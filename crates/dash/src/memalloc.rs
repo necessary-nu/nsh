@@ -548,3 +548,270 @@ macro_rules! STADJUST {
         $p = $p.offset($amount as isize)
     };
 }
+
+// ---------------------------------------------------------------------
+// Unit tests for this module's functions.
+//
+// Every test here takes the shared lock and brackets itself with a
+// stackmark: the allocator IS process-global state, and these tests both
+// read and move `stacknxt`/`stacknleft`. Leaving the stack where it was
+// found is what keeps them independent of each other and of the tests in
+// other modules.
+// ---------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::{raises, s, CStr0};
+
+    /// Run `body` between a matching setstackmark/popstackmark pair.
+    fn on_stack<R>(body: impl FnOnce() -> R) -> R {
+        let _g = crate::testutil::lock();
+        unsafe {
+            let mut mark: stackmark = core::mem::zeroed();
+            setstackmark(&mut mark);
+            let r = body();
+            popstackmark(&mut mark);
+            r
+        }
+    }
+
+    // [spec:dash:sem:memalloc.ckmalloc-fn/test]
+    // [spec:dash:sem:memalloc.checknull-fn/test]
+    #[test]
+    fn ckmalloc_returns_usable_memory() {
+        unsafe {
+            let p = ckmalloc(64) as *mut u8;
+            assert!(!p.is_null());
+            core::ptr::write_bytes(p, 0xAB, 64);
+            assert_eq!(*p.add(63), 0xAB);
+            libc::free(p as *mut c_void);
+            // checknull passes a non-NULL pointer straight through; the
+            // out-of-space path is asserted through outofspace below,
+            // since forcing malloc to fail here is not reproducible.
+            let q = ckmalloc(1);
+            assert_eq!(checknull(q), q);
+            libc::free(q);
+        }
+    }
+
+    // [spec:dash:sem:memalloc.ckrealloc-fn/test]
+    #[test]
+    fn ckrealloc_preserves_contents() {
+        unsafe {
+            let p = ckmalloc(8) as *mut u8;
+            core::ptr::copy_nonoverlapping(b"12345678".as_ptr(), p, 8);
+            let q = ckrealloc(p as *mut c_void, 64) as *mut u8;
+            assert!(!q.is_null());
+            assert_eq!(core::slice::from_raw_parts(q, 8), b"12345678");
+            libc::free(q as *mut c_void);
+        }
+    }
+
+    // [spec:dash:sem:memalloc.savestr-fn/test]
+    #[test]
+    fn savestr_copies_into_fresh_storage() {
+        unsafe {
+            let src = CStr0::new("keep me");
+            let copy = savestr(src.p());
+            assert_eq!(s(copy), "keep me");
+            assert_ne!(copy as *const c_char, src.p());
+            libc::free(copy as *mut c_void);
+            assert_eq!(s(savestr(CStr0::new("").p())), "");
+        }
+    }
+
+    // [spec:dash:sem:memalloc.outofspace-fn/test]
+    #[test]
+    fn outofspace_raises() {
+        let _g = crate::testutil::lock();
+        // It is declared to return (), but sh_error never returns, so the
+        // only observable behaviour is the unwind.
+        assert!(raises(|| unsafe { outofspace() }));
+    }
+
+    // [spec:dash:sem:memalloc.stalloc-fn/test]
+    // [spec:dash:sem:memalloc.stunalloc-fn/test]
+    #[test]
+    fn stalloc_carves_the_stack_and_stunalloc_gives_it_back() {
+        on_stack(|| unsafe {
+            let before = stacknleft;
+            let a = stalloc(16) as *mut c_char;
+            assert!(!a.is_null());
+            // Allocations are aligned, so the charge is SHELL_ALIGN(16),
+            // not 16.
+            assert_eq!(before - stacknleft, SHELL_ALIGN(16) as size_t);
+            let b = stalloc(16) as *mut c_char;
+            assert_ne!(a, b);
+            assert_eq!(b as usize - a as usize, SHELL_ALIGN(16));
+            // stunalloc winds the pointer back and returns the space.
+            stunalloc(a as *mut c_void);
+            assert_eq!(stacknleft, before);
+            assert_eq!(stackblock() as *mut c_char, a);
+        });
+    }
+
+    // [spec:dash:sem:memalloc.stalloc-fn/test]
+    #[test]
+    fn stalloc_spans_blocks_when_the_request_exceeds_the_current_one() {
+        on_stack(|| unsafe {
+            // Larger than MINSIZE, so the allocator has to chain a new
+            // block rather than carve the current one.
+            let big = MINSIZE * 4;
+            let p = stalloc(big as size_t) as *mut u8;
+            assert!(!p.is_null());
+            core::ptr::write_bytes(p, 0x5A, big);
+            assert_eq!(*p.add(big - 1), 0x5A);
+        });
+    }
+
+    // [spec:dash:sem:memalloc.setstackmark-fn/test]
+    // [spec:dash:sem:memalloc.popstackmark-fn/test]
+    // [spec:dash:sem:memalloc.pushstackmark-fn/test]
+    #[test]
+    fn stack_marks_restore_the_allocator() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            let (p0, n0) = (stacknxt, stacknleft);
+
+            let mut outer: stackmark = core::mem::zeroed();
+            setstackmark(&mut outer);
+            stalloc(64);
+            let mut inner: stackmark = core::mem::zeroed();
+            setstackmark(&mut inner);
+            let mid = stacknxt;
+            stalloc(MINSIZE as size_t * 3); // forces a new block
+            assert_ne!(stacknxt, mid);
+            popstackmark(&mut inner);
+            assert_eq!(stacknxt, mid);
+            popstackmark(&mut outer);
+
+            // Back exactly where we started, blocks freed.
+            assert_eq!(stacknxt, p0);
+            assert_eq!(stacknleft, n0);
+            assert_eq!(sstrend, p0.add(n0));
+
+            // pushstackmark is setstackmark's worker, with the grab length
+            // supplied by the caller.
+            let mut m: stackmark = core::mem::zeroed();
+            pushstackmark(&mut m, 32);
+            assert_eq!(m.stacknxt, p0);
+            assert!(stacknleft < n0);
+            popstackmark(&mut m);
+            assert_eq!(stacknleft, n0);
+        }
+    }
+
+    // [spec:dash:sem:memalloc.grabstackblock-fn/test]
+    #[test]
+    fn grabstackblock_reserves_without_returning_a_pointer() {
+        on_stack(|| unsafe {
+            let before = stacknleft;
+            grabstackblock(32);
+            assert_eq!(before - stacknleft, SHELL_ALIGN(32) as size_t);
+        });
+    }
+
+    // [spec:dash:sem:memalloc.growstackblock-fn/test]
+    // [spec:dash:sem:memalloc.growstackto-fn/test]
+    #[test]
+    fn growing_the_block_keeps_the_string_being_built() {
+        on_stack(|| unsafe {
+            let start = stackblock() as *mut c_char;
+            for i in 0..16 {
+                *start.add(i) = b'x' as c_char;
+            }
+            let room = stackblocksize();
+            // growstackto is a no-op while the block is already big
+            // enough...
+            assert_eq!(growstackto(room / 2), start);
+            // ...and moves to a larger block when it is not, carrying the
+            // bytes across.
+            let grown = growstackto(room * 4);
+            assert!(stackblocksize() >= room * 4);
+            assert_eq!(
+                core::slice::from_raw_parts(grown as *const u8, 16),
+                b"xxxxxxxxxxxxxxxx"
+            );
+        });
+    }
+
+    // [spec:dash:sem:memalloc.growstackstr-fn/test]
+    #[test]
+    fn growstackstr_returns_the_end_of_the_grown_block() {
+        on_stack(|| unsafe {
+            let len = stackblocksize();
+            let end = growstackstr() as *mut c_char;
+            // `growstackblock(0).add(len)` with len the OLD size: the
+            // result is the cursor the caller had reached, base + old
+            // length, not the base. A first draft asserted it equalled
+            // stackblock() and was out by exactly MINSIZE.
+            assert_eq!(end as usize, stackblock() as usize + len);
+            assert!(stackblocksize() > len);
+        });
+    }
+
+    // [spec:dash:sem:memalloc.makestrspace-fn/test]
+    #[test]
+    fn makestrspace_guarantees_room_past_the_cursor() {
+        on_stack(|| unsafe {
+            let p = stackblock() as *mut c_char;
+            *p = b'a' as c_char;
+            let want = stackblocksize() * 4;
+            let q = makestrspace(want as size_t, p.add(1));
+            // The cursor keeps its offset, and there is now room for
+            // `want` more bytes beyond it.
+            assert_eq!(q as usize - stackblock() as usize, 1);
+            assert!(stackstrend() as usize - q as usize >= want);
+            assert_eq!(*(stackblock() as *const c_char), b'a' as c_char);
+        });
+    }
+
+    // [spec:dash:sem:memalloc.stputs-fn/test]
+    // [spec:dash:sem:memalloc.stnputs-fn/test]
+    #[test]
+    fn stputs_appends_and_returns_the_new_cursor() {
+        on_stack(|| unsafe {
+            let base = stackblock() as *mut c_char;
+            let mut p = stputs(CStr0::new("abc").p(), base);
+            assert_eq!(p as usize - base as usize, 3);
+            p = stputs(CStr0::new("de").p(), p);
+            assert_eq!(p as usize - base as usize, 5);
+            assert_eq!(
+                core::slice::from_raw_parts(stackblock() as *const u8, 5),
+                b"abcde"
+            );
+            // stnputs takes an explicit count and does NOT stop at a NUL,
+            // which is what lets the parser copy raw byte runs.
+            let raw = [b'x' as c_char, 0, b'y' as c_char];
+            let q = stnputs(raw.as_ptr(), 3, p);
+            assert_eq!(q as usize - p as usize, 3);
+            assert_eq!(
+                core::slice::from_raw_parts(stackblock() as *const u8, 8),
+                b"abcdex\0y"
+            );
+        });
+    }
+
+    // [spec:dash:sem:memalloc.stputc-fn/test]
+    #[test]
+    fn stputc_appends_one_byte_and_grows_at_the_end() {
+        on_stack(|| unsafe {
+            let base = stackblock() as *mut c_char;
+            let p = _STPUTC(b'z' as c_int, base);
+            assert_eq!(p as usize - base as usize, 1);
+            assert_eq!(*base, b'z' as c_char);
+
+            // At sstrend it must grow rather than write past the block.
+            // Fill to the very end first.
+            let mut q = stackblock() as *mut c_char;
+            let room = stackblocksize();
+            for _ in 0..room {
+                q = _STPUTC(b'f' as c_int, q);
+            }
+            assert_eq!(q, sstrend);
+            let grown = _STPUTC(b'!' as c_int, q);
+            assert!(stackblocksize() > room);
+            assert_eq!(*grown.sub(1), b'!' as c_char);
+        });
+    }
+}
