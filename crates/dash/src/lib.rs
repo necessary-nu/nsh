@@ -25,6 +25,10 @@ pub mod output;
 pub mod shell;
 pub mod system;
 
+// ---- unit-test scaffolding (test builds only) ------------------------
+#[cfg(test)]
+pub mod testutil;
+
 // ---- generated tables ------------------------------------------------
 pub mod builtins;
 pub mod nodes;
