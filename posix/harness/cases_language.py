@@ -583,11 +583,40 @@ CASES: tuple[Case, ...] = (
         stdout="[F]\nnz=1\n",
     ),
     # [spec:posix:syn:grammar.program/test]
+    # The production has two alternatives and complete_commands is
+    # left-recursive over newline_list, so all three have to be reached:
+    #
+    #   program           : linebreak complete_commands linebreak
+    #                     | linebreak
+    #   complete_commands : complete_commands newline_list complete_command
+    #                     | complete_command
+    #
+    # This case used to be `script="\n\n# only a comment\n\n"` asserting
+    # `stdout=""`, which covers the empty alternative and nothing else --
+    # and "produces no output and exits 0" is satisfied by a shell that
+    # does not read its input at all. It was the single case in the suite
+    # that passed against `/bin/true`.
     Case(
         id="lang-grammar-program",
         rules=("grammar.program",),
-        script="\n\n# only a comment\n\n",
-        stdout="",
+        script=(
+            "\n"
+            "\n"
+            "# a comment in the leading linebreak\n"
+            "\n"
+            "printf one\n"
+            "\n"
+            "\n"
+            "# a newline_list, then another complete_command\n"
+            "printf two\n"
+            "printf '\\n'\n"
+            "sh -c '\n\n# a program that is only a linebreak\n\n'\n"
+            "printf 'empty=%s\\n' \"$?\"\n"
+            "\n"
+            "# a trailing linebreak\n"
+            "\n"
+        ),
+        stdout="onetwo\nempty=0\n",
     ),
     # [spec:posix:syn:grammar.list-and-or/test]
     # [spec:posix:syn:grammar.separators/test]

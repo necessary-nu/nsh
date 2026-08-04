@@ -237,6 +237,48 @@ class ReportTests(unittest.TestCase):
         )
         self.assertEqual(result.verdict, "FAIL")
 
+    def test_every_case_asserts_something_a_null_shell_cannot_satisfy(self) -> None:
+        """No case may pass against a shell that does not read its input.
+
+        A case is only evidence if it can fail. `/bin/true` accepts any
+        argv, writes nothing and exits 0, so any case it satisfies is
+        asserting nothing about a shell -- it is testing that silence is
+        silent. Exactly one case used to be in that position:
+        `lang-grammar-program` ran `"\\n\\n# only a comment\\n\\n"` and
+        expected no output and status 0, which covered the empty
+        alternative of `program: linebreak` and nothing else.
+
+        This runs a sample rather than all 674 cases -- the full control
+        run belongs in `run.py --shell /bin/true` -- but it is chosen to
+        include every case whose expectation is weak enough to be at
+        risk: no exact stdout, or an exact stdout of "".
+        """
+        at_risk = [
+            case
+            for case in CASES
+            if case.mode != "interactive"
+            and not case.stdout_contains
+            and not case.stderr_contains
+            and not case.stdout_excludes
+            and not case.stderr_excludes
+            and case.stderr is None
+            and (case.stdout in (None, ""))
+            and case.status in (0, "any")
+        ]
+        self.assertLess(
+            len(at_risk), 40, "too many weakly-asserting cases to check inline"
+        )
+        for case in at_risk:
+            observation = run_case(
+                Path("/bin/true"), case, {"UP": True, "XSI": True, "OB": True}
+            )
+            self.assertNotEqual(
+                observation.verdict,
+                "PASS",
+                f"case {case.id} passes against /bin/true, so it asserts "
+                f"nothing about a shell",
+            )
+
     def test_json_report_is_serializable(self) -> None:
         report = report_dict(
             shell=Path("/bin/sh"),
