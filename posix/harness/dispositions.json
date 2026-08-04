@@ -1,20 +1,8 @@
 {
   "rules": {
-    "cmd.async-job-notification-format": {
-      "disposition": "manual",
-      "reason": "Requires an interactive shell writing the '[n] pid' notification to stderr."
-    },
-    "cmd.async-job-number": {
-      "disposition": "manual",
-      "reason": "Requires job control enabled and a job number assigned; interactive pty session."
-    },
     "cmd.async-known-pid-retention": {
       "disposition": "not-applicable",
       "reason": "The standard releases the shell here: \"need not retain more than the {CHILD_MAX} most recent entries\"."
-    },
-    "cmd.async-non-job-pid-message": {
-      "disposition": "manual",
-      "reason": "Requires an interactive shell with job control disabled."
     },
     "cmd.case-multiple-pattern-order-unspecified": {
       "disposition": "not-applicable",
@@ -39,10 +27,6 @@
     "cmd.search-unspecified-utility-names": {
       "disposition": "not-applicable",
       "reason": "The standard releases the shell here: \"the results are unspecified\"."
-    },
-    "cmd.sequential-foreground-job": {
-      "disposition": "manual",
-      "reason": "Requires observing foreground job membership under job control; needs an interactive pty session."
     },
     "cmd.std-fd-closed": {
       "disposition": "not-applicable",

@@ -22,43 +22,15 @@
     },
     "jobctl.background-job-brought-to-foreground": {
       "disposition": "manual",
-      "reason": "Requires the fg utility and a job stopped by a signal while in the foreground; needs an interactive session with a controlling terminal."
-    },
-    "jobctl.background-job-completion-message": {
-      "disposition": "manual",
-      "reason": "Requires an interactive shell and observation of the completion message timing relative to the next prompt under both set -b states."
-    },
-    "jobctl.background-job-suspended-message": {
-      "disposition": "manual",
-      "reason": "Requires an interactive shell, a background job stopped by SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU, and observation of the message relative to the next prompt under both set -b states."
-    },
-    "jobctl.continue-suspended-job": {
-      "disposition": "manual",
-      "reason": "Requires fg/bg on a suspended job and observation of the SIGCONT sent to the stopped process group; needs interactive job control."
+      "reason": "Not an interactive-shell limitation -- the harness runs interactive cases on a pty with a controlling terminal, and the other job-control rules are now tested there. What is out of reach is TIMING against the tty: _run_pty writes the whole script in one payload, and the line discipline acts on a suspend character when the byte ARRIVES, not when the shell reads it, so a ^Z sent this way fires before the foreground job it was meant to stop exists. Suspensions driven by `kill -STOP` on a background job ARE tested (see cases_jobctl.py); this rule specifically requires a FOREGROUND job stopped from the terminal. Testable once _run_pty grows paced input."
     },
     "jobctl.fg-terminal-settings-restore": {
       "disposition": "manual",
-      "reason": "Requires observing the ordering of tcsetpgrp, termios restore and SIGCONT inside fg on a controlling terminal."
+      "reason": "Not observable from the shell language: this is about state the shell holds across a suspend/resume -- saved termios, and the ordering of tcsetpgrp against SIGCONT inside fg -- for which the shell exposes no interface. The harness does have a controlling terminal (see cases_jobctl.py); that is not what is missing."
     },
     "jobctl.foreground-job": {
       "disposition": "manual",
       "reason": "Requires observing that 'the whole list shall form a single foreground job up until the sequentially executed AND-OR lists have all completed', which is only visible through job-control bookkeeping in an interactive session."
-    },
-    "jobctl.foreground-process-group-assignment": {
-      "disposition": "manual",
-      "reason": "Requires reading the terminal's foreground process group ID (tcgetpgrp) as each pipeline of a job is executed; not observable from within the shell language."
-    },
-    "jobctl.foreground-process-group-restored": {
-      "disposition": "manual",
-      "reason": "Requires reading the terminal's foreground process group ID after a foreground job terminates or is suspended; not observable from within the shell language."
-    },
-    "jobctl.initial-foreground-process-group": {
-      "disposition": "manual",
-      "reason": "Requires a controlling terminal plus inspection of tcgetpgrp() at shell start-up, including the SIGTTIN/SIGCONT retry path for a shell started as a background job; not reachable from shell-visible state."
-    },
-    "jobctl.job-number-and-process-id": {
-      "disposition": "manual",
-      "reason": "The removal half of the requirement ('When a background job is brought into the foreground by means of the fg utility, the associated job number shall be removed') needs fg in an interactive session."
     },
     "jobctl.non-interactive-message-timing": {
       "disposition": "not-applicable",
@@ -66,39 +38,15 @@
     },
     "jobctl.save-terminal-settings": {
       "disposition": "manual",
-      "reason": "Requires comparing saved and restored termios settings across a suspend/resume cycle on a controlling terminal."
+      "reason": "Not observable from the shell language: this is about state the shell holds across a suspend/resume -- saved termios, and the ordering of tcsetpgrp against SIGCONT inside fg -- for which the shell exposes no interface. The harness does have a controlling terminal (see cases_jobctl.py); that is not what is missing."
     },
     "jobctl.suspend-on-catchable-signal": {
       "disposition": "manual",
-      "reason": "Requires stopping a foreground job with SIGTSTP/SIGTTIN/SIGTTOU from a controlling terminal and then inspecting which commands the resulting suspended job contains."
-    },
-    "jobctl.suspend-on-sigstop": {
-      "disposition": "manual",
-      "reason": "Requires SIGSTOP delivered while the shell itself is executing a built-in, then SIGCONT, and inspection of the suspended job the shell creates; needs interactive job control."
+      "reason": "Not an interactive-shell limitation -- the harness runs interactive cases on a pty with a controlling terminal, and the other job-control rules are now tested there. What is out of reach is TIMING against the tty: _run_pty writes the whole script in one payload, and the line discipline acts on a suspend character when the byte ARRIVES, not when the shell reads it, so a ^Z sent this way fires before the foreground job it was meant to stop exists. Suspensions driven by `kill -STOP` on a background job ARE tested (see cases_jobctl.py); this rule specifically requires a FOREGROUND job stopped from the terminal. Testable once _run_pty grows paced input."
     },
     "jobctl.suspended-job-message": {
       "disposition": "manual",
-      "reason": "Requires an interactive shell writing the jobs-format suspended-job message to standard error after a foreground job is stopped."
-    },
-    "param.lang": {
-      "disposition": "manual",
-      "reason": "LANG only 'provide[s] a default value for the internationalization variables that are unset or null'; distinguishing that from the fallback requires a second installed locale, and the harness fixes LC_ALL=C and cannot assume any non-POSIX locale exists on the host."
-    },
-    "param.lc-all": {
-      "disposition": "manual",
-      "reason": "'The value of this variable overrides the LC_* variables and LANG' \u2014 the override is only observable as a difference between two locales' behaviour, which needs a second installed locale the harness cannot assume."
-    },
-    "param.lc-collate": {
-      "disposition": "manual",
-      "reason": "Determines 'the behavior of range expressions, equivalence classes, and multi-character collating elements'; in the C/POSIX locale the harness runs in, no collation differs from byte order, so a second installed locale is required to observe it."
-    },
-    "param.lc-ctype": {
-      "disposition": "manual",
-      "reason": "Determines 'the interpretation of sequences of bytes of text data as characters (for example, single-byte as opposed to multi-byte)'; observing this, and that a change after start-up does not affect lexical processing, requires a multi-byte locale the harness cannot assume."
-    },
-    "param.lc-messages": {
-      "disposition": "manual",
-      "reason": "'Determine the language in which messages should be written' \u2014 requires a translated message catalog installed on the host to observe."
+      "reason": "Not an interactive-shell limitation -- the harness runs interactive cases on a pty with a controlling terminal, and the other job-control rules are now tested there. What is out of reach is TIMING against the tty: _run_pty writes the whole script in one payload, and the line discipline acts on a suspend character when the byte ARRIVES, not when the shell reads it, so a ^Z sent this way fires before the foreground job it was meant to stop exists. Suspensions driven by `kill -STOP` on a background job ARE tested (see cases_jobctl.py); this rule specifically requires a FOREGROUND job stopped from the terminal. Testable once _run_pty grows paced input."
     },
     "param.nlspath": {
       "disposition": "conditional",

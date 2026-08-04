@@ -1,9 +1,5 @@
 {
   "rules": {
-    "builtin.bg.env-locale": {
-      "disposition": "manual",
-      "reason": "A heading introducing the LANG/LC_* block: the listed variables affect only the byte interpretation of arguments and the wording of diagnostics, which POSIX leaves unspecified. The harness pins LC_ALL=C, so there is nothing observable to assert."
-    },
     "builtin.bg.env-nlspath": {
       "disposition": "conditional",
       "reason": "XSI-shaded: 'NLSPATH determines the location of messages objects and message catalogs'. Gated on the XSI option rather than inapplicable. The requirement locates catalogs; dash ships none and emits only built-in English diagnostics, so on this host there is no catalog for NLSPATH to point at and no observable difference to assert. Recorded as conditional so it is not mistaken for a dismissed obligation."
@@ -20,17 +16,9 @@
       "disposition": "not-applicable",
       "reason": "Explicitly unspecified: \"When no arguments are given, the results are unspecified.\" (The -p form, which IS specified, is covered separately by builtin.export.p-output-format and builtin.export.p-output-reinput.)"
     },
-    "builtin.fg.env-locale": {
-      "disposition": "manual",
-      "reason": "A heading introducing the LANG/LC_* block: the listed variables affect only the byte interpretation of arguments and the wording of diagnostics, which POSIX leaves unspecified. The harness pins LC_ALL=C, so there is nothing observable to assert."
-    },
     "builtin.fg.env-nlspath": {
       "disposition": "conditional",
       "reason": "XSI-shaded: 'NLSPATH determines the location of messages objects and message catalogs'. Gated on the XSI option rather than inapplicable. The requirement locates catalogs; dash ships none and emits only built-in English diagnostics, so on this host there is no catalog for NLSPATH to point at and no observable difference to assert. Recorded as conditional so it is not mistaken for a dismissed obligation."
-    },
-    "builtin.jobs.env-locale": {
-      "disposition": "manual",
-      "reason": "A heading introducing the LANG/LC_* block: the listed variables affect only the byte interpretation of arguments and the wording of diagnostics, which POSIX leaves unspecified. The harness pins LC_ALL=C, so there is nothing observable to assert."
     },
     "builtin.jobs.env-nlspath": {
       "disposition": "conditional",

@@ -1,24 +1,12 @@
 {
   "rules": {
-    "builtin.alias.env-locale": {
-      "disposition": "manual",
-      "reason": "Only LANG/LC_ALL/LC_CTYPE/LC_MESSAGES; requires a non-C locale and localized diagnostics to observe, which the fixed LC_ALL=C harness environment cannot provide."
-    },
     "builtin.alias.env-nlspath": {
       "disposition": "conditional",
       "reason": "XSI-shaded: 'NLSPATH determines the location of messages objects and message catalogs'. Gated on the XSI option rather than inapplicable. The requirement locates catalogs; dash ships none and emits only built-in English diagnostics, so on this host there is no catalog for NLSPATH to point at and no observable difference to assert. Recorded as conditional so it is not mistaken for a dismissed obligation."
     },
-    "builtin.command.env-locale": {
-      "disposition": "manual",
-      "reason": "Only LANG/LC_ALL/LC_CTYPE/LC_MESSAGES; requires a non-C locale and localized diagnostics to observe, which the fixed LC_ALL=C harness environment cannot provide."
-    },
     "builtin.command.env-nlspath": {
       "disposition": "conditional",
       "reason": "XSI-shaded: 'NLSPATH determines the location of messages objects and message catalogs'. Gated on the XSI option rather than inapplicable. The requirement locates catalogs; dash ships none and emits only built-in English diagnostics, so on this host there is no catalog for NLSPATH to point at and no observable difference to assert. Recorded as conditional so it is not mistaken for a dismissed obligation."
-    },
-    "builtin.fc.env-fcedit": {
-      "disposition": "manual",
-      "reason": "FCEDIT is only consulted on fc's editor path, which needs a writable /tmp for dash's mkstemp(_PATH_TMP \"_shXXXXXX\"); the sandboxed harness mounts the root read-only. Verified by hand: with FCEDIT unset dash uses $EDITOR rather than the required 'If FCEDIT is null or unset, ed shall be used as the editor'."
     },
     "builtin.fc.env-histfile-initialization": {
       "disposition": "not-applicable",
@@ -28,10 +16,6 @@
       "disposition": "not-applicable",
       "reason": "Explicitly unspecified at both ends: \"it is unspecified how updates to the history file from those shells interact\" and \"It is unspecified when history file entries are physically removed from the history file\". The residual ordering requirement (oldest deleted first) becomes observable only once the history file has reached its implementation-defined size, which no portable command sequence can force."
     },
-    "builtin.fc.env-locale": {
-      "disposition": "manual",
-      "reason": "Only LANG/LC_ALL/LC_CTYPE/LC_MESSAGES; requires a non-C locale and localized diagnostics to observe, which the fixed LC_ALL=C harness environment cannot provide."
-    },
     "builtin.fc.env-nlspath": {
       "disposition": "conditional",
       "reason": "XSI-shaded: 'NLSPATH determines the location of messages objects and message catalogs'. Gated on the XSI option rather than inapplicable. The requirement locates catalogs; dash ships none and emits only built-in English diagnostics, so on this host there is no catalog for NLSPATH to point at and no observable difference to assert. Recorded as conditional so it is not mistaken for a dismissed obligation."
@@ -40,14 +24,6 @@
       "disposition": "manual",
       "reason": "Permissive ('the shell may wrap the numbers') and the residual 'shall maintain the time-ordering sequence' only becomes observable past an 'implementation-defined upper limit, which shall be no smaller than ... 32767' interactive commands; not automatable in a pty case."
     },
-    "builtin.fc.opt-e": {
-      "disposition": "manual",
-      "reason": "Exercising '-e editor' requires fc's editor round-trip, which dash performs through a temporary file created under _PATH_TMP (/tmp); harness cases run with a read-only root bind mount, so mkstemp fails before any editor is invoked. Verified by hand: dash ignores the -e option-argument and always falls back to FCEDIT/EDITOR/ed."
-    },
-    "builtin.getopts.env": {
-      "disposition": "manual",
-      "reason": "Lists only LANG/LC_ALL/LC_CTYPE/LC_MESSAGES; observing them needs additional locales installed and localized diagnostics, while every harness case runs with LC_ALL=C and dash emits untranslated messages."
-    },
     "builtin.getopts.env-nlspath": {
       "disposition": "conditional",
       "reason": "XSI-shaded: 'NLSPATH determines the location of messages objects and message catalogs'. Gated on the XSI option rather than inapplicable. The requirement locates catalogs; dash ships none and emits only built-in English diagnostics, so on this host there is no catalog for NLSPATH to point at and no observable difference to assert. Recorded as conditional so it is not mistaken for a dismissed obligation."
@@ -55,10 +31,6 @@
     "builtin.getopts.optstring-character-restrictions": {
       "disposition": "not-applicable",
       "reason": "Half application constraint, half unspecified. The first sentence binds the application (question-mark and colon shall not be used as option characters by an application), and for every other non-alphanumeric character \"The use of other option characters that are not alphanumeric produces unspecified results\". getopts' handling of the alphanumeric option characters it must support is asserted by the builtin.getopts.* operand and semantics cases."
-    },
-    "builtin.hash.env-locale": {
-      "disposition": "manual",
-      "reason": "Only LANG/LC_ALL/LC_CTYPE/LC_MESSAGES; requires a non-C locale and localized diagnostics to observe, which the fixed LC_ALL=C harness environment cannot provide."
     },
     "builtin.hash.env-nlspath": {
       "disposition": "conditional",
@@ -76,17 +48,9 @@
       "disposition": "not-applicable",
       "reason": "Explicitly unspecified: \"it is unspecified what effects, if any, the change has on how read performs field splitting\" when a var operand names LANG, LC_CTYPE, or LC_ALL and the new value changes how IFS bytes form characters."
     },
-    "builtin.type.env-locale": {
-      "disposition": "manual",
-      "reason": "Only LANG/LC_ALL/LC_CTYPE/LC_MESSAGES; requires a non-C locale and localized diagnostics to observe, which the fixed LC_ALL=C harness environment cannot provide."
-    },
     "builtin.type.env-nlspath": {
       "disposition": "conditional",
       "reason": "XSI-shaded: 'NLSPATH determines the location of messages objects and message catalogs'. Gated on the XSI option rather than inapplicable. The requirement locates catalogs; dash ships none and emits only built-in English diagnostics, so on this host there is no catalog for NLSPATH to point at and no observable difference to assert. Recorded as conditional so it is not mistaken for a dismissed obligation."
-    },
-    "builtin.unalias.env-locale": {
-      "disposition": "manual",
-      "reason": "Only LANG/LC_ALL/LC_CTYPE/LC_MESSAGES; requires a non-C locale and localized diagnostics to observe, which the fixed LC_ALL=C harness environment cannot provide."
     },
     "builtin.unalias.env-nlspath": {
       "disposition": "conditional",

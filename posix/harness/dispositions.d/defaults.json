@@ -12,10 +12,6 @@
       "disposition": "conditional",
       "reason": "Marked `[UP]`. The only firm numbers are minima - 'an unspecified default greater than or equal to 128' and 'The maximum number of commands in the history list is unspecified, but shall be at least 128' - and 'it is unspecified whether changes made to HISTSIZE after the history file has been initialized are effective'."
     },
-    "sh.envvar-lc-messages": {
-      "disposition": "manual",
-      "reason": "'LC_MESSAGES determines the locale that should be used to affect the format and contents of diagnostic messages written to standard error.' The format is declared unspecified elsewhere, so the only observable is a translated diagnostic; that requires a message catalog for this shell in a second locale, which does not exist."
-    },
     "sh.envvar-nlspath": {
       "disposition": "conditional",
       "reason": "Marked `[XSI]`: 'NLSPATH determines the location of messages objects and message catalogs.' The shell ships no message catalog, so NLSPATH has nothing to locate."
