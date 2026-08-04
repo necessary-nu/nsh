@@ -717,3 +717,350 @@ macro_rules! xasprintf {
 }
 
 pub use crate::{fmtstr, out1fmt, outfmt, xasprintf};
+
+// ---------------------------------------------------------------------
+// Unit tests for this module's functions.
+//
+// Everything here writes to a real file descriptor, because that is what
+// distinguishes this module's behaviour: whether a byte is sitting in the
+// buffer or has reached the fd is the whole question for outmem, flushout
+// and outc. Each test owns a pipe and a `struct output` pointing at it.
+// ---------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::CStr0;
+
+    /// A `struct output` writing into a pipe, with a buffer of `bufsize`.
+    struct Sink {
+        out: Box<output>,
+        buf: Vec<c_char>,
+        r: c_int,
+        w: c_int,
+    }
+
+    impl Sink {
+        fn new(bufsize: usize) -> Sink {
+            let mut fds = [0 as c_int; 2];
+            assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+            let mut buf = vec![0 as c_char; bufsize.max(1)];
+            let base = buf.as_mut_ptr();
+            let out = Box::new(output {
+                nextc: base,
+                end: unsafe { base.add(bufsize) },
+                buf: base,
+                bufsize: bufsize as size_t,
+                fd: fds[1],
+                flags: 0,
+            });
+            Sink { out, buf, r: fds[0], w: fds[1] }
+        }
+        fn p(&mut self) -> *mut output {
+            &mut *self.out as *mut output
+        }
+        /// Bytes that have actually reached the pipe.
+        fn drained(&mut self) -> Vec<u8> {
+            unsafe {
+                // Close the writer so the read sees EOF rather than blocking.
+                libc::close(self.w);
+                self.w = -1;
+                let mut got = Vec::new();
+                let mut tmp = [0u8; 4096];
+                loop {
+                    let n = libc::read(self.r, tmp.as_mut_ptr() as *mut c_void, tmp.len());
+                    if n <= 0 {
+                        break;
+                    }
+                    got.extend_from_slice(&tmp[..n as usize]);
+                }
+                got
+            }
+        }
+        /// Bytes still sitting in the buffer, unflushed.
+        fn buffered(&self) -> usize {
+            (self.out.nextc as usize) - (self.out.buf as usize)
+        }
+    }
+
+    impl Drop for Sink {
+        fn drop(&mut self) {
+            unsafe {
+                if self.w >= 0 {
+                    libc::close(self.w);
+                }
+                libc::close(self.r);
+            }
+            let _ = &self.buf;
+        }
+    }
+
+    // [spec:dash:sem:output.outmem-fn/test]
+    // [spec:dash:sem:output.flushout-fn/test]
+    #[test]
+    fn outmem_buffers_until_the_buffer_cannot_hold_the_write() {
+        unsafe {
+            let mut s = Sink::new(16);
+            let p = s.p();
+            outmem(CStr0::new("abc").p(), 3, p);
+            // Fits: buffered, nothing on the fd yet.
+            assert_eq!(s.buffered(), 3);
+            outmem(CStr0::new("defghij").p(), 7, p);
+            assert_eq!(s.buffered(), 10);
+            flushout(p);
+            assert_eq!(s.buffered(), 0);
+            assert_eq!(s.drained(), b"abcdefghij");
+        }
+        unsafe {
+            // A write larger than the buffer cannot be buffered, so the
+            // buffer is flushed and the payload goes straight out.
+            let mut s = Sink::new(4);
+            let p = s.p();
+            outmem(CStr0::new("ab").p(), 2, p);
+            outmem(CStr0::new("0123456789").p(), 10, p);
+            flushout(p);
+            assert_eq!(s.drained(), b"ab0123456789");
+        }
+    }
+
+    // [spec:dash:sem:output.flushout-fn/test]
+    #[test]
+    fn flushout_is_a_noop_when_empty_or_closed() {
+        unsafe {
+            let mut s = Sink::new(16);
+            let p = s.p();
+            // Nothing buffered: no write, no error flag.
+            flushout(p);
+            assert_eq!((*p).flags & OUTPUT_ERR, 0);
+            // A negative fd is the "discard" case and must not be written
+            // to; the buffer is left alone.
+            outmem(CStr0::new("xy").p(), 2, p);
+            (*p).fd = -1;
+            flushout(p);
+            assert_eq!(s.buffered(), 2);
+            (*p).fd = s.w;
+            flushout(p);
+            assert_eq!(s.drained(), b"xy");
+        }
+    }
+
+    // [spec:dash:sem:output.flushout-fn/test]
+    #[test]
+    fn flushout_records_an_error_on_a_bad_descriptor() {
+        unsafe {
+            let mut s = Sink::new(16);
+            let p = s.p();
+            outmem(CStr0::new("z").p(), 1, p);
+            (*p).fd = 9999; // never opened
+            flushout(p);
+            assert_ne!((*p).flags & OUTPUT_ERR, 0);
+            assert_ne!(outerr(p), 0);
+            (*p).fd = -1; // keep Drop quiet
+        }
+    }
+
+    // [spec:dash:sem:output.outstr-fn/test]
+    // [spec:dash:sem:output.outcslow-fn/test]
+    // [spec:dash:sem:output.outc-fn/test]
+    #[test]
+    fn outstr_outcslow_and_outc_append_bytes() {
+        unsafe {
+            let mut s = Sink::new(64);
+            let p = s.p();
+            outstr(CStr0::new("hi").p(), p);
+            outcslow('!' as c_int, p);
+            outc(' ' as c_int, p);
+            outc('o' as c_int, p);
+            // outstr stops at the NUL; outcslow and outc each add one byte.
+            assert_eq!(s.buffered(), 5);
+            flushout(p);
+            assert_eq!(s.drained(), b"hi! o");
+        }
+    }
+
+    // [spec:dash:sem:output.fmtstr-fn/test]
+    #[test]
+    fn fmtstr_formats_into_a_caller_buffer_and_truncates() {
+        unsafe {
+            let mut buf = [0 as c_char; 32];
+            let n = fmtstr(
+                buf.as_mut_ptr(),
+                buf.len() as size_t,
+                CStr0::new("%s=%d").p(),
+                &[VaArg::Str(CStr0::new("x").p()), VaArg::Int(42)],
+            );
+            assert_eq!(crate::testutil::s(buf.as_ptr()), "x=42");
+            assert_eq!(n, 4);
+            // On truncation fmtstr CLAMPS to `length`; it does not report
+            // what would have been written. The C is
+            // `ret > (int)length ? length : ret`, so a caller detects
+            // truncation by the result reaching the buffer size, not by it
+            // exceeding it -- unlike snprintf, which is what a first draft
+            // assumed here.
+            let mut small = [0 as c_char; 4];
+            let n2 = fmtstr(
+                small.as_mut_ptr(),
+                small.len() as size_t,
+                CStr0::new("%s").p(),
+                &[VaArg::Str(CStr0::new("abcdefgh").p())],
+            );
+            assert_eq!(crate::testutil::s(small.as_ptr()), "abc");
+            assert_eq!(n2, 4);
+        }
+    }
+
+    // [spec:dash:sem:output.doformat-fn/test]
+    // [spec:dash:sem:output.outfmt-fn/test]
+    #[test]
+    fn outfmt_and_doformat_write_formatted_output() {
+        unsafe {
+            let mut s = Sink::new(64);
+            let p = s.p();
+            outfmt(p, CStr0::new("[%s:%d]").p(),
+                   &[VaArg::Str(CStr0::new("k").p()), VaArg::Int(7)]);
+            doformat(p, CStr0::new("%c").p(), &[VaArg::Int('!' as c_int)]);
+            flushout(p);
+            assert_eq!(s.drained(), b"[k:7]!");
+        }
+    }
+
+    // [spec:dash:sem:output.xasprintf-fn/test]
+    // [spec:dash:sem:output.xvasprintf-fn/test]
+    #[test]
+    fn xasprintf_allocates_on_the_stack_and_reports_the_length() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            let mut mark: crate::memalloc::stackmark = core::mem::zeroed();
+            crate::memalloc::setstackmark(&mut mark);
+            let mut sp: *mut c_char = core::ptr::null_mut();
+            let n = xasprintf(&mut sp, CStr0::new("%s-%d").p(),
+                              &[VaArg::Str(CStr0::new("id").p()), VaArg::Int(9)]);
+            assert_eq!(crate::testutil::s(sp), "id-9");
+            assert_eq!(n, 4);
+            // Long enough to force the grow path rather than the initial
+            // guess.
+            let long = "y".repeat(2048);
+            let n2 = xasprintf(&mut sp, CStr0::new("%s").p(),
+                               &[VaArg::Str(CStr0::new(&long).p())]);
+            assert_eq!(n2, 2048);
+            assert_eq!(crate::testutil::s(sp).len(), 2048);
+            crate::memalloc::popstackmark(&mut mark);
+        }
+    }
+
+    // [spec:dash:sem:output.xvsnprintf-fn/test]
+    #[test]
+    fn xvsnprintf_is_snprintf_with_interrupts_held() {
+        unsafe {
+            let mut buf = [0 as c_char; 8];
+            let n = xvsnprintf(buf.as_mut_ptr(), 8, CStr0::new("%d").p(), &[VaArg::Int(-5)]);
+            assert_eq!(crate::testutil::s(buf.as_ptr()), "-5");
+            assert_eq!(n, 2);
+            // A zero length writes nothing but still returns the required
+            // size; dash relies on that in xvasprintf's first pass.
+            let n0 = xvsnprintf(core::ptr::null_mut(), 0, CStr0::new("abcd").p(), &[]);
+            assert_eq!(n0, 4);
+        }
+    }
+
+    // [spec:dash:sem:output.xwrite-fn/test]
+    #[test]
+    fn xwrite_writes_everything_or_reports_failure() {
+        unsafe {
+            let mut s = Sink::new(1);
+            let payload = vec![b'q'; 200_000];
+            // Larger than a pipe buffer, so this only succeeds if xwrite
+            // loops over partial writes -- which is its whole purpose.
+            let w = s.w;
+            let reader = std::thread::spawn({
+                let r = s.r;
+                move || {
+                    let mut got = 0usize;
+                    let mut tmp = [0u8; 8192];
+                    loop {
+                        let n = libc::read(r, tmp.as_mut_ptr() as *mut c_void, tmp.len());
+                        if n <= 0 { break; }
+                        got += n as usize;
+                    }
+                    got
+                }
+            });
+            assert_eq!(xwrite(w, payload.as_ptr() as *const c_void, payload.len()), 0);
+            libc::close(w);
+            s.w = -1;
+            assert_eq!(reader.join().unwrap(), 200_000);
+            // A closed descriptor fails rather than looping.
+            assert_eq!(xwrite(9999, payload.as_ptr() as *const c_void, 1), -1);
+        }
+    }
+
+    // [spec:dash:sem:output.freestdout-fn/test]
+    #[test]
+    fn freestdout_resets_the_buffer_and_error_flag() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            let saved = (output.nextc, output.buf, output.end, output.flags, output.fd);
+            let mut b = vec![0 as c_char; 16];
+            output.buf = b.as_mut_ptr();
+            output.nextc = b.as_mut_ptr().add(5);
+            output.end = b.as_mut_ptr().add(16);
+            output.flags = OUTPUT_ERR;
+
+            freestdout();
+
+            assert_eq!(output.nextc, output.buf);
+            assert_eq!(output.flags, 0);
+            (output.nextc, output.buf, output.end, output.flags, output.fd) = saved;
+        }
+    }
+
+    // [spec:dash:sem:output.flushall-fn/test]
+    // [spec:dash:sem:output.out1fmt-fn/test]
+    #[test]
+    fn out1fmt_and_flushall_go_through_the_stdout_stream() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            let saved = (output.nextc, output.buf, output.end, output.bufsize,
+                         output.fd, output.flags);
+            let mut s = Sink::new(64);
+            // Point the global stdout stream at the pipe.
+            output.buf = s.out.buf;
+            output.nextc = s.out.buf;
+            output.end = s.out.end;
+            output.bufsize = s.out.bufsize;
+            output.fd = s.w;
+            output.flags = 0;
+
+            out1fmt(CStr0::new("n=%d").p(), &[VaArg::Int(3)]);
+            // Buffered, not yet written.
+            assert_eq!((output.nextc as usize) - (output.buf as usize), 3);
+            flushall();
+            assert_eq!(output.nextc, output.buf);
+
+            (output.nextc, output.buf, output.end, output.bufsize,
+             output.fd, output.flags) = saved;
+            assert_eq!(s.drained(), b"n=3");
+        }
+    }
+
+    // The three routines below sit inside `#ifdef notyet` and
+    // `#ifdef USE_GLIBC_STDIO`, neither defined in any shipped
+    // configuration: `struct output` has no `stream` member and there is
+    // no `memout`. Their bodies are empty in both languages, so what can
+    // be asserted is that they are callable and inert -- which is the
+    // contract, and is what would break if someone gave one a body.
+    //
+    // [spec:dash:sem:output.initstreams-fn/test]
+    // [spec:dash:sem:output.openmemout-fn/test]
+    // [spec:dash:sem:output.closememout-fn/test]
+    #[test]
+    fn inactive_glibc_stdio_hooks_are_inert() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            let before = (output.nextc, output.buf, output.fd, errout.fd);
+            initstreams();
+            openmemout();
+            assert_eq!(__closememout(), 0);
+            assert_eq!((output.nextc, output.buf, output.fd, errout.fd), before);
+        }
+    }
+}
