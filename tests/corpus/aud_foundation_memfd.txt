@@ -6,6 +6,11 @@ EOF
 %%%
 #!name heredoc-small
 #!mode=file
+#!norm=pid
+# norm=pid above: what this asserts is that a small here-document arrives
+# on a *pipe* rather than a memfd. readlink reports `pipe:[<inode>]`, and
+# the inode differs between any two processes, so without normalising the
+# digits the case compares kernel bookkeeping instead of the shell.
 readlink /proc/self/fd/0 <<EOF
 small
 EOF

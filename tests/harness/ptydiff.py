@@ -56,6 +56,13 @@ def run(shell, args, lines, workdir, timeout=10.0, settle=0.5):
         os.environ["PS1"] = "$ "
         os.environ["PS2"] = "> "
         os.environ["TERM"] = "xterm"
+        # Python ignores SIGPIPE, and a disposition survives exec, so
+        # without this both shells inherit "ignore" from the harness and
+        # a shell that gets SIGPIPE wrong looks correct. See the note in
+        # sandboxed.sh -- this is the same leak, and it hid a real one.
+        for sig in (signal.SIGPIPE, signal.SIGINT, signal.SIGQUIT, signal.SIGTERM,
+                    signal.SIGHUP, signal.SIGTSTP, signal.SIGTTIN, signal.SIGTTOU):
+            signal.signal(sig, signal.SIG_DFL)
         argv = sandbox_argv(workdir, shell, args)
         try:
             os.execvp(argv[0], argv)
@@ -70,7 +77,18 @@ def run(shell, args, lines, workdir, timeout=10.0, settle=0.5):
         while time.time() < deadline:
             r, w, _ = select.select([fd], [fd], [], 0.3)
             if w and i < len(lines):
-                os.write(fd, (lines[i] + "\r").encode())
+                line = lines[i]
+                # A bare control character is sent raw, with no Return:
+                # "\x03" is how a user actually interrupts, and it is the
+                # only way to reach onint() from a *blocked* read on the
+                # tty rather than from shell code. That distinction is the
+                # whole bug -- the port aborted with SIGABRT there,
+                # because Rust will not let an unwind leave an extern "C"
+                # frame, and a signal handler is one.
+                if len(line) == 1 and ord(line) < 32:
+                    os.write(fd, line.encode())
+                else:
+                    os.write(fd, (line + "\r").encode())
                 i += 1
                 time.sleep(settle)
             if r:
@@ -130,13 +148,33 @@ CASES = [
     ("editing off then on",    [], ["set -o emacs", "echo late", "fc -l", "exit"]),
     ("HISTSIZE in editing",    ["-E"], ["HISTSIZE=2", "echo a", "echo b", "echo c", "fc -l 1 9", "exit"]),
     ("multiline into history", ["-E"], ["for i in 1 2", "do", "echo $i", "done", "fc -l", "exit"]),
+    # --- onint() leaving the signal handler ---
+    # C longjmps out of the handler back to main_handler. The port raises
+    # that jump as an unwind, which Rust turns into an abort unless the
+    # handler is declared extern "C-unwind" -- so the shell died with
+    # status 134 where dash printed a fresh prompt.
+    ("^C at the prompt",       [], ["\x03", "echo ALIVE-$?", "exit"]),
+    ("^C mid-line",            [], ["echo notsent", "\x03", "echo ALIVE-$?", "exit"]),
+    ("^C during a loop",       [], ["while :; do :; done", "\x03", "echo ALIVE-$?", "exit"]),
+    ("^C in a here-doc",       [], ["cat <<EOF", "body", "\x03", "echo ALIVE-$?", "exit"]),
+    ("^C during PS2",          [], ["for i in a b", "\x03", "echo ALIVE-$?", "exit"]),
+    ("^C with a trap set",     [], ["trap 'echo caught' INT", "\x03", "echo ALIVE-$?", "exit"]),
+    ("^C then ^C again",       [], ["\x03", "\x03", "echo ALIVE-$?", "exit"]),
+    ("^C in emacs mode",       ["-E"], ["\x03", "echo ALIVE-$?", "exit"]),
+    ("^C in vi mode",          ["-V"], ["\x03", "echo ALIVE-$?", "exit"]),
+    ("^C with EXIT trap",      [], ["trap 'echo bye' EXIT", "\x03", "exit"]),
+    # A subshell inside an EXIT trap: the child raises EXEXIT into main's
+    # frame via forkreset(). Non-interactively this is covered by
+    # tests/corpus/aud_exception_paths.txt; here it also has to survive
+    # job control being on.
+    ("subshell in EXIT trap",  [], ["trap '(exit 7); echo t=$?' EXIT", "exit"]),
 ]
 
 
 def main():
     root = f"{ROOT}/tests/.build/ptyrun"
     subprocess.run(["rm", "-rf", root], check=False)
-    npass = nfail = 0
+    npass = nfail = nflaky = 0
     failures = []
     for idx, (name, args, lines) in enumerate(CASES):
         wa = f"{root}/{idx}/w"
@@ -148,13 +186,29 @@ def main():
         if a == b:
             npass += 1
             print(f"  ok   {name}")
-        else:
-            nfail += 1
-            print(f"  FAIL {name}")
-            failures.append((name, a, b))
+            continue
+        # A single mismatch on a pty is not yet a divergence. How much of
+        # a prompt has been drained when the reader gives up is a timing
+        # question, and this harness once reported 18/20 on a tree that
+        # was fine. Re-run both sides and only call it a failure when the
+        # two sets of observed outputs are disjoint -- the same rule
+        # dscase.sh applies. (Documented as missing in tests/README.md;
+        # it no longer is.)
+        refset, portset = {a}, {b}
+        for _ in range(3):
+            refset.add(norm(run(REF, args, lines, wa), REF, wa))
+            portset.add(norm(run(PORT, args, lines, wb), PORT, wb))
+        if refset & portset:
+            nflaky += 1
+            npass += 1
+            print(f"  ok   {name}  (flaky: the port produced an output the reference also produces)")
+            continue
+        nfail += 1
+        print(f"  FAIL {name}")
+        failures.append((name, a, b))
     for name, a, b in failures:
         print(f"\n### {name}\n  ref :\n{a}\n  port:\n{b}")
-    print(f"\nINTERACTIVE (pty, sandboxed): PASS={npass} FAIL={nfail}")
+    print(f"\nINTERACTIVE (pty, sandboxed): PASS={npass} FAIL={nfail} FLAKY={nflaky}")
     return 1 if nfail else 0
 
 

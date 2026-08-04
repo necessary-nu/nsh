@@ -36,6 +36,20 @@ DS_SANDBOX=${DS_SANDBOX:-sandbox}
 # wedging during setup.
 DS_TIMEOUT=${DS_TIMEOUT:-10}
 
+# `env --default-signal` is not decoration. Signal *dispositions* are
+# inherited across fork and exec, so whatever ignores a signal above this
+# harness -- an editor, a CI runner, a Node-based agent, all of which
+# ignore SIGPIPE -- silently imposes that on both shells under test. Both
+# then behave identically-wrongly and the case passes.
+#
+# That is not hypothetical: it hid a real divergence for the length of
+# this port. Rust's runtime sets SIGPIPE to SIG_IGN before main, which
+# dash never does, so `... | head -2` printed ~99,930 "I/O error" lines
+# from the port and none from dash. Under the harness, the parent's own
+# SIG_IGN reached both shells, so both produced the errors and the only
+# difference left was how many -- which reads as a scheduling flake.
+#
+# Start every shell from a known signal state instead of an inherited one.
 ds_sandboxed() {  # ds_sandboxed WORKDIR SHELL [ARGS...]
 	local dir=$1; shift
 	timeout $((DS_TIMEOUT + 5)) \
@@ -51,7 +65,7 @@ ds_sandboxed() {  # ds_sandboxed WORKDIR SHELL [ARGS...]
 		--setenv TMPDIR "$dir" \
 		--setenv PATH "$dir/.bin:/usr/bin:/bin" \
 		--limit nproc=64 \
-		-- timeout "$DS_TIMEOUT" "$@"
+		-- timeout "$DS_TIMEOUT" env --default-signal -- "$@"
 }
 
 # Equality between two shells proves nothing if neither ran. Assert that
