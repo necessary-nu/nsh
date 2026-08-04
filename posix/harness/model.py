@@ -68,6 +68,12 @@ class Case:
     # there. Only cases that need a writable /tmp -- dash's `fc` editor
     # path uses a compile-time _PATH_TMP rather than $TMPDIR -- turn it on.
     writable_tmp: bool = False
+    # Seconds between input lines for an interactive case. 0 delivers the
+    # whole script at once. Non-zero is needed whenever the case sends a
+    # character the TERMINAL acts on (^Z, ^C): the line discipline reacts
+    # when the byte arrives, so it has to arrive while the job it targets
+    # is actually running.
+    pace: float = 0.0
 
 
 @dataclass

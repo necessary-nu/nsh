@@ -113,11 +113,23 @@ def _run_pty(
     env: dict[str, str],
     stdin: str,
     timeout: float,
+    pace: float = 0.0,
 ) -> tuple[int, str, str, bool]:
     """Run an interactive shell on a real controlling terminal.
 
     A terminal has one output stream, so stderr is intentionally returned as
     empty and the complete terminal transcript is returned as stdout.
+
+    With ``pace`` set, the script is delivered a line at a time with that
+    many seconds between lines, instead of in one payload. This is what
+    makes the suspend character testable at all: the line discipline acts
+    on ^Z when the byte ARRIVES, not when the shell reads it, so a ^Z
+    written up front fires before the foreground job it was meant to stop
+    even exists. Pacing lets `sleep 5` start and only then sends the ^Z.
+
+    A line consisting of a single control character is written raw, with
+    no newline appended -- ^Z and ^C are characters the terminal acts on,
+    not commands the shell reads.
     """
 
     master, slave = pty.openpty()
@@ -144,8 +156,20 @@ def _run_pty(
         raise
     os.close(slave)
 
-    payload = stdin.encode("utf-8", errors="surrogateescape") + b"\x04\x04"
-    offset = 0
+    if pace > 0:
+        chunks: list[bytes] = []
+        for line in stdin.splitlines(keepends=True):
+            body = line.rstrip("\n")
+            if len(body) == 1 and ord(body) < 32:
+                chunks.append(body.encode())
+            else:
+                chunks.append(line.encode("utf-8", errors="surrogateescape"))
+        chunks.append(b"\x04\x04")
+    else:
+        chunks = [stdin.encode("utf-8", errors="surrogateescape") + b"\x04\x04"]
+    chunk_index = 0
+    chunk_offset = 0
+    next_write_at = 0.0
     output = bytearray()
     deadline = time.monotonic() + timeout
     terminal_eof = False
@@ -164,9 +188,17 @@ def _run_pty(
 
             running = process.poll() is None
             readers = [] if terminal_eof else [master]
-            writers = [master] if running and offset < len(payload) else []
+            may_write = (
+                running
+                and chunk_index < len(chunks)
+                and time.monotonic() >= next_write_at
+            )
+            writers = [master] if may_write else []
             remaining = max(0.0, deadline - now) if running else 0.02
             wait = min(0.05, remaining) if running else 0.02
+            if running and chunk_index < len(chunks) and not may_write:
+                # Waiting out a pace interval, not for the shell.
+                wait = min(wait, max(0.005, next_write_at - time.monotonic()))
             try:
                 readable, writable, _ = select.select(readers, writers, [], wait)
             except InterruptedError:
@@ -174,7 +206,12 @@ def _run_pty(
 
             if writable:
                 try:
-                    offset += os.write(master, payload[offset:])
+                    written = os.write(master, chunks[chunk_index][chunk_offset:])
+                    chunk_offset += written
+                    if chunk_offset >= len(chunks[chunk_index]):
+                        chunk_index += 1
+                        chunk_offset = 0
+                        next_write_at = time.monotonic() + pace
                 except BlockingIOError:
                     pass
                 except OSError as error:
@@ -436,6 +473,7 @@ def run_case(
                     env=env,
                     stdin=stdin or "",
                     timeout=case.timeout,
+                    pace=case.pace,
                 )
             else:
                 status, stdout, stderr, timed_out = _run_process(
