@@ -62,6 +62,12 @@ class Case:
     shell_options: tuple[str, ...] = ()
     timeout: float = 5.0
     requires: tuple[str, ...] = ()
+    # Bind a private writable /tmp into the namespace. Off by default: a
+    # bind over /tmp hides everything beneath it, and both the case root
+    # and (depending on how it was built) the shell under test can live
+    # there. Only cases that need a writable /tmp -- dash's `fc` editor
+    # path uses a compile-time _PATH_TMP rather than $TMPDIR -- turn it on.
+    writable_tmp: bool = False
 
 
 @dataclass

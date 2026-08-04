@@ -51,3 +51,4 @@ Makefile
 __pycache__/
 *.py[cod]
 
+posix/.work/

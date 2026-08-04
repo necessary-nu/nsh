@@ -225,12 +225,24 @@ def _run_pty(
 # name here would not be found when Popen launches the wrapper.
 SANDBOX = shutil.which(os.environ.get("POSIX_HARNESS_SANDBOX", "sandbox")) or ""
 
+# Case directories deliberately do NOT live under /tmp. _contain binds a
+# private writable /tmp into the namespace, and a bind over /tmp hides
+# everything beneath it -- including the case's own root, if that is where
+# tempfile would have put it ("Can't chdir to /tmp/tmpXXXX"). Keeping the
+# roots outside /tmp lets both binds coexist.
+WORK_ROOT = Path(
+    os.environ.get("POSIX_HARNESS_WORKDIR")
+    or (Path(__file__).resolve().parents[1] / ".work")
+)
+
 
 class ContainmentError(RuntimeError):
     """Raised when the shell cannot be confined. Never degrade to running free."""
 
 
-def _contain(argv: list[str], *, cwd: Path, interactive: bool) -> list[str]:
+def _contain(
+    argv: list[str], *, cwd: Path, interactive: bool, writable_tmp: bool = False
+) -> list[str]:
     """Wrap a shell invocation in a PID namespace.
 
     A conformance case is hostile input: this suite necessarily exercises
@@ -263,11 +275,21 @@ def _contain(argv: list[str], *, cwd: Path, interactive: bool) -> list[str]:
         "/proc",
         "--bind",
         f"{cwd}:{cwd}",
+        # A writable /tmp, private to the case. dash's `fc` builds its
+        # editor scratch file as `sprintf(editfile, "%s_shXXXXXX",
+        # _PATH_TMP)` -- a compile-time /tmp, not $TMPDIR -- so with the
+        # whole root read-only, `fc -e` and the `v` command could not run
+        # at all and three rules were being excused as untestable for what
+        # was really a property of this wrapper. It is a fresh directory
+        # per case, inside the case's own root, so it is as disposable as
+        # everything else here.
         "--chdir",
         str(cwd),
         "--limit",
         "nproc=64",
     ]
+    if writable_tmp:
+        wrapper += ["--bind", f"{cwd}/.tmp:/tmp"]
     if not interactive:
         wrapper.append("--new-session")
         return [*wrapper, "--", *argv]
@@ -300,7 +322,8 @@ def assert_contained() -> None:
         )
     sentinel = subprocess.Popen(["sleep", "30"])
     try:
-        with tempfile.TemporaryDirectory() as probe:
+        WORK_ROOT.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=WORK_ROOT) as probe:
             argv = _contain(
                 ["/bin/sh", "-c", f"test -d /proc/{sentinel.pid} && echo VISIBLE; ls /proc | grep -c '^[0-9]*$'"],
                 cwd=Path(probe),
@@ -327,13 +350,25 @@ def _invocation(shell: Path, case: Case, cwd: Path) -> tuple[list[str], str | No
     options = list(case.shell_options)
     if case.mode == "command":
         argv = [str(shell), *options, "-c", case.script, *case.args]
-        return _contain(argv, cwd=cwd, interactive=False), case.stdin, False
+        return (
+            _contain(argv, cwd=cwd, interactive=False, writable_tmp=case.writable_tmp),
+            case.stdin,
+            False,
+        )
     session = case.stdin if case.stdin is not None else case.script
     if case.mode == "stdin":
         argv = [str(shell), *options, "-s", *case.args]
-        return _contain(argv, cwd=cwd, interactive=False), session, False
+        return (
+            _contain(argv, cwd=cwd, interactive=False, writable_tmp=case.writable_tmp),
+            session,
+            False,
+        )
     argv = [str(shell), *options, "-i", *case.args]
-    return _contain(argv, cwd=cwd, interactive=True), session, True
+    return (
+        _contain(argv, cwd=cwd, interactive=True, writable_tmp=case.writable_tmp),
+        session,
+        True,
+    )
 
 
 def run_case(
@@ -361,13 +396,16 @@ def run_case(
     shell = shell.resolve()
     started = time.monotonic()
     try:
-        with tempfile.TemporaryDirectory(prefix="dash-posix-") as directory:
+        WORK_ROOT.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix="dash-posix-", dir=WORK_ROOT) as directory:
             root = Path(directory)
             home = root / ".home"
             home.mkdir()
             bin_dir = root / ".bin"
             bin_dir.mkdir()
             (bin_dir / "sh").symlink_to(shell)
+            # Bound onto /tmp inside the namespace; see _contain.
+            (root / ".tmp").mkdir()
 
             for relative, fixture in case.files.items():
                 path = root / relative
