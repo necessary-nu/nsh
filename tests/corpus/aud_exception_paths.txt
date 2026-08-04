@@ -1,0 +1,121 @@
+# Exception-mechanism paths: the places where C's setjmp/longjmp pair
+# becomes catch_unwind/panic in the port, and where the two can disagree
+# about *which frame* is the jump target.
+#
+# The two bugs this corpus was written for:
+#
+#   * A subshell forked from inside an EXIT trap. forkreset() points
+#     `handler` back at main_handler, so the child raises EXEXIT into
+#     main's frame. In C that frame is live for as long as main runs,
+#     including during the exitshell() at `exit:`. The port had
+#     exitshell() outside the catch region, so the child's unwind escaped
+#     main and it died with Rust's panic status 101 -- which the trap then
+#     printed as $?.
+#
+#   * onint() leaving the signal handler. See aud_signal_paths.txt; that
+#     one needs a tty, so it lives in ptydiff.py.
+#
+# Every case here is a *status*, because a wrong exception target shows up
+# as a status long before it shows up as output.
+
+trap '(false); echo $?' EXIT
+%%%
+trap '(exit 7); echo $?' EXIT
+%%%
+trap '(:); echo $?' EXIT
+%%%
+trap 'echo sub $( (exit 4); echo $? )' EXIT
+%%%
+trap '(exit 3); (exit 4); echo $?' EXIT
+%%%
+trap 'x=$( (exit 9); echo $? ); echo "x=$x"' EXIT
+%%%
+trap '( exit 5 ) & wait $!; echo $?' EXIT
+%%%
+# The trap runs a subshell that itself sets a trap.
+trap '( trap "echo inner" EXIT; exit 2 ); echo $?' EXIT
+%%%
+# ...and one that raises a shell error rather than exiting.
+trap '( nosuchcommand_9182 ); echo $?' EXIT 2>/dev/null
+%%%
+# A subshell under EXIT after an explicit exit status.
+trap '(false); echo $?' EXIT
+exit 6
+%%%
+# The same, via `set -e`, which raises EXERROR rather than EXEXIT.
+set -e
+trap '(exit 8); echo $?' EXIT
+false
+%%%
+# Nested: a subshell in an EXIT trap inside a subshell.
+( trap '(exit 4); echo inner=$?' EXIT; : ); echo outer=$?
+%%%
+# Command substitution inside the EXIT trap of a command substitution.
+echo "got $( trap 'echo t$( (exit 1); echo $? )' EXIT; : )"
+%%%
+# exit invoked from within the EXIT trap itself.
+trap 'echo in; (exit 2); exit 3' EXIT
+%%%
+# A function called from the EXIT trap that forks.
+f() { (exit 5); echo f=$?; }
+trap f EXIT
+%%%
+# EXIT trap in a -c script that ends in an error.
+trap '(:); echo end=$?' EXIT
+nosuchcommand_4471
+%%%
+# Pipelines in the EXIT trap: each stage is a forked child.
+trap 'true | false; echo p=$?; false | true; echo q=$?' EXIT
+%%%
+# Backgrounded subshell in the EXIT trap.
+trap '(exit 1) & wait; echo bg=$?' EXIT
+%%%
+# The EXIT trap runs `exec` in a subshell.
+trap '( exec /bin/echo execd ); echo e=$?' EXIT
+%%%
+# Deep recursion of subshells inside the trap.
+trap '((((exit 6)))); echo deep=$?' EXIT
+%%%
+# Exception raised while the shell is already exiting: a syntax error in
+# the trap body.
+trap 'if; echo unreached' EXIT
+echo before
+%%%
+# `return` from the EXIT trap (outside a function) then a subshell.
+trap 'return 2>/dev/null; (exit 4); echo r=$?' EXIT
+%%%
+# Redirections on the trap's subshell.
+trap '(exit 3) > /dev/null 2>&1; echo r=$?' EXIT
+%%%
+# A trap on a signal, not EXIT, that forks -- exercises the same handler.
+#!allow-kill
+trap '(exit 5); echo u=$?' USR1
+kill -USR1 $$
+sleep 0.1
+%%%
+# eval inside the EXIT trap, which pushes its own input source.
+trap 'eval "(exit 7); echo ev=\$?"' EXIT
+%%%
+# `.` (dot) a file from the EXIT trap.
+echo '(exit 8); echo dot=$?' > d.sh
+trap '. ./d.sh' EXIT
+%%%
+# Subshell in the EXIT trap after the shell has closed stdout.
+trap '(exit 2); echo c=$? >&2' EXIT
+exec >&-
+%%%
+# The trap is set inside a function, and fires after the function returns.
+g() { trap '(exit 9); echo g=$?' EXIT; }
+g
+%%%
+# Two exits racing: `exit` inside a subshell inside the trap.
+trap '( exit 1; echo unreached ); echo t=$?' EXIT
+%%%
+# A command substitution whose child exits non-zero, inside the trap.
+trap 'v=$(exit 3); echo v=$?' EXIT
+%%%
+# Here-document consumed by a subshell in the trap.
+trap '(cat <<EOF
+here
+EOF
+); echo h=$?' EXIT

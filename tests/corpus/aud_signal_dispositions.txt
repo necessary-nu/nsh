@@ -1,0 +1,98 @@
+# Signal dispositions, which dash mostly does not manage and therefore
+# passes through unchanged -- and which a Rust port silently does not.
+#
+# Rust's runtime sets SIGPIPE to SIG_IGN before main(). dash never touches
+# SIGPIPE at all, so the disposition it presents to every child is the one
+# it was exec'd with. The port therefore turned every "writer dies when
+# the reader goes away" into "writer gets EPIPE and complains", ~99,930
+# times for a single `| head -2`.
+#
+# Note this corpus only proves the SIG_DFL case: the harness starts every
+# shell from `env --default-signal`. The SIG_IGN-inherited case (a shell
+# started from something that ignores SIGPIPE, which is most daemons) is
+# covered by the direct check in crates/dash/src/main.rs's comment and was
+# verified by hand -- both shells keep the ignore.
+
+#!name sigpipe-head-quiet
+i=0; while [ $i -lt 100000 ]; do echo lots; i=$((i+1)); done | head -2; echo "rc=$?"
+%%%
+#!name sigpipe-count-diagnostics
+{ i=0; while [ $i -lt 20000 ]; do echo lots; i=$((i+1)); done | head -1; } 2>&1 | grep -c 'I/O error'
+%%%
+#!name sigpipe-yes-into-head
+i=0; while :; do echo y; i=$((i+1)); [ $i -gt 50000 ] && break; done | head -3
+%%%
+#!name sigpipe-external-writer
+seq 1 200000 2>/dev/null | head -2; echo "rc=$?"
+%%%
+#!name sigpipe-printf-builtin
+{ i=0; while [ $i -lt 20000 ]; do printf 'x\n'; i=$((i+1)); done | head -1; } 2>&1 | sort -u
+%%%
+#!name sigpipe-status-of-writer
+{ i=0; while [ $i -lt 50000 ]; do echo a; i=$((i+1)); done; } | head -1 >/dev/null; echo "rc=$?"
+%%%
+#!name sigpipe-in-subshell
+( i=0; while [ $i -lt 50000 ]; do echo b; i=$((i+1)); done ) | head -1; echo "rc=$?"
+%%%
+#!name sigpipe-cmdsub
+v=$( { i=0; while [ $i -lt 20000 ]; do echo c; i=$((i+1)); done | head -1; } 2>&1 ); printf '%s\n' "$v" | sort -u
+%%%
+# The dispositions the shell *does* manage must still be default-on-exec
+# for a non-interactive shell.
+#!name dispositions-noninteractive
+grep -E '^Sig(Ign|Blk|Cgt):' /proc/self/status
+%%%
+#!name dispositions-after-trap
+trap '' USR1; grep -E '^SigIgn:' /proc/self/status
+%%%
+#!name dispositions-trap-reset
+trap 'echo hi' USR1; trap - USR1; grep -E '^SigIgn:' /proc/self/status
+%%%
+#!name dispositions-in-subshell
+trap '' USR2; ( grep -E '^SigIgn:' /proc/self/status )
+%%%
+#!name dispositions-background
+trap '' USR1; { grep -E '^SigIgn:' /proc/self/status; } & wait
+%%%
+# An ignored signal must stay ignored across a `trap` that tries to catch
+# it -- POSIX says a signal ignored on entry cannot be trapped.
+#!name inherited-ignore-not-trappable
+trap '' PIPE; trap 'echo caught' PIPE; trap -p PIPE
+%%%
+# --- the rest of what Rust's runtime does and dash does not ---
+#
+# std::rt::init also opens /dev/null over any closed standard fd, and
+# installs SIGSEGV/SIGBUS handlers on an alternate stack so a stack
+# overflow prints a message. dash does neither: a closed fd stays closed,
+# and a segfault is a segfault. Both are undone in crates/dash/src/main.rs.
+
+# These have to close the fd for a *freshly started* shell -- `sh` on PATH
+# is the shell under test -- because what is being tested is what the
+# runtime did before main(), which cannot be observed from a shell that
+# started with the fd open.
+#!name closed-stdin-stays-closed
+sh -c 'readlink /proc/self/fd/0 2>&1 || echo "(no fd 0)"' 0<&-
+%%%
+#!name closed-stdin-read-fails
+sh -c 'read x; echo "rc=$? x=[$x]"' 0<&-
+%%%
+#!name closed-stdin-exec-dup
+sh -c 'exec 3<&0 2>/dev/null; echo "rc=$?"' 0<&-
+%%%
+#!name closed-stdout-stays-closed
+sh -c 'readlink /proc/self/fd/1 >&2 2>/dev/null; echo "one=$?" >&2' 1>&- 2>&1
+%%%
+#!name closed-stdin-fd-list
+sh -c 'ls /proc/self/fd | sort | tr "\n" " "; echo' 0<&-
+%%%
+#!name stack-overflow-is-a-segfault
+sh -c 'ulimit -s 2048; f() { f; }; f' >/dev/null 2>&1; echo "rc=$?"
+%%%
+#!name shell-sigcgt
+grep -E '^SigCgt:' /proc/$$/status; :
+%%%
+#!name shell-sigcgt-with-trap
+trap 'echo x' USR1; grep -E '^SigCgt:' /proc/$$/status; :
+%%%
+#!name shell-sigcgt-in-subshell
+( grep -E '^SigCgt:' /proc/$$/status; : )

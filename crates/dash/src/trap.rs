@@ -312,7 +312,23 @@ pub unsafe fn ignoresig(signo: c_int) {
 
 // [spec:dash:def:trap.onsig-fn]
 // [spec:dash:sem:trap.onsig-fn]
-pub unsafe extern "C" fn onsig(signo: c_int) {
+/* `extern "C-unwind"`, not `extern "C"`, and this is the whole reason
+ * an interactive port survived `kill -INT $$` only in the C.
+ *
+ * `onint()` below does not return: in the C it `longjmp`s out of the
+ * signal handler back to whichever handler is armed, which for an
+ * interactive shell is `main_handler`. That is how dash abandons a
+ * blocked `read()` in `preadfd` — the `EINTR` path there just retries,
+ * so an interrupt that merely sets `intpending` and returns would be
+ * swallowed and the shell would sit there.
+ *
+ * The port raises that jump as an unwind. Rust makes unwinding out of
+ * an `extern "C"` frame an abort, so the handler took the process down
+ * with SIGABRT (status 134) instead. `extern "C-unwind"` is the ABI
+ * that permits it; the unwinder walks the kernel signal frame through
+ * the `__restore_rt` trampoline's CFI, the same mechanism that lets a
+ * C++ exception leave a handler under `-fnon-call-exceptions`. */
+pub unsafe extern "C-unwind" fn onsig(signo: c_int) {
     if crate::jobs::vforked != 0 && libc::getpid() != crate::jobs::vforked {
         return;
     }

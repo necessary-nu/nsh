@@ -108,7 +108,21 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
     let smark_p: *mut stackmark = &mut smark;
 
     /* Where the startup sequence resumes: 0 is the top, 1..4 are the
-     * `state1`..`state4` labels. */
+     * `state1`..`state4` labels, and 5 is `exit:`.
+     *
+     * `exit:` is inside the loop, and that is load bearing. In the C,
+     * `setjmp(main_handler.loc)` is armed in `main`'s own frame, so it
+     * stays a live jump target for as long as `main` runs — including
+     * during the `exitshell()` at `exit:`. `forkreset()` relies on
+     * exactly that: it points `handler` back at `main_handler`, so a
+     * subshell forked from inside an EXIT trap raises `EXEXIT` into
+     * this frame and leaves through `goto exit`.
+     *
+     * A `catch_unwind` is not a frame-lifetime jump target — it only
+     * catches while its body runs. With `exitshell()` called after the
+     * loop, that subshell's unwind had no handler on the stack, escaped
+     * `main`, and the child died with Rust's panic status 101, which the
+     * trap then reported as `$?`. */
     let mut entry: c_int = 0;
 
     loop {
@@ -169,22 +183,29 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
                         if sflag() != 0 || crate::options::minusc.is_null() {
                             pc = 4;
                         } else {
-                            return; /* falls out to exit: */
+                            pc = 5; /* goto exit */
                         }
                     }
-                    _ => {
+                    4 => {
                         /* state4: XXX ??? - why isn't this before the "if"
                          * statement */
                         cmdloop(1);
-                        return; /* falls out to exit: */
+                        pc = 5; /* falls into exit: */
+                    }
+                    _ => {
+                        // exit:
+                        /* #if PROFILE: monitor(0); */
+                        /* #if GPROF: _mcleanup(); */
+                        crate::trap::exitshell();
+                        /* NOTREACHED — exitshell() ends in _exit(). */
                     }
                 }
             }
         });
 
-        if jumped == 0 {
-            break; /* the startup sequence fell through to exit: */
-        }
+        /* `jumped == 0` is unreachable: every path through the body ends
+         * at `exit:`, and `exitshell()` never returns. */
+        let _ = jumped;
 
         /* setjmp returned non-zero: an exception unwound to main. */
         {
@@ -202,7 +223,8 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
                 || iflag() == 0
                 || shlvl != 0
             {
-                break; // goto exit
+                entry = 5; // goto exit
+                continue;
             }
 
             crate::init::reset();
@@ -225,11 +247,6 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
             };
         }
     }
-    // exit:
-    /* #if PROFILE: monitor(0); */
-    /* #if GPROF: _mcleanup(); */
-    crate::trap::exitshell();
-    /* NOTREACHED */
 }
 
 /// Glue for the binary crate root: turns Rust's `Vec<String>` argv into
