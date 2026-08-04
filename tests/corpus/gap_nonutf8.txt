@@ -1,0 +1,9 @@
+#!name argv-invalid-utf8
+#!args ÿ
+echo "[$1]" | od -c | head -2
+%%%
+#!name body-invalid-utf8
+x=ÿabc; echo "$x" | od -c | head -2
+%%%
+#!name printf-latin1
+printf "\303\251\377\n" | od -c | head -2

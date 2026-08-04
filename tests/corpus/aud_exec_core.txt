@@ -1,0 +1,645 @@
+#!name exitstatus: pipeline last stage
+false | true; echo $?
+true | false; echo $?
+%%%
+#!name exitstatus: pipefail
+set -o pipefail
+false | true; echo $?
+(exit 3) | (exit 0) | (exit 0); echo $?
+(exit 0) | (exit 4) | (exit 5); echo $?
+%%%
+#!name exitstatus: subshell
+(exit 7); echo $?
+( (exit 9) ); echo $?
+%%%
+#!name exitstatus: function return
+f() { return 5; }
+f; echo $?
+g() { false; }
+g; echo $?
+h() { return; }
+false; h; echo $?
+%%%
+#!name exitstatus: NNOT
+! true; echo $?
+! false; echo $?
+! ! false; echo $?
+%%%
+#!name exitstatus: NREDIR redirect error
+{ echo hi; } < /nonexistent/zzz; echo "rc=$?"
+%%%
+#!name exitstatus: empty case body EV_EXIT
+case a in a) ;; esac; echo $?
+false; case a in a) ;; esac; echo $?
+false; case a in b) echo no;; esac; echo $?
+%%%
+#!name set -e: simple
+set -e
+false
+echo NOTREACHED
+%%%
+#!name set -e: in condition context
+set -e
+if false; then echo t; else echo f; fi
+while false; do :; done
+echo alive
+false || echo ok
+! false
+echo done
+%%%
+#!name set -e: function body
+set -e
+f() { false; echo NOPE; }
+f
+echo NOTREACHED
+%%%
+#!name set -e: function in condition
+set -e
+f() { false; echo INSIDE; }
+if f; then echo t; else echo f; fi
+echo alive
+%%%
+#!name set -e: subshell
+set -e
+(false; echo NOPE)
+echo NOTREACHED
+%%%
+#!name set -e: pipeline
+set -e
+false | true
+echo alive
+true | false
+echo NOTREACHED
+%%%
+#!name set -e with redirect failure
+set -e
+echo hi > /nonexistent/dir/file
+echo NOTREACHED
+%%%
+#!name eval builtin exit status
+eval 'true'; echo $?
+eval 'false'; echo $?
+eval; echo $?
+eval 'echo' 'a' 'b'; echo $?
+%%%
+#!name eval multiple args concatenation
+eval echo one two three
+eval 'x=1' '; echo $x'
+%%%
+#!name break/continue counts
+for i in 1 2 3; do for j in a b; do echo $i$j; continue 2; done; done
+for i in 1 2 3; do for j in a b; do echo $i$j; break 2; done; done
+%%%
+#!name break beyond loopnest
+break; echo "rc=$?"
+for i in 1 2; do break 5; echo NOPE; done; echo after
+%%%
+#!name break bad number
+for i in 1 2; do break 0; done
+echo "rc=$?"
+%%%
+#!name return outside function skips file
+#!mode=file
+echo one
+return 3
+echo NOTREACHED
+%%%
+#!name return with no arg outside function
+#!mode=file
+false
+return
+echo NOTREACHED
+%%%
+#!name dot file return status
+#!mode=file
+printf 'echo in-dot\nreturn 4\necho NOPE\n' > d.sh
+. ./d.sh
+echo "rc=$?"
+%%%
+#!name exec without args keeps redirection status
+exec 2>&1
+echo ok
+%%%
+#!name exec with redirection only in subshell
+( exec > out.txt; echo redirected ); cat out.txt
+%%%
+#!name exec replaces shell
+#!mode=file
+exec echo replaced
+echo NOTREACHED
+%%%
+#!name exec nonexistent command
+#!mode=file
+exec /nonexistent/zzz
+echo NOTREACHED
+%%%
+#!name exec nonexistent in subshell rc
+( exec /nonexistent/zzz ) 2>/dev/null; echo "rc=$?"
+%%%
+#!name exec nonexecutable file
+: > notexec
+chmod 644 notexec
+( exec ./notexec ) 2>/dev/null; echo "rc=$?"
+%%%
+#!name command -v builtins keywords aliases
+command -v echo
+command -v if
+alias foo=bar
+command -v foo
+f() { :; }
+command -v f
+command -v /bin/sh
+command -v nosuchthing; echo "rc=$?"
+%%%
+#!name command -V
+command -V echo
+command -V if
+command -V :
+command -V read
+f() { :; }
+command -V f
+command -V nosuchthing; echo "rc=$?"
+%%%
+#!name command -p
+command -p echo pfound
+command -pv echo
+%%%
+#!name command with -- separator
+command -- echo dashdash
+command -v -- echo
+%%%
+#!name command runs external ignoring function
+ls() { echo FUNC; }
+ls() { echo FUNC; }
+command ls -d .
+ls
+%%%
+#!name type on various
+type echo
+type if
+type :
+type read
+type nosuchthing; echo "rc=$?"
+%%%
+#!name hash table basics
+hash
+PATH=/bin:/usr/bin
+true
+hash -r
+hash
+echo hashdone
+%%%
+#!name hash a nonexistent command
+hash nosuchcmd 2>&1; echo "rc=$?"
+%%%
+#!name hash then cd invalidates
+mkdir -p bindir
+printf '#!/bin/sh\necho MYPROG\n' > bindir/myprog
+chmod 755 bindir/myprog
+PATH=$PWD/bindir:$PATH
+myprog
+cd bindir
+myprog
+cd ..
+myprog
+%%%
+#!name PATH search relative entry rehash
+mkdir -p b1 b2
+printf '#!/bin/sh\necho ONE\n' > b1/p; chmod 755 b1/p
+printf '#!/bin/sh\necho TWO\n' > b2/p; chmod 755 b2/p
+PATH=b1:b2:$PATH
+p
+PATH=b2:b1:$PATH
+p
+%%%
+#!name empty PATH entry means cwd
+mkdir -p .
+printf '#!/bin/sh\necho CWDPROG\n' > cwdprog; chmod 755 cwdprog
+PATH=:/bin:/usr/bin
+cwdprog
+PATH=/bin::/usr/bin
+cwdprog
+%%%
+#!name builtinloc %builtin position
+PATH=/bin:%builtin:/usr/bin
+type echo
+PATH=%builtin:/bin
+type echo
+%%%
+#!name background job and wait
+sleep 0 &
+wait
+echo "rc=$?"
+%%%
+#!name wait for specific pid
+#!norm=pid
+(exit 3) &
+p=$!
+wait $p
+echo "rc=$?"
+%%%
+#!name wait unknown pid
+wait 999999
+echo "rc=$?"
+%%%
+#!name wait with no children
+wait; echo "rc=$?"
+%%%
+#!name jobs builtin nonintr
+sleep 0 &
+wait
+jobs
+echo "rc=$?"
+%%%
+#!name trap EXIT runs
+trap 'echo TRAPPED' EXIT
+echo body
+%%%
+#!name trap EXIT and exit status
+trap 'echo T=$?' EXIT
+(exit 9)
+%%%
+#!name trap with exit inside function
+trap 'echo EXITTRAP' EXIT
+f() { exit 3; }
+f
+echo NOTREACHED
+%%%
+#!name trap in subshell inherits then resets
+trap 'echo OUTER' EXIT
+( echo sub )
+echo main
+%%%
+#!name trap INT ignore then command
+trap '' INT
+echo ok
+trap - INT
+echo ok2
+%%%
+#!name trap makes EV_EXIT fork
+#!mode=file
+trap 'echo T' EXIT
+/bin/echo last
+%%%
+#!name local in recursive function
+f() {
+  local n=$1
+  if [ "$n" -gt 0 ]; then
+    f $((n-1))
+  fi
+  echo "n=$n"
+}
+f 3
+%%%
+#!name local unset restores
+x=outer
+f() { local x; echo "in=[$x]"; x=inner; echo "in2=$x"; }
+f
+echo "out=$x"
+%%%
+#!name local in nested functions
+a=1
+g() { echo "g sees $a"; }
+f() { local a=2; g; }
+f
+g
+%%%
+#!name function redefines itself
+f() { echo first; f() { echo second; }; }
+f
+f
+f
+%%%
+#!name unset function
+f() { echo hi; }
+f
+unset -f f
+f 2>/dev/null; echo "rc=$?"
+%%%
+#!name funcline and LINENO
+f() {
+echo "$LINENO"
+echo "$LINENO"
+}
+echo "$LINENO"
+f
+echo "$LINENO"
+%%%
+#!name ulimit defaults
+ulimit -f
+ulimit -Hf
+ulimit -Sf
+%%%
+#!name ulimit set and read back
+( ulimit -f 100; ulimit -f )
+( ulimit -c 0; ulimit -c )
+%%%
+#!name ulimit -a
+ulimit -a | sed 's/[0-9][0-9]*/N/g'
+%%%
+#!name ulimit bad number
+ulimit -f abc 2>&1; echo "rc=$?"
+ulimit -f 12x 2>&1; echo "rc=$?"
+%%%
+#!name ulimit too many args
+ulimit -f 1 2 2>&1; echo "rc=$?"
+ulimit -a 5 2>&1; echo "rc=$?"
+%%%
+#!name ulimit unlimited
+( ulimit -c unlimited; ulimit -c )
+%%%
+#!name ulimit lower hard limit then raise
+( ulimit -Hn 64; ulimit -Hn; ulimit -n 128 2>&1; echo "rc=$?" )
+%%%
+#!name read basic
+printf 'a b c\n' | { read x y z; echo "[$x][$y][$z]"; }
+printf 'a b c d\n' | { read x y; echo "[$x][$y]"; }
+printf 'a\n' | { read x y z; echo "[$x][$y][$z]"; }
+%%%
+#!name read -r backslash
+printf 'a\\\\b\n' | { read x; echo "[$x]"; }
+printf 'a\\\\b\n' | { read -r x; echo "[$x]"; }
+%%%
+#!name read line continuation
+printf 'a\\\\\nb\n' | { read x; echo "[$x]"; }
+printf 'a\\\\\nb\n' | { read -r x; echo "[$x]"; }
+%%%
+#!name read IFS
+printf 'a:b:c\n' | { IFS=: read x y z; echo "[$x][$y][$z]"; }
+printf ':a::b:\n' | { IFS=: read x y z; echo "[$x][$y][$z]"; }
+printf 'a  b\n' | { IFS=' ' read x y; echo "[$x][$y]"; }
+%%%
+#!name read at EOF
+printf 'abc' | { read x; echo "rc=$? x=[$x]"; }
+printf '' | { read x; echo "rc=$? x=[$x]"; }
+%%%
+#!name read no args
+echo hi | read 2>&1; echo "rc=$?"
+%%%
+#!name read consumes only one line
+printf 'l1\nl2\nl3\n' > f3
+{ read a; read b; echo "[$a][$b]"; } < f3
+%%%
+#!name read with NUL bytes
+printf 'a\000b\n' | { read x; echo "[$x]"; }
+%%%
+#!name read strips trailing IFS whitespace
+printf '  a  b  \n' | { read x y; echo "[$x][$y]"; }
+%%%
+#!name umask octal and symbolic
+( umask 022; umask )
+( umask 022; umask -S )
+( umask 0777; umask )
+( umask u=rwx,g=rx,o=; umask )
+( umask a+r; umask )
+%%%
+#!name umask bad
+( umask 9 2>&1; echo "rc=$?" )
+( umask zzz 2>&1; echo "rc=$?" )
+%%%
+#!name special builtin error aborts
+#!mode=file
+: ${x?boom}
+echo NOTREACHED
+%%%
+#!name regular builtin error does not abort shell
+#!mode=file
+read 2>/dev/null
+echo REACHED
+%%%
+#!name special builtin redirect error aborts
+#!mode=file
+: < /nonexistent/zzz
+echo NOTREACHED
+%%%
+#!name regular builtin redirect error continues
+#!mode=file
+true < /nonexistent/zzz
+echo REACHED rc=$?
+%%%
+#!name assignment before special builtin persists
+x=1
+x=2 :
+echo "x=$x"
+%%%
+#!name assignment before regular builtin is local
+x=1
+x=2 true
+echo "x=$x"
+%%%
+#!name assignment before function call
+x=1
+f() { echo "in=$x"; }
+x=2 f
+echo "out=$x"
+%%%
+#!name assignment before external command
+x=1
+x=2 env | grep '^x='
+echo "out=$x"
+%%%
+#!name command as assignment builtin
+command export y=3
+echo "y=$y"
+%%%
+#!name xtrace of command with assignments
+set -x
+a=1 b=2 echo hi
+set +x
+%%%
+#!name xtrace PS4
+PS4='+X '
+set -x
+echo hi
+set +x
+%%%
+#!name back_exitstatus preserved by empty command
+false
+> emptyfile
+echo "rc=$?"
+%%%
+#!name redirection-only command status
+(exit 5)
+< /dev/null
+echo "rc=$?"
+%%%
+#!name evalskip stops evalstring
+#!mode=file
+f() { return 0; echo NOPE; }
+f
+echo after
+%%%
+#!name nested function return depth
+f() { g; echo "f after g"; }
+g() { return 2; echo NOPE; }
+f
+echo "rc=$?"
+%%%
+#!name loopnest reset in function
+for i in 1 2; do
+  f() { break; }
+  f
+  echo "iter $i"
+done
+echo done
+%%%
+#!name for loop with no words
+for i in ; do echo NOPE; done; echo "rc=$?"
+(exit 3); for i in ; do echo NOPE; done; echo "rc=$?"
+%%%
+#!name until loop status
+until true; do echo NOPE; done; echo $?
+i=0; until [ $i -ge 2 ]; do i=$((i+1)); done; echo "i=$i rc=$?"
+%%%
+#!name while loop status is body status
+i=0; while [ $i -lt 3 ]; do i=$((i+1)); false; done; echo "rc=$?"
+%%%
+#!name and-or chains and -e
+true && false || true; echo $?
+false && echo no; echo $?
+%%%
+#!name backquote exit status
+x=`false`; echo "rc=$?"
+x=$(exit 7); echo "rc=$?"
+echo "$(echo nested $(echo inner))"
+%%%
+#!name backquote of builtin
+x=$(pwd); [ -n "$x" ] && echo pwd-ok
+y=$(echo builtin); echo "$y"
+%%%
+#!name subshell inherits and does not export back
+x=1
+(x=2; echo "in=$x")
+echo "out=$x"
+%%%
+#!name exit inside subshell
+(exit 4); echo $?
+( exit ); echo $?
+false; ( exit ); echo $?
+%%%
+#!name exit with no args uses last status
+#!mode=file
+false
+exit
+%%%
+#!name exit status from trap-modified
+#!mode=file
+trap 'true' EXIT
+false
+exit
+%%%
+#!name deep function recursion with locals
+f() {
+  local d=$1
+  [ "$d" -ge 5 ] && { echo "depth $d"; return 0; }
+  f $((d+1))
+  echo "unwind $d"
+}
+f 0
+%%%
+#!name getopts in function with local OPTIND
+f() {
+  local OPTIND=1
+  while getopts ab o; do echo "opt=$o"; done
+}
+f -a -b
+f -b
+%%%
+#!name shift and positional params in function
+f() { echo "$#:$*"; shift; echo "$#:$*"; }
+set -- x y z
+f 1 2 3
+echo "outer $#:$*"
+%%%
+#!name here document in function
+f() {
+cat <<EOF
+line $1
+EOF
+}
+f one
+f two
+%%%
+#!name command hash after PATH change
+mkdir -p h1 h2
+printf '#!/bin/sh\necho H1\n' > h1/hp; chmod 755 h1/hp
+printf '#!/bin/sh\necho H2\n' > h2/hp; chmod 755 h2/hp
+PATH=$PWD/h1:/bin:/usr/bin
+hp
+PATH=$PWD/h2:/bin:/usr/bin
+hp
+%%%
+#!name find_command with slash
+./nonexistent 2>&1; echo "rc=$?"
+/nonexistent 2>&1; echo "rc=$?"
+mkdir -p adir
+./adir 2>&1; echo "rc=$?"
+%%%
+#!name command -v with slash paths
+command -v ./nosuch; echo "rc=$?"
+command -v /bin/sh
+%%%
+#!name executing a directory
+mkdir -p adirx
+./adirx 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+%%%
+#!name executing non-executable
+: > ne; chmod 644 ne
+./ne 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+%%%
+#!name shell script without shebang
+printf 'echo NOSHEBANG $0\n' > s1.sh; chmod 755 s1.sh
+./s1.sh
+%%%
+#!name evalcommand lastarg underscore
+#!shargs -i
+echo one two
+echo "[$_]"
+%%%
+#!name times builtin present
+times > /dev/null; echo "rc=$?"
+%%%
+#!name dot with arguments
+printf 'echo "dollar0=$0"\n' > da.sh
+. ./da.sh
+echo "rc=$?"
+%%%
+#!name dot searches PATH
+mkdir -p dotdir
+printf 'echo DOTTED\n' > dotdir/dotted.sh
+PATH=$PWD/dotdir:$PATH
+. dotted.sh
+echo "rc=$?"
+%%%
+#!name dot missing file
+. ./nosuchfile.sh 2>&1; echo "rc=$?"
+%%%
+#!name eval with EV_EXIT propagation
+#!mode=file
+eval 'echo a; exit 2; echo NOPE'
+echo NOTREACHED
+%%%
+#!name nested eval
+eval 'eval "echo deep"'
+eval "eval 'echo deep2'"
+%%%
+#!name subshell EV_EXIT optimisation no traps
+#!mode=file
+( echo sub; echo "pid-eq=$([ $$ = $$ ] && echo yes)" )
+%%%
+#!name command substitution in pipeline
+echo $(echo a) | cat
+printf 'x\n' | { read v; echo "got=$v"; }
+%%%
+#!name multi-stage pipeline exit
+echo a | cat | cat | grep a; echo $?
+echo a | cat | cat | grep zzz; echo $?
+%%%
+#!name pipeline with builtin stages
+echo x | { read v; echo "[$v]"; } | cat
+%%%
+#!name I/O in pipeline stage that exits early
+yes 2>/dev/null | head -1
+echo "rc=$?"

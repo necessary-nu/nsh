@@ -1,0 +1,171 @@
+#!name PS1 PS2 plain
+#!mode=stdin
+#!shargs -i
+PS1='P1> '
+PS2='P2> '
+echo one
+echo "unterminated
+continued"
+%%%
+#!name PS2 during heredoc
+#!mode=stdin
+#!shargs -i
+PS1='A '
+PS2='B '
+cat <<EOF
+line1
+line2
+EOF
+%%%
+#!name PS2 during backslash newline
+#!mode=stdin
+#!shargs -i
+PS1='A '
+PS2='B '
+echo x\
+y
+%%%
+#!name PS2 during quote continuation
+#!mode=stdin
+#!shargs -i
+PS1='A '
+PS2='B '
+echo 'a
+b'
+%%%
+#!name PS2 during cmdsub continuation
+#!mode=stdin
+#!shargs -i
+PS1='A '
+PS2='B '
+echo $(echo a
+echo b)
+%%%
+#!name PS2 during backquote continuation
+#!mode=stdin
+#!shargs -i
+PS1='A '
+PS2='B '
+echo `echo a
+echo b`
+%%%
+#!name PS2 during for loop
+#!mode=stdin
+#!shargs -i
+PS1='A '
+PS2='B '
+for i in 1 2
+do
+echo $i
+done
+%%%
+#!name PS1 with expansion
+#!mode=stdin
+#!shargs -i
+v=V
+PS1='[$v] '
+echo one
+echo two
+%%%
+#!name PS1 with cmdsub
+#!mode=stdin
+#!shargs -i
+PS1='[$(echo s)] '
+echo one
+%%%
+#!name PS1 with arith
+#!mode=stdin
+#!shargs -i
+PS1='[$((1+2))] '
+echo one
+%%%
+#!name PS1 with braces
+#!mode=stdin
+#!shargs -i
+v=V
+PS1='[${v:-d}] '
+echo one
+%%%
+#!name PS1 with bad syntax
+#!mode=stdin
+#!shargs -i
+PS1='[${ '
+echo one
+%%%
+#!name PS1 unterminated quote
+#!mode=stdin
+#!shargs -i
+PS1='["abc '
+echo one
+%%%
+#!name PS1 with tilde
+#!mode=stdin
+#!shargs -i
+HOME=/hh
+PS1='~ '
+echo one
+%%%
+#!name PS1 with dollarsq
+#!mode=stdin
+#!shargs -i
+PS1="\$'a\tb' "
+echo one
+%%%
+#!name PS2 with expansion
+#!mode=stdin
+#!shargs -i
+v=V
+PS1='A '
+PS2='[$v] '
+echo x\
+y
+%%%
+#!name interactive syntax error recovery
+#!mode=stdin
+#!shargs -i
+PS1='A '
+echo )
+echo after
+%%%
+#!name interactive alias
+#!mode=stdin
+#!shargs -i
+PS1='A '
+alias f='echo F'
+f
+%%%
+#!name interactive nested heredoc prompts
+#!mode=stdin
+#!shargs -i
+PS1='A '
+PS2='B '
+cat <<X; cat <<Y
+1
+X
+2
+Y
+%%%
+#!name interactive comment then command
+#!mode=stdin
+#!shargs -i
+PS1='A '
+# a comment
+echo done
+%%%
+#!name interactive empty lines
+#!mode=stdin
+#!shargs -i
+PS1='A '
+
+echo done
+%%%
+#!name interactive multiline case
+#!mode=stdin
+#!shargs -i
+PS1='A '
+PS2='B '
+case a in
+a)
+echo m
+;;
+esac

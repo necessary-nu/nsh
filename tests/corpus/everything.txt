@@ -1,0 +1,151 @@
+echo hi
+echo "a  b"   c
+echo 'a  b'
+printf '%s|%d|%05.2f\n' x 42 3.14159
+printf '%b\n' 'a\tb\ncd'
+printf '%c%c\n' abc def
+echo $((1+2*3))
+echo $((7/2)) $((7%2)) $((-7/2)) $((-7%2))
+echo $((1<<10)) $((1024>>3))
+echo $((2>1)) $((1>2)) $((1==1)) $((1!=1))
+echo $((0||3)) $((0&&3)) $((5?6:7))
+x=10; echo $((x+=5)) $x
+echo $((0x10)) $((010)) $((10))
+v=abc; echo ${v}${v}
+v=abc; echo ${#v}
+v=abcdef; echo ${v#a} ${v##a*c} ${v%f} ${v%%c*}
+unset u; echo "[${u:-def}][${u-def}][${u:+set}]"
+u=; echo "[${u:-def}][${u-def}][${u:+set}]"
+unset u; echo ${u:=assigned} $u
+set -- a b c; echo $# "$1" "$@" "$*"
+set -- a b c; for i; do printf '<%s>' "$i"; done; echo
+set -- 'x y' z; printf '<%s>' "$@"; echo
+set -- 'x y' z; printf '<%s>' $@; echo
+IFS=:; set -- a:b; echo "$*"
+echo a b c | while read x y; do echo "[$x][$y]"; done
+echo "  lead"; echo "trail  "
+true && echo t || echo f
+false && echo t || echo f
+if false; then echo a; elif true; then echo b; else echo c; fi
+i=0; until [ $i -ge 3 ]; do i=$((i+1)); done; echo $i
+for i in 1 2 3; do [ $i = 2 ] && continue; echo $i; done
+for i in 1 2 3; do [ $i = 2 ] && break; echo $i; done
+case abc in a*) echo A;; b*) echo B;; *) echo C;; esac
+case abc in x|abc) echo M;; esac
+f() { echo "$1-$2"; }; f p q
+f() { g() { echo inner; }; g; }; f
+f() { local v=in; echo $v; }; v=out; f; echo $v
+f() { return 7; }; f; echo $?
+echo $?; false; echo $?; true; echo $?
+(exit 5); echo $?
+echo a > out1; cat out1
+echo a > out2; echo b >> out2; cat out2
+cat < cases.txt | head -1
+echo x 2>&1 1>/dev/null; echo done
+exec 3>&1; echo via3 >&3; exec 3>&-
+echo pipe | cat | cat | cat
+echo $(echo $(echo deep))
+echo `echo backtick`
+v=$(printf 'a\nb'); echo "$v"
+v=$(echo trailing; echo); echo "[$v]"
+echo "quoted $(echo sub) end"
+test -f cases.txt && echo isfile
+test -d . && echo isdir
+[ 1 -lt 2 ] && echo lt
+[ abc = abc ] && echo streq
+[ -n "" ] || echo empty
+[ ! -e /nonexistent ] && echo noent
+echo a\ b
+echo "a\"b"
+echo 'a'"b"'c'
+echo \$notvar
+echo "\$notvar"
+trap 'echo trapped' EXIT; echo body
+: ; echo colon$?
+shift 0; echo ok
+set -- 1 2 3; shift 2; echo "$@"
+alias foo='echo aliased'; foo
+readonly r=1; echo $r
+export E=1; sh -c 'echo $E'
+echo ${PATH:+haspath}
+cd /tmp && pwd && cd - >/dev/null && echo back
+getopts ab: o -a -b val; echo "$o/$OPTARG/$OPTIND"
+set -- -a -bval x; while getopts ab: o; do echo "$o:$OPTARG"; done; shift $((OPTIND-1)); echo "rest=$*"
+printf 'a\\b\n' | { read -r l; echo "[$l]"; }
+printf 'a\\b\n' | { read l; echo "[$l]"; }
+printf 'x y  z\n' | { read a b; echo "[$a][$b]"; }
+umask 022; umask
+umask 022; umask -S
+ulimit -n
+type echo; type test; type cd
+command -v echo; command -v /bin/ls
+hash; echo $?
+echo ${x-$(echo sub)}
+echo "$(exit 3)"; echo $?
+v=$(false); echo $?
+false; echo ${?}
+echo $((1/0))
+echo $((2**3))
+: $((x=)); echo $?
+echo ${#@}
+set -- a b; echo ${#@} ${#*}
+echo a{b,c}d
+echo [a-c]*
+echo /nonexistentdir/*
+echo "a
+b"
+cat <<'EOF'
+$notexpanded
+EOF
+cat <<EOF
+${HOME:+expanded}
+EOF
+cat <<-EOF
+	stripped
+	EOF
+sleep 0.05 & wait; echo waited
+sleep 0.05 & echo $!>/dev/null; wait $!; echo waited2
+set -o | head -3
+set -f; echo *; set +f
+set -u; echo ${nosuchvar}
+set -x; echo traced
+eval 'echo evaled'
+eval 'a=1; echo $a'
+. /dev/null; echo sourced
+exec echo execed
+echo [ab]b.txt
+echo [!a]b.txt
+echo [[:alpha:]]b.txt
+echo ?b.txt
+echo *.tx?
+mkdir -p d1/d2; echo d1/*/
+mkdir -p d1/d2; touch d1/d2/f; echo d1/*/f
+echo nomatch*glob
+v='a*b'; echo "$v"; echo $v
+v='*'; echo "${v}"; case $v in \*) echo litstar;; esac
+case 'a*b' in a\*b) echo escmatch;; esac
+case abc in [a-c][a-c][a-c]) echo classmatch;; esac
+case 'a]b' in a[]]b) echo brack;; esac
+v=héllo; echo ${#v}
+v=héllo; echo ${v%o}
+v=日本語; echo ${#v}
+v=日本語; echo ${v#日}
+printf '%s\n' 'héllo' | { read x; echo ${#x}; }
+IFS=é; v=aéb; set -- $v; echo $#
+echo $'a\tb'
+echo $'\x41\101'
+echo $'é'
+echo $'\cA' | od -An -c | head -1
+v=$'a\nb'; echo "${#v}"
+printf 'a\0b' | od -An -c | head -1
+echo "${PATH%%:*}"
+x=aXbXc; echo ${x//X/}
+x=abc; echo ${x:1}
+f() { echo "$*"; }; f a b c
+set -- a b c; IFS=,; echo "$*"; IFS=' '
+echo ${-}
+echo $0
+u=1; unset u; echo "${u-unset}"
+readonly rr=1; rr=2; echo $?
+set -C; echo x > clob; echo y > clob; echo $?
+set -C; echo x > clob2; echo y >| clob2; echo $?

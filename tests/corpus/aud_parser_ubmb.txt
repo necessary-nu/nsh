@@ -1,0 +1,123 @@
+#!name heredoc var mb
+export LC_ALL=en_US.UTF-8
+v=é
+cat <<EOF
+$v
+EOF
+
+%%%
+#!name heredoc var mb od
+export LC_ALL=en_US.UTF-8
+v=é
+cat <<EOF | od -An -c | head -2
+$v
+EOF
+
+%%%
+#!name heredoc var mb inline
+export LC_ALL=en_US.UTF-8
+v=aéb
+cat <<EOF | od -An -c | head -2
+x${v}y
+EOF
+
+%%%
+#!name heredoc cmdsub mb
+export LC_ALL=en_US.UTF-8
+cat <<EOF | od -An -c | head -2
+$(printf "é")
+EOF
+
+%%%
+#!name heredoc backq mb
+export LC_ALL=en_US.UTF-8
+cat <<EOF | od -An -c | head -2
+`printf "é"`
+EOF
+
+%%%
+#!name heredoc var highbyte C
+export LC_ALL=C
+v=$(printf "\303\251")
+cat <<EOF | od -An -c | head -2
+$v
+EOF
+
+%%%
+#!name heredoc var highbyte utf8
+export LC_ALL=en_US.UTF-8
+v=$(printf "\303\251")
+cat <<EOF | od -An -c | head -2
+$v
+EOF
+
+%%%
+#!name heredoc invalid mb
+export LC_ALL=en_US.UTF-8
+v=$(printf "\303")
+cat <<EOF | od -An -c | head -2
+$v
+EOF
+
+%%%
+#!name heredoc arith mb
+export LC_ALL=en_US.UTF-8
+cat <<EOF
+$((1+1))é
+EOF
+
+%%%
+#!name ps4 var mb
+export LC_ALL=en_US.UTF-8
+v=é
+PS4="[$v] "
+set -x
+:
+
+%%%
+#!name ps4 cmdsub mb
+export LC_ALL=en_US.UTF-8
+PS4="[$(printf 'é')] "
+set -x
+:
+
+%%%
+#!name heredoc var mb len
+export LC_ALL=en_US.UTF-8
+v=é
+cat <<EOF | wc -c
+$v
+EOF
+
+%%%
+#!name heredoc two mb
+export LC_ALL=en_US.UTF-8
+v=éé
+cat <<EOF | od -An -c | head -2
+$v
+EOF
+
+%%%
+#!name heredoc mb with trim
+export LC_ALL=en_US.UTF-8
+v=aéb
+cat <<EOF | od -An -c | head -2
+${v#a}
+EOF
+
+%%%
+#!name heredoc mb quoted eof
+export LC_ALL=en_US.UTF-8
+v=é
+cat <<'EOF' | od -An -c | head -2
+$v
+EOF
+
+%%%
+#!name heredoc mb positional
+export LC_ALL=en_US.UTF-8
+set -- é
+cat <<EOF | od -An -c | head -2
+$1 $@ $*
+EOF
+

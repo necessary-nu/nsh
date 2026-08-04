@@ -1,0 +1,210 @@
+#!name heredoc plain
+cat <<EOF
+hello
+EOF
+%%%
+#!name heredoc quoted eof
+cat <<'EOF'
+$HOME `echo x` $(echo y) \$z
+EOF
+%%%
+#!name heredoc unquoted expansion
+v=V
+cat <<EOF
+$v ${v} `echo b` $(echo c) \$v \\ \` "q" 'q'
+EOF
+%%%
+#!name heredoc striptabs
+cat <<-EOF
+	indented
+		more
+EOF
+%%%
+#!name heredoc eof not at start
+cat <<EOF
+aEOF
+EOF
+%%%
+#!name heredoc eof prefix
+cat <<EOF
+EOFX
+EOF
+%%%
+#!name heredoc eof partial then real
+cat <<END
+EN
+END
+%%%
+#!name heredoc empty
+cat <<EOF
+EOF
+echo done
+%%%
+#!name two heredocs one line
+cat <<A; cat <<B
+one
+A
+two
+B
+%%%
+#!name heredoc in pipeline
+cat <<EOF | tr a-z A-Z
+mixed Case
+EOF
+%%%
+#!name heredoc with quoted parts of word
+cat <<"E"OF
+$x
+EOF
+%%%
+#!name heredoc eofmark with escape
+cat <<E\OF
+$x
+EOF
+%%%
+#!name heredoc eofmark partially quoted
+v=1
+cat <<E'O'F
+$v
+EOF
+%%%
+#!name heredoc backslash newline inside
+cat <<EOF
+a\
+b
+EOF
+%%%
+#!name heredoc quoted backslash newline
+cat <<'EOF'
+a\
+b
+EOF
+%%%
+#!name heredoc unterminated
+cat <<EOF
+abc
+%%%
+#!name heredoc inside function
+f() {
+cat <<EOF
+in func
+EOF
+}
+f
+%%%
+#!name heredoc inside backquote
+echo "`cat <<EOF
+bq here
+EOF
+`"
+%%%
+#!name heredoc inside dollar paren
+echo "$(cat <<EOF
+dp here
+EOF
+)"
+%%%
+#!name nested heredoc cmdsub
+cat <<EOF
+$(cat <<INNER
+deep
+INNER
+)
+EOF
+%%%
+#!name heredoc after redirect
+cat <<EOF >out.txt
+data
+EOF
+cat out.txt
+%%%
+#!name heredoc with arith
+cat <<EOF
+$((1+2))
+EOF
+%%%
+#!name heredoc quoted with arith
+cat <<'EOF'
+$((1+2))
+EOF
+%%%
+#!name heredoc CTL chars
+cat <<EOF
+a"b'c\`d
+EOF
+%%%
+#!name heredoc tilde
+HOME=/hh
+cat <<EOF
+~ ~/x
+EOF
+%%%
+#!name here in loop
+for i in 1 2; do
+cat <<EOF
+i=$i
+EOF
+done
+%%%
+#!name heredoc with ${} braces
+v=1
+cat <<EOF
+${v} ${v:-d} ${v#1} ${nosuch:-e}
+EOF
+%%%
+#!name heredoc dollar brace unterminated
+cat <<EOF
+${
+EOF
+%%%
+#!name heredoc close brace alone
+cat <<EOF
+}
+EOF
+%%%
+#!name heredoc with backslash escapes
+cat <<EOF
+\$ \` \\ \" \' \a
+EOF
+%%%
+#!name heredoc quoted with backslash escapes
+cat <<'EOF'
+\$ \` \\ \" \' \a
+EOF
+%%%
+#!name heredoc word with dollar
+cat <<$X
+lit
+$X
+%%%
+#!name multiple heredoc same line 3
+cat <<A <<B
+first
+A
+second
+B
+%%%
+#!name heredoc then more input
+cat <<EOF
+x
+EOF
+echo after
+%%%
+#!name heredoc in case
+case a in
+a)
+cat <<EOF
+casebody
+EOF
+;;
+esac
+%%%
+#!name heredoc in and-or
+true && cat <<EOF
+andor
+EOF
+%%%
+#!name heredoc with CRLF-ish
+cat <<EOF
+a 	b
+EOF

@@ -1,0 +1,121 @@
+#!name local basic
+f() { local x=1; echo "$x"; }; x=outer; f; echo "$x"
+%%%
+#!name local unset restore
+f() { local x; echo "[${x-unset}]"; x=in; echo "$x"; }; x=out; f; echo "$x"
+%%%
+#!name local on nonexistent var
+f() { local zz; echo "[${zz-U}]"; zz=1; echo "$zz"; }; f; echo "[${zz-U}]"
+%%%
+#!name local dash saves options
+set -e; f() { local -; set +e; echo "$-"; }; f; echo "$-"
+%%%
+#!name local dash restores xtrace
+f() { local -; set -f; echo "in=$-"; }; echo "before=$-"; f; echo "after=$-"
+%%%
+#!name nested local
+f() { local x=1; g; echo "f:$x"; }; g() { local x=2; echo "g:$x"; }; x=0; f; echo "$x"
+%%%
+#!name local of exported var keeps export
+export E=1; f() { local E=2; env | grep '^E='; }; f; env | grep '^E='
+%%%
+#!name local readonly
+f() { local r; readonly r=5; echo "$r"; }; f; echo "[${r-U}]"
+%%%
+#!name readonly then assign
+readonly R=1; R=2; echo "rc=$?"; echo "$R"
+%%%
+#!name readonly unset
+readonly R=1; unset R; echo "rc=$?"; echo "$R"
+%%%
+#!name export -p subset
+export AAA=1; export BBB; export -p | grep -E 'AAA|BBB'
+%%%
+#!name readonly -p
+readonly RRR=xyz; readonly -p | grep RRR
+%%%
+#!name export existing var no value
+V=hello; export V; env | grep '^V='
+%%%
+#!name export nonexistent no value
+export NOPE; env | grep -c '^NOPE=' ; echo "[${NOPE-U}]"
+%%%
+#!name export nonexistent then set
+export NOPE; NOPE=1; env | grep '^NOPE='
+%%%
+#!name allexport
+set -a; QQ=1; env | grep '^QQ='; set +a; WW=2; env | grep -c '^WW='
+%%%
+#!name allexport local
+set -a; f() { local LL=3; env | grep '^LL='; }; f
+%%%
+#!name unset special IFS
+unset IFS; set -- a b c; x="$*"; echo "[$x]"; IFS=,; echo "[$*]"
+%%%
+#!name IFS reset after unset
+IFS=,; set -- a b c; echo "[$*]"; unset IFS; echo "[$*]"
+%%%
+#!name unset PATH then command
+unset PATH; echo "[${PATH-U}]"; command -v echo
+%%%
+#!name unset OPTIND
+unset OPTIND; echo "[${OPTIND-U}]"
+%%%
+#!name OPTIND reset via assignment
+set -- -a -b; getopts ab o; echo "$o $OPTIND"; OPTIND=1; getopts ab o; echo "$o $OPTIND"
+%%%
+#!name bad variable name
+set -- x; eval 'foo-bar=1'; echo "rc=$?"
+%%%
+#!name set with no args sorts
+unset a b c; ZZZ=1; AAA=2; set | grep -E '^(AAA|ZZZ)='
+%%%
+#!name showvars quoting
+V="a'b"; set | grep "^V="
+%%%
+#!name showvars empty value
+V=; set | grep "^V="
+%%%
+#!name unset -v and -f
+f() { echo fn; }; f=var; unset -f f; echo "[$f]"; f 2>&1 | head -1
+%%%
+#!name unset -v then -f flag ordering
+g() { echo G; }; unset -f -v g; g
+%%%
+#!name unset no flag removes var not func
+h() { echo H; }; h=1; unset h; h; echo "[${h-U}]"
+%%%
+#!name LINENO
+echo $LINENO
+echo $LINENO
+%%%
+#!name PS1 PS2 PS4 defaults
+echo "[$PS1][$PS2][$PS4]"
+%%%
+#!name PPID nonzero
+#!norm=pid
+case "$PPID" in ''|*[!0-9]*) echo bad;; *) echo ok;; esac
+%%%
+#!name local with equals on existing
+x=1; f() { local x=2; echo $x; }; f; echo $x
+%%%
+#!name local multiple names
+f() { local a b=2 c; echo "[${a-U}][$b][${c-U}]"; }; a=1; f; echo "[$a]"
+%%%
+#!name local outside function
+local x 2>&1; echo "rc=$?"
+%%%
+#!name setvar via export with =
+export XV=1 YV=2; echo "$XV$YV"; env | grep -E '^(XV|YV)='
+%%%
+#!name readonly then local
+readonly RO=1; f() { local RO=2; echo in; }; f 2>&1; echo "rc=$?"; echo "$RO"
+%%%
+#!name VUNSET var lookup keeps two nuls
+unset MAIL; echo "[${MAIL-unset}]"
+%%%
+#!name LC_ALL set
+LC_ALL=C; echo "$LC_ALL"; export LC_ALL; env|grep '^LC_ALL='
+%%%
+#!name hashvar collision-ish
+a1=1; a2=2; b1=3; echo "$a1$a2$b1"

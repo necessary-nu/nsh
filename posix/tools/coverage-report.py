@@ -40,6 +40,15 @@ PAIRS = [
     ('builtins-set-trap', 'builtins-set-trap'),
     ('invocation', 'invocation'),
     ('line-editing', 'line-editing'),
+    # Intrinsic utilities (XCU 1.7) and the chapter-1 baseline they defer to.
+    ('builtins-command', 'builtins-command'),
+    ('builtins-process', 'builtins-process'),
+    ('builtins-jobs', 'builtins-jobs'),
+    ('builtins-signals', 'builtins-signals'),
+    ('builtins-alias', 'builtins-alias'),
+    ('builtins-input', 'builtins-input'),
+    ('utility-defaults', 'utility-defaults'),
+    ('xcu-relationship', 'relationship'),
 ]
 
 NORMATIVE = re.compile(r'\b(shall|should|may|must)\b', re.I)

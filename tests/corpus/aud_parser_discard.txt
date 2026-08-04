@@ -1,0 +1,54 @@
+unset u; echo "[${u:+`echo A`}]" "[`echo B`]"
+unset u; echo "[${u+`echo A`}]" "[`echo B`]"
+u=x; echo "[${u:-`echo A`}]" "[`echo B`]"
+u=x; echo "[${u-`echo A`}]" "[`echo B`]"
+unset u; echo "[${u:+$(echo A)}]" "[$(echo B)]"
+u=x; echo "[${u:-$(echo A)}]" "[$(echo B)]"
+u=x; echo "[${u:-$(echo A)$(echo C)}]" "[$(echo B)]"
+unset u; echo "[${u:+$(echo A)$(echo C)}]" "[$(echo B)]"
+unset u; echo "[${u:+$((1/0))}]" ok
+u=x; echo "[${u:-$((1/0))}]" ok
+unset u; echo "[${u:+${w:-`echo N`}}]" "[`echo B`]"
+u=x; echo "[${u:-${w:-`echo N`}}]" "[`echo B`]"
+unset u; echo "[${u:+~}]" ok
+HOME=/hh; unset u; echo "[${u:-~}]"
+HOME=/hh; u=x; echo "[${u:+~}]"
+unset u; f() { echo RAN >&2; }; echo "[${u:+$(f)}]"; echo done
+u=x; f() { echo RAN >&2; }; echo "[${u:-$(f)}]"; echo done
+unset u; echo "[${u:+${v:=SET}}]"; echo "[${v-unset}]"
+u=x; echo "[${u:-${v:=SET}}]"; echo "[${v-unset}]"
+unset u; echo ${u:=`echo A`}; echo "[$u]"
+u=; echo ${u:=`echo A`}; echo "[$u]"
+u=x; echo ${u:=`echo A`}; echo "[$u]"
+unset u; echo ${u=`echo A`}; echo "[$u]"
+u=; echo ${u=`echo A`}; echo "[$u]"
+unset u; echo "[${u:?`echo MSG`}]"; echo rc=$?
+u=x; echo "[${u:?`echo MSG`}]"; echo rc=$?
+unset u; echo "[${u:-a}${u:-b}${u:-c}]"
+unset u; v=x; echo "[${u:+${v:+deep}}]"
+u=y; v=x; echo "[${u:+${v:+deep}}]"
+u=y; unset v; echo "[${u:+${v:+deep}}]"
+unset u; echo "[${u:+`echo A`}${u:-`echo B`}]" "[`echo C`]"
+unset u; echo ${u:+a b c} X
+u=z; echo ${u:+a b c} X
+unset u; IFS=:; echo ${u:-a:b} X
+u=z; IFS=:; echo ${u:+a:b} X
+set -- p q; unset u; echo "[${u:+$@}]" "[${u:-$@}]"
+set -- p q; unset u; echo "[${u:+$*}]" "[${u:-$*}]"
+unset u; echo "[${u:+${#u}}]"
+u=abc; echo "[${u:+${#u}}]"
+unset u; echo "[${u:+${u#a}}]"
+u=abc; echo "[${u:+${u#a}}]"
+unset u; echo "[${u:+$((1+1))}]" "[$((2+2))]"
+u=x; echo "[${u:-$((1+1))}]" "[$((2+2))]"
+unset u; echo "[${u:+"quoted $u"}]"
+u=x; echo "[${u:-"quoted $u"}]"
+unset u; echo "[${u:+'sq'}]"
+u=x; echo "[${u:-'sq'}]"
+unset u; case ${u:+a} in '') echo empty;; *) echo "[$_]";; esac
+unset u; echo "${u:+`echo A`}${nosuch:+`echo B`}`echo C`"
+unset u; echo "${u:-`echo A`}${nosuch:-`echo B`}`echo C`"
+unset a b c; echo "${a:-${b:-${c:-`echo deep`}}}"
+a=1; unset b c; echo "${a:+${b:-${c:-`echo deep`}}}"
+unset u; echo "${u:+`echo A` `echo B`}" "[`echo C`]"
+u=1; echo "${u:+`echo A` `echo B`}" "[`echo C`]"

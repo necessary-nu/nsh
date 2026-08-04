@@ -1,0 +1,217 @@
+#!name fc -l with an empty pattern
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+fc -l ''
+%%%
+#!name fc -l with a lone dash
+#!mode=stdin
+#!shargs -i
+echo a
+fc -l - 2>&1
+%%%
+#!name fc -l with a double dash
+#!mode=stdin
+#!shargs -i
+echo a
+fc -l -- 2>&1
+%%%
+#!name fc number before option stops parsing
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+fc 1 -l 2>&1 | sed 's|/tmp/_sh[A-Za-z0-9]*|TMPFILE|g'
+%%%
+#!name fc -le combined
+#!mode=stdin
+#!shargs -i
+echo a
+fc -le 2>&1 | sed 's|/tmp/_sh[A-Za-z0-9]*|TMPFILE|g'
+%%%
+#!name fc -s with an equals at position zero
+#!mode=stdin
+#!shargs -i
+echo hello
+fc -s =X
+%%%
+#!name fc -s with equals only
+#!mode=stdin
+#!shargs -i
+echo hello
+fc -s = 2>&1
+%%%
+#!name fc -s pat=repl where pat is the whole line
+#!mode=stdin
+#!shargs -i
+true
+fc -s true=false 2>&1; echo "rc=$?"
+%%%
+#!name fc -l -1 -1
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+fc -l -1 -1
+%%%
+#!name fc -l 2 2 same event twice
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+echo c
+fc -l 2 2
+%%%
+#!name fc -lr with equal endpoints
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+fc -lr 1 1
+%%%
+#!name HISTSIZE grown back after zero
+#!mode=stdin
+#!shargs -i
+echo a
+HISTSIZE=0
+echo b
+HISTSIZE=100
+echo c
+echo d
+fc -l 1 99 2>&1
+%%%
+#!name event numbers keep counting after trimming
+#!mode=stdin
+#!shargs -i
+HISTSIZE=2
+echo a
+echo b
+echo c
+echo d
+fc -l 1 99 2>&1
+%%%
+#!name HISTSIZE empty string means 100
+#!mode=stdin
+#!shargs -i
+echo a
+HISTSIZE=
+echo b
+fc -l 1 99
+%%%
+#!name HISTSIZE unset restores default
+#!mode=stdin
+#!shargs -i
+HISTSIZE=2
+echo a
+unset HISTSIZE
+echo b
+echo c
+echo d
+fc -l 1 99 2>&1
+%%%
+#!name HISTSIZE with leading spaces
+#!mode=stdin
+#!shargs -i
+echo a
+HISTSIZE=' 3 '
+echo b
+echo c
+echo d
+fc -l 1 99 2>&1
+%%%
+#!name fc -s inside a compound command
+#!mode=stdin
+#!shargs -i
+echo a
+for i in 1
+do
+fc -l 1 99
+done
+%%%
+#!name fc -l then a continuation line appends to the right event
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+fc -l 1 1
+for i in x
+do
+echo $i
+done
+fc -l 1 99
+%%%
+#!name fc pattern matching after fc moved the cursor
+#!mode=stdin
+#!shargs -i
+zmark 2>/dev/null
+echo a
+fc -l 1 1
+fc -l zmark 2>&1
+%%%
+#!name repeated fc -s
+#!mode=stdin
+#!shargs -i
+echo hi
+fc -s
+fc -s
+%%%
+#!name fc -s uses the fc line itself when it matches
+#!mode=stdin
+#!shargs -i
+echo a
+fc -s f 2>&1
+%%%
+#!name fc -l pattern is the whole newest line
+#!mode=stdin
+#!shargs -i
+echo a
+fc -l 'fc -l' 2>&1
+%%%
+#!name fc -n -l -r combined single arg
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+echo c
+fc -lnr 1 3
+%%%
+#!name fc -l when only one entry exists
+#!mode=stdin
+#!shargs -i
+fc -l 1 1
+%%%
+#!name fc -l -1 on a one-entry history
+#!mode=stdin
+#!shargs -i
+fc -l -1
+%%%
+#!name fc -l 1 2 on a one-entry history
+#!mode=stdin
+#!shargs -i
+fc -l 1 2
+%%%
+#!name fc -s with too many args
+#!mode=stdin
+#!shargs -i
+echo a
+fc -s 1 2 2>&1
+%%%
+#!name fc -s pat=repl plus two more
+#!mode=stdin
+#!shargs -i
+echo a
+fc -s x=y 1 2 2>&1
+%%%
+#!name fc -l three operands
+#!mode=stdin
+#!shargs -i
+echo a
+fc -l 1 2 3 2>&1
+%%%
+#!name fc -r -s
+#!mode=stdin
+#!shargs -i
+echo one
+echo two
+fc -rs 1 2>&1

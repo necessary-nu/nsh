@@ -1,0 +1,142 @@
+v=abcabc; echo ${v#a} ${v##a*b} ${v%c} ${v%%b*}
+v=abcabc; echo "${v#a}" "${v##a*b}" "${v%c}" "${v%%b*}"
+v=/a/b/c; echo ${v#*/} ${v##*/} ${v%/*} ${v%%/*}
+v=aaa; echo ${v#} ${v##} ${v%} ${v%%}
+v=aaa; echo "[${v#*}]" "[${v##*}]" "[${v%*}]" "[${v%%*}]"
+v='a*b'; echo "${v#a\*}" "${v%\*b}"
+v='a*b'; echo "${v#'a*'}"
+v='a b'; echo "${v# }" "${v#a }"
+v=abc; echo ${v#?} ${v%?} ${v#??} ${v%%?}
+v=abc; echo "${v#[ab]}" "${v%[bc]}"
+v=abc; echo "${v#[!a]}" "${v%[!c]}"
+v=x; echo "${v#[]}"
+v=abc; p=b; echo ${v#$p} ${v%$p}
+v=abc; p='*b'; echo "${v#$p}"
+v=abc; p='*b'; echo "${v#"$p"}"
+unset u; echo "[${u:-d}][${u-d}][${u:+p}][${u+p}]"
+u=; echo "[${u:-d}][${u-d}][${u:+p}][${u+p}]"
+u=x; echo "[${u:-d}][${u-d}][${u:+p}][${u+p}]"
+unset u; echo ${u:=v} [$u]
+u=; echo ${u:=v} [$u]
+u=; echo ${u=v} [$u]
+unset u; echo "${u:?}" ; echo rc=$?
+unset u; echo "${u:?custom msg}" ; echo rc=$?
+u=; echo "${u:?empty}"; echo rc=$?
+u=; echo "${u?notempty}"; echo rc=$?
+set -u; unset u; echo "$u"; echo rc=$?
+set -u; unset u; echo "${u-ok}"; echo rc=$?
+set -u; unset u; echo "${#u}"; echo rc=$?
+v=abcdef; echo ${#v} ${#}
+set -- a bb ccc; echo ${#1} ${#2} ${#@} ${#*}
+echo ${#-} ${#?}
+v=abc; echo "${v:-$(echo sub)}"
+unset v; echo "${v:-$(echo sub)}"
+unset v; echo "${v:-`echo bq`}"
+unset v; echo ${v:-a b c}
+unset v; echo "${v:-a b c}"
+unset v; IFS=; echo ${v:-a b c}
+unset v; echo "${v:-"a b" c}"
+echo ${v:-~}
+HOME=/hh; echo ${v:-~}
+HOME=/hh; echo ~ ~/x ~root 2>/dev/null | head -1
+HOME=/hh; v=~; echo "$v"
+HOME=/hh; v=~/a:~/b; echo "$v"
+HOME=/hh; v=x:~; echo "$v"
+HOME=/hh; v=x=~; echo "$v"
+HOME=/hh; export v=~; echo "$v"
+HOME=/hh; echo "~"
+HOME=/hh; echo ~nonexistentuser12345
+HOME=/hh; echo ${HOME}
+set -- a b c; echo "$*" "$@"; IFS=:; echo "$*" "$@"
+set -- a b c; IFS=; echo "$*"; echo $*
+set -- a b c; unset IFS; echo "$*"
+set -- ; echo "[$*][$@]"; echo $#
+set -- ''; echo "[$*][$@]" $#
+set -- '' ''; printf '<%s>' "$@"; echo
+IFS=xy; set -- a b; echo "$*"
+IFS=; set -- a b; echo "$*"
+IFS=' '; v='a  b'; printf '<%s>' $v; echo
+IFS=':'; v='a::b'; printf '<%s>' $v; echo
+IFS=': '; v='a: :b'; printf '<%s>' $v; echo
+IFS=': '; v=' a : b '; printf '<%s>' $v; echo
+IFS=':'; v=':a:'; printf '<%s>' $v; echo
+IFS=' :'; v=' : '; printf '<%s>' $v; echo
+v='a b'; printf '<%s>' "$v"; echo
+v='  '; printf '<%s>' $v; echo; echo done
+echo "a`echo b`c"
+echo a$(echo b)c
+echo "$(echo "nested $(echo deep)")"
+echo `echo \`echo x\``
+echo "`echo \"q\"`"
+echo $(echo '(')
+echo $(( $(echo 1) + 1 ))
+echo "$(echo a; echo b)"
+echo $(echo a; echo b)
+echo "$(printf 'a\n\n\n')"
+echo "[$(printf 'a\n\n\n')]"
+echo "[$(printf '\n\n')]"
+x=$(echo); echo "[$x]"
+echo "${x:-`echo a b`}"
+echo a"b"c'd'e
+echo "a'b'c"
+echo 'a"b"c'
+echo a\ b
+echo "a\ b"
+echo "a\\b"
+echo 'a\b'
+echo "a\$b" "a\`b" "a\"b"
+echo "a\zb"
+echo "\
+x"
+printf '%s\n' "a
+b"
+echo $'a\tb'
+echo $'\x41\102C'
+echo $'\cA' | od -An -c | head -1
+echo $'a\'b'
+echo $'\\'
+echo "$'x'"
+v=a; echo "${v}"'x'"${v}"
+case abc in a*) echo 1;; esac
+case 'a*c' in 'a*c') echo lit;; esac
+case 'abc' in a\*c) echo esc;; *) echo no;; esac
+case abc in [a-c]*) echo r;; esac
+case ABC in [a-c]*) echo r;; *) echo n;; esac
+case '-' in [a-]) echo d;; *) echo n;; esac
+case ']' in []]) echo b;; *) echo n;; esac
+case 'a' in [!b]) echo neg;; esac
+case 'a' in [^b]) echo caret;; esac
+case '' in '') echo empty;; esac
+case x in x|y) echo alt;; esac
+case x in (x) echo paren;; esac
+case abc in a[[:alpha:]]c) echo cls;; *) echo n;; esac
+case a1c in a[[:digit:]]c) echo dig;; *) echo n;; esac
+case 'a' in [[:foo:]]) echo y;; *) echo n;; esac
+v='*'; case 'x' in $v) echo star;; esac
+v='*'; case 'x' in "$v") echo lit;; *) echo n;; esac
+v=abc; echo ${v:1}
+v=abc; echo ${v:1:1}
+echo ${!v}
+v=abc; echo ${v/b/X}
+echo ${}
+echo ${ }
+echo ${1abc}
+echo ${#!}
+echo ${#*}
+echo "${@}"
+echo "${*}"
+set -- a b; echo "${@:-x}"
+set -- ; echo "${@:-x}"
+set -- ; echo "${*:-x}"
+echo ${$}x | tr -dc x
+echo "${?}"
+u=1; echo ${u}2
+echo "$@$*"
+set -- a; echo "$@$@"
+set -- a b; v="$*"; echo "$v"
+echo "${nosuch-}"
+echo "${nosuch-}${nosuch-}"
+f() { echo "$#"; }; set -- a b c; f "$@"
+f() { echo "$#"; }; set --; f "$@"
+f() { echo "$#"; }; set --; f $@
+f() { echo "$#"; }; set --; f "$*"

@@ -1,0 +1,119 @@
+#!name err-longname-10
+n=$(i=0; s=; while [ $i -lt 10 ]; do s="${s}n"; i=$((i+1)); done; echo "$s"); ./$n 2>&1 | wc -c
+%%%
+#!name err-longmsg-10
+m=$(i=0; s=; while [ $i -lt 10 ]; do s="${s}m"; i=$((i+1)); done; echo "$s"); unset u; (echo ${u?$m}) 2>&1 | wc -c
+%%%
+#!name out-long-echo-10
+s=$(i=0; r=; while [ $i -lt 10 ]; do r="${r}o"; i=$((i+1)); done; echo "$r"); echo "$s" | wc -c; printf "%s\n" "$s" | wc -c
+%%%
+#!name err-longname-100
+n=$(i=0; s=; while [ $i -lt 100 ]; do s="${s}n"; i=$((i+1)); done; echo "$s"); ./$n 2>&1 | wc -c
+%%%
+#!name err-longmsg-100
+m=$(i=0; s=; while [ $i -lt 100 ]; do s="${s}m"; i=$((i+1)); done; echo "$s"); unset u; (echo ${u?$m}) 2>&1 | wc -c
+%%%
+#!name out-long-echo-100
+s=$(i=0; r=; while [ $i -lt 100 ]; do r="${r}o"; i=$((i+1)); done; echo "$r"); echo "$s" | wc -c; printf "%s\n" "$s" | wc -c
+%%%
+#!name err-longname-1000
+n=$(i=0; s=; while [ $i -lt 1000 ]; do s="${s}n"; i=$((i+1)); done; echo "$s"); ./$n 2>&1 | wc -c
+%%%
+#!name err-longmsg-1000
+m=$(i=0; s=; while [ $i -lt 1000 ]; do s="${s}m"; i=$((i+1)); done; echo "$s"); unset u; (echo ${u?$m}) 2>&1 | wc -c
+%%%
+#!name out-long-echo-1000
+s=$(i=0; r=; while [ $i -lt 1000 ]; do r="${r}o"; i=$((i+1)); done; echo "$r"); echo "$s" | wc -c; printf "%s\n" "$s" | wc -c
+%%%
+#!name err-longname-4000
+n=$(i=0; s=; while [ $i -lt 4000 ]; do s="${s}n"; i=$((i+1)); done; echo "$s"); ./$n 2>&1 | wc -c
+%%%
+#!name err-longmsg-4000
+m=$(i=0; s=; while [ $i -lt 4000 ]; do s="${s}m"; i=$((i+1)); done; echo "$s"); unset u; (echo ${u?$m}) 2>&1 | wc -c
+%%%
+#!name out-long-echo-4000
+s=$(i=0; r=; while [ $i -lt 4000 ]; do r="${r}o"; i=$((i+1)); done; echo "$r"); echo "$s" | wc -c; printf "%s\n" "$s" | wc -c
+%%%
+#!name err-longname-8000
+n=$(i=0; s=; while [ $i -lt 8000 ]; do s="${s}n"; i=$((i+1)); done; echo "$s"); ./$n 2>&1 | wc -c
+%%%
+#!name err-longmsg-8000
+m=$(i=0; s=; while [ $i -lt 8000 ]; do s="${s}m"; i=$((i+1)); done; echo "$s"); unset u; (echo ${u?$m}) 2>&1 | wc -c
+%%%
+#!name out-long-echo-8000
+s=$(i=0; r=; while [ $i -lt 8000 ]; do r="${r}o"; i=$((i+1)); done; echo "$r"); echo "$s" | wc -c; printf "%s\n" "$s" | wc -c
+%%%
+#!name err-longname-8180
+n=$(i=0; s=; while [ $i -lt 8180 ]; do s="${s}n"; i=$((i+1)); done; echo "$s"); ./$n 2>&1 | wc -c
+%%%
+#!name err-longmsg-8180
+m=$(i=0; s=; while [ $i -lt 8180 ]; do s="${s}m"; i=$((i+1)); done; echo "$s"); unset u; (echo ${u?$m}) 2>&1 | wc -c
+%%%
+#!name out-long-echo-8180
+s=$(i=0; r=; while [ $i -lt 8180 ]; do r="${r}o"; i=$((i+1)); done; echo "$r"); echo "$s" | wc -c; printf "%s\n" "$s" | wc -c
+%%%
+#!name err-longname-8190
+n=$(i=0; s=; while [ $i -lt 8190 ]; do s="${s}n"; i=$((i+1)); done; echo "$s"); ./$n 2>&1 | wc -c
+%%%
+#!name err-longmsg-8190
+m=$(i=0; s=; while [ $i -lt 8190 ]; do s="${s}m"; i=$((i+1)); done; echo "$s"); unset u; (echo ${u?$m}) 2>&1 | wc -c
+%%%
+#!name out-long-echo-8190
+s=$(i=0; r=; while [ $i -lt 8190 ]; do r="${r}o"; i=$((i+1)); done; echo "$r"); echo "$s" | wc -c; printf "%s\n" "$s" | wc -c
+%%%
+#!name err-longname-8192
+n=$(i=0; s=; while [ $i -lt 8192 ]; do s="${s}n"; i=$((i+1)); done; echo "$s"); ./$n 2>&1 | wc -c
+%%%
+#!name err-longmsg-8192
+m=$(i=0; s=; while [ $i -lt 8192 ]; do s="${s}m"; i=$((i+1)); done; echo "$s"); unset u; (echo ${u?$m}) 2>&1 | wc -c
+%%%
+#!name out-long-echo-8192
+s=$(i=0; r=; while [ $i -lt 8192 ]; do r="${r}o"; i=$((i+1)); done; echo "$r"); echo "$s" | wc -c; printf "%s\n" "$s" | wc -c
+%%%
+#!name err-longname-8200
+n=$(i=0; s=; while [ $i -lt 8200 ]; do s="${s}n"; i=$((i+1)); done; echo "$s"); ./$n 2>&1 | wc -c
+%%%
+#!name err-longmsg-8200
+m=$(i=0; s=; while [ $i -lt 8200 ]; do s="${s}m"; i=$((i+1)); done; echo "$s"); unset u; (echo ${u?$m}) 2>&1 | wc -c
+%%%
+#!name out-long-echo-8200
+s=$(i=0; r=; while [ $i -lt 8200 ]; do r="${r}o"; i=$((i+1)); done; echo "$r"); echo "$s" | wc -c; printf "%s\n" "$s" | wc -c
+%%%
+#!name err-longname-20000
+n=$(i=0; s=; while [ $i -lt 20000 ]; do s="${s}n"; i=$((i+1)); done; echo "$s"); ./$n 2>&1 | wc -c
+%%%
+#!name err-longmsg-20000
+m=$(i=0; s=; while [ $i -lt 20000 ]; do s="${s}m"; i=$((i+1)); done; echo "$s"); unset u; (echo ${u?$m}) 2>&1 | wc -c
+%%%
+#!name out-long-echo-20000
+s=$(i=0; r=; while [ $i -lt 20000 ]; do r="${r}o"; i=$((i+1)); done; echo "$r"); echo "$s" | wc -c; printf "%s\n" "$s" | wc -c
+%%%
+#!name err-loop-many
+i=0; while [ $i -lt 2000 ]; do ./nosuch$i 2>/dev/null; i=$((i+1)); done; echo done
+%%%
+#!name err-loop-mark
+i=0; while [ $i -lt 500 ]; do (exit 1); v=$(echo "x$i"); i=$((i+1)); done; echo "$v"
+%%%
+#!name err-subshell-unwind
+i=0; while [ $i -lt 300 ]; do ( eval "syntax ) error" ) 2>/dev/null; i=$((i+1)); done; echo ok
+%%%
+#!name trap-err-loop
+trap "echo T" EXIT; i=0; while [ $i -lt 100 ]; do : ; i=$((i+1)); done; echo end
+%%%
+#!name set-e-err
+set -e; (false); echo unreachable
+%%%
+#!name deep-func-err
+f() { g; }; g() { h; }; h() { nosuchcmdabc; }; f 2>&1; echo rc=$?
+%%%
+#!name longpath-notfound
+PATH=$(i=0; p=; while [ $i -lt 200 ]; do p="$p:/nope$i"; i=$((i+1)); done; echo "$p"); nosuchprog 2>&1; echo rc=$?
+%%%
+#!name readonly-longname
+n=$(i=0; s=; while [ $i -lt 3000 ]; do s="${s}v"; i=$((i+1)); done; echo "$s"); eval "readonly $n=1"; eval "$n=2" 2>&1 | wc -c
+%%%
+#!name export-many
+i=0; while [ $i -lt 400 ]; do eval "export ev$i=val$i"; i=$((i+1)); done; export -p | wc -l
+%%%
+#!name set-dump-many
+i=0; while [ $i -lt 400 ]; do eval "sv$i='q'q'"; i=$((i+1)); done; set | wc -l; set | wc -c

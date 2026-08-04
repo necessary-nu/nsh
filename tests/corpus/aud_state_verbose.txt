@@ -1,0 +1,129 @@
+#!name verbose script echoes lines
+#!mode=file
+set -v
+echo one
+echo two
+%%%
+#!name verbose from argv
+#!mode=file
+#!args
+echo a
+echo b
+%%%
+#!name verbose with heredoc
+#!mode=file
+set -v
+cat <<EOF
+body
+EOF
+echo after
+%%%
+#!name verbose with continuation
+#!mode=file
+set -v
+echo x \
+y
+echo done
+%%%
+#!name verbose with blank and comment lines
+#!mode=file
+set -v
+
+# comment
+
+echo z
+%%%
+#!name verbose in dot file
+#!mode=file
+printf 'echo inner1\necho inner2\n' > vv.sh
+set -v
+. ./vv.sh
+%%%
+#!name verbose multiline compound
+#!mode=file
+set -v
+if true
+then
+echo t
+fi
+%%%
+#!name verbose then off
+#!mode=file
+set -v
+echo a
+set +v
+echo b
+%%%
+#!name verbose stdin
+#!mode=stdin
+set -v
+echo s1
+echo s2
+%%%
+#!name no trailing newline
+#!mode=c
+printf 'echo last-line-no-nl' > nn.sh; "$0" ./nn.sh; echo "|rc=$?"
+%%%
+#!name no trailing newline verbose
+#!mode=c
+printf 'set -v\necho tail' > nn2.sh; "$0" ./nn2.sh 2>&1; echo "|end"
+%%%
+#!name script with NUL byte
+#!mode=c
+printf 'echo a\000b\n' > nul.sh; "$0" ./nul.sh; echo "rc=$?"
+%%%
+#!name NUL byte in stdin
+#!mode=c
+printf 'echo x\000y\n' | "$0"; echo "rc=$?"
+%%%
+#!name NUL at line start
+#!mode=c
+printf '\000echo q\n' > nul2.sh; "$0" ./nul2.sh; echo "rc=$?"
+%%%
+#!name many NULs
+#!mode=c
+printf 'ec\000\000ho w\000\000\000\n' > nul3.sh; "$0" ./nul3.sh; echo "rc=$?"
+%%%
+#!name very long single line script
+#!mode=c
+{ printf 'echo '; i=0; while [ $i -lt 4000 ]; do printf 'x'; i=$((i+1)); done; printf '\n'; } > long.sh; "$0" ./long.sh | wc -c
+%%%
+#!name line longer than BUFSIZ
+#!mode=c
+{ printf 'echo '; i=0; while [ $i -lt 9000 ]; do printf 'y'; i=$((i+1)); done; printf '\n'; } > long2.sh; "$0" ./long2.sh | wc -c
+%%%
+#!name line longer than BUFSIZ verbose
+#!mode=c
+{ printf 'set -v\necho '; i=0; while [ $i -lt 9000 ]; do printf 'z'; i=$((i+1)); done; printf '\n'; } > long3.sh; "$0" ./long3.sh 2>&1 | wc -c
+%%%
+#!name script from stdin longer than buffer
+#!mode=c
+{ i=0; while [ $i -lt 1200 ]; do echo "echo n$i"; i=$((i+1)); done; } | "$0" | wc -l
+%%%
+#!name stdin script leaves rest for child
+#!mode=c
+printf 'read a\necho "a=$a"\ncat\n1\n2\n3\n' | "$0"
+%%%
+#!name sh -c with embedded newlines
+"$0" -c 'echo p
+echo q'
+%%%
+#!name sh -s reads stdin
+#!mode=c
+echo 'echo from-s' | "$0" -s
+%%%
+#!name sh with args after script
+#!mode=c
+printf 'echo "$0 $1 $2"\n' > ar.sh; "$0" ./ar.sh one two
+%%%
+#!name sh -c with args
+"$0" -c 'echo "$0|$1|$2"' zero uno dos
+%%%
+#!name dash dash terminates options
+"$0" -c -- 'echo dd' 2>&1; echo "rc=$?"
+%%%
+#!name sh - option
+"$0" - -c 'echo dash' 2>&1; echo "rc=$?"
+%%%
+#!name sh -c requires arg
+"$0" -c 2>&1; echo "rc=$?"

@@ -94,6 +94,10 @@ chapter-2 prose sections.
   load-bearing.
 - Character names like `<backslash>`, `<newline>`, `<space>` appear escaped in
   the source markdown as `\<backslash\>`. Write them unescaped in rule bodies.
+- **Do not correct the standard.** POSIX.1-2024 contains typos. Reproduce them
+  verbatim and append `[sic]` — e.g. "the fist [sic] character". Silently fixing
+  one makes the corpus diverge from the text it claims to reproduce, and the
+  next reader can't tell your correction from the standard's wording.
 - **Preserve option markers, using the standard's own notation.** POSIX shades
   option-conditional text in the margin: a code (`UP`, `XSI`, `OB`) names the
   option, then `[Option Start]` … `[Option End]` bracket the extent. Mirror that

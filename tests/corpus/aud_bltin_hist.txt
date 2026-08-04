@@ -1,0 +1,279 @@
+#!name H_PREV_STR starts at the cursor (matches the fc line itself)
+#!mode=stdin
+#!shargs -i
+echo a
+fc -l fc
+%%%
+#!name H_PREV_STR pattern matching newest entry
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+fc -l echo
+%%%
+#!name HISTSIZE=0
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+HISTSIZE=0
+echo c
+fc -l 1 9
+%%%
+#!name HISTSIZE set then listed on the same line
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+echo c
+echo d
+echo e
+HISTSIZE=2; fc -l 1 9
+%%%
+#!name HISTSIZE shrink then list next line
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+echo c
+echo d
+HISTSIZE=2
+fc -l 1 9
+%%%
+#!name HISTSIZE negative
+#!mode=stdin
+#!shargs -i
+echo a
+HISTSIZE=-5
+echo b
+fc -l 1 9
+%%%
+#!name HISTSIZE non-numeric
+#!mode=stdin
+#!shargs -i
+echo a
+HISTSIZE=abc
+echo b
+fc -l 1 9
+%%%
+#!name HISTSIZE=1
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+HISTSIZE=1
+echo c
+echo d
+fc -l 1 9
+%%%
+#!name fc -l 0
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+fc -l 0
+%%%
+#!name fc -l -0
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+fc -l -0
+%%%
+#!name fc -l +1
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+fc -l +1
+%%%
+#!name fc -l 999
+#!mode=stdin
+#!shargs -i
+echo a
+fc -l 999
+%%%
+#!name fc -l 1 999
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+fc -l 1 999
+%%%
+#!name fc -l 999 1
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+fc -l 999 1
+%%%
+#!name fc -l -100
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+fc -l -100
+%%%
+#!name fc -l 3 1 descending explicit
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+echo c
+echo d
+fc -l 3 1
+%%%
+#!name fc -r without -l
+#!mode=stdin
+#!shargs -i
+echo one
+echo two
+fc -sr 1 2>&1
+%%%
+#!name fc -s pattern
+#!mode=stdin
+#!shargs -i
+echo hello
+true
+fc -s echo
+%%%
+#!name fc -s replacement not found
+#!mode=stdin
+#!shargs -i
+echo original
+fc -s zzz=yyy 2>&1
+%%%
+#!name fc -s repeated substitution only first
+#!mode=stdin
+#!shargs -i
+echo aa aa aa
+fc -s aa=bb
+%%%
+#!name fc -s empty replacement
+#!mode=stdin
+#!shargs -i
+echo abcabc
+fc -s abc=
+%%%
+#!name fc -e - behaves like -s
+#!mode=stdin
+#!shargs -i
+echo hi
+fc -e - 1 2>&1 | sed 's|/tmp/_sh[A-Za-z0-9]*|TMPFILE|g'
+%%%
+#!name fc -e with FCEDIT unset uses optionarg not optarg
+#!mode=stdin
+#!shargs -i
+echo hi
+fc -e cat 1 2>&1 | sed 's|/tmp/_sh[A-Za-z0-9]*|TMPFILE|g'
+%%%
+#!name fc -n only
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+fc -ln
+%%%
+#!name fc with no options at all
+#!mode=stdin
+#!shargs -i
+echo a
+fc 2>&1 | sed 's|/tmp/_sh[A-Za-z0-9]*|TMPFILE|g'
+%%%
+#!name fc -l after a multiline command
+#!mode=stdin
+#!shargs -i
+if true
+then
+echo yes
+fi
+fc -l 1 9
+%%%
+#!name fc -l 1 with only the fc line in history
+#!mode=stdin
+#!shargs -i
+fc -l 1
+%%%
+#!name fc -l on a fresh shell
+#!mode=stdin
+#!shargs -i
+fc -l
+%%%
+#!name fc -l with pattern that is a number-like string
+#!mode=stdin
+#!shargs -i
+echo a
+1234 2>/dev/null
+fc -l 12 2>&1
+%%%
+#!name fc -l -- separator
+#!mode=stdin
+#!shargs -i
+echo a
+fc -l -- 2>&1
+%%%
+#!name fc -lZ unknown option
+#!mode=stdin
+#!shargs -i
+echo a
+fc -lZ 2>&1
+%%%
+#!name fc -e without argument
+#!mode=stdin
+#!shargs -i
+echo a
+fc -e 2>&1
+%%%
+#!name fc history not active non-interactive
+#!mode=stdin
+fc -l 2>&1
+%%%
+#!name fc -s recursion guard
+#!mode=stdin
+#!shargs -i
+fc -s fc 2>&1
+%%%
+#!name history entries include HISTSIZE assignment lines
+#!mode=stdin
+#!shargs -i
+HISTSIZE=100
+echo a
+fc -l 1 9
+%%%
+#!name blank lines are not recorded
+#!mode=stdin
+#!shargs -i
+echo a
+
+
+echo b
+fc -l 1 9
+%%%
+#!name fc -l range spanning missing events
+#!mode=stdin
+#!shargs -i
+echo a
+echo b
+echo c
+fc -l 2 2
+%%%
+#!name fc -s with event number and substitution
+#!mode=stdin
+#!shargs -i
+echo one
+echo two
+fc -s one=three 1
+%%%
+#!name fc -l pattern prefix of an older entry only
+#!mode=stdin
+#!shargs -i
+zzz_marker_cmd 2>/dev/null
+echo a
+echo b
+fc -l zzz 2>&1
+%%%
+#!name fc -l pattern that matches nothing
+#!mode=stdin
+#!shargs -i
+echo a
+fc -l qqqq 2>&1

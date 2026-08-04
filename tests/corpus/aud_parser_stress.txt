@@ -1,0 +1,152 @@
+#!name long word growth
+v=$(printf 'a%.0s' $(seq 1 5000)); echo ${#v}; echo "${v#aaa}" | wc -c
+%%%
+#!name long word in quotes
+v=$(printf 'a%.0s' $(seq 1 5000)); echo "${#v}"; case "$v" in a*a) echo m;; *) echo n;; esac
+%%%
+#!name long word with escapes
+v=$(printf '\\a%.0s' $(seq 1 2000)); echo ${#v}; echo "${v#\\}" | wc -c
+%%%
+#!name long literal word
+echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa | wc -c
+%%%
+#!name long quoted word growth
+echo "$(printf 'x%.0s' $(seq 1 3000))" | wc -c
+%%%
+#!name long trim pattern
+v=$(printf 'ab%.0s' $(seq 1 1500)); echo "${#v}"; echo "${v##*b}" | wc -c; echo "${v%%a*}" | wc -c
+%%%
+#!name long var trim quoted with esc
+v=$(printf 'a*%.0s' $(seq 1 1000)); echo ${#v}; echo "${v#a\*}" | wc -c
+%%%
+#!name many fields
+v=$(seq 1 2000 | tr '\n' ' '); set -- $v; echo $#
+%%%
+#!name read maxargs 1
+printf 'a b c d\n' | { read x; echo "[$x]"; }
+%%%
+#!name read maxargs 2
+printf 'a b c d\n' | { read x y; echo "[$x][$y]"; }
+%%%
+#!name read maxargs trailing ws
+printf 'a b c   \n' | { read x y; echo "[$x][$y]"; }
+%%%
+#!name read ifs colon
+printf 'a:b:c\n' | { IFS=: read x y; echo "[$x][$y]"; }
+%%%
+#!name read ifs colon trailing
+printf 'a:b:\n' | { IFS=: read x y z; echo "[$x][$y][$z]"; }
+%%%
+#!name read ifs mixed
+printf 'a : b : c\n' | { IFS=': ' read x y; echo "[$x][$y]"; }
+%%%
+#!name read ifs empty
+printf 'a b\n' | { IFS= read x; echo "[$x]"; }
+%%%
+#!name read ifs empty two vars
+printf 'a b\n' | { IFS= read x y; echo "[$x][$y]"; }
+%%%
+#!name read leading ws
+printf '   a b\n' | { read x y; echo "[$x][$y]"; }
+%%%
+#!name read leading colon
+printf ':a:b\n' | { IFS=: read x y; echo "[$x][$y]"; }
+%%%
+#!name read multiple nonspace ifs
+printf 'a::b\n' | { IFS=: read x y z; echo "[$x][$y][$z]"; }
+%%%
+#!name read more vars than fields
+printf 'a\n' | { read x y z; echo "[$x][$y][$z]"; }
+%%%
+#!name glob simple
+mkdir -p d; touch d/a d/b d/ab; echo d/*; echo d/a*; echo d/?
+%%%
+#!name glob no match
+echo nosuchdir/*
+%%%
+#!name glob bracket
+touch xa xb xc; echo x[ab]; echo x[!a]; echo x[a-b]
+%%%
+#!name glob escaped star
+touch 'lit*'; echo lit\*; echo 'lit*'; echo lit*
+%%%
+#!name glob dot files
+touch .hidden vis; echo *; echo .*
+%%%
+#!name glob nested dirs
+mkdir -p a/b/c; touch a/b/c/f; echo a/*/*/f; echo a/b/*
+%%%
+#!name glob trailing slash
+mkdir -p g1 g2; touch gf; echo g*/
+%%%
+#!name glob with ctlesc pattern
+touch 'a b'; echo a\ *; echo "a b"
+%%%
+#!name glob bracket unclosed
+touch 'x['; echo 'x['*; echo x[
+%%%
+#!name glob only rbracket
+echo ]
+%%%
+#!name glob question in dir part
+mkdir -p q1; touch q1/z; echo ?1/z
+%%%
+#!name glob var expanded
+p='*'; touch va vb; echo $p; echo "$p"
+%%%
+#!name glob noglob
+set -f; touch fa fb; echo f*
+%%%
+#!name NUL in cmdsub
+v=$(printf 'a\0b'); echo "${#v}"; echo "$v"
+%%%
+#!name NUL via var
+v=$(printf 'a\0b'); case "$v" in ab) echo m;; *) echo n;; esac
+%%%
+#!name deeply nested cmdsub
+echo $(echo $(echo $(echo $(echo deep))))
+%%%
+#!name deeply nested backquote
+echo `echo \`echo \\\`echo x\\\`\``
+%%%
+#!name deeply nested quotes
+echo "a\"b\"c"
+%%%
+#!name deeply nested braces
+unset a b c; echo "${a:-${b:-${c:-x}}}"
+%%%
+#!name deeply nested arith
+echo $(( 1 + (2 * (3 + (4 * (5 + 6)))) ))
+%%%
+#!name mixed control chars
+printf 'a\001b\002c' | od -An -c | head -1
+%%%
+#!name var with high bytes
+export LC_ALL=C; v=$(printf '\200\201'); echo ${#v}; echo "$v" | od -An -c | head -1
+%%%
+#!name var high bytes trim
+export LC_ALL=C; v=$(printf '\200\201'); echo "${v#?}" | od -An -c | head -1
+%%%
+#!name var high bytes utf8 locale
+export LC_ALL=en_US.UTF-8; v=$(printf '\200\201'); echo ${#v}; echo "${v#?}" | od -An -c | head -1
+%%%
+#!name pattern with high bytes
+export LC_ALL=C; case "$(printf '\200')" in ?) echo m;; *) echo n;; esac
+%%%
+#!name assignment tilde multi colon
+HOME=/hh; v=a:~:b:~/c; echo "$v"
+%%%
+#!name assignment tilde after equals
+HOME=/hh; export PATH=~/bin:~/sbin; echo "$PATH"
+%%%
+#!name tilde not in assignment
+HOME=/hh; echo a:~:b
+%%%
+#!name tilde in cmdsub
+HOME=/hh; echo $(echo ~)
+%%%
+#!name tilde quoted
+HOME=/hh; echo "~" '~' \~
+%%%
+#!name tilde with expansion
+HOME=/hh; v=x; echo ~$v 2>/dev/null; echo rc=$?

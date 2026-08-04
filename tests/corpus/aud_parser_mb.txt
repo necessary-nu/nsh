@@ -1,0 +1,58 @@
+export LC_ALL=en_US.UTF-8; v=héllo; echo "$v" ${#v}
+export LC_ALL=en_US.UTF-8; v=héllo; echo "${v#h}" "${v#hé}" "${v%o}" "${v%lo}"
+export LC_ALL=en_US.UTF-8; v=héllo; echo "${v#?}" "${v%?}"
+export LC_ALL=en_US.UTF-8; v=héllo; echo ${v#?} ${v%?}
+export LC_ALL=en_US.UTF-8; v=áéíóú; echo ${#v} "${v#?}" "${v##?}" "${v%?}" "${v%%?}"
+export LC_ALL=C; v=héllo; echo "$v" ${#v} "${v#?}"
+export LC_ALL=en_US.UTF-8; case héllo in h?llo) echo m;; *) echo n;; esac
+export LC_ALL=C; case héllo in h?llo) echo m;; *) echo n;; esac
+export LC_ALL=en_US.UTF-8; case é in [é]) echo m;; *) echo n;; esac
+export LC_ALL=en_US.UTF-8; case é in [a-z]) echo m;; *) echo n;; esac
+export LC_ALL=en_US.UTF-8; case é in [[:alpha:]]) echo m;; *) echo n;; esac
+export LC_ALL=en_US.UTF-8; case 5 in [[:digit:]]) echo m;; *) echo n;; esac
+export LC_ALL=en_US.UTF-8; case héllo in *é*) echo m;; *) echo n;; esac
+export LC_ALL=en_US.UTF-8; case héllo in h*o) echo m;; *) echo n;; esac
+export LC_ALL=en_US.UTF-8; v='a é b'; printf '<%s>' $v; echo
+export LC_ALL=en_US.UTF-8; IFS=é; v='aébéc'; printf '<%s>' $v; echo
+export LC_ALL=en_US.UTF-8; IFS=é; set -- a b c; echo "$*"
+export LC_ALL=en_US.UTF-8; IFS='é '; v='a é b'; printf '<%s>' $v; echo
+export LC_ALL=en_US.UTF-8; echo "héllo" | od -An -c | head -2
+export LC_ALL=en_US.UTF-8; v=$(printf 'h\303\251llo'); echo ${#v}
+export LC_ALL=en_US.UTF-8; v=$(printf '\303'); echo ${#v}; echo "$v" | od -An -c | head -1
+export LC_ALL=en_US.UTF-8; v=$(printf '\303\251\303'); echo ${#v}
+export LC_ALL=en_US.UTF-8; echo $((1+1))é
+export LC_ALL=en_US.UTF-8; é=5 2>/dev/null; echo rc=$?
+export LC_ALL=en_US.UTF-8; echo "\é"
+export LC_ALL=en_US.UTF-8; echo '\é'
+export LC_ALL=en_US.UTF-8; echo \é
+export LC_ALL=en_US.UTF-8; v=é; echo "${v}${v}" ${#v}
+export LC_ALL=en_US.UTF-8; v=éé; echo "${v#é}"
+export LC_ALL=en_US.UTF-8; v=aéa; echo "${v##*é}" "${v%%é*}"
+export LC_ALL=en_US.UTF-8; v=aéaéa; echo "${v#*é}" "${v##*é}" "${v%é*}" "${v%%é*}"
+export LC_ALL=en_US.UTF-8; touch 'fé.txt'; echo f?.txt; echo f*.txt
+export LC_ALL=C; touch 'fé.txt'; echo f?.txt; echo f*.txt
+export LC_ALL=en_US.UTF-8; touch 'fé.txt'; echo 'f'*'.txt'
+export LC_ALL=en_US.UTF-8; printf '%s\n' é | wc -c
+export LC_ALL=en_US.UTF-8; v='  é  '; printf '<%s>' $v; echo
+export LC_ALL=en_US.UTF-8; read x <<EOF2
+héllo
+EOF2
+echo "$x" ${#x}
+export LC_ALL=en_US.UTF-8; echo $'é' | od -An -c | head -1
+export LC_ALL=en_US.UTF-8; echo $'\U000000e9' | od -An -c | head -1
+export LC_ALL=en_US.UTF-8; v=é; case $v in é) echo m;; esac
+export LC_ALL=en_US.UTF-8; v=é; case "$v" in "é") echo m;; esac
+export LC_ALL=en_US.UTF-8; v='é*'; case 'éx' in $v) echo m;; *) echo n;; esac
+export LC_ALL=en_US.UTF-8; v='é*'; case 'éx' in "$v") echo m;; *) echo n;; esac
+export LC_ALL=en_US.UTF-8; echo "é" > mbf; cat < mbf
+export LC_ALL=en_US.UTF-8; set -- é ü; echo "$@" "$*" $#
+export LC_ALL=en_US.UTF-8; v=éü; echo "${v:-x}" "${v:+y}"
+export LC_ALL=en_US.UTF-8; unset v; echo "${v:-é}"
+export LC_ALL=en_US.UTF-8; v=aébéc; echo "${v#a?b}"
+export LC_ALL=en_US.UTF-8; v=aébéc; echo "${v%c?c}" "${v%é?}"
+export LC_ALL=en_US.UTF-8; v=éa; echo "${v#[é]}" "${v#[aé]}"
+export LC_ALL=en_US.UTF-8; v=éa; echo "${v#[!é]}"
+export LC_ALL=en_US.UTF-8; case 'aXb' in a[[:upper:]]b) echo m;; *) echo n;; esac
+export LC_ALL=en_US.UTF-8; case 'aéb' in a[[:upper:]]b) echo m;; *) echo n;; esac
+export LC_ALL=en_US.UTF-8; case 'a-b' in a[x-]b) echo m;; *) echo n;; esac
+export LC_ALL=en_US.UTF-8; case 'aéb' in a[é-ü]b) echo m;; *) echo n;; esac

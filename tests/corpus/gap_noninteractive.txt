@@ -1,0 +1,90 @@
+#!name getoptsreset: OPTIND is a var-change hook (var.c defoptindvar)
+set -- -a -b x
+while getopts ab o; do echo "1:$o"; done
+OPTIND=1
+while getopts ab o; do echo "2:$o"; done
+echo "optind=$OPTIND"
+%%%
+#!name getoptsreset: assigning OPTIND mid-scan
+set -- -a -b
+getopts ab o; echo "got=$o ind=$OPTIND"
+OPTIND=1
+getopts ab o; echo "again=$o ind=$OPTIND"
+%%%
+#!name legal_pathopt: %builtin leading path option
+PATH=%builtin:/bin:/usr/bin
+echo builtin-path-ok
+type echo
+%%%
+#!name legal_pathopt: trailing %builtin on an entry
+PATH=/bin%builtin:/usr/bin
+command -v echo >/dev/null; echo trailing-ok
+%%%
+#!name legal_pathopt: unrecognised pathopt is folded into the entry
+PATH=/bin%bogus:/usr/bin
+command -v sh >/dev/null 2>&1; echo "bogus-rc=$?"
+%%%
+#!name legal_pathopt with magic=0 via CDPATH
+mkdir -p sub
+CDPATH=%builtin:.
+cd sub >/dev/null 2>&1; echo "cd-rc=$?"; basename "$PWD"
+%%%
+#!name readcmdfile + %func: autoloaded function file
+mkdir -p fdir
+printf 'myfn() { echo LOADED-FROM-FILE; }\n' > fdir/myfn
+PATH=fdir%func:/bin:/usr/bin
+myfn
+myfn
+%%%
+#!name readcmdfile + %func: file that does not define the function
+mkdir -p fdir2
+printf 'echo SIDE-EFFECT-ONLY\n' > fdir2/ghost
+PATH=fdir2%func:/bin:/usr/bin
+ghost 2>&1
+echo "rc=$?"
+%%%
+#!name read_profile: login shell reads /etc/profile and $HOME/.profile
+#!shargs -l
+echo login-shell-body
+%%%
+#!name read_profile: login shell with a controlled HOME
+#!mode=file
+#!shargs -l
+printf 'echo FROM-PROFILE\n' > "$PWD/.profile"
+HOME=$PWD
+echo body-ran
+%%%
+#!name read_profile: ENV is read when iflag is set
+#!shargs -i
+echo env-path-body
+%%%
+#!allow-kill
+#!name killcmd: kill -l lists signal names
+kill -l | head -3
+echo "rc=$?"
+%%%
+#!allow-kill
+#!name killcmd: kill -0 on our own pid
+kill -0 $$; echo "self-rc=$?"
+%%%
+#!allow-kill
+#!name killcmd: signal a job by jobspec
+sleep 5 &
+kill %1
+wait 2>/dev/null
+echo after-kill
+%%%
+#!allow-kill
+#!name killcmd: bad signal name is a usage error
+kill -NOSUCHSIG $$ 2>&1 | sed 's/^[^:]*://'
+echo "rc=$?"
+%%%
+#!allow-kill
+#!name killcmd: -s form and numeric signal
+sleep 5 &
+kill -s TERM %1
+wait 2>/dev/null
+sleep 5 &
+kill -15 %1
+wait 2>/dev/null
+echo both-done

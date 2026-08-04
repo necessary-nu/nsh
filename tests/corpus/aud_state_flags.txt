@@ -1,0 +1,104 @@
+#!name unset OPTIND calls getoptsreset
+set -- -a -b -c; getopts abc o; echo "1:$o $OPTIND"; getopts abc o; echo "2:$o $OPTIND"; unset OPTIND; echo "u:[${OPTIND-U}]"; getopts abc o; echo "3:$o $OPTIND"
+%%%
+#!name OPTIND assign after unset resets
+set -- -a -b -c; getopts abc o; getopts abc o; echo "at:$o $OPTIND"; unset OPTIND; OPTIND=1; getopts abc o; echo "after:$o $OPTIND"
+%%%
+#!name OPTIND assign without unset is sticky
+set -- -a -b -c; getopts abc o; getopts abc o; echo "at:$o $OPTIND"; OPTIND=1; getopts abc o; echo "after:$o $OPTIND"
+%%%
+#!name OPTIND flags after unset then getopts
+set -- -a -b; unset OPTIND; OPTIND=9; echo "$OPTIND"; getopts ab o; echo "$o $OPTIND"
+%%%
+#!name unset IFS then set restores callback
+IFS=:; set -- ; a="x:y"; set -- $a; echo "$#"; unset IFS; set -- $a; echo "$#"
+%%%
+#!name unset PS1 PS2
+unset PS1 PS2; echo "[${PS1-U}][${PS2-U}]"
+%%%
+#!name export PS1 then unset
+export PS1; env | grep -c '^PS1='; unset PS1; env | grep -c '^PS1='
+%%%
+#!name readonly IFS
+readonly IFS; IFS=x 2>&1; echo "rc=$?"
+%%%
+#!name readonly PATH then unset
+readonly PATH; unset PATH 2>&1; echo "rc=$?"
+%%%
+#!name unset then re-set special var PATH
+p=$PATH; unset PATH; echo "[${PATH-U}]"; PATH=$p; command -v echo > /dev/null; echo ok
+%%%
+#!name allexport affects unset-then-set
+set -a; unset ZED; ZED=5; env | grep '^ZED='
+%%%
+#!name allexport does not export on unset
+set -a; QX=1; unset QX; env | grep -c '^QX='
+%%%
+#!name local of special var IFS
+f() { local IFS=,; set -- $1; echo "$#"; }; f "a,b,c"; set -- "a,b,c"; set -- $1; echo "$#"
+%%%
+#!name local IFS restore triggers callback
+IFS=' '; f() { local IFS=:; echo "in:[$*]"; }; set -- a b; f; echo "out:[$*]"
+%%%
+#!name local PATH restore
+f() { local PATH=/nonexistent; command -v echo; echo "rc=$?"; }; f; command -v echo > /dev/null; echo ok
+%%%
+#!name local OPTIND
+f() { local OPTIND; OPTIND=1; set -- -a; getopts a o; echo "$o $OPTIND"; }; set -- -a -b; getopts ab o; f; echo "$o"
+%%%
+#!name exec redirection drop
+exec 3>ef; echo a >&3; exec 3>&-; cat ef
+%%%
+#!name exec builtin with only redirect at top
+(exec > eo; echo hidden); cat eo
+%%%
+#!name exec cmd inherits redirect
+(exec 2>&1; echo x >&2) 2>/dev/null
+%%%
+#!name command exec
+{ command exec 3>ce; echo q >&3; } ; cat ce 2>&1; echo "rc=$?"
+%%%
+#!name function redirect popredir
+f() { echo in; } ; f > fr1 2> fr2; cat fr1; wc -c < fr2
+%%%
+#!name nested function redirect restore
+f() { echo f1; g > g.out; echo f2; }; g() { echo g1; }; f > f.out; cat f.out; cat g.out
+%%%
+#!name subshell redirect does not leak
+(exec 3>sl; echo s >&3); echo x >&3 2>&1; echo "rc=$?"
+%%%
+#!name redirect on builtin restores
+echo before; read v < /dev/null; echo "rc=$?"; echo after
+%%%
+#!name loop redirect with break
+for i in 1 2 3; do echo $i; [ $i = 2 ] && break; done > lr; cat lr
+%%%
+#!name eval with redirect
+eval 'echo ev' > ev.out; cat ev.out
+%%%
+#!name dot with redirect
+printf 'echo dotted\n' > d.sh; . ./d.sh > d.out; cat d.out
+%%%
+#!name trap EXIT sees redirect state
+(trap 'echo T >&2' EXIT; echo body) 2>&1
+%%%
+#!name set -o inside function local dash
+set +f; f() { local -; set -f; echo "in:$-"; }; f; echo "out:$-"
+%%%
+#!name local dash with -o name
+f() { local -; set -o noglob; echo "in:$-"; }; echo "pre:$-"; f; echo "post:$-"
+%%%
+#!name local dash nested twice
+f() { local -; set -f; g; echo "f:$-"; }; g() { local -; set -C; echo "g:$-"; }; f; echo "m:$-"
+%%%
+#!name shift inside function affects global
+f() { shift; echo "f:$#"; }; set -- a b c; f x y z; echo "m:$#"
+%%%
+#!name set inside function
+f() { set -- p q; echo "f:$*"; }; set -- a b c; f; echo "m:$*"
+%%%
+#!name dollar-dash in subshell
+set -f; (echo "$-"); echo "$-"
+%%%
+#!name dollar-hash after set --
+set -- 1 2 3 4 5; echo $#; shift 2; echo $#; set --; echo $#

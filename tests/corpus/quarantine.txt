@@ -1,0 +1,14 @@
+# Cases removed from the differential corpus because they cannot yield a
+# stable verdict. Kept here so the exclusion is visible and revisitable.
+#
+# echo | echo | echo | echo; echo $?
+#   Nondeterministic in BOTH binaries: whether a stage sees EPIPE depends
+#   on process scheduling. Measured over 200 runs each: dash-ref reports
+#   "echo: I/O error" 19/200, the port 7/200. The port does implement the
+#   write-error path, so this is a race, not a divergence.
+#
+# echo ${#}; echo ${#0}
+#   ${#0} is the length of argv[0], i.e. the length of the binary's path.
+#   The reference and the port live at paths of different lengths (106 vs
+#   41), so this compares filesystem layout, not shell behaviour. Output
+#   normalisation cannot help: the length is computed before printing.

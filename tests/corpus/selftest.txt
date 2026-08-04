@@ -1,0 +1,30 @@
+#!name multiline for loop
+for i in a b c
+do
+    echo "$i"
+done
+%%%
+#!name mode=file with args
+#!mode=file
+#!args one two
+echo "$0 $# $1 $2"
+%%%
+#!name mode=stdin heredoc
+cat <<EOF
+hello
+EOF
+echo done
+%%%
+#!mode=stdin
+#!name stdin multiline func
+f() {
+  echo "in f: $*"
+}
+f x y
+%%%
+#!name pid normalisation
+#!norm=pid
+echo $$
+%%%
+#!name deliberate sanity (single line)
+echo ${x:-fallback}

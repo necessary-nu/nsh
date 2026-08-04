@@ -1,0 +1,12 @@
+#!name optind reset
+set -- -a -b
+getopts ab o
+OPTIND=1
+getopts ab o
+echo "$o $OPTIND"
+%%%
+#!name func dir
+mkdir -p fdir
+printf 'myfn() { echo LOADED; }\n' > fdir/myfn
+PATH=fdir%func:/bin:/usr/bin
+myfn

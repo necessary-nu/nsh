@@ -1,0 +1,498 @@
+#!name hash printentry after running commands
+PATH=/bin:/usr/bin
+true
+false
+hash | sed 's|/usr/bin|/BIN|; s|/bin|/BIN|'
+%%%
+#!name hash listing after cd marks rehash
+mkdir -p hb
+printf '#!/bin/sh\necho HB\n' > hb/hbin; chmod 755 hb/hbin
+PATH=$PWD/hb:/bin:/usr/bin
+hbin
+cd hb
+hash | sed "s|$PWD||"
+cd ..
+%%%
+#!name type reports tracked alias
+mkdir -p tb
+printf '#!/bin/sh\necho TB\n' > tb/tbin; chmod 755 tb/tbin
+PATH=$PWD/tb:/bin:/usr/bin
+tbin > /dev/null
+type tbin | sed "s|$PWD||"
+%%%
+#!name command -v after hashing
+mkdir -p vb
+printf '#!/bin/sh\n:\n' > vb/vbin; chmod 755 vb/vbin
+PATH=$PWD/vb:/bin:/usr/bin
+vbin
+command -v vbin | sed "s|$PWD||"
+command -V vbin | sed "s|$PWD||"
+%%%
+#!name hash -r resets
+PATH=/bin:/usr/bin
+true
+hash -r
+hash
+echo "rc=$?"
+%%%
+#!name hash with args
+PATH=/bin:/usr/bin
+hash true false
+hash | sed 's|/usr/bin|/BIN|; s|/bin|/BIN|'
+%%%
+#!name hash mixed valid and invalid
+PATH=/bin:/usr/bin
+hash true nosuchxyz 2>&1 | sed 's|/usr/bin|/BIN|; s|/bin|/BIN|'
+echo "rc=$?"
+%%%
+#!name special builtin exec error not fatal without args
+exec 3>&1
+echo ok >&3
+exec 3>&-
+echo done
+%%%
+#!name exec with bad fd
+exec 3<&9 2>&1; echo "rc=$?"
+echo alive
+%%%
+#!name unset special builtin errors
+unset -f 2>&1; echo "rc=$?"
+%%%
+#!name spclbltin EXERROR path
+#!mode=file
+f() { : ${undefinedvar?msg}; }
+f
+echo NOTREACHED
+%%%
+#!name regular builtin EXERROR path continues
+#!mode=file
+false
+command : ${undefinedvar?msg} 2>/dev/null
+echo REACHED
+%%%
+#!name errors inside eval unwind
+#!mode=file
+eval ': ${nope?bad}'
+echo NOTREACHED
+%%%
+#!name errors inside command substitution
+x=$(: ${nope?bad} 2>/dev/null); echo "rc=$? x=[$x]"
+echo alive
+%%%
+#!name builtin write error to closed fd
+echo hi >&- 2>/dev/null; echo "rc=$?"
+%%%
+#!name I/O error on out1
+( exec >&-; echo hi ) 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+%%%
+#!name getjob by number
+sleep 0 &
+wait %1 2>&1; echo "rc=$?"
+%%%
+#!name getjob current and previous
+sleep 0 &
+sleep 0 &
+wait %% 2>&1 ; echo "rc1=$?"
+wait 2>&1; echo "rc2=$?"
+%%%
+#!name getjob invalid
+wait %99 2>&1; echo "rc=$?"
+wait %nosuch 2>&1; echo "rc=$?"
+wait %?nosuch 2>&1; echo "rc=$?"
+%%%
+#!name getjob no current job
+wait %% 2>&1; echo "rc=$?"
+wait %+ 2>&1; echo "rc=$?"
+wait %- 2>&1; echo "rc=$?"
+%%%
+#!name jobs -l and -p forms
+sleep 0 &
+wait
+jobs -l; echo "rc=$?"
+jobs -p; echo "rc=$?"
+%%%
+#!name jobs with explicit spec
+sleep 0 &
+wait %1 2>/dev/null
+jobs 2>&1; echo "rc=$?"
+%%%
+#!name backgndpid dollar-bang
+#!norm=pid
+true &
+echo "set=$([ -n "$!" ] && echo yes)"
+wait
+%%%
+#!name wait -- multiple pids
+#!norm=pid
+(exit 1) &
+a=$!
+(exit 2) &
+b=$!
+wait $a; echo "a=$?"
+wait $b; echo "b=$?"
+%%%
+#!name wait returns 127 for unknown then known
+#!norm=pid
+(exit 6) &
+p=$!
+wait 111111 $p
+echo "rc=$?"
+%%%
+#!name wait all with mixture
+(exit 1) &
+(exit 2) &
+wait
+echo "rc=$?"
+%%%
+#!name background in subshell
+#!norm=pid
+( sleep 0 & wait ); echo "rc=$?"
+%%%
+#!name nested background pipelines
+{ echo a | cat; } &
+wait
+echo done
+%%%
+#!name padvance percent handling in PATH
+PATH=/bin%builtin:/usr/bin
+type echo
+PATH=%func:/bin:/usr/bin
+type echo
+PATH=/nonexistent%zzz:/bin:/usr/bin
+command -v true >/dev/null; echo "rc=$?"
+%%%
+#!name PATH with trailing colon
+PATH=/bin:/usr/bin:
+printf '#!/bin/sh\necho TRAIL\n' > tprog; chmod 755 tprog
+tprog
+%%%
+#!name PATH is only builtins
+PATH=%builtin
+echo builtin-echo
+true; echo "rc=$?"
+/bin/echo abs-ok
+%%%
+#!name PATH empty string
+PATH=
+printf '#!/bin/sh\necho EMPTYPATH\n' > eprog; chmod 755 eprog
+eprog 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+echo builtin-still-works
+%%%
+#!name command -p uses default path
+PATH=/nonexistent
+command -p echo defpath-ok
+echo "rc=$?"
+%%%
+#!name command -p with -v
+PATH=/nonexistent
+command -pv ls
+echo "rc=$?"
+%%%
+#!name command -v -V combined
+command -vV echo
+echo "rc=$?"
+command -Vv echo
+echo "rc=$?"
+%%%
+#!name command with no operands
+command; echo "rc=$?"
+command -v; echo "rc=$?"
+command -p; echo "rc=$?"
+%%%
+#!name command nested
+command command command echo nested-ok
+%%%
+#!name command with unknown option runs typecmd path
+command -z echo 2>&1; echo "rc=$?"
+%%%
+#!name readcmd with -p prompt not a tty
+printf 'val\n' | { read -p 'PROMPT: ' x; echo "[$x]"; }
+%%%
+#!name readcmd multiple vars fewer fields
+printf 'one\n' | { read a b c; echo "a=[$a] b=[$b] c=[$c]"; }
+%%%
+#!name readcmd IFS non whitespace trailing
+printf 'a::\n' | { IFS=: read x y z; echo "[$x][$y][$z]"; }
+printf 'a:b:c:d\n' | { IFS=: read x y; echo "[$x][$y]"; }
+%%%
+#!name readcmd escaped IFS char
+printf 'a\\\\:b:c\n' | { IFS=: read x y; echo "[$x][$y]"; }
+printf 'a\\\\:b:c\n' | { IFS=: read -r x y; echo "[$x][$y]"; }
+%%%
+#!name readcmd backslash newline in raw mode ends line
+printf 'a\\\\\nb\n' > rl.txt
+{ read -r x; read -r y; echo "[$x][$y]"; } < rl.txt
+%%%
+#!name readcmd leaves rest of file for next reader
+printf 'a b\nc d\n' > rr.txt
+exec 4< rr.txt
+read x y <&4; echo "[$x][$y]"
+read x y <&4; echo "[$x][$y]"
+exec 4<&-
+%%%
+#!name readcmd from here-doc
+read x <<EOF
+here doc value
+EOF
+echo "[$x]"
+%%%
+#!name readcmd sets remaining to empty
+printf 'q\n' | { a=1 b=2; read a b; echo "a=[$a] b=[$b]"; }
+%%%
+#!name umask -S round trip
+( umask 077; umask -S )
+( umask 0; umask -S )
+( umask 0777; umask -S )
+%%%
+#!name umask symbolic ops
+( umask 022; umask g-w; umask )
+( umask 022; umask o+w; umask )
+( umask 022; umask =rwx; umask )
+( umask 077; umask u=rwx,go=rx; umask )
+( umask 022; umask a-x; umask )
+%%%
+#!name umask symbolic X and s
+( umask 022; umask a+X; umask )
+( umask 022; umask u+s; umask )
+%%%
+#!name umask symbolic copy from class
+( umask 022; umask g=u; umask )
+( umask 027; umask o=g; umask )
+%%%
+#!name umask errors
+( umask 022; umask 'u' 2>&1; echo "rc=$?" )
+( umask 022; umask 'u=' ; umask )
+( umask 022; umask 'u+q' 2>&1; echo "rc=$?" )
+%%%
+#!name ulimit each resource read
+for o in t f d s c m l p n v w r; do
+  printf '%s: ' "$o"
+  ulimit -$o 2>&1
+done
+%%%
+#!name ulimit hard and soft flags order
+( ulimit -SHf 200; ulimit -Sf; ulimit -Hf )
+( ulimit -HSf 300; ulimit -Sf; ulimit -Hf )
+%%%
+#!name ulimit -a with -H
+ulimit -Ha | sed 's/[0-9][0-9]*/N/g'
+%%%
+#!name ulimit set below current
+( ulimit -f 10; ulimit -f; ulimit -f 5; ulimit -f )
+%%%
+#!name ulimit factor scaling
+( ulimit -f 1; ulimit -f )
+( ulimit -c 1; ulimit -c )
+( ulimit -d 1; ulimit -d 2>/dev/null || echo failed )
+%%%
+#!name ulimit set failure message
+( ulimit -Hn 5 ; ulimit -Hn 100 2>&1 | sed 's/(.*)/(E)/'; echo "rc=$?" )
+%%%
+#!name trap DEBUG-less signals in subshell
+trap 'echo INT-TRAP' INT
+( trap; echo insub )
+trap
+%%%
+#!name trap list output
+trap 'echo a' USR1
+trap 'echo b' USR2
+trap
+trap - USR1
+trap
+%%%
+#!name trap inside function affects global
+f() { trap 'echo FT' EXIT; }
+f
+echo body
+%%%
+#!name exit code from signal-killed child
+sh -c 'kill -9 $$' 2>/dev/null; echo "rc=$?"
+%%%
+#!name exitshell with trap that exits
+#!mode=file
+trap 'exit 42' EXIT
+echo body
+exit 1
+%%%
+#!name savestatus and traps
+#!mode=file
+trap 'echo "in trap: $?"' EXIT
+(exit 17)
+%%%
+#!name function called from trap
+f() { echo "F $1"; }
+trap 'f fromtrap' EXIT
+echo body
+%%%
+#!name evalstring EV_EXIT with parser_eof
+#!mode=c
+echo a; echo b
+%%%
+#!name minusc with sflag
+#!shargs -s
+#!mode=stdin
+echo from-stdin
+%%%
+#!name dot inside function
+printf 'echo DOTBODY; return 7\n' > dd1.sh
+f() { . ./dd1.sh; echo "after=$?"; }
+f
+echo "rc=$?"
+%%%
+#!name return from dotted file inside function
+printf 'return 3\n' > dd2.sh
+f() { . ./dd2.sh; echo NOTREACHED-OR-REACHED=$?; }
+f
+echo "rc=$?"
+%%%
+#!name break inside dotted file
+printf 'break\n' > dd3.sh
+for i in 1 2 3; do . ./dd3.sh; echo "iter $i"; done
+echo done
+%%%
+#!name prehash before pipeline fork
+mkdir -p pd
+printf '#!/bin/sh\necho PD\n' > pd/pdp; chmod 755 pd/pdp
+PATH=$PWD/pd:/bin:/usr/bin
+pdp | cat
+hash | sed "s|$PWD||"
+%%%
+#!name goodname prehash skip
+PATH=/bin:/usr/bin
+$(echo true) | cat; echo "rc=$?"
+%%%
+#!name evalcommand with only assignments and redirect
+x=1 > f_ass.txt
+echo "x=$x"
+[ -f f_ass.txt ] && echo file-created
+%%%
+#!name empty command with redirect error
+> /nonexistent/dir/f 2>/dev/null; echo "rc=$?"
+echo alive
+%%%
+#!name NDEFUN status
+f() { :; }; echo "rc=$?"
+(exit 4); f() { :; }; echo "rc=$?"
+%%%
+#!name defun overwrites builtin name lookup
+echo() { command echo "OVER: $*"; }
+echo hi
+unset -f echo
+echo hi
+%%%
+#!name function named like special builtin
+eval() { command echo "NOTEVAL"; }
+eval x
+unset -f eval
+eval 'echo realeval'
+%%%
+#!name DO_NOFUNC via command
+f() { echo FUNC; }
+command f 2>&1; echo "rc=$?"
+%%%
+#!name nested command -p f
+f() { echo FUNC; }
+command -p f 2>&1; echo "rc=$?"
+%%%
+#!name evaltree NNOT with skip
+f() { ! return 1; echo NOPE; }
+f; echo "rc=$?"
+%%%
+#!name evalcase with skip inside
+f() {
+  case x in
+    x) return 5 ;;
+  esac
+  echo NOPE
+}
+f; echo "rc=$?"
+%%%
+#!name evalfor status with skiploop
+f() {
+  for i in 1 2 3; do
+    [ $i = 2 ] && return 8
+  done
+  echo NOPE
+}
+f; echo "rc=$?"
+%%%
+#!name evalloop status with SKIPFUNC
+f() {
+  while true; do
+    return 9
+  done
+  echo NOPE
+}
+f; echo "rc=$?"
+%%%
+#!name until with break in condition
+i=0
+until [ $i -ge 3 ] || { i=$((i+1)); false; }; do :; done
+echo "i=$i"
+%%%
+#!name subshell background does not wait
+#!norm=pid
+{ exit 3; } &
+wait
+echo "rc=$?"
+%%%
+#!name vforkexec path with traps present
+#!mode=file
+trap 'echo T' USR1
+/bin/echo forked
+echo "rc=$?"
+%%%
+#!name EV_EXIT external command last in script
+#!mode=file
+echo before
+/bin/echo last
+%%%
+#!name EV_EXIT with trailing builtin
+#!mode=file
+echo before
+:
+%%%
+#!name stdin restored after read in loop
+printf 'a\nb\nc\n' > sr.txt
+while read l; do echo "line=$l"; done < sr.txt
+echo done
+%%%
+#!name read inside for loop redirect
+for i in 1 2; do read x < sr.txt; echo "$i:$x"; done
+%%%
+#!name popstackmark after longjmp
+#!mode=file
+f() { : ${zzz?err}; }
+(f) 2>/dev/null
+echo "rc=$?"
+echo alive
+%%%
+#!name command substitution capturing stderr of failing builtin
+x=$( (: ${nope?boom}) 2>&1 ); echo "[${x#*: }]"
+%%%
+#!name deeply nested subshells status
+( ( ( exit 6 ) ) ); echo "rc=$?"
+%%%
+#!name pipeline in function with return
+f() { echo a | grep b; return $?; }
+f; echo "rc=$?"
+%%%
+#!name set -e inside function called in pipeline
+set -e
+f() { false; echo NOPE; }
+f | cat
+echo alive
+%%%
+#!name set -e and command substitution
+set -e
+x=$(false) || echo caught
+echo "rc=$?"
+%%%
+#!name set -e with trap EXIT
+#!mode=file
+set -e
+trap 'echo "trap status $?"' EXIT
+false
+echo NOTREACHED

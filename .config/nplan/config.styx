@@ -1,5 +1,17 @@
 platforms (
     {
+        platform "python/posix-harness"
+        files (posix/harness/**/*.py posix/harness/*.json)
+        checks {
+            syntax {
+                cmd "python3 -m compileall -q posix/harness"
+            }
+            test {
+                cmd "python3 -m unittest discover -s posix/harness/tests -v"
+            }
+        }
+    }
+    {
         platform "c++"
         files (src/**/*.c src/**/*.cc src/**/*.cpp src/**/*.cxx src/**/*.h src/**/*.hpp include/**/*.h include/**/*.hpp)
         checks {

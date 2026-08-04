@@ -1,0 +1,324 @@
+#!name alias basic
+alias foo='echo hi'
+foo
+%%%
+#!name alias trailing space chains
+alias a='echo ' b='world'
+a b
+%%%
+#!name alias recursive
+alias echo='echo x'
+echo y
+%%%
+#!name alias to keyword
+alias t='while'
+t false; do echo x; done
+echo ok
+%%%
+#!name alias in middle
+alias l='ls'
+echo l
+%%%
+#!name alias empty value
+alias e=''
+e echo hi
+%%%
+#!name alias with quotes
+alias q='echo "a b"'
+q
+%%%
+#!name alias defined after use in same line
+alias z='echo Z'; z
+%%%
+#!name unalias
+alias u='echo U'; u; unalias u; u 2>&1 | head -1
+%%%
+#!name alias expanding to redirection
+alias r='> f.txt echo hi'
+r
+cat f.txt
+%%%
+#!name alias for do
+alias D='do echo body;'
+for i in 1; D done
+%%%
+#!name backslash newline in word
+ec\
+ho hi
+%%%
+#!name backslash newline in string
+echo "a\
+b"
+%%%
+#!name backslash newline in single quote
+echo 'a\
+b'
+%%%
+#!name backslash newline in arith
+echo $((1+\
+2))
+%%%
+#!name backslash newline in var name
+v=42
+echo ${v\
+}
+%%%
+#!name backslash newline mid dollar
+v=42
+echo $\
+v
+%%%
+#!name comment handling
+echo a # comment
+# whole line
+echo b
+%%%
+#!name hash not comment
+echo a#b
+echo a #b
+%%%
+#!name semicolons and newlines
+echo a;;
+%%%
+#!name empty command
+;
+%%%
+#!name subshell
+(echo a; echo b)
+%%%
+#!name brace group
+{ echo a; echo b; }
+%%%
+#!name brace group no semi
+{ echo a }
+%%%
+#!name nested subshell paren
+((echo a))
+%%%
+#!name arith vs nested subshell
+echo $(( (1) ))
+%%%
+#!name cmdsub with nested paren
+echo $( (echo a) )
+%%%
+#!name cmdsub with case
+echo $(case a in a) echo m;; esac)
+%%%
+#!name backquote with case
+echo `case a in a) echo m;; esac`
+%%%
+#!name function def
+f() { echo fn; }
+f
+%%%
+#!name function with redirect
+f() { echo fn; } > o.txt
+f; cat o.txt
+%%%
+#!name function bad name
+1f() { echo x; }
+%%%
+#!name function special builtin name
+eval() { echo x; }
+%%%
+#!name function non special builtin name
+true() { echo x; }
+true
+%%%
+#!name if elif else
+if false; then echo a; elif false; then echo b; elif true; then echo c; else echo d; fi
+%%%
+#!name until loop
+i=0; until [ $i -ge 2 ]; do i=$((i+1)); echo $i; done
+%%%
+#!name for no in
+set -- x y
+for i; do echo $i; done
+%%%
+#!name for with in and semi
+for i in a b; do echo $i; done
+%%%
+#!name for in newline
+for i in a b
+do echo $i
+done
+%%%
+#!name case fallthrough esac
+case a in esac) echo x;; *) echo y;; esac
+%%%
+#!name case with newlines
+case a in
+  a)
+    echo m
+    ;;
+  *)
+    echo n
+    ;;
+esac
+%%%
+#!name case empty body
+case a in a);; esac; echo ok
+%%%
+#!name case last no dsemi
+case a in a) echo m esac
+%%%
+#!name redirections
+echo hi > a.txt; cat < a.txt; echo hi >> a.txt; cat a.txt
+%%%
+#!name redirect fd
+echo err >&2 2>/dev/null; echo ok
+%%%
+#!name redirect n>&m
+exec 3>&1; echo via3 >&3; exec 3>&-
+%%%
+#!name redirect clobber
+set -C; echo a > c.txt; echo b > c.txt; echo rc=$?
+%%%
+#!name redirect noclobber bang
+set -C; echo a > c.txt; echo b >| c.txt; cat c.txt
+%%%
+#!name redirect <>
+echo x > rw.txt; exec 4<> rw.txt; read line <&4; echo "$line"; exec 4>&-
+%%%
+#!name redirect digit prefix
+echo x 1>o.txt; cat o.txt
+%%%
+#!name redirect two-digit fd not special
+echo x 11>o.txt 2>/dev/null; echo rc=$?; ls
+%%%
+#!name redirect with var
+f=v.txt; echo x > $f; cat $f
+%%%
+#!name redirect to fd from var
+exec 3>&1; echo a >&3
+%%%
+#!name bad fd number
+echo x >&abc
+%%%
+#!name pipeline negation
+! false; echo $?
+! true; echo $?
+%%%
+#!name pipeline multiple
+echo abc | tr a-z A-Z | tr A-Z a-z
+%%%
+#!name background
+{ sleep 0; } & wait; echo done
+%%%
+#!name andor precedence
+true || echo a && echo b
+false && echo a || echo b
+%%%
+#!name newline in andor
+true &&
+echo continued
+%%%
+#!name pipe then newline
+echo a |
+cat
+%%%
+#!name lone ampersand parse
+& echo x
+%%%
+#!name unmatched paren
+echo )
+%%%
+#!name unmatched brace
+echo }
+%%%
+#!name double semicolon outside case
+echo a ;; echo b
+%%%
+#!name eof in quote
+echo "unterminated
+%%%
+#!name eof in single quote
+echo 'unterminated
+%%%
+#!name eof in backquote
+echo `unterminated
+%%%
+#!name eof in dollar paren
+echo $(unterminated
+%%%
+#!name eof in arith
+echo $((1+2
+%%%
+#!name eof in brace expansion
+echo ${x
+%%%
+#!name arith missing close
+echo $((1+2)
+%%%
+#!name dollar at eof
+echo $
+%%%
+#!name dollar brace at eof
+echo ${
+%%%
+#!name backslash at eof
+echo a\
+%%%
+#!name CTL char literal in word
+printf '%s' 'x' | od -An -c | head -1
+%%%
+#!name deep nesting quotes
+echo "a$(echo "b$(echo "c")")"
+%%%
+#!name quotes in var expansion word
+v=; echo "${v:-"a`echo b`c"}"
+%%%
+#!name dq inside ${} inside dq
+v=x; echo "${v#"x"}"
+%%%
+#!name dq inside ${} pattern
+v=abc; echo "${v%"c"}"
+%%%
+#!name nested braces in expansion
+v=x; echo "${v:-${v}}"
+%%%
+#!name nested braces unset
+unset v; echo "${v:-${w:-deep}}"
+%%%
+#!name arith inside expansion word
+unset v; echo "${v:-$((1+2))}"
+%%%
+#!name backquote inside expansion word quoted
+unset v; echo "${v:-`echo a b`}"
+%%%
+#!name cmdsub inside pattern
+v=abc; p=b; echo "${v#$(echo b)}"
+%%%
+#!name expansion in case pattern
+v=a; case a in $v) echo m;; esac
+%%%
+#!name arith with var containing arith
+a=1+2; echo $((a))
+%%%
+#!name arith with nested var
+a=b; b=5; echo $((a))
+%%%
+#!name LINENO
+echo $LINENO
+echo $LINENO
+%%%
+#!name set -x trace
+set -x; echo hi
+%%%
+#!name eval parse
+eval 'echo from eval'
+%%%
+#!name eval nested quotes
+eval "echo \"a b\""
+%%%
+#!name dot script
+echo 'echo sourced' > s.sh; . ./s.sh
+%%%
+#!name read builtin ifs
+printf 'a:b\n' | { IFS=: read x y; echo "[$x][$y]"; }
+%%%
+#!name read with backslash
+printf 'a\\\nb\n' | { read x; echo "[$x]"; }
+%%%
+#!name read -r
+printf 'a\\b\n' | { read -r x; echo "[$x]"; }

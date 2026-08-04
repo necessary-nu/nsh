@@ -1,0 +1,40 @@
+#!name ppid
+#!norm=pid
+test -n "$PPID" && echo "$PPID" | grep -qE "^[0-9]+$" && echo ok
+%%%
+#!name lineno
+echo $LINENO
+echo $LINENO
+f() { echo $LINENO; }
+f
+echo $LINENO
+%%%
+#!name lineno-big
+eval "$(i=0; while [ $i -lt 300 ]; do echo ":"; i=$((i+1)); done; echo "echo \$LINENO")"
+%%%
+#!name arith-cvtnum
+echo $((1)); echo $((-1)); echo $((9223372036854775807)); echo $(( -9223372036854775807 - 1 )); echo $((0x7fffffff)); echo $((1<<62))
+%%%
+#!name arith-in-string
+x=$((123456789012345678)); echo "[$x]"; echo "${#x}"
+%%%
+#!name setvarint
+set -- a b c; echo $#; shift; echo $#; OPTIND=1; set -- -a; getopts a o; echo $OPTIND
+%%%
+#!name dollar-hash-many
+set -- $(i=0; while [ $i -lt 1000 ]; do printf "x "; i=$((i+1)); done); echo $#
+%%%
+#!name exit-status-fmt
+false; echo $?; (exit 200); echo $?; true; echo $?
+%%%
+#!name times-out
+times | wc -l
+%%%
+#!name ulimit-all', 'x
+ulimit -a | md5sum
+%%%
+#!name set-o-md5
+set -o | md5sum; set +o | md5sum
+%%%
+#!name umask-all
+for m in 0 1 7 22 77 177 777 7777; do umask $m; umask; umask -S; done

@@ -1,0 +1,149 @@
+#!name glob quoted star mix
+touch 'a*b' aXb ab; echo a"*"b; echo a'*'b; echo a\*b; echo a*b
+%%%
+#!name glob quoted question
+touch 'a?b' aXb; echo a"?"b; echo a'?'b; echo a\?b; echo a?b
+%%%
+#!name glob quoted bracket
+touch 'a[b]c' aXc; echo 'a[b]c'; echo a[b]c; echo a\[b\]c; echo "a[b]c"
+%%%
+#!name glob partial quote
+touch axb; echo "a"*b; echo a*"b"; echo "a*"b; echo a"*b"
+%%%
+#!name glob backslash before star
+touch 'a\b' ab; echo a\\*; echo 'a\'*; echo "a\\"*
+%%%
+#!name glob var with meta
+touch p1 p2; v='p*'; echo $v; echo "$v"; echo ${v}; echo "${v}"
+%%%
+#!name glob var quoted meta
+touch 'p*'; v='p*'; echo "$v"
+%%%
+#!name glob esc in var
+touch 'p*' pa; v='p\*'; echo $v; echo "$v"
+%%%
+#!name glob trailing backslash
+touch 'x'; echo x\\ 2>&1 | head -1
+%%%
+#!name glob only backslash
+echo \\ | od -An -c | head -1
+%%%
+#!name glob multiple backslash
+echo \\\\ | od -An -c | head -1
+%%%
+#!name pattern trim quoted star
+v='a*b'; echo "${v#a\*}" "${v#a*}" "${v#'a*'}" "${v#"a*"}"
+%%%
+#!name pattern trim quoted question
+v='a?b'; echo "${v#a\?}" "${v#a?}" "${v#'a?'}"
+%%%
+#!name pattern trim bracket quoted
+v='a[b'; echo "${v#a\[}" "${v#'a['}" "${v#a[}"
+%%%
+#!name pattern trim backslash content
+v='a\b'; echo "${v#a\\\\}" "${v#'a\'}" "${v%'\b'}"
+%%%
+#!name pattern trim mixed quotes
+v=abcabc; echo "${v#"a"bc}" "${v##*"b"}" "${v%"c"}" "${v%%"b"*}"
+%%%
+#!name pattern trim unquoted outer
+v=abcabc; echo ${v#"a"bc} ${v##*"b"} ${v%"c"} ${v%%"b"*}
+%%%
+#!name case quoted star
+case 'a*b' in a"*"b) echo q;; *) echo n;; esac
+%%%
+#!name case unquoted star
+case 'aXb' in a*b) echo s;; *) echo n;; esac
+%%%
+#!name case escaped bracket
+case 'a[b' in a\[b) echo e;; *) echo n;; esac
+%%%
+#!name case backslash literal
+case 'a\b' in 'a\b') echo l;; *) echo n;; esac
+%%%
+#!name case backslash pattern
+case 'ab' in a\b) echo p;; *) echo n;; esac
+%%%
+#!name case class with esc
+case 'a]b' in a[\]]b) echo c;; *) echo n;; esac
+%%%
+#!name case class with quoted rbracket
+case 'a]b' in a[']']b) echo c;; *) echo n;; esac
+%%%
+#!name case class range esc
+case 'a-b' in a[x\-z]b) echo c;; *) echo n;; esac
+%%%
+#!name case class negate esc
+case 'aXb' in a[!\]]b) echo c;; *) echo n;; esac
+%%%
+#!name case star star
+case 'abc' in **c) echo m;; *) echo n;; esac
+%%%
+#!name case star question
+case 'abc' in *?c) echo m;; *) echo n;; esac
+%%%
+#!name case star bracket
+case 'abc' in *[c]) echo m;; *) echo n;; esac
+%%%
+#!name case star esc
+case 'a*c' in *\*c) echo m;; *) echo n;; esac
+%%%
+#!name case empty pattern esc
+case '' in \*) echo m;; *) echo n;; esac
+%%%
+#!name case pattern is single backslash
+case '\' in \\) echo m;; *) echo n;; esac
+%%%
+#!name case pattern var with backslash
+v='\'; case '\' in $v) echo m;; *) echo n;; esac
+%%%
+#!name case pattern var quoted backslash
+v='\'; case '\' in "$v") echo m;; *) echo n;; esac
+%%%
+#!name trim with backslash var
+v='a\b'; p='a\'; echo "${v#$p}" "${v#"$p"}"
+%%%
+#!name trim pattern from cmdsub
+v=abc; echo "${v#$(printf 'a')}" "${v#"$(printf 'a')"}"
+%%%
+#!name trim longest vs shortest star
+v=a.b.c; echo "${v#*.}" "${v##*.}" "${v%.*}" "${v%%.*}"
+%%%
+#!name trim on positional
+set -- abcabc; echo "${1#a}" "${1%c}"
+%%%
+#!name trim on star param
+set -- ab cd; echo "${*#a}" "${*%d}"
+%%%
+#!name trim on at param
+set -- ab cd; echo "${@#a}" "${@%d}"
+%%%
+#!name trim quoted at param
+set -- ab cd; printf '<%s>' "${@#a}"; echo
+%%%
+#!name trim length interplay
+v=abc; echo "${#v}" "${v#a}" "${#v}"
+%%%
+#!name nested trim
+v=abc; w=${v#a}; echo "${w#b}"
+%%%
+#!name trim with empty pattern var
+v=abc; p=; echo "[${v#$p}]" "[${v%$p}]"
+%%%
+#!name trim with ifs split pattern
+IFS=b; v=abc; p='a b'; echo "${v#$p}"
+%%%
+#!name glob in for
+touch f1 f2; for i in f*; do echo "$i"; done
+%%%
+#!name glob assignment no split
+touch g1 g2; v=g*; echo "$v"
+%%%
+#!name glob in redirect target
+touch h1; echo z > h*; ls h* 2>&1 | head -2
+%%%
+#!name glob dir traversal escape
+mkdir -p 'd*'; touch 'd*/f'; echo 'd*'/*; echo d\*/*
+%%%
+#!name glob with CTLESC in dirname
+mkdir -p 'e f'; touch 'e f/g'; echo 'e f'/*; echo e\ f/*

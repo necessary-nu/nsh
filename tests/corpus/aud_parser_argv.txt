@@ -1,0 +1,17 @@
+#!name argv non-utf8 in -c body
+echo ÿ
+%%%
+#!name argv non-utf8 as positional
+#!args sh ÿ
+echo "$1"
+%%%
+#!name argv valid utf8 body
+echo é
+%%%
+#!name argv non-utf8 via file mode
+#!mode=file
+echo ÿ
+%%%
+#!name argv non-utf8 via stdin mode
+#!mode=stdin
+echo ÿ

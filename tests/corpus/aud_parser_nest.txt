@@ -1,0 +1,54 @@
+unset a b c; echo "${a:-"${b:-"${c:-x}"}"}"
+unset a b c; echo "${a:-${b:-${c:-x}}}"
+a=1; unset b c; echo "${a:+${b:-${c:-x}}}"
+unset a b c; echo ${a:-"${b:-'${c:-x}'}"}
+unset a; echo "${a:-"$(echo "${a:-inner}")"}"
+unset a; echo "${a:-`echo "${a:-bq}"`}"
+echo $(( ${a:-1} + $(( 2 )) ))
+unset a; echo $(( ${a:-3} * ${a:-4} ))
+echo "$(( 1 + $(echo 2) ))"
+echo $(( $(( $(( 1 )) )) ))
+unset a; echo "x${a:-"y$(echo "z${a:-w}")v"}u"
+unset a; echo "${a:-$((1+$((2+$((3))))))}"
+echo "${x:-"a"b"c"}"
+echo "${x:-"a'b'c"}"
+echo "${x:-'a"b"c'}"
+echo "a${x:-"b${y:-"c"}d"}e"
+unset q; echo "${q:-\}}"
+unset q; echo "${q:-\{}"
+unset q; echo ${q:-\}}
+unset q; echo "${q:-a"}"b}"
+v=1; echo "${v:+"${v:+"${v:+deep}"}"}"
+v=1; echo "${v:+${v:+${v:+${v:+${v:+${v:+d6}}}}}}"
+unset v; echo "${v:-${v:-${v:-${v:-${v:-${v:-d6}}}}}}"
+echo $(($((1))+$((1))+$((1))+$((1))))
+echo "$(echo "$(echo "$(echo "$(echo deep)")")")"
+echo `echo \`echo \\\`echo deep\\\`\``
+unset a; echo "${a:-$(echo "${a:-$(echo "${a:-x}")}")}"
+echo "${IFS:+has}"; IFS=; echo "${IFS:+has}${IFS-set}"
+v=abc; echo "${v#"${v%bc}"}"
+v=abc; w=a; echo "${v#"${w}"}" "${v#${w}}"
+v=a.b.c; echo "${v%.*}" "${v%%.*}" "${v#*.}" "${v##*.}" "${v%"${v#*.}"}"
+unset a; echo "${a:-"${a:-"${a:-"${a:-"${a:-deep5}"}"}"}"}"
+echo "$((1))$((2))$((3))"
+echo "${x:-$(( ${y:-1} + 1 ))}"
+echo "$(cat <<E
+$(echo inner)
+E
+)"
+echo "`cat <<E
+\`echo inner\`
+E
+`"
+unset a; echo "${a:-$'x\ty'}"
+echo "${x:-$'a\'b'}"
+v=1; case "${v:+x}" in x) echo m;; *) echo n;; esac
+case "$(echo a)" in "$(echo a)") echo m;; *) echo n;; esac
+case a in ${v:-a}) echo m;; *) echo n;; esac
+case a in "${v:-a}") echo m;; *) echo n;; esac
+unset a; for i in "${a:-x y}" ${a:-p q}; do printf '<%s>' "$i"; done; echo
+unset a; set -- "${a:-x y}" ${a:-p q}; echo $#
+echo "$((0x$(printf '10')))"
+v=5; echo "$(( v > 3 ? $(echo 1) : $(echo 2) ))"
+unset a; echo "${a:-$(exit 3)}"; echo rc=$?
+echo "${a:-\$}" "${a:-\`}" "${a:-\\}"

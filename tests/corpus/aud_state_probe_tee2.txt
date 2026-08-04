@@ -1,0 +1,42 @@
+#!name killed shell leaves pipe position (builtins only)
+#!allow-kill
+#!mode=c
+printf 'echo A\nkill -KILL $$\nLEFT1\nLEFT2\n' | { "$0"; cat; } 2>&1
+%%%
+#!name killed shell leaves pipe position (SIGTERM default)
+#!allow-kill
+#!mode=c
+printf 'echo A\nkill -TERM $$\nLEFT1\nLEFT2\n' | { "$0"; cat; } 2>&1
+%%%
+#!name killed shell after external command
+#!allow-kill
+#!mode=c
+printf 'true\necho A\nkill -KILL $$\nLEFT1\nLEFT2\n' | { "$0"; cat; } 2>&1
+%%%
+#!name killed shell mid big script
+#!allow-kill
+#!mode=c
+{ i=0; while [ $i -lt 40 ]; do echo ": n$i"; i=$((i+1)); done; echo 'kill -KILL $$'; echo LEFT1; echo LEFT2; } > k1.txt; cat k1.txt | { "$0"; cat; } 2>&1
+%%%
+#!name killed shell in function
+#!allow-kill
+#!mode=c
+printf 'f() { kill -KILL $$; }\necho A\nf\nLEFT1\n' | { "$0"; cat; } 2>&1
+%%%
+#!name killed shell inside subshell parent survives
+#!allow-kill
+#!mode=c
+printf 'echo A\n(kill -KILL $$)\nLEFT1\nLEFT2\n' | { "$0"; cat; } 2>&1
+%%%
+#!name shell exits normally leaves rest
+#!mode=c
+printf 'echo A\nexit 0\nLEFT1\nLEFT2\n' | { "$0"; cat; } 2>&1
+%%%
+#!name shell hits eof leaves nothing
+#!mode=c
+printf 'echo A\necho B\n' | { "$0"; cat; echo "[endcat]"; } 2>&1
+%%%
+#!name killed shell then wc of remainder
+#!allow-kill
+#!mode=c
+{ i=0; while [ $i -lt 100 ]; do echo ": p"; i=$((i+1)); done; echo 'kill -KILL $$'; i=0; while [ $i -lt 20 ]; do echo "t$i"; i=$((i+1)); done; } > k2.txt; cat k2.txt | { "$0"; wc -l; } 2>&1

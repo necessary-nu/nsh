@@ -1,0 +1,56 @@
+#!name devfull-echo
+ls -l /dev/full >/dev/null 2>&1 && { echo hi > /dev/full; echo "rc=$?"; } || echo nofull
+%%%
+#!name devfull-1
+s=$(i=0; r=; while [ $i -lt 1 ]; do r="${r}z"; i=$((i+1)); done; echo "$r"); { printf "%s" "$s" > /dev/full; echo "rc=$?"; } 2>&1 | cut -d: -f2-
+%%%
+#!name devfull-100
+s=$(i=0; r=; while [ $i -lt 100 ]; do r="${r}z"; i=$((i+1)); done; echo "$r"); { printf "%s" "$s" > /dev/full; echo "rc=$?"; } 2>&1 | cut -d: -f2-
+%%%
+#!name devfull-8191
+s=$(i=0; r=; while [ $i -lt 8191 ]; do r="${r}z"; i=$((i+1)); done; echo "$r"); { printf "%s" "$s" > /dev/full; echo "rc=$?"; } 2>&1 | cut -d: -f2-
+%%%
+#!name devfull-8192
+s=$(i=0; r=; while [ $i -lt 8192 ]; do r="${r}z"; i=$((i+1)); done; echo "$r"); { printf "%s" "$s" > /dev/full; echo "rc=$?"; } 2>&1 | cut -d: -f2-
+%%%
+#!name devfull-8193
+s=$(i=0; r=; while [ $i -lt 8193 ]; do r="${r}z"; i=$((i+1)); done; echo "$r"); { printf "%s" "$s" > /dev/full; echo "rc=$?"; } 2>&1 | cut -d: -f2-
+%%%
+#!name devfull-20000
+s=$(i=0; r=; while [ $i -lt 20000 ]; do r="${r}z"; i=$((i+1)); done; echo "$r"); { printf "%s" "$s" > /dev/full; echo "rc=$?"; } 2>&1 | cut -d: -f2-
+%%%
+#!name closed-stdout
+exec 1>&-; echo hi; echo "rc=$?" >&2
+%%%
+#!name closed-stdout-sub
+(exec 1>&-; echo hi) 2>&1 | cut -d: -f2-; echo done
+%%%
+#!name sigpipe-yes
+i=0; while [ $i -lt 100000 ]; do echo lots; i=$((i+1)); done | head -2; echo "rc=$?"
+%%%
+#!name out-err-order
+echo a; echo b >&2; echo c; echo d >&2; echo e
+%%%
+#!name out-err-order-big
+s=$(i=0; r=; while [ $i -lt 5000 ]; do r="${r}p"; i=$((i+1)); done; echo "$r"); printf "%s" "$s"; echo X >&2; printf "%s" "$s"; echo Y >&2; echo Z
+%%%
+#!name out-flush-on-fork
+printf "buffered"; (echo forked); echo end
+%%%
+#!name out-flush-on-exec
+printf "buffered"; /bin/echo external; echo end
+%%%
+#!name out-flush-on-exit
+printf "no-newline"
+%%%
+#!name out-flush-subshell
+printf "parent"; ( printf "child" ); printf "tail"
+%%%
+#!name out-cmdsub-capture
+v=$(printf "abc"; echo def >&2); echo "[$v]"
+%%%
+#!name out-eval-exit
+printf "x"; exit 3
+%%%
+#!name out-trap-exit
+trap "printf T" EXIT; printf "M"

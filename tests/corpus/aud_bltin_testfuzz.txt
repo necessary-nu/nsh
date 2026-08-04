@@ -1,0 +1,5016 @@
+test -nt -t; echo $?
+[ -nt -t ]; echo $?
+test -x ')' abc -n / x; echo $?
+[ -x ')' abc -n / x ]; echo $?
+test '' -w 1; echo $?
+[ '' -w 1 ]; echo $?
+test -ge ')' -eq; echo $?
+[ -ge ')' -eq ]; echo $?
+test -L -G; echo $?
+[ -L -G ]; echo $?
+test -L -i -a; echo $?
+[ -L -i -a ]; echo $?
+test -i 0 -S '!=' y; echo $?
+[ -i 0 -S '!=' y ]; echo $?
+test -u -h -lt '('; echo $?
+[ -u -h -lt '(' ]; echo $?
+test --; echo $?
+[ -- ]; echo $?
+test x; echo $?
+[ x ]; echo $?
+test -b; echo $?
+[ -b ]; echo $?
+test -h '' y -k; echo $?
+[ -h '' y -k ]; echo $?
+test -t 1; echo $?
+[ -t 1 ]; echo $?
+test /etc/passwd '(' /nonexistent -G 0x1; echo $?
+[ /etc/passwd '(' /nonexistent -G 0x1 ]; echo $?
+test -gt ')' -ot ')' ')' '>'; echo $?
+[ -gt ')' -ot ')' ')' '>' ]; echo $?
+test -k = -d /etc/passwd /etc/passwd -L; echo $?
+[ -k = -d /etc/passwd /etc/passwd -L ]; echo $?
+test -b -O / -t; echo $?
+[ -b -O / -t ]; echo $?
+test -1 '' ')' -s -z; echo $?
+[ -1 '' ')' -s -z ]; echo $?
+test -c /nonexistent '!' -nt; echo $?
+[ -c /nonexistent '!' -nt ]; echo $?
+test -g; echo $?
+[ -g ]; echo $?
+test 1 '>'; echo $?
+[ 1 '>' ]; echo $?
+test '(' -ot ')' x -x; echo $?
+[ '(' -ot ')' x -x ]; echo $?
+test -e -p 0 -k; echo $?
+[ -e -p 0 -k ]; echo $?
+test -eq '<' ')' abc -nt -h; echo $?
+[ -eq '<' ')' abc -nt -h ]; echo $?
+test y; echo $?
+[ y ]; echo $?
+test x -ge; echo $?
+[ x -ge ]; echo $?
+test -gt -t -t = -u; echo $?
+[ -gt -t -t = -u ]; echo $?
+test -ot -w -O; echo $?
+[ -ot -w -O ]; echo $?
+test -s -ot -e -G -u; echo $?
+[ -s -ot -e -G -u ]; echo $?
+test -gt -nt; echo $?
+[ -gt -nt ]; echo $?
+test 2 -s -nt -w -t -p; echo $?
+[ 2 -s -nt -w -t -p ]; echo $?
+test '!' -S y -o -g; echo $?
+[ '!' -S y -o -g ]; echo $?
+test '<' x; echo $?
+[ '<' x ]; echo $?
+test -e; echo $?
+[ -e ]; echo $?
+test -s; echo $?
+[ -s ]; echo $?
+test -k -1 '>' 0; echo $?
+[ -k -1 '>' 0 ]; echo $?
+test -b -p -ge '<'; echo $?
+[ -b -p -ge '<' ]; echo $?
+test '' -i -nt '<' -i -S; echo $?
+[ '' -i -nt '<' -i -S ]; echo $?
+test 0 -L = -ot; echo $?
+[ 0 -L = -ot ]; echo $?
+test / -eq -le; echo $?
+[ / -eq -le ]; echo $?
+test x -eq -L '<' -ot -ef; echo $?
+[ x -eq -L '<' -ot -ef ]; echo $?
+test '<' -1 -t; echo $?
+[ '<' -1 -t ]; echo $?
+test -S -n; echo $?
+[ -S -n ]; echo $?
+test abc -O abc -le abc -ne; echo $?
+[ abc -O abc -le abc -ne ]; echo $?
+test -o ')' /etc/passwd; echo $?
+[ -o ')' /etc/passwd ]; echo $?
+test 2 --; echo $?
+[ 2 -- ]; echo $?
+test -k 0x1 -z -O ')'; echo $?
+[ -k 0x1 -z -O ')' ]; echo $?
+test '!=' -L -r y -- -h; echo $?
+[ '!=' -L -r y -- -h ]; echo $?
+test -s '<' '!='; echo $?
+[ -s '<' '!=' ]; echo $?
+test '' -lt = -e --; echo $?
+[ '' -lt = -e -- ]; echo $?
+test -S x -1 = '(' -n; echo $?
+[ -S x -1 = '(' -n ]; echo $?
+test -c; echo $?
+[ -c ]; echo $?
+test '!=' 0x1; echo $?
+[ '!=' 0x1 ]; echo $?
+test -t; echo $?
+[ -t ]; echo $?
+test '<' -n '!=' -k 0; echo $?
+[ '<' -n '!=' -k 0 ]; echo $?
+test '' -L; echo $?
+[ '' -L ]; echo $?
+test 1 -lt -c -c; echo $?
+[ 1 -lt -c -c ]; echo $?
+test -O '!' ')'; echo $?
+[ -O '!' ')' ]; echo $?
+test ')'; echo $?
+[ ')' ]; echo $?
+test -u 2 -c -b '>'; echo $?
+[ -u 2 -c -b '>' ]; echo $?
+test 0 -1; echo $?
+[ 0 -1 ]; echo $?
+test -w -k -w -h; echo $?
+[ -w -k -w -h ]; echo $?
+test -x -i -O; echo $?
+[ -x -i -O ]; echo $?
+test -ot -x y 1; echo $?
+[ -ot -x y 1 ]; echo $?
+test -x -i -ge '!=' 0x1 0; echo $?
+[ -x -i -ge '!=' 0x1 0 ]; echo $?
+test -o -eq -a ')'; echo $?
+[ -o -eq -a ')' ]; echo $?
+test -lt; echo $?
+[ -lt ]; echo $?
+test '!'; echo $?
+[ '!' ]; echo $?
+test -ge; echo $?
+[ -ge ]; echo $?
+test -ot -f -ot -ot -t -a; echo $?
+[ -ot -f -ot -ot -t -a ]; echo $?
+test ')' '!' -1 -ot; echo $?
+[ ')' '!' -1 -ot ]; echo $?
+test y -u 0 -i; echo $?
+[ y -u 0 -i ]; echo $?
+test -ge -n '<' --; echo $?
+[ -ge -n '<' -- ]; echo $?
+test -s y; echo $?
+[ -s y ]; echo $?
+test -d -gt -k -ne /etc/passwd '<'; echo $?
+[ -d -gt -k -ne /etc/passwd '<' ]; echo $?
+test '<' -z -a -b; echo $?
+[ '<' -z -a -b ]; echo $?
+test ')' -ot -w -b; echo $?
+[ ')' -ot -w -b ]; echo $?
+test -G -e -s y; echo $?
+[ -G -e -s y ]; echo $?
+test -k -O -c 0 ')' -z; echo $?
+[ -k -O -c 0 ')' -z ]; echo $?
+test -i /nonexistent -1 2; echo $?
+[ -i /nonexistent -1 2 ]; echo $?
+test '('; echo $?
+[ '(' ]; echo $?
+test -b 0; echo $?
+[ -b 0 ]; echo $?
+test -t '>' -gt -e /etc/passwd; echo $?
+[ -t '>' -gt -e /etc/passwd ]; echo $?
+test -p; echo $?
+[ -p ]; echo $?
+test y -nt /etc/passwd; echo $?
+[ y -nt /etc/passwd ]; echo $?
+test / '!' -c -w -eq -a; echo $?
+[ / '!' -c -w -eq -a ]; echo $?
+test -k -d -o; echo $?
+[ -k -d -o ]; echo $?
+test -nt '!'; echo $?
+[ -nt '!' ]; echo $?
+test '' -t -ef -d -eq abc; echo $?
+[ '' -t -ef -d -eq abc ]; echo $?
+test -k; echo $?
+[ -k ]; echo $?
+test y -le ''; echo $?
+[ y -le '' ]; echo $?
+test -S abc 0x1 -lt y -i; echo $?
+[ -S abc 0x1 -lt y -i ]; echo $?
+test '!' '(' /etc/passwd -x abc -ne; echo $?
+[ '!' '(' /etc/passwd -x abc -ne ]; echo $?
+test -d -d -r /etc/passwd; echo $?
+[ -d -d -r /etc/passwd ]; echo $?
+test -r -e -p '' ')'; echo $?
+[ -r -e -p '' ')' ]; echo $?
+test -k -x -n -G -a y; echo $?
+[ -k -x -n -G -a y ]; echo $?
+test '>' -nt -ot -o '<' -p; echo $?
+[ '>' -nt -ot -o '<' -p ]; echo $?
+test /etc/passwd -gt -z -e -- -e; echo $?
+[ /etc/passwd -gt -z -e -- -e ]; echo $?
+test -c -a -p y -n -o; echo $?
+[ -c -a -p y -n -o ]; echo $?
+test ''; echo $?
+[ '' ]; echo $?
+test -L -e -- -p ')' -z; echo $?
+[ -L -e -- -p ')' -z ]; echo $?
+test -ge -u; echo $?
+[ -ge -u ]; echo $?
+test -w -- -p -h; echo $?
+[ -w -- -p -h ]; echo $?
+test -O 2 -S; echo $?
+[ -O 2 -S ]; echo $?
+test -u; echo $?
+[ -u ]; echo $?
+test -c -nt /; echo $?
+[ -c -nt / ]; echo $?
+test -w -L; echo $?
+[ -w -L ]; echo $?
+test -ef -gt; echo $?
+[ -ef -gt ]; echo $?
+test -e x /nonexistent -1 -nt -f; echo $?
+[ -e x /nonexistent -1 -nt -f ]; echo $?
+test -le /; echo $?
+[ -le / ]; echo $?
+test -a; echo $?
+[ -a ]; echo $?
+test -c -le -b 2 --; echo $?
+[ -c -le -b 2 -- ]; echo $?
+test 2 /etc/passwd; echo $?
+[ 2 /etc/passwd ]; echo $?
+test /nonexistent; echo $?
+[ /nonexistent ]; echo $?
+test x -G '!' -u '!=' -nt; echo $?
+[ x -G '!' -u '!=' -nt ]; echo $?
+test /etc/passwd -eq -f -S; echo $?
+[ /etc/passwd -eq -f -S ]; echo $?
+test -eq -L /nonexistent -r; echo $?
+[ -eq -L /nonexistent -r ]; echo $?
+test / -h /nonexistent -L / -eq; echo $?
+[ / -h /nonexistent -L / -eq ]; echo $?
+test ')' /etc/passwd; echo $?
+[ ')' /etc/passwd ]; echo $?
+test -h -k -i '(' -i '!'; echo $?
+[ -h -k -i '(' -i '!' ]; echo $?
+test -- -nt -L 0x1 '<'; echo $?
+[ -- -nt -L 0x1 '<' ]; echo $?
+test -g abc -lt -p -p '('; echo $?
+[ -g abc -lt -p -p '(' ]; echo $?
+test -z /etc/passwd -b; echo $?
+[ -z /etc/passwd -b ]; echo $?
+test -ot -a; echo $?
+[ -ot -a ]; echo $?
+test ')' -o -nt -O '(' -b; echo $?
+[ ')' -o -nt -O '(' -b ]; echo $?
+test 0; echo $?
+[ 0 ]; echo $?
+test -S -h -O -r -L; echo $?
+[ -S -h -O -r -L ]; echo $?
+test '<'; echo $?
+[ '<' ]; echo $?
+test /etc/passwd -e ''; echo $?
+[ /etc/passwd -e '' ]; echo $?
+test -eq -nt; echo $?
+[ -eq -nt ]; echo $?
+test -d 1; echo $?
+[ -d 1 ]; echo $?
+test -o 2 '!='; echo $?
+[ -o 2 '!=' ]; echo $?
+test 0 -i; echo $?
+[ 0 -i ]; echo $?
+test 0 / -u; echo $?
+[ 0 / -u ]; echo $?
+test 1 -c -x -- -g; echo $?
+[ 1 -c -x -- -g ]; echo $?
+test -f -h -s; echo $?
+[ -f -h -s ]; echo $?
+test -f; echo $?
+[ -f ]; echo $?
+test -ot -ef 2 x -t; echo $?
+[ -ot -ef 2 x -t ]; echo $?
+test -ot; echo $?
+[ -ot ]; echo $?
+test -f -t; echo $?
+[ -f -t ]; echo $?
+test -1 0 2; echo $?
+[ -1 0 2 ]; echo $?
+test -i -nt -lt; echo $?
+[ -i -nt -lt ]; echo $?
+test -nt -L -c '(' abc; echo $?
+[ -nt -L -c '(' abc ]; echo $?
+test -le '' -gt; echo $?
+[ -le '' -gt ]; echo $?
+test -z -n /; echo $?
+[ -z -n / ]; echo $?
+test -S -z; echo $?
+[ -S -z ]; echo $?
+test -u -lt; echo $?
+[ -u -lt ]; echo $?
+test = -1 -ot -1; echo $?
+[ = -1 -ot -1 ]; echo $?
+test -e -z -n; echo $?
+[ -e -z -n ]; echo $?
+test -L -h y '(' '<'; echo $?
+[ -L -h y '(' '<' ]; echo $?
+test '!' '(' -b; echo $?
+[ '!' '(' -b ]; echo $?
+test 1; echo $?
+[ 1 ]; echo $?
+test -O; echo $?
+[ -O ]; echo $?
+test = -e -- -b; echo $?
+[ = -e -- -b ]; echo $?
+test -lt -ne -le -z abc -o; echo $?
+[ -lt -ne -le -z abc -o ]; echo $?
+test / 2 2; echo $?
+[ / 2 2 ]; echo $?
+test 1 1 -z; echo $?
+[ 1 1 -z ]; echo $?
+test y -x -h /nonexistent 2; echo $?
+[ y -x -h /nonexistent 2 ]; echo $?
+test -r -nt -1; echo $?
+[ -r -nt -1 ]; echo $?
+test '' '>' -s -z /etc/passwd; echo $?
+[ '' '>' -s -z /etc/passwd ]; echo $?
+test -le ')' -le; echo $?
+[ -le ')' -le ]; echo $?
+test -a '' -w -o; echo $?
+[ -a '' -w -o ]; echo $?
+test y '' abc; echo $?
+[ y '' abc ]; echo $?
+test -s -c -o -r; echo $?
+[ -s -c -o -r ]; echo $?
+test -ge -L; echo $?
+[ -ge -L ]; echo $?
+test -G; echo $?
+[ -G ]; echo $?
+test -i -t; echo $?
+[ -i -t ]; echo $?
+test '' -r -a; echo $?
+[ '' -r -a ]; echo $?
+test = -lt; echo $?
+[ = -lt ]; echo $?
+test -- -a = -le -gt -x; echo $?
+[ -- -a = -le -gt -x ]; echo $?
+test '(' -g; echo $?
+[ '(' -g ]; echo $?
+test -O / -x -t /; echo $?
+[ -O / -x -t / ]; echo $?
+test -x = ')' -L -s -s; echo $?
+[ -x = ')' -L -s -s ]; echo $?
+test '>' -ef; echo $?
+[ '>' -ef ]; echo $?
+test -ef -g -x '!=' -S; echo $?
+[ -ef -g -x '!=' -S ]; echo $?
+test /nonexistent ')' -a -g -1; echo $?
+[ /nonexistent ')' -a -g -1 ]; echo $?
+test -eq '<' 0 -w -b '('; echo $?
+[ -eq '<' 0 -w -b '(' ]; echo $?
+test -d -g '!='; echo $?
+[ -d -g '!=' ]; echo $?
+test -S --; echo $?
+[ -S -- ]; echo $?
+test -h; echo $?
+[ -h ]; echo $?
+test -le -gt -i /etc/passwd '!=' -p; echo $?
+[ -le -gt -i /etc/passwd '!=' -p ]; echo $?
+test -p '<' -k -p; echo $?
+[ -p '<' -k -p ]; echo $?
+test -o '!=' -w 1 -p 2; echo $?
+[ -o '!=' -w 1 -p 2 ]; echo $?
+test 0x1 '' -w; echo $?
+[ 0x1 '' -w ]; echo $?
+test -o -p -p -ot -i; echo $?
+[ -o -p -p -ot -i ]; echo $?
+test -r -t 0 ''; echo $?
+[ -r -t 0 '' ]; echo $?
+test /etc/passwd /etc/passwd -ot -ne; echo $?
+[ /etc/passwd /etc/passwd -ot -ne ]; echo $?
+test '!=' -t y -gt; echo $?
+[ '!=' -t y -gt ]; echo $?
+test -ot -d y; echo $?
+[ -ot -d y ]; echo $?
+test -d; echo $?
+[ -d ]; echo $?
+test '>' -c -t 1 0x1; echo $?
+[ '>' -c -t 1 0x1 ]; echo $?
+test -s '(' -p -e; echo $?
+[ -s '(' -p -e ]; echo $?
+test -i /etc/passwd; echo $?
+[ -i /etc/passwd ]; echo $?
+test -o; echo $?
+[ -o ]; echo $?
+test -ot -ne; echo $?
+[ -ot -ne ]; echo $?
+test '<' -f -t / 2 '<'; echo $?
+[ '<' -f -t / 2 '<' ]; echo $?
+test -ef 1 -a -r -x; echo $?
+[ -ef 1 -a -r -x ]; echo $?
+test /etc/passwd /; echo $?
+[ /etc/passwd / ]; echo $?
+test -ne -ot -s; echo $?
+[ -ne -ot -s ]; echo $?
+test -d 0 -w -eq -i; echo $?
+[ -d 0 -w -eq -i ]; echo $?
+test -i -s -d y x; echo $?
+[ -i -s -d y x ]; echo $?
+test '>' -z -lt -O -G x; echo $?
+[ '>' -z -lt -O -G x ]; echo $?
+test -c -gt; echo $?
+[ -c -gt ]; echo $?
+test / -o / -u; echo $?
+[ / -o / -u ]; echo $?
+test -e /etc/passwd -ge y -g; echo $?
+[ -e /etc/passwd -ge y -g ]; echo $?
+test x -ne -a -w -x -1; echo $?
+[ x -ne -a -w -x -1 ]; echo $?
+test -- -o -O '<' y -ef; echo $?
+[ -- -o -O '<' y -ef ]; echo $?
+test -S -g 1 2 -L; echo $?
+[ -S -g 1 2 -L ]; echo $?
+test '<' -k abc -r -S -e; echo $?
+[ '<' -k abc -r -S -e ]; echo $?
+test 2 = '(' -eq -gt -1; echo $?
+[ 2 = '(' -eq -gt -1 ]; echo $?
+test /; echo $?
+[ / ]; echo $?
+test -ef '' -ot -h -eq; echo $?
+[ -ef '' -ot -h -eq ]; echo $?
+test 2 -- -x; echo $?
+[ 2 -- -x ]; echo $?
+test 1 -c '<'; echo $?
+[ 1 -c '<' ]; echo $?
+test -a -u -ef '!'; echo $?
+[ -a -u -ef '!' ]; echo $?
+test -le -lt 1 -c /nonexistent; echo $?
+[ -le -lt 1 -c /nonexistent ]; echo $?
+test -d -n; echo $?
+[ -d -n ]; echo $?
+test -le -e -c; echo $?
+[ -le -e -c ]; echo $?
+test -p -p abc -n -t; echo $?
+[ -p -p abc -n -t ]; echo $?
+test -ef -le -d; echo $?
+[ -ef -le -d ]; echo $?
+test -S x '!'; echo $?
+[ -S x '!' ]; echo $?
+test -p -s -ge '!=' '!'; echo $?
+[ -p -s -ge '!=' '!' ]; echo $?
+test -ot -t -gt 0x1; echo $?
+[ -ot -t -gt 0x1 ]; echo $?
+test '' -S -O y; echo $?
+[ '' -S -O y ]; echo $?
+test -g 1; echo $?
+[ -g 1 ]; echo $?
+test -ne -u ')' '!=' -w; echo $?
+[ -ne -u ')' '!=' -w ]; echo $?
+test y -h -- -nt; echo $?
+[ y -h -- -nt ]; echo $?
+test -le -eq 2 -eq; echo $?
+[ -le -eq 2 -eq ]; echo $?
+test -g -b '!=' -f; echo $?
+[ -g -b '!=' -f ]; echo $?
+test -ot -nt /etc/passwd -x -z -S; echo $?
+[ -ot -nt /etc/passwd -x -z -S ]; echo $?
+test -o -nt -ge; echo $?
+[ -o -nt -ge ]; echo $?
+test -d -a -gt -t; echo $?
+[ -d -a -gt -t ]; echo $?
+test -w -g -ne -lt -ne -ne; echo $?
+[ -w -g -ne -lt -ne -ne ]; echo $?
+test -1 -u -s '!' 1; echo $?
+[ -1 -u -s '!' 1 ]; echo $?
+test -gt x; echo $?
+[ -gt x ]; echo $?
+test '!=' 0x1 -ot; echo $?
+[ '!=' 0x1 -ot ]; echo $?
+test -g -O '!' -ot; echo $?
+[ -g -O '!' -ot ]; echo $?
+test -n -c -ne; echo $?
+[ -n -c -ne ]; echo $?
+test -L -t / 0 -e; echo $?
+[ -L -t / 0 -e ]; echo $?
+test -lt 1 -lt; echo $?
+[ -lt 1 -lt ]; echo $?
+test / -gt -e y -r; echo $?
+[ / -gt -e y -r ]; echo $?
+test / '>' -n -ef /; echo $?
+[ / '>' -n -ef / ]; echo $?
+test '!=' -w '!=' -gt abc; echo $?
+[ '!=' -w '!=' -gt abc ]; echo $?
+test -G -x; echo $?
+[ -G -x ]; echo $?
+test abc -i -g -p -g; echo $?
+[ abc -i -g -p -g ]; echo $?
+test 0 abc; echo $?
+[ 0 abc ]; echo $?
+test -b -- -G -gt 0x1 -r; echo $?
+[ -b -- -G -gt 0x1 -r ]; echo $?
+test '(' -w -k -ef; echo $?
+[ '(' -w -k -ef ]; echo $?
+test /etc/passwd -ot -t -ot; echo $?
+[ /etc/passwd -ot -t -ot ]; echo $?
+test -s -k; echo $?
+[ -s -k ]; echo $?
+test -n -le = -p; echo $?
+[ -n -le = -p ]; echo $?
+test '(' -z; echo $?
+[ '(' -z ]; echo $?
+test -z -L; echo $?
+[ -z -L ]; echo $?
+test -o -c / '!=' =; echo $?
+[ -o -c / '!=' = ]; echo $?
+test -e -L -z -x; echo $?
+[ -e -L -z -x ]; echo $?
+test -r -f -p '(' -O; echo $?
+[ -r -f -p '(' -O ]; echo $?
+test /etc/passwd -S /nonexistent -t ')'; echo $?
+[ /etc/passwd -S /nonexistent -t ')' ]; echo $?
+test '<' -e -r -e '' '!'; echo $?
+[ '<' -e -r -e '' '!' ]; echo $?
+test -x -eq -le -1 y -k; echo $?
+[ -x -eq -le -1 y -k ]; echo $?
+test = -s; echo $?
+[ = -s ]; echo $?
+test /nonexistent -1 -gt 2; echo $?
+[ /nonexistent -1 -gt 2 ]; echo $?
+test -r -nt '>' 0x1 -a -w; echo $?
+[ -r -nt '>' 0x1 -a -w ]; echo $?
+test 1 -h -t; echo $?
+[ 1 -h -t ]; echo $?
+test / -o '' -t -c -lt; echo $?
+[ / -o '' -t -c -lt ]; echo $?
+test abc -le -G abc -gt; echo $?
+[ abc -le -G abc -gt ]; echo $?
+test /nonexistent -ef -z; echo $?
+[ /nonexistent -ef -z ]; echo $?
+test 2 -b -ne -b -k -le; echo $?
+[ 2 -b -ne -b -k -le ]; echo $?
+test -h -ne -gt -ge -r -L; echo $?
+[ -h -ne -gt -ge -r -L ]; echo $?
+test '(' '<' -s; echo $?
+[ '(' '<' -s ]; echo $?
+test / /nonexistent; echo $?
+[ / /nonexistent ]; echo $?
+test -h -d -f; echo $?
+[ -h -d -f ]; echo $?
+test -r y; echo $?
+[ -r y ]; echo $?
+test -gt -b -b -ne -le; echo $?
+[ -gt -b -b -ne -le ]; echo $?
+test -d 2 -e -ge; echo $?
+[ -d 2 -e -ge ]; echo $?
+test 1 -e -t -b -ne; echo $?
+[ 1 -e -t -b -ne ]; echo $?
+test -e -i -r -r -f ''; echo $?
+[ -e -i -r -r -f '' ]; echo $?
+test -b '(' 2 -i -ge; echo $?
+[ -b '(' 2 -i -ge ]; echo $?
+test '(' 1 -ef; echo $?
+[ '(' 1 -ef ]; echo $?
+test 2 -e -ne -gt 2 /etc/passwd; echo $?
+[ 2 -e -ne -gt 2 /etc/passwd ]; echo $?
+test -- -ot -le 0 -G -w; echo $?
+[ -- -ot -le 0 -G -w ]; echo $?
+test -o -- /etc/passwd -O /nonexistent; echo $?
+[ -o -- /etc/passwd -O /nonexistent ]; echo $?
+test -G -ot '<' '!='; echo $?
+[ -G -ot '<' '!=' ]; echo $?
+test -i -1 -i -1 -c; echo $?
+[ -i -1 -i -1 -c ]; echo $?
+test -ne -f -c; echo $?
+[ -ne -f -c ]; echo $?
+test y -ne 0 -k -ef; echo $?
+[ y -ne 0 -k -ef ]; echo $?
+test /etc/passwd 1 '!' -s; echo $?
+[ /etc/passwd 1 '!' -s ]; echo $?
+test -w -d -b -z -ot; echo $?
+[ -w -d -b -z -ot ]; echo $?
+test -ot -L '!' '(' -k; echo $?
+[ -ot -L '!' '(' -k ]; echo $?
+test abc; echo $?
+[ abc ]; echo $?
+test '!' -r -d -S -ge; echo $?
+[ '!' -r -d -S -ge ]; echo $?
+test -e '<'; echo $?
+[ -e '<' ]; echo $?
+test /etc/passwd '(' -h -p -o --; echo $?
+[ /etc/passwd '(' -h -p -o -- ]; echo $?
+test -o -x; echo $?
+[ -o -x ]; echo $?
+test -S -r -d -u -c /nonexistent; echo $?
+[ -S -r -d -u -c /nonexistent ]; echo $?
+test -g x; echo $?
+[ -g x ]; echo $?
+test -z; echo $?
+[ -z ]; echo $?
+test /etc/passwd -eq -z -h -eq; echo $?
+[ /etc/passwd -eq -z -h -eq ]; echo $?
+test -f -ef y; echo $?
+[ -f -ef y ]; echo $?
+test 0x1; echo $?
+[ 0x1 ]; echo $?
+test -ne -k 0; echo $?
+[ -ne -k 0 ]; echo $?
+test -L; echo $?
+[ -L ]; echo $?
+test -le; echo $?
+[ -le ]; echo $?
+test '!' -ot -O 1 -e -i; echo $?
+[ '!' -ot -O 1 -e -i ]; echo $?
+test y -ge / -r; echo $?
+[ y -ge / -r ]; echo $?
+test -1 y -gt -t 0x1 /; echo $?
+[ -1 y -gt -t 0x1 / ]; echo $?
+test / -e -ge; echo $?
+[ / -e -ge ]; echo $?
+test -r '!=' -e 1 -G -G; echo $?
+[ -r '!=' -e 1 -G -G ]; echo $?
+test -a -e -n '!=' -a; echo $?
+[ -a -e -n '!=' -a ]; echo $?
+test -d -p -p -r 2; echo $?
+[ -d -p -p -r 2 ]; echo $?
+test -a -eq; echo $?
+[ -a -eq ]; echo $?
+test -s x -ne 0 -ot; echo $?
+[ -s x -ne 0 -ot ]; echo $?
+test -w -c -G -1 -eq -gt; echo $?
+[ -w -c -G -1 -eq -gt ]; echo $?
+test / -1; echo $?
+[ / -1 ]; echo $?
+test abc '' 0 -s -d; echo $?
+[ abc '' 0 -s -d ]; echo $?
+test ')' /nonexistent -t; echo $?
+[ ')' /nonexistent -t ]; echo $?
+test '!=' -O -gt -d '>'; echo $?
+[ '!=' -O -gt -d '>' ]; echo $?
+test '(' -c; echo $?
+[ '(' -c ]; echo $?
+test -S -z -a -i -- -eq; echo $?
+[ -S -z -a -i -- -eq ]; echo $?
+test -t -u 1; echo $?
+[ -t -u 1 ]; echo $?
+test -le -lt -x; echo $?
+[ -le -lt -x ]; echo $?
+test y 2 1; echo $?
+[ y 2 1 ]; echo $?
+test -gt -L; echo $?
+[ -gt -L ]; echo $?
+test '!' '(' '!' -g 1 -h; echo $?
+[ '!' '(' '!' -g 1 -h ]; echo $?
+test -i -f -f; echo $?
+[ -i -f -f ]; echo $?
+test -1 -s -i -L; echo $?
+[ -1 -s -i -L ]; echo $?
+test '>' -ne -b; echo $?
+[ '>' -ne -b ]; echo $?
+test -g '<' ''; echo $?
+[ -g '<' '' ]; echo $?
+test -O '(' -f -z; echo $?
+[ -O '(' -f -z ]; echo $?
+test = -lt -k / -x; echo $?
+[ = -lt -k / -x ]; echo $?
+test -k -h -eq; echo $?
+[ -k -h -eq ]; echo $?
+test -r -i /; echo $?
+[ -r -i / ]; echo $?
+test -o -S -g 0 -n; echo $?
+[ -o -S -g 0 -n ]; echo $?
+test -ef -ge 2 x -a; echo $?
+[ -ef -ge 2 x -a ]; echo $?
+test -eq -ef -ef -lt -- -o; echo $?
+[ -eq -ef -ef -lt -- -o ]; echo $?
+test -nt -S -w -k; echo $?
+[ -nt -S -w -k ]; echo $?
+test -b -1 -u -f '!=' -lt; echo $?
+[ -b -1 -u -f '!=' -lt ]; echo $?
+test -ge -le '('; echo $?
+[ -ge -le '(' ]; echo $?
+test x -d -ne; echo $?
+[ x -d -ne ]; echo $?
+test -n -r -p; echo $?
+[ -n -r -p ]; echo $?
+test -n -k '>'; echo $?
+[ -n -k '>' ]; echo $?
+test '(' '!' -1; echo $?
+[ '(' '!' -1 ]; echo $?
+test 0 -G -w -o y -gt; echo $?
+[ 0 -G -w -o y -gt ]; echo $?
+test '!' -a; echo $?
+[ '!' -a ]; echo $?
+test -S -r '(' 2 -e -o; echo $?
+[ -S -r '(' 2 -e -o ]; echo $?
+test -eq -r y; echo $?
+[ -eq -r y ]; echo $?
+test -- -z '' -h; echo $?
+[ -- -z '' -h ]; echo $?
+test -d -ne -h -lt '>'; echo $?
+[ -d -ne -h -lt '>' ]; echo $?
+test -L -w -g -le -1; echo $?
+[ -L -w -g -le -1 ]; echo $?
+test -S -s; echo $?
+[ -S -s ]; echo $?
+test -w '>' -e -ot /etc/passwd; echo $?
+[ -w '>' -e -ot /etc/passwd ]; echo $?
+test -ge -1 -f; echo $?
+[ -ge -1 -f ]; echo $?
+test -- -ne -z; echo $?
+[ -- -ne -z ]; echo $?
+test 0x1 -O -a ')' -o 2; echo $?
+[ 0x1 -O -a ')' -o 2 ]; echo $?
+test -r; echo $?
+[ -r ]; echo $?
+test -gt -O -s; echo $?
+[ -gt -O -s ]; echo $?
+test x -G -f; echo $?
+[ x -G -f ]; echo $?
+test -g -g -h -ef; echo $?
+[ -g -g -h -ef ]; echo $?
+test -nt; echo $?
+[ -nt ]; echo $?
+test ')' / -S /etc/passwd; echo $?
+[ ')' / -S /etc/passwd ]; echo $?
+test -f x -S -t; echo $?
+[ -f x -S -t ]; echo $?
+test -f -lt; echo $?
+[ -f -lt ]; echo $?
+test 0x1 -r -ge x; echo $?
+[ 0x1 -r -ge x ]; echo $?
+test -x; echo $?
+[ -x ]; echo $?
+test -lt ')' -lt; echo $?
+[ -lt ')' -lt ]; echo $?
+test -i 0 '(' -p; echo $?
+[ -i 0 '(' -p ]; echo $?
+test -z -ot x -t; echo $?
+[ -z -ot x -t ]; echo $?
+test '<' /etc/passwd -L -le; echo $?
+[ '<' /etc/passwd -L -le ]; echo $?
+test abc -o -le -lt; echo $?
+[ abc -o -le -lt ]; echo $?
+test -O -S; echo $?
+[ -O -S ]; echo $?
+test -e -p -t -O; echo $?
+[ -e -p -t -O ]; echo $?
+test -u ')' -d; echo $?
+[ -u ')' -d ]; echo $?
+test -c -O -gt -r -d; echo $?
+[ -c -O -gt -r -d ]; echo $?
+test abc 2 abc -g; echo $?
+[ abc 2 abc -g ]; echo $?
+test ')' =; echo $?
+[ ')' = ]; echo $?
+test -gt -r =; echo $?
+[ -gt -r = ]; echo $?
+test -r ''; echo $?
+[ -r '' ]; echo $?
+test 0x1 0 /etc/passwd; echo $?
+[ 0x1 0 /etc/passwd ]; echo $?
+test -ge y 2 y; echo $?
+[ -ge y 2 y ]; echo $?
+test -e -G -t -w; echo $?
+[ -e -G -t -w ]; echo $?
+test -nt -a -1 -u; echo $?
+[ -nt -a -1 -u ]; echo $?
+test -lt '<' ')'; echo $?
+[ -lt '<' ')' ]; echo $?
+test -1; echo $?
+[ -1 ]; echo $?
+test -u -gt -- 0; echo $?
+[ -u -gt -- 0 ]; echo $?
+test -i -p =; echo $?
+[ -i -p = ]; echo $?
+test y -u -w; echo $?
+[ y -u -w ]; echo $?
+test -ge -ge 0 -lt; echo $?
+[ -ge -ge 0 -lt ]; echo $?
+test -le -o -ef -nt -nt; echo $?
+[ -le -o -ef -nt -nt ]; echo $?
+test x '<' 2; echo $?
+[ x '<' 2 ]; echo $?
+test 0x1 -ne -h '>'; echo $?
+[ 0x1 -ne -h '>' ]; echo $?
+test -z -S '!'; echo $?
+[ -z -S '!' ]; echo $?
+test -eq -k -S -i -o; echo $?
+[ -eq -k -S -i -o ]; echo $?
+test -r -ot 0 abc -1; echo $?
+[ -r -ot 0 abc -1 ]; echo $?
+test -i; echo $?
+[ -i ]; echo $?
+test -k x -k -O 0; echo $?
+[ -k x -k -O 0 ]; echo $?
+test -lt -z -a '!=' -t x; echo $?
+[ -lt -z -a '!=' -t x ]; echo $?
+test x -e 0 0x1; echo $?
+[ x -e 0 0x1 ]; echo $?
+test y -G -ne -nt /etc/passwd; echo $?
+[ y -G -ne -nt /etc/passwd ]; echo $?
+test '<' 0x1 x; echo $?
+[ '<' 0x1 x ]; echo $?
+test '<' x 1 -ef -1; echo $?
+[ '<' x 1 -ef -1 ]; echo $?
+test '(' -r '!=' -i; echo $?
+[ '(' -r '!=' -i ]; echo $?
+test '<' -nt; echo $?
+[ '<' -nt ]; echo $?
+test -x -r -c; echo $?
+[ -x -r -c ]; echo $?
+test -s -L / -ne; echo $?
+[ -s -L / -ne ]; echo $?
+test -ot -lt -ef '(' -f 0x1; echo $?
+[ -ot -lt -ef '(' -f 0x1 ]; echo $?
+test -S -t; echo $?
+[ -S -t ]; echo $?
+test -le -- -s; echo $?
+[ -le -- -s ]; echo $?
+test -z -- -d -G -n -e; echo $?
+[ -z -- -d -G -n -e ]; echo $?
+test -o -z -ne 1 '!'; echo $?
+[ -o -z -ne 1 '!' ]; echo $?
+test -ot -le -e -ef --; echo $?
+[ -ot -le -e -ef -- ]; echo $?
+test -g 0 -r -h; echo $?
+[ -g 0 -r -h ]; echo $?
+test -t -ot -ot x -k; echo $?
+[ -t -ot -ot x -k ]; echo $?
+test -gt abc -p; echo $?
+[ -gt abc -p ]; echo $?
+test y -- -w '!' -L -eq; echo $?
+[ y -- -w '!' -L -eq ]; echo $?
+test -ge = -le; echo $?
+[ -ge = -le ]; echo $?
+test -ne -ne; echo $?
+[ -ne -ne ]; echo $?
+test -r -O; echo $?
+[ -r -O ]; echo $?
+test /etc/passwd '(' -eq -eq; echo $?
+[ /etc/passwd '(' -eq -eq ]; echo $?
+test '>' '!' -ef; echo $?
+[ '>' '!' -ef ]; echo $?
+test /nonexistent -eq; echo $?
+[ /nonexistent -eq ]; echo $?
+test '!' -nt x -o -ge -z; echo $?
+[ '!' -nt x -o -ge -z ]; echo $?
+test x '>' /etc/passwd 2; echo $?
+[ x '>' /etc/passwd 2 ]; echo $?
+test -b -r -z -t x -r; echo $?
+[ -b -r -z -t x -r ]; echo $?
+test /nonexistent '(' -eq '('; echo $?
+[ /nonexistent '(' -eq '(' ]; echo $?
+test -w -p -w -ot -- -f; echo $?
+[ -w -p -w -ot -- -f ]; echo $?
+test -ne -z -z abc; echo $?
+[ -ne -z -z abc ]; echo $?
+test -L x -gt -G ''; echo $?
+[ -L x -gt -G '' ]; echo $?
+test -p -nt; echo $?
+[ -p -nt ]; echo $?
+test '!' 1 '>' -ne; echo $?
+[ '!' 1 '>' -ne ]; echo $?
+test -S '('; echo $?
+[ -S '(' ]; echo $?
+test '(' -ge -s -lt ')'; echo $?
+[ '(' -ge -s -lt ')' ]; echo $?
+test -h -ef y; echo $?
+[ -h -ef y ]; echo $?
+test -lt -d -r -ge -p; echo $?
+[ -lt -d -r -ge -p ]; echo $?
+test -f -o -h '!' -z -ne; echo $?
+[ -f -o -h '!' -z -ne ]; echo $?
+test -c /nonexistent -w -t =; echo $?
+[ -c /nonexistent -w -t = ]; echo $?
+test -- -k -ne -L -ge -ot; echo $?
+[ -- -k -ne -L -ge -ot ]; echo $?
+test / -r /; echo $?
+[ / -r / ]; echo $?
+test 0 -a; echo $?
+[ 0 -a ]; echo $?
+test /nonexistent -t; echo $?
+[ /nonexistent -t ]; echo $?
+test 2; echo $?
+[ 2 ]; echo $?
+test -f -S -w -O; echo $?
+[ -f -S -w -O ]; echo $?
+test /etc/passwd; echo $?
+[ /etc/passwd ]; echo $?
+test '(' y -c; echo $?
+[ '(' y -c ]; echo $?
+test -c -ge -nt -O -s; echo $?
+[ -c -ge -nt -O -s ]; echo $?
+test -nt '(' -s -ge; echo $?
+[ -nt '(' -s -ge ]; echo $?
+test -f -s; echo $?
+[ -f -s ]; echo $?
+test -d '!' -b -ef; echo $?
+[ -d '!' -b -ef ]; echo $?
+test /etc/passwd ''; echo $?
+[ /etc/passwd '' ]; echo $?
+test 0 -x; echo $?
+[ 0 -x ]; echo $?
+test =; echo $?
+[ = ]; echo $?
+test abc 0 -n '!=' -x '<'; echo $?
+[ abc 0 -n '!=' -x '<' ]; echo $?
+test -ne '!=' -a -e '<' -t; echo $?
+[ -ne '!=' -a -e '<' -t ]; echo $?
+test '' ''; echo $?
+[ '' '' ]; echo $?
+test -s -S; echo $?
+[ -s -S ]; echo $?
+test '>' /etc/passwd; echo $?
+[ '>' /etc/passwd ]; echo $?
+test -p -h -S -n; echo $?
+[ -p -h -S -n ]; echo $?
+test -t /nonexistent -a -g; echo $?
+[ -t /nonexistent -a -g ]; echo $?
+test 2 '!' ')' -g y -O; echo $?
+[ 2 '!' ')' -g y -O ]; echo $?
+test -d -a -G -r; echo $?
+[ -d -a -G -r ]; echo $?
+test '' x '<' -le -s -w; echo $?
+[ '' x '<' -le -s -w ]; echo $?
+test -f -u --; echo $?
+[ -f -u -- ]; echo $?
+test /nonexistent '!' ''; echo $?
+[ /nonexistent '!' '' ]; echo $?
+test -k -a; echo $?
+[ -k -a ]; echo $?
+test -O -S 0x1 '('; echo $?
+[ -O -S 0x1 '(' ]; echo $?
+test -e -le '!' -t 2; echo $?
+[ -e -le '!' -t 2 ]; echo $?
+test -a -n -o -u -ef; echo $?
+[ -a -n -o -u -ef ]; echo $?
+test x = -e -r -S; echo $?
+[ x = -e -r -S ]; echo $?
+test '' -r -w -g; echo $?
+[ '' -r -w -g ]; echo $?
+test -f -x -x -ge -ef -t; echo $?
+[ -f -x -x -ge -ef -t ]; echo $?
+test -ne /; echo $?
+[ -ne / ]; echo $?
+test 1 -le -t; echo $?
+[ 1 -le -t ]; echo $?
+test '!=' -s ''; echo $?
+[ '!=' -s '' ]; echo $?
+test -x '!' /nonexistent -d '!=' -t; echo $?
+[ -x '!' /nonexistent -d '!=' -t ]; echo $?
+test / /nonexistent -lt; echo $?
+[ / /nonexistent -lt ]; echo $?
+test -w 0x1 0 -f -eq --; echo $?
+[ -w 0x1 0 -f -eq -- ]; echo $?
+test -- -h; echo $?
+[ -- -h ]; echo $?
+test '<' -S '!=' '!' -ef -ot; echo $?
+[ '<' -S '!=' '!' -ef -ot ]; echo $?
+test -p -1 1; echo $?
+[ -p -1 1 ]; echo $?
+test -a -1; echo $?
+[ -a -1 ]; echo $?
+test -b -ef -G /etc/passwd; echo $?
+[ -b -ef -G /etc/passwd ]; echo $?
+test -1 -w 0x1 x; echo $?
+[ -1 -w 0x1 x ]; echo $?
+test /nonexistent abc -g -h -O; echo $?
+[ /nonexistent abc -g -h -O ]; echo $?
+test -S -p -b '<'; echo $?
+[ -S -p -b '<' ]; echo $?
+test -t -ge -w -lt; echo $?
+[ -t -ge -w -lt ]; echo $?
+test -g -c -a; echo $?
+[ -g -c -a ]; echo $?
+test -le -o -d -G; echo $?
+[ -le -o -d -G ]; echo $?
+test -ne -a; echo $?
+[ -ne -a ]; echo $?
+test '!' -h -d -t; echo $?
+[ '!' -h -d -t ]; echo $?
+test -r -nt; echo $?
+[ -r -nt ]; echo $?
+test -u -t -eq; echo $?
+[ -u -t -eq ]; echo $?
+test -p -gt -le -1 -b 0x1; echo $?
+[ -p -gt -le -1 -b 0x1 ]; echo $?
+test -r -n -nt; echo $?
+[ -r -n -nt ]; echo $?
+test 0x1 -O -le -eq; echo $?
+[ 0x1 -O -le -eq ]; echo $?
+test y -o; echo $?
+[ y -o ]; echo $?
+test -ge -n -nt; echo $?
+[ -ge -n -nt ]; echo $?
+test -p -x x -O -gt -z; echo $?
+[ -p -x x -O -gt -z ]; echo $?
+test -eq -le -c -k -gt; echo $?
+[ -eq -le -c -k -gt ]; echo $?
+test -le x '>' 2 -u -a; echo $?
+[ -le x '>' 2 -u -a ]; echo $?
+test '!' -gt -s '!' y 2; echo $?
+[ '!' -gt -s '!' y 2 ]; echo $?
+test -c /nonexistent -le -le /; echo $?
+[ -c /nonexistent -le -le / ]; echo $?
+test -d '' abc ')' '!' -O; echo $?
+[ -d '' abc ')' '!' -O ]; echo $?
+test -e / -t -O '!='; echo $?
+[ -e / -t -O '!=' ]; echo $?
+test -ef; echo $?
+[ -ef ]; echo $?
+test -r -c -L -h; echo $?
+[ -r -c -L -h ]; echo $?
+test -L -- -e; echo $?
+[ -L -- -e ]; echo $?
+test -c -h '>' -c x; echo $?
+[ -c -h '>' -c x ]; echo $?
+test -s -ef '' -ef; echo $?
+[ -s -ef '' -ef ]; echo $?
+test -ne; echo $?
+[ -ne ]; echo $?
+test -a 2 -ne -gt; echo $?
+[ -a 2 -ne -gt ]; echo $?
+test -p -le; echo $?
+[ -p -le ]; echo $?
+test -x '(' y -L -ef; echo $?
+[ -x '(' y -L -ef ]; echo $?
+test -O -b; echo $?
+[ -O -b ]; echo $?
+test -t /; echo $?
+[ -t / ]; echo $?
+test -S -r; echo $?
+[ -S -r ]; echo $?
+test -nt 0x1 -le; echo $?
+[ -nt 0x1 -le ]; echo $?
+test abc '' -s -gt; echo $?
+[ abc '' -s -gt ]; echo $?
+test -n '<' 0 -S -ot; echo $?
+[ -n '<' 0 -S -ot ]; echo $?
+test 0x1 '' /nonexistent ')' -t -g; echo $?
+[ 0x1 '' /nonexistent ')' -t -g ]; echo $?
+test -e -t -gt -r; echo $?
+[ -e -t -gt -r ]; echo $?
+test -f -lt -u; echo $?
+[ -f -lt -u ]; echo $?
+test -1 -S /etc/passwd -u -x /; echo $?
+[ -1 -S /etc/passwd -u -x / ]; echo $?
+test -f -ne; echo $?
+[ -f -ne ]; echo $?
+test -t -z; echo $?
+[ -t -z ]; echo $?
+test -eq 0 -G; echo $?
+[ -eq 0 -G ]; echo $?
+test 2 -ot -k x -h =; echo $?
+[ 2 -ot -k x -h = ]; echo $?
+test -- -x -ot -b; echo $?
+[ -- -x -ot -b ]; echo $?
+test -ef ')' -a -w / x; echo $?
+[ -ef ')' -a -w / x ]; echo $?
+test '' -w; echo $?
+[ '' -w ]; echo $?
+test -a /etc/passwd ')'; echo $?
+[ -a /etc/passwd ')' ]; echo $?
+test -s -d -le ')' -u 0; echo $?
+[ -s -d -le ')' -u 0 ]; echo $?
+test '!' -u 1 -O 0; echo $?
+[ '!' -u 1 -O 0 ]; echo $?
+test -c -r -w -f; echo $?
+[ -c -r -w -f ]; echo $?
+test -nt '<' -ef -n 2; echo $?
+[ -nt '<' -ef -n 2 ]; echo $?
+test -f -eq; echo $?
+[ -f -eq ]; echo $?
+test /etc/passwd -1 /etc/passwd -L -e -gt; echo $?
+[ /etc/passwd -1 /etc/passwd -L -e -gt ]; echo $?
+test '' -c; echo $?
+[ '' -c ]; echo $?
+test 1 /etc/passwd -ef -S -t -o; echo $?
+[ 1 /etc/passwd -ef -S -t -o ]; echo $?
+test -G 0 2 /nonexistent -x -k; echo $?
+[ -G 0 2 /nonexistent -x -k ]; echo $?
+test -lt -f -h -b -O -p; echo $?
+[ -lt -f -h -b -O -p ]; echo $?
+test '>' -h '('; echo $?
+[ '>' -h '(' ]; echo $?
+test -ne '>' x /nonexistent -h ''; echo $?
+[ -ne '>' x /nonexistent -h '' ]; echo $?
+test abc -lt; echo $?
+[ abc -lt ]; echo $?
+test -k -h -a; echo $?
+[ -k -h -a ]; echo $?
+test -u -h; echo $?
+[ -u -h ]; echo $?
+test -ot -f -ef -nt -n abc; echo $?
+[ -ot -f -ef -nt -n abc ]; echo $?
+test '>' -h -1; echo $?
+[ '>' -h -1 ]; echo $?
+test x -a -h -L '>' '('; echo $?
+[ x -a -h -L '>' '(' ]; echo $?
+test -g -x '!' x -nt; echo $?
+[ -g -x '!' x -nt ]; echo $?
+test -c ')'; echo $?
+[ -c ')' ]; echo $?
+test -eq; echo $?
+[ -eq ]; echo $?
+test -n; echo $?
+[ -n ]; echo $?
+test -- '>' -le; echo $?
+[ -- '>' -le ]; echo $?
+test '<' -nt -h -w ''; echo $?
+[ '<' -nt -h -w '' ]; echo $?
+test -s -ot; echo $?
+[ -s -ot ]; echo $?
+test '' -ge '>'; echo $?
+[ '' -ge '>' ]; echo $?
+test -k -G; echo $?
+[ -k -G ]; echo $?
+test -gt 0x1 '<' -p -r 1; echo $?
+[ -gt 0x1 '<' -p -r 1 ]; echo $?
+test -x '(' -i -d -ne '!'; echo $?
+[ -x '(' -i -d -ne '!' ]; echo $?
+test -ge -u -lt =; echo $?
+[ -ge -u -lt = ]; echo $?
+test -z -ge -G; echo $?
+[ -z -ge -G ]; echo $?
+test -o -t -gt -L = 2; echo $?
+[ -o -t -gt -L = 2 ]; echo $?
+test -S = -t '>'; echo $?
+[ -S = -t '>' ]; echo $?
+test -ot 0 -t; echo $?
+[ -ot 0 -t ]; echo $?
+test -ef -k -c y -k -1; echo $?
+[ -ef -k -c y -k -1 ]; echo $?
+test -x -r -o '('; echo $?
+[ -x -r -o '(' ]; echo $?
+test -u /nonexistent -S / -f; echo $?
+[ -u /nonexistent -S / -f ]; echo $?
+test '<' '(' -b '>' ''; echo $?
+[ '<' '(' -b '>' '' ]; echo $?
+test -z -ot 1; echo $?
+[ -z -ot 1 ]; echo $?
+test -1 -u; echo $?
+[ -1 -u ]; echo $?
+test -t -r; echo $?
+[ -t -r ]; echo $?
+test -- -a -1 -k ')' -g; echo $?
+[ -- -a -1 -k ')' -g ]; echo $?
+test -b -nt -ne; echo $?
+[ -b -nt -ne ]; echo $?
+test 1 -S -f -s -t; echo $?
+[ 1 -S -f -s -t ]; echo $?
+test -b -ne -u; echo $?
+[ -b -ne -u ]; echo $?
+test -O x; echo $?
+[ -O x ]; echo $?
+test -h -L; echo $?
+[ -h -L ]; echo $?
+test -le -p -gt '>' '>'; echo $?
+[ -le -p -gt '>' '>' ]; echo $?
+test '!=' -u '<' ')' -u -k; echo $?
+[ '!=' -u '<' ')' -u -k ]; echo $?
+test -x -s /etc/passwd '!=' -w -e; echo $?
+[ -x -s /etc/passwd '!=' -w -e ]; echo $?
+test x -O -z -a -b; echo $?
+[ x -O -z -a -b ]; echo $?
+test -lt -lt '!=' ''; echo $?
+[ -lt -lt '!=' '' ]; echo $?
+test -g -le -g; echo $?
+[ -g -le -g ]; echo $?
+test '' -s; echo $?
+[ '' -s ]; echo $?
+test -S -i -O -e -t; echo $?
+[ -S -i -O -e -t ]; echo $?
+test /etc/passwd -i /etc/passwd; echo $?
+[ /etc/passwd -i /etc/passwd ]; echo $?
+test -le '' -b -x; echo $?
+[ -le '' -b -x ]; echo $?
+test -s -n -gt; echo $?
+[ -s -n -gt ]; echo $?
+test -z '!=' -gt ')'; echo $?
+[ -z '!=' -gt ')' ]; echo $?
+test -i -n y -t; echo $?
+[ -i -n y -t ]; echo $?
+test -S '!' -f; echo $?
+[ -S '!' -f ]; echo $?
+test -z -G; echo $?
+[ -z -G ]; echo $?
+test -n -n; echo $?
+[ -n -n ]; echo $?
+test /nonexistent -ge '('; echo $?
+[ /nonexistent -ge '(' ]; echo $?
+test -- -r -nt; echo $?
+[ -- -r -nt ]; echo $?
+test '!' -L -w --; echo $?
+[ '!' -L -w -- ]; echo $?
+test y /nonexistent -p; echo $?
+[ y /nonexistent -p ]; echo $?
+test -z -nt -f = -O -b; echo $?
+[ -z -nt -f = -O -b ]; echo $?
+test -i -u -e -b -h; echo $?
+[ -i -u -e -b -h ]; echo $?
+test /nonexistent =; echo $?
+[ /nonexistent = ]; echo $?
+test -S -a; echo $?
+[ -S -a ]; echo $?
+test -c -O -h -o 2 /nonexistent; echo $?
+[ -c -O -h -o 2 /nonexistent ]; echo $?
+test ')' -x -r -G; echo $?
+[ ')' -x -r -G ]; echo $?
+test -- -S 2; echo $?
+[ -- -S 2 ]; echo $?
+test -z /nonexistent '!' -lt -nt -b; echo $?
+[ -z /nonexistent '!' -lt -nt -b ]; echo $?
+test -i -o -h -f -1 '!'; echo $?
+[ -i -o -h -f -1 '!' ]; echo $?
+test -g -- -f; echo $?
+[ -g -- -f ]; echo $?
+test 1 '!=' -le; echo $?
+[ 1 '!=' -le ]; echo $?
+test abc abc; echo $?
+[ abc abc ]; echo $?
+test '!=' -ot x -k -le -le; echo $?
+[ '!=' -ot x -k -le -le ]; echo $?
+test -S -eq -f; echo $?
+[ -S -eq -f ]; echo $?
+test ')' -i -nt -z x; echo $?
+[ ')' -i -nt -z x ]; echo $?
+test /nonexistent -g -n '('; echo $?
+[ /nonexistent -g -n '(' ]; echo $?
+test -p -G -p; echo $?
+[ -p -G -p ]; echo $?
+test = --; echo $?
+[ = -- ]; echo $?
+test -i /; echo $?
+[ -i / ]; echo $?
+test y -ge '!'; echo $?
+[ y -ge '!' ]; echo $?
+test '!' y; echo $?
+[ '!' y ]; echo $?
+test /nonexistent -g -G '<'; echo $?
+[ /nonexistent -g -G '<' ]; echo $?
+test '!=' ')'; echo $?
+[ '!=' ')' ]; echo $?
+test -h -1 0 -p -z --; echo $?
+[ -h -1 0 -p -z -- ]; echo $?
+test -G /nonexistent; echo $?
+[ -G /nonexistent ]; echo $?
+test -u -O -f -g; echo $?
+[ -u -O -f -g ]; echo $?
+test -S; echo $?
+[ -S ]; echo $?
+test -b -h -ne -n -k -b; echo $?
+[ -b -h -ne -n -k -b ]; echo $?
+test -1 -i -ef -n '('; echo $?
+[ -1 -i -ef -n '(' ]; echo $?
+test -eq -z -w / -c ''; echo $?
+[ -eq -z -w / -c '' ]; echo $?
+test -s -gt -gt; echo $?
+[ -s -gt -gt ]; echo $?
+test -1 -a '' -nt /nonexistent -O; echo $?
+[ -1 -a '' -nt /nonexistent -O ]; echo $?
+test -b -i; echo $?
+[ -b -i ]; echo $?
+test '' -z -o /nonexistent; echo $?
+[ '' -z -o /nonexistent ]; echo $?
+test -G -ef; echo $?
+[ -G -ef ]; echo $?
+test -le -1 2; echo $?
+[ -le -1 2 ]; echo $?
+test '' -z; echo $?
+[ '' -z ]; echo $?
+test -G 1 -S; echo $?
+[ -G 1 -S ]; echo $?
+test x -nt = '>' -p; echo $?
+[ x -nt = '>' -p ]; echo $?
+test -p -e; echo $?
+[ -p -e ]; echo $?
+test = -gt -O -nt --; echo $?
+[ = -gt -O -nt -- ]; echo $?
+test '' '>'; echo $?
+[ '' '>' ]; echo $?
+test -gt 2 y y -S; echo $?
+[ -gt 2 y y -S ]; echo $?
+test -ge -L -g = -S; echo $?
+[ -ge -L -g = -S ]; echo $?
+test -u -r -O -b; echo $?
+[ -u -r -O -b ]; echo $?
+test / -h -- -L 0x1 -L; echo $?
+[ / -h -- -L 0x1 -L ]; echo $?
+test / ')' ')'; echo $?
+[ / ')' ')' ]; echo $?
+test abc -k /etc/passwd -c /etc/passwd; echo $?
+[ abc -k /etc/passwd -c /etc/passwd ]; echo $?
+test -ot -le 1 --; echo $?
+[ -ot -le 1 -- ]; echo $?
+test '>' -u -p -b -lt; echo $?
+[ '>' -u -p -b -lt ]; echo $?
+test -g -s -a -L -r -x; echo $?
+[ -g -s -a -L -r -x ]; echo $?
+test ')' -x y; echo $?
+[ ')' -x y ]; echo $?
+test -G -O -w -nt 0x1 -ot; echo $?
+[ -G -O -w -nt 0x1 -ot ]; echo $?
+test -k -p y -o -k; echo $?
+[ -k -p y -o -k ]; echo $?
+test 2 -1 -u; echo $?
+[ 2 -1 -u ]; echo $?
+test 1 =; echo $?
+[ 1 = ]; echo $?
+test '!' -h; echo $?
+[ '!' -h ]; echo $?
+test -ge -c -p; echo $?
+[ -ge -c -p ]; echo $?
+test -d -S -b; echo $?
+[ -d -S -b ]; echo $?
+test = -n '!'; echo $?
+[ = -n '!' ]; echo $?
+test 1 -G / -w abc --; echo $?
+[ 1 -G / -w abc -- ]; echo $?
+test -u -f -ge -b -n; echo $?
+[ -u -f -ge -b -n ]; echo $?
+test '(' 0x1 -ne -a -z -r; echo $?
+[ '(' 0x1 -ne -a -z -r ]; echo $?
+test -w -h -ef -i -L; echo $?
+[ -w -h -ef -i -L ]; echo $?
+test ')' -e -t -ne; echo $?
+[ ')' -e -t -ne ]; echo $?
+test / = /nonexistent -gt x -c; echo $?
+[ / = /nonexistent -gt x -c ]; echo $?
+test -u -x /etc/passwd -eq -w -h; echo $?
+[ -u -x /etc/passwd -eq -w -h ]; echo $?
+test 0 -t; echo $?
+[ 0 -t ]; echo $?
+test -S -ne '<'; echo $?
+[ -S -ne '<' ]; echo $?
+test 2 /etc/passwd '('; echo $?
+[ 2 /etc/passwd '(' ]; echo $?
+test -b -eq -S -d /etc/passwd; echo $?
+[ -b -eq -S -d /etc/passwd ]; echo $?
+test -h '!=' -ot; echo $?
+[ -h '!=' -ot ]; echo $?
+test -ge '!' -ne; echo $?
+[ -ge '!' -ne ]; echo $?
+test -1 '!=' -g / -e --; echo $?
+[ -1 '!=' -g / -e -- ]; echo $?
+test ')' -s; echo $?
+[ ')' -s ]; echo $?
+test -O -L; echo $?
+[ -O -L ]; echo $?
+test -O -1; echo $?
+[ -O -1 ]; echo $?
+test -r -x '('; echo $?
+[ -r -x '(' ]; echo $?
+test -h -x ')'; echo $?
+[ -h -x ')' ]; echo $?
+test /etc/passwd -k y -f -eq; echo $?
+[ /etc/passwd -k y -f -eq ]; echo $?
+test '(' -e -ot; echo $?
+[ '(' -e -ot ]; echo $?
+test -u 0; echo $?
+[ -u 0 ]; echo $?
+test '' = -x; echo $?
+[ '' = -x ]; echo $?
+test -lt -p -n -le -u; echo $?
+[ -lt -p -n -le -u ]; echo $?
+test -G 2; echo $?
+[ -G 2 ]; echo $?
+test -u /nonexistent 2 -u -O -a; echo $?
+[ -u /nonexistent 2 -u -O -a ]; echo $?
+test 1 -b -- '(' -u; echo $?
+[ 1 -b -- '(' -u ]; echo $?
+test -x --; echo $?
+[ -x -- ]; echo $?
+test -ne -t -r -O; echo $?
+[ -ne -t -r -O ]; echo $?
+test -ef -c; echo $?
+[ -ef -c ]; echo $?
+test -gt -o -- -L /etc/passwd -c; echo $?
+[ -gt -o -- -L /etc/passwd -c ]; echo $?
+test -G -ge -G -w -ot '!='; echo $?
+[ -G -ge -G -w -ot '!=' ]; echo $?
+test -b -r 0x1; echo $?
+[ -b -r 0x1 ]; echo $?
+test -ne 0 /nonexistent; echo $?
+[ -ne 0 /nonexistent ]; echo $?
+test '!=' -gt; echo $?
+[ '!=' -gt ]; echo $?
+test -s / 0x1 -a -n -ef; echo $?
+[ -s / 0x1 -a -n -ef ]; echo $?
+test -ef x; echo $?
+[ -ef x ]; echo $?
+test -eq -u -L -h; echo $?
+[ -eq -u -L -h ]; echo $?
+test -n -nt; echo $?
+[ -n -nt ]; echo $?
+test -eq y 1; echo $?
+[ -eq y 1 ]; echo $?
+test 2 -f; echo $?
+[ 2 -f ]; echo $?
+test -i abc '>' -le; echo $?
+[ -i abc '>' -le ]; echo $?
+test -i -L / -f; echo $?
+[ -i -L / -f ]; echo $?
+test -c -a; echo $?
+[ -c -a ]; echo $?
+test -e -e -r; echo $?
+[ -e -e -r ]; echo $?
+test -x -O; echo $?
+[ -x -O ]; echo $?
+test /nonexistent -1 -u; echo $?
+[ /nonexistent -1 -u ]; echo $?
+test -O -n y -e; echo $?
+[ -O -n y -e ]; echo $?
+test = -e; echo $?
+[ = -e ]; echo $?
+test 0 = '!=' ')' -1 0x1; echo $?
+[ 0 = '!=' ')' -1 0x1 ]; echo $?
+test -w -f -ot /nonexistent -S 1; echo $?
+[ -w -f -ot /nonexistent -S 1 ]; echo $?
+test -c -gt /nonexistent; echo $?
+[ -c -gt /nonexistent ]; echo $?
+test -gt '>'; echo $?
+[ -gt '>' ]; echo $?
+test -h -le -S -r; echo $?
+[ -h -le -S -r ]; echo $?
+test -n y -t; echo $?
+[ -n y -t ]; echo $?
+test -eq '<' x -t; echo $?
+[ -eq '<' x -t ]; echo $?
+test 2 -z -O -n -h; echo $?
+[ 2 -z -O -n -h ]; echo $?
+test -S '(' x -b -ne -e; echo $?
+[ -S '(' x -b -ne -e ]; echo $?
+test -nt -ge -i 0x1; echo $?
+[ -nt -ge -i 0x1 ]; echo $?
+test -1 abc -S -d -le -O; echo $?
+[ -1 abc -S -d -le -O ]; echo $?
+test -O -d; echo $?
+[ -O -d ]; echo $?
+test / '<' -ge -1; echo $?
+[ / '<' -ge -1 ]; echo $?
+test -p -u -ge; echo $?
+[ -p -u -ge ]; echo $?
+test -z -le abc -ge =; echo $?
+[ -z -le abc -ge = ]; echo $?
+test x -t -S -- -ne -t; echo $?
+[ x -t -S -- -ne -t ]; echo $?
+test -x -ot -nt -a -S -x; echo $?
+[ -x -ot -nt -a -S -x ]; echo $?
+test = -gt -r; echo $?
+[ = -gt -r ]; echo $?
+test -le '' -O -u -r; echo $?
+[ -le '' -O -u -r ]; echo $?
+test -L y -z 0x1 -G; echo $?
+[ -L y -z 0x1 -G ]; echo $?
+test -eq -w; echo $?
+[ -eq -w ]; echo $?
+test -p -a /etc/passwd -k -ot; echo $?
+[ -p -a /etc/passwd -k -ot ]; echo $?
+test -nt /etc/passwd; echo $?
+[ -nt /etc/passwd ]; echo $?
+test 2 '>' -O -ge '(' -G; echo $?
+[ 2 '>' -O -ge '(' -G ]; echo $?
+test ')' -ef; echo $?
+[ ')' -ef ]; echo $?
+test -- '!' y; echo $?
+[ -- '!' y ]; echo $?
+test -c -s -r '!' -nt; echo $?
+[ -c -s -r '!' -nt ]; echo $?
+test -g -b ')' -f -r -b; echo $?
+[ -g -b ')' -f -r -b ]; echo $?
+test -t -s -g abc -f; echo $?
+[ -t -s -g abc -f ]; echo $?
+test 0 -ne -w; echo $?
+[ 0 -ne -w ]; echo $?
+test /etc/passwd -k /; echo $?
+[ /etc/passwd -k / ]; echo $?
+test -O 0; echo $?
+[ -O 0 ]; echo $?
+test -p -le 1 -ef; echo $?
+[ -p -le 1 -ef ]; echo $?
+test '(' y -a -lt /nonexistent -ge; echo $?
+[ '(' y -a -lt /nonexistent -ge ]; echo $?
+test -G -le; echo $?
+[ -G -le ]; echo $?
+test '' -ge; echo $?
+[ '' -ge ]; echo $?
+test -ne / x -x -i -ot; echo $?
+[ -ne / x -x -i -ot ]; echo $?
+test -r -ne; echo $?
+[ -r -ne ]; echo $?
+test -L / -b -c '!'; echo $?
+[ -L / -b -c '!' ]; echo $?
+test '!=' -le '' -o -ge -S; echo $?
+[ '!=' -le '' -o -ge -S ]; echo $?
+test -S '!'; echo $?
+[ -S '!' ]; echo $?
+test -S -- -u -e -eq; echo $?
+[ -S -- -u -e -eq ]; echo $?
+test /etc/passwd -k; echo $?
+[ /etc/passwd -k ]; echo $?
+test -n -s '>'; echo $?
+[ -n -s '>' ]; echo $?
+test -nt -z -ef -G; echo $?
+[ -nt -z -ef -G ]; echo $?
+test -d abc -r -r 0x1; echo $?
+[ -d abc -r -r 0x1 ]; echo $?
+test / 0; echo $?
+[ / 0 ]; echo $?
+test -eq /nonexistent -ef -f '' 2; echo $?
+[ -eq /nonexistent -ef -f '' 2 ]; echo $?
+test / 0x1 -- -s; echo $?
+[ / 0x1 -- -s ]; echo $?
+test '>'; echo $?
+[ '>' ]; echo $?
+test -ge -g -L abc; echo $?
+[ -ge -g -L abc ]; echo $?
+test '!=' /etc/passwd; echo $?
+[ '!=' /etc/passwd ]; echo $?
+test -s -ot = ')' -h; echo $?
+[ -s -ot = ')' -h ]; echo $?
+test -d -L / -s -f; echo $?
+[ -d -L / -s -f ]; echo $?
+test 0x1 '('; echo $?
+[ 0x1 '(' ]; echo $?
+test -e 0x1 -d '<'; echo $?
+[ -e 0x1 -d '<' ]; echo $?
+test = -ge = --; echo $?
+[ = -ge = -- ]; echo $?
+test -1 -g -ot -g 0 -ot; echo $?
+[ -1 -g -ot -g 0 -ot ]; echo $?
+test -w; echo $?
+[ -w ]; echo $?
+test -ot -s; echo $?
+[ -ot -s ]; echo $?
+test -e -1; echo $?
+[ -e -1 ]; echo $?
+test -e -b; echo $?
+[ -e -b ]; echo $?
+test -o -s y /etc/passwd; echo $?
+[ -o -s y /etc/passwd ]; echo $?
+test -t -d -p; echo $?
+[ -t -d -p ]; echo $?
+test -h -o -ge -i; echo $?
+[ -h -o -ge -i ]; echo $?
+test y 0x1; echo $?
+[ y 0x1 ]; echo $?
+test -u '<' -ne; echo $?
+[ -u '<' -ne ]; echo $?
+test -c 2 -e; echo $?
+[ -c 2 -e ]; echo $?
+test -h -u /etc/passwd '!=' -S -le; echo $?
+[ -h -u /etc/passwd '!=' -S -le ]; echo $?
+test -S -ge -h -r 2 -o; echo $?
+[ -S -ge -h -r 2 -o ]; echo $?
+test -lt -1 -O ''; echo $?
+[ -lt -1 -O '' ]; echo $?
+test y -nt -b; echo $?
+[ y -nt -b ]; echo $?
+test -u -G -k -ef; echo $?
+[ -u -G -k -ef ]; echo $?
+test -le -le -ne; echo $?
+[ -le -le -ne ]; echo $?
+test -s abc -d 2; echo $?
+[ -s abc -d 2 ]; echo $?
+test -S -p -G; echo $?
+[ -S -p -G ]; echo $?
+test -e -p ')' y -ef; echo $?
+[ -e -p ')' y -ef ]; echo $?
+test -d 0x1; echo $?
+[ -d 0x1 ]; echo $?
+test '(' -ge -t -p; echo $?
+[ '(' -ge -t -p ]; echo $?
+test = 2 -b 0x1 '!'; echo $?
+[ = 2 -b 0x1 '!' ]; echo $?
+test -O -g; echo $?
+[ -O -g ]; echo $?
+test 1 abc; echo $?
+[ 1 abc ]; echo $?
+test -s -ne -f -h /nonexistent 2; echo $?
+[ -s -ne -f -h /nonexistent 2 ]; echo $?
+test -z -d -G; echo $?
+[ -z -d -G ]; echo $?
+test ')' -k; echo $?
+[ ')' -k ]; echo $?
+test 0 -w -i; echo $?
+[ 0 -w -i ]; echo $?
+test -a -ne; echo $?
+[ -a -ne ]; echo $?
+test -p -z; echo $?
+[ -p -z ]; echo $?
+test -w -ef -g '' -e; echo $?
+[ -w -ef -g '' -e ]; echo $?
+test -h -ot -t 0 -x -1; echo $?
+[ -h -ot -t 0 -x -1 ]; echo $?
+test '!='; echo $?
+[ '!=' ]; echo $?
+test -s ')' x '!' -ot -p; echo $?
+[ -s ')' x '!' -ot -p ]; echo $?
+test abc 2 '(' -G; echo $?
+[ abc 2 '(' -G ]; echo $?
+test -p -t /; echo $?
+[ -p -t / ]; echo $?
+test '!' -S; echo $?
+[ '!' -S ]; echo $?
+test -p abc 2 -1 -G; echo $?
+[ -p abc 2 -1 -G ]; echo $?
+test '<' -w -z -b -eq /; echo $?
+[ '<' -w -z -b -eq / ]; echo $?
+test -n '' -d '>' / -lt; echo $?
+[ -n '' -d '>' / -lt ]; echo $?
+test -ne -h ')'; echo $?
+[ -ne -h ')' ]; echo $?
+test 1 -le; echo $?
+[ 1 -le ]; echo $?
+test -le 1 /nonexistent -i -gt; echo $?
+[ -le 1 /nonexistent -i -gt ]; echo $?
+test -L 2; echo $?
+[ -L 2 ]; echo $?
+test -gt '' -p; echo $?
+[ -gt '' -p ]; echo $?
+test /nonexistent -gt -1 0 -s -e; echo $?
+[ /nonexistent -gt -1 0 -s -e ]; echo $?
+test abc 1 1 2 -lt; echo $?
+[ abc 1 1 2 -lt ]; echo $?
+test 0 -r -d -o -a -le; echo $?
+[ 0 -r -d -o -a -le ]; echo $?
+test -ge -w '('; echo $?
+[ -ge -w '(' ]; echo $?
+test -ne -f -r '!' '>' -1; echo $?
+[ -ne -f -r '!' '>' -1 ]; echo $?
+test -o -p; echo $?
+[ -o -p ]; echo $?
+test -u -le -i -s abc /etc/passwd; echo $?
+[ -u -le -i -s abc /etc/passwd ]; echo $?
+test -ne -n y y; echo $?
+[ -ne -n y y ]; echo $?
+test '' = -c ''; echo $?
+[ '' = -c '' ]; echo $?
+test / -c -O -e '!='; echo $?
+[ / -c -O -e '!=' ]; echo $?
+test '!=' -w; echo $?
+[ '!=' -w ]; echo $?
+test -w -lt = -le; echo $?
+[ -w -lt = -le ]; echo $?
+test -le -ge -w -e; echo $?
+[ -le -ge -w -e ]; echo $?
+test / -h 1 -f -a; echo $?
+[ / -h 1 -f -a ]; echo $?
+test '(' -i -k; echo $?
+[ '(' -i -k ]; echo $?
+test / -w -n -z -k; echo $?
+[ / -w -n -z -k ]; echo $?
+test /etc/passwd -x '' -eq '<'; echo $?
+[ /etc/passwd -x '' -eq '<' ]; echo $?
+test abc -gt '<' -t; echo $?
+[ abc -gt '<' -t ]; echo $?
+test '<' -w; echo $?
+[ '<' -w ]; echo $?
+test -u -ne -O -f -gt -G; echo $?
+[ -u -ne -O -f -gt -G ]; echo $?
+test -G '!' -ot -g; echo $?
+[ -G '!' -ot -g ]; echo $?
+test -a 0x1 '>' -r = -eq; echo $?
+[ -a 0x1 '>' -r = -eq ]; echo $?
+test -h /nonexistent -s -b; echo $?
+[ -h /nonexistent -s -b ]; echo $?
+test -h '<' -i -ge --; echo $?
+[ -h '<' -i -ge -- ]; echo $?
+test -g 2 -x -- -f; echo $?
+[ -g 2 -x -- -f ]; echo $?
+test -h -O; echo $?
+[ -h -O ]; echo $?
+test /etc/passwd -x -G -z; echo $?
+[ /etc/passwd -x -G -z ]; echo $?
+test 0x1 -ot -a ''; echo $?
+[ 0x1 -ot -a '' ]; echo $?
+test -o -h 1; echo $?
+[ -o -h 1 ]; echo $?
+test -G -f -i 2 1 -ef; echo $?
+[ -G -f -i 2 1 -ef ]; echo $?
+test -gt -ne '<' =; echo $?
+[ -gt -ne '<' = ]; echo $?
+test /nonexistent -t -ef -- -1 -ne; echo $?
+[ /nonexistent -t -ef -- -1 -ne ]; echo $?
+test / / -1 '('; echo $?
+[ / / -1 '(' ]; echo $?
+test -G -nt; echo $?
+[ -G -nt ]; echo $?
+test -i x -w -nt x; echo $?
+[ -i x -w -nt x ]; echo $?
+test '<' abc '!=' '!'; echo $?
+[ '<' abc '!=' '!' ]; echo $?
+test -z -p x -le -1 -le; echo $?
+[ -z -p x -le -1 -le ]; echo $?
+test -c '!='; echo $?
+[ -c '!=' ]; echo $?
+test -i /nonexistent -1 -L -h -x; echo $?
+[ -i /nonexistent -1 -L -h -x ]; echo $?
+test -nt -ge --; echo $?
+[ -nt -ge -- ]; echo $?
+test -ge ')' -a x; echo $?
+[ -ge ')' -a x ]; echo $?
+test 1 -1 -r; echo $?
+[ 1 -1 -r ]; echo $?
+test -k -f -1 -x /; echo $?
+[ -k -f -1 -x / ]; echo $?
+test -f -u '>'; echo $?
+[ -f -u '>' ]; echo $?
+test -i -n -w; echo $?
+[ -i -n -w ]; echo $?
+test -nt '('; echo $?
+[ -nt '(' ]; echo $?
+test -b y -le -ge -d; echo $?
+[ -b y -le -ge -d ]; echo $?
+test -L ''; echo $?
+[ -L '' ]; echo $?
+test -n = -g -ge; echo $?
+[ -n = -g -ge ]; echo $?
+test -t '<' / -k; echo $?
+[ -t '<' / -k ]; echo $?
+test / -f -ne -a -x; echo $?
+[ / -f -ne -a -x ]; echo $?
+test -le x '!=' -x -x; echo $?
+[ -le x '!=' -x -x ]; echo $?
+test -S '<'; echo $?
+[ -S '<' ]; echo $?
+test -s -n -i -eq '>' -1; echo $?
+[ -s -n -i -eq '>' -1 ]; echo $?
+test -t -e; echo $?
+[ -t -e ]; echo $?
+test -b -lt -a -ot; echo $?
+[ -b -lt -a -ot ]; echo $?
+test '(' -d 0x1; echo $?
+[ '(' -d 0x1 ]; echo $?
+test -h =; echo $?
+[ -h = ]; echo $?
+test -1 -ge -e -n -g; echo $?
+[ -1 -ge -e -n -g ]; echo $?
+test -1 '<'; echo $?
+[ -1 '<' ]; echo $?
+test ')' -nt; echo $?
+[ ')' -nt ]; echo $?
+test -g -nt -ef -eq; echo $?
+[ -g -nt -ef -eq ]; echo $?
+test -t / -a -ot -x; echo $?
+[ -t / -a -ot -x ]; echo $?
+test -S -eq ')' '(' -eq '<'; echo $?
+[ -S -eq ')' '(' -eq '<' ]; echo $?
+test -r -S -ge ')'; echo $?
+[ -r -S -ge ')' ]; echo $?
+test '>' -S -1; echo $?
+[ '>' -S -1 ]; echo $?
+test 2 -u; echo $?
+[ 2 -u ]; echo $?
+test -n -lt -gt 0x1 '!'; echo $?
+[ -n -lt -gt 0x1 '!' ]; echo $?
+test -n -c -s -b; echo $?
+[ -n -c -s -b ]; echo $?
+test -e -h -eq -gt; echo $?
+[ -e -h -eq -gt ]; echo $?
+test -k -x /nonexistent -b = -i; echo $?
+[ -k -x /nonexistent -b = -i ]; echo $?
+test / -eq -ef '' 0; echo $?
+[ / -eq -ef '' 0 ]; echo $?
+test -s -G -u -a 0 /etc/passwd; echo $?
+[ -s -G -u -a 0 /etc/passwd ]; echo $?
+test -s -w -ef -1 -p /etc/passwd; echo $?
+[ -s -w -ef -1 -p /etc/passwd ]; echo $?
+test -a /etc/passwd -O '<' -r '>'; echo $?
+[ -a /etc/passwd -O '<' -r '>' ]; echo $?
+test 1 -u; echo $?
+[ 1 -u ]; echo $?
+test -e -c -o abc -nt; echo $?
+[ -e -c -o abc -nt ]; echo $?
+test -t -O; echo $?
+[ -t -O ]; echo $?
+test -z -le '!=' -S x -p; echo $?
+[ -z -le '!=' -S x -p ]; echo $?
+test -L -b -s -u -ot -ne; echo $?
+[ -L -b -s -u -ot -ne ]; echo $?
+test -u -L; echo $?
+[ -u -L ]; echo $?
+test -n -x; echo $?
+[ -n -x ]; echo $?
+test 0x1 ''; echo $?
+[ 0x1 '' ]; echo $?
+test -a -lt -le 0x1; echo $?
+[ -a -lt -le 0x1 ]; echo $?
+test -c -b '!' -o; echo $?
+[ -c -b '!' -o ]; echo $?
+test '!=' -u -s; echo $?
+[ '!=' -u -s ]; echo $?
+test -f -d; echo $?
+[ -f -d ]; echo $?
+test -p '>' -r -L -G '<'; echo $?
+[ -p '>' -r -L -G '<' ]; echo $?
+test '<' -le -u; echo $?
+[ '<' -le -u ]; echo $?
+test x -O -gt; echo $?
+[ x -O -gt ]; echo $?
+test -O -- -w '>'; echo $?
+[ -O -- -w '>' ]; echo $?
+test -ge -1; echo $?
+[ -ge -1 ]; echo $?
+test / -r x -a -w; echo $?
+[ / -r x -a -w ]; echo $?
+test /nonexistent abc -ot '!' 1 '('; echo $?
+[ /nonexistent abc -ot '!' 1 '(' ]; echo $?
+test -i abc; echo $?
+[ -i abc ]; echo $?
+test -d /nonexistent -s -u; echo $?
+[ -d /nonexistent -s -u ]; echo $?
+test 0 /etc/passwd -b -x; echo $?
+[ 0 /etc/passwd -b -x ]; echo $?
+test -d -h -f -eq -i; echo $?
+[ -d -h -f -eq -i ]; echo $?
+test -L '>' '!=' = -d; echo $?
+[ -L '>' '!=' = -d ]; echo $?
+test '' -s -ot -c; echo $?
+[ '' -s -ot -c ]; echo $?
+test /nonexistent -a -w -b -ot -w; echo $?
+[ /nonexistent -a -w -b -ot -w ]; echo $?
+test -d =; echo $?
+[ -d = ]; echo $?
+test -c -ge -o -nt -e -z; echo $?
+[ -c -ge -o -nt -e -z ]; echo $?
+test -lt -ef -x -S abc; echo $?
+[ -lt -ef -x -S abc ]; echo $?
+test -x = -p 2; echo $?
+[ -x = -p 2 ]; echo $?
+test -e abc -x ')' -u -f; echo $?
+[ -e abc -x ')' -u -f ]; echo $?
+test -r -o; echo $?
+[ -r -o ]; echo $?
+test /etc/passwd -lt -g -G '!=' -r; echo $?
+[ /etc/passwd -lt -g -G '!=' -r ]; echo $?
+test abc -d '(' -e; echo $?
+[ abc -d '(' -e ]; echo $?
+test -x -L -z -x -ge; echo $?
+[ -x -L -z -x -ge ]; echo $?
+test y -t 2 -u =; echo $?
+[ y -t 2 -u = ]; echo $?
+test -w -x =; echo $?
+[ -w -x = ]; echo $?
+test -z /etc/passwd x -eq; echo $?
+[ -z /etc/passwd x -eq ]; echo $?
+test -ne -G -w -S; echo $?
+[ -ne -G -w -S ]; echo $?
+test -nt '>'; echo $?
+[ -nt '>' ]; echo $?
+test -o -h; echo $?
+[ -o -h ]; echo $?
+test -d -- '<'; echo $?
+[ -d -- '<' ]; echo $?
+test 2 -G -L -nt abc; echo $?
+[ 2 -G -L -nt abc ]; echo $?
+test -c /nonexistent -ge -ge -g -le; echo $?
+[ -c /nonexistent -ge -ge -g -le ]; echo $?
+test -1 / -ot -ot '' '!='; echo $?
+[ -1 / -ot -ot '' '!=' ]; echo $?
+test -e -eq -k -o -ne; echo $?
+[ -e -eq -k -o -ne ]; echo $?
+test -g '<' /etc/passwd abc -a -a; echo $?
+[ -g '<' /etc/passwd abc -a -a ]; echo $?
+test / / '' -p -t -c; echo $?
+[ / / '' -p -t -c ]; echo $?
+test -x -i -O -b -1; echo $?
+[ -x -i -O -b -1 ]; echo $?
+test -e -o y -g -x -x; echo $?
+[ -e -o y -g -x -x ]; echo $?
+test -h -a -1 -h abc; echo $?
+[ -h -a -1 -h abc ]; echo $?
+test -b -g 2 -f -p; echo $?
+[ -b -g 2 -f -p ]; echo $?
+test -x -d -O; echo $?
+[ -x -d -O ]; echo $?
+test -f --; echo $?
+[ -f -- ]; echo $?
+test -h '(' 0; echo $?
+[ -h '(' 0 ]; echo $?
+test -n -x -S ')' -p; echo $?
+[ -n -x -S ')' -p ]; echo $?
+test y x -p -d; echo $?
+[ y x -p -d ]; echo $?
+test -u -eq -r -z; echo $?
+[ -u -eq -r -z ]; echo $?
+test -ef '!'; echo $?
+[ -ef '!' ]; echo $?
+test /etc/passwd 0x1 -lt; echo $?
+[ /etc/passwd 0x1 -lt ]; echo $?
+test / -t -i 0; echo $?
+[ / -t -i 0 ]; echo $?
+test -le -G; echo $?
+[ -le -G ]; echo $?
+test -ef -ef; echo $?
+[ -ef -ef ]; echo $?
+test -ne 0; echo $?
+[ -ne 0 ]; echo $?
+test = y -u; echo $?
+[ = y -u ]; echo $?
+test -L -ge; echo $?
+[ -L -ge ]; echo $?
+test -h -x y; echo $?
+[ -h -x y ]; echo $?
+test -O '!=' 0; echo $?
+[ -O '!=' 0 ]; echo $?
+test abc /etc/passwd ')'; echo $?
+[ abc /etc/passwd ')' ]; echo $?
+test '<' -g =; echo $?
+[ '<' -g = ]; echo $?
+test '!=' y; echo $?
+[ '!=' y ]; echo $?
+test -nt -n; echo $?
+[ -nt -n ]; echo $?
+test -ne -O -O -lt; echo $?
+[ -ne -O -O -lt ]; echo $?
+test -1 -O -s -z -- -eq; echo $?
+[ -1 -O -s -z -- -eq ]; echo $?
+test -f -x -ef 1 -x -p; echo $?
+[ -f -x -ef 1 -x -p ]; echo $?
+test -x abc '<' -- -ne -p; echo $?
+[ -x abc '<' -- -ne -p ]; echo $?
+test -f -lt '('; echo $?
+[ -f -lt '(' ]; echo $?
+test '!=' -n -g -a ')'; echo $?
+[ '!=' -n -g -a ')' ]; echo $?
+test / -p -d; echo $?
+[ / -p -d ]; echo $?
+test 1 -t -x /etc/passwd -L; echo $?
+[ 1 -t -x /etc/passwd -L ]; echo $?
+test -nt '!' -h -ge 0x1 -b; echo $?
+[ -nt '!' -h -ge 0x1 -b ]; echo $?
+test -S -L -lt -O -ne -c; echo $?
+[ -S -L -lt -O -ne -c ]; echo $?
+test -gt 0x1 -1 '!='; echo $?
+[ -gt 0x1 -1 '!=' ]; echo $?
+test 2 -S -ge -c; echo $?
+[ 2 -S -ge -c ]; echo $?
+test -e -G '('; echo $?
+[ -e -G '(' ]; echo $?
+test / -i; echo $?
+[ / -i ]; echo $?
+test -ot -u '(' -t -p abc; echo $?
+[ -ot -u '(' -t -p abc ]; echo $?
+test '>' = 0 -1 y -n; echo $?
+[ '>' = 0 -1 y -n ]; echo $?
+test -i -L '' 1 -ot -c; echo $?
+[ -i -L '' 1 -ot -c ]; echo $?
+test -w -t -n; echo $?
+[ -w -t -n ]; echo $?
+test -s /nonexistent ')'; echo $?
+[ -s /nonexistent ')' ]; echo $?
+test -h -u '<' -L; echo $?
+[ -h -u '<' -L ]; echo $?
+test 1 -f; echo $?
+[ 1 -f ]; echo $?
+test -1 -f -g =; echo $?
+[ -1 -f -g = ]; echo $?
+test -p -o -i -w -o 0; echo $?
+[ -p -o -i -w -o 0 ]; echo $?
+test -u -u -r -e; echo $?
+[ -u -u -r -e ]; echo $?
+test ')' -b; echo $?
+[ ')' -b ]; echo $?
+test -z -h; echo $?
+[ -z -h ]; echo $?
+test -c 0x1 -ot '<' -1 2; echo $?
+[ -c 0x1 -ot '<' -1 2 ]; echo $?
+test '' 1; echo $?
+[ '' 1 ]; echo $?
+test -ef '' -t; echo $?
+[ -ef '' -t ]; echo $?
+test -g -w -1 '>' -O 2; echo $?
+[ -g -w -1 '>' -O 2 ]; echo $?
+test -1 -g -G -z /; echo $?
+[ -1 -g -G -z / ]; echo $?
+test -d /; echo $?
+[ -d / ]; echo $?
+test -gt; echo $?
+[ -gt ]; echo $?
+test -x /nonexistent /; echo $?
+[ -x /nonexistent / ]; echo $?
+test -x -le 0x1 y -t; echo $?
+[ -x -le 0x1 y -t ]; echo $?
+test -r 0; echo $?
+[ -r 0 ]; echo $?
+test x /nonexistent abc y; echo $?
+[ x /nonexistent abc y ]; echo $?
+test -e -G -i -n; echo $?
+[ -e -G -i -n ]; echo $?
+test -lt ')' -g -ot -d x; echo $?
+[ -lt ')' -g -ot -d x ]; echo $?
+test -d -b -w; echo $?
+[ -d -b -w ]; echo $?
+test 0x1 '<' -c -g -h; echo $?
+[ 0x1 '<' -c -g -h ]; echo $?
+test 1 -G 0x1 2 2 -t; echo $?
+[ 1 -G 0x1 2 2 -t ]; echo $?
+test -c -gt y 0 -k -a; echo $?
+[ -c -gt y 0 -k -a ]; echo $?
+test -f -L; echo $?
+[ -f -L ]; echo $?
+test -t x -w '>' -L; echo $?
+[ -t x -w '>' -L ]; echo $?
+test -lt -ge; echo $?
+[ -lt -ge ]; echo $?
+test -g -L -f; echo $?
+[ -g -L -f ]; echo $?
+test -b '<'; echo $?
+[ -b '<' ]; echo $?
+test -p -o -- -ef; echo $?
+[ -p -o -- -ef ]; echo $?
+test -a =; echo $?
+[ -a = ]; echo $?
+test 1 -p = '>'; echo $?
+[ 1 -p = '>' ]; echo $?
+test -- -eq x '(' -S; echo $?
+[ -- -eq x '(' -S ]; echo $?
+test -1 -le /nonexistent '!' x; echo $?
+[ -1 -le /nonexistent '!' x ]; echo $?
+test x -ot -nt; echo $?
+[ x -ot -nt ]; echo $?
+test -- -L 1; echo $?
+[ -- -L 1 ]; echo $?
+test -h -ne; echo $?
+[ -h -ne ]; echo $?
+test -- -d -nt -G; echo $?
+[ -- -d -nt -G ]; echo $?
+test -b -b 0x1 -z -w; echo $?
+[ -b -b 0x1 -z -w ]; echo $?
+test -b -o -g -z =; echo $?
+[ -b -o -g -z = ]; echo $?
+test -s -ne 2 -s -s =; echo $?
+[ -s -ne 2 -s -s = ]; echo $?
+test = 2 x; echo $?
+[ = 2 x ]; echo $?
+test 1 '!'; echo $?
+[ 1 '!' ]; echo $?
+test -1 1 -n; echo $?
+[ -1 1 -n ]; echo $?
+test -1 -O '!'; echo $?
+[ -1 -O '!' ]; echo $?
+test '' -ef -c -e -o /etc/passwd; echo $?
+[ '' -ef -c -e -o /etc/passwd ]; echo $?
+test -a -L = = -le ')'; echo $?
+[ -a -L = = -le ')' ]; echo $?
+test -d '!' -z -o -o -n; echo $?
+[ -d '!' -z -o -o -n ]; echo $?
+test /nonexistent -a -u '('; echo $?
+[ /nonexistent -a -u '(' ]; echo $?
+test -le 1 -k -u '(' 1; echo $?
+[ -le 1 -k -u '(' 1 ]; echo $?
+test abc -lt -f; echo $?
+[ abc -lt -f ]; echo $?
+test -d -i -r -G -u; echo $?
+[ -d -i -r -G -u ]; echo $?
+test -o -t -G 0; echo $?
+[ -o -t -G 0 ]; echo $?
+test /nonexistent -x '' '<' 2; echo $?
+[ /nonexistent -x '' '<' 2 ]; echo $?
+test -1 -p -ef; echo $?
+[ -1 -p -ef ]; echo $?
+test -nt -x; echo $?
+[ -nt -x ]; echo $?
+test -u = -f -k; echo $?
+[ -u = -f -k ]; echo $?
+test -nt 2; echo $?
+[ -nt 2 ]; echo $?
+test -ge -S -ef; echo $?
+[ -ge -S -ef ]; echo $?
+test 1 -d -o -c -b; echo $?
+[ 1 -d -o -c -b ]; echo $?
+test abc -a 2 -r -b; echo $?
+[ abc -a 2 -r -b ]; echo $?
+test '!' -c -x -le '>'; echo $?
+[ '!' -c -x -le '>' ]; echo $?
+test -w -o abc -ef -r -S; echo $?
+[ -w -o abc -ef -r -S ]; echo $?
+test -w -x /nonexistent ')'; echo $?
+[ -w -x /nonexistent ')' ]; echo $?
+test -g -g -g; echo $?
+[ -g -g -g ]; echo $?
+test -o -- -g '<' -ot; echo $?
+[ -o -- -g '<' -ot ]; echo $?
+test 2 x; echo $?
+[ 2 x ]; echo $?
+test -d -z '<' ''; echo $?
+[ -d -z '<' '' ]; echo $?
+test -z -a = -p -d '>'; echo $?
+[ -z -a = -p -d '>' ]; echo $?
+test /etc/passwd -- -i -ot; echo $?
+[ /etc/passwd -- -i -ot ]; echo $?
+test -w -i -le -h; echo $?
+[ -w -i -le -h ]; echo $?
+test -f -f -z; echo $?
+[ -f -f -z ]; echo $?
+test -S -x 0; echo $?
+[ -S -x 0 ]; echo $?
+test '(' 0 -c -b -ne -n; echo $?
+[ '(' 0 -c -b -ne -n ]; echo $?
+test -x abc 0x1; echo $?
+[ -x abc 0x1 ]; echo $?
+test -nt x -S -L -n; echo $?
+[ -nt x -S -L -n ]; echo $?
+test -gt '>' '' -b -g abc; echo $?
+[ -gt '>' '' -b -g abc ]; echo $?
+test -ge /etc/passwd -c; echo $?
+[ -ge /etc/passwd -c ]; echo $?
+test -d -h -nt; echo $?
+[ -d -h -nt ]; echo $?
+test -f 1 -s y; echo $?
+[ -f 1 -s y ]; echo $?
+test -o -eq -z -a; echo $?
+[ -o -eq -z -a ]; echo $?
+test /nonexistent -ne /nonexistent -r -ne --; echo $?
+[ /nonexistent -ne /nonexistent -r -ne -- ]; echo $?
+test -w -ge -p 2; echo $?
+[ -w -ge -p 2 ]; echo $?
+test = / -b /nonexistent / -r; echo $?
+[ = / -b /nonexistent / -r ]; echo $?
+test -gt -ge; echo $?
+[ -gt -ge ]; echo $?
+test '!=' -G -f -ot -i '('; echo $?
+[ '!=' -G -f -ot -i '(' ]; echo $?
+test '!=' ')' = -o '!='; echo $?
+[ '!=' ')' = -o '!=' ]; echo $?
+test abc = -o -x -p; echo $?
+[ abc = -o -x -p ]; echo $?
+test -ef -c -x -f '!' 0; echo $?
+[ -ef -c -x -f '!' 0 ]; echo $?
+test x -x; echo $?
+[ x -x ]; echo $?
+test -p -S y -o; echo $?
+[ -p -S y -o ]; echo $?
+test /etc/passwd -x; echo $?
+[ /etc/passwd -x ]; echo $?
+test '<' '' /nonexistent -p; echo $?
+[ '<' '' /nonexistent -p ]; echo $?
+test -w -S; echo $?
+[ -w -S ]; echo $?
+test / y ')' /etc/passwd '!='; echo $?
+[ / y ')' /etc/passwd '!=' ]; echo $?
+test -t -o y -f; echo $?
+[ -t -o y -f ]; echo $?
+test '>' -b -gt -gt -ot -p; echo $?
+[ '>' -b -gt -gt -ot -p ]; echo $?
+test -z -O 0x1; echo $?
+[ -z -O 0x1 ]; echo $?
+test -o -ge -nt -e; echo $?
+[ -o -ge -nt -e ]; echo $?
+test ')' -a; echo $?
+[ ')' -a ]; echo $?
+test -le -o 1; echo $?
+[ -le -o 1 ]; echo $?
+test -e '>' -1 1 -ot -w; echo $?
+[ -e '>' -1 1 -ot -w ]; echo $?
+test -G -k -k; echo $?
+[ -G -k -k ]; echo $?
+test -f '>' /nonexistent; echo $?
+[ -f '>' /nonexistent ]; echo $?
+test -lt '' -n /nonexistent ')' -s; echo $?
+[ -lt '' -n /nonexistent ')' -s ]; echo $?
+test -p -z -r '<' 0x1; echo $?
+[ -p -z -r '<' 0x1 ]; echo $?
+test /etc/passwd -f -s; echo $?
+[ /etc/passwd -f -s ]; echo $?
+test -k -c -s; echo $?
+[ -k -c -s ]; echo $?
+test -e -f -a -h; echo $?
+[ -e -f -a -h ]; echo $?
+test = -k -i -gt -z '<'; echo $?
+[ = -k -i -gt -z '<' ]; echo $?
+test -eq -n -h; echo $?
+[ -eq -n -h ]; echo $?
+test -n -ge '!' -t y; echo $?
+[ -n -ge '!' -t y ]; echo $?
+test -x '!' -r 0x1 -ef; echo $?
+[ -x '!' -r 0x1 -ef ]; echo $?
+test -s -r /nonexistent -h -b; echo $?
+[ -s -r /nonexistent -h -b ]; echo $?
+test 0 = -le abc -L; echo $?
+[ 0 = -le abc -L ]; echo $?
+test -S x; echo $?
+[ -S x ]; echo $?
+test -ot -h -O -s -o; echo $?
+[ -ot -h -O -s -o ]; echo $?
+test abc -h -h -ne -w ''; echo $?
+[ abc -h -h -ne -w '' ]; echo $?
+test '(' -ot '>' -a 2; echo $?
+[ '(' -ot '>' -a 2 ]; echo $?
+test -G '>' ')' -c -eq; echo $?
+[ -G '>' ')' -c -eq ]; echo $?
+test -f -x; echo $?
+[ -f -x ]; echo $?
+test '>' -n /nonexistent '<' -w; echo $?
+[ '>' -n /nonexistent '<' -w ]; echo $?
+test -h -ot; echo $?
+[ -h -ot ]; echo $?
+test -O -ge -f; echo $?
+[ -O -ge -f ]; echo $?
+test -G -ne -lt -ne / x; echo $?
+[ -G -ne -lt -ne / x ]; echo $?
+test ')' -O -le; echo $?
+[ ')' -O -le ]; echo $?
+test -o -S -x -w -ef; echo $?
+[ -o -S -x -w -ef ]; echo $?
+test ')' -e -o -h; echo $?
+[ ')' -e -o -h ]; echo $?
+test 1 -f -r =; echo $?
+[ 1 -f -r = ]; echo $?
+test /etc/passwd -lt -o /nonexistent ''; echo $?
+[ /etc/passwd -lt -o /nonexistent '' ]; echo $?
+test -e -gt 0 -a; echo $?
+[ -e -gt 0 -a ]; echo $?
+test y -p -d -o -lt -ef; echo $?
+[ y -p -d -o -lt -ef ]; echo $?
+test -eq abc -ef / -r; echo $?
+[ -eq abc -ef / -r ]; echo $?
+test -w -G = -lt; echo $?
+[ -w -G = -lt ]; echo $?
+test -h -s -ef -e; echo $?
+[ -h -s -ef -e ]; echo $?
+test -t -nt '<' -i; echo $?
+[ -t -nt '<' -i ]; echo $?
+test -a /; echo $?
+[ -a / ]; echo $?
+test -u -lt 2 -d ''; echo $?
+[ -u -lt 2 -d '' ]; echo $?
+test -w /etc/passwd -gt -S -S; echo $?
+[ -w /etc/passwd -gt -S -S ]; echo $?
+test /etc/passwd -nt 1 -x -a -z; echo $?
+[ /etc/passwd -nt 1 -x -a -z ]; echo $?
+test -c -gt -1 -nt -o; echo $?
+[ -c -gt -1 -nt -o ]; echo $?
+test /nonexistent -i; echo $?
+[ /nonexistent -i ]; echo $?
+test -nt -s -d -r; echo $?
+[ -nt -s -d -r ]; echo $?
+test /etc/passwd /nonexistent -a 1 1 -S; echo $?
+[ /etc/passwd /nonexistent -a 1 1 -S ]; echo $?
+test -ge -i; echo $?
+[ -ge -i ]; echo $?
+test /nonexistent -a 2 -r -x; echo $?
+[ /nonexistent -a 2 -r -x ]; echo $?
+test -gt -gt; echo $?
+[ -gt -gt ]; echo $?
+test -r x -s /etc/passwd '<'; echo $?
+[ -r x -s /etc/passwd '<' ]; echo $?
+test / '>' -u --; echo $?
+[ / '>' -u -- ]; echo $?
+test / -le -w; echo $?
+[ / -le -w ]; echo $?
+test -ge -b -G abc -g; echo $?
+[ -ge -b -G abc -g ]; echo $?
+test -1 ''; echo $?
+[ -1 '' ]; echo $?
+test -w -f -le; echo $?
+[ -w -f -le ]; echo $?
+test -h -ef; echo $?
+[ -h -ef ]; echo $?
+test -eq '(' -k; echo $?
+[ -eq '(' -k ]; echo $?
+test ')' -- 0 -L; echo $?
+[ ')' -- 0 -L ]; echo $?
+test -w '<' -n = -1; echo $?
+[ -w '<' -n = -1 ]; echo $?
+test -gt -le --; echo $?
+[ -gt -le -- ]; echo $?
+test -O y -x -s; echo $?
+[ -O y -x -s ]; echo $?
+test 0 -b; echo $?
+[ 0 -b ]; echo $?
+test -r '(' -O 0x1; echo $?
+[ -r '(' -O 0x1 ]; echo $?
+test '(' -s -L -r '<'; echo $?
+[ '(' -s -L -r '<' ]; echo $?
+test -w -f -u; echo $?
+[ -w -f -u ]; echo $?
+test '!' 0 abc -S; echo $?
+[ '!' 0 abc -S ]; echo $?
+test -gt '' -o; echo $?
+[ -gt '' -o ]; echo $?
+test -s -r; echo $?
+[ -s -r ]; echo $?
+test -k '(' -ge -- 1 -b; echo $?
+[ -k '(' -ge -- 1 -b ]; echo $?
+test 0x1 -L; echo $?
+[ 0x1 -L ]; echo $?
+test -t -nt -le -r -f -ot; echo $?
+[ -t -nt -le -r -f -ot ]; echo $?
+test '!=' /etc/passwd -ne -nt -o; echo $?
+[ '!=' /etc/passwd -ne -nt -o ]; echo $?
+test /etc/passwd -a -ot; echo $?
+[ /etc/passwd -a -ot ]; echo $?
+test 0 -p --; echo $?
+[ 0 -p -- ]; echo $?
+test -p -d -O -- -d -o; echo $?
+[ -p -d -O -- -d -o ]; echo $?
+test -x '!=' abc; echo $?
+[ -x '!=' abc ]; echo $?
+test 1 -k '(' -lt -S; echo $?
+[ 1 -k '(' -lt -S ]; echo $?
+test '>' -nt; echo $?
+[ '>' -nt ]; echo $?
+test -O -O -z abc -p '>'; echo $?
+[ -O -O -z abc -p '>' ]; echo $?
+test -ge -ot -G -a -gt; echo $?
+[ -ge -ot -G -a -gt ]; echo $?
+test -O 2 -1 -s; echo $?
+[ -O 2 -1 -s ]; echo $?
+test -c /etc/passwd -ef /etc/passwd -z -b; echo $?
+[ -c /etc/passwd -ef /etc/passwd -z -b ]; echo $?
+test ')' -t -b; echo $?
+[ ')' -t -b ]; echo $?
+test -g -f -ne -ne -p 2; echo $?
+[ -g -f -ne -ne -p 2 ]; echo $?
+test -u /nonexistent -eq -eq '>' abc; echo $?
+[ -u /nonexistent -eq -eq '>' abc ]; echo $?
+test -1 x /nonexistent; echo $?
+[ -1 x /nonexistent ]; echo $?
+test '!' -le; echo $?
+[ '!' -le ]; echo $?
+test 0 -t -s 1 y; echo $?
+[ 0 -t -s 1 y ]; echo $?
+test 0 -L; echo $?
+[ 0 -L ]; echo $?
+test -ne 0x1; echo $?
+[ -ne 0x1 ]; echo $?
+test -nt -h y; echo $?
+[ -nt -h y ]; echo $?
+test '(' -g -ne -ge 0; echo $?
+[ '(' -g -ne -ge 0 ]; echo $?
+test -gt /etc/passwd; echo $?
+[ -gt /etc/passwd ]; echo $?
+test = -ot '!=' 0; echo $?
+[ = -ot '!=' 0 ]; echo $?
+test -gt -ge abc -w -s; echo $?
+[ -gt -ge abc -w -s ]; echo $?
+test -e -e -n 2 -t /nonexistent; echo $?
+[ -e -e -n 2 -t /nonexistent ]; echo $?
+test -f -h '>'; echo $?
+[ -f -h '>' ]; echo $?
+test -e -x; echo $?
+[ -e -x ]; echo $?
+test -1 -e '<' -p; echo $?
+[ -1 -e '<' -p ]; echo $?
+test -p -1; echo $?
+[ -p -1 ]; echo $?
+test abc ')' -i; echo $?
+[ abc ')' -i ]; echo $?
+test -ef 2; echo $?
+[ -ef 2 ]; echo $?
+test -t '>' -le -a -ge; echo $?
+[ -t '>' -le -a -ge ]; echo $?
+test y -d /nonexistent 0x1 -le; echo $?
+[ y -d /nonexistent 0x1 -le ]; echo $?
+test '!' -ef -ot -f; echo $?
+[ '!' -ef -ot -f ]; echo $?
+test abc -k = -c; echo $?
+[ abc -k = -c ]; echo $?
+test -o -S -r; echo $?
+[ -o -S -r ]; echo $?
+test -d -t -o; echo $?
+[ -d -t -o ]; echo $?
+test -ef 0x1 -S -L; echo $?
+[ -ef 0x1 -S -L ]; echo $?
+test '' -S -r -lt -g; echo $?
+[ '' -S -r -lt -g ]; echo $?
+test -i -b -a -e; echo $?
+[ -i -b -a -e ]; echo $?
+test -h -O -p -n -L; echo $?
+[ -h -O -p -n -L ]; echo $?
+test -c '>'; echo $?
+[ -c '>' ]; echo $?
+test -S -w = -- -h; echo $?
+[ -S -w = -- -h ]; echo $?
+test -L -i -ot abc -f -z; echo $?
+[ -L -i -ot abc -f -z ]; echo $?
+test -nt -h; echo $?
+[ -nt -h ]; echo $?
+test -f '!'; echo $?
+[ -f '!' ]; echo $?
+test -ot -w '' -eq -lt; echo $?
+[ -ot -w '' -eq -lt ]; echo $?
+test -f -ne 0 1 -G -f; echo $?
+[ -f -ne 0 1 -G -f ]; echo $?
+test '<' -d '<' ')' -L abc; echo $?
+[ '<' -d '<' ')' -L abc ]; echo $?
+test '>' -n -nt -ge '('; echo $?
+[ '>' -n -nt -ge '(' ]; echo $?
+test -- -x y -r -x; echo $?
+[ -- -x y -r -x ]; echo $?
+test -1 '<' -x -k; echo $?
+[ -1 '<' -x -k ]; echo $?
+test ')' '>'; echo $?
+[ ')' '>' ]; echo $?
+test -lt -s -nt -gt -e 1; echo $?
+[ -lt -s -nt -gt -e 1 ]; echo $?
+test -r -lt -n -nt -t -1; echo $?
+[ -r -lt -n -nt -t -1 ]; echo $?
+test -S -g; echo $?
+[ -S -g ]; echo $?
+test -r -G -ge -S; echo $?
+[ -r -G -ge -S ]; echo $?
+test '!' -- -k '>' -h; echo $?
+[ '!' -- -k '>' -h ]; echo $?
+test -S '!' 0x1; echo $?
+[ -S '!' 0x1 ]; echo $?
+test -t -G -nt -e -p '<'; echo $?
+[ -t -G -nt -e -p '<' ]; echo $?
+test '>' '>'; echo $?
+[ '>' '>' ]; echo $?
+test -z '' / -u; echo $?
+[ -z '' / -u ]; echo $?
+test -ef 2 -ne -g; echo $?
+[ -ef 2 -ne -g ]; echo $?
+test -o -n abc -z /nonexistent; echo $?
+[ -o -n abc -z /nonexistent ]; echo $?
+test 0 '<' -a; echo $?
+[ 0 '<' -a ]; echo $?
+test -z -c /nonexistent -gt; echo $?
+[ -z -c /nonexistent -gt ]; echo $?
+test -s y -u abc; echo $?
+[ -s y -u abc ]; echo $?
+test -L '' abc '' -L -r; echo $?
+[ -L '' abc '' -L -r ]; echo $?
+test -S -gt; echo $?
+[ -S -gt ]; echo $?
+test -t abc '>' -d -w -h; echo $?
+[ -t abc '>' -d -w -h ]; echo $?
+test -nt -x -r -p -s x; echo $?
+[ -nt -x -r -p -s x ]; echo $?
+test -w ')' '!' -n -i; echo $?
+[ -w ')' '!' -n -i ]; echo $?
+test -le '(' -c -b 0; echo $?
+[ -le '(' -c -b 0 ]; echo $?
+test x -k; echo $?
+[ x -k ]; echo $?
+test -w -h -p -n; echo $?
+[ -w -h -p -n ]; echo $?
+test ')' -h 1 --; echo $?
+[ ')' -h 1 -- ]; echo $?
+test / -a -u 0x1 '!' /nonexistent; echo $?
+[ / -a -u 0x1 '!' /nonexistent ]; echo $?
+test -u -x; echo $?
+[ -u -x ]; echo $?
+test = -S -r; echo $?
+[ = -S -r ]; echo $?
+test -ge '' '>' -O -nt; echo $?
+[ -ge '' '>' -O -nt ]; echo $?
+test -gt -c -d -i -nt; echo $?
+[ -gt -c -d -i -nt ]; echo $?
+test -le 0x1 -r -L; echo $?
+[ -le 0x1 -r -L ]; echo $?
+test '' -d 1 /; echo $?
+[ '' -d 1 / ]; echo $?
+test -t -p; echo $?
+[ -t -p ]; echo $?
+test -i '' 2 -i; echo $?
+[ -i '' 2 -i ]; echo $?
+test -le -k; echo $?
+[ -le -k ]; echo $?
+test -k /nonexistent -g -O -e; echo $?
+[ -k /nonexistent -g -O -e ]; echo $?
+test abc abc 0 -r -p -eq; echo $?
+[ abc abc 0 -r -p -eq ]; echo $?
+test 1 -t -S '>'; echo $?
+[ 1 -t -S '>' ]; echo $?
+test -lt -w 0 -ot /nonexistent -gt; echo $?
+[ -lt -w 0 -ot /nonexistent -gt ]; echo $?
+test /nonexistent -ot; echo $?
+[ /nonexistent -ot ]; echo $?
+test -G / -h -t; echo $?
+[ -G / -h -t ]; echo $?
+test -z -d abc -a x -S; echo $?
+[ -z -d abc -a x -S ]; echo $?
+test 0 -f -- -r -g -O; echo $?
+[ 0 -f -- -r -g -O ]; echo $?
+test -ot '!' -o -c -nt '('; echo $?
+[ -ot '!' -o -c -nt '(' ]; echo $?
+test -ge abc -u; echo $?
+[ -ge abc -u ]; echo $?
+test -a -z '<' -ne -z; echo $?
+[ -a -z '<' -ne -z ]; echo $?
+test '(' -i /nonexistent -i; echo $?
+[ '(' -i /nonexistent -i ]; echo $?
+test -s 0x1; echo $?
+[ -s 0x1 ]; echo $?
+test -f -k -ne -le ')' 0x1; echo $?
+[ -f -k -ne -le ')' 0x1 ]; echo $?
+test '!=' = -f -nt; echo $?
+[ '!=' = -f -nt ]; echo $?
+test -e '!' -g -gt; echo $?
+[ -e '!' -g -gt ]; echo $?
+test -t -G '>' -eq -le '!'; echo $?
+[ -t -G '>' -eq -le '!' ]; echo $?
+test -o -gt /nonexistent -O; echo $?
+[ -o -gt /nonexistent -O ]; echo $?
+test -a '('; echo $?
+[ -a '(' ]; echo $?
+test -d -n -x -e; echo $?
+[ -d -n -x -e ]; echo $?
+test = 2; echo $?
+[ = 2 ]; echo $?
+test -1 -t ')' '<' -p; echo $?
+[ -1 -t ')' '<' -p ]; echo $?
+test y -u; echo $?
+[ y -u ]; echo $?
+test y /nonexistent -G -ne x; echo $?
+[ y /nonexistent -G -ne x ]; echo $?
+test x abc = -e; echo $?
+[ x abc = -e ]; echo $?
+test y -h -ne 1 -1; echo $?
+[ y -h -ne 1 -1 ]; echo $?
+test -w '>' -z -S; echo $?
+[ -w '>' -z -S ]; echo $?
+test -k -p -1; echo $?
+[ -k -p -1 ]; echo $?
+test -- -k; echo $?
+[ -- -k ]; echo $?
+test abc -1; echo $?
+[ abc -1 ]; echo $?
+test -L -gt '<' '>'; echo $?
+[ -L -gt '<' '>' ]; echo $?
+test -c -c -ne -1 -nt /etc/passwd; echo $?
+[ -c -c -ne -1 -nt /etc/passwd ]; echo $?
+test -z -d; echo $?
+[ -z -d ]; echo $?
+test -lt -p -S; echo $?
+[ -lt -p -S ]; echo $?
+test -r -eq '' -h -p; echo $?
+[ -r -eq '' -h -p ]; echo $?
+test '<' -r 0x1 -h -lt '<'; echo $?
+[ '<' -r 0x1 -h -lt '<' ]; echo $?
+test -S -e ')' -u; echo $?
+[ -S -e ')' -u ]; echo $?
+test -1 -c; echo $?
+[ -1 -c ]; echo $?
+test /etc/passwd '!=' -L = -h '>'; echo $?
+[ /etc/passwd '!=' -L = -h '>' ]; echo $?
+test -le '>' 2 -e '!' -gt; echo $?
+[ -le '>' 2 -e '!' -gt ]; echo $?
+test -ef '<'; echo $?
+[ -ef '<' ]; echo $?
+test -ge x -g -1 -a -p; echo $?
+[ -ge x -g -1 -a -p ]; echo $?
+test -s '<' 1; echo $?
+[ -s '<' 1 ]; echo $?
+test 0 '<' -z /etc/passwd /nonexistent; echo $?
+[ 0 '<' -z /etc/passwd /nonexistent ]; echo $?
+test '(' '<' -o; echo $?
+[ '(' '<' -o ]; echo $?
+test -f /etc/passwd -o -x -k; echo $?
+[ -f /etc/passwd -o -x -k ]; echo $?
+test -S -d -x; echo $?
+[ -S -d -x ]; echo $?
+test -p -i -u; echo $?
+[ -p -i -u ]; echo $?
+test -t /nonexistent -x -f -eq -t; echo $?
+[ -t /nonexistent -x -f -eq -t ]; echo $?
+test '!' '>' -O '<' = 0; echo $?
+[ '!' '>' -O '<' = 0 ]; echo $?
+test '<' '<' '<' abc; echo $?
+[ '<' '<' '<' abc ]; echo $?
+test -u -ne -L -b 1 -d; echo $?
+[ -u -ne -L -b 1 -d ]; echo $?
+test -d -gt; echo $?
+[ -d -gt ]; echo $?
+test 0x1 -f; echo $?
+[ 0x1 -f ]; echo $?
+test -ef '(' -r; echo $?
+[ -ef '(' -r ]; echo $?
+test -t 2; echo $?
+[ -t 2 ]; echo $?
+test -ge -gt -ef -n /etc/passwd '<'; echo $?
+[ -ge -gt -ef -n /etc/passwd '<' ]; echo $?
+test y -b -p -ef 1; echo $?
+[ y -b -p -ef 1 ]; echo $?
+test -h -r; echo $?
+[ -h -r ]; echo $?
+test -le 0x1 -d -f -z; echo $?
+[ -le 0x1 -d -f -z ]; echo $?
+test '!=' -- -u -gt -L -z; echo $?
+[ '!=' -- -u -gt -L -z ]; echo $?
+test -1 0; echo $?
+[ -1 0 ]; echo $?
+test -g -u '!' -gt -e -i; echo $?
+[ -g -u '!' -gt -e -i ]; echo $?
+test -c / -G; echo $?
+[ -c / -G ]; echo $?
+test -- 2; echo $?
+[ -- 2 ]; echo $?
+test -d -ne -L 1 -g; echo $?
+[ -d -ne -L 1 -g ]; echo $?
+test -x -a -u; echo $?
+[ -x -a -u ]; echo $?
+test 0x1 -ef -d; echo $?
+[ 0x1 -ef -d ]; echo $?
+test -le -k -i -k -lt; echo $?
+[ -le -k -i -k -lt ]; echo $?
+test -c -r; echo $?
+[ -c -r ]; echo $?
+test 2 -z; echo $?
+[ 2 -z ]; echo $?
+test '!=' '!='; echo $?
+[ '!=' '!=' ]; echo $?
+test x -r -w -O; echo $?
+[ x -r -w -O ]; echo $?
+test -ef y -nt -a -i -L; echo $?
+[ -ef y -nt -a -i -L ]; echo $?
+test -f -ot; echo $?
+[ -f -ot ]; echo $?
+test -p -u '!' 0; echo $?
+[ -p -u '!' 0 ]; echo $?
+test -ef -p '>' '!' -ot; echo $?
+[ -ef -p '>' '!' -ot ]; echo $?
+test -gt ')' -w -p -1 -ot; echo $?
+[ -gt ')' -w -p -1 -ot ]; echo $?
+test -n -a 1; echo $?
+[ -n -a 1 ]; echo $?
+test -f -g; echo $?
+[ -f -g ]; echo $?
+test = -s 1 -- -n -eq; echo $?
+[ = -s 1 -- -n -eq ]; echo $?
+test -r x -ef -c -e; echo $?
+[ -r x -ef -c -e ]; echo $?
+test -G -ne -s '('; echo $?
+[ -G -ne -s '(' ]; echo $?
+test -w -G -b / -ot; echo $?
+[ -w -G -b / -ot ]; echo $?
+test 1 -- -a '>' -b; echo $?
+[ 1 -- -a '>' -b ]; echo $?
+test -eq '!=' -n; echo $?
+[ -eq '!=' -n ]; echo $?
+test '' '!' -1 -S -eq; echo $?
+[ '' '!' -1 -S -eq ]; echo $?
+test -h -ef -ef -o; echo $?
+[ -h -ef -ef -o ]; echo $?
+test -e -nt '(' -f '!'; echo $?
+[ -e -nt '(' -f '!' ]; echo $?
+test -lt -c -s -p; echo $?
+[ -lt -c -s -p ]; echo $?
+test -ne '!='; echo $?
+[ -ne '!=' ]; echo $?
+test -x '(' -z -t; echo $?
+[ -x '(' -z -t ]; echo $?
+test / '!=' -f; echo $?
+[ / '!=' -f ]; echo $?
+test = '(' 1 -h -u -gt; echo $?
+[ = '(' 1 -h -u -gt ]; echo $?
+test -h -G -x -ot /; echo $?
+[ -h -G -x -ot / ]; echo $?
+test -le ')' -gt -z 2 -f; echo $?
+[ -le ')' -gt -z 2 -f ]; echo $?
+test -L -1 ''; echo $?
+[ -L -1 '' ]; echo $?
+test '!=' -nt; echo $?
+[ '!=' -nt ]; echo $?
+test 2 -s -- 2; echo $?
+[ 2 -s -- 2 ]; echo $?
+test -x / -ef = -x; echo $?
+[ -x / -ef = -x ]; echo $?
+test -lt ')' x ')' -i; echo $?
+[ -lt ')' x ')' -i ]; echo $?
+test /nonexistent '>' 0x1 /etc/passwd -u; echo $?
+[ /nonexistent '>' 0x1 /etc/passwd -u ]; echo $?
+test -c -u -ef -t -d abc; echo $?
+[ -c -u -ef -t -d abc ]; echo $?
+test -g -ot -gt /etc/passwd '!'; echo $?
+[ -g -ot -gt /etc/passwd '!' ]; echo $?
+test ')' '>' -w 0x1; echo $?
+[ ')' '>' -w 0x1 ]; echo $?
+test -b -ot; echo $?
+[ -b -ot ]; echo $?
+test abc -- --; echo $?
+[ abc -- -- ]; echo $?
+test -o -t -ne -o -eq; echo $?
+[ -o -t -ne -o -eq ]; echo $?
+test -1 -o -h -a; echo $?
+[ -1 -o -h -a ]; echo $?
+test -x -ge -G /etc/passwd; echo $?
+[ -x -ge -G /etc/passwd ]; echo $?
+test 0 -O -S '!='; echo $?
+[ 0 -O -S '!=' ]; echo $?
+test -L -lt ')'; echo $?
+[ -L -lt ')' ]; echo $?
+test -d /nonexistent '(' -p -w; echo $?
+[ -d /nonexistent '(' -p -w ]; echo $?
+test '(' 0x1 -u; echo $?
+[ '(' 0x1 -u ]; echo $?
+test -ne 0 / =; echo $?
+[ -ne 0 / = ]; echo $?
+test 1 -k / abc; echo $?
+[ 1 -k / abc ]; echo $?
+test -n -w 2 -- '!=' -n; echo $?
+[ -n -w 2 -- '!=' -n ]; echo $?
+test y '!' -d -g ''; echo $?
+[ y '!' -d -g '' ]; echo $?
+test -eq -a -nt; echo $?
+[ -eq -a -nt ]; echo $?
+test -ef -o -n /nonexistent; echo $?
+[ -ef -o -n /nonexistent ]; echo $?
+test -ot 0 /nonexistent; echo $?
+[ -ot 0 /nonexistent ]; echo $?
+test -1 -ot -i -s -ef; echo $?
+[ -1 -ot -i -s -ef ]; echo $?
+test '(' -gt -h -gt '!='; echo $?
+[ '(' -gt -h -gt '!=' ]; echo $?
+test -nt -ne 0x1; echo $?
+[ -nt -ne 0x1 ]; echo $?
+test '<' -L; echo $?
+[ '<' -L ]; echo $?
+test -1 ')' x -i; echo $?
+[ -1 ')' x -i ]; echo $?
+test -1 -h -d -k 0 -k; echo $?
+[ -1 -h -d -k 0 -k ]; echo $?
+test -b -S -g -ne; echo $?
+[ -b -S -g -ne ]; echo $?
+test -x -s -d -b ''; echo $?
+[ -x -s -d -b '' ]; echo $?
+test '<' -S ')' x -p; echo $?
+[ '<' -S ')' x -p ]; echo $?
+test 0x1 -1; echo $?
+[ 0x1 -1 ]; echo $?
+test -G /nonexistent -le; echo $?
+[ -G /nonexistent -le ]; echo $?
+test 0x1 1; echo $?
+[ 0x1 1 ]; echo $?
+test -d abc; echo $?
+[ -d abc ]; echo $?
+test / /nonexistent -s -g; echo $?
+[ / /nonexistent -s -g ]; echo $?
+test abc / 2 -x; echo $?
+[ abc / 2 -x ]; echo $?
+test /etc/passwd -u 2 -a; echo $?
+[ /etc/passwd -u 2 -a ]; echo $?
+test 0x1 =; echo $?
+[ 0x1 = ]; echo $?
+test -lt -ot; echo $?
+[ -lt -ot ]; echo $?
+test 0 -t '' -k 1 '<'; echo $?
+[ 0 -t '' -k 1 '<' ]; echo $?
+test -u -ne 0 -z -nt -r; echo $?
+[ -u -ne 0 -z -nt -r ]; echo $?
+test -nt '!='; echo $?
+[ -nt '!=' ]; echo $?
+test '>' -h y 0; echo $?
+[ '>' -h y 0 ]; echo $?
+test -O -u -p; echo $?
+[ -O -u -p ]; echo $?
+test -S -1 /etc/passwd -w -b abc; echo $?
+[ -S -1 /etc/passwd -w -b abc ]; echo $?
+test -O -G -z -b -f; echo $?
+[ -O -G -z -b -f ]; echo $?
+test -d / -z; echo $?
+[ -d / -z ]; echo $?
+test -r /etc/passwd -eq -G; echo $?
+[ -r /etc/passwd -eq -G ]; echo $?
+test -h -u '<' -g -gt -lt; echo $?
+[ -h -u '<' -g -gt -lt ]; echo $?
+test -s -o; echo $?
+[ -s -o ]; echo $?
+test '' -n -ge -b 2 -c; echo $?
+[ '' -n -ge -b 2 -c ]; echo $?
+test -x '!'; echo $?
+[ -x '!' ]; echo $?
+test '<' -x '<' '!' -w; echo $?
+[ '<' -x '<' '!' -w ]; echo $?
+test -ge -ef -ot -r; echo $?
+[ -ge -ef -ot -r ]; echo $?
+test -ef '' -1; echo $?
+[ -ef '' -1 ]; echo $?
+test x abc -o; echo $?
+[ x abc -o ]; echo $?
+test -G -w; echo $?
+[ -G -w ]; echo $?
+test = -a; echo $?
+[ = -a ]; echo $?
+test -w -x -ge -w -k; echo $?
+[ -w -x -ge -w -k ]; echo $?
+test -i -gt -ef -L -L -e; echo $?
+[ -i -gt -ef -L -L -e ]; echo $?
+test -r '!' -e abc; echo $?
+[ -r '!' -e abc ]; echo $?
+test = -g -e -e ''; echo $?
+[ = -g -e -e '' ]; echo $?
+test -d = -ge -t =; echo $?
+[ -d = -ge -t = ]; echo $?
+test -r -t -a -G -i; echo $?
+[ -r -t -a -G -i ]; echo $?
+test -ne -p -n; echo $?
+[ -ne -p -n ]; echo $?
+test -eq '(' -w; echo $?
+[ -eq '(' -w ]; echo $?
+test '>' '!' x -z -w -d; echo $?
+[ '>' '!' x -z -w -d ]; echo $?
+test -ne '!' -S '>' -w; echo $?
+[ -ne '!' -S '>' -w ]; echo $?
+test -L -d -nt; echo $?
+[ -L -d -nt ]; echo $?
+test 2 = '(' -h -o -d; echo $?
+[ 2 = '(' -h -o -d ]; echo $?
+test -c /etc/passwd -le -G -h; echo $?
+[ -c /etc/passwd -le -G -h ]; echo $?
+test -p -s; echo $?
+[ -p -s ]; echo $?
+test -lt '('; echo $?
+[ -lt '(' ]; echo $?
+test -gt -c /etc/passwd -g 1; echo $?
+[ -gt -c /etc/passwd -g 1 ]; echo $?
+test 0x1 -c -w '(' '('; echo $?
+[ 0x1 -c -w '(' '(' ]; echo $?
+test -nt /etc/passwd '<' -S /etc/passwd; echo $?
+[ -nt /etc/passwd '<' -S /etc/passwd ]; echo $?
+test '!' '!' 0x1 -nt 1 -p; echo $?
+[ '!' '!' 0x1 -nt 1 -p ]; echo $?
+test -lt -lt -le '>'; echo $?
+[ -lt -lt -le '>' ]; echo $?
+test -u -f -k -x -b -x; echo $?
+[ -u -f -k -x -b -x ]; echo $?
+test -o 1 -b -O -c; echo $?
+[ -o 1 -b -O -c ]; echo $?
+test -gt -g -ef; echo $?
+[ -gt -g -ef ]; echo $?
+test -n -O 0 -eq -ne y; echo $?
+[ -n -O 0 -eq -ne y ]; echo $?
+test -u -i -ge -e -e -eq; echo $?
+[ -u -i -ge -e -e -eq ]; echo $?
+test /nonexistent -g /nonexistent; echo $?
+[ /nonexistent -g /nonexistent ]; echo $?
+test -s -a = -ef; echo $?
+[ -s -a = -ef ]; echo $?
+test -b -ge -x -f '!='; echo $?
+[ -b -ge -x -f '!=' ]; echo $?
+test -t '!' -p -d -e -le; echo $?
+[ -t '!' -p -d -e -le ]; echo $?
+test -c -e; echo $?
+[ -c -e ]; echo $?
+test x '('; echo $?
+[ x '(' ]; echo $?
+test -le -r; echo $?
+[ -le -r ]; echo $?
+test -x -nt ')' -d; echo $?
+[ -x -nt ')' -d ]; echo $?
+test -- -a; echo $?
+[ -- -a ]; echo $?
+test / -z -O abc -ef -gt; echo $?
+[ / -z -O abc -ef -gt ]; echo $?
+test -d -s -i -ef -u ')'; echo $?
+[ -d -s -i -ef -u ')' ]; echo $?
+test -p -nt -o 0 -f; echo $?
+[ -p -nt -o 0 -f ]; echo $?
+test -n -ne; echo $?
+[ -n -ne ]; echo $?
+test 0 '!=' y -w; echo $?
+[ 0 '!=' y -w ]; echo $?
+test 0 -t -g -i -t; echo $?
+[ 0 -t -g -i -t ]; echo $?
+test '>' -o; echo $?
+[ '>' -o ]; echo $?
+test -O -w; echo $?
+[ -O -w ]; echo $?
+test '!' /nonexistent -r; echo $?
+[ '!' /nonexistent -r ]; echo $?
+test -r '' y -x; echo $?
+[ -r '' y -x ]; echo $?
+test 2 '!' -c -r; echo $?
+[ 2 '!' -c -r ]; echo $?
+test -O -t -c -r -b; echo $?
+[ -O -t -c -r -b ]; echo $?
+test -ot -O -eq; echo $?
+[ -ot -O -eq ]; echo $?
+test 1 2 0x1; echo $?
+[ 1 2 0x1 ]; echo $?
+test -G /etc/passwd -O; echo $?
+[ -G /etc/passwd -O ]; echo $?
+test -x -t -gt -G -1; echo $?
+[ -x -t -gt -G -1 ]; echo $?
+test -le -O -t x -s -p; echo $?
+[ -le -O -t x -s -p ]; echo $?
+test -k -gt; echo $?
+[ -k -gt ]; echo $?
+test -z -ef -n; echo $?
+[ -z -ef -n ]; echo $?
+test '' -h -ot; echo $?
+[ '' -h -ot ]; echo $?
+test -z -ge -w -O 0x1; echo $?
+[ -z -ge -w -O 0x1 ]; echo $?
+test -G -b -i '!' -O; echo $?
+[ -G -b -i '!' -O ]; echo $?
+test /nonexistent -z; echo $?
+[ /nonexistent -z ]; echo $?
+test /etc/passwd -d; echo $?
+[ /etc/passwd -d ]; echo $?
+test -c -o /etc/passwd -o; echo $?
+[ -c -o /etc/passwd -o ]; echo $?
+test -gt = -k abc -1 -ef; echo $?
+[ -gt = -k abc -1 -ef ]; echo $?
+test -S -e -d 1 -x; echo $?
+[ -S -e -d 1 -x ]; echo $?
+test -nt /nonexistent -i; echo $?
+[ -nt /nonexistent -i ]; echo $?
+test 2 -1 -eq -z /nonexistent; echo $?
+[ 2 -1 -eq -z /nonexistent ]; echo $?
+test /nonexistent '<' -lt; echo $?
+[ /nonexistent '<' -lt ]; echo $?
+test -lt /nonexistent -w 2 '!' -O; echo $?
+[ -lt /nonexistent -w 2 '!' -O ]; echo $?
+test 2 -k -k ')' y =; echo $?
+[ 2 -k -k ')' y = ]; echo $?
+test '' '<' 0x1 x -S; echo $?
+[ '' '<' 0x1 x -S ]; echo $?
+test -ne -L -- -1; echo $?
+[ -ne -L -- -1 ]; echo $?
+test -t -s; echo $?
+[ -t -s ]; echo $?
+test -ef -i -s /etc/passwd -n -z; echo $?
+[ -ef -i -s /etc/passwd -n -z ]; echo $?
+test '!=' '(' 2; echo $?
+[ '!=' '(' 2 ]; echo $?
+test -o ')'; echo $?
+[ -o ')' ]; echo $?
+test 0 1 -L -x; echo $?
+[ 0 1 -L -x ]; echo $?
+test 0 -i / -d; echo $?
+[ 0 -i / -d ]; echo $?
+test -c -d -nt -L; echo $?
+[ -c -d -nt -L ]; echo $?
+test -a -e; echo $?
+[ -a -e ]; echo $?
+test -n -u 1 -a '(' -c; echo $?
+[ -n -u 1 -a '(' -c ]; echo $?
+test 2 '!'; echo $?
+[ 2 '!' ]; echo $?
+test -h -lt -eq; echo $?
+[ -h -lt -eq ]; echo $?
+test -ge -g '!=' -S; echo $?
+[ -ge -g '!=' -S ]; echo $?
+test = 2 -nt -n -u -le; echo $?
+[ = 2 -nt -n -u -le ]; echo $?
+test -ge /nonexistent -s -w; echo $?
+[ -ge /nonexistent -s -w ]; echo $?
+test -x -o -f -n -ge '>'; echo $?
+[ -x -o -f -n -ge '>' ]; echo $?
+test 0 '!='; echo $?
+[ 0 '!=' ]; echo $?
+test -i -ef /etc/passwd -f -ge; echo $?
+[ -i -ef /etc/passwd -f -ge ]; echo $?
+test -ge -lt --; echo $?
+[ -ge -lt -- ]; echo $?
+test -r -z x; echo $?
+[ -r -z x ]; echo $?
+test -o -nt -gt '!' x -gt; echo $?
+[ -o -nt -gt '!' x -gt ]; echo $?
+test '!' '<' -a; echo $?
+[ '!' '<' -a ]; echo $?
+test -n -G -L -f; echo $?
+[ -n -G -L -f ]; echo $?
+test -nt /etc/passwd -1 = -o; echo $?
+[ -nt /etc/passwd -1 = -o ]; echo $?
+test -b -a -t -a = -r; echo $?
+[ -b -a -t -a = -r ]; echo $?
+test -G -lt / 0x1; echo $?
+[ -G -lt / 0x1 ]; echo $?
+test '!=' -ge -i -c -G; echo $?
+[ '!=' -ge -i -c -G ]; echo $?
+test -ot -t -L; echo $?
+[ -ot -t -L ]; echo $?
+test -eq 1 = -gt --; echo $?
+[ -eq 1 = -gt -- ]; echo $?
+test -b -s -h -ge '(' -p; echo $?
+[ -b -s -h -ge '(' -p ]; echo $?
+test -O -b -s -eq 2; echo $?
+[ -O -b -s -eq 2 ]; echo $?
+test -c 2 -c; echo $?
+[ -c 2 -c ]; echo $?
+test -ge '' y -L; echo $?
+[ -ge '' y -L ]; echo $?
+test -b -n -f abc; echo $?
+[ -b -n -f abc ]; echo $?
+test -u '' / '>' -x =; echo $?
+[ -u '' / '>' -x = ]; echo $?
+test -L -ot; echo $?
+[ -L -ot ]; echo $?
+test -ef -le '>' -p /; echo $?
+[ -ef -le '>' -p / ]; echo $?
+test -k ''; echo $?
+[ -k '' ]; echo $?
+test -d -ef -S '<' -ef -1; echo $?
+[ -d -ef -S '<' -ef -1 ]; echo $?
+test -le -a; echo $?
+[ -le -a ]; echo $?
+test -G -f; echo $?
+[ -G -f ]; echo $?
+test -1 -f; echo $?
+[ -1 -f ]; echo $?
+test -O -eq -n -g -lt; echo $?
+[ -O -eq -n -g -lt ]; echo $?
+test 2 -O -ge = -h; echo $?
+[ 2 -O -ge = -h ]; echo $?
+test -f -s 2; echo $?
+[ -f -s 2 ]; echo $?
+test -le / /etc/passwd 2 y abc; echo $?
+[ -le / /etc/passwd 2 y abc ]; echo $?
+test -o -g -o; echo $?
+[ -o -g -o ]; echo $?
+test y / -1 -n / -b; echo $?
+[ y / -1 -n / -b ]; echo $?
+test /etc/passwd '('; echo $?
+[ /etc/passwd '(' ]; echo $?
+test '!' -L -z -ef -le; echo $?
+[ '!' -L -z -ef -le ]; echo $?
+test -g -s; echo $?
+[ -g -s ]; echo $?
+test -u -u -f; echo $?
+[ -u -u -f ]; echo $?
+test abc -d '>' /etc/passwd -1 -L; echo $?
+[ abc -d '>' /etc/passwd -1 -L ]; echo $?
+test ')' -f -w; echo $?
+[ ')' -f -w ]; echo $?
+test -h -h /nonexistent -nt; echo $?
+[ -h -h /nonexistent -nt ]; echo $?
+test -lt -L -ef -le; echo $?
+[ -lt -L -ef -le ]; echo $?
+test -e -i -o -G; echo $?
+[ -e -i -o -G ]; echo $?
+test x 0; echo $?
+[ x 0 ]; echo $?
+test '>' '!'; echo $?
+[ '>' '!' ]; echo $?
+test ')' -i; echo $?
+[ ')' -i ]; echo $?
+test -n -e '<' -1; echo $?
+[ -n -e '<' -1 ]; echo $?
+test /etc/passwd -nt -ef '<' -1 -ot; echo $?
+[ /etc/passwd -nt -ef '<' -1 -ot ]; echo $?
+test -w '(' -G; echo $?
+[ -w '(' -G ]; echo $?
+test -d -t '' -nt -d '<'; echo $?
+[ -d -t '' -nt -d '<' ]; echo $?
+test '!' -ge -O; echo $?
+[ '!' -ge -O ]; echo $?
+test -1 -n -L -1; echo $?
+[ -1 -n -L -1 ]; echo $?
+test '!=' -s -ef -lt -eq ')'; echo $?
+[ '!=' -s -ef -lt -eq ')' ]; echo $?
+test -d -u 0x1; echo $?
+[ -d -u 0x1 ]; echo $?
+test -1 -i '(' ''; echo $?
+[ -1 -i '(' '' ]; echo $?
+test -z -eq 2 -i -- -z; echo $?
+[ -z -eq 2 -i -- -z ]; echo $?
+test -i -S -gt -d abc; echo $?
+[ -i -S -gt -d abc ]; echo $?
+test /etc/passwd -ef -1; echo $?
+[ /etc/passwd -ef -1 ]; echo $?
+test -ne -- 0x1 '!' -le ')'; echo $?
+[ -ne -- 0x1 '!' -le ')' ]; echo $?
+test -u -nt -x; echo $?
+[ -u -nt -x ]; echo $?
+test -le -n; echo $?
+[ -le -n ]; echo $?
+test -e -ef -f 0x1 -f -k; echo $?
+[ -e -ef -f 0x1 -f -k ]; echo $?
+test -o ''; echo $?
+[ -o '' ]; echo $?
+test -gt -i -1 -i -le -s; echo $?
+[ -gt -i -1 -i -le -s ]; echo $?
+test -b -x -ne -i -S -S; echo $?
+[ -b -x -ne -i -S -S ]; echo $?
+test -lt -a; echo $?
+[ -lt -a ]; echo $?
+test 0x1 -le -ne -d -a; echo $?
+[ 0x1 -le -ne -d -a ]; echo $?
+test 2 -x -ef 0; echo $?
+[ 2 -x -ef 0 ]; echo $?
+test '!' -nt -k -p -s -n; echo $?
+[ '!' -nt -k -p -s -n ]; echo $?
+test -ot -k '!' -k; echo $?
+[ -ot -k '!' -k ]; echo $?
+test '!=' -r; echo $?
+[ '!=' -r ]; echo $?
+test -S /etc/passwd; echo $?
+[ -S /etc/passwd ]; echo $?
+test '<' -G 0 = -f; echo $?
+[ '<' -G 0 = -f ]; echo $?
+test -o '' 1 1 -h; echo $?
+[ -o '' 1 1 -h ]; echo $?
+test -lt -n / -ot; echo $?
+[ -lt -n / -ot ]; echo $?
+test -lt -- -s / abc -w; echo $?
+[ -lt -- -s / abc -w ]; echo $?
+test -n -O -ge -e; echo $?
+[ -n -O -ge -e ]; echo $?
+test -i -eq -z -le; echo $?
+[ -i -eq -z -le ]; echo $?
+test -G x '<' -r; echo $?
+[ -G x '<' -r ]; echo $?
+test -gt -r -lt; echo $?
+[ -gt -r -lt ]; echo $?
+test -u -a /nonexistent -L =; echo $?
+[ -u -a /nonexistent -L = ]; echo $?
+test -gt -ne -h -S; echo $?
+[ -gt -ne -h -S ]; echo $?
+test -i -d 1; echo $?
+[ -i -d 1 ]; echo $?
+test -lt -t -ef '!=' -w =; echo $?
+[ -lt -t -ef '!=' -w = ]; echo $?
+test -O -h -e; echo $?
+[ -O -h -e ]; echo $?
+test '!' = -n -e; echo $?
+[ '!' = -n -e ]; echo $?
+test -b y; echo $?
+[ -b y ]; echo $?
+test y '<' -c -f -w 0; echo $?
+[ y '<' -c -f -w 0 ]; echo $?
+test abc -S -g; echo $?
+[ abc -S -g ]; echo $?
+test -s / -t -b 1; echo $?
+[ -s / -t -b 1 ]; echo $?
+test '(' -o -L y 0x1; echo $?
+[ '(' -o -L y 0x1 ]; echo $?
+test -f -G -z -ne -s; echo $?
+[ -f -G -z -ne -s ]; echo $?
+test '<' -c -z -O -L; echo $?
+[ '<' -c -z -O -L ]; echo $?
+test 0x1 -ge -u -a -d; echo $?
+[ 0x1 -ge -u -a -d ]; echo $?
+test -gt /; echo $?
+[ -gt / ]; echo $?
+test / '<' -p 0x1 -x; echo $?
+[ / '<' -p 0x1 -x ]; echo $?
+test -h -u -a -w '<'; echo $?
+[ -h -u -a -w '<' ]; echo $?
+test /etc/passwd -G; echo $?
+[ /etc/passwd -G ]; echo $?
+test 2 = -nt / -n; echo $?
+[ 2 = -nt / -n ]; echo $?
+test 1 -ef; echo $?
+[ 1 -ef ]; echo $?
+test 0 1; echo $?
+[ 0 1 ]; echo $?
+test -w -nt -L; echo $?
+[ -w -nt -L ]; echo $?
+test -u -ne; echo $?
+[ -u -ne ]; echo $?
+test 2 2; echo $?
+[ 2 2 ]; echo $?
+test -i x; echo $?
+[ -i x ]; echo $?
+test -ne 2 '>'; echo $?
+[ -ne 2 '>' ]; echo $?
+test /nonexistent -z -g; echo $?
+[ /nonexistent -z -g ]; echo $?
+test -le -i -S -t 2 -O; echo $?
+[ -le -i -S -t 2 -O ]; echo $?
+test -e -u '<' -f; echo $?
+[ -e -u '<' -f ]; echo $?
+test -le ''; echo $?
+[ -le '' ]; echo $?
+test 1 -ef -f y; echo $?
+[ 1 -ef -f y ]; echo $?
+test -u -i -ge -p -z -o; echo $?
+[ -u -i -ge -p -z -o ]; echo $?
+test -ef -O -k -x; echo $?
+[ -ef -O -k -x ]; echo $?
+test -i 0 -eq '!='; echo $?
+[ -i 0 -eq '!=' ]; echo $?
+test '' '!' / --; echo $?
+[ '' '!' / -- ]; echo $?
+test y '!=' -gt '' -ne ''; echo $?
+[ y '!=' -gt '' -ne '' ]; echo $?
+test /etc/passwd '>' = -f x /; echo $?
+[ /etc/passwd '>' = -f x / ]; echo $?
+test -le -n -ot '('; echo $?
+[ -le -n -ot '(' ]; echo $?
+test -ot 2 /nonexistent; echo $?
+[ -ot 2 /nonexistent ]; echo $?
+test '<' '' x -lt -L -a; echo $?
+[ '<' '' x -lt -L -a ]; echo $?
+test -c -ge -a; echo $?
+[ -c -ge -a ]; echo $?
+test -d -ot /etc/passwd -gt --; echo $?
+[ -d -ot /etc/passwd -gt -- ]; echo $?
+test -O -nt -u -t -eq; echo $?
+[ -O -nt -u -t -eq ]; echo $?
+test -S -eq / '' -ef; echo $?
+[ -S -eq / '' -ef ]; echo $?
+test '!=' y -z '>' '(' /; echo $?
+[ '!=' y -z '>' '(' / ]; echo $?
+test -G x -eq -a; echo $?
+[ -G x -eq -a ]; echo $?
+test -z -n -- -g '' '>'; echo $?
+[ -z -n -- -g '' '>' ]; echo $?
+test -ot -eq; echo $?
+[ -ot -eq ]; echo $?
+test -ge -d '!' '<' -eq; echo $?
+[ -ge -d '!' '<' -eq ]; echo $?
+test -b -r -h 1 0; echo $?
+[ -b -r -h 1 0 ]; echo $?
+test -g '>' -n -b -d; echo $?
+[ -g '>' -n -b -d ]; echo $?
+test -x -eq -lt -ot 2; echo $?
+[ -x -eq -lt -ot 2 ]; echo $?
+test -f -b -ef -a -ge; echo $?
+[ -f -b -ef -a -ge ]; echo $?
+test -x ')' -nt -L -s; echo $?
+[ -x ')' -nt -L -s ]; echo $?
+test -gt -G -r '!' -k -u; echo $?
+[ -gt -G -r '!' -k -u ]; echo $?
+test '(' '!' /nonexistent -le -f; echo $?
+[ '(' '!' /nonexistent -le -f ]; echo $?
+test -a x -b -ef; echo $?
+[ -a x -b -ef ]; echo $?
+test -c /nonexistent -ot /etc/passwd 0; echo $?
+[ -c /nonexistent -ot /etc/passwd 0 ]; echo $?
+test -G -f '(' -p; echo $?
+[ -G -f '(' -p ]; echo $?
+test -t -G -o '!' -1 -S; echo $?
+[ -t -G -o '!' -1 -S ]; echo $?
+test -x -c -ef; echo $?
+[ -x -c -ef ]; echo $?
+test -lt -g -w '<' 0; echo $?
+[ -lt -g -w '<' 0 ]; echo $?
+test / x '!=' -lt -O; echo $?
+[ / x '!=' -lt -O ]; echo $?
+test '>' -f -d '>' abc -O; echo $?
+[ '>' -f -d '>' abc -O ]; echo $?
+test '' -a -k; echo $?
+[ '' -a -k ]; echo $?
+test -c -ge 0x1 -O; echo $?
+[ -c -ge 0x1 -O ]; echo $?
+test -gt -r /nonexistent = -r; echo $?
+[ -gt -r /nonexistent = -r ]; echo $?
+test '>' -c '' -d /nonexistent; echo $?
+[ '>' -c '' -d /nonexistent ]; echo $?
+test 0x1 -n -t -S; echo $?
+[ 0x1 -n -t -S ]; echo $?
+test '!' ')' /nonexistent; echo $?
+[ '!' ')' /nonexistent ]; echo $?
+test -le -h -i -L 0 -c; echo $?
+[ -le -h -i -L 0 -c ]; echo $?
+test -e 1 -w / 0x1 --; echo $?
+[ -e 1 -w / 0x1 -- ]; echo $?
+test -i -g -u 2 '!='; echo $?
+[ -i -g -u 2 '!=' ]; echo $?
+test -le ')' '!' -gt -g; echo $?
+[ -le ')' '!' -gt -g ]; echo $?
+test -ge -f ')' /etc/passwd abc -x; echo $?
+[ -ge -f ')' /etc/passwd abc -x ]; echo $?
+test -eq -e -o -gt; echo $?
+[ -eq -e -o -gt ]; echo $?
+test /nonexistent '(' ')' -G -gt -S; echo $?
+[ /nonexistent '(' ')' -G -gt -S ]; echo $?
+test '!' -g -n -a 1; echo $?
+[ '!' -g -n -a 1 ]; echo $?
+test -ef -p -t; echo $?
+[ -ef -p -t ]; echo $?
+test -e -G; echo $?
+[ -e -G ]; echo $?
+test -k -r '!' -h -ef -p; echo $?
+[ -k -r '!' -h -ef -p ]; echo $?
+test -ef '<' -ef; echo $?
+[ -ef '<' -ef ]; echo $?
+test -n 1 -i; echo $?
+[ -n 1 -i ]; echo $?
+test -- '!'; echo $?
+[ -- '!' ]; echo $?
+test -e -g '!' 1 -1; echo $?
+[ -e -g '!' 1 -1 ]; echo $?
+test -o -x -O '<' -s -L; echo $?
+[ -o -x -O '<' -s -L ]; echo $?
+test -G -nt -eq -S; echo $?
+[ -G -nt -eq -S ]; echo $?
+test 1 -n; echo $?
+[ 1 -n ]; echo $?
+test -t -k -s -k; echo $?
+[ -t -k -s -k ]; echo $?
+test -i -r -O -b; echo $?
+[ -i -r -O -b ]; echo $?
+test -s -O -L '!=' y -o; echo $?
+[ -s -O -L '!=' y -o ]; echo $?
+test y -k -ne -o '' -a; echo $?
+[ y -k -ne -o '' -a ]; echo $?
+test -x -u; echo $?
+[ -x -u ]; echo $?
+test -n 0x1; echo $?
+[ -n 0x1 ]; echo $?
+test -g -x / '('; echo $?
+[ -g -x / '(' ]; echo $?
+test -eq -1 '(' -eq -ge; echo $?
+[ -eq -1 '(' -eq -ge ]; echo $?
+test -c -1 -f /nonexistent; echo $?
+[ -c -1 -f /nonexistent ]; echo $?
+test -g -ne; echo $?
+[ -g -ne ]; echo $?
+test -f 1 -ne -d 1; echo $?
+[ -f 1 -ne -d 1 ]; echo $?
+test -ne -nt -nt -t =; echo $?
+[ -ne -nt -nt -t = ]; echo $?
+test -t -b -e -i -z; echo $?
+[ -t -b -e -i -z ]; echo $?
+test '' -nt -ne y; echo $?
+[ '' -nt -ne y ]; echo $?
+test -S -w; echo $?
+[ -S -w ]; echo $?
+test -b -p -- =; echo $?
+[ -b -p -- = ]; echo $?
+test -u -g -1 1 -x -s; echo $?
+[ -u -g -1 1 -x -s ]; echo $?
+test -w '!=' -O x; echo $?
+[ -w '!=' -O x ]; echo $?
+test / -G -i; echo $?
+[ / -G -i ]; echo $?
+test /etc/passwd -u 2 -ef; echo $?
+[ /etc/passwd -u 2 -ef ]; echo $?
+test -k 0 -i; echo $?
+[ -k 0 -i ]; echo $?
+test -w -eq -o '!' '!=' /etc/passwd; echo $?
+[ -w -eq -o '!' '!=' /etc/passwd ]; echo $?
+test '(' -lt -k '!' -s; echo $?
+[ '(' -lt -k '!' -s ]; echo $?
+test /etc/passwd 0x1 y -i; echo $?
+[ /etc/passwd 0x1 y -i ]; echo $?
+test y -- -- -c -x; echo $?
+[ y -- -- -c -x ]; echo $?
+test -eq -b; echo $?
+[ -eq -b ]; echo $?
+test -L -u / 1 2 -t; echo $?
+[ -L -u / 1 2 -t ]; echo $?
+test -nt -nt; echo $?
+[ -nt -nt ]; echo $?
+test -S '!=' -lt -le; echo $?
+[ -S '!=' -lt -le ]; echo $?
+test /etc/passwd -ot -- /nonexistent -i; echo $?
+[ /etc/passwd -ot -- /nonexistent -i ]; echo $?
+test 1 -o -ef -g; echo $?
+[ 1 -o -ef -g ]; echo $?
+test -b -z -u -x --; echo $?
+[ -b -z -u -x -- ]; echo $?
+test '<' -S -G -ef; echo $?
+[ '<' -S -G -ef ]; echo $?
+test '(' -le 0; echo $?
+[ '(' -le 0 ]; echo $?
+test -s '!=' -eq -z '' 1; echo $?
+[ -s '!=' -eq -z '' 1 ]; echo $?
+test -1 -p ')'; echo $?
+[ -1 -p ')' ]; echo $?
+test /etc/passwd -s /; echo $?
+[ /etc/passwd -s / ]; echo $?
+test -g -ge -a -p; echo $?
+[ -g -ge -a -p ]; echo $?
+test -n -S -u 0; echo $?
+[ -n -S -u 0 ]; echo $?
+test -a '' -ne -s -w -k; echo $?
+[ -a '' -ne -s -w -k ]; echo $?
+test -o -1 -p -gt; echo $?
+[ -o -1 -p -gt ]; echo $?
+test -c -lt -k; echo $?
+[ -c -lt -k ]; echo $?
+test -s -eq =; echo $?
+[ -s -eq = ]; echo $?
+test -s -o y '' -f; echo $?
+[ -s -o y '' -f ]; echo $?
+test '!' -n -G -k -i; echo $?
+[ '!' -n -G -k -i ]; echo $?
+test -r -t /nonexistent -k; echo $?
+[ -r -t /nonexistent -k ]; echo $?
+test -t -le /nonexistent; echo $?
+[ -t -le /nonexistent ]; echo $?
+test '!' -n -ot; echo $?
+[ '!' -n -ot ]; echo $?
+test -a -ne ')' -t; echo $?
+[ -a -ne ')' -t ]; echo $?
+test -w -t -le /etc/passwd -ge; echo $?
+[ -w -t -le /etc/passwd -ge ]; echo $?
+test -d -ot; echo $?
+[ -d -ot ]; echo $?
+test /etc/passwd -ef -x '(' -b; echo $?
+[ /etc/passwd -ef -x '(' -b ]; echo $?
+test '<' -L '(' -z; echo $?
+[ '<' -L '(' -z ]; echo $?
+test -ne -g -c; echo $?
+[ -ne -g -c ]; echo $?
+test -d '<' -g 2 -eq; echo $?
+[ -d '<' -g 2 -eq ]; echo $?
+test /nonexistent -1; echo $?
+[ /nonexistent -1 ]; echo $?
+test -i 1 -n; echo $?
+[ -i 1 -n ]; echo $?
+test -ge -u -f -t; echo $?
+[ -ge -u -f -t ]; echo $?
+test 0x1 -S -c --; echo $?
+[ 0x1 -S -c -- ]; echo $?
+test 0x1 -ne -u '('; echo $?
+[ 0x1 -ne -u '(' ]; echo $?
+test -c -k x; echo $?
+[ -c -k x ]; echo $?
+test '<' -gt /etc/passwd -n '(' -ne; echo $?
+[ '<' -gt /etc/passwd -n '(' -ne ]; echo $?
+test -b -gt '<' -f -o '>'; echo $?
+[ -b -gt '<' -f -o '>' ]; echo $?
+test y -r 0; echo $?
+[ y -r 0 ]; echo $?
+test / / -k; echo $?
+[ / / -k ]; echo $?
+test -t -eq 0 -d; echo $?
+[ -t -eq 0 -d ]; echo $?
+test -G -1 --; echo $?
+[ -G -1 -- ]; echo $?
+test '<' -h -k; echo $?
+[ '<' -h -k ]; echo $?
+test -ne -f -r; echo $?
+[ -ne -f -r ]; echo $?
+test -w -n '<'; echo $?
+[ -w -n '<' ]; echo $?
+test -x -u -le 0; echo $?
+[ -x -u -le 0 ]; echo $?
+test 1 abc -r -i -nt -u; echo $?
+[ 1 abc -r -i -nt -u ]; echo $?
+test -k '!' -O; echo $?
+[ -k '!' -O ]; echo $?
+test -ne -c; echo $?
+[ -ne -c ]; echo $?
+test -r -ge -x; echo $?
+[ -r -ge -x ]; echo $?
+test -f / -f '!' -w; echo $?
+[ -f / -f '!' -w ]; echo $?
+test -- '('; echo $?
+[ -- '(' ]; echo $?
+test '' / /etc/passwd -- -1 -eq; echo $?
+[ '' / /etc/passwd -- -1 -eq ]; echo $?
+test '!' -- '!=' -r /nonexistent; echo $?
+[ '!' -- '!=' -r /nonexistent ]; echo $?
+test -s -- -p -lt; echo $?
+[ -s -- -p -lt ]; echo $?
+test -n '>' 0x1 '!=' -z =; echo $?
+[ -n '>' 0x1 '!=' -z = ]; echo $?
+test -S 0x1 -ne -i -eq; echo $?
+[ -S 0x1 -ne -i -eq ]; echo $?
+test /etc/passwd -z 0 --; echo $?
+[ /etc/passwd -z 0 -- ]; echo $?
+test ')' -G 0x1; echo $?
+[ ')' -G 0x1 ]; echo $?
+test -nt -G 1 x -r; echo $?
+[ -nt -G 1 x -r ]; echo $?
+test -G -u -g -gt -w =; echo $?
+[ -G -u -g -gt -w = ]; echo $?
+test -c x =; echo $?
+[ -c x = ]; echo $?
+test 0 -lt x 1; echo $?
+[ 0 -lt x 1 ]; echo $?
+test -i -o '!=' -O -i '>'; echo $?
+[ -i -o '!=' -O -i '>' ]; echo $?
+test 0 -h -g; echo $?
+[ 0 -h -g ]; echo $?
+test '(' -h ''; echo $?
+[ '(' -h '' ]; echo $?
+test -ne -ot -le; echo $?
+[ -ne -ot -le ]; echo $?
+test -k -h '>' -p; echo $?
+[ -k -h '>' -p ]; echo $?
+test ')' -e -1 -z -ot --; echo $?
+[ ')' -e -1 -z -ot -- ]; echo $?
+test '(' -eq 2 '!='; echo $?
+[ '(' -eq 2 '!=' ]; echo $?
+test -1 -L '<'; echo $?
+[ -1 -L '<' ]; echo $?
+test -k -ot -G '(' -r -o; echo $?
+[ -k -ot -G '(' -r -o ]; echo $?
+test = -f 1 / -p; echo $?
+[ = -f 1 / -p ]; echo $?
+test -nt '(' --; echo $?
+[ -nt '(' -- ]; echo $?
+test -s -ge abc; echo $?
+[ -s -ge abc ]; echo $?
+test -ef -- '!' -p; echo $?
+[ -ef -- '!' -p ]; echo $?
+test -ef -i -b -d; echo $?
+[ -ef -i -b -d ]; echo $?
+test -h -z -d -O; echo $?
+[ -h -z -d -O ]; echo $?
+test -e -- -le /etc/passwd; echo $?
+[ -e -- -le /etc/passwd ]; echo $?
+test '<' -d -nt -x -t; echo $?
+[ '<' -d -nt -x -t ]; echo $?
+test 0 -nt -g y; echo $?
+[ 0 -nt -g y ]; echo $?
+test -nt ')'; echo $?
+[ -nt ')' ]; echo $?
+test -t -h -le '!'; echo $?
+[ -t -h -le '!' ]; echo $?
+test = -ot; echo $?
+[ = -ot ]; echo $?
+test '!=' -ne -G; echo $?
+[ '!=' -ne -G ]; echo $?
+test '!=' -S -w; echo $?
+[ '!=' -S -w ]; echo $?
+test -g -gt -g; echo $?
+[ -g -gt -g ]; echo $?
+test -- 1 -gt -O; echo $?
+[ -- 1 -gt -O ]; echo $?
+test ')' -le; echo $?
+[ ')' -le ]; echo $?
+test -ne /nonexistent; echo $?
+[ -ne /nonexistent ]; echo $?
+test -G -e /nonexistent -k -s; echo $?
+[ -G -e /nonexistent -k -s ]; echo $?
+test -d -eq '<' -lt; echo $?
+[ -d -eq '<' -lt ]; echo $?
+test -L -u; echo $?
+[ -L -u ]; echo $?
+test -nt -i '!' y -nt 0; echo $?
+[ -nt -i '!' y -nt 0 ]; echo $?
+test -p -x -G -b; echo $?
+[ -p -x -G -b ]; echo $?
+test -x '>' 0x1 1 -i; echo $?
+[ -x '>' 0x1 1 -i ]; echo $?
+test '(' -f 2 '>' -O -g; echo $?
+[ '(' -f 2 '>' -O -g ]; echo $?
+test -ge -r -b -z -f; echo $?
+[ -ge -r -b -z -f ]; echo $?
+test -le -d '!' -h -f; echo $?
+[ -le -d '!' -h -f ]; echo $?
+test '>' -i 0 -O -e -g; echo $?
+[ '>' -i 0 -O -e -g ]; echo $?
+test /etc/passwd -n -o -t -i; echo $?
+[ /etc/passwd -n -o -t -i ]; echo $?
+test '(' /nonexistent =; echo $?
+[ '(' /nonexistent = ]; echo $?
+test -u -c -z /nonexistent; echo $?
+[ -u -c -z /nonexistent ]; echo $?
+test -z -s -le -nt -o; echo $?
+[ -z -s -le -nt -o ]; echo $?
+test -1 -s -eq -S; echo $?
+[ -1 -s -eq -S ]; echo $?
+test -t -le -s /nonexistent -le -g; echo $?
+[ -t -le -s /nonexistent -le -g ]; echo $?
+test -lt '<' '<'; echo $?
+[ -lt '<' '<' ]; echo $?
+test -g 1 -z -p -i -gt; echo $?
+[ -g 1 -z -p -i -gt ]; echo $?
+test -s -t; echo $?
+[ -s -t ]; echo $?
+test -ne -le -e -O /; echo $?
+[ -ne -le -e -O / ]; echo $?
+test -ot -nt 2; echo $?
+[ -ot -nt 2 ]; echo $?
+test -i 0 y -u; echo $?
+[ -i 0 y -u ]; echo $?
+test -k abc -1; echo $?
+[ -k abc -1 ]; echo $?
+test -f = /nonexistent '>'; echo $?
+[ -f = /nonexistent '>' ]; echo $?
+test '!' '!'; echo $?
+[ '!' '!' ]; echo $?
+test / -O -s; echo $?
+[ / -O -s ]; echo $?
+test -1 -ge -ne -a; echo $?
+[ -1 -ge -ne -a ]; echo $?
+test -ef /nonexistent -s y; echo $?
+[ -ef /nonexistent -s y ]; echo $?
+test -u -S -gt -ot -n 0x1; echo $?
+[ -u -S -gt -ot -n 0x1 ]; echo $?
+test -eq -i -- -g; echo $?
+[ -eq -i -- -g ]; echo $?
+test -ot -t; echo $?
+[ -ot -t ]; echo $?
+test -a -b -eq; echo $?
+[ -a -b -eq ]; echo $?
+test '<' -u -r /nonexistent -s '('; echo $?
+[ '<' -u -r /nonexistent -s '(' ]; echo $?
+test 0x1 -le x -w -f abc; echo $?
+[ 0x1 -le x -w -f abc ]; echo $?
+test -n -s -d -x -k -nt; echo $?
+[ -n -s -d -x -k -nt ]; echo $?
+test -k '!' -a -1 -nt; echo $?
+[ -k '!' -a -1 -nt ]; echo $?
+test = 0x1 '(' -gt -k; echo $?
+[ = 0x1 '(' -gt -k ]; echo $?
+test -s -i; echo $?
+[ -s -i ]; echo $?
+test -s -c -le; echo $?
+[ -s -c -le ]; echo $?
+test -e -S -eq; echo $?
+[ -e -S -eq ]; echo $?
+test -g /etc/passwd -le -le 1; echo $?
+[ -g /etc/passwd -le -le 1 ]; echo $?
+test -ef -le; echo $?
+[ -ef -le ]; echo $?
+test -gt -nt -eq -ot '!' -ef; echo $?
+[ -gt -nt -eq -ot '!' -ef ]; echo $?
+test -r -b -x -nt -a 0x1; echo $?
+[ -r -b -x -nt -a 0x1 ]; echo $?
+test -p -eq -S -L -b ''; echo $?
+[ -p -eq -S -L -b '' ]; echo $?
+test -t /etc/passwd ')' -a =; echo $?
+[ -t /etc/passwd ')' -a = ]; echo $?
+test /etc/passwd -i '<'; echo $?
+[ /etc/passwd -i '<' ]; echo $?
+test /etc/passwd -le -a -i abc -a; echo $?
+[ /etc/passwd -le -a -i abc -a ]; echo $?
+test -e -c -w; echo $?
+[ -e -c -w ]; echo $?
+test = -eq -O; echo $?
+[ = -eq -O ]; echo $?
+test -O -nt -o -i '!'; echo $?
+[ -O -nt -o -i '!' ]; echo $?
+test 2 -g -s -z -gt; echo $?
+[ 2 -g -s -z -gt ]; echo $?
+test '' -u -a -g -n; echo $?
+[ '' -u -a -g -n ]; echo $?
+test -a -gt -r -k; echo $?
+[ -a -gt -r -k ]; echo $?
+test -k 1 -w '>' -r; echo $?
+[ -k 1 -w '>' -r ]; echo $?
+test abc -s -le -p; echo $?
+[ abc -s -le -p ]; echo $?
+test -n -O -w -ne -w; echo $?
+[ -n -O -w -ne -w ]; echo $?
+test -ne ')' -g 0 -a; echo $?
+[ -ne ')' -g 0 -a ]; echo $?
+test '' -u -d -e -s -e; echo $?
+[ '' -u -d -e -s -e ]; echo $?
+test x '>' -ge -eq -ge =; echo $?
+[ x '>' -ge -eq -ge = ]; echo $?
+test 1 /nonexistent; echo $?
+[ 1 /nonexistent ]; echo $?
+test -n 0x1 -gt; echo $?
+[ -n 0x1 -gt ]; echo $?
+test -g -ef abc '!='; echo $?
+[ -g -ef abc '!=' ]; echo $?
+test -gt -z -gt = -o; echo $?
+[ -gt -z -gt = -o ]; echo $?
+test -le -- '!' -ne -n ''; echo $?
+[ -le -- '!' -ne -n '' ]; echo $?
+test '(' -ef 0 = x -d; echo $?
+[ '(' -ef 0 = x -d ]; echo $?
+test '!=' -gt '('; echo $?
+[ '!=' -gt '(' ]; echo $?
+test y -le -ef -h 1 -z; echo $?
+[ y -le -ef -h 1 -z ]; echo $?
+test -a -g -ne '(' /etc/passwd; echo $?
+[ -a -g -ne '(' /etc/passwd ]; echo $?
+test -i -i; echo $?
+[ -i -i ]; echo $?
+test y -k /nonexistent '!' -ot; echo $?
+[ y -k /nonexistent '!' -ot ]; echo $?
+test / -t 0x1 -e -ot 2; echo $?
+[ / -t 0x1 -e -ot 2 ]; echo $?
+test -z -e -a -ge -le; echo $?
+[ -z -e -a -ge -le ]; echo $?
+test -t /etc/passwd '>' -i; echo $?
+[ -t /etc/passwd '>' -i ]; echo $?
+test -- ')' -k -eq 2 0; echo $?
+[ -- ')' -k -eq 2 0 ]; echo $?
+test -i '>' -b ''; echo $?
+[ -i '>' -b '' ]; echo $?
+test 1 -O -x -a 2; echo $?
+[ 1 -O -x -a 2 ]; echo $?
+test '<' -e -x y -u; echo $?
+[ '<' -e -x y -u ]; echo $?
+test 0x1 abc; echo $?
+[ 0x1 abc ]; echo $?
+test /etc/passwd '!=' '!'; echo $?
+[ /etc/passwd '!=' '!' ]; echo $?
+test -ef -S abc; echo $?
+[ -ef -S abc ]; echo $?
+test -i -w -ge /etc/passwd; echo $?
+[ -i -w -ge /etc/passwd ]; echo $?
+test 0 -r -L -f; echo $?
+[ 0 -r -L -f ]; echo $?
+test -f '!=' abc -r -eq; echo $?
+[ -f '!=' abc -r -eq ]; echo $?
+test '>' -o -1 -le; echo $?
+[ '>' -o -1 -le ]; echo $?
+test = -S; echo $?
+[ = -S ]; echo $?
+test -S /etc/passwd -- '>' -b =; echo $?
+[ -S /etc/passwd -- '>' -b = ]; echo $?
+test -- -p -u -le; echo $?
+[ -- -p -u -le ]; echo $?
+test -o -k 0; echo $?
+[ -o -k 0 ]; echo $?
+test = 2 -le -gt -t --; echo $?
+[ = 2 -le -gt -t -- ]; echo $?
+test -lt -k x -s -G; echo $?
+[ -lt -k x -s -G ]; echo $?
+test abc -G -O -i -k /etc/passwd; echo $?
+[ abc -G -O -i -k /etc/passwd ]; echo $?
+test -- -k -ef; echo $?
+[ -- -k -ef ]; echo $?
+test 1 -h -lt; echo $?
+[ 1 -h -lt ]; echo $?
+test -le -t -f -a x; echo $?
+[ -le -t -f -a x ]; echo $?
+test '!=' = -z -b; echo $?
+[ '!=' = -z -b ]; echo $?
+test = -i / -n; echo $?
+[ = -i / -n ]; echo $?
+test '!=' 0x1 -- -i abc -S; echo $?
+[ '!=' 0x1 -- -i abc -S ]; echo $?
+test -z = -ne -s; echo $?
+[ -z = -ne -s ]; echo $?
+test -O x -L -a -c; echo $?
+[ -O x -L -a -c ]; echo $?
+test -S y -- -le -a; echo $?
+[ -S y -- -le -a ]; echo $?
+test -ot -nt -S; echo $?
+[ -ot -nt -S ]; echo $?
+test abc x abc -f; echo $?
+[ abc x abc -f ]; echo $?
+test -b 0 '>' -s '<'; echo $?
+[ -b 0 '>' -s '<' ]; echo $?
+test -x -a /nonexistent -d; echo $?
+[ -x -a /nonexistent -d ]; echo $?
+test -c -ne -s 0; echo $?
+[ -c -ne -s 0 ]; echo $?
+test 0 -e -d -a; echo $?
+[ 0 -e -d -a ]; echo $?
+test -a -u -r abc; echo $?
+[ -a -u -r abc ]; echo $?
+test '<' -G -s -ef; echo $?
+[ '<' -G -s -ef ]; echo $?
+test -s -u /nonexistent -r =; echo $?
+[ -s -u /nonexistent -r = ]; echo $?
+test '<' -t / -n ')'; echo $?
+[ '<' -t / -n ')' ]; echo $?
+test -ge 2 -f; echo $?
+[ -ge 2 -f ]; echo $?
+test -r ')'; echo $?
+[ -r ')' ]; echo $?
+test -u -G -ef -nt; echo $?
+[ -u -G -ef -nt ]; echo $?
+test /nonexistent -h -r; echo $?
+[ /nonexistent -h -r ]; echo $?
+test -ge -r; echo $?
+[ -ge -r ]; echo $?
+test /etc/passwd -e -lt; echo $?
+[ /etc/passwd -e -lt ]; echo $?
+test -g /etc/passwd -f; echo $?
+[ -g /etc/passwd -f ]; echo $?
+test -s '(' -d; echo $?
+[ -s '(' -d ]; echo $?
+test -e '!' / -ef; echo $?
+[ -e '!' / -ef ]; echo $?
+test -w ')' -gt; echo $?
+[ -w ')' -gt ]; echo $?
+test -n -G; echo $?
+[ -n -G ]; echo $?
+test -le -n '!' -w -n; echo $?
+[ -le -n '!' -w -n ]; echo $?
+test '' '' -h; echo $?
+[ '' '' -h ]; echo $?
+test / -ge 1 -d; echo $?
+[ / -ge 1 -d ]; echo $?
+test -h -r x; echo $?
+[ -h -r x ]; echo $?
+test -ge -h -p y '!=' -d; echo $?
+[ -ge -h -p y '!=' -d ]; echo $?
+test -f -nt = '>' -eq; echo $?
+[ -f -nt = '>' -eq ]; echo $?
+test -ne 0x1 -r -c /nonexistent; echo $?
+[ -ne 0x1 -r -c /nonexistent ]; echo $?
+test abc 1 -lt -ne; echo $?
+[ abc 1 -lt -ne ]; echo $?
+test -s -L -h -w; echo $?
+[ -s -L -h -w ]; echo $?
+test '!' -gt -i -f; echo $?
+[ '!' -gt -i -f ]; echo $?
+test -eq 0; echo $?
+[ -eq 0 ]; echo $?
+test -1 -gt; echo $?
+[ -1 -gt ]; echo $?
+test -eq -eq; echo $?
+[ -eq -eq ]; echo $?
+test -nt -nt 0x1 -b -c -r; echo $?
+[ -nt -nt 0x1 -b -c -r ]; echo $?
+test -le -1 -x '('; echo $?
+[ -le -1 -x '(' ]; echo $?
+test ')' -x; echo $?
+[ ')' -x ]; echo $?
+test abc abc -b -nt; echo $?
+[ abc abc -b -nt ]; echo $?
+test -w -a -g -f; echo $?
+[ -w -a -g -f ]; echo $?
+test -g -f '>' -nt /; echo $?
+[ -g -f '>' -nt / ]; echo $?
+test '(' -ge -h -d; echo $?
+[ '(' -ge -h -d ]; echo $?
+test -a -G 1 y -x -i; echo $?
+[ -a -G 1 y -x -i ]; echo $?
+test -nt -f -e '' -ot -gt; echo $?
+[ -nt -f -e '' -ot -gt ]; echo $?
+test -ge -lt; echo $?
+[ -ge -lt ]; echo $?
+test 0x1 '!' '(' x '<'; echo $?
+[ 0x1 '!' '(' x '<' ]; echo $?
+test -- -ge 1 -O -k /etc/passwd; echo $?
+[ -- -ge 1 -O -k /etc/passwd ]; echo $?
+test -h -- -G -n; echo $?
+[ -h -- -G -n ]; echo $?
+test '<' -le -g -h -b; echo $?
+[ '<' -le -g -h -b ]; echo $?
+test -n -O -ge '(' -d; echo $?
+[ -n -O -ge '(' -d ]; echo $?
+test -k '!=' abc '!' x 2; echo $?
+[ -k '!=' abc '!' x 2 ]; echo $?
+test -S -S -e -eq -t; echo $?
+[ -S -S -e -eq -t ]; echo $?
+test = -x; echo $?
+[ = -x ]; echo $?
+test '<' -g -o -r '!='; echo $?
+[ '<' -g -o -r '!=' ]; echo $?
+test -b 2 -r; echo $?
+[ -b 2 -r ]; echo $?
+test '' -ne -k '!=' '('; echo $?
+[ '' -ne -k '!=' '(' ]; echo $?
+test -z 0x1 2; echo $?
+[ -z 0x1 2 ]; echo $?
+test -f = abc -e -x; echo $?
+[ -f = abc -e -x ]; echo $?
+test -g '' -i; echo $?
+[ -g '' -i ]; echo $?
+test '>' -i; echo $?
+[ '>' -i ]; echo $?
+test x -d -1 -S -w -ot; echo $?
+[ x -d -1 -S -w -ot ]; echo $?
+test -lt '' -w -i -u '<'; echo $?
+[ -lt '' -w -i -u '<' ]; echo $?
+test -d -f '!=' -e -n; echo $?
+[ -d -f '!=' -e -n ]; echo $?
+test -n /etc/passwd; echo $?
+[ -n /etc/passwd ]; echo $?
+test -t -z 2 -ne ')' '!='; echo $?
+[ -t -z 2 -ne ')' '!=' ]; echo $?
+test -k -- y; echo $?
+[ -k -- y ]; echo $?
+test 0x1 -c; echo $?
+[ 0x1 -c ]; echo $?
+test -f abc -ne ''; echo $?
+[ -f abc -ne '' ]; echo $?
+test x -L '!=' '(' abc /nonexistent; echo $?
+[ x -L '!=' '(' abc /nonexistent ]; echo $?
+test /etc/passwd -1 -S -k '!=' ')'; echo $?
+[ /etc/passwd -1 -S -k '!=' ')' ]; echo $?
+test '!' /nonexistent ')' -u -d /nonexistent; echo $?
+[ '!' /nonexistent ')' -u -d /nonexistent ]; echo $?
+test ')' -g = 2 -gt; echo $?
+[ ')' -g = 2 -gt ]; echo $?
+test ')' -x -x '>' -le -nt; echo $?
+[ ')' -x -x '>' -le -nt ]; echo $?
+test 2 -nt; echo $?
+[ 2 -nt ]; echo $?
+test -r -O -lt -k; echo $?
+[ -r -O -lt -k ]; echo $?
+test -n -ef -d; echo $?
+[ -n -ef -d ]; echo $?
+test -O -ge ')' 1 -eq -r; echo $?
+[ -O -ge ')' 1 -eq -r ]; echo $?
+test -lt -ge -d; echo $?
+[ -lt -ge -d ]; echo $?
+test -u -1 '!' -gt = -s; echo $?
+[ -u -1 '!' -gt = -s ]; echo $?
+test -1 -L -n; echo $?
+[ -1 -L -n ]; echo $?
+test 0x1 -h; echo $?
+[ 0x1 -h ]; echo $?
+test -b -n -ge -1 --; echo $?
+[ -b -n -ge -1 -- ]; echo $?
+test abc 1; echo $?
+[ abc 1 ]; echo $?
+test '<' -eq '>' 2 -eq; echo $?
+[ '<' -eq '>' 2 -eq ]; echo $?
+test -G 2 -s /etc/passwd -G; echo $?
+[ -G 2 -s /etc/passwd -G ]; echo $?
+test -k y -k -x ')' -b; echo $?
+[ -k y -k -x ')' -b ]; echo $?
+test -ge abc -O 2 -k; echo $?
+[ -ge abc -O 2 -k ]; echo $?
+test -e -- -lt -z -c -ot; echo $?
+[ -e -- -lt -z -c -ot ]; echo $?
+test ')' -t -gt -p /; echo $?
+[ ')' -t -gt -p / ]; echo $?
+test -w -o; echo $?
+[ -w -o ]; echo $?
+test -G -lt --; echo $?
+[ -G -lt -- ]; echo $?
+test -r -n -ot -le -ne -p; echo $?
+[ -r -n -ot -le -ne -p ]; echo $?
+test -p -a /etc/passwd; echo $?
+[ -p -a /etc/passwd ]; echo $?
+test x -r -c -r; echo $?
+[ x -r -c -r ]; echo $?
+test '(' -ef -ge -x -u -nt; echo $?
+[ '(' -ef -ge -x -u -nt ]; echo $?
+test -z -x /nonexistent -i -O y; echo $?
+[ -z -x /nonexistent -i -O y ]; echo $?
+test -k -e '('; echo $?
+[ -k -e '(' ]; echo $?
+test -1 -w -t -p -s; echo $?
+[ -1 -w -t -p -s ]; echo $?
+test -p ')' -u /nonexistent ''; echo $?
+[ -p ')' -u /nonexistent '' ]; echo $?
+test '>' -d -i -ot; echo $?
+[ '>' -d -i -ot ]; echo $?
+test -lt abc = -w -w; echo $?
+[ -lt abc = -w -w ]; echo $?
+test '!' -L; echo $?
+[ '!' -L ]; echo $?
+test -z -c -p -nt; echo $?
+[ -z -c -p -nt ]; echo $?
+test '<' / 2 '>' -g 0; echo $?
+[ '<' / 2 '>' -g 0 ]; echo $?
+test -eq abc -i /etc/passwd -c; echo $?
+[ -eq abc -i /etc/passwd -c ]; echo $?
+test -G -a -n /nonexistent -o -z; echo $?
+[ -G -a -n /nonexistent -o -z ]; echo $?
+test '>' -eq; echo $?
+[ '>' -eq ]; echo $?
+test '(' -s abc; echo $?
+[ '(' -s abc ]; echo $?
+test -G = -G -1; echo $?
+[ -G = -G -1 ]; echo $?
+test -b -x abc -x -O; echo $?
+[ -b -x abc -x -O ]; echo $?
+test -eq -gt '!' 0 -ne; echo $?
+[ -eq -gt '!' 0 -ne ]; echo $?
+test y -nt -nt x; echo $?
+[ y -nt -nt x ]; echo $?
+test abc -ot 0x1 -L -c; echo $?
+[ abc -ot 0x1 -L -c ]; echo $?
+test -b /nonexistent -S abc; echo $?
+[ -b /nonexistent -S abc ]; echo $?
+test -eq -a abc -g -L; echo $?
+[ -eq -a abc -g -L ]; echo $?
+test -d -t; echo $?
+[ -d -t ]; echo $?
+test abc 1 -eq; echo $?
+[ abc 1 -eq ]; echo $?
+test x -lt = -eq /; echo $?
+[ x -lt = -eq / ]; echo $?
+test -le -ef 0 ')' -r -r; echo $?
+[ -le -ef 0 ')' -r -r ]; echo $?
+test '!' -- 0; echo $?
+[ '!' -- 0 ]; echo $?
+test '!=' -b; echo $?
+[ '!=' -b ]; echo $?
+test -a -ge /nonexistent -S; echo $?
+[ -a -ge /nonexistent -S ]; echo $?
+test '' -eq; echo $?
+[ '' -eq ]; echo $?
+test -t -e -ef -p -lt; echo $?
+[ -t -e -ef -p -lt ]; echo $?
+test -d -- -n 0 -h; echo $?
+[ -d -- -n 0 -h ]; echo $?
+test -r -u -ne -G; echo $?
+[ -r -u -ne -G ]; echo $?
+test x -gt -ef -ne; echo $?
+[ x -gt -ef -ne ]; echo $?
+test -lt -t -S -e -S; echo $?
+[ -lt -t -S -e -S ]; echo $?
+test -n -k -L -t -b -d; echo $?
+[ -n -k -L -t -b -d ]; echo $?
+test -1 y -n -lt -eq -nt; echo $?
+[ -1 y -n -lt -eq -nt ]; echo $?
+test -1 -k -z; echo $?
+[ -1 -k -z ]; echo $?
+test ')' / '>' -z ')' -nt; echo $?
+[ ')' / '>' -z ')' -nt ]; echo $?
+test -h -ot --; echo $?
+[ -h -ot -- ]; echo $?
+test '!=' '<' -nt; echo $?
+[ '!=' '<' -nt ]; echo $?
+test -ef -1 -t; echo $?
+[ -ef -1 -t ]; echo $?
+test -h -f; echo $?
+[ -h -f ]; echo $?
+test ')' /nonexistent -n '<'; echo $?
+[ ')' /nonexistent -n '<' ]; echo $?
+test '(' '' -z -e -w x; echo $?
+[ '(' '' -z -e -w x ]; echo $?
+test -g -nt / -s; echo $?
+[ -g -nt / -s ]; echo $?
+test -1 1 0 -1 ')'; echo $?
+[ -1 1 0 -1 ')' ]; echo $?
+test -ot -1 1 -L -1; echo $?
+[ -ot -1 1 -L -1 ]; echo $?
+test -ef -- -b; echo $?
+[ -ef -- -b ]; echo $?
+test -w = '(' -o -eq; echo $?
+[ -w = '(' -o -eq ]; echo $?
+test -h ')' -b -p -gt; echo $?
+[ -h ')' -b -p -gt ]; echo $?
+test -b 1 -s -eq 1; echo $?
+[ -b 1 -s -eq 1 ]; echo $?
+test -lt -u -e -o; echo $?
+[ -lt -u -e -o ]; echo $?
+test '' -ne -L /; echo $?
+[ '' -ne -L / ]; echo $?
+test y -p -p; echo $?
+[ y -p -p ]; echo $?
+test -nt -k x -gt '!='; echo $?
+[ -nt -k x -gt '!=' ]; echo $?
+test '' -G -b -u -d; echo $?
+[ '' -G -b -u -d ]; echo $?
+test -o -n -h 0x1; echo $?
+[ -o -n -h 0x1 ]; echo $?
+test -eq -ot / /nonexistent -d -S; echo $?
+[ -eq -ot / /nonexistent -d -S ]; echo $?
+test '>' -k x -gt; echo $?
+[ '>' -k x -gt ]; echo $?
+test -G -f -o; echo $?
+[ -G -f -o ]; echo $?
+test -g '' -s -t; echo $?
+[ -g '' -s -t ]; echo $?
+test -r -r x -t 0 -k; echo $?
+[ -r -r x -t 0 -k ]; echo $?
+test -ge y -z -le / -a; echo $?
+[ -ge y -z -le / -a ]; echo $?
+test y -e abc -h = -nt; echo $?
+[ y -e abc -h = -nt ]; echo $?
+test abc '!'; echo $?
+[ abc '!' ]; echo $?
+test -s -p -ne; echo $?
+[ -s -p -ne ]; echo $?
+test -r '<' '>' ''; echo $?
+[ -r '<' '>' '' ]; echo $?
+test -O = '>'; echo $?
+[ -O = '>' ]; echo $?
+test -r -t -i; echo $?
+[ -r -t -i ]; echo $?
+test '<' -G -d -g -w -le; echo $?
+[ '<' -G -d -g -w -le ]; echo $?
+test -1 -ne -O 1; echo $?
+[ -1 -ne -O 1 ]; echo $?
+test -nt -L -t -t; echo $?
+[ -nt -L -t -t ]; echo $?
+test abc 2 '(' -a; echo $?
+[ abc 2 '(' -a ]; echo $?
+test -p 0x1 -e -ef; echo $?
+[ -p 0x1 -e -ef ]; echo $?
+test -- ')' -nt /etc/passwd; echo $?
+[ -- ')' -nt /etc/passwd ]; echo $?
+test y -ot; echo $?
+[ y -ot ]; echo $?
+test -w -O; echo $?
+[ -w -O ]; echo $?
+test '<' -ef 0 -w /nonexistent -w; echo $?
+[ '<' -ef 0 -w /nonexistent -w ]; echo $?
+test 0 2 -lt; echo $?
+[ 0 2 -lt ]; echo $?
+test -S -d abc -x; echo $?
+[ -S -d abc -x ]; echo $?
+test -o '>' x -p -h -gt; echo $?
+[ -o '>' x -p -h -gt ]; echo $?
+test -h -S -le -w = -b; echo $?
+[ -h -S -le -w = -b ]; echo $?
+test -s -G; echo $?
+[ -s -G ]; echo $?
+test 0 0 '<' -le -o 1; echo $?
+[ 0 0 '<' -le -o 1 ]; echo $?
+test -nt -a; echo $?
+[ -nt -a ]; echo $?
+test -d -a abc -r x; echo $?
+[ -d -a abc -r x ]; echo $?
+test -gt '' -x -k -- '>'; echo $?
+[ -gt '' -x -k -- '>' ]; echo $?
+test -h 2 '<'; echo $?
+[ -h 2 '<' ]; echo $?
+test -G -o -g -ne; echo $?
+[ -G -o -g -ne ]; echo $?
+test 0x1 -h -1 -lt 2; echo $?
+[ 0x1 -h -1 -lt 2 ]; echo $?
+test -ef -L; echo $?
+[ -ef -L ]; echo $?
+test / -w -g -ne -lt -g; echo $?
+[ / -w -g -ne -lt -g ]; echo $?
+test abc -le 0; echo $?
+[ abc -le 0 ]; echo $?
+test -e -t -O -k -i -s; echo $?
+[ -e -t -O -k -i -s ]; echo $?
+test -k '' '>' -G -i -ne; echo $?
+[ -k '' '>' -G -i -ne ]; echo $?
+test -eq -ne -O /nonexistent '('; echo $?
+[ -eq -ne -O /nonexistent '(' ]; echo $?
+test -u -S -G; echo $?
+[ -u -S -G ]; echo $?
+test -- -u -s -o -lt -z; echo $?
+[ -- -u -s -o -lt -z ]; echo $?
+test -S -ot -r ')'; echo $?
+[ -S -ot -r ')' ]; echo $?
+test = -z y /etc/passwd; echo $?
+[ = -z y /etc/passwd ]; echo $?
+test '(' -f -ne; echo $?
+[ '(' -f -ne ]; echo $?
+test '(' -f ')' -L; echo $?
+[ '(' -f ')' -L ]; echo $?
+test 1 -i y /etc/passwd -eq '<'; echo $?
+[ 1 -i y /etc/passwd -eq '<' ]; echo $?
+test -ef -u -a '(' -G; echo $?
+[ -ef -u -a '(' -G ]; echo $?
+test -r -ef -s 1; echo $?
+[ -r -ef -s 1 ]; echo $?
+test -O -G 0 x 0x1 -le; echo $?
+[ -O -G 0 x 0x1 -le ]; echo $?
+test -o '<' -c; echo $?
+[ -o '<' -c ]; echo $?
+test -r -1; echo $?
+[ -r -1 ]; echo $?
+test '>' -c -o -b abc -n; echo $?
+[ '>' -c -o -b abc -n ]; echo $?
+test -d '>'; echo $?
+[ -d '>' ]; echo $?
+test /etc/passwd y -i / -f; echo $?
+[ /etc/passwd y -i / -f ]; echo $?
+test -w -r '<' -r -g -le; echo $?
+[ -w -r '<' -r -g -le ]; echo $?
+test -O -u /etc/passwd '' '!' /nonexistent; echo $?
+[ -O -u /etc/passwd '' '!' /nonexistent ]; echo $?
+test -e /etc/passwd; echo $?
+[ -e /etc/passwd ]; echo $?
+test '!=' -ge -lt '<'; echo $?
+[ '!=' -ge -lt '<' ]; echo $?
+test 0x1 x -f; echo $?
+[ 0x1 x -f ]; echo $?
+test -p '!' -u; echo $?
+[ -p '!' -u ]; echo $?
+test -x -p -ne; echo $?
+[ -x -p -ne ]; echo $?
+test -z '<'; echo $?
+[ -z '<' ]; echo $?
+test -r -i -o -ef; echo $?
+[ -r -i -o -ef ]; echo $?
+test -b '' -- -t 1; echo $?
+[ -b '' -- -t 1 ]; echo $?
+test -nt -r -w -w -g; echo $?
+[ -nt -r -w -w -g ]; echo $?
+test '(' abc -gt -e; echo $?
+[ '(' abc -gt -e ]; echo $?
+test = -eq -g -ot -gt; echo $?
+[ = -eq -g -ot -gt ]; echo $?
+test 2 -f -lt -a; echo $?
+[ 2 -f -lt -a ]; echo $?
+test -g -k -o '!' -u /; echo $?
+[ -g -k -o '!' -u / ]; echo $?
+test y -z -w; echo $?
+[ y -z -w ]; echo $?
+test = -o -le -ne; echo $?
+[ = -o -le -ne ]; echo $?
+test -n -f = /etc/passwd; echo $?
+[ -n -f = /etc/passwd ]; echo $?
+test -eq -le; echo $?
+[ -eq -le ]; echo $?
+test -e -t -t = '!='; echo $?
+[ -e -t -t = '!=' ]; echo $?
+test -g '<' -h -s -ge; echo $?
+[ -g '<' -h -s -ge ]; echo $?
+test -f -S '!' -k '!' abc; echo $?
+[ -f -S '!' -k '!' abc ]; echo $?
+test -ge /nonexistent; echo $?
+[ -ge /nonexistent ]; echo $?
+test -1 -o -n /etc/passwd -z; echo $?
+[ -1 -o -n /etc/passwd -z ]; echo $?
+test -L -u -ef -lt -L; echo $?
+[ -L -u -ef -lt -L ]; echo $?
+test -G -h; echo $?
+[ -G -h ]; echo $?
+test -lt -z -z -i -o; echo $?
+[ -lt -z -z -i -o ]; echo $?
+test 0 -gt; echo $?
+[ 0 -gt ]; echo $?
+test ')' -n 1 -f; echo $?
+[ ')' -n 1 -f ]; echo $?
+test 2 -z -ot y 0x1; echo $?
+[ 2 -z -ot y 0x1 ]; echo $?
+test -h -z -g 0; echo $?
+[ -h -z -g 0 ]; echo $?
+test -d -- -O -ef -ot '!'; echo $?
+[ -d -- -O -ef -ot '!' ]; echo $?
+test -h -gt -k -o; echo $?
+[ -h -gt -k -o ]; echo $?
+test -o / -a -a -p; echo $?
+[ -o / -a -a -p ]; echo $?
+test -b -g 0; echo $?
+[ -b -g 0 ]; echo $?
+test abc -nt -L -O; echo $?
+[ abc -nt -L -O ]; echo $?
+test '<' -- '<' -O ')'; echo $?
+[ '<' -- '<' -O ')' ]; echo $?
+test -lt x / -z -f /nonexistent; echo $?
+[ -lt x / -z -f /nonexistent ]; echo $?
+test '(' -eq -p -nt -t --; echo $?
+[ '(' -eq -p -nt -t -- ]; echo $?
+test -g -gt 1; echo $?
+[ -g -gt 1 ]; echo $?
+test /nonexistent -p; echo $?
+[ /nonexistent -p ]; echo $?
+test '<' -b /nonexistent ''; echo $?
+[ '<' -b /nonexistent '' ]; echo $?
+test -ot 2 -a -o 1; echo $?
+[ -ot 2 -a -o 1 ]; echo $?
+test -ne -u -b abc; echo $?
+[ -ne -u -b abc ]; echo $?
+test -x -1; echo $?
+[ -x -1 ]; echo $?
+test -e -b '!=' -r -gt; echo $?
+[ -e -b '!=' -r -gt ]; echo $?
+test '<' -O -w -r '('; echo $?
+[ '<' -O -w -r '(' ]; echo $?
+test '<' -lt /nonexistent / -ne -i; echo $?
+[ '<' -lt /nonexistent / -ne -i ]; echo $?
+test -s -s '' -G -gt --; echo $?
+[ -s -s '' -G -gt -- ]; echo $?
+test -nt '!=' -n; echo $?
+[ -nt '!=' -n ]; echo $?
+test -u -a ')'; echo $?
+[ -u -a ')' ]; echo $?
+test -f -O; echo $?
+[ -f -O ]; echo $?
+test -p -c; echo $?
+[ -p -c ]; echo $?
+test abc -a -i -r -c -le; echo $?
+[ abc -a -i -r -c -le ]; echo $?
+test -- '<' -gt 0 -u '!'; echo $?
+[ -- '<' -gt 0 -u '!' ]; echo $?
+test ')' y -b -h '>'; echo $?
+[ ')' y -b -h '>' ]; echo $?
+test '' y; echo $?
+[ '' y ]; echo $?
+test -O -c 1 -eq; echo $?
+[ -O -c 1 -eq ]; echo $?
+test -n -a -h '<' '>'; echo $?
+[ -n -a -h '<' '>' ]; echo $?
+test 0x1 '(' -k; echo $?
+[ 0x1 '(' -k ]; echo $?
+test '!' -f -o; echo $?
+[ '!' -f -o ]; echo $?
+test 0x1 x; echo $?
+[ 0x1 x ]; echo $?
+test abc -w / 2 1; echo $?
+[ abc -w / 2 1 ]; echo $?
+test -t 2 -S '' -p; echo $?
+[ -t 2 -S '' -p ]; echo $?
+test '<' -s -o -o -o; echo $?
+[ '<' -s -o -o -o ]; echo $?
+test 2 -a -h -b '' -le; echo $?
+[ 2 -a -h -b '' -le ]; echo $?
+test -eq -w /nonexistent; echo $?
+[ -eq -w /nonexistent ]; echo $?
+test 2 '(' -x -r; echo $?
+[ 2 '(' -x -r ]; echo $?
+test -le -O -o y; echo $?
+[ -le -O -o y ]; echo $?
+test 0x1 -i -f -x; echo $?
+[ 0x1 -i -f -x ]; echo $?
+test -ef = '' -g; echo $?
+[ -ef = '' -g ]; echo $?
+test -S -- / -r; echo $?
+[ -S -- / -r ]; echo $?
+test '!' ')' -le -L -L; echo $?
+[ '!' ')' -le -L -L ]; echo $?
+test abc 2 -L -c /nonexistent; echo $?
+[ abc 2 -L -c /nonexistent ]; echo $?
+test -a /etc/passwd -t '!' -G -ef; echo $?
+[ -a /etc/passwd -t '!' -G -ef ]; echo $?
+test y -lt -r -a; echo $?
+[ y -lt -r -a ]; echo $?
+test -k -o; echo $?
+[ -k -o ]; echo $?
+test -h /nonexistent -L; echo $?
+[ -h /nonexistent -L ]; echo $?
+test -c -i -ne -n; echo $?
+[ -c -i -ne -n ]; echo $?
+test '(' x -w -c; echo $?
+[ '(' x -w -c ]; echo $?
+test -r 2 x; echo $?
+[ -r 2 x ]; echo $?
+test -h '<' 0x1; echo $?
+[ -h '<' 0x1 ]; echo $?
+test y /etc/passwd -p -r; echo $?
+[ y /etc/passwd -p -r ]; echo $?
+test -f -c -r -eq -gt -r; echo $?
+[ -f -c -r -eq -gt -r ]; echo $?
+test -x -p '' -lt -S -i; echo $?
+[ -x -p '' -lt -S -i ]; echo $?
+test -G -x -t /nonexistent; echo $?
+[ -G -x -t /nonexistent ]; echo $?
+test -h '<'; echo $?
+[ -h '<' ]; echo $?
+test = -eq -ne x -n -le; echo $?
+[ = -eq -ne x -n -le ]; echo $?
+test -r -o -ne abc -g -d; echo $?
+[ -r -o -ne abc -g -d ]; echo $?
+test -z -g y; echo $?
+[ -z -g y ]; echo $?
+test -h -eq -ge -d; echo $?
+[ -h -eq -ge -d ]; echo $?
+test 1 -ne -lt '!' -t -p; echo $?
+[ 1 -ne -lt '!' -t -p ]; echo $?
+test x -k '('; echo $?
+[ x -k '(' ]; echo $?
+test -b -x; echo $?
+[ -b -x ]; echo $?
+test -s x; echo $?
+[ -s x ]; echo $?
+test 2 -G -k ')'; echo $?
+[ 2 -G -k ')' ]; echo $?
+test '(' -gt; echo $?
+[ '(' -gt ]; echo $?
+test -O -lt -d -ot 0x1 -d; echo $?
+[ -O -lt -d -ot 0x1 -d ]; echo $?
+test -le -S -t; echo $?
+[ -le -S -t ]; echo $?
+test x 2 /nonexistent 1; echo $?
+[ x 2 /nonexistent 1 ]; echo $?
+test -G -c -le; echo $?
+[ -G -c -le ]; echo $?
+test -g -ef -f -a -f -z; echo $?
+[ -g -ef -f -a -f -z ]; echo $?
+test ')' 1 -i -n -d =; echo $?
+[ ')' 1 -i -n -d = ]; echo $?
+test -p -n '!=' -S -u; echo $?
+[ -p -n '!=' -S -u ]; echo $?
+test abc -a y -z; echo $?
+[ abc -a y -z ]; echo $?
+test -e -f '' -r; echo $?
+[ -e -f '' -r ]; echo $?
+test 2 -G -nt -g -G -b; echo $?
+[ 2 -G -nt -g -G -b ]; echo $?
+test -w -i; echo $?
+[ -w -i ]; echo $?
+test '(' 0x1; echo $?
+[ '(' 0x1 ]; echo $?
+test abc -1 /etc/passwd 0x1; echo $?
+[ abc -1 /etc/passwd 0x1 ]; echo $?
+test -ot -r; echo $?
+[ -ot -r ]; echo $?
+test y -s; echo $?
+[ y -s ]; echo $?
+test -ne -z -O -L -b; echo $?
+[ -ne -z -O -L -b ]; echo $?
+test -O '>' '>' '' /nonexistent; echo $?
+[ -O '>' '>' '' /nonexistent ]; echo $?
+test -S -h -u / -f -g; echo $?
+[ -S -h -u / -f -g ]; echo $?
+test /nonexistent abc -h -g; echo $?
+[ /nonexistent abc -h -g ]; echo $?
+test -d -L -le; echo $?
+[ -d -L -le ]; echo $?
+test -x -z; echo $?
+[ -x -z ]; echo $?
+test /nonexistent -x -s; echo $?
+[ /nonexistent -x -s ]; echo $?
+test -b y -h -h; echo $?
+[ -b y -h -h ]; echo $?
+test '>' -p -k -f -b; echo $?
+[ '>' -p -k -f -b ]; echo $?
+test -eq -h -k ''; echo $?
+[ -eq -h -k '' ]; echo $?
+test '' / -d -ef -L; echo $?
+[ '' / -d -ef -L ]; echo $?
+test '!=' -le abc; echo $?
+[ '!=' -le abc ]; echo $?
+test -nt -lt; echo $?
+[ -nt -lt ]; echo $?
+test -o '<' -S; echo $?
+[ -o '<' -S ]; echo $?
+test -z / '!=' -s -G ''; echo $?
+[ -z / '!=' -s -G '' ]; echo $?
+test 2 -eq -le / -u; echo $?
+[ 2 -eq -le / -u ]; echo $?
+test /etc/passwd -lt -s -d; echo $?
+[ /etc/passwd -lt -s -d ]; echo $?
+test -ef -ge; echo $?
+[ -ef -ge ]; echo $?
+test -h -L -ge -S -u -1; echo $?
+[ -h -L -ge -S -u -1 ]; echo $?
+test -p -ge = -c; echo $?
+[ -p -ge = -c ]; echo $?
+test -lt -O -c -eq -S -eq; echo $?
+[ -lt -O -c -eq -S -eq ]; echo $?
+test -z -g '>' /etc/passwd -h x; echo $?
+[ -z -g '>' /etc/passwd -h x ]; echo $?
+test -w abc -o; echo $?
+[ -w abc -o ]; echo $?
+test -f -d x -L -- -i; echo $?
+[ -f -d x -L -- -i ]; echo $?
+test -x -s; echo $?
+[ -x -s ]; echo $?
+test /nonexistent y '!' '>'; echo $?
+[ /nonexistent y '!' '>' ]; echo $?
+test -G -s; echo $?
+[ -G -s ]; echo $?
+test ')' '<' -x; echo $?
+[ ')' '<' -x ]; echo $?
+test 0 -le x -G '!='; echo $?
+[ 0 -le x -G '!=' ]; echo $?
+test -f -n abc; echo $?
+[ -f -n abc ]; echo $?
+test -k y 0x1; echo $?
+[ -k y 0x1 ]; echo $?
+test -S '(' 0 = -b; echo $?
+[ -S '(' 0 = -b ]; echo $?
+test -u -g -O; echo $?
+[ -u -g -O ]; echo $?
+test x -c x -f --; echo $?
+[ x -c x -f -- ]; echo $?
+test -le -w '(' 2 -G x; echo $?
+[ -le -w '(' 2 -G x ]; echo $?
+test -e -ne -a -c -c -n; echo $?
+[ -e -ne -a -c -c -n ]; echo $?
+test -x -z '!=' -t -k --; echo $?
+[ -x -z '!=' -t -k -- ]; echo $?
+test = -h abc; echo $?
+[ = -h abc ]; echo $?
+test y '<' 0; echo $?
+[ y '<' 0 ]; echo $?
+test -gt -nt -x 1; echo $?
+[ -gt -nt -x 1 ]; echo $?
+test -c 1 -le; echo $?
+[ -c 1 -le ]; echo $?
+test 0 '<' -d '!='; echo $?
+[ 0 '<' -d '!=' ]; echo $?
+test -h '' -b '>' '!'; echo $?
+[ -h '' -b '>' '!' ]; echo $?
+test y -ne -n -eq; echo $?
+[ y -ne -n -eq ]; echo $?
+test 0 2 x; echo $?
+[ 0 2 x ]; echo $?
+test 1 -b 2; echo $?
+[ 1 -b 2 ]; echo $?
+test 0x1 abc -c -p 1; echo $?
+[ 0x1 abc -c -p 1 ]; echo $?
+test -- -g -ot -c -c -ot; echo $?
+[ -- -g -ot -c -c -ot ]; echo $?
+test -1 -s -S '!'; echo $?
+[ -1 -s -S '!' ]; echo $?
+test -G -f '<' ')'; echo $?
+[ -G -f '<' ')' ]; echo $?
+test abc -f -ne -O '!'; echo $?
+[ abc -f -ne -O '!' ]; echo $?
+test -gt -ot 0 -lt; echo $?
+[ -gt -ot 0 -lt ]; echo $?
+test -nt -c; echo $?
+[ -nt -c ]; echo $?
+test -z -lt -- 0x1; echo $?
+[ -z -lt -- 0x1 ]; echo $?
+test -c -b -z -c; echo $?
+[ -c -b -z -c ]; echo $?
+test -nt -u -ot 0x1; echo $?
+[ -nt -u -ot 0x1 ]; echo $?
+test -O -i; echo $?
+[ -O -i ]; echo $?
+test -G '!=' -u; echo $?
+[ -G '!=' -u ]; echo $?
+test -ef -ef abc; echo $?
+[ -ef -ef abc ]; echo $?
+test -ne x -nt '!' x; echo $?
+[ -ne x -nt '!' x ]; echo $?
+test -c -r /; echo $?
+[ -c -r / ]; echo $?
+test -u -L -- -n -e abc; echo $?
+[ -u -L -- -n -e abc ]; echo $?
+test -G -w '!'; echo $?
+[ -G -w '!' ]; echo $?
+test -le 2 -- -a; echo $?
+[ -le 2 -- -a ]; echo $?
+test -d -g -ot '>' -t; echo $?
+[ -d -g -ot '>' -t ]; echo $?
+test -c -f -ne '!' -t --; echo $?
+[ -c -f -ne '!' -t -- ]; echo $?
+test -- '>'; echo $?
+[ -- '>' ]; echo $?
+test -r /etc/passwd = -k -z -G; echo $?
+[ -r /etc/passwd = -k -z -G ]; echo $?
+test '(' -a; echo $?
+[ '(' -a ]; echo $?
+test -b -p -e -z -G -ef; echo $?
+[ -b -p -e -z -G -ef ]; echo $?
+test 2 -u -f -le -S; echo $?
+[ 2 -u -f -le -S ]; echo $?
+test -S '>' -nt -L -p -e; echo $?
+[ -S '>' -nt -L -p -e ]; echo $?
+test -i -c / -eq; echo $?
+[ -i -c / -eq ]; echo $?
+test x '' -z = -1; echo $?
+[ x '' -z = -1 ]; echo $?
+test ')' '<' -ot -h '<'; echo $?
+[ ')' '<' -ot -h '<' ]; echo $?
+test abc '!=' -nt; echo $?
+[ abc '!=' -nt ]; echo $?
+test '(' 0x1 -z -h '<' -lt; echo $?
+[ '(' 0x1 -z -h '<' -lt ]; echo $?
+test -o -ef; echo $?
+[ -o -ef ]; echo $?
+test -L ')' '!' '' 2 -eq; echo $?
+[ -L ')' '!' '' 2 -eq ]; echo $?
+test -- 1 -g -n -h 2; echo $?
+[ -- 1 -g -n -h 2 ]; echo $?
+test 2 -ef -a -f 0x1; echo $?
+[ 2 -ef -a -f 0x1 ]; echo $?
+test -S -L -ne -ef -lt /etc/passwd; echo $?
+[ -S -L -ne -ef -lt /etc/passwd ]; echo $?
+test -G -S; echo $?
+[ -G -S ]; echo $?
+test '' -eq 0 -a '('; echo $?
+[ '' -eq 0 -a '(' ]; echo $?
+test -t -le; echo $?
+[ -t -le ]; echo $?
+test -s y -nt x; echo $?
+[ -s y -nt x ]; echo $?
+test -n -lt -O -x -k -z; echo $?
+[ -n -lt -O -x -k -z ]; echo $?
+test 0x1 -f -r -g; echo $?
+[ 0x1 -f -r -g ]; echo $?
+test -n 1; echo $?
+[ -n 1 ]; echo $?
+test -p -f 1 1; echo $?
+[ -p -f 1 1 ]; echo $?
+test x -gt -le -r -z; echo $?
+[ x -gt -le -r -z ]; echo $?
+test -eq -o; echo $?
+[ -eq -o ]; echo $?
+test -eq -x x -n x abc; echo $?
+[ -eq -x x -n x abc ]; echo $?
+test '!' 0 -ef '' -L; echo $?
+[ '!' 0 -ef '' -L ]; echo $?
+test -a y; echo $?
+[ -a y ]; echo $?
+test -c -ot -w -ot; echo $?
+[ -c -ot -w -ot ]; echo $?
+test -o y -nt; echo $?
+[ -o y -nt ]; echo $?
+test -L -f; echo $?
+[ -L -f ]; echo $?
+test -ge -S -eq -b; echo $?
+[ -ge -S -eq -b ]; echo $?
+test -k -p -g /etc/passwd -G; echo $?
+[ -k -p -g /etc/passwd -G ]; echo $?
+test = '<' -G; echo $?
+[ = '<' -G ]; echo $?
+test 1 -z -L -h -e -r; echo $?
+[ 1 -z -L -h -e -r ]; echo $?
+test = 0 1 0 -ge; echo $?
+[ = 0 1 0 -ge ]; echo $?
+test -a -L -p -g --; echo $?
+[ -a -L -p -g -- ]; echo $?
+test -O x 2 '(' -O -h; echo $?
+[ -O x 2 '(' -O -h ]; echo $?
+test '!=' 1 '>'; echo $?
+[ '!=' 1 '>' ]; echo $?
+test -e x -n '!' -ef -r; echo $?
+[ -e x -n '!' -ef -r ]; echo $?
+test / '!' -L -G / --; echo $?
+[ / '!' -L -G / -- ]; echo $?
+test 2 -b /nonexistent -c; echo $?
+[ 2 -b /nonexistent -c ]; echo $?
+test ')' -i y; echo $?
+[ ')' -i y ]; echo $?
+test abc -t = '(' -x; echo $?
+[ abc -t = '(' -x ]; echo $?
+test -f -z -g -d 0; echo $?
+[ -f -z -g -d 0 ]; echo $?
+test -z -1 '' -ot -k; echo $?
+[ -z -1 '' -ot -k ]; echo $?
+test -t -- -G -nt -nt -w; echo $?
+[ -t -- -G -nt -nt -w ]; echo $?
+test -u -o /nonexistent '!'; echo $?
+[ -u -o /nonexistent '!' ]; echo $?
+test -ot '('; echo $?
+[ -ot '(' ]; echo $?
+test -t -z '<'; echo $?
+[ -t -z '<' ]; echo $?
+test -b -b 0 '<' 0x1; echo $?
+[ -b -b 0 '<' 0x1 ]; echo $?
+test -ot -- -lt; echo $?
+[ -ot -- -lt ]; echo $?
+test -eq '!'; echo $?
+[ -eq '!' ]; echo $?
+test '>' /etc/passwd -x 1 --; echo $?
+[ '>' /etc/passwd -x 1 -- ]; echo $?
+test -ef -le 2; echo $?
+[ -ef -le 2 ]; echo $?
+test -ne -g -x abc ''; echo $?
+[ -ne -g -x abc '' ]; echo $?
+test -o '(' -G -O -f; echo $?
+[ -o '(' -G -O -f ]; echo $?
+test -1 -e -S -b -f; echo $?
+[ -1 -e -S -b -f ]; echo $?
+test 0 -f; echo $?
+[ 0 -f ]; echo $?
+test -r -x /etc/passwd abc; echo $?
+[ -r -x /etc/passwd abc ]; echo $?
+test abc -ot 1 /; echo $?
+[ abc -ot 1 / ]; echo $?
+test /nonexistent '!='; echo $?
+[ /nonexistent '!=' ]; echo $?
+test -g 0 -c; echo $?
+[ -g 0 -c ]; echo $?
+test -p -- 0x1 '(' 1; echo $?
+[ -p -- 0x1 '(' 1 ]; echo $?
+test -n -a; echo $?
+[ -n -a ]; echo $?
+test -w '!=' '('; echo $?
+[ -w '!=' '(' ]; echo $?
+test -eq -d; echo $?
+[ -eq -d ]; echo $?
+test y '<' -1 -O -u -n; echo $?
+[ y '<' -1 -O -u -n ]; echo $?
+test '(' -p ')'; echo $?
+[ '(' -p ')' ]; echo $?
+test ')' 0 -1 /etc/passwd -ne; echo $?
+[ ')' 0 -1 /etc/passwd -ne ]; echo $?
+test -a -x 2; echo $?
+[ -a -x 2 ]; echo $?
+test -b '' = y -lt /; echo $?
+[ -b '' = y -lt / ]; echo $?
+test -ne -ge -gt -1; echo $?
+[ -ne -ge -gt -1 ]; echo $?
+test -i -O -L -d -le; echo $?
+[ -i -O -L -d -le ]; echo $?
+test -ot ')'; echo $?
+[ -ot ')' ]; echo $?
+test 2 -ge '(' -ne -b -f; echo $?
+[ 2 -ge '(' -ne -b -f ]; echo $?
+test -b -r -ot 0; echo $?
+[ -b -r -ot 0 ]; echo $?
+test -O / -gt -s; echo $?
+[ -O / -gt -s ]; echo $?
+test -a -u -lt -k -ne 2; echo $?
+[ -a -u -lt -k -ne 2 ]; echo $?
+test -u -eq -1 -z; echo $?
+[ -u -eq -1 -z ]; echo $?
+test /etc/passwd 0x1 -S -L; echo $?
+[ /etc/passwd 0x1 -S -L ]; echo $?
+test -L -i --; echo $?
+[ -L -i -- ]; echo $?
+test = -O; echo $?
+[ = -O ]; echo $?
+test -eq '!=' '(' ')' 0x1 -c; echo $?
+[ -eq '!=' '(' ')' 0x1 -c ]; echo $?
+test -w /etc/passwd -G 0 -gt; echo $?
+[ -w /etc/passwd -G 0 -gt ]; echo $?
+test -le -ot -s -lt -S -d; echo $?
+[ -le -ot -s -lt -S -d ]; echo $?
+test -e -e -o -r x -u; echo $?
+[ -e -e -o -r x -u ]; echo $?
+test -ef -b -u '<'; echo $?
+[ -ef -b -u '<' ]; echo $?
+test abc =; echo $?
+[ abc = ]; echo $?
+test -G -s '!' '!='; echo $?
+[ -G -s '!' '!=' ]; echo $?
+test -O -le y; echo $?
+[ -O -le y ]; echo $?
+test -nt -w 1 x -e; echo $?
+[ -nt -w 1 x -e ]; echo $?
+test -- -g -n; echo $?
+[ -- -g -n ]; echo $?
+test /etc/passwd -1 -w -r; echo $?
+[ /etc/passwd -1 -w -r ]; echo $?
+test = -e '<'; echo $?
+[ = -e '<' ]; echo $?
+test -ef -S -c -t; echo $?
+[ -ef -S -c -t ]; echo $?
+test -L -L -- 0; echo $?
+[ -L -L -- 0 ]; echo $?
+test -ef -t '<' '>' -o; echo $?
+[ -ef -t '<' '>' -o ]; echo $?
+test -gt -le -n '!=' /nonexistent -L; echo $?
+[ -gt -le -n '!=' /nonexistent -L ]; echo $?
+test -lt -ne; echo $?
+[ -lt -ne ]; echo $?
+test -L '!=' -k -S '!='; echo $?
+[ -L '!=' -k -S '!=' ]; echo $?
+test -a ')' 0 -le -ne -s; echo $?
+[ -a ')' 0 -le -ne -s ]; echo $?
+test '' -x / -gt -z; echo $?
+[ '' -x / -gt -z ]; echo $?
+test -s -b -nt -ot -d -i; echo $?
+[ -s -b -nt -ot -d -i ]; echo $?
+test /etc/passwd -z -ot y -O -z; echo $?
+[ /etc/passwd -z -ot y -O -z ]; echo $?
+test -gt = -ot 0 -g; echo $?
+[ -gt = -ot 0 -g ]; echo $?
+test = -nt; echo $?
+[ = -nt ]; echo $?
+test '<' 0; echo $?
+[ '<' 0 ]; echo $?
+test '<' abc; echo $?
+[ '<' abc ]; echo $?
+test -ge /etc/passwd '!=' -o; echo $?
+[ -ge /etc/passwd '!=' -o ]; echo $?
+test -a /nonexistent -G 0x1 -le '<'; echo $?
+[ -a /nonexistent -G 0x1 -le '<' ]; echo $?
+test -- -f x -ot; echo $?
+[ -- -f x -ot ]; echo $?
+test '' x -o -nt y -k; echo $?
+[ '' x -o -nt y -k ]; echo $?
+test -le '!' -G -a -e; echo $?
+[ -le '!' -G -a -e ]; echo $?
+test -t -x -r '(' -O -ot; echo $?
+[ -t -x -r '(' -O -ot ]; echo $?
+test -lt -ne -nt -o /etc/passwd; echo $?
+[ -lt -ne -nt -o /etc/passwd ]; echo $?
+test -ge -r -d; echo $?
+[ -ge -r -d ]; echo $?
+test -gt -ne -x -G; echo $?
+[ -gt -ne -x -G ]; echo $?
+test /nonexistent -x -gt y; echo $?
+[ /nonexistent -x -gt y ]; echo $?
+test -o -nt -t -x -e /etc/passwd; echo $?
+[ -o -nt -t -x -e /etc/passwd ]; echo $?
+test -eq -L '>' x -e; echo $?
+[ -eq -L '>' x -e ]; echo $?
+test -n -x abc -S -t -ge; echo $?
+[ -n -x abc -S -t -ge ]; echo $?
+test -u -c -u /nonexistent; echo $?
+[ -u -c -u /nonexistent ]; echo $?
+test -O -eq -G; echo $?
+[ -O -eq -G ]; echo $?
+test -f x -w 0; echo $?
+[ -f x -w 0 ]; echo $?
+test 1 -t -nt 1; echo $?
+[ 1 -t -nt 1 ]; echo $?
+test -a -h; echo $?
+[ -a -h ]; echo $?
+test -c -ge -e; echo $?
+[ -c -ge -e ]; echo $?
+test -nt -o; echo $?
+[ -nt -o ]; echo $?
+test -x ')' -c '>' -d -o; echo $?
+[ -x ')' -c '>' -d -o ]; echo $?
+test -g '!=' ''; echo $?
+[ -g '!=' '' ]; echo $?
+test '(' '('; echo $?
+[ '(' '(' ]; echo $?
+test '(' -z ')' -eq; echo $?
+[ '(' -z ')' -eq ]; echo $?
+test -w / -lt 1 -ot; echo $?
+[ -w / -lt 1 -ot ]; echo $?
+test -c -t -d -o '!'; echo $?
+[ -c -t -d -o '!' ]; echo $?
+test '!' -c; echo $?
+[ '!' -c ]; echo $?
+test '!=' -a -1 -t; echo $?
+[ '!=' -a -1 -t ]; echo $?
+test -gt -ef -nt -S; echo $?
+[ -gt -ef -nt -S ]; echo $?
+test -d -ge; echo $?
+[ -d -ge ]; echo $?
+test / -i -u -a; echo $?
+[ / -i -u -a ]; echo $?
+test y ')' -ot y -le; echo $?
+[ y ')' -ot y -le ]; echo $?
+test 2 -1 -f; echo $?
+[ 2 -1 -f ]; echo $?
+test -d -c; echo $?
+[ -d -c ]; echo $?
+test -L '!=' 2 --; echo $?
+[ -L '!=' 2 -- ]; echo $?
+test -g -o '!=' '!=' -S '>'; echo $?
+[ -g -o '!=' '!=' -S '>' ]; echo $?
+test 0 -k -le 1 -le -b; echo $?
+[ 0 -k -le 1 -le -b ]; echo $?
+test -a -L -s /; echo $?
+[ -a -L -s / ]; echo $?
+test = '>' -c; echo $?
+[ = '>' -c ]; echo $?
+test y /etc/passwd '>' / x; echo $?
+[ y /etc/passwd '>' / x ]; echo $?
+test -z 2 -ne -o; echo $?
+[ -z 2 -ne -o ]; echo $?
+test -a -le; echo $?
+[ -a -le ]; echo $?
+test -gt -nt --; echo $?
+[ -gt -nt -- ]; echo $?
+test -b -p / -d -r -t; echo $?
+[ -b -p / -d -r -t ]; echo $?
+test -ot -a '!=' -a; echo $?
+[ -ot -a '!=' -a ]; echo $?
+test -i -z -d -p 1; echo $?
+[ -i -z -d -p 1 ]; echo $?
+test -f -eq -g; echo $?
+[ -f -eq -g ]; echo $?
+test -ef -1 1 -a x; echo $?
+[ -ef -1 1 -a x ]; echo $?
+test / -L -r -b; echo $?
+[ / -L -r -b ]; echo $?
+test /nonexistent -u; echo $?
+[ /nonexistent -u ]; echo $?
+test -ef -b -g -lt; echo $?
+[ -ef -b -g -lt ]; echo $?
+test -a -t 1; echo $?
+[ -a -t 1 ]; echo $?
+test -e -ot -u -a -L; echo $?
+[ -e -ot -u -a -L ]; echo $?
+test -ef y -eq; echo $?
+[ -ef y -eq ]; echo $?
+test -L -o -g -f -k -1; echo $?
+[ -L -o -g -f -k -1 ]; echo $?
+test /nonexistent -ge -L -a -r; echo $?
+[ /nonexistent -ge -L -a -r ]; echo $?
+test -1 '>' -w -p '>'; echo $?
+[ -1 '>' -w -p '>' ]; echo $?
+test '!' 0 -S -n; echo $?
+[ '!' 0 -S -n ]; echo $?
+test -o -e; echo $?
+[ -o -e ]; echo $?
+test '!=' x -g -s -S -h; echo $?
+[ '!=' x -g -s -S -h ]; echo $?
+test -f -k '(' '>' '!'; echo $?
+[ -f -k '(' '>' '!' ]; echo $?
+test 1 -1; echo $?
+[ 1 -1 ]; echo $?
+test -t -L -ne -g '>'; echo $?
+[ -t -L -ne -g '>' ]; echo $?
+test -le -n -o '!=' -p =; echo $?
+[ -le -n -o '!=' -p = ]; echo $?
+test -- '<' ')' -d '>'; echo $?
+[ -- '<' ')' -d '>' ]; echo $?
+test '>' -g 0x1 -ot -k -p; echo $?
+[ '>' -g 0x1 -ot -k -p ]; echo $?
+test -n -p x x ')' -S; echo $?
+[ -n -p x x ')' -S ]; echo $?
+test abc -ef -t -g; echo $?
+[ abc -ef -t -g ]; echo $?
+test '!=' '!=' -nt -r; echo $?
+[ '!=' '!=' -nt -r ]; echo $?
+test = -le; echo $?
+[ = -le ]; echo $?
+test -ge -u = -1 -r; echo $?
+[ -ge -u = -1 -r ]; echo $?
+test -u -S -O -h -d; echo $?
+[ -u -S -O -h -d ]; echo $?
+test -o -- x /nonexistent '<' -S; echo $?
+[ -o -- x /nonexistent '<' -S ]; echo $?
+test -u -S -ge; echo $?
+[ -u -S -ge ]; echo $?
+test -f abc -eq; echo $?
+[ -f abc -eq ]; echo $?
+test -a -t x -h -g -s; echo $?
+[ -a -t x -h -g -s ]; echo $?
+test -i -g; echo $?
+[ -i -g ]; echo $?
+test -s -s; echo $?
+[ -s -s ]; echo $?
+test -ef -ot -k -ge 0 '>'; echo $?
+[ -ef -ot -k -ge 0 '>' ]; echo $?
+test -ef -b 0 -b -o; echo $?
+[ -ef -b 0 -b -o ]; echo $?
+test -ne -i; echo $?
+[ -ne -i ]; echo $?
+test / -s -g -ge; echo $?
+[ / -s -g -ge ]; echo $?
+test '!=' -r x; echo $?
+[ '!=' -r x ]; echo $?
+test -nt -x -G -S; echo $?
+[ -nt -x -G -S ]; echo $?
+test -lt -s x -le -lt; echo $?
+[ -lt -s x -le -lt ]; echo $?
+test -a -g -o; echo $?
+[ -a -g -o ]; echo $?
+test -x -a; echo $?
+[ -x -a ]; echo $?
+test 0x1 /etc/passwd -o 2; echo $?
+[ 0x1 /etc/passwd -o 2 ]; echo $?
+test 1 -le -lt -f; echo $?
+[ 1 -le -lt -f ]; echo $?
+test -- -d -a; echo $?
+[ -- -d -a ]; echo $?
+test -r -u; echo $?
+[ -r -u ]; echo $?
+test -z -t -n /etc/passwd -G; echo $?
+[ -z -t -n /etc/passwd -G ]; echo $?
+test / -ef -L '('; echo $?
+[ / -ef -L '(' ]; echo $?
+test -g -a; echo $?
+[ -g -a ]; echo $?
+test /etc/passwd '!' / -k; echo $?
+[ /etc/passwd '!' / -k ]; echo $?
+test -d '<'; echo $?
+[ -d '<' ]; echo $?
+test -le '!' -a -gt =; echo $?
+[ -le '!' -a -gt = ]; echo $?
+test -i -nt '!='; echo $?
+[ -i -nt '!=' ]; echo $?
+test -i -r; echo $?
+[ -i -r ]; echo $?
+test '(' -ge -g -nt; echo $?
+[ '(' -ge -g -nt ]; echo $?
+test -b -ge -g -eq 0 -L; echo $?
+[ -b -ge -g -eq 0 -L ]; echo $?
+test -i 0x1 -L -1; echo $?
+[ -i 0x1 -L -1 ]; echo $?
+test -nt -c 0 -h; echo $?
+[ -nt -c 0 -h ]; echo $?
+test 2 -nt abc -L; echo $?
+[ 2 -nt abc -L ]; echo $?
+test ')' -c -a -eq -G; echo $?
+[ ')' -c -a -eq -G ]; echo $?
+test -1 -w 0x1 '(' -- '('; echo $?
+[ -1 -w 0x1 '(' -- '(' ]; echo $?
+test -c -z -n; echo $?
+[ -c -z -n ]; echo $?
+test -nt '>' '!=' -k -gt '>'; echo $?
+[ -nt '>' '!=' -k -gt '>' ]; echo $?
+test -eq -d -ne -L -k; echo $?
+[ -eq -d -ne -L -k ]; echo $?
+test -ot -- -w -i -g; echo $?
+[ -ot -- -w -i -g ]; echo $?
+test 0 -t -r; echo $?
+[ 0 -t -r ]; echo $?
+test -s -x '(' 1 -c ''; echo $?
+[ -s -x '(' 1 -c '' ]; echo $?
+test -g -e -lt ''; echo $?
+[ -g -e -lt '' ]; echo $?
+test -d -g ')' '!' -G -s; echo $?
+[ -d -g ')' '!' -G -s ]; echo $?
+test -ge -x; echo $?
+[ -ge -x ]; echo $?
+test -z -ot; echo $?
+[ -z -ot ]; echo $?
+test '>' -eq = -u; echo $?
+[ '>' -eq = -u ]; echo $?
+test -a -s y -k ''; echo $?
+[ -a -s y -k '' ]; echo $?
+test -z -1 0; echo $?
+[ -z -1 0 ]; echo $?
+test -gt -z -e y; echo $?
+[ -gt -z -e y ]; echo $?
+test -- -r -S; echo $?
+[ -- -r -S ]; echo $?
+test 0 '<' -ne; echo $?
+[ 0 '<' -ne ]; echo $?
+test 0 -ge -L -eq -O /; echo $?
+[ 0 -ge -L -eq -O / ]; echo $?
+test -h -g -s; echo $?
+[ -h -g -s ]; echo $?
+test -x '>' -z -c -o abc; echo $?
+[ -x '>' -z -c -o abc ]; echo $?
+test -ot '!' -le -nt; echo $?
+[ -ot '!' -le -nt ]; echo $?
+test /nonexistent -f '' -eq; echo $?
+[ /nonexistent -f '' -eq ]; echo $?
+test -o -G -nt; echo $?
+[ -o -G -nt ]; echo $?
+test -b -z '(' ')'; echo $?
+[ -b -z '(' ')' ]; echo $?
+test / -S -gt y; echo $?
+[ / -S -gt y ]; echo $?
+test -w /etc/passwd -u '(' -k abc; echo $?
+[ -w /etc/passwd -u '(' -k abc ]; echo $?
+test -t -L -S; echo $?
+[ -t -L -S ]; echo $?
+test /nonexistent -L -- -gt -s; echo $?
+[ /nonexistent -L -- -gt -s ]; echo $?
+test -f = 0 1 x -ot; echo $?
+[ -f = 0 1 x -ot ]; echo $?
+test -f -g -k = -ne -nt; echo $?
+[ -f -g -k = -ne -nt ]; echo $?
+test -- '<' '' '!=' -a; echo $?
+[ -- '<' '' '!=' -a ]; echo $?
+test -k -d; echo $?
+[ -k -d ]; echo $?
+test y -i; echo $?
+[ y -i ]; echo $?
+test -nt 1 -g; echo $?
+[ -nt 1 -g ]; echo $?
+test -i /etc/passwd -t '!' ')'; echo $?
+[ -i /etc/passwd -t '!' ')' ]; echo $?
+test '<' -g -G 0x1 -ge -k; echo $?
+[ '<' -g -G 0x1 -ge -k ]; echo $?
+test -G -gt -k /nonexistent -ot =; echo $?
+[ -G -gt -k /nonexistent -ot = ]; echo $?
+test ')' '>' -gt 0 '' -h; echo $?
+[ ')' '>' -gt 0 '' -h ]; echo $?
+test -d -L '(' 0 -n ''; echo $?
+[ -d -L '(' 0 -n '' ]; echo $?
+test -ot 1 -- -ef; echo $?
+[ -ot 1 -- -ef ]; echo $?
+test 1 -z -ef -O -u -o; echo $?
+[ 1 -z -ef -O -u -o ]; echo $?
+test -r -lt -S -t -eq; echo $?
+[ -r -lt -S -t -eq ]; echo $?
+test -k / -p 0 -ge; echo $?
+[ -k / -p 0 -ge ]; echo $?
+test -o 1; echo $?
+[ -o 1 ]; echo $?
+test x '<' -ne /nonexistent -nt; echo $?
+[ x '<' -ne /nonexistent -nt ]; echo $?
+test -n abc -d 1 -n; echo $?
+[ -n abc -d 1 -n ]; echo $?
+test -G -nt -k; echo $?
+[ -G -nt -k ]; echo $?
+test -O -h x '>' ')'; echo $?
+[ -O -h x '>' ')' ]; echo $?
+test -a -d x ')' -O -x; echo $?
+[ -a -d x ')' -O -x ]; echo $?
+test '!=' -g; echo $?
+[ '!=' -g ]; echo $?
+test -r -S '>' -p; echo $?
+[ -r -S '>' -p ]; echo $?
+test 0x1 -ef 2; echo $?
+[ 0x1 -ef 2 ]; echo $?
+test -- -- '<'; echo $?
+[ -- -- '<' ]; echo $?
+test -eq '!=' -d -x; echo $?
+[ -eq '!=' -d -x ]; echo $?
+test 2 =; echo $?
+[ 2 = ]; echo $?
+test -lt -w -p -nt -n -gt; echo $?
+[ -lt -w -p -nt -n -gt ]; echo $?
+test '(' -d -ot -eq -- -nt; echo $?
+[ '(' -d -ot -eq -- -nt ]; echo $?
+test ')' -nt -S y -lt; echo $?
+[ ')' -nt -S y -lt ]; echo $?
+test -S y 1 -o; echo $?
+[ -S y 1 -o ]; echo $?
+test /nonexistent -d y 2 -L; echo $?
+[ /nonexistent -d y 2 -L ]; echo $?

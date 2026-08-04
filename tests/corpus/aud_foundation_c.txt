@@ -1,0 +1,362 @@
+#!name stack-len-1
+i=0; s=; while [ $i -lt 1 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-2
+i=0; s=; while [ $i -lt 2 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-3
+i=0; s=; while [ $i -lt 3 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-7
+i=0; s=; while [ $i -lt 7 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-8
+i=0; s=; while [ $i -lt 8 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-9
+i=0; s=; while [ $i -lt 9 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-15
+i=0; s=; while [ $i -lt 15 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-16
+i=0; s=; while [ $i -lt 16 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-17
+i=0; s=; while [ $i -lt 17 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-63
+i=0; s=; while [ $i -lt 63 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-64
+i=0; s=; while [ $i -lt 64 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-120
+i=0; s=; while [ $i -lt 120 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-126
+i=0; s=; while [ $i -lt 126 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-127
+i=0; s=; while [ $i -lt 127 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-128
+i=0; s=; while [ $i -lt 128 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-129
+i=0; s=; while [ $i -lt 129 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-130
+i=0; s=; while [ $i -lt 130 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-247
+i=0; s=; while [ $i -lt 247 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-248
+i=0; s=; while [ $i -lt 248 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-249
+i=0; s=; while [ $i -lt 249 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-375
+i=0; s=; while [ $i -lt 375 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-376
+i=0; s=; while [ $i -lt 376 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-377
+i=0; s=; while [ $i -lt 377 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-503
+i=0; s=; while [ $i -lt 503 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-504
+i=0; s=; while [ $i -lt 504 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-505
+i=0; s=; while [ $i -lt 505 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-511
+i=0; s=; while [ $i -lt 511 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-512
+i=0; s=; while [ $i -lt 512 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-513
+i=0; s=; while [ $i -lt 513 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-1007
+i=0; s=; while [ $i -lt 1007 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-1008
+i=0; s=; while [ $i -lt 1008 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-1009
+i=0; s=; while [ $i -lt 1009 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-1015
+i=0; s=; while [ $i -lt 1015 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-1016
+i=0; s=; while [ $i -lt 1016 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-1017
+i=0; s=; while [ $i -lt 1017 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-2015
+i=0; s=; while [ $i -lt 2015 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-2016
+i=0; s=; while [ $i -lt 2016 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-2017
+i=0; s=; while [ $i -lt 2017 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-4031
+i=0; s=; while [ $i -lt 4031 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-4032
+i=0; s=; while [ $i -lt 4032 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-4033
+i=0; s=; while [ $i -lt 4033 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-8062
+i=0; s=; while [ $i -lt 8062 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-8063
+i=0; s=; while [ $i -lt 8063 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-8064
+i=0; s=; while [ $i -lt 8064 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-8190
+i=0; s=; while [ $i -lt 8190 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-8191
+i=0; s=; while [ $i -lt 8191 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-8192
+i=0; s=; while [ $i -lt 8192 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-8193
+i=0; s=; while [ $i -lt 8193 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-8194
+i=0; s=; while [ $i -lt 8194 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name stack-len-8200
+i=0; s=; while [ $i -lt 8200 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; t="$s$s"; echo ${#t}; u="${t#a}"; echo ${#u}; case "$s" in a*) echo m;; esac; printf "%s" "$s" | wc -c
+%%%
+#!name out-len-1
+i=0; s=; while [ $i -lt 1 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-2
+i=0; s=; while [ $i -lt 2 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-3
+i=0; s=; while [ $i -lt 3 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-7
+i=0; s=; while [ $i -lt 7 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-8
+i=0; s=; while [ $i -lt 8 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-9
+i=0; s=; while [ $i -lt 9 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-15
+i=0; s=; while [ $i -lt 15 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-16
+i=0; s=; while [ $i -lt 16 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-17
+i=0; s=; while [ $i -lt 17 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-63
+i=0; s=; while [ $i -lt 63 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-64
+i=0; s=; while [ $i -lt 64 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-120
+i=0; s=; while [ $i -lt 120 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-126
+i=0; s=; while [ $i -lt 126 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-127
+i=0; s=; while [ $i -lt 127 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-128
+i=0; s=; while [ $i -lt 128 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-129
+i=0; s=; while [ $i -lt 129 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-130
+i=0; s=; while [ $i -lt 130 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-247
+i=0; s=; while [ $i -lt 247 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-248
+i=0; s=; while [ $i -lt 248 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-249
+i=0; s=; while [ $i -lt 249 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-375
+i=0; s=; while [ $i -lt 375 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-376
+i=0; s=; while [ $i -lt 376 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-377
+i=0; s=; while [ $i -lt 377 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-503
+i=0; s=; while [ $i -lt 503 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-504
+i=0; s=; while [ $i -lt 504 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-505
+i=0; s=; while [ $i -lt 505 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-511
+i=0; s=; while [ $i -lt 511 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-512
+i=0; s=; while [ $i -lt 512 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-513
+i=0; s=; while [ $i -lt 513 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-1007
+i=0; s=; while [ $i -lt 1007 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-1008
+i=0; s=; while [ $i -lt 1008 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-1009
+i=0; s=; while [ $i -lt 1009 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-1015
+i=0; s=; while [ $i -lt 1015 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-1016
+i=0; s=; while [ $i -lt 1016 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-1017
+i=0; s=; while [ $i -lt 1017 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-2015
+i=0; s=; while [ $i -lt 2015 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-2016
+i=0; s=; while [ $i -lt 2016 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-2017
+i=0; s=; while [ $i -lt 2017 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-4031
+i=0; s=; while [ $i -lt 4031 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-4032
+i=0; s=; while [ $i -lt 4032 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-4033
+i=0; s=; while [ $i -lt 4033 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-8062
+i=0; s=; while [ $i -lt 8062 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-8063
+i=0; s=; while [ $i -lt 8063 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-8064
+i=0; s=; while [ $i -lt 8064 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-8190
+i=0; s=; while [ $i -lt 8190 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-8191
+i=0; s=; while [ $i -lt 8191 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-8192
+i=0; s=; while [ $i -lt 8192 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-8193
+i=0; s=; while [ $i -lt 8193 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-8194
+i=0; s=; while [ $i -lt 8194 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name out-len-8200
+i=0; s=; while [ $i -lt 8200 ]; do s="${s}b"; i=$((i+1)); done; printf "%s" "$s"; echo E >&2; printf "%s" "$s"; echo F >&2; echo done
+%%%
+#!name sq-len-1
+i=0; s=; while [ $i -lt 1 ]; do s="${s}x'"; i=$((i+1)); done; v=$s; set | grep -c "^v="; set | sed -n "s/^v=//p" | wc -c
+%%%
+#!name sq-len-3
+i=0; s=; while [ $i -lt 3 ]; do s="${s}x'"; i=$((i+1)); done; v=$s; set | grep -c "^v="; set | sed -n "s/^v=//p" | wc -c
+%%%
+#!name sq-len-7
+i=0; s=; while [ $i -lt 7 ]; do s="${s}x'"; i=$((i+1)); done; v=$s; set | grep -c "^v="; set | sed -n "s/^v=//p" | wc -c
+%%%
+#!name sq-len-64
+i=0; s=; while [ $i -lt 64 ]; do s="${s}x'"; i=$((i+1)); done; v=$s; set | grep -c "^v="; set | sed -n "s/^v=//p" | wc -c
+%%%
+#!name sq-len-127
+i=0; s=; while [ $i -lt 127 ]; do s="${s}x'"; i=$((i+1)); done; v=$s; set | grep -c "^v="; set | sed -n "s/^v=//p" | wc -c
+%%%
+#!name sq-len-128
+i=0; s=; while [ $i -lt 128 ]; do s="${s}x'"; i=$((i+1)); done; v=$s; set | grep -c "^v="; set | sed -n "s/^v=//p" | wc -c
+%%%
+#!name sq-len-250
+i=0; s=; while [ $i -lt 250 ]; do s="${s}x'"; i=$((i+1)); done; v=$s; set | grep -c "^v="; set | sed -n "s/^v=//p" | wc -c
+%%%
+#!name sq-len-503
+i=0; s=; while [ $i -lt 503 ]; do s="${s}x'"; i=$((i+1)); done; v=$s; set | grep -c "^v="; set | sed -n "s/^v=//p" | wc -c
+%%%
+#!name sq-len-504
+i=0; s=; while [ $i -lt 504 ]; do s="${s}x'"; i=$((i+1)); done; v=$s; set | grep -c "^v="; set | sed -n "s/^v=//p" | wc -c
+%%%
+#!name sq-len-505
+i=0; s=; while [ $i -lt 505 ]; do s="${s}x'"; i=$((i+1)); done; v=$s; set | grep -c "^v="; set | sed -n "s/^v=//p" | wc -c
+%%%
+#!name sq-len-1000
+i=0; s=; while [ $i -lt 1000 ]; do s="${s}x'"; i=$((i+1)); done; v=$s; set | grep -c "^v="; set | sed -n "s/^v=//p" | wc -c
+%%%
+#!name sq-len-1008
+i=0; s=; while [ $i -lt 1008 ]; do s="${s}x'"; i=$((i+1)); done; v=$s; set | grep -c "^v="; set | sed -n "s/^v=//p" | wc -c
+%%%
+#!name sq-len-2000
+i=0; s=; while [ $i -lt 2000 ]; do s="${s}x'"; i=$((i+1)); done; v=$s; set | grep -c "^v="; set | sed -n "s/^v=//p" | wc -c
+%%%
+#!name sq-len-4096
+i=0; s=; while [ $i -lt 4096 ]; do s="${s}x'"; i=$((i+1)); done; v=$s; set | grep -c "^v="; set | sed -n "s/^v=//p" | wc -c
+%%%
+#!name args-1
+set -- $(i=0; while [ $i -lt 1 ]; do printf "arg%s " $i; i=$((i+1)); done); echo $#; echo "$*" | wc -c; for a; do :; done; echo ok
+%%%
+#!name args-2
+set -- $(i=0; while [ $i -lt 2 ]; do printf "arg%s " $i; i=$((i+1)); done); echo $#; echo "$*" | wc -c; for a; do :; done; echo ok
+%%%
+#!name args-5
+set -- $(i=0; while [ $i -lt 5 ]; do printf "arg%s " $i; i=$((i+1)); done); echo $#; echo "$*" | wc -c; for a; do :; done; echo ok
+%%%
+#!name args-10
+set -- $(i=0; while [ $i -lt 10 ]; do printf "arg%s " $i; i=$((i+1)); done); echo $#; echo "$*" | wc -c; for a; do :; done; echo ok
+%%%
+#!name args-40
+set -- $(i=0; while [ $i -lt 40 ]; do printf "arg%s " $i; i=$((i+1)); done); echo $#; echo "$*" | wc -c; for a; do :; done; echo ok
+%%%
+#!name args-100
+set -- $(i=0; while [ $i -lt 100 ]; do printf "arg%s " $i; i=$((i+1)); done); echo $#; echo "$*" | wc -c; for a; do :; done; echo ok
+%%%
+#!name args-500
+set -- $(i=0; while [ $i -lt 500 ]; do printf "arg%s " $i; i=$((i+1)); done); echo $#; echo "$*" | wc -c; for a; do :; done; echo ok

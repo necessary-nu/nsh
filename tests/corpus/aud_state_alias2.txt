@@ -1,0 +1,96 @@
+#!name alias chain two deep
+alias a='b'; alias b='echo B'; a
+%%%
+#!name alias chain three deep
+alias a='b'; alias b='c'; alias c='echo C'; a
+%%%
+#!name alias self reference terminates
+alias e='e x'; e 2>&1 | head -1
+%%%
+#!name alias unalias self during expansion
+alias a='unalias a; echo A'; a; a 2>&1; echo "rc=$?"
+%%%
+#!name alias unalias other during expansion
+alias a='b'; alias b='unalias a b; echo done'; a; alias 2>&1; echo "rc=$?"
+%%%
+#!name unalias -a during expansion
+alias a='unalias -a; echo gone'; a; alias; echo "rc=$?"
+%%%
+#!name alias redefines itself
+alias r='alias r="echo second"; echo first'; r; r; r
+%%%
+#!name alias with trailing space chains
+alias x='y '; alias y='echo Y'; alias z='echo Z'; x z
+%%%
+#!name alias no trailing space no chain
+alias x='y'; alias y='echo Y'; alias z='echo Z'; x z
+%%%
+#!name alias expands to keyword
+alias iff='if'; iff true; then echo K; fi
+%%%
+#!name alias in function body
+alias q='echo Q'; f() { q; }; f; unalias q; f 2>&1; echo "rc=$?"
+%%%
+#!name alias defined and used same line
+alias n='echo N'; n
+%%%
+#!name alias with semicolon
+alias s='echo one; echo two'; s
+%%%
+#!name alias with redirection
+alias w='echo W >aw.txt'; w; cat aw.txt
+%%%
+#!name alias empty value
+alias emp=''; emp; echo "rc=$?"
+%%%
+#!name alias value with newline
+alias nl='echo a
+echo b'; nl
+%%%
+#!name alias then dot file uses it
+alias da='echo DA'; printf 'da\n' > al.sh; . ./al.sh 2>&1; echo "rc=$?"
+%%%
+#!name alias inside eval
+alias ev='echo EV'; eval ev
+%%%
+#!name alias inside command substitution
+alias cs='echo CS'; v=$(cs); echo "$v"
+%%%
+#!name alias inside subshell
+alias sb='echo SB'; (sb)
+%%%
+#!name alias name that is builtin
+alias echo='echo pre'; echo hi; unalias echo; echo hi
+%%%
+#!name alias mutual with args
+alias m1='m2 one'; alias m2='echo M2'; m1 two
+%%%
+#!name many aliases hash spread
+i=0; while [ $i -lt 60 ]; do eval "alias al$i='echo $i'"; i=$((i+1)); done; al0; al59; alias | wc -l
+%%%
+#!name unalias several
+alias u1=x u2=y u3=z; unalias u1 u3; alias | sort
+%%%
+#!name unalias mixed missing
+alias k1=x; unalias k1 nope 2>&1; echo "rc=$?"
+%%%
+#!name alias listing single
+alias sl='echo S'; alias sl
+%%%
+#!name alias query multiple
+alias p1=a p2=b; alias p1 p2
+%%%
+#!name alias arg without equals is query
+alias qz 2>&1; echo "rc=$?"
+%%%
+#!name alias name starting with equals
+alias '=v' 2>&1; echo "rc=$?"
+%%%
+#!name alias name with slash
+alias 'a/b=x' 2>&1; echo "rc=$?"
+%%%
+#!name alias name with dollar
+alias 'a$b=x' 2>&1; echo "rc=$?"
+%%%
+#!name alias reuse after in-use free
+alias a='b'; alias b='unalias b; alias b="echo second"; echo first'; a; b

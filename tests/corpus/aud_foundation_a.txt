@@ -1,0 +1,159 @@
+#!name outbuf-8190
+i=0; s=; while [ $i -lt 8190 ]; do s="${s}x"; i=$((i+1)); done; printf '%s' "$s"; echo ERR >&2; echo DONE
+%%%
+#!name outbuf-8191
+i=0; s=; while [ $i -lt 8191 ]; do s="${s}x"; i=$((i+1)); done; printf '%s' "$s"; echo ERR >&2; echo DONE
+%%%
+#!name outbuf-8192
+i=0; s=; while [ $i -lt 8192 ]; do s="${s}x"; i=$((i+1)); done; printf '%s' "$s"; echo ERR >&2; echo DONE
+%%%
+#!name outbuf-8193
+i=0; s=; while [ $i -lt 8193 ]; do s="${s}x"; i=$((i+1)); done; printf '%s' "$s"; echo ERR >&2; echo DONE
+%%%
+#!name outbuf-8194
+i=0; s=; while [ $i -lt 8194 ]; do s="${s}x"; i=$((i+1)); done; printf '%s' "$s"; echo ERR >&2; echo DONE
+%%%
+#!name outbuf-partial-then-exact
+i=0; s=; while [ $i -lt 4096 ]; do s="${s}x"; i=$((i+1)); done; printf '%s' "$s"; echo M1 >&2; printf '%s' "$s"; echo M2 >&2; echo DONE
+%%%
+#!name outbuf-2-then-8190
+printf 'ab'; echo E1 >&2; i=0; s=; while [ $i -lt 8190 ]; do s="${s}y"; i=$((i+1)); done; printf '%s' "$s"; echo E2 >&2; echo DONE
+%%%
+#!name outbuf-2-then-8189
+printf 'ab'; echo E1 >&2; i=0; s=; while [ $i -lt 8189 ]; do s="${s}y"; i=$((i+1)); done; printf '%s' "$s"; echo E2 >&2; echo DONE
+%%%
+#!name single-quote-simple
+x="a'b"; set | grep '^x='
+%%%
+#!name single-quote-many
+x="'''"; set | grep '^x='
+%%%
+#!name single-quote-lead-trail
+x="'abc'"; set | grep '^x='
+%%%
+#!name single-quote-only
+x="'"; set | grep '^x='
+%%%
+#!name single-quote-empty
+x=""; set | grep '^x='
+%%%
+#!name single-quote-mixed
+x="a'b''c'''d"; set | grep '^x='
+%%%
+#!name single-quote-dq
+x='a"b'"'"'c'; set | grep '^x='
+%%%
+#!name single-quote-export
+x="a'b'\"c"; export x; export -p | grep '^export x'
+%%%
+#!name single-quote-long
+i=0; s=; while [ $i -lt 300 ]; do s="${s}a'"; i=$((i+1)); done; x=$s; set | grep -c "^x="
+%%%
+#!name single-quote-readonly
+readonly y="a'b"; readonly -p 2>/dev/null | grep '^readonly y' || set | grep '^y='
+%%%
+#!name setopt-format
+set -o
+%%%
+#!name setopt-format-plus
+set +o
+%%%
+#!name number-badnum
+exit foo
+%%%
+#!name number-space
+exit ' 12 '
+%%%
+#!name number-negative
+shift -1
+%%%
+#!name number-hex
+shift 0x10
+%%%
+#!name number-empty
+exit ''
+%%%
+#!name number-trailing
+set -- a b c; shift '2 '
+%%%
+#!name number-huge
+exit 99999999999999999999
+%%%
+#!name number-intmax
+exit 2147483648
+%%%
+#!name readonly-msg
+readonly r=1; r=2
+%%%
+#!name badvarname
+read 1abc </dev/null
+%%%
+#!name unset-err
+unset -v 'a b'
+%%%
+#!name param-null-msg
+unset q; echo ${q?custom message}
+%%%
+#!name param-null-default-msg
+unset q; echo ${q?}
+%%%
+#!name param-substr-msg
+unset qqqqqqqqqqqqqqqqqq; echo ${qqqqqqqqqqqqqqqqqq?}
+%%%
+#!name errlinno
+echo start
+false
+nosuchcommandxyz
+%%%
+#!name errmsg-open
+. /nonexistent/file
+%%%
+#!name errmsg-notdir
+. /etc/passwd/nope
+%%%
+#!name ulimit-a
+ulimit -a
+%%%
+#!name stack-huge-string
+s=x; i=0; while [ $i -lt 16 ]; do s="$s$s"; i=$((i+1)); done; echo ${#s}
+%%%
+#!name stack-huge-concat
+s=x; i=0; while [ $i -lt 17 ]; do s="$s$s"; i=$((i+1)); done; echo ${#s}; echo "${s%%${s#?}}"
+%%%
+#!name stack-here-doc
+cat <<EOF
+$(i=0; s=; while [ $i -lt 5000 ]; do s="${s}z"; i=$((i+1)); done; echo "$s")
+EOF
+%%%
+#!name stack-many-args
+set -- $(i=0; while [ $i -lt 2000 ]; do echo a$i; i=$((i+1)); done); echo $#; echo $1 $2000
+%%%
+#!name stack-nested-subst
+a=1; b=$a$a$a$a; c=$b$b$b$b; d=$c$c$c$c; e=$d$d$d$d; f=$e$e$e$e; echo ${#f}
+%%%
+#!name printf-widths
+printf '%5d|%-5d|%05d|%+d|% d\n' 1 2 3 4 5
+%%%
+#!name printf-star
+printf '%*d|%-*d|%.*s\n' 6 42 6 42 3 abcdef
+%%%
+#!name printf-neg-star
+printf '%*d|\n' -6 42
+%%%
+#!name printf-octal-hex
+printf '%o %x %X %#o %#x\n' 8 255 255 8 255
+%%%
+#!name trap-list
+trap 'echo hi' INT; trap
+%%%
+#!name trap-badtrap
+trap 'echo x' NOSUCHSIG
+%%%
+#!name getopts-illegal
+set -- -Z; getopts ab opt; echo "$?/$opt"
+%%%
+#!name illegal-option
+set -Z
+%%%
+#!name illegal-option-o
+set -o nosuchoption

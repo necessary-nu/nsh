@@ -1,0 +1,1817 @@
+set -- ; printf "<%s>"  \' a
+%%%
+IFS='ab'; echo \\ "\a"
+%%%
+_a=${-#`echo ${*%a?b}`}; echo $w \*
+%%%
+x1=$_a; : $$$v
+%%%
+for i in $(for i in $!; do echo "$i"; done) ${-="$((63))"}; do echo "$i"; done
+%%%
+IFS='ab'; echo $HOME
+%%%
+case ${#_a} in ) echo M;; *) echo N;; esac
+%%%
+u=${HOME}; echo a\*b
+%%%
+for i in a{b; do echo "$i"; done
+%%%
+while false; do :; done; echo $(((~$IFS + 1))) ${#HOME} $1
+%%%
+if : $((IFS ? HOME ^ _a <<= 0 : w <<= u)) $$$(x1=\`; echo a]b); then echo ${*#$(( echo '.' $((HOME)) ))} $1; fi
+%%%
+if : '
+' ${#2} ""$#""; then echo $(((~017)))[[:alpha:]] `echo $(echo a]b) ""a b""${HOME=$((_a))} \n`; fi
+%%%
+u=$w; : ${x1} $?
+%%%
+( if echo $*; then echo 	; fi )
+%%%
+echo $((x1))
+%%%
+printf "<%s>"  `if echo a* ${HOME} $$; then printf "<%s>"  $(echo $((9223372036854775807))) $#; fi` $(_a=$(echo ${#9} a*ba$b "aa"); echo `case ${#*} in ]) echo M;; *) echo N;; esac`) $(( echo $u [a-c] `echo a{babc` ))
+%%%
+echo $((-0x10 ? $u + 1 ? x1 >>= 1 : -017 : 08))
+%%%
+echo $((1))
+%%%
+set -- \"; echo $((0))${_a}"${v##~}"
+%%%
+{ while false; do :; done; : /a/b a\*b; }
+%%%
+IFS=' '; echo ${$=$#} ${u} $#'a*b'
+%%%
+echo $(echo $2)
+%%%
+( set -- ; echo `for i in ${#:-a*b} a bé; do echo "$i"; done` )
+%%%
+echo ${v} $@ \* ; echo $(for i in *b*; do echo "$i"; done) \"
+%%%
+set -- ; echo `echo $((-8))` "$u\a"
+%%%
+echo $((~8))
+%%%
+if echo a{b; then echo aéb []a]; fi
+%%%
+IFS='ab'; printf "<%s>"  ${#@} ${u} 'a=b'
+%%%
+IFS=' :'; echo '	' ${#*} ${w}
+%%%
+for i in $_a ${HOME}; do echo "$i"; done
+%%%
+printf "<%s>"  `if echo ${HOME}; then echo $(while false; do :; done; echo printf "<%s>"   \  *) 'a"b'; fi` ; echo $((+9223372036854775807)) ${#x1}
+%%%
+{ set -- \" $*; printf "<%s>"  '.'; }
+%%%
+if echo N """" []a]; then : \$ ${#HOME} a]b; fi
+%%%
+set -- ${_a}`echo \$` *a; printf "<%s>"  ""${x1}""
+%%%
+if echo ${HOME:?$(: ~)"a{ba"b"}; then echo \a b; fi
+%%%
+IFS=' :'; echo a ${#IFS}
+%%%
+set -- $x1; echo ${_a} \`
+%%%
+IFS='é'; echo 'b'`if echo $(: ${x1}); then echo $IFS $IFS; fi` ${x1:?"${#$}"}
+%%%
+while false; do :; done; printf "<%s>"  ${#2} `echo $((63))` ${v#]}`while false; do :; done; echo ${_a} a%b`
+%%%
+set -- ${HOME=a`b}; : ${#$} ${x1##a?b} a
+%%%
+if echo ${IFS} $?; then : `set -- $x1; echo $IFS ~/z $((w *= 16))` $2; fi
+%%%
+case `case $! in [[:alpha:]]) echo M;; *) echo N;; esac` in \*) echo M;; *) echo N;; esac
+%%%
+echo $((-$IFS + 1))
+%%%
+IFS=' '; echo a%b a\*b
+%%%
+echo $v $({ while false; do :; done; echo ${x1}; }) "a*b" ; echo '/a/b' $((x1))
+%%%
+case \  in [) echo M;; *) echo N;; esac
+%%%
+echo $((((9223372036854775807 && u))))
+%%%
+for i in $@ $w; do echo "$i"; done
+%%%
+if echo $v 'a"b' $(for i in ${#x1}${u}; do echo "$i"; done); then : \"; fi
+%%%
+( { echo $((HOME ^= w)); } )
+%%%
+set -- ${x1#$u}; echo a?c 'a\b' $((~(0x10 & HOME)))
+%%%
+echo a%b "\ " $$ | echo "`echo $((-1))`" ${w}
+%%%
+set -- $(for i in $(echo ..); do echo "$i"; done) $(( : '
+' a[b )); echo $({ IFS=':'; echo a}b "${u}" $(echo 'a]b'); })
+%%%
+for i in a\*b \'; do echo "$i"; done
+%%%
+{ ( echo $((64)) ); }
+%%%
+( { case ${IFS} in a) echo M;; *) echo N;; esac; } )
+%%%
+echo `for i in \a; do echo "$i"; done`
+%%%
+x1=$HOME; echo $(( u=${$+~/z}; echo ${*?${$:? }} )) \'[!abc]
+%%%
+while false; do :; done; echo `for i in 'abc'; do echo "$i"; done`
+%%%
+{ IFS=':'; echo $x1 $v $9; }
+%%%
+for i in `set -- $(printf "<%s>"  é a a%b) echo a a$b; : printf "<%s>"  ${-#N} $IFS *b* ${x1}`; do echo "$i"; done
+%%%
+for i in 'a#b' 'abc'$(echo ${#@}); do echo "$i"; done
+%%%
+{ ( printf "<%s>"  ""a}b"" '..' "`echo   a"b`" ); }
+%%%
+set -- `if : : $u ${#2} $((3)); then : abc $(echo ""); fi`; echo $(((08)))
+%%%
+( printf "<%s>"  $2 $((-3)) ${#_a} && printf "<%s>"  a}b \\ )
+%%%
+set -- 'a b'; : ${x1}
+%%%
+set -- ; : ${#+${#x1}} $((!(2 || 1))) $_a
+%%%
+: "$({ echo \" '..' "é"; })" \n
+%%%
+set -- ; echo a*
+%%%
+IFS='ab'; echo $HOME `w=$((0x10)); echo $v ${_a:?$?} \n`
+%%%
+IFS=' '; echo /a/b
+%%%
+case $(echo $((u))) in ]) echo M;; *) echo N;; esac
+%%%
+if echo 	; then echo $! ${HOME:?'.'} `for i in $?\$ \*; do echo "$i"; done`; fi
+%%%
+echo $((3))
+%%%
+case $((($x1 + 1))) in *a) echo M;; *) echo N;; esac
+%%%
+set -- ${?##"[[:alpha:]]"}; echo '..' $!
+%%%
+( for i in $((3 ? 0x10 : 0x10)); do echo "$i"; done )
+%%%
+if echo a\*b; then printf "<%s>"  'abc'; fi
+%%%
+for i in $w; do echo "$i"; done
+%%%
+if echo ${IFS##${v%%"/a/b"$v}}; then echo `IFS=' '; echo ${HOME} \*` aaa; fi
+%%%
+set -- $9; printf "<%s>"  $9 $((-1)) ${##}
+%%%
+printf "<%s>"  ${#IFS}
+%%%
+IFS=':'; printf "<%s>"  \\ "$x1" `for i in $- **; do echo "$i"; done`\$
+%%%
+case \$ in [) echo M;; *) echo N;; esac
+%%%
+set -- $w; echo $? .
+%%%
+echo $((u))
+%%%
+echo $@
+%%%
+( echo ? ${w} ; echo ${@:=`printf "<%s>"  ${v} \$`} )
+%%%
+echo '
+' 'a{b' ${HOME} || echo ${u:+**aaa} "$!"
+%%%
+if printf "<%s>"  ${IFS:=[abc]} ${u}${v}; then echo $(($v + 1 ? _a >>= 0x10 : w + $w + 1)) *b*; fi
+%%%
+IFS=\"; echo '/a/b'
+%%%
+_a=${v}; echo a $_a
+%%%
+echo ${_a#${2%${w:-$((1))}}} ; echo $HOME
+%%%
+: $? ${x1}$_a
+%%%
+echo $((w *= -8 || 0x10))
+%%%
+echo $v 'a*b' || echo $1 $#
+%%%
+for i in ${v}; do echo "$i"; done
+%%%
+if echo $- $(($x1 + 1)); then echo a; fi
+%%%
+case `for i in 'aa' ${?=a]b}; do echo "$i"; done` in ) echo M;; *) echo N;; esac
+%%%
+IFS='ab'; echo ${_a} ${#1}
+%%%
+if echo 'a$b' ..; then printf "<%s>"  ${#:+${2-..}} ${IFS} ${-#"$(echo ${v:-aéb})"}; fi
+%%%
+if printf "<%s>"  $! []a]; then : $(if printf "<%s>"  a*; then echo ${#-}; fi)${x1##[[:alpha:]]}*a `IFS='é'; : $$ $((u = 1 - x1 ? 017 : 1))` $(u=$(echo `echo .. ~ ~` ${w}); : $(($HOME + 1)) ${IFS}); fi
+%%%
+for i in a{b$(: "a\b" ${#9}) $v; do echo "$i"; done
+%%%
+echo $x1 'a}b' $(echo \` \' $@ || echo . $@ *)\  ; : `case 'a'echo a\b in *) echo M;; *) echo N;; esac`
+%%%
+printf "<%s>"  [!abc] ${IFS}
+%%%
+IFS=''; echo $9
+%%%
+printf "<%s>"  $(if printf "<%s>"  ${@##$IFS}; then echo $v $((1 ? _a : 0x10 <= HOME)) $(($w + 1 < (08))); fi) ${#9}
+%%%
+for i in $(((-u))); do echo "$i"; done
+%%%
+{ { for i in * `echo b a b`; do echo "$i"; done; }; }
+%%%
+echo $2
+%%%
+set -- $(( echo a[ba*b )); echo ""${-#	}""`{ echo ${x1} "aaa"; }` $9
+%%%
+echo  || echo 'a'
+%%%
+case ${#?} in *) echo M;; *) echo N;; esac
+%%%
+set -- \`; echo ""a*"" $(((v -= 0 >> 0x10 + 017)))
+%%%
+w=a}b; : ${v}
+%%%
+IFS=~/z; printf "<%s>"  $((63 ? 64 & 7 ? w : x1 *= 1 : $IFS + 1))
+%%%
+echo $((_a))
+%%%
+if echo a]b `echo 'a*b'`; then echo "$((+HOME -= 8))"; fi
+%%%
+case "$$" in a*) echo M;; *) echo N;; esac
+%%%
+set -- $IFS; echo $(set -- ; echo ${IFS:+$((10 ? 10 : 0x10))} é) "a*"
+%%%
+echo a[b && printf "<%s>"  $2
+%%%
+( if echo $v $9 [abc]; then echo a`b${@%a}$(echo `echo b` *a) $(echo $((08 != HOME))); fi )
+%%%
+echo \` ${*%${9:-Na`b}`echo $_a a"b`} ${2=\ }a?c
+%%%
+echo $(($u + 1))
+%%%
+set -- ; echo ** `if echo IFS=' :'; echo $(echo ${IFS}) ${9#${!#a}} \n $(set -- \n; echo $HOME $?) 'a*b'; then echo "${_a}$w" \$; fi` a
+%%%
+( { echo $((-2 && 64)); } )
+%%%
+while false; do :; done; echo a[b 'x:y'
+%%%
+echo $((017))
+%%%
+( IFS=':'; echo *a )
+%%%
+{ while false; do :; done; echo 'a' ${-:-${_a}} *b*; }
+%%%
+IFS='ab'; printf "<%s>"  . '.' $IFS
+%%%
+for i in a* \\; do echo "$i"; done
+%%%
+IFS=' '; echo a`b a\*b
+%%%
+{ if echo $(: $((_a)) $(printf "<%s>"  a`b))${2#${#?}} 'a*b' 'aéb'; then echo $(echo $((0))) ${#u}*a ${#*}; fi; }
+%%%
+echo *a $((((8))))
+%%%
+while false; do :; done; echo $w
+%%%
+set -- ; printf "<%s>"  $(IFS=' :'; echo $x1 ""`echo a{b /a/b`"" "\\") $({ if printf "<%s>"  ${#x1}; then printf "<%s>"  $u `echo ${-=a%b}` a`b${x1:=a}; fi; })
+%%%
+u=$9$HOME; echo `for i in $(echo ${x1} abaaa); do echo "$i"; done` \*
+%%%
+while false; do :; done; echo ${u}
+%%%
+case \\* in a*) echo M;; *) echo N;; esac
+%%%
+x1="${#9}"; echo [[:alpha:]] `for i in ${u}; do echo "$i"; done` ${*+}
+%%%
+case 'a#b' in a?c) echo M;; *) echo N;; esac
+%%%
+set -- ; echo a\b \  	
+%%%
+for i in ${HOME:+${v}}; do echo "$i"; done
+%%%
+case `if printf "<%s>"  $((16)); then echo $(printf "<%s>"  printf "<%s>"    a}b . 'a[b' "a[b"); fi` in a*) echo M;; *) echo N;; esac
+%%%
+echo $(((u %= 017) >= !017))
+%%%
+IFS=':	
+'; printf "<%s>"  $(if echo ${#u} $(: $v a[ba'b b)${*%${#HOME}} *a; then echo "$(echo aéb 'a b')"; fi) $?
+%%%
+case 'a?b' in **) echo M;; *) echo N;; esac
+%%%
+printf "<%s>"  a%b $w
+%%%
+( set -- ${#@} 'a#b'; : a$b )
+%%%
+( { IFS='é'; echo 'aaa' 'aa'; } )
+%%%
+echo $((v += 017))
+%%%
+: ${#%%"${IFS:+a"b}"} && : $(((+$x1 + 1)))
+%%%
+for i in `{ echo printf "<%s>"  a[b a b . N éa]b; }`; do echo "$i"; done
+%%%
+printf "<%s>"  \* $((!(x1))) "a" ; echo $$
+%%%
+echo ${x1} ${u}
+%%%
+case a"b in **) echo M;; *) echo N;; esac
+%%%
+case $(set -- *b*; printf "<%s>"  "'aaa'" $IFS) in *a) echo M;; *) echo N;; esac
+%%%
+for i in ${#2}; do echo "$i"; done
+%%%
+case ${#w} in ?) echo M;; *) echo N;; esac
+%%%
+if : \$; then printf "<%s>"  [a-c]; fi
+%%%
+IFS=''; echo .${HOME%"$(: a b a[b a=b)"} ${#@}
+%%%
+for i in ${#HOME} $u; do echo "$i"; done
+%%%
+IFS=' :'; : 'aaa'\* $$${HOME-${#IFS}}
+%%%
+for i in "${w}"; do echo "$i"; done
+%%%
+set -- $(set -- `printf "<%s>"  a=b a?b /a/b` ${HOME}; echo $((u <<= 9223372036854775807))); printf "<%s>"  $(echo $((+0 ^ u ? x1 : 1)))
+%%%
+IFS=' '; echo $_a ${v} $u
+%%%
+while false; do :; done; : $1 $({ echo $HOME $HOME $(echo ${#-} 'a`b' \\); })
+%%%
+( : $u \a | echo `if : $HOME; then echo $(printf "<%s>"  $x1 $2 $IFS); fi` $(($HOME + 1 ? IFS != 16 : $w + 1)) $9 )
+%%%
+echo $((!1 ? 64 : _a >> 7))
+%%%
+IFS=':'; echo $(echo `set -- ; : ${IFS:?${@:=a\b}} [` $(echo . ${!:-${u:+a}b}} ; printf "<%s>"  ${#:?$(echo   a)} "\$" a%b) ${IFS#${x1%%${u}}} && printf "<%s>"  ' '"[a-c]" ${*+`echo 	 `${#?}} $({ echo `echo ab a[b b` $((_a)); })) ~/z
+%%%
+echo `echo ~/z $2 ; echo $@ ]`
+%%%
+set -- ; echo *b* ${IFS-$u}
+%%%
+IFS=' :'; echo $(echo \n'abc' ${#x1} ${#1} ; echo $((_a)) $(printf "<%s>"  * && echo 'é' $(echo `: aaa a?b a?b` ${#IFS} '.') $((0x10))$((08)))) ${IFS}
+%%%
+IFS=''; echo `( ( echo $((64)) ) )`
+%%%
+set -- ; echo `case $(:  ..)echo a=b aéb in [) echo M;; *) echo N;; esac` ${#9} 'a=b'
+%%%
+( _a='..'; echo `while false; do :; done; echo ${#@} echo ${x1} $2 '..' \'` )
+%%%
+( ( while false; do :; done; echo "`echo a]b a'b a*b`" "'..'" ) )
+%%%
+echo [[:alpha:]] || echo   ${#_a} $!
+%%%
+IFS='ab'; echo 'a b'
+%%%
+echo $((!(v)))
+%%%
+( echo $? 'a#b' $((HOME *= v *= 0)) && printf "<%s>"  *b* $IFS $w )
+%%%
+echo $((_a)) ${x1} []a]
+%%%
+case $! in *) echo M;; *) echo N;; esac
+%%%
+if : ${IFS}$((HOME)) ${#*}; then : `( set -- aéb; printf "<%s>"  /a/b "$HOME" $? )` \\ $(while false; do :; done; echo $HOME); fi
+%%%
+w=${#:?a*}; echo ${x1:-"$_a"$#} \*
+%%%
+if echo ${#HOME} ?; then echo "'/a/b'" 	 ${#$}; fi
+%%%
+while false; do :; done; printf "<%s>"  ${@:+'a%b'}
+%%%
+IFS=' '; echo $x1 \ 
+%%%
+HOME=$(IFS=$((0)); echo \\ $(echo $(echo abc) **) $(: $HOME "aéb" $u)); echo a\b$w
+%%%
+echo ${_a} a* && echo ${v} `echo ${u}`
+%%%
+IFS=' :'; echo $(($_a + 1)) $(while false; do :; done; : ${@:-$(echo ${x1})}) ${u+${#u}}
+%%%
+set -- 'a]b'; echo ${#9}
+%%%
+( IFS='é'; printf "<%s>"  $u abc a$b )
+%%%
+for i in ?; do echo "$i"; done
+%%%
+case ${IFS}$2 in *) echo M;; *) echo N;; esac
+%%%
+case é in ) echo M;; *) echo N;; esac
+%%%
+while false; do :; done; echo $(echo $@ || : $$ \ ) $(case $1 in a\*b) echo M;; *) echo N;; esac)
+%%%
+{ case a*${$:=a[b} in [a-c]) echo M;; *) echo N;; esac; }
+%%%
+( echo $! $w `case a$b in *) echo M;; *) echo N;; esac` )
+%%%
+set -- ; echo a]b
+%%%
+( set -- ${u}; : aéb $x1 $((-$_a + 1)) )
+%%%
+u=$({ printf "<%s>"  $$; }); printf "<%s>"  $(( IFS='é'; echo \` $v 'a*b' )) ${x1} $(w=$_a; echo $(echo $((_a <<= 8))))
+%%%
+echo é `case echo a=b x:y /a/b in [) echo M;; *) echo N;; esac`\" "$9"
+%%%
+echo ${_a%%${_a}} ${_a}
+%%%
+printf "<%s>"  ${*:-${#*}} "`echo $_a ; echo $((0)) $(echo ${?:-a$b} \$ ${IFS})`" `( set -- a]ba\b; : 'a#b' )` && printf "<%s>"  $(case ${HOME%$-} in **) echo M;; *) echo N;; esac) ${#@} `{ : a$b; }`
+%%%
+if echo 'a#b' ${#x1} ]; then echo \\ $((w %= -017 ? 1 : 8)); fi
+%%%
+IFS=' '; : $_a
+%%%
+( : $(($w + 1)) `_a=$(echo aaa é ); : echo *a "é" ${#@} ${2%\a}` && echo $* 'a%b' )
+%%%
+( case `echo $(echo abc a]b) echo a*b ?` in [) echo M;; *) echo N;; esac )
+%%%
+{ for i in $(printf "<%s>"  a?b)$(echo a"b a\b a'b); do echo "$i"; done; }
+%%%
+IFS=aa$@; : "$((0x10))"
+%%%
+{ _a='a=b'; echo []a]; }
+%%%
+set -- ${#*} ' '; echo ${$:-`case $((v)) in []a]) echo M;; *) echo N;; esac`} "'~'"
+%%%
+echo $x1 $! `IFS=''; echo $u`
+%%%
+{ for i in ${u}; do echo "$i"; done; }
+%%%
+{ while false; do :; done; printf "<%s>"  .${#$} "$1"; }
+%%%
+echo $((HOME >>= _a &= $IFS + 1))
+%%%
+{ IFS=' :'; : $({ echo ${#w}; }); }
+%%%
+echo `case ${x1=${##}} in a*) echo M;; *) echo N;; esac` $(echo $1 $(($_a + 1))$? ${#2})
+%%%
+echo $(($IFS + 1))
+%%%
+for i in "~/z"${$%`echo /a/b a 	`} "\n"; do echo "$i"; done
+%%%
+: ${v}
+%%%
+case `HOME=a; : ${#v}` in ) echo M;; *) echo N;; esac
+%%%
+if echo $x1 "a?c"; then echo aéb $-; fi
+%%%
+echo $(($x1 + 1 << (~2)))
+%%%
+echo "${#x1}"${2:-`echo ${#@} a]ba\b`} ${#w} | echo $x1
+%%%
+x1=${#@}; : é a*b${_a+$x1}\\ `:  $# || printf "<%s>"  b`
+%%%
+while false; do :; done; echo $_a
+%%%
+HOME=${_a:+`echo $#`}; echo "'~/z'"
+%%%
+for i in ** $(($IFS + 1)); do echo "$i"; done
+%%%
+echo $(($HOME + 1 ? 0x10 ? w /= 1 : _a ? v : 1 : v ^= +HOME))
+%%%
+( echo $((08)) )
+%%%
+if echo $2; then echo $w; fi
+%%%
+echo $((0 * ~u < u))
+%%%
+for i in ${2%%${#1}}${#IFS}; do echo "$i"; done
+%%%
+IFS='é'; : ${IFS} "$(echo $((v >= IFS)))"
+%%%
+set -- ${#@}; echo ${*=$(IFS=' '; echo \n $?)}
+%%%
+echo ${v} ${#$} $(( while false; do :; done; printf "<%s>"  ${v+$HOME} ))
+%%%
+: ${w} $2 `{ echo a{b $1 | : x:y $(printf "<%s>"  $* ${*:=a} ~) ${v}; }`
+%%%
+echo $(IFS=' '; printf "<%s>"  "${_a}[]a]" $# $((u -= HOME * $u + 1)))
+%%%
+while false; do :; done; printf "<%s>"  $@
+%%%
+{ HOME=${#w}; : $?*b* a*; }
+%%%
+IFS=' '; echo $(IFS='ab'; echo $((31)))
+%%%
+set -- $u 'a`b'; echo ${2?	}
+%%%
+if echo ${2+$w} 'a`b'; then printf "<%s>"  	 `{ printf "<%s>"  $(echo a{b) a'b; }`\$; fi
+%%%
+echo "${_a}"
+%%%
+case $w in a) echo M;; *) echo N;; esac
+%%%
+if echo ${*:=$((-2 < -w))}; then echo $v \$ '..'; fi
+%%%
+for i in `set -- $v 'ab'; echo ${u=${9:=~}}`; do echo "$i"; done
+%%%
+printf "<%s>"  $u ${HOME##${v}} \  | echo $((HOME &= 0 ? 7 : 08 ? $_a + 1 : $v + 1))
+%%%
+: 'x:y' "$!" ${#1} ; : $9 ${#?}
+%%%
+IFS='ab'; printf "<%s>"  $(for i in $IFS $(echo "~/z"); do echo "$i"; done) $#
+%%%
+x1=\$; : `IFS='ab'; echo ${#-}`
+%%%
+if echo a; then printf "<%s>"  a}b ${HOME}; fi
+%%%
+: \` ~/z
+%%%
+set -- $(echo $((-1)) $v $- || : * \ ) $(($IFS + 1)); echo a'b $#
+%%%
+for i in $1 "a]b"; do echo "$i"; done
+%%%
+while false; do :; done; printf "<%s>"  "$?" 'a b'
+%%%
+while false; do :; done; echo `IFS='ab'; echo ${v} if printf "<%s>"  "$(echo x:y a x:y)" $- $(: $(echo a b) ${v}); then : $9 $((63)); fi` $#/a/b $*
+%%%
+if printf "<%s>"  "`{ echo "a}b"; }`"; then echo $IFS \a`while false; do :; done; echo $_a "$((v))"` $w; fi
+%%%
+case ${_a:-[[:alpha:]]} in ?) echo M;; *) echo N;; esac
+%%%
+IFS=':'; echo `IFS=':	
+'; echo $$ $IFS` ' ' `for i in '' 'é'; do echo "$i"; done`
+%%%
+v=${#?}; printf "<%s>"  ${IFS}
+%%%
+for i in `for i in $(echo x:y) a=ba b; do echo "$i"; done` ${u%%$HOME}; do echo "$i"; done
+%%%
+_a=${#1}; echo 
+%%%
+for i in ${#x1}; do echo "$i"; done
+%%%
+for i in \$ `echo a"b ${_a+abc} $!`$(printf "<%s>"  `echo a#b a"b` $((31)) Na{b); do echo "$i"; done
+%%%
+echo $* [!abc] 'a"b'
+%%%
+IFS=''; echo "${u}" $(echo a=b \*$# ${u} | echo ${#HOME} $(((u ^= 017)))) "a"\ 
+%%%
+if echo ${#2} `case $# in [) echo M;; *) echo N;; esac`; then : ] $(if printf "<%s>"  ?; then echo ${#$} "\\"; fi); fi
+%%%
+x1=\$; : $x1
+%%%
+echo $((-017))
+%%%
+case 'aa' in [) echo M;; *) echo N;; esac
+%%%
+case $((2))${@#$(echo a'b ~/z)} in [a-c]) echo M;; *) echo N;; esac
+%%%
+echo ${#1}
+%%%
+while false; do :; done; echo $* ""$IFS"`echo $((IFS))`" [
+%%%
+set -- `echo ${#v} ".." ${_a}`${w}; printf "<%s>"  $(((0))) $_a
+%%%
+echo `x1=\'; echo $_a ~`[a-c] a#babc | printf "<%s>"  **
+%%%
+while false; do :; done; echo $((IFS /= HOME >> -u & !w ^= 1)) \ 
+%%%
+if : $_a ${x1} $@; then echo $((!!!0x10)) 'a]b'; fi
+%%%
+( while false; do :; done; echo $$ ${IFS} )
+%%%
+while false; do :; done; printf "<%s>"  'a'\''b' $(printf "<%s>"  $$ 'a' \$ && echo *b*)
+%%%
+while false; do :; done; echo ${@:-'a`b'} ${IFS}${#%%${HOME:=a\b}}$((u /= u)) \'$(($IFS + 1))
+%%%
+IFS=${x1}; echo ${w:-$9}
+%%%
+printf "<%s>"  [ $((v ? 3 : 2 ? 08 : v ? v -= v : IFS <<= $v + 1)) $1 || echo \" [ é
+%%%
+: ${##} 	
+%%%
+case $(if echo $((8 | 017)); then : $(echo ${#HOME}) $((63 ? x1 : 8)) `echo $! $((w))`; fi) in [!abc]) echo M;; *) echo N;; esac
+%%%
+{ IFS="${#@}"; : $v a* \a; }
+%%%
+if : $w `while false; do :; done; echo \* $((+1))` 'aéb'; then echo `echo "echo ${x1%aa} N"`; fi
+%%%
+while false; do :; done; echo ${_a}
+%%%
+while false; do :; done; echo $({ ( echo `echo a{b` '.' ); }) "${#IFS}"
+%%%
+IFS='ab'; echo ${IFS+'a b'}
+%%%
+( echo $((_a |= (_a))) )
+%%%
+set -- ${u}; printf "<%s>"  `set -- $(echo \  : . ab); : *a $2`
+%%%
+IFS=''; printf "<%s>"  "$((w <<= IFS))" ${IFS} `for i in [abc]; do echo "$i"; done`
+%%%
+printf "<%s>"  ${v:?$(( echo ${_a} é ))}
+%%%
+if echo `for i in "$HOME"; do echo "$i"; done` ${w#${2%%'a?b'}} `if echo "a" ${#%%${x1}}; then echo '~/z' aéb $IFS; fi`; then printf "<%s>"  $((-!x1 -= 08)) 'a#b' ~/z; fi
+%%%
+if echo $IFS $2; then echo ${IFS%\a} $!$9 $((1)); fi
+%%%
+( : 'b' \\ )
+%%%
+for i in ${??\*}; do echo "$i"; done
+%%%
+{ echo $((_a)); }
+%%%
+echo [abc]
+%%%
+( IFS='é'; echo a=b$(echo 'b') )
+%%%
+_a=${@:-'a*b'}; printf "<%s>"  ${#2}${#v} $w
+%%%
+while false; do :; done; echo $(HOME=${#HOME}; printf "<%s>"  $(case '	' in *a) echo M;; *) echo N;; esac) $?)
+%%%
+while false; do :; done; echo `if echo ?$u; then echo a#b ${$?$((017))}; fi`
+%%%
+while false; do :; done; printf "<%s>"  \' $!
+%%%
+{ { w=$u; printf "<%s>"  ${IFS}; }; }
+%%%
+for i in $((0)); do echo "$i"; done
+%%%
+IFS='é'; echo ${##} ${#9}
+%%%
+echo $w && : \a
+%%%
+while false; do :; done; echo ${HOME} ${w:?\"}$((v = ~63)) ${_a}
+%%%
+if echo `for i in '
+'; do echo "$i"; done`$v $(: .. $HOME ${w} | echo ${w} ${_a}) ${_a}; then echo $1 \'; fi
+%%%
+IFS='é'; : *a $(echo $v \a)
+%%%
+: ${_a}[a-c] && echo $-
+%%%
+printf "<%s>"  $x1 $((1))
+%%%
+echo ${#v}$- a%b
+%%%
+{ case ${w:?x:y.} in ?) echo M;; *) echo N;; esac; }
+%%%
+echo abc\* $? || echo $$ \ 
+%%%
+: $HOME $x1 $((v)) || printf "<%s>"  $(while false; do :; done; echo $HOME ${#$} "${#?}") ${w#'b'} *a
+%%%
+case '/a/b' in a?c) echo M;; *) echo N;; esac
+%%%
+{ ( IFS=${HOME}; echo `echo : a"b 'aéb'` ] $_a ); }
+%%%
+echo $((((_a) * x1))) $(case ${v:-'aa'} in **) echo M;; *) echo N;; esac) '~'
+%%%
+if echo $IFS a* a[b; then echo "$(printf "<%s>"  $((2)) ${v})" ; fi
+%%%
+( echo $2 )
+%%%
+u=${u}; echo ${#2} ""${-=`printf "<%s>"  aéb`}"" $(( if echo `echo 'a b'`; then echo ${_a}; fi ))
+%%%
+set -- ; echo 'b'
+%%%
+if echo $@ a\*b; then echo ${x1%%$((64 && 16))}$((-017 ? $_a + 1 : +u)) $((IFS <<= 63)); fi
+%%%
+IFS='é'; echo "[abc]" ${#1} 'a%b'
+%%%
+while false; do :; done; echo $w $((0x10))
+%%%
+( echo $(case ${#v} in ]) echo M;; *) echo N;; esac) \' $1 )
+%%%
+( if : "'a`b'" $IFS aéb; then echo $9 "${#v}"; fi )
+%%%
+HOME=$(echo $(((0x10)))); : ${x1} `while false; do :; done; : $? ${_a}` ${#HOME}
+%%%
+echo "''" $((1 << 08)) ; echo $x1${#HOME} $IFS ${x1%%${IFS:='
+'}}
+%%%
+set -- `echo $w`; echo \  ${1##'
+'} ${IFS:?\`}
+%%%
+set -- ; echo `set -- ; echo  \a a?b` ${_a?\\} 'a#b'
+%%%
+for i in $# $$; do echo "$i"; done
+%%%
+while false; do :; done; echo $2 a?c\\ $w
+%%%
+if : ${x1:?\a} \a ${1:=..}; then echo `( { echo abé; } )` \* \`; fi
+%%%
+printf "<%s>"  $((+_a == 1 - v)) "${2?[a-c]}" $(echo $9 . $-)
+%%%
+echo $((08))
+%%%
+IFS=' '; echo ${u} $(IFS=' '; echo N) .
+%%%
+echo $((017))
+%%%
+while false; do :; done; echo "\n"
+%%%
+for i in N $(if echo ${v?aaa} \*$!; then echo $(printf "<%s>"  ] "/a/b" `printf "<%s>"  a'b`) `echo $!`; fi); do echo "$i"; done
+%%%
+printf "<%s>"  \a ${#u} && printf "<%s>"  a*${v} \$ $((-++64))
+%%%
+u=$u; echo $?
+%%%
+HOME='a=b'${#HOME}; printf "<%s>"  `{ echo $((-v)); }`
+%%%
+( if echo ${v} ; then echo ${1:+?}; fi )
+%%%
+{ IFS='ab'; echo $2; }
+%%%
+: $$ a[b
+%%%
+echo a*b $({ echo *a && echo 'a{b' `echo ${IFS#~} ${_a} echo ` ${IFS}; }) $({ printf "<%s>"  $! ""/a/b""; })
+%%%
+( : $((HOME |= 1)) )
+%%%
+( if : ${w}; then printf "<%s>"  $$; fi )
+%%%
+if echo ${#2} $(v="$u"; echo ${9:-${1=\*}} ${*%${_a}}) ${#?}; then echo $w ${#-}; fi
+%%%
+echo $((9223372036854775807))
+%%%
+v=\'; echo $9 $(set -- $((1 << 08)) $(echo ${?-a?b} "a[b"); echo $(echo $((0))))
+%%%
+: $((IFS != 017 ? HOME : 8 ? 017 : $u + 1)) $({ set -- ; : ${v}; })
+%%%
+IFS=':'; : ${!%%${#$}}
+%%%
+case [[:alpha:]] in a*) echo M;; *) echo N;; esac
+%%%
+echo $((((~w))))
+%%%
+: `for i in $IFS*; do echo "$i"; done` $2 $(echo ${2:?"$((7))"}) && : ${IFS}
+%%%
+set -- ; echo a[b $(IFS='é'; echo ${#$}) `case a]ba"b in *b*) echo M;; *) echo N;; esac`${x1}
+%%%
+echo $((_a))
+%%%
+( if : a 'abc'; then printf "<%s>"  ${HOME} $(((16) != ~08)); fi )
+%%%
+while false; do :; done; echo $(echo $((!8))) $x1
+%%%
+if echo ~ ''; then echo  $$ *; fi
+%%%
+if echo $(($HOME + 1 & $_a + 1 ? $u + 1 : (64))) $((017 < 1 ? 63 ? 64 : x1 : $x1 + 1)); then echo `( echo \\ '~' )` "${-+${#x1}}"; fi
+%%%
+if : 'aaa' $(IFS=''; : \`${v} a b); then echo $(u=.; : `echo $((0x10))` ** x:y) 'a]b'; fi
+%%%
+set -- `while false; do :; done; echo echo ${#?a{b}` $IFS; echo ${u:=${#v}} 'a}b' "'/a/b'`: a b a{b ~``: [a-c] a echo a\b a{b a[b`"
+%%%
+{ { if echo '/a/b' ${u} `echo ] a* ${#_a}`; then : ${_a+\$} a#b; fi; }; }
+%%%
+while false; do :; done; echo $w
+%%%
+echo \\
+%%%
+{ echo $(($w + 1)); }
+%%%
+{ printf "<%s>"  $((1)); }
+%%%
+echo $w[[:alpha:]] $9
+%%%
+IFS='é'; echo $- $2 $(case 'a' in **) echo M;; *) echo N;; esac)
+%%%
+( echo $((0)) )
+%%%
+echo $((1))
+%%%
+echo $((+64))
+%%%
+for i in ${#*} $x1; do echo "$i"; done
+%%%
+set -- ${#*}; printf "<%s>"  'a#b' $9
+%%%
+for i in `echo echo a{ba $(printf "<%s>"  a\b a'b a]b) ${w} $(printf "<%s>"  echo 	) $- ; printf "<%s>"   'x:y'` "**"; do echo "$i"; done
+%%%
+: a$b 'b' ; echo 'a}b' [!abc] ${#w}
+%%%
+echo $((($w + 1)))
+%%%
+echo \\ ${#-} ${#HOME} && echo \* [
+%%%
+{ echo "]"; }
+%%%
+IFS=' '; printf "<%s>"  ${1:+${##}}${w} \$
+%%%
+set -- ; echo ${#x1} "$u"
+%%%
+v=\ ; echo 
+%%%
+{ set -- ${u=/a/bN} "aaa=b"; echo ""$((017))""; }
+%%%
+case $(: $1) in ]) echo M;; *) echo N;; esac
+%%%
+while false; do :; done; printf "<%s>"  $(((-HOME &= _a))) '.'
+%%%
+u=$2; echo $_a ${HOME} $(IFS=':	
+'; echo $x1)$$
+%%%
+set -- ${##${2-\'}} `: echo ${@-a$b} [[:alpha:]] $* | echo ${#x1}`; printf "<%s>"  ${#v} `echo *a a*b`
+%%%
+echo $((v))
+%%%
+if echo $_a $1; then echo $((~$IFS + 1)) \'; fi
+%%%
+echo $((3))
+%%%
+IFS='ab'; printf "<%s>"  "[!abc]"
+%%%
+set -- $(x1=`echo a\b`; echo \  ${9:-\ }) $(for i in \  `echo .. a[b`; do echo "$i"; done); echo ${-:?$-}
+%%%
+while false; do :; done; printf "<%s>"  ${x1:-[}
+%%%
+( printf "<%s>"  $9 $$${#x1} )
+%%%
+{ case $_a in *) echo M;; *) echo N;; esac; }
+%%%
+( ( echo 'a*b' ) )
+%%%
+echo $((-$w + 1 >> $x1 + 1))
+%%%
+IFS=':'; printf "<%s>"  `while false; do :; done; echo $({ echo $((1)); })` '/a/b' $((w ^= 9223372036854775807))"\""\ 
+%%%
+set -- 'aaa' \\; echo *a a$(((0x10))) *b*
+%%%
+if echo 'a' $(IFS=`echo a*b a"b a*b`[; echo ${u} ); then : $(if printf "<%s>"  ${v}; then echo "[[:alpha:]]"; fi) '/a/b'; fi
+%%%
+{ if echo **\" '~/z'; then echo `echo $((3 == HOME))` 'abc'$(($HOME + 1)) $2; fi; }
+%%%
+set -- é$?; printf "<%s>"  ${HOME-${#@}} ${_a}
+%%%
+for i in \*; do echo "$i"; done
+%%%
+while false; do :; done; : ${#1}
+%%%
+if echo $9; then : ${#@} ${w:=\\}$u; fi
+%%%
+echo ${##} $HOME
+%%%
+echo $((-w <<= 10))
+%%%
+while false; do :; done; : $(set -- `echo $w $((x1))`; : ? ~/z ${u}) 'é' $((017))
+%%%
+IFS=' '; echo \a
+%%%
+printf "<%s>"  $- $(IFS='é'; echo "${_a}") $(case \` in [a-c]) echo M;; *) echo N;; esac)'aéb'
+%%%
+while false; do :; done; echo ${$:?"\a"} $? ${#IFS}
+%%%
+set -- a$b $((u)); echo ${#u} $(set -- ; echo 'abc' ${#x1} \a) ${-:=a}
+%%%
+echo $((017 ? (0 ? w : 017) : 7))
+%%%
+echo x:y
+%%%
+for i in 	; do echo "$i"; done
+%%%
+IFS=':'; echo ${_a} 	 ${#9}
+%%%
+set -- 'aéb'; echo `if echo 'x:y'; then : if echo ${HOME}; then printf "<%s>"  a?c a$b echo $v ${#_a}; fi echo ${IFS}"a=b" || echo $(echo "." é) $(echo "~/z" ?) 'a#b'; fi` 'a=b' $_a
+%%%
+{ { IFS='ab'; echo $1 ..; }; }
+%%%
+set -- a$b; echo ] x:y $((64))
+%%%
+for i in $IFS ${#v}; do echo "$i"; done
+%%%
+echo $((31))
+%%%
+( HOME=$(echo ${#9} *b* ?); echo `echo é || echo ${#*} 'a]b' : a#b /a/b${#w}` )
+%%%
+set -- ${v-${w}}\"; echo $(echo $1 b) \*
+%%%
+if echo 'a]b''é' ${w#"$((1))"'.'} "${HOME}"; then echo $(($_a + 1)) ${#9}; fi
+%%%
+echo `IFS='ab'; echo ${#u} $(printf "<%s>"  $HOME $((_a)) 'a\b'$* | printf "<%s>"  ${u})` && printf "<%s>"  $(for i in "'..'" 'a*b'; do echo "$i"; done)
+%%%
+echo 'aéb' ; printf "<%s>"  $1 ${w} a
+%%%
+if echo $(case \  in [abc]) echo M;; *) echo N;; esac); then : $-${2:?\ } $HOME "$w"; fi
+%%%
+for i in ${IFS}; do echo "$i"; done
+%%%
+for i in ${x1} $(IFS=' :'; echo $1 ${x1} \ ); do echo "$i"; done
+%%%
+echo [a-c]
+%%%
+echo $((0))
+%%%
+while false; do :; done; echo []a] `set -- ; echo ${x1:?${#u}}${x1:=$1}  ""${IFS:=}""` ""$(: ${_a})""
+%%%
+set -- ; : ${IFS?${w}${IFS}}
+%%%
+while false; do :; done; printf "<%s>"  ${x1-`case ${v=	} in ]) echo M;; *) echo N;; esac`} $(((w)))
+%%%
+if echo $(while false; do :; done; echo $({ : ${!=a"b}; }) a b) `case $1 in [!abc]) echo M;; *) echo N;; esac`; then echo ${#2} $(echo *a ${w} [) \\; fi
+%%%
+u=${v}; echo "${#HOME}" 'b' `: $2`
+%%%
+w="$(echo $((08)) )"; echo ${_a} $w
+%%%
+{ echo $((10 ? x1 : 63)); }
+%%%
+echo '~/z' $9 ${#2}
+%%%
+case $(echo $w) in [) echo M;; *) echo N;; esac
+%%%
+set -- ; printf "<%s>"  ${#-} \"
+%%%
+echo $((0x10))
+%%%
+set -- ; : \ 
+%%%
+set -- 'b'**$(printf "<%s>"  `echo ab` `echo  	`); echo $(for i in [[:alpha:]]; do echo "$i"; done) ${IFS}
+%%%
+IFS='é'; echo 'aa' `{ case '	' in *b*) echo M;; *) echo N;; esac; }`
+%%%
+while false; do :; done; : \` $x1
+%%%
+u=`if echo **; then : ${#2}; fi`; echo ${w}$IFS
+%%%
+( for i in $((0 || 8)); do echo "$i"; done )
+%%%
+( x1=`printf "<%s>"  a$ba?b`; printf "<%s>"  \* )
+%%%
+: "[[:alpha:]]" $(if echo \n; then printf "<%s>"  a $w; fi) ${_a}
+%%%
+while false; do :; done; printf "<%s>"  $# $1a=b $((v))
+%%%
+echo $((_a))
+%%%
+v=; echo ${#*} $_a
+%%%
+if echo ${IFS} $(IFS=' :'; echo "${_a}" ${_a}); then echo ${2%%N} "${#v}" $x1; fi
+%%%
+echo $(($IFS + 1))
+%%%
+( echo $(for i in $((017)); do echo "$i"; done) `echo $(((v)))` ${9+$9} )
+%%%
+while false; do :; done; echo $((_a)) $u
+%%%
+echo $(($u + 1)) $@ 'a[b'
+%%%
+set -- `{ echo $((w)) a"b; }`; echo ] abc''
+%%%
+IFS=' '; echo $*/a/b \n 'a]b'
+%%%
+set -- ; echo $((3 ? 16 : v ? HOME : ($w + 1)))
+%%%
+{ { ( echo ${#@} 'aa' ); }; }
+%%%
+echo ${#HOME} || echo \' $HOME]
+%%%
+case ${_a:+$IFS} in *a) echo M;; *) echo N;; esac
+%%%
+: ~ 'a`b'
+%%%
+echo \$ $_a $9
+%%%
+echo \" a* 'a' && printf "<%s>"  "[]a]$(echo a'ba%b $1)" ${##} $$
+%%%
+echo $((+$v + 1))
+%%%
+( ( set -- ; echo ${#1} ) )
+%%%
+( IFS='é'; printf "<%s>"  \* ${_a} )
+%%%
+IFS=' '; echo \$
+%%%
+while false; do :; done; printf "<%s>"  `echo ${#u} ${u##$_a}`
+%%%
+: \"$HOME $* $(for i in 'a]b' $(echo "a#b"   $v); do echo "$i"; done)
+%%%
+case ""~""aaa in [a-c]) echo M;; *) echo N;; esac
+%%%
+( IFS=**; echo $? )
+%%%
+for i in $1; do echo "$i"; done
+%%%
+case $((-2 ? 8 : ~017)) in a*) echo M;; *) echo N;; esac
+%%%
+echo $(if echo "a\*b"~"" ; then echo $(set -- ; echo ${HOME}); fi) $(IFS='ab'; echo "$(echo 	 é)""	"a b) | : \  aéb $({ _a=${2%%a$b}; echo \  *a; })
+%%%
+echo $(($HOME + 1))
+%%%
+_a=\'; echo $((9223372036854775807 ? 9223372036854775807 : $w + 1)) ${#x1}
+%%%
+( while false; do :; done; echo $v )
+%%%
+{ w="$2"; echo $9 ${#*}; }
+%%%
+_a=\`; printf "<%s>"  \  $((HOME >>= u)) $(for i in $u `echo $(echo  . aa) 'a=b'`; do echo "$i"; done)
+%%%
+echo $((63))
+%%%
+for i in ${IFS} *a$(echo $((9223372036854775807)) []a]); do echo "$i"; done
+%%%
+case $(echo a?b $9)$((-2)) in \*) echo M;; *) echo N;; esac
+%%%
+HOME=${w}; echo $u
+%%%
+case $x1 in [[:alpha:]]) echo M;; *) echo N;; esac
+%%%
+{ if echo `case é in [[:alpha:]]) echo M;; *) echo N;; esac` ${IFS:+$(((2)))} ${#_a}; then echo "\a" $((16 > 0x10 ? _a : _a)); fi; }
+%%%
+echo $((w))
+%%%
+( : ${2=$HOME} )
+%%%
+if echo ${##} 'a[b'; then echo \n $#; fi
+%%%
+if printf "<%s>"  '
+' 	; then echo \ ; fi
+%%%
+IFS=' '; echo 'a`b' [[:alpha:]] 
+%%%
+IFS=''; : $((IFS |= u))
+%%%
+{ w=$x1; : ${u} \"; }
+%%%
+IFS=' :'; echo 'abc'
+%%%
+while false; do :; done; echo $# $((31 ? u >>= +IFS : (+63)))
+%%%
+echo $((u))
+%%%
+_a=\"; echo ] $1
+%%%
+( case ${w?a]ba%b} in a*) echo M;; *) echo N;; esac )
+%%%
+case $w in [) echo M;; *) echo N;; esac
+%%%
+( echo $((((017)))) )
+%%%
+case $v in ) echo M;; *) echo N;; esac
+%%%
+echo $((0))
+%%%
+{ : 'a$b' \  ; echo ${x1} abc; }
+%%%
+for i in \\ \`; do echo "$i"; done
+%%%
+echo $((IFS))
+%%%
+set -- ~/z ${IFS}; echo `: 'a]b' x:y` ${#@} "]"
+%%%
+{ case "$!" in \*) echo M;; *) echo N;; esac; }
+%%%
+while false; do :; done; echo 'aéb'
+%%%
+echo ${##}[!abc]"a'b"[a-c] ; : $! ${#@} $((017))
+%%%
+IFS='ab'; echo \* 'aéb'
+%%%
+if printf "<%s>"  'a{b' $(($_a + 1)) ${_a:-`while false; do :; done; : ${x1}`}; then echo \`; fi
+%%%
+echo $(($_a + 1 >> _a ? w : HOME))
+%%%
+{ if echo 'x:y' $x1 a*b; then echo $* $(for i in "~"; do echo "$i"; done); fi; }
+%%%
+echo $(($_a + 1 ? 1 / (0x10) : 08))
+%%%
+IFS=' :'; echo 'a$b' $x1
+%%%
+set -- ${#w} ${IFS}; echo $HOME '/a/b' $x1
+%%%
+( echo $((0x10)) )
+%%%
+case `echo * ..a#b`"$w" in a*) echo M;; *) echo N;; esac
+%%%
+{ if printf "<%s>"  a'b ${?##a\b}; then echo \* 'a'\''b'  ; fi; }
+%%%
+{ echo \" `echo aéb ${v} | printf "<%s>"  ${##}` ; : $! `echo ${*# a$b} $9 $(echo $# "é" '.') && echo ${2:="ab"} ${#-}` $(if echo $w $(echo ${1:?	} a?c) $(echo `echo é a}b b`); then : "`echo a b a=b`" "$(echo a)" \*; fi); }
+%%%
+while false; do :; done; : $HOME ${$?'aéb'}
+%%%
+for i in $(case $# in [abc]) echo M;; *) echo N;; esac); do echo "$i"; done
+%%%
+IFS=' :'; echo ${x1:+a}b}\  $(set -- "~/zaa"; echo $((_a)) ${#9} \*) "${IFS}"
+%%%
+if echo $u; then echo abc $1; fi
+%%%
+while false; do :; done; echo $((8))
+%%%
+if printf "<%s>"  ${#9} `echo [abc] && echo *b* a*` ${w}; then echo $(if printf "<%s>"  'a=b''a{b' `while false; do :; done; echo aaa 'a$b'` $(echo $((08 > u))); then echo $(set -- éaéb $(echo a#b aaa); echo $(echo ${!:=a#b} $((_a))) ) ${#HOME}; fi) 'a#b' [; fi
+%%%
+while false; do :; done; echo `{ case a%b.. in *) echo M;; *) echo N;; esac; }` [abc] $_a
+%%%
+set -- $_a $((_a)); echo é   $x1
+%%%
+echo `: $# $((--2)) ; echo a* ${x1} [[:alpha:]]` ${2+[!abc]$w${w}} ${HOME}
+%%%
+echo "`set -- a}b; echo ${2%%$x1}`" ${@:+`printf "<%s>"  ${v} ; echo 'é' 'aaa' echo $- x:ya#b ${#$}`} `( printf "<%s>"  ${--aaa} [ ${#1} )`$(_a='a`b'; echo ${#IFS} 'a{b')
+%%%
+echo $((0))
+%%%
+case ${#?} in a) echo M;; *) echo N;; esac
+%%%
+{ printf "<%s>"  a$b && printf "<%s>"  "'a\b'" ${#HOME}; }
+%%%
+if : ${_a:+${*?$((0x10))}} ${#@} \"; then echo \  [; fi
+%%%
+echo $1 "$IFSa\b" $? || : ${#9} $$
+%%%
+set -- "]"; echo `set -- "$(echo a'b a'b a\b)" $_a; echo $((+$_a + 1)) ${#HOME} 'abc'` $(_a=$(printf "<%s>"  "a`b"); : a)
+%%%
+case $IFS in [[:alpha:]]) echo M;; *) echo N;; esac
+%%%
+if echo `printf "<%s>"  case 'x:y' in \*) echo M;; *) echo N;; esac`; then echo \  $((-9223372036854775807)) ${##}; fi
+%%%
+{ IFS='é'; : $((16 % +0x10)); }
+%%%
+IFS="${*##${_a}}"; printf "<%s>"  ${IFS} 'a}b'
+%%%
+{ printf "<%s>"  $(for i in `echo a{b a\b`; do echo "$i"; done) ${IFS}; }
+%%%
+for i in $(IFS='ab'; echo $?) $w; do echo "$i"; done
+%%%
+for i in "$((!31))" `case aa in [!abc]) echo M;; *) echo N;; esac`; do echo "$i"; done
+%%%
+if printf "<%s>"  $IFS `{ if echo ${#$} ${u}; then printf "<%s>"  $(echo : ~/z ${x1}) $((~-1)) $((v >>= 0)); fi; }` `echo 'a}b' ${$-$(: echo ~/z a 'b' $(echo a[b N é))} $1`; then echo ${#*}$((8))[]a]; fi
+%%%
+{ if echo ${9:-'a$b'} $(for i in a*b~ ""; do echo "$i"; done) ${#x1}; then echo $HOME a"b; fi; }
+%%%
+for i in . ${HOME}; do echo "$i"; done
+%%%
+case a}b in *) echo M;; *) echo N;; esac
+%%%
+u=a?c; : ${##} "\`"
+%%%
+IFS=':'; echo `if echo $w while false; do :; done; : ] $* \  '~/z'; then echo $?; fi` a"b `x1=\'; echo ${#*} ${#+$v}`\a
+%%%
+printf "<%s>"  "${##}"
+%%%
+IFS=':'; : \  \'
+%%%
+set -- *a $((_a)); printf "<%s>"  `while false; do :; done; printf "<%s>"  ${u} ${#?} $w` ${-:=a*$((u = 31))}
+%%%
+echo ${u} ${w} \$
+%%%
+set -- ${2:-$((10 << 0))} $IFS; echo 'a'
+%%%
+case $(( printf "<%s>"  ${#%a`b} a\*b ${#1} )) in \*) echo M;; *) echo N;; esac
+%%%
+case $((-017 >= 017 % 3)) in ?) echo M;; *) echo N;; esac
+%%%
+echo $((1))
+%%%
+( if echo *b*; then printf "<%s>"  a"b; fi )
+%%%
+case "a$b""N" in [!abc]) echo M;; *) echo N;; esac
+%%%
+echo $((017 ? v : 0 || IFS | 1 != x1 *= 0x10))
+%%%
+IFS=' :'; echo \"
+%%%
+IFS=""\`""; echo a ${1-${#1}}
+%%%
+{ echo a`b a\*b; }
+%%%
+{ IFS=':	
+'; echo $# \*${1#${u}} \'; }
+%%%
+case ${w=$(echo aéb)${1+x:y}} in [) echo M;; *) echo N;; esac
+%%%
+IFS=':'; echo $(while false; do :; done; echo ' ' aa) 'b' ${#w}
+%%%
+_a=$IFS; echo a}b $IFS ${v}
+%%%
+echo $(IFS='é'; printf "<%s>"  a=b) ]
+%%%
+printf "<%s>"  "$((_a >>= IFS))[a-c]"
+%%%
+for i in ${HOME?$$} $*; do echo "$i"; done
+%%%
+v='..'; echo ${#1} $((w >>= 8))
+%%%
+echo `u=echo "a"b" a]b ${2%abc}; echo ${#*} a]b` .. ; : \\ \n
+%%%
+for i in \n ${#1}; do echo "$i"; done
+%%%
+printf "<%s>"  \\ $(IFS=' :'; echo `{ echo $((1)) $! []a]; }` ${x1} `case a b in *a) echo M;; *) echo N;; esac`) 'a"b' || : \* "`case  in [abc]) echo M;; *) echo N;; esac`" `{ echo ${IFS:-echo abc a ab} echo  ${#+a#b} ${v}; }`
+%%%
+set -- $u; echo 'a"b' ${#u}
+%%%
+case ${#w} in *a) echo M;; *) echo N;; esac
+%%%
+( case "\"" in a\*b) echo M;; *) echo N;; esac )
+%%%
+case   in a) echo M;; *) echo N;; esac
+%%%
+{ while false; do :; done; echo ${-%$((IFS))} \ ; }
+%%%
+for i in $({ echo `echo ~/z b x:y` `printf "<%s>"  aaa a aéb` $(echo a%b x:y aéb); }); do echo "$i"; done
+%%%
+: \" ${*#$_a} && printf "<%s>"  "$(set -- ${x1} \'; echo 'b')" 'a{b' a
+%%%
+IFS=$@; echo $(set -- \` "${IFS}"; echo $* $9)
+%%%
+IFS=''; printf "<%s>"  \* $((x1 &= 9223372036854775807 - (u))) \\
+%%%
+echo $((9223372036854775807))
+%%%
+case `echo [!abc] echo $w ${HOME} a?c N` in a) echo M;; *) echo N;; esac
+%%%
+echo '' $! | echo ${??"a[ba}b"}$*
+%%%
+IFS=${*=$((_a))}; echo `{ echo $((16)); }` ${IFS}
+%%%
+case 'a$b' in a?c) echo M;; *) echo N;; esac
+%%%
+echo `while false; do :; done; echo $_a$?$((IFS)) \\a set -- $9; echo ${v} 'aa'` ${#1}\$ $2 | printf "<%s>"    ${-:-$(while false; do :; done; printf "<%s>"  `echo ${@#..}` ${_a%%aéb})}
+%%%
+for i in a*b"a`b"; do echo "$i"; done
+%%%
+( echo $(((1 > 31))) )
+%%%
+while false; do :; done; : $(if echo ${_a}; then printf "<%s>"  $((9223372036854775807)) $9 $2; fi)
+%%%
+if echo a`b; then echo \* $((v)); fi
+%%%
+case $((IFS)) in *a) echo M;; *) echo N;; esac
+%%%
+set -- N \*; echo $u $(($_a + 1 << !017 ? w : 63)) $IFS
+%%%
+set -- \* $_a\`; echo `case ${#IFS} in [!abc]) echo M;; *) echo N;; esac` ${#_a}
+%%%
+echo é
+%%%
+( { ( : x:ya%b ); } )
+%%%
+( set -- ; echo "'
+'" `printf "<%s>"  $(echo ${u} $(echo a"b a\b)) $(echo * ${IFS}) ${w:+a]bN} ; : $(echo $(echo aéb)) \\` $((9223372036854775807)) )
+%%%
+{ ( if echo $((64 - 08)); then echo "$((v))"; fi ); }
+%%%
+case $(set -- ; echo '' ${u} 'aaa') in a) echo M;; *) echo N;; esac
+%%%
+echo $((((0) >> 017)))
+%%%
+case "a b" in [a-c]) echo M;; *) echo N;; esac
+%%%
+echo ${v:-a?b} ; echo ${#$} $-
+%%%
+HOME=a"b; echo a"b a[b
+%%%
+case $w in ]) echo M;; *) echo N;; esac
+%%%
+for i in `if echo $((017)) ${?=	} ${_a}$u; then printf "<%s>"  ${u} $(($_a + 1)); fi` $((31)); do echo "$i"; done
+%%%
+case a* in a*) echo M;; *) echo N;; esac
+%%%
+( : ${$+"`echo a\b a b ~/z`"} ${_a} `if echo $- ""/a/b"" ${#HOME}$((_a)); then echo $?; fi` || echo \* $- )
+%%%
+echo $((0))
+%%%
+for i in ${-+'aaa'}; do echo "$i"; done
+%%%
+_a="${#w}"; printf "<%s>"  "${!-${#-}a}babc}"
+%%%
+{ if echo a%b $({ printf "<%s>"  ${w}; }) *; then : x:y; fi; }
+%%%
+IFS=$(case \a in \*) echo M;; *) echo N;; esac); echo "'a}b'"
+%%%
+( _a="'a$b'"; echo $(( : $(echo a"b) /a/ba#b ${HOME} )) "${-+a=b}"$(printf "<%s>"  `printf "<%s>"  a[b a{b a*b` $(echo .)) $(if echo a{b $v; then echo a?c ${#?}a'b; fi) )
+%%%
+echo $(((64 * 017) == v <<= 8))
+%%%
+case `case éa$b in a*) echo M;; *) echo N;; esac` in *b*) echo M;; *) echo N;; esac
+%%%
+( if echo $((0)) ${#2}; then echo $((v ^= 63 | 7)) $HOME; fi )
+%%%
+if echo ${2?${#IFS}}; then echo $((x1 &= +v)) $(if echo `case "~/z" in a*) echo M;; *) echo N;; esac`; then echo "'a b'" "$2" '..'; fi); fi
+%%%
+for i in ${IFS}; do echo "$i"; done
+%%%
+while false; do :; done; echo 'a[b' $(( while false; do :; done; echo $$ )) \*
+%%%
+for i in $IFS $$; do echo "$i"; done
+%%%
+for i in ${-#`echo a{b`$v} ${#u}$((_a |= IFS)); do echo "$i"; done
+%%%
+echo $(($w + 1))
+%%%
+{ echo "a b" | echo $HOME ${#$} $1; }
+%%%
+u=${#IFS}; : $u $9 ${IFS}
+%%%
+x1=`echo 'a[b'a]b \*`; echo a$b $9 "\ "
+%%%
+for i in b $(((31))); do echo "$i"; done
+%%%
+if echo "`x1=$v; echo \* $((0))$-`" ${#v} $9; then echo ${x1}; fi
+%%%
+while false; do :; done; echo $*
+%%%
+while false; do :; done; : "$((HOME))'/a/b'" 'a[b'
+%%%
+echo $((31 && 017 < !017 >= v))
+%%%
+echo $((((08))))
+%%%
+IFS=' '; echo a[b `case $2 in *) echo M;; *) echo N;; esac` [[:alpha:]]
+%%%
+while false; do :; done; printf "<%s>"  '
+'
+%%%
+while false; do :; done; echo **
+%%%
+HOME=${?##$((u ? 0 : 017))}; printf "<%s>"  ${HOME}$$ ${#1}
+%%%
+( echo "$-" ${#9} a$b && : a\*b a?c )
+%%%
+case $# in a?c) echo M;; *) echo N;; esac
+%%%
+set -- ; echo \* 'aaa' $#
+%%%
+( while false; do :; done; echo $(printf "<%s>"  'a%b' \$ `printf "<%s>"  "a=b" ${#*} echo  ` ; printf "<%s>"  ${w} ${#2}${$=b} $!) )
+%%%
+set -- $(echo 'a]b' ?)$u a"b; printf "<%s>"  'a}b'$IFS $((8))
+%%%
+echo $((1))
+%%%
+if echo $(echo $((v *= 1 | v))) "$@""a"b"""; then printf "<%s>"  $@; fi
+%%%
+if echo `echo "$(((w)))" || echo 'a$b'` $(echo $((~017))); then printf "<%s>"  [abc] 'b' \n; fi
+%%%
+if echo $! $? $((-2)); then : ${v%%${#2}}; fi
+%%%
+for i in ..; do echo "$i"; done
+%%%
+if printf "<%s>"  $(case $(: a?c) in [) echo M;; *) echo N;; esac) $@ $IFS; then printf "<%s>"  ${#_a}; fi
+%%%
+while false; do :; done; : \  $(((1))) $*
+%%%
+echo $((+!IFS))
+%%%
+while false; do :; done; echo 'a#b' "'aéb'" "$IFS"
+%%%
+while false; do :; done; echo $(w=$x1\`; : $((v))"${#w}") a?c$((017))
+%%%
+if : `case \$ in a*) echo M;; *) echo N;; esac`; then echo ** ${*##${-%%$(echo abc "~")}}; fi
+%%%
+echo ${#@} *a
+%%%
+echo $((1 ? u : 3 | 8 ^ x1 %= _a |= 0x10))
+%%%
+set -- ; echo ${x1}
+%%%
+set -- ${w#\*}; echo .. $9
+%%%
+( while false; do :; done; : ~ 'a?b' )
+%%%
+for i in `case a b in [a-c]) echo M;; *) echo N;; esac` ${_a}; do echo "$i"; done
+%%%
+case a%b in ]) echo M;; *) echo N;; esac
+%%%
+case $(($_a + 1 <= v)) in a) echo M;; *) echo N;; esac
+%%%
+( echo `( echo printf "<%s>"  a?b a'b $2 )` $((_a *= 0 / 08)) && echo `echo echo é é  printf "<%s>"  	 é`\* \" $((8)) )
+%%%
+echo ${#1} $u a\b
+%%%
+w=${v}; : "$((~$u + 1))" ${v} ${u}
+%%%
+echo ${9%$(while false; do :; done; printf "<%s>"  **)} && echo ""${IFS+$(printf "<%s>"  	 aa)}"" a\b
+%%%
+set -- ${_a}; echo "${$%\*}"$*
+%%%
+echo ${_a="[abc]"} "`case ${1%%x:y} in ?) echo M;; *) echo N;; esac`" ~/z
+%%%
+for i in $(w=""; echo ${HOME} "$-" [[:alpha:]]) ${$%%$u}; do echo "$i"; done
+%%%
+: $x1 `echo $(((+v)))` && echo $9 ${#_a} `( echo $((w & 0)) )`
+%%%
+while false; do :; done; : ${v} $HOME
+%%%
+if echo ${-?[}"`echo $_a`" $@; then echo $(if : *a ${w}; then echo $w; fi); fi
+%%%
+echo $(((x1) << _a < 0 && ~64))
+%%%
+( for i in ${u-$(echo x:y ~ a[b)}; do echo "$i"; done )
+%%%
+( while false; do :; done; echo "${x1}" ${#HOME} )
+%%%
+{ if printf "<%s>"  $(($x1 + 1))  ${#9} `set -- ${#_a} $w; echo $HOME \$ $x1`; then echo $(((1 ? 0x10 : 1))) $v; fi; }
+%%%
+for i in $w \`$(: `: a}b ~`); do echo "$i"; done
+%%%
+v='a[b'; echo `{ printf "<%s>"  $HOME; }` $(case $w in [[:alpha:]]) echo M;; *) echo N;; esac)
+%%%
+{ { echo "$@" $(printf "<%s>"  "abc") ${$+$(: a}b ~/z)} || echo a; }; }
+%%%
+{ w=${u}; : $((08)) \` $((!IFS))${IFS}; }
+%%%
+w='a\b'; echo ${v?"a"b"}${*%%~/a/b}' '
+%%%
+echo $(w=$(printf "<%s>"  ${HOME}); echo ? a?b'a%b') $(: [a-c] \` $2) a\ba=b && echo ${u} `IFS=' :'; echo $({ echo ${#2}; })`
+%%%
+for i in 'a*b'; do echo "$i"; done
+%%%
+{ u='a$b'; printf "<%s>"  a b \" a?c; }
+%%%
+set -- ; echo "${w}" $(echo $((0x10)))
+%%%
+IFS=' :'; echo aéb
+%%%
+for i in \\ $((_a ? 017 : IFS <= $IFS + 1)); do echo "$i"; done
+%%%
+for i in `case a"b in *a) echo M;; *) echo N;; esac`; do echo "$i"; done
+%%%
+for i in ${#v} "$(echo `: ` [abc])"; do echo "$i"; done
+%%%
+printf "<%s>"  $((1 == 64 - (IFS)))a\*b || echo $(case ${_a%${2%%aéb}} in [) echo M;; *) echo N;; esac)   $$${v}
+%%%
+if echo "`_a=printf "<%s>"  é; echo a b`" aéb; then echo 'a' a*; fi
+%%%
+( IFS=\ a\*b; printf "<%s>"  "$(echo 'aaa' $(echo a`b))" `while false; do :; done; echo ${u} $IFS` )
+%%%
+printf "<%s>"  "$_a" && printf "<%s>"  ${#IFS} \" \$
+%%%
+case ${-:+$w} in a*) echo M;; *) echo N;; esac
+%%%
+echo ${u} '' && echo $x1$$
+%%%
+echo $((w += _a))
+%%%
+( echo 'a?b' && printf "<%s>"  `IFS=' :'; echo \* $(printf "<%s>"  'a#b' ${u%N} $((0x10))) \` ${2%${w}}'a`b' )
+%%%
+w="\ "; echo ${#v} `( while false; do :; done; echo $(printf "<%s>"  'a$b' $? $1) )` $(echo $((HOME)))
+%%%
+if printf "<%s>"  *a; then printf "<%s>"  $(( case a$b~ in *a) echo M;; *) echo N;; esac )) ${#?}; fi
+%%%
+printf "<%s>"  ${#v} 'a{b' $(($IFS + 1 <= HOME /= 0x10 >= 017))
+%%%
+case "/a/b" in [) echo M;; *) echo N;; esac
+%%%
+echo $(((HOME) ? x1 : ~0 <= u <<= 8))
+%%%
+set -- ; : $1
+%%%
+echo $((08))
+%%%
+echo $((x1 = u / 1 < $w + 1 ? u = HOME : (10)))
+%%%
+IFS='é'; echo ${v}$(((64))) ${#@}
+%%%
+while false; do :; done; : N
+%%%
+if echo \`$(echo abc)$(echo ${#HOME} $(echo aa abc) $(echo a#b)); then printf "<%s>"  a\*b $x1; fi
+%%%
+v=\n; : \' $((IFS)) ${u}
+%%%
+( while false; do :; done; : $HOME ] \" )
+%%%
+echo $((8 / -2 ? (1) : (10) ? HOME : x1))
+%%%
+: `case \" in a) echo M;; *) echo N;; esac``: N && printf "<%s>"  \n echo ${HOME} ${IFS} $9` $((-$_a + 1)) && : b `case ${#HOME}$HOME in *a) echo M;; *) echo N;; esac` $(w=$2; echo 'a#b' $((10)))
+%%%
+v=..; echo $(( while false; do :; done; echo ** $((x1 >> _a)) )) ${v}
+%%%
+case $! in **) echo M;; *) echo N;; esac
+%%%
+IFS=' '; printf "<%s>"  `while false; do :; done; echo $((0)) *b*$$`
+%%%
+if printf "<%s>"  \  [!abc]; then echo $(IFS=' :'; printf "<%s>"  ${w:+${u}} $v ${_a%$2}) $(((x1))); fi
+%%%
+{ { v=$@; echo $(echo a}ba); }; }
+%%%
+printf "<%s>"  $IFS $* && echo "$(while false; do :; done; : x:y)" 'a' $((-w %= 08 ? x1 : 0x10))
+%%%
+{ while false; do :; done; echo $({ echo ${v} ${u:?x:y} *; }); }
+%%%
+while false; do :; done; : $x1 ${$%%$2} x:y
+%%%
+case "$@" in \*) echo M;; *) echo N;; esac
+%%%
+IFS=':	
+'; echo ${HOME}
+%%%
+{ printf "<%s>"  \\; }
+%%%
+_a="$9"; printf "<%s>"  "a$b" \  ${1#[[:alpha:]]$9}
+%%%
+echo ${#u} $w | printf "<%s>"  $? \"
+%%%
+( echo $((1)) )
+%%%
+case ${##} in a*) echo M;; *) echo N;; esac
+%%%
+case ${#HOME} in **) echo M;; *) echo N;; esac
+%%%
+( echo `if echo ${v} $@ \*; then echo $!; fi` ${_a=${HOME}} \` )
+%%%
+IFS=':'; printf "<%s>"  "$((w))"
+%%%
+echo $(($x1 + 1 >= $_a + 1))
+%%%
+while false; do :; done; echo a\b $# ${IFS}
+%%%
+if echo a{b a#b; then echo $((x1)) *a ${2#`for i in ${#v}; do echo "$i"; done`}; fi
+%%%
+while false; do :; done; echo ${!:-"a]b"} [!abc]
+%%%
+set -- ${#*}; printf "<%s>"  ${#2} $HOME
+%%%
+for i in ${#u}; do echo "$i"; done
+%%%
+{ echo $((017)); }
+%%%
+{ IFS=' :'; printf "<%s>"  $w $HOME /a/b`echo *b* a'b \'`; }
+%%%
+set -- ${u}; echo $* "`echo [abc] "aaa*b" ${1?${*-a'b}} ; : ${IFS=\*}`" abc
+%%%
+( printf "<%s>"  'a$b' )
+%%%
+IFS=':'; echo 'a' $(case "$$" in a\*b) echo M;; *) echo N;; esac) $?
+%%%
+case `echo $HOME : ~/z . a#b`'/a/b' in [) echo M;; *) echo N;; esac
+%%%
+( case ${##} in *) echo M;; *) echo N;; esac )
+%%%
+if echo "`for i in 'aa' ${v}; do echo "$i"; done`"; then : \$ [[:alpha:]]; fi
+%%%
+set -- $(case $(: 	 ..) in **) echo M;; *) echo N;; esac); echo aaa $?
+%%%
+while false; do :; done; echo `case printf "<%s>"  ${#w} ${$%abc} in a?c) echo M;; *) echo N;; esac` `echo $((HOME -= _a &= 0))` [!abc]
+%%%
+set -- "\n" a`b; : 'a'\''b'
+%%%
+for i in $(case $w in \*) echo M;; *) echo N;; esac); do echo "$i"; done
+%%%
+set -- $((w |= 9223372036854775807 ? u : HOME)); echo $((IFS)) ""a#b"" $*
+%%%
+echo $((0x10 > _a |= 0x10 != 16))
+%%%
+w="\a"; : a "${#_a}"
+%%%
+while false; do :; done; echo $x1
+%%%
+while false; do :; done; echo a* ${v%'aaa'}
+%%%
+{ while false; do :; done; echo ${w}; }
+%%%
+printf "<%s>"  $1 ; echo ${IFS} ${HOME} '~/z'
+%%%
+set -- `echo ${w}~/z && echo $((8 ? 0x10 : 31)) $1 ""a"b""` a*; echo ${9-${x1}} ${?##$1\a}**
+%%%
+( ( { echo $((1)); } ) )
+%%%
+echo $(((0x10)))
+%%%
+set -- ${IFS}; echo 	 `echo $(((HOME)))` a'b
+%%%
+case "$#" in [) echo M;; *) echo N;; esac
+%%%
+for i in $v `{ echo a; }`; do echo "$i"; done
+%%%
+case ? in *a) echo M;; *) echo N;; esac
+%%%
+{ IFS=':'; echo `for i in $x1 \; do echo "$i"; done` \ ; }
+%%%
+IFS=' '; printf "<%s>"  ${_a} ~
+%%%
+for i in "$!"; do echo "$i"; done
+%%%
+for i in ${#x1} a; do echo "$i"; done
+%%%
+{ set -- ${#?} ${#9}; printf "<%s>"  $IFS; }
+%%%
+HOME=$w; echo `( echo $(((8))) )` $#
+%%%
+if echo ${?-"'a b'"}$@ $((+IFS -= 1 >> 0)); then : a*b \$ \'; fi
+%%%
+set -- ; echo $(((((64))))) `{ IFS=':	
+'; echo ${#%%"aa"} $- $*; }`
+%%%
+( while false; do :; done; printf "<%s>"  $((IFS <<= _a *= 08)) )
+%%%
+{ HOME=${u%%$(echo é a"b)}; printf "<%s>"  `echo "$(echo x:y)" \$ ; : ${HOME:-echo a b a}` ${#$} $(($HOME + 1)); }
+%%%
+if echo a\b\$ ${#@} 'a`b'; then echo `set -- ${#x1} $9; echo \$ ${_a#$IFS}` [; fi
+%%%
+_a=${u}; printf "<%s>"  ${#@}
+%%%
+echo $((017 == IFS))
+%%%
+for i in $1 a'b; do echo "$i"; done
+%%%
+case ${#u} in a?c) echo M;; *) echo N;; esac
+%%%
+( : "`printf "<%s>"  $x1 'abc'`" $((HOME |= ~0)) ; echo $((!_a ? 08 ? 64 : 3 : $v + 1)) $(set -- ; echo $! ${#u}) 'abc' )
+%%%
+case $x1 in [) echo M;; *) echo N;; esac
+%%%
+IFS=''; echo `set -- a; echo a?c` ${#1} $(((-HOME ? HOME += 16 : x1)))
+%%%
+{ case $((IFS)) in []a]) echo M;; *) echo N;; esac; }
+%%%
+echo $IFS '..' $(((64) && !017)) || echo [abc] "\'"${#2}
+%%%
+echo `set -- ; printf "<%s>"  ${v} \*` 'aéb' ${#@}
+%%%
+while false; do :; done; echo '.' $9 ?
+%%%
+IFS=' :'; echo \` ${_a} a\*b
+%%%
+u=${1:-}; printf "<%s>"  'a\b' $HOME \ 
+%%%
+{ ( ( echo \' ${#HOME} ) ); }
+%%%
+u='é'; echo 'é' 	 "\ "
+%%%
+echo $((0))
+%%%
+{ echo a=b "${HOME}${#9}" || echo \a; }
+%%%
+while false; do :; done; echo $((u |= 10))
+%%%
+printf "<%s>"  `( ( : $(: a=b) a ) )` [abc] && echo '' ${_a=$((w -= +HOME))}  
+%%%
+while false; do :; done; echo ${u:?[abc]} a=b
+%%%
+{ for i in $IFS; do echo "$i"; done; }
+%%%
+if echo ${v}'aéb' a[b; then printf "<%s>"  "${#$}" $(((HOME %= w ? w ? 7 : -2 : (8)))) ${HOME}; fi
+%%%
+set -- ; echo ${#x1}
+%%%
+if echo 'é' $u $((+0x10 / 017))\"; then : $2 ${w+\n} a?c; fi
+%%%
+w='a*b'; echo $HOME
+%%%
+for i in ${#-} [[:alpha:]]; do echo "$i"; done
+%%%
+for i in 'aéb' ${$:-`echo $?`}; do echo "$i"; done
+%%%
+set -- a $v; echo 	 a"b x:y'a'\''b'
+%%%
+x1=$(x1=${#% }; echo $HOME $IFS 'a'); echo $({ for i in $u; do echo "$i"; done; })
+%%%
+IFS=""aéb""; : ${#:+[a-c]}
+%%%
+echo ${_a} $(set -- x:y~/z~/z~/z; printf "<%s>"  \  \  $(if echo $(echo `echo  a b a#b` 'a%b') "$(echo b)" 'a=b'; then echo ${#w} ${1:+${#v}}; fi)) | printf "<%s>"  $# ${#IFS}
+%%%
+( set -- '..' ${!:+[abc]}; : ${$:?${#-}} \* )
+%%%
+printf "<%s>"  $w "$$" $u | echo $((1 == 7 || $w + 1)) ${#1}
+%%%
+for i in "${w}" $(IFS='ab'; echo ${v:-${v}} "\n"); do echo "$i"; done
+%%%
+set -- $_a; : ${#v}
+%%%
+if printf "<%s>"  \a "${#*}" ${$?\n}; then echo x:y $(while false; do :; done; echo ${##}) ${#w}a*b; fi
+%%%
+IFS='é'; echo "$(IFS=''; printf "<%s>"  "\a" a$b)" $(echo []a] ; echo 'a$b')
+%%%
+IFS=':	
+'; echo `IFS=' '; : ${#w}`${#%%${2%%${x1%	}}} $(echo ${#-} ${-:-'a?b'} ${#1} ; printf "<%s>"  \"${!##\ }) $IFS$((-08 ? HOME : v))
+%%%
+: 'abc' []a] && : $w $(echo $((-1))) ${v}
+%%%
+echo $((!0x10 ? $x1 + 1 : 0x10 ? HOME : IFS != 31 ? 16 : _a))
+%%%
+: `echo $(($_a + 1))`
+%%%
+{ echo $((+(017))); }
+%%%
+( printf "<%s>"  "$(echo \\ ${HOME} abcaaa)" ** [abc]$? || echo $((7)) ${HOME} a\b )
+%%%
+IFS=' '; : $(if echo `set -- $#; echo ${#u}`; then echo ${v:="]"}; fi) $((u ^= _a ? 9223372036854775807 : -2 << 0))
+%%%
+printf "<%s>"  $(: 'aéb' $* ${IFS:+abc}) "$(echo $# a)\'" ; echo $$[]a]${v} ${#-}
+%%%
+while false; do :; done; echo [ \""${#9}"
+%%%
+printf "<%s>"  \' ${#v} | echo [a-c] `echo '' && : ${*?[]a]} $(echo : ${@:-a[b} $((IFS)) ] && echo $((64))) $({ echo ${#2}; })`
+%%%
+( echo `case echo é aéb in *b*) echo M;; *) echo N;; esac` )
+%%%
+case ${#?} in a*) echo M;; *) echo N;; esac
+%%%
+echo $((08))
+%%%
+while false; do :; done; echo $((u))*a
+%%%
+x1=${#v}; echo $! $((16)) *a
+%%%
+for i in ${$:=\"}; do echo "$i"; done
+%%%
+if echo 'a*b' a\b $((x1 ? 1 : x1 ^= 017 - $u + 1)); then echo `v=${u##[!abc]}; : \* $((v % _a % w))` $1 "${x1}"; fi
+%%%
+( echo $(($u + 1 ? u : x1 <<= 08)) )
+%%%
+while false; do :; done; echo `echo ${9:+a b} ${#x1} $(($x1 + 1)) ; echo $(for i in $(printf "<%s>"  aéb); do echo "$i"; done) $(if echo 	 $(echo $$) "${x1:-a{b}"; then echo 'a]b' \n; fi)` $- [a-c]
+%%%
+set -- $* $((0 ? 08 >> 1 : _a = 2)); echo $9 ${HOME} $x1
+%%%
+set -- ; printf "<%s>"  ${v} ${x1%%[]a]}
+%%%
+case ${v} in ]) echo M;; *) echo N;; esac
+%%%
+case a?b in ) echo M;; *) echo N;; esac
+%%%
+IFS='ab'; echo a=b $IFS `: $_a ${w} | echo '~/z' a`
+%%%
+( echo ${IFS:?`echo a$ba'b a ba$b ".."`} []a] `v=[abc]; printf "<%s>"  ${9:+$(echo a[b   aéb)}` )
+%%%
+{ { echo ${#HOME} ${#2}; }; }
+%%%
+IFS='ab'; : $(IFS=':	
+'; echo $((u |= 9223372036854775807 >> 017 ? 9223372036854775807 : 0x10)) "*a")
+%%%
+w=\$; echo `for i in $#; do echo "$i"; done` ${HOME} $((017))
+%%%
+set -- $IFS$w \$; echo "$_a"
+%%%
+( set -- \$ 'a b'; echo $@ `echo ** "a=b" ${#@}`${x1} )
+%%%
+case $((3)) in []a]) echo M;; *) echo N;; esac
+%%%
+HOME=${IFS?`echo a{b a a}b`}$(((x1))); printf "<%s>"  ${#$} ${u} [a-c]
+%%%
+echo \$ $(while false; do :; done; echo 'a?b' "~") || : $((-1))$v
+%%%
+echo \n$- `( echo "$((0))" ${x1} ${w:-$(: )} )` ; echo 'abc'
+%%%
+( IFS=''; echo $((8)) "$(echo `echo a'b a'b x:y` $IFS ${##})" )
+%%%
+set -- ${v:=\`}; echo $((1)) ${w} ${##}
+%%%
+echo ' ' $u
+%%%
+IFS=':	
+'; echo $@ \*
+%%%
+echo `if echo ${x1:?$(printf "<%s>"  $2 '~/z' 'a]b')}; then : ${9?$((HOME -= x1))} ${#@}; fi` ; printf "<%s>"  $w "$#"$(( : [!abc]   )) ${#u}
+%%%
+echo *a || echo $* "a?b" ${w}
+%%%
+echo $((017 ? $x1 + 1 : $u + 1))
+%%%
+if echo $((x1 += -2 ? 0 : HOME ? _a *= 2 ? ~w : v : -$_a + 1)) ${*%`if : $(($IFS + 1)) echo * $!; then echo "echo ab" $x1; fi`}; then echo $u; fi
+%%%
+( IFS=''; echo $((0)) )
+%%%
+if echo "b"; then printf "<%s>"  ${u:+$?}; fi
+%%%
+if printf "<%s>"  $((8)); then printf "<%s>"  ${#*} $(IFS=''; printf "<%s>"  $((0x10 <= !08)) $({ echo $((IFS)) 	b; }) \a); fi
+%%%
+( echo $((-$IFS + 1)) )
+%%%
+echo ${!%${#IFS}} $(((x1 &= 0x10 ? _a : v))) || echo $(($u + 1)) `set -- ; echo ${2?~/z}` ${u+"$IFS"}
+%%%
+echo $((w))
+%%%
+echo $((017))
+%%%
+printf "<%s>"  $x1
+%%%
+IFS=':'; echo $(set -- ; echo é \a)
+%%%
+set -- ; printf "<%s>"  a b "$*" `v=a'b; echo ${v:=${IFS}} $$""a"b"" ${#*}`
+%%%
+printf "<%s>"  $IFS * $((u = 1 ? v ? 3 || 63 : v + -1 : $_a + 1))
+%%%
+echo $(echo $v $HOME | echo $2 `set -- 'a=b'; echo ${#:=${2?..}}` ${#$}) | echo $@'/a/b' ".."
+%%%
+case \* in [) echo M;; *) echo N;; esac
+%%%
+echo ${#HOME} $((017)) ; : \  ${x1##${u}} `case $u in ]) echo M;; *) echo N;; esac`
+%%%
+echo $((3))
+%%%
+x1=${HOME}N; echo $(while false; do :; done; echo ${x1}) $2
+%%%
+case a in ?) echo M;; *) echo N;; esac
+%%%
+set -- $v; : $_a "\`" $(echo 	 \`)?`set -- "a[b" \\; : echo [[:alpha:]] $w ~ $(((0)))`
+%%%
+if echo '/a/b'; then printf "<%s>"  a'b; fi
+%%%
+IFS=$2; : $!
+%%%
+case \\ in [a-c]) echo M;; *) echo N;; esac
+%%%
+: *b* \*
+%%%
+echo $(($u + 1))
+%%%
+echo $(($v + 1 == $v + 1)) ${_a} ${HOME} && printf "<%s>"  ${!:+$(($HOME + 1))} `while false; do :; done; printf "<%s>"  ${*%"a]b"} \\` $(if echo $(if printf "<%s>"  ${#2} ${u:+'a{b'}; then echo $_a; fi) a b $9; then echo \* \\ a{b; fi)
+%%%
+{ for i in 'aaa'; do echo "$i"; done; }
+%%%
+echo $v ${#2}
+%%%
+set -- $(((u) ? IFS <= 0 : 0x10)) $(case $((HOME)) in a\*b) echo M;; *) echo N;; esac); : ${u} $*$w $(: $HOME . || echo a\*b "$w"${v%%$u})
+%%%
+while false; do :; done; echo $((7)) $u${??${#2}}"${2:=\*}"
+%%%
+if echo ${#+..\*}; then echo a%b *b*; fi
+%%%
+echo ${#v} $$
+%%%
+( : $((9223372036854775807)) )
+%%%
+if echo ? $(($HOME + 1)) $((16)); then : $((017)) $(echo \a "\\`echo `" $! || echo $v); fi
+%%%
+set -- ; echo ${#w} $HOME ${#?}\a$((w *= u ? 08 : 10))
+%%%
+echo $((3 ? ($IFS + 1) : u))
+%%%
+case \a in [abc]) echo M;; *) echo N;; esac
+%%%
+set -- $_a; echo $(((-u ^= -1)))
+%%%
+printf "<%s>"  "$_a" $HOME $HOME && echo $_a a?b

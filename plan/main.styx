@@ -884,6 +884,7 @@ children (
                 id posix-harness
                 title "Build rule-driven POSIX compliance harness"
                 priority 0
+                sealed true
                 log (
                     {
                         at 2026-08-04T00:01:43.722897829Z
@@ -891,7 +892,527 @@ children (
                         kind @status
                         text "Todo → Doing (nplan start)"
                     }
+
+                    {
+                        at 2026-08-04T00:31:09.803718675Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
+                    }
                 )
+            }
+
+            {
+                id posix-relationship
+                title "XCU 1.1 Relationship to Other Documents"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:def:xcurel.system-interfaces-scope]
+                        [spec:posix:req:xcurel.descriptions-override-defaults]
+                        [spec:posix:def:xcurel.process-attributes]
+                        [spec:posix:req:xcurel.process-attributes-additional]
+                        [spec:posix:req:xcurel.concurrent-execution]
+                        [spec:posix:req:xcurel.file-access-permissions]
+                        [spec:posix:req:xcurel.file-create-if-absent]
+                        [spec:posix:req:xcurel.file-creation-attributes]
+                        [spec:posix:req:xcurel.file-create-existing-actions]
+                        [spec:posix:def:xcurel.file-create-existing-codes]
+                        [spec:posix:req:xcurel.file-append-mode]
+                        [spec:posix:req:xcurel.file-open-access-mode]
+                        [spec:posix:req:xcurel.file-removal-active-directory]
+                        [spec:posix:req:xcurel.file-removal-effects]
+                        [spec:posix:req:xcurel.file-time-values]
+                        [spec:posix:def:xcurel.file-contents]
+                        [spec:posix:req:xcurel.file-contents-nbytes]
+                        [spec:posix:sem:xcurel.file-contents-read-error]
+                        [spec:posix:req:xcurel.pathname-resolution]
+                        [spec:posix:req:xcurel.change-cwd]
+                        [spec:posix:req:xcurel.establish-locale]
+                        [spec:posix:req:xcurel.actions-equivalent-to-functions]
+                        [spec:posix:req:xcurel.iso-c-concepts]
+                        [spec:posix:req:xcurel.arithmetic-precision]
+                        [spec:posix:req:xcurel.arithmetic-variable-initialization]
+                        [spec:posix:req:xcurel.arithmetic-operators]
+                        [spec:posix:req:xcurel.arithmetic-expression-evaluation]
+                        [spec:posix:req:xcurel.mathematical-functions]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-utility-defaults
+                title "XCU 1.2-1.7 Limits, Defaults, and Built-Ins"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:def:xcu.limits.braces-notation]
+                        [spec:posix:req:xcu.limits.minimum-values]
+                        [spec:posix:req:xcu.limits.more-liberal-values]
+                        [spec:posix:sem:xcu.limits.symbol-retrieval]
+                        [spec:posix:req:xcu.limits.system-interfaces-apply]
+                        [spec:posix:sem:xcu.limits.reachability-not-guaranteed]
+                        [spec:posix:def:xcu.limits.symbolic]
+                        [spec:posix:def:xcu.limits.posix2-symlinks]
+                        [spec:posix:def:xcu.grammar-notation.basis]
+                        [spec:posix:req:xcu.grammar-notation.implementation-freedom]
+                        [spec:posix:syn:xcu.grammar-notation.typographic-conventions]
+                        [spec:posix:def:xcu.defaults.scope]
+                        [spec:posix:def:xcu.section.name]
+                        [spec:posix:syn:xcu.section.synopsis]
+                        [spec:posix:def:xcu.section.description]
+                        [spec:posix:req:xcu.description.equivalent-functionality]
+                        [spec:posix:req:xcu.description.declaration-utility]
+                        [spec:posix:def:xcu.section.options]
+                        [spec:posix:req:xcu.options.conflict-resolution]
+                        [spec:posix:req:xcu.options.syntax-guidelines-scope]
+                        [spec:posix:req:xcu.options.unrecognized-diagnostic]
+                        [spec:posix:req:xcu.options.eight-bit-transparency]
+                        [spec:posix:req:xcu.defaults.options-none]
+                        [spec:posix:def:xcu.section.operands]
+                        [spec:posix:req:xcu.operands.conflict-resolution]
+                        [spec:posix:req:xcu.operands.hyphen-means-stdin]
+                        [spec:posix:req:xcu.operands.processing-order]
+                        [spec:posix:req:xcu.defaults.operands-none]
+                        [spec:posix:def:xcu.section.stdin]
+                        [spec:posix:req:xcu.stdin.input-file-restrictions-apply]
+                        [spec:posix:req:xcu.stdin.terminal-background]
+                        [spec:posix:req:xcu.stdin.env-independence]
+                        [spec:posix:req:xcu.defaults.stdin-not-used]
+                        [spec:posix:def:xcu.section.input-files]
+                        [spec:posix:req:xcu.input-files.eight-bit-transparency]
+                        [spec:posix:req:xcu.input-files.seekable-file-offset]
+                        [spec:posix:req:xcu.input-files.document-size-limits]
+                        [spec:posix:req:xcu.input-files.text-file-and-line-continuation]
+                        [spec:posix:syn:xcu.record-format-notation]
+                        [spec:posix:req:xcu.defaults.input-files-none]
+                        [spec:posix:def:xcu.section.environment-variables]
+                        [spec:posix:req:xcu.env.effects-confined-to-section]
+                        [spec:posix:req:xcu.env.utility-selection-path-search]
+                        [spec:posix:req:xcu.env.eight-bit-transparency]
+                        [spec:posix:req:xcu.defaults.environment-variables-none]
+                        [spec:posix:def:xcu.section.asynchronous-events]
+                        [spec:posix:req:xcu.defaults.asynchronous-events-default]
+                        [spec:posix:req:xcu.async.may-catch-and-resignal]
+                        [spec:posix:def:xcu.section.stdout]
+                        [spec:posix:req:xcu.stdout.terminal-background]
+                        [spec:posix:req:xcu.stdout.env-independence]
+                        [spec:posix:req:xcu.stdout.display-verb]
+                        [spec:posix:req:xcu.defaults.stdout-not-used]
+                        [spec:posix:def:xcu.section.stderr]
+                        [spec:posix:req:xcu.stderr.terminal-background]
+                        [spec:posix:req:xcu.stderr.message-language]
+                        [spec:posix:req:xcu.stderr.env-independence]
+                        [spec:posix:req:xcu.defaults.stderr-diagnostics-only]
+                        [spec:posix:req:xcu.defaults.stderr-not-used]
+                        [spec:posix:def:xcu.section.output-files]
+                        [spec:posix:req:xcu.output-files.tmpdir]
+                        [spec:posix:req:xcu.output-files.temp-file-naming]
+                        [spec:posix:req:xcu.output-files.temp-file-removal]
+                        [spec:posix:req:xcu.output-files.sigquit-bypasses-recovery]
+                        [spec:posix:req:xcu.defaults.output-files-none]
+                        [spec:posix:def:xcu.section.extended-description]
+                        [spec:posix:def:xcu.defaults.extended-description-none]
+                        [spec:posix:def:xcu.section.exit-status]
+                        [spec:posix:req:xcu.exit-status.listed-values-binding]
+                        [spec:posix:req:xcu.exit-status.test-for-success]
+                        [spec:posix:req:xcu.exit-status.unlisted-values]
+                        [spec:posix:req:xcu.defaults.exit-status-successful-completion]
+                        [spec:posix:def:xcu.section.consequences-of-errors]
+                        [spec:posix:req:xcu.errors.failure-reasons-unspecified]
+                        [spec:posix:req:xcu.errors.operand-failure-continues]
+                        [spec:posix:req:xcu.errors.option-failure]
+                        [spec:posix:req:xcu.errors.unrecoverable-exit-status]
+                        [spec:posix:req:xcu.errors.diagnostic-message-required]
+                        [spec:posix:sem:xcu.errors.possible-actions]
+                        [spec:posix:def:xcu.defaults.consequences-of-errors-default]
+                        [spec:posix:def:xcu.section.informative]
+                        [spec:posix:req:xcu.examples.normative-material-wins]
+                        [spec:posix:def:xcu.invoked-utilities-not-described]
+                        [spec:posix:req:xcu.arbitrary-file-size]
+                        [spec:posix:req:xcu.builtin.regular-permitted]
+                        [spec:posix:req:xcu.builtin.exec-accessible]
+                        [spec:posix:req:xcu.intrinsic-utilities]
+                        [spec:posix:req:xcu.intrinsic.additional-implementation-defined]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-builtins-command
+                title "Intrinsic Built-Ins: command, type, and hash"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:syn:builtin.command.synopsis]
+                        [spec:posix:req:builtin.command.suppress-function-lookup]
+                        [spec:posix:req:builtin.command.special-builtin-properties-suppressed]
+                        [spec:posix:req:builtin.command.equivalent-to-omitting-command]
+                        [spec:posix:req:builtin.command.v-options-report-interpretation]
+                        [spec:posix:req:builtin.command.declaration-utility]
+                        [spec:posix:req:builtin.command.utility-syntax-guidelines]
+                        [spec:posix:req:builtin.command.opt-p]
+                        [spec:posix:req:builtin.command.opt-v]
+                        [spec:posix:req:builtin.command.opt-v-uppercase]
+                        [spec:posix:def:builtin.command.operands]
+                        [spec:posix:req:builtin.command.env-locale]
+                        [spec:posix:sem:builtin.command.env-nlspath]
+                        [spec:posix:sem:builtin.command.env-path]
+                        [spec:posix:req:builtin.command.stdout-format]
+                        [spec:posix:req:builtin.command.stderr]
+                        [spec:posix:req:builtin.command.interfaces]
+                        [spec:posix:req:builtin.command.exit-status-v-options]
+                        [spec:posix:req:builtin.command.exit-status-invocation]
+                        [spec:posix:syn:builtin.type.synopsis]
+                        [spec:posix:req:builtin.type.indicate-interpretation]
+                        [spec:posix:def:builtin.type.operand-name]
+                        [spec:posix:req:builtin.type.env-locale]
+                        [spec:posix:sem:builtin.type.env-nlspath]
+                        [spec:posix:sem:builtin.type.env-path]
+                        [spec:posix:sem:builtin.type.stdout]
+                        [spec:posix:req:builtin.type.stderr]
+                        [spec:posix:req:builtin.type.interfaces]
+                        [spec:posix:req:builtin.type.exit-status]
+                        [spec:posix:syn:builtin.hash.synopsis]
+                        [spec:posix:req:builtin.hash.remembered-locations]
+                        [spec:posix:req:builtin.hash.builtins-and-functions-not-reported]
+                        [spec:posix:req:builtin.hash.utility-syntax-guidelines]
+                        [spec:posix:req:builtin.hash.opt-r]
+                        [spec:posix:def:builtin.hash.operand-utility]
+                        [spec:posix:sem:builtin.hash.operand-utility-unspecified]
+                        [spec:posix:req:builtin.hash.env-locale]
+                        [spec:posix:sem:builtin.hash.env-nlspath]
+                        [spec:posix:sem:builtin.hash.env-path]
+                        [spec:posix:req:builtin.hash.stdout-report]
+                        [spec:posix:req:builtin.hash.list-cleared-on-path-change]
+                        [spec:posix:req:builtin.hash.stderr]
+                        [spec:posix:req:builtin.hash.interfaces]
+                        [spec:posix:req:builtin.hash.exit-status]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-builtins-process
+                title "Intrinsic Built-Ins: cd, umask, and ulimit"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:syn:builtin.cd.syn]
+                        [spec:posix:req:builtin.cd.change-working-directory]
+                        [spec:posix:def:builtin.cd.curpath]
+                        [spec:posix:req:builtin.cd.step1-no-operand-no-home]
+                        [spec:posix:req:builtin.cd.step2-home-as-operand]
+                        [spec:posix:sem:builtin.cd.step3-absolute-operand]
+                        [spec:posix:sem:builtin.cd.step4-dot-or-dot-dot]
+                        [spec:posix:sem:builtin.cd.step5-cdpath-search]
+                        [spec:posix:sem:builtin.cd.step6-operand-as-curpath]
+                        [spec:posix:sem:builtin.cd.step7-prefix-pwd]
+                        [spec:posix:req:builtin.cd.step8-canonical-form-dot]
+                        [spec:posix:req:builtin.cd.step8-canonical-form-dot-dot]
+                        [spec:posix:req:builtin.cd.step8-further-simplification]
+                        [spec:posix:req:builtin.cd.step9-path-max-relative]
+                        [spec:posix:req:builtin.cd.step10-chdir]
+                        [spec:posix:req:builtin.cd.step10-pwd-physical]
+                        [spec:posix:req:builtin.cd.oldpwd-set]
+                        [spec:posix:req:builtin.cd.utility-syntax-guidelines]
+                        [spec:posix:req:builtin.cd.opt-e]
+                        [spec:posix:req:builtin.cd.opt-l]
+                        [spec:posix:req:builtin.cd.opt-p]
+                        [spec:posix:req:builtin.cd.opt-l-p-last-wins]
+                        [spec:posix:def:builtin.cd.operand-directory]
+                        [spec:posix:req:builtin.cd.operand-empty-string]
+                        [spec:posix:req:builtin.cd.operand-hyphen]
+                        [spec:posix:req:builtin.cd.env-cdpath]
+                        [spec:posix:def:builtin.cd.env-home]
+                        [spec:posix:req:builtin.cd.env-locale]
+                        [spec:posix:req:builtin.cd.env-nlspath]
+                        [spec:posix:req:builtin.cd.env-oldpwd]
+                        [spec:posix:req:builtin.cd.env-pwd]
+                        [spec:posix:req:builtin.cd.stdout-new-directory]
+                        [spec:posix:sem:builtin.cd.stdout-undeterminable-pathname]
+                        [spec:posix:req:builtin.cd.stdout-no-output]
+                        [spec:posix:req:builtin.cd.stderr]
+                        [spec:posix:req:builtin.cd.interfaces]
+                        [spec:posix:req:builtin.cd.exit-status]
+                        [spec:posix:req:builtin.cd.consequences-of-errors]
+                        [spec:posix:syn:builtin.umask.syn]
+                        [spec:posix:req:builtin.umask.set-mask]
+                        [spec:posix:req:builtin.umask.subshell-no-effect]
+                        [spec:posix:req:builtin.umask.report-when-no-operand]
+                        [spec:posix:req:builtin.umask.utility-syntax-guidelines]
+                        [spec:posix:req:builtin.umask.opt-s]
+                        [spec:posix:req:builtin.umask.default-output-style]
+                        [spec:posix:def:builtin.umask.operand-mask]
+                        [spec:posix:req:builtin.umask.symbolic-mode-complement]
+                        [spec:posix:req:builtin.umask.symbolic-op-characters]
+                        [spec:posix:sem:builtin.umask.non-permission-bits-unspecified]
+                        [spec:posix:req:builtin.umask.octal-form]
+                        [spec:posix:req:builtin.umask.prior-default-output-as-operand]
+                        [spec:posix:req:builtin.umask.env-locale]
+                        [spec:posix:req:builtin.umask.env-nlspath]
+                        [spec:posix:req:builtin.umask.stdout-no-operand]
+                        [spec:posix:req:builtin.umask.stdout-symbolic-format]
+                        [spec:posix:req:builtin.umask.stdout-operand-no-output]
+                        [spec:posix:req:builtin.umask.stderr]
+                        [spec:posix:req:builtin.umask.interfaces]
+                        [spec:posix:req:builtin.umask.exit-status]
+                        [spec:posix:syn:builtin.ulimit.syn]
+                        [spec:posix:req:builtin.ulimit.report-or-set]
+                        [spec:posix:sem:builtin.ulimit.soft-and-hard-limits]
+                        [spec:posix:req:builtin.ulimit.unlimited-value]
+                        [spec:posix:req:builtin.ulimit.limits-exceeded]
+                        [spec:posix:req:builtin.ulimit.utility-syntax-guidelines]
+                        [spec:posix:req:builtin.ulimit.opt-hard]
+                        [spec:posix:req:builtin.ulimit.opt-soft]
+                        [spec:posix:req:builtin.ulimit.opt-all]
+                        [spec:posix:req:builtin.ulimit.opt-core]
+                        [spec:posix:req:builtin.ulimit.opt-data]
+                        [spec:posix:req:builtin.ulimit.opt-fsize]
+                        [spec:posix:req:builtin.ulimit.opt-nofile]
+                        [spec:posix:req:builtin.ulimit.opt-stack]
+                        [spec:posix:req:builtin.ulimit.opt-cpu]
+                        [spec:posix:req:builtin.ulimit.opt-as]
+                        [spec:posix:def:builtin.ulimit.rlimit-annotation]
+                        [spec:posix:req:builtin.ulimit.default-hard-and-soft]
+                        [spec:posix:req:builtin.ulimit.default-f-option]
+                        [spec:posix:sem:builtin.ulimit.repeated-option-unspecified]
+                        [spec:posix:def:builtin.ulimit.operand-newlimit]
+                        [spec:posix:req:builtin.ulimit.env-locale]
+                        [spec:posix:req:builtin.ulimit.env-nlspath]
+                        [spec:posix:req:builtin.ulimit.stdout-used-when-reporting]
+                        [spec:posix:req:builtin.ulimit.stdout-all-format]
+                        [spec:posix:req:builtin.ulimit.stdout-single-limit-format]
+                        [spec:posix:req:builtin.ulimit.stderr]
+                        [spec:posix:req:builtin.ulimit.interfaces]
+                        [spec:posix:req:builtin.ulimit.exit-status]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-builtins-jobs
+                title "Intrinsic Built-Ins: bg, fg, and jobs"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:syn:builtin.bg.synopsis]
+                        [spec:posix:req:builtin.bg.resume-suspended-jobs]
+                        [spec:posix:req:builtin.bg.already-running-no-effect]
+                        [spec:posix:req:builtin.bg.operand-job-id]
+                        [spec:posix:req:builtin.bg.env-locale]
+                        [spec:posix:sem:builtin.bg.env-nlspath]
+                        [spec:posix:req:builtin.bg.stdout-format]
+                        [spec:posix:req:builtin.bg.stderr]
+                        [spec:posix:req:builtin.bg.exit-status]
+                        [spec:posix:req:builtin.bg.job-control-disabled]
+                        [spec:posix:req:builtin.bg.interfaces]
+                        [spec:posix:syn:builtin.fg.synopsis]
+                        [spec:posix:req:builtin.fg.move-job-to-foreground]
+                        [spec:posix:req:builtin.fg.removes-known-process-id]
+                        [spec:posix:req:builtin.fg.operand-job-id]
+                        [spec:posix:req:builtin.fg.env-locale]
+                        [spec:posix:sem:builtin.fg.env-nlspath]
+                        [spec:posix:req:builtin.fg.stdout-format]
+                        [spec:posix:req:builtin.fg.stderr]
+                        [spec:posix:req:builtin.fg.exit-status]
+                        [spec:posix:req:builtin.fg.job-control-disabled]
+                        [spec:posix:req:builtin.fg.interfaces]
+                        [spec:posix:syn:builtin.jobs.synopsis]
+                        [spec:posix:req:builtin.jobs.display-background-jobs]
+                        [spec:posix:req:builtin.jobs.remove-reported-job]
+                        [spec:posix:req:builtin.jobs.utility-syntax-guidelines]
+                        [spec:posix:req:builtin.jobs.option-l]
+                        [spec:posix:req:builtin.jobs.option-p]
+                        [spec:posix:req:builtin.jobs.default-display]
+                        [spec:posix:req:builtin.jobs.operand-job-id]
+                        [spec:posix:req:builtin.jobs.env-locale]
+                        [spec:posix:sem:builtin.jobs.env-nlspath]
+                        [spec:posix:req:builtin.jobs.stdout-p-format]
+                        [spec:posix:req:builtin.jobs.stdout-default-format]
+                        [spec:posix:req:builtin.jobs.stdout-current-field]
+                        [spec:posix:def:builtin.jobs.stdout-state-strings]
+                        [spec:posix:req:builtin.jobs.stdout-state-substitution]
+                        [spec:posix:req:builtin.jobs.stdout-l-format]
+                        [spec:posix:req:builtin.jobs.stderr]
+                        [spec:posix:req:builtin.jobs.exit-status]
+                        [spec:posix:req:builtin.jobs.interfaces]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-builtins-signals
+                title "Intrinsic Built-Ins: kill and wait"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:syn:builtin.kill.synopsis]
+                        [spec:posix:syn:builtin.kill.synopsis-xsi]
+                        [spec:posix:req:builtin.kill.send-signal]
+                        [spec:posix:req:builtin.kill.utility-syntax-guidelines]
+                        [spec:posix:req:builtin.kill.option-l]
+                        [spec:posix:req:builtin.kill.option-s]
+                        [spec:posix:req:builtin.kill.option-signal-name]
+                        [spec:posix:req:builtin.kill.option-signal-number]
+                        [spec:posix:req:builtin.kill.negative-first-argument]
+                        [spec:posix:req:builtin.kill.operand-pid-number]
+                        [spec:posix:def:builtin.kill.operand-pid-job-id]
+                        [spec:posix:def:builtin.kill.operand-exit-status]
+                        [spec:posix:req:builtin.kill.env-vars]
+                        [spec:posix:sem:builtin.kill.env-nlspath]
+                        [spec:posix:req:builtin.kill.stdout-unused-without-l]
+                        [spec:posix:req:builtin.kill.stdout-signal-list-format]
+                        [spec:posix:req:builtin.kill.stdout-exit-status-format]
+                        [spec:posix:req:builtin.kill.stderr]
+                        [spec:posix:req:builtin.kill.interfaces]
+                        [spec:posix:req:builtin.kill.exit-status]
+                        [spec:posix:syn:builtin.wait.synopsis]
+                        [spec:posix:req:builtin.wait.await-children]
+                        [spec:posix:req:builtin.wait.no-operands]
+                        [spec:posix:req:builtin.wait.pid-operands]
+                        [spec:posix:req:builtin.wait.remove-waited-for-pid]
+                        [spec:posix:def:builtin.wait.operand-pid-number]
+                        [spec:posix:req:builtin.wait.operand-pid-job-id]
+                        [spec:posix:req:builtin.wait.env-vars]
+                        [spec:posix:sem:builtin.wait.env-nlspath]
+                        [spec:posix:req:builtin.wait.stderr]
+                        [spec:posix:req:builtin.wait.interfaces]
+                        [spec:posix:req:builtin.wait.exit-status-last-operand]
+                        [spec:posix:req:builtin.wait.exit-status-signal]
+                        [spec:posix:req:builtin.wait.exit-status-values]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-builtins-alias
+                title "Intrinsic Built-Ins: alias, unalias, and fc"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:syn:builtin.alias.synopsis]
+                        [spec:posix:req:builtin.alias.create-or-display]
+                        [spec:posix:def:builtin.alias.definition]
+                        [spec:posix:req:builtin.alias.execution-environment]
+                        [spec:posix:req:builtin.alias.operands]
+                        [spec:posix:req:builtin.alias.env-locale]
+                        [spec:posix:sem:builtin.alias.env-nlspath]
+                        [spec:posix:req:builtin.alias.stdout-format]
+                        [spec:posix:req:builtin.alias.stderr]
+                        [spec:posix:req:builtin.alias.interfaces]
+                        [spec:posix:req:builtin.alias.exit-status]
+                        [spec:posix:syn:builtin.unalias.synopsis]
+                        [spec:posix:req:builtin.unalias.remove-definitions]
+                        [spec:posix:req:builtin.unalias.utility-syntax-guidelines]
+                        [spec:posix:req:builtin.unalias.opt-a]
+                        [spec:posix:req:builtin.unalias.operand-alias-name]
+                        [spec:posix:req:builtin.unalias.env-locale]
+                        [spec:posix:sem:builtin.unalias.env-nlspath]
+                        [spec:posix:req:builtin.unalias.stderr]
+                        [spec:posix:req:builtin.unalias.interfaces]
+                        [spec:posix:req:builtin.unalias.exit-status]
+                        [spec:posix:syn:builtin.fc.synopsis]
+                        [spec:posix:req:builtin.fc.list-or-edit]
+                        [spec:posix:req:builtin.fc.history-numbering]
+                        [spec:posix:req:builtin.fc.history-number-wrap]
+                        [spec:posix:req:builtin.fc.edit-and-reexecute]
+                        [spec:posix:req:builtin.fc.utility-syntax-guidelines]
+                        [spec:posix:req:builtin.fc.opt-e]
+                        [spec:posix:req:builtin.fc.opt-l]
+                        [spec:posix:req:builtin.fc.opt-n]
+                        [spec:posix:req:builtin.fc.opt-r]
+                        [spec:posix:req:builtin.fc.opt-s]
+                        [spec:posix:syn:builtin.fc.operand-first-last]
+                        [spec:posix:req:builtin.fc.operand-default-s]
+                        [spec:posix:req:builtin.fc.operand-defaults-no-s]
+                        [spec:posix:req:builtin.fc.operand-range]
+                        [spec:posix:req:builtin.fc.operand-range-clamping]
+                        [spec:posix:req:builtin.fc.operand-old-new]
+                        [spec:posix:req:builtin.fc.env-fcedit]
+                        [spec:posix:req:builtin.fc.env-histfile]
+                        [spec:posix:req:builtin.fc.env-histfile-initialization]
+                        [spec:posix:req:builtin.fc.env-histfile-sharing-and-deletion]
+                        [spec:posix:req:builtin.fc.env-histsize]
+                        [spec:posix:req:builtin.fc.env-locale]
+                        [spec:posix:sem:builtin.fc.env-nlspath]
+                        [spec:posix:req:builtin.fc.stdout-list-format]
+                        [spec:posix:req:builtin.fc.stderr]
+                        [spec:posix:req:builtin.fc.interfaces]
+                        [spec:posix:req:builtin.fc.exit-status]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-builtins-input
+                title "Intrinsic Built-Ins: read and getopts"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:syn:builtin.read.syn]
+                        [spec:posix:req:builtin.read.logical-line]
+                        [spec:posix:req:builtin.read.backslash-escape]
+                        [spec:posix:req:builtin.read.backslash-line-continuation]
+                        [spec:posix:req:builtin.read.continuation-prompt]
+                        [spec:posix:req:builtin.read.terminating-delimiter-removed]
+                        [spec:posix:req:builtin.read.ifs-empty]
+                        [spec:posix:req:builtin.read.field-splitting-modified]
+                        [spec:posix:req:builtin.read.field-splitting-leftover]
+                        [spec:posix:req:builtin.read.var-assignment-order]
+                        [spec:posix:req:builtin.read.unprocessed-vars-empty]
+                        [spec:posix:thm:builtin.read.single-var-unsplit]
+                        [spec:posix:req:builtin.read.affects-current-environment]
+                        [spec:posix:req:builtin.read.variable-set-error]
+                        [spec:posix:req:builtin.read.end-of-file]
+                        [spec:posix:req:builtin.read.utility-syntax-guidelines]
+                        [spec:posix:req:builtin.read.option-d]
+                        [spec:posix:req:builtin.read.option-r]
+                        [spec:posix:def:builtin.read.operand-var]
+                        [spec:posix:sem:builtin.read.operand-var-locale]
+                        [spec:posix:req:builtin.read.stdin]
+                        [spec:posix:req:builtin.read.env]
+                        [spec:posix:req:builtin.read.env-nlspath]
+                        [spec:posix:req:builtin.read.env-ps2]
+                        [spec:posix:req:builtin.read.stderr]
+                        [spec:posix:req:builtin.read.interfaces]
+                        [spec:posix:req:builtin.read.exit-status]
+                        [spec:posix:syn:builtin.getopts.syn]
+                        [spec:posix:req:builtin.getopts.retrieve-options]
+                        [spec:posix:req:builtin.getopts.optind-initialized]
+                        [spec:posix:req:builtin.getopts.optind-after-invocation]
+                        [spec:posix:req:builtin.getopts.optarg]
+                        [spec:posix:req:builtin.getopts.unknown-option]
+                        [spec:posix:req:builtin.getopts.missing-option-argument]
+                        [spec:posix:req:builtin.getopts.end-of-options]
+                        [spec:posix:def:builtin.getopts.end-of-options-identification]
+                        [spec:posix:req:builtin.getopts.no-export]
+                        [spec:posix:req:builtin.getopts.variable-set-error]
+                        [spec:posix:sem:builtin.getopts.affects-current-environment]
+                        [spec:posix:sem:builtin.getopts.reset]
+                        [spec:posix:def:builtin.getopts.operand-optstring]
+                        [spec:posix:req:builtin.getopts.optstring-separate-arguments]
+                        [spec:posix:syn:builtin.getopts.optstring-character-restrictions]
+                        [spec:posix:req:builtin.getopts.optarg-content]
+                        [spec:posix:sem:builtin.getopts.optstring-first-character]
+                        [spec:posix:def:builtin.getopts.operand-name]
+                        [spec:posix:req:builtin.getopts.operand-param]
+                        [spec:posix:req:builtin.getopts.env]
+                        [spec:posix:req:builtin.getopts.env-nlspath]
+                        [spec:posix:req:builtin.getopts.env-optind]
+                        [spec:posix:req:builtin.getopts.stderr-diagnostic]
+                        [spec:posix:req:builtin.getopts.interfaces]
+                        [spec:posix:req:builtin.getopts.exit-status]
+                    )
+                }
+                deps (posix-harness)
             }
         )
     }

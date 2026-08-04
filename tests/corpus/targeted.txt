@@ -1,0 +1,5 @@
+PATH=/bin:/usr/bin; command -v ls >/dev/null; ls >/dev/null; echo done
+sleep 0.2 & jobs; wait
+set -- a b c; while getopts x o; do :; done; echo $?
+type cat; hash cat 2>/dev/null; echo ok
+cd /bin && command -p -v sh >/dev/null; echo p

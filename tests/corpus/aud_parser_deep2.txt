@@ -1,0 +1,501 @@
+#!name eofmark ${##}
+v=V
+cat <<${##}
+body
+${##}
+%%%
+#!name eofmark ${#}
+v=V
+cat <<${#}
+body
+${#}
+%%%
+#!name eofmark ${#?}
+v=V
+cat <<${#?}
+body
+${#?}
+%%%
+#!name eofmark ${#$}
+v=V
+cat <<${#$}
+body
+${#$}
+%%%
+#!name eofmark ${#@}
+v=V
+cat <<${#@}
+body
+${#@}
+%%%
+#!name eofmark ${#*}
+v=V
+cat <<${#*}
+body
+${#*}
+%%%
+#!name eofmark ${#-}
+v=V
+cat <<${#-}
+body
+${#-}
+%%%
+#!name eofmark ${#v}
+v=V
+cat <<${#v}
+body
+${#v}
+%%%
+#!name eofmark ${#v:-x}
+v=V
+cat <<${#v:-x}
+body
+${#v:-x}
+%%%
+#!name eofmark ${#v-x}
+v=V
+cat <<${#v-x}
+body
+${#v-x}
+%%%
+#!name eofmark ${%}
+v=V
+cat <<${%}
+body
+${%}
+%%%
+#!name eofmark ${^}
+v=V
+cat <<${^}
+body
+${^}
+%%%
+#!name eofmark ${.}
+v=V
+cat <<${.}
+body
+${.}
+%%%
+#!name eofmark ${+}
+v=V
+cat <<${+}
+body
+${+}
+%%%
+#!name eofmark ${v##x}
+v=V
+cat <<${v##x}
+body
+${v##x}
+%%%
+#!name eofmark ${v%%x}
+v=V
+cat <<${v%%x}
+body
+${v%%x}
+%%%
+#!name eofmark ${v#x}
+v=V
+cat <<${v#x}
+body
+${v#x}
+%%%
+#!name eofmark ${v%x}
+v=V
+cat <<${v%x}
+body
+${v%x}
+%%%
+#!name eofmark ${v:-x}
+v=V
+cat <<${v:-x}
+body
+${v:-x}
+%%%
+#!name eofmark ${v:=x}
+v=V
+cat <<${v:=x}
+body
+${v:=x}
+%%%
+#!name eofmark ${v:+x}
+v=V
+cat <<${v:+x}
+body
+${v:+x}
+%%%
+#!name eofmark ${v:?x}
+v=V
+cat <<${v:?x}
+body
+${v:?x}
+%%%
+#!name eofmark ${v-x}
+v=V
+cat <<${v-x}
+body
+${v-x}
+%%%
+#!name eofmark ${v=x}
+v=V
+cat <<${v=x}
+body
+${v=x}
+%%%
+#!name eofmark ${v+x}
+v=V
+cat <<${v+x}
+body
+${v+x}
+%%%
+#!name eofmark ${v?x}
+v=V
+cat <<${v?x}
+body
+${v?x}
+%%%
+#!name eofmark ${@}
+v=V
+cat <<${@}
+body
+${@}
+%%%
+#!name eofmark ${*}
+v=V
+cat <<${*}
+body
+${*}
+%%%
+#!name eofmark ${?}
+v=V
+cat <<${?}
+body
+${?}
+%%%
+#!name eofmark ${$}
+v=V
+cat <<${$}
+body
+${$}
+%%%
+#!name eofmark ${!}
+v=V
+cat <<${!}
+body
+${!}
+%%%
+#!name eofmark ${-}
+v=V
+cat <<${-}
+body
+${-}
+%%%
+#!name eofmark ${0}
+v=V
+cat <<${0}
+body
+${0}
+%%%
+#!name eofmark ${1}
+v=V
+cat <<${1}
+body
+${1}
+%%%
+#!name eofmark ${#1}
+v=V
+cat <<${#1}
+body
+${#1}
+%%%
+#!name eofmark ${1#x}
+v=V
+cat <<${1#x}
+body
+${1#x}
+%%%
+#!name eofmark $#
+v=V
+cat <<$#
+body
+$#
+%%%
+#!name eofmark $@
+v=V
+cat <<$@
+body
+$@
+%%%
+#!name eofmark $*
+v=V
+cat <<$*
+body
+$*
+%%%
+#!name eofmark $?
+v=V
+cat <<$?
+body
+$?
+%%%
+#!name eofmark $$
+v=V
+cat <<$$
+body
+$$
+%%%
+#!name eofmark $-
+v=V
+cat <<$-
+body
+$-
+%%%
+#!name eofmark $1
+v=V
+cat <<$1
+body
+$1
+%%%
+#!name eofmark $v
+v=V
+cat <<$v
+body
+$v
+%%%
+#!name eofmark ${v}${v}
+v=V
+cat <<${v}${v}
+body
+${v}${v}
+%%%
+#!name eofmark ${ }
+v=V
+cat <<${ }
+body
+${ }
+%%%
+#!name eofmark ${}
+v=V
+cat <<${}
+body
+${}
+%%%
+#!name eofmark ${#${v}}
+v=V
+cat <<${#${v}}
+body
+${#${v}}
+%%%
+#!name word ${##}
+v=V; echo "${##}"; echo rc=$?
+%%%
+#!name word ${#}
+v=V; echo "${#}"; echo rc=$?
+%%%
+#!name word ${#v:-x}
+v=V; echo "${#v:-x}"; echo rc=$?
+%%%
+#!name word ${%}
+v=V; echo "${%}"; echo rc=$?
+%%%
+#!name word ${^}
+v=V; echo "${^}"; echo rc=$?
+%%%
+#!name word ${+}
+v=V; echo "${+}"; echo rc=$?
+%%%
+#!name word ${#${v}}
+v=V; echo "${#${v}}"; echo rc=$?
+%%%
+#!name word ${v##x}
+v=V; echo "${v##x}"; echo rc=$?
+%%%
+#!name word ${#v-x}
+v=V; echo "${#v-x}"; echo rc=$?
+%%%
+#!name word ${#v}
+v=V; echo "${#v}"; echo rc=$?
+%%%
+#!name cback brace in dquote
+echo "a\}b"
+%%%
+#!name cback brace in varnest
+unset q; echo "${q:-a\}b}"
+%%%
+#!name cback brace unquoted varnest
+unset q; echo ${q:-a\}b}
+%%%
+#!name cback dquote in varnest
+unset q; echo "${q:-a\"b}"
+%%%
+#!name cback dquote in heredoc word
+cat <<${q:-a\"b}
+x
+a"b
+%%%
+#!name cback misc in dquote
+echo "\a \z \1 \  \	"
+%%%
+#!name cback in backq
+echo `echo "a\}b"`
+%%%
+#!name cback brace heredoc body
+unset q
+cat <<EOF
+${q:-a\}b}
+EOF
+%%%
+#!name rme naked bs then quoted esc
+v='a\\'; case 'a\\$' in $v"\$") echo m;; *) echo n;; esac
+%%%
+#!name rme naked bs then quoted esc2
+v='\\'; case '\\z' in $v"\z") echo m;; *) echo n;; esac
+%%%
+#!name rme naked bs then quoted lit
+v='a\\'; case 'a\\b' in $v"b") echo m;; *) echo n;; esac
+%%%
+#!name rme naked bs glob
+touch 'a\\b'; v='a\\'; echo $v*
+%%%
+#!name rme naked bs then mb
+export LC_ALL=en_US.UTF-8; w=é; v='a\\'; case "a\\é" in $v$w) echo m;; *) echo n;; esac
+%%%
+#!name rme naked bs then mb glob
+export LC_ALL=en_US.UTF-8; touch 'a\\é'; w=é; v='a\\'; echo $v$w
+%%%
+#!name rme quoted then esc then bs
+v='\\'; case 'x\\' in "x"$v) echo m;; *) echo n;; esac
+%%%
+#!name rme trim naked bs
+v='a\\b'; p='a\\'; echo "[${v#$p}]"
+%%%
+#!name rme trim naked bs quoted
+v='a\\b'; p='a\\'; echo "[${v#"$p"}]"
+%%%
+#!name rme bs at pattern end
+v='ab'; p='b\\'; echo "[${v%$p}]"
+%%%
+#!name rme multiple bs
+v='a\\\\b'; case "$v" in a\\\\\\\\b) echo m;; *) echo n;; esac
+%%%
+#!name rme mb after bs in pattern
+export LC_ALL=en_US.UTF-8; v=aéb; case "$v" in a\\éb) echo m;; *) echo n;; esac
+%%%
+#!name invalid mb source c3c3
+export LC_ALL=en_US.UTF-8; echo ÃÃx
+%%%
+#!name invalid mb source c3 end
+export LC_ALL=en_US.UTF-8; echo xÃ
+%%%
+#!name invalid mb source e2 82
+export LC_ALL=en_US.UTF-8; echo xây
+%%%
+#!name invalid mb source ff
+export LC_ALL=en_US.UTF-8; echo xÿy
+%%%
+#!name invalid mb escaped
+export LC_ALL=en_US.UTF-8; echo \ÃÃ
+%%%
+#!name invalid mb in dquote
+export LC_ALL=en_US.UTF-8; echo "xÃÃy"
+%%%
+#!name invalid mb in squote
+export LC_ALL=en_US.UTF-8; echo 'xÃÃy'
+%%%
+#!name invalid mb in backq
+export LC_ALL=en_US.UTF-8; echo `echo ÃÃ`
+%%%
+#!name invalid mb var name-ish
+export LC_ALL=en_US.UTF-8; echo $Ã
+%%%
+#!name invalid mb pattern
+export LC_ALL=en_US.UTF-8; case xÃ in xÃ) echo m;; *) echo n;; esac
+%%%
+#!name dollarsq unterminated
+echo $'
+%%%
+#!name dollarsq empty
+echo $''
+%%%
+#!name dollarsq only escape
+echo $'\\'
+%%%
+#!name dollarsq c escape
+echo $'\ca' | od -An -c | head -1
+%%%
+#!name dollarsq c backslash
+echo $'\c\\' | od -An -c | head -1
+%%%
+#!name dollarsq c alone
+echo $'\c' | od -An -c | head -1
+%%%
+#!name dollarsq unknown escape
+echo $'\q'
+%%%
+#!name dollarsq octal
+echo $'\101\102'
+%%%
+#!name dollarsq hex
+echo $'\x41\x4a'
+%%%
+#!name dollarsq u4
+echo $'\u0041'
+%%%
+#!name dollarsq U8
+echo $'\U00000041'
+%%%
+#!name dollarsq long
+echo $'\U0001F600' | od -An -c | head -1
+%%%
+#!name dollarsq nested quote
+echo $'a\'b'
+%%%
+#!name dollarsq in dquote
+echo "$'a'"
+%%%
+#!name dollarsq in arith
+echo $(( $'1' ))
+%%%
+#!name dollarsq after var
+v=x; echo $v$'a'
+%%%
+#!name dollarsq in case pattern
+case a in $'a') echo m;; *) echo n;; esac
+%%%
+#!name dollarsq in heredoc word
+cat <<$'EOF'
+x
+EOF
+%%%
+#!name dollarsq with mb
+export LC_ALL=en_US.UTF-8; echo $'\u00e9' | od -An -c | head -1
+%%%
+#!name arith unbalanced rp
+echo $((1)2))
+%%%
+#!name arith rp then junk
+echo $((1) )
+%%%
+#!name arith nested parens
+echo $(( ((((1)))) ))
+%%%
+#!name arith paren mismatch
+echo $(( (1 ))
+%%%
+#!name read long fields
+printf 'aaaaaaaaaaaa bbbbbbbbbbbb cccccccccccc\n' | { read x y; echo "[$x][$y]"; }
+%%%
+#!name read long single
+printf 'aaaaaaaaaaaaaaaaaaaaaaaa\n' | { read x; echo "[$x]"; }
+%%%
+#!name read long trailing ws
+printf 'aaaaaaaaaaaa        \n' | { read x; echo "[$x]"; }
+%%%
+#!name split long runs
+v='aaaaaaaaaaaa bbbbbbbbbbbb cccccccccccc'; printf '<%s>' $v; echo
+%%%
+#!name split long runs ifs colon
+IFS=:; v='aaaaaaaaaaaa:bbbbbbbbbbbb'; printf '<%s>' $v; echo
+%%%
+#!name read three long
+printf 'aaaaaaaa bbbbbbbb cccccccc dddddddd\n' | { read x y z; echo "[$x][$y][$z]"; }

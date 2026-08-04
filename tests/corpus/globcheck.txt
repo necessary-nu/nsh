@@ -1,0 +1,6 @@
+mkdir -p g/sub; touch g/a.txt g/b.txt g/.hidden g/sub/c.txt; echo g/*; echo g/*.txt; echo g/.*; echo g/sub/*
+touch 'we ird.txt'; echo *ird*; echo [wq]e*
+echo /nonexistent/*; echo "rc=$?"
+mkdir -p d1 d2; touch d1/x d2/x; echo d?/x; echo d[12]/x
+echo ~/nonexistentpath/*
+touch 'a*b'; echo a\*b; echo 'a*b'

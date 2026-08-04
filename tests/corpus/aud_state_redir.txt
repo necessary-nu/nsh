@@ -1,0 +1,126 @@
+#!name basic fd save restore
+exec 3>&1; echo hi >&3; exec 3>&-; echo "rc=$?"
+%%%
+#!name exec close then use
+exec 3>&-; echo x >&3 2>&1; echo "rc=$?"
+%%%
+#!name redirect in compound restores
+{ echo a; } > out1; cat out1; echo after
+%%%
+#!name nested redirection save order
+exec 3>f3; { echo one >&3; { echo two >&3; } 3>f3b; echo three >&3; }; exec 3>&-; cat f3; cat f3b
+%%%
+#!name fd 0 redirection resets input
+#!mode=stdin
+cat <<'EOF'
+hello
+EOF
+echo done
+%%%
+#!name here-doc short
+cat <<EOF
+a
+b
+EOF
+%%%
+#!name here-doc expanded
+X=val; cat <<EOF
+$X
+EOF
+%%%
+#!name here-doc quoted
+X=val; cat <<'EOF'
+$X
+EOF
+%%%
+#!name here-doc dash strip
+cat <<-EOF
+	tabbed
+	EOF
+%%%
+#!name here-doc big
+i=0; while [ $i -lt 300 ]; do echo "line$i"; i=$((i+1)); done > big.txt; cat <<EOF > /dev/null
+$(cat big.txt)
+EOF
+echo ok
+%%%
+#!name here-doc to fd 3
+exec 3<<EOF
+xyz
+EOF
+read v <&3; echo "$v"
+%%%
+#!name multiple heredocs one line
+cat <<A; cat <<B
+first
+A
+second
+B
+%%%
+#!name dup fd both ways
+exec 4>&2 2>&1; echo toout >&2; exec 2>&4 4>&-; echo toerr >&2
+%%%
+#!name noclobber with existing dir
+set -C; echo x > . 2>&1; echo "rc=$?"
+%%%
+#!name noclobber devnull
+set -C; echo x > /dev/null; echo "rc=$?"
+%%%
+#!name redirect stdin from file
+echo content > in1; read v < in1; echo "$v"
+%%%
+#!name redirect fd0 close
+exec 0<&-; read v; echo "rc=$?"
+%%%
+#!name redir order 2>&1 1>file
+{ echo out; echo err >&2; } 2>&1 1>ofile; echo "---"; cat ofile
+%%%
+#!name redir order 1>file 2>&1
+{ echo out; echo err >&2; } 1>ofile 2>&1; echo "---"; cat ofile
+%%%
+#!name fd above 9
+exec 9>f9; echo nine >&9; exec 9>&-; cat f9
+%%%
+#!name redirect on function call
+f() { echo body; }; f > fout; cat fout
+%%%
+#!name redirect and popredir with error
+f() { echo x >&3; }; (exec 3>ff; f); cat ff
+%%%
+#!name append
+echo one > ap; echo two >> ap; cat ap
+%%%
+#!name readwrite
+echo abc > rw; exec 5<> rw; read v <&5; echo "$v"; exec 5>&-
+%%%
+#!name redirect failure keeps shell
+echo x > /nonexistent/dir/file 2>&1; echo "rc=$?"; echo alive
+%%%
+#!name exec redirect persists
+exec > pout; echo captured; exec >&2 2>/dev/null; cat pout 1>&2 2>&1
+%%%
+#!name subshell fd inheritance
+exec 6>f6; (echo sub >&6); echo main >&6; exec 6>&-; cat f6
+%%%
+#!name closing unopened fd in list
+{ echo a; } 7>&- 8>&-; echo "rc=$?"
+%%%
+#!name dup from closed
+exec 3>&- ; exec 4>&3 2>&1; echo "rc=$?"
+%%%
+#!name redirect loop body
+for i in 1 2 3; do echo $i; done > lout; cat lout
+%%%
+#!name here-doc in function
+f() { cat <<EOF
+inner
+EOF
+}; f; f
+%%%
+#!name redir stdin heredoc then reset
+#!mode=stdin
+read a <<EOF
+zzz
+EOF
+echo "[$a]"
+echo next

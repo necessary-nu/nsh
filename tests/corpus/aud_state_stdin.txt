@@ -1,0 +1,61 @@
+#!name pipe script large with reads
+#!mode=c
+{ echo 'read a'; echo 'echo "a=$a"'; i=0; while [ $i -lt 900 ]; do echo "echo l$i"; i=$((i+1)); done; echo 'cat'; echo FIRSTREAD; echo T1; echo T2; } | "$0" | tail -5
+%%%
+#!name pipe script exec at end
+#!mode=c
+{ i=0; while [ $i -lt 900 ]; do echo "echo l$i"; i=$((i+1)); done; echo 'exec cat'; echo E1; echo E2; } | "$0" | tail -3
+%%%
+#!name pipe script with heredoc and cat
+#!mode=c
+printf 'cat <<X\nhd1\nhd2\nX\ncat\nAFTER1\nAFTER2\n' | "$0"
+%%%
+#!name pipe script with fd10 in use
+#!mode=c
+printf 'exec 10>t10\necho ten >&10\nexec 10>&-\ncat t10\ncat\nZZ\n' | "$0"
+%%%
+#!name pipe script with fd11 12
+#!mode=c
+printf 'exec 11>t11 12>t12\necho a >&11\necho b >&12\nexec 11>&- 12>&-\ncat t11 t12\ncat\nQQ\n' | "$0"
+%%%
+#!name pipe script subshell reads stdin
+#!mode=c
+printf 'echo start\n(read v; echo "sub=$v")\nSUBLINE\necho after\ncat\nEND1\n' | "$0"
+%%%
+#!name pipe script with dot file
+#!mode=c
+printf 'echo included\n' > pinc.sh; printf '. ./pinc.sh\ncat\nDOTLEFT\n' | "$0"
+%%%
+#!name pipe script exit early leaves rest
+#!mode=c
+{ i=0; while [ $i -lt 500 ]; do echo "echo x$i"; i=$((i+1)); done; echo exit; echo LEFT1; echo LEFT2; } > s.txt; cat s.txt | { "$0" >/dev/null; cat; }
+%%%
+#!name stdin from fifo-like process substitution replacement
+#!mode=c
+printf 'echo A\necho B\n' | "$0" -s
+%%%
+#!name pipe with very long single line
+#!mode=c
+{ printf 'echo '; i=0; while [ $i -lt 12000 ]; do printf 'q'; i=$((i+1)); done; printf '\n'; echo 'cat'; echo LL; } | "$0" | wc -c
+%%%
+#!name pipe with NUL bytes and cat
+#!mode=c
+printf 'echo a\000b\ncat\nNULLEFT\n' | "$0"
+%%%
+#!name interactive from pipe with read
+#!mode=stdin
+#!shargs -i
+read v
+echo "v=$v"
+VALUE
+echo done
+%%%
+#!name stdin script sets and unsets specials
+#!mode=stdin
+unset IFS
+set -- a b c
+echo "$*"
+IFS=,
+echo "$*"
+cat
+TAILLINE

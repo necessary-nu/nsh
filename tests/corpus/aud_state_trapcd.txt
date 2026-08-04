@@ -1,0 +1,149 @@
+#!name trap list empty
+trap
+%%%
+#!name trap set and list
+trap 'echo hi' USR1; trap
+%%%
+#!name trap exit
+trap 'echo bye' EXIT; echo body
+%%%
+#!name trap exit in subshell
+(trap 'echo subbye' EXIT; echo sub); echo main
+%%%
+#!name trap reset with dash
+trap 'echo x' USR1; trap - USR1; trap
+%%%
+#!name trap ignore empty string
+trap '' USR1; trap
+%%%
+#!name trap inherited by subshell reset
+trap 'echo T' USR1; (trap); echo ---; trap
+%%%
+#!name trap bad name
+trap 'echo x' NOSUCHSIG 2>&1; echo "rc=$?"
+%%%
+#!name trap numeric signal
+trap 'echo n' 2; trap
+%%%
+#!name trap signal 0 is exit
+trap 'echo zero' 0; echo body
+%%%
+#!name trap with no action arg is list-for-sig
+trap 'echo a' USR1; trap USR1; trap
+%%%
+#!name trap in function then return
+f() { trap 'echo F' USR1; }; f; trap
+%%%
+#!name trap exit status preserved
+trap 'echo "st=$?"' EXIT; (exit 7)
+%%%
+#!name trap dash resets multiple
+trap 'echo a' USR1 USR2; trap - USR1 USR2; trap
+%%%
+#!name trap out of range signal
+trap 'echo x' 999 2>&1; echo "rc=$?"
+%%%
+#!name trap EXIT then exec
+trap 'echo E' EXIT; true
+%%%
+#!name trap subshell forked simple trap cmd
+trap 'echo P' USR1; ( trap ) ; echo done
+%%%
+#!name cd basic
+b=$PWD; mkdir -p d1/d2; cd d1; pwd | sed "s|^$b||"; cd ..; pwd | sed "s|^$b|ROOT|"
+%%%
+#!name cd dash prints
+b=$PWD; mkdir -p da db; cd da; cd ../db; cd - > /dev/null; pwd | sed "s|^$b||"
+%%%
+#!name cd with CDPATH prints
+b=$PWD; mkdir -p cp1/target; CDPATH=./cp1; cd target 2>&1 | sed "s|^$b||"; echo "rc=$?"; pwd | sed "s|^$b||"
+%%%
+#!name cd CDPATH with dot first
+b=$PWD; mkdir -p cp2/t2; CDPATH=.:./cp2; cd cp2 2>&1 | sed "s|^$b||"; pwd | sed "s|^$b||"
+%%%
+#!name cd -P physical
+b=$PWD; mkdir -p real; ln -s real link; cd -P link; pwd | sed "s|^$b||"
+%%%
+#!name cd -L logical
+b=$PWD; mkdir -p real2; ln -s real2 link2; cd -L link2; pwd | sed "s|^$b||"; echo "$PWD" | sed "s|^$b||"
+%%%
+#!name cd -L then dotdot
+b=$PWD; mkdir -p a/b; ln -s a/b lnk; cd lnk; cd ..; pwd | sed "s|^$b|ROOT|"
+%%%
+#!name cd -P then dotdot
+b=$PWD; mkdir -p a2/b2; ln -s a2/b2 lnk2; cd -P lnk2; cd ..; pwd | sed "s|^$b|ROOT|"
+%%%
+#!name cd LP toggling
+b=$PWD; mkdir -p r3; ln -s r3 l3; cd -L -P -L l3; pwd | sed "s|^$b||"
+%%%
+#!name cd PL toggling
+b=$PWD; mkdir -p r4; ln -s r4 l4; cd -P -L l4; pwd | sed "s|^$b||"
+%%%
+#!name cd nonexistent
+cd /no/such/dir 2>&1; echo "rc=$?"
+%%%
+#!name cd no arg no HOME
+unset HOME; cd 2>&1; echo "rc=$?"; pwd > /dev/null; echo ok
+%%%
+#!name cd to HOME
+b=$PWD; mkdir -p hh; HOME=$PWD/hh; cd; pwd | sed "s|^$b||"
+%%%
+#!name pwd -P and -L
+b=$PWD; mkdir -p pr; ln -s pr pl; cd pl; pwd -L | sed "s|^$b||"; pwd -P | sed "s|^$b||"
+%%%
+#!name OLDPWD set by cd
+b=$PWD; mkdir -p o1 o2; cd o1; cd ../o2; echo "$OLDPWD" | sed "s|^$b||"
+%%%
+#!name PWD exported
+mkdir -p pe; cd pe; env | grep -c "^PWD=$PWD$"
+%%%
+#!name cd dot dot dot
+b=$PWD; mkdir -p x/y; cd x/y; cd ... 2>&1 | sed "s|^$b||"; echo "rc=$?"
+%%%
+#!name cd with trailing slashes
+b=$PWD; mkdir -p ts/inner; cd ts//inner/; pwd | sed "s|^$b||"
+%%%
+#!name cd absolute double slash
+cd //; pwd
+%%%
+#!name updatepwd dotdot beyond root
+cd /; cd ../../..; pwd
+%%%
+#!name alias basic
+alias foo='echo bar'; foo
+%%%
+#!name alias listing
+alias a1='x'; alias a2='y'; alias | sort
+%%%
+#!name alias recursion self
+alias echo='echo pre'; echo hi
+%%%
+#!name alias mutual recursion
+alias a='b '; alias b='a '; alias c='echo done'; a c 2>&1 | head -2
+%%%
+#!name alias trailing space expands next
+alias l='ls '; alias ls='echo LS'; l foo
+%%%
+#!name unalias
+alias u1=x; unalias u1; alias u1 2>&1; echo "rc=$?"
+%%%
+#!name unalias -a
+alias q1=x q2=y; unalias -a; alias
+%%%
+#!name unalias missing
+unalias nosuch 2>&1; echo "rc=$?"
+%%%
+#!name alias invalid name
+alias 'a b'=x 2>&1; echo "rc=$?"
+%%%
+#!name alias empty name
+alias =x 2>&1; echo "rc=$?"
+%%%
+#!name alias query missing
+alias nosuchalias 2>&1; echo "rc=$?"
+%%%
+#!name alias with quotes in value
+alias qq="echo 'a b'"; qq; alias qq
+%%%
+#!name alias redefine while in use
+alias r='echo r; alias r="echo r2"'; r; r

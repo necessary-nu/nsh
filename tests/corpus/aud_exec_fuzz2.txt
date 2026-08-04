@@ -1,0 +1,3599 @@
+#!name rd0
+printf '?"=a\n*b\t:"\n' | { IFS=' :' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd1
+printf '%*\n' | { IFS=' :' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd2
+printf ''\t \n' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd3
+printf 'a\n' | { IFS=' :' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd4
+printf ']|~|\t' | { IFS=' :' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd5
+printf '"\n' | { IFS=':' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd6
+printf '[\000%a\000]\n' | { IFS='ab' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd7
+printf ']\t##\tb?a"'a~' | { IFS='ab' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd8
+printf 'a\nb\t\000|:*\n"="=?' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd9
+printf '$' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd10
+printf '\000"\\]?~ []\n' | { IFS=' ' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd11
+printf '[#\tb \000~'b*\000"' | { IFS=':;' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd12
+printf 'b' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd13
+printf '%\\$:\t$"\\b$[\\\n' | { IFS=':' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd14
+printf ']#?[#'\\:'~\t#' | { IFS=':' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd15
+printf '=~=" ' | { IFS='ab' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd16
+printf '~?#?[]\n' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd17
+printf '?]?\n[=""?"$"\t' | { IFS=':;' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd18
+printf '\\=\t|"#[ $\n' | { IFS=' \t\n' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd19
+printf '?a|\t%\n\000\t*' | { IFS=':' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd20
+printf '\tb\\:\n' | { IFS=':' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd21
+printf 'b$\n"'\000 %|\n' | { IFS='ab' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd22
+printf '?$:~"b~\n' | { IFS=' ' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd23
+printf ']%["\\$$%~\n' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd24
+printf '%#|\\\000 "' | { read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd25
+printf '%\000~\\]%\n' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd26
+printf '#''\t\000\n' | { IFS='\t' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd27
+printf 'a][#[\\#\n' | { IFS=':;' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd28
+printf '\\' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd29
+printf '?*#b*#?\\[\n' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd30
+printf '\\[[~]\000[=a\n""%\n' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd31
+printf ':~|a$$\000%\n' | { IFS=':;' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd32
+printf '|[\n [a$\n' | { IFS=':;' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd33
+printf '#~#' | { IFS=':' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd34
+printf 'b *?  a]$' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd35
+printf ':*\n' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd36
+printf '\n\\\t\000\t$\t \000|b~\n' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd37
+printf '%\n' | { IFS=' \t\n' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd38
+printf ' ]\000##""' | { IFS=':' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd39
+printf '=[~~\000*? ~*\n' | { IFS='\t' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd40
+printf '"\n'\t\\a] %b :=\000\n' | { IFS=' \t\n' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd41
+printf ':=a~'b' | { IFS=' \t\n' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd42
+printf ' #' | { IFS=':' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd43
+printf '*[]\000"''\\"[$"=b\n' | { IFS=' :' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd44
+printf ':b\n' | { IFS=' :' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd45
+printf '#"a$#[\000$\n' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd46
+printf '\t "' | { IFS=':;' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd47
+printf ':?\t[*\n' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd48
+printf 'ba\n#\\:' | { IFS='ab' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd49
+printf '*\tb|a%* \000'"\n' | { IFS=':' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd50
+printf ' \n\t*\t\n' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd51
+printf 'a\nb\n$\n' | { read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd52
+printf ' *# #b*b#'bb\n' | { IFS=' \t\n' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd53
+printf 'bb|\t='|~* ]' | { IFS=' ' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd54
+printf '|\000\n' | { IFS='ab' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd55
+printf ''=\\a[\n*~:\\\n' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd56
+printf '\\\\~ #*\n' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd57
+printf '#' | { read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd58
+printf ': $]'~\n' | { IFS='\t' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd59
+printf '\n\n' | { read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd60
+printf '?:'~\\] \n' | { IFS=':' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd61
+printf '][b ~~aa:b\\' | { IFS=' \t\n' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd62
+printf '*\n' | { IFS=':' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd63
+printf '"a\t%\000\t' | { IFS=' ' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd64
+printf '\t\\\n$$:]]\n*\n' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd65
+printf '\t\n' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd66
+printf '$b|' | { read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd67
+printf '"'\n||?|[~="*\n' | { IFS=' :' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd68
+printf ''"\\\\*#'b\n' | { IFS=' \t\n' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd69
+printf '|]##~\n' | { IFS=' :' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd70
+printf ':\n' | { IFS=':' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd71
+printf 'a\000[='=\n' | { IFS=' \t\n' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd72
+printf '~b~\\$"%a=|[[\n' | { IFS=' ' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd73
+printf '$[a?* b ["\n' | { IFS=' :' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd74
+printf ':*\n' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd75
+printf '''\t=|\000]']:~\n' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd76
+printf '[[?\000\n' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd77
+printf '\t* %%~$\n' | { IFS=' \t\n' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd78
+printf '*[$? \000]\t$a\n' | { IFS='\t' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd79
+printf ']\000:]' | { read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd80
+printf '= ]|\n'*\000#:a|\t:\n' | { IFS=':' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd81
+printf ':%\n]\t~%:": ||\n' | { IFS=':' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd82
+printf ' *'~\n'a:\000"\\a\n' | { IFS='ab' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd83
+printf '[a:#"|]'\\[# %\n' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd84
+printf '$b*$*? \\?' | { IFS=':;' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd85
+printf ''* \n"\\ a\\\n' | { read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd86
+printf '\n'= b||\na\n' | { IFS=' ' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd87
+printf '#=ab\t'=$%\000%b|a\n' | { IFS=' \t\n' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd88
+printf '\t' | { IFS=':' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd89
+printf ' "|'$|?\n' | { IFS='ab' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd90
+printf ':\t\n  'b$\\|a' | { IFS=':;' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd91
+printf '\\\n* "\000aa\n' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd92
+printf '"]|\n' | { IFS=' ' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd93
+printf ''"\n' | { IFS=':;' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd94
+printf '\\?a~a'\\*#b\n' | { IFS=' :' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd95
+printf '\000*[b=*b'"' | { IFS='\t' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd96
+printf ':"\n' | { IFS='\t' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd97
+printf '\t% \nb' | { IFS=' \t\n' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd98
+printf '~"$\\\n\n' | { IFS=':;' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd99
+printf '|%\nbb :]\\"' | { IFS='\t' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd100
+printf '\\:??a?'\t*?%\n\t\n' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd101
+printf 'a\n\n' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd102
+printf '$:$=\000\n\000%*~' | { IFS=' ' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd103
+printf '% b \n[=~ ?:\n' | { IFS='\t' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd104
+printf '[a]=#\n' | { IFS=':' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd105
+printf '\000|\n \\"' | { IFS=' \t\n' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd106
+printf ''\t|\\#\t=\n%\n' | { read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd107
+printf '%#=~|\n' | { IFS=':' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd108
+printf '?][\000:|?$"=?# ' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd109
+printf ':[' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd110
+printf '\t]?:$]:\n' | { IFS='\t' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd111
+printf '$  [ \tb:=$:\n$ \n' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd112
+printf '=]' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd113
+printf '\t*\n' | { IFS=' ' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd114
+printf '~'$:?[~\n$b|' | { IFS=':' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd115
+printf '\t|]= \\[b\n[\n\n' | { IFS='\t' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd116
+printf '?\n#'\000:\\\000|\n:\n' | { IFS=':' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd117
+printf ' \n?\000\n\t#:[%?\n' | { read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd118
+printf 'a]%%##=\000[\000]b[\n' | { IFS=' \t\n' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd119
+printf '\\[|ba#' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd120
+printf '$%\n]=\n' | { read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd121
+printf 'a~#\n"b*~\n' | { IFS=' ' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd122
+printf '=*'\n' | { IFS=' \t\n' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd123
+printf '*?a|*% ="$%[*:\n' | { IFS=':;' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd124
+printf 'a\\$b\na||:\n' | { IFS=':;' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd125
+printf '= a\000\000\n' | { IFS=' :' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd126
+printf '=| ]|:~"' | { IFS=':' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd127
+printf 'b\n' | { IFS='\t' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd128
+printf '''\t:'||\\'\n\\$a?\n' | { IFS=' :' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd129
+printf '*$$~\n||]%?b|~\t\n' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd130
+printf '\\[\ta~\\$:a~\n] #\n' | { read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd131
+printf '"#?%\n]\000~$\t\n' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd132
+printf '[:= ~#* \n' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd133
+printf ']$\t]"b[:=  b\n' | { IFS=':;' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd134
+printf '\\$?\000\n\n' | { IFS=' :' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd135
+printf '[ '[$:\t"$ ' | { IFS=' :' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd136
+printf '\n]\n' | { IFS=':;' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd137
+printf '\nb\000*[[?\n=="\n' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd138
+printf '|\000'$:\\ \n]b[' | { IFS=' \t\n' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd139
+printf '\n\n' | { IFS='\t' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd140
+printf '%b\n' | { IFS=' ' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd141
+printf '[$*b$\n' | { IFS=':' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd142
+printf '=%'\n\000\nb\t"#]\000\n' | { IFS=':;' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd143
+printf ']:''\n?\\\\~\n"?\t\n' | { IFS=' \t\n' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd144
+printf ']?|\000\\$\000\n' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd145
+printf '|' | { IFS=' \t\n' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd146
+printf '%=a:~[:]\n' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd147
+printf '|\n' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd148
+printf 'b*]]\n' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd149
+printf ':|:[:* :%"]?\n' | { IFS='\t' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd150
+printf '\t*#a[#*' | { IFS=' :' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd151
+printf ':[#b?a\n\\: ' | { IFS='ab' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd152
+printf '#aa%]='"]?\n' | { IFS='\t' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd153
+printf 'a%%|*a%[ **\n' | { IFS=' :' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd154
+printf '|\t:\n' | { IFS=':;' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd155
+printf '[? \000\t%\n~:"%\n' | { read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd156
+printf '\t\000\t['?#\000\000\n' | { IFS=':' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd157
+printf '~|:\000a#\t[~\n' | { IFS='\t' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd158
+printf '? "[:\000*\n' | { IFS=' :' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd159
+printf '? #'#\\'#' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd160
+printf 'b|=?]=\t"$\000' | { IFS=':' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd161
+printf '*%\000\000b[*$##=\t\n#' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd162
+printf '*\\ :\n\n\n' | { read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd163
+printf '\000\\:b $\n\t' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd164
+printf '=]*\t#=#~]\n' | { IFS='ab' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd165
+printf '|\n' | { IFS='\t' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd166
+printf '*\n %\n' | { IFS=':;' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd167
+printf '?|"$a]:' | { IFS=' :' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd168
+printf '*"*[:~#?:~=?b\n' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd169
+printf '\\~*]]' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd170
+printf ''a:?=' ' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd171
+printf '\n\\\\"~[? $\n' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd172
+printf '#:[= \n' | { IFS=' \t\n' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd173
+printf '*=\000'=|#=="\n' | { read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd174
+printf ''$a\n]~*]#?\n' | { IFS=':;' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd175
+printf '? \n' | { IFS='\t' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd176
+printf '\nb\tb*$=%\\|"\n' | { IFS=' ' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd177
+printf '\n#%\\\n' | { IFS=':' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd178
+printf '\n[\n' | { IFS=':;' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd179
+printf '\000* =?"' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd180
+printf '\t*'=$"\n' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd181
+printf '\ta]b:|$=\000#\n' | { IFS=' ' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd182
+printf '*':%b'' | { IFS=' :' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd183
+printf ']?[#]\t*' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd184
+printf ' #"[\n' | { IFS=':' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd185
+printf '#\t#|'\n?\000%a\000|\n' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd186
+printf '%]?aa~"$:=*\n' | { IFS=':' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd187
+printf '|\000'\t\\\000#[\000'\n]' | { IFS='ab' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd188
+printf ''#\000~*\n' | { IFS=' ' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd189
+printf ':\000$\000:"\\#$b\n' | { IFS='ab' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd190
+printf '?:=~|%%:#\\' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd191
+printf '\000*b\n' | { IFS=':' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd192
+printf '\n ?a\n' | { IFS=' :' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd193
+printf '$=%#[:*\\~#\000"' | { IFS=':;' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd194
+printf '$?\\\n' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd195
+printf '"%\n\n' | { IFS=':;' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd196
+printf '"#$:a~' | { read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd197
+printf '~\n\\]]$ ]?' : \n' | { IFS=' ' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd198
+printf '#$"'\n' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd199
+printf '[?\n' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd200
+printf '\000]\\%\000\\a|\n|ba"?\n' | { IFS=':;' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd201
+printf ' ]\t%=b% a\n' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd202
+printf 'a~*\000\na*'":b:|#\n' | { IFS=' :' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd203
+printf '%|*|\t|:%\n' | { IFS=':;' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd204
+printf '\000#|a*\n' | { IFS=' \t\n' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd205
+printf '?\t]~:]?' | { IFS='ab' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd206
+printf '$\t#*]b\t=~[?\\:' | { IFS=' ' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd207
+printf '?"?\n' | { IFS=':;' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd208
+printf '#*\n\t~\t?"|$ab?]\n' | { IFS='ab' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd209
+printf '\n' | { IFS='ab' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd210
+printf '\n#'~ \000[%#|$?b' | { IFS='ab' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd211
+printf '"~?|:?\\?\\ | \t"\n' | { IFS=':' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd212
+printf '?$:'['\n$* \n' | { IFS='ab' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd213
+printf '?'\t\n\n' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd214
+printf '" =]\t' \000\000\000':\n' | { IFS='\t' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd215
+printf '#=|a\n# ]]\n' | { IFS=':;' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd216
+printf '#:$' | { IFS='ab' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd217
+printf '~?*\n' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd218
+printf '\t?$#\n*\t$=b\\\n' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd219
+printf '[|'\000\000\000a\\\n?\\ \n' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd220
+printf '|\n|"#\n %\\? \\\n' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd221
+printf '\n**#$# '\n[]*#a' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd222
+printf '?"\000% \n~'*\n ~~\000\n' | { IFS=':;' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd223
+printf '$'|\t"]%*|#= ]\n' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd224
+printf '?"?"\000%"|b\n' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd225
+printf ']\n' | { IFS=':' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd226
+printf '*]'**%[#\\=|':' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd227
+printf ' \n' | { IFS='ab' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd228
+printf 'a#]\\\n' | { IFS=' \t\n' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd229
+printf '[\n a\t\n' | { IFS=' ' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd230
+printf '\000$\n~?=\n' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd231
+printf '?:\t|'="a|\\% |\n' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd232
+printf 'b\n\t\\[' | { IFS='ab' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd233
+printf '\n\t*%\n' | { IFS=':;' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd234
+printf '\\**%\\\000[~=*]~' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd235
+printf '\000[#' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd236
+printf '#[ba ' | { IFS=' :' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd237
+printf '|\t*|]' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd238
+printf '\t:\t"\000'\n' | { IFS=' :' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd239
+printf '*$  \\' | { IFS=' :' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd240
+printf '|'$\n\\\t\n\n' | { IFS='ab' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd241
+printf '?[~$%\n' | { IFS='ab' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd242
+printf ' :\\~"#[| b$|\n' | { IFS=':' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd243
+printf 'a\n' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd244
+printf '[:a$\000=]\n' | { read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd245
+printf '\t$"\000]"\n' | { IFS=' :' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd246
+printf '$|\000|=#?]\n#\000\n' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd247
+printf '[=\000|?' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd248
+printf 'b["%=#"\n\000='' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd249
+printf '["|##"ab\\?\n'' | { IFS='\t' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd250
+printf '\\$|\n' | { IFS=':' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd251
+printf '*"\000b\n' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd252
+printf 'b%#a|#\n' | { IFS='ab' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd253
+printf '*:~#\t=|=#b=%\n=\n' | { IFS=' ' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd254
+printf '\t\n' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd255
+printf ']%\n' | { IFS=' :' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd256
+printf '*'\000~' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd257
+printf '%| $=\000b' | { IFS=' \t\n' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd258
+printf '\000[$?=?]%\n' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd259
+printf '%~' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd260
+printf ':\000a\000 $a[:?\n' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd261
+printf '\n?=#:\\~[[~\n[\n' | { read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd262
+printf ':"\t?%??'' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd263
+printf '\n\t' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd264
+printf ' [] bb"""==$ \n' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd265
+printf ':%$\t\n' | { IFS='ab' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd266
+printf '"\n' | { read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd267
+printf '\\\t' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd268
+printf 'a' | { IFS='\t' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd269
+printf '~\\%\000b~\t\\' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd270
+printf '[|#*\t#$?\\~'~\n\n' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd271
+printf 'b*|~[= b[\n' | { IFS=' :' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd272
+printf '[\n' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd273
+printf '$~' | { IFS=' ' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd274
+printf '~b=[=~\t\n' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd275
+printf '|\n\000"#\n' | { IFS='\t' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd276
+printf '*#*|":\t%?ba%\n' | { IFS=':;' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd277
+printf '\t?]\000\\%' | { IFS='\t' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd278
+printf 'b[$\n' | { IFS=':;' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd279
+printf '\\#*\\\t**~=#\n' | { read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd280
+printf '$\\a\\*:]a\\"a%\\' | { IFS='\t' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd281
+printf 'b|=a?a:\t~\n"*\n' | { IFS='ab' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd282
+printf '$] \n' | { IFS=' :' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd283
+printf 'b%\t#['%%~\n'\n' | { IFS=':' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd284
+printf '\n|#[\n' | { read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd285
+printf '%:\000[ \n'   ][' | { IFS='\t' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd286
+printf ':\n%*||:\000\n' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd287
+printf ' [=?\\\000\\]a\n' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd288
+printf ']]#=|$\n' | { read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd289
+printf ' %~$a\na\\:"'\t\n' | { read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd290
+printf '?:]'%%' ~\n' | { IFS='\t' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd291
+printf '\nb'|a\n\t?%#:\n' | { IFS=' :' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd292
+printf '?\\\000||:#a[ b%\n' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd293
+printf '$*\t\\=[\000\000#b\n' | { IFS=' \t\n' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd294
+printf ']' | { IFS=' :' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd295
+printf ':%"|a~'b\n' | { IFS='ab' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd296
+printf 'ab\000##\000%#' | { IFS=':;' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd297
+printf 'ab%[ "%=\000\n' | { IFS='ab' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd298
+printf ''\n' | { IFS='\t' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd299
+printf '=\\\t]\000\n' | { IFS=':;' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd300
+printf ' \t=]$":\\ [?a\n' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd301
+printf '\\]= #|]=\t\000\000"*"' | { read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd302
+printf '\\[\n' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd303
+printf '[|~=a|: $\n' | { IFS=':;' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd304
+printf '*' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd305
+printf '|$*b '%\000\n' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd306
+printf '\000:?:%\n\n|\000b\000' | { IFS=' \t\n' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd307
+printf '?[ [:=~%%|\t'%?\n' | { IFS=' ' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd308
+printf '? %a\\\000:[ "?~b' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd309
+printf '[%b[\n' | { IFS=' ' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd310
+printf 'b"\000$ =|?' | { IFS='\t' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd311
+printf '#':%%%\n' | { read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd312
+printf '=\t~a:\n' | { IFS=' :' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd313
+printf ']%'\n' | { IFS=' :' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd314
+printf 'a\n' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd315
+printf ']\\\n||?\n' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd316
+printf '"~":=\000]*\000=\n' | { IFS='\t' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd317
+printf ']%*|\\'|'=#\n' | { IFS=':;' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd318
+printf ''~%'=\t%"~*\000\n' | { IFS=':' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd319
+printf ':%a%\t\n' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd320
+printf ''\000\n% "\n' | { IFS=' ' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd321
+printf '\t?'~a\\"|a?\\:|' | { IFS=' ' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd322
+printf '\t"~]a]=#a$' | { read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd323
+printf '"$\n' | { IFS='ab' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd324
+printf '$$':\000|\n' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd325
+printf '?|\t' | { IFS=' :' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd326
+printf ' #:~\t[ab$[\n' | { read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd327
+printf '?a"\n\t="\n[$*~\n' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd328
+printf '|\\\\\n' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd329
+printf ' ]:\n"#b:?\n' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd330
+printf '~#* ~?]*#*||ab\n' | { IFS='ab' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd331
+printf '][\t\000b\\~]]' | { IFS=':;' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd332
+printf '~=\t\t~:]=\t|%*\000a' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd333
+printf ' \000%\n' | { IFS=':' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd334
+printf '\000'%a\t~'|\n' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd335
+printf ''=ab%a\\*:]$]~' | { IFS=':;' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd336
+printf '\\\n#*=' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd337
+printf '% ' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd338
+printf '\n%  \ta$\t"[\t:\n' | { IFS=' ' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd339
+printf ' "$\n\000\t#~:\n' | { IFS='\t' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd340
+printf ':[\ta~\n' | { IFS=' ' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd341
+printf ''\nb  b\n' | { IFS=':' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd342
+printf '$\000\n' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd343
+printf '' %|*a b\000\n|:$' | { read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd344
+printf '''\n' | { IFS='ab' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd345
+printf '# \000'=:%['|\n' | { IFS='\t' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd346
+printf '[$\\*$' | { IFS='\t' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd347
+printf '|'"\000#:%$\n*]$' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd348
+printf '\000%]a\n=\\\n\n' | { IFS=' \t\n' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd349
+printf '| #\\:' | { IFS=' ' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd350
+printf 'b$|=\000\\*~' | { IFS=' :' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd351
+printf '~=\000\n\n$]#b\\\t' | { IFS=' :' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd352
+printf 'ba] [\000b\n' | { IFS='\t' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd353
+printf '#\\\n' | { IFS=' \t\n' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd354
+printf '\na\n=b\t\\' | { IFS=' ' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd355
+printf '#\t \n" ?*\n' | { IFS=' ' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd356
+printf '%\t' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd357
+printf ': \000 :\t\000\n?\n' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd358
+printf '\\' | { IFS='ab' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd359
+printf ']"=%\n~~?==' | { IFS=' :' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd360
+printf ''\n]\000"]\\?\n' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd361
+printf '"=?' | { IFS=' :' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd362
+printf '="#?' | { IFS=' :' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd363
+printf '\000a=[$"\t*"|%"\n' | { IFS='\t' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd364
+printf '?\\\n' | { IFS=' ' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd365
+printf '|\n\n* \\\t]=\n' | { IFS='ab' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd366
+printf '*[~\\][\n|\t' | { IFS=':;' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd367
+printf '~:\\]]\000\n' | { IFS='ab' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd368
+printf ' %[#\n' | { IFS=' ' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd369
+printf '?%] \t]]\\b=a\n' | { IFS='ab' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd370
+printf '$\t \n]b\n' | { read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd371
+printf '\n?\t\n' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd372
+printf '*?]\000=$=[a' | { IFS='ab' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd373
+printf ' |\n=%\ta"|' | { IFS=' ' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd374
+printf '  =\n\\%']|\n' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd375
+printf '% ]*|~$*\000\n' | { IFS=' \t\n' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd376
+printf '= a:\n\n' | { IFS=':;' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd377
+printf '*]]]b\t%~\n' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd378
+printf '|$' | { IFS=' ' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd379
+printf '$\000' | { IFS=' \t\n' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd380
+printf '| %||~~[]a\n?\n' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd381
+printf '*a"\t\000 #$%[\n' | { IFS=' :' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd382
+printf ']?\\' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd383
+printf ']%*#~%[\n\na|:\n' | { IFS='\t' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd384
+printf 'b\t' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd385
+printf '#\000$[\n$"a\n' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd386
+printf '\\[= \n' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd387
+printf '?' | { IFS=':;' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd388
+printf '\000\t|:$\n\n*\000'\t%%\n' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd389
+printf '$\t\n[[]\n#'|%[\n' | { IFS=' \t\n' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd390
+printf '#a\n' | { IFS=' ' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd391
+printf '\000\n' | { IFS=':' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd392
+printf '*=$' | { read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd393
+printf '#\t$? #\n'\n' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd394
+printf ''\n' | { IFS=' :' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd395
+printf '*'aa=]]$a=' | { IFS='\t' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd396
+printf '|\n' | { read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd397
+printf '"]#*|[=|a#=$=\n' | { IFS='ab' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd398
+printf '%\n'\n$\\~[\n' | { read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd399
+printf 'a\\ ':'=|\t]='\n' | { IFS='ab' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name um0
+( umask 075; umask 'o=w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um1
+( umask 477; umask 'ug=g,ug=x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um2
+( umask 013; umask 'ugo-g,ao-rw,a+us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um3
+( umask 250; umask 'g=rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um4
+( umask 100; umask '-r' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um5
+( umask 747; umask 'ugo=X' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um6
+( umask 627; umask '0307' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um7
+( umask 040; umask '0441' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um8
+( umask 122; umask '0660' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um9
+( umask 764; umask 'ao+x,u-us,+' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um10
+( umask 500; umask '0533' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um11
+( umask 746; umask '0437' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um12
+( umask 201; umask 'ug+g,ao=,g=w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um13
+( umask 416; umask '-' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um14
+( umask 252; umask '0325' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um15
+( umask 501; umask '0275' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um16
+( umask 126; umask '0061' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um17
+( umask 657; umask '0240' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um18
+( umask 475; umask '0136' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um19
+( umask 215; umask '0303' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um20
+( umask 277; umask 'ug-u' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um21
+( umask 352; umask '0132' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um22
+( umask 363; umask '0053' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um23
+( umask 073; umask 'ao-' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um24
+( umask 462; umask '0670' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um25
+( umask 201; umask 'ug+r,a+rwx,go-r' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um26
+( umask 642; umask 'ugo=w,=r,go=' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um27
+( umask 703; umask 'ug+wx,g+x,=rw' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um28
+( umask 535; umask 'ug+rw,u=s,+rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um29
+( umask 254; umask '0050' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um30
+( umask 021; umask 'ao=gX,g-g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um31
+( umask 534; umask 'ug=rx,u+u' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um32
+( umask 743; umask '0736' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um33
+( umask 475; umask '0042' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um34
+( umask 723; umask 'o=g,u-wx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um35
+( umask 102; umask '0732' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um36
+( umask 230; umask 'g=rx,o=g,ugo-o' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um37
+( umask 173; umask 'go=' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um38
+( umask 553; umask '0415' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um39
+( umask 102; umask 'g-wx,ao+rX,g+' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um40
+( umask 214; umask 'a+rX,ugo=wx,ug-gX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um41
+( umask 767; umask '+rwx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um42
+( umask 460; umask '0220' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um43
+( umask 036; umask 'ug+rX,ug-,go+x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um44
+( umask 017; umask '0321' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um45
+( umask 560; umask 'o+us,ug+us,+rw' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um46
+( umask 764; umask 'ugo=rx,o=s,=u' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um47
+( umask 160; umask '0416' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um48
+( umask 620; umask '0471' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um49
+( umask 422; umask 'a=x,o+gX,u-w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um50
+( umask 026; umask 'ao-r,ao=r' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um51
+( umask 610; umask '0736' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um52
+( umask 001; umask '0516' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um53
+( umask 411; umask 'g-wx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um54
+( umask 357; umask '0461' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um55
+( umask 710; umask 'ugo-rx,o-rwx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um56
+( umask 633; umask '+s' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um57
+( umask 375; umask 'go=X' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um58
+( umask 403; umask 'go-g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um59
+( umask 410; umask 'ug=rX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um60
+( umask 650; umask '0072' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um61
+( umask 311; umask 'u=rwx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um62
+( umask 261; umask '0342' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um63
+( umask 062; umask 'u-,a+rw,ug-us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um64
+( umask 537; umask 'u+x,ao+rX,ug+rw' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um65
+( umask 451; umask '0302' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um66
+( umask 567; umask '+wx,ugo+X' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um67
+( umask 774; umask 'u=gX,u-u' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um68
+( umask 555; umask 'o+rwx,go+rX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um69
+( umask 744; umask '=rwx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um70
+( umask 304; umask '0724' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um71
+( umask 676; umask '0373' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um72
+( umask 106; umask 'o=gX,ug=x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um73
+( umask 434; umask 'g=s,a=wx,ug=s' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um74
+( umask 454; umask '0764' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um75
+( umask 322; umask '-g,-w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um76
+( umask 523; umask 'ugo+' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um77
+( umask 260; umask '0613' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um78
+( umask 653; umask 'a=g,-gX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um79
+( umask 466; umask '0432' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um80
+( umask 622; umask 'g=wx,ug+rw' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um81
+( umask 131; umask '0616' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um82
+( umask 707; umask '0560' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um83
+( umask 042; umask 'ug+gX,g+r,u-wx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um84
+( umask 054; umask 'ao-r,ao+g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um85
+( umask 032; umask '0532' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um86
+( umask 214; umask 'o-g,u=r,u-X' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um87
+( umask 232; umask 'o=us,g+wx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um88
+( umask 347; umask '0332' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um89
+( umask 652; umask '0260' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um90
+( umask 005; umask '0755' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um91
+( umask 436; umask '0561' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um92
+( umask 652; umask 'ao+rwx,o+x,go-g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um93
+( umask 430; umask 'ao-x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um94
+( umask 543; umask '0207' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um95
+( umask 602; umask '0557' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um96
+( umask 530; umask '0042' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um97
+( umask 773; umask 'ugo=rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um98
+( umask 703; umask '0624' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um99
+( umask 204; umask '0030' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um100
+( umask 247; umask 'ug=rwx,ugo=s' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um101
+( umask 634; umask 'ug=X,ugo-rX,a=x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um102
+( umask 070; umask 'ugo-rwx,=X' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um103
+( umask 464; umask 'u-rX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um104
+( umask 353; umask 'a=wx,g-rwx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um105
+( umask 655; umask 'ao+,ao-X' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um106
+( umask 563; umask 'ug-,=w,a=u' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um107
+( umask 543; umask 'ugo+o' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um108
+( umask 073; umask '0613' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um109
+( umask 612; umask '0573' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um110
+( umask 063; umask '0311' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um111
+( umask 541; umask 'ug+wx,ao=rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um112
+( umask 514; umask '0426' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um113
+( umask 663; umask 'a=r' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um114
+( umask 475; umask 'g+w,a+w,+rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um115
+( umask 330; umask 'u+us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um116
+( umask 174; umask 'ugo+x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um117
+( umask 404; umask '0470' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um118
+( umask 704; umask 'g+us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um119
+( umask 564; umask 'g=us,go=g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um120
+( umask 053; umask '0562' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um121
+( umask 170; umask '=u,u=w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um122
+( umask 473; umask '0745' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um123
+( umask 243; umask '0474' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um124
+( umask 141; umask 'go-rwx,ugo=r,a-o' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um125
+( umask 771; umask '0353' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um126
+( umask 120; umask '0020' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um127
+( umask 273; umask 'g=x,o+rX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um128
+( umask 144; umask 'ugo=gX,ugo=wx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um129
+( umask 374; umask 'g=X,a=rwx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um130
+( umask 752; umask 'ao=r,o-o,+r' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um131
+( umask 361; umask 'a+X,ug-us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um132
+( umask 372; umask 'ug+x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um133
+( umask 727; umask 'go-X' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um134
+( umask 425; umask 'ao+s,u=,a+g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um135
+( umask 746; umask '0175' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um136
+( umask 533; umask 'g+gX,ug-rwx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um137
+( umask 246; umask 'ug+rw' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um138
+( umask 045; umask 'ugo-r,a-rw,-rwx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um139
+( umask 257; umask 'g-gX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um140
+( umask 173; umask 'go-s' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um141
+( umask 464; umask '-,ugo-s' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um142
+( umask 260; umask 'g+w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um143
+( umask 030; umask '+wx,ugo=r,g=g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um144
+( umask 651; umask 'go-rw,o+x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um145
+( umask 544; umask 'ug+r,ugo-o' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um146
+( umask 527; umask '0417' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um147
+( umask 246; umask '0567' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um148
+( umask 323; umask 'ao=g,ugo+X,ug=' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um149
+( umask 021; umask 'a-X' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um150
+( umask 211; umask '0031' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um151
+( umask 533; umask 'a=wx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um152
+( umask 152; umask '-rX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um153
+( umask 361; umask 'go+gX,go-rx,o=' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um154
+( umask 203; umask '0346' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um155
+( umask 000; umask 'go-rw,a-gX,a=X' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um156
+( umask 160; umask 'ugo+x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um157
+( umask 316; umask '0306' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um158
+( umask 522; umask 'o-s,a+r,g-w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um159
+( umask 774; umask '0412' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um160
+( umask 033; umask 'a=us,o+us,ao+rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um161
+( umask 633; umask 'u=w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um162
+( umask 656; umask '0625' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um163
+( umask 712; umask '0333' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um164
+( umask 241; umask 'ug-o,a+g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um165
+( umask 034; umask 'ugo-w,a-x,a-rwx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um166
+( umask 004; umask 'u=us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um167
+( umask 443; umask '0757' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um168
+( umask 370; umask '0516' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um169
+( umask 637; umask '0676' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um170
+( umask 355; umask 'g+rw,go+g,-rX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um171
+( umask 627; umask '0656' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um172
+( umask 125; umask 'ug=wx,ug-o' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um173
+( umask 024; umask 'a=o,o+X,ao=wx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um174
+( umask 331; umask 'u=rwx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um175
+( umask 047; umask 'ao+us,g-x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um176
+( umask 466; umask 'o+w,ug=X,ug-g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um177
+( umask 644; umask 'g+X,a-us,a+' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um178
+( umask 053; umask 'ug=u,ug=gX,g=g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um179
+( umask 650; umask '-gX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um180
+( umask 534; umask '0224' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um181
+( umask 517; umask '0765' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um182
+( umask 570; umask '-wx,ao+rx,a=s' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um183
+( umask 310; umask 'g+s,g=rx,ug+rwx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um184
+( umask 775; umask 'g-s,g-x,go+rw' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um185
+( umask 142; umask 'ao=rwx,go-u,+x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um186
+( umask 006; umask '0436' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um187
+( umask 712; umask '0303' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um188
+( umask 723; umask 'a=rw,=rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um189
+( umask 034; umask 'go+x,+rw,ug=x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um190
+( umask 526; umask '0756' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um191
+( umask 753; umask '0062' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um192
+( umask 612; umask 'ug=g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um193
+( umask 443; umask 'ug-o' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um194
+( umask 047; umask '0264' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um195
+( umask 327; umask 'a-r,u=w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um196
+( umask 731; umask 'ug+g,u+us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um197
+( umask 207; umask 'o=rX,o+r' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um198
+( umask 353; umask 'u=x,a-g,ug-rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um199
+( umask 224; umask 'a+g,ao=gX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um200
+( umask 726; umask '0552' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um201
+( umask 731; umask '=,g-s' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um202
+( umask 460; umask '0107' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um203
+( umask 301; umask 'go+s,u+X,a+u' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um204
+( umask 303; umask 'go+rw,ug+r,ug+o' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um205
+( umask 121; umask 'go=wx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um206
+( umask 125; umask 'ugo=s' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um207
+( umask 660; umask 'a+x,go-o' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um208
+( umask 546; umask 'g-rw' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um209
+( umask 035; umask 'ao+w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um210
+( umask 741; umask '0254' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um211
+( umask 517; umask '-w,g=wx,u+x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um212
+( umask 652; umask '0603' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um213
+( umask 071; umask '0621' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um214
+( umask 076; umask 'go=g,go+g,o+w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um215
+( umask 057; umask 'ugo=r,go-w,g+o' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um216
+( umask 551; umask '0055' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um217
+( umask 275; umask '0026' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um218
+( umask 705; umask 'u=X,ao+X' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um219
+( umask 211; umask '0673' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um220
+( umask 650; umask 'g-r,o+,u+wx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um221
+( umask 166; umask 'ao+wx,ao+gX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um222
+( umask 730; umask '0211' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um223
+( umask 550; umask '0571' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um224
+( umask 463; umask 'g-rw' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um225
+( umask 421; umask '+X,go+rwx,ao=wx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um226
+( umask 704; umask '0230' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um227
+( umask 425; umask 'o-o,u=X,o-s' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um228
+( umask 467; umask 'go+X' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um229
+( umask 412; umask '0155' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um230
+( umask 406; umask '=rX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um231
+( umask 311; umask 'go-rx,u-wx,ao=s' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um232
+( umask 336; umask 'ao-u' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um233
+( umask 065; umask 'ug+rX,a-rwx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um234
+( umask 175; umask '0653' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um235
+( umask 575; umask '0230' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um236
+( umask 037; umask '0064' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um237
+( umask 505; umask 'o=u,go-s' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um238
+( umask 122; umask 'o=o,o+o,ugo-wx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um239
+( umask 134; umask '0010' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um240
+( umask 702; umask 'ug+gX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um241
+( umask 541; umask 'go-rw,g-gX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um242
+( umask 653; umask 'ao=s,go-us,g=us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um243
+( umask 377; umask 'o=us,u=o' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um244
+( umask 242; umask '0605' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um245
+( umask 066; umask 'ug+us,ugo=r,ugo-rX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um246
+( umask 003; umask '=rw,g+rX,ugo=rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um247
+( umask 155; umask '0007' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um248
+( umask 620; umask 'a-rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um249
+( umask 072; umask 'u=rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um250
+( umask 761; umask 'u-rwx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um251
+( umask 473; umask 'o-rX,ao-g,ugo+rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um252
+( umask 513; umask '0460' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um253
+( umask 566; umask '0213' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um254
+( umask 711; umask '0404' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um255
+( umask 656; umask 'u=rw,g+s,u=rw' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um256
+( umask 463; umask 'ugo+rwx,a-X' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um257
+( umask 653; umask '0054' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um258
+( umask 540; umask 'ao-g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um259
+( umask 677; umask 'go+o,ug+g,-rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um260
+( umask 512; umask 'o+' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um261
+( umask 511; umask '-r' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um262
+( umask 771; umask '0740' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um263
+( umask 234; umask 'a=rwx,ug+us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um264
+( umask 460; umask '0101' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um265
+( umask 536; umask 'go-o' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um266
+( umask 206; umask '+o,o-wx,ao=rw' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um267
+( umask 523; umask '0527' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um268
+( umask 133; umask '0640' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um269
+( umask 357; umask '0032' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um270
+( umask 340; umask 'u+o,o=s,go-X' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um271
+( umask 243; umask 'a=u' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um272
+( umask 233; umask 'a=wx,ug-g,ug=s' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um273
+( umask 471; umask '0723' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um274
+( umask 246; umask '=u' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um275
+( umask 361; umask '0331' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um276
+( umask 674; umask 'ugo+u,g=u,u-wx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um277
+( umask 726; umask 'o=rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um278
+( umask 035; umask 'u+u,u-s' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um279
+( umask 721; umask 'a-X,-rw,o=x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um280
+( umask 647; umask 'ugo=wx,go=u' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um281
+( umask 057; umask '0734' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um282
+( umask 767; umask '0276' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um283
+( umask 640; umask '-rX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um284
+( umask 533; umask 'ao+rwx,go-wx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um285
+( umask 063; umask 'go-wx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um286
+( umask 254; umask '0666' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um287
+( umask 353; umask 'go=r,-us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um288
+( umask 430; umask 'ao+rw,u=x,ug=r' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um289
+( umask 353; umask 'o+us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um290
+( umask 742; umask '+rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um291
+( umask 473; umask 'a=x,g-w,u-r' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um292
+( umask 535; umask '0036' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um293
+( umask 632; umask '0130' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um294
+( umask 326; umask 'ugo-gX,-o,ao-rw' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um295
+( umask 156; umask 'ug=us,o-o,go+us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um296
+( umask 544; umask 'go-rwx,o-' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um297
+( umask 273; umask '0701' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um298
+( umask 414; umask 'g+,ug=u,ugo+us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um299
+( umask 372; umask 'g+wx,o=s,=rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um300
+( umask 431; umask 'o-g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um301
+( umask 542; umask '0537' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um302
+( umask 112; umask '0127' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um303
+( umask 736; umask 'o-r' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um304
+( umask 730; umask 'g-o,g+us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um305
+( umask 252; umask 'ug-g,=gX,ug-rwx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um306
+( umask 353; umask 'ug=us,u-X,g-' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um307
+( umask 546; umask 'g+w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um308
+( umask 552; umask '0702' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um309
+( umask 114; umask '0640' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um310
+( umask 342; umask 'ao-r' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um311
+( umask 670; umask '0374' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um312
+( umask 525; umask 'ugo=s,o+rwx,u=g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um313
+( umask 170; umask '0632' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um314
+( umask 555; umask '0163' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um315
+( umask 065; umask 'o=s,g=o' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um316
+( umask 244; umask 'a=X' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um317
+( umask 112; umask '0261' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um318
+( umask 205; umask 'ug=w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um319
+( umask 233; umask '0573' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um320
+( umask 634; umask 'g-us,u=w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um321
+( umask 362; umask '0072' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um322
+( umask 716; umask '0755' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um323
+( umask 712; umask '0741' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um324
+( umask 156; umask '+rX,ug-o,a=r' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um325
+( umask 244; umask '0503' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um326
+( umask 507; umask '0702' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um327
+( umask 323; umask '0232' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um328
+( umask 100; umask '=rX,ugo-s' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um329
+( umask 444; umask 'u-g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um330
+( umask 220; umask 'g+g,u+' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um331
+( umask 170; umask 'go=w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um332
+( umask 177; umask '0474' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um333
+( umask 732; umask 'ao+rX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um334
+( umask 012; umask '0355' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um335
+( umask 134; umask 'ugo=s,u+wx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um336
+( umask 716; umask 'a+w,go-us,go=rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um337
+( umask 572; umask 'ug-X,g-r,ug+rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um338
+( umask 545; umask '0346' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um339
+( umask 436; umask 'o-x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um340
+( umask 732; umask '0320' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um341
+( umask 422; umask 'u-rw,ug+r,ugo=rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um342
+( umask 413; umask '=r' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um343
+( umask 232; umask 'ugo=rwx,u-o' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um344
+( umask 774; umask '+gX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um345
+( umask 403; umask '0257' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um346
+( umask 535; umask 'go-s,ugo-rwx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um347
+( umask 304; umask 'ugo+rwx,+g,g+us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um348
+( umask 054; umask 'u+,g+us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um349
+( umask 673; umask '0750' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um350
+( umask 764; umask 'g-r' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um351
+( umask 277; umask '0124' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um352
+( umask 277; umask 'g+X,u+wx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um353
+( umask 152; umask 'ugo+rX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um354
+( umask 457; umask 'ugo+w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um355
+( umask 024; umask 'ug+rX,a=x,ao-x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um356
+( umask 466; umask 'o-u' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um357
+( umask 552; umask 'ug+x,ug+rX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um358
+( umask 127; umask 'ug+gX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um359
+( umask 326; umask '0026' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um360
+( umask 612; umask 'ugo=g,ao-x,=u' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um361
+( umask 640; umask 'a-r,go-gX,ao=gX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um362
+( umask 041; umask 'ao+gX,a-,go-rwx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um363
+( umask 600; umask 'ugo+w' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um364
+( umask 576; umask '0620' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um365
+( umask 405; umask '0126' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um366
+( umask 702; umask 'o+u,g-rwx,go=o' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um367
+( umask 655; umask '0617' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um368
+( umask 700; umask '0537' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um369
+( umask 254; umask 'u=X,=rwx,go=gX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um370
+( umask 054; umask 'g+r,o+rwx,go-rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um371
+( umask 416; umask '0427' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um372
+( umask 254; umask '0334' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um373
+( umask 352; umask '-rw,ugo+us,o=rx' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um374
+( umask 513; umask 'ao-wx,o=u,+rw' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um375
+( umask 610; umask 'g=rw,u+us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um376
+( umask 453; umask 'ug+,ugo=u,-gX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um377
+( umask 423; umask '0040' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um378
+( umask 222; umask 'a+gX,g-us' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um379
+( umask 721; umask 'a-rx,o+u' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um380
+( umask 543; umask 'ugo-rw' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um381
+( umask 654; umask 'go-rx,ugo=g,ao=x' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um382
+( umask 367; umask '0517' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um383
+( umask 543; umask 'u-wx,a=x,-s' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um384
+( umask 547; umask 'go+rX,u-w,ug+g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um385
+( umask 322; umask '0574' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um386
+( umask 536; umask 'go=g' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um387
+( umask 244; umask '0706' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um388
+( umask 350; umask '0371' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um389
+( umask 072; umask '0455' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um390
+( umask 611; umask '0723' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um391
+( umask 520; umask 'ao-gX,+wx,u+r' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um392
+( umask 572; umask '0324' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um393
+( umask 255; umask 'ao=gX' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um394
+( umask 241; umask '0247' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um395
+( umask 051; umask '0766' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um396
+( umask 201; umask 'g-r' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um397
+( umask 306; umask 'go-wx,ao=o' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um398
+( umask 035; umask '0040' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name um399
+( umask 601; umask 'ug=X' 2>&1; echo "rc=$?"; umask; umask -S )
+%%%
+#!name ul0
+( ulimit -HS -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul1
+( ulimit -S -n 10 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul2
+( ulimit  -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul3
+( ulimit -HS -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul4
+( ulimit -H -p 10 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul5
+( ulimit  -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul6
+( ulimit  -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul7
+( ulimit -HS -p abc 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul8
+( ulimit -HS -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul9
+( ulimit -HS -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul10
+( ulimit -HS -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul11
+( ulimit -S -t 10 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul12
+( ulimit  -v 999999999999999999999 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul13
+( ulimit -HS -r 0 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul14
+( ulimit -S -f 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul15
+( ulimit -H -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul16
+( ulimit -HS -v -1 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul17
+( ulimit -S -m 10 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul18
+( ulimit -S -r 100 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul19
+( ulimit -HS -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul20
+( ulimit -H -n -1 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul21
+( ulimit -S -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul22
+( ulimit -SH -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul23
+( ulimit  -v 0 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul24
+( ulimit  -l 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul25
+( ulimit -S -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul26
+( ulimit -SH -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul27
+( ulimit -HS -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul28
+( ulimit -H -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul29
+( ulimit  -t 12x 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul30
+( ulimit  -m 10 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul31
+( ulimit -SH -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul32
+( ulimit -SH -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul33
+( ulimit -S -w 12x 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul34
+( ulimit  -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul35
+( ulimit -SH -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul36
+( ulimit -S -n abc 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul37
+( ulimit -HS -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul38
+( ulimit -SH -d 100 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul39
+( ulimit -SH -w unlimited 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul40
+( ulimit -HS -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul41
+( ulimit -HS -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul42
+( ulimit -SH -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul43
+( ulimit -HS -w 12x 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul44
+( ulimit -HS -d 10 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul45
+( ulimit  -f abc 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul46
+( ulimit -S -f 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul47
+( ulimit  -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul48
+( ulimit -S -w -1 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul49
+( ulimit -SH -r unlimited 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul50
+( ulimit  -s 100 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul51
+( ulimit -SH -p 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul52
+( ulimit -H -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul53
+( ulimit -S -p 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul54
+( ulimit  -l 10 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul55
+( ulimit -S -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul56
+( ulimit  -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul57
+( ulimit -H -f unlimited 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul58
+( ulimit -SH -s 12x 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul59
+( ulimit -S -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul60
+( ulimit -HS -p 100 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul61
+( ulimit -HS -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul62
+( ulimit -H -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul63
+( ulimit  -d 0 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul64
+( ulimit -HS -f 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul65
+( ulimit -HS -l 100 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul66
+( ulimit -S -r -1 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul67
+( ulimit  -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul68
+( ulimit  -w -1 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul69
+( ulimit -SH -r abc 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul70
+( ulimit -H -p 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul71
+( ulimit -S -r 10 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul72
+( ulimit  -t 1 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul73
+( ulimit -S -r 10 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul74
+( ulimit -S -r 100 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul75
+( ulimit -HS -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul76
+( ulimit  -n 10 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul77
+( ulimit  -c 999999999999999999999 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul78
+( ulimit -HS -d abc 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul79
+( ulimit -H -r 999999999999999999999 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul80
+( ulimit -HS -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul81
+( ulimit -H -n 12x 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul82
+( ulimit -H -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul83
+( ulimit -SH -l 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul84
+( ulimit -HS -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul85
+( ulimit -S -v abc 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul86
+( ulimit -S -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul87
+( ulimit  -f 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul88
+( ulimit -S -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul89
+( ulimit -S -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul90
+( ulimit -H -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul91
+( ulimit -HS -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul92
+( ulimit -S -n 100 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul93
+( ulimit -HS -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul94
+( ulimit -S -p -1 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul95
+( ulimit -H -f 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul96
+( ulimit  -v 12x 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul97
+( ulimit  -r unlimited 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul98
+( ulimit -H -l 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul99
+( ulimit -S -v -1 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul100
+( ulimit -S -w 999999999999999999999 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul101
+( ulimit -SH -f 999999999999999999999 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul102
+( ulimit -HS -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul103
+( ulimit -HS -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul104
+( ulimit -HS -l 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul105
+( ulimit -SH -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul106
+( ulimit -SH -f 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul107
+( ulimit  -t 999999999999999999999 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul108
+( ulimit -S -n 1 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul109
+( ulimit  -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul110
+( ulimit  -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul111
+( ulimit  -v unlimited 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul112
+( ulimit -HS -p 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul113
+( ulimit -HS -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul114
+( ulimit  -t 10 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul115
+( ulimit -SH -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul116
+( ulimit -H -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul117
+( ulimit -H -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul118
+( ulimit  -r unlimited 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul119
+( ulimit -HS -p abc 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul120
+( ulimit -SH -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul121
+( ulimit -S -t 0 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul122
+( ulimit -HS -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul123
+( ulimit -H -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul124
+( ulimit  -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul125
+( ulimit -SH -p 1 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul126
+( ulimit  -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul127
+( ulimit  -v -1 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul128
+( ulimit -HS -c 10 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul129
+( ulimit -H -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul130
+( ulimit -S -v 1 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul131
+( ulimit -H -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul132
+( ulimit -SH -s abc 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul133
+( ulimit  -f 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul134
+( ulimit -HS -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul135
+( ulimit -SH -n 100 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul136
+( ulimit -HS -w 10 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul137
+( ulimit -HS -t 999999999999999999999 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul138
+( ulimit -S -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul139
+( ulimit -S -w 10 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul140
+( ulimit -H -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul141
+( ulimit -SH -l 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul142
+( ulimit -H -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul143
+( ulimit -HS -l 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul144
+( ulimit  -m abc 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul145
+( ulimit -HS -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul146
+( ulimit -S -f 0 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul147
+( ulimit -SH -w 999999999999999999999 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul148
+( ulimit  -c 100 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul149
+( ulimit -H -r abc 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul150
+( ulimit -S -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul151
+( ulimit -HS -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul152
+( ulimit  -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul153
+( ulimit -S -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul154
+( ulimit -H -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul155
+( ulimit -SH -r 100 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul156
+( ulimit  -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul157
+( ulimit -SH -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul158
+( ulimit  -c abc 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul159
+( ulimit -HS -c 12x 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul160
+( ulimit  -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul161
+( ulimit -H -l unlimited 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul162
+( ulimit -S -t abc 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul163
+( ulimit -S -s unlimited 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul164
+( ulimit  -d 100 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul165
+( ulimit -H -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul166
+( ulimit -HS -p 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul167
+( ulimit -SH -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul168
+( ulimit -H -p 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul169
+( ulimit -HS -w abc 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul170
+( ulimit  -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul171
+( ulimit -HS -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul172
+( ulimit -SH -w 12x 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul173
+( ulimit -H -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul174
+( ulimit -H -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul175
+( ulimit -S -d 12x 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul176
+( ulimit  -m 10 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul177
+( ulimit  -n 0 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul178
+( ulimit -H -s 100 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul179
+( ulimit -S -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul180
+( ulimit -S -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul181
+( ulimit -S -r 1 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul182
+( ulimit -S -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul183
+( ulimit -H -f 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul184
+( ulimit -SH -p 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul185
+( ulimit -H -m 1 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul186
+( ulimit -SH -t 1 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul187
+( ulimit -H -f 0 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul188
+( ulimit -HS -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul189
+( ulimit -S -l -1 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul190
+( ulimit -H -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul191
+( ulimit -HS -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul192
+( ulimit -SH -v 1 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul193
+( ulimit -H -s 10 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul194
+( ulimit -HS -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul195
+( ulimit -H -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul196
+( ulimit -SH -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul197
+( ulimit  -l 1 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul198
+( ulimit -S -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul199
+( ulimit -H -f 1 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul200
+( ulimit  -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul201
+( ulimit -SH -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul202
+( ulimit -S -w abc 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul203
+( ulimit -HS -r unlimited 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul204
+( ulimit  -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul205
+( ulimit -H -f 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul206
+( ulimit -H -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul207
+( ulimit -H -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul208
+( ulimit -S -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul209
+( ulimit -S -n abc 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul210
+( ulimit -HS -r 100 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul211
+( ulimit  -m 10 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul212
+( ulimit -H -p 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul213
+( ulimit -SH -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul214
+( ulimit -SH -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul215
+( ulimit  -m 0 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul216
+( ulimit -S -p 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul217
+( ulimit -SH -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul218
+( ulimit -S -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul219
+( ulimit -HS -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul220
+( ulimit -HS -f 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul221
+( ulimit -S -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul222
+( ulimit -SH -v 0 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul223
+( ulimit -S -c -1 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul224
+( ulimit -H -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul225
+( ulimit -SH -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul226
+( ulimit -H -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul227
+( ulimit  -p 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul228
+( ulimit -S -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul229
+( ulimit -HS -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul230
+( ulimit -S -s 0 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul231
+( ulimit -HS -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul232
+( ulimit -SH -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul233
+( ulimit -H -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul234
+( ulimit -HS -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul235
+( ulimit -HS -w 12x 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul236
+( ulimit -H -f 10 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul237
+( ulimit -S -v 1 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul238
+( ulimit  -t 0 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul239
+( ulimit -SH -t 100 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul240
+( ulimit  -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul241
+( ulimit -SH -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul242
+( ulimit -H -l 10 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul243
+( ulimit  -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul244
+( ulimit  -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul245
+( ulimit -SH -l 1 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul246
+( ulimit -HS -n -1 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul247
+( ulimit -H -s 999999999999999999999 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul248
+( ulimit -SH -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul249
+( ulimit -HS -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul250
+( ulimit  -r unlimited 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul251
+( ulimit -H -p unlimited 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul252
+( ulimit -H -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul253
+( ulimit -S -t 12x 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul254
+( ulimit  -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul255
+( ulimit -SH -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul256
+( ulimit -H -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul257
+( ulimit -S -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul258
+( ulimit -HS -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul259
+( ulimit -SH -p 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul260
+( ulimit -H -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul261
+( ulimit  -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul262
+( ulimit  -f 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul263
+( ulimit  -n unlimited 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul264
+( ulimit -SH -w 999999999999999999999 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul265
+( ulimit -HS -v 12x 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul266
+( ulimit -H -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul267
+( ulimit -S -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul268
+( ulimit  -c abc 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul269
+( ulimit -HS -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul270
+( ulimit  -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul271
+( ulimit  -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul272
+( ulimit -S -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul273
+( ulimit -HS -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul274
+( ulimit  -v abc 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul275
+( ulimit -S -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul276
+( ulimit -S -d 100 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul277
+( ulimit -H -r 10 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul278
+( ulimit -SH -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul279
+( ulimit -SH -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul280
+( ulimit -SH -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul281
+( ulimit -H -r abc 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul282
+( ulimit -S -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul283
+( ulimit -HS -n abc 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul284
+( ulimit -SH -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul285
+( ulimit -SH -s -1 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul286
+( ulimit -SH -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul287
+( ulimit -H -v 100 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul288
+( ulimit -S -l -1 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul289
+( ulimit  -p 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul290
+( ulimit -SH -f 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul291
+( ulimit -SH -v 10 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul292
+( ulimit -SH -m -1 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul293
+( ulimit -HS -f 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul294
+( ulimit -SH -r 1 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul295
+( ulimit -HS -n -1 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul296
+( ulimit -SH -t 999999999999999999999 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul297
+( ulimit -SH -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul298
+( ulimit -H -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul299
+( ulimit  -l 100 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul300
+( ulimit -HS -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul301
+( ulimit  -f unlimited 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul302
+( ulimit -H -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul303
+( ulimit -H -n 999999999999999999999 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul304
+( ulimit -H -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul305
+( ulimit -H -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul306
+( ulimit -SH -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul307
+( ulimit -S -p 999999999999999999999 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul308
+( ulimit -S -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul309
+( ulimit  -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul310
+( ulimit -HS -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul311
+( ulimit  -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul312
+( ulimit  -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul313
+( ulimit -HS -v unlimited 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul314
+( ulimit -S -t 10 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul315
+( ulimit -S -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul316
+( ulimit -SH -n abc 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul317
+( ulimit -SH -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul318
+( ulimit -H -f 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul319
+( ulimit -H -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul320
+( ulimit -HS -c abc 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul321
+( ulimit -S -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul322
+( ulimit -HS -m unlimited 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul323
+( ulimit -H -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul324
+( ulimit -HS -n 100 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul325
+( ulimit -SH -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul326
+( ulimit -SH -v abc 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul327
+( ulimit -S -n abc 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul328
+( ulimit  -l 999999999999999999999 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul329
+( ulimit -H -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul330
+( ulimit -SH -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul331
+( ulimit -SH -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul332
+( ulimit  -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul333
+( ulimit -HS -l unlimited 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul334
+( ulimit -H -l 0 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul335
+( ulimit -HS -l 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul336
+( ulimit -HS -n 0 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul337
+( ulimit -SH -s 10 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul338
+( ulimit -SH -f 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul339
+( ulimit  -d 12x 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul340
+( ulimit  -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul341
+( ulimit -S -d unlimited 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul342
+( ulimit -S -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul343
+( ulimit -SH -d 0 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul344
+( ulimit -S -c abc 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul345
+( ulimit -HS -d 1 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul346
+( ulimit -SH -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul347
+( ulimit -S -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul348
+( ulimit -H -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul349
+( ulimit -S -c unlimited 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul350
+( ulimit -SH -d 1 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul351
+( ulimit -H -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul352
+( ulimit -H -s 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul353
+( ulimit  -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul354
+( ulimit  -f -1 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul355
+( ulimit -HS -n 12x 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul356
+( ulimit -H -n 0 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul357
+( ulimit -SH -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul358
+( ulimit -H -v 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul359
+( ulimit -H -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul360
+( ulimit -HS -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul361
+( ulimit  -m -1 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul362
+( ulimit  -w 1 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul363
+( ulimit -H -f unlimited 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul364
+( ulimit -HS -d 999999999999999999999 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul365
+( ulimit -HS -v 1 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul366
+( ulimit -H -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul367
+( ulimit  -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul368
+( ulimit -H -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul369
+( ulimit -HS -p abc 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul370
+( ulimit -SH -r 2>&1; echo "rc=$?"; ulimit -r 2>&1; ulimit -Hr 2>&1 )
+%%%
+#!name ul371
+( ulimit -SH -s unlimited 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul372
+( ulimit -HS -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul373
+( ulimit -S -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul374
+( ulimit -SH -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul375
+( ulimit -HS -c 2>&1; echo "rc=$?"; ulimit -c 2>&1; ulimit -Hc 2>&1 )
+%%%
+#!name ul376
+( ulimit -SH -p 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul377
+( ulimit -S -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul378
+( ulimit -H -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul379
+( ulimit -S -p 12x 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul380
+( ulimit -S -d 12x 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul381
+( ulimit -S -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul382
+( ulimit -HS -f 1 2>&1; echo "rc=$?"; ulimit -f 2>&1; ulimit -Hf 2>&1 )
+%%%
+#!name ul383
+( ulimit -SH -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul384
+( ulimit -SH -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul385
+( ulimit -SH -p 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul386
+( ulimit -H -n 2>&1; echo "rc=$?"; ulimit -n 2>&1; ulimit -Hn 2>&1 )
+%%%
+#!name ul387
+( ulimit -H -p 0 2>&1; echo "rc=$?"; ulimit -p 2>&1; ulimit -Hp 2>&1 )
+%%%
+#!name ul388
+( ulimit -H -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul389
+( ulimit -SH -t 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul390
+( ulimit -HS -w 2>&1; echo "rc=$?"; ulimit -w 2>&1; ulimit -Hw 2>&1 )
+%%%
+#!name ul391
+( ulimit -HS -l 999999999999999999999 2>&1; echo "rc=$?"; ulimit -l 2>&1; ulimit -Hl 2>&1 )
+%%%
+#!name ul392
+( ulimit -S -m unlimited 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul393
+( ulimit  -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul394
+( ulimit  -t 100 2>&1; echo "rc=$?"; ulimit -t 2>&1; ulimit -Ht 2>&1 )
+%%%
+#!name ul395
+( ulimit -S -m 2>&1; echo "rc=$?"; ulimit -m 2>&1; ulimit -Hm 2>&1 )
+%%%
+#!name ul396
+( ulimit -H -v 0 2>&1; echo "rc=$?"; ulimit -v 2>&1; ulimit -Hv 2>&1 )
+%%%
+#!name ul397
+( ulimit -SH -s abc 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )
+%%%
+#!name ul398
+( ulimit -S -d 2>&1; echo "rc=$?"; ulimit -d 2>&1; ulimit -Hd 2>&1 )
+%%%
+#!name ul399
+( ulimit -HS -s 0 2>&1; echo "rc=$?"; ulimit -s 2>&1; ulimit -Hs 2>&1 )

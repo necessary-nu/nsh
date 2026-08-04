@@ -1,0 +1,144 @@
+test; echo $?
+[ ]; echo $?
+test ""; echo $?
+test x; echo $?
+test !; echo $?
+test -n; echo $?
+test -z; echo $?
+test -t; echo $?
+test '('; echo $?
+test ')'; echo $?
+test =; echo $?
+test -a; echo $?
+test -o; echo $?
+test ! x; echo $?
+test ! ''; echo $?
+test ! !; echo $?
+test -z ''; echo $?
+test -n ''; echo $?
+test -z x; echo $?
+test -n x; echo $?
+test x = x; echo $?
+test x = y; echo $?
+test x != y; echo $?
+test '' = ''; echo $?
+test a '<' b; echo $?
+test b '<' a; echo $?
+test a '>' b; echo $?
+test 1 -eq 1; echo $?
+test 1 -eq 2; echo $?
+test 1 -ne 2; echo $?
+test 2 -gt 1; echo $?
+test 2 -lt 1; echo $?
+test 2 -ge 2; echo $?
+test 2 -le 1; echo $?
+test ! ! x; echo $?
+test ! ! ! x; echo $?
+test ! -z x; echo $?
+test ! x = x; echo $?
+test '(' x ')'; echo $?
+test '(' '' ')'; echo $?
+test '(' ')'; echo $?
+test '(' '(' ')'; echo $?
+test x -a y; echo $?
+test x -a ''; echo $?
+test '' -o x; echo $?
+test '' -o ''; echo $?
+test x -o y -a ''; echo $?
+test '' -a x -o x; echo $?
+test ! x -a x; echo $?
+test ! '(' x ')'; echo $?
+test x -a x -a x; echo $?
+test x -o x -o x; echo $?
+[ x ]; echo $?
+[ x = x ]; echo $?
+[ ! x ]; echo $?
+[ '(' x ')' ]; echo $?
+[ x -a y ]; echo $?
+test 0; echo $?
+test -e /; echo $?
+test -d /; echo $?
+test -f /; echo $?
+test -r /; echo $?
+test -w /etc/passwd; echo $?
+test -x /bin/sh; echo $?
+test -s /etc/passwd; echo $?
+test -e /nonexistent-xyz; echo $?
+test -h /nonexistent-xyz; echo $?
+test / -ef /; echo $?
+test / -nt /; echo $?
+test / -ot /; echo $?
+test /nonexistent-a -nt /nonexistent-b; echo $?
+test /nonexistent-a -ot /nonexistent-b; echo $?
+test / -nt /nonexistent-b; echo $?
+test /nonexistent-a -ot /; echo $?
+test -t 0 </dev/null; echo $?
+test -t abc; echo $?
+test -t ''; echo $?
+test -t 99; echo $?
+test 0x10 -eq 16; echo $?
+test 010 -eq 10; echo $?
+test ' 5 ' -eq 5; echo $?
+test 5x -eq 5; echo $?
+test '' -eq 0; echo $?
+test 9223372036854775807 -eq 9223372036854775807; echo $?
+test 9223372036854775808 -gt 0; echo $?
+test -9223372036854775808 -lt 0; echo $?
+test 99999999999999999999 -gt 0; echo $?
+test -- ; echo $?
+test -- x; echo $?
+test x -a; echo $?
+test -a x; echo $?
+test x -o; echo $?
+test = =; echo $?
+test = = =; echo $?
+test '!' = '!'; echo $?
+test '(' = '('; echo $?
+test -z -z; echo $?
+test -n -n; echo $?
+test -f -f; echo $?
+test x = x -a y = y; echo $?
+test x = y -o y = y; echo $?
+test '(' x = x ')'; echo $?
+test '(' x = x ')' -a '(' y = y ')'; echo $?
+test '(' ! x ')'; echo $?
+test x '(' ')'; echo $?
+test '(' x ')' -a y; echo $?
+test ! '(' ! x ')'; echo $?
+[ -n x -a -n y ]; echo $?
+[ ! ]; echo $?
+[ ! ! ]; echo $?
+[ -a ]; echo $?
+[ '(' ]; echo $?
+[ ')' ]; echo $?
+test a = a = a; echo $?
+test x -eq; echo $?
+test -eq x; echo $?
+test x = ; echo $?
+test 1 2 3 4 5; echo $?
+test '(' x ')' '(' y ')'; echo $?
+test '(' '(' x ')' ')'; echo $?
+test ! ! ! ! x; echo $?
+test -L /dev/stdin; echo $?
+test -S /dev/null; echo $?
+test -c /dev/null; echo $?
+test -b /dev/null; echo $?
+test -p /dev/null; echo $?
+test -u /bin/sh; echo $?
+test -g /bin/sh; echo $?
+test -k /tmp; echo $?
+test -O /etc/passwd; echo $?
+test -G /etc/passwd; echo $?
+[ x ] ; echo $?
+eval '[ x' ; echo $?
+test x ] ; echo $?
+[ x = x -o y = z -a z = z ]; echo $?
+[ x = y -a y = z -o z = z ]; echo $?
+[ ! x = y ]; echo $?
+[ ! -f / ]; echo $?
+test 1 -eq 1 -a 2 -eq 2 -a 3 -eq 3; echo $?
+test '(' 1 -eq 1 ')' -o '(' 2 -eq 3 ')'; echo $?
+test -n '(' ; echo $?
+test -z '(' ; echo $?
+test '(' -n x ')'; echo $?
+test '(' -z '' ')'; echo $?

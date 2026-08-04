@@ -1,0 +1,2860 @@
+#!mode=stdin
+'echo ÉF)~
+%%%
+#!mode=file
+echo 6\x4178##$*{echo ‚echo z
+%%%
+#!mode=file
+:+%{©:=/:√:+Äˇ}?echo ;;echo ?echo echo ¿ˇ
+%%%
+#!mode=stdin
+@<<;;>
+%%%
+#!mode=file
+)Ñ'ˇ$@\
+@\©c`^[echo 
+%%%
+#!mode=file
+2©echo 
+%%%
+#!mode=stdin
+àc<<-echo <<-<Ä:]echo $'$@\=|ÄÇ'<<echo Ñ\
+F
+%%%
+#!mode=stdin
++echo |
+%%%
+#!mode=file
+))echo :-{}echo <))29$((Å$(bÑá=
+%%%
+#!mode=file
+zfi<echo ‚:=Ä#for =
+%%%
+#!mode=file
+É©á}}©(+:-4ò>Äecho 4${3b)echo <esac%%if 
+%%%
+#!mode=file
+&‚!$(;{##!)Ü]Ö
+%%%
+#!mode=file
+`##5a$((Ö¿(;done@#[6
+%%%
+#!mode=stdin
+3}$#`echo á√!à$#$'(
+%%%
+#!mode=stdin
+Ç7Ö'8do 
+%%%
+#!mode=stdin
+
+\u2>‚	}á$#&Äif 9a©echo <<-echo =&&F
+%%%
+#!mode=stdin
+¿Ä}
+%%%
+#!mode=file
+)esac$(]Ü13echo E#<<-ÉEz
+%%%
+#!mode=file
+à$'echo ${#Fa-$¿until <&&:+7while ÄO;;√zdo ]Å
+%%%
+#!mode=stdin
+<&-echo 1$#<<-echo ò*"Ñ;;0]'>>&Öfi\c&&)ˇ
+%%%
+#!mode=file
+/"	&&0¿
+%%%
+#!mode=file
+|O$((26${#b=
+%%%
+#!mode=stdin
+#
+echo á	``
+%%%
+#!mode=stdin
+F\
+while x!done>}!`y
+%%%
+#!mode=file
+echo Ö{
+%%%
+#!mode=file
+Fyecho à
+%%%
+#!mode=file
+ ò<:+!( ˇ6¿${#~echo !38'for 
+%%%
+#!mode=file
+=esac√<<-Ü$#9)))echo %%&&~&&
+%%%
+#!mode=stdin
+\u%%>&‚
+%%%
+#!mode=stdin
+2;;{-àà=ÇÖ"¿Öá>& ÜÇÖecho -O\c1||
+%%%
+#!mode=file
+\
+Ñ+|$#4)))(
+%%%
+#!mode=stdin
+‚738√Ä%$*F(5©¿)echo *$@2>))ˇ||
+%%%
+#!mode=file
+while !:-${#*!bbecho %for 
+%%%
+#!mode=file
+√echo Éˇ*]‚{echo ¿¿# %:=<< echo 
+%%%
+#!mode=stdin
+doneecho :
+until +;;)echo òÇuntil \x41©c	
+%%%
+#!mode=file
+2<<echo while 'esac&ádo Ñdo ò^OÇ;;2
+%%%
+#!mode=stdin
+a>&echo √(!ˇ"echo do :Å$'‚1 $((b"+‚
+%%%
+#!mode=stdin
++${\
+Üecho :?^‚b3esacÄ{xÅ@:=Ç
+%%%
+#!mode=stdin
+Ñ ]echo echo '&&--E;Ñecho }
+<<for y
+%%%
+#!mode=file
+;%√aFcase  ò5echo '2"}!=a:?
+%%%
+#!mode=stdin
+Å>/Ü:-Å
+ }'àˇÄ\c&+":=}>%Ä
+%%%
+#!mode=file
+Ñ<<-x
+%%%
+#!mode=stdin
+2>2>
+%%%
+#!mode=file
+	y!{"}O46fi[[:alpha:]]echo "echo ¿‚"√:‚E(√\ò
+%%%
+#!mode=stdin
+ÉÄcase 9bÉÜ	'*c${z©Ü@2/$((Å
+%%%
+#!mode=file
+\uÜc7##done|until Å'||6	>esacà-(
+%%%
+#!mode=stdin
+until 5@06<<c}echo echo $*cc
+%%%
+#!mode=file
+-}‚:?4áÜ^echo @©${
+%%%
+#!mode=stdin
+"òb~||>case @[ =É':=*
+%%%
+#!mode=stdin
+-x? echo 8echo \uuntil ']Å;;
+ˇÅ©:+ÇÜ
+%%%
+#!mode=file
+}:?' in 8á
+%%%
+#!mode=file
+:=$*/besacàbˇ[[:alpha:]]8^<<\uecho 
+%%%
+#!mode=stdin
+##Ö"¿à4until Fbesac
+%%%
+#!mode=stdin
+$((<<
+%%%
+#!mode=stdin
+\c6echo /:+/$'{'<<${Ä;áecho $'/
+%%%
+#!mode=file
+'a:?$((echo Ö&&$(Äecho echo ]echo xecho O<<:-Ä+
+%%%
+#!mode=stdin
+Ñ+$(
+%%%
+#!mode=stdin
+&&7\cecho echo ¿$5à
+%%%
+#!mode=file
+1&0
+%%%
+#!mode=file
+\7!&echo $((ÅÇ\`fi4:+Ä<<-\Ä'\c©
+%%%
+#!mode=file
+ˇcecho $'F%%á@à\cÄ<&cˇÄfor y2:=
+%%%
+#!mode=stdin
+Ç1$':)
+%%%
+#!mode=file
+|E}/@while ÜÖecho %%}¿\
+%%%
+%%%
+#!mode=file
++F6$@$#ˇ%%Åecho 2>:?\u$#$(( in 2'É\^*:?echo `
+%%%
+#!mode=stdin
+	##‚fiáádoneF"ccy!zyO!
+%%%
+#!mode=file
+=4√{à}[echo Å8echo "{<<-
+%%%
+#!mode=stdin
+>echo Ç>&$@then 6echo becho 
+%%%
+#!mode=stdin
+echo ]yÖÉecho >[[:alpha:]]}‚b$\uecho esac
+%%%
+#!mode=stdin
+33"fifor echo `
+%%%
+#!mode=stdin
+echo echo then echo \É58while ¿"'<Oecho echo √until >
+%%%
+#!mode=stdin
+:-Ö:=echo ||0xecho Fecho <<6‚;;[[:alpha:]]Ç\E%%echo ©Ç
+%%%
+#!mode=file
+a`]2$'<echo √4
+Ö@√ #echo ‚echo ]Çyecho 
+%%%
+#!mode=stdin
+;$(©àÑthen  ¿Åˇecho \u{OÅÜfor >
+%%%
+#!mode=file
+F6<<à
+Öecho zecho |‚`*echo $@for 
+%%%
+#!mode=file
+}${Ö‚?:-$(echo \x41Ö'\[
+%%%
+#!mode=stdin
+ò[[:alpha:]])b√-5<
+%%%
+#!mode=file
+8^^Ådo ` in >x:-*))Öy\√echo c~)%‚
+%%%
+#!mode=stdin
+))@‚echo esaca:=<&z"echo Ç[until +
+%%%
+#!mode=file
+<<-fi in while Ewhile ‚Å844}Ñ‚##
+%%%
+#!mode=stdin
+x}√>echo {òzˇ~
+%%%
+#!mode=stdin
+${#ˇ	!b$((
+%%%
+#!mode=stdin
+echo $#%%)do <echo 
+do 1@
+%%%
+#!mode=stdin
+\cˇaecho \c=#`$/
+%%%
+#!mode=file
+4fi"%$"y##ÇaÅFfor <becho 
+%%%
+#!mode=stdin
+Öecho }1\c<&Åecho echo }##@:=<‚2á
+%%%
+#!mode=file
+then ò-echo 6
+echo [[:alpha:]]echo &Ü1echo (Ö1z\x41||[:-echo 
+%%%
+#!mode=file
+/echo 9*9{esac
+%%%
+#!mode=file
+echo aecho :+$'>&then z;;	ˇ%	+then }É
+%%%
+#!mode=stdin
+E‚ in <echo echo Ñ|[:-"doneˇ<&?echo 7àÑecho 
+%%%
+#!mode=file
+]E"Ö1"2fi[[:alpha:]]echo 
+%%%
+#!mode=file
+√6√5Éecho ‚É\
+áÖ
+%%%
+#!mode=stdin
+echo [[:alpha:]]òÇ$(($##:echo 
+%%%
+#!mode=file
+echo Å@:-until }\u[[:alpha:]]'*Ä‚ÜÄecho ‚
+%%%
+#!mode=stdin
+\uthen echo for ˇÄ1a√7Å:fi
+%%%
+#!mode=file
+]echo !\x41 in (!$(Ö\u;;O[[:alpha:]]ò:+echo ]
+%%%
+#!mode=stdin
+-/:=
+%%%
+#!mode=file
+$((":Üecho echo áÄfi!2;ˇ!^>
+%%%
+#!mode=stdin
+É2>:-a
+Ü(##`‚echo *7case {\cÑa-7
+%%%
+#!mode=file
+xÇ>&:?echo do )Äuntil &;;ÇOecho E
+%%%
+#!mode=file
+53##0É<}
+%%%
+#!mode=file
+Ö>#}=}~<&%%$@áb^6a'2{echo :?echo $#(
+%%%
+#!mode=stdin
+%%echo $#7
+%%%
+#!mode=stdin
+Ü)+
+%%%
+#!mode=file
+{9√echo \ˇÅecho echo if +\x41√${#2>É^$((6
+%%%
+#!mode=stdin
+{-ò Ç
+%%%
+#!mode=stdin
+##@
+%%%
+#!mode=file
+Ü  until Öfi]*echo yE%
+%%%
+#!mode=stdin
+echo ${8echo [6for <<echo $@Çecho until echo ¿:+
+%%%
+#!mode=stdin
+{<&©
+%%%
+#!mode=stdin
+5{echo É$*>&
+%%%
+#!mode=file
+:?echo &&0√esac+&&\
+y\cecho <<))-ˇ1>[Üthen doneÇecho 
+%%%
+#!mode=file
+}<<à$@)||\u*OÇ&:-!>8©echo %%%ÅaÜ
+%%%
+#!mode=stdin
+/'ˇ> in òecho $'%-}echo $#‚\u\x412
+%%%
+#!mode=file
+?echo echo 54esacòˇ
+%%%
+#!mode=file
+$((case Ä$
+%%%
+#!mode=file
+/òb‚1echo %%ÜÇ<<-$*}à√á$#
+%%%
+#!mode=file
+5àecho '7<<]√
+%%%
+#!mode=stdin
+\u3
+%%%
+#!mode=file
+‚echo !#||√á-@8$((]3="Ö!adone
+%%%
+#!mode=file
+Ñ$%%6ÜÉÑ‚echo }
+%%%
+#!mode=stdin
+©{Åwhile Ç&&Ü9}?4->echo ?echo {Ö
+%%%
+#!mode=file
+$'<<-c3$Å$ÑÑ\
+$#:!Ñfi)
+%%%
+#!mode=file
+Ü|2>aecho O+echo ¿}\
+)a84à3
+%%%
+#!mode=file
+$#}^echo OÅ
+%%%
+#!mode=stdin
+$']
+%%%
+#!mode=stdin
+}echo echo 8©
+%%%
+#!mode=file
+;á~√[:? \[case √Ñ))|á+~||áecho 
+%%%
+#!mode=file
+ò5echo $
+%%%
+#!mode=stdin
+{echo <&z√:-$;;‚while :
+%%%
+#!mode=file
+Öecho 9echo }"echo then until $'for )${òecho :?
+%%%
+#!mode=stdin
+echo !¿echo ¿*;\
+%%%
+#!mode=file
+á%%\x41]case esac(1echo <&){/ˇc~=a√É√echo echo 
+%%%
+#!mode=stdin
+Édo "0echo $(({3[for $((if echo `O√case 
+%%%
+#!mode=file
+%%Ö	
+%%%
+#!mode=file
+=7}Åecho b9echo '!)4#:2>à"echo ##while ‚Ö+echo 
+%%%
+#!mode=stdin
+{¿echo $'
+ÜÉ	"~F?
+%%%
+#!mode=stdin
+@%echo echo ['<&echo ‚if echo !É
+%%%
+#!mode=file
+EÜ=8case >echo 7Å$'Ü#echo %%8@ÄÇÄ/*
+%%%
+#!mode=file
+'aÄ‚echo Åàthen 4%%Ö4'3z\x41+{#))\
+%%%
+#!mode=file
+":until then Ü¿=@{`!+Å]until }
+%%%
+#!mode=stdin
+`z√\
+Äwhile echo $'%%/á
+%%%
+#!mode=stdin
+>&$*&}¿
+%%%
+#!mode=stdin
+:?>ˇÇà$*]Oà;;${#:<7<&{
+%%%
+#!mode=file
+òthen ~
+%%%
+#!mode=stdin
+F{\c‚
+%%%
+#!mode=stdin
+66case for }b2z'becho ^:=
+%%%
+#!mode=stdin
+\
+:Ñ:√ <echo fi
+%%%
+#!mode=file
+Çá]Å$((?
+%%%
+#!mode=file
+\echo Ç6*esac##echo $(({#aecho {:+}4Ü‚ˇ¿echo echo 5echo 
+%%%
+#!mode=file
+)ÜÖdo F√echo á2>@
+%%%
+#!mode=stdin
+echo a7Å"if \u`Äecho \u\cecho àÜ4Eecho Ü:? 'Ñ$
+%%%
+#!mode=file
+Ç#?òÖecho ]ˇ})->|:9áÖ
+%%%
+#!mode=file
+!ˇò
+%%%
+#!mode=file
+echo echo 0[[:alpha:]]7echo ˇEdoneÑb√ˇ
+%%%
+#!mode=file
+<<-:=fi)) in à'O‚<<-!$*echo {á#©echo <<echo ${#30echo %
+%%%
+#!mode=stdin
+:=©Ä<&5echo ˇdoneÇ
+%%%
+#!mode=stdin
+!$%%echo {0!$@${echo 
+[[:alpha:]]!8=Å;ÑÖecho E5Ö
+%%%
+#!mode=file
+5O
+%%%
+#!mode=stdin
+Åecho b‚=&}2>c-`522
+%%%
+#!mode=file
+5while Å:ˇ!É:?√+b
+%%%
+#!mode=file
+¿fi-echo <<-©ÉOthen :+O|©}\u in \0òif echo Å'$*<<-
+%%%
+#!mode=stdin
+until :=||$'$@until 0É1òÇecho :?/-$%>8áò
+%%%
+#!mode=stdin
+^Ç{ò${#^É:=b&√echo <àÜ5until $√6{
+%%%
+#!mode=file
+:-á0\x41Fecho }
+%%%
+#!mode=file
+Ä/${b/$à:-
+%%%
+#!mode=file
+Ü0<c|Eˇif echo 8}@3ˇ\
+Ñecho )
+%%%
+#!mode=stdin
+3$(\u\Eecho \x41Åecho 	!then ]5))`);√©+cÅ
+%%%
+#!mode=stdin
+>[[:alpha:]]¿&0y6esacfi'echo ‚echo $echo 7#>&:-$#$((
+%%%
+#!mode=file
+áÇE)¿
+%%%
+#!mode=file
+echo echo $(()for !yfor `
+%%%
+#!mode=file
+esacò\u$*:Ü#echo 9$fi©until <<-7Å¿echo 
+%%%
+#!mode=file
+echo Çecho ¿echo :=esacecho $*Éecho >&
+%%%
+#!mode=stdin
+%%<<-echo }
+$#then $@Äˇ<&echo  √]a`/;;
+%%%
+#!mode=file
+`then >&y!2$(
+%%%
+#!mode=stdin
+<<echo 4':($*<<-8$@Ñecho \u${#@|Ñ{&
+%%%
+#!mode=stdin
+\u7'ˇ@É\uÉÅ9ÜÉecho ":+\c`"
+%%%
+#!mode=file
+2>@$((Ex6:-)@`[~#\x41√4
+%%%
+#!mode=stdin
+8while 	(}2>esac47ythen echo -done8echo à
+#$((ÅÖˇ]@
+%%%
+#!mode=stdin
+E[[:alpha:]]<echo Äaˇecho 
+%%%
+#!mode=file
+*[echo 
+%%%
+#!mode=stdin
+esac\Ç‚@|<<:=/7ÉòÇwhile {Ä;Å
+%%%
+#!mode=stdin
+‚à:?echo ‚Fecho }Ñcase  ©ÑFecho O<<-
+%%%
+#!mode=stdin
+echo echo echo \
+6|3+&&Ö√
+%%%
+#!mode=file
+:=)):+Ä\echo ©:?)√
+%%%
+#!mode=file
+$#√6\
+$'case &&do <<
+%%%
+#!mode=stdin
+{&&4<7until ${#E¿<O©:+ˇc`;'z3)|
+%%%
+#!mode=stdin
+\x412]F<5]while &&
+%%%
+#!mode=file
+'${#?echo echo echo yáa*?}"case [[:alpha:]]echo \
+until :-echo √`
+%%%
+#!mode=stdin
+b;echo E7until 66while {‚[ˇ/*||'^Ö0aà{${
+%%%
+#!mode=stdin
+Ädone
+%%%
+#!mode=stdin
+){~1(echo :=)F\
+Ñ$@&($@
+%%%
+#!mode=file
+ in 4~y%%ÜÅ
+%%%
+#!mode=file
+Å‚~||<<-))Ä$((Ä{echo 
+%%%
+#!mode=file
+fi`z0;?$for ;z$!do O<<-`
+%%%
+#!mode=file
+<<?echo ?$#ÇÇxthen àecho echo 8Öcase  echo a\u)
+%%%
+#!mode=stdin
+echo Ñecho done(\
+(}6&&{Ö${# in if 1©:=2echo 
+%%%
+#!mode=stdin
+'Ö\cˇ=}$# (¿¿4!fiz√<)Éˇ
+%%%
+#!mode=file
+0	Å0
+%%%
+#!mode=stdin
+Çecho $((Ñ1O=c~Üecho <${#echo Ç`echo ;for :?Ç
+%%%
+#!mode=file
+Ñ(©
+%%%
+#!mode=stdin
+@!x@Üfor 1?5\u^$@√donedone then !\x41
+%%%
+#!mode=file
+09$áecho }&<<{É6[while *echo "$((
+%%%
+#!mode=stdin
+{$*donedo zà<<||||:&&Eecho 3"/(case :?echo ]
+%%%
+#!mode=stdin
+c&Ä@F in √>%%${echo %F:-<aecho 6\x41while 2>y
+%%%
+#!mode=stdin
+#<[fi ^echo ©Ä'$*\c&;;#&&Ñ
+%%%
+#!mode=stdin
+z${‚bò)
+%%%
+#!mode=file
+:=}[/becho ©done7Ä]5||ÇÅ#Å=%$((!\á{'
+%%%
+#!mode=file
+%%á1!%ˇ*``;:}&&echo )~
+%%%
+#!mode=file
+4√
+%%%
+#!mode=stdin
+9echo á‚Ü/
+%%%
+#!mode=file
+É	{2>@echo case á{"Çuntil *[[:alpha:]] echo ($+${#"while !
+%%%
+#!mode=stdin
+ˇF|echo /!
+%%%
+#!mode=file
+$+
+%%%
+#!mode=stdin
+echo \
+:-2zcase á?xecho 1 in Å	echo ‚echo E¿
+%%%
+#!mode=stdin
+á\c
+%%%
+#!mode=stdin
+Ü[[:alpha:]]echo echo [òÇ\Åáyecho echo echo &)]!
+%%%
+#!mode=stdin
+esac'$*Öˇ$(($'echo $y
+%%%
+#!mode=stdin
+echo /))a‚ do  *|√*echo %!;;;ò in 
+%%%
+#!mode=stdin
+#echo ($#echo echo echo {do ÄÅ√^
+%%%
+#!mode=file
+
+!O$((@&&echo #ˇá-Ä©:+2>{Fyecho \
+$*` 
+%%%
+#!mode=stdin
+Å<<
+%%%
+#!mode=stdin
+=‚ in }<<√then 2#*<<√{}"Çá
+%%%
+#!mode=file
+))}!do echo echo à{if 4Ñ)!echo %>(>&√echo 
+%%%
+#!mode=stdin
+3||echo 3if $:-:+9echo 2$echo echo Ü [[:alpha:]]5<<
+%%%
+#!mode=file
+echo 1${#F$#Åecho ^echo echo !doneuntil y##Å!:?©
+%%%
+#!mode=file
+7case ^;5\
+\$Ç
+%%%
+#!mode=stdin
+||}then }$((echo :=)if Üecho $<&>E
+%%%
+#!mode=stdin
+¿0\u'`if =|||>&√Å+;;while echo 
+%%%
+#!mode=stdin
+for 0Ñ${#-?#¿\x41;;Åecho 
+%%%
+#!mode=file
+echo $zÄ)$((done>\x41\0~Å5OÄ
+%%%
+#!mode=stdin
+esac\&echo |Åecho ;&&! fi%1[for Çá%2
+%%%
+#!mode=stdin
+/©echo F{echo ˇ<$then echo 'ca
+%%%
+#!mode=stdin
+esacecho òá `/}
+fiecho Ü9echo \cecho |for E`
+%%%
+#!mode=stdin
+-√ in ÉÇecho %%\
+echo y¿echo @á1echo Åfi'&
+%%%
+#!mode=file
+}'%%Ñ##‚9>&until É\u&&
+%%%
+#!mode=file
+$(((\x41á0case echo 2>;
+%%%
+#!mode=stdin
+¿`zá‚#2>/))1‚$#¿
+%%%
+#!mode=stdin
+echo "'echo FÉ))!
+%%%
+#!mode=file
+ in ˇ$)}')$@1cecho 	: 
+%%%
+#!mode=file
+:?8‚;$echo echo 8©Ñthen *Åcfor √13<<1
+%%%
+#!mode=stdin
+àa2do 'echo $'\
+;;a>!\uecho {echo done##©`Äbecho 
+%%%
+#!mode=file
+O"}until :?$
+%%%
+#!mode=stdin
+àÉ
+%%%
+#!mode=file
+yáÜ\(|[[:alpha:]]||Å$"Çecho <<8)):+}done]¿9+
+%%%
+#!mode=stdin
+!%
+%%%
+#!mode=stdin
+Ç:ˇ©$*;echo echo 5òecho 
+%%%
+#!mode=file
+aecho a\u
+%%%
+#!mode=file
+!echo ò
+%%%
+#!mode=file
+$<<-á¿‚>Oecho echo Éecho \c+\c<<-
+%%%
+#!mode=stdin
+©"Ä/echo until =##\
+©
+%%%
+#!mode=file
+2>¿É"© in ¿echo √;;=á[`"|a/{ÇFzÅecho echo 
+%%%
+#!mode=stdin
+ in /34#|F*
+%%%
+#!mode=file
+/#'Åˇ[[:alpha:]]\u##4<<Å^80á}##@Å||echo Ö¿Äwhile 
+%%%
+#!mode=file
+#àdo ${#&&
+%%%
+#!mode=file
+Ö}©echo Ñ:4
+%%Ü||echo O>&=while ^
+%%%
+#!mode=stdin
+(<<-ò$OÖ\x41
+%%%
+#!mode=file
+~6~)!':=${#$*esacfi&&3&à@Fecho '
+%%%
+#!mode=stdin
+Ç{'&√echo >&òÅ¿©Üecho 9Ö
+%%%
+#!mode=stdin
+$(('√-4`Ç
+%%%
+#!mode=file
+ in +zF'-
+%%%
+#!mode=stdin
+&)\udonedo Ñ9%3y\x41‚6'echo 
+%%%
+#!mode=stdin
+:%ˇ in à|y$*:+Éáecho echo ˇ
+%%%
+#!mode=stdin
+3- in Ñ‚Ü$(ÇÇ:-
+%%%
+#!mode=stdin
+if echo √${<Éˇ>&!echo 
+%%%
+#!mode=file
+à%:=ÄÉ‚É{until "9echo à<<Äecho ;ˇÄ$@OÅò
+%%%
+#!mode=stdin
+z>||?Ñ;yecho √Å
+echo $^ˇò"z1$'\
+%%%
+#!mode=stdin
+case ]echo echo 1)until $#"echo ^2(echo +/^É
+%%%
+#!mode=file
+¿echo Ö1E:?2>Ç&&'5
+%%%
+#!mode=file
+"\%&&|	\}@||{`echo 8$'##Fecho {x4òÄ?
+%%%
+#!mode=stdin
+<<-4%a	©do $#{z ÉÑxÅif ‚1until 
+%%%
+#!mode=file
+echo :=7\%%>$#<&echo }
+%%%
+#!mode=stdin
+echo 7!>echo ?y-then F${#${66
+%%%
+#!mode=stdin
+;$'*<<-+##~
+%%%
+#!mode=file
+echo ¿>
+%%%
+#!mode=stdin
+*[[:alpha:]]É4¿echo 
+%%%
+#!mode=stdin
+F'}}$((echo 0echo $'<${#echo esac4
+%%%
+#!mode=stdin
+"ÄÑ
+%%%
+#!mode=file
+$#Å>x%%Å
+%%%
+#!mode=stdin
+6Ñ& in then 3-`${¿case Ey(√{echo  in %then &&##Öecho 1
+%%%
+#!mode=file
+:+echo ‚O b[[:alpha:]]echo 'echo 
+%%%
+#!mode=file
+Ö:
+%%%
+#!mode=stdin
+á||Fecho ©\u$'8+esacecho >&O'/$'Åecho [echo ÉÅ
+%%%
+#!mode=file
+${#echo echo Ü-b<& in do √$@if ) in 4E
+%%%
+#!mode=file
+zÅÉ#esac'\
+<<Åzòx:+‚àecho 
+%%%
+#!mode=file
+\cecho ))\uÖ8{:-OˇÇ¿©7$√$'$=%for echo ;
+%%%
+#!mode=stdin
+√echo ^7E@Ü
+%%%
+#!mode=file
+;@Öuntil echo Ä9òádone&&echo echo àecho áyÜa|ÅÖecho 
+%%%
+#!mode=stdin
+aò}à2>until &fi[+$:?`<&
+%%%
+#!mode=file
+then  òecho doneÑwhile \c\x41Å@<<]{5;;<&*&
+%%%
+#!mode=stdin
+={then xif >"%%:-##/!Ç>&until Åˇ|\c
+%%%
+#!mode=stdin
+O]fi$^c6c¿=
+"ˇ
+%%%
+#!mode=file
+
+fiesac<!9;
+%%%
+#!mode=stdin
+<<-#Ñ<<${#√`$(\x41done||©5Å	Öx@á+case $('
+%%%
+#!mode=file
+Éecho )\x41$@echo 5$#>
+%%%
+#!mode=file
+echo z%\u√while {
+%%%
+#!mode=file
+4¿*√E√\Å`©echo [[:alpha:]]!{$*Äecho !
+%%%
+#!mode=stdin
+^echo $<<Ü@if ‚0É©do $@
+%%%
+#!mode=stdin
+for \uuntil >&√aecho :Ä2$';case ${#$@:+$((*+{$@
+%%%
+#!mode=file
+á${|${
+%%%
+#!mode=stdin
+<<-Ö‚echo esacyx:-$(+
+%%%
+#!mode=file
+' in \x41do echo echo x;;ˇÇ+>)[\x41\c3##àecho }
+%%%
+#!mode=file
+?Äecho >*
+%%%
+#!mode=file
+<<-$#echo Ä&#*ˇFÖ;if 7b
+%%%
+#!mode=file
+ echo done8:-\echo Fc$@\u"Éuntil ||echo :?))'y"
+%%%
+#!mode=file
+=zÜ
+%%%
+#!mode=file
+\x41$@)`+echo Åy]<&}Ñ$'fiE@||&&É$((
+%%%
+#!mode=stdin
+}2"'echo echo echo :-'ˇ'1]\x41${#)2‚
+%%%
+#!mode=stdin
+3Ü+$(($*echo Öecho $((echo echo *
+%%%
+#!mode=file
+3[[:alpha:]]Ñ
+%%%
+#!mode=file
+<<©zÜ`>&3Ä‚Ä05##42>2ˇecho 
+%%%
+#!mode=file
+echo √Ä)$((ˇ-0)ò	<<-$(@{
+%%%
+#!mode=file
+|0ˇ2
+%%%
+#!mode=file
+")áecho 3case =ò]done!)!^`Ü}Å
+%%%
+#!mode=file
+echo Å$Å8?Ñ
+%%%
+#!mode=file
+echo <!echo ${"echo \
+$@Å
+%%%
+#!mode=stdin
+!:?:echo echo {<<-*while if 3Ç\ˇ{`
+ÄÜ√
+%%%
+#!mode=stdin
+}echo 2>'0echo ¿ do 66$echo %
+%%%
+#!mode=file
+ythen doneecho ©``3Ñ^;;c:?:\
+%%%
+#!mode=stdin
+echo !for while =4‚
+%%%
+#!mode=file
+#))||#
+echo 6Ö©echo Ä<&[[:alpha:]][[:alpha:]]"Ç<¿Ö
+%%%
+#!mode=stdin
+{then 'Å6>&Çòfiá$*òecho Å1z¿then echo 	ˇ4\x41Öecho 
+%%%
+#!mode=stdin
+c=àc"'##\x41then Oecho àecho &&©94
+%%%
+#!mode=stdin
+7:=|%%Ç5*Ä'echo 
+%%%
+#!mode=stdin
+echo [${b$(
+%%%
+#!mode=file
+3<&2><&?'Ö$for Çzecho zecho 	3\echo for 
+%%%
+#!mode=stdin
+&&O©${#%{}echo 6c¿ò\ux
+%%%
+#!mode=file
+©case {yecho 2:&&`-4<<ˇ&b3
+	echo 5Å:-òO©
+%%%
+#!mode=file
+echo ÅÑ>&then echo Ç<<a ^if -<<-!`
+%%%
+#!mode=stdin
+while >$(({@echo Ñ$@E¿òecho à@5x}echo 
+%%%
+#!mode=stdin
+ÉÅecho :+\cEecho ¿do c$'%%3ˇdone<&+}Å
+%%%
+#!mode=file
+7Ü<<-Ä√!x¿É7echo ©|Ü`ò}ax1$@:-echo \
+
+%%%
+#!mode=file
+echo <&while <&&echo =$(%8:+:?a)<${#Ä`;;:?Å¿:'if 
+%%%
+#!mode=file
+echo √Ñ
+%%%
+#!mode=stdin
+2#O¿)ÅF<'{echo adoneEˇ√Ö
+%%%
+#!mode=stdin
+echo Åecho <ÇÜecho !
+%%%
+#!mode=file
+òx:?"[á;case 
+%%%
+#!mode=stdin
+0ÄÄ;;F)É[echo ¿@ in echo 
+[[:alpha:]]Ñ5√Ñ‚
+%%%
+#!mode=file
+ˇecho ˇ\c#echo echo ||^|<c\uwhile echo echo ©7if !Å$((&áÑ
+%%%
+#!mode=file
+ˇ'
+%%%
+#!mode=stdin
+echo à%Ä?echo :?Öcase ©
+echo Éecho ‚Ö"Üà${#<<`
+%%%
+#!mode=file
+7fi+-$#if for ©‚then [[:alpha:]]\c in |Äecho [[:alpha:]]\echo }
+%%%
+#!mode=file
+‚echo ${# then -while Å%&$(|‚echo then 	¿à4áecho %ˇ
+%%%
+#!mode=file
+[[:alpha:]])))ÑàÉ\echo  )esacfi\Å©;;then {
+%%%
+#!mode=file
+\Åecho '2>{$(z¿Ñ}‚\uˇx|ÑÜ#b in Ç
+%%%
+#!mode=file
+Üà
+%%%
+#!mode=file
+;;3echo 2>\cÅ7[ááˇ;É in 702echo [
+%%%
+#!mode=stdin
+fiecho $#$((√yecho ;<
+%%%
+#!mode=stdin
+;;314c>&$((àxb))0\x41ˇ\#6\echo :+|√8@
+%%%
+#!mode=stdin
+echo a||
+%%%
+#!mode=file
+$#F${#`@Ö`;;>©>&while done
+%%%
+#!mode=file
+echo becho √echo >``Ñcase echo Ñx√echo echo [echo echo `>$*
+%%%
+#!mode=stdin
+$'=7-{3$*ˇ√\c!;;Ñecho Å<<-if z<&
+%%%
+#!mode=file
+echo ©[[:alpha:]]%%:?8\echo `)))
+${#b`¿cò©Ü9ˇF©
+%%%
+#!mode=file
+"))1/¿echo ;;√	>&`echo $
+%%%
+#!mode=file
+:Ü$}while ¿^$*#áÇc%%}:yÑ;;b?
+%%%
+#!mode=stdin
+x$#echo `^]while echo echo ;;]echo Ç}
+%%%
+#!mode=stdin
+	Ñ"+4Ç=#)echo >&
+√
+%%%
+#!mode=stdin
+until echo <:=É<<-ˇthen ;@&
+%%%
+#!mode=stdin
++||if '{É"echo 
+%%%
+#!mode=file
+©z2)) echo à=}z!done#\
+<%"]à6Å($@Ñx
+%%%
+#!mode=file
+'/ in echo !Üfi66&&5E\cdo 	
+%%%
+#!mode=stdin
+${#E	<<-Ñ-à
+" in {4))
+%%%
+#!mode=stdin
+‚Å||[7	Öecho \c!Éecho echo $‚echo 
+%%%
+#!mode=stdin
+0'echo echo 
+\uò>#>while do 
+%%%
+#!mode=stdin
+$while ˇ
+%%%
+#!mode=stdin
+"á?"
+%%%
+#!mode=stdin
+~#done|~=‚<&)Ö+x;;!##echo >
+%%%
+#!mode=file
++&&echo `echo ©$*7y"
+%%%
+#!mode=stdin
+echo case 1b~}\
+:\
+/‚echo echo 'Å=;:+
+%%%
+#!mode=stdin
+{‚while %%echo :?8¿done)echo (Ñesac:=
+%%%
+#!mode=file
+Ö9[Ñá/Éx
+%%%
+#!mode=file
+|||	echo +2${bF+
+%%%
+#!mode=stdin
+‚esac in ##
+%%%
+#!mode=stdin
+2>à}¿-$'<<-‚/for do ‚aÄ$echo :Ñ]}2
+%%%
+#!mode=file
+zwhile +~\
+*echo :+ò[[:alpha:]]||/!/¿'{¿
+%%%
+#!mode=file
+1'echo }6á;))<&{z:ˇ;;##c(! =@$
+%%%
+#!mode=file
+if ¿	^
+%%%
+#!mode=stdin
+||x}/if 
+%%%
+#!mode=stdin
+echo 94√"echo @{\${#echo 3Ö
+%%%
+#!mode=file
+á<&Ä-O;;$((&<<-echo echo Oò(Ç
+%%%
+#!mode=file
+echo ÜÄecho echo echo ‚¿}$(	!~;
+%%%
+#!mode=file
+$*¿
+%%%
+#!mode=file
+\13OÅc/Ü>then ${#&&
+%%%
+#!mode=file
+3Çcase done7<&##while 
+O?a${#
+%%%
+#!mode=stdin
+ Oecho \c
+%%%
+#!mode=file
+:?Ü‚
+%%%
+#!mode=file
+{echo 9\echo z25
+%%%
+#!mode=file
+#Üá5]Owhile @á<<-*O2$@√echo ~:=)echo 
+%%%
+#!mode=file
+:=' #doneÇ7)>&6áòˇ\x41&do $fiecho 
+%%%
+#!mode=stdin
+Ö¿Édone:+
+%%%
+#!mode=file
+"ˇ&Fà9}52>É:echo echo 
+%%%
+#!mode=stdin
+echo &&echo aá42}>&¿ÑzÅ9‚)echo ©√5
+%%%
+#!mode=stdin
+)$((
+%%%
+#!mode=stdin
+7'~òÑ>case Ñ√Oecho :}${#Ä%%}+-"\{2
+%%%
+#!mode=file
+Ozecho Åfor 7`echo x&& &à 3;;
+%%%
+#!mode=file
+y<4Ç
+%%%
+#!mode=stdin
+${#Å#%%:7√&echo !>&*\$'echo 
+%%%
+#!mode=stdin
+$@\u#echo then {6$@
+*%$'}Ç\uÖ<&[[:alpha:]]\x41 in ò'¿
+%%%
+#!mode=stdin
+6Ñecho 
+7until echo 0:+-Ñ1until 
+%%%
+#!mode=stdin
+done[[:alpha:]]©{Ä"(aa>*echo <&`esac
+%%%
+#!mode=stdin
+É√until ##
+%%%
+#!mode=file
+ˇzx!until echo 4=√Ü)2áecho ;$((<<-√!:+x
+%%%
+#!mode=file
+||${<))){
+%%%
+#!mode=file
+#ò:+^:+\case √\
+yˇ
+%%%
+#!mode=file
+*3if 
+%%%
+#!mode=stdin
+!}¿9~<<òecho á}ÉO	\
+$(%%echo <&aecho $#4))<&
+%%%
+#!mode=file
+5ÑÑ%Å+
+%%%
+#!mode=stdin
+ò\x41Ñecho [F
+%%%
+#!mode=file
+echo \u'3<&©${\u\x41$((esacecho bàecho :=@
+%%%
+#!mode=file
+Ñ‚1$@
+%%%
+#!mode=stdin
+<&ˇF)<9\c‚echo xecho \
+8
+%%%
+#!mode=stdin
+$echo ${#8|echo 3Çecho !|)"Öecho Ça
+%%%
+#!mode=stdin
+|\u/Ö
+%%%
+#!mode=file
+echo ?>&echo echo }for E6echo 
+%%%
+#!mode=file
+echo /ˇ${#ˇ+@\
+
+%%%
+#!mode=stdin
+Écase Ç:= |echo }$((
+%%%
+#!mode=file
+:-É}}0$
+%%%
+#!mode=stdin
+ò<<-echo á$
+%%%
+#!mode=file
+Ü)!:=á8\>&à[[:alpha:]]$((Å6for ))@#Ä
+%%%
+#!mode=stdin
+;;ˇ
+%%%
+#!mode=stdin
+;4case b
+%%%
+#!mode=stdin
+9¿{%$'\
+[{while !$@]/echo echo echo àò:-7©[Å<<
+%%%
+#!mode=stdin
+Ö\x41fi¿a
+%%%
+#!mode=stdin
+8¿echo ÄÜ"%`Ü
+%%%
+#!mode=stdin
+do ^if {`$@
+%%%
+#!mode=stdin
+\
+6##a‚\c:=\u¿\?done\
+then $#]##\echo echo {<á
+%%%
+#!mode=stdin
+\x41fi
+%%%
+#!mode=stdin
+!É!à=:?{'2&&à68**¿©`9$*
+%%%
+#!mode=file
+><&~
+%%%
+#!mode=stdin
+echo ò<<
+'=echo $@
+%%%
+#!mode=stdin
+√Ñ7${$*:4>3echo echo yòecho Ñecho %%
+%%%
+#!mode=stdin
+2>echo ¿${#*while 1Å4do :=aecho ˇecho case %until ^ˇ
+%%%
+#!mode=stdin
+á{‚2><&:?©)7
+%%%
+#!mode=stdin
+}$*5"Ä
+echo Äˇ	Ç
+%%%
+#!mode=file
+do echo <&[[:alpha:]]¿©
+%%%
+#!mode=file
+0bF)\©echo 
+%%%
+#!mode=file
+doneecho )¿;Ñthen %%"√do 4%}-}:-{echo \x41=0echo ;\
+%%%
+#!mode=stdin
+##}echo 
+echo b$#echo &:%`EF
+%%%
+#!mode=stdin
+6Ö$'"?<<echo ©<&-
+%%%
+#!mode=file
+!echo echo ò}[[:alpha:]]<&òdo à{<<-:+Ä-[cˇ>&`\u
+%%%
+#!mode=stdin
+echo !¿echo :for 1>&echo az
+%%%
+#!mode=file
+¿$Ç$((echo 3echo Ñ
+%%%
+#!mode=file
+Ç echo $(à\√\c
+%%%
+#!mode=stdin
+6"$#echo F/=$(($((\$à${[2]<<case esacˇc
+echo 3
+%%%
+#!mode=stdin
+}cÖ[[:alpha:]]:-"\
+E'2>Ü))\
+ÇÖ:-0||echo echo $((echo 
+%%%
+#!mode=stdin
+echo -echo y##ˇE
+%%%
+#!mode=stdin
+©cc8	3:"$*{<&Ö`Ö‚))75	
+%%%
+#!mode=stdin
+:?:-FÅy>&\u !ˇ:--©
+%%%
+#!mode=stdin
+©}/>>&}echo echo then 
+%%%
+#!mode=file
+}7{Ç^(}2echo yecho :Ñ√:=\+##F
+%%%
+#!mode=file
+ò$
+%%%
+#!mode=file
+√\x41||%%:+;Åà]	#
+%%%
+#!mode=file
+&$)$]`
+%%%
+#!mode=stdin
+$@^
+%%%
+#!mode=file
+echo >then echo !for z&echo 9/
+%%%
+#!mode=file
+Ñ?‚45$' &[fi${##echo ?
+%%%
+#!mode=file
+‚Öecho ?>&echo 8ò}fi&};$((${if if +echo do :
+%%%
+#!mode=stdin
+1echo ©a
+%%%
+#!mode=file
+>:?fiÖ
+%%%
+#!mode=stdin
+ò\u}b));\c√<y√echo echo echo }echo ˇ?Ñecho 
+%%%
+#!mode=file
+c} \
+until ^(while >E¿Å:?#
+%%%
+#!mode=stdin
+‚ˇfic:=a¿%fi;;©echo echo á:+echo Ä{$a#2
+%%%
+#!mode=file
+Ä[Oecho Ü5for àÇwhile $((>©8Å?''`©&&©{O
+%%%
+#!mode=file
+echo echo then echo >%%8
+%%%
+#!mode=stdin
+echo Ä<<-&$(;case ©echo =
+%%%
+#!mode=file
+4echo &&$@á
+%%%
+#!mode=stdin
+É)
+%%%
+#!mode=stdin
+:=case 7`*|$√
+%%%
+#!mode=file
+"&$'<<-¿/@
+%%%
+#!mode=stdin
+echo ˇ}}É6á©a0Ñá${-$
+%%%
+#!mode=stdin
+{6echo ##\cecho `Ö$(©Ä~;E
+%%%
+#!mode=file
+:+"echo 1$((‚))?ˇ\}^2>`E©©y;;9~$# in `!
+%%%
+#!mode=file
+E©<||
+%%%
+#!mode=stdin
+~12>?@;=for then ¿:=√echo echo Ü√$#?Ö~√echo :-
+%%%
+#!mode=file
+echo ${<echo 8√':-1*=√a%
+%%%
+#!mode=stdin
+'{ÖÄ^Ådo  in -fidone
+do Å&echo \c)))7c
+%%%
+#!mode=stdin
+@à	à">&||cfor ^-~@á^9á
+%%%
+#!mode=file
+Å`echo 
+%%%
+#!mode=stdin
+Ä|>
+%%%
+#!mode=file
+b
+%%Ä<<-
+%%%
+#!mode=stdin
+Ö\c%if Ñ
+%%%
+#!mode=stdin
+')(|fi`@^É;
+%%%
+#!mode=file
+Ö$@à\u4%%echo ;##Çecho 
+<"
+%%%
+#!mode=file
+F4√a[7y)esacecho !for E}:=ˇ'}
+%%%
+#!mode=file
+ $(5echo \
+echo ${<))a;?}
+%%%
+#!mode=file
+Ñecho <<-6#%%echo %##òÅˇ#if 	$#echo fi
+%%%
+#!mode=file
+3echo }
+%%%
+#!mode=file
+<<-\
+\
+
+%%%
+#!mode=stdin
+!	:-Ä[[:alpha:]]echo {echo then %%(:?$'~echo 8$:echo F`$'}
+%%%
+#!mode=stdin
+:-{echo until echo ||=~cwhile $'@àecho echo 
+%%%
+#!mode=file
++${#ˇc5echo √echo òEcase 
+%%%
+#!mode=stdin
+<&√>>{©%%afor áecho ò8;;6;Ñz*Ö√<<##
+%%%
+#!mode=file
+!#/ in ~echo 4||$*Ç$@z?[[:alpha:]]${#%fi
+%%%
+#!mode=file
+echo <<-Ç:+echo [`	))echo òecho "case zecho 
+%%%
+#!mode=stdin
+echo ÑFecho "\x41Ö]%√cecho O|Ñà
+8á!echo [[:alpha:]]$
+%%%
+#!mode=file
+echo :-[[:alpha:]]ÇÉ
+%%%
+#!mode=stdin
+if O%%%%√\u}ˇ	&(:?&echo y
+%%%
+#!mode=stdin
+*\cdonebfor 3^cO$Ç}Çecho %%echo É+`fi:`
+%%%
+#!mode=stdin
+√))`case 1=$#
+%%%
+#!mode=file
+:=5^
+6\u(\>until echo 
+%%%
+#!mode=stdin
+$#{á=z{*}Ö[:?a}¿a7Ä
+%%%
+#!mode=file
+!b|echo 
+%%%
+#!mode=stdin
+Ö$(*ˇcase á'%É{z%%8##	1)7(for ÇÄ}c2
+%%%
+#!mode=stdin
+√0#¿for fi
+%%%
+#!mode=stdin
+]√‚¿%%Äz'^$echo echo 
+%%%
+#!mode=stdin
+OÄ${#√‚7<E3Çecho áFwhile "ˇ
+%%%
+#!mode=file
+:1##if ‚echo ÑÖ]
+~9$#y	!
+%%%
+#!mode=file
+<<-	
+%%%
+#!mode=file
+${#4echo Ü
+%%%
+#!mode=file
+[:=ˇthen ©ÉÉ7ˇecho # #<&while while 	Ö'${#"Ü
+%%%
+#!mode=file
+y(*echo :=}Ñ8O
+%%%
+#!mode=stdin
+}if [[:alpha:]]à\x41:?aybÇ"echo }1:-echo ÅÉ5á
+%%%
+#!mode=stdin
+}6/
+%%%
+#!mode=file
+/ò1/
+%%%
+#!mode=file
+{echo ÉÄ!Å-##[[:alpha:]]+\
+xif /Üecho ©4{||
+$
+%%%
+#!mode=file
+\
+for Ç:F8%%echo 
+-?
+%%%
+#!mode=stdin
+Ü*√à%%54òecho √$*F"6until 2>3\cecho 
+%%%
+#!mode=file
+á?;echo ;ÇF *‚-?b?Ñ${#$?
+%%%
+#!mode=stdin
+O<<-doneÉ/yÜecho ##}echo \
+>&
+%%%
+#!mode=stdin
+4à7©$((É$Å√' ##\c# in  -}{á[[:alpha:]]echo (
+%%%
+#!mode=file
+*>61}
+%%%
+#!mode=stdin
+echo echo esacecho ©Ñà)#echo \cÇcase 4`
+%%%
+#!mode=stdin
+Ö;;echo %
+%%%
+#!mode=stdin
+]until do Ñ<<1@{Äò\c$@	√¿ààecho 2>)echo 
+%%%
+#!mode=stdin
+[50©Ü&&y9]\esacÜ\0[
+%%%
+#!mode=stdin
+
+${#echo 0Üecho doneecho \
+[[:alpha:]]done3Eecho x
+%%%
+#!mode=stdin
+case Å$?echo echo :#zfor <<&&
+%%%
+#!mode=stdin
+
+Çˇ+%%c8Fx[>&%%&&
+%%%
+#!mode=stdin
+!
+Ñ0]z<&echo }while while <echo echo zcò$%%@3echo 
+%%%
+#!mode=stdin
+echo while >%"
+%%%
+#!mode=stdin
+7 in %‚echo yyàesac5`\cÇ[[:alpha:]]
+%%%
+#!mode=file
+%}$("echo ||/case $*0y=>[echo Äˇ89\ufor 8
+%%%
+#!mode=stdin
+'¿?>&"a))Åà
+%%%
+#!mode=file
+x$###\x419'\cˇ$*Å©5>until 
+%%%
+#!mode=file
+y¿fifi<<"√!-
+%%%
+#!mode=file
+`$($('Ä7echo Å‚5ˇ"
+%%%
+#!mode=file
+echo 0'Ö)$((echo 
+%%%
+#!mode=stdin
+=`"ÅÇecho ò{echo á^}echo esacààÇ7Ç
+%%%
+#!mode=file
+√9echo ` in echo 6%%8y{$((echo 	73
+Ü	Ñ‚
+%%%
+#!mode=file
+1${#echo <<-\:=7É&$#$Ñ{>&
+%%%
+#!mode=file
+:+*ò\u5becho &b:+
+%%%
+#!mode=stdin
+É%%-^>'while echo Ä<<-$*yecho >&'}'until + in echo echo 
+%%%
+#!mode=stdin
+echo (ˇy
+%%%
+#!mode=stdin
+echo echo ázò\cif √7';;ò
+%%%
+#!mode=file
+àà‚ˇ$*${#${$*$(¿‚}:+Éc'$#
+%%%
+#!mode=file
+©5 <&$(	echo #Çecho 9Ç~Åecho :=$@©
+%%%
+#!mode=file
+~fi!¿^y¿))$(${#:?©c:=78òxÉb6
+%%%
+#!mode=file
+Ç&}\}
+%%%
+#!mode=stdin
+¿then echo 6Ñecho 6done‚echo Ñ`Ñ{echo {1Çˇwhile $@ÅÅ<<
+%%%
+#!mode=stdin
+&echo 
+'5ÇE"ò©))<doneÄáecho -case 5
+%%%
+#!mode=file
+echo ${#
+%%%
+#!mode=stdin
+ÅÅÄ<<- [[:alpha:]]
+%%%
+#!mode=file
+'ááb${!Ö|<4echo 
+%%%
+#!mode=stdin
+2>à
+%%%
+#!mode=file
+echo "Ä))^F'9Ç$ÇÇÖEesac~*echo *©echo 
+%%%
+#!mode=stdin
+'['case ?echo \${\{OÖ}
+%%%
+#!mode=stdin
+òecho ~ˇ2>É"
+%%%
+#!mode=stdin
+:-))/echo fiˇbecho << F)echo >É%Ñ
+%%%
+#!mode=stdin
+echo b7aà\c2>aò&&Ö
+%%%
+#!mode=stdin
+¿${#(©ˇ${#^y
+%%%
+#!mode=file
+"Äif F'Ü©=áecho ˇ√`]ˇdoneecho }[[:alpha:]]
+%%%
+#!mode=file
+86"\Efor echo $((echo echo ?:?echo 1
+%%%
+#!mode=file
+"$@!echo 7$*àò:+${©##2Çecho y\x41
+%%%
+#!mode=file
+x√echo Äˇcà${#;"<
+%%%
+#!mode=file
+#FÉdone[!~<echo Ü¿*echo echo `Éyò:+Ü
+%%%
+#!mode=stdin
+/>^>&
+%%%
+#!mode=file
+}for ;echo \
+~>3¿[echo ©&&Ñ\x41echo echo @
+%%%
+#!mode=file
+c[|>|
+%%%
+#!mode=stdin
+echo <<-Ä
+%%%
+#!mode=file
+yEfor Ç√
+%%%
+#!mode=stdin
+>&√}&&$(E))Çc{òecho 
+%%%
+#!mode=file
+echo "echo ò+#√àecho fi<
+echo &&echo <<^
+%%%
+#!mode=file
+
+á`case 	©
+%%%
+#!mode=stdin
+"|zÑ:+:-4+`
+%%%
+#!mode=stdin
+echo Ö8(>&©c}$@))Ñ=ò)>&‚
+%%%
+#!mode=stdin
+\
+>esac‚Öecho ÄÉ$@[[:alpha:]]Äcase \[|¿|Åecho =|O|à\x41
+%%%
+#!mode=stdin
+echo ‚@á4@:<(&Å<<case 	$@##!y:?(;:-Ö+
+%%%
+#!mode=stdin
+;;0©\uecho $ˇ(á$@ in %%[[:alpha:]]#\c$(Éò\©ˇ/
+%%%
+#!mode=stdin
+Å>&"*ò6
+echo 
+%%%
+#!mode=file
+Åcase òÅ$*
+%%%
+#!mode=stdin
+echo ÄÉ:+ˇ##
+%%%
+#!mode=stdin
+echo 6√}'©1$@)){echo \u"O"
+%%%
+#!mode=stdin
+~$((echo  in :-{while (;;{
+xwhile ;
+%%%
+#!mode=stdin
+Ö$(¿echo "É:-Ä#©$((
+%%%
+#!mode=stdin
+>&x in #0%8&^ in ÜÉecho `||@Å=\x41$(á&
+%%%
+#!mode=file
+)while >)3ˇ:echo *^7	?3Ç;echo É3ˇ©
+%%%
+#!mode=file
+}echo echo }7echo 6=fi*4[[:alpha:]];>&[[:alpha:]]echo [echo echo ;;
+%%%
+#!mode=stdin
+4\}"'Üá\cecho +;*É:/ÑÜy\u0!echo √
+%%%
+#!mode=file
+>&Åˇ+until ©echo $`~Äecho 1Ö‚‚!)$'
+%%%
+#!mode=stdin
+for then \ÖzÜecho [[:alpha:]]@'fi0Fecho 
+%%%
+#!mode=stdin
+esac${EF
+%%%
+#!mode=stdin
+&&6=
+%%%
+#!mode=stdin
+$'3√9@echo ${#[
+%%%
+#!mode=file
+then |$((y
+%%%
+#!mode=file
+${#~!1}áfor O Öecho 'echo echo echo ‚
+%%%
+#!mode=stdin
+echo $(if "\
+%%%
+#!mode=file
+${#echo 
+%%%
+#!mode=stdin
+{|%%\c#]à5aÇ>&/echo then ${echo Ä
+%%%
+#!mode=stdin
+*9echo echo ^
+aecho Ñ6echo echo $?^}${ :?9\*Ç}
+%%%
+#!mode=file
+echo Ñá
+!Å||7echo Ç1||['Ü$@ááecho case 
+%%%
+#!mode=file
+case ^[+<Eecho <<while [[:alpha:]]‚àÖò!+echo %%7echo àÅ
+%%%
+#!mode=file
+echo %%echo echo á<)echo <#E√"&&:?\if Ä
+%%%
+#!mode=stdin
+√50
+\x41;ò[:$echo 7‚\uÅ}&;Ä√
+%%%
+#!mode=stdin
+)#Ñ>echo <<<<1ò:??cá<&# in <ÅÇ
+%%%
+#!mode=file
+"adoneÑÖbÄ
+%%%
+#!mode=file
+ò echo echo ^echo ;
+%%%
+#!mode=file
+x√*fi\
+:+?$((\
+#!á5echo ÉÄ@)
+%%%
+#!mode=file
+($'echo ~àdone¿aò$((y?if 
+echo :do '\
+^¿à
+%%%
+#!mode=file
+2}\
+\u¿©\
+}O9%%echo ?)9!!}
+%%%
+#!mode=file
+`\x41:=[echo \
+then Ñ-	6ÅE'Ü$'É‚:?Oaecho 
+%%%
+#!mode=stdin
+ˇthen doneF	esac{0$"Ä@[echo 2‚$#:[['0à$((
+%%%
+#!mode=file
+|Ü*echo Ö<<-‚ˇ
+ˇFO'1©)&&*1/4
+%%%
+#!mode=stdin
+$(Fòesac&&9if c ^<&@‚Çecho 	©
+=x&echo 
+%%%
+#!mode=stdin
+8<<5©ÖÅ\uecho 
+%%%
+#!mode=stdin
+$while -1Ä^\x41))\x41ˇa
+%%%
+#!mode=file
+&'
+%%%
+#!mode=file
+echo echo 
+%%%
+#!mode=stdin
+cÇ{8
+%%%
+#!mode=stdin
+}?Äecho /?<<-9#b%%2done:="echo √6%Å©Ñecho 2
+%%%
+#!mode=stdin
+echo @!]=$(>4do becho O:?`à
+%%%
+#!mode=file
+)207(:-ÉÄ√E}87¿/<$@á É$echo '
+%%%
+#!mode=file
+ˇfor $($'$*Çecho y%©¿]?*||becho Ñ%echo do 
+%%%
+#!mode=stdin
+echo :8echo ;)$(Çá
+%%%
+#!mode=stdin
+\uecho Ñ?$*>&echo ]{`2>"!''&&echo 
+%%%
+#!mode=file
+;;Ü!á61[[:alpha:]]||$@do Ö@echo case Oòecho 1Üaecho echo [[:alpha:]]echo 
+%%%
+#!mode=stdin
+\
+$':?6Ä\9${#É${#Å
+%%%
+#!mode=file
+1~Åwhile 2>echo <Ç:OÜ©echo yáE0:-\u√01!|
+%%%
+#!mode=file
+||echo <<\c2É
+%%%
+#!mode=stdin
+$#echo Ç${\c!!echo +@1$Çdone
+%%%
+#!mode=file
+(>&;;\ò7E1$@¿:òecho 2©zÉòecho \
+ò:?
+%%%
+#!mode=file
+!á:=*};:?}&2fi
+%%%
+#!mode=file
+echo case 
+%%%
+#!mode=stdin
+<<-$#!${#^
+${#]<<Ö;;
+%%%
+#!mode=stdin
+{${#echo !á}echo echo 
+*©`
+%%%
+#!mode=stdin
+echo =\
+$(echo \cecho Ñ|
+%%%
+#!mode=stdin
+}-Oecho :?echo $']esac*ÄÉecho }5}√&*$((
+%%%
+#!mode=file
+*"<<-echo echo <&do y√F4¿$(%ÉÅecho √"òÑ~	y+
+%%%
+#!mode=file
+<<))<>&√òà-	¿donez2>case "
+%%%
+#!mode=stdin
+*0echo :-1√!echo $$*¿if Å$#<%>&Çfor E©
+%%%
+#!mode=stdin
+'¿?òecho "¿
+%%%
+#!mode=file
+$*then +@Ä~until 
+%%%
+#!mode=stdin
+Ñ in 	4echo xfi6&$@echo \esacecho =FÇO~?[
+%%%
+#!mode=stdin
+\4/{&echo =fi4"$(($</òò	áÑ3ò*	*while 
+%%%
+#!mode=file
+?%á5zecho ${# in "6< y‚
+%%%
+#!mode=stdin
+8Ä\x41%$((:=/<<-
+%%%
+#!mode=file
+\
+~do :+]echo 2Ñ##òEecho bcyÉ${]a2Å2a
+%%%
+#!mode=stdin
+!echo 2>$*\while ;;à!5'^$*`0$(([}{`8©!:=
+%%%
+#!mode=stdin
+;;##©$$@echo F}<&[É
+%%%
+#!mode=file
+6${'ò"then >&áÇò
+%%%
+#!mode=stdin
+echo $;<<
+%%%
+#!mode=stdin
+then 1"${:?@b!Å?
+%%%
+#!mode=file
+||<<-	echo !;;
+%%%
+#!mode=file
+'z<<-'É in `ÖE}done(
+%%%
+#!mode=stdin
+:=Ö\√echo ($'}[[:alpha:]]$
+%%%
+#!mode=stdin
+`'echo 8x))z4àò<<-echo done}‚echo =echo done6"Fá:?:?
+%%%
+#!mode=stdin
+<<Å‚}>&
+%%%
+#!mode=stdin
+ò$'doneif #until aecho  ©||echo }
+%%%
+#!mode=stdin
+echo becho 1fi##
+echo 1>~&&
+%%%
+#!mode=stdin
+esacdone&àx-à'echo ;;$))4[
+%%%
+#!mode=file
+É${#+\u !do &
+%%%
+#!mode=file
+a‚5|?Å}echo {;b[[:alpha:]]`echo @4)echo b}::40?
+%%%
+#!mode=stdin
+√á
+{>à##0&&É8}à8‚ in :=ÇFy+Ü$* in 2
+%%%
+#!mode=file
+${#‚<until  in ${?);; xecho done:-^\echo echo $echo ÑÇ©©|
+%%%
+#!mode=stdin
++&&ˇ
+%%%
+#!mode=stdin
+¿echo ${#echo `do 
+Ç‚"¿©zÖ©'	3Edo 
+%%%
+#!mode=file
+$*!:+
+%%%
+#!mode=stdin
+${if echo $((ˇá√
+%%%
+#!mode=file
+esac${#\ò
+%%%
+#!mode=stdin
+!\x41ò +
+%%%
+#!mode=file
+*‚:=2
+%%%
+#!mode=stdin
+Funtil 
+%%%
+#!mode=file
+O~©Üa4echo Åwhile !do $*\x41$(O}^*cÇ:+##fi&
+%%%
+#!mode=stdin
+}$>for :=á3<<-1}8
+%%%
+#!mode=file
+)echo do ))6}
+%%%
+#!mode=stdin
+©echo 7echo case |}[echo Ñ>#
+%%%
+#!mode=stdin
+&5Åò10ÑÑ>9+then F3$x}5/<b2>$(}!
+%%%
+#!mode=stdin
+á©+%%for ||$((`y8òÜ`/echo <
+%%%
+#!mode=stdin
+3$((&ˇÑ9:
+%%%
+#!mode=file
+ò$(4*({&&))√(¿#:?echo "
+%%%
+#!mode=stdin
+\cˇ$*
+/%))if echo 0\
+;¿&&case ;$echo )z
+%%%
+#!mode=stdin
+Üàcase [[:alpha:]]$'\u‚:=753
+%%%
+#!mode=stdin
+echo $@Ä¿'\c‚||echo ''72b`6Üˇ
+%%%
+#!mode=file
+&& ‚#)do echo >c${x:-echo ÜÄ¿Ç>echo 
+%%%
+#!mode=stdin
+ÅÜecho }\cÇ~bcase case $#echo {echo echo ¿"a
+%%%
+#!mode=stdin
+-echo case Ö!;}[Ö]&&
+%%%
+#!mode=stdin
+Äˇ?:~%¿
+%%%
+#!mode=file
+F√
+%%%
+#!mode=file
+!<&for !case $@)√fi$*~[echo ˇ%[[:alpha:]]¿echo :=<
+%%%
+#!mode=file
+>-/
+%%%
+#!mode=file
+$'Ö9Ñà&}Å
+%%%
+#!mode=file
+[^
+esac<&8Ç:
+%%%
+#!mode=stdin
+7Éwhile 	
+%%%
+#!mode=file
+\x41case 1$@~:=do echo echo echo 1©ÖÉ%%}
+%%%
+#!mode=stdin
+echo !c9©EF
+:-©y##
+%%%
+#!mode=stdin
+Üòecho 0]4${#&&echo 6Ñ'${"6É`||<&ÅOÖ
+%%%
+#!mode=stdin
+Ñfor 4É©##%%;&62echo 4OÄ}#Ö
+%%%
+#!mode=file
+-echo 2a √á
+%%%
+#!mode=file
+¿for #aÅ√:‚&:-cfor for ||02
+ò in É@Éecho 
+%%%
+#!mode=stdin
+©Å\x41$((Fx':?\
+%%%
+#!mode=stdin
+5;F%%Ö‚!}©<<-echo $@
+%%%
+#!mode=stdin
+"`	$(echo echo &&@zx&&3))c‚E1√2>\x41Åò[[:alpha:]]
+%%%
+#!mode=stdin
+ò`0a:-%%√||\ca
+%%%
+#!mode=stdin
+√{ in ||:+<</ˇecho 4‚Ñ^ˇ)"xecho y$'
+%%%
+#!mode=file
+Ö;Ü<<¿fi#√{\
+*8echo -echo Å
+%%%
+#!mode=stdin
+echo `echo &{
+%%%
+#!mode=file
+then '5 in $@Éesac${3
+%%%
+#!mode=stdin
+<||echo $
+%%%
+#!mode=stdin
+#:?echo echo \x41||##©
+%%%
+#!mode=stdin
+6cxa*√[ in %%echo ádo ¿Ü
+%%%
+#!mode=stdin
+$*${echo `<<'*‚òò}1$'0E[[:alpha:]]esac>Ç%
+%%%
+#!mode=file
+echo 2ò~Ä:echo \u$@&&$*
+do 
+%%%
+#!mode=stdin
+/`=‚©$':?{"F/‚esac‚'y
+%%%
+#!mode=stdin
+`2@Äwhile ${\
+[[:alpha:]]©echo echo @
+%%%
+#!mode=file
+\
+Ö]ÇÑ${8;echo {;;$'1))zecho '/:?echo :=$'2
+
+%%%
+#!mode=file
+&`Å{
+%%%
+#!mode=stdin
+([[:alpha:]]>
+%%%
+#!mode=file
+Éá
+%%%
+#!mode=file
+"echo [%
+%%%
+#!mode=stdin
+${#case echo !:?\u`
+%%%
+#!mode=file
+%Ç/á$(<#	6?$$'\ccase {E:-;;ò‚Ñ
+%%%
+#!mode=stdin
+Ç%%echo √àÄ!:=\x415'
+%%%
+#!mode=file
+à[[:alpha:]]echo ;;2>"${4
+%%%
+#!mode=stdin
+echo (á@;}>&F;;ácase }^5fiF\
+echo 	]Fecho 
+%%%
+#!mode=file
+9√=\u))4|!O in |{Å
+%%%
+#!mode=file
+`!*Ñ-ˇ$@-
+%%%
+#!mode=stdin
+echo :=Ä4\
+`6©¿'echo #${©àÉ
+%%%
+#!mode=file
+b√||cÇÑ\cÑ${$@$@:?\x41yuntil ^?(\u0~^<<-]y
+%%%
+#!mode=stdin
+case case }
+‚(ˇ<}`$(|;E in y{
+%%%
+#!mode=file
+\^Ñecho 
+%%%
+#!mode=file
+0Ö<<$#<<-©\x41<<-(do until 7òÜecho $#
+%%%
+#!mode=stdin
+*ò
+%%%
+#!mode=stdin
+echo á2>aecho :;~<<	
+%%%
+#!mode=file
+fiecho ']8:àÑecho à4$'{$'¿echo &&á@>&Å:echo ;	
+%%%
+#!mode=stdin
+:?òecho Fwhile echo &3echo &ÄÄ+/%)if echo &${ 
+%%%
+#!mode=file
+<<echo ò
+%%%
+#!mode=file
+‚c:-<&
+%%%
+#!mode=stdin
+√7doneÄbdoneecho EÅ3Ü:-&&Fcase ÖÉecho fi$((echo echo ^
+%%%
+#!mode=stdin
+à}ˇ}|for ¿ˇ"xb|)
+%%%
+#!mode=stdin
+do echo ‚Ä^
+%%%
+#!mode=stdin
+z+àáecho do fi'Ü:?echo Ç`for 
+%%%
+#!mode=file
+É$'c<<ÅÇÖy*É
+%%%
+#!mode=stdin
+% <<\x41‚O:?Ä0Å6‚}	
+%%%
+#!mode=stdin
+for echo 2for \
+}0yfi!:?(${\+8if echo [&-^\u
+%%%
+#!mode=file
+-0E(echo ]\c:-O√' in >&echo until 8!echo 
+%%%
+#!mode=stdin
+~3Ç¿|√
+%%%
+#!mode=file
+‚$*[[√9
+%%%
+#!mode=file
+9echo )${~	òÇ%
+%%%
+#!mode=file
+F'if 	2>%%$#3Ö‚!echo echo 
+%%%
+#!mode=stdin
+:+65à)then xÄdonez‚Ü in echo $#ò¿4<<-© in 
+%%%
+#!mode=file
+$(($((Ü1á©$#$'$*echo 
+/y#echo √$
+%%%
+#!mode=stdin
+[[0ˇ]$#:?à&&
+%%%
+#!mode=stdin
+%%Ç¿‚^
+}x}É¿}Ä(à&&5<<-
+%%%
+#!mode=file
+ò‚>á4$((?&&if òuntil echo 
+%%%
+#!mode=stdin
+òthen %%}áÄ\
+:until z$@/##}&case $*>echo :
+%%%
+#!mode=file
+©3É&&
+%%%
+#!mode=stdin
+echo echo 	echo 3`#until ˇfi¿Ñ\c6É>echo until :echo until until Ü
+%%%
+#!mode=stdin
+á5<<-√))E)$'then 
+%%%
+#!mode=file
+2>[[:alpha:]]Ñ/then à\
+
+%%%
+#!mode=file
+echo ${esacwhile :-}É8))7^~echo case aÖÄˇE${echo ]Ö
+%%%
+#!mode=stdin
+echo while O|echo echo }zF
+%%%
+#!mode=file
+by~¿Ñ8:'5Ñòecho E>Å
+%%%
+#!mode=file
+
+8:=^<<done
+%%%
+#!mode=stdin
+aà<esacà	O√5
+%%%
+#!mode=file
+;[[:alpha:]]\ 0:?>&echo ©à[echo echo Å[[:alpha:]]!6
+%%%
+#!mode=stdin
+Öecho <&do z\x41√yÉÄ/]2>echo ¿'ÜEecho '
+%%%
+#!mode=file
+echo É
+%%%
+#!mode=file
+!ÅÑ$*)/ˇ2Ç
+%%%
+#!mode=stdin
+0
+Å&while Çesac;; x	
+%%%
+#!mode=file
+\?\x41Ä!√
+%%%
+#!mode=stdin
+Ö";{echo <&{$*~acase ;done[for )?@$*92>
+%%%
+#!mode=stdin
+cá?
+%%%
+#!mode=stdin
+xecho ˇ\uÇ
+%%%
+#!mode=file
+[[:alpha:]]"2>à)<}
+%%%
+#!mode=file
+2)©=}\6Ñ9E&until |
+%%%
+#!mode=stdin
+*2echo Ü[7}$(%aecho É9;7 donez©fi
+%%%
+#!mode=file
+))?ò#O√^3\uecho b:a${#Fecho until {^${#á:-Ç$[[:alpha:]]
+%%%
+#!mode=stdin
+6{echo echo ;;Ñ`F&&39
+${#$É\x41${#‚if √‚
+%%%
+#!mode=stdin
+©echo Ä¿
+%%%
+#!mode=file
+\cecho if ©!Eecho echo 8\
+:=done in echo $((echo ~$((:?
+%%%
+#!mode=file
+Üesac%
+%%%
+#!mode=file
+)^fiecho ;$@O¿Äá${#fi"8{
+%%%
+#!mode=stdin
+$#√6/(ò-*]then ##${Äecho ò
+%%%
+#!mode=file
+$(echo ;;||
+%%%
+#!mode=stdin
+z+##$#:?
+%%%
+#!mode=file
+0echo |02>Ç{echo 2ˇ`%>&$Ñ√
+%%%
+#!mode=stdin
+©1'Å0Ç+*à5`ÖÅÉ>&[echo b
+%%%
+#!mode=file
+:=<&
+%%%
+#!mode=stdin
+&3:?^)$(Ä;Ç?2>do Åˇ
+%%%
+#!mode=file
+Ç1"‚)*`:$@Ç$'echo áx$' in )aÅ)=for F
+%%%
+#!mode=file
+2>#©:?‚||7ˇ&z@O4[)©Å%[
+%%%
+#!mode=file
+\u©do $@$^
+%%%
+#!mode=stdin
+=$#$echo ˇecho 2>echo <a2$*}5$*
+%%%
+#!mode=stdin
+9echo /aÇÅ$echo O`b
+%%%
+#!mode=stdin
+echo }$@:=&&echo -xˇ2>:-}>&Å©bÉ07do x+while echo 
+%%%
+#!mode=file
+\
+'echo ©=ò+:=&Ñb&
+%%%
+#!mode=file
+à|+:=\x41b‚/\x41echo |>&:?ˇ}for OÄ
+%%%
+#!mode=stdin
+echo echo ‚!echo Å`echo +$(({!]#‚
+%%%
+#!mode=file
+$#Eaò&
+%%%
+#!mode=file
+}	á/$@^echo 2>\c+z[√echo echo \c6#4{^bca
+%%%
+#!mode=file
+*echo *3<until ${##]done;if 
+%%%
+#!mode=stdin
+}Ä]$(cecho $@do then }||Å\u
+%%%
+#!mode=file
+Å8\)Ö):-$*||Ç$#
+%%%
+#!mode=file
+!for echo ?!\c[${
+%%%
+#!mode=file
+Äá	Ö© in %%2#ò~$((doneecho "then ày#]~echo ?É
+%%%
+#!mode=file
+;©:='Ç
+%%%
+#!mode=file
+>until !{:#=&Ä2>
+%%%
+#!mode=stdin
+Ü@
+>1{[||
+%%%
+#!mode=file
+echo echo cˇecho √echo $*echo %ya[echo if -/©
+%%%
+#!mode=stdin
+ˇÇ!echo |until :=%%'<<-{4
+%%%
+#!mode=stdin
+echo &#=
+%%%
+#!mode=file
+^$*á©%`~?
+%%%
+#!mode=file
+for c60x2>2echo :+''aˇy¿}'
+%%%
+#!mode=file
+echo b
+%%%
+#!mode=file
+#while echo É‚‚97
+%%%
+#!mode=file
+\|78]8))until -‚$#[+[[:alpha:]]z‚]{;>&>echo 
+%%%
+#!mode=stdin
+while ##-<echo a9z<echo <<-=^©ò)F
+%%%
+#!mode=stdin
+fidone4
+%%%
+#!mode=file
+y\u;;echo |20á}ÅÜá}do %
+%%%
+#!mode=file
+echo  √%%<<))echo 
+%%%
+#!mode=file
+:+/echo echo [[
+%%%
+#!mode=file
+echo echo Ä2>||:=+6))$()Ç${#	${echo echo echo case echo ©43
+%%%
+#!mode=stdin
+[:?6?5||2>" in ^\c))if =0do ]`~3b\u+`^
+%%%
+#!mode=stdin
+1;;/] echo case <&;<<9‚`ò
+%%%
+#!mode=stdin
+`@[√
+%%%
+#!mode=stdin
+7à<<?case >}2/‚"¿É
+%%%
+#!mode=stdin
+echo echo [[:alpha:]]?
+%%%
+#!mode=stdin
+echo \$'©43b3:+}!${Ea]^7esacÖ>&&*7echo "
+%%%
+#!mode=file
+<5until b$*E4&&Ö9&=))4*E?-]ÖÇ|:-*Ñ
+%%%
+#!mode=stdin
+2<+1Üecho 1||{
+%%%
+#!mode=stdin
+©Üecho echo !©;% 3á6\cÄwhile ©
+%%%
+#!mode=file
+{(
+%%%
+#!mode=stdin
+%%:=&Éy√
+<&echo until ;^¿5echo !)4}(;;esac
+%%%
+#!mode=stdin
+Ö<<-esac]àÅF(
+%%%
+#!mode=stdin
+[[:alpha:]]$(@<&%\x411}:
+%%%
+#!mode=stdin
+b\
+ˇ|
+%%%
+#!mode=file
+Ä>&$O<<done$E‚
+%%%
+#!mode=file
+`à}{$(‚(Ö	
+%%%
+#!mode=file
+:?$‚2>echo @~echo ©>ˇÜ@for ]@>&/[[:alpha:]]echo echo `
+%%%
+#!mode=stdin
+esacecho while 
+%%%
+#!mode=stdin
+2>$4&&6))echo do 
+%%%
+#!mode=file
+^Ä
+{fiÇOÄ1<<-};;$(esac
+%%%
+#!mode=stdin
+echo b‚
+%%%
+#!mode=stdin
+Ä||}√¿echo +%%$((echo 3Öecho ||echo esac$@ˇ|\cE);;
+%%%
+#!mode=file
+ $*echo +>&echo ?‚:+<&c2>
+%%%
+#!mode=stdin
+9)Ñ in 	?'¿
+%%%
+#!mode=file
+${#{<&\xÜ7echo >&‚'
+%%%
+#!mode=file
+[
+
+%%%
+#!mode=stdin
++@√case :->echo ˇ
+%%%
+#!mode=file
+=echo òecho 4':=!)Ç/¿\u
+%%%
+#!mode=file
+{-{¿Ü¿¿echo `%%>=
+echo 4
+%%%
+#!mode=stdin
+esac3';%%àÑ<&echo case ‚ ¿8:?"
+%%%
+#!mode=file
+©while ÇÅ!echo \x41`+6Ä:?7done2á+[[:alpha:]]({
+%%%
+#!mode=stdin
+>ˇ√7${\
+}3z"!:-Öcase echo $((ˇecho 
+%%%
+#!mode=stdin
+\
+ò^echo ‚:=echo '$((echo áÇ{E
+%%%
+#!mode=stdin
+]Äy|echo }!!echo Öza`52$(({
+%%%
+#!mode=file
+'√Ü[echo $((while F-5√if echo {\x41&Ä‚
+%%%
+#!mode=file
+$@echo echo $*\uÜÑÑÄ!<<à
+%%%
+#!mode=file
+/case {√ˇ#
+%%%
+#!mode=file
+Çdoneà$#do echo :?>'do ‚doneecho Ü&7||!|$*&Ö]9
+%%%
+#!mode=file
+[-$echo ||echo )
+%%%
+#!mode=file
+ày
+%%%
+#!mode=stdin
+echo 2$(\
+echo á"##2>for Ü+:=echo for echo case !$F/$?<<
+%%%
+#!mode=stdin
+<<$'F<&O]Ä9F$'O:-ˇ'}ò6"'5@$@Fecho 
+%%%
+#!mode=stdin
+%%Ü))!
+%%%
+#!mode=file
+:-à!6${ò√} `&&echo echo \cecho \u6y√?fi)E%%
+%%%
+#!mode=stdin
+Ä0áÜaòÇÜ 
+%%%
+#!mode=file
+|}á%%F}ò=${0:+Ä>:
+%%%
+#!mode=stdin
+`2>}%6)‚0$*esac||x[zecho ¿ in F||3echo  in echo Ö$*
+%%%
+#!mode=stdin
+\/  Åz
+%%%
+#!mode=stdin
+ádo if echo 3Ñ[donex
+%%%
+#!mode=stdin
+for à
+%%%
+#!mode=stdin
+||Ç7echo 
+%%%
+#!mode=stdin
+(29@%%1¿ in 8à-‚z'^*while 6áx"echo 
+%%%
+#!mode=file
+: in 2>	4echo \uecho \c&<}√2:=[[:alpha:]]@á7Ñ$#8${#echo 
+%%%
+#!mode=stdin
+-á50esac@
+%%%
+#!mode=stdin
+}á$*3{echo echo ^"Å!\x41fi¿|Üecho x^:<\
+
+%%%
+#!mode=stdin
+^3‚${#ˇ)
+%%%
+#!mode=stdin
+echo $6c$'-)Çecho 0ÇE2:+á
+%%%
+#!mode=file
+echo =echo 6x&á)
+%%%
+#!mode=stdin
+2z`á\c!echo echo until 8ˇ2echo $'
+%%%
+#!mode=file
+xFÄ<<->áxfiÑ${#$((‚\;2
+%%%
+#!mode=stdin
+echo 	3ò"|Ä'))
+%%%
+#!mode=stdin
+$@ò:?>&$(()Fdone
+%%%
+#!mode=file
+7c$@case Ü√{2${#$@:-
+%%%
+#!mode=file
+9Éá
+%%%
+#!mode=file
+¿9!√‚\c5}~\c
+%%%
+#!mode=file
+echo echo &Ç/2echo echo <<-Fzzif `√(`$echo echo 
+%%%
+#!mode=file
+03&Ü${#
+%%%
+#!mode=stdin
+2>|8Üwhile ):+fi\
++;;$#
+%%%
+#!mode=stdin
+√	:=&&echo ##4-:-'a>&
+%%%
+#!mode=stdin
+2+@Ä{ÖÜ4Ç	F
+%%%
+#!mode=file
+$'`$(/;‚echo Ü|[until O:=2<Fá&&\c:?$((Äecho !if 
+%%%
+#!mode=stdin
+áwhile Ñ*y
+%%%
+#!mode=file
+`?@Oecho <<}
+%%%
+#!mode=file
+echo Éecho Ñá}4ÉÖ~x0&&
+<^#:='=©!$àÇ
+%%%
+#!mode=file
+Öcase }while $*:+$((áO;ò+8$&&b>&E||©^ÉÇ;;8
+%%%
+#!mode=stdin
+#\u{Öecho *Ö[[:alpha:]]
+%%%
+#!mode=stdin
+>\
+O"√2>$x¿~zÑ:-echo 
+%%%
+#!mode=file
+EÑ√}done\u|&&Å<<while [[:alpha:]]Å3
+%%%
+#!mode=stdin
+"||if 

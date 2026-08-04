@@ -23,13 +23,15 @@ BUILTIN_DELIMITER = re.compile(
     re.S,
 )
 
-# <blockquote class="synopsis"><p><code>…</code></p></blockquote> is a command
-# synopsis, not a quotation. pandoc's BlockQuote carries no attributes, so the
-# class would be lost; rewrite to <pre> to land as a code block.
+# <blockquote class="synopsis"> is a command synopsis, not a quotation. pandoc's
+# BlockQuote carries no attributes, so the class would be lost; rewrite to <pre>
+# to land as a code block. The inner wrapper varies: a plain synopsis uses <p>,
+# but an option-shaded one (bg, fc, fg, jobs, type) uses <div class="box">, so
+# strip whichever wrapper is there rather than matching one of them.
 SYNOPSIS = re.compile(
-    r'<blockquote class="synopsis">\s*<p>(?P<body>.*?)</p>\s*</blockquote>',
-    re.S,
+    r'<blockquote class="synopsis">(?P<body>.*?)</blockquote>', re.S,
 )
+SYNOPSIS_WRAPPER = re.compile(r'</?(?:p|div)\b[^>]*>')
 
 
 def strip(html: str) -> str:
@@ -55,7 +57,12 @@ def strip(html: str) -> str:
     html = BUILTIN_DELIMITER.sub(
         r'<h3 class="builtin" id="\g<tag>">\g<slug></h3>', html,
     )
-    html = SYNOPSIS.sub(r'<pre class="synopsis">\g<body></pre>', html)
+    html = SYNOPSIS.sub(
+        lambda m: '<pre class="synopsis">'
+                  + SYNOPSIS_WRAPPER.sub('', m.group('body')).strip()
+                  + '</pre>',
+        html,
+    )
 
     return html
 

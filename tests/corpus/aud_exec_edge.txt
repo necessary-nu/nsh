@@ -1,0 +1,491 @@
+#!name command exec combination
+#!mode=file
+command exec echo via-command-exec
+echo NOTREACHED
+%%%
+#!name command command exec
+#!mode=file
+command command exec echo double-command-exec
+echo NOTREACHED
+%%%
+#!name command exec with no operands
+command exec 2>&1
+echo alive
+%%%
+#!name exec via command in subshell with redirect
+( command exec > co.txt; echo hidden ); cat co.txt
+%%%
+#!name command -p exec
+#!mode=file
+command -p exec echo p-exec
+echo NOTREACHED
+%%%
+#!name vlocal with special builtin assignments
+x=1
+x=9 export z=2
+echo "x=$x z=$z"
+%%%
+#!name vlocal with command export
+x=1
+x=9 command export w=2
+echo "x=$x w=$w"
+%%%
+#!name assignment with eval special builtin
+x=1
+x=9 eval 'echo "inside=$x"'
+echo "after=$x"
+%%%
+#!name assignment with . special builtin
+printf 'echo "dot sees x=$x"\n' > ax.sh
+x=1
+x=9 . ./ax.sh
+echo "after=$x"
+%%%
+#!name assignment before break-ish builtins
+x=1
+x=5 true
+echo "x=$x"
+x=5 :
+echo "x=$x"
+%%%
+#!name assignment before readonly
+r=1 readonly rr=2
+echo "r=$r rr=$rr"
+%%%
+#!name PATH with %func directory and type
+mkdir -p fdir
+printf 'fnx() { echo FROMFUNC; }\n' > fdir/fnx
+PATH=fdir%func:/bin:/usr/bin
+type fnx
+fnx
+type fnx
+%%%
+#!name PATH %func then command -v
+mkdir -p fdir2
+printf 'fny() { echo Y; }\n' > fdir2/fny
+PATH=fdir2%func:/bin:/usr/bin
+command -v fny
+fny
+command -v fny
+%%%
+#!name PATH %func with command (DO_NOFUNC)
+mkdir -p fdir3
+printf 'fnz() { echo Z; }\n' > fdir3/fnz
+PATH=fdir3%func:/bin:/usr/bin
+command fnz 2>&1; echo "rc=$?"
+%%%
+#!name PATH %builtin%func chained
+PATH=%builtin%func:/bin:/usr/bin
+type echo
+echo chained-ok
+%%%
+#!name PATH entry that is literally percent
+mkdir -p 'pc%dir'
+printf '#!/bin/sh\necho PCT\n' > 'pc%dir/pctprog'; chmod 755 'pc%dir/pctprog'
+PATH=$PWD/pc%dir:/bin:/usr/bin
+pctprog 2>&1 | sed 's|.*/||'
+echo "rc=$?"
+%%%
+#!name PATH percent at end of entry
+PATH=/bin%:/usr/bin
+command -v true >/dev/null 2>&1; echo "rc=$?"
+echo alive
+%%%
+#!name rehash absolute path element unchanged
+mkdir -p ab1
+printf '#!/bin/sh\necho AB1\n' > ab1/abp; chmod 755 ab1/abp
+PATH=$PWD/ab1:/bin:/usr/bin
+abp
+mkdir -p sub2
+cd sub2
+abp
+cd ..
+abp
+%%%
+#!name rehash with relative element that moves
+mkdir -p r1 r1/inner
+printf '#!/bin/sh\necho OUTER\n' > r1/rp; chmod 755 r1/rp
+printf '#!/bin/sh\necho INNER\n' > r1/inner/rp; chmod 755 r1/inner/rp
+PATH=r1:r1/inner:/bin:/usr/bin
+rp
+cd r1
+rp
+cd ..
+rp
+%%%
+#!name hash entry deleted when command removed
+mkdir -p g1
+printf '#!/bin/sh\necho G1\n' > g1/gp; chmod 755 g1/gp
+PATH=$PWD/g1:/bin:/usr/bin
+gp
+rm g1/gp
+gp 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+hash | sed "s|$PWD|WD|"
+%%%
+#!name builtin shadowed by PATH before %builtin
+mkdir -p s1
+printf '#!/bin/sh\necho EXTERNAL-TRUE\n' > s1/true; chmod 755 s1/true
+PATH=$PWD/s1:%builtin:/bin:/usr/bin
+true
+echo "rc=$?"
+type true | sed "s|$PWD||"
+%%%
+#!name special builtin not shadowed
+mkdir -p s2
+printf '#!/bin/sh\necho EXTERNAL-COLON\n' > s2/:; chmod 755 s2/:
+PATH=$PWD/s2:%builtin:/bin:/usr/bin
+:
+echo "rc=$?"
+type : | sed "s|$PWD||"
+%%%
+#!name hashcd invalidates builtin entries with builtinloc
+mkdir -p s3
+printf '#!/bin/sh\necho EXT\n' > s3/true; chmod 755 s3/true
+PATH=$PWD/s3:%builtin:/bin:/usr/bin
+true
+cd s3
+true
+cd ..
+true
+%%%
+#!name LINENO in nested function definitions
+f() {
+  g() {
+    echo "g:$LINENO"
+  }
+  echo "f:$LINENO"
+  g
+}
+f
+echo "top:$LINENO"
+%%%
+#!name LINENO after dot file
+printf 'echo "dot:$LINENO"\necho "dot:$LINENO"\n' > ln.sh
+. ./ln.sh
+echo "main:$LINENO"
+%%%
+#!name LINENO in for and case
+for i in 1; do
+echo "for:$LINENO"
+done
+case x in
+x) echo "case:$LINENO" ;;
+esac
+%%%
+#!name errors during expredir
+( > "${nope?boom}" ) 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+echo alive
+%%%
+#!name redirect expansion producing multiple words
+set -- a b
+echo hi > "$*" 2>/dev/null; ls | grep -c 'a b' 2>/dev/null
+echo "rc=$?"
+%%%
+#!name here doc expansion in subshell
+( cat <<EOF
+$((1+2))
+EOF
+)
+%%%
+#!name xtrace with special chars
+set -x
+echo 'a b' "c
+d" 'e$f'
+set +x
+%%%
+#!name xtrace with assignments and redirect
+set -x
+a=1 b='x y' cat /dev/null
+set +x
+%%%
+#!name xtrace of pipeline and subshell
+set -x
+echo a | cat > /dev/null
+( echo b ) > /dev/null
+set +x
+%%%
+#!name xtrace nested PS4
+PS4='$(echo PS) '
+set -x
+echo hi
+set +x
+%%%
+#!name xtrace inside function
+f() { echo infn; }
+set -x
+f
+set +x
+%%%
+#!name read with multibyte
+printf '\303\251x\n' | { read v; echo "[$v]"; }
+%%%
+#!name read very long line
+awk 'BEGIN{for(i=0;i<2000;i++) printf "x"; printf "\n"}' > big.txt
+read v < big.txt
+echo "${#v}"
+%%%
+#!name read with many variables
+printf 'a b c d e f g h\n' | { read v1 v2 v3 v4 v5 v6 v7 v8 v9; echo "[$v1][$v8][$v9]"; }
+%%%
+#!name read with IFS containing backslash
+printf 'a\\\\b\n' | { IFS='\' read x y; echo "[$x][$y]"; }
+%%%
+#!name read with IFS empty
+printf '  a b  \n' | { IFS= read x; echo "[$x]"; }
+%%%
+#!name read then rest of script from stdin
+#!mode=stdin
+read line
+echo "read=[$line]"
+echo rest
+%%%
+#!name read in a while over a pipe
+printf 'a\nb\nc\n' | while read l; do echo "got $l"; done
+%%%
+#!name read return status at EOF mid-line
+printf 'x y' | { read a b; echo "rc=$? [$a][$b]"; }
+%%%
+#!name many arguments
+set -- $(awk 'BEGIN{for(i=0;i<500;i++) printf "a%d ", i}')
+echo "$#"
+echo "$1 $500"
+f() { echo "$#"; }
+f "$@"
+%%%
+#!name deep nesting of subshells
+( ( ( ( ( echo deep ) ) ) ) )
+echo "rc=$?"
+%%%
+#!name recursive function depth 100
+f() { [ "$1" -le 0 ] && return 0; f $(( $1 - 1 )); }
+f 100
+echo "rc=$?"
+%%%
+#!name recursive function with locals depth 50
+f() { local a="$1"; [ "$a" -le 0 ] && return 0; f $(( a - 1 )); }
+f 50
+echo "rc=$?"
+%%%
+#!name trap RETURN-like via EXIT in subshell
+( trap 'echo SUBEXIT' EXIT; echo body )
+echo main
+%%%
+#!name trap and exec
+#!mode=file
+trap 'echo T' EXIT
+exec /bin/echo replaced
+echo NOTREACHED
+%%%
+#!name trap with signal during wait
+trap 'echo GOTUSR' USR1
+( sleep 0 ) &
+wait
+echo "rc=$?"
+%%%
+#!name exitshell status from function
+#!mode=file
+f() { exit 7; }
+f
+%%%
+#!name exit inside trap
+#!mode=file
+trap 'echo intrap; exit 5' EXIT
+exit 2
+%%%
+#!name nested traps
+#!mode=file
+trap 'echo outer' EXIT
+f() { trap 'echo inner' EXIT; exit 1; }
+f
+%%%
+#!name savestatus with exit in trap
+#!mode=file
+trap 'exit' EXIT
+false
+%%%
+#!name command not found message format
+nosuchcommandxyz 2>&1
+echo "rc=$?"
+%%%
+#!name permission denied message format
+: > pd; chmod 000 pd
+./pd 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+%%%
+#!name is a directory message
+mkdir -p isdir
+./isdir 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+%%%
+#!name too long path name
+p=$(awk 'BEGIN{for(i=0;i<50;i++) printf "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/"}')
+"/$p/x" 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+%%%
+#!name loop symlink
+ln -s l1 l2 2>/dev/null
+ln -s l2 l1 2>/dev/null
+./l1 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+%%%
+#!name script with shebang to nonexistent
+printf '#!/nonexistent/interp\necho x\n' > sb.sh; chmod 755 sb.sh
+./sb.sh 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+%%%
+#!name binary garbage as script
+printf '\177ELF\001\002\003\004\n' > bg.bin; chmod 755 bg.bin
+./bg.bin 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+%%%
+#!name empty executable file
+: > ee; chmod 755 ee
+./ee; echo "rc=$?"
+%%%
+#!name pipeline where first exits immediately
+true | cat; echo "rc=$?"
+( exit 3 ) | ( exit 0 ); echo "rc=$?"
+%%%
+#!name pipeline with 5 stages
+echo a | cat | cat | cat | cat; echo "rc=$?"
+%%%
+#!name pipeline background then wait
+echo a | cat &
+wait
+echo "rc=$?"
+%%%
+#!name backgrounded builtin
+{ echo bgbuiltin; } &
+wait
+%%%
+#!name nested command substitution depth
+echo "$(echo "$(echo "$(echo deep3)")")"
+%%%
+#!name command substitution with large output
+x=$(awk 'BEGIN{for(i=0;i<3000;i++) print "line" i}')
+echo "${#x}"
+%%%
+#!name command substitution trailing newlines
+x=$(printf 'a\n\n\n'); echo "[$x]"
+x=$(printf 'a'); echo "[$x]"
+%%%
+#!name back_exitstatus in bltincmd via assignment
+x=$(exit 4)
+echo "rc=$?"
+y=$(exit 5) > /dev/null
+echo "rc=$?"
+%%%
+#!name back_exitstatus reset per command
+false
+:
+echo "rc=$?"
+%%%
+#!name evalcommand no words only redirects twice
+> f1
+> f2
+[ -f f1 ] && [ -f f2 ] && echo both
+%%%
+#!name ulimit with -H then set both
+( ulimit -f 100; ulimit -Hf; ulimit -Sf )
+%%%
+#!name ulimit zero value
+( ulimit -c 0; ulimit -c; ulimit -Hc )
+%%%
+#!name ulimit huge value
+( ulimit -f 99999999999999999999 2>&1; ulimit -f )
+%%%
+#!name ulimit negative-looking
+( ulimit -f -- 2>&1; echo "rc=$?" )
+%%%
+#!name ulimit unknown option
+ulimit -Z 2>&1; echo "rc=$?"
+%%%
+#!name umask with leading zeros
+( umask 0022; umask )
+( umask 00022; umask )
+( umask 000; umask )
+%%%
+#!name umask with 8 or 9
+( umask 018 2>&1; echo "rc=$?" )
+%%%
+#!name umask symbolic with commas and no ops
+( umask 022; umask 'u,g' 2>&1; echo "rc=$?" )
+%%%
+#!name umask -S then feed back
+m=$( umask -S )
+( umask "$m"; umask )
+%%%
+#!name jobs after job finishes and freejob
+sleep 0 &
+wait
+jobs
+sleep 0 &
+wait
+jobs
+echo done
+%%%
+#!name many background jobs growjobtab
+i=0
+while [ $i -lt 12 ]; do
+  ( exit $i ) &
+  i=$((i+1))
+done
+wait
+echo "rc=$?"
+%%%
+#!name job table reuse after wait
+i=0
+while [ $i -lt 5 ]; do
+  true &
+  wait
+  i=$((i+1))
+done
+jobs
+echo done
+%%%
+#!name wait with job spec after completion
+sleep 0 &
+wait
+wait %1 2>&1; echo "rc=$?"
+%%%
+#!name evalstring stops at evalskip in dot file
+printf 'echo a\nbreak\necho NOPE\n' > es.sh
+for i in 1; do . ./es.sh; done
+echo after
+%%%
+#!name eval with trailing skip
+f() { eval 'return 3; echo NOPE'; echo NOPE2; }
+f; echo "rc=$?"
+%%%
+#!name eval EV_TESTED propagation with set -e
+set -e
+if eval 'false'; then echo t; else echo f; fi
+echo alive
+%%%
+#!name eval sets exit status of last command
+eval 'true; false'; echo "rc=$?"
+eval 'false; true'; echo "rc=$?"
+%%%
+#!name evaltree NULL node
+;
+echo "rc=$?"
+%%%
+#!name noexec flag
+#!shargs -n
+echo NOTPRINTED
+false
+%%%
+#!name noexec with syntax error
+#!shargs -n
+if true; then
+echo x
+%%%
+#!name set -n mid script
+#!mode=file
+echo one
+set -n
+echo NOTPRINTED
+set +n
+echo NOTPRINTED2

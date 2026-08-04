@@ -1,0 +1,7654 @@
+#!mode=file
+v=V
+echo a\
+b
+%%%
+#!mode=file
+v=V
+echo `echo z` > f.txt
+cat f.txt
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo b > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+cat <<EO"F"
+${
+$v ${v} ${v:-d} ${#v}
+
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-EOF
+	${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+cat <<'EOF'
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+v=~
+cat <<\EOF
+EOF
+if true; then
+cat <<EO"F"
+EO
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo a=b > f.txt
+cat f.txt
+v=$'a\tb'
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+for i in 1 2; do
+cat <<'EOF'
+"quoted" 'single'
+${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+done
+cat <<'EOF'
+${v#a} ${v%b} ${v##*} ${v%%*}
+`
+$((1+2)) $((v)) $(($#))
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<-"EOF"
+	$((1+2)) $((v)) $(($#))
+EOF
+cat <<-"EOF"
+EOF
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+v=?
+cat <<E\OF
+$v ${v} ${v:-d} ${#v}
+	TABBED
+	TABBED
+EOF
+%%%
+#!mode=file
+v=V
+cat <<-EO"F"
+	"quoted" 'single'
+	}
+		TABBED
+EOF
+echo after
+for i in 1 2; do
+cat <<E\OF
+$
+$@ $* $?
+${
+EOF
+done
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-EO"F"
+	"quoted" 'single'
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo $'\x41'
+%%%
+#!mode=file
+v=V
+cat <<\EOF
+$
+$((1+2)) $((v)) $(($#))
+}
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+v=*
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo x:y > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+v=$'\x41'
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo $'\cA'
+%%%
+#!mode=file
+v=V
+cat <<EOF
+$
+"quoted" 'single'
+EOF
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+v=`echo z`
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+cat <<X
+X
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+cat <<'EOF'
+$((1+2)) $((v)) $(($#))
+\$ \` \\ \" \a \
+EOF
+if true; then
+cat <<-E\OF
+EOF
+fi
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<"EOF"
+EOF
+done
+echo a
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo $'\'' > f.txt
+cat f.txt
+if true; then
+cat <<EO"F"
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo * > f.txt
+cat f.txt
+cat <<EOF
+\$ \` \\ \" \a \
+EOF
+echo $'\'' `echo z` ?
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+cat <<-"EOF"
+	~ ~/x
+	~ ~/x
+EOF
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo a\
+b
+cat <<-X
+	$@ $* $?
+X
+echo after
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<'EOF'
+EO
+plain text
+EOF
+fi
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo `echo z` > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo ~ > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+v=b
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo a $'\cA' \
+%%%
+#!mode=file
+v=V
+echo '\$v' a\ b
+echo $(cat <<I
+inner $v
+I
+)
+if true; then
+cat <<-X
+	$@ $* $?
+	$v ${v} ${v:-d} ${#v}
+	$@ $* $?
+X
+fi
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo '\$v' > f.txt
+cat f.txt
+cat <<EO"F"
+$
+~ ~/x
+EOF
+echo after
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo $'\cA' a \
+cat <<-EOF
+	$((1+2)) $((v)) $(($#))
+	"quoted" 'single'
+EOF
+echo after
+for i in 1 2; do
+cat <<-X
+	$v ${v} ${v:-d} ${#v}
+	\$ \` \\ \" \a \
+	$
+X
+done
+%%%
+#!mode=file
+v=V
+echo b > f.txt
+cat f.txt
+echo $'\cA' a *
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+echo ${v:-x} > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo ${v:-x} ? $v
+echo ${v:-x} > f.txt
+cat f.txt
+if true; then
+cat <<"EOF"
+`
+EOF
+fi
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<\EOF
+${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+fi
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<EOF
+aéb
+EOF
+fi
+cat <<'EOF'
+EOFX
+plain text
+EOF
+echo after
+if true; then
+cat <<\EOF
+`
+\$ \` \\ \" \a \
+EOF
+fi
+%%%
+#!mode=file
+v=V
+v=~
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo $(echo y) a\ b ~
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<-E\OF
+	$((1+2)) $((v)) $(($#))
+		TABBED
+EOF
+echo `cat <<I
+inner
+I
+`
+echo $v > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo a\
+b
+cat <<-E'O'F
+	\$ \` \\ \" \a \
+	`
+		TABBED
+EOF
+%%%
+#!mode=file
+v=V
+echo \ b
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo `cat <<I
+inner
+I
+`
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+v=$'\cA'
+cat <<X
+EO
+aéb
+${
+X
+echo after
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<X
+X
+%%%
+#!mode=file
+v=V
+echo a\
+b
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo $v
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo a\
+b
+%%%
+#!mode=file
+v=V
+echo $((1+1))
+echo ${v:-x} ? $(echo y)
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-X
+	$v ${v} ${v:-d} ${#v}
+X
+fi
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo a > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+cat <<E\OF
+`
+`
+EO
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<E'O'F
+EOF
+fi
+%%%
+#!mode=file
+v=V
+v=x:y
+%%%
+#!mode=file
+v=V
+cat <<"EOF"
+${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+for i in 1 2; do
+cat <<EOF
+EOF
+done
+for i in 1 2; do
+cat <<E\OF
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo $'\'' a\ b
+%%%
+#!mode=file
+v=V
+cat <<-EO"F"
+	$
+EOF
+echo a\
+b
+cat <<-X
+	${v#a} ${v%b} ${v##*} ${v%%*}
+	$@ $* $?
+	EOFX
+X
+echo after
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+cat <<-EOF
+EOF
+echo after
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+cat <<-E'O'F
+EOF
+%%%
+#!mode=file
+v=V
+echo "a b"
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+cat <<'EOF'
+EOFX
+
+	TABBED
+EOF
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+v="$v"
+for i in 1 2; do
+cat <<X
+aéb
+	TABBED
+X
+done
+%%%
+#!mode=file
+v=V
+v=b
+echo a\
+$v
+echo a > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+echo $(echo y) > f.txt
+cat f.txt
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo a\ b > f.txt
+cat f.txt
+echo "a\
+b"
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<E\OF
+`
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo $(echo y) > f.txt
+cat f.txt
+cat <<\EOF
+EOF
+cat <<-E'O'F
+	${v#a} ${v%b} ${v##*} ${v%%*}
+	aéb
+	EO
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo x:y > f.txt
+cat f.txt
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo a > f.txt
+cat f.txt
+v=$'\x41'
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<\EOF
+$
+$((1+2)) $((v)) $(($#))
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<-EOF
+	${
+		TABBED
+EOF
+echo after
+cat <<X
+~ ~/x
+${
+"quoted" 'single'
+X
+echo after
+echo x:y > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+v=b
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo $'\'' \ $'\''
+if true; then
+cat <<-"EOF"
+	
+	"quoted" 'single'
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo `echo z` > f.txt
+cat f.txt
+cat <<E\OF
+${
+`echo bq` $(echo dp)
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo "a b" > f.txt
+cat f.txt
+echo [ab] > f.txt
+cat f.txt
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+echo a\
+b
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+v=a\ b
+cat <<"EOF"
+EOF
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo `cat <<I
+inner
+I
+`
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-\EOF
+	aéb
+	EO
+	~ ~/x
+EOF
+done
+%%%
+#!mode=file
+v=V
+cat <<E\OF
+EOF
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo $(cat <<I
+inner $v
+I
+)
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+v=\
+echo $'\cA' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+cat <<'EOF'
+`
+$
+$v ${v} ${v:-d} ${#v}
+EOF
+echo after
+cat <<A; cat <<B
+1
+A
+2
+B
+for i in 1 2; do
+cat <<'EOF'
+$((1+2)) $((v)) $(($#))
+EOF
+done
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+echo a\
+b
+cat <<-E\OF
+	`echo bq` $(echo dp)
+	`echo bq` $(echo dp)
+		TABBED
+EOF
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-EOF
+		TABBED
+EOF
+done
+%%%
+#!mode=file
+v=V
+cat <<-EOF
+	~ ~/x
+	~ ~/x
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+v=$'\x41'
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+cat <<'EOF'
+EOF
+echo after
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-\EOF
+	aéb
+EOF
+done
+echo x:y $'\cA' `echo z`
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo "a\
+b"
+if true; then
+cat <<X
+\$ \` \\ \" \a \
+X
+fi
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+for i in 1 2; do
+cat <<-EOF
+	a\
+	`echo bq` $(echo dp)
+EOF
+done
+cat <<-E\OF
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+v=$'\''
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<EO"F"
+a\
+\$ \` \\ \" \a \
+${
+EOF
+done
+echo x:y > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-EOF
+	~ ~/x
+EOF
+fi
+echo a=b a
+%%%
+#!mode=file
+v=V
+echo b [ab]
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+echo a\
+"c"
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<"EOF"
+EOF
+fi
+echo $((1+1)) '\$v' \
+echo $v "$v"
+%%%
+#!mode=file
+v=V
+cat <<-"EOF"
+	\$ \` \\ \" \a \
+EOF
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+if true; then
+cat <<-'EOF'
+	${v#a} ${v%b} ${v##*} ${v%%*}
+	aéb
+	$
+EOF
+fi
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<X
+}
+"quoted" 'single'
+plain text
+X
+fi
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<-E'O'F
+	${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+echo $(echo y) > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo [ab] a a
+echo $(cat <<I
+inner $v
+I
+)
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo a\
+b
+echo `cat <<I
+inner
+I
+`
+v=x:y
+%%%
+#!mode=file
+v=V
+v=$(echo y)
+echo a\ b b [ab]
+%%%
+#!mode=file
+v=V
+echo $((1+1)) $'\'' `echo z`
+%%%
+#!mode=file
+v=V
+cat <<-E'O'F
+	EO
+	
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<X
+${v#a} ${v%b} ${v##*} ${v%%*}
+$
+X
+echo a\
+"c"
+v=$((1+1))
+%%%
+#!mode=file
+v=V
+cat <<\EOF
+EOFX
+EOF
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo $(cat <<I
+inner $v
+I
+)
+if true; then
+cat <<\EOF
+\$ \` \\ \" \a \
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo a\
+b
+cat <<X
+X
+echo after
+%%%
+#!mode=file
+v=V
+echo ~ > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+cat <<-X
+	a\
+	~ ~/x
+X
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<A; cat <<B
+1
+A
+2
+B
+for i in 1 2; do
+cat <<-X
+	"quoted" 'single'
+	${
+	${
+X
+done
+%%%
+#!mode=file
+v=V
+echo a\
+b
+%%%
+#!mode=file
+v=V
+echo a > f.txt
+cat f.txt
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo a\
+"c"
+cat <<-'EOF'
+	${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+%%%
+#!mode=file
+v=V
+v=$'a\tb'
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo a\
+b
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+echo a\
+"c"
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+for i in 1 2; do
+cat <<"EOF"
+${
+~ ~/x
+aéb
+EOF
+done
+cat <<-\EOF
+	$@ $* $?
+	}
+	EO
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+cat <<-"EOF"
+EOF
+echo after
+v=x:y
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<\EOF
+$((1+2)) $((v)) $(($#))
+`
+${
+EOF
+done
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<'EOF'
+EOF
+done
+echo $(echo y) > f.txt
+cat f.txt
+for i in 1 2; do
+cat <<-EO"F"
+	`
+	$v ${v} ${v:-d} ${#v}
+EOF
+done
+%%%
+#!mode=file
+v=V
+v=`echo z`
+echo $((1+1))
+cat <<-X
+	$
+X
+echo after
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo a\
+"c"
+if true; then
+cat <<X
+aéb
+X
+fi
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<-EOF
+	$((1+2)) $((v)) $(($#))
+EOF
+echo after
+echo a x:y
+%%%
+#!mode=file
+v=V
+cat <<'EOF'
+EO
+"quoted" 'single'
+~ ~/x
+EOF
+echo after
+v=a
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo a\
+b
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<E\OF
+${
+EOFX
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<X
+$
+${v#a} ${v%b} ${v##*} ${v%%*}
+
+X
+echo after
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo $'\cA' $'\x41' *
+echo $'\x41'
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo x:y
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<'EOF'
+aéb
+`
+EOF
+done
+echo `cat <<I
+inner
+I
+`
+echo a > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo "a b" ${v:-x}
+for i in 1 2; do
+cat <<X
+$@ $* $?
+`
+X
+done
+%%%
+#!mode=file
+v=V
+cat <<-\EOF
+	~ ~/x
+EOF
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-\EOF
+	${
+	}
+EOF
+done
+cat <<-'EOF'
+	
+EOF
+echo after
+v=a
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+cat <<-\EOF
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo \ > f.txt
+cat f.txt
+cat <<"EOF"
+`
+${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+if true; then
+cat <<-X
+	\$ \` \\ \" \a \
+	$((1+2)) $((v)) $(($#))
+X
+fi
+%%%
+#!mode=file
+v=V
+echo \
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo ?
+echo a\
+$v
+for i in 1 2; do
+cat <<-"EOF"
+	plain text
+	~ ~/x
+	a\
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo `echo z` > f.txt
+cat f.txt
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+cat <<-\EOF
+	"quoted" 'single'
+	\$ \` \\ \" \a \
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo a\
+b
+echo `cat <<I
+inner
+I
+`
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<'EOF'
+"quoted" 'single'
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<E\OF
+~ ~/x
+EOF
+v=a\ b
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo ${v:-x} > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo $'\cA' $(echo y) $'\cA'
+%%%
+#!mode=file
+v=V
+echo x:y b
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo $'\x41'
+cat <<-\EOF
+	\$ \` \\ \" \a \
+	$((1+2)) $((v)) $(($#))
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<-"EOF"
+	${
+	EO
+EOF
+cat <<A; cat <<B
+1
+A
+2
+B
+echo a\
+b
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+echo a\
+b
+%%%
+#!mode=file
+v=V
+echo ${v:-x} > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-\EOF
+	$((1+2)) $((v)) $(($#))
+	${
+	\$ \` \\ \" \a \
+EOF
+fi
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<E\OF
+EOF
+done
+echo "a\
+b"
+echo `echo z` "$v" $'\x41'
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<"EOF"
+${
+$v ${v} ${v:-d} ${#v}
+	TABBED
+EOF
+done
+echo $(cat <<I
+inner $v
+I
+)
+echo $((1+1)) $'\'' a=b
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+echo $'\'' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo a\
+b
+if true; then
+cat <<X
+X
+fi
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-E'O'F
+	$((1+2)) $((v)) $(($#))
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<E'O'F
+plain text
+EOF
+echo after
+echo a\
+b
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<EO"F"
+plain text
+aéb
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<EO"F"
+$((1+2)) $((v)) $(($#))
+"quoted" 'single'
+${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+done
+echo $'\'' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<\EOF
+`echo bq` $(echo dp)
+$@ $* $?
+~ ~/x
+EOF
+fi
+echo "a\
+b"
+v=$(echo y)
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-E'O'F
+	"quoted" 'single'
+	"quoted" 'single'
+	}
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo `cat <<I
+inner
+I
+`
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-'EOF'
+	aéb
+	aéb
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<E'O'F
+EOF
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<E\OF
+$((1+2)) $((v)) $(($#))
+EOF
+fi
+echo a\
+b
+v=${v:-x}
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-E'O'F
+EOF
+fi
+echo `cat <<I
+inner
+I
+`
+echo '\$v' ${v:-x}
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<\EOF
+$@ $* $?
+EOF
+fi
+echo "a b" $'a\tb'
+v=${v:-x}
+%%%
+#!mode=file
+v=V
+echo x:y > f.txt
+cat f.txt
+echo $'\cA' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo $v b "$v"
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+v=\
+v="a b"
+%%%
+#!mode=file
+v=V
+echo x:y > f.txt
+cat f.txt
+if true; then
+cat <<EO"F"
+EOF
+fi
+if true; then
+cat <<X
+X
+fi
+%%%
+#!mode=file
+v=V
+cat <<-X
+	
+	${v#a} ${v%b} ${v##*} ${v%%*}
+X
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo `echo z` > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<E'O'F
+`
+plain text
+EOF
+done
+v=${v:-x}
+%%%
+#!mode=file
+v=V
+echo $v
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<X
+${v#a} ${v%b} ${v##*} ${v%%*}
+X
+echo after
+%%%
+#!mode=file
+v=V
+cat <<EO"F"
+EOF
+for i in 1 2; do
+cat <<-E\OF
+	$
+	\$ \` \\ \" \a \
+	EOFX
+EOF
+done
+for i in 1 2; do
+cat <<-X
+	a\
+	${v#a} ${v%b} ${v##*} ${v%%*}
+X
+done
+%%%
+#!mode=file
+v=V
+cat <<"EOF"
+EOFX
+	TABBED
+EOF
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo "$v" > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo $(echo y) > f.txt
+cat f.txt
+echo `cat <<I
+inner
+I
+`
+cat <<"EOF"
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo '\$v' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+if true; then
+cat <<-EOF
+	`
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo a\
+b
+cat <<A; cat <<B
+1
+A
+2
+B
+echo [ab] $(echo y) $'a\tb'
+%%%
+#!mode=file
+v=V
+echo ~ a '\$v'
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-"EOF"
+	plain text
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+v=${v:-x}
+echo * > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+v=${v:-x}
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo ${v:-x} "a b" *
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+v=b
+%%%
+#!mode=file
+v=V
+cat <<"EOF"
+EO
+`echo bq` $(echo dp)
+EOF
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+v=${v:-x}
+for i in 1 2; do
+cat <<-E\OF
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<\EOF
+${v#a} ${v%b} ${v##*} ${v%%*}
+$
+EOF
+%%%
+#!mode=file
+v=V
+v=$'a\tb'
+echo "a\
+b"
+echo $'\'' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+cat <<EO"F"
+EOFX
+$@ $* $?
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo [ab] > f.txt
+cat f.txt
+cat <<-\EOF
+	`echo bq` $(echo dp)
+		TABBED
+EOF
+if true; then
+cat <<-E'O'F
+	~ ~/x
+	$@ $* $?
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo $'\x41' > f.txt
+cat f.txt
+echo \ > f.txt
+cat f.txt
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<-E'O'F
+	plain text
+	\$ \` \\ \" \a \
+EOF
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<\EOF
+${v#a} ${v%b} ${v##*} ${v%%*}
+~ ~/x
+${
+EOF
+done
+cat <<A; cat <<B
+1
+A
+2
+B
+echo `echo z` * x:y
+%%%
+#!mode=file
+v=V
+echo $v > f.txt
+cat f.txt
+echo "a\
+b"
+echo x:y > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+v=x:y
+cat <<-EOF
+	plain text
+	${v#a} ${v%b} ${v##*} ${v%%*}
+	${
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+v=~
+echo ${v:-x} \
+%%%
+#!mode=file
+v=V
+echo $v \
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-X
+X
+done
+echo "a\
+b"
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+cat <<\EOF
+\$ \` \\ \" \a \
+~ ~/x
+$v ${v} ${v:-d} ${#v}
+EOF
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+v=~
+v=~
+if true; then
+cat <<-E\OF
+	`echo bq` $(echo dp)
+	`
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo * *
+v='\$v'
+cat <<E'O'F
+aéb
+EOF
+%%%
+#!mode=file
+v=V
+cat <<EO"F"
+EOF
+echo after
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+cat <<E\OF
+$@ $* $?
+	TABBED
+EOF
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<E'O'F
+$
+plain text
+plain text
+EOF
+done
+echo $'\cA'
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo a\ b > f.txt
+cat f.txt
+echo a\
+b
+echo $'a\tb' ? $'\''
+%%%
+#!mode=file
+v=V
+cat <<E'O'F
+EOF
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-"EOF"
+EOF
+done
+echo [ab] > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<E\OF
+~ ~/x
+`echo bq` $(echo dp)
+EOF
+fi
+cat <<-EO"F"
+	EO
+	
+EOF
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-'EOF'
+	${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<EO"F"
+	TABBED
+	TABBED
+plain text
+EOF
+echo after
+echo "$v" ? $'\x41'
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<E\OF
+EOF
+done
+cat <<A; cat <<B
+1
+A
+2
+B
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-EOF
+	$
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+if true; then
+cat <<E'O'F
+EOF
+fi
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<X
+${v#a} ${v%b} ${v##*} ${v%%*}
+${
+X
+fi
+echo a\
+$v
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-EO"F"
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo '\$v' \ a=b
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo "a b" ~
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+cat <<-X
+	$v ${v} ${v:-d} ${#v}
+X
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<E'O'F
+EOF
+done
+for i in 1 2; do
+cat <<-EO"F"
+	$((1+2)) $((v)) $(($#))
+	EO
+EOF
+done
+if true; then
+cat <<X
+$v ${v} ${v:-d} ${#v}
+X
+fi
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo "a\
+b"
+v=$'\x41'
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<E\OF
+$v ${v} ${v:-d} ${#v}
+aéb
+EOF
+fi
+echo $(cat <<I
+inner $v
+I
+)
+cat <<-X
+	`echo bq` $(echo dp)
+	$((1+2)) $((v)) $(($#))
+		TABBED
+X
+echo after
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<\EOF
+${
+EOF
+done
+echo `cat <<I
+inner
+I
+`
+for i in 1 2; do
+cat <<-E'O'F
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo `cat <<I
+inner
+I
+`
+echo ${v:-x} > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+cat <<-E'O'F
+	$v ${v} ${v:-d} ${#v}
+	}
+EOF
+echo after
+cat <<-EOF
+	`echo bq` $(echo dp)
+	${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+cat <<-EO"F"
+	~ ~/x
+	a\
+	${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-EOF
+	\$ \` \\ \" \a \
+EOF
+done
+v=$((1+1))
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+v=$((1+1))
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo $(echo y) $(echo y)
+if true; then
+cat <<-EOF
+	EOFX
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo $'\cA'
+if true; then
+cat <<E'O'F
+plain text
+aéb
+~ ~/x
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<X
+X
+echo after
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<'EOF'
+EOF
+done
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo $v a\ b $'a\tb'
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<X
+aéb
+
+X
+fi
+%%%
+#!mode=file
+v=V
+cat <<-\EOF
+	EOFX
+	
+EOF
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo \ ~
+for i in 1 2; do
+cat <<-EOF
+	`echo bq` $(echo dp)
+	`echo bq` $(echo dp)
+	a\
+EOF
+done
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<EO"F"
+$v ${v} ${v:-d} ${#v}
+
+EOF
+done
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<E'O'F
+`echo bq` $(echo dp)
+EOFX
+~ ~/x
+EOF
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<EOF
+~ ~/x
+
+$((1+2)) $((v)) $(($#))
+EOF
+fi
+cat <<-\EOF
+EOF
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+cat <<E\OF
+$((1+2)) $((v)) $(($#))
+EO
+EOF
+echo after
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<-'EOF'
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo a\
+"c"
+if true; then
+cat <<-E'O'F
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+v="$v"
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo $v > f.txt
+cat f.txt
+echo a\
+b
+if true; then
+cat <<-"EOF"
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<-EO"F"
+	${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-EOF
+	EOFX
+	`
+	`
+EOF
+fi
+%%%
+#!mode=file
+v=V
+v=$v
+echo b > f.txt
+cat f.txt
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-EOF
+	\$ \` \\ \" \a \
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<-'EOF'
+	plain text
+	aéb
+	$((1+2)) $((v)) $(($#))
+EOF
+cat <<'EOF'
+$
+EOF
+echo after
+echo a\
+b
+%%%
+#!mode=file
+v=V
+echo \ > f.txt
+cat f.txt
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-EOF
+EOF
+done
+v='\$v'
+cat <<-X
+X
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-\EOF
+EOF
+done
+%%%
+#!mode=file
+v=V
+v=a
+%%%
+#!mode=file
+v=V
+echo `echo z` \ a=b
+for i in 1 2; do
+cat <<'EOF'
+}
+EOF
+done
+cat <<-X
+	\$ \` \\ \" \a \
+X
+echo after
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo ? > f.txt
+cat f.txt
+if true; then
+cat <<\EOF
+$((1+2)) $((v)) $(($#))
+~ ~/x
+	TABBED
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo $'a\tb' "a b" [ab]
+for i in 1 2; do
+cat <<E\OF
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+if true; then
+cat <<-\EOF
+	EOFX
+EOF
+fi
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo * $'a\tb' ~
+%%%
+#!mode=file
+v=V
+cat <<"EOF"
+EOF
+echo after
+echo $(cat <<I
+inner $v
+I
+)
+echo '\$v' \
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo `cat <<I
+inner
+I
+`
+echo x:y > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo x:y $'\cA'
+if true; then
+cat <<-"EOF"
+	${
+	`
+	$@ $* $?
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<-\EOF
+	$
+	"quoted" 'single'
+EOF
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+v=\
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo a\ b > f.txt
+cat f.txt
+echo * > f.txt
+cat f.txt
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo "a\
+b"
+cat <<-X
+	
+	$
+	a\
+X
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo "a b" ${v:-x}
+%%%
+#!mode=file
+v=V
+v=$'\x41'
+%%%
+#!mode=file
+v=V
+echo $'\x41'
+echo a\
+"c"
+echo a\
+b
+%%%
+#!mode=file
+v=V
+v=[ab]
+v=~
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<E\OF
+EOF
+done
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo b > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo * $'\cA'
+echo b "$v" ~
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<'EOF'
+	TABBED
+EOFX
+${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+echo after
+v="$v"
+%%%
+#!mode=file
+v=V
+echo a\
+b
+%%%
+#!mode=file
+v=V
+cat <<-X
+X
+echo after
+%%%
+#!mode=file
+v=V
+echo $(echo y) > f.txt
+cat f.txt
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+v=?
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+v=?
+cat <<"EOF"
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo $'a\tb' b "a b"
+%%%
+#!mode=file
+v=V
+cat <<"EOF"
+plain text
+EOF
+echo after
+echo a\ b > f.txt
+cat f.txt
+cat <<-E'O'F
+	$((1+2)) $((v)) $(($#))
+	aéb
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo $(echo y) > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+v=$v
+for i in 1 2; do
+cat <<E'O'F
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo $(echo y) > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-"EOF"
+	$v ${v} ${v:-d} ${#v}
+	a\
+	plain text
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo ? a
+v=$((1+1))
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo \ > f.txt
+cat f.txt
+v=~
+%%%
+#!mode=file
+v=V
+echo ? [ab] $'a\tb'
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<'EOF'
+
+\$ \` \\ \" \a \
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo a * *
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<E'O'F
+EOF
+fi
+echo `cat <<I
+inner
+I
+`
+cat <<'EOF'
+`echo bq` $(echo dp)
+EOF
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-EO"F"
+	
+EOF
+fi
+echo $(cat <<I
+inner $v
+I
+)
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+v=a=b
+%%%
+#!mode=file
+v=V
+echo $'a\tb' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<"EOF"
+EO
+plain text
+$@ $* $?
+EOF
+echo after
+echo a\
+"c"
+echo '\$v'
+%%%
+#!mode=file
+v=V
+v="a b"
+%%%
+#!mode=file
+v=V
+echo ?
+echo '\$v' > f.txt
+cat f.txt
+echo x:y $'\''
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo a\
+$v
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+v=$((1+1))
+cat <<\EOF
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-EO"F"
+	\$ \` \\ \" \a \
+	
+EOF
+done
+cat <<\EOF
+$@ $* $?
+`echo bq` $(echo dp)
+EOF
+echo after
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo x:y *
+%%%
+#!mode=file
+v=V
+cat <<-E'O'F
+EOF
+echo * > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+cat <<-E\OF
+	$((1+2)) $((v)) $(($#))
+EOF
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<-X
+	aéb
+	
+	
+X
+echo after
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo `echo z` "$v"
+for i in 1 2; do
+cat <<'EOF'
+EOF
+done
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+v="a b"
+for i in 1 2; do
+cat <<-E'O'F
+	${
+EOF
+done
+cat <<-E'O'F
+	$
+EOF
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo a\ b
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+echo a\ b
+for i in 1 2; do
+cat <<\EOF
+}
+$((1+2)) $((v)) $(($#))
+`
+EOF
+done
+%%%
+#!mode=file
+v=V
+v=${v:-x}
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+v='\$v'
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+v=b
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo $(cat <<I
+inner $v
+I
+)
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+for i in 1 2; do
+cat <<E\OF
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo a\
+b
+echo "a\
+b"
+echo a\
+b
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<'EOF'
+a\
+EO
+EOF
+echo after
+cat <<-X
+	\$ \` \\ \" \a \
+	
+X
+echo after
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+echo ?
+%%%
+#!mode=file
+v=V
+cat <<E'O'F
+EOF
+echo after
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+v=a=b
+v=~
+%%%
+#!mode=file
+v=V
+cat <<-E\OF
+	\$ \` \\ \" \a \
+EOF
+echo after
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+cat <<'EOF'
+EO
+EOFX
+EOF
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-"EOF"
+	
+EOF
+fi
+echo a\
+$v
+echo $'\'' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+cat <<E'O'F
+${
+`echo bq` $(echo dp)
+${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<'EOF'
+\$ \` \\ \" \a \
+${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+cat <<-EO"F"
+EOF
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo $'\'' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-X
+	`echo bq` $(echo dp)
+	`
+X
+done
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+cat <<\EOF
+~ ~/x
+EOF
+echo after
+for i in 1 2; do
+cat <<E'O'F
+plain text
+EOF
+done
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+echo $(echo y) > f.txt
+cat f.txt
+cat <<-EO"F"
+	a\
+EOF
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-EOF
+	a\
+EOF
+fi
+cat <<-EO"F"
+		TABBED
+	`echo bq` $(echo dp)
+	${
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo a\
+b
+cat <<E'O'F
+aéb
+${
+EOF
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<\EOF
+${
+$v ${v} ${v:-d} ${#v}
+}
+EOF
+done
+echo $(cat <<I
+inner $v
+I
+)
+if true; then
+cat <<-E'O'F
+	plain text
+	${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+cat <<A; cat <<B
+1
+A
+2
+B
+v=x:y
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo $((1+1)) > f.txt
+cat f.txt
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo a\
+b
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+v=a\ b
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo $(cat <<I
+inner $v
+I
+)
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-E'O'F
+	EO
+	plain text
+EOF
+fi
+if true; then
+cat <<X
+$((1+2)) $((v)) $(($#))
+$
+X
+fi
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<X
+\$ \` \\ \" \a \
+X
+done
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+if true; then
+cat <<E'O'F
+$((1+2)) $((v)) $(($#))
+aéb
+EOFX
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<-EOF
+		TABBED
+EOF
+echo \
+%%%
+#!mode=file
+v=V
+v=$'\cA'
+cat <<E'O'F
+aéb
+$v ${v} ${v:-d} ${#v}
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+echo a\
+"c"
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<E\OF
+"quoted" 'single'
+`
+EOF
+fi
+cat <<A; cat <<B
+1
+A
+2
+B
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+echo x:y x:y
+cat <<-X
+X
+echo after
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+echo $'\'' a $'\cA'
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo x:y > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-E'O'F
+EOF
+fi
+for i in 1 2; do
+cat <<"EOF"
+EOF
+done
+%%%
+#!mode=file
+v=V
+v=a
+if true; then
+cat <<-X
+	$
+	${v#a} ${v%b} ${v##*} ${v%%*}
+X
+fi
+for i in 1 2; do
+cat <<-E\OF
+EOF
+done
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<"EOF"
+	TABBED
+
+EOF
+fi
+v=b
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<-EO"F"
+	}
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<-EOF
+EOF
+echo after
+echo [ab] > f.txt
+cat f.txt
+echo ? ${v:-x} $'\cA'
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+if true; then
+cat <<-X
+	a\
+	$v ${v} ${v:-d} ${#v}
+X
+fi
+%%%
+#!mode=file
+v=V
+cat <<E'O'F
+$@ $* $?
+aéb
+${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+v=$(echo y)
+cat <<-\EOF
+		TABBED
+	\$ \` \\ \" \a \
+	`
+EOF
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<-EOF
+	$v ${v} ${v:-d} ${#v}
+	`
+EOF
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-X
+		TABBED
+	aéb
+	a\
+X
+done
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+cat <<\EOF
+`
+EO
+EOF
+echo after
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-EOF
+EOF
+fi
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-X
+	EO
+	~ ~/x
+	${
+X
+fi
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-'EOF'
+EOF
+fi
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+cat <<-E\OF
+	EO
+EOF
+echo after
+echo `cat <<I
+inner
+I
+`
+cat <<"EOF"
+}
+$
+`echo bq` $(echo dp)
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+for i in 1 2; do
+cat <<-'EOF'
+	EO
+	aéb
+EOF
+done
+cat <<'EOF'
+EOF
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-X
+X
+fi
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+echo a=b > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+cat <<\EOF
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo $'a\tb' a\ b $v
+if true; then
+cat <<-EOF
+	EO
+EOF
+fi
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<\EOF
+aéb
+`echo bq` $(echo dp)
+${
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo b
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+echo `echo z` a
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+v=${v:-x}
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo $'\''
+echo "a\
+b"
+cat <<-\EOF
+	$((1+2)) $((v)) $(($#))
+	}
+EOF
+%%%
+#!mode=file
+v=V
+echo "$v" > f.txt
+cat f.txt
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+v='\$v'
+echo $((1+1)) ~
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+if true; then
+cat <<"EOF"
+}
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo a\
+b
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+if true; then
+cat <<-'EOF'
+	$@ $* $?
+EOF
+fi
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<EO"F"
+`
+$((1+2)) $((v)) $(($#))
+EOF
+fi
+if true; then
+cat <<\EOF
+$v ${v} ${v:-d} ${#v}
+EOF
+fi
+cat <<E\OF
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<EO"F"
+EOF
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+cat <<A; cat <<B
+1
+A
+2
+B
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+cat <<-"EOF"
+	}
+	
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+echo $(cat <<I
+inner $v
+I
+)
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+for i in 1 2; do
+cat <<E\OF
+$
+$v ${v} ${v:-d} ${#v}
+EOF
+done
+cat <<X
+${
+${v#a} ${v%b} ${v##*} ${v%%*}
+X
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+v=?
+%%%
+#!mode=file
+v=V
+v=\
+%%%
+#!mode=file
+v=V
+echo $'a\tb' > f.txt
+cat f.txt
+echo "a\
+b"
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo $'\'' "a b" $(echo y)
+%%%
+#!mode=file
+v=V
+echo a\ b
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo b '\$v' a
+echo $'\x41' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo "a b" > f.txt
+cat f.txt
+echo a\
+b
+for i in 1 2; do
+cat <<-EO"F"
+	$
+	$((1+2)) $((v)) $(($#))
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo a
+%%%
+#!mode=file
+v=V
+v=x:y
+cat <<\EOF
+$@ $* $?
+`
+$@ $* $?
+EOF
+echo $'\'' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+v=a\ b
+%%%
+#!mode=file
+v=V
+echo a\
+b
+echo x:y
+cat <<-E'O'F
+	`
+EOF
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo b
+if true; then
+cat <<-EO"F"
+	a\
+EOF
+fi
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+cat <<E'O'F
+EOF
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo ~ > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+cat <<A; cat <<B
+1
+A
+2
+B
+v=$(echo y)
+%%%
+#!mode=file
+v=V
+echo a\ b > f.txt
+cat f.txt
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<"EOF"
+${
+${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+%%%
+#!mode=file
+v=V
+cat <<EO"F"
+$v ${v} ${v:-d} ${#v}
+a\
+\$ \` \\ \" \a \
+EOF
+echo after
+echo "a\
+b"
+v=$v
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+cat <<-\EOF
+	${v#a} ${v%b} ${v##*} ${v%%*}
+	$((1+2)) $((v)) $(($#))
+EOF
+echo `cat <<I
+inner
+I
+`
+echo "$v" > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-E\OF
+EOF
+done
+%%%
+#!mode=file
+v=V
+cat <<-'EOF'
+EOF
+echo after
+if true; then
+cat <<'EOF'
+$((1+2)) $((v)) $(($#))
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<-"EOF"
+EOF
+%%%
+#!mode=file
+v=V
+v=b
+echo a=b > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+cat <<-'EOF'
+	"quoted" 'single'
+	$@ $* $?
+	aéb
+EOF
+echo after
+cat <<EO"F"
+$v ${v} ${v:-d} ${#v}
+$@ $* $?
+EO
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo ~ > f.txt
+cat f.txt
+if true; then
+cat <<"EOF"
+EO
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+cat <<E'O'F
+plain text
+EOF
+v=`echo z`
+%%%
+#!mode=file
+v=V
+echo $v [ab]
+v=a\ b
+cat <<-EO"F"
+	a\
+	"quoted" 'single'
+	EOFX
+EOF
+%%%
+#!mode=file
+v=V
+cat <<EO"F"
+EOFX
+}
+$((1+2)) $((v)) $(($#))
+EOF
+if true; then
+cat <<EOF
+EOF
+fi
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<-EOF
+	`echo bq` $(echo dp)
+	`echo bq` $(echo dp)
+EOF
+echo after
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+cat <<E'O'F
+
+$((1+2)) $((v)) $(($#))
+$
+EOF
+cat <<EOF
+EOF
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-EO"F"
+	plain text
+	~ ~/x
+EOF
+fi
+echo * > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo $'\cA' > f.txt
+cat f.txt
+echo a\
+b
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<EO"F"
+EOF
+fi
+echo [ab] > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-EO"F"
+	~ ~/x
+EOF
+fi
+cat <<-EO"F"
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+echo $(cat <<I
+inner $v
+I
+)
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-\EOF
+	\$ \` \\ \" \a \
+	$v ${v} ${v:-d} ${#v}
+	`
+EOF
+fi
+echo x:y > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo "$v" > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+cat <<E'O'F
+a\
+aéb
+EOF
+echo $v
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+v=a\ b
+echo x:y > f.txt
+cat f.txt
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+cat <<-X
+X
+cat <<E'O'F
+aéb
+EOFX
+EOF
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-EOF
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+echo `cat <<I
+inner
+I
+`
+echo b > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+cat <<E\OF
+	TABBED
+aéb
+
+EOF
+echo after
+v=$'a\tb'
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+v=$'\cA'
+echo "a b" > f.txt
+cat f.txt
+for i in 1 2; do
+cat <<-E'O'F
+	EO
+	}
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo $v
+for i in 1 2; do
+cat <<-EOF
+	`echo bq` $(echo dp)
+	\$ \` \\ \" \a \
+	$
+EOF
+done
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo $(cat <<I
+inner $v
+I
+)
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+if true; then
+cat <<\EOF
+${v#a} ${v%b} ${v##*} ${v%%*}
+EO
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<EO"F"
+`echo bq` $(echo dp)
+	TABBED
+$@ $* $?
+EOF
+echo after
+v=~
+echo '\$v' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo a\
+b
+%%%
+#!mode=file
+v=V
+cat <<\EOF
+$
+$
+${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<A; cat <<B
+1
+A
+2
+B
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo $'\cA' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<E\OF
+EOF
+fi
+echo $'\'' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<EOF
+}
+$@ $* $?
+}
+EOF
+done
+if true; then
+cat <<E\OF
+EOF
+fi
+v=a=b
+%%%
+#!mode=file
+v=V
+cat <<-EO"F"
+	}
+	
+EOF
+echo after
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<-EOF
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<'EOF'
+EOF
+echo after
+echo a\
+b
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo $((1+1)) > f.txt
+cat f.txt
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-E'O'F
+EOF
+done
+echo $(echo y) > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo [ab]
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+for i in 1 2; do
+cat <<E\OF
+$v ${v} ${v:-d} ${#v}
+	TABBED
+EOF
+done
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+echo \ > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo a\
+b
+echo ? > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<E\OF
+
+a\
+EOF
+done
+for i in 1 2; do
+cat <<-E'O'F
+	$v ${v} ${v:-d} ${#v}
+	EO
+EOF
+done
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-E\OF
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo a\
+b
+echo a $'\'' $'\cA'
+%%%
+#!mode=file
+v=V
+echo $'\x41' $'\cA' ?
+cat <<-EOF
+	plain text
+	`echo bq` $(echo dp)
+	aéb
+EOF
+echo $(echo y) > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+cat <<-EO"F"
+	${
+	plain text
+	${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+%%%
+#!mode=file
+v=V
+echo '\$v' x:y $'\cA'
+v='\$v'
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo "a\
+b"
+echo $'\x41' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+for i in 1 2; do
+cat <<X
+aéb
+X
+done
+%%%
+#!mode=file
+v=V
+cat <<-EOF
+EOF
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<-EOF
+	$v ${v} ${v:-d} ${#v}
+	$
+EOF
+%%%
+#!mode=file
+v=V
+cat <<-"EOF"
+	$@ $* $?
+	`
+EOF
+echo after
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo ${v:-x} > f.txt
+cat f.txt
+if true; then
+cat <<\EOF
+EOF
+fi
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<E'O'F
+"quoted" 'single'
+EOF
+done
+%%%
+#!mode=file
+v=V
+cat <<'EOF'
+plain text
+aéb
+EOFX
+EOF
+echo `cat <<I
+inner
+I
+`
+if true; then
+cat <<-"EOF"
+	"quoted" 'single'
+	$@ $* $?
+	$
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<E\OF
+	TABBED
+EOFX
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-E'O'F
+	$v ${v} ${v:-d} ${#v}
+	plain text
+	$
+EOF
+fi
+echo $(cat <<I
+inner $v
+I
+)
+cat <<-"EOF"
+	plain text
+	`echo bq` $(echo dp)
+EOF
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+if true; then
+cat <<-E\OF
+	
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+echo \ > f.txt
+cat f.txt
+echo a\ b > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<EOF
+a\
+EOF
+done
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-"EOF"
+EOF
+done
+cat <<-E\OF
+	aéb
+	$((1+2)) $((v)) $(($#))
+	`
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+for i in 1 2; do
+cat <<"EOF"
+$v ${v} ${v:-d} ${#v}
+EOFX
+a\
+EOF
+done
+cat <<-E'O'F
+	~ ~/x
+	EO
+	}
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<'EOF'
+aéb
+}
+EOF
+%%%
+#!mode=file
+v=V
+cat <<'EOF'
+aéb
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-X
+X
+fi
+echo `cat <<I
+inner
+I
+`
+cat <<E'O'F
+$@ $* $?
+${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo $(echo y) > f.txt
+cat f.txt
+v=*
+echo \ > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+if true; then
+cat <<"EOF"
+}
+
+"quoted" 'single'
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+cat <<-'EOF'
+	${
+	${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+v=$((1+1))
+cat <<E'O'F
+$@ $* $?
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+v=[ab]
+%%%
+#!mode=file
+v=V
+echo a\
+b
+if true; then
+cat <<-E'O'F
+	`echo bq` $(echo dp)
+	aéb
+	aéb
+EOF
+fi
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<\EOF
+EOF
+done
+%%%
+#!mode=file
+v=V
+cat <<-E\OF
+	EO
+EOF
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo $(echo y) > f.txt
+cat f.txt
+if true; then
+cat <<-E'O'F
+	${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo \ > f.txt
+cat f.txt
+if true; then
+cat <<\EOF
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+cat <<X
+plain text
+`echo bq` $(echo dp)
+X
+echo after
+echo $(echo y) > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<E'O'F
+EO
+"quoted" 'single'
+EOF
+done
+%%%
+#!mode=file
+v=V
+cat <<-'EOF'
+	$@ $* $?
+EOF
+%%%
+#!mode=file
+v=V
+echo a=b > f.txt
+cat f.txt
+for i in 1 2; do
+cat <<-E'O'F
+	`
+	plain text
+	${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+done
+%%%
+#!mode=file
+v=V
+cat <<'EOF'
+`
+\$ \` \\ \" \a \
+EOF
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+v='\$v'
+%%%
+#!mode=file
+v=V
+cat <<EO"F"
+	TABBED
+\$ \` \\ \" \a \
+`echo bq` $(echo dp)
+EOF
+echo "$v" > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+v=$((1+1))
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo $'\cA' b x:y
+%%%
+#!mode=file
+v=V
+echo \ a\ b
+%%%
+#!mode=file
+v=V
+cat <<-EOF
+EOF
+v=$'\''
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo a=b > f.txt
+cat f.txt
+v="a b"
+echo a\
+b
+%%%
+#!mode=file
+v=V
+cat <<E'O'F
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-EO"F"
+		TABBED
+EOF
+done
+for i in 1 2; do
+cat <<-"EOF"
+EOF
+done
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<E\OF
+	TABBED
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo ? *
+echo $(cat <<I
+inner $v
+I
+)
+echo $'a\tb' $((1+1)) $'\''
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+v="$v"
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo $v > f.txt
+cat f.txt
+echo a > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+v=$'\cA'
+v=a=b
+cat <<\EOF
+
+${v#a} ${v%b} ${v##*} ${v%%*}
+"quoted" 'single'
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<-EOF
+	}
+	EO
+EOF
+echo ~ * $'\x41'
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-'EOF'
+	plain text
+EOF
+done
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-X
+	"quoted" 'single'
+	aéb
+	${
+X
+done
+echo * > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo ${v:-x} > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-"EOF"
+	}
+	$v ${v} ${v:-d} ${#v}
+	\$ \` \\ \" \a \
+EOF
+fi
+echo a\
+"c"
+if true; then
+cat <<-"EOF"
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<E'O'F
+a\
+EOF
+fi
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo a=b $'\cA' "a b"
+cat <<-X
+	\$ \` \\ \" \a \
+	`
+	}
+X
+echo after
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+cat <<X
+plain text
+X
+echo after
+%%%
+#!mode=file
+v=V
+echo $'a\tb'
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo $(echo y) > f.txt
+cat f.txt
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo b $((1+1))
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+if true; then
+cat <<'EOF'
+${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo x:y > f.txt
+cat f.txt
+echo $'\cA'
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<EO"F"
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo "a b" > f.txt
+cat f.txt
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-EO"F"
+	
+	$v ${v} ${v:-d} ${#v}
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo ${v:-x} > f.txt
+cat f.txt
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<\EOF
+$@ $* $?
+$@ $* $?
+EOF
+fi
+echo "a\
+b"
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+v=\
+cat <<E'O'F
+EOF
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-E\OF
+EOF
+fi
+echo a > f.txt
+cat f.txt
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+cat <<-E'O'F
+EOF
+echo $'\cA' * \
+%%%
+#!mode=file
+v=V
+echo a\
+b
+cat <<X
+X
+echo after
+%%%
+#!mode=file
+v=V
+cat <<-'EOF'
+	}
+EOF
+echo after
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo "a b" $(echo y)
+cat <<A; cat <<B
+1
+A
+2
+B
+echo a\
+b
+%%%
+#!mode=file
+v=V
+v=${v:-x}
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+v=`echo z`
+cat <<-EO"F"
+EOF
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+if true; then
+cat <<E\OF
+$v ${v} ${v:-d} ${#v}
+~ ~/x
+EOF
+fi
+if true; then
+cat <<\EOF
+EOF
+fi
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<EO"F"
+\$ \` \\ \" \a \
+EOF
+done
+cat <<EO"F"
+${
+EOFX
+`
+EOF
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+if true; then
+cat <<-EO"F"
+EOF
+fi
+v=$(echo y)
+%%%
+#!mode=file
+v=V
+cat <<'EOF'
+$v ${v} ${v:-d} ${#v}
+EOF
+echo after
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo a\
+b
+cat <<-E\OF
+	`
+	$((1+2)) $((v)) $(($#))
+	a\
+EOF
+cat <<"EOF"
+EOF
+%%%
+#!mode=file
+v=V
+v=${v:-x}
+echo "a\
+b"
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo * > f.txt
+cat f.txt
+cat <<E\OF
+~ ~/x
+	TABBED
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<E\OF
+$
+`
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-E'O'F
+	~ ~/x
+	`
+	$
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo [ab] x:y
+for i in 1 2; do
+cat <<'EOF'
+EOFX
+$
+EOF
+done
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<E\OF
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<'EOF'
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<-EOF
+	}
+	"quoted" 'single'
+EOF
+%%%
+#!mode=file
+v=V
+cat <<E'O'F
+$
+"quoted" 'single'
+EOF
+v=[ab]
+cat <<-EOF
+	}
+EOF
+%%%
+#!mode=file
+v=V
+cat <<EO"F"
+aéb
+EOF
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+cat <<-X
+	`
+X
+if true; then
+cat <<EO"F"
+
+$@ $* $?
+EO
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<A; cat <<B
+1
+A
+2
+B
+echo $'\'' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<\EOF
+
+	TABBED
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo a\
+b
+%%%
+#!mode=file
+v=V
+echo a b $'\x41'
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-EOF
+	plain text
+EOF
+done
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-EO"F"
+	`
+	~ ~/x
+	${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+done
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+if true; then
+cat <<-EO"F"
+	$@ $* $?
+	~ ~/x
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+cat <<A; cat <<B
+1
+A
+2
+B
+v=a=b
+%%%
+#!mode=file
+v=V
+cat <<-X
+X
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-E'O'F
+	\$ \` \\ \" \a \
+EOF
+done
+%%%
+#!mode=file
+v=V
+cat <<-E\OF
+	`echo bq` $(echo dp)
+	plain text
+EOF
+echo after
+cat <<A; cat <<B
+1
+A
+2
+B
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo ${v:-x}
+echo b
+cat <<\EOF
+`echo bq` $(echo dp)
+	TABBED
+EOF
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo $v
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+cat <<-E'O'F
+	$((1+2)) $((v)) $(($#))
+	EOFX
+EOF
+echo after
+echo [ab] > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+v='\$v'
+cat <<-\EOF
+	EO
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+echo "a\
+b"
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo $'\x41'
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+v=${v:-x}
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-X
+X
+fi
+echo a\
+$v
+echo b ~ ${v:-x}
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo "a\
+b"
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+v=~
+v=$'\x41'
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<\EOF
+`
+	TABBED
+`echo bq` $(echo dp)
+EOF
+echo after
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<E'O'F
+${
+${v#a} ${v%b} ${v##*} ${v%%*}
+
+EOF
+fi
+cat <<\EOF
+	TABBED
+$
+EOF
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+cat <<'EOF'
+aéb
+}
+$
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+v="a b"
+for i in 1 2; do
+cat <<EOF
+a\
+
+~ ~/x
+EOF
+done
+for i in 1 2; do
+cat <<-\EOF
+	a\
+	`echo bq` $(echo dp)
+	`
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo $'\cA' ~ x:y
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<E'O'F
+\$ \` \\ \" \a \
+EOF
+echo ? $(echo y)
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<"EOF"
+a\
+$((1+2)) $((v)) $(($#))
+EOF
+fi
+echo `cat <<I
+inner
+I
+`
+cat <<E'O'F
+`
+}
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo ?
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-X
+	}
+	~ ~/x
+	}
+X
+done
+%%%
+#!mode=file
+v=V
+cat <<-EO"F"
+	plain text
+	}
+EOF
+echo "a\
+b"
+v=$'a\tb'
+%%%
+#!mode=file
+v=V
+v='\$v'
+echo '\$v' $'\x41' a\ b
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+cat <<EO"F"
+
+
+plain text
+EOF
+cat <<X
+a\
+`
+X
+cat <<E\OF
+${
+EOF
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo \
+%%%
+#!mode=file
+v=V
+cat <<-EOF
+	${
+	~ ~/x
+	}
+EOF
+echo after
+for i in 1 2; do
+cat <<-EOF
+EOF
+done
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+cat <<A; cat <<B
+1
+A
+2
+B
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo a=b $v \
+echo `cat <<I
+inner
+I
+`
+if true; then
+cat <<"EOF"
+a\
+${
+EOF
+fi
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<"EOF"
+}
+\$ \` \\ \" \a \
+plain text
+EOF
+fi
+cat <<-'EOF'
+	
+	\$ \` \\ \" \a \
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<-'EOF'
+EOF
+%%%
+#!mode=file
+v=V
+echo a\
+b
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+cat <<-\EOF
+	\$ \` \\ \" \a \
+	}
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo "a\
+b"
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<EO"F"
+EOF
+%%%
+#!mode=file
+v=V
+cat <<-E'O'F
+	aéb
+	${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-X
+	a\
+X
+done
+v="$v"
+%%%
+#!mode=file
+v=V
+cat <<-'EOF'
+	$
+	$
+	$((1+2)) $((v)) $(($#))
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo "a b" \
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<EO"F"
+EOF
+fi
+v=a\ b
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<E'O'F
+$
+"quoted" 'single'
+~ ~/x
+EOF
+echo after
+cat <<-E'O'F
+EOF
+echo after
+echo a\
+b
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<EO"F"
+$v ${v} ${v:-d} ${#v}
+`
+EOF
+done
+cat <<E\OF
+EOF
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<\EOF
+$v ${v} ${v:-d} ${#v}
+EO
+}
+EOF
+fi
+cat <<-EO"F"
+EOF
+cat <<EOF
+EOF
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo ${v:-x} > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+if true; then
+cat <<-EO"F"
+	$v ${v} ${v:-d} ${#v}
+	aéb
+EOF
+fi
+echo a\
+$v
+%%%
+#!mode=file
+v=V
+echo * > f.txt
+cat f.txt
+echo `echo z` * $'a\tb'
+cat <<-E\OF
+	~ ~/x
+	$@ $* $?
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<\EOF
+$@ $* $?
+
+EOF
+fi
+cat <<-E'O'F
+	`echo bq` $(echo dp)
+EOF
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+echo $(cat <<I
+inner $v
+I
+)
+v=*
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-EO"F"
+	$((1+2)) $((v)) $(($#))
+	${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+fi
+for i in 1 2; do
+cat <<EO"F"
+EOF
+done
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<E\OF
+`
+$
+EOF
+done
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<\EOF
+}
+aéb
+`
+EOF
+fi
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo x:y > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+v='\$v'
+%%%
+#!mode=file
+v=V
+cat <<EO"F"
+"quoted" 'single'
+EOF
+echo after
+echo $((1+1)) > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+v="$v"
+%%%
+#!mode=file
+v=V
+v="$v"
+%%%
+#!mode=file
+v=V
+echo a\
+$v
+cat <<X
+$
+
+	TABBED
+X
+%%%
+#!mode=file
+v=V
+cat <<-'EOF'
+	"quoted" 'single'
+EOF
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<X
+a\
+X
+done
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+cat <<'EOF'
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+cat <<-X
+	`
+	}
+	a\
+X
+echo after
+%%%
+#!mode=file
+v=V
+echo a\
+b
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<\EOF
+	TABBED
+plain text
+$v ${v} ${v:-d} ${#v}
+EOF
+fi
+echo $'\'' *
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+cat <<-E'O'F
+	a\
+EOF
+echo a\ b > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<"EOF"
+EOFX
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+cat <<E'O'F
+EOF
+echo after
+echo `cat <<I
+inner
+I
+`
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo $v `echo z`
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-"EOF"
+	$
+	
+	${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+fi
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-E'O'F
+	}
+	`
+EOF
+done
+echo a\
+"c"
+for i in 1 2; do
+cat <<EOF
+EOF
+done
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-EOF
+	EO
+EOF
+done
+echo $'a\tb' > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+cat <<'EOF'
+$((1+2)) $((v)) $(($#))
+a\
+EOF
+echo after
+if true; then
+cat <<-E'O'F
+	plain text
+	EO
+EOF
+fi
+if true; then
+cat <<-\EOF
+EOF
+fi
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<EOF
+}
+EOF
+fi
+cat <<A; cat <<B
+1
+A
+2
+B
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<"EOF"
+aéb
+$@ $* $?
+EOF
+done
+v=?
+echo b [ab] b
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-E\OF
+	${
+	`echo bq` $(echo dp)
+EOF
+fi
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo $((1+1)) ${v:-x} `echo z`
+echo $(cat <<I
+inner $v
+I
+)
+if true; then
+cat <<-X
+	
+X
+fi
+%%%
+#!mode=file
+v=V
+echo a\
+b
+echo $((1+1)) > f.txt
+cat f.txt
+echo $(echo y)
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-\EOF
+	
+EOF
+fi
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-X
+	$((1+2)) $((v)) $(($#))
+		TABBED
+	aéb
+X
+done
+v=\
+%%%
+#!mode=file
+v=V
+echo a\
+b
+echo \ a\ b $'a\tb'
+%%%
+#!mode=file
+v=V
+echo * > f.txt
+cat f.txt
+cat <<-\EOF
+	`
+	~ ~/x
+	a\
+EOF
+echo after
+echo x:y > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo ~ > f.txt
+cat f.txt
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+cat <<-'EOF'
+	~ ~/x
+	EO
+	$@ $* $?
+EOF
+echo after
+echo a\
+"c"
+cat <<-"EOF"
+EOF
+%%%
+#!mode=file
+v=V
+cat <<-X
+	$((1+2)) $((v)) $(($#))
+	${
+	EOFX
+X
+%%%
+#!mode=file
+v=V
+cat <<"EOF"
+\$ \` \\ \" \a \
+}
+${v#a} ${v%b} ${v##*} ${v%%*}
+EOF
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-\EOF
+	\$ \` \\ \" \a \
+EOF
+done
+cat <<-\EOF
+	$@ $* $?
+	EOFX
+	`echo bq` $(echo dp)
+EOF
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+v=b
+echo a\
+b
+%%%
+#!mode=file
+v=V
+cat <<-'EOF'
+	$v ${v} ${v:-d} ${#v}
+	$@ $* $?
+	$@ $* $?
+EOF
+v="a b"
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<'EOF'
+$@ $* $?
+$((1+2)) $((v)) $(($#))
+`
+EOF
+fi
+echo a\
+$v
+echo `cat <<I
+inner
+I
+`
+%%%
+#!mode=file
+v=V
+echo "$v" ?
+v=*
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+echo `echo z`
+echo "a\
+b"
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<EO"F"
+EOF
+fi
+v=x:y
+%%%
+#!mode=file
+v=V
+cat <<EOF
+EOF
+echo after
+cat <<A; cat <<B
+1
+A
+2
+B
+%%%
+#!mode=file
+v=V
+echo $(echo y) > f.txt
+cat f.txt
+echo `cat <<I
+inner
+I
+`
+if true; then
+cat <<-E\OF
+	`
+	a\
+EOF
+fi
+%%%
+#!mode=file
+v=V
+echo [ab] x:y "a b"
+echo $(echo y) * $'a\tb'
+%%%
+#!mode=file
+v=V
+cat <<A; cat <<B
+1
+A
+2
+B
+for i in 1 2; do
+cat <<-\EOF
+	$((1+2)) $((v)) $(($#))
+	}
+EOF
+done
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<-\EOF
+	
+EOF
+fi
+echo $'\cA' "a b" ${v:-x}
+%%%
+#!mode=file
+v=V
+if true; then
+cat <<EO"F"
+EOF
+fi
+echo "a\
+b"
+v=$'\cA'
+%%%
+#!mode=file
+v=V
+cat <<-"EOF"
+	plain text
+	"quoted" 'single'
+EOF
+%%%
+#!mode=file
+v=V
+v=a
+cat <<-EOF
+	$v ${v} ${v:-d} ${#v}
+	~ ~/x
+	$@ $* $?
+EOF
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-E\OF
+	`
+		TABBED
+EOF
+done
+echo * > f.txt
+cat f.txt
+%%%
+#!mode=file
+v=V
+echo a=b > f.txt
+cat f.txt
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo a\
+"c"
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo a\
+$v
+for i in 1 2; do
+cat <<-'EOF'
+	`echo bq` $(echo dp)
+	EO
+EOF
+done
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo ~ > f.txt
+cat f.txt
+cat <<-'EOF'
+EOF
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+v=$'\x41'
+%%%
+#!mode=file
+v=V
+cat <<EO"F"
+"quoted" 'single'
+EOFX
+"quoted" 'single'
+EOF
+echo `cat <<I
+inner
+I
+`
+v=$'\x41'
+%%%
+#!mode=file
+v=V
+echo x:y > f.txt
+cat f.txt
+cat <<'EOF'
+
+EO
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo `cat <<I
+inner
+I
+`
+cat <<-\EOF
+		TABBED
+	$@ $* $?
+	a\
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+echo "a\
+b"
+for i in 1 2; do
+cat <<EO"F"
+${v#a} ${v%b} ${v##*} ${v%%*}
+`
+$
+EOF
+done
+v=?
+%%%
+#!mode=file
+v=V
+v=~
+cat <<"EOF"
+aéb
+}
+}
+EOF
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<-EOF
+	a\
+EOF
+done
+echo "a\
+b"
+echo x:y "a b" b
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+echo a\
+"c"
+echo $(cat <<I
+inner $v
+I
+)
+%%%
+#!mode=file
+v=V
+echo $(cat <<I
+inner $v
+I
+)
+v="a b"
+cat <<E'O'F
+$@ $* $?
+$v ${v} ${v:-d} ${#v}
+$
+EOF
+echo after
+%%%
+#!mode=file
+v=V
+cat <<"EOF"
+~ ~/x
+EOF
+echo after
+if true; then
+cat <<"EOF"
+EOF
+fi
+%%%
+#!mode=file
+v=V
+for i in 1 2; do
+cat <<"EOF"
+${
+"quoted" 'single'
+EOF
+done
+if true; then
+cat <<EOF
+~ ~/x
+EO
+EOF
+fi

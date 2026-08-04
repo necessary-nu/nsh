@@ -1,0 +1,400 @@
+#!name special builtin behind %builtin loses spclbltin
+#!mode=file
+PATH=/bin:%builtin:/usr/bin
+: ${undefinedvar?boom}
+echo REACHED-OR-NOT
+%%%
+#!name special builtin with %builtin first
+#!mode=file
+PATH=%builtin:/bin:/usr/bin
+: ${undefinedvar?boom}
+echo REACHED-OR-NOT
+%%%
+#!name special builtin default PATH
+#!mode=file
+: ${undefinedvar?boom}
+echo REACHED-OR-NOT
+%%%
+#!name eval behind %builtin error
+#!mode=file
+PATH=/bin:%builtin:/usr/bin
+eval ': ${undefinedvar?boom}'
+echo REACHED-OR-NOT
+%%%
+#!name dot behind %builtin missing file
+#!mode=file
+PATH=/bin:%builtin:/usr/bin
+. ./nosuchfile.sh
+echo REACHED-OR-NOT
+%%%
+#!name export bad name behind %builtin
+#!mode=file
+PATH=/bin:%builtin:/usr/bin
+export 1bad=1
+echo REACHED-OR-NOT
+%%%
+#!name export bad name default path
+#!mode=file
+export 1bad=1
+echo REACHED-OR-NOT
+%%%
+#!name assignments scope behind %builtin
+PATH=/bin:%builtin:/usr/bin
+x=1
+x=2 :
+echo "x=$x"
+%%%
+#!name assignments scope with %builtin first
+PATH=%builtin:/bin:/usr/bin
+x=1
+x=2 :
+echo "x=$x"
+%%%
+#!name redirect error on special builtin behind %builtin
+#!mode=file
+PATH=/bin:%builtin:/usr/bin
+: < /nonexistent/zzz
+echo REACHED-OR-NOT
+%%%
+#!name shift error is special
+#!mode=file
+set --
+shift 2>&1
+echo "rc=$?"
+%%%
+#!name set with bad option
+#!mode=file
+set -Q 2>&1
+echo REACHED-OR-NOT
+%%%
+#!name readonly assignment failure
+#!mode=file
+readonly rv=1
+rv=2
+echo REACHED-OR-NOT
+%%%
+#!name readonly assignment in function
+#!mode=file
+readonly rv=1
+f() { rv=2; echo NOPE; }
+f
+echo REACHED-OR-NOT
+%%%
+#!name readonly assignment prefix to external
+#!mode=file
+readonly rv=1
+rv=2 /bin/echo hi
+echo REACHED-OR-NOT
+%%%
+#!name unset readonly
+readonly rv=1
+unset rv 2>&1; echo "rc=$?"
+echo alive
+%%%
+#!name hashed name later defined as function
+mkdir -p hf
+printf '#!/bin/sh\necho EXTERNAL\n' > hf/hcmd; chmod 755 hf/hcmd
+PATH=$PWD/hf:/bin:/usr/bin
+hcmd
+hcmd() { echo FUNCTION; }
+hcmd
+unset -f hcmd
+hcmd
+%%%
+#!name function then hash same name
+f() { echo FN; }
+hash f 2>&1; echo "rc=$?"
+f
+%%%
+#!name unset -f on builtin name
+unset -f echo
+echo still-works
+%%%
+#!name alias and function same name
+alias av='echo ALIAS'
+av() { echo FUNC; }
+type av
+av
+%%%
+#!name type of alias in brief mode
+alias bv='echo B'
+command -v bv
+%%%
+#!name type of alias that shadows builtin
+alias echo='echo A:'
+type echo
+command -v echo
+%%%
+#!name local in function calling dot
+printf 'echo "dot sees lv=$lv"\n' > dl.sh
+lv=global
+f() { local lv=localv; . ./dl.sh; }
+f
+echo "after=$lv"
+%%%
+#!name local without value then assignment
+f() { local q; q=5; echo "q=$q"; }
+q=orig
+f
+echo "after=$q"
+%%%
+#!name local of special var
+f() { local IFS=:; set -- $1; echo "$#"; }
+f 'a:b:c'
+echo "IFS-intact=$(printf 'x y' | { read a b; echo "$a-$b"; })"
+%%%
+#!name local PATH restores hash
+mkdir -p lp
+printf '#!/bin/sh\necho LP\n' > lp/lpc; chmod 755 lp/lpc
+f() { local PATH=$PWD/lp:/bin:/usr/bin; lpc; }
+f
+lpc 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+%%%
+#!name getopts OPTIND across function calls
+f() { getopts ab o; echo "o=$o ind=$OPTIND"; }
+set -- -a -b
+f
+f
+f
+%%%
+#!name getopts fresh in each function invocation
+f() { set -- -a -b; while getopts ab o; do echo "in=$o"; done; }
+f
+f
+%%%
+#!name shellparam restore after function
+set -- p1 p2 p3
+f() { set -- x y; echo "in=$*"; }
+f
+echo "out=$*"
+%%%
+#!name shellparam with shift in function
+set -- a b c
+f() { shift; echo "in=$*"; }
+f q w e
+echo "out=$*"
+%%%
+#!name recursive function redefining itself
+f() { echo "call $1"; f() { echo "second $1"; }; [ "$1" = 1 ] && f 2; }
+f 1
+f 3
+%%%
+#!name unset function while running
+f() { unset -f f; echo "still running"; }
+f
+f 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+%%%
+#!name function count reference across redefinition
+f() { g; }
+g() { echo g1; g() { echo g2; }; }
+f
+f
+%%%
+#!name subshell in function returns
+f() { ( return 5 ); echo "sub=$?"; return 6; }
+f; echo "rc=$?"
+%%%
+#!name background in function
+f() { true & wait; echo "bg=$?"; }
+f
+%%%
+#!name pipeline of functions
+a() { echo A; }
+b() { cat; echo B; }
+a | b
+%%%
+#!name function that execs
+#!mode=file
+f() { exec /bin/echo from-exec; }
+f
+echo NOTREACHED
+%%%
+#!name function that execs in subshell
+f() { exec /bin/echo from-exec; }
+( f )
+echo alive
+%%%
+#!name EV_EXIT and traps with function last
+#!mode=file
+trap 'echo T' EXIT
+f() { /bin/echo in-f; }
+f
+%%%
+#!name nested subshell with EV_EXIT nofork path
+#!mode=file
+( ( ( /bin/echo innermost ) ) )
+%%%
+#!name subshell nofork with redirect
+#!mode=file
+( /bin/echo out ) > sr.out
+cat sr.out
+%%%
+#!name backgrounded subshell EV_TESTED cleared
+#!mode=file
+set -e
+( false ) &
+wait
+echo alive
+%%%
+#!name set -e in background subshell
+#!mode=file
+set -e
+( false; echo NOPE ) &
+wait
+echo "rc=$?"
+%%%
+#!name evalbackcmd with builtin only
+x=$(echo builtin-out); echo "[$x]"
+x=$(: ; echo after-colon); echo "[$x]"
+%%%
+#!name evalbackcmd nested in redirect
+cat < /dev/null > "$(echo bq.out)"
+[ -f bq.out ] && echo made
+%%%
+#!name command substitution inside function inside pipeline
+f() { echo "$(echo inner)"; }
+f | cat
+%%%
+#!name tpip cleanup after error in backquote
+x=$( : ${nope?boom} ) 2>/dev/null
+echo "rc=$?"
+echo alive
+y=$(echo works); echo "[$y]"
+%%%
+#!name multiple sequential command substitutions
+i=0
+while [ $i -lt 30 ]; do x=$(echo $i); i=$((i+1)); done
+echo "last=$x"
+%%%
+#!name evalcase no match returns 0
+(exit 3); case zzz in a) echo a;; esac; echo "rc=$?"
+%%%
+#!name evalcase multiple patterns
+case b in a|b|c) echo matched;; esac
+case d in a|b|c) echo no;; *) echo star;; esac
+%%%
+#!name evalcase with skip from earlier
+f() { return 4; }
+case x in x) f;; esac; echo "rc=$?"
+%%%
+#!name evalfor modifying loop variable
+for i in 1 2 3; do i=9; echo "i=$i"; done
+echo "after=$i"
+%%%
+#!name evalfor over expanded parameters
+set -- a b c
+for i in "$@"; do echo "[$i]"; done
+for i; do echo "d[$i]"; done
+%%%
+#!name evalloop until with skip in body
+i=0
+until [ $i -ge 5 ]; do i=$((i+1)); [ $i = 3 ] && continue; echo "i=$i"; done
+%%%
+#!name break in while condition
+i=0
+while { i=$((i+1)); [ $i -lt 5 ]; }; do
+  [ $i = 3 ] && break
+  echo "i=$i"
+done
+echo "final=$i"
+%%%
+#!name continue at outer level from nested
+for a in 1 2; do
+  for b in x y; do
+    continue 2
+    echo NOPE
+  done
+  echo NOPE2
+done
+echo done
+%%%
+#!name break 2 from three deep
+for a in 1 2; do for b in 1 2; do for c in 1 2; do break 2; done; echo "b-loop $b"; done; echo "a-loop $a"; done
+%%%
+#!name skipcount larger than nesting
+for a in 1 2; do for b in 1 2; do break 9; done; echo NOPE; done; echo done
+%%%
+#!name return inside loop inside function
+f() { for i in 1 2 3; do [ $i = 2 ] && return 7; done; echo NOPE; }
+f; echo "rc=$?"
+%%%
+#!name return inside nested loop and subshell
+f() { for i in 1 2; do ( return 3 ); echo "sub=$?"; done; }
+f; echo "rc=$?"
+%%%
+#!name loopnest reset across function boundary
+for i in 1 2; do
+  f() { break; echo NOPE; }
+  f
+  echo "outer $i"
+done
+echo done
+%%%
+#!name continue in function inside loop
+for i in 1 2 3; do
+  f() { continue; }
+  f
+  echo "after f $i"
+done
+echo done
+%%%
+#!name evalskip cleared after function
+f() { return 1; }
+f
+for i in 1 2; do echo "i=$i"; done
+%%%
+#!allow-kill
+#!name wait interrupted by signal
+#!norm=pid
+trap 'echo GOTUSR1' USR1
+sleep 3 &
+( sleep 0.2; kill -USR1 $$ ) &
+wait
+echo "rc=$?"
+%%%
+#!allow-kill
+#!name wait specific job interrupted by signal
+#!norm=pid
+trap 'echo GOTUSR2' USR2
+sleep 3 &
+j=$!
+( sleep 0.2; kill -USR2 $$ ) &
+wait $j
+echo "rc=$?"
+%%%
+#!allow-kill
+#!name child killed by signal exit status
+#!norm=pid
+sh -c 'kill -TERM $$' 2>/dev/null
+echo "rc=$?"
+%%%
+#!allow-kill
+#!name background child killed reported by wait
+#!norm=pid
+sh -c 'sleep 2' &
+p=$!
+sleep 0.2
+kill -TERM $p 2>/dev/null
+wait $p
+echo "rc=$?"
+%%%
+#!allow-kill
+#!name trap during command substitution
+#!norm=pid
+trap 'echo IN-TRAP' USR1
+x=$( sleep 0.1; echo done )
+echo "[$x]"
+%%%
+#!name exitstatus after signal-terminated pipeline element
+sh -c 'exit 130' | cat; echo "rc=$?"
+%%%
+#!name pipefail with signal status
+set -o pipefail
+sh -c 'exit 130' | cat; echo "rc=$?"
+%%%
+#!name nested pipefail in subshell
+set -o pipefail
+( false | true ); echo "rc=$?"
+( set +o pipefail; false | true ); echo "rc=$?"

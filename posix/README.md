@@ -6,9 +6,10 @@ rule corpus that an implementation can be tracked against with `nplan`.
 
 The vendored HTML of the standard is the input; `docs/spec/` is the output.
 
-**705 rules across 15 files**, covering XCU chapter 2 (Shell Command Language,
-including the fifteen special built-ins) and the `sh` reference page — 497 `req`,
-84 `syn`, 68 `def`, 56 `sem`.
+**1130 rules across 23 files**, covering everything POSIX requires a shell to
+implement internally: XCU chapters 1 and 2, the `sh` reference page, the fifteen
+special built-ins, and the sixteen intrinsic utilities — 821 `req`, 113 `def`,
+106 `syn`, 89 `sem`, 1 `thm`.
 
 ## What's here
 
@@ -43,15 +44,43 @@ The **shell** portion of XCU:
 | XCU 2.15 `set` and `trap` | `builtins-set-trap.md` | 69 | `builtin.` |
 | `sh` reference page | `invocation.md` | 49 | `sh.` |
 | `sh` command history and line editing | `line-editing.md` | 55 | `edit.` |
+| XCU 1.1 Relationship to Other Documents | `relationship.md` | 28 | `xcurel.` |
+| XCU 1.2–1.7 limits, defaults, built-ins | `utility-defaults.md` | 88 | `xcu.` |
+| Intrinsic `command`, `type`, `hash` | `builtins-command.md` | 44 | `builtin.` |
+| Intrinsic `cd`, `umask`, `ulimit` | `builtins-process.md` | 88 | `builtin.` |
+| Intrinsic `bg`, `fg`, `jobs` | `builtins-jobs.md` | 41 | `builtin.` |
+| Intrinsic `kill`, `wait` | `builtins-signals.md` | 34 | `builtin.` |
+| Intrinsic `alias`, `unalias`, `fc` | `builtins-alias.md` | 49 | `builtin.` |
+| Intrinsic `read`, `getopts` | `builtins-input.md` | 53 | `builtin.` |
 
 Each file owns an exclusive id prefix. That matters more than it looks: nspec
 keys coverage on the **bare rule id**, dropping namespace and verb, so two files
 using the same id would silently merge into one rule.
 
-Not covered: the regular built-ins that live in their own utility pages (`cd`,
-`read`, `command`, `getopts`, …) and the rest of the XCU utilities. The pipeline
-handles them unchanged — `tools/convert.sh utilities/cd.html` — they just
-haven't been authored into rules.
+## Where the shell's boundary is
+
+The scope above is not a judgement call — the standard draws the line itself.
+XCU 1.6 Built-In Utilities says every standard utility **except**
+
+- the special built-ins of XCU 2.15, and
+- the intrinsic utilities named in XCU 1.7, except for `kill`
+
+shall be implemented so that it can be reached through the `exec` family. Those
+two sets are therefore exactly what a conforming shell must provide *internally*;
+everything else may be a separate executable. XCU 1.7 puts it the other way
+round: intrinsic utilities "are not subject to a *PATH* search during command
+search and execution".
+
+So the corpus covers both sets. The intrinsic utilities are `alias`, `bg`, `cd`,
+`command`, `fc`, `fg`, `getopts`, `hash`, `jobs`, `kill`, `read`, `type`,
+`ulimit`, `umask`, `unalias`, and `wait`.
+
+Not covered: the rest of the XCU utilities (`awk`, `sed`, `find`, …). Those are
+ordinary utilities — a shell may implement them as regular built-ins for speed,
+but it is not required to, and they are reachable via `exec`. `pwd`, `test`,
+`echo`, and `printf` fall in this group too, despite being built into most real
+shells. The pipeline handles them unchanged — `tools/convert.sh utilities/sed.html`
+— they simply aren't part of the shell's own contract.
 
 ## Regenerating the markdown
 

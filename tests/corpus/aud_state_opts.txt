@@ -1,0 +1,113 @@
+#!name dollar-dash default
+echo "$-"
+%%%
+#!name set -o output
+set -o
+%%%
+#!name set +o output
+set +o
+%%%
+#!name set -o name
+set -o noglob; echo "$-"; set +o noglob; echo "$-"
+%%%
+#!name set -o bad
+set -o nosuchopt 2>&1; echo "rc=$?"
+%%%
+#!name set illegal option
+set -Z 2>&1; echo "rc=$?"
+%%%
+#!name set -- resets params
+set -- a b c; echo "$#:$*"; set --; echo "$#:[$*]"
+%%%
+#!name set - turns off x and v
+set -xv; set -; echo "$-"
+%%%
+#!name set plus options
+set -f; echo "$-"; set +f; echo "$-"
+%%%
+#!name shift default
+set -- a b c; shift; echo "$#:$*"
+%%%
+#!name shift n
+set -- a b c d; shift 3; echo "$#:$*"
+%%%
+#!name shift too many
+set -- a b; shift 5 2>&1; echo "rc=$?"; echo "$#"
+%%%
+#!name shift 0
+set -- a b; shift 0; echo "$#:$*"
+%%%
+#!name shift bad number
+set -- a b; shift x 2>&1; echo "rc=$?"
+%%%
+#!name positional after set
+set -- 1 2 3; echo "$1$2$3"; set -- ; echo "[$1]"
+%%%
+#!name V and E mutual exclusion
+set -V; echo "$-"; set -E; echo "$-"; set -V; echo "$-"
+%%%
+#!name -o vi emacs
+set -o vi; set -o | grep -E '^set .. (vi|emacs)$'
+%%%
+#!name getopts basic
+set -- -a -b arg; while getopts ab o; do echo "$o"; done; echo "OPTIND=$OPTIND"
+%%%
+#!name getopts with arg
+set -- -f file rest; getopts f: o; echo "$o $OPTARG $OPTIND"
+%%%
+#!name getopts missing arg
+set -- -f; getopts f: o 2>&1; echo "o=$o OPTARG=[${OPTARG-U}] rc=$?"
+%%%
+#!name getopts silent missing arg
+set -- -f; getopts :f: o; echo "o=$o OPTARG=[$OPTARG]"
+%%%
+#!name getopts illegal
+set -- -z; getopts ab o 2>&1; echo "o=$o"
+%%%
+#!name getopts silent illegal
+set -- -z; getopts :ab o; echo "o=$o OPTARG=[$OPTARG]"
+%%%
+#!name getopts clustered
+set -- -ab; while getopts ab o; do echo "$o $OPTIND"; done
+%%%
+#!name getopts double dash
+set -- -a -- -b; while getopts ab o; do echo "$o"; done; echo "OPTIND=$OPTIND"
+%%%
+#!name getopts explicit args
+getopts ab o -a -b; echo "$o $OPTIND"; getopts ab o -a -b; echo "$o $OPTIND"
+%%%
+#!name getopts OPTIND out of range
+set -- -a; OPTIND=99; getopts ab o; echo "o=$o OPTIND=$OPTIND"
+%%%
+#!name getopts attached arg
+set -- -fvalue; getopts f: o; echo "$o [$OPTARG] $OPTIND"
+%%%
+#!name getopts nonoption stops
+set -- x -a; getopts ab o; echo "rc=$? o=$o OPTIND=$OPTIND"
+%%%
+#!name getopts usage error
+getopts 2>&1; echo "rc=$?"
+%%%
+#!name getopts loop then reset
+set -- -a -b; while getopts ab o; do :; done; echo $OPTIND; set -- -a; OPTIND=1; getopts ab o; echo "$o $OPTIND"
+%%%
+#!name nextopt double dash in builtin
+set -- -a; unalias -- -a 2>&1; echo rc=$?
+%%%
+#!name set -o pipefail
+set -o pipefail; (exit 3) | true; echo "$?"
+%%%
+#!name set -u
+set -u; echo "${UNSETV}" 2>&1; echo "rc=$?"
+%%%
+#!name set -C noclobber
+set -C; echo x > f1; echo y > f1 2>&1; echo "rc=$?"; cat f1; echo z >| f1; cat f1
+%%%
+#!name set -n noexec in subshell
+(set -n; echo nope); echo "rc=$?"
+%%%
+#!name option letters all
+set -efICmnsxvVEabu 2>&1; echo "$-"
+%%%
+#!name minus o list after changes
+set -f -C; set +o | grep -E 'noglob|noclobber'

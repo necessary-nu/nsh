@@ -1,0 +1,47 @@
+#!name exec cat leaves stdin position
+#!mode=c
+printf 'exec cat\nleftover1\nleftover2\n' | "$0"
+%%%
+#!name external cmd reads rest of stdin
+#!mode=c
+printf 'echo A\ncat\nrest1\nrest2\n' | "$0"
+%%%
+#!name builtin read then cat
+#!mode=c
+printf 'read v\necho "v=$v"\ncat\nR1\nR2\n' | "$0"
+%%%
+#!name shell exit leaves stdin for next reader
+#!mode=c
+printf 'echo hi\nexit\nafter1\nafter2\n' > sc.txt; { "$0"; cat; } < sc.txt
+%%%
+#!name shell exit from pipe leaves stdin
+#!mode=c
+printf 'echo hi\nexit\nafter1\nafter2\n' | { "$0"; cat; }
+%%%
+#!name big script via pipe then cat
+#!mode=c
+{ i=0; while [ $i -lt 1500 ]; do echo "echo n$i"; i=$((i+1)); done; echo exit; echo TAIL1; echo TAIL2; } > sc2.txt; cat sc2.txt | { "$0" > /dev/null; cat; }
+%%%
+#!name no newline at eof pipe
+#!mode=c
+printf 'echo a\nexit\nrest' | { "$0"; cat; }
+%%%
+#!name subshell inherits stdin pipe
+#!mode=c
+printf 'echo A\n(cat)\nX1\nX2\n' | "$0"
+%%%
+#!name eval exec cat
+#!mode=c
+printf 'eval exec cat\nZZ1\nZZ2\n' | "$0"
+%%%
+#!name dot file then cat from stdin
+#!mode=c
+printf 'echo inner\n' > inc.sh; printf '. ./inc.sh\ncat\nQ1\nQ2\n' | "$0"
+%%%
+#!name background job then cat
+#!mode=c
+printf 'true &\nwait\ncat\nB1\n' | "$0"
+%%%
+#!name stdin from file with exec cat
+#!mode=c
+printf 'exec cat\nfileleft1\nfileleft2\n' > sf.txt; "$0" < sf.txt

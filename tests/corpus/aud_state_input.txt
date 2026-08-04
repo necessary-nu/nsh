@@ -1,0 +1,140 @@
+#!name dot sourcing
+printf 'echo sourced\nX=42\n' > s1.sh; . ./s1.sh; echo "$X"
+%%%
+#!name dot sourcing nested
+printf 'echo one\n. ./s3.sh\necho three\n' > s2.sh; printf 'echo two\n' > s3.sh; . ./s2.sh
+%%%
+#!name dot missing file
+. ./nosuch.sh 2>&1; echo "rc=$?"
+%%%
+#!name dot with error mid file
+printf 'echo a\nfalse\necho b\n' > s4.sh; . ./s4.sh; echo "rc=$?"
+%%%
+#!name script mode basic
+#!mode=file
+echo line1
+echo line2
+%%%
+#!name script mode with continuation
+#!mode=file
+echo one \
+two
+echo done
+%%%
+#!name stdin mode multiline
+#!mode=stdin
+echo a
+echo b
+echo c
+%%%
+#!name stdin mode read consumes
+#!mode=stdin
+read x
+echo "got=$x"
+echo rest
+%%%
+#!name stdin read then exec cat
+#!mode=stdin
+read x
+echo "x=$x"
+cat
+remaining1
+remaining2
+%%%
+#!name stdin here-doc mid-script
+#!mode=stdin
+cat <<E
+inner
+E
+echo after
+%%%
+#!name eval string
+eval 'echo from-eval; Y=9'; echo "$Y"
+%%%
+#!name eval nested quotes
+eval 'eval "echo deep"'
+%%%
+#!name command substitution multi-line
+v=$(echo a
+echo b); echo "[$v]"
+%%%
+#!name backquote
+v=`echo x`; echo "$v"
+%%%
+#!name long line input
+#!mode=file
+echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+echo end
+%%%
+#!name many lines file
+#!mode=file
+i=0
+while [ $i -lt 200 ]; do echo "n$i"; i=$((i+1)); done
+%%%
+#!name here-doc bigger than pipe buffer
+i=0; : > hd.txt; while [ $i -lt 2000 ]; do echo "hdline$i" >> hd.txt; i=$((i+1)); done; wc -l < hd.txt; cat <<EOF | wc -l
+$(cat hd.txt)
+EOF
+%%%
+#!name unicode input
+echo "héllo wörld"
+%%%
+#!name pungetc across newline
+#!mode=file
+if true
+then
+echo yes
+fi
+%%%
+#!name case with esac on same line
+case a in a) echo hit;; esac
+%%%
+#!name alias inside sourced file
+printf "alias zz='echo ZZ'\n" > s5.sh; . ./s5.sh; zz
+%%%
+#!name function defined in dot file
+printf 'g() { echo G; }\n' > s6.sh; . ./s6.sh; g
+%%%
+#!name exit inside dot file
+printf 'echo pre\nexit 4\necho post\n' > s7.sh; (. ./s7.sh); echo "rc=$?"
+%%%
+#!name return inside dot file
+printf 'echo pre\nreturn 5\necho post\n' > s8.sh; . ./s8.sh; echo "rc=$?"
+%%%
+#!name read builtin from file
+printf 'l1\nl2\n' > r1.txt; while read l; do echo "[$l]"; done < r1.txt
+%%%
+#!name read -r backslash
+printf 'a\\tb\n' > r2.txt; read -r v < r2.txt; echo "$v"
+%%%
+#!name comments and blank lines
+#!mode=file
+
+# a comment
+echo ok    # trailing
+
+echo ok2
+%%%
+#!name semicolons and newlines mix
+echo a; echo b
+echo c
+%%%
+#!name empty script
+#!mode=file
+%%%
+#!name script with only comment
+#!mode=file
+# nothing
+%%%
+#!name backslash newline in word
+#!mode=file
+echo ab\
+cd
+%%%
+#!name deep nesting parse
+#!mode=file
+for i in 1 2; do
+  for j in 3 4; do
+    echo "$i$j"
+  done
+done

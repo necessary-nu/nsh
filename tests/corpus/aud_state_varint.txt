@@ -1,0 +1,133 @@
+#!name LINENO advances
+#!mode=file
+echo $LINENO
+echo $LINENO
+
+echo $LINENO
+%%%
+#!name LINENO assigned becomes static
+#!mode=file
+LINENO=5
+echo $LINENO
+echo $LINENO
+%%%
+#!name LINENO unset
+#!mode=file
+unset LINENO
+echo "[${LINENO-U}]"
+echo "[$LINENO]"
+%%%
+#!name LINENO in function
+#!mode=file
+f() {
+echo $LINENO
+}
+f
+echo $LINENO
+%%%
+#!name LINENO exported
+#!mode=file
+export LINENO
+env | grep -c '^LINENO='
+%%%
+#!name LINENO local
+#!mode=file
+f() { local LINENO; echo "[${LINENO-U}]"; }
+f
+echo $LINENO
+%%%
+#!name LC_ALL set unset via putenv
+LC_ALL=C; env | grep -c '^LC_ALL=C$'; unset LC_ALL; env | grep -c '^LC_ALL'
+%%%
+#!name LC_ALL reassign
+LC_ALL=C; LC_ALL=POSIX; env | grep '^LC_ALL='
+%%%
+#!name LANG and LC_ALL
+LANG=C; LC_ALL=C; env | grep -E '^(LANG|LC_ALL)=' | sort
+%%%
+#!name LC_COLLATE affects nothing visible
+LC_COLLATE=C; echo "$LC_COLLATE"; unset LC_COLLATE; echo "[${LC_COLLATE-U}]"
+%%%
+#!name locale vars in set output
+LC_CTYPE=C; set | grep '^LC_CTYPE='
+%%%
+#!name locale var local
+LC_NUMERIC=C; f() { local LC_NUMERIC=POSIX; env|grep '^LC_NUMERIC='; }; f; env|grep '^LC_NUMERIC='
+%%%
+#!name PS1 assignment
+PS1='x'; echo "$PS1"; set | grep "^PS1="
+%%%
+#!name IFS default value bytes
+printf '%s' "$IFS" | od -c | head -2
+%%%
+#!name IFS unset then default restore
+unset IFS; printf '[%s]' "$IFS"; echo; IFS=' '; printf '[%s]' "$IFS"; echo
+%%%
+#!name PATH default when unset in subshell
+(unset PATH; command -v ls; echo "rc=$?")
+%%%
+#!name MAIL and MAILPATH set
+MAIL=/nonexistent/mbox; echo "$MAIL"; MAILPATH=/a:/b; echo "$MAILPATH"
+%%%
+#!name MAILPATH unset check
+unset MAILPATH; echo "[${MAILPATH-U}]"
+%%%
+#!name TERM and HISTSIZE
+TERM=dumb; HISTSIZE=10; echo "$TERM $HISTSIZE"
+%%%
+#!name HISTSIZE bad value
+HISTSIZE=notanumber 2>&1; echo "rc=$?"
+%%%
+#!name OPTIND default value
+echo "$OPTIND"
+%%%
+#!name all varinit names present in set
+set | grep -cE '^(IFS|PATH|PS1|PS2|PS4|OPTIND|LINENO)='
+%%%
+#!name env import of odd names
+#!mode=c
+env 'X-Y=1' 'GOOD=2' "$0" -c 'echo "[${GOOD}]"; set | grep -c "^X"'
+%%%
+#!name env import overrides builtin var
+#!mode=c
+env PS1='envps1' "$0" -c 'echo "$PS1"'
+%%%
+#!name env import IFS
+#!mode=c
+env IFS=: "$0" -c 'set -- $(echo "a:b"); echo $#'
+%%%
+#!name PPID matches parent
+#!mode=c
+"$0" -c 'echo "$PPID"' > pp.txt; echo "$$" > mypid.txt; if [ "$(cat pp.txt)" = "$(cat mypid.txt)" ]; then echo MATCH; else echo DIFF; fi
+%%%
+#!name PWD sanity at startup
+#!mode=c
+"$0" -c 'test "$PWD" = "$(pwd)" && echo SAME || echo DIFF'
+%%%
+#!name PWD bogus from env
+#!mode=c
+env PWD=/definitely/not/here "$0" -c 'test "$PWD" = "$(pwd)" && echo SAME || echo DIFF'
+%%%
+#!name unset OLDPWD then cd
+unset OLDPWD; mkdir -p z1; cd z1; echo "${OLDPWD:+SET}"
+%%%
+#!name readonly on unset var then set
+readonly RQ; RQ=1 2>&1; echo "rc=$?"; echo "[${RQ-U}]"
+%%%
+#!name export then readonly same var
+X=1; export X; readonly X; X=2 2>&1; echo "rc=$?"; env|grep '^X='
+%%%
+#!name bad variable name error text
+eval '1abc=1' 2>&1; echo "rc=$?"
+%%%
+#!name bad variable name with punctuation
+eval 'a.b=1' 2>&1; echo "rc=$?"
+%%%
+#!name empty variable name
+eval '=1' 2>&1; echo "rc=$?"
+%%%
+#!name unset with invalid name
+unset 'a b' 2>&1; echo "rc=$?"
+%%%
+#!name export with invalid name
+export 'a-b=1' 2>&1; echo "rc=$?"

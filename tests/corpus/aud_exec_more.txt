@@ -1,0 +1,374 @@
+#!allow-kill
+#!name kill -l full list
+kill -l
+echo "rc=$?"
+%%%
+#!allow-kill
+#!name kill -l with numbers
+for n in 0 1 9 16 32 33 34 64 65 128 137 200; do
+  printf '%s: ' "$n"
+  kill -l "$n" 2>&1
+done
+%%%
+#!allow-kill
+#!name kill -l with bad arg
+kill -l abc 2>&1; echo "rc=$?"
+kill -l -1 2>&1; echo "rc=$?"
+%%%
+#!allow-kill
+#!name kill signal name forms
+kill -0 $$ 2>&1; echo "rc=$?"
+kill -s 0 $$ 2>&1; echo "rc=$?"
+kill -TERM 2>&1; echo "rc=$?"
+%%%
+#!allow-kill
+#!name kill nonexistent pid
+kill -0 999999 2>&1; echo "rc=$?"
+%%%
+#!allow-kill
+#!name kill usage errors
+kill 2>&1; echo "rc=$?"
+kill -l 1 2 2>&1; echo "rc=$?"
+kill -s 2>&1; echo "rc=$?"
+kill -s NOSUCH 1 2>&1; echo "rc=$?"
+%%%
+#!name empty command with back_exitstatus
+unset u
+$u; echo "rc=$?"
+$u$(exit 3); echo "rc=$?"
+$u$(exit 0); echo "rc=$?"
+%%%
+#!name empty command with redirect error
+unset u
+$u < /nonexistent/zzz 2>/dev/null; echo "rc=$?"
+echo alive
+%%%
+#!name empty command with successful redirect
+unset u
+(exit 6)
+$u < /dev/null; echo "rc=$?"
+%%%
+#!name empty command with assignment and substitution
+unset u
+v=$(exit 4) $u; echo "rc=$?"
+%%%
+#!name set -e with NREDIR failure
+#!mode=file
+set -e
+{ echo hi; } < /nonexistent/zzz
+echo NOTREACHED
+%%%
+#!name set -e with NREDIR failure tested
+set -e
+if { echo hi; } < /nonexistent/zzz 2>/dev/null; then echo t; else echo f; fi
+echo alive
+%%%
+#!name set -e with subshell in condition
+set -e
+if ( false ); then echo t; else echo f; fi
+echo alive
+%%%
+#!name set -e with pipeline in condition
+set -e
+if false | false; then echo t; else echo f; fi
+echo alive
+%%%
+#!name set -e with until loop body failure
+#!mode=file
+set -e
+i=0
+until [ $i -ge 2 ]; do i=$((i+1)); false; done
+echo NOTREACHED
+%%%
+#!name set -e with for loop body failure
+#!mode=file
+set -e
+for i in 1 2; do false; done
+echo NOTREACHED
+%%%
+#!name set -e with case body failure
+#!mode=file
+set -e
+case x in x) false;; esac
+echo NOTREACHED
+%%%
+#!name set -e inside eval
+#!mode=file
+set -e
+eval 'false'
+echo NOTREACHED
+%%%
+#!name set -e with negated pipeline
+set -e
+! false | true
+echo alive
+! true | false
+echo alive2
+%%%
+#!name set -e cleared inside function used as condition
+set -e
+f() { g; echo "after g"; }
+g() { false; }
+if f; then echo t; else echo f; fi
+echo alive
+%%%
+#!name set -e with && chain last element failing
+#!mode=file
+set -e
+true && false
+echo NOTREACHED
+%%%
+#!name set -e with || chain
+set -e
+false || true
+echo alive
+%%%
+#!name set -e in dot file
+#!mode=file
+printf 'false\necho NOPE\n' > se.sh
+set -e
+. ./se.sh
+echo NOTREACHED
+%%%
+#!name long command text in jobs display
+sleep 0 &
+wait
+echo done
+%%%
+#!name Done status display via jobs
+(exit 3) &
+sleep 0.2
+jobs
+echo "rc=$?"
+%%%
+#!name Done zero status display
+true &
+sleep 0.2
+jobs
+echo "rc=$?"
+%%%
+#!name jobs with many completed
+i=0
+while [ $i -lt 6 ]; do ( exit $i ) & i=$((i+1)); done
+sleep 0.3
+jobs
+echo done
+%%%
+#!name describe_command with slash path index -1
+command -V /bin/sh
+type /bin/sh
+command -v ./nonexistent-file; echo "rc=$?"
+type ./nonexistent-file 2>&1; echo "rc=$?"
+%%%
+#!name describe_command on dir path
+command -V /bin 2>&1; echo "rc=$?"
+type /bin 2>&1; echo "rc=$?"
+%%%
+#!name describe_command on non-executable path
+: > nx; chmod 644 nx
+type ./nx 2>&1; echo "rc=$?"
+command -V ./nx 2>&1; echo "rc=$?"
+%%%
+#!name type with multiple operands
+type echo nosuch true 2>&1; echo "rc=$?"
+%%%
+#!name type with -- like arg
+type -- 2>&1; echo "rc=$?"
+%%%
+#!name ulimit -a padding
+ulimit -a | sed 's/[0-9][0-9]*/N/g' | cat -A | sed 's/\$$//'
+%%%
+#!name hash output for command in second path element
+mkdir -p q1 q2
+printf '#!/bin/sh\n:\n' > q2/qcmd; chmod 755 q2/qcmd
+PATH=$PWD/q1:$PWD/q2:/bin:/usr/bin
+qcmd
+hash | sed "s|$PWD|WD|"
+%%%
+#!name hash output after rehash marker
+mkdir -p q3
+printf '#!/bin/sh\n:\n' > q3/rcmd; chmod 755 q3/rcmd
+PATH=$PWD/q3:/bin:/usr/bin
+top=$PWD
+rcmd
+mkdir -p sd
+cd sd
+hash | sed "s|$top|WD|"
+cd ..
+%%%
+#!name command -V for hashed command with index
+mkdir -p q4 q5
+printf '#!/bin/sh\n:\n' > q5/vcmd; chmod 755 q5/vcmd
+PATH=$PWD/q4:$PWD/q5:/bin:/usr/bin
+vcmd
+command -V vcmd | sed "s|$PWD|WD|"
+command -v vcmd | sed "s|$PWD|WD|"
+%%%
+#!name I/O error from builtin with closed stdout
+( exec >&-; echo hi ) 2>&1 | sed 's/^[^:]*: [0-9]*: //'
+echo "rc=$?"
+%%%
+#!name I/O error printf builtin
+( exec >&-; printf 'x\n' ) 2>&1 | sed 's/^[^:]*: [0-9]*: //'
+echo "rc=$?"
+%%%
+#!name builtin output to full pipe reader gone
+( yes 2>/dev/null || true ) | head -1
+echo "rc=$?"
+%%%
+#!name echo to a directory
+echo x > . 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+%%%
+#!name evalbltin exitstatus preserved
+echo hi > /dev/null; echo "rc=$?"
+false > /dev/null; echo "rc=$?"
+%%%
+#!name growjobtab many jobs then jobs
+i=0
+while [ $i -lt 20 ]; do ( exit 0 ) & i=$((i+1)); done
+wait
+jobs
+echo "rc=$?"
+%%%
+#!name job numbering after growth
+i=0
+while [ $i -lt 9 ]; do sleep 0 & i=$((i+1)); done
+wait
+sleep 0 &
+wait
+jobs
+echo done
+%%%
+#!name trap unwinds out of nested functions
+#!mode=file
+f() { g; }
+g() { h; }
+h() { : ${nope?deep}; }
+f
+echo NOTREACHED
+%%%
+#!name error deep in nested subshells
+( ( ( : ${nope?deep} ) ) ) 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+echo alive
+%%%
+#!name error inside command substitution inside function
+f() { echo "$( : ${nope?bad} )"; }
+f 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+echo alive
+%%%
+#!name evalskip after error in loop
+for i in 1 2 3; do
+  ( : ${nope?x} ) 2>/dev/null
+  echo "iter $i rc=$?"
+done
+%%%
+#!name exec failure inside pipeline stage
+{ exec /nonexistent/zzz; } 2>/dev/null | cat
+echo "rc=$?"
+%%%
+#!name exec script without shebang
+printf 'echo NOSHEBANG-VIA-EXEC "$0" "$@"\n' > es2.sh; chmod 755 es2.sh
+( exec ./es2.sh arg1 ) 2>&1 | sed 's|[^ ]*es2.sh|ES|'
+echo "rc=$?"
+%%%
+#!name run script without shebang with args
+printf 'echo "argv0=$0 args=$*"\n' > es3.sh; chmod 755 es3.sh
+./es3.sh a b 2>&1 | sed 's|[^ ]*es3.sh|ES|'
+%%%
+#!name nested no-shebang script exec chain
+printf 'echo LEVEL1\n./es5.sh\n' > es4.sh; chmod 755 es4.sh
+printf 'echo LEVEL2\n' > es5.sh; chmod 755 es5.sh
+./es4.sh
+%%%
+#!name evalcommand argv slot with command
+printf 'echo CMDNOSHEBANG\n' > es6.sh; chmod 755 es6.sh
+command ./es6.sh
+echo "rc=$?"
+%%%
+#!name eprintlist separator sharing
+set -x
+a=1 echo x y
+set +x
+%%%
+#!name eprintlist with only assignments
+set -x
+a=1 b=2
+set +x
+%%%
+#!name eprintlist with only command
+set -x
+echo solo
+set +x
+%%%
+#!name xtrace with empty argument
+set -x
+echo '' x
+set +x
+%%%
+#!name preverrout fd after redirect
+set -x
+{ echo a; } 2>/dev/null
+set +x
+echo alive
+%%%
+#!name funcline zero at top level for lastarg
+#!shargs -i
+f() { echo "$1"; }
+f zz
+echo "[$_]"
+%%%
+#!name dollar underscore non interactive
+echo one two
+echo "[$_]"
+%%%
+#!name evalstring EV_EXIT only on last command
+#!mode=c
+/bin/echo a; /bin/echo b
+%%%
+#!name minusc plus sflag reads stdin after
+#!shargs -s
+#!mode=stdin
+echo one
+echo two
+%%%
+#!name dot file that exits
+printf 'echo in-dot\nexit 9\n' > de.sh
+#!mode=file
+. ./de.sh
+echo NOTREACHED
+%%%
+#!name dot file with syntax error
+printf 'echo a\nif\n' > ds.sh
+. ./ds.sh 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+echo alive
+%%%
+#!name dot file nested dot
+printf 'echo L1\n. ./dn2.sh\necho L1END\n' > dn1.sh
+printf 'echo L2\n' > dn2.sh
+. ./dn1.sh
+echo "rc=$?"
+%%%
+#!name readcmdfile via %func with syntax error
+mkdir -p fbad
+printf 'if\n' > fbad/badfn
+PATH=fbad%func:/bin:/usr/bin
+badfn 2>&1 | sed 's/.*: //'
+echo "rc=$?"
+echo alive
+%%%
+#!name readcmdfile via %func defining several
+mkdir -p fmulti
+printf 'aa() { echo AA; }\nbb() { echo BB; }\n' > fmulti/aa
+PATH=fmulti%func:/bin:/usr/bin
+aa
+bb
+%%%
+#!name %func directory where file missing
+mkdir -p fmiss
+PATH=fmiss%func:/bin:/usr/bin
+nosuchfn 2>&1 | sed 's/.*: //'
+echo "rc=$?"

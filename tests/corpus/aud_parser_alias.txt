@@ -1,0 +1,221 @@
+#!mode=file
+#!name alias partial mb head
+export LC_ALL=en_US.UTF-8
+alias a='echo Ã'
+a©
+
+%%%
+#!mode=file
+#!name alias partial mb head 2
+export LC_ALL=en_US.UTF-8
+alias a='echo xÃ'
+a©y
+
+%%%
+#!mode=file
+#!name alias whole mb
+export LC_ALL=en_US.UTF-8
+alias a='echo é'
+a
+
+%%%
+#!mode=file
+#!name alias trailing space then mb
+export LC_ALL=en_US.UTF-8
+alias a='echo '
+alias b='é'
+a b
+
+%%%
+#!mode=file
+#!name alias value is mb
+export LC_ALL=en_US.UTF-8
+alias é='echo hit' 2>/dev/null; echo rc=$?
+
+%%%
+#!mode=file
+#!name alias ends mid mb in dquote
+export LC_ALL=en_US.UTF-8
+alias a='echo "Ã'
+a©"
+
+%%%
+#!mode=file
+#!name alias ends with backslash
+export LC_ALL=en_US.UTF-8
+alias a='echo x\\'
+a
+y
+
+%%%
+#!mode=file
+#!name alias ends with quote
+export LC_ALL=en_US.UTF-8
+alias a='echo "unterm'
+a ok"
+
+%%%
+#!mode=file
+#!name alias ends with dollar
+export LC_ALL=en_US.UTF-8
+alias a='echo $'
+av
+
+%%%
+#!mode=file
+#!name alias ends with dollarbrace
+export LC_ALL=en_US.UTF-8
+alias a='echo ${'
+av}
+
+%%%
+#!mode=file
+#!name alias ends with backquote
+export LC_ALL=en_US.UTF-8
+alias a='echo `'
+aecho x`
+
+%%%
+#!mode=file
+#!name alias ends with dollarparen
+export LC_ALL=en_US.UTF-8
+alias a='echo $('
+aecho x)
+
+%%%
+#!mode=file
+#!name alias ends with arith open
+export LC_ALL=en_US.UTF-8
+alias a='echo $(('
+a1+1))
+
+%%%
+#!mode=file
+#!name alias ends mid heredoc op
+export LC_ALL=en_US.UTF-8
+alias a='cat <<'
+aEOF
+body
+EOF
+
+%%%
+#!mode=file
+#!name alias inside heredoc body
+export LC_ALL=en_US.UTF-8
+alias a='echo A'
+cat <<EOF
+a
+EOF
+
+%%%
+#!mode=file
+#!name alias expands to heredoc
+export LC_ALL=en_US.UTF-8
+alias a='cat <<EOF'
+a
+body
+EOF
+
+%%%
+#!mode=file
+#!name alias recursion guard
+export LC_ALL=en_US.UTF-8
+alias a='a b'
+a
+
+%%%
+#!mode=file
+#!name alias chain space
+export LC_ALL=en_US.UTF-8
+alias a='echo ' b='B' c='C'
+a b c
+
+%%%
+#!mode=file
+#!name alias in for list
+export LC_ALL=en_US.UTF-8
+alias a='1 2'
+for i in a; do echo $i; done
+
+%%%
+#!mode=file
+#!name alias as keyword do
+export LC_ALL=en_US.UTF-8
+alias d='do'
+for i in 1; d echo x; done
+
+%%%
+#!mode=file
+#!name alias empty then word
+export LC_ALL=en_US.UTF-8
+alias a=''
+a echo hi
+
+%%%
+#!mode=file
+#!name alias with newline
+export LC_ALL=en_US.UTF-8
+alias a='echo one
+echo two'
+a
+
+%%%
+#!mode=file
+#!name alias with semicolon
+export LC_ALL=en_US.UTF-8
+alias a='echo one; echo two'
+a
+
+%%%
+#!mode=file
+#!name alias with trailing backslash newline
+export LC_ALL=en_US.UTF-8
+alias a='echo one \\
+'
+a two
+
+%%%
+#!mode=file
+#!name alias in case pattern pos
+export LC_ALL=en_US.UTF-8
+alias a='x'
+case x in a) echo m;; *) echo n;; esac
+
+%%%
+#!mode=file
+#!name alias with quotes unbalanced
+export LC_ALL=en_US.UTF-8
+alias a="echo '"
+a b'
+
+%%%
+#!mode=file
+#!name alias defining alias
+export LC_ALL=en_US.UTF-8
+alias a='alias b="echo B"'
+a
+b
+
+%%%
+#!mode=file
+#!name alias with CTL byte
+export LC_ALL=en_US.UTF-8
+alias a='echo '
+a | od -An -c | head -1
+
+%%%
+#!mode=file
+#!name alias mb split point
+export LC_ALL=en_US.UTF-8
+alias a='echo é'
+a
+
+%%%
+#!mode=file
+#!name two aliases mb halves
+export LC_ALL=en_US.UTF-8
+alias a='echo Ã'
+alias b='©'
+a
+b
+

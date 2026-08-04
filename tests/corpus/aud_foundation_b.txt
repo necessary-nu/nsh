@@ -1,0 +1,156 @@
+#!name umask-numeric
+umask 022; umask
+%%%
+#!name umask-symbolic
+umask 022; umask -S
+%%%
+#!name umask-odd
+umask 0007; umask; umask -S
+%%%
+#!name times-fmt
+times >/dev/null 2>&1; echo $?
+%%%
+#!name jobs-l
+#!norm=pid
+sleep 0.2 | cat | cat & jobs -l; wait
+%%%
+#!name jobs-plain
+sleep 0.2 & jobs; wait
+%%%
+#!name jobs-pgid
+#!norm=pid
+sleep 0.2 & jobs -p; wait
+%%%
+#!name jobs-two
+#!norm=pid
+sleep 0.2 & sleep 0.3 & jobs -l; wait
+%%%
+#!name type-builtin
+type echo; type type; type ls; type nosuchthing
+%%%
+#!name command-V
+command -V echo; command -V cd; command -v true
+%%%
+#!name alias-show
+alias foo='bar baz'; alias; type foo
+%%%
+#!name hash-out
+hash; ls >/dev/null 2>&1; hash
+%%%
+#!name xtrace-long
+set -x
+i=0; s=; while [ $i -lt 300 ]; do s="${s}q"; i=$((i+1)); done
+echo "$s" > /dev/null
+set +x
+%%%
+#!name xtrace-interleave
+set -x
+echo one
+echo two
+%%%
+#!name xtrace-buffer
+set -x
+i=0; while [ $i -lt 200 ]; do echo "line $i"; i=$((i+1)); done
+%%%
+#!name here-doc-big
+cat <<'EOF' | wc -c
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+EOF
+%%%
+#!name stack-boundary-503
+i=0; s=; while [ $i -lt 503 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; echo "$s" | wc -c
+%%%
+#!name stack-boundary-504
+i=0; s=; while [ $i -lt 504 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; echo "$s" | wc -c
+%%%
+#!name stack-boundary-505
+i=0; s=; while [ $i -lt 505 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}; echo "$s" | wc -c
+%%%
+#!name stack-boundary-1007
+i=0; s=; while [ $i -lt 1007 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}
+%%%
+#!name stack-boundary-1008
+i=0; s=; while [ $i -lt 1008 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}
+%%%
+#!name stack-boundary-1009
+i=0; s=; while [ $i -lt 1009 ]; do s="${s}a"; i=$((i+1)); done; echo ${#s}
+%%%
+#!name stack-case-pattern
+s=abcdefghij; case "$s" in a*j) echo yes;; *) echo no;; esac
+%%%
+#!name stack-glob-long
+mkdir -p d; i=0; while [ $i -lt 60 ]; do : > d/f$i; i=$((i+1)); done; echo d/* | wc -c
+%%%
+#!name stack-func-recursion
+f() { if [ $1 -gt 0 ]; then f $(($1-1)); fi; }; f 200; echo ok
+%%%
+#!name stack-nested-cmdsub
+echo "$(echo "$(echo "$(echo "$(echo deep)")")")"
+%%%
+#!name stack-ifs-split
+IFS=:; s=$(i=0; r=; while [ $i -lt 400 ]; do r="$r:w$i"; i=$((i+1)); done; echo "$r"); set -- $s; echo $#
+%%%
+#!name stack-pattern-strip
+s=$(i=0; r=; while [ $i -lt 1000 ]; do r="${r}ab"; i=$((i+1)); done; echo "$r"); echo ${#s}; t=${s#a}; echo ${#t}; u=${s%b}; echo ${#u}
+%%%
+#!name stack-longest-strip
+s=$(i=0; r=; while [ $i -lt 700 ]; do r="${r}ab"; i=$((i+1)); done; echo "$r"); t=${s##*a}; echo ${#t}; u=${s%%b*}; echo ${#u}
+%%%
+#!name arith-big
+echo $((9223372036854775807)); echo $((-9223372036854775807-1))
+%%%
+#!name arith-overflow-msg
+echo $((1/0))
+%%%
+#!name printf-many
+printf '%s|' a b c d e f g h i j; echo
+%%%
+#!name printf-jd
+printf '%d\n' 9223372036854775807
+%%%
+#!name read-timeout-badnum
+read -t abc x </dev/null
+%%%
+#!name local-unset
+f() { local v=1; echo $v; }; f; echo "[${v-unset}]"
+%%%
+#!name getopts-loop
+set -- -a -b val -c; while getopts ab:c o; do echo "$o=$OPTARG"; done; echo $OPTIND
+%%%
+#!name eval-err-lineno
+eval 'echo a
+echo b
+nosuchcmdxyz'
+%%%
+#!name func-err-lineno
+f() {
+  echo one
+  nosuchcmdzzz
+}
+f
+%%%
+#!name syntax-err
+echo a; ; echo b
+%%%
+#!name syntax-err-eof
+if true; then
+%%%
+#!name redir-err
+echo hi > /nonexistent-dir/x
+%%%
+#!name redir-fd-err
+exec 3>&99
+%%%
+#!name badfd
+echo x 9999999999999999999>&1
+%%%
+#!name exec-notfound
+./nosuchprogram-xyz
+%%%
+#!name exec-perm
+: > np; chmod 000 np; ./np
+%%%
+#!name dot-notfound
+. ./nosuchfile-xyz

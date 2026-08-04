@@ -1,0 +1,29 @@
+#!name arith assign big positive
+x=$((9223372036854775807)); echo "$x"
+%%%
+#!name arith assign big negative
+x=$((-9223372036854775807 - 1)); echo "$x"
+%%%
+#!name arith assign via compound
+n=0; : $((n = 1234567890123456789)); echo "$n"
+%%%
+#!name arith increment
+i=5; : $((i += 100)); echo "$i"
+%%%
+#!name arith negative assign
+: $((z = -42)); echo "$z"
+%%%
+#!name arith assign zero
+: $((z = 0)); echo "$z"
+%%%
+#!name arith assign then flags kept
+export E=1; : $((E = 7)); env | grep '^E='
+%%%
+#!name arith assign readonly
+readonly R=1; : $((R = 2)) 2>&1; echo "rc=$?"
+%%%
+#!name arith assign local
+f() { local L=1; : $((L = 9)); echo "$L"; }; L=0; f; echo "$L"
+%%%
+#!name OPTIND grows
+set -- -a -a -a -a -a -a -a -a -a -a -a -a; while getopts a o; do :; done; echo "$OPTIND"

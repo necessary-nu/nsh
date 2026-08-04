@@ -1,0 +1,165 @@
+#!name ps4 plain
+PS4='+ '; set -x; echo hi
+%%%
+#!name ps4 with var
+v=V; PS4='[$v] '; set -x; echo hi
+%%%
+#!name ps4 with braces
+v=V; PS4='[${v}] '; set -x; echo hi
+%%%
+#!name ps4 with default
+PS4='[${nosuch:-D}] '; set -x; echo hi
+%%%
+#!name ps4 with arith
+PS4='[$((1+2))] '; set -x; echo hi
+%%%
+#!name ps4 with cmdsub
+PS4='[$(echo sub)] '; set -x; echo hi
+%%%
+#!name ps4 with backquote
+PS4='[`echo bq`] '; set -x; echo hi
+%%%
+#!name ps4 with quotes
+PS4='["a b"] '; set -x; echo hi
+%%%
+#!name ps4 with single quotes
+PS4="['x'] "; set -x; echo hi
+%%%
+#!name ps4 with backslash
+PS4='a\tb '; set -x; echo hi
+%%%
+#!name ps4 with backslash dollar
+PS4='\$ '; set -x; echo hi
+%%%
+#!name ps4 with tilde
+HOME=/hh; PS4='~ '; set -x; echo hi
+%%%
+#!name ps4 with dollar single quote
+PS4="\$'a\\tb' "; set -x; echo hi
+%%%
+#!name ps4 with star
+set -- a b; PS4='[$*] '; set -x; echo hi
+%%%
+#!name ps4 with at
+set -- a b; PS4='[$@] '; set -x; echo hi
+%%%
+#!name ps4 with trim
+v=abc; PS4='[${v#a}] '; set -x; echo hi
+%%%
+#!name ps4 with nested
+v=abc; PS4='[${v:-${w:-z}}] '; set -x; echo hi
+%%%
+#!name ps4 with unbalanced brace
+PS4='${ '; set -x; echo hi
+%%%
+#!name ps4 with unbalanced quote
+PS4='"abc'; set -x; echo hi
+%%%
+#!name ps4 with unbalanced arith
+PS4='$((1+2'; set -x; echo hi
+%%%
+#!name ps4 error in cmdsub
+PS4='$(exit 3)x '; set -x; echo hi; echo rc=$?
+%%%
+#!name ps4 with newline
+PS4='a
+b '; set -x; echo hi
+%%%
+#!name ps4 multibyte
+export LC_ALL=en_US.UTF-8; PS4='é '; set -x; echo hi
+%%%
+#!name ps4 with CTL-ish
+PS4='a$Vb '; set -x; echo hi
+%%%
+#!name ps4 length var
+v=abcd; PS4='[${#v}] '; set -x; echo hi
+%%%
+#!name ps4 assign form
+PS4='[${nosuch=A}] '; set -x; echo hi; echo "[$nosuch]"
+%%%
+#!name ps4 question form
+PS4='[${nosuch?bad}] '; set -x; echo hi
+%%%
+#!name here eofmark var expansion
+v=E
+cat <<$v
+body
+$v
+%%%
+#!name here eofmark braces
+v=E
+cat <<${v}
+body
+${v}
+%%%
+#!name here eofmark cmdsub
+cat <<$(echo E)
+body
+$(echo E)
+%%%
+#!name here eofmark backquote
+cat <<`echo E`
+body
+`echo E`
+%%%
+#!name here eofmark arith
+cat <<$((1+1))
+body
+$((1+1))
+%%%
+#!name here eofmark default
+cat <<${nosuch:-E}
+body
+${nosuch:-E}
+%%%
+#!name here eofmark trim
+cat <<${v#a}
+body
+${v#a}
+%%%
+#!name here eofmark length
+v=abc
+cat <<${#v}
+body
+${#v}
+%%%
+#!name here eofmark dollar special
+cat <<$?
+body
+$?
+%%%
+#!name here eofmark dollarsq
+cat <<$'ab'
+body
+$'ab'
+%%%
+#!name here eofmark quoted dollar
+cat <<"$v"
+$v
+$v
+%%%
+#!name here eofmark backslash dollar
+cat <<\$v
+$v
+$v
+%%%
+#!name here eofmark hash
+cat <<${#}
+body
+${#}
+%%%
+#!name here eofmark nested braces
+cat <<${v:-${w:-E}}
+body
+${v:-${w:-E}}
+%%%
+#!name here eofmark paren
+cat <<$( echo E )
+body
+$( echo E )
+%%%
+#!name here eofmark tilde
+HOME=/hh
+cat <<~
+body
+~

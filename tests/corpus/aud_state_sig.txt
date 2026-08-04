@@ -1,0 +1,155 @@
+#!name trap usr1 self
+#!allow-kill
+trap 'echo caught' USR1; kill -USR1 $$; echo after
+%%%
+#!name trap usr1 twice
+#!allow-kill
+trap 'echo c1' USR1; kill -USR1 $$; kill -USR1 $$; echo after
+%%%
+#!name trap exit status inside handler
+#!allow-kill
+trap 'echo "in=$?"' USR1; false; kill -USR1 $$; echo "out=$?"
+%%%
+#!name trap handler modifies var
+#!allow-kill
+v=0; trap 'v=1' USR1; kill -USR1 $$; echo "$v"
+%%%
+#!name trap ignored signal
+#!allow-kill
+trap '' USR1; kill -USR1 $$; echo alive
+%%%
+#!name trap reset to default then ignore
+#!allow-kill
+trap '' USR2; trap - USR2; trap; echo done
+%%%
+#!name trap exit runs on explicit exit
+#!allow-kill
+trap 'echo E' EXIT; exit 3
+%%%
+#!name trap exit with status
+#!allow-kill
+(trap 'echo "s=$?"' EXIT; exit 9); echo "rc=$?"
+%%%
+#!name trap in function called from trap
+#!allow-kill
+f() { echo inF; }; trap 'f' USR1; kill -USR1 $$; echo done
+%%%
+#!name nested trap fire during command
+#!allow-kill
+trap 'echo T' USR1; { kill -USR1 $$; echo body; }; echo end
+%%%
+#!name subshell resets non-ignored traps
+#!allow-kill
+trap 'echo P' USR1; (kill -USR1 $$ 2>/dev/null; echo sub) ; echo main
+%%%
+#!name ignored trap inherited by subshell
+#!allow-kill
+trap '' USR1; (trap); echo ---; trap
+%%%
+#!name trap list after multiple sets
+trap 'echo a' USR1; trap 'echo b' USR2; trap 'echo c' EXIT; trap
+%%%
+#!name trapcnt via many traps
+trap 'x' USR1 USR2 HUP; trap - USR1; trap
+%%%
+#!name signal name case insensitive
+trap 'echo x' usr1; trap
+%%%
+#!name signal with SIG prefix
+trap 'echo x' SIGUSR1 2>&1; echo "rc=$?"; trap
+%%%
+#!name trap numbers list
+trap 'echo n' 1 2 15; trap
+%%%
+#!name set -m then off
+set -m; echo "$-"; set +m; echo "$-"
+%%%
+#!name set -b notify
+set -b; echo "$-"; set +b; echo "$-"
+%%%
+#!name interactive echo
+#!mode=stdin
+#!shargs -i
+echo hello
+%%%
+#!name interactive two commands
+#!mode=stdin
+#!shargs -i
+echo one
+echo two
+%%%
+#!name interactive multiline compound
+#!mode=stdin
+#!shargs -i
+if true
+then
+echo yes
+fi
+%%%
+#!name interactive dollar dash
+#!mode=stdin
+#!shargs -i
+echo "$-"
+%%%
+#!name interactive set -o
+#!mode=stdin
+#!shargs -i
+set -o | head -5
+%%%
+#!name interactive blank lines
+#!mode=stdin
+#!shargs -i
+
+echo after-blank
+
+echo end
+%%%
+#!name interactive whitespace only line
+#!mode=stdin
+#!shargs -i
+
+echo done
+%%%
+#!name interactive error recovery
+#!mode=stdin
+#!shargs -i
+echo a
+) bad syntax
+echo b
+%%%
+#!name interactive unset PS1
+#!mode=stdin
+#!shargs -i
+unset PS1
+echo x
+%%%
+#!name interactive custom PS1 PS2
+#!mode=stdin
+#!shargs -i
+PS1='P1> '
+PS2='P2> '
+if true
+then
+echo hi
+fi
+%%%
+#!name interactive local dash
+#!mode=stdin
+#!shargs -i
+f() { local -; set -f; echo "$-"; }
+f
+echo "$-"
+%%%
+#!name interactive cd and pwd
+#!mode=stdin
+#!shargs -i
+mkdir -p idir
+cd idir
+basename "$PWD"
+%%%
+#!name interactive alias
+#!mode=stdin
+#!shargs -i
+alias ia='echo IA'
+ia
+alias

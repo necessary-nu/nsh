@@ -1,0 +1,462 @@
+printf '%%s' $'\a' | od -c; echo rc=$?
+v=$'a\ab'; printf '%s' "$v" | od -c
+case $'\a' in *) echo m;; esac
+printf '%%s' $'\b' | od -c; echo rc=$?
+v=$'a\bb'; printf '%s' "$v" | od -c
+case $'\b' in *) echo m;; esac
+printf '%%s' $'\c' | od -c; echo rc=$?
+v=$'a\cb'; printf '%s' "$v" | od -c
+case $'\c' in *) echo m;; esac
+printf '%%s' $'\d' | od -c; echo rc=$?
+v=$'a\db'; printf '%s' "$v" | od -c
+case $'\d' in *) echo m;; esac
+printf '%%s' $'\e' | od -c; echo rc=$?
+v=$'a\eb'; printf '%s' "$v" | od -c
+case $'\e' in *) echo m;; esac
+printf '%%s' $'\f' | od -c; echo rc=$?
+v=$'a\fb'; printf '%s' "$v" | od -c
+case $'\f' in *) echo m;; esac
+printf '%%s' $'\g' | od -c; echo rc=$?
+v=$'a\gb'; printf '%s' "$v" | od -c
+case $'\g' in *) echo m;; esac
+printf '%%s' $'\h' | od -c; echo rc=$?
+v=$'a\hb'; printf '%s' "$v" | od -c
+case $'\h' in *) echo m;; esac
+printf '%%s' $'\i' | od -c; echo rc=$?
+v=$'a\ib'; printf '%s' "$v" | od -c
+case $'\i' in *) echo m;; esac
+printf '%%s' $'\j' | od -c; echo rc=$?
+v=$'a\jb'; printf '%s' "$v" | od -c
+case $'\j' in *) echo m;; esac
+printf '%%s' $'\k' | od -c; echo rc=$?
+v=$'a\kb'; printf '%s' "$v" | od -c
+case $'\k' in *) echo m;; esac
+printf '%%s' $'\l' | od -c; echo rc=$?
+v=$'a\lb'; printf '%s' "$v" | od -c
+case $'\l' in *) echo m;; esac
+printf '%%s' $'\m' | od -c; echo rc=$?
+v=$'a\mb'; printf '%s' "$v" | od -c
+case $'\m' in *) echo m;; esac
+printf '%%s' $'\n' | od -c; echo rc=$?
+v=$'a\nb'; printf '%s' "$v" | od -c
+case $'\n' in *) echo m;; esac
+printf '%%s' $'\o' | od -c; echo rc=$?
+v=$'a\ob'; printf '%s' "$v" | od -c
+case $'\o' in *) echo m;; esac
+printf '%%s' $'\p' | od -c; echo rc=$?
+v=$'a\pb'; printf '%s' "$v" | od -c
+case $'\p' in *) echo m;; esac
+printf '%%s' $'\q' | od -c; echo rc=$?
+v=$'a\qb'; printf '%s' "$v" | od -c
+case $'\q' in *) echo m;; esac
+printf '%%s' $'\r' | od -c; echo rc=$?
+v=$'a\rb'; printf '%s' "$v" | od -c
+case $'\r' in *) echo m;; esac
+printf '%%s' $'\s' | od -c; echo rc=$?
+v=$'a\sb'; printf '%s' "$v" | od -c
+case $'\s' in *) echo m;; esac
+printf '%%s' $'\t' | od -c; echo rc=$?
+v=$'a\tb'; printf '%s' "$v" | od -c
+case $'\t' in *) echo m;; esac
+printf '%%s' $'\u' | od -c; echo rc=$?
+v=$'a\ub'; printf '%s' "$v" | od -c
+case $'\u' in *) echo m;; esac
+printf '%%s' $'\v' | od -c; echo rc=$?
+v=$'a\vb'; printf '%s' "$v" | od -c
+case $'\v' in *) echo m;; esac
+printf '%%s' $'\w' | od -c; echo rc=$?
+v=$'a\wb'; printf '%s' "$v" | od -c
+case $'\w' in *) echo m;; esac
+printf '%%s' $'\x' | od -c; echo rc=$?
+v=$'a\xb'; printf '%s' "$v" | od -c
+case $'\x' in *) echo m;; esac
+printf '%%s' $'\y' | od -c; echo rc=$?
+v=$'a\yb'; printf '%s' "$v" | od -c
+case $'\y' in *) echo m;; esac
+printf '%%s' $'\z' | od -c; echo rc=$?
+v=$'a\zb'; printf '%s' "$v" | od -c
+case $'\z' in *) echo m;; esac
+printf '%%s' $'\A' | od -c; echo rc=$?
+v=$'a\Ab'; printf '%s' "$v" | od -c
+case $'\A' in *) echo m;; esac
+printf '%%s' $'\B' | od -c; echo rc=$?
+v=$'a\Bb'; printf '%s' "$v" | od -c
+case $'\B' in *) echo m;; esac
+printf '%%s' $'\C' | od -c; echo rc=$?
+v=$'a\Cb'; printf '%s' "$v" | od -c
+case $'\C' in *) echo m;; esac
+printf '%%s' $'\D' | od -c; echo rc=$?
+v=$'a\Db'; printf '%s' "$v" | od -c
+case $'\D' in *) echo m;; esac
+printf '%%s' $'\E' | od -c; echo rc=$?
+v=$'a\Eb'; printf '%s' "$v" | od -c
+case $'\E' in *) echo m;; esac
+printf '%%s' $'\F' | od -c; echo rc=$?
+v=$'a\Fb'; printf '%s' "$v" | od -c
+case $'\F' in *) echo m;; esac
+printf '%%s' $'\G' | od -c; echo rc=$?
+v=$'a\Gb'; printf '%s' "$v" | od -c
+case $'\G' in *) echo m;; esac
+printf '%%s' $'\H' | od -c; echo rc=$?
+v=$'a\Hb'; printf '%s' "$v" | od -c
+case $'\H' in *) echo m;; esac
+printf '%%s' $'\I' | od -c; echo rc=$?
+v=$'a\Ib'; printf '%s' "$v" | od -c
+case $'\I' in *) echo m;; esac
+printf '%%s' $'\J' | od -c; echo rc=$?
+v=$'a\Jb'; printf '%s' "$v" | od -c
+case $'\J' in *) echo m;; esac
+printf '%%s' $'\K' | od -c; echo rc=$?
+v=$'a\Kb'; printf '%s' "$v" | od -c
+case $'\K' in *) echo m;; esac
+printf '%%s' $'\L' | od -c; echo rc=$?
+v=$'a\Lb'; printf '%s' "$v" | od -c
+case $'\L' in *) echo m;; esac
+printf '%%s' $'\M' | od -c; echo rc=$?
+v=$'a\Mb'; printf '%s' "$v" | od -c
+case $'\M' in *) echo m;; esac
+printf '%%s' $'\N' | od -c; echo rc=$?
+v=$'a\Nb'; printf '%s' "$v" | od -c
+case $'\N' in *) echo m;; esac
+printf '%%s' $'\O' | od -c; echo rc=$?
+v=$'a\Ob'; printf '%s' "$v" | od -c
+case $'\O' in *) echo m;; esac
+printf '%%s' $'\P' | od -c; echo rc=$?
+v=$'a\Pb'; printf '%s' "$v" | od -c
+case $'\P' in *) echo m;; esac
+printf '%%s' $'\Q' | od -c; echo rc=$?
+v=$'a\Qb'; printf '%s' "$v" | od -c
+case $'\Q' in *) echo m;; esac
+printf '%%s' $'\R' | od -c; echo rc=$?
+v=$'a\Rb'; printf '%s' "$v" | od -c
+case $'\R' in *) echo m;; esac
+printf '%%s' $'\S' | od -c; echo rc=$?
+v=$'a\Sb'; printf '%s' "$v" | od -c
+case $'\S' in *) echo m;; esac
+printf '%%s' $'\T' | od -c; echo rc=$?
+v=$'a\Tb'; printf '%s' "$v" | od -c
+case $'\T' in *) echo m;; esac
+printf '%%s' $'\U' | od -c; echo rc=$?
+v=$'a\Ub'; printf '%s' "$v" | od -c
+case $'\U' in *) echo m;; esac
+printf '%%s' $'\V' | od -c; echo rc=$?
+v=$'a\Vb'; printf '%s' "$v" | od -c
+case $'\V' in *) echo m;; esac
+printf '%%s' $'\W' | od -c; echo rc=$?
+v=$'a\Wb'; printf '%s' "$v" | od -c
+case $'\W' in *) echo m;; esac
+printf '%%s' $'\X' | od -c; echo rc=$?
+v=$'a\Xb'; printf '%s' "$v" | od -c
+case $'\X' in *) echo m;; esac
+printf '%%s' $'\Y' | od -c; echo rc=$?
+v=$'a\Yb'; printf '%s' "$v" | od -c
+case $'\Y' in *) echo m;; esac
+printf '%%s' $'\Z' | od -c; echo rc=$?
+v=$'a\Zb'; printf '%s' "$v" | od -c
+case $'\Z' in *) echo m;; esac
+printf '%%s' $'\0' | od -c; echo rc=$?
+v=$'a\0b'; printf '%s' "$v" | od -c
+case $'\0' in *) echo m;; esac
+printf '%%s' $'\1' | od -c; echo rc=$?
+v=$'a\1b'; printf '%s' "$v" | od -c
+case $'\1' in *) echo m;; esac
+printf '%%s' $'\2' | od -c; echo rc=$?
+v=$'a\2b'; printf '%s' "$v" | od -c
+case $'\2' in *) echo m;; esac
+printf '%%s' $'\3' | od -c; echo rc=$?
+v=$'a\3b'; printf '%s' "$v" | od -c
+case $'\3' in *) echo m;; esac
+printf '%%s' $'\4' | od -c; echo rc=$?
+v=$'a\4b'; printf '%s' "$v" | od -c
+case $'\4' in *) echo m;; esac
+printf '%%s' $'\5' | od -c; echo rc=$?
+v=$'a\5b'; printf '%s' "$v" | od -c
+case $'\5' in *) echo m;; esac
+printf '%%s' $'\6' | od -c; echo rc=$?
+v=$'a\6b'; printf '%s' "$v" | od -c
+case $'\6' in *) echo m;; esac
+printf '%%s' $'\7' | od -c; echo rc=$?
+v=$'a\7b'; printf '%s' "$v" | od -c
+case $'\7' in *) echo m;; esac
+printf '%%s' $'\8' | od -c; echo rc=$?
+v=$'a\8b'; printf '%s' "$v" | od -c
+case $'\8' in *) echo m;; esac
+printf '%%s' $'\9' | od -c; echo rc=$?
+v=$'a\9b'; printf '%s' "$v" | od -c
+case $'\9' in *) echo m;; esac
+printf '%%s' $'\\' | od -c; echo rc=$?
+v=$'a\\b'; printf '%s' "$v" | od -c
+case $'\\' in *) echo m;; esac
+printf '%%s' $'\'' | od -c; echo rc=$?
+v=$'a\'b'; printf '%s' "$v" | od -c
+case $'\'' in *) echo m;; esac
+printf '%%s' $'\"' | od -c; echo rc=$?
+v=$'a\"b'; printf '%s' "$v" | od -c
+case $'\"' in *) echo m;; esac
+printf '%%s' $'\?' | od -c; echo rc=$?
+v=$'a\?b'; printf '%s' "$v" | od -c
+case $'\?' in *) echo m;; esac
+printf '%%s' $'\!' | od -c; echo rc=$?
+v=$'a\!b'; printf '%s' "$v" | od -c
+case $'\!' in *) echo m;; esac
+printf '%%s' $'\*' | od -c; echo rc=$?
+v=$'a\*b'; printf '%s' "$v" | od -c
+case $'\*' in *) echo m;; esac
+printf '%%s' $'\[' | od -c; echo rc=$?
+v=$'a\[b'; printf '%s' "$v" | od -c
+case $'\[' in *) echo m;; esac
+printf '%%s' $'\]' | od -c; echo rc=$?
+v=$'a\]b'; printf '%s' "$v" | od -c
+case $'\]' in *) echo m;; esac
+printf '%%s' $'\^' | od -c; echo rc=$?
+v=$'a\^b'; printf '%s' "$v" | od -c
+case $'\^' in *) echo m;; esac
+printf '%%s' $'\~' | od -c; echo rc=$?
+v=$'a\~b'; printf '%s' "$v" | od -c
+case $'\~' in *) echo m;; esac
+printf '%%s' $'\:' | od -c; echo rc=$?
+v=$'a\:b'; printf '%s' "$v" | od -c
+case $'\:' in *) echo m;; esac
+printf '%%s' $'\/' | od -c; echo rc=$?
+v=$'a\/b'; printf '%s' "$v" | od -c
+case $'\/' in *) echo m;; esac
+printf '%%s' $'\-' | od -c; echo rc=$?
+v=$'a\-b'; printf '%s' "$v" | od -c
+case $'\-' in *) echo m;; esac
+printf '%%s' $'\=' | od -c; echo rc=$?
+v=$'a\=b'; printf '%s' "$v" | od -c
+case $'\=' in *) echo m;; esac
+printf '%%s' $'\$' | od -c; echo rc=$?
+v=$'a\$b'; printf '%s' "$v" | od -c
+case $'\$' in *) echo m;; esac
+printf '%%s' $'\`' | od -c; echo rc=$?
+v=$'a\`b'; printf '%s' "$v" | od -c
+case $'\`' in *) echo m;; esac
+printf '%%s' $'\{' | od -c; echo rc=$?
+v=$'a\{b'; printf '%s' "$v" | od -c
+case $'\{' in *) echo m;; esac
+printf '%%s' $'\}' | od -c; echo rc=$?
+v=$'a\}b'; printf '%s' "$v" | od -c
+case $'\}' in *) echo m;; esac
+printf '%%s' $'\|' | od -c; echo rc=$?
+v=$'a\|b'; printf '%s' "$v" | od -c
+case $'\|' in *) echo m;; esac
+printf '%%s' $'\&' | od -c; echo rc=$?
+v=$'a\&b'; printf '%s' "$v" | od -c
+case $'\&' in *) echo m;; esac
+printf '%%s' $'\;' | od -c; echo rc=$?
+v=$'a\;b'; printf '%s' "$v" | od -c
+case $'\;' in *) echo m;; esac
+printf '%%s' $'\<' | od -c; echo rc=$?
+v=$'a\<b'; printf '%s' "$v" | od -c
+case $'\<' in *) echo m;; esac
+printf '%%s' $'\>' | od -c; echo rc=$?
+v=$'a\>b'; printf '%s' "$v" | od -c
+case $'\>' in *) echo m;; esac
+printf '%%s' $'\(' | od -c; echo rc=$?
+v=$'a\(b'; printf '%s' "$v" | od -c
+case $'\(' in *) echo m;; esac
+printf '%%s' $'\)' | od -c; echo rc=$?
+v=$'a\)b'; printf '%s' "$v" | od -c
+case $'\)' in *) echo m;; esac
+printf '%%s' $'\#' | od -c; echo rc=$?
+v=$'a\#b'; printf '%s' "$v" | od -c
+case $'\#' in *) echo m;; esac
+printf '%%s' $'\%' | od -c; echo rc=$?
+v=$'a\%b'; printf '%s' "$v" | od -c
+case $'\%' in *) echo m;; esac
+printf '%%s' $'\@' | od -c; echo rc=$?
+v=$'a\@b'; printf '%s' "$v" | od -c
+case $'\@' in *) echo m;; esac
+printf '%%s' $'\+' | od -c; echo rc=$?
+v=$'a\+b'; printf '%s' "$v" | od -c
+case $'\+' in *) echo m;; esac
+printf '%%s' $'\,' | od -c; echo rc=$?
+v=$'a\,b'; printf '%s' "$v" | od -c
+case $'\,' in *) echo m;; esac
+printf '%%s' $'\.' | od -c; echo rc=$?
+v=$'a\.b'; printf '%s' "$v" | od -c
+case $'\.' in *) echo m;; esac
+printf '%%s' $'\ ' | od -c; echo rc=$?
+v=$'a\ b'; printf '%s' "$v" | od -c
+case $'\ ' in *) echo m;; esac
+printf '%%s' $'\x' | od -c; echo rc=$?
+v=$'a\xb'; printf '%s' "$v" | od -c
+case $'\x' in *) echo m;; esac
+printf '%%s' $'\x0' | od -c; echo rc=$?
+v=$'a\x0b'; printf '%s' "$v" | od -c
+case $'\x0' in *) echo m;; esac
+printf '%%s' $'\x1' | od -c; echo rc=$?
+v=$'a\x1b'; printf '%s' "$v" | od -c
+case $'\x1' in *) echo m;; esac
+printf '%%s' $'\x7f' | od -c; echo rc=$?
+v=$'a\x7fb'; printf '%s' "$v" | od -c
+case $'\x7f' in *) echo m;; esac
+printf '%%s' $'\x80' | od -c; echo rc=$?
+v=$'a\x80b'; printf '%s' "$v" | od -c
+case $'\x80' in *) echo m;; esac
+printf '%%s' $'\x81' | od -c; echo rc=$?
+v=$'a\x81b'; printf '%s' "$v" | od -c
+case $'\x81' in *) echo m;; esac
+printf '%%s' $'\xff' | od -c; echo rc=$?
+v=$'a\xffb'; printf '%s' "$v" | od -c
+case $'\xff' in *) echo m;; esac
+printf '%%s' $'\xFF' | od -c; echo rc=$?
+v=$'a\xFFb'; printf '%s' "$v" | od -c
+case $'\xFF' in *) echo m;; esac
+printf '%%s' $'\x41' | od -c; echo rc=$?
+v=$'a\x41b'; printf '%s' "$v" | od -c
+case $'\x41' in *) echo m;; esac
+printf '%%s' $'\xg' | od -c; echo rc=$?
+v=$'a\xgb'; printf '%s' "$v" | od -c
+case $'\xg' in *) echo m;; esac
+printf '%%s' $'\0' | od -c; echo rc=$?
+v=$'a\0b'; printf '%s' "$v" | od -c
+case $'\0' in *) echo m;; esac
+printf '%%s' $'\00' | od -c; echo rc=$?
+v=$'a\00b'; printf '%s' "$v" | od -c
+case $'\00' in *) echo m;; esac
+printf '%%s' $'\000' | od -c; echo rc=$?
+v=$'a\000b'; printf '%s' "$v" | od -c
+case $'\000' in *) echo m;; esac
+printf '%%s' $'\0000' | od -c; echo rc=$?
+v=$'a\0000b'; printf '%s' "$v" | od -c
+case $'\0000' in *) echo m;; esac
+printf '%%s' $'\01' | od -c; echo rc=$?
+v=$'a\01b'; printf '%s' "$v" | od -c
+case $'\01' in *) echo m;; esac
+printf '%%s' $'\010' | od -c; echo rc=$?
+v=$'a\010b'; printf '%s' "$v" | od -c
+case $'\010' in *) echo m;; esac
+printf '%%s' $'\0101' | od -c; echo rc=$?
+v=$'a\0101b'; printf '%s' "$v" | od -c
+case $'\0101' in *) echo m;; esac
+printf '%%s' $'\1' | od -c; echo rc=$?
+v=$'a\1b'; printf '%s' "$v" | od -c
+case $'\1' in *) echo m;; esac
+printf '%%s' $'\7' | od -c; echo rc=$?
+v=$'a\7b'; printf '%s' "$v" | od -c
+case $'\7' in *) echo m;; esac
+printf '%%s' $'\8' | od -c; echo rc=$?
+v=$'a\8b'; printf '%s' "$v" | od -c
+case $'\8' in *) echo m;; esac
+printf '%%s' $'\101' | od -c; echo rc=$?
+v=$'a\101b'; printf '%s' "$v" | od -c
+case $'\101' in *) echo m;; esac
+printf '%%s' $'\177' | od -c; echo rc=$?
+v=$'a\177b'; printf '%s' "$v" | od -c
+case $'\177' in *) echo m;; esac
+printf '%%s' $'\200' | od -c; echo rc=$?
+v=$'a\200b'; printf '%s' "$v" | od -c
+case $'\200' in *) echo m;; esac
+printf '%%s' $'\201' | od -c; echo rc=$?
+v=$'a\201b'; printf '%s' "$v" | od -c
+case $'\201' in *) echo m;; esac
+printf '%%s' $'\377' | od -c; echo rc=$?
+v=$'a\377b'; printf '%s' "$v" | od -c
+case $'\377' in *) echo m;; esac
+printf '%%s' $'\400' | od -c; echo rc=$?
+v=$'a\400b'; printf '%s' "$v" | od -c
+case $'\400' in *) echo m;; esac
+printf '%%s' $'\777' | od -c; echo rc=$?
+v=$'a\777b'; printf '%s' "$v" | od -c
+case $'\777' in *) echo m;; esac
+printf '%%s' $'\0377' | od -c; echo rc=$?
+v=$'a\0377b'; printf '%s' "$v" | od -c
+case $'\0377' in *) echo m;; esac
+printf '%%s' $'\u' | od -c; echo rc=$?
+v=$'a\ub'; printf '%s' "$v" | od -c
+case $'\u' in *) echo m;; esac
+printf '%%s' $'\u0' | od -c; echo rc=$?
+v=$'a\u0b'; printf '%s' "$v" | od -c
+case $'\u0' in *) echo m;; esac
+printf '%%s' $'\u00' | od -c; echo rc=$?
+v=$'a\u00b'; printf '%s' "$v" | od -c
+case $'\u00' in *) echo m;; esac
+printf '%%s' $'\u000' | od -c; echo rc=$?
+v=$'a\u000b'; printf '%s' "$v" | od -c
+case $'\u000' in *) echo m;; esac
+printf '%%s' $'\u0000' | od -c; echo rc=$?
+v=$'a\u0000b'; printf '%s' "$v" | od -c
+case $'\u0000' in *) echo m;; esac
+printf '%%s' $'\u0041' | od -c; echo rc=$?
+v=$'a\u0041b'; printf '%s' "$v" | od -c
+case $'\u0041' in *) echo m;; esac
+printf '%%s' $'\u007f' | od -c; echo rc=$?
+v=$'a\u007fb'; printf '%s' "$v" | od -c
+case $'\u007f' in *) echo m;; esac
+printf '%%s' $'\u0080' | od -c; echo rc=$?
+v=$'a\u0080b'; printf '%s' "$v" | od -c
+case $'\u0080' in *) echo m;; esac
+printf '%%s' $'\u00e9' | od -c; echo rc=$?
+v=$'a\u00e9b'; printf '%s' "$v" | od -c
+case $'\u00e9' in *) echo m;; esac
+printf '%%s' $'\u07ff' | od -c; echo rc=$?
+v=$'a\u07ffb'; printf '%s' "$v" | od -c
+case $'\u07ff' in *) echo m;; esac
+printf '%%s' $'\u0800' | od -c; echo rc=$?
+v=$'a\u0800b'; printf '%s' "$v" | od -c
+case $'\u0800' in *) echo m;; esac
+printf '%%s' $'\ufffd' | od -c; echo rc=$?
+v=$'a\ufffdb'; printf '%s' "$v" | od -c
+case $'\ufffd' in *) echo m;; esac
+printf '%%s' $'\uffff' | od -c; echo rc=$?
+v=$'a\uffffb'; printf '%s' "$v" | od -c
+case $'\uffff' in *) echo m;; esac
+printf '%%s' $'\ud800' | od -c; echo rc=$?
+v=$'a\ud800b'; printf '%s' "$v" | od -c
+case $'\ud800' in *) echo m;; esac
+printf '%%s' $'\udfff' | od -c; echo rc=$?
+v=$'a\udfffb'; printf '%s' "$v" | od -c
+case $'\udfff' in *) echo m;; esac
+printf '%%s' $'\U' | od -c; echo rc=$?
+v=$'a\Ub'; printf '%s' "$v" | od -c
+case $'\U' in *) echo m;; esac
+printf '%%s' $'\U0' | od -c; echo rc=$?
+v=$'a\U0b'; printf '%s' "$v" | od -c
+case $'\U0' in *) echo m;; esac
+printf '%%s' $'\U00000041' | od -c; echo rc=$?
+v=$'a\U00000041b'; printf '%s' "$v" | od -c
+case $'\U00000041' in *) echo m;; esac
+printf '%%s' $'\U0000ffff' | od -c; echo rc=$?
+v=$'a\U0000ffffb'; printf '%s' "$v" | od -c
+case $'\U0000ffff' in *) echo m;; esac
+printf '%%s' $'\U00010000' | od -c; echo rc=$?
+v=$'a\U00010000b'; printf '%s' "$v" | od -c
+case $'\U00010000' in *) echo m;; esac
+printf '%%s' $'\U0010ffff' | od -c; echo rc=$?
+v=$'a\U0010ffffb'; printf '%s' "$v" | od -c
+case $'\U0010ffff' in *) echo m;; esac
+printf '%%s' $'\U00110000' | od -c; echo rc=$?
+v=$'a\U00110000b'; printf '%s' "$v" | od -c
+case $'\U00110000' in *) echo m;; esac
+printf '%%s' $'\Uffffffff' | od -c; echo rc=$?
+v=$'a\Uffffffffb'; printf '%s' "$v" | od -c
+case $'\Uffffffff' in *) echo m;; esac
+printf '%%s' $'\U7fffffff' | od -c; echo rc=$?
+v=$'a\U7fffffffb'; printf '%s' "$v" | od -c
+case $'\U7fffffff' in *) echo m;; esac
+printf '%%s' $'\U80000000' | od -c; echo rc=$?
+v=$'a\U80000000b'; printf '%s' "$v" | od -c
+case $'\U80000000' in *) echo m;; esac
+printf '%%s' $'\c' | od -c; echo rc=$?
+v=$'a\cb'; printf '%s' "$v" | od -c
+case $'\c' in *) echo m;; esac
+printf '%%s' $'\ca' | od -c; echo rc=$?
+v=$'a\cab'; printf '%s' "$v" | od -c
+case $'\ca' in *) echo m;; esac
+printf '%%s' $'\e' | od -c; echo rc=$?
+v=$'a\eb'; printf '%s' "$v" | od -c
+case $'\e' in *) echo m;; esac
+printf '%%s' $'\E' | od -c; echo rc=$?
+v=$'a\Eb'; printf '%s' "$v" | od -c
+case $'\E' in *) echo m;; esac
+printf '%%s' $'\\' | od -c; echo rc=$?
+v=$'a\\b'; printf '%s' "$v" | od -c
+case $'\\' in *) echo m;; esac
+printf '%%s' $'\\\\' | od -c; echo rc=$?
+v=$'a\\\\b'; printf '%s' "$v" | od -c
+case $'\\\\' in *) echo m;; esac
+printf '%%s' $'' | od -c; echo rc=$?
+v=$'ab'; printf '%s' "$v" | od -c
+case $'' in *) echo m;; esac

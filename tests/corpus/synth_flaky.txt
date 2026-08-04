@@ -1,0 +1,1 @@
+if [ $(( $(date +%N) % 2 )) = 0 ]; then echo A; else echo B; fi

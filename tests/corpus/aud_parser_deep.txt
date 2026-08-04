@@ -1,0 +1,220 @@
+#!name mb blank ideographic unquoted
+export LC_ALL=en_US.UTF-8; echo a　b
+%%%
+#!name mb blank ideographic printf
+export LC_ALL=en_US.UTF-8; printf '<%s>' a　b; echo
+%%%
+#!name mb blank leading
+export LC_ALL=en_US.UTF-8; printf '<%s>' 　ab; echo
+%%%
+#!name mb blank quoted
+export LC_ALL=en_US.UTF-8; echo "a　b"
+%%%
+#!name mb blank in single quotes
+export LC_ALL=en_US.UTF-8; echo 'a　b'
+%%%
+#!name mb nbsp unquoted
+export LC_ALL=en_US.UTF-8; printf '<%s>' a b; echo
+%%%
+#!name mb blank C locale
+export LC_ALL=C; printf '<%s>' a　b; echo
+%%%
+#!name mb blank only word
+export LC_ALL=en_US.UTF-8; echo 　; echo done
+%%%
+#!name mb blank in var value
+export LC_ALL=en_US.UTF-8; v=a　b; echo "$v" ${#v}
+%%%
+#!name mb blank split from var
+export LC_ALL=en_US.UTF-8; v=a　b; printf '<%s>' $v; echo
+%%%
+#!name esc mb literal
+export LC_ALL=en_US.UTF-8; echo \é
+%%%
+#!name esc mb in dquote
+export LC_ALL=en_US.UTF-8; echo "\é"
+%%%
+#!name esc mb assignment
+export LC_ALL=en_US.UTF-8; v=\é; echo "$v" ${#v}
+%%%
+#!name esc mb trim pattern
+export LC_ALL=en_US.UTF-8; v=aéb; echo "${v%\é*}" "${v#*\é}"
+%%%
+#!name esc mb trim exact
+export LC_ALL=en_US.UTF-8; v=é; echo "[${v#\é}]"
+%%%
+#!name esc mb case pattern
+export LC_ALL=en_US.UTF-8; case aéb in a\éb) echo m;; *) echo n;; esac
+%%%
+#!name esc mb case class
+export LC_ALL=en_US.UTF-8; case é in [\é]) echo m;; *) echo n;; esac
+%%%
+#!name esc mb glob
+export LC_ALL=en_US.UTF-8; touch 'xéy'; echo x\éy; echo x\é*
+%%%
+#!name esc mb backquote
+export LC_ALL=en_US.UTF-8; echo `echo \é`
+%%%
+#!name esc mb dollarparen
+export LC_ALL=en_US.UTF-8; echo $(echo \é)
+%%%
+#!name esc mb in heredoc
+export LC_ALL=en_US.UTF-8; cat <<EOF
+\é
+EOF
+%%%
+#!name esc mb len
+export LC_ALL=en_US.UTF-8; v=\é\é; echo ${#v}
+%%%
+#!name class mb member
+export LC_ALL=en_US.UTF-8; case é in [éx]) echo m;; *) echo n;; esac
+%%%
+#!name class mb range
+export LC_ALL=en_US.UTF-8; case é in [a-é]) echo m;; *) echo n;; esac
+%%%
+#!name class mb range2
+export LC_ALL=en_US.UTF-8; case b in [é-z]) echo m;; *) echo n;; esac
+%%%
+#!name class mb neg
+export LC_ALL=en_US.UTF-8; case é in [!é]) echo m;; *) echo n;; esac
+%%%
+#!name class mb after range
+export LC_ALL=en_US.UTF-8; case é in [x-yé]) echo m;; *) echo n;; esac
+%%%
+#!name class mb esc range
+export LC_ALL=en_US.UTF-8; case é in [\é-\é]) echo m;; *) echo n;; esac
+%%%
+#!name class incomplete colon
+export LC_ALL=en_US.UTF-8; case a in [[:) echo m;; *) echo n;; esac
+%%%
+#!name class bad class name
+export LC_ALL=en_US.UTF-8; case a in [[:zzz:]]) echo m;; *) echo n;; esac
+%%%
+#!name class colon no close
+export LC_ALL=en_US.UTF-8; case a in [[:alpha) echo m;; *) echo n;; esac
+%%%
+#!name class alpha mb
+export LC_ALL=en_US.UTF-8; case é in [[:alpha:]]) echo m;; *) echo n;; esac
+%%%
+#!name class print mb
+export LC_ALL=en_US.UTF-8; case é in [[:print:]]) echo m;; *) echo n;; esac
+%%%
+#!name class mb invalid seq
+export LC_ALL=en_US.UTF-8; case "$(printf '\303')" in [[:alpha:]]) echo m;; *) echo n;; esac
+%%%
+#!name pattern mb literal match
+export LC_ALL=en_US.UTF-8; case éé in éé) echo m;; *) echo n;; esac
+%%%
+#!name pattern mb literal nomatch
+export LC_ALL=en_US.UTF-8; case éa in éb) echo m;; *) echo n;; esac
+%%%
+#!name pattern mb star
+export LC_ALL=en_US.UTF-8; case aéb in a*b) echo m;; *) echo n;; esac
+%%%
+#!name pattern mb qmark seq
+export LC_ALL=en_US.UTF-8; case éé in ??) echo m;; *) echo n;; esac
+%%%
+#!name scanright mb
+export LC_ALL=en_US.UTF-8; v=aébéc; echo "${v%é*}" "${v%%é*}"
+%%%
+#!name scanright mb esc
+export LC_ALL=en_US.UTF-8; v=aébéc; echo "${v%\é*}"
+%%%
+#!name scanright mb unquoted
+export LC_ALL=en_US.UTF-8; v=aébéc; echo ${v%é*} ${v%%é*}
+%%%
+#!name scanright mb qmark
+export LC_ALL=en_US.UTF-8; v=ééé; echo "${v%?}" "${v%??}" "${v%%?*}"
+%%%
+#!name scanleft mb qmark
+export LC_ALL=en_US.UTF-8; v=ééé; echo "${v#?}" "${v##?}" "${v##*?}"
+%%%
+#!name tilde with escape
+HOME=/hh; echo ~a\b
+%%%
+#!name tilde with quote
+HOME=/hh; echo ~a"b"
+%%%
+#!name tilde with squote
+HOME=/hh; echo ~a'b'
+%%%
+#!name tilde colon no vartilde
+HOME=/hh; echo ~:x
+%%%
+#!name tilde assign colon
+HOME=/hh; v=~:x; echo "$v"
+%%%
+#!name tilde escape first
+HOME=/hh; echo \~
+%%%
+#!name tilde quotemark first
+HOME=/hh; echo ~"")
+%%%
+#!name tilde ctlendvar
+HOME=/hh; unset q; echo "${q:-~}"
+%%%
+#!name ifs mb invalid input
+export LC_ALL=en_US.UTF-8; IFS=é; v=$(printf "a\303b"); printf "<%s>" $v; echo
+%%%
+#!name ifs mb valid
+export LC_ALL=en_US.UTF-8; IFS=é; v=aéb; printf "<%s>" $v; echo
+%%%
+#!name ifs invalid start
+export LC_ALL=en_US.UTF-8; IFS=$(printf "\303"); v=ab; printf "<%s>" $v; echo
+%%%
+#!name ifs high byte C
+export LC_ALL=C; IFS=$(printf "\303"); v=$(printf "a\303b"); printf "<%s>" $v; echo
+%%%
+#!name dash option letters
+set -e; echo "$-"; set +e; echo "$-"
+%%%
+#!name dash option letters u
+set -u; echo "$-"
+%%%
+#!name no positional params
+echo "[$1][$@][$*]" $#
+%%%
+#!name bad substitution
+echo ${?}; echo "${@}"
+%%%
+#!name removerecordregions second
+set -- a b; unset q; echo ${q:-x $1 y} z
+%%%
+#!name removerecordregions many
+set -- a b c d e; unset q; echo ${q:-$1 $2 $3} ${q:-$4 $5}
+%%%
+#!name nested trim after regions
+v=a; set -- p q; echo "${v}" $1 ${v#a} $2
+%%%
+#!name expmeta nested literal
+mkdir -p a/b; touch a/b/c; echo a/*/c; echo a/b/*
+%%%
+#!name expmeta deep
+mkdir -p a/b/c/d; touch a/b/c/d/e; echo a/*/*/*/e
+%%%
+#!name expmeta literal tail nomatch
+mkdir -p a/b; echo a/*/nosuch
+%%%
+#!name expmeta esc in dir
+mkdir -p 'a b'; touch 'a b/c'; echo a\ b/*; echo 'a b'/*
+%%%
+#!name expmeta dot dir
+mkdir -p .d; touch .d/f; echo .d/*; echo .*/f
+%%%
+#!name rmescapes q-1 backslash
+touch 'a\\b'; echo a'\\'*; echo "a\\"*
+%%%
+#!name rmescapes quoted then meta
+touch ab; echo 'a'*; echo "a"*; echo a""*
+%%%
+#!name rmescapes meta then quoted
+touch ab; echo *'b'; echo *"b"
+%%%
+#!name rmescapes mb then meta
+export LC_ALL=en_US.UTF-8; touch 'xéy'; echo 'é'*; echo xé*
+%%%
+#!name rmescapes escaped mb glob
+export LC_ALL=en_US.UTF-8; touch 'xéy'; echo x\é*
+%%%
+#!name rmescapes backslash in pattern
+v='a\\b'; case "$v" in a\\\\b) echo m;; *) echo n;; esac

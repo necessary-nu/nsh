@@ -1,0 +1,7 @@
+#!allow-kill
+#!name trap INT, self-signal in subshell
+(trap 'echo INT' INT; kill -INT $$; echo after)
+%%%
+#!allow-kill
+#!name trap HUP, self-signal
+trap 'echo hup' HUP; kill -HUP $$; echo cont

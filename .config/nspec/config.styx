@@ -7,8 +7,9 @@
 //
 //   posix  — "does the shell conform to POSIX.1-2024?"
 //            Derived FROM the standard, so a rule here describes what
-//            the standard REQUIRES. 705 rules over XCU chapter 2 and
-//            the `sh` page. See posix/README.md.
+//            the standard REQUIRES. 1,130 rules cover XCU chapters 1
+//            and 2, the `sh` page, and every intrinsic built-in. See
+//            posix/README.md.
 //
 // These will disagree, and that is the point: dash deliberately
 // deviates from POSIX in places. An uncovered posix rule therefore

@@ -1,0 +1,5 @@
+mkdir -p fdir
+printf 'myfn() { echo LOADED-FROM-FILE; }\n' > fdir/myfn
+PATH=fdir%func:/bin:/usr/bin
+myfn
+%%%
