@@ -528,8 +528,36 @@ pub unsafe fn el_gets(e: *mut EditLine, hist: *mut History, n: *mut c_int) -> *c
                 Err(_) => ptr::null(),
             }
         }
-        // Ctrl-D on an empty line, and Ctrl-C, both read as end of input
-        // here; dash's caller treats NULL as EOF.
+        // ^C is an interrupt, not end of input. libedit leaves ISIG
+        // enabled, so the tty driver delivers a real SIGINT: dash's
+        // onsig/onint take it from there, the shell prints a fresh prompt
+        // and $? becomes 130. rustyline puts the terminal in raw mode,
+        // reads the 0x03 itself and returns Err(Interrupted), so no signal
+        // is ever raised -- and reporting that as NULL made dash read it
+        // as EOF and *exit the shell* on ^C at the prompt. Raise the
+        // signal the tty would have.
+        //
+        // Safe to raise here: readline() has already returned, so its
+        // terminal-restoring guard has run and the tty is back in cooked
+        // mode, exactly as it would be when libedit's handler returns.
+        Err(rustyline::error::ReadlineError::Interrupted) => {
+            libc::raise(libc::SIGINT);
+            // Reached only when SIGINT is trapped -- onint() is not called
+            // in that case, so control comes back. dash runs the trap and
+            // carries on, which wants an empty line, not EOF.
+            match CString::new("\n") {
+                Ok(cs) => {
+                    (*e).last = Some(cs);
+                    if !n.is_null() {
+                        *n = 1;
+                    }
+                    (*e).last.as_ref().unwrap().as_ptr()
+                }
+                Err(_) => ptr::null(),
+            }
+        }
+        // Ctrl-D on an empty line really is end of input; dash's caller
+        // treats NULL as EOF.
         Err(e) => {
             if std::env::var_os("DASH_LINEDIT_DEBUG").is_some() {
                 eprintln!("[linedit] readline error: {e:?}");

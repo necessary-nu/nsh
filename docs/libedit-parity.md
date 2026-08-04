@@ -28,6 +28,27 @@ Reproduce with:
 port has to reproduce dash's failure too. Do not treat this one as a
 bonus.
 
+## The interactive suite says the same thing
+
+`tests/harness/ptydiff.py` drives both shells on a real pty: 31 cases,
+**29 identical, and the 2 that differ are `-E` and `-V`** — the two that
+turn the editor on. Everything else about an interactive shell agrees,
+including all seven `^C` cases with the editor off.
+
+That pair started much worse. `el_gets` reported rustyline's
+`Err(Interrupted)` as NULL, dash's caller reads NULL as end of input, and
+so **`^C` at the prompt exited the shell** where dash prints a fresh one.
+libedit leaves `ISIG` enabled and lets the tty driver deliver a real
+SIGINT; rustyline takes the terminal to raw mode and eats the `0x03`.
+`linedit.rs` now re-raises SIGINT so dash's own `onsig`/`onint` run, and
+the shell survives with `$? == 130` as it should.
+
+What is left in those two cases is one extra blank line: rustyline's
+renderer emits a newline when it handles `^C`, and dash then emits its
+own from the `EXINT` path in `main`. libedit emits neither. A real
+libedit will not have the problem; a replacement that renders the line
+itself must not print anything on interrupt.
+
 ## Two things rustyline does that libedit does not
 
 Both show up in the raw output below and neither is shell behaviour, but
