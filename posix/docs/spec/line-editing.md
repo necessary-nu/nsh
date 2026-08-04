@@ -1,0 +1,670 @@
+# Command History and Line Editing
+
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT",
+"SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" in this
+document are to be interpreted as described in RFC 2119. This document
+reproduces normative text from IEEE Std 1003.1-2024 (POSIX.1-2024),
+Copyright © 2001-2024 The IEEE and The Open Group.
+
+Option-conditional text carries the standard's own margin code inline, at the point the standard shades it:
+
+`[UP]`
+: User Portability Utilities. The functionality described is optional.
+
+Every rule here lies inside the single shaded region that opens the `sh`
+EXTENDED DESCRIPTION section, which the standard marks `[UP]` once and then
+notes is "not further shaded for this option".
+
+## sh EXTENDED DESCRIPTION — option conditionality
+
+> [spec:posix:req:edit.up-option]
+> `[UP]` The functionality described in the rest of the sh EXTENDED DESCRIPTION section
+> shall be provided on implementations that support the User Portability
+> Utilities option (and the rest of that section is not further shaded for this
+> option).
+>
+> The command history list, command line editing, and the vi-mode insert and
+> command mode editing commands described in this document are all inside that
+> `[UP]` `[Option Start]` … `[Option End]` bracket and are therefore conditional
+> on the User Portability Utilities option.
+>
+> Source: XCU sh EXTENDED DESCRIPTION — utilities/sh.html#tag_20_110_13
+
+## Command History List
+
+> [spec:posix:req:edit.history-list]
+> `[UP]` When the sh utility is being used interactively, it shall maintain a list of
+> commands previously entered from the terminal in the file named by the HISTFILE
+> environment variable. The type, size, and internal format of this file are
+> unspecified. Multiple sh processes can share access to the file for a user, if
+> file access permissions allow this; see the description of the HISTFILE
+> environment variable.
+>
+> Source: XCU sh Command History List — utilities/sh.html#tag_20_110_13_01
+
+## Command Line Editing
+
+> [spec:posix:req:edit.vi-mode-editing]
+> `[UP]` When sh is being used interactively from a terminal, the current command and
+> the command history (see fc) can be edited using vi-mode command line editing.
+> This mode uses commands, described below, similar to a subset of those
+> described in the vi utility. Implementations may offer other command line
+> editing modes corresponding to other editing utilities.
+>
+> Source: XCU sh Command Line Editing — utilities/sh.html#tag_20_110_13_02
+
+> [spec:posix:req:edit.set-o-vi]
+> `[UP]` The command `set -o vi` shall enable vi-mode editing and place sh into vi
+> insert mode. This command also shall disable any other editing mode that the
+> implementation may provide. The command `set +o vi` disables vi-mode editing.
+>
+> Source: XCU sh Command Line Editing — utilities/sh.html#tag_20_110_13_02
+
+> [spec:posix:req:edit.block-mode-terminals]
+> `[UP]` Certain block-mode terminals may be unable to support shell command line
+> editing. If a terminal is unable to provide either edit mode, it need not be
+> possible to `set -o vi` when using the shell on this terminal.
+>
+> Source: XCU sh Command Line Editing — utilities/sh.html#tag_20_110_13_02
+
+> [spec:posix:def:edit.stty-characters]
+> `[UP]` In the command line editing sections, the characters erase, interrupt, kill,
+> and end-of-file are those set by the stty utility.
+>
+> Source: XCU sh Command Line Editing — utilities/sh.html#tag_20_110_13_02
+
+## Command Line Editing (vi-mode)
+
+> [spec:posix:def:edit.edit-line]
+> `[UP]` In vi editing mode, there shall be a distinguished line, the edit line. All the
+> editing operations which modify a line affect the edit line. The edit line is
+> always the newest line in the command history buffer.
+>
+> Source: XCU sh Command Line Editing (vi-mode) — utilities/sh.html#tag_20_110_13_03
+
+> [spec:posix:req:edit.insert-mode-default]
+> `[UP]` With vi-mode enabled, sh can be switched between insert mode and command mode.
+>
+> When in insert mode, an entered character shall be inserted into the command
+> line, except as noted in vi Line Editing Insert Mode. Upon entering sh and after
+> termination of the previous command, sh shall be in insert mode.
+>
+> Source: XCU sh Command Line Editing (vi-mode) — utilities/sh.html#tag_20_110_13_03
+
+> [spec:posix:req:edit.escape-to-command-mode]
+> `[UP]` Typing an escape character shall switch sh into command mode. In command mode,
+> an entered character shall either invoke a defined operation, be used as part of
+> a multi-character operation, or be treated as an error. A character that is not
+> recognized as part of an editing command shall terminate any specific editing
+> command and shall alert the terminal.
+>
+> Source: XCU sh Command Line Editing (vi-mode) — utilities/sh.html#tag_20_110_13_03
+
+> [spec:posix:req:edit.sigint-command-mode]
+> `[UP]` If sh receives a SIGINT signal in command mode (whether generated by typing the
+> interrupt character or by other means), it shall terminate command line editing
+> on the current command line, reissue the prompt on the next line of the
+> terminal, and reset the command history (see fc) so that the most recently
+> executed command is the previous command (that is, the command that was being
+> edited when it was interrupted is not re-entered into the history).
+>
+> Source: XCU sh Command Line Editing (vi-mode) — utilities/sh.html#tag_20_110_13_03
+
+> [spec:posix:def:edit.cursor-terminology]
+> `[UP]` In the vi line editing sections, the phrase "move the cursor to the beginning of
+> the word" shall mean "move the cursor to the first character of the current
+> word" and the phrase "move the cursor to the end of the word" shall mean "move
+> the cursor to the last character of the current word". The phrase "beginning of
+> the command line" indicates the point between the end of the prompt string
+> issued by the shell (or the beginning of the terminal line, if there is no
+> prompt string) and the first character of the command text.
+>
+> Source: XCU sh Command Line Editing (vi-mode) — utilities/sh.html#tag_20_110_13_03
+
+## vi Line Editing Insert Mode
+
+> [spec:posix:req:edit.insert-mode-special-characters]
+> `[UP]` While in insert mode, any character typed shall be inserted in the current
+> command line, unless it is from the following set: <newline>, erase, interrupt,
+> kill, <control>-V, <control>-W, end-of-file, and <ESC>.
+>
+> Source: XCU sh vi Line Editing Insert Mode — utilities/sh.html#tag_20_110_13_04
+
+> [spec:posix:req:edit.insert-newline]
+> `[UP]` `<newline>` — Execute the current command line. If the current command line is
+> not empty, this line shall be entered into the command history (see fc).
+>
+> Source: XCU sh vi Line Editing Insert Mode — utilities/sh.html#tag_20_110_13_04
+
+> [spec:posix:req:edit.insert-deletion]
+> `[UP]` `erase` — Delete the character previous to the current cursor position and move
+> the current cursor position back one character. In insert mode, characters shall
+> be erased from both the screen and the buffer when backspacing.
+>
+> `kill` — Clear all the characters from the input line.
+>
+> `<control>-W` — Delete the characters from the one preceding the cursor to the
+> preceding word boundary. The word boundary in this case is the closer to the
+> cursor of either the beginning of the line or a character that is in neither the
+> **blank** nor **punct** character classification of the current locale.
+>
+> Source: XCU sh vi Line Editing Insert Mode — utilities/sh.html#tag_20_110_13_04
+
+> [spec:posix:req:edit.insert-interrupt]
+> `[UP]` `interrupt` — If sh receives a SIGINT signal in insert mode (whether generated
+> by typing the interrupt character or by other means), it shall terminate command
+> line editing with the same effects as described for interrupting command mode.
+>
+> Source: XCU sh vi Line Editing Insert Mode — utilities/sh.html#tag_20_110_13_04
+
+> [spec:posix:sem:edit.insert-literal-next]
+> `[UP]` `<control>-V` — Insert the next character input, even if the character is
+> otherwise a special insert mode character.
+>
+> Source: XCU sh vi Line Editing Insert Mode — utilities/sh.html#tag_20_110_13_04
+
+> [spec:posix:req:edit.insert-end-of-file]
+> `[UP]` `end-of-file` — Interpreted as the end of input in sh. This interpretation shall
+> occur only at the beginning of an input line. If end-of-file is entered other
+> than at the beginning of the line, the results are unspecified.
+>
+> Source: XCU sh vi Line Editing Insert Mode — utilities/sh.html#tag_20_110_13_04
+
+> [spec:posix:sem:edit.insert-escape]
+> `[UP]` `<ESC>` — Place sh into command mode.
+>
+> Source: XCU sh vi Line Editing Insert Mode — utilities/sh.html#tag_20_110_13_04
+
+## vi Line Editing Command Mode
+
+### Counts, motions, and terminology
+
+> [spec:posix:req:edit.command-count]
+> `[UP]` In command mode for the command line editing feature, decimal digits not
+> beginning with 0 that precede a command letter shall be remembered. Some
+> commands use these decimal digits as a count number that affects the operation.
+>
+> Any command that is preceded by count shall take a count (the numeric value of
+> any preceding decimal digits). Unless otherwise noted, this count shall cause
+> the specified operation to repeat by the number of times specified by the count.
+> Also unless otherwise noted, a count that is out of range is considered an error
+> condition and shall alert the terminal, but neither the cursor position, nor the
+> command line, shall change.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:def:edit.motion-command-set]
+> `[UP]` The term motion command represents one of the commands:
+> `<space>`, `0`, `b`, `F`, `l`, `W`, `^`, `$`, `;`, `E`, `f`, `T`, `w`, `|`,
+> `,`, `B`, `e`, `h`, `t`.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.edit-line-replacement]
+> `[UP]` If the current line is not the edit line, any command that modifies the current
+> line shall cause the content of the current line to replace the content of the
+> edit line, and the current line shall become the edit line. This replacement
+> cannot be undone (see the `u` and `U` commands). The modification requested
+> shall then be performed to the edit line. When the current line is the edit
+> line, the modification shall be done directly to the edit line.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:def:edit.word-bigword-terms]
+> `[UP]` The terms word and bigword are used as defined in the vi description. The term
+> save buffer corresponds to the term unnamed buffer in vi.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+### General command mode commands
+
+> [spec:posix:req:edit.command-newline]
+> `[UP]` The following commands shall be recognized in command mode.
+>
+> `<newline>` — Execute the current command line. If the current command line is
+> not empty, this line shall be entered into the command history (see fc).
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:sem:edit.command-redraw]
+> `[UP]` `<control>-L` — Redraw the current command line. Position the cursor at the same
+> location on the redrawn line.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.command-comment]
+> `[UP]` `#` — Insert the character '#' at the beginning of the current command line and
+> treat the resulting edit line as a comment. This line shall be entered into the
+> command history (see fc).
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.command-display-expansions]
+> `[UP]` `=` — Display the possible shell word expansions (see 2.6 Word Expansions) of
+> the bigword at the current command line position.
+>
+> Note: This does not modify the content of the current line, and therefore does
+> not cause the current line to become the edit line.
+>
+> These expansions shall be displayed on subsequent terminal lines. If the bigword
+> contains none of the characters '?', '*', or '[', an <asterisk> ('*') shall be
+> implicitly assumed at the end. If any directories are matched, these expansions
+> shall have a '/' character appended. After the expansion, the line shall be
+> redrawn, the cursor repositioned at the current cursor position, and sh shall be
+> placed in command mode.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.command-complete-unique]
+> `[UP]` `\` — Perform pathname expansion (see 2.6.6 Pathname Expansion) on the current
+> bigword, up to the largest set of characters that can be matched uniquely. If
+> the bigword contains none of the characters '?', '*', or '[', an <asterisk>
+> ('*') shall be implicitly assumed at the end. This maximal expansion then shall
+> replace the original bigword in the command line, and the cursor shall be placed
+> after this expansion. If the resulting bigword completely and uniquely matches a
+> directory, a '/' character shall be inserted directly after the bigword. If some
+> other file is completely matched, a single <space> shall be inserted after the
+> bigword. After this operation, sh shall be placed in insert mode.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.command-expand-all]
+> `[UP]` `*` — Perform pathname expansion on the current bigword and insert all
+> expansions into the command to replace the current bigword, with each expansion
+> separated by a single <space>. If at the end of the line, the current cursor
+> position shall be moved to the first column position following the expansions
+> and sh shall be placed in insert mode. Otherwise, the current cursor position
+> shall be the last column position of the first character after the expansions
+> and sh shall be placed in insert mode. If the current bigword contains none of
+> the characters '?', '*', or '[', before the operation, an <asterisk> ('*') shall
+> be implicitly assumed at the end.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.command-alias-insert]
+> `[UP]` `@`letter — Insert the value of the alias named `_letter`. The symbol letter
+> represents a single alphabetic character from the portable character set;
+> implementations may support additional characters as an extension. If the alias
+> `_letter` contains other editing commands, these commands shall be performed as
+> part of the insertion. If no alias `_letter` is enabled, this command shall have
+> no effect.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.command-case-toggle]
+> `[UP]` `[count]~` — Convert, if the current character is a lowercase letter, to the
+> equivalent uppercase letter and vice versa, as prescribed by the current locale.
+> The current cursor position then shall be advanced by one character. If the
+> cursor was positioned on the last character of the line, the case conversion
+> shall occur, but the cursor shall not advance. If the '~' command is preceded by
+> a count, that number of characters shall be converted, and the cursor shall be
+> advanced to the character position after the last character converted. If the
+> count is larger than the number of characters after the cursor, this shall not
+> be considered an error; the cursor shall advance to the last character on the
+> line.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.command-repeat]
+> `[UP]` `[count].` — Repeat the most recent non-motion command, even if it was executed
+> on an earlier command line. If the previous command was preceded by a count, and
+> no count is given on the '.' command, the count from the previous command shall
+> be included as part of the repeated command. If the '.' command is preceded by a
+> count, this shall override any count argument to the previous command. The count
+> specified in the '.' command shall become the count for subsequent '.' commands
+> issued without a count.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.command-invoke-vi]
+> `[UP]` `[number]v` — Invoke the vi editor to edit the current command line in a
+> temporary file. When the editor exits, the commands in the temporary file shall
+> be executed and placed in the command history. If a number is included, it
+> specifies the command number in the command history to be edited, rather than
+> the current command line.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+### Motion commands
+
+> [spec:posix:req:edit.motion-char]
+> `[UP]` `[count]l` (ell) and `[count]<space>` — Move the current cursor position to the
+> next character position. If the cursor was positioned on the last character of
+> the line, the terminal shall be alerted and the cursor shall not be advanced. If
+> the count is larger than the number of characters after the cursor, this shall
+> not be considered an error; the cursor shall advance to the last character on
+> the line.
+>
+> `[count]h` — Move the current cursor position to the countth (default 1)
+> previous character position. If the cursor was positioned on the first character
+> of the line, the terminal shall be alerted and the cursor shall not be moved. If
+> the count is larger than the number of characters before the cursor, this shall
+> not be considered an error; the cursor shall move to the first character on the
+> line.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.motion-word-forward]
+> `[UP]` `[count]w` — Move to the start of the next word. If the cursor was positioned on
+> the last character of the line, the terminal shall be alerted and the cursor
+> shall not be advanced. If the count is larger than the number of words after the
+> cursor, this shall not be considered an error; the cursor shall advance to the
+> last character on the line.
+>
+> `[count]W` — Move to the start of the next bigword. If the cursor was positioned
+> on the last character of the line, the terminal shall be alerted and the cursor
+> shall not be advanced. If the count is larger than the number of bigwords after
+> the cursor, this shall not be considered an error; the cursor shall advance to
+> the last character on the line.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.motion-word-end]
+> `[UP]` `[count]e` — Move to the end of the current word. If at the end of a word, move
+> to the end of the next word. If the cursor was positioned on the last character
+> of the line, the terminal shall be alerted and the cursor shall not be advanced.
+> If the count is larger than the number of words after the cursor, this shall not
+> be considered an error; the cursor shall advance to the last character on the
+> line.
+>
+> `[count]E` — Move to the end of the current bigword. If at the end of a bigword,
+> move to the end of the next bigword. If the cursor was positioned on the last
+> character of the line, the terminal shall be alerted and the cursor shall not be
+> advanced. If the count is larger than the number of bigwords after the cursor,
+> this shall not be considered an error; the cursor shall advance to the last
+> character on the line.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.motion-word-backward]
+> `[UP]` `[count]b` — Move to the beginning of the current word. If at the beginning of a
+> word, move to the beginning of the previous word. If the cursor was positioned
+> on the first character of the line, the terminal shall be alerted and the cursor
+> shall not be moved. If the count is larger than the number of words preceding
+> the cursor, this shall not be considered an error; the cursor shall return to
+> the first character on the line.
+>
+> `[count]B` — Move to the beginning of the current bigword. If at the beginning
+> of a bigword, move to the beginning of the previous bigword. If the cursor was
+> positioned on the first character of the line, the terminal shall be alerted and
+> the cursor shall not be moved. If the count is larger than the number of
+> bigwords preceding the cursor, this shall not be considered an error; the cursor
+> shall return to the first character on the line.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.motion-line-position]
+> `[UP]` `^` — Move the current cursor position to the first character on the input line
+> that is not a <blank>.
+>
+> `$` — Move to the last character position on the current command line.
+>
+> `0` — (Zero.) Move to the first character position on the current command line.
+>
+> `[count]|` — Move to the countth character position on the current command line.
+> If no number is specified, move to the first position. The first character
+> position shall be numbered 1. If the count is larger than the number of
+> characters on the line, this shall not be considered an error; the cursor shall
+> be placed on the last character on the line.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.motion-char-search]
+> `[UP]` `[count]f`c — Move to the first occurrence of the character 'c' that occurs
+> after the current cursor position. If the cursor was positioned on the last
+> character of the line, the terminal shall be alerted and the cursor shall not be
+> advanced. If the character 'c' does not occur in the line after the current
+> cursor position, the terminal shall be alerted and the cursor shall not be
+> moved.
+>
+> `[count]F`c — Move to the first occurrence of the character 'c' that occurs
+> before the current cursor position. If the cursor was positioned on the first
+> character of the line, the terminal shall be alerted and the cursor shall not be
+> moved. If the character 'c' does not occur in the line before the current cursor
+> position, the terminal shall be alerted and the cursor shall not be moved.
+>
+> `[count]t`c — Move to the character before the first occurrence of the character
+> 'c' that occurs after the current cursor position. If the cursor was positioned
+> on the last character of the line, the terminal shall be alerted and the cursor
+> shall not be advanced. If the character 'c' does not occur in the line after the
+> current cursor position, the terminal shall be alerted and the cursor shall not
+> be moved.
+>
+> `[count]T`c — Move to the character after the first occurrence of the character
+> 'c' that occurs before the current cursor position. If the cursor was positioned
+> on the first character of the line, the terminal shall be alerted and the cursor
+> shall not be moved. If the character 'c' does not occur in the line before the
+> current cursor position, the terminal shall be alerted and the cursor shall not
+> be moved.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.motion-char-search-repeat]
+> `[UP]` `[count];` — Repeat the most recent `f`, `F`, `t`, or `T` command. Any number
+> argument on that previous command shall be ignored. Errors are those described
+> for the repeated command.
+>
+> `[count],` — Repeat the most recent `f`, `F`, `t`, or `T` command. Any number
+> argument on that previous command shall be ignored. However, reverse the
+> direction of that command.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+### Entering insert mode
+
+> [spec:posix:req:edit.enter-insert-mode]
+> `[UP]` `a` — Enter insert mode after the current cursor position. Characters that are
+> entered shall be inserted before the next character.
+>
+> `A` — Enter insert mode after the end of the current command line.
+>
+> `i` — Enter insert mode at the current cursor position. Characters that are
+> entered shall be inserted before the current character.
+>
+> `I` — Enter insert mode at the beginning of the current command line.
+>
+> `R` — Enter insert mode, replacing characters from the command line beginning at
+> the current cursor position.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+### Change, delete, yank, put, and undo
+
+> [spec:posix:req:edit.change-motion]
+> `[UP]` `[count]c`motion — Delete the characters between the current cursor position and
+> the cursor position that would result from the specified motion command. Then
+> enter insert mode before the first character following any deleted characters.
+> If count is specified, it shall be applied to the motion command. A count shall
+> be ignored for the following motion commands: `0`, `^`, `$`, `c`.
+>
+> If the motion command is the character 'c', the current command line shall be
+> cleared and insert mode shall be entered. If the motion command would move the
+> current cursor position toward the beginning of the command line, the character
+> under the current cursor position shall not be deleted. If the motion command
+> would move the current cursor position toward the end of the command line, the
+> character under the current cursor position shall be deleted. If the count is
+> larger than the number of characters between the current cursor position and the
+> end of the command line toward which the motion command would move the cursor,
+> this shall not be considered an error; all of the remaining characters in the
+> aforementioned range shall be deleted and insert mode shall be entered. If the
+> motion command is invalid, the terminal shall be alerted, the cursor shall not
+> be moved, and no text shall be deleted.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:sem:edit.change-to-end-and-line]
+> `[UP]` `C` — Delete from the current character to the end of the line and enter insert
+> mode at the new end-of-line.
+>
+> `S` — Clear the entire edit line and enter insert mode.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.replace-char]
+> `[UP]` `[count]r`c — Replace the current character with the character 'c'. With a
+> number count, replace the current and the following count-1 characters. After
+> this command, the current cursor position shall be on the last character that
+> was changed. If the count is larger than the number of characters after the
+> cursor, this shall not be considered an error; all of the remaining characters
+> shall be changed.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:sem:edit.append-last-bigword]
+> `[UP]` `[count]_` — Append a <space> after the current character position and then
+> append the last bigword in the previous input line after the <space>. Then enter
+> insert mode after the last character just appended. With a number count, append
+> the countth bigword in the previous line.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.delete-char]
+> `[UP]` `[count]x` — Delete the character at the current cursor position and place the
+> deleted characters in the save buffer. If the cursor was positioned on the last
+> character of the line, the character shall be deleted and the cursor position
+> shall be moved to the previous character (the new last character). If the count
+> is larger than the number of characters after the cursor, this shall not be
+> considered an error; all the characters from the cursor to the end of the line
+> shall be deleted.
+>
+> `[count]X` — Delete the character before the current cursor position and place
+> the deleted characters in the save buffer. The character under the current
+> cursor position shall not change. If the cursor was positioned on the first
+> character of the line, the terminal shall be alerted, and the `X` command shall
+> have no effect. If the line contained a single character, the `X` command shall
+> have no effect. If the line contained no characters, the terminal shall be
+> alerted and the cursor shall not be moved. If the count is larger than the
+> number of characters before the cursor, this shall not be considered an error;
+> all the characters from before the cursor to the beginning of the line shall be
+> deleted.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.delete-motion]
+> `[UP]` `[count]d`motion — Delete the characters between the current cursor position and
+> the character position that would result from the motion command. A number count
+> repeats the motion command count times. If the motion command would move toward
+> the beginning of the command line, the character under the current cursor
+> position shall not be deleted. If the motion command is `d`, the entire current
+> command line shall be cleared. If the count is larger than the number of
+> characters between the current cursor position and the end of the command line
+> toward which the motion command would move the cursor, this shall not be
+> considered an error; all of the remaining characters in the aforementioned range
+> shall be deleted. The deleted characters shall be placed in the save buffer.
+>
+> `D` — Delete all characters from the current cursor position to the end of the
+> line. The deleted characters shall be placed in the save buffer.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.yank-motion]
+> `[UP]` `[count]y`motion — Yank (that is, copy) the characters from the current cursor
+> position to the position resulting from the motion command into the save buffer.
+> A number count shall be applied to the motion command. If the motion command
+> would move toward the beginning of the command line, the character under the
+> current cursor position shall not be included in the set of yanked characters.
+> If the motion command is `y`, the entire current command line shall be yanked
+> into the save buffer. The current cursor position shall be unchanged. If the
+> count is larger than the number of characters between the current cursor
+> position and the end of the command line toward which the motion command would
+> move the cursor, this shall not be considered an error; all of the remaining
+> characters in the aforementioned range shall be yanked.
+>
+> `Y` — Yank the characters from the current cursor position to the end of the
+> line into the save buffer. The current character position shall be unchanged.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.put-save-buffer]
+> `[UP]` `[count]p` — Put a copy of the current contents of the save buffer after the
+> current cursor position. The current cursor position shall be advanced to the
+> last character put from the save buffer. A count shall indicate how many copies
+> of the save buffer shall be put.
+>
+> `[count]P` — Put a copy of the current contents of the save buffer before the
+> current cursor position. The current cursor position shall be moved to the last
+> character put from the save buffer. A count shall indicate how many copies of
+> the save buffer shall be put.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.undo]
+> `[UP]` `u` — Undo the last command that changed the edit line. This operation shall not
+> undo the copy of any command line to the edit line.
+>
+> `U` — Undo all changes made to the edit line. This operation shall not undo the
+> copy of any command line to the edit line.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+### Command history navigation and search
+
+> [spec:posix:req:edit.history-prev-next]
+> `[UP]` `[count]k` and `[count]-` — Set the current command line to be the countth
+> previous command line in the shell command history. If count is not specified,
+> it shall default to 1. The cursor shall be positioned on the first character of
+> the new command. If a `k` or `-` command would retreat past the maximum number
+> of commands in effect for this shell (affected by the HISTSIZE environment
+> variable), the terminal shall be alerted, and the command shall have no effect.
+>
+> `[count]j` and `[count]+` — Set the current command line to be the countth next
+> command line in the shell command history. If count is not specified, it shall
+> default to 1. The cursor shall be positioned on the first character of the new
+> command. If a `j` or `+` command advances past the edit line, the current
+> command line shall be restored to the edit line and the terminal shall be
+> alerted.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.history-goto]
+> `[UP]` `[number]G` — Set the current command line to be the oldest command line stored
+> in the shell command history. With a number number, set the current command line
+> to be the command line number in the history. If command line number does not
+> exist, the terminal shall be alerted and the command line shall not be changed.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:syn:edit.history-search-pattern]
+> `[UP]` Patterns given to the `/` and `?` command history search commands use the
+> pattern matching notation described in 2.14 Pattern Matching Notation, except
+> that the '^' character shall have special meaning when it appears as the first
+> character of pattern. In this case, the '^' is discarded and the characters
+> after the '^' shall be matched only at the beginning of a line. Commands in the
+> command history shall be treated as strings, not as filenames.
+>
+> If pattern is empty, the last non-empty pattern provided to `/` or `?` shall be
+> used. If there is no previous non-empty pattern, the terminal shall be alerted
+> and the current command line shall remain unchanged.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.history-search-backward]
+> `[UP]` `/`pattern`<newline>` — Move backwards through the command history, searching
+> for the specified pattern, beginning with the previous command line. If the
+> pattern is not found, the current command line shall be unchanged and the
+> terminal shall be alerted. If it is found in a previous line, the current
+> command line shall be set to that line and the cursor shall be set to the
+> fist [sic] character of the new command line.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.history-search-forward]
+> `[UP]` `?`pattern`<newline>` — Move forwards through the command history, searching for
+> the specified pattern, beginning with the next command line. If the pattern is
+> not found, the current command line shall be unchanged and the terminal shall be
+> alerted. If it is found in a following line, the current command line shall be
+> set to that line and the cursor shall be set to the first character of the new
+> command line.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05
+
+> [spec:posix:req:edit.history-search-repeat]
+> `[UP]` `n` — Repeat the most recent `/` or `?` command. If there is no previous `/` or
+> `?`, the terminal shall be alerted and the current command line shall remain
+> unchanged.
+>
+> `N` — Repeat the most recent `/` or `?` command, reversing the direction of the
+> search. If there is no previous `/` or `?`, the terminal shall be alerted and
+> the current command line shall remain unchanged.
+>
+> Source: XCU sh vi Line Editing Command Mode — utilities/sh.html#tag_20_110_13_05

@@ -1,0 +1,28 @@
+platforms (
+    {
+        platform "c++"
+        files (src/**/*.c src/**/*.cc src/**/*.cpp src/**/*.cxx src/**/*.h src/**/*.hpp include/**/*.h include/**/*.hpp)
+        checks {
+            format {
+                cmd "find src include -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' | xargs clang-format --dry-run --Werror"
+                fix "find src include -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' | xargs clang-format -i"
+            }
+        }
+    }
+)
+
+commit {
+    type-prefix "required"
+}
+
+adoption {
+    scope "porting"
+}
+
+// The C source is upstream dash and stays byte-identical, so its
+// coverage claims live in plan/annotations.styx and never in source
+// comments. The Rust target carries its claims inline as ordinary
+// comments, which is what `@both` (the union of the two) allows.
+annotations {
+    mode @both
+}

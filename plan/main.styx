@@ -1,0 +1,898 @@
+name dash
+
+source {
+    url https://git.kernel.org/pub/scm/utils/dash/dash.git
+    ref master
+}
+
+children (
+    {
+        id posix-conformance
+        title "POSIX.1-2024 conformance of the shell"
+        children (
+            {
+                id posix-quoting
+                title "XCU 2.1-2.2 Shell Introduction and Quoting"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:def:shell.command-language-interpreter]
+                        [spec:posix:sem:shell.input-sources]
+                        [spec:posix:req:shell.hashbang-unspecified]
+                        [spec:posix:sem:shell.tokenization-and-parsing]
+                        [spec:posix:sem:shell.word-processing]
+                        [spec:posix:sem:shell.redirection-processing]
+                        [spec:posix:sem:shell.command-execution]
+                        [spec:posix:sem:shell.exit-status-collection]
+                        [spec:posix:def:quote.purpose]
+                        [spec:posix:req:quote.always-special-characters]
+                        [spec:posix:req:quote.conditionally-special-characters]
+                        [spec:posix:req:quote.future-special-characters]
+                        [spec:posix:def:quote.mechanisms]
+                        [spec:posix:req:quote.backslash-literal]
+                        [spec:posix:req:quote.backslash-newline]
+                        [spec:posix:req:quote.single-quotes]
+                        [spec:posix:req:quote.double-quotes-literal]
+                        [spec:posix:req:quote.double-quotes-dollar-sign]
+                        [spec:posix:req:quote.double-quotes-command-substitution]
+                        [spec:posix:req:quote.double-quotes-substring-parameter-expansion]
+                        [spec:posix:req:quote.double-quotes-other-parameter-expansion]
+                        [spec:posix:req:quote.double-quotes-backquote]
+                        [spec:posix:req:quote.double-quotes-backquote-undefined]
+                        [spec:posix:req:quote.double-quotes-backslash]
+                        [spec:posix:req:quote.double-quotes-expansion-result]
+                        [spec:posix:req:quote.double-quotes-embedded-double-quote]
+                        [spec:posix:req:quote.dollar-single-quotes]
+                        [spec:posix:def:quote.dollar-single-quotes-escapes]
+                        [spec:posix:def:quote.dollar-single-quotes-control-escape]
+                        [spec:posix:def:quote.dollar-single-quotes-hex-escape]
+                        [spec:posix:def:quote.dollar-single-quotes-octal-escape]
+                        [spec:posix:req:quote.dollar-single-quotes-undefined-escape]
+                        [spec:posix:syn:quote.dollar-single-quotes-escape-termination]
+                        [spec:posix:req:quote.dollar-single-quotes-processing-time]
+                        [spec:posix:req:quote.dollar-single-quotes-null-byte]
+                        [spec:posix:req:quote.dollar-single-quotes-octal-overflow]
+                        [spec:posix:req:quote.dollar-single-quotes-unencodable]
+                        [spec:posix:req:quote.dollar-single-quotes-quote-escape-not-terminator]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-tokens
+                title "XCU 2.3-2.4 Token Recognition and Reserved Words"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:req:token.input-lines]
+                        [spec:posix:req:token.here-document-mode]
+                        [spec:posix:syn:token.recognition-algorithm]
+                        [spec:posix:syn:token.delimit-at-end-of-input]
+                        [spec:posix:syn:token.start-new-word]
+                        [spec:posix:syn:token.operator-continue]
+                        [spec:posix:syn:token.operator-delimit]
+                        [spec:posix:syn:token.quoting-characters]
+                        [spec:posix:syn:token.expansion-candidates]
+                        [spec:posix:syn:token.start-new-operator]
+                        [spec:posix:syn:token.unquoted-blank-delimits]
+                        [spec:posix:syn:token.append-to-word]
+                        [spec:posix:syn:token.comment]
+                        [spec:posix:sem:token.categorization]
+                        [spec:posix:req:token.incremental-execution]
+                        [spec:posix:req:token.alias-substitution-conditions]
+                        [spec:posix:req:token.alias-reserved-word-unspecified]
+                        [spec:posix:req:token.alias-replacement]
+                        [spec:posix:req:token.alias-trailing-blank-chaining]
+                        [spec:posix:req:token.alias-change-timing]
+                        [spec:posix:req:token.alias-not-inherited]
+                        [spec:posix:def:token.reserved-words]
+                        [spec:posix:req:token.reserved-word-recognition-contexts]
+                        [spec:posix:def:token.reserved-words-optional]
+                        [spec:posix:req:token.reserved-word-time]
+                        [spec:posix:def:token.reserved-words-trailing-colon]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-parameters
+                title "XCU 2.5 Parameters and Variables"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:def:param.denotation]
+                        [spec:posix:def:param.set-state]
+                        [spec:posix:req:param.byte-values]
+                        [spec:posix:def:param.positional-definition]
+                        [spec:posix:req:param.positional-decimal-digits]
+                        [spec:posix:syn:param.positional-multi-digit-braces]
+                        [spec:posix:sem:param.positional-zero-not-positional]
+                        [spec:posix:sem:param.positional-assignment]
+                        [spec:posix:def:param.special-parameters]
+                        [spec:posix:req:param.special-at]
+                        [spec:posix:req:param.special-at-double-quotes]
+                        [spec:posix:req:param.special-at-no-positional]
+                        [spec:posix:req:param.special-asterisk]
+                        [spec:posix:req:param.special-hash]
+                        [spec:posix:req:param.special-question]
+                        [spec:posix:sem:param.special-question-assignment]
+                        [spec:posix:req:param.special-hyphen]
+                        [spec:posix:req:param.special-dollar]
+                        [spec:posix:req:param.special-bang]
+                        [spec:posix:req:param.special-zero]
+                        [spec:posix:req:param.variable-environment-initialization]
+                        [spec:posix:sem:param.variable-creation]
+                        [spec:posix:def:param.shell-variables]
+                        [spec:posix:req:param.env]
+                        [spec:posix:def:param.home]
+                        [spec:posix:def:param.ifs]
+                        [spec:posix:req:param.ifs-unset]
+                        [spec:posix:req:param.ifs-initial-value]
+                        [spec:posix:req:param.lang]
+                        [spec:posix:req:param.lc-all]
+                        [spec:posix:req:param.lc-collate]
+                        [spec:posix:req:param.lc-ctype]
+                        [spec:posix:req:param.lc-messages]
+                        [spec:posix:req:param.lineno]
+                        [spec:posix:req:param.nlspath]
+                        [spec:posix:def:param.path]
+                        [spec:posix:req:param.ppid]
+                        [spec:posix:req:param.ps1]
+                        [spec:posix:req:param.ps1-two-pass]
+                        [spec:posix:req:param.ps1-exclamation-expansion]
+                        [spec:posix:req:param.ps1-default]
+                        [spec:posix:req:param.ps2]
+                        [spec:posix:req:param.ps4]
+                        [spec:posix:req:param.pwd]
+                        [spec:posix:req:param.pwd-assignment]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-expansion
+                title "XCU 2.6 Word Expansions"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:req:expand.order]
+                        [spec:posix:req:expand.single-field]
+                        [spec:posix:req:expand.brace-implementation-defined]
+                        [spec:posix:req:expand.execution-environment]
+                        [spec:posix:req:expand.assignment-redirection-environment]
+                        [spec:posix:def:expand.dollar-introducer]
+                        [spec:posix:req:expand.dollar-invalid-follower]
+                        [spec:posix:req:expand.dollar-literal]
+                        [spec:posix:def:expand.tilde-prefix]
+                        [spec:posix:def:expand.tilde-prefix-in-assignment]
+                        [spec:posix:req:expand.tilde-home]
+                        [spec:posix:req:expand.tilde-login-name]
+                        [spec:posix:sem:expand.tilde-no-further-expansion]
+                        [spec:posix:req:expand.tilde-replacement-pathname]
+                        [spec:posix:req:expand.tilde-result-quoted]
+                        [spec:posix:syn:expand.param-format]
+                        [spec:posix:req:expand.param-simple]
+                        [spec:posix:syn:expand.param-braces-optional]
+                        [spec:posix:syn:expand.param-unbraced-resolution]
+                        [spec:posix:req:expand.param-word-expansion]
+                        [spec:posix:req:expand.param-use-default]
+                        [spec:posix:req:expand.param-assign-default]
+                        [spec:posix:req:expand.param-error-if-unset]
+                        [spec:posix:req:expand.param-use-alternative]
+                        [spec:posix:req:expand.param-colon-effect]
+                        [spec:posix:req:expand.param-hash-requires-word]
+                        [spec:posix:req:expand.param-string-length]
+                        [spec:posix:req:expand.param-substring-common]
+                        [spec:posix:req:expand.param-remove-smallest-suffix]
+                        [spec:posix:req:expand.param-remove-largest-suffix]
+                        [spec:posix:req:expand.param-remove-smallest-prefix]
+                        [spec:posix:req:expand.param-remove-largest-prefix]
+                        [spec:posix:def:expand.cmdsub-forms]
+                        [spec:posix:req:expand.cmdsub-semantics]
+                        [spec:posix:req:expand.cmdsub-backquote-backslash]
+                        [spec:posix:req:expand.cmdsub-backquote-matching]
+                        [spec:posix:syn:expand.cmdsub-dollar-paren-extent]
+                        [spec:posix:req:expand.cmdsub-parsing]
+                        [spec:posix:req:expand.cmdsub-redirections-only]
+                        [spec:posix:req:expand.cmdsub-alias-substitution]
+                        [spec:posix:req:expand.cmdsub-terminating-paren]
+                        [spec:posix:req:expand.cmdsub-no-reexpansion]
+                        [spec:posix:req:expand.cmdsub-nesting]
+                        [spec:posix:req:expand.cmdsub-arith-ambiguity]
+                        [spec:posix:syn:expand.arith-format]
+                        [spec:posix:req:expand.arith-token-expansion]
+                        [spec:posix:req:expand.arith-evaluation]
+                        [spec:posix:req:expand.arith-variable-changes]
+                        [spec:posix:req:expand.arith-variable-reference]
+                        [spec:posix:req:expand.arith-extensions]
+                        [spec:posix:req:expand.arith-invalid-expression]
+                        [spec:posix:req:expand.field-splitting-applies]
+                        [spec:posix:def:expand.field-splitting-results-of-expansion]
+                        [spec:posix:req:expand.field-splitting-empty-ifs]
+                        [spec:posix:req:expand.field-splitting-order]
+                        [spec:posix:req:expand.field-splitting-unexpanded-fields]
+                        [spec:posix:def:expand.ifs-white-space]
+                        [spec:posix:req:expand.ifs-unset-default]
+                        [spec:posix:req:expand.ifs-delimiters]
+                        [spec:posix:sem:expand.field-splitting-arbitrary-bytes]
+                        [spec:posix:req:expand.field-splitting-zero-fields]
+                        [spec:posix:def:expand.field-splitting-delimited]
+                        [spec:posix:req:expand.field-splitting-algorithm]
+                        [spec:posix:req:expand.field-splitting-output-replaces-input]
+                        [spec:posix:req:expand.pathname]
+                        [spec:posix:req:expand.quote-removal]
+                        [spec:posix:sem:expand.quote-removal-quoting-remembered]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-redirection
+                title "XCU 2.7 Redirection"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:def:redir.purpose]
+                        [spec:posix:syn:redir.format]
+                        [spec:posix:syn:redir.quoting-suppresses-recognition]
+                        [spec:posix:req:redir.not-in-command-arguments]
+                        [spec:posix:req:redir.location-format]
+                        [spec:posix:req:redir.max-fd-number]
+                        [spec:posix:req:redir.word-expansion]
+                        [spec:posix:req:redir.word-pathname-expansion]
+                        [spec:posix:sem:redir.evaluation-order]
+                        [spec:posix:req:redir.open-failure]
+                        [spec:posix:req:redir.input]
+                        [spec:posix:syn:redir.output-format]
+                        [spec:posix:req:redir.output-noclobber]
+                        [spec:posix:req:redir.output-noclobber-atomicity]
+                        [spec:posix:req:redir.output-truncate]
+                        [spec:posix:req:redir.append]
+                        [spec:posix:syn:redir.append-format]
+                        [spec:posix:def:redir.here-doc]
+                        [spec:posix:req:redir.here-doc-delimiter]
+                        [spec:posix:syn:redir.here-doc-format]
+                        [spec:posix:sem:redir.here-doc-fd-type]
+                        [spec:posix:req:redir.here-doc-quoted-delimiter]
+                        [spec:posix:req:redir.here-doc-unquoted-delimiter]
+                        [spec:posix:req:redir.here-doc-line-continuation]
+                        [spec:posix:req:redir.here-doc-expansion]
+                        [spec:posix:req:redir.here-doc-backslash]
+                        [spec:posix:req:redir.here-doc-tab-strip]
+                        [spec:posix:req:redir.here-doc-multiple]
+                        [spec:posix:req:redir.here-doc-ps2]
+                        [spec:posix:req:redir.dup-input]
+                        [spec:posix:req:redir.dup-input-close]
+                        [spec:posix:req:redir.dup-output]
+                        [spec:posix:req:redir.dup-output-close]
+                        [spec:posix:req:redir.open-read-write]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-exit-status
+                title "XCU 2.8 Exit Status and Errors"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:req:exit.shell-error-consequences]
+                        [spec:posix:req:exit.unrecoverable-read-error]
+                        [spec:posix:def:exit.expansion-error]
+                        [spec:posix:req:exit.subshell-error-exit]
+                        [spec:posix:req:exit.interactive-abandons-command]
+                        [spec:posix:def:exit.command-status]
+                        [spec:posix:req:exit.status-command-not-found]
+                        [spec:posix:req:exit.status-not-executable]
+                        [spec:posix:req:exit.status-signal-terminated]
+                        [spec:posix:req:exit.status-normal-termination]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-commands
+                title "XCU 2.9 Shell Commands"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:syn:cmd.format-descriptions-informal]
+                        [spec:posix:def:cmd.command-kinds]
+                        [spec:posix:req:cmd.default-exit-status]
+                        [spec:posix:req:cmd.no-size-limit]
+                        [spec:posix:def:cmd.simple-definition]
+                        [spec:posix:req:cmd.simple-processing-order]
+                        [spec:posix:req:cmd.simple-command-name-determination]
+                        [spec:posix:req:cmd.simple-declaration-utility-expansion]
+                        [spec:posix:req:cmd.simple-argument-expansion]
+                        [spec:posix:req:cmd.simple-redirections-performed]
+                        [spec:posix:req:cmd.simple-assignment-expansion]
+                        [spec:posix:req:cmd.simple-step-order-reversal]
+                        [spec:posix:req:cmd.declaration-utility-lexical-analysis]
+                        [spec:posix:req:cmd.assign-no-command-name]
+                        [spec:posix:req:cmd.assign-exported-to-command]
+                        [spec:posix:req:cmd.assign-standard-utility-as-function]
+                        [spec:posix:req:cmd.assign-special-builtin]
+                        [spec:posix:req:cmd.assign-function]
+                        [spec:posix:req:cmd.assign-readonly-error]
+                        [spec:posix:req:cmd.no-name-redirections-subshell]
+                        [spec:posix:req:cmd.no-name-redirection-failure]
+                        [spec:posix:req:cmd.no-name-exit-status]
+                        [spec:posix:req:cmd.search-applies]
+                        [spec:posix:req:cmd.search-special-builtin]
+                        [spec:posix:req:cmd.search-unspecified-utility-names]
+                        [spec:posix:req:cmd.search-function]
+                        [spec:posix:req:cmd.search-intrinsic-utility]
+                        [spec:posix:req:cmd.search-path-associated-builtin]
+                        [spec:posix:req:cmd.search-path-non-builtin]
+                        [spec:posix:req:cmd.search-remembered-location]
+                        [spec:posix:req:cmd.search-path-unsuccessful]
+                        [spec:posix:req:cmd.search-name-with-slash]
+                        [spec:posix:req:cmd.std-fd-closed]
+                        [spec:posix:req:cmd.std-fd-nonconforming-environment]
+                        [spec:posix:req:cmd.nonbuiltin-separate-environment]
+                        [spec:posix:req:cmd.nonbuiltin-exec-replaces-environment]
+                        [spec:posix:req:cmd.nonbuiltin-path-search-execl]
+                        [spec:posix:req:cmd.nonbuiltin-enoexec-script]
+                        [spec:posix:req:cmd.nonbuiltin-invalid-name-env-unspecified]
+                        [spec:posix:req:cmd.nonbuiltin-path-search-unsuccessful]
+                        [spec:posix:req:cmd.nonbuiltin-slash-execl]
+                        [spec:posix:req:cmd.nonbuiltin-slash-enoexec-script]
+                        [spec:posix:req:cmd.nonbuiltin-slash-not-found]
+                        [spec:posix:def:cmd.pipeline-definition]
+                        [spec:posix:req:cmd.pipeline-connects-stdio]
+                        [spec:posix:syn:cmd.pipeline-format]
+                        [spec:posix:req:cmd.pipeline-bang-subshell-separation]
+                        [spec:posix:req:cmd.pipeline-assignment-precedes-redirection]
+                        [spec:posix:req:cmd.pipeline-foreground-wait]
+                        [spec:posix:req:cmd.pipeline-exit-status]
+                        [spec:posix:req:cmd.pipeline-pipefail-setting-at-start]
+                        [spec:posix:def:cmd.and-or-list-definition]
+                        [spec:posix:def:cmd.list-definition]
+                        [spec:posix:req:cmd.and-or-precedence]
+                        [spec:posix:req:cmd.list-separator-semantics]
+                        [spec:posix:def:cmd.compound-list-definition]
+                        [spec:posix:req:cmd.async-subshell-background]
+                        [spec:posix:req:cmd.async-job-number]
+                        [spec:posix:sem:cmd.async-job-control]
+                        [spec:posix:req:cmd.async-process-id-known]
+                        [spec:posix:req:cmd.async-known-pid-retention]
+                        [spec:posix:req:cmd.async-stdin-devnull]
+                        [spec:posix:req:cmd.async-job-notification-format]
+                        [spec:posix:req:cmd.async-non-job-pid-message]
+                        [spec:posix:req:cmd.async-exit-status]
+                        [spec:posix:sem:cmd.async-status-via-wait]
+                        [spec:posix:req:cmd.sequential-execution]
+                        [spec:posix:req:cmd.sequential-foreground-job]
+                        [spec:posix:req:cmd.sequential-exit-status]
+                        [spec:posix:syn:cmd.and-list-format]
+                        [spec:posix:req:cmd.and-list-execution]
+                        [spec:posix:req:cmd.and-list-exit-status]
+                        [spec:posix:syn:cmd.or-list-format]
+                        [spec:posix:req:cmd.or-list-execution]
+                        [spec:posix:req:cmd.or-list-exit-status]
+                        [spec:posix:def:cmd.compound-definition]
+                        [spec:posix:req:cmd.compound-redirection-scope]
+                        [spec:posix:req:cmd.compound-list-exit-status]
+                        [spec:posix:req:cmd.group-subshell]
+                        [spec:posix:req:cmd.group-double-paren-ambiguity]
+                        [spec:posix:sem:cmd.group-brace-current-environment]
+                        [spec:posix:req:cmd.group-exit-status]
+                        [spec:posix:req:cmd.for-do-done-delimiters]
+                        [spec:posix:syn:cmd.for-format]
+                        [spec:posix:req:cmd.for-iteration]
+                        [spec:posix:req:cmd.for-omitted-in]
+                        [spec:posix:req:cmd.for-exit-status]
+                        [spec:posix:req:cmd.case-selection]
+                        [spec:posix:syn:cmd.case-clause-syntax]
+                        [spec:posix:syn:cmd.case-format]
+                        [spec:posix:req:cmd.case-pattern-expansion]
+                        [spec:posix:req:cmd.case-clause-terminators]
+                        [spec:posix:req:cmd.case-multiple-pattern-order-unspecified]
+                        [spec:posix:req:cmd.case-exit-status]
+                        [spec:posix:syn:cmd.if-format]
+                        [spec:posix:req:cmd.if-execution]
+                        [spec:posix:req:cmd.if-exit-status]
+                        [spec:posix:syn:cmd.while-format]
+                        [spec:posix:req:cmd.while-execution]
+                        [spec:posix:req:cmd.while-exit-status]
+                        [spec:posix:syn:cmd.until-format]
+                        [spec:posix:req:cmd.until-execution]
+                        [spec:posix:req:cmd.until-exit-status]
+                        [spec:posix:def:cmd.function-definition-term]
+                        [spec:posix:syn:cmd.function-format]
+                        [spec:posix:req:cmd.function-name-requirements]
+                        [spec:posix:req:cmd.function-no-expansion-at-definition]
+                        [spec:posix:req:cmd.function-syntax-error-properties]
+                        [spec:posix:req:cmd.function-invocation-positional-parameters]
+                        [spec:posix:req:cmd.function-return]
+                        [spec:posix:req:cmd.function-exit-status]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-grammar
+                title "XCU 2.10 Shell Grammar"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:req:grammar.formal-syntax-precedence]
+                        [spec:posix:syn:grammar.token-classification]
+                        [spec:posix:syn:grammar.token-context-dependent-distinction]
+                        [spec:posix:req:grammar.highest-numbered-rule-applies]
+                        [spec:posix:req:grammar.word-expansion-timing]
+                        [spec:posix:syn:grammar.command-name]
+                        [spec:posix:req:grammar.redirection-filename]
+                        [spec:posix:req:grammar.here-doc-redirection]
+                        [spec:posix:syn:grammar.case-statement-termination]
+                        [spec:posix:syn:grammar.for-name]
+                        [spec:posix:syn:grammar.third-word-of-for-and-case]
+                        [spec:posix:syn:grammar.assignment-first-word]
+                        [spec:posix:syn:grammar.assignment-word-recognition]
+                        [spec:posix:req:grammar.assignment-word-processing]
+                        [spec:posix:syn:grammar.function-name]
+                        [spec:posix:req:grammar.function-body-no-expansion]
+                        [spec:posix:def:grammar.token-symbols]
+                        [spec:posix:def:grammar.operator-tokens]
+                        [spec:posix:def:grammar.reserved-word-tokens]
+                        [spec:posix:syn:grammar.program]
+                        [spec:posix:syn:grammar.list-and-or]
+                        [spec:posix:syn:grammar.pipeline]
+                        [spec:posix:syn:grammar.command]
+                        [spec:posix:syn:grammar.subshell-and-compound-list]
+                        [spec:posix:syn:grammar.for-clause]
+                        [spec:posix:syn:grammar.case-clause]
+                        [spec:posix:syn:grammar.if-clause]
+                        [spec:posix:syn:grammar.while-until-clause]
+                        [spec:posix:syn:grammar.function-definition]
+                        [spec:posix:syn:grammar.brace-group-and-do-group]
+                        [spec:posix:syn:grammar.simple-command]
+                        [spec:posix:syn:grammar.io-redirect]
+                        [spec:posix:syn:grammar.io-file]
+                        [spec:posix:syn:grammar.io-here]
+                        [spec:posix:syn:grammar.separators]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-execution
+                title "XCU 2.11-2.13 Job Control, Signals, Execution Environment"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:def:jobctl.definition]
+                        [spec:posix:req:jobctl.initial-foreground-process-group]
+                        [spec:posix:req:jobctl.job-creation]
+                        [spec:posix:req:jobctl.list-splitting]
+                        [spec:posix:def:jobctl.background-job]
+                        [spec:posix:def:jobctl.foreground-job]
+                        [spec:posix:req:jobctl.pipeline-process-group]
+                        [spec:posix:req:jobctl.background-job-brought-to-foreground]
+                        [spec:posix:req:jobctl.foreground-process-group-assignment]
+                        [spec:posix:req:jobctl.foreground-process-group-restored]
+                        [spec:posix:req:jobctl.job-number-and-process-id]
+                        [spec:posix:req:jobctl.suspend-on-catchable-signal]
+                        [spec:posix:req:jobctl.suspend-on-sigstop]
+                        [spec:posix:req:jobctl.suspended-job-message]
+                        [spec:posix:req:jobctl.save-terminal-settings]
+                        [spec:posix:req:jobctl.background-job-suspended-message]
+                        [spec:posix:req:jobctl.continue-suspended-job]
+                        [spec:posix:req:jobctl.fg-terminal-settings-restore]
+                        [spec:posix:req:jobctl.background-job-completion-message]
+                        [spec:posix:req:jobctl.non-interactive-message-timing]
+                        [spec:posix:req:signal.async-list-sigint-sigquit-ignored]
+                        [spec:posix:req:signal.inherited-actions]
+                        [spec:posix:req:signal.trap-deferred-until-foreground-command-completes]
+                        [spec:posix:req:signal.trap-during-wait]
+                        [spec:posix:sem:signal.pending-trap-order]
+                        [spec:posix:def:shenv.components]
+                        [spec:posix:req:shenv.utility-environment]
+                        [spec:posix:req:shenv.utility-does-not-change-shell-environment]
+                        [spec:posix:req:shenv.subshell-creation]
+                        [spec:posix:req:shenv.subshell-isolation]
+                        [spec:posix:req:shenv.subshell-contexts]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-pattern-matching
+                title "XCU 2.14 Pattern Matching Notation"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:def:pattern.notation-purpose]
+                        [spec:posix:req:pattern.invalid-byte-sequence-unspecified]
+                        [spec:posix:syn:pattern.single-character-patterns]
+                        [spec:posix:syn:pattern.backslash-escape-with-shell-quoting]
+                        [spec:posix:syn:pattern.backslash-escape-without-shell-quoting]
+                        [spec:posix:req:pattern.escaping-follows-quoting-rules]
+                        [spec:posix:syn:pattern.trailing-backslash-unspecified]
+                        [spec:posix:def:pattern.ordinary-character]
+                        [spec:posix:req:pattern.match-by-bit-pattern]
+                        [spec:posix:req:pattern.quote-to-match-literally]
+                        [spec:posix:def:pattern.special-pattern-characters]
+                        [spec:posix:sem:pattern.question-mark]
+                        [spec:posix:sem:pattern.asterisk]
+                        [spec:posix:syn:pattern.bracket-expression]
+                        [spec:posix:sem:pattern.left-bracket-literal]
+                        [spec:posix:sem:pattern.asterisk-matches-any-string]
+                        [spec:posix:syn:pattern.concatenation]
+                        [spec:posix:sem:pattern.asterisk-longest-match]
+                        [spec:posix:def:pattern.filename-expansion-qualification]
+                        [spec:posix:req:pattern.slash-explicit-match]
+                        [spec:posix:syn:pattern.slash-terminates-bracket]
+                        [spec:posix:req:pattern.leading-period]
+                        [spec:posix:req:pattern.leading-period-in-bracket-unspecified]
+                        [spec:posix:req:pattern.filename-expansion-trigger]
+                        [spec:posix:req:pattern.directory-permissions]
+                        [spec:posix:req:pattern.permission-errors-not-fatal]
+                        [spec:posix:req:pattern.replacement-sorted]
+                        [spec:posix:req:pattern.unmatched-open-bracket-unspecified]
+                        [spec:posix:req:pattern.no-match-unchanged]
+                        [spec:posix:req:pattern.no-special-chars-unchanged]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-builtins-control
+                title "XCU 2.15 Special Built-Ins: break .. exit"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:req:builtin.special.supported-and-output]
+                        [spec:posix:def:builtin.special.term-built-in]
+                        [spec:posix:req:builtin.special.error-may-abort-shell]
+                        [spec:posix:req:builtin.special.preceding-assignments-persist]
+                        [spec:posix:req:builtin.special.not-exec-accessible]
+                        [spec:posix:req:builtin.special.utility-syntax-guidelines]
+                        [spec:posix:syn:builtin.break.syn]
+                        [spec:posix:req:builtin.break.exit-nth-loop]
+                        [spec:posix:def:builtin.break.lexically-enclosing]
+                        [spec:posix:sem:builtin.break.non-lexical-loop-unspecified]
+                        [spec:posix:req:builtin.break.stderr]
+                        [spec:posix:req:builtin.break.interfaces]
+                        [spec:posix:req:builtin.break.exit-status]
+                        [spec:posix:syn:builtin.colon.syn]
+                        [spec:posix:req:builtin.colon.null-utility]
+                        [spec:posix:req:builtin.colon.no-options]
+                        [spec:posix:req:builtin.colon.interfaces]
+                        [spec:posix:req:builtin.colon.exit-status]
+                        [spec:posix:syn:builtin.continue.syn]
+                        [spec:posix:req:builtin.continue.return-to-top]
+                        [spec:posix:req:builtin.continue.n-operand]
+                        [spec:posix:req:builtin.continue.stderr]
+                        [spec:posix:req:builtin.continue.interfaces]
+                        [spec:posix:req:builtin.continue.exit-status]
+                        [spec:posix:syn:builtin.dot.syn]
+                        [spec:posix:req:builtin.dot.execute-in-current-environment]
+                        [spec:posix:req:builtin.dot.path-search]
+                        [spec:posix:req:builtin.dot.utility-syntax-guidelines]
+                        [spec:posix:req:builtin.dot.stderr]
+                        [spec:posix:req:builtin.dot.interfaces]
+                        [spec:posix:req:builtin.dot.exit-status]
+                        [spec:posix:syn:builtin.eval.syn]
+                        [spec:posix:req:builtin.eval.construct-and-execute]
+                        [spec:posix:req:builtin.eval.stderr]
+                        [spec:posix:req:builtin.eval.interfaces]
+                        [spec:posix:req:builtin.eval.exit-status]
+                        [spec:posix:syn:builtin.exec.syn]
+                        [spec:posix:req:builtin.exec.no-operands-redirections]
+                        [spec:posix:req:builtin.exec.utility-operand]
+                        [spec:posix:req:builtin.exec.failure-non-interactive-exits]
+                        [spec:posix:req:builtin.exec.failure-interactive-up]
+                        [spec:posix:req:builtin.exec.utility-syntax-guidelines]
+                        [spec:posix:req:builtin.exec.env-path]
+                        [spec:posix:req:builtin.exec.stderr]
+                        [spec:posix:req:builtin.exec.interfaces]
+                        [spec:posix:req:builtin.exec.exit-status]
+                        [spec:posix:syn:builtin.exit.syn]
+                        [spec:posix:req:builtin.exit.cause-shell-exit]
+                        [spec:posix:req:builtin.exit.wait-status-from-n]
+                        [spec:posix:sem:builtin.exit.invalid-n-unspecified]
+                        [spec:posix:req:builtin.exit.default-n]
+                        [spec:posix:req:builtin.exit.exit-trap]
+                        [spec:posix:req:builtin.exit.stderr]
+                        [spec:posix:req:builtin.exit.interfaces]
+                        [spec:posix:sem:builtin.exit.exit-status]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-builtins-variables
+                title "XCU 2.15 Special Built-Ins: export .. unset"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:syn:builtin.export.synopsis]
+                        [spec:posix:req:builtin.export.set-attribute]
+                        [spec:posix:req:builtin.export.declaration-utility]
+                        [spec:posix:req:builtin.export.utility-syntax-guidelines]
+                        [spec:posix:req:builtin.export.p-output-format]
+                        [spec:posix:req:builtin.export.p-output-reinput]
+                        [spec:posix:sem:builtin.export.no-arguments]
+                        [spec:posix:req:builtin.export.stderr]
+                        [spec:posix:req:builtin.export.exit-status]
+                        [spec:posix:sem:builtin.export.utility-defaults]
+                        [spec:posix:syn:builtin.readonly.synopsis]
+                        [spec:posix:req:builtin.readonly.set-attribute]
+                        [spec:posix:def:builtin.readonly.attribute]
+                        [spec:posix:req:builtin.readonly.application-constraint]
+                        [spec:posix:req:builtin.readonly.declaration-utility]
+                        [spec:posix:req:builtin.readonly.utility-syntax-guidelines]
+                        [spec:posix:sem:builtin.readonly.p-output-format]
+                        [spec:posix:req:builtin.readonly.p-output-reinput]
+                        [spec:posix:sem:builtin.readonly.no-arguments]
+                        [spec:posix:req:builtin.readonly.stderr]
+                        [spec:posix:req:builtin.readonly.exit-status]
+                        [spec:posix:sem:builtin.readonly.utility-defaults]
+                        [spec:posix:syn:builtin.return.synopsis]
+                        [spec:posix:req:builtin.return.stop-function-or-dot-script]
+                        [spec:posix:req:builtin.return.stderr]
+                        [spec:posix:req:builtin.return.exit-status]
+                        [spec:posix:sem:builtin.return.utility-defaults]
+                        [spec:posix:syn:builtin.shift.synopsis]
+                        [spec:posix:req:builtin.shift.positional-parameters]
+                        [spec:posix:req:builtin.shift.operand-value]
+                        [spec:posix:req:builtin.shift.stderr]
+                        [spec:posix:req:builtin.shift.exit-status]
+                        [spec:posix:sem:builtin.shift.utility-defaults]
+                        [spec:posix:syn:builtin.times.synopsis]
+                        [spec:posix:req:builtin.times.output-format]
+                        [spec:posix:req:builtin.times.tms-correspondence]
+                        [spec:posix:req:builtin.times.stderr]
+                        [spec:posix:req:builtin.times.exit-status]
+                        [spec:posix:sem:builtin.times.utility-defaults]
+                        [spec:posix:syn:builtin.unset.synopsis]
+                        [spec:posix:req:builtin.unset.unset-names]
+                        [spec:posix:req:builtin.unset.v-option]
+                        [spec:posix:req:builtin.unset.f-option]
+                        [spec:posix:req:builtin.unset.no-option]
+                        [spec:posix:req:builtin.unset.not-previously-set]
+                        [spec:posix:req:builtin.unset.utility-syntax-guidelines]
+                        [spec:posix:sem:builtin.unset.empty-assignment-and-special-parameters]
+                        [spec:posix:req:builtin.unset.stderr]
+                        [spec:posix:req:builtin.unset.exit-status]
+                        [spec:posix:sem:builtin.unset.utility-defaults]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-builtins-set-trap
+                title "XCU 2.15 Special Built-Ins: set and trap"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:syn:builtin.set.synopsis]
+                        [spec:posix:req:builtin.set.no-operands-writes-variables]
+                        [spec:posix:req:builtin.set.variable-output-reinput]
+                        [spec:posix:sem:builtin.set.options-and-arguments]
+                        [spec:posix:req:builtin.set.utility-syntax-guidelines]
+                        [spec:posix:req:builtin.set.options-both-forms]
+                        [spec:posix:req:builtin.set.opt-a-allexport]
+                        [spec:posix:sem:builtin.set.opt-a-separate-environments]
+                        [spec:posix:req:builtin.set.opt-b-notify]
+                        [spec:posix:req:builtin.set.opt-c-noclobber]
+                        [spec:posix:req:builtin.set.opt-e-errexit]
+                        [spec:posix:req:builtin.set.opt-e-per-environment]
+                        [spec:posix:req:builtin.set.opt-f-noglob]
+                        [spec:posix:req:builtin.set.opt-h]
+                        [spec:posix:req:builtin.set.opt-m-monitor]
+                        [spec:posix:req:builtin.set.opt-n-noexec]
+                        [spec:posix:req:builtin.set.opt-u-nounset]
+                        [spec:posix:req:builtin.set.opt-v-verbose]
+                        [spec:posix:req:builtin.set.opt-x-xtrace]
+                        [spec:posix:sem:builtin.set.opt-o-report]
+                        [spec:posix:sem:builtin.set.plus-o-report]
+                        [spec:posix:req:builtin.set.opt-o-option]
+                        [spec:posix:def:builtin.set.opt-o-allexport]
+                        [spec:posix:def:builtin.set.opt-o-errexit]
+                        [spec:posix:req:builtin.set.opt-o-ignoreeof]
+                        [spec:posix:req:builtin.set.opt-o-monitor]
+                        [spec:posix:def:builtin.set.opt-o-noclobber]
+                        [spec:posix:def:builtin.set.opt-o-noglob]
+                        [spec:posix:def:builtin.set.opt-o-noexec]
+                        [spec:posix:req:builtin.set.opt-o-nolog]
+                        [spec:posix:def:builtin.set.opt-o-notify]
+                        [spec:posix:def:builtin.set.opt-o-nounset]
+                        [spec:posix:sem:builtin.set.opt-o-pipefail]
+                        [spec:posix:def:builtin.set.opt-o-verbose]
+                        [spec:posix:req:builtin.set.opt-o-vi]
+                        [spec:posix:def:builtin.set.opt-o-xtrace]
+                        [spec:posix:req:builtin.set.options-default-off]
+                        [spec:posix:req:builtin.set.positional-parameters]
+                        [spec:posix:req:builtin.set.first-argument-hyphen]
+                        [spec:posix:req:builtin.set.double-hyphen]
+                        [spec:posix:req:builtin.set.utility-defaults]
+                        [spec:posix:req:builtin.set.stderr-diagnostics-only]
+                        [spec:posix:req:builtin.set.exit-status]
+                        [spec:posix:syn:builtin.trap.synopsis]
+                        [spec:posix:req:builtin.trap.operand-interpretation]
+                        [spec:posix:req:builtin.trap.action-values]
+                        [spec:posix:req:builtin.trap.action-overrides-and-exit-status]
+                        [spec:posix:def:builtin.trap.condition]
+                        [spec:posix:req:builtin.trap.signal-name-extensions]
+                        [spec:posix:req:builtin.trap.kill-stop-undefined]
+                        [spec:posix:req:builtin.trap.exit-condition]
+                        [spec:posix:req:builtin.trap.exit-action-environment]
+                        [spec:posix:req:builtin.trap.action-executed-as-eval]
+                        [spec:posix:req:builtin.trap.signals-ignored-on-entry]
+                        [spec:posix:req:builtin.trap.persistence]
+                        [spec:posix:req:builtin.trap.subshell-reset]
+                        [spec:posix:req:builtin.trap.subshell-lexical-check]
+                        [spec:posix:req:builtin.trap.list-condition-set]
+                        [spec:posix:req:builtin.trap.list-in-subshell]
+                        [spec:posix:syn:builtin.trap.list-format]
+                        [spec:posix:req:builtin.trap.list-suitable-for-reinput]
+                        [spec:posix:req:builtin.trap.xsi-signal-numbers]
+                        [spec:posix:req:builtin.trap.invalid-condition-warning]
+                        [spec:posix:req:builtin.trap.utility-syntax-guidelines]
+                        [spec:posix:req:builtin.trap.opt-p]
+                        [spec:posix:req:builtin.trap.opt-p-suitable-for-reinput]
+                        [spec:posix:req:builtin.trap.utility-defaults]
+                        [spec:posix:req:builtin.trap.stderr-usage]
+                        [spec:posix:req:builtin.trap.exit-status]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-invocation
+                title "sh reference page: invocation"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:syn:sh.synopsis]
+                        [spec:posix:req:sh.command-language-interpreter]
+                        [spec:posix:req:sh.pathname-expansion-file-size]
+                        [spec:posix:sem:sh.redirection-offset-maximum]
+                        [spec:posix:req:sh.utility-syntax-guidelines]
+                        [spec:posix:req:sh.set-derived-options]
+                        [spec:posix:req:sh.option-o-without-option-argument]
+                        [spec:posix:req:sh.option-c]
+                        [spec:posix:req:sh.option-i]
+                        [spec:posix:req:sh.option-s]
+                        [spec:posix:req:sh.option-s-assumed]
+                        [spec:posix:def:sh.interactive]
+                        [spec:posix:req:sh.operand-hyphen]
+                        [spec:posix:req:sh.operand-argument]
+                        [spec:posix:req:sh.operand-command-file]
+                        [spec:posix:req:sh.special-parameter-0]
+                        [spec:posix:req:sh.operand-command-name]
+                        [spec:posix:req:sh.operand-command-string]
+                        [spec:posix:req:sh.stdin-used-only-if]
+                        [spec:posix:req:sh.stdin-no-read-ahead]
+                        [spec:posix:req:sh.stdin-blocking-reads]
+                        [spec:posix:req:sh.input-file-contents]
+                        [spec:posix:req:sh.input-file-blank-or-comments]
+                        [spec:posix:def:sh.environment-variables]
+                        [spec:posix:req:sh.envvar-env]
+                        [spec:posix:req:sh.envvar-fcedit]
+                        [spec:posix:req:sh.envvar-histfile]
+                        [spec:posix:req:sh.envvar-histsize]
+                        [spec:posix:sem:sh.envvar-home]
+                        [spec:posix:sem:sh.envvar-lang-and-lc-all]
+                        [spec:posix:sem:sh.envvar-lc-collate]
+                        [spec:posix:sem:sh.envvar-lc-ctype]
+                        [spec:posix:req:sh.envvar-lc-messages]
+                        [spec:posix:req:sh.envvar-mail]
+                        [spec:posix:req:sh.envvar-mailcheck]
+                        [spec:posix:req:sh.envvar-mailpath]
+                        [spec:posix:sem:sh.envvar-nlspath]
+                        [spec:posix:sem:sh.envvar-path]
+                        [spec:posix:req:sh.envvar-pwd]
+                        [spec:posix:req:sh.signals-standard-action]
+                        [spec:posix:req:sh.interactive-sigint]
+                        [spec:posix:req:sh.interactive-sigquit-sigterm]
+                        [spec:posix:req:sh.interactive-stop-signals]
+                        [spec:posix:req:sh.signal-actions-overridable]
+                        [spec:posix:req:sh.stderr-diagnostics-only]
+                        [spec:posix:sem:sh.output-files]
+                        [spec:posix:req:sh.exit-status-values]
+                        [spec:posix:req:sh.exit-status-otherwise]
+                        [spec:posix:req:sh.consequences-of-errors]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-line-editing
+                title "sh command history and line editing"
+                priority 1
+                implements {
+                    shell (
+                        [spec:posix:req:edit.up-option]
+                        [spec:posix:req:edit.history-list]
+                        [spec:posix:req:edit.vi-mode-editing]
+                        [spec:posix:req:edit.set-o-vi]
+                        [spec:posix:req:edit.block-mode-terminals]
+                        [spec:posix:def:edit.stty-characters]
+                        [spec:posix:def:edit.edit-line]
+                        [spec:posix:req:edit.insert-mode-default]
+                        [spec:posix:req:edit.escape-to-command-mode]
+                        [spec:posix:req:edit.sigint-command-mode]
+                        [spec:posix:def:edit.cursor-terminology]
+                        [spec:posix:req:edit.insert-mode-special-characters]
+                        [spec:posix:req:edit.insert-newline]
+                        [spec:posix:req:edit.insert-deletion]
+                        [spec:posix:req:edit.insert-interrupt]
+                        [spec:posix:sem:edit.insert-literal-next]
+                        [spec:posix:req:edit.insert-end-of-file]
+                        [spec:posix:sem:edit.insert-escape]
+                        [spec:posix:req:edit.command-count]
+                        [spec:posix:def:edit.motion-command-set]
+                        [spec:posix:req:edit.edit-line-replacement]
+                        [spec:posix:def:edit.word-bigword-terms]
+                        [spec:posix:req:edit.command-newline]
+                        [spec:posix:sem:edit.command-redraw]
+                        [spec:posix:req:edit.command-comment]
+                        [spec:posix:req:edit.command-display-expansions]
+                        [spec:posix:req:edit.command-complete-unique]
+                        [spec:posix:req:edit.command-expand-all]
+                        [spec:posix:req:edit.command-alias-insert]
+                        [spec:posix:req:edit.command-case-toggle]
+                        [spec:posix:req:edit.command-repeat]
+                        [spec:posix:req:edit.command-invoke-vi]
+                        [spec:posix:req:edit.motion-char]
+                        [spec:posix:req:edit.motion-word-forward]
+                        [spec:posix:req:edit.motion-word-end]
+                        [spec:posix:req:edit.motion-word-backward]
+                        [spec:posix:req:edit.motion-line-position]
+                        [spec:posix:req:edit.motion-char-search]
+                        [spec:posix:req:edit.motion-char-search-repeat]
+                        [spec:posix:req:edit.enter-insert-mode]
+                        [spec:posix:req:edit.change-motion]
+                        [spec:posix:sem:edit.change-to-end-and-line]
+                        [spec:posix:req:edit.replace-char]
+                        [spec:posix:sem:edit.append-last-bigword]
+                        [spec:posix:req:edit.delete-char]
+                        [spec:posix:req:edit.delete-motion]
+                        [spec:posix:req:edit.yank-motion]
+                        [spec:posix:req:edit.put-save-buffer]
+                        [spec:posix:req:edit.undo]
+                        [spec:posix:req:edit.history-prev-next]
+                        [spec:posix:req:edit.history-goto]
+                        [spec:posix:syn:edit.history-search-pattern]
+                        [spec:posix:req:edit.history-search-backward]
+                        [spec:posix:req:edit.history-search-forward]
+                        [spec:posix:req:edit.history-search-repeat]
+                    )
+                }
+                deps (posix-harness)
+            }
+
+            {
+                id posix-harness
+                title "Build rule-driven POSIX compliance harness"
+                priority 0
+                log (
+                    {
+                        at 2026-08-04T00:01:43.722897829Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+                )
+            }
+        )
+    }
+)

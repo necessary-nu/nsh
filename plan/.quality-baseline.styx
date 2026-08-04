@@ -1,0 +1,78 @@
+generated_at 2026-08-03T15:15:31.90322925Z
+
+seal 2a496b56f63767cc
+
+files (
+    {path Makefile.am, code_loc 1, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path autogen.sh, code_loc 4, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path plan/main.styx, code_loc 6, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/Makefile.am, code_loc 53, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/alias.c, code_loc 154, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/alias.h, code_loc 14, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/arith_yacc.c, code_loc 218, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/arith_yacc.h, code_loc 48, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/arith_yylex.c, code_loc 201, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/bltin/bltin.h, code_loc 42, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/bltin/printf.c, code_loc 483, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/bltin/test.c, code_loc 477, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 1}
+    {path src/bltin/times.c, code_loc 30, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/builtins.def.in, code_loc 80, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/cd.c, code_loc 245, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/cd.h, code_loc 3, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/error.c, code_loc 132, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/error.h, code_loc 57, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/eval.c, code_loc 873, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/eval.h, code_loc 21, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/exec.c, code_loc 659, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/exec.h, code_loc 41, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/expand.c, code_loc 1726, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 1}
+    {path src/expand.h, code_loc 40, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/histedit.c, code_loc 361, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/init.h, code_loc 6, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/input.c, code_loc 510, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/input.h, code_loc 70, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/jobs.c, code_loc 1257, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 1}
+    {path src/jobs.h, code_loc 59, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/machdep.h, code_loc 2, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/mail.c, code_loc 60, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/mail.h, code_loc 2, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/main.c, code_loc 252, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/main.h, code_loc 13, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/memalloc.c, code_loc 174, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 2}
+    {path src/memalloc.h, code_loc 55, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/miscbltin.c, code_loc 402, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/miscbltin.h, code_loc 3, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/mkbuiltins, code_loc 72, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/mkinit.c, code_loc 356, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/mknodes.c, code_loc 349, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/mksignames.c, code_loc 282, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/mksyntax.c, code_loc 209, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/mktokens, code_loc 55, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/myhistedit.h, code_loc 24, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/mystring.c, code_loc 127, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/mystring.h, code_loc 37, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/options.c, code_loc 422, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/options.h, code_loc 43, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/output.c, code_loc 308, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/output.h, code_loc 82, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/parser.c, code_loc 1530, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/parser.h, code_loc 52, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/redir.c, code_loc 379, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/redir.h, code_loc 15, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/shell.h, code_loc 38, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/show.c, code_loc 324, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/show.h, code_loc 11, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/system.c, code_loc 135, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 12}
+    {path src/system.h, code_loc 135, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/trap.c, code_loc 322, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/trap.h, code_loc 18, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/var.c, code_loc 473, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+    {path src/var.h, code_loc 109, function_count 0, max_cyclomatic 0, duplicate_memberships 0, trivial_function_count 0}
+)
+
+directories (
+    {path "", test_ratio_milli 0}
+    {path plan, test_ratio_milli 0}
+    {path src, test_ratio_milli 0}
+    {path src/bltin, test_ratio_milli 0}
+)

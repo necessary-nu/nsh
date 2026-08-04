@@ -1,0 +1,1 @@
+specs ({name posix, include (docs/spec/**/*.md), impls ({name main, languages (@rust), include (src/**/*.rs), exclude (target/**)})})

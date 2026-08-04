@@ -1,0 +1,3018 @@
+//! Literal port of `src/expand.c` / `src/expand.h`.
+//! Rules: `docs/spec/port/src/expand.md`.
+//!
+//! Routines to expand arguments to commands.  We have to deal with
+//! backquotes, shell variables, and file metacharacters.
+//!
+//! This is a deliberately un-idiomatic, line-for-line translation.  The
+//! word being expanded is the parser's internal *encoded byte string* — a
+//! NUL-terminated `char *` in which `CTLESC`, `CTLVAR`, `CTLENDVAR`,
+//! `CTLBACKQ`, `CTLMBCHAR`, `CTLARI`, `CTLENDARI` and `CTLQUOTEMARK` (all
+//! negative `signed char` values) are markers.  It is therefore
+//! represented here exactly as in C, by `*mut c_char` plus index
+//! arithmetic; no `String`/`Vec<u8>` appears anywhere, and `mbnext` keeps
+//! its packed `start | end << 8` return rather than becoming a struct.
+//!
+//! C `goto`s are reproduced with labelled blocks (`'label: { … break
+//! 'label; }` for a forward jump) and labelled loops (for the backward
+//! jumps `tilde:`, `start:` and `again:`), so the control flow still
+//! diffs one-to-one against the C.
+
+#![allow(unknown_lints)]
+#![allow(static_mut_refs)]
+
+use core::mem;
+use core::ptr;
+
+use libc::{c_char, c_int, c_uint, c_ulong, c_void, intmax_t, size_t, ssize_t, wchar_t};
+
+// ---------------------------------------------------------------------
+// Declarations from <wchar.h> / <wctype.h> that the `libc` crate does not
+// expose.  These are plain libc entry points, not ported symbols.
+// ---------------------------------------------------------------------
+
+#[allow(non_camel_case_types)]
+type wint_t = c_uint;
+#[allow(non_camel_case_types)]
+type wctype_t = c_ulong;
+
+extern "C" {
+    fn mbrlen(s: *const c_char, n: size_t, ps: *mut libc::mbstate_t) -> size_t;
+    fn mbrtowc(
+        pwc: *mut wchar_t,
+        s: *const c_char,
+        n: size_t,
+        ps: *mut libc::mbstate_t,
+    ) -> size_t;
+    fn mbsrtowcs(
+        dst: *mut wchar_t,
+        src: *mut *const c_char,
+        len: size_t,
+        ps: *mut libc::mbstate_t,
+    ) -> size_t;
+    fn wcschr(wcs: *const wchar_t, wc: wchar_t) -> *mut wchar_t;
+    fn iswspace(wc: wint_t) -> c_int;
+    fn wctype(name: *const c_char) -> wctype_t;
+    fn iswctype(wc: wint_t, desc: wctype_t) -> c_int;
+}
+
+// ---------------------------------------------------------------------
+// Constants mirrored from the headers this file includes.
+//
+// The parser's marker bytes and variable-substitution codes come from
+// `parser.h`.  They are aliased here as `c_char`/`c_int` so they can be
+// used as `match` patterns and so that the numeric type the parser
+// module happens to choose does not matter.
+// ---------------------------------------------------------------------
+
+const CTLESC: c_char = crate::parser::CTLESC as c_char;
+const CTLVAR: c_char = crate::parser::CTLVAR as c_char;
+const CTLENDVAR: c_char = crate::parser::CTLENDVAR as c_char;
+const CTLBACKQ: c_char = crate::parser::CTLBACKQ as c_char;
+const CTLMBCHAR: c_char = crate::parser::CTLMBCHAR as c_char;
+const CTLARI: c_char = crate::parser::CTLARI as c_char;
+const CTLENDARI: c_char = crate::parser::CTLENDARI as c_char;
+const CTLQUOTEMARK: c_char = crate::parser::CTLQUOTEMARK as c_char;
+
+const VSTYPE: c_int = crate::parser::VSTYPE as c_int;
+const VSNUL: c_int = crate::parser::VSNUL as c_int;
+const VSBIT: c_int = crate::parser::VSBIT as c_int;
+
+const VSNORMAL: c_int = crate::parser::VSNORMAL as c_int;
+const VSMINUS: c_int = crate::parser::VSMINUS as c_int;
+const VSPLUS: c_int = crate::parser::VSPLUS as c_int;
+const VSQUESTION: c_int = crate::parser::VSQUESTION as c_int;
+const VSASSIGN: c_int = crate::parser::VSASSIGN as c_int;
+const VSTRIMRIGHT: c_int = crate::parser::VSTRIMRIGHT as c_int;
+const VSTRIMRIGHTMAX: c_int = crate::parser::VSTRIMRIGHTMAX as c_int;
+const VSTRIMLEFT: c_int = crate::parser::VSTRIMLEFT as c_int;
+const VSTRIMLEFTMAX: c_int = crate::parser::VSTRIMLEFTMAX as c_int;
+const VSLENGTH: c_int = crate::parser::VSLENGTH as c_int;
+
+/// `FNMATCH_IS_ENABLED` / `GLOB_IS_ENABLED` from `mystring.h`: the
+/// build-time switch between libc `fnmatch(3)`/`glob(3)` and the shell's
+/// own matcher.  `--enable-fnmatch` / `--enable-glob` are opt-in, so both
+/// are false in the shipped build.
+const FNMATCH_IS_ENABLED: bool = crate::mystring::FNMATCH_IS_ENABLED != 0;
+const GLOB_IS_ENABLED: bool = crate::mystring::GLOB_IS_ENABLED != 0;
+
+/// `<limits.h>`
+const CHAR_BIT: c_int = 8;
+
+// C character literals used as `switch` labels; Rust `match` patterns
+// require named constants, so the ones this file switches on get names.
+const C_NUL: c_char = 0;
+const C_NL: c_char = b'\n' as c_char;
+const C_BANG: c_char = b'!' as c_char;
+const C_HASH: c_char = b'#' as c_char;
+const C_DOLLAR: c_char = b'$' as c_char;
+const C_STAR: c_char = b'*' as c_char;
+const C_MINUS: c_char = b'-' as c_char;
+const C_DOT: c_char = b'.' as c_char;
+const C_SLASH: c_char = b'/' as c_char;
+const C_COLON: c_char = b':' as c_char;
+const C_QUESTION: c_char = b'?' as c_char;
+const C_AT: c_char = b'@' as c_char;
+const C_LBRACKET: c_char = b'[' as c_char;
+const C_RBRACKET: c_char = b']' as c_char;
+const C_BACKSLASH: c_char = b'\\' as c_char;
+const C_CARET: c_char = b'^' as c_char;
+const C_EQUALS: c_char = b'=' as c_char;
+const C_TILDE: c_char = b'~' as c_char;
+const C_0: c_char = b'0' as c_char;
+const C_9: c_char = b'9' as c_char;
+
+// ---------------------------------------------------------------------
+// src/expand.h
+// ---------------------------------------------------------------------
+
+// [spec:dash:def:expand.strlist]
+#[repr(C)]
+pub struct strlist {
+    pub next: *mut strlist,
+    pub text: *mut c_char,
+}
+
+// [spec:dash:def:expand.arglist]
+#[repr(C)]
+pub struct arglist {
+    pub list: *mut strlist,
+    pub lastp: *mut *mut strlist,
+}
+
+/*
+ * expandarg() flags
+ */
+pub const EXP_FULL: c_int = 0x1; /* perform word splitting & file globbing */
+pub const EXP_TILDE: c_int = 0x2; /* do normal tilde expansion */
+pub const EXP_VARTILDE: c_int = 0x4; /* expand tildes in an assignment */
+pub const EXP_REDIR: c_int = 0x8; /* file glob for a redirection (1 match only) */
+pub const EXP_CASE: c_int = 0x10; /* keeps quotes around for CASE pattern */
+pub const EXP_MBCHAR: c_int = 0x20; /* mark multi-byte characters */
+pub const EXP_VARTILDE2: c_int = 0x40; /* expand tildes after colons only */
+pub const EXP_WORD: c_int = 0x80; /* expand word in parameter expansion */
+pub const EXP_QUOTED: c_int = 0x100; /* expand word in double quotes */
+pub const EXP_KEEPNUL: c_int = 0x200; /* do not skip NUL characters */
+pub const EXP_DISCARD: c_int = 0x400; /* discard result of expansion */
+
+/// `expand.h`: `#define rmescapes(p) _rmescapes((p), 0)`
+#[inline]
+pub unsafe fn rmescapes(p: *mut c_char) -> *mut c_char {
+    _rmescapes(p, 0)
+}
+
+// ---------------------------------------------------------------------
+// src/expand.c
+// ---------------------------------------------------------------------
+
+/*
+ * _rmescape() flags
+ */
+pub const RMESCAPE_ALLOC: c_int = 0x1; /* Allocate a new string */
+pub const RMESCAPE_GLOB: c_int = 0x2; /* Add backslashes for glob */
+pub const RMESCAPE_GROW: c_int = 0x8; /* Grow strings instead of stalloc */
+pub const RMESCAPE_HEAP: c_int = 0x10; /* Malloc strings instead of stalloc */
+
+/* Add CTLESC when necessary. */
+pub const QUOTES_ESC: c_int = EXP_FULL | EXP_CASE;
+
+/*
+ * Structure specifying which parts of the string should be searched
+ * for IFS characters.
+ */
+
+// [spec:dash:def:expand.ifsregion]
+#[repr(C)]
+pub struct ifsregion {
+    pub next: *mut ifsregion, /* next region in list */
+    pub begoff: c_int,        /* offset of start of region */
+    pub endoff: c_int,        /* offset of end of region */
+    pub nulonly: c_int,       /* search for nul bytes only */
+}
+
+// [spec:dash:def:expand.ifs-state]
+#[repr(C)]
+pub struct ifs_state {
+    pub ifs: *const c_char,
+    pub start: *mut c_char,
+    pub r: *mut c_char,
+    pub maxargs: c_int,
+    pub ifsspc: c_int,
+}
+
+/* output of current string */
+static mut expdest: *mut c_char = ptr::null_mut();
+/* list of back quote expressions */
+static mut argbackq: *mut crate::nodes::nodelist = ptr::null_mut();
+/* first struct in list of ifs regions */
+static mut ifsfirst: ifsregion = ifsregion {
+    next: ptr::null_mut(),
+    begoff: 0,
+    endoff: 0,
+    nulonly: 0,
+};
+/* last struct in list */
+static mut ifslastp: *mut ifsregion = ptr::null_mut();
+/* holds expanded arg list */
+static mut exparg: arglist = arglist {
+    list: ptr::null_mut(),
+    lastp: ptr::null_mut(),
+};
+
+static mut ifsmap: [c_char; 128] = [0; 128];
+static mut ncifs: *const c_char = ptr::null();
+static mut ifsmb0len: size_t = 0;
+static mut wcifs: *mut wchar_t = ptr::null_mut();
+
+// ---------------------------------------------------------------------
+// Expansions of the macros this file uses from other headers.  These are
+// `#define`s, not manifest symbols, so they carry no annotations; they
+// exist only so the ported bodies read like the C.
+// ---------------------------------------------------------------------
+
+/// `memalloc.h`: `#define stackblock() ((void *)stacknxt)`
+#[inline]
+unsafe fn stackblock() -> *mut c_char {
+    crate::memalloc::stackblock() as *mut c_char
+}
+
+/// `memalloc.h`: `#define grabstackstr(p) stalloc((char *)(p) - (char *)stackblock())`
+#[inline]
+unsafe fn grabstackstr(p: *mut c_char) -> *mut c_char {
+    crate::memalloc::stalloc(p.offset_from(stackblock()) as size_t) as *mut c_char
+}
+
+/// `syntax.h`: `#define BASESYNTAX (basesyntax + SYNBASE)`
+#[inline]
+unsafe fn BASESYNTAX() -> *const c_char {
+    crate::syntax::basesyntax
+        .as_ptr()
+        .offset(crate::syntax::SYNBASE as isize)
+}
+
+/// `syntax.h`: `#define SQSYNTAX (sqsyntax + SYNBASE)`
+#[inline]
+unsafe fn SQSYNTAX() -> *const c_char {
+    crate::syntax::sqsyntax
+        .as_ptr()
+        .offset(crate::syntax::SYNBASE as isize)
+}
+
+/// Backing store for [`is_type_unbiased`]. See that function for why the
+/// 129 leading zero bytes exist; they are never read as data, only as the
+/// answer to an out-of-bounds classification query.
+static IS_TYPE_UNBIASED_PAD: [c_char; 129 + 257] = {
+    let mut t = [0 as c_char; 129 + 257];
+    let mut i = 0;
+    while i < 257 {
+        t[129 + i] = crate::syntax::is_type[i];
+        i += 1;
+    }
+    t
+};
+
+/// `syntax.h`: the classification table as `memtodest` uses it.
+///
+/// `memtodest` passes this table **unbiased** — plain `is_type`, where
+/// every other user writes `is_type + SYNBASE`. Its consumers then index
+/// it with a `(signed char)`, and `mbtodest` additionally reads
+/// `syntax[CTLMBCHAR]` with `CTLMBCHAR == -123`. So in the C, every input
+/// byte >= 0x80 (and the CTLMBCHAR probe) reads up to 129 bytes *before*
+/// the array — undefined behaviour whose result is decided by whatever
+/// the linker happened to place there. In the reference build that is
+/// `nodesize` and `defpathvar`.
+///
+/// This port does NOT reproduce that read, and the deviation is
+/// deliberate. Reproducing an out-of-bounds read does not reproduce the
+/// C's *behaviour*: the byte it yields is a property of one binary's
+/// layout, so the C and the port would each be reading independently
+/// arbitrary memory, and could silently disagree the moment either side
+/// is relaid out. It is also genuine UB on the Rust side.
+///
+/// Instead the window is made real and zero-filled. Zero is `CWORD`, and
+/// the only question ever asked of these slots is `== CCTL`, so the port
+/// answers "no framing" — deterministically, in bounds. That is what both
+/// the reference C and this port were measured to do: the byte at
+/// `is_type - 123` is `0xE2` in the C binary and the classification is
+/// `!= CCTL` in both. `[spec:dash:sem:expand.memtodest-fn]` requires this
+/// treatment ("a port must not reproduce the out-of-bounds index").
+#[inline]
+unsafe fn is_type_unbiased() -> *const c_char {
+    IS_TYPE_UNBIASED_PAD.as_ptr().add(129)
+}
+
+/// `syntax.h`: syntax class "like CWORD, except it must be escaped".
+#[inline]
+fn CCTL() -> c_char {
+    crate::syntax::CCTL as c_char
+}
+
+/// `options.h`: `#define fflag optlist[1]`
+#[inline]
+unsafe fn fflag() -> c_char {
+    crate::options::optlist[1]
+}
+
+/// `options.h`: `#define uflag optlist[14]`
+#[inline]
+unsafe fn uflag() -> c_char {
+    crate::options::optlist[14]
+}
+
+/// `memalloc.h`: `#define ckfree(p) free((void *)(p))`
+#[inline]
+unsafe fn ckfree(p: *mut c_void) {
+    libc::free(p);
+}
+
+/// `error.h`: `#define int_pending() intpending`
+#[inline]
+unsafe fn int_pending() -> c_int {
+    crate::error::int_pending()
+}
+
+// ---------------------------------------------------------------------
+// Flag-value guards.  The C has `#error` directives for both of these;
+// the branchless expressions in `memtodest` and `varvalue` are only
+// correct for these exact numeric values.
+// ---------------------------------------------------------------------
+
+/* #if QUOTES_ESC != 0x11 || EXP_MBCHAR != 0x20 || EXP_QUOTED != 0x100
+ * #error QUOTES_ESC != 0x11 || EXP_MBCHAR != 0x20 || EXP_QUOTED != 0x100
+ * #endif */
+const _: () = assert!(QUOTES_ESC == 0x11 && EXP_MBCHAR == 0x20 && EXP_QUOTED == 0x100);
+
+/* #if EXP_QUOTED >> CHAR_BIT != EXP_FULL
+ * #error The following two lines expect EXP_QUOTED == EXP_FULL << CHAR_BIT
+ * #endif */
+const _: () = assert!(EXP_QUOTED >> CHAR_BIT == EXP_FULL);
+
+/*
+ * Prepare a pattern for a glob(3) call.
+ *
+ * Returns an stalloced string.
+ */
+
+// [spec:dash:def:expand.preglob-fn]
+// [spec:dash:sem:expand.preglob-fn]
+unsafe fn preglob(pattern: *const c_char, mut flag: c_int) -> *mut c_char {
+    if FNMATCH_IS_ENABLED {
+        if flag == 0 {
+            flag = RMESCAPE_GROW;
+        }
+        flag |= RMESCAPE_ALLOC;
+    }
+    flag |= RMESCAPE_GLOB;
+    _rmescapes(pattern as *mut c_char, flag)
+}
+
+// [spec:dash:def:expand.mesclen-fn]
+// [spec:dash:sem:expand.mesclen-fn]
+unsafe fn mesclen(start: *const c_char, mut p: *const c_char, mesc: c_char) -> size_t {
+    let mut esc: size_t = 0;
+
+    while p > start && {
+        p = p.offset(-1);
+        *p == mesc
+    } {
+        esc += 1;
+    }
+    esc
+}
+
+// [spec:dash:def:expand.esclen-fn]
+// [spec:dash:sem:expand.esclen-fn]
+unsafe fn esclen(start: *const c_char, p: *const c_char) -> size_t {
+    mesclen(start, p, CTLESC)
+}
+
+// [spec:dash:def:expand.mbnext-fn]
+// [spec:dash:sem:expand.mbnext-fn]
+//
+// Returns `start | end << 8`: the low byte is the offset from `p` to the
+// character's data (past any markers), the next byte the span *from that
+// data position* to the end of the encoded character.  The total span
+// from `p` is therefore `(mb & 0xff) + (mb >> 8)`, which is why that
+// expression appears at every call site.
+#[inline(never)]
+unsafe fn mbnext(p: *const c_char) -> c_uint {
+    let mut start: c_uint = 0;
+    let mut end: c_uint = 0;
+    let ml: c_uint;
+    let c: c_int;
+
+    c = *p.offset(end as isize) as c_int;
+    end += 1;
+
+    match c as c_char {
+        CTLMBCHAR => {
+            if *p.offset(end as isize) == CTLESC {
+                end += 1;
+            }
+            ml = *(p.offset(end as isize) as *const u8) as c_uint;
+            end += 1;
+            start = end;
+            end = ml + 2;
+        }
+        CTLESC => {
+            start += 1;
+        }
+        _ => {}
+    }
+
+    start | end << 8
+}
+
+// [spec:dash:def:expand.getpwhome-fn]
+// [spec:dash:sem:expand.getpwhome-fn]
+#[inline]
+unsafe fn getpwhome(name: *const c_char) -> *const c_char {
+    /* #ifdef HAVE_GETPWNAM */
+    let pw: *mut libc::passwd = libc::getpwnam(name);
+    if !pw.is_null() {
+        (*pw).pw_dir
+    } else {
+        ptr::null()
+    }
+    /* #else
+     *	return 0;
+     * #endif */
+}
+
+/*
+ * Perform variable substitution and command substitution on an argument,
+ * placing the resulting list of arguments in arglist.  If EXP_FULL is true,
+ * perform splitting and file name expansion.  When arglist is NULL, perform
+ * here document expansion.
+ */
+
+// [spec:dash:def:expand.expandarg-fn]
+// [spec:dash:sem:expand.expandarg-fn]
+pub unsafe fn expandarg(arg: *mut crate::nodes::node, arglist: *mut arglist, flag: c_int) {
+    let sp: *mut strlist;
+    let p: *mut c_char;
+
+    argbackq = (*arg).narg.backquote;
+    /* STARTSTACKSTR(expdest) */
+    expdest = stackblock();
+    argstr((*arg).narg.text, flag);
+    'out: {
+        if arglist.is_null() {
+            /* here document expanded */
+            break 'out;
+        }
+        p = grabstackstr(expdest);
+        exparg.lastp = &mut exparg.list;
+        /*
+         * TODO - EXP_REDIR
+         */
+        if (flag & EXP_FULL) != 0 {
+            ifsbreakup(p, -1, &mut exparg);
+            *exparg.lastp = ptr::null_mut();
+            exparg.lastp = &mut exparg.list;
+            expandmeta(exparg.list);
+        } else {
+            sp = crate::memalloc::stalloc(mem::size_of::<strlist>() as size_t) as *mut strlist;
+            (*sp).text = p;
+            *exparg.lastp = sp;
+            exparg.lastp = &mut (*sp).next;
+        }
+        *exparg.lastp = ptr::null_mut();
+        if !exparg.list.is_null() {
+            *(*arglist).lastp = exparg.list;
+            (*arglist).lastp = exparg.lastp;
+        }
+    }
+
+    /* out: */
+    ifsfree();
+}
+
+/*
+ * Perform variable and command substitution.  If EXP_FULL is set, output CTLESC
+ * characters to allow for further processing.  Otherwise treat
+ * $@ like $* since no splitting will be performed.
+ */
+
+// [spec:dash:def:expand.argstr-fn]
+// [spec:dash:sem:expand.argstr-fn]
+unsafe fn argstr(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
+    static spclchars: [c_char; 11] = [
+        C_EQUALS,
+        C_COLON,
+        CTLQUOTEMARK,
+        CTLENDVAR,
+        CTLESC,
+        CTLVAR,
+        CTLBACKQ,
+        CTLMBCHAR,
+        CTLARI,
+        CTLENDARI,
+        0,
+    ];
+    let mut reject: *const c_char = spclchars.as_ptr();
+    let mut c: c_int;
+    let breakall: c_int = ((flag & (EXP_WORD | EXP_QUOTED)) == EXP_WORD) as c_int;
+    let mut inquotes: c_int;
+    let mut length: size_t;
+    let mut startloc: c_int;
+
+    reject = reject.offset(if (flag & EXP_VARTILDE2) != 0 { 1 } else { 0 });
+    reject = reject.offset(if (flag & EXP_VARTILDE) != 0 { 0 } else { 2 });
+    inquotes = 0;
+    length = 0;
+
+    /* `tilde:` is a label inside this `if`; `goto tilde` re-runs only the
+     * `*p == '~'` test, which is what `do_tilde` models. */
+    let mut do_tilde = false;
+    if (flag & EXP_TILDE) != 0 {
+        flag &= !EXP_TILDE;
+        do_tilde = true;
+    }
+
+    'start: loop {
+        if do_tilde {
+            /* tilde: */
+            do_tilde = false;
+            if *p == C_TILDE {
+                p = exptilde(p, flag);
+            }
+        }
+        /* start: */
+        startloc = expdest.offset_from(stackblock()) as c_int;
+        loop {
+            let ml: c_uint;
+            let mb: c_uint;
+            let end: c_int;
+
+            length += libc::strcspn(p.offset(length as isize), reject);
+            c = *p.offset(length as isize) as c_int;
+            if (c & 0x80) == 0 || c == CTLENDARI as c_int || c == CTLENDVAR as c_int {
+                /*
+                 * c == '=' || c == ':' || c == '\0' ||
+                 * c == CTLENDARI || c == CTLENDVAR
+                 */
+                length += 1;
+                /* c == '\0' || c == CTLENDARI || c == CTLENDVAR */
+                end = (((c - 1) & 0x80) != 0) as c_int;
+            } else {
+                end = 0;
+            }
+            if length > 0 && (flag & EXP_DISCARD) == 0 {
+                let newloc: c_int;
+                let q: *mut c_char;
+
+                q = crate::memalloc::stnputs(p, length, expdest);
+                *q.offset(-1) &= (end - 1) as c_char;
+                expdest = q.offset(-((if (flag & EXP_WORD) != 0 { end } else { 0 }) as isize));
+                newloc = q.offset_from(stackblock()) as c_int - end;
+                if breakall != 0 && inquotes == 0 && newloc > startloc {
+                    recordregion(startloc, newloc, 0);
+                }
+                startloc = newloc;
+            }
+            p = p.offset(length as isize + 1);
+            length = 0;
+
+            if end != 0 {
+                break 'start;
+            }
+
+            match c as c_char {
+                C_EQUALS | C_COLON => {
+                    if (c as c_char) == C_EQUALS {
+                        flag |= EXP_VARTILDE2;
+                        reject = reject.offset(1);
+                        /* fall through */
+                    }
+                    /*
+                     * sort of a hack - expand tildes in variable
+                     * assignments (after the first '=' and after ':'s).
+                     */
+                    p = p.offset(-1);
+                    if *p == C_TILDE {
+                        do_tilde = true;
+                        continue 'start; /* goto tilde */
+                    }
+                    continue;
+                }
+                CTLQUOTEMARK => {
+                    /* "$@" syntax adherence hack */
+                    if inquotes == 0
+                        && libc::strcmp(p, crate::mystring::dolatstr.as_ptr().offset(1)) == 0
+                    {
+                        p = evalvar(p.offset(1), flag | EXP_QUOTED).offset(1);
+                        continue 'start; /* goto start */
+                    }
+                    inquotes ^= EXP_QUOTED;
+                    /* addquote: */
+                    if (flag & QUOTES_ESC) != 0 {
+                        p = p.offset(-1);
+                        length += 1;
+                        startloc += 1;
+                    }
+                }
+                CTLMBCHAR => {
+                    c = *p as c_int;
+                    p = p.offset(-1);
+                    mb = mbnext(p);
+                    ml = (mb >> 8) - 2;
+                    if (flag & (QUOTES_ESC | EXP_MBCHAR)) != 0 {
+                        length = ((mb >> 8) + (mb & 0xff)) as size_t;
+                        if (c as c_char) == CTLESC {
+                            startloc += length as c_int;
+                        }
+                    } else {
+                        if c == CTLESC as c_int {
+                            startloc += ml as c_int;
+                        }
+                        p = p.offset((mb & 0xff) as isize);
+                        if (flag & EXP_DISCARD) == 0 {
+                            expdest = crate::memalloc::stnputs(p, ml as size_t, expdest);
+                        }
+                        p = p.offset((mb >> 8) as isize);
+                    }
+                }
+                CTLESC => {
+                    startloc += 1;
+                    length += 1;
+                    /* goto addquote */
+                    if (flag & QUOTES_ESC) != 0 {
+                        p = p.offset(-1);
+                        length += 1;
+                        startloc += 1;
+                    }
+                }
+                CTLVAR => {
+                    p = evalvar(p, flag | inquotes);
+                    continue 'start; /* goto start */
+                }
+                CTLBACKQ => {
+                    expbackq((*argbackq).n, flag | inquotes);
+                    continue 'start; /* goto start */
+                }
+                CTLARI => {
+                    p = expari(p, flag | inquotes);
+                    continue 'start; /* goto start */
+                }
+                _ => {}
+            }
+        }
+    }
+    p.offset(-1)
+}
+
+// [spec:dash:def:expand.exptilde-fn]
+// [spec:dash:sem:expand.exptilde-fn]
+unsafe fn exptilde(startp: *mut c_char, flag: c_int) -> *mut c_char {
+    let mut c: c_char;
+    let name: *mut c_char;
+    let home: *const c_char;
+    let mut p: *mut c_char;
+
+    p = startp;
+    name = p.offset(1);
+
+    loop {
+        p = p.offset(1);
+        c = *p;
+        if c == C_NUL {
+            break;
+        }
+        match c {
+            CTLESC => return startp,
+            CTLQUOTEMARK => return startp,
+            C_COLON => {
+                if (flag & EXP_VARTILDE) != 0 {
+                    break; /* goto done */
+                }
+            }
+            C_SLASH | CTLENDVAR => break, /* goto done */
+            _ => {}
+        }
+    }
+    /* done: */
+    'out: {
+        if (flag & EXP_DISCARD) != 0 {
+            break 'out;
+        }
+        *p = C_NUL;
+        if *name == C_NUL {
+            home = crate::var::lookupvar(crate::mystring::homestr.as_ptr());
+        } else {
+            home = getpwhome(name);
+        }
+        *p = c;
+        if home.is_null() {
+            /* lose: */
+            return startp;
+        }
+        strtodest(home, flag | EXP_QUOTED);
+    }
+    /* out: */
+    p
+}
+
+// [spec:dash:def:expand.removerecordregions-fn]
+// [spec:dash:sem:expand.removerecordregions-fn]
+pub unsafe fn removerecordregions(endoff: c_int) {
+    if ifslastp.is_null() {
+        return;
+    }
+
+    if ifsfirst.endoff > endoff {
+        while !ifsfirst.next.is_null() {
+            let ifsp: *mut ifsregion;
+            crate::error::INTOFF();
+            ifsp = (*ifsfirst.next).next;
+            ckfree(ifsfirst.next as *mut c_void);
+            ifsfirst.next = ifsp;
+            crate::error::INTON();
+        }
+        if ifsfirst.begoff > endoff {
+            ifslastp = ptr::null_mut();
+        } else {
+            ifslastp = &mut ifsfirst;
+            ifsfirst.endoff = endoff;
+        }
+        return;
+    }
+
+    ifslastp = &mut ifsfirst;
+    while !(*ifslastp).next.is_null() && (*(*ifslastp).next).begoff < endoff {
+        ifslastp = (*ifslastp).next;
+    }
+    while !(*ifslastp).next.is_null() {
+        let ifsp: *mut ifsregion;
+        crate::error::INTOFF();
+        ifsp = (*(*ifslastp).next).next;
+        ckfree((*ifslastp).next as *mut c_void);
+        (*ifslastp).next = ifsp;
+        crate::error::INTON();
+    }
+    if (*ifslastp).endoff > endoff {
+        (*ifslastp).endoff = endoff;
+    }
+}
+
+/*
+ * Expand arithmetic expression.  Backup to start of expression,
+ * evaluate, place result in (backed up) result, adjust string position.
+ */
+
+// [spec:dash:def:expand.expari-fn]
+// [spec:dash:sem:expand.expari-fn]
+unsafe fn expari(mut start: *mut c_char, flag: c_int) -> *mut c_char {
+    let mut sm: crate::memalloc::stackmark = mem::zeroed();
+    let begoff: c_int;
+    let endoff: c_int;
+    let len: c_int;
+    let result: intmax_t;
+    let mut p: *mut c_char;
+
+    p = stackblock();
+    begoff = expdest.offset_from(p) as c_int;
+    p = argstr(start, flag & EXP_DISCARD);
+
+    'out: {
+        if (flag & EXP_DISCARD) != 0 {
+            break 'out;
+        }
+
+        start = stackblock();
+        endoff = expdest.offset_from(start) as c_int;
+        start = start.offset(begoff as isize);
+        /* STADJUST(start - expdest, expdest) */
+        expdest = expdest.offset(start.offset_from(expdest));
+
+        removerecordregions(begoff);
+
+        crate::memalloc::pushstackmark(&mut sm, endoff as size_t);
+        result = crate::arith_yacc::arith(start);
+        crate::memalloc::popstackmark(&mut sm);
+
+        len = cvtnum(result, flag) as c_int;
+
+        if (flag & EXP_QUOTED) == 0 {
+            recordregion(begoff, begoff + len, 0);
+        }
+    }
+
+    /* out: */
+    p
+}
+
+/*
+ * Expand stuff in backwards quotes.
+ */
+
+// [spec:dash:def:expand.expbackq-fn]
+// [spec:dash:sem:expand.expbackq-fn]
+unsafe fn expbackq(cmd: *mut crate::nodes::node, flag: c_int) {
+    let mut in_: crate::eval::backcmd = mem::zeroed();
+    let mut i: c_int;
+    let mut buf: [c_char; 128] = [0; 128];
+    let mut p: *mut c_char;
+    let mut dest: *mut c_char;
+    let startloc: c_int;
+    let mut smark: crate::memalloc::stackmark = mem::zeroed();
+
+    'out: {
+        if (flag & EXP_DISCARD) != 0 {
+            break 'out;
+        }
+
+        crate::error::INTOFF();
+        startloc = expdest.offset_from(stackblock()) as c_int;
+        crate::memalloc::pushstackmark(&mut smark, startloc as size_t);
+        crate::eval::evalbackcmd(cmd, &mut in_ as *mut crate::eval::backcmd);
+        crate::memalloc::popstackmark(&mut smark);
+
+        p = in_.buf;
+        i = in_.nleft;
+        /* `if (i == 0) goto read;` — skips the first memtodest only. */
+        let mut jump_read = i == 0;
+        loop {
+            if !jump_read {
+                memtodest(p, i as size_t, flag);
+            }
+            jump_read = false;
+            /* read: */
+            if in_.fd < 0 {
+                break;
+            }
+            loop {
+                i = libc::read(in_.fd, buf.as_mut_ptr() as *mut c_void, mem::size_of_val(&buf))
+                    as c_int;
+                if !(i < 0 && *libc::__errno_location() == libc::EINTR) {
+                    break;
+                }
+            }
+            /* TRACE(("expbackq: read returns %d\n", i)); */
+            if i <= 0 {
+                break;
+            }
+            p = buf.as_mut_ptr();
+        }
+
+        if !in_.buf.is_null() {
+            ckfree(in_.buf as *mut c_void);
+        }
+        if in_.fd >= 0 {
+            libc::close(in_.fd);
+            crate::eval::back_exitstatus = crate::jobs::waitforjob(in_.jp);
+        }
+        crate::error::INTON();
+
+        /* Eat all trailing newlines */
+        dest = expdest;
+        while dest > stackblock().offset(startloc as isize) && *dest.offset(-1) == C_NL {
+            /* STUNPUTC(dest) */
+            dest = dest.offset(-1);
+        }
+        expdest = dest;
+
+        if (flag & EXP_QUOTED) == 0 {
+            recordregion(startloc, dest.offset_from(stackblock()) as c_int, 0);
+        }
+        /* TRACE(("evalbackq: size=%d: \"%.*s\"\n", ...)); */
+    }
+
+    /* out: */
+    argbackq = (*argbackq).next;
+}
+
+// [spec:dash:def:expand.scanleft-fn]
+// [spec:dash:sem:expand.scanleft-fn]
+unsafe fn scanleft(
+    startp: *mut c_char,
+    endp: *mut c_char,
+    rmesc: *mut c_char,
+    rmescend: *mut c_char,
+    str: *mut c_char,
+    quotes: c_int,
+    zero: c_int,
+) -> *mut c_char {
+    let mut loc: *mut c_char;
+    let mut loc2: *mut c_char;
+    let mut c: c_char;
+
+    loc = startp;
+    loc2 = rmesc;
+    loop {
+        let mut s: *mut c_char = if FNMATCH_IS_ENABLED { loc2 } else { loc };
+        let mb: c_uint;
+        let ml: c_uint;
+        let match_: c_int;
+
+        c = *s;
+        if zero != 0 {
+            *s = C_NUL;
+            s = if FNMATCH_IS_ENABLED { rmesc } else { startp };
+        }
+        match_ = pmatch(str, s);
+        *(if FNMATCH_IS_ENABLED { loc2 } else { loc }) = c;
+        if match_ != 0 {
+            return if quotes != 0 { loc } else { loc2 };
+        }
+
+        if c == C_NUL {
+            break;
+        }
+
+        mb = mbnext(loc);
+        loc = loc.offset(((mb & 0xff) + (mb >> 8)) as isize);
+        ml = if (mb >> 8) > 3 { (mb >> 8) - 2 } else { 1 };
+        loc2 = loc2.offset(ml as isize);
+    }
+    ptr::null_mut()
+}
+
+// [spec:dash:def:expand.scanright-fn]
+// [spec:dash:sem:expand.scanright-fn]
+unsafe fn scanright(
+    startp: *mut c_char,
+    endp: *mut c_char,
+    rmesc: *mut c_char,
+    rmescend: *mut c_char,
+    str: *mut c_char,
+    quotes: c_int,
+    zero: c_int,
+) -> *mut c_char {
+    let mut esc: size_t = 0;
+    let mut loc: *mut c_char;
+    let mut loc2: *mut c_char;
+
+    loc = endp;
+    loc2 = rmescend;
+    /* `for (;; loc2--)` — the `continue`s below must still run `loc2--`,
+     * hence the inner labelled block. */
+    'forloop: loop {
+        'cont: {
+            let mut s: *mut c_char = if FNMATCH_IS_ENABLED { loc2 } else { loc };
+            let c: c_char = *s;
+            let ml: c_uint;
+            let match_: c_int;
+
+            if zero != 0 {
+                *s = C_NUL;
+                s = if FNMATCH_IS_ENABLED { rmesc } else { startp };
+            }
+            match_ = pmatch(str, s);
+            *(if FNMATCH_IS_ENABLED { loc2 } else { loc }) = c;
+            if match_ != 0 {
+                return if quotes != 0 { loc } else { loc2 };
+            }
+            loc = loc.offset(-1);
+            if loc < startp {
+                break 'forloop;
+            }
+            /* if (!esc--) esc = esclen(startp, loc); */
+            let was: size_t = esc;
+            esc = esc.wrapping_sub(1);
+            if was == 0 {
+                esc = esclen(startp, loc);
+            }
+            if esc % 2 != 0 {
+                esc -= 1;
+                loc = loc.offset(-1);
+                break 'cont; /* continue */
+            }
+            if *loc != CTLMBCHAR {
+                break 'cont; /* continue */
+            }
+
+            loc = loc.offset(-1);
+            ml = *(loc as *const u8) as c_uint;
+            loc = loc.offset(-((ml + 2) as isize));
+            if *loc == CTLESC {
+                loc = loc.offset(-1);
+            }
+            loc2 = loc2.offset(-((ml.wrapping_sub(1)) as isize));
+        }
+        loc2 = loc2.offset(-1);
+    }
+    ptr::null_mut()
+}
+
+// [spec:dash:def:expand.subevalvar-fn]
+// [spec:dash:sem:expand.subevalvar-fn]
+unsafe fn subevalvar(
+    start: *mut c_char,
+    mut str: *mut c_char,
+    strloc: c_int,
+    startloc: c_int,
+    varflags: c_int,
+    flag: c_int,
+) -> *mut c_char {
+    let mut subtype: c_int = varflags & VSTYPE;
+    let quotes: c_int = flag & QUOTES_ESC;
+    let mut startp: *mut c_char;
+    let mut loc: *mut c_char;
+    let amount: isize;
+    let mut rmesc: *mut c_char;
+    let mut rmescend: *mut c_char;
+    let zero: c_int;
+    let scan: unsafe fn(
+        *mut c_char,
+        *mut c_char,
+        *mut c_char,
+        *mut c_char,
+        *mut c_char,
+        c_int,
+        c_int,
+    ) -> *mut c_char;
+    let mut nstrloc: c_int = strloc;
+    let endp: *mut c_char;
+    let p: *mut c_char;
+
+    p = argstr(
+        start,
+        (flag & EXP_DISCARD) | EXP_TILDE | (if !str.is_null() { 0 } else { EXP_CASE }),
+    );
+    if (flag & EXP_DISCARD) != 0 {
+        return p;
+    }
+
+    startp = stackblock().offset(startloc as isize);
+
+    'out: {
+        match subtype {
+            VSASSIGN => {
+                crate::var::setvar(str, startp, 0);
+
+                loc = startp;
+                break 'out;
+            }
+
+            VSQUESTION => {
+                varunset(start, str, startp, varflags);
+                /* NOTREACHED */
+            }
+            _ => {}
+        }
+
+        subtype -= VSTRIMRIGHT;
+        /* #ifdef DEBUG
+         *	if (subtype < 0 || subtype > 3)
+         *		abort();
+         * #endif */
+
+        rmescend = stackblock().offset(strloc as isize);
+        str = preglob(rmescend, 0);
+        if FNMATCH_IS_ENABLED {
+            startp = stackblock().offset(startloc as isize);
+            rmescend = stackblock().offset(strloc as isize);
+            nstrloc = str.offset_from(stackblock()) as c_int;
+        }
+
+        rmesc = startp;
+        if FNMATCH_IS_ENABLED || quotes == 0 {
+            rmesc = _rmescapes(startp, RMESCAPE_ALLOC | RMESCAPE_GROW);
+            if rmesc != startp {
+                rmescend = expdest;
+            }
+            startp = stackblock().offset(startloc as isize);
+            str = stackblock().offset(nstrloc as isize);
+        }
+        rmescend = rmescend.offset(-1);
+
+        /* zero = subtype == VSTRIMLEFT || subtype == VSTRIMLEFTMAX */
+        zero = subtype >> 1;
+        /* VSTRIMLEFT/VSTRIMRIGHTMAX -> scanleft */
+        scan = if ((subtype & 1) ^ zero) != 0 {
+            scanleft
+        } else {
+            scanright
+        };
+
+        endp = stackblock().offset(strloc as isize - 1);
+        loc = scan(startp, endp, rmesc, rmescend, str, quotes, zero);
+        if loc.is_null() {
+            if quotes != 0 {
+                rmesc = startp;
+                rmescend = endp;
+            }
+        } else if quotes == 0 {
+            if zero != 0 {
+                rmesc = loc;
+            } else {
+                rmescend = loc;
+            }
+        } else if zero != 0 {
+            rmesc = loc;
+            rmescend = endp;
+        } else {
+            rmesc = startp;
+            rmescend = loc;
+        }
+
+        libc::memmove(
+            startp as *mut c_void,
+            rmesc as *const c_void,
+            rmescend.offset_from(rmesc) as size_t,
+        );
+        loc = startp.offset(rmescend.offset_from(rmesc));
+    }
+
+    /* out: */
+    *loc = C_NUL;
+    amount = loc.offset_from(expdest);
+    /* STADJUST(amount, expdest) */
+    expdest = expdest.offset(amount);
+
+    /* Remove any recorded regions beyond start of variable */
+    removerecordregions(startloc);
+
+    p
+}
+
+/*
+ * Expand a variable, and return a pointer to the next character in the
+ * input string.
+ */
+
+// [spec:dash:def:expand.evalvar-fn]
+// [spec:dash:sem:expand.evalvar-fn]
+unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
+    let mut subtype: c_int;
+    let mut varflags: c_int;
+    let var: *mut c_char;
+    let patloc: c_int;
+    let startloc: c_int;
+    let mut varlen: ssize_t;
+    let mut discard: c_int;
+    let mut quoted: c_int;
+    let mbchar: c_int;
+
+    varflags = (*p as c_int) & !VSBIT;
+    p = p.offset(1);
+    subtype = varflags & VSTYPE;
+
+    quoted = flag & EXP_QUOTED;
+    var = p;
+    startloc = expdest.offset_from(stackblock()) as c_int;
+    p = libc::strchr(p, C_EQUALS as c_int).offset(1);
+
+    mbchar = match subtype {
+        VSTRIMLEFT | VSTRIMLEFTMAX | VSTRIMRIGHT | VSTRIMRIGHTMAX => EXP_MBCHAR,
+        _ => 0,
+    };
+
+    /* `record:` and `really_record:` are the two joins at the bottom. */
+    let mut really_record = false;
+
+    'again: loop {
+        varlen = varvalue(var, varflags, (flag | mbchar) as c_uint);
+        if (varflags & VSNUL) != 0 {
+            varlen -= 1;
+        }
+
+        discard = if varlen < 0 { EXP_DISCARD } else { 0 };
+
+        match subtype {
+            VSPLUS | 0 | VSMINUS => {
+                if subtype == VSPLUS {
+                    discard ^= EXP_DISCARD;
+                    /* fall through */
+                }
+
+                p = argstr(p, flag | EXP_TILDE | EXP_WORD | (discard ^ EXP_DISCARD));
+                break 'again; /* goto record */
+            }
+
+            VSASSIGN | VSQUESTION => {
+                p = subevalvar(
+                    p,
+                    var,
+                    0,
+                    startloc,
+                    varflags,
+                    (flag & !QUOTES_ESC) | (discard ^ EXP_DISCARD),
+                );
+
+                if ((flag | !discard) & EXP_DISCARD) != 0 {
+                    break 'again; /* goto record */
+                }
+
+                varflags &= !VSNUL;
+                subtype = VSNORMAL;
+                continue 'again;
+            }
+            _ => {}
+        }
+
+        if (discard & !flag) != 0 && uflag() != 0 {
+            varunset(p, var, ptr::null(), 0);
+        }
+
+        if subtype == VSLENGTH {
+            p = p.offset(1);
+            if (flag & EXP_DISCARD) != 0 {
+                return p;
+            }
+            cvtnum((if varlen > 0 { varlen } else { 0 }) as intmax_t, flag);
+            really_record = true;
+            break 'again; /* goto really_record */
+        }
+
+        if subtype == VSNORMAL {
+            break 'again; /* goto record */
+        }
+
+        /* #ifdef DEBUG
+         *	switch (subtype) {
+         *	case VSTRIMLEFT: case VSTRIMLEFTMAX:
+         *	case VSTRIMRIGHT: case VSTRIMRIGHTMAX:
+         *		break;
+         *	default:
+         *		abort();
+         *	}
+         * #endif */
+
+        flag |= discard;
+        if (flag & EXP_DISCARD) == 0 {
+            /*
+             * Terminate the string and start recording the pattern
+             * right after it
+             */
+            /* STPUTC('\0', expdest) */
+            expdest = crate::memalloc::_STPUTC(0, expdest);
+        }
+
+        patloc = expdest.offset_from(stackblock()) as c_int;
+        p = subevalvar(p, ptr::null_mut(), patloc, startloc, varflags, flag);
+        break 'again;
+    }
+
+    /* record: */
+    if !really_record {
+        if ((flag | discard) & EXP_DISCARD) != 0 {
+            return p;
+        }
+    }
+
+    /* really_record: */
+    if quoted != 0 {
+        quoted = (*var == C_AT && crate::options::shellparam.nparam != 0) as c_int;
+        if quoted == 0 {
+            return p;
+        }
+    }
+    recordregion(startloc, expdest.offset_from(stackblock()) as c_int, quoted);
+    p
+}
+
+// [spec:dash:def:expand.chtodest-fn]
+// [spec:dash:sem:expand.chtodest-fn]
+unsafe fn chtodest(c: c_int, syntax: *const c_char, mut out: *mut c_char) -> *mut c_char {
+    if *syntax.offset(c as isize) == CCTL() {
+        /* USTPUTC(CTLESC, out) */
+        *out = CTLESC;
+        out = out.offset(1);
+    }
+    /* USTPUTC(c, out) */
+    *out = c as c_char;
+    out = out.offset(1);
+
+    out
+}
+
+// [spec:dash:def:expand.mbpair]
+#[repr(C)]
+pub struct mbpair {
+    pub ml: c_uint,
+    pub ql: c_uint,
+}
+
+// [spec:dash:def:expand.mbtodest-fn]
+// [spec:dash:sem:expand.mbtodest-fn]
+unsafe fn mbtodest(
+    mut p: *const c_char,
+    mut q: *mut c_char,
+    syntax: *const c_char,
+    len: size_t,
+) -> mbpair {
+    let mut mbs: libc::mbstate_t = mem::zeroed();
+    let mbp: mbpair;
+    let q0: *mut c_char = q;
+    let mut ml: size_t;
+
+    p = p.offset(-1);
+    ml = mbrlen(p, len, &mut mbs);
+    'out: {
+        if ml == (0 as size_t).wrapping_sub(2) || ml == (0 as size_t).wrapping_sub(1) || ml < 2 {
+            q = chtodest(*p as c_int, syntax, q);
+            ml = 1;
+            break 'out;
+        }
+
+        /* `syntax[CTLMBCHAR]` — CTLMBCHAR is negative; see the note in
+         * `memtodest` about the unbiased `is_type` table. */
+        if *syntax.offset(CTLMBCHAR as isize) == CCTL() {
+            /* USTPUTC(CTLMBCHAR, q); USTPUTC(ml, q); */
+            *q = CTLMBCHAR;
+            q = q.offset(1);
+            *q = ml as c_char;
+            q = q.offset(1);
+        }
+
+        q = crate::system::mempcpy(q as *mut c_void, p as *const c_void, ml) as *mut c_char;
+
+        if *syntax.offset(CTLMBCHAR as isize) == CCTL() {
+            /* USTPUTC(ml, q); USTPUTC(CTLMBCHAR, q); */
+            *q = ml as c_char;
+            q = q.offset(1);
+            *q = CTLMBCHAR;
+            q = q.offset(1);
+        }
+    }
+
+    /* out: */
+    mbp = mbpair {
+        ml: (ml.wrapping_sub(1)) as c_uint,
+        ql: q.offset_from(q0) as c_uint,
+    };
+    mbp
+}
+
+/*
+ * Put a string on the stack.
+ */
+
+// [spec:dash:def:expand.memtodest-fn]
+// [spec:dash:sem:expand.memtodest-fn]
+unsafe fn memtodest(mut p: *const c_char, mut len: size_t, flags: c_int) -> size_t {
+    let syntax: *const c_char;
+    let mut count: size_t = 0;
+    let expq: c_int;
+    let mut q: *mut c_char;
+
+    if len == 0 {
+        return 0;
+    }
+
+    /* CTLMBCHAR, 2, c, c, 2, CTLMBCHAR */
+    q = crate::memalloc::makestrspace(len * 3, expdest);
+
+    /* Guarded by the `assert!(QUOTES_ESC == 0x11 && …)` above, which is
+     * this file's port of the matching `#error`. */
+    expq = flags & EXP_QUOTED;
+    if (flags & (expq >> 3 | expq >> 4 | expq >> 8) & (QUOTES_ESC | EXP_MBCHAR)) == 0 {
+        while len >= 8 {
+            let x: u64;
+
+            x = ptr::read_unaligned(p.offset(count as isize) as *const u64);
+
+            if (x | x.wrapping_sub(0x0101010101010101)) & 0x8080808080808080 != 0 {
+                break;
+            }
+
+            ptr::write_unaligned(q.offset(count as isize) as *mut u64, x);
+
+            count += 8;
+            len -= 8;
+        }
+
+        q = q.offset(count as isize);
+        p = p.offset(count as isize);
+
+        /* NOTE (bug-for-bug): `is_type` is used here *unbiased*, i.e.
+         * without the `+ SYNBASE` every other syntax-table user applies.
+         * `chtodest` only ever indexes it with 0..127, which is in range
+         * and always reads 0 (never CCTL) — that is the point of the
+         * choice.  `mbtodest` however indexes it with CTLMBCHAR (-123),
+         * a read *before* the array; the C relies on that happening to
+         * yield a non-CCTL byte.  Reproduced verbatim, not fixed. */
+        syntax = if (flags & (QUOTES_ESC | EXP_MBCHAR)) != 0 {
+            BASESYNTAX()
+        } else {
+            is_type_unbiased()
+        };
+    } else {
+        syntax = SQSYNTAX();
+    }
+
+    /* for (; len; len--) */
+    while len != 0 {
+        'cont: {
+            let c: c_int = *p as c_int;
+            p = p.offset(1);
+
+            if c == 0 && (flags & EXP_KEEPNUL) == 0 {
+                break 'cont; /* continue */
+            }
+
+            count += 1;
+
+            if c < 0 {
+                let mbp: mbpair = mbtodest(p, q, syntax, len);
+                let mlm: c_uint;
+
+                q = q.offset(mbp.ql as isize);
+                mlm = mbp.ml;
+                p = p.offset(mlm as isize);
+                len -= mlm as size_t;
+                break 'cont; /* continue */
+            }
+
+            q = chtodest(c, syntax, q);
+        }
+        len -= 1;
+    }
+
+    expdest = q;
+    count
+}
+
+// [spec:dash:def:expand.strtodest-fn]
+// [spec:dash:sem:expand.strtodest-fn]
+unsafe fn strtodest(p: *const c_char, flags: c_int) -> size_t {
+    let len: size_t = libc::strlen(p);
+    memtodest(p, len, flags)
+}
+
+/*
+ * Add the value of a specialized variable to the stack string.
+ */
+
+// [spec:dash:def:expand.varvalue-fn]
+// [spec:dash:sem:expand.varvalue-fn]
+unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssize_t {
+    let subtype: c_int = varflags & VSTYPE;
+    let mut seplen: size_t;
+    let mut seps: *const c_char;
+    let mut len: ssize_t = 0;
+    let start: size_t;
+    let discard: c_int;
+    let mut ap: *mut *mut c_char;
+    let mut num: c_int = 0;
+    let mut p: *mut c_char = ptr::null_mut();
+    let mut i: c_int;
+
+    discard =
+        ((subtype == VSPLUS || subtype == VSLENGTH) as c_int) | ((flags as c_int) & EXP_DISCARD);
+
+    if subtype == 0 {
+        if discard != 0 {
+            return -1;
+        }
+
+        crate::sh_error!(b"Bad substitution\0".as_ptr() as *const c_char);
+    }
+
+    flags &= if discard != 0 {
+        (!QUOTES_ESC) as c_uint
+    } else {
+        !(0 as c_uint)
+    };
+    seps = crate::shell::nullstr.as_ptr();
+    seplen = ((flags as c_int) & EXP_FULL) as size_t;
+    start = expdest.offset_from(stackblock()) as size_t;
+
+    'sw: {
+        'value: {
+            'param: {
+                'numvar: {
+                    match *name {
+                        C_DOLLAR => {
+                            num = crate::shellmain::rootpid;
+                            break 'numvar;
+                        }
+                        C_QUESTION => {
+                            num = crate::eval::exitstatus;
+                            break 'numvar;
+                        }
+                        C_HASH => {
+                            num = crate::options::shellparam.nparam;
+                            break 'numvar;
+                        }
+                        C_BANG => {
+                            num = crate::jobs::backgndpid as c_int;
+                            if num == 0 {
+                                return -1;
+                            }
+                            break 'numvar;
+                        }
+                        C_MINUS => {
+                            p = crate::memalloc::makestrspace(
+                                crate::options::NOPTS as size_t,
+                                expdest,
+                            );
+                            i = crate::options::NOPTS as c_int - 1;
+                            while i >= 0 {
+                                if crate::options::optlist[i as usize] != 0
+                                    && crate::options::optletters[i as usize] != 0
+                                {
+                                    /* USTPUTC(optletters[i], p) */
+                                    *p = crate::options::optletters[i as usize];
+                                    p = p.offset(1);
+                                    len += 1;
+                                }
+                                i -= 1;
+                            }
+                            expdest = p;
+                            break 'sw;
+                        }
+                        C_AT | C_STAR => {
+                            if *name == C_AT {
+                                if ((flags as c_int) & (EXP_QUOTED | EXP_FULL))
+                                    == (EXP_QUOTED | EXP_FULL)
+                                {
+                                    break 'param;
+                                }
+                                /* fall through to case '*' */
+                            }
+                            /* We will set seplen to 0 or !0 depending on
+                             * whether we're doing field splitting.  We
+                             * won't do field splitting if either we're
+                             * quoted or seplen is zero.
+                             *
+                             * Instead of testing (quoted || !sep) the
+                             * following trick optimises away any branches
+                             * by using the fact that EXP_QUOTED (which is
+                             * the only bit that can be set in quoted) is
+                             * the same as EXP_FULL << CHAR_BIT (which is
+                             * the only bit that can be set in sep).
+                             */
+                            seplen &= (!(flags >> CHAR_BIT)) as size_t;
+                            if seplen == 0 {
+                                seps = ncifs;
+                            }
+                            seplen = (seplen.wrapping_sub(1) & ifsmb0len.wrapping_sub(1))
+                                .wrapping_add(1);
+                            break 'param;
+                        }
+                        c if c >= C_0 && c <= C_9 => {
+                            num = libc::atoi(name);
+                            if num < 0 || num > crate::options::shellparam.nparam {
+                                return -1;
+                            }
+                            p = if num != 0 {
+                                *crate::options::shellparam.p.offset(num as isize - 1)
+                            } else {
+                                crate::options::arg0
+                            };
+                            break 'value;
+                        }
+                        _ => {
+                            /* default: */
+                            p = crate::var::lookupvar(name);
+                            break 'value;
+                        }
+                    }
+                }
+                /* numvar: */
+                len = cvtnum(num as intmax_t, flags as c_int) as ssize_t;
+                break 'sw;
+            }
+            /* param: */
+            ap = crate::options::shellparam.p;
+            if ap.is_null() {
+                return -1;
+            }
+            p = *ap;
+            if p.is_null() {
+                break 'sw;
+            }
+            loop {
+                len += strtodest(p, flags as c_int) as ssize_t;
+
+                ap = ap.offset(1);
+                p = *ap;
+                if p.is_null() {
+                    break;
+                }
+
+                len += memtodest(seps, seplen, (flags as c_int) | EXP_KEEPNUL) as ssize_t;
+            }
+            break 'sw;
+        }
+        /* value: */
+        if p.is_null() {
+            return -1;
+        }
+
+        len = strtodest(p, flags as c_int) as ssize_t;
+    }
+
+    if discard != 0 {
+        expdest = stackblock().offset(start as isize);
+    }
+
+    len
+}
+
+/*
+ * Record the fact that we have to scan this region of the
+ * string for IFS characters.
+ */
+
+// [spec:dash:def:expand.recordregion-fn]
+// [spec:dash:sem:expand.recordregion-fn]
+pub unsafe fn recordregion(start: c_int, end: c_int, nulonly: c_int) {
+    let ifsp: *mut ifsregion;
+
+    if ifslastp.is_null() {
+        ifsp = &mut ifsfirst;
+    } else {
+        crate::error::INTOFF();
+        ifsp = crate::memalloc::ckmalloc(mem::size_of::<ifsregion>() as size_t) as *mut ifsregion;
+        (*ifsp).next = ptr::null_mut();
+        (*ifslastp).next = ifsp;
+        crate::error::INTON();
+    }
+    ifslastp = ifsp;
+    (*ifslastp).begoff = start;
+    (*ifslastp).endoff = end;
+    (*ifslastp).nulonly = nulonly;
+}
+
+// [spec:dash:def:expand.ifsisifs-fn]
+// [spec:dash:sem:expand.ifsisifs-fn]
+unsafe fn ifsisifs(p: *const c_char, ml: c_uint, ifs: *const c_char) -> c_uint {
+    let mut isdefifs: bool = false;
+    let mut isifs: bool = false;
+    let mut wc: wchar_t = *p as wchar_t;
+    /* C leaves `ifs0` uninitialised; it is only read when `isifs`, which
+     * implies one of the branches below assigned it. */
+    let mut ifs0: wchar_t = 0;
+
+    'out: {
+        if *ifs != 0 && !wcifs.is_null() {
+            if (wc & 0x80) != 0 {
+                let mut mbst: libc::mbstate_t = mem::zeroed();
+                let mut wc2: wchar_t = 0;
+
+                if mbrtowc(&mut wc2, p, ml as size_t, &mut mbst) != ml as size_t {
+                    break 'out;
+                }
+                wc = wc2;
+            }
+
+            isifs = !wcschr(wcifs, wc).is_null();
+            ifs0 = *wcifs;
+        } else if ml == 0 {
+            isifs = !libc::strchr(ifs, wc as c_int).is_null();
+            ifs0 = *ifs as wchar_t;
+        }
+
+        if isifs {
+            isdefifs = iswspace((if wc != 0 { wc } else { ifs0 }) as wint_t) != 0;
+        }
+    }
+
+    /* out: */
+    (isifs as c_uint) << 1 | (isdefifs as c_uint)
+}
+
+// [spec:dash:def:expand.ifsbreakup-slow-fn]
+// [spec:dash:sem:expand.ifsbreakup-slow-fn]
+unsafe fn ifsbreakup_slow(
+    ifst: *mut ifs_state,
+    arglist: *mut arglist,
+    nulonly: c_int,
+    mut p: *mut c_char,
+) -> *mut c_char {
+    let sp: *mut strlist;
+    let ifschar: c_uint;
+    let sisifs: c_uint;
+    let isdefifs: bool;
+    let ml: c_uint;
+    let isifs: bool;
+    let mut q: *mut c_char;
+
+    q = p;
+
+    ifschar = mbnext(p);
+    p = p.offset((ifschar & 0xff) as isize);
+    ml = if (ifschar >> 8) > 3 {
+        (ifschar >> 8) - 2
+    } else {
+        0
+    };
+
+    sisifs = ifsisifs(p, ml, (*ifst).ifs);
+    p = p.offset((ifschar >> 8) as isize);
+
+    isifs = (sisifs >> 1) != 0;
+    isdefifs = (sisifs & 1) != 0;
+
+    /* If only reading one more argument:
+     * If we have exactly one field,
+     * read that field without its terminator.
+     * If we have more than one field,
+     * read all fields including their terminators,
+     * except for trailing IFS whitespace.
+     *
+     * This means that if we have only IFS
+     * characters left, and at most one
+     * of them is non-whitespace, we stop
+     * reading here.
+     * Otherwise, we read all the remaining
+     * characters except for trailing
+     * IFS whitespace.
+     *
+     * In any case, r indicates the start
+     * of the characters to remove, or NULL
+     * if no characters should be removed.
+     */
+    'out_zero_ifsspc: {
+        if (*ifst).maxargs == 0 {
+            if isdefifs {
+                if (*ifst).r.is_null() {
+                    (*ifst).r = q;
+                }
+                return p;
+            }
+
+            if !(isifs && (*ifst).ifsspc != 0) {
+                (*ifst).r = ptr::null_mut();
+            }
+        } else if (*ifst).ifsspc != 0 {
+            if isifs {
+                q = p;
+            }
+
+            (*ifst).start = q;
+
+            if isdefifs {
+                return p;
+            }
+        } else if isifs {
+            let mut ifsspc: c_int = (*ifst).ifsspc;
+
+            if nulonly == 0 {
+                ifsspc = isdefifs as c_int;
+                (*ifst).ifsspc = ifsspc;
+            }
+
+            /* Ignore IFS whitespace at start */
+            if q == (*ifst).start && ifsspc != 0 {
+                (*ifst).start = p;
+                break 'out_zero_ifsspc; /* goto out_zero_ifsspc */
+            }
+            /* if (ifst->maxargs > 0 && !--ifst->maxargs) */
+            if (*ifst).maxargs > 0 && {
+                (*ifst).maxargs -= 1;
+                (*ifst).maxargs == 0
+            } {
+                (*ifst).r = q;
+                return p;
+            }
+            *q = C_NUL;
+            sp = crate::memalloc::stalloc(mem::size_of::<strlist>() as size_t) as *mut strlist;
+            (*sp).text = (*ifst).start;
+            *(*arglist).lastp = sp;
+            (*arglist).lastp = &mut (*sp).next;
+            (*ifst).start = p;
+            return p;
+        }
+    }
+
+    /* out_zero_ifsspc: */
+    (*ifst).ifsspc = 0;
+    p
+}
+
+/*
+ * Break the argument string into pieces based upon IFS and add the
+ * strings to the argument list.  The regions of the string to be
+ * searched for IFS characters have been stored by recordregion.
+ * If maxargs is non-negative, at most maxargs arguments will be created, by
+ * joining together the last arguments.
+ */
+
+// [spec:dash:def:expand.ifsbreakup-fn]
+// [spec:dash:sem:expand.ifsbreakup-fn]
+pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: *mut arglist) {
+    let mut ifsp: *mut ifsregion;
+    let mut ifst: ifs_state = mem::zeroed();
+    let realifs: *const c_char;
+    let sp: *mut strlist;
+    let mut nulonly: c_int;
+    let mut p: *mut c_char;
+
+    ifst.r = ptr::null_mut();
+    ifst.start = string;
+    ifst.maxargs = maxargs;
+    'add: {
+        if !ifslastp.is_null() {
+            ifst.ifsspc = 0;
+            nulonly = 0;
+            realifs = ncifs;
+            ifsp = &mut ifsfirst;
+            loop {
+                let afternul: c_int;
+
+                p = string.offset((*ifsp).begoff as isize);
+                afternul = nulonly;
+                nulonly = (*ifsp).nulonly;
+                ifst.ifs = if nulonly != 0 {
+                    crate::shell::nullstr.as_ptr()
+                } else {
+                    realifs
+                };
+                ifst.ifsspc = 0;
+                loop {
+                    let p0: *mut c_char = p;
+
+                    while string.offset((*ifsp).endoff as isize).offset_from(p) >= 8 {
+                        /* union { uint64_t qw; unsigned char b[8]; } x; */
+                        let qw: u64 = ptr::read_unaligned(p as *const u64);
+                        let b: [u8; 8] = qw.to_ne_bytes();
+
+                        if (qw & 0x8080808080808080) != 0 {
+                            break;
+                        }
+                        if (ifsmap[b[0] as usize]
+                            | ifsmap[b[1] as usize]
+                            | ifsmap[b[2] as usize]
+                            | ifsmap[b[3] as usize]
+                            | ifsmap[b[4] as usize]
+                            | ifsmap[b[5] as usize]
+                            | ifsmap[b[6] as usize]
+                            | ifsmap[b[7] as usize])
+                            != 0
+                        {
+                            break;
+                        }
+                        p = p.offset(8);
+                    }
+
+                    if p != p0 {
+                        if ifst.maxargs == 0 {
+                            ifst.r = ptr::null_mut();
+                        } else if ifst.ifsspc != 0 {
+                            ifst.start = p0;
+                        }
+                        ifst.ifsspc = 0;
+                    }
+
+                    if p >= string.offset((*ifsp).endoff as isize) {
+                        break;
+                    }
+
+                    p = ifsbreakup_slow(&mut ifst, arglist, afternul | nulonly, p);
+                }
+
+                ifsp = (*ifsp).next;
+                if ifsp.is_null() {
+                    break;
+                }
+            }
+            if nulonly != 0 {
+                break 'add; /* goto add */
+            }
+            if !ifst.r.is_null() {
+                *ifst.r = C_NUL;
+            }
+        }
+
+        if *ifst.start == C_NUL {
+            return;
+        }
+    }
+
+    /* add: */
+    sp = crate::memalloc::stalloc(mem::size_of::<strlist>() as size_t) as *mut strlist;
+    (*sp).text = ifst.start;
+    *(*arglist).lastp = sp;
+    (*arglist).lastp = &mut (*sp).next;
+}
+
+// [spec:dash:def:expand.ifsfree-fn]
+// [spec:dash:sem:expand.ifsfree-fn]
+pub unsafe fn ifsfree() {
+    let mut p: *mut ifsregion = ifsfirst.next;
+
+    'out: {
+        if p.is_null() {
+            break 'out;
+        }
+
+        crate::error::INTOFF();
+        loop {
+            let ifsp: *mut ifsregion;
+            ifsp = (*p).next;
+            ckfree(p as *mut c_void);
+            p = ifsp;
+            if p.is_null() {
+                break;
+            }
+        }
+        ifsfirst.next = ptr::null_mut();
+        crate::error::INTON();
+    }
+
+    /* out: */
+    ifslastp = ptr::null_mut();
+}
+
+// [spec:dash:def:expand.changeifs-fn]
+// [spec:dash:sem:expand.changeifs-fn]
+pub unsafe fn changeifs(mut ifs: *const c_char) {
+    let mut mbs: libc::mbstate_t = mem::zeroed();
+    let mut nwcifs: *mut wchar_t;
+    let mut mb: c_uint = 0;
+    let mut len: size_t = 0;
+    let mut p: *const c_char;
+    let mut ml: size_t;
+
+    if crate::var::ifsset() == 0 {
+        ifs = crate::var::defifs();
+    }
+    ncifs = ifs;
+
+    /* memset(ifsmap, 0, sizeof(ifsmap)) */
+    ifsmap = [0; 128];
+
+    p = ifs;
+    loop {
+        let c: c_uint = *(p as *const u8) as c_uint;
+
+        mb |= c >> 7;
+        if (c >> 7) == 0 {
+            ifsmap[c as usize] = 1;
+        }
+
+        if c == 0 {
+            break;
+        }
+
+        len += 1;
+        p = p.offset(1);
+    }
+
+    nwcifs = ptr::null_mut();
+
+    ifsmb0len = (len != 0) as size_t;
+
+    'out: {
+        if mb == 0 {
+            break 'out;
+        }
+
+        ml = mbrlen(ifs, len, &mut mbs);
+        if ml == (0 as size_t).wrapping_sub(2) || ml == (0 as size_t).wrapping_sub(1) {
+            ml = 1;
+        }
+        ifsmb0len = ml;
+
+        nwcifs = crate::memalloc::ckmalloc((len + 1) * mem::size_of::<wchar_t>() as size_t)
+            as *mut wchar_t;
+        ptr::write_bytes(nwcifs as *mut u8, 0, (len + 1) * mem::size_of::<wchar_t>());
+
+        p = ifs;
+        mbsrtowcs(nwcifs, &mut p, len + 1, &mut mbs);
+    }
+
+    /* out: */
+    ckfree(wcifs as *mut c_void);
+    wcifs = nwcifs;
+}
+
+/*
+ * Expand shell metacharacters.  At this point, the only control characters
+ * should be escapes.  The results are stored in the list exparg.
+ */
+
+/* #ifdef __GLIBC__ */
+// [spec:dash:def:expand.opendir-interruptible-fn]
+// [spec:dash:sem:expand.opendir-interruptible-fn]
+unsafe extern "C" fn opendir_interruptible(pathname: *const c_char) -> *mut c_void {
+    if int_pending() != 0 {
+        crate::error::suppressint = 0;
+        crate::error::onint();
+    }
+
+    libc::opendir(pathname) as *mut c_void
+}
+/* #else
+ * #define GLOB_ALTDIRFUNC 0
+ * #endif */
+
+// [spec:dash:def:expand.expandmeta-glob-fn]
+// [spec:dash:sem:expand.expandmeta-glob-fn]
+unsafe fn expandmeta_glob(mut str: *mut strlist) {
+    while !str.is_null() {
+        let p: *const c_char;
+        let mut pglob: crate::system::glob64_t = mem::zeroed();
+        let i: c_int;
+
+        'sw: {
+            'nometa: {
+                'nometa2: {
+                    if fflag() != 0 {
+                        break 'nometa;
+                    }
+
+                    /* #ifdef __GLIBC__ */
+                    pglob.gl_closedir = Some(mem::transmute(libc::closedir as *const () as usize));
+                    pglob.gl_readdir = Some(mem::transmute(libc::readdir64 as *const () as usize));
+                    pglob.gl_opendir = Some(opendir_interruptible);
+                    pglob.gl_lstat = Some(mem::transmute(libc::lstat64 as *const () as usize));
+                    pglob.gl_stat = Some(mem::transmute(libc::stat64 as *const () as usize));
+                    /* #endif */
+
+                    crate::error::INTOFF();
+                    p = preglob((*str).text, RMESCAPE_HEAP);
+                    i = crate::system::glob64(
+                        p,
+                        crate::system::GLOB_ALTDIRFUNC | crate::system::GLOB_NOMAGIC,
+                        None,
+                        &mut pglob,
+                    );
+                    if p != (*str).text {
+                        ckfree(p as *mut c_void);
+                    }
+                    if i == 0 {
+                        if (pglob.gl_flags
+                            & (crate::system::GLOB_NOMAGIC | crate::system::GLOB_NOCHECK))
+                            == (crate::system::GLOB_NOMAGIC | crate::system::GLOB_NOCHECK)
+                        {
+                            break 'nometa2; /* goto nometa2 */
+                        }
+                        addglob(&pglob);
+                        crate::system::globfree64(&mut pglob);
+                        crate::error::INTON();
+                        break 'sw;
+                    } else if i == crate::system::GLOB_NOMATCH {
+                        break 'nometa2;
+                    } else {
+                        /* default:  GLOB_NOSPACE */
+                        crate::sh_error!(b"Out of space\0".as_ptr() as *const c_char);
+                    }
+                }
+                /* nometa2: */
+                crate::system::globfree64(&mut pglob);
+                crate::error::INTON();
+                /* fall through to nometa */
+            }
+            /* nometa: */
+            *exparg.lastp = str;
+            rmescapes((*str).text);
+            exparg.lastp = &mut (*str).next;
+        }
+        str = (*str).next;
+    }
+}
+
+/*
+ * Add the result of glob(3) to the list.
+ */
+
+// [spec:dash:def:expand.addglob-fn]
+// [spec:dash:sem:expand.addglob-fn]
+unsafe fn addglob(pglob: *const crate::system::glob64_t) {
+    let mut p: *mut *mut c_char = (*pglob).gl_pathv;
+
+    loop {
+        addfname(*p);
+        p = p.offset(1);
+        if (*p).is_null() {
+            break;
+        }
+    }
+}
+
+// [spec:dash:def:expand.expandmeta-fn]
+// [spec:dash:sem:expand.expandmeta-fn]
+unsafe fn expandmeta(mut str: *mut strlist) {
+    /* TODO - EXP_REDIR */
+
+    if GLOB_IS_ENABLED {
+        return expandmeta_glob(str);
+    }
+
+    while !str.is_null() {
+        let savelastp: *mut *mut strlist;
+        let mut sp: *mut strlist;
+        let p: *mut c_char;
+        let len: c_uint;
+
+        'sw: {
+            'nometa: {
+                if fflag() != 0 {
+                    break 'nometa;
+                }
+                if libc::strpbrk((*str).text, b"*?]\0".as_ptr() as *const c_char).is_null()
+                    || libc::strcmp((*str).text, b"]\0".as_ptr() as *const c_char) == 0
+                {
+                    break 'nometa;
+                }
+                savelastp = exparg.lastp;
+
+                crate::error::INTOFF();
+                p = preglob((*str).text, RMESCAPE_ALLOC | RMESCAPE_HEAP);
+                len = libc::strlen(p) as c_uint;
+
+                expmeta(p, len, 0);
+                if p != (*str).text {
+                    ckfree(p as *mut c_void);
+                }
+                crate::error::INTON();
+                if exparg.lastp == savelastp {
+                    /*
+                     * no matches
+                     */
+                    break 'nometa;
+                } else {
+                    *exparg.lastp = ptr::null_mut();
+                    sp = expsort(*savelastp);
+                    *savelastp = sp;
+                    while !(*sp).next.is_null() {
+                        sp = (*sp).next;
+                    }
+                    exparg.lastp = &mut (*sp).next;
+                    break 'sw;
+                }
+            }
+            /* nometa: */
+            *exparg.lastp = str;
+            rmescapes((*str).text);
+            exparg.lastp = &mut (*str).next;
+        }
+        str = (*str).next;
+    }
+}
+
+// [spec:dash:def:expand.addfname-common-fn]
+// [spec:dash:sem:expand.addfname-common-fn]
+unsafe fn addfname_common(name: *mut c_char) {
+    let sp: *mut strlist;
+
+    sp = crate::memalloc::stalloc(mem::size_of::<strlist>() as size_t) as *mut strlist;
+    (*sp).text = name;
+    *exparg.lastp = sp;
+    exparg.lastp = &mut (*sp).next;
+}
+
+// [spec:dash:def:expand.addfnamealt-fn]
+// [spec:dash:sem:expand.addfnamealt-fn]
+unsafe fn addfnamealt(mut enddir: *mut c_char, expdir_len: size_t) -> *mut c_char {
+    let name: *mut c_char;
+
+    name = grabstackstr(enddir);
+    addfname_common(name);
+
+    /* STARTSTACKSTR(enddir) */
+    enddir = stackblock();
+    crate::memalloc::stnputs(name, expdir_len, enddir).offset(-(expdir_len as isize))
+}
+
+// [spec:dash:def:expand.expmeta-rmescapes-fn]
+// [spec:dash:sem:expand.expmeta-rmescapes-fn]
+unsafe fn expmeta_rmescapes(mut enddir: *mut c_char, name: *const c_char) -> *mut c_char {
+    let mut p: *const c_char;
+
+    if !FNMATCH_IS_ENABLED {
+        return crate::system::strchrnul(rmescapes(libc::strcpy(enddir, name)), 0);
+    }
+
+    p = name;
+    loop {
+        let q: *mut c_char = crate::system::strchrnul(p, C_BACKSLASH as c_int);
+
+        enddir = crate::system::mempcpy(
+            enddir as *mut c_void,
+            p as *const c_void,
+            (q.offset_from(p) + 1) as size_t,
+        ) as *mut c_char;
+        p = q;
+        if *p == C_NUL {
+            break;
+        }
+        p = p.offset(1);
+        if *p != C_NUL {
+            *enddir.offset(-1) = *p;
+            p = p.offset(1);
+        }
+    }
+
+    enddir.offset(-1)
+}
+
+/* #ifndef HAVE_MEMRCHR */
+// [spec:dash:def:expand.memrchr-fn]
+// [spec:dash:sem:expand.memrchr-fn]
+unsafe fn memrchr(s: *const c_void, c: c_int, n: size_t) -> *mut c_void {
+    let str: *const u8 = s as *const u8;
+    let mut cp: *const u8;
+
+    /* `cp = str + n - 1` is `str - 1` when n == 0, so the arithmetic is
+     * wrapping here — the loop then never runs, as in C. */
+    cp = str.wrapping_offset(n as isize - 1);
+    while cp >= str {
+        if *cp as c_int == c {
+            return cp as *mut c_void;
+        }
+        cp = cp.wrapping_offset(-1);
+    }
+    ptr::null_mut()
+}
+/* #endif */
+
+/*
+ * Do metacharacter (i.e. *, ?, [...]) expansion.
+ */
+
+// [spec:dash:def:expand.expmeta-fn]
+// [spec:dash:sem:expand.expmeta-fn]
+unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_t) -> *mut c_char {
+    let mesc: c_char = if FNMATCH_IS_ENABLED {
+        C_BACKSLASH
+    } else {
+        CTLESC
+    };
+    let savehandler: *mut crate::error::jmploc;
+    let mut jmploc: crate::error::jmploc = mem::zeroed();
+    let mut statb: libc::stat64 = mem::zeroed();
+    let mut dp: *mut libc::dirent64;
+    /* `volatile int err` — Rust has no volatile locals; the value is
+     * written by setjmp's return and read twice, which suffices here. */
+    let err: c_int;
+    let mut endname: *mut c_char = ptr::null_mut();
+    let mut zeroedp: *mut c_char = ptr::null_mut();
+    let mut enddir: *mut c_char;
+    let mut matchdot: c_int;
+    let mut esc: c_uint;
+    let mut start: *mut c_char;
+    let mut len: size_t;
+    /* `DIR *dirp;` — Rust needs the binding initialised before the
+     * volatile store below, which is the C's actual initialisation. */
+    let mut dirp: *mut libc::DIR = ptr::null_mut();
+    let pat: *mut c_char;
+    let mut cp: *mut c_char = ptr::null_mut();
+    let mut p: *mut c_char;
+    let mut c: c_int = 0;
+
+    /* *(DIR *volatile *)&dirp = NULL; */
+    ptr::write_volatile(&mut dirp, ptr::null_mut());
+    savehandler = crate::error::handler;
+    /* The C is `if (unlikely(err = setjmp(jmploc.loc))) goto out;`.
+     *
+     * NOTE (bug-for-bug): the C never does `handler = &jmploc`, so that
+     * handler is never installed — nothing can longjmp into `jmploc`,
+     * `setjmp` can only ever return 0, and both the `goto out` arm and the
+     * `longjmp` at `out_opendir` are unreachable.  The `sem` rule claims
+     * the handler is installed; the code says otherwise.  Reproduced
+     * verbatim — do not "fix".
+     *
+     * `err` is therefore 0 by construction, which is why this is a plain
+     * assignment and not `eval::setjmp_catch`.  Using `setjmp_catch` here
+     * would be wrong in the other direction: it would establish a
+     * `catch_unwind` the C does not have, swallowing exceptions that must
+     * propagate out through `expmeta` to whichever handler is actually
+     * current.  Calling libc's `setjmp` would be pointless too — Rust has
+     * no way to return from it non-locally, and no caller ever tries. */
+    err = 0;
+
+    'out_opendir: {
+        'out: {
+            if err != 0 {
+                break 'out; /* goto out */
+            }
+
+            len = expdir_len + name_len as size_t + 1;
+            cp = crate::memalloc::growstackto(len);
+            enddir = cp.offset(expdir_len as isize);
+
+            p = name;
+            esc = 0;
+            loop {
+                p = libc::strpbrk(p.offset(esc as isize), b"*?]\0".as_ptr() as *const c_char);
+                if p.is_null() {
+                    break;
+                }
+                esc = (mesclen(name, p, mesc) & 1) as c_uint;
+                if esc == 0 {
+                    break;
+                }
+            }
+            /* No meta characters */
+            if p.is_null() {
+                if expdir_len == 0 {
+                    break 'out_opendir; /* goto out_opendir */
+                }
+                enddir = expmeta_rmescapes(enddir, name);
+                if libc::lstat64(cp, &mut statb) >= 0 {
+                    cp = addfnamealt(enddir.offset(1), expdir_len);
+                }
+                break 'out_opendir; /* goto out_opendir */
+            }
+            start = memrchr(
+                name as *const c_void,
+                C_SLASH as c_int,
+                p.offset_from(name) as size_t,
+            ) as *mut c_char;
+            if !start.is_null() {
+                start = start.offset(1);
+                c = *start as c_int;
+                *start = 0;
+                enddir = expmeta_rmescapes(enddir, name);
+                *start = c as c_char;
+                expdir_len = enddir.offset_from(cp) as size_t;
+            } else {
+                start = name;
+            }
+            *enddir = 0;
+
+            /* *(DIR *volatile *)&dirp = opendir(expdir_len ? cp : dotdir); */
+            ptr::write_volatile(
+                &mut dirp,
+                libc::opendir(if expdir_len != 0 {
+                    cp
+                } else {
+                    crate::mystring::dotdir.as_ptr()
+                }),
+            );
+            if dirp.is_null() {
+                break 'out_opendir; /* goto out_opendir */
+            }
+            esc = 0;
+            p = crate::system::strchrnul(p.offset(1), C_SLASH as c_int);
+            zeroedp = p;
+            endname = p;
+            if *p != C_NUL {
+                esc = (mesclen(name, p, mesc) & 1) as c_uint;
+                zeroedp = zeroedp.offset(-(esc as isize));
+                endname = endname.offset(1);
+            }
+            c = *zeroedp as c_int;
+            *zeroedp = C_NUL;
+            name_len = name_len.wrapping_sub(endname.offset_from(name) as c_uint);
+            matchdot = 0;
+            pat = start;
+            p = pat;
+            if *p == mesc {
+                p = p.offset(1);
+            }
+            if *p == C_DOT {
+                matchdot += 1;
+            }
+            loop {
+                dp = libc::readdir64(dirp);
+                if dp.is_null() {
+                    break;
+                }
+                let dname: *mut c_char = (*dp).d_name.as_mut_ptr();
+
+                'check_int: {
+                    if *dname == C_DOT && matchdot == 0 {
+                        break 'check_int; /* goto check_int */
+                    }
+                    if c != 0
+                        && (*dp).d_type != libc::DT_DIR
+                        && (*dp).d_type != libc::DT_LNK
+                        && (*dp).d_type != libc::DT_UNKNOWN
+                    {
+                        break 'check_int; /* goto check_int */
+                    }
+                    len = libc::strlen(dname) + 1;
+                    p = dname;
+                    if !FNMATCH_IS_ENABLED {
+                        expdest = enddir;
+                        memtodest(p, len, EXP_MBCHAR | EXP_KEEPNUL);
+                        cp = stackblock();
+                        enddir = cp.offset(expdir_len as isize);
+                        p = enddir;
+                    }
+                    if pmatch(pat, p) != 0 {
+                        enddir = crate::memalloc::stnputs(dname, len, enddir);
+                        if c == 0 {
+                            cp = addfnamealt(enddir, expdir_len);
+                        } else {
+                            *enddir.offset(-1) = C_SLASH;
+                            len += expdir_len;
+                            cp = expmeta(endname, name_len, len);
+                        }
+                        enddir = cp.offset(expdir_len as isize);
+                    }
+                }
+                /* check_int: */
+                if int_pending() != 0 {
+                    break;
+                }
+            }
+            *zeroedp = c as c_char;
+        }
+
+        /* out: */
+        /* NOTE: `closedir(NULL)` is reachable here in the C when the
+         * (never-installed) handler fires before `opendir`; glibc
+         * tolerates a NULL argument. */
+        libc::closedir(ptr::read_volatile(&dirp));
+    }
+
+    /* out_opendir: */
+    crate::error::handler = savehandler;
+    if err != 0 {
+        crate::error::raise_longjmp(crate::error::handler, 1);
+    }
+    cp
+}
+
+/*
+ * Add a file name to the list.
+ */
+
+// [spec:dash:def:expand.addfname-fn]
+// [spec:dash:sem:expand.addfname-fn]
+unsafe fn addfname(name: *mut c_char) {
+    addfname_common(crate::mystring::sstrdup(name));
+}
+
+/*
+ * Sort the results of file name expansion.  It calculates the number of
+ * strings to sort and then calls msort (short for merge sort) to do the
+ * work.
+ */
+
+// [spec:dash:def:expand.expsort-fn]
+// [spec:dash:sem:expand.expsort-fn]
+unsafe fn expsort(str: *mut strlist) -> *mut strlist {
+    let mut len: c_int;
+    let mut sp: *mut strlist;
+
+    len = 0;
+    sp = str;
+    while !sp.is_null() {
+        len += 1;
+        sp = (*sp).next;
+    }
+    msort(str, len)
+}
+
+// [spec:dash:def:expand.msort-fn]
+// [spec:dash:sem:expand.msort-fn]
+unsafe fn msort(mut list: *mut strlist, len: c_int) -> *mut strlist {
+    let mut p: *mut strlist;
+    let mut q: *mut strlist = ptr::null_mut();
+    let mut lpp: *mut *mut strlist;
+    let half: c_int;
+    let mut n: c_int;
+
+    if len <= 1 {
+        return list;
+    }
+    half = len >> 1;
+    p = list;
+    n = half;
+    loop {
+        n -= 1;
+        if n < 0 {
+            break;
+        }
+        q = p;
+        p = (*p).next;
+    }
+    (*q).next = ptr::null_mut(); /* terminate first half of list */
+    q = msort(list, half); /* sort first half of list */
+    p = msort(p, len - half); /* sort second half */
+    lpp = &mut list;
+    loop {
+        if libc::strcoll((*p).text, (*q).text) < 0 {
+            *lpp = p;
+            lpp = &mut (*p).next;
+            p = *lpp;
+            if p.is_null() {
+                *lpp = q;
+                break;
+            }
+        } else {
+            *lpp = q;
+            lpp = &mut (*q).next;
+            q = *lpp;
+            if q.is_null() {
+                *lpp = p;
+                break;
+            }
+        }
+    }
+    list
+}
+
+/*
+ * Returns true if the pattern matches the string.
+ */
+
+// [spec:dash:def:expand.patmatch-fn]
+// [spec:dash:sem:expand.patmatch-fn]
+#[inline]
+unsafe fn patmatch(pattern: *mut c_char, string: *const c_char) -> c_int {
+    pmatch(preglob(pattern, 0), string)
+}
+
+// [spec:dash:def:expand.ccmatch-fn]
+// [spec:dash:sem:expand.ccmatch-fn]
+#[inline(never)]
+unsafe fn ccmatch(mut p: *mut c_char, mbc: *const c_char, ml: c_int, r: *mut *mut c_char) -> c_int {
+    let mut mbst: libc::mbstate_t = mem::zeroed();
+    let type_: wctype_t;
+    let mut wc: wchar_t = 0;
+    let q: *mut c_char;
+
+    *r = ptr::null_mut();
+
+    if *p != C_COLON {
+        return 0;
+    }
+    p = p.offset(1);
+
+    q = libc::strstr(p, b":]\0".as_ptr() as *const c_char);
+    if q.is_null() {
+        return 0;
+    }
+
+    *q = 0;
+    type_ = wctype(p);
+    *q = C_COLON;
+
+    if type_ == 0 as wctype_t {
+        return 0;
+    }
+
+    *r = q.offset(2);
+
+    if mbrtowc(&mut wc, mbc, ml as size_t, &mut mbst) != ml as size_t {
+        return 0;
+    }
+
+    iswctype(wc as wint_t, type_)
+}
+
+// [spec:dash:def:expand.pmatch-fn]
+// [spec:dash:sem:expand.pmatch-fn]
+unsafe fn pmatch(pattern: *mut c_char, string: *const c_char) -> c_int {
+    let mut q: *const c_char;
+    let mut mb: c_uint;
+    let mut p: *mut c_char;
+    let mut c: c_char;
+
+    if FNMATCH_IS_ENABLED {
+        return (libc::fnmatch(pattern, string, 0) == 0) as c_int;
+    }
+
+    p = pattern;
+    q = string;
+    'forever: loop {
+        'dft: {
+            c = *p;
+            p = p.offset(1);
+            match c {
+                C_NUL => break 'forever, /* goto breakloop */
+                CTLESC => {
+                    c = *p;
+                    p = p.offset(1);
+                    /* break — fall through to dft */
+                }
+                C_QUESTION => {
+                    if *q == C_NUL {
+                        return 0;
+                    }
+                    mb = mbnext(q);
+                    q = q.offset(((mb >> 8) + (mb & 0xff)) as isize);
+                    continue 'forever;
+                }
+                C_STAR => {
+                    c = *p;
+                    while c == C_STAR {
+                        p = p.offset(1);
+                        c = *p;
+                    }
+                    if c == C_NUL {
+                        return 1;
+                    }
+                    if c == C_QUESTION || c == C_LBRACKET {
+                        c = CTLESC;
+                    }
+                    loop {
+                        if c != CTLESC {
+                            /* Stop should be null-terminated
+                             * as it is passed as a string to
+                             * strpbrk(3).
+                             */
+                            let stop: [c_char; 4] = [c, CTLESC, CTLMBCHAR, 0];
+                            q = libc::strpbrk(q, stop.as_ptr());
+                            if q.is_null() {
+                                return 0;
+                            }
+                        }
+                        if pmatch(p, q) != 0 {
+                            return 1;
+                        }
+                        if *q == C_NUL {
+                            break;
+                        }
+                        mb = mbnext(q);
+                        q = q.offset(((mb >> 8) + (mb & 0xff)) as isize);
+                    }
+                    return 0;
+                }
+                C_LBRACKET => {
+                    let startp: *mut c_char;
+                    let mut invert: c_int;
+                    let mut found: c_int;
+                    let chr: c_char;
+
+                    startp = p;
+                    invert = 0;
+                    if *p == C_BANG || *p == C_CARET {
+                        invert += 1;
+                        p = p.offset(1);
+                    }
+                    found = 0;
+                    mb = mbnext(q);
+                    q = q.offset((mb & 0xff) as isize);
+                    mb >>= 8;
+                    chr = *q;
+                    if chr == C_NUL {
+                        return 0;
+                    }
+                    c = *p;
+                    p = p.offset(1);
+                    loop {
+                        'cont: {
+                            let mut mbp: c_uint = 0;
+                            /* NOTE (bug-for-bug): `mbs` starts as the
+                             * address of the *local* `c`; when the string
+                             * character is multibyte the `strncmp` below
+                             * reads `mb` bytes from it, past the end of
+                             * that single byte.  Reproduced. */
+                            let mut mbs: *const c_char = &c as *const c_char;
+
+                            if c == C_NUL {
+                                p = startp;
+                                c = C_LBRACKET;
+                                break 'dft; /* goto dft */
+                            }
+                            if c == C_LBRACKET {
+                                let mut r: *mut c_char = ptr::null_mut();
+
+                                found |= (ccmatch(
+                                    p,
+                                    q,
+                                    (if mb > 1 { mb - 2 } else { mb }) as c_int,
+                                    &mut r,
+                                ) != 0) as c_int;
+                                if !r.is_null() {
+                                    p = r;
+                                    break 'cont; /* continue */
+                                }
+                            } else if c == CTLESC {
+                                c = *p;
+                                p = p.offset(1);
+                            } else if c == CTLMBCHAR {
+                                p = p.offset(-1);
+                                mbp = mbnext(p);
+                                p = p.offset((mbp & 0xff) as isize);
+                                mbs = p;
+                                mbp >>= 8;
+                                p = p.offset(mbp as isize);
+                            }
+                            if *p == C_MINUS
+                                && *p.offset(1) != C_NUL
+                                && *p.offset(1) != C_RBRACKET
+                            {
+                                p = p.offset(1);
+                                if *p == CTLESC {
+                                    p = p.offset(1);
+                                } else if *p == CTLMBCHAR {
+                                    mbp = mbnext(p);
+                                    p = p.offset((mbp & 0xff) as isize);
+                                    p = p.offset((mbp >> 8) as isize);
+                                    break 'cont; /* continue */
+                                }
+                                if (mbp | mb.wrapping_sub(1)) == 0 && chr >= c && chr <= *p {
+                                    found = 1;
+                                }
+                                p = p.offset(1);
+                            } else if libc::strncmp(mbs, q, mb as size_t) == 0 {
+                                found = 1;
+                            }
+                        }
+                        /* } while ((c = *p++) != ']'); */
+                        c = *p;
+                        p = p.offset(1);
+                        if c == C_RBRACKET {
+                            break;
+                        }
+                    }
+                    if found == invert {
+                        return 0;
+                    }
+                    q = q.offset(mb as isize);
+                    continue 'forever;
+                }
+                CTLMBCHAR => {
+                    p = p.offset(-1);
+                    mb = mbnext(p);
+                    p = p.offset((mb & 0xff) as isize);
+                    mb = mbnext(q);
+                    q = q.offset((mb & 0xff) as isize);
+                    mb >>= 8;
+
+                    if libc::strncmp(p.offset(-1), q.offset(-1), (mb + 1) as size_t) != 0 {
+                        return 0;
+                    }
+
+                    p = p.offset(mb as isize);
+                    q = q.offset(mb as isize);
+                    continue 'forever;
+                }
+                _ => {}
+            }
+        }
+        /* dft: */
+        mb = mbnext(q);
+        if (mb >> 8) > 1 {
+            return 0;
+        }
+        q = q.offset((mb & 0xff) as isize);
+        if *q != c {
+            return 0;
+        }
+        q = q.offset((mb >> 8) as isize);
+    }
+    /* breakloop: */
+    if *q != C_NUL {
+        return 0;
+    }
+    1
+}
+
+/*
+ * Remove any CTLESC characters from a string.
+ */
+
+// [spec:dash:def:expand.rmescapes-fn]
+// [spec:dash:sem:expand.rmescapes-fn]
+pub unsafe fn _rmescapes(mut str: *mut c_char, flag: c_int) -> *mut c_char {
+    let mut p: *mut c_char;
+    let mut q: *mut c_char;
+    let mut r: *mut c_char;
+    let mut notescaped: c_int;
+    let globbing: c_int;
+    let mut inquotes: c_int;
+
+    p = libc::strpbrk(str, crate::mystring::cqchars.as_ptr());
+    if p.is_null() {
+        return str;
+    }
+    q = p;
+    r = str;
+    globbing = flag & RMESCAPE_GLOB;
+
+    if (flag & RMESCAPE_ALLOC) != 0 {
+        let len: size_t = p.offset_from(str) as size_t;
+        let mut fulllen: size_t = libc::strlen(p);
+
+        if FNMATCH_IS_ENABLED && globbing != 0 {
+            fulllen *= 2;
+        }
+
+        fulllen += len + 1;
+
+        if (flag & RMESCAPE_GROW) != 0 {
+            let strloc: c_int = str.offset_from(stackblock()) as c_int;
+
+            r = crate::memalloc::makestrspace(fulllen, expdest);
+            str = stackblock().offset(strloc as isize);
+            p = str.offset(len as isize);
+        } else if (flag & RMESCAPE_HEAP) != 0 {
+            r = crate::memalloc::ckmalloc(fulllen) as *mut c_char;
+        } else {
+            r = crate::memalloc::stalloc(fulllen) as *mut c_char;
+        }
+        q = r;
+        if len > 0 {
+            q = crate::system::mempcpy(q as *mut c_void, str as *const c_void, len) as *mut c_char;
+        }
+    }
+    inquotes = 0;
+    notescaped = globbing;
+    'whileloop: while *p != C_NUL {
+        let mut c: c_int = *p as c_int;
+        let mut newnesc: c_int = globbing;
+        let mb: c_uint;
+        let mut ml: c_uint;
+
+        'setnesc: {
+            if c == CTLQUOTEMARK as c_int {
+                p = p.offset(1);
+                inquotes ^= globbing;
+                continue 'whileloop;
+            } else if c == C_BACKSLASH as c_int {
+                /* naked back slash */
+                newnesc ^= notescaped;
+                /* naked backslashes can only occur outside quotes */
+                inquotes = 0;
+                if !FNMATCH_IS_ENABLED && notescaped != 0 {
+                    c = CTLESC as c_int;
+                }
+            } else if c == CTLESC as c_int {
+                if ((notescaped ^ inquotes) & inquotes) != 0 {
+                    if FNMATCH_IS_ENABLED {
+                        *q = C_BACKSLASH;
+                        q = q.offset(1);
+                    } else {
+                        *q.offset(-1) = C_BACKSLASH;
+                    }
+                }
+                if globbing != 0 {
+                    *q = if FNMATCH_IS_ENABLED {
+                        C_BACKSLASH
+                    } else {
+                        CTLESC
+                    };
+                    q = q.offset(1);
+                }
+
+                p = p.offset(1);
+                c = *p as c_int;
+            } else if c == CTLMBCHAR as c_int {
+                let mut tail: c_uint = 2;
+
+                if !FNMATCH_IS_ENABLED && (globbing ^ notescaped) != 0 {
+                    q = q.offset(-1);
+                }
+
+                mb = mbnext(p);
+                ml = mb >> 8;
+
+                if globbing == 0 || FNMATCH_IS_ENABLED {
+                    p = p.offset((mb & 0xff) as isize);
+                    ml -= 2;
+                } else {
+                    ml += mb & 0xff;
+                    tail = 0;
+                }
+
+                libc::memmove(q as *mut c_void, p as *const c_void, ml as size_t);
+                q = q.offset(ml as isize);
+                p = p.offset((ml + tail) as isize);
+                break 'setnesc; /* goto setnesc */
+            }
+
+            *q = c as c_char;
+            q = q.offset(1);
+            p = p.offset(1);
+        }
+        /* setnesc: */
+        notescaped = newnesc;
+    }
+    if !FNMATCH_IS_ENABLED && (globbing ^ notescaped) != 0 {
+        *q.offset(-1) = C_BACKSLASH;
+    }
+    *q = C_NUL;
+    if (flag & (RMESCAPE_ALLOC | RMESCAPE_GROW)) != 0 {
+        expdest = r;
+        /* STADJUST(q - r + 1, expdest) */
+        expdest = expdest.offset(q.offset_from(r) + 1);
+    }
+    r
+}
+
+/*
+ * See if a pattern matches in a case statement.
+ */
+
+// [spec:dash:def:expand.casematch-fn]
+// [spec:dash:sem:expand.casematch-fn]
+pub unsafe fn casematch(pattern: *mut crate::nodes::node, val: *mut c_char) -> c_int {
+    let mut smark: crate::memalloc::stackmark = mem::zeroed();
+    let result: c_int;
+
+    crate::memalloc::setstackmark(&mut smark);
+    argbackq = (*pattern).narg.backquote;
+    /* STARTSTACKSTR(expdest) */
+    expdest = stackblock();
+    argstr((*pattern).narg.text, EXP_TILDE | EXP_CASE);
+    ifsfree();
+    result = patmatch(stackblock(), val);
+    crate::memalloc::popstackmark(&mut smark);
+    result
+}
+
+/*
+ * Our own itoa().
+ */
+
+// [spec:dash:def:expand.cvtnum-fn]
+// [spec:dash:sem:expand.cvtnum-fn]
+unsafe fn cvtnum(num: intmax_t, flags: c_int) -> size_t {
+    let mut len: c_int = crate::shell::max_int_length(mem::size_of::<intmax_t>() as c_int);
+    /* `char buf[len]` — a VLA of max_int_length(sizeof(intmax_t)) == 32.
+     * A fixed 64-byte backing array with the same `len` bound handed to
+     * fmtstr is behaviourally identical. */
+    let mut buf: [c_char; 64] = [0; 64];
+
+    len = crate::fmtstr!(
+        buf.as_mut_ptr(),
+        len as size_t,
+        b"%jd\0".as_ptr() as *const c_char,
+        num,
+    );
+    memtodest(buf.as_ptr(), len as size_t, flags)
+}
+
+// [spec:dash:def:expand.varunset-fn]
+// [spec:dash:sem:expand.varunset-fn]
+unsafe fn varunset(
+    end: *const c_char,
+    var: *const c_char,
+    umsg: *const c_char,
+    varflags: c_int,
+) -> ! {
+    let mut msg: *const c_char;
+    let mut tail: *const c_char;
+
+    tail = crate::shell::nullstr.as_ptr();
+    msg = b"parameter not set\0".as_ptr() as *const c_char;
+    if !umsg.is_null() {
+        if *end == CTLENDVAR {
+            if (varflags & VSNUL) != 0 {
+                tail = b" or null\0".as_ptr() as *const c_char;
+            }
+        } else {
+            msg = umsg;
+        }
+    }
+    crate::sh_error!(
+        b"%.*s: %s%s\0".as_ptr() as *const c_char,
+        (end.offset_from(var) - 1) as c_int,
+        var,
+        msg,
+        tail,
+    )
+}
+
+// [spec:dash:def:expand.restore-handler-expandarg-fn]
+// [spec:dash:sem:expand.restore-handler-expandarg-fn]
+pub unsafe fn restore_handler_expandarg(savehandler: *mut crate::error::jmploc, err: c_int) {
+    crate::error::handler = savehandler;
+    if err != 0 {
+        if crate::error::exception != crate::error::EXERROR {
+            crate::error::raise_longjmp(crate::error::handler, 1);
+        }
+        ifsfree();
+    }
+}
+
+/* #ifdef mkinit
+ *
+ * INCLUDE "expand.h"
+ *
+ * EXITRESET {
+ *	ifsfree();
+ * }
+ *
+ * #endif
+ *
+ * The EXITRESET hook is emitted into init.c by mkinit; it belongs to the
+ * generated `init` module, not here.
+ */
+
+// ---------------------------------------------------------------------
+// Prototypes declared in expand.h that have no definition in expand.c.
+// They exist here only so that every manifest symbol has a target site.
+// ---------------------------------------------------------------------
+
+/// `intmax_t arith(const char *)` — prototype only; the definition lives
+/// in `arith.y` / `arith_yacc.c`.  Re-exported so that `expand`'s view of
+/// the symbol resolves to the real one.
+// [spec:dash:def:expand.arith-fn]
+// [spec:dash:sem:expand.arith-fn]
+pub use crate::arith_yacc::arith;
+
+/// `int expcmd(int, char **)` — declared in `expand.h` but defined
+/// nowhere in the C tree; a vestige of a removed builtin.  There is
+/// nothing to port, so this is an unreachable stub kept purely as the
+/// symbol's target site.
+// [spec:dash:def:expand.expcmd-fn]
+// [spec:dash:sem:expand.expcmd-fn]
+pub unsafe fn expcmd(_argc: c_int, _argv: *mut *mut c_char) -> c_int {
+    /* No definition exists in the C tree; calling this is a bug. */
+    unreachable!("expcmd: declared in expand.h, never defined")
+}
+
+/// ```c
+/// #ifdef USE_LEX
+/// void arith_lex_reset(void);
+/// #else
+/// #define arith_lex_reset()
+/// #endif
+/// ```
+/// In the shipped build (`arith_yylex.c`, no generated lexer) this is a
+/// macro expanding to nothing, so the port is an empty function.
+// [spec:dash:def:expand.arith-lex-reset-fn]
+// [spec:dash:sem:expand.arith-lex-reset-fn]
+#[inline]
+pub unsafe fn arith_lex_reset() {}
+
+/// `int yylex(void)` — prototype only, declared in `expand.h` for the
+/// arithmetic parser's benefit; the definition lives in `arith_yylex.c`.
+// [spec:dash:def:expand.yylex-fn]
+// [spec:dash:sem:expand.yylex-fn]
+pub use crate::arith_yylex::yylex;

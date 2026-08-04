@@ -1,0 +1,57 @@
+// Two specs are tracked against this repo, and they answer different
+// questions. Keep them apart in your head:
+//
+//   dash   — "does the Rust port behave exactly like dash's C?"
+//            Derived FROM the C, so a rule here describes what dash
+//            does, bugs included. 534 rules, one per ported symbol.
+//
+//   posix  — "does the shell conform to POSIX.1-2024?"
+//            Derived FROM the standard, so a rule here describes what
+//            the standard REQUIRES. 705 rules over XCU chapter 2 and
+//            the `sh` page. See posix/README.md.
+//
+// These will disagree, and that is the point: dash deliberately
+// deviates from POSIX in places. An uncovered posix rule therefore
+// means "not established", NOT "port bug" — a deviation the port
+// faithfully reproduces is correct behaviour for the `dash` spec and a
+// genuine non-conformance for the `posix` one. Do not "fix" the port to
+// satisfy a posix rule; that would break the bug-for-bug contract.
+//
+// nspec keys coverage on the BARE rule id — namespace and verb are
+// dropped — so an id used by both corpora would silently merge into one
+// rule. There are currently 0 such collisions, but the prefixes
+// `expand.`, `redir.` and `shell.` appear in both, so check before
+// adding rules under those.
+specs (
+    {
+        name dash,
+        include (docs/spec/port/**/*.md),
+        source_url "https://git.kernel.org/pub/scm/utils/dash/dash.git",
+        impls (
+            {name source-impl, languages (@c), include (src/**/*.c src/**/*.h), mode @impl-only}
+            {name target-impl, languages (@rust), include (crates/**/*.rs), exclude (target/**), mode @both}
+        )
+    }
+    {
+        name posix,
+        include (posix/docs/spec/**/*.md),
+        source_url "https://pubs.opengroup.org/onlinepubs/9799919799/",
+        impls (
+            // Conformance is a property of the shell we ship, so it is
+            // claimed on the Rust port. The C is not a second impl here:
+            // it cannot carry inline annotations (it stays byte-identical
+            // to upstream), and since the port is bug-for-bug, a claim
+            // about one is a claim about the other.
+            // Python files are verification sites only: the shipped shell
+            // remains the Rust implementation, while the rule-driven harness
+            // carries `[spec:posix:.../test]` evidence.
+            {
+                name shell
+                languages (@rust @python)
+                include (crates/**/*.rs posix/harness/**/*.py)
+                exclude (target/**)
+                mode @both
+            }
+        )
+    }
+)

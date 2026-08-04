@@ -1,0 +1,18 @@
+[workspace]
+members = ["crates/dash"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "BSD-3-Clause"
+
+# The port replaces C's setjmp/longjmp with catch_unwind over a typed
+# payload (see eval::setjmp_catch). That mechanism REQUIRES unwinding;
+# `panic = "abort"` would silently break every shell exception path —
+# errors, interrupts, `exit` and the `set -e` unwind. Do not change
+# these without replacing the exception mechanism first.
+[profile.dev]
+panic = "unwind"
+
+[profile.release]
+panic = "unwind"
