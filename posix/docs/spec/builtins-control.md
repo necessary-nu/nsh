@@ -56,7 +56,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 2.15 Special Built-In Utilities — utilities/V3_chap02.html#tag_19_15
 
-> [spec:posix:req:builtin.special.utility-syntax-guidelines]
 > Some of the special built-ins are described as conforming to XBD 12.2 Utility
 > Syntax Guidelines. For those that are not, the requirement in 1.4 Utility
 > Description Defaults that `"--"` be recognized as a first argument to be

@@ -1,0 +1,73 @@
+{
+  "rules": {
+    "builtin.bg.env-locale": {
+      "disposition": "manual",
+      "reason": "A heading introducing the LANG/LC_* block: the listed variables affect only the byte interpretation of arguments and the wording of diagnostics, which POSIX leaves unspecified. The harness pins LC_ALL=C, so there is nothing observable to assert."
+    },
+    "builtin.bg.env-nlspath": {
+      "disposition": "conditional",
+      "reason": "XSI-shaded: 'NLSPATH determines the location of messages objects and message catalogs'. Gated on the XSI option rather than inapplicable. The requirement locates catalogs; dash ships none and emits only built-in English diagnostics, so on this host there is no catalog for NLSPATH to point at and no observable difference to assert. Recorded as conditional so it is not mistaken for a dismissed obligation."
+    },
+    "builtin.break.non-lexical-loop-unspecified": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: \"it is unspecified whether that loop encloses the command\". Whether `break n` reaches a non-lexically enclosing loop in the same execution environment is therefore not a conformance question; the lexical cases are asserted by builtin.break.exit-nth-loop and builtin.break.lexically-enclosing."
+    },
+    "builtin.exit.invalid-n-unspecified": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified for an n that is not an unsigned decimal integer, equals 256, or exceeds 256 without corresponding to a signal-terminated status: \"the wait status of the shell or subshell is unspecified\"."
+    },
+    "builtin.export.no-arguments": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: \"When no arguments are given, the results are unspecified.\" (The -p form, which IS specified, is covered separately by builtin.export.p-output-format and builtin.export.p-output-reinput.)"
+    },
+    "builtin.fg.env-locale": {
+      "disposition": "manual",
+      "reason": "A heading introducing the LANG/LC_* block: the listed variables affect only the byte interpretation of arguments and the wording of diagnostics, which POSIX leaves unspecified. The harness pins LC_ALL=C, so there is nothing observable to assert."
+    },
+    "builtin.fg.env-nlspath": {
+      "disposition": "conditional",
+      "reason": "XSI-shaded: 'NLSPATH determines the location of messages objects and message catalogs'. Gated on the XSI option rather than inapplicable. The requirement locates catalogs; dash ships none and emits only built-in English diagnostics, so on this host there is no catalog for NLSPATH to point at and no observable difference to assert. Recorded as conditional so it is not mistaken for a dismissed obligation."
+    },
+    "builtin.jobs.env-locale": {
+      "disposition": "manual",
+      "reason": "A heading introducing the LANG/LC_* block: the listed variables affect only the byte interpretation of arguments and the wording of diagnostics, which POSIX leaves unspecified. The harness pins LC_ALL=C, so there is nothing observable to assert."
+    },
+    "builtin.jobs.env-nlspath": {
+      "disposition": "conditional",
+      "reason": "XSI-shaded: 'NLSPATH determines the location of messages objects and message catalogs'. Gated on the XSI option rather than inapplicable. The requirement locates catalogs; dash ships none and emits only built-in English diagnostics, so on this host there is no catalog for NLSPATH to point at and no observable difference to assert. Recorded as conditional so it is not mistaken for a dismissed obligation."
+    },
+    "builtin.readonly.application-constraint": {
+      "disposition": "not-applicable",
+      "reason": "Binds conforming applications rather than the shell, and states its consequence permissively: \"as it may render those utilities unable to complete successfully\". Marking a built-in-manipulated variable readonly is something the application shall not do; once it does, POSIX requires nothing of the shell, so neither completing nor failing the built-in can be judged."
+    },
+    "builtin.readonly.no-arguments": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: \"When no arguments are given, the results are unspecified.\" (The -p form, which IS specified, is covered separately by builtin.readonly.p-output-format and builtin.readonly.p-output-reinput.)"
+    },
+    "builtin.set.first-argument-hyphen": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified when the first argument is a lone hyphen: \"the results are unspecified\"."
+    },
+    "builtin.special.not-exec-accessible": {
+      "disposition": "not-applicable",
+      "reason": "Permissive: the special built-ins \"need not be provided in a manner accessible via the exec family of functions\". Neither providing nor withholding an executable file of that name can fail."
+    },
+    "builtin.special.term-built-in": {
+      "disposition": "not-applicable",
+      "reason": "Terminology plus a permission: it fixes the word built-in and then leaves the choice open, \"An implementation may choose to make any utility a built-in\". The one behavioural claim it makes in passing, that special built-ins differ in error handling and in the effect of preceding variable assignments, is stated normatively and asserted elsewhere by builtin.special.error-may-abort-shell and builtin.special.preceding-assignments-persist."
+    },
+    "builtin.trap.kill-stop-undefined": {
+      "disposition": "not-applicable",
+      "reason": "Undefined behaviour: \"Setting a trap for SIGKILL or SIGSTOP produces undefined results.\" No outcome can be non-conformant."
+    },
+    "builtin.trap.signal-name-extensions": {
+      "disposition": "not-applicable",
+      "reason": "Permissive extension: \"Implementations may permit names with the SIG prefix or ignore case in signal names as an extension.\" Accepting or rejecting SIGINT and int are both conformant."
+    },
+    "builtin.trap.subshell-lexical-check": {
+      "disposition": "not-applicable",
+      "reason": "Permissive: \"Implementations may check for the single-trap-command command substitution case using only lexical analysis\", so either analysis strategy conforms."
+    }
+  },
+  "version": 1
+}

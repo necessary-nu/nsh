@@ -1,0 +1,69 @@
+{
+  "rules": {
+    "builtin.cd.curpath": {
+      "disposition": "not-applicable",
+      "reason": "Names an intermediate value used only to describe the algorithm, and the standard says so outright: \"There is no requirement that curpath be made visible to the application.\" Every step that manipulates curpath is asserted separately by the builtin.cd.step* rules."
+    },
+    "builtin.cd.env-locale": {
+      "disposition": "manual",
+      "reason": "LC_CTYPE only changes 'the interpretation of sequences of bytes of text data as characters ... in arguments' and LC_MESSAGES only 'the format and contents of diagnostic messages', whose wording POSIX leaves unspecified. Observing either needs an installed non-POSIX locale, and every harness case is pinned to LC_ALL=C/LANG=C for determinism."
+    },
+    "builtin.cd.env-nlspath": {
+      "disposition": "conditional",
+      "reason": "XSI-shaded: 'NLSPATH determines the location of messages objects and message catalogs'. Gated on the XSI option rather than inapplicable. The requirement locates catalogs; dash ships none and emits only built-in English diagnostics, so on this host there is no catalog for NLSPATH to point at and no observable difference to assert. Recorded as conditional so it is not mistaken for a dismissed obligation."
+    },
+    "builtin.cd.stdout-undeterminable-pathname": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: \"it is unspecified whether nothing is written to the standard output or the value of curpath used in step 10, followed by a <newline>, is written to the standard output\". Both outcomes conform, so no assertion can be made about a cd whose absolute pathname cannot be determined."
+    },
+    "builtin.cd.step1-no-operand-no-home": {
+      "disposition": "not-applicable",
+      "reason": "With no directory operand and an empty or unset HOME, \"the default behavior is implementation-defined\". The residual \"no further steps shall be taken\" has no observable of its own: any implementation-defined default is indistinguishable from having run the remaining steps, since there is no operand for step 5 to search CDPATH with."
+    },
+    "builtin.cd.step8-further-simplification": {
+      "disposition": "not-applicable",
+      "reason": "Permissive: \"An implementation may further simplify curpath\" by removing trailing and redundant <slash> characters. The rule's only normative clause is contingent on that optional simplification producing a null curpath, so an implementation that declines the simplification never reaches it and cannot fail it."
+    },
+    "builtin.kill.env-nlspath": {
+      "disposition": "conditional",
+      "reason": "XSI-shaded: 'NLSPATH determines the location of messages objects and message catalogs'. Gated on the XSI option rather than inapplicable. The requirement locates catalogs; dash ships none and emits only built-in English diagnostics, so on this host there is no catalog for NLSPATH to point at and no observable difference to assert. Recorded as conditional so it is not mistaken for a dismissed obligation."
+    },
+    "builtin.kill.env-vars": {
+      "disposition": "manual",
+      "reason": "LC_CTYPE affects only 'the interpretation of sequences of bytes of text data as characters ... in arguments' and LC_MESSAGES only diagnostic text; signal names are ASCII in every locale. Requires an installed non-POSIX locale, and the harness pins LC_ALL=C and LANG=C."
+    },
+    "builtin.ulimit.env-locale": {
+      "disposition": "manual",
+      "reason": "LANG/LC_ALL/LC_CTYPE/LC_MESSAGES affect only argument byte interpretation and diagnostic message text; the one locale-sensitive normative statement elsewhere ('in the POSIX locale the following format shall be used: \"unlimited\\n\"') is asserted by proc-ulimit-report-or-set. Observing the rest needs an installed non-POSIX locale, and the harness pins LC_ALL=C."
+    },
+    "builtin.ulimit.env-nlspath": {
+      "disposition": "conditional",
+      "reason": "XSI-shaded: 'NLSPATH determines the location of messages objects and message catalogs'. Gated on the XSI option rather than inapplicable. The requirement locates catalogs; dash ships none and emits only built-in English diagnostics, so on this host there is no catalog for NLSPATH to point at and no observable difference to assert. Recorded as conditional so it is not mistaken for a dismissed obligation."
+    },
+    "builtin.ulimit.repeated-option-unspecified": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: \"If any option other than -H or -S is repeated, the behavior is unspecified.\""
+    },
+    "builtin.umask.env-locale": {
+      "disposition": "manual",
+      "reason": "Same four internationalization variables as cd: LC_CTYPE affects only byte-to-character interpretation of arguments and LC_MESSAGES only diagnostic text POSIX leaves unspecified. Requires an installed non-POSIX locale; the harness pins LC_ALL=C and LANG=C."
+    },
+    "builtin.umask.env-nlspath": {
+      "disposition": "conditional",
+      "reason": "XSI-shaded: 'NLSPATH determines the location of messages objects and message catalogs'. Gated on the XSI option rather than inapplicable. The requirement locates catalogs; dash ships none and emits only built-in English diagnostics, so on this host there is no catalog for NLSPATH to point at and no observable difference to assert. Recorded as conditional so it is not mistaken for a dismissed obligation."
+    },
+    "builtin.umask.non-permission-bits-unspecified": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: \"The interpretation of mode values that specify file mode bits other than the file permission bits is unspecified.\""
+    },
+    "builtin.wait.env-nlspath": {
+      "disposition": "conditional",
+      "reason": "XSI-shaded: 'NLSPATH determines the location of messages objects and message catalogs'. Gated on the XSI option rather than inapplicable. The requirement locates catalogs; dash ships none and emits only built-in English diagnostics, so on this host there is no catalog for NLSPATH to point at and no observable difference to assert. Recorded as conditional so it is not mistaken for a dismissed obligation."
+    },
+    "builtin.wait.env-vars": {
+      "disposition": "manual",
+      "reason": "LC_CTYPE affects only byte-to-character interpretation of arguments (wait takes only decimal pids and job IDs) and LC_MESSAGES only diagnostic text POSIX leaves unspecified. Requires an installed non-POSIX locale; the harness pins LC_ALL=C and LANG=C."
+    }
+  },
+  "version": 1
+}

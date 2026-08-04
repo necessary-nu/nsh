@@ -1,0 +1,125 @@
+{
+  "rules": {
+    "sh.envvar-fcedit": {
+      "disposition": "conditional",
+      "reason": "Marked `[UP]` (User Portability Utilities, optional). It fixes 'the default value for the -e editor option's editor option-argument' of fc; observing it requires the fc utility with a working history and an interactive editor session, which this shell declines with 'fc: history not active'."
+    },
+    "sh.envvar-histfile": {
+      "disposition": "conditional",
+      "reason": "Marked `[UP]`. Beyond the option marking the rule is almost entirely permissive or unspecified: 'the shell may attempt to access or create a file .sh_history', 'it shall use an unspecified mechanism', 'An implementation may choose to access this variable only when initializing the history file', 'it is unspecified how updates to the history file from those shells interact', 'It is unspecified when history file entries are physically removed'."
+    },
+    "sh.envvar-histsize": {
+      "disposition": "conditional",
+      "reason": "Marked `[UP]`. The only firm numbers are minima - 'an unspecified default greater than or equal to 128' and 'The maximum number of commands in the history list is unspecified, but shall be at least 128' - and 'it is unspecified whether changes made to HISTSIZE after the history file has been initialized are effective'."
+    },
+    "sh.envvar-lc-messages": {
+      "disposition": "manual",
+      "reason": "'LC_MESSAGES determines the locale that should be used to affect the format and contents of diagnostic messages written to standard error.' The format is declared unspecified elsewhere, so the only observable is a translated diagnostic; that requires a message catalog for this shell in a second locale, which does not exist."
+    },
+    "sh.envvar-nlspath": {
+      "disposition": "conditional",
+      "reason": "Marked `[XSI]`: 'NLSPATH determines the location of messages objects and message catalogs.' The shell ships no message catalog, so NLSPATH has nothing to locate."
+    },
+    "sh.option-o-without-option-argument": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: \"the behavior is unspecified\" when -o or +o is given without an option-argument."
+    },
+    "sh.redirection-offset-maximum": {
+      "disposition": "not-applicable",
+      "reason": "Left to the implementation: \"an implementation-defined offset maximum that is established in the open file description\", so the standard fixes no value to test against. The observable consequence, a redirection working past 2^32, is asserted by def-arbitrary-file-size."
+    },
+    "sh.stdin-blocking-reads": {
+      "disposition": "manual",
+      "reason": "'If the standard input to sh is a FIFO or terminal device and is set to non-blocking reads, then sh shall enable blocking reads on standard input.' The precondition requires O_NONBLOCK to be set on the descriptor between open() and the exec of the shell; no shell script or file fixture can arrange that, so it needs a purpose-built C launcher plus an fcntl(F_GETFL) check after the shell exits."
+    },
+    "xcu.async.may-catch-and-resignal": {
+      "disposition": "not-applicable",
+      "reason": "Purely permissive: \"the utility may catch the signal, perform some additional processing\", restore the default action and resignal itself. Nothing is required either way; the observable obligation is xcu.defaults.asynchronous-events-default, asserted by inv-signal-inherited-ignore and inv-signal-default-action."
+    },
+    "xcu.builtin.regular-permitted": {
+      "disposition": "not-applicable",
+      "reason": "Purely permissive: \"Any of the standard utilities may be implemented as regular built-in utilities\" within the command language interpreter. The complementary obligation is xcu.builtin.exec-accessible, asserted by def2-builtin-exec-accessible."
+    },
+    "xcu.errors.failure-reasons-unspecified": {
+      "disposition": "not-applicable",
+      "reason": "Declines to specify anything: the reasons for failure are generally not given, and \"Utilities may terminate prematurely if they encounter\" invalid usage, resource exhaustion, file access difficulties or privilege difficulties."
+    },
+    "xcu.grammar-notation.implementation-freedom": {
+      "disposition": "not-applicable",
+      "reason": "Purely permissive: \"Implementations may use other programming languages or algorithms\", as long as the syntax supported is the same as the grammar. The syntax obligation itself is carried by the grammar.* rules."
+    },
+    "xcu.input-files.document-size-limits": {
+      "disposition": "manual",
+      "reason": "A documentation obligation rather than a runtime one: 'Implementations shall document those utilities that are limited by constraints other than file system space, available memory, and other limits specifically cited by this volume of POSIX.1-2024, and identify what the constraint is and indicate a way of estimating when the constraint would be reached.' Satisfying it is a review of the implementation's documentation, not an executable observation."
+    },
+    "xcu.input-files.text-file-and-line-continuation": {
+      "disposition": "not-applicable",
+      "reason": "Undefined and permissive throughout: input that is not from a text file produces undefined results, \"the utility need not be able to accumulate more than {LINE_MAX} bytes\" from a set of continued lines, and end-of-file immediately after an escaped newline leaves \"the results are unspecified\". For sh the {LINE_MAX} clause is additionally overridden by sh.input-file-contents, asserted by inv-input-file-long-lines."
+    },
+    "xcu.intrinsic.additional-implementation-defined": {
+      "disposition": "not-applicable",
+      "reason": "Left to the implementation: \"Whether any additional utility is considered an intrinsic utility is implementation-defined\", followed by advice that implementations should not do so. Nothing is required either way; the named set is asserted by def-intrinsic-utilities."
+    },
+    "xcu.limits.more-liberal-values": {
+      "disposition": "not-applicable",
+      "reason": "Purely permissive: \"Implementations may provide more liberal, or less restrictive, values\" than the tabulated minima. The minima themselves are asserted by def2-limits-minimum-values and def2-limits-symbolic-retrieval."
+    },
+    "xcu.limits.posix2-symlinks": {
+      "disposition": "not-applicable",
+      "reason": "Nothing is fixed to test: \"The following value may be a constant within an implementation or may vary\" from one pathname to another, and \"for non-directory files, the meaning of {POSIX2_SYMLINKS} is undefined\"."
+    },
+    "xcu.limits.reachability-not-guaranteed": {
+      "disposition": "not-applicable",
+      "reason": "An explicit non-guarantee: an application cannot count on reaching a tabulated limit at all, because \"a lack of virtual memory or other resources may prevent this\"."
+    },
+    "xcu.operands.hyphen-means-stdin": {
+      "disposition": "not-applicable",
+      "reason": "Conditional on wording that no utility in this corpus states, and unspecified where it does apply: the use of multiple hyphen operands \"to mean standard input in a single command produces unspecified results\"."
+    },
+    "xcu.output-files.sigquit-bypasses-recovery": {
+      "disposition": "not-applicable",
+      "reason": "Advisory and hedged: \"Receipt of the SIGQUIT signal should generally cause termination\" (unless in some debugging mode) that would bypass any attempted recovery actions."
+    },
+    "xcu.output-files.tmpdir": {
+      "disposition": "not-applicable",
+      "reason": "Advice addressed to applications rather than an obligation on utilities: where applications use temporary or intermediate files, \"they should use the TMPDIR environment variable\", if it is set and represents an accessible directory."
+    },
+    "xcu.stderr.message-language": {
+      "disposition": "conditional",
+      "reason": "Carries `[XSI]` for the NLSPATH half and is otherwise unspecified plus advisory: 'The format of diagnostic messages for most utilities is unspecified, but the language and cultural conventions of diagnostic and informative messages whose format is unspecified ... should be affected by the setting of LC_MESSAGES and [XSI] NLSPATH.' With no message catalog for this shell there is no second language to observe."
+    },
+    "xcu.stderr.terminal-background": {
+      "disposition": "not-applicable",
+      "reason": "A permissive observation plus advice to applications: \"Use of a terminal for standard error may cause any of the standard utilities\" that write standard error output to stop when used in the background."
+    },
+    "xcu.stdin.terminal-background": {
+      "disposition": "not-applicable",
+      "reason": "A permissive observation plus advice to applications: a terminal on standard input can cause a utility to stop in the background, and \"applications should not use interactive features in scripts to be placed in the background\"."
+    },
+    "xcu.stdout.display-verb": {
+      "disposition": "not-applicable",
+      "reason": "Conditional on a verb sh never uses, and released even then: output from a utility that describes its output as displayed \"may be produced using means other than standard output\", and away from a terminal \"Otherwise, the results are undefined\"."
+    },
+    "xcu.stdout.terminal-background": {
+      "disposition": "not-applicable",
+      "reason": "A permissive observation plus advice to applications: \"Use of a terminal for standard output may cause any of the standard utilities\" that write standard output to stop when used in the background."
+    },
+    "xcurel.file-contents-nbytes": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: \"The value of *nbytes* in the above sequence is unspecified\". The remaining clause constrains only the size a reader passes to read(), which is not observable from outside the process."
+    },
+    "xcurel.file-contents-read-error": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: \"it is unspecified whether the contents of the file are considered to include any data from offsets in the file beyond where the error would be returned\"."
+    },
+    "xcurel.file-removal-active-directory": {
+      "disposition": "not-applicable",
+      "reason": "Left to the implementation: when the removed directory is the root or current working directory of a process, \"the effect is implementation-defined\"."
+    },
+    "xcurel.process-attributes-additional": {
+      "disposition": "not-applicable",
+      "reason": "Purely permissive: \"A conforming implementation may include additional process attributes\"."
+    }
+  },
+  "version": 1
+}

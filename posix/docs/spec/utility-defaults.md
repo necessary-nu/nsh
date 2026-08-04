@@ -13,7 +13,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ## 1.2 Utility Limits
 
-> [spec:posix:def:xcu.limits.braces-notation]
 > This section lists magnitude limitations imposed by a specific
 > implementation. The braces notation, {LIMIT}, is used in this volume of
 > POSIX.1-2024 to indicate these values, but the braces are not part of the
@@ -60,7 +59,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 1.2 Utility Limits — utilities/V3_chap01.html#tag_18_02
 
-> [spec:posix:req:xcu.limits.system-interfaces-apply]
 > All numeric limits defined by the System Interfaces volume of POSIX.1-2024,
 > such as {PATH_MAX}, shall also apply to this volume of POSIX.1-2024. All the
 > utilities defined by this volume of POSIX.1-2024 are implicitly limited by
@@ -105,7 +103,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ## 1.3 Grammar Conventions
 
-> [spec:posix:def:xcu.grammar-notation.basis]
 > Portions of this volume of POSIX.1-2024 are expressed in terms of a special
 > grammar notation. It is used to portray the complex syntax of certain program
 > input. The grammar is based on the syntax used by the yacc utility. However,
@@ -125,7 +122,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 1.3 Grammar Conventions — utilities/V3_chap01.html#tag_18_03
 
-> [spec:posix:syn:xcu.grammar-notation.typographic-conventions]
 > The following typographical conventions are used in the grammar; they have no
 > significance except to aid in reading.
 >
@@ -140,7 +136,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ## 1.4 Utility Description Defaults
 
-> [spec:posix:def:xcu.defaults.scope]
 > This section describes all of the subsections used within the utility
 > descriptions, including:
 >
@@ -153,7 +148,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ### NAME
 
-> [spec:posix:def:xcu.section.name]
 > This section gives the name or names of the utility and briefly states its
 > purpose.
 >
@@ -161,7 +155,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ### SYNOPSIS
 
-> [spec:posix:syn:xcu.section.synopsis]
 > The SYNOPSIS section summarizes the syntax of the calling sequence for the
 > utility, including options, option-arguments, and operands. Standards for
 > utility naming are described in XBD 12.2 Utility Syntax Guidelines; for
@@ -171,7 +164,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ### DESCRIPTION
 
-> [spec:posix:def:xcu.section.description]
 > The DESCRIPTION section describes the actions of the utility. If the utility
 > has a very complex set of subcommands or its own procedural language, an
 > EXTENDED DESCRIPTION section is also provided. Most explanations of optional
@@ -200,7 +192,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ### OPTIONS
 
-> [spec:posix:def:xcu.section.options]
 > The OPTIONS section describes the utility options and option-arguments, and
 > how they modify the actions of the utility. Standard utilities that have
 > options either fully comply with XBD 12.2 Utility Syntax Guidelines or
@@ -208,14 +199,12 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 1.4 Utility Description Defaults, OPTIONS — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:req:xcu.options.conflict-resolution]
 > Apparent disagreements between functionality descriptions in the OPTIONS and
 > DESCRIPTION (or EXTENDED DESCRIPTION) sections are always resolved in favor
 > of the OPTIONS section.
 >
 > Source: XCU 1.4 Utility Description Defaults, OPTIONS — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:req:xcu.options.syntax-guidelines-scope]
 > Each OPTIONS section that uses the phrase "The ... utility shall conform to
 > the Utility Syntax Guidelines ..." refers only to the use of the utility as
 > specified by this volume of POSIX.1-2024; implementation extensions should
@@ -238,7 +227,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 1.4 Utility Description Defaults, OPTIONS — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:req:xcu.defaults.options-none]
 > When this section is listed as "None.", it means that the implementation need
 > not support any options. Standard utilities that do not accept options, but
 > that do accept operands, shall recognize `"--"` as a first argument to be
@@ -248,13 +236,11 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ### OPERANDS
 
-> [spec:posix:def:xcu.section.operands]
 > The OPERANDS section describes the utility operands, and how they affect the
 > actions of the utility.
 >
 > Source: XCU 1.4 Utility Description Defaults, OPERANDS — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:req:xcu.operands.conflict-resolution]
 > Apparent disagreements between functionality descriptions in the OPERANDS and
 > DESCRIPTION (or EXTENDED DESCRIPTION) sections shall be resolved in favor of
 > the OPERANDS section.
@@ -275,7 +261,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 1.4 Utility Description Defaults, OPERANDS — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:req:xcu.defaults.operands-none]
 > When this section is listed as "None.", it means that the implementation need
 > not support any operands.
 >
@@ -283,7 +268,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ### STDIN
 
-> [spec:posix:def:xcu.section.stdin]
 > The STDIN section describes the standard input of the utility. This section
 > is frequently merely a reference to the following section, as many utilities
 > treat standard input and input files in the same manner.
@@ -311,7 +295,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 1.4 Utility Description Defaults, STDIN — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:req:xcu.defaults.stdin-not-used]
 > When this section is listed as "Not used.", it means that the standard input
 > shall not be read when the utility is used as described by this volume of
 > POSIX.1-2024.
@@ -320,7 +303,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ### INPUT FILES
 
-> [spec:posix:def:xcu.section.input-files]
 > The INPUT FILES section describes the files, other than the standard input,
 > used as input by the utility. It includes files named as operands and
 > option-arguments as well as other files that are referred to, such as
@@ -388,7 +370,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 1.4 Utility Description Defaults, INPUT FILES — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:syn:xcu.record-format-notation]
 > Record formats are described in a notation similar to that used by the
 > C-language function, printf(). See XBD 5. File Format Notation for a
 > description of this notation. The format description is intended to be
@@ -402,7 +383,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 1.4 Utility Description Defaults, INPUT FILES — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:req:xcu.defaults.input-files-none]
 > When this section is listed as "None.", it means that no input files are
 > required to be supplied when the utility is used as described by this volume
 > of POSIX.1-2024.
@@ -411,7 +391,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ### ENVIRONMENT VARIABLES
 
-> [spec:posix:def:xcu.section.environment-variables]
 > The ENVIRONMENT VARIABLES section lists what variables affect the utility's
 > execution.
 >
@@ -445,7 +424,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 1.4 Utility Description Defaults, ENVIRONMENT VARIABLES — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:req:xcu.defaults.environment-variables-none]
 > When this section is listed as "None.", it means that the behavior of the
 > utility is not directly affected by environment variables described by this
 > volume of POSIX.1-2024 when the utility is used as described by this volume
@@ -455,7 +433,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ### ASYNCHRONOUS EVENTS
 
-> [spec:posix:def:xcu.section.asynchronous-events]
 > The ASYNCHRONOUS EVENTS section lists how the utility reacts to such events
 > as signals and what signals are caught.
 >
@@ -487,7 +464,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ### STDOUT
 
-> [spec:posix:def:xcu.section.stdout]
 > The STDOUT section completely describes the standard output of the utility.
 > This section is frequently merely a reference to the following section,
 > OUTPUT FILES, because many utilities treat standard output and output files
@@ -519,7 +495,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 1.4 Utility Description Defaults, STDOUT — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:req:xcu.defaults.stdout-not-used]
 > When this section is listed as "Not used.", it means that the standard output
 > shall not be written when the utility is used as described by this volume of
 > POSIX.1-2024.
@@ -528,7 +503,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ### STDERR
 
-> [spec:posix:def:xcu.section.stderr]
 > The STDERR section describes the standard error output of the utility. Only
 > those messages that are purposely sent by the utility are described.
 >
@@ -567,7 +541,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 1.4 Utility Description Defaults, STDERR — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:req:xcu.defaults.stderr-not-used]
 > When this section is listed as "Not used.", it means that the standard error
 > shall not be used when the utility is used as described in this volume of
 > POSIX.1-2024.
@@ -576,7 +549,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ### OUTPUT FILES
 
-> [spec:posix:def:xcu.section.output-files]
 > The OUTPUT FILES section completely describes the files created or modified
 > by the utility. Temporary or system files that are created for internal usage
 > by this utility or other parts of the implementation (for example, spool,
@@ -634,21 +606,18 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ### EXTENDED DESCRIPTION
 
-> [spec:posix:def:xcu.section.extended-description]
 > The EXTENDED DESCRIPTION section provides a place for describing the actions
 > of very complicated utilities, such as text editors or language processors,
 > which typically have elaborate command languages.
 >
 > Source: XCU 1.4 Utility Description Defaults, EXTENDED DESCRIPTION — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:def:xcu.defaults.extended-description-none]
 > When this section is listed as "None.", no further description is necessary.
 >
 > Source: XCU 1.4 Utility Description Defaults, EXTENDED DESCRIPTION — utilities/V3_chap01.html#tag_18_04
 
 ### EXIT STATUS
 
-> [spec:posix:def:xcu.section.exit-status]
 > The EXIT STATUS section describes the values the utility shall return to the
 > calling program, or shell, and the conditions that cause these values to be
 > returned. Usually, utilities return zero for successful completion and values
@@ -665,7 +634,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 1.4 Utility Description Defaults, EXIT STATUS — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:req:xcu.exit-status.test-for-success]
 > For example, a utility may list zero as a successful return, 1 as a failure
 > for a specific reason, and >1 as "an error occurred". In this case,
 > unspecified conditions may cause a 2 or 3, or other value, to be returned. A
@@ -676,7 +644,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 1.4 Utility Description Defaults, EXIT STATUS — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:req:xcu.exit-status.unlisted-values]
 > Unspecified error conditions may be represented by specific values not listed
 > in this volume of POSIX.1-2024.
 >
@@ -691,7 +658,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ### CONSEQUENCES OF ERRORS
 
-> [spec:posix:def:xcu.section.consequences-of-errors]
 > The CONSEQUENCES OF ERRORS section describes the effects on the environment,
 > file systems, process state, and so on, when error conditions occur. It does
 > not describe error messages produced or exit status values used.
@@ -753,7 +719,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 1.4 Utility Description Defaults, CONSEQUENCES OF ERRORS — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:sem:xcu.errors.possible-actions]
 > When a utility encounters an error condition several actions are possible,
 > depending on the severity of the error and the state of the utility. Included
 > in the possible actions of various utilities are: deletion of temporary or
@@ -762,7 +727,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 1.4 Utility Description Defaults, CONSEQUENCES OF ERRORS — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:def:xcu.defaults.consequences-of-errors-default]
 > When this section is listed as "Default.", it means that any changes to the
 > environment, file systems, process state, and so on are unspecified.
 >
@@ -770,7 +734,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 
 ### Informative sections
 
-> [spec:posix:def:xcu.section.informative]
 > The APPLICATION USAGE, EXAMPLES, RATIONALE, FUTURE DIRECTIONS, SEE ALSO, and
 > CHANGE HISTORY sections are informative.
 >
@@ -790,13 +753,11 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU 1.4 Utility Description Defaults — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:req:xcu.examples.normative-material-wins]
 > In the event of conflict between an example and a normative part of the
 > specification, the normative material is to be taken as correct.
 >
 > Source: XCU 1.4 Utility Description Defaults, EXAMPLES — utilities/V3_chap01.html#tag_18_04
 
-> [spec:posix:def:xcu.invoked-utilities-not-described]
 > Certain of the standard utilities describe how they can invoke other
 > utilities or applications, such as by passing a command string to the command
 > interpreter. The external influences (STDIN, ENVIRONMENT VARIABLES, and so

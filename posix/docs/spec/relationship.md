@@ -8,7 +8,6 @@ Copyright © 2001-2024 The IEEE and The Open Group.
 
 ## 1.1.1 System Interfaces
 
-> [spec:posix:def:xcurel.system-interfaces-scope]
 > This subsection describes some of the features provided by the System
 > Interfaces volume of POSIX.1-2024 that are assumed to be globally available on
 > all systems conforming to this volume of POSIX.1-2024. This subsection does
@@ -20,7 +19,6 @@ Copyright © 2001-2024 The IEEE and The Open Group.
 >
 > Source: XCU 1.1.1 System Interfaces — utilities/V3_chap01.html#tag_18_01_01
 
-> [spec:posix:req:xcurel.descriptions-override-defaults]
 > The following subsections describe frequently used concepts. Many of these
 > concepts are described in the Base Definitions volume of POSIX.1-2024. Utility
 > and function description statements override these defaults when appropriate.
@@ -29,7 +27,6 @@ Copyright © 2001-2024 The IEEE and The Open Group.
 
 ### 1.1.1.1 Process Attributes
 
-> [spec:posix:def:xcurel.process-attributes]
 > The following process attributes, as described in the System Interfaces volume
 > of POSIX.1-2024, are assumed to be supported for all processes in this volume
 > of POSIX.1-2024:
@@ -268,7 +265,6 @@ Copyright © 2001-2024 The IEEE and The Open Group.
 
 ### 1.1.1.7 File Contents
 
-> [spec:posix:def:xcurel.file-contents]
 > When a reference is made to the contents of a file, *pathname*, this means the
 > equivalent of all of the data placed in the space pointed to by *buf* when
 > performing the read() function calls in the following operations defined in
@@ -339,7 +335,6 @@ Copyright © 2001-2024 The IEEE and The Open Group.
 
 ### 1.1.1.11 Actions Equivalent to Functions
 
-> [spec:posix:req:xcurel.actions-equivalent-to-functions]
 > Some utility descriptions specify that a utility performs actions equivalent
 > to a function defined in the System Interfaces volume of POSIX.1-2024. Such
 > specifications require only that the external effects be equivalent, not that

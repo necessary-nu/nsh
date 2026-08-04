@@ -1,0 +1,6 @@
+{
+  "demoted": [
+    "builtin.special.utility-syntax-guidelines",
+    "builtin.ulimit.rlimit-annotation"
+  ]
+}

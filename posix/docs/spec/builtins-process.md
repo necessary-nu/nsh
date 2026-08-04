@@ -639,7 +639,6 @@ Option-conditional text carries the standard's own margin code inline, at the po
 >
 > Source: XCU ulimit OPTIONS — utilities/ulimit.html#tag_20_131_04
 
-> [spec:posix:def:builtin.ulimit.rlimit-annotation]
 > Where an option description is followed by `[RLIMIT_name]` it indicates which
 > resource for the getrlimit() and setrlimit() functions, defined in the System
 > Interfaces volume of POSIX.1-2024, the option corresponds to.

@@ -1,0 +1,233 @@
+{
+  "rules": {
+    "cmd.assign-standard-utility-as-function": {
+      "disposition": "not-applicable",
+      "reason": "Applies only 'If the command name is a standard utility implemented as a function'; dash implements standard utilities as built-ins or external commands and defines none as a shell function, so the antecedent never holds."
+    },
+    "cmd.function-syntax-error-properties": {
+      "disposition": "not-applicable",
+      "reason": "Inherits the permission in the first item of 2.15: a syntax error in a special built-in 'may cause a shell executing that utility to abort'; nothing is required either way."
+    },
+    "cmd.search-path-associated-builtin": {
+      "disposition": "not-applicable",
+      "reason": "The requirement is conditioned on the implementation having 'implemented the utility as a built-in or as a shell function ... associated with the directory that was most recently tested during the successful PATH search'. Which directory a built-in is associated with is implementation-defined and not exposed by the shell, so no test can distinguish conformance from non-conformance."
+    },
+    "expand.arith-extensions": {
+      "disposition": "not-applicable",
+      "reason": "Permissive: 'the shell may recognize arithmetic expressions beyond those listed ... may use a signed integer type with a rank larger than ... signed long'."
+    },
+    "expand.assignment-redirection-environment": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: 'it is unspecified whether the expansions are carried out in the current execution environment or in the environment of the command about to be executed'."
+    },
+    "expand.brace-implementation-defined": {
+      "disposition": "not-applicable",
+      "reason": "Permissive: the word 'may be subject to an additional implementation-defined form of expansion'; no behaviour is required either way."
+    },
+    "expand.cmdsub-alias-substitution": {
+      "disposition": "not-applicable",
+      "reason": "Conditioned on an unspecified choice: it applies only 'If the commands string is parsed as a single compound_list', and expand.cmdsub-parsing leaves that choice unspecified."
+    },
+    "expand.cmdsub-redirections-only": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: 'If the commands string consists solely of redirections, the results are unspecified'."
+    },
+    "expand.cmdsub-terminating-paren": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: 'The behavior is unspecified if the terminating ')' is not present in the token containing the command substitution'."
+    },
+    "expand.field-splitting-delimited": {
+      "disposition": "not-applicable",
+      "reason": "Defines the term 'delimited' for the field-splitting algorithm; the observable behaviour is asserted by expand.field-splitting-algorithm and expand.field-splitting-order."
+    },
+    "expand.param-hash-requires-word": {
+      "disposition": "not-applicable",
+      "reason": "Constrains the application, not the shell: 'the application shall ensure that word is specified'."
+    },
+    "grammar.token-context-dependent-distinction": {
+      "disposition": "not-applicable",
+      "reason": "Meta-rule describing how the numbered grammar annotations are applied ('the applicable rule shall be applied to convert the token identifier type'); rules 1 through 8 are each tested individually."
+    },
+    "grammar.token-symbols": {
+      "disposition": "not-applicable",
+      "reason": "A %token declaration list (WORD, ASSIGNMENT_WORD, NAME, NEWLINE, IO_NUMBER, IO_LOCATION); the recognition of each is asserted by grammar.token-classification and rules 1 through 8."
+    },
+    "jobctl.background-job-brought-to-foreground": {
+      "disposition": "manual",
+      "reason": "Requires the fg utility and a job stopped by a signal while in the foreground; needs an interactive session with a controlling terminal."
+    },
+    "jobctl.background-job-completion-message": {
+      "disposition": "manual",
+      "reason": "Requires an interactive shell and observation of the completion message timing relative to the next prompt under both set -b states."
+    },
+    "jobctl.background-job-suspended-message": {
+      "disposition": "manual",
+      "reason": "Requires an interactive shell, a background job stopped by SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU, and observation of the message relative to the next prompt under both set -b states."
+    },
+    "jobctl.continue-suspended-job": {
+      "disposition": "manual",
+      "reason": "Requires fg/bg on a suspended job and observation of the SIGCONT sent to the stopped process group; needs interactive job control."
+    },
+    "jobctl.fg-terminal-settings-restore": {
+      "disposition": "manual",
+      "reason": "Requires observing the ordering of tcsetpgrp, termios restore and SIGCONT inside fg on a controlling terminal."
+    },
+    "jobctl.foreground-job": {
+      "disposition": "manual",
+      "reason": "Requires observing that 'the whole list shall form a single foreground job up until the sequentially executed AND-OR lists have all completed', which is only visible through job-control bookkeeping in an interactive session."
+    },
+    "jobctl.foreground-process-group-assignment": {
+      "disposition": "manual",
+      "reason": "Requires reading the terminal's foreground process group ID (tcgetpgrp) as each pipeline of a job is executed; not observable from within the shell language."
+    },
+    "jobctl.foreground-process-group-restored": {
+      "disposition": "manual",
+      "reason": "Requires reading the terminal's foreground process group ID after a foreground job terminates or is suspended; not observable from within the shell language."
+    },
+    "jobctl.initial-foreground-process-group": {
+      "disposition": "manual",
+      "reason": "Requires a controlling terminal plus inspection of tcgetpgrp() at shell start-up, including the SIGTTIN/SIGCONT retry path for a shell started as a background job; not reachable from shell-visible state."
+    },
+    "jobctl.job-number-and-process-id": {
+      "disposition": "manual",
+      "reason": "The removal half of the requirement ('When a background job is brought into the foreground by means of the fg utility, the associated job number shall be removed') needs fg in an interactive session."
+    },
+    "jobctl.non-interactive-message-timing": {
+      "disposition": "not-applicable",
+      "reason": "Permissive: 'the same message may also be written by a non-interactive shell, at any of the following times'; nothing is required either way."
+    },
+    "jobctl.save-terminal-settings": {
+      "disposition": "manual",
+      "reason": "Requires comparing saved and restored termios settings across a suspend/resume cycle on a controlling terminal."
+    },
+    "jobctl.suspend-on-catchable-signal": {
+      "disposition": "manual",
+      "reason": "Requires stopping a foreground job with SIGTSTP/SIGTTIN/SIGTTOU from a controlling terminal and then inspecting which commands the resulting suspended job contains."
+    },
+    "jobctl.suspend-on-sigstop": {
+      "disposition": "manual",
+      "reason": "Requires SIGSTOP delivered while the shell itself is executing a built-in, then SIGCONT, and inspection of the suspended job the shell creates; needs interactive job control."
+    },
+    "jobctl.suspended-job-message": {
+      "disposition": "manual",
+      "reason": "Requires an interactive shell writing the jobs-format suspended-job message to standard error after a foreground job is stopped."
+    },
+    "param.lang": {
+      "disposition": "manual",
+      "reason": "LANG only 'provide[s] a default value for the internationalization variables that are unset or null'; distinguishing that from the fallback requires a second installed locale, and the harness fixes LC_ALL=C and cannot assume any non-POSIX locale exists on the host."
+    },
+    "param.lc-all": {
+      "disposition": "manual",
+      "reason": "'The value of this variable overrides the LC_* variables and LANG' \u2014 the override is only observable as a difference between two locales' behaviour, which needs a second installed locale the harness cannot assume."
+    },
+    "param.lc-collate": {
+      "disposition": "manual",
+      "reason": "Determines 'the behavior of range expressions, equivalence classes, and multi-character collating elements'; in the C/POSIX locale the harness runs in, no collation differs from byte order, so a second installed locale is required to observe it."
+    },
+    "param.lc-ctype": {
+      "disposition": "manual",
+      "reason": "Determines 'the interpretation of sequences of bytes of text data as characters (for example, single-byte as opposed to multi-byte)'; observing this, and that a change after start-up does not affect lexical processing, requires a multi-byte locale the harness cannot assume."
+    },
+    "param.lc-messages": {
+      "disposition": "manual",
+      "reason": "'Determine the language in which messages should be written' \u2014 requires a translated message catalog installed on the host to observe."
+    },
+    "param.nlspath": {
+      "disposition": "conditional",
+      "reason": "[XSI] 'Determine the location of message catalogs for the processing of LC_MESSAGES'; observable only on an XSI system with a message catalog installed."
+    },
+    "param.positional-zero-not-positional": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: 'the results of expanding ${00} are unspecified'."
+    },
+    "param.pwd-assignment": {
+      "disposition": "not-applicable",
+      "reason": "Permissive and unspecified: 'Assignments to the PWD variable may be ignored. If an application sets or unsets the value of PWD, the behaviors of the cd and pwd utilities are unspecified'."
+    },
+    "param.shell-variables": {
+      "disposition": "not-applicable",
+      "reason": "An enumeration ('The following variables shall affect the execution of the shell: ENV, HOME, IFS, ...'); each named variable carries its own rule."
+    },
+    "pattern.invalid-byte-sequence-unspecified": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: matching a string containing 'bytes that do not form part of a valid character' has unspecified behavior."
+    },
+    "pattern.leading-period-in-bracket-unspecified": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: 'It is unspecified whether an explicit <period> in a bracket expression matching list ... can match a leading <period> in a filename'."
+    },
+    "pattern.trailing-backslash-unspecified": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: 'If a pattern ends with an unescaped <backslash>, the behavior is unspecified'."
+    },
+    "pattern.unmatched-open-bracket-unspecified": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: 'it is unspecified whether other unquoted '*', '?', '[' or <backslash> characters within the same slash-delimited component ... retain their special meanings or are treated as ordinary characters'."
+    },
+    "quote.dollar-single-quotes-null-byte": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: 'it is unspecified whether that null byte is included in the result or if that byte and any following ... are evaluated and discarded'."
+    },
+    "quote.dollar-single-quotes-octal-overflow": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: 'If the octal value specified by \\ddd will not fit in a byte, the results are unspecified'."
+    },
+    "quote.dollar-single-quotes-undefined-escape": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: 'The behavior of an unescaped <backslash> immediately followed by any other character, including <newline>, is unspecified'."
+    },
+    "quote.dollar-single-quotes-unencodable": {
+      "disposition": "not-applicable",
+      "reason": "Implementation-defined, and its one normative constraint ('shall not replace an unsupported character with bytes that do not form valid characters') is vacuous in the C locale the harness fixes, where every byte is a valid character and \\e and \\cX are always encodable."
+    },
+    "quote.double-quotes-backquote-undefined": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly undefined: 'Either of the following cases produces undefined results'."
+    },
+    "quote.future-special-characters": {
+      "disposition": "not-applicable",
+      "reason": "Advisory about a possible future revision: 'A future version of this standard may extend the conditions ... Therefore applications should quote them'."
+    },
+    "redir.here-doc-fd-type": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: 'It is unspecified whether the file descriptor a here-document is supplied on is opened as a regular file or some other type of file'."
+    },
+    "redir.location-format": {
+      "disposition": "not-applicable",
+      "reason": "Permissive and implementation-defined: 'The shell may support an additional format ... If this format is supported its behavior is implementation-defined'."
+    },
+    "redir.output-noclobber-atomicity": {
+      "disposition": "not-applicable",
+      "reason": "Requires observing that check-existence/create/open happen atomically 'as is done by the open() function ... when the O_CREAT and O_EXCL flags are set'; atomicity is not falsifiable from the shell language, and the symlink clause is permissive ('need not fail with [EEXIST]')."
+    },
+    "shell.command-language-interpreter": {
+      "disposition": "not-applicable",
+      "reason": "Chapter introduction: 'The shell is a command language interpreter. This chapter describes the syntax of that command language'."
+    },
+    "shell.hashbang-unspecified": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: 'If the first line of a file of shell commands starts with the characters \"#!\", the results are unspecified'."
+    },
+    "signal.pending-trap-order": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: 'the order of execution of trap actions is unspecified'."
+    },
+    "token.alias-reserved-word-unspecified": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: 'it is unspecified whether the TOKEN is subject to alias substitution'."
+    },
+    "token.reserved-word-time": {
+      "disposition": "not-applicable",
+      "reason": "Applies only 'When the word time is recognized as a reserved word', which token.reserved-words-optional makes optional; dash does not recognise it (`time true` is resolved by PATH search), so the antecedent never holds."
+    },
+    "token.reserved-words-optional": {
+      "disposition": "not-applicable",
+      "reason": "Permissive and unspecified: the listed words '[[', ']]', 'function', 'namespace', 'select', 'time' 'may be recognized as reserved words, in which case the results are unspecified'."
+    },
+    "token.reserved-words-trailing-colon": {
+      "disposition": "not-applicable",
+      "reason": "Explicitly unspecified: words ending in <colon> are reserved and 'their use in those circumstances produces unspecified results'."
+    }
+  },
+  "version": 1
+}

@@ -1,0 +1,16 @@
+{
+  "demoted": [
+    "xcu.errors.possible-actions",
+    "xcu.examples.normative-material-wins",
+    "xcu.invoked-utilities-not-described",
+    "xcu.operands.conflict-resolution",
+    "xcu.options.conflict-resolution",
+    "xcu.record-format-notation",
+    "xcu.section.informative",
+    "xcu.section.output-files",
+    "xcu.section.stdout",
+    "xcurel.actions-equivalent-to-functions",
+    "xcurel.descriptions-override-defaults",
+    "xcurel.file-contents"
+  ]
+}

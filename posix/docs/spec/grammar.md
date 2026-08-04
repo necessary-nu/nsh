@@ -8,7 +8,6 @@ Copyright © 2001-2024 The IEEE and The Open Group.
 
 ## 2.10 Shell Grammar
 
-> [spec:posix:req:grammar.formal-syntax-precedence]
 > The following grammar defines the Shell Command Language. This formal syntax
 > shall take precedence over the preceding text syntax description.
 >

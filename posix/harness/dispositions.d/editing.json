@@ -1,0 +1,29 @@
+{
+  "rules": {
+    "edit.block-mode-terminals": {
+      "disposition": "not-applicable",
+      "reason": "Permissive: \"Certain block-mode terminals may be unable to support shell command line editing\", and on such a terminal \"it need not be possible to\" enable vi mode. This is the exemption from the other line-editing requirements, not a requirement of its own. The harness deliberately drives a pty that can support editing (TERM=xterm), so those requirements are exercised by the other edit.* cases rather than excused by this one."
+    },
+    "edit.command-invoke-vi": {
+      "disposition": "manual",
+      "reason": "'[number]v - Invoke the vi editor to edit the current command line in a temporary file.' The editor's temporary file is created under /tmp, which the harness sandbox bind-mounts read only, so the invocation fails before the rule can be observed. Verified as a sandbox artefact, not a shell result: with a fake vi installed on PATH the C reference ran it and executed the rewritten line ('R:vidone') outside the sandbox, and only alerts the terminal inside it."
+    },
+    "edit.command-redraw": {
+      "disposition": "manual",
+      "reason": "'<control>-L - Redraw the current command line. Position the cursor at the same location on the redrawn line.' Both halves are screen state. The harness compares one merged terminal transcript and cannot inspect cursor position, and any content-based assertion would also be satisfied by an implementation that ignored <control>-L entirely, so a case here would be vacuous. Observed manually: the C reference emits ESC[H ESC[2J followed by the prompt and buffer, and the buffer survives."
+    },
+    "edit.insert-interrupt": {
+      "disposition": "manual",
+      "reason": "'interrupt - If sh receives a SIGINT signal in insert mode... it shall terminate command line editing with the same effects as described for interrupting command mode.' Not drivable for the same reason as edit.sigint-command-mode: the interrupt character embedded in the session payload raises SIGINT from the line discipline before the shell reaches the line being edited."
+    },
+    "edit.sigint-command-mode": {
+      "disposition": "manual",
+      "reason": "'If sh receives a SIGINT signal in command mode... it shall terminate command line editing on the current command line, reissue the prompt... and reset the command history.' The harness writes the entire session to the terminal before the shell begins reading it, so an embedded interrupt character is turned into SIGINT by the line discipline at write time and reaches the shell before any editing starts (observed: both shells are killed by SIGINT during startup, status -2, empty transcript). There is no other way to raise SIGINT while the editor holds the terminal."
+    },
+    "edit.up-option": {
+      "disposition": "conditional",
+      "reason": "Gated on the User Portability Utilities option: 'shall be provided on implementations that support [UP]'. This host reports UP=yes, so the requirement is live rather than inapplicable -- it was previously marked not-applicable, which wrongly excused the port. The umbrella has no separate observable; its content is asserted by the individual edit.* rules, 36 of which currently fail because the port substitutes rustyline for a POSIX vi-mode editor."
+    }
+  },
+  "version": 1
+}
