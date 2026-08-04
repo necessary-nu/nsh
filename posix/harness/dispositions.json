@@ -1,4 +1,57 @@
 {
-  "version": 1,
-  "rules": {}
+  "rules": {
+    "cmd.async-job-notification-format": {
+      "disposition": "manual",
+      "reason": "Requires an interactive shell writing the '[n] pid' notification to stderr."
+    },
+    "cmd.async-job-number": {
+      "disposition": "manual",
+      "reason": "Requires job control enabled and a job number assigned; interactive pty session."
+    },
+    "cmd.async-known-pid-retention": {
+      "disposition": "not-applicable",
+      "reason": "The standard releases the shell here: \"need not retain more than the {CHILD_MAX} most recent entries\"."
+    },
+    "cmd.async-non-job-pid-message": {
+      "disposition": "manual",
+      "reason": "Requires an interactive shell with job control disabled."
+    },
+    "cmd.case-multiple-pattern-order-unspecified": {
+      "disposition": "not-applicable",
+      "reason": "The standard releases the shell here: \"statement is unspecified\"."
+    },
+    "cmd.declaration-utility-lexical-analysis": {
+      "disposition": "not-applicable",
+      "reason": "The standard releases the shell here: \"an implementation may use only lexical analysis\"."
+    },
+    "cmd.group-double-paren-ambiguity": {
+      "disposition": "not-applicable",
+      "reason": "The standard releases the shell here: \"may treat the\"."
+    },
+    "cmd.nonbuiltin-invalid-name-env-unspecified": {
+      "disposition": "not-applicable",
+      "reason": "The standard releases the shell here: \"It is unspecified whether environment variables\"."
+    },
+    "cmd.search-remembered-location": {
+      "disposition": "not-applicable",
+      "reason": "The standard releases the shell here: \"an implementation may remember its location and need not search for the utility again\"."
+    },
+    "cmd.search-unspecified-utility-names": {
+      "disposition": "not-applicable",
+      "reason": "The standard releases the shell here: \"the results are unspecified\"."
+    },
+    "cmd.sequential-foreground-job": {
+      "disposition": "manual",
+      "reason": "Requires observing foreground job membership under job control; needs an interactive pty session."
+    },
+    "cmd.std-fd-closed": {
+      "disposition": "not-applicable",
+      "reason": "The standard releases the shell here: \"implementations may execute the utility with the file descriptor open to an unspecified file\"."
+    },
+    "cmd.std-fd-nonconforming-environment": {
+      "disposition": "not-applicable",
+      "reason": "The standard releases the shell here: \"might not behave as described in this standard\"."
+    }
+  },
+  "version": 1
 }

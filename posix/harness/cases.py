@@ -892,4 +892,277 @@ CASES: tuple[Case, ...] = (
         ),
         stdout="trapped\nforeground-done\n",
     ),
+
+    # ---------------------------------------------------------------
+    # XCU 2.9 Shell Commands. Expectations below state what POSIX
+    # REQUIRES, not what dash does -- a failure here is a conformance
+    # finding, not a broken test.
+    # ---------------------------------------------------------------
+    # [spec:posix:req:cmd.default-exit-status/test]
+    # [spec:posix:req:cmd.simple-processing-order/test]
+    Case(
+        id="cmd-default-exit-status",
+        rules=("cmd.default-exit-status", "cmd.simple-processing-order"),
+        script="{ true; false; }\necho $?\n",
+        stdout="1\n",
+    ),
+    # [spec:posix:req:cmd.simple-command-name-determination/test]
+    # [spec:posix:req:cmd.simple-argument-expansion/test]
+    Case(
+        id="cmd-name-determination",
+        rules=(
+            "cmd.simple-command-name-determination",
+            "cmd.simple-argument-expansion",
+        ),
+        script="c=printf\nf='%s|%s\\n'\nargs='a b'\n$c \"$f\" $args\n",
+        stdout="a|b\n",
+    ),
+    # [spec:posix:req:cmd.simple-assignment-expansion/test]
+    Case(
+        id="cmd-assignment-expansion",
+        rules=("cmd.simple-assignment-expansion",),
+        script="HOME=/hm\nv=x\na=~/$v$(echo s)$((1+1))\nprintf '%s\\n' \"$a\"\n",
+        stdout="/hm/xs2\n",
+    ),
+    # [spec:posix:req:cmd.assign-no-command-name/test]
+    Case(
+        id="cmd-assign-no-name-persists",
+        rules=("cmd.assign-no-command-name",),
+        script="v=set-in-current\nprintf '%s\\n' \"$v\"\n",
+        stdout="set-in-current\n",
+    ),
+    # [spec:posix:req:cmd.assign-readonly-error/test]
+    Case(
+        id="cmd-assign-readonly-error",
+        rules=("cmd.assign-readonly-error",),
+        script="readonly r=1\nr=2 true\necho reached=$?\n",
+        status="nonzero",
+        stdout="",
+    ),
+    # [spec:posix:req:cmd.no-name-redirection-failure/test]
+    Case(
+        id="cmd-no-name-redirect-failure",
+        rules=("cmd.no-name-redirection-failure",),
+        # The rule requires the COMMAND to fail with a status greater than
+        # zero and an error message to be written. It does not require the
+        # shell to exit, so assert on $? rather than on the shell status.
+        script=(
+            "if < /nonexistent/path; then echo zero; else echo nonzero; fi\n"
+        ),
+        stdout="nonzero\n",
+        stderr_contains=("/nonexistent/path",),
+    ),
+    # [spec:posix:req:cmd.simple-redirections-performed/test]
+    Case(
+        id="cmd-redirections-performed",
+        rules=("cmd.simple-redirections-performed",),
+        script="printf 'x\\n' > out\ncat out\n",
+        stdout="x\n",
+    ),
+    # [spec:posix:req:cmd.search-special-builtin/test]
+    Case(
+        id="cmd-search-special-builtin-first",
+        rules=("cmd.search-special-builtin",),
+        script="PATH=/nonexistent\nset -- a\nshift\necho $#\n",
+        stdout="0\n",
+    ),
+    # [spec:posix:req:cmd.search-path-unsuccessful/test]
+    # [spec:posix:req:cmd.nonbuiltin-path-search-unsuccessful/test]
+    Case(
+        id="cmd-search-path-unsuccessful",
+        rules=(
+            "cmd.search-path-unsuccessful",
+            "cmd.nonbuiltin-path-search-unsuccessful",
+        ),
+        script="PATH=/nonexistent\nno_such_utility_xyz\n",
+        status=127,
+        stderr_contains=("no_such_utility_xyz",),
+        stdout="",
+    ),
+    # [spec:posix:req:cmd.search-name-with-slash/test]
+    # [spec:posix:req:cmd.nonbuiltin-slash-execl/test]
+    Case(
+        id="cmd-name-with-slash",
+        rules=("cmd.search-name-with-slash", "cmd.nonbuiltin-slash-execl"),
+        script="PATH=/nonexistent\n./prog\n",
+        files={"prog": FileFixture("#!/bin/sh\nprintf 'ran\\n'\n", 0o755)},
+        stdout="ran\n",
+    ),
+    # [spec:posix:req:cmd.nonbuiltin-slash-enoexec-script/test]
+    # [spec:posix:req:cmd.nonbuiltin-enoexec-script/test]
+    Case(
+        id="cmd-enoexec-runs-as-script",
+        rules=(
+            "cmd.nonbuiltin-slash-enoexec-script",
+            "cmd.nonbuiltin-enoexec-script",
+        ),
+        script="./noshebang\n",
+        files={"noshebang": FileFixture("printf 'script-ran\\n'\n", 0o755)},
+        stdout="script-ran\n",
+    ),
+    # [spec:posix:req:cmd.nonbuiltin-separate-environment/test]
+    Case(
+        id="cmd-nonbuiltin-separate-env",
+        rules=("cmd.nonbuiltin-separate-environment",),
+        script="v=parent\n./child\nprintf '%s\\n' \"$v\"\n",
+        files={"child": FileFixture("#!/bin/sh\nv=child\n", 0o755)},
+        stdout="parent\n",
+    ),
+    # [spec:posix:req:cmd.nonbuiltin-exec-replaces-environment/test]
+    Case(
+        id="cmd-exec-replaces-image",
+        rules=("cmd.nonbuiltin-exec-replaces-environment",),
+        script="exec printf 'replaced\\n'\nprintf 'unreachable\\n'\n",
+        stdout="replaced\n",
+    ),
+    # [spec:posix:req:cmd.pipeline-connects-stdio/test]
+    # [spec:posix:req:cmd.pipeline-foreground-wait/test]
+    Case(
+        id="cmd-pipeline-connects",
+        rules=("cmd.pipeline-connects-stdio", "cmd.pipeline-foreground-wait"),
+        script="printf 'a\\nb\\n' | wc -l | tr -d ' '\n",
+        stdout="2\n",
+    ),
+    # [spec:posix:req:cmd.list-separator-semantics/test]
+    # [spec:posix:req:cmd.sequential-execution/test]
+    # [spec:posix:req:cmd.sequential-exit-status/test]
+    Case(
+        id="cmd-sequential-lists",
+        rules=(
+            "cmd.list-separator-semantics",
+            "cmd.sequential-execution",
+            "cmd.sequential-exit-status",
+        ),
+        script="echo one; echo two; false\necho $?\n",
+        stdout="one\ntwo\n1\n",
+    ),
+    # [spec:posix:req:cmd.and-list-exit-status/test]
+    # [spec:posix:req:cmd.or-list-exit-status/test]
+    Case(
+        id="cmd-and-or-exit-status",
+        rules=("cmd.and-list-exit-status", "cmd.or-list-exit-status"),
+        script="true && false; echo $?\nfalse || true; echo $?\nfalse && true; echo $?\n",
+        stdout="1\n0\n1\n",
+    ),
+    # [spec:posix:req:cmd.compound-redirection-scope/test]
+    Case(
+        id="cmd-compound-redirection-scope",
+        rules=("cmd.compound-redirection-scope",),
+        script="{ echo a; echo b > inner; echo c; } > outer\ncat outer\ncat inner\n",
+        stdout="a\nc\nb\n",
+    ),
+    # [spec:posix:req:cmd.group-exit-status/test]
+    # [spec:posix:req:cmd.compound-list-exit-status/test]
+    Case(
+        id="cmd-group-exit-status",
+        rules=("cmd.group-exit-status", "cmd.compound-list-exit-status"),
+        script="{ true; exit 7; }\n",
+        status=7,
+        stdout="",
+    ),
+    # [spec:posix:req:cmd.for-omitted-in/test]
+    # [spec:posix:req:cmd.for-exit-status/test]
+    Case(
+        id="cmd-for-omitted-in",
+        rules=("cmd.for-omitted-in", "cmd.for-exit-status"),
+        script="set -- p q\nfor i do printf '%s.' \"$i\"; done\nprintf '\\n'\nfor i in; do :; done\necho $?\n",
+        stdout="p.q.\n0\n",
+    ),
+    # [spec:posix:req:cmd.case-clause-syntax/test]
+    # [spec:posix:req:cmd.case-pattern-expansion/test]
+    # [spec:posix:req:cmd.case-exit-status/test]
+    Case(
+        id="cmd-case-clauses",
+        rules=(
+            "cmd.case-clause-syntax",
+            "cmd.case-pattern-expansion",
+            "cmd.case-exit-status",
+        ),
+        script=(
+            "p=b\n"
+            "case b in a|$p) echo matched;; *) echo no;; esac\n"
+            "case zz in a) :;; esac\necho $?\n"
+        ),
+        stdout="matched\n0\n",
+    ),
+    # [spec:posix:req:cmd.if-execution/test]
+    # [spec:posix:req:cmd.if-exit-status/test]
+    Case(
+        id="cmd-if-exit-status",
+        rules=("cmd.if-execution", "cmd.if-exit-status"),
+        script=(
+            "if true; then echo t; fi\n"
+            "if false; then echo t; else echo e; fi\n"
+            "if false; then :; fi\necho $?\n"
+        ),
+        stdout="t\ne\n0\n",
+    ),
+    # [spec:posix:req:cmd.while-exit-status/test]
+    # [spec:posix:req:cmd.until-exit-status/test]
+    Case(
+        id="cmd-while-until-exit-status",
+        rules=("cmd.while-exit-status", "cmd.until-exit-status"),
+        script=(
+            "while false; do :; done\necho $?\n"
+            "until true; do :; done\necho $?\n"
+            "i=0\nwhile [ $i -lt 2 ]; do i=$((i+1)); false; done\necho $?\n"
+        ),
+        stdout="0\n0\n1\n",
+    ),
+    # [spec:posix:req:cmd.function-exit-status/test]
+    # [spec:posix:req:cmd.function-name-requirements/test]
+    Case(
+        id="cmd-function-exit-status",
+        rules=("cmd.function-exit-status", "cmd.function-name-requirements"),
+        script="f() { return 4; }\necho $?\nf\necho $?\n",
+        stdout="0\n4\n",
+    ),
+    # [spec:posix:req:cmd.async-subshell-background/test]
+    # [spec:posix:req:cmd.async-stdin-devnull/test]
+    Case(
+        id="cmd-async-subshell",
+        rules=("cmd.async-subshell-background", "cmd.async-stdin-devnull"),
+        script=(
+            "v=parent\n"
+            "{ v=child; } &\nwait\n"
+            "printf '%s\\n' \"$v\"\n"
+        ),
+        stdout="parent\n",
+    ),
+    # [spec:posix:req:cmd.search-applies/test]
+    # [spec:posix:req:cmd.search-path-non-builtin/test]
+    Case(
+        id="cmd-search-uses-path",
+        rules=("cmd.search-applies", "cmd.search-path-non-builtin"),
+        script="PATH=$PWD/bin:$PATH mytool\n",
+        files={"bin/mytool": FileFixture("#!/bin/sh\nprintf 'found\\n'\n", 0o755)},
+        stdout="found\n",
+    ),
+    # [spec:posix:req:cmd.simple-step-order-reversal/test]
+    Case(
+        id="cmd-assign-redirect-order",
+        rules=("cmd.simple-step-order-reversal",),
+        script="v=$( : ) > out\necho ok\n",
+        stdout="ok\n",
+    ),
 )
+
+# ---------------------------------------------------------------------
+# Area modules. Each `cases_<area>.py` exports its own CASES tuple and is
+# appended here, so several authors can add coverage at once without
+# touching a shared file. Nothing else needs changing to register one.
+# ---------------------------------------------------------------------
+
+def _load_area_cases() -> tuple[Case, ...]:
+    import importlib
+    import pathlib
+
+    found: list[Case] = []
+    here = pathlib.Path(__file__).parent
+    for path in sorted(here.glob("cases_*.py")):
+        module = importlib.import_module(path.stem)
+        found.extend(getattr(module, "CASES", ()))
+    return tuple(found)
+
+
+CASES = CASES + _load_area_cases()

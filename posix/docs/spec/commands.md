@@ -8,7 +8,6 @@ Copyright © 2001-2024 The IEEE and The Open Group.
 
 ## 2.9 Shell Commands
 
-> [spec:posix:syn:cmd.format-descriptions-informal]
 > The command descriptions in this section each describe a format of the command
 > that is only used to aid the reader in recognizing the command type, and does
 > not formally represent the syntax. In particular, the representations include

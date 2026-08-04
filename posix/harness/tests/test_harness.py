@@ -28,8 +28,18 @@ class CatalogTests(unittest.TestCase):
         cls.dispositions = dispositions(cls.rules, cls.cases, cls.overrides)
 
     def test_extracts_complete_unique_corpus(self) -> None:
-        self.assertEqual(len(self.rules), 1130)
+        # No exact count: the corpus legitimately shrinks when a passage
+        # turns out to describe the standard document rather than the
+        # shell and loses its rule marker, and grows when a section is
+        # authored. Pinning the number only produces a stale assertion
+        # that says nothing about extraction being correct. Assert the
+        # invariants instead: substantial, unique, and well-formed.
+        self.assertGreater(len(self.rules), 1000)
         self.assertEqual(len(self.rules), len(set(self.rules)))
+        self.assertTrue(all(r.body.strip() for r in self.rules.values()))
+        self.assertTrue(
+            all(r.verb in {"def", "syn", "sem", "req", "thm"} for r in self.rules.values())
+        )
         rule = self.rules["builtin.set.opt-u-nounset"]
         self.assertEqual(rule.verb, "req")
         self.assertIn("arithmetic expansion", rule.body)
@@ -45,9 +55,17 @@ class CatalogTests(unittest.TestCase):
         )
 
     def test_seed_registry_is_normative_and_unique(self) -> None:
-        self.assertEqual(len(self.cases), 69)
+        # Again no exact count -- cases are added continuously. What must
+        # hold is that every case is normative (cites at least one real
+        # rule) and that ids are unique, which validate_registry enforces
+        # and this re-checks independently.
+        self.assertGreater(len(self.cases), 100)
         self.assertEqual(len({case.id for case in self.cases}), len(self.cases))
         self.assertTrue(all(case.rules for case in self.cases))
+        known = set(self.rules)
+        for case in self.cases:
+            for rule in case.rules:
+                self.assertIn(rule, known, f"case {case.id} cites unknown rule {rule}")
 
 
 class ExecutorTests(unittest.TestCase):

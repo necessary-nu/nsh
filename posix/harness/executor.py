@@ -8,6 +8,7 @@ import os
 import pty
 import select
 import signal
+import shutil
 import subprocess
 import tempfile
 import termios
@@ -132,7 +133,10 @@ def _run_pty(
             stdout=slave,
             stderr=slave,
             close_fds=True,
-            preexec_fn=_make_controlling_terminal,
+            # No preexec_fn: the session is taken inside the namespace by
+            # `setsid --ctty` (see _contain). Doing it here as well makes
+            # the inner TIOCSCTTY fail with EPERM.
+            start_new_session=True,
         )
     except BaseException:
         os.close(master)
@@ -216,16 +220,120 @@ def _run_pty(
     return (124 if timed_out else returncode), transcript, "", timed_out
 
 
-def _invocation(shell: Path, case: Case) -> tuple[list[str], str | None, bool]:
+# Resolved against the REAL environment at import time. Cases run with a
+# deterministic PATH that deliberately excludes the caller's, so a bare
+# name here would not be found when Popen launches the wrapper.
+SANDBOX = shutil.which(os.environ.get("POSIX_HARNESS_SANDBOX", "sandbox")) or ""
+
+
+class ContainmentError(RuntimeError):
+    """Raised when the shell cannot be confined. Never degrade to running free."""
+
+
+def _contain(argv: list[str], *, cwd: Path, interactive: bool) -> list[str]:
+    """Wrap a shell invocation in a PID namespace.
+
+    A conformance case is hostile input: this suite necessarily exercises
+    `kill`, `trap`, job control and background processes. Run as the login
+    uid with no namespace, `kill -- -1` means "signal every process this uid
+    may signal" -- which on 2026-08-02 killed the login shell, tmux, the
+    agent daemon and the harness itself. A PID namespace makes that
+    structurally impossible: a process cannot signal what it cannot see, and
+    everything in the namespace dies when its pid 1 exits, so background
+    jobs cannot leak either.
+
+    `timeout` is not a substitute. It bounds how long a case runs, not what
+    the case can reach.
+
+    Interactive cases keep the pty as their controlling terminal, so
+    --new-session is omitted for them; every other property is the same.
+    """
+
+    wrapper = [
+        SANDBOX,
+        "--quiet",
+        "--unshare",
+        "all",
+        "--die-with-parent",
+        "--bind",
+        "/:/:ro",
+        "--dev",
+        "/dev",
+        "--proc",
+        "/proc",
+        "--bind",
+        f"{cwd}:{cwd}",
+        "--chdir",
+        str(cwd),
+        "--limit",
+        "nproc=64",
+    ]
+    if not interactive:
+        wrapper.append("--new-session")
+        return [*wrapper, "--", *argv]
+    # Interactive cases need a controlling terminal AND working job control.
+    # Establishing the session outside the namespace does not give both: the
+    # pty's foreground process group is then a pid that does not exist inside
+    # it, so dash records an invisible `initialpgrp` and its teardown
+    # `tcsetpgrp` fails with "Cannot set tty process group (No such process)"
+    # -- exit status 2 on every interactive case. `sandbox --new-session` is
+    # not the answer either: setsid without re-acquiring the tty leaves the
+    # shell with no controlling terminal at all, so it prints "can't access
+    # tty; job control turned off" and every job-control rule becomes
+    # untestable. Running `setsid --ctty` as pid 1's child inside the
+    # namespace gives the shell its own session and the pty as controlling
+    # terminal, both visible to itself.
+    return [*wrapper, "--", "setsid", "--ctty", *argv]
+
+
+def assert_contained() -> None:
+    """Refuse to run at all unless the PID namespace really is active.
+
+    Deliberately no fallback: a harness that silently degrades to "no
+    sandbox" is exactly how the incident happened.
+    """
+
+    if not SANDBOX:
+        raise ContainmentError(
+            "the 'sandbox' binary was not found on PATH; "
+            "refusing to run shell cases unconfined"
+        )
+    sentinel = subprocess.Popen(["sleep", "30"])
+    try:
+        with tempfile.TemporaryDirectory() as probe:
+            argv = _contain(
+                ["/bin/sh", "-c", f"test -d /proc/{sentinel.pid} && echo VISIBLE; ls /proc | grep -c '^[0-9]*$'"],
+                cwd=Path(probe),
+                interactive=False,
+            )
+            result = subprocess.run(argv, capture_output=True, text=True, timeout=30)
+    finally:
+        sentinel.kill()
+        sentinel.wait()
+    if result.returncode != 0:
+        raise ContainmentError(f"sandbox probe failed ({result.returncode}): {result.stderr.strip()}")
+    if "VISIBLE" in result.stdout:
+        raise ContainmentError(
+            "a host pid was visible inside the sandbox; the PID namespace is not active"
+        )
+    visible = result.stdout.strip().splitlines()[-1]
+    if not visible.isdigit() or int(visible) > 16:
+        raise ContainmentError(f"unexpected process count inside the sandbox: {visible!r}")
+
+
+def _invocation(shell: Path, case: Case, cwd: Path) -> tuple[list[str], str | None, bool]:
     """Translate a case execution mode into argv, input, and PTY use."""
 
     options = list(case.shell_options)
     if case.mode == "command":
-        return [str(shell), *options, "-c", case.script, *case.args], case.stdin, False
+        argv = [str(shell), *options, "-c", case.script, *case.args]
+        return _contain(argv, cwd=cwd, interactive=False), case.stdin, False
     session = case.stdin if case.stdin is not None else case.script
     if case.mode == "stdin":
-        return [str(shell), *options, "-s", *case.args], session, False
-    return [str(shell), *options, "-i", *case.args], session, True
+        argv = [str(shell), *options, "-s", *case.args]
+        return _contain(argv, cwd=cwd, interactive=False), session, False
+    argv = [str(shell), *options, "-i", *case.args]
+    return _contain(argv, cwd=cwd, interactive=True), session, True
 
 
 def run_case(
@@ -282,7 +390,7 @@ def run_case(
                     for name, value in case.environment.items()
                 }
             )
-            argv, stdin, interactive = _invocation(shell, case)
+            argv, stdin, interactive = _invocation(shell, case, root)
             if interactive:
                 status, stdout, stderr, timed_out = _run_pty(
                     argv,

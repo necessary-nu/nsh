@@ -16,9 +16,10 @@ from catalog import (
     dispositions,
     load_overrides,
     load_rules,
+    validate_exemptions,
     validate_registry,
 )
-from executor import host_capabilities, run_case
+from executor import host_capabilities, run_case, ContainmentError, assert_contained
 from model import Case, Observation, RuleResult
 from report import (
     CASE_VERDICT_ORDER,
@@ -33,6 +34,9 @@ HARNESS_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = HARNESS_DIR.parents[1]
 SPEC_DIR = PROJECT_ROOT / "posix" / "docs" / "spec"
 OVERRIDES = HARNESS_DIR / "dispositions.json"
+# Fragments dropped in dispositions.d/ are merged over the base file, so
+# parallel authors can record dispositions without a shared-file conflict.
+OVERRIDES_DIR = HARNESS_DIR / "dispositions.d"
 
 
 def _path(value: str) -> Path:
@@ -228,11 +232,44 @@ def _list_catalog(
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    # Containment first. Every case runs a shell, and this suite necessarily
+    # exercises kill/trap/job control; there is deliberately no unconfined
+    # fallback path.
+    try:
+        assert_contained()
+    except ContainmentError as error:
+        print(f"posix-harness: CONTAINMENT FAILURE: {error}", file=sys.stderr)
+        print("posix-harness: refusing to run shell cases unconfined", file=sys.stderr)
+        return 2
     try:
         rules = load_rules(SPEC_DIR)
         cases = validate_registry(rules, CASES)
         overrides = load_overrides(OVERRIDES)
+        # Later fragments win on a duplicate id; a clash is an authoring
+        # error, so surface it rather than silently taking one side.
+        for fragment in sorted(OVERRIDES_DIR.glob("*.json")) if OVERRIDES_DIR.is_dir() else []:
+            extra = load_overrides(fragment)
+            clashes = sorted(set(extra) & set(overrides))
+            if clashes:
+                raise CatalogError(
+                    f"{fragment}: dispositions already set elsewhere: {', '.join(clashes)}"
+                )
+            overrides.update(extra)
+        unsupported = validate_exemptions(rules, overrides)
+        # Strip what could not be justified so it reverts to `pending`.
+        for message in unsupported:
+            overrides.pop(message.split(":", 1)[0], None)
         rule_dispositions = dispositions(rules, cases, overrides)
+        if unsupported:
+            print(
+                f"\nUNJUSTIFIED EXEMPTIONS ({len(unsupported)}): a not-applicable "
+                "disposition must quote, verbatim from the rule body, the wording "
+                "that releases the shell. These have reverted to `pending` and are "
+                "NOT counted as excused:",
+                file=sys.stderr,
+            )
+            for message in unsupported:
+                print(f"  {message}", file=sys.stderr)
         unknown_rules = sorted(set(args.rule) - rules.keys())
         if unknown_rules:
             raise CatalogError(f"unknown rule ids: {', '.join(unknown_rules)}")

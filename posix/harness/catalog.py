@@ -97,6 +97,68 @@ def load_overrides(path: Path) -> dict[str, tuple[Disposition, str]]:
     return result
 
 
+# A `not-applicable` disposition is a claim that the standard does not
+# require anything of the shell. That claim is cheap to assert and was
+# repeatedly asserted wrongly: rules were excused as "a heading", "an
+# enumeration" or "a grammar production" when the wording was in fact an
+# obligation ("The following operands shall be supported" means cd must
+# accept a directory operand). Every one of those was testable.
+#
+# So the exemption now has to be shown, not argued: the reason must quote,
+# verbatim from the rule body, the phrase that releases the shell -- an
+# "unspecified", "undefined", "need not", "may", and so on. If the standard
+# never says such a thing, the rule is either a real obligation (write a
+# case, and let it fail if the shell does not comply) or it is text about
+# the document rather than the shell (remove the rule marker and leave it
+# as prose).
+ESCAPE_WORDS = re.compile(
+    r"\b(unspecified|undefined|need not|implementation-defined|may|might|"
+    r"should|optional|not required|no requirement)\b",
+    re.IGNORECASE,
+)
+_QUOTED = re.compile(r"[\"\u201c\u2018']([^\"\u201c\u201d\u2018\u2019']{8,})[\"\u201d\u2019']")
+
+
+def _normalize(text: str) -> str:
+    return " ".join(text.split()).lower()
+
+
+def validate_exemptions(
+    rules: dict[str, Rule], overrides: dict[str, tuple[Disposition, str]]
+) -> list[str]:
+    """Report not-applicable exemptions the rule text does not support.
+
+    Returns one message per unsupported exemption. The caller strips those
+    exemptions rather than honouring them: an exemption nobody can justify
+    is not an exemption, so the rule reverts to `pending` and the run exits
+    non-zero. Reporting instead of refusing to start keeps the suite usable
+    while a backlog is worked through -- the conformance numbers stay
+    truthful because the unjustified rules stop counting as excused.
+    """
+
+    problems: list[str] = []
+    for rule_id, (disposition, reason) in sorted(overrides.items()):
+        if disposition != "not-applicable":
+            continue
+        rule = rules.get(rule_id)
+        if rule is None:
+            continue
+        body = _normalize(rule.body)
+        quotes = [q for q in _QUOTED.findall(reason) if _normalize(q) in body]
+        if not quotes:
+            problems.append(
+                f"{rule_id}: not-applicable reason quotes nothing found in the rule body; "
+                f"quote the wording that releases the shell, or write a case / demote to prose"
+            )
+            continue
+        if not any(ESCAPE_WORDS.search(q) for q in quotes):
+            problems.append(
+                f"{rule_id}: the quoted wording carries no exemption "
+                f"(no unspecified/undefined/need not/may); this reads as an obligation"
+            )
+    return problems
+
+
 def validate_registry(rules: dict[str, Rule], cases: Iterable[Case]) -> tuple[Case, ...]:
     """Reject stale rule ids, duplicate case ids, and malformed fixtures early."""
 
