@@ -1,20 +1,8 @@
 {
   "rules": {
-    "cmd.assign-standard-utility-as-function": {
-      "disposition": "not-applicable",
-      "reason": "Applies only 'If the command name is a standard utility implemented as a function'; dash implements standard utilities as built-ins or external commands and defines none as a shell function, so the antecedent never holds."
-    },
-    "cmd.function-syntax-error-properties": {
-      "disposition": "not-applicable",
-      "reason": "Inherits the permission in the first item of 2.15: a syntax error in a special built-in 'may cause a shell executing that utility to abort'; nothing is required either way."
-    },
-    "cmd.search-path-associated-builtin": {
-      "disposition": "not-applicable",
-      "reason": "The requirement is conditioned on the implementation having 'implemented the utility as a built-in or as a shell function ... associated with the directory that was most recently tested during the successful PATH search'. Which directory a built-in is associated with is implementation-defined and not exposed by the shell, so no test can distinguish conformance from non-conformance."
-    },
     "expand.arith-extensions": {
       "disposition": "not-applicable",
-      "reason": "Permissive: 'the shell may recognize arithmetic expressions beyond those listed ... may use a signed integer type with a rank larger than ... signed long'."
+      "reason": "Permissive throughout: \"the shell may recognize arithmetic expressions beyond those listed\", and it may use a wider signed integer type, or a real-floating type where that does not change the result. Nothing is required either way."
     },
     "expand.assignment-redirection-environment": {
       "disposition": "not-applicable",
@@ -24,33 +12,13 @@
       "disposition": "not-applicable",
       "reason": "Permissive: the word 'may be subject to an additional implementation-defined form of expansion'; no behaviour is required either way."
     },
-    "expand.cmdsub-alias-substitution": {
-      "disposition": "not-applicable",
-      "reason": "Conditioned on an unspecified choice: it applies only 'If the commands string is parsed as a single compound_list', and expand.cmdsub-parsing leaves that choice unspecified."
-    },
     "expand.cmdsub-redirections-only": {
       "disposition": "not-applicable",
       "reason": "Explicitly unspecified: 'If the commands string consists solely of redirections, the results are unspecified'."
     },
     "expand.cmdsub-terminating-paren": {
       "disposition": "not-applicable",
-      "reason": "Explicitly unspecified: 'The behavior is unspecified if the terminating ')' is not present in the token containing the command substitution'."
-    },
-    "expand.field-splitting-delimited": {
-      "disposition": "not-applicable",
-      "reason": "Defines the term 'delimited' for the field-splitting algorithm; the observable behaviour is asserted by expand.field-splitting-algorithm and expand.field-splitting-order."
-    },
-    "expand.param-hash-requires-word": {
-      "disposition": "not-applicable",
-      "reason": "Constrains the application, not the shell: 'the application shall ensure that word is specified'."
-    },
-    "grammar.token-context-dependent-distinction": {
-      "disposition": "not-applicable",
-      "reason": "Meta-rule describing how the numbered grammar annotations are applied ('the applicable rule shall be applied to convert the token identifier type'); rules 1 through 8 are each tested individually."
-    },
-    "grammar.token-symbols": {
-      "disposition": "not-applicable",
-      "reason": "A %token declaration list (WORD, ASSIGNMENT_WORD, NAME, NEWLINE, IO_NUMBER, IO_LOCATION); the recognition of each is asserted by grammar.token-classification and rules 1 through 8."
+      "reason": "Explicitly unspecified: \"The behavior is unspecified if the terminating\" right-parenthesis \"is not present in the token containing the command substitution\"."
     },
     "jobctl.background-job-brought-to-foreground": {
       "disposition": "manual",
@@ -138,23 +106,19 @@
     },
     "param.positional-zero-not-positional": {
       "disposition": "not-applicable",
-      "reason": "Explicitly unspecified: 'the results of expanding ${00} are unspecified'."
+      "reason": "Explicitly unspecified: \"the results of expanding `${00}` are unspecified\". The classification of 0 as a special parameter rather than a positional one is asserted by param.special-parameters and param.special-zero."
     },
     "param.pwd-assignment": {
       "disposition": "not-applicable",
       "reason": "Permissive and unspecified: 'Assignments to the PWD variable may be ignored. If an application sets or unsets the value of PWD, the behaviors of the cd and pwd utilities are unspecified'."
     },
-    "param.shell-variables": {
-      "disposition": "not-applicable",
-      "reason": "An enumeration ('The following variables shall affect the execution of the shell: ENV, HOME, IFS, ...'); each named variable carries its own rule."
-    },
     "pattern.invalid-byte-sequence-unspecified": {
       "disposition": "not-applicable",
-      "reason": "Explicitly unspecified: matching a string containing 'bytes that do not form part of a valid character' has unspecified behavior."
+      "reason": "Explicitly unspecified: matching a string containing bytes that \"do not form part of a valid character, the behavior is unspecified\"."
     },
     "pattern.leading-period-in-bracket-unspecified": {
       "disposition": "not-applicable",
-      "reason": "Explicitly unspecified: 'It is unspecified whether an explicit <period> in a bracket expression matching list ... can match a leading <period> in a filename'."
+      "reason": "Explicitly unspecified: \"It is unspecified whether an explicit <period> in a bracket expression matching list\" can match a leading period in a filename."
     },
     "pattern.trailing-backslash-unspecified": {
       "disposition": "not-applicable",
@@ -162,15 +126,15 @@
     },
     "pattern.unmatched-open-bracket-unspecified": {
       "disposition": "not-applicable",
-      "reason": "Explicitly unspecified: 'it is unspecified whether other unquoted '*', '?', '[' or <backslash> characters within the same slash-delimited component ... retain their special meanings or are treated as ordinary characters'."
+      "reason": "Explicitly unspecified: \"it is unspecified whether other unquoted\" pattern characters \"within the same slash-delimited component of the pattern retain their special meanings or are treated as ordinary characters\"."
     },
     "quote.dollar-single-quotes-null-byte": {
       "disposition": "not-applicable",
-      "reason": "Explicitly unspecified: 'it is unspecified whether that null byte is included in the result or if that byte and any following ... are evaluated and discarded'."
+      "reason": "Explicitly unspecified: \"it is unspecified whether that null byte is included in the result\" or whether it and everything after it up to the closing quote is evaluated and discarded."
     },
     "quote.dollar-single-quotes-octal-overflow": {
       "disposition": "not-applicable",
-      "reason": "Explicitly unspecified: 'If the octal value specified by \\ddd will not fit in a byte, the results are unspecified'."
+      "reason": "Explicitly unspecified: an octal escape that \"will not fit in a byte, the results are unspecified\"."
     },
     "quote.dollar-single-quotes-undefined-escape": {
       "disposition": "not-applicable",
@@ -178,7 +142,7 @@
     },
     "quote.dollar-single-quotes-unencodable": {
       "disposition": "not-applicable",
-      "reason": "Implementation-defined, and its one normative constraint ('shall not replace an unsupported character with bytes that do not form valid characters') is vacuous in the C locale the harness fixes, where every byte is a valid character and \\e and \\cX are always encodable."
+      "reason": "For a character with no encoding in the current locale \"the result is implementation-defined\"; the one normative constraint (implementations shall not substitute bytes that do not form valid characters) is vacuous in the C locale the harness fixes, where every byte is a valid character."
     },
     "quote.double-quotes-backquote-undefined": {
       "disposition": "not-applicable",
@@ -186,7 +150,7 @@
     },
     "quote.future-special-characters": {
       "disposition": "not-applicable",
-      "reason": "Advisory about a possible future revision: 'A future version of this standard may extend the conditions ... Therefore applications should quote them'."
+      "reason": "Advisory about a possible future revision, addressed to applications: \"A future version of this standard may extend the conditions under which the conditionally-special characters are special.\" Nothing is required of the shell."
     },
     "redir.here-doc-fd-type": {
       "disposition": "not-applicable",
@@ -194,19 +158,15 @@
     },
     "redir.location-format": {
       "disposition": "not-applicable",
-      "reason": "Permissive and implementation-defined: 'The shell may support an additional format ... If this format is supported its behavior is implementation-defined'."
+      "reason": "Permissive and implementation-defined: \"The shell may support an additional format used for redirection\", and if it is supported its behavior is implementation-defined."
     },
     "redir.output-noclobber-atomicity": {
       "disposition": "not-applicable",
-      "reason": "Requires observing that check-existence/create/open happen atomically 'as is done by the open() function ... when the O_CREAT and O_EXCL flags are set'; atomicity is not falsifiable from the shell language, and the symlink clause is permissive ('need not fail with [EEXIST]')."
-    },
-    "shell.command-language-interpreter": {
-      "disposition": "not-applicable",
-      "reason": "Chapter introduction: 'The shell is a command language interpreter. This chapter describes the syntax of that command language'."
+      "reason": "Atomicity is not falsifiable from the shell language, and the two shell-visible clauses are both permissive: the open operation \"need not fail with [EEXIST]\" when the target is a symbolic link that does not resolve to an existing regular file, and \"The check for the type of the file need not be performed atomically\" with the rest."
     },
     "shell.hashbang-unspecified": {
       "disposition": "not-applicable",
-      "reason": "Explicitly unspecified: 'If the first line of a file of shell commands starts with the characters \"#!\", the results are unspecified'."
+      "reason": "Explicitly unspecified: if the first line of a file of shell commands starts with a <number-sign> followed by an <exclamation-mark>, \"the results are unspecified\"."
     },
     "signal.pending-trap-order": {
       "disposition": "not-applicable",
@@ -215,10 +175,6 @@
     "token.alias-reserved-word-unspecified": {
       "disposition": "not-applicable",
       "reason": "Explicitly unspecified: 'it is unspecified whether the TOKEN is subject to alias substitution'."
-    },
-    "token.reserved-word-time": {
-      "disposition": "not-applicable",
-      "reason": "Applies only 'When the word time is recognized as a reserved word', which token.reserved-words-optional makes optional; dash does not recognise it (`time true` is resolved by PATH search), so the antecedent never holds."
     },
     "token.reserved-words-optional": {
       "disposition": "not-applicable",

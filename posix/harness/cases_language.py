@@ -1866,4 +1866,267 @@ CASES: tuple[Case, ...] = (
         ),
         stdout="12\n",
     ),
+    # -----------------------------------------------------------------
+    # Rules formerly excused as `not-applicable` on the grounds that they
+    # were "a heading", "an enumeration", "a %token list" or "a chapter
+    # introduction". Each states an obligation on the shell, so each is
+    # tested here instead.
+    # -----------------------------------------------------------------
+    # [spec:posix:def:shell.command-language-interpreter/test]
+    Case(
+        id="lang2-command-language-interpreter",
+        rules=("shell.command-language-interpreter",),
+        script=_s(
+            r"""
+            printf 'if true; then printf "[then]"; fi\n' > s.sh
+            sh -c 'for w in a b; do printf "[%s]" "$w"; done'
+            sh s.sh
+            printf 'printf "[%%s]" "$((1+2))"\n' | sh
+            printf '\n'
+            """
+        ),
+        stdout="[a][b][then][3]\n",
+    ),
+    # The %token list is a claim about which terminal symbols the shell
+    # recognizes: ASSIGNMENT_WORD, WORD, NAME, NEWLINE and IO_NUMBER are
+    # each required. IO_LOCATION is not, because redir.location-format
+    # only says the shell "may support" that format.
+    # [spec:posix:def:grammar.token-symbols/test]
+    Case(
+        id="lang2-grammar-token-symbols",
+        rules=("grammar.token-symbols",),
+        script=_s(
+            r"""
+            name=VALUE
+            printf '[%s]' "$name"
+            for name in ITEM; do printf '[%s]' "$name"; done
+            printf '[%s]' 2>err
+            printf '[%s]' 2 >out
+            printf '%s' "$(cat out)"
+            printf '\n'
+            """
+        ),
+        stdout="[VALUE][ITEM][][2]\n",
+    ),
+    # The same TOKEN `for` yields the reserved word For, then a NAME,
+    # then a WORD, then an ASSIGNMENT_WORD, purely from context.
+    # [spec:posix:syn:grammar.token-context-dependent-distinction/test]
+    Case(
+        id="lang2-token-context-dependent",
+        rules=("grammar.token-context-dependent-distinction",),
+        script=_s(
+            r"""
+            for for in for; do printf '[%s]' "$for"; done
+            for=ASSIGNED
+            printf '[%s]' "$for"
+            printf '[%s]' for
+            printf '\n'
+            """
+        ),
+        stdout="[for][ASSIGNED][for]\n",
+    ),
+    # [spec:posix:def:expand.field-splitting-delimited/test]
+    Case(
+        id="lang2-field-splitting-delimited",
+        rules=("expand.field-splitting-delimited",),
+        script=_s(
+            r"""
+            IFS=:
+            v='a::b'
+            set -- $v
+            printf '%s' "$#"
+            printf '[%s]' "$1" "$2" "$3"
+            unset IFS
+            w='  p q  '
+            set -- $w
+            printf '%s' "$#"
+            printf '[%s]' "$1" "$2"
+            printf '\n'
+            """
+        ),
+        stdout="3[a][][b]2[p][q]\n",
+    ),
+    # With word supplied, `${#-word}` and `${#+word}` are the parameter
+    # expansion of `#`, not the string length of some other parameter.
+    # [spec:posix:req:expand.param-hash-requires-word/test]
+    Case(
+        id="lang2-param-hash-requires-word",
+        rules=("expand.param-hash-requires-word",),
+        script=_s(
+            r"""
+            set -- alpha beta
+            printf '[%s]' "${#-WORD}"
+            printf '[%s]' "${#+WORD}"
+            printf '[%s]' "${#}"
+            set --
+            printf '[%s]' "${#-WORD}"
+            printf '\n'
+            """
+        ),
+        stdout="[2][WORD][2][0]\n",
+    ),
+    # expand.cmdsub-parsing leaves the choice of parsing strategy
+    # unspecified, so establish which one this shell made before
+    # asserting the obligation that follows from it: a trailing syntax
+    # error that suppresses an earlier command means the whole string
+    # was parsed before anything in it ran.
+    # [spec:posix:req:expand.cmdsub-alias-substitution/test]
+    Case(
+        id="lang2-cmdsub-alias-substitution",
+        rules=("expand.cmdsub-alias-substitution",),
+        script=_s(
+            r"""
+            rm -f marker
+            ( eval 'x=$(: > marker; done)' ) 2>/dev/null
+            alias outer='printf OUTER'
+            v=$(unalias outer
+            outer)
+            { w=$(alias inner='printf INNER'
+            inner); } 2>/dev/null
+            if [ -f marker ]; then
+                printf 'ok\n'
+            elif [ "$v" = OUTER ] && [ -z "$w" ]; then
+                printf 'ok\n'
+            else
+                printf 'alias-took-effect v=[%s] w=[%s]\n' "$v" "$w"
+            fi
+            """
+        ),
+        stdout="ok\n",
+    ),
+    # [spec:posix:req:cmd.assign-standard-utility-as-function/test]
+    Case(
+        id="lang2-assign-standard-utility-as-function",
+        rules=("cmd.assign-standard-utility-as-function",),
+        script=_s(
+            r"""
+            V=outer
+            true() { printf 'in=[%s]' "$V"; }
+            V=inner true
+            printf 'after=[%s]' "$V"
+            V=inner env > envout
+            printf 'exported=[%s]' "$(grep -c '^V=inner$' envout)"
+            printf 'after=[%s]\n' "$V"
+            """
+        ),
+        stdout="in=[inner]after=[outer]exported=[1]after=[outer]\n",
+    ),
+    # A syntax error met while a function runs has the syntax-error
+    # properties of a special built-in: the shell may abort, but if it
+    # does not abort the exit status must still be non-zero.
+    # [spec:posix:req:cmd.function-syntax-error-properties/test]
+    Case(
+        id="lang2-function-syntax-error-properties",
+        rules=("cmd.function-syntax-error-properties",),
+        script=_s(
+            r"""
+            f() { eval 'for'; printf 'CONTINUED'; }
+            ( f; printf 'status=%s' "$?" ) > out 2>/dev/null
+            outer=$?
+            body=$(cat out)
+            if [ -n "$body" ]; then
+                case "$body" in
+                *status=0*) printf 'zero-status-without-abort\n' ;;
+                *) printf 'ok\n' ;;
+                esac
+            elif [ "$outer" -ne 0 ]; then
+                printf 'ok\n'
+            else
+                printf 'zero-status-after-abort\n'
+            fi
+            """
+        ),
+        stdout="ok\n",
+    ),
+    # Step 1e: what runs is decided by the PATH search, and the earliest
+    # directory that tests successfully is the one that supplies it.
+    # [spec:posix:req:cmd.search-path-associated-builtin/test]
+    Case(
+        id="lang2-search-path-associated-builtin",
+        rules=("cmd.search-path-associated-builtin",),
+        files={
+            "d1/langpath": FileFixture("#!/bin/sh\nprintf 'D1'\n", 0o755),
+            "d2/langpath": FileFixture("#!/bin/sh\nprintf 'D2'\n", 0o755),
+        },
+        script=_s(
+            r"""
+            base=$PWD
+            PATH=$base/d1:$base/d2
+            langpath
+            PATH=$base/d2:$base/d1
+            langpath
+            PATH=$base/d2
+            langpath
+            printf '\n'
+            """
+        ),
+        stdout="D1D2D2\n",
+    ),
+    # token.reserved-words-optional makes recognizing `time` optional.
+    # Either way the observable is the same: `time utility` runs the
+    # utility, passes its standard output through, and exits with its
+    # status, writing any timing to standard error.
+    # [spec:posix:req:token.reserved-word-time/test]
+    Case(
+        id="lang2-reserved-word-time",
+        rules=("token.reserved-word-time",),
+        files={
+            "bin/time": FileFixture(
+                '#!/bin/sh\n"$@"\nstatus=$?\nprintf \'real 0.00\\n\' >&2\n'
+                'exit "$status"\n',
+                0o755,
+            )
+        },
+        script=_s(
+            r"""
+            PATH=$PWD/bin:$PATH
+            time printf 'OUT\n'
+            printf 'status=%s\n' "$?"
+            time false
+            printf 'status=%s\n' "$?"
+            """
+        ),
+        stdout="OUT\nstatus=0\nstatus=1\n",
+    ),
+    # "The following variables shall affect the execution of the shell":
+    # the seven below are observable without a terminal or a second
+    # installed locale.
+    # [spec:posix:def:param.shell-variables/test]
+    Case(
+        id="lang2-shell-variables",
+        rules=("param.shell-variables",),
+        files={"bin/langvar": FileFixture("#!/bin/sh\nprintf 'PATH-OK'\n", 0o755)},
+        script=_s(
+            r"""
+            base=$PWD
+            mkdir langhome
+            HOME=$base/langhome
+            cd
+            printf 'HOME=[%s]' "${PWD##*/}"
+            cd "$base"
+            IFS=:
+            v=x:y
+            set -- $v
+            printf 'IFS=[%s%s]' "$1" "$2"
+            unset IFS
+            PATH=$base/bin:$PATH
+            printf 'PATH=[%s]' "$(langvar)"
+            case $PPID in
+            ''|*[!0-9]*) printf 'PPID=[bad]' ;;
+            *) printf 'PPID=[ok]' ;;
+            esac
+            first=$LINENO
+            second=$LINENO
+            printf 'LINENO=[%s]' "$((second - first))"
+            (PS4='@@ '; set -x; :) 2>ps4out
+            printf 'PS4=[%s]' "$(grep -c '^@@ ' ps4out)"
+            if [ "$PWD" = "$(pwd)" ]; then
+                printf 'PWD=[same]\n'
+            else
+                printf 'PWD=[differs]\n'
+            fi
+            """
+        ),
+        stdout="HOME=[langhome]IFS=[xy]PATH=[PATH-OK]PPID=[ok]LINENO=[1]PS4=[1]PWD=[same]\n",
+    ),
 )
