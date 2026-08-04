@@ -386,3 +386,265 @@ pub unsafe fn ispunct(c: c_int) -> c_int {
 pub unsafe fn isxdigit(c: c_int) -> c_int {
     libc::isxdigit(c)
 }
+
+// ---------------------------------------------------------------------
+// Unit tests for this module's functions.
+//
+// Most of this file is either a thin wrapper over libc or an
+// `#ifndef HAVE_…` fallback that a hosted build never compiles. Both are
+// still ported code with a stated contract, so both are asserted -- the
+// fallbacks precisely because nothing else in the tree exercises them,
+// which is how a wrong one would go unnoticed.
+// ---------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::{s, CStr0};
+
+    // [spec:dash:sem:system.mempcpy-fn/test]
+    #[test]
+    fn mempcpy_copies_and_returns_the_end() {
+        unsafe {
+            let src = b"hello world";
+            let mut dst = [0u8; 16];
+            let end = mempcpy(
+                dst.as_mut_ptr() as *mut c_void,
+                src.as_ptr() as *const c_void,
+                5,
+            );
+            assert_eq!(&dst[..5], b"hello");
+            // The point of mempcpy over memcpy: it returns dest+n, so
+            // appends chain without a second strlen.
+            assert_eq!(end as usize, dst.as_ptr() as usize + 5);
+            let end2 = mempcpy(end, b"!".as_ptr() as *const c_void, 1);
+            assert_eq!(&dst[..6], b"hello!");
+            assert_eq!(end2 as usize, dst.as_ptr() as usize + 6);
+            // A zero-length copy still reports the (unmoved) end.
+            assert_eq!(
+                mempcpy(dst.as_mut_ptr() as *mut c_void, src.as_ptr() as *const c_void, 0) as usize,
+                dst.as_ptr() as usize
+            );
+        }
+    }
+
+    // [spec:dash:sem:system.stpcpy-fn/test]
+    #[test]
+    fn stpcpy_copies_and_returns_the_nul() {
+        unsafe {
+            let mut dst = [0 as c_char; 16];
+            let end = stpcpy(dst.as_mut_ptr(), CStr0::new("abc").p());
+            assert_eq!(s(dst.as_ptr()), "abc");
+            // Returns a pointer to the terminating NUL, not to dest.
+            assert_eq!(end as usize, dst.as_ptr() as usize + 3);
+            assert_eq!(*end, 0);
+            let end2 = stpcpy(end, CStr0::new("de").p());
+            assert_eq!(s(dst.as_ptr()), "abcde");
+            assert_eq!(end2 as usize, dst.as_ptr() as usize + 5);
+        }
+    }
+
+    // [spec:dash:sem:system.strchrnul-fn/test]
+    #[test]
+    fn strchrnul_falls_back_to_the_nul() {
+        unsafe {
+            let hay = CStr0::new("abcdef");
+            assert_eq!(s(strchrnul(hay.p(), 'c' as c_int)), "cdef");
+            assert_eq!(s(strchrnul(hay.p(), 'a' as c_int)), "abcdef");
+            // The whole reason this exists rather than strchr: a miss
+            // returns the NUL, never NULL, so callers need no branch.
+            let miss = strchrnul(hay.p(), 'z' as c_int);
+            assert!(!miss.is_null());
+            assert_eq!(*miss, 0);
+            assert_eq!(miss as usize, hay.p() as usize + 6);
+            // Searching for NUL finds the terminator.
+            assert_eq!(strchrnul(hay.p(), 0) as usize, hay.p() as usize + 6);
+        }
+    }
+
+    // [spec:dash:sem:system.strsignal-fn/test]
+    #[test]
+    fn strsignal_names_known_signals_and_numbers_the_rest() {
+        unsafe {
+            assert!(s(strsignal(libc::SIGINT)).contains("Interrupt"));
+            assert!(!s(strsignal(libc::SIGTERM)).is_empty());
+            // Out of range falls through to the "Signal %d" buffer.
+            assert_eq!(s(strsignal(NSIG as c_int + 5)), format!("Signal {}", NSIG as c_int + 5));
+            // Negative is also out of range: the check is an unsigned
+            // compare, so a negative signal number wraps above NSIG.
+            assert_eq!(s(strsignal(-1)), "Signal -1");
+        }
+    }
+
+    // [spec:dash:sem:system.bsearch-fn/test]
+    #[test]
+    fn bsearch_finds_members_and_reports_misses() {
+        unsafe {
+            let table: [c_int; 5] = [1, 3, 5, 7, 9];
+            unsafe extern "C" fn cmp(a: *const c_void, b: *const c_void) -> c_int {
+                *(a as *const c_int) - *(b as *const c_int)
+            }
+            let n = table.len();
+            let sz = core::mem::size_of::<c_int>();
+            for (i, want) in table.iter().enumerate() {
+                let hit = bsearch(
+                    want as *const c_int as *const c_void,
+                    table.as_ptr() as *const c_void,
+                    n as size_t,
+                    sz,
+                    cmp,
+                );
+                assert!(!hit.is_null());
+                assert_eq!(hit as usize, table.as_ptr() as usize + i * sz);
+            }
+            let missing: c_int = 4;
+            assert!(bsearch(
+                &missing as *const c_int as *const c_void,
+                table.as_ptr() as *const c_void,
+                n as size_t,
+                sz,
+                cmp,
+            )
+            .is_null());
+            // An empty table is a miss, not a crash.
+            assert!(bsearch(
+                &missing as *const c_int as *const c_void,
+                table.as_ptr() as *const c_void,
+                0,
+                sz,
+                cmp,
+            )
+            .is_null());
+        }
+    }
+
+    // [spec:dash:sem:system.sysconf-fn/test]
+    #[test]
+    fn sysconf_fallback_always_raises() {
+        let _g = crate::testutil::lock();
+        // This is the `#ifndef HAVE_SYSCONF` fallback, and it does not
+        // wrap libc: the C body is a bare
+        // `sh_error("no sysconf for: %d", name)`, so it never returns a
+        // value for any name at all -- including one the host supports.
+        // A first draft asserted `sysconf(_SC_OPEN_MAX) > 0` and got an
+        // unwind, which is the function behaving correctly.
+        for name in [libc::_SC_OPEN_MAX, libc::_SC_CLK_TCK, _SC_CLK_TCK, -12345] {
+            assert!(crate::testutil::raises(|| unsafe {
+                sysconf(name);
+            }));
+        }
+    }
+
+    // [spec:dash:sem:system.sigclearmask-fn/test]
+    #[test]
+    fn sigclearmask_unblocks_everything() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            let mut blocked: libc::sigset_t = core::mem::zeroed();
+            libc::sigemptyset(&mut blocked);
+            libc::sigaddset(&mut blocked, libc::SIGUSR1);
+            let mut saved: libc::sigset_t = core::mem::zeroed();
+            libc::sigprocmask(libc::SIG_BLOCK, &blocked, &mut saved);
+            let mut now: libc::sigset_t = core::mem::zeroed();
+            libc::sigprocmask(libc::SIG_SETMASK, core::ptr::null(), &mut now);
+            assert_eq!(libc::sigismember(&now, libc::SIGUSR1), 1);
+
+            sigclearmask();
+
+            libc::sigprocmask(libc::SIG_SETMASK, core::ptr::null(), &mut now);
+            assert_eq!(libc::sigismember(&now, libc::SIGUSR1), 0);
+            libc::sigprocmask(libc::SIG_SETMASK, &saved, core::ptr::null_mut());
+        }
+    }
+
+    // [spec:dash:sem:system.killpg-fn/test]
+    #[test]
+    fn killpg_signals_a_process_group() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            // Signal 0 is the existence probe: no signal is sent, so this
+            // asserts the call reaches the right group without disturbing
+            // the test process.
+            assert_eq!(killpg(libc::getpgrp(), 0), 0);
+            // A group that cannot exist reports ESRCH.
+            assert_eq!(killpg(0x7fff_fff0, 0), -1);
+            assert_eq!(*libc::__errno_location(), libc::ESRCH);
+        }
+    }
+
+    // The `#ifndef HAVE_…` fallbacks. A hosted build compiles none of
+    // these -- redir.rs and input.rs call libc's memfd_create and tee
+    // directly, and the shell uses its own pattern matcher rather than
+    // fnmatch/glob. They are asserted anyway because a fallback nothing
+    // exercises is exactly where a wrong constant survives.
+    //
+    // [spec:dash:sem:system.memfd-create-fn/test]
+    // [spec:dash:sem:system.tee-fn/test]
+    // [spec:dash:sem:system.fnmatch-fn/test]
+    // [spec:dash:sem:system.glob64-fn/test]
+    // [spec:dash:sem:system.globfree64-fn/test]
+    // [spec:dash:sem:system.strtod-fn/test]
+    #[test]
+    fn unavailable_facility_fallbacks_report_failure() {
+        unsafe {
+            assert_eq!(memfd_create(CStr0::new("x").p(), 0), -1);
+            assert_eq!(tee(0, 1, 16, 0), -1);
+            assert_eq!(fnmatch(CStr0::new("*").p(), CStr0::new("a").p(), 0), -1);
+
+            let mut g: glob64_t = core::mem::zeroed();
+            assert_eq!(glob64(CStr0::new("*").p(), 0, None, &mut g), -1);
+            // globfree64 is a no-op, so the pair is safe to call after a
+            // failed glob -- which is what the callers do.
+            globfree64(&mut g);
+
+            // The strtod fallback parses nothing: it reports zero and
+            // leaves endptr AT the start, which is how a caller detects
+            // "no conversion performed".
+            let nptr = CStr0::new("1.5");
+            let mut end: *mut c_char = core::ptr::null_mut();
+            assert_eq!(strtod(nptr.p(), &mut end), 0.0);
+            assert_eq!(end as *const c_char, nptr.p());
+        }
+    }
+
+    // The ctype wrappers. Asserted over the whole unsigned-char range
+    // plus EOF rather than at a few sample points, because the thing that
+    // goes wrong with these is a boundary, not a typical case.
+    //
+    // [spec:dash:sem:system.isalnum-fn/test]
+    // [spec:dash:sem:system.iscntrl-fn/test]
+    // [spec:dash:sem:system.islower-fn/test]
+    // [spec:dash:sem:system.isspace-fn/test]
+    // [spec:dash:sem:system.isalpha-fn/test]
+    // [spec:dash:sem:system.isdigit-fn/test]
+    // [spec:dash:sem:system.isprint-fn/test]
+    // [spec:dash:sem:system.isupper-fn/test]
+    // [spec:dash:sem:system.isblank-fn/test]
+    // [spec:dash:sem:system.isgraph-fn/test]
+    // [spec:dash:sem:system.ispunct-fn/test]
+    // [spec:dash:sem:system.isxdigit-fn/test]
+    #[test]
+    fn ctype_wrappers_agree_with_the_c_locale_classification() {
+        unsafe {
+            for c in 0..=255i32 {
+                let ch = c as u8 as char;
+                assert_eq!(isalnum(c) != 0, ch.is_ascii_alphanumeric(), "isalnum {c}");
+                assert_eq!(isalpha(c) != 0, ch.is_ascii_alphabetic(), "isalpha {c}");
+                assert_eq!(isdigit(c) != 0, ch.is_ascii_digit(), "isdigit {c}");
+                assert_eq!(isxdigit(c) != 0, ch.is_ascii_hexdigit(), "isxdigit {c}");
+                assert_eq!(islower(c) != 0, ch.is_ascii_lowercase(), "islower {c}");
+                assert_eq!(isupper(c) != 0, ch.is_ascii_uppercase(), "isupper {c}");
+                assert_eq!(iscntrl(c) != 0, ch.is_ascii_control(), "iscntrl {c}");
+                assert_eq!(ispunct(c) != 0, ch.is_ascii_punctuation(), "ispunct {c}");
+                assert_eq!(isgraph(c) != 0, ch.is_ascii_graphic(), "isgraph {c}");
+                assert_eq!(isprint(c) != 0, ch.is_ascii() && !ch.is_ascii_control(), "isprint {c}");
+                assert_eq!(isspace(c) != 0, matches!(c as u8, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r'), "isspace {c}");
+                assert_eq!(isblank(c) != 0, matches!(c as u8, b' ' | b'\t'), "isblank {c}");
+            }
+            // EOF must classify as nothing at all.
+            for f in [isalnum, isalpha, isdigit, isxdigit, islower, isupper,
+                      iscntrl, ispunct, isgraph, isprint, isspace, isblank] {
+                assert_eq!(f(-1), 0);
+            }
+        }
+    }
+}
