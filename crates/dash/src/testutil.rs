@@ -18,7 +18,7 @@
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use core::ptr::addr_of_mut;
-use libc::c_char;
+use libc::{c_char, c_int};
 
 /// Serialises tests that touch shell globals.
 ///
@@ -76,4 +76,37 @@ impl CStr0 {
 /// `p` must be non-NULL and NUL-terminated.
 pub unsafe fn s(p: *const c_char) -> String {
     std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
+}
+
+/// Run `body` in a forked child and return the child's exit status.
+///
+/// Some ported functions end in `exit()` -- every `main`, and
+/// `trap::exitshell` -- so calling them in-process would take the test
+/// runner with them. Forking is the only way to observe what they do and
+/// still have a test report afterwards. Anything the child writes to a
+/// file is visible to the parent, which is how the generator tests check
+/// their output.
+///
+/// Takes [`lock`] internally: forking a process whose other threads may
+/// hold locks is only safe if nothing else is running, and cargo runs
+/// tests on several threads by default.
+pub fn forked(body: impl FnOnce()) -> c_int {
+    let _g = lock();
+    unsafe {
+        let pid = libc::fork();
+        assert!(pid >= 0, "fork failed");
+        if pid == 0 {
+            body();
+            // Only reached if `body` did NOT exit on its own.
+            libc::_exit(0);
+        }
+        let mut status: c_int = 0;
+        assert_eq!(libc::waitpid(pid, &mut status, 0), pid);
+        if libc::WIFEXITED(status) {
+            libc::WEXITSTATUS(status)
+        } else {
+            // Encode a signal death as 128+n, the shell's own convention.
+            128 + libc::WTERMSIG(status)
+        }
+    }
 }

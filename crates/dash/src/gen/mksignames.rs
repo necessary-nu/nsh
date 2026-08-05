@@ -307,3 +307,104 @@ pub fn main_fn(argc: c_int, argv: Vec<String>) -> c_int {
         libc::exit(0);
     }
 }
+
+// ---------------------------------------------------------------------
+// Unit tests for this module's functions.
+//
+// A generator has an oracle the rest of the crate does not: the C
+// generator ran during the reference build and left its output in
+// tests/.build/ref/src/. Where that tree is present the comparison is
+// byte-for-byte, which is the strongest statement available -- the two
+// programs emit the same file. Where it is absent the structural
+// assertions still run, so the test never degrades to passing vacuously.
+// ---------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The C generator's output from the reference build, if built.
+    pub(crate) fn reference(name: &str) -> Option<String> {
+        let root = std::env::var("DASH_ROOT").unwrap_or_else(|_| {
+            concat!(env!("CARGO_MANIFEST_DIR"), "/../..").to_string()
+        });
+        std::fs::read_to_string(format!("{root}/tests/.build/ref/src/{name}")).ok()
+    }
+
+    fn generate_into(path: &std::path::Path) -> String {
+        unsafe {
+            let cpath = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+            let stream = libc::fopen(cpath.as_ptr(), c"w".as_ptr());
+            assert!(!stream.is_null());
+            initialize_signames();
+            write_signames(stream);
+            libc::fclose(stream);
+        }
+        std::fs::read_to_string(path).expect("generator wrote nothing")
+    }
+
+    // [spec:dash:sem:mksignames.initialize-signames-fn/test]
+    // [spec:dash:sem:mksignames.write-signames-fn/test]
+    #[test]
+    fn write_signames_emits_the_signal_table() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            // progname appears in the banner, so it has to be set before
+            // write_signames; main_fn does this from argv[0]. The value
+            // has to be the one the reference build used -- the Makefile
+            // runs `./mksignames`, so anything else makes the byte
+            // comparison fail on the banner alone while all 65 entries
+            // match.
+            let name = std::ffi::CString::new("./mksignames").unwrap();
+            progname = name.as_ptr();
+
+            let dir = std::env::temp_dir().join(format!("mksig-{}", libc::getpid()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let out = dir.join("signames.c");
+            let text = generate_into(&out);
+
+            // Structure: the declaration, a NULL terminator, and one entry
+            // per signal up to LASTSIG.
+            assert!(text.contains("const char *const signal_names[NSIG + 1] = {"));
+            assert!(text.contains("(char *)0x0"));
+            assert_eq!(text.matches("\",\n").count(), LASTSIG as usize + 1);
+            // initialize_signames must have filled the well-known names.
+            for want in ["\"HUP\"", "\"INT\"", "\"KILL\"", "\"TERM\"", "\"EXIT\""] {
+                assert!(text.contains(want), "missing {want}");
+            }
+
+            if let Some(c_output) = reference("signames.c") {
+                assert_eq!(
+                    text, c_output,
+                    "the Rust generator and the C generator disagree"
+                );
+            } else {
+                eprintln!(
+                    "note: tests/.build/ref absent, skipped the byte comparison \
+                     (run tests/build-reference.sh for the stronger assertion)"
+                );
+            }
+            std::fs::remove_dir_all(&dir).ok();
+        }
+    }
+
+    // [spec:dash:sem:mksignames.main-fn/test]
+    #[test]
+    fn main_fn_writes_the_named_file() {
+        // main_fn ends in `libc::exit(0)`, so calling it here would take
+        // the test runner with it -- hence the fork. Its declared return
+        // type is unreachable.
+        let dir = std::env::temp_dir().join(format!("mksigmain-{}", unsafe { libc::getpid() }));
+        std::fs::create_dir_all(&dir).unwrap();
+        let out = dir.join("out.c");
+        let path = out.to_str().unwrap().to_string();
+        let rc = crate::testutil::forked(move || {
+            main_fn(2, vec!["mksignames".to_string(), path]);
+        });
+        assert_eq!(rc, 0);
+        let text = std::fs::read_to_string(&out).unwrap();
+        assert!(text.contains("signal_names[NSIG + 1]"));
+        // The banner names the program from argv[0].
+        assert!(text.contains("mksignames"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
