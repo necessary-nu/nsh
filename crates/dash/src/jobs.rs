@@ -1181,6 +1181,16 @@ unsafe fn forkparent(jp: *mut job, n: *mut Node, mode: c_int, pid: pid_t) {
     if mode == FORK_BG {
         backgndpid = pid; /* set $! */
         set_curjob(jp, CUR_RUNNING);
+        if crate::options::optlist[crate::options::iflag] != 0 {
+            crate::output::outfmt(
+                crate::output::out2,
+                crate::shell::cstr(b"[%d] %d\n\0"),
+                &[
+                    crate::output::VaArg::Int(jobno(jp)),
+                    crate::output::VaArg::Int(pid),
+                ],
+            );
+        }
     }
     if !jp.is_null() {
         let ps: *mut procstat = (*jp).ps.add((*jp).nprocs as usize);

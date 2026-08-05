@@ -201,8 +201,16 @@ control.
 > control and when the job gets its own group, `setpgid(pid, pgrp)` with
 > the same group rule as the child (its own pid for the first element,
 > the first element's for the rest) — done in both processes so neither
-> can race ahead. For a background job, set `backgndpid` (`$!`) and move
-> the job to the front of the running list.
+> can race ahead. For a background job, set `backgndpid` (`$!`), move the
+> job to the front of the running list, and — if the shell is interactive
+> — announce it on stderr as `"[%d] %d\n"`, job number then pid.
+>
+> That announcement is a **fix, upstreamable**, not upstream behaviour.
+> POSIX XCU 2.9.3.1 requires it of an interactive shell; dash wrote
+> nothing, so `[%d] ` appeared only in the `jobs` listing and completion
+> formats and there was no way to learn a job's number except by running
+> `jobs`. Found by the POSIX case `jobctl-async-notification-format`.
+> Gated on `iflag`, so no non-interactive behaviour changes.
 >
 > Then append a `procstat`: the pid, `status = -1` (running), and the
 > command text — `nullstr` unless job control is on and a command node
