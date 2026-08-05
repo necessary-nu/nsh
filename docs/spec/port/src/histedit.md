@@ -38,13 +38,15 @@ the history-recording calls, not the libedit API.
 > numbers when listing, `-r` reverses the order, `-s` re-executes without
 > editing. A missing option argument or unknown option raises.
 >
-> **Bug (reproduce, do not fix).** The `-e` arm reads `optionarg` — the
-> shell's *own* option variable, set by `nextopt` in `options.c` — rather
-> than `optarg`, which is what the library `getopt` being used here
-> actually sets. So `fc -e ed` silently discards its argument and
-> `editor` keeps whatever stale or NULL value `optionarg` held. Present
-> since the original NetBSD import. Wave 2 must reproduce it; fixing it
-> is separate post-port work.
+> **Fixed here, and upstreamable.** The `-e` arm used to read `optionarg`
+> — the shell's *own* option variable, set by `nextopt` in `options.c` —
+> rather than `optarg`, which is what the library `getopt` used on the
+> line above actually sets. The two are unrelated, so `fc -e ed` silently
+> discarded its argument, `editor` kept whatever NULL or stale value
+> `optionarg` held, and the DEFEDITOR path ran `ed` instead. Present since
+> the original NetBSD import; found by the POSIX case
+> `fc-opt-e-names-an-editor`, which had been excused as `manual` until the
+> harness grew a writable /tmp. Both languages now read `optarg`.
 >
 > **Mode.** Unless purely listing, an exception handler is installed that
 > resets the recursion counter, unlinks the temporary file and re-raises —

@@ -40,6 +40,7 @@ extern "C" {
     // `<getopt.h>` state. `libc` 0.2 exposes `getopt` but not these.
     static mut optind: c_int;
     static mut optopt: c_int;
+    static mut optarg: *mut c_char;
 }
 
 /// `#include <sys/param.h>` — MAXPATHLEN.
@@ -500,7 +501,7 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
         }
         match ch as u8 {
             b'e' => {
-                editor = crate::options::optionarg;
+                editor = optarg;
             }
             b'l' => {
                 lflg = 1;
