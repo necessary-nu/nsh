@@ -959,6 +959,8 @@ static void forkparent(struct job *jp, union node *n, int mode, pid_t pid)
 	if (mode == FORK_BG) {
 		backgndpid = pid;		/* set $! */
 		set_curjob(jp, CUR_RUNNING);
+		if (iflag)
+			outfmt(out2, "[%d] %d\n", jobno(jp), pid);
 	}
 	if (jp) {
 		struct procstat *ps = &jp->ps[jp->nprocs++];
