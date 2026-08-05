@@ -319,7 +319,7 @@ pub fn main_fn(argc: c_int, argv: Vec<String>) -> c_int {
 // assertions still run, so the test never degrades to passing vacuously.
 // ---------------------------------------------------------------------
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// The C generator's output from the reference build, if built.

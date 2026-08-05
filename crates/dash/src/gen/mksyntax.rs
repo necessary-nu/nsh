@@ -301,3 +301,137 @@ fn output_type_macros(hfile: *mut FILE) {
         libc::fputs(c"#define digit_val(c)\t((c) - '0')\n".as_ptr(), hfile);
     }
 }
+
+// ---------------------------------------------------------------------
+// Unit tests for this module's functions.
+//
+// Same shape as mksignames: the C generator ran during the reference
+// build, so syntax.c and syntax.h in tests/.build/ref/src/ are an oracle
+// for the whole program, and the helpers are asserted directly on a
+// table.
+// ---------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gen::mksignames::tests::reference;
+
+    fn fresh() -> SyntaxTable {
+        [c""; 513]
+    }
+
+    // [spec:dash:sem:mksyntax.filltable-fn/test]
+    #[test]
+    fn filltable_sets_the_first_257_entries_only() {
+        let mut t = fresh();
+        filltable(c"CWORD", &mut t);
+        for i in 0..257 {
+            assert_eq!(t[i], c"CWORD", "entry {i}");
+        }
+        // The table is 513 long but only 257 entries are used, and
+        // filltable deliberately leaves the tail alone.
+        for i in 257..513 {
+            assert_eq!(t[i], c"", "entry {i} should be untouched");
+        }
+    }
+
+    // [spec:dash:sem:mksyntax.init-fn/test]
+    #[test]
+    fn init_defaults_to_cword_with_ceof_and_the_control_range() {
+        let mut t = fresh();
+        init(&mut t);
+        // Index 0 is EOF; the table is biased by 129 so that a signed
+        // char index lands in range.
+        assert_eq!(t[0], c"CEOF");
+        for ctl in CTL_FIRST..=CTL_LAST {
+            assert_eq!(t[(129 + ctl) as usize], c"CCTL", "ctl {ctl}");
+        }
+        // An ordinary character keeps the default.
+        assert_eq!(t[(b'a' as c_int + 129) as usize], c"CWORD");
+    }
+
+    // [spec:dash:sem:mksyntax.add-fn/test]
+    #[test]
+    fn add_marks_every_character_of_the_string() {
+        let mut t = fresh();
+        filltable(c"CWORD", &mut t);
+        add(c"()", c"CLP", &mut t);
+        assert_eq!(t[(b'(' as c_int + 129) as usize], c"CLP");
+        assert_eq!(t[(b')' as c_int + 129) as usize], c"CLP");
+        assert_eq!(t[(b'a' as c_int + 129) as usize], c"CWORD");
+        // The +129 bias is what lets a byte above 127 index the table
+        // without going negative once it is taken as a signed char.
+        add(c"\xff", c"CHIGH", &mut t);
+        assert_eq!(t[(0xffu8 as c_char as c_int + 129) as usize], c"CHIGH");
+    }
+
+    // [spec:dash:sem:mksyntax.print-fn/test]
+    // [spec:dash:sem:mksyntax.output-type-macros-fn/test]
+    #[test]
+    fn print_and_output_type_macros_emit_c_source() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            let dir = std::env::temp_dir().join(format!("mksyn-{}", libc::getpid()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let (cp, hp) = (dir.join("c.txt"), dir.join("h.txt"));
+            let cs = std::ffi::CString::new(cp.to_str().unwrap()).unwrap();
+            let hs = std::ffi::CString::new(hp.to_str().unwrap()).unwrap();
+            let cfile = libc::fopen(cs.as_ptr(), c"w".as_ptr());
+            let hfile = libc::fopen(hs.as_ptr(), c"w".as_ptr());
+            assert!(!cfile.is_null() && !hfile.is_null());
+
+            let mut t = fresh();
+            init(&mut t);
+            print(c"basesyntax", &t, cfile, hfile);
+            output_type_macros(hfile);
+            libc::fclose(cfile);
+            libc::fclose(hfile);
+
+            let ctext = std::fs::read_to_string(&cp).unwrap();
+            let htext = std::fs::read_to_string(&hp).unwrap();
+            // The definition goes in the .c and the declaration in the
+            // .h, and neither carries the 513 -- the array is written as
+            // `const char basesyntax[] = {` and declared `extern const
+            // char basesyntax[];`. The size lives only in the type alias
+            // on the Rust side.
+            assert!(ctext.contains("const char basesyntax[] = {"), "{ctext}");
+            assert!(htext.contains("extern const char basesyntax[];"), "{htext}");
+            assert!(ctext.contains("CEOF"));
+            assert!(ctext.contains("CCTL"));
+            // output_type_macros writes the is_* helpers into the header.
+            assert!(htext.contains("is_digit"), "{htext}");
+            std::fs::remove_dir_all(&dir).ok();
+        }
+    }
+
+    // [spec:dash:sem:mksyntax.main-fn/test]
+    #[test]
+    fn main_fn_reproduces_the_c_generators_syntax_files() {
+        let dir = std::env::temp_dir().join(format!("mksynmain-{}", unsafe { libc::getpid() }));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.clone();
+        // main_fn writes syntax.c and syntax.h into the CURRENT directory
+        // and then exits, so it runs in a forked child that chdirs first.
+        let rc = crate::testutil::forked(move || unsafe {
+            let d = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+            assert_eq!(libc::chdir(d.as_ptr()), 0);
+            main_fn(1, vec!["mksyntax".to_string()]);
+        });
+        assert_eq!(rc, 0);
+
+        for name in ["syntax.c", "syntax.h"] {
+            let ours = std::fs::read_to_string(dir.join(name))
+                .unwrap_or_else(|e| panic!("{name} not written: {e}"));
+            assert!(ours.contains("generated by the mksyntax program"));
+            match reference(name) {
+                Some(theirs) => assert_eq!(
+                    ours, theirs,
+                    "{name}: the Rust generator and the C generator disagree"
+                ),
+                None => eprintln!(
+                    "note: tests/.build/ref absent, skipped the {name} byte comparison"
+                ),
+            }
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}
