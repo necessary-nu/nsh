@@ -15,9 +15,4 @@ path = "src/main.rs"
 
 [dependencies]
 libc = "0.2"
-# The line editor. nshedit is the Rust re-implementation of libedit, which
-# is what dash is written against -- histedit.c calls el_init/el_set/el_gets
-# and history() directly. The native Rust API is used rather than
-# nshedit-abi's C ABI: going out through `extern "C"` and back would buy
-# nothing here, and the ABI crate needs a nightly for `c_variadic`.
-nshedit = { path = "../../../../git/libedit/crates/nshedit" }
+nshedit = { git = "ssh://git@github.com/necessary-nu/nshedit.git", branch = "main" }

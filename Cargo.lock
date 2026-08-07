@@ -87,6 +87,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 [[package]]
 name = "nshedit"
 version = "0.0.0"
+source = "git+ssh://git@github.com/necessary-nu/nshedit.git?branch=main#6174b06f6f7bf0a80612311b403b53715112a860"
 dependencies = [
  "bstr",
  "nshedit-plat",
@@ -98,6 +99,7 @@ dependencies = [
 [[package]]
 name = "nshedit-plat"
 version = "0.0.0"
+source = "git+ssh://git@github.com/necessary-nu/nshedit.git?branch=main#6174b06f6f7bf0a80612311b403b53715112a860"
 dependencies = [
  "rustix",
 ]
@@ -105,6 +107,7 @@ dependencies = [
 [[package]]
 name = "nshterm"
 version = "0.1.0"
+source = "git+ssh://git@github.com/necessary-nu/nshedit.git?branch=main#6174b06f6f7bf0a80612311b403b53715112a860"
 dependencies = [
  "nshedit-plat",
 ]
