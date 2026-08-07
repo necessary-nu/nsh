@@ -1312,6 +1312,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.alias.stdout-format])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1320,6 +1321,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.cd.operand-empty-string])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1328,6 +1330,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.cd.opt-e])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1336,6 +1339,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.cd.step8-canonical-form-dot-dot])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1344,6 +1348,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.cd.step9-path-max-relative])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1352,6 +1357,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.command.opt-v])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1360,6 +1366,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.dot.path-search])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1368,6 +1375,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.exec.failure-interactive-up])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1376,6 +1384,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.exec.utility-syntax-guidelines])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1384,6 +1393,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.fc.edit-and-reexecute])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1392,6 +1402,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.fc.env-histfile])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1400,6 +1411,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.fc.env-histsize])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1408,6 +1420,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.fc.exit-status])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1416,6 +1429,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.fc.stdout-list-format])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1424,6 +1438,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.getopts.env-optind])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1432,6 +1447,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.getopts.optarg])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1440,6 +1456,7 @@ children (
                         implements {
                             shell ([spec:posix:sem:builtin.getopts.reset])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1448,6 +1465,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.getopts.stderr-diagnostic])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1456,6 +1474,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.jobs.stdout-default-format])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1464,6 +1483,7 @@ children (
                         implements {
                             shell ([spec:posix:def:builtin.jobs.stdout-state-strings])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1472,6 +1492,7 @@ children (
                         implements {
                             shell ([spec:posix:def:builtin.kill.operand-pid-job-id])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1480,6 +1501,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.read.continuation-prompt])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1488,6 +1510,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.read.env-ps2])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1496,6 +1519,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.read.option-d])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1504,6 +1528,7 @@ children (
                         implements {
                             shell ([spec:posix:syn:builtin.read.syn])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1512,6 +1537,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.set.opt-b-notify])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1520,6 +1546,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.set.opt-h])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1528,6 +1555,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.set.opt-o-ignoreeof])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1536,6 +1564,7 @@ children (
                         implements {
                             shell ([spec:posix:def:builtin.set.opt-o-noclobber])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1544,6 +1573,7 @@ children (
                         implements {
                             shell ([spec:posix:sem:builtin.set.opt-o-report])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1552,6 +1582,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.set.opt-u-nounset])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1560,6 +1591,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.set.options-both-forms])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1568,6 +1600,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.trap.list-in-subshell])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1576,6 +1609,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.trap.opt-p])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1584,6 +1618,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.trap.opt-p-suitable-for-reinput])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1592,6 +1627,7 @@ children (
                         implements {
                             shell ([spec:posix:syn:builtin.trap.synopsis])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1600,6 +1636,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.ulimit.stdout-all-format])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1608,6 +1645,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.wait.exit-status-last-operand])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1616,6 +1654,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.wait.exit-status-values])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1624,6 +1663,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.wait.pid-operands])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1632,6 +1672,7 @@ children (
                         implements {
                             shell ([spec:posix:req:builtin.wait.remove-waited-for-pid])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1640,6 +1681,7 @@ children (
                         implements {
                             shell ([spec:posix:req:cmd.case-clause-terminators])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1648,6 +1690,7 @@ children (
                         implements {
                             shell ([spec:posix:req:edit.command-alias-insert])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1656,6 +1699,7 @@ children (
                         implements {
                             shell ([spec:posix:req:edit.command-complete-unique])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1664,6 +1708,7 @@ children (
                         implements {
                             shell ([spec:posix:req:edit.command-display-expansions])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1672,6 +1717,7 @@ children (
                         implements {
                             shell ([spec:posix:req:edit.command-expand-all])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1680,6 +1726,7 @@ children (
                         implements {
                             shell ([spec:posix:def:edit.edit-line])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1688,6 +1735,7 @@ children (
                         implements {
                             shell ([spec:posix:req:edit.edit-line-replacement])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1696,6 +1744,7 @@ children (
                         implements {
                             shell ([spec:posix:req:edit.history-goto])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1704,6 +1753,7 @@ children (
                         implements {
                             shell ([spec:posix:req:edit.history-list])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1712,6 +1762,7 @@ children (
                         implements {
                             shell ([spec:posix:syn:edit.history-search-pattern])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1720,6 +1771,7 @@ children (
                         implements {
                             shell ([spec:posix:req:edit.insert-end-of-file])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1728,6 +1780,7 @@ children (
                         implements {
                             shell ([spec:posix:sem:edit.insert-literal-next])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1736,6 +1789,7 @@ children (
                         implements {
                             shell ([spec:posix:req:edit.undo])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1744,6 +1798,7 @@ children (
                         implements {
                             shell ([spec:posix:req:exit.shell-error-consequences])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1752,6 +1807,7 @@ children (
                         implements {
                             shell ([spec:posix:req:exit.unrecoverable-read-error])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1760,6 +1816,7 @@ children (
                         implements {
                             shell ([spec:posix:syn:grammar.case-clause])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1768,6 +1825,7 @@ children (
                         implements {
                             shell ([spec:posix:def:grammar.operator-tokens])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1776,6 +1834,7 @@ children (
                         implements {
                             shell ([spec:posix:req:jobctl.save-terminal-settings])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1784,6 +1843,7 @@ children (
                         implements {
                             shell ([spec:posix:req:param.ps1-exclamation-expansion])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1792,6 +1852,7 @@ children (
                         implements {
                             shell ([spec:posix:req:param.ps1-two-pass])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1800,6 +1861,7 @@ children (
                         implements {
                             shell ([spec:posix:syn:pattern.bracket-expression])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1808,6 +1870,7 @@ children (
                         implements {
                             shell ([spec:posix:req:sh.exit-status-values])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1816,6 +1879,7 @@ children (
                         implements {
                             shell ([spec:posix:req:xcu.exit-status.listed-values-binding])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1824,6 +1888,7 @@ children (
                         implements {
                             shell ([spec:posix:sem:edit.append-last-bigword])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1832,6 +1897,7 @@ children (
                         implements {
                             shell ([spec:posix:req:edit.history-prev-next])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1840,6 +1906,7 @@ children (
                         implements {
                             shell ([spec:posix:req:edit.history-search-backward])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1848,6 +1915,7 @@ children (
                         implements {
                             shell ([spec:posix:req:edit.history-search-forward])
                         }
+                        deps (shell-as-library)
                     }
 
                     {
@@ -1856,6 +1924,7 @@ children (
                         implements {
                             shell ([spec:posix:req:edit.history-search-repeat])
                         }
+                        deps (shell-as-library)
                     }
                 )
             }
@@ -1865,11 +1934,13 @@ children (
     {
         id shell-as-library
         title "Make nsh a shell library with a binary frontend, per [dec:nsh:shell-as-library]"
+        priority 0
         kind @refactor
         children (
             {
                 id host-owns-streams
                 title "The shell's three streams come from the frontend, not descriptors 0/1/2"
+                priority 0
                 kind @feat
                 sealed true
                 log (
@@ -1892,6 +1963,7 @@ children (
             {
                 id errors-are-values
                 title "Replace the longjmp-as-unwind exception mechanism with Result propagation"
+                priority 0
                 kind @refactor
                 deps (delete-memalloc sanctioned-divergences public-api-design)
             }
@@ -1899,18 +1971,22 @@ children (
             {
                 id no-ambient-state
                 title "Move every process-global static into a shell instance; no globals, no thread-locals"
+                priority 0
                 kind @refactor
                 deps (errors-are-values sanctioned-divergences public-api-design)
                 children (
                     {
                         id thread-context
                         title "Thread a context parameter through every function that touches a static"
+                        priority 0
                         kind @refactor
+                        deps (errors-are-values public-api-design)
                     }
 
                     {
                         id move-state
                         title "Move each static table onto the shell instance, one table per commit"
+                        priority 0
                         kind @refactor
                         deps (thread-context)
                     }
@@ -1920,6 +1996,7 @@ children (
             {
                 id host-owns-signals
                 title "The frontend claims signal dispositions; needs pty cases for job control first"
+                priority 0
                 kind @refactor
                 deps (no-ambient-state)
             }
@@ -1927,11 +2004,13 @@ children (
             {
                 id owned-data
                 title "Delete memalloc: the shell's data becomes owned Rust values, per [dec:nsh:owned-data]"
+                priority 0
                 kind @refactor
                 children (
                     {
                         id owned-nodes
                         title "union node becomes an owned Rust enum; copyfunc becomes Rc + Clone"
+                        priority 0
                         kind @refactor
                         sealed true
                         log (
@@ -1954,6 +2033,7 @@ children (
                     {
                         id owned-strings
                         title "The stack string builder becomes an owned byte vector across parser and expand"
+                        priority 0
                         kind @refactor
                         deps (owned-nodes sanctioned-divergences)
                     }
@@ -1961,6 +2041,7 @@ children (
                     {
                         id delete-memalloc
                         title "Move the last region allocations to ownership and delete memalloc.rs"
+                        priority 0
                         kind @refactor
                         deps (owned-strings)
                     }
@@ -1968,6 +2049,7 @@ children (
                     {
                         id delete-gen
                         title "Decide the fate of the build-time generators and remove what is dead"
+                        priority 0
                         kind @refactor
                     }
                 )
@@ -1976,24 +2058,28 @@ children (
             {
                 id sanctioned-divergences
                 title "Teach dsdiff.sh the sanctioned-divergence register so FAIL=0 stays legible"
+                priority 0
                 kind @test
             }
 
             {
                 id crate-rename
                 title "Rename the crate to nsh and split the frontend into nsh-cli"
+                priority 0
                 kind @refactor
             }
 
             {
                 id nshedit-in-tree
                 title "Publish nshedit so nsh can be published; the git dep only fixes clone-and-build"
+                priority 0
                 kind @build
             }
 
             {
                 id output-is-a-writer
                 title "output.rs becomes a writer the shell holds, not four statics on descriptors"
+                priority 0
                 kind @refactor
                 deps (delete-memalloc)
             }
@@ -2001,6 +2087,7 @@ children (
             {
                 id builtins-take-args
                 title "The 40 builtins stop taking argc and a raw char pointer array"
+                priority 0
                 kind @refactor
                 deps (owned-strings)
             }
@@ -2008,12 +2095,14 @@ children (
             {
                 id public-api-design
                 title "Design the public API: Shell, Error taxonomy, and what run() means when called twice"
+                priority 0
                 kind @docs
             }
 
             {
                 id process-model
                 title "fork, exec and wait in a library: what a Shell may do to the process"
+                priority 0
                 kind @refactor
                 deps (no-ambient-state)
             }
@@ -2021,6 +2110,7 @@ children (
             {
                 id public-api
                 title "Implement the public API and close the surface: 35 pub mod down to what an embedder needs"
+                priority 0
                 kind @feat
                 deps (no-ambient-state host-owns-signals public-api-design)
             }
