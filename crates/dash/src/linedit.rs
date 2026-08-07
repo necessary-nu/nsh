@@ -34,20 +34,16 @@
 //! narrow shim and `wide` is 0. That is what `nshedit-abi` does with a
 //! `el_pfunc_t` too.
 //!
-//! **Reading is wide.** The core crate exposes `el_wgets`; the byte-level
-//! `el_gets` lives in the ABI crate, which is not in play here. So this
-//! module does what that entry point does: take the wide line, encode it
-//! through the editor's own legacy conversion buffer, and hand back the
-//! bytes. Using `el.el_lgcyconv` rather than a private buffer is not
-//! incidental — it gives the caller libedit's exact lifetime, "valid
-//! until the next `el_gets`", and `preadfd` depends on that: it holds the
-//! returned pointer in a static across calls and consumes it a line at a
-//! time.
+//! **Reading.** `el_gets` is the core's, not a reimplementation of it.
+//! It briefly was one — the byte-level entry point lived only in the ABI
+//! crate — and the count it reported was the encoded slice's length,
+//! which is right only while nobody sets EL_UNBUFFERED. The library
+//! reports the count separately for exactly that reason, so this passes
+//! the library's `nread` through untouched.
 
 use core::ptr;
 use libc::{c_char, c_int, c_void};
 
-use nshedit::chartype::ct_encode_string;
 use nshedit::el::EditLine as NshEditLine;
 use nshedit::history::{History as NshHistory, HistoryArg};
 
@@ -320,35 +316,23 @@ pub unsafe fn el_gets(e: *mut EditLine, _hist: *mut History, n: *mut c_int) -> *
     }
 
     let mut nread: i32 = 0;
-    // The wide line borrows the editor, and encoding needs the editor
-    // mutably for its conversion buffer, so the line is copied out first.
-    // A command line is short; this is not the expensive part of reading
-    // one.
-    let wide: Vec<u32> = match nshedit::read::el_wgets((*e).inner(), Some(&mut nread)) {
-        Some(w) => w.to_vec(),
-        None => {
-            if !n.is_null() {
-                *n = nread;
-            }
-            return ptr::null();
-        }
-    };
+    let line = nshedit::read::el_gets((*e).inner(), Some(&mut nread));
 
-    let el = (*e).inner();
-    let bytes = match ct_encode_string(Some(&wide), &mut el.el_lgcyconv) {
-        Some(b) => b,
-        None => {
-            if !n.is_null() {
-                *n = 0;
-            }
-            return ptr::null();
-        }
-    };
-
-    // The C converts the wide count it was given into a byte count, since
-    // that is what the caller will index with.
+    // `nread`, never `line.len()`. Under EL_UNBUFFERED the returned slice
+    // runs past the reported count into what an earlier line left in the
+    // conversion buffer (ERR-core-api-26), so the count is the only honest
+    // answer for how much of it is this line. dash does not set
+    // EL_UNBUFFERED, so the two agree today; taking the length here would
+    // be a latent bug waiting for the option to be used.
+    //
+    // `preadfd` consumes what it gets by count and never looks for a NUL
+    // -- `memcpy(buf, rl_cp, min(nr, el_len))`, then advances both -- so
+    // the un-terminated slice is safe to hand back as a `char *`.
     if !n.is_null() {
-        *n = bytes.len() as c_int;
+        *n = nread;
     }
-    bytes.as_ptr() as *const c_char
+    match line {
+        Some(bytes) => bytes.as_ptr() as *const c_char,
+        None => ptr::null(),
+    }
 }
