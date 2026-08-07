@@ -471,6 +471,7 @@ pub unsafe fn exitshell() -> ! {
         crate::jobs::setjobctl(0);
     });
     crate::output::flushall();
+    crate::shell::flush_coverage();
     libc::_exit(exitstatus);
     /* NOTREACHED */
 }

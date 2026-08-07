@@ -67,3 +67,27 @@ pub fn max_int_length(bytes: c_int) -> c_int {
 pub fn cstr(s: &'static [u8]) -> *const c_char {
     s.as_ptr() as *const c_char
 }
+
+/// Flush the coverage profile before a `_exit`.
+///
+/// Only compiled for the instrumented build (`--cfg coverage`, set by
+/// tests/harness/covrust.sh), where it is the difference between a
+/// measurement and an empty directory.
+///
+/// dash never returns from `main`: every exit path ends in `_exit`, which
+/// is faithful -- the C does the same, and it is what stops a forked
+/// child running the parent's atexit handlers. But LLVM's coverage
+/// runtime writes its profile FROM an atexit handler, so an instrumented
+/// dash produced no profile at all while a trivial Rust program under the
+/// identical sandbox produced one. The sandbox was innocent; `_exit` was
+/// the whole story.
+#[inline]
+pub unsafe fn flush_coverage() {
+    #[cfg(coverage)]
+    {
+        extern "C" {
+            fn __llvm_profile_write_file() -> libc::c_int;
+        }
+        __llvm_profile_write_file();
+    }
+}

@@ -65,8 +65,22 @@ ds_sandboxed() {  # ds_sandboxed WORKDIR SHELL [ARGS...]
 		--setenv TMPDIR "$dir" \
 		--setenv PATH "$dir/.bin:/usr/bin:/bin" \
 		--limit nproc=64 \
+		${DS_COVDIR:+--bind "$DS_COVDIR:$DS_COVDIR"} \
+		${DS_COVDIR:+--setenv LLVM_PROFILE_FILE "$DS_COVDIR/dash-%p-%m.profraw"} \
 		-- timeout "$DS_TIMEOUT" env --default-signal -- "$@"
 }
+
+# DS_COVDIR, when set, is one writable directory bound into the namespace
+# for LLVM's coverage profiles. Containment is unchanged: the PID
+# namespace, the read-only root and the process limit all still apply, and
+# the only thing this adds is a place to write .profraw files. It is off
+# unless tests/harness/covrust.sh sets it, so an ordinary run has exactly
+# the surface it had before.
+#
+# The path has to be bound rather than just named: `-C instrument-coverage`
+# writes the profile from inside the case, where the root is read-only, so
+# without the bind every profile is silently dropped and the merge sees
+# nothing.
 
 # Equality between two shells proves nothing if neither ran. Assert that
 # each binary independently produces the expected bytes through the real

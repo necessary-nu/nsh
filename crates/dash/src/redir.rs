@@ -377,6 +377,7 @@ unsafe fn openhere(redir: *mut node) -> c_int {
         libc::signal(libc::SIGTSTP, libc::SIG_IGN);
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
         crate::output::xwrite(pip[1], p as *const c_void, len);
+        crate::shell::flush_coverage();
         libc::_exit(0);
     }
     /* out: */

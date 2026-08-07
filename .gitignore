@@ -52,3 +52,9 @@ __pycache__/
 *.py[cod]
 
 posix/.work/
+
+# LLVM coverage profiles. `-C instrument-coverage` drops one per process
+# wherever the process happened to be, and the differential corpus runs
+# tens of thousands of them; tests/harness/covrust.sh collects what it
+# needs into tests/.build/cov and merges there.
+*.profraw

@@ -213,6 +213,7 @@ pub unsafe fn exraise(e: c_int) -> ! {
     }
 
     if crate::jobs::vforked != 0 {
+        crate::shell::flush_coverage();
         libc::_exit(crate::eval::exitstatus);
     }
 
