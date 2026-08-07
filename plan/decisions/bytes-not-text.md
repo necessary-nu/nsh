@@ -21,9 +21,9 @@ consequences {
     accepted (
         "`bstr` becomes the crate's third dependency, after `libc` and `nshedit`."
         "Interior NUL is excluded by the shell language, not by the type -- see \"On NUL\" below. `BString` permits it, so the invariant becomes ours to hold at the point where a value reaches a syscall."
-        "The syscall boundary is explicit. `execve`, `open`, `getenv` and friends want NUL-terminated bytes, so a conversion sits at that edge rather than being implicit in the representation."
+        "The syscall boundary is explicit, and `CString::new` *is* the check. It takes `Into<Vec<u8>>`, which `BString` satisfies directly, and returns `Result<CString, NulError>` -- so the one invariant the representation stops enforcing is re-enforced at exactly the edge that cares, as a value rather than a panic. `NulError` even carries `nul_position()` and gives the bytes back, which is what a diagnostic needs."
     )
-    deferred ("Whether the conversion at the syscall edge is a `CString` allocation each time or a type that maintains a trailing-NUL invariant is a real question -- dash today hands `*mut c_char` straight to `execve` with no copy. Measure before choosing; do not assume the allocation matters, and do not assume it does not.")
+    deferred ("The borrowed form does not go straight in: `&BStr` is not `Into<Vec<u8>>` and needs `.as_bytes()` first. That is free -- `BStr` is `#[repr(transparent)]` over `[u8]` -- but it is a papercut to expect rather than discover.")
 }
 edges {
     requires ([dec:nsh:owned-data])
@@ -108,7 +108,30 @@ and none of them admits NUL:
 
 So the invariant is real and independent of the representation. What
 changes is who enforces it: `*mut c_char` enforced it by construction,
-and `BString` does not, so it becomes ours to hold at the edge where a
-value becomes a syscall argument. That edge is one to make explicit in
-any case -- it is the same edge [dec:nsh:host-owns-streams] made explicit
-for descriptors.
+and `BString` does not.
+
+`CString::new` is that enforcement, and it needs nothing built for it. It
+takes `Into<Vec<u8>>`, `BString` satisfies that, and it returns
+`Result<CString, NulError>`. So the check lands at exactly the edge that
+cares about it, costs a copy that a `fork`/`exec` or an `open` dwarfs,
+and fails as a value rather than a panic -- which is the shape
+[dec:nsh:errors-are-values] wants anyway. `NulError::nul_position` and
+`into_vec` give a diagnostic the offset and the bytes.
+
+Verified rather than assumed, against bstr 1.13:
+
+```rust
+CString::new(BString::from(&b"/bin/sh"[..]))       // Ok
+CString::new(BStr::new(b"/bin/sh").as_bytes())     // Ok -- see below
+CString::new(BString::from(&b"a\0b"[..]))          // Err, nul_position() == 1
+CString::new(BString::from(&b"\x88\x82x\x83\x88"[..]))  // Ok: invalid UTF-8 is
+                                                   // not this API's business
+```
+
+The one papercut: `&BStr` is *not* `Into<Vec<u8>>`, so the borrowed form
+needs `.as_bytes()` (and `bstr::ByteSlice` in scope). That is free at
+runtime, since `BStr` is `#[repr(transparent)]` over `[u8]`, but it is a
+compile error to expect rather than to discover.
+
+That edge is one to make explicit in any case -- it is the same edge
+[dec:nsh:host-owns-streams] made explicit for descriptors.
