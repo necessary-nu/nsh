@@ -17,8 +17,9 @@ consequences {
     accepted (
         "The raw pointers go with the ambient state: most of the unsafety is reaching into statics and walking C strings, and both stop existing rather than get wrapped."
         "What remains is a real, small surface -- the syscall wrappers, the signal handler, the fd manipulation redirection performs -- and being small is what makes it reviewable."
+        "**The baseline is 598 of 794 functions carrying `unsafe fn`, 75%**, counted at `4463fc6` by matching function definitions across `crates/dash/src`. Taken now rather than deferred, because a property with no number attached is not checkable, and \"most of the unsafety goes with the state\" is a claim that needs a before and an after to mean anything. The target is under 5% -- a few dozen functions, each of which a reader can be pointed at."
     )
-    deferred ("An audit of what is left. Today the count is not worth taking, because it would measure the transliteration rather than the design.")
+    deferred ("Where the floor actually sits. The target below is an estimate, not a measurement: the syscall wrappers, the signal handler, the descriptor manipulation and the pointer handoffs to libc have never been counted separately from the incidental unsafety around them. Resolved by taking the count again once `delete-memalloc` lands, when what remains is the design rather than the transliteration.")
 }
 edges {
     requires ([dec:nsh:shell-as-library] [dec:nsh:no-ambient-state])

@@ -1304,6 +1304,7 @@ children (
                 id posix-nonconformance
                 title "Correct dash's POSIX non-conformances in the port"
                 kind @fix
+                deps (shell-as-library)
                 children (
                     {
                         id fix-builtin-alias-stdout-format
@@ -1892,14 +1893,28 @@ children (
                 id errors-are-values
                 title "Replace the longjmp-as-unwind exception mechanism with Result propagation"
                 kind @refactor
-                deps (delete-memalloc)
+                deps (delete-memalloc sanctioned-divergences public-api-design)
             }
 
             {
                 id no-ambient-state
                 title "Move every process-global static into a shell instance; no globals, no thread-locals"
                 kind @refactor
-                deps (errors-are-values)
+                deps (errors-are-values sanctioned-divergences public-api-design)
+                children (
+                    {
+                        id thread-context
+                        title "Thread a context parameter through every function that touches a static"
+                        kind @refactor
+                    }
+
+                    {
+                        id move-state
+                        title "Move each static table onto the shell instance, one table per commit"
+                        kind @refactor
+                        deps (thread-context)
+                    }
+                )
             }
 
             {
@@ -1918,12 +1933,20 @@ children (
                         id owned-nodes
                         title "union node becomes an owned Rust enum; copyfunc becomes Rc + Clone"
                         kind @refactor
+                        sealed true
                         log (
                             {
                                 at 2026-08-07T09:34:17.049858598Z
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-07T11:42:00.055092499Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }
@@ -1932,7 +1955,7 @@ children (
                         id owned-strings
                         title "The stack string builder becomes an owned byte vector across parser and expand"
                         kind @refactor
-                        deps (owned-nodes)
+                        deps (owned-nodes sanctioned-divergences)
                     }
 
                     {
@@ -1941,6 +1964,12 @@ children (
                         kind @refactor
                         deps (owned-strings)
                     }
+
+                    {
+                        id delete-gen
+                        title "Decide the fate of the build-time generators and remove what is dead"
+                        kind @refactor
+                    }
                 )
             }
 
@@ -1948,6 +1977,52 @@ children (
                 id sanctioned-divergences
                 title "Teach dsdiff.sh the sanctioned-divergence register so FAIL=0 stays legible"
                 kind @test
+            }
+
+            {
+                id crate-rename
+                title "Rename the crate to nsh and split the frontend into nsh-cli"
+                kind @refactor
+            }
+
+            {
+                id nshedit-in-tree
+                title "Publish nshedit so nsh can be published; the git dep only fixes clone-and-build"
+                kind @build
+            }
+
+            {
+                id output-is-a-writer
+                title "output.rs becomes a writer the shell holds, not four statics on descriptors"
+                kind @refactor
+                deps (delete-memalloc)
+            }
+
+            {
+                id builtins-take-args
+                title "The 40 builtins stop taking argc and a raw char pointer array"
+                kind @refactor
+                deps (owned-strings)
+            }
+
+            {
+                id public-api-design
+                title "Design the public API: Shell, Error taxonomy, and what run() means when called twice"
+                kind @docs
+            }
+
+            {
+                id process-model
+                title "fork, exec and wait in a library: what a Shell may do to the process"
+                kind @refactor
+                deps (no-ambient-state)
+            }
+
+            {
+                id public-api
+                title "Implement the public API and close the surface: 35 pub mod down to what an embedder needs"
+                kind @feat
+                deps (no-ambient-state host-owns-signals public-api-design)
             }
         )
     }

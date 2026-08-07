@@ -36,10 +36,16 @@ elements (
         // Everything a library may not do lives here: argv, the process
         // lifecycle, terminating the process, and claiming the signal
         // dispositions and standard descriptors on the host's behalf.
+        // Becomes its own crate, `crates/nsh-cli`. While it is a `[[bin]]`
+        // inside the library it can reach `crate::` internals and nothing
+        // reports it; once it links the library as an external crate,
+        // anything it needs that is not public stops compiling. That is
+        // the only mechanism that makes [dec:nsh:shell-as-library]
+        // checkable -- see [dec:nsh:public-surface].
         exposes ("crates/dash/src/main.rs")
         depends_on ([arch:nsh:shell-core])
         decisions ([dec:nsh:shell-as-library] [dec:nsh:host-owns-signals]
-                   [dec:nsh:host-owns-streams])
+                   [dec:nsh:host-owns-streams] [dec:nsh:public-surface])
         log (
             {at "2026-08-07T00:00:00Z", kind @established, by "[dec:nsh:shell-as-library]"}
             // `main.rs` hands the shell `Streams::INHERIT` explicitly: the
@@ -72,8 +78,15 @@ elements (
         // and a silent divergence from it -- which is why how much of the
         // code they reach is a first-class question and not a metric.
         // See [dec:nsh:differential-is-the-oracle].
+        //
+        // The differential contract attaches to [arch:nsh:shell-bin], not
+        // to the core: what it asserts is "the frontend, in dash's
+        // configuration, is dash". The harness runs one configuration --
+        // INHERIT streams, one shell per process, signals claimed, exit by
+        // `_exit` -- so every library axis the core grows is outside what
+        // it can see, and each such axis owes its own test.
         exposes ("tests/harness" "posix/harness")
-        decisions ([dec:nsh:differential-is-the-oracle])
+        decisions ([dec:nsh:differential-is-the-oracle] [dec:nsh:we-own-the-defects])
         log (
             {at "2026-08-07T00:00:00Z", kind @established, by "[dec:nsh:differential-is-the-oracle]"}
         )

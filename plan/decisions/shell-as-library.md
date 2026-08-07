@@ -21,6 +21,9 @@ consequences {
     accepted (
         "Idiomatization is not cosmetic. Four properties of the literal port have to change before the library is honest, and they are the four decisions this one requires."
         "The binary keeps doing exactly what dash does. Everything a library may not do -- exit, signals, argv, the standard descriptors -- moves INTO the frontend rather than away."
+        "**Those four are necessary and not sufficient.** They describe what the library stops doing to the process and say nothing about what an embedder can hold, call or read -- the surface, which is the part an embedder actually sees. Four more properties, checkable the same way, in `docs/idiomatization.md` §1.7: the library does not end the process (4 sites today); it is re-entrant, so two `Shell`s coexist and `testutil::lock()` can be deleted; it is publishable, meaning no out-of-repo path dependency and no blanket `allow`; and the API is a surface rather than the source."
+        "**The surface property is the one that separates \"has a lib target\" from \"is a library\", and today it is unmet by two orders of magnitude.** `lib.rs` declares 35 `pub mod` and the crate exposes roughly a thousand public items -- a public transliteration, not an API. `main_fn(argc, argv, streams) -> !` is the whole of what an embedder could call, and the `-> !` is why none can."
+        "**The frontend becomes a separate crate, and that is a mechanism rather than tidiness.** While `main.rs` is a `[[bin]]` inside the library it can reach `crate::` internals and nothing would ever report it. With the split, anything the frontend needs that is not public is a compile error. There is no other way to make this decision checkable."
     )
     deferred ("Until those four land, `dash` the crate is a library only in the Cargo sense: it has a lib target, and embedding it twice in one process is undefined.")
 }
