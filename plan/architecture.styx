@@ -1,0 +1,71 @@
+// A timeless register: edit in place; status via lifecycle + log + decisions,
+// never a duplicate corrected record. A gone element stays at lifecycle @retired.
+//
+// The shape this register describes is the goal, not today's code. nsh is a
+// shell *library* with a thin binary frontend, and the literal port of dash is
+// not one yet: it keeps its state in process-global statics, ends in `_exit`,
+// installs signal handlers on its own authority and reports errors by
+// unwinding. The boundary below is what idiomatization is FOR — see
+// [dec:nsh:shell-as-library] and the four decisions that follow it.
+elements (
+    {
+        id [arch:nsh:shell-core]
+        name "The shell, as a library"
+        kind @subsystem
+        lifecycle @provisional
+        exposes ("crates/dash/src/lib.rs")
+        depends_on ([arch:nsh:line-editor])
+        decisions ([dec:nsh:shell-as-library] [dec:nsh:no-ambient-state]
+                   [dec:nsh:errors-are-values] [dec:nsh:host-owns-signals]
+                   [dec:nsh:host-owns-streams])
+        log (
+            {at "2026-08-07T00:00:00Z", kind @established, by "[dec:nsh:shell-as-library]"}
+        )
+    }
+    {
+        id [arch:nsh:shell-bin]
+        name "The binary frontend"
+        kind @boundary
+        lifecycle @provisional
+        // Everything a library may not do lives here: argv, the process
+        // lifecycle, terminating the process, and claiming the signal
+        // dispositions and standard descriptors on the host's behalf.
+        exposes ("crates/dash/src/main.rs")
+        depends_on ([arch:nsh:shell-core])
+        decisions ([dec:nsh:shell-as-library] [dec:nsh:host-owns-signals]
+                   [dec:nsh:host-owns-streams])
+        log (
+            {at "2026-08-07T00:00:00Z", kind @established, by "[dec:nsh:shell-as-library]"}
+        )
+    }
+    {
+        id [arch:nsh:line-editor]
+        name "Line editing and history"
+        kind @boundary
+        lifecycle @active
+        // The seam onto nshedit. `histedit.c` is written against libedit's C
+        // API, so `crate::histedit::libedit` keeps that shape and `linedit.rs`
+        // is the whole of what binds it to an implementation.
+        exposes ("crates/dash/src/linedit.rs")
+        log (
+            {at "2026-08-07T00:00:00Z", kind @established, by "[dec:nsh:shell-as-library]"}
+        )
+    }
+    {
+        id [arch:nsh:conformance]
+        name "The behavioural oracles"
+        kind @capability
+        lifecycle @active
+        // Not shipped. The differential harness against the C dash, and the
+        // rule-indexed POSIX suite. With no per-function test suite, these
+        // are the only thing standing between a restructuring of the shell
+        // and a silent divergence from it -- which is why how much of the
+        // code they reach is a first-class question and not a metric.
+        // See [dec:nsh:differential-is-the-oracle].
+        exposes ("tests/harness" "posix/harness")
+        decisions ([dec:nsh:differential-is-the-oracle])
+        log (
+            {at "2026-08-07T00:00:00Z", kind @established, by "[dec:nsh:differential-is-the-oracle]"}
+        )
+    }
+)
