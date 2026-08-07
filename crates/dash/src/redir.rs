@@ -9,7 +9,7 @@ use crate::output::VaArg;
 use crate::shell::cstr;
 use crate::memalloc::{ckfree, ckmalloc};
 use crate::nodes::{
-    node, NAPPEND, NCLOBBER, NFROM, NFROMFD, NFROMTO, NTO, NTOFD, NXHERE,
+    Node, NAPPEND, NCLOBBER, NFROM, NFROMFD, NFROMTO, NTO, NTOFD, NXHERE,
 };
 
 /* flags passed to redirect (redir.h) */
@@ -76,15 +76,14 @@ unsafe fn update_closed_redirs(fd: c_int, nfd: c_int) -> c_uint {
 
 // [spec:dash:def:redir.redirect-fn]
 // [spec:dash:sem:redir.redirect-fn]
-pub unsafe fn redirect(redir: *mut node, flags: c_int) {
-    let mut n: *mut node;
+pub unsafe fn redirect(redir: &[Node], flags: c_int) {
     let mut sv: *mut redirtab;
     let mut i: c_int;
     let mut fd: c_int;
     let mut newfd: c_int;
 
     /* #if notyet — the `memory[10]` in-memory sink is not compiled. */
-    if redir.is_null() {
+    if redir.is_empty() {
         return;
     }
     sv = null_mut();
@@ -92,11 +91,12 @@ pub unsafe fn redirect(redir: *mut node, flags: c_int) {
     if (flags & REDIR_PUSH) != 0 {
         sv = redirlist;
     }
-    n = redir;
-    loop {
+    /* The C walks the list through `n->nfile.next`, which is the same offset
+     * in every redirection arm; the list is a `Vec` now. */
+    for n in redir {
         newfd = openredirect(n);
         if newfd >= -1 {
-            fd = (*n).nfile.fd;
+            fd = n.redir_fd();
             /* The C's `fd == 0` is "this redirection replaced the shell's
              * own input", which is what makes the buffered parse state
              * stale -- not descriptor 0 for its own sake. */
@@ -126,10 +126,6 @@ pub unsafe fn redirect(redir: *mut node, flags: c_int) {
             if fd != newfd {
                 dupredirect(n, newfd);
             }
-        }
-        n = (*n).nfile.next;
-        if n.is_null() {
-            break;
         }
     }
     INTON();
@@ -196,29 +192,29 @@ pub unsafe fn sh_open(pathname: *const c_char, flags: c_int, mayfail: c_int) -> 
 
 // [spec:dash:def:redir.openredirect-fn]
 // [spec:dash:sem:redir.openredirect-fn]
-unsafe fn openredirect(redir: *mut node) -> c_int {
+unsafe fn openredirect(redir: &Node) -> c_int {
     let mut sb: libc::stat64 = core::mem::zeroed();
     let mut fname: *mut c_char = null_mut();
     let mut flags: c_int;
     let f: c_int;
 
-    match (*redir).nfile.r#type {
+    match redir.node_type() {
         NFROM => {
             flags = libc::O_RDONLY;
             /* do_open: */
-            f = sh_open((*redir).nfile.expfname, flags, 0);
+            f = sh_open(redir.nfile().expfname.get(), flags, 0);
         }
         NFROMTO => {
             flags = libc::O_RDWR | libc::O_CREAT;
-            f = sh_open((*redir).nfile.expfname, flags, 0);
+            f = sh_open(redir.nfile().expfname.get(), flags, 0);
         }
         NTO | NCLOBBER => {
             let mut fell_through = true;
             let mut fv: c_int = 0;
-            if (*redir).nfile.r#type == NTO {
+            if redir.node_type() == NTO {
                 /* Take care of noclobber mode. */
                 if crate::options::optlist[crate::options::Cflag] != 0 {
-                    fname = (*redir).nfile.expfname;
+                    fname = redir.nfile().expfname.get();
                     if libc::stat64(fname, &mut sb) < 0 {
                         flags = libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL;
                         /* goto do_open */
@@ -244,18 +240,18 @@ unsafe fn openredirect(redir: *mut node) -> c_int {
             }
             if fell_through {
                 flags = libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC;
-                f = sh_open((*redir).nfile.expfname, flags, 0);
+                f = sh_open(redir.nfile().expfname.get(), flags, 0);
             } else {
                 f = fv;
             }
         }
         NAPPEND => {
             flags = libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND;
-            f = sh_open((*redir).nfile.expfname, flags, 0);
+            f = sh_open(redir.nfile().expfname.get(), flags, 0);
         }
         NTOFD | NFROMFD => {
-            let mut fv = (*redir).ndup.dupfd;
-            if fv == (*redir).nfile.fd {
+            let mut fv = redir.ndup().dupfd.get();
+            if fv == redir.ndup().fd {
                 fv = -2;
             }
             f = fv;
@@ -310,10 +306,10 @@ unsafe fn sh_dup2(ofd: c_int, nfd: c_int, cfd: c_int) -> c_int {
 // [spec:dash:sem:redir.dupredirect-fn]
 /// The extracted `def` signature carries a stray `#endif`; the real signature
 /// (outside `#ifdef notyet`) is `static void dupredirect(union node *, int)`.
-unsafe fn dupredirect(redir: *mut node, f: c_int) {
-    let fd: c_int = (*redir).nfile.fd;
+unsafe fn dupredirect(redir: &Node, f: c_int) {
+    let fd: c_int = redir.redir_fd();
 
-    if (*redir).nfile.r#type == NTOFD || (*redir).nfile.r#type == NFROMFD {
+    if redir.node_type() == NTOFD || redir.node_type() == NFROMFD {
         /* if not ">&-" */
         if f >= 0 {
             sh_dup2(f, fd, -1);
@@ -355,16 +351,19 @@ pub unsafe fn sh_pipe(pip: *mut c_int, memfd: c_int) -> c_int {
 
 // [spec:dash:def:redir.openhere-fn]
 // [spec:dash:sem:redir.openhere-fn]
-unsafe fn openhere(redir: *mut node) -> c_int {
+unsafe fn openhere(redir: &Node) -> c_int {
     let len: size_t;
     let mut pip: [c_int; 2] = [0; 2];
     let memfd: c_int;
     let mut p: *mut c_char;
 
-    p = (*(*redir).nhere.doc).narg.text;
-    if (*redir).r#type == NXHERE {
+    /* `redir->nhere.doc` is the slot `parseheredoc` filled; the C would have
+     * dereferenced a null pointer had it not run. */
+    let doc: &Node = redir.nhere().doc.get().unwrap();
+    p = doc.narg().text.as_ptr();
+    if redir.node_type() == NXHERE {
         crate::expand::expandarg(
-            (*redir).nhere.doc,
+            doc,
             core::ptr::null_mut::<crate::expand::arglist>(),
             crate::expand::EXP_QUOTED,
         );
@@ -382,7 +381,7 @@ unsafe fn openhere(redir: *mut node) -> c_int {
         return pip[0];
     }
 
-    if crate::jobs::forkshell(null_mut(), null_mut(), crate::jobs::FORK_NOJOB) == 0 {
+    if crate::jobs::forkshell(null_mut(), None, crate::jobs::FORK_NOJOB) == 0 {
         libc::close(pip[0]);
         libc::signal(libc::SIGINT, libc::SIG_IGN);
         libc::signal(libc::SIGQUIT, libc::SIG_IGN);
@@ -497,7 +496,7 @@ pub unsafe fn savefd(from: c_int, ofd: c_int) -> c_int {
 
 // [spec:dash:def:redir.redirectsafe-fn]
 // [spec:dash:sem:redir.redirectsafe-fn]
-pub unsafe fn redirectsafe(redir: *mut node, flags: c_int) -> c_int {
+pub unsafe fn redirectsafe(redir: &[Node], flags: c_int) -> c_int {
     let err: c_int;
     let mut saveint: c_int = 0;
     let savehandler: *mut jmploc = crate::error::handler;
@@ -524,13 +523,13 @@ pub unsafe fn unwindredir(stop: *mut redirtab) {
 
 // [spec:dash:def:redir.pushredir-fn]
 // [spec:dash:sem:redir.pushredir-fn]
-pub unsafe fn pushredir(redir: *mut node) -> *mut redirtab {
+pub unsafe fn pushredir(redir: &[Node]) -> *mut redirtab {
     let sv: *mut redirtab;
     let q: *mut redirtab;
     let mut i: c_int;
 
     q = redirlist;
-    if redir.is_null() {
+    if redir.is_empty() {
         return q; /* goto out */
     }
 

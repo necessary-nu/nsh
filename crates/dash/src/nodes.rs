@@ -1,30 +1,47 @@
-//! Literal port of `src/nodes.c` / `src/nodes.h`.
+//! The shell's parse tree.
 //!
-//! Both files are *generated* at build time by `src/mknodes.c` (see
-//! `crate::gen::mknodes`, `docs/spec/port/src/mknodes.md`) from
-//! `src/nodetypes` and `src/nodes.c.pat`.  They are not checked-in C source,
-//! so nothing here carries `[spec:dash:…]` annotations; only the generator
-//! does.
+//! `src/nodes.c` and `src/nodes.h` are generated at build time by
+//! `src/mknodes.c` from `src/nodetypes` and `src/nodes.c.pat`, and the first
+//! port of this module was a transcription of that output: a `#[repr(C)]
+//! union node` whose arms shared an `int type` first member, a `nodesize[]`
+//! table indexed by that member, and a `copyfunc` that measured a tree with
+//! `calcsize` and then laid a copy of it out inside one `ckmalloc`'d block,
+//! refcounted through `struct funcnode { int count; union node n; }`.
 //!
-//! The contents below are a transcription of the real generator's output on
-//! this tree: the node numbering is positional in `src/nodetypes`, the
-//! per-tag structs keep their field order, and `calcsize`/`copynode` walk the
-//! tree in exactly the order `mknodes` emits (fields from last down to index
-//! 1, skipping field 0 — the `type` field, which `copynode` assigns last).
+//! Every part of that existed because the tree lived in the stack allocator
+//! and C has neither destructors nor a discriminated union.
+//! [dec:nsh:owned-data] takes the allocator away, so what is here now is an
+//! owned Rust tree: children are `Option<Box<Node>>`, the `next`-linked
+//! sibling lists are `Vec<Node>`, and the whole deep-copy apparatus is
+//! `Rc::new` of a derived `Clone`.
 //!
-//! `union node` is modelled as a `#[repr(C)] union`, the direct analogue of
-//! the C: the shell relies on every arm sharing an `int type` first member
-//! and on `nodesize[]` being the *aligned size of the arm actually in use*,
-//! so a Rust enum would change both the layout and the allocation
-//! arithmetic in `copyfunc`.
+//! Two things the C's layout did that an enum cannot, and how they are
+//! spelled here instead:
+//!
+//!   * **Several node types share one arm.** `NREDIR`/`NBACKGND`/`NSUBSHELL`
+//!     are all `struct nredir`, and `list()` *relabels* a node from one to
+//!     another in place. The arms that cover more than one type therefore
+//!     keep the `type` field the C had, and [`Node::node_type`] recovers the
+//!     number every `switch (n->type)` in the shell still switches on.
+//!   * **Two fields are written at run time, not at parse time.**
+//!     `nfile.expfname` (the C marks it `temp`, so `copynode` never copied
+//!     it) and `ndup.dupfd` are filled in by `expredir` on a tree that may
+//!     be a shared function definition. They are `Cell`s.
+//!
+//! Strings are still the C's `char *` into the stack allocator, wrapped in
+//! [`NodeText`] only so that `copyfunc` can take the copy the C took with
+//! `nodesavestr`. Converting them properly is a later slice of
+//! [dec:nsh:owned-data], and [dec:nsh:bytes-not-text] says what they become.
+//!
+//! `crate::gen::mknodes` is untouched: it is the port of the generator that
+//! still emits the C the reference build compiles. It no longer describes
+//! this file.
 
-use core::mem::{offset_of, size_of};
+use core::cell::{Cell, OnceCell, RefCell};
 use core::ptr;
+use std::rc::Rc;
 
-use libc::{c_char, c_int, c_short, size_t};
-
-use crate::memalloc::{ckfree, ckmalloc};
-use crate::shell::pointer;
+use libc::{c_char, c_int};
 
 // ---- node types (positional in src/nodetypes) ------------------------
 
@@ -81,439 +98,472 @@ pub const NXHERE: c_int = 24;
 /// ! command  (actually pipeline)
 pub const NNOT: c_int = 25;
 
-/// Number of node types; the length of `nodesize[]`.
-pub const NODE_TYPES: usize = 26;
-
 // ---- the per-tag structs --------------------------------------------
 
-#[repr(C)]
-#[derive(Clone, Copy)]
+/// The slot a here-document body lands in.
+///
+/// A here-document is read *after* its redirection node is already buried in
+/// a command: `parseredir` builds the node, and `parseheredoc` — which runs
+/// at the next newline — supplies the text. The C did that with a back
+/// pointer out of `struct heredoc` into the tree (`here->here->nhere.doc =
+/// n`). A back pointer into an owned tree is the one thing Rust will not
+/// give you, so the *slot* is shared instead: the node and the pending
+/// `struct heredoc` hold one handle each. `OnceCell` rather than `RefCell`
+/// because the write happens exactly once and readers must be able to hold a
+/// plain `&Node` across an expansion that can re-enter the tree.
+pub type heredoc_body = Rc<OnceCell<Node>>;
+
+/// The text of a word, a `for` variable or a function name.
+///
+/// The C stores a bare `char *` that points into the stack allocator, and
+/// that is what a freshly parsed tree still holds here. It works because the
+/// tree and the text die together, at the `popstackmark` that ends the
+/// command.
+///
+/// `copyfunc` is the one place where they do not die together: a function
+/// definition outlives the mark its text was parsed under. So `copynode` did
+/// not copy the pointer, it copied the *bytes* — that is what
+/// `funcstringsize` measured and `nodesavestr` wrote. Cloning a node
+/// therefore has to take ownership of the text, and this is the type that
+/// says so.
+///
+/// The owned arm becomes a `BString` when [dec:nsh:bytes-not-text]'s slice
+/// lands; the borrowed arm goes when the stack allocator does.
+pub enum NodeText {
+    /// into the stack allocator, valid until the enclosing mark pops
+    Borrowed(*mut c_char),
+    /// a copy of the bytes, NUL included — what `nodesavestr` produced
+    Owned(Box<[u8]>),
+}
+
+impl NodeText {
+    /// The C's `char *`. Callers only read through it; nothing in the shell
+    /// writes a word's text after the parser has built the node.
+    pub fn as_ptr(&self) -> *mut c_char {
+        match self {
+            NodeText::Borrowed(p) => *p,
+            NodeText::Owned(b) => b.as_ptr() as *mut c_char,
+        }
+    }
+}
+
+impl Clone for NodeText {
+    /// `nodesavestr`: copy the bytes, never the pointer.
+    fn clone(&self) -> NodeText {
+        let p = self.as_ptr();
+        unsafe {
+            let len = libc::strlen(p);
+            let mut v: Vec<u8> = Vec::with_capacity(len + 1);
+            ptr::copy_nonoverlapping(p as *const u8, v.as_mut_ptr(), len + 1);
+            v.set_len(len + 1);
+            NodeText::Owned(v.into_boxed_slice())
+        }
+    }
+}
+
+/// `NCMD`
+#[derive(Clone)]
 pub struct ncmd {
-    pub r#type: c_int,
     pub linno: c_int,
-    pub assign: *mut node,
-    pub args: *mut node,
-    pub redirect: *mut node,
+    /// variable assignments (C: a `narg.next`-linked list)
+    pub assign: Vec<Node>,
+    /// the arguments (C: a `narg.next`-linked list)
+    pub args: Vec<Node>,
+    /// list of file redirections (C: an `nfile.next`-linked list)
+    pub redirect: Vec<Node>,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
+/// `NPIPE`
+#[derive(Clone)]
 pub struct npipe {
-    pub r#type: c_int,
     pub backgnd: c_int,
-    pub cmdlist: *mut nodelist,
+    /// the commands in the pipeline (C: `struct nodelist *`)
+    pub cmdlist: Vec<Node>,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
+/// `NREDIR`, `NBACKGND`, `NSUBSHELL`
+#[derive(Clone)]
 pub struct nredir {
     pub r#type: c_int,
     pub linno: c_int,
-    pub n: *mut node,
-    pub redirect: *mut node,
+    pub n: Option<Box<Node>>,
+    pub redirect: Vec<Node>,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
+/// `NAND`, `NOR`, `NSEMI`, `NWHILE`, `NUNTIL`
+#[derive(Clone)]
 pub struct nbinary {
     pub r#type: c_int,
-    pub ch1: *mut node,
-    pub ch2: *mut node,
+    pub ch1: Option<Box<Node>>,
+    pub ch2: Option<Box<Node>>,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
+/// `NIF`
+#[derive(Clone)]
 pub struct nif {
-    pub r#type: c_int,
-    pub test: *mut node,
-    pub ifpart: *mut node,
-    pub elsepart: *mut node,
+    pub test: Option<Box<Node>>,
+    pub ifpart: Option<Box<Node>>,
+    pub elsepart: Option<Box<Node>>,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
+/// `NFOR`
+#[derive(Clone)]
 pub struct nfor {
-    pub r#type: c_int,
     pub linno: c_int,
-    pub args: *mut node,
-    pub body: *mut node,
-    pub var: *mut c_char,
+    pub args: Vec<Node>,
+    pub body: Option<Box<Node>>,
+    pub var: NodeText,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
+/// `NCASE`
+#[derive(Clone)]
 pub struct ncase {
-    pub r#type: c_int,
     pub linno: c_int,
-    pub expr: *mut node,
-    pub cases: *mut node,
+    pub expr: Option<Box<Node>>,
+    /// the list of cases (C: an `nclist.next`-linked list of NCLIST nodes)
+    pub cases: Vec<Node>,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
+/// `NCLIST`
+#[derive(Clone)]
 pub struct nclist {
-    pub r#type: c_int,
-    pub next: *mut node,
-    pub pattern: *mut node,
-    pub body: *mut node,
+    /// list of patterns for this case (C: a `narg.next`-linked list)
+    pub pattern: Vec<Node>,
+    pub body: Option<Box<Node>>,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
+/// `NDEFUN`
+#[derive(Clone)]
 pub struct ndefun {
-    pub r#type: c_int,
     pub linno: c_int,
-    pub text: *mut c_char,
-    pub body: *mut node,
+    pub text: NodeText,
+    pub body: Option<Box<Node>>,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
+/// `NARG`
+#[derive(Clone)]
 pub struct narg {
-    pub r#type: c_int,
-    pub next: *mut node,
-    pub text: *mut c_char,
-    pub backquote: *mut nodelist,
+    pub text: NodeText,
+    /// list of commands in back quotes (C: `struct nodelist *`).  An entry is
+    /// `None` where the C stored a null `n`, which is what `$( )` parses to.
+    pub backquote: Vec<Option<Node>>,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
+/// `NTO`, `NCLOBBER`, `NFROM`, `NFROMTO`, `NAPPEND`
 pub struct nfile {
     pub r#type: c_int,
-    pub next: *mut node,
+    /// file descriptor being redirected
     pub fd: c_int,
-    pub fname: *mut node,
-    /// `temp` field: filled in at run time, never copied by `copynode`
-    pub expfname: *mut c_char,
+    /// file name, in a NARG node
+    pub fname: Option<Box<Node>>,
+    /// actual file name — the C's `temp` field: written by `expredir` before
+    /// every use and never copied by `copynode`, so it is interior-mutable
+    /// here rather than part of the tree's value.
+    pub expfname: Cell<*mut c_char>,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
+impl Clone for nfile {
+    /// `expfname` is the C's `temp` field: `copynode` skips it, so a copied
+    /// node inherits whatever was in the block. `expredir` writes it before
+    /// every use, so what it starts as does not matter; null is the value an
+    /// owned node can state.
+    fn clone(&self) -> nfile {
+        nfile {
+            r#type: self.r#type,
+            fd: self.fd,
+            fname: self.fname.clone(),
+            expfname: Cell::new(ptr::null_mut()),
+        }
+    }
+}
+
+/// `NTOFD`, `NFROMFD`
+#[derive(Clone)]
 pub struct ndup {
     pub r#type: c_int,
-    pub next: *mut node,
+    /// file descriptor being redirected
     pub fd: c_int,
-    pub dupfd: c_int,
-    pub vname: *mut node,
+    /// file descriptor to duplicate — rewritten by `expredir`/`fixredir`
+    /// each time the redirection is performed, so interior-mutable.
+    pub dupfd: Cell<c_int>,
+    /// file name if `fd>&$var`; `fixredir` clears it at parse time.
+    pub vname: RefCell<Option<Box<Node>>>,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
+/// `NHERE`, `NXHERE`
 pub struct nhere {
     pub r#type: c_int,
-    pub next: *mut node,
+    /// file descriptor being redirected
     pub fd: c_int,
-    pub doc: *mut node,
+    /// input to command (NARG node), filled in by `parseheredoc`
+    pub doc: heredoc_body,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
+impl Clone for nhere {
+    /// `new->nhere.doc = copynode(n->nhere.doc)`. The slot is shared with a
+    /// `struct heredoc` only so `parseheredoc` can reach it; a *copy* of the
+    /// node needs its own body, not a second handle on this one — otherwise
+    /// the copy would keep pointing at text in the stack allocator.
+    fn clone(&self) -> nhere {
+        let doc: heredoc_body = Rc::new(OnceCell::new());
+        if let Some(n) = self.doc.get() {
+            let _ = doc.set(n.clone());
+        }
+        nhere {
+            r#type: self.r#type,
+            fd: self.fd,
+            doc,
+        }
+    }
+}
+
+/// `NNOT`
+#[derive(Clone)]
 pub struct nnot {
-    pub r#type: c_int,
-    pub com: *mut node,
+    pub com: Option<Box<Node>>,
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub union node {
-    pub r#type: c_int,
-    pub ncmd: ncmd,
-    pub npipe: npipe,
-    pub nredir: nredir,
-    pub nbinary: nbinary,
-    pub nif: nif,
-    pub nfor: nfor,
-    pub ncase: ncase,
-    pub nclist: nclist,
-    pub ndefun: ndefun,
-    pub narg: narg,
-    pub nfile: nfile,
-    pub ndup: ndup,
-    pub nhere: nhere,
-    pub nnot: nnot,
+/// The C's `union node`.
+#[derive(Clone)]
+pub enum Node {
+    Cmd(ncmd),
+    Pipe(npipe),
+    Redir(nredir),
+    Binary(nbinary),
+    If(nif),
+    For(nfor),
+    Case(ncase),
+    Clist(nclist),
+    Defun(ndefun),
+    Arg(narg),
+    File(nfile),
+    Dup(ndup),
+    Here(nhere),
+    Not(nnot),
 }
 
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct nodelist {
-    pub next: *mut nodelist,
-    pub n: *mut node,
+/* The C spells this `union node`; ported modules refer to it by both names. */
+pub type node = Node;
+
+/// Names a `union node` arm that the node is not.
+///
+/// Reached only where the C would have read one arm's fields through
+/// another's — a type pun on a node type that cannot occur at that point.
+/// Every such site in the shell is a `switch` default that C lets fall into
+/// the next `case`; see the comments there.
+#[cold]
+#[inline(never)]
+fn wrong_arm(want: &str) -> ! {
+    panic!("node is not a {want}");
 }
 
-#[repr(C)]
-pub struct funcnode {
-    pub count: c_int,
-    pub n: node,
+impl Node {
+    /// The `int type` first member every arm of the C's union shared.
+    pub fn node_type(&self) -> c_int {
+        match self {
+            Node::Cmd(_) => NCMD,
+            Node::Pipe(_) => NPIPE,
+            Node::Redir(n) => n.r#type,
+            Node::Binary(n) => n.r#type,
+            Node::If(_) => NIF,
+            Node::For(_) => NFOR,
+            Node::Case(_) => NCASE,
+            Node::Clist(_) => NCLIST,
+            Node::Defun(_) => NDEFUN,
+            Node::Arg(_) => NARG,
+            Node::File(n) => n.r#type,
+            Node::Dup(n) => n.r#type,
+            Node::Here(n) => n.r#type,
+            Node::Not(_) => NNOT,
+        }
+    }
+
+    pub fn ncmd(&self) -> &ncmd {
+        match self {
+            Node::Cmd(n) => n,
+            _ => wrong_arm("ncmd"),
+        }
+    }
+
+    pub fn npipe(&self) -> &npipe {
+        match self {
+            Node::Pipe(n) => n,
+            _ => wrong_arm("npipe"),
+        }
+    }
+
+    pub fn npipe_mut(&mut self) -> &mut npipe {
+        match self {
+            Node::Pipe(n) => n,
+            _ => wrong_arm("npipe"),
+        }
+    }
+
+    pub fn nredir(&self) -> &nredir {
+        match self {
+            Node::Redir(n) => n,
+            _ => wrong_arm("nredir"),
+        }
+    }
+
+    pub fn nredir_mut(&mut self) -> &mut nredir {
+        match self {
+            Node::Redir(n) => n,
+            _ => wrong_arm("nredir"),
+        }
+    }
+
+    pub fn nbinary(&self) -> &nbinary {
+        match self {
+            Node::Binary(n) => n,
+            _ => wrong_arm("nbinary"),
+        }
+    }
+
+    pub fn nif(&self) -> &nif {
+        match self {
+            Node::If(n) => n,
+            _ => wrong_arm("nif"),
+        }
+    }
+
+    pub fn nfor(&self) -> &nfor {
+        match self {
+            Node::For(n) => n,
+            _ => wrong_arm("nfor"),
+        }
+    }
+
+    pub fn ncase(&self) -> &ncase {
+        match self {
+            Node::Case(n) => n,
+            _ => wrong_arm("ncase"),
+        }
+    }
+
+    pub fn nclist(&self) -> &nclist {
+        match self {
+            Node::Clist(n) => n,
+            _ => wrong_arm("nclist"),
+        }
+    }
+
+    pub fn ndefun(&self) -> &ndefun {
+        match self {
+            Node::Defun(n) => n,
+            _ => wrong_arm("ndefun"),
+        }
+    }
+
+    pub fn narg(&self) -> &narg {
+        match self {
+            Node::Arg(n) => n,
+            _ => wrong_arm("narg"),
+        }
+    }
+
+    /// Consume the node for its `narg`. `simplecmd` needs this where the C
+    /// relabelled an NARG node NDEFUN in place and kept its `text`.
+    pub fn into_narg(self) -> narg {
+        match self {
+            Node::Arg(n) => n,
+            _ => wrong_arm("narg"),
+        }
+    }
+
+    /// The `nfile` view. Where the C reads `n->nfile.fd` on a redirection
+    /// that is not one — `fd` sits at the same offset in `nfile`, `ndup` and
+    /// `nhere` — use [`Node::redir_fd`] instead.
+    pub fn nfile(&self) -> &nfile {
+        match self {
+            Node::File(n) => n,
+            _ => wrong_arm("nfile"),
+        }
+    }
+
+    pub fn nfile_mut(&mut self) -> &mut nfile {
+        match self {
+            Node::File(n) => n,
+            _ => wrong_arm("nfile"),
+        }
+    }
+
+    pub fn ndup(&self) -> &ndup {
+        match self {
+            Node::Dup(n) => n,
+            _ => wrong_arm("ndup"),
+        }
+    }
+
+    pub fn nhere(&self) -> &nhere {
+        match self {
+            Node::Here(n) => n,
+            _ => wrong_arm("nhere"),
+        }
+    }
+
+    pub fn nhere_mut(&mut self) -> &mut nhere {
+        match self {
+            Node::Here(n) => n,
+            _ => wrong_arm("nhere"),
+        }
+    }
+
+    pub fn nnot(&self) -> &nnot {
+        match self {
+            Node::Not(n) => n,
+            _ => wrong_arm("nnot"),
+        }
+    }
+
+    /// `n->nfile.fd` for any redirection node — the C reads it through the
+    /// `nfile` arm whatever the redirection actually is, because `fd` sits
+    /// at the same offset in `nfile`, `ndup` and `nhere`.
+    pub fn redir_fd(&self) -> c_int {
+        match self {
+            Node::File(n) => n.fd,
+            Node::Dup(n) => n.fd,
+            Node::Here(n) => n.fd,
+            _ => wrong_arm("redirection"),
+        }
+    }
 }
 
 // ---- nodes.c ---------------------------------------------------------
 
-/// size of structures in function
-pub static mut funcblocksize: c_int = 0;
-/// size of strings in node
-pub static mut funcstringsize: c_int = 0;
-/// block to allocate function from
-pub static mut funcblock: pointer = ptr::null_mut();
-/// block to allocate strings from
-pub static mut funcstring: *mut c_char = ptr::null_mut();
+/// The C's `struct funcnode { int count; union node n; }`.
+///
+/// `Rc` *is* `count`: the C starts a fresh copy at `count = 0` meaning one
+/// owner and frees at `count < 0`, which is `Rc`'s strong count offset by
+/// one. The command table entry that holds it (`exec::tblentry`) is still a
+/// `ckmalloc`'d C struct with a flexible array member, so what it stores is
+/// the raw form of the `Rc` rather than the `Rc` itself; that goes when
+/// `memalloc` does.
+pub type funcnode = Node;
 
-/// `machdep.h`: `SHELL_SIZE` is `sizeof(union {int i; char *cp; double d;}) - 1`.
-const SHELL_SIZE: usize = 8 - 1;
-
-/// `machdep.h`: `#define SHELL_ALIGN(nbytes) (((nbytes) + SHELL_SIZE) & ~SHELL_SIZE)`
-const fn SHELL_ALIGN(nbytes: usize) -> usize {
-    (nbytes + SHELL_SIZE) & !SHELL_SIZE
+/// Make a copy of a parse tree.
+///
+/// The C measured the tree with `calcsize`, allocated one block for the
+/// nodes and the strings together, and laid the copy out inside it with
+/// `copynode`/`copystring`. There is nothing left of that: an owned tree
+/// clones itself, and one allocation for the whole tree was only ever a
+/// consequence of having to free it in one `ckfree`.
+pub unsafe fn copyfunc(n: &Node) -> *const funcnode {
+    Rc::into_raw(Rc::new(n.clone()))
 }
 
-static nodesize: [c_short; NODE_TYPES] = [
-    SHELL_ALIGN(size_of::<ncmd>()) as c_short,
-    SHELL_ALIGN(size_of::<npipe>()) as c_short,
-    SHELL_ALIGN(size_of::<nredir>()) as c_short,
-    SHELL_ALIGN(size_of::<nredir>()) as c_short,
-    SHELL_ALIGN(size_of::<nredir>()) as c_short,
-    SHELL_ALIGN(size_of::<nbinary>()) as c_short,
-    SHELL_ALIGN(size_of::<nbinary>()) as c_short,
-    SHELL_ALIGN(size_of::<nbinary>()) as c_short,
-    SHELL_ALIGN(size_of::<nif>()) as c_short,
-    SHELL_ALIGN(size_of::<nbinary>()) as c_short,
-    SHELL_ALIGN(size_of::<nbinary>()) as c_short,
-    SHELL_ALIGN(size_of::<nfor>()) as c_short,
-    SHELL_ALIGN(size_of::<ncase>()) as c_short,
-    SHELL_ALIGN(size_of::<nclist>()) as c_short,
-    SHELL_ALIGN(size_of::<ndefun>()) as c_short,
-    SHELL_ALIGN(size_of::<narg>()) as c_short,
-    SHELL_ALIGN(size_of::<nfile>()) as c_short,
-    SHELL_ALIGN(size_of::<nfile>()) as c_short,
-    SHELL_ALIGN(size_of::<nfile>()) as c_short,
-    SHELL_ALIGN(size_of::<nfile>()) as c_short,
-    SHELL_ALIGN(size_of::<nfile>()) as c_short,
-    SHELL_ALIGN(size_of::<ndup>()) as c_short,
-    SHELL_ALIGN(size_of::<ndup>()) as c_short,
-    SHELL_ALIGN(size_of::<nhere>()) as c_short,
-    SHELL_ALIGN(size_of::<nhere>()) as c_short,
-    SHELL_ALIGN(size_of::<nnot>()) as c_short,
-];
-
-/*
- * Make a copy of a parse tree.
- */
-
-pub unsafe fn copyfunc(n: *mut node) -> *mut funcnode {
-    let f: *mut funcnode;
-    let blocksize: size_t;
-
-    funcblocksize = offset_of!(funcnode, n) as c_int;
-    funcstringsize = 0;
-    calcsize(n);
-    blocksize = funcblocksize as size_t;
-    f = ckmalloc(blocksize + funcstringsize as size_t) as *mut funcnode;
-    funcblock = (f as *mut c_char).offset(offset_of!(funcnode, n) as isize) as pointer;
-    funcstring = (f as *mut c_char).offset(blocksize as isize);
-    copynode(n);
-    (*f).count = 0;
-    f
-}
-
-unsafe fn calcsize(n: *mut node) {
-    if n.is_null() {
-        return;
-    }
-    funcblocksize += nodesize[(*n).r#type as usize] as c_int;
-    match (*n).r#type {
-        NCMD => {
-            calcsize((*n).ncmd.redirect);
-            calcsize((*n).ncmd.args);
-            calcsize((*n).ncmd.assign);
-        }
-        NPIPE => {
-            sizenodelist((*n).npipe.cmdlist);
-        }
-        NREDIR | NBACKGND | NSUBSHELL => {
-            calcsize((*n).nredir.redirect);
-            calcsize((*n).nredir.n);
-        }
-        NAND | NOR | NSEMI | NWHILE | NUNTIL => {
-            calcsize((*n).nbinary.ch2);
-            calcsize((*n).nbinary.ch1);
-        }
-        NIF => {
-            calcsize((*n).nif.elsepart);
-            calcsize((*n).nif.ifpart);
-            calcsize((*n).nif.test);
-        }
-        NFOR => {
-            funcstringsize += libc::strlen((*n).nfor.var) as c_int + 1;
-            calcsize((*n).nfor.body);
-            calcsize((*n).nfor.args);
-        }
-        NCASE => {
-            calcsize((*n).ncase.cases);
-            calcsize((*n).ncase.expr);
-        }
-        NCLIST => {
-            calcsize((*n).nclist.body);
-            calcsize((*n).nclist.pattern);
-            calcsize((*n).nclist.next);
-        }
-        NDEFUN => {
-            calcsize((*n).ndefun.body);
-            funcstringsize += libc::strlen((*n).ndefun.text) as c_int + 1;
-        }
-        NARG => {
-            sizenodelist((*n).narg.backquote);
-            funcstringsize += libc::strlen((*n).narg.text) as c_int + 1;
-            calcsize((*n).narg.next);
-        }
-        NTO | NCLOBBER | NFROM | NFROMTO | NAPPEND => {
-            calcsize((*n).nfile.fname);
-            calcsize((*n).nfile.next);
-        }
-        NTOFD | NFROMFD => {
-            calcsize((*n).ndup.vname);
-            calcsize((*n).ndup.next);
-        }
-        NHERE | NXHERE => {
-            calcsize((*n).nhere.doc);
-            calcsize((*n).nhere.next);
-        }
-        NNOT => {
-            calcsize((*n).nnot.com);
-        }
-        _ => {}
+/// `f->count++` — take a second reference to a function that is about to
+/// run, so redefining it mid-execution does not pull the body out from under
+/// the evaluator.
+pub unsafe fn reffunc(f: *const funcnode) {
+    if !f.is_null() {
+        Rc::increment_strong_count(f);
     }
 }
 
-unsafe fn sizenodelist(mut lp: *mut nodelist) {
-    while !lp.is_null() {
-        funcblocksize += SHELL_ALIGN(size_of::<nodelist>()) as c_int;
-        calcsize((*lp).n);
-        lp = (*lp).next;
+/// Free a parse tree.
+pub unsafe fn freefunc(f: *const funcnode) {
+    if !f.is_null() {
+        Rc::decrement_strong_count(f);
     }
 }
-
-unsafe fn copynode(n: *mut node) -> *mut node {
-    let new: *mut node;
-
-    if n.is_null() {
-        return ptr::null_mut();
-    }
-    new = funcblock as *mut node;
-    funcblock =
-        (funcblock as *mut c_char).offset(nodesize[(*n).r#type as usize] as isize) as pointer;
-    match (*n).r#type {
-        NCMD => {
-            (*new).ncmd.redirect = copynode((*n).ncmd.redirect);
-            (*new).ncmd.args = copynode((*n).ncmd.args);
-            (*new).ncmd.assign = copynode((*n).ncmd.assign);
-            (*new).ncmd.linno = (*n).ncmd.linno;
-        }
-        NPIPE => {
-            (*new).npipe.cmdlist = copynodelist((*n).npipe.cmdlist);
-            (*new).npipe.backgnd = (*n).npipe.backgnd;
-        }
-        NREDIR | NBACKGND | NSUBSHELL => {
-            (*new).nredir.redirect = copynode((*n).nredir.redirect);
-            (*new).nredir.n = copynode((*n).nredir.n);
-            (*new).nredir.linno = (*n).nredir.linno;
-        }
-        NAND | NOR | NSEMI | NWHILE | NUNTIL => {
-            (*new).nbinary.ch2 = copynode((*n).nbinary.ch2);
-            (*new).nbinary.ch1 = copynode((*n).nbinary.ch1);
-        }
-        NIF => {
-            (*new).nif.elsepart = copynode((*n).nif.elsepart);
-            (*new).nif.ifpart = copynode((*n).nif.ifpart);
-            (*new).nif.test = copynode((*n).nif.test);
-        }
-        NFOR => {
-            (*new).nfor.var = nodesavestr((*n).nfor.var);
-            (*new).nfor.body = copynode((*n).nfor.body);
-            (*new).nfor.args = copynode((*n).nfor.args);
-            (*new).nfor.linno = (*n).nfor.linno;
-        }
-        NCASE => {
-            (*new).ncase.cases = copynode((*n).ncase.cases);
-            (*new).ncase.expr = copynode((*n).ncase.expr);
-            (*new).ncase.linno = (*n).ncase.linno;
-        }
-        NCLIST => {
-            (*new).nclist.body = copynode((*n).nclist.body);
-            (*new).nclist.pattern = copynode((*n).nclist.pattern);
-            (*new).nclist.next = copynode((*n).nclist.next);
-        }
-        NDEFUN => {
-            (*new).ndefun.body = copynode((*n).ndefun.body);
-            (*new).ndefun.text = nodesavestr((*n).ndefun.text);
-            (*new).ndefun.linno = (*n).ndefun.linno;
-        }
-        NARG => {
-            (*new).narg.backquote = copynodelist((*n).narg.backquote);
-            (*new).narg.text = nodesavestr((*n).narg.text);
-            (*new).narg.next = copynode((*n).narg.next);
-        }
-        NTO | NCLOBBER | NFROM | NFROMTO | NAPPEND => {
-            (*new).nfile.fname = copynode((*n).nfile.fname);
-            (*new).nfile.fd = (*n).nfile.fd;
-            (*new).nfile.next = copynode((*n).nfile.next);
-        }
-        NTOFD | NFROMFD => {
-            (*new).ndup.vname = copynode((*n).ndup.vname);
-            (*new).ndup.dupfd = (*n).ndup.dupfd;
-            (*new).ndup.fd = (*n).ndup.fd;
-            (*new).ndup.next = copynode((*n).ndup.next);
-        }
-        NHERE | NXHERE => {
-            (*new).nhere.doc = copynode((*n).nhere.doc);
-            (*new).nhere.fd = (*n).nhere.fd;
-            (*new).nhere.next = copynode((*n).nhere.next);
-        }
-        NNOT => {
-            (*new).nnot.com = copynode((*n).nnot.com);
-        }
-        _ => {}
-    }
-    (*new).r#type = (*n).r#type;
-    new
-}
-
-unsafe fn copynodelist(mut lp: *mut nodelist) -> *mut nodelist {
-    let mut start: *mut nodelist = ptr::null_mut();
-    let mut lpp: *mut *mut nodelist;
-
-    lpp = &mut start;
-    while !lp.is_null() {
-        *lpp = funcblock as *mut nodelist;
-        funcblock = (funcblock as *mut c_char)
-            .offset(SHELL_ALIGN(size_of::<nodelist>()) as isize) as pointer;
-        (**lpp).n = copynode((*lp).n);
-        lp = (*lp).next;
-        lpp = &mut (**lpp).next;
-    }
-    *lpp = ptr::null_mut();
-    start
-}
-
-unsafe fn nodesavestr(s: *mut c_char) -> *mut c_char {
-    let rtn: *mut c_char = funcstring;
-
-    funcstring = libc::stpcpy(funcstring, s).offset(1);
-    rtn
-}
-
-/*
- * Free a parse tree.
- */
-
-pub unsafe fn freefunc(f: *mut funcnode) {
-    if !f.is_null() && {
-        (*f).count -= 1;
-        (*f).count < 0
-    } {
-        ckfree(f as pointer);
-    }
-}
-
-/* The C spells this `union node`; some ported modules refer to it by the
- * Rust-conventional `Node`. Alias rather than rename, so the literal C
- * name stays canonical. */
-pub use self::node as Node;

@@ -22,7 +22,7 @@ use libc::{c_char, c_int, c_uint, c_void, pid_t, size_t};
 use crate::error::{INTOFF, INTON};
 use crate::eval::exitstatus;
 use crate::memalloc::{ckfree, ckmalloc, ckrealloc, makestrspace, savestr, stackblock};
-use crate::nodes::{nodelist, Node};
+use crate::nodes::Node;
 use crate::nodes::{
     NAND, NAPPEND, NARG, NBACKGND, NCASE, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO,
     NHERE, NIF, NNOT, NOR, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE, NXHERE,
@@ -1091,7 +1091,7 @@ unsafe fn growjobtab() -> *mut job {
 
 // [spec:dash:def:jobs.forkchild-fn]
 // [spec:dash:sem:jobs.forkchild-fn]
-unsafe fn forkchild(jp: *mut job, n: *mut Node, mode: c_int) {
+unsafe fn forkchild(jp: *mut job, n: Option<&Node>, mode: c_int) {
     let mut jp: *mut job = jp;
     let lvforked: c_int;
     let oldlvl: c_int;
@@ -1107,7 +1107,7 @@ unsafe fn forkchild(jp: *mut job, n: *mut Node, mode: c_int) {
         crate::shellmain::mypid = 0;
         crate::shellmain::shlvl += 1;
 
-        crate::init::forkreset(if mode == FORK_NOJOB { n } else { null_mut() });
+        crate::init::forkreset(if mode == FORK_NOJOB { n } else { None });
 
         /* do job control only in root shell */
         jobctl = 0;
@@ -1179,7 +1179,7 @@ unsafe fn forkchild(jp: *mut job, n: *mut Node, mode: c_int) {
 
 // [spec:dash:def:jobs.forkparent-fn]
 // [spec:dash:sem:jobs.forkparent-fn]
-unsafe fn forkparent(jp: *mut job, n: *mut Node, mode: c_int, pid: pid_t) {
+unsafe fn forkparent(jp: *mut job, n: Option<&Node>, mode: c_int, pid: pid_t) {
     if pid < 0 {
         /* TRACE(("Fork failed, errno=%d", errno)); */
         if !jp.is_null() {
@@ -1224,15 +1224,15 @@ unsafe fn forkparent(jp: *mut job, n: *mut Node, mode: c_int, pid: pid_t) {
         (*ps).pid = pid;
         (*ps).status = -1;
         (*ps).cmd = (core::ptr::addr_of!(crate::shell::nullstr) as *mut c_char);
-        if jobctl != 0 && !n.is_null() {
-            (*ps).cmd = commandtext(n);
+        if jobctl != 0 && n.is_some() {
+            (*ps).cmd = commandtext(n.unwrap());
         }
     }
 }
 
 // [spec:dash:def:jobs.forkshell-fn]
 // [spec:dash:sem:jobs.forkshell-fn]
-pub unsafe fn forkshell(jp: *mut job, n: *mut Node, mode: c_int) -> c_int {
+pub unsafe fn forkshell(jp: *mut job, n: Option<&Node>, mode: c_int) -> c_int {
     let pid: c_int;
 
     /* TRACE(("forkshell(%%%d, %p, %d) called\n", jobno(jp), n, mode)); */
@@ -1253,7 +1253,7 @@ pub unsafe fn forkshell(jp: *mut job, n: *mut Node, mode: c_int) -> c_int {
 // [spec:dash:sem:jobs.vforkexec-fn]
 #[allow(deprecated)] /* libc marks vfork deprecated; dash relies on it */
 pub unsafe fn vforkexec(
-    n: *mut Node,
+    n: &Node,
     argv: *mut *mut c_char,
     path: *const c_char,
     idx: c_int,
@@ -1271,13 +1271,13 @@ pub unsafe fn vforkexec(
     pid = libc::vfork();
 
     if pid == 0 {
-        forkchild(jp, n, FORK_FG);
+        forkchild(jp, Some(n), FORK_FG);
         crate::exec::shellexec(argv, path, idx);
         /* NOTREACHED */
     }
 
     vforked = 0;
-    forkparent(jp, n, FORK_FG, pid);
+    forkparent(jp, Some(n), FORK_FG, pid);
 
     jp
 }
@@ -1581,12 +1581,12 @@ static mut cmdnextc: *mut c_char = null_mut();
 
 // [spec:dash:def:jobs.commandtext-fn]
 // [spec:dash:sem:jobs.commandtext-fn]
-unsafe fn commandtext(n: *mut Node) -> *mut c_char {
+unsafe fn commandtext(n: &Node) -> *mut c_char {
     let name: *mut c_char;
 
     /* STARTSTACKSTR(cmdnextc) */
     cmdnextc = stackblock() as *mut c_char;
-    cmdtxt(n);
+    cmdtxt(Some(n));
     name = stackblock() as *mut c_char;
     /* TRACE(("commandtext: name %p, end %p\n", name, cmdnextc)); */
     savestr(name)
@@ -1599,10 +1599,7 @@ unsafe fn commandtext(n: *mut Node) -> *mut c_char {
 // `goto donode` from the redirection tail), so the label graph is
 // expressed as an explicit program counter rather than as nested
 // labelled blocks.
-unsafe fn cmdtxt(n: *mut Node) {
-    let mut n: *mut Node = n;
-    let mut np: *mut Node;
-    let mut lp: *mut nodelist;
+unsafe fn cmdtxt(n: Option<&Node>) {
     let mut p: *const c_char = core::ptr::null();
     let mut s: [c_char; 2] = [0; 2];
 
@@ -1615,14 +1612,21 @@ unsafe fn cmdtxt(n: *mut Node) {
     const L_DOTAIL2: c_int = 6;
     const L_REDIR: c_int = 7;
 
-    if n.is_null() {
-        return;
-    }
+    /* The C reassigns `n` and jumps; every label that reads a *field* reads
+     * one of the node the switch was entered with, and every label that
+     * reassigns hands the new node straight to a recursive `cmdtxt` that
+     * tolerates NULL. So the entry node and the "next" node are separate
+     * bindings here. */
+    let cur: &Node = match n {
+        Some(n) => n,
+        None => return,
+    };
+    let mut n: Option<&Node> = None;
 
     let mut pc: c_int = L_SWITCH;
     loop {
         match pc {
-            L_SWITCH => match (*n).r#type {
+            L_SWITCH => match cur.node_type() {
                 NSEMI => {
                     p = b"; \0".as_ptr() as *const c_char;
                     pc = L_BINOP;
@@ -1636,31 +1640,32 @@ unsafe fn cmdtxt(n: *mut Node) {
                     pc = L_BINOP;
                 }
                 NREDIR | NBACKGND => {
-                    n = (*n).nredir.n;
+                    n = cur.nredir().n.as_deref();
                     pc = L_DONODE;
                 }
                 NNOT => {
                     cmdputs(b"!\0".as_ptr() as *const c_char);
-                    n = (*n).nnot.com;
+                    n = cur.nnot().com.as_deref();
                     pc = L_DONODE;
                 }
                 NIF => {
+                    let f = cur.nif();
                     cmdputs(b"if \0".as_ptr() as *const c_char);
-                    cmdtxt((*n).nif.test);
+                    cmdtxt(f.test.as_deref());
                     cmdputs(b"; then \0".as_ptr() as *const c_char);
-                    if !(*n).nif.elsepart.is_null() {
-                        cmdtxt((*n).nif.ifpart);
+                    if f.elsepart.is_some() {
+                        cmdtxt(f.ifpart.as_deref());
                         cmdputs(b"; else \0".as_ptr() as *const c_char);
-                        n = (*n).nif.elsepart;
+                        n = f.elsepart.as_deref();
                     } else {
-                        n = (*n).nif.ifpart;
+                        n = f.ifpart.as_deref();
                     }
                     p = b"; fi\0".as_ptr() as *const c_char;
                     pc = L_DOTAIL;
                 }
                 NSUBSHELL => {
                     cmdputs(b"(\0".as_ptr() as *const c_char);
-                    n = (*n).nredir.n;
+                    n = cur.nredir().n.as_deref();
                     p = b")\0".as_ptr() as *const c_char;
                     pc = L_DOTAIL;
                 }
@@ -1673,26 +1678,27 @@ unsafe fn cmdtxt(n: *mut Node) {
                     pc = L_UNTIL;
                 }
                 NFOR => {
+                    let f = cur.nfor();
                     cmdputs(b"for \0".as_ptr() as *const c_char);
-                    cmdputs((*n).nfor.var);
+                    cmdputs(f.var.as_ptr());
                     cmdputs(b" in \0".as_ptr() as *const c_char);
-                    cmdlist((*n).nfor.args, 1);
-                    n = (*n).nfor.body;
+                    cmdlist(&f.args, 1);
+                    n = f.body.as_deref();
                     p = b"; done\0".as_ptr() as *const c_char;
                     pc = L_DODO;
                 }
                 NDEFUN => {
-                    cmdputs((*n).ndefun.text);
+                    cmdputs(cur.ndefun().text.as_ptr());
                     p = b"() { ... }\0".as_ptr() as *const c_char;
                     pc = L_DOTAIL2;
                 }
                 NCMD => {
-                    cmdlist((*n).ncmd.args, 1);
-                    cmdlist((*n).ncmd.redirect, 0);
+                    cmdlist(&cur.ncmd().args, 1);
+                    cmdlist(&cur.ncmd().redirect, 0);
                     return;
                 }
                 NARG => {
-                    p = (*n).narg.text;
+                    p = cur.narg().text.as_ptr();
                     pc = L_DOTAIL2;
                 }
                 NHERE | NXHERE => {
@@ -1700,16 +1706,17 @@ unsafe fn cmdtxt(n: *mut Node) {
                     pc = L_DOTAIL2;
                 }
                 NCASE => {
+                    let c = cur.ncase();
                     cmdputs(b"case \0".as_ptr() as *const c_char);
-                    cmdputs((*(*n).ncase.expr).narg.text);
+                    cmdputs(c.expr.as_deref().unwrap().narg().text.as_ptr());
                     cmdputs(b" in \0".as_ptr() as *const c_char);
-                    np = (*n).ncase.cases;
-                    while !np.is_null() {
-                        cmdtxt((*np).nclist.pattern);
+                    for np in &c.cases {
+                        /* the C passes the head of the pattern list, so only
+                         * the first pattern of a case ever prints */
+                        cmdtxt(np.nclist().pattern.first());
                         cmdputs(b") \0".as_ptr() as *const c_char);
-                        cmdtxt((*np).nclist.body);
+                        cmdtxt(np.nclist().body.as_deref());
                         cmdputs(b";; \0".as_ptr() as *const c_char);
-                        np = (*np).nclist.next;
                     }
                     p = b"esac\0".as_ptr() as *const c_char;
                     pc = L_DOTAIL2;
@@ -1744,13 +1751,14 @@ unsafe fn cmdtxt(n: *mut Node) {
                 }
                 /* `default:` is empty outside DEBUG, so an unrecognised
                  * node type falls straight through into `case NPIPE:`.
-                 * Reproduced bug-for-bug. */
+                 * NCLIST is the only type left over, and it never reaches
+                 * `cmdtxt`: the NCASE arm above hands over its `pattern`
+                 * and `body`, never the NCLIST itself. */
                 _ /* default, NPIPE */ => {
-                    lp = (*n).npipe.cmdlist;
-                    loop {
-                        cmdtxt((*lp).n);
-                        lp = (*lp).next;
-                        if lp.is_null() {
+                    let cl = &cur.npipe().cmdlist;
+                    for (i, c) in cl.iter().enumerate() {
+                        cmdtxt(Some(c));
+                        if i + 1 == cl.len() {
                             break;
                         }
                         cmdputs(b" | \0".as_ptr() as *const c_char);
@@ -1760,9 +1768,9 @@ unsafe fn cmdtxt(n: *mut Node) {
             },
             L_BINOP => {
                 // binop:
-                cmdtxt((*n).nbinary.ch1);
+                cmdtxt(cur.nbinary().ch1.as_deref());
                 cmdputs(p);
-                n = (*n).nbinary.ch2;
+                n = cur.nbinary().ch2.as_deref();
                 pc = L_DONODE;
             }
             L_DONODE => {
@@ -1773,8 +1781,8 @@ unsafe fn cmdtxt(n: *mut Node) {
             L_UNTIL => {
                 // until:
                 cmdputs(p);
-                cmdtxt((*n).nbinary.ch1);
-                n = (*n).nbinary.ch2;
+                cmdtxt(cur.nbinary().ch1.as_deref());
+                n = cur.nbinary().ch2.as_deref();
                 p = b"; done\0".as_ptr() as *const c_char;
                 pc = L_DODO;
             }
@@ -1795,16 +1803,16 @@ unsafe fn cmdtxt(n: *mut Node) {
             }
             _ /* L_REDIR */ => {
                 // redir:
-                s[0] = ((*n).nfile.fd + '0' as c_int) as c_char;
+                s[0] = (cur.redir_fd() + '0' as c_int) as c_char;
                 s[1] = b'\0' as c_char;
                 cmdputs(s.as_ptr());
                 cmdputs(p);
-                if (*n).r#type == NTOFD || (*n).r#type == NFROMFD {
-                    s[0] = ((*n).ndup.dupfd + '0' as c_int) as c_char;
+                if cur.node_type() == NTOFD || cur.node_type() == NFROMFD {
+                    s[0] = (cur.ndup().dupfd.get() + '0' as c_int) as c_char;
                     p = s.as_ptr();
                     pc = L_DOTAIL2;
                 } else {
-                    n = (*n).nfile.fname;
+                    n = cur.nfile().fname.as_deref();
                     pc = L_DONODE;
                 }
             }
@@ -1814,18 +1822,15 @@ unsafe fn cmdtxt(n: *mut Node) {
 
 // [spec:dash:def:jobs.cmdlist-fn]
 // [spec:dash:sem:jobs.cmdlist-fn]
-unsafe fn cmdlist(np: *mut Node, sep: c_int) {
-    let mut np: *mut Node = np;
-
-    while !np.is_null() {
+unsafe fn cmdlist(np: &[Node], sep: c_int) {
+    for (i, node) in np.iter().enumerate() {
         if sep == 0 {
-            cmdputs((core::ptr::addr_of!(crate::mystring::spcstr) as *const c_char));
+            cmdputs(core::ptr::addr_of!(crate::mystring::spcstr) as *const c_char);
         }
-        cmdtxt(np);
-        if sep != 0 && !(*np).narg.next.is_null() {
-            cmdputs((core::ptr::addr_of!(crate::mystring::spcstr) as *const c_char));
+        cmdtxt(Some(node));
+        if sep != 0 && i + 1 < np.len() {
+            cmdputs(core::ptr::addr_of!(crate::mystring::spcstr) as *const c_char);
         }
-        np = (*np).narg.next;
     }
 }
 

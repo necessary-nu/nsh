@@ -8,9 +8,11 @@
 //! `parsesub`, `parsebackq`, `parsearith`) are reached by `goto` in C and
 //! are plain functions taking the shared state by `&mut` here.
 
+use core::cell::{Cell, OnceCell, RefCell};
 use core::mem;
 use core::ptr;
 use core::ptr::addr_of_mut;
+use std::rc::Rc;
 
 use libc::{c_char, c_int, c_uint, c_void};
 
@@ -20,13 +22,12 @@ use crate::input::{
     pgetc, pgetc_eoa, popfile, pungetc, pungetn, pushstring, setinputstring, unwindfiles,
     whichprompt, PEOA,
 };
-use crate::memalloc::{grabstackblock, popstackmark, pushstackmark, stackmark, stalloc, stnputs};
+use crate::memalloc::{grabstackblock, popstackmark, pushstackmark, stackmark, stnputs};
 use crate::output::{fmtstr, VaArg};
 use crate::nodes::{
-    narg, nbinary, ncase, nclist, ncmd, nfile, nfor, nhere, nif, nnot, node, nodelist, npipe,
-    nredir, NAND, NAPPEND, NARG, NBACKGND, NCASE, NCLIST, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM,
-    NFROMFD, NFROMTO, NHERE, NIF, NNOT, NOR, NPIPE, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD,
-    NUNTIL, NWHILE, NXHERE,
+    heredoc_body, narg, nbinary, ncase, nclist, ncmd, ndefun, ndup, nfile, nfor, nhere, nif,
+    nnot, npipe, nredir, Node, NodeText, NAND, NAPPEND, NBACKGND, NCLOBBER, NCMD, NFROM, NFROMFD,
+    NFROMTO, NHERE, NOR, NPIPE, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE, NXHERE,
 };
 use crate::syntax::{
     digit_val, is_digit, is_in_name, is_name, is_special, syntax_at, Syntax, CBACK, CBQUOTE,
@@ -238,9 +239,28 @@ pub const CHKKWD: c_int = 0x2;
 pub const CHKNL: c_int = 0x4;
 pub const CHKEOFMARK: c_int = 0x8;
 
-/// `#define NEOF ((union node *)&tokpushback)`
-pub unsafe fn NEOF() -> *mut node {
-    addr_of_mut!(tokpushback) as *mut node
+/// What the C returns from `list()` and `parsecmd`.
+///
+/// `union node *` is three things there at once: a tree, `NULL` for a blank
+/// line, and the sentinel `#define NEOF ((union node *)&tokpushback)` for end
+/// of file. Only `list(1)` — that is, `parsecmd` — can produce `NEOF`,
+/// because the `n1 = NEOF` assignment is guarded by `chknl == 0` and `chknl`
+/// is only zero when `nlflag & 1`.
+pub enum ParseResult {
+    /// the C's `NEOF`
+    Eof,
+    /// a tree, or `None` where the C returned `NULL` for a blank line
+    Tree(Option<Node>),
+}
+
+impl ParseResult {
+    /// The tree, for the callers of `list()` that cannot see `NEOF`.
+    fn into_node(self) -> Option<Node> {
+        match self {
+            ParseResult::Tree(n) => n,
+            ParseResult::Eof => None,
+        }
+    }
 }
 
 /// Used by expandstr to get here-doc like behaviour:
@@ -252,10 +272,17 @@ fn FAKEEOFMARK() -> *mut c_char {
 // ---------------------------------------------------------------------
 
 // [spec:dash:def:parser.heredoc]
-#[repr(C)]
+/// The C carries `union node *here`, a back pointer to the redirection node,
+/// and reads `here->type` in `parseheredoc` to decide whether the body is
+/// expanded. Owning the tree makes that pointer impossible, so what travels
+/// is the shared body slot (`nodes::heredoc_body`) plus the one bit of the
+/// node's type `parseheredoc` actually wanted. `parsefname` settles the type
+/// immediately before appending, so the bit is final when it is recorded.
 pub struct heredoc {
-    pub next: *mut heredoc,   /* next here document in list */
-    pub here: *mut node,      /* redirection node */
+    /// the slot in the redirection node the body lands in
+    pub doc: heredoc_body,
+    /// the node is `NXHERE`: read the body with `DQSYNTAX`, not `SQSYNTAX`
+    pub expand: bool,
     pub eofmark: *mut c_char, /* string indicating end of input */
     pub striptabs: c_int,     /* if set, strip leading tabs */
 }
@@ -275,17 +302,36 @@ pub struct synstack {
     pub dqvarnest: c_int,  /* levels of variables expansion within double quotes */
 }
 
-pub static mut heredoclist: *mut heredoc = ptr::null_mut(); /* list of here documents to read */
+pub static mut heredoclist: Vec<heredoc> = Vec::new(); /* list of here documents to read */
 pub static mut doprompt: c_int = 0; /* if set, prompt the user */
 pub static mut needprompt: c_int = 0; /* true if interactive and at start of line */
 pub static mut lasttoken: c_int = 0; /* last token read */
 pub static mut tokpushback: c_int = 0; /* last token pushed back */
 pub static mut wordtext: *mut c_char = ptr::null_mut(); /* text of last word */
 pub static mut checkkwd: c_int = 0;
-pub static mut backquotelist: *mut nodelist = ptr::null_mut();
-pub static mut redirnode: *mut node = ptr::null_mut();
-pub static mut heredoc: *mut heredoc = ptr::null_mut();
+pub static mut backquotelist: Vec<Option<Node>> = Vec::new();
+pub static mut redirnode: Option<Node> = None;
+pub static mut heredoc: Option<heredoc> = None;
 pub static mut quoteflag: c_int = 0; /* set if (part of) last token was quoted */
+
+/// Move one of the parser's globals out and leave it empty.
+///
+/// Four of them hand a value to whoever reads next and are not read again
+/// until the next token refills them, which in C is a pointer copy and here
+/// has to be a move:
+///
+///   * `backquotelist` — `n->narg.backquote = backquotelist`, aliased into
+///     the node just built; the next `readtoken1` overwrites the global.
+///   * `heredoclist` — `save = heredoclist; heredoclist = NULL;`.
+///   * `redirnode` — copied into a local at the top of `parsefname`, because
+///     the token read inside it can set the global again.
+///   * `heredoc` — the pending here-document `parseredir` left behind.
+///
+/// Raw rather than `mem::take` so that no `&mut` to a `static mut` exists,
+/// even momentarily.
+unsafe fn takeglobal<T: Default>(p: *mut T) -> T {
+    ptr::replace(p, T::default())
+}
 
 // [spec:dash:def:parser.isassignment-fn]
 // [spec:dash:sem:parser.isassignment-fn]
@@ -299,11 +345,14 @@ pub unsafe fn isassignment(p: *const c_char) -> c_int {
 
 // [spec:dash:def:parser.issimplecmd-fn]
 // [spec:dash:sem:parser.issimplecmd-fn]
-pub unsafe fn issimplecmd(n: *mut node, name: *const c_char) -> c_int {
-    (!n.is_null()
-        && (*n).r#type == NCMD
-        && !(*n).ncmd.args.is_null()
-        && equal!((*(*n).ncmd.args).narg.text, name)) as c_int
+pub unsafe fn issimplecmd(n: Option<&Node>, name: *const c_char) -> c_int {
+    match n {
+        Some(n) if n.node_type() == NCMD => {
+            let args = &n.ncmd().args;
+            (!args.is_empty() && equal!(args[0].narg().text.as_ptr(), name)) as c_int
+        }
+        _ => 0,
+    }
 }
 
 // [spec:dash:def:parser.realeofmark-fn]
@@ -319,10 +368,10 @@ unsafe fn realeofmark(eofmark: *const c_char) -> c_int {
 
 // [spec:dash:def:parser.parsecmd-fn]
 // [spec:dash:sem:parser.parsecmd-fn]
-pub unsafe fn parsecmd(interact: c_int) -> *mut node {
+pub unsafe fn parsecmd(interact: c_int) -> ParseResult {
     tokpushback = 0;
     checkkwd = 0;
-    heredoclist = ptr::null_mut();
+    heredoclist = Vec::new();
     doprompt = interact;
     if doprompt != 0 {
         setprompt(doprompt);
@@ -333,65 +382,76 @@ pub unsafe fn parsecmd(interact: c_int) -> *mut node {
 
 // [spec:dash:def:parser.list-fn]
 // [spec:dash:sem:parser.list-fn]
-unsafe fn list(nlflag: c_int) -> *mut node {
+unsafe fn list(nlflag: c_int) -> ParseResult {
     let mut nlflag = nlflag;
     let chknl = if nlflag & 1 != 0 { 0 } else { CHKNL };
-    let mut n1: *mut node;
-    let mut n2: *mut node;
+    let mut n1: Option<Node>;
+    let mut n2: Option<Node>;
     let mut tok: c_int;
 
-    n1 = ptr::null_mut();
+    n1 = None;
     loop {
         checkkwd = chknl | CHKKWD | CHKALIAS;
         tok = readtoken();
         match tok {
             TNL => {
                 parseheredoc();
-                return n1;
+                return ParseResult::Tree(n1);
             }
 
             TEOF => {
-                if n1.is_null() && chknl == 0 {
-                    n1 = NEOF();
-                }
+                let eof = n1.is_none() && chknl == 0;
                 /* out_eof: */
                 parseheredoc();
                 tokpushback += 1;
                 lasttoken = TEOF;
-                return n1;
+                return if eof {
+                    ParseResult::Eof
+                } else {
+                    ParseResult::Tree(n1)
+                };
             }
             _ => {}
         }
 
         tokpushback += 1;
         if nlflag == 2 && tokendlist[tok as usize] != 0 {
-            return n1;
+            return ParseResult::Tree(n1);
         }
         nlflag |= 2;
 
         n2 = andor();
         tok = readtoken();
         if tok == TBACKGND {
-            if (*n2).r#type == NPIPE {
-                (*n2).npipe.backgnd = 1;
+            /* The C dereferences n2 unconditionally here. */
+            if n2.as_ref().unwrap().node_type() == NPIPE {
+                n2.as_mut().unwrap().npipe_mut().backgnd = 1;
             } else {
-                if (*n2).r#type != NREDIR {
-                    let n3 = stalloc(mem::size_of::<nredir>()) as *mut node;
-                    (*n3).nredir.n = n2;
-                    (*n3).nredir.redirect = ptr::null_mut();
-                    n2 = n3;
+                if n2.as_ref().unwrap().node_type() != NREDIR {
+                    /* The C leaves this wrapper's `linno` unwritten — it is
+                     * whatever `stalloc` handed back.  `evalsubshell` copies
+                     * it into `lineno`, but every path from there either
+                     * forks and immediately re-sets it from the command
+                     * inside, or is a fork failure.  Zero, being a value,
+                     * is the closest an owned node gets. */
+                    n2 = Some(Node::Redir(nredir {
+                        r#type: 0,
+                        linno: 0,
+                        n: n2.map(Box::new),
+                        redirect: Vec::new(),
+                    }));
                 }
-                (*n2).r#type = NBACKGND;
+                n2.as_mut().unwrap().nredir_mut().r#type = NBACKGND;
             }
         }
-        if n1.is_null() {
+        if n1.is_none() {
             n1 = n2;
         } else {
-            let n3 = stalloc(mem::size_of::<nbinary>()) as *mut node;
-            (*n3).r#type = NSEMI;
-            (*n3).nbinary.ch1 = n1;
-            (*n3).nbinary.ch2 = n2;
-            n1 = n3;
+            n1 = Some(Node::Binary(nbinary {
+                r#type: NSEMI,
+                ch1: n1.map(Box::new),
+                ch2: n2.map(Box::new),
+            }));
         }
         match tok {
             TEOF => {
@@ -399,7 +459,7 @@ unsafe fn list(nlflag: c_int) -> *mut node {
                 parseheredoc();
                 tokpushback += 1;
                 lasttoken = TEOF;
-                return n1;
+                return ParseResult::Tree(n1);
             }
             TNL => {
                 tokpushback += 1;
@@ -411,7 +471,7 @@ unsafe fn list(nlflag: c_int) -> *mut node {
                     synexpect(-1);
                 }
                 tokpushback += 1;
-                return n1;
+                return ParseResult::Tree(n1);
             }
         }
     }
@@ -419,8 +479,8 @@ unsafe fn list(nlflag: c_int) -> *mut node {
 
 // [spec:dash:def:parser.andor-fn]
 // [spec:dash:sem:parser.andor-fn]
-unsafe fn andor() -> *mut node {
-    let mut n1: *mut node;
+unsafe fn andor() -> Option<Node> {
+    let mut n1: Option<Node>;
     let mut t: c_int;
 
     n1 = pipeline();
@@ -436,22 +496,18 @@ unsafe fn andor() -> *mut node {
         }
         checkkwd = CHKNL | CHKKWD | CHKALIAS;
         let n2 = pipeline();
-        let n3 = stalloc(mem::size_of::<nbinary>()) as *mut node;
-        (*n3).r#type = t;
-        (*n3).nbinary.ch1 = n1;
-        (*n3).nbinary.ch2 = n2;
-        n1 = n3;
+        n1 = Some(Node::Binary(nbinary {
+            r#type: t,
+            ch1: n1.map(Box::new),
+            ch2: n2.map(Box::new),
+        }));
     }
 }
 
 // [spec:dash:def:parser.pipeline-fn]
 // [spec:dash:sem:parser.pipeline-fn]
-unsafe fn pipeline() -> *mut node {
-    let mut n1: *mut node;
-    let n2: *mut node;
-    let pipenode: *mut node;
-    let mut lp: *mut nodelist;
-    let mut prev: *mut nodelist;
+unsafe fn pipeline() -> Option<Node> {
+    let mut n1: Option<Node>;
     let mut negate: c_int;
 
     negate = 0;
@@ -464,31 +520,27 @@ unsafe fn pipeline() -> *mut node {
     }
     n1 = command();
     if readtoken() == TPIPE {
-        pipenode = stalloc(mem::size_of::<npipe>()) as *mut node;
-        (*pipenode).r#type = NPIPE;
-        (*pipenode).npipe.backgnd = 0;
-        lp = stalloc(mem::size_of::<nodelist>()) as *mut nodelist;
-        (*pipenode).npipe.cmdlist = lp;
-        (*lp).n = n1;
+        /* Every `stalloc(sizeof(struct nodelist))` the C does here is one
+         * `Vec` slot; the list is built front to back either way, and
+         * `command()` cannot return NULL without having raised first. */
+        let mut cmdlist: Vec<Node> = vec![n1.take().unwrap()];
         loop {
-            prev = lp;
-            lp = stalloc(mem::size_of::<nodelist>()) as *mut nodelist;
             checkkwd = CHKNL | CHKKWD | CHKALIAS;
-            (*lp).n = command();
-            (*prev).next = lp;
+            cmdlist.push(command().unwrap());
             if readtoken() != TPIPE {
                 break;
             }
         }
-        (*lp).next = ptr::null_mut();
-        n1 = pipenode;
+        n1 = Some(Node::Pipe(npipe {
+            backgnd: 0,
+            cmdlist,
+        }));
     }
     tokpushback += 1;
     if negate != 0 {
-        n2 = stalloc(mem::size_of::<nnot>()) as *mut node;
-        (*n2).r#type = NNOT;
-        (*n2).nnot.com = n1;
-        n2
+        Some(Node::Not(nnot {
+            com: n1.map(Box::new),
+        }))
     } else {
         n1
     }
@@ -496,95 +548,93 @@ unsafe fn pipeline() -> *mut node {
 
 // [spec:dash:def:parser.command-fn]
 // [spec:dash:sem:parser.command-fn]
-unsafe fn command() -> *mut node {
-    let mut n1: *mut node;
-    let mut n2: *mut node;
-    let mut ap: *mut node = ptr::null_mut();
-    let mut app: *mut *mut node;
-    let mut cp: *mut node;
-    let mut cpp: *mut *mut node;
-    let mut redir: *mut node;
-    let mut rpp: *mut *mut node;
-    let rpp2: *mut *mut node;
+unsafe fn command() -> Option<Node> {
+    let mut n1: Option<Node>;
     let mut t: c_int;
     let savelinno: c_int;
-
-    redir = ptr::null_mut();
-    rpp2 = &mut redir as *mut *mut node;
 
     savelinno = crate::plinno!();
 
     let mut goto_redir = false;
     let tok = readtoken();
     if tok == TIF {
-        n1 = stalloc(mem::size_of::<nif>()) as *mut node;
-        (*n1).r#type = NIF;
-        (*n1).nif.test = list(0);
+        /* The C threads the elif chain through `elsepart` on the way down,
+         * writing each new nif into its parent before parsing it.  An owned
+         * tree cannot hand out that parent pointer, so the clauses are
+         * collected in parse order and folded back up afterwards; the
+         * sequence of `list(0)` calls — and so of everything they read — is
+         * unchanged. */
+        let mut clauses: Vec<(Option<Node>, Option<Node>)> = Vec::new();
+        let test = list(0).into_node();
         if readtoken() != TTHEN {
             synexpect(TTHEN);
         }
-        (*n1).nif.ifpart = list(0);
-        n2 = n1;
+        let ifpart = list(0).into_node();
+        clauses.push((test, ifpart));
         while readtoken() == TELIF {
-            (*n2).nif.elsepart = stalloc(mem::size_of::<nif>()) as *mut node;
-            n2 = (*n2).nif.elsepart;
-            (*n2).r#type = NIF;
-            (*n2).nif.test = list(0);
+            let test = list(0).into_node();
             if readtoken() != TTHEN {
                 synexpect(TTHEN);
             }
-            (*n2).nif.ifpart = list(0);
+            let ifpart = list(0).into_node();
+            clauses.push((test, ifpart));
         }
-        if lasttoken == TELSE {
-            (*n2).nif.elsepart = list(0);
+        let mut elsepart: Option<Node> = if lasttoken == TELSE {
+            list(0).into_node()
         } else {
-            (*n2).nif.elsepart = ptr::null_mut();
             tokpushback += 1;
+            None
+        };
+        for (test, ifpart) in clauses.into_iter().rev() {
+            elsepart = Some(Node::If(nif {
+                test: test.map(Box::new),
+                ifpart: ifpart.map(Box::new),
+                elsepart: elsepart.map(Box::new),
+            }));
         }
+        n1 = elsepart;
         t = TFI;
     } else if tok == TWHILE || tok == TUNTIL {
         let got: c_int;
-        n1 = stalloc(mem::size_of::<nbinary>()) as *mut node;
-        (*n1).r#type = if lasttoken == TWHILE { NWHILE } else { NUNTIL };
-        (*n1).nbinary.ch1 = list(0);
+        let ty = if lasttoken == TWHILE { NWHILE } else { NUNTIL };
+        let ch1 = list(0).into_node();
         got = readtoken();
         if got != TDO {
             synexpect(TDO);
         }
-        (*n1).nbinary.ch2 = list(0);
+        let ch2 = list(0).into_node();
+        n1 = Some(Node::Binary(nbinary {
+            r#type: ty,
+            ch1: ch1.map(Box::new),
+            ch2: ch2.map(Box::new),
+        }));
         t = TDONE;
     } else if tok == TFOR {
         if readtoken() != TWORD || quoteflag != 0 || goodname(wordtext) == 0 {
             synerror(c"Bad for loop variable".as_ptr());
         }
-        n1 = stalloc(mem::size_of::<nfor>()) as *mut node;
-        (*n1).r#type = NFOR;
-        (*n1).nfor.linno = savelinno;
-        (*n1).nfor.var = wordtext;
+        /* the C stores `wordtext` into the node here, before any further
+         * token read can overwrite it */
+        let var = NodeText::Borrowed(wordtext);
+        let mut args: Vec<Node> = Vec::new();
         checkkwd = CHKNL | CHKKWD | CHKALIAS;
         if readtoken() == TIN {
-            app = &mut ap as *mut *mut node;
             while readtoken() == TWORD {
-                n2 = stalloc(mem::size_of::<narg>()) as *mut node;
-                (*n2).r#type = NARG;
-                (*n2).narg.text = wordtext;
-                (*n2).narg.backquote = backquotelist;
-                *app = n2;
-                app = addr_of_mut!((*n2).narg.next);
+                args.push(Node::Arg(narg {
+                    text: NodeText::Borrowed(wordtext),
+                    backquote: takeglobal(addr_of_mut!(backquotelist)),
+                }));
             }
-            *app = ptr::null_mut();
-            (*n1).nfor.args = ap;
             if lasttoken != TNL && lasttoken != TSEMI {
                 synexpect(-1);
             }
         } else {
-            n2 = stalloc(mem::size_of::<narg>()) as *mut node;
-            (*n2).r#type = NARG;
-            (*n2).narg.text =
-                ptr::addr_of!(crate::mystring::dolatstr) as *const c_char as *mut c_char;
-            (*n2).narg.backquote = ptr::null_mut();
-            (*n2).narg.next = ptr::null_mut();
-            (*n1).nfor.args = n2;
+            args.push(Node::Arg(narg {
+                text: NodeText::Borrowed(
+                    ptr::addr_of!(crate::mystring::dolatstr) as *const c_char as *mut c_char,
+                ),
+                backquote: Vec::new(),
+            }));
             /*
              * Newline or semicolon here is optional (but note
              * that the original Bourne shell only allowed NL).
@@ -597,26 +647,27 @@ unsafe fn command() -> *mut node {
         if readtoken() != TDO {
             synexpect(TDO);
         }
-        (*n1).nfor.body = list(0);
+        let body = list(0).into_node();
+        n1 = Some(Node::For(nfor {
+            linno: savelinno,
+            args,
+            body: body.map(Box::new),
+            var,
+        }));
         t = TDONE;
     } else if tok == TCASE {
-        n1 = stalloc(mem::size_of::<ncase>()) as *mut node;
-        (*n1).r#type = NCASE;
-        (*n1).ncase.linno = savelinno;
         if readtoken() != TWORD {
             synexpect(TWORD);
         }
-        n2 = stalloc(mem::size_of::<narg>()) as *mut node;
-        (*n1).ncase.expr = n2;
-        (*n2).r#type = NARG;
-        (*n2).narg.text = wordtext;
-        (*n2).narg.backquote = backquotelist;
-        (*n2).narg.next = ptr::null_mut();
+        let expr = Node::Arg(narg {
+            text: NodeText::Borrowed(wordtext),
+            backquote: takeglobal(addr_of_mut!(backquotelist)),
+        });
         checkkwd = CHKNL | CHKKWD | CHKALIAS;
         if readtoken() != TIN {
             synexpect(TIN);
         }
-        cpp = addr_of_mut!((*n1).ncase.cases);
+        let mut cases: Vec<Node> = Vec::new();
         'next_case: loop {
             checkkwd = CHKNL | CHKKWD;
             t = readtoken();
@@ -624,32 +675,28 @@ unsafe fn command() -> *mut node {
                 if lasttoken == TLP {
                     readtoken();
                 }
-                cp = stalloc(mem::size_of::<nclist>()) as *mut node;
-                *cpp = cp;
-                (*cp).r#type = NCLIST;
-                app = addr_of_mut!((*cp).nclist.pattern);
+                let mut pattern: Vec<Node> = Vec::new();
                 loop {
                     if lasttoken < TWORD {
                         synexpect(TWORD);
                     }
-                    ap = stalloc(mem::size_of::<narg>()) as *mut node;
-                    *app = ap;
-                    (*ap).r#type = NARG;
-                    (*ap).narg.text = wordtext;
-                    (*ap).narg.backquote = backquotelist;
+                    pattern.push(Node::Arg(narg {
+                        text: NodeText::Borrowed(wordtext),
+                        backquote: takeglobal(addr_of_mut!(backquotelist)),
+                    }));
                     if readtoken() != TPIPE {
                         break;
                     }
-                    app = addr_of_mut!((*ap).narg.next);
                     readtoken();
                 }
-                (*ap).narg.next = ptr::null_mut();
                 if lasttoken != TRP {
                     synexpect(TRP);
                 }
-                (*cp).nclist.body = list(2);
-
-                cpp = addr_of_mut!((*cp).nclist.next);
+                let body = list(2).into_node();
+                cases.push(Node::Clist(nclist {
+                    pattern,
+                    body: body.map(Box::new),
+                }));
 
                 checkkwd = CHKNL | CHKKWD;
                 t = readtoken();
@@ -663,17 +710,23 @@ unsafe fn command() -> *mut node {
             }
             break;
         }
-        *cpp = ptr::null_mut();
+        n1 = Some(Node::Case(ncase {
+            linno: savelinno,
+            expr: Some(Box::new(expr)),
+            cases,
+        }));
         goto_redir = true;
     } else if tok == TLP {
-        n1 = stalloc(mem::size_of::<nredir>()) as *mut node;
-        (*n1).r#type = NSUBSHELL;
-        (*n1).nredir.linno = savelinno;
-        (*n1).nredir.n = list(0);
-        (*n1).nredir.redirect = ptr::null_mut();
+        let inner = list(0).into_node();
+        n1 = Some(Node::Redir(nredir {
+            r#type: NSUBSHELL,
+            linno: savelinno,
+            n: inner.map(Box::new),
+            redirect: Vec::new(),
+        }));
         t = TRP;
     } else if tok == TBEGIN {
-        n1 = list(0);
+        n1 = list(0).into_node();
         t = TEND;
     } else if tok == TWORD || tok == TREDIR {
         tokpushback += 1;
@@ -692,24 +745,26 @@ unsafe fn command() -> *mut node {
     /* redir: */
     /* Now check for redirection which may follow command */
     checkkwd = CHKKWD | CHKALIAS;
-    rpp = rpp2;
+    let mut redir: Vec<Node> = Vec::new();
     while readtoken() == TREDIR {
-        n2 = redirnode;
-        *rpp = n2;
-        rpp = addr_of_mut!((*n2).nfile.next);
-        parsefname();
+        /* The C copies `redirnode` into a local *before* `parsefname`,
+         * because the token read inside it can set the global again.
+         * Taking ownership of it here is the same guarantee. */
+        let mut n2 = takeglobal(addr_of_mut!(redirnode)).unwrap();
+        parsefname(&mut n2);
+        redir.push(n2);
     }
     tokpushback += 1;
-    *rpp = ptr::null_mut();
-    if !redir.is_null() {
-        if (*n1).r#type != NSUBSHELL {
-            n2 = stalloc(mem::size_of::<nredir>()) as *mut node;
-            (*n2).r#type = NREDIR;
-            (*n2).nredir.linno = savelinno;
-            (*n2).nredir.n = n1;
-            n1 = n2;
+    if !redir.is_empty() {
+        if n1.as_ref().map_or(true, |n| n.node_type() != NSUBSHELL) {
+            n1 = Some(Node::Redir(nredir {
+                r#type: NREDIR,
+                linno: savelinno,
+                n: n1.map(Box::new),
+                redirect: Vec::new(),
+            }));
         }
-        (*n1).nredir.redirect = redir;
+        n1.as_mut().unwrap().nredir_mut().redirect = redir;
     }
 
     n1
@@ -717,23 +772,12 @@ unsafe fn command() -> *mut node {
 
 // [spec:dash:def:parser.simplecmd-fn]
 // [spec:dash:sem:parser.simplecmd-fn]
-unsafe fn simplecmd() -> *mut node {
-    let mut args: *mut node;
-    let mut app: *mut *mut node;
-    let mut n: *mut node = ptr::null_mut();
-    let mut vars: *mut node;
-    let mut vpp: *mut *mut node;
-    let mut rpp: *mut *mut node;
-    let mut redir: *mut node;
+unsafe fn simplecmd() -> Option<Node> {
+    let mut args: Vec<Node> = Vec::new();
+    let mut vars: Vec<Node> = Vec::new();
+    let mut redir: Vec<Node> = Vec::new();
     let mut savecheckkwd: c_int;
     let savelinno: c_int;
-
-    args = ptr::null_mut();
-    app = &mut args as *mut *mut node;
-    vars = ptr::null_mut();
-    vpp = &mut vars as *mut *mut node;
-    redir = ptr::null_mut();
-    rpp = &mut redir as *mut *mut node;
 
     savecheckkwd = CHKALIAS;
     savelinno = crate::plinno!();
@@ -741,30 +785,24 @@ unsafe fn simplecmd() -> *mut node {
         checkkwd = savecheckkwd;
         let tok = readtoken();
         if tok == TWORD {
-            n = stalloc(mem::size_of::<narg>()) as *mut node;
-            (*n).r#type = NARG;
-            (*n).narg.text = wordtext;
-            (*n).narg.backquote = backquotelist;
+            let n = Node::Arg(narg {
+                text: NodeText::Borrowed(wordtext),
+                backquote: takeglobal(addr_of_mut!(backquotelist)),
+            });
             if savecheckkwd != 0 && isassignment(wordtext) != 0 {
-                *vpp = n;
-                vpp = addr_of_mut!((*n).narg.next);
+                vars.push(n);
             } else {
-                *app = n;
-                app = addr_of_mut!((*n).narg.next);
+                args.push(n);
                 savecheckkwd = 0;
             }
         } else if tok == TREDIR {
-            n = redirnode;
-            *rpp = n;
-            rpp = addr_of_mut!((*n).nfile.next);
-            parsefname(); /* read name of redirection file */
+            let mut n = takeglobal(addr_of_mut!(redirnode)).unwrap();
+            parsefname(&mut n); /* read name of redirection file */
+            redir.push(n);
         } else {
-            if tok == TLP
-                && !args.is_null()
-                && app == addr_of_mut!((*args).narg.next)
-                && vars.is_null()
-                && redir.is_null()
-            {
+            /* The C's `app == &args->narg.next` says the argument list holds
+             * exactly one word, which is the name being defined. */
+            if tok == TLP && args.len() == 1 && vars.is_empty() && redir.is_empty() {
                 let bcmd: *const crate::builtins::builtincmd;
                 let name: *const c_char;
 
@@ -772,7 +810,10 @@ unsafe fn simplecmd() -> *mut node {
                 if readtoken() != TRP {
                     synexpect(TRP);
                 }
-                name = (*n).narg.text;
+                /* the word becomes the function's name; the C keeps the same
+                 * `char *` when it relabels the node */
+                let word: narg = args.pop().unwrap().into_narg();
+                name = word.text.as_ptr();
                 bcmd = crate::exec::find_builtin(name);
                 if goodname(name) == 0
                     || (!bcmd.is_null()
@@ -780,12 +821,18 @@ unsafe fn simplecmd() -> *mut node {
                 {
                     synerror(c"Bad function name".as_ptr());
                 }
-                (*n).r#type = NDEFUN;
+                /* The C relabels the NARG node NDEFUN in place: a union
+                 * type-pun that copies `narg.text` (offset 16) into
+                 * `ndefun.text` (offset 8) and overwrites the rest.  The
+                 * NARG's backquote list is dropped either way. */
                 checkkwd = CHKNL | CHKKWD | CHKALIAS;
-                (*n).ndefun.text = (*n).narg.text;
-                (*n).ndefun.linno = crate::plinno!();
-                (*n).ndefun.body = command();
-                return n;
+                let linno = crate::plinno!();
+                let body = command();
+                return Some(Node::Defun(ndefun {
+                    linno,
+                    text: word.text,
+                    body: body.map(Box::new),
+                }));
             }
             /* fall through */
             /* default: */
@@ -794,88 +841,82 @@ unsafe fn simplecmd() -> *mut node {
         }
     }
     /* out: */
-    *app = ptr::null_mut();
-    *vpp = ptr::null_mut();
-    *rpp = ptr::null_mut();
-    n = stalloc(mem::size_of::<ncmd>()) as *mut node;
-    (*n).r#type = NCMD;
-    (*n).ncmd.linno = savelinno;
-    (*n).ncmd.args = args;
-    (*n).ncmd.assign = vars;
-    (*n).ncmd.redirect = redir;
-    n
+    Some(Node::Cmd(ncmd {
+        linno: savelinno,
+        assign: vars,
+        args,
+        redirect: redir,
+    }))
 }
 
 // [spec:dash:def:parser.makename-fn]
 // [spec:dash:sem:parser.makename-fn]
-unsafe fn makename() -> *mut node {
-    let n: *mut node;
-
-    n = stalloc(mem::size_of::<narg>()) as *mut node;
-    (*n).r#type = NARG;
-    (*n).narg.next = ptr::null_mut();
-    (*n).narg.text = wordtext;
-    (*n).narg.backquote = backquotelist;
-    n
+unsafe fn makename() -> Node {
+    Node::Arg(narg {
+        text: NodeText::Borrowed(wordtext),
+        backquote: takeglobal(addr_of_mut!(backquotelist)),
+    })
 }
 
 // [spec:dash:def:parser.fixredir-fn]
 // [spec:dash:sem:parser.fixredir-fn]
-pub unsafe fn fixredir(n: *mut node, text: *const c_char, err: c_int) {
+//
+// Called twice with different owners: from `parsefname` while the node is
+// still being built (`err == 0`), and from `expredir` on a tree that may be a
+// shared function definition (`err != 0`).  Only the second writes at run
+// time, and it only writes `dupfd`, which is why that field is the `Cell`.
+pub unsafe fn fixredir(n: &Node, text: *const c_char, err: c_int) {
     /* TRACE(("Fix redir %s %d\n", text, err)); */
+    let d = n.ndup();
     if err == 0 {
-        (*n).ndup.vname = ptr::null_mut();
+        *d.vname.borrow_mut() = None;
     }
 
     if is_digit(*text.offset(0) as c_int) && *text.offset(1) == 0 {
-        (*n).ndup.dupfd = digit_val(*text.offset(0) as c_int);
+        d.dupfd.set(digit_val(*text.offset(0) as c_int));
     } else if *text.offset(0) == '-' as c_char && *text.offset(1) == 0 {
-        (*n).ndup.dupfd = -1;
+        d.dupfd.set(-1);
     } else {
         if err != 0 {
             crate::error::sh_error(c"Bad fd number: %s".as_ptr(), &[VaArg::Str(text)]);
         } else {
-            (*n).ndup.vname = makename();
+            *d.vname.borrow_mut() = Some(Box::new(makename()));
         }
     }
 }
 
 // [spec:dash:def:parser.parsefname-fn]
 // [spec:dash:sem:parser.parsefname-fn]
-unsafe fn parsefname() {
-    let n: *mut node = redirnode;
-
-    if (*n).r#type == NHERE {
+//
+// The C reads the redirection node out of the `redirnode` global; here the
+// caller has already taken ownership of it, because the `readtoken` below can
+// set that global again before this function is done with it.
+unsafe fn parsefname(n: &mut Node) {
+    if n.node_type() == NHERE {
         checkkwd |= CHKEOFMARK;
     }
     if readtoken() != TWORD {
         synexpect(-1);
     }
     checkkwd &= !CHKEOFMARK;
-    if (*n).r#type == NHERE {
-        let here: *mut heredoc = heredoc;
-        let mut p: *mut heredoc;
+    if n.node_type() == NHERE {
+        /* the C reads the `heredoc` global here, after the token read */
+        let mut here: heredoc = takeglobal(addr_of_mut!(heredoc)).unwrap();
 
         if quoteflag == 0 {
-            (*n).r#type = NXHERE;
+            n.nhere_mut().r#type = NXHERE;
         }
         /* TRACE(("Here document %d\n", n->type)); */
         rmescapes(wordtext);
-        (*here).eofmark = wordtext;
-        (*here).next = ptr::null_mut();
-        if heredoclist.is_null() {
-            heredoclist = here;
-        } else {
-            p = heredoclist;
-            while !(*p).next.is_null() {
-                p = (*p).next;
-            }
-            (*p).next = here;
-        }
-    } else if (*n).r#type == NTOFD || (*n).r#type == NFROMFD {
+        here.eofmark = wordtext;
+        /* `parseheredoc` asked the node whether it was NXHERE; the type is
+         * settled above, so the answer travels with the here-document. */
+        here.expand = n.nhere().r#type == NXHERE;
+        (&mut *addr_of_mut!(heredoclist)).push(here);
+    } else if n.node_type() == NTOFD || n.node_type() == NFROMFD {
         fixredir(n, wordtext, 0);
     } else {
-        (*n).nfile.fname = makename();
+        n.nfile_mut().fname = Some(Box::new(makename()));
     }
 }
 
@@ -886,32 +927,30 @@ unsafe fn parsefname() {
 // [spec:dash:def:parser.parseheredoc-fn]
 // [spec:dash:sem:parser.parseheredoc-fn]
 unsafe fn parseheredoc() {
-    let mut here: *mut heredoc;
+    let list: Vec<heredoc> = takeglobal(addr_of_mut!(heredoclist));
 
-    here = heredoclist;
-    heredoclist = ptr::null_mut();
-
-    while !here.is_null() {
+    for here in list {
         if needprompt != 0 {
             setprompt(2);
         }
-        if (*(*here).here).r#type == NHERE {
-            readtoken1(pgetc(), SQSYNTAX(), (*here).eofmark, (*here).striptabs);
+        if !here.expand {
+            readtoken1(pgetc(), SQSYNTAX(), here.eofmark, here.striptabs);
         } else {
             readtoken1(
                 pgetc_eatbnl(),
                 DQSYNTAX(),
-                (*here).eofmark,
-                (*here).striptabs,
+                here.eofmark,
+                here.striptabs,
             );
         }
-        let n = stalloc(mem::size_of::<narg>()) as *mut node;
-        (*n).narg.r#type = NARG;
-        (*n).narg.next = ptr::null_mut();
-        (*n).narg.text = wordtext;
-        (*n).narg.backquote = backquotelist;
-        (*(*here).here).nhere.doc = n;
-        here = (*here).next;
+        let n = Node::Arg(narg {
+            text: NodeText::Borrowed(wordtext),
+            backquote: takeglobal(addr_of_mut!(backquotelist)),
+        });
+        /* `here->here->nhere.doc = n` in the C — the same slot, reached
+         * through a shared handle instead of a back pointer.  It is written
+         * exactly once, so a second write cannot happen. */
+        let _ = here.doc.set(n);
     }
 }
 
@@ -1254,7 +1293,7 @@ struct Rt1 {
     synstack: *mut synstack,
     chkeofmark: c_int,
     printesc: bool,
-    bqlist: *mut nodelist,
+    bqlist: Vec<Option<Node>>,
     dollarsq: c_int,
     c: c_int,
     quotef: c_int,
@@ -1314,7 +1353,7 @@ unsafe fn readtoken1(
         synstack: &mut synbase as *mut synstack,
         chkeofmark: checkkwd & CHKEOFMARK,
         printesc: syntax == SQSYNTAX(),
-        bqlist: ptr::null_mut(),
+        bqlist: Vec::new(),
         dollarsq: 0,
         c: firstc,
         quotef: 0,
@@ -1580,7 +1619,7 @@ unsafe fn readtoken1(
         }
     }
     quoteflag = st.quotef;
-    backquotelist = st.bqlist;
+    backquotelist = mem::take(&mut st.bqlist);
     grabstackblock(len);
     wordtext = st.out;
     lasttoken = TWORD;
@@ -1671,55 +1710,81 @@ unsafe fn checkend(st: &mut Rt1) {
 
 /* parseredir: */
 unsafe fn parseredir(st: &mut Rt1) {
-    let fd: c_char = *st.out;
-    let mut np: *mut node;
+    let fdc: c_char = *st.out;
+    /* The C carves one `struct nfile` and then decides what it is by
+     * assigning `np->type`, re-allocating only because `nhere` is smaller.
+     * The arm has to be chosen up front here, so the type and the fd are
+     * worked out first and the node built at the end. */
+    let mut fd: c_int;
+    let ty: c_int;
+    let mut doc: Option<heredoc_body> = None;
 
-    np = stalloc(mem::size_of::<nfile>()) as *mut node;
     if st.c == '>' as c_int {
-        (*np).nfile.fd = 1;
+        fd = 1;
         st.c = pgetc_eatbnl();
         if st.c == '>' as c_int {
-            (*np).r#type = NAPPEND;
+            ty = NAPPEND;
         } else if st.c == '|' as c_int {
-            (*np).r#type = NCLOBBER;
+            ty = NCLOBBER;
         } else if st.c == '&' as c_int {
-            (*np).r#type = NTOFD;
+            ty = NTOFD;
         } else {
-            (*np).r#type = NTO;
+            ty = NTO;
             pungetc();
         }
     } else {
         /* c == '<' */
-        (*np).nfile.fd = 0;
+        fd = 0;
         st.c = pgetc_eatbnl();
         if st.c == '<' as c_int {
-            if mem::size_of::<nfile>() != mem::size_of::<nhere>() {
-                np = stalloc(mem::size_of::<nhere>()) as *mut node;
-                (*np).nfile.fd = 0;
-            }
-            (*np).r#type = NHERE;
-            heredoc = stalloc(mem::size_of::<heredoc>()) as *mut heredoc;
-            (*heredoc).here = np;
+            ty = NHERE;
+            let slot: heredoc_body = Rc::new(OnceCell::new());
+            let mut here = heredoc {
+                doc: Rc::clone(&slot),
+                expand: false,
+                eofmark: ptr::null_mut(),
+                striptabs: 0,
+            };
+            doc = Some(slot);
             st.c = pgetc_eatbnl();
             if st.c == '-' as c_int {
-                (*heredoc).striptabs = 1;
+                here.striptabs = 1;
             } else {
-                (*heredoc).striptabs = 0;
+                here.striptabs = 0;
                 pungetc();
             }
+            heredoc = Some(here);
         } else if st.c == '&' as c_int {
-            (*np).r#type = NFROMFD;
+            ty = NFROMFD;
         } else if st.c == '>' as c_int {
-            (*np).r#type = NFROMTO;
+            ty = NFROMTO;
         } else {
-            (*np).r#type = NFROM;
+            ty = NFROM;
             pungetc();
         }
     }
-    if fd != '\0' as c_char {
-        (*np).nfile.fd = digit_val(fd as c_int);
+    if fdc != '\0' as c_char {
+        fd = digit_val(fdc as c_int);
     }
-    redirnode = np;
+    redirnode = Some(match ty {
+        NTOFD | NFROMFD => Node::Dup(ndup {
+            r#type: ty,
+            fd,
+            dupfd: Cell::new(0),
+            vname: RefCell::new(None),
+        }),
+        NHERE => Node::Here(nhere {
+            r#type: NHERE,
+            fd,
+            doc: doc.unwrap(),
+        }),
+        _ => Node::File(nfile {
+            r#type: ty,
+            fd,
+            fname: None,
+            expfname: Cell::new(ptr::null_mut()),
+        }),
+    });
     /* goto parseredir_return; */
 }
 
@@ -1922,10 +1987,10 @@ unsafe fn parsesub(st: &mut Rt1) -> bool {
 /* parsebackq: */
 unsafe fn parsebackq(st: &mut Rt1, oldstyle: c_int) {
     let mut saveprompt: c_int = 0;
-    let saveheredoclist: *mut heredoc;
-    let mut nlpp: *mut *mut nodelist;
+    let saveheredoclist: Vec<heredoc>;
+    let nlpp: usize;
     let savelen: usize;
-    let n: *mut node;
+    let n: Option<Node>;
     let mut ml: c_uint;
     let pstr: *mut c_char;
     let str: *mut c_char;
@@ -1994,22 +2059,21 @@ unsafe fn parsebackq(st: &mut Rt1, oldstyle: c_int) {
         pstr = grabstackstr(pout);
         setinputstring(pstr);
     }
-    nlpp = &mut st.bqlist as *mut *mut nodelist;
-    while !(*nlpp).is_null() {
-        nlpp = addr_of_mut!((**nlpp).next);
-    }
-    *nlpp = stalloc(mem::size_of::<nodelist>()) as *mut nodelist;
-    (**nlpp).next = ptr::null_mut();
+    /* The C walks to the tail of `bqlist` and appends an empty cell, then
+     * fills its `n` after the recursive parse.  Reserving the slot first is
+     * the same order; nothing else can append to this list while `list(2)`
+     * runs, because `bqlist` is a local of *this* `readtoken1`. */
+    nlpp = st.bqlist.len();
+    st.bqlist.push(None);
 
-    saveheredoclist = heredoclist;
-    heredoclist = ptr::null_mut();
+    saveheredoclist = takeglobal(addr_of_mut!(heredoclist));
 
     if oldstyle != 0 {
         saveprompt = doprompt;
         doprompt = 0;
     }
 
-    n = list(2);
+    n = list(2).into_node();
 
     if oldstyle != 0 {
         doprompt = saveprompt;
@@ -2023,7 +2087,7 @@ unsafe fn parsebackq(st: &mut Rt1, oldstyle: c_int) {
     parseheredoc();
     heredoclist = saveheredoclist;
 
-    (**nlpp).n = n;
+    st.bqlist[nlpp] = n;
     /* Start reading from old file again. */
     popfile();
 
@@ -2152,11 +2216,10 @@ unsafe fn setprompt(which: c_int) {
 pub unsafe fn expandstr(ps: *const c_char) -> *const c_char {
     let file_stop: *mut crate::input::parsefile;
     let savehandler: *mut jmploc;
-    let saveheredoclist: *mut heredoc;
+    let saveheredoclist: Vec<heredoc>;
     let mut result: *const c_char;
     let saveprompt: c_int;
     let mut jmploc: crate::error::jmploc = crate::error::jmploc::new();
-    let mut n: node = mem::zeroed();
     let err: c_int;
 
     file_stop = crate::input::parsefile;
@@ -2164,8 +2227,7 @@ pub unsafe fn expandstr(ps: *const c_char) -> *const c_char {
     /* XXX Fix (char *) cast. */
     setinputstring(ps as *mut c_char);
 
-    saveheredoclist = heredoclist;
-    heredoclist = ptr::null_mut();
+    saveheredoclist = takeglobal(addr_of_mut!(heredoclist));
     saveprompt = doprompt;
     doprompt = 0;
     needprompt = 0;
@@ -2175,21 +2237,22 @@ pub unsafe fn expandstr(ps: *const c_char) -> *const c_char {
      * this port are established by `eval::setjmp_catch`, not a real
      * `setjmp`, so the body goes in the closure and everything after the
      * call is the `out:` label. Raw pointers rather than captures keep
-     * the C's aliasing (the closure writes locals the tail then reads). */
+     * the C's aliasing (the closure writes locals the tail then reads).
+     * The C's `union node n` is a bare local it never reads after the
+     * call, so it lives inside the closure here. */
     let jl: *mut crate::error::jmploc = addr_of_mut!(jmploc);
-    let np: *mut crate::nodes::node = addr_of_mut!(n);
     let resultp: *mut *const c_char = addr_of_mut!(result);
     err = crate::eval::setjmp_catch(jl, || unsafe {
         handler = jl;
 
         readtoken1(pgetc_eatbnl(), DQSYNTAX(), FAKEEOFMARK(), 0);
 
-        (*np).narg.r#type = NARG;
-        (*np).narg.next = ptr::null_mut();
-        (*np).narg.text = wordtext;
-        (*np).narg.backquote = backquotelist;
+        let n = Node::Arg(narg {
+            text: NodeText::Borrowed(wordtext),
+            backquote: takeglobal(addr_of_mut!(backquotelist)),
+        });
 
-        expandarg(np, ptr::null_mut(), EXP_QUOTED);
+        expandarg(&n, ptr::null_mut(), EXP_QUOTED);
         *resultp = stackblock();
     });
 

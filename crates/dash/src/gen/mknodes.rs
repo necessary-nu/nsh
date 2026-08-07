@@ -4,12 +4,23 @@
 //! This program reads the nodetypes file and nodes.c.pat file.  It generates
 //! the files nodes.h and nodes.c.
 //!
-//! It is a build-time code generator, not part of the shell; it is ported so
-//! that `crate::nodes` stays derivable.  The port keeps the C's globals,
-//! `char *` buffers and pointer arithmetic, so it is `unsafe` throughout.
-//! Two unavoidable renames: `struct str` becomes `str_` (a Rust `struct str`
-//! would shadow the primitive `str` for the whole module) and `error` takes
-//! an already-formatted message, because Rust cannot receive C varargs.
+//! It is a build-time code generator, not part of the shell.  The port keeps
+//! the C's globals, `char *` buffers and pointer arithmetic, so it is
+//! `unsafe` throughout.  Two unavoidable renames: `struct str` becomes `str_`
+//! (a Rust `struct str` would shadow the primitive `str` for the whole
+//! module) and `error` takes an already-formatted message, because Rust
+//! cannot receive C varargs.
+//!
+//! It stays because it still describes something real: `src/Makefile.am`
+//! builds `nodes.c` and `nodes.h` with `src/mknodes.c` from `src/nodetypes`,
+//! and that is what the C reference the differential harness compares against
+//! is built from.  What it no longer describes is `crate::nodes`.
+//! [dec:nsh:owned-data] made the Rust parse tree an owned enum with `Vec`
+//! children and an `Rc` for `copyfunc`; `%SIZES`, `%CALCSIZE` and `%COPY` —
+//! the three things this program emits — have no counterpart there, because
+//! `nodesize[]`, `calcsize` and `copynode` were consequences of allocating a
+//! tree out of one block.  So `crate::nodes` is hand-written from here on,
+//! and this file is a port of the C generator, not the source of that one.
 
 use core::ptr;
 

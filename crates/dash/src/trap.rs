@@ -16,7 +16,7 @@ use crate::memalloc::{ckfree, savestr};
 use crate::mystring::nullstr;
 use crate::output::VaArg;
 use crate::shell::cstr;
-use crate::nodes::node;
+use crate::nodes::Node;
 use crate::options::{argptr, nextopt};
 
 /// glibc's `NSIG` (`_NSIG`) on Linux.
@@ -62,7 +62,7 @@ pub unsafe fn mkinit_init() {
 }
 
 /* mkinit FORKRESET fragment from src/trap.c:99-101. */
-pub unsafe fn mkinit_forkreset(n: *mut node) {
+pub unsafe fn mkinit_forkreset(n: Option<&Node>) {
     clear_traps(n);
 }
 
@@ -96,7 +96,7 @@ pub unsafe fn trapcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         return 0;
     }
     if ptrap != 0 {
-        clear_traps(null_mut());
+        clear_traps(None);
     }
     if (*ap.offset(1)).is_null() || decode_signum(*ap) >= 0 {
         action = null_mut();
@@ -147,7 +147,7 @@ pub unsafe fn trapcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
 // [spec:dash:def:trap.clear-traps-fn]
 // [spec:dash:sem:trap.clear-traps-fn]
-pub unsafe fn clear_traps(n: *mut node) {
+pub unsafe fn clear_traps(n: Option<&Node>) {
     let simplecmd: c_int;
     let mut tp: *mut *mut c_char;
 

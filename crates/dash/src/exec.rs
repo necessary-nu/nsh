@@ -55,7 +55,11 @@ const _PATH_BSHELL: &[u8] = b"/bin/sh\0";
 pub union param {
     pub index: c_int,
     pub cmd: *const builtincmd,
-    pub func: *mut funcnode,
+    /// The C's `struct funcnode *`. `funcnode` is `Rc<Node>` now, and this
+    /// entry is still a `ckmalloc`'d C struct, so what is stored is the raw
+    /// form: `Rc::into_raw` going in, `Rc::from_raw` coming out. See
+    /// `nodes::copyfunc` / `nodes::freefunc`.
+    pub func: *const funcnode,
 }
 
 // [spec:dash:def:exec.cmdentry]
@@ -873,7 +877,7 @@ unsafe fn addcmdentry(name: *mut c_char, entry: *mut cmdentry) {
 
 // [spec:dash:def:exec.defun-fn]
 // [spec:dash:sem:exec.defun-fn]
-pub unsafe fn defun(func: *mut Node) {
+pub unsafe fn defun(func: &Node) {
     let mut entry: cmdentry = cmdentry {
         cmdtype: 0,
         u: param { index: 0 },
@@ -882,7 +886,7 @@ pub unsafe fn defun(func: *mut Node) {
     INTOFF();
     entry.cmdtype = CMDFUNCTION;
     entry.u.func = crate::nodes::copyfunc(func);
-    addcmdentry((*func).ndefun.text, &mut entry);
+    addcmdentry(func.ndefun().text.as_ptr(), &mut entry);
     INTON();
 }
 

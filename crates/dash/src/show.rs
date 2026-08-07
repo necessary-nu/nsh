@@ -13,8 +13,8 @@ use libc::{c_char, c_int, c_void, FILE};
 use core::ptr::null_mut;
 
 use crate::nodes::{
-    node, nodelist, NAPPEND, NAND, NARG, NCLOBBER, NCMD, NFROM, NFROMFD, NFROMTO, NOR, NPIPE,
-    NSEMI, NTO, NTOFD,
+    Node, NAPPEND, NAND, NARG, NCLOBBER, NCMD, NFROM, NFROMFD, NFROMTO, NOR, NPIPE, NSEMI, NTO,
+    NTOFD,
 };
 use crate::parser::{
     CTLBACKQ, CTLENDVAR, CTLESC, CTLVAR, VSASSIGN, VSLENGTH, VSMINUS, VSNORMAL, VSNUL, VSPLUS,
@@ -32,34 +32,34 @@ extern "C" {
 
 // [spec:dash:def:show.showtree-fn]
 // [spec:dash:sem:show.showtree-fn]
-pub unsafe fn showtree(n: *mut node) {
+pub unsafe fn showtree(n: Option<&Node>) {
     trputs(b"showtree called\n\0".as_ptr() as *const c_char);
     shtree(n, 1, null_mut(), stdout);
 }
 
 // [spec:dash:def:show.shtree-fn]
 // [spec:dash:sem:show.shtree-fn]
-unsafe fn shtree(n: *mut node, ind: c_int, pfx: *mut c_char, fp: *mut FILE) {
-    let mut lp: *mut nodelist;
+unsafe fn shtree(n: Option<&Node>, ind: c_int, pfx: *mut c_char, fp: *mut FILE) {
     let s: *const c_char;
 
-    if n.is_null() {
-        return;
-    }
+    let n: &Node = match n {
+        Some(n) => n,
+        None => return,
+    };
 
     indent(ind, pfx, fp);
-    match (*n).r#type {
+    match n.node_type() {
         NSEMI | NAND | NOR => {
-            s = match (*n).r#type {
+            s = match n.node_type() {
                 NSEMI => b"; \0".as_ptr() as *const c_char,
                 NAND => b" && \0".as_ptr() as *const c_char,
                 _ => b" || \0".as_ptr() as *const c_char,
             };
             /* binop: */
-            shtree((*n).nbinary.ch1, ind, null_mut(), fp);
+            shtree(n.nbinary().ch1.as_deref(), ind, null_mut(), fp);
             /*    if (ind < 0) */
             libc::fputs(s, fp);
-            shtree((*n).nbinary.ch2, ind, null_mut(), fp);
+            shtree(n.nbinary().ch2.as_deref(), ind, null_mut(), fp);
         }
         NCMD => {
             shcmd(n, fp);
@@ -68,15 +68,14 @@ unsafe fn shtree(n: *mut node, ind: c_int, pfx: *mut c_char, fp: *mut FILE) {
             }
         }
         NPIPE => {
-            lp = (*n).npipe.cmdlist;
-            while !lp.is_null() {
-                shcmd((*lp).n, fp);
-                if !(*lp).next.is_null() {
+            let cl = &n.npipe().cmdlist;
+            for (i, c) in cl.iter().enumerate() {
+                shcmd(c, fp);
+                if i + 1 < cl.len() {
                     libc::fputs(b" | \0".as_ptr() as *const c_char, fp);
                 }
-                lp = (*lp).next;
             }
-            if (*n).npipe.backgnd != 0 {
+            if n.npipe().backgnd != 0 {
                 libc::fputs(b" &\0".as_ptr() as *const c_char, fp);
             }
             if ind >= 0 {
@@ -87,7 +86,7 @@ unsafe fn shtree(n: *mut node, ind: c_int, pfx: *mut c_char, fp: *mut FILE) {
             libc::fprintf(
                 fp,
                 b"<node type %d>\0".as_ptr() as *const c_char,
-                (*n).r#type,
+                n.node_type(),
             );
             if ind >= 0 {
                 libc::fputc(b'\n' as c_int, fp);
@@ -98,26 +97,22 @@ unsafe fn shtree(n: *mut node, ind: c_int, pfx: *mut c_char, fp: *mut FILE) {
 
 // [spec:dash:def:show.shcmd-fn]
 // [spec:dash:sem:show.shcmd-fn]
-unsafe fn shcmd(cmd: *mut node, fp: *mut FILE) {
-    let mut np: *mut node;
+unsafe fn shcmd(cmd: &Node, fp: *mut FILE) {
     let mut first: c_int;
 
     first = 1;
-    np = (*cmd).ncmd.args;
-    while !np.is_null() {
+    for np in &cmd.ncmd().args {
         if first == 0 {
             libc::putchar(b' ' as c_int);
         }
         sharg(np, fp);
         first = 0;
-        np = (*np).narg.next;
     }
-    np = (*cmd).ncmd.redirect;
-    while !np.is_null() {
+    for np in &cmd.ncmd().redirect {
         if first == 0 {
             libc::putchar(b' ' as c_int);
         }
-        let (s, dftfd): (*const c_char, c_int) = match (*np).nfile.r#type {
+        let (s, dftfd): (*const c_char, c_int) = match np.node_type() {
             NTO => (b">\0".as_ptr() as *const c_char, 1),
             NCLOBBER => (b">|\0".as_ptr() as *const c_char, 1),
             NAPPEND => (b">>\0".as_ptr() as *const c_char, 1),
@@ -127,33 +122,40 @@ unsafe fn shcmd(cmd: *mut node, fp: *mut FILE) {
             NFROMTO => (b"<>\0".as_ptr() as *const c_char, 0),
             _ => (b"*error*\0".as_ptr() as *const c_char, 0),
         };
-        if (*np).nfile.fd != dftfd {
-            libc::fprintf(fp, b"%d\0".as_ptr() as *const c_char, (*np).nfile.fd);
+        if np.redir_fd() != dftfd {
+            libc::fprintf(fp, b"%d\0".as_ptr() as *const c_char, np.redir_fd());
         }
         libc::fputs(s, fp);
-        if (*np).nfile.r#type == NTOFD || (*np).nfile.r#type == NFROMFD {
-            libc::fprintf(fp, b"%d\0".as_ptr() as *const c_char, (*np).ndup.dupfd);
+        if np.node_type() == NTOFD || np.node_type() == NFROMFD {
+            libc::fprintf(
+                fp,
+                b"%d\0".as_ptr() as *const c_char,
+                np.ndup().dupfd.get(),
+            );
         } else {
-            sharg((*np).nfile.fname, fp);
+            /* the C dereferences `fname` here without checking it */
+            sharg(np.nfile().fname.as_deref().unwrap(), fp);
         }
         first = 0;
-        np = (*np).nfile.next;
     }
 }
 
 // [spec:dash:def:show.sharg-fn]
 // [spec:dash:sem:show.sharg-fn]
-unsafe fn sharg(arg: *mut node, fp: *mut FILE) {
+unsafe fn sharg(arg: &Node, fp: *mut FILE) {
     let mut p: *mut c_char;
-    let bqlist: *mut nodelist;
+    let bqlist: &[Option<Node>];
     let mut subtype: c_int;
 
-    if (*arg).r#type != NARG {
-        libc::printf(b"<node type %d>\n\0".as_ptr() as *const c_char, (*arg).r#type);
+    if arg.node_type() != NARG {
+        libc::printf(
+            b"<node type %d>\n\0".as_ptr() as *const c_char,
+            arg.node_type(),
+        );
         libc::abort();
     }
-    bqlist = (*arg).narg.backquote;
-    p = (*arg).narg.text;
+    bqlist = &arg.narg().backquote;
+    p = arg.narg().text.as_ptr();
     while *p != 0 {
         match *p as i8 as c_int {
             CTLESC => {
@@ -220,7 +222,9 @@ unsafe fn sharg(arg: *mut node, fp: *mut FILE) {
             CTLBACKQ => {
                 libc::fputc(b'$' as c_int, fp);
                 libc::fputc(b'(' as c_int, fp);
-                shtree((*bqlist).n, -1, null_mut(), fp);
+                /* the C never advances `bqlist`, so every CTLBACKQ in a word
+                 * prints the *first* backquoted command */
+                shtree(bqlist[0].as_ref(), -1, null_mut(), fp);
                 libc::fputc(b')' as c_int, fp);
             }
             _ => {

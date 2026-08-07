@@ -28,7 +28,7 @@
 use libc::c_void;
 use core::ptr::addr_of_mut;
 
-use crate::nodes::node;
+use crate::nodes::Node;
 
 /*
  * Initialization code.
@@ -97,7 +97,7 @@ pub unsafe fn exitreset() {
 
 // [spec:dash:def:init.forkreset-fn]
 // [spec:dash:sem:init.forkreset-fn]
-pub unsafe fn forkreset(n: *mut node) {
+pub unsafe fn forkreset(n: Option<&Node>) {
     /* from input.c: */
     crate::input::mkinit_forkreset();
 

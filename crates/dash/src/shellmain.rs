@@ -26,7 +26,6 @@ use crate::error::{jmploc, FORCEINTON};
 use crate::eval::{evalskip, EV_EXIT, SKIPFUNC, SKIPFUNCDEF};
 use crate::jobs::SHOW_CHANGED;
 use crate::memalloc::{popstackmark, setstackmark, stackblock, stackmark, stalloc};
-use crate::nodes::Node;
 use crate::output::out2;
 
 /* pid of main shell */
@@ -296,7 +295,6 @@ pub fn main_fn(argc: c_int, argv: Vec<Vec<u8>>, streams: crate::streams::Streams
 // [spec:dash:def:main.cmdloop-fn]
 // [spec:dash:sem:main.cmdloop-fn]
 unsafe fn cmdloop(top: c_int) -> c_int {
-    let mut n: *mut Node;
     let mut smark: stackmark = core::mem::zeroed();
     let mut inter: c_int;
     let mut status: c_int = 0;
@@ -315,9 +313,18 @@ unsafe fn cmdloop(top: c_int) -> c_int {
             inter += 1;
             crate::mail::chkmail();
         }
-        n = crate::parser::parsecmd(inter);
+        let parsed = crate::parser::parsecmd(inter);
         /* showtree(n); DEBUG */
-        if n == crate::parser::NEOF() {
+        if let crate::parser::ParseResult::Tree(n) = parsed {
+            let i: c_int;
+
+            crate::jobs::job_warning = if crate::jobs::job_warning == 2 { 1 } else { 0 };
+            numeof = 0;
+            i = crate::eval::evaltree(n.as_ref(), 0);
+            if n.is_some() {
+                status = i;
+            }
+        } else {
             if top == 0 || numeof >= 50 {
                 break;
             }
@@ -333,15 +340,6 @@ unsafe fn cmdloop(top: c_int) -> c_int {
                 );
             }
             numeof += 1;
-        } else {
-            let i: c_int;
-
-            crate::jobs::job_warning = if crate::jobs::job_warning == 2 { 1 } else { 0 };
-            numeof = 0;
-            i = crate::eval::evaltree(n, 0);
-            if !n.is_null() {
-                status = i;
-            }
         }
         popstackmark(&mut smark);
 

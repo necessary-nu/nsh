@@ -202,8 +202,12 @@ pub struct ifs_state {
 
 /* output of current string */
 static mut expdest: *mut c_char = ptr::null_mut();
-/* list of back quote expressions */
-static mut argbackq: *mut crate::nodes::nodelist = ptr::null_mut();
+/* list of back quote expressions.
+ * The C walks a `struct nodelist *` and advances it with `argbackq =
+ * argbackq->next`; the list is now the `Vec` inside the NARG node, so what
+ * travels is a raw slice cursor over it. */
+static mut argbackq: *const [Option<crate::nodes::Node>] =
+    ptr::slice_from_raw_parts(ptr::null::<Option<crate::nodes::Node>>(), 0);
 /* first struct in list of ifs regions */
 static mut ifsfirst: ifsregion = ifsregion {
     next: ptr::null_mut(),
@@ -448,14 +452,14 @@ unsafe fn getpwhome(name: *const c_char) -> *const c_char {
 
 // [spec:dash:def:expand.expandarg-fn]
 // [spec:dash:sem:expand.expandarg-fn]
-pub unsafe fn expandarg(arg: *mut crate::nodes::node, arglist: *mut arglist, flag: c_int) {
+pub unsafe fn expandarg(arg: &crate::nodes::Node, arglist: *mut arglist, flag: c_int) {
     let sp: *mut strlist;
     let p: *mut c_char;
 
-    argbackq = (*arg).narg.backquote;
+    argbackq = arg.narg().backquote.as_slice();
     /* STARTSTACKSTR(expdest) */
     expdest = stackblock();
-    argstr((*arg).narg.text, flag);
+    argstr(arg.narg().text.as_ptr(), flag);
     'out: {
         if arglist.is_null() {
             /* here document expanded */
@@ -648,7 +652,7 @@ unsafe fn argstr(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
                     continue 'start; /* goto start */
                 }
                 CTLBACKQ => {
-                    expbackq((*argbackq).n, flag | inquotes);
+                    expbackq((&*argbackq)[0].as_ref(), flag | inquotes);
                     continue 'start; /* goto start */
                 }
                 CTLARI => {
@@ -808,7 +812,7 @@ unsafe fn expari(mut start: *mut c_char, flag: c_int) -> *mut c_char {
 
 // [spec:dash:def:expand.expbackq-fn]
 // [spec:dash:sem:expand.expbackq-fn]
-unsafe fn expbackq(cmd: *mut crate::nodes::node, flag: c_int) {
+unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
     let mut in_: crate::eval::backcmd = mem::zeroed();
     let mut i: c_int;
     let mut buf: [c_char; 128] = [0; 128];
@@ -879,7 +883,7 @@ unsafe fn expbackq(cmd: *mut crate::nodes::node, flag: c_int) {
     }
 
     /* out: */
-    argbackq = (*argbackq).next;
+    argbackq = (&*argbackq)[1..].as_ref() as *const [Option<crate::nodes::Node>];
 }
 
 // [spec:dash:def:expand.scanleft-fn]
@@ -2880,15 +2884,15 @@ pub unsafe fn _rmescapes(mut str: *mut c_char, flag: c_int) -> *mut c_char {
 
 // [spec:dash:def:expand.casematch-fn]
 // [spec:dash:sem:expand.casematch-fn]
-pub unsafe fn casematch(pattern: *mut crate::nodes::node, val: *mut c_char) -> c_int {
+pub unsafe fn casematch(pattern: &crate::nodes::Node, val: *mut c_char) -> c_int {
     let mut smark: crate::memalloc::stackmark = mem::zeroed();
     let result: c_int;
 
     crate::memalloc::setstackmark(&mut smark);
-    argbackq = (*pattern).narg.backquote;
+    argbackq = pattern.narg().backquote.as_slice();
     /* STARTSTACKSTR(expdest) */
     expdest = stackblock();
-    argstr((*pattern).narg.text, EXP_TILDE | EXP_CASE);
+    argstr(pattern.narg().text.as_ptr(), EXP_TILDE | EXP_CASE);
     ifsfree();
     result = patmatch(stackblock(), val);
     crate::memalloc::popstackmark(&mut smark);
