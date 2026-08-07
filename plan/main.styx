@@ -1943,6 +1943,12 @@ children (
                     }
                 )
             }
+
+            {
+                id sanctioned-divergences
+                title "Teach dsdiff.sh the sanctioned-divergence register so FAIL=0 stays legible"
+                kind @test
+            }
         )
     }
 )
