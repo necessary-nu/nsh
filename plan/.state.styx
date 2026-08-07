@@ -1142,36 +1142,24 @@ impl_evidence (
         {id signal.trap-during-wait, version 0}
     )}
     {id posix-line-editing, covered_rules (
-        edit.append-last-bigword
+        edit.block-mode-terminals
         edit.change-motion
         edit.change-to-end-and-line
-        edit.command-alias-insert
         edit.command-case-toggle
         edit.command-comment
-        edit.command-complete-unique
         edit.command-count
-        edit.command-display-expansions
-        edit.command-expand-all
+        edit.command-invoke-vi
         edit.command-newline
+        edit.command-redraw
         edit.command-repeat
         edit.cursor-terminology
         edit.delete-char
         edit.delete-motion
-        edit.edit-line
-        edit.edit-line-replacement
         edit.enter-insert-mode
         edit.escape-to-command-mode
-        edit.history-goto
-        edit.history-list
-        edit.history-prev-next
-        edit.history-search-backward
-        edit.history-search-forward
-        edit.history-search-pattern
-        edit.history-search-repeat
         edit.insert-deletion
-        edit.insert-end-of-file
         edit.insert-escape
-        edit.insert-literal-next
+        edit.insert-interrupt
         edit.insert-mode-default
         edit.insert-mode-special-characters
         edit.insert-newline
@@ -1186,42 +1174,31 @@ impl_evidence (
         edit.put-save-buffer
         edit.replace-char
         edit.set-o-vi
+        edit.sigint-command-mode
         edit.stty-characters
-        edit.undo
+        edit.up-option
         edit.vi-mode-editing
         edit.word-bigword-terms
         edit.yank-motion
     ), covered_claims (
-        {impl_name shell, rule edit.append-last-bigword}
+        {impl_name shell, rule edit.block-mode-terminals}
         {impl_name shell, rule edit.change-motion}
         {impl_name shell, rule edit.change-to-end-and-line}
-        {impl_name shell, rule edit.command-alias-insert}
         {impl_name shell, rule edit.command-case-toggle}
         {impl_name shell, rule edit.command-comment}
-        {impl_name shell, rule edit.command-complete-unique}
         {impl_name shell, rule edit.command-count}
-        {impl_name shell, rule edit.command-display-expansions}
-        {impl_name shell, rule edit.command-expand-all}
+        {impl_name shell, rule edit.command-invoke-vi}
         {impl_name shell, rule edit.command-newline}
+        {impl_name shell, rule edit.command-redraw}
         {impl_name shell, rule edit.command-repeat}
         {impl_name shell, rule edit.cursor-terminology}
         {impl_name shell, rule edit.delete-char}
         {impl_name shell, rule edit.delete-motion}
-        {impl_name shell, rule edit.edit-line}
-        {impl_name shell, rule edit.edit-line-replacement}
         {impl_name shell, rule edit.enter-insert-mode}
         {impl_name shell, rule edit.escape-to-command-mode}
-        {impl_name shell, rule edit.history-goto}
-        {impl_name shell, rule edit.history-list}
-        {impl_name shell, rule edit.history-prev-next}
-        {impl_name shell, rule edit.history-search-backward}
-        {impl_name shell, rule edit.history-search-forward}
-        {impl_name shell, rule edit.history-search-pattern}
-        {impl_name shell, rule edit.history-search-repeat}
         {impl_name shell, rule edit.insert-deletion}
-        {impl_name shell, rule edit.insert-end-of-file}
         {impl_name shell, rule edit.insert-escape}
-        {impl_name shell, rule edit.insert-literal-next}
+        {impl_name shell, rule edit.insert-interrupt}
         {impl_name shell, rule edit.insert-mode-default}
         {impl_name shell, rule edit.insert-mode-special-characters}
         {impl_name shell, rule edit.insert-newline}
@@ -1236,60 +1213,11 @@ impl_evidence (
         {impl_name shell, rule edit.put-save-buffer}
         {impl_name shell, rule edit.replace-char}
         {impl_name shell, rule edit.set-o-vi}
+        {impl_name shell, rule edit.sigint-command-mode}
         {impl_name shell, rule edit.stty-characters}
-        {impl_name shell, rule edit.undo}
+        {impl_name shell, rule edit.up-option}
         {impl_name shell, rule edit.vi-mode-editing}
         {impl_name shell, rule edit.word-bigword-terms}
         {impl_name shell, rule edit.yank-motion}
-    ), rule_versions_seen (
-        {id edit.append-last-bigword, version 0}
-        {id edit.change-motion, version 0}
-        {id edit.change-to-end-and-line, version 0}
-        {id edit.command-alias-insert, version 0}
-        {id edit.command-case-toggle, version 0}
-        {id edit.command-comment, version 0}
-        {id edit.command-complete-unique, version 0}
-        {id edit.command-count, version 0}
-        {id edit.command-display-expansions, version 0}
-        {id edit.command-expand-all, version 0}
-        {id edit.command-newline, version 0}
-        {id edit.command-repeat, version 0}
-        {id edit.cursor-terminology, version 0}
-        {id edit.delete-char, version 0}
-        {id edit.delete-motion, version 0}
-        {id edit.edit-line, version 0}
-        {id edit.edit-line-replacement, version 0}
-        {id edit.enter-insert-mode, version 0}
-        {id edit.escape-to-command-mode, version 0}
-        {id edit.history-goto, version 0}
-        {id edit.history-list, version 0}
-        {id edit.history-prev-next, version 0}
-        {id edit.history-search-backward, version 0}
-        {id edit.history-search-forward, version 0}
-        {id edit.history-search-pattern, version 0}
-        {id edit.history-search-repeat, version 0}
-        {id edit.insert-deletion, version 0}
-        {id edit.insert-end-of-file, version 0}
-        {id edit.insert-escape, version 0}
-        {id edit.insert-literal-next, version 0}
-        {id edit.insert-mode-default, version 0}
-        {id edit.insert-mode-special-characters, version 0}
-        {id edit.insert-newline, version 0}
-        {id edit.motion-char, version 0}
-        {id edit.motion-char-search, version 0}
-        {id edit.motion-char-search-repeat, version 0}
-        {id edit.motion-command-set, version 0}
-        {id edit.motion-line-position, version 0}
-        {id edit.motion-word-backward, version 0}
-        {id edit.motion-word-end, version 0}
-        {id edit.motion-word-forward, version 0}
-        {id edit.put-save-buffer, version 0}
-        {id edit.replace-char, version 0}
-        {id edit.set-o-vi, version 0}
-        {id edit.stty-characters, version 0}
-        {id edit.undo, version 0}
-        {id edit.vi-mode-editing, version 0}
-        {id edit.word-bigword-terms, version 0}
-        {id edit.yank-motion, version 0}
     )}
 )

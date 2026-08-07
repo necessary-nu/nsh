@@ -70,12 +70,32 @@ it" as settled.
 
 ## Candidates not yet decided
 
-### `edit.undo` — the port is currently *more* capable than dash
+### The port is *more* conformant than dash in two line-editing cases
 
-`edit-undo-all-changes` passes on the port and fails on the reference.
-This has been listed in `docs/libedit-parity.md` as something the libedit
-crate must make *worse* to stay faithful. Under the reasoning above it
-might instead belong in the register as a sanctioned improvement — but
-that is a decision about the line editor, and it should be made when the
-libedit crate lands rather than inferred from an accident of rustyline's
-behaviour.
+`edit-history-goto-number` (`edit.history-goto`, the `[number]G` command)
+and `edit-history-search-pattern-anchored`
+(`edit.history-search-pattern`) pass on the port and fail on the C. The
+port's line editor is nshedit; dash's is libedit; nshedit satisfies these
+two and libedit does not.
+
+Nobody chose this. It is what fell out of attaching the history, and it
+is the same shape as the `edit.undo` entry that used to sit here —
+which resolved itself, since nshedit reproduces dash's behaviour there
+and both now fail together.
+
+Under the bug-for-bug contract a port that is *better* than its original
+is still a divergence, so the choice is the usual three:
+
+  1. Reproduce libedit's failure, keeping the port faithful.
+  2. Register these as sanctioned improvements and let the port lead.
+  3. Fix libedit, so both conform and nothing is registered — the route
+     `fc -e` and the background job announcement took.
+
+Option 3 is not available in the same way here: the defect is in
+libedit, not in dash, and nshedit is already the fixed implementation.
+So it reduces to 1 or 2, and 2 costs nothing to hold — no maintenance,
+no divergence in the shell language, only in the editor.
+
+Left undecided deliberately. Recorded so that a future parity run
+showing "2 mismatches, port ahead" is read as this entry and not as a
+regression.

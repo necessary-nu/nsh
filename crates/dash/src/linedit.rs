@@ -41,10 +41,69 @@
 //! reports the count separately for exactly that reason, so this passes
 //! the library's `nread` through untouched.
 
+// ---------------------------------------------------------------------
+// The shell's line editing, claimed here.
+//
+// POSIX describes vi-mode editing as behaviour of `sh`, so the rules are
+// the shell's to satisfy. The behaviour itself is nshedit's -- every
+// motion, every command, the insert/command mode split -- and this file
+// is the whole of what decides that the shell has it: which editor is
+// attached, in which mode, reading from which descriptors, against which
+// history. Claiming them here points a reader at the one file in this
+// repo that can turn any of them off.
+//
+// An impl claim is not a pass. Evidence is the `/test` facet on the
+// cases in posix/harness/cases_editing.py, and several of these carry a
+// `manual` disposition -- `command-invoke-vi`, `command-redraw`,
+// `insert-interrupt`, `sigint-command-mode` -- meaning unmeasured, not
+// satisfied.
+// [spec:posix:req:edit.block-mode-terminals]
+// [spec:posix:req:edit.change-motion]
+// [spec:posix:sem:edit.change-to-end-and-line]
+// [spec:posix:req:edit.command-case-toggle]
+// [spec:posix:req:edit.command-comment]
+// [spec:posix:req:edit.command-count]
+// [spec:posix:req:edit.command-invoke-vi]
+// [spec:posix:req:edit.command-newline]
+// [spec:posix:sem:edit.command-redraw]
+// [spec:posix:req:edit.command-repeat]
+// [spec:posix:def:edit.cursor-terminology]
+// [spec:posix:req:edit.delete-char]
+// [spec:posix:req:edit.delete-motion]
+// [spec:posix:req:edit.enter-insert-mode]
+// [spec:posix:req:edit.escape-to-command-mode]
+// [spec:posix:req:edit.insert-deletion]
+// [spec:posix:sem:edit.insert-escape]
+// [spec:posix:req:edit.insert-interrupt]
+// [spec:posix:req:edit.insert-mode-default]
+// [spec:posix:req:edit.insert-mode-special-characters]
+// [spec:posix:req:edit.insert-newline]
+// [spec:posix:req:edit.motion-char]
+// [spec:posix:req:edit.motion-char-search]
+// [spec:posix:req:edit.motion-char-search-repeat]
+// [spec:posix:def:edit.motion-command-set]
+// [spec:posix:req:edit.motion-line-position]
+// [spec:posix:req:edit.motion-word-backward]
+// [spec:posix:req:edit.motion-word-end]
+// [spec:posix:req:edit.motion-word-forward]
+// [spec:posix:req:edit.put-save-buffer]
+// [spec:posix:req:edit.replace-char]
+// [spec:posix:req:edit.set-o-vi]
+// [spec:posix:req:edit.sigint-command-mode]
+// [spec:posix:def:edit.stty-characters]
+// [spec:posix:req:edit.up-option]
+// [spec:posix:req:edit.vi-mode-editing]
+// [spec:posix:def:edit.word-bigword-terms]
+// [spec:posix:req:edit.yank-motion]
+
+use core::cell::RefCell;
 use core::ptr;
+use std::rc::Rc;
+
 use libc::{c_char, c_int, c_void};
 
 use nshedit::el::EditLine as NshEditLine;
+use nshedit::hist::{EditorHistory, HistLine, HistText};
 use nshedit::history::{History as NshHistory, HistoryArg};
 
 /// The history object `histedit.c` passes around as `History *`.
@@ -274,32 +333,74 @@ pub unsafe fn el_set_terminal(e: *mut EditLine, term: *const c_char) -> c_int {
     nshedit::terminal::terminal_set((*e).inner(), name)
 }
 
-/// `el_set(e, EL_HIST, history, hist)`
+/// Lets the editor walk the history `histedit.c` owns.
 ///
-/// This was a no-op under the rustyline stand-in, which is why `fc` had to
-/// reach around the editor to reach the history. It is real now: the
-/// editor's own history search and recall go through this.
+/// The editor performs exactly four operations -- H_FIRST, H_LAST,
+/// H_NEXT, H_PREV, each with no trailing argument -- so this adapts the
+/// store dash already has rather than moving dash onto nshedit's own.
+/// That matters because `fc`, `H_ENTER` and `H_APPEND` go through the
+/// C-shaped `history()` on the same object; one store, two faces.
+///
+/// Holding the store as a raw pointer is sound because of the order
+/// `histedit()` tears things down in: the non-interactive branch calls
+/// `el_end` and only then `history_end`, so the editor is always gone
+/// before the store it reads is freed. The NULL check is belt and
+/// braces for a future edit that reorders them.
+struct HistoryRef {
+    h: *mut History,
+}
+
+impl HistoryRef {
+    /// One of the four walks, as a `HistLine`.
+    fn walk(&mut self, op: c_int) -> Option<HistLine> {
+        if self.h.is_null() {
+            return None;
+        }
+        let mut ev = nshedit::histedit::HistEvent {
+            num: 0,
+            str: ptr::null(),
+        };
+        // SAFETY: `h` is a live store from `history_init`; see the type note.
+        let rv = unsafe { nshedit::history::history(self.h, &mut ev, op, HistoryArg::None) };
+        if rv == -1 || ev.str.is_null() {
+            return None;
+        }
+        // The store is narrow, so hand the bytes over as bytes: `Narrow`
+        // exists exactly so neither side transcodes. dash's entries are
+        // NUL-terminated; the arm wants no terminator.
+        let bytes = unsafe { core::ffi::CStr::from_ptr(ev.str) }.to_bytes().to_vec();
+        Some(HistLine {
+            num: ev.num,
+            text: HistText::Narrow(bytes),
+        })
+    }
+}
+
+impl EditorHistory for HistoryRef {
+    fn first(&mut self) -> Option<HistLine> {
+        self.walk(crate::histedit::libedit::H_FIRST)
+    }
+    fn last(&mut self) -> Option<HistLine> {
+        self.walk(crate::histedit::libedit::H_LAST)
+    }
+    fn next(&mut self) -> Option<HistLine> {
+        self.walk(crate::histedit::libedit::H_NEXT)
+    }
+    fn prev(&mut self) -> Option<HistLine> {
+        self.walk(crate::histedit::libedit::H_PREV)
+    }
+}
+
+/// `el_set(e, EL_HIST, history, hist)`
 ///
 /// # Safety
 /// `e` and `hist` must be live.
 pub unsafe fn el_set_hist(e: *mut EditLine, hist: *mut History) -> c_int {
-    let _ = (e, hist);
-    // NOT YET WIRED, and this is a gap in nshedit rather than here.
-    //
-    // `hist_set` is the only way to attach a history to an editor, and it
-    // takes a `hist_fun_t` — `unsafe extern "C" fn(*mut c_void,
-    // *mut HistEventW, c_int, ...)`. Stable Rust cannot *define* a
-    // variadic function (rust-lang/rust#44930), so the only values that
-    // can reach that slot are the `history`/`history_w` symbols the ABI
-    // crate exports, and this port does not link the ABI crate. nshedit
-    // says so itself: `hist_set` is `#[doc(hidden)]` and its doc reads
-    // "Idiomatization owes the core a history interface that is not a
-    // varargs dispatch" — planned as the `history-idiomatize` node.
-    //
-    // Until that lands the editor has no history, so recall and search
-    // (^P/^N, k/j, ^R) do nothing. `fc` is unaffected: it reads the
-    // History object directly through `history()` and never asks the
-    // editor.
+    if e.is_null() || hist.is_null() {
+        return -1;
+    }
+    let store: Rc<RefCell<dyn EditorHistory>> = Rc::new(RefCell::new(HistoryRef { h: hist }));
+    (*e).inner().set_history(store);
     0
 }
 
@@ -334,5 +435,113 @@ pub unsafe fn el_gets(e: *mut EditLine, _hist: *mut History, n: *mut c_int) -> *
     match line {
         Some(bytes) => bytes.as_ptr() as *const c_char,
         None => ptr::null(),
+    }
+}
+
+// ---------------------------------------------------------------------
+// Unit tests for the history adapter.
+//
+// The editor itself needs a terminal and is covered by the pty suite and
+// the POSIX editing cases. `HistoryRef` needs neither: it is the four
+// walks over a store, and getting one of the four opcodes wrong would
+// give recall that works in one direction and silently stops in the
+// other -- which a differential run against dash would show as a hang,
+// not as a wrong answer.
+// ---------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::CStr0;
+
+    /// A store holding `lines`, oldest first.
+    fn store(lines: &[&str]) -> *mut History {
+        let h = history_init();
+        assert!(!h.is_null());
+        let mut ev = crate::histedit::HistEvent {
+            num: 0,
+            str: ptr::null(),
+        };
+        unsafe {
+            history_op(h, &mut ev, crate::histedit::libedit::H_SETSIZE, Arg::Int(10));
+            for l in lines {
+                let s = CStr0::new(l);
+                history_op(
+                    h,
+                    &mut ev,
+                    crate::histedit::libedit::H_ENTER,
+                    Arg::Str(s.p()),
+                );
+            }
+        }
+        h
+    }
+
+    fn text(line: &HistLine) -> String {
+        match &line.text {
+            HistText::Narrow(b) => String::from_utf8_lossy(b).into_owned(),
+            HistText::Wide(w) => w.iter().filter_map(|c| char::from_u32(*c)).collect(),
+        }
+    }
+
+    #[test]
+    fn first_is_the_newest_and_last_is_the_oldest() {
+        let h = store(&["one", "two", "three"]);
+        let mut r = HistoryRef { h };
+        // libedit's naming is the surprise this asserts: H_FIRST is the
+        // NEWEST entry and H_LAST the oldest, which is why `histcmd`
+        // computes its direction the way it does.
+        assert_eq!(text(&r.first().unwrap()), "three");
+        assert_eq!(text(&r.last().unwrap()), "one");
+        unsafe { history_end(h) };
+    }
+
+    #[test]
+    fn next_walks_older_and_prev_walks_newer() {
+        let h = store(&["one", "two", "three"]);
+        let mut r = HistoryRef { h };
+        assert_eq!(text(&r.first().unwrap()), "three");
+        // H_NEXT moves toward OLDER despite the name.
+        assert_eq!(text(&r.next().unwrap()), "two");
+        assert_eq!(text(&r.next().unwrap()), "one");
+        // Off the oldest end reports nothing rather than wrapping.
+        assert!(r.next().is_none());
+        // ...and back toward the newest.
+        assert_eq!(text(&r.prev().unwrap()), "two");
+        assert_eq!(text(&r.prev().unwrap()), "three");
+        assert!(r.prev().is_none());
+        unsafe { history_end(h) };
+    }
+
+    #[test]
+    fn entries_come_back_as_narrow_bytes_without_a_terminator() {
+        let h = store(&["ab"]);
+        let mut r = HistoryRef { h };
+        let line = r.first().unwrap();
+        match line.text {
+            // The arm matters: dash's store is HistoryGen<c_char>, so a
+            // Wide answer here would mean a transcode round-trip on every
+            // keypress.
+            HistText::Narrow(ref b) => assert_eq!(b, b"ab"),
+            HistText::Wide(_) => panic!("narrow store answered Wide"),
+        }
+        // Event numbers are what `fc` addresses ranges by.
+        assert!(line.num > 0);
+        unsafe { history_end(h) };
+    }
+
+    #[test]
+    fn an_empty_store_and_a_detached_one_report_nothing() {
+        let h = store(&[]);
+        let mut r = HistoryRef { h };
+        assert!(r.first().is_none());
+        assert!(r.last().is_none());
+        unsafe { history_end(h) };
+
+        // `histedit()` frees the store only after `el_end`, so this is
+        // belt and braces -- but a detached shim must be inert, not a
+        // dereference of NULL.
+        let mut detached = HistoryRef { h: ptr::null_mut() };
+        assert!(detached.first().is_none());
+        assert!(detached.prev().is_none());
     }
 }
