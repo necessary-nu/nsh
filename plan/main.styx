@@ -1870,12 +1870,20 @@ children (
                 id host-owns-streams
                 title "The shell's three streams come from the frontend, not descriptors 0/1/2"
                 kind @feat
+                sealed true
                 log (
                     {
                         at 2026-08-07T09:11:54.770587255Z
                         author "brendan@necessary.nu"
                         kind @status
                         text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-07T09:33:13.662151863Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }
@@ -1884,7 +1892,7 @@ children (
                 id errors-are-values
                 title "Replace the longjmp-as-unwind exception mechanism with Result propagation"
                 kind @refactor
-                deps (host-owns-streams)
+                deps (delete-memalloc)
             }
 
             {
@@ -1899,6 +1907,41 @@ children (
                 title "The frontend claims signal dispositions; needs pty cases for job control first"
                 kind @refactor
                 deps (no-ambient-state)
+            }
+
+            {
+                id owned-data
+                title "Delete memalloc: the shell's data becomes owned Rust values, per [dec:nsh:owned-data]"
+                kind @refactor
+                children (
+                    {
+                        id owned-nodes
+                        title "union node becomes an owned Rust enum; copyfunc becomes Rc + Clone"
+                        kind @refactor
+                        log (
+                            {
+                                at 2026-08-07T09:34:17.049858598Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+                        )
+                    }
+
+                    {
+                        id owned-strings
+                        title "The stack string builder becomes an owned byte vector across parser and expand"
+                        kind @refactor
+                        deps (owned-nodes)
+                    }
+
+                    {
+                        id delete-memalloc
+                        title "Move the last region allocations to ownership and delete memalloc.rs"
+                        kind @refactor
+                        deps (owned-strings)
+                    }
+                )
             }
         )
     }
