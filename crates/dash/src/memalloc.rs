@@ -184,7 +184,11 @@ pub unsafe fn stunalloc(p: *mut c_void) {
             || (stacknxt as usize) < (p as usize)
             || (p as usize) < (addr_of_mut!((*stackp).space) as usize)
         {
-            let _ = libc::write(2, b"stunalloc\n".as_ptr() as *const c_void, 10);
+            let _ = libc::write(
+                crate::streams::streams().stderr,
+                b"stunalloc\n".as_ptr() as *const c_void,
+                10,
+            );
             libc::abort();
         }
     }

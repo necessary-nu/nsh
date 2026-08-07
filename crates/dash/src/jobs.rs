@@ -239,12 +239,26 @@ pub unsafe fn setjobctl(on: c_int) {
             'out_lbl: {
                 'close_lbl: {
                     if fd < 0 {
-                        fd += 3;
-                        while libc::isatty(fd) == 0 {
-                            fd -= 1;
-                            if fd < 0 {
-                                break 'out_lbl; // goto out
+                        /* `/dev/tty` would not open, so fall back to
+                         * whichever of the shell's own streams is a
+                         * terminal. The C writes this as `fd += 3` from
+                         * -1 and counts down -- descriptors 2, 1, 0, in
+                         * that order -- which is the shell's stderr,
+                         * stdout and stdin, not the numbers for their
+                         * own sake. */
+                        let s = crate::streams::streams();
+                        let candidates = [s.stderr, s.stdout, s.stdin];
+                        let mut i: usize = 0;
+                        fd = -1;
+                        while i < candidates.len() {
+                            if libc::isatty(candidates[i]) != 0 {
+                                fd = candidates[i];
+                                break;
                             }
+                            i += 1;
+                        }
+                        if fd < 0 {
+                            break 'out_lbl; // goto out
                         }
                     }
                     fd = crate::redir::savefd(fd, ofd);
@@ -1119,8 +1133,18 @@ unsafe fn forkchild(jp: *mut job, n: *mut Node, mode: c_int) {
         crate::trap::ignoresig(libc::SIGINT);
         crate::trap::ignoresig(libc::SIGQUIT);
         if (*jp).nprocs == 0 {
-            libc::close(0);
-            crate::redir::sh_open(_PATH_DEVNULL.as_ptr() as *const c_char, libc::O_RDONLY, 0);
+            /* The C closes descriptor 0 and reopens /dev/null, relying on
+             * `open` returning the lowest free descriptor to land back on
+             * 0. That only works when the shell's stdin *is* 0, so put it
+             * where it belongs when the frontend said otherwise. */
+            let sin: c_int = crate::streams::streams().stdin;
+            libc::close(sin);
+            let f: c_int =
+                crate::redir::sh_open(_PATH_DEVNULL.as_ptr() as *const c_char, libc::O_RDONLY, 0);
+            if f != sin {
+                libc::dup2(f, sin);
+                libc::close(f);
+            }
             /* Should call reset_input here, but it's harmless
              * for now.
              */

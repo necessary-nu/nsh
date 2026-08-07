@@ -158,6 +158,11 @@ pub unsafe fn mkinit_init() {
     basepf.buf = addr_of_mut!(basebuf) as *mut c_char;
     basepf.nextc = basepf.buf;
     basepf.linno = 1;
+    /* Not in the C: `basepf` is statically `.fd = 0` there because the
+     * shell reads descriptor 0 by definition. Here the base parse file
+     * reads whatever the frontend gave us -- which is 0 unless it said
+     * otherwise. See [dec:nsh:host-owns-streams]. */
+    basepf.fd = crate::streams::streams().stdin;
 }
 
 /* mkinit RESET fragment from src/input.c:101-112. */
@@ -179,9 +184,14 @@ pub unsafe fn mkinit_reset() {
 /* mkinit FORKRESET fragment from src/input.c:114-125. */
 pub unsafe fn mkinit_forkreset() {
     popallfiles();
-    if (*parsefile).fd > 0 {
+    /* The C tests `> 0`, meaning "an open file that is not stdin". With a
+     * frontend-supplied stdin the second half of that is no longer implied
+     * by the first, and getting it wrong would close the shell's own
+     * input. */
+    let sin: c_int = crate::streams::streams().stdin;
+    if (*parsefile).fd > 0 && (*parsefile).fd != sin {
         libc::close((*parsefile).fd);
-        (*parsefile).fd = 0;
+        (*parsefile).fd = sin;
     }
     if stdin_state.pip[0] != 0 {
         libc::close(stdin_state.pip[0]);
@@ -206,12 +216,14 @@ pub unsafe fn input_init() {
     let mut tios: libc::termios = core::mem::zeroed();
     let istty: c_int;
 
-    istty = libc::tcgetattr(0, &mut tios) + 1;
+    let sin: c_int = crate::streams::streams().stdin;
+
+    istty = libc::tcgetattr(sin, &mut tios) + 1;
     stdin_istty = istty;
     if istty != 0 {
         (*st).bufferable = tios.c_lflag & libc::ICANON;
     } else {
-        (*st).seekable = libc::lseek(0, 0, libc::SEEK_CUR) + 1;
+        (*st).seekable = libc::lseek(sin, 0, libc::SEEK_CUR) + 1;
         (*st).bufferable = ((*st).seekable != 0) as tcflag_t;
     }
 }
@@ -234,7 +246,11 @@ unsafe fn flush_tee(buf: *mut c_void, nr: c_int, mut pending: c_int) {
     while pending > 0 {
         let err: c_int;
 
-        err = libc::read(0, buf, if nr > pending { pending } else { nr } as size_t) as c_int;
+        err = libc::read(
+            crate::streams::streams().stdin,
+            buf,
+            if nr > pending { pending } else { nr } as size_t,
+        ) as c_int;
         if err > 0 {
             pending -= err;
         }
@@ -367,11 +383,12 @@ pub unsafe fn pgetc_eoa() -> c_int {
 // [spec:dash:def:input.stdin-clear-nonblock-fn]
 // [spec:dash:sem:input.stdin-clear-nonblock-fn]
 unsafe fn stdin_clear_nonblock() -> c_int {
-    let mut flags: c_int = libc::fcntl(0, libc::F_GETFL, 0);
+    let sin: c_int = crate::streams::streams().stdin;
+    let mut flags: c_int = libc::fcntl(sin, libc::F_GETFL, 0);
 
     if flags >= 0 {
         flags &= !libc::O_NONBLOCK;
-        flags = libc::fcntl(0, libc::F_SETFL, flags);
+        flags = libc::fcntl(sin, libc::F_SETFL, flags);
     }
 
     flags
@@ -415,7 +432,12 @@ unsafe fn preadfd() -> c_int {
         return nr;
     }
 
-    use_tee = fd == 0
+    /* The C's `fd == 0` means "this parse file is the shell's standard
+     * input", which is the condition for line editing and for teeing --
+     * not descriptor 0 for its own sake. */
+    let sin: c_int = crate::streams::streams().stdin;
+
+    use_tee = fd == sin
         /* #ifndef SMALL */
         && crate::histedit::el.is_null()
         && !stdin_bufferable();
@@ -424,7 +446,7 @@ unsafe fn preadfd() -> c_int {
     'retry: loop {
         nr = pnr;
         /* #ifndef SMALL */
-        if fd == 0 && !crate::histedit::el.is_null() {
+        if fd == sin && !crate::histedit::el.is_null() {
             static mut rl_cp: *const c_char = null_mut();
             static mut el_len: c_int = 0;
 
@@ -589,7 +611,10 @@ unsafe fn preadbuffer() -> c_int {
     }
     *q = b'\0' as c_char;
 
-    if (*parsefile).fd == 0 && !crate::histedit::hist.is_null() && something != 0 {
+    if (*parsefile).fd == crate::streams::streams().stdin
+        && !crate::histedit::hist.is_null()
+        && something != 0
+    {
         let mut he: crate::histedit::HistEvent = core::mem::zeroed();
         crate::histedit::history(
             crate::histedit::hist,
@@ -840,7 +865,11 @@ pub unsafe fn flush_input() {
 
     INTOFF();
     if stdin_state.seekable != 0 && left != 0 {
-        libc::lseek(0, -(left as off_t), libc::SEEK_CUR);
+        libc::lseek(
+            crate::streams::streams().stdin,
+            -(left as off_t),
+            libc::SEEK_CUR,
+        );
     } else if stdin_state.pending > left {
         flush_tee(
             addr_of_mut!(basebuf) as *mut c_void,

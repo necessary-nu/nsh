@@ -994,7 +994,7 @@ unsafe fn evalcommand(cmd: *mut Node, flags: c_int) -> c_int {
         lastarg = *nargv.offset(-1);
     }
 
-    crate::output::preverrout.fd = 2;
+    crate::output::preverrout.fd = crate::streams::streams().stderr;
     expredir((*cmd).ncmd.redirect);
     redir_stop = crate::redir::pushredir((*cmd).ncmd.redirect);
     status = crate::redir::redirectsafe((*cmd).ncmd.redirect, REDIR_PUSH | REDIR_SAVEFD2);

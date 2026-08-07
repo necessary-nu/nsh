@@ -144,7 +144,9 @@ pub unsafe fn procargs(mut xargv: *mut *mut c_char) -> c_int {
     }
     if optlist[iflag] == 2 && optlist[sflag] == 1 {
         crate::input::input_init();
-        if crate::input::stdin_istty != 0 && libc::isatty(2) != 0 {
+        if crate::input::stdin_istty != 0
+            && libc::isatty(crate::streams::streams().stderr) != 0
+        {
             optlist[iflag] = 1;
         }
     }

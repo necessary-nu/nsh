@@ -1309,624 +1309,596 @@ children (
                         id fix-builtin-alias-stdout-format
                         title "builtin.alias.stdout-format: The format for displaying aliases (when no operands or only name operands are..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.alias.stdout-format]
-                            )
+                            shell ([spec:posix:req:builtin.alias.stdout-format])
                         }
                     }
+
                     {
                         id fix-builtin-cd-operand-empty-string
                         title "builtin.cd.operand-empty-string: If directory is an empty string, cd shall write a diagnostic message to standard..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.cd.operand-empty-string]
-                            )
+                            shell ([spec:posix:req:builtin.cd.operand-empty-string])
                         }
                     }
+
                     {
                         id fix-builtin-cd-opt-e
                         title "builtin.cd.opt-e: The following options shall be supported by the implementation"
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.cd.opt-e]
-                            )
+                            shell ([spec:posix:req:builtin.cd.opt-e])
                         }
                     }
+
                     {
                         id fix-builtin-cd-step8-canonical-form-dot-dot
                         title "builtin.cd.step8-canonical-form-dot-dot: Step 8, continued: For each dot-dot component, if there is a preceding component and..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.cd.step8-canonical-form-dot-dot]
-                            )
+                            shell ([spec:posix:req:builtin.cd.step8-canonical-form-dot-dot])
                         }
                     }
+
                     {
                         id fix-builtin-cd-step9-path-max-relative
                         title "builtin.cd.step9-path-max-relative: Step 9: If curpath is longer than {PATH_MAX} bytes (including the terminating null)..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.cd.step9-path-max-relative]
-                            )
+                            shell ([spec:posix:req:builtin.cd.step9-path-max-relative])
                         }
                     }
+
                     {
                         id fix-builtin-command-opt-v
                         title "builtin.command.opt-v: -v: Write a string to standard output that indicates the pathname or command that..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.command.opt-v]
-                            )
+                            shell ([spec:posix:req:builtin.command.opt-v])
                         }
                     }
+
                     {
                         id fix-builtin-dot-path-search
                         title "builtin.dot.path-search: If file does not contain a <slash>, the shell shall use the search path specified by..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.dot.path-search]
-                            )
+                            shell ([spec:posix:req:builtin.dot.path-search])
                         }
                     }
+
                     {
                         id fix-builtin-exec-failure-interactive-up
                         title "builtin.exec.failure-interactive-up: When the exec command fails, an interactive shell may exit from a subshell..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.exec.failure-interactive-up]
-                            )
+                            shell ([spec:posix:req:builtin.exec.failure-interactive-up])
                         }
                     }
+
                     {
                         id fix-builtin-exec-utility-syntax-guidelines
                         title "builtin.exec.utility-syntax-guidelines: The exec special built-in shall support XBD 12.2 Utility Syntax Guidelines"
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.exec.utility-syntax-guidelines]
-                            )
+                            shell ([spec:posix:req:builtin.exec.utility-syntax-guidelines])
                         }
                     }
+
                     {
                         id fix-builtin-fc-edit-and-reexecute
                         title "builtin.fc.edit-and-reexecute: When commands are edited (when the -l option is not specified), the resulting lines..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.fc.edit-and-reexecute]
-                            )
+                            shell ([spec:posix:req:builtin.fc.edit-and-reexecute])
                         }
                     }
+
                     {
                         id fix-builtin-fc-env-histfile
                         title "builtin.fc.env-histfile: see case blt2-fc-histfile-names-history-file"
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.fc.env-histfile]
-                            )
+                            shell ([spec:posix:req:builtin.fc.env-histfile])
                         }
                     }
+
                     {
                         id fix-builtin-fc-env-histsize
                         title "builtin.fc.env-histsize: see case fc-env-histsize-default"
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.fc.env-histsize]
-                            )
+                            shell ([spec:posix:req:builtin.fc.env-histsize])
                         }
                     }
+
                     {
                         id fix-builtin-fc-exit-status
                         title "builtin.fc.exit-status: The following exit values shall be returned"
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.fc.exit-status]
-                            )
+                            shell ([spec:posix:req:builtin.fc.exit-status])
                         }
                     }
+
                     {
                         id fix-builtin-fc-stdout-list-format
                         title "builtin.fc.stdout-list-format: When the -l option is used to list commands, the format of each command in the list..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.fc.stdout-list-format]
-                            )
+                            shell ([spec:posix:req:builtin.fc.stdout-list-format])
                         }
                     }
+
                     {
                         id fix-builtin-getopts-env-optind
                         title "builtin.getopts.env-optind: see case getopts-optind-reset"
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.getopts.env-optind]
-                            )
+                            shell ([spec:posix:req:builtin.getopts.env-optind])
                         }
                     }
+
                     {
                         id fix-builtin-getopts-optarg
                         title "builtin.getopts.optarg: When the option requires an option-argument, the getopts utility shall place it in..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.getopts.optarg]
-                            )
+                            shell ([spec:posix:req:builtin.getopts.optarg])
                         }
                     }
+
                     {
                         id fix-builtin-getopts-reset
                         title "builtin.getopts.reset: If the application sets OPTIND to the value 1, a new set of parameters can be used:..."
                         implements {
-                            shell (
-                                [spec:posix:sem:builtin.getopts.reset]
-                            )
+                            shell ([spec:posix:sem:builtin.getopts.reset])
                         }
                     }
+
                     {
                         id fix-builtin-getopts-stderr-diagnostic
                         title "builtin.getopts.stderr-diagnostic: Whenever an error is detected and the first character in the optstring operand is..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.getopts.stderr-diagnostic]
-                            )
+                            shell ([spec:posix:req:builtin.getopts.stderr-diagnostic])
                         }
                     }
+
                     {
                         id fix-builtin-jobs-stdout-default-format
                         title "builtin.jobs.stdout-default-format: Otherwise, if the -l option is not specified, the output shall be a series of lines..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.jobs.stdout-default-format]
-                            )
+                            shell ([spec:posix:req:builtin.jobs.stdout-default-format])
                         }
                     }
+
                     {
                         id fix-builtin-jobs-stdout-state-strings
                         title "builtin.jobs.stdout-state-strings: see case job-jobs-state-stopped"
                         implements {
-                            shell (
-                                [spec:posix:def:builtin.jobs.stdout-state-strings]
-                            )
+                            shell ([spec:posix:def:builtin.jobs.stdout-state-strings])
                         }
                     }
+
                     {
                         id fix-builtin-kill-operand-pid-job-id
                         title "builtin.kill.operand-pid-job-id: pid: A job ID (see XBD 3.182 Job ID) that identifies a process group in the case of..."
                         implements {
-                            shell (
-                                [spec:posix:def:builtin.kill.operand-pid-job-id]
-                            )
+                            shell ([spec:posix:def:builtin.kill.operand-pid-job-id])
                         }
                     }
+
                     {
                         id fix-builtin-read-continuation-prompt
                         title "builtin.read.continuation-prompt: If standard input is a terminal device and the invoking shell is interactive, read..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.read.continuation-prompt]
-                            )
+                            shell ([spec:posix:req:builtin.read.continuation-prompt])
                         }
                     }
+
                     {
                         id fix-builtin-read-env-ps2
                         title "builtin.read.env-ps2: see case read-continuation-prompt"
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.read.env-ps2]
-                            )
+                            shell ([spec:posix:req:builtin.read.env-ps2])
                         }
                     }
+
                     {
                         id fix-builtin-read-option-d
                         title "builtin.read.option-d: The following option shall be supported"
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.read.option-d]
-                            )
+                            shell ([spec:posix:req:builtin.read.option-d])
                         }
                     }
+
                     {
                         id fix-builtin-read-syn
                         title "builtin.read.syn: The synopsis of the read utility is read [-r] [-d delim] var"
                         implements {
-                            shell (
-                                [spec:posix:syn:builtin.read.syn]
-                            )
+                            shell ([spec:posix:syn:builtin.read.syn])
                         }
                     }
+
                     {
                         id fix-builtin-set-opt-b-notify
                         title "builtin.set.opt-b-notify: -b: This option shall be supported if the implementation supports the User..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.set.opt-b-notify]
-                            )
+                            shell ([spec:posix:req:builtin.set.opt-b-notify])
                         }
                     }
+
                     {
                         id fix-builtin-set-opt-h
                         title "builtin.set.opt-h: -h: [OB] Setting this option may speed up PATH searches (see XBD 8"
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.set.opt-h]
-                            )
+                            shell ([spec:posix:req:builtin.set.opt-h])
                         }
                     }
+
                     {
                         id fix-builtin-set-opt-o-ignoreeof
                         title "builtin.set.opt-o-ignoreeof: -o ignoreeof: Prevent an interactive shell from exiting on end-of-file"
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.set.opt-o-ignoreeof]
-                            )
+                            shell ([spec:posix:req:builtin.set.opt-o-ignoreeof])
                         }
                     }
+
                     {
                         id fix-builtin-set-opt-o-noclobber
                         title "builtin.set.opt-o-noclobber: -o noclobber: Equivalent to -C (uppercase C)"
                         implements {
-                            shell (
-                                [spec:posix:def:builtin.set.opt-o-noclobber]
-                            )
+                            shell ([spec:posix:def:builtin.set.opt-o-noclobber])
                         }
                     }
+
                     {
                         id fix-builtin-set-opt-o-report
                         title "builtin.set.opt-o-report: -o (without an option-argument): Write the current settings of the options to..."
                         implements {
-                            shell (
-                                [spec:posix:sem:builtin.set.opt-o-report]
-                            )
+                            shell ([spec:posix:sem:builtin.set.opt-o-report])
                         }
                     }
+
                     {
                         id fix-builtin-set-opt-u-nounset
                         title "builtin.set.opt-u-nounset: -u: When the shell tries to expand, in a parameter expansion or an arithmetic..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.set.opt-u-nounset]
-                            )
+                            shell ([spec:posix:req:builtin.set.opt-u-nounset])
                         }
                     }
+
                     {
                         id fix-builtin-set-options-both-forms
                         title "builtin.set.options-both-forms: Implementations shall support the options in the following list in both their..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.set.options-both-forms]
-                            )
+                            shell ([spec:posix:req:builtin.set.options-both-forms])
                         }
                     }
+
                     {
                         id fix-builtin-trap-list-in-subshell
                         title "builtin.trap.list-in-subshell: If the command is executed in a subshell, the implementation does not perform the..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.trap.list-in-subshell]
-                            )
+                            shell ([spec:posix:req:builtin.trap.list-in-subshell])
                         }
                     }
+
                     {
                         id fix-builtin-trap-opt-p
                         title "builtin.trap.opt-p: The following option shall be supported"
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.trap.opt-p]
-                            )
+                            shell ([spec:posix:req:builtin.trap.opt-p])
                         }
                     }
+
                     {
                         id fix-builtin-trap-opt-p-suitable-for-reinput
                         title "builtin.trap.opt-p-suitable-for-reinput: The shell shall format the output, including the proper use of quoting, so that it..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.trap.opt-p-suitable-for-reinput]
-                            )
+                            shell ([spec:posix:req:builtin.trap.opt-p-suitable-for-reinput])
                         }
                     }
+
                     {
                         id fix-builtin-trap-synopsis
                         title "builtin.trap.synopsis: The trap special built-in has the following forms"
                         implements {
-                            shell (
-                                [spec:posix:syn:builtin.trap.synopsis]
-                            )
+                            shell ([spec:posix:syn:builtin.trap.synopsis])
                         }
                     }
+
                     {
                         id fix-builtin-ulimit-stdout-all-format
                         title "builtin.ulimit.stdout-all-format: If the -a option is specified, the output written for each resource shall consist of..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.ulimit.stdout-all-format]
-                            )
+                            shell ([spec:posix:req:builtin.ulimit.stdout-all-format])
                         }
                     }
+
                     {
                         id fix-builtin-wait-exit-status-last-operand
                         title "builtin.wait.exit-status-last-operand: If one or more operands were specified, all of them have terminated or were not..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.wait.exit-status-last-operand]
-                            )
+                            shell ([spec:posix:req:builtin.wait.exit-status-last-operand])
                         }
                     }
+
                     {
                         id fix-builtin-wait-exit-status-values
                         title "builtin.wait.exit-status-values: Otherwise, the wait utility shall exit with one of the following values"
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.wait.exit-status-values]
-                            )
+                            shell ([spec:posix:req:builtin.wait.exit-status-values])
                         }
                     }
+
                     {
                         id fix-builtin-wait-pid-operands
                         title "builtin.wait.pid-operands: If one or more pid operands are specified that represent known process IDs, the wait..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.wait.pid-operands]
-                            )
+                            shell ([spec:posix:req:builtin.wait.pid-operands])
                         }
                     }
+
                     {
                         id fix-builtin-wait-remove-waited-for-pid
                         title "builtin.wait.remove-waited-for-pid: Once a process ID that is known in the current shell execution environment (see 2.13..."
                         implements {
-                            shell (
-                                [spec:posix:req:builtin.wait.remove-waited-for-pid]
-                            )
+                            shell ([spec:posix:req:builtin.wait.remove-waited-for-pid])
                         }
                     }
+
                     {
                         id fix-cmd-case-clause-terminators
                         title "cmd.case-clause-terminators: If the case statement clause is terminated by ';;', no further clauses shall be examined"
                         implements {
-                            shell (
-                                [spec:posix:req:cmd.case-clause-terminators]
-                            )
+                            shell ([spec:posix:req:cmd.case-clause-terminators])
                         }
                     }
+
                     {
                         id fix-edit-command-alias-insert
                         title "edit.command-alias-insert: see case edit-command-alias-insert"
                         implements {
-                            shell (
-                                [spec:posix:req:edit.command-alias-insert]
-                            )
+                            shell ([spec:posix:req:edit.command-alias-insert])
                         }
                     }
+
                     {
                         id fix-edit-command-complete-unique
                         title "edit.command-complete-unique: — Perform pathname expansion (see 2.6.6 Pathname Expansion) on the current bigword,..."
                         implements {
-                            shell (
-                                [spec:posix:req:edit.command-complete-unique]
-                            )
+                            shell ([spec:posix:req:edit.command-complete-unique])
                         }
                     }
+
                     {
                         id fix-edit-command-display-expansions
                         title "edit.command-display-expansions: see case edit-command-display-expansions"
                         implements {
-                            shell (
-                                [spec:posix:req:edit.command-display-expansions]
-                            )
+                            shell ([spec:posix:req:edit.command-display-expansions])
                         }
                     }
+
                     {
                         id fix-edit-command-expand-all
                         title "edit.command-expand-all: — Perform pathname expansion on the current bigword and insert all expansions into..."
                         implements {
-                            shell (
-                                [spec:posix:req:edit.command-expand-all]
-                            )
+                            shell ([spec:posix:req:edit.command-expand-all])
                         }
                     }
+
                     {
                         id fix-edit-edit-line
                         title "edit.edit-line: In vi editing mode, there shall be a distinguished line, the edit line"
                         implements {
-                            shell (
-                                [spec:posix:def:edit.edit-line]
-                            )
+                            shell ([spec:posix:def:edit.edit-line])
                         }
                     }
+
                     {
                         id fix-edit-edit-line-replacement
                         title "edit.edit-line-replacement: If the current line is not the edit line, any command that modifies the current line..."
                         implements {
-                            shell (
-                                [spec:posix:req:edit.edit-line-replacement]
-                            )
+                            shell ([spec:posix:req:edit.edit-line-replacement])
                         }
                     }
+
                     {
                         id fix-edit-history-goto
                         title "edit.history-goto: see case edit-history-goto-oldest"
                         implements {
-                            shell (
-                                [spec:posix:req:edit.history-goto]
-                            )
+                            shell ([spec:posix:req:edit.history-goto])
                         }
                     }
+
                     {
                         id fix-edit-history-list
                         title "edit.history-list: When the sh utility is being used interactively, it shall maintain a list of..."
                         implements {
-                            shell (
-                                [spec:posix:req:edit.history-list]
-                            )
+                            shell ([spec:posix:req:edit.history-list])
                         }
                     }
+
                     {
                         id fix-edit-history-search-pattern
                         title "edit.history-search-pattern: Patterns given to the / and ? command history search commands use the pattern..."
                         implements {
-                            shell (
-                                [spec:posix:syn:edit.history-search-pattern]
-                            )
+                            shell ([spec:posix:syn:edit.history-search-pattern])
                         }
                     }
+
                     {
                         id fix-edit-insert-end-of-file
                         title "edit.insert-end-of-file: see case edit-insert-end-of-file"
                         implements {
-                            shell (
-                                [spec:posix:req:edit.insert-end-of-file]
-                            )
+                            shell ([spec:posix:req:edit.insert-end-of-file])
                         }
                     }
+
                     {
                         id fix-edit-insert-literal-next
                         title "edit.insert-literal-next: see case edit-insert-literal-next"
                         implements {
-                            shell (
-                                [spec:posix:sem:edit.insert-literal-next]
-                            )
+                            shell ([spec:posix:sem:edit.insert-literal-next])
                         }
                     }
+
                     {
                         id fix-edit-undo
                         title "edit.undo: see case edit-undo-last-change"
                         implements {
-                            shell (
-                                [spec:posix:req:edit.undo]
-                            )
+                            shell ([spec:posix:req:edit.undo])
                         }
                     }
+
                     {
                         id fix-exit-shell-error-consequences
                         title "exit.shell-error-consequences: Certain errors shall cause the shell to write a diagnostic message to standard error..."
                         implements {
-                            shell (
-                                [spec:posix:req:exit.shell-error-consequences]
-                            )
+                            shell ([spec:posix:req:exit.shell-error-consequences])
                         }
                     }
+
                     {
                         id fix-exit-unrecoverable-read-error
                         title "exit.unrecoverable-read-error: If an unrecoverable read error occurs when reading commands, other than from the..."
                         implements {
-                            shell (
-                                [spec:posix:req:exit.unrecoverable-read-error]
-                            )
+                            shell ([spec:posix:req:exit.unrecoverable-read-error])
                         }
                     }
+
                     {
                         id fix-grammar-case-clause
                         title "grammar.case-clause: Rule 4 is applied only to the first pattern_list production, as marked"
                         implements {
-                            shell (
-                                [spec:posix:syn:grammar.case-clause]
-                            )
+                            shell ([spec:posix:syn:grammar.case-clause])
                         }
                     }
+
                     {
                         id fix-grammar-operator-tokens
                         title "grammar.operator-tokens: The following are the operators (see XBD 3.243 Operator) containing more than one..."
                         implements {
-                            shell (
-                                [spec:posix:def:grammar.operator-tokens]
-                            )
+                            shell ([spec:posix:def:grammar.operator-tokens])
                         }
                     }
+
                     {
                         id fix-jobctl-save-terminal-settings
                         title "jobctl.save-terminal-settings: When a suspended job is created as a result of a foreground job being stopped, if..."
                         implements {
-                            shell (
-                                [spec:posix:req:jobctl.save-terminal-settings]
-                            )
+                            shell ([spec:posix:req:jobctl.save-terminal-settings])
                         }
                     }
+
                     {
                         id fix-param-ps1-exclamation-expansion
                         title "param.ps1-exclamation-expansion: Exclamation-mark expansion: The shell shall replace each instance of the..."
                         implements {
-                            shell (
-                                [spec:posix:req:param.ps1-exclamation-expansion]
-                            )
+                            shell ([spec:posix:req:param.ps1-exclamation-expansion])
                         }
                     }
+
                     {
                         id fix-param-ps1-two-pass
                         title "param.ps1-two-pass: The PS1 expansions shall be performed in two passes, where the result of the first..."
                         implements {
-                            shell (
-                                [spec:posix:req:param.ps1-two-pass]
-                            )
+                            shell ([spec:posix:req:param.ps1-two-pass])
                         }
                     }
+
                     {
                         id fix-pattern-bracket-expression
                         title "pattern.bracket-expression: A <left-square-bracket> shall introduce a bracket expression if the characters..."
                         implements {
-                            shell (
-                                [spec:posix:syn:pattern.bracket-expression]
-                            )
+                            shell ([spec:posix:syn:pattern.bracket-expression])
                         }
                     }
+
                     {
                         id fix-sh-exit-status-values
                         title "sh.exit-status-values: The following exit values shall be returned"
                         implements {
-                            shell (
-                                [spec:posix:req:sh.exit-status-values]
-                            )
+                            shell ([spec:posix:req:sh.exit-status-values])
                         }
                     }
+
                     {
                         id fix-xcu-exit-status-listed-values-binding
                         title "xcu.exit-status.listed-values-binding: If specific numeric values are listed in this section, the system shall use those..."
                         implements {
-                            shell (
-                                [spec:posix:req:xcu.exit-status.listed-values-binding]
-                            )
+                            shell ([spec:posix:req:xcu.exit-status.listed-values-binding])
                         }
                     }
+
                     {
                         id fix-edit-append-last-bigword
                         title "edit.append-last-bigword: BLOCKED on nshedit history-idiomatize — see case edit-append-last-bigword"
                         implements {
-                            shell (
-                                [spec:posix:sem:edit.append-last-bigword]
-                            )
+                            shell ([spec:posix:sem:edit.append-last-bigword])
                         }
                     }
+
                     {
                         id fix-edit-history-prev-next
                         title "edit.history-prev-next: BLOCKED on nshedit history-idiomatize — see case edit-history-previous"
                         implements {
-                            shell (
-                                [spec:posix:req:edit.history-prev-next]
-                            )
+                            shell ([spec:posix:req:edit.history-prev-next])
                         }
                     }
+
                     {
                         id fix-edit-history-search-backward
                         title "edit.history-search-backward: BLOCKED on nshedit history-idiomatize — see case edit-history-search-backward"
                         implements {
-                            shell (
-                                [spec:posix:req:edit.history-search-backward]
-                            )
+                            shell ([spec:posix:req:edit.history-search-backward])
                         }
                     }
+
                     {
                         id fix-edit-history-search-forward
                         title "edit.history-search-forward: BLOCKED on nshedit history-idiomatize — see case edit-history-search-forward"
                         implements {
-                            shell (
-                                [spec:posix:req:edit.history-search-forward]
-                            )
+                            shell ([spec:posix:req:edit.history-search-forward])
                         }
                     }
+
                     {
                         id fix-edit-history-search-repeat
                         title "edit.history-search-repeat: BLOCKED on nshedit history-idiomatize — see case edit-history-search-repeat"
                         implements {
-                            shell (
-                                [spec:posix:req:edit.history-search-repeat]
-                            )
+                            shell ([spec:posix:req:edit.history-search-repeat])
                         }
                     }
                 )
+            }
+        )
+    }
+
+    {
+        id shell-as-library
+        title "Make nsh a shell library with a binary frontend, per [dec:nsh:shell-as-library]"
+        kind @refactor
+        children (
+            {
+                id host-owns-streams
+                title "The shell's three streams come from the frontend, not descriptors 0/1/2"
+                kind @feat
+                log (
+                    {
+                        at 2026-08-07T09:11:54.770587255Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+                )
+            }
+
+            {
+                id errors-are-values
+                title "Replace the longjmp-as-unwind exception mechanism with Result propagation"
+                kind @refactor
+                deps (host-owns-streams)
+            }
+
+            {
+                id no-ambient-state
+                title "Move every process-global static into a shell instance; no globals, no thread-locals"
+                kind @refactor
+                deps (errors-are-values)
+            }
+
+            {
+                id host-owns-signals
+                title "The frontend claims signal dispositions; needs pty cases for job control first"
+                kind @refactor
+                deps (no-ambient-state)
             }
         )
     }

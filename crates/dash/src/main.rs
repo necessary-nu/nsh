@@ -145,5 +145,12 @@ fn main() {
     let argv: Vec<Vec<u8>> = std::env::args_os()
         .map(std::os::unix::ffi::OsStringExt::into_vec)
         .collect();
-    dash::shellmain::main_fn(argv.len() as libc::c_int, argv);
+    // The frontend is the thing entitled to the process's standard
+    // descriptors, so it hands them to the shell explicitly rather than
+    // letting the shell assume them. See [dec:nsh:host-owns-streams].
+    dash::shellmain::main_fn(
+        argv.len() as libc::c_int,
+        argv,
+        dash::streams::Streams::INHERIT,
+    );
 }

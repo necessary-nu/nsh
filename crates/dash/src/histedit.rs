@@ -331,7 +331,9 @@ pub unsafe fn histedit() {
                 crate::output::out2str(c"sh: can't initialize history\n".as_ptr());
             }
         }
-        if editing!() && el.is_null() && libc::isatty(0) != 0 {
+        let sin: c_int = crate::streams::streams().stdin;
+        let serr: c_int = crate::streams::streams().stderr;
+        if editing!() && el.is_null() && libc::isatty(sin) != 0 {
             /* && isatty(2) ??? */
             /*
              * turn editing on
@@ -339,11 +341,14 @@ pub unsafe fn histedit() {
             INTOFF!();
             'ok: {
                 'bad: {
+                    /* The C names 0 and 2. dash writes the editor's output
+                     * to stderr, not stdout, which is why this is `serr`
+                     * and not `streams().stdout`. */
                     if el_in.is_null() {
-                        el_in = libc::fdopen(0, c"r".as_ptr());
+                        el_in = libc::fdopen(sin, c"r".as_ptr());
                     }
                     if el_out.is_null() {
-                        el_out = libc::fdopen(2, c"w".as_ptr());
+                        el_out = libc::fdopen(serr, c"w".as_ptr());
                     }
                     if el_in.is_null() || el_out.is_null() {
                         break 'bad; /* goto bad */

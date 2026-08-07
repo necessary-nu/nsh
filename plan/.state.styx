@@ -1089,6 +1089,7 @@ rule_versions (
 
 assertions (
     {id posix-harness, kind @complete, author "brendan@necessary.nu", at 2026-08-04T00:31:09.803718675Z}
+    {id host-owns-streams, kind @doing, author "brendan@necessary.nu", at 2026-08-07T09:11:54.770587255Z}
 )
 
 impl_evidence (

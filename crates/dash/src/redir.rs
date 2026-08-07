@@ -97,7 +97,10 @@ pub unsafe fn redirect(redir: *mut node, flags: c_int) {
         newfd = openredirect(n);
         if newfd >= -1 {
             fd = (*n).nfile.fd;
-            if fd == 0 {
+            /* The C's `fd == 0` is "this redirection replaced the shell's
+             * own input", which is what makes the buffered parse state
+             * stale -- not descriptor 0 for its own sake. */
+            if fd == crate::streams::streams().stdin {
                 crate::input::reset_input();
             }
 
@@ -131,9 +134,19 @@ pub unsafe fn redirect(redir: *mut node, flags: c_int) {
     }
     INTON();
     /* NB: REDIR_SAVEFD2 is 03, so this test also fires for a plain
-     * REDIR_PUSH (01); reproduced verbatim (src/redir.c:184). */
-    if (flags & REDIR_SAVEFD2) != 0 && (*sv).renamed[2] >= 0 {
-        crate::output::preverrout.fd = (*sv).renamed[2];
+     * REDIR_PUSH (01); reproduced verbatim (src/redir.c:184).
+     *
+     * The C indexes slot 2 because that is where the shell's stderr is.
+     * The slot follows the frontend's stderr instead -- and if that was
+     * put past the end of `renamed`, which covers the ten descriptors
+     * redirection can name, there is nothing saved to point the trace
+     * stream at and it stays where it was. */
+    let serr: c_int = crate::streams::streams().stderr;
+    if (flags & REDIR_SAVEFD2) != 0
+        && (serr as usize) < (*sv).renamed.len()
+        && (*sv).renamed[serr as usize] >= 0
+    {
+        crate::output::preverrout.fd = (*sv).renamed[serr as usize];
     }
 }
 

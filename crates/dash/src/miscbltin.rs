@@ -116,7 +116,7 @@ pub unsafe fn readcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
             rflag = 1;
         }
     }
-    if !prompt.is_null() && libc::isatty(0) != 0 {
+    if !prompt.is_null() && libc::isatty(crate::streams::streams().stdin) != 0 {
         crate::output::out2str(prompt);
     }
     ap = crate::options::argptr;

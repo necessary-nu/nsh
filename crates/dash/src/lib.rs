@@ -23,6 +23,7 @@ pub mod memalloc;
 pub mod mystring;
 pub mod output;
 pub mod shell;
+pub mod streams;
 pub mod system;
 
 // ---- unit-test scaffolding (test builds only) ------------------------

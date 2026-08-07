@@ -255,7 +255,20 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
 /* argv arrives as raw bytes, not `String`: C argv elements are arbitrary
  * NUL-terminated byte strings and dash passes non-UTF-8 through untouched.
  * See the comment in main.rs. */
-pub fn main_fn(argc: c_int, argv: Vec<Vec<u8>>) -> ! {
+/// Run the shell to completion on `streams`.
+///
+/// The `streams` argument is [dec:nsh:host-owns-streams] at the entry
+/// point: the shell is *given* its three streams rather than assuming
+/// descriptors 0, 1 and 2. A frontend that has already lent the shell the
+/// standard descriptors -- which is what `crate::streams::install` does,
+/// and what the `dash` binary wants -- passes
+/// [`crate::streams::Streams::INHERIT`].
+///
+/// This still ends in `_exit` rather than returning, because the shell's
+/// exception mechanism is C's and `exitshell` terminates the process.
+/// Making it return is [dec:nsh:errors-are-values], not this.
+pub fn main_fn(argc: c_int, argv: Vec<Vec<u8>>, streams: crate::streams::Streams) -> ! {
+    unsafe { crate::streams::set(streams) };
     let mut owned: Vec<*mut c_char> = Vec::with_capacity(argv.len() + 1);
     for a in &argv {
         let mut bytes: Vec<u8> = a.clone();

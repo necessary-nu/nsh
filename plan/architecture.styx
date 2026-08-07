@@ -13,13 +13,19 @@ elements (
         name "The shell, as a library"
         kind @subsystem
         lifecycle @provisional
-        exposes ("crates/dash/src/lib.rs")
+        exposes ("crates/dash/src/lib.rs" "crates/dash/src/streams.rs")
         depends_on ([arch:nsh:line-editor])
         decisions ([dec:nsh:shell-as-library] [dec:nsh:no-ambient-state]
                    [dec:nsh:errors-are-values] [dec:nsh:host-owns-signals]
                    [dec:nsh:host-owns-streams])
         log (
             {at "2026-08-07T00:00:00Z", kind @established, by "[dec:nsh:shell-as-library]"}
+            // The core no longer names descriptors 0, 1 and 2 for its own
+            // I/O: `main_fn` takes the streams and `streams.rs` is where
+            // they live. The language's descriptor numbers are a separate
+            // question and still the process's -- see the decision's
+            // deferred consequence.
+            {at "2026-08-07T00:00:00Z", kind @modified, by "[dec:nsh:host-owns-streams]"}
         )
     }
     {
@@ -36,6 +42,10 @@ elements (
                    [dec:nsh:host-owns-streams])
         log (
             {at "2026-08-07T00:00:00Z", kind @established, by "[dec:nsh:shell-as-library]"}
+            // `main.rs` hands the shell `Streams::INHERIT` explicitly: the
+            // frontend is the thing entitled to the process's standard
+            // descriptors, so it is the thing that gives them away.
+            {at "2026-08-07T00:00:00Z", kind @modified, by "[dec:nsh:host-owns-streams]"}
         )
     }
     {
