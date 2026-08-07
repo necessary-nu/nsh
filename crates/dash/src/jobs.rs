@@ -1084,6 +1084,8 @@ unsafe fn forkchild(jp: *mut job, n: *mut Node, mode: c_int) {
 
     /* TRACE(("Child shell %d\n", getpid())); */
 
+    crate::shell::reset_coverage();
+
     oldlvl = crate::shellmain::shlvl;
     lvforked = vforked;
 

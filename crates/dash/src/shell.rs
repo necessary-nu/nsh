@@ -91,3 +91,28 @@ pub unsafe fn flush_coverage() {
         __llvm_profile_write_file();
     }
 }
+
+/// Zero the coverage counters in a freshly forked child.
+///
+/// Only compiled for the instrumented build, and it is what makes the
+/// measurement arithmetically possible at all.
+///
+/// A fork copies the parent's counters. Without this the child then
+/// merges the parent's counts into the shared profile a second time, its
+/// own children merge them a third, and a shell forks per command, per
+/// pipeline stage and per command substitution. The counts do not drift,
+/// they compound: a full corpus run produced counters around 5e18 and
+/// `llvm-profdata` refused every profile with "counter overflow".
+///
+/// Resetting here means a child reports only what the child ran. What it
+/// executed before the fork is not lost -- the parent already counted it.
+#[inline]
+pub unsafe fn reset_coverage() {
+    #[cfg(coverage)]
+    {
+        extern "C" {
+            fn __llvm_profile_reset_counters();
+        }
+        __llvm_profile_reset_counters();
+    }
+}

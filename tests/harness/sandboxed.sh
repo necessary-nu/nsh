@@ -66,7 +66,7 @@ ds_sandboxed() {  # ds_sandboxed WORKDIR SHELL [ARGS...]
 		--setenv PATH "$dir/.bin:/usr/bin:/bin" \
 		--limit nproc=64 \
 		${DS_COVDIR:+--bind "$DS_COVDIR:$DS_COVDIR"} \
-		${DS_COVDIR:+--setenv LLVM_PROFILE_FILE "$DS_COVDIR/dash-%p-%m.profraw"} \
+		${DS_COVDIR:+--setenv LLVM_PROFILE_FILE "$DS_COVDIR/dash-%8m.profraw"} \
 		-- timeout "$DS_TIMEOUT" env --default-signal -- "$@"
 }
 
@@ -81,6 +81,18 @@ ds_sandboxed() {  # ds_sandboxed WORKDIR SHELL [ARGS...]
 # writes the profile from inside the case, where the root is read-only, so
 # without the bind every profile is silently dropped and the merge sees
 # nothing.
+#
+# `%8m` is a pool of eight files the runtime merges into as it writes,
+# taking a lock per file. Not a detail: the corpus runs tens of thousands
+# of cases and each forks, so one file per process would be hundreds of
+# thousands of profiles and tens of gigabytes. Eight also beats one,
+# because the harness runs twelve cases at a time and they would
+# otherwise serialise on a single lock.
+#
+# `%p` is deliberately absent. It would look like the safe choice and is
+# the opposite: inside the PID namespace every case's shell is pid 2, so
+# `%p` collides across cases and the merge happens anyway -- by accident,
+# and only while the namespace keeps renumbering.
 
 # Equality between two shells proves nothing if neither ran. Assert that
 # each binary independently produces the expected bytes through the real
