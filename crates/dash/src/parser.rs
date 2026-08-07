@@ -420,6 +420,12 @@ unsafe fn list(nlflag: c_int) -> ParseResult {
         }
         nlflag |= 2;
 
+        /* The line the backgrounded command starts on, captured before
+         * anything consumes it. `command()` and `pipeline()` both take
+         * their `savelinno` at this same point, so a wrapper built here
+         * records the line its contents record. */
+        let savelinno: c_int = crate::plinno!();
+
         n2 = andor();
         tok = readtoken();
         if tok == TBACKGND {
@@ -428,15 +434,22 @@ unsafe fn list(nlflag: c_int) -> ParseResult {
                 n2.as_mut().unwrap().npipe_mut().backgnd = 1;
             } else {
                 if n2.as_ref().unwrap().node_type() != NREDIR {
-                    /* The C leaves this wrapper's `linno` unwritten — it is
-                     * whatever `stalloc` handed back.  `evalsubshell` copies
-                     * it into `lineno`, but every path from there either
-                     * forks and immediately re-sets it from the command
-                     * inside, or is a fork failure.  Zero, being a value,
-                     * is the closest an owned node gets. */
+                    /* dash never writes `linno` on this wrapper, so
+                     * `evalsubshell` copies whatever `stalloc` returned
+                     * into `lineno` and `errlinno` -- both observable, via
+                     * `$LINENO` and the `sh: N:` diagnostic prefix. It is
+                     * reached only on a fork failure, which is why nothing
+                     * has noticed.
+                     *
+                     * There is no bug-for-bug option here: reading
+                     * uninitialised memory is not something a safe
+                     * language reproduces, so the only question is which
+                     * correct value to write. See
+                     * [dec:nsh:we-own-the-defects] and
+                     * `docs/divergences.md`. */
                     n2 = Some(Node::Redir(nredir {
                         r#type: 0,
-                        linno: 0,
+                        linno: savelinno,
                         n: n2.map(Box::new),
                         redirect: Vec::new(),
                     }));
