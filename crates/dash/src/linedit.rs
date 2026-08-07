@@ -1,349 +1,96 @@
-//! The line-editing and history backend, replacing libedit with rustyline.
+//! dash's binding onto `nshedit`, the Rust re-implementation of libedit.
 //!
-//! `histedit.c` is written against libedit's C API, so the port keeps that
-//! API shape (`history_init`, `history(h, &he, H_OP, ...)`, `el_init`,
-//! `el_set`, `el_gets`) and implements it here in Rust. Everything above
-//! this module — `histcmd`, `str_to_event`, the `H_ENTER`/`H_APPEND`
-//! recording in `input.rs` — is unchanged and still a literal port.
+//! `histedit.c` is written against libedit's C API — `el_init`, `el_set`,
+//! `el_gets`, `history_init`, `history()` — so the port keeps that shape in
+//! `crate::histedit::libedit` and this module is where it lands on a real
+//! implementation.
 //!
-//! # Fidelity
+//! # What this replaced
 //!
-//! The history side is exact. The `H_*` semantics below were derived
-//! empirically from libedit 3.1-20250104 rather than from its
-//! documentation, because two of them are surprising:
+//! Until now this file was a rustyline stand-in. It got `fc`'s observable
+//! behaviour right and the *editing* wrong, which
+//! `docs/libedit-parity.md` measured precisely: 40 POSIX cases and 2 pty
+//! cases where the port and the C dash disagreed, every one of them line
+//! editing, twelve of them hanging rather than answering. nshedit is the
+//! actual libedit semantics, so that gap is a binding problem now rather
+//! than a behaviour problem.
 //!
-//! ```text
-//!   H_FIRST     the NEWEST entry           H_LAST   the OLDEST entry
-//!   H_NEXT      moves toward OLDER         H_PREV   moves toward NEWER
-//!   H_PREV_STR  prefix search toward OLDER (despite the name)
-//!   H_NEXT_STR  prefix search toward NEWER
-//!   H_APPEND    appends to the newest entry's text
-//! ```
+//! # The native API, not the C ABI
 //!
-//! `histcmd` depends on exactly this: it computes
-//! `direction = first < last ? H_PREV : H_NEXT`, which is only correct if
-//! `H_PREV` walks toward higher event numbers.
+//! nshedit ships two faces: `nshedit` (Rust) and `nshedit-abi` (the
+//! `extern "C"` libedit/readline ABI, as a cdylib). This uses the first.
+//! Going out through `extern "C"` and straight back into Rust would buy
+//! nothing, and the ABI crate needs a nightly toolchain for `c_variadic`
+//! so it can declare `el_set`/`history` variadic the way `histedit.h`
+//! does. dash issues a fixed, known set of operations, so the variadic
+//! entry points are exactly what it does not need.
 //!
-//! The *interactive editing* side is *not* a faithful reproduction of
-//! libedit and cannot be: key bindings, the `~/.editrc` file and the
-//! history-file format are rustyline's, not libedit's. `fc`'s observable
-//! behaviour is matched; which keystroke moves the cursor is not.
+//! # Two impedance mismatches, both deliberate on nshedit's side
+//!
+//! **The prompt callback is typed wide.** `ElPfuncT` returns `*mut u32`,
+//! but `prompt_set`'s `wide` parameter records which it really is, and
+//! `el_set(EL_PROMPT)` passes 0 — meaning "narrow, `char *`". dash's
+//! `getprompt` returns `*const c_char`, so it is installed through a
+//! narrow shim and `wide` is 0. That is what `nshedit-abi` does with a
+//! `el_pfunc_t` too.
+//!
+//! **Reading is wide.** The core crate exposes `el_wgets`; the byte-level
+//! `el_gets` lives in the ABI crate, which is not in play here. So this
+//! module does what that entry point does: take the wide line, encode it
+//! through the editor's own legacy conversion buffer, and hand back the
+//! bytes. Using `el.el_lgcyconv` rather than a private buffer is not
+//! incidental — it gives the caller libedit's exact lifetime, "valid
+//! until the next `el_gets`", and `preadfd` depends on that: it holds the
+//! returned pointer in a static across calls and consumes it a line at a
+//! time.
 
 use core::ptr;
-use libc::{c_char, c_int};
-use std::collections::VecDeque;
-use std::ffi::{CStr, CString};
+use libc::{c_char, c_int, c_void};
 
-use crate::histedit::HistEvent;
+use nshedit::chartype::ct_encode_string;
+use nshedit::el::EditLine as NshEditLine;
+use nshedit::history::{History as NshHistory, HistoryArg};
 
-/// One history entry. libedit hands out `const char *` into its own
-/// storage and keeps it valid until the entry is evicted, so the `CString`
-/// must be owned here and only the pointer handed out.
-struct Entry {
-    num: c_int,
-    text: CString,
+/// The history object `histedit.c` passes around as `History *`.
+pub type History = NshHistory;
+
+/// The editor.
+///
+/// A wrapper rather than a re-export of nshedit's `EditLine`, because
+/// `el_gets` has to own the bytes it hands back for as long as libedit
+/// would, and the conversion needs somewhere to record how many there
+/// were. Everything else forwards straight through.
+pub struct EditLine {
+    el: *mut NshEditLine,
 }
 
-pub struct History {
-    /// Newest last, so index order matches event-number order.
-    entries: VecDeque<Entry>,
-    /// Index into `entries` of the cursor, or `None` before the first seek.
-    cursor: Option<usize>,
-    /// `H_SETSIZE`.  libedit's `history_def_init` starts it at 0 and dash
-    /// always calls `sethistsize()` straight after `history_init()`, so a
-    /// non-zero value is in force before the first entry.  0 is *not*
-    /// "unbounded": `history_def_enter` trims with
-    /// `while (h->cur > h->max && h->cur > 0)`, so a size of 0 throws the
-    /// list away after every insert.  `HISTSIZE=0` (and any non-numeric
-    /// `HISTSIZE`, since `sethistsize` uses `atoi`) relies on that.
-    max: usize,
-    next_num: c_int,
-}
-
-impl History {
-    fn new() -> Self {
-        History {
-            entries: VecDeque::new(),
-            cursor: None,
-            max: 0,
-            next_num: 1,
-        }
-    }
-
-    fn fill(&self, he: *mut HistEvent, idx: usize) -> c_int {
-        match self.entries.get(idx) {
-            Some(e) => {
-                unsafe {
-                    (*he).num = e.num;
-                    (*he).str = e.text.as_ptr();
-                }
-                0
-            }
-            None => -1,
-        }
-    }
-
-    fn seek(&mut self, he: *mut HistEvent, idx: Option<usize>) -> c_int {
-        match idx {
-            Some(i) if i < self.entries.len() => {
-                self.cursor = Some(i);
-                self.fill(he, i)
-            }
-            _ => -1,
-        }
-    }
-
-    fn newest(&self) -> Option<usize> {
-        self.entries.len().checked_sub(1)
-    }
-
-    fn enter(&mut self, s: &CStr) {
-        let num = self.next_num;
-        self.next_num += 1;
-        self.entries.push_back(Entry {
-            num,
-            text: s.to_owned(),
-        });
-        // libedit drops the oldest once the list exceeds its size:
-        //   while (h->cur > h->max && h->cur > 0)
-        //           history_def_delete(h, ev, h->list.prev);
-        // There is no `max == 0 means unbounded` case.
-        while self.entries.len() > self.max {
-            self.entries.pop_front();
-        }
-        self.cursor = self.newest();
-    }
-
-    /// `H_APPEND` concatenates onto the newest entry rather than adding a
-    /// new one. dash uses it for continuation lines, so a multi-line
-    /// command becomes a single history event.
-    fn append(&mut self, s: &CStr) {
-        if let Some(last) = self.entries.back_mut() {
-            let mut bytes = last.text.as_bytes().to_vec();
-            bytes.extend_from_slice(s.to_bytes());
-            if let Ok(joined) = CString::new(bytes) {
-                last.text = joined;
-            }
-        } else {
-            self.enter(s);
-        }
-    }
-
-    /// Prefix search. `back` walks toward older entries (`H_PREV_STR`),
-    /// otherwise toward newer (`H_NEXT_STR`).
-    ///
-    /// libedit's `history_prev_string` is
-    ///
-    /// ```text
-    /// for (retval = HCURR(h, ev); retval != -1; retval = HNEXT(h, ev))
-    ///         if (Strncmp(str, ev->str, len) == 0)
-    ///                 return 0;
-    /// ```
-    ///
-    /// so the scan *starts on the cursor itself* — the entry the cursor is
-    /// on is tested first and can be the match.  That matters directly:
-    /// `str_to_event` seeks `H_FIRST` before searching, and by then the
-    /// `fc ...` command line has already been recorded by `input.c`, so
-    /// `fc -l fc` / `fc -s fc` must match that very line.  Failure leaves
-    /// the cursor where the walk ran out, i.e. on the oldest (`H_PREV_STR`)
-    /// or newest (`H_NEXT_STR`) entry.
-    fn search(&mut self, he: *mut HistEvent, pat: &CStr, back: bool) -> c_int {
-        let pat = pat.to_bytes();
-        // HCURR: -1 when the cursor is on the list head.
-        let mut i = match self.cursor {
-            Some(c) if c < self.entries.len() => c,
-            _ => return -1,
-        };
-        loop {
-            if self.entries[i].text.to_bytes().starts_with(pat) {
-                self.cursor = Some(i);
-                return self.fill(he, i);
-            }
-            // HNEXT / HPREV: on failure the cursor is left where it is.
-            i = if back {
-                match i.checked_sub(1) {
-                    Some(n) => n,
-                    None => {
-                        self.cursor = Some(i);
-                        return -1;
-                    }
-                }
-            } else {
-                let n = i + 1;
-                if n >= self.entries.len() {
-                    self.cursor = Some(i);
-                    return -1;
-                }
-                n
-            };
-            self.cursor = Some(i);
-        }
-    }
-
-    /// `history_next_event`:
-    ///
-    /// ```text
-    /// for (retval = HFIRST(h, ev); retval != -1; retval = HNEXT(h, ev))
-    ///         if (ev->num == num)
-    ///                 break;
-    /// ```
-    ///
-    /// i.e. it re-seeks to the newest entry and walks toward older, so the
-    /// cursor is left on the match, or on the oldest entry when there is
-    /// none (and on the list head when the list is empty).
-    fn find_event(&mut self, he: *mut HistEvent, num: c_int) -> c_int {
-        self.cursor = self.newest();
-        let mut i = match self.cursor {
-            Some(c) => c,
-            None => return -1,
-        };
-        loop {
-            if self.entries[i].num == num {
-                self.cursor = Some(i);
-                return self.fill(he, i);
-            }
-            match i.checked_sub(1) {
-                Some(n) => {
-                    i = n;
-                    self.cursor = Some(i);
-                }
-                None => return -1,
-            }
-        }
-    }
-
-    /// Every command in `histcmd`/`str_to_event`/`input.rs`. Returns
-    /// libedit's 0-on-success / -1-on-failure.
-    pub fn op(&mut self, he: *mut HistEvent, action: c_int, arg: Arg) -> c_int {
-        use crate::histedit::libedit as op;
-        match action {
-            op::H_SETSIZE => {
-                // history_setsize() rejects a negative size and otherwise
-                // only stores it (history_def_setsize is `h->max = num`).
-                // The trim is *not* done here — it happens on the next
-                // H_ENTER — so a size change is invisible until then.
-                if let Arg::Int(n) = arg {
-                    if n < 0 {
-                        return -1;
-                    }
-                    self.max = n as usize;
-                }
-                0
-            }
-            op::H_GETSIZE => {
-                unsafe { (*he).num = self.max as c_int };
-                0
-            }
-            // history_def_first/last move the cursor unconditionally (to
-            // the list head when the list is empty) and only then report.
-            op::H_FIRST => {
-                self.cursor = self.newest();
-                let i = self.cursor;
-                self.seek(he, i)
-            }
-            op::H_LAST => {
-                self.cursor = if self.entries.is_empty() {
-                    None
-                } else {
-                    Some(0)
-                };
-                let i = self.cursor;
-                self.seek(he, i)
-            }
-            /* H_NEXT moves toward OLDER, H_PREV toward NEWER -- see the
-             * module comment; `histcmd` relies on this orientation. */
-            op::H_NEXT => match self.cursor {
-                Some(c) => self.seek(he, c.checked_sub(1)),
-                None => -1,
-            },
-            op::H_PREV => match self.cursor {
-                Some(c) => self.seek(he, Some(c + 1)),
-                None => -1,
-            },
-            op::H_CURR => match self.cursor {
-                Some(c) => self.fill(he, c),
-                None => -1,
-            },
-            op::H_SET => {
-                if let Arg::Int(n) = arg {
-                    self.find_event(he, n)
-                } else {
-                    -1
-                }
-            }
-            op::H_NEXT_EVENT | op::H_PREV_EVENT => {
-                if let Arg::Int(n) = arg {
-                    self.find_event(he, n)
-                } else {
-                    -1
-                }
-            }
-            op::H_ENTER | op::H_ADD => {
-                if let Arg::Str(s) = arg {
-                    if s.is_null() {
-                        return -1;
-                    }
-                    let cs = unsafe { CStr::from_ptr(s) };
-                    if action == op::H_ENTER {
-                        self.enter(cs);
-                    } else {
-                        self.append(cs);
-                    }
-                    let i = self.newest();
-                    self.seek(he, i)
-                } else {
-                    -1
-                }
-            }
-            op::H_APPEND => {
-                if let Arg::Str(s) = arg {
-                    if s.is_null() {
-                        return -1;
-                    }
-                    self.append(unsafe { CStr::from_ptr(s) });
-                    let i = self.newest();
-                    self.seek(he, i)
-                } else {
-                    -1
-                }
-            }
-            op::H_PREV_STR | op::H_NEXT_STR => {
-                if let Arg::Str(s) = arg {
-                    if s.is_null() {
-                        return -1;
-                    }
-                    let back = action == op::H_PREV_STR;
-                    self.search(he, unsafe { CStr::from_ptr(s) }, back)
-                } else {
-                    -1
-                }
-            }
-            op::H_END => {
-                self.entries.clear();
-                self.cursor = None;
-                0
-            }
-            _ => -1,
-        }
-    }
-
-    /// The lines rustyline should offer on up-arrow, oldest first.
-    fn lines(&self) -> Vec<String> {
-        self.entries
-            .iter()
-            .map(|e| String::from_utf8_lossy(e.text.to_bytes()).trim_end().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
+impl EditLine {
+    /// # Safety
+    /// `self.el` must still be live.
+    unsafe fn inner(&mut self) -> &mut NshEditLine {
+        &mut *self.el
     }
 }
 
-/// The extra argument of libedit's variadic `history()`, which is an int
-/// for the seek/size operations and a string for the add/search ones.
-#[derive(Clone, Copy)]
+/// The trailing argument of the variadic `history()`.
+///
+/// Kept as dash's own enum rather than using `HistoryArg` directly so the
+/// `history!` macro in `crate::histedit::libedit` reads the way the C
+/// call sites do; [`Arg::into_history_arg`] does the translation.
 pub enum Arg {
     None,
     Int(c_int),
     Str(*const c_char),
+}
+
+impl Arg {
+    fn into_history_arg<'a>(self) -> HistoryArg<'a, c_char> {
+        match self {
+            Arg::None => HistoryArg::None,
+            Arg::Int(n) => HistoryArg::Num(n),
+            Arg::Str(p) => HistoryArg::Str(p),
+        }
+    }
 }
 
 /// Lets the `history!` macro accept either kind at a call site without the
@@ -367,205 +114,241 @@ impl IntoArg for *mut c_char {
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* history                                                             */
+/* ------------------------------------------------------------------ */
+
 pub fn history_init() -> *mut History {
-    Box::into_raw(Box::new(History::new()))
+    nshedit::history::history_init()
 }
 
+/// # Safety
+/// `h` must be a live history from [`history_init`], or NULL.
 pub unsafe fn history_end(h: *mut History) {
     if !h.is_null() {
-        drop(Box::from_raw(h));
+        nshedit::history::history_end(h);
     }
 }
 
-pub unsafe fn history_op(h: *mut History, he: *mut HistEvent, action: c_int, arg: Arg) -> c_int {
-    if h.is_null() || he.is_null() {
+/// `int history(History *, HistEvent *, int op, ...)`.
+///
+/// # Safety
+/// `h` and `he` must be live; a `Arg::Str` must be NUL-terminated.
+pub unsafe fn history_op(
+    h: *mut History,
+    he: *mut crate::histedit::HistEvent,
+    action: c_int,
+    arg: Arg,
+) -> c_int {
+    if he.is_null() {
         return -1;
     }
-    (*h).op(he, action, arg)
+    // dash's HistEvent and nshedit's are the same two fields in the same
+    // order, both #[repr(C)]: `int num` then `const char *str`. The cast
+    // is between two spellings of one C struct, not a reinterpretation.
+    let ev = &mut *(he as *mut nshedit::histedit::HistEvent);
+    nshedit::history::history(h, ev, action, arg.into_history_arg())
 }
 
-// ---------------------------------------------------------------------
-// The editor half.
-// ---------------------------------------------------------------------
+/* ------------------------------------------------------------------ */
+/* the editor                                                          */
+/* ------------------------------------------------------------------ */
 
-pub struct EditLine {
-    editor: Option<rustyline::Editor<(), rustyline::history::DefaultHistory>>,
-    /// `EL_PROMPT_ESC` hands us `getprompt`; call it for each line.
-    prompt_fn: Option<unsafe fn(*mut libc::c_void) -> *const c_char>,
-    vi_mode: bool,
-    /// `el_gets` returns a borrowed pointer that must stay valid until the
-    /// next call, exactly as libedit's does.
-    last: Option<CString>,
-}
-
-pub fn el_init() -> *mut EditLine {
-    // libedit emits none of rustyline's modern terminal protocol, so turn
-    // off what can be turned off. Bracketed paste in particular wraps every
-    // prompt in \e[?2004h/l, which shows up as noise against the C shell.
-    let cfg = rustyline::Config::builder().bracketed_paste(false).build();
-    let r = rustyline::Editor::with_config(cfg);
-    if std::env::var_os("DASH_LINEDIT_DEBUG").is_some() {
-        eprintln!("[linedit] el_init: editor ok={}", r.is_ok());
+/// `EditLine *el_init(const char *, FILE *, FILE *, FILE *)`
+///
+/// # Safety
+/// The three streams must be live `FILE *`.
+pub unsafe fn el_init(
+    prog: *const c_char,
+    fin: *mut c_void,
+    fout: *mut c_void,
+    ferr: *mut c_void,
+) -> *mut EditLine {
+    let name = if prog.is_null() {
+        "sh".to_string()
+    } else {
+        core::ffi::CStr::from_ptr(prog).to_string_lossy().into_owned()
+    };
+    // `el_init_fd`, NOT `el_init`. The core crate's `el_init` derives the
+    // three descriptors with its own `fileno`, which is
+    // `fn fileno(_stream: CFile) -> i32 { -1 }` -- a stub, because a FILE *
+    // is the C library's object and nshedit's `no-c-ffi` decision reserves
+    // reaching into one for the ABI crate (which does it properly, with
+    // `cstdio::fileno_of`). A Rust caller therefore gets an editor whose
+    // stdin, stdout and stderr are all fd -1: every read is EBADF, which
+    // `el_wgets` reports as EOF, so the shell saw end-of-input before a key
+    // was pressed and exited. dash is a port of C and has the streams, so it
+    // supplies the descriptors itself.
+    match nshedit::el::el_init_fd(
+        &name,
+        fin,
+        fout,
+        ferr,
+        libc::fileno(fin as *mut libc::FILE),
+        libc::fileno(fout as *mut libc::FILE),
+        libc::fileno(ferr as *mut libc::FILE),
+    ) {
+        Some(el) => Box::into_raw(Box::new(EditLine {
+            el: Box::into_raw(el),
+        })),
+        None => ptr::null_mut(),
     }
-    let editor = r.ok();
-    Box::into_raw(Box::new(EditLine {
-        editor,
-        prompt_fn: None,
-        vi_mode: false,
-        last: None,
-    }))
 }
 
+/// # Safety
+/// `e` must come from [`el_init`], or be NULL.
 pub unsafe fn el_end(e: *mut EditLine) {
-    if !e.is_null() {
-        drop(Box::from_raw(e));
+    if e.is_null() {
+        return;
+    }
+    let wrapper = Box::from_raw(e);
+    if !wrapper.el.is_null() {
+        nshedit::el::el_end(Some(Box::from_raw(wrapper.el)));
     }
 }
 
-pub unsafe fn el_set_prompt(
-    e: *mut EditLine,
-    f: unsafe fn(*mut libc::c_void) -> *const c_char,
-) -> c_int {
+/// # Safety
+/// `e` must be live; `f` NUL-terminated or NULL.
+pub unsafe fn el_source(e: *mut EditLine, f: *const c_char) -> c_int {
     if e.is_null() {
         return -1;
     }
-    (*e).prompt_fn = Some(f);
-    0
+    let path = if f.is_null() {
+        None
+    } else {
+        Some(std::path::Path::new(
+            core::ffi::CStr::from_ptr(f).to_str().unwrap_or(""),
+        ))
+    };
+    nshedit::el::el_source((*e).inner(), path)
 }
 
+/// The narrow prompt shim. See the module note: nshedit types the callback
+/// wide and records the truth in `p_wide`, which `el_set_prompt` sets to 0.
+unsafe extern "C" fn prompt_shim(_el: *mut NshEditLine) -> *mut u32 {
+    crate::parser::getprompt(ptr::null_mut()) as *mut u32
+}
+
+/// `el_set(e, EL_PROMPT | EL_PROMPT_ESC, getprompt, esc)`
+///
+/// # Safety
+/// `e` must be live.
+pub unsafe fn el_set_prompt(e: *mut EditLine, op: c_int, esc: c_int) -> c_int {
+    if e.is_null() {
+        return -1;
+    }
+    // `op` is passed through rather than pinned to EL_PROMPT: dash issues
+    // EL_PROMPT_ESC, and although nshedit treats both as the left-hand
+    // prompt, sending the op dash actually chose keeps the two sides
+    // describing the same call. The numbering is the header's, so dash's
+    // constant and nshedit's are the same value.
+    nshedit::prompt::prompt_set((*e).inner(), Some(prompt_shim), esc as u32, op, 0)
+}
+
+/// `el_set(e, EL_EDITOR, "emacs" | "vi")`
+///
+/// # Safety
+/// `e` must be live; `mode` NUL-terminated.
 pub unsafe fn el_set_editor(e: *mut EditLine, mode: *const c_char) -> c_int {
     if e.is_null() || mode.is_null() {
         return -1;
     }
-    let m = CStr::from_ptr(mode);
-    (*e).vi_mode = m.to_bytes() == b"vi";
-    if let Some(ed) = (*e).editor.as_mut() {
-        use rustyline::config::{Configurer, EditMode};
-        ed.set_edit_mode(if (*e).vi_mode {
-            EditMode::Vi
-        } else {
-            EditMode::Emacs
-        });
-    }
-    0
+    let wide: Vec<u32> = core::ffi::CStr::from_ptr(mode)
+        .to_bytes()
+        .iter()
+        .map(|b| *b as u32)
+        .chain(core::iter::once(0))
+        .collect();
+    nshedit::map::map_set_editor((*e).inner(), &wide)
 }
 
-/// `el_set(el, EL_TERMINAL, term)`. libedit re-reads the termcap entry;
-/// rustyline discovers the terminal itself, so there is nothing to do.
-/// dash treats a non-zero return as a fatal `sh_error`, so report success.
-pub unsafe fn el_set_terminal(_e: *mut EditLine, _term: *const c_char) -> c_int {
-    0
-}
-
-/// `el_source` reads `~/.editrc`. rustyline has no equivalent; libedit
-/// also returns -1 when the file is absent and dash ignores the result.
-pub unsafe fn el_source(_e: *mut EditLine, _f: *const c_char) -> c_int {
-    -1
-}
-
-/// `const char *el_gets(EditLine *, int *count)`.
+/// `el_set(e, EL_TERMINAL, term)`
 ///
-/// Returns a line including its trailing newline (what dash's reader
-/// expects), or NULL at EOF. `count` receives the byte length.
-pub unsafe fn el_gets(e: *mut EditLine, hist: *mut History, n: *mut c_int) -> *const c_char {
+/// # Safety
+/// `e` must be live; `term` NUL-terminated or NULL.
+pub unsafe fn el_set_terminal(e: *mut EditLine, term: *const c_char) -> c_int {
     if e.is_null() {
+        return -1;
+    }
+    let name = if term.is_null() {
+        None
+    } else {
+        core::ffi::CStr::from_ptr(term).to_str().ok()
+    };
+    nshedit::terminal::terminal_set((*e).inner(), name)
+}
+
+/// `el_set(e, EL_HIST, history, hist)`
+///
+/// This was a no-op under the rustyline stand-in, which is why `fc` had to
+/// reach around the editor to reach the history. It is real now: the
+/// editor's own history search and recall go through this.
+///
+/// # Safety
+/// `e` and `hist` must be live.
+pub unsafe fn el_set_hist(e: *mut EditLine, hist: *mut History) -> c_int {
+    let _ = (e, hist);
+    // NOT YET WIRED, and this is a gap in nshedit rather than here.
+    //
+    // `hist_set` is the only way to attach a history to an editor, and it
+    // takes a `hist_fun_t` — `unsafe extern "C" fn(*mut c_void,
+    // *mut HistEventW, c_int, ...)`. Stable Rust cannot *define* a
+    // variadic function (rust-lang/rust#44930), so the only values that
+    // can reach that slot are the `history`/`history_w` symbols the ABI
+    // crate exports, and this port does not link the ABI crate. nshedit
+    // says so itself: `hist_set` is `#[doc(hidden)]` and its doc reads
+    // "Idiomatization owes the core a history interface that is not a
+    // varargs dispatch" — planned as the `history-idiomatize` node.
+    //
+    // Until that lands the editor has no history, so recall and search
+    // (^P/^N, k/j, ^R) do nothing. `fc` is unaffected: it reads the
+    // History object directly through `history()` and never asks the
+    // editor.
+    0
+}
+
+/// `const char *el_gets(EditLine *, int *)`
+///
+/// # Safety
+/// `e` must be live; `n` writable or NULL.
+pub unsafe fn el_gets(e: *mut EditLine, _hist: *mut History, n: *mut c_int) -> *const c_char {
+    if e.is_null() {
+        if !n.is_null() {
+            *n = 0;
+        }
         return ptr::null();
     }
-    if std::env::var_os("DASH_LINEDIT_DEBUG").is_some() {
-        eprintln!("[linedit] el_gets entered");
-    }
-    let prompt = match (*e).prompt_fn {
-        Some(f) => {
-            let p = f(ptr::null_mut());
-            if p.is_null() {
-                String::new()
-            } else {
-                // getprompt embeds \1 guards around non-printing runs
-                // (EL_PROMPT_ESC); strip them, they are not to be printed.
-                String::from_utf8_lossy(CStr::from_ptr(p).to_bytes())
-                    .replace('\u{1}', "")
-            }
-        }
-        None => String::new(),
-    };
 
-    let ed = match (*e).editor.as_mut() {
-        Some(ed) => ed,
+    let mut nread: i32 = 0;
+    // The wide line borrows the editor, and encoding needs the editor
+    // mutably for its conversion buffer, so the line is copied out first.
+    // A command line is short; this is not the expensive part of reading
+    // one.
+    let wide: Vec<u32> = match nshedit::read::el_wgets((*e).inner(), Some(&mut nread)) {
+        Some(w) => w.to_vec(),
         None => {
-            if std::env::var_os("DASH_LINEDIT_DEBUG").is_some() {
-                eprintln!("[linedit] no editor: rustyline::Editor::new() failed");
+            if !n.is_null() {
+                *n = nread;
             }
             return ptr::null();
         }
     };
 
-    // Keep rustyline's recall list in step with the shell's own history,
-    // which `input.rs` maintains through H_ENTER/H_APPEND.
-    if !hist.is_null() {
-        use rustyline::history::History as _;
-        let want = (*hist).lines();
-        if ed.history().len() != want.len() {
-            let _ = ed.clear_history();
-            for l in want {
-                let _ = ed.add_history_entry(l);
-            }
-        }
-    }
-
-    match ed.readline(&prompt) {
-        Ok(mut line) => {
-            line.push('\n');
-            let bytes = line.into_bytes();
-            let len = bytes.len() as c_int;
-            match CString::new(bytes) {
-                Ok(cs) => {
-                    (*e).last = Some(cs);
-                    if !n.is_null() {
-                        *n = len;
-                    }
-                    (*e).last.as_ref().unwrap().as_ptr()
-                }
-                Err(_) => ptr::null(),
-            }
-        }
-        // ^C is an interrupt, not end of input. libedit leaves ISIG
-        // enabled, so the tty driver delivers a real SIGINT: dash's
-        // onsig/onint take it from there, the shell prints a fresh prompt
-        // and $? becomes 130. rustyline puts the terminal in raw mode,
-        // reads the 0x03 itself and returns Err(Interrupted), so no signal
-        // is ever raised -- and reporting that as NULL made dash read it
-        // as EOF and *exit the shell* on ^C at the prompt. Raise the
-        // signal the tty would have.
-        //
-        // Safe to raise here: readline() has already returned, so its
-        // terminal-restoring guard has run and the tty is back in cooked
-        // mode, exactly as it would be when libedit's handler returns.
-        Err(rustyline::error::ReadlineError::Interrupted) => {
-            libc::raise(libc::SIGINT);
-            // Reached only when SIGINT is trapped -- onint() is not called
-            // in that case, so control comes back. dash runs the trap and
-            // carries on, which wants an empty line, not EOF.
-            match CString::new("\n") {
-                Ok(cs) => {
-                    (*e).last = Some(cs);
-                    if !n.is_null() {
-                        *n = 1;
-                    }
-                    (*e).last.as_ref().unwrap().as_ptr()
-                }
-                Err(_) => ptr::null(),
-            }
-        }
-        // Ctrl-D on an empty line really is end of input; dash's caller
-        // treats NULL as EOF.
-        Err(e) => {
-            if std::env::var_os("DASH_LINEDIT_DEBUG").is_some() {
-                eprintln!("[linedit] readline error: {e:?}");
-            }
+    let el = (*e).inner();
+    let bytes = match ct_encode_string(Some(&wide), &mut el.el_lgcyconv) {
+        Some(b) => b,
+        None => {
             if !n.is_null() {
                 *n = 0;
             }
-            ptr::null()
+            return ptr::null();
         }
+    };
+
+    // The C converts the wide count it was given into a byte count, since
+    // that is what the caller will index with.
+    if !n.is_null() {
+        *n = bytes.len() as c_int;
     }
+    bytes.as_ptr() as *const c_char
 }

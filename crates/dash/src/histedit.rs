@@ -234,12 +234,17 @@ pub(crate) mod libedit {
 
     /// `EditLine *el_init(const char *, FILE *, FILE *, FILE *)`
     pub unsafe fn el_init(
-        _prog: *const c_char,
-        _fin: *mut FILE,
-        _fout: *mut FILE,
-        _ferr: *mut FILE,
+        prog: *const c_char,
+        fin: *mut FILE,
+        fout: *mut FILE,
+        ferr: *mut FILE,
     ) -> *mut EditLine {
-        crate::linedit::el_init()
+        crate::linedit::el_init(
+            prog,
+            fin as *mut libc::c_void,
+            fout as *mut libc::c_void,
+            ferr as *mut libc::c_void,
+        )
     }
 
     /// `void el_end(EditLine *)`
@@ -272,13 +277,13 @@ pub(crate) mod libedit {
     /// `histedit.c` actually issues are routed; anything else reports the
     /// failure libedit gives for an unknown op.
     macro_rules! el_set {
-        ($e:expr, $crate_op:expr, history, $hist:expr $(,)?) => {{
-            let _ = $hist;
-            0 as libc::c_int
-        }};
-        ($e:expr, $op:expr, $f:expr, $esc:expr $(,)?) => {
-            $crate::linedit::el_set_prompt($e, $f)
+        ($e:expr, $crate_op:expr, history, $hist:expr $(,)?) => {
+            $crate::linedit::el_set_hist($e, $hist)
         };
+        ($e:expr, $op:expr, $f:expr, $esc:expr $(,)?) => {{
+            let _ = $f;
+            $crate::linedit::el_set_prompt($e, $op, $esc)
+        }};
         ($e:expr, $op:expr, $arg:expr $(,)?) => {{
             let op = $op;
             if op == $crate::histedit::libedit::EL_EDITOR {
