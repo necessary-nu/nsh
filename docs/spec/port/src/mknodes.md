@@ -25,34 +25,37 @@ survive is the *set of node types and their field layouts*, and the
 deep-copy semantics that `copyfunc`/`freefunc` provide. In Rust an enum
 with per-variant data and a derived clone covers both.
 
-> [spec:dash:def:mknodes.error-fn]
+**Rules retired.** `delete-gen` removed `crates/nsh/src/gen/mknodes.rs`.
+The workspace has no `build.rs`, so nothing in the Rust build ran it, and
+`crates/nsh/src/nodes.rs` stopped being its output when
+[dec:nsh:owned-data] made the parse tree an owned enum — `%SIZES`,
+`%CALCSIZE` and `%COPY`, the three things this program emits, have no
+counterpart there. `src/Makefile.am` still builds and runs it for the C
+reference, which is untouched. The blocks below therefore carry no
+`[spec:dash:…]` ids — each is a C signature followed by its semantics —
+and are kept because they still describe `src/mknodes.c`.
+
 > static void error(const char *msg, ...)
 
-> [spec:dash:sem:mknodes.error-fn]
 > Print `line <n>: ` followed by the printf-style message and a newline
 > to stderr, then `exit(2)`. Does not return.
 
-> [spec:dash:def:mknodes.field]
 > struct field {
 >   char *name;
 >   int type;
 >   char *decl;
 > }
 
-> [spec:dash:def:mknodes.indent-fn]
 > static void indent(int amount, FILE *fp)
 
-> [spec:dash:sem:mknodes.indent-fn]
 > Emit `amount` columns of indentation as tabs while at least 8 remain,
 > then one space per remaining column. The space loop is
 > `while (--amount >= 0)`, which pre-decrements and so emits exactly the
 > remaining count — `indent(12)` produces one tab and four spaces,
 > landing on column 12.
 
-> [spec:dash:def:mknodes.main-fn]
 > int main(int argc, char **argv)
 
-> [spec:dash:sem:mknodes.main-fn]
 > Require exactly two arguments, else `error("usage: mknodes file")`.
 > Open the node description file, then read it line by line: a line
 > starting with a space or tab is a field (`parsefield`), a non-empty
@@ -60,17 +63,13 @@ with per-variant data and a derived clone covers both.
 > line is skipped. Then `output(argv[2])` with the template file name,
 > and exit 0.
 
-> [spec:dash:def:mknodes.nextfield-fn]
 > static int nextfield(char *buf)
 
-> [spec:dash:sem:mknodes.nextfield-fn]
 > Read the next whitespace-delimited word from the current line into
 > `buf`, advancing `linep`. Returns whether a non-empty word was found.
 
-> [spec:dash:def:mknodes.outfunc-fn]
 > static void outfunc(FILE *cfile, int calcsize)
 
-> [spec:dash:sem:mknodes.outfunc-fn]
 > Emit the body of either `calcsize` (`calcsize` non-zero) or `copynode`
 > (zero) — the two halves of the deep copy, which must walk the tree
 > identically so that the size computed by the first is exactly what the
@@ -94,10 +93,8 @@ with per-variant data and a derived clone covers both.
 >
 > The copy pass finishes with `new->type = n->type;`.
 
-> [spec:dash:def:mknodes.output-fn]
 > static void output(char *file)
 
-> [spec:dash:sem:mknodes.output-fn]
 > Write `nodes.h` and `nodes.c`.
 >
 > `nodes.h` gets the banner, one `#define <NODENAME> <n>` per node type
@@ -117,19 +114,15 @@ with per-variant data and a derived clone covers both.
 > silently renumbers every node — and `eval.c` has `#error` checks that
 > depend on `NAND`, `NOR` and `NSEMI` staying consecutive.
 
-> [spec:dash:def:mknodes.outsizes-fn]
 > static void outsizes(FILE *cfile)
 
-> [spec:dash:sem:mknodes.outsizes-fn]
 > Emit `static const short nodesize[N]`, one entry per node type giving
 > `SHELL_ALIGN(sizeof (struct <tag>))` — the aligned size of whichever
 > struct that node type uses. Indexed by node type at run time to size
 > each copy.
 
-> [spec:dash:def:mknodes.parsefield-fn]
 > static void parsefield(void)
 
-> [spec:dash:sem:mknodes.parsefield-fn]
 > Parse one field line into the current struct. Errors if there is no
 > current struct or it is already complete, or if the name or type word
 > is missing.
@@ -143,10 +136,8 @@ with per-variant data and a derived clone covers both.
 > is taken verbatim; for the others, anything left on the line is
 > `error("Garbage at end of line")`.
 
-> [spec:dash:def:mknodes.parsenode-fn]
 > static void parsenode(void)
 
-> [spec:dash:sem:mknodes.parsenode-fn]
 > Parse a node type declaration: a node name and a struct tag, with
 > anything further being an error. First mark the previous struct
 > complete if it had any fields — which is what allows several node names
@@ -157,28 +148,21 @@ with per-variant data and a derived clone covers both.
 > and becomes current. Either way the node's struct pointer is recorded
 > and the node count advances.
 
-> [spec:dash:def:mknodes.readline-fn]
 > static int readline(void)
 
-> [spec:dash:sem:mknodes.readline-fn]
 > Read one line into the buffer, returning 0 at end of file. Truncate at
 > the first `#` or newline, then strip trailing spaces and tabs, so a
 > comment-only or blank line becomes empty. Reset the field cursor,
 > increment `linno`, and error if the result exceeds `BUFLEN`.
 
-> [spec:dash:def:mknodes.savestr-fn]
 > static char * savestr(const char *s)
 
-> [spec:dash:sem:mknodes.savestr-fn]
 > `malloc` a copy of `s`, calling `error("Out of space")` on failure.
 
-> [spec:dash:def:mknodes.skipbl-fn]
 > static void skipbl(void)
 
-> [spec:dash:sem:mknodes.skipbl-fn]
 > Advance `linep` past spaces and tabs.
 
-> [spec:dash:def:mknodes.str]
 > struct str {
 >   char *tag;
 >   int nfields;

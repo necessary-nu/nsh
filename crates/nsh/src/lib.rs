@@ -7,7 +7,7 @@
 //! the rule it implements; the corresponding claims for the C source
 //! live in `plan/annotations.styx`.
 //!
-//! It is not a library yet in any sense but Cargo's. Thirty-five public
+//! It is not a library yet in any sense but Cargo's. Thirty-three public
 //! modules is not an API, it is the transliteration left open — see
 //! [dec:nsh:public-surface]. `docs/idiomatization.md` is the path from
 //! here to a surface an embedder can hold, and the properties that decide
@@ -44,9 +44,6 @@ pub mod nodes;
 pub mod signames;
 pub mod syntax;
 
-// ---- build-time generators (literal ports of src/mk*.c) --------------
-pub mod gen;
-
 // ---- shell state -----------------------------------------------------
 pub mod alias;
 pub mod cd;
@@ -55,7 +52,6 @@ pub mod input;
 pub mod mail;
 pub mod options;
 pub mod redir;
-pub mod show;
 pub mod trap;
 pub mod var;
 

@@ -20,10 +20,20 @@ signals are handled specially and are disabled entirely under
 names, including the `EXIT` alias at 0 and the numeric fallback; the
 generator itself need not be reproduced.
 
-> [spec:dash:def:mksignames.initialize-signames-fn]
+**Rules retired.** `delete-gen` removed
+`crates/nsh/src/gen/mksignames.rs`. The workspace has no `build.rs`, so
+nothing in the Rust build ran it, and it emitted C rather than Rust, so
+it was never the authority for `crates/nsh/src/signames.rs`. That table's
+provenance is instead asserted against this program's output from the
+reference build, in
+`signames.rs::tests::the_table_is_the_c_generators_output`.
+`src/Makefile.am` still builds and runs this program for the C reference,
+which is untouched. The blocks below therefore carry no `[spec:dash:…]`
+ids — each is a C signature followed by its semantics — and are kept
+because they still describe `src/mksignames.c`.
+
 > void initialize_signames ()
 
-> [spec:dash:sem:mksignames.initialize-signames-fn]
 > Populate `signal_names[]`. Clear every entry from 1 upward, then set
 > index 0 to `"EXIT"`.
 >
@@ -46,20 +56,16 @@ generator itself need not be reproduced.
 > number as its name, allocated with `malloc(18)` — so every slot has a
 > usable string and `kill -l` never prints a NULL.
 
-> [spec:dash:def:mksignames.main-fn]
 > int main(int argc, char **argv)
 
-> [spec:dash:sem:mksignames.main-fn]
 > Record `argv[0]` as `progname` for the generated file's header. With no
 > argument the output is `signames.c`; with one it is that name; with
 > more, print `"Usage: %s [output-file]"` and `exit(1)`. Open the file,
 > reporting `"%s: %s: cannot open for writing"` and exiting on failure,
 > then `initialize_signames()`, `write_signames(stream)`, and exit 0.
 
-> [spec:dash:def:mksignames.write-signames-fn]
 > void write_signames(FILE *stream)
 
-> [spec:dash:sem:mksignames.write-signames-fn]
 > Write the generated file: a "created automatically, do not edit"
 > header naming the program, `#include <signal.h>`, then
 > `const char *const signal_names[NSIG + 1] = { … };` with one quoted

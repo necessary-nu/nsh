@@ -889,14 +889,8 @@ unsafe fn poplocalvars() {
         }
         next = (*lvp).next;
         vp = (*lvp).vp;
-        crate::TRACE!(
-            "poplocalvar %s\n",
-            if !vp.is_null() {
-                (*vp).text
-            } else {
-                b"-\0".as_ptr() as *const c_char
-            }
-        );
+        /* `TRACE(("poplocalvar %s\n", vp ? vp->text : "-"));` — `#ifdef
+         * DEBUG` in `shell.h`, and the dash build does not define it. */
         if vp.is_null() {
             /* $- saved */
             libc::memcpy(

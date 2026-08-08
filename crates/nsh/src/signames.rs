@@ -1,12 +1,13 @@
 //! Literal port of `src/signames.c`.
 //!
-//! `signames.c` is *generated* at build time by `src/mksignames.c` (see
-//! `crate::gen::mksignames`, `docs/spec/port/src/mksignames.md`).  It is not
-//! checked-in C source, so nothing here carries `[spec:dash:…]` annotations;
-//! only the generator does.
+//! `signames.c` is *generated* at build time by `src/mksignames.c`
+//! (`docs/spec/port/src/mksignames.md`).  It is not checked-in C source, so
+//! nothing here carries `[spec:dash:…]` annotations.
 //!
 //! The table below is the real generator's output on Linux/glibc, where
-//! `NSIG` is 65, `SIGRTMIN` is 34 and `SIGRTMAX` is 64.  As in the C:
+//! `NSIG` is 65, `SIGRTMIN` is 34 and `SIGRTMAX` is 64; the test at the foot
+//! of this file asserts it against the `signames.c` the reference build
+//! generated.  As in the C:
 //!
 //! * index 0 is `"EXIT"`, the pseudo-signal for the exit trap (which is why
 //!   `decode_signal` takes a `minsig` argument);
@@ -103,3 +104,53 @@ pub static signal_names: [&CStr; NSIG + 1] = [
     c"RTMAX",
     c"", // (char *)0x0
 ];
+
+// ---------------------------------------------------------------------
+// Provenance: the table against the C generator's own output.
+//
+// Same shape as `crate::syntax`: the reference build runs the real
+// `mksignames` and leaves `signames.c` beside the binary the differential
+// harness compares against, so the module's claim is checked on the table
+// the shell actually indexes.
+// ---------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The C generator's output from the reference build, if built.
+    fn reference(name: &str) -> Option<String> {
+        let root = std::env::var("DASH_ROOT")
+            .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../..").to_string());
+        std::fs::read_to_string(format!("{root}/tests/.build/ref/src/{name}")).ok()
+    }
+
+    #[test]
+    fn the_table_is_the_c_generators_output() {
+        let text = match reference("signames.c") {
+            Some(t) => t,
+            None => {
+                eprintln!(
+                    "note: tests/.build/ref absent, skipped the signames.c comparison \
+                     (run tests/build-reference.sh for the stronger assertion)"
+                );
+                return;
+            }
+        };
+        let head = "const char *const signal_names[NSIG + 1] = {";
+        let start = text.find(head).expect("declaration not found") + head.len();
+        let len = text[start..].find("(char *)0x0").expect("NULL sentinel not found");
+        let theirs: Vec<&str> = text[start..start + len]
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix('"'))
+            .filter_map(|l| l.strip_suffix("\","))
+            .collect();
+
+        // The C writes one name per signal up to LASTSIG and then the NULL
+        // sentinel that this port spells as the empty string at NSIG.
+        assert_eq!(theirs.len(), LASTSIG + 1, "entry count");
+        for (i, name) in theirs.iter().enumerate() {
+            assert_eq!(signal_names[i].to_bytes(), name.as_bytes(), "signal_names[{i}]");
+        }
+        assert_eq!(signal_names[NSIG].to_bytes(), b"");
+    }
+}

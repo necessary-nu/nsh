@@ -16,6 +16,20 @@ through to them.
 `conv_escape` is declared here but defined in `src/bltin/printf.c`; its
 rule is anchored to the header, and `printf.md` cross-references it.
 
+**Twenty rules retired.** `delete-gen` removed the twenty exported items
+of `crates/nsh/src/system.rs` that had no caller anywhere in the crate:
+the twelve `ctype` wrappers, `stpcpy`, `strsignal`, `strtod`, `killpg`,
+`sysconf`, `tee`, `memfd_create` and `fnmatch`. Every caller goes to
+`libc::` directly, and for all but `fnmatch` the reference build's
+`config.h` defines the matching `HAVE_*`, so the C compiles none of them
+either; `HAVE_FNMATCH` is undefined, but the sole call site sits behind
+`if (FNMATCH_IS_ENABLED)`, which is 0. Their blocks below therefore carry
+no `[spec:dash:…]` ids — each is a C signature followed by its semantics
+— and are kept because they still describe `src/system.c` and
+`src/system.h`. `mempcpy`, `strchrnul`, `bsearch`, `sigclearmask`,
+`conv_escape` and the `glob64` group are still implemented and still
+carry their rules.
+
 > [spec:dash:def:system.bsearch-fn]
 > void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int (*cmp)(const void *, const void *))
 
@@ -73,10 +87,8 @@ rule is anchored to the header, and `printf.md` cross-references it.
 > (the caller handles quote removal); otherwise an unrecognised character
 > yields a literal backslash followed by that character.
 
-> [spec:dash:def:system.fnmatch-fn]
 > static inline int fnmatch(const char *pattern, const char *string, int flags)
 
-> [spec:dash:sem:system.fnmatch-fn]
 > Stub returning -1, compiled only where libc has no `fnmatch`. The shell
 > does its own pattern matching in `expand.c`, so this exists purely to
 > satisfy the link.
@@ -139,97 +151,69 @@ rule is anchored to the header, and `printf.md` cross-references it.
 > Empty stub, compiled only where libc has no `glob`: the fallback
 > `glob64` never allocates, so there is nothing to release.
 
-> [spec:dash:def:system.isalnum-fn]
 > int isalnum(int c)
 
-> [spec:dash:sem:system.isalnum-fn]
 > Out-of-line wrapper around the platform's `_isalnum` macro, compiled
 > only without `HAVE_ISALPHA`. Semantics are the C standard's: true for
 > letters and digits in the current locale.
 
-> [spec:dash:def:system.isalpha-fn]
 > int isalpha(int c)
 
-> [spec:dash:sem:system.isalpha-fn]
 > Out-of-line wrapper around `_isalpha`; standard C semantics.
 
-> [spec:dash:def:system.isblank-fn]
 > int isblank(int c)
 
-> [spec:dash:sem:system.isblank-fn]
 > Two variants exist. Where the platform declares `isblank`
 > (`HAVE_DECL_ISBLANK`) but lacks `HAVE_ISALPHA`, this wraps `_isblank`.
 > Where it is not declared at all, it is defined directly as
 > `c == ' ' || c == '\t'`.
 
-> [spec:dash:def:system.iscntrl-fn]
 > int iscntrl(int c)
 
-> [spec:dash:sem:system.iscntrl-fn]
 > Out-of-line wrapper around `_iscntrl`; standard C semantics.
 
-> [spec:dash:def:system.isdigit-fn]
 > int isdigit(int c)
 
-> [spec:dash:sem:system.isdigit-fn]
 > Out-of-line wrapper around `_isdigit`; standard C semantics. Note the
 > shell's own `is_digit` in `shell.h` is a separate, locale-independent
 > test used in parsing.
 
-> [spec:dash:def:system.isgraph-fn]
 > int isgraph(int c)
 
-> [spec:dash:sem:system.isgraph-fn]
 > Out-of-line wrapper around `_isgraph`; standard C semantics.
 
-> [spec:dash:def:system.islower-fn]
 > int islower(int c)
 
-> [spec:dash:sem:system.islower-fn]
 > Out-of-line wrapper around `_islower`; standard C semantics.
 
-> [spec:dash:def:system.isprint-fn]
 > int isprint(int c)
 
-> [spec:dash:sem:system.isprint-fn]
 > Out-of-line wrapper around `_isprint`; standard C semantics.
 
-> [spec:dash:def:system.ispunct-fn]
 > int ispunct(int c)
 
-> [spec:dash:sem:system.ispunct-fn]
 > Out-of-line wrapper around `_ispunct`; standard C semantics.
 
-> [spec:dash:def:system.isspace-fn]
 > int isspace(int c)
 
-> [spec:dash:sem:system.isspace-fn]
 > Out-of-line wrapper around `_isspace`; standard C semantics.
 
-> [spec:dash:def:system.isupper-fn]
 > int isupper(int c)
 
-> [spec:dash:sem:system.isupper-fn]
 > Out-of-line wrapper around `_isupper`; standard C semantics.
 
-> [spec:dash:def:system.isxdigit-fn]
 > int isxdigit(int c)
 
-> [spec:dash:sem:system.isxdigit-fn]
 > Out-of-line wrapper around `_isxdigit`; standard C semantics.
 
-> [spec:dash:def:system.killpg-fn]
 > static inline int killpg(pid_t pid, int signal)
 
-> [spec:dash:sem:system.killpg-fn]
 > Send `signal` to the process group `pid`: `kill(-pid, signal)`. Under
 > `DEBUG`, `abort()` on a negative `pid`, since negating it again would
 > address the wrong target. Compiled only without `HAVE_KILLPG`.
 
-> [spec:dash:def:system.memfd-create-fn]
 > static inline int memfd_create(const char *name, unsigned int flags)
 
-> [spec:dash:sem:system.memfd-create-fn]
 > Stub returning -1, compiled only without `HAVE_MEMFD_CREATE`.
 > `sh_pipe` treats the failure as "no memfd available" and falls back to
 > a real pipe, so here documents still work.
@@ -251,10 +235,8 @@ rule is anchored to the header, and `printf.md` cross-references it.
 > where the pragma works — and otherwise
 > `sigprocmask(SIG_SETMASK, &empty_set, 0)`.
 
-> [spec:dash:def:system.stpcpy-fn]
 > char *stpcpy(char *dest, const char *src)
 
-> [spec:dash:sem:system.stpcpy-fn]
 > Copy `src` into `dest` and return a pointer to the terminating NUL.
 > Implemented as: measure the length, write the NUL at `dest[len]`, then
 > `mempcpy` the `len` bytes — so the return value is the address of the
@@ -269,35 +251,27 @@ rule is anchored to the header, and `printf.md` cross-references it.
 > shell relies on this heavily to split `"name=value"` without a
 > not-found branch.
 
-> [spec:dash:def:system.strsignal-fn]
 > char *strsignal(int sig)
 
-> [spec:dash:sem:system.strsignal-fn]
 > Return a description of signal `sig`. Use `sys_siglist[sig]` when `sig`
 > is in range and the entry is non-NULL; otherwise format
 > `"Signal %d"` into a 19-byte static buffer and return that. The static
 > buffer means the result is only valid until the next call.
 
-> [spec:dash:def:system.strtod-fn]
 > static inline double strtod(const char *nptr, char **endptr)
 
-> [spec:dash:sem:system.strtod-fn]
 > Stub compiled only without `HAVE_STRTOD`: consume nothing (set
 > `*endptr = nptr`) and return 0, so every input parses as "no digits
 > found".
 
-> [spec:dash:def:system.sysconf-fn]
 > long sysconf(int name)
 
-> [spec:dash:sem:system.sysconf-fn]
 > Stub compiled only without `HAVE_SYSCONF`: raise
 > `sh_error("no sysconf for: %d", name)`, which does not return. Reaching
 > it means the shell needed a limit the platform cannot report.
 
-> [spec:dash:def:system.tee-fn]
 > static inline ssize_t tee(int fd_in, int fd_out, size_t len, unsigned int flags)
 
-> [spec:dash:sem:system.tee-fn]
 > Stub returning -1, compiled only without `HAVE_TEE`. `input.c` uses the
 > failure — specifically the resulting `EINVAL` from `stdin_tee` — to fall
 > back to unbuffered, one-byte-at-a-time reads on a shared stdin.
