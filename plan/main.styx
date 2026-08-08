@@ -2064,6 +2064,13 @@ children (
                                 kind @status
                                 text "Todo → Doing (nplan start)"
                             }
+
+                            {
+                                at 2026-08-08T21:32:05.680586982Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Partial on wt/glob-buffer (b6f6449), still Doing. expand.rs's glob buffer is owned: expmeta's cp/enddir into the stack block are a static BString plus a length, growstackto is reserve, stnputs is a set_len-to-the-cursor plus append, and addfnamealt's grabstackstr + STARTSTACKSTR + stnputs re-seed is a copy into the region plus set_len(expdir_len). String-builder sites in expand.rs 16 -> 8, and all eight are over owned buffers -- no growstackto/stnputs/stackblock/grabstackstr from memalloc is left in the file, and the two macro transcriptions the glob buffer needed are deleted. crate::memalloc:: in expand.rs 23 -> 19: zero string builder, two grab seams (grabexpdest, addfnamealt) copying an owned buffer into the region, eight stalloc/ckmalloc for strlist/ifsregion/wcifs and _rmescapes' HEAP arm, nine stack marks. All nineteen are delete-memalloc's. The invariant the buffer is held to, since expmeta recurses one frame per path component: at every point where it can grow, its length is the current frame's expdir_len -- asserted on entry to expmeta, re-established by hand where expdir_len changes mid-frame, and derived from the cursor by the stnputs transcription. Four load-bearing sites written up on plan/decisions/owned-data.md: stnputs takes its length in its cursor (which is how a frame recovers from its own recursion -- appending at Vec::len() emits a/b/c/b/...); addfnamealt's re-seed is the allocator's price, not the algorithm's; the growstackto reservation is exact and an assertion on Vec::capacity() is vacuous because Vec over-allocates too, so both expmeta_rmescapes call sites assert against len; and the top-level call was getting a clean buffer by accident, so expandmeta clears. crates/nsh/tests/glob_buffer.rs is new: three cases, one per property, each confirmed to fail under a mutation of the property it names. Still not converted, all outside this branch's scope: bltin/printf.rs, miscbltin.rs, parser.rs, var.rs, output.rs, input.rs. Fully gated: PASS=61498 FAIL=0 FLAKY=22 XFAIL=1 (sorted_tables in aud_state_var, pre-existing), POSIX 54/657 against the C's 56/655 with the same two differentials, ptydiff 31/0, register 28/28."
+                            }
                         )
                     }
 
