@@ -543,9 +543,35 @@ and one commit is what §5 says not to do here.
     `xasprintf` to get the field width right and then memcpies the real
     bytes over them, because the real bytes can contain NUL. Three cursors
     into the same region at once.
-  * **`miscbltin.rs`.** `readcmd` builds its line in the region and hands
-    it to `ifsbreakup`, so it shares the `strlist` seam above.
+  * **`miscbltin.rs`'s `strlist` chain.** `readcmd`'s line is owned, but
+    `ifsbreakup` still `stalloc`s the `strlist` nodes that point into it —
+    the same seam as `expandarg`'s result above.
+  * **`output.rs`'s `xvasprintf`.** Its `stalloc` is the region's, and it
+    is sized to force a fresh block; see the `X`s entry below. It goes
+    with `delete-memalloc`.
   * **`parser.rs`.** Eight sites inside `getmbc` and `dollarsq_escape`,
     which write through a raw cursor into a `BString`'s spare capacity and
     commit with `set_len`. The reservation has to stay exactly the C's
     number; see the `getmbc`/`conv_escape` entry above.
+
+## What this cost in the port: the builtins' buffers
+
+Written after `miscbltin.rs`'s `read` line and `bltin/printf.rs`'s three
+buffers became owned. Same rule as above: each entry is a place where the
+C's *structure* was doing work its *text* did not admit to.
+
+### `readcmd_handle_line`'s `s` is the cursor, not the line
+
+The doc comment above it says `@param line complete line of input`. It is
+not. `readcmd` calls it with `p + 1` — the cursor one past the terminator
+`STACKSTRNUL` just wrote — and the first statement of the body is
+
+    s = grabstackstr(s);
+
+which is `stalloc(s - stackblock())`, so the parameter arrives as a
+*length* and comes back as the line's base. The call does the other half
+too: it reserves those bytes so that the `stalloc` `ifsbreakup` performs
+for each `strlist` node lands above them rather than on top of the line it
+is splitting. An owned line is already its own base and has nothing to
+reserve, and the `strlist`s that point into it are kept alive by the
+caller holding it rather than by the enclosing `popstackmark`.

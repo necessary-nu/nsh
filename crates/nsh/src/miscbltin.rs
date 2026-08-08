@@ -14,14 +14,24 @@
 //!     since the shell option is reached as `optlist[...]`.
 
 use core::ptr::null_mut;
-use libc::{c_char, c_int, c_uint, size_t};
+use libc::{c_char, c_int, c_uint};
+
+use bstr::BString;
 
 use crate::error::{INTOFF, INTON};
 use crate::expand::{arglist, strlist};
-use crate::memalloc::{growstackstr, makestrspace, stackblock, stalloc};
 
 /* glibc <limits.h> */
 const MB_LEN_MAX: usize = 16;
+
+/// `readcmd`'s `CHECKSTRSPACE((MB_LEN_MAX > 16 ? MB_LEN_MAX : 16) + 4, p)`.
+///
+/// `getmbc` writes through the bare `char *` this makes room for, so the
+/// number has to stay the C's: with `mode` 0 it puts the character's bytes at
+/// `out + 2` and the closing length and marker at `out + 2 + ml` and
+/// `out + 3 + ml`, which for `ml == MB_LEN_MAX` is the twentieth byte and not
+/// one fewer.
+const READ_MBSLOP: usize = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 4;
 
 // ---------------------------------------------------------------------
 
@@ -37,13 +47,19 @@ const MB_LEN_MAX: usize = 16;
 
 // [spec:dash:def:miscbltin.readcmd-handle-line-fn]
 // [spec:dash:sem:miscbltin.readcmd-handle-line-fn]
-unsafe fn readcmd_handle_line(s: *mut c_char, ac: c_int, ap: *mut *mut c_char) {
+unsafe fn readcmd_handle_line(line: &mut BString, ac: c_int, ap: *mut *mut c_char) {
     let mut ap: *mut *mut c_char = ap;
     let mut arglist: arglist = core::mem::zeroed();
     let mut sl: *mut strlist;
 
-    /* grabstackstr(s) */
-    let s: *mut c_char = stalloc(s as usize - stackblock() as usize) as *mut c_char;
+    /* `s = grabstackstr(s)`.  The C is handed the cursor one *past* the
+     * terminator and turns it into the block's base, which both names the
+     * line and reserves it so that `ifsbreakup`'s `stalloc`s land above it.
+     * An owned line is already its own base and there is nothing to reserve;
+     * the `strlist`s `ifsbreakup` builds point into it, and it outlives them
+     * because the caller holds it. */
+    let s: *mut c_char = line.as_mut_ptr() as *mut c_char;
+    debug_assert!(!line.is_empty(), "readcmd always pushes the terminator");
 
     arglist.lastp = &mut arglist.list;
 
@@ -100,7 +116,6 @@ pub unsafe fn readcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     let mut status: c_int;
     let ap: *mut *mut c_char;
     let mut rflag: c_int;
-    let mut p: *mut c_char;
     let mut i: c_int;
 
     rflag = 0;
@@ -125,8 +140,10 @@ pub unsafe fn readcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     }
 
     status = 0;
-    /* STARTSTACKSTR(p) */
-    p = stackblock() as *mut c_char;
+    /* `STARTSTACKSTR(p)`.  The line is an owned buffer, so the C's cursor is
+     * its length and `stackblock()` its base: every `p - stackblock()` below
+     * is `line.len()`, and `USTPUTC` is `push`. */
+    let mut line = BString::default();
 
     crate::input::pushstdin();
 
@@ -145,14 +162,9 @@ pub unsafe fn readcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         if pc == L_BODY {
             let ml: c_uint;
 
-            /* CHECKSTRSPACE((MB_LEN_MAX > 16 ? MB_LEN_MAX : 16) + 4, p) */
-            {
-                let _l: size_t = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 4;
-                let _m: size_t = crate::memalloc::sstrend as usize - p as usize;
-                if _l > _m {
-                    p = makestrspace(_l, p);
-                }
-            }
+            /* CHECKSTRSPACE((MB_LEN_MAX > 16 ? MB_LEN_MAX : 16) + 4, p) —
+             * the room `getmbc` writes into through the raw cursor below. */
+            line.reserve(READ_MBSLOP);
             c = crate::input::pgetc();
             if c == crate::syntax::PEOF {
                 status = 1;
@@ -162,9 +174,14 @@ pub unsafe fn readcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
                 pc = L_BODY;
                 continue;
             }
-            ml = crate::parser::getmbc(c, p, 0);
+            let at = line.len();
+            ml = crate::parser::getmbc(c, line.as_mut_ptr().add(at) as *mut c_char, 0);
             if ml != 0 {
-                p = p.add(ml as usize);
+                /* `p += ml` is the commit of what `getmbc` wrote past the
+                 * cursor; a zero return leaves the scribble uncommitted, for
+                 * the next write to overwrite exactly as the C's does. */
+                debug_assert!(ml as usize <= READ_MBSLOP);
+                line.set_len(at + ml as usize);
                 pc = L_RECORD; /* goto record */
             } else if newloc >= startloc {
                 if c == '\n' as c_int {
@@ -173,7 +190,7 @@ pub unsafe fn readcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
                     pc = L_PUT; /* goto put */
                 }
             } else if rflag == 0 && c == '\\' as c_int {
-                newloc = (p as usize - stackblock() as usize) as c_int;
+                newloc = line.len() as c_int;
                 pc = L_BODY;
                 continue;
             } else if c == '\n' as c_int {
@@ -191,12 +208,10 @@ pub unsafe fn readcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
             .is_null()
             {
                 /* USTPUTC(CTLESC, p) */
-                *p = crate::parser::CTLESC as c_char;
-                p = p.add(1);
+                line.push(crate::parser::CTLESC as u8);
             }
             /* USTPUTC(c, p) */
-            *p = c as c_char;
-            p = p.add(1);
+            line.push(c as u8);
             pc = L_RECORD;
         }
         if pc == L_RECORD {
@@ -211,22 +226,19 @@ pub unsafe fn readcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         }
         if pc == L_START {
             // start:
-            startloc = (p as usize - stackblock() as usize) as c_int;
+            startloc = line.len() as c_int;
             newloc = startloc - 1;
             pc = L_BODY; /* end of the for body */
         }
     }
     crate::input::popfile();
-    crate::expand::recordregion(startloc, (p as usize - stackblock() as usize) as c_int, 0);
-    /* STACKSTRNUL(p) */
-    if p == crate::memalloc::sstrend {
-        p = growstackstr() as *mut c_char;
-        *p = b'\0' as c_char;
-    } else {
-        *p = b'\0' as c_char;
-    }
+    crate::expand::recordregion(startloc, line.len() as c_int, 0);
+    /* `STACKSTRNUL(p)` writes the terminator without advancing, and the call
+     * below then passes `p + 1` — the length *including* it.  Pushing is both
+     * halves at once. */
+    line.push(b'\0');
     readcmd_handle_line(
-        p.add(1),
+        &mut line,
         argc - ((ap as usize - argv as usize) / core::mem::size_of::<*mut c_char>()) as c_int,
         ap,
     );

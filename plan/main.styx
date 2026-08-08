@@ -2057,6 +2057,13 @@ children (
                                 kind @note
                                 text "Partial on wt/owned-strings2 (907d761, 5149923), still Doing. expand.rs's expansion buffer is owned: expdest is the length of a static BString, memtodest/strtodest/cvtnum take &mut BString, and grabstackstr(expdest) is a copy into the region -- the seam with delete-memalloc, since ifsbreakup/expandmeta/strlist are still stalloc'd C structs. String-builder sites: expand.rs 42 -> 16, redir.rs 1 -> 0. Of the 16 left in expand.rs, six are the glob buffer (expmeta's growstackto/stnputs and addfnamealt's grabstackstr/stackblock/stnputs), four are the stackblock()/grabstackstr macro transcriptions it needs, and six are the owned buffer's own helpers, which touch no region. crate::memalloc:: in expand.rs 28 -> 23: five string builder (all glob), one the grabstackstr seam, eight stalloc/ckmalloc for strlist/ifsregion/wcifs and _rmescapes' HEAP arm, nine stack marks. Not converted: expand.rs's glob buffer (now separable -- expmeta's memtodest output is scratch that stnputs overwrites, so it moved to its own buffer), bltin/printf.rs 26 (print_escape_str formats a run of X's through xasprintf and memcpies the real bytes over them, three cursors into one region), miscbltin.rs 8 (readcmd, shares the ifsbreakup/strlist seam), parser.rs 8 (getmbc/dollarsq_escape writing into a BString's spare capacity), var.rs 4 and output.rs 3 and input.rs 1. var.rs and alias.rs were off-limits this pass -- another agent is converting those tables to BTreeMap. Five load-bearing sites written up on plan/decisions/owned-data.md, the sharpest being that _rmescapes leaves expdest pointing into a ckmalloc'd block expandmeta then frees, and that expandarg(n, NULL, flag) has two readers outside expand.c (redir.c:openhere and parser.c:expandstr) -- missing the second costs the \"+ \" on every set -x line. crates/nsh/tests/expansion_buffer.rs is new: four cases pinning what the differential corpus cannot aim at, per docs/idiomatization.md §5. Both commits fully gated: PASS=61498 FAIL=0 XFAIL=0, POSIX 54/657 against the C's 56/655 with the same two differentials, ptydiff 31/0, register 13/13."
                             }
+
+                            {
+                                at 2026-08-08T14:13:57.757798607Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
                         )
                     }
 
