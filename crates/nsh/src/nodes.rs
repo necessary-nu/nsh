@@ -134,6 +134,12 @@ pub type heredoc_body = Rc<OnceCell<Node>>;
 pub struct NodeText(BString);
 
 impl NodeText {
+    /// Take ownership of a word's bytes. `text` ends in the NUL the parser
+    /// wrote, which is part of the value.
+    pub fn new(text: BString) -> NodeText {
+        NodeText(text)
+    }
+
     /// Copy a NUL-terminated C string, NUL included.
     ///
     /// # Safety
@@ -562,5 +568,73 @@ pub unsafe fn reffunc(f: *const funcnode) {
 pub unsafe fn freefunc(f: *const funcnode) {
     if !f.is_null() {
         Rc::decrement_strong_count(f);
+    }
+}
+
+// ---------------------------------------------------------------------
+// A word's bytes are not text, and the trailing NUL is part of the value.
+// Both of those are load-bearing for every reader that is still C-shaped,
+// and neither is visible to the differential harness as anything other
+// than "the shell changed".
+// ---------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::{CTLENDVAR, CTLESC, CTLQUOTEMARK, CTLVAR};
+
+    /// The bytes `"$x"` leaves the parser as: they are invalid UTF-8 by
+    /// construction, so nothing on this path may validate them as text.
+    fn quoted_var() -> BString {
+        BString::from(vec![
+            CTLQUOTEMARK as u8,
+            CTLVAR as u8,
+            b'x',
+            CTLENDVAR as u8,
+            CTLQUOTEMARK as u8,
+            0,
+        ])
+    }
+
+    #[test]
+    fn node_text_keeps_the_in_band_control_bytes() {
+        let t = NodeText::new(quoted_var());
+        assert_eq!(t.as_bstr(), &quoted_var()[..5]);
+        assert!(core::str::from_utf8(t.as_bstr()).is_err());
+        // `as_ptr` hands the readers that still take a `char *` a string
+        // that terminates where the parser said it did.
+        unsafe {
+            assert_eq!(libc::strlen(t.as_ptr()), 5);
+            assert_eq!(*t.as_ptr() as c_int, CTLQUOTEMARK);
+        }
+    }
+
+    #[test]
+    fn node_text_from_ptr_copies_the_terminator() {
+        let src = quoted_var();
+        let t = unsafe { NodeText::from_ptr(src.as_ptr() as *const c_char) };
+        assert_eq!(t.as_bstr(), &src[..5]);
+        assert_ne!(t.as_ptr() as *const u8, src.as_ptr());
+    }
+
+    #[test]
+    fn cloning_a_node_copies_the_bytes_rather_than_sharing_them() {
+        // `copyfunc` is why this matters: a function definition outlives
+        // the text it was parsed from, so `copynode` called `nodesavestr`.
+        let n = Node::Arg(narg {
+            text: NodeText::new(quoted_var()),
+            backquote: Vec::new(),
+        });
+        let copy = n.clone();
+        assert_eq!(copy.narg().text.as_bstr(), n.narg().text.as_bstr());
+        assert_ne!(copy.narg().text.as_ptr(), n.narg().text.as_ptr());
+    }
+
+    #[test]
+    fn a_word_may_contain_a_nul_the_terminator_does_not_hide() {
+        // A raw NUL byte reaches the parser from the input, so the value is
+        // its bytes and not what `strlen` makes of them.
+        let t = NodeText::new(BString::from(vec![b'a', 0, b'b', 0]));
+        assert_eq!(t.as_bstr(), b"a\0b".as_slice());
+        assert_eq!(unsafe { libc::strlen(t.as_ptr()) }, 1);
     }
 }
