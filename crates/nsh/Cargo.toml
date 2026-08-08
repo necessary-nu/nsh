@@ -9,7 +9,14 @@ description = "A POSIX shell as a library"
 name = "nsh"
 path = "src/lib.rs"
 
+[features]
+api-sketch = []
+
 [dependencies]
 bstr = "1"
 libc = "0.2"
 nshedit = { git = "ssh://git@github.com/necessary-nu/nshedit.git", branch = "main" }
+
+[[example]]
+name = "embed"
+required-features = ["api-sketch"]

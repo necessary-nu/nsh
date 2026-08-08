@@ -25,6 +25,22 @@
 #![allow(unused_variables)]
 #![allow(clippy::all)]
 
+// ---- the proposed public API, unimplemented --------------------------
+//
+// `api` is a design artefact, not code: every body is `todo!()` and
+// nothing else in the crate refers to it. It is compiled so that the
+// signatures in `docs/api-design.md` are checked by the compiler rather
+// than by reading. It is deleted by the `public-api` node, which replaces
+// it with the implementation.
+//
+// Behind a feature that nothing enables by default, because leaving it
+// `pub` would put a surface an embedder can call -- and that panics on
+// every call -- into the crate's public API. [dec:nsh:public-surface]
+// exists to make that surface honest, so a sketch shipping as part of it
+// would contradict the decision it was written to serve.
+#[cfg(feature = "api-sketch")]
+pub mod api;
+
 // ---- foundation -----------------------------------------------------
 pub mod error;
 pub mod memalloc;

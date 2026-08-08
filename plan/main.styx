@@ -2144,6 +2144,14 @@ children (
                 title "Design the public API: Shell, Error taxonomy, and what run() means when called twice"
                 priority 0
                 kind @docs
+                log (
+                    {
+                        at 2026-08-08T08:50:26.111500849Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+                )
             }
 
             {

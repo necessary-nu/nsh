@@ -87,3 +87,20 @@ Run the harness self-tests with:
 ```sh
 python3 -m unittest discover -s posix/harness/tests -v
 ```
+
+## A known-flaky differential
+
+`locale-jobs-multibyte-command-text` shows up in `--reference` mode's
+`differentials` list under load and not otherwise. It has now been seen
+three times, always with **both** shells scoring PASS and the case
+totals unchanged, and it disappears on a re-run of an idle machine.
+
+The case backgrounds a job and reads its command text, so whether the
+child has been reaped when `jobs` renders it is decided by the
+scheduler. Two shells racing the same way is not a divergence.
+
+So: `differentials` of `['edit-history-goto-number',
+'edit-history-search-pattern-anchored']` is the expected result. A third
+entry naming this case, with `summary.cases` still at FAIL=54 PASS=657,
+is the race — re-run before investigating. A third entry that moves the
+totals is not.
