@@ -4,11 +4,12 @@
 //! `__CYGWIN__` is not selected, so `updatepwd` does no path normalisation.
 //! `__GLIBC__` *is* selected, so `getpwd` uses `getcwd(0, 0)`.
 
+use bstr::BString;
+use core::ptr::{addr_of, addr_of_mut, null_mut};
 use libc::{c_char, c_int, c_void, size_t};
-use core::ptr::{addr_of, null_mut};
 
 use crate::error::{INTOFF, INTON};
-use crate::memalloc::{makestrspace, savestr, stackblock, stalloc, stputs};
+use crate::memalloc::{savestr, stalloc};
 use crate::mystring::{dotdir, homestr, nullstr};
 use crate::options::{argptr, nextopt};
 use crate::output::VaArg;
@@ -105,7 +106,12 @@ pub unsafe fn cdcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
                 break;
             }
             c = *p;
-            p = stalloc(len as size_t) as *const c_char;
+            /* `stalloc(len)` took the candidate the C had built in the
+             * stack block; the copy is what takes it out of `padvance`'s
+             * buffer, which the `docd` below can overwrite. */
+            let kept = stalloc(len as size_t) as *mut c_char;
+            libc::strcpy(kept, crate::exec::padvance_result());
+            p = kept as *const c_char;
 
             if libc::stat64(p, &mut statb) >= 0 && (statb.st_mode & libc::S_IFMT) == libc::S_IFDIR
             {
@@ -182,37 +188,47 @@ unsafe fn docd(mut dest: *const c_char, flags: c_int) -> c_int {
 // [spec:dash:def:cd.updatepwd-fn]
 // [spec:dash:sem:cd.updatepwd-fn]
 unsafe fn updatepwd(dir: *const c_char) -> *const c_char {
-    let mut new: *mut c_char;
     let mut p: *mut c_char;
     let mut cdcomppath: *mut c_char;
-    let mut lim: *const c_char;
+    /* `lim` is `stackblock() + 1` in the C, re-read after `makestrspace`
+     * because the block can move; against an owned buffer it is just an
+     * index, and `new > lim` is a comparison of lengths. */
+    let mut lim: usize;
 
     /* #ifdef __CYGWIN__ — not selected. */
 
     cdcomppath = crate::mystring::sstrdup(dir);
-    crate::STARTSTACKSTR!(new);
+    let new = &mut *addr_of_mut!(pwdbuf);
+    new.clear();
     if *dir != b'/' as c_char {
         if curdir == addr_of!(nullstr) as *mut c_char {
             return null_mut();
         }
-        new = stputs(curdir, new);
+        new.extend_from_slice(core::slice::from_raw_parts(
+            curdir as *const u8,
+            libc::strlen(curdir),
+        ));
     }
-    new = makestrspace(libc::strlen(dir) as size_t + 2, new);
-    lim = (stackblock() as *const c_char).add(1);
+    new.reserve(libc::strlen(dir) + 2);
+    lim = 1;
     if *dir != b'/' as c_char {
-        if *new.offset(-1) != b'/' as c_char {
-            crate::USTPUTC!(b'/' as c_int, new);
+        /* `*(new - 1)` reads before the stack block when `curdir` is empty.
+         * It cannot be — `curdir` is either `nullstr`, which returned above,
+         * or a path `updatepwd` itself produced — so this only differs from
+         * the C on a path the C reads out of bounds on. */
+        if new.last() != Some(&b'/') {
+            new.push(b'/');
         }
-        if new as *const c_char > lim && *lim == b'/' as c_char {
-            lim = lim.add(1);
+        if new.len() > lim && new[lim] == b'/' {
+            lim += 1;
         }
     } else {
-        crate::USTPUTC!(b'/' as c_int, new);
+        new.push(b'/');
         cdcomppath = cdcomppath.add(1);
         if *dir.offset(1) == b'/' as c_char && *dir.offset(2) != b'/' as c_char {
-            crate::USTPUTC!(b'/' as c_int, new);
+            new.push(b'/');
             cdcomppath = cdcomppath.add(1);
-            lim = lim.add(1);
+            lim += 1;
         }
     }
     p = libc::strtok(cdcomppath, b"/\0".as_ptr() as *const c_char);
@@ -221,9 +237,9 @@ unsafe fn updatepwd(dir: *const c_char) -> *const c_char {
             && *p.offset(1) == b'.' as c_char
             && *p.offset(2) == b'\0' as c_char
         {
-            while new as *const c_char > lim {
-                crate::STUNPUTC!(new);
-                if *new.offset(-1) == b'/' as c_char {
+            while new.len() > lim {
+                new.pop();
+                if new[new.len() - 1] == b'/' {
                     break;
                 }
             }
@@ -231,17 +247,23 @@ unsafe fn updatepwd(dir: *const c_char) -> *const c_char {
             /* nothing */
         } else {
             /* fall through / default: */
-            new = stputs(p, new);
-            crate::USTPUTC!(b'/' as c_int, new);
+            new.extend_from_slice(core::slice::from_raw_parts(p as *const u8, libc::strlen(p)));
+            new.push(b'/');
         }
         p = libc::strtok(null_mut(), b"/\0".as_ptr() as *const c_char);
     }
-    if new as *const c_char > lim {
-        crate::STUNPUTC!(new);
+    if new.len() > lim {
+        new.pop();
     }
-    *new = 0;
-    stackblock() as *const c_char
+    /* `*new = '\0'` — the C writes the terminator at the cursor without
+     * advancing it, and the caller reads the block as a C string. */
+    new.push(0);
+    new.as_ptr() as *const c_char
 }
+
+/// [`updatepwd`]'s result, which the C left in the stack block for its one
+/// caller to read before the next `cd`.
+static mut pwdbuf: BString = BString::new(Vec::new());
 
 /*
  * Find out what the current directory is. If we already know the current

@@ -25,7 +25,7 @@ use libc::{c_char, c_int, size_t};
 use crate::error::{jmploc, FORCEINTON};
 use crate::eval::{evalskip, EV_EXIT, SKIPFUNC, SKIPFUNCDEF};
 use crate::jobs::SHOW_CHANGED;
-use crate::memalloc::{popstackmark, setstackmark, stackblock, stackmark, stalloc};
+use crate::memalloc::{popstackmark, setstackmark, stackmark, stalloc};
 use crate::output::out2;
 
 /* pid of main shell */
@@ -409,13 +409,18 @@ unsafe fn find_dot_file(basename: *mut c_char) -> *mut c_char {
         if len < 0 {
             break;
         }
-        fullname = stackblock() as *mut c_char;
+        fullname = crate::exec::padvance_result();
         if (crate::exec::pathopt.is_null() || *crate::exec::pathopt == b'f' as c_char)
             && libc::stat64(fullname, &mut statb) == 0
             && (statb.st_mode & libc::S_IFMT) == libc::S_IFREG
         {
             /* This will be freed by the caller. */
-            return stalloc(len as size_t) as *mut c_char;
+            /* `stalloc(len)` took the candidate straight out of the stack
+             * block; the copy is what takes it out of `padvance`'s buffer,
+             * and the block it lands in is still the caller's to release. */
+            let kept = stalloc(len as size_t) as *mut c_char;
+            libc::strcpy(kept, fullname);
+            return kept;
         }
     }
 

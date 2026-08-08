@@ -14,12 +14,13 @@
 //!     `shellmain`, but reads here go straight to libc, which is
 //!     behaviourally identical.
 
-use core::ptr::{addr_of_mut, null, null_mut};
+use bstr::BString;
+use core::ptr::{addr_of, addr_of_mut, null, null_mut};
 use libc::{c_char, c_int, c_short, c_uint, c_void, size_t};
 
 use crate::builtins::{builtincmd, BUILTIN_REGULAR, BUILTIN_SPECIAL};
 use crate::error::{E_EXEC, INTOFF, INTON};
-use crate::memalloc::{ckfree, ckmalloc, growstackto, stackblock, stalloc, stunalloc};
+use crate::memalloc::{ckfree, ckmalloc, stalloc};
 use crate::nodes::{funcnode, Node};
 use crate::output::{out1, output};
 
@@ -129,7 +130,7 @@ pub unsafe fn shellexec(argv: *mut *mut c_char, path: *const c_char, mut idx: c_
     } else {
         let mut se: c_int = libc::ENOENT;
         while padvance(&mut lpath, *argv.offset(0)) >= 0 {
-            cmdname = stackblock() as *mut c_char;
+            cmdname = padvance_result();
             idx -= 1;
             if idx < 0 && pathopt.is_null() {
                 tryexec(cmdname, argv, envp);
@@ -285,16 +286,38 @@ pub unsafe fn padvance_magic(path: &mut *const c_char, name: *const c_char, magi
 
     /* "2" is for '/' and '\0' */
     qlen = len + libc::strlen(name) + 2;
-    q = growstackto(qlen);
+    let buf = &mut *addr_of_mut!(pathbuf);
+    buf.clear();
+    buf.reserve(qlen);
 
     if len != 0 {
-        q = libc::mempcpy(q as *mut c_void, start as *const c_void, len) as *mut c_char;
-        *q = b'/' as c_char;
-        q = q.add(1);
+        buf.extend_from_slice(core::slice::from_raw_parts(start as *const u8, len));
+        buf.push(b'/');
     }
+    q = buf.as_mut_ptr().add(buf.len()) as *mut c_char;
     libc::strcpy(q, name);
+    /* `strcpy` wrote the name and its terminator into the reserved tail;
+     * `qlen` is what the C's `growstackto` guaranteed room for, and it is
+     * one more than the bytes written when `len` is zero. */
+    let n = buf.len() + libc::strlen(q) + 1;
+    buf.set_len(n);
 
     qlen as c_int
+}
+
+/// The candidate path [`padvance_magic`] builds.
+///
+/// The C builds it at `stackblock()` and hands the caller the *length* it
+/// reserved room for, so a caller that wants to keep the candidate calls
+/// `stalloc(len)` to take exactly that block. That is why `len` is the
+/// return value and not the string: it is an allocation size, not a
+/// strlen, and it is two larger than the path when the path component is
+/// empty. Callers that kept the candidate now copy it instead.
+static mut pathbuf: BString = BString::new(Vec::new());
+
+/// The candidate path the last `padvance` built, as a C string.
+pub unsafe fn padvance_result() -> *mut c_char {
+    (*addr_of_mut!(pathbuf)).as_mut_ptr() as *mut c_char
 }
 
 // [spec:dash:def:exec.padvance-fn]
@@ -386,7 +409,7 @@ unsafe fn printentry(cmdp: *mut tblentry) {
             break;
         }
     }
-    name = stackblock() as *mut c_char;
+    name = padvance_result();
     crate::output::out1str(name);
     crate::out1fmt!(
         (core::ptr::addr_of!(crate::mystring::snlfmt) as *const c_char),
@@ -543,7 +566,7 @@ pub unsafe fn find_command(
                     }
                     let lpathopt: *const c_char = pathopt;
 
-                    fullname = stackblock() as *mut c_char;
+                    fullname = padvance_result();
                     idx += 1;
                     if !lpathopt.is_null() {
                         if *lpathopt == b'b' as c_char {
@@ -578,7 +601,12 @@ pub unsafe fn find_command(
                     }
                     if !lpathopt.is_null() {
                         /* this is a %func directory */
-                        stalloc(len as size_t);
+                        /* `stalloc(len)` took the candidate out of the way
+                         * because `readcmdfile` runs shell code that can
+                         * search the path again; the copy is what keeps it,
+                         * and `stunalloc` is the copy going out of scope. */
+                        let kept = (*addr_of!(pathbuf)).clone();
+                        let fullname = kept.as_ptr() as *mut c_char;
                         crate::shellmain::readcmdfile(fullname);
                         cmdp = cmdlookup(name, 0);
                         if cmdp.is_null() || (*cmdp).cmdtype as c_int != CMDFUNCTION {
@@ -588,7 +616,6 @@ pub unsafe fn find_command(
                                 fullname
                             );
                         }
-                        stunalloc(fullname as *mut c_void);
                         break 'success;
                     }
                     e = libc::EACCES; /* if we fail, this will be the error */
@@ -1005,7 +1032,7 @@ unsafe fn describe_command(
                             break;
                         }
                     }
-                    p = stackblock() as *mut c_char;
+                    p = padvance_result();
                 }
                 if verbose != 0 {
                     crate::outfmt!(
