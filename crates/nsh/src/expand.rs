@@ -711,7 +711,7 @@ unsafe fn exptilde(startp: *mut c_char, flag: c_int) -> *mut c_char {
             /* lose: */
             return startp;
         }
-        strtodest(home, flag | EXP_QUOTED);
+        strtodest(home, flag | EXP_QUOTED, &mut expdest);
     }
     /* out: */
     p
@@ -795,7 +795,7 @@ unsafe fn expari(mut start: *mut c_char, flag: c_int) -> *mut c_char {
         result = crate::arith_yacc::arith(start);
         crate::memalloc::popstackmark(&mut sm);
 
-        len = cvtnum(result, flag) as c_int;
+        len = cvtnum(result, flag, &mut expdest) as c_int;
 
         if (flag & EXP_QUOTED) == 0 {
             recordregion(begoff, begoff + len, 0);
@@ -838,7 +838,7 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
         let mut jump_read = i == 0;
         loop {
             if !jump_read {
-                memtodest(p, i as size_t, flag);
+                memtodest(p, i as size_t, flag, &mut expdest);
             }
             jump_read = false;
             /* read: */
@@ -1215,7 +1215,11 @@ unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
             if (flag & EXP_DISCARD) != 0 {
                 return p;
             }
-            cvtnum((if varlen > 0 { varlen } else { 0 }) as intmax_t, flag);
+            cvtnum(
+                (if varlen > 0 { varlen } else { 0 }) as intmax_t,
+                flag,
+                &mut expdest,
+            );
             really_record = true;
             break 'again; /* goto really_record */
         }
@@ -1346,7 +1350,29 @@ unsafe fn mbtodest(
 
 // [spec:dash:def:expand.memtodest-fn]
 // [spec:dash:sem:expand.memtodest-fn]
-unsafe fn memtodest(mut p: *const c_char, mut len: size_t, flags: c_int) -> size_t {
+//
+// PORT: the C reads and writes the global `expdest`; here the destination
+// cursor is a parameter.  This is not a tidying — the C's `expdest` is not
+// *the* expansion's cursor, it is *a* cursor, and `expmeta` borrows it:
+//
+//     expdest = enddir;
+//     memtodest(p, len, EXP_MBCHAR | EXP_KEEPNUL);
+//     cp = stackblock();
+//     enddir = cp + expdir_len;
+//
+// `enddir` points into the glob buffer, not into the word being expanded,
+// so `memtodest` is already a generic "encode these bytes at this cursor"
+// routine that happens to pass its argument through a global.  Naming the
+// argument makes `expmeta` stop touching `expdest` at all, which is what
+// lets the expansion buffer and the glob buffer be converted separately.
+//
+// `chtodest` and `mbtodest` already take theirs (`out`, `q`).
+unsafe fn memtodest(
+    mut p: *const c_char,
+    mut len: size_t,
+    flags: c_int,
+    dst: &mut *mut c_char,
+) -> size_t {
     let syntax: *const c_char;
     let mut count: size_t = 0;
     let expq: c_int;
@@ -1357,7 +1383,7 @@ unsafe fn memtodest(mut p: *const c_char, mut len: size_t, flags: c_int) -> size
     }
 
     /* CTLMBCHAR, 2, c, c, 2, CTLMBCHAR */
-    q = crate::memalloc::makestrspace(len * 3, expdest);
+    q = crate::memalloc::makestrspace(len * 3, *dst);
 
     /* Guarded by the `assert!(QUOTES_ESC == 0x11 && …)` above, which is
      * this file's port of the matching `#error`. */
@@ -1425,15 +1451,15 @@ unsafe fn memtodest(mut p: *const c_char, mut len: size_t, flags: c_int) -> size
         len -= 1;
     }
 
-    expdest = q;
+    *dst = q;
     count
 }
 
 // [spec:dash:def:expand.strtodest-fn]
 // [spec:dash:sem:expand.strtodest-fn]
-unsafe fn strtodest(p: *const c_char, flags: c_int) -> size_t {
+unsafe fn strtodest(p: *const c_char, flags: c_int, dst: &mut *mut c_char) -> size_t {
     let len: size_t = libc::strlen(p);
-    memtodest(p, len, flags)
+    memtodest(p, len, flags, dst)
 }
 
 /*
@@ -1567,7 +1593,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
                     }
                 }
                 /* numvar: */
-                len = cvtnum(num as intmax_t, flags as c_int) as ssize_t;
+                len = cvtnum(num as intmax_t, flags as c_int, &mut expdest) as ssize_t;
                 break 'sw;
             }
             /* param: */
@@ -1580,7 +1606,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
                 break 'sw;
             }
             loop {
-                len += strtodest(p, flags as c_int) as ssize_t;
+                len += strtodest(p, flags as c_int, &mut expdest) as ssize_t;
 
                 ap = ap.offset(1);
                 p = *ap;
@@ -1588,7 +1614,8 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
                     break;
                 }
 
-                len += memtodest(seps, seplen, (flags as c_int) | EXP_KEEPNUL) as ssize_t;
+                len += memtodest(seps, seplen, (flags as c_int) | EXP_KEEPNUL, &mut expdest)
+                    as ssize_t;
             }
             break 'sw;
         }
@@ -1597,7 +1624,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
             return -1;
         }
 
-        len = strtodest(p, flags as c_int) as ssize_t;
+        len = strtodest(p, flags as c_int, &mut expdest) as ssize_t;
     }
 
     if discard != 0 {
@@ -2376,8 +2403,26 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
                     len = libc::strlen(dname) + 1;
                     p = dname;
                     if !FNMATCH_IS_ENABLED {
-                        expdest = enddir;
-                        memtodest(p, len, EXP_MBCHAR | EXP_KEEPNUL);
+                        /* The C parks `enddir` in the global `expdest`
+                         * across this call and never restores it.  With the
+                         * destination named, the glob buffer's cursor stays
+                         * in this frame and `expandmeta` stops perturbing
+                         * `expdest` at all — which is what makes the two
+                         * buffers separable.  Nothing reads `expdest`
+                         * between here and the next `STARTSTACKSTR`, so the
+                         * C's leftover value was never observable:
+                         * `expandmeta` runs only at the tail of
+                         * `expandarg`, after `grabstackstr(expdest)`, and
+                         * both `expandarg` and `casematch` open with
+                         * `expdest = stackblock()`.
+                         *
+                         * The cursor `memtodest` leaves in `enddir` is
+                         * discarded on the next line, exactly as the C
+                         * discards what it leaves in `expdest`:
+                         * `makestrspace` may have moved the block, so the
+                         * cursor is re-derived from `stackblock()` instead
+                         * of trusted. */
+                        memtodest(p, len, EXP_MBCHAR | EXP_KEEPNUL, &mut enddir);
                         cp = stackblock();
                         enddir = cp.offset(expdir_len as isize);
                         p = enddir;
@@ -2905,7 +2950,7 @@ pub unsafe fn casematch(pattern: &crate::nodes::Node, val: *mut c_char) -> c_int
 
 // [spec:dash:def:expand.cvtnum-fn]
 // [spec:dash:sem:expand.cvtnum-fn]
-unsafe fn cvtnum(num: intmax_t, flags: c_int) -> size_t {
+unsafe fn cvtnum(num: intmax_t, flags: c_int, dst: &mut *mut c_char) -> size_t {
     let mut len: c_int = crate::shell::max_int_length(mem::size_of::<intmax_t>() as c_int);
     /* `char buf[len]` — a VLA of max_int_length(sizeof(intmax_t)) == 32.
      * A fixed 64-byte backing array with the same `len` bound handed to
@@ -2918,7 +2963,7 @@ unsafe fn cvtnum(num: intmax_t, flags: c_int) -> size_t {
         b"%jd\0".as_ptr() as *const c_char,
         num,
     );
-    memtodest(buf.as_ptr(), len as size_t, flags)
+    memtodest(buf.as_ptr(), len as size_t, flags, dst)
 }
 
 // [spec:dash:def:expand.varunset-fn]
