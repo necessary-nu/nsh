@@ -14,6 +14,7 @@ use core::ptr;
 use core::ptr::addr_of_mut;
 use std::rc::Rc;
 
+use bstr::{BStr, BString};
 use libc::{c_char, c_int, c_uint, c_void};
 
 use crate::error::{errlinno, handler, jmploc};
@@ -22,7 +23,7 @@ use crate::input::{
     pgetc, pgetc_eoa, popfile, pungetc, pungetn, pushstring, setinputstring, unwindfiles,
     whichprompt, PEOA,
 };
-use crate::memalloc::{grabstackblock, popstackmark, pushstackmark, stackmark, stnputs};
+use crate::memalloc::{popstackmark, pushstackmark, stackmark};
 use crate::output::{fmtstr, VaArg};
 use crate::nodes::{
     heredoc_body, narg, nbinary, ncase, nclist, ncmd, ndefun, ndup, nfile, nfor, nhere, nif,
@@ -47,21 +48,6 @@ macro_rules! equal {
 
 /// `MB_LEN_MAX` from `<limits.h>` (16 on the platforms dash targets).
 const MB_LEN_MAX: usize = 16;
-
-/// `#define stackblock() ((void *)stacknxt)` — src/memalloc.h
-unsafe fn stackblock() -> *mut c_char {
-    crate::memalloc::stackblock() as *mut c_char
-}
-
-/// `#define stackblocksize() stacknleft` — src/memalloc.h
-unsafe fn stackblocksize() -> usize {
-    crate::memalloc::stackblocksize()
-}
-
-/// `#define grabstackstr(p) stalloc((char *)(p) - (char *)stackblock())`
-unsafe fn grabstackstr(p: *mut c_char) -> *mut c_char {
-    crate::memalloc::grabstackstr(p) as *mut c_char
-}
 
 /*
  * The four syntax tables, as the *table pointers* `synstack->syntax`
@@ -263,10 +249,38 @@ impl ParseResult {
     }
 }
 
-/// Used by expandstr to get here-doc like behaviour:
-/// `#define FAKEEOFMARK (char *)1`
-fn FAKEEOFMARK() -> *mut c_char {
-    1 as *mut c_char
+/// `readtoken1`'s `eofmark` argument.
+///
+/// The C passes a `char *` that is overloaded three ways: NULL means "read a
+/// word", `FAKEEOFMARK` (`(char *)1`) means "read a word but behave as if a
+/// here-document were in progress", and anything else is the delimiter of a
+/// real here-document. Only the third carries bytes, so only the third owns
+/// any.
+#[derive(Clone, Copy)]
+enum EofMark<'a> {
+    /// C: `NULL`
+    None,
+    /// C: `FAKEEOFMARK` — what `expandstr` passes
+    Fake,
+    /// C: the here-document's delimiter, after `rmescapes`
+    Word(&'a BStr),
+}
+
+impl<'a> EofMark<'a> {
+    /// `eofmark == NULL`
+    fn is_none(self) -> bool {
+        matches!(self, EofMark::None)
+    }
+
+    /// `#define realeofmark(m) ((m) && (m) != FAKEEOFMARK)` — src/parser.c
+    // [spec:dash:def:parser.realeofmark-fn]
+    // [spec:dash:sem:parser.realeofmark-fn]
+    fn real(self) -> Option<&'a BStr> {
+        match self {
+            EofMark::Word(w) => Some(w),
+            _ => None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -283,8 +297,9 @@ pub struct heredoc {
     pub doc: heredoc_body,
     /// the node is `NXHERE`: read the body with `DQSYNTAX`, not `SQSYNTAX`
     pub expand: bool,
-    pub eofmark: *mut c_char, /* string indicating end of input */
-    pub striptabs: c_int,     /* if set, strip leading tabs */
+    /// string indicating end of input, with `rmescapes` already applied
+    pub eofmark: BString,
+    pub striptabs: c_int, /* if set, strip leading tabs */
 }
 
 // [spec:dash:def:parser.synstack]
@@ -307,7 +322,8 @@ pub static mut doprompt: c_int = 0; /* if set, prompt the user */
 pub static mut needprompt: c_int = 0; /* true if interactive and at start of line */
 pub static mut lasttoken: c_int = 0; /* last token read */
 pub static mut tokpushback: c_int = 0; /* last token pushed back */
-pub static mut wordtext: *mut c_char = ptr::null_mut(); /* text of last word */
+/// text of last word, with the terminating NUL `readtoken1` writes
+pub static mut wordtext: BString = BString::new(Vec::new());
 pub static mut checkkwd: c_int = 0;
 pub static mut backquotelist: Vec<Option<Node>> = Vec::new();
 pub static mut redirnode: Option<Node> = None;
@@ -355,10 +371,14 @@ pub unsafe fn issimplecmd(n: Option<&Node>, name: *const c_char) -> c_int {
     }
 }
 
-// [spec:dash:def:parser.realeofmark-fn]
-// [spec:dash:sem:parser.realeofmark-fn]
-unsafe fn realeofmark(eofmark: *const c_char) -> c_int {
-    (!eofmark.is_null() && eofmark != FAKEEOFMARK() as *const c_char) as c_int
+/// The last word read, as the `char *` the C-shaped readers still expect.
+unsafe fn wordtext_ptr() -> *mut c_char {
+    (*ptr::addr_of!(wordtext)).as_ptr() as *mut c_char
+}
+
+/// The last word read, as a node's owned text.
+unsafe fn wordtext_node() -> NodeText {
+    NodeText::new((*ptr::addr_of!(wordtext)).clone())
 }
 
 /*
@@ -623,18 +643,18 @@ unsafe fn command() -> Option<Node> {
         }));
         t = TDONE;
     } else if tok == TFOR {
-        if readtoken() != TWORD || quoteflag != 0 || goodname(wordtext) == 0 {
+        if readtoken() != TWORD || quoteflag != 0 || goodname(wordtext_ptr()) == 0 {
             synerror(c"Bad for loop variable".as_ptr());
         }
         /* the C stores `wordtext` into the node here, before any further
          * token read can overwrite it */
-        let var = NodeText::Borrowed(wordtext);
+        let var = wordtext_node();
         let mut args: Vec<Node> = Vec::new();
         checkkwd = CHKNL | CHKKWD | CHKALIAS;
         if readtoken() == TIN {
             while readtoken() == TWORD {
                 args.push(Node::Arg(narg {
-                    text: NodeText::Borrowed(wordtext),
+                    text: wordtext_node(),
                     backquote: takeglobal(addr_of_mut!(backquotelist)),
                 }));
             }
@@ -643,9 +663,7 @@ unsafe fn command() -> Option<Node> {
             }
         } else {
             args.push(Node::Arg(narg {
-                text: NodeText::Borrowed(
-                    ptr::addr_of!(crate::mystring::dolatstr) as *const c_char as *mut c_char,
-                ),
+                text: NodeText::from_ptr(ptr::addr_of!(crate::mystring::dolatstr) as *const c_char),
                 backquote: Vec::new(),
             }));
             /*
@@ -673,7 +691,7 @@ unsafe fn command() -> Option<Node> {
             synexpect(TWORD);
         }
         let expr = Node::Arg(narg {
-            text: NodeText::Borrowed(wordtext),
+            text: wordtext_node(),
             backquote: takeglobal(addr_of_mut!(backquotelist)),
         });
         checkkwd = CHKNL | CHKKWD | CHKALIAS;
@@ -694,7 +712,7 @@ unsafe fn command() -> Option<Node> {
                         synexpect(TWORD);
                     }
                     pattern.push(Node::Arg(narg {
-                        text: NodeText::Borrowed(wordtext),
+                        text: wordtext_node(),
                         backquote: takeglobal(addr_of_mut!(backquotelist)),
                     }));
                     if readtoken() != TPIPE {
@@ -799,10 +817,10 @@ unsafe fn simplecmd() -> Option<Node> {
         let tok = readtoken();
         if tok == TWORD {
             let n = Node::Arg(narg {
-                text: NodeText::Borrowed(wordtext),
+                text: wordtext_node(),
                 backquote: takeglobal(addr_of_mut!(backquotelist)),
             });
-            if savecheckkwd != 0 && isassignment(wordtext) != 0 {
+            if savecheckkwd != 0 && isassignment(wordtext_ptr()) != 0 {
                 vars.push(n);
             } else {
                 args.push(n);
@@ -866,7 +884,7 @@ unsafe fn simplecmd() -> Option<Node> {
 // [spec:dash:sem:parser.makename-fn]
 unsafe fn makename() -> Node {
     Node::Arg(narg {
-        text: NodeText::Borrowed(wordtext),
+        text: wordtext_node(),
         backquote: takeglobal(addr_of_mut!(backquotelist)),
     })
 }
@@ -920,14 +938,19 @@ unsafe fn parsefname(n: &mut Node) {
             n.nhere_mut().r#type = NXHERE;
         }
         /* TRACE(("Here document %d\n", n->type)); */
-        rmescapes(wordtext);
-        here.eofmark = wordtext;
+        /* `rmescapes` rewrites the word in place and can only shorten it, so
+         * the new terminator is where the delimiter now ends. */
+        let mut mark = takeglobal(addr_of_mut!(wordtext));
+        rmescapes(mark.as_mut_ptr() as *mut c_char);
+        let n_mark = libc::strlen(mark.as_ptr() as *const c_char);
+        mark.truncate(n_mark);
+        here.eofmark = mark;
         /* `parseheredoc` asked the node whether it was NXHERE; the type is
          * settled above, so the answer travels with the here-document. */
         here.expand = n.nhere().r#type == NXHERE;
         (&mut *addr_of_mut!(heredoclist)).push(here);
     } else if n.node_type() == NTOFD || n.node_type() == NFROMFD {
-        fixredir(n, wordtext, 0);
+        fixredir(n, wordtext_ptr(), 0);
     } else {
         n.nfile_mut().fname = Some(Box::new(makename()));
     }
@@ -946,18 +969,14 @@ unsafe fn parseheredoc() {
         if needprompt != 0 {
             setprompt(2);
         }
+        let mark = EofMark::Word(BStr::new(&here.eofmark));
         if !here.expand {
-            readtoken1(pgetc(), SQSYNTAX(), here.eofmark, here.striptabs);
+            readtoken1(pgetc(), SQSYNTAX(), mark, here.striptabs);
         } else {
-            readtoken1(
-                pgetc_eatbnl(),
-                DQSYNTAX(),
-                here.eofmark,
-                here.striptabs,
-            );
+            readtoken1(pgetc_eatbnl(), DQSYNTAX(), mark, here.striptabs);
         }
         let n = Node::Arg(narg {
-            text: NodeText::Borrowed(wordtext),
+            text: wordtext_node(),
             backquote: takeglobal(addr_of_mut!(backquotelist)),
         });
         /* `here->here->nhere.doc = n` in the C — the same slot, reached
@@ -998,7 +1017,7 @@ unsafe fn readtoken() -> c_int {
          * check for keywords
          */
         if kwd & CHKKWD != 0 {
-            let pp: *const *const c_char = findkwd(wordtext);
+            let pp: *const *const c_char = findkwd(wordtext_ptr());
 
             if !pp.is_null() {
                 t = pp.offset_from(parsekwd.0.as_ptr()) as c_int + KWDOFFSET;
@@ -1008,7 +1027,7 @@ unsafe fn readtoken() -> c_int {
         }
 
         if kwd & CHKALIAS != 0 {
-            let ap = crate::alias::lookupalias(wordtext, 1);
+            let ap = crate::alias::lookupalias(wordtext_ptr(), 1);
             if !ap.is_null() {
                 if *(*ap).val != 0 {
                     pushstring((*ap).val, ap as *mut c_void);
@@ -1113,7 +1132,7 @@ unsafe fn xxreadtoken() -> c_int {
             lasttoken = TRP;
             return TRP;
         }
-        tok = readtoken1(c, BASESYNTAX(), ptr::null_mut(), 0);
+        tok = readtoken1(c, BASESYNTAX(), EofMark::None, 0);
         if tok != TBLANK {
             return tok;
         }
@@ -1233,10 +1252,33 @@ pub unsafe fn getmbc(c: c_int, out: *mut c_char, mode: c_int) -> c_uint {
     0
 }
 
+/// The most `getmbc` or `conv_escape` can write past the cursor.
+///
+/// `readtoken1` spells it `CHECKSTRSPACE(MAX(MB_LEN_MAX, 16) + 7, out)` and
+/// then lets both of them write through a bare `char *`. Reserving is what
+/// makes those writes land in a `Vec`'s spare capacity rather than past the
+/// end of it, so the number has to stay the C's.
+const MBSLOP: usize = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 7;
+
+/// `getmbc` appending to a growable string.
+///
+/// The C hands it a cursor into the stack block; the byte count it returns is
+/// how far that cursor moved, which here is what the caller commits. It can
+/// also return 0 or 1 having scribbled on the block past the cursor, and the
+/// C leaves that scribble for the next write to overwrite — so does this,
+/// because the bytes stay uncommitted.
+unsafe fn getmbc_at(out: &mut BString, c: c_int, mode: c_int) -> c_uint {
+    out.reserve(MBSLOP);
+    let len = out.len();
+    getmbc(c, out.as_mut_ptr().add(len) as *mut c_char, mode)
+}
+
 // [spec:dash:def:parser.dollarsq-escape-fn]
 // [spec:dash:sem:parser.dollarsq-escape-fn]
-unsafe fn dollarsq_escape(out: *mut c_char) -> *mut c_char {
-    let mut out = out;
+unsafe fn dollarsq_escape(dest: &mut BString) {
+    dest.reserve(MBSLOP);
+    let base = dest.len();
+    let mut out: *mut c_char = dest.as_mut_ptr().add(base) as *mut c_char;
     /* 10 = length of UXXXXXXXX + NUL */
     let mut str: [c_char; 10] = [0; 10];
     let mut len: c_uint;
@@ -1283,7 +1325,8 @@ unsafe fn dollarsq_escape(out: *mut c_char) -> *mut c_char {
     }
 
     pungetn((len as isize - (p as isize - str.as_ptr() as isize)) as c_int);
-    out
+    let written = out as usize - (dest.as_ptr().add(base) as usize);
+    dest.set_len(base + written);
 }
 
 /*
@@ -1302,7 +1345,7 @@ unsafe fn dollarsq_escape(out: *mut c_char) -> *mut c_char {
  */
 
 /// The locals of `readtoken1` that its internal subroutines share.
-struct Rt1 {
+struct Rt1<'a> {
     synstack: *mut synstack,
     chkeofmark: c_int,
     printesc: bool,
@@ -1310,8 +1353,12 @@ struct Rt1 {
     dollarsq: c_int,
     c: c_int,
     quotef: c_int,
-    out: *mut c_char,
-    eofmark: *mut c_char,
+    /// The word being built. The C's `out` is a `char *` cursor into the
+    /// stack block and `stackblock()` is the base; here the base is the
+    /// buffer, the cursor is its length, and `STADJUST` is `truncate` or a
+    /// `set_len` over bytes a raw writer has already filled.
+    out: BString,
+    eofmark: EofMark<'a>,
     striptabs: c_int,
     /// Backing store for the `alloca`'d `struct synstack` levels.  The C
     /// cannot free them (alloca inside a loop), so it reuses them through
@@ -1326,7 +1373,7 @@ struct Rt1 {
 }
 
 /// `alloca(sizeof(*synstack))`
-unsafe fn alloca_synstack(st: &mut Rt1) -> *mut synstack {
+unsafe fn alloca_synstack(st: &mut Rt1<'_>) -> *mut synstack {
     st.pool.push(Box::new(mem::zeroed()));
     let last = st.pool.len() - 1;
     (&mut *st.pool[last]) as *mut synstack
@@ -1347,7 +1394,7 @@ enum Lbl {
 unsafe fn readtoken1(
     firstc: c_int,
     syntax: *const Syntax,
-    eofmark: *mut c_char,
+    eofmark: EofMark<'_>,
     striptabs: c_int,
 ) -> c_int {
     let mut synbase = synstack {
@@ -1370,7 +1417,7 @@ unsafe fn readtoken1(
         dollarsq: 0,
         c: firstc,
         quotef: 0,
-        out: ptr::null_mut(),
+        out: BString::new(Vec::new()),
         eofmark,
         striptabs,
         pool: Vec::new(),
@@ -1378,7 +1425,6 @@ unsafe fn readtoken1(
     };
     let len: usize;
 
-    crate::STARTSTACKSTR!(st.out);
     'loop_: loop {
         /* for each line, until end of word */
         checkend(&mut st); /* set c to PEOF if at end of here document */
@@ -1388,11 +1434,6 @@ unsafe fn readtoken1(
                 let fieldsplitting: c_int;
                 let mut ml: c_uint;
 
-                /* Permit max(MB_LEN_MAX, 23) calls to USTPUTC. */
-                crate::CHECKSTRSPACE!(
-                    (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 7,
-                    st.out
-                );
                 fieldsplitting = if (*st.synstack).syntax == BASESYNTAX()
                     && ((*st.synstack).varnest | (*st.synstack).backq) == 0
                 {
@@ -1400,19 +1441,22 @@ unsafe fn readtoken1(
                 } else {
                     0
                 };
-                ml = getmbc(
+                /* The C's CHECKSTRSPACE, which permits max(MB_LEN_MAX, 23)
+                 * calls to USTPUTC, is `getmbc_at`'s reserve. */
+                ml = getmbc_at(
+                    &mut st.out,
                     st.c,
-                    st.out,
                     fieldsplitting | (if st.printesc { 2 } else { 0 }),
                 );
                 if ml == 1 {
-                    if st.out == stackblock() {
+                    if st.out.is_empty() {
                         return TBLANK;
                     }
                     st.c = pgetc();
                     break 'loop_;
                 }
-                st.out = st.out.offset(ml as isize);
+                let grown = st.out.len() + ml as usize;
+                st.out.set_len(grown);
                 if ml != 0 {
                     break 'body; /* continue */
                 }
@@ -1425,31 +1469,31 @@ unsafe fn readtoken1(
                     if fieldsplitting != 0 {
                         break 'loop_; /* exit outer loop */
                     }
-                    crate::USTPUTC!(st.c, st.out);
+                    st.out.push(st.c as u8);
                     nlprompt();
                     st.c = pgetc_top(st.synstack);
                     continue 'loop_; /* continue outer loop */
                 } else if cls == CWORD as c_int {
-                    crate::USTPUTC!(st.c, st.out);
+                    st.out.push(st.c as u8);
                 } else if cls == CCTL as c_int {
                     if st.c == st.dollarsq {
-                        st.out = dollarsq_escape(st.out);
+                        dollarsq_escape(&mut st.out);
                     } else {
-                        if (st.eofmark.is_null() as c_int
+                        if (st.eofmark.is_none() as c_int
                             | (*st.synstack).dblquote
                             | (*st.synstack).varnest)
                             != 0
                         {
-                            crate::USTPUTC!(CTLESC, st.out);
+                            st.out.push(CTLESC as u8);
                         }
-                        crate::USTPUTC!(st.c, st.out);
+                        st.out.push(st.c as u8);
                     }
                 } else if cls == CBACK as c_int {
                     /* backslash */
                     st.c = pgetc();
                     if st.c == PEOF {
-                        crate::USTPUTC!(CTLESC, st.out);
-                        crate::USTPUTC!('\\', st.out);
+                        st.out.push(CTLESC as u8);
+                        st.out.push('\\' as u8);
                         pungetc();
                     } else {
                         if ((*st.synstack).dblquote | (*st.synstack).backq) != 0
@@ -1457,19 +1501,20 @@ unsafe fn readtoken1(
                             && st.c != '`' as c_int
                             && st.c != '$' as c_int
                             && (st.c != '"' as c_int
-                                || (!st.eofmark.is_null() && (*st.synstack).varnest == 0))
+                                || (!st.eofmark.is_none() && (*st.synstack).varnest == 0))
                             && (st.c != '}' as c_int || (*st.synstack).varnest == 0)
                         {
-                            crate::USTPUTC!(CTLESC, st.out);
-                            crate::USTPUTC!('\\', st.out);
+                            st.out.push(CTLESC as u8);
+                            st.out.push('\\' as u8);
                         }
                         st.quotef += 1;
 
-                        ml = getmbc(st.c, st.out, 1);
-                        st.out = st.out.offset(ml as isize);
+                        ml = getmbc_at(&mut st.out, st.c, 1);
+                        let grown = st.out.len() + ml as usize;
+                        st.out.set_len(grown);
                         if ml == 0 {
-                            crate::USTPUTC!(CTLESC, st.out);
-                            crate::USTPUTC!(st.c, st.out);
+                            st.out.push(CTLESC as u8);
+                            st.out.push(st.c as u8);
                         }
                     }
                 } else if cls == CSQUOTE as c_int {
@@ -1479,15 +1524,17 @@ unsafe fn readtoken1(
                     (*st.synstack).dblquote = 1;
                     lbl = Lbl::Toggledq;
                 } else if cls == CENDQUOTE as c_int {
-                    if !st.eofmark.is_null() && (*st.synstack).varnest == 0 {
-                        crate::USTPUTC!(st.c, st.out);
+                    if !st.eofmark.is_none() && (*st.synstack).varnest == 0 {
+                        st.out.push(st.c as u8);
                     } else {
                         if (*st.synstack).dqvarnest == 0 {
                             if st.dollarsq != 0 {
-                                let p = stackblock();
-
-                                *st.out = 0;
-                                st.out = p.offset(libc::strlen(p) as isize);
+                                /* `*out = '\0'; out = p + strlen(p);` — a NUL
+                                 * written by a `$'\0'` escape ends the word,
+                                 * so the cursor winds back to it. */
+                                let end =
+                                    st.out.iter().position(|&b| b == 0).unwrap_or(st.out.len());
+                                st.out.truncate(end);
                                 st.dollarsq = 0;
                             }
 
@@ -1522,11 +1569,11 @@ unsafe fn readtoken1(
                             st.c = CTLENDVAR;
                         }
                     }
-                    crate::USTPUTC!(st.c, st.out);
+                    st.out.push(st.c as u8);
                 } else if cls == CLP as c_int {
                     /* '(' in arithmetic */
                     (*st.synstack).parenlevel += 1;
-                    crate::USTPUTC!(st.c, st.out);
+                    st.out.push(st.c as u8);
                 } else if cls == CRP as c_int {
                     /* ')' in arithmetic */
                     if (*st.synstack).parenlevel > 0 {
@@ -1534,7 +1581,7 @@ unsafe fn readtoken1(
                     } else if pgetc_eatbnl() == ')' as c_int {
                         synstack_pop(&mut st.synstack);
                         if st.chkeofmark != 0 {
-                            crate::USTPUTC!(st.c, st.out);
+                            st.out.push(st.c as u8);
                         } else {
                             st.c = CTLENDARI;
                         }
@@ -1545,13 +1592,13 @@ unsafe fn readtoken1(
                          */
                         pungetc();
                     }
-                    crate::USTPUTC!(st.c, st.out);
+                    st.out.push(st.c as u8);
                 } else if cls == CBQUOTE as c_int {
                     /* '`' */
                     if (*st.synstack).backq == 2 {
                         lbl = Lbl::EndBackq;
                     } else {
-                        crate::USTPUTC!('`', st.out);
+                        st.out.push('`' as u8);
                         parsebackq(&mut st, 1);
                     }
                 } else if cls == CEOF as c_int {
@@ -1563,7 +1610,7 @@ unsafe fn readtoken1(
                     } else if fieldsplitting != 0 {
                         break 'loop_; /* exit outer loop */
                     } else {
-                        crate::USTPUTC!(st.c, st.out);
+                        st.out.push(st.c as u8);
                     }
                 }
 
@@ -1578,8 +1625,8 @@ unsafe fn readtoken1(
                         }
                         Lbl::Quotemark => {
                             /* quotemark: */
-                            if st.eofmark.is_null() {
-                                crate::USTPUTC!(CTLQUOTEMARK, st.out);
+                            if st.eofmark.is_none() {
+                                st.out.push(CTLQUOTEMARK as u8);
                             }
                             lbl = Lbl::None;
                         }
@@ -1594,7 +1641,7 @@ unsafe fn readtoken1(
                             /* end_backq: */
                             synstack_pop(&mut st.synstack);
                             st.printesc = false;
-                            crate::USTPUTC!(st.c, st.out);
+                            st.out.push(st.c as u8);
                             lbl = Lbl::None;
                         }
                     }
@@ -1607,7 +1654,7 @@ unsafe fn readtoken1(
     if (*st.synstack).syntax == ARISYNTAX() {
         synerror(c"Missing '))'".as_ptr());
     }
-    if ((*st.synstack).syntax != BASESYNTAX() && st.eofmark.is_null()) || (*st.synstack).backq != 0
+    if ((*st.synstack).syntax != BASESYNTAX() && st.eofmark.is_none()) || (*st.synstack).backq != 0
     {
         synerror(c"Unterminated quoted string".as_ptr());
     }
@@ -1615,14 +1662,13 @@ unsafe fn readtoken1(
         /* { */
         synerror(c"Missing '}'".as_ptr());
     }
-    crate::USTPUTC!('\0', st.out);
-    len = st.out as usize - stackblock() as usize;
-    st.out = stackblock();
-    if st.eofmark.is_null() {
+    st.out.push(b'\0');
+    len = st.out.len();
+    if st.eofmark.is_none() {
         if (st.c == '>' as c_int || st.c == '<' as c_int)
             && st.quotef == 0
             && len <= 2
-            && (*st.out == 0 || is_digit(*st.out as c_int))
+            && (st.out[0] == 0 || is_digit(st.out[0] as i8 as c_int))
         {
             parseredir(&mut st);
             lasttoken = TREDIR;
@@ -1633,8 +1679,10 @@ unsafe fn readtoken1(
     }
     quoteflag = st.quotef;
     backquotelist = mem::take(&mut st.bqlist);
-    grabstackblock(len);
-    wordtext = st.out;
+    /* `grabstackblock(len)` reserved the bytes the C had been writing into
+     * scratch space, which is what made `wordtext` outlive the next token.
+     * Moving the buffer out is the same guarantee. */
+    wordtext = mem::take(&mut st.out);
     lasttoken = TWORD;
     TWORD
 }
@@ -1647,10 +1695,10 @@ unsafe fn readtoken1(
  */
 
 /* checkend: */
-unsafe fn checkend(st: &mut Rt1) {
-    if realeofmark(st.eofmark) != 0 {
-        let markloc: isize;
-        let mut p: *mut c_char;
+unsafe fn checkend(st: &mut Rt1<'_>) {
+    if let Some(mark) = st.eofmark.real() {
+        let markloc: usize;
+        let mut i: usize;
         let mut more_heredoc = false;
 
         if st.striptabs != 0 {
@@ -1659,20 +1707,24 @@ unsafe fn checkend(st: &mut Rt1) {
             }
         }
 
-        markloc = st.out as isize - stackblock() as isize;
-        p = st.eofmark;
+        /* The C reads the candidate delimiter into the word being built and
+         * then winds the cursor back to `markloc`, so the scratch is the tail
+         * of the same buffer. */
+        markloc = st.out.len();
+        i = 0;
         loop {
-            crate::STPUTC!(st.c, st.out);
-            if *p == 0 {
+            st.out.push(st.c as u8);
+            if i == mark.len() {
+                /* `*p == '\0'` — the delimiter's terminator */
                 break;
             }
-            if st.c != *p as i8 as c_int {
+            if st.c != mark[i] as i8 as c_int {
                 more_heredoc = true; /* goto more_heredoc */
                 break;
             }
 
             st.c = pgetc();
-            p = p.offset(1);
+            i += 1;
         }
 
         if !more_heredoc {
@@ -1685,32 +1737,33 @@ unsafe fn checkend(st: &mut Rt1) {
         }
 
         if more_heredoc {
-            let mut len: isize;
+            let mut len: usize;
 
             /* more_heredoc: */
-            p = stackblock().offset(markloc + 1);
-            len = st.out as isize - p as isize;
+            let start = markloc + 1;
+            len = st.out.len() - start;
 
             if len != 0 {
-                len -= (st.c <= PEOF) as isize;
-                st.c = *p.offset(-1) as c_int;
+                len -= (st.c <= PEOF) as usize;
+                st.c = st.out[start - 1] as i8 as c_int;
 
                 if len != 0 {
                     let str: *mut c_char;
 
                     /* str = alloca(len + 1) */
-                    st.strpool.push(vec![0u8; len as usize + 1]);
+                    let mut copy: Vec<u8> = Vec::with_capacity(len + 1);
+                    copy.extend_from_slice(&st.out[start..start + len]);
+                    copy.push(0);
+                    st.strpool.push(copy);
                     let last = st.strpool.len() - 1;
                     str = st.strpool[last].as_mut_ptr() as *mut c_char;
-                    *(libc::mempcpy(str as *mut c_void, p as *const c_void, len as usize)
-                        as *mut c_char) = 0;
 
                     pushstring(str, ptr::null_mut());
                 }
             }
         }
 
-        crate::STADJUST!(stackblock() as isize + markloc - st.out as isize, st.out);
+        st.out.truncate(markloc);
     }
     /* goto checkend_return; */
 }
@@ -1722,8 +1775,8 @@ unsafe fn checkend(st: &mut Rt1) {
  */
 
 /* parseredir: */
-unsafe fn parseredir(st: &mut Rt1) {
-    let fdc: c_char = *st.out;
+unsafe fn parseredir(st: &mut Rt1<'_>) {
+    let fdc: c_char = st.out[0] as c_char;
     /* The C carves one `struct nfile` and then decides what it is by
      * assigning `np->type`, re-allocating only because `nhere` is smaller.
      * The arm has to be chosen up front here, so the type and the fd are
@@ -1755,7 +1808,7 @@ unsafe fn parseredir(st: &mut Rt1) {
             let mut here = heredoc {
                 doc: Rc::clone(&slot),
                 expand: false,
-                eofmark: ptr::null_mut(),
+                eofmark: BString::new(Vec::new()),
                 striptabs: 0,
             };
             doc = Some(slot);
@@ -1810,17 +1863,17 @@ unsafe fn parseredir(st: &mut Rt1) {
  */
 
 /* parsesub: */
-unsafe fn parsesub(st: &mut Rt1) -> bool {
+unsafe fn parsesub(st: &mut Rt1<'_>) -> bool {
     let mut newsyn: *const Syntax = (*st.synstack).syntax;
     static types: [u8; 6] = *b"}-+?=\0";
     let mut subtype: c_int;
 
-    crate::USTPUTC!('$', st.out);
+    st.out.push('$' as u8);
 
     st.c = pgetc_eatbnl();
     if st.c == '(' as c_int {
         /* $(command) or $((arith)) */
-        crate::USTPUTC!(st.c, st.out);
+        st.out.push(st.c as u8);
         if pgetc_eatbnl() == '(' as c_int {
             parsearith(st);
         } else {
@@ -1828,18 +1881,21 @@ unsafe fn parsesub(st: &mut Rt1) -> bool {
             parsebackq(st, 0);
         }
     } else if st.c == '\'' as c_int && syn_at(newsyn, '&' as c_int) != 0 {
-        crate::STADJUST!(-1, st.out);
+        st.out.pop();
         st.dollarsq = '\\' as c_int;
         return true; /* goto csquote */
     } else if st.c == '{' as c_int || is_name(st.c) || is_special(st.c) != 0 {
-        let typeloc: isize = st.out as isize - stackblock() as isize;
+        let typeloc: usize = st.out.len();
         let mut badsub = false;
 
-        crate::STADJUST!((st.chkeofmark == 0) as c_int, st.out);
+        /* `STADJUST(chkeofmark == 0, out)` steps over the byte the CTLVAR
+         * subtype lands in below; nothing reads it in between, so the
+         * placeholder value is not observable. */
+        st.out.resize(typeloc + (st.chkeofmark == 0) as usize, 0);
         subtype = VSNORMAL;
         if st.c == '{' as c_int {
             if st.chkeofmark != 0 {
-                crate::USTPUTC!('{', st.out);
+                st.out.push('{' as u8);
             }
             st.c = pgetc_eatbnl();
             subtype = 0;
@@ -1847,7 +1903,7 @@ unsafe fn parsesub(st: &mut Rt1) -> bool {
         'varname: loop {
             if is_name(st.c) {
                 loop {
-                    crate::STPUTC!(st.c, st.out);
+                    st.out.push(st.c as u8);
                     st.c = pgetc_eatbnl();
                     if !is_in_name(st.c) {
                         break;
@@ -1855,7 +1911,7 @@ unsafe fn parsesub(st: &mut Rt1) -> bool {
                 }
             } else if is_digit(st.c) {
                 loop {
-                    crate::STPUTC!(st.c, st.out);
+                    st.out.push(st.c as u8);
                     st.c = pgetc_eatbnl();
                     if !((subtype <= 0 || subtype >= VSLENGTH) && is_digit(st.c)) {
                         break;
@@ -1871,7 +1927,7 @@ unsafe fn parsesub(st: &mut Rt1) -> bool {
 
                     if st.c == '_' as c_int || libc::isalnum(st.c) != 0 {
                         if st.chkeofmark != 0 {
-                            crate::USTPUTC!('#', st.out);
+                            st.out.push('#' as u8);
                         }
                         continue 'varname; /* goto varname */
                     }
@@ -1884,7 +1940,7 @@ unsafe fn parsesub(st: &mut Rt1) -> bool {
                         st.c = cc;
                         cc = '#' as c_int;
                     } else if st.chkeofmark != 0 {
-                        crate::USTPUTC!('#', st.out);
+                        st.out.push('#' as u8);
                     }
                 }
 
@@ -1896,7 +1952,7 @@ unsafe fn parsesub(st: &mut Rt1) -> bool {
                     break 'varname;
                 }
 
-                crate::USTPUTC!(cc, st.out);
+                st.out.push(cc as u8);
             } else {
                 badsub = true; /* goto badsub */
                 break 'varname;
@@ -1911,7 +1967,7 @@ unsafe fn parsesub(st: &mut Rt1) -> bool {
             let cc = st.c;
 
             if st.chkeofmark != 0 {
-                crate::STPUTC!(st.c, st.out);
+                st.out.push(st.c as u8);
             }
 
             if st.c == '%' as c_int || st.c == '#' as c_int {
@@ -1923,7 +1979,7 @@ unsafe fn parsesub(st: &mut Rt1) -> bool {
                 st.c = pgetc_eatbnl();
                 if st.c == cc {
                     if st.chkeofmark != 0 {
-                        crate::STPUTC!(st.c, st.out);
+                        st.out.push(st.c as u8);
                     }
                     subtype += 1;
                 } else {
@@ -1936,7 +1992,7 @@ unsafe fn parsesub(st: &mut Rt1) -> bool {
                     subtype = VSNUL;
                     st.c = pgetc_eatbnl();
                     if st.chkeofmark != 0 {
-                        crate::STPUTC!(st.c, st.out);
+                        st.out.push(st.c as u8);
                     }
                     /*FALLTHROUGH*/
                 }
@@ -1978,11 +2034,9 @@ unsafe fn parsesub(st: &mut Rt1) -> bool {
             }
         }
         if st.chkeofmark == 0 {
-            let p = stackblock();
-
-            *p.offset(typeloc - 1) = CTLVAR as c_char;
-            *p.offset(typeloc) = (subtype | VSBIT) as c_char;
-            crate::STPUTC!('=', st.out);
+            st.out[typeloc - 1] = CTLVAR as u8;
+            st.out[typeloc] = (subtype | VSBIT) as u8;
+            st.out.push(b'=');
         }
     } else {
         pungetc();
@@ -1998,15 +2052,18 @@ unsafe fn parsesub(st: &mut Rt1) -> bool {
  */
 
 /* parsebackq: */
-unsafe fn parsebackq(st: &mut Rt1, oldstyle: c_int) {
+unsafe fn parsebackq(st: &mut Rt1<'_>, oldstyle: c_int) {
     let mut saveprompt: c_int = 0;
     let saveheredoclist: Vec<heredoc>;
     let nlpp: usize;
-    let savelen: usize;
     let n: Option<Node>;
     let mut ml: c_uint;
-    let pstr: *mut c_char;
-    let str: *mut c_char;
+    /* `grabstackstr(pout)` had to reserve the backquote's text because
+     * `list(2)` builds on the same stack; owning it says the same thing, and
+     * it has to outlive the `popfile` below because `setinputstring` reads
+     * through the pointer rather than copying. */
+    let mut pstr: BString = BString::new(Vec::new());
+    let str: BString;
 
     if st.chkeofmark != 0 {
         let next = if !(*st.synstack).prev.is_null() {
@@ -2023,23 +2080,25 @@ unsafe fn parsebackq(st: &mut Rt1, oldstyle: c_int) {
         }
         return;
     }
-    crate::STADJUST!(oldstyle - 1, st.out);
-    *st.out.offset(-1) = CTLBACKQ as c_char;
-    str = stackblock();
-    savelen = st.out as usize - stackblock() as usize;
-    grabstackblock(savelen);
-    crate::STARTSTACKSTR!(st.out);
+    /* `STADJUST(oldstyle - 1, out)` drops the '(' of `$(` and leaves the '`'
+     * of a backquote in place; either way the last byte becomes CTLBACKQ. */
+    if oldstyle == 0 {
+        st.out.pop();
+    }
+    let last = st.out.len() - 1;
+    st.out[last] = CTLBACKQ as u8;
+    /* The word so far is parked while `list(2)` runs, which is what
+     * `grabstackblock(savelen)` bought the C. */
+    str = mem::take(&mut st.out);
     if oldstyle != 0 {
         /* We must read until the closing backquote, giving special
         treatment to some slashes, and then push the string and
         reread it as input, interpreting it normally.  */
         let mut done = false;
-        let mut pout: *mut c_char = st.out;
         let mut pc: c_int;
 
         while !done {
             'bqbody: {
-                crate::CHECKSTRSPACE!(MB_LEN_MAX + 1, pout);
                 if needprompt != 0 {
                     setprompt(2);
                 }
@@ -2053,10 +2112,11 @@ unsafe fn parsebackq(st: &mut Rt1, oldstyle: c_int) {
                         && pc != '$' as c_int
                         && ((*st.synstack).dblquote == 0 || pc != '"' as c_int)
                     {
-                        crate::USTPUTC!('\\', pout);
+                        pstr.push(b'\\');
                     }
-                    ml = getmbc(pc, pout, 2);
-                    pout = pout.offset(ml as isize);
+                    ml = getmbc_at(&mut pstr, pc, 2);
+                    let grown = pstr.len() + ml as usize;
+                    pstr.set_len(grown);
                     if ml != 0 {
                         break 'bqbody; /* continue */
                     }
@@ -2065,12 +2125,14 @@ unsafe fn parsebackq(st: &mut Rt1, oldstyle: c_int) {
                 } else if pc == '\n' as c_int {
                     nlnoprompt();
                 }
-                crate::USTPUTC!(pc, pout);
+                pstr.push(pc as u8);
             }
         }
-        *pout.offset(-1) = 0;
-        pstr = grabstackstr(pout);
-        setinputstring(pstr);
+        /* `pout[-1] = '\0'` — over the closing backquote the loop just
+         * wrote, which is why the buffer is never empty here. */
+        let last = pstr.len() - 1;
+        pstr[last] = 0;
+        setinputstring(pstr.as_mut_ptr() as *mut c_char);
     }
     /* The C walks to the tail of `bqlist` and appends an empty cell, then
      * fills its `n` after the recursive parse.  Reserving the slot first is
@@ -2104,7 +2166,7 @@ unsafe fn parsebackq(st: &mut Rt1, oldstyle: c_int) {
     /* Start reading from old file again. */
     popfile();
 
-    st.out = stnputs(str, savelen, stackblock());
+    st.out = str;
 
     /* parsebackq_out: */
     if oldstyle != 0 {
@@ -2119,7 +2181,7 @@ unsafe fn parsebackq(st: &mut Rt1, oldstyle: c_int) {
  * Parse an arithmetic expansion (indicate start of one and set state)
  */
 /* parsearith: */
-unsafe fn parsearith(st: &mut Rt1) {
+unsafe fn parsearith(st: &mut Rt1<'_>) {
     let next = if !(*st.synstack).prev.is_null() {
         (*st.synstack).prev
     } else {
@@ -2128,10 +2190,13 @@ unsafe fn parsearith(st: &mut Rt1) {
     synstack_push(&mut st.synstack, next, ARISYNTAX());
     (*st.synstack).dblquote = 1;
     if st.chkeofmark != 0 {
-        crate::USTPUTC!(st.c, st.out);
+        st.out.push(st.c as u8);
     } else {
-        crate::STADJUST!(-1, st.out);
-        *st.out.offset(-1) = CTLARI as c_char;
+        /* `STADJUST(-1); out[-1] = CTLARI` — drop the second '(' of `$((`
+         * and relabel the '$'. */
+        st.out.pop();
+        let last = st.out.len() - 1;
+        st.out[last] = CTLARI as u8;
     }
     /* goto parsearith_return; */
 }
@@ -2218,7 +2283,7 @@ unsafe fn setprompt(which: c_int) {
     /* #ifdef SMALL: show = 1 */
     show = crate::histedit::el.is_null() as c_int;
     if show != 0 && (*crate::input::parsefile).nleft == 0 {
-        pushstackmark(&mut smark, stackblocksize());
+        pushstackmark(&mut smark, crate::memalloc::stackblocksize());
         crate::output::out2str(getprompt(ptr::null_mut()));
         popstackmark(&mut smark);
     }
@@ -2258,15 +2323,15 @@ pub unsafe fn expandstr(ps: *const c_char) -> *const c_char {
     err = crate::eval::setjmp_catch(jl, || unsafe {
         handler = jl;
 
-        readtoken1(pgetc_eatbnl(), DQSYNTAX(), FAKEEOFMARK(), 0);
+        readtoken1(pgetc_eatbnl(), DQSYNTAX(), EofMark::Fake, 0);
 
         let n = Node::Arg(narg {
-            text: NodeText::Borrowed(wordtext),
+            text: wordtext_node(),
             backquote: takeglobal(addr_of_mut!(backquotelist)),
         });
 
         expandarg(&n, ptr::null_mut(), EXP_QUOTED);
-        *resultp = stackblock();
+        *resultp = crate::memalloc::stackblock() as *const c_char;
     });
 
     /* out: */

@@ -4,7 +4,7 @@
 use libc::{c_char, c_int, time_t};
 use core::ptr::{addr_of, addr_of_mut};
 
-use crate::memalloc::{popstackmark, setstackmark, stackblock, stackmark};
+use crate::memalloc::{popstackmark, setstackmark, stackmark};
 use crate::mystring::nullstr;
 use crate::output::VaArg;
 use crate::var::{mailval, mpathset, mpathval};
@@ -44,7 +44,7 @@ pub unsafe fn chkmail() {
         if len < 0 {
             break;
         }
-        let p_blk = stackblock() as *mut c_char;
+        let p_blk = crate::exec::padvance_result();
         if *p_blk == b'\0' as c_char {
             mtp = mtp.add(1);
             continue;

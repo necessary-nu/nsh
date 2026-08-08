@@ -23,7 +23,7 @@
 //!   * `crate::error::{jmploc, jmp_buf, handler, setjmp, longjmp,
 //!     sh_error!, suppressint, intpending, onint}`
 //!   * `crate::output::{out1fmt!, outfmt!, out1str, out2str, out2}`
-//!   * `crate::memalloc::{stacknxt, sstrend, stalloc, growstackstr, _STPUTC}`
+//!   * `crate::memalloc::stalloc`
 //!   * `crate::options::{optlist, arg0, optionarg}`
 //!   * `crate::var::{bltinlookup, histsizeval}`
 //!   * `crate::mystring::is_number`
@@ -31,6 +31,7 @@
 //!   * `crate::parser::getprompt`
 //!   * `crate::shellmain::readcmdfile` (src/main.c:283)
 
+use bstr::BString;
 use core::mem;
 use core::ptr;
 use libc::{c_char, c_int, c_void, FILE};
@@ -113,50 +114,6 @@ macro_rules! INTON {
             crate::error::onint();
         }
     }};
-}
-
-// ---------------------------------------------------------------------
-// src/memalloc.h:78-97 — the stack-string macros used by fc_replace.
-// ---------------------------------------------------------------------
-
-/// `#define stackblock() ((void *)stacknxt)`
-macro_rules! stackblock {
-    () => {
-        crate::memalloc::stacknxt
-    };
-}
-
-/// `#define STARTSTACKSTR(p) ((p) = stackblock())`
-macro_rules! STARTSTACKSTR {
-    ($p:ident) => {
-        $p = stackblock!()
-    };
-}
-
-/// `#define STPUTC(c, p) ((p) = _STPUTC((c), (p)))`
-macro_rules! STPUTC {
-    ($c:expr, $p:ident) => {
-        $p = crate::memalloc::_STPUTC($c as c_int, $p)
-    };
-}
-
-/// `#define STACKSTRNUL(p) ...`
-macro_rules! STACKSTRNUL {
-    ($p:ident) => {{
-        if $p == crate::memalloc::sstrend {
-            $p = crate::memalloc::growstackstr() as *mut _;
-            *$p = 0;
-        } else {
-            *$p = 0;
-        }
-    }};
-}
-
-/// `#define grabstackstr(p) stalloc((char *)(p) - (char *)stackblock())`
-macro_rules! grabstackstr {
-    ($p:expr) => {
-        crate::memalloc::stalloc(($p as usize) - (stackblock!() as usize))
-    };
 }
 
 // ---------------------------------------------------------------------
@@ -706,8 +663,10 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
                 }
                 crate::output::out1str(he.str);
             } else {
+                let replaced: BString;
                 let s: *const c_char = if !pat.is_null() {
-                    fc_replace(he.str, pat, repl)
+                    replaced = fc_replace(he.str, pat, repl);
+                    replaced.as_ptr() as *const c_char
                 } else {
                     he.str
                 };
@@ -777,26 +736,30 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
 
 // [spec:dash:def:histedit.fc-replace-fn]
 // [spec:dash:sem:histedit.fc-replace-fn]
-unsafe fn fc_replace(mut s: *const c_char, p: *mut c_char, mut r: *mut c_char) -> *const c_char {
-    let mut dest: *mut c_char;
+//
+// The C returns `grabstackstr(dest)`, which reserves the bytes *before* the
+// `STACKSTRNUL` — so the terminator sits one past the allocation and the
+// caller reads it anyway. An owned string carries its own terminator, and
+// returning it makes the lifetime the caller's rather than the enclosing
+// stack mark's, which matters because the caller hands it to `evalstring`.
+unsafe fn fc_replace(mut s: *const c_char, p: *mut c_char, mut r: *mut c_char) -> BString {
+    let mut dest: BString = BString::new(Vec::new());
     let plen: c_int = libc::strlen(p) as c_int;
 
-    STARTSTACKSTR!(dest);
     while *s != 0 {
         if *s == *p && libc::strncmp(s, p, plen as usize) == 0 {
             while *r != 0 {
-                STPUTC!(*r, dest);
+                dest.push(*r as u8);
                 r = r.add(1);
             }
             s = s.add(plen as usize);
             *p = 0; /* so no more matches */
         } else {
-            STPUTC!(*s, dest);
+            dest.push(*s as u8);
             s = s.add(1);
         }
     }
-    STACKSTRNUL!(dest);
-    dest = grabstackstr!(dest) as *mut c_char;
+    dest.push(0);
 
     dest
 }

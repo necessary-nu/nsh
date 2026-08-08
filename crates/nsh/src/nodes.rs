@@ -28,10 +28,12 @@
 //!     it) and `ndup.dupfd` are filled in by `expredir` on a tree that may
 //!     be a shared function definition. They are `Cell`s.
 //!
-//! Strings are still the C's `char *` into the stack allocator, wrapped in
-//! [`NodeText`] only so that `copyfunc` can take the copy the C took with
-//! `nodesavestr`. Converting them properly is a later slice of
-//! [dec:nsh:owned-data], and [dec:nsh:bytes-not-text] says what they become.
+//! A word's text is an owned [`NodeText`], which is a `BString` carrying the
+//! parser's trailing NUL ([dec:nsh:bytes-not-text]). The C kept a `char *`
+//! into the stack allocator and `copyfunc` called `nodesavestr` on every one
+//! of them; owning the bytes at parse time makes that copy the ordinary
+//! `Clone` and removes the distinction between a tree the allocator still
+//! backs and a tree that outlived its mark.
 //!
 //! `src/mknodes.c` still generates the `nodes.c`/`nodes.h` that the C
 //! reference is built from, but nothing it emits — `nodesize[]`, `calcsize`,
@@ -42,6 +44,7 @@ use core::cell::{Cell, OnceCell, RefCell};
 use core::ptr;
 use std::rc::Rc;
 
+use bstr::{BStr, BString};
 use libc::{c_char, c_int};
 
 // ---- node types (positional in src/nodetypes) ------------------------
@@ -116,49 +119,49 @@ pub type heredoc_body = Rc<OnceCell<Node>>;
 
 /// The text of a word, a `for` variable or a function name.
 ///
-/// The C stores a bare `char *` that points into the stack allocator, and
-/// that is what a freshly parsed tree still holds here. It works because the
-/// tree and the text die together, at the `popstackmark` that ends the
-/// command.
+/// The C stores a bare `char *` into the stack allocator, which works only
+/// because the tree and the text die together at the `popstackmark` that ends
+/// the command. `copyfunc` is where they do not: a function definition
+/// outlives the mark its text was parsed under, so `copynode` copied the
+/// *bytes* — `funcstringsize` measured them and `nodesavestr` wrote them.
 ///
-/// `copyfunc` is the one place where they do not die together: a function
-/// definition outlives the mark its text was parsed under. So `copynode` did
-/// not copy the pointer, it copied the *bytes* — that is what
-/// `funcstringsize` measured and `nodesavestr` wrote. Cloning a node
-/// therefore has to take ownership of the text, and this is the type that
-/// says so.
+/// Here the bytes are owned from the moment the parser produces them, so both
+/// cases are the same case and `Clone` is derived.
 ///
-/// The owned arm becomes a `BString` when [dec:nsh:bytes-not-text]'s slice
-/// lands; the borrowed arm goes when the stack allocator does.
-pub enum NodeText {
-    /// into the stack allocator, valid until the enclosing mark pops
-    Borrowed(*mut c_char),
-    /// a copy of the bytes, NUL included — what `nodesavestr` produced
-    Owned(Box<[u8]>),
-}
+/// The trailing NUL the parser wrote is *part of the value*: `as_ptr` hands
+/// the bytes to the `char *` readers that are still C-shaped, and `as_bstr`
+/// hides it from the ones that are not.
+#[derive(Clone)]
+pub struct NodeText(BString);
 
 impl NodeText {
+    /// Take ownership of a word's bytes. `text` ends in the NUL the parser
+    /// wrote, which is part of the value.
+    pub fn new(text: BString) -> NodeText {
+        NodeText(text)
+    }
+
+    /// Copy a NUL-terminated C string, NUL included.
+    ///
+    /// # Safety
+    /// `p` must point at a NUL-terminated string.
+    pub unsafe fn from_ptr(p: *const c_char) -> NodeText {
+        let len = libc::strlen(p);
+        NodeText(BString::from(core::slice::from_raw_parts(
+            p as *const u8,
+            len + 1,
+        )))
+    }
+
     /// The C's `char *`. Callers only read through it; nothing in the shell
     /// writes a word's text after the parser has built the node.
     pub fn as_ptr(&self) -> *mut c_char {
-        match self {
-            NodeText::Borrowed(p) => *p,
-            NodeText::Owned(b) => b.as_ptr() as *mut c_char,
-        }
+        self.0.as_ptr() as *mut c_char
     }
-}
 
-impl Clone for NodeText {
-    /// `nodesavestr`: copy the bytes, never the pointer.
-    fn clone(&self) -> NodeText {
-        let p = self.as_ptr();
-        unsafe {
-            let len = libc::strlen(p);
-            let mut v: Vec<u8> = Vec::with_capacity(len + 1);
-            ptr::copy_nonoverlapping(p as *const u8, v.as_mut_ptr(), len + 1);
-            v.set_len(len + 1);
-            NodeText::Owned(v.into_boxed_slice())
-        }
+    /// The text without its terminating NUL.
+    pub fn as_bstr(&self) -> &BStr {
+        BStr::new(&self.0[..self.0.len() - 1])
     }
 }
 
@@ -566,5 +569,73 @@ pub unsafe fn reffunc(f: *const funcnode) {
 pub unsafe fn freefunc(f: *const funcnode) {
     if !f.is_null() {
         Rc::decrement_strong_count(f);
+    }
+}
+
+// ---------------------------------------------------------------------
+// A word's bytes are not text, and the trailing NUL is part of the value.
+// Both of those are load-bearing for every reader that is still C-shaped,
+// and neither is visible to the differential harness as anything other
+// than "the shell changed".
+// ---------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::{CTLENDVAR, CTLESC, CTLQUOTEMARK, CTLVAR};
+
+    /// The bytes `"$x"` leaves the parser as: they are invalid UTF-8 by
+    /// construction, so nothing on this path may validate them as text.
+    fn quoted_var() -> BString {
+        BString::from(vec![
+            CTLQUOTEMARK as u8,
+            CTLVAR as u8,
+            b'x',
+            CTLENDVAR as u8,
+            CTLQUOTEMARK as u8,
+            0,
+        ])
+    }
+
+    #[test]
+    fn node_text_keeps_the_in_band_control_bytes() {
+        let t = NodeText::new(quoted_var());
+        assert_eq!(t.as_bstr(), &quoted_var()[..5]);
+        assert!(core::str::from_utf8(t.as_bstr()).is_err());
+        // `as_ptr` hands the readers that still take a `char *` a string
+        // that terminates where the parser said it did.
+        unsafe {
+            assert_eq!(libc::strlen(t.as_ptr()), 5);
+            assert_eq!(*t.as_ptr() as c_int, CTLQUOTEMARK);
+        }
+    }
+
+    #[test]
+    fn node_text_from_ptr_copies_the_terminator() {
+        let src = quoted_var();
+        let t = unsafe { NodeText::from_ptr(src.as_ptr() as *const c_char) };
+        assert_eq!(t.as_bstr(), &src[..5]);
+        assert_ne!(t.as_ptr() as *const u8, src.as_ptr());
+    }
+
+    #[test]
+    fn cloning_a_node_copies_the_bytes_rather_than_sharing_them() {
+        // `copyfunc` is why this matters: a function definition outlives
+        // the text it was parsed from, so `copynode` called `nodesavestr`.
+        let n = Node::Arg(narg {
+            text: NodeText::new(quoted_var()),
+            backquote: Vec::new(),
+        });
+        let copy = n.clone();
+        assert_eq!(copy.narg().text.as_bstr(), n.narg().text.as_bstr());
+        assert_ne!(copy.narg().text.as_ptr(), n.narg().text.as_ptr());
+    }
+
+    #[test]
+    fn a_word_may_contain_a_nul_the_terminator_does_not_hide() {
+        // A raw NUL byte reaches the parser from the input, so the value is
+        // its bytes and not what `strlen` makes of them.
+        let t = NodeText::new(BString::from(vec![b'a', 0, b'b', 0]));
+        assert_eq!(t.as_bstr(), b"a\0b".as_slice());
+        assert_eq!(unsafe { libc::strlen(t.as_ptr()) }, 1);
     }
 }

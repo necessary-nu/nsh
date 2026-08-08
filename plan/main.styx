@@ -2036,6 +2036,14 @@ children (
                         priority 0
                         kind @refactor
                         deps (owned-nodes sanctioned-divergences)
+                        log (
+                            {
+                                at 2026-08-08T10:06:34.731197116Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Partial on wt/owned-strings (858a6e2..f6b5c15), left Todo on purpose. String-builder call sites 205 -> 91. Cleared: parser.rs (74 -> 8, and the 8 are getmbc/dollarsq_escape writing through a raw cursor into a Vec's spare capacity, plus expandstr's read of expand.rs's builder), nodes.rs NodeText, cd.rs, histedit.rs, mystring.rs, exec.rs, jobs.rs, eval.rs, shellmain.rs, mail.rs. Remaining: expand.rs 41, bltin/printf.rs 22, miscbltin.rs 8, var.rs 7 (listvars' envp array), output.rs 3, redir.rs 1, input.rs 1. expand.rs is blocked structurally, not by effort: expmeta borrows the global expdest to encode directory entries into the glob buffer, so expdest cannot become an index into one owned buffer until memtodest/chtodest/mbtodest take their destination as a parameter. plan/decisions/owned-data.md has the full reasoning. Unconverted rider from docs/std-replacements.md §3 step 3: cd.rs:234,253 libc::strtok -> split_str(b\"/\") filtered for empty fields."
+                            }
+                        )
                     }
 
                     {

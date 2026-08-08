@@ -9,6 +9,7 @@
 //!	number(s)		Convert a string of digits to an integer.
 //!	is_number(s)		Return true if s is a string of digits.
 
+use bstr::BString;
 use libc::{c_char, c_int, c_uchar, c_void, intmax_t, size_t};
 
 use crate::output::VaArg;
@@ -230,55 +231,45 @@ pub unsafe fn is_number(p: *const c_char) -> c_int {
 // [spec:dash:def:mystring.single-quote-fn]
 // [spec:dash:sem:mystring.single-quote-fn]
 pub unsafe fn single_quote(s: *const c_char) -> *mut c_char {
-    let mut p: *mut c_char;
     let mut s = s;
-
-    crate::STARTSTACKSTR!(p);
+    /* The C leaves the result in the stack block without grabbing it, so
+     * the next call overwrites it and every caller reads it before making
+     * another. One buffer, reused, is that contract exactly. */
+    let q = &mut *core::ptr::addr_of_mut!(quoted);
+    q.clear();
 
     loop {
-        let mut q: *mut c_char;
         let mut len: size_t;
 
         len = (crate::system::strchrnul(s, '\'' as c_int) as usize).wrapping_sub(s as usize);
 
-        p = crate::memalloc::makestrspace(len + 3, p);
-        q = p;
-
-        *q = '\'' as c_char;
-        q = q.add(1);
-        q = crate::system::mempcpy(q as *mut c_void, s as *const c_void, len) as *mut c_char;
-        *q = '\'' as c_char;
-        q = q.add(1);
+        q.push(b'\'');
+        q.extend_from_slice(core::slice::from_raw_parts(s as *const u8, len));
+        q.push(b'\'');
         s = s.add(len);
-
-        crate::STADJUST!((q as usize).wrapping_sub(p as usize), p);
 
         len = libc::strspn(s, cstr(b"'\0"));
         if len == 0 {
             break;
         }
 
-        p = crate::memalloc::makestrspace(len + 3, p);
-        q = p;
-
-        *q = '"' as c_char;
-        q = q.add(1);
-        q = crate::system::mempcpy(q as *mut c_void, s as *const c_void, len) as *mut c_char;
-        *q = '"' as c_char;
-        q = q.add(1);
+        q.push(b'"');
+        q.extend_from_slice(core::slice::from_raw_parts(s as *const u8, len));
+        q.push(b'"');
         s = s.add(len);
-
-        crate::STADJUST!((q as usize).wrapping_sub(p as usize), p);
 
         if *s == 0 {
             break;
         }
     }
 
-    crate::USTPUTC!(0, p);
+    q.push(0);
 
-    crate::memalloc::stackblock() as *mut c_char
+    q.as_mut_ptr() as *mut c_char
 }
+
+/// [`single_quote`]'s result, which the C left in the stack block.
+static mut quoted: BString = BString::new(Vec::new());
 
 /*
  * Like strdup but works with the ash stack.
