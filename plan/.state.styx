@@ -1093,6 +1093,7 @@ assertions (
     {id owned-nodes, kind @complete, author "brendan@necessary.nu", at 2026-08-07T11:42:00.055092499Z}
     {id crate-rename, kind @complete, author "brendan@necessary.nu", at 2026-08-08T02:12:48.664729127Z}
     {id sanctioned-divergences, kind @doing, author "brendan@necessary.nu", at 2026-08-08T08:24:19.29009759Z}
+    {id public-api-design, kind @doing, author "brendan@necessary.nu", at 2026-08-08T08:50:26.111500849Z}
 )
 
 impl_evidence (

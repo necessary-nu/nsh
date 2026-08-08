@@ -25,6 +25,15 @@
 #![allow(unused_variables)]
 #![allow(clippy::all)]
 
+// ---- the proposed public API, unimplemented --------------------------
+//
+// `api` is a design artefact, not code: every body is `todo!()` and
+// nothing else in the crate refers to it. It is compiled so that the
+// signatures in `docs/api-design.md` are checked by the compiler rather
+// than by reading. It is deleted by the `public-api` node, which replaces
+// it with the implementation.
+pub mod api;
+
 // ---- foundation -----------------------------------------------------
 pub mod error;
 pub mod memalloc;
