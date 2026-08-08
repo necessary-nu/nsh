@@ -538,17 +538,20 @@ and one commit is what §5 says not to do here.
     still `stalloc`'d C structures holding `char *`. That copy is the seam
     with `delete-memalloc` and it disappears with those structures, not
     before.
-  * **`bltin/printf.rs`.** `print_escape_str` is the hard one and it is not
-    hard for allocation reasons: it formats a run of `X`s through
-    `xasprintf` to get the field width right and then memcpies the real
-    bytes over them, because the real bytes can contain NUL. Three cursors
-    into the same region at once.
+  * **`bltin/printf.rs`'s `xasprintf` result.** `ASPF` formats through
+    `output.rs:xvasprintf`, which `stalloc`s the block it writes into. The
+    three buffers `printf.c` itself builds are owned; this one belongs to
+    `output.rs` and goes with it.
   * **`miscbltin.rs`'s `strlist` chain.** `readcmd`'s line is owned, but
     `ifsbreakup` still `stalloc`s the `strlist` nodes that point into it —
     the same seam as `expandarg`'s result above.
   * **`output.rs`'s `xvasprintf`.** Its `stalloc` is the region's, and it
     is sized to force a fresh block; see the `X`s entry below. It goes
     with `delete-memalloc`.
+  * **The two `pushstackmark(&sm, stackblocksize())` calls** in
+    `input.rs:preadfd` and `parser.rs:setprompt`. `stackblocksize` is the
+    region's free space, not a builder cursor; these are marks and they go
+    with `popstackmark`.
   * **`parser.rs`.** Eight sites inside `getmbc` and `dollarsq_escape`,
     which write through a raw cursor into a `BString`'s spare capacity and
     commit with `set_len`. The reservation has to stay exactly the C's
@@ -575,3 +578,69 @@ for each `strlist` node lands above them rather than on top of the line it
 is splitting. An owned line is already its own base and has nothing to
 reserve, and the `strlist`s that point into it are kept alive by the
 caller holding it rather than by the enclosing `popstackmark`.
+
+### `conv_escape` writes two bytes past what `CHECKSTRSPACE` promises
+
+`printf.c` guards both of its `conv_escape` calls with
+`CHECKSTRSPACE(4, cp)`, and 4 is not the bound. The `\U` arm is
+
+    USTPUTC(CTLMBCHAR, out);
+    USTPUTC(len, out);
+    STADJUST(mboff, out);
+    memcpy(out, &value, 4);
+    STADJUST(len, out);
+    USTPUTC(len, out);
+    USTPUTC(CTLMBCHAR, out);
+    STADJUST(mboff, out);
+
+with `mboff` `-2` when `mbchar` is false. So the closing pair lands at
+`out0[len]` and `out0[len + 1]` — bytes 5 and 6 for `\U0001F600`, whose
+`len` is 4 — and `out` is then wound back to `out0 + len`, which is what
+the function returns. The two bytes are above the returned length and the
+next write overwrites them, and in a 504-byte stack block nobody notices.
+
+Spare capacity is exactly as long as it is reserved to be, so the port has
+to reserve what the C *writes* rather than what the C *says*: 8, which
+also covers the `mbchar` case's `4 + len`. This is the one place in the
+pass where the C's number is wrong rather than merely generous, and the
+opposite of the `getmbc` entry above, where it is generous and must not be
+narrowed. A `debug_assert` in the arm names the highest byte it touches.
+
+### `print_escape_str`'s `X`s fit only because the mask is zero there
+
+    p = makestrspace(len, q);
+    memset(p, 'X', total);
+    p[total] = 0;
+
+`makestrspace(len, q)` guarantees `len` bytes at `q`, and `q` is itself
+`len` from the base — so the block is `2 * len` and `p[total]` is its last
+byte only while `total == len - 1`. It is, but not locally: `q[-1]` is
+`(!!((f[1] - 's') | done) - 1) & f[2]`, whose mask is 0 whenever `f[1]` is
+not `'s'`, and `f[1] == 's'` is precisely the `goto easy` that skips these
+three lines. Read separately they ask for a buffer that is one byte short
+on every `printf '%<width>b'`, and never on `echo`'s.
+
+### The run of `X`s is scratch, and `xvasprintf` is why it can be
+
+`print_escape_str` formats a run of `X`s through the real conversion to
+get the field width right, then memcpies the real bytes over them —
+because the real bytes can contain NUL and `printf` would stop at it. That
+is three cursors into one region: the converted string at the base, the
+`X`s above it, and the formatted result.
+
+The third is not in the same block, and that is not luck. `xvasprintf`
+asks `stalloc` for `max(len, stackblocksize()) + 1`, which exceeds the
+free space by construction, so it always chains a fresh block and the `X`s
+survive being read as the conversion's argument while it writes. Once that
+is established the `X`s have no reason to sit above the converted string
+at all — nothing ever reads the two as one string — so they become a
+buffer of their own, and the converted string can be owned. Same shape as
+`expmeta`'s encoded directory entry above.
+
+### `mklong` returns a lifetime, the way `grabstackblock` did
+
+`mklong` builds the widened conversion at `stackblock()` and returns the
+pointer without grabbing it, so the value is live exactly until the next
+`stalloc` — and the caller's next act is the `printf` that reads it. What
+the region call communicates is when the bytes stop being valid, not where
+they are; the owned form is a buffer the caller holds across the `printf`.

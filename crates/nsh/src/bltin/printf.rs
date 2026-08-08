@@ -7,11 +7,12 @@
 //! both the `printf.*` and the `system.*` rule ids.
 //!
 //! Cross-module signatures assumed (see the port report):
-//!   * `crate::memalloc::{stacknxt, sstrend}` — `extern char *` globals
-//!     (src/memalloc.h:47-49); the stack-string macros below are the
-//!     literal expansions of `src/memalloc.h:78-97` over them.
-//!   * `crate::memalloc::{stackmark, setstackmark, popstackmark, stalloc,
-//!     makestrspace, growstackstr, _STPUTC}`
+//!   * `crate::memalloc::{stackmark, setstackmark, popstackmark}` — the
+//!     region mark that bounds the block `xasprintf` allocates.  The three
+//!     buffers this file builds — the escaped string, the run of `X`s that
+//!     stands in for it, and `mklong`'s widened format — are owned, so
+//!     `USTPUTC`/`STADJUST` below are the two macros `conv_escape` still
+//!     needs to write through a bare cursor and touch no region.
 //!   * `crate::output::{out1mem, out1fmt!, outc, out1c, xasprintf!}`
 //!   * `crate::error::{sh_error!, sh_warnx!}` via `bltin.h`'s aliases
 //!   * `crate::mystring::{nullstr, snlfmt}` — `char nullstr[1]`
@@ -25,6 +26,8 @@
 use core::mem;
 use core::ptr;
 use libc::{c_char, c_double, c_int, c_uint, c_void, intmax_t, uintmax_t};
+
+use bstr::BString;
 
 // glibc extensions/C99 functions the `libc` crate does not reliably expose.
 //
@@ -44,34 +47,25 @@ extern "C" {
 }
 
 // ---------------------------------------------------------------------
-// src/memalloc.h:78-97 — the stack-string macros, expanded literally.
+// src/memalloc.h:78-97 — the two stack-string macros `conv_escape` still
+// needs.  Both are pure cursor arithmetic; neither touches the region.
 // ---------------------------------------------------------------------
 
-/// `#define stackblock() ((void *)stacknxt)`
-macro_rules! stackblock {
-    () => {
-        crate::memalloc::stacknxt
-    };
-}
-
-/// `#define STARTSTACKSTR(p) ((p) = stackblock())`
-macro_rules! STARTSTACKSTR {
-    ($p:ident) => {
-        $p = stackblock!()
-    };
-}
-
-/// `#define CHECKSTRSPACE(n, p) ...`
-macro_rules! CHECKSTRSPACE {
-    ($n:expr, $p:ident) => {{
-        let _q = $p;
-        let _l: usize = $n;
-        let _m: usize = crate::memalloc::sstrend.offset_from(_q) as usize;
-        if _l > _m {
-            $p = crate::memalloc::makestrspace(_l, _q);
-        }
-    }};
-}
+/// The most `conv_escape` can write past the cursor it is given.
+///
+/// The C guards both of its calls with `CHECKSTRSPACE(4, cp)`, and 4 is not
+/// enough. `\U0001F600` takes the `len == 4` arm, which writes the four
+/// encoded bytes at `out + mboff` and *then* `USTPUTC(len, out);
+/// USTPUTC(CTLMBCHAR, out)` at `out + len` and `out + len + 1` — bytes 5 and
+/// 6 with `mbchar` false, bytes 7 and 8 with it true. It returns before them,
+/// so they are scratch the next write overwrites; but they are written, and
+/// in a 504-byte stack block nobody notices. Spare capacity is exactly as
+/// long as it is reserved to be, so the port has to reserve what the C
+/// writes rather than what the C says.
+///
+/// `parser.rs` reaches the `mbchar` arm and its `CHECKSTRSPACE(MAX(MB_LEN_MAX,
+/// 16) + 7, out)` already covers 8.
+pub const CONV_ESCAPE_SLOP: usize = 8;
 
 /// `#define USTPUTC(c, p) (*p++ = (c))`
 macro_rules! USTPUTC {
@@ -178,44 +172,68 @@ unsafe fn print_escape_str(
     s: *mut c_char,
 ) -> c_int {
     let mut smark: crate::memalloc::stackmark = mem::zeroed();
-    let mut p: *mut c_char;
-    let mut q: *mut c_char = ptr::null_mut();
+    let mut p: *const c_char;
     let done: c_int;
     let mut len: c_int;
     let mut total: c_int;
+    /* The C's `q` is a cursor into the stack block and `stackblock()` its
+     * base.  Both are this buffer: `len` is its length, `q[-1]` its last
+     * byte, and the `q = stackblock()` the C re-reads after `makestrspace`
+     * is the buffer itself, which cannot move under it. */
+    let mut buf = BString::default();
 
+    /* The mark is still needed: `ASPF` goes through `xasprintf`, which
+     * `stalloc`s the block it formats into.  Nothing else here is region. */
     crate::memalloc::setstackmark(&mut smark);
-    done = conv_escape_str(s, &mut q);
-    p = stackblock!();
-    len = q.offset_from(p) as c_int;
+    done = conv_escape_str(s, &mut buf);
+    len = buf.len() as c_int;
     total = len - 1;
 
+    /* `conv_escape_str`'s do-while exits only on the iteration that writes
+     * the terminating NUL, so `q[-1]` always exists. */
+    debug_assert!(len >= 1);
+
     // q[-1] = (!!((f[1] - 's') | done) - 1) & f[2];
-    *q.offset(-1) = (((((*f.add(1) as c_int - b's' as c_int) | done) != 0) as c_int - 1)
-        & *f.add(2) as c_int) as c_char;
-    total += (*q.offset(-1) != 0) as c_int;
+    let close = (((((*f.add(1) as c_int - b's' as c_int) | done) != 0) as c_int - 1)
+        & *f.add(2) as c_int) as u8;
+    buf[len as usize - 1] = close;
+    total += (close != 0) as c_int;
+
+    p = buf.as_ptr() as *const c_char;
 
     'easy: {
         if *f.add(1) == b's' as c_char {
             break 'easy; /* goto easy */
         }
 
-        p = crate::memalloc::makestrspace(len as usize, q);
-        libc::memset(p as *mut c_void, b'X' as c_int, total as usize);
-        *p.add(total as usize) = 0;
+        /* The mask above is 0 whenever `f[1]` is not 's', which is every
+         * path that reaches here, so the run of `X`s is exactly as long as
+         * the converted string. */
+        debug_assert_eq!(total, len - 1);
 
-        q = stackblock!();
+        /* `p = makestrspace(len, q); memset(p, 'X', total); p[total] = 0;`
+         * The C puts the `X`s directly above the converted string because
+         * the region is the only scratch it has, and nothing ever reads the
+         * two as one string — so here they are a buffer of their own. */
+        let mut xs: Vec<u8> = vec![b'X'; total as usize];
+        xs.push(0);
+
+        let mut r: *mut c_char = xs.as_mut_ptr() as *mut c_char;
         // `ASPF(&p, f, p)`: the out-parameter has to be a raw pointer, not
-        // `&mut p`, or the borrow would conflict with reading `p` as the
+        // `&mut r`, or the borrow would conflict with reading `r` as the
         // conversion's argument in the same call.
-        total = ASPF!(param, array, ptr::addr_of_mut!(p), f, p);
+        total = ASPF!(param, array, ptr::addr_of_mut!(r), f, r);
 
-        len = strchrnul(p, b'X' as c_int).offset_from(p) as c_int;
+        /* The formatted result carries the field width, with the `X`s
+         * standing in for the real bytes — which may contain NUL and so
+         * cannot go through `printf` at all.  Put them back. */
+        len = strchrnul(r, b'X' as c_int).offset_from(r) as c_int;
         libc::memcpy(
-            p.add(len as usize) as *mut c_void,
-            q as *const c_void,
-            libc::strspn(p.add(len as usize), c"X".as_ptr()),
+            r.add(len as usize) as *mut c_void,
+            buf.as_ptr() as *const c_void,
+            libc::strspn(r.add(len as usize), c"X".as_ptr()),
         );
+        p = r;
     }
 
     // easy:
@@ -273,16 +291,21 @@ pub unsafe fn printfcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
                 let nextch: c_char;
                 let mut array: [c_int; 2] = [0; 2];
                 let mut param: *mut c_int;
+                /* `mklong`'s widened format, held for as long as the
+                 * conversion that reads it. */
+                let mut longfmt = BString::default();
 
                 if ch == b'\\' as c_int {
                     let ret: c_uint;
-                    let mut cp: *mut c_char;
+                    /* `STARTSTACKSTR(cp); CHECKSTRSPACE(4, cp)` — one
+                     * escape's worth of scratch and nothing else; see
+                     * `CONV_ESCAPE_SLOP` for why 4 is not the bound. */
+                    let mut cp: [c_char; CONV_ESCAPE_SLOP] = [0; CONV_ESCAPE_SLOP];
 
-                    STARTSTACKSTR!(cp);
-                    CHECKSTRSPACE!(4, cp);
-                    ret = conv_escape(fmt, cp, false);
+                    ret = conv_escape(fmt, cp.as_mut_ptr(), false);
                     fmt = fmt.add((ret >> 4) as usize);
-                    crate::output::out1mem(cp, (ret & 15) as usize);
+                    debug_assert!((ret & 15) as usize <= CONV_ESCAPE_SLOP);
+                    crate::output::out1mem(cp.as_ptr(), (ret & 15) as usize);
                     continue;
                 }
                 if ch != b'%' as c_int
@@ -351,12 +374,12 @@ pub unsafe fn printfcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
                     }
                     b'd' | b'i' => {
                         let p: uintmax_t = getuintmax(1);
-                        start = mklong(start, fmt);
+                        start = mklong(&mut longfmt, start, fmt);
                         PF!(param, array.as_mut_ptr(), start, p);
                     }
                     b'o' | b'u' | b'x' | b'X' => {
                         let p: uintmax_t = getuintmax(0);
-                        start = mklong(start, fmt);
+                        start = mklong(&mut longfmt, start, fmt);
                         PF!(param, array.as_mut_ptr(), start, p);
                     }
                     b'a' | b'A' | b'e' | b'E' | b'f' | b'F' | b'g' | b'G' => {
@@ -387,18 +410,21 @@ pub unsafe fn printfcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
  */
 // [spec:dash:def:printf.conv-escape-str-fn]
 // [spec:dash:sem:printf.conv-escape-str-fn]
-unsafe fn conv_escape_str(mut str: *mut c_char, sp: *mut *mut c_char) -> c_int {
-    let mut cp: *mut c_char;
+unsafe fn conv_escape_str(mut str: *mut c_char, cp: &mut BString) -> c_int {
     let mut c: c_int;
 
     /* convert string into a temporary buffer... */
-    STARTSTACKSTR!(cp);
+    /* `STARTSTACKSTR(cp)` — the buffer is the caller's, and the C's `*sp =
+     * cp` at the end is its length. */
+    debug_assert!(cp.is_empty());
 
     loop {
         let ret: c_uint;
         let ch: c_int;
 
-        CHECKSTRSPACE!(4, cp);
+        /* `CHECKSTRSPACE(4, cp)` — the room `conv_escape` writes into
+         * through the raw cursor below; see `CONV_ESCAPE_SLOP`. */
+        cp.reserve(CONV_ESCAPE_SLOP);
 
         // `goto putchar` is taken from two places; the flag replaces it.
         let mut goto_putchar = false;
@@ -419,7 +445,9 @@ unsafe fn conv_escape_str(mut str: *mut c_char, sp: *mut *mut c_char) -> c_int {
 
         if goto_putchar {
             // putchar:
-            USTPUTC!(c, cp);
+            /* `USTPUTC(c, cp)` truncates to `char`, which is what turns
+             * `\c`'s 0x100 into the terminating NUL. */
+            cp.push(c as u8);
         } else {
             /*
              * %b string octal constants are not like those in C.
@@ -431,9 +459,14 @@ unsafe fn conv_escape_str(mut str: *mut c_char, sp: *mut *mut c_char) -> c_int {
             }
 
             /* Finally test for sequences valid in the format string */
-            ret = conv_escape(str, cp, false);
+            let at = cp.len();
+            ret = conv_escape(str, cp.as_mut_ptr().add(at) as *mut c_char, false);
             str = str.add((ret >> 4) as usize);
-            cp = cp.add((ret & 15) as usize);
+            /* `cp += ret & 15` is the commit of what `conv_escape` wrote
+             * past the cursor; what it wrote above that stays uncommitted,
+             * for the next write to overwrite as the C's does. */
+            debug_assert!((ret & 15) as usize <= CONV_ESCAPE_SLOP);
+            cp.set_len(at + (ret & 15) as usize);
         }
 
         // } while (c & 0xff);
@@ -441,8 +474,6 @@ unsafe fn conv_escape_str(mut str: *mut c_char, sp: *mut *mut c_char) -> c_int {
             break;
         }
     }
-
-    *sp = cp;
 
     c
 }
@@ -623,6 +654,14 @@ pub unsafe fn conv_escape(str0: *mut c_char, out0: *mut c_char, mbchar: bool) ->
                     USTPUTC!(len, out);
                     USTPUTC!(crate::parser::CTLMBCHAR, out);
                     STADJUST!(mboff, out);
+
+                    /* The highest byte the block above touches, counted from
+                     * `out0`: the four encoded bytes end at `2 + mboff + 3`
+                     * and the closing pair at `2 + mboff + len + 1`.  It is
+                     * past the length this returns, so every caller has to
+                     * have reserved `CONV_ESCAPE_SLOP` and not the C's 4. */
+                    let highest = 2 + mboff + if len + 1 > 3 { len + 1 } else { 3 };
+                    debug_assert!(highest >= 0 && (highest as usize) < CONV_ESCAPE_SLOP);
                 }
 
                 break 'out_noput; /* goto out_noput */
@@ -665,7 +704,7 @@ const SIZEOF_PRIdMAX: usize = 3;
 
 // [spec:dash:def:printf.mklong-fn]
 // [spec:dash:sem:printf.mklong-fn]
-unsafe fn mklong(str: *const c_char, ch: *const c_char) -> *mut c_char {
+unsafe fn mklong(dest: &mut BString, str: *const c_char, ch: *const c_char) -> *mut c_char {
     /*
      * Replace a string like "%92.3u" with "%92.3"PRIuMAX.
      *
@@ -675,24 +714,23 @@ unsafe fn mklong(str: *const c_char, ch: *const c_char) -> *mut c_char {
      * character.
      */
 
-    let mut copy: *mut c_char;
     let len: usize;
 
     len = ch.offset_from(str) as usize + SIZEOF_PRIdMAX;
-    STARTSTACKSTR!(copy);
-    copy = crate::memalloc::makestrspace(len, copy);
-    libc::memcpy(
-        copy as *mut c_void,
-        str as *const c_void,
+    /* `STARTSTACKSTR(copy); copy = makestrspace(len, copy)`.  The C hands
+     * back a pointer into the block, live until the next `stalloc`; the
+     * caller uses it as the format of the very next `printf` and nothing
+     * allocates in between.  Here it is the caller's buffer, live for the
+     * whole conversion. */
+    debug_assert_eq!(PRIdMAX.to_bytes_with_nul().len(), SIZEOF_PRIdMAX);
+    dest.clear();
+    dest.extend_from_slice(core::slice::from_raw_parts(
+        str as *const u8,
         len - SIZEOF_PRIdMAX,
-    );
-    libc::memcpy(
-        copy.add(len - SIZEOF_PRIdMAX) as *mut c_void,
-        PRIdMAX.as_ptr() as *const c_void,
-        SIZEOF_PRIdMAX,
-    );
-    *copy.add(len - 2) = *ch;
-    copy
+    ));
+    dest.extend_from_slice(PRIdMAX.to_bytes_with_nul());
+    dest[len - 2] = *ch as u8;
+    dest.as_mut_ptr() as *mut c_char
 }
 
 // [spec:dash:def:printf.getchr-fn]
