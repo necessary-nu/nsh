@@ -410,34 +410,142 @@ itself produced -- so the read is unreachable rather than benign. An index
 of `-1` is not available, so the port asks `last() != Some(&b'/')`, which
 agrees with the C everywhere the C is defined.
 
+## What this cost in the port: the expansion buffer
+
+Written after `expand.rs`'s `expdest` builder became an owned `BString`.
+The four blockers the previous pass recorded are resolved as follows: the
+`memtodest` signature is a commit of its own; the `grabstackstr` seam is a
+copy into the region and stays until `delete-memalloc`; the `subevalvar`
+re-derivations translate one-to-one, because `Vec::reserve` reallocates
+exactly where `growstackto` did; and the `pushstackmark` lengths turn out
+to have been protecting against something that can no longer happen. What
+follows is what the reading of those did not predict.
+
+### `_rmescapes` leaves `expdest` pointing into a block it then frees
+
+The tail of `_rmescapes` is
+
+    if (flag & (RMESCAPE_ALLOC | RMESCAPE_GROW)) {
+            expdest = r;
+            STADJUST(q - r + 1, expdest);
+    }
+
+and `r` is inside the expansion buffer only under `RMESCAPE_GROW`. The
+other live arm is `expandmeta`'s
+`preglob(text, RMESCAPE_ALLOC | RMESCAPE_HEAP)`, where `r` is a
+`ckmalloc`'d block that `expandmeta` `ckfree`s four lines later -- so the
+C sets the expansion cursor to a pointer into memory it is about to free.
+It is harmless only because of where `expandmeta` sits: at the tail of
+`expandarg`, after `grabstackstr(expdest)` has taken the word, and every
+entry to the expansion re-opens with `STARTSTACKSTR`. The value is written
+and never read.
+
+An owned buffer cannot hold that pointer and gains nothing by trying, so
+the store is confined to the `GROW` arm. The reasoning that got there
+first -- "`RMESCAPE_HEAP` has no caller, so `GROW` is the only reachable
+case" -- was simply wrong, and it was a `debug_assert` on that claim that
+said so, in two corpus cases out of 61,498. The claim was checkable by
+grep and was not checked.
+
+### The expansion buffer has two readers outside `expand.c`
+
+`expandarg(n, NULL, flag)` is the call that does *not* grab its result, and
+both callers read it back as `stackblock()`: `redir.c:openhere` for a
+here-document, and `parser.c:expandstr` for `PS1` and `PS4`. A conversion
+that reads only `expand.c` finds the first, which is two functions away,
+and misses the second. What that costs is the `+ ` in front of every
+`set -x` line, and the corpus observes it in exactly one case -- the rest
+of an xtrace line comes from `eval.c:eprintlist`, which does not go through
+this buffer.
+
+Both pointers outlive their C equivalents rather than the reverse. The C's
+are valid until the next `stalloc`, and `parser.c:setprompt` bounds
+`expandstr`'s explicitly with `pushstackmark(&smark, stackblocksize())`
+around the `out2str` that consumes it; the port's are valid until the next
+expansion begins.
+
+### `argstr` terminates the word with a bitwise AND that reads as a no-op
+
+    q = stnputs(p, length, expdest);
+    *(q - 1) &= (end - 1);
+
+`end` is 1 exactly when the byte just copied closed the word -- NUL,
+CTLENDVAR or CTLENDARI -- and `end - 1` is then 0, so the AND *turns the
+closer into a NUL*. Otherwise `end` is 0, the mask is `-1`, and the line
+does nothing. One line, doing the single most load-bearing thing in the
+file: it is why the buffer can be handed to `strlen` by
+`redir.c:openhere`, why `setvar(str, startp, 0)` in `subevalvar` sees a
+terminated value, and why `patmatch(stackblock(), val)` in `casematch`
+works. Transcribed as written it keeps working; noticed, it is what lets
+the owned buffer's length be trusted as the end of the word.
+
+### Two places write *above* the cursor and read the byte back
+
+The region copies the whole block when it grows. `Vec::reserve` copies only
+the first `len` bytes. So "bytes above the cursor survive a growth" is a
+property the region has, an owned buffer does not, and the C has no reason
+to mention. Both sites had to be argued rather than transcribed:
+
+  * `expari` winds the cursor back to `begoff` and then calls
+    `arith(start)` with `start` pointing *at* the arithmetic text it just
+    truncated away. Safe because `arith` -- and `yylex` under it --
+    allocate only from the region and never touch this buffer, so nothing
+    on that path can reserve.
+  * `subevalvar` closes with `*loc = '\0'; STADJUST(loc - expdest, expdest)`,
+    which puts the terminator one past the length. Safe because every path
+    out of `argstr` re-supplies the word's own terminator (the AND above)
+    before anything reads the buffer as a string, and because `loc` is
+    always strictly below the cursor there, so the byte is inside the
+    initialised area until then.
+
+### `pushstackmark(&sm, endoff)` was doing two jobs and only one survives
+
+`expari` passes `endoff` and `expbackq` passes `startloc`, and
+`docs/idiomatization.md` §5 names these two lines as the reason
+`expand.rs` is dangerous -- "dash keeps offsets and pointers into the
+region across calls that can move it". The length does one thing:
+`grabstackblock(len)` reserves the region under the half-built word so
+that `arith()`'s and `makejob()`'s `stalloc`s land above it. The
+save-and-restore does the other: it releases whatever those calls
+allocated.
+
+Once the word is owned the first job has no customer, because the two
+allocators can no longer collide with a buffer they cannot reach, so the
+length is 0 and the save/restore stays. The hazard is not reproduced as an
+index; it is made impossible. `popstackmark` is unaffected either way --
+it restores `stacknxt` to the value recorded *before* `grabstackblock`.
+
+### `expmeta`'s encoded directory entry is scratch, and that is the seam
+
+The glob loop's `memtodest` writes the encoded form of `d_name` at
+`enddir`, inside the glob buffer and past the directory prefix, purely so
+that `pmatch` has something to match against; the branch that keeps the
+entry then overwrites those same bytes with the raw name via
+`stnputs(dname, len, enddir)`. The encoding is therefore scratch, it can go
+to a buffer of its own, and the *glob* buffer can stay in the region while
+the *expansion* buffer becomes owned. Without that the two are one commit,
+and one commit is what §5 says not to do here.
+
 ### What is *not* converted, and the reason
 
-`expand.rs` still builds its string in the region. The blocker is
-structural rather than a matter of effort, and it is worth writing down
-before the next attempt:
-
-  * `expdest` is not the expansion's cursor, it is *a* cursor, and
-    `expmeta` borrows it. At `expand.c`'s glob loop the code does
-    `expdest = enddir; memtodest(dname, len, ...); cp = stackblock();
-    enddir = cp + expdir_len;` -- `enddir` points into the *glob* buffer,
-    not into the expansion being built, and `memtodest` is being used as a
-    generic "encode these bytes at this cursor" routine. So `expdest`
-    cannot become an index into one owned buffer until `memtodest`,
-    `chtodest` and `mbtodest` take their destination as a parameter.
-  * `expandarg` ends with `grabstackstr(expdest)` and hands the result to
-    `ifsbreakup`, `expandmeta` and the `strlist` chain, all of which are
-    `stalloc`'d C structures holding `char *`. Those belong to
-    `delete-memalloc`. The clean seam is for the *builder* to become owned
-    and the *result* to still be copied into the region, which keeps this
-    node's property separable from that one's.
-  * `_rmescapes` with `RMESCAPE_GROW` writes into the builder and moves
-    `expdest`, and `subevalvar` re-derives `startp`, `str` and `rmescend`
-    from `stackblock()` afterwards precisely because of it. Those
-    re-derivations are the invariant, and each one needs reading against
-    the C rather than transcribing.
-  * The offsets that `expari` and `expbackq` protect with
-    `pushstackmark(&sm, endoff)` are protecting against `arith()` and
-    `makejob()` allocating from the region, not against the string builder
-    moving. `evalbackcmd` always forks, so no nested `expandarg` runs in
-    the parent -- that is what makes a single global builder safe at all,
-    and it is not obvious from the code.
+  * **`expand.rs`'s glob buffer.** `expmeta` builds candidate paths with
+    `growstackto`/`stnputs` in the region and `addfnamealt` hands them to
+    the arg list with `grabstackstr`. It is separable from the expansion
+    buffer now, which is what the `memtodest` commit bought, but it is its
+    own property.
+  * **`expandarg`'s result.** `grabstackstr(expdest)` is a copy into the
+    region, because `ifsbreakup`, `expandmeta` and the `strlist` chain are
+    still `stalloc`'d C structures holding `char *`. That copy is the seam
+    with `delete-memalloc` and it disappears with those structures, not
+    before.
+  * **`bltin/printf.rs`.** `print_escape_str` is the hard one and it is not
+    hard for allocation reasons: it formats a run of `X`s through
+    `xasprintf` to get the field width right and then memcpies the real
+    bytes over them, because the real bytes can contain NUL. Three cursors
+    into the same region at once.
+  * **`miscbltin.rs`.** `readcmd` builds its line in the region and hands
+    it to `ifsbreakup`, so it shares the `strlist` seam above.
+  * **`parser.rs`.** Eight sites inside `getmbc` and `dollarsq_escape`,
+    which write through a raw cursor into a `BString`'s spare capacity and
+    commit with `set_len`. The reservation has to stay exactly the C's
+    number; see the `getmbc`/`conv_escape` entry above.

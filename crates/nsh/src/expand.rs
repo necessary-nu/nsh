@@ -24,6 +24,7 @@
 use core::mem;
 use core::ptr;
 
+use bstr::BString;
 use libc::{c_char, c_int, c_uint, c_ulong, c_void, intmax_t, size_t, ssize_t, wchar_t};
 
 // ---------------------------------------------------------------------
@@ -201,7 +202,28 @@ pub struct ifs_state {
 }
 
 /* output of current string */
-static mut expdest: *mut c_char = ptr::null_mut();
+///
+/// The C is `static char *expdest;`, a cursor into the stack block whose
+/// base is `stackblock()`.  Here the word owns its bytes and **the cursor
+/// is the length**: `expdest` is `expbuf.len()`, `stackblock()` is
+/// [`expbase`], `STADJUST` backwards is `truncate`, and `STPUTC` is `push`.
+///
+/// Two properties of the region that the C leans on are *not* properties of
+/// a `Vec`, and both are audited where they matter:
+///
+///   * **The base does not move.** Every `p = stackblock()` re-read in the
+///     C is there because `makestrspace` may have reallocated. `Vec` has
+///     exactly the same hazard — `reserve` reallocates — so those re-reads
+///     stay, as `expbase()`, and they still mean "a growth can happen
+///     here".
+///   * **Bytes past the cursor survive a growth.** The region copies the
+///     whole block; `Vec::reserve` copies only the first `len` bytes. Two
+///     places write past the cursor and read the byte back: `subevalvar`'s
+///     closing `*loc = '\0'` (re-supplied by `argstr`'s own terminator
+///     before anything reads it) and `expari`'s arithmetic text (read by
+///     `arith`, which cannot grow this buffer). Both are argued at the
+///     site.
+static mut expbuf: BString = BString::new(Vec::new());
 /* list of back quote expressions.
  * The C walks a `struct nodelist *` and advances it with `argbackq =
  * argbackq->next`; the list is now the `Vec` inside the NARG node, so what
@@ -244,6 +266,100 @@ unsafe fn stackblock() -> *mut c_char {
 #[inline]
 unsafe fn grabstackstr(p: *mut c_char) -> *mut c_char {
     crate::memalloc::stalloc(p.offset_from(stackblock()) as size_t) as *mut c_char
+}
+
+// ---------------------------------------------------------------------
+// The expansion buffer.  See [`expbuf`].
+// ---------------------------------------------------------------------
+
+/// `&mut expbuf`, without ever naming a reference to the `static mut`
+/// twice at once.
+#[inline]
+unsafe fn expb() -> &'static mut BString {
+    &mut *ptr::addr_of_mut!(expbuf)
+}
+
+/// `stackblock()`, for the expansion buffer.  Re-read after anything that
+/// can grow it, exactly where the C re-reads `stackblock()`.
+#[inline]
+unsafe fn expbase() -> *mut c_char {
+    expb().as_mut_ptr() as *mut c_char
+}
+
+/// The C's `expdest`, as a pointer.
+#[inline]
+unsafe fn expdest() -> *mut c_char {
+    let b = expb();
+    let n = b.len();
+    b.as_mut_ptr().add(n) as *mut c_char
+}
+
+/// `expdest - stackblock()`.
+#[inline]
+unsafe fn expdest_off() -> c_int {
+    expb().len() as c_int
+}
+
+/// `expdest = p` / `STADJUST(p - expdest, expdest)`.  `p` must point into
+/// the buffer; the bytes below it have been written by a raw cursor.
+#[inline]
+unsafe fn set_expdest(p: *mut c_char) {
+    let b = expb();
+    let off = p.offset_from(b.as_mut_ptr() as *mut c_char) as usize;
+    b.set_len(off);
+}
+
+/// `makestrspace(n, expdest)`: make `n` bytes writable past the cursor and
+/// return a raw cursor at it.  The caller commits with [`set_expdest`], as
+/// the C commits by assigning `expdest`.
+#[inline]
+unsafe fn expmakestrspace(n: size_t) -> *mut c_char {
+    expb().reserve(n);
+    expdest()
+}
+
+/// `stnputs(s, n, expdest)`, returning the new cursor.
+#[inline]
+unsafe fn expstnputs(s: *const c_char, n: size_t) -> *mut c_char {
+    let b = expb();
+    b.reserve(n);
+    let len = b.len();
+    ptr::copy_nonoverlapping(s as *const u8, b.as_mut_ptr().add(len), n);
+    b.set_len(len + n);
+    expdest()
+}
+
+/// `p = grabstackstr(expdest)`.
+///
+/// This is the seam between [dec:nsh:owned-data]'s string-builder property
+/// and `delete-memalloc`.  The *builder* is owned; the *result* is still a
+/// region pointer, because `ifsbreakup`, `expandmeta` and the `strlist`
+/// chain are `stalloc`'d C structures holding `char *`.  In the C the call
+/// allocates nothing and copies nothing — it moves the bump pointer past
+/// bytes that are already in place, which is how C says "these outlive the
+/// next builder".  Owned bytes say that for free, so what is left here is
+/// the copy into the region that the consumers still require, and it goes
+/// when they do.
+unsafe fn grabexpdest() -> *mut c_char {
+    let b = expb();
+    let n = b.len();
+    let p = crate::memalloc::stalloc(n) as *mut c_char;
+    ptr::copy_nonoverlapping(b.as_ptr(), p as *mut u8, n);
+    b.clear();
+    p
+}
+
+/// The result of an `expandarg(n, NULL, flag)` — the call that does *not*
+/// grab its output.
+///
+/// Two callers: `redir::openhere` for a here-document and
+/// `parser::expandstr` for `PS1`/`PS4`.  Both read the C's `stackblock()`
+/// back after the call.  The bytes are NUL-terminated by `argstr`, which
+/// forces the word's closing marker to 0 (`*(q - 1) &= end - 1`), and they
+/// stay valid until the next expansion begins — where the C's were valid
+/// only until the next `stalloc`.
+pub unsafe fn expansion_result() -> *mut c_char {
+    expbase()
 }
 
 /// `syntax.h`: `#define BASESYNTAX (basesyntax + SYNBASE)`
@@ -458,14 +574,15 @@ pub unsafe fn expandarg(arg: &crate::nodes::Node, arglist: *mut arglist, flag: c
 
     argbackq = arg.narg().backquote.as_slice();
     /* STARTSTACKSTR(expdest) */
-    expdest = stackblock();
+    expb().clear();
     argstr(arg.narg().text.as_ptr(), flag);
     'out: {
         if arglist.is_null() {
-            /* here document expanded */
+            /* here document expanded — the caller reads the buffer back
+             * through `expansion_result()`. */
             break 'out;
         }
-        p = grabstackstr(expdest);
+        p = grabexpdest();
         exparg.lastp = &mut exparg.list;
         /*
          * TODO - EXP_REDIR
@@ -543,7 +660,7 @@ unsafe fn argstr(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
             }
         }
         /* start: */
-        startloc = expdest.offset_from(stackblock()) as c_int;
+        startloc = expdest_off();
         loop {
             let ml: c_uint;
             let mb: c_uint;
@@ -566,10 +683,16 @@ unsafe fn argstr(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
                 let newloc: c_int;
                 let q: *mut c_char;
 
-                q = crate::memalloc::stnputs(p, length, expdest);
+                q = expstnputs(p, length);
                 *q.offset(-1) &= (end - 1) as c_char;
-                expdest = q.offset(-((if (flag & EXP_WORD) != 0 { end } else { 0 }) as isize));
-                newloc = q.offset_from(stackblock()) as c_int - end;
+                /* `end` is 1 exactly when the byte just written closed the
+                 * word (NUL, CTLENDVAR or CTLENDARI), and the line above
+                 * has already turned it into a NUL.  Under EXP_WORD the
+                 * cursor steps back over it, so it lands past the length —
+                 * the outer `argstr` overwrites it on its next append. */
+                let q_off = q.offset_from(expbase()) as c_int;
+                set_expdest(q.offset(-((if (flag & EXP_WORD) != 0 { end } else { 0 }) as isize)));
+                newloc = q_off - end;
                 if breakall != 0 && inquotes == 0 && newloc > startloc {
                     recordregion(startloc, newloc, 0);
                 }
@@ -632,7 +755,7 @@ unsafe fn argstr(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
                         }
                         p = p.offset((mb & 0xff) as isize);
                         if (flag & EXP_DISCARD) == 0 {
-                            expdest = crate::memalloc::stnputs(p, ml as size_t, expdest);
+                            expstnputs(p, ml as size_t);
                         }
                         p = p.offset((mb >> 8) as isize);
                     }
@@ -711,7 +834,7 @@ unsafe fn exptilde(startp: *mut c_char, flag: c_int) -> *mut c_char {
             /* lose: */
             return startp;
         }
-        strtodest(home, flag | EXP_QUOTED, &mut expdest);
+        strtodest(home, flag | EXP_QUOTED, expb());
     }
     /* out: */
     p
@@ -769,13 +892,13 @@ pub unsafe fn removerecordregions(endoff: c_int) {
 unsafe fn expari(mut start: *mut c_char, flag: c_int) -> *mut c_char {
     let mut sm: crate::memalloc::stackmark = mem::zeroed();
     let begoff: c_int;
-    let endoff: c_int;
     let len: c_int;
     let result: intmax_t;
-    let mut p: *mut c_char;
+    /* The C's `p` doubles as a scratch `stackblock()` before it becomes the
+     * return value; only the second use survives. */
+    let p: *mut c_char;
 
-    p = stackblock();
-    begoff = expdest.offset_from(p) as c_int;
+    begoff = expdest_off();
     p = argstr(start, flag & EXP_DISCARD);
 
     'out: {
@@ -783,19 +906,33 @@ unsafe fn expari(mut start: *mut c_char, flag: c_int) -> *mut c_char {
             break 'out;
         }
 
-        start = stackblock();
-        endoff = expdest.offset_from(start) as c_int;
-        start = start.offset(begoff as isize);
-        /* STADJUST(start - expdest, expdest) */
-        expdest = expdest.offset(start.offset_from(expdest));
+        /* `start = stackblock() + begoff; STADJUST(start - expdest, expdest)`
+         * winds the cursor back over the arithmetic text, which then stays
+         * where it is and is read by `arith` from *past* the cursor.
+         *
+         * The C protects it with `pushstackmark(&sm, endoff)`: `endoff` is
+         * how much of the region the half-built word occupies, and grabbing
+         * that much keeps `arith`'s own `stalloc`s off it.  The word is no
+         * longer in the region, so there is nothing for `arith` to collide
+         * with and the length is 0; the mark now only releases what `arith`
+         * allocated, which is its other job.
+         *
+         * What the reservation is replaced by is an argument rather than a
+         * mechanism: `arith` (and `yylex` under it) allocate from the
+         * region and never touch this buffer, so the bytes above the
+         * truncated length cannot be moved or overwritten while `arith`
+         * reads them.  `Vec::reserve` would move them — it copies only the
+         * first `len` bytes — but nothing on this path reserves. */
+        expb().truncate(begoff as usize);
+        start = expbase().offset(begoff as isize);
 
         removerecordregions(begoff);
 
-        crate::memalloc::pushstackmark(&mut sm, endoff as size_t);
+        crate::memalloc::pushstackmark(&mut sm, 0);
         result = crate::arith_yacc::arith(start);
         crate::memalloc::popstackmark(&mut sm);
 
-        len = cvtnum(result, flag, &mut expdest) as c_int;
+        len = cvtnum(result, flag, expb()) as c_int;
 
         if (flag & EXP_QUOTED) == 0 {
             recordregion(begoff, begoff + len, 0);
@@ -827,8 +964,13 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
         }
 
         crate::error::INTOFF();
-        startloc = expdest.offset_from(stackblock()) as c_int;
-        crate::memalloc::pushstackmark(&mut smark, startloc as size_t);
+        startloc = expdest_off();
+        /* `pushstackmark(&smark, startloc)`: the length existed to keep
+         * `makejob`'s region allocations off the half-built word.  The word
+         * is no longer in the region — see `expari` for the same change —
+         * so the mark's remaining job is releasing what `evalbackcmd`
+         * allocated, and it needs no length. */
+        crate::memalloc::pushstackmark(&mut smark, 0);
         crate::eval::evalbackcmd(cmd, &mut in_ as *mut crate::eval::backcmd);
         crate::memalloc::popstackmark(&mut smark);
 
@@ -838,7 +980,7 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
         let mut jump_read = i == 0;
         loop {
             if !jump_read {
-                memtodest(p, i as size_t, flag, &mut expdest);
+                memtodest(p, i as size_t, flag, expb());
             }
             jump_read = false;
             /* read: */
@@ -869,15 +1011,15 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
         crate::error::INTON();
 
         /* Eat all trailing newlines */
-        dest = expdest;
-        while dest > stackblock().offset(startloc as isize) && *dest.offset(-1) == C_NL {
+        dest = expdest();
+        while dest > expbase().offset(startloc as isize) && *dest.offset(-1) == C_NL {
             /* STUNPUTC(dest) */
             dest = dest.offset(-1);
         }
-        expdest = dest;
+        set_expdest(dest);
 
         if (flag & EXP_QUOTED) == 0 {
-            recordregion(startloc, dest.offset_from(stackblock()) as c_int, 0);
+            recordregion(startloc, expdest_off(), 0);
         }
         /* TRACE(("evalbackq: size=%d: \"%.*s\"\n", ...)); */
     }
@@ -1013,7 +1155,6 @@ unsafe fn subevalvar(
     let quotes: c_int = flag & QUOTES_ESC;
     let mut startp: *mut c_char;
     let mut loc: *mut c_char;
-    let amount: isize;
     let mut rmesc: *mut c_char;
     let mut rmescend: *mut c_char;
     let zero: c_int;
@@ -1038,7 +1179,7 @@ unsafe fn subevalvar(
         return p;
     }
 
-    startp = stackblock().offset(startloc as isize);
+    startp = expbase().offset(startloc as isize);
 
     'out: {
         match subtype {
@@ -1062,22 +1203,29 @@ unsafe fn subevalvar(
          *		abort();
          * #endif */
 
-        rmescend = stackblock().offset(strloc as isize);
+        rmescend = expbase().offset(strloc as isize);
         str = preglob(rmescend, 0);
         if FNMATCH_IS_ENABLED {
-            startp = stackblock().offset(startloc as isize);
-            rmescend = stackblock().offset(strloc as isize);
-            nstrloc = str.offset_from(stackblock()) as c_int;
+            startp = expbase().offset(startloc as isize);
+            rmescend = expbase().offset(strloc as isize);
+            nstrloc = str.offset_from(expbase()) as c_int;
         }
 
         rmesc = startp;
         if FNMATCH_IS_ENABLED || quotes == 0 {
+            /* `_rmescapes` with RMESCAPE_GROW appends an unescaped copy of
+             * `startp` past the cursor and moves the cursor over it, so the
+             * buffer can have reallocated underneath.  `rmesc` (its return)
+             * and `rmescend` (the cursor it left) are both derived *after*
+             * that growth and stay valid; `startp` and `str` are from
+             * before and are re-derived, which is exactly why the C
+             * re-reads `stackblock()` on these two lines. */
             rmesc = _rmescapes(startp, RMESCAPE_ALLOC | RMESCAPE_GROW);
             if rmesc != startp {
-                rmescend = expdest;
+                rmescend = expdest();
             }
-            startp = stackblock().offset(startloc as isize);
-            str = stackblock().offset(nstrloc as isize);
+            startp = expbase().offset(startloc as isize);
+            str = expbase().offset(nstrloc as isize);
         }
         rmescend = rmescend.offset(-1);
 
@@ -1090,7 +1238,7 @@ unsafe fn subevalvar(
             scanright
         };
 
-        endp = stackblock().offset(strloc as isize - 1);
+        endp = expbase().offset(strloc as isize - 1);
         loc = scan(startp, endp, rmesc, rmescend, str, quotes, zero);
         if loc.is_null() {
             if quotes != 0 {
@@ -1120,10 +1268,19 @@ unsafe fn subevalvar(
     }
 
     /* out: */
+    /* `*loc = '\0'; STADJUST(loc - expdest, expdest)` — the terminator is
+     * written *at* the new cursor, so it lands one past the length rather
+     * than inside it.  In the region that byte survives; in a `Vec` a later
+     * reallocation would drop it, because `reserve` copies only the first
+     * `len` bytes.  It does not matter: every path out of `argstr` writes
+     * the word's own terminator (`*(q - 1) &= end - 1` forces the closing
+     * NUL, CTLENDVAR or CTLENDARI to 0) before anything reads the buffer as
+     * a string, and `loc` is always strictly below the cursor here, so the
+     * byte is inside the initialised area until then.  `amount` was only
+     * ever `loc - expdest`. */
+    debug_assert!(loc <= expdest());
     *loc = C_NUL;
-    amount = loc.offset_from(expdest);
-    /* STADJUST(amount, expdest) */
-    expdest = expdest.offset(amount);
+    set_expdest(loc);
 
     /* Remove any recorded regions beyond start of variable */
     removerecordregions(startloc);
@@ -1155,7 +1312,7 @@ unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
 
     quoted = flag & EXP_QUOTED;
     var = p;
-    startloc = expdest.offset_from(stackblock()) as c_int;
+    startloc = expdest_off();
     p = libc::strchr(p, C_EQUALS as c_int).offset(1);
 
     mbchar = match subtype {
@@ -1215,11 +1372,7 @@ unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
             if (flag & EXP_DISCARD) != 0 {
                 return p;
             }
-            cvtnum(
-                (if varlen > 0 { varlen } else { 0 }) as intmax_t,
-                flag,
-                &mut expdest,
-            );
+            cvtnum((if varlen > 0 { varlen } else { 0 }) as intmax_t, flag, expb());
             really_record = true;
             break 'again; /* goto really_record */
         }
@@ -1245,10 +1398,10 @@ unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
              * right after it
              */
             /* STPUTC('\0', expdest) */
-            expdest = crate::memalloc::_STPUTC(0, expdest);
+            expb().push(0);
         }
 
-        patloc = expdest.offset_from(stackblock()) as c_int;
+        patloc = expdest_off();
         p = subevalvar(p, ptr::null_mut(), patloc, startloc, varflags, flag);
         break 'again;
     }
@@ -1267,7 +1420,7 @@ unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
             return p;
         }
     }
-    recordregion(startloc, expdest.offset_from(stackblock()) as c_int, quoted);
+    recordregion(startloc, expdest_off(), quoted);
     p
 }
 
@@ -1367,23 +1520,32 @@ unsafe fn mbtodest(
 // lets the expansion buffer and the glob buffer be converted separately.
 //
 // `chtodest` and `mbtodest` already take theirs (`out`, `q`).
+//
+// The destination is an owned buffer and the cursor is its length, so
+// `makestrspace` is `reserve` and the commit is a `set_len` over bytes this
+// function's raw cursor has filled — the same shape `parser::getmbc_at`
+// uses.  `p` never points into `dst`: every caller's source is a variable
+// value, a `read` buffer, a `getpwnam` field or a stack array.
 unsafe fn memtodest(
     mut p: *const c_char,
     mut len: size_t,
     flags: c_int,
-    dst: &mut *mut c_char,
+    dst: &mut BString,
 ) -> size_t {
     let syntax: *const c_char;
     let mut count: size_t = 0;
     let expq: c_int;
     let mut q: *mut c_char;
+    let base: *mut c_char;
 
     if len == 0 {
         return 0;
     }
 
     /* CTLMBCHAR, 2, c, c, 2, CTLMBCHAR */
-    q = crate::memalloc::makestrspace(len * 3, *dst);
+    dst.reserve(len * 3);
+    base = dst.as_mut_ptr() as *mut c_char;
+    q = base.add(dst.len());
 
     /* Guarded by the `assert!(QUOTES_ESC == 0x11 && …)` above, which is
      * this file's port of the matching `#error`. */
@@ -1451,13 +1613,14 @@ unsafe fn memtodest(
         len -= 1;
     }
 
-    *dst = q;
+    /* `expdest = q` */
+    dst.set_len(q.offset_from(base) as usize);
     count
 }
 
 // [spec:dash:def:expand.strtodest-fn]
 // [spec:dash:sem:expand.strtodest-fn]
-unsafe fn strtodest(p: *const c_char, flags: c_int, dst: &mut *mut c_char) -> size_t {
+unsafe fn strtodest(p: *const c_char, flags: c_int, dst: &mut BString) -> size_t {
     let len: size_t = libc::strlen(p);
     memtodest(p, len, flags, dst)
 }
@@ -1498,7 +1661,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
     };
     seps = crate::shell::nullstr.as_ptr();
     seplen = ((flags as c_int) & EXP_FULL) as size_t;
-    start = expdest.offset_from(stackblock()) as size_t;
+    start = expdest_off() as size_t;
 
     'sw: {
         'value: {
@@ -1525,10 +1688,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
                             break 'numvar;
                         }
                         C_MINUS => {
-                            p = crate::memalloc::makestrspace(
-                                crate::options::NOPTS as size_t,
-                                expdest,
-                            );
+                            p = expmakestrspace(crate::options::NOPTS as size_t);
                             i = crate::options::NOPTS as c_int - 1;
                             while i >= 0 {
                                 if crate::options::optlist[i as usize] != 0
@@ -1541,7 +1701,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
                                 }
                                 i -= 1;
                             }
-                            expdest = p;
+                            set_expdest(p);
                             break 'sw;
                         }
                         C_AT | C_STAR => {
@@ -1593,7 +1753,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
                     }
                 }
                 /* numvar: */
-                len = cvtnum(num as intmax_t, flags as c_int, &mut expdest) as ssize_t;
+                len = cvtnum(num as intmax_t, flags as c_int, expb()) as ssize_t;
                 break 'sw;
             }
             /* param: */
@@ -1606,7 +1766,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
                 break 'sw;
             }
             loop {
-                len += strtodest(p, flags as c_int, &mut expdest) as ssize_t;
+                len += strtodest(p, flags as c_int, expb()) as ssize_t;
 
                 ap = ap.offset(1);
                 p = *ap;
@@ -1614,8 +1774,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
                     break;
                 }
 
-                len += memtodest(seps, seplen, (flags as c_int) | EXP_KEEPNUL, &mut expdest)
-                    as ssize_t;
+                len += memtodest(seps, seplen, (flags as c_int) | EXP_KEEPNUL, expb()) as ssize_t;
             }
             break 'sw;
         }
@@ -1624,11 +1783,11 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
             return -1;
         }
 
-        len = strtodest(p, flags as c_int, &mut expdest) as ssize_t;
+        len = strtodest(p, flags as c_int, expb()) as ssize_t;
     }
 
     if discard != 0 {
-        expdest = stackblock().offset(start as isize);
+        expb().truncate(start);
     }
 
     len
@@ -2277,6 +2436,10 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
     let mut cp: *mut c_char = ptr::null_mut();
     let mut p: *mut c_char;
     let mut c: c_int = 0;
+    /* Scratch for the encoded form of each directory entry; see the
+     * `memtodest` call below.  A local rather than a static because
+     * `expmeta` recurses, one frame per path component. */
+    let mut globenc: BString = BString::new(Vec::new());
 
     /* *(DIR *volatile *)&dirp = NULL; */
     ptr::write_volatile(&mut dirp, ptr::null_mut());
@@ -2403,29 +2566,29 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
                     len = libc::strlen(dname) + 1;
                     p = dname;
                     if !FNMATCH_IS_ENABLED {
-                        /* The C parks `enddir` in the global `expdest`
-                         * across this call and never restores it.  With the
-                         * destination named, the glob buffer's cursor stays
-                         * in this frame and `expandmeta` stops perturbing
-                         * `expdest` at all — which is what makes the two
-                         * buffers separable.  Nothing reads `expdest`
-                         * between here and the next `STARTSTACKSTR`, so the
-                         * C's leftover value was never observable:
-                         * `expandmeta` runs only at the tail of
-                         * `expandarg`, after `grabstackstr(expdest)`, and
-                         * both `expandarg` and `casematch` open with
-                         * `expdest = stackblock()`.
+                        /* The C encodes the directory entry's name at
+                         * `enddir` — inside the glob buffer, past the
+                         * prefix — by parking `enddir` in the global
+                         * `expdest` for the length of the call.  Those bytes
+                         * are pure scratch: they exist only for `pmatch`
+                         * below, and the branch that keeps the entry
+                         * immediately overwrites them with the raw name via
+                         * `stnputs`.  So the encoding goes to its own buffer
+                         * and `expdest` is not involved at all, which is
+                         * what lets the expansion buffer be owned while the
+                         * glob buffer is still the region.
                          *
-                         * The cursor `memtodest` leaves in `enddir` is
-                         * discarded on the next line, exactly as the C
-                         * discards what it leaves in `expdest`:
-                         * `makestrspace` may have moved the block, so the
-                         * cursor is re-derived from `stackblock()` instead
-                         * of trusted. */
-                        memtodest(p, len, EXP_MBCHAR | EXP_KEEPNUL, &mut enddir);
+                         * `cp = stackblock()` is kept and is now a no-op:
+                         * `memtodest` no longer allocates, so the block
+                         * cannot have moved across it.  The re-read is the
+                         * C's marker for "a growth can happen here", and
+                         * `growstackto` and `stnputs` in this same loop
+                         * still can. */
+                        globenc.clear();
+                        memtodest(p, len, EXP_MBCHAR | EXP_KEEPNUL, &mut globenc);
                         cp = stackblock();
                         enddir = cp.offset(expdir_len as isize);
-                        p = enddir;
+                        p = globenc.as_mut_ptr() as *mut c_char;
                     }
                     if pmatch(pat, p) != 0 {
                         enddir = crate::memalloc::stnputs(dname, len, enddir);
@@ -2824,10 +2987,15 @@ pub unsafe fn _rmescapes(mut str: *mut c_char, flag: c_int) -> *mut c_char {
         fulllen += len + 1;
 
         if (flag & RMESCAPE_GROW) != 0 {
-            let strloc: c_int = str.offset_from(stackblock()) as c_int;
+            /* RMESCAPE_GROW means "the destination is the expansion
+             * buffer", and `str` is always inside it on this path — the one
+             * caller is `subevalvar`'s `_rmescapes(startp, ALLOC | GROW)`.
+             * `reserve` can reallocate, which is why the C re-reads
+             * `stackblock()` on the next line. */
+            let strloc: c_int = str.offset_from(expbase()) as c_int;
 
-            r = crate::memalloc::makestrspace(fulllen, expdest);
-            str = stackblock().offset(strloc as isize);
+            r = expmakestrspace(fulllen);
+            str = expbase().offset(strloc as isize);
             p = str.offset(len as isize);
         } else if (flag & RMESCAPE_HEAP) != 0 {
             r = crate::memalloc::ckmalloc(fulllen) as *mut c_char;
@@ -2915,10 +3083,24 @@ pub unsafe fn _rmescapes(mut str: *mut c_char, flag: c_int) -> *mut c_char {
         *q.offset(-1) = C_BACKSLASH;
     }
     *q = C_NUL;
-    if (flag & (RMESCAPE_ALLOC | RMESCAPE_GROW)) != 0 {
-        expdest = r;
-        /* STADJUST(q - r + 1, expdest) */
-        expdest = expdest.offset(q.offset_from(r) + 1);
+    if (flag & RMESCAPE_GROW) != 0 {
+        /* `expdest = r; STADJUST(q - r + 1, expdest)` — but only when `r`
+         * is in the expansion buffer, which is RMESCAPE_GROW and nothing
+         * else.
+         *
+         * The other live arm is `expandmeta`'s
+         * `preglob(text, RMESCAPE_ALLOC | RMESCAPE_HEAP)`, where `r` is a
+         * `ckmalloc`'d block that the caller `ckfree`s a few lines later.
+         * The C runs this same assignment there and so leaves `expdest`
+         * pointing into freed memory.  It is harmless only because of where
+         * `expandmeta` sits: at the tail of `expandarg`, after
+         * `grabstackstr(expdest)` has taken the word, and every entry to the
+         * expansion re-opens with `STARTSTACKSTR`.  So the value is written
+         * and never read.  An owned buffer cannot hold that pointer and has
+         * no reason to, so the assignment is dropped for the non-GROW arms
+         * rather than transcribed — a deliberate divergence from a store
+         * that has no observable value. */
+        set_expdest(r.offset(q.offset_from(r) + 1));
     }
     r
 }
@@ -2936,10 +3118,13 @@ pub unsafe fn casematch(pattern: &crate::nodes::Node, val: *mut c_char) -> c_int
     crate::memalloc::setstackmark(&mut smark);
     argbackq = pattern.narg().backquote.as_slice();
     /* STARTSTACKSTR(expdest) */
-    expdest = stackblock();
+    expb().clear();
     argstr(pattern.narg().text.as_ptr(), EXP_TILDE | EXP_CASE);
     ifsfree();
-    result = patmatch(stackblock(), val);
+    /* The C reads the word back as `stackblock()`; the mark that follows
+     * still has work to do, because `argstr` can `stalloc` for backquotes
+     * and arithmetic. */
+    result = patmatch(expbase(), val);
     crate::memalloc::popstackmark(&mut smark);
     result
 }
@@ -2950,7 +3135,7 @@ pub unsafe fn casematch(pattern: &crate::nodes::Node, val: *mut c_char) -> c_int
 
 // [spec:dash:def:expand.cvtnum-fn]
 // [spec:dash:sem:expand.cvtnum-fn]
-unsafe fn cvtnum(num: intmax_t, flags: c_int, dst: &mut *mut c_char) -> size_t {
+unsafe fn cvtnum(num: intmax_t, flags: c_int, dst: &mut BString) -> size_t {
     let mut len: c_int = crate::shell::max_int_length(mem::size_of::<intmax_t>() as c_int);
     /* `char buf[len]` — a VLA of max_int_length(sizeof(intmax_t)) == 32.
      * A fixed 64-byte backing array with the same `len` bound handed to
