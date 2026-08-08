@@ -28,6 +28,7 @@
 //! `DEBUG`, so the calls are dropped; C `goto`s are reproduced with
 //! labelled blocks whose nesting mirrors the order of the C labels.
 
+use bstr::BString;
 use core::ptr::{addr_of_mut, null, null_mut};
 use libc::{c_char, c_int, c_void, size_t};
 
@@ -38,7 +39,7 @@ use crate::exec::{CMDBUILTIN, CMDFUNCTION, CMDNORMAL, CMDUNKNOWN, DO_ERR, DO_NOF
 use crate::expand::{arglist, strlist};
 use crate::expand::{EXP_FULL, EXP_MBCHAR, EXP_REDIR, EXP_TILDE, EXP_VARTILDE};
 use crate::jobs::{job, FORK_NOJOB};
-use crate::memalloc::{popstackmark, setstackmark, stackblock, stackmark, stalloc, stunalloc};
+use crate::memalloc::{popstackmark, setstackmark, stackmark, stalloc, stunalloc};
 use crate::nodes::{funcnode, Node};
 use crate::nodes::{
     NAND, NAPPEND, NBACKGND, NCASE, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO, NIF,
@@ -165,29 +166,31 @@ pub(crate) unsafe fn setjmp_catch<F: FnOnce()>(loc: *mut jmploc, body: F) -> c_i
 // [spec:dash:sem:eval.evalcmd-fn]
 unsafe fn evalcmd(argc: c_int, argv: *mut *mut c_char, flags: c_int) -> c_int {
     let mut p: *mut c_char;
-    let mut concat: *mut c_char;
     let mut ap: *mut *mut c_char;
+    /* `grabstackstr` kept the joined string alive until the enclosing mark
+     * popped, which is past the `evalstring` that parses it. Owning it here
+     * says the same thing, and it has to be a binding of this frame because
+     * `setinputstring` reads through the pointer rather than copying. */
+    let mut concat: BString = BString::new(Vec::new());
 
     if argc > 1 {
         p = *argv.offset(1);
         if argc > 2 {
-            /* STARTSTACKSTR(concat) */
-            concat = stackblock() as *mut c_char;
             ap = argv.offset(2);
             loop {
-                concat = crate::memalloc::stputs(p, concat);
+                concat.extend_from_slice(core::slice::from_raw_parts(
+                    p as *const u8,
+                    libc::strlen(p),
+                ));
                 p = *ap;
                 ap = ap.add(1);
                 if p.is_null() {
                     break;
                 }
-                /* STPUTC(' ', concat) */
-                concat = crate::memalloc::_STPUTC(' ' as c_int, concat);
+                concat.push(b' ');
             }
-            /* STPUTC('\0', concat) */
-            concat = crate::memalloc::_STPUTC('\0' as c_int, concat);
-            /* grabstackstr(concat) */
-            p = stalloc(concat as usize - stackblock() as usize) as *mut c_char;
+            concat.push(0);
+            p = concat.as_mut_ptr() as *mut c_char;
         }
         return evalstring(p, flags & EV_TESTED);
     }

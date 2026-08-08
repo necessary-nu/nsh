@@ -16,12 +16,13 @@
 //!     `goto`s in `cmdtxt` become an explicit label program counter.
 //!   * `TRACE(...)` compiles to nothing without `DEBUG` and is dropped.
 
+use bstr::BString;
 use core::ptr::{addr_of_mut, null_mut};
 use libc::{c_char, c_int, c_uint, c_void, pid_t, size_t};
 
 use crate::error::{INTOFF, INTON};
 use crate::eval::exitstatus;
-use crate::memalloc::{ckfree, ckmalloc, ckrealloc, makestrspace, savestr, stackblock};
+use crate::memalloc::{ckfree, ckmalloc, ckrealloc, savestr};
 use crate::nodes::Node;
 use crate::nodes::{
     NAND, NAPPEND, NARG, NBACKGND, NCASE, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO,
@@ -1577,17 +1578,25 @@ pub unsafe fn stoppedjobs() -> c_int {
  * jobs command).
  */
 
-static mut cmdnextc: *mut c_char = null_mut();
+/// The text `cmdtxt` is building. The C's `cmdnextc` is a `char *` cursor
+/// into the stack block; here the cursor is the buffer's length.
+static mut cmdbuf: BString = BString::new(Vec::new());
 
 // [spec:dash:def:jobs.commandtext-fn]
 // [spec:dash:sem:jobs.commandtext-fn]
 unsafe fn commandtext(n: &Node) -> *mut c_char {
     let name: *mut c_char;
 
-    /* STARTSTACKSTR(cmdnextc) */
-    cmdnextc = stackblock() as *mut c_char;
+    let buf = &mut *addr_of_mut!(cmdbuf);
+    buf.clear();
+    /* `cmdtxt` writes nothing at all for a command with no words — `x=1 &`
+     * is one — and the C then hands `savestr` an uninitialised stack block.
+     * The reference reads a NUL there and prints an empty command text;
+     * naming the value is the only way to say that on purpose. */
+    buf.reserve(1);
+    *buf.as_mut_ptr() = 0;
     cmdtxt(Some(n));
-    name = stackblock() as *mut c_char;
+    name = buf.as_mut_ptr() as *mut c_char;
     /* TRACE(("commandtext: name %p, end %p\n", name, cmdnextc)); */
     savestr(name)
 }
@@ -1872,7 +1881,13 @@ unsafe fn cmdputs(s: *const c_char) {
     let mut subtype: c_int = 0;
     let mut quoted: c_int = 0;
 
-    nextc = makestrspace((libc::strlen(s) + 1) * 8, cmdnextc);
+    /* `makestrspace((strlen(s) + 1) * 8, cmdnextc)` — the C's bound on how
+     * far the cursor can run for this one input string, which is also what
+     * makes the unadvanced `*nextc = '\0'` below land inside the block. */
+    let buf = &mut *addr_of_mut!(cmdbuf);
+    let base = buf.len();
+    buf.reserve((libc::strlen(s) + 1) * 8);
+    nextc = buf.as_mut_ptr().add(base) as *mut c_char;
     p = s;
     'whileloop: loop {
         c = *p;
@@ -1977,8 +1992,12 @@ unsafe fn cmdputs(s: *const c_char) {
         *nextc = b'"' as c_char;
         nextc = nextc.add(1);
     }
+    /* `*nextc = '\0'` without advancing: the terminator sits one past the
+     * cursor for `commandtext` to read, exactly where the C left it, and
+     * the reserve above is what guarantees the byte is inside the buffer. */
     *nextc = 0;
-    cmdnextc = nextc;
+    let n = nextc as usize - (buf.as_ptr() as usize);
+    buf.set_len(n);
 }
 
 // [spec:dash:def:jobs.showpipe-fn]
