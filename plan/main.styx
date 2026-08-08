@@ -2051,6 +2051,14 @@ children (
                         title "Delete dead code: gen/, show.rs, and the 20 uncalled system.rs wrappers"
                         priority 0
                         kind @refactor
+                        log (
+                            {
+                                at 2026-08-08T08:49:20.61098823Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+                        )
                     }
                 )
             }

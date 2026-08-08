@@ -26,32 +26,35 @@ warns that adding classes may require changing `is_in_name`.
 and the semantics of the `is_*` macros; a Rust port can build them as
 `const` arrays or `match` arms rather than generating C.
 
-> [spec:dash:def:mksyntax.add-fn]
+**Rules retired.** `delete-gen` removed `crates/nsh/src/gen/mksyntax.rs`.
+The workspace has no `build.rs`, so nothing in the Rust build ran it, and
+it emitted C rather than Rust, so it was never the authority for
+`crates/nsh/src/syntax.rs`. That table's provenance is instead asserted
+against this program's output from the reference build, in
+`syntax.rs::tests::the_tables_are_the_c_generators_output`.
+`src/Makefile.am` still builds and runs this program for the C reference,
+which is untouched. The blocks below therefore carry no `[spec:dash:…]`
+ids — each is a C signature followed by its semantics — and are kept
+because they still describe `src/mksyntax.c`.
+
 > static void add(char *p, char *type)
 
-> [spec:dash:sem:mksyntax.add-fn]
 > Set every character of the string `p` to syntax class `type`, indexing
 > as `(signed char)*p + 129` so the table's offset convention is applied.
 
-> [spec:dash:def:mksyntax.filltable-fn]
 > static void filltable(char *dftval)
 
-> [spec:dash:sem:mksyntax.filltable-fn]
 > Set all 257 entries of the working table to `dftval`.
 
-> [spec:dash:def:mksyntax.init-fn]
 > static void init(void)
 
-> [spec:dash:sem:mksyntax.init-fn]
 > Reset the working table for a new syntax: fill it with `CWORD`, set
 > index 0 (i.e. `PEOF`) to `CEOF`, and mark every byte from `CTL_FIRST`
 > to `CTL_LAST` as `CCTL` — the range reserved for the shell's internal
 > markers, which must always be escaped when they appear as data.
 
-> [spec:dash:def:mksyntax.main-fn]
 > int main(int argc, char **argv)
 
-> [spec:dash:sem:mksyntax.main-fn]
 > Create `syntax.c` and `syntax.h`, each starting with the generated-file
 > banner.
 >
@@ -87,10 +90,8 @@ and the semantics of the `is_*` macros; a Rust port can build them as
 > table still marks every letter, since `c` and `v` both appear; a port
 > should reproduce the *table contents*, not the typo.
 
-> [spec:dash:def:mksyntax.output-type-macros-fn]
 > static void output_type_macros(void)
 
-> [spec:dash:sem:mksyntax.output-type-macros-fn]
 > Emit the character-classification macros into the header:
 > `is_digit(c)` as the unsigned range test `((unsigned)((c) - '0') <= 9)`
 > — locale-independent, unlike `isdigit`; `is_alpha`, `is_name` (letter or
@@ -99,15 +100,12 @@ and the semantics of the `is_*` macros; a Rust port can build them as
 > for `ISSPECL|ISDIGIT`, which is what recognises `$1`, `$@`, `$?` and
 > friends; and `digit_val(c)` as `(c) - '0'`.
 
-> [spec:dash:def:mksyntax.print-fn]
 > static void print(char *name)
 
-> [spec:dash:sem:mksyntax.print-fn]
 > Emit the working table as `const char <name>[]` in `syntax.c`, with a
 > matching `extern` declaration in `syntax.h`. Entries are written four
 > per line, each padded to a nine-column field so the result lines up.
 
-> [spec:dash:def:mksyntax.synclass]
 > struct synclass {
 >   char *name;
 >   char *comment;

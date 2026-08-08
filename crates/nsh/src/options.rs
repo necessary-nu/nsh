@@ -196,9 +196,8 @@ pub unsafe fn procargs(mut xargv: *mut *mut c_char) -> c_int {
 // [spec:dash:def:options.optschanged-fn]
 // [spec:dash:sem:options.optschanged-fn]
 pub unsafe fn optschanged() {
-    if crate::shell::DEBUG {
-        crate::show::opentrace();
-    }
+    /* `#ifdef DEBUG opentrace();` — the dash build does not define DEBUG,
+     * so `show.c` compiles to nothing and there is no trace file. */
     crate::trap::setinteractive(optlist[iflag] as c_int);
     /* #ifndef SMALL */
     crate::histedit::histedit();

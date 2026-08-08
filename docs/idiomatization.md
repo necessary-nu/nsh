@@ -95,8 +95,8 @@ Everything else becomes `pub(crate)`. The check is mechanical: count of
 `pub` items reachable from `lib.rs` under a `#![deny(missing_docs)]`.
 
 `show.rs` (the `#ifdef DEBUG` tree printer) and `gen/` (the build-time
-generators) are not on this list, and section 3.2 argues they should not
-be in the crate at all.
+generators) were not on this list; section 3.2 argued they should not be
+in the crate at all, and `delete-gen` removed both.
 
 ### 1.3 The error taxonomy
 
@@ -474,6 +474,35 @@ mechanical refactor has to carry through, for code that does not run.
 `gen/mkinit.rs` alone has 14 `unsafe fn` and 7 `static mut` that count
 against P1 and P7 and mean nothing.
 
+*What was done, and where it departs from the recommendation:* `gen/` was
+deleted rather than moved, because the parity property it carried is not
+the one the recommendation assumes. The generators emit **C**, not Rust —
+`mksyntax::main_fn` writes `syntax.c`/`syntax.h` and `mksignames::main_fn`
+writes `signames.c` — so `77822d2` and `73bf36d` assert that the Rust port
+of the *generator* agrees with the C generator. Neither ever touched
+`crates/nsh/src/syntax.rs` or `signames.rs`, which are hand transcriptions
+of the C generator's output, so the generators were never the authority
+for the checked-in tables and deleting them loses no ability to regenerate
+anything. The property worth keeping is the one nothing asserted: that the
+tables the shell indexes *are* that output. It is now asserted directly,
+in `syntax.rs::tests::the_tables_are_the_c_generators_output` and
+`signames.rs::tests::the_table_is_the_c_generators_output`, against the
+`syntax.c` and `signames.c` the reference build generates — 155 lines in
+place of 2,019, checking the artefact the shell uses instead of a second
+implementation of the generator. The C reference is unaffected:
+`src/Makefile.am:33,55-67` builds the four `src/mk*.c` helpers with
+`COMPILE_FOR_BUILD` and they are in `CLEANFILES`, so they are host
+programs that never link into `dash`.
+
+`show.rs` and the twenty uncalled `system.rs` wrappers went with it, on
+one shared criterion: **none of the 74 symbols contributes an instruction
+to `tests/.build/ref/src/dash`.** `show.c` is entirely inside
+`#ifdef DEBUG` and the reference `config.h` does not define it; the
+`system.c`/`system.h` fallbacks are `#ifndef HAVE_…` arms whose `HAVE_*`
+that same `config.h` defines. A symbol absent from the reference binary
+has no oracle and never had one, which is what makes the deletion R0 and
+what justifies retiring its rules rather than leaving them claimed.
+
 ---
 
 **3. `owned-strings` — the stack string builder becomes `Vec<u8>`/`BString`.**
@@ -778,7 +807,8 @@ across `bltin/`, plus `miscbltin.rs` (661) and the builtin halves of
 
 **3.2 `gen/` — confirmed missing, and the doubt is justified.** 2,006
 lines, not linked into the binary, zero coverage, and one of the four is
-already not the source of the thing it generates. Section 2.3 step 2.
+already not the source of the thing it generates. Section 2.3 step 2,
+which now records what `delete-gen` did with it.
 
 **3.3 `var.rs` and the variable table — confirmed missing.**
 `vartab: [*mut var; VTABSIZE]` (`var.rs:297`), `varinit: [var; 16]`
@@ -1059,13 +1089,12 @@ Stated rather than smoothed over.
    call graph from `cargo call-stack` or from rustc's MIR, or by
    spot-checking the 4 functions in `memalloc \ raise`.
 
-2. **Whether `gen/` should be deleted, moved, or kept.** The measurement
-   says it is not linked and not covered. It does not say whether the
-   generators are still the authority for `syntax.rs` and `signames.rs`
-   or whether those tables are now hand-maintained. *Resolved by:*
-   reading `docs/spec/port/src/mksyntax.md` and the two parity commits
-   (`77822d2`, `73bf36d`) and deciding whether the C generator's output
-   is still a thing anyone needs to reproduce.
+2. ~~**Whether `gen/` should be deleted, moved, or kept.**~~ *Resolved:*
+   deleted. The generators emit C, not Rust, so they were never the
+   authority for `syntax.rs` or `signames.rs`; those tables are
+   transcriptions of the C generator's output, and their provenance is
+   now asserted directly against the reference build's `syntax.c` and
+   `signames.c`. Section 2.3 step 2 carries the full argument.
 
 3. **Whether `output-is-a-writer` is really separable from
    `no-ambient-state`.** The argument is fan-in (24 files) and the

@@ -1,12 +1,14 @@
 //! Literal port of `src/syntax.c` / `src/syntax.h`.
 //!
-//! These two files are *generated* at build time by `src/mksyntax.c` (see
-//! `crate::gen::mksyntax`, `docs/spec/port/src/mksyntax.md`).  They are not
-//! checked-in C source, so nothing here carries `[spec:dash:…]` annotations;
-//! only the generator does.
+//! These two files are *generated* at build time by `src/mksyntax.c`
+//! (`docs/spec/port/src/mksyntax.md`).  They are not checked-in C source, so
+//! nothing here carries `[spec:dash:…]` annotations.
 //!
 //! The five tables below are byte-for-byte the output of running the real
-//! `mksyntax` on this tree (with `CTL_FIRST`/`CTL_LAST` from `src/parser.h`).
+//! `mksyntax` on this tree (with `CTL_FIRST`/`CTL_LAST` from `src/parser.h`),
+//! and the test at the foot of this file asserts exactly that against the
+//! `syntax.c` the reference build generated — which is what makes the claim
+//! checkable rather than a comment.
 //!
 //! Each table has 257 entries covering the byte values `-129..=127` reached
 //! through the `SYNBASE` offset: C indexes them as `basesyntax + SYNBASE`, so
@@ -331,3 +333,105 @@ pub static is_type: Syntax = [
     0,                                                                                       // 127..=127
 ];
 
+// ---------------------------------------------------------------------
+// Provenance: the five tables against the C generator's own output.
+//
+// The module claims these are `mksyntax`'s output byte for byte. The
+// reference build runs the real `mksyntax` and leaves `syntax.c` beside
+// the binary the differential harness compares against, so the claim can
+// be checked directly on the table the shell actually indexes rather than
+// inferred from a second implementation of the generator.
+//
+// Where the reference build is absent -- a linked worktree, which shares
+// no `tests/.build` with the checkout that built it -- there is nothing
+// to compare against and the test says so and returns. `DASH_ROOT` points
+// it at a checkout that has one.
+// ---------------------------------------------------------------------
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The C generator's output from the reference build, if built.
+    fn reference(name: &str) -> Option<String> {
+        let root = std::env::var("DASH_ROOT")
+            .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../..").to_string());
+        std::fs::read_to_string(format!("{root}/tests/.build/ref/src/{name}")).ok()
+    }
+
+    /// The entries of `const char <name>[] = { … };`, in order.
+    fn table_of(text: &str, name: &str) -> Vec<String> {
+        let head = format!("const char {name}[] = {{");
+        let start = text
+            .find(&head)
+            .unwrap_or_else(|| panic!("{name} not found in the generated syntax.c"))
+            + head.len();
+        let len = text[start..]
+            .find("\n};")
+            .unwrap_or_else(|| panic!("{name} is not terminated"));
+        text[start..start + len]
+            .split(',')
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// The generator emits class names, not numbers; `is_type` is filled
+    /// with a literal `0` rather than a class, which is why that arm is
+    /// here and not a missing case.
+    fn value_of(sym: &str) -> c_char {
+        match sym {
+            "0" => 0,
+            "CWORD" => CWORD,
+            "CNL" => CNL,
+            "CBACK" => CBACK,
+            "CSQUOTE" => CSQUOTE,
+            "CDQUOTE" => CDQUOTE,
+            "CENDQUOTE" => CENDQUOTE,
+            "CBQUOTE" => CBQUOTE,
+            "CVAR" => CVAR,
+            "CENDVAR" => CENDVAR,
+            "CLP" => CLP,
+            "CRP" => CRP,
+            "CEOF" => CEOF,
+            "CCTL" => CCTL,
+            "CSPCL" => CSPCL,
+            "ISDIGIT" => ISDIGIT,
+            "ISUPPER" => ISUPPER,
+            "ISLOWER" => ISLOWER,
+            "ISUNDER" => ISUNDER,
+            "ISSPECL" => ISSPECL,
+            other => panic!("unknown syntax class {other} in the generated syntax.c"),
+        }
+    }
+
+    #[test]
+    fn the_tables_are_the_c_generators_output() {
+        let text = match reference("syntax.c") {
+            Some(t) => t,
+            None => {
+                eprintln!(
+                    "note: tests/.build/ref absent, skipped the syntax.c comparison \
+                     (run tests/build-reference.sh for the stronger assertion)"
+                );
+                return;
+            }
+        };
+        for (name, ours) in [
+            ("basesyntax", &basesyntax),
+            ("dqsyntax", &dqsyntax),
+            ("sqsyntax", &sqsyntax),
+            ("arisyntax", &arisyntax),
+            ("is_type", &is_type),
+        ] {
+            let theirs = table_of(&text, name);
+            // 257 entries covering -129..=127. The C array is written
+            // without a size and indexed through SYNBASE; `Syntax` pins
+            // the length, so a short or long table fails here.
+            assert_eq!(theirs.len(), 257, "{name}: entry count");
+            for (i, sym) in theirs.iter().enumerate() {
+                assert_eq!(ours[i], value_of(sym), "{name}[{i}] (C says {sym})");
+            }
+        }
+    }
+}

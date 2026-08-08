@@ -155,7 +155,8 @@ unsafe fn docd(mut dest: *const c_char, flags: c_int) -> c_int {
     let mut dir: *const c_char = null_mut();
     let err: c_int;
 
-    crate::TRACE!("docd(\"%s\", %d) called\n", dest, flags);
+    /* `TRACE(("docd(\"%s\", %d) called\n", dest, flags));` — `#ifdef DEBUG`
+     * in `shell.h`, and the dash build does not define it. */
 
     INTOFF();
     if (flags & CD_PHYSICAL) == 0 {

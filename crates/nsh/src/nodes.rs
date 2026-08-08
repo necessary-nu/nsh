@@ -33,9 +33,10 @@
 //! `nodesavestr`. Converting them properly is a later slice of
 //! [dec:nsh:owned-data], and [dec:nsh:bytes-not-text] says what they become.
 //!
-//! `crate::gen::mknodes` is untouched: it is the port of the generator that
-//! still emits the C the reference build compiles. It no longer describes
-//! this file.
+//! `src/mknodes.c` still generates the `nodes.c`/`nodes.h` that the C
+//! reference is built from, but nothing it emits — `nodesize[]`, `calcsize`,
+//! `copynode` — has a counterpart here, so the port of that generator went
+//! with the layout it described.
 
 use core::cell::{Cell, OnceCell, RefCell};
 use core::ptr;

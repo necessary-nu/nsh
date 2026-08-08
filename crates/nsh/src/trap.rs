@@ -441,7 +441,8 @@ pub unsafe fn exitshell() -> ! {
     let locp: *mut jmploc = addr_of_mut!(loc);
 
     savestatus = exitstatus;
-    crate::TRACE!("pid %d, exitshell(%d)\n", libc::getpid(), savestatus);
+    /* `TRACE(("pid %d, exitshell(%d)\n", getpid(), savestatus));` —
+     * `#ifdef DEBUG` in `shell.h`, and the dash build does not define it. */
     /* `if (setjmp(loc.loc)) goto out;` — the body below is the fall-through. */
     crate::eval::setjmp_catch(locp, || {
         let p: *mut c_char;

@@ -1,6 +1,10 @@
 # What the standard library already does, and what dash meant instead
 
-Status: proposal. Nothing here is applied. It is supplementary to
+Status: proposal, except for three entries `delete-gen` landed: §4.1's
+twenty uncalled `system.rs` items, §4.3's `show.rs` and §4.4's `gen/` are
+deleted and their spec rules retired. §7's other two candidates
+(`mystring.rs` `scopyn`, the two `error.rs` stubs) were not in that node's
+scope and are still open. It is supplementary to
 `docs/idiomatization.md`: that document says what the end state is and in
 what order to reach it; this one says, for each step it names, **what can
 be deleted while you are already in the file**.

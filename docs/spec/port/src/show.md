@@ -15,18 +15,22 @@ For the port, this is the natural place to substitute idiomatic
 target-language tracing: the contract is "when tracing is enabled, emit
 this information in this form", not the specific stdio calls.
 
-> [spec:dash:def:show.indent-fn]
+**Rules retired.** `delete-gen` removed `crates/nsh/src/show.rs`. The
+reference build does not define `DEBUG`, so nothing in this file reaches
+the binary the differential harness compares against, and in the port the
+only paths to it were `crate::shell::DEBUG`, a `const false`, and one
+commented-out `showtree`. The blocks below therefore carry no
+`[spec:dash:…]` ids — each is a C signature followed by its semantics —
+and are kept because they still describe `src/show.c`.
+
 > static void indent(int amount, char *pfx, FILE *fp)
 
-> [spec:dash:sem:show.indent-fn]
 > Write `amount` tab characters, and when `pfx` is non-NULL emit it
 > immediately before the *last* tab — so the prefix marks the deepest
 > level rather than the start of the line.
 
-> [spec:dash:def:show.opentrace-fn]
 > void opentrace(void)
 
-> [spec:dash:sem:show.opentrace-fn]
 > Open or reopen the trace file. When tracing is off, flush an already
 > open `tracefile` but deliberately leave it open — libedit may be using
 > the descriptor — and return.
@@ -45,10 +49,8 @@ this information in this form", not the specific stdio calls.
 > other, and `setlinebuf` so a crash does not lose buffered trace. Emit
 > `"\nTracing started.\n"`.
 
-> [spec:dash:def:show.sharg-fn]
 > static void sharg(union node *arg, FILE *fp)
 
-> [spec:dash:sem:show.sharg-fn]
 > Print one `NARG` node, decoding the shell's internal control-byte
 > encoding back into readable syntax. A node of any other type prints
 > `<node type N>` and `abort()`s, since it indicates a corrupt tree.
@@ -71,10 +73,8 @@ this information in this form", not the specific stdio calls.
 >   containing several substitutions prints the first one each time.
 > - anything else — print it as-is.
 
-> [spec:dash:def:show.shcmd-fn]
 > static void shcmd(union node *cmd, FILE *fp)
 
-> [spec:dash:sem:show.shcmd-fn]
 > Print a simple command: its arguments, then its redirections,
 > space-separated (the `first` flag suppresses the leading space).
 >
@@ -91,18 +91,14 @@ this information in this form", not the specific stdio calls.
 > else goes to `fp`; with `fp` set to something other than stdout the
 > spaces are misdirected.
 
-> [spec:dash:def:show.showtree-fn]
 > void showtree(union node *n)
 
-> [spec:dash:sem:show.showtree-fn]
 > Dump a parse tree: trace `"showtree called\n"`, then
 > `shtree(n, 1, NULL, stdout)` — indent level 1, no prefix, to standard
 > output.
 
-> [spec:dash:def:show.shtree-fn]
 > static void shtree(union node *n, int ind, char *pfx, FILE *fp)
 
-> [spec:dash:sem:show.shtree-fn]
 > Print a command tree. `ind` is the indent level, and a negative `ind`
 > additionally means "inline": no trailing newlines, used when rendering
 > a command substitution inside an argument. A NULL node prints nothing.
@@ -120,46 +116,34 @@ this information in this form", not the specific stdio calls.
 >   conditionals, function definitions and subshells are therefore not
 >   rendered; this is a debugging aid, not a decompiler.
 
-> [spec:dash:def:show.trace-fn]
 > void trace(const char *fmt, ...)
 
-> [spec:dash:sem:show.trace-fn]
 > `vfprintf` the formatted message to `tracefile`, when `debug == 1`.
 > This is what the `TRACE(( … ))` macro expands to — the doubled
 > parentheses let the whole argument list be passed as one macro
 > argument.
 
-> [spec:dash:def:show.tracev-fn]
 > void tracev(const char *fmt, va_list va)
 
-> [spec:dash:sem:show.tracev-fn]
 > As `trace` but taking an already-collected `va_list`, for callers that
 > are themselves variadic. Backs the `TRACEV` macro.
 
-> [spec:dash:def:show.trargs-fn]
 > void trargs(char **ap)
 
-> [spec:dash:sem:show.trargs-fn]
 > Trace a NULL-terminated argument vector: `trstring` each element,
 > separated by spaces, with a newline after the last. An empty vector
 > emits nothing at all — not even the newline.
 
-> [spec:dash:def:show.trputc-fn]
 > void trputc(int c)
 
-> [spec:dash:sem:show.trputc-fn]
 > Write one character to `tracefile`, when `debug == 1`.
 
-> [spec:dash:def:show.trputs-fn]
 > void trputs(const char *s)
 
-> [spec:dash:sem:show.trputs-fn]
 > Write a NUL-terminated string to `tracefile`, when `debug == 1`.
 
-> [spec:dash:def:show.trstring-fn]
 > static void trstring(char *s)
 
-> [spec:dash:sem:show.trstring-fn]
 > Write `s` to the trace file in double quotes with non-printables
 > escaped, so control bytes in the shell's internal encoding are
 > readable. Escape `\n`, `\t`, `\r`, `"` and `\` conventionally, and give

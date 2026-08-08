@@ -47,8 +47,34 @@ ds_assert_contained || exit 3
 ds_assert_harness_live "$REF" "$PORT" || exit 4
 
 RUNROOT=$(mktemp -d "${TMPDIR:-/tmp}/dsdiff.XXXXXXXX")
-trap 'rm -rf "$RUNROOT"' EXIT
-mkdir -p "$RUNROOT/cases" "$RUNROOT/out"
+
+# Pin both shells to inodes nothing else can move.
+#
+# A sweep takes the better part of an hour, and for that hour
+# `target/debug/nsh` is a file somebody else is entitled to replace: a
+# concurrent `cargo build` relinks it, `cargo clean` removes it, and a
+# full disk once took the whole directory with it. Each of those turns
+# the rest of the run into thousands of cases measuring a binary that is
+# no longer there -- which is how a single `rm` produced 315 convincing
+# divergences with nothing wrong with the shell.
+#
+# A hard link costs nothing and makes the run immune: cargo replaces the
+# path by rename, so the inode this run holds stays exactly the bytes the
+# run started with. The pin has to sit on the same filesystem as the
+# binary to be linkable at all -- `tests/.build` is beside `target/`,
+# where `$RUNROOT` is usually a tmpfs -- and falls back to a copy when
+# the two are somehow apart.
+PINDIR=$ROOT/tests/.build/pin.$$
+mkdir -p "$PINDIR" "$RUNROOT/cases" "$RUNROOT/out"
+trap 'rm -rf "$RUNROOT" "$PINDIR"' EXIT
+
+ds_pin() {  # ds_pin SRC NAME -> the pinned path
+	local src=$1 dst=$PINDIR/$2
+	ln "$src" "$dst" 2>/dev/null || cp "$src" "$dst" || return 1
+	printf '%s' "$dst"
+}
+PORT=$(ds_pin "$PORT" port) || { echo "cannot pin the port binary" >&2; exit 2; }
+REF=$(ds_pin "$REF" ref) || { echo "cannot pin the reference binary" >&2; exit 2; }
 
 # Second layer: drop signal-delivery cases before they ever run.
 LINTED=$RUNROOT/corpus.linted

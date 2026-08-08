@@ -79,6 +79,14 @@ ds_sanctioned() {
 # thousands of cases. This is the per-case counterpart, checked only when
 # a case has already failed, so it costs two stats on the unhappy path
 # and nothing at all on the happy one.
+#
+# `dsdiff.sh` now hard-links both shells into a pin directory for the
+# duration of a run, which prevents the common causes rather than
+# detecting them -- a concurrent rebuild or an `rm -rf target` no longer
+# reaches the inodes the run is using. This stays because prevention and
+# detection fail differently: the pin cannot survive its own directory
+# being removed, and a check that costs two stats on a path already
+# heading for a failure report is not worth optimising away.
 ds_harness_alive() {
 	[ -x "$1" ] && [ -x "$2" ]
 }

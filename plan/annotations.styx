@@ -1171,168 +1171,6 @@ sites (
         [spec:dash:def:miscbltin.umaskcmd-fn]
         [spec:dash:sem:miscbltin.umaskcmd-fn]
     )}
-    {path src/mkinit.c, symbol addchar, spec (
-        [spec:dash:def:mkinit.addchar-fn]
-        [spec:dash:sem:mkinit.addchar-fn]
-    )}
-    {path src/mkinit.c, symbol addstr, spec (
-        [spec:dash:def:mkinit.addstr-fn]
-        [spec:dash:sem:mkinit.addstr-fn]
-    )}
-    {path src/mkinit.c, symbol block, spec (
-        [spec:dash:def:mkinit.block]
-    )}
-    {path src/mkinit.c, symbol ckfopen, spec (
-        [spec:dash:def:mkinit.ckfopen-fn]
-        [spec:dash:sem:mkinit.ckfopen-fn]
-    )}
-    {path src/mkinit.c, symbol ckmalloc, spec (
-        [spec:dash:def:mkinit.ckmalloc-fn]
-        [spec:dash:sem:mkinit.ckmalloc-fn]
-    )}
-    {path src/mkinit.c, symbol dodecl, spec (
-        [spec:dash:def:mkinit.dodecl-fn]
-        [spec:dash:sem:mkinit.dodecl-fn]
-    )}
-    {path src/mkinit.c, symbol doevent, spec (
-        [spec:dash:def:mkinit.doevent-fn]
-        [spec:dash:sem:mkinit.doevent-fn]
-    )}
-    {path src/mkinit.c, symbol doinclude, spec (
-        [spec:dash:def:mkinit.doinclude-fn]
-        [spec:dash:sem:mkinit.doinclude-fn]
-    )}
-    {path src/mkinit.c, symbol error, spec (
-        [spec:dash:def:mkinit.error-fn]
-        [spec:dash:sem:mkinit.error-fn]
-    )}
-    {path src/mkinit.c, symbol event, spec (
-        [spec:dash:def:mkinit.event]
-    )}
-    {path src/mkinit.c, symbol gooddefine, spec (
-        [spec:dash:def:mkinit.gooddefine-fn]
-        [spec:dash:sem:mkinit.gooddefine-fn]
-    )}
-    {path src/mkinit.c, symbol main, spec (
-        [spec:dash:def:mkinit.main-fn]
-        [spec:dash:sem:mkinit.main-fn]
-    )}
-    {path src/mkinit.c, symbol match, spec (
-        [spec:dash:def:mkinit.match-fn]
-        [spec:dash:sem:mkinit.match-fn]
-    )}
-    {path src/mkinit.c, symbol output, spec (
-        [spec:dash:def:mkinit.output-fn]
-        [spec:dash:sem:mkinit.output-fn]
-    )}
-    {path src/mkinit.c, symbol readfile, spec (
-        [spec:dash:def:mkinit.readfile-fn]
-        [spec:dash:sem:mkinit.readfile-fn]
-    )}
-    {path src/mkinit.c, symbol savestr, spec (
-        [spec:dash:def:mkinit.savestr-fn]
-        [spec:dash:sem:mkinit.savestr-fn]
-    )}
-    {path src/mkinit.c, symbol text, spec (
-        [spec:dash:def:mkinit.text]
-    )}
-    {path src/mkinit.c, symbol writetext, spec (
-        [spec:dash:def:mkinit.writetext-fn]
-        [spec:dash:sem:mkinit.writetext-fn]
-    )}
-    {path src/mknodes.c, symbol error, spec (
-        [spec:dash:def:mknodes.error-fn]
-        [spec:dash:sem:mknodes.error-fn]
-    )}
-    {path src/mknodes.c, symbol field, spec (
-        [spec:dash:def:mknodes.field]
-    )}
-    {path src/mknodes.c, symbol indent, spec (
-        [spec:dash:def:mknodes.indent-fn]
-        [spec:dash:sem:mknodes.indent-fn]
-    )}
-    {path src/mknodes.c, symbol main, spec (
-        [spec:dash:def:mknodes.main-fn]
-        [spec:dash:sem:mknodes.main-fn]
-    )}
-    {path src/mknodes.c, symbol nextfield, spec (
-        [spec:dash:def:mknodes.nextfield-fn]
-        [spec:dash:sem:mknodes.nextfield-fn]
-    )}
-    {path src/mknodes.c, symbol outfunc, spec (
-        [spec:dash:def:mknodes.outfunc-fn]
-        [spec:dash:sem:mknodes.outfunc-fn]
-    )}
-    {path src/mknodes.c, symbol output, spec (
-        [spec:dash:def:mknodes.output-fn]
-        [spec:dash:sem:mknodes.output-fn]
-    )}
-    {path src/mknodes.c, symbol outsizes, spec (
-        [spec:dash:def:mknodes.outsizes-fn]
-        [spec:dash:sem:mknodes.outsizes-fn]
-    )}
-    {path src/mknodes.c, symbol parsefield, spec (
-        [spec:dash:def:mknodes.parsefield-fn]
-        [spec:dash:sem:mknodes.parsefield-fn]
-    )}
-    {path src/mknodes.c, symbol parsenode, spec (
-        [spec:dash:def:mknodes.parsenode-fn]
-        [spec:dash:sem:mknodes.parsenode-fn]
-    )}
-    {path src/mknodes.c, symbol readline, spec (
-        [spec:dash:def:mknodes.readline-fn]
-        [spec:dash:sem:mknodes.readline-fn]
-    )}
-    {path src/mknodes.c, symbol savestr, spec (
-        [spec:dash:def:mknodes.savestr-fn]
-        [spec:dash:sem:mknodes.savestr-fn]
-    )}
-    {path src/mknodes.c, symbol skipbl, spec (
-        [spec:dash:def:mknodes.skipbl-fn]
-        [spec:dash:sem:mknodes.skipbl-fn]
-    )}
-    {path src/mknodes.c, symbol str, spec (
-        [spec:dash:def:mknodes.str]
-    )}
-    {path src/mksignames.c, symbol initialize_signames, spec (
-        [spec:dash:def:mksignames.initialize-signames-fn]
-        [spec:dash:sem:mksignames.initialize-signames-fn]
-    )}
-    {path src/mksignames.c, symbol main, spec (
-        [spec:dash:def:mksignames.main-fn]
-        [spec:dash:sem:mksignames.main-fn]
-    )}
-    {path src/mksignames.c, symbol write_signames, spec (
-        [spec:dash:def:mksignames.write-signames-fn]
-        [spec:dash:sem:mksignames.write-signames-fn]
-    )}
-    {path src/mksyntax.c, symbol add, spec (
-        [spec:dash:def:mksyntax.add-fn]
-        [spec:dash:sem:mksyntax.add-fn]
-    )}
-    {path src/mksyntax.c, symbol filltable, spec (
-        [spec:dash:def:mksyntax.filltable-fn]
-        [spec:dash:sem:mksyntax.filltable-fn]
-    )}
-    {path src/mksyntax.c, symbol init, spec (
-        [spec:dash:def:mksyntax.init-fn]
-        [spec:dash:sem:mksyntax.init-fn]
-    )}
-    {path src/mksyntax.c, symbol main, spec (
-        [spec:dash:def:mksyntax.main-fn]
-        [spec:dash:sem:mksyntax.main-fn]
-    )}
-    {path src/mksyntax.c, symbol output_type_macros, spec (
-        [spec:dash:def:mksyntax.output-type-macros-fn]
-        [spec:dash:sem:mksyntax.output-type-macros-fn]
-    )}
-    {path src/mksyntax.c, symbol print, spec (
-        [spec:dash:def:mksyntax.print-fn]
-        [spec:dash:sem:mksyntax.print-fn]
-    )}
-    {path src/mksyntax.c, symbol synclass, spec (
-        [spec:dash:def:mksyntax.synclass]
-    )}
     {path src/myhistedit.h, symbol EditLine, spec (
         [spec:dash:def:myhistedit.edit-line]
     )}
@@ -1748,125 +1586,17 @@ sites (
         [spec:dash:def:shell.max-int-length-fn]
         [spec:dash:sem:shell.max-int-length-fn]
     )}
-    {path src/show.c, symbol indent, spec (
-        [spec:dash:def:show.indent-fn]
-        [spec:dash:sem:show.indent-fn]
-    )}
-    {path src/show.c, symbol sharg, spec (
-        [spec:dash:def:show.sharg-fn]
-        [spec:dash:sem:show.sharg-fn]
-    )}
-    {path src/show.c, symbol shcmd, spec (
-        [spec:dash:def:show.shcmd-fn]
-        [spec:dash:sem:show.shcmd-fn]
-    )}
-    {path src/show.c, symbol showtree, spec (
-        [spec:dash:def:show.showtree-fn]
-        [spec:dash:sem:show.showtree-fn]
-    )}
-    {path src/show.c, symbol shtree, spec (
-        [spec:dash:def:show.shtree-fn]
-        [spec:dash:sem:show.shtree-fn]
-    )}
-    {path src/show.c, symbol trace, spec (
-        [spec:dash:def:show.trace-fn]
-        [spec:dash:sem:show.trace-fn]
-    )}
-    {path src/show.c, symbol tracev, spec (
-        [spec:dash:def:show.tracev-fn]
-        [spec:dash:sem:show.tracev-fn]
-    )}
-    {path src/show.c, symbol trargs, spec (
-        [spec:dash:def:show.trargs-fn]
-        [spec:dash:sem:show.trargs-fn]
-    )}
-    {path src/show.c, symbol trputc, spec (
-        [spec:dash:def:show.trputc-fn]
-        [spec:dash:sem:show.trputc-fn]
-    )}
-    {path src/show.c, symbol trputs, spec (
-        [spec:dash:def:show.trputs-fn]
-        [spec:dash:sem:show.trputs-fn]
-    )}
-    {path src/show.c, symbol trstring, spec (
-        [spec:dash:def:show.trstring-fn]
-        [spec:dash:sem:show.trstring-fn]
-    )}
-    {path src/show.h, symbol opentrace, spec (
-        [spec:dash:def:show.opentrace-fn]
-        [spec:dash:sem:show.opentrace-fn]
-    )}
     {path src/system.c, symbol bsearch, spec (
         [spec:dash:def:system.bsearch-fn]
         [spec:dash:sem:system.bsearch-fn]
-    )}
-    {path src/system.c, symbol isalnum, spec (
-        [spec:dash:def:system.isalnum-fn]
-        [spec:dash:sem:system.isalnum-fn]
-    )}
-    {path src/system.c, symbol isalpha, spec (
-        [spec:dash:def:system.isalpha-fn]
-        [spec:dash:sem:system.isalpha-fn]
-    )}
-    {path src/system.c, symbol isblank, spec (
-        [spec:dash:def:system.isblank-fn]
-        [spec:dash:sem:system.isblank-fn]
-    )}
-    {path src/system.c, symbol iscntrl, spec (
-        [spec:dash:def:system.iscntrl-fn]
-        [spec:dash:sem:system.iscntrl-fn]
-    )}
-    {path src/system.c, symbol isdigit, spec (
-        [spec:dash:def:system.isdigit-fn]
-        [spec:dash:sem:system.isdigit-fn]
-    )}
-    {path src/system.c, symbol isgraph, spec (
-        [spec:dash:def:system.isgraph-fn]
-        [spec:dash:sem:system.isgraph-fn]
-    )}
-    {path src/system.c, symbol islower, spec (
-        [spec:dash:def:system.islower-fn]
-        [spec:dash:sem:system.islower-fn]
-    )}
-    {path src/system.c, symbol isprint, spec (
-        [spec:dash:def:system.isprint-fn]
-        [spec:dash:sem:system.isprint-fn]
-    )}
-    {path src/system.c, symbol ispunct, spec (
-        [spec:dash:def:system.ispunct-fn]
-        [spec:dash:sem:system.ispunct-fn]
-    )}
-    {path src/system.c, symbol isspace, spec (
-        [spec:dash:def:system.isspace-fn]
-        [spec:dash:sem:system.isspace-fn]
-    )}
-    {path src/system.c, symbol isupper, spec (
-        [spec:dash:def:system.isupper-fn]
-        [spec:dash:sem:system.isupper-fn]
-    )}
-    {path src/system.c, symbol isxdigit, spec (
-        [spec:dash:def:system.isxdigit-fn]
-        [spec:dash:sem:system.isxdigit-fn]
     )}
     {path src/system.c, symbol mempcpy, spec (
         [spec:dash:def:system.mempcpy-fn]
         [spec:dash:sem:system.mempcpy-fn]
     )}
-    {path src/system.c, symbol stpcpy, spec (
-        [spec:dash:def:system.stpcpy-fn]
-        [spec:dash:sem:system.stpcpy-fn]
-    )}
     {path src/system.c, symbol strchrnul, spec (
         [spec:dash:def:system.strchrnul-fn]
         [spec:dash:sem:system.strchrnul-fn]
-    )}
-    {path src/system.c, symbol strsignal, spec (
-        [spec:dash:def:system.strsignal-fn]
-        [spec:dash:sem:system.strsignal-fn]
-    )}
-    {path src/system.c, symbol sysconf, spec (
-        [spec:dash:def:system.sysconf-fn]
-        [spec:dash:sem:system.sysconf-fn]
     )}
     {path src/system.h, symbol "(*gl_closedir)", spec (
         [spec:dash:def:system.gl-closedir-fn]
@@ -1892,10 +1622,6 @@ sites (
         [spec:dash:def:system.conv-escape-fn]
         [spec:dash:sem:system.conv-escape-fn]
     )}
-    {path src/system.h, symbol fnmatch, spec (
-        [spec:dash:def:system.fnmatch-fn]
-        [spec:dash:sem:system.fnmatch-fn]
-    )}
     {path src/system.h, symbol glob64, spec (
         [spec:dash:def:system.glob64-fn]
         [spec:dash:sem:system.glob64-fn]
@@ -1907,25 +1633,9 @@ sites (
         [spec:dash:def:system.globfree64-fn]
         [spec:dash:sem:system.globfree64-fn]
     )}
-    {path src/system.h, symbol killpg, spec (
-        [spec:dash:def:system.killpg-fn]
-        [spec:dash:sem:system.killpg-fn]
-    )}
-    {path src/system.h, symbol memfd_create, spec (
-        [spec:dash:def:system.memfd-create-fn]
-        [spec:dash:sem:system.memfd-create-fn]
-    )}
     {path src/system.h, symbol sigclearmask, spec (
         [spec:dash:def:system.sigclearmask-fn]
         [spec:dash:sem:system.sigclearmask-fn]
-    )}
-    {path src/system.h, symbol strtod, spec (
-        [spec:dash:def:system.strtod-fn]
-        [spec:dash:sem:system.strtod-fn]
-    )}
-    {path src/system.h, symbol tee, spec (
-        [spec:dash:def:system.tee-fn]
-        [spec:dash:sem:system.tee-fn]
     )}
     {path src/trap.c, symbol clear_traps, spec (
         [spec:dash:def:trap.clear-traps-fn]
