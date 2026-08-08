@@ -251,24 +251,6 @@ static mut ifsmb0len: size_t = 0;
 static mut wcifs: *mut wchar_t = ptr::null_mut();
 
 // ---------------------------------------------------------------------
-// Expansions of the macros this file uses from other headers.  These are
-// `#define`s, not manifest symbols, so they carry no annotations; they
-// exist only so the ported bodies read like the C.
-// ---------------------------------------------------------------------
-
-/// `memalloc.h`: `#define stackblock() ((void *)stacknxt)`
-#[inline]
-unsafe fn stackblock() -> *mut c_char {
-    crate::memalloc::stackblock() as *mut c_char
-}
-
-/// `memalloc.h`: `#define grabstackstr(p) stalloc((char *)(p) - (char *)stackblock())`
-#[inline]
-unsafe fn grabstackstr(p: *mut c_char) -> *mut c_char {
-    crate::memalloc::stalloc(p.offset_from(stackblock()) as size_t) as *mut c_char
-}
-
-// ---------------------------------------------------------------------
 // The expansion buffer.  See [`expbuf`].
 // ---------------------------------------------------------------------
 
@@ -360,6 +342,97 @@ unsafe fn grabexpdest() -> *mut c_char {
 /// only until the next `stalloc`.
 pub unsafe fn expansion_result() -> *mut c_char {
     expbase()
+}
+
+// ---------------------------------------------------------------------
+// The glob buffer.  See [`globbuf`].
+// ---------------------------------------------------------------------
+
+/// The candidate path `expmeta` is building.
+///
+/// The C has no name for this: it is the stack block, addressed through
+/// `expmeta`'s locals `cp` (the base, `growstackto`'s return) and `enddir`
+/// (the cursor, `cp + expdir_len` plus whatever has been appended). Every
+/// frame of the recursion owns `[0, expdir_len)` — the directory prefix its
+/// parent wrote, ending in `/` — and writes the next component above it.
+///
+/// Owned, the base stops moving for the region's reasons and starts moving
+/// for `Vec`'s, so the C's `cp = ...; enddir = cp + expdir_len` re-derivation
+/// stays exactly where it is. What changes is the one property the region
+/// had and a `Vec` does not: **the region copies the whole block when it
+/// grows, `Vec::reserve` copies only the first `len` bytes.** So the
+/// invariant this buffer is held to is
+///
+/// > at every point where the glob buffer can grow, its length is the
+/// > current frame's `expdir_len`.
+///
+/// which is what makes the prefix survive. It is asserted on entry to
+/// `expmeta`, re-established by hand at the one place `expdir_len` changes
+/// mid-frame, and re-derived from the cursor by [`globstnputs`], exactly as
+/// the C's `makestrspace` derives it (`len = p - stacknxt`).
+///
+/// A `static` rather than a parameter for the same reason [`expbuf`] is one:
+/// the cursors are raw pointers that outlive the borrow that produced them,
+/// and `expmeta` recurses. `expandmeta` is the only entry and holds `INTOFF`
+/// across it, so there is never a second glob in flight.
+static mut globbuf: BString = BString::new(Vec::new());
+
+/// `&mut globbuf`, without ever naming a reference to the `static mut`
+/// twice at once.
+#[inline]
+unsafe fn globb() -> &'static mut BString {
+    &mut *ptr::addr_of_mut!(globbuf)
+}
+
+/// `stackblock()`, for the glob buffer. Re-read after anything that can
+/// grow it, exactly where the C re-reads `stackblock()`.
+#[inline]
+unsafe fn globbase() -> *mut c_char {
+    globb().as_mut_ptr() as *mut c_char
+}
+
+/// `memalloc.c`: `growstackto(len)` — make `len` bytes writable from the
+/// base and return it.
+///
+/// The reservation is the C's number, `expdir_len + name_len + 1`, and it is
+/// exact rather than generous: `expmeta_rmescapes` writes `name` at the
+/// cursor through a raw pointer carrying no bound of its own, and what kept
+/// the C inside the block is that a region block is never smaller than 504
+/// bytes and doubles. So both `expmeta_rmescapes` call sites assert the
+/// bound the C left to that — against `len` rather than against the
+/// capacity, because a `Vec` over-allocates too and a capacity that fits
+/// would prove nothing about the arithmetic.
+///
+/// The arithmetic is right because `name_len == strlen(name)` at every
+/// entry: the top-level call passes `strlen`, and the recursion passes
+/// `name_len - (endname - name)` for a `name` whose temporary NUL at
+/// `zeroedp` sits strictly below `endname` and so cannot shorten it.
+#[inline]
+unsafe fn globgrowto(len: size_t) -> *mut c_char {
+    let b = globb();
+    let have = b.len();
+    b.reserve(len.saturating_sub(have));
+    b.as_mut_ptr() as *mut c_char
+}
+
+/// `memalloc.c`: `stnputs(s, n, p)` — append `n` bytes at the cursor `p`
+/// and return the new cursor.
+///
+/// `p` carries the length, as it does in the C: `makestrspace(n, p)` opens
+/// with `len = p - stacknxt`, so an append at a cursor below the end of the
+/// buffer discards what was above it. That is not incidental here — it is
+/// how the frame that a recursive `expmeta` returned into gets its own
+/// `expdir_len` back.
+#[inline]
+unsafe fn globstnputs(s: *const c_char, n: size_t, p: *mut c_char) -> *mut c_char {
+    let b = globb();
+    let off = p.offset_from(b.as_mut_ptr() as *mut c_char) as size_t;
+    debug_assert!(off <= b.len());
+    b.set_len(off);
+    b.reserve(n);
+    ptr::copy_nonoverlapping(s as *const u8, b.as_mut_ptr().add(off), n);
+    b.set_len(off + n);
+    b.as_mut_ptr().add(off + n) as *mut c_char
 }
 
 /// `syntax.h`: `#define BASESYNTAX (basesyntax + SYNBASE)`
@@ -2297,6 +2370,16 @@ unsafe fn expandmeta(mut str: *mut strlist) {
                 p = preglob((*str).text, RMESCAPE_ALLOC | RMESCAPE_HEAP);
                 len = libc::strlen(p) as c_uint;
 
+                /* The C's top-level `expmeta` starts on whatever block the
+                 * region is on and gets away with it because `expdir_len`
+                 * is 0: it writes from the base and never reads what was
+                 * there.  An owned buffer's length is not 0 — the previous
+                 * glob's `addfnamealt` left it at that glob's `expdir_len`
+                 * — and every consequence of carrying it in is benign,
+                 * which is the reason to clear rather than to argue.  The
+                 * invariant [`globbuf`] states is then an equality, and an
+                 * equality is what `expmeta` can assert. */
+                globb().clear();
                 expmeta(p, len, 0);
                 if p != (*str).text {
                     ckfree(p as *mut c_void);
@@ -2340,15 +2423,36 @@ unsafe fn addfname_common(name: *mut c_char) {
 
 // [spec:dash:def:expand.addfnamealt-fn]
 // [spec:dash:sem:expand.addfnamealt-fn]
-unsafe fn addfnamealt(mut enddir: *mut c_char, expdir_len: size_t) -> *mut c_char {
+unsafe fn addfnamealt(enddir: *mut c_char, expdir_len: size_t) -> *mut c_char {
     let name: *mut c_char;
+    let b = globb();
+    let n: size_t = enddir.offset_from(b.as_mut_ptr() as *mut c_char) as size_t;
 
-    name = grabstackstr(enddir);
+    /* `name = grabstackstr(enddir)` — in the C this allocates nothing and
+     * copies nothing: it moves the region's bump pointer past bytes that
+     * are already in place, which is how C says "these outlive the next
+     * candidate".  Owned bytes say that for free, so what is left is the
+     * copy into the region that `strlist` still requires.  Same seam as
+     * `grabexpdest`, and it goes with the same commit.
+     *
+     * `n` runs past the length when the caller is the no-metacharacter
+     * branch, whose `expmeta_rmescapes` wrote through a raw cursor without
+     * committing.  Those bytes are written; they are only uncounted, and
+     * counting them here is what makes the read below a read of the
+     * buffer rather than of its spare capacity. */
+    debug_assert!(n <= b.capacity());
+    b.set_len(n);
+    name = crate::memalloc::stalloc(n) as *mut c_char;
+    ptr::copy_nonoverlapping(b.as_ptr(), name as *mut u8, n);
     addfname_common(name);
 
-    /* STARTSTACKSTR(enddir) */
-    enddir = stackblock();
-    crate::memalloc::stnputs(name, expdir_len, enddir).offset(-(expdir_len as isize))
+    /* `STARTSTACKSTR(enddir); return stnputs(name, expdir_len, enddir) -
+     * expdir_len;` — the C has to start a new block and copy the directory
+     * prefix back into it, because `grabstackstr` gave the old one away.
+     * Nothing was given away here, so the prefix is still the first
+     * `expdir_len` bytes and re-seeding is `set_len`. */
+    b.set_len(expdir_len);
+    b.as_mut_ptr() as *mut c_char
 }
 
 // [spec:dash:def:expand.expmeta-rmescapes-fn]
@@ -2468,8 +2572,15 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
                 break 'out; /* goto out */
             }
 
+            /* The glob buffer's invariant, stated where it is relied on:
+             * this frame's prefix is `[0, expdir_len)` and it is exactly
+             * what the buffer counts as written, so `globgrowto`'s
+             * `reserve` copies it and nothing else.  `expandmeta` clears
+             * for the top-level call; a recursive one arrives straight out
+             * of the `globstnputs` that appended the component. */
+            debug_assert_eq!(globb().len(), expdir_len);
             len = expdir_len + name_len as size_t + 1;
-            cp = crate::memalloc::growstackto(len);
+            cp = globgrowto(len);
             enddir = cp.offset(expdir_len as isize);
 
             p = name;
@@ -2490,6 +2601,12 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
                     break 'out_opendir; /* goto out_opendir */
                 }
                 enddir = expmeta_rmescapes(enddir, name);
+                /* See [`globgrowto`]: `len` is the whole bound on what
+                 * `expmeta_rmescapes` just wrote, and `enddir` is on the
+                 * NUL it wrote last.  Asserted against `len` and not
+                 * against the capacity because `Vec` over-allocates, so a
+                 * capacity that fits proves nothing about the arithmetic. */
+                debug_assert!((enddir.offset_from(cp) as size_t) < len);
                 if libc::lstat64(cp, &mut statb) >= 0 {
                     cp = addfnamealt(enddir.offset(1), expdir_len);
                 }
@@ -2507,6 +2624,14 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
                 enddir = expmeta_rmescapes(enddir, name);
                 *start = c as c_char;
                 expdir_len = enddir.offset_from(cp) as size_t;
+                /* `expdir_len` grew, and the bytes it grew over were
+                 * written by `expmeta_rmescapes` through a raw cursor.
+                 * Count them: the invariant above has to hold again before
+                 * the readdir loop, whose `globstnputs` can reallocate.
+                 * The assertion is the same one as in the branch above,
+                 * and here it also covers the `*enddir = 0` below. */
+                debug_assert!(expdir_len < len);
+                globb().set_len(expdir_len);
             } else {
                 start = name;
             }
@@ -2574,24 +2699,24 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
                          * below, and the branch that keeps the entry
                          * immediately overwrites them with the raw name via
                          * `stnputs`.  So the encoding goes to its own buffer
-                         * and `expdest` is not involved at all, which is
-                         * what lets the expansion buffer be owned while the
-                         * glob buffer is still the region.
+                         * and the candidate path never holds it.  That is
+                         * what let the expansion buffer and this one be
+                         * converted separately.
                          *
-                         * `cp = stackblock()` is kept and is now a no-op:
-                         * `memtodest` no longer allocates, so the block
-                         * cannot have moved across it.  The re-read is the
-                         * C's marker for "a growth can happen here", and
-                         * `growstackto` and `stnputs` in this same loop
-                         * still can. */
+                         * `cp = stackblock()` is kept and is a no-op:
+                         * `memtodest` writes to `globenc`, so the glob
+                         * buffer cannot have moved across it.  The re-read
+                         * is the C's marker for "a growth can happen here",
+                         * and `globstnputs` in this same loop still is
+                         * one. */
                         globenc.clear();
                         memtodest(p, len, EXP_MBCHAR | EXP_KEEPNUL, &mut globenc);
-                        cp = stackblock();
+                        cp = globbase();
                         enddir = cp.offset(expdir_len as isize);
                         p = globenc.as_mut_ptr() as *mut c_char;
                     }
                     if pmatch(pat, p) != 0 {
-                        enddir = crate::memalloc::stnputs(dname, len, enddir);
+                        enddir = globstnputs(dname, len, enddir);
                         if c == 0 {
                             cp = addfnamealt(enddir, expdir_len);
                         } else {

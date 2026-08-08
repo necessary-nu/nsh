@@ -526,13 +526,14 @@ to a buffer of its own, and the *glob* buffer can stay in the region while
 the *expansion* buffer becomes owned. Without that the two are one commit,
 and one commit is what §5 says not to do here.
 
-### What is *not* converted, and the reason
+### What the expansion buffer left behind, and why
 
-  * **`expand.rs`'s glob buffer.** `expmeta` builds candidate paths with
-    `growstackto`/`stnputs` in the region and `addfnamealt` hands them to
-    the arg list with `grabstackstr`. It is separable from the expansion
-    buffer now, which is what the `memtodest` commit bought, but it is its
-    own property.
+  * **`expand.rs`'s glob buffer.** Converted since, in the pass recorded
+    below: `expmeta`'s candidate path is its own owned buffer. It was
+    separable from the expansion buffer because the `memtodest` commit
+    made `expmeta` stop touching `expdest`, and because — unlike the
+    expansion buffer — nothing outside `expmeta` and `addfnamealt` ever
+    read it.
   * **`expandarg`'s result.** `grabstackstr(expdest)` is a copy into the
     region, because `ifsbreakup`, `expandmeta` and the `strlist` chain are
     still `stalloc`'d C structures holding `char *`. That copy is the seam
@@ -644,3 +645,121 @@ pointer without grabbing it, so the value is live exactly until the next
 `stalloc` — and the caller's next act is the `printf` that reads it. What
 the region call communicates is when the bytes stop being valid, not where
 they are; the owned form is a buffer the caller holds across the `printf`.
+## What this cost in the port: the glob buffer
+
+Written after `expmeta`'s candidate path became an owned `BString`. This
+closes the first entry of the list above: the previous pass said the glob
+buffer was separable because `expmeta`'s encoded `d_name` is scratch, and
+it was. Nothing outside `expmeta` and `addfnamealt` ever touched it, which
+is the opposite of what the expansion buffer turned out to be, and the code
+that changed is small enough that the arguments below are most of the diff.
+
+The C never names this buffer. It is the stack block, addressed through
+two locals: `cp`, which `growstackto` returns, and `enddir`, which is
+`cp + expdir_len` plus whatever has been appended. `expmeta` recurses one
+frame per path component, every frame owns `[0, expdir_len)` -- the
+directory prefix its parent wrote, ending in `/` -- and writes the next
+component above it. So the property to hold is
+
+> at every point where the glob buffer can grow, its length is the current
+> frame's `expdir_len`
+
+which is the same sentence as the expansion buffer's "bytes past the
+cursor do not survive a growth", said for a buffer whose cursor belongs to
+whichever frame is running.
+
+### `addfnamealt`'s re-seed is the allocator's price, not the algorithm's
+
+    name = grabstackstr(enddir);
+    addfname_common(name);
+    STARTSTACKSTR(enddir);
+    return stnputs(name, expdir_len, enddir) - expdir_len;
+
+Read as work, the last two lines rebuild the directory prefix so the next
+candidate has something to append to. They do not. `grabstackstr` gave the
+block away to `strlist`, `addfname_common` then `stalloc`s a `struct
+strlist` on top of it, and the prefix has to be copied because the C has
+nowhere to copy it *from* any more. Owned, nothing was given away: the
+prefix is still the first `expdir_len` bytes and the re-seed is
+`set_len(expdir_len)`. Same shape as `grabstackblock` in `readtoken1` --
+an allocator move that reads as an allocation.
+
+### `stnputs` takes its length in its cursor, and the recursion needs that
+
+`makestrspace(n, p)` opens with `len = p - stacknxt`, so `stnputs(s, n, p)`
+appends *at `p`* and discards whatever was above it. In a builder that only
+ever appends at the end that is invisible. Here it is the mechanism by
+which a frame recovers from its own recursion: the child `expmeta` returns
+having left the buffer at *its* deeper `expdir_len`, and the parent's next
+`stnputs` at `cp + expdir_len` is what cuts it back. A conversion that
+appended at `Vec::len()` -- the obvious reading of `stnputs` -- concatenates
+the child's prefix onto the parent's and emits `a/b/c/b/…`. It is one
+subtraction in `memalloc.c` and it is load bearing three functions away.
+
+### The reservation is exact, and a 504-byte minimum block was covering it
+
+`growstackto(expdir_len + name_len + 1)` is the only bound on
+`expmeta_rmescapes`, which then writes `strcpy(enddir, name)` through a raw
+pointer that carries no bound of its own. That is safe only if
+`name_len == strlen(name)`, and the C never says so. It holds by induction:
+the top-level call passes `strlen(p)`, and the recursion passes
+`name_len - (endname - name)` for a `name` whose temporary NUL --
+`*zeroedp = '\0'` -- sits at `p - esc`, strictly *below* `endname`, so it
+cannot shorten the string being measured.
+
+In the C an off-by-something here is invisible, because a region block is
+never smaller than 504 bytes and doubles. So the same arithmetic is now the
+difference between a correct glob and a heap overflow, and both
+`expmeta_rmescapes` call sites assert it -- against the reservation and
+*not* against `Vec::capacity()`. That distinction was not obvious and had
+to be found by mutation: `Vec::reserve` over-allocates as well, so shaving
+a byte off the request leaves the capacity unchanged and an assertion on
+the capacity says nothing. An assertion has to name the number the C
+computed, not the allocator's answer to it.
+
+### The buffer that no other function reads
+
+The expansion buffer's conversion turned on finding `redir.c:openhere` and
+`parser.c:expandstr`, two callers in other files reading `stackblock()`
+back. The glob buffer was checked for the same thing and has none: its only
+export is `addfnamealt`'s `grabstackstr`, and after that the bytes are a
+`strlist` entry. `expandmeta` holds `INTOFF` across the whole glob and
+nothing on the path -- `pmatch`, `opendir`, `readdir`, `lstat` -- re-enters
+expansion, so there is never a second candidate path in flight either. That
+is why it is a `static` and not a parameter: the cursors are raw pointers
+that outlive the borrow that produced them, and there is nothing for a
+parameter to disambiguate.
+
+### What the top-level call was getting by accident
+
+`expmeta(p, len, 0)` starts on whatever block the region happens to be on,
+and gets away with it because `expdir_len` is 0 -- it writes from the base
+and never reads what was there. An owned buffer's length is not 0: the
+previous glob's `addfnamealt` left it at *that* glob's `expdir_len`. Every
+consequence of the stale length turns out to be benign, which is precisely
+why `expandmeta` clears explicitly -- the invariant above is worth stating
+as an equality that can be asserted, and an equality is what the assertion
+on entry to `expmeta` checks.
+
+### What the corpus cannot aim at, and what does
+
+Every property above is invisible to a corpus case that globs a short path
+in a shallow tree, because the buffer only has to survive a growth once it
+is longer than its first reservation, and a frame only has to cut itself
+back once a sibling has recursed before it.
+`crates/nsh/tests/glob_buffer.rs` is §5's targeted suite for that: three
+cases over deliberately deep, wide and long-named fixtures, one per
+property, each confirmed to fail when its property is broken. Expected
+output was checked against the reference C.
+
+### What the glob buffer left behind, and why
+
+`expand.rs` keeps no string builder over the region after this. What is
+left of `memalloc` in the file is the region allocator itself, and all of
+it belongs to `delete-memalloc`:
+
+  * `stalloc` for `struct strlist`, and the two grab seams
+    (`grabexpdest`, `addfnamealt`) that copy an owned buffer into it.
+  * `ckmalloc` for `ifsregion`, for `wcifs`, and in `_rmescapes`'
+    `RMESCAPE_HEAP` arm.
+  * `setstackmark` / `pushstackmark` / `popstackmark`.

@@ -10,6 +10,10 @@ ROOT=${DASH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)}
 HERE=$(cd "$(dirname "$0")" && pwd)
 JOBS=${1:-8}
 
+# For DS_DIVERGENCES, so a registered entry that no corpus triggers can be
+# reported at the end of the run.
+. "$HERE/divergences.sh"
+
 OUT=$ROOT/tests/.build/fail
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -34,13 +38,18 @@ done
 export PORT=$RUNPIN/port REF=$RUNPIN/ref
 
 total_pass=0 total_fail=0 total_flaky=0 total_xfail=0 bad=0
+declare -A seen_any=()
 
 for corpus in "$ROOT"/tests/corpus/*.txt; do
 	name=$(basename "$corpus" .txt)
 	printf '\r%-40s' "$name" >&2
-	line=$(FAILOUT=$OUT/$name.out FLAKYOUT=$OUT/$name.flaky \
+	out=$(FAILOUT=$OUT/$name.out FLAKYOUT=$OUT/$name.flaky \
 		XFAILOUT=$OUT/$name.xfail \
-		"$HERE/dsdiff.sh" "$corpus" "$JOBS" 2>&1 | grep -m1 '^PASS=')
+		"$HERE/dsdiff.sh" "$corpus" "$JOBS" 2>&1)
+	line=$(printf '%s\n' "$out" | grep -m1 '^PASS=')
+	while IFS= read -r id; do
+		[ -n "$id" ] && seen_any[${id#XFAILID=}]=1
+	done < <(printf '%s\n' "$out" | grep '^XFAILID=')
 	case $line in
 	PASS=*) ;;
 	*) echo "!! $name: harness did not report a tally"; bad=$((bad + 1)); continue ;;
@@ -58,5 +67,15 @@ for corpus in "$ROOT"/tests/corpus/*.txt; do
 done
 
 echo "==== TOTAL PASS=$total_pass FAIL=$total_fail FLAKY=$total_flaky XFAIL=$total_xfail ===="
+# A registered divergence that no corpus in a whole run triggers is an
+# excuse for a difference the shell no longer produces, and a stale excuse
+# is how a real regression eventually gets waved through. This is the only
+# place the question is answerable: per corpus, an entry not matching is
+# the normal case.
+for id in "${DS_DIVERGENCES[@]:-}"; do
+	[ -n "$id" ] || continue
+	[ -n "${seen_any[$id]:-}" ] || echo "STALE: register entry '$id' matched nothing in the whole run"
+done
+
 [ "$bad" -gt 0 ] && echo "$bad corpora produced no tally — treat this run as invalid"
 exit 0

@@ -157,12 +157,13 @@ echo "PASS=$pass FAIL=$fail FLAKY=$nflaky XFAIL=$nxfail"
 [ "$nflaky" -gt 0 ] && echo "(flaky cases counted as passing; detail in $FLAKYOUT)"
 [ "$nxfail" -gt 0 ] && echo "(sanctioned divergences, counted as passing; detail in $XFAILOUT)"
 
-# An entry nothing matches is an excuse for a difference the shell no
-# longer produces. Say so: a stale register is how a real regression
-# eventually gets waved through.
-for id in "${DS_DIVERGENCES[@]:-}"; do
-	[ -n "$id" ] || continue
-	[ -n "${seen_div[$id]:-}" ] || echo "(register entry '$id' matched nothing in this corpus)"
+# Which entries fired, for the caller to aggregate. Deliberately not a
+# staleness verdict: an entry matches only the corpora that exercise its
+# feature, so "matched nothing here" is the normal case for almost every
+# corpus and almost every entry. Staleness is a property of a whole run,
+# and `runall.sh` is what can see one.
+for id in "${!seen_div[@]}"; do
+	echo "XFAILID=$id"
 done
 
 [ "$fail" -gt 0 ] && { echo "--- failures (also in $FAILOUT) ---"; head -c 200000 "$FAILOUT"; }
