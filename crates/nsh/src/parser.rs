@@ -2331,7 +2331,11 @@ pub unsafe fn expandstr(ps: *const c_char) -> *const c_char {
         });
 
         expandarg(&n, ptr::null_mut(), EXP_QUOTED);
-        *resultp = crate::memalloc::stackblock() as *const c_char;
+        /* The C reads the expansion back as `stackblock()`; the expansion
+         * buffer is owned now, so the read is named.  The C's pointer was
+         * live only until the next `stalloc`; this one is live until the
+         * next expansion, which is a superset. */
+        *resultp = crate::expand::expansion_result() as *const c_char;
     });
 
     /* out: */

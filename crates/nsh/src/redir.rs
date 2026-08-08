@@ -367,7 +367,14 @@ unsafe fn openhere(redir: &Node) -> c_int {
             core::ptr::null_mut::<crate::expand::arglist>(),
             crate::expand::EXP_QUOTED,
         );
-        p = crate::memalloc::stackblock() as *mut c_char;
+        /* The C reads the expansion back out of the region as
+         * `stackblock()`.  The expansion buffer is owned now, so the read is
+         * named.  Two consequences, both in the port's favour: the bytes
+         * cannot be moved by the `sh_pipe`/`forkshell` allocations below —
+         * the C's were only safe because neither happens to `stalloc` — and
+         * they are still NUL-terminated by `argstr`, which is what the
+         * `strlen` on the next line needs. */
+        p = crate::expand::expansion_result();
     }
 
     len = libc::strlen(p) as size_t;
