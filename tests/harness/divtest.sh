@@ -81,5 +81,17 @@ printf 'echo "the environment"\n' > "$case_file"
 check "a mention in a string is not excused" 1 \
 	$'one\ntwo' $'two\none' 0 0 "$case_file"
 
+# ---- the dead-harness guard --------------------------------------
+#
+# A shell that stopped existing is not a shell that behaved differently.
+missing=$(mktemp -u)
+if ds_harness_alive "$missing" /bin/sh; then no "a missing port is not alive"; else ok; fi
+if ds_harness_alive /bin/sh "$missing"; then no "a missing reference is not alive"; else ok; fi
+if ds_harness_alive /bin/sh /bin/sh; then ok; else no "two real shells are alive"; fi
+# A file that exists but cannot be executed is just as dead.
+notexec=$(mktemp); printf '#!/bin/sh\n' > "$notexec"; chmod -x "$notexec"
+if ds_harness_alive "$notexec" /bin/sh; then no "a non-executable port is not alive"; else ok; fi
+rm -f "$notexec"
+
 echo "DIVERGENCE REGISTER: PASS=$pass FAIL=$fail"
 [ "$fail" -eq 0 ]

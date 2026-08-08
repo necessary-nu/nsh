@@ -8,6 +8,7 @@
 ROOT=${DASH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)}
 set -u
 . "$(dirname "$0")/sandboxed.sh"
+. "$(dirname "$0")/divergences.sh"
 
 CASE=$1
 ID=$(basename "$CASE")
@@ -151,6 +152,32 @@ classify() {
 }
 
 if [ "$ro" = "$po" ] && [ "$rr" = "$pr" ]; then
+	echo PASS > "$OUT"
+elif ! ds_harness_alive "$PORT" "$REF"; then
+	# Not a divergence: one of the shells stopped existing mid-corpus.
+	# Leave the failure report in place so nothing is silently excused,
+	# and drop a marker dsdiff.sh turns into a refusal to report a
+	# tally at all -- a run that lost its binary has no result, and
+	# reporting one is worse than reporting nothing.
+	{
+		echo "### HARNESS DEAD $name"
+		echo "  '$PORT' or '$REF' is no longer executable."
+		echo "  Everything after this point in the corpus is measuring"
+		echo "  a missing binary, not the shell. The run is void."
+		echo "  ref  rc=$rr [$ro]"
+		echo "  port rc=$pr [$po]"
+		echo
+	} | tee "$OUT.dead" > "$OUT"
+elif ds_sanctioned "$ro" "$po" "$rr" "$pr" "$body"; then
+	{
+		echo "### XFAIL($DS_DIVERGENCE) $name"
+		echo "--- case ---"
+		cat "$body"
+		echo "  a sanctioned divergence: see docs/divergences.md"
+		echo "  ref  rc=$rr [$ro]"
+		echo "  port rc=$pr [$po]"
+		echo
+	} > "$OUT.xfail"
 	echo PASS > "$OUT"
 elif classify; then
 	{

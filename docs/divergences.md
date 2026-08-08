@@ -40,18 +40,39 @@ conformance. `fc -e` reads the wrong variable; nobody meant that. Not
 managing the terminal is a design position dash has held since the
 NetBSD import.
 
-## A constraint on category 3
+## How a category-3 divergence is registered
 
-The harness does not read this file. `dsdiff.sh` knows nothing about the
-register, so a sanctioned divergence that a corpus case observes turns
-`FAIL=0` into a permanent `FAIL=n` that cannot be told apart from a
-regression — and the single legible number is the whole reason the
-harness is worth running.
+The harness reads a register, so a sanctioned divergence no longer spends
+`FAIL=0`. The prose lives here; the executable half is
+`tests/harness/divergences.sh`, and an entry is a shell function:
 
-So, until `dsdiff.sh` is taught the sanctioned-divergence list: **a
-category-3 fix may land only if no corpus case observes it.** The first
-one that a corpus case does observe must be preceded by building that
-mechanism.
+```
+dsdiv_<id> REF_OUT PORT_OUT REF_RC PORT_RC CASE_FILE  ->  0 = this explains it
+```
+
+A case that matches is reported as `XFAIL(<id>)` and counted as passing,
+with the detail in `tests/.build/xfail.out`. An entry that matches
+nothing is reported too — a stale excuse is how a real regression
+eventually gets waved through.
+
+It is a function rather than a pattern in a config file because a
+divergence is a claim about *behaviour*, and the only honest way to say
+"the outputs differ exactly this way and no other" is code that can
+inspect both sides. A glob over case names would excuse whatever else
+those cases happened to break.
+
+**The one rule: an entry must not be able to match a regression.** Two
+habits keep that true, and `tests/harness/divtest.sh` enforces them by
+asserting refusals rather than matches — a changed value, a dropped line,
+an extra line, a duplicate, a differing exit status, a case outside the
+feature:
+
+  * *Compare, do not ignore.* `ds_same_lines` sorts both sides and
+    requires equality, so it says "the same lines in a different order".
+    Dropping the lines would say "anything at all", which is not a
+    divergence, it is a blind spot.
+  * *Scope to the feature.* An entry about `export -p` ordering has no
+    business excusing a case that never runs `export -p`.
 
 ## Register
 
@@ -143,11 +164,14 @@ keeping a weak hash's bucket walk forever so that a number stays green is
 the tail wagging the dog.
 
 Thirty corpus files observe it -- ten with a bare `env`, ten with
-`export -p` or a bare `set`, ten with a bare `alias` -- so this is the
-first divergence that cannot land under the constraint above. It waits
-for `dsdiff.sh` to learn this register. That ordering is deliberate: a
-mechanism built with no customer is usually the wrong mechanism, and this
-one arrives with thirty cases and three built-ins to be right about.
+`export -p` or a bare `set`, ten with a bare `alias` -- which is why the
+register had to exist first. It now does; this will be its first entry,
+written in the same change that makes the shell sort, since an excuse
+registered before the behaviour it excuses is an excuse waiting to be
+misapplied.
+
+Upstream wants the same thing, for what it is worth: `alias.c` carries
+its own `/* TODO - sort output */`.
 
 ## Candidates not yet decided
 

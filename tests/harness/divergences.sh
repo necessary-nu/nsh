@@ -65,6 +65,24 @@ ds_sanctioned() {
 	return 1
 }
 
+# ds_harness_alive PORT REF -- both shells still exist and are runnable.
+#
+# The other half of making the tally mean something. A case whose port
+# side exits 127 with "No such file or directory" naming its own path did
+# not behave differently -- it did not run, and counting that as a
+# divergence is how a full disk once produced 315 convincing failures in
+# a single corpus with nothing wrong with the shell.
+#
+# `ds_assert_harness_live` in sandboxed.sh already refuses to start
+# without both binaries. What it cannot see is a binary that disappears
+# *during* a corpus, because it runs once per invocation and a corpus is
+# thousands of cases. This is the per-case counterpart, checked only when
+# a case has already failed, so it costs two stats on the unhappy path
+# and nothing at all on the happy one.
+ds_harness_alive() {
+	[ -x "$1" ] && [ -x "$2" ]
+}
+
 # ---------------------------------------------------------------------
 # Helpers for writing entries
 # ---------------------------------------------------------------------
@@ -105,3 +123,11 @@ ds_case_matches() {
 #       ds_case_matches "$5" '(^|[;&|( ])(env|export -p|set|alias)([ ;|]|$)' || return 1
 #       ds_same_lines "$1" "$2"
 #   }
+
+# An extra register, for testing the machinery itself. The mechanism has
+# to be exercisable end to end while the real register is empty --
+# otherwise the first thing that proves the XFAIL path works is the first
+# real divergence, which is precisely the moment to already trust it.
+if [ -n "${DS_DIVERGENCES_FILE:-}" ] && [ -r "${DS_DIVERGENCES_FILE}" ]; then
+	. "${DS_DIVERGENCES_FILE}"
+fi

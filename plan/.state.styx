@@ -1091,7 +1091,8 @@ assertions (
     {id posix-harness, kind @complete, author "brendan@necessary.nu", at 2026-08-04T00:31:09.803718675Z}
     {id host-owns-streams, kind @complete, author "brendan@necessary.nu", at 2026-08-07T09:33:13.662151863Z}
     {id owned-nodes, kind @complete, author "brendan@necessary.nu", at 2026-08-07T11:42:00.055092499Z}
-    {id crate-rename, kind @doing, author "brendan@necessary.nu", at 2026-08-07T14:04:44.997768512Z}
+    {id crate-rename, kind @complete, author "brendan@necessary.nu", at 2026-08-08T02:12:48.664729127Z}
+    {id sanctioned-divergences, kind @doing, author "brendan@necessary.nu", at 2026-08-08T08:24:19.29009759Z}
 )
 
 impl_evidence (

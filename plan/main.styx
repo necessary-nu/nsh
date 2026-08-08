@@ -2060,6 +2060,14 @@ children (
                 title "Make the differential tally mean what it says: sanctioned divergences, and a dead harness that reports as one"
                 priority 0
                 kind @test
+                log (
+                    {
+                        at 2026-08-08T08:24:19.29009759Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+                )
             }
 
             {
@@ -2067,12 +2075,20 @@ children (
                 title "Rename the crate to nsh and split the frontend into nsh-cli"
                 priority 0
                 kind @refactor
+                sealed true
                 log (
                     {
                         at 2026-08-07T14:04:44.997768512Z
                         author "brendan@necessary.nu"
                         kind @status
                         text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-08T02:12:48.664729127Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }

@@ -26,6 +26,7 @@ ROOT=${DASH_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)}
 set -u
 
 . "$(cd "$(dirname "$0")" && pwd)/sandboxed.sh"
+. "$(cd "$(dirname "$0")" && pwd)/divergences.sh"
 
 PORT=${PORT:-$ROOT/target/debug/nsh}
 REF=${REF:-$ROOT/tests/.build/ref/src/dash}
@@ -79,14 +80,19 @@ done
 find "$RUNROOT/cases" -type f -print0 |
 	PORT=$PORT REF=$REF RUNROOT=$RUNROOT xargs -0 -P "$JOBS" -n 1 "$HERE/dscase.sh"
 
-pass=$(find "$RUNROOT/out" -maxdepth 1 -type f ! -name '*.flaky' -exec grep -lx PASS {} + 2>/dev/null | wc -l)
-fail=$(find "$RUNROOT/out" -maxdepth 1 -type f ! -name '*.flaky' -exec grep -Lx PASS {} + 2>/dev/null | wc -l)
+# The sidecars are reports, not verdicts: the verdict for a case is
+# always its bare `out/<id>` file. Every new sidecar suffix has to be
+# excluded here or it is counted as a case in its own right -- an
+# `.xfail` report read as a failure is how the register would have
+# quietly inverted its own meaning.
+pass=$(find "$RUNROOT/out" -maxdepth 1 -type f ! -name '*.flaky' ! -name '*.xfail' ! -name '*.dead' -exec grep -lx PASS {} + 2>/dev/null | wc -l)
+fail=$(find "$RUNROOT/out" -maxdepth 1 -type f ! -name '*.flaky' ! -name '*.xfail' ! -name '*.dead' -exec grep -Lx PASS {} + 2>/dev/null | wc -l)
 
 # Reports go under tests/.build (gitignored), not the caller's cwd —
 # this script now lives in the repo, and a test run must not dirty it.
 mkdir -p "$ROOT/tests/.build"
 : > "${FAILOUT:=$ROOT/tests/.build/failures.out}"
-for f in $(find "$RUNROOT/out" -maxdepth 1 -type f ! -name '*.flaky' -exec grep -Lx PASS {} + 2>/dev/null | sort); do
+for f in $(find "$RUNROOT/out" -maxdepth 1 -type f ! -name '*.flaky' ! -name '*.xfail' ! -name '*.dead' -exec grep -Lx PASS {} + 2>/dev/null | sort); do
 	cat "$f" >> "$FAILOUT"
 done
 
@@ -98,7 +104,40 @@ for f in "$RUNROOT"/out/*.flaky; do
 	nflaky=$((nflaky + 1))
 done
 
-echo "PASS=$pass FAIL=$fail FLAKY=$nflaky"
+# A binary that vanished mid-corpus makes every case after it look like a
+# divergence. Refuse to report a tally rather than report a wrong one:
+# runall.sh counts a missing tally as a corpus that invalidates the run,
+# which is the honest outcome.
+ndead=$(find "$RUNROOT/out" -maxdepth 1 -name '*.dead' 2>/dev/null | wc -l)
+if [ "$ndead" -gt 0 ]; then
+	echo "HARNESS DEAD: $ndead case(s) ran without a shell to run." >&2
+	cat "$RUNROOT"/out/*.dead >&2
+	echo "Refusing to report a tally for this corpus: the run is void." >&2
+	exit 2
+fi
+
+: > "${XFAILOUT:=$ROOT/tests/.build/xfail.out}"
+nxfail=0
+declare -A seen_div=()
+for f in "$RUNROOT"/out/*.xfail; do
+	[ -e "$f" ] || continue
+	cat "$f" >> "$XFAILOUT"
+	nxfail=$((nxfail + 1))
+	id=$(sed -n '1s/^### XFAIL(\([^)]*\)).*/\1/p' "$f")
+	[ -n "$id" ] && seen_div[$id]=1
+done
+
+echo "PASS=$pass FAIL=$fail FLAKY=$nflaky XFAIL=$nxfail"
 [ "$nflaky" -gt 0 ] && echo "(flaky cases counted as passing; detail in $FLAKYOUT)"
+[ "$nxfail" -gt 0 ] && echo "(sanctioned divergences, counted as passing; detail in $XFAILOUT)"
+
+# An entry nothing matches is an excuse for a difference the shell no
+# longer produces. Say so: a stale register is how a real regression
+# eventually gets waved through.
+for id in "${DS_DIVERGENCES[@]:-}"; do
+	[ -n "$id" ] || continue
+	[ -n "${seen_div[$id]:-}" ] || echo "(register entry '$id' matched nothing in this corpus)"
+done
+
 [ "$fail" -gt 0 ] && { echo "--- failures (also in $FAILOUT) ---"; head -c 200000 "$FAILOUT"; }
 exit 0
