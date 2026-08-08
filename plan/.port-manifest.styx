@@ -1950,18 +1950,6 @@ symbols (
         {verb def, id var.unsetvar-fn}
         {verb sem, id var.unsetvar-fn}
     )}
-    {id var.hashvar-fn, kind @function, name hashvar, qualified hashvar, signature "var ** hashvar(const char *p)", file src/var.c, line_start 648, line_end 652, rules (
-        {verb def, id var.hashvar-fn}
-        {verb sem, id var.hashvar-fn}
-    )}
-    {id var.varcmp-fn, kind @function, name varcmp, qualified varcmp, signature "int varcmp(const char *p, const char *q)", file src/var.c, line_start 662, line_end 679, rules (
-        {verb def, id var.varcmp-fn}
-        {verb sem, id var.varcmp-fn}
-    )}
-    {id var.vpcmp-fn, kind @function, name vpcmp, qualified vpcmp, signature "STATIC int vpcmp(const void *a, const void *b)", file src/var.c, line_start 681, line_end 685, rules (
-        {verb def, id var.vpcmp-fn}
-        {verb sem, id var.vpcmp-fn}
-    )}
     {id var.findvar-fn, kind @function, name findvar, qualified findvar, signature "var ** findvar(const char *name)", file src/var.c, line_start 687, line_end 698, rules (
         {verb def, id var.findvar-fn}
         {verb sem, id var.findvar-fn}
@@ -1984,14 +1972,6 @@ symbols (
         "const char *text"
     ), file src/var.h, line_start 65, line_end 70, rules (
         {verb def, id var.localvar}
-    )}
-    {id var.hashval-fn, kind @function, name hashval, qualified hashval, signature "static inline unsigned int hashval(const char *p)", file src/var.h, line_start 156, line_end 168, rules (
-        {verb def, id var.hashval-fn}
-        {verb sem, id var.hashval-fn}
-    )}
-    {id var.varequal-fn, kind @function, name varequal, qualified varequal, signature "static inline int varequal(const char *a, const char *b)", file src/var.h, line_start 171, line_end 173, rules (
-        {verb def, id var.varequal-fn}
-        {verb sem, id var.varequal-fn}
     )}
     {id var.bltinlookup-fn, kind @function, name bltinlookup, qualified bltinlookup, signature "static inline char *bltinlookup(const char *name)", file src/var.h, line_start 179, line_end 182, rules (
         {verb def, id var.bltinlookup-fn}

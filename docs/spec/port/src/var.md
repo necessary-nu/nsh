@@ -41,6 +41,20 @@ Local variables form a stack of stacks: `localvar_stack` is a list of
 `struct localvar_list`, one per active function invocation, each holding
 the `struct localvar` saves made in that invocation.
 
+**Rules retired: the hash table.** `sorted-tables` replaced `vartab` with
+a `BTreeMap` keyed by variable name, so five of the symbols below have no
+counterpart in the port and their rule ids are retired: `hashval` and
+`hashvar`, which existed only to choose a bucket; `varcmp` and
+`varequal`, whose "compare up to the first `=`" *is* the map key, so the
+comparison belongs to the container; and `vpcmp`, the `qsort` comparator
+`showvars` no longer needs now that `listvars` yields its output in name
+order. `struct var` loses its `next` field with them. What the port does
+is what the C's own comment above `showvars` wishes for — "Maybe we could
+keep them in an ordered balanced binary tree instead of hashed lists".
+The five blocks are kept, without ids, because they still describe
+`src/var.c`, which still has all five. `docs/divergences.md` records the
+observable half.
+
 > [spec:dash:def:var.bltinlookup-fn]
 > static inline char *bltinlookup(const char *name)
 
@@ -91,10 +105,8 @@ the `struct localvar` saves made in that invocation.
 > holds. Returning the link address is what lets `setvareq` unlink an
 > entry without a second traversal.
 
-> [spec:dash:def:var.hashval-fn]
 > static inline unsigned int hashval(const char *p)
 
-> [spec:dash:sem:var.hashval-fn]
 > Hash a variable name, stopping at `=` so `"name"` and `"name=value"`
 > hash alike. Seed with the first byte shifted left 4, then add each byte
 > as it is consumed, breaking once the *next* byte is `=`. Note the
@@ -103,10 +115,8 @@ the `struct localvar` saves made in that invocation.
 > `unsigned int` accumulator is defined wraparound and part of the
 > function. The caller reduces the result modulo the table size.
 
-> [spec:dash:def:var.hashvar-fn]
 > var ** hashvar(const char *p)
 
-> [spec:dash:sem:var.hashvar-fn]
 > Return the bucket head address for `p`: `&vartab[hashval(p) % VTABSIZE]`.
 
 > [spec:dash:def:var.initvar-fn]
@@ -372,20 +382,16 @@ the `struct localvar` saves made in that invocation.
 > callback. The callbacks in use are `changeifs`, `changemail`,
 > `changepath`, `getoptsreset`, `sethistsize` and `changelocale`.
 
-> [spec:dash:def:var.varcmp-fn]
 > int varcmp(const char *p, const char *q)
 
-> [spec:dash:sem:var.varcmp-fn]
 > Compare two variable strings up to the first `=` or NUL on either
 > side, so `"PATH=x"` and `"PATH"` compare equal. Walk while the current
 > characters match, stopping at a NUL; after each advance, map a `=` to
 > `'\0'` on either side so it compares as a terminator. Return
 > `c - d`, the usual sign convention.
 
-> [spec:dash:def:var.varequal-fn]
 > static inline int varequal(const char *a, const char *b)
 
-> [spec:dash:sem:var.varequal-fn]
 > `!varcmp(a, b)` — true when the two names are equal, ignoring anything
 > from an `=` onward.
 
@@ -407,10 +413,8 @@ the `struct localvar` saves made in that invocation.
 > extra byte and leaves two NULs there, making the result a valid empty
 > string rather than a read past the end.
 
-> [spec:dash:def:var.vpcmp-fn]
 > STATIC int vpcmp(const void *a, const void *b)
 
-> [spec:dash:sem:var.vpcmp-fn]
 > `qsort` comparator over an array of `char *` variable texts:
 > dereference both and return `varcmp` of the two, so ordering is by name
 > only.

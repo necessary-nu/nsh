@@ -119,11 +119,13 @@ unsafe fn equal(s1: *const c_char, s2: *const c_char) -> bool {
 pub unsafe fn shellexec(argv: *mut *mut c_char, path: *const c_char, mut idx: c_int) -> ! {
     let mut cmdname: *mut c_char;
     let e: c_int;
-    let envp: *mut *mut c_char;
     let exerrno: c_int;
     let mut lpath: *const c_char = path;
 
-    envp = crate::var::environment();
+    /* The C's `environment()` leaves its array in the stack allocator; ours
+     * owns it, so the `Vec` has to outlive every `execve` below. */
+    let envv = crate::var::environment();
+    let envp: *mut *mut c_char = envv.as_ptr() as *mut *mut c_char;
     if !libc::strchr(*argv.offset(0), '/' as c_int).is_null() {
         tryexec(*argv.offset(0), argv, envp);
         e = errno();

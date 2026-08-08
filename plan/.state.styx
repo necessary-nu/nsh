@@ -1093,6 +1093,9 @@ assertions (
     {id owned-nodes, kind @complete, author "brendan@necessary.nu", at 2026-08-07T11:42:00.055092499Z}
     {id crate-rename, kind @complete, author "brendan@necessary.nu", at 2026-08-08T02:12:48.664729127Z}
     {id sanctioned-divergences, kind @complete, author "brendan@necessary.nu", at 2026-08-08T08:45:40.959456042Z}
+    {id delete-gen, kind @complete, author "brendan@necessary.nu", at 2026-08-08T10:58:15.738053128Z}
+    {id public-api-design, kind @complete, author "brendan@necessary.nu", at 2026-08-08T10:58:17.762829462Z}
+    {id sorted-tables, kind @doing, author "brendan@necessary.nu", at 2026-08-08T11:44:42.574884968Z}
 )
 
 impl_evidence (

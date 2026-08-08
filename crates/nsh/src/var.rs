@@ -6,12 +6,23 @@
 //! `DEBUG` defined.  `varinit[]` order is load bearing — `var.h` addresses its
 //! entries positionally through the `vifs`/`vmail`/… macros and the `*val()`
 //! accessors skip the name by a hard-coded byte count.  Do not reorder.
+//!
+//! One deliberate departure from the C, registered in `docs/divergences.md`:
+//! `vartab` is a `BTreeMap` keyed by variable name, not 39 chained hash
+//! buckets.  `listvars` therefore yields the variables in name order, and
+//! since its result *is* `execve`'s `envp`, a child's environment is sorted
+//! too.  dash walks the buckets, so its order is an artefact of
+//! `hashval` — neither sorted nor insertion order.  POSIX constrains
+//! neither, and it requires `set` to print sorted, which the container now
+//! gives for free instead of a `qsort` at print time.
 
+use bstr::{BStr, BString};
 use libc::{c_char, c_int, c_uint, c_void, intmax_t, size_t};
+use std::collections::BTreeMap;
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 
 use crate::error::{INTOFF, INTON};
-use crate::memalloc::{ckfree, ckmalloc, savestr, stackstrend};
+use crate::memalloc::{ckfree, ckmalloc, savestr};
 use crate::mystring::nullstr;
 use crate::options::{argptr, getoptsreset, nextopt, optlist, optschanged};
 use crate::output::VaArg;
@@ -34,8 +45,6 @@ pub const VNOFUNC: c_int = 0x40; /* don't call the callback function */
 pub const VFULL: c_int = 0x80; /* pass value suitable for putenv */
 pub const VNOSAVE: c_int = 0x100; /* when text is on the heap before setvareq */
 
-pub const VTABSIZE: usize = 39;
-
 // [spec:dash:def:var.var.func-fn]
 // [spec:dash:sem:var.var.func-fn]
 /// `void (*func)(const char *)` — the change-callback member of `struct var`.
@@ -45,9 +54,12 @@ pub const VTABSIZE: usize = 39;
 pub type varfunc_t = Option<unsafe fn(*const c_char)>;
 
 // [spec:dash:def:var.var]
+/// The C carries a `struct var *next` here, the link in the hash chain.
+/// `vartab` is an ordered map now, so the link is the map's business and the
+/// field is gone; the struct is still separately allocated and never moved,
+/// because `localvar.vp` holds its address across a whole function call.
 #[repr(C)]
 pub struct var {
-    pub next: *mut var,      /* next entry in hash list */
     pub flags: c_int,        /* flags are defined above */
     pub text: *const c_char, /* name=value */
     pub func: varfunc_t,     /* called when the variable gets set/unset */
@@ -108,99 +120,83 @@ unsafe fn changelocale(val: *const c_char) {
 /* Some macros in var.h depend on the order, add new variables to the end. */
 pub static mut varinit: [var; 16] = [
     var {
-        next: null_mut(),
         flags: VSTRFIXED | VTEXTFIXED,
         text: addr_of!(defifsvar) as *const c_char,
         func: Some(crate::expand::changeifs),
     },
     var {
-        next: null_mut(),
         flags: VSTRFIXED | VTEXTFIXED | VUNSET,
         text: b"MAIL\0\0".as_ptr() as *const c_char,
         func: Some(crate::mail::changemail),
     },
     var {
-        next: null_mut(),
         flags: VSTRFIXED | VTEXTFIXED | VUNSET,
         text: b"MAILPATH\0\0".as_ptr() as *const c_char,
         func: Some(crate::mail::changemail),
     },
     var {
-        next: null_mut(),
         flags: VSTRFIXED | VTEXTFIXED,
         text: addr_of!(defpathvar) as *const c_char,
         func: Some(crate::exec::changepath),
     },
     var {
-        next: null_mut(),
         flags: VSTRFIXED | VTEXTFIXED,
         text: b"PS1=$ \0".as_ptr() as *const c_char,
         func: None,
     },
     var {
-        next: null_mut(),
         flags: VSTRFIXED | VTEXTFIXED,
         text: b"PS2=> \0".as_ptr() as *const c_char,
         func: None,
     },
     var {
-        next: null_mut(),
         flags: VSTRFIXED | VTEXTFIXED,
         text: b"PS4=+ \0".as_ptr() as *const c_char,
         func: None,
     },
     var {
-        next: null_mut(),
         flags: VSTRFIXED | VTEXTFIXED | VNOFUNC,
         text: addr_of!(defoptindvar) as *const c_char,
         func: Some(getoptsreset),
     },
     /* #ifdef WITH_LINENO */
     var {
-        next: null_mut(),
         flags: VSTRFIXED | VTEXTFIXED,
         text: addr_of!(linenovar) as *const c_char,
         func: None,
     },
     /* #ifndef SMALL */
     var {
-        next: null_mut(),
         flags: VSTRFIXED | VTEXTFIXED | VUNSET,
         text: b"TERM\0\0".as_ptr() as *const c_char,
         func: None,
     },
     var {
-        next: null_mut(),
         flags: VSTRFIXED | VTEXTFIXED | VUNSET,
         text: b"HISTSIZE\0\0".as_ptr() as *const c_char,
         func: Some(crate::histedit::sethistsize),
     },
     var {
-        next: null_mut(),
         flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
         text: b"LC_ALL\0\0".as_ptr() as *const c_char,
         func: Some(changelocale),
     },
     var {
-        next: null_mut(),
         flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
         text: b"LC_COLLATE\0\0".as_ptr() as *const c_char,
         func: Some(changelocale),
     },
     var {
-        next: null_mut(),
         flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
         text: b"LC_CTYPE\0\0".as_ptr() as *const c_char,
         func: Some(changelocale),
     },
     var {
-        next: null_mut(),
         flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
         text: b"LC_NUMERIC\0\0".as_ptr() as *const c_char,
         func: Some(changelocale),
     },
     var {
-        next: null_mut(),
         flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
         text: b"LANG\0\0".as_ptr() as *const c_char,
         func: Some(changelocale),
@@ -290,33 +286,36 @@ pub unsafe fn mpathset() -> c_int {
 }
 
 /// `#define environment() listvars(VEXPORT, VUNSET, 0)`
-pub unsafe fn environment() -> *mut *mut c_char {
-    listvars(VEXPORT, VUNSET, null_mut())
+///
+/// Returns the array `execve` wants: the `text` of every exported, set
+/// variable, in name order, with the terminating NULL. The caller owns it
+/// and must keep it alive across the `execve`.
+pub unsafe fn environment() -> Vec<*mut c_char> {
+    let mut envp = listvars(VEXPORT, VUNSET);
+    envp.push(null_mut());
+    envp
 }
 
-static mut vartab: [*mut var; VTABSIZE] = [null_mut(); VTABSIZE];
+/// Every variable, by name. dash's `vartab` is `struct var *[39]` walked
+/// through `hashval`; this is the same set of separately allocated `var`s
+/// filed in an order that means something. See the module comment.
+static mut vartab: BTreeMap<BString, *mut var> = BTreeMap::new();
 
-// [spec:dash:def:var.hashval-fn]
-// [spec:dash:sem:var.hashval-fn]
-pub unsafe fn hashval(mut p: *const c_char) -> c_uint {
-    let mut hashval: c_uint;
-
-    hashval = ((*p as u8) as c_uint) << 4;
-    while *p != 0 {
-        hashval = hashval.wrapping_add((*p as u8) as c_uint);
-        p = p.add(1);
-        if *p == b'=' as c_char {
-            break;
-        }
-    }
-
-    hashval
+#[inline]
+unsafe fn vartab_mut() -> &'static mut BTreeMap<BString, *mut var> {
+    &mut *addr_of_mut!(vartab)
 }
 
-// [spec:dash:def:var.varequal-fn]
-// [spec:dash:sem:var.varequal-fn]
-pub unsafe fn varequal(a: *const c_char, b: *const c_char) -> c_int {
-    (varcmp(a, b) == 0) as c_int
+/// The name `s` is filed under: its bytes up to the first `=`, or all of
+/// them if there is none.
+///
+/// This is what dash's `hashval`/`varequal` pair did implicitly — both stop
+/// at the `=`, so `"PATH"` and `"PATH=/bin"` reach the same entry. Made
+/// explicit, it is the map key, and the two functions go away with the
+/// hash. Borrowed from `s`, so it must not outlive the buffer.
+pub(crate) unsafe fn varname<'a>(s: *const c_char) -> &'a BStr {
+    let len = strchrnul(s, b'=' as c_int) as usize - s as usize;
+    BStr::new(core::slice::from_raw_parts(s as *const u8, len))
 }
 
 /*
@@ -418,14 +417,16 @@ unsafe fn varfunc(vp: *mut var) {
 pub unsafe fn initvar() {
     let mut vp: *mut var;
     let end: *mut var;
-    let mut vpp: *mut *mut var;
 
     vp = addr_of_mut!(varinit) as *mut var;
     end = vp.add(16);
     loop {
-        vpp = hashvar((*vp).text);
-        (*vp).next = *vpp;
-        *vpp = vp;
+        /* The 16 entries stay a static array: `vifs`/`vps1`/… address them
+         * positionally, `lookupvar` compares against `vlineno()` by
+         * address, and their `text` is `VTEXTFIXED`. Only the link into the
+         * table changes — the map holds the address, it does not own the
+         * `var`. */
+        vartab_mut().insert(varname((*vp).text).to_owned(), vp);
         vp = vp.add(1);
         if !(vp < end) {
             break;
@@ -520,11 +521,9 @@ pub unsafe fn setvarint(name: *const c_char, val: intmax_t, flags: c_int) -> int
 // [spec:dash:sem:var.setvareq-fn]
 pub unsafe fn setvareq(mut s: *mut c_char, mut flags: c_int) -> *mut var {
     let mut vp: *mut var;
-    let vpp: *mut *mut var;
 
     flags |= VEXPORT & (((1 - crate::options::optlist[crate::options::aflag] as c_int) as c_uint).wrapping_sub(1)) as c_int;
-    vpp = findvar(s);
-    vp = *vpp;
+    vp = findvar(s);
     if !vp.is_null() {
         let bits: c_uint;
 
@@ -544,6 +543,12 @@ pub unsafe fn setvareq(mut s: *mut c_char, mut flags: c_int) -> *mut var {
             );
         }
 
+        /* Taken before the old text is freed. `s` and `(*vp).text` are
+         * different buffers on every path the shell has — `setvar` always
+         * hands over a fresh one — but reading a freed buffer to find a map
+         * key would be a hazard the C did not have, so do not create it. */
+        let key = varname(s).to_owned();
+
         if ((*vp).flags & (VTEXTFIXED | VSTACK)) == 0 {
             ckfree((*vp).text as *mut c_void);
         }
@@ -553,7 +558,7 @@ pub unsafe fn setvareq(mut s: *mut c_char, mut flags: c_int) -> *mut var {
         } else if ((*vp).flags & VSTRFIXED) != 0 {
             bits = VSTRFIXED as c_uint;
         } else {
-            *vpp = (*vp).next;
+            vartab_mut().remove(&key);
             ckfree(vp as *mut c_void);
             /* out_free: */
             if (flags & (VTEXTFIXED | VSTACK | VNOSAVE)) == VNOSAVE {
@@ -575,9 +580,8 @@ pub unsafe fn setvareq(mut s: *mut c_char, mut flags: c_int) -> *mut var {
         }
         /* not found */
         vp = ckmalloc(core::mem::size_of::<var>() as size_t) as *mut var;
-        (*vp).next = *vpp;
         (*vp).func = None;
-        *vpp = vp;
+        vartab_mut().insert(varname(s).to_owned(), vp);
     }
     if (flags & (VTEXTFIXED | VSTACK | VNOSAVE)) == 0 {
         s = savestr(s);
@@ -601,7 +605,7 @@ pub unsafe fn setvareq(mut s: *mut c_char, mut flags: c_int) -> *mut var {
 pub unsafe fn lookupvar(name: *const c_char) -> *mut c_char {
     let v: *mut var;
 
-    v = *findvar(name);
+    v = findvar(name);
     if !v.is_null() && ((*v).flags & VUNSET) == 0 {
         /* #ifdef WITH_LINENO */
         if v == vlineno() && (*v).text == addr_of!(linenovar) as *const c_char {
@@ -637,65 +641,43 @@ pub unsafe fn lookupvarint(name: *const c_char) -> intmax_t {
 
 // [spec:dash:def:var.listvars-fn]
 // [spec:dash:sem:var.listvars-fn]
-pub unsafe fn listvars(on: c_int, off: c_int, end: *mut *mut *mut c_char) -> *mut *mut c_char {
-    let mut vpp: *mut *mut var;
-    let mut vp: *mut var;
-    let mut ep: *mut *mut c_char;
-    let mask: c_int;
+/// The `text` of every variable whose flags match — every bit in `on` set
+/// and every bit in `off` clear — in name order.
+///
+/// The C accumulates into the stack allocator and returns a NULL-terminated
+/// `char **` plus, through `end`, the position of the terminator so the
+/// caller gets a count without a second scan. An owned `Vec` carries its own
+/// length, so both go: `environment` appends the NULL that `execve` needs,
+/// and `showvars` just iterates.
+pub unsafe fn listvars(on: c_int, off: c_int) -> Vec<*mut c_char> {
+    let mask = on | off;
+    let mut ep = Vec::new();
 
-    crate::STARTSTACKSTR!(ep);
-    vpp = addr_of_mut!(vartab) as *mut *mut var;
-    mask = on | off;
-    loop {
-        vp = *vpp;
-        while !vp.is_null() {
-            if ((*vp).flags & mask) == on {
-                if ep as *mut c_void == stackstrend() {
-                    ep = crate::memalloc::growstackstr() as *mut *mut c_char;
-                }
-                *ep = (*vp).text as *mut c_char;
-                ep = ep.add(1);
-            }
-            vp = (*vp).next;
-        }
-        vpp = vpp.add(1);
-        if !(vpp < (addr_of_mut!(vartab) as *mut *mut var).add(VTABSIZE)) {
-            break;
+    for &vp in vartab_mut().values() {
+        if ((*vp).flags & mask) == on {
+            ep.push((*vp).text as *mut c_char);
         }
     }
-    if ep as *mut c_void == stackstrend() {
-        ep = crate::memalloc::growstackstr() as *mut *mut c_char;
-    }
-    if !end.is_null() {
-        *end = ep;
-    }
-    *ep = null_mut();
-    ep = ep.add(1);
-    crate::memalloc::grabstackstr(ep as *mut c_void) as *mut *mut c_char
+
+    ep
 }
 
 /*
  * POSIX requires that 'set' (but not export or readonly) output the
  * variables in lexicographic order - by the locale's collating order (sigh).
- * Maybe we could keep them in an ordered balanced binary tree
- * instead of hashed lists.
- * For now just roll 'em through qsort for printing...
+ * The C's comment here wishes for "an ordered balanced binary tree instead
+ * of hashed lists" and settles for rolling them through qsort at print
+ * time.  `vartab` is that tree, so the sort and its `vpcmp` comparator are
+ * gone and the order comes from the container.
+ *
+ * Neither shell honours the locale: dash's `varcmp` compares bytes, and so
+ * does a `BStr` key.  The parenthesised sigh is still owed.
  */
 
 // [spec:dash:def:var.showvars-fn]
 // [spec:dash:sem:var.showvars-fn]
 pub unsafe fn showvars(prefix: *const c_char, on: c_int, off: c_int) -> c_int {
     let sep: *const c_char;
-    let mut ep: *mut *mut c_char;
-    let mut epend: *mut *mut c_char = null_mut();
-
-    ep = listvars(on, off, &mut epend);
-    libc::qsort(
-        ep as *mut c_void,
-        ((epend as usize - ep as usize) / core::mem::size_of::<*mut c_char>()) as size_t,
-        core::mem::size_of::<*mut c_char>() as size_t,
-        Some(vpcmp),
-    );
 
     sep = if *prefix != 0 {
         addr_of!(crate::mystring::spcstr) as *const c_char
@@ -703,11 +685,11 @@ pub unsafe fn showvars(prefix: *const c_char, on: c_int, off: c_int) -> c_int {
         prefix
     };
 
-    while ep < epend {
+    for &e in listvars(on, off).iter() {
         let mut p: *const c_char;
         let mut q: *const c_char;
 
-        p = strchrnul(*ep, b'=' as c_int);
+        p = strchrnul(e, b'=' as c_int);
         q = addr_of!(nullstr) as *const c_char;
         if *p != 0 {
             p = p.add(1);
@@ -719,12 +701,11 @@ pub unsafe fn showvars(prefix: *const c_char, on: c_int, off: c_int) -> c_int {
             &[
                 VaArg::Str(prefix),
                 VaArg::Str(sep),
-                VaArg::Int((p as usize - *ep as usize) as c_int),
-                VaArg::Str(*ep),
+                VaArg::Int((p as usize - e as usize) as c_int),
+                VaArg::Str(e),
                 VaArg::Str(q),
             ],
         );
-        ep = ep.add(1);
     }
 
     0
@@ -757,7 +738,7 @@ pub unsafe fn exportcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
             if !p.is_null() {
                 p = p.add(1);
             } else {
-                vp = *findvar(name);
+                vp = findvar(name);
                 if !vp.is_null() {
                     (*vp).flags |= flag;
                     /* continue */
@@ -835,7 +816,7 @@ pub unsafe fn mklocal(name: *mut c_char, flags: c_int) {
         let eq: *mut c_char;
         let found: *mut var;
 
-        found = *findvar(name);
+        found = findvar(name);
         eq = libc::strchr(name, b'=' as c_int);
         if found.is_null() {
             if !eq.is_null() {
@@ -998,61 +979,18 @@ pub unsafe fn unsetvar(s: *const c_char) {
 }
 
 /*
- * Find the appropriate entry in the hash table from the name.
+ * Find the entry for a name, which may be given bare or as "name=value".
  */
-
-// [spec:dash:def:var.hashvar-fn]
-// [spec:dash:sem:var.hashvar-fn]
-unsafe fn hashvar(p: *const c_char) -> *mut *mut var {
-    (addr_of_mut!(vartab) as *mut *mut var).add((hashval(p) % VTABSIZE as c_uint) as usize)
-}
-
-/*
- * Compares two strings up to the first = or '\0'.  The first
- * string must be terminated by '='; the second may be terminated by
- * either '=' or '\0'.
- */
-
-// [spec:dash:def:var.varcmp-fn]
-// [spec:dash:sem:var.varcmp-fn]
-pub unsafe fn varcmp(mut p: *const c_char, mut q: *const c_char) -> c_int {
-    let mut c: c_int = *p as c_int;
-    let mut d: c_int = *q as c_int;
-    while c == d {
-        if c == 0 {
-            break;
-        }
-        p = p.add(1);
-        q = q.add(1);
-        c = *p as c_int;
-        d = *q as c_int;
-        if c == b'=' as c_int {
-            c = b'\0' as c_int;
-        }
-        if d == b'=' as c_int {
-            d = b'\0' as c_int;
-        }
-    }
-    c - d
-}
-
-// [spec:dash:def:var.vpcmp-fn]
-// [spec:dash:sem:var.vpcmp-fn]
-unsafe extern "C" fn vpcmp(a: *const c_void, b: *const c_void) -> c_int {
-    varcmp(*(a as *const *const c_char), *(b as *const *const c_char))
-}
 
 // [spec:dash:def:var.findvar-fn]
 // [spec:dash:sem:var.findvar-fn]
-unsafe fn findvar(name: *const c_char) -> *mut *mut var {
-    let mut vpp: *mut *mut var;
-
-    vpp = hashvar(name);
-    while !(*vpp).is_null() {
-        if varequal((**vpp).text, name) != 0 {
-            break;
-        }
-        vpp = addr_of_mut!((**vpp).next);
+/// The C returns the address of the *link* holding the entry — never NULL,
+/// so callers test `*result` — because that is what lets `setvareq` unlink
+/// without a second traversal. A map removes by key, so this returns the
+/// entry itself and NULL when there is none.
+unsafe fn findvar(name: *const c_char) -> *mut var {
+    match vartab_mut().get(varname(name)) {
+        Some(&vp) => vp,
+        None => null_mut(),
     }
-    vpp
 }

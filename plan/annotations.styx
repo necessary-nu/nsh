@@ -1697,10 +1697,6 @@ sites (
         [spec:dash:def:var.findvar-fn]
         [spec:dash:sem:var.findvar-fn]
     )}
-    {path src/var.c, symbol hashvar, spec (
-        [spec:dash:def:var.hashvar-fn]
-        [spec:dash:sem:var.hashvar-fn]
-    )}
     {path src/var.c, symbol initvar, spec (
         [spec:dash:def:var.initvar-fn]
         [spec:dash:sem:var.initvar-fn]
@@ -1764,10 +1760,6 @@ sites (
         [spec:dash:def:var.unwindlocalvars-fn]
         [spec:dash:sem:var.unwindlocalvars-fn]
     )}
-    {path src/var.c, symbol varcmp, spec (
-        [spec:dash:def:var.varcmp-fn]
-        [spec:dash:sem:var.varcmp-fn]
-    )}
     {path src/var.c, symbol varfunc, spec (
         [spec:dash:def:var.varfunc-fn]
         [spec:dash:sem:var.varfunc-fn]
@@ -1775,10 +1767,6 @@ sites (
     {path src/var.c, symbol varnull, spec (
         [spec:dash:def:var.varnull-fn]
         [spec:dash:sem:var.varnull-fn]
-    )}
-    {path src/var.c, symbol vpcmp, spec (
-        [spec:dash:def:var.vpcmp-fn]
-        [spec:dash:sem:var.vpcmp-fn]
     )}
     {path src/var.h, symbol "(*func)", spec (
         [spec:dash:def:var.var.func-fn]
@@ -1788,18 +1776,10 @@ sites (
         [spec:dash:def:var.bltinlookup-fn]
         [spec:dash:sem:var.bltinlookup-fn]
     )}
-    {path src/var.h, symbol hashval, spec (
-        [spec:dash:def:var.hashval-fn]
-        [spec:dash:sem:var.hashval-fn]
-    )}
     {path src/var.h, symbol localvar, spec (
         [spec:dash:def:var.localvar]
     )}
     {path src/var.h, symbol var, spec (
         [spec:dash:def:var.var]
-    )}
-    {path src/var.h, symbol varequal, spec (
-        [spec:dash:def:var.varequal-fn]
-        [spec:dash:sem:var.varequal-fn]
     )}
 )

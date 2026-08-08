@@ -27,20 +27,26 @@
 #
 # **An entry must not be able to match a regression.** That is the entire
 # design constraint, and it is easy to get wrong by writing something too
-# permissive. Two habits keep it honest:
+# permissive. Three habits keep it honest:
 #
 #   * Compare, do not ignore. `sort`ing both sides and requiring equality
 #     says "the same lines in a different order". Dropping the lines
 #     entirely would say "anything at all", which is not a divergence,
 #     it is a blind spot.
-#   * Scope to the feature. An entry about `export -p` ordering has no
-#     business excusing a case that never runs `export -p`, so it checks
-#     the case text before it excuses anything.
+#   * Scope to the feature. An entry about `env` ordering has no business
+#     excusing a case that never runs `env`, so it checks the case text
+#     before it excuses anything -- and it names only the commands that
+#     actually diverge, not every command in the neighbourhood.
+#   * Say which side is right. "The same lines in a different order"
+#     excuses every order, including one that is neither shell's. An
+#     ordering entry also asserts the order, and which lines were allowed
+#     to move.
 #
 # An entry that stops matching is reported as stale rather than left
 # lying around: once the port and dash agree again, the excuse should go.
 
 # Every registered divergence, by id. Order is the order they are tried.
+# Set by the register at the bottom of this file.
 DS_DIVERGENCES=()
 
 # Set by ds_sanctioned to the id that matched, for the report.
@@ -112,30 +118,112 @@ ds_case_matches() {
 	grep -qE "$2" "$1" 2>/dev/null
 }
 
+# ds_moved_lines_match A B ERE -- true when every line that sits at a
+# different position in the two outputs matches ERE, on both sides.
+#
+# `ds_same_lines` says "the same lines, some order". This says *which*
+# lines were allowed to move. An ordering divergence knows the shape of
+# the lines it reorders, so an entry can refuse a permutation of anything
+# else -- a diagnostic that raced stdout, a byte dump, an echo -- instead
+# of excusing every reordering that happens to preserve the multiset.
+ds_moved_lines_match() {
+	local -a x y
+	local i
+
+	mapfile -t x <<< "$1"
+	mapfile -t y <<< "$2"
+	[ "${#x[@]}" = "${#y[@]}" ] || return 1
+
+	for ((i = 0; i < ${#x[@]}; i++)); do
+		[ "${x[i]}" = "${y[i]}" ] && continue
+		[[ ${x[i]} =~ $3 ]] || return 1
+		[[ ${y[i]} =~ $3 ]] || return 1
+	done
+	return 0
+}
+
+# ds_blocks_sorted OUT ERE -- true when every maximal run of consecutive
+# ERE-matching lines in OUT is in non-decreasing C-collation order.
+#
+# The other half of a *sorting* divergence, and the half that is easy to
+# leave out. "The same lines in a different order" would excuse any order
+# at all, including a future one that is neither the reference's nor
+# sorted. This is the entry saying which side is the sorted one.
+#
+# Runs rather than the whole output, so a case that prints an environment,
+# something else, and another environment is still judged block by block.
+ds_blocks_sorted() {
+	local -a y
+	local i block=
+
+	mapfile -t y <<< "$1"
+	for ((i = 0; i <= ${#y[@]}; i++)); do
+		if [ "$i" -lt "${#y[@]}" ] && [[ ${y[i]} =~ $2 ]]; then
+			block+=${y[i]}$'\n'
+			continue
+		fi
+		if [ -n "$block" ]; then
+			printf '%s' "$block" | LC_ALL=C sort -C || return 1
+			block=
+		fi
+	done
+	return 0
+}
+
 # ---------------------------------------------------------------------
 # The register
 # ---------------------------------------------------------------------
-#
-# Empty. The first entry arrives with the `BTreeMap` change that makes
-# `env`, `export -p`, `set` and `alias` print in sorted order -- see
-# `docs/divergences.md`. It is not written here ahead of the behaviour it
-# describes, because an entry that excuses a difference the shell does
-# not yet produce is an excuse waiting to be misapplied.
-#
-# For the shape it will take:
-#
-#   DS_DIVERGENCES=(env_ordering)
-#
-#   dsdiv_env_ordering() {
-#       [ "$3" = "$4" ] || return 1
-#       ds_case_matches "$5" '(^|[;&|( ])(env|export -p|set|alias)([ ;|]|$)' || return 1
-#       ds_same_lines "$1" "$2"
-#   }
 
-# An extra register, for testing the machinery itself. The mechanism has
-# to be exercisable end to end while the real register is empty --
-# otherwise the first thing that proves the XFAIL path works is the first
-# real divergence, which is precisely the moment to already trust it.
+DS_DIVERGENCES=(sorted_tables)
+
+# A line the sorted tables produce: an environment entry, `NAME=value`, or
+# an alias listing, which is the same thing inside the single quotes
+# `single_quote` puts round it. Names are what `endofname` accepts, because
+# that is the only way a name reaches either table.
+DS_ORDERED_LINE="^'?[A-Za-z_][A-Za-z0-9_]*="
+
+# `env`, `printenv` and `alias` print in name order; dash prints in the
+# order its 39 hash buckets happen to chain. See `docs/divergences.md` for
+# why the port sorts.
+#
+# Five conditions, and each one is a regression class the entry must not
+# reach:
+#
+#   * the exit status matches. Reordering output changes nothing else.
+#   * the case runs `env`, `printenv` or `alias`. `export -p` and `set`
+#     are deliberately *not* in that list even though they print
+#     variables: dash already `qsort`s them in `showvars`, so both shells
+#     print those sorted and always did. A permutation there is a
+#     regression, and an entry naming them could excuse it.
+#   * the two outputs hold the same lines, so a changed value, a dropped
+#     line, an extra line or a duplicate still fails.
+#   * only assignment-shaped lines moved, so a reordering of anything else
+#     -- a diagnostic racing stdout, an `od` dump -- is not this.
+#   * the port's blocks of those lines are sorted. Without this the entry
+#     would excuse any environment order at all.
+#
+# Known limit, and the reason it is acceptable: the sortedness test reads
+# each maximal run of assignment-shaped lines as one block, so a case that
+# printed two environments back to back with nothing between them would be
+# refused and reported as a failure. Nothing in `tests/corpus` does, and
+# for an entry whose job is to not excuse too much, a loud refusal is the
+# right way to be wrong. `tests/harness/divtest.sh` pins it so it cannot
+# drift silently.
+dsdiv_sorted_tables() {
+	[ "$3" = "$4" ] || return 1
+	ds_case_matches "$5" '(^|[;&|(`{ ])(env|printenv|alias)([ ;&|)`}]|$)' || return 1
+	ds_same_lines "$1" "$2" || return 1
+	ds_moved_lines_match "$1" "$2" "$DS_ORDERED_LINE" || return 1
+	ds_blocks_sorted "$2" "$DS_ORDERED_LINE"
+}
+
+# An extra register, for testing the machinery itself. It was written
+# because the mechanism had to be exercisable end to end while the real
+# register was still empty -- otherwise the first thing to prove the XFAIL
+# path worked would have been the first real divergence, which is
+# precisely the moment to already trust it. It stays useful for the same
+# reason in reverse: a hypothetical entry can be tried against a corpus
+# without being registered.
 if [ -n "${DS_DIVERGENCES_FILE:-}" ] && [ -r "${DS_DIVERGENCES_FILE}" ]; then
 	. "${DS_DIVERGENCES_FILE}"
 fi

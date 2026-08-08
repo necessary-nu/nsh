@@ -61,7 +61,7 @@ divergence is a claim about *behaviour*, and the only honest way to say
 inspect both sides. A glob over case names would excuse whatever else
 those cases happened to break.
 
-**The one rule: an entry must not be able to match a regression.** Two
+**The one rule: an entry must not be able to match a regression.** Three
 habits keep that true, and `tests/harness/divtest.sh` enforces them by
 asserting refusals rather than matches — a changed value, a dropped line,
 an extra line, a duplicate, a differing exit status, a case outside the
@@ -71,8 +71,17 @@ feature:
     requires equality, so it says "the same lines in a different order".
     Dropping the lines would say "anything at all", which is not a
     divergence, it is a blind spot.
-  * *Scope to the feature.* An entry about `export -p` ordering has no
-    business excusing a case that never runs `export -p`.
+  * *Scope to the feature.* An entry about `env` ordering has no business
+    excusing a case that never runs `env`. Scope to what actually
+    diverges, too: the first entry does not name `export -p` or `set`,
+    because both already print sorted on both shells, so a permutation
+    there could only be a regression.
+  * *Say which side is right.* "The same lines in a different order"
+    excuses *every* order, including a future one that is neither the
+    reference's nor the intended one. An ordering entry also asserts the
+    order — `ds_blocks_sorted` — and which lines were allowed to move —
+    `ds_moved_lines_match`. Between them they turn "they differ somehow"
+    into a claim that can be false.
 
 ## Register
 
@@ -142,36 +151,88 @@ contents record.
 An upstream fix would be welcome and is not blocked by anything here; it
 just is not a precondition. See [dec:nsh:we-own-the-defects].
 
-### `env`, `export -p`, `set` and `alias` print in sorted order
+### `env` and `alias` print in sorted order
 
-**Status:** decided, blocked on the sanctioned-divergence mechanism.
-Category 3.
+**Status:** fixed in the Rust; dash unchanged. Category 3. Registered as
+`sorted_tables` in `tests/harness/divergences.sh` -- the register's first
+real entry.
 
 dash keeps variables and aliases in 39-bucket chained hash tables and
-walks the buckets to produce output. `var.rs:640-675 listvars` is what
-builds `execve`'s `envp`, so the walk order is what `env`, `export -p`
-and a bare `set` print; `alias.rs` does the same for `alias`. The hash is
+walks the buckets to produce output. `var.rs listvars` is what builds
+`execve`'s `envp`, so the walk order is the environment every child sees;
+`alias.rs aliascmd` walks the buckets to print. The hash is
 `(first_byte << 4)` plus the sum of the bytes, which puts
 `export AA=1 BB=2 CC=3 DD=4 EE=5 FF=6` on the wire as
 `AA FF DD BB EE CC` -- neither sorted nor insertion order, just an
 artefact of a weak hash over a prime bucket count.
 
-The port becomes `BTreeMap` and prints sorted.
+`vartab` and `atab` are `BTreeMap`s keyed by name now, so both print
+sorted. Upstream wants the second half of that: `alias.c` has carried a
+one-line request for sorted output above `aliascmd` since the NetBSD
+import.
 
-POSIX specifies neither ordering, so nothing here is a conformance
-question. What the order has is a differential harness that pins it, and
-keeping a weak hash's bucket walk forever so that a number stays green is
-the tail wagging the dog.
+**The heading used to name four builtins, and two of them were wrong.**
+`export -p` and a bare `set` both go through `showvars`, and `showvars`
+already `qsort`s with `vpcmp` before printing -- the C comment above it
+says so, and wishes out loud for "an ordered balanced binary tree instead
+of hashed lists". So those two printed sorted on both shells before this
+change and print sorted on both after it; the only observable difference
+is `env` (and anything else that reads `environ`, such as `printenv`) and
+a bare `alias`. Measured, not assumed:
 
-Thirty corpus files observe it -- ten with a bare `env`, ten with
-`export -p` or a bare `set`, ten with a bare `alias` -- which is why the
-register had to exist first. It now does; this will be its first entry,
-written in the same change that makes the shell sort, since an excuse
-registered before the behaviour it excuses is an excuse waiting to be
-misapplied.
+```
+$ env -i sh -c 'export AA=1 BB=2 CC=3 DD=4 EE=5 FF=6; env'
+dash: AA FF DD BB EE CC        port: AA BB CC DD EE FF
+$ env -i sh -c 'alias AA=1 BB=2 CC=3 DD=4 EE=5 FF=6; alias'
+dash: AA FF DD BB EE CC        port: AA BB CC DD EE FF
+$ env -i sh -c 'export AA=1 BB=2 CC=3 DD=4 EE=5 FF=6; export -p'
+both: AA BB CC DD EE FF
+```
 
-Upstream wants the same thing, for what it is worth: `alias.c` carries
-its own `/* TODO - sort output */`.
+What is left of the four-builtin claim is that `set`'s order stops
+depending on a sort at print time and starts being a property of the
+container, which is the arrangement POSIX's "lexicographic order"
+requirement wants. Neither shell honours the *locale's* collating order
+that the requirement actually names: dash's `varcmp` compares bytes, and
+so does a `BStr` key. That gap is unchanged and still owed.
+
+POSIX specifies no ordering for `env` or `alias`, so nothing here is a
+conformance question. What the order had was a differential harness that
+pinned it, and keeping a weak hash's bucket walk forever so that a number
+stays green is the tail wagging the dog.
+
+**What the corpus actually observes.** One case, in
+`tests/corpus/aud_state_var.txt`:
+
+```
+export XV=1 YV=2; echo "$XV$YV"; env | grep -E '^(XV|YV)='
+```
+
+`aud_state_gen3` runs `env` forty-odd times and every one of them is
+`env | grep -c '^NAME='`, which counts rather than lists; the `alias`
+cases print one alias, or none after `unalias -a`. So the sweep goes
+`XFAIL=1`, not the thirty this section used to predict.
+
+**What the entry refuses.** Five conditions, each one a regression class
+the entry must not be able to reach: the exit status must match; the case
+must run `env`, `printenv` or `alias`; the two outputs must hold the same
+lines, so a changed value, a dropped line, an extra line or a duplicate
+still fails; only assignment-shaped lines may have moved, so a
+diagnostic that raced stdout is not this; and the port's blocks of those
+lines must be *sorted*, without which the entry would excuse any
+environment order at all rather than this one.
+
+`export -p` and `set` are deliberately absent from the scoping pattern
+even though the old heading named them. Both already print sorted on both
+shells, so a permutation there could only be a regression, and an entry
+listing them could excuse it.
+
+It has one known limit, pinned by a `divtest.sh` case so it cannot drift:
+the sortedness test reads each maximal run of assignment-shaped lines as
+one block, so a case printing two environments back to back with nothing
+between them would be refused and reported as a failure rather than an
+`XFAIL`. Nothing in the corpus does. For an entry whose job is to not
+excuse too much, that is the right way to be wrong.
 
 ## Candidates not yet decided
 

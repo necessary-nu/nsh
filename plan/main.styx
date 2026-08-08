@@ -2059,12 +2059,20 @@ children (
                         title "Delete dead code: gen/, show.rs, and the 20 uncalled system.rs wrappers"
                         priority 0
                         kind @refactor
+                        sealed true
                         log (
                             {
                                 at 2026-08-08T08:49:20.61098823Z
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-08T10:58:15.738053128Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Done (nplan complete)"
                             }
                         )
                     }
@@ -2144,12 +2152,20 @@ children (
                 title "Design the public API: Shell, Error taxonomy, and what run() means when called twice"
                 priority 0
                 kind @docs
+                sealed true
                 log (
                     {
                         at 2026-08-08T08:50:26.111500849Z
                         author "brendan@necessary.nu"
                         kind @status
                         text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-08T10:58:17.762829462Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Done (nplan complete)"
                     }
                 )
             }
@@ -2168,6 +2184,29 @@ children (
                 priority 0
                 kind @feat
                 deps (no-ambient-state host-owns-signals public-api-design)
+            }
+
+            {
+                id sorted-tables
+                title "env and alias print sorted: BTreeMap tables, and the register's first entry"
+                priority 0
+                kind @fix
+                deps (sanctioned-divergences)
+                log (
+                    {
+                        at 2026-08-08T11:44:42.574884968Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-08T11:57:04.358106034Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "The title named four builtins and two of them were wrong. `export -p` and a bare `set` both print through `showvars`, which already `qsort`s with `vpcmp` before printing, so both shells printed those sorted before this change and print them sorted after it. Only `env` -- anything that reads `environ`, since `listvars` builds `execve`'s `envp` -- and a bare `alias` change. Measured on both binaries before touching anything. The register entry is scoped to `env`, `printenv` and `alias` for the same reason: naming `export -p` or `set` would let it excuse a permutation that could only be a regression.\n\nThe corpus observes it once, not thirty times: `aud_state_var.txt`'s `export XV=1 YV=2; echo \"$XV$YV\"; env | grep -E '^(XV|YV)='`. The forty-odd `env` cases in `aud_state_gen3` are all `env | grep -c '^NAME='`, which counts rather than lists, and the `alias` cases print one alias or none.\n\nFive C symbols lost their target counterpart -- `hashval`, `hashvar`, `varcmp`, `varequal`, `vpcmp` -- since all five existed only to serve the hash table. Retired with the transaction `delete-gen` established: marker lines out of `docs/spec/port/src/var.md` with every word of prose kept, entries out of `plan/annotations.styx` and `plan/.port-manifest.styx`. Spec coverage 460/460 to 455/455."
+                    }
+                )
             }
         )
     }
