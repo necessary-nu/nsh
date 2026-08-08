@@ -14,6 +14,25 @@ OUT=$ROOT/tests/.build/fail
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
+# Pin once for the whole run, not once per corpus.
+#
+# `dsdiff.sh` hard-links the two shells so a rebuild cannot move the
+# binary out from under a running sweep. That protects one corpus. This
+# script invokes it 113 times, so a rebuild between corpora silently
+# swaps the binary mid-run and the tally covers two different shells --
+# an hour of work that reads as one result and is not. Pinning here and
+# exporting the paths makes the whole sweep one shell, and dsdiff's own
+# pin of an already-pinned path is a second hard link to the same inode.
+RUNPIN=$ROOT/tests/.build/runpin.$$
+mkdir -p "$RUNPIN"
+trap 'rm -rf "$RUNPIN"' EXIT
+for pair in "port:${PORT:-$ROOT/target/debug/nsh}" "ref:${REF:-$ROOT/tests/.build/ref/src/dash}"; do
+	src=${pair#*:}
+	[ -x "$src" ] || { echo "no ${pair%%:*} binary at $src" >&2; exit 2; }
+	ln "$src" "$RUNPIN/${pair%%:*}" 2>/dev/null || cp "$src" "$RUNPIN/${pair%%:*}" || exit 2
+done
+export PORT=$RUNPIN/port REF=$RUNPIN/ref
+
 total_pass=0 total_fail=0 total_flaky=0 total_xfail=0 bad=0
 
 for corpus in "$ROOT"/tests/corpus/*.txt; do
