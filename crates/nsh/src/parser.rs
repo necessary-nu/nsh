@@ -628,13 +628,13 @@ unsafe fn command() -> Option<Node> {
         }
         /* the C stores `wordtext` into the node here, before any further
          * token read can overwrite it */
-        let var = NodeText::Borrowed(wordtext);
+        let var = NodeText::from_ptr(wordtext);
         let mut args: Vec<Node> = Vec::new();
         checkkwd = CHKNL | CHKKWD | CHKALIAS;
         if readtoken() == TIN {
             while readtoken() == TWORD {
                 args.push(Node::Arg(narg {
-                    text: NodeText::Borrowed(wordtext),
+                    text: NodeText::from_ptr(wordtext),
                     backquote: takeglobal(addr_of_mut!(backquotelist)),
                 }));
             }
@@ -643,9 +643,7 @@ unsafe fn command() -> Option<Node> {
             }
         } else {
             args.push(Node::Arg(narg {
-                text: NodeText::Borrowed(
-                    ptr::addr_of!(crate::mystring::dolatstr) as *const c_char as *mut c_char,
-                ),
+                text: NodeText::from_ptr(ptr::addr_of!(crate::mystring::dolatstr) as *const c_char),
                 backquote: Vec::new(),
             }));
             /*
@@ -673,7 +671,7 @@ unsafe fn command() -> Option<Node> {
             synexpect(TWORD);
         }
         let expr = Node::Arg(narg {
-            text: NodeText::Borrowed(wordtext),
+            text: NodeText::from_ptr(wordtext),
             backquote: takeglobal(addr_of_mut!(backquotelist)),
         });
         checkkwd = CHKNL | CHKKWD | CHKALIAS;
@@ -694,7 +692,7 @@ unsafe fn command() -> Option<Node> {
                         synexpect(TWORD);
                     }
                     pattern.push(Node::Arg(narg {
-                        text: NodeText::Borrowed(wordtext),
+                        text: NodeText::from_ptr(wordtext),
                         backquote: takeglobal(addr_of_mut!(backquotelist)),
                     }));
                     if readtoken() != TPIPE {
@@ -799,7 +797,7 @@ unsafe fn simplecmd() -> Option<Node> {
         let tok = readtoken();
         if tok == TWORD {
             let n = Node::Arg(narg {
-                text: NodeText::Borrowed(wordtext),
+                text: NodeText::from_ptr(wordtext),
                 backquote: takeglobal(addr_of_mut!(backquotelist)),
             });
             if savecheckkwd != 0 && isassignment(wordtext) != 0 {
@@ -866,7 +864,7 @@ unsafe fn simplecmd() -> Option<Node> {
 // [spec:dash:sem:parser.makename-fn]
 unsafe fn makename() -> Node {
     Node::Arg(narg {
-        text: NodeText::Borrowed(wordtext),
+        text: NodeText::from_ptr(wordtext),
         backquote: takeglobal(addr_of_mut!(backquotelist)),
     })
 }
@@ -957,7 +955,7 @@ unsafe fn parseheredoc() {
             );
         }
         let n = Node::Arg(narg {
-            text: NodeText::Borrowed(wordtext),
+            text: NodeText::from_ptr(wordtext),
             backquote: takeglobal(addr_of_mut!(backquotelist)),
         });
         /* `here->here->nhere.doc = n` in the C — the same slot, reached
@@ -2261,7 +2259,7 @@ pub unsafe fn expandstr(ps: *const c_char) -> *const c_char {
         readtoken1(pgetc_eatbnl(), DQSYNTAX(), FAKEEOFMARK(), 0);
 
         let n = Node::Arg(narg {
-            text: NodeText::Borrowed(wordtext),
+            text: NodeText::from_ptr(wordtext),
             backquote: takeglobal(addr_of_mut!(backquotelist)),
         });
 

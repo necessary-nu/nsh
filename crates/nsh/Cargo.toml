@@ -10,5 +10,6 @@ name = "nsh"
 path = "src/lib.rs"
 
 [dependencies]
+bstr = "1"
 libc = "0.2"
 nshedit = { git = "ssh://git@github.com/necessary-nu/nshedit.git", branch = "main" }

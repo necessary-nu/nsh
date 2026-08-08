@@ -28,10 +28,12 @@
 //!     it) and `ndup.dupfd` are filled in by `expredir` on a tree that may
 //!     be a shared function definition. They are `Cell`s.
 //!
-//! Strings are still the C's `char *` into the stack allocator, wrapped in
-//! [`NodeText`] only so that `copyfunc` can take the copy the C took with
-//! `nodesavestr`. Converting them properly is a later slice of
-//! [dec:nsh:owned-data], and [dec:nsh:bytes-not-text] says what they become.
+//! A word's text is an owned [`NodeText`], which is a `BString` carrying the
+//! parser's trailing NUL ([dec:nsh:bytes-not-text]). The C kept a `char *`
+//! into the stack allocator and `copyfunc` called `nodesavestr` on every one
+//! of them; owning the bytes at parse time makes that copy the ordinary
+//! `Clone` and removes the distinction between a tree the allocator still
+//! backs and a tree that outlived its mark.
 //!
 //! `crate::gen::mknodes` is untouched: it is the port of the generator that
 //! still emits the C the reference build compiles. It no longer describes
@@ -41,6 +43,7 @@ use core::cell::{Cell, OnceCell, RefCell};
 use core::ptr;
 use std::rc::Rc;
 
+use bstr::{BStr, BString};
 use libc::{c_char, c_int};
 
 // ---- node types (positional in src/nodetypes) ------------------------
@@ -115,49 +118,43 @@ pub type heredoc_body = Rc<OnceCell<Node>>;
 
 /// The text of a word, a `for` variable or a function name.
 ///
-/// The C stores a bare `char *` that points into the stack allocator, and
-/// that is what a freshly parsed tree still holds here. It works because the
-/// tree and the text die together, at the `popstackmark` that ends the
-/// command.
+/// The C stores a bare `char *` into the stack allocator, which works only
+/// because the tree and the text die together at the `popstackmark` that ends
+/// the command. `copyfunc` is where they do not: a function definition
+/// outlives the mark its text was parsed under, so `copynode` copied the
+/// *bytes* — `funcstringsize` measured them and `nodesavestr` wrote them.
 ///
-/// `copyfunc` is the one place where they do not die together: a function
-/// definition outlives the mark its text was parsed under. So `copynode` did
-/// not copy the pointer, it copied the *bytes* — that is what
-/// `funcstringsize` measured and `nodesavestr` wrote. Cloning a node
-/// therefore has to take ownership of the text, and this is the type that
-/// says so.
+/// Here the bytes are owned from the moment the parser produces them, so both
+/// cases are the same case and `Clone` is derived.
 ///
-/// The owned arm becomes a `BString` when [dec:nsh:bytes-not-text]'s slice
-/// lands; the borrowed arm goes when the stack allocator does.
-pub enum NodeText {
-    /// into the stack allocator, valid until the enclosing mark pops
-    Borrowed(*mut c_char),
-    /// a copy of the bytes, NUL included — what `nodesavestr` produced
-    Owned(Box<[u8]>),
-}
+/// The trailing NUL the parser wrote is *part of the value*: `as_ptr` hands
+/// the bytes to the `char *` readers that are still C-shaped, and `as_bstr`
+/// hides it from the ones that are not.
+#[derive(Clone)]
+pub struct NodeText(BString);
 
 impl NodeText {
+    /// Copy a NUL-terminated C string, NUL included.
+    ///
+    /// # Safety
+    /// `p` must point at a NUL-terminated string.
+    pub unsafe fn from_ptr(p: *const c_char) -> NodeText {
+        let len = libc::strlen(p);
+        NodeText(BString::from(core::slice::from_raw_parts(
+            p as *const u8,
+            len + 1,
+        )))
+    }
+
     /// The C's `char *`. Callers only read through it; nothing in the shell
     /// writes a word's text after the parser has built the node.
     pub fn as_ptr(&self) -> *mut c_char {
-        match self {
-            NodeText::Borrowed(p) => *p,
-            NodeText::Owned(b) => b.as_ptr() as *mut c_char,
-        }
+        self.0.as_ptr() as *mut c_char
     }
-}
 
-impl Clone for NodeText {
-    /// `nodesavestr`: copy the bytes, never the pointer.
-    fn clone(&self) -> NodeText {
-        let p = self.as_ptr();
-        unsafe {
-            let len = libc::strlen(p);
-            let mut v: Vec<u8> = Vec::with_capacity(len + 1);
-            ptr::copy_nonoverlapping(p as *const u8, v.as_mut_ptr(), len + 1);
-            v.set_len(len + 1);
-            NodeText::Owned(v.into_boxed_slice())
-        }
+    /// The text without its terminating NUL.
+    pub fn as_bstr(&self) -> &BStr {
+        BStr::new(&self.0[..self.0.len() - 1])
     }
 }
 
