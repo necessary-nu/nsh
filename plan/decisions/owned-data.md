@@ -19,7 +19,7 @@ alternatives (
 )
 consequences {
     accepted (
-        "`crates/dash/src/memalloc.rs` is deleted, not rewritten. 384 call sites across 24 files go with it."
+        "`crates/nsh/src/memalloc.rs` is deleted, not rewritten. 384 call sites across 24 files go with it."
         "Roughly 90 libc string calls -- `strlen`, `strcmp`, `strchr`, `strcpy`, `strspn` -- disappear as a consequence rather than as work, because they only exist to operate on `*mut c_char`."
         "`union node` becomes an owned Rust enum. `calcsize`, `copynode`, `nodesize[]`, `funcblocksize` and `funcstring` -- the manual deep-copy-into-one-block that `copyfunc` performs -- are replaced by `Rc<Node>` and a derived `Clone`."
         "[dec:nsh:minimal-unsafe] mostly falls out of this rather than being separate work."

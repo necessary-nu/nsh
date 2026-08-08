@@ -2048,7 +2048,7 @@ children (
 
                     {
                         id delete-gen
-                        title "Decide the fate of the build-time generators and remove what is dead"
+                        title "Delete dead code: gen/, show.rs, and the 20 uncalled system.rs wrappers"
                         priority 0
                         kind @refactor
                     }
@@ -2057,7 +2057,7 @@ children (
 
             {
                 id sanctioned-divergences
-                title "Teach dsdiff.sh the sanctioned-divergence register so FAIL=0 stays legible"
+                title "Make the differential tally mean what it says: sanctioned divergences, and a dead harness that reports as one"
                 priority 0
                 kind @test
             }
@@ -2067,6 +2067,14 @@ children (
                 title "Rename the crate to nsh and split the frontend into nsh-cli"
                 priority 0
                 kind @refactor
+                log (
+                    {
+                        at 2026-08-07T14:04:44.997768512Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+                )
             }
 
             {

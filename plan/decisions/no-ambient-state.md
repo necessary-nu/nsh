@@ -23,6 +23,7 @@ alternatives (
 )
 consequences {
     accepted (
+        "**Independence stops at the C library's own globals, and that is not refactorable.** `var.rs:103-106 changelocale` calls `putenv` then `setlocale(LC_ALL, \"\")`, and the locale is process-global -- so one `Shell` assigning `LC_COLLATE` changes how another sorts a glob, however cleanly this crate's state is separated. `strtok` (`cd.rs:218,237`) and `getopt` with `optind = 0` (`histedit.rs`) are the same shape, and none of the three is counted by a `static mut` audit because the static is in libc. Recorded as a limit rather than left for an embedder to find; escaping it means not calling those functions at all, which is a larger question than this decision."
         "Nearly every function in the crate changes shape. This is the largest single piece of wave 4."
         "The unit tests' `testutil::lock()` becomes unnecessary: tests serialise today only because the state is shared."
     )

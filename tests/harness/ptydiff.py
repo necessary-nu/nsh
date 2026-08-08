@@ -28,7 +28,7 @@ import time
 
 ROOT = os.environ.get("DASH_ROOT") or os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 REF = os.environ.get("REF", f"{ROOT}/tests/.build/ref/src/dash")
-PORT = os.environ.get("PORT", f"{ROOT}/target/debug/dash")
+PORT = os.environ.get("PORT", f"{ROOT}/target/debug/nsh")
 SANDBOX = os.environ.get("DS_SANDBOX", "sandbox")
 
 

@@ -13,7 +13,7 @@ consequences {
         "Redirection and `exec` still manipulate real descriptors: those are the shell language's semantics, not the library's I/O policy, and they stay."
         "There are two ways to be given streams, because embedders have opposite constraints. `install` lends the shell descriptors 0, 1 and 2 and restores the host's afterwards: full fidelity, since within the shell's execution environment the standard descriptors really are standard. `set` moves only the shell's own I/O, for a host that cannot have `dup2` called on its descriptor 1 at all."
     )
-    deferred ("Under `set`, the shell's own writes follow but the language's descriptor numbers do not: `echo hi` reaches the supplied stream, `echo hi >file` and every external command still mean the process's descriptor 1. Making those agree needs a per-instance descriptor table, which cannot be built while the shell keeps its state in statics -- it lands with [dec:nsh:no-ambient-state]. `crates/dash/tests/streams_embed.rs` pins the limit as a test rather than leaving it as a claim.")
+    deferred ("Under `set`, the shell's own writes follow but the language's descriptor numbers do not: `echo hi` reaches the supplied stream, `echo hi >file` and every external command still mean the process's descriptor 1. Making those agree needs a per-instance descriptor table, which cannot be built while the shell keeps its state in statics -- it lands with [dec:nsh:no-ambient-state]. `crates/nsh/tests/streams_embed.rs` pins the limit as a test rather than leaving it as a claim.")
 }
 edges {
     requires ([dec:nsh:shell-as-library])
@@ -40,7 +40,7 @@ bug that made the editor read fd -1 and exit before a key was pressed.
 
 ## What this cost in the port
 
-`crates/dash/src/streams.rs` is the whole of the mechanism, and the rest
+`crates/nsh/src/streams.rs` is the whole of the mechanism, and the rest
 was finding the places where the C's `0`, `1` and `2` were load bearing
 in a way a rename would have missed. Three were not simple substitutions:
 

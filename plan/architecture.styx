@@ -13,7 +13,7 @@ elements (
         name "The shell, as a library"
         kind @subsystem
         lifecycle @provisional
-        exposes ("crates/dash/src/lib.rs" "crates/dash/src/streams.rs")
+        exposes ("crates/nsh/src/lib.rs" "crates/nsh/src/streams.rs")
         depends_on ([arch:nsh:line-editor])
         decisions ([dec:nsh:shell-as-library] [dec:nsh:no-ambient-state]
                    [dec:nsh:errors-are-values] [dec:nsh:host-owns-signals]
@@ -42,7 +42,7 @@ elements (
         // anything it needs that is not public stops compiling. That is
         // the only mechanism that makes [dec:nsh:shell-as-library]
         // checkable -- see [dec:nsh:public-surface].
-        exposes ("crates/dash/src/main.rs")
+        exposes ("crates/nsh-cli/src/main.rs")
         depends_on ([arch:nsh:shell-core])
         decisions ([dec:nsh:shell-as-library] [dec:nsh:host-owns-signals]
                    [dec:nsh:host-owns-streams] [dec:nsh:public-surface])
@@ -62,7 +62,7 @@ elements (
         // The seam onto nshedit. `histedit.c` is written against libedit's C
         // API, so `crate::histedit::libedit` keeps that shape and `linedit.rs`
         // is the whole of what binds it to an implementation.
-        exposes ("crates/dash/src/linedit.rs")
+        exposes ("crates/nsh/src/linedit.rs")
         log (
             {at "2026-08-07T00:00:00Z", kind @established, by "[dec:nsh:shell-as-library]"}
         )

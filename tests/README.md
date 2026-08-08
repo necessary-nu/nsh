@@ -24,7 +24,7 @@ which meant a tmp sweep would have erased every case backing the port.
 only for corpora that actually failed.
 
 `PORT`, `REF` and `DASH_ROOT` override the defaults, which are
-`target/debug/dash` and `tests/.build/ref/src/dash` relative to the repo.
+`target/debug/nsh` and `tests/.build/ref/src/dash` relative to the repo.
 
 ## Containment — read this before adding cases
 
@@ -84,7 +84,7 @@ And once in the other direction — it reported divergences that were not
 there. dash prints `argv[0]` in every diagnostic, so a case that renders
 its own stderr (`2>&1 | od -c`, all over the printf corpora) embeds the
 path to the shell, one byte per `od` column, where the path-normalising
-`sed` cannot reach it. `.../ref/src/dash` against `.../target/debug/dash`
+`sed` cannot reach it. `.../ref/src/dash` against `.../target/debug/nsh`
 was 3002 "failures" in `aud_bltin_printffuzz` alone. Both shells now run
 sequentially in the same directory and are invoked through the same
 `.bin/sh` symlink, so `argv[0]`, `$0` and `$PWD` are identical by

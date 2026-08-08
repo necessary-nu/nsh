@@ -123,7 +123,7 @@ fn main() {
     std::panic::set_hook(Box::new(move |info| {
         if info
             .payload()
-            .downcast_ref::<dash::error::Longjmp>()
+            .downcast_ref::<nsh::error::Longjmp>()
             .is_some()
         {
             return;
@@ -148,9 +148,9 @@ fn main() {
     // The frontend is the thing entitled to the process's standard
     // descriptors, so it hands them to the shell explicitly rather than
     // letting the shell assume them. See [dec:nsh:host-owns-streams].
-    dash::shellmain::main_fn(
+    nsh::shellmain::main_fn(
         argv.len() as libc::c_int,
         argv,
-        dash::streams::Streams::INHERIT,
+        nsh::streams::Streams::INHERIT,
     );
 }

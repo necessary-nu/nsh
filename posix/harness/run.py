@@ -54,7 +54,7 @@ def _parser() -> argparse.ArgumentParser:
         "--shell",
         type=_path,
         default=(PROJECT_ROOT / "target" / "debug" / "dash").resolve(),
-        help="shell under test (default: target/debug/dash)",
+        help="shell under test (default: target/debug/nsh)",
     )
     parser.add_argument(
         "--reference",

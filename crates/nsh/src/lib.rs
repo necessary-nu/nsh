@@ -1,14 +1,22 @@
-//! dash — Debian Almquist Shell, Rust port.
+//! nsh — a POSIX shell as a library.
 //!
-//! This is a **literal port**: every module mirrors the C source
-//! file of the same name, function for function, with the same control
-//! flow and the same names. It is deliberately un-idiomatic and
-//! deliberately bug-for-bug — idiomatisation comes later, and behaviour changes
-//! (including bug fixes) come after the port is proven green.
+//! Today this is still the literal port of dash 0.5.13.5 it began as:
+//! every module mirrors the C source file of the same name, function for
+//! function, with the same control flow and the same names. Each item
+//! carries the `[spec:dash:def:…]` / `[spec:dash:sem:…]` annotations of
+//! the rule it implements; the corresponding claims for the C source
+//! live in `plan/annotations.styx`.
 //!
-//! Each item carries the `[spec:dash:def:…]` / `[spec:dash:sem:…]`
-//! annotations of the rule it implements; the corresponding claims for
-//! the C source live in `plan/annotations.styx`.
+//! It is not a library yet in any sense but Cargo's. Thirty-five public
+//! modules is not an API, it is the transliteration left open — see
+//! [dec:nsh:public-surface]. `docs/idiomatization.md` is the path from
+//! here to a surface an embedder can hold, and the properties that decide
+//! when it has arrived.
+//!
+//! The command-line shell lives in `crates/nsh-cli` and links this crate
+//! as an external dependency, so anything the frontend needs that is not
+//! `pub` here is a compile error rather than something a reader has to
+//! notice.
 
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]

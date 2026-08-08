@@ -10,7 +10,7 @@
 //! this -- so a test that called it in process would take the test runner
 //! with it.
 
-use dash::streams::{self, Streams};
+use nsh::streams::{self, Streams};
 use std::io::Read;
 use std::os::unix::io::FromRawFd;
 
@@ -42,13 +42,13 @@ fn run_shell(script: &str, prepare: impl FnOnce()) -> i32 {
             // shell's, not the runtime's.
             let default_hook = std::panic::take_hook();
             std::panic::set_hook(Box::new(move |info| {
-                if info.payload().downcast_ref::<dash::error::Longjmp>().is_some() {
+                if info.payload().downcast_ref::<nsh::error::Longjmp>().is_some() {
                     return;
                 }
                 default_hook(info);
             }));
             prepare();
-            dash::shellmain::main_fn(argv.len() as libc::c_int, argv, streams::streams());
+            nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, streams::streams());
         }
         let mut status = 0i32;
         assert_eq!(libc::waitpid(pid, &mut status, 0), pid);
@@ -158,7 +158,7 @@ fn the_shell_reads_a_script_from_the_stream_it_was_given() {
             })
             .expect("install");
             core::mem::forget(lent); // see the note in the test above
-            dash::shellmain::main_fn(argv.len() as libc::c_int, argv, Streams::INHERIT);
+            nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, Streams::INHERIT);
         }
         let mut status = 0i32;
         libc::waitpid(pid, &mut status, 0);

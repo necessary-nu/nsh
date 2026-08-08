@@ -1,6 +1,6 @@
 # What the libedit port had to make true — closed
 
-`crates/dash/src/linedit.rs` now binds `nshedit`, the Rust
+`crates/nsh/src/linedit.rs` now binds `nshedit`, the Rust
 re-implementation of libedit, in place of the rustyline stand-in this
 file was written against. The gap it measured is closed.
 
@@ -36,5 +36,5 @@ reading code:
 Kept as the record of what the swap cost and how each failure was
 caught. The live acceptance check is one command:
 
-    posix/harness/run.py --shell target/debug/dash \
+    posix/harness/run.py --shell target/debug/nsh \
         --reference tests/.build/ref/src/dash

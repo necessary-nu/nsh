@@ -67,7 +67,7 @@ is not descriptor 1, an error that returns instead of unwinding, a
 signal the host owns. There is no version of the differential harness
 that covers those, because dash cannot do them and there is nothing to
 compare against. So each step owes its own test, and
-`crates/dash/tests/streams_embed.rs` is the pattern -- four cases that
+`crates/nsh/tests/streams_embed.rs` is the pattern -- four cases that
 exist precisely because the 61,498 cannot see what they check.
 
 **Its verdict is whole-shell.** A failure names the case, not the

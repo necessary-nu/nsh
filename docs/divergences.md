@@ -121,6 +121,34 @@ contents record.
 An upstream fix would be welcome and is not blocked by anything here; it
 just is not a precondition. See [dec:nsh:we-own-the-defects].
 
+### `env`, `export -p`, `set` and `alias` print in sorted order
+
+**Status:** decided, blocked on the sanctioned-divergence mechanism.
+Category 3.
+
+dash keeps variables and aliases in 39-bucket chained hash tables and
+walks the buckets to produce output. `var.rs:640-675 listvars` is what
+builds `execve`'s `envp`, so the walk order is what `env`, `export -p`
+and a bare `set` print; `alias.rs` does the same for `alias`. The hash is
+`(first_byte << 4)` plus the sum of the bytes, which puts
+`export AA=1 BB=2 CC=3 DD=4 EE=5 FF=6` on the wire as
+`AA FF DD BB EE CC` -- neither sorted nor insertion order, just an
+artefact of a weak hash over a prime bucket count.
+
+The port becomes `BTreeMap` and prints sorted.
+
+POSIX specifies neither ordering, so nothing here is a conformance
+question. What the order has is a differential harness that pins it, and
+keeping a weak hash's bucket walk forever so that a number stays green is
+the tail wagging the dog.
+
+Thirty corpus files observe it -- ten with a bare `env`, ten with
+`export -p` or a bare `set`, ten with a bare `alias` -- so this is the
+first divergence that cannot land under the constraint above. It waits
+for `dsdiff.sh` to learn this register. That ordering is deliberate: a
+mechanism built with no customer is usually the wrong mechanism, and this
+one arrives with thirty cases and three built-ins to be right about.
+
 ## Candidates not yet decided
 
 ### The port is *more* conformant than dash in two line-editing cases

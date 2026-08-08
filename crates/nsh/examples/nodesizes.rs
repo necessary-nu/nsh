@@ -1,6 +1,6 @@
 //! Temporary check: print SHELL_ALIGN(size_of) for every node struct so it
 //! can be diffed against the C. Not part of the shell.
-use dash::nodes::*;
+use nsh::nodes::*;
 const fn align(n: usize) -> usize { (n + 7) & !7 }
 macro_rules! p { ($t:ty, $n:expr) => { println!("{} {}", $n, align(core::mem::size_of::<$t>())) } }
 fn main() {

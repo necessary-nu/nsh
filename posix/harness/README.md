@@ -27,7 +27,7 @@ Build the Rust port, then run:
 
 ```sh
 cargo build
-python3 posix/harness/run.py --shell target/debug/dash
+python3 posix/harness/run.py --shell target/debug/nsh
 ```
 
 The default exit status is non-zero if any normative case fails or encounters
@@ -38,7 +38,7 @@ Compare the port with another shell:
 
 ```sh
 python3 posix/harness/run.py \
-  --shell target/debug/dash \
+  --shell target/debug/nsh \
   --reference /path/to/c-dash
 ```
 

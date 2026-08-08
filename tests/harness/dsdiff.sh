@@ -27,7 +27,7 @@ set -u
 
 . "$(cd "$(dirname "$0")" && pwd)/sandboxed.sh"
 
-PORT=${PORT:-$ROOT/target/debug/dash}
+PORT=${PORT:-$ROOT/target/debug/nsh}
 REF=${REF:-$ROOT/tests/.build/ref/src/dash}
 CORPUS=${1:?usage: dsdiff.sh CORPUS [JOBS]}
 JOBS=${2:-8}

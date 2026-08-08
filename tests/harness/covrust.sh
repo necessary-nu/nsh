@@ -50,7 +50,7 @@ echo "building instrumented port..." >&2
 RUSTFLAGS="-C instrument-coverage --cfg coverage" \
 	CARGO_TARGET_DIR="$ROOT/tests/.build/cov-target" \
 	cargo build --manifest-path "$ROOT/Cargo.toml" >&2 || exit 1
-PORT=$ROOT/tests/.build/cov-target/debug/dash
+PORT=$ROOT/tests/.build/cov-target/debug/nsh
 
 # %p is the pid and %m the binary's signature: one profile per process,
 # which is the whole reason this works where gcov does not. The directory

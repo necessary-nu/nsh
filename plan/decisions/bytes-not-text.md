@@ -33,7 +33,7 @@ edges {
 ## Rationale
 
 The port already knows this in one place, and it was learned the hard
-way. `crates/dash/src/main.rs` collects argv as `Vec<Vec<u8>>` rather
+way. `crates/nsh-cli/src/main.rs` collects argv as `Vec<Vec<u8>>` rather
 than `Vec<String>` with a comment explaining why: `std::env::args()`
 unwraps a UTF-8 conversion and panics on any non-UTF-8 argument, so the
 port died with status 101 where the C ran normally. `dash -c $'x=\xff;

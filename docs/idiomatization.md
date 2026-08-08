@@ -273,8 +273,19 @@ target.
 | P6 | Bytes, not text | no `String`/`&str` in any signature carrying shell data; `bstr` is a dependency | `bstr` not yet a dependency | `BStr`/`BString` throughout |
 | P7 | Minimal unsafe | `unsafe fn` count; `#![deny(unsafe_op_in_unsafe_fn)]`; every `unsafe` block has `// SAFETY:` | 611 of 800 `fn` are `unsafe` (76%) | budget: syscall wrappers, the signal handler, redirection's fd work. Order 30, not 611. |
 | P8 | The library does not end the process | `libc::_exit\|process::exit\|libc::abort` in the library | 4 (`error.rs:217`, `trap.rs:475`, `redir.rs:393`, `shellmain.rs:287`) | 0 outside a forked child |
-| P9 | Re-entrant | two `Shell`s, one thread and two, pass the suite; `testutil::lock()` deleted | one shell per process, `lock()` required | both pass |
-| P10 | Publishable | no out-of-repo path deps; `cargo package` succeeds; lint allows removed | `nshedit` is `../../../../`; `lib.rs` has 6 blanket `allow`s including `clippy::all` and `dead_code` | clean |
+| P9 | Re-entrant | two `Shell`s, one thread and two, pass the suite; `testutil::lock()` deleted | one shell per process, `lock()` required | both pass, *except the locale* — see below |
+| P10 | Publishable | no unpublished deps; `cargo package` succeeds; lint allows removed | `nshedit` is a git dep (was a path four directories out); `lib.rs` has 6 blanket `allow`s including `clippy::all` and `dead_code` | clean |
+
+**P9 has a limit that cannot be refactored away.** `var.rs:103-106
+changelocale` calls `putenv` and then `setlocale(LC_ALL, "")`, and the C
+library's locale is process-global. One `Shell` assigning `LC_COLLATE`
+changes how another sorts a glob, however cleanly the rest of the state
+is separated. Two more libc globals are the same shape and are invisible
+to P1 because the static lives in libc rather than here: `strtok`
+(`cd.rs:218,237`) and `getopt` with `optind = 0` (`histedit.rs`). P9's
+honest target is "independent except for the C library's own globals",
+and the exceptions belong on [dec:nsh:no-ambient-state] as recorded
+limits rather than being discovered by an embedder.
 | P11 | The API is a surface, not the source | count of `pub` items reachable from `lib.rs`; `#![deny(missing_docs)]` | 35 `pub mod`, ~1,129 `pub` items | order 20 items, all documented |
 
 P11 is the one most obviously missing from the current four, and it is
@@ -492,8 +503,56 @@ struct with a flexible array member
 and it stores `Rc::into_raw` of the function node
 ([dec:nsh:owned-data] says so in prose). `var.rs`'s `vartab: [*mut var;
 VTABSIZE]` and `varinit: [var; 16]` are the same shape. Both are hash
-tables that want to be `HashMap<BString, _>`, and neither appears in the
-WBS.
+tables, and neither appears in the WBS.
+
+**Correction, from `docs/std-replacements.md` §4.1 and verified here: they
+do NOT want to be `HashMap<BString, _>`, and this was the most dangerous
+sentence in this document.** dash's bucket walk order is observable
+output. `var.rs:640-675 listvars` walks the 39 buckets and the result *is*
+`execve`'s `envp`, so it is what `env`, `export -p` and a bare `set`
+print. Measured against the C and the port together:
+
+```
+env -i sh -c 'export AA=1 BB=2 CC=3 DD=4 EE=5 FF=6; env'
+  -> AA FF DD BB PWD EE CC        both shells, byte-identical
+sh -c 'alias bb=1 zz=2 mm=3 aa=4; alias'
+  -> bb zz mm aa
+```
+
+Neither sorted nor insertion order. It is a hash table with a fixed,
+weak, seed-free hash --
+
+```c
+hashval = (*p << 4);  while (*p) { hashval += *p; if (p[1] == '=') break; }
+```
+
+first byte shifted left four, plus the sum of the bytes, modulo 39
+chained buckets. There is nothing deep here to preserve reverently.
+
+What that means for the refactor is narrower than "do not use a map".
+`std::HashMap` with a fixed hasher is deterministic -- the randomisation
+is `RandomState`, not hashing -- but it still will not reproduce *this*
+order, because hashbrown uses power-of-two capacity and open addressing,
+so 39 chained buckets iterate differently whatever the hash. The Rust
+equivalent is roughly forty lines: `Vec<Vec<(BString, V)>>`, 39 buckets,
+`hashval` carried over. Write those rather than reaching for `HashMap`
+and hoping.
+
+**Decided: the tables become `BTreeMap` and the order becomes sorted.**
+POSIX specifies neither `env`'s output order nor `export -p`'s, so this
+is unspecified behaviour that the differential harness happens to pin.
+Preserving it is a harness constraint, not a correctness one, and
+reproducing a weak hash's bucket walk forever to keep a number green is
+the tail wagging the dog. `export -p | sort` is what everyone types
+anyway.
+
+It is a category-3 divergence under `docs/divergences.md` and the corpus
+does observe it -- ten files run a bare `env`, ten run `export -p` or a
+bare `set`, ten run a bare `alias`. So it cannot land before
+`sanctioned-divergences`, which is the head of the critical path in any
+case. That is a good pairing rather than an obstacle: a mechanism built
+with no customer is usually the wrong mechanism, and this one arrives
+with thirty cases and three built-ins to be right about.
 
 *If it is later:* everything downstream keeps working through raw
 pointers into a region, so `no-ambient-state` would be moving a *pointer
