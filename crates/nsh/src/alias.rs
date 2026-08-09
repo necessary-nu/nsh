@@ -76,14 +76,18 @@ unsafe fn setalias(name: *const c_char, val: *const c_char) {
         }
         (*ap).flag &= !ALIASDEAD;
     } else {
-        /* not found */
-        let mut node = Box::new(alias {
-            name: null_mut(),
-            val: null_mut(),
-            flag: 0,
-        });
-        ap = &mut *node as *mut alias;
-        atab_mut().insert(varname(name).to_owned(), node);
+        /* not found.  The address comes back out of the map rather than out
+         * of the `Box` that went in, so nothing derived from it predates the
+         * move. */
+        ap = &mut **atab_mut()
+            .entry(varname(name).to_owned())
+            .or_insert_with(|| {
+                Box::new(alias {
+                    name: null_mut(),
+                    val: null_mut(),
+                    flag: 0,
+                })
+            }) as *mut alias;
     }
     namelen = (val as usize - name as usize) as size_t;
     (*ap).name = savestr(name);
