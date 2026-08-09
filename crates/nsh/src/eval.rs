@@ -928,7 +928,7 @@ unsafe fn parse_command_args(
 unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
     let localvar_stop: *mut crate::var::localvar_list;
     let file_stop: *mut crate::input::parsefile;
-    let redir_stop: *mut crate::redir::redirtab;
+    let redir_stop: usize;
     let mut argp: &[Node];
     let mut arglist: arglist = arglist::new();
     let mut varlist: arglist = arglist::new();
