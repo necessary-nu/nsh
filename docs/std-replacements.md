@@ -1129,7 +1129,13 @@ one crate (`rustix`) at exactly one node (`process-model`).**
   (`var.rs:104`; glibc's `putenv` does not copy). `exec.rs:125,171`
   builds its own `envp` and never reads `environ`, so the only consumer
   is `setlocale` — meaning the `putenv` can go when the locale question
-  is answered, and not before.
+  is answered, and not before. `unset LC_ALL` is the case where that
+  pointer is already wrong today: the buffer is freed, `changelocale` is
+  handed the empty string because `VFULL` is not inherited on the unset
+  path, `putenv("")` fails with `EINVAL` for want of an `=`, and the
+  `environ` slot keeps pointing at freed memory that the `setlocale` on
+  the next line reads. dash does the same; `[dec:nsh:owned-data]` records
+  it under the variable table.
 * **`trap.rs:331 onsig` unwinds out of a kernel signal frame** (§4.11).
   Documented at the site (`trap.rs:315-330`), absent from every
   cross-cutting document. It belongs on [dec:nsh:errors-are-values] as an

@@ -17,14 +17,13 @@
 //! gives for free instead of a `qsort` at print time.
 
 use bstr::{BStr, BString};
-use libc::{c_char, c_int, c_uint, c_void, intmax_t, size_t};
+use libc::{c_char, c_int, c_uint, intmax_t, size_t};
 use std::collections::BTreeMap;
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 
 use crate::error::{INTOFF, INTON};
-use crate::memalloc::{ckfree, ckmalloc, savestr};
 use crate::mystring::nullstr;
-use crate::options::{argptr, getoptsreset, nextopt, optlist, optschanged};
+use crate::options::{argptr, getoptsreset, nextopt, optlist, optschanged, NOPTS};
 use crate::output::VaArg;
 use crate::shell::cstr;
 use crate::system::strchrnul;
@@ -53,36 +52,111 @@ pub const VNOSAVE: c_int = 0x100; /* when text is on the heap before setvareq */
 /// variable carries `VFULL` (see `varfunc`).  `None` means no callback.
 pub type varfunc_t = Option<unsafe fn(*const c_char)>;
 
+/// A variable's `NAME=value` bytes, and who they belong to.
+///
+/// The C keeps one `const char *` and answers "who frees it" from
+/// `flags & (VTEXTFIXED|VSTACK)`: clear means the shell allocated it,
+/// set means it is a `static` in this module or an `environ` entry the
+/// process was started with. The two answers are the two variants, and
+/// the flag bit is now a description of the type rather than a stand-in
+/// for it — [`setvareq_text`] asserts they agree.
+///
+/// `Box<[u8]>` rather than a growable buffer, because the address has to
+/// hold still. `listvars` hands these pointers to `execve` as `envp`, and
+/// `changelocale` hands one to `putenv`, which glibc stores without
+/// copying; a buffer that could reallocate would invalidate both.
+enum VarText {
+    Fixed(*const c_char),
+    /// NUL-terminated, and the terminator is counted.
+    Owned(Box<[u8]>),
+}
+
+impl VarText {
+    /// `vp->text`, as the `char *` every reader wants.
+    #[inline]
+    fn as_ptr(&self) -> *const c_char {
+        match self {
+            VarText::Fixed(p) => *p,
+            VarText::Owned(b) => {
+                debug_assert_eq!(b.last(), Some(&0), "a variable is a C string");
+                b.as_ptr() as *const c_char
+            }
+        }
+    }
+}
+
+/// `savestr(p)`: the C string at `p`, terminator included, in a buffer of
+/// its own.
+unsafe fn cstring_box(p: *const c_char) -> Box<[u8]> {
+    let n = libc::strlen(p);
+    core::slice::from_raw_parts(p as *const u8, n + 1).into()
+}
+
 // [spec:dash:def:var.var]
 /// The C carries a `struct var *next` here, the link in the hash chain.
 /// `vartab` is an ordered map now, so the link is the map's business and the
 /// field is gone; the struct is still separately allocated and never moved,
 /// because `localvar.vp` holds its address across a whole function call.
-#[repr(C)]
 pub struct var {
-    pub flags: c_int,        /* flags are defined above */
-    pub text: *const c_char, /* name=value */
-    pub func: varfunc_t,     /* called when the variable gets set/unset */
+    pub flags: c_int,    /* flags are defined above */
+    text: VarText,       /* name=value */
+    pub func: varfunc_t, /* called when the variable gets set/unset */
 }
 
 // [spec:dash:def:var.localvar]
-#[repr(C)]
-pub struct localvar {
-    pub next: *mut localvar, /* next local variable in list */
-    pub vp: *mut var,        /* the variable that was made local */
-    pub flags: c_int,        /* saved flags */
-    pub text: *const c_char, /* saved text */
+/// What one `local` declaration has to give back.
+///
+/// The C's `next` is gone — the chain is the `Vec` inside
+/// [`localvar_list`]. What is left is three different records sharing one
+/// struct, which `poplocalvars` tells apart by testing two fields in
+/// order: `vp == NULL` means the saved option vector is in `text`, then
+/// `flags == VUNSET` means the variable did not exist and `text` was never
+/// written. Splitting them into variants means the field that must not be
+/// read on a path is not there to read.
+///
+/// The sentinel is sound because no variable in the table can have flags
+/// exactly `VUNSET`: `setvareq` stores an entry only when the incoming or
+/// inherited flags carry one of `VEXPORT|VREADONLY|VSTRFIXED` as well.
+enum localvar {
+    /// `local -`: `optlist` copied whole. The C `ckmalloc`s
+    /// `sizeof(optlist)` and keeps the copy in `text`; the array is a
+    /// fixed-size `Copy` value, so it is simply held.
+    Options([c_char; NOPTS]),
+    /// The variable was not in the table. `mklocal` created it and
+    /// `poplocalvars` takes it back out.
+    Unset { vp: *mut var },
+    /// The variable was in the table; these are its flags and its text
+    /// from before `local` named it. The save *owns* the text — `vp`
+    /// borrows it until `poplocalvars` hands it back, which is what the
+    /// C's `vp->flags |= VTEXTFIXED` was saying.
+    Saved {
+        vp: *mut var,
+        flags: c_int,
+        text: VarText,
+    },
 }
 
 // [spec:dash:def:var.localvar-list]
-#[repr(C)]
+/// One function invocation's worth of saves.
+///
+/// `mklocal` pushes at the head of the C's list and `poplocalvars` walks
+/// it from the head, so the C restores in reverse order of declaration —
+/// which is what makes `local x; local x=2` end up back at the outermost
+/// save. A `Vec` drained from the back does the same.
 pub struct localvar_list {
-    pub next: *mut localvar_list,
-    pub lv: *mut localvar,
+    lv: Vec<localvar>,
 }
 
 /* MKINIT struct localvar_list *localvar_stack; */
-pub static mut localvar_stack: *mut localvar_list = null_mut();
+/// The C's `next` chain, outermost first. A frame's index in this stack is
+/// what `pushlocalvars` hands back and `unwindlocalvars` unwinds to, in
+/// place of the address of the frame below it.
+pub static mut localvar_stack: Vec<localvar_list> = Vec::new();
+
+#[inline]
+unsafe fn localvar_stack_mut() -> &'static mut Vec<localvar_list> {
+    &mut *addr_of_mut!(localvar_stack)
+}
 
 pub static defpathvar: [c_char; 66] = unsafe {
     core::mem::transmute::<[u8; 66], [c_char; 66]>(
@@ -121,84 +195,84 @@ unsafe fn changelocale(val: *const c_char) {
 pub static mut varinit: [var; 16] = [
     var {
         flags: VSTRFIXED | VTEXTFIXED,
-        text: addr_of!(defifsvar) as *const c_char,
+        text: VarText::Fixed(addr_of!(defifsvar) as *const c_char),
         func: Some(crate::expand::changeifs),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VUNSET,
-        text: b"MAIL\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"MAIL\0\0".as_ptr() as *const c_char),
         func: Some(crate::mail::changemail),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VUNSET,
-        text: b"MAILPATH\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"MAILPATH\0\0".as_ptr() as *const c_char),
         func: Some(crate::mail::changemail),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED,
-        text: addr_of!(defpathvar) as *const c_char,
+        text: VarText::Fixed(addr_of!(defpathvar) as *const c_char),
         func: Some(crate::exec::changepath),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED,
-        text: b"PS1=$ \0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"PS1=$ \0".as_ptr() as *const c_char),
         func: None,
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED,
-        text: b"PS2=> \0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"PS2=> \0".as_ptr() as *const c_char),
         func: None,
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED,
-        text: b"PS4=+ \0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"PS4=+ \0".as_ptr() as *const c_char),
         func: None,
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VNOFUNC,
-        text: addr_of!(defoptindvar) as *const c_char,
+        text: VarText::Fixed(addr_of!(defoptindvar) as *const c_char),
         func: Some(getoptsreset),
     },
     /* #ifdef WITH_LINENO */
     var {
         flags: VSTRFIXED | VTEXTFIXED,
-        text: addr_of!(linenovar) as *const c_char,
+        text: VarText::Fixed(addr_of!(linenovar) as *const c_char),
         func: None,
     },
     /* #ifndef SMALL */
     var {
         flags: VSTRFIXED | VTEXTFIXED | VUNSET,
-        text: b"TERM\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"TERM\0\0".as_ptr() as *const c_char),
         func: None,
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VUNSET,
-        text: b"HISTSIZE\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"HISTSIZE\0\0".as_ptr() as *const c_char),
         func: Some(crate::histedit::sethistsize),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
-        text: b"LC_ALL\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"LC_ALL\0\0".as_ptr() as *const c_char),
         func: Some(changelocale),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
-        text: b"LC_COLLATE\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"LC_COLLATE\0\0".as_ptr() as *const c_char),
         func: Some(changelocale),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
-        text: b"LC_CTYPE\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"LC_CTYPE\0\0".as_ptr() as *const c_char),
         func: Some(changelocale),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
-        text: b"LC_NUMERIC\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"LC_NUMERIC\0\0".as_ptr() as *const c_char),
         func: Some(changelocale),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
-        text: b"LANG\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"LANG\0\0".as_ptr() as *const c_char),
         func: Some(changelocale),
     },
 ];
@@ -246,40 +320,40 @@ pub unsafe fn vhistsize() -> *mut var {
  * skip over the name, by a hard-coded byte count.
  */
 pub unsafe fn ifsval() -> *const c_char {
-    (*vifs()).text.add(4)
+    (*vifs()).text.as_ptr().add(4)
 }
 pub unsafe fn ifsset() -> c_int {
     (((*vifs()).flags & VUNSET) == 0) as c_int
 }
 pub unsafe fn mailval() -> *const c_char {
-    (*vmail()).text.add(5)
+    (*vmail()).text.as_ptr().add(5)
 }
 pub unsafe fn mpathval() -> *const c_char {
-    (*vmpath()).text.add(9)
+    (*vmpath()).text.as_ptr().add(9)
 }
 pub unsafe fn pathval() -> *const c_char {
-    (*vpath()).text.add(5)
+    (*vpath()).text.as_ptr().add(5)
 }
 pub unsafe fn ps1val() -> *const c_char {
-    (*vps1()).text.add(4)
+    (*vps1()).text.as_ptr().add(4)
 }
 pub unsafe fn ps2val() -> *const c_char {
-    (*vps2()).text.add(4)
+    (*vps2()).text.as_ptr().add(4)
 }
 pub unsafe fn ps4val() -> *const c_char {
-    (*vps4()).text.add(4)
+    (*vps4()).text.as_ptr().add(4)
 }
 pub unsafe fn optindval() -> *const c_char {
-    (*voptind()).text.add(7)
+    (*voptind()).text.as_ptr().add(7)
 }
 pub unsafe fn linenoval() -> *const c_char {
-    (*vlineno()).text.add(7)
+    (*vlineno()).text.as_ptr().add(7)
 }
 pub unsafe fn histsizeval() -> *const c_char {
-    (*vhistsize()).text.add(9)
+    (*vhistsize()).text.as_ptr().add(9)
 }
 pub unsafe fn termval() -> *const c_char {
-    (*vterm()).text.add(5)
+    (*vterm()).text.as_ptr().add(5)
 }
 pub unsafe fn mpathset() -> c_int {
     (((*vmpath()).flags & VUNSET) == 0) as c_int
@@ -296,13 +370,35 @@ pub unsafe fn environment() -> Vec<*mut c_char> {
     envp
 }
 
+/// One entry of `vartab`: one of `varinit`'s sixteen, which the table
+/// borrows and never drops, or a `var` the table owns.
+///
+/// The `Box` is not decoration. `localvar::Saved` holds the entry's
+/// address across a whole function invocation, and `setvareq` may file or
+/// remove other names in between — which a `BTreeMap` answers by moving
+/// the values it holds. Boxing keeps the address the C's `ckmalloc` gave.
+enum VarSlot {
+    Builtin(*mut var),
+    Owned(Box<var>),
+}
+
+impl VarSlot {
+    #[inline]
+    unsafe fn as_ptr(&mut self) -> *mut var {
+        match self {
+            VarSlot::Builtin(p) => *p,
+            VarSlot::Owned(b) => &mut **b as *mut var,
+        }
+    }
+}
+
 /// Every variable, by name. dash's `vartab` is `struct var *[39]` walked
 /// through `hashval`; this is the same set of separately allocated `var`s
 /// filed in an order that means something. See the module comment.
-static mut vartab: BTreeMap<BString, *mut var> = BTreeMap::new();
+static mut vartab: BTreeMap<BString, VarSlot> = BTreeMap::new();
 
 #[inline]
-unsafe fn vartab_mut() -> &'static mut BTreeMap<BString, *mut var> {
+unsafe fn vartab_mut() -> &'static mut BTreeMap<BString, VarSlot> {
     &mut *addr_of_mut!(vartab)
 }
 
@@ -381,7 +477,7 @@ pub unsafe fn mkinit_init() {
 
 /* mkinit RESET fragment from src/var.c:164-166. */
 pub unsafe fn mkinit_reset() {
-    unwindlocalvars(null_mut());
+    unwindlocalvars(0);
 }
 
 // [spec:dash:def:var.varnull-fn]
@@ -400,7 +496,7 @@ unsafe fn varfunc(vp: *mut var) {
         return;
     }
 
-    s = (*vp).text;
+    s = (*vp).text.as_ptr();
     if ((*vp).flags & VFULL) == 0 {
         s = varnull(s);
     }
@@ -426,7 +522,7 @@ pub unsafe fn initvar() {
          * address, and their `text` is `VTEXTFIXED`. Only the link into the
          * table changes — the map holds the address, it does not own the
          * `var`. */
-        vartab_mut().insert(varname((*vp).text).to_owned(), vp);
+        vartab_mut().insert(varname((*vp).text.as_ptr()).to_owned(), VarSlot::Builtin(vp));
         vp = vp.add(1);
         if !(vp < end) {
             break;
@@ -436,7 +532,7 @@ pub unsafe fn initvar() {
      * PS1 depends on uid
      */
     if libc::geteuid() == 0 {
-        (*vps1()).text = b"PS1=# \0".as_ptr() as *const c_char;
+        (*vps1()).text = VarText::Fixed(b"PS1=# \0".as_ptr() as *const c_char);
     }
 }
 
@@ -448,10 +544,10 @@ pub unsafe fn initvar() {
 // [spec:dash:def:var.setvar-fn]
 // [spec:dash:sem:var.setvar-fn]
 pub unsafe fn setvar(name: *const c_char, val: *const c_char, mut flags: c_int) -> *mut var {
-    let mut p: *mut c_char;
+    let p: *mut c_char;
     let q: *mut c_char;
     let namelen: size_t;
-    let nameeq: *mut c_char;
+    let mut nameeq: Vec<u8>;
     let mut vallen: size_t;
     let vp: *mut var;
 
@@ -473,15 +569,20 @@ pub unsafe fn setvar(name: *const c_char, val: *const c_char, mut flags: c_int) 
         vallen = libc::strlen(val) as size_t;
     }
     INTOFF();
-    nameeq = ckmalloc(namelen + vallen + 2) as *mut c_char;
-    p = crate::system::mempcpy(nameeq as *mut c_void, name as *const c_void, namelen + 1)
-        as *mut c_char;
+    /* `ckmalloc(namelen + vallen + 2)` filled by two `mempcpy`s.  The
+     * first copies `namelen + 1` bytes -- the name *and the byte after
+     * it*, which is the `=` or the NUL that ended it -- and the `=` is
+     * written back over that byte only when there is a value.  So an
+     * unset variable's buffer is `NAME\0\0`, and the second NUL is the
+     * one `varnull` returns a pointer to. */
+    nameeq = Vec::with_capacity(namelen + vallen + 2);
+    nameeq.extend_from_slice(core::slice::from_raw_parts(name as *const u8, namelen + 1));
     if !val.is_null() {
-        *p.offset(-1) = b'=' as c_char;
-        p = crate::system::mempcpy(p as *mut c_void, val as *const c_void, vallen) as *mut c_char;
+        nameeq[namelen] = b'=';
+        nameeq.extend_from_slice(core::slice::from_raw_parts(val as *const u8, vallen));
     }
-    *p = b'\0' as c_char;
-    vp = setvareq(nameeq, flags | VNOSAVE);
+    nameeq.push(b'\0');
+    vp = setvareq_text(VarText::Owned(nameeq.into_boxed_slice()), flags | VNOSAVE);
     INTON();
 
     vp
@@ -519,8 +620,33 @@ pub unsafe fn setvarint(name: *const c_char, val: intmax_t, flags: c_int) -> int
 
 // [spec:dash:def:var.setvareq-fn]
 // [spec:dash:sem:var.setvareq-fn]
-pub unsafe fn setvareq(mut s: *mut c_char, mut flags: c_int) -> *mut var {
+/// The C takes a `char *` plus flag bits saying who owns it: `VTEXTFIXED`
+/// or `VSTACK` for a buffer it must not free, `VNOSAVE` for one handed
+/// over outright, neither for one to `savestr`.  Only `setvar` ever passed
+/// `VNOSAVE`, and it now hands its buffer to [`setvareq_text`] directly,
+/// so what is left here is the two cases an outside caller can mean.
+pub unsafe fn setvareq(s: *mut c_char, flags: c_int) -> *mut var {
+    debug_assert_eq!(
+        flags & VNOSAVE,
+        0,
+        "VNOSAVE means the callee adopts the caller's allocation, which this signature cannot express"
+    );
+    let text = if (flags & (VTEXTFIXED | VSTACK)) != 0 {
+        VarText::Fixed(s)
+    } else {
+        /* `savestr(s)`.  The C copies at the far end of the function, one
+         * statement before the store; the only path between here and there
+         * that does not reach the store is the read-only `sh_error`, where
+         * the copy is dropped by the unwind. */
+        VarText::Owned(cstring_box(s))
+    };
+    setvareq_text(text, flags)
+}
+
+/// The body of `setvareq`, over a text whose owner is already settled.
+unsafe fn setvareq_text(text: VarText, mut flags: c_int) -> *mut var {
     let mut vp: *mut var;
+    let s: *const c_char = text.as_ptr();
 
     flags |= VEXPORT & (((1 - crate::options::optlist[crate::options::aflag] as c_int) as c_uint).wrapping_sub(1)) as c_int;
     vp = findvar(s);
@@ -530,10 +656,9 @@ pub unsafe fn setvareq(mut s: *mut c_char, mut flags: c_int) -> *mut var {
         if ((*vp).flags & VREADONLY) != 0 {
             let n: *const c_char;
 
-            if (flags & VNOSAVE) != 0 {
-                libc::free(s as *mut c_void);
-            }
-            n = (*vp).text;
+            /* The C's `if (flags & VNOSAVE) free(s)`: `text` is a local,
+             * so the unwind out of `sh_error` drops it. */
+            n = (*vp).text.as_ptr();
             crate::error::sh_error(
                 cstr(b"%.*s: is read only\0"),
                 &[
@@ -543,29 +668,26 @@ pub unsafe fn setvareq(mut s: *mut c_char, mut flags: c_int) -> *mut var {
             );
         }
 
-        /* Taken before the old text is freed. `s` and `(*vp).text` are
-         * different buffers on every path the shell has — `setvar` always
-         * hands over a fresh one — but reading a freed buffer to find a map
-         * key would be a hazard the C did not have, so do not create it. */
+        /* The name this entry is filed under, for the removal path below. */
         let key = varname(s).to_owned();
 
-        if ((*vp).flags & (VTEXTFIXED | VSTACK)) == 0 {
-            ckfree((*vp).text as *mut c_void);
-        }
+        /* `if ((vp->flags & (VTEXTFIXED|VSTACK)) == 0) ckfree(vp->text);`
+         * belongs here, and is instead the drop of the old value at the
+         * store below — so the field stays readable in between rather than
+         * dangling for the width of the flag arithmetic. */
 
         if (flags & (VEXPORT | VREADONLY | VSTRFIXED | VUNSET)) != VUNSET {
             bits = !((VTEXTFIXED | VSTACK | VNOSAVE | VUNSET) as c_uint);
         } else if ((*vp).flags & VSTRFIXED) != 0 {
             bits = VSTRFIXED as c_uint;
         } else {
+            /* The C unlinks the node, `ckfree`s it and then `ckfree`s `s`;
+             * taking the entry out of the map drops the `Box` that is the
+             * node and the text inside it, and `text` goes out of scope. */
             vartab_mut().remove(&key);
-            ckfree(vp as *mut c_void);
-            /* out_free: */
-            if (flags & (VTEXTFIXED | VSTACK | VNOSAVE)) == VNOSAVE {
-                ckfree(s as *mut c_void);
-            }
-            /* goto out — NB `vp` has just been freed and is returned
-             * dangling, exactly as the C does (src/var.c:304-309, 331). */
+            /* out_free, then goto out — NB `vp` has just been dropped and
+             * is returned dangling, exactly as the C does
+             * (src/var.c:304-309, 331). */
             return vp;
         }
 
@@ -573,21 +695,27 @@ pub unsafe fn setvareq(mut s: *mut c_char, mut flags: c_int) -> *mut var {
     } else {
         if (flags & (VEXPORT | VREADONLY | VSTRFIXED | VUNSET)) == VUNSET {
             /* goto out_free */
-            if (flags & (VTEXTFIXED | VSTACK | VNOSAVE)) == VNOSAVE {
-                ckfree(s as *mut c_void);
-            }
             return vp;
         }
         /* not found */
-        vp = ckmalloc(core::mem::size_of::<var>() as size_t) as *mut var;
-        (*vp).func = None;
-        vartab_mut().insert(varname(s).to_owned(), vp);
+        /* The C leaves `flags` and `text` uninitialised here and fills
+         * them in below, which every path from this point reaches. */
+        vp = vartab_mut()
+            .entry(varname(s).to_owned())
+            .or_insert(VarSlot::Owned(Box::new(var {
+                flags: 0,
+                text: VarText::Fixed(null_mut()),
+                func: None,
+            })))
+            .as_ptr();
     }
-    if (flags & (VTEXTFIXED | VSTACK | VNOSAVE)) == 0 {
-        s = savestr(s);
-    }
-    (*vp).text = s;
+    (*vp).text = text;
     (*vp).flags = flags;
+    debug_assert_eq!(
+        matches!((*vp).text, VarText::Owned(_)),
+        ((*vp).flags & (VTEXTFIXED | VSTACK)) == 0,
+        "who owns vp->text and what its flags say must agree"
+    );
 
     if (flags & VNOFUNC) == 0 {
         varfunc(vp);
@@ -608,7 +736,7 @@ pub unsafe fn lookupvar(name: *const c_char) -> *mut c_char {
     v = findvar(name);
     if !v.is_null() && ((*v).flags & VUNSET) == 0 {
         /* #ifdef WITH_LINENO */
-        if v == vlineno() && (*v).text == addr_of!(linenovar) as *const c_char {
+        if v == vlineno() && (*v).text.as_ptr() == addr_of!(linenovar) as *const c_char {
             crate::output::fmtstr(
                 (addr_of_mut!(linenovar) as *mut c_char).add(7),
                 (19 - 7) as size_t,
@@ -616,7 +744,7 @@ pub unsafe fn lookupvar(name: *const c_char) -> *mut c_char {
                 &[VaArg::Int(lineno)],
             );
         }
-        return strchrnul((*v).text, b'=' as c_int).add(1);
+        return strchrnul((*v).text.as_ptr(), b'=' as c_int).add(1);
     }
     null_mut()
 }
@@ -653,9 +781,10 @@ pub unsafe fn listvars(on: c_int, off: c_int) -> Vec<*mut c_char> {
     let mask = on | off;
     let mut ep = Vec::new();
 
-    for &vp in vartab_mut().values() {
+    for slot in vartab_mut().values_mut() {
+        let vp = slot.as_ptr();
         if ((*vp).flags & mask) == on {
-            ep.push((*vp).text as *mut c_char);
+            ep.push((*vp).text.as_ptr() as *mut c_char);
         }
     }
 
@@ -772,7 +901,7 @@ pub unsafe fn exportcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 pub unsafe fn localcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
     let mut name: *mut c_char;
 
-    if localvar_stack.is_null() {
+    if localvar_stack_mut().is_empty() {
         crate::error::sh_error(cstr(b"not in a function\0"), &[]);
     }
 
@@ -798,20 +927,9 @@ pub unsafe fn localcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
 // [spec:dash:def:var.mklocal-fn]
 // [spec:dash:sem:var.mklocal-fn]
 pub unsafe fn mklocal(name: *mut c_char, flags: c_int) {
-    let lvp: *mut localvar;
-    let vp: *mut var;
-
     INTOFF();
-    lvp = ckmalloc(core::mem::size_of::<localvar>() as size_t) as *mut localvar;
     if *name.offset(0) == b'-' as c_char && *name.offset(1) == b'\0' as c_char {
-        let p: *mut c_char;
-        p = ckmalloc(core::mem::size_of_val(&optlist) as size_t) as *mut c_char;
-        (*lvp).text = libc::memcpy(
-            p as *mut c_void,
-            addr_of!(optlist) as *const c_void,
-            core::mem::size_of_val(&optlist) as size_t,
-        ) as *const c_char;
-        vp = null_mut();
+        pushlocal(localvar::Options(optlist));
     } else {
         let eq: *mut c_char;
         let found: *mut var;
@@ -819,28 +937,49 @@ pub unsafe fn mklocal(name: *mut c_char, flags: c_int) {
         found = findvar(name);
         eq = libc::strchr(name, b'=' as c_int);
         if found.is_null() {
+            let vp: *mut var;
             if !eq.is_null() {
                 vp = setvareq(name, VSTRFIXED | flags);
             } else {
                 vp = setvar(name, null_mut(), VSTRFIXED | flags);
             }
-            /* NB: lvp->text is left uninitialised on this path — safe only
-             * because lvp->flags == VUNSET makes poplocalvars ignore it. */
-            (*lvp).flags = VUNSET;
+            pushlocal(localvar::Unset { vp });
         } else {
-            vp = found;
-            (*lvp).text = (*vp).text;
-            (*lvp).flags = (*vp).flags;
+            let vp: *mut var = found;
+            let saved: c_int = (*vp).flags;
+            /* The C leaves two pointers to one buffer -- `lvp->text` and
+             * `vp->text` -- and says who frees it by setting VTEXTFIXED on
+             * the variable.  The save takes the buffer and the variable is
+             * left borrowing it, which is the same arrangement with the
+             * ownership in the type. */
+            let p = (*vp).text.as_ptr();
+            let text = core::mem::replace(&mut (*vp).text, VarText::Fixed(p));
             (*vp).flags |= VSTRFIXED | VTEXTFIXED;
+            /* Pushed before `setvareq`, which raises on a read-only
+             * variable: the save now holds the only copy of what `vp` is
+             * borrowing, so it has to be somewhere an unwind will not drop
+             * it.  The C leaks the `localvar` on that path instead, and
+             * leaves the variable VSTRFIXED|VTEXTFIXED for good. */
+            pushlocal(localvar::Saved {
+                vp,
+                flags: saved,
+                text,
+            });
             if !eq.is_null() {
                 setvareq(name, flags);
             }
         }
     }
-    (*lvp).vp = vp;
-    (*lvp).next = (*localvar_stack).lv;
-    (*localvar_stack).lv = lvp;
     INTON();
+}
+
+/// Add a save to the innermost frame.
+unsafe fn pushlocal(lvp: localvar) {
+    localvar_stack_mut()
+        .last_mut()
+        .expect("mklocal runs inside a function")
+        .lv
+        .push(lvp);
 }
 
 /*
@@ -851,50 +990,47 @@ pub unsafe fn mklocal(name: *mut c_char, flags: c_int) {
 // [spec:dash:def:var.poplocalvars-fn]
 // [spec:dash:sem:var.poplocalvars-fn]
 unsafe fn poplocalvars() {
-    let ll: *mut localvar_list;
-    let mut lvp: *mut localvar;
-    let mut next: *mut localvar;
-    let mut vp: *mut var;
+    let mut ll: localvar_list;
 
     INTOFF();
-    ll = localvar_stack;
-    localvar_stack = (*ll).next;
+    ll = localvar_stack_mut()
+        .pop()
+        .expect("poplocalvars runs on a pushed frame");
 
-    next = (*ll).lv;
-    ckfree(ll as *mut c_void);
-
-    loop {
-        lvp = next;
-        if lvp.is_null() {
-            break;
-        }
-        next = (*lvp).next;
-        vp = (*lvp).vp;
+    /* The C walks the chain from the head, which is the most recent
+     * `local`; draining from the back of the `Vec` is the same order. */
+    while let Some(lvp) = ll.lv.pop() {
         /* `TRACE(("poplocalvar %s\n", vp ? vp->text : "-"));` — `#ifdef
          * DEBUG` in `shell.h`, and the dash build does not define it. */
-        if vp.is_null() {
-            /* $- saved */
-            libc::memcpy(
-                addr_of_mut!(optlist) as *mut c_void,
-                (*lvp).text as *const c_void,
-                core::mem::size_of_val(&optlist) as size_t,
-            );
-            ckfree((*lvp).text as *mut c_void);
-            optschanged();
-        } else if (*lvp).flags == VUNSET {
-            (*vp).flags &= !(VSTRFIXED | VREADONLY);
-            unsetvar((*vp).text);
-        } else {
-            if ((*vp).flags & (VTEXTFIXED | VSTACK)) == 0 {
-                ckfree((*vp).text as *mut c_void);
+        match lvp {
+            localvar::Options(saved) => {
+                optlist = saved;
+                optschanged();
             }
-            (*vp).flags = (*lvp).flags;
-            (*vp).text = (*lvp).text;
-            if ((*vp).flags & VNOFUNC) == 0 {
-                varfunc(vp);
+            localvar::Unset { vp } => {
+                (*vp).flags &= !(VSTRFIXED | VREADONLY);
+                /* `setvar` copies the name out before `setvareq_text` can
+                 * drop the buffer it was read from. */
+                unsetvar((*vp).text.as_ptr());
+            }
+            localvar::Saved { vp, flags, text } => {
+                /* The C frees `vp->text` first when the flags say the
+                 * variable owns it; the assignment is what does that.
+                 * When nothing was assigned to the variable while it was
+                 * local, what it drops is the `Fixed` borrow `mklocal`
+                 * left in place of the buffer it took. */
+                (*vp).flags = flags;
+                (*vp).text = text;
+                debug_assert_eq!(
+                    matches!((*vp).text, VarText::Owned(_)),
+                    ((*vp).flags & (VTEXTFIXED | VSTACK)) == 0,
+                    "who owns vp->text and what its flags say must agree"
+                );
+                if ((*vp).flags & VNOFUNC) == 0 {
+                    varfunc(vp);
+                }
             }
         }
-        ckfree(lvp as *mut c_void);
     }
     INTON();
 }
@@ -905,20 +1041,19 @@ unsafe fn poplocalvars() {
 
 // [spec:dash:def:var.pushlocalvars-fn]
 // [spec:dash:sem:var.pushlocalvars-fn]
-pub unsafe fn pushlocalvars(push: c_int) -> *mut localvar_list {
-    let ll: *mut localvar_list;
-    let top: *mut localvar_list;
+/// The C returns the `localvar_list *` that was on top, which the caller
+/// hands back to `unwindlocalvars`; with the stack owned, that address is
+/// the frame's depth.
+pub unsafe fn pushlocalvars(push: c_int) -> usize {
+    let top: usize;
 
-    top = localvar_stack;
+    top = localvar_stack_mut().len();
     if push == 0 {
         return top; /* goto out */
     }
 
     INTOFF();
-    ll = ckmalloc(core::mem::size_of::<localvar_list>() as size_t) as *mut localvar_list;
-    (*ll).lv = null_mut();
-    (*ll).next = top;
-    localvar_stack = ll;
+    localvar_stack_mut().push(localvar_list { lv: Vec::new() });
     INTON();
 
     top
@@ -926,8 +1061,11 @@ pub unsafe fn pushlocalvars(push: c_int) -> *mut localvar_list {
 
 // [spec:dash:def:var.unwindlocalvars-fn]
 // [spec:dash:sem:var.unwindlocalvars-fn]
-pub unsafe fn unwindlocalvars(stop: *mut localvar_list) {
-    while localvar_stack != stop {
+/// The C's loop is `while (localvar_stack != stop)`, which runs off the
+/// bottom of the stack if `stop` was never on it; `>` is total, and the
+/// only state it declines to reproduce is a NULL dereference.
+pub unsafe fn unwindlocalvars(stop: usize) {
+    while localvar_stack_mut().len() > stop {
         poplocalvars();
     }
 }
@@ -989,8 +1127,102 @@ pub unsafe fn unsetvar(s: *const c_char) {
 /// without a second traversal. A map removes by key, so this returns the
 /// entry itself and NULL when there is none.
 unsafe fn findvar(name: *const c_char) -> *mut var {
-    match vartab_mut().get(varname(name)) {
-        Some(&vp) => vp,
+    match vartab_mut().get_mut(varname(name)) {
+        Some(slot) => slot.as_ptr(),
         None => null_mut(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::{lock, s, CStr0};
+
+    /// The whole buffer `vp->text` points at, `len` bytes of it.
+    unsafe fn text_bytes(name: &str, len: usize) -> Vec<u8> {
+        let n = CStr0::new(name);
+        let vp = findvar(n.p());
+        assert!(!vp.is_null(), "{name} is not in the table");
+        core::slice::from_raw_parts((*vp).text.as_ptr() as *const u8, len).to_vec()
+    }
+
+    // [spec:dash:sem:var.setvar-fn/test]
+    // [spec:dash:sem:var.varnull-fn/test]
+    /// `setvar` builds one `NAME=value` buffer, and an unset variable's
+    /// buffer ends in two NULs -- which is not decoration: `varnull`
+    /// returns the byte after the first one and every reader of an unset
+    /// variable's value stops there.
+    #[test]
+    fn setvar_files_a_name_equals_value() {
+        let _g = lock();
+        unsafe {
+            let name = CStr0::new("Tsetvar");
+            let val = CStr0::new("hello");
+
+            setvar(name.p(), val.p(), 0);
+            assert_eq!(text_bytes("Tsetvar", 14), b"Tsetvar=hello\0".to_vec());
+            assert_eq!(s(lookupvar(name.p())), "hello");
+
+            /* VSTRFIXED so the entry survives being unset and can be read. */
+            setvar(name.p(), null_mut(), VSTRFIXED);
+            assert_eq!(text_bytes("Tsetvar", 9), b"Tsetvar\0\0".to_vec());
+            let vp = findvar(name.p());
+            assert_eq!(s(varnull((*vp).text.as_ptr())), "");
+            assert!(lookupvar(name.p()).is_null());
+        }
+    }
+
+    // [spec:dash:sem:var.poplocalvars-fn/test]
+    /// A frame restores in reverse order of declaration, so two `local`s
+    /// on one name leave the outermost value behind, not the middle one.
+    #[test]
+    fn a_frame_restores_in_reverse_order() {
+        let _g = lock();
+        unsafe {
+            let name = CStr0::new("Tframe");
+            let two = CStr0::new("Tframe=two");
+            let three = CStr0::new("Tframe=three");
+
+            setvar(name.p(), CStr0::new("one").p(), 0);
+            let stop = pushlocalvars(1);
+            mklocal(two.p() as *mut c_char, 0);
+            mklocal(three.p() as *mut c_char, 0);
+            assert_eq!(s(lookupvar(name.p())), "three");
+
+            unwindlocalvars(stop);
+            assert_eq!(s(lookupvar(name.p())), "one");
+            unsetvar(name.p());
+        }
+    }
+
+    // [spec:dash:sem:var.mklocal-fn/test]
+    /// A save holds the variable's address for the whole invocation, so an
+    /// entry must not move while it is in the table -- and filing another
+    /// two hundred names that sort below it is what would move it.
+    #[test]
+    fn a_saved_entry_does_not_move() {
+        let _g = lock();
+        unsafe {
+            let name = CStr0::new("Tchurn");
+            let local = CStr0::new("Tchurn=inner");
+
+            setvar(name.p(), CStr0::new("outer").p(), 0);
+            let stop = pushlocalvars(1);
+            mklocal(local.p() as *mut c_char, 0);
+            let entry = findvar(name.p());
+
+            let filler: Vec<CStr0> = (0..200).map(|i| CStr0::new(&format!("Ta{i:04}"))).collect();
+            for f in &filler {
+                setvar(f.p(), CStr0::new("x").p(), 0);
+            }
+            assert_eq!(findvar(name.p()), entry, "the entry moved under the save");
+
+            unwindlocalvars(stop);
+            assert_eq!(s(lookupvar(name.p())), "outer");
+            for f in &filler {
+                unsetvar(f.p());
+            }
+            unsetvar(name.p());
+        }
     }
 }
