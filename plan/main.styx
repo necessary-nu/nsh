@@ -2102,6 +2102,7 @@ children (
                         priority 0
                         kind @refactor
                         deps (owned-strings)
+                        sealed true
                         log (
                             {
                                 at 2026-08-09T13:46:34.315288286Z
@@ -2150,6 +2151,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @status
                                 text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-09T22:07:54.34344606Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }

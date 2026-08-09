@@ -1098,7 +1098,7 @@ assertions (
     {id sorted-tables, kind @complete, author "brendan@necessary.nu", at 2026-08-09T16:24:56.014094132Z}
     {id owned-strings, kind @complete, author "brendan@necessary.nu", at 2026-08-09T16:24:36.630845046Z}
     {id edition-2024, kind @complete, author "brendan@necessary.nu", at 2026-08-09T19:30:39.321605436Z}
-    {id delete-memalloc, kind @doing, author "brendan@necessary.nu", at 2026-08-09T20:51:52.987175342Z}
+    {id delete-memalloc, kind @complete, author "brendan@necessary.nu", at 2026-08-09T22:07:54.34344606Z}
 )
 
 impl_evidence (
