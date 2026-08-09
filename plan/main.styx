@@ -2036,6 +2036,7 @@ children (
                         priority 0
                         kind @refactor
                         deps (owned-nodes sanctioned-divergences)
+                        sealed true
                         log (
                             {
                                 at 2026-08-08T10:06:34.731197116Z
@@ -2077,6 +2078,20 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "Partial on wt/glob-buffer (b6f6449), still Doing. expand.rs's glob buffer is owned: expmeta's cp/enddir into the stack block are a static BString plus a length, growstackto is reserve, stnputs is a set_len-to-the-cursor plus append, and addfnamealt's grabstackstr + STARTSTACKSTR + stnputs re-seed is a copy into the region plus set_len(expdir_len). String-builder sites in expand.rs 16 -> 8, and all eight are over owned buffers -- no growstackto/stnputs/stackblock/grabstackstr from memalloc is left in the file, and the two macro transcriptions the glob buffer needed are deleted. crate::memalloc:: in expand.rs 23 -> 19: zero string builder, two grab seams (grabexpdest, addfnamealt) copying an owned buffer into the region, eight stalloc/ckmalloc for strlist/ifsregion/wcifs and _rmescapes' HEAP arm, nine stack marks. All nineteen are delete-memalloc's. The invariant the buffer is held to, since expmeta recurses one frame per path component: at every point where it can grow, its length is the current frame's expdir_len -- asserted on entry to expmeta, re-established by hand where expdir_len changes mid-frame, and derived from the cursor by the stnputs transcription. Four load-bearing sites written up on plan/decisions/owned-data.md: stnputs takes its length in its cursor (which is how a frame recovers from its own recursion -- appending at Vec::len() emits a/b/c/b/...); addfnamealt's re-seed is the allocator's price, not the algorithm's; the growstackto reservation is exact and an assertion on Vec::capacity() is vacuous because Vec over-allocates too, so both expmeta_rmescapes call sites assert against len; and the top-level call was getting a clean buffer by accident, so expandmeta clears. crates/nsh/tests/glob_buffer.rs is new: three cases, one per property, each confirmed to fail under a mutation of the property it names. Still not converted, all outside this branch's scope: bltin/printf.rs, miscbltin.rs, parser.rs, var.rs, output.rs, input.rs. Fully gated: PASS=61498 FAIL=0 FLAKY=22 XFAIL=1 (sorted_tables in aud_state_var, pre-existing), POSIX 54/657 against the C's 56/655 with the same two differentials, ptydiff 31/0, register 28/28."
+                            }
+
+                            {
+                                at 2026-08-09T16:24:32.160543578Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Done at af1434d. The node's goal — \"the stack string builder becomes an owned byte vector across parser and expand\" — is met, and it is checkable rather than argued: `crates/nsh/src/expand.rs` and `crates/nsh/src/parser.rs` each hold zero `memalloc::` references, and neither file calls any region-state function (`stalloc`, `stackblock`, `grabstackstr`, `growstackblock`, `growstackto`, `makestrspace`, `stnputs`, `stputs`, the three marks, `stackblocksize`).\n\nIt took four passes rather than one, on three branches plus `wt/strlist`: builder sites 205 -> 91 (parser, nodes, cd, histedit, mystring, exec, jobs, eval, shellmain, mail), then the expansion buffer, then the glob buffer, then `strlist` itself. The reason it could not be one commit is on [dec:nsh:owned-data]: `expdest` was a global cursor into the region that `expmeta` borrowed to encode directory entries, so the buffer could not become an index into an owned `BString` until `memtodest`/`chtodest`/`mbtodest` took their destination as a parameter.\n\nWhat remains is not this node's. Two macros from `memalloc.rs` still expand in `parser.rs` — `USTPUTC` x6 and `STADJUST` x1 — but both are pointer arithmetic (`p += amount`) over a `BString`'s spare capacity and touch no region state; rehoming them is bookkeeping recorded on [[delete-memalloc]]. Builder-shaped code outside parser and expand — `bltin/printf.rs`, `miscbltin.rs`, `var.rs`, `output.rs`, `input.rs` — was never in this node's title and is likewise over owned buffers now."
+                            }
+
+                            {
+                                at 2026-08-09T16:24:36.630845046Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }
@@ -2176,8 +2191,16 @@ children (
             {
                 id nshedit-in-tree
                 title "Publish nshedit so nsh can be published; the git dep only fixes clone-and-build"
-                priority 0
+                priority 2
                 kind @build
+                log (
+                    {
+                        at 2026-08-09T16:23:27.678365136Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "Deferred out of P0 (priority 0 -> 2) on 2026-08-09. Right work, wrong pass — not being done now.\n\nIt only gates `cargo publish`, and publishing is not close: the public API does not exist yet (`public-api-design` and `public-api` are both open, and `docs/api-design.md` describes a surface nothing constructs). The `ssh://git@github.com/necessary-nu/nshedit.git` dependency with `git-fetch-with-cli = true` already makes clone-and-build work for anyone with access, which is every consumer there currently is.\n\nKeeping it at P0 had a cost beyond the wasted rank: it was the *only* P0 candidate `nplan_next` would return, so the computed frontier said \"publish a dependency\" while the actual work — the remaining `ck*`/`savestr` owners, `errors-are-values`, `no-ambient-state` — sat behind deps or claims and never surfaced.\n\nUn-defer when `public-api` lands and publishing is the next real step."
+                    }
+                )
             }
 
             {
@@ -2248,6 +2271,7 @@ children (
                 priority 0
                 kind @fix
                 deps (sanctioned-divergences)
+                sealed true
                 log (
                     {
                         at 2026-08-08T11:44:42.574884968Z
@@ -2261,6 +2285,20 @@ children (
                         author "brendan@necessary.nu"
                         kind @note
                         text "The title named four builtins and two of them were wrong. `export -p` and a bare `set` both print through `showvars`, which already `qsort`s with `vpcmp` before printing, so both shells printed those sorted before this change and print them sorted after it. Only `env` -- anything that reads `environ`, since `listvars` builds `execve`'s `envp` -- and a bare `alias` change. Measured on both binaries before touching anything. The register entry is scoped to `env`, `printenv` and `alias` for the same reason: naming `export -p` or `set` would let it excuse a permutation that could only be a regression.\n\nThe corpus observes it once, not thirty times: `aud_state_var.txt`'s `export XV=1 YV=2; echo \"$XV$YV\"; env | grep -E '^(XV|YV)='`. The forty-odd `env` cases in `aud_state_gen3` are all `env | grep -c '^NAME='`, which counts rather than lists, and the `alias` cases print one alias or none.\n\nFive C symbols lost their target counterpart -- `hashval`, `hashvar`, `varcmp`, `varequal`, `vpcmp` -- since all five existed only to serve the hash table. Retired with the transaction `delete-gen` established: marker lines out of `docs/spec/port/src/var.md` with every word of prose kept, entries out of `plan/annotations.styx` and `plan/.port-manifest.styx`. Spec coverage 460/460 to 455/455."
+                    }
+
+                    {
+                        at 2026-08-09T16:24:49.364256759Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Done. Both halves landed and both are exercised on every sweep.\n\nThe tables: `var.rs` and `alias.rs` hold `BTreeMap`s, so `env`, `printenv` and `alias` print in name order where dash prints in the order its 39 hash buckets happen to chain. `export -p` and `set` are deliberately untouched — dash already `qsort`s those in `showvars` (`src/var.c:409`), so both shells print them sorted and always did.\n\nThe register: `dsdiv_sorted_tables` in `tests/harness/divergences.sh` is the first entry, and it is the reason the sweep can still report FAIL=0. It asserts five things rather than ignoring the difference — matching exit status, a case that actually runs `env`/`printenv`/`alias`, an identical multiset of lines, only assignment-shaped lines having moved, and the port's blocks being the sorted side. The last two are what keep it from excusing a regression: `ds_same_lines` alone would excuse every permutation, including one that is neither shell's.\n\nCurrent state on master: `runall.sh 8` reports XFAIL=1 with no STALE (the entry fires in `aud_state_var`), and `divtest.sh` reports PASS=28 FAIL=0 — twenty-eight tests that all assert *refusals*, because the way this entry fails is by matching too much.\n\nKnown limit, pinned by `divtest.sh` so it cannot drift silently: `ds_blocks_sorted` reads each maximal run of assignment-shaped lines as one block, so a case printing two environments back to back with nothing between them would be refused and reported as a failure. Nothing in `tests/corpus` does, and a loud refusal is the right way for this entry to be wrong."
+                    }
+
+                    {
+                        at 2026-08-09T16:24:56.014094132Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }
