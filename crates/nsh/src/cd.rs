@@ -4,12 +4,11 @@
 //! `__CYGWIN__` is not selected, so `updatepwd` does no path normalisation.
 //! `__GLIBC__` *is* selected, so `getpwd` uses `getcwd(0, 0)`.
 
-use bstr::BString;
+use bstr::{BStr, BString, ByteSlice};
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 use libc::{c_char, c_int, c_void};
 
 use crate::error::{INTOFF, INTON};
-use crate::memalloc::savestr;
 use crate::mystring::{dotdir, homestr, nullstr};
 use crate::options::{argptr, nextopt};
 use crate::output::VaArg;
@@ -19,12 +18,26 @@ use crate::var::{bltinlookup, setvar, VEXPORT};
 const CD_PHYSICAL: c_int = 1;
 const CD_PRINT: c_int = 2;
 
-static mut curdir: *mut c_char = addr_of!(nullstr) as *mut c_char; /* current working directory */
-static mut physdir: *mut c_char = addr_of!(nullstr) as *mut c_char; /* physical working directory */
+/* The C's `nullstr` sentinel is `None`.  It is a sentinel, not an empty
+ * path: `getpwd` never returns an empty string on success and `updatepwd`
+ * never produces one, so no reachable value collides with it. */
+static mut curdir: Option<BString> = None; /* current working directory */
+static mut physdir: Option<BString> = None; /* physical working directory */
 
 #[inline]
 unsafe fn errno() -> c_int {
     *libc::__errno_location()
+}
+
+/// The bytes `setvar` and `out1fmt` want: a path with the terminator the C's
+/// readers read up to, `nullstr`'s empty string when the sentinel is set.
+unsafe fn cbytes(s: &Option<BString>) -> Vec<u8> {
+    let mut v = match s {
+        Some(b) => b.to_vec(),
+        None => Vec::new(),
+    };
+    v.push(0);
+    v
 }
 
 // [spec:dash:def:cd.cdopt-fn]
@@ -154,9 +167,10 @@ pub unsafe fn cdcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
     /* out: */
     if (flags & CD_PRINT) != 0 {
+        let d = cbytes(&*addr_of!(curdir));
         crate::output::out1fmt(
             addr_of!(crate::mystring::snlfmt) as *const c_char,
-            &[VaArg::Str(curdir)],
+            &[VaArg::Str(d.as_ptr() as *const c_char)],
         );
     }
     0
@@ -201,8 +215,6 @@ unsafe fn docd(mut dest: *const c_char, flags: c_int) -> c_int {
 // [spec:dash:def:cd.updatepwd-fn]
 // [spec:dash:sem:cd.updatepwd-fn]
 unsafe fn updatepwd(dir: *const c_char) -> *const c_char {
-    let mut p: *mut c_char;
-    let mut cdcomppath: *mut c_char;
     /* `lim` is `stackblock() + 1` in the C, re-read after `makestrspace`
      * because the block can move; against an owned buffer it is just an
      * index, and `new > lim` is a comparison of lengths. */
@@ -210,23 +222,17 @@ unsafe fn updatepwd(dir: *const c_char) -> *const c_char {
 
     /* #ifdef __CYGWIN__ — not selected. */
 
-    /* `sstrdup(dir)` — `strtok` below writes NULs into the copy, so it
-     * cannot be `dir` itself, and the copy has to outlive the whole walk.
-     * That is a local buffer; the C's was the region's, released by
-     * `cdcmd`'s enclosing mark. */
-    let mut cdcompbuf: Vec<u8> =
-        core::slice::from_raw_parts(dir as *const u8, libc::strlen(dir) + 1).to_vec();
-    cdcomppath = cdcompbuf.as_mut_ptr() as *mut c_char;
+    /* `sstrdup(dir)`.  The copy outlives the whole walk because the
+     * components below borrow it while `new` grows. */
+    let cdcompbuf: Vec<u8> =
+        core::slice::from_raw_parts(dir as *const u8, libc::strlen(dir)).to_vec();
     let new = &mut *addr_of_mut!(pwdbuf);
     new.clear();
     if *dir != b'/' as c_char {
-        if curdir == addr_of!(nullstr) as *mut c_char {
+        let Some(cur) = &*addr_of!(curdir) else {
             return null_mut();
-        }
-        new.extend_from_slice(core::slice::from_raw_parts(
-            curdir as *const u8,
-            libc::strlen(curdir),
-        ));
+        };
+        new.extend_from_slice(cur);
     }
     new.reserve(libc::strlen(dir) + 2);
     lim = 1;
@@ -243,33 +249,32 @@ unsafe fn updatepwd(dir: *const c_char) -> *const c_char {
         }
     } else {
         new.push(b'/');
-        cdcomppath = cdcomppath.add(1);
         if *dir.offset(1) == b'/' as c_char && *dir.offset(2) != b'/' as c_char {
             new.push(b'/');
-            cdcomppath = cdcomppath.add(1);
             lim += 1;
         }
     }
-    p = libc::strtok(cdcomppath, b"/\0".as_ptr() as *const c_char);
-    while !p.is_null() {
-        if *p == b'.' as c_char
-            && *p.offset(1) == b'.' as c_char
-            && *p.offset(2) == b'\0' as c_char
-        {
+    /* `strtok(cdcomppath, "/")` walked from just past the leading slashes the
+     * arm above consumed; an empty field is exactly what `strtok` never
+     * yields, so skipping them here would change nothing. */
+    for p in cdcompbuf.split_str(b"/") {
+        if p.is_empty() {
+            continue;
+        }
+        if p == b".." {
             while new.len() > lim {
                 new.pop();
                 if new[new.len() - 1] == b'/' {
                     break;
                 }
             }
-        } else if *p == b'.' as c_char && *p.offset(1) == b'\0' as c_char {
+        } else if p == b"." {
             /* nothing */
         } else {
             /* fall through / default: */
-            new.extend_from_slice(core::slice::from_raw_parts(p as *const u8, libc::strlen(p)));
+            new.extend_from_slice(p);
             new.push(b'/');
         }
-        p = libc::strtok(null_mut(), b"/\0".as_ptr() as *const c_char);
     }
     if new.len() > lim {
         new.pop();
@@ -291,73 +296,103 @@ static mut pwdbuf: BString = BString::new(Vec::new());
 
 // [spec:dash:def:cd.getpwd-fn]
 // [spec:dash:sem:cd.getpwd-fn]
-unsafe fn getpwd() -> *mut c_char {
-    /* #ifdef __GLIBC__ */
+unsafe fn getpwd() -> Option<BString> {
+    /* #ifdef __GLIBC__ — `getcwd(0, 0)` allocates as it needs to, which is
+     * what makes it work for a path longer than `PATH_MAX`; the buffer is
+     * libc's, so it is copied out and released rather than kept. */
     let dir: *mut c_char = libc::getcwd(null_mut(), 0);
 
     if !dir.is_null() {
-        return dir;
+        let owned =
+            BString::from(core::slice::from_raw_parts(dir as *const u8, libc::strlen(dir)));
+        libc::free(dir as *mut c_void);
+        return Some(owned);
     }
 
     crate::error::sh_warnx(
         cstr(b"getcwd() failed: %s\0"),
         &[VaArg::Str(libc::strerror(errno()))],
     );
-    addr_of!(nullstr) as *mut c_char
+    None
 }
 
 // [spec:dash:def:cd.pwdcmd-fn]
 // [spec:dash:sem:cd.pwdcmd-fn]
 pub unsafe fn pwdcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     let flags: c_int;
-    let mut dir: *const c_char = curdir;
 
     flags = cdopt();
-    if flags != 0 {
-        if physdir == addr_of!(nullstr) as *mut c_char {
-            setpwd(dir, 0);
+    let dir = if flags != 0 {
+        if (*addr_of!(physdir)).is_none() {
+            setpwd_inner(Pwd::Current, 0);
         }
-        dir = physdir;
-    }
+        cbytes(&*addr_of!(physdir))
+    } else {
+        cbytes(&*addr_of!(curdir))
+    };
     crate::output::out1fmt(
         addr_of!(crate::mystring::snlfmt) as *const c_char,
-        &[VaArg::Str(dir)],
+        &[VaArg::Str(dir.as_ptr() as *const c_char)],
     );
     0
+}
+
+/// What `setpwd`'s `val` says, which the C encodes in two pointer
+/// comparisons against a value the caller cannot construct any other way.
+enum Pwd<'a> {
+    /// `setpwd(NULL, …)` — ask the kernel, and take the answer for both
+    /// `curdir` and `physdir`.
+    Unknown,
+    /// `setpwd(curdir, …)` — `pwdcmd`'s call.  Refresh `physdir`; `curdir`
+    /// already holds the logical path and keeps it.
+    Current,
+    /// `setpwd(p, …)` — adopt `p` as the logical path.
+    New(&'a BStr),
 }
 
 // [spec:dash:def:cd.setpwd-fn]
 // [spec:dash:sem:cd.setpwd-fn]
 pub unsafe fn setpwd(val: *const c_char, setold: c_int) {
-    let oldcur: *mut c_char;
-    let mut dir: *mut c_char;
+    if val.is_null() {
+        setpwd_inner(Pwd::Unknown, setold);
+    } else {
+        let bytes = core::slice::from_raw_parts(val as *const u8, libc::strlen(val));
+        setpwd_inner(Pwd::New(BStr::new(bytes)), setold);
+    }
+}
 
-    oldcur = curdir;
-    dir = curdir;
-
+unsafe fn setpwd_inner(val: Pwd, setold: c_int) {
     if setold != 0 {
-        setvar(b"OLDPWD\0".as_ptr() as *const c_char, oldcur, VEXPORT);
+        let old = cbytes(&*addr_of!(curdir));
+        setvar(
+            b"OLDPWD\0".as_ptr() as *const c_char,
+            old.as_ptr() as *const c_char,
+            VEXPORT,
+        );
     }
     INTOFF();
-    if physdir != addr_of!(nullstr) as *mut c_char {
-        if physdir != oldcur {
-            libc::free(physdir as *mut c_void);
+    /* `free(physdir)` guarded by `physdir != oldcur`: the C's `curdir` and
+     * `physdir` are one allocation after a `setpwd(NULL, …)`, and the guard
+     * exists only to stop the double free.  Two owned copies say the same
+     * thing without the alias. */
+    physdir = None;
+    match val {
+        Pwd::Unknown | Pwd::Current => {
+            let s = getpwd();
+            if matches!(val, Pwd::Unknown) {
+                curdir = s.clone();
+            }
+            physdir = s;
         }
-        physdir = addr_of!(nullstr) as *mut c_char;
-    }
-    if oldcur as *const c_char == val || val.is_null() {
-        let s: *mut c_char = getpwd();
-        physdir = s;
-        if val.is_null() {
-            dir = s;
+        Pwd::New(v) => {
+            curdir = Some(v.to_owned());
         }
-    } else {
-        dir = savestr(val);
     }
-    if oldcur != dir && oldcur != addr_of!(nullstr) as *mut c_char {
-        libc::free(oldcur as *mut c_void);
-    }
-    curdir = dir;
+    let dir = cbytes(&*addr_of!(curdir));
     INTON();
-    setvar(b"PWD\0".as_ptr() as *const c_char, dir, VEXPORT);
+    setvar(
+        b"PWD\0".as_ptr() as *const c_char,
+        dir.as_ptr() as *const c_char,
+        VEXPORT,
+    );
 }
