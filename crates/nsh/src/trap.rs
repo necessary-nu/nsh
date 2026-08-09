@@ -422,7 +422,7 @@ pub unsafe fn dotrap() {
          * buffer it is handed and the action it runs may `trap` over this
          * very slot; the C passes the slot's own pointer and keeps reading
          * it after `trapcmd` has freed it. */
-        let p = match &(*addr_of!(trap))[(i + 1) as usize] {
+        let mut p = match &(*addr_of!(trap))[(i + 1) as usize] {
             Some(t) => cbytes(t),
             None => {
                 i += 1;
@@ -430,7 +430,7 @@ pub unsafe fn dotrap() {
                 continue;
             }
         };
-        crate::eval::evalstring(p.as_ptr() as *mut c_char, 0);
+        crate::eval::evalstring(p.as_mut_ptr() as *mut c_char, 0);
         if evalskip != SKIPFUNC {
             exitstatus = status;
         }
@@ -486,8 +486,8 @@ pub unsafe fn exitshell() -> ! {
                     break 'out;
                 }
                 evalskip = 0;
-                let p = cbytes(&p);
-                crate::eval::evalstring(p.as_ptr() as *mut c_char, 0);
+                let mut p = cbytes(&p);
+                crate::eval::evalstring(p.as_mut_ptr() as *mut c_char, 0);
                 evalskip = SKIPFUNCDEF;
             }
         }

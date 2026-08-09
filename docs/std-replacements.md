@@ -1198,9 +1198,19 @@ one deliberate act rather than five incidental ones.
    supply `mempcpy`" is a claim anyone still needs asserted.
 
 5. **Whether `savefd`'s `EBADF`-as-success (§4.9 item 2) is reachable
-   from the language.** It is plainly deliberate in the C, but the path
-   that produces a closed `from` descriptor was inferred, not traced.
-   *Resolved by:* `dash -c 'exec 9>&-; { :; } 9>&1'` under `strace`.
+   from the language.** *Settled: it is, from two tokens of shell.*
+   `dash -c 'exec 9>&-; { :; } 9>&1'` under `strace` gives
+
+   ```
+   fcntl(9, F_DUPFD_CLOEXEC, 10)    = -1 EBADF (Bad file descriptor)
+   dup2(1, 9)                       = 9
+   close(9)                         = 0
+   ```
+
+   The `err != EBADF` guard skips both the `close(ofd)` and the
+   `sh_error`, `savefd` returns -1, `renamed[9]` stays `CLOSED`, and
+   `popredir` closes 9. The port produces the identical three syscalls.
+   An `OwnedFd` conversion must reproduce this and `try_clone()` cannot.
 
 6. **The risk weights in §2 are a ranking device, not a measurement.**
    R0=1/R1=2/R2=6/R3=20 was chosen so that a 400-line R0 deletion

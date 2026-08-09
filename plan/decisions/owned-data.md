@@ -1123,3 +1123,222 @@ things with two owners:
 pass, and three of the 26 are `region_untouched`, which exists only to
 check that the rest is dead.  `expand.rs`, `parser.rs` and `mail.rs` reach
 `memalloc` not at all.
+
+## What this cost in the port: five small containers
+
+Written after `redir.rs`'s saved-descriptor stack, `trap.rs`'s action
+table, `alias.rs`'s nodes, `options.rs`'s positional parameters and
+`cd.rs`'s two working directories became owned values.  The five are
+unrelated to each other and landed as five commits; what they have in
+common is that each one's C representation was carrying a fact the Rust
+has to carry deliberately.
+
+### `curdir` and `physdir` are one allocation, and a guard says so
+
+`cd.c:setpwd` frees `physdir` only `if (physdir != oldcur)`.  That test
+is not defensive: after `setpwd(NULL, …)` -- which is what `var.c`'s
+`INIT` does when `$PWD` does not name the current directory -- `curdir`
+and `physdir` are the *same* `getpwd()` result, because the C writes
+`physdir = s` and then `dir = s`.  The guard exists to stop the double
+free and for no other reason.  Two owned copies say the same thing about
+the shell and remove the question; the extra copy is one path per `cd`.
+
+Its sibling, `oldcur == val`, is a different kind of thing: it is the C
+asking "is my caller `pwdcmd`, handing me `curdir` itself?", and it is
+the only way that call can be distinguished from `setpwd(p, …)` with a
+path that happens to compare equal byte for byte.  Owned values have no
+pointer to compare, so the three calls the two tests separate became
+three arms of an enum.  `Pwd::Current` is `pwdcmd`'s.
+
+### `nullstr` is a sentinel `cd.c` reads by identity, never by content
+
+`cd.h`'s contract, restated in `[spec:dash:sem:cd.getpwd-fn]`: `getpwd`
+returns `nullstr` on failure and "callers detect it by pointer identity,
+not by content, and must never free".  `curdir == nullstr` in `updatepwd`
+and `physdir == nullstr` in `pwdcmd` are both that test.
+
+`Option<BString>` is exact here only because no reachable value collides
+with the sentinel: `getcwd` cannot return an empty string on success, and
+`updatepwd` always emits at least the leading slash before its `lim`
+floor stops the `..` pops.  If either could produce an empty path the
+mapping would silently merge "failed" with "the empty path", so the
+argument, not the type, is what makes this safe.
+
+### `strtok` put `updatepwd`'s parse position in a libc static
+
+The last piece of shell state that was not merely process-global but
+*libc*-global.  Two `strtok` calls in `updatepwd` shared the hidden
+cursor with every other `strtok` caller in the process, which does not
+matter for a shell that owns its process and does matter for a shell
+that is becoming a library: any host code calling `strtok` between the
+two would have redirected the walk.
+
+`split_str(b"/")` filtered for empty fields is byte-identical, and the
+filter is why: `strtok` never yields an empty token, so runs of slashes
+collapse the same way and the two `cdcomppath` advances past the leading
+slashes -- pure `strtok` bookkeeping -- could go with it.  The rest of
+`updatepwd` is untouched, because `cd -L` is textual and
+`docs/std-replacements.md` §5.3 measures four ways `std::path` would get
+it wrong.
+
+### `onsig` reads the trap table from a kernel signal frame
+
+`trap[NSIG]` is written by `trapcmd` under `INTOFF` and read by `onsig`,
+which the kernel can call between any two instructions.  Whatever the
+table is made of, `onsig`'s two questions -- is `trap[SIGCHLD]` set, is
+`trap[SIGINT]` set -- must compile to what `!= NULL` compiled to.
+`Option<BString>` does: `Vec`'s pointer is `NonNull`, so the `None`
+discriminant is the null pointer word and `is_none()` is that load.  No
+allocation, no lock, nothing that is not async-signal-safe.
+
+The write side needed the ordering thought about, and it is the reverse
+of what a first reading suggests.  The C frees the old action and *then*
+stores the new one, so the slot spends a few instructions holding a
+dangling non-NULL pointer.  That is not a bug for `onsig`, which never
+dereferences it: the slot reads "a trap is set" for the whole window,
+which is the same answer before and after.  A `take` followed by a store
+would have made the slot read `None` in the middle -- and under `INTOFF`
+that is the difference between `intpending` being set and not.
+`mem::replace` keeps the C's answer and leaves nothing stale.
+
+### `dotrap` hands `evalstring` the slot's own pointer, and the C reads it freed
+
+`dotrap` does `p = trap[i + 1]` and then `evalstring(p, 0)`, which parses
+directly out of that buffer.  A trap action is allowed to run `trap`,
+including on its own signal, and `trapcmd` frees the slot's old action.
+`trap 'trap - INT; echo gone; echo more' INT` reaches it: reference dash
+prints both lines, from memory it has already freed.
+
+Copying the action before running it is what makes ownership work at all
+here, and it is also what lets `clear_traps` stop leaking.  The C's
+`*tp = NULL; … ckfree(*tp)` frees NULL and leaks the action
+(`trap.c:189`); dropping the taken value frees it instead, which is only
+safe because no reader holds a pointer into a slot any more.  `exitshell`
+takes `trap[0]` for the same reason the C sets it to NULL without
+freeing.
+
+### `strpush.string` is where an alias's buffer changes owner
+
+The one place in these five where the C's ownership could not be moved
+into Rust, and it is worth stating precisely because it looks like it
+should be easy.
+
+`alias.c:setalias` skips `ckfree(ap->name)` when `ap->flag & ALIASINUSE`
+and then re-points `ap->name` at a fresh `savestr`.  That reads as a
+deliberate leak so the in-flight reader keeps a valid pointer.  It is not
+a leak: `input.c:popstring` ends with
+
+    if (sp->string != sp->ap->name)
+            ckfree(sp->string);
+
+and `sp->string` is the `ap->name` that was current when `pushstring`
+ran.  So the test means "did `setalias` re-point this alias under me?",
+and when it did, ownership of that buffer transfers from `alias.c` to
+`input.c`, which frees it with `free`.  An owned `BString` there would be
+a Rust allocation freed by libc.
+
+The path is reachable in two lines, because `parsecmd` returns at the
+newline inside an alias body, so the redefinition *executes* while the
+body is still being read:
+
+    alias a='alias a=zzz
+    echo hi'
+    a
+
+Reference dash prints `hi` from the old buffer and then lists `a=zzz`,
+and valgrind reports no leak -- which is only possible if `popstring`
+did the free.  Deferring the re-point until the reader finishes is not a
+way out either: `alias` run from *inside* the same body prints the new
+value, so the C's re-point is immediate and observable.
+
+What did convert is the node.  `input.rs` holds an entry's address in a
+`parsefile` for as long as the alias is being read from, so the map's
+values are `Box<alias>`; a `BTreeMap` moves its values when it
+rebalances, and the `Box` is what stops that being observable.  The name
+buffer waits for `input.rs:popstring` to stop freeing it.
+
+### A redirection frame's address is stable; its index is what survives
+
+`redir.c`'s `sv` is a `redirtab *` held across the whole redirection
+loop, and the loop calls `openredirect`, which for a here-document
+reaches `expandarg`, which reaches command substitution, which runs
+`evalcommand`, which pushes and pops redirection frames of its own.  In
+the C that is free: `sv` points at its own `ckmalloc` block and nothing
+moves it.  A `Vec` reallocates.
+
+So `redirect` holds the frame's *index* and re-indexes on every use
+rather than borrowing across the loop.  Nested activity is balanced --
+`evalcommand`'s `unwindredir(redir_stop)` pops back to its own depth --
+so the index still names the same frame when control returns, and an
+exception that unwound past it would have abandoned the loop anyway.
+Indexing also converts what would have been a dangling frame pointer
+into a panic.
+
+`pushredir`'s return value was a `redirtab *` used only as a mark for
+`unwindredir` to compare against; a stack in a vector says the same thing
+with a depth, which is `eval.rs:931`'s one-line change.
+
+The slots stay `c_int`.  `docs/std-replacements.md` §4.9 item 5 is the
+reason and it is unchanged by this: `popredir` restores with `dup2` and
+then closes, it is reached from the unwind path through
+`mkinit_exitreset`, and giving a slot a destructor moves descriptor
+closes to points the C never had them.  `mkinit_forkreset`'s
+`redirlist = NULL` abandons frames without restoring or closing anything,
+and `Vec::clear` over integer slots abandons them the same way; over
+`OwnedFd`s it would not.
+
+### `savefd`'s EBADF-as-success is reachable from two tokens
+
+`docs/std-replacements.md` §8 item 5 listed this as inferred rather than
+traced.  Traced now.  `dash -c 'exec 9>&-; { :; } 9>&1'` under `strace`:
+
+    fcntl(9, F_DUPFD_CLOEXEC, 10)    = -1 EBADF (Bad file descriptor)
+    dup2(1, 9)                       = 9
+    close(9)                         = 0
+
+`savefd`'s `if (err != EBADF)` guard skips both the `close(ofd)` and the
+`sh_error`, so duplicating a closed descriptor returns -1 and the caller
+carries on; `renamed[9]` stays `CLOSED` and `popredir` closes 9.  The
+port produces the identical three syscalls.  Any future `OwnedFd`
+conversion has to reproduce it, and `try_clone()` cannot -- it returns
+`Err` and a `?` propagates.
+
+### `shellparam.malloc` and `shellparam.p` are one fact said twice
+
+A flag saying who owns the words and a pointer to them.  They became one
+field: `owned` is `Some` exactly where `malloc` was 1, `borrowed` is the
+`argv` `p` pointed into when it was 0.
+
+What the words alone cannot carry is `getopts`, which is real pointer
+arithmetic over a `char **` -- `optnext[-1]`, `optnext - optfirst` -- and
+whose `optfirst` is *either* `shellparam.p` or a pointer into the
+builtin's own `argv` (`getoptscmd` picks by argument count).  One uniform
+array is not a convenience there, it is the interface.  So the owned form
+keeps a `ptrs` vector beside `words`, holding each word's address and a
+NULL, rebuilt whenever `words` changes; each word carries its own
+terminator because every reader reads it as a C string.  The invariant
+that falls out: a word may be dropped or the list rebuilt, but a word
+must never be resized in place.
+
+`shift` needs both halves.  With owned words it drains the front and
+reindexes.  With borrowed ones the C shifts the array down *in place*,
+which rewrites the caller's `argv` -- that is not an accident, it is how
+`shift` inside a function works, and `evalcommand` discards the array
+when the call returns.
+
+### `saveparam = shellparam` is a copy the C immediately disarms
+
+`evalfun` copies the whole struct and then, two lines later and inside
+the protected region, sets `shellparam.malloc = 0`.  The second statement
+is what makes the first safe: without it the epilogue's
+`freeparam(&shellparam)` would free the words `saveparam` still points
+at, and `shellparam = saveparam` would restore the freed pointers.
+
+That is a move written as a copy plus a disarm, and it is why `shparam`
+being `Copy` was load-bearing rather than incidental.  `takeparam` is
+both statements at once.  The one behavioural difference is the window
+between it and `borrowparam`: the C leaves the outer parameters readable
+there and the port leaves none.  Nothing in that window -- `INTOFF`,
+`handler = jl`, `reffunc`, two assignments, `INTON` -- reads a positional
+parameter, and on the C's side the same window is the one its `malloc = 0`
+exists to make safe.
