@@ -28,7 +28,7 @@ use crate::output::VaArg;
 use crate::shell::cstr;
 use crate::system::strchrnul;
 
-extern "C" {
+unsafe extern "C" {
     /// `MKINIT char **environ;` — the process environment (unistd.h).
     static mut environ: *mut *mut c_char;
 }

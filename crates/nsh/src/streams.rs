@@ -328,11 +328,11 @@ mod tests {
                 stdout: 8,
                 stderr: 9,
             });
-            assert_eq!(crate::output::output.fd, 8);
-            assert_eq!(crate::output::errout.fd, 9);
+            let (out, err) = (crate::output::output.fd, crate::output::errout.fd);
+            assert_eq!((out, err), (8, 9));
             set(Streams::INHERIT);
-            assert_eq!(crate::output::output.fd, 1);
-            assert_eq!(crate::output::errout.fd, 2);
+            let (out, err) = (crate::output::output.fd, crate::output::errout.fd);
+            assert_eq!((out, err), (1, 2));
         }
     }
 

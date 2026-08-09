@@ -37,7 +37,7 @@ type wint_t = c_uint;
 #[allow(non_camel_case_types)]
 type wctype_t = c_ulong;
 
-extern "C" {
+unsafe extern "C" {
     fn mbrlen(s: *const c_char, n: size_t, ps: *mut libc::mbstate_t) -> size_t;
     fn mbrtowc(
         pwc: *mut wchar_t,

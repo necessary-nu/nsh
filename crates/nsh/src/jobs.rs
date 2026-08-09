@@ -1503,7 +1503,7 @@ unsafe fn waitproc(block: c_int, status: *mut c_int) -> c_int {
 
     /* HAVE_WAIT3; the fallback is `waitpid((pid_t)-1, status, flags, NULL)`.
      * `wait3` has no binding in the `libc` crate, so it is declared here. */
-    extern "C" {
+    unsafe extern "C" {
         fn wait3(status: *mut c_int, options: c_int, rusage: *mut libc::rusage) -> pid_t;
     }
 

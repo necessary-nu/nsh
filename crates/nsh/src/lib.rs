@@ -24,6 +24,20 @@
 #![allow(non_upper_case_globals)]
 #![allow(unused_variables)]
 #![allow(clippy::all)]
+// Edition 2024 turns this on, and on this crate it fires 5,010 times:
+// 2,747 calls to an unsafe function, 1,221 raw-pointer dereferences,
+// 1,018 reads of a mutable static, 24 union-field accesses. Every one is
+// inside a function already declared `unsafe`, so wrapping the bodies
+// restates what the signature says and buries the warnings that mean
+// something.
+//
+// The count is the point. [dec:nsh:minimal-unsafe] tracks unsafe
+// *functions* — 598 of 794 — which says nothing about how much unsafe is
+// inside them. 5,010 operations is the figure that falls as `owned-data`,
+// `errors-are-values` and `no-ambient-state` remove raw pointers and
+// statics, and it is what to turn this lint on against once it is
+// affordable. Re-measure by deleting this line.
+#![allow(unsafe_op_in_unsafe_fn)]
 
 // ---- the proposed public API, unimplemented --------------------------
 //

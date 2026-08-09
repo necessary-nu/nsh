@@ -242,7 +242,7 @@ pub unsafe fn yylex() -> c_int {
  * accept them — `$((0b11))` is 3 — and binding the plain symbol here
  * silently loses binary literals.
  */
-extern "C" {
+unsafe extern "C" {
     #[link_name = "__isoc23_strtoimax"]
     fn strtoimax(nptr: *const c_char, endptr: *mut *mut c_char, base: c_int) -> intmax_t;
 }

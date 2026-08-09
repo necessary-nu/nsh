@@ -2309,6 +2309,13 @@ children (
                     }
                 )
             }
+
+            {
+                id edition-2024
+                title "Move the workspace to edition 2024, and take unsafe-op count as the real minimal-unsafe metric"
+                priority 0
+                kind @build
+            }
         )
     }
 )

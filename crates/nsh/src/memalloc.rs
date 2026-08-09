@@ -666,7 +666,8 @@ mod tests {
             assert_eq!(b as usize - a as usize, SHELL_ALIGN(16));
             // stunalloc winds the pointer back and returns the space.
             stunalloc(a as *mut c_void);
-            assert_eq!(stacknleft, before);
+            let left = stacknleft;
+            assert_eq!(left, before);
             assert_eq!(stackblock() as *mut c_char, a);
         });
     }
@@ -701,15 +702,16 @@ mod tests {
             setstackmark(&mut inner);
             let mid = stacknxt;
             stalloc(MINSIZE as size_t * 3); // forces a new block
-            assert_ne!(stacknxt, mid);
+            assert_ne!({ stacknxt }, mid);
             popstackmark(&mut inner);
-            assert_eq!(stacknxt, mid);
+            assert_eq!({ stacknxt }, mid);
             popstackmark(&mut outer);
 
             // Back exactly where we started, blocks freed.
-            assert_eq!(stacknxt, p0);
-            assert_eq!(stacknleft, n0);
-            assert_eq!(sstrend, p0.add(n0));
+            let (nxt, left, end) = (stacknxt, stacknleft, sstrend);
+            assert_eq!(nxt, p0);
+            assert_eq!(left, n0);
+            assert_eq!(end, p0.add(n0));
 
             // pushstackmark is setstackmark's worker, with the grab length
             // supplied by the caller.
@@ -718,7 +720,8 @@ mod tests {
             assert_eq!(m.stacknxt, p0);
             assert!(stacknleft < n0);
             popstackmark(&mut m);
-            assert_eq!(stacknleft, n0);
+            let left = stacknleft;
+            assert_eq!(left, n0);
         }
     }
 
@@ -829,7 +832,7 @@ mod tests {
             for _ in 0..room {
                 q = _STPUTC(b'f' as c_int, q);
             }
-            assert_eq!(q, sstrend);
+            assert_eq!(q, { sstrend });
             let grown = _STPUTC(b'!' as c_int, q);
             assert!(stackblocksize() > room);
             assert_eq!(*grown.sub(1), b'!' as c_char);

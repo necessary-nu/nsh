@@ -1032,8 +1032,9 @@ mod tests {
 
             freestdout();
 
-            assert_eq!(output.nextc, output.buf);
-            assert_eq!(output.flags, 0);
+            let (nextc, buf, flags) = (output.nextc, output.buf, output.flags);
+            assert_eq!(nextc, buf);
+            assert_eq!(flags, 0);
             (output.nextc, output.buf, output.end, output.flags, output.fd) = saved;
         }
     }
@@ -1057,9 +1058,11 @@ mod tests {
 
             out1fmt(CStr0::new("n=%d").p(), &[VaArg::Int(3)]);
             // Buffered, not yet written.
-            assert_eq!((output.nextc as usize) - (output.buf as usize), 3);
+            let (nextc, buf) = (output.nextc as usize, output.buf as usize);
+            assert_eq!(nextc - buf, 3);
             flushall();
-            assert_eq!(output.nextc, output.buf);
+            let (nextc, buf) = (output.nextc, output.buf);
+            assert_eq!(nextc, buf);
 
             (output.nextc, output.buf, output.end, output.bufsize,
              output.fd, output.flags) = saved;

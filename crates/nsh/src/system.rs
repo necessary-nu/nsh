@@ -73,7 +73,7 @@ pub unsafe fn strchrnul(s: *const c_char, c: c_int) -> *mut c_char {
  * accept them — `$((0b11))` is 3 — and binding the plain symbol here
  * silently loses binary literals.
  */
-extern "C" {
+unsafe extern "C" {
     #[link_name = "__isoc23_strtoimax"]
     pub fn strtoimax(
         nptr: *const c_char,
