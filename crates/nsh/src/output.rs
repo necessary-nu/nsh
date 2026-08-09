@@ -32,7 +32,6 @@ use libc::{c_char, c_double, c_int, c_long, c_longlong, c_uint, c_ulong, c_ulong
            size_t};
 
 use crate::error::{INTOFF, INTON};
-use crate::memalloc::{popstackmark, setstackmark, stackblocksize, stalloc, stackmark};
 use crate::shell::{cstr, likely};
 
 const OUTBUFSIZ: size_t = 8192; /* BUFSIZ */
@@ -437,11 +436,23 @@ pub unsafe fn fmtstr(outbuf: *mut c_char, length: size_t, fmt: *const c_char, ap
 
 // [spec:dash:def:output.xvasprintf-fn]
 // [spec:dash:sem:output.xvasprintf-fn]
+/// The C's `xvasprintf`, with `out` in place of the region.
+///
+/// `stalloc(MAX(len, stackblocksize()) + 1)` asks for a block the region
+/// cannot satisfy from its free space, so it always chains a fresh one.
+/// [dec:nsh:owned-data] records why that was load bearing: it kept
+/// `print_escape_str`'s run of `X`s, sitting above the converted string
+/// in the *same* block, alive while `printf` read it as this call's
+/// argument.  The `X`s became a buffer of their own in the previous pass,
+/// so the `stackblocksize()` term has no remaining customer and the
+/// request is `len + 1` — which is all `xvsnprintf` writes in either
+/// case, and all any caller reads.
 unsafe fn xvasprintf(
     sp: *mut *mut c_char,
     size: size_t,
     f: *const c_char,
     ap: &[VaArg],
+    out: &mut Vec<u8>,
 ) -> c_int {
     let s: *mut c_char;
     let mut len: c_int;
@@ -457,46 +468,55 @@ unsafe fn xvasprintf(
         return len;
     }
 
-    s = stalloc(
-        (if (len as size_t) >= stackblocksize() {
-            len as size_t
-        } else {
-            stackblocksize()
-        }) + 1,
-    ) as *mut c_char;
+    out.clear();
+    out.resize(len as usize + 1, 0);
+    s = out.as_mut_ptr() as *mut c_char;
     *sp = s;
     len = xvsnprintf(s, (len + 1) as size_t, f, ap);
+    /* The second pass formats the same arguments into a buffer sized from
+     * the first pass's answer, so it cannot come out longer; the caller
+     * reads `len` bytes from `s` on that basis. */
+    debug_assert!(len >= 0 && (len as usize) < out.len());
     len
 }
 
 // [spec:dash:def:output.xasprintf-fn]
 // [spec:dash:sem:output.xasprintf-fn]
-pub unsafe fn xasprintf(sp: *mut *mut c_char, f: *const c_char, ap: &[VaArg]) -> c_int {
+pub unsafe fn xasprintf(
+    sp: *mut *mut c_char,
+    f: *const c_char,
+    ap: &[VaArg],
+    out: &mut Vec<u8>,
+) -> c_int {
     let ret: c_int;
 
-    ret = xvasprintf(sp, 0, f, ap);
+    ret = xvasprintf(sp, 0, f, ap, out);
     ret
 }
 
 // [spec:dash:def:output.doformat-fn]
 // [spec:dash:sem:output.doformat-fn]
 pub unsafe fn doformat(dest: *mut output, f: *const c_char, ap: &[VaArg]) {
-    let mut smark: stackmark = stackmark::new();
     let mut s: *mut c_char;
     let len: c_int;
     let olen: c_int;
+    /* `setstackmark`/`popstackmark` bounded the block `xvasprintf` used
+     * when the text did not fit in `dest`.  That block is this, and it is
+     * dropped at the end of the function by the same rule the mark
+     * expressed.  `Vec::new` does not allocate, so the common path — the
+     * text fits and `xvasprintf` returns before touching it — costs
+     * nothing. */
+    let mut buf: Vec<u8> = Vec::new();
 
-    setstackmark(&mut smark);
     s = (*dest).nextc;
     olen = ((*dest).end as isize).wrapping_sub((*dest).nextc as isize) as c_int;
-    len = xvasprintf(&mut s, olen as size_t, f, ap);
+    len = xvasprintf(&mut s, olen as size_t, f, ap, &mut buf);
     if likely(olen > len) {
         (*dest).nextc = (*dest).nextc.offset(len as isize);
     } else {
         /* out: is reached either way; only the buffered case skips this */
         outmem(s, len as size_t, dest);
     }
-    popstackmark(&mut smark);
 }
 
 /*
@@ -711,8 +731,8 @@ macro_rules! fmtstr {
 
 #[macro_export]
 macro_rules! xasprintf {
-    ($sp:expr, $f:expr $(, $arg:expr)* $(,)?) => {
-        $crate::output::xasprintf($sp, $f, &[$($crate::output::VaArg::from($arg)),*])
+    ($sp:expr, $out:expr, $f:expr $(, $arg:expr)* $(,)?) => {
+        $crate::output::xasprintf($sp, $f, &[$($crate::output::VaArg::from($arg)),*], $out)
     };
 }
 
@@ -926,24 +946,29 @@ mod tests {
     // [spec:dash:sem:output.xasprintf-fn/test]
     // [spec:dash:sem:output.xvasprintf-fn/test]
     #[test]
-    fn xasprintf_allocates_on_the_stack_and_reports_the_length() {
+    fn xasprintf_writes_into_the_callers_buffer_and_reports_the_length() {
         let _g = crate::testutil::lock();
         unsafe {
-            let mut mark: crate::memalloc::stackmark = core::mem::zeroed();
-            crate::memalloc::setstackmark(&mut mark);
+            let mut out: Vec<u8> = Vec::new();
             let mut sp: *mut c_char = core::ptr::null_mut();
             let n = xasprintf(&mut sp, CStr0::new("%s-%d").p(),
-                              &[VaArg::Str(CStr0::new("id").p()), VaArg::Int(9)]);
+                              &[VaArg::Str(CStr0::new("id").p()), VaArg::Int(9)],
+                              &mut out);
             assert_eq!(crate::testutil::s(sp), "id-9");
             assert_eq!(n, 4);
-            // Long enough to force the grow path rather than the initial
-            // guess.
+            // The block is the caller's, so `sp` points into it.
+            assert_eq!(sp as *const u8, out.as_ptr());
+            // Long enough that the length is well past anything the
+            // region's 504-byte minimum block would have covered.
             let long = "y".repeat(2048);
             let n2 = xasprintf(&mut sp, CStr0::new("%s").p(),
-                               &[VaArg::Str(CStr0::new(&long).p())]);
+                               &[VaArg::Str(CStr0::new(&long).p())],
+                               &mut out);
             assert_eq!(n2, 2048);
             assert_eq!(crate::testutil::s(sp).len(), 2048);
-            crate::memalloc::popstackmark(&mut mark);
+            // Sized to what the first pass measured: the text plus its
+            // terminator, and not the C's `MAX(len, stackblocksize()) + 1`.
+            assert_eq!(out.len(), 2049);
         }
     }
 

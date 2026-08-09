@@ -7,12 +7,12 @@
 //! both the `printf.*` and the `system.*` rule ids.
 //!
 //! Cross-module signatures assumed (see the port report):
-//!   * `crate::memalloc::{stackmark, setstackmark, popstackmark}` — the
-//!     region mark that bounds the block `xasprintf` allocates.  The three
-//!     buffers this file builds — the escaped string, the run of `X`s that
-//!     stands in for it, and `mklong`'s widened format — are owned, so
-//!     `USTPUTC`/`STADJUST` below are the two macros `conv_escape` still
-//!     needs to write through a bare cursor and touch no region.
+//!   * Nothing from `crate::memalloc`.  The four buffers this file deals
+//!     in — the escaped string, the run of `X`s that stands in for it,
+//!     `mklong`'s widened format, and the block `xasprintf` formats into
+//!     — are all owned, so `USTPUTC`/`STADJUST` below are the two macros
+//!     `conv_escape` still needs to write through a bare cursor and touch
+//!     no region.
 //!   * `crate::output::{out1mem, out1fmt!, outc, out1c, xasprintf!}`
 //!   * `crate::error::{sh_error!, sh_warnx!}` via `bltin.h`'s aliases
 //!   * `crate::mystring::{nullstr, snlfmt}` — `char nullstr[1]`
@@ -141,22 +141,29 @@ macro_rules! PF {
 }
 
 macro_rules! ASPF {
-    ($param:expr, $array:expr, $sp:expr, $f:expr, $func:expr) => {{
+    ($param:expr, $array:expr, $sp:expr, $out:expr, $f:expr, $func:expr) => {{
         let __array: *mut c_int = $array;
         let ret: c_int;
         // (char *)param - (char *)array
         match ($param as usize).wrapping_sub(__array as usize) {
             // case 0:
             0 => {
-                ret = crate::output::xasprintf!($sp, $f, $func);
+                ret = crate::output::xasprintf!($sp, $out, $f, $func);
             }
             // case sizeof(*param):
             __n if __n == mem::size_of::<c_int>() => {
-                ret = crate::output::xasprintf!($sp, $f, *__array.add(0), $func);
+                ret = crate::output::xasprintf!($sp, $out, $f, *__array.add(0), $func);
             }
             // default:
             _ => {
-                ret = crate::output::xasprintf!($sp, $f, *__array.add(0), *__array.add(1), $func);
+                ret = crate::output::xasprintf!(
+                    $sp,
+                    $out,
+                    $f,
+                    *__array.add(0),
+                    *__array.add(1),
+                    $func
+                );
             }
         }
         ret
@@ -171,7 +178,6 @@ unsafe fn print_escape_str(
     array: *mut c_int,
     s: *mut c_char,
 ) -> c_int {
-    let mut smark: crate::memalloc::stackmark = mem::zeroed();
     let mut p: *const c_char;
     let done: c_int;
     let mut len: c_int;
@@ -181,10 +187,11 @@ unsafe fn print_escape_str(
      * byte, and the `q = stackblock()` the C re-reads after `makestrspace`
      * is the buffer itself, which cannot move under it. */
     let mut buf = BString::default();
+    /* The block `ASPF` formats into.  It was the region's, bounded by the
+     * `setstackmark`/`popstackmark` pair this replaces; `out1mem` below
+     * reads it, so it has to outlive the `'easy` block and no longer. */
+    let mut formatted: Vec<u8> = Vec::new();
 
-    /* The mark is still needed: `ASPF` goes through `xasprintf`, which
-     * `stalloc`s the block it formats into.  Nothing else here is region. */
-    crate::memalloc::setstackmark(&mut smark);
     done = conv_escape_str(s, &mut buf);
     len = buf.len() as c_int;
     total = len - 1;
@@ -222,7 +229,7 @@ unsafe fn print_escape_str(
         // `ASPF(&p, f, p)`: the out-parameter has to be a raw pointer, not
         // `&mut r`, or the borrow would conflict with reading `r` as the
         // conversion's argument in the same call.
-        total = ASPF!(param, array, ptr::addr_of_mut!(r), f, r);
+        total = ASPF!(param, array, ptr::addr_of_mut!(r), &mut formatted, f, r);
 
         /* The formatted result carries the field width, with the `X`s
          * standing in for the real bytes — which may contain NUL and so
@@ -239,7 +246,6 @@ unsafe fn print_escape_str(
     // easy:
     crate::output::out1mem(p, total as usize);
 
-    crate::memalloc::popstackmark(&mut smark);
     done
 }
 
