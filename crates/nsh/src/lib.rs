@@ -57,7 +57,6 @@ pub mod api;
 
 // ---- foundation -----------------------------------------------------
 pub mod error;
-pub mod memalloc;
 pub mod mystring;
 pub mod output;
 pub mod shell;

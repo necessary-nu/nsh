@@ -2,11 +2,13 @@
 //! Rules: `docs/spec/port/src/cd.md`.
 //!
 //! `__CYGWIN__` is not selected, so `updatepwd` does no path normalisation.
-//! `__GLIBC__` *is* selected, so `getpwd` uses `getcwd(0, 0)`.
+//! `getpwd` uses Rust's Unix OS-string cwd query, preserving the bytes that
+//! the selected glibc `getcwd(0, 0)` path returned without its raw allocation.
 
 use bstr::{BStr, BString, ByteSlice};
 use core::ptr::{addr_of, addr_of_mut, null_mut};
-use libc::{c_char, c_int, c_void};
+use libc::{c_char, c_int};
+use std::os::unix::ffi::OsStrExt;
 
 use crate::error::{INTOFF, INTON};
 use crate::mystring::{dotdir, homestr, nullstr};
@@ -23,11 +25,6 @@ const CD_PRINT: c_int = 2;
  * never produces one, so no reachable value collides with it. */
 static mut curdir: Option<BString> = None; /* current working directory */
 static mut physdir: Option<BString> = None; /* physical working directory */
-
-#[inline]
-unsafe fn errno() -> c_int {
-    *libc::__errno_location()
-}
 
 /// The bytes `setvar` and `out1fmt` want: a path with the terminator the C's
 /// readers read up to, `nullstr`'s empty string when the sentinel is set.
@@ -297,22 +294,18 @@ static mut pwdbuf: BString = BString::new(Vec::new());
 // [spec:dash:def:cd.getpwd-fn]
 // [spec:dash:sem:cd.getpwd-fn]
 unsafe fn getpwd() -> Option<BString> {
-    /* #ifdef __GLIBC__ — `getcwd(0, 0)` allocates as it needs to, which is
-     * what makes it work for a path longer than `PATH_MAX`; the buffer is
-     * libc's, so it is copied out and released rather than kept. */
-    let dir: *mut c_char = libc::getcwd(null_mut(), 0);
-
-    if !dir.is_null() {
-        let owned =
-            BString::from(core::slice::from_raw_parts(dir as *const u8, libc::strlen(dir)));
-        libc::free(dir as *mut c_void);
-        return Some(owned);
+    match std::env::current_dir() {
+        Ok(dir) => return Some(BString::from(dir.as_os_str().as_bytes())),
+        Err(err) => {
+            /* `current_dir` is an OS query on Unix, so this is the errno
+             * `getcwd` would have left for the C's `strerror(errno)` path. */
+            let errno = err.raw_os_error().unwrap_or(libc::EIO);
+            crate::error::sh_warnx(
+                cstr(b"getcwd() failed: %s\0"),
+                &[VaArg::Str(libc::strerror(errno))],
+            );
+        }
     }
-
-    crate::error::sh_warnx(
-        cstr(b"getcwd() failed: %s\0"),
-        &[VaArg::Str(libc::strerror(errno()))],
-    );
     None
 }
 
@@ -395,4 +388,65 @@ unsafe fn setpwd_inner(val: Pwd, setold: c_int) {
         dir.as_ptr() as *const c_char,
         VEXPORT,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    use std::path::PathBuf;
+
+    struct CwdGuard {
+        old: PathBuf,
+        temporary: PathBuf,
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            std::env::set_current_dir(&self.old).unwrap();
+            match std::fs::remove_dir(&self.temporary) {
+                Ok(()) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+                Err(err) => panic!("cannot remove cwd test directory: {err}"),
+            }
+        }
+    }
+
+    // [spec:dash:sem:cd.getpwd-fn/test]
+    #[test]
+    fn getpwd_preserves_non_utf8_path_bytes() {
+        let _g = crate::testutil::lock();
+        {
+            let old = std::env::current_dir().unwrap();
+            let mut component = format!("nsh-cd-test-{}-", std::process::id()).into_bytes();
+            component.push(0xff);
+            let temporary = std::env::temp_dir().join(OsString::from_vec(component));
+            std::fs::create_dir(&temporary).unwrap();
+            let _restore = CwdGuard {
+                old,
+                temporary: temporary.clone(),
+            };
+            std::env::set_current_dir(&temporary).unwrap();
+
+            let got = unsafe { getpwd().unwrap() };
+            assert_eq!(&got[..], temporary.as_os_str().as_bytes());
+            assert!(!got.contains(&0));
+        }
+
+        {
+            let old = std::env::current_dir().unwrap();
+            let component = format!("nsh-cd-deleted-{}", std::process::id());
+            let temporary = std::env::temp_dir().join(component);
+            std::fs::create_dir(&temporary).unwrap();
+            let _restore = CwdGuard {
+                old,
+                temporary: temporary.clone(),
+            };
+            std::env::set_current_dir(&temporary).unwrap();
+            std::fs::remove_dir(&temporary).unwrap();
+
+            assert!(unsafe { getpwd() }.is_none());
+        }
+    }
 }

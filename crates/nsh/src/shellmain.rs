@@ -339,14 +339,6 @@ unsafe fn cmdloop(top: c_int) -> c_int {
             }
             numeof += 1;
         }
-        /* Where `popstackmark(&smark)` was.  See `eval::evaltree`: that
-         * check runs at the head of a command and so covers every command
-         * but the last; this one covers the last. */
-        debug_assert!(
-            crate::memalloc::region_untouched(),
-            "the region has a caller again; a mark would be load bearing"
-        );
-
         skip = evalskip;
         if skip != 0 {
             evalskip &= !(SKIPFUNC | SKIPFUNCDEF);

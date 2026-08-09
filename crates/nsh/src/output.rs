@@ -1,16 +1,21 @@
 //! Literal port of `src/output.c` / `src/output.h`.
 //! Rules: `docs/spec/port/src/output.md`.
 //!
-//! Shell output routines.  We use our own output routines because:
+//! The C introduced its own shell output routines because:
 //!	When a builtin command is interrupted we have to discard
 //!		any pending output.
-//!	When a builtin command appears in back quotes, we want to
-//!		save the output of the command in a region obtained
-//!		via malloc, rather than doing a fork and reading the
-//!		output of the command via a pipe.
+//!	When a builtin command appears in back quotes, it can save
+//!		the output in malloc-backed memory rather than fork and
+//!		read the output through a pipe.
 //!	Our output routines may be smaller than the stdio routines.
 //!
-//! ## The one structural deviation in this module
+//! ## Structural deviations in this module
+//!
+//! The C output cursor triplet (`buf`, `nextc`, `end`) becomes an owned
+//! `Option<Vec<u8>>`. `None` preserves the pre-allocation state needed by
+//! `outmem`'s exact-fill rule; `Vec::len` is the pending range and `bufsize`
+//! remains the logical limit. The global `output` objects themselves retain
+//! stable addresses for `out1` and `out2`.
 //!
 //! Stable Rust cannot *define* a C-variadic function and cannot build a
 //! `va_list`.  Every `...` parameter in `output.h` therefore becomes a
@@ -40,36 +45,29 @@ pub const MEM_OUT: c_int = -3; /* output to dynamically allocated memory */
 pub const OUTPUT_ERR: c_int = 0o1; /* error occurred on output */
 
 // [spec:dash:def:output.output]
-#[repr(C)]
 pub struct output {
-    pub nextc: *mut c_char,
-    pub end: *mut c_char,
-    pub buf: *mut c_char,
+    /// Optional pending-output storage. `None` preserves dash's lazy
+    /// allocation state; `Some(_)` is the initialized buffer state.
+    pub buf: Option<Vec<u8>>,
     pub bufsize: size_t,
     pub fd: c_int,
     pub flags: c_int,
 }
 
 pub static mut output: output = output {
-    nextc: core::ptr::null_mut(),
-    end: core::ptr::null_mut(),
-    buf: core::ptr::null_mut(),
+    buf: None,
     bufsize: OUTBUFSIZ,
     fd: 1,
     flags: 0,
 };
 pub static mut errout: output = output {
-    nextc: core::ptr::null_mut(),
-    end: core::ptr::null_mut(),
-    buf: core::ptr::null_mut(),
+    buf: None,
     bufsize: 0,
     fd: 2,
     flags: 0,
 };
 pub static mut preverrout: output = output {
-    nextc: core::ptr::null_mut(),
-    end: core::ptr::null_mut(),
-    buf: core::ptr::null_mut(),
+    buf: None,
     bufsize: 0,
     fd: 0,
     flags: 0,
@@ -303,29 +301,28 @@ unsafe fn c_vsnprintf(
 // [spec:dash:def:output.outmem-fn]
 // [spec:dash:sem:output.outmem-fn]
 pub unsafe fn outmem(p: *const c_char, len: size_t, dest: *mut output) {
-    let bufsize: size_t;
-    let offset: size_t;
-    let mut nleft: size_t;
-
-    nleft = ((*dest).end as usize).wrapping_sub((*dest).nextc as usize);
+    if len == 0 {
+        return;
+    }
+    let bytes = core::slice::from_raw_parts(p as *const u8, len);
+    let mut nleft = (*dest)
+        .buf
+        .as_ref()
+        .map_or(0, |buf| (*dest).bufsize.saturating_sub(buf.len()));
     if likely(nleft >= len) {
-        /* buffered: */
-        (*dest).nextc =
-            crate::system::mempcpy((*dest).nextc as *mut c_void, p as *const c_void, len)
-                as *mut c_char;
+        (*dest).buf.as_mut().unwrap().extend_from_slice(bytes);
         return;
     }
 
-    bufsize = (*dest).bufsize;
+    let bufsize = (*dest).bufsize;
     if bufsize == 0 {
         /* unbuffered — fall through to the direct write */
-    } else if (*dest).buf.is_null() {
+    } else if (*dest).buf.is_none() {
         /*
          * #ifdef notyet
          *	if (dest->fd == MEM_OUT && len > bufsize) bufsize = len;
          * #endif
          */
-        offset = 0;
         /*
          * #ifdef notyet
          *	goto alloc;
@@ -337,30 +334,27 @@ pub unsafe fn outmem(p: *const c_char, len: size_t, dest: *mut output) {
          * #endif
          */
         INTOFF();
-        (*dest).buf = crate::memalloc::ckrealloc((*dest).buf as *mut c_void, bufsize) as *mut c_char;
-        (*dest).bufsize = bufsize;
-        (*dest).end = (*dest).buf.add(bufsize);
-        (*dest).nextc = (*dest).buf.add(offset);
+        (*dest).buf = Some(Vec::with_capacity(bufsize));
         INTON();
     } else {
         flushout(dest);
     }
 
-    nleft = ((*dest).end as usize).wrapping_sub((*dest).nextc as usize);
+    nleft = (*dest)
+        .buf
+        .as_ref()
+        .map_or(0, |buf| (*dest).bufsize.saturating_sub(buf.len()));
     /*
      * NOTE (faithfully reproduced, src/output.c:187): this second test is
      * `>` where the first was `>=`, so a run that would exactly fill the
      * buffer is written straight out instead of buffered.
      */
     if nleft > len {
-        /* goto buffered; */
-        (*dest).nextc =
-            crate::system::mempcpy((*dest).nextc as *mut c_void, p as *const c_void, len)
-                as *mut c_char;
+        (*dest).buf.as_mut().unwrap().extend_from_slice(bytes);
         return;
     }
 
-    if xwrite((*dest).fd, p as *const c_void, len) != 0 {
+    if xwrite((*dest).fd, bytes.as_ptr() as *const c_void, len) != 0 {
         /* err: */
         (*dest).flags |= OUTPUT_ERR;
     }
@@ -397,14 +391,16 @@ pub unsafe fn flushall() {
 // [spec:dash:def:output.flushout-fn]
 // [spec:dash:sem:output.flushout-fn]
 pub unsafe fn flushout(dest: *mut output) {
-    let len: size_t;
-
-    len = ((*dest).nextc as usize).wrapping_sub((*dest).buf as usize);
+    let len = (*dest).buf.as_ref().map_or(0, Vec::len);
     if len == 0 || (*dest).fd < 0 {
         return;
     }
-    (*dest).nextc = (*dest).buf;
-    if xwrite((*dest).fd, (*dest).buf as *const c_void, len) != 0 {
+    let buf = (*dest).buf.as_mut().unwrap();
+    let bytes = buf.as_ptr();
+    /* dash resets the pending range before writing. `clear` retains the
+     * allocation and xwrite cannot mutate it. */
+    buf.clear();
+    if xwrite((*dest).fd, bytes as *const c_void, len) != 0 {
         (*dest).flags |= OUTPUT_ERR;
     }
 }
@@ -497,26 +493,11 @@ pub unsafe fn xasprintf(
 // [spec:dash:def:output.doformat-fn]
 // [spec:dash:sem:output.doformat-fn]
 pub unsafe fn doformat(dest: *mut output, f: *const c_char, ap: &[VaArg]) {
-    let mut s: *mut c_char;
-    let len: c_int;
-    let olen: c_int;
-    /* `setstackmark`/`popstackmark` bounded the block `xvasprintf` used
-     * when the text did not fit in `dest`.  That block is this, and it is
-     * dropped at the end of the function by the same rule the mark
-     * expressed.  `Vec::new` does not allocate, so the common path — the
-     * text fits and `xvasprintf` returns before touching it — costs
-     * nothing. */
+    let mut s: *mut c_char = core::ptr::null_mut();
     let mut buf: Vec<u8> = Vec::new();
-
-    s = (*dest).nextc;
-    olen = ((*dest).end as isize).wrapping_sub((*dest).nextc as isize) as c_int;
-    len = xvasprintf(&mut s, olen as size_t, f, ap, &mut buf);
-    if likely(olen > len) {
-        (*dest).nextc = (*dest).nextc.offset(len as isize);
-    } else {
-        /* out: is reached either way; only the buffered case skips this */
-        outmem(s, len as size_t, dest);
-    }
+    let len = xvasprintf(&mut s, 0, f, ap, &mut buf);
+    debug_assert_eq!(s as *const u8, buf.as_ptr());
+    outmem(buf.as_ptr() as *const c_char, len as usize, dest);
 }
 
 /*
@@ -612,20 +593,24 @@ unsafe fn xvsnprintf(outbuf: *mut c_char, length: size_t, fmt: *const c_char, ap
 // [spec:dash:sem:output.freestdout-fn]
 #[inline]
 pub unsafe fn freestdout() {
-    output.nextc = output.buf;
-    output.flags = 0;
+    let out = addr_of_mut!(output);
+    if let Some(buf) = (*out).buf.as_mut() {
+        buf.clear();
+    }
+    (*out).flags = 0;
 }
 
 // [spec:dash:def:output.outc-fn]
 // [spec:dash:sem:output.outc-fn]
 #[inline]
 pub unsafe fn outc(ch: c_int, file: *mut output) {
-    if (*file).nextc == (*file).end {
-        outcslow(ch, file);
-    } else {
-        *(*file).nextc = ch as c_char;
-        (*file).nextc = (*file).nextc.add(1);
+    if let Some(buf) = (*file).buf.as_mut() {
+        if buf.len() < (*file).bufsize {
+            buf.push(ch as u8);
+            return;
+        }
     }
+    outcslow(ch, file);
 }
 
 /* `#define out1c(c) outc((c), out1)` */
@@ -754,26 +739,21 @@ mod tests {
     /// A `struct output` writing into a pipe, with a buffer of `bufsize`.
     struct Sink {
         out: Box<output>,
-        buf: Vec<c_char>,
         r: c_int,
         w: c_int,
     }
 
     impl Sink {
-        fn new(bufsize: usize) -> Sink {
+        fn new(bufsize: usize, allocated: bool) -> Sink {
             let mut fds = [0 as c_int; 2];
             assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
-            let mut buf = vec![0 as c_char; bufsize.max(1)];
-            let base = buf.as_mut_ptr();
             let out = Box::new(output {
-                nextc: base,
-                end: unsafe { base.add(bufsize) },
-                buf: base,
+                buf: allocated.then(|| Vec::with_capacity(bufsize)),
                 bufsize: bufsize as size_t,
                 fd: fds[1],
                 flags: 0,
             });
-            Sink { out, buf, r: fds[0], w: fds[1] }
+            Sink { out, r: fds[0], w: fds[1] }
         }
         fn p(&mut self) -> *mut output {
             &mut *self.out as *mut output
@@ -798,7 +778,7 @@ mod tests {
         }
         /// Bytes still sitting in the buffer, unflushed.
         fn buffered(&self) -> usize {
-            (self.out.nextc as usize) - (self.out.buf as usize)
+            self.out.buf.as_ref().map_or(0, Vec::len)
         }
     }
 
@@ -810,7 +790,6 @@ mod tests {
                 }
                 libc::close(self.r);
             }
-            let _ = &self.buf;
         }
     }
 
@@ -819,7 +798,7 @@ mod tests {
     #[test]
     fn outmem_buffers_until_the_buffer_cannot_hold_the_write() {
         unsafe {
-            let mut s = Sink::new(16);
+            let mut s = Sink::new(16, true);
             let p = s.p();
             outmem(CStr0::new("abc").p(), 3, p);
             // Fits: buffered, nothing on the fd yet.
@@ -833,12 +812,75 @@ mod tests {
         unsafe {
             // A write larger than the buffer cannot be buffered, so the
             // buffer is flushed and the payload goes straight out.
-            let mut s = Sink::new(4);
+            let mut s = Sink::new(4, true);
             let p = s.p();
             outmem(CStr0::new("ab").p(), 2, p);
             outmem(CStr0::new("0123456789").p(), 10, p);
             flushout(p);
             assert_eq!(s.drained(), b"ab0123456789");
+        }
+        unsafe {
+            /* On the first write the C allocates before its strict `>`
+             * test, so an exact fill bypasses the newly allocated buffer. */
+            let mut lazy = Sink::new(4, false);
+            let p = lazy.p();
+            outmem(CStr0::new("abcd").p(), 4, p);
+            assert_eq!(lazy.buffered(), 0);
+            assert_eq!(lazy.drained(), b"abcd");
+
+            /* Once allocated, the initial `>=` test buffers an exact fill. */
+            let mut allocated = Sink::new(4, true);
+            let p = allocated.p();
+            outmem(CStr0::new("abcd").p(), 4, p);
+            assert_eq!(allocated.buffered(), 4);
+            flushout(p);
+            assert_eq!(allocated.drained(), b"abcd");
+        }
+        unsafe {
+            /* A failed flush discards the pending range before writing but
+             * retains its allocation for the next builtin. */
+            let mut failed = Sink::new(16, true);
+            let p = failed.p();
+            let base = (*p).buf.as_ref().unwrap().as_ptr();
+            let capacity = (*p).buf.as_ref().unwrap().capacity();
+            outmem(CStr0::new("discarded").p(), 9, p);
+            (*p).fd = 9999;
+            flushout(p);
+            assert_ne!((*p).flags & OUTPUT_ERR, 0);
+            assert_eq!(failed.buffered(), 0);
+            assert_eq!((*p).buf.as_ref().unwrap().as_ptr(), base);
+            assert_eq!((*p).buf.as_ref().unwrap().capacity(), capacity);
+
+            (*p).fd = failed.w;
+            (*p).flags = 0;
+            outmem(CStr0::new("kept").p(), 4, p);
+            flushout(p);
+            assert_eq!((*p).flags & OUTPUT_ERR, 0);
+            assert_eq!(failed.drained(), b"kept");
+        }
+        unsafe {
+            /* outmem is length-based, so an embedded NUL is data rather
+             * than a terminator and arbitrary shell bytes survive. */
+            let bytes = [b'a', 0, b'b', 0xff];
+            let mut binary = Sink::new(8, true);
+            let p = binary.p();
+            outmem(bytes.as_ptr() as *const c_char, bytes.len(), p);
+            assert_eq!(binary.buffered(), bytes.len());
+            flushout(p);
+            assert_eq!(binary.drained(), bytes);
+        }
+        unsafe {
+            /* Exercise every byte through the owned buffer, including the
+             * signed-c_char boundary that text-only storage would corrupt. */
+            let bytes: Vec<u8> = (0..=u8::MAX).collect();
+            let mut binary = Sink::new(300, true);
+            let p = binary.p();
+            let base = (*p).buf.as_ref().unwrap().as_ptr();
+            outmem(bytes.as_ptr() as *const c_char, bytes.len(), p);
+            assert_eq!(binary.buffered(), bytes.len());
+            flushout(p);
+            assert_eq!((*p).buf.as_ref().unwrap().as_ptr(), base);
+            assert_eq!(binary.drained(), bytes);
         }
     }
 
@@ -846,7 +888,7 @@ mod tests {
     #[test]
     fn flushout_is_a_noop_when_empty_or_closed() {
         unsafe {
-            let mut s = Sink::new(16);
+            let mut s = Sink::new(16, true);
             let p = s.p();
             // Nothing buffered: no write, no error flag.
             flushout(p);
@@ -867,7 +909,7 @@ mod tests {
     #[test]
     fn flushout_records_an_error_on_a_bad_descriptor() {
         unsafe {
-            let mut s = Sink::new(16);
+            let mut s = Sink::new(16, true);
             let p = s.p();
             outmem(CStr0::new("z").p(), 1, p);
             (*p).fd = 9999; // never opened
@@ -884,7 +926,7 @@ mod tests {
     #[test]
     fn outstr_outcslow_and_outc_append_bytes() {
         unsafe {
-            let mut s = Sink::new(64);
+            let mut s = Sink::new(64, true);
             let p = s.p();
             outstr(CStr0::new("hi").p(), p);
             outcslow('!' as c_int, p);
@@ -910,6 +952,19 @@ mod tests {
             );
             assert_eq!(crate::testutil::s(buf.as_ptr()), "x=42");
             assert_eq!(n, 4);
+            let mut flagged = [0 as c_char; 64];
+            let nf = fmtstr(
+                flagged.as_mut_ptr(),
+                flagged.len(),
+                CStr0::new("%#08x|%-5s|%+d").p(),
+                &[
+                    VaArg::Uint(42),
+                    VaArg::Str(CStr0::new("x").p()),
+                    VaArg::Int(7),
+                ],
+            );
+            assert_eq!(crate::testutil::s(flagged.as_ptr()), "0x00002a|x    |+7");
+            assert_eq!(nf, 17);
             // On truncation fmtstr CLAMPS to `length`; it does not report
             // what would have been written. The C is
             // `ret > (int)length ? length : ret`, so a caller detects
@@ -933,7 +988,7 @@ mod tests {
     #[test]
     fn outfmt_and_doformat_write_formatted_output() {
         unsafe {
-            let mut s = Sink::new(64);
+            let mut s = Sink::new(64, true);
             let p = s.p();
             outfmt(p, CStr0::new("[%s:%d]").p(),
                    &[VaArg::Str(CStr0::new("k").p()), VaArg::Int(7)]);
@@ -991,7 +1046,7 @@ mod tests {
     #[test]
     fn xwrite_writes_everything_or_reports_failure() {
         unsafe {
-            let mut s = Sink::new(1);
+            let mut s = Sink::new(1, true);
             let payload = vec![b'q'; 200_000];
             // Larger than a pipe buffer, so this only succeeds if xwrite
             // loops over partial writes -- which is its whole purpose.
@@ -1023,19 +1078,22 @@ mod tests {
     fn freestdout_resets_the_buffer_and_error_flag() {
         let _g = crate::testutil::lock();
         unsafe {
-            let saved = (output.nextc, output.buf, output.end, output.flags, output.fd);
-            let mut b = vec![0 as c_char; 16];
-            output.buf = b.as_mut_ptr();
-            output.nextc = b.as_mut_ptr().add(5);
-            output.end = b.as_mut_ptr().add(16);
-            output.flags = OUTPUT_ERR;
+            let out = addr_of_mut!(output);
+            let saved_buf = (*out).buf.take();
+            let saved = ((*out).bufsize, (*out).flags, (*out).fd);
+            (*out).buf = Some(Vec::with_capacity(16));
+            (*out).buf.as_mut().unwrap().extend_from_slice(b"abcde");
+            (*out).bufsize = 16;
+            (*out).flags = OUTPUT_ERR;
 
             freestdout();
 
-            let (nextc, buf, flags) = (output.nextc, output.buf, output.flags);
-            assert_eq!(nextc, buf);
+            let buffered = (*out).buf.as_ref().unwrap().len();
+            let flags = (*out).flags;
+            assert_eq!(buffered, 0);
             assert_eq!(flags, 0);
-            (output.nextc, output.buf, output.end, output.flags, output.fd) = saved;
+            (*out).buf = saved_buf;
+            ((*out).bufsize, (*out).flags, (*out).fd) = saved;
         }
     }
 
@@ -1045,27 +1103,28 @@ mod tests {
     fn out1fmt_and_flushall_go_through_the_stdout_stream() {
         let _g = crate::testutil::lock();
         unsafe {
-            let saved = (output.nextc, output.buf, output.end, output.bufsize,
-                         output.fd, output.flags);
-            let mut s = Sink::new(64);
+            let out = addr_of_mut!(output);
+            let saved_buf = (*out).buf.take();
+            let saved = ((*out).bufsize, (*out).fd, (*out).flags);
+            let out1_before = out1;
+            let mut s = Sink::new(64, true);
             // Point the global stdout stream at the pipe.
-            output.buf = s.out.buf;
-            output.nextc = s.out.buf;
-            output.end = s.out.end;
-            output.bufsize = s.out.bufsize;
-            output.fd = s.w;
-            output.flags = 0;
+            (*out).buf = None;
+            (*out).bufsize = s.out.bufsize;
+            (*out).fd = s.w;
+            (*out).flags = 0;
 
             out1fmt(CStr0::new("n=%d").p(), &[VaArg::Int(3)]);
             // Buffered, not yet written.
-            let (nextc, buf) = (output.nextc as usize, output.buf as usize);
-            assert_eq!(nextc - buf, 3);
+            assert_eq!((*out).buf.as_ref().unwrap().len(), 3);
             flushall();
-            let (nextc, buf) = (output.nextc, output.buf);
-            assert_eq!(nextc, buf);
+            assert_eq!((*out).buf.as_ref().unwrap().len(), 0);
+            let out1_after = out1;
+            assert_eq!(out1_after, out1_before);
+            assert_eq!(out1_after, out);
 
-            (output.nextc, output.buf, output.end, output.bufsize,
-             output.fd, output.flags) = saved;
+            (*out).buf = saved_buf;
+            ((*out).bufsize, (*out).fd, (*out).flags) = saved;
             assert_eq!(s.drained(), b"n=3");
         }
     }
@@ -1084,11 +1143,24 @@ mod tests {
     fn inactive_glibc_stdio_hooks_are_inert() {
         let _g = crate::testutil::lock();
         unsafe {
-            let before = (output.nextc, output.buf, output.fd, errout.fd);
+            let out = addr_of_mut!(output);
+            let err = addr_of_mut!(errout);
+            let before = (
+                (*out).buf.as_ref().map(|buf| (buf.len(), buf.capacity())),
+                (*out).fd,
+                (*err).fd,
+            );
             initstreams();
             openmemout();
             assert_eq!(__closememout(), 0);
-            assert_eq!((output.nextc, output.buf, output.fd, errout.fd), before);
+            assert_eq!(
+                (
+                    (*out).buf.as_ref().map(|buf| (buf.len(), buf.capacity())),
+                    (*out).fd,
+                    (*err).fd,
+                ),
+                before,
+            );
         }
     }
 }

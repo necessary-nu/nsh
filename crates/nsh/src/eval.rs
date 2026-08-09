@@ -217,10 +217,6 @@ pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> c_int {
     let s: *mut c_char = owned.as_ptr() as *mut c_char;
 
     crate::input::setinputstring(s);
-    /* `setstackmark(&smark)` — the mark bounded what the parse below and
-     * each `evaltree` allocated from the region.  Neither allocates from
-     * it any more; see `memalloc::region_untouched`. */
-
     status = 0;
     loop {
         let n: Option<Node> = match crate::parser::parsecmd(0) {
@@ -250,10 +246,6 @@ pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> c_int {
         /* `popstackmark(&smark)` — one per parsed command, and one on the
          * way out. */
     }
-    debug_assert!(
-        crate::memalloc::region_untouched(),
-        "the region has a caller again; a mark would be load bearing"
-    );
     crate::input::popfile();
     drop(owned);
 
@@ -277,23 +269,6 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> c_int {
     let mut evalfn: unsafe fn(&Node, c_int) -> c_int = evalcommand;
     let isor: libc::c_uint;
     let mut status: c_int = 0;
-
-    /* `setstackmark(&smark)`, matched by the `popstackmark` at `out:`.
-     * This is the region's broadest customer — it releases whatever the
-     * command below allocated — and it has nothing left to release: with
-     * `strlist` owning its bytes, no shell path calls `stalloc` at all.
-     *
-     * That is a claim about every command of every corpus case rather than
-     * about the source, so it is checked here rather than argued.  Nothing
-     * winds `stacknxt` back now that the marks are gone, so a single
-     * `stalloc` anywhere fails this from then on — which is why the check
-     * at the *head* of a command is enough to catch the one before it, and
-     * why `main.c:cmdloop` carries the same check where its `popstackmark`
-     * was, to cover the last one. */
-    debug_assert!(
-        crate::memalloc::region_untouched(),
-        "the region has a caller again; a mark would be load bearing"
-    );
 
     'out_lbl: {
         if nflag() != 0 {

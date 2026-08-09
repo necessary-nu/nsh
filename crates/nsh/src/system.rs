@@ -53,9 +53,9 @@ pub unsafe fn sigclearmask() {
 }
 
 /* `#ifndef HAVE_MEMPCPY`.  `copy_from_slice` plus the length is this,
- * but the seven callers are raw-pointer cursors in `memalloc.rs`,
- * `output.rs` and `expand.rs` — files whose conversions are other
- * tasks — so rewriting the callee alone would only move the cast. */
+ * but the three callers are raw-pointer cursors in `expand.rs`, whose
+ * conversion is another task, so rewriting the callee alone would only
+ * move the cast. */
 // [spec:dash:def:system.mempcpy-fn]
 // [spec:dash:sem:system.mempcpy-fn]
 pub unsafe fn mempcpy(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void {

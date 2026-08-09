@@ -8,12 +8,11 @@
 //! in `docs/divergences.md`.
 
 use bstr::BString;
-use libc::{c_char, c_int, c_void, size_t};
-use std::collections::BTreeMap;
 use core::ptr::{addr_of, addr_of_mut, null_mut};
+use libc::{c_char, c_int};
+use std::collections::BTreeMap;
 
 use crate::error::{INTOFF, INTON};
-use crate::memalloc::{ckfree, savestr};
 use crate::options::{argptr, nextopt};
 use crate::output::VaArg;
 use crate::shell::cstr;
@@ -26,15 +25,43 @@ pub const ALIASDEAD: c_int = 2;
 /// The C's `struct alias *next` is gone with the hash chain; `atab` orders
 /// the entries itself.
 ///
-/// `name` and `val` are still C allocations, and that is not an oversight:
-/// `input.rs:popstring` frees `strpush.string` — the `name` a `pushstring`
-/// recorded — whenever `setalias` has re-pointed `name` under a reader, so
-/// ownership of that buffer transfers out of this module.
-#[repr(C)]
+/// `text` owns the complete NUL-terminated `name=value` byte string. `name`
+/// and `val` are cached views into it for the parser/input interface that still
+/// speaks C pointers; neither pointer owns or frees anything. `input.rs`
+/// copies `val` into its `StrPush`, so replacing `text` cannot invalidate an
+/// in-flight alias expansion.
 pub struct alias {
     pub name: *mut c_char,
     pub val: *mut c_char,
     pub flag: c_int,
+    text: BString,
+    value_offset: usize,
+}
+
+impl alias {
+    fn new(text: BString, value_offset: usize) -> Self {
+        let mut ap = alias {
+            name: null_mut(),
+            val: null_mut(),
+            flag: 0,
+            text,
+            value_offset,
+        };
+        ap.refresh_views();
+        ap
+    }
+
+    fn replace_text(&mut self, text: BString, value_offset: usize) {
+        self.text = text;
+        self.value_offset = value_offset;
+        self.refresh_views();
+    }
+
+    fn refresh_views(&mut self) {
+        self.name = self.text.as_mut_ptr() as *mut c_char;
+        debug_assert!(self.value_offset < self.text.len());
+        self.val = unsafe { self.name.add(self.value_offset) };
+    }
 }
 
 /// Every alias, by name. Keyed the same way variables are — see
@@ -54,9 +81,9 @@ unsafe fn atab_mut() -> &'static mut BTreeMap<BString, Box<alias>> {
 // [spec:dash:def:alias.setalias-fn]
 // [spec:dash:sem:alias.setalias-fn]
 unsafe fn setalias(name: *const c_char, val: *const c_char) {
-    let mut ap: *mut alias;
+    let ap: *mut alias;
     let mut p: *const c_char = name;
-    let namelen: size_t;
+    let value_offset: usize;
 
     loop {
         if crate::syntax::BASESYNTAX(*p as i8 as c_int) != crate::syntax::CWORD {
@@ -70,31 +97,21 @@ unsafe fn setalias(name: *const c_char, val: *const c_char) {
 
     ap = __lookupalias(name);
     INTOFF();
+    value_offset = val as usize - name as usize;
+    let text = BString::from(core::ffi::CStr::from_ptr(name).to_bytes_with_nul());
     if !ap.is_null() {
-        /* The C skips this free while the alias is being expanded, because
-         * `input.c` is then reading out of this very buffer and its
-         * `strpush` has taken over the freeing (`sp->string != sp->ap->name`
-         * in `popstring`). `input.rs` reads a copy, so nobody else holds
-         * the buffer and the guard would only leak it. */
-        ckfree((*ap).name as *mut c_void);
+        /* `input.rs` reads its own copy, so dropping the replaced `BString`
+         * cannot pull bytes out from under an in-flight expansion. */
+        (*ap).replace_text(text, value_offset);
         (*ap).flag &= !ALIASDEAD;
     } else {
         /* not found.  The address comes back out of the map rather than out
          * of the `Box` that went in, so nothing derived from it predates the
          * move. */
-        ap = &mut **atab_mut()
+        atab_mut()
             .entry(varname(name).to_owned())
-            .or_insert_with(|| {
-                Box::new(alias {
-                    name: null_mut(),
-                    val: null_mut(),
-                    flag: 0,
-                })
-            }) as *mut alias;
+            .or_insert_with(|| Box::new(alias::new(text, value_offset)));
     }
-    namelen = (val as usize - name as usize) as size_t;
-    (*ap).name = savestr(name);
-    (*ap).val = (*ap).name.add(namelen as usize);
     INTON();
 }
 
@@ -231,15 +248,14 @@ pub unsafe fn unaliascmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 /// The C returns the link that replaces `ap` in its chain: `ap` itself when
 /// it survives, `ap->next` when it does not. With no chain that is one bit
 /// of information, so this returns "the entry stays in the table" — and the
-/// caller drops the `Box` when it does not, which is the `ckfree(ap)` the C
-/// does here.
+/// caller drops the `Box` when it does not, releasing both the node and its
+/// owned bytes.
 unsafe fn freealias(ap: &mut alias) -> bool {
     if (ap.flag & ALIASINUSE) != 0 {
         ap.flag |= ALIASDEAD;
         return true;
     }
 
-    ckfree(ap.name as *mut c_void);
     false
 }
 
@@ -261,5 +277,91 @@ unsafe fn __lookupalias(name: *const c_char) -> *mut alias {
     match atab_mut().get_mut(varname(name)) {
         Some(ap) => &mut **ap as *mut alias,
         None => null_mut(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::CStr0;
+
+    // [spec:dash:sem:alias.setalias-fn/test]
+    // [spec:dash:sem:alias.lookupalias-pub-fn/test]
+    // [spec:dash:sem:alias.unalias-fn/test]
+    // [spec:dash:sem:alias.rmaliases-fn/test]
+    // [spec:dash:sem:alias.freealias-fn/test]
+    #[test]
+    fn owned_alias_views_remain_stable() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            atab_mut().clear();
+
+            let initial = CStr0::new("a=old");
+            setalias(initial.p(), initial.p().add(2));
+            let ap = lookupalias(CStr0::new("a").p(), 0);
+            assert!(!ap.is_null());
+            let address = ap as usize;
+
+            for i in 0..64 {
+                let definition = CStr0::new(&format!("name{i}=value{i}"));
+                let offset = format!("name{i}=").len();
+                setalias(definition.p(), definition.p().add(offset));
+            }
+            assert_eq!(lookupalias(CStr0::new("a").p(), 0) as usize, address);
+
+            let replacement = [b'a' as c_char, b'=' as c_char, -1, 0];
+            setalias(replacement.as_ptr(), replacement.as_ptr().add(2));
+            let ap = lookupalias(CStr0::new("a").p(), 0);
+            assert_eq!(ap as usize, address);
+            assert_eq!(core::ffi::CStr::from_ptr((*ap).name).to_bytes(), b"a=\xff");
+            assert_eq!(core::ffi::CStr::from_ptr((*ap).val).to_bytes(), b"\xff");
+            assert_eq!((*ap).name as *const u8, (*ap).text.as_ptr());
+
+            assert_eq!(unalias(CStr0::new("a").p()), 0);
+
+            let held_definition = CStr0::new("held=old");
+            let held_name = CStr0::new("held");
+            setalias(held_definition.p(), held_definition.p().add(5));
+            let held = lookupalias(held_name.p(), 0);
+            (*held).flag |= ALIASINUSE;
+            assert!(lookupalias(held_name.p(), 1).is_null());
+
+            assert_eq!(unalias(held_name.p()), 0);
+            let deferred = lookupalias(held_name.p(), 0);
+            assert_eq!(deferred, held);
+            assert_ne!((*deferred).flag & ALIASINUSE, 0);
+            assert_ne!((*deferred).flag & ALIASDEAD, 0);
+
+            let held_replacement = CStr0::new("held=new");
+            setalias(held_replacement.p(), held_replacement.p().add(5));
+            let revived = lookupalias(held_name.p(), 0);
+            assert_eq!(revived, held);
+            assert_ne!((*revived).flag & ALIASINUSE, 0);
+            assert_eq!((*revived).flag & ALIASDEAD, 0);
+            assert_eq!(core::ffi::CStr::from_ptr((*revived).val).to_bytes(), b"new");
+
+            (*revived).flag &= !ALIASINUSE;
+            assert_eq!(unalias(held_name.p()), 0);
+            assert!(lookupalias(held_name.p(), 0).is_null());
+
+            let kept_definition = CStr0::new("kept=value");
+            let kept_name = CStr0::new("kept");
+            let dropped_definition = CStr0::new("dropped=value");
+            let dropped_name = CStr0::new("dropped");
+            setalias(kept_definition.p(), kept_definition.p().add(5));
+            setalias(dropped_definition.p(), dropped_definition.p().add(8));
+            let kept = lookupalias(kept_name.p(), 0);
+            (*kept).flag |= ALIASINUSE;
+
+            rmaliases();
+            assert!(lookupalias(dropped_name.p(), 0).is_null());
+            assert_eq!(lookupalias(kept_name.p(), 0), kept);
+            assert_ne!((*kept).flag & ALIASDEAD, 0);
+
+            (*kept).flag &= !ALIASINUSE;
+            rmaliases();
+            assert!(lookupalias(kept_name.p(), 0).is_null());
+            atab_mut().clear();
+        }
     }
 }
