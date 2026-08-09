@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 
 use crate::error::{INTOFF, INTON};
-use crate::memalloc::{ckfree, ckmalloc, savestr};
+use crate::memalloc::{ckfree, savestr};
 use crate::options::{argptr, nextopt};
 use crate::output::VaArg;
 use crate::shell::cstr;
@@ -24,9 +24,12 @@ pub const ALIASDEAD: c_int = 2;
 
 // [spec:dash:def:alias.alias]
 /// The C's `struct alias *next` is gone with the hash chain; `atab` orders
-/// the entries itself. The struct stays separately allocated and never
-/// moves, because `input.rs` holds its address in a `parsefile` for as long
-/// as the alias is being read from.
+/// the entries itself.
+///
+/// `name` and `val` are still C allocations, and that is not an oversight:
+/// `input.rs:popstring` frees `strpush.string` — the `name` a `pushstring`
+/// recorded — whenever `setalias` has re-pointed `name` under a reader, so
+/// ownership of that buffer transfers out of this module.
 #[repr(C)]
 pub struct alias {
     pub name: *mut c_char,
@@ -37,10 +40,14 @@ pub struct alias {
 /// Every alias, by name. Keyed the same way variables are — see
 /// `var::varname`, which is dash's own choice: `alias.c` reaches into
 /// `var.h` for `hashval` and `varequal`.
-static mut atab: BTreeMap<BString, *mut alias> = BTreeMap::new();
+///
+/// The `Box` is what `input.rs` needs: it holds an entry's address in a
+/// `parsefile` for as long as the alias is being read from, and a map's
+/// values move when the map rebalances.
+static mut atab: BTreeMap<BString, Box<alias>> = BTreeMap::new();
 
 #[inline]
-unsafe fn atab_mut() -> &'static mut BTreeMap<BString, *mut alias> {
+unsafe fn atab_mut() -> &'static mut BTreeMap<BString, Box<alias>> {
     &mut *addr_of_mut!(atab)
 }
 
@@ -70,9 +77,13 @@ unsafe fn setalias(name: *const c_char, val: *const c_char) {
         (*ap).flag &= !ALIASDEAD;
     } else {
         /* not found */
-        ap = ckmalloc(core::mem::size_of::<alias>() as size_t) as *mut alias;
-        (*ap).flag = 0;
-        atab_mut().insert(varname(name).to_owned(), ap);
+        let mut node = Box::new(alias {
+            name: null_mut(),
+            val: null_mut(),
+            flag: 0,
+        });
+        ap = &mut *node as *mut alias;
+        atab_mut().insert(varname(name).to_owned(), node);
     }
     namelen = (val as usize - name as usize) as size_t;
     (*ap).name = savestr(name);
@@ -93,8 +104,8 @@ pub unsafe fn unalias(name: *const c_char) -> c_int {
      * a dead alias by its own text -- so the key has to be owned before
      * `freealias` can free the buffer it points into, and `remove_entry`
      * hands it over without a copy. */
-    let (key, ap) = atab_mut().remove_entry(varname(name)).unwrap();
-    if freealias(ap) {
+    let (key, mut ap) = atab_mut().remove_entry(varname(name)).unwrap();
+    if freealias(&mut ap) {
         atab_mut().insert(key, ap);
     }
     INTON();
@@ -106,7 +117,7 @@ pub unsafe fn unalias(name: *const c_char) -> c_int {
 // [spec:dash:sem:alias.rmaliases-fn]
 pub unsafe fn rmaliases() {
     INTOFF();
-    atab_mut().retain(|_, &mut ap| freealias(ap));
+    atab_mut().retain(|_, ap| freealias(ap));
     INTON();
 }
 
@@ -137,8 +148,8 @@ pub unsafe fn aliascmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
     let mut ap: *mut alias;
 
     if argc == 1 {
-        for &ap in atab_mut().values() {
-            printalias(ap);
+        for ap in atab_mut().values() {
+            printalias(&**ap as *const alias);
         }
         return 0;
     }
@@ -212,15 +223,16 @@ pub unsafe fn unaliascmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 ///
 /// The C returns the link that replaces `ap` in its chain: `ap` itself when
 /// it survives, `ap->next` when it does not. With no chain that is one bit
-/// of information, so this returns "the entry stays in the table".
-unsafe fn freealias(ap: *mut alias) -> bool {
-    if ((*ap).flag & ALIASINUSE) != 0 {
-        (*ap).flag |= ALIASDEAD;
+/// of information, so this returns "the entry stays in the table" — and the
+/// caller drops the `Box` when it does not, which is the `ckfree(ap)` the C
+/// does here.
+unsafe fn freealias(ap: &mut alias) -> bool {
+    if (ap.flag & ALIASINUSE) != 0 {
+        ap.flag |= ALIASDEAD;
         return true;
     }
 
-    ckfree((*ap).name as *mut c_void);
-    ckfree(ap as *mut c_void);
+    ckfree(ap.name as *mut c_void);
     false
 }
 
@@ -239,8 +251,8 @@ pub unsafe fn printalias(ap: *const alias) {
 /// callers test `*result`; a map removes by key, so this returns the entry
 /// itself and NULL when there is none.
 unsafe fn __lookupalias(name: *const c_char) -> *mut alias {
-    match atab_mut().get(varname(name)) {
-        Some(&ap) => ap,
+    match atab_mut().get_mut(varname(name)) {
+        Some(ap) => &mut **ap as *mut alias,
         None => null_mut(),
     }
 }
