@@ -220,9 +220,10 @@ is `Rc::increment_strong_count`. Checking this against `exec.c` rather than
 assuming it was worth the five minutes: an off-by-one here is a
 use-after-free that only appears when a function redefines itself.
 
-The `Rc` is stored in `exec::tblentry`, which is still a `ckmalloc`'d C
-struct with a flexible array member, so what the table holds is
-`Rc::into_raw`. That is not the end state; it goes when `memalloc` does.
+The `Rc` is now stored directly in `exec::tblentry`'s command enum. The
+raw pointer that `cmdentry` exposes to the C-shaped evaluator is a borrowed
+view from `Rc::as_ptr`; `evalfun` takes its own strong reference before it
+can run code that redefines the function.
 
 ### `NEOF` is a pointer that is not a node
 
@@ -1773,3 +1774,40 @@ pointer, written by the single writer of the index and refreshed after each
 of the two operations that can move a frame, brings the whole conversion to
 2% and +4.4% instructions.  The cached pointer carries a `debug_assert`
 that it agrees with the index; removing the refresh in `pushfile` fires it.
+
+## What this cost in the port: the command table
+
+### A map value still needs a stable address
+
+`find_command` keeps `cmdp` across the path search, including a `%func`
+arm that runs `readcmdfile` and can add another command. A `BTreeMap` may
+move inline values while rebalancing, so returning a pointer to an inline
+`tblentry` would turn that existing control flow into a dangling pointer.
+The map therefore owns `Box<tblentry>` values. The box is not a shadow
+allocator: it is the entry's single owner, and deletion drops the value,
+including an `Rc<Node>` function body, normally.
+
+### The key includes the terminator because a reader still speaks C
+
+`printentry` must replay `padvance(path, cmdname)`, and `padvance` still
+takes a C string. The `BString` key owns the trailing NUL so the ordered
+map's key can be passed directly rather than duplicating the name in the
+entry or allocating a terminated copy for every `hash`. This does not
+change ordering: every key has exactly the same terminator after its name.
+
+### Deletion owns the lookup name before it mutates the map
+
+The C saves `lastcmdentry`, a pointer to the chain link found by the last
+lookup. The map deletes by key instead, removing both the intrusive cursor
+and the call-order side channel. `delete_cmd_entry` first copies the input
+name: although today's callers pass argv or parser-owned bytes, this makes
+the operation sound even if a later caller names an entry through the
+map's own key and the removal drops that storage.
+
+### Builtin lookup is byte ordering, not text ordering
+
+The generated builtin table is sorted under `LC_COLLATE=C`, and `pstrcmp`
+compared its NUL-terminated names with `strcmp`. `BStr` slice ordering is
+the same unsigned-byte lexicographic comparison, including for invalid
+UTF-8, so `binary_search_by` preserves the lookup without making a shell
+word into `String`.

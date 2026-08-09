@@ -13,14 +13,21 @@
 //!     that pointer in `dash_errno` and the caching is reproduced in
 //!     `shellmain`, but reads here go straight to libc, which is
 //!     behaviourally identical.
+//!
+//! `cmdtable` is a `BTreeMap` keyed by command name, not the C's 31
+//! chained hash buckets, so `hash` with no operands prints in name order
+//! rather than in the order `hashval` happens to chain. Registered in
+//! `docs/divergences.md`.
 
-use bstr::BString;
+use bstr::{BStr, BString};
 use core::ptr::{addr_of, addr_of_mut, null, null_mut};
-use libc::{c_char, c_int, c_short, c_uint, c_void, size_t};
+use libc::{c_char, c_int, size_t};
+use std::collections::BTreeMap;
+use std::ffi::CStr;
+use std::rc::Rc;
 
 use crate::builtins::{builtincmd, BUILTIN_REGULAR, BUILTIN_SPECIAL};
 use crate::error::{E_EXEC, INTOFF, INTON};
-use crate::memalloc::{ckfree, ckmalloc};
 use crate::nodes::{funcnode, Node};
 use crate::output::{out1, output};
 
@@ -41,9 +48,6 @@ pub const DO_NOFUNC: c_int = 0x04; /* don't return shell functions, for command 
 pub const DO_ALTPATH: c_int = 0x08; /* using alternate path */
 pub const DO_REGBLTIN: c_int = 0x10; /* regular built-ins and functions only */
 
-const CMDTABLESIZE: usize = 31; /* should be prime */
-const ARB: usize = 1; /* actual size determined at run time */
-
 const _PATH_BSHELL: &[u8] = b"/bin/sh\0";
 
 // ---------------------------------------------------------------------
@@ -56,10 +60,9 @@ const _PATH_BSHELL: &[u8] = b"/bin/sh\0";
 pub union param {
     pub index: c_int,
     pub cmd: *const builtincmd,
-    /// The C's `struct funcnode *`. `funcnode` is `Rc<Node>` now, and this
-    /// entry is still a `ckmalloc`'d C struct, so what is stored is the raw
-    /// form: `Rc::into_raw` going in, `Rc::from_raw` coming out. See
-    /// `nodes::copyfunc` / `nodes::freefunc`.
+    /// A borrowed view of the `Rc<Node>` owned by the command table. The
+    /// evaluator increments the strong count before running the body, so a
+    /// function can still redefine itself without invalidating this pointer.
     pub func: *const funcnode,
 }
 
@@ -71,40 +74,90 @@ pub struct cmdentry {
     pub u: param,
 }
 
+enum Command {
+    Unknown,
+    Normal(c_int),
+    Function(Rc<funcnode>),
+    Builtin(*const builtincmd),
+}
+
 // [spec:dash:def:exec.tblentry]
-//
-// `cmdname[ARB]` is a flexible array member: `ARB` is 1 and the real
-// size is chosen at allocation time, so the name lives in the same
-// block as the entry.
-#[repr(C)]
+/// One cached command resolution.
+///
+/// The name is the `BTreeMap` key and the command kind is an enum, so the
+/// intrusive `next` pointer, flexible array tail and untagged internal union
+/// all disappear. Values are boxed because `find_command` keeps their address
+/// across operations that can insert another command and rebalance the map.
 pub struct tblentry {
-    pub next: *mut tblentry,    /* next entry in hash chain */
-    pub param: param,           /* definition of builtin function */
-    pub cmdtype: c_short,       /* index identifying command */
-    pub rehash: c_char,         /* if set, cd done since entry created */
-    pub cmdname: [c_char; ARB], /* name of command */
+    command: Command,
+    rehash: bool,
+}
+
+impl tblentry {
+    fn cmdtype(&self) -> c_int {
+        match self.command {
+            Command::Unknown => CMDUNKNOWN,
+            Command::Normal(_) => CMDNORMAL,
+            Command::Function(_) => CMDFUNCTION,
+            Command::Builtin(_) => CMDBUILTIN,
+        }
+    }
+
+    fn path_index(&self) -> c_int {
+        match self.command {
+            Command::Normal(index) => index,
+            _ => unreachable!("only external commands have PATH indices"),
+        }
+    }
+
+    fn builtin(&self) -> *const builtincmd {
+        match self.command {
+            Command::Builtin(cmd) => cmd,
+            _ => unreachable!("only builtin entries have builtin pointers"),
+        }
+    }
+
+    fn path_dependent(&self) -> bool {
+        match self.command {
+            Command::Normal(_) => true,
+            Command::Builtin(cmd) => unsafe {
+                ((*cmd).flags & BUILTIN_REGULAR) == 0 && builtinloc > 0
+            },
+            _ => false,
+        }
+    }
+
+    unsafe fn write_to(&self, entry: *mut cmdentry) {
+        (*entry).cmdtype = self.cmdtype();
+        match &self.command {
+            Command::Unknown => (*entry).u.index = 0,
+            Command::Normal(index) => (*entry).u.index = *index,
+            Command::Function(func) => (*entry).u.func = Rc::as_ptr(func),
+            Command::Builtin(cmd) => (*entry).u.cmd = *cmd,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------
 // module globals
 // ---------------------------------------------------------------------
 
-static mut cmdtable: [*mut tblentry; CMDTABLESIZE] = [null_mut(); CMDTABLESIZE];
+/// Command names include their trailing NUL because C-shaped consumers still
+/// pass the map key straight to `padvance`. `BStr` ordering remains ordering by
+/// the command's bytes: every key has the same trailing terminator.
+static mut cmdtable: BTreeMap<BString, Box<tblentry>> = BTreeMap::new();
 static mut builtinloc: c_int = -1; /* index in path of %builtin, or -1 */
 
 pub static mut pathopt: *const c_char = null(); /* set by padvance */
 
-pub static mut lastcmdentry: *mut *mut tblentry = null_mut();
+#[inline]
+unsafe fn cmdtable_mut() -> &'static mut BTreeMap<BString, Box<tblentry>> {
+    &mut *addr_of_mut!(cmdtable)
+}
 
 #[inline]
 unsafe fn errno() -> c_int {
     *libc::__errno_location()
-}
-
-/* C: #define equal(s1, s2) (strcmp(s1, s2) == 0) */
-#[inline]
-unsafe fn equal(s1: *const c_char, s2: *const c_char) -> bool {
-    libc::strcmp(s1, s2) == 0
 }
 
 // ---------------------------------------------------------------------
@@ -334,7 +387,6 @@ pub unsafe fn padvance(path: &mut *const c_char, name: *const c_char) -> c_int {
 // [spec:dash:def:exec.hashcmd-fn]
 // [spec:dash:sem:exec.hashcmd-fn]
 pub unsafe fn hashcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
-    let mut pp: *mut *mut tblentry;
     let mut cmdp: *mut tblentry;
     let mut c: c_int;
     let mut entry: cmdentry = cmdentry {
@@ -358,16 +410,10 @@ pub unsafe fn hashcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     }
 
     if (*crate::options::argptr).is_null() {
-        pp = (addr_of_mut!(cmdtable) as *mut *mut tblentry);
-        while pp < (addr_of_mut!(cmdtable) as *mut *mut tblentry).add(CMDTABLESIZE) {
-            cmdp = *pp;
-            while !cmdp.is_null() {
-                if (*cmdp).cmdtype as c_int == CMDNORMAL {
-                    printentry(cmdp);
-                }
-                cmdp = (*cmdp).next;
+        for (name, cmdp) in cmdtable_mut().iter() {
+            if cmdp.cmdtype() == CMDNORMAL {
+                printentry(BStr::new(name.as_slice()), cmdp);
             }
-            pp = pp.add(1);
         }
         return 0;
     }
@@ -378,13 +424,8 @@ pub unsafe fn hashcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
             break;
         }
         cmdp = cmdlookup(name, 0);
-        if !cmdp.is_null()
-            && ((*cmdp).cmdtype as c_int == CMDNORMAL
-                || ((*cmdp).cmdtype as c_int == CMDBUILTIN
-                    && ((*(*cmdp).param.cmd).flags & BUILTIN_REGULAR) == 0
-                    && builtinloc > 0))
-        {
-            delete_cmd_entry();
+        if !cmdp.is_null() && (*cmdp).path_dependent() {
+            delete_cmd_entry(name);
         }
         find_command(name, &mut entry, DO_ERR, crate::var::pathval());
         if entry.cmdtype == CMDUNKNOWN {
@@ -397,25 +438,25 @@ pub unsafe fn hashcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
 // [spec:dash:def:exec.printentry-fn]
 // [spec:dash:sem:exec.printentry-fn]
-unsafe fn printentry(cmdp: *mut tblentry) {
+unsafe fn printentry(name: &BStr, cmdp: &tblentry) {
     let mut idx: c_int;
     let mut path: *const c_char;
-    let name: *mut c_char;
+    let fullname: *mut c_char;
 
-    idx = (*cmdp).param.index;
+    idx = cmdp.path_index();
     path = crate::var::pathval();
     loop {
-        padvance(&mut path, (*cmdp).cmdname.as_ptr());
+        padvance(&mut path, name.as_ptr() as *const c_char);
         idx -= 1;
         if idx < 0 {
             break;
         }
     }
-    name = padvance_result();
-    crate::output::out1str(name);
+    fullname = padvance_result();
+    crate::output::out1str(fullname);
     crate::out1fmt!(
         (core::ptr::addr_of!(crate::mystring::snlfmt) as *const c_char),
-        if (*cmdp).rehash != 0 {
+        if cmdp.rehash {
             b"*\0".as_ptr() as *const c_char
         } else {
             (core::ptr::addr_of!(crate::shell::nullstr) as *const c_char)
@@ -503,12 +544,12 @@ pub unsafe fn find_command(
                 if !cmdp.is_null() {
                     let bit: c_int;
 
-                    match (*cmdp).cmdtype as c_int {
+                    match (*cmdp).cmdtype() {
                         CMDFUNCTION => {
                             bit = DO_NOFUNC;
                         }
                         CMDBUILTIN => {
-                            bit = if ((*(*cmdp).param.cmd).flags & BUILTIN_REGULAR) != 0 {
+                            bit = if ((*(*cmdp).builtin()).flags & BUILTIN_REGULAR) != 0 {
                                 0
                             } else {
                                 DO_REGBLTIN
@@ -526,7 +567,7 @@ pub unsafe fn find_command(
 
                         updatetbl = 0;
                         cmdp = null_mut();
-                    } else if (*cmdp).rehash == 0 {
+                    } else if !(*cmdp).rehash {
                         /* if not invalidated by cd, we're done */
                         break 'success;
                     }
@@ -549,12 +590,12 @@ pub unsafe fn find_command(
 
                 /* We have to search path. */
                 prev = -1; /* where to start */
-                if !cmdp.is_null() && (*cmdp).rehash != 0 {
+                if !cmdp.is_null() && (*cmdp).rehash {
                     /* doing a rehash */
-                    if (*cmdp).cmdtype as c_int == CMDBUILTIN {
+                    if (*cmdp).cmdtype() == CMDBUILTIN {
                         prev = builtinloc;
                     } else {
-                        prev = (*cmdp).param.index;
+                        prev = (*cmdp).path_index();
                     }
                 }
 
@@ -611,7 +652,7 @@ pub unsafe fn find_command(
                         let fullname = kept.as_ptr() as *mut c_char;
                         crate::shellmain::readcmdfile(fullname);
                         cmdp = cmdlookup(name, 0);
-                        if cmdp.is_null() || (*cmdp).cmdtype as c_int != CMDFUNCTION {
+                        if cmdp.is_null() || (*cmdp).cmdtype() != CMDFUNCTION {
                             crate::sh_error!(
                                 b"%s not defined in %s\0".as_ptr() as *const c_char,
                                 name,
@@ -632,15 +673,14 @@ pub unsafe fn find_command(
                     }
                     INTOFF();
                     cmdp = cmdlookup(name, 1);
-                    (*cmdp).cmdtype = CMDNORMAL as c_short;
-                    (*cmdp).param.index = idx;
+                    (*cmdp).command = Command::Normal(idx);
                     INTON();
                     break 'success;
                 }
 
                 /* We failed.  If there was an entry for this command, delete it */
                 if !cmdp.is_null() && updatetbl != 0 {
-                    delete_cmd_entry();
+                    delete_cmd_entry(name);
                 }
                 if (act & DO_ERR) != 0 {
                     crate::sh_warnx!(
@@ -663,15 +703,13 @@ pub unsafe fn find_command(
         }
         INTOFF();
         cmdp = cmdlookup(name, 1);
-        (*cmdp).cmdtype = CMDBUILTIN as c_short;
-        (*cmdp).param.cmd = bcmd;
+        (*cmdp).command = Command::Builtin(bcmd);
         INTON();
         // fall through into success:
     }
     // success:
-    (*cmdp).rehash = 0;
-    (*entry).cmdtype = (*cmdp).cmdtype as c_int;
-    (*entry).u = (*cmdp).param;
+    (*cmdp).rehash = false;
+    (*cmdp).write_to(entry);
 }
 
 /*
@@ -681,16 +719,10 @@ pub unsafe fn find_command(
 // [spec:dash:def:exec.find-builtin-fn]
 // [spec:dash:sem:exec.find-builtin-fn]
 pub unsafe fn find_builtin(name: *const c_char) -> *const builtincmd {
-    let bp: *const builtincmd;
-
-    bp = libc::bsearch(
-        &name as *const *const c_char as *const c_void,
-        crate::builtins::builtincmd.as_ptr() as *const c_void,
-        crate::builtins::NUMBUILTINS as size_t,
-        core::mem::size_of::<builtincmd>() as size_t,
-        Some(crate::mystring::pstrcmp),
-    ) as *const builtincmd;
-    bp
+    let name = BStr::new(CStr::from_ptr(name).to_bytes());
+    crate::builtins::builtincmd
+        .binary_search_by(|cmd| BStr::new(cmd.name.to_bytes()).cmp(name))
+        .map_or(null(), |index| &crate::builtins::builtincmd[index])
 }
 
 /*
@@ -701,23 +733,10 @@ pub unsafe fn find_builtin(name: *const c_char) -> *const builtincmd {
 // [spec:dash:def:exec.hashcd-fn]
 // [spec:dash:sem:exec.hashcd-fn]
 pub unsafe fn hashcd() {
-    let mut pp: *mut *mut tblentry;
-    let mut cmdp: *mut tblentry;
-
-    pp = (addr_of_mut!(cmdtable) as *mut *mut tblentry);
-    while pp < (addr_of_mut!(cmdtable) as *mut *mut tblentry).add(CMDTABLESIZE) {
-        cmdp = *pp;
-        while !cmdp.is_null() {
-            if (*cmdp).cmdtype as c_int == CMDNORMAL
-                || ((*cmdp).cmdtype as c_int == CMDBUILTIN
-                    && ((*(*cmdp).param.cmd).flags & BUILTIN_REGULAR) == 0
-                    && builtinloc > 0)
-            {
-                (*cmdp).rehash = 1;
-            }
-            cmdp = (*cmdp).next;
+    for cmdp in cmdtable_mut().values_mut() {
+        if cmdp.path_dependent() {
+            cmdp.rehash = true;
         }
-        pp = pp.add(1);
     }
 }
 
@@ -765,97 +784,47 @@ pub unsafe fn changepath(newval: *const c_char) {
 // [spec:dash:def:exec.clearcmdentry-fn]
 // [spec:dash:sem:exec.clearcmdentry-fn]
 unsafe fn clearcmdentry() {
-    let mut tblp: *mut *mut tblentry;
-    let mut pp: *mut *mut tblentry;
-    let mut cmdp: *mut tblentry;
-
     INTOFF();
-    tblp = (addr_of_mut!(cmdtable) as *mut *mut tblentry);
-    while tblp < (addr_of_mut!(cmdtable) as *mut *mut tblentry).add(CMDTABLESIZE) {
-        pp = tblp;
-        loop {
-            cmdp = *pp;
-            if cmdp.is_null() {
-                break;
-            }
-            if (*cmdp).cmdtype as c_int == CMDNORMAL
-                || ((*cmdp).cmdtype as c_int == CMDBUILTIN
-                    && ((*(*cmdp).param.cmd).flags & BUILTIN_REGULAR) == 0
-                    && builtinloc > 0)
-            {
-                *pp = (*cmdp).next;
-                ckfree(cmdp as *mut c_void);
-            } else {
-                pp = &mut (*cmdp).next;
-            }
-        }
-        tblp = tblp.add(1);
-    }
+    cmdtable_mut().retain(|_, cmdp| !cmdp.path_dependent());
     INTON();
 }
 
 /*
  * Locate a command in the command hash table.  If "add" is nonzero,
  * add the command to the table if it is not already present.  The
- * variable "lastcmdentry" is set to point to the address of the link
- * pointing to the entry, so that delete_cmd_entry can delete the
- * entry.
- *
  * Interrupts must be off if called with add != 0.
  */
 
 // [spec:dash:def:exec.cmdlookup-fn]
 // [spec:dash:sem:exec.cmdlookup-fn]
 unsafe fn cmdlookup(name: *const c_char, add: c_int) -> *mut tblentry {
-    let mut hashval: c_uint;
-    let mut p: *const c_char;
-    let mut cmdp: *mut tblentry;
-    let mut pp: *mut *mut tblentry;
-
-    p = name;
-    hashval = ((*p as libc::c_uchar) as c_uint) << 4;
-    while *p != 0 {
-        hashval = hashval.wrapping_add((*p as libc::c_uchar) as c_uint);
-        p = p.add(1);
+    let name = BStr::new(CStr::from_ptr(name).to_bytes_with_nul());
+    if add != 0 {
+        &mut **cmdtable_mut().entry(name.to_owned()).or_insert_with(|| {
+            Box::new(tblentry {
+                command: Command::Unknown,
+                rehash: false,
+            })
+        })
+    } else {
+        cmdtable_mut()
+            .get_mut(name)
+            .map_or(null_mut(), |cmdp| &mut **cmdp)
     }
-    hashval &= 0x7FFF;
-    pp = (addr_of_mut!(cmdtable) as *mut *mut tblentry).add((hashval as usize) % CMDTABLESIZE);
-    cmdp = *pp;
-    while !cmdp.is_null() {
-        if equal((*cmdp).cmdname.as_ptr(), name) {
-            break;
-        }
-        pp = &mut (*cmdp).next;
-        cmdp = *pp;
-    }
-    if add != 0 && cmdp.is_null() {
-        cmdp = ckmalloc(core::mem::size_of::<tblentry>() - ARB + libc::strlen(name) + 1)
-            as *mut tblentry;
-        *pp = cmdp;
-        (*cmdp).next = null_mut();
-        (*cmdp).cmdtype = CMDUNKNOWN as c_short;
-        libc::strcpy((*cmdp).cmdname.as_mut_ptr(), name);
-    }
-    lastcmdentry = pp;
-    cmdp
 }
 
 /*
- * Delete the command entry returned on the last lookup.
+ * Delete a command table entry by name.
  */
 
 // [spec:dash:def:exec.delete-cmd-entry-fn]
 // [spec:dash:sem:exec.delete-cmd-entry-fn]
-unsafe fn delete_cmd_entry() {
-    let cmdp: *mut tblentry;
-
+unsafe fn delete_cmd_entry(name: *const c_char) {
     INTOFF();
-    cmdp = *lastcmdentry;
-    *lastcmdentry = (*cmdp).next;
-    if (*cmdp).cmdtype as c_int == CMDFUNCTION {
-        crate::nodes::freefunc((*cmdp).param.func);
-    }
-    ckfree(cmdp as *mut c_void);
+    /* Own the lookup key before mutating the map. This also makes deletion
+     * sound if a future caller passes a pointer into the stored key itself. */
+    let name = BStr::new(CStr::from_ptr(name).to_bytes_with_nul()).to_owned();
+    cmdtable_mut().remove(BStr::new(name.as_slice()));
     INTON();
 }
 
@@ -873,8 +842,7 @@ pub unsafe fn getcmdentry(name: *mut c_char, entry: *mut cmdentry) {
     let cmdp: *mut tblentry = cmdlookup(name, 0);
 
     if !cmdp.is_null() {
-        (*entry).u = (*cmdp).param;
-        (*entry).cmdtype = (*cmdp).cmdtype as c_int;
+        (*cmdp).write_to(entry);
     } else {
         (*entry).cmdtype = CMDUNKNOWN;
         (*entry).u.index = 0;
@@ -888,16 +856,12 @@ pub unsafe fn getcmdentry(name: *mut c_char, entry: *mut cmdentry) {
 
 // [spec:dash:def:exec.addcmdentry-fn]
 // [spec:dash:sem:exec.addcmdentry-fn]
-unsafe fn addcmdentry(name: *mut c_char, entry: *mut cmdentry) {
+unsafe fn addcmdentry(name: *mut c_char, command: Command) {
     let cmdp: *mut tblentry;
 
     cmdp = cmdlookup(name, 1);
-    if (*cmdp).cmdtype as c_int == CMDFUNCTION {
-        crate::nodes::freefunc((*cmdp).param.func);
-    }
-    (*cmdp).cmdtype = (*entry).cmdtype as c_short;
-    (*cmdp).param = (*entry).u;
-    (*cmdp).rehash = 0;
+    (*cmdp).command = command;
+    (*cmdp).rehash = false;
 }
 
 /*
@@ -907,15 +871,11 @@ unsafe fn addcmdentry(name: *mut c_char, entry: *mut cmdentry) {
 // [spec:dash:def:exec.defun-fn]
 // [spec:dash:sem:exec.defun-fn]
 pub unsafe fn defun(func: &Node) {
-    let mut entry: cmdentry = cmdentry {
-        cmdtype: 0,
-        u: param { index: 0 },
-    };
-
     INTOFF();
-    entry.cmdtype = CMDFUNCTION;
-    entry.u.func = crate::nodes::copyfunc(func);
-    addcmdentry(func.ndefun().text.as_ptr(), &mut entry);
+    addcmdentry(
+        func.ndefun().text.as_ptr(),
+        Command::Function(Rc::new(func.clone())),
+    );
     INTON();
 }
 
@@ -929,8 +889,8 @@ pub unsafe fn unsetfunc(name: *const c_char) {
     let cmdp: *mut tblentry;
 
     cmdp = cmdlookup(name, 0);
-    if !cmdp.is_null() && (*cmdp).cmdtype as c_int == CMDFUNCTION {
-        delete_cmd_entry();
+    if !cmdp.is_null() && (*cmdp).cmdtype() == CMDFUNCTION {
+        delete_cmd_entry(name);
     }
 }
 
@@ -1013,8 +973,7 @@ unsafe fn describe_command(
         }
 
         if !cmdp.is_null() {
-            entry.cmdtype = (*cmdp).cmdtype as c_int;
-            entry.u = (*cmdp).param;
+            (*cmdp).write_to(&mut entry);
         } else {
             /* Finally use brute force */
             find_command(command, &mut entry, DO_ABS, path);

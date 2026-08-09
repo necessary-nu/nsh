@@ -185,6 +185,62 @@ check "sorted_tables: two adjacent environments are refused (known limit)" 1 \
 	$'AA=1\nFF=6\nBB=2\nAA=1\nFF=6\nBB=2' \
 	$'AA=1\nBB=2\nFF=6\nAA=1\nBB=2\nFF=6' 0 0 "$case_file"
 
+# ---- the live register: sorted_cmdtable -----------------------------
+#
+# `hash` prints reconstructed paths, with a trailing `*` after `cd` marks
+# an entry for rehashing. The map sorts by the command name (the basename),
+# not by the full printed path.
+printf 'hash\n' > "$case_file"
+H_BUCKET=$'/bin/rm\n/bin/cat\n/bin/mkdir\n/bin/cp\n/bin/ls\n/bin/chmod'
+H_SORTED=$'/bin/cat\n/bin/chmod\n/bin/cp\n/bin/ls\n/bin/mkdir\n/bin/rm'
+
+check "sorted_cmdtable: the divergence it was written for" 0 \
+	"$H_BUCKET" "$H_SORTED" 0 0 "$case_file"
+
+# The key order is basename order even when PATH resolution gives the full
+# lines an unrelated order.
+check "sorted_cmdtable: sorting is by command name, not printed path" 0 \
+	$'/z/mkdir\n/a/cat\n/z/chmod' $'/a/cat\n/z/chmod\n/z/mkdir' 0 0 "$case_file"
+
+# Rehash markers are part of printentry's line shape but not of the key.
+check "sorted_cmdtable: rehash markers are accepted and ignored for sorting" 0 \
+	$'/bin/rm*\n/bin/cat*\n/bin/ls*' $'/bin/cat*\n/bin/ls*\n/bin/rm*' 0 0 "$case_file"
+
+check "sorted_cmdtable: a changed path is not excused" 1 \
+	"$H_BUCKET" $'/usr/bin/cat\n/bin/chmod\n/bin/cp\n/bin/ls\n/bin/mkdir\n/bin/rm' 0 0 "$case_file"
+check "sorted_cmdtable: a missing command is not excused" 1 \
+	"$H_BUCKET" $'/bin/cat\n/bin/chmod\n/bin/cp\n/bin/ls\n/bin/mkdir' 0 0 "$case_file"
+check "sorted_cmdtable: an extra command is not excused" 1 \
+	"$H_BUCKET" $'/bin/cat\n/bin/chmod\n/bin/cp\n/bin/echo\n/bin/ls\n/bin/mkdir\n/bin/rm' 0 0 "$case_file"
+check "sorted_cmdtable: a duplicate command is not excused" 1 \
+	$'/bin/cat\n/bin/ls' $'/bin/cat\n/bin/cat' 0 0 "$case_file"
+check "sorted_cmdtable: a differing exit status is not excused" 1 \
+	"$H_BUCKET" "$H_SORTED" 0 1 "$case_file"
+
+# This is the load-bearing assertion: matching the same lines is not enough;
+# the port side must actually be in the BTreeMap's command-name order.
+check "sorted_cmdtable: an unsorted permutation is not excused" 1 \
+	"$H_BUCKET" $'/bin/cat\n/bin/cp\n/bin/chmod\n/bin/ls\n/bin/mkdir\n/bin/rm' 0 0 "$case_file"
+
+# Only printentry-shaped pathname lines may move. A diagnostic or unrelated
+# output race remains a failure even in a case that runs hash.
+check "sorted_cmdtable: a reordered diagnostic is not excused" 1 \
+	$'/bin/cat\nSH: 1: x: not found' $'SH: 1: x: not found\n/bin/cat' 0 0 "$case_file"
+check "sorted_cmdtable: a non-path line is not excused" 1 \
+	$'/bin/cat\nvalue with spaces' $'value with spaces\n/bin/cat' 0 0 "$case_file"
+
+# Scope is specifically a no-operand hash listing. Refreshes and operand
+# lookups do not print the table and cannot acquire this excuse.
+printf 'echo hash\n' > "$case_file"
+check "sorted_cmdtable: a mention is outside the entry" 1 \
+	"$H_BUCKET" "$H_SORTED" 0 0 "$case_file"
+printf 'hash cat\n' > "$case_file"
+check "sorted_cmdtable: hash with an operand is outside the entry" 1 \
+	"$H_BUCKET" "$H_SORTED" 0 0 "$case_file"
+printf 'hash -r\n' > "$case_file"
+check "sorted_cmdtable: hash -r is outside the entry" 1 \
+	"$H_BUCKET" "$H_SORTED" 0 0 "$case_file"
+
 # ---- the dead-harness guard --------------------------------------
 #
 # A shell that stopped existing is not a shell that behaved differently.

@@ -566,10 +566,9 @@ impl Node {
 ///
 /// `Rc` *is* `count`: the C starts a fresh copy at `count = 0` meaning one
 /// owner and frees at `count < 0`, which is `Rc`'s strong count offset by
-/// one. The command table entry that holds it (`exec::tblentry`) is still a
-/// `ckmalloc`'d C struct with a flexible array member, so what it stores is
-/// the raw form of the `Rc` rather than the `Rc` itself; that goes when
-/// `memalloc` does.
+/// one. `exec::tblentry` owns that reference as an `Rc<Node>`; the raw
+/// pointer exposed to the evaluator is only a borrowed view, and `evalfun`
+/// increments the count before running the body.
 pub type funcnode = Node;
 
 /// Make a copy of a parse tree.

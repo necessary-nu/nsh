@@ -59,6 +59,13 @@ PATH=$PWD/coll:/bin:/usr/bin
 ab; ba; c0; 0c
 hash | sed "s|$PWD|WD|" | sort
 %%%
+#!name hash listing order is command-name order
+mkdir -p collorder
+for n in ab ba c0 0c; do printf '#!/bin/sh\n:\n' > collorder/$n; chmod 755 collorder/$n; done
+PATH=$PWD/collorder:/bin:/usr/bin
+ab; ba; c0; 0c
+hash | sed "s|$PWD|WD|"
+%%%
 #!name unset function frees entry
 f() { echo x; }
 f

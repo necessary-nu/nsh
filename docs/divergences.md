@@ -234,6 +234,45 @@ between them would be refused and reported as a failure rather than an
 `XFAIL`. Nothing in the corpus does. For an entry whose job is to not
 excuse too much, that is the right way to be wrong.
 
+### `hash` prints cached commands in name order
+
+**Status:** fixed in the Rust; dash unchanged. Category 3. Registered as
+`sorted_cmdtable` in `tests/harness/divergences.sh`.
+
+dash's command cache is a 31-bucket chained hash table. A bare `hash`
+walks buckets and chains, so its output order is an artefact of the inline
+hash in `cmdlookup`, just as `env` and `alias` used to expose their table
+orders. The port owns the cache as a `BTreeMap<BString, Box<tblentry>>`
+keyed by command-name bytes. The box keeps an entry address stable across
+map rebalancing for the still-C-shaped resolver interface; the map owns
+both the NUL-terminated key and the entry, and a function entry owns its
+body as `Rc<Node>`.
+
+Consequently, a no-operand `hash` prints entries in bytewise command-name
+order while dash retains bucket order. POSIX does not specify `hash`'s
+listing order. This is the third table-order divergence anticipated by
+`docs/std-replacements.md` section 5.1 and is accepted for the same reason:
+preserving a weak hash's internal walk would preserve an allocator-driven
+representation as observable policy.
+
+The executable entry is scoped to a no-operand `hash`; `hash name` and
+`hash -r` cannot match it. It requires equal exit statuses and the same
+line multiset, and only lines with `printentry`'s shape may move: a
+reconstructed path with an optional trailing `*` rehash marker. It then
+strips that marker and the directory prefix and asserts that each block on
+the nsh side is sorted by command name. Sorting the whole printed line
+would be wrong because two commands may resolve through different `PATH`
+elements.
+
+The line grammar deliberately accepts only the pathname characters used
+by the corpus. A valid but exotic command path containing whitespace or
+other shell punctuation is refused and remains a loud differential. That
+is preferable to broadening an ordering exception until it could mistake
+unrelated output or a diagnostic for a hash-table line. `divtest.sh` pins
+the matching case, content/drop/add/duplicate/status failures, the line
+shape and feature scope, the optional `*`, basename rather than full-path
+sorting, and an unsorted nsh permutation.
+
 ## Candidates not yet decided
 
 ### The port is *more* conformant than dash in two line-editing cases

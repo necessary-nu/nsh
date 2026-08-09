@@ -174,7 +174,7 @@ ds_blocks_sorted() {
 # The register
 # ---------------------------------------------------------------------
 
-DS_DIVERGENCES=(sorted_tables)
+DS_DIVERGENCES=(sorted_tables sorted_cmdtable)
 
 # A line the sorted tables produce: an environment entry, `NAME=value`, or
 # an alias listing, which is the same thing inside the single quotes
@@ -215,6 +215,51 @@ dsdiv_sorted_tables() {
 	ds_same_lines "$1" "$2" || return 1
 	ds_moved_lines_match "$1" "$2" "$DS_ORDERED_LINE" || return 1
 	ds_blocks_sorted "$2" "$DS_ORDERED_LINE"
+}
+
+# A line `printentry` produces: the reconstructed command path, optionally
+# followed by `*` when `cd` marked the cache entry for rehashing. This is
+# deliberately narrower than every pathname the shell language can express.
+# It covers the corpus's hash listings; an exotic path is refused rather than
+# letting this entry mistake arbitrary output for a command-table line.
+DS_HASH_LINE='^/?([A-Za-z0-9_.,+%=-]+/)*[A-Za-z0-9_.,+%=-]+\*?$'
+
+# ds_hash_blocks_sorted OUT -- true when each run of printentry-shaped lines
+# is ordered by command name. The map is keyed by the name, while printentry
+# exposes the full resolved path, so sorting whole lines would be the wrong
+# assertion whenever commands came from different PATH elements.
+ds_hash_blocks_sorted() {
+	local -a y
+	local i line block=
+
+	mapfile -t y <<< "$1"
+	for ((i = 0; i <= ${#y[@]}; i++)); do
+		if [ "$i" -lt "${#y[@]}" ] && [[ ${y[i]} =~ $DS_HASH_LINE ]]; then
+			line=${y[i]%\*}
+			block+=${line##*/}$'\n'
+			continue
+		fi
+		if [ -n "$block" ]; then
+			printf '%s' "$block" | LC_ALL=C sort -C || return 1
+			block=
+		fi
+	done
+	return 0
+}
+
+# `hash` with no operands prints cached external commands in command-name
+# order; dash prints the same entries in its 31-bucket chain order.
+#
+# The entry requires the same status and line multiset, scopes itself to a
+# no-operand hash command, permits only printentry-shaped lines to move, and
+# independently proves that the port ordered each such block by command name.
+# It intentionally refuses `hash name`, `hash -r`, and exotic path bytes.
+dsdiv_sorted_cmdtable() {
+	[ "$3" = "$4" ] || return 1
+	ds_case_matches "$5" '(^|[;&|(`{][[:space:]]*)hash([[:space:]]*($|[;&|)`}<>]))' || return 1
+	ds_same_lines "$1" "$2" || return 1
+	ds_moved_lines_match "$1" "$2" "$DS_HASH_LINE" || return 1
+	ds_hash_blocks_sorted "$2"
 }
 
 # An extra register, for testing the machinery itself. It was written
