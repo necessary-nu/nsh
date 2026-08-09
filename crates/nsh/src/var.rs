@@ -186,8 +186,45 @@ pub static mut linenovar: [c_char; 19] = unsafe {
 
 // [spec:dash:def:var.changelocale-fn]
 // [spec:dash:sem:var.changelocale-fn]
+/// The C is `putenv(val); setlocale(LC_ALL, "")`, and the `putenv` is a
+/// use-after-free in both shells.
+///
+/// glibc's `putenv` stores the caller's pointer in `environ` rather than
+/// copying it. `varfunc` passes `vp->text`, which this crate owns — a
+/// `Box<[u8]>` since [dec:nsh:owned-data] — so reassigning any of the
+/// five locale variables drops the box while `environ` still points into
+/// it, and the next `setlocale` reads freed memory. `setenv` copies, so
+/// `environ` holds storage glibc owns and the lifetime question does not
+/// arise. dash keeps the defect; we do not, per
+/// [dec:nsh:we-own-the-defects].
+///
+/// The unset path cannot be fixed here, for a reason that is not visible
+/// from inside this function. `setvareq` keeps only
+/// `VSTRFIXED` when it unsets an entry (`var.c:317`), so `VFULL` is gone
+/// by the time `varfunc` runs, `varfunc` takes its `varnull` branch, and
+/// what arrives is the empty string — the *value* of an unset variable,
+/// with no name attached. `putenv("")` fails `EINVAL`, which is why dash
+/// leaves `environ` holding the old entry after `unset LC_ALL`, and why
+/// the locale does not revert. Reproducing that is deliberate: the
+/// observable behaviour is dash's, and changing it is a divergence for
+/// the register, not something to slip into a memory-safety fix. Fixing
+/// it properly means giving the callback the variable rather than a
+/// pointer into its text.
 unsafe fn changelocale(val: *const c_char) {
-    libc::putenv(val as *mut c_char);
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+
+    let text = core::ffi::CStr::from_ptr(val).to_bytes();
+    if let Some(i) = text.iter().position(|&b| b == b'=') {
+        if i > 0 {
+            unsafe {
+                std::env::set_var(
+                    OsStr::from_bytes(&text[..i]),
+                    OsStr::from_bytes(&text[i + 1..]),
+                );
+            }
+        }
+    }
     libc::setlocale(libc::LC_ALL, addr_of!(nullstr) as *const c_char);
 }
 
@@ -1223,6 +1260,60 @@ mod tests {
                 unsetvar(f.p());
             }
             unsetvar(name.p());
+        }
+    }
+
+    // [spec:dash:sem:var.changelocale-fn/test]
+    /// `environ` must own its bytes, not borrow the shell's.
+    ///
+    /// glibc's `putenv` files the caller's pointer; `setenv` copies. Under
+    /// `putenv` the entry `getenv` hands back *is* the tail of `vp->text`,
+    /// so the next assignment drops that `Box` out from under `setlocale`
+    /// — valgrind reports it as an invalid read inside `getenv`, reached
+    /// from `unsetvar`. The assertion is that the two addresses differ.
+    ///
+    /// Mutation-checked: restoring `libc::putenv(val)` makes them equal
+    /// and the test fails.
+    #[test]
+    fn environ_owns_the_locale_bytes() {
+        let _g = lock();
+        unsafe {
+            let name = CStr0::new("LC_COLLATE");
+            let saved = libc::getenv(name.p());
+            let saved = if saved.is_null() {
+                None
+            } else {
+                Some(core::ffi::CStr::from_ptr(saved).to_bytes().to_vec())
+            };
+
+            let text: &[u8] = b"LC_COLLATE=C\0";
+            changelocale(text.as_ptr() as *const c_char);
+
+            let filed = libc::getenv(name.p());
+            assert!(!filed.is_null(), "changelocale reached the environment");
+            assert_eq!(core::ffi::CStr::from_ptr(filed).to_bytes(), b"C");
+            assert_ne!(
+                filed as usize,
+                text.as_ptr().add("LC_COLLATE=".len()) as usize,
+                "environ borrowed the caller's buffer instead of copying it"
+            );
+
+            // An unset arrives as the bare value with no name attached,
+            // because `setvareq` drops VFULL; it must not panic and must
+            // not disturb what is filed. See the function's own comment.
+            changelocale(b"\0".as_ptr() as *const c_char);
+            assert_eq!(
+                core::ffi::CStr::from_ptr(libc::getenv(name.p())).to_bytes(),
+                b"C"
+            );
+
+            match saved {
+                None => std::env::remove_var("LC_COLLATE"),
+                Some(v) => {
+                    use std::os::unix::ffi::OsStrExt;
+                    std::env::set_var("LC_COLLATE", std::ffi::OsStr::from_bytes(&v))
+                }
+            }
         }
     }
 }
