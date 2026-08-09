@@ -4,7 +4,8 @@
 //! Note `sigmode`/`gotsig` are indexed by `signo - 1` while `trap` is indexed
 //! by `signo`, slot 0 being the `EXIT` trap.
 
-use libc::{c_char, c_int, c_void, sigset_t};
+use bstr::BString;
+use libc::{c_char, c_int, sigset_t};
 use core::ptr::{addr_of, addr_of_mut, null, null_mut};
 
 /// `sig_atomic_t` — `int` on every platform dash supports.
@@ -12,7 +13,6 @@ pub type sig_atomic_t = c_int;
 
 use crate::error::{jmploc, INTOFF, INTON};
 use crate::eval::{evalskip, exitstatus, savestatus, SKIPFUNC, SKIPFUNCDEF};
-use crate::memalloc::{ckfree, savestr};
 use crate::mystring::nullstr;
 use crate::output::VaArg;
 use crate::shell::cstr;
@@ -35,7 +35,13 @@ const S_HARD_IGN: c_char = 4; /* signal is ignored permenantly */
 const S_RESET: c_char = 5; /* temporary - to reset a hard ignored sig */
 
 /* trap handler commands */
-static mut trap: [*mut c_char; NSIG] = [null_mut(); NSIG];
+/// The C's three states are `NULL` (no trap), `""` (the signal is ignored)
+/// and an action; `None` and an empty `BString` keep them apart.
+///
+/// `onsig` reads this array from a kernel-delivered signal frame, so nothing
+/// here may do more than the C's pointer load did: `Option<BString>` carries
+/// its emptiness in the vector's pointer word, and `is_none()` is that load.
+static mut trap: [Option<BString>; NSIG] = [const { None }; NSIG];
 /* traps have not been fully cleared */
 static mut ptrap: c_int = 0;
 /* number of non-null traps */
@@ -48,6 +54,19 @@ static mut gotsig: [c_char; NSIG - 1] = [0; NSIG - 1];
 pub static mut pending_sig: sig_atomic_t = 0;
 /* received SIGCHLD */
 pub static mut gotsigchld: sig_atomic_t = 0;
+
+#[inline]
+unsafe fn trap_mut() -> &'static mut [Option<BString>; NSIG] {
+    &mut *addr_of_mut!(trap)
+}
+
+/// A trap action with the terminator its readers — `single_quote`, and
+/// `evalstring` by way of `strlen` — read up to.
+fn cbytes(s: &BString) -> Vec<u8> {
+    let mut v = s.to_vec();
+    v.push(0);
+    v
+}
 
 // [spec:dash:def:trap.have-traps-fn]
 // [spec:dash:sem:trap.have-traps-fn]
@@ -82,11 +101,12 @@ pub unsafe fn trapcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     if (*ap).is_null() {
         signo = 0;
         while signo < NSIG as c_int {
-            if !trap[signo as usize].is_null() {
+            if let Some(t) = &(*addr_of!(trap))[signo as usize] {
+                let t = cbytes(t);
                 crate::output::out1fmt(
                     cstr(b"trap -- %s %s\n\0"),
                     &[
-                        VaArg::Str(crate::mystring::single_quote(trap[signo as usize])),
+                        VaArg::Str(crate::mystring::single_quote(t.as_ptr() as *const c_char)),
                         VaArg::Str(crate::signames::signal_names[signo as usize].as_ptr()),
                     ],
                 );
@@ -115,6 +135,11 @@ pub unsafe fn trapcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
             return 1;
         }
         INTOFF();
+        /* The C's `action = savestr(action)` makes the next signal in the
+         * list copy the previous copy; copying the argument word each time
+         * gives the same bytes and leaves `action` pointing at what the
+         * `'-'` test reads. */
+        let mut newtrap: Option<BString> = None;
         if !action.is_null() {
             if *action.offset(0) == b'-' as c_char && *action.offset(1) == b'\0' as c_char {
                 action = null_mut();
@@ -122,16 +147,25 @@ pub unsafe fn trapcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
                 if *action != 0 {
                     trapcnt += 1;
                 }
-                action = savestr(action);
+                newtrap = Some(BString::from(core::slice::from_raw_parts(
+                    action as *const u8,
+                    libc::strlen(action),
+                )));
             }
         }
-        if !trap[signo as usize].is_null() {
-            if *trap[signo as usize] != 0 {
+        if let Some(old) = &(*addr_of!(trap))[signo as usize] {
+            if !old.is_empty() {
                 trapcnt -= 1;
             }
-            ckfree(trap[signo as usize] as *mut c_void);
         }
-        trap[signo as usize] = action;
+        /* The C frees the old action and *then* stores the new one, so the
+         * slot is briefly a dangling non-NULL pointer; `onsig` only tests it
+         * for NULL, so it reads "a trap is set" throughout. A replace reads
+         * the same way and never leaves a stale pointer for it to load. */
+        drop(core::mem::replace(
+            &mut trap_mut()[signo as usize],
+            newtrap,
+        ));
         if signo != 0 {
             setsignal(signo);
         }
@@ -149,34 +183,29 @@ pub unsafe fn trapcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 // [spec:dash:sem:trap.clear-traps-fn]
 pub unsafe fn clear_traps(n: Option<&Node>) {
     let simplecmd: c_int;
-    let mut tp: *mut *mut c_char;
 
     simplecmd = crate::parser::issimplecmd(n, crate::builtins::TRAPCMD.name.as_ptr());
 
     INTOFF();
-    tp = addr_of_mut!(trap) as *mut *mut c_char;
-    while tp < (addr_of_mut!(trap) as *mut *mut c_char).add(NSIG) {
-        if !(*tp).is_null() && **tp != 0 {
-            /* trap not NULL or SIG_IGN */
-            let otp: *mut c_char = *tp;
-
-            *tp = null_mut();
-            if tp != addr_of_mut!(trap) as *mut *mut c_char {
-                setsignal(
-                    ((tp as usize - addr_of_mut!(trap) as usize)
-                        / core::mem::size_of::<*mut c_char>()) as c_int,
-                );
-            }
-
-            if simplecmd != 0 {
-                *tp = otp;
-            } else {
-                /* NB: *tp has just been set to NULL, so this frees NULL and
-                 * leaks `otp`.  Reproduced verbatim (src/trap.c:189). */
-                ckfree(*tp as *mut c_void);
-            }
+    for signo in 0..NSIG {
+        /* trap not NULL or SIG_IGN */
+        match &(*addr_of!(trap))[signo] {
+            Some(t) if !t.is_empty() => {}
+            _ => continue,
         }
-        tp = tp.add(1);
+        let otp = trap_mut()[signo].take();
+        if signo != 0 {
+            setsignal(signo as c_int);
+        }
+
+        if simplecmd != 0 {
+            trap_mut()[signo] = otp;
+        }
+        /* The C's else arm is `ckfree(*tp)` after `*tp = NULL`, so it frees
+         * NULL and leaks `otp` (src/trap.c:189).  Dropping `otp` here frees
+         * it instead, which no reader can tell apart: `dotrap` and
+         * `exitshell` are the only readers of an action and both take a
+         * copy before running it. */
     }
     trapcnt = 0;
     ptrap = simplecmd;
@@ -193,20 +222,16 @@ pub unsafe fn clear_traps(n: Option<&Node>) {
 pub unsafe fn setsignal(signo: c_int) {
     let mut action: c_int;
     let lvforked: c_int;
-    let mut t: *mut c_char;
     let mut tsig: c_char;
     let mut act: libc::sigaction = core::mem::zeroed();
 
     lvforked = crate::jobs::vforked;
 
-    t = trap[signo as usize];
-    if t.is_null() {
-        action = S_DFL as c_int;
-    } else if *t != b'\0' as c_char {
-        action = S_CATCH as c_int;
-    } else {
-        action = S_IGN as c_int;
-    }
+    action = match &(*addr_of!(trap))[signo as usize] {
+        None => S_DFL as c_int,
+        Some(t) if !t.is_empty() => S_CATCH as c_int,
+        Some(_) => S_IGN as c_int,
+    };
     if crate::shellmain::rootshell() != 0 && action == S_DFL as c_int && lvforked == 0 {
         match signo {
             libc::SIGINT => {
@@ -335,7 +360,7 @@ pub unsafe extern "C-unwind" fn onsig(signo: c_int) {
 
     if signo == libc::SIGCHLD {
         gotsigchld = 1;
-        if trap[libc::SIGCHLD as usize].is_null() {
+        if (*addr_of!(trap))[libc::SIGCHLD as usize].is_none() {
             return;
         }
     }
@@ -343,7 +368,7 @@ pub unsafe extern "C-unwind" fn onsig(signo: c_int) {
     gotsig[(signo - 1) as usize] = 1;
     pending_sig = signo;
 
-    if signo == libc::SIGINT && trap[libc::SIGINT as usize].is_null() {
+    if signo == libc::SIGINT && (*addr_of!(trap))[libc::SIGINT as usize].is_none() {
         if crate::error::suppressint == 0 {
             crate::error::onint();
         }
@@ -359,7 +384,6 @@ pub unsafe extern "C-unwind" fn onsig(signo: c_int) {
 // [spec:dash:def:trap.dotrap-fn]
 // [spec:dash:sem:trap.dotrap-fn]
 pub unsafe fn dotrap() {
-    let mut p: *mut c_char;
     let mut q: *mut c_char;
     let mut i: c_int;
     let mut status: c_int;
@@ -394,13 +418,19 @@ pub unsafe fn dotrap() {
 
         *q = 0;
 
-        p = trap[(i + 1) as usize];
-        if p.is_null() {
-            i += 1;
-            q = q.add(1);
-            continue;
-        }
-        crate::eval::evalstring(p, 0);
+        /* The action is copied out because `evalstring` parses from the
+         * buffer it is handed and the action it runs may `trap` over this
+         * very slot; the C passes the slot's own pointer and keeps reading
+         * it after `trapcmd` has freed it. */
+        let mut p = match &(*addr_of!(trap))[(i + 1) as usize] {
+            Some(t) => cbytes(t),
+            None => {
+                i += 1;
+                q = q.add(1);
+                continue;
+            }
+        };
+        crate::eval::evalstring(p.as_mut_ptr() as *mut c_char, 0);
         if evalskip != SKIPFUNC {
             exitstatus = status;
         }
@@ -445,18 +475,19 @@ pub unsafe fn exitshell() -> ! {
      * `#ifdef DEBUG` in `shell.h`, and the dash build does not define it. */
     /* `if (setjmp(loc.loc)) goto out;` — the body below is the fall-through. */
     crate::eval::setjmp_catch(locp, || {
-        let p: *mut c_char;
-
         crate::error::handler = locp;
         'out: {
-            p = trap[0];
-            if !p.is_null() {
-                trap[0] = null_mut();
+            /* `trap[0] = NULL` with no free: the C leaks the EXIT action on
+             * purpose so `evalstring` can still read it.  Taking it keeps the
+             * action alive for exactly as long and gives the buffer back. */
+            let p = (*addr_of_mut!(trap))[0].take();
+            if let Some(p) = p {
                 if ptrap != 0 {
                     break 'out;
                 }
                 evalskip = 0;
-                crate::eval::evalstring(p, 0);
+                let mut p = cbytes(&p);
+                crate::eval::evalstring(p.as_mut_ptr() as *mut c_char, 0);
                 evalskip = SKIPFUNCDEF;
             }
         }

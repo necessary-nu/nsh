@@ -1945,7 +1945,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
                                 return -1;
                             }
                             p = if num != 0 {
-                                *crate::options::shellparam.p.offset(num as isize - 1)
+                                *crate::options::shellparam_p().offset(num as isize - 1)
                             } else {
                                 crate::options::arg0
                             };
@@ -1963,7 +1963,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
                 break 'sw;
             }
             /* param: */
-            ap = crate::options::shellparam.p;
+            ap = crate::options::shellparam_p();
             if ap.is_null() {
                 return -1;
             }

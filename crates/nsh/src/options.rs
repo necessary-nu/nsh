@@ -6,25 +6,88 @@
 //! `options.h` become `usize` indices, so a call site reads `optlist[eflag]`
 //! and stays assignable exactly like the C macro.
 
-use libc::{c_char, c_int, c_uint, c_void, size_t};
+use bstr::BString;
+use libc::{c_char, c_int, c_uint, size_t};
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 
 use crate::error::{INTOFF, INTON};
-use crate::memalloc::{ckfree, ckmalloc, savestr};
 use crate::mystring::nullstr;
 use crate::output::VaArg;
 use crate::shell::cstr;
 use crate::var::{setvar, setvarint, showvars, VNOFUNC, VUNSET};
 
+/// The positional parameters when the shell owns them — the C's
+/// `shellparam.malloc`.
+///
+/// `ptrs` is the `char **` that `getopts` walks and `$@` iterates, and it
+/// holds the address of each word's bytes, so a word may be dropped or the
+/// whole list rebuilt but a word must never be resized in place. Each word
+/// carries its own terminator because every reader reads it as a C string.
+struct Params {
+    words: Vec<BString>,
+    ptrs: Vec<*mut c_char>,
+}
+
+impl Params {
+    fn new(words: Vec<BString>) -> Params {
+        let mut p = Params {
+            words,
+            ptrs: Vec::new(),
+        };
+        p.reindex();
+        p
+    }
+
+    fn reindex(&mut self) {
+        self.ptrs.clear();
+        self.ptrs.reserve(self.words.len() + 1);
+        for w in &mut self.words {
+            self.ptrs.push(w.as_mut_ptr() as *mut c_char);
+        }
+        self.ptrs.push(null_mut());
+    }
+}
+
 // [spec:dash:def:options.shparam]
-#[repr(C)]
-#[derive(Copy, Clone)]
+/// The C's `malloc` flag and `p` pointer are one field: `owned` is `Some`
+/// exactly when `malloc` was 1, and `borrowed` is the `argv` `p` pointed
+/// into when it was 0.
 pub struct shparam {
     pub nparam: c_int,        /* # of positional parameters (without $0) */
-    pub malloc: libc::c_uchar, /* if parameter list dynamically allocated */
-    pub p: *mut *mut c_char,  /* parameter list */
     pub optind: c_int,        /* next parameter to be processed by getopts */
     pub optoff: c_int,        /* used by getopts */
+    owned: Option<Params>,
+    borrowed: *mut *mut c_char,
+}
+
+impl shparam {
+    pub const fn new() -> shparam {
+        shparam {
+            nparam: 0,
+            optind: 0,
+            optoff: 0,
+            owned: None,
+            borrowed: null_mut(),
+        }
+    }
+
+    /// `shellparam.p` — the NULL-terminated array, wherever it lives.
+    fn p(&mut self) -> *mut *mut c_char {
+        match &mut self.owned {
+            Some(o) => o.ptrs.as_mut_ptr(),
+            None => self.borrowed,
+        }
+    }
+}
+
+/// `shellparam.p`, for the readers outside this file.
+pub unsafe fn shellparam_p() -> *mut *mut c_char {
+    (*addr_of_mut!(shellparam)).p()
+}
+
+/// A positional parameter's bytes, terminator included.
+unsafe fn word(s: *const c_char) -> BString {
+    BString::from(core::slice::from_raw_parts(s as *const u8, libc::strlen(s) + 1))
 }
 
 pub const NOPTS: usize = 18;
@@ -54,13 +117,7 @@ pub const pipefail: usize = 16;
 pub const debug: usize = 17;
 
 pub static mut arg0: *mut c_char = null_mut(); /* value of $0 */
-pub static mut shellparam: shparam = shparam {
-    nparam: 0,
-    malloc: 0,
-    p: null_mut(),
-    optind: 0,
-    optoff: 0,
-}; /* current positional parameters */
+pub static mut shellparam: shparam = shparam::new(); /* current positional parameters */
 pub static mut argptr: *mut *mut c_char = null_mut(); /* argument list for builtin commands */
 pub static mut optionarg: *mut c_char = null_mut(); /* set by nextopt (like getopt) */
 pub static mut optptr: *mut c_char = null_mut(); /* used by nextopt */
@@ -180,14 +237,14 @@ pub unsafe fn procargs(mut xargv: *mut *mut c_char) -> c_int {
         xargv = xargv.add(1);
     }
 
-    shellparam.p = xargv;
-    shellparam.optind = 1;
-    shellparam.optoff = -1;
     /* assert(shellparam.malloc == 0 && shellparam.nparam == 0); */
-    while !(*xargv).is_null() {
-        shellparam.nparam += 1;
-        xargv = xargv.add(1);
+    let mut nparam: c_int = 0;
+    let mut count = xargv;
+    while !(*count).is_null() {
+        nparam += 1;
+        count = count.add(1);
     }
+    borrowparam(xargv, nparam);
     optschanged();
 
     login
@@ -361,30 +418,50 @@ unsafe fn setoption(flag: c_int, val: c_int) {
 // [spec:dash:def:options.setparam-fn]
 // [spec:dash:sem:options.setparam-fn]
 pub unsafe fn setparam(mut argv: *mut *mut c_char) {
-    let newparam: *mut *mut c_char;
-    let mut ap: *mut *mut c_char;
     let mut nparam: c_int;
 
     nparam = 0;
     while !(*argv.offset(nparam as isize)).is_null() {
         nparam += 1;
     }
-    newparam = ckmalloc(
-        (nparam as size_t + 1) * core::mem::size_of::<*mut c_char>() as size_t,
-    ) as *mut *mut c_char;
-    ap = newparam;
+    /* Copied out in full before the old list goes, as the C's
+     * `savestr` loop is: `freeparam` comes after the copy there too. */
+    let mut words: Vec<BString> = Vec::with_capacity(nparam as usize);
     while !(*argv).is_null() {
-        *ap = savestr(*argv);
-        ap = ap.add(1);
+        words.push(word(*argv));
         argv = argv.add(1);
     }
-    *ap = null_mut();
+    let param = &mut *addr_of_mut!(shellparam);
+    param.owned = Some(Params::new(words));
+    param.borrowed = null_mut();
+    param.nparam = nparam;
+    param.optind = 1;
+    param.optoff = -1;
+}
+
+/// `shellparam.malloc = 0; shellparam.p = argv` — the parameters a function
+/// call installs are its caller's `argv`, borrowed for the length of the
+/// call and rewritten in place by `shift`.
+pub unsafe fn borrowparam(argv: *mut *mut c_char, nparam: c_int) {
+    let param = &mut *addr_of_mut!(shellparam);
+    param.owned = None;
+    param.borrowed = argv;
+    param.nparam = nparam;
+    param.optind = 1;
+    param.optoff = -1;
+}
+
+/// `saveparam = shellparam`, which is a copy in the C only because
+/// `shellparam.malloc = 0` on the next line disarms the `freeparam` that
+/// would otherwise free what the copy still points at. One move says both.
+pub unsafe fn takeparam() -> shparam {
+    core::mem::replace(&mut *addr_of_mut!(shellparam), shparam::new())
+}
+
+/// `freeparam(&shellparam); shellparam = saveparam;`
+pub unsafe fn restoreparam(saved: shparam) {
     freeparam(addr_of_mut!(shellparam));
-    shellparam.malloc = 1;
-    shellparam.nparam = nparam;
-    shellparam.p = newparam;
-    shellparam.optind = 1;
-    shellparam.optoff = -1;
+    shellparam = saved;
 }
 
 /*
@@ -394,16 +471,7 @@ pub unsafe fn setparam(mut argv: *mut *mut c_char) {
 // [spec:dash:def:options.freeparam-fn]
 // [spec:dash:sem:options.freeparam-fn]
 pub unsafe fn freeparam(param: *mut shparam) {
-    let mut ap: *mut *mut c_char;
-
-    if (*param).malloc != 0 {
-        ap = (*param).p;
-        while !(*ap).is_null() {
-            ckfree(*ap as *mut c_void);
-            ap = ap.add(1);
-        }
-        ckfree((*param).p as *mut c_void);
-    }
+    (*param).owned = None;
 }
 
 /*
@@ -413,42 +481,43 @@ pub unsafe fn freeparam(param: *mut shparam) {
 // [spec:dash:def:options.shiftcmd-fn]
 // [spec:dash:sem:options.shiftcmd-fn]
 pub unsafe fn shiftcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
-    let mut n: c_int;
-    let mut ap1: *mut *mut c_char;
-    let mut ap2: *mut *mut c_char;
+    let n: c_int;
 
-    n = 1;
-    if argc > 1 {
-        n = crate::mystring::number(*argv.offset(1));
-    }
+    n = if argc > 1 {
+        crate::mystring::number(*argv.offset(1))
+    } else {
+        1
+    };
     if n > shellparam.nparam {
         crate::error::sh_error(cstr(b"can't shift that many\0"), &[]);
     }
     INTOFF();
     shellparam.nparam -= n;
-    ap1 = shellparam.p;
-    loop {
-        n -= 1;
-        if !(n >= 0) {
-            break;
+    let param = &mut *addr_of_mut!(shellparam);
+    match &mut param.owned {
+        Some(o) => {
+            o.words.drain(..n as usize);
+            o.reindex();
         }
-        if shellparam.malloc != 0 {
-            ckfree(*ap1 as *mut c_void);
+        None => {
+            /* The C shifts the array down whether or not it owns the words,
+             * so a `shift` inside a function rewrites the caller's `argv`;
+             * `evalcommand` discards it when the call returns. */
+            let mut ap1: *mut *mut c_char = param.borrowed.add(n as usize);
+            let mut ap2: *mut *mut c_char = param.borrowed;
+            loop {
+                *ap2 = *ap1;
+                let done = (*ap2).is_null();
+                ap2 = ap2.add(1);
+                ap1 = ap1.add(1);
+                if done {
+                    break;
+                }
+            }
         }
-        ap1 = ap1.add(1);
     }
-    ap2 = shellparam.p;
-    loop {
-        *ap2 = *ap1;
-        let done = (*ap2).is_null();
-        ap2 = ap2.add(1);
-        ap1 = ap1.add(1);
-        if done {
-            break;
-        }
-    }
-    shellparam.optind = 1;
-    shellparam.optoff = -1;
+    param.optind = 1;
+    param.optoff = -1;
     INTON();
     0
 }
@@ -500,7 +569,7 @@ pub unsafe fn getoptscmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
     if argc < 3 {
         crate::error::sh_error(cstr(b"Usage: getopts optstring var [arg...]\0"), &[]);
     } else if argc == 3 {
-        optbase = shellparam.p;
+        optbase = shellparam_p();
         if (shellparam.optind as c_uint) > (shellparam.nparam + 1) as c_uint {
             shellparam.optind = 1;
             shellparam.optoff = -1;
