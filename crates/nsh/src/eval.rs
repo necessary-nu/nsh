@@ -38,7 +38,7 @@ use crate::exec::{cmdentry, find_command, param, shellexec};
 use crate::exec::{CMDBUILTIN, CMDFUNCTION, CMDNORMAL, CMDUNKNOWN, DO_ERR, DO_NOFUNC, DO_REGBLTIN};
 use crate::expand::{arglist, strlist};
 use crate::expand::{EXP_FULL, EXP_MBCHAR, EXP_REDIR, EXP_TILDE, EXP_VARTILDE};
-use crate::jobs::{job, FORK_NOJOB};
+use crate::jobs::FORK_NOJOB;
 use crate::nodes::{funcnode, Node};
 use crate::nodes::{
     NAND, NAPPEND, NBACKGND, NCASE, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO, NIF,
@@ -69,7 +69,7 @@ pub struct backcmd {
     pub fd: c_int,        /* file descriptor to read from */
     pub buf: *mut c_char, /* buffer */
     pub nleft: c_int,     /* number of chars in buffer */
-    pub jp: *mut job,     /* job structure for command */
+    pub jp: Option<usize>, /* index of the job structure for command */
 }
 
 // ---------------------------------------------------------------------
@@ -612,7 +612,7 @@ unsafe fn evalcase(n: &Node, flags: c_int) -> c_int {
 // [spec:dash:def:eval.evalsubshell-fn]
 // [spec:dash:sem:eval.evalsubshell-fn]
 unsafe fn evalsubshell(n: &Node, flags: c_int) -> c_int {
-    let jp: *mut job;
+    let jp: usize;
     let backgnd: c_int = (n.node_type() == NBACKGND) as c_int;
     let mut status: c_int;
     let mut flags: c_int = flags;
@@ -632,7 +632,7 @@ unsafe fn evalsubshell(n: &Node, flags: c_int) -> c_int {
             break 'nofork;
         }
         jp = crate::jobs::makejob(1);
-        if crate::jobs::forkshell(jp, r.n.as_deref(), backgnd) == 0 {
+        if crate::jobs::forkshell(Some(jp), r.n.as_deref(), backgnd) == 0 {
             flags |= EV_EXIT;
             if backgnd != 0 {
                 flags &= !EV_TESTED;
@@ -643,7 +643,7 @@ unsafe fn evalsubshell(n: &Node, flags: c_int) -> c_int {
          * never returns, so it is reached only from here */
         status = 0;
         if backgnd == 0 {
-            status = crate::jobs::waitforjob(jp);
+            status = crate::jobs::waitforjob(Some(jp));
         }
         INTON();
         return status;
@@ -716,7 +716,7 @@ unsafe fn expredir(n: &[Node]) {
 // [spec:dash:def:eval.evalpipe-fn]
 // [spec:dash:sem:eval.evalpipe-fn]
 unsafe fn evalpipe(n: &Node, flags: c_int) -> c_int {
-    let jp: *mut job;
+    let jp: usize;
     let pipelen: c_int;
     let mut prevfd: c_int;
     let mut pip: [c_int; 2] = [0; 2];
@@ -740,7 +740,7 @@ unsafe fn evalpipe(n: &Node, flags: c_int) -> c_int {
                 crate::sh_error!(b"Pipe call failed\0".as_ptr() as *const c_char);
             }
         }
-        if crate::jobs::forkshell(jp, Some(cmd), p.backgnd) == 0 {
+        if crate::jobs::forkshell(Some(jp), Some(cmd), p.backgnd) == 0 {
             INTON();
             if pip[1] >= 0 {
                 libc::close(pip[0]);
@@ -764,7 +764,7 @@ unsafe fn evalpipe(n: &Node, flags: c_int) -> c_int {
         libc::close(pip[1]);
     }
     if p.backgnd == 0 {
-        status = crate::jobs::waitforjob(jp);
+        status = crate::jobs::waitforjob(Some(jp));
         /* TRACE(("evalpipe:  job done exit status %d\n", status)); */
     }
     INTON();
@@ -782,14 +782,14 @@ unsafe fn evalpipe(n: &Node, flags: c_int) -> c_int {
 // [spec:dash:def:eval.evalbackcmd-fn]
 // [spec:dash:sem:eval.evalbackcmd-fn]
 pub unsafe fn evalbackcmd(n: Option<&Node>, result: *mut backcmd) {
-    let jp: *mut job;
+    let jp: usize;
     let mut pip: [c_int; 2] = [0; 2];
     let pid: c_int;
 
     (*result).fd = -1;
     (*result).buf = null_mut();
     (*result).nleft = 0;
-    (*result).jp = null_mut();
+    (*result).jp = None;
     'out_lbl: {
         if n.is_none() {
             break 'out_lbl;
@@ -799,7 +799,7 @@ pub unsafe fn evalbackcmd(n: Option<&Node>, result: *mut backcmd) {
         tpip[0] = pip[0];
         tpip[1] = pip[1];
         jp = crate::jobs::makejob(1);
-        pid = crate::jobs::forkshell(jp, n, FORK_NOJOB);
+        pid = crate::jobs::forkshell(Some(jp), n, FORK_NOJOB);
         tpip[0] = -1;
         if pid == 0 {
             FORCEINTON();
@@ -814,7 +814,7 @@ pub unsafe fn evalbackcmd(n: Option<&Node>, result: *mut backcmd) {
         }
         libc::close(pip[1]);
         (*result).fd = pip[0];
-        (*result).jp = jp;
+        (*result).jp = Some(jp);
     }
     // out:
     /* TRACE(("evalbackcmd done: fd=%d buf=0x%x nleft=%d jp=0x%x\n", ...)); */
@@ -942,7 +942,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
         cmdtype: 0,
         u: param { index: 0 },
     };
-    let mut jp: *mut job;
+    let mut jp: Option<usize>;
     let mut lastarg: *mut c_char;
     let mut path: *const c_char;
     let mut spclbltin: c_int;
@@ -1123,7 +1123,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
                 find_command(*argv.offset(0), &mut cmdentry, cmd_flag | DO_ERR, path);
             }
 
-            jp = null_mut();
+            jp = None;
 
             /* Execute the command. */
             match cmdentry.cmdtype {
@@ -1154,7 +1154,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
                     /* Fork off a child process if necessary. */
                     if (flags & EV_EXIT) == 0 || crate::trap::have_traps() != 0 {
                         INTOFF();
-                        jp = crate::jobs::vforkexec(cmd, argv, path, cmdentry.u.index);
+                        jp = Some(crate::jobs::vforkexec(cmd, argv, path, cmdentry.u.index));
                     } else {
                         shellexec(argv, path, cmdentry.u.index);
                         /* NOTREACHED */

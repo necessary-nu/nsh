@@ -138,6 +138,20 @@ CASES = [
     ("syntax error recovery",  [], ["for", "echo survived", "exit"]),
     ("unset -u error",         [], ["set -u", "echo $nosuch", "echo survived", "exit"]),
     ("bg job + jobs",          [], ["sleep 0.1 &", "jobs", "wait", "exit"]),
+    # --- the job table itself, which dsdiff.sh cannot reach because job
+    # control needs a controlling terminal. The fifth background job is
+    # the one that grows jobtab, and growing it is what jobs.c relocated
+    # curjob, every prev_job and every ps-into-ps0 for. The rest pin the
+    # current-job chain's ordering (the + and - markers), the two ways a
+    # job is named, and a job whose process array is longer than one.
+    ("five bg jobs + jobs",    [], ["sleep 3 & sleep 3 & sleep 3 & sleep 3 & sleep 3 &",
+                                    "jobs", "wait", "echo done", "exit"]),
+    ("job refs by number",     [], ["sleep 3 &", "sleep 3 &", "jobs %1", "jobs %2",
+                                    "wait %2", "wait %1", "echo done", "exit"]),
+    ("job refs by name",       [], ["sleep 3 &", "jobs %sleep", "jobs %?lee", "wait", "exit"]),
+    ("bg pipeline + jobs",     [], ["sleep 3 | cat &", "jobs", "wait", "echo done", "exit"]),
+    ("fg a bg job",            [], ["sleep 2 &", "fg", "echo done", "exit"]),
+    ("stop then fg",           [], ["sleep 2", "\x1a", "jobs", "fg", "echo done", "exit"]),
     # --- the line-editor paths, which only exist with -E/-V ---
     ("emacs mode: basic",      ["-E"], ["echo X", "exit"]),
     ("emacs mode: fc -l",      ["-E"], ["echo one", "echo two", "fc -l", "exit"]),

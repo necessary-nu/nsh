@@ -384,7 +384,7 @@ unsafe fn openhere(redir: &Node) -> c_int {
         return pip[0];
     }
 
-    if crate::jobs::forkshell(null_mut(), None, crate::jobs::FORK_NOJOB) == 0 {
+    if crate::jobs::forkshell(None, None, crate::jobs::FORK_NOJOB) == 0 {
         libc::close(pip[0]);
         libc::signal(libc::SIGINT, libc::SIG_IGN);
         libc::signal(libc::SIGQUIT, libc::SIG_IGN);
