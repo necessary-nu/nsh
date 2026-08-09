@@ -127,17 +127,38 @@ const C_9: c_char = b'9' as c_char;
 // ---------------------------------------------------------------------
 
 // [spec:dash:def:expand.strlist]
-#[repr(C)]
+///
+/// The C's `next` field is gone: the chain is the `Vec` inside
+/// [`arglist`], the same shape as [`ifsregion`]'s.  What is left is the
+/// text.
 pub struct strlist {
-    pub next: *mut strlist,
     pub text: *mut c_char,
 }
 
 // [spec:dash:def:expand.arglist]
-#[repr(C)]
+///
+/// `lastp` goes with `next`.  The C carries it because appending to a
+/// singly-linked list needs its tail, and it is always
+/// `&(last node)->next` — which is `list.len()`.  The three places that
+/// save it across an `expandarg` and read back what that call appended
+/// (`eval.c:fill_arglist`, `evalcommand`'s assignment loop, and
+/// `expandmeta`'s `savelastp`) save the length instead.
+///
+/// `arglist->list` is *also* reassigned in one place —
+/// `eval.c:parse_command_args`, which advances the head past the
+/// `command [-p]` words it consumed while `eval.c:evalcommand` keeps the
+/// original head in `osp` for `set -x`.  A `Vec`'s start does not move, so
+/// that head travels as an index of its own.
 pub struct arglist {
-    pub list: *mut strlist,
-    pub lastp: *mut *mut strlist,
+    pub list: Vec<strlist>,
+}
+
+impl arglist {
+    /// The C writes `struct arglist arglist;` and then
+    /// `arglist.lastp = &arglist.list`, which is an empty list.
+    pub const fn new() -> arglist {
+        arglist { list: Vec::new() }
+    }
 }
 
 /*
@@ -247,10 +268,7 @@ static mut argbackq: *const [Option<crate::nodes::Node>] =
 /// `ifslastp` first.
 static mut ifsregions: Vec<ifsregion> = Vec::new();
 /* holds expanded arg list */
-static mut exparg: arglist = arglist {
-    list: ptr::null_mut(),
-    lastp: ptr::null_mut(),
-};
+static mut exparg: arglist = arglist::new();
 
 static mut ifsmap: [c_char; 128] = [0; 128];
 static mut ncifs: *const c_char = ptr::null();
@@ -274,6 +292,15 @@ unsafe fn ifsr() -> &'static mut Vec<ifsregion> {
 #[inline]
 unsafe fn wcifsv() -> &'static mut Vec<wchar_t> {
     &mut *ptr::addr_of_mut!(wcifs)
+}
+
+/// `&mut exparg.list`, same.  Every `*exparg.lastp = sp` in the C is a
+/// `push` on this, and `exparg.lastp = &exparg.list` — the C's way of
+/// throwing away whatever the previous expansion left in the head — is a
+/// `clear`.
+#[inline]
+unsafe fn expargl() -> &'static mut Vec<strlist> {
+    &mut (*ptr::addr_of_mut!(exparg)).list
 }
 
 /// `wcschr(wcifs, wc) != NULL`.
@@ -691,8 +718,7 @@ unsafe fn getpwhome(name: *const c_char) -> *const c_char {
 
 // [spec:dash:def:expand.expandarg-fn]
 // [spec:dash:sem:expand.expandarg-fn]
-pub unsafe fn expandarg(arg: &crate::nodes::Node, arglist: *mut arglist, flag: c_int) {
-    let sp: *mut strlist;
+pub unsafe fn expandarg(arg: &crate::nodes::Node, arglist: Option<&mut arglist>, flag: c_int) {
     let p: *mut c_char;
 
     argbackq = arg.narg().backquote.as_slice();
@@ -700,32 +726,39 @@ pub unsafe fn expandarg(arg: &crate::nodes::Node, arglist: *mut arglist, flag: c
     expb().clear();
     argstr(arg.narg().text.as_ptr(), flag);
     'out: {
-        if arglist.is_null() {
+        let Some(arglist) = arglist else {
             /* here document expanded — the caller reads the buffer back
              * through `expansion_result()`. */
             break 'out;
-        }
+        };
         p = grabexpdest();
-        exparg.lastp = &mut exparg.list;
+        /* `exparg.lastp = &exparg.list`.  It re-points the tail at the
+         * head, which discards whatever the previous call left there —
+         * reachable only when that call unwound between building the list
+         * and splicing it into its caller's. */
+        expargl().clear();
         /*
          * TODO - EXP_REDIR
          */
         if (flag & EXP_FULL) != 0 {
-            ifsbreakup(p, -1, &mut exparg);
-            *exparg.lastp = ptr::null_mut();
-            exparg.lastp = &mut exparg.list;
-            expandmeta(exparg.list);
+            ifsbreakup(p, -1, &mut *ptr::addr_of_mut!(exparg));
+            /* `*exparg.lastp = NULL; exparg.lastp = &exparg.list;` —
+             * terminate the fields `ifsbreakup` built, then re-point the
+             * tail at the head so `expandmeta` rebuilds the list while
+             * walking the one it was handed.  The first append there
+             * overwrites the head, which is why the C can read `str->next`
+             * before the write reaches it; taking the `Vec` is both
+             * halves. */
+            let words = mem::take(expargl());
+            expandmeta(words);
         } else {
-            sp = crate::memalloc::stalloc(mem::size_of::<strlist>() as size_t) as *mut strlist;
-            (*sp).text = p;
-            *exparg.lastp = sp;
-            exparg.lastp = &mut (*sp).next;
+            expargl().push(strlist { text: p });
         }
-        *exparg.lastp = ptr::null_mut();
-        if !exparg.list.is_null() {
-            *(*arglist).lastp = exparg.list;
-            (*arglist).lastp = exparg.lastp;
-        }
+        /* `if (exparg.list) { *arglist->lastp = exparg.list; arglist->lastp
+         * = exparg.lastp; }`.  The C guards on emptiness because splicing a
+         * NULL head would leave the caller's tail pointing at `exparg`'s
+         * own head; appending an empty `Vec` is already a no-op. */
+        arglist.list.append(expargl());
     }
 
     /* out: */
@@ -1982,11 +2015,10 @@ unsafe fn ifsisifs(p: *const c_char, ml: c_uint, ifs: *const c_char) -> c_uint {
 // [spec:dash:sem:expand.ifsbreakup-slow-fn]
 unsafe fn ifsbreakup_slow(
     ifst: *mut ifs_state,
-    arglist: *mut arglist,
+    arglist: &mut arglist,
     nulonly: c_int,
     mut p: *mut c_char,
 ) -> *mut c_char {
-    let sp: *mut strlist;
     let ifschar: c_uint;
     let sisifs: c_uint;
     let isdefifs: bool;
@@ -2073,10 +2105,7 @@ unsafe fn ifsbreakup_slow(
                 return p;
             }
             *q = C_NUL;
-            sp = crate::memalloc::stalloc(mem::size_of::<strlist>() as size_t) as *mut strlist;
-            (*sp).text = (*ifst).start;
-            *(*arglist).lastp = sp;
-            (*arglist).lastp = &mut (*sp).next;
+            arglist.list.push(strlist { text: (*ifst).start });
             (*ifst).start = p;
             return p;
         }
@@ -2097,11 +2126,10 @@ unsafe fn ifsbreakup_slow(
 
 // [spec:dash:def:expand.ifsbreakup-fn]
 // [spec:dash:sem:expand.ifsbreakup-fn]
-pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: *mut arglist) {
+pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: &mut arglist) {
     let mut ifsp: usize;
     let mut ifst: ifs_state = mem::zeroed();
     let realifs: *const c_char;
-    let sp: *mut strlist;
     let mut nulonly: c_int;
     let mut p: *mut c_char;
 
@@ -2188,10 +2216,7 @@ pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: *mut argl
     }
 
     /* add: */
-    sp = crate::memalloc::stalloc(mem::size_of::<strlist>() as size_t) as *mut strlist;
-    (*sp).text = ifst.start;
-    *(*arglist).lastp = sp;
-    (*arglist).lastp = &mut (*sp).next;
+    arglist.list.push(strlist { text: ifst.start });
 }
 
 // [spec:dash:def:expand.ifsfree-fn]
@@ -2304,8 +2329,8 @@ unsafe extern "C" fn opendir_interruptible(pathname: *const c_char) -> *mut c_vo
 
 // [spec:dash:def:expand.expandmeta-glob-fn]
 // [spec:dash:sem:expand.expandmeta-glob-fn]
-unsafe fn expandmeta_glob(mut str: *mut strlist) {
-    while !str.is_null() {
+unsafe fn expandmeta_glob(words: Vec<strlist>) {
+    for str in words {
         let p: *const c_char;
         let mut pglob: crate::system::glob64_t = mem::zeroed();
         let i: c_int;
@@ -2326,14 +2351,14 @@ unsafe fn expandmeta_glob(mut str: *mut strlist) {
                     /* #endif */
 
                     crate::error::INTOFF();
-                    p = preglob((*str).text, RMESCAPE_HEAP, None);
+                    p = preglob(str.text, RMESCAPE_HEAP, None);
                     i = crate::system::glob64(
                         p,
                         crate::system::GLOB_ALTDIRFUNC | crate::system::GLOB_NOMAGIC,
                         None,
                         &mut pglob,
                     );
-                    if p != (*str).text {
+                    if p != str.text {
                         ckfree(p as *mut c_void);
                     }
                     if i == 0 {
@@ -2360,11 +2385,9 @@ unsafe fn expandmeta_glob(mut str: *mut strlist) {
                 /* fall through to nometa */
             }
             /* nometa: */
-            *exparg.lastp = str;
-            rmescapes((*str).text);
-            exparg.lastp = &mut (*str).next;
+            rmescapes(str.text);
+            expargl().push(str);
         }
-        str = (*str).next;
     }
 }
 
@@ -2388,11 +2411,11 @@ unsafe fn addglob(pglob: *const crate::system::glob64_t) {
 
 // [spec:dash:def:expand.expandmeta-fn]
 // [spec:dash:sem:expand.expandmeta-fn]
-unsafe fn expandmeta(mut str: *mut strlist) {
+unsafe fn expandmeta(words: Vec<strlist>) {
     /* TODO - EXP_REDIR */
 
     if GLOB_IS_ENABLED {
-        return expandmeta_glob(str);
+        return expandmeta_glob(words);
     }
 
     /* The C's `preglob(..., RMESCAPE_HEAP)` result: one `ckmalloc` per
@@ -2403,9 +2426,8 @@ unsafe fn expandmeta(mut str: *mut strlist) {
      * while `FNMATCH_IS_ENABLED` is 0. */
     let mut pattern: Vec<u8> = Vec::new();
 
-    while !str.is_null() {
-        let savelastp: *mut *mut strlist;
-        let mut sp: *mut strlist;
+    for str in words {
+        let savelastp: usize;
         let p: *mut c_char;
         let len: c_uint;
 
@@ -2414,19 +2436,18 @@ unsafe fn expandmeta(mut str: *mut strlist) {
                 if fflag() != 0 {
                     break 'nometa;
                 }
-                if libc::strpbrk((*str).text, b"*?]\0".as_ptr() as *const c_char).is_null()
-                    || libc::strcmp((*str).text, b"]\0".as_ptr() as *const c_char) == 0
+                if libc::strpbrk(str.text, b"*?]\0".as_ptr() as *const c_char).is_null()
+                    || libc::strcmp(str.text, b"]\0".as_ptr() as *const c_char) == 0
                 {
                     break 'nometa;
                 }
-                savelastp = exparg.lastp;
+                /* `savelastp = exparg.lastp` — where this word's matches
+                 * will start, so that the sort below covers them and not
+                 * the words already in the list. */
+                savelastp = expargl().len();
 
                 crate::error::INTOFF();
-                p = preglob(
-                    (*str).text,
-                    RMESCAPE_ALLOC | RMESCAPE_HEAP,
-                    Some(&mut pattern),
-                );
+                p = preglob(str.text, RMESCAPE_ALLOC | RMESCAPE_HEAP, Some(&mut pattern));
                 len = libc::strlen(p) as c_uint;
 
                 /* The C's top-level `expmeta` starts on whatever block the
@@ -2444,40 +2465,34 @@ unsafe fn expandmeta(mut str: *mut strlist) {
                  * "did `_rmescapes` allocate?".  `pattern` owns the bytes
                  * either way now, and the next iteration reuses it. */
                 crate::error::INTON();
-                if exparg.lastp == savelastp {
+                if expargl().len() == savelastp {
                     /*
                      * no matches
                      */
                     break 'nometa;
                 } else {
-                    *exparg.lastp = ptr::null_mut();
-                    sp = expsort(*savelastp);
-                    *savelastp = sp;
-                    while !(*sp).next.is_null() {
-                        sp = (*sp).next;
-                    }
-                    exparg.lastp = &mut (*sp).next;
+                    /* `*exparg.lastp = NULL; sp = expsort(*savelastp);
+                     * *savelastp = sp; while (sp->next) sp = sp->next;
+                     * exparg.lastp = &sp->next;` — terminate the run this
+                     * word added, sort it, splice it back and walk to its
+                     * new end.  Three of those four exist to re-find the
+                     * tail of a list the sort reordered; a slice's tail
+                     * does not move. */
+                    expsort(&mut expargl()[savelastp..]);
                     break 'sw;
                 }
             }
             /* nometa: */
-            *exparg.lastp = str;
-            rmescapes((*str).text);
-            exparg.lastp = &mut (*str).next;
+            rmescapes(str.text);
+            expargl().push(str);
         }
-        str = (*str).next;
     }
 }
 
 // [spec:dash:def:expand.addfname-common-fn]
 // [spec:dash:sem:expand.addfname-common-fn]
 unsafe fn addfname_common(name: *mut c_char) {
-    let sp: *mut strlist;
-
-    sp = crate::memalloc::stalloc(mem::size_of::<strlist>() as size_t) as *mut strlist;
-    (*sp).text = name;
-    *exparg.lastp = sp;
-    exparg.lastp = &mut (*sp).next;
+    expargl().push(strlist { text: name });
 }
 
 // [spec:dash:def:expand.addfnamealt-fn]
@@ -2827,66 +2842,31 @@ unsafe fn addfname(name: *mut c_char) {
 
 // [spec:dash:def:expand.expsort-fn]
 // [spec:dash:sem:expand.expsort-fn]
-unsafe fn expsort(str: *mut strlist) -> *mut strlist {
-    let mut len: c_int;
-    let mut sp: *mut strlist;
-
-    len = 0;
-    sp = str;
-    while !sp.is_null() {
-        len += 1;
-        sp = (*sp).next;
-    }
-    msort(str, len)
+unsafe fn expsort(str: &mut [strlist]) {
+    /* The C walks the chain to count it and hands the count to `msort`,
+     * because a singly-linked list does not know its own length. */
+    msort(str, str.len() as c_int)
 }
 
 // [spec:dash:def:expand.msort-fn]
 // [spec:dash:sem:expand.msort-fn]
-unsafe fn msort(mut list: *mut strlist, len: c_int) -> *mut strlist {
-    let mut p: *mut strlist;
-    let mut q: *mut strlist = ptr::null_mut();
-    let mut lpp: *mut *mut strlist;
-    let half: c_int;
-    let mut n: c_int;
-
+///
+/// The C's merge sort, as `sort_by`.  Two properties have to match, and
+/// both do:
+///
+///   * **Order.**  `q` is the sorted *first* half and `p` the second, and
+///     the merge takes `p` only on `strcoll(p->text, q->text) < 0`, so the
+///     comparison is ascending by `strcoll`.
+///   * **Stability.**  That same test takes `q` — the earlier half — when
+///     the two compare equal, and a top-down merge sort whose merge is
+///     stable is stable.  `strcoll` can return 0 for byte-different
+///     strings under a collating locale, so this is not vacuous.
+///     `slice::sort_by` is stable.
+unsafe fn msort(list: &mut [strlist], len: c_int) {
     if len <= 1 {
-        return list;
+        return;
     }
-    half = len >> 1;
-    p = list;
-    n = half;
-    loop {
-        n -= 1;
-        if n < 0 {
-            break;
-        }
-        q = p;
-        p = (*p).next;
-    }
-    (*q).next = ptr::null_mut(); /* terminate first half of list */
-    q = msort(list, half); /* sort first half of list */
-    p = msort(p, len - half); /* sort second half */
-    lpp = &mut list;
-    loop {
-        if libc::strcoll((*p).text, (*q).text) < 0 {
-            *lpp = p;
-            lpp = &mut (*p).next;
-            p = *lpp;
-            if p.is_null() {
-                *lpp = q;
-                break;
-            }
-        } else {
-            *lpp = q;
-            lpp = &mut (*q).next;
-            q = *lpp;
-            if q.is_null() {
-                *lpp = p;
-                break;
-            }
-        }
-    }
-    list
+    list.sort_by(|p, q| libc::strcoll(p.text, q.text).cmp(&0));
 }
 
 /*
@@ -3335,7 +3315,7 @@ pub unsafe fn _rmescapes(
 
 // [spec:dash:def:expand.casematch-fn]
 // [spec:dash:sem:expand.casematch-fn]
-pub unsafe fn casematch(pattern: &crate::nodes::Node, val: *mut c_char) -> c_int {
+pub unsafe fn casematch(pattern: &crate::nodes::Node, val: *const c_char) -> c_int {
     let mut smark: crate::memalloc::stackmark = mem::zeroed();
     let result: c_int;
 

@@ -2330,7 +2330,7 @@ pub unsafe fn expandstr(ps: *const c_char) -> *const c_char {
             backquote: takeglobal(addr_of_mut!(backquotelist)),
         });
 
-        expandarg(&n, ptr::null_mut(), EXP_QUOTED);
+        expandarg(&n, None, EXP_QUOTED);
         /* The C reads the expansion back as `stackblock()`; the expansion
          * buffer is owned now, so the read is named.  The C's pointer was
          * live only until the next `stalloc`; this one is live until the
