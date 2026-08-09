@@ -322,15 +322,38 @@ all three                                       403
 raise-path  \  memalloc-reachable                 0
 ```
 
-The first of those is the ordering argument for `owned-data`, and it is
-stronger than the argument [dec:nsh:owned-data] actually makes. The
-decision says "the measurements say the data is upstream". The
-measurement says something sharper: **the set of functions on a raise
-path is a strict subset of the set that touches the allocator.** There is
-no function anywhere in the crate that `errors-are-values` would touch
-and `delete-memalloc` would not. Converting errors first rewrites 420
-signatures, every one of which the allocator work then rewrites again.
-Zero of them would have been spared.
+**The subset claim above is false, and the numbers are wrong.** Left in
+place because a retracted measurement is more useful than a deleted one.
+
+`docs/errors-are-values.md` §1 redid this with a resolver that works by
+module rather than by name and expands `macro_rules!` — which mattered
+most, since `bltin/mod.rs:123`'s `error!` is dash's `#define error
+sh_error` and carries six raise sites on its own. Re-run on `4463fc6`,
+the very tree these numbers claim to describe:
+
+```
+raise-path                                      325   (not 420)
+memalloc-reachable                              313   (not 424)
+raise-path  \  memalloc-reachable                25   (not 0)
+```
+
+`bltin/test.rs`'s entire recursive-descent evaluator is the clearest of
+the 25: four raise sites, zero references to the allocator. So there is
+no subset relation, and "zero would have been spared" is wrong — about
+twenty-five would have been.
+
+Where 420 came from could not be reconstructed by any reading; a
+deliberately crude name-merged regex graph gives 321, and seeding on all
+of `error.rs` gives 351. Its provenance is unknown rather than merely
+mistaken, which is the more troubling of the two.
+
+**The ordering conclusion survives**, on the argument
+[dec:nsh:owned-data] actually makes rather than on this one: the data
+representation is upstream, and converting errors first rewrites
+signatures that the allocator work then rewrites again. That holds for
+the ~300 functions in the intersection whatever the exact figure. It was
+never the subset relation that made the case; the subset relation was
+extra evidence, and it did not survive being checked.
 
 Module fan-in, as distinct files naming `crate::<m>::` and total
 references:
@@ -1081,13 +1104,15 @@ record that the differential harness's contract attaches to the frontend.
 
 Stated rather than smoothed over.
 
-1. **The call-graph numbers are name-based.** `raise ⊆ memalloc` (420 of
-   420) is the strongest claim here and it rests on a resolver that
-   merges same-named functions across modules. The direction of the
-   result is not in doubt — the two sets are 420 and 424 out of 720 — but
-   the exact subset relation could be an artefact. *Resolved by:* a real
-   call graph from `cargo call-stack` or from rustc's MIR, or by
-   spot-checking the 4 functions in `memalloc \ raise`.
+1. ~~**The call-graph numbers are name-based.**~~ *Resolved, and the
+   suspicion was right.* `docs/errors-are-values.md` §1 redid it by
+   module with macro expansion: on the same tree the sets are 325 and
+   313, and `raise \ memalloc` is **25**, not 0. There is no subset
+   relation. §2.1 above carries the retraction and the reason the
+   ordering conclusion survives anyway. Where 420 came from could not be
+   reconstructed — which is worse than a wrong number, because a
+   measurement whose provenance is unknown cannot be corrected, only
+   discarded.
 
 2. ~~**Whether `gen/` should be deleted, moved, or kept.**~~ *Resolved:*
    deleted. The generators emit C, not Rust, so they were never the
