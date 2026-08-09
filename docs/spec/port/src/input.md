@@ -172,10 +172,30 @@ via `tee` when it is not.
 > clear the popped level's `prev`. `basepf` is statically allocated and
 > its buffer is static, so stop there without freeing anything.
 > Otherwise close `fd` if it is open, free `buf`, run any deferred
-> `freestrings` for the now-current level, then pop and free every
-> `strpush` still on the popped level — calling `freestrings` after each
-> `popstring`, since `popstring` only defers. Finally free the level
-> itself.
+> `freestrings` for the now-current level, and free the level itself.
+>
+> Two things about the popped level's own `strpush` state are not what
+> the source reads as, and both are observable.
+>
+> The `while (pf->strpush) { popstring(); freestrings(…); }` loop between
+> the two does not do what it says. `popstring` operates on
+> `parsefile->strpush`, and `parsefile` became the *outer* level two
+> lines earlier, so the loop pops the outer level's stack while testing
+> the popped one's — the condition never changes, and the second
+> iteration dereferences a NULL `strpush` on any outer level with an
+> empty stack. It was correct in 0.5.10, where `parsefile = pf->prev`
+> came *after* the loop. It cannot execute in any run that survives, so
+> reproducing it is reproducing a crash; discard the popped level's
+> `strpush` entries instead.
+>
+> `pf->spfree` is never drained. `freestrings` above runs on the level
+> being returned to, not the one being popped, and `ckfree(pf)` takes the
+> popped level's chain with it — with `ALIASINUSE` still set on every
+> entry. Because `popstring` defers by one `pgetc`, a level can end with
+> an entry still there: `alias q='echo hi '; echo \`q\`` leaves `q`
+> marked in use for the rest of the shell's life, so it never expands
+> again and the next `q` reports "not found". Do not release the chain;
+> that is a behaviour change, not a leak fix.
 
 > [spec:dash:def:input.popstring-fn]
 > static void popstring(void)
@@ -350,7 +370,11 @@ via `tee` when it is not.
 > point `nextc` at `string` with `nleft = strlen(string)`, and set
 > `eof = 2` marking it unrefillable, so `preadbuffer` returns `PEOF`
 > immediately once it is exhausted. `fd` stays -1 from `pushfile` and no
-> buffer is allocated, so the string must outlive the level.
+> buffer is allocated, so in the C the string must outlive the level —
+> which is why `evalstring` holds its `sstrdup` across the `popfile` and
+> `parsebackq` cannot release the block it grabbed. Nothing writes
+> through it, so a level that copies the string into its own buffer is
+> behaviour for behaviour.
 
 > [spec:dash:def:input.stdin-bufferable-fn]
 > static bool stdin_bufferable(void)

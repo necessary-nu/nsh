@@ -71,9 +71,12 @@ unsafe fn setalias(name: *const c_char, val: *const c_char) {
     ap = __lookupalias(name);
     INTOFF();
     if !ap.is_null() {
-        if ((*ap).flag & ALIASINUSE) == 0 {
-            ckfree((*ap).name as *mut c_void);
-        }
+        /* The C skips this free while the alias is being expanded, because
+         * `input.c` is then reading out of this very buffer and its
+         * `strpush` has taken over the freeing (`sp->string != sp->ap->name`
+         * in `popstring`). `input.rs` reads a copy, so nobody else holds
+         * the buffer and the guard would only leak it. */
+        ckfree((*ap).name as *mut c_void);
         (*ap).flag &= !ALIASDEAD;
     } else {
         /* not found.  The address comes back out of the map rather than out
