@@ -206,6 +206,13 @@ check "sorted_cmdtable: sorting is by command name, not printed path" 0 \
 check "sorted_cmdtable: rehash markers are accepted and ignored for sorting" 0 \
 	$'/bin/rm*\n/bin/cat*\n/bin/ls*' $'/bin/cat*\n/bin/ls*\n/bin/rm*' 0 0 "$case_file"
 
+# Status and diagnostics may surround a hash listing. They are fixed anchors,
+# not part of the command-name block, even when their bytes could be a valid
+# bare executable name.
+check "sorted_cmdtable: surrounding status text is not part of the block" 0 \
+	$'rc=0\n/bin/rm\nWD/g1/gp\n/bin/sed' \
+	$'rc=0\nWD/g1/gp\n/bin/rm\n/bin/sed' 0 0 "$case_file"
+
 check "sorted_cmdtable: a changed path is not excused" 1 \
 	"$H_BUCKET" $'/usr/bin/cat\n/bin/chmod\n/bin/cp\n/bin/ls\n/bin/mkdir\n/bin/rm' 0 0 "$case_file"
 check "sorted_cmdtable: a missing command is not excused" 1 \
@@ -228,6 +235,8 @@ check "sorted_cmdtable: a reordered diagnostic is not excused" 1 \
 	$'/bin/cat\nSH: 1: x: not found' $'SH: 1: x: not found\n/bin/cat' 0 0 "$case_file"
 check "sorted_cmdtable: a non-path line is not excused" 1 \
 	$'/bin/cat\nvalue with spaces' $'value with spaces\n/bin/cat' 0 0 "$case_file"
+check "sorted_cmdtable: bare command names are deliberately refused" 1 \
+	$'rm\ncat' $'cat\nrm' 0 0 "$case_file"
 
 # Scope is specifically a no-operand hash listing. Refreshes and operand
 # lookups do not print the table and cannot acquire this excuse.

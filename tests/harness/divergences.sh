@@ -218,11 +218,12 @@ dsdiv_sorted_tables() {
 }
 
 # A line `printentry` produces: the reconstructed command path, optionally
-# followed by `*` when `cd` marked the cache entry for rehashing. This is
-# deliberately narrower than every pathname the shell language can express.
-# It covers the corpus's hash listings; an exotic path is refused rather than
-# letting this entry mistake arbitrary output for a command-table line.
-DS_HASH_LINE='^/?([A-Za-z0-9_.,+%=-]+/)*[A-Za-z0-9_.,+%=-]+\*?$'
+# followed by `*` when `cd` marked the cache entry for rehashing. Requiring a
+# directory separator is deliberately narrower than every pathname the shell
+# can resolve: it keeps status text such as `rc=0` and arbitrary bare words out
+# of the sortable block. The corpus's hash listings use paths; a bare or exotic
+# path is refused rather than mistaken for command-table output.
+DS_HASH_LINE='^/?([A-Za-z0-9_.,+%=-]+/)+[A-Za-z0-9_.,+%=-]+\*?$'
 
 # ds_hash_blocks_sorted OUT -- true when each run of printentry-shaped lines
 # is ordered by command name. The map is keyed by the name, while printentry

@@ -265,13 +265,16 @@ would be wrong because two commands may resolve through different `PATH`
 elements.
 
 The line grammar deliberately accepts only the pathname characters used
-by the corpus. A valid but exotic command path containing whitespace or
-other shell punctuation is refused and remains a loud differential. That
-is preferable to broadening an ordering exception until it could mistake
-unrelated output or a diagnostic for a hash-table line. `divtest.sh` pins
-the matching case, content/drop/add/duplicate/status failures, the line
-shape and feature scope, the optional `*`, basename rather than full-path
-sorting, and an unsorted nsh permutation.
+by the corpus and requires a directory separator. A valid bare command,
+or an exotic path containing whitespace or other shell punctuation, is
+refused and remains a loud differential. Requiring the separator also
+keeps surrounding status text such as `rc=0` out of the sorted block.
+That is preferable to broadening an ordering exception until it could
+mistake unrelated output or a diagnostic for a hash-table line.
+`divtest.sh` pins the matching case, surrounding fixed lines,
+content/drop/add/duplicate/status failures, the line shape and feature
+scope, the optional `*`, basename rather than full-path sorting, a bare
+name refusal, and an unsorted nsh permutation.
 
 ## Candidates not yet decided
 
