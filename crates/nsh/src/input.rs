@@ -9,11 +9,11 @@
 //! buffer and the `strpush` node — are owned Rust values. The frame stack is
 //! `FRAMES`, addressed by index rather than by `prev` pointer, because a
 //! `Vec` moves its elements and the C compares frame *identity*
-//! (`unwindfiles(stop)`, `pf == &basepf`). `nextc` stays a raw cursor: it
-//! points into a `Vec<u8>`'s heap, which does not move when the `Vec` that
-//! holds the frame reallocates.
+//! (`unwindfiles(stop)`, `pf == &basepf`). `nextc` is an index into
+//! whichever text the level is reading -- the frame's own `buf`, or the
+//! string the innermost `strpush` pushed in front of it.
 
-use libc::{c_char, c_int, c_long, c_uint, c_void, off_t, size_t, tcflag_t};
+use libc::{c_char, c_int, c_void, off_t, size_t, tcflag_t};
 use core::ptr::{addr_of_mut, null_mut};
 
 use crate::alias::alias;
@@ -51,7 +51,8 @@ pub const INPUT_NOFILE_OK: c_int = 2;
 /// into, held so that redefining an alias mid-expansion does not free the
 /// text being read. See `plan/decisions/owned-data.md`.
 pub struct StrPush {
-    pub prevstring: *mut c_char,
+    /// `sp->prevstring`, as a cursor into the text that was current
+    pub prevpos: usize,
     pub prevnleft: c_int,
     /// if push was associated with an alias
     pub ap: *mut alias,
@@ -82,9 +83,9 @@ pub struct ParseFile {
     pub nleft: c_int,
     /// do not read again once we hit EOF
     pub eof: c_int,
-    /// next char in buffer
-    pub nextc: *mut c_char,
-    /// input buffer
+    /// next char in the current text
+    pub pos: usize,
+    /// input buffer, or the whole text when this level reads a string
     pub buf: Vec<u8>,
     /// for pushing strings at this level
     pub strpush: Vec<StrPush>,
@@ -105,7 +106,7 @@ impl ParseFile {
         fd: 0,
         nleft: 0,
         eof: 0,
-        nextc: null_mut(),
+        pos: 0,
         buf: Vec::new(),
         strpush: Vec::new(),
         spfree: Vec::new(),
@@ -134,6 +135,10 @@ static mut FRAMES: Vec<ParseFile> = Vec::new();
 static mut toppf: usize = 0;
 /// `parsefile` — the current input frame.
 static mut cur: usize = 0;
+/// `parsefile` itself. Derived from `cur`, and re-derived by `set_cur`,
+/// which is the only writer of `cur` and runs after every `FRAMES` push and
+/// pop -- the only two things that move a frame.
+static mut curp: *mut ParseFile = addr_of_mut!(basepf);
 
 pub static mut stdin_state: stdin_state_t = stdin_state_t {
     seekable: 0,
@@ -146,7 +151,7 @@ pub static mut stdin_istty: c_int = -1;
 
 /// Frame `i`. Index 0 is `basepf`, which is not in `FRAMES` because it
 /// outlives every push and the C gives it a different `popfile`.
-#[inline]
+#[inline(always)]
 pub unsafe fn pf_at(i: usize) -> &'static mut ParseFile {
     if i == 0 {
         &mut *addr_of_mut!(basepf)
@@ -157,10 +162,32 @@ pub unsafe fn pf_at(i: usize) -> &'static mut ParseFile {
 }
 
 /// The C's `parsefile`, dereferenced.
-#[inline]
+#[inline(always)]
 pub unsafe fn cur_pf() -> &'static mut ParseFile {
-    pf_at(cur)
+    debug_assert_eq!(curp as *const ParseFile, pf_at(cur) as *const ParseFile);
+    &mut *curp
 }
+
+/// `parsefile = pf`. Both halves, because the pointer is what `pgetc` reads
+/// and the index is what `unwindfiles` compares.
+#[inline]
+unsafe fn set_cur(i: usize) {
+    cur = i;
+    curp = pf_at(i);
+}
+
+/// What `nextc` indexes: the innermost pushed string if there is one, and
+/// the level's own buffer otherwise. `preadbuffer` and `preadfd` are reached
+/// only with the `strpush` stack empty, so they may assume `buf`.
+#[inline(always)]
+fn text(pf: &ParseFile) -> &[u8] {
+    if pf.strpush.is_empty() {
+        &pf.buf
+    } else {
+        &pf.strpush[pf.strpush.len() - 1].string
+    }
+}
+
 
 /// The C's `parsefile`, as a value `unwindfiles` can be given later.
 #[inline]
@@ -208,7 +235,7 @@ pub unsafe fn mkinit_init() {
     if base.buf.len() != IBUFSIZ {
         base.buf = vec![0u8; IBUFSIZ];
     }
-    base.nextc = base.buf.as_mut_ptr() as *mut c_char;
+    base.pos = 0;
     base.linno = 1;
     /* Not in the C: `basepf` is statically `.fd = 0` there because the
      * shell reads descriptor 0 by definition. Here the base parse file
@@ -224,10 +251,14 @@ pub unsafe fn mkinit_reset() {
     /* clear input buffer */
     popallfiles();
 
+    /* `toppf->nextc - toppf->buf > toppf->unget` is "at least one character
+     * past the pushback window has been consumed". The C subtracts `buf`
+     * from a cursor that a live `strpush` has moved into an unrelated
+     * allocation; the index says what the difference was meant to say. */
     let top = pf_at(toppf);
     c = PEOF;
-    if (top.nextc as isize - top.buf.as_ptr() as isize) > top.unget as isize {
-        c = *top.nextc.offset(-(top.unget as isize) - 1) as i8 as c_int;
+    if top.pos > top.unget as usize {
+        c = text(top)[top.pos - top.unget as usize - 1] as i8 as c_int;
     }
     while c != b'\n' as c_int && c != PEOF && crate::error::int_pending() == 0 {
         c = pgetc();
@@ -375,45 +406,46 @@ unsafe fn freestrings() {
 // [spec:dash:sem:input.pgetc-fn]
 pub unsafe fn pgetc() -> c_int {
     let mut c: c_int;
+    /* Re-derived after everything that can push a level, because that is
+     * what moves the frames; the C reloads the same global for the same
+     * reason. */
+    let mut pf = cur_pf();
 
-    if !cur_pf().spfree.is_empty() {
+    if !pf.spfree.is_empty() {
         freestrings();
+        pf = cur_pf();
     }
 
     'again: loop {
-        let pf = cur_pf();
         if pf.unget != 0 {
-            let old = pf.unget;
+            let unget = pf.unget as usize;
             pf.unget -= 1;
-            let unget: c_long = -((old as c_uint) as c_long);
 
-            return *pf.nextc.offset(unget as isize) as i8 as c_int;
+            return text(pf)[pf.pos - unget] as i8 as c_int;
         }
 
         'nextc: loop {
-            let pf = cur_pf();
             if pf.nleft > 0 {
                 pf.nleft -= 1;
-                c = *pf.nextc as i8 as c_int;
-                pf.nextc = pf.nextc.add(1);
+                c = text(pf)[pf.pos] as i8 as c_int;
+                pf.pos += 1;
             } else if !pf.strpush.is_empty() {
                 popstring();
                 /* The freestrings call must be delayed til the next
                  * pgetc call for PEOA to work properly.
                  */
+                pf = cur_pf();
                 continue 'again;
             } else {
                 c = preadbuffer();
+                pf = cur_pf();
             }
 
             /* delete nul characters */
             if IS_DEFINED_SMALL && c == 0 {
-                let pf = cur_pf();
-                pf.nextc = libc::memmove(
-                    pf.nextc.offset(-1) as *mut c_void,
-                    pf.nextc as *const c_void,
-                    pf.nleft as size_t,
-                ) as *mut c_char;
+                let n = pf.nleft as usize;
+                pf.buf.copy_within(pf.pos..pf.pos + n, pf.pos - 1);
+                pf.pos -= 1;
                 continue 'nextc;
             }
 
@@ -460,10 +492,6 @@ unsafe fn el_gets(e: *mut crate::histedit::EditLine, n: *mut c_int) -> *const c_
 // [spec:dash:def:input.preadfd-fn]
 // [spec:dash:sem:input.preadfd-fn]
 unsafe fn preadfd() -> c_int {
-    /* The buffer's heap does not move when a nested `pushfile` reallocates
-     * the frame stack, so this pointer outlives `el_gets` the way the C's
-     * `ckmalloc`'d block did. */
-    let mut buf: *mut c_char = cur_pf().buf.as_mut_ptr() as *mut c_char;
     let mut fd: c_int = cur_pf().fd;
     let mut use_tee: bool;
     let mut unget: c_int;
@@ -472,19 +500,23 @@ unsafe fn preadfd() -> c_int {
 
     nr = input_get_lleft(cur_pf());
 
-    unget = (cur_pf().nextc as isize - buf as isize) as c_int;
+    unget = cur_pf().pos as c_int;
     if unget > PUNGETC_MAX as c_int {
         unget = PUNGETC_MAX as c_int;
     }
 
-    libc::memmove(
-        buf as *mut c_void,
-        cur_pf().nextc.offset(-(unget as isize)) as *const c_void,
-        (unget + nr) as size_t,
-    );
-    buf = buf.offset(unget as isize);
-    cur_pf().nextc = buf;
-    buf = buf.offset(nr as isize);
+    /* Slide the retained pushback window and the partial line already read
+     * down to the front, so the read lands after both. */
+    {
+        let pf = cur_pf();
+        let from = pf.pos - unget as usize;
+        pf.buf.copy_within(from..from + (unget + nr) as usize, 0);
+        pf.pos = unget as usize;
+    }
+    /* The C's `buf` walks past both; here it is the offset the read fills
+     * from, and it survives a nested `pushfile` because it is not a
+     * pointer. */
+    let off: usize = unget as usize + nr as usize;
 
     nr = BUFSIZ - nr;
     if !IS_DEFINED_SMALL && nr == 0 {
@@ -521,7 +553,11 @@ unsafe fn preadfd() -> c_int {
                 if nr > el_len {
                     nr = el_len;
                 }
-                libc::memcpy(buf as *mut c_void, rl_cp as *const c_void, nr as size_t);
+                libc::memcpy(
+                    cur_pf().buf.as_mut_ptr().add(off) as *mut c_void,
+                    rl_cp as *const c_void,
+                    nr as size_t,
+                );
                 if nr != el_len {
                     el_len -= nr;
                     rl_cp = rl_cp.offset(nr as isize);
@@ -534,7 +570,7 @@ unsafe fn preadfd() -> c_int {
         }
 
         if use_tee {
-            nr = stdin_tee(buf as *mut c_void, nr);
+            nr = stdin_tee(cur_pf().buf.as_mut_ptr().add(off) as *mut c_void, nr);
             if nr >= 0 {
                 fd = stdin_state.pip[0];
             } else if errno() == libc::EINVAL {
@@ -545,7 +581,11 @@ unsafe fn preadfd() -> c_int {
         }
 
         if nr > 0 {
-            nr = libc::read(fd, buf as *mut c_void, nr as size_t) as c_int;
+            nr = libc::read(
+                fd,
+                cur_pf().buf.as_mut_ptr().add(off) as *mut c_void,
+                nr as size_t,
+            ) as c_int;
         }
 
         if nr < 0 {
@@ -580,9 +620,10 @@ unsafe fn preadfd() -> c_int {
 unsafe fn preadbuffer() -> c_int {
     let first: c_int = (whichprompt == 1) as c_int;
     let mut something: c_int;
-    let mut savec: c_char = 0;
+    let mut savec: u8 = 0;
     let mut more: c_int;
-    let mut q: *mut c_char;
+    /* The C's `q`, as an index into `buf`. */
+    let mut q: usize;
     let mut nr: c_int;
     let mut save = false;
 
@@ -593,7 +634,7 @@ unsafe fn preadbuffer() -> c_int {
     }
     crate::output::flushall();
 
-    q = cur_pf().nextc;
+    q = cur_pf().pos;
     something = (first == 0) as c_int;
 
     more = input_get_lleft(cur_pf());
@@ -602,10 +643,10 @@ unsafe fn preadbuffer() -> c_int {
     'outer: loop {
         if more <= 0 {
             /* again: */
-            nr = (q as isize - cur_pf().nextc as isize) as c_int;
+            nr = (q - cur_pf().pos) as c_int;
             input_set_lleft(cur_pf(), nr);
             more = preadfd();
-            q = cur_pf().nextc.offset(nr as isize);
+            q = cur_pf().pos + nr as usize;
             if more <= 0 {
                 cur_pf().nleft = 0;
                 input_set_lleft(cur_pf(), 0);
@@ -621,7 +662,7 @@ unsafe fn preadbuffer() -> c_int {
         }
 
         if IS_DEFINED_SMALL {
-            q = q.offset(more as isize);
+            q += more as usize;
             more = 0;
             break 'outer; /* goto done */
         }
@@ -631,17 +672,14 @@ unsafe fn preadbuffer() -> c_int {
             let c: c_int;
 
             more -= 1;
-            c = *q as c_int;
+            c = cur_pf().buf[q] as i8 as c_int;
 
             if c == 0 {
-                libc::memmove(
-                    q as *mut c_void,
-                    q.offset(1) as *const c_void,
-                    more as size_t,
-                );
+                let pf = cur_pf();
+                pf.buf.copy_within(q + 1..q + 1 + more as usize, q);
                 /* goto check */
             } else {
-                q = q.add(1);
+                q += 1;
 
                 if c == b'\n' as c_int {
                     break 'outer; /* goto done */
@@ -664,11 +702,21 @@ unsafe fn preadbuffer() -> c_int {
     }
 
     /* save: */
-    cur_pf().nleft = ((q as isize - cur_pf().nextc as isize) - 1) as c_int;
-    if !IS_DEFINED_SMALL {
-        savec = *q;
+    {
+        let pf = cur_pf();
+        pf.nleft = (q - pf.pos) as c_int - 1;
+        if !IS_DEFINED_SMALL {
+            savec = pf.buf[q];
+        }
+        pf.buf[q] = b'\0';
     }
-    *q = b'\0' as c_char;
+
+    /* `parsefile->nextc` handed to something that wants a C string: the
+     * line was NUL-terminated at `q` two statements ago. */
+    let line: *mut c_char = {
+        let pf = cur_pf();
+        pf.buf.as_mut_ptr().add(pf.pos) as *mut c_char
+    };
 
     if cur_pf().fd == crate::streams::streams().stdin
         && !crate::histedit::hist.is_null()
@@ -683,23 +731,23 @@ unsafe fn preadbuffer() -> c_int {
             } else {
                 crate::histedit::libedit::H_APPEND
             },
-            cur_pf().nextc,
+            line,
         );
     }
     INTON();
 
     if crate::options::optlist[crate::options::vflag] != 0 {
-        crate::output::out2str(cur_pf().nextc);
+        crate::output::out2str(line);
         /* #ifdef FLUSHERR flushout(out2); */
     }
 
     if !IS_DEFINED_SMALL {
-        *q = savec;
+        cur_pf().buf[q] = savec;
     }
 
     let pf = cur_pf();
-    let r = *pf.nextc as i8 as c_int;
-    pf.nextc = pf.nextc.add(1);
+    let r = pf.buf[pf.pos] as i8 as c_int;
+    pf.pos += 1;
     r
 }
 
@@ -742,7 +790,7 @@ pub unsafe fn pushstring(s: *mut c_char, ap: *mut c_void) {
     string.extend_from_slice(core::slice::from_raw_parts(s as *const u8, len as usize));
     string.push(0);
     let sp = StrPush {
-        prevstring: pf.nextc,
+        prevpos: pf.pos,
         prevnleft: pf.nleft,
         unget: pf.unget,
         spfree: core::mem::take(&mut pf.spfree),
@@ -755,7 +803,7 @@ pub unsafe fn pushstring(s: *mut c_char, ap: *mut c_void) {
     /* The C reads on through `ap->val`, which points into `ap->name`; this
      * reads the copy, so redefining the alias mid-expansion cannot pull the
      * text out from under the cursor and `popstring` has nothing to free. */
-    pf.nextc = sp.string.as_ptr() as *mut c_char;
+    pf.pos = 0;
     pf.nleft = len as c_int;
     pf.unget = 0;
     pf.strpush.push(sp);
@@ -775,12 +823,13 @@ unsafe fn popstring() {
      * cursor. Against the copy the same test means "at least one character
      * consumed", and the two agree: with none consumed the C reads the `=`
      * that ends the alias name, which is neither a space nor a tab. */
-    if !sp.ap.is_null() && pf.nextc as usize > sp.string.as_ptr() as usize {
-        if *pf.nextc.offset(-1) == b' ' as c_char || *pf.nextc.offset(-1) == b'\t' as c_char {
+    if !sp.ap.is_null() && pf.pos > 0 {
+        let prev = sp.string[pf.pos - 1];
+        if prev == b' ' || prev == b'\t' {
             crate::parser::checkkwd |= crate::parser::CHKALIAS;
         }
     }
-    pf.nextc = sp.prevstring;
+    pf.pos = sp.prevpos;
     pf.nleft = sp.prevnleft;
     pf.unget = sp.unget;
     /*dprintf("*** calling popstring: restoring to '%s'\n", parsenextc);*/
@@ -831,7 +880,7 @@ unsafe fn setinputfd(fd: c_int, push: c_int) {
     let pf = cur_pf();
     pf.fd = fd;
     pf.buf = vec![0u8; IBUFSIZ];
-    pf.nextc = pf.buf.as_mut_ptr() as *mut c_char;
+    pf.pos = 0;
 }
 
 /*
@@ -843,9 +892,18 @@ unsafe fn setinputfd(fd: c_int, push: c_int) {
 pub unsafe fn setinputstring(string: *mut c_char) {
     INTOFF();
     pushfile();
+    let len: usize = libc::strlen(string);
     let pf = cur_pf();
-    pf.nextc = string;
-    pf.nleft = libc::strlen(string) as c_int;
+    /* The C points `nextc` at the caller's string and reads it in place,
+     * which is why `evalstring` has to keep its `sstrdup` alive across the
+     * `popfile` and why `parsebackq` cannot release the stack block it
+     * grabbed. The level owns its text here. */
+    pf.buf = Vec::with_capacity(len + 1);
+    pf.buf
+        .extend_from_slice(core::slice::from_raw_parts(string as *const u8, len));
+    pf.buf.push(0);
+    pf.pos = 0;
+    pf.nleft = len as c_int;
     pf.eof = 2;
     INTON();
 }
@@ -866,7 +924,7 @@ unsafe fn pushfile() {
         fd: -1,
         ..ParseFile::EMPTY
     });
-    cur = frames.len();
+    set_cur(frames.len());
 }
 
 // [spec:dash:def:input.pushstdin-fn]
@@ -874,7 +932,7 @@ unsafe fn pushfile() {
 pub unsafe fn pushstdin() {
     INTOFF();
     pf_at(0).prev = Some(cur);
-    cur = 0;
+    set_cur(0);
     INTON();
 }
 
@@ -887,7 +945,7 @@ pub unsafe fn popfile() {
     /* The C reads `pf->prev` into the global unconditionally, so popping
      * `basepf` when nothing pushed it leaves `parsefile` NULL; there is no
      * such value here and the base frame stays current. */
-    cur = pf_at(dying).prev.take().unwrap_or(0);
+    set_cur(pf_at(dying).prev.take().unwrap_or(0));
     if dying == 0 {
         INTON();
         return; /* goto out */
@@ -896,6 +954,8 @@ pub unsafe fn popfile() {
     let frames = &mut *addr_of_mut!(FRAMES);
     debug_assert_eq!(dying, frames.len());
     let mut pf = frames.pop().unwrap();
+    /* The pop can move the remaining frames. */
+    set_cur(cur);
 
     if pf.fd >= 0 {
         libc::close(pf.fd);
