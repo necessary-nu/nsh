@@ -1490,3 +1490,111 @@ there and the port leaves none.  Nothing in that window -- `INTOFF`,
 `handler = jl`, `reffunc`, two assignments, `INTON` -- reads a positional
 parameter, and on the C's side the same window is the one its `malloc = 0`
 exists to make safe.
+## What this cost in the port: the job table and the process array
+
+Written after `jobtab` became a `Vec<Job>` and `job.ps` a `Vec<ProcStat>`.
+`jobs.c` is the one place in dash whose *comments* admit that its container
+moves under its readers, so most of this section is the C's own warning
+re-read against the Rust rather than something the pass discovered.
+
+### `growjobtab` names its three kinds of interior pointer, and they are the whole step
+
+`growjobtab` `ckrealloc`s `jobtab` and then, if the block moved, walks the
+table backwards adjusting everything that pointed into it: each entry's
+`prev_job`, each entry's `ps` *but only where it pointed at that same
+entry's inline `ps0`*, and finally `curjob`.  The `joff`/`jmove` macro pair
+exists to spell "the same field of the entry at offset `l`, in the new
+array", because at that moment the old and new arrays are two different
+addresses for the same logical table.
+
+`Vec<Job>` has exactly this hazard on `push`, and the C's enumeration is
+also the fix list: `curjob` and `prev_job` become `Option<usize>` and `ps`
+becomes owned, after which `growjobtab` is four `push`es and the relocation
+pass has nothing to relocate.  `jobno`, which recovered a job number by
+subtracting `jobtab` from a pointer, becomes `jp + 1`.
+
+The set of pointers the C repairs is not the set of pointers that exist.
+`makejob` returns a `struct job *` that `evalsubshell`, `evalpipe`,
+`evalbackcmd`, `evalcommand` and `vforkexec` each keep in a local across
+one or more `forkshell`s, and `growjobtab` cannot reach a local.  Those
+survive only because nothing between a `makejob` and its `waitforjob`
+calls `makejob` again: `evalpipe`'s loop forks `pipelen` times without
+creating a second job, `expbackq` holds `backcmd.jp` across a `read` and
+not across any evaluation, and `evalcommand` waits on the job `vforkexec`
+has just made.  That is a real invariant the C never states, and it would
+have to be re-established every time one of those five callers changed.
+Holding an index means not having to know it.
+
+### `job.ps` aliasing `job.ps0` is a self-referential struct, and the port had it
+
+`makejob` sets `ps = &jp->ps0` for a single-process job and `ckmalloc`s
+only for a pipeline, and the port reproduced this faithfully -- `ps0` was a
+field and `ps` pointed at it.  A `struct job` therefore could not be moved
+without repair, which is what `growjobtab`'s `ps` arm is for.  It was
+*correct* in the port, because the port also carried the relocation; but
+the moment `jobtab` became any container that moves its elements without
+running that pass, every single-process job's `ps` would have dangled into
+the old allocation, silently, with `nprocs == 1` and no null to trip on.
+Deleting the optimisation is what makes `Vec<Job>` expressible at all; the
+inline slot bought one `malloc` per foreground command and cost the whole
+representation.
+
+`nprocs` goes with it.  The C sizes the array from `makejob`'s argument and
+counts the processes it has actually forked in a separate 16-bit bitfield;
+a `Vec` is both at once, so `ps.len()` is `nprocs` and `forkparent` pushes
+where it used to write through `&jp->ps[jp->nprocs++]`.
+
+### A job reaches the current-job chain before it can have any processes
+
+Three readers index `ps[0]` unconditionally and two index `ps[nprocs - 1]`,
+which for `nprocs == 0` is `ps[-1]`.  The C gets away with it because a job
+with no processes is not supposed to be reachable -- and it is.  `evalpipe`
+calls `makejob(pipelen)`, which links the job into the chain with `used`
+set, and only then opens the pipe; a failing `pipe(2)` raises `"Pipe call
+failed"` out of `evalpipe` without freeing it.  What is left on the chain
+is a `used`, `JOBRUNNING`, zero-process job that `jobs`, `kill %n`,
+`wait %n` and `%string` can all find, and whose `ps0` is the zeroed one
+`memset` left.  In the C, `jobs` hands `ps0.cmd == NULL` to `%s` and
+`getjob`'s name match hands it to `prefix`.
+
+The Rust answers for that job rather than reading past the end: `ps_pid`
+gives the zero the C reads out of `ps0` and `ps_cmd` gives the null string
+where the C reads a null pointer, `wait %n` on it reports 0, and it matches
+no name and no pid.  This is the only place in the file where the behaviour
+is *chosen* rather than ported, and it is chosen because what the C does
+there is undefined.  The underlying leak is `evalpipe`'s, not `jobs.c`'s,
+and it is still there.
+
+### `freejob` unlinks a job and deliberately leaves its own `prev_job` alone
+
+`set_curjob(jp, CUR_DELETE)` rewrites the link that *arrived at* `jp`; it
+never touches `jp->prev_job`.  Two loops depend on that and neither says
+so: `showjobs` calls `showjob`, which calls `freejob` on a finished job,
+and then steps to `jp->prev_job`; `forkchild` frees every job on the chain
+with `for (jp = curjob; jp; jp = jp->prev_job) freejob(jp)`, walking
+through each entry after freeing it.  A `freejob` that cleared `prev_job`
+-- the obvious thing to do when a job becomes unused -- would truncate the
+first walk to one job and the second to one iteration, and the corpus
+cannot see either, because both need job control.
+
+The Rust keeps `prev_job` and empties `ps` instead, which also makes a
+second `freejob` on the same job a no-op where the C would free every
+`ps[i].cmd` twice.
+
+### What `forkchild` may do in a `vfork` child, and what a `Vec` nearly added
+
+`vforkexec` is the one path in the file that runs in a shared address space:
+`vfork`, then `forkchild`, then `shellexec` to `execve`, with nothing in
+between allowed to allocate, free or drop ([dec:nsh:owned-data] records
+`exraise` under `vforked` and `shellexec` as the two paths that correctly
+skip destructors).  `forkchild` guards this with `lvforked`, and everything
+above that guard reads the job table without writing to it: `jp->jobctl`,
+`jp->nprocs`, `jp->ps[0].pid`.  All three stay reads under the new
+representation, and `freejob` -- the only thing in `forkchild` that frees --
+is below the guard, where the child is a real `fork` and dash already calls
+`ckfree`.  The `FORK_BG` arm, which opens `/dev/null`, is not on the `vfork`
+path either: `vforkexec` passes `FORK_FG`.
+
+The trap to avoid was making the job table's readers take `&mut` and having
+a `Job` move, or giving `forkchild` a local `Vec`; neither is present, and
+the count of allocator calls between `vfork` and `execve` is still zero.
