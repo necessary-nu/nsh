@@ -188,7 +188,6 @@ fn text(pf: &ParseFile) -> &[u8] {
     }
 }
 
-
 /// The C's `parsefile`, as a value `unwindfiles` can be given later.
 #[inline]
 pub unsafe fn cur_mark() -> usize {

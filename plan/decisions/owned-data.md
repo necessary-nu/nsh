@@ -1123,3 +1123,179 @@ things with two owners:
 pass, and three of the 26 are `region_untouched`, which exists only to
 check that the rest is dead.  `expand.rs`, `parser.rs` and `mail.rs` reach
 `memalloc` not at all.
+
+## What this cost in the port: the input stack
+
+Written after `input.rs`'s `parsefile` chain, its `IBUFSIZ` buffers and its
+`strpush` stack became owned values.  `docs/std-replacements.md` §4.10
+settles the shape -- `Vec<u8>` and explicit indices, not `BufRead` -- and
+is right about all four of the reasons.  What follows is what reading it
+did not predict.
+
+### `ap->val` points into `ap->name`, so `strpush` holds the whole allocation
+
+`alias.c:setalias` is
+
+    namelen = val - name;
+    ap->name = savestr(name);
+    ap->val = ap->name + namelen;
+
+One allocation: `name` is the entire `n=v` text and `val` is a pointer into
+it.  Three things in `input.c` follow from that and read as something else:
+
+  * `pushstring` sets `sp->string = ap->name` -- not `s`, which is
+    `ap->val`.  It is not remembering the pushed text, it is remembering
+    the *allocation* the pushed text lives in.
+  * `popstring`'s `if (sp->string != sp->ap->name) ckfree(sp->string)` is
+    therefore live exactly when the alias was redefined while it was being
+    read: `setalias` skips its own `ckfree(ap->name)` under `ALIASINUSE`
+    and installs a new buffer, and the old one is freed here, after the
+    cursor has left it.  `alias a='alias a=x; echo'; a` is the whole case.
+  * `popstring`'s other test, `parsefile->nextc > sp->string`, then cannot
+    be false: `nextc` starts at `ap->name + namelen` with `namelen >= 2`.
+    It reads as "has anything been consumed"; it is not that any more.
+
+The port copies the pushed text into the `strpush`, which makes the
+redefinition impossible to observe rather than deferred, and the first two
+disappear.  The third translates back to what it says -- `pos > 0` -- and
+the two agree, because with nothing consumed the C reads `name[namelen-1]`,
+the `=` that ends the alias name, and the test it feeds asks whether that
+byte is a space or a tab.
+
+The copy leaves `setalias`'s `if (!(ap->flag & ALIASINUSE))` guard with
+nobody to defer to, so it goes: **that is the one edit this pass made
+outside `input.rs` and its callers.**  Keeping it would leak the old buffer
+on every mid-expansion redefinition.
+
+### `popfile` drops the dying level's pending list, and an alias never expands again
+
+`pgetc` frees a popped `strpush` one call late -- `popstring` moves it to
+`parsefile->spfree` and the *next* `pgetc` runs `freestrings` -- so that
+`PEOA` is generated before the alias becomes eligible again.  A level can
+therefore end with an entry still on `spfree`, and `popfile` only drains
+the chain of the level it is returning *to*:
+
+    parsefile = pf->prev;
+    ...
+    if (parsefile->spfree)
+            freestrings(parsefile->spfree);
+    ...
+    ckfree(pf);
+
+`pf->spfree` goes with `ckfree(pf)`, `ALIASINUSE` still set on it.  The
+alias is then permanently in use, `lookupalias(name, 1)` returns NULL for
+the rest of the shell's life, and it never expands again.
+`alias q='echo hi '; echo \`q\`; q` is two lines and reproduces it: dash
+prints `hi` then `q: not found`.
+
+An owned `Vec<StrPush>` wants to release that chain on the way out, and
+releasing it is a divergence -- it was written that way first and the probe
+caught it.  So `popfile` drops the chain instead: the memory is freed, the
+flag is not cleared, which is what the C does minus the leak.
+
+### `popfile`'s string loop pops the wrong level's stack
+
+Immediately above the free,
+
+    while (pf->strpush) {
+            popstring();
+            freestrings(parsefile->spfree);
+    }
+
+and `popstring` reads `parsefile->strpush`, which two lines earlier became
+the *outer* level.  The loop's condition never changes, and the second
+iteration dereferences a NULL `strpush` on any level whose own stack is
+empty.  It was correct in 0.5.10, where `parsefile = pf->prev` came after
+the loop; the `spfree` rework moved the assignment to the top and did not
+move the loop.
+
+This cannot have executed in the corpus, because executing it segfaults.
+The port drops `pf->strpush` the same way it drops the chain, which is
+indistinguishable from the C in every case the C survives.
+
+### `pushstdin` puts `basepf` back on top of levels that are still live
+
+`read` calls `pushstdin`, which is `basepf.prev = parsefile; parsefile =
+&basepf` -- the *same* object appearing a second time at the top of a stack
+it is also the bottom of.  No position in a `Vec` expresses that, so
+`basepf` is not in the `Vec`: it is index 0, `FRAMES[i]` is index `i + 1`,
+and `basepf.prev` is what `unwindfiles`' `while (basepf.prev || ...)`
+already treats as a separate piece of state.  `popfile`'s `if (pf ==
+&basepf) goto out` becomes `if (dying == 0)`, and the invariant that makes
+the `Vec` a stack -- the current level is index 0 or the top of `FRAMES` --
+is a `debug_assert` in `popfile` rather than a sentence.  It fires if the
+base-level early return is removed.
+
+### `preadfd` holds a pointer across a call that pushes a level
+
+`preadfd`'s local `buf` is live across `el_gets`, and `el_gets` runs the
+prompt through `expandstr`, which is `setinputstring` -- a push.  In the C
+that is safe because the buffer is a separate `ckmalloc`'d block.  It stays
+safe with a `Vec<u8>` for the same reason and would *not* have been safe
+had the buffer been inline in the frame, which is the trap in the obvious
+first version of this conversion: `Vec<ParseFile>` moves its elements, and
+the pushback window `preadfd` reserves is inside the buffer.
+
+The same reasoning is why `strpush`'s inline `basestrpush` had to go rather
+than be kept for speed.  `parsefile->strpush` can point at
+`&parsefile->basestrpush`, which is an interior address of a frame, and a
+nested `pushfile` during an alias expansion moves it.  A `Vec<StrPush>`
+needs no inline slot, so `pushstring`'s malloc-or-inline branch and
+`freestrings`' `psp != &parsefile->basestrpush` test both disappear.
+
+### `mkinit_reset` subtracts `buf` from a cursor that need not be in `buf`
+
+    c = PEOF;
+    if (toppf->nextc - toppf->buf > toppf->unget)
+            c = toppf->nextc[-toppf->unget - 1];
+
+`popallfiles` has just run, but it does not touch `toppf`'s own `strpush`
+stack, so an error raised mid-alias leaves `nextc` pointing into the alias
+body -- a different allocation from `buf`.  The subtraction is then a
+number with no meaning, large and positive in practice, so the branch is
+taken and the byte read is the one before the cursor.  As an index into
+whatever text the level is reading, the test says what it was for -- at
+least one character past the pushback window has been consumed -- and reads
+the same byte.  This is the one place where the port is defined and the C
+is not.
+
+### The `spfree` chain hides itself, and `popstring`'s assignment can lose one
+
+`pushstring` does `sp->spfree = parsefile->spfree; parsefile->spfree =
+NULL`, and `popstring` does `parsefile->spfree = sp` -- so the pending list
+is stashed inside the entry being pushed and comes back when it is popped,
+and anything the current list picked up in between is dropped on the floor.
+Two `popstring`s in one `pgetc` -- possible, because the `goto again` after
+one does not re-run the entry `freestrings` -- lose the first.
+
+That is reproduced rather than repaired: the entry carries a `Vec<StrPush>`
+of its own, `popstring` restores from it and pushes itself on top, and the
+list that was current is dropped without clearing any flag.  Clearing it
+would be the same divergence as the `popfile` one above.
+
+### `setinputstring` borrows, and three of its four callers pay for it
+
+`parsefile->nextc = string` with no copy, so the level reads the caller's
+memory: `evalstring`'s `sstrdup(s)`, which it holds until after `popfile`
+and then `stunalloc`s; `parsebackq`'s `grabstackstr(pout)`, which the
+enclosing mark has to keep; and `expandstr`'s `ps`, which is a pointer into
+the variable table.  Copying into the level's own buffer is one allocation
+per `eval`, per `.`, per old-style backquote and per prompt, and it is what
+makes a level's text something the level owns.  Nothing writes through the
+borrow -- `preadbuffer` returns `PEOF` immediately on `eof & 2`, which
+`setinputstring` always sets -- so the copy is behaviour for behaviour.
+
+### The index is not what the hot path costs; the frame lookup is
+
+`pgetc` runs per character and the C's inner statement is
+`parsefile->nleft--; c = *parsefile->nextc++`.  Parsing a 13MB script with
+`-n`, minimum of eight interleaved runs: 644ms before this pass, 733ms with
+the frames in a `Vec` and `nextc` still a pointer, 669ms with `nextc` an
+index as well.  The middle number is the interesting one.  What costs is
+`parsefile` itself -- an index plus a bounds check plus a branch for the
+base level, reloaded three times per character -- and not the bounds check
+on the character.  Reloading it once per `pgetc` and caching the resolved
+pointer, written by the single writer of the index and refreshed after each
+of the two operations that can move a frame, brings the whole conversion to
+2% and +4.4% instructions.  The cached pointer carries a `debug_assert`
+that it agrees with the index; removing the refresh in `pushfile` fires it.
