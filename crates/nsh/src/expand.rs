@@ -127,17 +127,84 @@ const C_9: c_char = b'9' as c_char;
 // ---------------------------------------------------------------------
 
 // [spec:dash:def:expand.strlist]
-#[repr(C)]
+///
+/// The C's `next` field is gone: the chain is the `Vec` inside
+/// [`arglist`], the same shape as [`ifsregion`]'s.  What is left is the
+/// text, and the text is the entry's own.
+///
+/// In the C it is a `char *` into the region, kept alive by whichever
+/// `popstackmark` encloses the command — which is why `expandarg` had to
+/// copy the word out of the expansion buffer and `addfnamealt` had to copy
+/// the candidate out of the glob buffer before either could hand it over.
+/// Owning the bytes says that lifetime directly.
+///
+/// **Invariant: the bytes end with a NUL, and the terminator is counted.**
+/// Every reader is a C-string reader — `setvar`, `setvareq`, `execve`,
+/// `find_command`, `strcoll`, `patmatch`, `outfmt` — so a field that
+/// stopped at `strlen` would have to have a terminator appended at each of
+/// them. [`strlist::textp`] asserts it.
 pub struct strlist {
-    pub next: *mut strlist,
-    pub text: *mut c_char,
+    pub text: BString,
+}
+
+impl strlist {
+    /// A field taken out of a buffer the shell is about to stop owning:
+    /// the run `ifsbreakup` has just terminated, or `glob`'s `d_name`.
+    #[inline]
+    pub unsafe fn from_cstr(p: *const c_char) -> strlist {
+        strlist {
+            text: crate::shell::cstring_bytes(p),
+        }
+    }
+
+    /// `sp->text`, as the `char *` every reader wants.
+    #[inline]
+    pub fn textp(&self) -> *mut c_char {
+        debug_assert_eq!(self.text.last(), Some(&0), "a field is a C string");
+        self.text.as_ptr() as *mut c_char
+    }
+
+    /// `rmescapes(sp->text)`, in place as the C does it.
+    ///
+    /// `_rmescapes` shortens the C string and says nothing about by how
+    /// much, so the length is re-derived. No reader of a field uses its
+    /// length — they all stop at the terminator, as the C's did — so the
+    /// truncation is hygiene rather than correctness: what it buys is that
+    /// the entry's length keeps meaning the string's length, which is what
+    /// makes the assertion in [`strlist::textp`] worth anything.
+    #[inline]
+    pub unsafe fn rmescapes(&mut self) {
+        let p = self.text.as_mut_ptr() as *mut c_char;
+        rmescapes(p);
+        let n = libc::strlen(p);
+        self.text.truncate(n + 1);
+    }
 }
 
 // [spec:dash:def:expand.arglist]
-#[repr(C)]
+///
+/// `lastp` goes with `next`.  The C carries it because appending to a
+/// singly-linked list needs its tail, and it is always
+/// `&(last node)->next` — which is `list.len()`.  The three places that
+/// save it across an `expandarg` and read back what that call appended
+/// (`eval.c:fill_arglist`, `evalcommand`'s assignment loop, and
+/// `expandmeta`'s `savelastp`) save the length instead.
+///
+/// `arglist->list` is *also* reassigned in one place —
+/// `eval.c:parse_command_args`, which advances the head past the
+/// `command [-p]` words it consumed while `eval.c:evalcommand` keeps the
+/// original head in `osp` for `set -x`.  A `Vec`'s start does not move, so
+/// that head travels as an index of its own.
 pub struct arglist {
-    pub list: *mut strlist,
-    pub lastp: *mut *mut strlist,
+    pub list: Vec<strlist>,
+}
+
+impl arglist {
+    /// The C writes `struct arglist arglist;` and then
+    /// `arglist.lastp = &arglist.list`, which is an empty list.
+    pub const fn new() -> arglist {
+        arglist { list: Vec::new() }
+    }
 }
 
 /*
@@ -247,10 +314,7 @@ static mut argbackq: *const [Option<crate::nodes::Node>] =
 /// `ifslastp` first.
 static mut ifsregions: Vec<ifsregion> = Vec::new();
 /* holds expanded arg list */
-static mut exparg: arglist = arglist {
-    list: ptr::null_mut(),
-    lastp: ptr::null_mut(),
-};
+static mut exparg: arglist = arglist::new();
 
 static mut ifsmap: [c_char; 128] = [0; 128];
 static mut ncifs: *const c_char = ptr::null();
@@ -274,6 +338,15 @@ unsafe fn ifsr() -> &'static mut Vec<ifsregion> {
 #[inline]
 unsafe fn wcifsv() -> &'static mut Vec<wchar_t> {
     &mut *ptr::addr_of_mut!(wcifs)
+}
+
+/// `&mut exparg.list`, same.  Every `*exparg.lastp = sp` in the C is a
+/// `push` on this, and `exparg.lastp = &exparg.list` — the C's way of
+/// throwing away whatever the previous expansion left in the head — is a
+/// `clear`.
+#[inline]
+unsafe fn expargl() -> &'static mut Vec<strlist> {
+    &mut (*ptr::addr_of_mut!(exparg)).list
 }
 
 /// `wcschr(wcifs, wc) != NULL`.
@@ -359,22 +432,24 @@ unsafe fn expstnputs(s: *const c_char, n: size_t) -> *mut c_char {
 
 /// `p = grabstackstr(expdest)`.
 ///
-/// This is the seam between [dec:nsh:owned-data]'s string-builder property
-/// and `delete-memalloc`.  The *builder* is owned; the *result* is still a
-/// region pointer, because `ifsbreakup`, `expandmeta` and the `strlist`
-/// chain are `stalloc`'d C structures holding `char *`.  In the C the call
-/// allocates nothing and copies nothing — it moves the bump pointer past
-/// bytes that are already in place, which is how C says "these outlive the
-/// next builder".  Owned bytes say that for free, so what is left here is
-/// the copy into the region that the consumers still require, and it goes
-/// when they do.
-unsafe fn grabexpdest() -> *mut c_char {
+/// In the C this allocates nothing and copies nothing — it moves the bump
+/// pointer past bytes that are already in place, which is how C says "these
+/// outlive the next builder".  Owned, that is `mem::take`: the word's
+/// buffer *becomes* the caller's, and what the next `expandarg`'s
+/// `STARTSTACKSTR` clears is the empty one left behind.
+///
+/// While `strlist` was still a C structure this was a copy into the region,
+/// because the consumers held `char *`.  They hold their own bytes now, so
+/// the copy is gone rather than smaller.
+unsafe fn grabexpdest() -> BString {
     let b = expb();
-    let n = b.len();
-    let p = crate::memalloc::stalloc(n) as *mut c_char;
-    ptr::copy_nonoverlapping(b.as_ptr(), p as *mut u8, n);
-    b.clear();
-    p
+    /* `argstr` closes the word by masking its terminating marker to 0
+     * (`*(q - 1) &= end - 1`), so the buffer is a C string and the
+     * `strlen` `ifsbreakup` and `openhere` perform on it stops inside it.
+     * The bytes belong to the word being handed over, terminator included;
+     * `clear` on the next entry is what `mem::take` leaves behind. */
+    debug_assert_eq!(b.last(), Some(&0), "argstr terminates the word");
+    mem::take(b)
 }
 
 /// The result of an `expandarg(n, NULL, flag)` — the call that does *not*
@@ -691,41 +766,57 @@ unsafe fn getpwhome(name: *const c_char) -> *const c_char {
 
 // [spec:dash:def:expand.expandarg-fn]
 // [spec:dash:sem:expand.expandarg-fn]
-pub unsafe fn expandarg(arg: &crate::nodes::Node, arglist: *mut arglist, flag: c_int) {
-    let sp: *mut strlist;
-    let p: *mut c_char;
+pub unsafe fn expandarg(arg: &crate::nodes::Node, arglist: Option<&mut arglist>, flag: c_int) {
+    let mut p: BString;
 
     argbackq = arg.narg().backquote.as_slice();
     /* STARTSTACKSTR(expdest) */
     expb().clear();
     argstr(arg.narg().text.as_ptr(), flag);
     'out: {
-        if arglist.is_null() {
+        let Some(arglist) = arglist else {
             /* here document expanded — the caller reads the buffer back
              * through `expansion_result()`. */
             break 'out;
-        }
+        };
         p = grabexpdest();
-        exparg.lastp = &mut exparg.list;
+        /* `exparg.lastp = &exparg.list`.  It re-points the tail at the
+         * head, which discards whatever the previous call left there —
+         * reachable only when that call unwound between building the list
+         * and splicing it into its caller's. */
+        expargl().clear();
         /*
          * TODO - EXP_REDIR
          */
         if (flag & EXP_FULL) != 0 {
-            ifsbreakup(p, -1, &mut exparg);
-            *exparg.lastp = ptr::null_mut();
-            exparg.lastp = &mut exparg.list;
-            expandmeta(exparg.list);
+            /* The fields copy out of the word rather than pointing into
+             * it, so the word itself is a local that dies at the end of
+             * this block.  The C could not do that: its fields *are*
+             * offsets into the grabbed block, which is why the block had to
+             * outlive them and why the enclosing mark had to be the thing
+             * that freed it. */
+            ifsbreakup(
+                p.as_mut_ptr() as *mut c_char,
+                -1,
+                &mut *ptr::addr_of_mut!(exparg),
+            );
+            /* `*exparg.lastp = NULL; exparg.lastp = &exparg.list;` —
+             * terminate the fields `ifsbreakup` built, then re-point the
+             * tail at the head so `expandmeta` rebuilds the list while
+             * walking the one it was handed.  The first append there
+             * overwrites the head, which is why the C can read `str->next`
+             * before the write reaches it; taking the `Vec` is both
+             * halves. */
+            let words = mem::take(expargl());
+            expandmeta(words);
         } else {
-            sp = crate::memalloc::stalloc(mem::size_of::<strlist>() as size_t) as *mut strlist;
-            (*sp).text = p;
-            *exparg.lastp = sp;
-            exparg.lastp = &mut (*sp).next;
+            expargl().push(strlist { text: p });
         }
-        *exparg.lastp = ptr::null_mut();
-        if !exparg.list.is_null() {
-            *(*arglist).lastp = exparg.list;
-            (*arglist).lastp = exparg.lastp;
-        }
+        /* `if (exparg.list) { *arglist->lastp = exparg.list; arglist->lastp
+         * = exparg.lastp; }`.  The C guards on emptiness because splicing a
+         * NULL head would leave the caller's tail pointing at `exparg`'s
+         * own head; appending an empty `Vec` is already a no-op. */
+        arglist.list.append(expargl());
     }
 
     /* out: */
@@ -1010,7 +1101,6 @@ pub unsafe fn removerecordregions(endoff: c_int) {
 // [spec:dash:def:expand.expari-fn]
 // [spec:dash:sem:expand.expari-fn]
 unsafe fn expari(mut start: *mut c_char, flag: c_int) -> *mut c_char {
-    let mut sm: crate::memalloc::stackmark = mem::zeroed();
     let begoff: c_int;
     let len: c_int;
     let result: intmax_t;
@@ -1030,27 +1120,26 @@ unsafe fn expari(mut start: *mut c_char, flag: c_int) -> *mut c_char {
          * winds the cursor back over the arithmetic text, which then stays
          * where it is and is read by `arith` from *past* the cursor.
          *
-         * The C protects it with `pushstackmark(&sm, endoff)`: `endoff` is
-         * how much of the region the half-built word occupies, and grabbing
-         * that much keeps `arith`'s own `stalloc`s off it.  The word is no
-         * longer in the region, so there is nothing for `arith` to collide
-         * with and the length is 0; the mark now only releases what `arith`
-         * allocated, which is its other job.
+         * The C protects it with `pushstackmark(&sm, endoff)`, which does
+         * two jobs: `endoff` is how much of the region the half-built word
+         * occupies, and grabbing that much keeps `arith`'s own `stalloc`s
+         * off it, while the save/restore releases them afterwards.  Neither
+         * job has a customer left.
          *
-         * What the reservation is replaced by is an argument rather than a
-         * mechanism: `arith` (and `yylex` under it) allocate from the
-         * region and never touch this buffer, so the bytes above the
-         * truncated length cannot be moved or overwritten while `arith`
-         * reads them.  `Vec::reserve` would move them — it copies only the
-         * first `len` bytes — but nothing on this path reserves. */
+         * The reservation is replaced by an argument rather than a
+         * mechanism: `arith` (and `yylex` under it) do not touch this
+         * buffer, so the bytes above the truncated length cannot be moved
+         * or overwritten while `arith` reads them.  `Vec::reserve` would
+         * move them — it copies only the first `len` bytes — but nothing on
+         * this path reserves.  And what the restore released,
+         * `arith_yylex`'s variable names, is a list `arith` clears on
+         * entry. */
         expb().truncate(begoff as usize);
         start = expbase().offset(begoff as isize);
 
         removerecordregions(begoff);
 
-        crate::memalloc::pushstackmark(&mut sm, 0);
         result = crate::arith_yacc::arith(start);
-        crate::memalloc::popstackmark(&mut sm);
 
         len = cvtnum(result, flag, expb()) as c_int;
 
@@ -1076,7 +1165,6 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
     let mut p: *mut c_char;
     let mut dest: *mut c_char;
     let startloc: c_int;
-    let mut smark: crate::memalloc::stackmark = mem::zeroed();
 
     'out: {
         if (flag & EXP_DISCARD) != 0 {
@@ -1085,14 +1173,12 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
 
         crate::error::INTOFF();
         startloc = expdest_off();
-        /* `pushstackmark(&smark, startloc)`: the length existed to keep
-         * `makejob`'s region allocations off the half-built word.  The word
-         * is no longer in the region — see `expari` for the same change —
-         * so the mark's remaining job is releasing what `evalbackcmd`
-         * allocated, and it needs no length. */
-        crate::memalloc::pushstackmark(&mut smark, 0);
+        /* `pushstackmark(&smark, startloc)`: the length kept `makejob`'s
+         * region allocations off the half-built word, and the save/restore
+         * released them afterwards.  The word is not in the region and
+         * neither is anything `evalbackcmd` reaches, so both halves are
+         * gone. */
         crate::eval::evalbackcmd(cmd, &mut in_ as *mut crate::eval::backcmd);
-        crate::memalloc::popstackmark(&mut smark);
 
         p = in_.buf;
         i = in_.nleft;
@@ -1982,11 +2068,10 @@ unsafe fn ifsisifs(p: *const c_char, ml: c_uint, ifs: *const c_char) -> c_uint {
 // [spec:dash:sem:expand.ifsbreakup-slow-fn]
 unsafe fn ifsbreakup_slow(
     ifst: *mut ifs_state,
-    arglist: *mut arglist,
+    arglist: &mut arglist,
     nulonly: c_int,
     mut p: *mut c_char,
 ) -> *mut c_char {
-    let sp: *mut strlist;
     let ifschar: c_uint;
     let sisifs: c_uint;
     let isdefifs: bool;
@@ -2073,10 +2158,7 @@ unsafe fn ifsbreakup_slow(
                 return p;
             }
             *q = C_NUL;
-            sp = crate::memalloc::stalloc(mem::size_of::<strlist>() as size_t) as *mut strlist;
-            (*sp).text = (*ifst).start;
-            *(*arglist).lastp = sp;
-            (*arglist).lastp = &mut (*sp).next;
+            arglist.list.push(strlist::from_cstr((*ifst).start));
             (*ifst).start = p;
             return p;
         }
@@ -2097,11 +2179,10 @@ unsafe fn ifsbreakup_slow(
 
 // [spec:dash:def:expand.ifsbreakup-fn]
 // [spec:dash:sem:expand.ifsbreakup-fn]
-pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: *mut arglist) {
+pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: &mut arglist) {
     let mut ifsp: usize;
     let mut ifst: ifs_state = mem::zeroed();
     let realifs: *const c_char;
-    let sp: *mut strlist;
     let mut nulonly: c_int;
     let mut p: *mut c_char;
 
@@ -2178,6 +2259,19 @@ pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: *mut argl
                 break 'add; /* goto add */
             }
             if !ifst.r.is_null() {
+                /* This is the one write into `string` that happens after
+                 * `ifsbreakup_slow` has stopped emitting fields, and the
+                 * fields no longer alias `string` — they copied out at the
+                 * instant each was terminated.  So it has to land in the
+                 * field that has *not* been created yet, which is the one
+                 * `add:` below takes from `ifst.start`.  It does: `r` is
+                 * only ever set once `maxargs` has reached 0, and the two
+                 * branches that set it both return without emitting, so no
+                 * field is taken between the two points. */
+                debug_assert!(
+                    ifst.r >= ifst.start,
+                    "the trailing-IFS truncation lands in an already-taken field"
+                );
                 *ifst.r = C_NUL;
             }
         }
@@ -2188,10 +2282,7 @@ pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: *mut argl
     }
 
     /* add: */
-    sp = crate::memalloc::stalloc(mem::size_of::<strlist>() as size_t) as *mut strlist;
-    (*sp).text = ifst.start;
-    *(*arglist).lastp = sp;
-    (*arglist).lastp = &mut (*sp).next;
+    arglist.list.push(strlist::from_cstr(ifst.start));
 }
 
 // [spec:dash:def:expand.ifsfree-fn]
@@ -2304,8 +2395,8 @@ unsafe extern "C" fn opendir_interruptible(pathname: *const c_char) -> *mut c_vo
 
 // [spec:dash:def:expand.expandmeta-glob-fn]
 // [spec:dash:sem:expand.expandmeta-glob-fn]
-unsafe fn expandmeta_glob(mut str: *mut strlist) {
-    while !str.is_null() {
+unsafe fn expandmeta_glob(words: Vec<strlist>) {
+    for mut str in words {
         let p: *const c_char;
         let mut pglob: crate::system::glob64_t = mem::zeroed();
         let i: c_int;
@@ -2326,14 +2417,17 @@ unsafe fn expandmeta_glob(mut str: *mut strlist) {
                     /* #endif */
 
                     crate::error::INTOFF();
-                    p = preglob((*str).text, RMESCAPE_HEAP, None);
+                    /* No RMESCAPE_ALLOC, so `_rmescapes` rewrites the
+                     * word in place and returns it; the cursor therefore
+                     * has to come from `&mut str` and not from `textp`. */
+                    p = preglob(str.text.as_mut_ptr() as *mut c_char, RMESCAPE_HEAP, None);
                     i = crate::system::glob64(
                         p,
                         crate::system::GLOB_ALTDIRFUNC | crate::system::GLOB_NOMAGIC,
                         None,
                         &mut pglob,
                     );
-                    if p != (*str).text {
+                    if p != str.text.as_ptr() as *const c_char {
                         ckfree(p as *mut c_void);
                     }
                     if i == 0 {
@@ -2360,11 +2454,9 @@ unsafe fn expandmeta_glob(mut str: *mut strlist) {
                 /* fall through to nometa */
             }
             /* nometa: */
-            *exparg.lastp = str;
-            rmescapes((*str).text);
-            exparg.lastp = &mut (*str).next;
+            str.rmescapes();
+            expargl().push(str);
         }
-        str = (*str).next;
     }
 }
 
@@ -2388,11 +2480,11 @@ unsafe fn addglob(pglob: *const crate::system::glob64_t) {
 
 // [spec:dash:def:expand.expandmeta-fn]
 // [spec:dash:sem:expand.expandmeta-fn]
-unsafe fn expandmeta(mut str: *mut strlist) {
+unsafe fn expandmeta(words: Vec<strlist>) {
     /* TODO - EXP_REDIR */
 
     if GLOB_IS_ENABLED {
-        return expandmeta_glob(str);
+        return expandmeta_glob(words);
     }
 
     /* The C's `preglob(..., RMESCAPE_HEAP)` result: one `ckmalloc` per
@@ -2403,9 +2495,8 @@ unsafe fn expandmeta(mut str: *mut strlist) {
      * while `FNMATCH_IS_ENABLED` is 0. */
     let mut pattern: Vec<u8> = Vec::new();
 
-    while !str.is_null() {
-        let savelastp: *mut *mut strlist;
-        let mut sp: *mut strlist;
+    for mut str in words {
+        let savelastp: usize;
         let p: *mut c_char;
         let len: c_uint;
 
@@ -2414,19 +2505,18 @@ unsafe fn expandmeta(mut str: *mut strlist) {
                 if fflag() != 0 {
                     break 'nometa;
                 }
-                if libc::strpbrk((*str).text, b"*?]\0".as_ptr() as *const c_char).is_null()
-                    || libc::strcmp((*str).text, b"]\0".as_ptr() as *const c_char) == 0
+                if libc::strpbrk(str.textp(), b"*?]\0".as_ptr() as *const c_char).is_null()
+                    || libc::strcmp(str.textp(), b"]\0".as_ptr() as *const c_char) == 0
                 {
                     break 'nometa;
                 }
-                savelastp = exparg.lastp;
+                /* `savelastp = exparg.lastp` — where this word's matches
+                 * will start, so that the sort below covers them and not
+                 * the words already in the list. */
+                savelastp = expargl().len();
 
                 crate::error::INTOFF();
-                p = preglob(
-                    (*str).text,
-                    RMESCAPE_ALLOC | RMESCAPE_HEAP,
-                    Some(&mut pattern),
-                );
+                p = preglob(str.textp(), RMESCAPE_ALLOC | RMESCAPE_HEAP, Some(&mut pattern));
                 len = libc::strlen(p) as c_uint;
 
                 /* The C's top-level `expmeta` starts on whatever block the
@@ -2444,65 +2534,68 @@ unsafe fn expandmeta(mut str: *mut strlist) {
                  * "did `_rmescapes` allocate?".  `pattern` owns the bytes
                  * either way now, and the next iteration reuses it. */
                 crate::error::INTON();
-                if exparg.lastp == savelastp {
+                if expargl().len() == savelastp {
                     /*
                      * no matches
                      */
                     break 'nometa;
                 } else {
-                    *exparg.lastp = ptr::null_mut();
-                    sp = expsort(*savelastp);
-                    *savelastp = sp;
-                    while !(*sp).next.is_null() {
-                        sp = (*sp).next;
-                    }
-                    exparg.lastp = &mut (*sp).next;
+                    /* `*exparg.lastp = NULL; sp = expsort(*savelastp);
+                     * *savelastp = sp; while (sp->next) sp = sp->next;
+                     * exparg.lastp = &sp->next;` — terminate the run this
+                     * word added, sort it, splice it back and walk to its
+                     * new end.  Three of those four exist to re-find the
+                     * tail of a list the sort reordered; a slice's tail
+                     * does not move. */
+                    expsort(&mut expargl()[savelastp..]);
                     break 'sw;
                 }
             }
             /* nometa: */
-            *exparg.lastp = str;
-            rmescapes((*str).text);
-            exparg.lastp = &mut (*str).next;
+            str.rmescapes();
+            expargl().push(str);
         }
-        str = (*str).next;
     }
 }
 
 // [spec:dash:def:expand.addfname-common-fn]
 // [spec:dash:sem:expand.addfname-common-fn]
-unsafe fn addfname_common(name: *mut c_char) {
-    let sp: *mut strlist;
-
-    sp = crate::memalloc::stalloc(mem::size_of::<strlist>() as size_t) as *mut strlist;
-    (*sp).text = name;
-    *exparg.lastp = sp;
-    exparg.lastp = &mut (*sp).next;
+unsafe fn addfname_common(name: BString) {
+    expargl().push(strlist { text: name });
 }
 
 // [spec:dash:def:expand.addfnamealt-fn]
 // [spec:dash:sem:expand.addfnamealt-fn]
 unsafe fn addfnamealt(enddir: *mut c_char, expdir_len: size_t) -> *mut c_char {
-    let name: *mut c_char;
-    let b = globb();
-    let n: size_t = enddir.offset_from(b.as_mut_ptr() as *mut c_char) as size_t;
-
     /* `name = grabstackstr(enddir)` — in the C this allocates nothing and
      * copies nothing: it moves the region's bump pointer past bytes that
      * are already in place, which is how C says "these outlive the next
-     * candidate".  Owned bytes say that for free, so what is left is the
-     * copy into the region that `strlist` still requires.  Same seam as
-     * `grabexpdest`, and it goes with the same commit.
+     * candidate".
+     *
+     * The candidate cannot simply be moved out, and that is the one place
+     * in this pass where a copy stays.  The field wants `[0, n)` and the
+     * *next* candidate wants `[0, expdir_len)` — the same bytes — so one of
+     * the two has to take a copy.  The C copies the prefix back
+     * (`STARTSTACKSTR(enddir); stnputs(name, expdir_len, enddir)`) because
+     * `grabstackstr` had already given the block away; this copies the
+     * field out and keeps the buffer, which costs the same order and leaves
+     * the glob buffer's capacity and its `expdir_len` invariant alone.
+     * What has gone is the region: the copy is into the field's own
+     * allocation, not into a block a `popstackmark` has to free.
      *
      * `n` runs past the length when the caller is the no-metacharacter
      * branch, whose `expmeta_rmescapes` wrote through a raw cursor without
      * committing.  Those bytes are written; they are only uncounted, and
      * counting them here is what makes the read below a read of the
      * buffer rather than of its spare capacity. */
-    debug_assert!(n <= b.capacity());
-    b.set_len(n);
-    name = crate::memalloc::stalloc(n) as *mut c_char;
-    ptr::copy_nonoverlapping(b.as_ptr(), name as *mut u8, n);
+    let name: BString = {
+        let b = globb();
+        let n: size_t = enddir.offset_from(b.as_mut_ptr() as *mut c_char) as size_t;
+        debug_assert!(n <= b.capacity());
+        b.set_len(n);
+        debug_assert_eq!(b.last(), Some(&0), "the candidate is a C string");
+        BString::from(b.to_vec())
+    };
     addfname_common(name);
 
     /* `STARTSTACKSTR(enddir); return stnputs(name, expdir_len, enddir) -
@@ -2510,6 +2603,7 @@ unsafe fn addfnamealt(enddir: *mut c_char, expdir_len: size_t) -> *mut c_char {
      * prefix back into it, because `grabstackstr` gave the old one away.
      * Nothing was given away here, so the prefix is still the first
      * `expdir_len` bytes and re-seeding is `set_len`. */
+    let b = globb();
     b.set_len(expdir_len);
     b.as_mut_ptr() as *mut c_char
 }
@@ -2816,7 +2910,10 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
 // [spec:dash:def:expand.addfname-fn]
 // [spec:dash:sem:expand.addfname-fn]
 unsafe fn addfname(name: *mut c_char) {
-    addfname_common(crate::mystring::sstrdup(name));
+    /* `sstrdup(name)`: the C copies `glob`'s `gl_pathv` entry into the
+     * region because `globfree64` is about to free it.  The field owns the
+     * copy now, which is the same statement without the allocator. */
+    addfname_common(crate::shell::cstring_bytes(name));
 }
 
 /*
@@ -2827,66 +2924,31 @@ unsafe fn addfname(name: *mut c_char) {
 
 // [spec:dash:def:expand.expsort-fn]
 // [spec:dash:sem:expand.expsort-fn]
-unsafe fn expsort(str: *mut strlist) -> *mut strlist {
-    let mut len: c_int;
-    let mut sp: *mut strlist;
-
-    len = 0;
-    sp = str;
-    while !sp.is_null() {
-        len += 1;
-        sp = (*sp).next;
-    }
-    msort(str, len)
+unsafe fn expsort(str: &mut [strlist]) {
+    /* The C walks the chain to count it and hands the count to `msort`,
+     * because a singly-linked list does not know its own length. */
+    msort(str, str.len() as c_int)
 }
 
 // [spec:dash:def:expand.msort-fn]
 // [spec:dash:sem:expand.msort-fn]
-unsafe fn msort(mut list: *mut strlist, len: c_int) -> *mut strlist {
-    let mut p: *mut strlist;
-    let mut q: *mut strlist = ptr::null_mut();
-    let mut lpp: *mut *mut strlist;
-    let half: c_int;
-    let mut n: c_int;
-
+///
+/// The C's merge sort, as `sort_by`.  Two properties have to match, and
+/// both do:
+///
+///   * **Order.**  `q` is the sorted *first* half and `p` the second, and
+///     the merge takes `p` only on `strcoll(p->text, q->text) < 0`, so the
+///     comparison is ascending by `strcoll`.
+///   * **Stability.**  That same test takes `q` — the earlier half — when
+///     the two compare equal, and a top-down merge sort whose merge is
+///     stable is stable.  `strcoll` can return 0 for byte-different
+///     strings under a collating locale, so this is not vacuous.
+///     `slice::sort_by` is stable.
+unsafe fn msort(list: &mut [strlist], len: c_int) {
     if len <= 1 {
-        return list;
+        return;
     }
-    half = len >> 1;
-    p = list;
-    n = half;
-    loop {
-        n -= 1;
-        if n < 0 {
-            break;
-        }
-        q = p;
-        p = (*p).next;
-    }
-    (*q).next = ptr::null_mut(); /* terminate first half of list */
-    q = msort(list, half); /* sort first half of list */
-    p = msort(p, len - half); /* sort second half */
-    lpp = &mut list;
-    loop {
-        if libc::strcoll((*p).text, (*q).text) < 0 {
-            *lpp = p;
-            lpp = &mut (*p).next;
-            p = *lpp;
-            if p.is_null() {
-                *lpp = q;
-                break;
-            }
-        } else {
-            *lpp = q;
-            lpp = &mut (*q).next;
-            q = *lpp;
-            if q.is_null() {
-                *lpp = p;
-                break;
-            }
-        }
-    }
-    list
+    list.sort_by(|p, q| libc::strcoll(p.textp(), q.textp()).cmp(&0));
 }
 
 /*
@@ -3335,21 +3397,18 @@ pub unsafe fn _rmescapes(
 
 // [spec:dash:def:expand.casematch-fn]
 // [spec:dash:sem:expand.casematch-fn]
-pub unsafe fn casematch(pattern: &crate::nodes::Node, val: *mut c_char) -> c_int {
-    let mut smark: crate::memalloc::stackmark = mem::zeroed();
+pub unsafe fn casematch(pattern: &crate::nodes::Node, val: *const c_char) -> c_int {
     let result: c_int;
 
-    crate::memalloc::setstackmark(&mut smark);
+    /* `setstackmark(&smark)` — it released what `argstr` allocated from the
+     * region for backquotes and arithmetic.  Neither allocates from it. */
     argbackq = pattern.narg().backquote.as_slice();
     /* STARTSTACKSTR(expdest) */
     expb().clear();
     argstr(pattern.narg().text.as_ptr(), EXP_TILDE | EXP_CASE);
     ifsfree();
-    /* The C reads the word back as `stackblock()`; the mark that follows
-     * still has work to do, because `argstr` can `stalloc` for backquotes
-     * and arithmetic. */
+    /* The C reads the word back as `stackblock()`. */
     result = patmatch(expbase(), val);
-    crate::memalloc::popstackmark(&mut smark);
     result
 }
 

@@ -4,7 +4,6 @@
 use libc::{c_char, c_int, time_t};
 use core::ptr::{addr_of, addr_of_mut};
 
-use crate::memalloc::{popstackmark, setstackmark, stackmark};
 use crate::mystring::nullstr;
 use crate::output::VaArg;
 use crate::var::{mailval, mpathset, mpathval};
@@ -27,10 +26,10 @@ pub unsafe fn chkmail() {
     let mut mpath: *const c_char;
     let mut q: *mut c_char;
     let mut mtp: *mut time_t;
-    let mut smark: stackmark = core::mem::zeroed();
     let mut statb: libc::stat64 = core::mem::zeroed();
 
-    setstackmark(&mut smark);
+    /* `setstackmark`/`popstackmark` bounded the candidate paths
+     * `padvance` built in the region; it builds them in its own buffer. */
     mpath = if mpathset() != 0 { mpathval() } else { mailval() };
     mtp = addr_of_mut!(mailtime) as *mut time_t;
     while mtp < (addr_of_mut!(mailtime) as *mut time_t).add(MAXMBOXES) {
@@ -77,7 +76,6 @@ pub unsafe fn chkmail() {
         mtp = mtp.add(1);
     }
     changed = 0;
-    popstackmark(&mut smark);
 }
 
 // [spec:dash:def:mail.changemail-fn]

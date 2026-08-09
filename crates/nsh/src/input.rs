@@ -451,10 +451,10 @@ unsafe fn preadfd() -> c_int {
             static mut el_len: c_int = 0;
 
             if rl_cp.is_null() {
-                let mut smark: crate::memalloc::stackmark = core::mem::zeroed();
-                crate::memalloc::pushstackmark(&mut smark, crate::memalloc::stackblocksize());
+                /* `pushstackmark(&smark, stackblocksize())` around
+                 * `el_gets`, whose prompt callback reaches `expandstr`.
+                 * That prompt is an owned buffer now. */
                 rl_cp = el_gets(crate::histedit::el, addr_of_mut!(el_len));
-                crate::memalloc::popstackmark(&mut smark);
             }
             if rl_cp.is_null() {
                 nr = 0;

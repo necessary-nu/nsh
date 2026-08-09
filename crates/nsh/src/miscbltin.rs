@@ -19,7 +19,7 @@ use libc::{c_char, c_int, c_uint};
 use bstr::BString;
 
 use crate::error::{INTOFF, INTON};
-use crate::expand::{arglist, strlist};
+use crate::expand::arglist;
 
 /* glibc <limits.h> */
 const MB_LEN_MAX: usize = 16;
@@ -49,28 +49,26 @@ const READ_MBSLOP: usize = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 4;
 // [spec:dash:sem:miscbltin.readcmd-handle-line-fn]
 unsafe fn readcmd_handle_line(line: &mut BString, ac: c_int, ap: *mut *mut c_char) {
     let mut ap: *mut *mut c_char = ap;
-    let mut arglist: arglist = core::mem::zeroed();
-    let mut sl: *mut strlist;
+    let mut arglist: arglist = arglist::new();
 
     /* `s = grabstackstr(s)`.  The C is handed the cursor one *past* the
      * terminator and turns it into the block's base, which both names the
      * line and reserves it so that `ifsbreakup`'s `stalloc`s land above it.
      * An owned line is already its own base and there is nothing to reserve;
-     * the `strlist`s `ifsbreakup` builds point into it, and it outlives them
-     * because the caller holds it. */
+     * the fields `ifsbreakup` builds copy out of it rather than pointing
+     * into it, so the line only has to outlive that one call. */
     let s: *mut c_char = line.as_mut_ptr() as *mut c_char;
     debug_assert!(!line.is_empty(), "readcmd always pushes the terminator");
 
-    arglist.lastp = &mut arglist.list;
-
     crate::expand::ifsbreakup(s, ac, &mut arglist);
-    *arglist.lastp = null_mut();
     crate::expand::ifsfree();
 
-    sl = arglist.list;
+    /* The C's `sl` is a node cursor that runs off the end of the chain; here
+     * it indexes the `Vec` and past-the-end is `sl >= list.len()`. */
+    let mut sl: usize = 0;
 
     loop {
-        if sl.is_null() {
+        if sl >= arglist.list.len() {
             /* nullify remaining arguments */
             loop {
                 crate::var::setvar(
@@ -88,9 +86,9 @@ unsafe fn readcmd_handle_line(line: &mut BString, ac: c_int, ap: *mut *mut c_cha
         }
 
         /* set variable to field */
-        crate::expand::rmescapes((*sl).text);
-        crate::var::setvar(*ap, (*sl).text, 0);
-        sl = (*sl).next;
+        arglist.list[sl].rmescapes();
+        crate::var::setvar(*ap, arglist.list[sl].textp(), 0);
+        sl += 1;
 
         ap = ap.add(1);
         if (*ap).is_null() {

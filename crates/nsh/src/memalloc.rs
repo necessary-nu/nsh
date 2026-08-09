@@ -141,6 +141,23 @@ pub static mut stacknleft: size_t = MINSIZE;
 pub static mut sstrend: *mut c_char =
     unsafe { (addr_of_mut!(stackbase.space) as *mut c_char).add(MINSIZE) };
 
+/// Whether the region is exactly as `.bss` left it: no block chained, the
+/// bump pointer at the base of `stackbase`, all of it free.
+///
+/// Not part of `memalloc.c`.  [dec:nsh:owned-data] removed the last
+/// `stalloc` on any shell path and then removed the marks, on the claim
+/// that every one of them had nothing left to release.  This is how that
+/// claim is checked rather than argued: with the marks gone nothing winds
+/// `stacknxt` back, so a single `stalloc` anywhere moves it permanently,
+/// and `eval::evaltree` — which runs for every command of every corpus
+/// case — asserts this.
+#[inline]
+pub unsafe fn region_untouched() -> bool {
+    stackp == addr_of_mut!(stackbase)
+        && stacknxt == addr_of_mut!(stackbase.space) as *mut c_char
+        && stacknleft == MINSIZE
+}
+
 // [spec:dash:def:memalloc.stalloc-fn]
 // [spec:dash:sem:memalloc.stalloc-fn]
 pub unsafe fn stalloc(nbytes: size_t) -> *mut c_void {

@@ -915,41 +915,211 @@ Two paths still skip destructors and both are correct to:
 `execve`.  In each the address space is about to stop being this shell's,
 so there is nothing to release.
 
-### What is left, and what it is waiting on
+### What the last region allocations left behind
 
-`crates/nsh/src/memalloc.rs` still exists.  The region -- `stalloc`,
-`stunalloc`, the `stack_block` chain, `setstackmark`/`pushstackmark`/
-`popstackmark` -- and the checked-malloc wrappers are both still in it.
-Two things hold it up, and they are independent of each other:
+`crates/nsh/src/memalloc.rs` still existed after this pass, held up by
+`struct strlist` and by the checked-malloc wrappers.  The section below
+records how the first of those went; the second is still open.
 
-  * **`struct strlist`.**  Every remaining `stalloc` outside
-    `mystring.rs:sstrdup` is a `strlist` node or a copy made to feed one:
-    `expandarg`'s `grabexpdest`, `ifsbreakup`'s fields, `addfname_common`,
-    `addfnamealt`, and `expandarg`'s single-field arm.  The consumers span
-    `expand.rs`, `eval.rs` (`fill_arglist`, `parse_command_args`,
-    `evalcommand`'s `argv`, `eprintlist`, `evalfor`) and
-    `miscbltin.rs:readcmd`.  The shape the C uses -- a `char *` list with a
-    `lastp` tail pointer, spliced in the middle by `expandmeta` and merge-
-    sorted by `msort` -- becomes a `Vec` of owned, NUL-terminated fields
-    with `lastp` as an index; `msort` is `sort_by` and stable in the same
-    direction the C's merge is.  It is one commit because the moment
-    `strlist.text` stops being a region pointer every reader changes at
-    once, which is what docs/idiomatization.md 5 says about this step.
-    Once it lands, the marks have nothing left to release and the region
-    goes with them.
+## What this cost in the port: `struct strlist`
+
+Written after the argument list became a `Vec` of owned fields and the
+region's marks came out.  Same rule as the sections above: each entry is a
+place where the C's *structure* was doing work its *text* did not admit to.
+
+The shape of the step is that `strlist` is two things bolted together and
+only one of them is hard.  `next` is a cons cell and becomes a `Vec` with
+no argument at all; `text` is a `char *` into the region whose lifetime is
+"until the enclosing `popstackmark`", and every reader in three files
+leans on that.  Separating the two is what made the step bisectable: the
+list converted first, with the text still a region pointer and no lifetime
+moving, and the text converted second.
+
+### `nfile.expfname` is a field with a different owner
+
+`expredir` does `redir->nfile.expfname = fn.list->text` and returns; the
+node then travels to `redir.c:openredirect`, which reads the pointer back.
+That works in the C because `fn` is a local `struct arglist` whose *text*
+is in the region, and the region belongs to `evalcommand`'s mark.  `fn` is
+declared inside the loop over the redirections, so the moment a field owns
+its bytes the stored pointer is dangling one statement later.
+
+It is the only part of the conversion separable from it, and it went
+first.  The node owns a `BString`; `None` is the C's null, which is not the
+same as an empty file name, because `> ""` is a real redirection.  The
+`char *` the four reads in `openredirect` want comes out of a borrow that
+ends immediately, and that being sound needs two facts worth stating: a
+`BString`'s bytes do not move when its header does, and nothing between
+the read and the use -- `stat64`, `sh_open`, `sh_open_fail` -- re-enters
+expansion, so no second `expredir` can write the field while the pointer
+is live.
+
+### `arglist->list` is the list *and* the cursor
+
+`parse_command_args` ends with `arglist->list = sp`, advancing the head
+past the `command` and `-p` words it consumed, while `evalcommand` keeps
+the original head in `osp` and hands *that* to `eprintlist`.  So `set -x`
+traces `command -p foo` as it was written and `argv` starts at `foo`, out
+of one field meaning two things.  A `Vec`'s start does not move, so the two
+separate: the list is the `Vec`, the head is an index.  Draining the front
+instead -- the obvious reading -- loses the `command -p` from the trace.
+
+### `msort`'s merge takes the first half on a tie, so it is stable
+
+`q = msort(list, half)` is the *first* half and `p = msort(p, len - half)`
+the second, and the merge takes `p` only on `strcoll(p->text, q->text) < 0`.
+Strictly less, so equal elements come from `q` -- the earlier run -- and
+the sort is stable.  `slice::sort_by` is too, and the difference is not
+academic: `strcoll` returns 0 for byte-different strings under a collating
+locale, which is exactly when a glob's order would visibly change.
+
+Three of the four lines around the call exist only to re-find the tail of a
+list the sort has reordered (`*savelastp = sp; while (sp->next) sp =
+sp->next; exparg.lastp = &sp->next;`).  A slice's tail does not move.
+
+### `argstr`'s bitwise AND is what terminates the word, not the source NUL
+
+The expansion buffer is read back as a C string by `ifsbreakup` and by
+`redir.c:openhere`, so "the last byte is a NUL" is a property the whole
+conversion rests on.  The obvious reading is that the word's own
+terminator is copied along with it -- `length` counts the closing byte and
+`stnputs` copies it.
+
+That reading is wrong, and the mutation says so: making `length` *not*
+count the closing byte still leaves a terminated buffer, because
+`*(q - 1) &= (end - 1)` then masks the last byte that *was* copied to zero.
+The AND is not a line that occasionally fires; it is the only thing
+guaranteeing the terminator.  The entry above -- "one line, doing the
+single most load-bearing thing in the file" -- understated it.  A
+`debug_assert` in `grabexpdest` names the property, and the mutation that
+proves it live is a word arriving one byte short.
+
+### `grabexpdest` is a move; `addfnamealt` cannot be
+
+Both were recorded above as "a copy of an owned buffer *into* the region,
+which goes when `strlist` does".  Only one of them is that.
+
+`grabexpdest` is `mem::take`: the expansion buffer's allocation *becomes*
+the field's, and the `STARTSTACKSTR` at the head of the next `expandarg`
+clears the empty one left behind.  The C's `grabstackstr` was not a copy
+either -- it was a bump-pointer move meaning "these bytes outlive the next
+builder", which is what a move says.
+
+`addfnamealt` cannot be, and the reason is the algorithm and not the
+allocator.  The field wants `[0, n)` of the glob buffer and the *next*
+candidate wants `[0, expdir_len)` -- the same bytes -- so exactly one of
+the two has to copy.  The C copies the prefix back
+(`STARTSTACKSTR(enddir); stnputs(name, expdir_len, enddir)`) because
+`grabstackstr` had already given the block away; the port copies the field
+out and keeps the buffer, which costs the same order of bytes and leaves
+the glob buffer's capacity and its `len == expdir_len` invariant alone.
+What has gone is the region: the copy lands in the field's own allocation
+and not in a block a `popstackmark` has to free.  The glob pass's entry --
+"owned, nothing was given away, so the re-seed is `set_len`" -- is still
+true, and it is true *because* this copy stays.
+
+### `ifsbreakup`'s fields stop aliasing the string they split
+
+In the C a field *is* an offset into the grabbed word, and `*q = '\0'`
+terminates it in place; the word therefore has to outlive every field cut
+from it, which is what the enclosing mark provided and what
+`readcmd_handle_line`'s `grabstackstr` was reserving room above.  Owned,
+each field copies out at exactly the instant the C wrote its terminator, so
+`expandarg`'s word is a local that dies at the end of the call and `read`'s
+line only has to survive one call.
+
+Taking the copy at that instant and no later is what makes them equal, and
+it rests on an ordering the C never states.  The one write into the string
+that happens after `ifsbreakup_slow` has stopped emitting fields is
+`*ifst.r = '\0'`, the trailing-IFS-whitespace truncation, and it has to
+land in the field that does not exist yet -- the one `add:` takes from
+`ifst.start`.  It does, because `r` is only ever set once `maxargs` has
+reached 0 and both branches that set it return without emitting.  That is
+a `debug_assert` rather than a sentence.  Honesty about its evidence: the
+site is confirmed reachable (negating the test fires it on
+`printf "a b c   \n" | read x y`) but no local mutation was found that
+makes the inequality false, because the branches that set `r` are the same
+branches that stop emitting.
+
+### `addfname`'s `sstrdup` was `glob`'s buffer, not the region's
+
+`addfname_common(sstrdup(name))` reads as the region's usual "keep this
+one".  It is not: `name` is a `gl_pathv` entry and `expandmeta_glob` calls
+`globfree64` four lines later, so the copy is escaping *glibc's*
+allocation.  The field owning it says the same thing without the region.
+The arm is unreachable in this build (`GLOB_IS_ENABLED` is 0), which is
+why it is worth reading rather than testing.
+
+### No field escapes into the variable table, and `setvareq` had to be read
+
+`evalcommand`'s assignment loop hands a field straight to
+`setvareq(s, vflags)` and `mklocal(name, VEXPORT)`, and `setvareq` stores
+`s` into `vp->text` *without copying* when `flags & VNOSAVE` is set.  Had
+either caller passed it, the variable table would hold a pointer into
+`evalcommand`'s frame and the region would have been what kept it valid.
+Neither does -- `vflags` is 0 or `VEXPORT`, `mklocal` adds `VSTRFIXED` --
+so both take the `s = savestr(s)` path.  Reading this cost five minutes; a
+wrong answer is a use-after-free on every `FOO=bar cmd`.
+
+### The marks are no-ops, and that is checked rather than argued
+
+With the fields owned, `stalloc` has no caller on any shell path.
+`mystring.rs:sstrdup` still contains one and nothing calls *it*; the only
+other reference is `grabstackblock`, which is what `pushstackmark`
+performs.  So every mark in the shell saved a cursor, grabbed nought or
+one byte, and restored the cursor.
+
+That is a claim about 61,498 corpus cases rather than about the source, so
+it is asserted.  `memalloc::region_untouched()` is `stackp == &stackbase
+&& stacknxt == stackbase.space && stacknleft == MINSIZE`, and three places
+check it: `eval::evaltree`, which runs at the head of every command;
+`main.c:cmdloop` where its `popstackmark` was, which covers the last
+command a script runs; and `eval::evalstring`'s tail, for `eval` and `.`.
+Nothing winds `stacknxt` back now, so one `stalloc` anywhere fails every
+check after it -- which is what the mutation shows: a `stalloc(1)` in
+`expandarg` fires `evaltree`'s on `echo hi; echo there` and `cmdloop`'s on
+a one-line script.
+
+Removing `popstackmark` does remove an `INTOFF`/`INTON` bracket, and that
+bracket is an interrupt *delivery* point -- `INTON` runs `onint()` when the
+counter reaches zero with a signal pending.  What is lost is delivery for a
+SIGINT arriving inside the bracket itself, a dozen instructions wide, which
+is then delivered at the next `INTON` or `CHECKINT`.  A signal arriving
+outside it is delivered by the handler directly, because `suppressint` is
+zero there, so the window is the bracket and nothing wider.
+
+### What is left, and who owns it
+
+`crates/nsh/src/memalloc.rs` still exists, and what is left in it is two
+things with two owners:
+
+  * **The region has no caller.**  `stalloc`, `stunalloc`, the
+    `stack_block` chain, `growstackblock`/`growstackto`/`makestrspace`/
+    `stnputs`/`stputs`/`_STPUTC`, and
+    `setstackmark`/`pushstackmark`/`popstackmark` are reached from nothing
+    the shell runs.  Two references survive and both are test-shaped:
+    `mystring.rs:sstrdup`, whose only caller (`addfname`) is gone but which
+    keeps a spec rule and a unit test, and the marks in `memalloc.rs`'s and
+    `mystring.rs`'s own tests.  Deleting the code is a spec-rule question
+    -- fifteen of `memalloc.rs`' twenty `def` rules and their `sem` pairs,
+    plus nine of its thirteen unit tests and `mystring.rs:sstrdup`'s --
+    rather than a call-site one, and it is the last thing this node has to
+    do.
 
   * **The checked-malloc wrappers.**  `ckmalloc`/`ckrealloc`/`ckfree`/
-    `savestr` have 30/3/41/13 references across `var.rs`, `alias.rs`,
-    `jobs.rs`, `options.rs`, `trap.rs`, `input.rs`, `redir.rs`, `exec.rs`
-    and `nodes.rs`.  These are the hash tables and the process-state
-    structs, not the region, and `var.rs`/`alias.rs` are out of bounds for
-    this node twice over: another pass owns them, and
-    docs/idiomatization.md 2.3 step 4 records that changing their
-    iteration order is a category-3 divergence over thirty corpus cases
-    that cannot land before `sanctioned-divergences`.  `exec.rs`'s
-    `tblentry` -- a `ckmalloc`'d struct with a flexible array member
-    holding `Rc::into_raw` of a function node -- belongs with them.
+    `savestr` have 13/2/28/6 call sites outside `memalloc.rs` across
+    `var.rs`, `alias.rs`, `jobs.rs`, `options.rs`, `trap.rs`, `input.rs`,
+    `redir.rs` and `exec.rs`, and not one of them changed in this pass --
+    the section above counted the same thing another way.  These are the hash tables and the process-state structs,
+    not the region, and `var.rs`/`alias.rs` are out of bounds for this node
+    twice over: another pass owns them, and docs/idiomatization.md 2.3
+    step 4 records that changing their iteration order is a category-3
+    divergence over thirty corpus cases that cannot land before
+    `sanctioned-divergences`.  `exec.rs`'s `tblentry` -- a `ckmalloc`'d
+    struct with a flexible array member holding `Rc::into_raw` of a
+    function node -- belongs with them.
 
-So `memalloc.rs` survives this node in two pieces with two different
-owners.  Deleting the file is not one more commit after `strlist`; it is
-`strlist` plus whichever node takes the tables.
+`crate::memalloc::` references went 47 -> 26 across the crate in this
+pass, and three of the 26 are `region_untouched`, which exists only to
+check that the rest is dead.  `expand.rs`, `parser.rs` and `mail.rs` reach
+`memalloc` not at all.

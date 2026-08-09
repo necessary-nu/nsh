@@ -39,7 +39,6 @@ use crate::exec::{CMDBUILTIN, CMDFUNCTION, CMDNORMAL, CMDUNKNOWN, DO_ERR, DO_NOF
 use crate::expand::{arglist, strlist};
 use crate::expand::{EXP_FULL, EXP_MBCHAR, EXP_REDIR, EXP_TILDE, EXP_VARTILDE};
 use crate::jobs::{job, FORK_NOJOB};
-use crate::memalloc::{popstackmark, setstackmark, stackmark};
 use crate::nodes::{funcnode, Node};
 use crate::nodes::{
     NAND, NAPPEND, NBACKGND, NCASE, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO, NIF,
@@ -204,7 +203,6 @@ unsafe fn evalcmd(argc: c_int, argv: *mut *mut c_char, flags: c_int) -> c_int {
 // [spec:dash:def:eval.evalstring-fn]
 // [spec:dash:sem:eval.evalstring-fn]
 pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> c_int {
-    let mut smark: stackmark = core::mem::zeroed();
     let mut status: c_int;
     /* `sstrdup(s)` and the `stunalloc(s)` at the bottom are one thing:
      * `setinputstring` keeps the pointer rather than copying, so the text
@@ -219,7 +217,9 @@ pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> c_int {
     let s: *mut c_char = owned.as_ptr() as *mut c_char;
 
     crate::input::setinputstring(s);
-    setstackmark(&mut smark);
+    /* `setstackmark(&smark)` — the mark bounded what the parse below and
+     * each `evaltree` allocated from the region.  Neither allocates from
+     * it any more; see `memalloc::region_untouched`. */
 
     status = 0;
     loop {
@@ -247,9 +247,13 @@ pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> c_int {
                 break;
             }
         }
-        popstackmark(&mut smark);
+        /* `popstackmark(&smark)` — one per parsed command, and one on the
+         * way out. */
     }
-    popstackmark(&mut smark);
+    debug_assert!(
+        crate::memalloc::region_untouched(),
+        "the region has a caller again; a mark would be load bearing"
+    );
     crate::input::popfile();
     drop(owned);
 
@@ -271,11 +275,25 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> c_int {
      * the six is as good, and `evaltree` itself no longer fits the type,
      * because the leaf evaluators all dereference their node. */
     let mut evalfn: unsafe fn(&Node, c_int) -> c_int = evalcommand;
-    let mut smark: stackmark = core::mem::zeroed();
     let isor: libc::c_uint;
     let mut status: c_int = 0;
 
-    setstackmark(&mut smark);
+    /* `setstackmark(&smark)`, matched by the `popstackmark` at `out:`.
+     * This is the region's broadest customer — it releases whatever the
+     * command below allocated — and it has nothing left to release: with
+     * `strlist` owning its bytes, no shell path calls `stalloc` at all.
+     *
+     * That is a claim about every command of every corpus case rather than
+     * about the source, so it is checked here rather than argued.  Nothing
+     * winds `stacknxt` back now that the marks are gone, so a single
+     * `stalloc` anywhere fails this from then on — which is why the check
+     * at the *head* of a command is enough to catch the one before it, and
+     * why `main.c:cmdloop` carries the same check where its `popstackmark`
+     * was, to cover the last one. */
+    debug_assert!(
+        crate::memalloc::region_untouched(),
+        "the region has a caller again; a mark would be load bearing"
+    );
 
     'out_lbl: {
         if nflag() != 0 {
@@ -423,8 +441,6 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> c_int {
             break 'exexit;
         }
 
-        popstackmark(&mut smark);
-
         return exitstatus;
     }
     // exexit:
@@ -510,8 +526,7 @@ unsafe fn evalloop(n: &Node, flags: c_int) -> c_int {
 // [spec:dash:def:eval.evalfor-fn]
 // [spec:dash:sem:eval.evalfor-fn]
 unsafe fn evalfor(n: &Node, flags: c_int) -> c_int {
-    let mut arglist: arglist = core::mem::zeroed();
-    let mut sp: *mut strlist;
+    let mut arglist: arglist = arglist::new();
     let mut status: c_int;
     let mut flags: c_int = flags;
 
@@ -522,23 +537,19 @@ unsafe fn evalfor(n: &Node, flags: c_int) -> c_int {
         crate::var::lineno -= funcline - 1;
     }
 
-    arglist.lastp = &mut arglist.list;
     for argp in &f.args {
-        crate::expand::expandarg(argp, &mut arglist, EXP_FULL | EXP_TILDE);
+        crate::expand::expandarg(argp, Some(&mut arglist), EXP_FULL | EXP_TILDE);
     }
-    *arglist.lastp = null_mut();
 
     status = 0;
     loopnest += 1;
     flags &= EV_TESTED;
-    sp = arglist.list;
-    while !sp.is_null() {
-        crate::var::setvar(f.var.as_ptr(), (*sp).text, 0);
+    for sp in &arglist.list {
+        crate::var::setvar(f.var.as_ptr(), sp.textp(), 0);
         status = evaltree(f.body.as_deref(), flags);
         if (skiploop() & !SKIPCONT) != 0 {
             break;
         }
-        sp = (*sp).next;
     }
     loopnest -= 1;
 
@@ -548,7 +559,7 @@ unsafe fn evalfor(n: &Node, flags: c_int) -> c_int {
 // [spec:dash:def:eval.evalcase-fn]
 // [spec:dash:sem:eval.evalcase-fn]
 unsafe fn evalcase(n: &Node, flags: c_int) -> c_int {
-    let mut arglist: arglist = core::mem::zeroed();
+    let mut arglist: arglist = arglist::new();
     let mut status: c_int = 0;
 
     let c = n.ncase();
@@ -558,23 +569,26 @@ unsafe fn evalcase(n: &Node, flags: c_int) -> c_int {
         crate::var::lineno -= funcline - 1;
     }
 
-    arglist.lastp = &mut arglist.list;
     crate::expand::expandarg(
         c.expr.as_deref().unwrap(),
-        &mut arglist,
+        Some(&mut arglist),
         if crate::mystring::FNMATCH_IS_ENABLED != 0 {
             EXP_TILDE
         } else {
             EXP_TILDE | EXP_MBCHAR
         },
     );
+    /* The C reads `arglist.list->text` with no null check, and is right to:
+     * `expandarg` without EXP_FULL takes its single-field arm, which appends
+     * exactly one entry whatever the word expands to. */
+    debug_assert_eq!(arglist.list.len(), 1, "an unsplit expansion is one field");
     'out_lbl: {
         for cp in &c.cases {
             if evalskip != 0 {
                 break;
             }
             for patp in &cp.nclist().pattern {
-                if crate::expand::casematch(patp, (*arglist.list).text) != 0 {
+                if crate::expand::casematch(patp, arglist.list[0].textp()) != 0 {
                     /* Ensure body is non-empty as otherwise
                      * EV_EXIT may prevent us from setting the
                      * exit status.
@@ -649,16 +663,25 @@ unsafe fn evalsubshell(n: &Node, flags: c_int) -> c_int {
 // [spec:dash:sem:eval.expredir-fn]
 unsafe fn expredir(n: &[Node]) {
     for redir in n {
-        let mut fnl: arglist = core::mem::zeroed();
-        fnl.lastp = &mut fnl.list;
+        let mut fnl: arglist = arglist::new();
         match redir.node_type() {
             NFROMTO | NFROM | NTO | NCLOBBER | NAPPEND => {
                 crate::expand::expandarg(
                     redir.nfile().fname.as_deref().unwrap(),
-                    &mut fnl,
+                    Some(&mut fnl),
                     EXP_TILDE | EXP_REDIR,
                 );
-                redir.nfile().expfname.set((*fnl.list).text);
+                /* `fn.list->text` with no null check: no EXP_FULL means
+                 * `expandarg` took its single-field arm. */
+                debug_assert_eq!(fnl.list.len(), 1, "an unsplit expansion is one field");
+                /* `redir->nfile.expfname = fn.list->text` — the C hands the
+                 * node a pointer into the region and relies on this
+                 * function's caller not popping its mark before `redirect`
+                 * has run. The node owns the bytes instead; `fnl` is a
+                 * per-iteration local and its list would be gone one
+                 * statement later.  Now that the field owns them too this
+                 * is the C's assignment exactly: a move, not a copy. */
+                *redir.nfile().expfname.borrow_mut() = Some(fnl.list.remove(0).text);
             }
             NFROMFD | NTOFD => {
                 /* The borrow of `vname` ends before `fixredir`, which writes
@@ -668,13 +691,14 @@ unsafe fn expredir(n: &[Node]) {
                     match vname.as_deref() {
                         None => false,
                         Some(v) => {
-                            crate::expand::expandarg(v, &mut fnl, EXP_TILDE | EXP_REDIR);
+                            crate::expand::expandarg(v, Some(&mut fnl), EXP_TILDE | EXP_REDIR);
                             true
                         }
                     }
                 };
                 if expand {
-                    crate::parser::fixredir(redir, (*fnl.list).text, 1);
+                    debug_assert_eq!(fnl.list.len(), 1, "an unsplit expansion is one field");
+                    crate::parser::fixredir(redir, fnl.list[0].textp(), 1);
                 }
             }
             _ => {}
@@ -801,44 +825,57 @@ pub unsafe fn evalbackcmd(n: Option<&Node>, result: *mut backcmd) {
 //
 // The C's `argpp` is a `union node **` cursor walking `narg.next`; the
 // argument list is a slice now, so the cursor is the unconsumed tail of it.
-unsafe fn fill_arglist<'a>(arglist: *mut arglist, argpp: &mut &'a [Node]) -> *mut strlist {
-    let lastp: *mut *mut strlist = (*arglist).lastp;
+// The return value is the C's `*lastp`: the first entry this call appended,
+// or NULL if the argument list ran out without producing one. As an index it
+// is the length the list had on entry, so the answer is `Some` exactly when
+// the list grew.
+unsafe fn fill_arglist<'a>(arglist: &mut arglist, argpp: &mut &'a [Node]) -> Option<usize> {
+    let lastp: usize = arglist.list.len();
 
     loop {
         let Some((argp, rest)) = argpp.split_first() else {
             break;
         };
-        crate::expand::expandarg(argp, arglist, EXP_FULL | EXP_TILDE);
+        crate::expand::expandarg(argp, Some(arglist), EXP_FULL | EXP_TILDE);
         *argpp = rest;
-        if !(*lastp).is_null() {
+        if arglist.list.len() != lastp {
             break;
         }
     }
 
-    *lastp
+    if arglist.list.len() != lastp {
+        Some(lastp)
+    } else {
+        None
+    }
 }
 
 // [spec:dash:def:eval.parse-command-args-fn]
 // [spec:dash:sem:eval.parse-command-args-fn]
+// `head` is the C's `arglist->list`, which this function reassigns to skip
+// the `command [-p]` words it consumed. A `Vec`'s start does not move, so the
+// head is an index the caller keeps; see [`crate::expand::arglist`].
 unsafe fn parse_command_args(
-    arglist: *mut arglist,
+    arglist: &mut arglist,
     argpp: &mut &[Node],
     path: *mut *const c_char,
+    head: &mut usize,
 ) -> c_int {
-    let mut sp: *mut strlist = (*arglist).list;
+    let mut sp: usize = *head;
     let mut cp: *mut c_char;
     let mut c: c_char;
 
     loop {
-        sp = if !(*sp).next.is_null() {
-            (*sp).next
+        /* `sp = sp->next ? sp->next : fill_arglist(arglist, argpp)` */
+        sp = if sp + 1 < arglist.list.len() {
+            sp + 1
         } else {
-            fill_arglist(arglist, argpp)
+            match fill_arglist(arglist, argpp) {
+                Some(i) => i,
+                None => return 0,
+            }
         };
-        if sp.is_null() {
-            return 0;
-        }
-        cp = (*sp).text;
+        cp = arglist.list[sp].textp();
         let c0 = *cp;
         cp = cp.add(1);
         if c0 != b'-' as c_char {
@@ -850,10 +887,10 @@ unsafe fn parse_command_args(
             break;
         }
         if c == b'-' as c_char && *cp == 0 {
-            if (*sp).next.is_null() && fill_arglist(arglist, argpp).is_null() {
+            if sp + 1 >= arglist.list.len() && fill_arglist(arglist, argpp).is_none() {
                 return 0;
             }
-            sp = (*sp).next;
+            sp += 1;
             break;
         }
         loop {
@@ -874,7 +911,7 @@ unsafe fn parse_command_args(
         }
     }
 
-    (*arglist).list = sp;
+    *head = sp;
     DO_NOFUNC
 }
 
@@ -893,12 +930,14 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
     let file_stop: *mut crate::input::parsefile;
     let redir_stop: *mut crate::redir::redirtab;
     let mut argp: &[Node];
-    let mut arglist: arglist = core::mem::zeroed();
-    let mut varlist: arglist = core::mem::zeroed();
+    let mut arglist: arglist = arglist::new();
+    let mut varlist: arglist = arglist::new();
     let argv: *mut *mut c_char;
     let mut argc: c_int;
-    let osp: *mut strlist;
-    let mut sp: *mut strlist;
+    let osp: Option<usize>;
+    /* The C's `arglist.list`, which `parse_command_args` moves past the
+     * `command [-p]` words while `osp` keeps the original head for `set -x`. */
+    let mut head: usize = 0;
     let mut cmdentry: cmdentry = cmdentry {
         cmdtype: 0,
         u: param { index: 0 },
@@ -928,10 +967,6 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
 
     cmdentry.cmdtype = CMDBUILTIN;
     cmdentry.u.cmd = addr_of_mut!(bltin);
-    varlist.lastp = &mut varlist.list;
-    *varlist.lastp = null_mut();
-    arglist.lastp = &mut arglist.list;
-    *arglist.lastp = null_mut();
 
     cmd_flag = 0;
     execcmd = 0;
@@ -943,12 +978,12 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
     argc = 0;
     argp = c.args.as_slice();
     osp = fill_arglist(&mut arglist, &mut argp);
-    if !osp.is_null() {
+    if osp.is_some() {
         let mut pseudovarflag: c_int = 0;
 
         loop {
             find_command(
-                (*arglist.list).text,
+                arglist.list[head].textp(),
                 &mut cmdentry,
                 cmd_flag | DO_REGBLTIN,
                 crate::var::pathval(),
@@ -971,7 +1006,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
                 break;
             }
 
-            cmd_flag = parse_command_args(&mut arglist, &mut argp, &mut path);
+            cmd_flag = parse_command_args(&mut arglist, &mut argp, &mut path, &mut head);
             if cmd_flag == 0 {
                 break;
             }
@@ -980,7 +1015,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
         for a in argp {
             crate::expand::expandarg(
                 a,
-                &mut arglist,
+                Some(&mut arglist),
                 if pseudovarflag != 0 && crate::parser::isassignment(a.narg().text.as_ptr()) != 0 {
                     EXP_VARTILDE
                 } else {
@@ -989,11 +1024,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
             );
         }
 
-        sp = arglist.list;
-        while !sp.is_null() {
-            argc += 1;
-            sp = (*sp).next;
-        }
+        argc = (arglist.list.len() - head) as c_int;
 
         if execcmd != 0 && argc > 1 {
             vflags = VEXPORT;
@@ -1014,12 +1045,10 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
     let argvend: *mut *mut c_char = argvbuf.as_mut_ptr().add(argc as usize + 2);
     nargv = argvbuf.as_mut_ptr().add(1);
     argv = nargv;
-    sp = arglist.list;
-    while !sp.is_null() {
+    for sp in &arglist.list[head..] {
         /* TRACE(("evalcommand arg: %s\n", sp->text)); */
-        *nargv = (*sp).text;
+        *nargv = sp.textp();
         nargv = nargv.add(1);
-        sp = (*sp).next;
     }
     *nargv = null_mut();
     /* `argc` was counted off the same list a few lines above, so the
@@ -1046,15 +1075,22 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
             }
 
             for a in &c.assign {
-                let spp: *mut *mut strlist;
+                let spp: usize;
 
-                spp = varlist.lastp;
-                crate::expand::expandarg(a, &mut varlist, EXP_VARTILDE);
+                spp = varlist.list.len();
+                crate::expand::expandarg(a, Some(&mut varlist), EXP_VARTILDE);
+                /* `(*spp)->text` with no null check: EXP_VARTILDE has no
+                 * EXP_FULL, so `expandarg` appended exactly one entry. */
+                debug_assert_eq!(
+                    varlist.list.len(),
+                    spp + 1,
+                    "an unsplit expansion is one field"
+                );
 
                 if vlocal != 0 {
-                    crate::var::mklocal((**spp).text, VEXPORT);
+                    crate::var::mklocal(varlist.list[spp].textp(), VEXPORT);
                 } else {
-                    crate::var::setvareq((**spp).text, vflags);
+                    crate::var::setvareq(varlist.list[spp].textp(), vflags);
                 }
             }
 
@@ -1068,8 +1104,12 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
                 crate::output::outstr(crate::parser::expandstr(crate::var::ps4val()), out);
                 inps4 = 0;
                 sep = 0;
-                sep = eprintlist(out, varlist.list, sep);
-                eprintlist(out, osp, sep);
+                sep = eprintlist(out, &varlist.list, sep);
+                /* `eprintlist(out, osp, sep)` prints from the *original*
+                 * head, so `command -p foo` traces as it was written and not
+                 * as `parse_command_args` left it.  A NULL `osp` prints
+                 * nothing, which is the empty slice. */
+                eprintlist(out, &arglist.list[osp.unwrap_or(arglist.list.len())..], sep);
                 crate::output::outcslow('\n' as c_int, out);
             }
 
@@ -1378,18 +1418,16 @@ pub unsafe fn execcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
 // [spec:dash:def:eval.eprintlist-fn]
 // [spec:dash:sem:eval.eprintlist-fn]
-unsafe fn eprintlist(out: *mut output, sp: *mut strlist, sep: c_int) -> c_int {
-    let mut sp: *mut strlist = sp;
+unsafe fn eprintlist(out: *mut output, list: &[strlist], sep: c_int) -> c_int {
     let mut sep: c_int = sep;
 
-    while !sp.is_null() {
+    for sp in list {
         let mut p: *const c_char;
 
         p = b" %s\0".as_ptr() as *const c_char;
         p = p.offset((1 - sep) as isize);
         sep |= 1;
-        crate::outfmt!(out, p, (*sp).text);
-        sp = (*sp).next;
+        crate::outfmt!(out, p, sp.textp());
     }
 
     sep

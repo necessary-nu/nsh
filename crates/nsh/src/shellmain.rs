@@ -25,7 +25,6 @@ use libc::{c_char, c_int, size_t};
 use crate::error::{jmploc, FORCEINTON};
 use crate::eval::{evalskip, EV_EXIT, SKIPFUNC, SKIPFUNCDEF};
 use crate::jobs::SHOW_CHANGED;
-use crate::memalloc::{popstackmark, setstackmark, stackmark};
 use crate::output::out2;
 
 /* pid of main shell */
@@ -93,7 +92,6 @@ unsafe fn etext() -> c_int {
 // [spec:dash:sem:main.main-fn]
 pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
     let mut state: c_int; /* volatile */
-    let mut smark: stackmark = core::mem::zeroed();
 
     dash_errno = libc::__errno_location();
 
@@ -101,10 +99,9 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
     state = 0;
 
-    /* `state` and `smark` are live across the jump, so they are reached
-     * through raw pointers rather than captured by reference. */
+    /* `state` is live across the jump, so it is reached through a raw
+     * pointer rather than captured by reference. */
     let state_p: *mut c_int = &mut state;
-    let smark_p: *mut stackmark = &mut smark;
 
     /* Where the startup sequence resumes: 0 is the top, 1..4 are the
      * `state1`..`state4` labels, and 5 is `exit:`.
@@ -137,7 +134,9 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
                         rootpid = libc::getpid();
                         mypid = rootpid;
                         crate::init::init();
-                        setstackmark(smark_p);
+                        /* `setstackmark(smark)`, popped at `state3` and on
+                         * the exception path, bounded what `procargs` and
+                         * the profile reads left in the region. */
                         let login: c_int = crate::options::procargs(argv);
                         if login != 0 {
                             *state_p = 1;
@@ -166,7 +165,6 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
                                 read_profile(shinit);
                             }
                         }
-                        popstackmark(smark_p);
                         pc = 3;
                     }
                     3 => {
@@ -233,7 +231,6 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
             {
                 crate::output::outcslow('\n' as c_int, out2);
             }
-            popstackmark(smark_p);
             FORCEINTON(); /* enable interrupts */
             entry = if s == 1 {
                 1 /* goto state1 */
@@ -295,7 +292,6 @@ pub fn main_fn(argc: c_int, argv: Vec<Vec<u8>>, streams: crate::streams::Streams
 // [spec:dash:def:main.cmdloop-fn]
 // [spec:dash:sem:main.cmdloop-fn]
 unsafe fn cmdloop(top: c_int) -> c_int {
-    let mut smark: stackmark = core::mem::zeroed();
     let mut inter: c_int;
     let mut status: c_int = 0;
     let mut numeof: c_int = 0;
@@ -304,7 +300,9 @@ unsafe fn cmdloop(top: c_int) -> c_int {
     loop {
         let skip: c_int;
 
-        setstackmark(&mut smark);
+        /* `setstackmark`/`popstackmark` per iteration: the parse tree and
+         * everything the command allocated used to live in the region
+         * between them. */
         if crate::jobs::jobctl != 0 {
             crate::jobs::showjobs(out2, SHOW_CHANGED);
         }
@@ -341,7 +339,13 @@ unsafe fn cmdloop(top: c_int) -> c_int {
             }
             numeof += 1;
         }
-        popstackmark(&mut smark);
+        /* Where `popstackmark(&smark)` was.  See `eval::evaltree`: that
+         * check runs at the head of a command and so covers every command
+         * but the last; this one covers the last. */
+        debug_assert!(
+            crate::memalloc::region_untouched(),
+            "the region has a caller again; a mark would be load bearing"
+        );
 
         skip = evalskip;
         if skip != 0 {

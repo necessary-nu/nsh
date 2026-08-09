@@ -68,6 +68,20 @@ pub fn cstr(s: &'static [u8]) -> *const c_char {
     s.as_ptr() as *const c_char
 }
 
+/*
+ * The other direction: take a `char *` the shell is about to stop owning
+ * and keep its bytes, terminator included.  Not part of shell.h.
+ *
+ * The terminator travels because every consumer of these bytes reads them
+ * as a C string; a buffer that stops at `strlen` would have to have one
+ * appended at each of them.
+ */
+#[inline]
+pub unsafe fn cstring_bytes(p: *const c_char) -> bstr::BString {
+    let n = libc::strlen(p);
+    bstr::BString::from(core::slice::from_raw_parts(p as *const u8, n + 1).to_vec())
+}
+
 /// Flush the coverage profile before a `_exit`.
 ///
 /// Only compiled for the instrumented build (`--cfg coverage`, set by
