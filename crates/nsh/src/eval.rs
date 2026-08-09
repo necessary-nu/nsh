@@ -1252,7 +1252,10 @@ unsafe fn evalfun(
     let savefuncline: c_int;
     let saveloopnest: c_int;
 
-    saveparam = crate::options::shellparam;
+    /* `saveparam = shellparam` plus the `shellparam.malloc = 0` that the C
+     * puts inside the protected region so the epilogue's `freeparam` cannot
+     * reach what the copy still points at. */
+    saveparam = crate::options::takeparam();
     savefuncline = funcline;
     saveloopnest = loopnest;
     savehandler = crate::error::handler;
@@ -1260,17 +1263,13 @@ unsafe fn evalfun(
     e = setjmp_catch(jl, || unsafe {
         INTOFF();
         crate::error::handler = jl;
-        crate::options::shellparam.malloc = 0;
         /* `func->count++`: the second reference that keeps the body alive if
          * the function is redefined while it runs. */
         crate::nodes::reffunc(func);
         funcline = (*func).ndefun().linno;
         loopnest = 0;
         INTON();
-        crate::options::shellparam.nparam = argc - 1;
-        crate::options::shellparam.p = argv.add(1);
-        crate::options::shellparam.optind = 1;
-        crate::options::shellparam.optoff = -1;
+        crate::options::borrowparam(argv.add(1), argc - 1);
         evaltree((*func).ndefun().body.as_deref(), flags & EV_TESTED);
     });
     // funcdone:
@@ -1278,8 +1277,7 @@ unsafe fn evalfun(
     loopnest = saveloopnest;
     funcline = savefuncline;
     crate::nodes::freefunc(func);
-    crate::options::freeparam(addr_of_mut!(crate::options::shellparam));
-    crate::options::shellparam = saveparam;
+    crate::options::restoreparam(saveparam);
     crate::error::handler = savehandler;
     INTON();
     evalskip &= !(SKIPFUNC | SKIPFUNCDEF);
