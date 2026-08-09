@@ -41,7 +41,7 @@ pub type sig_atomic_t = c_int;
 #[derive(Copy, Clone)]
 pub struct jmp_buf(pub [u8; 512]);
 
-extern "C" {
+unsafe extern "C" {
     /*
      * Calling `setjmp` through FFI is the only option available: Rust
      * has no intrinsic for it.  Its "returns twice" behaviour is why

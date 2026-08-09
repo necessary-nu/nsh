@@ -38,7 +38,7 @@ use bstr::BString;
 // when the base is 0 or 2.  The C `printf.c` therefore really calls
 // `__isoc23_strtoimax`, so `printf %d 0b11` prints 3 — link the same
 // symbols here or the port silently loses binary literals.
-extern "C" {
+unsafe extern "C" {
     fn strchrnul(s: *const c_char, c: c_int) -> *mut c_char;
     #[link_name = "__isoc23_strtoimax"]
     fn strtoimax(nptr: *const c_char, endptr: *mut *mut c_char, base: c_int) -> intmax_t;

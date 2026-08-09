@@ -2399,7 +2399,7 @@ pub unsafe fn parser_eof() -> c_int {
 // C library entry points the libc crate does not declare.
 // ---------------------------------------------------------------------
 
-extern "C" {
+unsafe extern "C" {
     fn mbrtowc(
         pwc: *mut libc::wchar_t,
         s: *const c_char,

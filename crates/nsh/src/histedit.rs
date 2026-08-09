@@ -35,7 +35,7 @@ use core::mem;
 use core::ptr;
 use libc::{c_char, c_int, c_void, FILE};
 
-extern "C" {
+unsafe extern "C" {
     fn sprintf(s: *mut c_char, format: *const c_char, ...) -> c_int;
     // `<getopt.h>` state. `libc` 0.2 exposes `getopt` but not these.
     static mut optind: c_int;
