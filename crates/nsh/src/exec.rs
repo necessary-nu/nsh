@@ -20,7 +20,7 @@ use libc::{c_char, c_int, c_short, c_uint, c_void, size_t};
 
 use crate::builtins::{builtincmd, BUILTIN_REGULAR, BUILTIN_SPECIAL};
 use crate::error::{E_EXEC, INTOFF, INTON};
-use crate::memalloc::{ckfree, ckmalloc, stalloc};
+use crate::memalloc::{ckfree, ckmalloc};
 use crate::nodes::{funcnode, Node};
 use crate::output::{out1, output};
 

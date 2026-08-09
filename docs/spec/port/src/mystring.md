@@ -11,6 +11,15 @@ as needing protection: `\`, `CTLESC`, `CTLMBCHAR`, `CTLQUOTEMARK`), and
 
 `equal` and `scopy` are macros in `mystring.h`, not functions here.
 
+**Three exported items retired.** `delete-memalloc` removed `scopyn`,
+`sstrdup` and `findstring` from `crates/nsh/src/mystring.rs`. `scopyn` is
+inside `#if 0` in the C and has no target behavior; `sstrdup` copied into
+the now-empty region allocator and had no remaining caller; `findstring`
+was used only to search the parser's keyword table, whose surviving
+behavior is implemented and specified by `parser.findkwd-fn`. Their
+blocks below keep describing the C source, but no longer carry
+`[spec:dash:…]` ids that would claim a target implementation still exists.
+
 > [spec:dash:def:mystring.atomax-fn]
 > intmax_t atomax(const char *s, int base)
 
@@ -41,10 +50,8 @@ as needing protection: `\`, `CTLESC`, `CTLMBCHAR`, `CTLQUOTEMARK`), and
 > Raise `sh_error(illnum, s)` — `"Illegal number: %s"` — which unwinds
 > and does not return.
 
-> [spec:dash:def:mystring.findstring-fn]
 > const char *const * findstring(const char *s, const char *const *array, size_t nmemb)
 
-> [spec:dash:sem:mystring.findstring-fn]
 > Binary-search a sorted array of `nmemb` string pointers for one equal
 > to `s`: `bsearch(&s, array, nmemb, sizeof(const char *), pstrcmp)`.
 > Note the key is the *address* of `s`, matching `pstrcmp`'s
@@ -89,10 +96,8 @@ as needing protection: `\`, `CTLESC`, `CTLMBCHAR`, `CTLQUOTEMARK`), and
 > arguments to `const char *const *`, dereference, and return
 > `strcmp` of the two strings.
 
-> [spec:dash:def:mystring.scopyn-fn]
 > void scopyn(const char *from, char *to, int size)
 
-> [spec:dash:sem:mystring.scopyn-fn]
 > Bounded string copy: copy from `from` into the `size`-byte buffer `to`,
 > truncating if needed and always NUL-terminating. Copy while
 > `--size > 0`, returning early once a NUL has been transferred;
@@ -124,10 +129,8 @@ as needing protection: `\`, `CTLESC`, `CTLMBCHAR`, `CTLQUOTEMARK`), and
 > The do/while shape means the empty string still produces one chunk,
 > `''`. A string like `a'b` becomes `'a'"'"'b'`.
 
-> [spec:dash:def:mystring.sstrdup-fn]
 > char * sstrdup(const char *p)
 
-> [spec:dash:sem:mystring.sstrdup-fn]
 > `strdup` onto the shell's stack allocator rather than the heap:
 > compute `strlen(p) + 1` and `memcpy` that many bytes into `stalloc`'d
 > space, returning the copy. Freed implicitly by the enclosing stack

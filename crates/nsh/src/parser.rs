@@ -45,6 +45,26 @@ macro_rules! equal {
     };
 }
 
+/// `#define USTPUTC(c, p) (*p++ = (c))` — src/memalloc.h:88
+///
+/// The C's other stack-string macros read `stacknxt`/`sstrend`; these two
+/// do not touch the allocator, and here the buffer under the cursor is a
+/// `BString`'s spare capacity. `getmbc` and `dollarsq_escape` are the only
+/// callers left, and both reserve `MBSLOP` before they take the cursor.
+macro_rules! USTPUTC {
+    ($c:expr, $p:ident) => {{
+        *$p = $c as c_char;
+        $p = $p.add(1);
+    }};
+}
+
+/// `#define STADJUST(amount, p) (p += (amount))` — src/memalloc.h:93
+macro_rules! STADJUST {
+    ($amount:expr, $p:ident) => {
+        $p = $p.offset($amount as isize)
+    };
+}
+
 /// `MB_LEN_MAX` from `<limits.h>` (16 on the platforms dash targets).
 const MB_LEN_MAX: usize = 16;
 
@@ -302,11 +322,12 @@ pub struct heredoc {
 }
 
 // [spec:dash:def:parser.synstack]
-#[repr(C)]
+/// One owned parse context. [`Rt1::synstack`] holds the contexts from the
+/// base level through the current level, so the C's `next` link is the
+/// preceding element and its `prev` link is spare `Vec` capacity left by a
+/// pop. No cursor into the vector survives a push or pop.
 pub struct synstack {
     pub syntax: *const Syntax,
-    pub prev: *mut synstack,
-    pub next: *mut synstack,
     pub innerdq: c_int,
     pub varpushed: c_int,
     pub dblquote: c_int,
@@ -1161,29 +1182,15 @@ unsafe fn pgetc_eatbnl() -> c_int {
 
 // [spec:dash:def:parser.pgetc-top-fn]
 // [spec:dash:sem:parser.pgetc-top-fn]
-unsafe fn pgetc_top(stack: *mut synstack) -> c_int {
-    if (*stack).syntax == SQSYNTAX() {
+unsafe fn pgetc_top(stack: &synstack) -> c_int {
+    if stack.syntax == SQSYNTAX() {
         pgetc()
     } else {
         pgetc_eatbnl()
     }
 }
 
-// [spec:dash:def:parser.synstack-push-fn]
-// [spec:dash:sem:parser.synstack-push-fn]
-unsafe fn synstack_push(stack: *mut *mut synstack, next: *mut synstack, syntax: *const Syntax) {
-    ptr::write_bytes(next as *mut u8, 0, mem::size_of::<synstack>());
-    (*next).syntax = syntax;
-    (*next).next = *stack;
-    (**stack).prev = next;
-    *stack = next;
-}
-
-// [spec:dash:def:parser.synstack-pop-fn]
-// [spec:dash:sem:parser.synstack-pop-fn]
-unsafe fn synstack_pop(stack: *mut *mut synstack) {
-    *stack = (**stack).next;
-}
+mod synstack_ops;
 
 // [spec:dash:def:parser.getmbc-fn]
 // [spec:dash:sem:parser.getmbc-fn]
@@ -1229,16 +1236,16 @@ pub unsafe fn getmbc(c: c_int, out: *mut c_char, mode: c_int) -> c_uint {
         }
 
         if (mode & 3) < 2 {
-            crate::USTPUTC!(CTLMBCHAR, out);
+            USTPUTC!(CTLMBCHAR, out);
             if mode == 1 {
-                crate::USTPUTC!(CTLESC, out);
+                USTPUTC!(CTLESC, out);
             }
-            crate::USTPUTC!(ml, out);
+            USTPUTC!(ml, out);
         }
-        crate::STADJUST!(ml, out);
+        STADJUST!(ml, out);
         if (mode & 3) < 2 {
-            crate::USTPUTC!(ml, out);
-            crate::USTPUTC!(CTLMBCHAR, out);
+            USTPUTC!(ml, out);
+            USTPUTC!(CTLMBCHAR, out);
         }
 
         return (out as usize - start as usize) as c_uint;
@@ -1319,7 +1326,7 @@ unsafe fn dollarsq_escape(dest: &mut BString) {
             p = p.offset((((c ^ *p as c_int) | (c ^ '\\' as c_int)) == 0) as isize);
 
             conv_ch = (c & !((c & 0x40) >> 1) & 0x7f) ^ 0x40;
-            crate::USTPUTC!(conv_ch, out);
+            USTPUTC!(conv_ch, out);
         }
     }
 
@@ -1345,7 +1352,9 @@ unsafe fn dollarsq_escape(dest: &mut BString) {
 
 /// The locals of `readtoken1` that its internal subroutines share.
 struct Rt1<'a> {
-    synstack: *mut synstack,
+    /// Owned parse contexts, base first and current last. Popping retains the
+    /// allocation, matching the C's reuse of its most recently popped level.
+    synstack: Vec<synstack>,
     chkeofmark: c_int,
     printesc: bool,
     bqlist: Vec<Option<Node>>,
@@ -1359,23 +1368,21 @@ struct Rt1<'a> {
     out: BString,
     eofmark: EofMark<'a>,
     striptabs: c_int,
-    /// Backing store for the `alloca`'d `struct synstack` levels.  The C
-    /// cannot free them (alloca inside a loop), so it reuses them through
-    /// the `prev` link and only calls `alloca` when `prev` is NULL; this
-    /// pool therefore only grows at exactly those points.  Boxes give the
-    /// stable addresses the `prev`/`next` links require, and the whole
-    /// pool is released when readtoken1 returns, like the alloca frame.
-    pool: Vec<Box<synstack>>,
     /// Backing store for the `alloca`'d pushback strings in `checkend`,
     /// which likewise accumulate for the life of the call.
     strpool: Vec<Vec<u8>>,
 }
 
-/// `alloca(sizeof(*synstack))`
-unsafe fn alloca_synstack(st: &mut Rt1<'_>) -> *mut synstack {
-    st.pool.push(Box::new(mem::zeroed()));
-    let last = st.pool.len() - 1;
-    (&mut *st.pool[last]) as *mut synstack
+impl Rt1<'_> {
+    #[inline]
+    fn syn(&self) -> &synstack {
+        self.synstack.last().unwrap()
+    }
+
+    #[inline]
+    fn syn_mut(&mut self) -> &mut synstack {
+        self.synstack.last_mut().unwrap()
+    }
 }
 
 /// The label targets inside readtoken1's character switch that are
@@ -1396,20 +1403,17 @@ unsafe fn readtoken1(
     eofmark: EofMark<'_>,
     striptabs: c_int,
 ) -> c_int {
-    let mut synbase = synstack {
-        syntax,
-        prev: ptr::null_mut(),
-        next: ptr::null_mut(),
-        innerdq: 0,
-        varpushed: 0,
-        dblquote: (syntax == DQSYNTAX()) as c_int,
-        backq: 0,
-        varnest: 0,
-        parenlevel: 0,
-        dqvarnest: 0,
-    };
     let mut st = Rt1 {
-        synstack: &mut synbase as *mut synstack,
+        synstack: vec![synstack {
+            syntax,
+            innerdq: 0,
+            varpushed: 0,
+            dblquote: (syntax == DQSYNTAX()) as c_int,
+            backq: 0,
+            varnest: 0,
+            parenlevel: 0,
+            dqvarnest: 0,
+        }],
         chkeofmark: checkkwd & CHKEOFMARK,
         printesc: syntax == SQSYNTAX(),
         bqlist: Vec::new(),
@@ -1419,7 +1423,6 @@ unsafe fn readtoken1(
         out: BString::new(Vec::new()),
         eofmark,
         striptabs,
-        pool: Vec::new(),
         strpool: Vec::new(),
     };
     let len: usize;
@@ -1433,8 +1436,8 @@ unsafe fn readtoken1(
                 let fieldsplitting: c_int;
                 let mut ml: c_uint;
 
-                fieldsplitting = if (*st.synstack).syntax == BASESYNTAX()
-                    && ((*st.synstack).varnest | (*st.synstack).backq) == 0
+                fieldsplitting = if st.syn().syntax == BASESYNTAX()
+                    && (st.syn().varnest | st.syn().backq) == 0
                 {
                     4
                 } else {
@@ -1460,7 +1463,7 @@ unsafe fn readtoken1(
                     break 'body; /* continue */
                 }
 
-                let cls = syn_at((*st.synstack).syntax, st.c);
+                let cls = syn_at(st.syn().syntax, st.c);
                 let mut lbl = Lbl::None;
 
                 if cls == CNL as c_int {
@@ -1470,7 +1473,7 @@ unsafe fn readtoken1(
                     }
                     st.out.push(st.c as u8);
                     nlprompt();
-                    st.c = pgetc_top(st.synstack);
+                    st.c = pgetc_top(st.syn());
                     continue 'loop_; /* continue outer loop */
                 } else if cls == CWORD as c_int {
                     st.out.push(st.c as u8);
@@ -1479,8 +1482,8 @@ unsafe fn readtoken1(
                         dollarsq_escape(&mut st.out);
                     } else {
                         if (st.eofmark.is_none() as c_int
-                            | (*st.synstack).dblquote
-                            | (*st.synstack).varnest)
+                            | st.syn().dblquote
+                            | st.syn().varnest)
                             != 0
                         {
                             st.out.push(CTLESC as u8);
@@ -1495,13 +1498,13 @@ unsafe fn readtoken1(
                         st.out.push('\\' as u8);
                         pungetc();
                     } else {
-                        if ((*st.synstack).dblquote | (*st.synstack).backq) != 0
+                        if (st.syn().dblquote | st.syn().backq) != 0
                             && st.c != '\\' as c_int
                             && st.c != '`' as c_int
                             && st.c != '$' as c_int
                             && (st.c != '"' as c_int
-                                || (!st.eofmark.is_none() && (*st.synstack).varnest == 0))
-                            && (st.c != '}' as c_int || (*st.synstack).varnest == 0)
+                                || (!st.eofmark.is_none() && st.syn().varnest == 0))
+                            && (st.c != '}' as c_int || st.syn().varnest == 0)
                         {
                             st.out.push(CTLESC as u8);
                             st.out.push('\\' as u8);
@@ -1519,14 +1522,14 @@ unsafe fn readtoken1(
                 } else if cls == CSQUOTE as c_int {
                     lbl = Lbl::Csquote;
                 } else if cls == CDQUOTE as c_int {
-                    (*st.synstack).syntax = DQSYNTAX();
-                    (*st.synstack).dblquote = 1;
+                    st.syn_mut().syntax = DQSYNTAX();
+                    st.syn_mut().dblquote = 1;
                     lbl = Lbl::Toggledq;
                 } else if cls == CENDQUOTE as c_int {
-                    if !st.eofmark.is_none() && (*st.synstack).varnest == 0 {
+                    if !st.eofmark.is_none() && st.syn().varnest == 0 {
                         st.out.push(st.c as u8);
                     } else {
-                        if (*st.synstack).dqvarnest == 0 {
+                        if st.syn().dqvarnest == 0 {
                             if st.dollarsq != 0 {
                                 /* `*out = '\0'; out = p + strlen(p);` — a NUL
                                  * written by a `$'\0'` escape ends the word,
@@ -1537,8 +1540,8 @@ unsafe fn readtoken1(
                                 st.dollarsq = 0;
                             }
 
-                            (*st.synstack).syntax = BASESYNTAX();
-                            (*st.synstack).dblquote = 0;
+                            st.syn_mut().syntax = BASESYNTAX();
+                            st.syn_mut().dblquote = 0;
                         }
 
                         st.quotef += 1;
@@ -1557,12 +1560,12 @@ unsafe fn readtoken1(
                     }
                 } else if cls == CENDVAR as c_int {
                     /* '}' */
-                    if (*st.synstack).innerdq == 0 && (*st.synstack).varnest > 0 {
-                        (*st.synstack).varnest -= 1;
-                        if (*st.synstack).varnest == 0 && (*st.synstack).varpushed != 0 {
-                            synstack_pop(&mut st.synstack);
-                        } else if (*st.synstack).dqvarnest > 0 {
-                            (*st.synstack).dqvarnest -= 1;
+                    if st.syn().innerdq == 0 && st.syn().varnest > 0 {
+                        st.syn_mut().varnest -= 1;
+                        if st.syn().varnest == 0 && st.syn().varpushed != 0 {
+                            synstack_ops::pop(&mut st.synstack);
+                        } else if st.syn().dqvarnest > 0 {
+                            st.syn_mut().dqvarnest -= 1;
                         }
                         if st.chkeofmark == 0 {
                             st.c = CTLENDVAR;
@@ -1571,14 +1574,14 @@ unsafe fn readtoken1(
                     st.out.push(st.c as u8);
                 } else if cls == CLP as c_int {
                     /* '(' in arithmetic */
-                    (*st.synstack).parenlevel += 1;
+                    st.syn_mut().parenlevel += 1;
                     st.out.push(st.c as u8);
                 } else if cls == CRP as c_int {
                     /* ')' in arithmetic */
-                    if (*st.synstack).parenlevel > 0 {
-                        (*st.synstack).parenlevel -= 1;
+                    if st.syn().parenlevel > 0 {
+                        st.syn_mut().parenlevel -= 1;
                     } else if pgetc_eatbnl() == ')' as c_int {
-                        synstack_pop(&mut st.synstack);
+                        synstack_ops::pop(&mut st.synstack);
                         if st.chkeofmark != 0 {
                             st.out.push(st.c as u8);
                         } else {
@@ -1594,7 +1597,7 @@ unsafe fn readtoken1(
                     st.out.push(st.c as u8);
                 } else if cls == CBQUOTE as c_int {
                     /* '`' */
-                    if (*st.synstack).backq == 2 {
+                    if st.syn().backq == 2 {
                         lbl = Lbl::EndBackq;
                     } else {
                         st.out.push('`' as u8);
@@ -1604,7 +1607,7 @@ unsafe fn readtoken1(
                     break 'loop_; /* exit outer loop */
                 } else {
                     /* default: */
-                    if st.c == ')' as c_int && (*st.synstack).backq == 1 {
+                    if st.c == ')' as c_int && st.syn().backq == 1 {
                         lbl = Lbl::EndBackq;
                     } else if fieldsplitting != 0 {
                         break 'loop_; /* exit outer loop */
@@ -1619,7 +1622,7 @@ unsafe fn readtoken1(
                         Lbl::None => break,
                         Lbl::Csquote => {
                             /* csquote: */
-                            (*st.synstack).syntax = SQSYNTAX();
+                            st.syn_mut().syntax = SQSYNTAX();
                             lbl = Lbl::Quotemark;
                         }
                         Lbl::Quotemark => {
@@ -1631,14 +1634,14 @@ unsafe fn readtoken1(
                         }
                         Lbl::Toggledq => {
                             /* toggledq: */
-                            if (*st.synstack).varnest != 0 {
-                                (*st.synstack).innerdq ^= 1;
+                            if st.syn().varnest != 0 {
+                                st.syn_mut().innerdq ^= 1;
                             }
                             lbl = Lbl::Quotemark;
                         }
                         Lbl::EndBackq => {
                             /* end_backq: */
-                            synstack_pop(&mut st.synstack);
+                            synstack_ops::pop(&mut st.synstack);
                             st.printesc = false;
                             st.out.push(st.c as u8);
                             lbl = Lbl::None;
@@ -1646,18 +1649,18 @@ unsafe fn readtoken1(
                     }
                 }
             }
-            st.c = pgetc_top(st.synstack);
+            st.c = pgetc_top(st.syn());
         }
     }
     /* endword: */
-    if (*st.synstack).syntax == ARISYNTAX() {
+    if st.syn().syntax == ARISYNTAX() {
         synerror(c"Missing '))'".as_ptr());
     }
-    if ((*st.synstack).syntax != BASESYNTAX() && st.eofmark.is_none()) || (*st.synstack).backq != 0
+    if (st.syn().syntax != BASESYNTAX() && st.eofmark.is_none()) || st.syn().backq != 0
     {
         synerror(c"Unterminated quoted string".as_ptr());
     }
-    if (*st.synstack).varnest != 0 {
+    if st.syn().varnest != 0 {
         /* { */
         synerror(c"Missing '}'".as_ptr());
     }
@@ -1863,7 +1866,7 @@ unsafe fn parseredir(st: &mut Rt1<'_>) {
 
 /* parsesub: */
 unsafe fn parsesub(st: &mut Rt1<'_>) -> bool {
-    let mut newsyn: *const Syntax = (*st.synstack).syntax;
+    let mut newsyn: *const Syntax = st.syn().syntax;
     static types: [u8; 6] = *b"}-+?=\0";
     let mut subtype: c_int;
 
@@ -2013,23 +2016,18 @@ unsafe fn parsesub(st: &mut Rt1<'_>) -> bool {
             newsyn = DQSYNTAX();
         }
 
-        if (newsyn != (*st.synstack).syntax || (*st.synstack).innerdq != 0) && subtype != VSNORMAL
+        if (newsyn != st.syn().syntax || st.syn().innerdq != 0) && subtype != VSNORMAL
         {
-            let next = if !(*st.synstack).prev.is_null() {
-                (*st.synstack).prev
-            } else {
-                alloca_synstack(st)
-            };
-            synstack_push(&mut st.synstack, next, newsyn);
+            synstack_ops::push(&mut st.synstack, newsyn);
 
-            (*st.synstack).varpushed += 1;
-            (*st.synstack).dblquote = (newsyn != BASESYNTAX()) as c_int;
+            st.syn_mut().varpushed += 1;
+            st.syn_mut().dblquote = (newsyn != BASESYNTAX()) as c_int;
         }
 
         if subtype != VSNORMAL {
-            (*st.synstack).varnest += 1;
-            if (*st.synstack).dblquote != 0 {
-                (*st.synstack).dqvarnest += 1;
+            st.syn_mut().varnest += 1;
+            if st.syn().dblquote != 0 {
+                st.syn_mut().dqvarnest += 1;
             }
         }
         if st.chkeofmark == 0 {
@@ -2065,13 +2063,8 @@ unsafe fn parsebackq(st: &mut Rt1<'_>, oldstyle: c_int) {
     let str: BString;
 
     if st.chkeofmark != 0 {
-        let next = if !(*st.synstack).prev.is_null() {
-            (*st.synstack).prev
-        } else {
-            alloca_synstack(st)
-        };
-        synstack_push(&mut st.synstack, next, BASESYNTAX());
-        (*st.synstack).backq = oldstyle + 1;
+        synstack_ops::push(&mut st.synstack, BASESYNTAX());
+        st.syn_mut().backq = oldstyle + 1;
         st.printesc = true;
         /* goto parsebackq_out; */
         if oldstyle != 0 {
@@ -2109,7 +2102,7 @@ unsafe fn parsebackq(st: &mut Rt1<'_>, oldstyle: c_int) {
                     if pc != '\\' as c_int
                         && pc != '`' as c_int
                         && pc != '$' as c_int
-                        && ((*st.synstack).dblquote == 0 || pc != '"' as c_int)
+                        && (st.syn().dblquote == 0 || pc != '"' as c_int)
                     {
                         pstr.push(b'\\');
                     }
@@ -2181,13 +2174,8 @@ unsafe fn parsebackq(st: &mut Rt1<'_>, oldstyle: c_int) {
  */
 /* parsearith: */
 unsafe fn parsearith(st: &mut Rt1<'_>) {
-    let next = if !(*st.synstack).prev.is_null() {
-        (*st.synstack).prev
-    } else {
-        alloca_synstack(st)
-    };
-    synstack_push(&mut st.synstack, next, ARISYNTAX());
-    (*st.synstack).dblquote = 1;
+    synstack_ops::push(&mut st.synstack, ARISYNTAX());
+    st.syn_mut().dblquote = 1;
     if st.chkeofmark != 0 {
         st.out.push(st.c as u8);
     } else {
@@ -2373,10 +2361,25 @@ pub unsafe fn getprompt(unused: *mut c_void) -> *const c_char {
     expandstr(prompt)
 }
 
+/// The C reaches `parsekwd` through `mystring.c`'s `findstring`, a generic
+/// `bsearch` over an array of `char *`. This is that function's only
+/// instantiation in the port, and `strcmp` over the table is plain byte
+/// order — `parsekwd` is ASCII and sorted — so `<[u8]>::cmp` is the C
+/// comparator rather than an approximation of it.
+///
+/// The result stays a pointer *into* `parsekwd` because `readtoken1`
+/// recovers the token code by subtracting the base.
 // [spec:dash:def:parser.findkwd-fn]
 // [spec:dash:sem:parser.findkwd-fn]
 pub unsafe fn findkwd(s: *const c_char) -> *const *const c_char {
-    crate::mystring::findstring(s, parsekwd.0.as_ptr(), parsekwd.0.len())
+    let key = core::ffi::CStr::from_ptr(s).to_bytes();
+    match parsekwd
+        .0
+        .binary_search_by(|&kwd| core::ffi::CStr::from_ptr(kwd).to_bytes().cmp(key))
+    {
+        Ok(i) => parsekwd.0.as_ptr().add(i),
+        Err(_) => ptr::null(),
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -2407,4 +2410,43 @@ unsafe extern "C" {
         ps: *mut libc::mbstate_t,
     ) -> usize;
     fn iswblank(wc: u32) -> c_int;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::CStr0;
+
+    // [spec:dash:sem:parser.findkwd-fn/test]
+    #[test]
+    fn findkwd_preserves_the_sorted_table_contract() {
+        unsafe {
+            let mut previous: Option<&[u8]> = None;
+
+            for (i, &keyword) in parsekwd.0.iter().enumerate() {
+                let bytes = core::ffi::CStr::from_ptr(keyword).to_bytes();
+                if let Some(previous) = previous {
+                    assert!(previous < bytes, "parsekwd must be strictly sorted");
+                }
+                previous = Some(bytes);
+
+                let found = findkwd(keyword);
+                assert!(!found.is_null(), "keyword {bytes:?} was not found");
+                assert_eq!(*found, keyword);
+                assert_eq!(found.offset_from(parsekwd.0.as_ptr()) as usize, i);
+
+                let mut longer = bytes.to_vec();
+                longer.push(b'x');
+                longer.push(0);
+                assert!(findkwd(longer.as_ptr().cast()).is_null());
+            }
+
+            for missing in ["", "cas", "integer", "zebra"] {
+                assert!(findkwd(CStr0::new(missing).p()).is_null());
+            }
+
+            let non_ascii = [0xff_u8, 0];
+            assert!(findkwd(non_ascii.as_ptr().cast()).is_null());
+        }
+    }
 }

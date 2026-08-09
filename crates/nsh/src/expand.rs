@@ -633,12 +633,6 @@ unsafe fn uflag() -> c_char {
     crate::options::optlist[14]
 }
 
-/// `memalloc.h`: `#define ckfree(p) free((void *)(p))`
-#[inline]
-unsafe fn ckfree(p: *mut c_void) {
-    libc::free(p);
-}
-
 /// `error.h`: `#define int_pending() intpending`
 #[inline]
 unsafe fn int_pending() -> c_int {
@@ -1180,6 +1174,17 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
          * gone. */
         crate::eval::evalbackcmd(cmd, &mut in_ as *mut crate::eval::backcmd);
 
+        /* `backcmd.buf` is ash's read-ahead buffer.  `evalbackcmd` writes
+         * NULL to it and to `nleft` and never writes either again, so the
+         * first `memtodest` below is always the one `goto read` skips and
+         * the C's closing `if (in.buf) ckfree(in.buf)` is unreachable.
+         * There is no allocation on this path to own, and the free is
+         * asserted away rather than transcribed. */
+        debug_assert!(
+            in_.buf.is_null() && in_.nleft == 0,
+            "expbackq: evalbackcmd left a read-ahead buffer nothing frees"
+        );
+
         p = in_.buf;
         i = in_.nleft;
         /* `if (i == 0) goto read;` — skips the first memtodest only. */
@@ -1207,9 +1212,6 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
             p = buf.as_mut_ptr();
         }
 
-        if !in_.buf.is_null() {
-            ckfree(in_.buf as *mut c_void);
-        }
         if in_.fd >= 0 {
             libc::close(in_.fd);
             crate::eval::back_exitstatus = crate::jobs::waitforjob(in_.jp);
@@ -2427,9 +2429,18 @@ unsafe fn expandmeta_glob(words: Vec<strlist>) {
                         None,
                         &mut pglob,
                     );
-                    if p != str.text.as_ptr() as *const c_char {
-                        ckfree(p as *mut c_void);
-                    }
+                    /* `if (p != str->text) ckfree(p)` — the C asking "did
+                     * `_rmescapes` allocate?".  It allocates only under
+                     * RMESCAPE_ALLOC, which `preglob` sets only
+                     * `if (FNMATCH_IS_ENABLED)`; without it the word was
+                     * rewritten in place and `p` is `str.text`'s own
+                     * pointer, so the answer is a build constant and there
+                     * is nothing to free. */
+                    debug_assert_eq!(
+                        p as *const c_char,
+                        str.text.as_ptr() as *const c_char,
+                        "expandmeta_glob: preglob allocated without RMESCAPE_ALLOC"
+                    );
                     if i == 0 {
                         if (pglob.gl_flags
                             & (crate::system::GLOB_NOMAGIC | crate::system::GLOB_NOCHECK))

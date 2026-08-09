@@ -1359,10 +1359,6 @@ symbols (
         {verb def, id myhistedit.str-to-event-fn}
         {verb sem, id myhistedit.str-to-event-fn}
     )}
-    {id mystring.scopyn-fn, kind @function, name scopyn, qualified scopyn, signature "void scopyn(const char *from, char *to, int size)", file src/mystring.c, line_start 89, line_end 98, rules (
-        {verb def, id mystring.scopyn-fn}
-        {verb sem, id mystring.scopyn-fn}
-    )}
     {id mystring.prefix-fn, kind @function, name prefix, qualified prefix, signature "char * prefix(const char *string, const char *pfx)", file src/mystring.c, line_start 106, line_end 114, rules (
         {verb def, id mystring.prefix-fn}
         {verb sem, id mystring.prefix-fn}
@@ -1391,17 +1387,9 @@ symbols (
         {verb def, id mystring.single-quote-fn}
         {verb sem, id mystring.single-quote-fn}
     )}
-    {id mystring.sstrdup-fn, kind @function, name sstrdup, qualified sstrdup, signature "char * sstrdup(const char *p)", file src/mystring.c, line_start 235, line_end 240, rules (
-        {verb def, id mystring.sstrdup-fn}
-        {verb sem, id mystring.sstrdup-fn}
-    )}
     {id mystring.pstrcmp-fn, kind @function, name pstrcmp, qualified pstrcmp, signature "int pstrcmp(const void *a, const void *b)", file src/mystring.c, line_start 245, line_end 249, rules (
         {verb def, id mystring.pstrcmp-fn}
         {verb sem, id mystring.pstrcmp-fn}
-    )}
-    {id mystring.findstring-fn, kind @function, name findstring, qualified findstring, signature "const char *const * findstring(const char *s, const char *const *array, size_t nmemb)", file src/mystring.c, line_start 254, line_end 258, rules (
-        {verb def, id mystring.findstring-fn}
-        {verb sem, id mystring.findstring-fn}
     )}
     {id options.procargs-fn, kind @function, name procargs, qualified procargs, signature "int procargs(char **xargv)", file src/options.c, line_start 121, line_end 176, rules (
         {verb def, id options.procargs-fn}
@@ -1776,10 +1764,6 @@ symbols (
     {id system.strchrnul-fn, kind @function, name strchrnul, qualified strchrnul, signature "char *strchrnul(const char *s, int c)", file src/system.c, line_start 81, line_end 87, rules (
         {verb def, id system.strchrnul-fn}
         {verb sem, id system.strchrnul-fn}
-    )}
-    {id system.bsearch-fn, kind @function, name bsearch, qualified bsearch, signature "void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int (*cmp)(const void *, const void *))", file src/system.c, line_start 103, line_end 122, rules (
-        {verb def, id system.bsearch-fn}
-        {verb sem, id system.bsearch-fn}
     )}
     {id system.sigclearmask-fn, kind @function, name sigclearmask, qualified sigclearmask, signature "static inline void sigclearmask(void)", file src/system.h, line_start 38, line_end 56, rules (
         {verb def, id system.sigclearmask-fn}

@@ -8,12 +8,23 @@
 //!	scopyn(from, to, n)	Like scopy, but checks for overflow.
 //!	number(s)		Convert a string of digits to an integer.
 //!	is_number(s)		Return true if s is a string of digits.
+//!
+//! Seven of those exported items are gone, because `<[u8]>` spells them and
+//! nothing called the port's copy. `equal` and `scopy` are `mystring.h`
+//! macros that `parser.rs` and `exec.rs` each expanded for themselves;
+//! `scopyn` is inside `#if 0` in the C; `sstrdup` copied onto
+//! the region allocator that `delete-memalloc` emptied; `findstring` was a
+//! `bsearch` over one sorted table, which `parser::findkwd` now does with
+//! `binary_search_by`; and `DOLATSTRLEN` and `qchars` had no reader on
+//! either side. `pstrcmp` remains for its last caller in `exec.rs`.
+//!
+//! What is left is here because std is not the same function. Each
+//! survivor says which.
 
 use bstr::BString;
-use libc::{c_char, c_int, c_uchar, c_void, intmax_t, size_t};
+use libc::{c_char, c_int, c_uchar, c_void, intmax_t};
 
 use crate::output::VaArg;
-use crate::shell::cstr;
 
 /*
  * C's `const char foo[] = "…"` becomes `[c_char; N]` here; this const fn
@@ -29,6 +40,9 @@ const fn to_cchar<const N: usize>(b: &[u8; N]) -> [c_char; N] {
     out
 }
 
+/* Callers compare `nullstr` by *address*, not by content — `cd.rs:241`
+ * distinguishes "unset" from "empty" that way — so it cannot become a
+ * shared `b""` literal, which the compiler is free to coalesce. */
 pub static mut nullstr: [c_char; 1] = [0]; /* zero length string */
 pub static spcstr: [c_char; 2] = to_cchar(b" \0");
 pub static snlfmt: [c_char; 4] = to_cchar(b"%s\n\0");
@@ -41,7 +55,6 @@ pub static dolatstr: [c_char; 7] = [
     crate::parser::CTLQUOTEMARK as c_char,
     b'\0' as c_char,
 ];
-pub const DOLATSTRLEN: usize = 6;
 pub static cqchars: [c_char; 5] = [
     b'\\' as c_char,
     crate::parser::CTLESC as c_char,
@@ -53,12 +66,6 @@ pub static illnum: [c_char; 19] = to_cchar(b"Illegal number: %s\0");
 pub static homestr: [c_char; 5] = to_cchar(b"HOME\0");
 pub static dotdir: [c_char; 2] = to_cchar(b".\0");
 
-/* `#define qchars (cqchars + 1)` */
-#[inline(always)]
-pub fn qchars() -> *const c_char {
-    unsafe { cqchars.as_ptr().add(1) }
-}
-
 /*
  * `#ifdef HAVE_FNMATCH` … — neither `--enable-fnmatch` nor
  * `--enable-glob` is on by default, so both knobs are 0 in the shipped
@@ -67,79 +74,24 @@ pub fn qchars() -> *const c_char {
 pub const FNMATCH_IS_ENABLED: c_int = 0;
 pub const GLOB_IS_ENABLED: c_int = 0;
 
-/* `#define equal(s1, s2) (strcmp(s1, s2) == 0)` */
-#[inline(always)]
-pub unsafe fn equal(s1: *const c_char, s2: *const c_char) -> bool {
-    libc::strcmp(s1, s2) == 0
-}
-
-/* `#define scopy(s1, s2) ((void)strcpy(s2, s1))` */
-#[inline(always)]
-pub unsafe fn scopy(s1: *const c_char, s2: *mut c_char) {
-    libc::strcpy(s2, s1);
-}
-
-/*
- * equal - #defined in mystring.h
- */
-
-/*
- * scopy - #defined in mystring.h
- */
-
-/*
- * The C body below is wrapped in `#if 0` and is not compiled; it is
- * carried here so the manifest symbol has a home, and it is never
- * called.
- *
- * scopyn - copy a string from "from" to "to", truncating the string
- *		if necessary.  "To" is always nul terminated, even if
- *		truncation is performed.  "Size" is the size of "to".
- */
-
-// [spec:dash:def:mystring.scopyn-fn]
-// [spec:dash:sem:mystring.scopyn-fn]
-pub unsafe fn scopyn(from: *const c_char, to: *mut c_char, size: c_int) {
-    let mut from = from;
-    let mut to = to;
-    let mut size = size;
-
-    loop {
-        size -= 1;
-        if !(size > 0) {
-            break;
-        }
-        let c = *from;
-        from = from.add(1);
-        *to = c;
-        to = to.add(1);
-        if c == 0 {
-            return;
-        }
-    }
-    *to = 0;
-}
-
 /*
  * prefix -- see if pfx is a prefix of string.
+ *
+ * The callers still use the returned interior pointer as a parse position,
+ * but the comparison itself is slice work: the offset of a successful
+ * `<[u8]>::strip_prefix` is the same pointer the C loop returned.
  */
 
 // [spec:dash:def:mystring.prefix-fn]
 // [spec:dash:sem:mystring.prefix-fn]
 pub unsafe fn prefix(string: *const c_char, pfx: *const c_char) -> *mut c_char {
-    let mut string = string;
-    let mut pfx = pfx;
-
-    while *pfx != 0 {
-        let a = *pfx;
-        pfx = pfx.add(1);
-        let b = *string;
-        string = string.add(1);
-        if a != b {
-            return core::ptr::null_mut();
-        }
+    let string_bytes = core::ffi::CStr::from_ptr(string).to_bytes();
+    let prefix_bytes = core::ffi::CStr::from_ptr(pfx).to_bytes();
+    if string_bytes.strip_prefix(prefix_bytes).is_some() {
+        string.add(prefix_bytes.len()) as *mut c_char
+    } else {
+        core::ptr::null_mut()
     }
-    string as *mut c_char
 }
 
 // [spec:dash:def:mystring.badnum-fn]
@@ -150,6 +102,12 @@ pub unsafe fn badnum(s: *const c_char) -> ! {
 
 /*
  * Convert a string into an integer of type intmax_t.  Alow trailing spaces.
+ *
+ * `str::parse` is not this function: `strtoimax` saturates at
+ * `INTMAX_MAX` and reports `ERANGE` where `parse` returns `Err`, it takes
+ * base 0 and — through the `__isoc23_` binding — `0b` literals, and it
+ * stops at the first unconvertible byte instead of rejecting the string.
+ * `docs/std-replacements.md` §5.8 measures all three.
  */
 // [spec:dash:def:mystring.atomax-fn]
 // [spec:dash:sem:mystring.atomax-fn]
@@ -168,6 +126,14 @@ pub unsafe fn atomax(s: *const c_char, base: c_int) -> intmax_t {
         badnum(s);
     }
 
+    /*
+     * `u8::is_ascii_whitespace` is not `isspace`: it excludes vertical
+     * tab, and `exit $'1\v'` exits 1 in both shells, so the substitution
+     * is observable from two tokens of shell.  Measured across `C`,
+     * `en_US.utf8` and a generated `en_US.ISO-8859-1`, no byte 0x80-0xFF
+     * is in the space class, so the locale is not what keeps this call —
+     * 0x0B is.
+     */
     while libc::isspace(*p as c_uchar as c_int) != 0 {
         p = p.add(1);
     }
@@ -204,34 +170,35 @@ pub unsafe fn number(s: *const c_char) -> c_int {
 
 /*
  * Check for a valid number.  This should be elsewhere.
+ *
+ * `iter().all(is_digit)` is the wrong answer, not a shorter one: the C
+ * loop is do/while, so the empty string tests `is_digit(0)` and returns
+ * 0, where `all` on an empty slice returns true.  Four callers
+ * (`jobs.rs:995`, `histedit.rs:782,808`, `trap.rs:516`) treat a
+ * non-number as "this is a name", so the empty case decides which.
  */
 
 // [spec:dash:def:mystring.is-number-fn]
 // [spec:dash:sem:mystring.is-number-fn]
 pub unsafe fn is_number(p: *const c_char) -> c_int {
-    let mut p = p;
-
-    loop {
-        if !crate::syntax::is_digit(*p as c_int) {
-            return 0;
-        }
-        p = p.add(1);
-        if *p == 0 {
-            break;
-        }
-    }
-    1
+    let bytes = core::ffi::CStr::from_ptr(p).to_bytes();
+    c_int::from(!bytes.is_empty() && bytes.iter().all(u8::is_ascii_digit))
 }
 
 /*
  * Produce a possibly single quoted string suitable as input to the shell.
  * The return string is allocated on the stack.
+ *
+ * Shell quoting, not a std facility: the alternation between `'…'` and
+ * `"…"` runs is what makes the result readable back by the shell, and no
+ * escaping API in std produces it.  The scan itself is slice work, so the
+ * C's `strchrnul` and `strspn` are gone.
  */
 
 // [spec:dash:def:mystring.single-quote-fn]
 // [spec:dash:sem:mystring.single-quote-fn]
 pub unsafe fn single_quote(s: *const c_char) -> *mut c_char {
-    let mut s = s;
+    let mut s = core::ffi::CStr::from_ptr(s).to_bytes();
     /* The C leaves the result in the stack block without grabbing it, so
      * the next call overwrites it and every caller reads it before making
      * another. One buffer, reused, is that contract exactly. */
@@ -239,26 +206,24 @@ pub unsafe fn single_quote(s: *const c_char) -> *mut c_char {
     q.clear();
 
     loop {
-        let mut len: size_t;
-
-        len = (crate::system::strchrnul(s, '\'' as c_int) as usize).wrapping_sub(s as usize);
+        let len = s.iter().position(|&c| c == b'\'').unwrap_or(s.len());
 
         q.push(b'\'');
-        q.extend_from_slice(core::slice::from_raw_parts(s as *const u8, len));
+        q.extend_from_slice(&s[..len]);
         q.push(b'\'');
-        s = s.add(len);
+        s = &s[len..];
 
-        len = libc::strspn(s, cstr(b"'\0"));
+        let len = s.iter().position(|&c| c != b'\'').unwrap_or(s.len());
         if len == 0 {
             break;
         }
 
         q.push(b'"');
-        q.extend_from_slice(core::slice::from_raw_parts(s as *const u8, len));
+        q.extend_from_slice(&s[..len]);
         q.push(b'"');
-        s = s.add(len);
+        s = &s[len..];
 
-        if *s == 0 {
+        if s.is_empty() {
             break;
         }
     }
@@ -272,18 +237,10 @@ pub unsafe fn single_quote(s: *const c_char) -> *mut c_char {
 static mut quoted: BString = BString::new(Vec::new());
 
 /*
- * Like strdup but works with the ash stack.
- */
-
-// [spec:dash:def:mystring.sstrdup-fn]
-// [spec:dash:sem:mystring.sstrdup-fn]
-pub unsafe fn sstrdup(p: *const c_char) -> *mut c_char {
-    let len: size_t = libc::strlen(p) + 1;
-    libc::memcpy(crate::memalloc::stalloc(len), p as *const c_void, len) as *mut c_char
-}
-
-/*
  * Wrapper around strcmp for qsort/bsearch/...
+ *
+ * `exec::find_builtin` is the last caller. This comparator remains until that
+ * call site performs the corresponding `binary_search_by` replacement.
  */
 // [spec:dash:def:mystring.pstrcmp-fn]
 // [spec:dash:sem:mystring.pstrcmp-fn]
@@ -292,26 +249,6 @@ pub unsafe extern "C" fn pstrcmp(a: *const c_void, b: *const c_void) -> c_int {
         *(a as *const *const c_char),
         *(b as *const *const c_char),
     )
-}
-
-/*
- * Find a string is in a sorted array.
- */
-// [spec:dash:def:mystring.findstring-fn]
-// [spec:dash:sem:mystring.findstring-fn]
-pub unsafe fn findstring(
-    s: *const c_char,
-    array: *const *const c_char,
-    nmemb: size_t,
-) -> *const *const c_char {
-    let s = s;
-    crate::system::bsearch(
-        &s as *const *const c_char as *const c_void,
-        array as *const c_void,
-        nmemb,
-        core::mem::size_of::<*const c_char>(),
-        pstrcmp,
-    ) as *const *const c_char
 }
 
 // ---------------------------------------------------------------------
@@ -332,16 +269,39 @@ mod tests {
     fn prefix_returns_the_tail_or_null() {
         unsafe {
             let str_ = CStr0::new("foobar");
-            assert_eq!(s(prefix(str_.p(), CStr0::new("foo").p())), "bar");
+            let tail = prefix(str_.p(), CStr0::new("foo").p());
+            assert!(!tail.is_null());
+            assert_eq!(s(tail), "bar");
             // A complete match leaves an empty tail, which is still a
             // non-NULL pointer -- callers test the pointer, not the byte.
             assert_eq!(s(prefix(str_.p(), CStr0::new("foobar").p())), "");
             assert!(!prefix(str_.p(), CStr0::new("foobar").p()).is_null());
             assert!(prefix(str_.p(), CStr0::new("fox").p()).is_null());
             // An empty prefix matches anything and consumes nothing.
-            assert_eq!(s(prefix(str_.p(), CStr0::new("").p())), "foobar");
+            let tail = prefix(str_.p(), CStr0::new("").p());
+            assert!(!tail.is_null());
+            assert_eq!(s(tail), "foobar");
             // A prefix longer than the string stops at the NUL.
             assert!(prefix(CStr0::new("fo").p(), CStr0::new("foo").p()).is_null());
+        }
+    }
+
+    // [spec:dash:sem:mystring.prefix-fn/test]
+    #[test]
+    fn prefix_handles_all_non_nul_bytes() {
+        unsafe {
+            for byte in 1_u8..=u8::MAX {
+                let haystack = [byte, b'x', 0];
+                let matching = [byte, 0];
+                let tail = prefix(haystack.as_ptr().cast(), matching.as_ptr().cast());
+
+                assert_eq!(tail.cast_const().cast::<u8>(), haystack.as_ptr().add(1));
+                assert_eq!(core::ffi::CStr::from_ptr(tail).to_bytes(), b"x");
+
+                let different = if byte == 1 { 2 } else { 1 };
+                let missing = [different, 0];
+                assert!(prefix(haystack.as_ptr().cast(), missing.as_ptr().cast()).is_null());
+            }
         }
     }
 
@@ -359,6 +319,32 @@ mod tests {
             assert_eq!(is_number(CStr0::new("-1").p()), 0);
             assert_eq!(is_number(CStr0::new("+1").p()), 0);
             assert_eq!(is_number(CStr0::new(" 1").p()), 0);
+        }
+    }
+
+    // [spec:dash:sem:mystring.is-number-fn/test]
+    #[test]
+    fn is_number_matches_ascii_digits() {
+        unsafe {
+            let empty = [0_u8];
+            assert_eq!(is_number(empty.as_ptr().cast()), 0);
+
+            for byte in 1_u8..=u8::MAX {
+                let candidate = [byte, 0];
+                assert_eq!(
+                    is_number(candidate.as_ptr().cast()),
+                    c_int::from(byte.is_ascii_digit()),
+                    "classification differed for byte 0x{byte:02x}"
+                );
+            }
+
+            let all_digits = b"0123456789\0";
+            assert_eq!(is_number(all_digits.as_ptr().cast()), 1);
+            for i in 0..all_digits.len() - 1 {
+                let mut candidate = *all_digits;
+                candidate[i] = b'x';
+                assert_eq!(is_number(candidate.as_ptr().cast()), 0);
+            }
         }
     }
 
@@ -444,8 +430,6 @@ mod tests {
     fn single_quote_produces_a_shell_requotable_string() {
         let _g = crate::testutil::lock();
         unsafe {
-            let mut mark: crate::memalloc::stackmark = core::mem::zeroed();
-            crate::memalloc::setstackmark(&mut mark);
             assert_eq!(s(single_quote(CStr0::new("abc").p())), "'abc'");
             assert_eq!(s(single_quote(CStr0::new("").p())), "''");
             // An embedded quote has to leave the single-quoted run and
@@ -460,24 +444,28 @@ mod tests {
             // Everything else, blanks and metacharacters included, is
             // literal inside the quotes.
             assert_eq!(s(single_quote(CStr0::new("a b|c$d").p())), "'a b|c$d'");
-            crate::memalloc::popstackmark(&mut mark);
         }
     }
 
-    // [spec:dash:sem:mystring.sstrdup-fn/test]
+    // [spec:dash:sem:mystring.single-quote-fn/test]
     #[test]
-    fn sstrdup_copies_onto_the_shell_stack() {
+    fn single_quote_handles_all_bytes() {
         let _g = crate::testutil::lock();
         unsafe {
-            let mut mark: crate::memalloc::stackmark = core::mem::zeroed();
-            crate::memalloc::setstackmark(&mut mark);
-            let src = CStr0::new("hello");
-            let copy = sstrdup(src.p());
-            assert_eq!(s(copy), "hello");
-            // A copy, not the original pointer.
-            assert_ne!(copy as *const c_char, src.p());
-            assert_eq!(s(sstrdup(CStr0::new("").p())), "");
-            crate::memalloc::popstackmark(&mut mark);
+            for byte in 1_u8..=u8::MAX {
+                let input = [byte, 0];
+                let actual = core::ffi::CStr::from_ptr(single_quote(input.as_ptr().cast()))
+                    .to_bytes();
+
+                if byte == b'\'' {
+                    assert_eq!(actual, b"''\"'\"");
+                } else {
+                    assert_eq!(actual.len(), 3);
+                    assert_eq!(actual[0], b'\'');
+                    assert_eq!(actual[1], byte);
+                    assert_eq!(actual[2], b'\'');
+                }
+            }
         }
     }
 
@@ -500,24 +488,4 @@ mod tests {
         }
     }
 
-    // [spec:dash:sem:mystring.findstring-fn/test]
-    #[test]
-    fn findstring_bsearches_a_sorted_array() {
-        unsafe {
-            let owned = ["alpha", "delta", "kilo", "zulu"].map(CStr0::new);
-            let array: Vec<*const c_char> = owned.iter().map(|c| c.p()).collect();
-            let n = array.len() as size_t;
-
-            for (i, name) in ["alpha", "delta", "kilo", "zulu"].iter().enumerate() {
-                let hit = findstring(CStr0::new(name).p(), array.as_ptr(), n);
-                assert!(!hit.is_null(), "{name} should be found");
-                assert_eq!(s(*hit), *name);
-                // The result points INTO the array, which is what callers
-                // rely on to recover the index.
-                assert_eq!(hit.offset_from(array.as_ptr()) as usize, i);
-            }
-            assert!(findstring(CStr0::new("mike").p(), array.as_ptr(), n).is_null());
-            assert!(findstring(CStr0::new("").p(), array.as_ptr(), n).is_null());
-        }
-    }
 }

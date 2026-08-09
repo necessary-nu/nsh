@@ -18,12 +18,25 @@
 //! `glob64` is the other stub the C really compiles (`HAVE_GLOB` is
 //! undefined); `expand.rs` still reaches it behind `GLOB_IS_ENABLED`, so
 //! it stays.
+//!
+//! `bsearch` and its comparator type are gone as well. The `#ifndef
+//! HAVE_BSEARCH` arm is a claim about the target, and `core` answers it
+//! unconditionally: `<[T]>::binary_search_by` exists on every target this
+//! crate builds for, so there is no configuration in which a fallback is
+//! reachable. Its one caller was `mystring.c`'s `findstring`, now
+//! `parser::findkwd`. `strtoumax` went with it — `bltin/printf.rs`
+//! declares its own binding and nothing else asked for one — as did the
+//! `conv_escape` prototype alias, which named a type no signature used.
 
-use libc::{c_char, c_int, c_uint, c_void, size_t, ssize_t};
+use libc::{c_char, c_int, c_void, size_t, ssize_t};
 
-/* `#ifndef SSIZE_MAX #define SSIZE_MAX ((ssize_t)((size_t)-1 >> 1))` */
-pub const SSIZE_MAX: ssize_t = (usize::MAX >> 1) as ssize_t;
+/* `#ifndef SSIZE_MAX #define SSIZE_MAX ((ssize_t)((size_t)-1 >> 1))`.
+ * `ssize_t::MAX` is the same value; the two readers are in `output.rs`,
+ * whose conversion is a separate task. */
+pub const SSIZE_MAX: ssize_t = ssize_t::MAX;
 
+/* std has no signal mask at all — `sigprocmask` is the only spelling —
+ * so this is not a shim over something better, it is the operation. */
 // [spec:dash:def:system.sigclearmask-fn]
 // [spec:dash:sem:system.sigclearmask-fn]
 #[inline]
@@ -39,14 +52,20 @@ pub unsafe fn sigclearmask() {
     libc::sigprocmask(libc::SIG_SETMASK, &set, core::ptr::null_mut());
 }
 
-/* `#ifndef HAVE_MEMPCPY` */
+/* `#ifndef HAVE_MEMPCPY`.  `copy_from_slice` plus the length is this,
+ * but the seven callers are raw-pointer cursors in `memalloc.rs`,
+ * `output.rs` and `expand.rs` — files whose conversions are other
+ * tasks — so rewriting the callee alone would only move the cast. */
 // [spec:dash:def:system.mempcpy-fn]
 // [spec:dash:sem:system.mempcpy-fn]
 pub unsafe fn mempcpy(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void {
     (libc::memcpy(dest, src, n) as *mut u8).add(n) as *mut c_void
 }
 
-/* `#ifndef HAVE_STRCHRNUL` */
+/* `#ifndef HAVE_STRCHRNUL`.  `find_byte(c).unwrap_or(len)` is this, and
+ * `mystring.rs` no longer calls it; the remaining callers are `var.rs`'s
+ * `name=value` splits and three cursors in `expand.rs`, both other
+ * tasks' files. */
 // [spec:dash:def:system.strchrnul-fn]
 // [spec:dash:sem:system.strchrnul-fn]
 pub unsafe fn strchrnul(s: *const c_char, c: c_int) -> *mut c_char {
@@ -80,51 +99,11 @@ unsafe extern "C" {
         endptr: *mut *mut c_char,
         base: c_int,
     ) -> libc::intmax_t;
-    #[link_name = "__isoc23_strtoumax"]
-    pub fn strtoumax(
-        nptr: *const c_char,
-        endptr: *mut *mut c_char,
-        base: c_int,
-    ) -> libc::uintmax_t;
 }
 
-/* comparator type of `int (*cmp)(const void *, const void *)` */
-pub type __compar_fn_t = unsafe extern "C" fn(*const c_void, *const c_void) -> c_int;
-
-/* `#ifndef HAVE_BSEARCH` */
-// [spec:dash:def:system.bsearch-fn]
-// [spec:dash:sem:system.bsearch-fn]
-pub unsafe fn bsearch(
-    key: *const c_void,
-    base: *const c_void,
-    nmemb: size_t,
-    size: size_t,
-    cmp: __compar_fn_t,
-) -> *mut c_void {
-    let mut base = base;
-    let mut nmemb = nmemb;
-
-    while nmemb != 0 {
-        let mididx: size_t = nmemb / 2;
-        let midobj: *const c_void = (base as *const u8).add(mididx * size) as *const c_void;
-        let diff: c_int = cmp(key, midobj);
-
-        if diff == 0 {
-            return midobj as *mut c_void;
-        }
-
-        if diff > 0 {
-            base = (midobj as *const u8).add(size) as *const c_void;
-            nmemb -= mididx + 1;
-        } else {
-            nmemb = mididx;
-        }
-    }
-
-    core::ptr::null_mut()
-}
-
-/* `#ifndef HAVE_GLOB` */
+/* `#ifndef HAVE_GLOB`.  `expand.rs`'s `expandmeta_glob` reaches these
+ * behind `GLOB_IS_ENABLED`, which is 0; the `glob` crate is not a
+ * replacement for either arm — `docs/std-replacements.md` §5.4. */
 pub const GLOB_ERR: c_int = 1 << 0; /* Return on read errors.  */
 pub const GLOB_MARK: c_int = 1 << 1; /* Append a slash to each name.  */
 pub const GLOB_NOSORT: c_int = 1 << 2; /* Don't sort the names.  */
@@ -205,10 +184,9 @@ pub unsafe fn globfree64(_pglob: *mut glob64_t) {}
  * Declared in system.h but *defined* in `src/bltin/printf.c`, so this
  * header symbol has no body of its own.  The port carries both the
  * `system.conv-escape-fn` and `printf.conv-escape-fn` annotations on
- * that single definition in `crate::bltin::printf`; this is the
- * equivalent of the header's prototype.
+ * that single definition in `crate::bltin::printf`; Rust has no place
+ * for a second declaration of it.
  */
-pub type conv_escape_fn = unsafe fn(str_: *mut c_char, out: *mut c_char, mbchar: bool) -> c_uint;
 
 // ---------------------------------------------------------------------
 // Unit tests for this module's functions.
@@ -265,48 +243,6 @@ mod tests {
             assert_eq!(miss as usize, hay.p() as usize + 6);
             // Searching for NUL finds the terminator.
             assert_eq!(strchrnul(hay.p(), 0) as usize, hay.p() as usize + 6);
-        }
-    }
-
-    // [spec:dash:sem:system.bsearch-fn/test]
-    #[test]
-    fn bsearch_finds_members_and_reports_misses() {
-        unsafe {
-            let table: [c_int; 5] = [1, 3, 5, 7, 9];
-            unsafe extern "C" fn cmp(a: *const c_void, b: *const c_void) -> c_int {
-                *(a as *const c_int) - *(b as *const c_int)
-            }
-            let n = table.len();
-            let sz = core::mem::size_of::<c_int>();
-            for (i, want) in table.iter().enumerate() {
-                let hit = bsearch(
-                    want as *const c_int as *const c_void,
-                    table.as_ptr() as *const c_void,
-                    n as size_t,
-                    sz,
-                    cmp,
-                );
-                assert!(!hit.is_null());
-                assert_eq!(hit as usize, table.as_ptr() as usize + i * sz);
-            }
-            let missing: c_int = 4;
-            assert!(bsearch(
-                &missing as *const c_int as *const c_void,
-                table.as_ptr() as *const c_void,
-                n as size_t,
-                sz,
-                cmp,
-            )
-            .is_null());
-            // An empty table is a miss, not a crash.
-            assert!(bsearch(
-                &missing as *const c_int as *const c_void,
-                table.as_ptr() as *const c_void,
-                0,
-                sz,
-                cmp,
-            )
-            .is_null());
         }
     }
 

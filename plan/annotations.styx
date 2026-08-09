@@ -1220,10 +1220,6 @@ sites (
         [spec:dash:def:mystring.badnum-fn]
         [spec:dash:sem:mystring.badnum-fn]
     )}
-    {path src/mystring.c, symbol findstring, spec (
-        [spec:dash:def:mystring.findstring-fn]
-        [spec:dash:sem:mystring.findstring-fn]
-    )}
     {path src/mystring.c, symbol is_number, spec (
         [spec:dash:def:mystring.is-number-fn]
         [spec:dash:sem:mystring.is-number-fn]
@@ -1240,17 +1236,9 @@ sites (
         [spec:dash:def:mystring.pstrcmp-fn]
         [spec:dash:sem:mystring.pstrcmp-fn]
     )}
-    {path src/mystring.c, symbol scopyn, spec (
-        [spec:dash:def:mystring.scopyn-fn]
-        [spec:dash:sem:mystring.scopyn-fn]
-    )}
     {path src/mystring.c, symbol single_quote, spec (
         [spec:dash:def:mystring.single-quote-fn]
         [spec:dash:sem:mystring.single-quote-fn]
-    )}
-    {path src/mystring.c, symbol sstrdup, spec (
-        [spec:dash:def:mystring.sstrdup-fn]
-        [spec:dash:sem:mystring.sstrdup-fn]
     )}
     {path src/options.c, symbol freeparam, spec (
         [spec:dash:def:options.freeparam-fn]
@@ -1585,10 +1573,6 @@ sites (
     {path src/shell.h, symbol max_int_length, spec (
         [spec:dash:def:shell.max-int-length-fn]
         [spec:dash:sem:shell.max-int-length-fn]
-    )}
-    {path src/system.c, symbol bsearch, spec (
-        [spec:dash:def:system.bsearch-fn]
-        [spec:dash:sem:system.bsearch-fn]
     )}
     {path src/system.c, symbol mempcpy, spec (
         [spec:dash:def:system.mempcpy-fn]

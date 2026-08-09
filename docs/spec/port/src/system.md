@@ -16,8 +16,8 @@ through to them.
 `conv_escape` is declared here but defined in `src/bltin/printf.c`; its
 rule is anchored to the header, and `printf.md` cross-references it.
 
-**Twenty rules retired.** `delete-gen` removed the twenty exported items
-of `crates/nsh/src/system.rs` that had no caller anywhere in the crate:
+**Twenty exported items retired first.** `delete-gen` removed the twenty
+exported items of `crates/nsh/src/system.rs` that had no caller anywhere in the crate:
 the twelve `ctype` wrappers, `stpcpy`, `strsignal`, `strtod`, `killpg`,
 `sysconf`, `tee`, `memfd_create` and `fnmatch`. Every caller goes to
 `libc::` directly, and for all but `fnmatch` the reference build's
@@ -26,14 +26,15 @@ either; `HAVE_FNMATCH` is undefined, but the sole call site sits behind
 `if (FNMATCH_IS_ENABLED)`, which is 0. Their blocks below therefore carry
 no `[spec:dash:…]` ids — each is a C signature followed by its semantics
 — and are kept because they still describe `src/system.c` and
-`src/system.h`. `mempcpy`, `strchrnul`, `bsearch`, `sigclearmask`,
-`conv_escape` and the `glob64` group are still implemented and still
-carry their rules.
+`src/system.h`. `delete-memalloc` subsequently retired `bsearch` too:
+the target's sole instantiation now uses `<[T]>::binary_search_by` in
+`parser.findkwd-fn`. Its block below keeps describing the C fallback,
+but its two markers are removed rather than stranded on code that no
+longer exists. `mempcpy`, `strchrnul`, `sigclearmask`, `conv_escape` and
+the `glob64` group are still implemented and still carry their rules.
 
-> [spec:dash:def:system.bsearch-fn]
 > void *bsearch(const void *key, const void *base, size_t nmemb, size_t size, int (*cmp)(const void *, const void *))
 
-> [spec:dash:sem:system.bsearch-fn]
 > Standard binary search, provided where libc lacks it. While `nmemb` is
 > non-zero: take `mididx = nmemb / 2` and the object at
 > `base + mididx * size`; return it if `cmp` reports 0. When the key is

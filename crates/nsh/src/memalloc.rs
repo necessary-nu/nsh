@@ -242,7 +242,7 @@ pub unsafe fn popstackmark(mark: *mut stackmark) {
     while stackp != (*mark).stackp {
         sp = stackp;
         stackp = (*sp).prev;
-        crate::ckfree!(sp);
+        ckfree(sp);
     }
     stacknxt = (*mark).stacknxt;
     stacknleft = (*mark).stacknleft;
@@ -459,116 +459,14 @@ pub unsafe fn ckfree<T>(p: *mut T) {
 }
 
 /*
- * `#define ckfree(p) free((void *)(p))` — macro form so call sites keep
- * the C spelling and the implicit `(void *)` cast.
+ * `memalloc.h`'s string-builder macros are not here.  `STARTSTACKSTR`,
+ * `STPUTC`, `CHECKSTRSPACE`, `STACKSTRNUL`, `STUNPUTC`, `STTOPC` and the
+ * macro spelling of `ckfree` went with the region's last caller.  The two
+ * that outlived it, `USTPUTC` and `STADJUST`, read and write no allocator
+ * state at all -- they are `*p++ = c` and `p += n` over a buffer their
+ * caller owns -- so they live in `parser.rs` and `bltin/printf.rs`, next
+ * to the cursors they advance.
  */
-#[macro_export]
-macro_rules! ckfree {
-    ($p:expr) => {
-        ::libc::free($p as *mut ::libc::c_void)
-    };
-}
-
-/*
- * `#define STARTSTACKSTR(p) ((p) = stackblock())`
- */
-#[macro_export]
-macro_rules! STARTSTACKSTR {
-    ($p:expr) => {
-        $p = $crate::memalloc::stackblock() as *mut _
-    };
-}
-
-/*
- * `#define STPUTC(c, p) ((p) = _STPUTC((c), (p)))`
- */
-#[macro_export]
-macro_rules! STPUTC {
-    ($c:expr, $p:expr) => {
-        $p = $crate::memalloc::_STPUTC($c as ::libc::c_int, $p)
-    };
-}
-
-/*
- * ```c
- * #define CHECKSTRSPACE(n, p) \
- *	({ char *_q = (p); size_t _l = (n); size_t _m = sstrend - _q; \
- *	   if (_l > _m) (p) = makestrspace(_l, _q); 0; })
- * ```
- */
-#[macro_export]
-macro_rules! CHECKSTRSPACE {
-    ($n:expr, $p:expr) => {{
-        let _q: *mut ::libc::c_char = $p;
-        let _l: usize = $n as usize;
-        let _m: usize = ($crate::memalloc::sstrend as usize).wrapping_sub(_q as usize);
-        if _l > _m {
-            $p = $crate::memalloc::makestrspace(_l, _q);
-        }
-        0
-    }};
-}
-
-/*
- * `#define USTPUTC(c, p) (*p++ = (c))`
- */
-#[macro_export]
-macro_rules! USTPUTC {
-    ($c:expr, $p:expr) => {{
-        let _c = $c as ::libc::c_char;
-        *$p = _c;
-        $p = $p.add(1);
-        _c
-    }};
-}
-
-/*
- * ```c
- * #define STACKSTRNUL(p) \
- *	((p) == sstrend? (p = growstackstr(), *p = '\0') : (*p = '\0'))
- * ```
- */
-#[macro_export]
-macro_rules! STACKSTRNUL {
-    ($p:expr) => {{
-        if $p == $crate::memalloc::sstrend {
-            $p = $crate::memalloc::growstackstr() as *mut ::libc::c_char;
-            *$p = 0;
-        } else {
-            *$p = 0;
-        }
-    }};
-}
-
-/*
- * `#define STUNPUTC(p) (--p)`
- */
-#[macro_export]
-macro_rules! STUNPUTC {
-    ($p:expr) => {
-        $p = $p.sub(1)
-    };
-}
-
-/*
- * `#define STTOPC(p) p[-1]`
- */
-#[macro_export]
-macro_rules! STTOPC {
-    ($p:expr) => {
-        *$p.offset(-1)
-    };
-}
-
-/*
- * `#define STADJUST(amount, p) (p += (amount))`
- */
-#[macro_export]
-macro_rules! STADJUST {
-    ($amount:expr, $p:expr) => {
-        $p = $p.offset($amount as isize)
-    };
-}
 
 // ---------------------------------------------------------------------
 // Unit tests for this module's functions.
