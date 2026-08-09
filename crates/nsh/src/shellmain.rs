@@ -25,7 +25,7 @@ use libc::{c_char, c_int, size_t};
 use crate::error::{jmploc, FORCEINTON};
 use crate::eval::{evalskip, EV_EXIT, SKIPFUNC, SKIPFUNCDEF};
 use crate::jobs::SHOW_CHANGED;
-use crate::memalloc::{popstackmark, setstackmark, stackmark, stalloc};
+use crate::memalloc::{popstackmark, setstackmark, stackmark};
 use crate::output::out2;
 
 /* pid of main shell */
@@ -393,7 +393,16 @@ pub unsafe fn readcmdfile(name: *mut c_char) {
 
 // [spec:dash:def:main.find-dot-file-fn]
 // [spec:dash:sem:main.find-dot-file-fn]
-unsafe fn find_dot_file(basename: *mut c_char) -> *mut c_char {
+/// The path the running `.` was found at.  See `dotcmd` for why this
+/// outlives the frame that built it.
+static mut dotfile_kept: Vec<u8> = Vec::new();
+
+/// The C returns a `stalloc`'d copy of the candidate — "This will be
+/// freed by the caller", meaning `dotcmd`'s enclosing `popstackmark`.
+/// `dotcmd` keeps the pointer in `commandname` for the whole of
+/// `cmdloop`, so the bytes have to outlive the call and cannot be a local
+/// of this function; the caller owns the buffer and this fills it.
+unsafe fn find_dot_file(basename: *mut c_char, out: &mut Vec<u8>) -> *mut c_char {
     let mut fullname: *mut c_char;
     let mut path: *const c_char = crate::var::pathval();
     let mut statb: libc::stat64 = core::mem::zeroed();
@@ -415,12 +424,15 @@ unsafe fn find_dot_file(basename: *mut c_char) -> *mut c_char {
             && (statb.st_mode & libc::S_IFMT) == libc::S_IFREG
         {
             /* This will be freed by the caller. */
-            /* `stalloc(len)` took the candidate straight out of the stack
-             * block; the copy is what takes it out of `padvance`'s buffer,
-             * and the block it lands in is still the caller's to release. */
-            let kept = stalloc(len as size_t) as *mut c_char;
-            libc::strcpy(kept, fullname);
-            return kept;
+            /* `len` is `padvance`'s *allocation* size, one more than the
+             * string's length when the PATH component is empty, so the
+             * buffer is sized from it and the bytes copied by hand. */
+            out.clear();
+            debug_assert!(len > 0);
+            out.resize(len as usize, 0);
+            libc::strcpy(out.as_mut_ptr() as *mut c_char, fullname);
+            debug_assert!(libc::strlen(out.as_ptr() as *const c_char) < len as usize);
+            return out.as_mut_ptr() as *mut c_char;
         }
     }
 
@@ -439,12 +451,42 @@ pub unsafe fn dotcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
     if !(*argv).is_null() {
         let fullname: *mut c_char;
+        let mut dotfile: Vec<u8> = Vec::new();
 
-        fullname = find_dot_file(*argv);
+        fullname = find_dot_file(*argv, &mut dotfile);
         crate::input::setinputfile(fullname, crate::input::INPUT_PUSH_FILE);
         crate::eval::commandname = fullname;
         status = cmdloop(0);
         crate::input::popfile();
+        /* `commandname` still points at these bytes when this returns,
+         * and `evalbltin`'s epilogue reads it — `flushall(); if
+         * (outerr(out1)) sh_warnx("%s: I/O error", commandname);` —
+         * *before* restoring `savecmdname`.  The C is safe there because
+         * the block is `stalloc`'d and the enclosing mark has not popped;
+         * a local `Vec` would be freed one statement too early.
+         *
+         * So the allocation is handed to a static slot instead of
+         * dropped.  Moving a `Vec` moves the header, not the bytes, so
+         * `fullname` stays valid — asserted below, because that is the
+         * whole reason this line works.  The slot's previous occupant is
+         * unreferenced by then: every `evalbltin` restores `commandname`
+         * on the way out, so the only window in which a `dotfile` is
+         * still named is between `dotcmd` returning and that restore, and
+         * no other `dotcmd` can run inside it.
+         *
+         * The buffer is empty when `find_dot_file` returned its argument
+         * without searching — a name containing `/` — and then
+         * `commandname` points at the word `evalcommand` expanded, as it
+         * does in the C.  The emptiness test is the discriminator, and it
+         * is sound because a filled buffer is `strlen(name) + 2` bytes at
+         * the very least.  A first draft asserted unconditionally and
+         * this is the case that found it. */
+        if !dotfile.is_empty() {
+            debug_assert_eq!(dotfile.as_ptr(), fullname as *const u8);
+            let kept = &mut *addr_of_mut!(dotfile_kept);
+            *kept = dotfile;
+            debug_assert_eq!(kept.as_ptr(), fullname as *const u8);
+        }
     }
 
     status

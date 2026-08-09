@@ -12,7 +12,7 @@
 
 use core::ptr;
 
-use libc::{c_char, c_int, c_void};
+use libc::{c_char, c_int};
 
 use crate::arith_yacc::{
     arith_buf, intmax_t, yylval, ARITH_ADD, ARITH_AND, ARITH_ASS, ARITH_BAD, ARITH_BAND,
@@ -21,7 +21,6 @@ use crate::arith_yacc::{
     ARITH_QMARK, ARITH_REM, ARITH_RPAREN, ARITH_RSHIFT, ARITH_SUB, ARITH_VAR, ARITH_BORASS,
     ARITH_EQ,
 };
-use crate::memalloc::stalloc;
 use crate::syntax::is_in_name;
 
 /* #if ARITH_BOR + 11 != ARITH_BORASS || ARITH_ASS + 11 != ARITH_EQ
@@ -29,6 +28,30 @@ use crate::syntax::is_in_name;
  * #endif
  */
 const _: () = assert!(ARITH_BOR + 11 == ARITH_BORASS && ARITH_ASS + 11 == ARITH_EQ);
+
+/// The variable names `yylex` hands to the parser through `yylval.name`.
+///
+/// The C `stalloc`s each one and lets `expari`'s enclosing mark release
+/// them all at once, and it needs *all* of them at once: `assignment`
+/// copies `yylval` into a local, recurses — which calls `yylex` again and
+/// overwrites `yylval` — and only then reads `val.name`, so `a = b = 1`
+/// has two names live. That is a per-evaluation lifetime, not a
+/// per-token one, and this is where it is now written down: `arith`
+/// clears the list on entry and the `Vec` owns the bytes until the next
+/// evaluation starts.
+///
+/// `arith` is already non-reentrant — it sets the `arith_buf` cursor from
+/// its argument — so one list is enough.  Pushing to it can reallocate
+/// the outer `Vec`, which moves the `Vec<u8>` headers but not the bytes
+/// they point at, so a `yylval.name` handed out earlier stays valid.
+static mut arith_names: Vec<Vec<u8>> = Vec::new();
+
+/// `&mut arith_names`, without naming a reference to the `static mut`
+/// twice at once.
+#[inline]
+pub unsafe fn arith_names_reset() {
+    (*ptr::addr_of_mut!(arith_names)).clear();
+}
 
 /// The `goto` targets in the C: `checkeq` advances past the current
 /// character first, `checkeqcur` does not (for the cases that have
@@ -69,9 +92,13 @@ pub unsafe fn yylex() -> c_int {
                 }
             }
             let len = buf as usize - p as usize;
-            yylval.name = stalloc(len + 1) as *mut c_char;
-            *(libc::mempcpy(yylval.name as *mut c_void, p as *const c_void, len) as *mut c_char) =
-                0;
+            let names = &mut *ptr::addr_of_mut!(arith_names);
+            let mut name: Vec<u8> = Vec::with_capacity(len + 1);
+            name.extend_from_slice(core::slice::from_raw_parts(p as *const u8, len));
+            name.push(0);
+            names.push(name);
+            let last = names.len() - 1;
+            yylval.name = names[last].as_mut_ptr() as *mut c_char;
             value = ARITH_VAR;
             lbl = Lbl::Out;
         } else if value == '=' as c_int {

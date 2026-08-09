@@ -14,7 +14,6 @@
 //!
 //! Cross-module signatures assumed (see the port report):
 //!   * `crate::mystring::atomax10(*const c_char) -> intmax_t`
-//!   * `crate::memalloc::stalloc(usize) -> *mut c_void`
 //!   * `crate::error::sh_error!` (diverging), via `bltin.h`'s `error` alias
 
 use core::mem;
@@ -649,9 +648,12 @@ pub unsafe fn test_access(sp: *const libc::stat64, mut stmode: c_int) -> c_int {
         /* XXX stolen almost verbatim from ksh93.... */
         /* on some systems you can be in several groups */
         maxgroups = libc::getgroups(0, ptr::null_mut());
-        groups = crate::memalloc::stalloc(maxgroups as usize * mem::size_of::<libc::gid_t>())
-            as *mut libc::gid_t;
+        /* The C `stalloc`s the array and leaves it to the enclosing mark;
+         * nothing reads it after the scan below, so it is a local. */
+        let mut groupbuf: Vec<libc::gid_t> = vec![0; maxgroups.max(0) as usize];
+        groups = groupbuf.as_mut_ptr();
         n = libc::getgroups(maxgroups, groups);
+        debug_assert!(n <= maxgroups);
         loop {
             n -= 1;
             if n < 0 {

@@ -763,3 +763,193 @@ it belongs to `delete-memalloc`:
   * `ckmalloc` for `ifsregion`, for `wcifs`, and in `_rmescapes`'
     `RMESCAPE_HEAP` arm.
   * `setstackmark` / `pushstackmark` / `popstackmark`.
+
+## What this cost in the port: the last region allocations
+
+Written during `delete-memalloc`, which did not finish -- see "What is
+left, and what it is waiting on" at the end.  Same rule as the sections
+above: each entry is a place where the C's *structure* was doing work its
+*text* did not admit to.
+
+### `ifslastp == NULL` is not "the list is empty" until you check that it is
+
+`recordregion` reuses the static head node `ifsfirst` when `ifslastp` is
+NULL and `ckmalloc`s a node otherwise, so the head is both a list element
+and a sentinel.  Modelling the chain as a `Vec` needs the equality
+"`ifslastp == NULL` iff no region is live", and that is a claim about
+three separate writers rather than a local fact: startup, `ifsfree`, and
+`removerecordregions`' first branch.  All three free the chain behind the
+head *before* nulling `ifslastp`, so the equality holds -- and
+`ifsfirst`'s stale contents are then unreachable, which is what permits
+emptying the `Vec` to throw them away.  Had any one of the three nulled
+the tail pointer while leaving `ifsfirst.next` set, the `Vec` would have
+silently lost regions and no assertion inside `recordregion` would have
+noticed.
+
+The INTOFF/INTON brackets are kept where the C has them, one pair per
+`ckmalloc` and one per `ckfree`, even though an owned `Vec` cannot be
+left half-linked by an interrupt.  They are not protecting the list any
+more; they are fixing the instruction at which a pending SIGINT is
+delivered, and that is not this commit's to move.
+
+### `wcschr` matches the terminator, and `ifsisifs` can ask it to
+
+    isifs = wcschr(wcifs, wc) != NULL;
+
+`wc` is the byte under the cursor, widened.  When that byte is NUL,
+`wcschr` returns a pointer to `wcifs`' own terminator -- non-NULL -- so
+the C treats a NUL inside an IFS region as an IFS character.  `contains`
+over the converted wide string does not, and the difference only shows up
+on input that puts a NUL inside a region, which is exactly what `nulonly`
+regions are for.  The port keeps the C's scan, terminator and all.  This
+is the second time in this decision that a libc string call turned out
+not to be the obvious Rust method; the first was `padvance` returning a
+size rather than a length.
+
+### `_rmescapes`' `stalloc` arm is unreachable, and the reason is a constant
+
+Three arms take the `RMESCAPE_ALLOC` branch: `GROW` writes into the
+expansion buffer, `HEAP` `ckmalloc`s, and the fall-through `stalloc`s.
+`RMESCAPE_ALLOC` is set in exactly two places -- `preglob`, inside
+`if (FNMATCH_IS_ENABLED)`, and `subevalvar`'s literal `ALLOC | GROW`.
+`FNMATCH_IS_ENABLED` is 0, so `preglob` only ever adds `RMESCAPE_GLOB`,
+and the only caller that both allocates and is not `GROW` is
+`expandmeta`'s `preglob(text, RMESCAPE_ALLOC | RMESCAPE_HEAP)` -- written
+out in full at the call site, which is why it survives the constant.  The
+previous pass got the neighbouring claim about this same flag wrong, so
+this one is a `debug_assert` on the arm rather than a sentence, and the
+mutation that proves it live is `echo "a"*`.
+
+The size bound is the other half.  `expandmeta`'s buffer is written
+through a raw cursor that carries no bound of its own, so `fulllen` --
+`strlen(p) + (p - str) + 1` -- is the only thing between the C's
+arithmetic and a heap overflow.  It is exact rather than generous:
+`echo a\**` writes precisely `fulllen` bytes, so shaving one fires the
+assertion.  Asserted against `fulllen` and not `Vec::capacity()`, per the
+glob buffer's entry above.
+
+### `xvasprintf`'s `stackblocksize()` had one customer, and it had already left
+
+`stalloc(MAX(len, stackblocksize()) + 1)` asks for more than the region's
+free space by construction, so it always chains a fresh block.  The
+builtins' pass established why that mattered: `print_escape_str`'s run of
+`X`s sat above the converted string in the *same* block and had to
+survive being read as this call's `printf` argument.  Both of those are
+owned buffers now, so the term has no customer left and the request is
+`len + 1` -- which is all `xvsnprintf` ever writes and all any caller ever
+reads.  Removing it is not a simplification of the C; it is the C's
+reason expiring, and the difference matters because the same expression
+would still be load bearing if the `X`s had not moved first.
+
+### `commandname` outlives `dotcmd` by the width of `evalbltin`'s epilogue
+
+`dotcmd` sets `commandname = fullname` and never restores it.
+`evalbltin` does, but only after `flushall()` and
+`if (outerr(out1)) sh_warnx("%s: I/O error", commandname)` -- so there is
+a window, after `dotcmd` has returned, in which the global still names
+the path `find_dot_file` built and something reads it.  The region covers
+that window because `dotcmd`'s block belongs to `evalcommand`'s mark; a
+local `Vec` does not, and would be freed one statement early.
+
+So the `Vec` is *moved* into a static slot on the way out rather than
+dropped.  Moving a `Vec` moves the header and not the bytes, so the
+pointer stays valid -- asserted, because that is the whole reason the
+line works.  The slot's previous occupant is provably unreferenced: every
+`evalbltin` restores `commandname` before any other `dotcmd` can run, so
+the only window in which a path is still named is the one just described,
+and it admits no second `dotcmd`.
+
+That assertion also caught what the first draft had wrong.
+`find_dot_file` returns its argument unchanged for a name containing `/`,
+without ever touching the out-buffer, so `fullname` is then the expanded
+word and the buffer is empty -- which is what the C does too, and what
+the emptiness test now discriminates on.
+
+### `yylval.name` is per-evaluation, not per-token
+
+`arith_yylex` `stalloc`s each variable name.  Read as a token value it
+looks like a per-token lifetime, and a `Vec<u8>` returned by value would
+compile.  `arith_yacc:assignment` copies `yylval` into a local, recurses
+-- which calls `yylex` again and overwrites `yylval` -- and only *then*
+reads `val.name`, so `a=b=1` has two names live at once.  The lifetime
+the C picked is the whole arithmetic evaluation, which is what `expari`'s
+enclosing mark releases, and the owned form has to say the same thing: a
+list cleared by `arith` on entry.  `arith` is already non-reentrant -- it
+seeds the `arith_buf` cursor from its argument -- so one list suffices,
+and pushing to it moves the inner `Vec` headers but not their bytes, so
+names handed out earlier stay valid.
+
+### `padvance` returns a size, and three `stalloc` callers were using it as one
+
+Recorded in the string-builder section as a property of `padvance`; here
+it is the property of its callers.  `cdcmd`, `find_dot_file` and
+`shellexec`'s `%func` arm each ask for `len` bytes and `strcpy` into
+them, and `len` is one *more* than the string's length when the PATH
+component is empty.  A `Vec` sized from `strlen` is correct for every
+case the corpus has and one byte short on `PATH=:`.  All three size from
+`len` and assert `strlen < len`; the assertion is tight -- it fires on an
+ordinary `cd` through `CDPATH` when shaved by one.
+
+### `popstackmark` versus `Drop`, under the mechanism that is actually there
+
+This decision claims both halves of the region's reason are absent in
+Rust: no destructors, and `longjmp` skipping cleanup.  The first half is
+unconditional.  The second is *true here but not for the reason the
+sentence gives*, and the difference is worth writing down because
+[dec:nsh:errors-are-values] has not landed and the mechanism could still
+change.
+
+`error.rs:raise_longjmp` is `std::panic::panic_any`, `eval.rs:setjmp_catch`
+is `catch_unwind`, and both Cargo profiles set `panic = "unwind"`.  So an
+exception in this port runs every destructor between the raise and the
+catch -- which is precisely what `popstackmark` in the catching frame was
+doing for the region.  That is not a property of Rust; it is a property of
+this port's choice, and `error.rs` records that the choice was forced: a
+real `longjmp` over a `catch_unwind`-armed `jmploc` is undefined and
+segfaulted on every fork and exit path until it was removed.  Had the port
+kept libc's `setjmp`/`longjmp`, `Drop` would not run and every mark would
+still be load bearing.
+
+Two paths still skip destructors and both are correct to:
+`exraise` under `vforked` calls `_exit` directly, and `shellexec` reaches
+`execve`.  In each the address space is about to stop being this shell's,
+so there is nothing to release.
+
+### What is left, and what it is waiting on
+
+`crates/nsh/src/memalloc.rs` still exists.  The region -- `stalloc`,
+`stunalloc`, the `stack_block` chain, `setstackmark`/`pushstackmark`/
+`popstackmark` -- and the checked-malloc wrappers are both still in it.
+Two things hold it up, and they are independent of each other:
+
+  * **`struct strlist`.**  Every remaining `stalloc` outside
+    `mystring.rs:sstrdup` is a `strlist` node or a copy made to feed one:
+    `expandarg`'s `grabexpdest`, `ifsbreakup`'s fields, `addfname_common`,
+    `addfnamealt`, and `expandarg`'s single-field arm.  The consumers span
+    `expand.rs`, `eval.rs` (`fill_arglist`, `parse_command_args`,
+    `evalcommand`'s `argv`, `eprintlist`, `evalfor`) and
+    `miscbltin.rs:readcmd`.  The shape the C uses -- a `char *` list with a
+    `lastp` tail pointer, spliced in the middle by `expandmeta` and merge-
+    sorted by `msort` -- becomes a `Vec` of owned, NUL-terminated fields
+    with `lastp` as an index; `msort` is `sort_by` and stable in the same
+    direction the C's merge is.  It is one commit because the moment
+    `strlist.text` stops being a region pointer every reader changes at
+    once, which is what docs/idiomatization.md 5 says about this step.
+    Once it lands, the marks have nothing left to release and the region
+    goes with them.
+
+  * **The checked-malloc wrappers.**  `ckmalloc`/`ckrealloc`/`ckfree`/
+    `savestr` have 30/3/41/13 references across `var.rs`, `alias.rs`,
+    `jobs.rs`, `options.rs`, `trap.rs`, `input.rs`, `redir.rs`, `exec.rs`
+    and `nodes.rs`.  These are the hash tables and the process-state
+    structs, not the region, and `var.rs`/`alias.rs` are out of bounds for
+    this node twice over: another pass owns them, and
+    docs/idiomatization.md 2.3 step 4 records that changing their
+    iteration order is a category-3 divergence over thirty corpus cases
+    that cannot land before `sanctioned-divergences`.  `exec.rs`'s
+    `tblentry` -- a `ckmalloc`'d struct with a flexible array member
+    holding `Rc::into_raw` of a function node -- belongs with them.
+
+So `memalloc.rs` survives this node in two pieces with two different
+owners.  Deleting the file is not one more commit after `strlist`; it is
+`strlist` plus whichever node takes the tables.

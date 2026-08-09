@@ -396,6 +396,9 @@ pub unsafe fn arith(s: *const c_char) -> intmax_t {
 
     arith_startbuf = s;
     arith_buf = arith_startbuf;
+    /* The names `yylex` produces belong to this evaluation; the C's
+     * `stalloc`s were released by `expari`'s mark, which is here. */
+    crate::arith_yylex::arith_names_reset();
 
     result = assignment(yylex(), 0);
 

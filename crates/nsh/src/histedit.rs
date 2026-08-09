@@ -23,7 +23,6 @@
 //!   * `crate::error::{jmploc, jmp_buf, handler, setjmp, longjmp,
 //!     sh_error!, suppressint, intpending, onint}`
 //!   * `crate::output::{out1fmt!, outfmt!, out1str, out2str, out2}`
-//!   * `crate::memalloc::stalloc`
 //!   * `crate::options::{optlist, arg0, optionarg}`
 //!   * `crate::var::{bltinlookup, histsizeval}`
 //!   * `crate::mystring::is_number`
@@ -696,13 +695,18 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
             retval = libedit::history!(hist, &mut he, direction);
         }
         if !editor.is_null() {
-            let editcmd: *mut c_char;
+            /* The C `stalloc`s `strlen(editor) + strlen(editfile) + 2` —
+             * the two strings, the separating space and the terminator —
+             * and lets `fccmd`'s enclosing mark release it.  `evalstring`
+             * copies what it is given, so the buffer is dead as soon as
+             * that call returns and can be this block's. */
+            let n = libc::strlen(editor) + libc::strlen(editfile.as_ptr()) + 2;
+            let mut editcmdbuf: Vec<u8> = vec![0; n];
+            let editcmd: *mut c_char = editcmdbuf.as_mut_ptr() as *mut c_char;
 
             libc::fclose(efp);
-            editcmd = crate::memalloc::stalloc(
-                libc::strlen(editor) + libc::strlen(editfile.as_ptr()) + 2,
-            ) as *mut c_char;
             sprintf(editcmd, c"%s %s".as_ptr(), editor, editfile.as_ptr());
+            debug_assert!(libc::strlen(editcmd) < n);
             /* XXX - should use no JC command */
             crate::eval::evalstring(editcmd, 0);
             INTON!();

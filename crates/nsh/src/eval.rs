@@ -30,7 +30,7 @@
 
 use bstr::BString;
 use core::ptr::{addr_of_mut, null, null_mut};
-use libc::{c_char, c_int, c_void, size_t};
+use libc::{c_char, c_int};
 
 use crate::builtins::{builtincmd, BUILTIN_ASSIGN, BUILTIN_REGULAR, BUILTIN_SPECIAL};
 use crate::error::{jmploc, FORCEINTON, INTOFF, INTON};
@@ -39,7 +39,7 @@ use crate::exec::{CMDBUILTIN, CMDFUNCTION, CMDNORMAL, CMDUNKNOWN, DO_ERR, DO_NOF
 use crate::expand::{arglist, strlist};
 use crate::expand::{EXP_FULL, EXP_MBCHAR, EXP_REDIR, EXP_TILDE, EXP_VARTILDE};
 use crate::jobs::{job, FORK_NOJOB};
-use crate::memalloc::{popstackmark, setstackmark, stackmark, stalloc, stunalloc};
+use crate::memalloc::{popstackmark, setstackmark, stackmark};
 use crate::nodes::{funcnode, Node};
 use crate::nodes::{
     NAND, NAPPEND, NBACKGND, NCASE, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO, NIF,
@@ -206,7 +206,17 @@ unsafe fn evalcmd(argc: c_int, argv: *mut *mut c_char, flags: c_int) -> c_int {
 pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> c_int {
     let mut smark: stackmark = core::mem::zeroed();
     let mut status: c_int;
-    let s: *mut c_char = crate::mystring::sstrdup(s);
+    /* `sstrdup(s)` and the `stunalloc(s)` at the bottom are one thing:
+     * `setinputstring` keeps the pointer rather than copying, so the text
+     * has to outlive every `popstackmark` the parse below performs — which
+     * is why the copy is taken *before* the mark is set and released by
+     * hand afterwards.  Owning it says both halves at once, and says them
+     * on the unwind path too, where the C's `stunalloc` never runs. */
+    let owned: Vec<u8> = {
+        let n = libc::strlen(s);
+        core::slice::from_raw_parts(s as *const u8, n + 1).to_vec()
+    };
+    let s: *mut c_char = owned.as_ptr() as *mut c_char;
 
     crate::input::setinputstring(s);
     setstackmark(&mut smark);
@@ -241,7 +251,7 @@ pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> c_int {
     }
     popstackmark(&mut smark);
     crate::input::popfile();
-    stunalloc(s as *mut c_void);
+    drop(owned);
 
     status
 }
@@ -992,9 +1002,17 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
 
     localvar_stop = crate::var::pushlocalvars(vlocal);
 
-    /* Reserve one extra spot at the front for shellexec. */
-    nargv = stalloc(core::mem::size_of::<*mut c_char>() * (argc as usize + 2)) as *mut *mut c_char;
-    nargv = nargv.add(1);
+    /* Reserve one extra spot at the front for shellexec.
+     *
+     * The C `stalloc`s `argc + 2` pointers and hands out `+ 1`, so
+     * `shellexec` can write `argv[-1]`; the block lives until this
+     * function's `popstackmark`.  A `Vec` of the same length owned by
+     * this frame is the same lifetime, and covers the unwind out of a
+     * builtin that the C's mark covers only because the handler pops
+     * it. */
+    let mut argvbuf: Vec<*mut c_char> = vec![null_mut(); argc as usize + 2];
+    let argvend: *mut *mut c_char = argvbuf.as_mut_ptr().add(argc as usize + 2);
+    nargv = argvbuf.as_mut_ptr().add(1);
     argv = nargv;
     sp = arglist.list;
     while !sp.is_null() {
@@ -1004,6 +1022,12 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
         sp = (*sp).next;
     }
     *nargv = null_mut();
+    /* `argc` was counted off the same list a few lines above, so the
+     * terminator lands at `argvbuf[argc + 1]` and the last slot is spare.
+     * A `stalloc`'d block that is one short overruns into whatever the
+     * region hands out next; a `Vec` that is one short is a heap
+     * overflow, so the count is asserted rather than assumed. */
+    debug_assert!(nargv < argvend);
 
     lastarg = null_mut();
     if iflag() != 0 && funcline == 0 && argc > 0 {

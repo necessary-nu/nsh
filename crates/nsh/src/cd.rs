@@ -6,10 +6,10 @@
 
 use bstr::BString;
 use core::ptr::{addr_of, addr_of_mut, null_mut};
-use libc::{c_char, c_int, c_void, size_t};
+use libc::{c_char, c_int, c_void};
 
 use crate::error::{INTOFF, INTON};
-use crate::memalloc::{savestr, stalloc};
+use crate::memalloc::savestr;
 use crate::mystring::{dotdir, homestr, nullstr};
 use crate::options::{argptr, nextopt};
 use crate::output::VaArg;
@@ -94,6 +94,10 @@ pub unsafe fn cdcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     }
 
     let mut out = false;
+    /* The CDPATH candidate `docd` is handed, copied out of `padvance`'s
+     * buffer.  Held across the whole loop rather than per iteration
+     * because `p` still points into it after the `break`. */
+    let mut keptbuf: Vec<u8> = Vec::new();
     if !step6 {
         if *dest == 0 {
             dest = addr_of!(dotdir) as *const c_char;
@@ -108,10 +112,18 @@ pub unsafe fn cdcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
             c = *p;
             /* `stalloc(len)` took the candidate the C had built in the
              * stack block; the copy is what takes it out of `padvance`'s
-             * buffer, which the `docd` below can overwrite. */
-            let kept = stalloc(len as size_t) as *mut c_char;
-            libc::strcpy(kept, crate::exec::padvance_result());
-            p = kept as *const c_char;
+             * buffer, which the `docd` below can overwrite.  `len` is
+             * `padvance`'s *allocation* size, one more than the string's
+             * length when the PATH component is empty, so the buffer is
+             * sized from it and the bytes are copied by hand. */
+            keptbuf.clear();
+            keptbuf.resize(len as usize, 0);
+            libc::strcpy(
+                keptbuf.as_mut_ptr() as *mut c_char,
+                crate::exec::padvance_result(),
+            );
+            debug_assert!(libc::strlen(keptbuf.as_ptr() as *const c_char) < len as usize);
+            p = keptbuf.as_ptr() as *const c_char;
 
             if libc::stat64(p, &mut statb) >= 0 && (statb.st_mode & libc::S_IFMT) == libc::S_IFDIR
             {
@@ -198,7 +210,13 @@ unsafe fn updatepwd(dir: *const c_char) -> *const c_char {
 
     /* #ifdef __CYGWIN__ — not selected. */
 
-    cdcomppath = crate::mystring::sstrdup(dir);
+    /* `sstrdup(dir)` — `strtok` below writes NULs into the copy, so it
+     * cannot be `dir` itself, and the copy has to outlive the whole walk.
+     * That is a local buffer; the C's was the region's, released by
+     * `cdcmd`'s enclosing mark. */
+    let mut cdcompbuf: Vec<u8> =
+        core::slice::from_raw_parts(dir as *const u8, libc::strlen(dir) + 1).to_vec();
+    cdcomppath = cdcompbuf.as_mut_ptr() as *mut c_char;
     let new = &mut *addr_of_mut!(pwdbuf);
     new.clear();
     if *dir != b'/' as c_char {
