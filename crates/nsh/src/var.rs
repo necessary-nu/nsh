@@ -330,13 +330,35 @@ pub unsafe fn environment() -> Vec<*mut c_char> {
     envp
 }
 
+/// One entry of `vartab`: one of `varinit`'s sixteen, which the table
+/// borrows and never drops, or a `var` the table owns.
+///
+/// The `Box` is not decoration. `localvar::Saved` holds the entry's
+/// address across a whole function invocation, and `setvareq` may file or
+/// remove other names in between — which a `BTreeMap` answers by moving
+/// the values it holds. Boxing keeps the address the C's `ckmalloc` gave.
+enum VarSlot {
+    Builtin(*mut var),
+    Owned(Box<var>),
+}
+
+impl VarSlot {
+    #[inline]
+    unsafe fn as_ptr(&mut self) -> *mut var {
+        match self {
+            VarSlot::Builtin(p) => *p,
+            VarSlot::Owned(b) => &mut **b as *mut var,
+        }
+    }
+}
+
 /// Every variable, by name. dash's `vartab` is `struct var *[39]` walked
 /// through `hashval`; this is the same set of separately allocated `var`s
 /// filed in an order that means something. See the module comment.
-static mut vartab: BTreeMap<BString, *mut var> = BTreeMap::new();
+static mut vartab: BTreeMap<BString, VarSlot> = BTreeMap::new();
 
 #[inline]
-unsafe fn vartab_mut() -> &'static mut BTreeMap<BString, *mut var> {
+unsafe fn vartab_mut() -> &'static mut BTreeMap<BString, VarSlot> {
     &mut *addr_of_mut!(vartab)
 }
 
@@ -460,7 +482,7 @@ pub unsafe fn initvar() {
          * address, and their `text` is `VTEXTFIXED`. Only the link into the
          * table changes — the map holds the address, it does not own the
          * `var`. */
-        vartab_mut().insert(varname((*vp).text).to_owned(), vp);
+        vartab_mut().insert(varname((*vp).text).to_owned(), VarSlot::Builtin(vp));
         vp = vp.add(1);
         if !(vp < end) {
             break;
@@ -592,8 +614,9 @@ pub unsafe fn setvareq(mut s: *mut c_char, mut flags: c_int) -> *mut var {
         } else if ((*vp).flags & VSTRFIXED) != 0 {
             bits = VSTRFIXED as c_uint;
         } else {
+            /* The C unlinks and `ckfree`s the node; taking the entry out of
+             * the map drops the `Box` that is the node. */
             vartab_mut().remove(&key);
-            ckfree(vp as *mut c_void);
             /* out_free: */
             if (flags & (VTEXTFIXED | VSTACK | VNOSAVE)) == VNOSAVE {
                 ckfree(s as *mut c_void);
@@ -613,9 +636,16 @@ pub unsafe fn setvareq(mut s: *mut c_char, mut flags: c_int) -> *mut var {
             return vp;
         }
         /* not found */
-        vp = ckmalloc(core::mem::size_of::<var>() as size_t) as *mut var;
-        (*vp).func = None;
-        vartab_mut().insert(varname(s).to_owned(), vp);
+        /* The C leaves `flags` and `text` uninitialised here and fills
+         * them in below, which every path from this point reaches. */
+        vp = vartab_mut()
+            .entry(varname(s).to_owned())
+            .or_insert(VarSlot::Owned(Box::new(var {
+                flags: 0,
+                text: null_mut(),
+                func: None,
+            })))
+            .as_ptr();
     }
     if (flags & (VTEXTFIXED | VSTACK | VNOSAVE)) == 0 {
         s = savestr(s);
@@ -687,7 +717,8 @@ pub unsafe fn listvars(on: c_int, off: c_int) -> Vec<*mut c_char> {
     let mask = on | off;
     let mut ep = Vec::new();
 
-    for &vp in vartab_mut().values() {
+    for slot in vartab_mut().values_mut() {
+        let vp = slot.as_ptr();
         if ((*vp).flags & mask) == on {
             ep.push((*vp).text as *mut c_char);
         }
@@ -1010,8 +1041,102 @@ pub unsafe fn unsetvar(s: *const c_char) {
 /// without a second traversal. A map removes by key, so this returns the
 /// entry itself and NULL when there is none.
 unsafe fn findvar(name: *const c_char) -> *mut var {
-    match vartab_mut().get(varname(name)) {
-        Some(&vp) => vp,
+    match vartab_mut().get_mut(varname(name)) {
+        Some(slot) => slot.as_ptr(),
         None => null_mut(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::testutil::{lock, s, CStr0};
+
+    /// The whole buffer `vp->text` points at, `len` bytes of it.
+    unsafe fn text_bytes(name: &str, len: usize) -> Vec<u8> {
+        let n = CStr0::new(name);
+        let vp = findvar(n.p());
+        assert!(!vp.is_null(), "{name} is not in the table");
+        core::slice::from_raw_parts((*vp).text as *const u8, len).to_vec()
+    }
+
+    // [spec:dash:sem:var.setvar-fn/test]
+    // [spec:dash:sem:var.varnull-fn/test]
+    /// `setvar` builds one `NAME=value` buffer, and an unset variable's
+    /// buffer ends in two NULs -- which is not decoration: `varnull`
+    /// returns the byte after the first one and every reader of an unset
+    /// variable's value stops there.
+    #[test]
+    fn setvar_files_a_name_equals_value() {
+        let _g = lock();
+        unsafe {
+            let name = CStr0::new("Tsetvar");
+            let val = CStr0::new("hello");
+
+            setvar(name.p(), val.p(), 0);
+            assert_eq!(text_bytes("Tsetvar", 13), b"Tsetvar=hello".to_vec());
+            assert_eq!(s(lookupvar(name.p())), "hello");
+
+            /* VSTRFIXED so the entry survives being unset and can be read. */
+            setvar(name.p(), null_mut(), VSTRFIXED);
+            assert_eq!(text_bytes("Tsetvar", 9), b"Tsetvar\0\0".to_vec());
+            let vp = findvar(name.p());
+            assert_eq!(s(varnull((*vp).text)), "");
+            assert!(lookupvar(name.p()).is_null());
+        }
+    }
+
+    // [spec:dash:sem:var.poplocalvars-fn/test]
+    /// A frame restores in reverse order of declaration, so two `local`s
+    /// on one name leave the outermost value behind, not the middle one.
+    #[test]
+    fn a_frame_restores_in_reverse_order() {
+        let _g = lock();
+        unsafe {
+            let name = CStr0::new("Tframe");
+            let two = CStr0::new("Tframe=two");
+            let three = CStr0::new("Tframe=three");
+
+            setvar(name.p(), CStr0::new("one").p(), 0);
+            let stop = pushlocalvars(1);
+            mklocal(two.p() as *mut c_char, 0);
+            mklocal(three.p() as *mut c_char, 0);
+            assert_eq!(s(lookupvar(name.p())), "three");
+
+            unwindlocalvars(stop);
+            assert_eq!(s(lookupvar(name.p())), "one");
+            unsetvar(name.p());
+        }
+    }
+
+    // [spec:dash:sem:var.mklocal-fn/test]
+    /// A save holds the variable's address for the whole invocation, so an
+    /// entry must not move while it is in the table -- and filing another
+    /// two hundred names that sort below it is what would move it.
+    #[test]
+    fn a_saved_entry_does_not_move() {
+        let _g = lock();
+        unsafe {
+            let name = CStr0::new("Tchurn");
+            let local = CStr0::new("Tchurn=inner");
+
+            setvar(name.p(), CStr0::new("outer").p(), 0);
+            let stop = pushlocalvars(1);
+            mklocal(local.p() as *mut c_char, 0);
+            let entry = findvar(name.p());
+
+            let filler: Vec<CStr0> = (0..200).map(|i| CStr0::new(&format!("Ta{i:04}"))).collect();
+            for f in &filler {
+                setvar(f.p(), CStr0::new("x").p(), 0);
+            }
+            assert_eq!(findvar(name.p()), entry, "the entry moved under the save");
+
+            unwindlocalvars(stop);
+            assert_eq!(s(lookupvar(name.p())), "outer");
+            for f in &filler {
+                unsetvar(f.p());
+            }
+            unsetvar(name.p());
+        }
     }
 }
