@@ -2187,6 +2187,14 @@ children (
                 priority 0
                 kind @refactor
                 deps (owned-strings)
+                log (
+                    {
+                        at 2026-08-09T15:08:07.242763957Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Scope rider: the `bltin/` module tree goes with the signature change, because both rewrite the same files and neither should churn them twice.\n\n`crates/nsh/src/bltin/` is a C linkage artifact with no Rust counterpart. `src/bltin/bltin.h` exists so `printf.c`, `test.c` and `times.c` could compile standalone as the BSD utilities they were imported from; it is a pile of `#define`s remapping stdio names onto the shell's output layer, and we port only the `SHELL`-defined configuration. Measured on the current tree: of the 19 macros `bltin/mod.rs` transcribes, 4 ever expand (`printf!` x4, `error!` x6, `warnx!` x3, `putchar!` x1) and the `FILE = crate::output::output` alias is used zero times — `test.rs`'s ten \"FILE\" hits are the `FILEX`/`FILEXIST`/`FILEQ` token names. 15 of 19 exist to mirror a header for a build we do not produce.\n\nThe split it imposes is arbitrary in Rust: 5 of the 40 dispatch entries in `builtins.rs` resolve into `bltin/`, 3 into `miscbltin.rs`, and the other 32 into whichever module owns the data (eval 7, jobs 5, var 4, options/exec/cd 3 each). `echocmd` lives in `printf.rs` because `printf.c` defines it, and `parser.rs:1308` already reaches across into `crate::bltin::printf::conv_escape` for `$'...'`, so the escape decoder is shared by three callers with no module of its own.\n\n`bltin/test.rs` is the sharpest instance and the reason this got noticed: `test` is where unit tests live by convention in Rust and is the name of the built-in test crate, so `crate::bltin::test::testcmd` reads as the builtins module's own test suite, and a `#[cfg(test)] mod test` added to `bltin/mod.rs` out of habit is a duplicate-definition error.\n\nTarget: a `builtins/` tree whose modules are named for the commands, the `bltin.h` shim deleted in favour of direct `crate::output` calls, the escape decoder given a home its three callers can name, and the `test` builtin under a module name that is not `test`. `docs/idiomatization.md` §3.7 records crate/module structure as an uncovered gap but scopes it to §1.6 — the crate rename, the frontend split and the `nshedit` path — so nothing below crate level was covered before this note."
+                    }
+                )
             }
 
             {
