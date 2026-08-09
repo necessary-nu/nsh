@@ -905,15 +905,18 @@ pub unsafe fn popfile() {
     if !cur_pf().spfree.is_empty() {
         freestrings();
     }
-    /* The C's loop here is `while (pf->strpush) { popstring(); … }`, but
-     * `parsefile` has already been moved to the outer frame, so `popstring`
-     * pops the outer frame's stack while the condition tests the dying
-     * one's — it walks the wrong stack and then dereferences NULL. Release
-     * the dying frame's own pushes, which is what the loop was written to
-     * do before the `spfree` rework moved the assignment above it. */
-    release_strpush(core::mem::take(&mut pf.strpush));
-    release_strpush(core::mem::take(&mut pf.spfree));
-    /* `ckfree(pf)` */
+    /* `ckfree(pf)` takes the dying level's `spfree` chain with it, and the
+     * `ALIASINUSE` bits on it are never cleared: an alias expanded inside an
+     * old-style backquote, or any other level that ends with the alias
+     * already popped but not yet freed, stays marked in use for the rest of
+     * the shell's life and never expands again. That is observable, so the
+     * chain is dropped here rather than released.
+     *
+     * The C's `while (pf->strpush) { popstring(); … }` above the free reads
+     * `parsefile->strpush`, and `parsefile` was moved to the outer level two
+     * lines earlier — so the loop pops the wrong stack and then walks into a
+     * NULL `strpush`. It cannot run in any case that survives; these go the
+     * same way as the chain. */
     drop(pf);
 
     INTON();
