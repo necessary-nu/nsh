@@ -1101,7 +1101,6 @@ pub unsafe fn removerecordregions(endoff: c_int) {
 // [spec:dash:def:expand.expari-fn]
 // [spec:dash:sem:expand.expari-fn]
 unsafe fn expari(mut start: *mut c_char, flag: c_int) -> *mut c_char {
-    let mut sm: crate::memalloc::stackmark = mem::zeroed();
     let begoff: c_int;
     let len: c_int;
     let result: intmax_t;
@@ -1121,27 +1120,26 @@ unsafe fn expari(mut start: *mut c_char, flag: c_int) -> *mut c_char {
          * winds the cursor back over the arithmetic text, which then stays
          * where it is and is read by `arith` from *past* the cursor.
          *
-         * The C protects it with `pushstackmark(&sm, endoff)`: `endoff` is
-         * how much of the region the half-built word occupies, and grabbing
-         * that much keeps `arith`'s own `stalloc`s off it.  The word is no
-         * longer in the region, so there is nothing for `arith` to collide
-         * with and the length is 0; the mark now only releases what `arith`
-         * allocated, which is its other job.
+         * The C protects it with `pushstackmark(&sm, endoff)`, which does
+         * two jobs: `endoff` is how much of the region the half-built word
+         * occupies, and grabbing that much keeps `arith`'s own `stalloc`s
+         * off it, while the save/restore releases them afterwards.  Neither
+         * job has a customer left.
          *
-         * What the reservation is replaced by is an argument rather than a
-         * mechanism: `arith` (and `yylex` under it) allocate from the
-         * region and never touch this buffer, so the bytes above the
-         * truncated length cannot be moved or overwritten while `arith`
-         * reads them.  `Vec::reserve` would move them — it copies only the
-         * first `len` bytes — but nothing on this path reserves. */
+         * The reservation is replaced by an argument rather than a
+         * mechanism: `arith` (and `yylex` under it) do not touch this
+         * buffer, so the bytes above the truncated length cannot be moved
+         * or overwritten while `arith` reads them.  `Vec::reserve` would
+         * move them — it copies only the first `len` bytes — but nothing on
+         * this path reserves.  And what the restore released,
+         * `arith_yylex`'s variable names, is a list `arith` clears on
+         * entry. */
         expb().truncate(begoff as usize);
         start = expbase().offset(begoff as isize);
 
         removerecordregions(begoff);
 
-        crate::memalloc::pushstackmark(&mut sm, 0);
         result = crate::arith_yacc::arith(start);
-        crate::memalloc::popstackmark(&mut sm);
 
         len = cvtnum(result, flag, expb()) as c_int;
 
@@ -1167,7 +1165,6 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
     let mut p: *mut c_char;
     let mut dest: *mut c_char;
     let startloc: c_int;
-    let mut smark: crate::memalloc::stackmark = mem::zeroed();
 
     'out: {
         if (flag & EXP_DISCARD) != 0 {
@@ -1176,14 +1173,12 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
 
         crate::error::INTOFF();
         startloc = expdest_off();
-        /* `pushstackmark(&smark, startloc)`: the length existed to keep
-         * `makejob`'s region allocations off the half-built word.  The word
-         * is no longer in the region — see `expari` for the same change —
-         * so the mark's remaining job is releasing what `evalbackcmd`
-         * allocated, and it needs no length. */
-        crate::memalloc::pushstackmark(&mut smark, 0);
+        /* `pushstackmark(&smark, startloc)`: the length kept `makejob`'s
+         * region allocations off the half-built word, and the save/restore
+         * released them afterwards.  The word is not in the region and
+         * neither is anything `evalbackcmd` reaches, so both halves are
+         * gone. */
         crate::eval::evalbackcmd(cmd, &mut in_ as *mut crate::eval::backcmd);
-        crate::memalloc::popstackmark(&mut smark);
 
         p = in_.buf;
         i = in_.nleft;
@@ -3403,20 +3398,17 @@ pub unsafe fn _rmescapes(
 // [spec:dash:def:expand.casematch-fn]
 // [spec:dash:sem:expand.casematch-fn]
 pub unsafe fn casematch(pattern: &crate::nodes::Node, val: *const c_char) -> c_int {
-    let mut smark: crate::memalloc::stackmark = mem::zeroed();
     let result: c_int;
 
-    crate::memalloc::setstackmark(&mut smark);
+    /* `setstackmark(&smark)` — it released what `argstr` allocated from the
+     * region for backquotes and arithmetic.  Neither allocates from it. */
     argbackq = pattern.narg().backquote.as_slice();
     /* STARTSTACKSTR(expdest) */
     expb().clear();
     argstr(pattern.narg().text.as_ptr(), EXP_TILDE | EXP_CASE);
     ifsfree();
-    /* The C reads the word back as `stackblock()`; the mark that follows
-     * still has work to do, because `argstr` can `stalloc` for backquotes
-     * and arithmetic. */
+    /* The C reads the word back as `stackblock()`. */
     result = patmatch(expbase(), val);
-    crate::memalloc::popstackmark(&mut smark);
     result
 }
 

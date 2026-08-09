@@ -23,7 +23,6 @@ use crate::input::{
     pgetc, pgetc_eoa, popfile, pungetc, pungetn, pushstring, setinputstring, unwindfiles,
     whichprompt, PEOA,
 };
-use crate::memalloc::{popstackmark, pushstackmark, stackmark};
 use crate::output::{fmtstr, VaArg};
 use crate::nodes::{
     heredoc_body, narg, nbinary, ncase, nclist, ncmd, ndefun, ndup, nfile, nfor, nhere, nif,
@@ -2274,7 +2273,6 @@ unsafe fn synerror(msg: *const c_char) -> ! {
 // [spec:dash:sem:parser.setprompt-fn]
 #[inline(never)]
 unsafe fn setprompt(which: c_int) {
-    let mut smark: stackmark = mem::zeroed();
     let show: c_int;
 
     needprompt = 0;
@@ -2283,9 +2281,10 @@ unsafe fn setprompt(which: c_int) {
     /* #ifdef SMALL: show = 1 */
     show = crate::histedit::el.is_null() as c_int;
     if show != 0 && (*crate::input::parsefile).nleft == 0 {
-        pushstackmark(&mut smark, crate::memalloc::stackblocksize());
+        /* `pushstackmark(&smark, stackblocksize())` bounded the prompt
+         * `expandstr` had left in the region for `out2str` to read.  The
+         * expansion buffer is owned, so there is nothing to bound. */
         crate::output::out2str(getprompt(ptr::null_mut()));
-        popstackmark(&mut smark);
     }
 }
 

@@ -39,7 +39,6 @@ use crate::exec::{CMDBUILTIN, CMDFUNCTION, CMDNORMAL, CMDUNKNOWN, DO_ERR, DO_NOF
 use crate::expand::{arglist, strlist};
 use crate::expand::{EXP_FULL, EXP_MBCHAR, EXP_REDIR, EXP_TILDE, EXP_VARTILDE};
 use crate::jobs::{job, FORK_NOJOB};
-use crate::memalloc::{popstackmark, setstackmark, stackmark};
 use crate::nodes::{funcnode, Node};
 use crate::nodes::{
     NAND, NAPPEND, NBACKGND, NCASE, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO, NIF,
@@ -204,7 +203,6 @@ unsafe fn evalcmd(argc: c_int, argv: *mut *mut c_char, flags: c_int) -> c_int {
 // [spec:dash:def:eval.evalstring-fn]
 // [spec:dash:sem:eval.evalstring-fn]
 pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> c_int {
-    let mut smark: stackmark = core::mem::zeroed();
     let mut status: c_int;
     /* `sstrdup(s)` and the `stunalloc(s)` at the bottom are one thing:
      * `setinputstring` keeps the pointer rather than copying, so the text
@@ -219,7 +217,9 @@ pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> c_int {
     let s: *mut c_char = owned.as_ptr() as *mut c_char;
 
     crate::input::setinputstring(s);
-    setstackmark(&mut smark);
+    /* `setstackmark(&smark)` — the mark bounded what the parse below and
+     * each `evaltree` allocated from the region.  Neither allocates from
+     * it any more; see `memalloc::region_untouched`. */
 
     status = 0;
     loop {
@@ -247,9 +247,13 @@ pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> c_int {
                 break;
             }
         }
-        popstackmark(&mut smark);
+        /* `popstackmark(&smark)` — one per parsed command, and one on the
+         * way out. */
     }
-    popstackmark(&mut smark);
+    debug_assert!(
+        crate::memalloc::region_untouched(),
+        "the region has a caller again; a mark would be load bearing"
+    );
     crate::input::popfile();
     drop(owned);
 
@@ -271,11 +275,25 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> c_int {
      * the six is as good, and `evaltree` itself no longer fits the type,
      * because the leaf evaluators all dereference their node. */
     let mut evalfn: unsafe fn(&Node, c_int) -> c_int = evalcommand;
-    let mut smark: stackmark = core::mem::zeroed();
     let isor: libc::c_uint;
     let mut status: c_int = 0;
 
-    setstackmark(&mut smark);
+    /* `setstackmark(&smark)`, matched by the `popstackmark` at `out:`.
+     * This is the region's broadest customer — it releases whatever the
+     * command below allocated — and it has nothing left to release: with
+     * `strlist` owning its bytes, no shell path calls `stalloc` at all.
+     *
+     * That is a claim about every command of every corpus case rather than
+     * about the source, so it is checked here rather than argued.  Nothing
+     * winds `stacknxt` back now that the marks are gone, so a single
+     * `stalloc` anywhere fails this from then on — which is why the check
+     * at the *head* of a command is enough to catch the one before it, and
+     * why `main.c:cmdloop` carries the same check where its `popstackmark`
+     * was, to cover the last one. */
+    debug_assert!(
+        crate::memalloc::region_untouched(),
+        "the region has a caller again; a mark would be load bearing"
+    );
 
     'out_lbl: {
         if nflag() != 0 {
@@ -422,8 +440,6 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> c_int {
         if (flags & EV_EXIT) != 0 {
             break 'exexit;
         }
-
-        popstackmark(&mut smark);
 
         return exitstatus;
     }
