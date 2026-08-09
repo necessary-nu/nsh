@@ -17,12 +17,11 @@
 //! gives for free instead of a `qsort` at print time.
 
 use bstr::{BStr, BString};
-use libc::{c_char, c_int, c_uint, c_void, intmax_t, size_t};
+use libc::{c_char, c_int, c_uint, intmax_t, size_t};
 use std::collections::BTreeMap;
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 
 use crate::error::{INTOFF, INTON};
-use crate::memalloc::{ckfree, ckmalloc, savestr};
 use crate::mystring::nullstr;
 use crate::options::{argptr, getoptsreset, nextopt, optlist, optschanged, NOPTS};
 use crate::output::VaArg;
@@ -53,16 +52,55 @@ pub const VNOSAVE: c_int = 0x100; /* when text is on the heap before setvareq */
 /// variable carries `VFULL` (see `varfunc`).  `None` means no callback.
 pub type varfunc_t = Option<unsafe fn(*const c_char)>;
 
+/// A variable's `NAME=value` bytes, and who they belong to.
+///
+/// The C keeps one `const char *` and answers "who frees it" from
+/// `flags & (VTEXTFIXED|VSTACK)`: clear means the shell allocated it,
+/// set means it is a `static` in this module or an `environ` entry the
+/// process was started with. The two answers are the two variants, and
+/// the flag bit is now a description of the type rather than a stand-in
+/// for it — [`setvareq_text`] asserts they agree.
+///
+/// `Box<[u8]>` rather than a growable buffer, because the address has to
+/// hold still. `listvars` hands these pointers to `execve` as `envp`, and
+/// `changelocale` hands one to `putenv`, which glibc stores without
+/// copying; a buffer that could reallocate would invalidate both.
+enum VarText {
+    Fixed(*const c_char),
+    /// NUL-terminated, and the terminator is counted.
+    Owned(Box<[u8]>),
+}
+
+impl VarText {
+    /// `vp->text`, as the `char *` every reader wants.
+    #[inline]
+    fn as_ptr(&self) -> *const c_char {
+        match self {
+            VarText::Fixed(p) => *p,
+            VarText::Owned(b) => {
+                debug_assert_eq!(b.last(), Some(&0), "a variable is a C string");
+                b.as_ptr() as *const c_char
+            }
+        }
+    }
+}
+
+/// `savestr(p)`: the C string at `p`, terminator included, in a buffer of
+/// its own.
+unsafe fn cstring_box(p: *const c_char) -> Box<[u8]> {
+    let n = libc::strlen(p);
+    core::slice::from_raw_parts(p as *const u8, n + 1).into()
+}
+
 // [spec:dash:def:var.var]
 /// The C carries a `struct var *next` here, the link in the hash chain.
 /// `vartab` is an ordered map now, so the link is the map's business and the
 /// field is gone; the struct is still separately allocated and never moved,
 /// because `localvar.vp` holds its address across a whole function call.
-#[repr(C)]
 pub struct var {
-    pub flags: c_int,        /* flags are defined above */
-    pub text: *const c_char, /* name=value */
-    pub func: varfunc_t,     /* called when the variable gets set/unset */
+    pub flags: c_int,    /* flags are defined above */
+    text: VarText,       /* name=value */
+    pub func: varfunc_t, /* called when the variable gets set/unset */
 }
 
 // [spec:dash:def:var.localvar]
@@ -79,7 +117,7 @@ pub struct var {
 /// The sentinel is sound because no variable in the table can have flags
 /// exactly `VUNSET`: `setvareq` stores an entry only when the incoming or
 /// inherited flags carry one of `VEXPORT|VREADONLY|VSTRFIXED` as well.
-pub enum localvar {
+enum localvar {
     /// `local -`: `optlist` copied whole. The C `ckmalloc`s
     /// `sizeof(optlist)` and keeps the copy in `text`; the array is a
     /// fixed-size `Copy` value, so it is simply held.
@@ -88,11 +126,13 @@ pub enum localvar {
     /// `poplocalvars` takes it back out.
     Unset { vp: *mut var },
     /// The variable was in the table; these are its flags and its text
-    /// from before `local` named it.
+    /// from before `local` named it. The save *owns* the text — `vp`
+    /// borrows it until `poplocalvars` hands it back, which is what the
+    /// C's `vp->flags |= VTEXTFIXED` was saying.
     Saved {
         vp: *mut var,
         flags: c_int,
-        text: *const c_char,
+        text: VarText,
     },
 }
 
@@ -155,84 +195,84 @@ unsafe fn changelocale(val: *const c_char) {
 pub static mut varinit: [var; 16] = [
     var {
         flags: VSTRFIXED | VTEXTFIXED,
-        text: addr_of!(defifsvar) as *const c_char,
+        text: VarText::Fixed(addr_of!(defifsvar) as *const c_char),
         func: Some(crate::expand::changeifs),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VUNSET,
-        text: b"MAIL\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"MAIL\0\0".as_ptr() as *const c_char),
         func: Some(crate::mail::changemail),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VUNSET,
-        text: b"MAILPATH\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"MAILPATH\0\0".as_ptr() as *const c_char),
         func: Some(crate::mail::changemail),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED,
-        text: addr_of!(defpathvar) as *const c_char,
+        text: VarText::Fixed(addr_of!(defpathvar) as *const c_char),
         func: Some(crate::exec::changepath),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED,
-        text: b"PS1=$ \0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"PS1=$ \0".as_ptr() as *const c_char),
         func: None,
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED,
-        text: b"PS2=> \0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"PS2=> \0".as_ptr() as *const c_char),
         func: None,
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED,
-        text: b"PS4=+ \0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"PS4=+ \0".as_ptr() as *const c_char),
         func: None,
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VNOFUNC,
-        text: addr_of!(defoptindvar) as *const c_char,
+        text: VarText::Fixed(addr_of!(defoptindvar) as *const c_char),
         func: Some(getoptsreset),
     },
     /* #ifdef WITH_LINENO */
     var {
         flags: VSTRFIXED | VTEXTFIXED,
-        text: addr_of!(linenovar) as *const c_char,
+        text: VarText::Fixed(addr_of!(linenovar) as *const c_char),
         func: None,
     },
     /* #ifndef SMALL */
     var {
         flags: VSTRFIXED | VTEXTFIXED | VUNSET,
-        text: b"TERM\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"TERM\0\0".as_ptr() as *const c_char),
         func: None,
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VUNSET,
-        text: b"HISTSIZE\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"HISTSIZE\0\0".as_ptr() as *const c_char),
         func: Some(crate::histedit::sethistsize),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
-        text: b"LC_ALL\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"LC_ALL\0\0".as_ptr() as *const c_char),
         func: Some(changelocale),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
-        text: b"LC_COLLATE\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"LC_COLLATE\0\0".as_ptr() as *const c_char),
         func: Some(changelocale),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
-        text: b"LC_CTYPE\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"LC_CTYPE\0\0".as_ptr() as *const c_char),
         func: Some(changelocale),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
-        text: b"LC_NUMERIC\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"LC_NUMERIC\0\0".as_ptr() as *const c_char),
         func: Some(changelocale),
     },
     var {
         flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
-        text: b"LANG\0\0".as_ptr() as *const c_char,
+        text: VarText::Fixed(b"LANG\0\0".as_ptr() as *const c_char),
         func: Some(changelocale),
     },
 ];
@@ -280,40 +320,40 @@ pub unsafe fn vhistsize() -> *mut var {
  * skip over the name, by a hard-coded byte count.
  */
 pub unsafe fn ifsval() -> *const c_char {
-    (*vifs()).text.add(4)
+    (*vifs()).text.as_ptr().add(4)
 }
 pub unsafe fn ifsset() -> c_int {
     (((*vifs()).flags & VUNSET) == 0) as c_int
 }
 pub unsafe fn mailval() -> *const c_char {
-    (*vmail()).text.add(5)
+    (*vmail()).text.as_ptr().add(5)
 }
 pub unsafe fn mpathval() -> *const c_char {
-    (*vmpath()).text.add(9)
+    (*vmpath()).text.as_ptr().add(9)
 }
 pub unsafe fn pathval() -> *const c_char {
-    (*vpath()).text.add(5)
+    (*vpath()).text.as_ptr().add(5)
 }
 pub unsafe fn ps1val() -> *const c_char {
-    (*vps1()).text.add(4)
+    (*vps1()).text.as_ptr().add(4)
 }
 pub unsafe fn ps2val() -> *const c_char {
-    (*vps2()).text.add(4)
+    (*vps2()).text.as_ptr().add(4)
 }
 pub unsafe fn ps4val() -> *const c_char {
-    (*vps4()).text.add(4)
+    (*vps4()).text.as_ptr().add(4)
 }
 pub unsafe fn optindval() -> *const c_char {
-    (*voptind()).text.add(7)
+    (*voptind()).text.as_ptr().add(7)
 }
 pub unsafe fn linenoval() -> *const c_char {
-    (*vlineno()).text.add(7)
+    (*vlineno()).text.as_ptr().add(7)
 }
 pub unsafe fn histsizeval() -> *const c_char {
-    (*vhistsize()).text.add(9)
+    (*vhistsize()).text.as_ptr().add(9)
 }
 pub unsafe fn termval() -> *const c_char {
-    (*vterm()).text.add(5)
+    (*vterm()).text.as_ptr().add(5)
 }
 pub unsafe fn mpathset() -> c_int {
     (((*vmpath()).flags & VUNSET) == 0) as c_int
@@ -456,7 +496,7 @@ unsafe fn varfunc(vp: *mut var) {
         return;
     }
 
-    s = (*vp).text;
+    s = (*vp).text.as_ptr();
     if ((*vp).flags & VFULL) == 0 {
         s = varnull(s);
     }
@@ -482,7 +522,7 @@ pub unsafe fn initvar() {
          * address, and their `text` is `VTEXTFIXED`. Only the link into the
          * table changes — the map holds the address, it does not own the
          * `var`. */
-        vartab_mut().insert(varname((*vp).text).to_owned(), VarSlot::Builtin(vp));
+        vartab_mut().insert(varname((*vp).text.as_ptr()).to_owned(), VarSlot::Builtin(vp));
         vp = vp.add(1);
         if !(vp < end) {
             break;
@@ -492,7 +532,7 @@ pub unsafe fn initvar() {
      * PS1 depends on uid
      */
     if libc::geteuid() == 0 {
-        (*vps1()).text = b"PS1=# \0".as_ptr() as *const c_char;
+        (*vps1()).text = VarText::Fixed(b"PS1=# \0".as_ptr() as *const c_char);
     }
 }
 
@@ -504,10 +544,10 @@ pub unsafe fn initvar() {
 // [spec:dash:def:var.setvar-fn]
 // [spec:dash:sem:var.setvar-fn]
 pub unsafe fn setvar(name: *const c_char, val: *const c_char, mut flags: c_int) -> *mut var {
-    let mut p: *mut c_char;
+    let p: *mut c_char;
     let q: *mut c_char;
     let namelen: size_t;
-    let nameeq: *mut c_char;
+    let mut nameeq: Vec<u8>;
     let mut vallen: size_t;
     let vp: *mut var;
 
@@ -529,15 +569,20 @@ pub unsafe fn setvar(name: *const c_char, val: *const c_char, mut flags: c_int) 
         vallen = libc::strlen(val) as size_t;
     }
     INTOFF();
-    nameeq = ckmalloc(namelen + vallen + 2) as *mut c_char;
-    p = crate::system::mempcpy(nameeq as *mut c_void, name as *const c_void, namelen + 1)
-        as *mut c_char;
+    /* `ckmalloc(namelen + vallen + 2)` filled by two `mempcpy`s.  The
+     * first copies `namelen + 1` bytes -- the name *and the byte after
+     * it*, which is the `=` or the NUL that ended it -- and the `=` is
+     * written back over that byte only when there is a value.  So an
+     * unset variable's buffer is `NAME\0\0`, and the second NUL is the
+     * one `varnull` returns a pointer to. */
+    nameeq = Vec::with_capacity(namelen + vallen + 2);
+    nameeq.extend_from_slice(core::slice::from_raw_parts(name as *const u8, namelen + 1));
     if !val.is_null() {
-        *p.offset(-1) = b'=' as c_char;
-        p = crate::system::mempcpy(p as *mut c_void, val as *const c_void, vallen) as *mut c_char;
+        nameeq[namelen] = b'=';
+        nameeq.extend_from_slice(core::slice::from_raw_parts(val as *const u8, vallen));
     }
-    *p = b'\0' as c_char;
-    vp = setvareq(nameeq, flags | VNOSAVE);
+    nameeq.push(b'\0');
+    vp = setvareq_text(VarText::Owned(nameeq.into_boxed_slice()), flags | VNOSAVE);
     INTON();
 
     vp
@@ -575,8 +620,33 @@ pub unsafe fn setvarint(name: *const c_char, val: intmax_t, flags: c_int) -> int
 
 // [spec:dash:def:var.setvareq-fn]
 // [spec:dash:sem:var.setvareq-fn]
-pub unsafe fn setvareq(mut s: *mut c_char, mut flags: c_int) -> *mut var {
+/// The C takes a `char *` plus flag bits saying who owns it: `VTEXTFIXED`
+/// or `VSTACK` for a buffer it must not free, `VNOSAVE` for one handed
+/// over outright, neither for one to `savestr`.  Only `setvar` ever passed
+/// `VNOSAVE`, and it now hands its buffer to [`setvareq_text`] directly,
+/// so what is left here is the two cases an outside caller can mean.
+pub unsafe fn setvareq(s: *mut c_char, flags: c_int) -> *mut var {
+    debug_assert_eq!(
+        flags & VNOSAVE,
+        0,
+        "VNOSAVE means the callee adopts the caller's allocation, which this signature cannot express"
+    );
+    let text = if (flags & (VTEXTFIXED | VSTACK)) != 0 {
+        VarText::Fixed(s)
+    } else {
+        /* `savestr(s)`.  The C copies at the far end of the function, one
+         * statement before the store; the only path between here and there
+         * that does not reach the store is the read-only `sh_error`, where
+         * the copy is dropped by the unwind. */
+        VarText::Owned(cstring_box(s))
+    };
+    setvareq_text(text, flags)
+}
+
+/// The body of `setvareq`, over a text whose owner is already settled.
+unsafe fn setvareq_text(text: VarText, mut flags: c_int) -> *mut var {
     let mut vp: *mut var;
+    let s: *const c_char = text.as_ptr();
 
     flags |= VEXPORT & (((1 - crate::options::optlist[crate::options::aflag] as c_int) as c_uint).wrapping_sub(1)) as c_int;
     vp = findvar(s);
@@ -586,10 +656,9 @@ pub unsafe fn setvareq(mut s: *mut c_char, mut flags: c_int) -> *mut var {
         if ((*vp).flags & VREADONLY) != 0 {
             let n: *const c_char;
 
-            if (flags & VNOSAVE) != 0 {
-                libc::free(s as *mut c_void);
-            }
-            n = (*vp).text;
+            /* The C's `if (flags & VNOSAVE) free(s)`: `text` is a local,
+             * so the unwind out of `sh_error` drops it. */
+            n = (*vp).text.as_ptr();
             crate::error::sh_error(
                 cstr(b"%.*s: is read only\0"),
                 &[
@@ -599,30 +668,26 @@ pub unsafe fn setvareq(mut s: *mut c_char, mut flags: c_int) -> *mut var {
             );
         }
 
-        /* Taken before the old text is freed. `s` and `(*vp).text` are
-         * different buffers on every path the shell has — `setvar` always
-         * hands over a fresh one — but reading a freed buffer to find a map
-         * key would be a hazard the C did not have, so do not create it. */
+        /* The name this entry is filed under, for the removal path below. */
         let key = varname(s).to_owned();
 
-        if ((*vp).flags & (VTEXTFIXED | VSTACK)) == 0 {
-            ckfree((*vp).text as *mut c_void);
-        }
+        /* `if ((vp->flags & (VTEXTFIXED|VSTACK)) == 0) ckfree(vp->text);`
+         * belongs here, and is instead the drop of the old value at the
+         * store below — so the field stays readable in between rather than
+         * dangling for the width of the flag arithmetic. */
 
         if (flags & (VEXPORT | VREADONLY | VSTRFIXED | VUNSET)) != VUNSET {
             bits = !((VTEXTFIXED | VSTACK | VNOSAVE | VUNSET) as c_uint);
         } else if ((*vp).flags & VSTRFIXED) != 0 {
             bits = VSTRFIXED as c_uint;
         } else {
-            /* The C unlinks and `ckfree`s the node; taking the entry out of
-             * the map drops the `Box` that is the node. */
+            /* The C unlinks the node, `ckfree`s it and then `ckfree`s `s`;
+             * taking the entry out of the map drops the `Box` that is the
+             * node and the text inside it, and `text` goes out of scope. */
             vartab_mut().remove(&key);
-            /* out_free: */
-            if (flags & (VTEXTFIXED | VSTACK | VNOSAVE)) == VNOSAVE {
-                ckfree(s as *mut c_void);
-            }
-            /* goto out — NB `vp` has just been freed and is returned
-             * dangling, exactly as the C does (src/var.c:304-309, 331). */
+            /* out_free, then goto out — NB `vp` has just been dropped and
+             * is returned dangling, exactly as the C does
+             * (src/var.c:304-309, 331). */
             return vp;
         }
 
@@ -630,9 +695,6 @@ pub unsafe fn setvareq(mut s: *mut c_char, mut flags: c_int) -> *mut var {
     } else {
         if (flags & (VEXPORT | VREADONLY | VSTRFIXED | VUNSET)) == VUNSET {
             /* goto out_free */
-            if (flags & (VTEXTFIXED | VSTACK | VNOSAVE)) == VNOSAVE {
-                ckfree(s as *mut c_void);
-            }
             return vp;
         }
         /* not found */
@@ -642,16 +704,18 @@ pub unsafe fn setvareq(mut s: *mut c_char, mut flags: c_int) -> *mut var {
             .entry(varname(s).to_owned())
             .or_insert(VarSlot::Owned(Box::new(var {
                 flags: 0,
-                text: null_mut(),
+                text: VarText::Fixed(null_mut()),
                 func: None,
             })))
             .as_ptr();
     }
-    if (flags & (VTEXTFIXED | VSTACK | VNOSAVE)) == 0 {
-        s = savestr(s);
-    }
-    (*vp).text = s;
+    (*vp).text = text;
     (*vp).flags = flags;
+    debug_assert_eq!(
+        matches!((*vp).text, VarText::Owned(_)),
+        ((*vp).flags & (VTEXTFIXED | VSTACK)) == 0,
+        "who owns vp->text and what its flags say must agree"
+    );
 
     if (flags & VNOFUNC) == 0 {
         varfunc(vp);
@@ -672,7 +736,7 @@ pub unsafe fn lookupvar(name: *const c_char) -> *mut c_char {
     v = findvar(name);
     if !v.is_null() && ((*v).flags & VUNSET) == 0 {
         /* #ifdef WITH_LINENO */
-        if v == vlineno() && (*v).text == addr_of!(linenovar) as *const c_char {
+        if v == vlineno() && (*v).text.as_ptr() == addr_of!(linenovar) as *const c_char {
             crate::output::fmtstr(
                 (addr_of_mut!(linenovar) as *mut c_char).add(7),
                 (19 - 7) as size_t,
@@ -680,7 +744,7 @@ pub unsafe fn lookupvar(name: *const c_char) -> *mut c_char {
                 &[VaArg::Int(lineno)],
             );
         }
-        return strchrnul((*v).text, b'=' as c_int).add(1);
+        return strchrnul((*v).text.as_ptr(), b'=' as c_int).add(1);
     }
     null_mut()
 }
@@ -720,7 +784,7 @@ pub unsafe fn listvars(on: c_int, off: c_int) -> Vec<*mut c_char> {
     for slot in vartab_mut().values_mut() {
         let vp = slot.as_ptr();
         if ((*vp).flags & mask) == on {
-            ep.push((*vp).text as *mut c_char);
+            ep.push((*vp).text.as_ptr() as *mut c_char);
         }
     }
 
@@ -863,11 +927,9 @@ pub unsafe fn localcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
 // [spec:dash:def:var.mklocal-fn]
 // [spec:dash:sem:var.mklocal-fn]
 pub unsafe fn mklocal(name: *mut c_char, flags: c_int) {
-    let lvp: localvar;
-
     INTOFF();
     if *name.offset(0) == b'-' as c_char && *name.offset(1) == b'\0' as c_char {
-        lvp = localvar::Options(optlist);
+        pushlocal(localvar::Options(optlist));
     } else {
         let eq: *mut c_char;
         let found: *mut var;
@@ -881,28 +943,43 @@ pub unsafe fn mklocal(name: *mut c_char, flags: c_int) {
             } else {
                 vp = setvar(name, null_mut(), VSTRFIXED | flags);
             }
-            lvp = localvar::Unset { vp };
+            pushlocal(localvar::Unset { vp });
         } else {
             let vp: *mut var = found;
             let saved: c_int = (*vp).flags;
-            let text: *const c_char = (*vp).text;
+            /* The C leaves two pointers to one buffer -- `lvp->text` and
+             * `vp->text` -- and says who frees it by setting VTEXTFIXED on
+             * the variable.  The save takes the buffer and the variable is
+             * left borrowing it, which is the same arrangement with the
+             * ownership in the type. */
+            let p = (*vp).text.as_ptr();
+            let text = core::mem::replace(&mut (*vp).text, VarText::Fixed(p));
             (*vp).flags |= VSTRFIXED | VTEXTFIXED;
-            if !eq.is_null() {
-                setvareq(name, flags);
-            }
-            lvp = localvar::Saved {
+            /* Pushed before `setvareq`, which raises on a read-only
+             * variable: the save now holds the only copy of what `vp` is
+             * borrowing, so it has to be somewhere an unwind will not drop
+             * it.  The C leaks the `localvar` on that path instead, and
+             * leaves the variable VSTRFIXED|VTEXTFIXED for good. */
+            pushlocal(localvar::Saved {
                 vp,
                 flags: saved,
                 text,
-            };
+            });
+            if !eq.is_null() {
+                setvareq(name, flags);
+            }
         }
     }
+    INTON();
+}
+
+/// Add a save to the innermost frame.
+unsafe fn pushlocal(lvp: localvar) {
     localvar_stack_mut()
         .last_mut()
         .expect("mklocal runs inside a function")
         .lv
         .push(lvp);
-    INTON();
 }
 
 /*
@@ -932,14 +1009,23 @@ unsafe fn poplocalvars() {
             }
             localvar::Unset { vp } => {
                 (*vp).flags &= !(VSTRFIXED | VREADONLY);
-                unsetvar((*vp).text);
+                /* `setvar` copies the name out before `setvareq_text` can
+                 * drop the buffer it was read from. */
+                unsetvar((*vp).text.as_ptr());
             }
             localvar::Saved { vp, flags, text } => {
-                if ((*vp).flags & (VTEXTFIXED | VSTACK)) == 0 {
-                    ckfree((*vp).text as *mut c_void);
-                }
+                /* The C frees `vp->text` first when the flags say the
+                 * variable owns it; the assignment is what does that.
+                 * When nothing was assigned to the variable while it was
+                 * local, what it drops is the `Fixed` borrow `mklocal`
+                 * left in place of the buffer it took. */
                 (*vp).flags = flags;
                 (*vp).text = text;
+                debug_assert_eq!(
+                    matches!((*vp).text, VarText::Owned(_)),
+                    ((*vp).flags & (VTEXTFIXED | VSTACK)) == 0,
+                    "who owns vp->text and what its flags say must agree"
+                );
                 if ((*vp).flags & VNOFUNC) == 0 {
                     varfunc(vp);
                 }
@@ -1057,7 +1143,7 @@ mod tests {
         let n = CStr0::new(name);
         let vp = findvar(n.p());
         assert!(!vp.is_null(), "{name} is not in the table");
-        core::slice::from_raw_parts((*vp).text as *const u8, len).to_vec()
+        core::slice::from_raw_parts((*vp).text.as_ptr() as *const u8, len).to_vec()
     }
 
     // [spec:dash:sem:var.setvar-fn/test]
@@ -1074,14 +1160,14 @@ mod tests {
             let val = CStr0::new("hello");
 
             setvar(name.p(), val.p(), 0);
-            assert_eq!(text_bytes("Tsetvar", 13), b"Tsetvar=hello".to_vec());
+            assert_eq!(text_bytes("Tsetvar", 14), b"Tsetvar=hello\0".to_vec());
             assert_eq!(s(lookupvar(name.p())), "hello");
 
             /* VSTRFIXED so the entry survives being unset and can be read. */
             setvar(name.p(), null_mut(), VSTRFIXED);
             assert_eq!(text_bytes("Tsetvar", 9), b"Tsetvar\0\0".to_vec());
             let vp = findvar(name.p());
-            assert_eq!(s(varnull((*vp).text)), "");
+            assert_eq!(s(varnull((*vp).text.as_ptr())), "");
             assert!(lookupvar(name.p()).is_null());
         }
     }

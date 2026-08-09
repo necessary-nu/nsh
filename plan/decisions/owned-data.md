@@ -1123,3 +1123,152 @@ things with two owners:
 pass, and three of the 26 are `region_untouched`, which exists only to
 check that the rest is dead.  `expand.rs`, `parser.rs` and `mail.rs` reach
 `memalloc` not at all.
+
+## What this cost in the port: the variable table
+
+Written after `var.rs`'s fourteen `ck*`/`savestr` sites and its one raw
+`libc::free` became owned Rust values: `struct var`'s node and its text,
+and the two nested intrusive lists behind `local`.  Same rule as the
+sections above -- each entry is a place where the C's *memory layout* was
+doing work its *text* did not admit to.
+
+The step split three ways because the failure modes are three different
+things.  The lists become `Vec`s and fail as wrong teardown order.  The
+node becomes a `Box` the table owns and fails as a dangling
+`localvar.vp`.  The text becomes owned bytes and fails as a lifetime bug
+in `execve`'s `envp`, in `putenv`, or in the alias `mklocal` creates.
+
+### `VTEXTFIXED` is not a fact about the buffer, it is a `Drop` impl
+
+`vp->text` is one `char *` and four different owners: a `static` in
+`var.c`, an `environ` entry the process was started with, a `ckmalloc`'d
+`NAME=value` from `setvar`, or a `savestr` copy.  Which one it is is
+recorded nowhere except in `flags & (VTEXTFIXED|VSTACK)`, and every read
+of those two bits is a decision about whether to `ckfree` a buffer or
+`savestr` one.  So the flag bits *are* the ownership, written as data.
+
+The Rust makes the type carry it -- `VarText::Fixed` or
+`VarText::Owned(Box<[u8]>)` -- and keeps the flag bits, because
+`setvareq`'s `bits` arithmetic and `poplocalvars`' restore still copy them
+around and a stored variable's `flags` are observable through `local`.
+Two records of one fact can drift, so both places that write them assert
+they agree: `Owned` exactly when `flags & (VTEXTFIXED|VSTACK)` is clear.
+The assertion fires on the first line of `mkinit_init` if the wrapper
+stops honouring `VTEXTFIXED`, and on the first `local` if `mklocal` saves
+a flag word that does not match the text it saved beside it.
+
+`VSTACK` is set by nobody, in the C or in the port.  It is carried
+because it appears in three masks and removing it from those is a
+separate, checkable act.
+
+### `mklocal` aliases the text and says so with a flag
+
+`lvp->text = vp->text; vp->flags |= VSTRFIXED|VTEXTFIXED` leaves two
+pointers to one buffer and resolves the ambiguity by marking the variable
+as not owning it.  The save owns it; the variable reads it until
+`poplocalvars` hands it back or an assignment replaces it.
+
+The Rust moves the buffer into the save and leaves `VarText::Fixed` in
+the variable pointing at the same bytes, which is the same arrangement
+with the ownership in the type rather than in a bit.  That is only sound
+while the save is reachable, and it forces one ordering change: the save
+is pushed onto the frame *before* `setvareq(name, flags)` rather than
+after.  `setvareq` raises on a read-only variable -- `readonly x; f() {
+local x=2; }` reaches it -- and a save still sitting in a local would be
+dropped by the unwind, leaving the variable borrowing freed bytes.  The C
+leaks the `localvar` on that path instead and leaves the variable
+`VSTRFIXED|VTEXTFIXED` for the rest of the process; neither is observable,
+because `VREADONLY` makes every later `setvareq` on that name fail before
+it reads either bit.
+
+### The saved option vector is distinguished by a null, not a tag
+
+`poplocalvars` asks `vp == NULL` to mean "this save holds `optlist`, not a
+variable", then asks `lvp->flags == VUNSET` to mean "the variable did not
+exist, and `text` was never written".  Two fields doing type dispatch, one
+of them for a record whose third field is deliberately uninitialised.
+
+Three variants replace it, which removes the null check and makes the
+uninitialised field unrepresentable.  The `VUNSET` sentinel had to be
+shown sound before it could be dropped: a stored variable can never have
+flags exactly `VUNSET`, because `setvareq` only files an entry when the
+incoming or inherited flags carry `VEXPORT`, `VREADONLY` or `VSTRFIXED`
+as well -- every other combination reaches the removal path.  So the C's
+test could not misfire, and the enum is a representation change rather
+than a fix.
+
+### `envp` is pointers into the table, and the table must not move
+
+`listvars` collects `vp->text` and `exec.rs:shellexec` hands the array to
+`execve`.  The strings are not copied at any point: the child's
+environment is read straight out of the parent's variable table.  Nothing
+between `environment()` and `execve` touches `vartab`, which is what makes
+it safe in the C and in the port -- but the port has one extra
+requirement, that the buffer behind a `VarText::Owned` cannot move while
+the array is live.  `Box<[u8]>` cannot reallocate, which is why the text
+is a boxed slice and not a `BString`; a growable buffer would make the
+`envp` array depend on nobody appending to a variable's bytes.
+
+`localvar::Saved.vp` needs the same guarantee for the node rather than the
+text: it holds a `*mut var` across a whole function invocation, during
+which `setvareq` may file or remove other names.  A `BTreeMap` that owned
+its values inline would move them on a split, so the map's value is
+`Box<var>` for a variable it owns and a bare pointer for one of
+`varinit`'s sixteen statics.  This is asserted rather than argued --
+`var.rs`'s `a_saved_entry_does_not_move` files two hundred names that sort
+below the saved one and checks `findvar` still answers the same address.
+
+### `putenv` holds a pointer the shell can still free
+
+`changelocale` is called from the `LC_ALL`, `LC_COLLATE`, `LC_CTYPE`,
+`LC_NUMERIC` and `LANG` entries of `varinit`, all of which carry `VFULL`,
+so the argument is the whole `NAME=value` -- and glibc's `putenv` stores
+that pointer in `environ` without copying.  `setlocale(LC_ALL, "")` on the
+next line reads `environ` back.
+
+Assigning to one of those names again is fine: the old buffer is dropped
+and `putenv` overwrites the slot with the new one, and the window between
+the two contains no libc call.  The port's window is *shorter* than the
+C's, which frees `vp->text` before the flag arithmetic rather than at the
+store.  `unset LC_ALL` is the case that is wrong in both: the buffer is
+freed, `varfunc` no longer sees `VFULL` -- `bits` does not inherit it on
+that path -- so `changelocale` gets the empty string, `putenv("")` fails
+with `EINVAL` because there is no `=`, and the slot in `environ` keeps
+pointing at freed memory that `setlocale` then reads.  That is dash's, not
+the port's, and it is reproduced rather than fixed: `docs/std-replacements.md`
+section 7 records that the `putenv` can only go when the locale question is
+answered.
+
+### `setvar`'s buffer is one byte longer than it looks
+
+`p = mempcpy(nameeq, name, namelen + 1)` copies the name *and the byte
+after it*, which is the `=` or the NUL that `endofname`/`strchrnul` stopped
+at, and `p[-1] = '='` writes over that byte only when there is a value.
+So an unset variable's buffer is `NAME\0\0` and `varnull` -- the accessor
+every reader of an unset variable's value goes through -- returns a
+pointer to the second NUL.  Rebuilding that as "name, then `=`, then
+value, then NUL" gets the set case right and the unset case one byte
+short, and the failure is a read past the end of the allocation rather
+than anything a test would print.  `var.rs`'s
+`setvar_files_a_name_equals_value` pins both layouts.
+
+### `VNOSAVE` never crosses the module boundary, checked twice
+
+`setvareq(s, flags | VNOSAVE)` means "the table adopts this allocation
+without copying", and the previous pass established that neither of
+`evalcommand`'s two call sites passes it.  Re-checked here, on this tree:
+`vflags` is 0 or `VEXPORT`, `mklocal` adds `VSTRFIXED`, and `mkinit_init`
+passes `VTEXTFIXED` -- so `setvar` is the only caller that has ever set
+it, and it now hands its buffer over as a `VarText::Owned` instead.  The
+flag survives, because a stored variable's `flags` keep it and
+`poplocalvars` restores them, but the public `setvareq` asserts it is
+absent: the signature it has cannot express adoption, so a caller passing
+it would be asking for a leak.
+
+### What the variable table left behind
+
+`var.rs` has no `ck*`, `savestr` or `libc::free` call site left, and no
+`crate::memalloc` import.  `struct var`, `struct localvar` and
+`struct localvar_list` are owned Rust values; `varinit`'s sixteen entries
+are still a `static mut` array, because `vifs`/`vps1`/... address them
+positionally and `lookupvar` compares against `vlineno()` by address.
