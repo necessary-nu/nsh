@@ -2144,6 +2144,13 @@ children (
                                 kind @note
                                 text "Wave 1 fully gated on master at f8ee207.\n\n```\nrunall.sh 6   ==== TOTAL PASS=61498 FAIL=0 FLAKY=29 XFAIL=1 ====   no STALE\nptydiff       INTERACTIVE (pty, sandboxed): PASS=37 FAIL=0 FLAKY=0\nPOSIX         cases: PASS=657 FAIL=54    reference: PASS=655 FAIL=56\n              differentials: edit-history-goto-number,\n                             edit-history-search-pattern-anchored\n```\n\nThis is the sweep the whole wave was held for, and it is the only valid one of the five that were started: three agent sweeps were killed by two unscoped `pkill -f runall.sh` calls, and a fourth was invalidated by the disk reaching 100% from a `rustc` build and a `git pack-objects` outside every worktree. It also covers 82dbc38, the `changelocale` fix, which landed after the previous sweep had pinned its binary and so had only cheap gates and valgrind until now.\n\nptydiff is 37 rather than 31 because `owned-jobs` added six interactive cases: five background jobs to push the table past its four slots, `%n`/`%name`/`%?substring`, a two-process pipeline job, `fg`, and ^Z-then-`fg`. That was the right instinct — `corpus-lint.sh` drops signal-delivery cases before they run, so job control is the part of the shell the 61,498-case corpus covers least, and a `Vec<Job>` conversion is exactly the change it would fail to see.\n\nOne loose end recorded rather than chased. The `owned-small` agent's POSIX runs printed a third differential, `locale-jobs-multibyte-command-text: target=PASS/0 reference=PASS/2` — both sides passing, only the reference's exit status differing. It does not appear in either POSIX run on master. `docs/std-replacements.md` §7 already records that `tests/harness/sandboxed.sh` does not pin the locale, so the harness's second configuration axis is whatever the invoking shell happened to export; a differential that appears in one worktree and not another, on a case whose name begins `locale-`, is that gap showing. Pinning `LC_ALL` in the sandbox is a small change to the harness and belongs with [dec:nsh:differential-is-the-oracle], which claims the harness tests exactly one configuration."
                             }
+
+                            {
+                                at 2026-08-09T20:51:52.987175342Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
                         )
                     }
 

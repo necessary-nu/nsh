@@ -50,6 +50,22 @@ DS_TIMEOUT=${DS_TIMEOUT:-10}
 # difference left was how many -- which reads as a scheduling flake.
 #
 # Start every shell from a known signal state instead of an inherited one.
+#
+# The locale is the same argument one axis over, and it was the one axis
+# still inherited. `strcoll` decides how `msort` orders a glob expansion,
+# the ctype functions decide what `isalpha` accepts in a name, `mbrtowc`
+# decides where a character ends, and every one of them reads the process
+# locale. So the harness was comparing two shells under whatever `LC_*`
+# the person or agent running it happened to export — which is how a
+# `locale-`prefixed POSIX case produced a differential in one worktree
+# and not in another on the same commit.
+#
+# [dec:nsh:differential-is-the-oracle] says the harness tests exactly one
+# configuration. It now does: `LC_ALL=C`, with the five variables that
+# could override it removed rather than left to chance. `DS_LOCALE`
+# exists so the *other* configurations can be tested deliberately —
+# running a sweep under a UTF-8 or a single-byte locale is a thing worth
+# doing, and doing it by accident is not.
 ds_sandboxed() {  # ds_sandboxed WORKDIR SHELL [ARGS...]
 	local dir=$1; shift
 	timeout $((DS_TIMEOUT + 5)) \
@@ -64,6 +80,13 @@ ds_sandboxed() {  # ds_sandboxed WORKDIR SHELL [ARGS...]
 		--chdir "$dir" \
 		--setenv TMPDIR "$dir" \
 		--setenv PATH "$dir/.bin:/usr/bin:/bin" \
+		--setenv LC_ALL "${DS_LOCALE:-C}" \
+		--unsetenv LANG \
+		--unsetenv LANGUAGE \
+		--unsetenv LC_COLLATE \
+		--unsetenv LC_CTYPE \
+		--unsetenv LC_NUMERIC \
+		--unsetenv LC_MESSAGES \
 		--limit nproc=64 \
 		${DS_COVDIR:+--bind "$DS_COVDIR:$DS_COVDIR"} \
 		${DS_COVDIR:+--setenv LLVM_PROFILE_FILE "$DS_COVDIR/dash-%8m.profraw"} \
