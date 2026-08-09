@@ -11,12 +11,13 @@ as needing protection: `\`, `CTLESC`, `CTLMBCHAR`, `CTLQUOTEMARK`), and
 
 `equal` and `scopy` are macros in `mystring.h`, not functions here.
 
-**Three exported items retired.** `delete-memalloc` removed `scopyn`,
-`sstrdup` and `findstring` from `crates/nsh/src/mystring.rs`. `scopyn` is
+**Four exported items retired.** `delete-memalloc` removed `scopyn`,
+`sstrdup`, `findstring` and `pstrcmp` from `crates/nsh/src/mystring.rs`. `scopyn` is
 inside `#if 0` in the C and has no target behavior; `sstrdup` copied into
 the now-empty region allocator and had no remaining caller; `findstring`
 was used only to search the parser's keyword table, whose surviving
-behavior is implemented and specified by `parser.findkwd-fn`. Their
+behavior is implemented and specified by `parser.findkwd-fn`; `pstrcmp`
+was only that search's adapter to C `bsearch`. Their
 blocks below keep describing the C source, but no longer carry
 `[spec:dash:…]` ids that would claim a target implementation still exists.
 
@@ -88,10 +89,8 @@ blocks below keep describing the C source, but no longer carry
 > itself. Since the loop stops at `pfx`'s NUL, `string` may be shorter
 > only by mismatching on its own NUL, which correctly fails.
 
-> [spec:dash:def:mystring.pstrcmp-fn]
 > int pstrcmp(const void *a, const void *b)
 
-> [spec:dash:sem:mystring.pstrcmp-fn]
 > `qsort`/`bsearch` comparator over arrays of `const char *`: cast both
 > arguments to `const char *const *`, dereference, and return
 > `strcmp` of the two strings.

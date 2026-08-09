@@ -1806,8 +1806,9 @@ map's own key and the removal drops that storage.
 
 ### Builtin lookup is byte ordering, not text ordering
 
-The generated builtin table is sorted under `LC_COLLATE=C`, and `pstrcmp`
-compared its NUL-terminated names with `strcmp`. `BStr` slice ordering is
-the same unsigned-byte lexicographic comparison, including for invalid
-UTF-8, so `binary_search_by` preserves the lookup without making a shell
-word into `String`.
+The generated builtin table is sorted under `LC_COLLATE=C`. Its old
+`pstrcmp` adapter compared NUL-terminated names with `strcmp`; after the
+lookup moved to `binary_search_by`, that adapter had no caller and was
+retired with its standalone port rule. `BStr` slice ordering is the same
+unsigned-byte lexicographic comparison, including for invalid UTF-8, so
+the lookup remains byte-exact without making a shell word into `String`.

@@ -1103,3 +1103,25 @@ pub unsafe fn test_file_access(path: *const c_char, mode: c_int) -> c_int {
 pub unsafe fn test_access(sp: *const libc::stat64, stmode: c_int) -> c_int {
     crate::bltin::test::test_access(sp, stmode)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // [spec:dash:sem:exec.find-builtin-fn/test]
+    #[test]
+    fn generated_builtin_lookup_round_trips() {
+        unsafe {
+            for expected in &crate::builtins::builtincmd {
+                assert!(core::ptr::eq(
+                    find_builtin(expected.name.as_ptr()),
+                    expected,
+                ));
+            }
+
+            for absent in [c"", c"/", c"alia", c"aliasx", c"waitx", c"zz"] {
+                assert!(find_builtin(absent.as_ptr()).is_null());
+            }
+        }
+    }
+}

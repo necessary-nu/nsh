@@ -1232,10 +1232,6 @@ sites (
         [spec:dash:def:mystring.prefix-fn]
         [spec:dash:sem:mystring.prefix-fn]
     )}
-    {path src/mystring.c, symbol pstrcmp, spec (
-        [spec:dash:def:mystring.pstrcmp-fn]
-        [spec:dash:sem:mystring.pstrcmp-fn]
-    )}
     {path src/mystring.c, symbol single_quote, spec (
         [spec:dash:def:mystring.single-quote-fn]
         [spec:dash:sem:mystring.single-quote-fn]

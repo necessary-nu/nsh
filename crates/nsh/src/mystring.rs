@@ -9,20 +9,20 @@
 //!	number(s)		Convert a string of digits to an integer.
 //!	is_number(s)		Return true if s is a string of digits.
 //!
-//! Seven of those exported items are gone, because `<[u8]>` spells them and
+//! Eight of those exported items are gone, because `<[u8]>` spells them and
 //! nothing called the port's copy. `equal` and `scopy` are `mystring.h`
 //! macros that `parser.rs` and `exec.rs` each expanded for themselves;
 //! `scopyn` is inside `#if 0` in the C; `sstrdup` copied onto
 //! the region allocator that `delete-memalloc` emptied; `findstring` was a
 //! `bsearch` over one sorted table, which `parser::findkwd` now does with
-//! `binary_search_by`; and `DOLATSTRLEN` and `qchars` had no reader on
-//! either side. `pstrcmp` remains for its last caller in `exec.rs`.
+//! `binary_search_by`; `pstrcmp` existed only to adapt that search to C's
+//! `bsearch`; and `DOLATSTRLEN` and `qchars` had no reader on either side.
 //!
 //! What is left is here because std is not the same function. Each
 //! survivor says which.
 
 use bstr::BString;
-use libc::{c_char, c_int, c_uchar, c_void, intmax_t};
+use libc::{c_char, c_int, c_uchar, intmax_t};
 
 use crate::output::VaArg;
 
@@ -235,21 +235,6 @@ pub unsafe fn single_quote(s: *const c_char) -> *mut c_char {
 
 /// [`single_quote`]'s result, which the C left in the stack block.
 static mut quoted: BString = BString::new(Vec::new());
-
-/*
- * Wrapper around strcmp for qsort/bsearch/...
- *
- * `exec::find_builtin` is the last caller. This comparator remains until that
- * call site performs the corresponding `binary_search_by` replacement.
- */
-// [spec:dash:def:mystring.pstrcmp-fn]
-// [spec:dash:sem:mystring.pstrcmp-fn]
-pub unsafe extern "C" fn pstrcmp(a: *const c_void, b: *const c_void) -> c_int {
-    libc::strcmp(
-        *(a as *const *const c_char),
-        *(b as *const *const c_char),
-    )
-}
 
 // ---------------------------------------------------------------------
 // Unit tests for this module's functions.
@@ -466,25 +451,6 @@ mod tests {
                     assert_eq!(actual[2], b'\'');
                 }
             }
-        }
-    }
-
-    // [spec:dash:sem:mystring.pstrcmp-fn/test]
-    #[test]
-    fn pstrcmp_compares_through_two_levels_of_pointer() {
-        unsafe {
-            let a = CStr0::new("aaa");
-            let b = CStr0::new("bbb");
-            let (pa, pb) = (a.p(), b.p());
-            let cmp = |x: &*const c_char, y: &*const c_char| {
-                pstrcmp(
-                    x as *const *const c_char as *const c_void,
-                    y as *const *const c_char as *const c_void,
-                )
-            };
-            assert!(cmp(&pa, &pb) < 0);
-            assert!(cmp(&pb, &pa) > 0);
-            assert_eq!(cmp(&pa, &pa), 0);
         }
     }
 

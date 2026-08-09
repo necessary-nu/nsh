@@ -1387,10 +1387,6 @@ symbols (
         {verb def, id mystring.single-quote-fn}
         {verb sem, id mystring.single-quote-fn}
     )}
-    {id mystring.pstrcmp-fn, kind @function, name pstrcmp, qualified pstrcmp, signature "int pstrcmp(const void *a, const void *b)", file src/mystring.c, line_start 245, line_end 249, rules (
-        {verb def, id mystring.pstrcmp-fn}
-        {verb sem, id mystring.pstrcmp-fn}
-    )}
     {id options.procargs-fn, kind @function, name procargs, qualified procargs, signature "int procargs(char **xargv)", file src/options.c, line_start 121, line_end 176, rules (
         {verb def, id options.procargs-fn}
         {verb sem, id options.procargs-fn}
