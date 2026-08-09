@@ -24,7 +24,7 @@ use core::ptr::{addr_of, addr_of_mut, null_mut};
 use crate::error::{INTOFF, INTON};
 use crate::memalloc::{ckfree, ckmalloc, savestr};
 use crate::mystring::nullstr;
-use crate::options::{argptr, getoptsreset, nextopt, optlist, optschanged};
+use crate::options::{argptr, getoptsreset, nextopt, optlist, optschanged, NOPTS};
 use crate::output::VaArg;
 use crate::shell::cstr;
 use crate::system::strchrnul;
@@ -66,23 +66,57 @@ pub struct var {
 }
 
 // [spec:dash:def:var.localvar]
-#[repr(C)]
-pub struct localvar {
-    pub next: *mut localvar, /* next local variable in list */
-    pub vp: *mut var,        /* the variable that was made local */
-    pub flags: c_int,        /* saved flags */
-    pub text: *const c_char, /* saved text */
+/// What one `local` declaration has to give back.
+///
+/// The C's `next` is gone — the chain is the `Vec` inside
+/// [`localvar_list`]. What is left is three different records sharing one
+/// struct, which `poplocalvars` tells apart by testing two fields in
+/// order: `vp == NULL` means the saved option vector is in `text`, then
+/// `flags == VUNSET` means the variable did not exist and `text` was never
+/// written. Splitting them into variants means the field that must not be
+/// read on a path is not there to read.
+///
+/// The sentinel is sound because no variable in the table can have flags
+/// exactly `VUNSET`: `setvareq` stores an entry only when the incoming or
+/// inherited flags carry one of `VEXPORT|VREADONLY|VSTRFIXED` as well.
+pub enum localvar {
+    /// `local -`: `optlist` copied whole. The C `ckmalloc`s
+    /// `sizeof(optlist)` and keeps the copy in `text`; the array is a
+    /// fixed-size `Copy` value, so it is simply held.
+    Options([c_char; NOPTS]),
+    /// The variable was not in the table. `mklocal` created it and
+    /// `poplocalvars` takes it back out.
+    Unset { vp: *mut var },
+    /// The variable was in the table; these are its flags and its text
+    /// from before `local` named it.
+    Saved {
+        vp: *mut var,
+        flags: c_int,
+        text: *const c_char,
+    },
 }
 
 // [spec:dash:def:var.localvar-list]
-#[repr(C)]
+/// One function invocation's worth of saves.
+///
+/// `mklocal` pushes at the head of the C's list and `poplocalvars` walks
+/// it from the head, so the C restores in reverse order of declaration —
+/// which is what makes `local x; local x=2` end up back at the outermost
+/// save. A `Vec` drained from the back does the same.
 pub struct localvar_list {
-    pub next: *mut localvar_list,
-    pub lv: *mut localvar,
+    lv: Vec<localvar>,
 }
 
 /* MKINIT struct localvar_list *localvar_stack; */
-pub static mut localvar_stack: *mut localvar_list = null_mut();
+/// The C's `next` chain, outermost first. A frame's index in this stack is
+/// what `pushlocalvars` hands back and `unwindlocalvars` unwinds to, in
+/// place of the address of the frame below it.
+pub static mut localvar_stack: Vec<localvar_list> = Vec::new();
+
+#[inline]
+unsafe fn localvar_stack_mut() -> &'static mut Vec<localvar_list> {
+    &mut *addr_of_mut!(localvar_stack)
+}
 
 pub static defpathvar: [c_char; 66] = unsafe {
     core::mem::transmute::<[u8; 66], [c_char; 66]>(
@@ -381,7 +415,7 @@ pub unsafe fn mkinit_init() {
 
 /* mkinit RESET fragment from src/var.c:164-166. */
 pub unsafe fn mkinit_reset() {
-    unwindlocalvars(null_mut());
+    unwindlocalvars(0);
 }
 
 // [spec:dash:def:var.varnull-fn]
@@ -772,7 +806,7 @@ pub unsafe fn exportcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 pub unsafe fn localcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
     let mut name: *mut c_char;
 
-    if localvar_stack.is_null() {
+    if localvar_stack_mut().is_empty() {
         crate::error::sh_error(cstr(b"not in a function\0"), &[]);
     }
 
@@ -798,20 +832,11 @@ pub unsafe fn localcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
 // [spec:dash:def:var.mklocal-fn]
 // [spec:dash:sem:var.mklocal-fn]
 pub unsafe fn mklocal(name: *mut c_char, flags: c_int) {
-    let lvp: *mut localvar;
-    let vp: *mut var;
+    let lvp: localvar;
 
     INTOFF();
-    lvp = ckmalloc(core::mem::size_of::<localvar>() as size_t) as *mut localvar;
     if *name.offset(0) == b'-' as c_char && *name.offset(1) == b'\0' as c_char {
-        let p: *mut c_char;
-        p = ckmalloc(core::mem::size_of_val(&optlist) as size_t) as *mut c_char;
-        (*lvp).text = libc::memcpy(
-            p as *mut c_void,
-            addr_of!(optlist) as *const c_void,
-            core::mem::size_of_val(&optlist) as size_t,
-        ) as *const c_char;
-        vp = null_mut();
+        lvp = localvar::Options(optlist);
     } else {
         let eq: *mut c_char;
         let found: *mut var;
@@ -819,27 +844,33 @@ pub unsafe fn mklocal(name: *mut c_char, flags: c_int) {
         found = findvar(name);
         eq = libc::strchr(name, b'=' as c_int);
         if found.is_null() {
+            let vp: *mut var;
             if !eq.is_null() {
                 vp = setvareq(name, VSTRFIXED | flags);
             } else {
                 vp = setvar(name, null_mut(), VSTRFIXED | flags);
             }
-            /* NB: lvp->text is left uninitialised on this path — safe only
-             * because lvp->flags == VUNSET makes poplocalvars ignore it. */
-            (*lvp).flags = VUNSET;
+            lvp = localvar::Unset { vp };
         } else {
-            vp = found;
-            (*lvp).text = (*vp).text;
-            (*lvp).flags = (*vp).flags;
+            let vp: *mut var = found;
+            let saved: c_int = (*vp).flags;
+            let text: *const c_char = (*vp).text;
             (*vp).flags |= VSTRFIXED | VTEXTFIXED;
             if !eq.is_null() {
                 setvareq(name, flags);
             }
+            lvp = localvar::Saved {
+                vp,
+                flags: saved,
+                text,
+            };
         }
     }
-    (*lvp).vp = vp;
-    (*lvp).next = (*localvar_stack).lv;
-    (*localvar_stack).lv = lvp;
+    localvar_stack_mut()
+        .last_mut()
+        .expect("mklocal runs inside a function")
+        .lv
+        .push(lvp);
     INTON();
 }
 
@@ -851,50 +882,38 @@ pub unsafe fn mklocal(name: *mut c_char, flags: c_int) {
 // [spec:dash:def:var.poplocalvars-fn]
 // [spec:dash:sem:var.poplocalvars-fn]
 unsafe fn poplocalvars() {
-    let ll: *mut localvar_list;
-    let mut lvp: *mut localvar;
-    let mut next: *mut localvar;
-    let mut vp: *mut var;
+    let mut ll: localvar_list;
 
     INTOFF();
-    ll = localvar_stack;
-    localvar_stack = (*ll).next;
+    ll = localvar_stack_mut()
+        .pop()
+        .expect("poplocalvars runs on a pushed frame");
 
-    next = (*ll).lv;
-    ckfree(ll as *mut c_void);
-
-    loop {
-        lvp = next;
-        if lvp.is_null() {
-            break;
-        }
-        next = (*lvp).next;
-        vp = (*lvp).vp;
+    /* The C walks the chain from the head, which is the most recent
+     * `local`; draining from the back of the `Vec` is the same order. */
+    while let Some(lvp) = ll.lv.pop() {
         /* `TRACE(("poplocalvar %s\n", vp ? vp->text : "-"));` — `#ifdef
          * DEBUG` in `shell.h`, and the dash build does not define it. */
-        if vp.is_null() {
-            /* $- saved */
-            libc::memcpy(
-                addr_of_mut!(optlist) as *mut c_void,
-                (*lvp).text as *const c_void,
-                core::mem::size_of_val(&optlist) as size_t,
-            );
-            ckfree((*lvp).text as *mut c_void);
-            optschanged();
-        } else if (*lvp).flags == VUNSET {
-            (*vp).flags &= !(VSTRFIXED | VREADONLY);
-            unsetvar((*vp).text);
-        } else {
-            if ((*vp).flags & (VTEXTFIXED | VSTACK)) == 0 {
-                ckfree((*vp).text as *mut c_void);
+        match lvp {
+            localvar::Options(saved) => {
+                optlist = saved;
+                optschanged();
             }
-            (*vp).flags = (*lvp).flags;
-            (*vp).text = (*lvp).text;
-            if ((*vp).flags & VNOFUNC) == 0 {
-                varfunc(vp);
+            localvar::Unset { vp } => {
+                (*vp).flags &= !(VSTRFIXED | VREADONLY);
+                unsetvar((*vp).text);
+            }
+            localvar::Saved { vp, flags, text } => {
+                if ((*vp).flags & (VTEXTFIXED | VSTACK)) == 0 {
+                    ckfree((*vp).text as *mut c_void);
+                }
+                (*vp).flags = flags;
+                (*vp).text = text;
+                if ((*vp).flags & VNOFUNC) == 0 {
+                    varfunc(vp);
+                }
             }
         }
-        ckfree(lvp as *mut c_void);
     }
     INTON();
 }
@@ -905,20 +924,19 @@ unsafe fn poplocalvars() {
 
 // [spec:dash:def:var.pushlocalvars-fn]
 // [spec:dash:sem:var.pushlocalvars-fn]
-pub unsafe fn pushlocalvars(push: c_int) -> *mut localvar_list {
-    let ll: *mut localvar_list;
-    let top: *mut localvar_list;
+/// The C returns the `localvar_list *` that was on top, which the caller
+/// hands back to `unwindlocalvars`; with the stack owned, that address is
+/// the frame's depth.
+pub unsafe fn pushlocalvars(push: c_int) -> usize {
+    let top: usize;
 
-    top = localvar_stack;
+    top = localvar_stack_mut().len();
     if push == 0 {
         return top; /* goto out */
     }
 
     INTOFF();
-    ll = ckmalloc(core::mem::size_of::<localvar_list>() as size_t) as *mut localvar_list;
-    (*ll).lv = null_mut();
-    (*ll).next = top;
-    localvar_stack = ll;
+    localvar_stack_mut().push(localvar_list { lv: Vec::new() });
     INTON();
 
     top
@@ -926,8 +944,11 @@ pub unsafe fn pushlocalvars(push: c_int) -> *mut localvar_list {
 
 // [spec:dash:def:var.unwindlocalvars-fn]
 // [spec:dash:sem:var.unwindlocalvars-fn]
-pub unsafe fn unwindlocalvars(stop: *mut localvar_list) {
-    while localvar_stack != stop {
+/// The C's loop is `while (localvar_stack != stop)`, which runs off the
+/// bottom of the stack if `stop` was never on it; `>` is total, and the
+/// only state it declines to reproduce is a NULL dereference.
+pub unsafe fn unwindlocalvars(stop: usize) {
+    while localvar_stack_mut().len() > stop {
         poplocalvars();
     }
 }

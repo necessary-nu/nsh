@@ -926,7 +926,7 @@ unsafe fn parse_command_args(
 // the compiled signature — ported here — is
 // `STATIC int evalcommand(union node *cmd, int flags)`.
 unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
-    let localvar_stop: *mut crate::var::localvar_list;
+    let localvar_stop: usize;
     let file_stop: *mut crate::input::parsefile;
     let redir_stop: *mut crate::redir::redirtab;
     let mut argp: &[Node];
