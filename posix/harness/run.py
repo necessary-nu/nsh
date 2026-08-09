@@ -53,7 +53,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--shell",
         type=_path,
-        default=(PROJECT_ROOT / "target" / "debug" / "dash").resolve(),
+        default=(PROJECT_ROOT / "target" / "debug" / "nsh").resolve(),
         help="shell under test (default: target/debug/nsh)",
     )
     parser.add_argument(
