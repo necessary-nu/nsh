@@ -1097,6 +1097,7 @@ assertions (
     {id public-api-design, kind @complete, author "brendan@necessary.nu", at 2026-08-08T10:58:17.762829462Z}
     {id sorted-tables, kind @complete, author "brendan@necessary.nu", at 2026-08-09T16:24:56.014094132Z}
     {id owned-strings, kind @complete, author "brendan@necessary.nu", at 2026-08-09T16:24:36.630845046Z}
+    {id edition-2024, kind @complete, author "brendan@necessary.nu", at 2026-08-09T19:30:39.321605436Z}
 )
 
 impl_evidence (

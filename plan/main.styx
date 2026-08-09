@@ -2331,6 +2331,22 @@ children (
                 title "Move the workspace to edition 2024, and take unsafe-op count as the real minimal-unsafe metric"
                 priority 0
                 kind @build
+                sealed true
+                log (
+                    {
+                        at 2026-08-09T19:30:34.867446656Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Merged to master at af1434d and fully gated there.\n\n```\nrunall.sh 6   ==== TOTAL PASS=61498 FAIL=0 FLAKY=50 XFAIL=1 ====   no STALE\nptydiff       INTERACTIVE (pty, sandboxed): PASS=31 FAIL=0 FLAKY=0\nPOSIX         cases: PASS=657 FAIL=54    reference: PASS=655 FAIL=56\n```\n\nThe sweep is what this node needed rather than a formality. Edition 2024 changes the temporary scope of tail expressions and of `if let` scrutinees, which moves when temporaries drop; `docs/errors-are-values.md` establishes that the crate defines exactly one `impl Drop` and it is `#[cfg(test)]`, so the exposure was always to timing rather than to observable destructors — but \"always\" was an argument and this is a measurement. 61,498 differential cases, 31 interactive pty cases and 657 POSIX cases cannot tell the two editions apart.\n\nFLAKY=50 is contention: three agents were running their own sweeps on the same box. It is not a signal; the flakiness classifier re-runs a divergent case eleven times and counts it flaky only when the reference disagrees with itself.\n\nRecorded for whoever turns the lint on: the 5,010 `unsafe_op_in_unsafe_fn` sites are 2,747 unsafe calls, 1,221 raw-pointer dereferences, 1,018 mutable-static reads and 24 union-field accesses. The three sources map onto three open nodes — the dereferences to [[delete-memalloc]] and [[delete-libc-calls]], the static reads to [[thread-context]] and [[move-state]], the unsafe calls to whatever remains after both. When the figure is small enough to wrap by hand, deleting `#![allow(unsafe_op_in_unsafe_fn)]` from `lib.rs` re-measures it."
+                    }
+
+                    {
+                        at 2026-08-09T19:30:39.321605436Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Done (nplan complete)"
+                    }
+                )
             }
         )
     }
