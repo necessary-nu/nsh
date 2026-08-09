@@ -20,13 +20,12 @@
 //!     `goto`s in `cmdtxt` become an explicit label program counter.
 //!   * `TRACE(...)` compiles to nothing without `DEBUG` and is dropped.
 
-use bstr::BString;
+use bstr::{BStr, BString, ByteSlice};
 use core::ptr::{addr_of_mut, null_mut};
-use libc::{c_char, c_int, c_uint, c_void, pid_t};
+use libc::{c_char, c_int, c_uint, pid_t};
 
 use crate::error::{INTOFF, INTON};
 use crate::eval::exitstatus;
-use crate::memalloc::{ckfree, savestr};
 use crate::nodes::Node;
 use crate::nodes::{
     NAND, NAPPEND, NARG, NBACKGND, NCASE, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO,
@@ -59,9 +58,13 @@ pub const JOBDONE: c_int = 2; /* all procs are completed */
 
 // [spec:dash:def:jobs.procstat]
 pub struct ProcStat {
-    pub pid: pid_t,       /* process id */
-    pub status: c_int,    /* last process status from wait() */
-    pub cmd: *mut c_char, /* text of command being run */
+    pub pid: pid_t,    /* process id */
+    pub status: c_int, /* last process status from wait() */
+    /* text of command being run. The C points this at the shared
+     * `nullstr` when there is none and at a `savestr` copy otherwise,
+     * and `freejob` tells the two apart by address; an owned text that
+     * is empty says the same thing without the comparison. */
+    pub cmd: BString,
 }
 
 // [spec:dash:def:jobs.job]
@@ -152,7 +155,7 @@ unsafe fn jobs() -> &'static mut Vec<Job> {
 /// used, zero-process job on the current-job chain for `jobs`, `kill`
 /// and `wait` to find. Every reader the C writes as an unconditional
 /// `ps[i]` goes through these two. `ps_pid` answers with the zero the C
-/// reads out of `ps0`; `ps_cmd` answers with the null string, where the
+/// reads out of `ps0`; `ps_cmd` answers with the empty text, where the
 /// C reads `ps0.cmd`, a null pointer it then hands to `%s`.
 #[inline]
 unsafe fn ps_pid(jp: usize, i: usize) -> pid_t {
@@ -160,11 +163,17 @@ unsafe fn ps_pid(jp: usize, i: usize) -> pid_t {
 }
 
 #[inline]
-unsafe fn ps_cmd(jp: usize, i: usize) -> *mut c_char {
-    jobs()[jp]
-        .ps
-        .get(i)
-        .map_or(core::ptr::addr_of!(crate::shell::nullstr) as *mut c_char, |p| p.cmd)
+unsafe fn ps_cmd(jp: usize, i: usize) -> &'static BStr {
+    jobs()[jp].ps.get(i).map_or(BStr::new(b""), |p| p.cmd.as_bstr())
+}
+
+/// `%s` of a command text. The bytes are the shell's own — the parser
+/// puts control bytes 0x81-0x88 in them — so they go out as bytes and
+/// not through a `char *`.
+#[inline]
+unsafe fn outcmd(jp: usize, i: usize, out: *mut output) {
+    let cmd = ps_cmd(jp, i);
+    crate::output::outmem(cmd.as_ptr() as *const c_char, cmd.len(), out);
 }
 
 /* Set if we are in the vforked child */
@@ -561,7 +570,7 @@ pub unsafe fn fgcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
             set_curjob(jp, CUR_RUNNING);
             crate::outfmt!(out, b"[%d] \0".as_ptr() as *const c_char, jobno(jp));
         }
-        crate::output::outstr(ps_cmd(jp, 0), out);
+        outcmd(jp, 0, out);
         showpipe(jp, out);
         retval = restartjob(jp, mode);
 
@@ -739,12 +748,12 @@ unsafe fn showjob(out: *mut output, jp: usize, mode: c_int) {
         // start:
         crate::outfmt!(
             out,
-            b"%s%*c%s\0".as_ptr() as *const c_char,
+            b"%s%*c\0".as_ptr() as *const c_char,
             s.as_ptr(),
             if 33 - col >= 0 { 33 - col } else { 0 },
-            ' ' as c_int,
-            ps_cmd(jp, ps)
+            ' ' as c_int
         );
+        outcmd(jp, ps, out);
         if (mode & SHOW_PID) == 0 {
             showpipe(jp, out);
             break;
@@ -837,15 +846,11 @@ pub unsafe fn showjobs(out: *mut output, mode: c_int) {
 // [spec:dash:sem:jobs.freejob-fn]
 unsafe fn freejob(jp: usize) {
     INTOFF();
-    for i in 0..jobs()[jp].ps.len() {
-        let cmd = jobs()[jp].ps[i].cmd;
-        if cmd != (core::ptr::addr_of!(crate::shell::nullstr) as *mut c_char) {
-            ckfree(cmd as *mut c_void);
-        }
-    }
-    /* The C leaves `nprocs` alone, so freeing the same job twice frees
-     * its command texts twice; emptying the array makes the second call
-     * the no-op the C only gets away with by never making it. */
+    /* The C `ckfree`s each `ps[i].cmd` that is not the shared null
+     * string and leaves `nprocs` alone, so freeing the same job twice
+     * frees them twice; dropping the array releases each text once and
+     * makes the second call the no-op the C only gets away with by
+     * never making it. */
     jobs()[jp].ps.clear();
     jobs()[jp].used = 0;
     set_curjob(jp, CUR_DELETE);
@@ -951,13 +956,9 @@ unsafe fn getjob(name: *const c_char, getctl: c_int) -> usize {
     let c: c_int;
     let mut p: *const c_char;
     /* C: `char *(*match)(const char *, const char *)`, assigned either
-     * `prefix` or `strstr`. `strstr` is `extern "C"`, so it is reached
-     * through a thin Rust-ABI wrapper to keep the two assignable to one
-     * variable. */
-    unsafe fn match_strstr(a: *const c_char, b: *const c_char) -> *mut c_char {
-        libc::strstr(a, b)
-    }
-    let mut matchfn: unsafe fn(*const c_char, *const c_char) -> *mut c_char;
+     * `prefix` or `strstr`; the two differ only in whether the pattern
+     * has to start at the beginning of the command text. */
+    let mut substring: bool;
 
     'err_lbl: {
         'gotit_lbl: {
@@ -1003,15 +1004,23 @@ unsafe fn getjob(name: *const c_char, getctl: c_int) -> usize {
                         }
                     }
 
-                    matchfn = crate::mystring::prefix;
+                    substring = false;
                     if *p == b'?' as c_char {
-                        matchfn = match_strstr;
+                        substring = true;
                         p = p.add(1);
                     }
 
+                    let pat: &[u8] =
+                        core::slice::from_raw_parts(p as *const u8, libc::strlen(p));
                     found = None;
                     while let Some(i) = jp {
-                        if !matchfn(ps_cmd(i, 0), p).is_null() {
+                        let cmd = ps_cmd(i, 0);
+                        let hit = if substring {
+                            cmd.contains_str(pat)
+                        } else {
+                            cmd.starts_with(pat)
+                        };
+                        if hit {
                             if found.is_some() {
                                 break 'err_lbl; // goto err
                             }
@@ -1279,7 +1288,7 @@ unsafe fn forkparent(jp: Option<usize>, n: Option<&Node>, mode: c_int, pid: pid_
     jobs()[ji].ps.push(ProcStat {
         pid,
         status: -1,
-        cmd: (core::ptr::addr_of!(crate::shell::nullstr) as *mut c_char),
+        cmd: BString::new(Vec::new()),
     });
     if jobctl != 0 && n.is_some() {
         let cmd = commandtext(n.unwrap());
@@ -1643,23 +1652,24 @@ pub unsafe fn stoppedjobs() -> c_int {
 /// into the stack block; here the cursor is the buffer's length.
 static mut cmdbuf: BString = BString::new(Vec::new());
 
+/// A fresh borrow of `cmdbuf` per access, so that a `cmdputs` reached
+/// from the middle of `cmdtxt`'s recursion never holds one.
+#[inline]
+unsafe fn cmdtext() -> &'static mut BString {
+    &mut *addr_of_mut!(cmdbuf)
+}
+
 // [spec:dash:def:jobs.commandtext-fn]
 // [spec:dash:sem:jobs.commandtext-fn]
-unsafe fn commandtext(n: &Node) -> *mut c_char {
-    let name: *mut c_char;
-
-    let buf = &mut *addr_of_mut!(cmdbuf);
-    buf.clear();
-    /* `cmdtxt` writes nothing at all for a command with no words — `x=1 &`
-     * is one — and the C then hands `savestr` an uninitialised stack block.
-     * The reference reads a NUL there and prints an empty command text;
-     * naming the value is the only way to say that on purpose. */
-    buf.reserve(1);
-    *buf.as_mut_ptr() = 0;
+unsafe fn commandtext(n: &Node) -> BString {
+    cmdtext().clear();
     cmdtxt(Some(n));
-    name = buf.as_mut_ptr() as *mut c_char;
+    /* `cmdtxt` writes nothing at all for a command with no words — `x=1 &`
+     * is one — and the C then hands `savestr` an uninitialised stack block,
+     * out of which the reference reads a NUL and prints an empty command
+     * text. The empty buffer is that, said on purpose. */
     /* TRACE(("commandtext: name %p, end %p\n", name, cmdnextc)); */
-    savestr(name)
+    cmdtext().clone()
 }
 
 // [spec:dash:def:jobs.cmdtxt-fn]
@@ -1937,18 +1947,13 @@ unsafe fn cmdputs(s: *const c_char) {
     let mut p: *const c_char;
     let mut str: *const c_char;
     let mut cc: [c_char; 2] = [b' ' as c_char, 0];
-    let mut nextc: *mut c_char;
     let mut c: c_char;
     let mut subtype: c_int = 0;
     let mut quoted: c_int = 0;
 
-    /* `makestrspace((strlen(s) + 1) * 8, cmdnextc)` — the C's bound on how
-     * far the cursor can run for this one input string, which is also what
-     * makes the unadvanced `*nextc = '\0'` below land inside the block. */
-    let buf = &mut *addr_of_mut!(cmdbuf);
-    let base = buf.len();
-    buf.reserve((libc::strlen(s) + 1) * 8);
-    nextc = buf.as_mut_ptr().add(base) as *mut c_char;
+    /* The C reserves `(strlen(s) + 1) * 8` — its bound on how far the
+     * cursor can run for this one input string — because a `char *`
+     * cursor cannot grow the block it walks. Pushing does. */
     p = s;
     'whileloop: loop {
         c = *p;
@@ -2027,8 +2032,7 @@ unsafe fn cmdputs(s: *const c_char) {
                     }
                 }
                 /* USTPUTC(c, nextc) */
-                *nextc = c;
-                nextc = nextc.add(1);
+                cmdtext().push(c as u8);
             }
             // checkstr:
             if str.is_null() {
@@ -2044,21 +2048,15 @@ unsafe fn cmdputs(s: *const c_char) {
                 break;
             }
             /* USTPUTC(c, nextc) */
-            *nextc = c;
-            nextc = nextc.add(1);
+            cmdtext().push(c as u8);
         }
     }
     if (quoted & 1) != 0 {
         /* USTPUTC('"', nextc) */
-        *nextc = b'"' as c_char;
-        nextc = nextc.add(1);
+        cmdtext().push(b'"');
     }
-    /* `*nextc = '\0'` without advancing: the terminator sits one past the
-     * cursor for `commandtext` to read, exactly where the C left it, and
-     * the reserve above is what guarantees the byte is inside the buffer. */
-    *nextc = 0;
-    let n = nextc as usize - (buf.as_ptr() as usize);
-    buf.set_len(n);
+    /* The C leaves an unadvanced `*nextc = '\0'` for `commandtext` to
+     * read as the end of the text. The length is that. */
 }
 
 // [spec:dash:def:jobs.showpipe-fn]
@@ -2067,7 +2065,8 @@ unsafe fn showpipe(jp: usize, out: *mut output) {
     let spend: usize = jobs()[jp].ps.len();
 
     for sp in 1..spend {
-        crate::outfmt!(out, b" | %s\0".as_ptr() as *const c_char, ps_cmd(jp, sp));
+        crate::output::outstr(b" | \0".as_ptr() as *const c_char, out);
+        outcmd(jp, sp, out);
     }
     crate::output::outcslow('\n' as c_int, out);
     crate::output::flushall();
