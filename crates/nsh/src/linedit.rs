@@ -1,62 +1,17 @@
-//! dash's binding onto `nshedit`, the Rust re-implementation of libedit.
+//! Native `nshedit` integration for interactive `nsh` sessions.
 //!
-//! `histedit.c` is written against libedit's C API — `el_init`, `el_set`,
-//! `el_gets`, `history_init`, `history()` — so the port keeps that shape in
-//! `crate::histedit::libedit` and this module is where it lands on a real
-//! implementation.
-//!
-//! # What this replaced
-//!
-//! Until now this file was a rustyline stand-in. It got `fc`'s observable
-//! behaviour right and the *editing* wrong, which
-//! `docs/libedit-parity.md` measured precisely: 40 POSIX cases and 2 pty
-//! cases where the port and the C dash disagreed, every one of them line
-//! editing, twelve of them hanging rather than answering. nshedit is the
-//! actual libedit semantics, so that gap is a binding problem now rather
-//! than a behaviour problem.
-//!
-//! # The native API, not the C ABI
-//!
-//! nshedit ships two faces: `nshedit` (Rust) and `nshedit-abi` (the
-//! `extern "C"` libedit/readline ABI, as a cdylib). This uses the first.
-//! Going out through `extern "C"` and straight back into Rust would buy
-//! nothing, and the ABI crate needs a nightly toolchain for `c_variadic`
-//! so it can declare `el_set`/`history` variadic the way `histedit.h`
-//! does. dash issues a fixed, known set of operations, so the variadic
-//! entry points are exactly what it does not need.
-//!
-//! # Two impedance mismatches, both deliberate on nshedit's side
-//!
-//! **The prompt callback is typed wide.** `ElPfuncT` returns `*mut u32`,
-//! but `prompt_set`'s `wide` parameter records which it really is, and
-//! `el_set(EL_PROMPT)` passes 0 — meaning "narrow, `char *`". dash's
-//! `getprompt` returns `*const c_char`, so it is installed through a
-//! narrow shim and `wide` is 0. That is what `nshedit-abi` does with a
-//! `el_pfunc_t` too.
-//!
-//! **Reading.** `el_gets` is the core's, not a reimplementation of it.
-//! It briefly was one — the byte-level entry point lived only in the ABI
-//! crate — and the count it reported was the encoded slice's length,
-//! which is right only while nobody sets EL_UNBUFFERED. The library
-//! reports the count separately for exactly that reason, so this passes
-//! the library's `nread` through untouched.
+//! The editor and its read driver are Rust values.  They borrow duplicated
+//! terminal descriptors, consume and produce owned [`Text`] values, and ask
+//! the shell for host services through typed effects.  No libedit operation
+//! codes, callbacks, C streams, or ABI structs cross this module.
 
 // ---------------------------------------------------------------------
 // The shell's line editing, claimed here.
 //
 // POSIX describes vi-mode editing as behaviour of `sh`, so the rules are
-// the shell's to satisfy. The behaviour itself is nshedit's -- every
-// motion, every command, the insert/command mode split -- and this file
-// is the whole of what decides that the shell has it: which editor is
-// attached, in which mode, reading from which descriptors, against which
-// history. Claiming them here points a reader at the one file in this
-// repo that can turn any of them off.
-//
-// An impl claim is not a pass. Evidence is the `/test` facet on the
-// cases in posix/harness/cases_editing.py, and several of these carry a
-// `manual` disposition -- `command-invoke-vi`, `command-redraw`,
-// `insert-interrupt`, `sigint-command-mode` -- meaning unmeasured, not
-// satisfied.
+// the shell's to satisfy.  The motions and editing state live in nshedit;
+// this module supplies the shell-owned prompt, descriptors, history and
+// completion effects that make them an nsh session.
 // [spec:posix:req:edit.block-mode-terminals]
 // [spec:posix:req:edit.change-motion]
 // [spec:posix:sem:edit.change-to-end-and-line]
@@ -96,452 +51,1068 @@
 // [spec:posix:def:edit.word-bigword-terms]
 // [spec:posix:req:edit.yank-motion]
 
-use core::cell::RefCell;
-use core::ptr;
-use std::rc::Rc;
+use nshedit::domain::{
+    Action, ArgumentCommand, Binding, CommandName, CommandSequence, Direction, EditTarget,
+    EditingMode, EditorConfig, EffectCommand, HistorySearchCommand, ImmediateCommand, InputMode,
+    KeySequence, KeymapMode, Motion, Outcome, Prompt, Refresh, ScreenSize, SignalPolicy,
+    TerminalLiteral, TerminalMode, Text, TextUnit, WordTraversal, YankPlacement,
+};
+use nshedit::editor::effect::{
+    AliasResponse, HistoryResponse, HistorySearchInput, HistorySearchResponse, HistorySelection,
+    HostFailure, PromptSide, ReadEffect, ReadOutcome,
+};
+use nshedit::editor::{
+    CompletionCandidate, DriverError, Editor, ReadDriver, ReadResult, ReadStep, StartError,
+    SystemTerminal, TerminalProfile,
+};
+use nshedit::history::HistoryCursor;
+use nshedit_plat::terminal::{ControlCharacter, TerminalAttributes};
+use std::error::Error as StdError;
+use std::ffi::{CStr, OsStr, OsString};
+use std::fmt;
+use std::fs::{File, OpenOptions};
+use std::io::{self, Read, Seek, Write};
+use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use libc::{c_char, c_int, c_void};
+type NativeEditor = Editor<SystemTerminal<'static>>;
 
-use nshedit::el::EditLine as NshEditLine;
-use nshedit::hist::{EditorHistory, HistLine, HistText};
-use nshedit::history::{History as NshHistory, HistoryArg};
+const FIRST_NONBLANK: &str = "nsh-vi-first-nonblank";
+const DELETE_TO_FIRST_NONBLANK: &str = "nsh-vi-delete-to-first-nonblank";
+const CHANGE_TO_FIRST_NONBLANK: &str = "nsh-vi-change-to-first-nonblank";
+const YANK_TO_FIRST_NONBLANK: &str = "nsh-vi-yank-to-first-nonblank";
 
-/// The history object `histedit.c` passes around as `History *`.
-pub type History = NshHistory;
+mod history;
+pub use history::{History, HistoryError, HistoryEvent};
 
-/// The editor.
-///
-/// A wrapper rather than a re-export of nshedit's `EditLine`, because
-/// `el_gets` has to own the bytes it hands back for as long as libedit
-/// would, and the conversion needs somewhere to record how many there
-/// were. Everything else forwards straight through.
-pub struct EditLine {
-    el: *mut NshEditLine,
+/// A native editor/session integration error.
+#[derive(Debug)]
+pub enum LineEditorError {
+    Io(io::Error),
+    Start(StartError),
+    Driver(DriverError),
+    Domain(nshedit::domain::Error),
+    TerminalProfile(Box<str>),
+    OpaqueCodePoint,
 }
 
-impl EditLine {
-    /// # Safety
-    /// `self.el` must still be live.
-    unsafe fn inner(&mut self) -> &mut NshEditLine {
-        &mut *self.el
-    }
-}
-
-/// The trailing argument of the variadic `history()`.
-///
-/// Kept as dash's own enum rather than using `HistoryArg` directly so the
-/// `history!` macro in `crate::histedit::libedit` reads the way the C
-/// call sites do; [`Arg::into_history_arg`] does the translation.
-pub enum Arg {
-    None,
-    Int(c_int),
-    Str(*const c_char),
-}
-
-impl Arg {
-    fn into_history_arg<'a>(self) -> HistoryArg<'a, c_char> {
+impl fmt::Display for LineEditorError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Arg::None => HistoryArg::None,
-            Arg::Int(n) => HistoryArg::Num(n),
-            Arg::Str(p) => HistoryArg::Str(p),
+            Self::Io(error) => error.fmt(formatter),
+            Self::Start(error) => error.fmt(formatter),
+            Self::Driver(error) => error.fmt(formatter),
+            Self::Domain(error) => error.fmt(formatter),
+            Self::TerminalProfile(error) => formatter.write_str(error),
+            Self::OpaqueCodePoint => {
+                formatter.write_str("editor returned a non-terminal opaque code point")
+            }
         }
     }
 }
 
-/// Lets the `history!` macro accept either kind at a call site without the
-/// call site having to say which it is.
-pub trait IntoArg {
-    fn into_arg(self) -> Arg;
-}
-impl IntoArg for c_int {
-    fn into_arg(self) -> Arg {
-        Arg::Int(self)
-    }
-}
-impl IntoArg for *const c_char {
-    fn into_arg(self) -> Arg {
-        Arg::Str(self)
-    }
-}
-impl IntoArg for *mut c_char {
-    fn into_arg(self) -> Arg {
-        Arg::Str(self as *const c_char)
-    }
-}
-
-/* ------------------------------------------------------------------ */
-/* history                                                             */
-/* ------------------------------------------------------------------ */
-
-pub fn history_init() -> *mut History {
-    nshedit::history::history_init()
-}
-
-/// # Safety
-/// `h` must be a live history from [`history_init`], or NULL.
-pub unsafe fn history_end(h: *mut History) {
-    if !h.is_null() {
-        nshedit::history::history_end(h);
-    }
-}
-
-/// `int history(History *, HistEvent *, int op, ...)`.
-///
-/// # Safety
-/// `h` and `he` must be live; a `Arg::Str` must be NUL-terminated.
-pub unsafe fn history_op(
-    h: *mut History,
-    he: *mut crate::histedit::HistEvent,
-    action: c_int,
-    arg: Arg,
-) -> c_int {
-    if he.is_null() {
-        return -1;
-    }
-    // dash's HistEvent and nshedit's are the same two fields in the same
-    // order, both #[repr(C)]: `int num` then `const char *str`. The cast
-    // is between two spellings of one C struct, not a reinterpretation.
-    let ev = &mut *(he as *mut nshedit::histedit::HistEvent);
-    nshedit::history::history(h, ev, action, arg.into_history_arg())
-}
-
-/* ------------------------------------------------------------------ */
-/* the editor                                                          */
-/* ------------------------------------------------------------------ */
-
-/// `EditLine *el_init(const char *, FILE *, FILE *, FILE *)`
-///
-/// # Safety
-/// The three streams must be live `FILE *`.
-pub unsafe fn el_init(
-    prog: *const c_char,
-    fin: *mut c_void,
-    fout: *mut c_void,
-    ferr: *mut c_void,
-) -> *mut EditLine {
-    let name = if prog.is_null() {
-        "sh".to_string()
-    } else {
-        core::ffi::CStr::from_ptr(prog).to_string_lossy().into_owned()
-    };
-    // `el_init_fd`, NOT `el_init`. The core crate's `el_init` derives the
-    // three descriptors with its own `fileno`, which is
-    // `fn fileno(_stream: CFile) -> i32 { -1 }` -- a stub, because a FILE *
-    // is the C library's object and nshedit's `no-c-ffi` decision reserves
-    // reaching into one for the ABI crate (which does it properly, with
-    // `cstdio::fileno_of`). A Rust caller therefore gets an editor whose
-    // stdin, stdout and stderr are all fd -1: every read is EBADF, which
-    // `el_wgets` reports as EOF, so the shell saw end-of-input before a key
-    // was pressed and exited. dash is a port of C and has the streams, so it
-    // supplies the descriptors itself.
-    match nshedit::el::el_init_fd(
-        &name,
-        fin,
-        fout,
-        ferr,
-        libc::fileno(fin as *mut libc::FILE),
-        libc::fileno(fout as *mut libc::FILE),
-        libc::fileno(ferr as *mut libc::FILE),
-    ) {
-        Some(el) => Box::into_raw(Box::new(EditLine {
-            el: Box::into_raw(el),
-        })),
-        None => ptr::null_mut(),
-    }
-}
-
-/// # Safety
-/// `e` must come from [`el_init`], or be NULL.
-pub unsafe fn el_end(e: *mut EditLine) {
-    if e.is_null() {
-        return;
-    }
-    let wrapper = Box::from_raw(e);
-    if !wrapper.el.is_null() {
-        nshedit::el::el_end(Some(Box::from_raw(wrapper.el)));
-    }
-}
-
-/// # Safety
-/// `e` must be live; `f` NUL-terminated or NULL.
-pub unsafe fn el_source(e: *mut EditLine, f: *const c_char) -> c_int {
-    if e.is_null() {
-        return -1;
-    }
-    let path = if f.is_null() {
-        None
-    } else {
-        Some(std::path::Path::new(
-            core::ffi::CStr::from_ptr(f).to_str().unwrap_or(""),
-        ))
-    };
-    nshedit::el::el_source((*e).inner(), path)
-}
-
-/// The narrow prompt shim. See the module note: nshedit types the callback
-/// wide and records the truth in `p_wide`, which `el_set_prompt` sets to 0.
-unsafe extern "C" fn prompt_shim(_el: *mut NshEditLine) -> *mut u32 {
-    crate::parser::getprompt(ptr::null_mut()) as *mut u32
-}
-
-/// `el_set(e, EL_PROMPT | EL_PROMPT_ESC, getprompt, esc)`
-///
-/// # Safety
-/// `e` must be live.
-pub unsafe fn el_set_prompt(e: *mut EditLine, op: c_int, esc: c_int) -> c_int {
-    if e.is_null() {
-        return -1;
-    }
-    // `op` is passed through rather than pinned to EL_PROMPT: dash issues
-    // EL_PROMPT_ESC, and although nshedit treats both as the left-hand
-    // prompt, sending the op dash actually chose keeps the two sides
-    // describing the same call. The numbering is the header's, so dash's
-    // constant and nshedit's are the same value.
-    nshedit::prompt::prompt_set((*e).inner(), Some(prompt_shim), esc as u32, op, 0)
-}
-
-/// `el_set(e, EL_EDITOR, "emacs" | "vi")`
-///
-/// # Safety
-/// `e` must be live; `mode` NUL-terminated.
-pub unsafe fn el_set_editor(e: *mut EditLine, mode: *const c_char) -> c_int {
-    if e.is_null() || mode.is_null() {
-        return -1;
-    }
-    let wide: Vec<u32> = core::ffi::CStr::from_ptr(mode)
-        .to_bytes()
-        .iter()
-        .map(|b| *b as u32)
-        .chain(core::iter::once(0))
-        .collect();
-    nshedit::map::map_set_editor((*e).inner(), &wide)
-}
-
-/// `el_set(e, EL_TERMINAL, term)`
-///
-/// # Safety
-/// `e` must be live; `term` NUL-terminated or NULL.
-pub unsafe fn el_set_terminal(e: *mut EditLine, term: *const c_char) -> c_int {
-    if e.is_null() {
-        return -1;
-    }
-    let name = if term.is_null() {
-        None
-    } else {
-        core::ffi::CStr::from_ptr(term).to_str().ok()
-    };
-    nshedit::terminal::terminal_set((*e).inner(), name)
-}
-
-/// Lets the editor walk the history `histedit.c` owns.
-///
-/// The editor performs exactly four operations -- H_FIRST, H_LAST,
-/// H_NEXT, H_PREV, each with no trailing argument -- so this adapts the
-/// store dash already has rather than moving dash onto nshedit's own.
-/// That matters because `fc`, `H_ENTER` and `H_APPEND` go through the
-/// C-shaped `history()` on the same object; one store, two faces.
-///
-/// Holding the store as a raw pointer is sound because of the order
-/// `histedit()` tears things down in: the non-interactive branch calls
-/// `el_end` and only then `history_end`, so the editor is always gone
-/// before the store it reads is freed. The NULL check is belt and
-/// braces for a future edit that reorders them.
-struct HistoryRef {
-    h: *mut History,
-}
-
-impl HistoryRef {
-    /// One of the four walks, as a `HistLine`.
-    fn walk(&mut self, op: c_int) -> Option<HistLine> {
-        if self.h.is_null() {
-            return None;
+impl StdError for LineEditorError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            Self::Start(error) => Some(error),
+            Self::Driver(error) => Some(error),
+            Self::Domain(error) => Some(error),
+            Self::TerminalProfile(_) | Self::OpaqueCodePoint => None,
         }
-        let mut ev = nshedit::histedit::HistEvent {
-            num: 0,
-            str: ptr::null(),
-        };
-        // SAFETY: `h` is a live store from `history_init`; see the type note.
-        let rv = unsafe { nshedit::history::history(self.h, &mut ev, op, HistoryArg::None) };
-        if rv == -1 || ev.str.is_null() {
-            return None;
-        }
-        // The store is narrow, so hand the bytes over as bytes: `Narrow`
-        // exists exactly so neither side transcodes. dash's entries are
-        // NUL-terminated; the arm wants no terminator.
-        let bytes = unsafe { core::ffi::CStr::from_ptr(ev.str) }.to_bytes().to_vec();
-        Some(HistLine {
-            num: ev.num,
-            text: HistText::Narrow(bytes),
+    }
+}
+
+impl From<io::Error> for LineEditorError {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<StartError> for LineEditorError {
+    fn from(error: StartError) -> Self {
+        Self::Start(error)
+    }
+}
+
+impl From<DriverError> for LineEditorError {
+    fn from(error: DriverError) -> Self {
+        Self::Driver(error)
+    }
+}
+
+impl From<nshedit::domain::Error> for LineEditorError {
+    fn from(error: nshedit::domain::Error) -> Self {
+        Self::Domain(error)
+    }
+}
+
+/// One interactive editor with its terminal and stream capabilities.
+pub struct LineEditor {
+    /// Taken and finished before the descriptor-owning files are dropped.
+    editor: Option<NativeEditor>,
+    driver: ReadDriver,
+    input: File,
+    output: File,
+    input_fd: RawFd,
+    output_fd: RawFd,
+    history_cursor: HistoryCursor,
+    live_history_line: Option<Text>,
+    last_history_pattern: Option<Text>,
+    pending_line: Vec<u8>,
+    pending_offset: usize,
+}
+
+impl LineEditor {
+    /// Duplicate the shell-owned descriptors and activate a native session.
+    ///
+    /// # Safety
+    /// `input_fd` and `output_fd` must be live descriptors for the duration of
+    /// this call.  The constructed value owns duplicates thereafter.
+    pub unsafe fn new(
+        input_fd: RawFd,
+        output_fd: RawFd,
+        mode: EditingMode,
+    ) -> Result<Self, LineEditorError> {
+        let input = duplicate_file(input_fd)?;
+        let output = duplicate_file(output_fd)?;
+        let owned_input_fd = input.as_raw_fd();
+        let owned_output_fd = output.as_raw_fd();
+
+        // SAFETY: the two `File`s remain fields of `LineEditor`.  `Drop`
+        // takes and finishes the editor before either file can close its fd.
+        // BorrowedFd stores the descriptor number, not an address into File,
+        // so moving LineEditor does not invalidate the borrow.
+        let terminal_input: BorrowedFd<'static> = BorrowedFd::borrow_raw(owned_input_fd);
+        let terminal_output: BorrowedFd<'static> = BorrowedFd::borrow_raw(owned_output_fd);
+        let terminal_attributes = nshedit_plat::terminal::read_attributes(terminal_input).ok();
+        let config = EditorConfig::default()
+            .with_editing_mode(mode)
+            .with_signal_policy(SignalPolicy::Ignore);
+        let mut editor = Editor::new(config, SystemTerminal::new(terminal_input, terminal_output))?;
+        let size = SystemTerminal::screen_size(terminal_output)
+            .unwrap_or_else(|_| ScreenSize::new(24, 80).expect("the fallback screen is valid"));
+        editor.configure_display(default_terminal_profile(), size);
+        install_shell_bindings(&mut editor, terminal_attributes.as_ref())?;
+
+        Ok(Self {
+            editor: Some(editor),
+            driver: ReadDriver::default(),
+            input,
+            output,
+            input_fd: owned_input_fd,
+            output_fd: owned_output_fd,
+            history_cursor: HistoryCursor::new(),
+            live_history_line: None,
+            last_history_pattern: None,
+            pending_line: Vec::new(),
+            pending_offset: 0,
         })
     }
-}
 
-impl EditorHistory for HistoryRef {
-    fn first(&mut self) -> Option<HistLine> {
-        self.walk(crate::histedit::libedit::H_FIRST)
+    pub fn set_mode(&mut self, mode: EditingMode) {
+        let editor = self.editor_mut();
+        editor.reconfigure(editor.config().with_editing_mode(mode));
     }
-    fn last(&mut self) -> Option<HistLine> {
-        self.walk(crate::histedit::libedit::H_LAST)
-    }
-    fn next(&mut self) -> Option<HistLine> {
-        self.walk(crate::histedit::libedit::H_NEXT)
-    }
-    fn prev(&mut self) -> Option<HistLine> {
-        self.walk(crate::histedit::libedit::H_PREV)
-    }
-}
 
-/// `el_set(e, EL_HIST, history, hist)`
-///
-/// # Safety
-/// `e` and `hist` must be live.
-pub unsafe fn el_set_hist(e: *mut EditLine, hist: *mut History) -> c_int {
-    if e.is_null() || hist.is_null() {
-        return -1;
+    pub fn set_terminal(&mut self, name: &[u8]) -> Result<(), LineEditorError> {
+        let name = core::str::from_utf8(name).map_err(|error| {
+            LineEditorError::TerminalProfile(error.to_string().into_boxed_str())
+        })?;
+        let size = self.screen_size();
+        let profile = match nshterm::TermInfo::from_name(name) {
+            Ok(entry) => TerminalProfile::from_terminfo(&entry),
+            Err(error) => {
+                self.editor_mut()
+                    .configure_display(TerminalProfile::plain(), size);
+                return Err(LineEditorError::TerminalProfile(
+                    error.to_string().into_boxed_str(),
+                ));
+            }
+        };
+        self.editor_mut().configure_display(profile, size);
+        Ok(())
     }
-    let store: Rc<RefCell<dyn EditorHistory>> = Rc::new(RefCell::new(HistoryRef { h: hist }));
-    (*e).inner().set_history(store);
-    0
-}
 
-/// `const char *el_gets(EditLine *, int *)`
-///
-/// # Safety
-/// `e` must be live; `n` writable or NULL.
-pub unsafe fn el_gets(e: *mut EditLine, _hist: *mut History, n: *mut c_int) -> *const c_char {
-    if e.is_null() {
-        if !n.is_null() {
-            *n = 0;
+    /// Fill a parser buffer from the current edited line, retaining any tail
+    /// that did not fit for the next call.
+    ///
+    /// # Safety
+    /// Prompt, variable and editor effects call into the shell's legacy
+    /// single-threaded global state.
+    pub unsafe fn read_into(
+        &mut self,
+        history: &mut History,
+        destination: &mut [u8],
+    ) -> Result<usize, LineEditorError> {
+        if destination.is_empty() {
+            return Ok(0);
         }
-        return ptr::null();
+        if self.pending_offset == self.pending_line.len() {
+            self.pending_line.clear();
+            self.pending_offset = 0;
+            let result = catch_unwind(AssertUnwindSafe(|| self.drive_line(history)));
+            let line = match result {
+                Ok(result) => result?,
+                Err(payload) => {
+                    let _ = self.editor_mut().set_terminal_mode(TerminalMode::Cooked);
+                    self.driver = ReadDriver::default();
+                    self.editor_mut().reset_line();
+                    self.history_cursor.reset();
+                    self.discard_display_image();
+                    resume_unwind(payload);
+                }
+            };
+            let Some(mut line) = line else {
+                return Ok(0);
+            };
+            line.push(b'\n');
+            self.pending_line = line;
+        }
+        let available = &self.pending_line[self.pending_offset..];
+        let count = available.len().min(destination.len());
+        destination[..count].copy_from_slice(&available[..count]);
+        self.pending_offset += count;
+        Ok(count)
     }
 
-    let mut nread: i32 = 0;
-    let line = nshedit::read::el_gets((*e).inner(), Some(&mut nread));
-
-    // `nread`, never `line.len()`. Under EL_UNBUFFERED the returned slice
-    // runs past the reported count into what an earlier line left in the
-    // conversion buffer (ERR-core-api-26), so the count is the only honest
-    // answer for how much of it is this line. dash does not set
-    // EL_UNBUFFERED, so the two agree today; taking the length here would
-    // be a latent bug waiting for the option to be used.
-    //
-    // `preadfd` consumes what it gets by count and never looks for a NUL
-    // -- `memcpy(buf, rl_cp, min(nr, el_len))`, then advances both -- so
-    // the un-terminated slice is safe to hand back as a `char *`.
-    if !n.is_null() {
-        *n = nread;
+    unsafe fn drive_line(
+        &mut self,
+        history: &mut History,
+    ) -> Result<Option<Vec<u8>>, LineEditorError> {
+        self.editor_mut().reset_line();
+        self.history_cursor.reset();
+        self.live_history_line = None;
+        let mut step = {
+            let (editor, driver) = self.editor_and_driver();
+            driver.begin(editor)?
+        };
+        loop {
+            step = match step {
+                ReadStep::Prompt(pending) => {
+                    let prompt = match pending.request().side {
+                        PromptSide::Left => shell_prompt(),
+                        PromptSide::Right => Prompt::default(),
+                    };
+                    let (editor, driver) = self.editor_and_driver();
+                    driver.resume_prompt(editor, &pending, Ok(prompt))?
+                }
+                ReadStep::Resize(pending) => {
+                    let response = SystemTerminal::screen_size(self.output_borrowed())
+                        .map_err(|_| HostFailure::Unavailable);
+                    let (editor, driver) = self.editor_and_driver();
+                    driver.resume_resize(editor, &pending, response)?
+                }
+                ReadStep::Read(pending) => {
+                    let response = self.read_effect(*pending.request());
+                    let (editor, driver) = self.editor_and_driver();
+                    driver.resume_read(editor, &pending, response)?
+                }
+                ReadStep::History(pending) => {
+                    let request = pending.request();
+                    let direction = request.direction;
+                    let count = request.count.get();
+                    let edited_line = self.editor_mut().line().clone();
+                    match history.current_editor_text(&self.history_cursor) {
+                        Some(selected) if selected != edited_line => {
+                            self.live_history_line = Some(edited_line);
+                        }
+                        None if direction == Direction::Previous => {
+                            self.live_history_line = Some(edited_line);
+                        }
+                        _ => {}
+                    }
+                    let mode = self.editor_mut().config().editing_mode();
+                    let mut response =
+                        history.navigate_editor(&mut self.history_cursor, direction, count, mode);
+                    if matches!(response.selection(), HistorySelection::Live)
+                        && let Some(line) = self.live_history_line.clone()
+                    {
+                        response = if response.reached_boundary() {
+                            HistoryResponse::entry(line).at_boundary()
+                        } else {
+                            HistoryResponse::entry(line)
+                        };
+                    }
+                    let (editor, driver) = self.editor_and_driver();
+                    driver.resume_history(editor, &pending, Ok(response))?
+                }
+                ReadStep::HistorySearch(pending) => {
+                    let request = pending.request();
+                    let direction = request.direction;
+                    let matching = request.matching;
+                    let input = request.input.clone();
+                    let mut live_line = None;
+                    let pattern = match input {
+                        HistorySearchInput::Pattern(pattern) => Ok(pattern),
+                        HistorySearchInput::Prompted => {
+                            live_line = Some(self.editor_mut().line().clone());
+                            let prompt = match direction {
+                                Direction::Previous => Text::from("\n/"),
+                                Direction::Next => Text::from("\n?"),
+                            };
+                            self.read_host_text(&prompt, true).and_then(|pattern| {
+                                if pattern.is_empty() {
+                                    self.last_history_pattern
+                                        .clone()
+                                        .ok_or(HostFailure::Cancelled)
+                                } else {
+                                    self.last_history_pattern = Some(pattern.clone());
+                                    Ok(pattern)
+                                }
+                            })
+                        }
+                        HistorySearchInput::Incremental(_) => {
+                            let prompt = match direction {
+                                Direction::Previous => Text::from("\nbck: "),
+                                Direction::Next => Text::from("\nfwd: "),
+                            };
+                            self.read_host_text(&prompt, true)
+                        }
+                    };
+                    let response = match pattern {
+                        Ok(pattern) => {
+                            let mut selection = history.search_editor(
+                                &mut self.history_cursor,
+                                &pattern,
+                                direction,
+                                matching,
+                            );
+                            if matches!(selection.selection(), HistorySelection::Unchanged)
+                                && let Some(line) = live_line
+                            {
+                                selection = HistoryResponse::entry(line).at_boundary();
+                            }
+                            Ok(HistorySearchResponse {
+                                history: selection,
+                                pattern,
+                            })
+                        }
+                        Err(HostFailure::Cancelled) if live_line.is_some() => {
+                            Ok(HistorySearchResponse {
+                                history: HistoryResponse::entry(
+                                    live_line.expect("checked prompted-line snapshot"),
+                                )
+                                .at_boundary(),
+                                pattern: Text::default(),
+                            })
+                        }
+                        Err(error) => Err(error),
+                    };
+                    let (editor, driver) = self.editor_and_driver();
+                    driver.resume_history_search(editor, &pending, response)?
+                }
+                ReadStep::HistoryLine(pending) => {
+                    let response = history
+                        .select_editor_line(&mut self.history_cursor, pending.request().position());
+                    let (editor, driver) = self.editor_and_driver();
+                    driver.resume_history_line(editor, &pending, Ok(response))?
+                }
+                ReadStep::HistoryWord(pending) => {
+                    let response = history.newest_word(pending.request().position);
+                    let (editor, driver) = self.editor_and_driver();
+                    driver.resume_history_word(editor, &pending, Ok(response))?
+                }
+                ReadStep::Alias(pending) => {
+                    let enter_insert = self.editor_mut().keymap_mode() == KeymapMode::ViCommand;
+                    let response = shell_alias(&pending.request().name, enter_insert);
+                    let (editor, driver) = self.editor_and_driver();
+                    driver.resume_alias(editor, &pending, response)?
+                }
+                ReadStep::EditorCommand(pending) => {
+                    let (editor, driver) = self.editor_and_driver();
+                    driver.resume_editor_command(editor, &pending, Err(HostFailure::Unavailable))?
+                }
+                ReadStep::ExternalEdit(pending) => {
+                    let response = self.external_edit(&pending.request().line);
+                    let (editor, driver) = self.editor_and_driver();
+                    driver.resume_external_edit(editor, &pending, response)?
+                }
+                ReadStep::RecordHistory(pending) => {
+                    // `input::preadbuffer` is authoritative: it knows whether
+                    // this is H_ENTER or a multiline H_APPEND.
+                    self.history_cursor.reset();
+                    let (editor, driver) = self.editor_and_driver();
+                    driver.resume_history_record(editor, &pending, Ok(()))?
+                }
+                ReadStep::Completion(pending) => {
+                    let response = Ok(completion_candidates(&pending.request().query));
+                    let (editor, driver) = self.editor_and_driver();
+                    driver.resume_completion(editor, &pending, response)?
+                }
+                ReadStep::UserCommand(pending) => {
+                    let response =
+                        shell_user_command(self.editor_mut(), pending.request().name.as_str());
+                    let (editor, driver) = self.editor_and_driver();
+                    driver.resume_user_command(editor, &pending, response)?
+                }
+                ReadStep::Signal(pending) => {
+                    let (editor, driver) = self.editor_and_driver();
+                    driver.resume_signal(editor, &pending, Ok(()))?
+                }
+                ReadStep::Display(display) => {
+                    let editor = self.editor.as_mut().expect("live native editor");
+                    self.driver.display(editor, &display, &mut self.output)?
+                }
+                ReadStep::Complete(result) => {
+                    let result = match result {
+                        ReadResult::Accepted(line) => Some(text_to_bytes(&line)?),
+                        ReadResult::Character(unit) => {
+                            Some(text_to_bytes(&core::iter::once(unit).collect())?)
+                        }
+                        ReadResult::Interrupted(_) => {
+                            self.discard_display_image();
+                            None
+                        }
+                        ReadResult::Command | ReadResult::EndOfInput => None,
+                    };
+                    self.editor_mut().reset_line();
+                    self.history_cursor.reset();
+                    return Ok(result);
+                }
+            };
+        }
     }
-    match line {
-        Some(bytes) => bytes.as_ptr() as *const c_char,
-        None => ptr::null(),
+
+    fn read_effect(&mut self, purpose: ReadEffect) -> Result<ReadOutcome, HostFailure> {
+        if purpose == ReadEffect::KeySequence
+            && SystemTerminal::bytes_ready(self.input_borrowed()).unwrap_or(0) == 0
+        {
+            return Ok(ReadOutcome::TimedOut);
+        }
+        let mut byte = [0];
+        match self.input.read(&mut byte) {
+            Ok(0) => Ok(ReadOutcome::EndOfInput),
+            Ok(_) => Ok(ReadOutcome::Bytes(byte.into())),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                Err(HostFailure::Interrupted)
+            }
+            Err(error) => Err(host_failure(error)),
+        }
+    }
+
+    fn read_host_text(
+        &mut self,
+        prompt: &Text,
+        cancel_on_escape: bool,
+    ) -> Result<Text, HostFailure> {
+        self.output
+            .write_all(&text_to_bytes(prompt).map_err(host_failure)?)
+            .and_then(|()| self.output.flush())
+            .map_err(host_failure)?;
+        let mut bytes = Vec::new();
+        loop {
+            let mut byte = [0];
+            match self.input.read(&mut byte) {
+                Ok(0) => return Err(HostFailure::Cancelled),
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                    return Err(HostFailure::Interrupted);
+                }
+                Err(error) => return Err(host_failure(error)),
+            }
+            match byte[0] {
+                b'\r' | b'\n' => {
+                    self.output.write_all(b"\n").map_err(host_failure)?;
+                    return Ok(text_from_bytes(&bytes));
+                }
+                0x1b if cancel_on_escape => return Err(HostFailure::Cancelled),
+                0x07 => return Err(HostFailure::Cancelled),
+                0x08 | 0x7f => {
+                    if bytes.pop().is_some() {
+                        self.output.write_all(b"\x08 \x08").map_err(host_failure)?;
+                    }
+                }
+                byte if bytes.len() == 4096 => {
+                    let _ = byte;
+                    return Err(HostFailure::Failed("command input is too long".into()));
+                }
+                byte => {
+                    bytes.push(byte);
+                    self.output.write_all(&[byte]).map_err(host_failure)?;
+                }
+            }
+        }
+    }
+
+    fn external_edit(&mut self, line: &Text) -> Result<Text, HostFailure> {
+        static NEXT_EDIT_FILE: AtomicU64 = AtomicU64::new(0);
+        let serial = NEXT_EDIT_FILE.fetch_add(1, Ordering::Relaxed);
+        let mut path = std::env::temp_dir();
+        path.push(format!("nsh-edit-{}-{serial}.tmp", std::process::id()));
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(host_failure)?;
+        let result = (|| {
+            file.write_all(&text_to_bytes(line).map_err(host_failure)?)
+                .and_then(|()| file.write_all(b"\n"))
+                .and_then(|()| file.flush())
+                .map_err(host_failure)?;
+            let editor = unsafe { shell_editor() };
+            Command::new(editor)
+                .arg(&path)
+                .status()
+                .map_err(host_failure)?;
+            file.rewind().map_err(host_failure)?;
+            let mut edited = Vec::new();
+            file.read_to_end(&mut edited).map_err(host_failure)?;
+            if edited.last() == Some(&b'\n') {
+                edited.pop();
+            }
+            Ok(text_from_bytes(&edited))
+        })();
+        drop(file);
+        let _ = std::fs::remove_file(path);
+        result
+    }
+
+    fn editor_mut(&mut self) -> &mut NativeEditor {
+        self.editor.as_mut().expect("live native editor")
+    }
+
+    fn editor_and_driver(&mut self) -> (&mut NativeEditor, &mut ReadDriver) {
+        (
+            self.editor.as_mut().expect("live native editor"),
+            &mut self.driver,
+        )
+    }
+
+    fn input_borrowed(&self) -> BorrowedFd<'_> {
+        // SAFETY: `self.input` owns this descriptor.
+        unsafe { BorrowedFd::borrow_raw(self.input_fd) }
+    }
+
+    fn output_borrowed(&self) -> BorrowedFd<'_> {
+        // SAFETY: `self.output` owns this descriptor.
+        unsafe { BorrowedFd::borrow_raw(self.output_fd) }
+    }
+
+    fn screen_size(&self) -> ScreenSize {
+        SystemTerminal::screen_size(self.output_borrowed())
+            .unwrap_or_else(|_| ScreenSize::new(24, 80).expect("the fallback screen is valid"))
+    }
+
+    /// Host signal handling can print a newline while unwinding past the
+    /// driver.  Its committed frame then no longer describes the terminal;
+    /// reinstalling the owned profile makes the next prompt a full frame.
+    fn discard_display_image(&mut self) {
+        let size = self.screen_size();
+        let profile = self.editor_mut().terminal_profile().cloned();
+        if let Some(profile) = profile {
+            self.editor_mut().configure_display(profile, size);
+        }
     }
 }
 
-// ---------------------------------------------------------------------
-// Unit tests for the history adapter.
-//
-// The editor itself needs a terminal and is covered by the pty suite and
-// the POSIX editing cases. `HistoryRef` needs neither: it is the four
-// walks over a store, and getting one of the four opcodes wrong would
-// give recall that works in one direction and silently stops in the
-// other -- which a differential run against dash would show as a hang,
-// not as a wrong answer.
-// ---------------------------------------------------------------------
+impl Drop for LineEditor {
+    fn drop(&mut self) {
+        if let Some(editor) = self.editor.take() {
+            let _ = editor.finish();
+        }
+    }
+}
+
+unsafe fn duplicate_file(fd: RawFd) -> io::Result<File> {
+    let borrowed = BorrowedFd::borrow_raw(fd);
+    let owned = borrowed.try_clone_to_owned()?;
+    Ok(File::from(owned))
+}
+
+fn default_terminal_profile() -> TerminalProfile {
+    std::env::var("TERM")
+        .ok()
+        .and_then(|name| nshterm::TermInfo::from_name(&name).ok())
+        .map(|entry| TerminalProfile::from_terminfo(&entry))
+        .unwrap_or_else(TerminalProfile::ansi)
+}
+
+fn install_shell_bindings(
+    editor: &mut NativeEditor,
+    terminal_attributes: Option<&TerminalAttributes>,
+) -> Result<(), nshedit::domain::Error> {
+    let terminal_bindings = [
+        (
+            "\u{1b}[A",
+            Binding::Effect(EffectCommand::NavigateHistory(Direction::Previous)),
+        ),
+        (
+            "\u{1b}[B",
+            Binding::Effect(EffectCommand::NavigateHistory(Direction::Next)),
+        ),
+        (
+            "\u{1b}[C",
+            Binding::Action(Action::Move(Motion::Character(Direction::Next))),
+        ),
+        (
+            "\u{1b}[D",
+            Binding::Action(Action::Move(Motion::Character(Direction::Previous))),
+        ),
+        (
+            "\u{1b}[H",
+            Binding::Action(Action::Move(Motion::StartOfLine)),
+        ),
+        ("\u{1b}[F", Binding::Action(Action::Move(Motion::EndOfLine))),
+        (
+            "\u{1b}[3~",
+            Binding::Action(Action::Delete(EditTarget::Character(Direction::Next))),
+        ),
+    ];
+    for mode in [
+        KeymapMode::Emacs,
+        KeymapMode::ViInsert,
+        KeymapMode::ViCommand,
+    ] {
+        for (sequence, binding) in &terminal_bindings {
+            editor.bind(mode, KeySequence::try_from(*sequence)?, binding.clone());
+        }
+    }
+
+    let vi_command_bindings = [
+        (
+            "\u{1}",
+            Binding::Action(Action::Move(Motion::StartOfBuffer)),
+        ),
+        (
+            "\u{8}",
+            Binding::Immediate(ImmediateCommand::DeletePreviousUnit),
+        ),
+        (
+            "\u{b}",
+            Binding::Action(Action::Kill(EditTarget::Motion(Motion::EndOfBuffer))),
+        ),
+        ("\u{c}", Binding::Action(Action::Refresh(Refresh::Full))),
+        (
+            "\u{e}",
+            Binding::Effect(EffectCommand::NavigateHistory(Direction::Next)),
+        ),
+        (
+            "\u{10}",
+            Binding::Effect(EffectCommand::NavigateHistory(Direction::Previous)),
+        ),
+        (
+            "\u{12}",
+            Binding::Action(Action::Refresh(Refresh::Redisplay)),
+        ),
+        (
+            "\u{15}",
+            Binding::Action(Action::Kill(EditTarget::Motion(Motion::StartOfBuffer))),
+        ),
+        (
+            "\u{17}",
+            Binding::Immediate(ImmediateCommand::TraverseWords {
+                direction: Direction::Previous,
+                operation: WordTraversal::Kill,
+            }),
+        ),
+        (
+            " ",
+            Binding::Action(Action::Move(Motion::Character(Direction::Next))),
+        ),
+        (
+            "+",
+            Binding::Effect(EffectCommand::NavigateHistory(Direction::Next)),
+        ),
+        (
+            "-",
+            Binding::Effect(EffectCommand::NavigateHistory(Direction::Previous)),
+        ),
+        (
+            "0",
+            Binding::Immediate(ImmediateCommand::StartOfLineOrArgument),
+        ),
+        (
+            "^",
+            Binding::User(
+                CommandName::new(FIRST_NONBLANK).expect("static shell command name is valid"),
+            ),
+        ),
+        (":", Binding::Effect(EffectCommand::ReadEditorCommand)),
+        (
+            "J",
+            Binding::Effect(EffectCommand::SearchHistory(HistorySearchCommand::Prefix(
+                Direction::Next,
+            ))),
+        ),
+        (
+            "K",
+            Binding::Effect(EffectCommand::SearchHistory(HistorySearchCommand::Prefix(
+                Direction::Previous,
+            ))),
+        ),
+        (
+            "P",
+            Binding::Immediate(ImmediateCommand::PasteRegister(YankPlacement::AtCursor)),
+        ),
+        ("U", Binding::Effect(EffectCommand::RestoreHistoryLine)),
+        (
+            "Y",
+            Binding::Action(Action::Copy(EditTarget::Motion(Motion::EndOfLine))),
+        ),
+        (
+            "X",
+            // The native action vocabulary deliberately applies a counted
+            // `Kill(Character)` only once.  Express vi's counted `X` as the
+            // ordinary delete-operator/backward-motion interaction; macro
+            // bindings preserve and replay the caller's count.
+            Binding::Macro(Text::from("dh")),
+        ),
+        (
+            "j",
+            Binding::Effect(EffectCommand::NavigateHistory(Direction::Next)),
+        ),
+        (
+            "k",
+            Binding::Effect(EffectCommand::NavigateHistory(Direction::Previous)),
+        ),
+        (
+            "p",
+            Binding::Immediate(ImmediateCommand::PasteRegister(YankPlacement::AfterCursor)),
+        ),
+        (
+            "x",
+            Binding::Action(Action::Kill(EditTarget::Character(Direction::Next))),
+        ),
+        (
+            "~",
+            Binding::Immediate(ImmediateCommand::ToggleCaseAndAdvance),
+        ),
+        (
+            "c^",
+            Binding::User(
+                CommandName::new(CHANGE_TO_FIRST_NONBLANK)
+                    .expect("static shell command name is valid"),
+            ),
+        ),
+        // POSIX shell vi mode gives `cw` the traditional change-to-word-end
+        // behavior, preserving the separator before the next word.
+        ("cw", Binding::Macro(Text::from("ce"))),
+        (
+            "d^",
+            Binding::User(
+                CommandName::new(DELETE_TO_FIRST_NONBLANK)
+                    .expect("static shell command name is valid"),
+            ),
+        ),
+        (
+            "y^",
+            Binding::User(
+                CommandName::new(YANK_TO_FIRST_NONBLANK)
+                    .expect("static shell command name is valid"),
+            ),
+        ),
+    ];
+    for (sequence, binding) in vi_command_bindings {
+        editor.bind(
+            KeymapMode::ViCommand,
+            KeySequence::try_from(sequence)?,
+            binding,
+        );
+    }
+    for digit in '1'..='9' {
+        editor.bind(
+            KeymapMode::ViCommand,
+            KeySequence::new(Text::from(digit.to_string()))?,
+            Binding::Sequence(CommandSequence::Argument(ArgumentCommand::StartDigit)),
+        );
+    }
+
+    if let Some(attributes) = terminal_attributes {
+        install_terminal_character(
+            editor,
+            attributes,
+            ControlCharacter::Erase,
+            &[
+                KeymapMode::Emacs,
+                KeymapMode::ViInsert,
+                KeymapMode::ViCommand,
+            ],
+            Binding::Immediate(ImmediateCommand::DeletePreviousUnit),
+        )?;
+        install_terminal_character(
+            editor,
+            attributes,
+            ControlCharacter::Kill,
+            &[KeymapMode::Emacs, KeymapMode::ViInsert],
+            Binding::Action(Action::Kill(EditTarget::Buffer)),
+        )?;
+        install_terminal_character(
+            editor,
+            attributes,
+            ControlCharacter::EndOfFile,
+            &[
+                KeymapMode::Emacs,
+                KeymapMode::ViInsert,
+                KeymapMode::ViCommand,
+            ],
+            Binding::Immediate(ImmediateCommand::EndOfInputIfEmpty),
+        )?;
+        install_terminal_character(
+            editor,
+            attributes,
+            ControlCharacter::WordErase,
+            &[KeymapMode::Emacs, KeymapMode::ViInsert],
+            Binding::Immediate(ImmediateCommand::TraverseWords {
+                direction: Direction::Previous,
+                operation: WordTraversal::Kill,
+            }),
+        )?;
+        install_terminal_character(
+            editor,
+            attributes,
+            ControlCharacter::LiteralNext,
+            &[KeymapMode::Emacs, KeymapMode::ViInsert],
+            Binding::Sequence(CommandSequence::QuotedInsert),
+        )?;
+        install_terminal_character(
+            editor,
+            attributes,
+            ControlCharacter::Reprint,
+            &[KeymapMode::Emacs, KeymapMode::ViInsert],
+            Binding::Action(Action::Refresh(Refresh::Full)),
+        )?;
+    }
+    Ok(())
+}
+
+fn install_terminal_character(
+    editor: &mut NativeEditor,
+    attributes: &TerminalAttributes,
+    character: ControlCharacter,
+    modes: &[KeymapMode],
+    binding: Binding,
+) -> Result<(), nshedit::domain::Error> {
+    let byte = attributes.control_character(character);
+    let sequence = KeySequence::new(text_from_bytes(&[byte]))?;
+    for mode in modes {
+        editor.bind(*mode, sequence.clone(), binding.clone());
+    }
+    Ok(())
+}
+
+unsafe fn shell_alias(name: &Text, enter_insert: bool) -> Result<AliasResponse, HostFailure> {
+    let mut name = text_to_bytes(name).map_err(host_failure)?;
+    if name.contains(&0) {
+        return Err(HostFailure::Failed(
+            "an editor alias name contains NUL".into(),
+        ));
+    }
+    name.push(0);
+    let alias = crate::alias::lookupalias(name.as_ptr().cast(), 0);
+    if alias.is_null() {
+        return Ok(AliasResponse::Missing);
+    }
+    let expansion = CStr::from_ptr((*alias).val).to_bytes();
+    let mut macro_text = Text::default();
+    // POSIX `@letter` inserts ordinary alias text.  Starting the native
+    // macro in Vi insertion mode gives embedded escape sequences and later
+    // command keys their normal editor meaning without baking shell policy
+    // into nshedit's generic alias effect.
+    if enter_insert {
+        macro_text.push(TextUnit::Scalar('i'));
+    }
+    macro_text.extend(text_from_bytes(expansion).as_units().iter().copied());
+    Ok(AliasResponse::Expansion(macro_text))
+}
+
+fn shell_user_command(editor: &mut NativeEditor, name: &str) -> Result<Outcome, HostFailure> {
+    let first_nonblank = first_nonblank_index(editor.line());
+    let destination = editor.line().index(first_nonblank).map_err(host_failure)?;
+    match name {
+        FIRST_NONBLANK => editor
+            .execute(Action::Move(Motion::Absolute(destination)))
+            .map_err(host_failure),
+        DELETE_TO_FIRST_NONBLANK | CHANGE_TO_FIRST_NONBLANK | YANK_TO_FIRST_NONBLANK => {
+            let cursor = editor.cursor().get();
+            let start = cursor.min(first_nonblank);
+            let mut end = cursor.max(first_nonblank);
+            if start == end && start < editor.line().len() {
+                end += 1;
+            }
+            let span = editor.line().span(start..end).map_err(host_failure)?;
+            let action = if name == YANK_TO_FIRST_NONBLANK {
+                Action::Copy(EditTarget::Span(span))
+            } else {
+                Action::Kill(EditTarget::Span(span))
+            };
+            let outcome = editor.execute(action).map_err(host_failure)?;
+            if name == CHANGE_TO_FIRST_NONBLANK {
+                editor
+                    .execute(Action::SetModes {
+                        input: InputMode::Insert,
+                        keymap: KeymapMode::ViInsert,
+                    })
+                    .map_err(host_failure)
+            } else {
+                Ok(outcome)
+            }
+        }
+        _ => Err(HostFailure::Unavailable),
+    }
+}
+
+fn first_nonblank_index(line: &Text) -> usize {
+    line.as_units()
+        .iter()
+        .position(|unit| !is_line_blank(unit))
+        .unwrap_or(0)
+}
+
+fn is_line_blank(unit: &TextUnit) -> bool {
+    matches!(
+        unit,
+        TextUnit::Scalar(' ' | '\t') | TextUnit::RawByte(b' ' | b'\t')
+    )
+}
+
+unsafe fn shell_prompt() -> Prompt {
+    let pointer = crate::parser::getprompt(core::ptr::null_mut());
+    if pointer.is_null() {
+        return Prompt::default();
+    }
+    prompt_from_text(&text_from_bytes(CStr::from_ptr(pointer).to_bytes()), 0x01)
+}
+
+fn prompt_from_text(text: &Text, escape: u32) -> Prompt {
+    let marker = TextUnit::from_code_point(escape);
+    let mut prompt = Prompt::default();
+    let mut literal = false;
+    for part in text.as_units().split(|unit| *unit == marker) {
+        if literal {
+            let bytes = part.iter().copied().collect::<Text>();
+            let bytes = text_to_bytes(&bytes).unwrap_or_default();
+            prompt.push_literal(TerminalLiteral::from(bytes));
+        } else {
+            prompt.push_text(part.iter().copied().collect::<Text>());
+        }
+        literal = !literal;
+    }
+    prompt
+}
+
+fn text_from_bytes(bytes: &[u8]) -> Text {
+    let mut text = Text::default();
+    let mut remaining = bytes;
+    while !remaining.is_empty() {
+        match core::str::from_utf8(remaining) {
+            Ok(valid) => {
+                text.extend(valid.chars().map(TextUnit::Scalar));
+                break;
+            }
+            Err(error) => {
+                let valid = &remaining[..error.valid_up_to()];
+                text.extend(
+                    core::str::from_utf8(valid)
+                        .expect("valid_up_to identifies valid UTF-8")
+                        .chars()
+                        .map(TextUnit::Scalar),
+                );
+                remaining = &remaining[error.valid_up_to()..];
+                let invalid = error.error_len().unwrap_or(remaining.len());
+                text.extend(remaining[..invalid].iter().copied().map(TextUnit::RawByte));
+                remaining = &remaining[invalid..];
+            }
+        }
+    }
+    text
+}
+
+fn text_to_bytes(text: &Text) -> Result<Vec<u8>, LineEditorError> {
+    let mut bytes = Vec::new();
+    for unit in text {
+        match unit {
+            TextUnit::Scalar(character) => {
+                let mut encoded = [0; 4];
+                bytes.extend_from_slice(character.encode_utf8(&mut encoded).as_bytes());
+            }
+            TextUnit::RawByte(byte) => bytes.push(*byte),
+            TextUnit::OpaqueCodePoint(_) => return Err(LineEditorError::OpaqueCodePoint),
+        }
+    }
+    Ok(bytes)
+}
+
+fn host_failure(error: impl fmt::Display) -> HostFailure {
+    let message = error.to_string();
+    HostFailure::Failed(message.into_boxed_str())
+}
+
+fn completion_candidates(
+    query: &nshedit::editor::CompletionQuery,
+) -> nshedit::editor::CompletionCandidates {
+    let Ok(stem) = text_to_bytes(query.stem()) else {
+        return Vec::new().into();
+    };
+    let split = stem
+        .iter()
+        .rposition(|byte| *byte == b'/')
+        .map_or((b"".as_slice(), stem.as_slice()), |position| {
+            (&stem[..=position], &stem[position + 1..])
+        });
+    let (prefix, basename) = split;
+    let directory = if prefix.is_empty() {
+        PathBuf::from(".")
+    } else if prefix == b"/" {
+        PathBuf::from("/")
+    } else {
+        PathBuf::from(OsStr::from_bytes(&prefix[..prefix.len() - 1]))
+    };
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return Vec::new().into();
+    };
+    entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name();
+            let name = name.as_bytes();
+            if !name.starts_with(basename) {
+                return None;
+            }
+            let mut insertion = prefix.to_vec();
+            insertion.extend_from_slice(name);
+            let suffix = entry
+                .file_type()
+                .ok()
+                .filter(|kind| kind.is_dir())
+                .map_or(" ", |_| "/");
+            Some(CompletionCandidate::new(text_from_bytes(&insertion)).with_suffix(suffix))
+        })
+        .collect()
+}
+
+unsafe fn shell_editor() -> OsString {
+    for name in [c"EDITOR", c"VISUAL"] {
+        let value = crate::var::bltinlookup(name.as_ptr());
+        if !value.is_null() {
+            let bytes = CStr::from_ptr(value).to_bytes();
+            if !bytes.is_empty() {
+                return OsString::from_vec(bytes.to_vec());
+            }
+        }
+    }
+    OsString::from("vi")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::CStr0;
 
-    /// A store holding `lines`, oldest first.
-    fn store(lines: &[&str]) -> *mut History {
-        let h = history_init();
-        assert!(!h.is_null());
-        let mut ev = crate::histedit::HistEvent {
-            num: 0,
-            str: ptr::null(),
-        };
-        unsafe {
-            history_op(h, &mut ev, crate::histedit::libedit::H_SETSIZE, Arg::Int(10));
-            for l in lines {
-                let s = CStr0::new(l);
-                history_op(
-                    h,
-                    &mut ev,
-                    crate::histedit::libedit::H_ENTER,
-                    Arg::Str(s.p()),
-                );
-            }
-        }
-        h
-    }
-
-    fn text(line: &HistLine) -> String {
-        match &line.text {
-            HistText::Narrow(b) => String::from_utf8_lossy(b).into_owned(),
-            HistText::Wide(w) => w.iter().filter_map(|c| char::from_u32(*c)).collect(),
-        }
+    #[test]
+    fn prompt_literals_do_not_contribute_columns() {
+        let prompt = prompt_from_text(&text_from_bytes(b"x\x01\x1b[31m\x01> "), 1);
+        assert_eq!(prompt.parts().len(), 3);
     }
 
     #[test]
-    fn first_is_the_newest_and_last_is_the_oldest() {
-        let h = store(&["one", "two", "three"]);
-        let mut r = HistoryRef { h };
-        // libedit's naming is the surprise this asserts: H_FIRST is the
-        // NEWEST entry and H_LAST the oldest, which is why `histcmd`
-        // computes its direction the way it does.
-        assert_eq!(text(&r.first().unwrap()), "three");
-        assert_eq!(text(&r.last().unwrap()), "one");
-        unsafe { history_end(h) };
-    }
-
-    #[test]
-    fn next_walks_older_and_prev_walks_newer() {
-        let h = store(&["one", "two", "three"]);
-        let mut r = HistoryRef { h };
-        assert_eq!(text(&r.first().unwrap()), "three");
-        // H_NEXT moves toward OLDER despite the name.
-        assert_eq!(text(&r.next().unwrap()), "two");
-        assert_eq!(text(&r.next().unwrap()), "one");
-        // Off the oldest end reports nothing rather than wrapping.
-        assert!(r.next().is_none());
-        // ...and back toward the newest.
-        assert_eq!(text(&r.prev().unwrap()), "two");
-        assert_eq!(text(&r.prev().unwrap()), "three");
-        assert!(r.prev().is_none());
-        unsafe { history_end(h) };
-    }
-
-    #[test]
-    fn entries_come_back_as_narrow_bytes_without_a_terminator() {
-        let h = store(&["ab"]);
-        let mut r = HistoryRef { h };
-        let line = r.first().unwrap();
-        match line.text {
-            // The arm matters: dash's store is HistoryGen<c_char>, so a
-            // Wide answer here would mean a transcode round-trip on every
-            // keypress.
-            HistText::Narrow(ref b) => assert_eq!(b, b"ab"),
-            HistText::Wide(_) => panic!("narrow store answered Wide"),
-        }
-        // Event numbers are what `fc` addresses ranges by.
-        assert!(line.num > 0);
-        unsafe { history_end(h) };
-    }
-
-    #[test]
-    fn an_empty_store_and_a_detached_one_report_nothing() {
-        let h = store(&[]);
-        let mut r = HistoryRef { h };
-        assert!(r.first().is_none());
-        assert!(r.last().is_none());
-        unsafe { history_end(h) };
-
-        // `histedit()` frees the store only after `el_end`, so this is
-        // belt and braces -- but a detached shim must be inert, not a
-        // dereference of NULL.
-        let mut detached = HistoryRef { h: ptr::null_mut() };
-        assert!(detached.first().is_none());
-        assert!(detached.prev().is_none());
+    fn first_nonblank_preserves_raw_bytes() {
+        assert_eq!(first_nonblank_index(&Text::from(" \tword")), 2);
+        assert_eq!(first_nonblank_index(&text_from_bytes(b" \t\xffword")), 2);
+        assert_eq!(first_nonblank_index(&Text::default()), 0);
     }
 }

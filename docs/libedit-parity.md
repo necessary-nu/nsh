@@ -1,40 +1,36 @@
-# What the libedit port had to make true — closed
+# Native nshedit integration
 
-`crates/nsh/src/linedit.rs` now binds `nshedit`, the Rust
-re-implementation of libedit, in place of the rustyline stand-in this
-file was written against. The gap it measured is closed.
+`crates/nsh/src/linedit.rs` consumes nshedit's Rust API directly. The
+dependency is an exact HTTPS-form Git revision, currently
+`cfb16cee5c51144a7a7f1b3574add4dd008a79d4`; there is no floating Git ref
+in the build. The repository still requires authentication, so this pin
+does not yet make unauthenticated clone-and-build possible.
 
-| | rustyline | nshedit |
-|---|---|---|
-| POSIX mismatches vs C dash | 40 | 2 |
-| non-editing mismatches | 0 | 0 |
-| interactive (pty) | 29/31 | 31/31 |
-| cases the port failed | 95 | 54 |
+The old libedit-shaped compatibility layer is gone:
 
-The two that remain are the port passing cases dash fails —
-`edit-history-goto-number` and `edit-history-search-pattern-anchored` —
-which is a decision rather than a defect. See `docs/divergences.md`.
+* `LineEditor` owns an `Editor<SystemTerminal>`, `ReadDriver`, duplicated
+  terminal descriptors, and the descriptor-lifetime proof joining them.
+* `History` owns `HistoryStore` entries and adds only shell policy:
+  displayed `fc` numbers, multiline append targets, byte-exact records,
+  and the delayed `HISTSIZE` limit.
+* Prompt, history, alias, completion, external-editor, terminal-size and
+  user-command requests are handled as typed effects. Shell vi bindings
+  and POSIX history-pattern matching remain consumer-specific.
+* Terminal profiles come from `nshterm`; configured `stty` characters
+  come from `nshedit-plat`. Invalid UTF-8 input remains raw bytes rather
+  than being replaced.
+* Normal teardown and shell signal unwinds restore cooked mode before
+  dropping the owned descriptors. Host-side terminal output invalidates
+  the committed display image before the next prompt.
 
-Three bugs in the binding, and what found each, since none was found by
-reading code:
+The historical C-ABI failures (`el_init` descriptor recovery,
+`el_gets` byte counts, variadic history callbacks) are no longer
+reachable because those entry points and operation codes are not part of
+the integration.
 
-  * `el_init` derives its descriptors through a stub `fileno` that always
-    answers -1, so the editor read fd -1, took EBADF for EOF and exited
-    before a key was pressed. Found by a pty probe after the suite went
-    40 -> 93; fixed by using `el_init_fd`. nshedit has since hidden
-    `el_init` from Rust callers.
-  * `el_gets` was reimplemented here and reported the encoded slice's
-    length as the count. Under EL_UNBUFFERED those differ
-    (ERR-core-api-26). Every test passed; the erratum found it, not the
-    tests.
-  * `el_set(EL_HIST)` was a no-op because the only way to attach a
-    history was a C-variadic callback stable Rust cannot define. Fixed in
-    nshedit by the `EditorHistory` trait; dash adapts its own store to it
-    rather than moving onto nshedit's, because `fc`, `H_ENTER` and
-    `H_APPEND` need the C-shaped face of the same object.
+The live acceptance checks are:
 
-Kept as the record of what the swap cost and how each failure was
-caught. The live acceptance check is one command:
-
-    posix/harness/run.py --shell target/debug/nsh \
+    cargo test -p nsh --lib
+    python3 tests/harness/ptydiff.py
+    python3 posix/harness/run.py --shell target/debug/nsh \
         --reference tests/.build/ref/src/dash

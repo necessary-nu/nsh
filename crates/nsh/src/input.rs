@@ -14,7 +14,7 @@
 //! string the innermost `strpush` pushed in front of it.
 
 use libc::{c_char, c_int, c_void, off_t, size_t, tcflag_t};
-use core::ptr::{addr_of_mut, null_mut};
+use core::ptr::addr_of_mut;
 
 use crate::alias::alias;
 use crate::error::{INTOFF, INTON};
@@ -481,13 +481,6 @@ unsafe fn stdin_clear_nonblock() -> c_int {
     flags
 }
 
-/// `const char *el_gets(EditLine *, int *)` — the libedit entry point
-/// `preadfd` uses.  `crate::histedit::libedit` shims the rest of the libedit
-/// API the same way; this one has no call site there, so it lives here.
-unsafe fn el_gets(e: *mut crate::histedit::EditLine, n: *mut c_int) -> *const c_char {
-    crate::linedit::el_gets(e, crate::histedit::hist, n)
-}
-
 // [spec:dash:def:input.preadfd-fn]
 // [spec:dash:sem:input.preadfd-fn]
 unsafe fn preadfd() -> c_int {
@@ -529,43 +522,22 @@ unsafe fn preadfd() -> c_int {
 
     use_tee = fd == sin
         /* #ifndef SMALL */
-        && crate::histedit::el.is_null()
+        && !crate::histedit::editing_active()
         && !stdin_bufferable();
 
     pnr = nr;
     'retry: loop {
         nr = pnr;
         /* #ifndef SMALL */
-        if fd == sin && !crate::histedit::el.is_null() {
-            static mut rl_cp: *const c_char = null_mut();
-            static mut el_len: c_int = 0;
-
-            if rl_cp.is_null() {
-                /* `pushstackmark(&smark, stackblocksize())` around
-                 * `el_gets`, whose prompt callback reaches `expandstr`.
-                 * That prompt is an owned buffer now. */
-                rl_cp = el_gets(crate::histedit::el, addr_of_mut!(el_len));
-            }
-            if rl_cp.is_null() {
-                nr = 0;
-            } else {
-                if nr > el_len {
-                    nr = el_len;
-                }
-                libc::memcpy(
-                    cur_pf().buf.as_mut_ptr().add(off) as *mut c_void,
-                    rl_cp as *const c_void,
-                    nr as size_t,
-                );
-                if nr != el_len {
-                    el_len -= nr;
-                    rl_cp = rl_cp.offset(nr as isize);
-                } else {
-                    rl_cp = null_mut();
-                }
-            }
-
-            return nr;
+        if fd == sin && crate::histedit::editing_active() {
+            let destination = {
+                let pf = cur_pf();
+                &mut pf.buf[off..off + nr as usize]
+            };
+            return match crate::histedit::read_edit_line(destination) {
+                Ok(count) => count as c_int,
+                Err(_) => 0,
+            };
         }
 
         if use_tee {
@@ -718,20 +690,14 @@ unsafe fn preadbuffer() -> c_int {
     };
 
     if cur_pf().fd == crate::streams::streams().stdin
-        && !crate::histedit::hist.is_null()
+        && crate::histedit::history_active()
         && something != 0
     {
-        let mut he: crate::histedit::HistEvent = core::mem::zeroed();
-        crate::histedit::history(
-            crate::histedit::hist,
-            &mut he,
-            if first != 0 {
-                crate::histedit::libedit::H_ENTER
-            } else {
-                crate::histedit::libedit::H_APPEND
-            },
-            line,
-        );
+        let bytes = {
+            let pf = cur_pf();
+            &pf.buf[pf.pos..q]
+        };
+        crate::histedit::record_history_line(bytes, first != 0);
     }
     INTON();
 

@@ -16,7 +16,9 @@ api-sketch = []
 [dependencies]
 bstr = "1"
 libc = "0.2"
-nshedit = { git = "ssh://git@github.com/necessary-nu/nshedit.git", branch = "main" }
+nshedit = { git = "https://github.com/necessary-nu/nshedit.git", rev = "cfb16cee5c51144a7a7f1b3574add4dd008a79d4" }
+nshedit-plat = { git = "https://github.com/necessary-nu/nshedit.git", rev = "cfb16cee5c51144a7a7f1b3574add4dd008a79d4" }
+nshterm = { git = "https://github.com/necessary-nu/nshedit.git", rev = "cfb16cee5c51144a7a7f1b3574add4dd008a79d4" }
 
 [[example]]
 name = "embed"

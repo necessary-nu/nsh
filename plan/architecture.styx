@@ -59,12 +59,19 @@ elements (
         name "Line editing and history"
         kind @boundary
         lifecycle @active
-        // The seam onto nshedit. `histedit.c` is written against libedit's C
-        // API, so `crate::histedit::libedit` keeps that shape and `linedit.rs`
-        // is the whole of what binds it to an implementation.
-        exposes ("crates/nsh/src/linedit.rs")
+        // The native seam onto nshedit. `linedit.rs` and its `history`
+        // submodule own Editor, ReadDriver, SystemTerminal and HistoryStore
+        // values; `histedit.rs` owns their shell lifecycle and exposes
+        // semantic history/fc operations. Shell-only bindings and typed host
+        // effects stay here, while no libedit operation codes, callbacks or
+        // ABI structs cross the boundary.
+        exposes ("crates/nsh/src/linedit.rs" "crates/nsh/src/linedit"
+                 "crates/nsh/src/histedit.rs")
+        decisions ([dec:nsh:shell-as-library] [dec:nsh:bytes-not-text]
+                   [dec:nsh:host-owns-signals] [dec:nsh:host-owns-streams])
         log (
             {at "2026-08-07T00:00:00Z", kind @established, by "[dec:nsh:shell-as-library]"}
+            {at "2026-08-09T23:39:26Z", kind @modified, by "[dec:nsh:shell-as-library]"}
         )
     }
     {

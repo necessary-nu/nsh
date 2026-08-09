@@ -247,13 +247,13 @@ finding.** That is the mechanism that makes [dec:nsh:shell-as-library]
 checkable, and there is no other one. The split costs a workspace member
 and a `nsh = { path = "../nsh" }`.
 
-**The `nshedit` dependency is a path outside the repository**
-(`crates/dash/Cargo.toml`: `path = "../../../../git/libedit/crates/nshedit"`).
-A crate with an out-of-tree path dependency cannot be published, cannot
-be cloned and built, and cannot be built in CI. Resolving this — vendor,
-submodule, workspace merge, or a published version — is a prerequisite
-for calling the thing a library at all, and it appears nowhere in the
-plan.
+**The `nshedit` dependency was a path outside the repository.** It is now
+an HTTPS-form Git dependency pinned to one exact revision, alongside the
+`nshterm` and `nshedit-plat` crates used by the native integration. That
+removes the floating ref and makes resolution deterministic for authorized
+consumers. The repository still requires authentication, and registry
+publication is still required before `nsh` itself can be published to
+crates.io.
 
 ### 1.7 "Idiomatic", reduced to checkable properties
 
@@ -274,7 +274,7 @@ target.
 | P7 | Minimal unsafe | `unsafe fn` count; `#![deny(unsafe_op_in_unsafe_fn)]`; every `unsafe` block has `// SAFETY:` | 611 of 800 `fn` are `unsafe` (76%) | budget: syscall wrappers, the signal handler, redirection's fd work. Order 30, not 611. |
 | P8 | The library does not end the process | `libc::_exit\|process::exit\|libc::abort` in the library | 4 (`error.rs:217`, `trap.rs:475`, `redir.rs:393`, `shellmain.rs:287`) | 0 outside a forked child |
 | P9 | Re-entrant | two `Shell`s, one thread and two, pass the suite; `testutil::lock()` deleted | one shell per process, `lock()` required | both pass, *except the locale* — see below |
-| P10 | Publishable | no unpublished deps; `cargo package` succeeds; lint allows removed | `nshedit` is a git dep (was a path four directories out); `lib.rs` has 6 blanket `allow`s including `clippy::all` and `dead_code` | clean |
+| P10 | Publishable | no unpublished deps; `cargo package` succeeds; lint allows removed | `nshedit`, `nshedit-plat` and `nshterm` are exact authenticated Git pins, not registry releases; `lib.rs` has 6 blanket `allow`s including `clippy::all` and `dead_code` | clean |
 
 **P9 has a limit that cannot be refactored away.** `var.rs:103-106
 changelocale` calls `putenv` and then `setlocale(LC_ALL, "")`, and the C
@@ -860,8 +860,10 @@ written down. `jobs.rs` also has the lowest coverage of any large module
 
 **3.6 The public error taxonomy — confirmed missing.** Section 1.3.
 
-**3.7 Crate/module structure — confirmed missing.** Section 1.6: rename,
-frontend split, and the out-of-repo `nshedit` path dependency.
+**3.7 Crate/module structure — partly resolved.** Section 1.6's rename
+and frontend split landed. The out-of-repo `nshedit` path was replaced
+by an exact Git revision and its native API. Unauthenticated repository
+access and registry publication remain packaging constraints.
 
 Three the brief did not list:
 
@@ -1068,7 +1070,9 @@ Not applied. Listed so they can be reviewed as a set.
   and `public-api` (deps: `no-ambient-state`, `host-owns-signals`).
 * Add `process-model` covering fork/exec/wait in a library, deps
   `no-ambient-state`.
-* Add `nshedit-in-tree` — resolve the out-of-repo path dependency.
+* Added `nshedit-in-tree`; authorized clone-and-build now uses an exact
+  Git revision, while the node remains open for unauthenticated access
+  and registry publication.
 * Make `posix-nonconformance` depend on `shell-as-library`.
 
 **AKM (`plan/decisions/`):**

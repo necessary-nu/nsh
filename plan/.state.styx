@@ -1099,6 +1099,7 @@ assertions (
     {id owned-strings, kind @complete, author "brendan@necessary.nu", at 2026-08-09T16:24:36.630845046Z}
     {id edition-2024, kind @complete, author "brendan@necessary.nu", at 2026-08-09T19:30:39.321605436Z}
     {id delete-memalloc, kind @complete, author "brendan@necessary.nu", at 2026-08-09T22:07:54.34344606Z}
+    {id nshedit-in-tree, kind @doing, author "brendan@necessary.nu", at 2026-08-09T22:10:03.872390597Z}
 )
 
 impl_evidence (

@@ -2267,7 +2267,7 @@ unsafe fn setprompt(which: c_int) {
     whichprompt = which;
 
     /* #ifdef SMALL: show = 1 */
-    show = crate::histedit::el.is_null() as c_int;
+    show = (!crate::histedit::editing_active()) as c_int;
     if show != 0 && crate::input::cur_pf().nleft == 0 {
         /* `pushstackmark(&smark, stackblocksize())` bounded the prompt
          * `expandstr` had left in the region for `out2str` to read.  The

@@ -2259,6 +2259,27 @@ children (
                         kind @decision
                         text "Deferred out of P0 (priority 0 -> 2) on 2026-08-09. Right work, wrong pass — not being done now.\n\nIt only gates `cargo publish`, and publishing is not close: the public API does not exist yet (`public-api-design` and `public-api` are both open, and `docs/api-design.md` describes a surface nothing constructs). The `ssh://git@github.com/necessary-nu/nshedit.git` dependency with `git-fetch-with-cli = true` already makes clone-and-build work for anyone with access, which is every consumer there currently is.\n\nKeeping it at P0 had a cost beyond the wasted rank: it was the *only* P0 candidate `nplan_next` would return, so the computed frontier said \"publish a dependency\" while the actual work — the remaining `ck*`/`savestr` owners, `errors-are-values`, `no-ambient-state` — sat behind deps or claims and never surfaced.\n\nUn-defer when `public-api` lands and publishing is the next real step."
                     }
+
+                    {
+                        at 2026-08-09T22:10:03.872390597Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-09T23:31:34.023238949Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "The public Rust API has landed, so the 2026-08-09 implementation deferral is superseded. nsh now consumes Editor, ReadDriver, HistoryStore, typed bindings/effects, nshterm and nshedit-plat directly at exact public HTTPS revision cfb16cee5c51144a7a7f1b3574add4dd008a79d4; the libedit-shaped ABI shim and floating private SSH branch are gone. Shell-specific bindings and host-effect policy remain in nsh. This completes the API migration and clone-and-build reproducibility work, but this node remains Doing because nshedit, nshedit-plat and nshterm are not yet registry releases, so cargo publication of nsh is still gated."
+                    }
+
+                    {
+                        at 2026-08-09T23:39:26.011630443Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "Correction to the prior entry: the landed native Rust API is nshedit's, not nsh's `public-api` node, which remains Todo. This migration was pulled forward by the explicit integration request and does not satisfy the original un-defer trigger. The manifests use an exact HTTPS-form Git revision, but the nshedit repository still requires authentication, so unauthenticated clone-and-build and registry publication both remain outstanding."
+                    }
                 )
             }
 

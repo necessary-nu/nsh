@@ -1,22 +1,10 @@
-//! Literal port of `src/histedit.c` and `src/myhistedit.h` —
-//! command-line editing and history, plus the `fc` builtin.
+//! Interactive editing, command history, and the `fc` builtin.
 //! Rules: `docs/spec/port/src/histedit.md`, `docs/spec/port/src/myhistedit.md`.
 //!
-//! # libedit
-//!
-//! The whole of `histedit.c` is inside `#ifndef SMALL` and is written
-//! against libedit. This crate has no libedit dependency; the [`libedit`]
-//! module below keeps that API's names and signatures and forwards them to
-//! [`crate::linedit`], which implements history and line editing in Rust
-//! (rustyline). The control flow in this file is unchanged by that
-//! substitution, because the contract is the behaviour of `fc`/`histcmd`
-//! and the history-recording calls, not the libedit API.
-//!
-//! History semantics are exact — the `H_*` operations were derived
-//! empirically from libedit 3.1 and `histcmd` depends on their orientation
-//! (`H_FIRST` is the *newest* entry, `H_PREV` walks toward *newer*). See
-//! [`crate::linedit`]. Interactive key bindings and `~/.editrc` are
-//! rustyline's and are deliberately *not* a reproduction of libedit's.
+//! `nsh` owns one semantic history store and, while editing is enabled, one
+//! native [`nshedit`] session.  The integration has no libedit-shaped shim:
+//! lifecycle, mode changes, reads, history insertion, and `fc` selection are
+//! ordinary Rust operations over owned values.
 //!
 //! # Cross-module signatures assumed (see the port report)
 //!
@@ -33,7 +21,10 @@
 use bstr::BString;
 use core::mem;
 use core::ptr;
-use libc::{c_char, c_int, c_void, FILE};
+use libc::{FILE, c_char, c_int};
+use nshedit::domain::EditingMode;
+
+use crate::linedit::{History, HistoryEvent, LineEditor};
 
 unsafe extern "C" {
     fn sprintf(s: *mut c_char, format: *const c_char, ...) -> c_int;
@@ -53,46 +44,66 @@ const MAXHISTLOOPS: c_int = 4;
 /// default editor *should* be $EDITOR
 const DEFEDITOR: &core::ffi::CStr = c"ed";
 
-// ---------------------------------------------------------------------
-// src/myhistedit.h — the history/editing interface.
-//
-// The three typedefs below are given here as their `SMALL` forms, except
-// that `HistEvent` has to be libedit's real struct: `histcmd` reads
-// `he.num` and `he.str`, which the `SMALL` `typedef int HistEvent` cannot
-// provide, and `histedit.c` is only ever compiled in a non-`SMALL` build.
-// ---------------------------------------------------------------------
-
+// The old myhistedit typedefs now map to owned semantic fields in this state.
 // [spec:dash:def:myhistedit.history]
-pub type History = crate::linedit::History;
-
 // [spec:dash:def:myhistedit.edit-line]
-pub type EditLine = crate::linedit::EditLine;
-
 // [spec:dash:def:myhistedit.hist-event]
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct HistEvent {
-    pub num: c_int,
-    pub str: *const c_char,
+struct HistEditState {
+    history: Option<History>,
+    editor: Option<LineEditor>,
 }
 
 // [spec:dash:def:myhistedit.history-fn]
 // [spec:dash:sem:myhistedit.history-fn]
-/// The `SMALL`-build stub for libedit's `history()`: accepts the same
-/// arguments and does nothing. In a normal build the real variadic libedit
-/// function is used instead — see [`libedit::history`], the shim this port
-/// calls from `histedit.c`'s call sites.
-pub unsafe fn history(h: *mut History, he: *mut HistEvent, action: c_int, p: *mut c_char) {
-    crate::linedit::history_op(h, he, action, crate::linedit::Arg::Str(p as *const c_char));
+static mut STATE: HistEditState = HistEditState {
+    history: None,
+    editor: None,
+};
+
+#[inline]
+unsafe fn state_mut() -> &'static mut HistEditState {
+    &mut *ptr::addr_of_mut!(STATE)
 }
 
-/// history cookie
-pub static mut hist: *mut History = ptr::null_mut();
-/// editline cookie
-pub static mut el: *mut EditLine = ptr::null_mut();
+#[inline]
+unsafe fn history_mut() -> Option<&'static mut History> {
+    state_mut().history.as_mut()
+}
+
+#[must_use]
+pub unsafe fn history_active() -> bool {
+    (*ptr::addr_of!(STATE)).history.is_some()
+}
+
+#[must_use]
+pub unsafe fn editing_active() -> bool {
+    (*ptr::addr_of!(STATE)).editor.is_some()
+}
+
+/// Read edited bytes directly into the parser's owned input buffer.
+pub unsafe fn read_edit_line(
+    destination: &mut [u8],
+) -> Result<usize, crate::linedit::LineEditorError> {
+    let state = state_mut();
+    match (&mut state.editor, &mut state.history) {
+        (Some(editor), Some(history)) => editor.read_into(history, destination),
+        _ => Ok(0),
+    }
+}
+
+/// Retain one physical input line, either starting or continuing a command.
+pub unsafe fn record_history_line(bytes: &[u8], first: bool) {
+    let Some(history) = history_mut() else {
+        return;
+    };
+    if first {
+        let _ = history.enter(bytes);
+    } else {
+        let _ = history.append(bytes);
+    }
+}
+
 pub static mut displayhist: c_int = 0;
-static mut el_in: *mut FILE = ptr::null_mut();
-static mut el_out: *mut FILE = ptr::null_mut();
 
 // ---------------------------------------------------------------------
 // src/error.h:84-98 — INTOFF / INTON, expanded literally over the globals
@@ -137,123 +148,6 @@ unsafe fn Eflag() -> c_char {
     crate::options::optlist[10]
 }
 
-// ---------------------------------------------------------------------
-// The libedit shim.
-//
-// Same names and signatures as the libedit entry points `histedit.c`
-// calls, forwarding to `crate::linedit`. The `H_*` / `EL_*` values are
-// libedit's real ones from <histedit.h> (libedit 3.1-20250104), verified
-// against the installed header rather than transcribed.
-// ---------------------------------------------------------------------
-
-pub(crate) mod libedit {
-    use super::{EditLine, History};
-    use core::ptr;
-    use libc::{c_char, c_int, FILE};
-
-    pub const H_FUNC: c_int = 0;
-    pub const H_SETSIZE: c_int = 1;
-    pub const H_GETSIZE: c_int = 2;
-    pub const H_FIRST: c_int = 3;
-    pub const H_LAST: c_int = 4;
-    pub const H_PREV: c_int = 5;
-    pub const H_NEXT: c_int = 6;
-    /* H_SET is 7 and H_CURR is 8 -- verified against /usr/include/histedit.h
-     * (libedit 3.1-20250104). These were transposed here, which was inert
-     * only because the functions below are stubs that never read them. */
-    pub const H_SET: c_int = 7;
-    pub const H_CURR: c_int = 8;
-    pub const H_ADD: c_int = 9;
-    pub const H_ENTER: c_int = 10;
-    pub const H_APPEND: c_int = 11;
-    pub const H_END: c_int = 12;
-    pub const H_NEXT_STR: c_int = 13;
-    pub const H_PREV_STR: c_int = 14;
-    pub const H_NEXT_EVENT: c_int = 15;
-    pub const H_PREV_EVENT: c_int = 16;
-
-    pub const EL_PROMPT: c_int = 0;
-    pub const EL_TERMINAL: c_int = 1;
-    pub const EL_EDITOR: c_int = 2;
-    pub const EL_HIST: c_int = 10;
-    pub const EL_PROMPT_ESC: c_int = 21;
-
-    /// `History *history_init(void)`
-    pub unsafe fn history_init() -> *mut History {
-        crate::linedit::history_init()
-    }
-
-    /// `void history_end(History *)`
-    pub unsafe fn history_end(h: *mut History) {
-        crate::linedit::history_end(h)
-    }
-
-    /// `EditLine *el_init(const char *, FILE *, FILE *, FILE *)`
-    pub unsafe fn el_init(
-        prog: *const c_char,
-        fin: *mut FILE,
-        fout: *mut FILE,
-        ferr: *mut FILE,
-    ) -> *mut EditLine {
-        crate::linedit::el_init(
-            prog,
-            fin as *mut libc::c_void,
-            fout as *mut libc::c_void,
-            ferr as *mut libc::c_void,
-        )
-    }
-
-    /// `void el_end(EditLine *)`
-    pub unsafe fn el_end(e: *mut EditLine) {
-        crate::linedit::el_end(e)
-    }
-
-    /// `int el_source(EditLine *, const char *)`
-    pub unsafe fn el_source(e: *mut EditLine, f: *const c_char) -> c_int {
-        crate::linedit::el_source(e, f)
-    }
-
-    /// `int history(History *, HistEvent *, int op, ...)` — variadic, so a
-    /// macro rather than a function.
-    macro_rules! history {
-        ($h:expr, $he:expr, $act:expr $(,)?) => {
-            $crate::linedit::history_op($h, $he, $act, $crate::linedit::Arg::None)
-        };
-        ($h:expr, $he:expr, $act:expr, $arg:expr $(,)?) => {
-            $crate::linedit::history_op(
-                $h, $he, $act,
-                <_ as $crate::linedit::IntoArg>::into_arg($arg),
-            )
-        };
-    }
-    pub(crate) use history;
-
-    /// `int el_set(EditLine *, int op, ...)` — variadic, so a macro.
-    /// `int el_set(EditLine *, int op, ...)`. Only the four operations
-    /// `histedit.c` actually issues are routed; anything else reports the
-    /// failure libedit gives for an unknown op.
-    macro_rules! el_set {
-        ($e:expr, $crate_op:expr, history, $hist:expr $(,)?) => {
-            $crate::linedit::el_set_hist($e, $hist)
-        };
-        ($e:expr, $op:expr, $f:expr, $esc:expr $(,)?) => {{
-            let _ = $f;
-            $crate::linedit::el_set_prompt($e, $op, $esc)
-        }};
-        ($e:expr, $op:expr, $arg:expr $(,)?) => {{
-            let op = $op;
-            if op == $crate::histedit::libedit::EL_EDITOR {
-                $crate::linedit::el_set_editor($e, $arg)
-            } else if op == $crate::histedit::libedit::EL_TERMINAL {
-                $crate::linedit::el_set_terminal($e, $arg)
-            } else {
-                -1 as libc::c_int
-            }
-        }};
-    }
-    pub(crate) use el_set;
-}
-
 /*
  * Set history and editing status.  Called whenever the status may
  * have changed (figures out what to do).
@@ -263,100 +157,51 @@ pub(crate) mod libedit {
 // [spec:dash:def:myhistedit.histedit-fn]
 // [spec:dash:sem:myhistedit.histedit-fn]
 pub unsafe fn histedit() {
-    let el_err: *mut FILE;
-
-    // #define editing (Eflag || Vflag)
-    macro_rules! editing {
-        () => {
-            (Eflag() != 0 || Vflag() != 0)
-        };
-    }
-
     if iflag() != 0 {
-        if hist.is_null() {
-            /*
-             * turn history on
-             */
+        if !history_active() {
             INTOFF!();
-            hist = libedit::history_init();
+            state_mut().history = Some(History::new());
             INTON!();
-
-            if !hist.is_null() {
-                sethistsize(crate::var::histsizeval());
-            } else {
-                crate::output::out2str(c"sh: can't initialize history\n".as_ptr());
-            }
+            sethistsize(crate::var::histsizeval());
         }
+
         let sin: c_int = crate::streams::streams().stdin;
         let serr: c_int = crate::streams::streams().stderr;
-        if editing!() && el.is_null() && libc::isatty(sin) != 0 {
-            /* && isatty(2) ??? */
-            /*
-             * turn editing on
-             */
+        let mode = if Vflag() != 0 {
+            Some(EditingMode::Vi)
+        } else if Eflag() != 0 {
+            Some(EditingMode::Emacs)
+        } else {
+            None
+        };
+
+        if let Some(mode) = mode
+            && !editing_active()
+            && libc::isatty(sin) != 0
+        {
             INTOFF!();
-            'ok: {
-                'bad: {
-                    /* The C names 0 and 2. dash writes the editor's output
-                     * to stderr, not stdout, which is why this is `serr`
-                     * and not `streams().stdout`. */
-                    if el_in.is_null() {
-                        el_in = libc::fdopen(sin, c"r".as_ptr());
-                    }
-                    if el_out.is_null() {
-                        el_out = libc::fdopen(serr, c"w".as_ptr());
-                    }
-                    if el_in.is_null() || el_out.is_null() {
-                        break 'bad; /* goto bad */
-                    }
-                    el_err = el_out;
-                    // #if DEBUG
-                    //     if (tracefile) el_err = tracefile;
-                    // #endif  (DEBUG is not defined in the ported build)
-                    el = libedit::el_init(crate::options::arg0, el_in, el_out, el_err);
-                    if !el.is_null() {
-                        if !hist.is_null() {
-                            libedit::el_set!(el, libedit::EL_HIST, history, hist);
-                        }
-                        libedit::el_set!(
-                            el,
-                            libedit::EL_PROMPT_ESC,
-                            crate::parser::getprompt,
-                            0o1 as c_int
-                        );
-                        break 'ok;
-                    }
-                    /* else fall through to bad: */
+            match LineEditor::new(sin, serr, mode) {
+                Ok(editor) => state_mut().editor = Some(editor),
+                Err(_) => {
+                    state_mut().editor = None;
+                    crate::output::out2str(c"sh: can't initialize editing\n".as_ptr());
                 }
-                // bad:
-                crate::output::out2str(c"sh: can't initialize editing\n".as_ptr());
             }
             INTON!();
-        } else if !editing!() && !el.is_null() {
+        } else if mode.is_none() && editing_active() {
             INTOFF!();
-            libedit::el_end(el);
-            el = ptr::null_mut();
+            state_mut().editor = None;
             INTON!();
         }
-        if !el.is_null() {
-            if Vflag() != 0 {
-                libedit::el_set!(el, libedit::EL_EDITOR, c"vi".as_ptr());
-            } else if Eflag() != 0 {
-                libedit::el_set!(el, libedit::EL_EDITOR, c"emacs".as_ptr());
-            }
-            libedit::el_source(el, ptr::null());
+
+        if let (Some(mode), Some(editor)) = (mode, state_mut().editor.as_mut()) {
+            editor.set_mode(mode);
         }
     } else {
         INTOFF!();
-        if !el.is_null() {
-            /* no editing if not interactive */
-            libedit::el_end(el);
-            el = ptr::null_mut();
-        }
-        if !hist.is_null() {
-            libedit::history_end(hist);
-            hist = ptr::null_mut();
-        }
+        let state = state_mut();
+        state.editor = None;
+        state.history = None;
         INTON!();
     }
 }
@@ -366,21 +211,16 @@ pub unsafe fn histedit() {
 // [spec:dash:def:myhistedit.sethistsize-fn]
 // [spec:dash:sem:myhistedit.sethistsize-fn]
 pub unsafe fn sethistsize(hs: *const c_char) {
-    let mut histsize: c_int;
-    let mut he: HistEvent = mem::zeroed();
-
-    if !hist.is_null() {
-        if hs.is_null()
-            || *hs == 0
-            || {
-                histsize = libc::atoi(hs);
-                histsize
-            } < 0
-        {
-            histsize = 100;
-        }
-        libedit::history!(hist, &mut he, libedit::H_SETSIZE, histsize);
-    }
+    let Some(history) = history_mut() else {
+        return;
+    };
+    let histsize = if hs.is_null() || *hs == 0 {
+        100
+    } else {
+        let parsed = libc::atoi(hs);
+        if parsed < 0 { 100 } else { parsed }
+    };
+    history.set_limit(histsize as usize);
 }
 
 // [spec:dash:def:histedit.setterm-fn]
@@ -388,18 +228,25 @@ pub unsafe fn sethistsize(hs: *const c_char) {
 // [spec:dash:def:myhistedit.setterm-fn]
 // [spec:dash:sem:myhistedit.setterm-fn]
 pub unsafe fn setterm(term: *const c_char) {
-    if !el.is_null() && !term.is_null() {
-        if libedit::el_set!(el, libedit::EL_TERMINAL, term) != 0 {
-            crate::output::outfmt!(
-                crate::output::out2,
-                c"sh: Can't set terminal type %s\n".as_ptr(),
-                term
-            );
-            crate::output::outfmt!(
-                crate::output::out2,
-                c"sh: Using dumb terminal settings.\n".as_ptr()
-            );
-        }
+    if term.is_null() {
+        return;
+    }
+    let Some(editor) = state_mut().editor.as_mut() else {
+        return;
+    };
+    if editor
+        .set_terminal(core::ffi::CStr::from_ptr(term).to_bytes())
+        .is_err()
+    {
+        crate::output::outfmt!(
+            crate::output::out2,
+            c"sh: Can't set terminal type %s\n".as_ptr(),
+            term
+        );
+        crate::output::outfmt!(
+            crate::output::out2,
+            c"sh: Using dumb terminal settings.\n".as_ptr()
+        );
     }
 }
 
@@ -414,7 +261,6 @@ pub unsafe fn setterm(term: *const c_char) {
 pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
     let mut ch: c_int;
     let mut editor: *const c_char = ptr::null();
-    let mut he: HistEvent = mem::zeroed();
     let mut lflg: c_int = 0;
     let mut nflg: c_int = 0;
     let mut rflg: c_int = 0;
@@ -424,12 +270,10 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
     // one is written before it is read, exactly as in the C, so the
     // initialisers are dead stores.
     let mut i: c_int = 0;
-    let mut retval: c_int = 0;
     let mut firststr: *const c_char = ptr::null();
     let mut laststr: *const c_char = ptr::null();
     let mut first: c_int = 0;
     let mut last: c_int = 0;
-    let mut direction: c_int = 0;
     /* ksh "fc old=new" crap */
     let mut pat: *mut c_char = ptr::null_mut();
     let mut repl: *mut c_char = ptr::null_mut();
@@ -445,7 +289,7 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
     // stop GCC keeping those variables in registers, where longjmp could
     // clobber them; they have no Rust equivalent.
 
-    if hist.is_null() {
+    if !history_active() {
         crate::error::sh_error!(c"history not active".as_ptr());
     }
 
@@ -538,13 +382,16 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
              * Set editor.
              */
             if sflg == 0 {
-                if editor.is_null() && {
-                    editor = crate::var::bltinlookup(c"FCEDIT".as_ptr());
-                    editor.is_null()
-                } && {
-                    editor = crate::var::bltinlookup(c"EDITOR".as_ptr());
-                    editor.is_null()
-                } {
+                if editor.is_null()
+                    && {
+                        editor = crate::var::bltinlookup(c"FCEDIT".as_ptr());
+                        editor.is_null()
+                    }
+                    && {
+                        editor = crate::var::bltinlookup(c"EDITOR".as_ptr());
+                        editor.is_null()
+                    }
+                {
                     editor = DEFEDITOR.as_ptr();
                 }
                 if *editor == b'-' as c_char && *editor.add(1) == 0 {
@@ -610,17 +457,6 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
             first = i;
         }
         /*
-         * XXX - this should not depend on the event numbers
-         * always increasing.  Add sequence numbers or offset
-         * to the history element in next (diskbased) release.
-         */
-        direction = if first < last {
-            libedit::H_PREV
-        } else {
-            libedit::H_NEXT
-        };
-
-        /*
          * If editing, grab a temp file.
          */
         if !editor.is_null() {
@@ -645,29 +481,27 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
             }
         }
 
-        /*
-         * Loop through selected history events.  If listing or executing,
-         * do it now.  Otherwise, put into temp file and call the editor
-         * after.
-         *
-         * The history interface needs rethinking, as the following
-         * convolutions will demonstrate.
-         */
-        libedit::history!(hist, &mut he, libedit::H_FIRST);
-        retval = libedit::history!(hist, &mut he, libedit::H_NEXT_EVENT, first);
-        while retval != -1 {
+        // Snapshot the semantic range before `evalstring` can re-enter the
+        // shell and mutate history.
+        let events = history_mut()
+            .map(|history| history.range(first, last))
+            .unwrap_or_default();
+        for event in events {
+            let mut line = nul_terminated(&event.line);
             if lflg != 0 {
                 if nflg == 0 {
-                    crate::output::out1fmt!(c"%5d ".as_ptr(), he.num);
+                    crate::output::out1fmt!(c"%5d ".as_ptr(), event.number);
                 }
-                crate::output::out1str(he.str);
+                crate::output::out1str(line.as_ptr() as *const c_char);
             } else {
-                let replaced: BString;
-                let s: *const c_char = if !pat.is_null() {
-                    replaced = fc_replace(he.str, pat, repl);
-                    replaced.as_ptr() as *const c_char
+                let mut replaced = if pat.is_null() {
+                    None
                 } else {
-                    he.str
+                    Some(fc_replace(line.as_ptr() as *const c_char, pat, repl))
+                };
+                let s: *mut c_char = match &mut replaced {
+                    Some(replaced) => replaced.as_mut_ptr() as *mut c_char,
+                    None => line.as_mut_ptr() as *mut c_char,
                 };
 
                 if sflg != 0 {
@@ -675,9 +509,9 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
                         crate::output::out2str(s);
                     }
 
-                    crate::eval::evalstring(s as *mut c_char, 0);
-                    if displayhist != 0 && !hist.is_null() {
-                        libedit::history!(hist, &mut he, libedit::H_ENTER, s);
+                    crate::eval::evalstring(s, 0);
+                    if displayhist != 0 && history_active() {
+                        record_history_line(core::ffi::CStr::from_ptr(s).to_bytes(), true);
                     }
 
                     break;
@@ -685,14 +519,6 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
                     libc::fputs(s, efp);
                 }
             }
-            /*
-             * At end?  (if we were to lose last, we'd sure be
-             * messed up).
-             */
-            if he.num == last {
-                break;
-            }
-            retval = libedit::history!(hist, &mut he, direction);
         }
         if !editor.is_null() {
             /* The C `stalloc`s `strlen(editor) + strlen(editfile) + 2` —
@@ -768,6 +594,12 @@ unsafe fn fc_replace(mut s: *const c_char, p: *mut c_char, mut r: *mut c_char) -
     dest
 }
 
+fn nul_terminated(line: &[u8]) -> BString {
+    let mut result = BString::from(line);
+    result.push(0);
+    result
+}
+
 // [spec:dash:def:histedit.not-fcnumber-fn]
 // [spec:dash:sem:histedit.not-fcnumber-fn]
 // [spec:dash:def:myhistedit.not-fcnumber-fn]
@@ -787,13 +619,8 @@ pub unsafe fn not_fcnumber(mut s: *mut c_char) -> c_int {
 // [spec:dash:def:myhistedit.str-to-event-fn]
 // [spec:dash:sem:myhistedit.str-to-event-fn]
 pub unsafe fn str_to_event(str: *const c_char, last: c_int) -> c_int {
-    let mut he: HistEvent = mem::zeroed();
     let mut s: *const c_char = str;
     let mut relative: c_int = 0;
-    let mut i: c_int;
-    let mut retval: c_int;
-
-    retval = libedit::history!(hist, &mut he, libedit::H_FIRST);
     match *s as u8 {
         b'-' => {
             relative = 1;
@@ -805,55 +632,37 @@ pub unsafe fn str_to_event(str: *const c_char, last: c_int) -> c_int {
         }
         _ => {}
     }
-    if crate::mystring::is_number(s) != 0 {
-        i = libc::atoi(s);
+    let event: Option<HistoryEvent> = if crate::mystring::is_number(s) != 0 {
+        let i = libc::atoi(s);
         if relative != 0 {
-            // while (retval != -1 && i--)
-            while retval != -1 && {
-                let __t = i;
-                i -= 1;
-                __t != 0
-            } {
-                retval = libedit::history!(hist, &mut he, libedit::H_NEXT);
-            }
-            if retval == -1 {
-                retval = libedit::history!(hist, &mut he, libedit::H_LAST);
-            }
+            history_mut().and_then(|history| {
+                usize::try_from(i)
+                    .ok()
+                    .and_then(|offset| history.relative(offset))
+                    .or_else(|| history.oldest())
+            })
         } else {
-            retval = libedit::history!(hist, &mut he, libedit::H_NEXT_EVENT, i);
-            if retval == -1 {
-                /*
-                 * the notion of first and last is
-                 * backwards to that of the history package
-                 */
-                retval = libedit::history!(
-                    hist,
-                    &mut he,
+            history_mut().and_then(|history| {
+                history.numbered(i).or_else(|| {
                     if last != 0 {
-                        libedit::H_FIRST
+                        history.relative(1)
                     } else {
-                        libedit::H_LAST
+                        history.oldest()
                     }
-                );
-                if retval != -1 && last != 0 {
-                    retval = libedit::history!(hist, &mut he, libedit::H_NEXT);
-                }
-            }
-        }
-        if retval == -1 {
-            crate::error::sh_error!(
-                c"history number %s not found (internal error)".as_ptr(),
-                str
-            );
+                })
+            })
         }
     } else {
-        /*
-         * pattern
-         */
-        retval = libedit::history!(hist, &mut he, libedit::H_PREV_STR, str);
-        if retval == -1 {
-            crate::error::sh_error!(c"history pattern not found: %s".as_ptr(), str);
-        }
+        let prefix = core::ffi::CStr::from_ptr(str).to_bytes();
+        history_mut().and_then(|history| history.prefixed(prefix))
+    };
+
+    match event {
+        Some(event) => event.number,
+        None if crate::mystring::is_number(s) != 0 => crate::error::sh_error!(
+            c"history number %s not found (internal error)".as_ptr(),
+            str
+        ),
+        None => crate::error::sh_error!(c"history pattern not found: %s".as_ptr(), str),
     }
-    he.num
 }
