@@ -47,7 +47,6 @@ use crate::nodes::{
 };
 use crate::output::{out1, output};
 use crate::redir::{REDIR_PUSH, REDIR_SAVEFD2};
-use crate::shell::cstring_bytes;
 use crate::var::VEXPORT;
 
 // ---------------------------------------------------------------------
@@ -530,7 +529,7 @@ unsafe fn evalfor(n: &Node, flags: c_int) -> c_int {
     loopnest += 1;
     flags &= EV_TESTED;
     for sp in &arglist.list {
-        crate::var::setvar(f.var.as_ptr(), sp.text, 0);
+        crate::var::setvar(f.var.as_ptr(), sp.textp(), 0);
         status = evaltree(f.body.as_deref(), flags);
         if (skiploop() & !SKIPCONT) != 0 {
             break;
@@ -573,7 +572,7 @@ unsafe fn evalcase(n: &Node, flags: c_int) -> c_int {
                 break;
             }
             for patp in &cp.nclist().pattern {
-                if crate::expand::casematch(patp, arglist.list[0].text) != 0 {
+                if crate::expand::casematch(patp, arglist.list[0].textp()) != 0 {
                     /* Ensure body is non-empty as otherwise
                      * EV_EXIT may prevent us from setting the
                      * exit status.
@@ -664,8 +663,9 @@ unsafe fn expredir(n: &[Node]) {
                  * function's caller not popping its mark before `redirect`
                  * has run. The node owns the bytes instead; `fnl` is a
                  * per-iteration local and its list would be gone one
-                 * statement later. */
-                *redir.nfile().expfname.borrow_mut() = Some(cstring_bytes(fnl.list[0].text));
+                 * statement later.  Now that the field owns them too this
+                 * is the C's assignment exactly: a move, not a copy. */
+                *redir.nfile().expfname.borrow_mut() = Some(fnl.list.remove(0).text);
             }
             NFROMFD | NTOFD => {
                 /* The borrow of `vname` ends before `fixredir`, which writes
@@ -682,7 +682,7 @@ unsafe fn expredir(n: &[Node]) {
                 };
                 if expand {
                     debug_assert_eq!(fnl.list.len(), 1, "an unsplit expansion is one field");
-                    crate::parser::fixredir(redir, fnl.list[0].text, 1);
+                    crate::parser::fixredir(redir, fnl.list[0].textp(), 1);
                 }
             }
             _ => {}
@@ -859,7 +859,7 @@ unsafe fn parse_command_args(
                 None => return 0,
             }
         };
-        cp = arglist.list[sp].text;
+        cp = arglist.list[sp].textp();
         let c0 = *cp;
         cp = cp.add(1);
         if c0 != b'-' as c_char {
@@ -967,7 +967,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
 
         loop {
             find_command(
-                arglist.list[head].text,
+                arglist.list[head].textp(),
                 &mut cmdentry,
                 cmd_flag | DO_REGBLTIN,
                 crate::var::pathval(),
@@ -1031,7 +1031,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
     argv = nargv;
     for sp in &arglist.list[head..] {
         /* TRACE(("evalcommand arg: %s\n", sp->text)); */
-        *nargv = sp.text;
+        *nargv = sp.textp();
         nargv = nargv.add(1);
     }
     *nargv = null_mut();
@@ -1072,9 +1072,9 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
                 );
 
                 if vlocal != 0 {
-                    crate::var::mklocal(varlist.list[spp].text, VEXPORT);
+                    crate::var::mklocal(varlist.list[spp].textp(), VEXPORT);
                 } else {
-                    crate::var::setvareq(varlist.list[spp].text, vflags);
+                    crate::var::setvareq(varlist.list[spp].textp(), vflags);
                 }
             }
 
@@ -1411,7 +1411,7 @@ unsafe fn eprintlist(out: *mut output, list: &[strlist], sep: c_int) -> c_int {
         p = b" %s\0".as_ptr() as *const c_char;
         p = p.offset((1 - sep) as isize);
         sep |= 1;
-        crate::outfmt!(out, p, sp.text);
+        crate::outfmt!(out, p, sp.textp());
     }
 
     sep

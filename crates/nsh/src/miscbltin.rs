@@ -55,8 +55,8 @@ unsafe fn readcmd_handle_line(line: &mut BString, ac: c_int, ap: *mut *mut c_cha
      * terminator and turns it into the block's base, which both names the
      * line and reserves it so that `ifsbreakup`'s `stalloc`s land above it.
      * An owned line is already its own base and there is nothing to reserve;
-     * the `strlist`s `ifsbreakup` builds point into it, and it outlives them
-     * because the caller holds it. */
+     * the fields `ifsbreakup` builds copy out of it rather than pointing
+     * into it, so the line only has to outlive that one call. */
     let s: *mut c_char = line.as_mut_ptr() as *mut c_char;
     debug_assert!(!line.is_empty(), "readcmd always pushes the terminator");
 
@@ -86,8 +86,8 @@ unsafe fn readcmd_handle_line(line: &mut BString, ac: c_int, ap: *mut *mut c_cha
         }
 
         /* set variable to field */
-        crate::expand::rmescapes(arglist.list[sl].text);
-        crate::var::setvar(*ap, arglist.list[sl].text, 0);
+        arglist.list[sl].rmescapes();
+        crate::var::setvar(*ap, arglist.list[sl].textp(), 0);
         sl += 1;
 
         ap = ap.add(1);

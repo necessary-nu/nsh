@@ -130,9 +130,55 @@ const C_9: c_char = b'9' as c_char;
 ///
 /// The C's `next` field is gone: the chain is the `Vec` inside
 /// [`arglist`], the same shape as [`ifsregion`]'s.  What is left is the
-/// text.
+/// text, and the text is the entry's own.
+///
+/// In the C it is a `char *` into the region, kept alive by whichever
+/// `popstackmark` encloses the command — which is why `expandarg` had to
+/// copy the word out of the expansion buffer and `addfnamealt` had to copy
+/// the candidate out of the glob buffer before either could hand it over.
+/// Owning the bytes says that lifetime directly.
+///
+/// **Invariant: the bytes end with a NUL, and the terminator is counted.**
+/// Every reader is a C-string reader — `setvar`, `setvareq`, `execve`,
+/// `find_command`, `strcoll`, `patmatch`, `outfmt` — so a field that
+/// stopped at `strlen` would have to have a terminator appended at each of
+/// them. [`strlist::textp`] asserts it.
 pub struct strlist {
-    pub text: *mut c_char,
+    pub text: BString,
+}
+
+impl strlist {
+    /// A field taken out of a buffer the shell is about to stop owning:
+    /// the run `ifsbreakup` has just terminated, or `glob`'s `d_name`.
+    #[inline]
+    pub unsafe fn from_cstr(p: *const c_char) -> strlist {
+        strlist {
+            text: crate::shell::cstring_bytes(p),
+        }
+    }
+
+    /// `sp->text`, as the `char *` every reader wants.
+    #[inline]
+    pub fn textp(&self) -> *mut c_char {
+        debug_assert_eq!(self.text.last(), Some(&0), "a field is a C string");
+        self.text.as_ptr() as *mut c_char
+    }
+
+    /// `rmescapes(sp->text)`, in place as the C does it.
+    ///
+    /// `_rmescapes` shortens the C string and says nothing about by how
+    /// much, so the length is re-derived. No reader of a field uses its
+    /// length — they all stop at the terminator, as the C's did — so the
+    /// truncation is hygiene rather than correctness: what it buys is that
+    /// the entry's length keeps meaning the string's length, which is what
+    /// makes the assertion in [`strlist::textp`] worth anything.
+    #[inline]
+    pub unsafe fn rmescapes(&mut self) {
+        let p = self.text.as_mut_ptr() as *mut c_char;
+        rmescapes(p);
+        let n = libc::strlen(p);
+        self.text.truncate(n + 1);
+    }
 }
 
 // [spec:dash:def:expand.arglist]
@@ -386,22 +432,24 @@ unsafe fn expstnputs(s: *const c_char, n: size_t) -> *mut c_char {
 
 /// `p = grabstackstr(expdest)`.
 ///
-/// This is the seam between [dec:nsh:owned-data]'s string-builder property
-/// and `delete-memalloc`.  The *builder* is owned; the *result* is still a
-/// region pointer, because `ifsbreakup`, `expandmeta` and the `strlist`
-/// chain are `stalloc`'d C structures holding `char *`.  In the C the call
-/// allocates nothing and copies nothing — it moves the bump pointer past
-/// bytes that are already in place, which is how C says "these outlive the
-/// next builder".  Owned bytes say that for free, so what is left here is
-/// the copy into the region that the consumers still require, and it goes
-/// when they do.
-unsafe fn grabexpdest() -> *mut c_char {
+/// In the C this allocates nothing and copies nothing — it moves the bump
+/// pointer past bytes that are already in place, which is how C says "these
+/// outlive the next builder".  Owned, that is `mem::take`: the word's
+/// buffer *becomes* the caller's, and what the next `expandarg`'s
+/// `STARTSTACKSTR` clears is the empty one left behind.
+///
+/// While `strlist` was still a C structure this was a copy into the region,
+/// because the consumers held `char *`.  They hold their own bytes now, so
+/// the copy is gone rather than smaller.
+unsafe fn grabexpdest() -> BString {
     let b = expb();
-    let n = b.len();
-    let p = crate::memalloc::stalloc(n) as *mut c_char;
-    ptr::copy_nonoverlapping(b.as_ptr(), p as *mut u8, n);
-    b.clear();
-    p
+    /* `argstr` closes the word by masking its terminating marker to 0
+     * (`*(q - 1) &= end - 1`), so the buffer is a C string and the
+     * `strlen` `ifsbreakup` and `openhere` perform on it stops inside it.
+     * The bytes belong to the word being handed over, terminator included;
+     * `clear` on the next entry is what `mem::take` leaves behind. */
+    debug_assert_eq!(b.last(), Some(&0), "argstr terminates the word");
+    mem::take(b)
 }
 
 /// The result of an `expandarg(n, NULL, flag)` — the call that does *not*
@@ -719,7 +767,7 @@ unsafe fn getpwhome(name: *const c_char) -> *const c_char {
 // [spec:dash:def:expand.expandarg-fn]
 // [spec:dash:sem:expand.expandarg-fn]
 pub unsafe fn expandarg(arg: &crate::nodes::Node, arglist: Option<&mut arglist>, flag: c_int) {
-    let p: *mut c_char;
+    let mut p: BString;
 
     argbackq = arg.narg().backquote.as_slice();
     /* STARTSTACKSTR(expdest) */
@@ -741,7 +789,17 @@ pub unsafe fn expandarg(arg: &crate::nodes::Node, arglist: Option<&mut arglist>,
          * TODO - EXP_REDIR
          */
         if (flag & EXP_FULL) != 0 {
-            ifsbreakup(p, -1, &mut *ptr::addr_of_mut!(exparg));
+            /* The fields copy out of the word rather than pointing into
+             * it, so the word itself is a local that dies at the end of
+             * this block.  The C could not do that: its fields *are*
+             * offsets into the grabbed block, which is why the block had to
+             * outlive them and why the enclosing mark had to be the thing
+             * that freed it. */
+            ifsbreakup(
+                p.as_mut_ptr() as *mut c_char,
+                -1,
+                &mut *ptr::addr_of_mut!(exparg),
+            );
             /* `*exparg.lastp = NULL; exparg.lastp = &exparg.list;` —
              * terminate the fields `ifsbreakup` built, then re-point the
              * tail at the head so `expandmeta` rebuilds the list while
@@ -2105,7 +2163,7 @@ unsafe fn ifsbreakup_slow(
                 return p;
             }
             *q = C_NUL;
-            arglist.list.push(strlist { text: (*ifst).start });
+            arglist.list.push(strlist::from_cstr((*ifst).start));
             (*ifst).start = p;
             return p;
         }
@@ -2206,6 +2264,19 @@ pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: &mut argl
                 break 'add; /* goto add */
             }
             if !ifst.r.is_null() {
+                /* This is the one write into `string` that happens after
+                 * `ifsbreakup_slow` has stopped emitting fields, and the
+                 * fields no longer alias `string` — they copied out at the
+                 * instant each was terminated.  So it has to land in the
+                 * field that has *not* been created yet, which is the one
+                 * `add:` below takes from `ifst.start`.  It does: `r` is
+                 * only ever set once `maxargs` has reached 0, and the two
+                 * branches that set it both return without emitting, so no
+                 * field is taken between the two points. */
+                debug_assert!(
+                    ifst.r >= ifst.start,
+                    "the trailing-IFS truncation lands in an already-taken field"
+                );
                 *ifst.r = C_NUL;
             }
         }
@@ -2216,7 +2287,7 @@ pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: &mut argl
     }
 
     /* add: */
-    arglist.list.push(strlist { text: ifst.start });
+    arglist.list.push(strlist::from_cstr(ifst.start));
 }
 
 // [spec:dash:def:expand.ifsfree-fn]
@@ -2330,7 +2401,7 @@ unsafe extern "C" fn opendir_interruptible(pathname: *const c_char) -> *mut c_vo
 // [spec:dash:def:expand.expandmeta-glob-fn]
 // [spec:dash:sem:expand.expandmeta-glob-fn]
 unsafe fn expandmeta_glob(words: Vec<strlist>) {
-    for str in words {
+    for mut str in words {
         let p: *const c_char;
         let mut pglob: crate::system::glob64_t = mem::zeroed();
         let i: c_int;
@@ -2351,14 +2422,17 @@ unsafe fn expandmeta_glob(words: Vec<strlist>) {
                     /* #endif */
 
                     crate::error::INTOFF();
-                    p = preglob(str.text, RMESCAPE_HEAP, None);
+                    /* No RMESCAPE_ALLOC, so `_rmescapes` rewrites the
+                     * word in place and returns it; the cursor therefore
+                     * has to come from `&mut str` and not from `textp`. */
+                    p = preglob(str.text.as_mut_ptr() as *mut c_char, RMESCAPE_HEAP, None);
                     i = crate::system::glob64(
                         p,
                         crate::system::GLOB_ALTDIRFUNC | crate::system::GLOB_NOMAGIC,
                         None,
                         &mut pglob,
                     );
-                    if p != str.text {
+                    if p != str.text.as_ptr() as *const c_char {
                         ckfree(p as *mut c_void);
                     }
                     if i == 0 {
@@ -2385,7 +2459,7 @@ unsafe fn expandmeta_glob(words: Vec<strlist>) {
                 /* fall through to nometa */
             }
             /* nometa: */
-            rmescapes(str.text);
+            str.rmescapes();
             expargl().push(str);
         }
     }
@@ -2426,7 +2500,7 @@ unsafe fn expandmeta(words: Vec<strlist>) {
      * while `FNMATCH_IS_ENABLED` is 0. */
     let mut pattern: Vec<u8> = Vec::new();
 
-    for str in words {
+    for mut str in words {
         let savelastp: usize;
         let p: *mut c_char;
         let len: c_uint;
@@ -2436,8 +2510,8 @@ unsafe fn expandmeta(words: Vec<strlist>) {
                 if fflag() != 0 {
                     break 'nometa;
                 }
-                if libc::strpbrk(str.text, b"*?]\0".as_ptr() as *const c_char).is_null()
-                    || libc::strcmp(str.text, b"]\0".as_ptr() as *const c_char) == 0
+                if libc::strpbrk(str.textp(), b"*?]\0".as_ptr() as *const c_char).is_null()
+                    || libc::strcmp(str.textp(), b"]\0".as_ptr() as *const c_char) == 0
                 {
                     break 'nometa;
                 }
@@ -2447,7 +2521,7 @@ unsafe fn expandmeta(words: Vec<strlist>) {
                 savelastp = expargl().len();
 
                 crate::error::INTOFF();
-                p = preglob(str.text, RMESCAPE_ALLOC | RMESCAPE_HEAP, Some(&mut pattern));
+                p = preglob(str.textp(), RMESCAPE_ALLOC | RMESCAPE_HEAP, Some(&mut pattern));
                 len = libc::strlen(p) as c_uint;
 
                 /* The C's top-level `expmeta` starts on whatever block the
@@ -2483,7 +2557,7 @@ unsafe fn expandmeta(words: Vec<strlist>) {
                 }
             }
             /* nometa: */
-            rmescapes(str.text);
+            str.rmescapes();
             expargl().push(str);
         }
     }
@@ -2491,33 +2565,42 @@ unsafe fn expandmeta(words: Vec<strlist>) {
 
 // [spec:dash:def:expand.addfname-common-fn]
 // [spec:dash:sem:expand.addfname-common-fn]
-unsafe fn addfname_common(name: *mut c_char) {
+unsafe fn addfname_common(name: BString) {
     expargl().push(strlist { text: name });
 }
 
 // [spec:dash:def:expand.addfnamealt-fn]
 // [spec:dash:sem:expand.addfnamealt-fn]
 unsafe fn addfnamealt(enddir: *mut c_char, expdir_len: size_t) -> *mut c_char {
-    let name: *mut c_char;
-    let b = globb();
-    let n: size_t = enddir.offset_from(b.as_mut_ptr() as *mut c_char) as size_t;
-
     /* `name = grabstackstr(enddir)` — in the C this allocates nothing and
      * copies nothing: it moves the region's bump pointer past bytes that
      * are already in place, which is how C says "these outlive the next
-     * candidate".  Owned bytes say that for free, so what is left is the
-     * copy into the region that `strlist` still requires.  Same seam as
-     * `grabexpdest`, and it goes with the same commit.
+     * candidate".
+     *
+     * The candidate cannot simply be moved out, and that is the one place
+     * in this pass where a copy stays.  The field wants `[0, n)` and the
+     * *next* candidate wants `[0, expdir_len)` — the same bytes — so one of
+     * the two has to take a copy.  The C copies the prefix back
+     * (`STARTSTACKSTR(enddir); stnputs(name, expdir_len, enddir)`) because
+     * `grabstackstr` had already given the block away; this copies the
+     * field out and keeps the buffer, which costs the same order and leaves
+     * the glob buffer's capacity and its `expdir_len` invariant alone.
+     * What has gone is the region: the copy is into the field's own
+     * allocation, not into a block a `popstackmark` has to free.
      *
      * `n` runs past the length when the caller is the no-metacharacter
      * branch, whose `expmeta_rmescapes` wrote through a raw cursor without
      * committing.  Those bytes are written; they are only uncounted, and
      * counting them here is what makes the read below a read of the
      * buffer rather than of its spare capacity. */
-    debug_assert!(n <= b.capacity());
-    b.set_len(n);
-    name = crate::memalloc::stalloc(n) as *mut c_char;
-    ptr::copy_nonoverlapping(b.as_ptr(), name as *mut u8, n);
+    let name: BString = {
+        let b = globb();
+        let n: size_t = enddir.offset_from(b.as_mut_ptr() as *mut c_char) as size_t;
+        debug_assert!(n <= b.capacity());
+        b.set_len(n);
+        debug_assert_eq!(b.last(), Some(&0), "the candidate is a C string");
+        BString::from(b.to_vec())
+    };
     addfname_common(name);
 
     /* `STARTSTACKSTR(enddir); return stnputs(name, expdir_len, enddir) -
@@ -2525,6 +2608,7 @@ unsafe fn addfnamealt(enddir: *mut c_char, expdir_len: size_t) -> *mut c_char {
      * prefix back into it, because `grabstackstr` gave the old one away.
      * Nothing was given away here, so the prefix is still the first
      * `expdir_len` bytes and re-seeding is `set_len`. */
+    let b = globb();
     b.set_len(expdir_len);
     b.as_mut_ptr() as *mut c_char
 }
@@ -2831,7 +2915,10 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
 // [spec:dash:def:expand.addfname-fn]
 // [spec:dash:sem:expand.addfname-fn]
 unsafe fn addfname(name: *mut c_char) {
-    addfname_common(crate::mystring::sstrdup(name));
+    /* `sstrdup(name)`: the C copies `glob`'s `gl_pathv` entry into the
+     * region because `globfree64` is about to free it.  The field owns the
+     * copy now, which is the same statement without the allocator. */
+    addfname_common(crate::shell::cstring_bytes(name));
 }
 
 /*
@@ -2866,7 +2953,7 @@ unsafe fn msort(list: &mut [strlist], len: c_int) {
     if len <= 1 {
         return;
     }
-    list.sort_by(|p, q| libc::strcoll(p.text, q.text).cmp(&0));
+    list.sort_by(|p, q| libc::strcoll(p.textp(), q.textp()).cmp(&0));
 }
 
 /*
