@@ -47,6 +47,7 @@ use crate::nodes::{
 };
 use crate::output::{out1, output};
 use crate::redir::{REDIR_PUSH, REDIR_SAVEFD2};
+use crate::shell::cstring_bytes;
 use crate::var::VEXPORT;
 
 // ---------------------------------------------------------------------
@@ -658,7 +659,13 @@ unsafe fn expredir(n: &[Node]) {
                     &mut fnl,
                     EXP_TILDE | EXP_REDIR,
                 );
-                redir.nfile().expfname.set((*fnl.list).text);
+                /* `redir->nfile.expfname = fn.list->text` — the C hands the
+                 * node a pointer into the region and relies on this
+                 * function's caller not popping its mark before `redirect`
+                 * has run. The node owns the bytes instead; `fnl` is a
+                 * per-iteration local and its list would be gone one
+                 * statement later. */
+                *redir.nfile().expfname.borrow_mut() = Some(cstring_bytes((*fnl.list).text));
             }
             NFROMFD | NTOFD => {
                 /* The borrow of `vname` ends before `fixredir`, which writes

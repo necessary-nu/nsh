@@ -1848,7 +1848,7 @@ unsafe fn parseredir(st: &mut Rt1<'_>) {
             r#type: ty,
             fd,
             fname: None,
-            expfname: Cell::new(ptr::null_mut()),
+            expfname: RefCell::new(None),
         }),
     });
     /* goto parseredir_return; */

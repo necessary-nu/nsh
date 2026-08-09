@@ -202,11 +202,11 @@ unsafe fn openredirect(redir: &Node) -> c_int {
         NFROM => {
             flags = libc::O_RDONLY;
             /* do_open: */
-            f = sh_open(redir.nfile().expfname.get(), flags, 0);
+            f = sh_open(redir.nfile().expfname_ptr(), flags, 0);
         }
         NFROMTO => {
             flags = libc::O_RDWR | libc::O_CREAT;
-            f = sh_open(redir.nfile().expfname.get(), flags, 0);
+            f = sh_open(redir.nfile().expfname_ptr(), flags, 0);
         }
         NTO | NCLOBBER => {
             let mut fell_through = true;
@@ -214,7 +214,7 @@ unsafe fn openredirect(redir: &Node) -> c_int {
             if redir.node_type() == NTO {
                 /* Take care of noclobber mode. */
                 if crate::options::optlist[crate::options::Cflag] != 0 {
-                    fname = redir.nfile().expfname.get();
+                    fname = redir.nfile().expfname_ptr();
                     if libc::stat64(fname, &mut sb) < 0 {
                         flags = libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL;
                         /* goto do_open */
@@ -240,14 +240,14 @@ unsafe fn openredirect(redir: &Node) -> c_int {
             }
             if fell_through {
                 flags = libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC;
-                f = sh_open(redir.nfile().expfname.get(), flags, 0);
+                f = sh_open(redir.nfile().expfname_ptr(), flags, 0);
             } else {
                 f = fv;
             }
         }
         NAPPEND => {
             flags = libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND;
-            f = sh_open(redir.nfile().expfname.get(), flags, 0);
+            f = sh_open(redir.nfile().expfname_ptr(), flags, 0);
         }
         NTOFD | NFROMFD => {
             let mut fv = redir.ndup().dupfd.get();

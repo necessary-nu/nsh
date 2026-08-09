@@ -263,7 +263,34 @@ pub struct nfile {
     /// actual file name — the C's `temp` field: written by `expredir` before
     /// every use and never copied by `copynode`, so it is interior-mutable
     /// here rather than part of the tree's value.
-    pub expfname: Cell<*mut c_char>,
+    ///
+    /// The C stores `fn.list->text`, a pointer into the region that stays
+    /// valid until `evalcommand`'s `popstackmark`. The node owns the bytes
+    /// instead, which is the same lifetime said without the allocator:
+    /// `redirect` runs while the node is alive, and nothing between
+    /// `expredir` and it can free the word. `None` is the C's null — the
+    /// value the field has before `expredir` has ever written it, which is
+    /// not the same as an empty file name (`> ""` is a real redirection).
+    pub expfname: RefCell<Option<BString>>,
+}
+
+impl nfile {
+    /// `n->nfile.expfname` read as the `char *` its four callers in
+    /// `redir.c:openredirect` want.
+    ///
+    /// The pointer outlives the borrow because a `BString`'s bytes do not
+    /// move when its header does, and because nothing on the path from here
+    /// — `stat64`, `sh_open`, `sh_open_fail` — re-enters expansion, so no
+    /// second `expredir` can write this field while the pointer is in use.
+    pub fn expfname_ptr(&self) -> *mut c_char {
+        match &*self.expfname.borrow() {
+            Some(b) => {
+                debug_assert_eq!(b.last(), Some(&0), "expfname is a C string");
+                b.as_ptr() as *mut c_char
+            }
+            None => ptr::null_mut(),
+        }
+    }
 }
 
 impl Clone for nfile {
@@ -276,7 +303,7 @@ impl Clone for nfile {
             r#type: self.r#type,
             fd: self.fd,
             fname: self.fname.clone(),
-            expfname: Cell::new(ptr::null_mut()),
+            expfname: RefCell::new(None),
         }
     }
 }
