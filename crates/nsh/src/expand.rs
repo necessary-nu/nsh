@@ -51,7 +51,6 @@ extern "C" {
         len: size_t,
         ps: *mut libc::mbstate_t,
     ) -> size_t;
-    fn wcschr(wcs: *const wchar_t, wc: wchar_t) -> *mut wchar_t;
     fn iswspace(wc: wint_t) -> c_int;
     fn wctype(name: *const c_char) -> wctype_t;
     fn iswctype(wc: wint_t, desc: wctype_t) -> c_int;
@@ -159,7 +158,7 @@ pub const EXP_DISCARD: c_int = 0x400; /* discard result of expansion */
 /// `expand.h`: `#define rmescapes(p) _rmescapes((p), 0)`
 #[inline]
 pub unsafe fn rmescapes(p: *mut c_char) -> *mut c_char {
-    _rmescapes(p, 0)
+    _rmescapes(p, 0, None)
 }
 
 // ---------------------------------------------------------------------
@@ -183,12 +182,13 @@ pub const QUOTES_ESC: c_int = EXP_FULL | EXP_CASE;
  */
 
 // [spec:dash:def:expand.ifsregion]
-#[repr(C)]
+///
+/// The C's `next` field is gone: the chain is [`ifsregions`], a `Vec`.
+/// See it for why "the `Vec` is empty" is exactly "`ifslastp` is NULL".
 pub struct ifsregion {
-    pub next: *mut ifsregion, /* next region in list */
-    pub begoff: c_int,        /* offset of start of region */
-    pub endoff: c_int,        /* offset of end of region */
-    pub nulonly: c_int,       /* search for nul bytes only */
+    pub begoff: c_int,  /* offset of start of region */
+    pub endoff: c_int,  /* offset of end of region */
+    pub nulonly: c_int, /* search for nul bytes only */
 }
 
 // [spec:dash:def:expand.ifs-state]
@@ -230,15 +230,22 @@ static mut expbuf: BString = BString::new(Vec::new());
  * travels is a raw slice cursor over it. */
 static mut argbackq: *const [Option<crate::nodes::Node>] =
     ptr::slice_from_raw_parts(ptr::null::<Option<crate::nodes::Node>>(), 0);
-/* first struct in list of ifs regions */
-static mut ifsfirst: ifsregion = ifsregion {
-    next: ptr::null_mut(),
-    begoff: 0,
-    endoff: 0,
-    nulonly: 0,
-};
-/* last struct in list */
-static mut ifslastp: *mut ifsregion = ptr::null_mut();
+/// The list of IFS regions.  The C is two statics — `ifsfirst`, a head
+/// node held in `.bss`, and `ifslastp`, a pointer to the last node —
+/// with every node after the head `ckmalloc`'d and chained through
+/// `next`.
+///
+/// The model this replaces them with is `ifsregions.is_empty()` **is**
+/// `ifslastp == NULL`, and that equality is exact rather than
+/// approximate.  `ifslastp` is NULL in three places and all three leave
+/// the chain behind the head empty as well: at startup, after `ifsfree`
+/// (which frees `ifsfirst.next` and nulls it before nulling `ifslastp`),
+/// and in `removerecordregions`' first branch (which frees the whole
+/// chain before testing `ifsfirst.begoff`).  So a NULL `ifslastp` never
+/// hides a live region, and `ifsfirst`'s stale contents are never read —
+/// `recordregion` overwrites them, and every other reader tests
+/// `ifslastp` first.
+static mut ifsregions: Vec<ifsregion> = Vec::new();
 /* holds expanded arg list */
 static mut exparg: arglist = arglist {
     list: ptr::null_mut(),
@@ -248,7 +255,46 @@ static mut exparg: arglist = arglist {
 static mut ifsmap: [c_char; 128] = [0; 128];
 static mut ncifs: *const c_char = ptr::null();
 static mut ifsmb0len: size_t = 0;
-static mut wcifs: *mut wchar_t = ptr::null_mut();
+/// The wide-character form of `IFS`, built by `changeifs`.
+///
+/// The C is a `ckmalloc`'d, zero-filled, NUL-terminated `wchar_t *` that
+/// is NULL whenever `IFS` holds no byte with the high bit set.  Empty
+/// **is** NULL here: the C only allocates under `mb != 0`, which needs a
+/// high-bit byte, so the buffer is never zero-length when it exists.
+static mut wcifs: Vec<wchar_t> = Vec::new();
+
+/// `&mut ifsregions`, without ever naming a reference to the `static mut`
+/// twice at once.
+#[inline]
+unsafe fn ifsr() -> &'static mut Vec<ifsregion> {
+    &mut *ptr::addr_of_mut!(ifsregions)
+}
+
+/// `&mut wcifs`, same.
+#[inline]
+unsafe fn wcifsv() -> &'static mut Vec<wchar_t> {
+    &mut *ptr::addr_of_mut!(wcifs)
+}
+
+/// `wcschr(wcifs, wc) != NULL`.
+///
+/// Transcribed rather than replaced with `contains`, because `wcschr`
+/// searches a NUL-*terminated* string and therefore **matches the
+/// terminator** when `wc` is 0.  `ifsisifs` reaches here with `wc` taken
+/// straight from the byte under the cursor, so a NUL inside an IFS region
+/// takes the `isifs` branch in the C and has to here too.
+#[inline]
+fn wcifs_chr(v: &[wchar_t], wc: wchar_t) -> bool {
+    for &c in v {
+        if c == wc {
+            return true;
+        }
+        if c == 0 {
+            return false;
+        }
+    }
+    false
+}
 
 // ---------------------------------------------------------------------
 // The expansion buffer.  See [`expbuf`].
@@ -548,7 +594,11 @@ const _: () = assert!(EXP_QUOTED >> CHAR_BIT == EXP_FULL);
 
 // [spec:dash:def:expand.preglob-fn]
 // [spec:dash:sem:expand.preglob-fn]
-unsafe fn preglob(pattern: *const c_char, mut flag: c_int) -> *mut c_char {
+unsafe fn preglob(
+    pattern: *const c_char,
+    mut flag: c_int,
+    heap: Option<&mut Vec<u8>>,
+) -> *mut c_char {
     if FNMATCH_IS_ENABLED {
         if flag == 0 {
             flag = RMESCAPE_GROW;
@@ -556,7 +606,7 @@ unsafe fn preglob(pattern: *const c_char, mut flag: c_int) -> *mut c_char {
         flag |= RMESCAPE_ALLOC;
     }
     flag |= RMESCAPE_GLOB;
-    _rmescapes(pattern as *mut c_char, flag)
+    _rmescapes(pattern as *mut c_char, flag, heap)
 }
 
 // [spec:dash:def:expand.mesclen-fn]
@@ -916,42 +966,39 @@ unsafe fn exptilde(startp: *mut c_char, flag: c_int) -> *mut c_char {
 // [spec:dash:def:expand.removerecordregions-fn]
 // [spec:dash:sem:expand.removerecordregions-fn]
 pub unsafe fn removerecordregions(endoff: c_int) {
-    if ifslastp.is_null() {
+    /* `ifslastp == NULL` */
+    if ifsr().is_empty() {
         return;
     }
 
-    if ifsfirst.endoff > endoff {
-        while !ifsfirst.next.is_null() {
-            let ifsp: *mut ifsregion;
+    /* `ifsfirst` is index 0; `ifslastp` is the index the walk below
+     * settles on, and dropping the tail is `truncate`.  The C frees one
+     * node per INTOFF/INTON pair, so the loops do too. */
+    if ifsr()[0].endoff > endoff {
+        while ifsr().len() > 1 {
             crate::error::INTOFF();
-            ifsp = (*ifsfirst.next).next;
-            ckfree(ifsfirst.next as *mut c_void);
-            ifsfirst.next = ifsp;
+            ifsr().pop();
             crate::error::INTON();
         }
-        if ifsfirst.begoff > endoff {
-            ifslastp = ptr::null_mut();
+        if ifsr()[0].begoff > endoff {
+            ifsr().clear();
         } else {
-            ifslastp = &mut ifsfirst;
-            ifsfirst.endoff = endoff;
+            ifsr()[0].endoff = endoff;
         }
         return;
     }
 
-    ifslastp = &mut ifsfirst;
-    while !(*ifslastp).next.is_null() && (*(*ifslastp).next).begoff < endoff {
-        ifslastp = (*ifslastp).next;
+    let mut last: usize = 0;
+    while last + 1 < ifsr().len() && ifsr()[last + 1].begoff < endoff {
+        last += 1;
     }
-    while !(*ifslastp).next.is_null() {
-        let ifsp: *mut ifsregion;
+    while ifsr().len() > last + 1 {
         crate::error::INTOFF();
-        ifsp = (*(*ifslastp).next).next;
-        ckfree((*ifslastp).next as *mut c_void);
-        (*ifslastp).next = ifsp;
+        ifsr().pop();
         crate::error::INTON();
     }
-    if (*ifslastp).endoff > endoff {
-        (*ifslastp).endoff = endoff;
+    if ifsr()[last].endoff > endoff {
+        ifsr()[last].endoff = endoff;
     }
 }
 
@@ -1277,7 +1324,7 @@ unsafe fn subevalvar(
          * #endif */
 
         rmescend = expbase().offset(strloc as isize);
-        str = preglob(rmescend, 0);
+        str = preglob(rmescend, 0, None);
         if FNMATCH_IS_ENABLED {
             startp = expbase().offset(startloc as isize);
             rmescend = expbase().offset(strloc as isize);
@@ -1293,7 +1340,7 @@ unsafe fn subevalvar(
              * that growth and stay valid; `startp` and `str` are from
              * before and are re-derived, which is exactly why the C
              * re-reads `stackblock()` on these two lines. */
-            rmesc = _rmescapes(startp, RMESCAPE_ALLOC | RMESCAPE_GROW);
+            rmesc = _rmescapes(startp, RMESCAPE_ALLOC | RMESCAPE_GROW, None);
             if rmesc != startp {
                 rmescend = expdest();
             }
@@ -1874,21 +1921,23 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
 // [spec:dash:def:expand.recordregion-fn]
 // [spec:dash:sem:expand.recordregion-fn]
 pub unsafe fn recordregion(start: c_int, end: c_int, nulonly: c_int) {
-    let ifsp: *mut ifsregion;
+    let r = ifsregion {
+        begoff: start,
+        endoff: end,
+        nulonly,
+    };
 
-    if ifslastp.is_null() {
-        ifsp = &mut ifsfirst;
+    /* Reusing the static head node and `ckmalloc`ing a fresh one are the
+     * same push; what differs is the INTOFF/INTON bracket, which the C
+     * only takes on the allocating path and which is kept because it
+     * fixes where a pending SIGINT is delivered. */
+    if ifsr().is_empty() {
+        ifsr().push(r);
     } else {
         crate::error::INTOFF();
-        ifsp = crate::memalloc::ckmalloc(mem::size_of::<ifsregion>() as size_t) as *mut ifsregion;
-        (*ifsp).next = ptr::null_mut();
-        (*ifslastp).next = ifsp;
+        ifsr().push(r);
         crate::error::INTON();
     }
-    ifslastp = ifsp;
-    (*ifslastp).begoff = start;
-    (*ifslastp).endoff = end;
-    (*ifslastp).nulonly = nulonly;
 }
 
 // [spec:dash:def:expand.ifsisifs-fn]
@@ -1902,7 +1951,7 @@ unsafe fn ifsisifs(p: *const c_char, ml: c_uint, ifs: *const c_char) -> c_uint {
     let mut ifs0: wchar_t = 0;
 
     'out: {
-        if *ifs != 0 && !wcifs.is_null() {
+        if *ifs != 0 && !wcifsv().is_empty() {
             if (wc & 0x80) != 0 {
                 let mut mbst: libc::mbstate_t = mem::zeroed();
                 let mut wc2: wchar_t = 0;
@@ -1913,8 +1962,8 @@ unsafe fn ifsisifs(p: *const c_char, ml: c_uint, ifs: *const c_char) -> c_uint {
                 wc = wc2;
             }
 
-            isifs = !wcschr(wcifs, wc).is_null();
-            ifs0 = *wcifs;
+            isifs = wcifs_chr(wcifsv(), wc);
+            ifs0 = wcifsv()[0];
         } else if ml == 0 {
             isifs = !libc::strchr(ifs, wc as c_int).is_null();
             ifs0 = *ifs as wchar_t;
@@ -2049,7 +2098,7 @@ unsafe fn ifsbreakup_slow(
 // [spec:dash:def:expand.ifsbreakup-fn]
 // [spec:dash:sem:expand.ifsbreakup-fn]
 pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: *mut arglist) {
-    let mut ifsp: *mut ifsregion;
+    let mut ifsp: usize;
     let mut ifst: ifs_state = mem::zeroed();
     let realifs: *const c_char;
     let sp: *mut strlist;
@@ -2060,17 +2109,18 @@ pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: *mut argl
     ifst.start = string;
     ifst.maxargs = maxargs;
     'add: {
-        if !ifslastp.is_null() {
+        if !ifsr().is_empty() {
             ifst.ifsspc = 0;
             nulonly = 0;
             realifs = ncifs;
-            ifsp = &mut ifsfirst;
+            ifsp = 0;
             loop {
                 let afternul: c_int;
+                let endoff: c_int = ifsr()[ifsp].endoff;
 
-                p = string.offset((*ifsp).begoff as isize);
+                p = string.offset(ifsr()[ifsp].begoff as isize);
                 afternul = nulonly;
-                nulonly = (*ifsp).nulonly;
+                nulonly = ifsr()[ifsp].nulonly;
                 ifst.ifs = if nulonly != 0 {
                     crate::shell::nullstr.as_ptr()
                 } else {
@@ -2080,7 +2130,7 @@ pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: *mut argl
                 loop {
                     let p0: *mut c_char = p;
 
-                    while string.offset((*ifsp).endoff as isize).offset_from(p) >= 8 {
+                    while string.offset(endoff as isize).offset_from(p) >= 8 {
                         /* union { uint64_t qw; unsigned char b[8]; } x; */
                         let qw: u64 = ptr::read_unaligned(p as *const u64);
                         let b: [u8; 8] = qw.to_ne_bytes();
@@ -2112,15 +2162,15 @@ pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: *mut argl
                         ifst.ifsspc = 0;
                     }
 
-                    if p >= string.offset((*ifsp).endoff as isize) {
+                    if p >= string.offset(endoff as isize) {
                         break;
                     }
 
                     p = ifsbreakup_slow(&mut ifst, arglist, afternul | nulonly, p);
                 }
 
-                ifsp = (*ifsp).next;
-                if ifsp.is_null() {
+                ifsp += 1;
+                if ifsp >= ifsr().len() {
                     break;
                 }
             }
@@ -2147,36 +2197,23 @@ pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: *mut argl
 // [spec:dash:def:expand.ifsfree-fn]
 // [spec:dash:sem:expand.ifsfree-fn]
 pub unsafe fn ifsfree() {
-    let mut p: *mut ifsregion = ifsfirst.next;
-
-    'out: {
-        if p.is_null() {
-            break 'out;
-        }
-
+    /* The C frees the chain behind the static head under one
+     * INTOFF/INTON and then nulls `ifslastp`; the head keeps its stale
+     * contents, which is unobservable because every reader tests
+     * `ifslastp` first.  Emptying the `Vec` is both halves. */
+    if ifsr().len() > 1 {
         crate::error::INTOFF();
-        loop {
-            let ifsp: *mut ifsregion;
-            ifsp = (*p).next;
-            ckfree(p as *mut c_void);
-            p = ifsp;
-            if p.is_null() {
-                break;
-            }
-        }
-        ifsfirst.next = ptr::null_mut();
+        ifsr().truncate(1);
         crate::error::INTON();
     }
-
-    /* out: */
-    ifslastp = ptr::null_mut();
+    ifsr().clear();
 }
 
 // [spec:dash:def:expand.changeifs-fn]
 // [spec:dash:sem:expand.changeifs-fn]
 pub unsafe fn changeifs(mut ifs: *const c_char) {
     let mut mbs: libc::mbstate_t = mem::zeroed();
-    let mut nwcifs: *mut wchar_t;
+    let mut nwcifs: Vec<wchar_t>;
     let mut mb: c_uint = 0;
     let mut len: size_t = 0;
     let mut p: *const c_char;
@@ -2207,7 +2244,7 @@ pub unsafe fn changeifs(mut ifs: *const c_char) {
         p = p.offset(1);
     }
 
-    nwcifs = ptr::null_mut();
+    nwcifs = Vec::new();
 
     ifsmb0len = (len != 0) as size_t;
 
@@ -2222,17 +2259,27 @@ pub unsafe fn changeifs(mut ifs: *const c_char) {
         }
         ifsmb0len = ml;
 
-        nwcifs = crate::memalloc::ckmalloc((len + 1) * mem::size_of::<wchar_t>() as size_t)
-            as *mut wchar_t;
-        ptr::write_bytes(nwcifs as *mut u8, 0, (len + 1) * mem::size_of::<wchar_t>());
+        /* The C `ckmalloc`s `len + 1` wide characters and zero-fills them
+         * before `mbsrtowcs` writes a prefix; the zero fill is what makes
+         * the result NUL-terminated when the conversion fails part-way,
+         * and `wcifs_chr` still depends on it. */
+        nwcifs = vec![0 as wchar_t; len + 1];
 
         p = ifs;
-        mbsrtowcs(nwcifs, &mut p, len + 1, &mut mbs);
+        mbsrtowcs(nwcifs.as_mut_ptr(), &mut p, len + 1, &mut mbs);
+
+        /* `mb != 0` means `IFS` holds a high-bit byte, so `len >= 1` and
+         * the allocation is never zero-length — which is what lets
+         * "empty" stand in for the C's NULL, and what lets `ifsisifs`
+         * read `wcifs[0]`. */
+        debug_assert!(
+            len > 0 && !nwcifs.is_empty(),
+            "changeifs: mb != 0 implies IFS holds a high-bit byte, so len >= 1"
+        );
     }
 
     /* out: */
-    ckfree(wcifs as *mut c_void);
-    wcifs = nwcifs;
+    *wcifsv() = nwcifs;
 }
 
 /*
@@ -2279,7 +2326,7 @@ unsafe fn expandmeta_glob(mut str: *mut strlist) {
                     /* #endif */
 
                     crate::error::INTOFF();
-                    p = preglob((*str).text, RMESCAPE_HEAP);
+                    p = preglob((*str).text, RMESCAPE_HEAP, None);
                     i = crate::system::glob64(
                         p,
                         crate::system::GLOB_ALTDIRFUNC | crate::system::GLOB_NOMAGIC,
@@ -2348,6 +2395,14 @@ unsafe fn expandmeta(mut str: *mut strlist) {
         return expandmeta_glob(str);
     }
 
+    /* The C's `preglob(..., RMESCAPE_HEAP)` result: one `ckmalloc` per
+     * word, `ckfree`d as soon as `expmeta` has read it.  That is a local
+     * buffer's lifetime exactly, and reusing it across the loop is the
+     * only difference — `expmeta` never re-enters `preglob`, because the
+     * only `preglob` under it is `patmatch`'s, which does not allocate
+     * while `FNMATCH_IS_ENABLED` is 0. */
+    let mut pattern: Vec<u8> = Vec::new();
+
     while !str.is_null() {
         let savelastp: *mut *mut strlist;
         let mut sp: *mut strlist;
@@ -2367,7 +2422,11 @@ unsafe fn expandmeta(mut str: *mut strlist) {
                 savelastp = exparg.lastp;
 
                 crate::error::INTOFF();
-                p = preglob((*str).text, RMESCAPE_ALLOC | RMESCAPE_HEAP);
+                p = preglob(
+                    (*str).text,
+                    RMESCAPE_ALLOC | RMESCAPE_HEAP,
+                    Some(&mut pattern),
+                );
                 len = libc::strlen(p) as c_uint;
 
                 /* The C's top-level `expmeta` starts on whatever block the
@@ -2381,9 +2440,9 @@ unsafe fn expandmeta(mut str: *mut strlist) {
                  * equality is what `expmeta` can assert. */
                 globb().clear();
                 expmeta(p, len, 0);
-                if p != (*str).text {
-                    ckfree(p as *mut c_void);
-                }
+                /* `if (p != str->text) ckfree(p)` — the C's way of asking
+                 * "did `_rmescapes` allocate?".  `pattern` owns the bytes
+                 * either way now, and the next iteration reuses it. */
                 crate::error::INTON();
                 if exparg.lastp == savelastp {
                     /*
@@ -2838,7 +2897,7 @@ unsafe fn msort(mut list: *mut strlist, len: c_int) -> *mut strlist {
 // [spec:dash:sem:expand.patmatch-fn]
 #[inline]
 unsafe fn patmatch(pattern: *mut c_char, string: *const c_char) -> c_int {
-    pmatch(preglob(pattern, 0), string)
+    pmatch(preglob(pattern, 0, None), string)
 }
 
 // [spec:dash:def:expand.ccmatch-fn]
@@ -3085,13 +3144,18 @@ unsafe fn pmatch(pattern: *mut c_char, string: *const c_char) -> c_int {
 
 // [spec:dash:def:expand.rmescapes-fn]
 // [spec:dash:sem:expand.rmescapes-fn]
-pub unsafe fn _rmescapes(mut str: *mut c_char, flag: c_int) -> *mut c_char {
+pub unsafe fn _rmescapes(
+    mut str: *mut c_char,
+    flag: c_int,
+    mut heap: Option<&mut Vec<u8>>,
+) -> *mut c_char {
     let mut p: *mut c_char;
     let mut q: *mut c_char;
     let mut r: *mut c_char;
     let mut notescaped: c_int;
     let globbing: c_int;
     let mut inquotes: c_int;
+    let mut fulllen: size_t = 0;
 
     p = libc::strpbrk(str, crate::mystring::cqchars.as_ptr());
     if p.is_null() {
@@ -3103,7 +3167,7 @@ pub unsafe fn _rmescapes(mut str: *mut c_char, flag: c_int) -> *mut c_char {
 
     if (flag & RMESCAPE_ALLOC) != 0 {
         let len: size_t = p.offset_from(str) as size_t;
-        let mut fulllen: size_t = libc::strlen(p);
+        fulllen = libc::strlen(p);
 
         if FNMATCH_IS_ENABLED && globbing != 0 {
             fulllen *= 2;
@@ -3122,10 +3186,29 @@ pub unsafe fn _rmescapes(mut str: *mut c_char, flag: c_int) -> *mut c_char {
             r = expmakestrspace(fulllen);
             str = expbase().offset(strloc as isize);
             p = str.offset(len as isize);
-        } else if (flag & RMESCAPE_HEAP) != 0 {
-            r = crate::memalloc::ckmalloc(fulllen) as *mut c_char;
         } else {
-            r = crate::memalloc::stalloc(fulllen) as *mut c_char;
+            /* The C splits this arm in two: `ckmalloc(fulllen)` under
+             * RMESCAPE_HEAP and `stalloc(fulllen)` otherwise.  The
+             * `stalloc` half is unreachable, and the reason is one
+             * constant away: `RMESCAPE_ALLOC` is only ever set by
+             * `preglob`, which sets it under `if (FNMATCH_IS_ENABLED)`,
+             * and by `subevalvar`'s `ALLOC | GROW`, which took the branch
+             * above.  `FNMATCH_IS_ENABLED` is 0, so the only caller that
+             * arrives here is `expandmeta`'s
+             * `preglob(text, RMESCAPE_ALLOC | RMESCAPE_HEAP)` — and that
+             * is the caller supplying `heap`.  Asserted rather than
+             * claimed, because [dec:nsh:owned-data] records this exact
+             * flag being reasoned about wrongly once already. */
+            debug_assert!(
+                (flag & RMESCAPE_HEAP) != 0 && heap.is_some(),
+                "_rmescapes: RMESCAPE_ALLOC without GROW reaches only the HEAP arm"
+            );
+            let out = heap
+                .as_deref_mut()
+                .expect("_rmescapes: RMESCAPE_ALLOC without GROW needs a heap buffer");
+            out.clear();
+            out.reserve(fulllen);
+            r = out.as_mut_ptr() as *mut c_char;
         }
         q = r;
         if len > 0 {
@@ -3226,6 +3309,22 @@ pub unsafe fn _rmescapes(mut str: *mut c_char, flag: c_int) -> *mut c_char {
          * rather than transcribed — a deliberate divergence from a store
          * that has no observable value. */
         set_expdest(r.offset(q.offset_from(r) + 1));
+    } else if (flag & RMESCAPE_ALLOC) != 0 {
+        /* The bytes went into the caller's buffer through a raw cursor
+         * that carries no bound of its own, so the only thing standing
+         * between `fulllen` and a heap overflow is the C's arithmetic
+         * being right.  Asserted against `fulllen` — the number the C
+         * computed — and *not* against `Vec::capacity()`, which
+         * over-allocates and would make the assertion vacuous. */
+        let written: usize = q.offset_from(r) as usize + 1;
+        debug_assert!(
+            written <= fulllen,
+            "_rmescapes wrote {written} bytes into a {fulllen}-byte reservation"
+        );
+        let out = heap
+            .as_deref_mut()
+            .expect("_rmescapes: RMESCAPE_ALLOC without GROW needs a heap buffer");
+        out.set_len(written);
     }
     r
 }
