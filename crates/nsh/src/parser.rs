@@ -2280,7 +2280,7 @@ unsafe fn setprompt(which: c_int) {
 
     /* #ifdef SMALL: show = 1 */
     show = crate::histedit::el.is_null() as c_int;
-    if show != 0 && (*crate::input::parsefile).nleft == 0 {
+    if show != 0 && crate::input::cur_pf().nleft == 0 {
         /* `pushstackmark(&smark, stackblocksize())` bounded the prompt
          * `expandstr` had left in the region for `out2str` to read.  The
          * expansion buffer is owned, so there is nothing to bound. */
@@ -2291,7 +2291,7 @@ unsafe fn setprompt(which: c_int) {
 // [spec:dash:def:parser.expandstr-fn]
 // [spec:dash:sem:parser.expandstr-fn]
 pub unsafe fn expandstr(ps: *const c_char) -> *const c_char {
-    let file_stop: *mut crate::input::parsefile;
+    let file_stop: usize;
     let savehandler: *mut jmploc;
     let saveheredoclist: Vec<heredoc>;
     let mut result: *const c_char;
@@ -2299,7 +2299,7 @@ pub unsafe fn expandstr(ps: *const c_char) -> *const c_char {
     let mut jmploc: crate::error::jmploc = crate::error::jmploc::new();
     let err: c_int;
 
-    file_stop = crate::input::parsefile;
+    file_stop = crate::input::cur_mark();
 
     /* XXX Fix (char *) cast. */
     setinputstring(ps as *mut c_char);

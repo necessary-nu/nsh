@@ -927,7 +927,7 @@ unsafe fn parse_command_args(
 // `STATIC int evalcommand(union node *cmd, int flags)`.
 unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
     let localvar_stop: *mut crate::var::localvar_list;
-    let file_stop: *mut crate::input::parsefile;
+    let file_stop: usize;
     let redir_stop: *mut crate::redir::redirtab;
     let mut argp: &[Node];
     let mut arglist: arglist = arglist::new();
@@ -962,7 +962,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
 
     /* First expand the arguments. */
     /* TRACE(("evalcommand(0x%lx, %d) called\n", (long)cmd, flags)); */
-    file_stop = crate::input::parsefile;
+    file_stop = crate::input::cur_mark();
     back_exitstatus = 0;
 
     cmdentry.cmdtype = CMDBUILTIN;
