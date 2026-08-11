@@ -2289,6 +2289,7 @@ children (
                 priority 0
                 kind @refactor
                 deps (delete-memalloc)
+                sealed true
                 log (
                     {
                         at 2026-08-10T00:04:37.702624978Z
@@ -2309,6 +2310,13 @@ children (
                         author "brendan@necessary.nu"
                         kind @unblock
                         text "Resolved, and not by either option the blocker offered. Brendan rejected both: no bespoke %a renderer and no 576-case register hole, because the question itself came from keeping a runtime %-conversion interpreter in the crate. It is gone — the printf builtin with it — under [dec:nsh:no-format-interpreters]. printf resolves through PATH like any other utility. Output stays what this node made it: Output is an io::Write the shell owns, formatting happens through write! at typed call sites, and nothing in the crate now reads a format pattern at runtime. Final gates: runall 47826/0 FLAKY=28 XFAIL=11 with no stale register entries, POSIX cases 661/50 against the C's 655/56, ptydiff 37/0, divtest 58/0, cargo test 62 lib + 11 integration."
+                    }
+
+                    {
+                        at 2026-08-11T20:55:43.687147342Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }
