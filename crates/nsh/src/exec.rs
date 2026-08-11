@@ -1111,4 +1111,39 @@ mod tests {
             }
         }
     }
+
+    /// `printf` is not a builtin and must not become one again: the
+    /// utility is a runtime `%`-conversion interpreter, and this shell
+    /// carries none. Not finding it here is what sends `printf` down the
+    /// ordinary PATH search. See `[dec:nsh:no-format-interpreters]`.
+    #[test]
+    fn printf_is_not_a_builtin() {
+        unsafe {
+            assert!(find_builtin(c"printf".as_ptr()).is_null());
+        }
+        assert!(
+            !crate::builtins::builtincmd
+                .iter()
+                .any(|cmd| cmd.name.to_bytes() == b"printf")
+        );
+        /* echo shares printf.c and stays, so absence above is the
+         * builtin going rather than the module going. */
+        unsafe {
+            assert!(!find_builtin(c"echo".as_ptr()).is_null());
+        }
+    }
+
+    /// The table is binary-searched, so its order is load-bearing —
+    /// removing a row must not have disturbed it.
+    #[test]
+    fn the_builtin_table_stays_sorted() {
+        let names: Vec<&[u8]> = crate::builtins::builtincmd
+            .iter()
+            .map(|cmd| cmd.name.to_bytes())
+            .collect();
+        let mut sorted = names.clone();
+        sorted.sort();
+        assert_eq!(names, sorted);
+        assert_eq!(names.len(), crate::builtins::NUMBUILTINS);
+    }
 }

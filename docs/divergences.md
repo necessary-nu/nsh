@@ -276,6 +276,44 @@ content/drop/add/duplicate/status failures, the line shape and feature
 scope, the optional `*`, basename rather than full-path sorting, a bare
 name refusal, and an unsorted nsh permutation.
 
+### `printf` is not a builtin
+
+Category 4 — dash is doing something the port deliberately does not.
+`[dec:nsh:no-format-interpreters]` bans runtime format-string
+interpretation from the crate, and the `printf` utility *is* one: its
+contract is to read a format string at runtime and render each argument
+by a pattern found in it. So nsh has no `printf` builtin, and `printf`
+resolves through `PATH` like any other external utility.
+
+The shell's own observable difference is small and exact. Ask either
+shell where `printf` is and dash says `printf is a shell builtin` while
+nsh names the executable it found. That is the whole of what the port
+does differently, and it is what `dsdiv_printf_is_external` excuses:
+the two outputs must be identical line for line except on a line naming
+`printf`, where the reference must say it is a builtin and the port must
+name a path ending in `/printf`. It refuses a differing line about any
+other command — `echo` is still a builtin and a case claiming otherwise
+is a regression — and it refuses a status mismatch, an added or dropped
+line, and any case that does not ask about `printf`.
+
+What is *not* registered is printf's own output. Once the utility is
+external, a case that runs `printf` and compares bytes is comparing GNU
+coreutils against dash's builtin: two printf implementations, neither of
+them nsh. They disagree in ways that have nothing to do with this shell
+— coreutils rejects `%5b`, warns on excess arguments, and expands `\u`
+differently — and no honest register entry can absorb that, because
+excusing it would mean modelling coreutils' printf in the register.
+Those cases were removed from the corpus instead, and the six corpora
+that existed to measure the builtin (`aud_bltin_printf`, `printf2`, the
+three fuzz sets and `aud_foundation_pf`) were retired with it. The
+corpus adjustments are listed in the commit that made them.
+
+One consequence is worth stating plainly because it is a real behavioural
+loss, not a bookkeeping one: with `PATH` empty or `printf` missing from
+it, dash still has `printf` and nsh does not. A script that clears `PATH`
+and then calls `printf` works on dash and fails on nsh. That is the price
+of the decision and it was accepted with it.
+
 ## Candidates not yet decided
 
 ### The port is *more* conformant than dash in two line-editing cases

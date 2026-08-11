@@ -101,10 +101,6 @@ sites (
         [spec:dash:def:bltin.echocmd-fn]
         [spec:dash:sem:bltin.echocmd-fn]
     )}
-    {path src/bltin/printf.c, symbol check_conversion, spec (
-        [spec:dash:def:printf.check-conversion-fn]
-        [spec:dash:sem:printf.check-conversion-fn]
-    )}
     {path src/bltin/printf.c, symbol conv_escape, spec (
         [spec:dash:def:printf.conv-escape-fn]
         [spec:dash:sem:printf.conv-escape-fn]
@@ -117,29 +113,9 @@ sites (
         [spec:dash:def:printf.echocmd-fn]
         [spec:dash:sem:printf.echocmd-fn]
     )}
-    {path src/bltin/printf.c, symbol getchr, spec (
-        [spec:dash:def:printf.getchr-fn]
-        [spec:dash:sem:printf.getchr-fn]
-    )}
-    {path src/bltin/printf.c, symbol getdouble, spec (
-        [spec:dash:def:printf.getdouble-fn]
-        [spec:dash:sem:printf.getdouble-fn]
-    )}
-    {path src/bltin/printf.c, symbol getstr, spec (
-        [spec:dash:def:printf.getstr-fn]
-        [spec:dash:sem:printf.getstr-fn]
-    )}
-    {path src/bltin/printf.c, symbol getuintmax, spec (
-        [spec:dash:def:printf.getuintmax-fn]
-        [spec:dash:sem:printf.getuintmax-fn]
-    )}
     {path src/bltin/printf.c, symbol print_escape_str, spec (
         [spec:dash:def:printf.print-escape-str-fn]
         [spec:dash:sem:printf.print-escape-str-fn]
-    )}
-    {path src/bltin/printf.c, symbol printfcmd, spec (
-        [spec:dash:def:printf.printfcmd-fn]
-        [spec:dash:sem:printf.printfcmd-fn]
     )}
     {path src/bltin/test.c, symbol aexpr, spec (
         [spec:dash:def:test.aexpr-fn]
