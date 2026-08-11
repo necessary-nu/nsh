@@ -18,7 +18,7 @@
 //!   * `crate::parser::getprompt`
 //!   * `crate::shellmain::readcmdfile` (src/main.c:283)
 
-use bstr::BString;
+use bstr::{BStr, BString};
 use core::ffi::CStr;
 use core::mem;
 use core::ptr;
@@ -259,7 +259,7 @@ pub unsafe fn setterm(term: *const c_char) {
 // [spec:dash:sem:histedit.histcmd-fn]
 // [spec:dash:def:myhistedit.histcmd-fn]
 // [spec:dash:sem:myhistedit.histcmd-fn]
-pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
+pub unsafe fn histcmd(args: &[&BStr]) -> c_int {
     let mut ch: c_int;
     let mut editor: *const c_char = ptr::null();
     let mut lflg: c_int = 0;
@@ -293,6 +293,17 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
     if !history_active() {
         crate::error::sh_error(b"history not active");
     }
+
+    /* `getopt(3)` keeps its state in process globals and permutes the
+     * array it is given, and `fc -s old=new` splits that word in place
+     * and then truncates it -- writes that `$_` shows, so they have to
+     * land on the shell's own words. `writable_args` says why that is the
+     * one builtin still holding a `char **`; that the scan is libc's at
+     * all is the limit `[dec:nsh:no-ambient-state]` records, and not this
+     * node's to lift. */
+    let mut slots = crate::builtins::writable_args(args);
+    let mut argc: c_int = args.len() as c_int;
+    let mut argv: *mut *mut c_char = slots.as_mut_ptr();
 
     // #ifdef __GLIBC__
     optind = 0;

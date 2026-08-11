@@ -41,21 +41,15 @@ pub const BUILTIN_ASSIGN: c_uint = 0x4;
 
 /// A builtin's entry point.
 ///
-/// The C has one shape, `int (*)(int, char **)`, and this has two only
-/// while the builtins are moving off it. `Args` is where they all end up:
-/// the words the shell expanded, `argv[0]` first, borrowed from the
+/// The words the shell expanded, `argv[0]` first, borrowed from the
 /// caller's storage rather than from any shell state -- which is the
 /// constraint `[dec:nsh:public-surface]` records, because a builtin that
-/// re-enters evaluation (`.`, `eval`, `fc`) must be able to hand the shell
-/// straight back.
+/// re-enters evaluation (`.`, `eval`, `fc`) has to be able to hand the
+/// shell straight back.
 ///
-/// `Raw` is temporary and goes when the last builtin leaves it.
-pub enum Builtin {
-    /// Not converted yet: the C's `argc` and `argv`.
-    Raw(unsafe fn(c_int, *mut *mut c_char) -> c_int),
-    /// The shell's own words, as byte strings.
-    Args(unsafe fn(&[&BStr]) -> c_int),
-}
+/// The C's `int (*)(int, char **)` is gone, and with it the count: a
+/// slice carries its own length, and no builtin has to be told twice.
+pub type Builtin = unsafe fn(&[&BStr]) -> c_int;
 
 pub struct builtincmd {
     pub name: &'static CStr,
@@ -81,48 +75,73 @@ pub fn args(fields: &[crate::expand::strlist]) -> Vec<&BStr> {
         .collect()
 }
 
+/// The same words as the writable `char **` the C hands every builtin,
+/// for the one builtin that still needs one.
+///
+/// `fc -s old=new` splits that word at the `=` and then truncates it, and
+/// dash's `$_` -- read from the word after the builtin returns -- shows
+/// the result. So the writes have to land on the words the shell
+/// expanded rather than on a copy, or `$_` reports the argument as it was
+/// typed instead of as `fc` left it.
+///
+/// The pointers are C strings because [`args`] took its slices off fields
+/// that end with a NUL and cut only that byte off the length, so the
+/// terminator is still there, one past the end. That is the same reading
+/// of the same invariant that `strlist::textp` makes.
+///
+/// **This is the last raw argument vector in the builtins**, and the
+/// signature `[dec:nsh:public-surface]` records has no room for it: a
+/// built-in that writes to its own arguments cannot be given `&[&BStr]`
+/// and mean it. Deciding whether that scribble survives is
+/// `printf-builtin`'s neighbourhood, not this node's.
+pub fn writable_args(args: &[&BStr]) -> Vec<*mut c_char> {
+    let mut slots: Vec<*mut c_char> = args.iter().map(|w| w.as_ptr() as *mut c_char).collect();
+    slots.push(core::ptr::null_mut());
+    slots
+}
+
 pub const NUMBUILTINS: usize = 39;
 
 pub static builtincmd: [builtincmd; NUMBUILTINS] = [
-    builtincmd { name: c".", builtin: Some(Builtin::Args(crate::shellmain::dotcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 0
-    builtincmd { name: c":", builtin: Some(Builtin::Args(crate::eval::truecmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 1
-    builtincmd { name: c"[", builtin: Some(Builtin::Args(crate::bltin::test::testcmd)), flags: 0 }, // 2
-    builtincmd { name: c"alias", builtin: Some(Builtin::Args(crate::alias::aliascmd)), flags: BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 3
-    builtincmd { name: c"bg", builtin: Some(Builtin::Args(crate::jobs::bgcmd)), flags: BUILTIN_REGULAR }, // 4
-    builtincmd { name: c"break", builtin: Some(Builtin::Args(crate::eval::breakcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 5
-    builtincmd { name: c"cd", builtin: Some(Builtin::Args(crate::cd::cdcmd)), flags: BUILTIN_REGULAR }, // 6
-    builtincmd { name: c"chdir", builtin: Some(Builtin::Args(crate::cd::cdcmd)), flags: 0 }, // 7
-    builtincmd { name: c"command", builtin: Some(Builtin::Args(crate::exec::commandcmd)), flags: BUILTIN_REGULAR }, // 8
-    builtincmd { name: c"continue", builtin: Some(Builtin::Args(crate::eval::breakcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 9
-    builtincmd { name: c"echo", builtin: Some(Builtin::Args(crate::bltin::printf::echocmd)), flags: 0 }, // 10
+    builtincmd { name: c".", builtin: Some(crate::shellmain::dotcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 0
+    builtincmd { name: c":", builtin: Some(crate::eval::truecmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 1
+    builtincmd { name: c"[", builtin: Some(crate::bltin::test::testcmd), flags: 0 }, // 2
+    builtincmd { name: c"alias", builtin: Some(crate::alias::aliascmd), flags: BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 3
+    builtincmd { name: c"bg", builtin: Some(crate::jobs::bgcmd), flags: BUILTIN_REGULAR }, // 4
+    builtincmd { name: c"break", builtin: Some(crate::eval::breakcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 5
+    builtincmd { name: c"cd", builtin: Some(crate::cd::cdcmd), flags: BUILTIN_REGULAR }, // 6
+    builtincmd { name: c"chdir", builtin: Some(crate::cd::cdcmd), flags: 0 }, // 7
+    builtincmd { name: c"command", builtin: Some(crate::exec::commandcmd), flags: BUILTIN_REGULAR }, // 8
+    builtincmd { name: c"continue", builtin: Some(crate::eval::breakcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 9
+    builtincmd { name: c"echo", builtin: Some(crate::bltin::printf::echocmd), flags: 0 }, // 10
     builtincmd { name: c"eval", builtin: None, flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 11
-    builtincmd { name: c"exec", builtin: Some(Builtin::Args(crate::eval::execcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 12
-    builtincmd { name: c"exit", builtin: Some(Builtin::Args(crate::shellmain::exitcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 13
-    builtincmd { name: c"export", builtin: Some(Builtin::Args(crate::var::exportcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 14
-    builtincmd { name: c"false", builtin: Some(Builtin::Args(crate::eval::falsecmd)), flags: BUILTIN_REGULAR }, // 15
-    builtincmd { name: c"fc", builtin: Some(Builtin::Raw(crate::histedit::histcmd)), flags: BUILTIN_REGULAR }, // 16
-    builtincmd { name: c"fg", builtin: Some(Builtin::Args(crate::jobs::fgcmd)), flags: BUILTIN_REGULAR }, // 17
-    builtincmd { name: c"getopts", builtin: Some(Builtin::Args(crate::options::getoptscmd)), flags: BUILTIN_REGULAR }, // 18
-    builtincmd { name: c"hash", builtin: Some(Builtin::Args(crate::exec::hashcmd)), flags: BUILTIN_REGULAR }, // 19
-    builtincmd { name: c"jobs", builtin: Some(Builtin::Args(crate::jobs::jobscmd)), flags: BUILTIN_REGULAR }, // 20
-    builtincmd { name: c"kill", builtin: Some(Builtin::Args(crate::jobs::killcmd)), flags: BUILTIN_REGULAR }, // 21
-    builtincmd { name: c"local", builtin: Some(Builtin::Args(crate::var::localcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 22
-    builtincmd { name: c"pwd", builtin: Some(Builtin::Args(crate::cd::pwdcmd)), flags: BUILTIN_REGULAR }, // 23
-    builtincmd { name: c"read", builtin: Some(Builtin::Args(crate::miscbltin::readcmd)), flags: BUILTIN_REGULAR }, // 24
-    builtincmd { name: c"readonly", builtin: Some(Builtin::Args(crate::var::exportcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 25
-    builtincmd { name: c"return", builtin: Some(Builtin::Args(crate::eval::returncmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 26
-    builtincmd { name: c"set", builtin: Some(Builtin::Args(crate::options::setcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 27
-    builtincmd { name: c"shift", builtin: Some(Builtin::Args(crate::options::shiftcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 28
-    builtincmd { name: c"test", builtin: Some(Builtin::Args(crate::bltin::test::testcmd)), flags: 0 }, // 29
-    builtincmd { name: c"times", builtin: Some(Builtin::Args(crate::bltin::times::timescmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 30
-    builtincmd { name: c"trap", builtin: Some(Builtin::Args(crate::trap::trapcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 31
-    builtincmd { name: c"true", builtin: Some(Builtin::Args(crate::eval::truecmd)), flags: BUILTIN_REGULAR }, // 32
-    builtincmd { name: c"type", builtin: Some(Builtin::Args(crate::exec::typecmd)), flags: BUILTIN_REGULAR }, // 33
-    builtincmd { name: c"ulimit", builtin: Some(Builtin::Args(crate::miscbltin::ulimitcmd)), flags: BUILTIN_REGULAR }, // 34
-    builtincmd { name: c"umask", builtin: Some(Builtin::Args(crate::miscbltin::umaskcmd)), flags: BUILTIN_REGULAR }, // 35
-    builtincmd { name: c"unalias", builtin: Some(Builtin::Args(crate::alias::unaliascmd)), flags: BUILTIN_REGULAR }, // 36
-    builtincmd { name: c"unset", builtin: Some(Builtin::Args(crate::var::unsetcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 37
-    builtincmd { name: c"wait", builtin: Some(Builtin::Args(crate::jobs::waitcmd)), flags: BUILTIN_REGULAR }, // 38
+    builtincmd { name: c"exec", builtin: Some(crate::eval::execcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 12
+    builtincmd { name: c"exit", builtin: Some(crate::shellmain::exitcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 13
+    builtincmd { name: c"export", builtin: Some(crate::var::exportcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 14
+    builtincmd { name: c"false", builtin: Some(crate::eval::falsecmd), flags: BUILTIN_REGULAR }, // 15
+    builtincmd { name: c"fc", builtin: Some(crate::histedit::histcmd), flags: BUILTIN_REGULAR }, // 16
+    builtincmd { name: c"fg", builtin: Some(crate::jobs::fgcmd), flags: BUILTIN_REGULAR }, // 17
+    builtincmd { name: c"getopts", builtin: Some(crate::options::getoptscmd), flags: BUILTIN_REGULAR }, // 18
+    builtincmd { name: c"hash", builtin: Some(crate::exec::hashcmd), flags: BUILTIN_REGULAR }, // 19
+    builtincmd { name: c"jobs", builtin: Some(crate::jobs::jobscmd), flags: BUILTIN_REGULAR }, // 20
+    builtincmd { name: c"kill", builtin: Some(crate::jobs::killcmd), flags: BUILTIN_REGULAR }, // 21
+    builtincmd { name: c"local", builtin: Some(crate::var::localcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 22
+    builtincmd { name: c"pwd", builtin: Some(crate::cd::pwdcmd), flags: BUILTIN_REGULAR }, // 23
+    builtincmd { name: c"read", builtin: Some(crate::miscbltin::readcmd), flags: BUILTIN_REGULAR }, // 24
+    builtincmd { name: c"readonly", builtin: Some(crate::var::exportcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 25
+    builtincmd { name: c"return", builtin: Some(crate::eval::returncmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 26
+    builtincmd { name: c"set", builtin: Some(crate::options::setcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 27
+    builtincmd { name: c"shift", builtin: Some(crate::options::shiftcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 28
+    builtincmd { name: c"test", builtin: Some(crate::bltin::test::testcmd), flags: 0 }, // 29
+    builtincmd { name: c"times", builtin: Some(crate::bltin::times::timescmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 30
+    builtincmd { name: c"trap", builtin: Some(crate::trap::trapcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 31
+    builtincmd { name: c"true", builtin: Some(crate::eval::truecmd), flags: BUILTIN_REGULAR }, // 32
+    builtincmd { name: c"type", builtin: Some(crate::exec::typecmd), flags: BUILTIN_REGULAR }, // 33
+    builtincmd { name: c"ulimit", builtin: Some(crate::miscbltin::ulimitcmd), flags: BUILTIN_REGULAR }, // 34
+    builtincmd { name: c"umask", builtin: Some(crate::miscbltin::umaskcmd), flags: BUILTIN_REGULAR }, // 35
+    builtincmd { name: c"unalias", builtin: Some(crate::alias::unaliascmd), flags: BUILTIN_REGULAR }, // 36
+    builtincmd { name: c"unset", builtin: Some(crate::var::unsetcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 37
+    builtincmd { name: c"wait", builtin: Some(crate::jobs::waitcmd), flags: BUILTIN_REGULAR }, // 38
 ];
 
 // The `*CMD` pointers of builtins.h: `#define NAME (builtincmd + n)`.

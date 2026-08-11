@@ -121,10 +121,6 @@ pub const debug: usize = 17;
 
 pub static mut arg0: *mut c_char = null_mut(); /* value of $0 */
 pub static mut shellparam: shparam = shparam::new(); /* current positional parameters */
-pub static mut argptr: *mut *mut c_char = null_mut(); /* argument list for builtin commands */
-pub static mut optionarg: *mut c_char = null_mut(); /* set by nextopt (like getopt) */
-pub static mut optptr: *mut c_char = null_mut(); /* used by nextopt */
-
 pub static mut minusc: *mut c_char = null_mut(); /* argument to -c option */
 
 /* `static const char *const optnames[NOPTS]` — `static mut` in Rust only
@@ -916,72 +912,6 @@ impl<'a> Options<'a> {
     pub fn operands(&self) -> &'a [&'a BStr] {
         &self.args[self.next..]
     }
-}
-
-/*
- * XXX - should get rid of.  have all builtins use getopt(3).  the
- * library getopt must have the BSD extension static variable "optreset"
- * otherwise it can't be used within the shell safely.
- *
- * Standard option processing (a la getopt) for builtin routines.  The
- * only argument that is passed to nextopt is the option string; the
- * other arguments are unnecessary.  It return the character, or '\0' on
- * end of input.
- */
-
-// [spec:dash:def:options.nextopt-fn]
-// [spec:dash:sem:options.nextopt-fn]
-pub unsafe fn nextopt(optstring: *const c_char) -> c_int {
-    let mut p: *mut c_char;
-    let mut q: *const c_char;
-    let c: c_char;
-
-    p = optptr;
-    if p.is_null() || *p == b'\0' as c_char {
-        p = *argptr;
-        if p.is_null() || *p != b'-' as c_char || {
-            p = p.add(1);
-            *p == b'\0' as c_char
-        } {
-            return b'\0' as c_int;
-        }
-        argptr = argptr.add(1);
-        if *p.offset(0) == b'-' as c_char && *p.offset(1) == b'\0' as c_char {
-            /* check for "--" */
-            return b'\0' as c_int;
-        }
-    }
-    c = *p;
-    p = p.add(1);
-    q = optstring;
-    while *q != c {
-        if *q == b'\0' as c_char {
-            let mut message = b"Illegal option -".to_vec();
-            message.push(c as u8);
-            crate::error::sh_error(&message);
-        }
-        q = q.add(1);
-        if *q == b':' as c_char {
-            q = q.add(1);
-        }
-    }
-    q = q.add(1);
-    if *q == b':' as c_char {
-        if *p == b'\0' as c_char && {
-            p = *argptr;
-            argptr = argptr.add(1);
-            p.is_null()
-        } {
-            let mut message = b"No arg for -".to_vec();
-            message.push(c as u8);
-            message.extend_from_slice(b" option");
-            crate::error::sh_error(&message);
-        }
-        optionarg = p;
-        p = null_mut();
-    }
-    optptr = p;
-    c as c_int
 }
 
 #[cfg(test)]

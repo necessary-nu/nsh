@@ -106,7 +106,7 @@ static BLTIN_NULLSTR: [c_char; 1] = [0];
 
 static mut bltin: builtincmd = builtincmd {
     name: c"",
-    builtin: Some(Builtin::Args(bltincmd)),
+    builtin: Some(bltincmd),
     flags: BUILTIN_REGULAR,
 };
 
@@ -171,34 +171,28 @@ pub(crate) unsafe fn setjmp_catch<F: FnOnce()>(loc: *mut jmploc, body: F) -> c_i
 
 // [spec:dash:def:eval.evalcmd-fn]
 // [spec:dash:sem:eval.evalcmd-fn]
-unsafe fn evalcmd(argc: c_int, argv: *mut *mut c_char, flags: c_int) -> c_int {
-    let mut p: *mut c_char;
-    let mut ap: *mut *mut c_char;
+unsafe fn evalcmd(args: &[&BStr], flags: c_int) -> c_int {
     /* `grabstackstr` kept the joined string alive until the enclosing mark
      * popped, which is past the `evalstring` that parses it. Owning it here
      * says the same thing, and it has to be a binding of this frame because
      * `setinputstring` reads through the pointer rather than copying. */
     let mut concat: BString = BString::new(Vec::new());
 
-    if argc > 1 {
-        p = *argv.offset(1);
-        if argc > 2 {
-            ap = argv.offset(2);
-            loop {
-                concat.extend_from_slice(core::slice::from_raw_parts(
-                    p as *const u8,
-                    libc::strlen(p),
-                ));
-                p = *ap;
-                ap = ap.add(1);
-                if p.is_null() {
-                    break;
+    if args.len() > 1 {
+        let single: CString;
+        let p: *mut c_char = if args.len() > 2 {
+            for (i, word) in args[1..].iter().enumerate() {
+                if i > 0 {
+                    concat.push(b' ');
                 }
-                concat.push(b' ');
+                concat.extend_from_slice(crate::shell::cstring(word).as_bytes());
             }
             concat.push(0);
-            p = concat.as_mut_ptr() as *mut c_char;
-        }
+            concat.as_mut_ptr() as *mut c_char
+        } else {
+            single = crate::shell::cstring(args[1]);
+            single.as_ptr() as *mut c_char
+        };
         return evalstring(p, flags & EV_TESTED);
     }
     0
@@ -1123,7 +1117,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
                 }
 
                 CMDBUILTIN => {
-                    if evalbltin(cmdentry.u.cmd, &args, argc, argv, flags) != 0
+                    if evalbltin(cmdentry.u.cmd, &args, flags) != 0
                         && !(crate::error::exception == crate::error::EXERROR && spclbltin <= 0)
                     {
                         // raise:
@@ -1186,13 +1180,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
 
 // [spec:dash:def:eval.evalbltin-fn]
 // [spec:dash:sem:eval.evalbltin-fn]
-unsafe fn evalbltin(
-    cmd: *const builtincmd,
-    args: &[&BStr],
-    argc: c_int,
-    argv: *mut *mut c_char,
-    flags: c_int,
-) -> c_int {
+unsafe fn evalbltin(cmd: *const builtincmd, args: &[&BStr], flags: c_int) -> c_int {
     let savecmdname: Option<BString>; /* volatile */
     let savehandler: *mut jmploc; /* volatile */
     let mut jmploc_: jmploc = jmploc::new();
@@ -1208,15 +1196,10 @@ unsafe fn evalbltin(
         /* `commandname = argv[0]`, and NULL for the command that has no
          * word at all -- the assignment-only one `bltin` stands for. */
         commandname = args.first().map(|name| BString::from(<&BStr as AsRef<[u8]>>::as_ref(name)));
-        crate::options::argptr = argv.add(1);
-        crate::options::optptr = null_mut(); /* initialize nextopt */
         if cmd == crate::builtins::EVALCMD {
-            status = evalcmd(argc, argv, flags);
+            status = evalcmd(args, flags);
         } else {
-            status = match (*cmd).builtin.as_ref().unwrap() {
-                Builtin::Raw(f) => f(argc, argv),
-                Builtin::Args(f) => f(args),
-            };
+            status = (*cmd).builtin.expect("a builtin with no special entry")(args);
         }
         crate::output::flushall();
         if crate::output::outerr(crate::output::stdout()) != 0 {

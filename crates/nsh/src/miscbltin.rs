@@ -396,7 +396,7 @@ pub unsafe fn umaskcmd(args: &[&BStr]) -> c_int {
                 }
                 // error:
                 let mut message = b"Illegal mode: ".to_vec();
-                message.extend_from_slice(CStr::from_ptr(*crate::options::argptr).to_bytes());
+                message.extend_from_slice(mode.as_ref().expect("a mode to walk").as_bytes());
                 crate::error::sh_error(&message);
                 /* return 1; -- NOTREACHED, sh_error does not return */
             }
