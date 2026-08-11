@@ -91,11 +91,11 @@ enum Command {
 /// across operations that can insert another command and rebalance the map.
 pub struct tblentry {
     command: Command,
-    rehash: bool,
+    pub(crate) rehash: bool,
 }
 
 impl tblentry {
-    fn cmdtype(&self) -> c_int {
+    pub(crate) fn cmdtype(&self) -> c_int {
         match self.command {
             Command::Unknown => CMDUNKNOWN,
             Command::Normal(_) => CMDNORMAL,
@@ -104,7 +104,7 @@ impl tblentry {
         }
     }
 
-    fn path_index(&self) -> c_int {
+    pub(crate) fn path_index(&self) -> c_int {
         match self.command {
             Command::Normal(index) => index,
             _ => unreachable!("only external commands have PATH indices"),
@@ -118,7 +118,7 @@ impl tblentry {
         }
     }
 
-    fn path_dependent(&self) -> bool {
+    pub(crate) fn path_dependent(&self) -> bool {
         match self.command {
             Command::Normal(_) => true,
             Command::Builtin(cmd) => unsafe {
@@ -128,7 +128,7 @@ impl tblentry {
         }
     }
 
-    unsafe fn write_to(&self, entry: *mut cmdentry) {
+    pub(crate) unsafe fn write_to(&self, entry: *mut cmdentry) {
         (*entry).cmdtype = self.cmdtype();
         match &self.command {
             Command::Unknown => (*entry).u.index = 0,
@@ -152,7 +152,7 @@ static mut builtinloc: c_int = -1; /* index in path of %builtin, or -1 */
 pub static mut pathopt: *const c_char = null(); /* set by padvance */
 
 #[inline]
-unsafe fn cmdtable_mut() -> &'static mut BTreeMap<BString, Box<tblentry>> {
+pub(crate) unsafe fn cmdtable_mut() -> &'static mut BTreeMap<BString, Box<tblentry>> {
     &mut *addr_of_mut!(cmdtable)
 }
 
@@ -383,75 +383,6 @@ pub unsafe fn padvance(path: &mut *const c_char, name: *const c_char) -> c_int {
 }
 
 /*** Command hashing code ***/
-
-// [spec:dash:def:exec.hashcmd-fn]
-// [spec:dash:sem:exec.hashcmd-fn]
-pub unsafe fn hashcmd(args: &[&BStr]) -> c_int {
-    let mut cmdp: *mut tblentry;
-    let mut c: c_int;
-    let mut entry: cmdentry = cmdentry {
-        cmdtype: 0,
-        u: param { index: 0 },
-    };
-    let mut clear: bool;
-
-    clear = false;
-    let mut opts = crate::options::Options::new(args);
-    while opts.next(b"r").is_some() {
-        clear = true;
-    }
-    if clear {
-        clearcmdentry();
-        return 0;
-    }
-
-    let operands = opts.operands();
-    if operands.is_empty() {
-        for (name, cmdp) in cmdtable_mut().iter() {
-            if cmdp.cmdtype() == CMDNORMAL {
-                printentry(BStr::new(name.as_slice()), cmdp);
-            }
-        }
-        return 0;
-    }
-    c = 0;
-    for name in operands {
-        let name = crate::shell::cstring(name);
-        let name = name.as_ptr() as *mut c_char;
-        cmdp = cmdlookup(name, 0);
-        if !cmdp.is_null() && (*cmdp).path_dependent() {
-            delete_cmd_entry(name);
-        }
-        find_command(name, &mut entry, DO_ERR, crate::var::pathval());
-        if entry.cmdtype == CMDUNKNOWN {
-            c = 1;
-        }
-    }
-    c
-}
-
-// [spec:dash:def:exec.printentry-fn]
-// [spec:dash:sem:exec.printentry-fn]
-unsafe fn printentry(name: &BStr, cmdp: &tblentry) {
-    let mut idx: c_int;
-    let mut path: *const c_char;
-    let fullname: *mut c_char;
-
-    idx = cmdp.path_index();
-    path = crate::var::pathval();
-    loop {
-        padvance(&mut path, name.as_ptr() as *const c_char);
-        idx -= 1;
-        if idx < 0 {
-            break;
-        }
-    }
-    fullname = padvance_result();
-    let output = &mut *crate::output::stdout();
-    let _ = output.write_all(CStr::from_ptr(fullname).to_bytes());
-    let suffix: &[u8] = if cmdp.rehash { b"*\n" } else { b"\n" };
-    let _ = output.write_all(suffix);
-}
 
 // [spec:dash:def:exec.test-exec-fn]
 // [spec:dash:sem:exec.test-exec-fn]
@@ -774,7 +705,7 @@ pub unsafe fn changepath(newval: *const c_char) {
 
 // [spec:dash:def:exec.clearcmdentry-fn]
 // [spec:dash:sem:exec.clearcmdentry-fn]
-unsafe fn clearcmdentry() {
+pub(crate) unsafe fn clearcmdentry() {
     INTOFF();
     cmdtable_mut().retain(|_, cmdp| !cmdp.path_dependent());
     INTON();
@@ -788,7 +719,7 @@ unsafe fn clearcmdentry() {
 
 // [spec:dash:def:exec.cmdlookup-fn]
 // [spec:dash:sem:exec.cmdlookup-fn]
-unsafe fn cmdlookup(name: *const c_char, add: c_int) -> *mut tblentry {
+pub(crate) unsafe fn cmdlookup(name: *const c_char, add: c_int) -> *mut tblentry {
     let name = BStr::new(CStr::from_ptr(name).to_bytes_with_nul());
     if add != 0 {
         &mut **cmdtable_mut().entry(name.to_owned()).or_insert_with(|| {
@@ -810,7 +741,7 @@ unsafe fn cmdlookup(name: *const c_char, add: c_int) -> *mut tblentry {
 
 // [spec:dash:def:exec.delete-cmd-entry-fn]
 // [spec:dash:sem:exec.delete-cmd-entry-fn]
-unsafe fn delete_cmd_entry(name: *const c_char) {
+pub(crate) unsafe fn delete_cmd_entry(name: *const c_char) {
     INTOFF();
     /* Own the lookup key before mutating the map. This also makes deletion
      * sound if a future caller passes a pointer into the stored key itself. */
@@ -888,181 +819,6 @@ pub unsafe fn unsetfunc(name: *const c_char) {
 /*
  * Locate and print what a word is...
  */
-
-// [spec:dash:def:exec.typecmd-fn]
-// [spec:dash:sem:exec.typecmd-fn]
-pub unsafe fn typecmd(args: &[&BStr]) -> c_int {
-    let mut err: c_int = 0;
-
-    let mut opts = crate::options::Options::new(args);
-    opts.next(b"");
-    for name in opts.operands() {
-        let name = crate::shell::cstring(name);
-        err |= describe_command(crate::output::stdout(), name.as_ptr() as *mut c_char, null(), 1);
-    }
-    err
-}
-
-// [spec:dash:def:exec.describe-command-fn]
-// [spec:dash:sem:exec.describe-command-fn]
-unsafe fn describe_command(
-    out: *mut Output,
-    command: *mut c_char,
-    mut path: *const c_char,
-    verbose: c_int,
-) -> c_int {
-    let mut entry: cmdentry = cmdentry {
-        cmdtype: 0,
-        u: param { index: 0 },
-    };
-    let cmdp: *mut tblentry;
-    let ap: *const crate::alias::alias;
-
-    'out_label: {
-        if verbose != 0 {
-            let _ = (&mut *out).write_all(CStr::from_ptr(command).to_bytes());
-        }
-
-        /* First look at the keywords */
-        if !crate::parser::findkwd(command).is_null() {
-            let bytes = if verbose != 0 {
-                b" is a shell keyword" as &[u8]
-            } else {
-                CStr::from_ptr(command).to_bytes()
-            };
-            let _ = (&mut *out).write_all(bytes);
-            break 'out_label;
-        }
-
-        /* Then look at the aliases */
-        ap = crate::alias::lookupalias(command, 0);
-        if !ap.is_null() {
-            if verbose != 0 {
-                let mut record = b" is an alias for ".to_vec();
-                record.extend_from_slice(CStr::from_ptr((*ap).val).to_bytes());
-                let _ = (&mut *out).write_all(&record);
-            } else {
-                let _ = (&mut *out).write_all(b"alias ");
-                crate::alias::printalias(ap);
-                return 0;
-            }
-            break 'out_label;
-        }
-
-        /* Then if the standard search path is used, check if it is
-         * a tracked alias.
-         */
-        if path.is_null() {
-            path = crate::var::pathval();
-            cmdp = cmdlookup(command, 0);
-        } else {
-            cmdp = null_mut();
-        }
-
-        if !cmdp.is_null() {
-            (*cmdp).write_to(&mut entry);
-        } else {
-            /* Finally use brute force */
-            find_command(command, &mut entry, DO_ABS, path);
-        }
-
-        match entry.cmdtype {
-            CMDNORMAL => {
-                let mut j: c_int = entry.u.index;
-                let p: *mut c_char;
-                if j == -1 {
-                    p = command;
-                } else {
-                    loop {
-                        padvance(&mut path, command);
-                        j -= 1;
-                        if j < 0 {
-                            break;
-                        }
-                    }
-                    p = padvance_result();
-                }
-                if verbose != 0 {
-                    let mut record = b" is".to_vec();
-                    if !cmdp.is_null() {
-                        record.extend_from_slice(b" a tracked alias for");
-                    }
-                    record.push(b' ');
-                    record.extend_from_slice(CStr::from_ptr(p).to_bytes());
-                    let _ = (&mut *out).write_all(&record);
-                } else {
-                    let _ = (&mut *out).write_all(CStr::from_ptr(p).to_bytes());
-                }
-            }
-
-            CMDFUNCTION => {
-                if verbose != 0 {
-                    let _ = (&mut *out).write_all(b" is a shell function");
-                } else {
-                    let _ = (&mut *out).write_all(CStr::from_ptr(command).to_bytes());
-                }
-            }
-
-            CMDBUILTIN => {
-                if verbose != 0 {
-                    let record: &[u8] = if ((*entry.u.cmd).flags & BUILTIN_SPECIAL) != 0 {
-                        b" is a special shell builtin"
-                    } else {
-                        b" is a shell builtin"
-                    };
-                    let _ = (&mut *out).write_all(record);
-                } else {
-                    let _ = (&mut *out).write_all(CStr::from_ptr(command).to_bytes());
-                }
-            }
-
-            _ => {
-                if verbose != 0 {
-                    let _ = (&mut *out).write_all(b": not found\n");
-                }
-                return 127;
-            }
-        }
-    }
-    // out:
-    let _ = (&mut *out).write_all(b"\n");
-    0
-}
-
-// [spec:dash:def:exec.commandcmd-fn]
-// [spec:dash:sem:exec.commandcmd-fn]
-pub unsafe fn commandcmd(args: &[&BStr]) -> c_int {
-    const VERIFY_BRIEF: c_int = 1;
-    const VERIFY_VERBOSE: c_int = 2;
-    let mut verify: c_int = 0;
-    let mut path: *const c_char = null();
-
-    let mut opts = crate::options::Options::new(args);
-    while let Some(c) = opts.next(b"pvV") {
-        if c == b'V' {
-            verify |= VERIFY_VERBOSE;
-        } else if c == b'v' {
-            verify |= VERIFY_BRIEF;
-        } else {
-            /* DEBUG: `else if (c != 'p') abort();` */
-            path = crate::var::defpath();
-        }
-    }
-
-    if verify != 0 {
-        if let Some(cmd) = opts.operands().first() {
-            let cmd = crate::shell::cstring(cmd);
-            return describe_command(
-                crate::output::stdout(),
-                cmd.as_ptr() as *mut c_char,
-                path,
-                verify - VERIFY_BRIEF,
-            );
-        }
-    }
-
-    0
-}
 
 // ---------------------------------------------------------------------
 // src/exec.h declarations whose definitions live in src/bltin/test.c.

@@ -154,7 +154,7 @@ pub struct localvar_list {
 pub static mut localvar_stack: Vec<localvar_list> = Vec::new();
 
 #[inline]
-unsafe fn localvar_stack_mut() -> &'static mut Vec<localvar_list> {
+pub(crate) unsafe fn localvar_stack_mut() -> &'static mut Vec<localvar_list> {
     &mut *addr_of_mut!(localvar_stack)
 }
 
@@ -878,65 +878,9 @@ pub unsafe fn showvars(prefix: *const c_char, on: c_int, off: c_int) -> c_int {
  * The export and readonly commands.
  */
 
-// [spec:dash:def:var.exportcmd-fn]
-// [spec:dash:sem:var.exportcmd-fn]
-pub unsafe fn exportcmd(args: &[&BStr]) -> c_int {
-    let mut vp: *mut var;
-    let mut p: *const c_char;
-    /* `export` and `readonly` are one builtin telling itself apart by the
-     * word it was called as. */
-    let flag: c_int = if args[0].first() == Some(&b'r') {
-        VREADONLY
-    } else {
-        VEXPORT
-    };
-
-    let mut opts = Options::new(args);
-    let notp = opts.next(b"p").is_none();
-    let operands = opts.operands();
-    if notp && !operands.is_empty() {
-        for word in operands {
-            let word = crate::shell::cstring(word);
-            let name = word.as_ptr() as *mut c_char;
-
-            p = libc::strchr(name, b'=' as c_int);
-            if !p.is_null() {
-                p = p.add(1);
-            } else {
-                vp = findvar(name);
-                if !vp.is_null() {
-                    (*vp).flags |= flag;
-                    continue;
-                }
-            }
-            setvar(name, p, flag);
-        }
-    } else {
-        let called = crate::shell::cstring(args[0]);
-        showvars(called.as_ptr(), flag, 0);
-    }
-    0
-}
-
 /*
  * The "local" command.
  */
-
-// [spec:dash:def:var.localcmd-fn]
-// [spec:dash:sem:var.localcmd-fn]
-pub unsafe fn localcmd(args: &[&BStr]) -> c_int {
-    if localvar_stack_mut().is_empty() {
-        crate::error::sh_error(b"not in a function");
-    }
-
-    /* `local` scans no options at all, so every word after the command
-     * name is a name to localise -- including one that starts with `-`. */
-    for name in &args[1..] {
-        let name = crate::shell::cstring(name);
-        mklocal(name.as_ptr() as *mut c_char, 0);
-    }
-    0
-}
 
 /*
  * Make a variable a local variable.  When a variable is made local, it's
@@ -1097,29 +1041,6 @@ pub unsafe fn unwindlocalvars(stop: usize) {
  * with the same name.
  */
 
-// [spec:dash:def:var.unsetcmd-fn]
-// [spec:dash:sem:var.unsetcmd-fn]
-pub unsafe fn unsetcmd(args: &[&BStr]) -> c_int {
-    let mut flag: u8 = 0;
-
-    let mut opts = Options::new(args);
-    while let Some(i) = opts.next(b"vf") {
-        flag = i;
-    }
-
-    for name in opts.operands() {
-        let name = crate::shell::cstring(name);
-        if flag != b'f' {
-            unsetvar(name.as_ptr());
-            continue;
-        }
-        if flag != b'v' {
-            crate::exec::unsetfunc(name.as_ptr());
-        }
-    }
-    0
-}
-
 /*
  * Unset the specified variable.
  */
@@ -1140,7 +1061,7 @@ pub unsafe fn unsetvar(s: *const c_char) {
 /// so callers test `*result` — because that is what lets `setvareq` unlink
 /// without a second traversal. A map removes by key, so this returns the
 /// entry itself and NULL when there is none.
-unsafe fn findvar(name: *const c_char) -> *mut var {
+pub(crate) unsafe fn findvar(name: *const c_char) -> *mut var {
     match vartab_mut().get_mut(varname(name)) {
         Some(slot) => slot.as_ptr(),
         None => null_mut(),
