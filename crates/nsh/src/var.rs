@@ -25,7 +25,7 @@ use std::io::Write as _;
 
 use crate::error::{INTOFF, INTON};
 use crate::mystring::nullstr;
-use crate::options::{NOPTS, argptr, getoptsreset, nextopt, optlist, optschanged};
+use crate::options::{NOPTS, Options, getoptsreset, optlist, optschanged};
 use crate::system::strchrnul;
 
 unsafe extern "C" {
@@ -880,23 +880,25 @@ pub unsafe fn showvars(prefix: *const c_char, on: c_int, off: c_int) -> c_int {
 
 // [spec:dash:def:var.exportcmd-fn]
 // [spec:dash:sem:var.exportcmd-fn]
-pub unsafe fn exportcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn exportcmd(args: &[&BStr]) -> c_int {
     let mut vp: *mut var;
-    let mut name: *mut c_char;
     let mut p: *const c_char;
-    let mut aptr: *mut *mut c_char;
-    let flag: c_int = if **argv.offset(0) == b'r' as c_char {
+    /* `export` and `readonly` are one builtin telling itself apart by the
+     * word it was called as. */
+    let flag: c_int = if args[0].first() == Some(&b'r') {
         VREADONLY
     } else {
         VEXPORT
     };
-    let notp: c_int;
 
-    notp = nextopt(b"p\0".as_ptr() as *const c_char) - b'p' as c_int;
-    aptr = argptr;
-    name = *aptr;
-    if notp != 0 && !name.is_null() {
-        loop {
+    let mut opts = Options::new(args);
+    let notp = opts.next(b"p").is_none();
+    let operands = opts.operands();
+    if notp && !operands.is_empty() {
+        for word in operands {
+            let word = crate::shell::cstring(word);
+            let name = word.as_ptr() as *mut c_char;
+
             p = libc::strchr(name, b'=' as c_int);
             if !p.is_null() {
                 p = p.add(1);
@@ -904,24 +906,14 @@ pub unsafe fn exportcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
                 vp = findvar(name);
                 if !vp.is_null() {
                     (*vp).flags |= flag;
-                    /* continue */
-                    aptr = aptr.add(1);
-                    name = *aptr;
-                    if name.is_null() {
-                        break;
-                    }
                     continue;
                 }
             }
             setvar(name, p, flag);
-            aptr = aptr.add(1);
-            name = *aptr;
-            if name.is_null() {
-                break;
-            }
         }
     } else {
-        showvars(*argv.offset(0), flag, 0);
+        let called = crate::shell::cstring(args[0]);
+        showvars(called.as_ptr(), flag, 0);
     }
     0
 }
@@ -932,21 +924,16 @@ pub unsafe fn exportcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
 // [spec:dash:def:var.localcmd-fn]
 // [spec:dash:sem:var.localcmd-fn]
-pub unsafe fn localcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
-    let mut name: *mut c_char;
-
+pub unsafe fn localcmd(args: &[&BStr]) -> c_int {
     if localvar_stack_mut().is_empty() {
         crate::error::sh_error(b"not in a function");
     }
 
-    argv = argptr;
-    loop {
-        name = *argv;
-        argv = argv.add(1);
-        if name.is_null() {
-            break;
-        }
-        mklocal(name, 0);
+    /* `local` scans no options at all, so every word after the command
+     * name is a name to localise -- including one that starts with `-`. */
+    for name in &args[1..] {
+        let name = crate::shell::cstring(name);
+        mklocal(name.as_ptr() as *mut c_char, 0);
     }
     0
 }
@@ -1112,30 +1099,23 @@ pub unsafe fn unwindlocalvars(stop: usize) {
 
 // [spec:dash:def:var.unsetcmd-fn]
 // [spec:dash:sem:var.unsetcmd-fn]
-pub unsafe fn unsetcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
-    let mut ap: *mut *mut c_char;
-    let mut i: c_int;
-    let mut flag: c_int = 0;
+pub unsafe fn unsetcmd(args: &[&BStr]) -> c_int {
+    let mut flag: u8 = 0;
 
-    loop {
-        i = nextopt(b"vf\0".as_ptr() as *const c_char);
-        if i == b'\0' as c_int {
-            break;
-        }
+    let mut opts = Options::new(args);
+    while let Some(i) = opts.next(b"vf") {
         flag = i;
     }
 
-    ap = argptr;
-    while !(*ap).is_null() {
-        if flag != b'f' as c_int {
-            unsetvar(*ap);
-            ap = ap.add(1);
+    for name in opts.operands() {
+        let name = crate::shell::cstring(name);
+        if flag != b'f' {
+            unsetvar(name.as_ptr());
             continue;
         }
-        if flag != b'v' as c_int {
-            crate::exec::unsetfunc(*ap);
+        if flag != b'v' {
+            crate::exec::unsetfunc(name.as_ptr());
         }
-        ap = ap.add(1);
     }
     0
 }

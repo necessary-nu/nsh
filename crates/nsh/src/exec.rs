@@ -386,22 +386,18 @@ pub unsafe fn padvance(path: &mut *const c_char, name: *const c_char) -> c_int {
 
 // [spec:dash:def:exec.hashcmd-fn]
 // [spec:dash:sem:exec.hashcmd-fn]
-pub unsafe fn hashcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn hashcmd(args: &[&BStr]) -> c_int {
     let mut cmdp: *mut tblentry;
     let mut c: c_int;
     let mut entry: cmdentry = cmdentry {
         cmdtype: 0,
         u: param { index: 0 },
     };
-    let mut name: *mut c_char;
     let mut clear: bool;
 
     clear = false;
-    loop {
-        c = crate::options::nextopt(b"r\0".as_ptr() as *const c_char);
-        if c == 0 {
-            break;
-        }
+    let mut opts = crate::options::Options::new(args);
+    while opts.next(b"r").is_some() {
         clear = true;
     }
     if clear {
@@ -409,7 +405,8 @@ pub unsafe fn hashcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         return 0;
     }
 
-    if (*crate::options::argptr).is_null() {
+    let operands = opts.operands();
+    if operands.is_empty() {
         for (name, cmdp) in cmdtable_mut().iter() {
             if cmdp.cmdtype() == CMDNORMAL {
                 printentry(BStr::new(name.as_slice()), cmdp);
@@ -418,11 +415,9 @@ pub unsafe fn hashcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         return 0;
     }
     c = 0;
-    loop {
-        name = *crate::options::argptr;
-        if name.is_null() {
-            break;
-        }
+    for name in operands {
+        let name = crate::shell::cstring(name);
+        let name = name.as_ptr() as *mut c_char;
         cmdp = cmdlookup(name, 0);
         if !cmdp.is_null() && (*cmdp).path_dependent() {
             delete_cmd_entry(name);
@@ -431,7 +426,6 @@ pub unsafe fn hashcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         if entry.cmdtype == CMDUNKNOWN {
             c = 1;
         }
-        crate::options::argptr = crate::options::argptr.add(1);
     }
     c
 }
@@ -897,14 +891,14 @@ pub unsafe fn unsetfunc(name: *const c_char) {
 
 // [spec:dash:def:exec.typecmd-fn]
 // [spec:dash:sem:exec.typecmd-fn]
-pub unsafe fn typecmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn typecmd(args: &[&BStr]) -> c_int {
     let mut err: c_int = 0;
 
-    crate::options::nextopt((core::ptr::addr_of!(crate::shell::nullstr) as *const c_char));
-    while !(*crate::options::argptr).is_null() {
-        let p = *crate::options::argptr;
-        crate::options::argptr = crate::options::argptr.add(1);
-        err |= describe_command(crate::output::stdout(), p, null(), 1);
+    let mut opts = crate::options::Options::new(args);
+    opts.next(b"");
+    for name in opts.operands() {
+        let name = crate::shell::cstring(name);
+        err |= describe_command(crate::output::stdout(), name.as_ptr() as *mut c_char, null(), 1);
     }
     err
 }
@@ -1037,22 +1031,17 @@ unsafe fn describe_command(
 
 // [spec:dash:def:exec.commandcmd-fn]
 // [spec:dash:sem:exec.commandcmd-fn]
-pub unsafe fn commandcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
-    let cmd: *mut c_char;
-    let mut c: c_int;
+pub unsafe fn commandcmd(args: &[&BStr]) -> c_int {
     const VERIFY_BRIEF: c_int = 1;
     const VERIFY_VERBOSE: c_int = 2;
     let mut verify: c_int = 0;
     let mut path: *const c_char = null();
 
-    loop {
-        c = crate::options::nextopt(b"pvV\0".as_ptr() as *const c_char);
-        if c == 0 {
-            break;
-        }
-        if c == 'V' as c_int {
+    let mut opts = crate::options::Options::new(args);
+    while let Some(c) = opts.next(b"pvV") {
+        if c == b'V' {
             verify |= VERIFY_VERBOSE;
-        } else if c == 'v' as c_int {
+        } else if c == b'v' {
             verify |= VERIFY_BRIEF;
         } else {
             /* DEBUG: `else if (c != 'p') abort();` */
@@ -1060,9 +1049,16 @@ pub unsafe fn commandcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         }
     }
 
-    cmd = *crate::options::argptr;
-    if verify != 0 && !cmd.is_null() {
-        return describe_command(crate::output::stdout(), cmd, path, verify - VERIFY_BRIEF);
+    if verify != 0 {
+        if let Some(cmd) = opts.operands().first() {
+            let cmd = crate::shell::cstring(cmd);
+            return describe_command(
+                crate::output::stdout(),
+                cmd.as_ptr() as *mut c_char,
+                path,
+                verify - VERIFY_BRIEF,
+            );
+        }
     }
 
     0
