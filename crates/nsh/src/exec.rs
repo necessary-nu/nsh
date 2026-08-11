@@ -24,12 +24,13 @@ use core::ptr::{addr_of, addr_of_mut, null, null_mut};
 use libc::{c_char, c_int, size_t};
 use std::collections::BTreeMap;
 use std::ffi::CStr;
+use std::io::Write as _;
 use std::rc::Rc;
 
-use crate::builtins::{builtincmd, BUILTIN_REGULAR, BUILTIN_SPECIAL};
+use crate::builtins::{BUILTIN_REGULAR, BUILTIN_SPECIAL, builtincmd};
 use crate::error::{E_EXEC, INTOFF, INTON};
-use crate::nodes::{funcnode, Node};
-use crate::output::{out1, output};
+use crate::nodes::{Node, funcnode};
+use crate::output::Output;
 
 // ---------------------------------------------------------------------
 // src/exec.h constants
@@ -208,12 +209,11 @@ pub unsafe fn shellexec(argv: *mut *mut c_char, path: *const c_char, mut idx: c_
     }
     crate::eval::exitstatus = exerrno;
     /* TRACE(("shellexec failed for %s, errno %d, suppressint %d\n", ...)); */
-    crate::exerror!(
-        crate::error::EXEND,
-        b"%s: %s\0".as_ptr() as *const c_char,
-        *argv.offset(0),
-        crate::error::errmsg(e, E_EXEC)
-    );
+    let mut message = Vec::new();
+    message.extend_from_slice(CStr::from_ptr(*argv.offset(0)).to_bytes());
+    message.extend_from_slice(b": ");
+    message.extend_from_slice(CStr::from_ptr(crate::error::errmsg(e, E_EXEC)).to_bytes());
+    crate::error::exerror(crate::error::EXEND, &message);
     /* NOTREACHED */
 }
 
@@ -453,15 +453,10 @@ unsafe fn printentry(name: &BStr, cmdp: &tblentry) {
         }
     }
     fullname = padvance_result();
-    crate::output::out1str(fullname);
-    crate::out1fmt!(
-        (core::ptr::addr_of!(crate::mystring::snlfmt) as *const c_char),
-        if cmdp.rehash {
-            b"*\0".as_ptr() as *const c_char
-        } else {
-            (core::ptr::addr_of!(crate::shell::nullstr) as *const c_char)
-        }
-    );
+    let output = &mut *crate::output::stdout();
+    let _ = output.write_all(CStr::from_ptr(fullname).to_bytes());
+    let suffix: &[u8] = if cmdp.rehash { b"*\n" } else { b"\n" };
+    let _ = output.write_all(suffix);
 }
 
 // [spec:dash:def:exec.test-exec-fn]
@@ -653,11 +648,11 @@ pub unsafe fn find_command(
                         crate::shellmain::readcmdfile(fullname);
                         cmdp = cmdlookup(name, 0);
                         if cmdp.is_null() || (*cmdp).cmdtype() != CMDFUNCTION {
-                            crate::sh_error!(
-                                b"%s not defined in %s\0".as_ptr() as *const c_char,
-                                name,
-                                fullname
-                            );
+                            let mut message = Vec::new();
+                            message.extend_from_slice(CStr::from_ptr(name).to_bytes());
+                            message.extend_from_slice(b" not defined in ");
+                            message.extend_from_slice(CStr::from_ptr(fullname).to_bytes());
+                            crate::error::sh_error(&message);
                         }
                         break 'success;
                     }
@@ -683,11 +678,13 @@ pub unsafe fn find_command(
                     delete_cmd_entry(name);
                 }
                 if (act & DO_ERR) != 0 {
-                    crate::sh_warnx!(
-                        b"%s: %s\0".as_ptr() as *const c_char,
-                        name,
-                        crate::error::errmsg(e, E_EXEC)
+                    let mut message = Vec::new();
+                    message.extend_from_slice(CStr::from_ptr(name).to_bytes());
+                    message.extend_from_slice(b": ");
+                    message.extend_from_slice(
+                        CStr::from_ptr(crate::error::errmsg(e, E_EXEC)).to_bytes(),
                     );
+                    crate::error::sh_warnx(&message);
                 }
                 // fall through into fail:
             }
@@ -907,7 +904,7 @@ pub unsafe fn typecmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     while !(*crate::options::argptr).is_null() {
         let p = *crate::options::argptr;
         crate::options::argptr = crate::options::argptr.add(1);
-        err |= describe_command(out1, p, null(), 1);
+        err |= describe_command(crate::output::stdout(), p, null(), 1);
     }
     err
 }
@@ -915,7 +912,7 @@ pub unsafe fn typecmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 // [spec:dash:def:exec.describe-command-fn]
 // [spec:dash:sem:exec.describe-command-fn]
 unsafe fn describe_command(
-    out: *mut output,
+    out: *mut Output,
     command: *mut c_char,
     mut path: *const c_char,
     verbose: c_int,
@@ -929,19 +926,17 @@ unsafe fn describe_command(
 
     'out_label: {
         if verbose != 0 {
-            crate::output::outstr(command, out);
+            let _ = (&mut *out).write_all(CStr::from_ptr(command).to_bytes());
         }
 
         /* First look at the keywords */
         if !crate::parser::findkwd(command).is_null() {
-            crate::output::outstr(
-                if verbose != 0 {
-                    b" is a shell keyword\0".as_ptr() as *const c_char
-                } else {
-                    command as *const c_char
-                },
-                out,
-            );
+            let bytes = if verbose != 0 {
+                b" is a shell keyword" as &[u8]
+            } else {
+                CStr::from_ptr(command).to_bytes()
+            };
+            let _ = (&mut *out).write_all(bytes);
             break 'out_label;
         }
 
@@ -949,13 +944,11 @@ unsafe fn describe_command(
         ap = crate::alias::lookupalias(command, 0);
         if !ap.is_null() {
             if verbose != 0 {
-                crate::outfmt!(
-                    out,
-                    b" is an alias for %s\0".as_ptr() as *const c_char,
-                    (*ap).val
-                );
+                let mut record = b" is an alias for ".to_vec();
+                record.extend_from_slice(CStr::from_ptr((*ap).val).to_bytes());
+                let _ = (&mut *out).write_all(&record);
             } else {
-                crate::output::outstr(b"alias \0".as_ptr() as *const c_char, out);
+                let _ = (&mut *out).write_all(b"alias ");
                 crate::alias::printalias(ap);
                 return 0;
             }
@@ -996,55 +989,49 @@ unsafe fn describe_command(
                     p = padvance_result();
                 }
                 if verbose != 0 {
-                    crate::outfmt!(
-                        out,
-                        b" is%s %s\0".as_ptr() as *const c_char,
-                        if !cmdp.is_null() {
-                            b" a tracked alias for\0".as_ptr() as *const c_char
-                        } else {
-                            (core::ptr::addr_of!(crate::shell::nullstr) as *const c_char)
-                        },
-                        p
-                    );
+                    let mut record = b" is".to_vec();
+                    if !cmdp.is_null() {
+                        record.extend_from_slice(b" a tracked alias for");
+                    }
+                    record.push(b' ');
+                    record.extend_from_slice(CStr::from_ptr(p).to_bytes());
+                    let _ = (&mut *out).write_all(&record);
                 } else {
-                    crate::output::outstr(p, out);
+                    let _ = (&mut *out).write_all(CStr::from_ptr(p).to_bytes());
                 }
             }
 
             CMDFUNCTION => {
                 if verbose != 0 {
-                    crate::output::outstr(b" is a shell function\0".as_ptr() as *const c_char, out);
+                    let _ = (&mut *out).write_all(b" is a shell function");
                 } else {
-                    crate::output::outstr(command, out);
+                    let _ = (&mut *out).write_all(CStr::from_ptr(command).to_bytes());
                 }
             }
 
             CMDBUILTIN => {
                 if verbose != 0 {
-                    crate::outfmt!(
-                        out,
-                        b" is a %sshell builtin\0".as_ptr() as *const c_char,
-                        if ((*entry.u.cmd).flags & BUILTIN_SPECIAL) != 0 {
-                            b"special \0".as_ptr() as *const c_char
-                        } else {
-                            (core::ptr::addr_of!(crate::shell::nullstr) as *const c_char)
-                        }
-                    );
+                    let record: &[u8] = if ((*entry.u.cmd).flags & BUILTIN_SPECIAL) != 0 {
+                        b" is a special shell builtin"
+                    } else {
+                        b" is a shell builtin"
+                    };
+                    let _ = (&mut *out).write_all(record);
                 } else {
-                    crate::output::outstr(command, out);
+                    let _ = (&mut *out).write_all(CStr::from_ptr(command).to_bytes());
                 }
             }
 
             _ => {
                 if verbose != 0 {
-                    crate::output::outstr(b": not found\n\0".as_ptr() as *const c_char, out);
+                    let _ = (&mut *out).write_all(b": not found\n");
                 }
                 return 127;
             }
         }
     }
     // out:
-    crate::output::outc('\n' as c_int, out);
+    let _ = (&mut *out).write_all(b"\n");
     0
 }
 
@@ -1075,7 +1062,7 @@ pub unsafe fn commandcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
     cmd = *crate::options::argptr;
     if verify != 0 && !cmd.is_null() {
-        return describe_command(out1, cmd, path, verify - VERIFY_BRIEF);
+        return describe_command(crate::output::stdout(), cmd, path, verify - VERIFY_BRIEF);
     }
 
     0

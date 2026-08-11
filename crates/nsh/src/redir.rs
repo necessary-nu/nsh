@@ -1,15 +1,13 @@
 //! Literal port of `src/redir.c` / `src/redir.h`.
 //! Rules: `docs/spec/port/src/redir.md`.
 
-use libc::{c_char, c_int, c_uint, c_void, size_t};
 use core::ptr::{addr_of_mut, null_mut};
+use libc::{c_char, c_int, c_uint, c_void, size_t};
+use std::ffi::CStr;
+use std::io::Write;
 
-use crate::error::{jmploc, INTOFF, INTON};
-use crate::output::VaArg;
-use crate::shell::cstr;
-use crate::nodes::{
-    Node, NAPPEND, NCLOBBER, NFROM, NFROMFD, NFROMTO, NTO, NTOFD, NXHERE,
-};
+use crate::error::{INTOFF, INTON, jmploc};
+use crate::nodes::{NAPPEND, NCLOBBER, NFROM, NFROMFD, NFROMTO, NTO, NTOFD, NXHERE, Node};
 
 /* flags passed to redirect (redir.h) */
 pub const REDIR_PUSH: c_int = 0o1; /* save previous values of file descriptors */
@@ -163,7 +161,7 @@ pub unsafe fn redirect(redir: &[Node], flags: c_int) {
         if let Some(svi) = sv {
             let renamed = redirlist_mut()[svi].renamed;
             if (serr as usize) < renamed.len() && renamed[serr as usize] >= 0 {
-                crate::output::preverrout.fd = renamed[serr as usize];
+                (*crate::output::previous_stderr()).fd = renamed[serr as usize];
             }
         }
     }
@@ -182,14 +180,13 @@ unsafe fn sh_open_fail(pathname: *const c_char, flags: c_int, e: c_int) -> ! {
         action = crate::error::E_CREAT;
     }
 
-    crate::error::sh_error(
-        cstr(b"cannot %s %s: %s\0"),
-        &[
-            VaArg::Str(word),
-            VaArg::Str(pathname),
-            VaArg::Str(crate::error::errmsg(e, action)),
-        ],
-    )
+    let mut message = b"cannot ".to_vec();
+    message.extend_from_slice(CStr::from_ptr(word).to_bytes());
+    message.push(b' ');
+    message.extend_from_slice(CStr::from_ptr(pathname).to_bytes());
+    message.extend_from_slice(b": ");
+    message.extend_from_slice(CStr::from_ptr(crate::error::errmsg(e, action)).to_bytes());
+    crate::error::sh_error(&message)
 }
 
 // [spec:dash:def:redir.sh-open-fn]
@@ -316,10 +313,11 @@ unsafe fn sh_dup2(ofd: c_int, nfd: c_int, cfd: c_int) -> c_int {
         libc::close(cfd);
     }
     if nfd < 0 {
-        crate::error::sh_error(
-            cstr(b"%d: %s\0"),
-            &[VaArg::Int(ofd), VaArg::Str(libc::strerror(errno()))],
-        );
+        let mut message = Vec::new();
+        write!(&mut message, "{}", ofd).expect("writing to a Vec cannot fail");
+        message.extend_from_slice(b": ");
+        message.extend_from_slice(CStr::from_ptr(libc::strerror(errno())).to_bytes());
+        crate::error::sh_error(&message);
     }
 
     nfd
@@ -360,7 +358,7 @@ pub unsafe fn sh_pipe(pip: *mut c_int, memfd: c_int) -> c_int {
     }
 
     if libc::pipe(pip) < 0 {
-        crate::error::sh_error(cstr(b"Pipe call failed\0"), &[]);
+        crate::error::sh_error(b"Pipe call failed");
     }
 
     0
@@ -513,10 +511,11 @@ pub unsafe fn savefd(from: c_int, ofd: c_int) -> c_int {
     if err != libc::EBADF {
         libc::close(ofd);
         if err != 0 {
-            crate::error::sh_error(
-                cstr(b"%d: %s\0"),
-                &[VaArg::Int(from), VaArg::Str(libc::strerror(err))],
-            );
+            let mut message = Vec::new();
+            write!(&mut message, "{}", from).expect("writing to a Vec cannot fail");
+            message.extend_from_slice(b": ");
+            message.extend_from_slice(CStr::from_ptr(libc::strerror(err)).to_bytes());
+            crate::error::sh_error(&message);
         } else if HAVE_F_DUPFD_CLOEXEC == 0 {
             libc::fcntl(newfd, libc::F_SETFD, libc::FD_CLOEXEC);
         }

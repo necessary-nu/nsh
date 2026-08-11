@@ -124,8 +124,7 @@ pub unsafe fn set(s: Streams) {
     // streams rather than the numbers. Doing it here rather than in an
     // init fragment means there is no window in which the buffers point
     // somewhere the caller did not ask for.
-    crate::output::output.fd = s.stdout;
-    crate::output::errout.fd = s.stderr;
+    crate::output::set_stream_fds(s.stdout, s.stderr);
 }
 
 /// The host's descriptors 0, 1 and 2, saved so [`restore`] can put them
@@ -328,10 +327,10 @@ mod tests {
                 stdout: 8,
                 stderr: 9,
             });
-            let (out, err) = (crate::output::output.fd, crate::output::errout.fd);
+            let (out, err) = ((*crate::output::stdout()).fd, (*crate::output::stderr()).fd);
             assert_eq!((out, err), (8, 9));
             set(Streams::INHERIT);
-            let (out, err) = (crate::output::output.fd, crate::output::errout.fd);
+            let (out, err) = ((*crate::output::stdout()).fd, (*crate::output::stderr()).fd);
             assert_eq!((out, err), (1, 2));
         }
     }

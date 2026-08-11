@@ -1,11 +1,12 @@
 //! Literal port of `src/mail.c` / `src/mail.h`.
 //! Rules: `docs/spec/port/src/mail.md`.
 
-use libc::{c_char, c_int, time_t};
 use core::ptr::{addr_of, addr_of_mut};
+use libc::{c_char, c_int, time_t};
+use std::ffi::CStr;
+use std::io::Write;
 
 use crate::mystring::nullstr;
-use crate::output::VaArg;
 use crate::var::{mailval, mpathset, mpathval};
 
 const MAXMBOXES: usize = 10;
@@ -30,16 +31,16 @@ pub unsafe fn chkmail() {
 
     /* `setstackmark`/`popstackmark` bounded the candidate paths
      * `padvance` built in the region; it builds them in its own buffer. */
-    mpath = if mpathset() != 0 { mpathval() } else { mailval() };
+    mpath = if mpathset() != 0 {
+        mpathval()
+    } else {
+        mailval()
+    };
     mtp = addr_of_mut!(mailtime) as *mut time_t;
     while mtp < (addr_of_mut!(mailtime) as *mut time_t).add(MAXMBOXES) {
         let len: c_int;
 
-        len = crate::exec::padvance_magic(
-            &mut mpath,
-            addr_of!(nullstr) as *const c_char,
-            2,
-        );
+        len = crate::exec::padvance_magic(&mut mpath, addr_of!(nullstr) as *const c_char, 2);
         if len < 0 {
             break;
         }
@@ -62,15 +63,14 @@ pub unsafe fn chkmail() {
             continue;
         }
         if changed == 0 && statb.st_mtime != *mtp {
-            crate::output::outfmt(
-                addr_of_mut!(crate::output::errout),
-                addr_of!(crate::mystring::snlfmt) as *const c_char,
-                &[VaArg::Str(if !crate::exec::pathopt.is_null() {
-                    crate::exec::pathopt
-                } else {
-                    crate::shell::cstr(b"you have mail\0")
-                })],
-            );
+            let text = if !crate::exec::pathopt.is_null() {
+                crate::exec::pathopt
+            } else {
+                crate::shell::cstr(b"you have mail\0")
+            };
+            let mut message = CStr::from_ptr(text).to_bytes().to_vec();
+            message.push(b'\n');
+            let _ = (*crate::output::stderr()).write_all(&message);
         }
         *mtp = statb.st_mtime;
         mtp = mtp.add(1);

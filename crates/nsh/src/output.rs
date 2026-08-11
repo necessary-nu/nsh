@@ -14,30 +14,21 @@
 //! The C output cursor triplet (`buf`, `nextc`, `end`) becomes an owned
 //! `Option<Vec<u8>>`. `None` preserves the pre-allocation state needed by
 //! `outmem`'s exact-fill rule; `Vec::len` is the pending range and `bufsize`
-//! remains the logical limit. The global `output` objects themselves retain
-//! stable addresses for `out1` and `out2`.
+//! remains the logical limit.
 //!
-//! Stable Rust cannot *define* a C-variadic function and cannot build a
-//! `va_list`.  Every `...` parameter in `output.h` therefore becomes a
-//! `&[VaArg]` slice, `va_list` is that slice, `va_start`/`va_end`
-//! disappear and `va_copy` is a copy of the slice reference (which is
-//! exactly the semantics `xvasprintf` needs: a second, independent pass
-//! over the same arguments).
-//!
-//! Because there is no `va_list` to hand to libc, `vsnprintf` itself is
-//! re-implemented in `c_vsnprintf` below: it walks the format string and
-//! renders each individual conversion by calling libc `snprintf` with a
-//! one-conversion format and a single, correctly typed argument.  That
-//! keeps C's exact padding/precision/`%j`/`%z` behaviour without a
-//! hand-written number formatter.
+//! The three destinations are fields of [`ShellIo`], the unit that moves
+//! onto `Shell` when the remaining ambient state is threaded. `stdout()` and
+//! its siblings are temporary raw-pointer accessors for the still-literal
+//! callers; unlike the old `out1`/`out2` pointer statics they cannot carry a
+//! second, independently mutable view of which destination is selected.
 
 use core::ptr::addr_of_mut;
+use std::io::{self, Write};
 
-use libc::{c_char, c_double, c_int, c_long, c_longlong, c_uint, c_ulong, c_ulonglong, c_void,
-           size_t};
+use libc::{c_char, c_int, c_void, size_t};
 
 use crate::error::{INTOFF, INTON};
-use crate::shell::{cstr, likely};
+use crate::shell::likely;
 
 const OUTBUFSIZ: size_t = 8192; /* BUFSIZ */
 pub const MEM_OUT: c_int = -3; /* output to dynamically allocated memory */
@@ -45,7 +36,7 @@ pub const MEM_OUT: c_int = -3; /* output to dynamically allocated memory */
 pub const OUTPUT_ERR: c_int = 0o1; /* error occurred on output */
 
 // [spec:dash:def:output.output]
-pub struct output {
+pub struct Output {
     /// Optional pending-output storage. `None` preserves dash's lazy
     /// allocation state; `Some(_)` is the initialized buffer state.
     pub buf: Option<Vec<u8>>,
@@ -54,245 +45,148 @@ pub struct output {
     pub flags: c_int,
 }
 
-pub static mut output: output = output {
-    buf: None,
-    bufsize: OUTBUFSIZ,
-    fd: 1,
-    flags: 0,
-};
-pub static mut errout: output = output {
-    buf: None,
-    bufsize: 0,
-    fd: 2,
-    flags: 0,
-};
-pub static mut preverrout: output = output {
-    buf: None,
-    bufsize: 0,
-    fd: 0,
-    flags: 0,
-};
+impl Output {
+    const fn new(fd: c_int, bufsize: size_t) -> Self {
+        Self {
+            buf: None,
+            bufsize,
+            fd,
+            flags: 0,
+        }
+    }
+
+    fn remember_error<T>(&mut self, result: io::Result<T>) -> io::Result<T> {
+        if result.is_err() {
+            self.flags |= OUTPUT_ERR;
+        }
+        result
+    }
+
+    fn write_bytes(&mut self, bytes: &[u8]) -> io::Result<()> {
+        if bytes.is_empty() {
+            return Ok(());
+        }
+
+        let mut nleft = self
+            .buf
+            .as_ref()
+            .map_or(0, |buf| self.bufsize.saturating_sub(buf.len()));
+        if likely(nleft >= bytes.len()) {
+            self.buf.as_mut().unwrap().extend_from_slice(bytes);
+            return Ok(());
+        }
+
+        let mut first_error = None;
+        if self.bufsize == 0 {
+            /* unbuffered — fall through to the direct write */
+        } else if self.buf.is_none() {
+            /* The inactive MEM_OUT growth branches from the C do not apply
+             * to any shipped configuration. */
+            unsafe { INTOFF() };
+            self.buf = Some(Vec::with_capacity(self.bufsize));
+            unsafe { INTON() };
+        } else if let Err(error) = self.flush() {
+            first_error = Some(error);
+        }
+
+        nleft = self
+            .buf
+            .as_ref()
+            .map_or(0, |buf| self.bufsize.saturating_sub(buf.len()));
+        /* This second comparison is deliberately strict. The first write
+         * into a lazily allocated buffer bypasses it when it would exactly
+         * fill the buffer; an already allocated buffer uses the `>=` fast
+         * path above. */
+        if nleft > bytes.len() {
+            self.buf.as_mut().unwrap().extend_from_slice(bytes);
+        } else if let Err(error) = self.remember_error(write_fd(bytes, self.fd)) {
+            if first_error.is_none() {
+                first_error = Some(error);
+            }
+        }
+
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    fn discard(&mut self) {
+        if let Some(buf) = self.buf.as_mut() {
+            buf.clear();
+        }
+        self.flags = 0;
+    }
+}
+
+/// The shell's three output destinations.
+///
+/// This is one field in the designed `Shell`; keeping the aggregate intact
+/// here makes moving it onto that instance a move rather than another output
+/// rewrite.
+pub struct ShellIo {
+    stdout: Output,
+    stderr: Output,
+    previous_stderr: Output,
+}
+
+impl ShellIo {
+    pub(crate) const fn new(stdout_fd: c_int, stderr_fd: c_int) -> Self {
+        Self {
+            stdout: Output::new(stdout_fd, OUTBUFSIZ),
+            stderr: Output::new(stderr_fd, 0),
+            previous_stderr: Output::new(0, 0),
+        }
+    }
+
+    pub(crate) fn stdout(&mut self) -> &mut Output {
+        &mut self.stdout
+    }
+
+    pub(crate) fn stderr(&mut self) -> &mut Output {
+        &mut self.stderr
+    }
+
+    pub(crate) fn previous_stderr(&mut self) -> &mut Output {
+        &mut self.previous_stderr
+    }
+}
+
+// The surrounding shell still has ambient state. `move-state` moves this
+// already-owned aggregate onto the concrete Shell instance after
+// `thread-context` makes that instance reachable at every call site.
+static mut SHELL_IO: ShellIo = ShellIo::new(1, 2);
+
+/// The shell's buffered standard-output writer.
+#[inline]
+pub unsafe fn stdout() -> *mut Output {
+    addr_of_mut!(SHELL_IO.stdout)
+}
+
+/// The shell's unbuffered standard-error writer.
+#[inline]
+pub unsafe fn stderr() -> *mut Output {
+    addr_of_mut!(SHELL_IO.stderr)
+}
+
+/// The saved standard-error writer used by `set -x` across redirection.
+#[inline]
+pub unsafe fn previous_stderr() -> *mut Output {
+    addr_of_mut!(SHELL_IO.previous_stderr)
+}
+
+/// Point the shell-owned writers at the descriptors supplied by its host.
+#[inline]
+pub unsafe fn set_stream_fds(stdout_fd: c_int, stderr_fd: c_int) {
+    (*stdout()).fd = stdout_fd;
+    (*stderr()).fd = stderr_fd;
+}
+
 /*
  * #ifdef notyet
  * struct output memout = { .fd = MEM_OUT, ... };
  * #endif
  */
-pub static mut out1: *mut output = addr_of_mut!(output);
-pub static mut out2: *mut output = addr_of_mut!(errout);
-
-/* ------------------------------------------------------------------ */
-/* varargs stand-in                                                    */
-/* ------------------------------------------------------------------ */
-
-/*
- * One promoted C variadic argument.  The variant selects the type the
- * value is passed to libc `snprintf` as, and hence the length modifier
- * the rebuilt conversion carries.
- */
-#[derive(Copy, Clone)]
-pub enum VaArg {
-    Int(c_int),
-    Uint(c_uint),
-    Long(c_long),
-    Ulong(c_ulong),
-    LongLong(c_longlong),
-    Ulonglong(c_ulonglong),
-    Intmax(libc::intmax_t),
-    Uintmax(libc::uintmax_t),
-    Size(size_t),
-    Double(c_double),
-    Char(c_int),
-    Str(*const c_char),
-    Ptr(*const c_void),
-}
-
-/* `va_list` — see the module comment. */
-pub type va_list<'a> = &'a [VaArg];
-
-macro_rules! snp {
-    ($f:expr, $v:expr, $out:expr) => {{
-        let n = libc::snprintf(core::ptr::null_mut(), 0, $f, $v);
-        if n > 0 {
-            let mut b: Vec<u8> = vec![0u8; n as usize + 1];
-            let _ = libc::snprintf(b.as_mut_ptr() as *mut c_char, n as usize + 1, $f, $v);
-            b.truncate(n as usize);
-            $out.extend_from_slice(&b);
-        }
-    }};
-}
-
-/* Take the next argument, or a zero if the caller supplied too few (C
- * reads garbage off the stack in that case; a zero is the closest
- * defined behaviour). */
-fn take_arg(ap: &[VaArg], argi: &mut usize) -> VaArg {
-    if *argi < ap.len() {
-        let a = ap[*argi];
-        *argi += 1;
-        a
-    } else {
-        VaArg::Int(0)
-    }
-}
-
-/* `*` width / `.*` precision arguments are plain ints. */
-fn take_int(ap: &[VaArg], argi: &mut usize) -> c_int {
-    match take_arg(ap, argi) {
-        VaArg::Int(v) => v,
-        VaArg::Uint(v) => v as c_int,
-        VaArg::Long(v) => v as c_int,
-        VaArg::Ulong(v) => v as c_int,
-        VaArg::LongLong(v) => v as c_int,
-        VaArg::Ulonglong(v) => v as c_int,
-        VaArg::Intmax(v) => v as c_int,
-        VaArg::Uintmax(v) => v as c_int,
-        VaArg::Size(v) => v as c_int,
-        VaArg::Char(v) => v,
-        _ => 0,
-    }
-}
-
-/* Render one conversion.  `prefix` is `%` plus flags, width and
- * precision; the length modifier is regenerated from the argument's own
- * type so the libc call is always type-correct. */
-unsafe fn format_one(prefix: &[u8], conv: u8, arg: VaArg, out: &mut Vec<u8>) {
-    let mut spec: Vec<u8> = prefix.to_vec();
-    match arg {
-        VaArg::Long(_) | VaArg::Ulong(_) => spec.push(b'l'),
-        VaArg::LongLong(_) | VaArg::Ulonglong(_) => spec.extend_from_slice(b"ll"),
-        VaArg::Intmax(_) | VaArg::Uintmax(_) => spec.push(b'j'),
-        VaArg::Size(_) => spec.push(b'z'),
-        _ => {}
-    }
-    spec.push(conv);
-    spec.push(0);
-    let f = spec.as_ptr() as *const c_char;
-    match arg {
-        VaArg::Int(v) => snp!(f, v, out),
-        VaArg::Uint(v) => snp!(f, v, out),
-        VaArg::Long(v) => snp!(f, v, out),
-        VaArg::Ulong(v) => snp!(f, v, out),
-        VaArg::LongLong(v) => snp!(f, v, out),
-        VaArg::Ulonglong(v) => snp!(f, v, out),
-        VaArg::Intmax(v) => snp!(f, v, out),
-        VaArg::Uintmax(v) => snp!(f, v, out),
-        VaArg::Size(v) => snp!(f, v, out),
-        VaArg::Double(v) => snp!(f, v, out),
-        VaArg::Char(v) => snp!(f, v, out),
-        VaArg::Str(v) => snp!(f, v, out),
-        VaArg::Ptr(v) => snp!(f, v, out),
-    }
-}
-
-/*
- * Stand-in for libc `vsnprintf` over the ported `va_list`.  Same
- * contract: write at most `length` bytes including the terminating NUL,
- * return the number of characters the full result would need.
- */
-unsafe fn c_vsnprintf(
-    outbuf: *mut c_char,
-    length: size_t,
-    fmt: *const c_char,
-    ap: &[VaArg],
-) -> c_int {
-    let mut out: Vec<u8> = Vec::new();
-    let mut argi: usize = 0;
-    let mut f = fmt;
-
-    while *f != 0 {
-        let c = *f as u8;
-        if c != b'%' {
-            out.push(c);
-            f = f.add(1);
-            continue;
-        }
-        f = f.add(1);
-
-        let mut spec: Vec<u8> = Vec::new();
-        spec.push(b'%');
-
-        /* flags */
-        loop {
-            let cc = *f as u8;
-            if cc == b'-' || cc == b'+' || cc == b' ' || cc == b'#' || cc == b'0' || cc == b'\'' {
-                spec.push(cc);
-                f = f.add(1);
-            } else {
-                break;
-            }
-        }
-
-        /* field width */
-        if *f as u8 == b'*' {
-            f = f.add(1);
-            let w = take_int(ap, &mut argi);
-            spec.extend_from_slice(format!("{}", w).as_bytes());
-        } else {
-            while (*f as u8).is_ascii_digit() {
-                spec.push(*f as u8);
-                f = f.add(1);
-            }
-        }
-
-        /* precision */
-        if *f as u8 == b'.' {
-            f = f.add(1);
-            if *f as u8 == b'*' {
-                f = f.add(1);
-                let p = take_int(ap, &mut argi);
-                /* a negative precision is as if omitted */
-                if p >= 0 {
-                    spec.push(b'.');
-                    spec.extend_from_slice(format!("{}", p).as_bytes());
-                }
-            } else {
-                spec.push(b'.');
-                while (*f as u8).is_ascii_digit() {
-                    spec.push(*f as u8);
-                    f = f.add(1);
-                }
-            }
-        }
-
-        /* length modifiers — dropped, regenerated from the argument */
-        loop {
-            let cc = *f as u8;
-            if cc == b'h'
-                || cc == b'l'
-                || cc == b'j'
-                || cc == b'z'
-                || cc == b't'
-                || cc == b'L'
-                || cc == b'q'
-            {
-                f = f.add(1);
-            } else {
-                break;
-            }
-        }
-
-        let conv = *f as u8;
-        if conv == 0 {
-            out.extend_from_slice(&spec);
-            break;
-        }
-        f = f.add(1);
-        if conv == b'%' {
-            out.push(b'%');
-            continue;
-        }
-
-        let arg = take_arg(ap, &mut argi);
-        format_one(&spec, conv, arg, &mut out);
-    }
-
-    let n = out.len();
-    if !outbuf.is_null() && length != 0 {
-        let m = if n < length - 1 { n } else { length - 1 };
-        core::ptr::copy_nonoverlapping(out.as_ptr(), outbuf as *mut u8, m);
-        *outbuf.add(m) = 0;
-    }
-    n as c_int
-}
 
 /* ------------------------------------------------------------------ */
 /* src/output.c                                                        */
@@ -300,69 +194,17 @@ unsafe fn c_vsnprintf(
 
 // [spec:dash:def:output.outmem-fn]
 // [spec:dash:sem:output.outmem-fn]
-pub unsafe fn outmem(p: *const c_char, len: size_t, dest: *mut output) {
+pub unsafe fn outmem(p: *const c_char, len: size_t, dest: *mut Output) {
     if len == 0 {
         return;
     }
     let bytes = core::slice::from_raw_parts(p as *const u8, len);
-    let mut nleft = (*dest)
-        .buf
-        .as_ref()
-        .map_or(0, |buf| (*dest).bufsize.saturating_sub(buf.len()));
-    if likely(nleft >= len) {
-        (*dest).buf.as_mut().unwrap().extend_from_slice(bytes);
-        return;
-    }
-
-    let bufsize = (*dest).bufsize;
-    if bufsize == 0 {
-        /* unbuffered — fall through to the direct write */
-    } else if (*dest).buf.is_none() {
-        /*
-         * #ifdef notyet
-         *	if (dest->fd == MEM_OUT && len > bufsize) bufsize = len;
-         * #endif
-         */
-        /*
-         * #ifdef notyet
-         *	goto alloc;
-         * } else if (dest->fd == MEM_OUT) {
-         *	offset = bufsize;
-         *	if (bufsize >= len) bufsize <<= 1; else bufsize += len;
-         *	if (bufsize < offset) goto err;
-         * alloc:
-         * #endif
-         */
-        INTOFF();
-        (*dest).buf = Some(Vec::with_capacity(bufsize));
-        INTON();
-    } else {
-        flushout(dest);
-    }
-
-    nleft = (*dest)
-        .buf
-        .as_ref()
-        .map_or(0, |buf| (*dest).bufsize.saturating_sub(buf.len()));
-    /*
-     * NOTE (faithfully reproduced, src/output.c:187): this second test is
-     * `>` where the first was `>=`, so a run that would exactly fill the
-     * buffer is written straight out instead of buffered.
-     */
-    if nleft > len {
-        (*dest).buf.as_mut().unwrap().extend_from_slice(bytes);
-        return;
-    }
-
-    if xwrite((*dest).fd, bytes.as_ptr() as *const c_void, len) != 0 {
-        /* err: */
-        (*dest).flags |= OUTPUT_ERR;
-    }
+    let _ = (*dest).write_bytes(bytes);
 }
 
 // [spec:dash:def:output.outstr-fn]
 // [spec:dash:sem:output.outstr-fn]
-pub unsafe fn outstr(p: *const c_char, file: *mut output) {
+pub unsafe fn outstr(p: *const c_char, file: *mut Output) {
     let len: size_t;
 
     len = libc::strlen(p);
@@ -371,7 +213,7 @@ pub unsafe fn outstr(p: *const c_char, file: *mut output) {
 
 // [spec:dash:def:output.outcslow-fn]
 // [spec:dash:sem:output.outcslow-fn]
-pub unsafe fn outcslow(c: c_int, dest: *mut output) {
+pub unsafe fn outcslow(c: c_int, dest: *mut Output) {
     let buf: c_char = c as c_char;
     outmem(&buf as *const c_char, 1, dest);
 }
@@ -379,7 +221,7 @@ pub unsafe fn outcslow(c: c_int, dest: *mut output) {
 // [spec:dash:def:output.flushall-fn]
 // [spec:dash:sem:output.flushall-fn]
 pub unsafe fn flushall() {
-    flushout(addr_of_mut!(output));
+    let _ = (*stdout()).flush();
     /*
      * #ifdef FLUSHERR
      *	flushout(&errout);
@@ -388,149 +230,161 @@ pub unsafe fn flushall() {
      */
 }
 
-// [spec:dash:def:output.flushout-fn]
-// [spec:dash:sem:output.flushout-fn]
-pub unsafe fn flushout(dest: *mut output) {
-    let len = (*dest).buf.as_ref().map_or(0, Vec::len);
-    if len == 0 || (*dest).fd < 0 {
-        return;
-    }
-    let buf = (*dest).buf.as_mut().unwrap();
-    let bytes = buf.as_ptr();
-    /* dash resets the pending range before writing. `clear` retains the
-     * allocation and xwrite cannot mutate it. */
-    buf.clear();
-    if xwrite((*dest).fd, bytes as *const c_void, len) != 0 {
-        (*dest).flags |= OUTPUT_ERR;
-    }
+struct OutputFormatter<'a> {
+    output: &'a mut Output,
+    error: Option<io::Error>,
 }
 
-// [spec:dash:def:output.outfmt-fn]
-// [spec:dash:sem:output.outfmt-fn]
-pub unsafe fn outfmt(file: *mut output, fmt: *const c_char, ap: &[VaArg]) {
-    doformat(file, fmt, ap);
-}
-
-// [spec:dash:def:output.out1fmt-fn]
-// [spec:dash:sem:output.out1fmt-fn]
-pub unsafe fn out1fmt(fmt: *const c_char, ap: &[VaArg]) {
-    doformat(out1, fmt, ap);
-}
-
-// [spec:dash:def:output.fmtstr-fn]
-// [spec:dash:sem:output.fmtstr-fn]
-pub unsafe fn fmtstr(outbuf: *mut c_char, length: size_t, fmt: *const c_char, ap: &[VaArg]) -> c_int {
-    let ret: c_int;
-
-    ret = xvsnprintf(outbuf, length, fmt, ap);
-    if ret > length as c_int {
-        length as c_int
-    } else {
-        ret
+impl std::fmt::Write for OutputFormatter<'_> {
+    fn write_str(&mut self, text: &str) -> std::fmt::Result {
+        match self.output.write_all(text.as_bytes()) {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                self.error = Some(error);
+                Err(std::fmt::Error)
+            }
+        }
     }
 }
 
-// [spec:dash:def:output.xvasprintf-fn]
-// [spec:dash:sem:output.xvasprintf-fn]
-/// The C's `xvasprintf`, with `out` in place of the region.
-///
-/// `stalloc(MAX(len, stackblocksize()) + 1)` asks for a block the region
-/// cannot satisfy from its free space, so it always chains a fresh one.
-/// [dec:nsh:owned-data] records why that was load bearing: it kept
-/// `print_escape_str`'s run of `X`s, sitting above the converted string
-/// in the *same* block, alive while `printf` read it as this call's
-/// argument.  The `X`s became a buffer of their own in the previous pass,
-/// so the `stackblocksize()` term has no remaining customer and the
-/// request is `len + 1` — which is all `xvsnprintf` writes in either
-/// case, and all any caller reads.
-unsafe fn xvasprintf(
-    sp: *mut *mut c_char,
-    size: size_t,
-    f: *const c_char,
-    ap: &[VaArg],
-    out: &mut Vec<u8>,
-) -> c_int {
-    let s: *mut c_char;
-    let mut len: c_int;
-    let ap2: &[VaArg];
+struct FormattingInterruptGuard;
 
-    ap2 = ap; /* va_copy(ap2, ap) */
-    len = xvsnprintf(*sp, size, f, ap2);
-    /* va_end(ap2) */
-    if len < 0 {
-        crate::error::sh_error(cstr(b"xvsnprintf failed\0"), &[]);
+impl FormattingInterruptGuard {
+    fn enter() -> Self {
+        unsafe { INTOFF() };
+        Self
     }
-    if (len as size_t) < size {
-        return len;
-    }
-
-    out.clear();
-    out.resize(len as usize + 1, 0);
-    s = out.as_mut_ptr() as *mut c_char;
-    *sp = s;
-    len = xvsnprintf(s, (len + 1) as size_t, f, ap);
-    /* The second pass formats the same arguments into a buffer sized from
-     * the first pass's answer, so it cannot come out longer; the caller
-     * reads `len` bytes from `s` on that basis. */
-    debug_assert!(len >= 0 && (len as usize) < out.len());
-    len
 }
 
-// [spec:dash:def:output.xasprintf-fn]
-// [spec:dash:sem:output.xasprintf-fn]
-pub unsafe fn xasprintf(
-    sp: *mut *mut c_char,
-    f: *const c_char,
-    ap: &[VaArg],
-    out: &mut Vec<u8>,
-) -> c_int {
-    let ret: c_int;
-
-    ret = xvasprintf(sp, 0, f, ap, out);
-    ret
+impl Drop for FormattingInterruptGuard {
+    fn drop(&mut self) {
+        unsafe { INTON() };
+    }
 }
 
-// [spec:dash:def:output.doformat-fn]
-// [spec:dash:sem:output.doformat-fn]
-pub unsafe fn doformat(dest: *mut output, f: *const c_char, ap: &[VaArg]) {
-    let mut s: *mut c_char = core::ptr::null_mut();
-    let mut buf: Vec<u8> = Vec::new();
-    let len = xvasprintf(&mut s, 0, f, ap, &mut buf);
-    debug_assert_eq!(s as *const u8, buf.as_ptr());
-    outmem(buf.as_ptr() as *const c_char, len as usize, dest);
+impl Write for Output {
+    /// Write according to [`Write::write`]'s consumption contract.
+    ///
+    /// Unlike the legacy `outmem` path, an error flushing bytes from a
+    /// previous call must stop this call before any of `bytes` is consumed.
+    /// A direct descriptor write is deliberately a single successful syscall
+    /// (apart from retrying `EINTR`) so a short write can be reported to the
+    /// caller as a partial count.
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.is_empty() {
+            return Ok(0);
+        }
+
+        let mut nleft = self
+            .buf
+            .as_ref()
+            .map_or(0, |buf| self.bufsize.saturating_sub(buf.len()));
+        if likely(nleft >= bytes.len()) {
+            self.buf.as_mut().unwrap().extend_from_slice(bytes);
+            return Ok(bytes.len());
+        }
+
+        if self.bufsize != 0 {
+            if self.buf.is_none() {
+                unsafe { INTOFF() };
+                self.buf = Some(Vec::with_capacity(self.bufsize));
+                unsafe { INTON() };
+            } else {
+                self.flush()?;
+            }
+        }
+
+        nleft = self
+            .buf
+            .as_ref()
+            .map_or(0, |buf| self.bufsize.saturating_sub(buf.len()));
+        if nleft > bytes.len() {
+            self.buf.as_mut().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        } else {
+            let result = write_fd_once(bytes, self.fd);
+            self.remember_error(result)
+        }
+    }
+
+    /// dash's `flushout`: push the pending range at the descriptor.
+    ///
+    /// The C had a free function over a `struct output *`; the port's is the
+    /// trait method, because a writer that cannot be flushed through
+    /// `Write::flush` is not a writer.
+    // [spec:dash:def:output.flushout-fn]
+    // [spec:dash:sem:output.flushout-fn]
+    fn flush(&mut self) -> io::Result<()> {
+        let len = self.buf.as_ref().map_or(0, Vec::len);
+        if len == 0 || self.fd < 0 {
+            return Ok(());
+        }
+
+        let buf = self.buf.as_mut().unwrap();
+        let bytes = buf.as_ptr();
+        /* Reset the pending range before writing. A failed or interrupted
+         * write must not leave bytes queued for a second attempt. The
+         * allocation stays live, so the raw range remains readable. */
+        buf.clear();
+        let result = unsafe { write_fd(core::slice::from_raw_parts(bytes, len), self.fd) };
+        self.remember_error(result)
+    }
+
+    fn write_fmt(&mut self, arguments: std::fmt::Arguments<'_>) -> io::Result<()> {
+        let _interrupts = FormattingInterruptGuard::enter();
+        let mut formatter = OutputFormatter {
+            output: self,
+            error: None,
+        };
+
+        match std::fmt::write(&mut formatter, arguments) {
+            Ok(()) => Ok(()),
+            Err(_) => match formatter.error {
+                Some(error) => Err(error),
+                None => panic!(
+                    "a formatting trait implementation returned an error when the underlying \
+                     stream did not"
+                ),
+            },
+        }
+    }
 }
 
 /*
  * Version of write which resumes after a signal is caught.
  */
 
+fn write_fd_once(bytes: &[u8], fd: c_int) -> io::Result<usize> {
+    let amount = bytes.len().min(crate::system::SSIZE_MAX as usize);
+    loop {
+        let written = unsafe { libc::write(fd, bytes.as_ptr() as *const c_void, amount) };
+        if written < 0 {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            return Err(error);
+        }
+        return Ok(written as usize);
+    }
+}
+
+fn write_fd(mut bytes: &[u8], fd: c_int) -> io::Result<()> {
+    while !bytes.is_empty() {
+        let written = write_fd_once(bytes, fd)?;
+        bytes = &bytes[written..];
+    }
+    Ok(())
+}
+
 // [spec:dash:def:output.xwrite-fn]
 // [spec:dash:sem:output.xwrite-fn]
 pub unsafe fn xwrite(fd: c_int, p: *const c_void, n: size_t) -> c_int {
-    let mut buf: *const c_char = p as *const c_char;
-    let mut n = n;
-
-    while n != 0 {
-        let mut i: isize;
-        let mut m: size_t;
-
-        m = n;
-        if m > crate::system::SSIZE_MAX as size_t {
-            m = crate::system::SSIZE_MAX as size_t;
-        }
-        loop {
-            i = libc::write(fd, buf as *const c_void, m);
-            if !(i < 0 && *libc::__errno_location() == libc::EINTR) {
-                break;
-            }
-        }
-        if i < 0 {
-            return -1;
-        }
-        buf = buf.offset(i);
-        n -= i as size_t;
+    if n == 0 {
+        return 0;
     }
-    0
+    let bytes = core::slice::from_raw_parts(p as *const u8, n);
+    if write_fd(bytes, fd).is_ok() { 0 } else { -1 }
 }
 
 /*
@@ -566,25 +420,6 @@ pub unsafe fn __closememout() -> c_int {
     0
 }
 
-// [spec:dash:def:output.xvsnprintf-fn]
-// [spec:dash:sem:output.xvsnprintf-fn]
-unsafe fn xvsnprintf(outbuf: *mut c_char, length: size_t, fmt: *const c_char, ap: &[VaArg]) -> c_int {
-    let ret: c_int;
-
-    /*
-     * #ifdef __sun
-     *	vsnprintf() on older versions of Solaris returns -1 when passed
-     *	a length of 0.  To avoid this, use a dummy 1-character buffer
-     *	instead.  Not applicable to the targets this port builds for.
-     * #endif
-     */
-
-    INTOFF();
-    ret = c_vsnprintf(outbuf, length, fmt, ap);
-    INTON();
-    ret
-}
-
 /* ------------------------------------------------------------------ */
 /* src/output.h                                                        */
 /* ------------------------------------------------------------------ */
@@ -593,17 +428,13 @@ unsafe fn xvsnprintf(outbuf: *mut c_char, length: size_t, fmt: *const c_char, ap
 // [spec:dash:sem:output.freestdout-fn]
 #[inline]
 pub unsafe fn freestdout() {
-    let out = addr_of_mut!(output);
-    if let Some(buf) = (*out).buf.as_mut() {
-        buf.clear();
-    }
-    (*out).flags = 0;
+    (*stdout()).discard();
 }
 
 // [spec:dash:def:output.outc-fn]
 // [spec:dash:sem:output.outc-fn]
 #[inline]
-pub unsafe fn outc(ch: c_int, file: *mut output) {
+pub unsafe fn outc(ch: c_int, file: *mut Output) {
     if let Some(buf) = (*file).buf.as_mut() {
         if buf.len() < (*file).bufsize {
             buf.push(ch as u8);
@@ -613,115 +444,17 @@ pub unsafe fn outc(ch: c_int, file: *mut output) {
     outcslow(ch, file);
 }
 
-/* `#define out1c(c) outc((c), out1)` */
-#[inline(always)]
-pub unsafe fn out1c(c: c_int) {
-    outc(c, out1);
-}
-
-/* `#define out2c(c) outcslow((c), out2)` */
-#[inline(always)]
-pub unsafe fn out2c(c: c_int) {
-    outcslow(c, out2);
-}
-
-/* `#define out1mem(s, l) outmem((s), (l), out1)` */
-#[inline(always)]
-pub unsafe fn out1mem(s: *const c_char, l: size_t) {
-    outmem(s, l, out1);
-}
-
-/* `#define out1str(s) outstr((s), out1)` */
-#[inline(always)]
-pub unsafe fn out1str(s: *const c_char) {
-    outstr(s, out1);
-}
-
-/* `#define out2str(s) outstr((s), out2)` */
-#[inline(always)]
-pub unsafe fn out2str(s: *const c_char) {
-    outstr(s, out2);
-}
+/* The five `out1*`/`out2*` macros in output.h — `out1c`, `out2c`,
+ * `out1mem`, `out1str`, `out2str` — were each `outc`/`outmem`/`outstr`
+ * against one of the two pointer statics. With the statics gone their
+ * callers name the destination and write to it, so the macros have no
+ * remaining meaning and are not ported. */
 
 /* `#define outerr(f) (f)->flags` */
 #[inline(always)]
-pub unsafe fn outerr(f: *mut output) -> c_int {
+pub unsafe fn outerr(f: *mut Output) -> c_int {
     (*f).flags
 }
-
-// ---------------------------------------------------------------------
-// Variadic compatibility layer.
-//
-// C's `outfmt(file, fmt, ...)` has no stable-Rust function equivalent, so
-// the formatted-output entry points above take an explicit `&[VaArg]`.
-// The macros below restore the C call shape, which is what the ported
-// call sites throughout the crate use. `VaArg::from` adapts the raw C
-// values those sites pass; the reflexive `From<T> for T` means a site may
-// also pass an explicit `VaArg` variant.
-//
-// Widths are per LP64, where `c_long`/`intmax_t` and
-// `c_ulong`/`uintmax_t`/`size_t` collapse onto `i64`/`u64`. The formatter
-// regenerates each conversion's length modifier from the variant, so a
-// `%zu` rendered through `Uintmax` is still correct on this target.
-// ---------------------------------------------------------------------
-
-impl From<*const c_char> for VaArg {
-    fn from(v: *const c_char) -> Self { VaArg::Str(v) }
-}
-impl From<*mut c_char> for VaArg {
-    fn from(v: *mut c_char) -> Self { VaArg::Str(v as *const c_char) }
-}
-impl From<*const c_void> for VaArg {
-    fn from(v: *const c_void) -> Self { VaArg::Ptr(v) }
-}
-impl From<*mut c_void> for VaArg {
-    fn from(v: *mut c_void) -> Self { VaArg::Ptr(v as *const c_void) }
-}
-impl From<i32> for VaArg {
-    fn from(v: i32) -> Self { VaArg::Int(v) }
-}
-impl From<u32> for VaArg {
-    fn from(v: u32) -> Self { VaArg::Uint(v) }
-}
-impl From<i64> for VaArg {
-    fn from(v: i64) -> Self { VaArg::Intmax(v as libc::intmax_t) }
-}
-impl From<u64> for VaArg {
-    fn from(v: u64) -> Self { VaArg::Uintmax(v as libc::uintmax_t) }
-}
-impl From<f64> for VaArg {
-    fn from(v: f64) -> Self { VaArg::Double(v) }
-}
-
-#[macro_export]
-macro_rules! outfmt {
-    ($file:expr, $fmt:expr $(, $arg:expr)* $(,)?) => {
-        $crate::output::outfmt($file, $fmt, &[$($crate::output::VaArg::from($arg)),*])
-    };
-}
-
-#[macro_export]
-macro_rules! out1fmt {
-    ($fmt:expr $(, $arg:expr)* $(,)?) => {
-        $crate::output::out1fmt($fmt, &[$($crate::output::VaArg::from($arg)),*])
-    };
-}
-
-#[macro_export]
-macro_rules! fmtstr {
-    ($buf:expr, $len:expr, $fmt:expr $(, $arg:expr)* $(,)?) => {
-        $crate::output::fmtstr($buf, $len, $fmt, &[$($crate::output::VaArg::from($arg)),*])
-    };
-}
-
-#[macro_export]
-macro_rules! xasprintf {
-    ($sp:expr, $out:expr, $f:expr $(, $arg:expr)* $(,)?) => {
-        $crate::output::xasprintf($sp, $f, &[$($crate::output::VaArg::from($arg)),*], $out)
-    };
-}
-
-pub use crate::{fmtstr, out1fmt, outfmt, xasprintf};
 
 // ---------------------------------------------------------------------
 // Unit tests for this module's functions.
@@ -738,7 +471,7 @@ mod tests {
 
     /// A `struct output` writing into a pipe, with a buffer of `bufsize`.
     struct Sink {
-        out: Box<output>,
+        out: Box<Output>,
         r: c_int,
         w: c_int,
     }
@@ -747,16 +480,20 @@ mod tests {
         fn new(bufsize: usize, allocated: bool) -> Sink {
             let mut fds = [0 as c_int; 2];
             assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
-            let out = Box::new(output {
+            let out = Box::new(Output {
                 buf: allocated.then(|| Vec::with_capacity(bufsize)),
                 bufsize: bufsize as size_t,
                 fd: fds[1],
                 flags: 0,
             });
-            Sink { out, r: fds[0], w: fds[1] }
+            Sink {
+                out,
+                r: fds[0],
+                w: fds[1],
+            }
         }
-        fn p(&mut self) -> *mut output {
-            &mut *self.out as *mut output
+        fn p(&mut self) -> *mut Output {
+            &mut *self.out as *mut Output
         }
         /// Bytes that have actually reached the pipe.
         fn drained(&mut self) -> Vec<u8> {
@@ -805,7 +542,7 @@ mod tests {
             assert_eq!(s.buffered(), 3);
             outmem(CStr0::new("defghij").p(), 7, p);
             assert_eq!(s.buffered(), 10);
-            flushout(p);
+            let _ = (*p).flush();
             assert_eq!(s.buffered(), 0);
             assert_eq!(s.drained(), b"abcdefghij");
         }
@@ -816,7 +553,7 @@ mod tests {
             let p = s.p();
             outmem(CStr0::new("ab").p(), 2, p);
             outmem(CStr0::new("0123456789").p(), 10, p);
-            flushout(p);
+            let _ = (*p).flush();
             assert_eq!(s.drained(), b"ab0123456789");
         }
         unsafe {
@@ -833,7 +570,7 @@ mod tests {
             let p = allocated.p();
             outmem(CStr0::new("abcd").p(), 4, p);
             assert_eq!(allocated.buffered(), 4);
-            flushout(p);
+            let _ = (*p).flush();
             assert_eq!(allocated.drained(), b"abcd");
         }
         unsafe {
@@ -845,7 +582,7 @@ mod tests {
             let capacity = (*p).buf.as_ref().unwrap().capacity();
             outmem(CStr0::new("discarded").p(), 9, p);
             (*p).fd = 9999;
-            flushout(p);
+            let _ = (*p).flush();
             assert_ne!((*p).flags & OUTPUT_ERR, 0);
             assert_eq!(failed.buffered(), 0);
             assert_eq!((*p).buf.as_ref().unwrap().as_ptr(), base);
@@ -854,7 +591,7 @@ mod tests {
             (*p).fd = failed.w;
             (*p).flags = 0;
             outmem(CStr0::new("kept").p(), 4, p);
-            flushout(p);
+            let _ = (*p).flush();
             assert_eq!((*p).flags & OUTPUT_ERR, 0);
             assert_eq!(failed.drained(), b"kept");
         }
@@ -866,7 +603,7 @@ mod tests {
             let p = binary.p();
             outmem(bytes.as_ptr() as *const c_char, bytes.len(), p);
             assert_eq!(binary.buffered(), bytes.len());
-            flushout(p);
+            let _ = (*p).flush();
             assert_eq!(binary.drained(), bytes);
         }
         unsafe {
@@ -878,7 +615,7 @@ mod tests {
             let base = (*p).buf.as_ref().unwrap().as_ptr();
             outmem(bytes.as_ptr() as *const c_char, bytes.len(), p);
             assert_eq!(binary.buffered(), bytes.len());
-            flushout(p);
+            let _ = (*p).flush();
             assert_eq!((*p).buf.as_ref().unwrap().as_ptr(), base);
             assert_eq!(binary.drained(), bytes);
         }
@@ -891,16 +628,16 @@ mod tests {
             let mut s = Sink::new(16, true);
             let p = s.p();
             // Nothing buffered: no write, no error flag.
-            flushout(p);
+            let _ = (*p).flush();
             assert_eq!((*p).flags & OUTPUT_ERR, 0);
             // A negative fd is the "discard" case and must not be written
             // to; the buffer is left alone.
             outmem(CStr0::new("xy").p(), 2, p);
             (*p).fd = -1;
-            flushout(p);
+            let _ = (*p).flush();
             assert_eq!(s.buffered(), 2);
             (*p).fd = s.w;
-            flushout(p);
+            let _ = (*p).flush();
             assert_eq!(s.drained(), b"xy");
         }
     }
@@ -913,7 +650,7 @@ mod tests {
             let p = s.p();
             outmem(CStr0::new("z").p(), 1, p);
             (*p).fd = 9999; // never opened
-            flushout(p);
+            let _ = (*p).flush();
             assert_ne!((*p).flags & OUTPUT_ERR, 0);
             assert_ne!(outerr(p), 0);
             (*p).fd = -1; // keep Drop quiet
@@ -934,112 +671,143 @@ mod tests {
             outc('o' as c_int, p);
             // outstr stops at the NUL; outcslow and outc each add one byte.
             assert_eq!(s.buffered(), 5);
-            flushout(p);
+            let _ = (*p).flush();
             assert_eq!(s.drained(), b"hi! o");
         }
     }
 
-    // [spec:dash:sem:output.fmtstr-fn/test]
     #[test]
-    fn fmtstr_formats_into_a_caller_buffer_and_truncates() {
-        unsafe {
-            let mut buf = [0 as c_char; 32];
-            let n = fmtstr(
-                buf.as_mut_ptr(),
-                buf.len() as size_t,
-                CStr0::new("%s=%d").p(),
-                &[VaArg::Str(CStr0::new("x").p()), VaArg::Int(42)],
-            );
-            assert_eq!(crate::testutil::s(buf.as_ptr()), "x=42");
-            assert_eq!(n, 4);
-            let mut flagged = [0 as c_char; 64];
-            let nf = fmtstr(
-                flagged.as_mut_ptr(),
-                flagged.len(),
-                CStr0::new("%#08x|%-5s|%+d").p(),
-                &[
-                    VaArg::Uint(42),
-                    VaArg::Str(CStr0::new("x").p()),
-                    VaArg::Int(7),
-                ],
-            );
-            assert_eq!(crate::testutil::s(flagged.as_ptr()), "0x00002a|x    |+7");
-            assert_eq!(nf, 17);
-            // On truncation fmtstr CLAMPS to `length`; it does not report
-            // what would have been written. The C is
-            // `ret > (int)length ? length : ret`, so a caller detects
-            // truncation by the result reaching the buffer size, not by it
-            // exceeding it -- unlike snprintf, which is what a first draft
-            // assumed here.
-            let mut small = [0 as c_char; 4];
-            let n2 = fmtstr(
-                small.as_mut_ptr(),
-                small.len() as size_t,
-                CStr0::new("%s").p(),
-                &[VaArg::Str(CStr0::new("abcdefgh").p())],
-            );
-            assert_eq!(crate::testutil::s(small.as_ptr()), "abc");
-            assert_eq!(n2, 4);
-        }
+    fn write_reports_the_current_operation() {
+        let mut s = Sink::new(0, false);
+        s.out.flags = OUTPUT_ERR;
+        s.out.fd = 9999;
+        assert!(s.out.write_all(b"bad").is_err());
+
+        s.out.fd = s.w;
+        assert!(s.out.write_all(b"good").is_ok());
+        assert_ne!(s.out.flags & OUTPUT_ERR, 0);
+        assert_eq!(s.drained(), b"good");
     }
 
-    // [spec:dash:sem:output.doformat-fn/test]
-    // [spec:dash:sem:output.outfmt-fn/test]
     #[test]
-    fn outfmt_and_doformat_write_formatted_output() {
-        unsafe {
-            let mut s = Sink::new(64, true);
-            let p = s.p();
-            outfmt(p, CStr0::new("[%s:%d]").p(),
-                   &[VaArg::Str(CStr0::new("k").p()), VaArg::Int(7)]);
-            doformat(p, CStr0::new("%c").p(), &[VaArg::Int('!' as c_int)]);
-            flushout(p);
-            assert_eq!(s.drained(), b"[k:7]!");
-        }
-    }
-
-    // [spec:dash:sem:output.xasprintf-fn/test]
-    // [spec:dash:sem:output.xvasprintf-fn/test]
-    #[test]
-    fn xasprintf_writes_into_the_callers_buffer_and_reports_the_length() {
+    fn write_fmt_restores_interrupt_state() {
         let _g = crate::testutil::lock();
+        let suppressint_before = unsafe { crate::error::suppressint };
+
+        let mut buffered = Sink::new(64, true);
+        write!(&mut *buffered.out, "{}={}", "x", 42).unwrap();
+        assert_eq!(buffered.out.buf.as_deref(), Some(&b"x=42"[..]));
+        assert_eq!(unsafe { crate::error::suppressint }, suppressint_before);
+        buffered.out.flush().unwrap();
+        assert_eq!(buffered.drained(), b"x=42");
+
+        let mut failed = Sink::new(0, false);
+        failed.out.fd = 9999;
+        assert!(write!(&mut *failed.out, "{}", "bad").is_err());
+        assert_eq!(unsafe { crate::error::suppressint }, suppressint_before);
+    }
+
+    #[test]
+    fn write_consumes_nothing_when_flush_fails() {
+        let mut s = Sink::new(4, true);
+        s.out.buf.as_mut().unwrap().extend_from_slice(b"abc");
+        s.out.fd = 9999;
+
+        assert!(s.out.write(b"xy").is_err());
+        assert_eq!(s.out.buf.as_deref(), Some(&b""[..]));
+        assert_ne!(s.out.flags & OUTPUT_ERR, 0);
+
+        s.out.fd = s.w;
+        assert_eq!(s.out.write(b"xy").unwrap(), 2);
+        s.out.flush().unwrap();
+        assert_eq!(s.drained(), b"xy");
+    }
+
+    #[test]
+    fn outmem_continues_past_a_flush_error() {
         unsafe {
-            let mut out: Vec<u8> = Vec::new();
-            let mut sp: *mut c_char = core::ptr::null_mut();
-            let n = xasprintf(&mut sp, CStr0::new("%s-%d").p(),
-                              &[VaArg::Str(CStr0::new("id").p()), VaArg::Int(9)],
-                              &mut out);
-            assert_eq!(crate::testutil::s(sp), "id-9");
-            assert_eq!(n, 4);
-            // The block is the caller's, so `sp` points into it.
-            assert_eq!(sp as *const u8, out.as_ptr());
-            // Long enough that the length is well past anything the
-            // region's 504-byte minimum block would have covered.
-            let long = "y".repeat(2048);
-            let n2 = xasprintf(&mut sp, CStr0::new("%s").p(),
-                               &[VaArg::Str(CStr0::new(&long).p())],
-                               &mut out);
-            assert_eq!(n2, 2048);
-            assert_eq!(crate::testutil::s(sp).len(), 2048);
-            // Sized to what the first pass measured: the text plus its
-            // terminator, and not the C's `MAX(len, stackblocksize()) + 1`.
-            assert_eq!(out.len(), 2049);
+            let mut s = Sink::new(4, true);
+            let p = s.p();
+            outmem(CStr0::new("abc").p(), 3, p);
+            (*p).fd = 9999;
+
+            outmem(CStr0::new("xy").p(), 2, p);
+            assert_eq!((*p).buf.as_deref(), Some(&b"xy"[..]));
+            assert_ne!((*p).flags & OUTPUT_ERR, 0);
+
+            (*p).fd = s.w;
+            let _ = (*p).flush();
+            assert_eq!(s.drained(), b"xy");
         }
     }
 
-    // [spec:dash:sem:output.xvsnprintf-fn/test]
+    #[cfg(target_os = "linux")]
     #[test]
-    fn xvsnprintf_is_snprintf_with_interrupts_held() {
+    fn write_reports_a_kernel_short_write() {
+        let mut s = Sink::new(0, false);
         unsafe {
-            let mut buf = [0 as c_char; 8];
-            let n = xvsnprintf(buf.as_mut_ptr(), 8, CStr0::new("%d").p(), &[VaArg::Int(-5)]);
-            assert_eq!(crate::testutil::s(buf.as_ptr()), "-5");
-            assert_eq!(n, 2);
-            // A zero length writes nothing but still returns the required
-            // size; dash relies on that in xvasprintf's first pass.
-            let n0 = xvsnprintf(core::ptr::null_mut(), 0, CStr0::new("abcd").p(), &[]);
-            assert_eq!(n0, 4);
+            let flags = libc::fcntl(s.w, libc::F_GETFL);
+            assert!(flags >= 0);
+            assert_eq!(libc::fcntl(s.w, libc::F_SETFL, flags | libc::O_NONBLOCK), 0);
+
+            let pipe_buf = libc::fpathconf(s.w, libc::_PC_PIPE_BUF);
+            assert!(pipe_buf > 0);
+            let pipe_buf = pipe_buf as usize;
+            let fill = vec![b'q'; pipe_buf];
+            let mut filled = 0usize;
+            loop {
+                let written = libc::write(s.w, fill.as_ptr() as *const c_void, fill.len());
+                if written > 0 {
+                    filled += written as usize;
+                    continue;
+                }
+                assert_eq!(written, -1);
+                let error = io::Error::last_os_error();
+                let raw_error = error.raw_os_error();
+                assert!(raw_error == Some(libc::EAGAIN) || raw_error == Some(libc::EWOULDBLOCK));
+                break;
+            }
+
+            let mut drained = vec![0u8; pipe_buf];
+            let mut offset = 0usize;
+            while offset < drained.len() {
+                let amount = libc::read(
+                    s.r,
+                    drained[offset..].as_mut_ptr() as *mut c_void,
+                    drained.len() - offset,
+                );
+                assert!(amount > 0);
+                offset += amount as usize;
+            }
+
+            let payload = vec![b'x'; pipe_buf * 2];
+            let written = s.out.write(&payload).unwrap();
+            assert!(written > 0);
+            assert!(written < payload.len());
+            assert_eq!(s.out.flags & OUTPUT_ERR, 0);
+
+            let got = s.drained();
+            assert_eq!(got.len(), filled - pipe_buf + written);
+            assert_eq!(&got[got.len() - written..], &payload[..written]);
         }
+    }
+
+    #[test]
+    fn shell_io_instances_own_independent_writers() {
+        let mut first = ShellIo::new(10, 11);
+        let mut second = ShellIo::new(20, 21);
+
+        first.stdout().flags = OUTPUT_ERR;
+        first.stderr().fd = 12;
+        first.previous_stderr().fd = 13;
+
+        assert_eq!(first.stdout().fd, 10);
+        assert_eq!(first.stderr().fd, 12);
+        assert_eq!(first.previous_stderr().fd, 13);
+        assert_eq!(second.stdout().fd, 20);
+        assert_eq!(second.stderr().fd, 21);
+        assert_eq!(second.previous_stderr().fd, 0);
+        assert_eq!(second.stdout().flags, 0);
     }
 
     // [spec:dash:sem:output.xwrite-fn/test]
@@ -1058,13 +826,18 @@ mod tests {
                     let mut tmp = [0u8; 8192];
                     loop {
                         let n = libc::read(r, tmp.as_mut_ptr() as *mut c_void, tmp.len());
-                        if n <= 0 { break; }
+                        if n <= 0 {
+                            break;
+                        }
                         got += n as usize;
                     }
                     got
                 }
             });
-            assert_eq!(xwrite(w, payload.as_ptr() as *const c_void, payload.len()), 0);
+            assert_eq!(
+                xwrite(w, payload.as_ptr() as *const c_void, payload.len()),
+                0
+            );
             libc::close(w);
             s.w = -1;
             assert_eq!(reader.join().unwrap(), 200_000);
@@ -1078,7 +851,7 @@ mod tests {
     fn freestdout_resets_the_buffer_and_error_flag() {
         let _g = crate::testutil::lock();
         unsafe {
-            let out = addr_of_mut!(output);
+            let out = stdout();
             let saved_buf = (*out).buf.take();
             let saved = ((*out).bufsize, (*out).flags, (*out).fd);
             (*out).buf = Some(Vec::with_capacity(16));
@@ -1098,15 +871,14 @@ mod tests {
     }
 
     // [spec:dash:sem:output.flushall-fn/test]
-    // [spec:dash:sem:output.out1fmt-fn/test]
     #[test]
-    fn out1fmt_and_flushall_go_through_the_stdout_stream() {
+    fn flushall_drains_the_stdout_writer() {
         let _g = crate::testutil::lock();
         unsafe {
-            let out = addr_of_mut!(output);
+            let out = stdout();
             let saved_buf = (*out).buf.take();
             let saved = ((*out).bufsize, (*out).fd, (*out).flags);
-            let out1_before = out1;
+            let stdout_before = stdout();
             let mut s = Sink::new(64, true);
             // Point the global stdout stream at the pipe.
             (*out).buf = None;
@@ -1114,14 +886,14 @@ mod tests {
             (*out).fd = s.w;
             (*out).flags = 0;
 
-            out1fmt(CStr0::new("n=%d").p(), &[VaArg::Int(3)]);
+            (*out).write_all(b"n=3").unwrap();
             // Buffered, not yet written.
             assert_eq!((*out).buf.as_ref().unwrap().len(), 3);
             flushall();
             assert_eq!((*out).buf.as_ref().unwrap().len(), 0);
-            let out1_after = out1;
-            assert_eq!(out1_after, out1_before);
-            assert_eq!(out1_after, out);
+            let stdout_after = stdout();
+            assert_eq!(stdout_after, stdout_before);
+            assert_eq!(stdout_after, out);
 
             (*out).buf = saved_buf;
             ((*out).bufsize, (*out).fd, (*out).flags) = saved;
@@ -1143,8 +915,8 @@ mod tests {
     fn inactive_glibc_stdio_hooks_are_inert() {
         let _g = crate::testutil::lock();
         unsafe {
-            let out = addr_of_mut!(output);
-            let err = addr_of_mut!(errout);
+            let out = stdout();
+            let err = stderr();
             let before = (
                 (*out).buf.as_ref().map(|buf| (buf.len(), buf.capacity())),
                 (*out).fd,

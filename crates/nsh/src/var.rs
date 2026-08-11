@@ -17,15 +17,15 @@
 //! gives for free instead of a `qsort` at print time.
 
 use bstr::{BStr, BString};
+use core::ptr::{addr_of, addr_of_mut, null_mut};
 use libc::{c_char, c_int, c_uint, intmax_t, size_t};
 use std::collections::BTreeMap;
-use core::ptr::{addr_of, addr_of_mut, null_mut};
+use std::ffi::CStr;
+use std::io::Write as _;
 
 use crate::error::{INTOFF, INTON};
 use crate::mystring::nullstr;
-use crate::options::{argptr, getoptsreset, nextopt, optlist, optschanged, NOPTS};
-use crate::output::VaArg;
-use crate::shell::cstr;
+use crate::options::{NOPTS, argptr, getoptsreset, nextopt, optlist, optschanged};
 use crate::system::strchrnul;
 
 unsafe extern "C" {
@@ -180,9 +180,8 @@ pub unsafe fn defpath() -> *const c_char {
 
 pub static mut lineno: c_int = 0;
 /* char linenovar[sizeof("LINENO=") + sizeof(int) * CHAR_BIT / 3 + 1] = "LINENO="; */
-pub static mut linenovar: [c_char; 19] = unsafe {
-    core::mem::transmute::<[u8; 19], [c_char; 19]>(*b"LINENO=\0\0\0\0\0\0\0\0\0\0\0\0")
-};
+pub static mut linenovar: [c_char; 19] =
+    unsafe { core::mem::transmute::<[u8; 19], [c_char; 19]>(*b"LINENO=\0\0\0\0\0\0\0\0\0\0\0\0") };
 
 // [spec:dash:def:var.changelocale-fn]
 // [spec:dash:sem:var.changelocale-fn]
@@ -490,11 +489,11 @@ pub unsafe fn mkinit_init() {
     setvareq(addr_of_mut!(defifsvar) as *mut c_char, VTEXTFIXED);
     setvareq(addr_of_mut!(defoptindvar) as *mut c_char, VTEXTFIXED);
 
-    crate::output::fmtstr(
+    let ppid_text = format!("{}", libc::getppid());
+    crate::mystring::copy_ascii_cstr(
         (addr_of_mut!(ppid) as *mut c_char).add(5),
-        (32 - 5) as size_t,
-        cstr(b"%ld\0"),
-        &[VaArg::Long(libc::getppid() as libc::c_long)],
+        32 - 5,
+        &ppid_text,
     );
     setvareq(addr_of_mut!(ppid) as *mut c_char, VTEXTFIXED);
 
@@ -559,7 +558,10 @@ pub unsafe fn initvar() {
          * address, and their `text` is `VTEXTFIXED`. Only the link into the
          * table changes — the map holds the address, it does not own the
          * `var`. */
-        vartab_mut().insert(varname((*vp).text.as_ptr()).to_owned(), VarSlot::Builtin(vp));
+        vartab_mut().insert(
+            varname((*vp).text.as_ptr()).to_owned(),
+            VarSlot::Builtin(vp),
+        );
         vp = vp.add(1);
         if !(vp < end) {
             break;
@@ -592,12 +594,10 @@ pub unsafe fn setvar(name: *const c_char, val: *const c_char, mut flags: c_int) 
     p = strchrnul(q, b'=' as c_int);
     namelen = (p as usize - name as usize) as size_t;
     if namelen == 0 || p != q {
-        /* NB: `namelen` is a size_t handed to a `%.*s` precision, which
-         * expects an int.  Reproduced verbatim (src/var.c:231). */
-        crate::error::sh_error(
-            cstr(b"%.*s: bad variable name\0"),
-            &[VaArg::Int(namelen as c_int), VaArg::Str(name)],
-        );
+        let mut message = Vec::new();
+        message.extend_from_slice(core::slice::from_raw_parts(name as *const u8, namelen));
+        message.extend_from_slice(b": bad variable name");
+        crate::error::sh_error(&message);
     }
     vallen = 0;
     if val.is_null() {
@@ -637,12 +637,8 @@ pub unsafe fn setvarint(name: *const c_char, val: intmax_t, flags: c_int) -> int
     /* C declares a VLA `char buf[len]`; max_int_length(8) is 32. */
     let mut buf = [0 as c_char; 32];
 
-    crate::output::fmtstr(
-        buf.as_mut_ptr(),
-        len as size_t,
-        cstr(b"%jd\0"),
-        &[VaArg::Intmax(val)],
-    );
+    let value = format!("{val}");
+    crate::mystring::copy_ascii_cstr(buf.as_mut_ptr(), len as usize, &value);
     setvar(name, buf.as_ptr(), flags);
     val
 }
@@ -685,7 +681,9 @@ unsafe fn setvareq_text(text: VarText, mut flags: c_int) -> *mut var {
     let mut vp: *mut var;
     let s: *const c_char = text.as_ptr();
 
-    flags |= VEXPORT & (((1 - crate::options::optlist[crate::options::aflag] as c_int) as c_uint).wrapping_sub(1)) as c_int;
+    flags |= VEXPORT
+        & (((1 - crate::options::optlist[crate::options::aflag] as c_int) as c_uint)
+            .wrapping_sub(1)) as c_int;
     vp = findvar(s);
     if !vp.is_null() {
         let bits: c_uint;
@@ -696,13 +694,11 @@ unsafe fn setvareq_text(text: VarText, mut flags: c_int) -> *mut var {
             /* The C's `if (flags & VNOSAVE) free(s)`: `text` is a local,
              * so the unwind out of `sh_error` drops it. */
             n = (*vp).text.as_ptr();
-            crate::error::sh_error(
-                cstr(b"%.*s: is read only\0"),
-                &[
-                    VaArg::Int((strchrnul(n, b'=' as c_int) as usize - n as usize) as c_int),
-                    VaArg::Str(n),
-                ],
-            );
+            let name_len = strchrnul(n, b'=' as c_int) as usize - n as usize;
+            let mut message = Vec::new();
+            message.extend_from_slice(core::slice::from_raw_parts(n as *const u8, name_len));
+            message.extend_from_slice(b": is read only");
+            crate::error::sh_error(&message);
         }
 
         /* The name this entry is filed under, for the removal path below. */
@@ -774,11 +770,12 @@ pub unsafe fn lookupvar(name: *const c_char) -> *mut c_char {
     if !v.is_null() && ((*v).flags & VUNSET) == 0 {
         /* #ifdef WITH_LINENO */
         if v == vlineno() && (*v).text.as_ptr() == addr_of!(linenovar) as *const c_char {
-            crate::output::fmtstr(
+            let current_lineno = lineno;
+            let value = format!("{current_lineno}");
+            crate::mystring::copy_ascii_cstr(
                 (addr_of_mut!(linenovar) as *mut c_char).add(7),
-                (19 - 7) as size_t,
-                cstr(b"%d\0"),
-                &[VaArg::Int(lineno)],
+                19 - 7,
+                &value,
             );
         }
         return strchrnul((*v).text.as_ptr(), b'=' as c_int).add(1);
@@ -862,16 +859,16 @@ pub unsafe fn showvars(prefix: *const c_char, on: c_int, off: c_int) -> c_int {
             q = crate::mystring::single_quote(p);
         }
 
-        crate::output::out1fmt(
-            cstr(b"%s%s%.*s%s\n\0"),
-            &[
-                VaArg::Str(prefix),
-                VaArg::Str(sep),
-                VaArg::Int((p as usize - e as usize) as c_int),
-                VaArg::Str(e),
-                VaArg::Str(q),
-            ],
-        );
+        let mut record = Vec::new();
+        record.extend_from_slice(CStr::from_ptr(prefix).to_bytes());
+        record.extend_from_slice(CStr::from_ptr(sep).to_bytes());
+        record.extend_from_slice(core::slice::from_raw_parts(
+            e as *const u8,
+            p as usize - e as usize,
+        ));
+        record.extend_from_slice(CStr::from_ptr(q).to_bytes());
+        record.push(b'\n');
+        let _ = (&mut *crate::output::stdout()).write_all(&record);
     }
 
     0
@@ -939,7 +936,7 @@ pub unsafe fn localcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
     let mut name: *mut c_char;
 
     if localvar_stack_mut().is_empty() {
-        crate::error::sh_error(cstr(b"not in a function\0"), &[]);
+        crate::error::sh_error(b"not in a function");
     }
 
     argv = argptr;
@@ -1173,7 +1170,7 @@ unsafe fn findvar(name: *const c_char) -> *mut var {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::{lock, s, CStr0};
+    use crate::testutil::{CStr0, lock, s};
 
     /// The whole buffer `vp->text` points at, `len` bytes of it.
     unsafe fn text_bytes(name: &str, len: usize) -> Vec<u8> {

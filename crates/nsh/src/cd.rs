@@ -8,14 +8,14 @@
 use bstr::{BStr, BString, ByteSlice};
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 use libc::{c_char, c_int};
+use std::ffi::CStr;
+use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 
 use crate::error::{INTOFF, INTON};
 use crate::mystring::{dotdir, homestr, nullstr};
 use crate::options::{argptr, nextopt};
-use crate::output::VaArg;
-use crate::shell::cstr;
-use crate::var::{bltinlookup, setvar, VEXPORT};
+use crate::var::{VEXPORT, bltinlookup, setvar};
 
 const CD_PHYSICAL: c_int = 1;
 const CD_PRINT: c_int = 2;
@@ -26,7 +26,7 @@ const CD_PRINT: c_int = 2;
 static mut curdir: Option<BString> = None; /* current working directory */
 static mut physdir: Option<BString> = None; /* physical working directory */
 
-/// The bytes `setvar` and `out1fmt` want: a path with the terminator the C's
+/// The bytes `setvar` and shell output want: a path with the terminator the C's
 /// readers read up to, `nullstr`'s empty string when the sentinel is set.
 unsafe fn cbytes(s: &Option<BString>) -> Vec<u8> {
     let mut v = match s {
@@ -135,8 +135,7 @@ pub unsafe fn cdcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
             debug_assert!(libc::strlen(keptbuf.as_ptr() as *const c_char) < len as usize);
             p = keptbuf.as_ptr() as *const c_char;
 
-            if libc::stat64(p, &mut statb) >= 0 && (statb.st_mode & libc::S_IFMT) == libc::S_IFDIR
-            {
+            if libc::stat64(p, &mut statb) >= 0 && (statb.st_mode & libc::S_IFMT) == libc::S_IFDIR {
                 if c != 0 && c != b':' as c_char {
                     flags |= CD_PRINT;
                 }
@@ -146,7 +145,9 @@ pub unsafe fn cdcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
                     break;
                 }
                 /* goto err */
-                crate::error::sh_error(cstr(b"can't cd to %s\0"), &[VaArg::Str(dest)]);
+                let mut message = b"can't cd to ".to_vec();
+                message.extend_from_slice(CStr::from_ptr(dest).to_bytes());
+                crate::error::sh_error(&message);
             }
         }
     }
@@ -157,18 +158,19 @@ pub unsafe fn cdcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         /* docd: */
         if docd(p, flags) != 0 {
             /* err: */
-            crate::error::sh_error(cstr(b"can't cd to %s\0"), &[VaArg::Str(dest)]);
+            let mut message = b"can't cd to ".to_vec();
+            message.extend_from_slice(CStr::from_ptr(dest).to_bytes());
+            crate::error::sh_error(&message);
             /* NOTREACHED */
         }
     }
 
     /* out: */
     if (flags & CD_PRINT) != 0 {
-        let d = cbytes(&*addr_of!(curdir));
-        crate::output::out1fmt(
-            addr_of!(crate::mystring::snlfmt) as *const c_char,
-            &[VaArg::Str(d.as_ptr() as *const c_char)],
-        );
+        let mut d = cbytes(&*addr_of!(curdir));
+        d.pop();
+        d.push(b'\n');
+        let _ = (*crate::output::stdout()).write_all(&d);
     }
     0
 }
@@ -300,10 +302,9 @@ unsafe fn getpwd() -> Option<BString> {
             /* `current_dir` is an OS query on Unix, so this is the errno
              * `getcwd` would have left for the C's `strerror(errno)` path. */
             let errno = err.raw_os_error().unwrap_or(libc::EIO);
-            crate::error::sh_warnx(
-                cstr(b"getcwd() failed: %s\0"),
-                &[VaArg::Str(libc::strerror(errno))],
-            );
+            let mut message = b"getcwd() failed: ".to_vec();
+            message.extend_from_slice(CStr::from_ptr(libc::strerror(errno)).to_bytes());
+            crate::error::sh_warnx(&message);
         }
     }
     None
@@ -315,7 +316,7 @@ pub unsafe fn pwdcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     let flags: c_int;
 
     flags = cdopt();
-    let dir = if flags != 0 {
+    let mut dir = if flags != 0 {
         if (*addr_of!(physdir)).is_none() {
             setpwd_inner(Pwd::Current, 0);
         }
@@ -323,10 +324,9 @@ pub unsafe fn pwdcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     } else {
         cbytes(&*addr_of!(curdir))
     };
-    crate::output::out1fmt(
-        addr_of!(crate::mystring::snlfmt) as *const c_char,
-        &[VaArg::Str(dir.as_ptr() as *const c_char)],
-    );
+    dir.pop();
+    dir.push(b'\n');
+    let _ = (*crate::output::stdout()).write_all(&dir);
     0
 }
 

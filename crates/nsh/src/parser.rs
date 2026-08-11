@@ -12,26 +12,27 @@ use core::cell::{Cell, OnceCell, RefCell};
 use core::mem;
 use core::ptr;
 use core::ptr::addr_of_mut;
+use std::ffi::CStr;
+use std::io::Write;
 use std::rc::Rc;
 
 use bstr::{BStr, BString};
 use libc::{c_char, c_int, c_uint, c_void};
 
 use crate::error::{errlinno, handler, jmploc};
-use crate::expand::{expandarg, restore_handler_expandarg, rmescapes, EXP_QUOTED};
+use crate::expand::{EXP_QUOTED, expandarg, restore_handler_expandarg, rmescapes};
 use crate::input::{
-    pgetc, pgetc_eoa, popfile, pungetc, pungetn, pushstring, setinputstring, unwindfiles,
-    whichprompt, PEOA,
+    PEOA, pgetc, pgetc_eoa, popfile, pungetc, pungetn, pushstring, setinputstring, unwindfiles,
+    whichprompt,
 };
-use crate::output::{fmtstr, VaArg};
 use crate::nodes::{
-    heredoc_body, narg, nbinary, ncase, nclist, ncmd, ndefun, ndup, nfile, nfor, nhere, nif,
-    nnot, npipe, nredir, Node, NodeText, NAND, NAPPEND, NBACKGND, NCLOBBER, NCMD, NFROM, NFROMFD,
-    NFROMTO, NHERE, NOR, NPIPE, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE, NXHERE,
+    NAND, NAPPEND, NBACKGND, NCLOBBER, NCMD, NFROM, NFROMFD, NFROMTO, NHERE, NOR, NPIPE, NREDIR,
+    NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE, NXHERE, Node, NodeText, heredoc_body, narg,
+    nbinary, ncase, nclist, ncmd, ndefun, ndup, nfile, nfor, nhere, nif, nnot, npipe, nredir,
 };
 use crate::syntax::{
-    digit_val, is_digit, is_in_name, is_name, is_special, syntax_at, Syntax, CBACK, CBQUOTE,
-    CCTL, CDQUOTE, CENDQUOTE, CENDVAR, CEOF, CLP, CNL, CRP, CSQUOTE, CVAR, CWORD, PEOF,
+    CBACK, CBQUOTE, CCTL, CDQUOTE, CENDQUOTE, CENDVAR, CEOF, CLP, CNL, CRP, CSQUOTE, CVAR, CWORD,
+    PEOF, Syntax, digit_val, is_digit, is_in_name, is_name, is_special, syntax_at,
 };
 
 // ---------------------------------------------------------------------
@@ -867,8 +868,7 @@ unsafe fn simplecmd() -> Option<Node> {
                 name = word.text.as_ptr();
                 bcmd = crate::exec::find_builtin(name);
                 if goodname(name) == 0
-                    || (!bcmd.is_null()
-                        && ((*bcmd).flags & crate::builtins::BUILTIN_SPECIAL) != 0)
+                    || (!bcmd.is_null() && ((*bcmd).flags & crate::builtins::BUILTIN_SPECIAL) != 0)
                 {
                     synerror(c"Bad function name".as_ptr());
                 }
@@ -929,7 +929,9 @@ pub unsafe fn fixredir(n: &Node, text: *const c_char, err: c_int) {
         d.dupfd.set(-1);
     } else {
         if err != 0 {
-            crate::error::sh_error(c"Bad fd number: %s".as_ptr(), &[VaArg::Str(text)]);
+            let mut message = b"Bad fd number: ".to_vec();
+            message.extend_from_slice(CStr::from_ptr(text).to_bytes());
+            crate::error::sh_error(&message);
         } else {
             *d.vname.borrow_mut() = Some(Box::new(makename()));
         }
@@ -1481,9 +1483,7 @@ unsafe fn readtoken1(
                     if st.c == st.dollarsq {
                         dollarsq_escape(&mut st.out);
                     } else {
-                        if (st.eofmark.is_none() as c_int
-                            | st.syn().dblquote
-                            | st.syn().varnest)
+                        if (st.eofmark.is_none() as c_int | st.syn().dblquote | st.syn().varnest)
                             != 0
                         {
                             st.out.push(CTLESC as u8);
@@ -1656,8 +1656,7 @@ unsafe fn readtoken1(
     if st.syn().syntax == ARISYNTAX() {
         synerror(c"Missing '))'".as_ptr());
     }
-    if (st.syn().syntax != BASESYNTAX() && st.eofmark.is_none()) || st.syn().backq != 0
-    {
+    if (st.syn().syntax != BASESYNTAX() && st.eofmark.is_none()) || st.syn().backq != 0 {
         synerror(c"Unterminated quoted string".as_ptr());
     }
     if st.syn().varnest != 0 {
@@ -2016,8 +2015,7 @@ unsafe fn parsesub(st: &mut Rt1<'_>) -> bool {
             newsyn = DQSYNTAX();
         }
 
-        if (newsyn != st.syn().syntax || st.syn().innerdq != 0) && subtype != VSNORMAL
-        {
+        if (newsyn != st.syn().syntax || st.syn().innerdq != 0) && subtype != VSNORMAL {
             synstack_ops::push(&mut st.synstack, newsyn);
 
             st.syn_mut().varpushed += 1;
@@ -2224,25 +2222,17 @@ pub unsafe fn endofname(name: *const c_char) -> *mut c_char {
 // [spec:dash:sem:parser.synexpect-fn]
 unsafe fn synexpect(token: c_int) -> ! {
     let mut msg: [c_char; 64] = [0; 64];
+    let mut message = Vec::new();
 
+    message.extend_from_slice(CStr::from_ptr(tokname.0[lasttoken as usize]).to_bytes());
+    message.extend_from_slice(b" unexpected");
     if token >= 0 {
-        fmtstr(
-            msg.as_mut_ptr(),
-            64,
-            c"%s unexpected (expecting %s)".as_ptr(),
-            &[
-                VaArg::Str(tokname.0[lasttoken as usize]),
-                VaArg::Str(tokname.0[token as usize]),
-            ],
-        );
-    } else {
-        fmtstr(
-            msg.as_mut_ptr(),
-            64,
-            c"%s unexpected".as_ptr(),
-            &[VaArg::Str(tokname.0[lasttoken as usize])],
-        );
+        message.extend_from_slice(b" (expecting ");
+        message.extend_from_slice(CStr::from_ptr(tokname.0[token as usize]).to_bytes());
+        message.push(b')');
     }
+    let copied = message.len().min(msg.len() - 1);
+    core::ptr::copy_nonoverlapping(message.as_ptr(), msg.as_mut_ptr() as *mut u8, copied);
     synerror(msg.as_ptr());
     /* NOTREACHED */
 }
@@ -2252,7 +2242,9 @@ unsafe fn synexpect(token: c_int) -> ! {
 #[allow(unreachable_code)]
 unsafe fn synerror(msg: *const c_char) -> ! {
     errlinno = crate::plinno!();
-    crate::error::sh_error(c"Syntax error: %s".as_ptr(), &[VaArg::Str(msg)]);
+    let mut message = b"Syntax error: ".to_vec();
+    message.extend_from_slice(CStr::from_ptr(msg).to_bytes());
+    crate::error::sh_error(&message);
     /* NOTREACHED */
     unreachable!()
 }
@@ -2272,7 +2264,8 @@ unsafe fn setprompt(which: c_int) {
         /* `pushstackmark(&smark, stackblocksize())` bounded the prompt
          * `expandstr` had left in the region for `out2str` to read.  The
          * expansion buffer is owned, so there is nothing to bound. */
-        crate::output::out2str(getprompt(ptr::null_mut()));
+        let prompt = CStr::from_ptr(getprompt(ptr::null_mut())).to_bytes();
+        let _ = (*crate::output::stderr()).write_all(prompt);
     }
 }
 

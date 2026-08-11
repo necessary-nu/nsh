@@ -15,6 +15,8 @@
 
 use core::ptr::null_mut;
 use libc::{c_char, c_int, c_uint};
+use std::ffi::CStr;
+use std::io::Write as _;
 
 use bstr::BString;
 
@@ -130,11 +132,11 @@ pub unsafe fn readcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         }
     }
     if !prompt.is_null() && libc::isatty(crate::streams::streams().stdin) != 0 {
-        crate::output::out2str(prompt);
+        let _ = (&mut *crate::output::stderr()).write_all(CStr::from_ptr(prompt).to_bytes());
     }
     ap = crate::options::argptr;
     if (*ap).is_null() {
-        crate::sh_error!(b"arg count\0".as_ptr() as *const c_char);
+        crate::error::sh_error(b"arg count");
     }
 
     status = 0;
@@ -300,12 +302,11 @@ pub unsafe fn umaskcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
                 i += 1;
             }
             *ap.offset(-1) = b'\0' as c_char;
-            crate::out1fmt!(
-                (core::ptr::addr_of!(crate::mystring::snlfmt) as *const c_char),
-                buf.as_ptr()
-            );
+            let mut record = CStr::from_ptr(buf.as_ptr()).to_bytes().to_vec();
+            record.push(b'\n');
+            let _ = (&mut *crate::output::stdout()).write_all(&record);
         } else {
-            crate::out1fmt!(b"%.4o\n\0".as_ptr() as *const c_char, mask);
+            let _ = writeln!(&mut *crate::output::stdout(), "{mask:04o}");
         }
     } else {
         let mut new_mask: c_int;
@@ -314,10 +315,9 @@ pub unsafe fn umaskcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
             new_mask = 0;
             loop {
                 if *ap >= b'8' as c_char || *ap < b'0' as c_char {
-                    crate::sh_error!(
-                        (core::ptr::addr_of!(crate::mystring::illnum) as *const c_char),
-                        *crate::options::argptr
-                    );
+                    let mut message = b"Illegal number: ".to_vec();
+                    message.extend_from_slice(CStr::from_ptr(*crate::options::argptr).to_bytes());
+                    crate::error::sh_error(&message);
                 }
                 new_mask = (new_mask << 3) + (*ap as c_int - '0' as c_int);
                 ap = ap.add(1);
@@ -413,10 +413,9 @@ pub unsafe fn umaskcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
                     break 'sym;
                 }
                 // error:
-                crate::sh_error!(
-                    b"Illegal mode: %s\0".as_ptr() as *const c_char,
-                    *crate::options::argptr
-                );
+                let mut message = b"Illegal mode: ".to_vec();
+                message.extend_from_slice(CStr::from_ptr(*crate::options::argptr).to_bytes());
+                crate::error::sh_error(&message);
                 /* return 1; -- NOTREACHED, sh_error does not return */
             }
         }
@@ -549,10 +548,11 @@ unsafe fn printlim(how: limtype, limit: *const libc::rlimit, l: *const limits) {
     }
 
     if val == libc::RLIM_INFINITY {
-        crate::out1fmt!(b"unlimited\n\0".as_ptr() as *const c_char);
+        let _ = writeln!(&mut *crate::output::stdout(), "unlimited");
     } else {
         val /= (*l).factor as libc::rlim_t;
-        crate::out1fmt!(b"%jd\n\0".as_ptr() as *const c_char, val as libc::intmax_t);
+        let signed = val as libc::intmax_t;
+        let _ = writeln!(&mut *crate::output::stdout(), "{signed}");
     }
 }
 
@@ -609,7 +609,7 @@ pub unsafe fn ulimitcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         let mut p: *mut c_char = *crate::options::argptr;
 
         if all != 0 || !(*crate::options::argptr.add(1)).is_null() {
-            crate::sh_error!(b"too many arguments\0".as_ptr() as *const c_char);
+            crate::error::sh_error(b"too many arguments");
         }
         if libc::strcmp(p, b"unlimited\0".as_ptr() as *const c_char) == 0 {
             val = libc::RLIM_INFINITY;
@@ -634,7 +634,7 @@ pub unsafe fn ulimitcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
                 }
             }
             if c != 0 {
-                crate::sh_error!(b"bad number\0".as_ptr() as *const c_char);
+                crate::error::sh_error(b"bad number");
             }
             val = val.wrapping_mul((*l).factor as libc::rlim_t);
         }
@@ -643,7 +643,14 @@ pub unsafe fn ulimitcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         l = limits.as_ptr();
         while !(*l).name.is_null() {
             libc::getrlimit((*l).cmd as libc::__rlimit_resource_t, &mut limit);
-            crate::out1fmt!(b"%-20s \0".as_ptr() as *const c_char, (*l).name);
+            let name = CStr::from_ptr((*l).name).to_bytes();
+            let mut record = Vec::with_capacity(name.len().max(20) + 1);
+            record.extend_from_slice(name);
+            if record.len() < 20 {
+                record.resize(20, b' ');
+            }
+            record.push(b' ');
+            let _ = (&mut *crate::output::stdout()).write_all(&record);
             printlim(how, &limit, l);
             l = l.add(1);
         }
@@ -659,10 +666,12 @@ pub unsafe fn ulimitcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
             limit.rlim_cur = val;
         }
         if libc::setrlimit((*l).cmd as libc::__rlimit_resource_t, &limit) < 0 {
-            crate::sh_error!(
-                b"error setting limit (%s)\0".as_ptr() as *const c_char,
-                libc::strerror(*libc::__errno_location())
+            let mut message = b"error setting limit (".to_vec();
+            message.extend_from_slice(
+                CStr::from_ptr(libc::strerror(*libc::__errno_location())).to_bytes(),
             );
+            message.push(b')');
+            crate::error::sh_error(&message);
         }
     } else {
         printlim(how, &limit, l);

@@ -1,4 +1,4 @@
-use super::{synstack, Syntax};
+use super::{Syntax, synstack};
 
 // [spec:dash:def:parser.synstack-push-fn]
 // [spec:dash:sem:parser.synstack-push-fn]

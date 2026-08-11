@@ -10,10 +10,9 @@
 //! `prec[]` is indexed by `op - ARITH_BINOP_MIN`.
 
 use core::ptr;
+use std::ffi::CStr;
 
 use libc::{c_char, c_int};
-
-use crate::output::VaArg;
 
 use crate::var::{lookupvarint, setvarint};
 
@@ -132,10 +131,12 @@ pub const ARITH_MAX_PREC: c_int = 8;
 // [spec:dash:sem:arith-yacc.yyerror-fn]
 #[allow(unreachable_code)]
 unsafe fn yyerror(s: *const c_char) -> ! {
-    crate::error::sh_error(
-        c"arithmetic expression: %s: \"%s\"".as_ptr(),
-        &[VaArg::Str(s), VaArg::Str(arith_startbuf)],
-    );
+    let mut message = b"arithmetic expression: ".to_vec();
+    message.extend_from_slice(CStr::from_ptr(s).to_bytes());
+    message.extend_from_slice(b": \"");
+    message.extend_from_slice(CStr::from_ptr(arith_startbuf).to_bytes());
+    message.push(b'"');
+    crate::error::sh_error(&message);
     /* NOTREACHED */
     unreachable!()
 }
@@ -179,11 +180,7 @@ unsafe fn do_binop(op: c_int, a: intmax_t, b: intmax_t) -> intmax_t {
             if b == 0 || (a == intmax_t::MIN && b == -1) {
                 yyerror(c"division error".as_ptr());
             }
-            if op == ARITH_REM {
-                a % b
-            } else {
-                a / b
-            }
+            if op == ARITH_REM { a % b } else { a / b }
         }
     }
 }
@@ -351,11 +348,7 @@ unsafe fn cond(token: c_int, val: *mut yystype, op: c_int, noeval: c_int) -> int
 
     c = cond(token, val, yylex(), noeval | (a != 0) as c_int);
 
-    if a != 0 {
-        b
-    } else {
-        c
-    }
+    if a != 0 { b } else { c }
 }
 
 // [spec:dash:def:arith-yacc.assignment-fn]

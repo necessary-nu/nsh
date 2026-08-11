@@ -1,12 +1,8 @@
 //! Literal port of `src/bltin/times.c` — the `times` builtin.
 //! Rules: `docs/spec/port/src/bltin/times.md`.
 //!
-//! Built as part of the `bltin` sub-library, so `printf` here is the
-//! shell's own `out1fmt` shim from `bltin.h` (the `USE_GLIBC_STDIO`
-//! configuration, which would use real stdio, is not the one we port).
-//!
-//! Cross-module signatures assumed: `crate::output::out1fmt!` via
-//! `bltin.h`'s `printf` alias.
+//! Built as part of the `bltin` sub-library, but its fixed numeric record
+//! now uses Rust formatting directly instead of the old C-variadic shim.
 
 /*
  * Copyright (c) 1999 Herbert Xu <herbert@gondor.apana.org.au>
@@ -15,6 +11,7 @@
 
 use core::mem;
 use libc::{c_char, c_int};
+use std::io::Write as _;
 
 // [spec:dash:def:times.timescmd-fn]
 // [spec:dash:sem:times.timescmd-fn]
@@ -48,16 +45,10 @@ pub unsafe fn timescmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     mcstime = (cstime / 60.0) as c_int;
     cstime -= mcstime as f64 * 60.0;
 
-    printf!(
-        c"%dm%fs %dm%fs\n%dm%fs %dm%fs\n".as_ptr(),
-        mutime,
-        utime,
-        mstime,
-        stime,
-        mcutime,
-        cutime,
-        mcstime,
-        cstime
+    let _ = write!(
+        &mut *crate::output::stdout(),
+        "{mutime}m{utime:.6}s {mstime}m{stime:.6}s\n\
+         {mcutime}m{cutime:.6}s {mcstime}m{cstime:.6}s\n"
     );
     0
 }

@@ -5,17 +5,17 @@
 //! by `signo`, slot 0 being the `EXIT` trap.
 
 use bstr::BString;
-use libc::{c_char, c_int, sigset_t};
 use core::ptr::{addr_of, addr_of_mut, null, null_mut};
+use libc::{c_char, c_int, sigset_t};
+use std::ffi::CStr;
+use std::io::Write;
 
 /// `sig_atomic_t` — `int` on every platform dash supports.
 pub type sig_atomic_t = c_int;
 
-use crate::error::{jmploc, INTOFF, INTON};
-use crate::eval::{evalskip, exitstatus, savestatus, SKIPFUNC, SKIPFUNCDEF};
+use crate::error::{INTOFF, INTON, jmploc};
+use crate::eval::{SKIPFUNC, SKIPFUNCDEF, evalskip, exitstatus, savestatus};
 use crate::mystring::nullstr;
-use crate::output::VaArg;
-use crate::shell::cstr;
 use crate::nodes::Node;
 use crate::options::{argptr, nextopt};
 
@@ -103,13 +103,16 @@ pub unsafe fn trapcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         while signo < NSIG as c_int {
             if let Some(t) = &(*addr_of!(trap))[signo as usize] {
                 let t = cbytes(t);
-                crate::output::out1fmt(
-                    cstr(b"trap -- %s %s\n\0"),
-                    &[
-                        VaArg::Str(crate::mystring::single_quote(t.as_ptr() as *const c_char)),
-                        VaArg::Str(crate::signames::signal_names[signo as usize].as_ptr()),
-                    ],
+                let quoted = crate::mystring::single_quote(t.as_ptr() as *const c_char);
+                let mut line = b"trap -- ".to_vec();
+                line.extend_from_slice(CStr::from_ptr(quoted).to_bytes());
+                line.push(b' ');
+                line.extend_from_slice(
+                    CStr::from_ptr(crate::signames::signal_names[signo as usize].as_ptr())
+                        .to_bytes(),
                 );
+                line.push(b'\n');
+                let _ = (*crate::output::stdout()).write_all(&line);
             }
             signo += 1;
         }
@@ -127,11 +130,10 @@ pub unsafe fn trapcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     while !(*ap).is_null() {
         signo = decode_signal(*ap, 0);
         if signo < 0 {
-            crate::output::outfmt(
-                crate::output::out2,
-                cstr(b"trap: %s: bad trap\n\0"),
-                &[VaArg::Str(*ap)],
-            );
+            let mut message = b"trap: ".to_vec();
+            message.extend_from_slice(CStr::from_ptr(*ap).to_bytes());
+            message.extend_from_slice(b": bad trap\n");
+            let _ = (*crate::output::stderr()).write_all(&message);
             return 1;
         }
         INTOFF();
@@ -162,10 +164,7 @@ pub unsafe fn trapcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
          * slot is briefly a dangling non-NULL pointer; `onsig` only tests it
          * for NULL, so it reads "a trap is set" throughout. A replace reads
          * the same way and never leaves a stale pointer for it to load. */
-        drop(core::mem::replace(
-            &mut trap_mut()[signo as usize],
-            newtrap,
-        ));
+        drop(core::mem::replace(&mut trap_mut()[signo as usize], newtrap));
         if signo != 0 {
             setsignal(signo);
         }
@@ -235,7 +234,9 @@ pub unsafe fn setsignal(signo: c_int) {
     if crate::shellmain::rootshell() != 0 && action == S_DFL as c_int && lvforked == 0 {
         match signo {
             libc::SIGINT => {
-                if crate::options::optlist[crate::options::iflag] != 0 || !crate::options::minusc.is_null() || crate::options::optlist[crate::options::sflag] == 0
+                if crate::options::optlist[crate::options::iflag] != 0
+                    || !crate::options::minusc.is_null()
+                    || crate::options::optlist[crate::options::sflag] == 0
                 {
                     action = S_CATCH as c_int;
                 }
@@ -535,7 +536,11 @@ pub unsafe fn decode_signal(string: *const c_char, minsig: c_int) -> c_int {
 
     signo = minsig;
     while signo < NSIG as c_int {
-        if libc::strcasecmp(string, crate::signames::signal_names[signo as usize].as_ptr()) == 0 {
+        if libc::strcasecmp(
+            string,
+            crate::signames::signal_names[signo as usize].as_ptr(),
+        ) == 0
+        {
             return signo;
         }
         signo += 1;

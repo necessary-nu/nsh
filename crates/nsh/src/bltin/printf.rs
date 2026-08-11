@@ -23,9 +23,11 @@
 //!     tables; `SQSYNTAX` is `sqsyntax + SYNBASE` with `SYNBASE` 129
 //!     (src/mksyntax.c:147,152)
 
+use core::ffi::CStr;
 use core::mem;
 use core::ptr;
 use libc::{c_char, c_double, c_int, c_uint, c_void, intmax_t, uintmax_t};
+use std::io::Write as _;
 
 use bstr::BString;
 
@@ -119,54 +121,96 @@ fn octtobin(c: c_int) -> c_int {
 // reach the caller's locals the way a C macro does.
 // ---------------------------------------------------------------------
 
+/// The builtin's existing single-conversion compatibility boundary.
+///
+/// `printfcmd` has already parsed the user format and temporarily terminated
+/// one conversion. This stays local to the builtin; shell output itself is an
+/// `io::Write` and has no runtime format-string API.
+// [spec:dash:def:output.xasprintf-fn]
+// [spec:dash:sem:output.xasprintf-fn]
+// [spec:dash:def:output.xvasprintf-fn]
+// [spec:dash:sem:output.xvasprintf-fn]
+// [spec:dash:def:output.xvsnprintf-fn]
+// [spec:dash:sem:output.xvsnprintf-fn]
+fn snprintf_conversion(mut render: impl FnMut(*mut c_char, usize) -> c_int) -> Vec<u8> {
+    let len = render(ptr::null_mut(), 0);
+    if len < 0 {
+        unsafe { crate::error::sh_error(b"xvsnprintf failed") };
+    }
+
+    let mut formatted = vec![0; len as usize + 1];
+    let written = render(formatted.as_mut_ptr() as *mut c_char, formatted.len());
+    if written < 0 {
+        unsafe { crate::error::sh_error(b"xvsnprintf failed") };
+    }
+    debug_assert_eq!(written, len);
+    formatted
+}
+
+macro_rules! snprintf_conversion {
+    ($format:expr, $value:expr) => {{
+        let __format = $format;
+        let __value = $value;
+        snprintf_conversion(|__dest, __size| unsafe {
+            libc::snprintf(__dest, __size, __format, __value)
+        })
+    }};
+    ($format:expr, $width:expr, $value:expr) => {{
+        let __format = $format;
+        let __width = $width;
+        let __value = $value;
+        snprintf_conversion(|__dest, __size| unsafe {
+            libc::snprintf(__dest, __size, __format, __width, __value)
+        })
+    }};
+    ($format:expr, $width:expr, $precision:expr, $value:expr) => {{
+        let __format = $format;
+        let __width = $width;
+        let __precision = $precision;
+        let __value = $value;
+        snprintf_conversion(|__dest, __size| unsafe {
+            libc::snprintf(__dest, __size, __format, __width, __precision, __value)
+        })
+    }};
+}
+
 macro_rules! PF {
     ($param:expr, $array:expr, $f:expr, $func:expr) => {{
         let __array: *mut c_int = $array;
         // (char *)param - (char *)array
-        match ($param as usize).wrapping_sub(__array as usize) {
+        let __formatted = match ($param as usize).wrapping_sub(__array as usize) {
             // case 0:
-            0 => {
-                printf!($f, $func);
-            }
+            0 => snprintf_conversion!($f, $func),
             // case sizeof(*param):
             __n if __n == mem::size_of::<c_int>() => {
-                printf!($f, *__array.add(0), $func);
+                snprintf_conversion!($f, *__array.add(0), $func)
             }
             // default:
-            _ => {
-                printf!($f, *__array.add(0), *__array.add(1), $func);
-            }
-        }
+            _ => snprintf_conversion!($f, *__array.add(0), *__array.add(1), $func),
+        };
+        let _ = (&mut *crate::output::stdout()).write_all(&__formatted[..__formatted.len() - 1]);
     }};
 }
 
 macro_rules! ASPF {
     ($param:expr, $array:expr, $sp:expr, $out:expr, $f:expr, $func:expr) => {{
         let __array: *mut c_int = $array;
-        let ret: c_int;
         // (char *)param - (char *)array
-        match ($param as usize).wrapping_sub(__array as usize) {
+        let __formatted = match ($param as usize).wrapping_sub(__array as usize) {
             // case 0:
-            0 => {
-                ret = crate::output::xasprintf!($sp, $out, $f, $func);
-            }
+            0 => snprintf_conversion!($f, $func),
             // case sizeof(*param):
             __n if __n == mem::size_of::<c_int>() => {
-                ret = crate::output::xasprintf!($sp, $out, $f, *__array.add(0), $func);
+                snprintf_conversion!($f, *__array.add(0), $func)
             }
             // default:
-            _ => {
-                ret = crate::output::xasprintf!(
-                    $sp,
-                    $out,
-                    $f,
-                    *__array.add(0),
-                    *__array.add(1),
-                    $func
-                );
-            }
-        }
-        ret
+            _ => snprintf_conversion!($f, *__array.add(0), *__array.add(1), $func),
+        };
+        let __ret = (__formatted.len() - 1) as c_int;
+        let __out: &mut Vec<u8> = $out;
+        *__out = __formatted;
+        *$sp = __out.as_mut_ptr() as *mut c_char;
+        __ret
     }};
 }
 
@@ -244,7 +288,8 @@ unsafe fn print_escape_str(
     }
 
     // easy:
-    crate::output::out1mem(p, total as usize);
+    let _ = (&mut *crate::output::stdout())
+        .write_all(core::slice::from_raw_parts(p as *const u8, total as usize));
 
     done
 }
@@ -267,7 +312,7 @@ pub unsafe fn printfcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
     format = *argv;
 
     if format.is_null() {
-        error!(c"usage: printf format [arg ...]".as_ptr());
+        crate::error::sh_error(b"usage: printf format [arg ...]");
     }
 
     argv = argv.add(1);
@@ -311,7 +356,10 @@ pub unsafe fn printfcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
                     ret = conv_escape(fmt, cp.as_mut_ptr(), false);
                     fmt = fmt.add((ret >> 4) as usize);
                     debug_assert!((ret & 15) as usize <= CONV_ESCAPE_SLOP);
-                    crate::output::out1mem(cp.as_ptr(), (ret & 15) as usize);
+                    let _ = (&mut *crate::output::stdout()).write_all(core::slice::from_raw_parts(
+                        cp.as_ptr() as *const u8,
+                        (ret & 15) as usize,
+                    ));
                     continue;
                 }
                 if ch != b'%' as c_int
@@ -320,7 +368,7 @@ pub unsafe fn printfcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
                         true
                     })
                 {
-                    putchar!(ch);
+                    let _ = (&mut *crate::output::stdout()).write_all(&[ch as u8]);
                     continue;
                 }
 
@@ -355,7 +403,7 @@ pub unsafe fn printfcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
 
                 ch = *fmt as c_int;
                 if ch == 0 {
-                    error!(c"missing format character".as_ptr());
+                    crate::error::sh_error(b"missing format character");
                 }
                 /* null terminate format string to we can use it
                 as an argument to printf. */
@@ -393,7 +441,10 @@ pub unsafe fn printfcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
                         PF!(param, array.as_mut_ptr(), start, p);
                     }
                     _ => {
-                        error!(c"%s: invalid directive".as_ptr(), start);
+                        let mut message = Vec::new();
+                        message.extend_from_slice(CStr::from_ptr(start).to_bytes());
+                        message.extend_from_slice(b": invalid directive");
+                        crate::error::sh_error(&message);
                     }
                 }
                 fmt = fmt.add(1);
@@ -822,14 +873,21 @@ unsafe fn getdouble() -> c_double {
 // [spec:dash:sem:printf.check-conversion-fn]
 unsafe fn check_conversion(s: *const c_char, ep: *const c_char) {
     if *ep != 0 {
+        let mut message = Vec::new();
+        message.extend_from_slice(CStr::from_ptr(s).to_bytes());
         if ep == s {
-            warnx!(c"%s: expected numeric value".as_ptr(), s);
+            message.extend_from_slice(b": expected numeric value");
         } else {
-            warnx!(c"%s: not completely converted".as_ptr(), s);
+            message.extend_from_slice(b": not completely converted");
         }
+        crate::error::sh_warnx(&message);
         rval = 1;
     } else if *libc::__errno_location() == libc::ERANGE {
-        warnx!(c"%s: %s".as_ptr(), s, libc::strerror(libc::ERANGE));
+        let mut message = Vec::new();
+        message.extend_from_slice(CStr::from_ptr(s).to_bytes());
+        message.extend_from_slice(b": ");
+        message.extend_from_slice(CStr::from_ptr(libc::strerror(libc::ERANGE)).to_bytes());
+        crate::error::sh_warnx(&message);
         rval = 1;
     }
 }

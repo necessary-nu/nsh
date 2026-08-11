@@ -31,20 +31,22 @@
 use bstr::BString;
 use core::ptr::{addr_of_mut, null, null_mut};
 use libc::{c_char, c_int};
+use std::ffi::CStr;
+use std::io::Write as _;
 
-use crate::builtins::{builtincmd, BUILTIN_ASSIGN, BUILTIN_REGULAR, BUILTIN_SPECIAL};
-use crate::error::{jmploc, FORCEINTON, INTOFF, INTON};
-use crate::exec::{cmdentry, find_command, param, shellexec};
+use crate::builtins::{BUILTIN_ASSIGN, BUILTIN_REGULAR, BUILTIN_SPECIAL, builtincmd};
+use crate::error::{FORCEINTON, INTOFF, INTON, jmploc};
 use crate::exec::{CMDBUILTIN, CMDFUNCTION, CMDNORMAL, CMDUNKNOWN, DO_ERR, DO_NOFUNC, DO_REGBLTIN};
-use crate::expand::{arglist, strlist};
+use crate::exec::{cmdentry, find_command, param, shellexec};
 use crate::expand::{EXP_FULL, EXP_MBCHAR, EXP_REDIR, EXP_TILDE, EXP_VARTILDE};
+use crate::expand::{arglist, strlist};
 use crate::jobs::FORK_NOJOB;
-use crate::nodes::{funcnode, Node};
 use crate::nodes::{
     NAND, NAPPEND, NBACKGND, NCASE, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO, NIF,
     NNOT, NOR, NPIPE, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE,
 };
-use crate::output::{out1, output};
+use crate::nodes::{Node, funcnode};
+use crate::output::Output;
 use crate::redir::{REDIR_PUSH, REDIR_SAVEFD2};
 use crate::var::VEXPORT;
 
@@ -66,9 +68,9 @@ pub const SKIPFUNCDEF: c_int = 1 << 3;
 #[repr(C)]
 pub struct backcmd {
     /* result of evalbackcmd */
-    pub fd: c_int,        /* file descriptor to read from */
-    pub buf: *mut c_char, /* buffer */
-    pub nleft: c_int,     /* number of chars in buffer */
+    pub fd: c_int,         /* file descriptor to read from */
+    pub buf: *mut c_char,  /* buffer */
+    pub nleft: c_int,      /* number of chars in buffer */
     pub jp: Option<usize>, /* index of the job structure for command */
 }
 
@@ -712,7 +714,7 @@ unsafe fn evalpipe(n: &Node, flags: c_int) -> c_int {
         if has_next {
             if libc::pipe(pip.as_mut_ptr()) < 0 {
                 libc::close(prevfd);
-                crate::sh_error!(b"Pipe call failed\0".as_ptr() as *const c_char);
+                crate::error::sh_error(b"Pipe call failed");
             }
         }
         if crate::jobs::forkshell(Some(jp), Some(cmd), p.backgnd) == 0 {
@@ -1038,7 +1040,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
         lastarg = *nargv.offset(-1);
     }
 
-    crate::output::preverrout.fd = crate::streams::streams().stderr;
+    (*crate::output::previous_stderr()).fd = crate::streams::streams().stderr;
     expredir(&c.redirect);
     redir_stop = crate::redir::pushredir(&c.redirect);
     status = crate::redir::redirectsafe(&c.redirect, REDIR_PUSH | REDIR_SAVEFD2);
@@ -1071,12 +1073,13 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
 
             /* Print the command if xflag is set. */
             if xflag() != 0 && inps4 == 0 {
-                let out: *mut output;
+                let out: *mut Output;
                 let mut sep: c_int;
 
-                out = addr_of_mut!(crate::output::preverrout);
+                out = crate::output::previous_stderr();
                 inps4 = 1;
-                crate::output::outstr(crate::parser::expandstr(crate::var::ps4val()), out);
+                let prompt = crate::parser::expandstr(crate::var::ps4val());
+                let _ = (&mut *out).write_all(CStr::from_ptr(prompt).to_bytes());
                 inps4 = 0;
                 sep = 0;
                 sep = eprintlist(out, &varlist.list, sep);
@@ -1085,7 +1088,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
                  * as `parse_command_args` left it.  A NULL `osp` prints
                  * nothing, which is the empty slice. */
                 eprintlist(out, &arglist.list[osp.unwrap_or(arglist.list.len())..], sep);
-                crate::output::outcslow('\n' as c_int, out);
+                let _ = (&mut *out).write_all(b"\n");
             }
 
             /* Now locate the command. */
@@ -1198,10 +1201,13 @@ unsafe fn evalbltin(
             status = ((*cmd).builtin.unwrap())(argc, argv);
         }
         crate::output::flushall();
-        if crate::output::outerr(out1) != 0 {
-            crate::sh_warnx!(b"%s: I/O error\0".as_ptr() as *const c_char, commandname);
+        if crate::output::outerr(crate::output::stdout()) != 0 {
+            let mut message = Vec::new();
+            message.extend_from_slice(CStr::from_ptr(commandname).to_bytes());
+            message.extend_from_slice(b": I/O error");
+            crate::error::sh_warnx(&message);
         }
-        status |= crate::output::outerr(out1);
+        status |= crate::output::outerr(crate::output::stdout());
         exitstatus = status;
     });
     // cmddone:
@@ -1391,16 +1397,17 @@ pub unsafe fn execcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
 // [spec:dash:def:eval.eprintlist-fn]
 // [spec:dash:sem:eval.eprintlist-fn]
-unsafe fn eprintlist(out: *mut output, list: &[strlist], sep: c_int) -> c_int {
+unsafe fn eprintlist(out: *mut Output, list: &[strlist], sep: c_int) -> c_int {
     let mut sep: c_int = sep;
 
     for sp in list {
-        let mut p: *const c_char;
-
-        p = b" %s\0".as_ptr() as *const c_char;
-        p = p.offset((1 - sep) as isize);
+        let mut record = Vec::new();
+        if sep != 0 {
+            record.push(b' ');
+        }
+        record.extend_from_slice(CStr::from_ptr(sp.textp()).to_bytes());
         sep |= 1;
-        crate::outfmt!(out, p, sp.textp());
+        let _ = (&mut *out).write_all(&record);
     }
 
     sep

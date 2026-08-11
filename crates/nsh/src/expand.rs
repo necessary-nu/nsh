@@ -23,6 +23,7 @@
 
 use core::mem;
 use core::ptr;
+use std::ffi::CStr;
 
 use bstr::BString;
 use libc::{c_char, c_int, c_uint, c_ulong, c_void, intmax_t, size_t, ssize_t, wchar_t};
@@ -39,12 +40,7 @@ type wctype_t = c_ulong;
 
 unsafe extern "C" {
     fn mbrlen(s: *const c_char, n: size_t, ps: *mut libc::mbstate_t) -> size_t;
-    fn mbrtowc(
-        pwc: *mut wchar_t,
-        s: *const c_char,
-        n: size_t,
-        ps: *mut libc::mbstate_t,
-    ) -> size_t;
+    fn mbrtowc(pwc: *mut wchar_t, s: *const c_char, n: size_t, ps: *mut libc::mbstate_t) -> size_t;
     fn mbsrtowcs(
         dst: *mut wchar_t,
         src: *mut *const c_char,
@@ -1199,8 +1195,11 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
                 break;
             }
             loop {
-                i = libc::read(in_.fd, buf.as_mut_ptr() as *mut c_void, mem::size_of_val(&buf))
-                    as c_int;
+                i = libc::read(
+                    in_.fd,
+                    buf.as_mut_ptr() as *mut c_void,
+                    mem::size_of_val(&buf),
+                ) as c_int;
                 if !(i < 0 && *libc::__errno_location() == libc::EINTR) {
                     break;
                 }
@@ -1580,7 +1579,11 @@ unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
             if (flag & EXP_DISCARD) != 0 {
                 return p;
             }
-            cvtnum((if varlen > 0 { varlen } else { 0 }) as intmax_t, flag, expb());
+            cvtnum(
+                (if varlen > 0 { varlen } else { 0 }) as intmax_t,
+                flag,
+                expb(),
+            );
             really_record = true;
             break 'again; /* goto really_record */
         }
@@ -1859,7 +1862,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
             return -1;
         }
 
-        crate::sh_error!(b"Bad substitution\0".as_ptr() as *const c_char);
+        crate::error::sh_error(b"Bad substitution");
     }
 
     flags &= if discard != 0 {
@@ -2456,7 +2459,7 @@ unsafe fn expandmeta_glob(words: Vec<strlist>) {
                         break 'nometa2;
                     } else {
                         /* default:  GLOB_NOSPACE */
-                        crate::sh_error!(b"Out of space\0".as_ptr() as *const c_char);
+                        crate::error::sh_error(b"Out of space");
                     }
                 }
                 /* nometa2: */
@@ -2527,7 +2530,11 @@ unsafe fn expandmeta(words: Vec<strlist>) {
                 savelastp = expargl().len();
 
                 crate::error::INTOFF();
-                p = preglob(str.textp(), RMESCAPE_ALLOC | RMESCAPE_HEAP, Some(&mut pattern));
+                p = preglob(
+                    str.textp(),
+                    RMESCAPE_ALLOC | RMESCAPE_HEAP,
+                    Some(&mut pattern),
+                );
                 len = libc::strlen(p) as c_uint;
 
                 /* The C's top-level `expmeta` starts on whatever block the
@@ -3140,9 +3147,7 @@ unsafe fn pmatch(pattern: *mut c_char, string: *const c_char) -> c_int {
                                 mbp >>= 8;
                                 p = p.offset(mbp as isize);
                             }
-                            if *p == C_MINUS
-                                && *p.offset(1) != C_NUL
-                                && *p.offset(1) != C_RBRACKET
+                            if *p == C_MINUS && *p.offset(1) != C_NUL && *p.offset(1) != C_RBRACKET
                             {
                                 p = p.offset(1);
                                 if *p == CTLESC {
@@ -3430,19 +3435,8 @@ pub unsafe fn casematch(pattern: &crate::nodes::Node, val: *const c_char) -> c_i
 // [spec:dash:def:expand.cvtnum-fn]
 // [spec:dash:sem:expand.cvtnum-fn]
 unsafe fn cvtnum(num: intmax_t, flags: c_int, dst: &mut BString) -> size_t {
-    let mut len: c_int = crate::shell::max_int_length(mem::size_of::<intmax_t>() as c_int);
-    /* `char buf[len]` — a VLA of max_int_length(sizeof(intmax_t)) == 32.
-     * A fixed 64-byte backing array with the same `len` bound handed to
-     * fmtstr is behaviourally identical. */
-    let mut buf: [c_char; 64] = [0; 64];
-
-    len = crate::fmtstr!(
-        buf.as_mut_ptr(),
-        len as size_t,
-        b"%jd\0".as_ptr() as *const c_char,
-        num,
-    );
-    memtodest(buf.as_ptr(), len as size_t, flags, dst)
+    let value = format!("{num}");
+    memtodest(value.as_ptr() as *const c_char, value.len(), flags, dst)
 }
 
 // [spec:dash:def:expand.varunset-fn]
@@ -3467,13 +3461,13 @@ unsafe fn varunset(
             msg = umsg;
         }
     }
-    crate::sh_error!(
-        b"%.*s: %s%s\0".as_ptr() as *const c_char,
-        (end.offset_from(var) - 1) as c_int,
-        var,
-        msg,
-        tail,
-    )
+    let name_len = (end.offset_from(var) - 1).max(0) as usize;
+    let mut message = Vec::new();
+    message.extend_from_slice(core::slice::from_raw_parts(var as *const u8, name_len));
+    message.extend_from_slice(b": ");
+    message.extend_from_slice(CStr::from_ptr(msg).to_bytes());
+    message.extend_from_slice(CStr::from_ptr(tail).to_bytes());
+    crate::error::sh_error(&message)
 }
 
 // [spec:dash:def:expand.restore-handler-expandarg-fn]

@@ -12,13 +12,13 @@
 //! where they change behaviour, and `test_access` — the `#else` branch of
 //! `HAVE_FACCESSAT` — is compiled in regardless because `exec.c` needs it.
 //!
-//! Cross-module signatures assumed (see the port report):
-//!   * `crate::mystring::atomax10(*const c_char) -> intmax_t`
-//!   * `crate::error::sh_error!` (diverging), via `bltin.h`'s `error` alias
+//! Cross-module signature assumed (see the port report):
+//! `crate::mystring::atomax10(*const c_char) -> intmax_t`.
 
 use core::mem;
 use core::ptr;
 use libc::{c_char, c_int, c_short, intmax_t};
+use std::ffi::CStr;
 
 /* test(1) accepts the following grammar:
     oexpr	::= aexpr | aexpr "-o" oexpr ;
@@ -183,11 +183,7 @@ const HAVE_TRADITIONAL_FACCESSAT: bool = false;
 // [spec:dash:sem:test.faccessat-confused-about-superuser-fn]
 #[inline]
 unsafe fn faccessat_confused_about_superuser() -> c_int {
-    if HAVE_TRADITIONAL_FACCESSAT {
-        1
-    } else {
-        0
-    }
+    if HAVE_TRADITIONAL_FACCESSAT { 1 } else { 0 }
 }
 
 // [spec:dash:def:test.getn-fn]
@@ -223,7 +219,7 @@ pub unsafe fn testcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
     if **argv == b'[' as c_char {
         argc -= 1;
         if *(*argv.add(argc as usize)) != b']' as c_char {
-            error!(c"missing ]".as_ptr());
+            crate::error::sh_error(b"missing ]");
         }
         *argv.add(argc as usize) = ptr::null_mut();
     }
@@ -287,11 +283,13 @@ pub unsafe fn testcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
 // [spec:dash:def:test.syntax-fn]
 // [spec:dash:sem:test.syntax-fn]
 unsafe fn syntax(op: *const c_char, msg: *const c_char) -> ! {
+    let mut message = Vec::new();
     if !op.is_null() && *op != 0 {
-        error!(c"%s: %s".as_ptr(), op, msg)
-    } else {
-        error!(c"%s".as_ptr(), msg)
+        message.extend_from_slice(CStr::from_ptr(op).to_bytes());
+        message.extend_from_slice(b": ");
     }
+    message.extend_from_slice(CStr::from_ptr(msg).to_bytes());
+    crate::error::sh_error(&message)
 }
 
 // [spec:dash:def:test.oexpr-fn]
@@ -535,8 +533,7 @@ unsafe fn newerf(f1: *const c_char, f2: *const c_char) -> bool {
     }
 
     // #ifdef HAVE_ST_MTIM — libc names the members st_mtime/st_mtime_nsec.
-    b1.st_mtime > b2.st_mtime
-        || (b1.st_mtime == b2.st_mtime && b1.st_mtime_nsec > b2.st_mtime_nsec)
+    b1.st_mtime > b2.st_mtime || (b1.st_mtime == b2.st_mtime && b1.st_mtime_nsec > b2.st_mtime_nsec)
     // #else return b1.st_mtime > b2.st_mtime;
 }
 
@@ -554,8 +551,7 @@ unsafe fn olderf(f1: *const c_char, f2: *const c_char) -> bool {
     }
 
     // #ifdef HAVE_ST_MTIM
-    b1.st_mtime < b2.st_mtime
-        || (b1.st_mtime == b2.st_mtime && b1.st_mtime_nsec < b2.st_mtime_nsec)
+    b1.st_mtime < b2.st_mtime || (b1.st_mtime == b2.st_mtime && b1.st_mtime_nsec < b2.st_mtime_nsec)
     // #else return b1.st_mtime < b2.st_mtime;
 }
 

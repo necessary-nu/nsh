@@ -13,8 +13,10 @@
 //! whichever text the level is reading -- the frame's own `buf`, or the
 //! string the innermost `strpush` pushed in front of it.
 
-use libc::{c_char, c_int, c_void, off_t, size_t, tcflag_t};
 use core::ptr::addr_of_mut;
+use libc::{c_char, c_int, c_void, off_t, size_t, tcflag_t};
+use std::ffi::CStr;
+use std::io::Write;
 
 use crate::alias::alias;
 use crate::error::{INTOFF, INTON};
@@ -457,10 +459,7 @@ pub unsafe fn pgetc() -> c_int {
 // [spec:dash:sem:input.pgetc-eoa-fn]
 pub unsafe fn pgetc_eoa() -> c_int {
     let pf = cur_pf();
-    if !pf.strpush.is_empty()
-        && pf.nleft == -1
-        && !pf.strpush[pf.strpush.len() - 1].ap.is_null()
-    {
+    if !pf.strpush.is_empty() && pf.nleft == -1 && !pf.strpush[pf.strpush.len() - 1].ap.is_null() {
         PEOA
     } else {
         pgetc()
@@ -560,15 +559,12 @@ unsafe fn preadfd() -> c_int {
         }
 
         if nr < 0 {
-            if errno() == libc::EINTR
-                && !(pf_at(0).prev.is_some() && crate::trap::pending_sig != 0)
+            if errno() == libc::EINTR && !(pf_at(0).prev.is_some() && crate::trap::pending_sig != 0)
             {
                 continue 'retry;
             }
             if fd == 0 && errno() == libc::EWOULDBLOCK && stdin_clear_nonblock() >= 0 {
-                crate::output::out2str(
-                    b"sh: turning off NDELAY mode\n\0".as_ptr() as *const c_char,
-                );
+                let _ = (*crate::output::stderr()).write_all(b"sh: turning off NDELAY mode\n");
                 continue 'retry;
             }
         }
@@ -702,7 +698,7 @@ unsafe fn preadbuffer() -> c_int {
     INTON();
 
     if crate::options::optlist[crate::options::vflag] != 0 {
-        crate::output::out2str(line);
+        let _ = (*crate::output::stderr()).write_all(CStr::from_ptr(line).to_bytes());
         /* #ifdef FLUSHERR flushout(out2); */
     }
 

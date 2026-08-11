@@ -9,8 +9,8 @@
 //! # Cross-module signatures assumed (see the port report)
 //!
 //!   * `crate::error::{jmploc, jmp_buf, handler, setjmp, longjmp,
-//!     sh_error!, suppressint, intpending, onint}`
-//!   * `crate::output::{out1fmt!, outfmt!, out1str, out2str, out2}`
+//!     sh_error, suppressint, intpending, onint}`
+//!   * `crate::output::{stderr, stdout}`
 //!   * `crate::options::{optlist, arg0, optionarg}`
 //!   * `crate::var::{bltinlookup, histsizeval}`
 //!   * `crate::mystring::is_number`
@@ -19,15 +19,18 @@
 //!   * `crate::shellmain::readcmdfile` (src/main.c:283)
 
 use bstr::BString;
+use core::ffi::CStr;
 use core::mem;
 use core::ptr;
-use libc::{FILE, c_char, c_int};
+use libc::{c_char, c_int};
 use nshedit::domain::EditingMode;
+use std::fs::File;
+use std::io::Write;
+use std::os::fd::FromRawFd;
 
 use crate::linedit::{History, HistoryEvent, LineEditor};
 
 unsafe extern "C" {
-    fn sprintf(s: *mut c_char, format: *const c_char, ...) -> c_int;
     // `<getopt.h>` state. `libc` 0.2 exposes `getopt` but not these.
     static mut optind: c_int;
     static mut optopt: c_int;
@@ -184,7 +187,8 @@ pub unsafe fn histedit() {
                 Ok(editor) => state_mut().editor = Some(editor),
                 Err(_) => {
                     state_mut().editor = None;
-                    crate::output::out2str(c"sh: can't initialize editing\n".as_ptr());
+                    let _ = (&mut *crate::output::stderr())
+                        .write_all(b"sh: can't initialize editing\n");
                 }
             }
             INTON!();
@@ -238,15 +242,12 @@ pub unsafe fn setterm(term: *const c_char) {
         .set_terminal(core::ffi::CStr::from_ptr(term).to_bytes())
         .is_err()
     {
-        crate::output::outfmt!(
-            crate::output::out2,
-            c"sh: Can't set terminal type %s\n".as_ptr(),
-            term
-        );
-        crate::output::outfmt!(
-            crate::output::out2,
-            c"sh: Using dumb terminal settings.\n".as_ptr()
-        );
+        let mut message = b"sh: Can't set terminal type ".to_vec();
+        message.extend_from_slice(core::ffi::CStr::from_ptr(term).to_bytes());
+        message.push(b'\n');
+        let errors = &mut *crate::output::stderr();
+        let _ = errors.write_all(&message);
+        let _ = errors.write_all(b"sh: Using dumb terminal settings.\n");
     }
 }
 
@@ -284,13 +285,13 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
     // it, and nothing can longjmp here before it is assigned.
     let mut savehandler: *mut crate::error::jmploc = ptr::null_mut();
     let mut editfile: [c_char; MAXPATHLEN + 1] = [0; MAXPATHLEN + 1];
-    let mut efp: *mut FILE = ptr::null_mut();
+    let mut edit_file: Option<File> = None;
     // The `(void) &var` statements at src/histedit.c:196-210 exist only to
     // stop GCC keeping those variables in registers, where longjmp could
     // clobber them; they have no Rust equivalent.
 
     if !history_active() {
-        crate::error::sh_error!(c"history not active".as_ptr());
+        crate::error::sh_error(b"history not active");
     }
 
     // #ifdef __GLIBC__
@@ -326,12 +327,17 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
                 sflg = 1;
             }
             b':' => {
-                crate::error::sh_error!(c"option -%c expects argument".as_ptr(), optopt);
+                let mut message = b"option -".to_vec();
+                message.push(optopt as u8);
+                message.extend_from_slice(b" expects argument");
+                crate::error::sh_error(&message);
                 /* NOTREACHED */
             }
             /* case '?': default: */
             _ => {
-                crate::error::sh_error!(c"unknown option: -%c".as_ptr(), optopt);
+                let mut message = b"unknown option: -".to_vec();
+                message.push(optopt as u8);
+                crate::error::sh_error(&message);
                 /* NOTREACHED */
             }
         }
@@ -376,7 +382,7 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
             if active > MAXHISTLOOPS {
                 active = 0;
                 displayhist = 0;
-                crate::error::sh_error!(c"called recursively too many times".as_ptr());
+                crate::error::sh_error(b"called recursively too many times");
             }
             /*
              * Set editor.
@@ -416,7 +422,7 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
                 argv = argv.add(1);
             }
             if argc >= 2 {
-                crate::error::sh_error!(c"too many args".as_ptr());
+                crate::error::sh_error(b"too many args");
             }
         }
 
@@ -441,7 +447,7 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
                 laststr = *argv.add(1);
             }
             _ => {
-                crate::error::sh_error!(c"too many args".as_ptr());
+                crate::error::sh_error(b"too many args");
                 /* NOTREACHED */
             }
         }
@@ -462,23 +468,26 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
         if !editor.is_null() {
             let fd: c_int;
             INTOFF!(); /* easier */
-            sprintf(
+            let path = _PATH_TMP.to_bytes();
+            let suffix = b"_shXXXXXX\0";
+            debug_assert!(path.len() + suffix.len() <= editfile.len());
+            ptr::copy_nonoverlapping(
+                path.as_ptr() as *const c_char,
                 editfile.as_mut_ptr(),
-                c"%s_shXXXXXX".as_ptr(),
-                _PATH_TMP.as_ptr(),
+                path.len(),
+            );
+            ptr::copy_nonoverlapping(
+                suffix.as_ptr() as *const c_char,
+                editfile.as_mut_ptr().add(path.len()),
+                suffix.len(),
             );
             fd = libc::mkstemp(editfile.as_mut_ptr());
             if fd < 0 {
-                crate::error::sh_error!(
-                    c"can't create temporary file %s".as_ptr(),
-                    editfile.as_ptr()
-                );
+                let mut message = b"can't create temporary file ".to_vec();
+                message.extend_from_slice(CStr::from_ptr(editfile.as_ptr()).to_bytes());
+                crate::error::sh_error(&message);
             }
-            efp = libc::fdopen(fd, c"w".as_ptr());
-            if efp.is_null() {
-                libc::close(fd);
-                crate::error::sh_error!(c"can't allocate stdio buffer for temp".as_ptr());
-            }
+            edit_file = Some(File::from_raw_fd(fd));
         }
 
         // Snapshot the semantic range before `evalstring` can re-enter the
@@ -490,9 +499,11 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
             let mut line = nul_terminated(&event.line);
             if lflg != 0 {
                 if nflg == 0 {
-                    crate::output::out1fmt!(c"%5d ".as_ptr(), event.number);
+                    let _ = write!(&mut *crate::output::stdout(), "{:5} ", event.number);
                 }
-                crate::output::out1str(line.as_ptr() as *const c_char);
+                let _ = (&mut *crate::output::stdout()).write_all(
+                    core::ffi::CStr::from_ptr(line.as_ptr() as *const c_char).to_bytes(),
+                );
             } else {
                 let mut replaced = if pat.is_null() {
                     None
@@ -506,7 +517,8 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
 
                 if sflg != 0 {
                     if displayhist != 0 {
-                        crate::output::out2str(s);
+                        let _ = (&mut *crate::output::stderr())
+                            .write_all(core::ffi::CStr::from_ptr(s).to_bytes());
                     }
 
                     crate::eval::evalstring(s, 0);
@@ -516,7 +528,10 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
 
                     break;
                 } else {
-                    libc::fputs(s, efp);
+                    let file = edit_file
+                        .as_mut()
+                        .expect("fc edit file must exist while an editor is selected");
+                    let _ = file.write_all(core::ffi::CStr::from_ptr(s).to_bytes());
                 }
             }
         }
@@ -526,13 +541,15 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
              * and lets `fccmd`'s enclosing mark release it.  `evalstring`
              * copies what it is given, so the buffer is dead as soon as
              * that call returns and can be this block's. */
-            let n = libc::strlen(editor) + libc::strlen(editfile.as_ptr()) + 2;
-            let mut editcmdbuf: Vec<u8> = vec![0; n];
+            let mut editcmdbuf: Vec<u8> =
+                Vec::with_capacity(libc::strlen(editor) + libc::strlen(editfile.as_ptr()) + 2);
+            editcmdbuf.extend_from_slice(CStr::from_ptr(editor).to_bytes());
+            editcmdbuf.push(b' ');
+            editcmdbuf.extend_from_slice(CStr::from_ptr(editfile.as_ptr()).to_bytes());
+            editcmdbuf.push(0);
             let editcmd: *mut c_char = editcmdbuf.as_mut_ptr() as *mut c_char;
 
-            libc::fclose(efp);
-            sprintf(editcmd, c"%s %s".as_ptr(), editor, editfile.as_ptr());
-            debug_assert!(libc::strlen(editcmd) < n);
+            drop(edit_file.take());
             /* XXX - should use no JC command */
             crate::eval::evalstring(editcmd, 0);
             INTON!();
@@ -552,6 +569,7 @@ pub unsafe fn histcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
     if executing {
         if crate::eval::setjmp_catch(jl, body) != 0 {
             active = 0;
+            drop(edit_file.take());
             if editfile[0] != 0 {
                 libc::unlink(editfile.as_ptr());
             }
@@ -659,10 +677,16 @@ pub unsafe fn str_to_event(str: *const c_char, last: c_int) -> c_int {
 
     match event {
         Some(event) => event.number,
-        None if crate::mystring::is_number(s) != 0 => crate::error::sh_error!(
-            c"history number %s not found (internal error)".as_ptr(),
-            str
-        ),
-        None => crate::error::sh_error!(c"history pattern not found: %s".as_ptr(), str),
+        None if crate::mystring::is_number(s) != 0 => {
+            let mut message = b"history number ".to_vec();
+            message.extend_from_slice(CStr::from_ptr(str).to_bytes());
+            message.extend_from_slice(b" not found (internal error)");
+            crate::error::sh_error(&message)
+        }
+        None => {
+            let mut message = b"history pattern not found: ".to_vec();
+            message.extend_from_slice(CStr::from_ptr(str).to_bytes());
+            crate::error::sh_error(&message)
+        }
     }
 }

@@ -20,12 +20,13 @@
 //!     `flushout(out2)` calls guarded by it are absent here too.
 
 use core::ptr::{addr_of_mut, null_mut};
-use libc::{c_char, c_int, size_t};
+use libc::{c_char, c_int};
+use std::ffi::CStr;
+use std::io::Write;
 
-use crate::error::{jmploc, FORCEINTON};
-use crate::eval::{evalskip, EV_EXIT, SKIPFUNC, SKIPFUNCDEF};
+use crate::error::{FORCEINTON, jmploc};
+use crate::eval::{EV_EXIT, SKIPFUNC, SKIPFUNCDEF, evalskip};
 use crate::jobs::SHOW_CHANGED;
-use crate::output::out2;
 
 /* pid of main shell */
 pub static mut rootpid: c_int = 0;
@@ -229,7 +230,7 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
             if e == crate::error::EXINT
             /* #if ATTY: && (!attyset() || equal(termval(), "emacs")) */
             {
-                crate::output::outcslow('\n' as c_int, out2);
+                let _ = (*crate::output::stderr()).write_all(b"\n");
             }
             FORCEINTON(); /* enable interrupts */
             entry = if s == 1 {
@@ -304,7 +305,7 @@ unsafe fn cmdloop(top: c_int) -> c_int {
          * everything the command allocated used to live in the region
          * between them. */
         if crate::jobs::jobctl != 0 {
-            crate::jobs::showjobs(out2, SHOW_CHANGED);
+            crate::jobs::showjobs(crate::output::stderr(), SHOW_CHANGED);
         }
         inter = 0;
         if iflag() != 0 && top != 0 {
@@ -329,13 +330,11 @@ unsafe fn cmdloop(top: c_int) -> c_int {
             if crate::jobs::stoppedjobs() == 0 {
                 if Iflag() == 0 {
                     if iflag() != 0 {
-                        crate::output::outcslow('\n' as c_int, out2);
+                        let _ = (*crate::output::stderr()).write_all(b"\n");
                     }
                     break;
                 }
-                crate::output::out2str(
-                    b"\nUse \"exit\" to leave shell.\n\0".as_ptr() as *const c_char
-                );
+                let _ = (*crate::output::stderr()).write_all(b"\nUse \"exit\" to leave shell.\n");
             }
             numeof += 1;
         }
@@ -433,7 +432,10 @@ unsafe fn find_dot_file(basename: *mut c_char, out: &mut Vec<u8>) -> *mut c_char
     }
 
     /* not found in the PATH */
-    crate::sh_error!(b"%s: not found\0".as_ptr() as *const c_char, basename);
+    let mut message = Vec::new();
+    message.extend_from_slice(CStr::from_ptr(basename).to_bytes());
+    message.extend_from_slice(b": not found");
+    crate::error::sh_error(&message);
     /* NOTREACHED */
 }
 

@@ -3,21 +3,20 @@
 //!
 //! Deviations forced by Rust, all noted inline:
 //!
-//! * C variadic functions cannot be *defined* in stable Rust, so
-//!   `sh_error`, `exerror` and `sh_warnx` take `&[VaArg]` (see
-//!   `crate::output::VaArg`) in place of `...`, and `va_list` is that
-//!   same slice.  `va_start`/`va_end` disappear; `va_copy` is a copy of
-//!   the slice reference.
+//! * The C variadic diagnostic entry points take a complete byte message in
+//!   Rust. Callers compose typed values before crossing this boundary, so
+//!   diagnostics do not need a second formatting language or a `va_list`.
 //! * `setjmp`/`longjmp` are used through FFI.  `jmp_buf` is an opaque,
 //!   over-sized, 16-byte-aligned buffer so it fits any libc's layout.
 
 use core::ptr::addr_of_mut;
-use core::sync::atomic::{compiler_fence, Ordering};
+use core::sync::atomic::{Ordering, compiler_fence};
+use std::ffi::CStr;
+use std::io::Write;
 
-use libc::{c_char, c_int, c_void};
+use libc::{c_char, c_int};
 
-use crate::output::VaArg;
-use crate::shell::{cstr, DEBUG};
+use crate::shell::{DEBUG, cstr};
 
 /*
  * Types of operations (passed to the errmsg routine).
@@ -262,53 +261,19 @@ pub unsafe fn onint() -> ! {
     /* NOTREACHED */
 }
 
-// [spec:dash:def:error.exvwarning2-fn]
-// [spec:dash:sem:error.exvwarning2-fn]
-unsafe fn exvwarning2(msg: *const c_char, ap: &[VaArg]) {
-    let errs: *mut crate::output::output;
-    let name: *const c_char;
-    let fmt: *const c_char;
-
-    errs = crate::output::out2;
-    name = if !crate::options::arg0.is_null() {
-        crate::options::arg0
-    } else {
-        cstr(b"sh\0")
-    };
-    if crate::eval::commandname.is_null() {
-        fmt = cstr(b"%s: %d: \0");
-    } else {
-        fmt = cstr(b"%s: %d: %s: \0");
-    }
-    crate::output::outfmt(
-        errs,
-        fmt,
-        &[
-            VaArg::Str(name),
-            VaArg::Int(errlinno),
-            VaArg::Str(crate::eval::commandname),
-        ],
-    );
-    crate::output::doformat(errs, msg, ap);
-    /* FLUSHERR is not defined in the shipped build, so: outcslow. */
-    crate::output::outcslow('\n' as c_int, errs);
-}
-
-/* `#define exvwarning(a, b, c) exvwarning2(b, c)` */
-macro_rules! exvwarning {
-    ($a:expr, $b:expr, $c:expr) => {
-        exvwarning2($b, $c)
-    };
-}
+/* `exvwarning2` is not a separate function here. In the C it exists only
+ * to accept the `va_list` that `sh_warnx`'s varargs collected, and the
+ * two have the same body otherwise. A message is a `&[u8]` now, so there
+ * is nothing for the inner one to accept and `sh_warnx` below carries
+ * both rules. */
 
 /*
- * Exverror is called to raise the error exception.  If the second argument
- * is not NULL then error prints an error message using printf style
- * formatting.  It then raises the error exception.
+ * Exverror is called to print a complete diagnostic message and raise the
+ * error exception.
  */
 // [spec:dash:def:error.exverror-fn]
 // [spec:dash:sem:error.exverror-fn]
-unsafe fn exverror(cond: c_int, msg: *const c_char, ap: &[VaArg]) -> ! {
+unsafe fn exverror(cond: c_int, msg: &[u8]) -> ! {
     /*
      * #ifdef DEBUG
      *	if (msg) { va_list aq; TRACE(("exverror(%d, \"", cond));
@@ -321,7 +286,7 @@ unsafe fn exverror(cond: c_int, msg: *const c_char, ap: &[VaArg]) -> ! {
      * Without DEBUG the `if (msg)` guard is compiled out along with the
      * tracing, so exvwarning runs unconditionally.
      */
-    exvwarning!(-1, msg, ap);
+    sh_warnx(msg);
 
     crate::output::flushall();
     exraise(cond);
@@ -330,17 +295,17 @@ unsafe fn exverror(cond: c_int, msg: *const c_char, ap: &[VaArg]) -> ! {
 
 // [spec:dash:def:error.sh-error-fn]
 // [spec:dash:sem:error.sh-error-fn]
-pub unsafe fn sh_error(msg: *const c_char, ap: &[VaArg]) -> ! {
+pub unsafe fn sh_error(msg: &[u8]) -> ! {
     crate::eval::exitstatus = 2;
 
-    exverror(EXERROR, msg, ap);
+    exverror(EXERROR, msg);
     /* NOTREACHED */
 }
 
 // [spec:dash:def:error.exerror-fn]
 // [spec:dash:sem:error.exerror-fn]
-pub unsafe fn exerror(cond: c_int, msg: *const c_char, ap: &[VaArg]) -> ! {
-    exverror(cond, msg, ap);
+pub unsafe fn exerror(cond: c_int, msg: &[u8]) -> ! {
+    exverror(cond, msg);
     /* NOTREACHED */
 }
 
@@ -350,8 +315,32 @@ pub unsafe fn exerror(cond: c_int, msg: *const c_char, ap: &[VaArg]) -> ! {
 
 // [spec:dash:def:error.sh-warnx-fn]
 // [spec:dash:sem:error.sh-warnx-fn]
-pub unsafe fn sh_warnx(fmt: *const c_char, ap: &[VaArg]) {
-    exvwarning!(-1, fmt, ap);
+// [spec:dash:def:error.exvwarning2-fn]
+// [spec:dash:sem:error.exvwarning2-fn]
+pub unsafe fn sh_warnx(msg: &[u8]) {
+    let name = if !crate::options::arg0.is_null() {
+        crate::options::arg0
+    } else {
+        cstr(b"sh\0")
+    };
+
+    let mut prefix = Vec::new();
+    prefix.extend_from_slice(CStr::from_ptr(name).to_bytes());
+    prefix.extend_from_slice(b": ");
+    let line = errlinno;
+    write!(&mut prefix, "{line}").expect("writing to a Vec cannot fail");
+    prefix.extend_from_slice(b": ");
+    if !crate::eval::commandname.is_null() {
+        prefix.extend_from_slice(CStr::from_ptr(crate::eval::commandname).to_bytes());
+        prefix.extend_from_slice(b": ");
+    }
+
+    /* stderr is unbuffered. Keep the C's three output operations visible:
+     * prefix, complete message body, then newline. */
+    let errs = &mut *crate::output::stderr();
+    let _ = errs.write_all(&prefix);
+    let _ = errs.write_all(msg);
+    let _ = errs.write_all(b"\n");
 }
 
 /*
@@ -389,36 +378,6 @@ pub unsafe fn __inton() {
         onint();
     }
 }
-
-// ---------------------------------------------------------------------
-// Variadic compatibility layer — see the note in `output.rs`. These
-// restore the C call shape for the error entry points; `sh_error` and
-// `exerror` diverge, so the macros are usable in expression position
-// where the C uses them as statements that do not return.
-// ---------------------------------------------------------------------
-
-#[macro_export]
-macro_rules! sh_error {
-    ($fmt:expr $(, $arg:expr)* $(,)?) => {
-        $crate::error::sh_error($fmt, &[$($crate::output::VaArg::from($arg)),*])
-    };
-}
-
-#[macro_export]
-macro_rules! sh_warnx {
-    ($fmt:expr $(, $arg:expr)* $(,)?) => {
-        $crate::error::sh_warnx($fmt, &[$($crate::output::VaArg::from($arg)),*])
-    };
-}
-
-#[macro_export]
-macro_rules! exerror {
-    ($cond:expr, $fmt:expr $(, $arg:expr)* $(,)?) => {
-        $crate::error::exerror($cond, $fmt, &[$($crate::output::VaArg::from($arg)),*])
-    };
-}
-
-pub use crate::{exerror, sh_error, sh_warnx};
 
 /* Payload for the catch_unwind-based stand-in for longjmp (see
  * `eval::setjmp_catch`). It carries the target so a payload aimed at an

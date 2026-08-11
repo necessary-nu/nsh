@@ -7,14 +7,14 @@
 //! and stays assignable exactly like the C macro.
 
 use bstr::BString;
-use libc::{c_char, c_int, c_uint, size_t};
 use core::ptr::{addr_of, addr_of_mut, null_mut};
+use libc::{c_char, c_int, c_uint, size_t};
+use std::ffi::CStr;
+use std::io::Write;
 
 use crate::error::{INTOFF, INTON};
 use crate::mystring::nullstr;
-use crate::output::VaArg;
-use crate::shell::cstr;
-use crate::var::{setvar, setvarint, showvars, VNOFUNC, VUNSET};
+use crate::var::{VNOFUNC, VUNSET, setvar, setvarint, showvars};
 
 /// The positional parameters when the shell owns them — the C's
 /// `shellparam.malloc`.
@@ -53,9 +53,9 @@ impl Params {
 /// exactly when `malloc` was 1, and `borrowed` is the `argv` `p` pointed
 /// into when it was 0.
 pub struct shparam {
-    pub nparam: c_int,        /* # of positional parameters (without $0) */
-    pub optind: c_int,        /* next parameter to be processed by getopts */
-    pub optoff: c_int,        /* used by getopts */
+    pub nparam: c_int, /* # of positional parameters (without $0) */
+    pub optind: c_int, /* next parameter to be processed by getopts */
+    pub optoff: c_int, /* used by getopts */
     owned: Option<Params>,
     borrowed: *mut *mut c_char,
 }
@@ -87,7 +87,10 @@ pub unsafe fn shellparam_p() -> *mut *mut c_char {
 
 /// A positional parameter's bytes, terminator included.
 unsafe fn word(s: *const c_char) -> BString {
-    BString::from(core::slice::from_raw_parts(s as *const u8, libc::strlen(s) + 1))
+    BString::from(core::slice::from_raw_parts(
+        s as *const u8,
+        libc::strlen(s) + 1,
+    ))
 }
 
 pub const NOPTS: usize = 18;
@@ -195,15 +198,13 @@ pub unsafe fn procargs(mut xargv: *mut *mut c_char) -> c_int {
     xargv = argptr;
     if (*xargv).is_null() {
         if !minusc.is_null() {
-            crate::error::sh_error(cstr(b"-c requires an argument\0"), &[]);
+            crate::error::sh_error(b"-c requires an argument");
         }
         optlist[sflag] = 1;
     }
     if optlist[iflag] == 2 && optlist[sflag] == 1 {
         crate::input::input_init();
-        if crate::input::stdin_istty != 0
-            && libc::isatty(crate::streams::streams().stderr) != 0
-        {
+        if crate::input::stdin_istty != 0 && libc::isatty(crate::streams::streams().stderr) != 0 {
             optlist[iflag] = 1;
         }
     }
@@ -340,36 +341,35 @@ unsafe fn minus_o(name: *mut c_char, val: c_int) {
 
     if name.is_null() {
         if val != 0 {
-            crate::output::out1str(b"Current option settings\n\0".as_ptr() as *const c_char);
+            let heading = b"Current option settings\n";
+            let _ = (*crate::output::stdout()).write_all(heading);
             i = 0;
             while i < NOPTS as c_int {
-                crate::output::out1fmt(
-                    cstr(b"%-16s%s\n\0"),
-                    &[
-                        VaArg::Str(optnames[i as usize]),
-                        VaArg::Str(if optlist[i as usize] != 0 {
-                            cstr(b"on\0")
-                        } else {
-                            cstr(b"off\0")
-                        }),
-                    ],
-                );
+                let name = CStr::from_ptr(optnames[i as usize]).to_bytes();
+                let mut line = name.to_vec();
+                if line.len() < 16 {
+                    line.resize(16, b' ');
+                }
+                line.extend_from_slice(if optlist[i as usize] != 0 {
+                    b"on\n"
+                } else {
+                    b"off\n"
+                });
+                let _ = (*crate::output::stdout()).write_all(&line);
                 i += 1;
             }
         } else {
             i = 0;
             while i < NOPTS as c_int {
-                crate::output::out1fmt(
-                    cstr(b"set %s %s\n\0"),
-                    &[
-                        VaArg::Str(if optlist[i as usize] != 0 {
-                            cstr(b"-o\0")
-                        } else {
-                            cstr(b"+o\0")
-                        }),
-                        VaArg::Str(optnames[i as usize]),
-                    ],
-                );
+                let mut line = b"set ".to_vec();
+                line.extend_from_slice(if optlist[i as usize] != 0 {
+                    b"-o "
+                } else {
+                    b"+o "
+                });
+                line.extend_from_slice(CStr::from_ptr(optnames[i as usize]).to_bytes());
+                line.push(b'\n');
+                let _ = (*crate::output::stdout()).write_all(&line);
                 i += 1;
             }
         }
@@ -382,7 +382,9 @@ unsafe fn minus_o(name: *mut c_char, val: c_int) {
             }
             i += 1;
         }
-        crate::error::sh_error(cstr(b"Illegal option -o %s\0"), &[VaArg::Str(name)]);
+        let mut message = b"Illegal option -o ".to_vec();
+        message.extend_from_slice(CStr::from_ptr(name).to_bytes());
+        crate::error::sh_error(&message);
     }
 }
 
@@ -407,7 +409,9 @@ unsafe fn setoption(flag: c_int, val: c_int) {
         }
         i += 1;
     }
-    crate::error::sh_error(cstr(b"Illegal option -%c\0"), &[VaArg::Char(flag)]);
+    let mut message = b"Illegal option -".to_vec();
+    message.push(flag as u8);
+    crate::error::sh_error(&message);
     /* NOTREACHED */
 }
 
@@ -489,7 +493,7 @@ pub unsafe fn shiftcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         1
     };
     if n > shellparam.nparam {
-        crate::error::sh_error(cstr(b"can't shift that many\0"), &[]);
+        crate::error::sh_error(b"can't shift that many");
     }
     INTOFF();
     shellparam.nparam -= n;
@@ -562,12 +566,11 @@ pub unsafe fn getoptscmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
     let optbase: *mut *mut c_char;
 
     nextopt(addr_of!(nullstr) as *const c_char);
-    argc -= (((argptr as isize - argv as isize)
-        / core::mem::size_of::<*mut c_char>() as isize)
-        - 1) as c_int;
+    argc -= (((argptr as isize - argv as isize) / core::mem::size_of::<*mut c_char>() as isize) - 1)
+        as c_int;
     argv = argptr.offset(-1);
     if argc < 3 {
-        crate::error::sh_error(cstr(b"Usage: getopts optstring var [arg...]\0"), &[]);
+        crate::error::sh_error(b"Usage: getopts optstring var [arg...]");
     } else if argc == 3 {
         optbase = shellparam_p();
         if (shellparam.optind as c_uint) > (shellparam.nparam + 1) as c_uint {
@@ -587,11 +590,7 @@ pub unsafe fn getoptscmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
 
 // [spec:dash:def:options.getopts-fn]
 // [spec:dash:sem:options.getopts-fn]
-unsafe fn getopts(
-    optstr: *mut c_char,
-    optvar: *mut c_char,
-    optfirst: *mut *mut c_char,
-) -> c_int {
+unsafe fn getopts(optstr: *mut c_char, optvar: *mut c_char, optfirst: *mut *mut c_char) -> c_int {
     let mut p: *mut c_char;
     let mut q: *mut c_char;
     let mut c: c_char = b'?' as c_char;
@@ -645,11 +644,10 @@ unsafe fn getopts(
                     s[1] = b'\0' as c_char;
                     setvar(b"OPTARG\0".as_ptr() as *const c_char, s.as_ptr(), 0);
                 } else {
-                    crate::output::outfmt(
-                        addr_of_mut!(crate::output::errout),
-                        cstr(b"Illegal option -%c\n\0"),
-                        &[VaArg::Char(c as c_int)],
-                    );
+                    let mut message = b"Illegal option -".to_vec();
+                    message.push(c as u8);
+                    message.push(b'\n');
+                    let _ = (*crate::output::stderr()).write_all(&message);
                     crate::var::unsetvar(b"OPTARG\0".as_ptr() as *const c_char);
                 }
                 c = b'?' as c_char;
@@ -673,11 +671,10 @@ unsafe fn getopts(
                     setvar(b"OPTARG\0".as_ptr() as *const c_char, s.as_ptr(), 0);
                     c = b':' as c_char;
                 } else {
-                    crate::output::outfmt(
-                        addr_of_mut!(crate::output::errout),
-                        cstr(b"No arg for -%c option\n\0"),
-                        &[VaArg::Char(c as c_int)],
-                    );
+                    let mut message = b"No arg for -".to_vec();
+                    message.push(c as u8);
+                    message.extend_from_slice(b" option\n");
+                    let _ = (*crate::output::stderr()).write_all(&message);
                     crate::var::unsetvar(b"OPTARG\0".as_ptr() as *const c_char);
                     c = b'?' as c_char;
                 }
@@ -700,10 +697,14 @@ unsafe fn getopts(
     }
 
     /* out: */
-    ind = ((optnext as isize - optfirst as isize)
-        / core::mem::size_of::<*mut c_char>() as isize) as c_int
+    ind = ((optnext as isize - optfirst as isize) / core::mem::size_of::<*mut c_char>() as isize)
+        as c_int
         + 1;
-    setvarint(b"OPTIND\0".as_ptr() as *const c_char, ind as libc::intmax_t, VNOFUNC);
+    setvarint(
+        b"OPTIND\0".as_ptr() as *const c_char,
+        ind as libc::intmax_t,
+        VNOFUNC,
+    );
     s[0] = c;
     s[1] = b'\0' as c_char;
     setvar(optvar, s.as_ptr(), 0);
@@ -756,7 +757,9 @@ pub unsafe fn nextopt(optstring: *const c_char) -> c_int {
     q = optstring;
     while *q != c {
         if *q == b'\0' as c_char {
-            crate::error::sh_error(cstr(b"Illegal option -%c\0"), &[VaArg::Char(c as c_int)]);
+            let mut message = b"Illegal option -".to_vec();
+            message.push(c as u8);
+            crate::error::sh_error(&message);
         }
         q = q.add(1);
         if *q == b':' as c_char {
@@ -770,7 +773,10 @@ pub unsafe fn nextopt(optstring: *const c_char) -> c_int {
             argptr = argptr.add(1);
             p.is_null()
         } {
-            crate::error::sh_error(cstr(b"No arg for -%c option\0"), &[VaArg::Char(c as c_int)]);
+            let mut message = b"No arg for -".to_vec();
+            message.push(c as u8);
+            message.extend_from_slice(b" option");
+            crate::error::sh_error(&message);
         }
         optionarg = p;
         p = null_mut();

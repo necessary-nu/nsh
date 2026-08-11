@@ -24,8 +24,6 @@
 use bstr::BString;
 use libc::{c_char, c_int, c_uchar, intmax_t};
 
-use crate::output::VaArg;
-
 /*
  * C's `const char foo[] = "…"` becomes `[c_char; N]` here; this const fn
  * spells the conversion from a NUL-terminated byte string.
@@ -97,7 +95,9 @@ pub unsafe fn prefix(string: *const c_char, pfx: *const c_char) -> *mut c_char {
 // [spec:dash:def:mystring.badnum-fn]
 // [spec:dash:sem:mystring.badnum-fn]
 pub unsafe fn badnum(s: *const c_char) -> ! {
-    crate::error::sh_error(illnum.as_ptr(), &[VaArg::Str(s)]);
+    let mut message = b"Illegal number: ".to_vec();
+    message.extend_from_slice(core::ffi::CStr::from_ptr(s).to_bytes());
+    crate::error::sh_error(&message);
 }
 
 /*
@@ -244,10 +244,22 @@ static mut quoted: BString = BString::new(Vec::new());
 // An external test crate would only reach the `pub` surface, and the
 // manifest's obligation is per function, not per public API.
 // ---------------------------------------------------------------------
+/// Copy an already-rendered ASCII number into one of the fixed C buffers
+/// retained by the variable ABI.
+pub(crate) unsafe fn copy_ascii_cstr(out: *mut c_char, capacity: usize, text: &str) {
+    debug_assert!(text.is_ascii());
+    debug_assert!(text.len() < capacity);
+    let copied = text.len().min(capacity.saturating_sub(1));
+    core::ptr::copy_nonoverlapping(text.as_ptr(), out as *mut u8, copied);
+    if capacity != 0 {
+        *out.add(copied) = 0;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::{raises, s, CStr0};
+    use crate::testutil::{CStr0, raises, s};
 
     // [spec:dash:sem:mystring.prefix-fn/test]
     #[test]
@@ -395,10 +407,7 @@ mod tests {
         let _g = crate::testutil::lock();
         unsafe {
             assert_eq!(number(CStr0::new("7").p()), 7);
-            assert_eq!(
-                number(CStr0::new(&c_int::MAX.to_string()).p()),
-                c_int::MAX
-            );
+            assert_eq!(number(CStr0::new(&c_int::MAX.to_string()).p()), c_int::MAX);
             // Negative and out-of-range both go through badnum.
             assert!(raises(|| {
                 number(CStr0::new("-1").p());
@@ -439,8 +448,8 @@ mod tests {
         unsafe {
             for byte in 1_u8..=u8::MAX {
                 let input = [byte, 0];
-                let actual = core::ffi::CStr::from_ptr(single_quote(input.as_ptr().cast()))
-                    .to_bytes();
+                let actual =
+                    core::ffi::CStr::from_ptr(single_quote(input.as_ptr().cast())).to_bytes();
 
                 if byte == b'\'' {
                     assert_eq!(actual, b"''\"'\"");
@@ -453,5 +462,4 @@ mod tests {
             }
         }
     }
-
 }

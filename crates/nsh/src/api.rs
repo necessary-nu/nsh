@@ -72,9 +72,8 @@ pub struct Shell {
     /// and `closed_redirs`. This is what makes [`Streams::from_fds`] carry
     /// to redirection and to external commands.
     fds: FdTable,
-    /// `output.rs`: `output`, `errout`, `preverrout`, and the `out1`/`out2`
-    /// indirection, which becomes a pair of fields rather than a pair of
-    /// pointers to statics.
+    /// `output.rs`'s `ShellIo` aggregate: buffered stdout, unbuffered stderr,
+    /// and the saved stderr destination used while tracing redirections.
     io: ShellIo,
     /// `eval.rs`: `evalskip`, `skipcount`, `loopnest`, `funcline`,
     /// `commandname`, `back_exitstatus`, `savestatus`, `inps4`.
@@ -141,11 +140,7 @@ impl Shell {
     /// beside [`Shell::run`].
     ///
     /// The parameters persist afterwards, exactly as `sh -c` leaves them.
-    pub fn run_command(
-        &mut self,
-        command: &BStr,
-        args: &[&BStr],
-    ) -> Result<ExitStatus, Error> {
+    pub fn run_command(&mut self, command: &BStr, args: &[&BStr]) -> Result<ExitStatus, Error> {
         todo!()
     }
 
@@ -823,11 +818,7 @@ impl Shell {
     /// This compiles, and that is the point of it being here: `host` is one
     /// field, so borrowing it does not borrow the tables, and a `Host`
     /// method that took `&mut Shell` would make this line impossible.
-    pub(crate) fn ask_for_signal(
-        &mut self,
-        signal: Signal,
-        to: Disposition,
-    ) -> io::Result<()> {
+    pub(crate) fn ask_for_signal(&mut self, signal: Signal, to: Disposition) -> io::Result<()> {
         self.host.set_signal(signal, to)
     }
 }
@@ -847,11 +838,13 @@ pub(crate) fn dot_builtin(sh: &mut Shell, args: &[&BStr]) -> Result<ExitStatus, 
 
     let name = match args.get(1) {
         Some(n) => *n,
-        None => return Err(sh.report(Error::Other {
-            line: 0,
-            status: ExitStatus(2),
-            message: BString::from(&b"filename argument required"[..]),
-        })),
+        None => {
+            return Err(sh.report(Error::Other {
+                line: 0,
+                status: ExitStatus(2),
+                message: BString::from(&b"filename argument required"[..]),
+            }));
+        }
     };
     let path = std::ffi::OsStr::from_bytes(name.as_bytes());
     // Re-entry. `args` is borrowed from the caller's storage, not from

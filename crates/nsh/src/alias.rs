@@ -8,14 +8,14 @@
 //! in `docs/divergences.md`.
 
 use bstr::BString;
-use core::ptr::{addr_of, addr_of_mut, null_mut};
+use core::ptr::{addr_of_mut, null_mut};
 use libc::{c_char, c_int};
 use std::collections::BTreeMap;
+use std::ffi::CStr;
+use std::io::Write;
 
 use crate::error::{INTOFF, INTON};
 use crate::options::{argptr, nextopt};
-use crate::output::VaArg;
-use crate::shell::cstr;
 use crate::var::varname;
 
 pub const ALIASINUSE: c_int = 1;
@@ -87,7 +87,9 @@ unsafe fn setalias(name: *const c_char, val: *const c_char) {
 
     loop {
         if crate::syntax::BASESYNTAX(*p as i8 as c_int) != crate::syntax::CWORD {
-            crate::error::sh_error(cstr(b"Invalid alias name: %s\0"), &[VaArg::Str(name)]);
+            let mut message = b"Invalid alias name: ".to_vec();
+            message.extend_from_slice(CStr::from_ptr(name).to_bytes());
+            crate::error::sh_error(&message);
         }
         p = p.add(1);
         if *p == b'=' as c_char {
@@ -192,11 +194,10 @@ pub unsafe fn aliascmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
         if *n == 0 || vv.is_null() {
             ap = __lookupalias(n);
             if ap.is_null() {
-                crate::output::outfmt(
-                    crate::output::out2,
-                    cstr(b"%s: %s not found\n\0"),
-                    &[VaArg::Str(cstr(b"alias\0")), VaArg::Str(n)],
-                );
+                let mut message = b"alias: ".to_vec();
+                message.extend_from_slice(CStr::from_ptr(n).to_bytes());
+                message.extend_from_slice(b" not found\n");
+                let _ = (*crate::output::stderr()).write_all(&message);
                 ret = 1;
             } else {
                 printalias(ap);
@@ -227,11 +228,10 @@ pub unsafe fn unaliascmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     i = 0;
     while !(*argptr).is_null() {
         if unalias(*argptr) != 0 {
-            crate::output::outfmt(
-                crate::output::out2,
-                cstr(b"%s: %s not found\n\0"),
-                &[VaArg::Str(cstr(b"unalias\0")), VaArg::Str(*argptr)],
-            );
+            let mut message = b"unalias: ".to_vec();
+            message.extend_from_slice(CStr::from_ptr(*argptr).to_bytes());
+            message.extend_from_slice(b" not found\n");
+            let _ = (*crate::output::stderr()).write_all(&message);
             i = 1;
         }
         argptr = argptr.add(1);
@@ -262,10 +262,10 @@ unsafe fn freealias(ap: &mut alias) -> bool {
 // [spec:dash:def:alias.printalias-fn]
 // [spec:dash:sem:alias.printalias-fn]
 pub unsafe fn printalias(ap: *const alias) {
-    crate::output::out1fmt(
-        addr_of!(crate::mystring::snlfmt) as *const c_char,
-        &[VaArg::Str(crate::mystring::single_quote((*ap).name))],
-    );
+    let quoted = crate::mystring::single_quote((*ap).name);
+    let mut line = CStr::from_ptr(quoted).to_bytes().to_vec();
+    line.push(b'\n');
+    let _ = (*crate::output::stdout()).write_all(&line);
 }
 
 // [spec:dash:def:alias.lookupalias-fn]

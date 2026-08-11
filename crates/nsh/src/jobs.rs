@@ -23,6 +23,8 @@
 use bstr::{BStr, BString, ByteSlice};
 use core::ptr::{addr_of_mut, null_mut};
 use libc::{c_char, c_int, c_uint, pid_t};
+use std::ffi::CStr;
+use std::io::Write as _;
 
 use crate::error::{INTOFF, INTON};
 use crate::eval::exitstatus;
@@ -31,8 +33,21 @@ use crate::nodes::{
     NAND, NAPPEND, NARG, NBACKGND, NCASE, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO,
     NHERE, NIF, NNOT, NOR, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE, NXHERE,
 };
-use crate::output::{out1, out2, output};
+use crate::output::Output;
 use crate::parser::{VSLENGTH, VSNORMAL, VSNUL, VSTYPE};
+
+/// Copy an already-rendered ASCII fragment into the bounded C scratch
+/// buffers retained by the job display code.  The return value preserves
+/// `fmtstr`'s historical clamp-to-capacity convention.
+unsafe fn copy_ascii_cstr(out: *mut c_char, capacity: usize, text: &str) -> c_int {
+    debug_assert!(text.is_ascii());
+    let copied = text.len().min(capacity.saturating_sub(1));
+    if capacity != 0 {
+        core::ptr::copy_nonoverlapping(text.as_ptr(), out as *mut u8, copied);
+        *out.add(copied) = 0;
+    }
+    text.len().min(capacity) as c_int
+}
 
 /* src/shell.h: JOBS defaults to 1 */
 const JOBS: c_int = 1;
@@ -83,11 +98,11 @@ pub struct Job {
     pub ps: Vec<ProcStat>,
     pub stopstatus: c_int, /* status of a stopped job (#if JOBS) */
     pub state: u8,
-    pub sigint: u8,  /* job was killed by SIGINT (#if JOBS) */
-    pub jobctl: u8,  /* job running under job control (#if JOBS) */
-    pub waited: u8,  /* true if this entry has been waited for */
-    pub used: u8,    /* true if this entry is in used */
-    pub changed: u8, /* true if status has changed */
+    pub sigint: u8,              /* job was killed by SIGINT (#if JOBS) */
+    pub jobctl: u8,              /* job running under job control (#if JOBS) */
+    pub waited: u8,              /* true if this entry has been waited for */
+    pub used: u8,                /* true if this entry is in used */
+    pub changed: u8,             /* true if status has changed */
     pub prev_job: Option<usize>, /* previous job */
 }
 
@@ -164,16 +179,19 @@ unsafe fn ps_pid(jp: usize, i: usize) -> pid_t {
 
 #[inline]
 unsafe fn ps_cmd(jp: usize, i: usize) -> &'static BStr {
-    jobs()[jp].ps.get(i).map_or(BStr::new(b""), |p| p.cmd.as_bstr())
+    jobs()[jp]
+        .ps
+        .get(i)
+        .map_or(BStr::new(b""), |p| p.cmd.as_bstr())
 }
 
 /// `%s` of a command text. The bytes are the shell's own — the parser
 /// puts control bytes 0x81-0x88 in them — so they go out as bytes and
 /// not through a `char *`.
 #[inline]
-unsafe fn outcmd(jp: usize, i: usize, out: *mut output) {
+unsafe fn outcmd(jp: usize, i: usize, out: *mut Output) {
     let cmd = ps_cmd(jp, i);
-    crate::output::outmem(cmd.as_ptr() as *const c_char, cmd.len(), out);
+    let _ = (&mut *out).write_all(cmd);
 }
 
 /* Set if we are in the vforked child */
@@ -379,9 +397,7 @@ pub unsafe fn setjobctl(on: c_int) {
             if iflag() == 0 {
                 break 'after_dowhile; // `break` of the do/while
             }
-            crate::sh_warnx!(
-                b"can't access tty; job control turned off\0".as_ptr() as *const c_char
-            );
+            crate::error::sh_warnx(b"can't access tty; job control turned off");
             crate::options::optlist[crate::options::mflag] = 0;
             on = 0;
             let _ = on;
@@ -429,7 +445,7 @@ pub unsafe fn killcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
     if argc <= 1 {
         // usage:
-        crate::sh_error!(USAGE.as_ptr() as *const c_char);
+        crate::error::sh_error(&USAGE[..USAGE.len() - 1]);
     }
 
     argv = argv.add(1);
@@ -447,11 +463,11 @@ pub unsafe fn killcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
                     b's' => {
                         signo = crate::trap::decode_signal(crate::options::optionarg, 1);
                         if signo < 0 {
-                            crate::sh_error!(
-                                b"invalid signal number or name: %s\0".as_ptr()
-                                    as *const c_char,
-                                crate::options::optionarg
+                            let mut message = b"invalid signal number or name: ".to_vec();
+                            message.extend_from_slice(
+                                CStr::from_ptr(crate::options::optionarg).to_bytes(),
                             );
+                            crate::error::sh_error(&message);
                         }
                     }
                     /* `default:` (DEBUG: abort()) falls through into 'l' */
@@ -472,22 +488,22 @@ pub unsafe fn killcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
     if (((signo < 0 || (*argv).is_null()) as c_int) ^ list) != 0 {
         // goto usage
-        crate::sh_error!(USAGE.as_ptr() as *const c_char);
+        crate::error::sh_error(&USAGE[..USAGE.len() - 1]);
     }
 
     if list != 0 {
-        let out: *mut output;
+        let out: *mut Output;
 
-        out = out1;
+        out = crate::output::stdout();
         if (*argv).is_null() {
-            crate::output::outstr(b"0\n\0".as_ptr() as *const c_char, out);
+            let _ = (&mut *out).write_all(b"0\n");
             i = 1;
             while i < crate::signames::NSIG as c_int {
-                crate::outfmt!(
-                    out,
-                    (core::ptr::addr_of!(crate::mystring::snlfmt) as *const c_char),
-                    crate::signames::signal_names[i as usize].as_ptr()
-                );
+                let mut record = crate::signames::signal_names[i as usize]
+                    .to_bytes()
+                    .to_vec();
+                record.push(b'\n');
+                let _ = (&mut *out).write_all(&record);
                 i += 1;
             }
             return 0;
@@ -497,16 +513,15 @@ pub unsafe fn killcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
             signo -= 128;
         }
         if 0 < signo && signo < crate::signames::NSIG as c_int {
-            crate::outfmt!(
-                out,
-                (core::ptr::addr_of!(crate::mystring::snlfmt) as *const c_char),
-                crate::signames::signal_names[signo as usize].as_ptr()
-            );
+            let mut record = crate::signames::signal_names[signo as usize]
+                .to_bytes()
+                .to_vec();
+            record.push(b'\n');
+            let _ = (&mut *out).write_all(&record);
         } else {
-            crate::sh_error!(
-                b"invalid signal number or exit status: %s\0".as_ptr() as *const c_char,
-                *argv
-            );
+            let mut message = b"invalid signal number or exit status: ".to_vec();
+            message.extend_from_slice(CStr::from_ptr(*argv).to_bytes());
+            crate::error::sh_error(&message);
         }
         return 0;
     }
@@ -524,10 +539,9 @@ pub unsafe fn killcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
             };
         }
         if libc::kill(pid, signo) != 0 {
-            crate::sh_warnx!(
-                (core::ptr::addr_of!(crate::mystring::snlfmt) as *const c_char),
-                libc::strerror(errno())
-            );
+            let mut message = CStr::from_ptr(libc::strerror(errno())).to_bytes().to_vec();
+            message.push(b'\n');
+            crate::error::sh_warnx(&message);
             i = 1;
         }
         argv = argv.add(1);
@@ -552,7 +566,7 @@ fn jobno(jp: usize) -> c_int {
 pub unsafe fn fgcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     let mut argv: *mut *mut c_char = argv;
     let mut jp: usize;
-    let out: *mut output;
+    let out: *mut Output;
     let mode: c_int;
     let mut retval: c_int;
 
@@ -563,12 +577,12 @@ pub unsafe fn fgcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     };
     crate::options::nextopt((core::ptr::addr_of!(crate::shell::nullstr) as *const c_char));
     argv = crate::options::argptr;
-    out = out1;
+    out = crate::output::stdout();
     loop {
         jp = getjob(*argv, 1);
         if mode == FORK_BG {
             set_curjob(jp, CUR_RUNNING);
-            crate::outfmt!(out, b"[%d] \0".as_ptr() as *const c_char, jobno(jp));
+            let _ = write!(&mut *out, "[{}] ", jobno(jp));
         }
         outcmd(jp, 0, out);
         showpipe(jp, out);
@@ -658,9 +672,8 @@ unsafe fn sprint_status(os: *mut c_char, status: c_int, sigonly: c_int) -> c_int
             }
         } else if sigonly == 0 {
             if st != 0 {
-                s = s.offset(
-                    crate::fmtstr!(s, 16, b"Done(%d)\0".as_ptr() as *const c_char, st) as isize,
-                );
+                let status = format!("Done({st})");
+                s = s.offset(copy_ascii_cstr(s, 16, &status) as isize);
             } else {
                 s = libc::stpcpy(s, b"Done\0".as_ptr() as *const c_char);
             }
@@ -672,7 +685,7 @@ unsafe fn sprint_status(os: *mut c_char, status: c_int, sigonly: c_int) -> c_int
 
 // [spec:dash:def:jobs.showjob-fn]
 // [spec:dash:sem:jobs.showjob-fn]
-unsafe fn showjob(out: *mut output, jp: usize, mode: c_int) {
+unsafe fn showjob(out: *mut Output, jp: usize, mode: c_int) {
     let mut ps: usize;
     let psend: usize;
     let mut col: c_int;
@@ -683,16 +696,12 @@ unsafe fn showjob(out: *mut output, jp: usize, mode: c_int) {
 
     if (mode & SHOW_PGID) != 0 {
         /* just output process (group) id of pipeline */
-        crate::outfmt!(out, b"%d\n\0".as_ptr() as *const c_char, ps_pid(jp, ps));
+        let _ = writeln!(&mut *out, "{}", ps_pid(jp, ps));
         return;
     }
 
-    col = crate::fmtstr!(
-        s.as_mut_ptr(),
-        16,
-        b"[%d]   \0".as_ptr() as *const c_char,
-        jobno(jp)
-    );
+    let heading = format!("[{}]   ", jobno(jp));
+    col = copy_ascii_cstr(s.as_mut_ptr(), 16, &heading);
     indent = col;
 
     if Some(jp) == curjob {
@@ -702,12 +711,8 @@ unsafe fn showjob(out: *mut output, jp: usize, mode: c_int) {
     }
 
     if (mode & SHOW_PID) != 0 {
-        col += crate::fmtstr!(
-            s.as_mut_ptr().offset(col as isize),
-            16,
-            b"%d \0".as_ptr() as *const c_char,
-            ps_pid(jp, ps)
-        );
+        let pid = format!("{} ", ps_pid(jp, ps));
+        col += copy_ascii_cstr(s.as_mut_ptr().offset(col as isize), 16, &pid);
     }
 
     psend = jobs()[jp].ps.len();
@@ -734,25 +739,21 @@ unsafe fn showjob(out: *mut output, jp: usize, mode: c_int) {
     loop {
         if !at_start {
             /* for each process */
-            col = crate::fmtstr!(
-                s.as_mut_ptr(),
-                48,
-                b" |\n%*c%d \0".as_ptr() as *const c_char,
-                indent,
-                ' ' as c_int,
-                ps_pid(jp, ps)
-            ) - 3;
+            let continuation = format!(
+                " |\n{space:>width$}{} ",
+                ps_pid(jp, ps),
+                space = ' ',
+                width = indent.max(0) as usize,
+            );
+            col = copy_ascii_cstr(s.as_mut_ptr(), 48, &continuation) - 3;
         }
         at_start = false;
 
         // start:
-        crate::outfmt!(
-            out,
-            b"%s%*c\0".as_ptr() as *const c_char,
-            s.as_ptr(),
-            if 33 - col >= 0 { 33 - col } else { 0 },
-            ' ' as c_int
-        );
+        let mut record = CStr::from_ptr(s.as_ptr()).to_bytes().to_vec();
+        let width = (33 - col).max(0) as usize;
+        record.resize(record.len() + width.max(1), b' ');
+        let _ = (&mut *out).write_all(&record);
         outcmd(jp, ps, out);
         if (mode & SHOW_PID) == 0 {
             showpipe(jp, out);
@@ -760,7 +761,7 @@ unsafe fn showjob(out: *mut output, jp: usize, mode: c_int) {
         }
         ps += 1;
         if ps == psend {
-            crate::output::outcslow('\n' as c_int, out);
+            let _ = (&mut *out).write_all(b"\n");
             break;
         }
     }
@@ -779,7 +780,7 @@ pub unsafe fn jobscmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     let mut argv: *mut *mut c_char = argv;
     let mut mode: c_int;
     let mut m: c_int;
-    let out: *mut output;
+    let out: *mut Output;
 
     mode = 0;
     loop {
@@ -794,7 +795,7 @@ pub unsafe fn jobscmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         }
     }
 
-    out = out1;
+    out = crate::output::stdout();
     argv = crate::options::argptr;
     if !(*argv).is_null() {
         loop {
@@ -818,7 +819,7 @@ pub unsafe fn jobscmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
 // [spec:dash:def:jobs.showjobs-fn]
 // [spec:dash:sem:jobs.showjobs-fn]
-pub unsafe fn showjobs(out: *mut output, mode: c_int) {
+pub unsafe fn showjobs(out: *mut Output, mode: c_int) {
     let mut jp: Option<usize>;
 
     /* TRACE(("showjobs(%x) called\n", mode)); */
@@ -949,9 +950,17 @@ pub unsafe fn waitcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 // [spec:dash:def:jobs.getjob-fn]
 // [spec:dash:sem:jobs.getjob-fn]
 unsafe fn getjob(name: *const c_char, getctl: c_int) -> usize {
+    enum JobError {
+        NoSuch,
+        NoPrevious,
+        Ambiguous,
+        NoCurrent,
+        NoControl,
+    }
+
     let mut jp: Option<usize>;
     let mut found: Option<usize>;
-    let mut err_msg: *const c_char = b"No such job: %s\0".as_ptr() as *const c_char;
+    let mut job_error = JobError::NoSuch;
     let num: c_uint;
     let c: c_int;
     let mut p: *const c_char;
@@ -987,7 +996,7 @@ unsafe fn getjob(name: *const c_char, getctl: c_int) -> usize {
                             if let Some(i) = jp {
                                 jp = jobs()[i].prev_job;
                             }
-                            err_msg = b"No previous job\0".as_ptr() as *const c_char;
+                            job_error = JobError::NoPrevious;
                             break 'check_lbl; // the check: label body
                         }
                     }
@@ -1010,8 +1019,7 @@ unsafe fn getjob(name: *const c_char, getctl: c_int) -> usize {
                         p = p.add(1);
                     }
 
-                    let pat: &[u8] =
-                        core::slice::from_raw_parts(p as *const u8, libc::strlen(p));
+                    let pat: &[u8] = core::slice::from_raw_parts(p as *const u8, libc::strlen(p));
                     found = None;
                     while let Some(i) = jp {
                         let cmd = ps_cmd(i, 0);
@@ -1025,7 +1033,7 @@ unsafe fn getjob(name: *const c_char, getctl: c_int) -> usize {
                                 break 'err_lbl; // goto err
                             }
                             found = Some(i);
-                            err_msg = b"%s: ambiguous\0".as_ptr() as *const c_char;
+                            job_error = JobError::Ambiguous;
                         }
                         jp = jobs()[i].prev_job;
                     }
@@ -1038,7 +1046,7 @@ unsafe fn getjob(name: *const c_char, getctl: c_int) -> usize {
                     break 'gotit_lbl; /* fall through to gotit: */
                 }
                 // currentjob:
-                err_msg = b"No current job\0".as_ptr() as *const c_char;
+                job_error = JobError::NoCurrent;
                 // goto check
             }
             // check:
@@ -1048,7 +1056,7 @@ unsafe fn getjob(name: *const c_char, getctl: c_int) -> usize {
             // goto gotit
         }
         // gotit:
-        err_msg = b"job %s not created under job control\0".as_ptr() as *const c_char;
+        job_error = JobError::NoControl;
         let i = jp.unwrap();
         if getctl != 0 && jobs()[i].jobctl == 0 {
             break 'err_lbl; // goto err
@@ -1056,7 +1064,29 @@ unsafe fn getjob(name: *const c_char, getctl: c_int) -> usize {
         return i;
     }
     // err:
-    crate::sh_error!(err_msg, name);
+    let mut message = Vec::new();
+    match job_error {
+        JobError::NoSuch => {
+            message.extend_from_slice(b"No such job: ");
+            message.extend_from_slice(CStr::from_ptr(name).to_bytes());
+        }
+        JobError::NoPrevious => message.extend_from_slice(b"No previous job"),
+        JobError::Ambiguous => {
+            message.extend_from_slice(CStr::from_ptr(name).to_bytes());
+            message.extend_from_slice(b": ambiguous");
+        }
+        JobError::NoCurrent => message.extend_from_slice(b"No current job"),
+        JobError::NoControl => {
+            message.extend_from_slice(b"job ");
+            if name.is_null() {
+                message.extend_from_slice(b"(null)");
+            } else {
+                message.extend_from_slice(CStr::from_ptr(name).to_bytes());
+            }
+            message.extend_from_slice(b" not created under job control");
+        }
+    }
+    crate::error::sh_error(&message);
 }
 
 /*
@@ -1173,9 +1203,7 @@ unsafe fn forkchild(jp: Option<usize>, n: Option<&Node>, mode: c_int) {
 
     /* The C tests `jp->jobctl` without checking `jp`; `jp` is NULL only
      * under FORK_NOJOB, which the first conjunct has already excluded. */
-    let ownpgrp = mode != FORK_NOJOB
-        && oldlvl == 0
-        && jp.map_or(false, |i| jobs()[i].jobctl != 0);
+    let ownpgrp = mode != FORK_NOJOB && oldlvl == 0 && jp.map_or(false, |i| jobs()[i].jobctl != 0);
     if ownpgrp {
         let pgrp: pid_t;
         let ji: usize = jp.unwrap();
@@ -1251,7 +1279,7 @@ unsafe fn forkparent(jp: Option<usize>, n: Option<&Node>, mode: c_int, pid: pid_
         if let Some(i) = jp {
             freejob(i);
         }
-        crate::sh_error!(b"Cannot fork\0".as_ptr() as *const c_char);
+        crate::error::sh_error(b"Cannot fork");
         /* NOTREACHED */
     }
 
@@ -1274,14 +1302,7 @@ unsafe fn forkparent(jp: Option<usize>, n: Option<&Node>, mode: c_int, pid: pid_
         backgndpid = pid; /* set $! */
         set_curjob(ji, CUR_RUNNING);
         if crate::options::optlist[crate::options::iflag] != 0 {
-            crate::output::outfmt(
-                crate::output::out2,
-                crate::shell::cstr(b"[%d] %d\n\0"),
-                &[
-                    crate::output::VaArg::Int(jobno(ji)),
-                    crate::output::VaArg::Int(pid),
-                ],
-            );
+            let _ = writeln!(&mut *crate::output::stderr(), "[{}] {pid}", jobno(ji));
         }
     }
     /* the C's second `if (jp)` is dead after the early return above */
@@ -1501,7 +1522,8 @@ unsafe fn waitone(block: c_int, jobp: Option<usize>) -> c_int {
         if len != 0 {
             s[len as usize] = b'\n' as c_char;
             s[(len + 1) as usize] = 0;
-            crate::output::outstr(s.as_ptr(), out2);
+            let _ =
+                (&mut *crate::output::stderr()).write_all(CStr::from_ptr(s.as_ptr()).to_bytes());
         }
     }
     pid
@@ -1634,7 +1656,7 @@ pub unsafe fn stoppedjobs() -> c_int {
         }
         jp = curjob;
         if jp.map_or(false, |i| jobs()[i].state as c_int == JOBSTOPPED) {
-            crate::output::out2str(b"You have stopped jobs.\n\0".as_ptr() as *const c_char);
+            let _ = (&mut *crate::output::stderr()).write_all(b"You have stopped jobs.\n");
             job_warning = 2;
             retval += 1;
         }
@@ -2061,14 +2083,14 @@ unsafe fn cmdputs(s: *const c_char) {
 
 // [spec:dash:def:jobs.showpipe-fn]
 // [spec:dash:sem:jobs.showpipe-fn]
-unsafe fn showpipe(jp: usize, out: *mut output) {
+unsafe fn showpipe(jp: usize, out: *mut Output) {
     let spend: usize = jobs()[jp].ps.len();
 
     for sp in 1..spend {
-        crate::output::outstr(b" | \0".as_ptr() as *const c_char, out);
+        let _ = (&mut *out).write_all(b" | ");
         outcmd(jp, sp, out);
     }
-    crate::output::outcslow('\n' as c_int, out);
+    let _ = (&mut *out).write_all(b"\n");
     crate::output::flushall();
 }
 
@@ -2082,10 +2104,10 @@ unsafe fn xtcsetpgrp(fd: c_int, pgrp: pid_t) {
     crate::system::sigclearmask();
 
     if err != 0 {
-        crate::sh_error!(
-            b"Cannot set tty process group (%s)\0".as_ptr() as *const c_char,
-            libc::strerror(errno())
-        );
+        let mut message = b"Cannot set tty process group (".to_vec();
+        message.extend_from_slice(CStr::from_ptr(libc::strerror(errno())).to_bytes());
+        message.push(b')');
+        crate::error::sh_error(&message);
     }
 }
 

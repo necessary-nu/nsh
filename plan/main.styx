@@ -2289,6 +2289,14 @@ children (
                 priority 0
                 kind @refactor
                 deps (delete-memalloc)
+                log (
+                    {
+                        at 2026-08-10T00:04:37.702624978Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+                )
             }
 
             {
