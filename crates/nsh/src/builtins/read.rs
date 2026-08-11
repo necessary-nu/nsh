@@ -1,0 +1,219 @@
+//! `read`.
+//!
+//! Port of `readcmd` from `src/miscbltin.c`.
+//!
+//! Splitting the line it read into fields is `crate::expand`'s
+//! `ifsbreakup` -- the same field splitting an unquoted expansion gets,
+//! which is why `read` honours `IFS` without knowing what `IFS` is.
+
+use core::ptr::null_mut;
+use libc::{c_char, c_int, c_uint};
+use std::ffi::CString;
+use std::io::Write as _;
+
+use bstr::{BStr, BString};
+
+use crate::expand::arglist;
+use crate::options::Options;
+
+/* glibc <limits.h> */
+const MB_LEN_MAX: usize = 16;
+
+/// `readcmd`'s `CHECKSTRSPACE((MB_LEN_MAX > 16 ? MB_LEN_MAX : 16) + 4, p)`.
+///
+/// `getmbc` writes through the bare `char *` this makes room for, so the
+/// number has to stay the C's: with `mode` 0 it puts the character's bytes at
+/// `out + 2` and the closing length and marker at `out + 2 + ml` and
+/// `out + 3 + ml`, which for `ml == MB_LEN_MAX` is the twentieth byte and not
+/// one fewer.
+const READ_MBSLOP: usize = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 4;
+
+// ---------------------------------------------------------------------
+
+/** handle one line of the read command.
+ *  more fields than variables -> remainder shall be part of last variable.
+ *  less fields than variables -> remaining variables unset.
+ *
+ *  @param line complete line of input
+ *  @param ac argument count
+ *  @param ap argument (variable) list
+ *  @param len length of line including trailing '\0'
+ */
+
+// [spec:dash:def:miscbltin.readcmd-handle-line-fn]
+// [spec:dash:sem:miscbltin.readcmd-handle-line-fn]
+unsafe fn readcmd_handle_line(line: &mut BString, names: &[&BStr]) {
+    let mut arglist: arglist = arglist::new();
+
+    /* `s = grabstackstr(s)`.  The C is handed the cursor one *past* the
+     * terminator and turns it into the block's base, which both names the
+     * line and reserves it so that `ifsbreakup`'s `stalloc`s land above it.
+     * An owned line is already its own base and there is nothing to reserve;
+     * the fields `ifsbreakup` builds copy out of it rather than pointing
+     * into it, so the line only has to outlive that one call. */
+    let s: *mut c_char = line.as_mut_ptr() as *mut c_char;
+    debug_assert!(!line.is_empty(), "readcmd always pushes the terminator");
+
+    crate::expand::ifsbreakup(s, names.len() as c_int, &mut arglist);
+    crate::expand::ifsfree();
+
+    /* The C walks the names and the fields with two cursors that advance
+     * together, so the field for a name is the field at its index; a name
+     * past the last field is the "nullify remaining arguments" case. */
+    for (index, name) in names.iter().enumerate() {
+        let name = crate::shell::cstring(name);
+        match arglist.list.get_mut(index) {
+            None => {
+                crate::var::setvar(
+                    name.as_ptr(),
+                    core::ptr::addr_of!(crate::shell::nullstr) as *const c_char,
+                    0,
+                );
+            }
+            Some(field) => {
+                /* set variable to field */
+                field.rmescapes();
+                crate::var::setvar(name.as_ptr(), field.textp(), 0);
+            }
+        }
+    }
+}
+
+/*
+ * The read builtin.  The -e option causes backslashes to escape the
+ * following character. The -p option followed by an argument prompts
+ * with the argument.
+ *
+ * This uses unbuffered input, which may be avoidable in some cases.
+ */
+
+// [spec:dash:def:miscbltin.readcmd-fn]
+// [spec:dash:sem:miscbltin.readcmd-fn]
+pub unsafe fn readcmd(args: &[&BStr]) -> c_int {
+    let mut prompt: Option<CString>;
+    let mut startloc: c_int = 0;
+    let mut newloc: c_int = 0;
+    let mut status: c_int;
+    let mut rflag: c_int;
+
+    rflag = 0;
+    prompt = None;
+    let mut opts = crate::options::Options::new(args);
+    while let Some(i) = opts.next(b"p:r") {
+        if i == b'p' {
+            prompt = Some(crate::shell::cstring(opts.arg()));
+        } else {
+            rflag = 1;
+        }
+    }
+    if let Some(prompt) = &prompt {
+        if libc::isatty(crate::streams::streams().stdin) != 0 {
+            let _ = (&mut *crate::output::stderr()).write_all(prompt.as_bytes());
+        }
+    }
+    let names = opts.operands();
+    if names.is_empty() {
+        crate::error::sh_error(b"arg count");
+    }
+
+    status = 0;
+    /* `STARTSTACKSTR(p)`.  The line is an owned buffer, so the C's cursor is
+     * its length and `stackblock()` its base: every `p - stackblock()` below
+     * is `line.len()`, and `USTPUTC` is `push`. */
+    let mut line = BString::default();
+
+    crate::input::pushstdin();
+
+    /* The C body is a `for (;;)` entered by `goto start`, with the
+     * labels `put`, `record` and `start` inside it. The label graph is
+     * reproduced with an explicit program counter. */
+    const L_BODY: c_int = 0;
+    const L_PUT: c_int = 1;
+    const L_RECORD: c_int = 2;
+    const L_START: c_int = 3;
+
+    let mut pc: c_int = L_START; /* goto start */
+    let mut c: c_int = 0;
+
+    loop {
+        if pc == L_BODY {
+            let ml: c_uint;
+
+            /* CHECKSTRSPACE((MB_LEN_MAX > 16 ? MB_LEN_MAX : 16) + 4, p) —
+             * the room `getmbc` writes into through the raw cursor below. */
+            line.reserve(READ_MBSLOP);
+            c = crate::input::pgetc();
+            if c == crate::syntax::PEOF {
+                status = 1;
+                break;
+            }
+            if c == '\0' as c_int {
+                pc = L_BODY;
+                continue;
+            }
+            let at = line.len();
+            ml = crate::parser::getmbc(c, line.as_mut_ptr().add(at) as *mut c_char, 0);
+            if ml != 0 {
+                /* `p += ml` is the commit of what `getmbc` wrote past the
+                 * cursor; a zero return leaves the scribble uncommitted, for
+                 * the next write to overwrite exactly as the C's does. */
+                debug_assert!(ml as usize <= READ_MBSLOP);
+                line.set_len(at + ml as usize);
+                pc = L_RECORD; /* goto record */
+            } else if newloc >= startloc {
+                if c == '\n' as c_int {
+                    pc = L_RECORD; /* goto record */
+                } else {
+                    pc = L_PUT; /* goto put */
+                }
+            } else if rflag == 0 && c == '\\' as c_int {
+                newloc = line.len() as c_int;
+                pc = L_BODY;
+                continue;
+            } else if c == '\n' as c_int {
+                break;
+            } else {
+                pc = L_PUT; /* fall through to put: */
+            }
+        }
+        if pc == L_PUT {
+            // put:
+            if !libc::strchr(
+                (core::ptr::addr_of!(crate::mystring::cqchars) as *const c_char).add(1),
+                c,
+            )
+            .is_null()
+            {
+                /* USTPUTC(CTLESC, p) */
+                line.push(crate::parser::CTLESC as u8);
+            }
+            /* USTPUTC(c, p) */
+            line.push(c as u8);
+            pc = L_RECORD;
+        }
+        if pc == L_RECORD {
+            // record:
+            if newloc >= startloc {
+                crate::expand::recordregion(startloc, newloc, 0);
+                pc = L_START;
+            } else {
+                pc = L_BODY; /* end of the for body */
+                continue;
+            }
+        }
+        if pc == L_START {
+            // start:
+            startloc = line.len() as c_int;
+            newloc = startloc - 1;
+            pc = L_BODY; /* end of the for body */
+        }
+    }
+    crate::input::popfile();
+    crate::expand::recordregion(startloc, line.len() as c_int, 0);
+    /* `STACKSTRNUL(p)` writes the terminator without advancing, and the call
+     * below then passes `p + 1` — the length *including* it.  Pushing is both
+     * halves at once. */
+    line.push(b'\0');
+    readcmd_handle_line(&mut line, names);
+    status
+}

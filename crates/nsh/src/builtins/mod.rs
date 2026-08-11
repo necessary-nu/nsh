@@ -120,6 +120,7 @@ pub mod eval;
 pub mod exec;
 pub mod exit;
 pub mod export;
+pub mod fc;
 pub mod fg;
 pub mod getopts;
 pub mod hash;
@@ -127,6 +128,7 @@ pub mod jobs;
 pub mod kill;
 pub mod local;
 pub mod pwd;
+pub mod read;
 pub mod r#break;
 pub mod r#false;
 pub mod r#return;
@@ -134,6 +136,8 @@ pub mod r#true;
 pub mod set;
 pub mod shift;
 pub mod r#type;
+pub mod ulimit;
+pub mod umask;
 pub mod test;
 pub mod trap;
 pub mod times;
@@ -182,7 +186,7 @@ pub static builtincmd: [builtincmd; NUMBUILTINS] = [
     builtincmd { name: c"exit", builtin: Some(exit::exitcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 13
     builtincmd { name: c"export", builtin: Some(export::exportcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 14
     builtincmd { name: c"false", builtin: Some(r#false::falsecmd), flags: BUILTIN_REGULAR }, // 15
-    builtincmd { name: c"fc", builtin: Some(crate::histedit::histcmd), flags: BUILTIN_REGULAR }, // 16
+    builtincmd { name: c"fc", builtin: Some(fc::histcmd), flags: BUILTIN_REGULAR }, // 16
     builtincmd { name: c"fg", builtin: Some(fg::fgcmd), flags: BUILTIN_REGULAR }, // 17
     builtincmd { name: c"getopts", builtin: Some(getopts::getoptscmd), flags: BUILTIN_REGULAR }, // 18
     builtincmd { name: c"hash", builtin: Some(hash::hashcmd), flags: BUILTIN_REGULAR }, // 19
@@ -190,7 +194,7 @@ pub static builtincmd: [builtincmd; NUMBUILTINS] = [
     builtincmd { name: c"kill", builtin: Some(kill::killcmd), flags: BUILTIN_REGULAR }, // 21
     builtincmd { name: c"local", builtin: Some(local::localcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 22
     builtincmd { name: c"pwd", builtin: Some(pwd::pwdcmd), flags: BUILTIN_REGULAR }, // 23
-    builtincmd { name: c"read", builtin: Some(crate::miscbltin::readcmd), flags: BUILTIN_REGULAR }, // 24
+    builtincmd { name: c"read", builtin: Some(read::readcmd), flags: BUILTIN_REGULAR }, // 24
     builtincmd { name: c"readonly", builtin: Some(export::exportcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 25
     builtincmd { name: c"return", builtin: Some(r#return::returncmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 26
     builtincmd { name: c"set", builtin: Some(set::setcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 27
@@ -200,8 +204,8 @@ pub static builtincmd: [builtincmd; NUMBUILTINS] = [
     builtincmd { name: c"trap", builtin: Some(trap::trapcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 31
     builtincmd { name: c"true", builtin: Some(r#true::truecmd), flags: BUILTIN_REGULAR }, // 32
     builtincmd { name: c"type", builtin: Some(r#type::typecmd), flags: BUILTIN_REGULAR }, // 33
-    builtincmd { name: c"ulimit", builtin: Some(crate::miscbltin::ulimitcmd), flags: BUILTIN_REGULAR }, // 34
-    builtincmd { name: c"umask", builtin: Some(crate::miscbltin::umaskcmd), flags: BUILTIN_REGULAR }, // 35
+    builtincmd { name: c"ulimit", builtin: Some(ulimit::ulimitcmd), flags: BUILTIN_REGULAR }, // 34
+    builtincmd { name: c"umask", builtin: Some(umask::umaskcmd), flags: BUILTIN_REGULAR }, // 35
     builtincmd { name: c"unalias", builtin: Some(unalias::unaliascmd), flags: BUILTIN_REGULAR }, // 36
     builtincmd { name: c"unset", builtin: Some(unset::unsetcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 37
     builtincmd { name: c"wait", builtin: Some(wait::waitcmd), flags: BUILTIN_REGULAR }, // 38

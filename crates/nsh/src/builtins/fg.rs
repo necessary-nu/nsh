@@ -23,6 +23,11 @@ use crate::output::Output;
 
 // [spec:dash:def:jobs.fgcmd-fn]
 // [spec:dash:sem:jobs.fgcmd-fn]
+// `bgcmd` is this function: the C declares it
+// `__attribute__((alias("fgcmd")))`, so one definition answers for both
+// names and carries both claims.
+// [spec:dash:def:jobs.bgcmd-fn]
+// [spec:dash:sem:jobs.bgcmd-fn]
 pub unsafe fn fgcmd(args: &[&BStr]) -> c_int {
     let mut jp: usize;
     let out: *mut Output;

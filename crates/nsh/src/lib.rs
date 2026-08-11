@@ -97,7 +97,6 @@ pub mod parser;
 pub mod eval;
 pub mod exec;
 pub mod jobs;
-pub mod miscbltin;
 pub mod shellmain;
 
 // ---- builtins ---------------------------------------------------------
