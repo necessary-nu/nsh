@@ -822,6 +822,8 @@ impl<'a> Options<'a> {
     ///
     /// An unrecognised option or a missing option argument raises, so this
     /// unwinds through the caller's frame like every other `sh_error`.
+    // [spec:dash:def:options.nextopt-fn]
+    // [spec:dash:sem:options.nextopt-fn]
     pub unsafe fn next(&mut self, optstring: &[u8]) -> Option<u8> {
         /* `p = optptr; if (p == NULL || *p == '\0')` -- the run in
          * progress is exhausted, so the next word starts a new one. */
