@@ -74,13 +74,13 @@ impl alias {
 static mut atab: BTreeMap<BString, Box<alias>> = BTreeMap::new();
 
 #[inline]
-unsafe fn atab_mut() -> &'static mut BTreeMap<BString, Box<alias>> {
+pub(crate) unsafe fn atab_mut() -> &'static mut BTreeMap<BString, Box<alias>> {
     &mut *addr_of_mut!(atab)
 }
 
 // [spec:dash:def:alias.setalias-fn]
 // [spec:dash:sem:alias.setalias-fn]
-unsafe fn setalias(name: *const c_char, val: *const c_char) {
+pub(crate) unsafe fn setalias(name: *const c_char, val: *const c_char) {
     let ap: *mut alias;
     let mut p: *const c_char = name;
     let value_offset: usize;
@@ -166,76 +166,6 @@ pub unsafe fn lookupalias(name: *const c_char, check: c_int) -> *mut alias {
  * so no-operand `alias` prints sorted without a sort.
  */
 
-// [spec:dash:def:alias.aliascmd-fn]
-// [spec:dash:sem:alias.aliascmd-fn]
-pub unsafe fn aliascmd(args: &[&BStr]) -> c_int {
-    let mut ret: c_int = 0;
-    let mut ap: *mut alias;
-
-    if args.len() == 1 {
-        for ap in atab_mut().values() {
-            printalias(&**ap as *const alias);
-        }
-        return 0;
-    }
-    for word in &args[1..] {
-        /* `setalias` reads the value as an offset into the name, so the
-         * two have to be one buffer, as they are in the word the shell
-         * expanded. */
-        let word = crate::shell::cstring(word);
-        let n = word.as_ptr();
-        /* n + 1: funny ksh stuff (from 44lite) */
-        let vv = if *n == 0 {
-            null_mut()
-        } else {
-            libc::strchr(n.add(1), b'=' as c_int)
-        };
-        if *n == 0 || vv.is_null() {
-            ap = __lookupalias(n);
-            if ap.is_null() {
-                let mut message = b"alias: ".to_vec();
-                message.extend_from_slice(word.as_bytes());
-                message.extend_from_slice(b" not found\n");
-                let _ = (*crate::output::stderr()).write_all(&message);
-                ret = 1;
-            } else {
-                printalias(ap);
-            }
-        } else {
-            setalias(n, vv.add(1));
-        }
-    }
-
-    ret
-}
-
-// [spec:dash:def:alias.unaliascmd-fn]
-// [spec:dash:sem:alias.unaliascmd-fn]
-pub unsafe fn unaliascmd(args: &[&BStr]) -> c_int {
-    let mut i: c_int;
-
-    let mut opts = Options::new(args);
-    while let Some(opt) = opts.next(b"a") {
-        if opt == b'a' {
-            rmaliases();
-            return 0;
-        }
-    }
-    i = 0;
-    for name in opts.operands() {
-        let name = crate::shell::cstring(name);
-        if unalias(name.as_ptr()) != 0 {
-            let mut message = b"unalias: ".to_vec();
-            message.extend_from_slice(name.as_bytes());
-            message.extend_from_slice(b" not found\n");
-            let _ = (*crate::output::stderr()).write_all(&message);
-            i = 1;
-        }
-    }
-
-    i
-}
-
 // [spec:dash:def:alias.freealias-fn]
 // [spec:dash:sem:alias.freealias-fn]
 /// Free `ap`, unless it is being read from — then only mark it dead, so the
@@ -269,7 +199,7 @@ pub unsafe fn printalias(ap: *const alias) {
 /// The C returns the address of the link holding the entry, never NULL, so
 /// callers test `*result`; a map removes by key, so this returns the entry
 /// itself and NULL when there is none.
-unsafe fn __lookupalias(name: *const c_char) -> *mut alias {
+pub(crate) unsafe fn __lookupalias(name: *const c_char) -> *mut alias {
     match atab_mut().get_mut(varname(name)) {
         Some(ap) => &mut **ap as *mut alias,
         None => null_mut(),

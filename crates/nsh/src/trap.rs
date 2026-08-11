@@ -41,9 +41,9 @@ const S_RESET: c_char = 5; /* temporary - to reset a hard ignored sig */
 /// `onsig` reads this array from a kernel-delivered signal frame, so nothing
 /// here may do more than the C's pointer load did: `Option<BString>` carries
 /// its emptiness in the vector's pointer word, and `is_none()` is that load.
-static mut trap: [Option<BString>; NSIG] = [const { None }; NSIG];
+pub(crate) static mut trap: [Option<BString>; NSIG] = [const { None }; NSIG];
 /* traps have not been fully cleared */
-static mut ptrap: c_int = 0;
+pub(crate) static mut ptrap: c_int = 0;
 /* number of non-null traps */
 pub static mut trapcnt: c_int = 0;
 /* current value of signal */
@@ -56,13 +56,13 @@ pub static mut pending_sig: sig_atomic_t = 0;
 pub static mut gotsigchld: sig_atomic_t = 0;
 
 #[inline]
-unsafe fn trap_mut() -> &'static mut [Option<BString>; NSIG] {
+pub(crate) unsafe fn trap_mut() -> &'static mut [Option<BString>; NSIG] {
     &mut *addr_of_mut!(trap)
 }
 
 /// A trap action with the terminator its readers — `single_quote`, and
 /// `evalstring` by way of `strlen` — read up to.
-fn cbytes(s: &BString) -> Vec<u8> {
+pub(crate) fn cbytes(s: &BString) -> Vec<u8> {
     let mut v = s.to_vec();
     v.push(0);
     v
@@ -88,89 +88,6 @@ pub unsafe fn mkinit_forkreset(n: Option<&Node>) {
 /*
  * The trap builtin.
  */
-
-// [spec:dash:def:trap.trapcmd-fn]
-// [spec:dash:sem:trap.trapcmd-fn]
-pub unsafe fn trapcmd(args: &[&BStr]) -> c_int {
-    let mut signo: c_int;
-
-    let mut opts = Options::new(args);
-    opts.next(b"");
-    let ap = opts.operands();
-    if ap.is_empty() {
-        signo = 0;
-        while signo < NSIG as c_int {
-            if let Some(t) = &(*addr_of!(trap))[signo as usize] {
-                let t = cbytes(t);
-                let quoted = crate::mystring::single_quote(t.as_ptr() as *const c_char);
-                let mut line = b"trap -- ".to_vec();
-                line.extend_from_slice(CStr::from_ptr(quoted).to_bytes());
-                line.push(b' ');
-                line.extend_from_slice(
-                    CStr::from_ptr(crate::signames::signal_names[signo as usize].as_ptr())
-                        .to_bytes(),
-                );
-                line.push(b'\n');
-                let _ = (*crate::output::stdout()).write_all(&line);
-            }
-            signo += 1;
-        }
-        return 0;
-    }
-    if ptrap != 0 {
-        clear_traps(None);
-    }
-    /* `trap SIG...` resets, and `trap ACTION SIG...` sets: the first word
-     * is the action unless it is itself a signal, or the only word. */
-    let first = crate::shell::cstring(ap[0]);
-    let (mut action, signals) = if ap.len() < 2 || decode_signum(first.as_ptr()) >= 0 {
-        (None, ap)
-    } else {
-        (Some(first), &ap[1..])
-    };
-    for word in signals {
-        let word = crate::shell::cstring(word);
-        signo = decode_signal(word.as_ptr(), 0);
-        if signo < 0 {
-            let mut message = b"trap: ".to_vec();
-            message.extend_from_slice(word.as_bytes());
-            message.extend_from_slice(b": bad trap\n");
-            let _ = (*crate::output::stderr()).write_all(&message);
-            return 1;
-        }
-        INTOFF();
-        /* The C's `action = savestr(action)` makes the next signal in the
-         * list copy the previous copy; copying the argument word each time
-         * gives the same bytes and leaves `action` pointing at what the
-         * `'-'` test reads. */
-        let mut newtrap: Option<BString> = None;
-        if let Some(text) = &action {
-            if text.as_bytes() == b"-" {
-                action = None;
-            } else {
-                if !text.as_bytes().is_empty() {
-                    trapcnt += 1;
-                }
-                newtrap = Some(BString::from(text.as_bytes()));
-            }
-        }
-        if let Some(old) = &(*addr_of!(trap))[signo as usize] {
-            if !old.is_empty() {
-                trapcnt -= 1;
-            }
-        }
-        /* The C frees the old action and *then* stores the new one, so the
-         * slot is briefly a dangling non-NULL pointer; `onsig` only tests it
-         * for NULL, so it reads "a trap is set" throughout. A replace reads
-         * the same way and never leaves a stale pointer for it to load. */
-        drop(core::mem::replace(&mut trap_mut()[signo as usize], newtrap));
-        if signo != 0 {
-            setsignal(signo);
-        }
-        INTON();
-    }
-    0
-}
 
 /*
  * Clear traps on a fork.
@@ -509,7 +426,7 @@ pub unsafe fn exitshell() -> ! {
 
 // [spec:dash:def:trap.decode-signum-fn]
 // [spec:dash:sem:trap.decode-signum-fn]
-unsafe fn decode_signum(string: *const c_char) -> c_int {
+pub(crate) unsafe fn decode_signum(string: *const c_char) -> c_int {
     let mut signo: c_int = -1;
 
     if crate::mystring::is_number(string) != 0 {
