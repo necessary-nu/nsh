@@ -79,7 +79,7 @@ pub struct backcmd {
 // ---------------------------------------------------------------------
 
 pub static mut evalskip: c_int = 0; /* set if we are skipping commands */
-static mut skipcount: c_int = 0; /* number of levels to skip */
+pub(crate) static mut skipcount: c_int = 0; /* number of levels to skip */
 pub static mut loopnest: c_int = 0; /* current loop nesting level (MKINIT) */
 static mut funcline: c_int = 0; /* starting line number of current function, or 0 */
 
@@ -98,12 +98,6 @@ pub static mut savestatus: c_int = -1; /* exit status of last command outside tr
 pub static mut inps4: c_int = 0; /* MKINIT */
 
 pub static mut tpip: [c_int; 2] = [-1, 0]; /* MKINIT int tpip[2] = { -1 } */
-
-static mut bltin: builtincmd = builtincmd {
-    name: c"",
-    builtin: Some(bltincmd),
-    flags: BUILTIN_REGULAR,
-};
 
 /* src/options.h: `#define nflag optlist[5]` and friends. */
 #[inline]
@@ -163,35 +157,6 @@ pub(crate) unsafe fn setjmp_catch<F: FnOnce()>(loc: *mut jmploc, body: F) -> c_i
 /*
  * The eval commmand.
  */
-
-// [spec:dash:def:eval.evalcmd-fn]
-// [spec:dash:sem:eval.evalcmd-fn]
-unsafe fn evalcmd(args: &[&BStr], flags: c_int) -> c_int {
-    /* `grabstackstr` kept the joined string alive until the enclosing mark
-     * popped, which is past the `evalstring` that parses it. Owning it here
-     * says the same thing, and it has to be a binding of this frame because
-     * `setinputstring` reads through the pointer rather than copying. */
-    let mut concat: BString = BString::new(Vec::new());
-
-    if args.len() > 1 {
-        let single: CString;
-        let p: *mut c_char = if args.len() > 2 {
-            for (i, word) in args[1..].iter().enumerate() {
-                if i > 0 {
-                    concat.push(b' ');
-                }
-                concat.extend_from_slice(crate::shell::cstring(word).as_bytes());
-            }
-            concat.push(0);
-            concat.as_mut_ptr() as *mut c_char
-        } else {
-            single = crate::shell::cstring(args[1]);
-            single.as_ptr() as *mut c_char
-        };
-        return evalstring(p, flags & EV_TESTED);
-    }
-    0
-}
 
 /*
  * Execute a command or commands contained in a string.
@@ -938,7 +903,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
     back_exitstatus = 0;
 
     cmdentry.cmdtype = CMDBUILTIN;
-    cmdentry.u.cmd = addr_of_mut!(bltin);
+    cmdentry.u.cmd = addr_of_mut!(crate::builtins::bltin);
 
     cmd_flag = 0;
     execcmd = 0;
@@ -1192,7 +1157,7 @@ unsafe fn evalbltin(cmd: *const builtincmd, args: &[&BStr], flags: c_int) -> c_i
          * word at all -- the assignment-only one `bltin` stands for. */
         commandname = args.first().map(|name| BString::from(<&BStr as AsRef<[u8]>>::as_ref(name)));
         if cmd == crate::builtins::EVALCMD {
-            status = evalcmd(args, flags);
+            status = crate::builtins::eval::evalcmd(args, flags);
         } else {
             status = (*cmd).builtin.expect("a builtin with no special entry")(args);
         }
@@ -1295,16 +1260,6 @@ unsafe fn prehash(n: &Node) {
  * No command given.
  */
 
-// [spec:dash:def:eval.bltincmd-fn]
-// [spec:dash:sem:eval.bltincmd-fn]
-unsafe fn bltincmd(_args: &[&BStr]) -> c_int {
-    /*
-     * Preserve exitstatus of a previous possible redirection
-     * as POSIX mandates
-     */
-    back_exitstatus
-}
-
 /*
  * Handle break and continue commands.  Break, continue, and return are
  * all handled by setting the evalskip flag.  The evaluation routines
@@ -1316,96 +1271,9 @@ unsafe fn bltincmd(_args: &[&BStr]) -> c_int {
  * in the standard shell so we don't make it one here.
  */
 
-// [spec:dash:def:eval.breakcmd-fn]
-// [spec:dash:sem:eval.breakcmd-fn]
-pub unsafe fn breakcmd(args: &[&BStr]) -> c_int {
-    let mut n: c_int = 1;
-
-    if let Some(count) = args.get(1) {
-        let count = crate::shell::cstring(count);
-        n = crate::mystring::number(count.as_ptr());
-        if n <= 0 {
-            crate::mystring::badnum(count.as_ptr());
-        }
-    }
-    if n > loopnest {
-        n = loopnest;
-    }
-    if n > 0 {
-        evalskip = if args[0].first() == Some(&b'c') {
-            SKIPCONT
-        } else {
-            SKIPBREAK
-        };
-        skipcount = n;
-    }
-    0
-}
-
 /*
  * The return command.
  */
-
-// [spec:dash:def:eval.returncmd-fn]
-// [spec:dash:sem:eval.returncmd-fn]
-pub unsafe fn returncmd(args: &[&BStr]) -> c_int {
-    let skip: c_int;
-    let status: c_int;
-
-    /*
-     * If called outside a function, do what ksh does;
-     * skip the rest of the file.
-     */
-    if let Some(want) = args.get(1) {
-        let want = crate::shell::cstring(want);
-        skip = SKIPFUNC;
-        status = crate::mystring::number(want.as_ptr());
-    } else {
-        skip = SKIPFUNCDEF;
-        status = exitstatus;
-    }
-    evalskip = skip;
-
-    status
-}
-
-// [spec:dash:def:eval.falsecmd-fn]
-// [spec:dash:sem:eval.falsecmd-fn]
-pub unsafe fn falsecmd(_args: &[&BStr]) -> c_int {
-    1
-}
-
-// [spec:dash:def:eval.truecmd-fn]
-// [spec:dash:sem:eval.truecmd-fn]
-pub unsafe fn truecmd(_args: &[&BStr]) -> c_int {
-    0
-}
-
-// [spec:dash:def:eval.execcmd-fn]
-// [spec:dash:sem:eval.execcmd-fn]
-pub unsafe fn execcmd(args: &[&BStr]) -> c_int {
-    if args.len() > 1 {
-        crate::options::optlist[crate::options::iflag] = 0; /* exit on error */
-        crate::options::optlist[crate::options::mflag] = 0;
-        crate::options::optschanged();
-        crate::input::flush_input();
-        /* `execve` wants the array back, so this is where it is built --
-         * once, for the one builtin that replaces the process, instead of
-         * for every builtin that does not. `shellexec` writes `argv[-1]`
-         * when it retries a script through the shell, so the spare slot
-         * `evalcommand` reserves is reserved here too.
-         *
-         * `shellexec` does not return: it either replaces the image or
-         * raises, so neither the words nor the array outlive their use. */
-        let words: Vec<CString> = args[1..].iter().map(|a| crate::shell::cstring(a)).collect();
-        let mut argv: Vec<*mut c_char> = Vec::with_capacity(words.len() + 2);
-        argv.push(null_mut());
-        argv.extend(words.iter().map(|w| w.as_ptr() as *mut c_char));
-        argv.push(null_mut());
-        shellexec(argv.as_mut_ptr().add(1), crate::var::pathval(), 0);
-    }
-    0
-}
 
 // [spec:dash:def:eval.eprintlist-fn]
 // [spec:dash:sem:eval.eprintlist-fn]
