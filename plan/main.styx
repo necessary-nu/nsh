@@ -2303,6 +2303,13 @@ children (
                         kind @blocker
                         text "The writer landed and the libc formatting bridge is gone (552f2b1, 5a259a4, 8d68cc0). One decision is outstanding before this can go Done: how `printf %a`/`%A` is rendered. Rust std has no hexadecimal float formatting, so the port currently prints an exactly round-tripping decimal instead of C's hex form. Measured cost: 576 differential cases fail — 1 in aud_bltin_printf, 181 in printffuzz, 394 in printffuzz2 — and every one of them contains an %a or %A conversion. Nothing else diverges in 12264 printf cases; printf2 and printffuzz3 are 113/0 and 4000/0, ptydiff 37/0, exec/foundation clean, divtest 44/0. Sanctioning it in the register was investigated and will not work honestly: a precision-bearing %a rounds the value (`%.0a` of 1.9 is 0x2p+0), so an entry cannot even assert \"the same number written differently\", and anything looser would be a blind spot over 576 fuzz cases contrary to the register's own rule. The two ways out are (a) render %a by transcribing the IEEE-754 fields with `format!(\"{:x}\")` — no digit generation or rounding table, but it is a bespoke %a renderer, which the architecture directive forbids — or (b) accept the decimal form and the 576-case hole. Isolated in `Spec::hexadecimal` in crates/nsh/src/bltin/printf/conv.rs so either is a local change."
                     }
+
+                    {
+                        at 2026-08-11T20:55:22.508593491Z
+                        author "brendan@necessary.nu"
+                        kind @unblock
+                        text "Resolved, and not by either option the blocker offered. Brendan rejected both: no bespoke %a renderer and no 576-case register hole, because the question itself came from keeping a runtime %-conversion interpreter in the crate. It is gone — the printf builtin with it — under [dec:nsh:no-format-interpreters]. printf resolves through PATH like any other utility. Output stays what this node made it: Output is an io::Write the shell owns, formatting happens through write! at typed call sites, and nothing in the crate now reads a format pattern at runtime. Final gates: runall 47826/0 FLAKY=28 XFAIL=11 with no stale register entries, POSIX cases 661/50 against the C's 655/56, ptydiff 37/0, divtest 58/0, cargo test 62 lib + 11 integration."
+                    }
                 )
             }
 
