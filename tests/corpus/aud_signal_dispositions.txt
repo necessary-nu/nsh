@@ -25,8 +25,8 @@ i=0; while :; do echo y; i=$((i+1)); [ $i -gt 50000 ] && break; done | head -3
 #!name sigpipe-external-writer
 seq 1 200000 2>/dev/null | head -2; echo "rc=$?"
 %%%
-#!name sigpipe-printf-builtin
-{ i=0; while [ $i -lt 20000 ]; do printf 'x\n'; i=$((i+1)); done | head -1; } 2>&1 | sort -u
+#!name sigpipe-builtin-writer
+{ i=0; while [ $i -lt 20000 ]; do echo x; i=$((i+1)); done | head -1; } 2>&1 | sort -u
 %%%
 #!name sigpipe-status-of-writer
 { i=0; while [ $i -lt 50000 ]; do echo a; i=$((i+1)); done; } | head -1 >/dev/null; echo "rc=$?"

@@ -1177,8 +1177,10 @@ CASES: tuple[Case, ...] = (
         rules=("builtin.command.opt-p",),
         script=(
             "PATH=/nonexistent-directory\n"
-            "command cat /dev/null 2>/dev/null || printf 'unset-path-fails;'\n"
-            "command -p cat /dev/null && printf 'default-path-finds-it\\n'\n"
+            # echo, not printf: the point of the case is that PATH finds
+            # nothing, and the probe has to be a builtin to survive that.
+            "command cat /dev/null 2>/dev/null || echo -n 'unset-path-fails;'\n"
+            "command -p cat /dev/null && echo 'default-path-finds-it'\n"
         ),
         stdout="unset-path-fails;default-path-finds-it\n",
     ),
@@ -1191,7 +1193,7 @@ CASES: tuple[Case, ...] = (
             "PATH=$PWD/tools\n"
             "command -v mytool\n"
             "PATH=/nonexistent-directory\n"
-            "command -v mytool >/dev/null 2>&1 || printf 'gone\\n'\n"
+            "command -v mytool >/dev/null 2>&1 || echo gone\n"
         ),
         stdout="{ROOT}/tools/mytool\ngone\n",
     ),
@@ -1304,7 +1306,7 @@ CASES: tuple[Case, ...] = (
             "PATH=$PWD/tools\n"
             "type mytool\n"
             "PATH=/nonexistent-directory\n"
-            "type mytool >/dev/null 2>&1 || printf 'gone\\n'\n"
+            "type mytool >/dev/null 2>&1 || echo gone\n"
         ),
         stdout=None,
         stdout_contains=("{ROOT}/tools/mytool", "gone"),
@@ -1415,9 +1417,9 @@ CASES: tuple[Case, ...] = (
         files={"tools/mytool": TOOL},
         script=(
             "PATH=/nonexistent-directory\n"
-            "hash mytool 2>/dev/null || printf 'not-found;'\n"
+            "hash mytool 2>/dev/null || echo -n 'not-found;'\n"
             "PATH=$PWD/tools\n"
-            "hash mytool && printf 'found;'\n"
+            "hash mytool && echo -n 'found;'\n"
             "hash\n"
         ),
         stdout="not-found;found;{ROOT}/tools/mytool\n",

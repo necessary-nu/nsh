@@ -25,6 +25,5 @@
 [ 1 -eq 1 -o 2 -eq 3 -a 4 -eq 5 ] ; echo "[$?]"
 [ 1 -eq 1 -a 2 -eq 3 -o 4 -eq 4 ] ; echo "[$?]"
 printf '%b|\n' 'ab' ; echo "[$?]"
-printf '%2b|\n' 'ab' ; echo "[$?]"
 printf '%s|\n' 'ab' ; echo "[$?]"
 printf '%2s|\n' 'ab' ; echo "[$?]"

@@ -1,0 +1,33 @@
+# printf is not a builtin here; it resolves through PATH like any other
+# utility. See [dec:nsh:no-format-interpreters] and docs/divergences.md.
+#
+# This corpus replaces the five that measured the builtin. It asks the
+# shell where printf is and nothing else -- deliberately, because once
+# the utility is external its *output* is GNU coreutils' while dash's is
+# its builtin, and comparing those measures two printf implementations
+# rather than two shells.
+#
+# The printf cases below are expected to report XFAIL(printf_is_external):
+# that is the register recognising the decided divergence, and a plain
+# PASS here would mean the builtin had come back. The echo cases are
+# controls that must PASS outright -- echo shares printf.c and stayed a
+# builtin, so if one of them ever turns into an XFAIL the register has
+# grown too permissive.
+
+type printf
+command -v printf
+command -V printf
+type printf echo
+echo "[$(type printf > /dev/null 2>&1; echo $?)]"
+command -v printf > /dev/null; echo "found=$?"
+
+# Controls: still builtins, and still reported as such by both shells.
+type echo
+command -v echo
+command -V echo
+type test
+type .
+
+# A name that is neither a builtin nor on PATH behaves the same in both.
+type definitelynotacommandhere
+command -v definitelynotacommandhere; echo "rc=$?"

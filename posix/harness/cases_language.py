@@ -2086,7 +2086,9 @@ CASES: tuple[Case, ...] = (
             langpath
             PATH=$base/d2
             langpath
-            printf '\n'
+            # echo, not printf: PATH here deliberately holds only d2, so
+            # the probe has to be a builtin to survive it.
+            echo
             """
         ),
         stdout="D1D2D2\n",

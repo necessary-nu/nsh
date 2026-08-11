@@ -175,7 +175,7 @@ true; echo "rc=$?"
 %%%
 #!name PATH empty string
 PATH=
-printf '#!/bin/sh\necho EMPTYPATH\n' > eprog; chmod 755 eprog
+{ echo '#!/bin/sh'; echo 'echo EMPTYPATH'; } > eprog; chmod 755 eprog
 eprog 2>&1 | sed 's/.*: //'
 echo "rc=$?"
 echo builtin-still-works
