@@ -15,10 +15,10 @@
 
 use core::ptr::null_mut;
 use libc::{c_char, c_int, c_uint};
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::io::Write as _;
 
-use bstr::BString;
+use bstr::{BStr, BString};
 
 use crate::error::{INTOFF, INTON};
 use crate::expand::arglist;
@@ -49,8 +49,7 @@ const READ_MBSLOP: usize = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 4;
 
 // [spec:dash:def:miscbltin.readcmd-handle-line-fn]
 // [spec:dash:sem:miscbltin.readcmd-handle-line-fn]
-unsafe fn readcmd_handle_line(line: &mut BString, ac: c_int, ap: *mut *mut c_char) {
-    let mut ap: *mut *mut c_char = ap;
+unsafe fn readcmd_handle_line(line: &mut BString, names: &[&BStr]) {
     let mut arglist: arglist = arglist::new();
 
     /* `s = grabstackstr(s)`.  The C is handed the cursor one *past* the
@@ -62,39 +61,27 @@ unsafe fn readcmd_handle_line(line: &mut BString, ac: c_int, ap: *mut *mut c_cha
     let s: *mut c_char = line.as_mut_ptr() as *mut c_char;
     debug_assert!(!line.is_empty(), "readcmd always pushes the terminator");
 
-    crate::expand::ifsbreakup(s, ac, &mut arglist);
+    crate::expand::ifsbreakup(s, names.len() as c_int, &mut arglist);
     crate::expand::ifsfree();
 
-    /* The C's `sl` is a node cursor that runs off the end of the chain; here
-     * it indexes the `Vec` and past-the-end is `sl >= list.len()`. */
-    let mut sl: usize = 0;
-
-    loop {
-        if sl >= arglist.list.len() {
-            /* nullify remaining arguments */
-            loop {
+    /* The C walks the names and the fields with two cursors that advance
+     * together, so the field for a name is the field at its index; a name
+     * past the last field is the "nullify remaining arguments" case. */
+    for (index, name) in names.iter().enumerate() {
+        let name = crate::shell::cstring(name);
+        match arglist.list.get_mut(index) {
+            None => {
                 crate::var::setvar(
-                    *ap,
-                    (core::ptr::addr_of!(crate::shell::nullstr) as *const c_char),
+                    name.as_ptr(),
+                    core::ptr::addr_of!(crate::shell::nullstr) as *const c_char,
                     0,
                 );
-                ap = ap.add(1);
-                if (*ap).is_null() {
-                    break;
-                }
             }
-
-            return;
-        }
-
-        /* set variable to field */
-        arglist.list[sl].rmescapes();
-        crate::var::setvar(*ap, arglist.list[sl].textp(), 0);
-        sl += 1;
-
-        ap = ap.add(1);
-        if (*ap).is_null() {
-            break;
+            Some(field) => {
+                /* set variable to field */
+                field.rmescapes();
+                crate::var::setvar(name.as_ptr(), field.textp(), 0);
+            }
         }
     }
 }
@@ -109,33 +96,30 @@ unsafe fn readcmd_handle_line(line: &mut BString, ac: c_int, ap: *mut *mut c_cha
 
 // [spec:dash:def:miscbltin.readcmd-fn]
 // [spec:dash:sem:miscbltin.readcmd-fn]
-pub unsafe fn readcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
-    let mut prompt: *mut c_char;
+pub unsafe fn readcmd(args: &[&BStr]) -> c_int {
+    let mut prompt: Option<CString>;
     let mut startloc: c_int = 0;
     let mut newloc: c_int = 0;
     let mut status: c_int;
-    let ap: *mut *mut c_char;
     let mut rflag: c_int;
-    let mut i: c_int;
 
     rflag = 0;
-    prompt = null_mut();
-    loop {
-        i = crate::options::nextopt(b"p:r\0".as_ptr() as *const c_char);
-        if i == 0 {
-            break;
-        }
-        if i == 'p' as c_int {
-            prompt = crate::options::optionarg;
+    prompt = None;
+    let mut opts = crate::options::Options::new(args);
+    while let Some(i) = opts.next(b"p:r") {
+        if i == b'p' {
+            prompt = Some(crate::shell::cstring(opts.arg()));
         } else {
             rflag = 1;
         }
     }
-    if !prompt.is_null() && libc::isatty(crate::streams::streams().stdin) != 0 {
-        let _ = (&mut *crate::output::stderr()).write_all(CStr::from_ptr(prompt).to_bytes());
+    if let Some(prompt) = &prompt {
+        if libc::isatty(crate::streams::streams().stdin) != 0 {
+            let _ = (&mut *crate::output::stderr()).write_all(prompt.as_bytes());
+        }
     }
-    ap = crate::options::argptr;
-    if (*ap).is_null() {
+    let names = opts.operands();
+    if names.is_empty() {
         crate::error::sh_error(b"arg count");
     }
 
@@ -237,11 +221,7 @@ pub unsafe fn readcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
      * below then passes `p + 1` — the length *including* it.  Pushing is both
      * halves at once. */
     line.push(b'\0');
-    readcmd_handle_line(
-        &mut line,
-        argc - ((ap as usize - argv as usize) / core::mem::size_of::<*mut c_char>()) as c_int,
-        ap,
-    );
+    readcmd_handle_line(&mut line, names);
     status
 }
 
@@ -256,26 +236,28 @@ pub unsafe fn readcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
 // [spec:dash:def:miscbltin.umaskcmd-fn]
 // [spec:dash:sem:miscbltin.umaskcmd-fn]
-pub unsafe fn umaskcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn umaskcmd(args: &[&BStr]) -> c_int {
     let mut ap: *mut c_char;
     let mut mask: c_int;
     let mut i: c_int;
     let mut symbolic_mode: c_int = 0;
 
-    loop {
-        i = crate::options::nextopt(b"S\0".as_ptr() as *const c_char);
-        if i == 0 {
-            break;
-        }
+    let mut opts = crate::options::Options::new(args);
+    while opts.next(b"S").is_some() {
         symbolic_mode = 1;
     }
+    /* The mode is walked as a cursor, so it stays a C string for the
+     * length of the walk. */
+    let mode = opts.operands().first().map(|w| crate::shell::cstring(w));
 
     INTOFF();
     mask = libc::umask(0) as c_int;
     libc::umask(mask as libc::mode_t);
     INTON();
 
-    ap = *crate::options::argptr;
+    ap = mode
+        .as_ref()
+        .map_or(null_mut(), |mode| mode.as_ptr() as *mut c_char);
     if ap.is_null() {
         if symbolic_mode != 0 {
             let mut buf: [c_char; 18] = [0; 18];
@@ -316,7 +298,7 @@ pub unsafe fn umaskcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
             loop {
                 if *ap >= b'8' as c_char || *ap < b'0' as c_char {
                     let mut message = b"Illegal number: ".to_vec();
-                    message.extend_from_slice(CStr::from_ptr(*crate::options::argptr).to_bytes());
+                    message.extend_from_slice(mode.as_ref().expect("a mode to walk").as_bytes());
                     crate::error::sh_error(&message);
                 }
                 new_mask = (new_mask << 3) + (*ap as c_int - '0' as c_int);
@@ -558,7 +540,7 @@ unsafe fn printlim(how: limtype, limit: *const libc::rlimit, l: *const limits) {
 
 // [spec:dash:def:miscbltin.ulimitcmd-fn]
 // [spec:dash:sem:miscbltin.ulimitcmd-fn]
-pub unsafe fn ulimitcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn ulimitcmd(args: &[&BStr]) -> c_int {
     let mut c: c_int;
     let mut val: libc::rlim_t = 0;
     let mut how: limtype = SOFT | HARD;
@@ -572,12 +554,13 @@ pub unsafe fn ulimitcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     what = 'f' as c_int;
     /* "HSa" plus one letter per resource the platform supports; each
      * letter is `#ifdef RLIMIT_*`-guarded in the C source. */
+    let mut opts = crate::options::Options::new(args);
     loop {
-        optc = crate::options::nextopt(b"HSatfdscmlpnvwr\0".as_ptr() as *const c_char);
-        if optc == 0 {
+        let Some(o) = opts.next(b"HSatfdscmlpnvwr") else {
             break;
-        }
-        match optc as u8 {
+        };
+        optc = o as c_int;
+        match o {
             b'H' => {
                 how = HARD;
             }
@@ -600,15 +583,13 @@ pub unsafe fn ulimitcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         l = l.add(1);
     }
 
-    set = if !(*crate::options::argptr).is_null() {
-        1
-    } else {
-        0
-    };
-    if set != 0 {
-        let mut p: *mut c_char = *crate::options::argptr;
+    let operands = opts.operands();
+    let limitarg = operands.first().map(|w| crate::shell::cstring(w));
+    set = limitarg.is_some() as c_int;
+    if let Some(limitarg) = &limitarg {
+        let mut p: *mut c_char = limitarg.as_ptr() as *mut c_char;
 
-        if all != 0 || !(*crate::options::argptr.add(1)).is_null() {
+        if all != 0 || operands.len() > 1 {
             crate::error::sh_error(b"too many arguments");
         }
         if libc::strcmp(p, b"unlimited\0".as_ptr() as *const c_char) == 0 {

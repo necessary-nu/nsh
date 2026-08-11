@@ -108,7 +108,7 @@ pub static builtincmd: [builtincmd; NUMBUILTINS] = [
     builtincmd { name: c"kill", builtin: Some(Builtin::Args(crate::jobs::killcmd)), flags: BUILTIN_REGULAR }, // 21
     builtincmd { name: c"local", builtin: Some(Builtin::Args(crate::var::localcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 22
     builtincmd { name: c"pwd", builtin: Some(Builtin::Args(crate::cd::pwdcmd)), flags: BUILTIN_REGULAR }, // 23
-    builtincmd { name: c"read", builtin: Some(Builtin::Raw(crate::miscbltin::readcmd)), flags: BUILTIN_REGULAR }, // 24
+    builtincmd { name: c"read", builtin: Some(Builtin::Args(crate::miscbltin::readcmd)), flags: BUILTIN_REGULAR }, // 24
     builtincmd { name: c"readonly", builtin: Some(Builtin::Args(crate::var::exportcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 25
     builtincmd { name: c"return", builtin: Some(Builtin::Args(crate::eval::returncmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 26
     builtincmd { name: c"set", builtin: Some(Builtin::Raw(crate::options::setcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 27
@@ -118,8 +118,8 @@ pub static builtincmd: [builtincmd; NUMBUILTINS] = [
     builtincmd { name: c"trap", builtin: Some(Builtin::Args(crate::trap::trapcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 31
     builtincmd { name: c"true", builtin: Some(Builtin::Args(crate::eval::truecmd)), flags: BUILTIN_REGULAR }, // 32
     builtincmd { name: c"type", builtin: Some(Builtin::Args(crate::exec::typecmd)), flags: BUILTIN_REGULAR }, // 33
-    builtincmd { name: c"ulimit", builtin: Some(Builtin::Raw(crate::miscbltin::ulimitcmd)), flags: BUILTIN_REGULAR }, // 34
-    builtincmd { name: c"umask", builtin: Some(Builtin::Raw(crate::miscbltin::umaskcmd)), flags: BUILTIN_REGULAR }, // 35
+    builtincmd { name: c"ulimit", builtin: Some(Builtin::Args(crate::miscbltin::ulimitcmd)), flags: BUILTIN_REGULAR }, // 34
+    builtincmd { name: c"umask", builtin: Some(Builtin::Args(crate::miscbltin::umaskcmd)), flags: BUILTIN_REGULAR }, // 35
     builtincmd { name: c"unalias", builtin: Some(Builtin::Args(crate::alias::unaliascmd)), flags: BUILTIN_REGULAR }, // 36
     builtincmd { name: c"unset", builtin: Some(Builtin::Args(crate::var::unsetcmd)), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 37
     builtincmd { name: c"wait", builtin: Some(Builtin::Args(crate::jobs::waitcmd)), flags: BUILTIN_REGULAR }, // 38
