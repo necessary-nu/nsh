@@ -16,6 +16,16 @@ variadic call at runtime, so the three cases are written out.
 `conv_escape` is declared in `system.h` and shared with the parser; its
 semantics are specified in `system.md` under `system.conv-escape-fn`.
 
+**One exported item retired.** `output-is-a-writer` renders every
+conversion from Rust's own formatting rather than handing the
+specification back to C's `printf`, so `mklong` — which rewrote a
+specification like `%92.3u` to `%92.3`PRIuMAX so that `printf` would
+pull a whole `intmax_t` off the varargs — has no format string left to
+widen, and the value arrives typed. `PF` and `ASPF` go with it, and with
+them the `array` of collected `*` values that chose between their three
+arities. The block below keeps describing `src/bltin/printf.c`, which
+still has `mklong`, but carries no `[spec:dash:…]` ids.
+
 > [spec:dash:def:printf.check-conversion-fn]
 > static void check_conversion(const char *s, const char *ep)
 
@@ -109,10 +119,8 @@ semantics are specified in `system.md` under `system.conv-escape-fn`.
 > `printf '%d' 0b11` prints 3. A port that binds the plain symbol loses
 > binary literals. Validated by `check_conversion`.
 
-> [spec:dash:def:printf.mklong-fn]
 > static char * mklong(const char *str, const char *ch)
 
-> [spec:dash:sem:printf.mklong-fn]
 > Rewrite an integer conversion specification to use the `intmax_t`
 > length modifier: `"%92.3u"` becomes `"%92.3" PRIuMAX`. Copy everything
 > up to but excluding the conversion character, append `PRIdMAX`, then

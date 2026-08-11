@@ -133,10 +133,6 @@ sites (
         [spec:dash:def:printf.getuintmax-fn]
         [spec:dash:sem:printf.getuintmax-fn]
     )}
-    {path src/bltin/printf.c, symbol mklong, spec (
-        [spec:dash:def:printf.mklong-fn]
-        [spec:dash:sem:printf.mklong-fn]
-    )}
     {path src/bltin/printf.c, symbol print_escape_str, spec (
         [spec:dash:def:printf.print-escape-str-fn]
         [spec:dash:sem:printf.print-escape-str-fn]
@@ -1217,10 +1213,6 @@ sites (
         [spec:dash:def:output.closememout-fn]
         [spec:dash:sem:output.closememout-fn]
     )}
-    {path src/output.c, symbol doformat, spec (
-        [spec:dash:def:output.doformat-fn]
-        [spec:dash:sem:output.doformat-fn]
-    )}
     {path src/output.c, symbol flushall, spec (
         [spec:dash:def:output.flushall-fn]
         [spec:dash:sem:output.flushall-fn]
@@ -1228,10 +1220,6 @@ sites (
     {path src/output.c, symbol flushout, spec (
         [spec:dash:def:output.flushout-fn]
         [spec:dash:sem:output.flushout-fn]
-    )}
-    {path src/output.c, symbol fmtstr, spec (
-        [spec:dash:def:output.fmtstr-fn]
-        [spec:dash:sem:output.fmtstr-fn]
     )}
     {path src/output.c, symbol initstreams, spec (
         [spec:dash:def:output.initstreams-fn]
@@ -1241,17 +1229,9 @@ sites (
         [spec:dash:def:output.openmemout-fn]
         [spec:dash:sem:output.openmemout-fn]
     )}
-    {path src/output.c, symbol out1fmt, spec (
-        [spec:dash:def:output.out1fmt-fn]
-        [spec:dash:sem:output.out1fmt-fn]
-    )}
     {path src/output.c, symbol outcslow, spec (
         [spec:dash:def:output.outcslow-fn]
         [spec:dash:sem:output.outcslow-fn]
-    )}
-    {path src/output.c, symbol outfmt, spec (
-        [spec:dash:def:output.outfmt-fn]
-        [spec:dash:sem:output.outfmt-fn]
     )}
     {path src/output.c, symbol outmem, spec (
         [spec:dash:def:output.outmem-fn]
@@ -1260,18 +1240,6 @@ sites (
     {path src/output.c, symbol outstr, spec (
         [spec:dash:def:output.outstr-fn]
         [spec:dash:sem:output.outstr-fn]
-    )}
-    {path src/output.c, symbol xasprintf, spec (
-        [spec:dash:def:output.xasprintf-fn]
-        [spec:dash:sem:output.xasprintf-fn]
-    )}
-    {path src/output.c, symbol xvasprintf, spec (
-        [spec:dash:def:output.xvasprintf-fn]
-        [spec:dash:sem:output.xvasprintf-fn]
-    )}
-    {path src/output.c, symbol xvsnprintf, spec (
-        [spec:dash:def:output.xvsnprintf-fn]
-        [spec:dash:sem:output.xvsnprintf-fn]
     )}
     {path src/output.c, symbol xwrite, spec (
         [spec:dash:def:output.xwrite-fn]

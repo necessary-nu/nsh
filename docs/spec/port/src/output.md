@@ -19,6 +19,19 @@ most functions delegate to stdio instead.
 Errors are recorded in `flags` rather than raised, so a failed write does
 not unwind mid-output; callers check later.
 
+**Seven exported items retired.** `output-is-a-writer` made `Output`
+an implementation of `std::io::Write` owned by the shell, so the port has
+no runtime format-string API for these seven to belong to. `doformat` is
+what `write!` does, and `fmtstr`, `out1fmt` and `outfmt` were the three
+entry points that reached it — their callers format at the typed call
+site now, where the arguments still have types. `xasprintf`,
+`xvasprintf` and `xvsnprintf` existed to size and grow a buffer around
+`vsnprintf`; the last caller that wanted C formatting at all was the
+`printf` builtin, which renders its own conversions. The blocks below
+therefore carry no `[spec:dash:…]` ids — each is a C signature followed
+by its semantics — and are kept because they still describe
+`src/output.c` and `src/output.h`, which still have all seven.
+
 > [spec:dash:def:output.closememout-fn]
 > int __closememout(void)
 
@@ -29,10 +42,8 @@ not unwind mid-output; callers check later.
 > shipped configuration; Wave 2 may carry the annotation on an equally
 > inactive site.
 
-> [spec:dash:def:output.doformat-fn]
 > void doformat(struct output *dest, const char *f, va_list ap)
 
-> [spec:dash:sem:output.doformat-fn]
 > Render a printf-style format straight into `dest`'s buffer when it
 > fits, avoiding a copy. Take a stack mark. Point `s` at `dest->nextc`
 > and compute `olen`, the space left in the buffer. Call
@@ -67,10 +78,8 @@ not unwind mid-output; callers check later.
 > set `OUTPUT_ERR` in `dest->flags`. Under `USE_GLIBC_STDIO` this is
 > `fflush(dest->stream)` between `INTOFF`/`INTON`.
 
-> [spec:dash:def:output.fmtstr-fn]
 > int fmtstr(char *outbuf, size_t length, const char *fmt, ...)
 
-> [spec:dash:sem:output.fmtstr-fn]
 > `snprintf` onto a caller-supplied buffer: collect the variadic
 > arguments, call `xvsnprintf(outbuf, length, fmt, ap)`, and return the
 > result clamped to `length`. The clamp converts C's "characters that
@@ -107,10 +116,8 @@ not unwind mid-output; callers check later.
 > so writes to `memout` accumulate into a growing buffer. Compiled only
 > under `USE_GLIBC_STDIO` and `notyet`.
 
-> [spec:dash:def:output.out1fmt-fn]
 > void out1fmt(const char *fmt, ...)
 
-> [spec:dash:sem:output.out1fmt-fn]
 > Collect the variadic arguments and `doformat(out1, fmt, ap)` — formatted
 > output to standard output.
 
@@ -131,10 +138,8 @@ not unwind mid-output; callers check later.
 > `outmem(&buf, 1, dest)`, which handles growing or flushing the buffer.
 > Split out of `outc` to keep the inline fast path small.
 
-> [spec:dash:def:output.outfmt-fn]
 > void outfmt(struct output *file, const char *fmt, ...)
 
-> [spec:dash:sem:output.outfmt-fn]
 > Collect the variadic arguments and `doformat(file, fmt, ap)` —
 > formatted output to an arbitrary `struct output`.
 
@@ -178,19 +183,15 @@ not unwind mid-output; callers check later.
 > its terminator. Under `USE_GLIBC_STDIO`, `fputs` between
 > `INTOFF`/`INTON`.
 
-> [spec:dash:def:output.xasprintf-fn]
 > int xasprintf(char **sp, const char *f, ...)
 
-> [spec:dash:sem:output.xasprintf-fn]
 > Format onto freshly allocated stack space: collect the variadic
 > arguments and call `xvasprintf(sp, 0, f, ap)`. Passing size 0 forces
 > the allocating path, so `*sp` always receives stack-allocated storage.
 > Returns the formatted length.
 
-> [spec:dash:def:output.xvasprintf-fn]
 > static int xvasprintf(char **sp, size_t size, const char *f, va_list ap)
 
-> [spec:dash:sem:output.xvasprintf-fn]
 > Format into `*sp` if the result fits in `size` bytes, otherwise onto
 > the shell stack, updating `*sp` to point at it. First attempt through a
 > `va_copy` so `ap` survives for a second pass:
@@ -209,10 +210,8 @@ not unwind mid-output; callers check later.
 > why `xasprintf` always returns freshly allocated stack storage. A port
 > must preserve that, not "clean up" the mixed comparison.
 
-> [spec:dash:def:output.xvsnprintf-fn]
 > static int xvsnprintf(char *outbuf, size_t length, const char *fmt, va_list ap)
 
-> [spec:dash:sem:output.xvsnprintf-fn]
 > `vsnprintf` with interrupts suspended, so a signal cannot arrive
 > partway through formatting. On Solaris, a `length` of 0 is first
 > redirected to a one-byte dummy buffer, because older `vsnprintf` there

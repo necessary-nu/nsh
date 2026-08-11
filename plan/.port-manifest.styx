@@ -129,10 +129,6 @@ symbols (
         {verb def, id printf.conv-escape-fn}
         {verb sem, id printf.conv-escape-fn}
     )}
-    {id printf.mklong-fn, kind @function, name mklong, qualified mklong, signature "static char * mklong(const char *str, const char *ch)", file src/bltin/printf.c, line_start 471, line_end 493, rules (
-        {verb def, id printf.mklong-fn}
-        {verb sem, id printf.mklong-fn}
-    )}
     {id printf.getchr-fn, kind @function, name getchr, qualified getchr, signature "static int getchr(void)", file src/bltin/printf.c, line_start 495, line_end 503, rules (
         {verb def, id printf.getchr-fn}
         {verb sem, id printf.getchr-fn}
@@ -1383,30 +1379,6 @@ symbols (
         {verb def, id output.flushout-fn}
         {verb sem, id output.flushout-fn}
     )}
-    {id output.outfmt-fn, kind @function, name outfmt, qualified outfmt, signature "void outfmt(struct output *file, const char *fmt, ...)", file src/output.c, line_start 258, line_end 266, rules (
-        {verb def, id output.outfmt-fn}
-        {verb sem, id output.outfmt-fn}
-    )}
-    {id output.out1fmt-fn, kind @function, name out1fmt, qualified out1fmt, signature "void out1fmt(const char *fmt, ...)", file src/output.c, line_start 269, line_end 277, rules (
-        {verb def, id output.out1fmt-fn}
-        {verb sem, id output.out1fmt-fn}
-    )}
-    {id output.fmtstr-fn, kind @function, name fmtstr, qualified fmtstr, signature "int fmtstr(char *outbuf, size_t length, const char *fmt, ...)", file src/output.c, line_start 280, line_end 290, rules (
-        {verb def, id output.fmtstr-fn}
-        {verb sem, id output.fmtstr-fn}
-    )}
-    {id output.xvasprintf-fn, kind @function, name xvasprintf, qualified xvasprintf, signature "static int xvasprintf(char **sp, size_t size, const char *f, va_list ap)", file src/output.c, line_start 293, line_end 311, rules (
-        {verb def, id output.xvasprintf-fn}
-        {verb sem, id output.xvasprintf-fn}
-    )}
-    {id output.xasprintf-fn, kind @function, name xasprintf, qualified xasprintf, signature "int xasprintf(char **sp, const char *f, ...)", file src/output.c, line_start 314, line_end 323, rules (
-        {verb def, id output.xasprintf-fn}
-        {verb sem, id output.xasprintf-fn}
-    )}
-    {id output.doformat-fn, kind @function, name doformat, qualified doformat, signature "void doformat(struct output *dest, const char *f, va_list ap)", file src/output.c, line_start 327, line_end 346, rules (
-        {verb def, id output.doformat-fn}
-        {verb sem, id output.doformat-fn}
-    )}
     {id output.xwrite-fn, kind @function, name xwrite, qualified xwrite, signature "int xwrite(int fd, const void *p, size_t n)", file src/output.c, line_start 355, line_end 376, rules (
         {verb def, id output.xwrite-fn}
         {verb sem, id output.xwrite-fn}
@@ -1422,10 +1394,6 @@ symbols (
     {id output.closememout-fn, kind @function, name __closememout, qualified closememout, signature "int __closememout(void)", file src/output.c, line_start 395, line_end 401, rules (
         {verb def, id output.closememout-fn}
         {verb sem, id output.closememout-fn}
-    )}
-    {id output.xvsnprintf-fn, kind @function, name xvsnprintf, qualified xvsnprintf, signature "static int xvsnprintf(char *outbuf, size_t length, const char *fmt, va_list ap)", file src/output.c, line_start 406, line_end 429, rules (
-        {verb def, id output.xvsnprintf-fn}
-        {verb sem, id output.xvsnprintf-fn}
     )}
     {id output.output, kind @struct, name output, qualified output, signature "struct output", members (
         "char *nextc"
