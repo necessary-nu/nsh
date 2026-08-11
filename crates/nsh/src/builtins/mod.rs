@@ -1,4 +1,15 @@
-//! Literal port of `src/builtins.c` / `src/builtins.h`.
+//! The builtins: one module per builtin, and the table that names them.
+//!
+//! `builtins::<name>` is the whole organising idea -- a builtin's entry
+//! point and the helpers only it uses live in the module named after it,
+//! while the machinery it drives (the variable table, job control, the
+//! alias table, the parser) stays in the module that owns that machinery
+//! and is called from here. Where a builtin's name is a Rust keyword the
+//! module is a raw identifier, so `type` is `builtins::r#type`: the module
+//! is named after the builtin even when the language would rather it were
+//! not.
+//!
+//! This file is the port of `src/builtins.c` / `src/builtins.h`.
 //!
 //! Both files are *generated* at build time by `src/mkbuiltins` (a shell
 //! script) from `src/builtins.def.in`, so nothing here carries
@@ -100,12 +111,16 @@ pub fn writable_args(args: &[&BStr]) -> Vec<*mut c_char> {
     slots
 }
 
+pub mod echo;
+pub mod test;
+pub mod times;
+
 pub const NUMBUILTINS: usize = 39;
 
 pub static builtincmd: [builtincmd; NUMBUILTINS] = [
     builtincmd { name: c".", builtin: Some(crate::shellmain::dotcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 0
     builtincmd { name: c":", builtin: Some(crate::eval::truecmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 1
-    builtincmd { name: c"[", builtin: Some(crate::bltin::test::testcmd), flags: 0 }, // 2
+    builtincmd { name: c"[", builtin: Some(test::testcmd), flags: 0 }, // 2
     builtincmd { name: c"alias", builtin: Some(crate::alias::aliascmd), flags: BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 3
     builtincmd { name: c"bg", builtin: Some(crate::jobs::bgcmd), flags: BUILTIN_REGULAR }, // 4
     builtincmd { name: c"break", builtin: Some(crate::eval::breakcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 5
@@ -113,7 +128,7 @@ pub static builtincmd: [builtincmd; NUMBUILTINS] = [
     builtincmd { name: c"chdir", builtin: Some(crate::cd::cdcmd), flags: 0 }, // 7
     builtincmd { name: c"command", builtin: Some(crate::exec::commandcmd), flags: BUILTIN_REGULAR }, // 8
     builtincmd { name: c"continue", builtin: Some(crate::eval::breakcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 9
-    builtincmd { name: c"echo", builtin: Some(crate::bltin::printf::echocmd), flags: 0 }, // 10
+    builtincmd { name: c"echo", builtin: Some(echo::echocmd), flags: 0 }, // 10
     builtincmd { name: c"eval", builtin: None, flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 11
     builtincmd { name: c"exec", builtin: Some(crate::eval::execcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 12
     builtincmd { name: c"exit", builtin: Some(crate::shellmain::exitcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 13
@@ -132,8 +147,8 @@ pub static builtincmd: [builtincmd; NUMBUILTINS] = [
     builtincmd { name: c"return", builtin: Some(crate::eval::returncmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 26
     builtincmd { name: c"set", builtin: Some(crate::options::setcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 27
     builtincmd { name: c"shift", builtin: Some(crate::options::shiftcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 28
-    builtincmd { name: c"test", builtin: Some(crate::bltin::test::testcmd), flags: 0 }, // 29
-    builtincmd { name: c"times", builtin: Some(crate::bltin::times::timescmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 30
+    builtincmd { name: c"test", builtin: Some(test::testcmd), flags: 0 }, // 29
+    builtincmd { name: c"times", builtin: Some(times::timescmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 30
     builtincmd { name: c"trap", builtin: Some(crate::trap::trapcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 31
     builtincmd { name: c"true", builtin: Some(crate::eval::truecmd), flags: BUILTIN_REGULAR }, // 32
     builtincmd { name: c"type", builtin: Some(crate::exec::typecmd), flags: BUILTIN_REGULAR }, // 33
@@ -179,3 +194,78 @@ pub static UMASKCMD: &builtincmd = &builtincmd[35];
 pub static UNALIASCMD: &builtincmd = &builtincmd[36];
 pub static UNSETCMD: &builtincmd = &builtincmd[37];
 pub static WAITCMD: &builtincmd = &builtincmd[38];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bstr::BString;
+
+    use crate::expand::strlist;
+
+    use super::*;
+
+    /// A field's bytes end with the NUL its C readers stop at, and a
+    /// builtin stops at a length, so exactly one byte comes off -- not the
+    /// trailing NUL of a word that ends in one.
+    #[test]
+    fn args_drop_only_the_terminator() {
+        let fields = vec![
+            strlist { text: BString::from(&b"echo\0"[..]) },
+            strlist { text: BString::from(&b"\0"[..]) },
+            strlist { text: BString::from(&b"a b\0"[..]) },
+        ];
+        let args = args(&fields);
+        assert_eq!(args, vec![BStr::new("echo"), BStr::new(""), BStr::new("a b")]);
+    }
+
+    /// The words `fc` writes through have to still be C strings, which
+    /// they are because the terminator is one past the slice rather than
+    /// gone.
+    #[test]
+    fn writable_args_are_c_strings() {
+        let fields = vec![
+            strlist { text: BString::from(&b"fc\0"[..]) },
+            strlist { text: BString::from(&b"old=new\0"[..]) },
+        ];
+        let args = args(&fields);
+        let slots = writable_args(&args);
+
+        assert_eq!(slots.len(), 3);
+        assert!(slots[2].is_null(), "the array is NULL-terminated");
+        unsafe {
+            assert_eq!(CStr::from_ptr(slots[0]).to_bytes(), b"fc");
+            assert_eq!(CStr::from_ptr(slots[1]).to_bytes(), b"old=new");
+        }
+    }
+
+    /// `fc -s old=new` splits the word where the `=` is and `$_` reads the
+    /// result, so the write has to reach the shell's own word.
+    #[test]
+    fn writable_args_write_through() {
+        let fields = vec![strlist { text: BString::from(&b"old=new\0"[..]) }];
+        let args = args(&fields);
+        let slots = writable_args(&args);
+
+        unsafe {
+            let eq = libc::strchr(slots[0], b'=' as c_int);
+            assert!(!eq.is_null());
+            *eq = 0;
+            assert_eq!(CStr::from_ptr(slots[0]).to_bytes(), b"old");
+        }
+        assert_eq!(fields[0].text, BString::from(&b"old\0new\0"[..]));
+    }
+
+    /// Every row the table names resolves, which is the check that a
+    /// module move did not leave a name pointing at the wrong function.
+    #[test]
+    fn every_row_has_an_entry_point() {
+        for cmd in &builtincmd {
+            let name = cmd.name.to_bytes();
+            assert_eq!(
+                cmd.builtin.is_none(),
+                name == b"eval",
+                "only `eval` has a special entry point"
+            );
+        }
+    }
+}

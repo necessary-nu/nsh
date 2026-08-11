@@ -677,3 +677,123 @@ pub unsafe fn test_access(sp: *const libc::stat64, mut stmode: c_int) -> c_int {
     ((*sp).st_mode & stmode as libc::mode_t) as c_int
 }
 // #endif	/* HAVE_FACCESSAT */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `test` is a pure expression evaluator over its words, so it can be
+    /// asked a question directly. The differential corpus covers it far
+    /// more widely than this; what these pin is the shape of the answer
+    /// for each arity the POSIX prescription branches on, because that
+    /// branching is what a refactor here would break first.
+    ///
+    /// `t_wp` is a module global, so the lock is the crate's usual one.
+    fn eval(words: &[&[u8]]) -> c_int {
+        let _guard = crate::testutil::lock();
+        let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
+        unsafe { testcmd(&args) }
+    }
+
+    #[test]
+    fn no_expression_is_false() {
+        assert_eq!(eval(&[b"test"]), 1);
+        assert_eq!(eval(&[b"[", b"]"]), 1);
+    }
+
+    /// One word is true when it is not empty -- the `argc == 2` arm.
+    #[test]
+    fn one_word_tests_for_emptiness() {
+        assert_eq!(eval(&[b"test", b"x"]), 0);
+        assert_eq!(eval(&[b"test", b""]), 1);
+        /* An operator name is still just a word here. */
+        assert_eq!(eval(&[b"test", b"-n"]), 0);
+        assert_eq!(eval(&[b"test", b"="]), 0);
+    }
+
+    #[test]
+    fn unary_string_operators() {
+        assert_eq!(eval(&[b"test", b"-n", b"x"]), 0);
+        assert_eq!(eval(&[b"test", b"-n", b""]), 1);
+        assert_eq!(eval(&[b"test", b"-z", b""]), 0);
+        assert_eq!(eval(&[b"test", b"-z", b"x"]), 1);
+    }
+
+    #[test]
+    fn binary_string_operators() {
+        assert_eq!(eval(&[b"test", b"a", b"=", b"a"]), 0);
+        assert_eq!(eval(&[b"test", b"a", b"=", b"b"]), 1);
+        assert_eq!(eval(&[b"test", b"a", b"!=", b"b"]), 0);
+    }
+
+    /// The `argc == 3` arm prefers a binary operator in the middle, so a
+    /// word that looks like one wins over the `!` negation reading.
+    #[test]
+    fn a_middle_operator_wins() {
+        assert_eq!(eval(&[b"test", b"!", b"=", b"!"]), 0);
+        assert_eq!(eval(&[b"test", b"!", b"=", b"x"]), 1);
+    }
+
+    #[test]
+    fn integer_comparison() {
+        assert_eq!(eval(&[b"test", b"1", b"-eq", b"1"]), 0);
+        assert_eq!(eval(&[b"test", b"1", b"-ne", b"1"]), 1);
+        assert_eq!(eval(&[b"test", b"1", b"-lt", b"2"]), 0);
+        assert_eq!(eval(&[b"test", b"2", b"-gt", b"1"]), 0);
+        assert_eq!(eval(&[b"test", b"-1", b"-lt", b"0"]), 0);
+    }
+
+    #[test]
+    fn the_remaining_integer_operators() {
+        assert_eq!(eval(&[b"test", b"1", b"-le", b"1"]), 0);
+        assert_eq!(eval(&[b"test", b"2", b"-le", b"1"]), 1);
+        assert_eq!(eval(&[b"test", b"1", b"-ge", b"1"]), 0);
+        assert_eq!(eval(&[b"test", b"1", b"-ge", b"2"]), 1);
+    }
+
+    /// The file predicates that ask about permission rather than about
+    /// type. `/` is readable and searchable to every uid that can run
+    /// this suite at all.
+    #[test]
+    fn permission_predicates() {
+        assert_eq!(eval(&[b"test", b"-r", b"/"]), 0);
+        assert_eq!(eval(&[b"test", b"-x", b"/"]), 0);
+        assert_eq!(eval(&[b"test", b"-s", b"/nonexistent-for-nsh-tests"]), 1);
+    }
+
+    #[test]
+    fn negation_and_connectives() {
+        assert_eq!(eval(&[b"test", b"!", b"-n", b""]), 0);
+        assert_eq!(eval(&[b"test", b"x", b"-a", b"y"]), 0);
+        assert_eq!(eval(&[b"test", b"x", b"-a", b""]), 1);
+        assert_eq!(eval(&[b"test", b"", b"-o", b"y"]), 0);
+        assert_eq!(eval(&[b"test", b"", b"-o", b""]), 1);
+    }
+
+    /// Parentheses at the ends of a three- or four-word expression are
+    /// stripped by the same arm that handles `!`.
+    #[test]
+    fn parentheses_group() {
+        assert_eq!(eval(&[b"test", b"(", b"x", b")"]), 0);
+        assert_eq!(eval(&[b"test", b"(", b"", b")"]), 1);
+    }
+
+    #[test]
+    fn file_operators_read_the_filesystem() {
+        assert_eq!(eval(&[b"test", b"-e", b"/"]), 0);
+        assert_eq!(eval(&[b"test", b"-d", b"/"]), 0);
+        assert_eq!(eval(&[b"test", b"-f", b"/"]), 1);
+        assert_eq!(eval(&[b"test", b"-e", b"/nonexistent-for-nsh-tests"]), 1);
+    }
+
+    /// `[` checks its own closing bracket, and the check is on the last
+    /// word rather than on any word.
+    #[test]
+    fn bracket_requires_its_bracket() {
+        assert_eq!(eval(&[b"[", b"x", b"]"]), 0);
+        assert!(crate::testutil::raises(|| {
+            let args = [BStr::new(b"["), BStr::new(b"x")];
+            unsafe { testcmd(&args) };
+        }));
+    }
+}

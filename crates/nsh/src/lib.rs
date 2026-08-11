@@ -57,6 +57,7 @@ pub mod api;
 
 // ---- foundation -----------------------------------------------------
 pub mod error;
+pub mod escape;
 pub mod mystring;
 pub mod output;
 pub mod shell;
@@ -67,8 +68,10 @@ pub mod system;
 #[cfg(test)]
 pub mod testutil;
 
-// ---- generated tables ------------------------------------------------
+// ---- the builtins ----------------------------------------------------
 pub mod builtins;
+
+// ---- generated tables ------------------------------------------------
 pub mod nodes;
 pub mod signames;
 pub mod syntax;
@@ -98,6 +101,5 @@ pub mod miscbltin;
 pub mod shellmain;
 
 // ---- builtins ---------------------------------------------------------
-pub mod bltin;
 pub mod histedit;
 pub mod linedit;

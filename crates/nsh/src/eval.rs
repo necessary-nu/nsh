@@ -99,11 +99,6 @@ pub static mut inps4: c_int = 0; /* MKINIT */
 
 pub static mut tpip: [c_int; 2] = [-1, 0]; /* MKINIT int tpip[2] = { -1 } */
 
-/* C: `.name = nullstr`. Rust cannot take the address of another
- * module's static in a const initialiser, so this carries its own
- * copy of the empty string; the field is never read for `bltin`. */
-static BLTIN_NULLSTR: [c_char; 1] = [0];
-
 static mut bltin: builtincmd = builtincmd {
     name: c"",
     builtin: Some(bltincmd),

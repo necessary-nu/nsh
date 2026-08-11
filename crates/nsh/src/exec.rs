@@ -1077,14 +1077,14 @@ pub unsafe fn commandcmd(args: &[&BStr]) -> c_int {
 // [spec:dash:sem:exec.test-file-access-fn]
 #[inline]
 pub unsafe fn test_file_access(path: *const c_char, mode: c_int) -> c_int {
-    crate::bltin::test::test_file_access(path, mode)
+    crate::builtins::test::test_file_access(path, mode)
 }
 
 // [spec:dash:def:exec.test-access-fn]
 // [spec:dash:sem:exec.test-access-fn]
 #[inline]
 pub unsafe fn test_access(sp: *const libc::stat64, stmode: c_int) -> c_int {
-    crate::bltin::test::test_access(sp, stmode)
+    crate::builtins::test::test_access(sp, stmode)
 }
 
 #[cfg(test)]

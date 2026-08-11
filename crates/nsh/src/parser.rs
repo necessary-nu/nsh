@@ -1313,7 +1313,7 @@ unsafe fn dollarsq_escape(dest: &mut BString) {
     if *p != 'c' as c_char {
         let ret: c_uint;
 
-        ret = crate::bltin::printf::conv_escape(p, out, true);
+        ret = crate::escape::conv_escape(p, out, true);
         p = p.offset((ret >> 4) as isize);
         out = out.offset((ret & 15) as isize);
     } else {
