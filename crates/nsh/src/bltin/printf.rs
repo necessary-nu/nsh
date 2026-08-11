@@ -38,6 +38,7 @@
 //!     (src/mksyntax.c:147,152)
 
 use core::ptr;
+use bstr::BStr;
 use libc::{c_char, c_int, c_uint};
 use std::io::Write as _;
 
@@ -433,34 +434,39 @@ pub unsafe fn conv_escape(str0: *mut c_char, out0: *mut c_char, mbchar: bool) ->
 
 // [spec:dash:def:printf.echocmd-fn]
 // [spec:dash:sem:printf.echocmd-fn]
-pub unsafe fn echocmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
+pub unsafe fn echocmd(args: &[&BStr]) -> c_int {
     /* The C picked between the formats `"%s\n"`, `"%s"` and `"%s "`; all
      * that ever differed was the byte after the conversion, so what is
      * chosen here is that byte. `-n` closes with nothing. */
     let mut last: u8 = b'\n';
     let mut nonl: c_int;
 
-    argv = argv.add(1);
-    if !(*argv).is_null() && libc::strcmp(*argv, c"-n".as_ptr()) == 0 {
-        argv = argv.add(1);
+    let mut words = &args[1..];
+    if words.first().is_some_and(|w| &w[..] == b"-n") {
+        words = &words[1..];
         last = 0;
     }
 
+    let mut index = 0usize;
     loop {
         let mut separator: u8 = b' ';
-        let s: *mut c_char = *argv;
+        let s = words.get(index);
 
         // if (!s || !*++argv) — `++argv` is not evaluated when s is NULL.
-        if s.is_null() || {
-            argv = argv.add(1);
-            (*argv).is_null()
+        if s.is_none() || {
+            index += 1;
+            words.get(index).is_none()
         } {
             separator = last;
         }
 
-        nonl = print_escape_str(separator, if !s.is_null() { s } else { nullstr() });
+        let s = s.map(|w| crate::shell::cstring(w));
+        nonl = print_escape_str(
+            separator,
+            s.as_ref().map_or(nullstr(), |w| w.as_ptr() as *mut c_char),
+        );
 
-        if !(nonl == 0 && !(*argv).is_null()) {
+        if !(nonl == 0 && words.get(index).is_some()) {
             break;
         }
     }

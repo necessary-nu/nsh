@@ -18,7 +18,8 @@
 use core::mem;
 use core::ptr;
 use libc::{c_char, c_int, c_short, intmax_t};
-use std::ffi::CStr;
+use bstr::BStr;
+use std::ffi::{CStr, CString};
 
 /* test(1) accepts the following grammar:
     oexpr	::= aexpr | aexpr "-o" oexpr ;
@@ -211,10 +212,21 @@ unsafe fn getop(s: *const c_char) -> *const t_op {
 
 // [spec:dash:def:test.testcmd-fn]
 // [spec:dash:sem:test.testcmd-fn]
-pub unsafe fn testcmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
+pub unsafe fn testcmd(args: &[&BStr]) -> c_int {
     let mut op: *const t_op;
     let n: token;
     let mut res: c_int = 1;
+
+    /* The expression walker below is a recursive descent over the words
+     * sharing one cursor (`t_wp`), and `[` writes into the array to drop
+     * its own `]`. Both want the words as an array for the length of the
+     * call, so this builtin builds one -- rather than `evalcommand`
+     * building one for every builtin whether it wanted one or not. */
+    let words: Vec<CString> = args.iter().map(|w| crate::shell::cstring(w)).collect();
+    let mut slots: Vec<*mut c_char> = words.iter().map(|w| w.as_ptr() as *mut c_char).collect();
+    slots.push(ptr::null_mut());
+    let mut argc: c_int = args.len() as c_int;
+    let mut argv: *mut *mut c_char = slots.as_mut_ptr();
 
     if **argv == b'[' as c_char {
         argc -= 1;
