@@ -4,7 +4,7 @@
 //! Note `sigmode`/`gotsig` are indexed by `signo - 1` while `trap` is indexed
 //! by `signo`, slot 0 being the `EXIT` trap.
 
-use bstr::BString;
+use bstr::{BStr, BString};
 use core::ptr::{addr_of, addr_of_mut, null, null_mut};
 use libc::{c_char, c_int, sigset_t};
 use std::ffi::CStr;
@@ -17,7 +17,7 @@ use crate::error::{INTOFF, INTON, jmploc};
 use crate::eval::{SKIPFUNC, SKIPFUNCDEF, evalskip, exitstatus, savestatus};
 use crate::mystring::nullstr;
 use crate::nodes::Node;
-use crate::options::{argptr, nextopt};
+use crate::options::Options;
 
 /// glibc's `NSIG` (`_NSIG`) on Linux.
 pub const NSIG: usize = 65;
@@ -91,14 +91,13 @@ pub unsafe fn mkinit_forkreset(n: Option<&Node>) {
 
 // [spec:dash:def:trap.trapcmd-fn]
 // [spec:dash:sem:trap.trapcmd-fn]
-pub unsafe fn trapcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
-    let mut action: *mut c_char;
-    let mut ap: *mut *mut c_char;
+pub unsafe fn trapcmd(args: &[&BStr]) -> c_int {
     let mut signo: c_int;
 
-    nextopt(addr_of!(nullstr) as *const c_char);
-    ap = argptr;
-    if (*ap).is_null() {
+    let mut opts = Options::new(args);
+    opts.next(b"");
+    let ap = opts.operands();
+    if ap.is_empty() {
         signo = 0;
         while signo < NSIG as c_int {
             if let Some(t) = &(*addr_of!(trap))[signo as usize] {
@@ -121,17 +120,20 @@ pub unsafe fn trapcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     if ptrap != 0 {
         clear_traps(None);
     }
-    if (*ap.offset(1)).is_null() || decode_signum(*ap) >= 0 {
-        action = null_mut();
+    /* `trap SIG...` resets, and `trap ACTION SIG...` sets: the first word
+     * is the action unless it is itself a signal, or the only word. */
+    let first = crate::shell::cstring(ap[0]);
+    let (mut action, signals) = if ap.len() < 2 || decode_signum(first.as_ptr()) >= 0 {
+        (None, ap)
     } else {
-        action = *ap;
-        ap = ap.add(1);
-    }
-    while !(*ap).is_null() {
-        signo = decode_signal(*ap, 0);
+        (Some(first), &ap[1..])
+    };
+    for word in signals {
+        let word = crate::shell::cstring(word);
+        signo = decode_signal(word.as_ptr(), 0);
         if signo < 0 {
             let mut message = b"trap: ".to_vec();
-            message.extend_from_slice(CStr::from_ptr(*ap).to_bytes());
+            message.extend_from_slice(word.as_bytes());
             message.extend_from_slice(b": bad trap\n");
             let _ = (*crate::output::stderr()).write_all(&message);
             return 1;
@@ -142,17 +144,14 @@ pub unsafe fn trapcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
          * gives the same bytes and leaves `action` pointing at what the
          * `'-'` test reads. */
         let mut newtrap: Option<BString> = None;
-        if !action.is_null() {
-            if *action.offset(0) == b'-' as c_char && *action.offset(1) == b'\0' as c_char {
-                action = null_mut();
+        if let Some(text) = &action {
+            if text.as_bytes() == b"-" {
+                action = None;
             } else {
-                if *action != 0 {
+                if !text.as_bytes().is_empty() {
                     trapcnt += 1;
                 }
-                newtrap = Some(BString::from(core::slice::from_raw_parts(
-                    action as *const u8,
-                    libc::strlen(action),
-                )));
+                newtrap = Some(BString::from(text.as_bytes()));
             }
         }
         if let Some(old) = &(*addr_of!(trap))[signo as usize] {
@@ -169,7 +168,6 @@ pub unsafe fn trapcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
             setsignal(signo);
         }
         INTON();
-        ap = ap.add(1);
     }
     0
 }

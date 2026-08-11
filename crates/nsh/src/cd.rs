@@ -14,7 +14,7 @@ use std::os::unix::ffi::OsStrExt;
 
 use crate::error::{INTOFF, INTON};
 use crate::mystring::{dotdir, homestr, nullstr};
-use crate::options::{argptr, nextopt};
+use crate::options::Options;
 use crate::var::{VEXPORT, bltinlookup, setvar};
 
 const CD_PHYSICAL: c_int = 1;
@@ -39,17 +39,11 @@ unsafe fn cbytes(s: &Option<BString>) -> Vec<u8> {
 
 // [spec:dash:def:cd.cdopt-fn]
 // [spec:dash:sem:cd.cdopt-fn]
-unsafe fn cdopt() -> c_int {
+unsafe fn cdopt(opts: &mut Options) -> c_int {
     let mut flags: c_int = 0;
-    let mut i: c_int;
-    let mut j: c_int;
+    let mut j: u8 = b'L';
 
-    j = b'L' as c_int;
-    loop {
-        i = nextopt(b"LP\0".as_ptr() as *const c_char);
-        if i == 0 {
-            break;
-        }
+    while let Some(i) = opts.next(b"LP") {
         if i != j {
             flags ^= CD_PHYSICAL;
             j = i;
@@ -61,7 +55,7 @@ unsafe fn cdopt() -> c_int {
 
 // [spec:dash:def:cd.cdcmd-fn]
 // [spec:dash:sem:cd.cdcmd-fn]
-pub unsafe fn cdcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn cdcmd(args: &[&BStr]) -> c_int {
     let mut dest: *const c_char;
     let mut path: *const c_char;
     let mut p: *const c_char;
@@ -70,13 +64,18 @@ pub unsafe fn cdcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     let mut flags: c_int;
     let mut len: c_int;
 
-    flags = cdopt();
-    dest = *argptr;
-    if dest.is_null() {
-        dest = bltinlookup(addr_of!(homestr) as *const c_char);
-    } else if *dest.offset(0) == b'-' as c_char && *dest.offset(1) == b'\0' as c_char {
-        dest = bltinlookup(b"OLDPWD\0".as_ptr() as *const c_char);
-        flags |= CD_PRINT;
+    let mut opts = Options::new(args);
+    flags = cdopt(&mut opts);
+    /* The operand outlives every reader below, which is what the C got
+     * from `argv` living in `evalcommand`'s frame. */
+    let operand = opts.operands().first().map(|d| crate::shell::cstring(d));
+    match &operand {
+        None => dest = bltinlookup(addr_of!(homestr) as *const c_char),
+        Some(d) if d.as_bytes() == b"-" => {
+            dest = bltinlookup(b"OLDPWD\0".as_ptr() as *const c_char);
+            flags |= CD_PRINT;
+        }
+        Some(d) => dest = d.as_ptr(),
     }
     if dest.is_null() {
         dest = addr_of!(nullstr) as *const c_char;
@@ -312,10 +311,10 @@ unsafe fn getpwd() -> Option<BString> {
 
 // [spec:dash:def:cd.pwdcmd-fn]
 // [spec:dash:sem:cd.pwdcmd-fn]
-pub unsafe fn pwdcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn pwdcmd(args: &[&BStr]) -> c_int {
     let flags: c_int;
 
-    flags = cdopt();
+    flags = cdopt(&mut Options::new(args));
     let mut dir = if flags != 0 {
         if (*addr_of!(physdir)).is_none() {
             setpwd_inner(Pwd::Current, 0);

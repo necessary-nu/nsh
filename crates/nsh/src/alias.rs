@@ -7,7 +7,7 @@
 //! this answers it in the container rather than at print time. Registered
 //! in `docs/divergences.md`.
 
-use bstr::BString;
+use bstr::{BStr, BString};
 use core::ptr::{addr_of_mut, null_mut};
 use libc::{c_char, c_int};
 use std::collections::BTreeMap;
@@ -15,7 +15,7 @@ use std::ffi::CStr;
 use std::io::Write;
 
 use crate::error::{INTOFF, INTON};
-use crate::options::{argptr, nextopt};
+use crate::options::Options;
 use crate::var::varname;
 
 pub const ALIASINUSE: c_int = 1;
@@ -168,23 +168,22 @@ pub unsafe fn lookupalias(name: *const c_char, check: c_int) -> *mut alias {
 
 // [spec:dash:def:alias.aliascmd-fn]
 // [spec:dash:sem:alias.aliascmd-fn]
-pub unsafe fn aliascmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
-    let mut n: *mut c_char;
+pub unsafe fn aliascmd(args: &[&BStr]) -> c_int {
     let mut ret: c_int = 0;
     let mut ap: *mut alias;
 
-    if argc == 1 {
+    if args.len() == 1 {
         for ap in atab_mut().values() {
             printalias(&**ap as *const alias);
         }
         return 0;
     }
-    loop {
-        argv = argv.add(1);
-        n = *argv;
-        if n.is_null() {
-            break;
-        }
+    for word in &args[1..] {
+        /* `setalias` reads the value as an offset into the name, so the
+         * two have to be one buffer, as they are in the word the shell
+         * expanded. */
+        let word = crate::shell::cstring(word);
+        let n = word.as_ptr();
         /* n + 1: funny ksh stuff (from 44lite) */
         let vv = if *n == 0 {
             null_mut()
@@ -195,7 +194,7 @@ pub unsafe fn aliascmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
             ap = __lookupalias(n);
             if ap.is_null() {
                 let mut message = b"alias: ".to_vec();
-                message.extend_from_slice(CStr::from_ptr(n).to_bytes());
+                message.extend_from_slice(word.as_bytes());
                 message.extend_from_slice(b" not found\n");
                 let _ = (*crate::output::stderr()).write_all(&message);
                 ret = 1;
@@ -212,29 +211,26 @@ pub unsafe fn aliascmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
 
 // [spec:dash:def:alias.unaliascmd-fn]
 // [spec:dash:sem:alias.unaliascmd-fn]
-pub unsafe fn unaliascmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn unaliascmd(args: &[&BStr]) -> c_int {
     let mut i: c_int;
 
-    loop {
-        i = nextopt(b"a\0".as_ptr() as *const c_char);
-        if i == b'\0' as c_int {
-            break;
-        }
-        if i == b'a' as c_int {
+    let mut opts = Options::new(args);
+    while let Some(opt) = opts.next(b"a") {
+        if opt == b'a' {
             rmaliases();
             return 0;
         }
     }
     i = 0;
-    while !(*argptr).is_null() {
-        if unalias(*argptr) != 0 {
+    for name in opts.operands() {
+        let name = crate::shell::cstring(name);
+        if unalias(name.as_ptr()) != 0 {
             let mut message = b"unalias: ".to_vec();
-            message.extend_from_slice(CStr::from_ptr(*argptr).to_bytes());
+            message.extend_from_slice(name.as_bytes());
             message.extend_from_slice(b" not found\n");
             let _ = (*crate::output::stderr()).write_all(&message);
             i = 1;
         }
-        argptr = argptr.add(1);
     }
 
     i
