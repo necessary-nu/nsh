@@ -430,43 +430,40 @@ pub unsafe fn setjobctl(on: c_int) {
 
 // [spec:dash:def:jobs.killcmd-fn]
 // [spec:dash:sem:jobs.killcmd-fn]
-pub unsafe fn killcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn killcmd(args: &[&BStr]) -> c_int {
     /* the `usage:` label is a backward goto whose body only calls the
      * noreturn sh_error, so it is reproduced as two calls with the
      * same message. */
     const USAGE: &[u8] =
         b"Usage: kill [-s sigspec | -signum | -sigspec] [pid | job]... or\nkill -l [exitstatus]\0";
-    let mut argv: *mut *mut c_char = argv;
     let mut signo: c_int = -1;
     let mut list: c_int = 0;
     let mut i: c_int;
     let mut pid: pid_t;
     let mut jp: usize;
 
-    if argc <= 1 {
+    if args.len() <= 1 {
         // usage:
         crate::error::sh_error(&USAGE[..USAGE.len() - 1]);
     }
 
-    argv = argv.add(1);
-    if **argv == b'-' as c_char {
-        signo = crate::trap::decode_signal((*argv).add(1), 1);
+    let mut opts = crate::options::Options::new(args);
+    /* `-9` and `-TERM` are a signal, not an option, so the option scan
+     * runs only once the signal reading has failed -- and then from the
+     * same word, which is where `Options` starts. */
+    let mut operands: &[&BStr] = &args[1..];
+    if args[1].first() == Some(&b'-') {
+        let first = crate::shell::cstring(args[1]);
+        signo = crate::trap::decode_signal(first.as_ptr().add(1), 1);
         if signo < 0 {
-            let mut c: c_int;
-
-            loop {
-                c = crate::options::nextopt(b"ls:\0".as_ptr() as *const c_char);
-                if c == 0 {
-                    break;
-                }
-                match c as u8 {
+            while let Some(c) = opts.next(b"ls:") {
+                match c {
                     b's' => {
-                        signo = crate::trap::decode_signal(crate::options::optionarg, 1);
+                        let name = crate::shell::cstring(opts.arg());
+                        signo = crate::trap::decode_signal(name.as_ptr(), 1);
                         if signo < 0 {
                             let mut message = b"invalid signal number or name: ".to_vec();
-                            message.extend_from_slice(
-                                CStr::from_ptr(crate::options::optionarg).to_bytes(),
-                            );
+                            message.extend_from_slice(name.as_bytes());
                             crate::error::sh_error(&message);
                         }
                     }
@@ -476,9 +473,9 @@ pub unsafe fn killcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
                     }
                 }
             }
-            argv = crate::options::argptr;
+            operands = opts.operands();
         } else {
-            argv = argv.add(1);
+            operands = &args[2..];
         }
     }
 
@@ -486,7 +483,7 @@ pub unsafe fn killcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         signo = libc::SIGTERM;
     }
 
-    if (((signo < 0 || (*argv).is_null()) as c_int) ^ list) != 0 {
+    if (((signo < 0 || operands.is_empty()) as c_int) ^ list) != 0 {
         // goto usage
         crate::error::sh_error(&USAGE[..USAGE.len() - 1]);
     }
@@ -495,9 +492,9 @@ pub unsafe fn killcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         let out: *mut Output;
 
         out = crate::output::stdout();
-        if (*argv).is_null() {
+        let Some(status) = operands.first() else {
             let _ = (&mut *out).write_all(b"0\n");
-            i = 1;
+            let mut i = 1;
             while i < crate::signames::NSIG as c_int {
                 let mut record = crate::signames::signal_names[i as usize]
                     .to_bytes()
@@ -507,8 +504,9 @@ pub unsafe fn killcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
                 i += 1;
             }
             return 0;
-        }
-        signo = crate::mystring::number(*argv);
+        };
+        let status = crate::shell::cstring(status);
+        signo = crate::mystring::number(status.as_ptr());
         if signo > 128 {
             signo -= 128;
         }
@@ -520,22 +518,23 @@ pub unsafe fn killcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
             let _ = (&mut *out).write_all(&record);
         } else {
             let mut message = b"invalid signal number or exit status: ".to_vec();
-            message.extend_from_slice(CStr::from_ptr(*argv).to_bytes());
+            message.extend_from_slice(status.as_bytes());
             crate::error::sh_error(&message);
         }
         return 0;
     }
 
     i = 0;
-    loop {
-        if **argv == b'%' as c_char {
-            jp = getjob(*argv, 0);
+    for spec in operands {
+        let target = crate::shell::cstring(spec);
+        if spec.first() == Some(&b'%') {
+            jp = getjob(target.as_ptr(), 0);
             pid = -ps_pid(jp, 0);
         } else {
-            pid = if **argv == b'-' as c_char {
-                -crate::mystring::number((*argv).add(1))
+            pid = if spec.first() == Some(&b'-') {
+                -crate::mystring::number(target.as_ptr().add(1))
             } else {
-                crate::mystring::number(*argv)
+                crate::mystring::number(target.as_ptr())
             };
         }
         if libc::kill(pid, signo) != 0 {
@@ -543,10 +542,6 @@ pub unsafe fn killcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
             message.push(b'\n');
             crate::error::sh_warnx(&message);
             i = 1;
-        }
-        argv = argv.add(1);
-        if (*argv).is_null() {
-            break;
         }
     }
 
@@ -563,23 +558,27 @@ fn jobno(jp: usize) -> c_int {
 
 // [spec:dash:def:jobs.fgcmd-fn]
 // [spec:dash:sem:jobs.fgcmd-fn]
-pub unsafe fn fgcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
-    let mut argv: *mut *mut c_char = argv;
+pub unsafe fn fgcmd(args: &[&BStr]) -> c_int {
     let mut jp: usize;
     let out: *mut Output;
     let mode: c_int;
-    let mut retval: c_int;
+    let mut retval: c_int = 0;
 
-    mode = if **argv == b'f' as c_char {
+    mode = if args[0].first() == Some(&b'f') {
         FORK_FG
     } else {
         FORK_BG
     };
-    crate::options::nextopt((core::ptr::addr_of!(crate::shell::nullstr) as *const c_char));
-    argv = crate::options::argptr;
+    let mut opts = crate::options::Options::new(args);
+    opts.next(b"");
+    let operands = opts.operands();
     out = crate::output::stdout();
+    /* `do { ... } while (*argv && *++argv)`: one pass on the current job
+     * when there is no operand, otherwise one pass per operand. */
+    let mut index = 0usize;
     loop {
-        jp = getjob(*argv, 1);
+        let spec = operands.get(index).map(|s| crate::shell::cstring(s));
+        jp = getjob(spec.as_ref().map_or(core::ptr::null(), |s| s.as_ptr()), 1);
         if mode == FORK_BG {
             set_curjob(jp, CUR_RUNNING);
             let _ = write!(&mut *out, "[{}] ", jobno(jp));
@@ -588,11 +587,8 @@ pub unsafe fn fgcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         showpipe(jp, out);
         retval = restartjob(jp, mode);
 
-        if (*argv).is_null() {
-            break;
-        }
-        argv = argv.add(1);
-        if (*argv).is_null() {
+        index += 1;
+        if index >= operands.len() {
             break;
         }
     }
@@ -605,8 +601,8 @@ pub unsafe fn fgcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 // The same function as `fgcmd` — `__attribute__((alias("fgcmd")))`
 // where the compiler supports it; the portable fallback, reproduced
 // here, forwards. `fgcmd` distinguishes the two by `argv[0]`.
-pub unsafe fn bgcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
-    fgcmd(argc, argv)
+pub unsafe fn bgcmd(args: &[&BStr]) -> c_int {
+    fgcmd(args)
 }
 
 // [spec:dash:def:jobs.restartjob-fn]
@@ -776,19 +772,14 @@ unsafe fn showjob(out: *mut Output, jp: usize, mode: c_int) {
 
 // [spec:dash:def:jobs.jobscmd-fn]
 // [spec:dash:sem:jobs.jobscmd-fn]
-pub unsafe fn jobscmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
-    let mut argv: *mut *mut c_char = argv;
+pub unsafe fn jobscmd(args: &[&BStr]) -> c_int {
     let mut mode: c_int;
-    let mut m: c_int;
     let out: *mut Output;
 
     mode = 0;
-    loop {
-        m = crate::options::nextopt(b"lp\0".as_ptr() as *const c_char);
-        if m == 0 {
-            break;
-        }
-        if m == 'l' as c_int {
+    let mut opts = crate::options::Options::new(args);
+    while let Some(m) = opts.next(b"lp") {
+        if m == b'l' {
             mode = SHOW_PID;
         } else {
             mode = SHOW_PGID;
@@ -796,14 +787,11 @@ pub unsafe fn jobscmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
     }
 
     out = crate::output::stdout();
-    argv = crate::options::argptr;
-    if !(*argv).is_null() {
-        loop {
-            showjob(out, getjob(*argv, 0), mode);
-            argv = argv.add(1);
-            if (*argv).is_null() {
-                break;
-            }
+    let operands = opts.operands();
+    if !operands.is_empty() {
+        for spec in operands {
+            let spec = crate::shell::cstring(spec);
+            showjob(out, getjob(spec.as_ptr(), 0), mode);
         }
     } else {
         showjobs(out, mode);
@@ -860,18 +848,18 @@ unsafe fn freejob(jp: usize) {
 
 // [spec:dash:def:jobs.waitcmd-fn]
 // [spec:dash:sem:jobs.waitcmd-fn]
-pub unsafe fn waitcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
-    let mut argv: *mut *mut c_char = argv;
+pub unsafe fn waitcmd(args: &[&BStr]) -> c_int {
     let mut jobp: Option<usize>;
     let mut retval: c_int;
     let mut jp: Option<usize>;
 
-    crate::options::nextopt((core::ptr::addr_of!(crate::shell::nullstr) as *const c_char));
+    let mut opts = crate::options::Options::new(args);
+    opts.next(b"");
     retval = 0;
 
-    argv = crate::options::argptr;
+    let operands = opts.operands();
     'out_lbl: {
-        if (*argv).is_null() {
+        if operands.is_empty() {
             /* wait for all jobs */
             loop {
                 jp = curjob;
@@ -895,10 +883,11 @@ pub unsafe fn waitcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
         }
 
         retval = 127;
-        loop {
+        for spec in operands {
+            let target = crate::shell::cstring(spec);
             'repeat: {
-                if **argv != b'%' as c_char {
-                    let pid: pid_t = crate::mystring::number(*argv);
+                if spec.first() != Some(&b'%') {
+                    let pid: pid_t = crate::mystring::number(target.as_ptr());
                     jobp = curjob;
                     /* `goto start` enters the do/while at `start:` */
                     let mut at_start = true;
@@ -920,7 +909,7 @@ pub unsafe fn waitcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
                         }
                     }
                 } else {
-                    jobp = Some(getjob(*argv, 0));
+                    jobp = Some(getjob(target.as_ptr(), 0));
                 }
                 /* loop until process terminated or stopped */
                 if dowait(DOWAIT_WAITCMD, jobp) == 0 {
@@ -933,10 +922,6 @@ pub unsafe fn waitcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
                 retval = getstatus(i);
             }
             // repeat:
-            argv = argv.add(1);
-            if (*argv).is_null() {
-                break;
-            }
         }
     }
     // out:
