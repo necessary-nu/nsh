@@ -330,8 +330,8 @@ pub unsafe fn sh_warnx(msg: &[u8]) {
     let line = errlinno;
     write!(&mut prefix, "{line}").expect("writing to a Vec cannot fail");
     prefix.extend_from_slice(b": ");
-    if !crate::eval::commandname.is_null() {
-        prefix.extend_from_slice(CStr::from_ptr(crate::eval::commandname).to_bytes());
+    if let Some(name) = &*core::ptr::addr_of!(crate::eval::commandname) {
+        prefix.extend_from_slice(name);
         prefix.extend_from_slice(b": ");
     }
 

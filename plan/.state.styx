@@ -1101,6 +1101,7 @@ assertions (
     {id delete-memalloc, kind @complete, author "brendan@necessary.nu", at 2026-08-09T22:07:54.34344606Z}
     {id nshedit-in-tree, kind @doing, author "brendan@necessary.nu", at 2026-08-09T22:10:03.872390597Z}
     {id output-is-a-writer, kind @complete, author "brendan@necessary.nu", at 2026-08-11T20:55:43.687147342Z}
+    {id builtins-take-args, kind @doing, author "brendan@necessary.nu", at 2026-08-11T21:37:48.069345805Z}
 )
 
 impl_evidence (

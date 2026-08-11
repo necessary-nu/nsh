@@ -25,7 +25,7 @@ use core::mem;
 use core::ptr;
 use std::ffi::CStr;
 
-use bstr::BString;
+use bstr::{BStr, BString};
 use libc::{c_char, c_int, c_uint, c_ulong, c_void, intmax_t, size_t, ssize_t, wchar_t};
 
 // ---------------------------------------------------------------------

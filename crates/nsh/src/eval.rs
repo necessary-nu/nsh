@@ -28,13 +28,13 @@
 //! `DEBUG`, so the calls are dropped; C `goto`s are reproduced with
 //! labelled blocks whose nesting mirrors the order of the C labels.
 
-use bstr::BString;
-use core::ptr::{addr_of_mut, null, null_mut};
+use bstr::{BStr, BString};
+use core::ptr::{addr_of, addr_of_mut, null, null_mut};
 use libc::{c_char, c_int};
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::io::Write as _;
 
-use crate::builtins::{BUILTIN_ASSIGN, BUILTIN_REGULAR, BUILTIN_SPECIAL, builtincmd};
+use crate::builtins::{BUILTIN_ASSIGN, BUILTIN_REGULAR, BUILTIN_SPECIAL, Builtin, builtincmd};
 use crate::error::{FORCEINTON, INTOFF, INTON, jmploc};
 use crate::exec::{CMDBUILTIN, CMDFUNCTION, CMDNORMAL, CMDUNKNOWN, DO_ERR, DO_NOFUNC, DO_REGBLTIN};
 use crate::exec::{cmdentry, find_command, param, shellexec};
@@ -83,7 +83,13 @@ static mut skipcount: c_int = 0; /* number of levels to skip */
 pub static mut loopnest: c_int = 0; /* current loop nesting level (MKINIT) */
 static mut funcline: c_int = 0; /* starting line number of current function, or 0 */
 
-pub static mut commandname: *mut c_char = null_mut();
+/// The name the running builtin was invoked by, for the error prefix.
+///
+/// dash points this at `argv[0]` and relies on the word outliving the
+/// call. Owning the bytes states that lifetime instead of assuming it,
+/// which is what lets `dotcmd` stop keeping its resolved path alive in a
+/// static of its own.
+pub static mut commandname: Option<BString> = None;
 pub static mut exitstatus: c_int = 0; /* exit status of last command */
 pub static mut back_exitstatus: c_int = 0; /* exit status of backquoted command */
 pub static mut savestatus: c_int = -1; /* exit status of last command outside traps */
@@ -100,7 +106,7 @@ static BLTIN_NULLSTR: [c_char; 1] = [0];
 
 static mut bltin: builtincmd = builtincmd {
     name: c"",
-    builtin: Some(bltincmd),
+    builtin: Some(Builtin::Args(bltincmd)),
     flags: BUILTIN_REGULAR,
 };
 
@@ -1035,6 +1041,12 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
      * overflow, so the count is asserted rather than assumed. */
     debug_assert!(nargv < argvend);
 
+    /* The same words as `argv`, in the shape a builtin takes them: no
+     * terminator, no array, and borrowed from `arglist` -- which this
+     * frame owns, so a builtin that re-enters evaluation is not holding
+     * anything the shell might move underneath it. */
+    let args: Vec<&BStr> = crate::builtins::args(&arglist.list[head..]);
+
     lastarg = null_mut();
     if iflag() != 0 && funcline == 0 && argc > 0 {
         lastarg = *nargv.offset(-1);
@@ -1111,7 +1123,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
                 }
 
                 CMDBUILTIN => {
-                    if evalbltin(cmdentry.u.cmd, argc, argv, flags) != 0
+                    if evalbltin(cmdentry.u.cmd, &args, argc, argv, flags) != 0
                         && !(crate::error::exception == crate::error::EXERROR && spclbltin <= 0)
                     {
                         // raise:
@@ -1176,34 +1188,42 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
 // [spec:dash:sem:eval.evalbltin-fn]
 unsafe fn evalbltin(
     cmd: *const builtincmd,
+    args: &[&BStr],
     argc: c_int,
     argv: *mut *mut c_char,
     flags: c_int,
 ) -> c_int {
-    let savecmdname: *mut c_char; /* volatile */
+    let savecmdname: Option<BString>; /* volatile */
     let savehandler: *mut jmploc; /* volatile */
     let mut jmploc_: jmploc = jmploc::new();
     let i: c_int;
 
-    savecmdname = commandname;
+    savecmdname = core::mem::take(&mut *addr_of_mut!(commandname));
     savehandler = crate::error::handler;
     let jl: *mut jmploc = &mut jmploc_;
     i = setjmp_catch(jl, || unsafe {
         let mut status: c_int;
 
         crate::error::handler = jl;
-        commandname = *argv.offset(0);
+        /* `commandname = argv[0]`, and NULL for the command that has no
+         * word at all -- the assignment-only one `bltin` stands for. */
+        commandname = args.first().map(|name| BString::from(<&BStr as AsRef<[u8]>>::as_ref(name)));
         crate::options::argptr = argv.add(1);
         crate::options::optptr = null_mut(); /* initialize nextopt */
         if cmd == crate::builtins::EVALCMD {
             status = evalcmd(argc, argv, flags);
         } else {
-            status = ((*cmd).builtin.unwrap())(argc, argv);
+            status = match (*cmd).builtin.as_ref().unwrap() {
+                Builtin::Raw(f) => f(argc, argv),
+                Builtin::Args(f) => f(args),
+            };
         }
         crate::output::flushall();
         if crate::output::outerr(crate::output::stdout()) != 0 {
             let mut message = Vec::new();
-            message.extend_from_slice(CStr::from_ptr(commandname).to_bytes());
+            if let Some(name) = &*addr_of!(commandname) {
+                message.extend_from_slice(name);
+            }
             message.extend_from_slice(b": I/O error");
             crate::error::sh_warnx(&message);
         }
@@ -1299,7 +1319,7 @@ unsafe fn prehash(n: &Node) {
 
 // [spec:dash:def:eval.bltincmd-fn]
 // [spec:dash:sem:eval.bltincmd-fn]
-unsafe fn bltincmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
+unsafe fn bltincmd(_args: &[&BStr]) -> c_int {
     /*
      * Preserve exitstatus of a previous possible redirection
      * as POSIX mandates
@@ -1320,21 +1340,21 @@ unsafe fn bltincmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
 // [spec:dash:def:eval.breakcmd-fn]
 // [spec:dash:sem:eval.breakcmd-fn]
-pub unsafe fn breakcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
-    let mut n: c_int = if argc > 1 {
-        crate::mystring::number(*argv.offset(1))
-    } else {
-        1
-    };
+pub unsafe fn breakcmd(args: &[&BStr]) -> c_int {
+    let mut n: c_int = 1;
 
-    if n <= 0 {
-        crate::mystring::badnum(*argv.offset(1));
+    if let Some(count) = args.get(1) {
+        let count = crate::shell::cstring(count);
+        n = crate::mystring::number(count.as_ptr());
+        if n <= 0 {
+            crate::mystring::badnum(count.as_ptr());
+        }
     }
     if n > loopnest {
         n = loopnest;
     }
     if n > 0 {
-        evalskip = if **argv == b'c' as c_char {
+        evalskip = if args[0].first() == Some(&b'c') {
             SKIPCONT
         } else {
             SKIPBREAK
@@ -1350,7 +1370,7 @@ pub unsafe fn breakcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
 // [spec:dash:def:eval.returncmd-fn]
 // [spec:dash:sem:eval.returncmd-fn]
-pub unsafe fn returncmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn returncmd(args: &[&BStr]) -> c_int {
     let skip: c_int;
     let status: c_int;
 
@@ -1358,9 +1378,10 @@ pub unsafe fn returncmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
      * If called outside a function, do what ksh does;
      * skip the rest of the file.
      */
-    if !(*argv.offset(1)).is_null() {
+    if let Some(want) = args.get(1) {
+        let want = crate::shell::cstring(want);
         skip = SKIPFUNC;
-        status = crate::mystring::number(*argv.offset(1));
+        status = crate::mystring::number(want.as_ptr());
     } else {
         skip = SKIPFUNCDEF;
         status = exitstatus;
@@ -1372,25 +1393,38 @@ pub unsafe fn returncmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
 // [spec:dash:def:eval.falsecmd-fn]
 // [spec:dash:sem:eval.falsecmd-fn]
-pub unsafe fn falsecmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn falsecmd(_args: &[&BStr]) -> c_int {
     1
 }
 
 // [spec:dash:def:eval.truecmd-fn]
 // [spec:dash:sem:eval.truecmd-fn]
-pub unsafe fn truecmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn truecmd(_args: &[&BStr]) -> c_int {
     0
 }
 
 // [spec:dash:def:eval.execcmd-fn]
 // [spec:dash:sem:eval.execcmd-fn]
-pub unsafe fn execcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
-    if argc > 1 {
+pub unsafe fn execcmd(args: &[&BStr]) -> c_int {
+    if args.len() > 1 {
         crate::options::optlist[crate::options::iflag] = 0; /* exit on error */
         crate::options::optlist[crate::options::mflag] = 0;
         crate::options::optschanged();
         crate::input::flush_input();
-        shellexec(argv.add(1), crate::var::pathval(), 0);
+        /* `execve` wants the array back, so this is where it is built --
+         * once, for the one builtin that replaces the process, instead of
+         * for every builtin that does not. `shellexec` writes `argv[-1]`
+         * when it retries a script through the shell, so the spare slot
+         * `evalcommand` reserves is reserved here too.
+         *
+         * `shellexec` does not return: it either replaces the image or
+         * raises, so neither the words nor the array outlive their use. */
+        let words: Vec<CString> = args[1..].iter().map(|a| crate::shell::cstring(a)).collect();
+        let mut argv: Vec<*mut c_char> = Vec::with_capacity(words.len() + 2);
+        argv.push(null_mut());
+        argv.extend(words.iter().map(|w| w.as_ptr() as *mut c_char));
+        argv.push(null_mut());
+        shellexec(argv.as_mut_ptr().add(1), crate::var::pathval(), 0);
     }
     0
 }

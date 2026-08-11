@@ -6,7 +6,7 @@
 //! `options.h` become `usize` indices, so a call site reads `optlist[eflag]`
 //! and stays assignable exactly like the C macro.
 
-use bstr::BString;
+use bstr::{BStr, BString};
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 use libc::{c_char, c_int, c_uint, size_t};
 use std::ffi::CStr;
@@ -719,6 +719,152 @@ unsafe fn getopts(optstr: *mut c_char, optvar: *mut c_char, optfirst: *mut *mut 
     done
 }
 
+/// The option scan a builtin runs over its own arguments.
+///
+/// This is `nextopt` with its state made local. dash keeps that state in
+/// three globals -- `argptr`, `optptr` and `optionarg` -- which
+/// `evalbltin` reinitialises before every builtin, and which the builtin
+/// reads back after the scan to find its operands. The reinitialisation
+/// is the tell: the state was never shared, only ambient, so it belongs to
+/// the builtin that is scanning.
+///
+/// The C's comment above `nextopt` asks for it to be replaced by
+/// `getopt(3)`, and says why it cannot be: the library's version keeps
+/// *its* state in a process global, which a shell cannot reset portably.
+/// Neither can this one, which is why it is a value.
+///
+/// [`Options::operands`] is the `argptr` a builtin reads afterwards.
+pub struct Options<'a> {
+    args: &'a [&'a BStr],
+    /// The next word to look at: dash's `argptr`.
+    next: usize,
+    /// How far a run of clustered options has got through a word already
+    /// consumed: dash's `optptr`. `None` is its NULL.
+    run: Option<(usize, usize)>,
+    /// dash's `optionarg`.
+    optionarg: Option<&'a BStr>,
+}
+
+impl<'a> Options<'a> {
+    /// Scan `args` from the first word after the command name, which is
+    /// where `evalbltin`'s `argptr = argv + 1` starts.
+    pub fn new(args: &'a [&'a BStr]) -> Self {
+        Self::from(args, 1)
+    }
+
+    /// Scan from `start`, for the one caller whose word list does not
+    /// begin with a command name: `procargs` reads the shell's own.
+    pub fn from(args: &'a [&'a BStr], start: usize) -> Self {
+        Options {
+            args,
+            next: start.min(args.len()),
+            run: None,
+            optionarg: None,
+        }
+    }
+
+    /// The next option, or `None` at the end of the options -- dash's
+    /// `'\0'`.
+    ///
+    /// `optstring` is the C's, minus its terminator: a letter, optionally
+    /// followed by `:` to say the option takes an argument.
+    ///
+    /// # Safety
+    ///
+    /// An unrecognised option or a missing option argument raises, so this
+    /// unwinds through the caller's frame like every other `sh_error`.
+    pub unsafe fn next(&mut self, optstring: &[u8]) -> Option<u8> {
+        /* `p = optptr; if (p == NULL || *p == '\0')` -- the run in
+         * progress is exhausted, so the next word starts a new one. */
+        let (word, mut off) = match self.run {
+            Some((w, off)) if off < self.args[w].len() => (w, off),
+            _ => {
+                let w = self.next;
+                /* `p == NULL || *p != '-' || *++p == '\0'`: the end of
+                 * the list, a word that is not an option, or a lone `-`.
+                 * None of the three is consumed. */
+                let word = *self.args.get(w)?;
+                if word.first() != Some(&b'-') || word.len() < 2 {
+                    return None;
+                }
+                self.next = w + 1; /* argptr++ */
+                if &word[..] == b"--" {
+                    /* consumed, and it ends the options */
+                    return None;
+                }
+                (w, 1)
+            }
+        };
+
+        let c = self.args[word][off];
+        off += 1;
+
+        /* Find `c` in the option string.  A `:` belongs to the option
+         * before it, so the scan steps over one; running off the end is
+         * the C reading its terminator, and the option is not ours. */
+        let mut q = 0usize;
+        loop {
+            let cur = optstring.get(q).copied().unwrap_or(0);
+            if cur == c {
+                break;
+            }
+            if cur == 0 {
+                let mut message = b"Illegal option -".to_vec();
+                message.push(c);
+                crate::error::sh_error(&message);
+            }
+            q += 1;
+            if optstring.get(q) == Some(&b':') {
+                q += 1;
+            }
+        }
+
+        q += 1;
+        if optstring.get(q) == Some(&b':') {
+            /* The option takes an argument: the rest of this word if
+             * there is any, otherwise the next word. */
+            let bytes = self.args[word];
+            if off < bytes.len() {
+                self.optionarg = Some(BStr::new(&bytes[off..]));
+            } else {
+                match self.args.get(self.next) {
+                    Some(a) => {
+                        self.optionarg = Some(a);
+                        self.next += 1;
+                    }
+                    None => {
+                        let mut message = b"No arg for -".to_vec();
+                        message.push(c);
+                        message.extend_from_slice(b" option");
+                        crate::error::sh_error(&message);
+                    }
+                }
+            }
+            self.run = None; /* p = NULL */
+        } else {
+            self.run = Some((word, off));
+        }
+
+        Some(c)
+    }
+
+    /// The argument of the option just returned: dash's `optionarg`.
+    ///
+    /// Only an option the option string marked with `:` has one, and
+    /// [`Options::next`] raises rather than return such an option without
+    /// it, so a caller that asks in the right place always gets it.
+    pub fn arg(&self) -> &'a BStr {
+        self.optionarg
+            .expect("an option marked `:` has an argument or does not return")
+    }
+
+    /// The words the scan stopped in front of: dash's `argptr`, read back
+    /// after `nextopt` has returned `'\0'`.
+    pub fn operands(&self) -> &'a [&'a BStr] {
+        &self.args[self.next..]
+    }
+}
+
 /*
  * XXX - should get rid of.  have all builtins use getopt(3).  the
  * library getopt must have the BSD extension static variable "optreset"
@@ -783,4 +929,117 @@ pub unsafe fn nextopt(optstring: *const c_char) -> c_int {
     }
     optptr = p;
     c as c_int
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `Options` is `nextopt` with its state made local, so what it has to
+    /// agree with is the C's walk, edge for edge. These are the edges:
+    /// which words the scan consumes is what decides where the operands
+    /// start, and every builtin reads its operands from there.
+    fn scan<'a>(args: &'a [&'a BStr], optstring: &[u8]) -> (Vec<u8>, Vec<&'a BStr>) {
+        let mut opts = Options::new(args);
+        let mut seen = Vec::new();
+        while let Some(c) = unsafe { opts.next(optstring) } {
+            seen.push(c);
+        }
+        (seen, opts.operands().to_vec())
+    }
+
+    fn words<'a>(raw: &'a [&'a [u8]]) -> Vec<&'a BStr> {
+        raw.iter().map(|w| BStr::new(*w)).collect()
+    }
+
+    #[test]
+    fn non_option_word_stops_scan() {
+        let args = words(&[b"jobs", b"%1", b"-l"]);
+        let (seen, operands) = scan(&args, b"lp");
+        assert!(seen.is_empty());
+        assert_eq!(operands, words(&[b"%1", b"-l"]));
+    }
+
+    #[test]
+    fn options_cluster_within_one_word() {
+        let args = words(&[b"jobs", b"-lp", b"%1"]);
+        let (seen, operands) = scan(&args, b"lp");
+        assert_eq!(seen, b"lp");
+        assert_eq!(operands, words(&[b"%1"]));
+    }
+
+    #[test]
+    fn option_arg_from_same_word() {
+        let args = words(&[b"read", b"-pPROMPT", b"var"]);
+        let mut opts = Options::new(&args);
+        assert_eq!(unsafe { opts.next(b"p:r") }, Some(b'p'));
+        assert_eq!(opts.arg(), BStr::new(b"PROMPT"));
+        assert_eq!(unsafe { opts.next(b"p:r") }, None);
+        assert_eq!(opts.operands(), words(&[b"var"]));
+    }
+
+    #[test]
+    fn option_arg_from_next_word() {
+        let args = words(&[b"read", b"-p", b"PROMPT", b"var"]);
+        let mut opts = Options::new(&args);
+        assert_eq!(unsafe { opts.next(b"p:r") }, Some(b'p'));
+        assert_eq!(opts.arg(), BStr::new(b"PROMPT"));
+        assert_eq!(unsafe { opts.next(b"p:r") }, None);
+        assert_eq!(opts.operands(), words(&[b"var"]));
+    }
+
+    /// A `:` in the option string belongs to the option in front of it, so
+    /// the search for a letter has to step over one. `r` is reachable only
+    /// if it does.
+    #[test]
+    fn search_skips_arg_marker() {
+        let args = words(&[b"read", b"-r", b"var"]);
+        let (seen, operands) = scan(&args, b"p:r");
+        assert_eq!(seen, b"r");
+        assert_eq!(operands, words(&[b"var"]));
+    }
+
+    #[test]
+    fn double_dash_ends_scan_consumed() {
+        let args = words(&[b"unalias", b"--", b"-a"]);
+        let (seen, operands) = scan(&args, b"a");
+        assert!(seen.is_empty());
+        assert_eq!(operands, words(&[b"-a"]));
+    }
+
+    /// A lone `-` ends the scan like `--` does, but the C returns before
+    /// `argptr++`, so it stays an operand. `cd -` is the case that cares.
+    #[test]
+    fn lone_dash_ends_scan_unconsumed() {
+        let args = words(&[b"cd", b"-"]);
+        let (seen, operands) = scan(&args, b"LP");
+        assert!(seen.is_empty());
+        assert_eq!(operands, words(&[b"-"]));
+    }
+
+    #[test]
+    fn options_spread_over_words() {
+        let args = words(&[b"jobs", b"-l", b"-p", b"%1", b"%2"]);
+        let (seen, operands) = scan(&args, b"lp");
+        assert_eq!(seen, b"lp");
+        assert_eq!(operands, words(&[b"%1", b"%2"]));
+    }
+
+    #[test]
+    fn scan_to_end_leaves_no_operands() {
+        let args = words(&[b"jobs", b"-l"]);
+        let (seen, operands) = scan(&args, b"lp");
+        assert_eq!(seen, b"l");
+        assert!(operands.is_empty());
+    }
+
+    /// The empty option string is what a builtin that takes no options
+    /// passes: it accepts nothing and exists to eat a `--`.
+    #[test]
+    fn empty_optstring_eats_double_dash() {
+        let args = words(&[b".", b"--", b"file"]);
+        let (seen, operands) = scan(&args, b"");
+        assert!(seen.is_empty());
+        assert_eq!(operands, words(&[b"file"]));
+    }
 }

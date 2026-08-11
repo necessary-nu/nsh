@@ -19,6 +19,7 @@
 //!   * `FLUSHERR` is never defined in the dash build, so the
 //!     `flushout(out2)` calls guarded by it are absent here too.
 
+use bstr::{BStr, BString};
 use core::ptr::{addr_of_mut, null_mut};
 use libc::{c_char, c_int};
 use std::ffi::CStr;
@@ -388,15 +389,10 @@ pub unsafe fn readcmdfile(name: *mut c_char) {
 
 // [spec:dash:def:main.find-dot-file-fn]
 // [spec:dash:sem:main.find-dot-file-fn]
-/// The path the running `.` was found at.  See `dotcmd` for why this
-/// outlives the frame that built it.
-static mut dotfile_kept: Vec<u8> = Vec::new();
-
 /// The C returns a `stalloc`'d copy of the candidate — "This will be
 /// freed by the caller", meaning `dotcmd`'s enclosing `popstackmark`.
-/// `dotcmd` keeps the pointer in `commandname` for the whole of
-/// `cmdloop`, so the bytes have to outlive the call and cannot be a local
-/// of this function; the caller owns the buffer and this fills it.
+/// The caller owns the buffer and this fills it, so the copy lasts
+/// exactly as long as the frame that asked for it.
 unsafe fn find_dot_file(basename: *mut c_char, out: &mut Vec<u8>) -> *mut c_char {
     let mut fullname: *mut c_char;
     let mut path: *const c_char = crate::var::pathval();
@@ -441,50 +437,30 @@ unsafe fn find_dot_file(basename: *mut c_char, out: &mut Vec<u8>) -> *mut c_char
 
 // [spec:dash:def:main.dotcmd-fn]
 // [spec:dash:sem:main.dotcmd-fn]
-pub unsafe fn dotcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn dotcmd(args: &[&BStr]) -> c_int {
     let mut status: c_int = 0;
 
-    crate::options::nextopt((core::ptr::addr_of!(crate::shell::nullstr) as *const c_char));
-    let argv: *mut *mut c_char = crate::options::argptr;
+    let mut opts = crate::options::Options::new(args);
+    opts.next(b"");
 
-    if !(*argv).is_null() {
-        let fullname: *mut c_char;
+    if let Some(name) = opts.operands().first() {
         let mut dotfile: Vec<u8> = Vec::new();
+        let name = crate::shell::cstring(name);
+        let fullname = find_dot_file(name.as_ptr() as *mut c_char, &mut dotfile);
 
-        fullname = find_dot_file(*argv, &mut dotfile);
         crate::input::setinputfile(fullname, crate::input::INPUT_PUSH_FILE);
-        crate::eval::commandname = fullname;
+        /* `evalbltin`'s epilogue reads `commandname` after this returns —
+         * `flushall(); if (outerr(out1)) sh_warnx("%s: I/O error",
+         * commandname);` — and the C is safe there only because the block
+         * is `stalloc`'d and the enclosing mark has not popped yet.
+         *
+         * Now that `commandname` owns its bytes there is nothing to keep
+         * alive: what the epilogue reads is a copy, so the buffer this
+         * frame allocated can be freed with the frame like any other
+         * local, and the static slot that used to hold it is gone. */
+        crate::eval::commandname = Some(BString::from(CStr::from_ptr(fullname).to_bytes()));
         status = cmdloop(0);
         crate::input::popfile();
-        /* `commandname` still points at these bytes when this returns,
-         * and `evalbltin`'s epilogue reads it — `flushall(); if
-         * (outerr(out1)) sh_warnx("%s: I/O error", commandname);` —
-         * *before* restoring `savecmdname`.  The C is safe there because
-         * the block is `stalloc`'d and the enclosing mark has not popped;
-         * a local `Vec` would be freed one statement too early.
-         *
-         * So the allocation is handed to a static slot instead of
-         * dropped.  Moving a `Vec` moves the header, not the bytes, so
-         * `fullname` stays valid — asserted below, because that is the
-         * whole reason this line works.  The slot's previous occupant is
-         * unreferenced by then: every `evalbltin` restores `commandname`
-         * on the way out, so the only window in which a `dotfile` is
-         * still named is between `dotcmd` returning and that restore, and
-         * no other `dotcmd` can run inside it.
-         *
-         * The buffer is empty when `find_dot_file` returned its argument
-         * without searching — a name containing `/` — and then
-         * `commandname` points at the word `evalcommand` expanded, as it
-         * does in the C.  The emptiness test is the discriminator, and it
-         * is sound because a filled buffer is `strlen(name) + 2` bytes at
-         * the very least.  A first draft asserted unconditionally and
-         * this is the case that found it. */
-        if !dotfile.is_empty() {
-            debug_assert_eq!(dotfile.as_ptr(), fullname as *const u8);
-            let kept = &mut *addr_of_mut!(dotfile_kept);
-            *kept = dotfile;
-            debug_assert_eq!(kept.as_ptr(), fullname as *const u8);
-        }
     }
 
     status
@@ -492,13 +468,14 @@ pub unsafe fn dotcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
 // [spec:dash:def:main.exitcmd-fn]
 // [spec:dash:sem:main.exitcmd-fn]
-pub unsafe fn exitcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn exitcmd(args: &[&BStr]) -> c_int {
     if crate::jobs::stoppedjobs() != 0 {
         return 0;
     }
 
-    if argc > 1 {
-        crate::eval::savestatus = crate::mystring::number(*argv.offset(1));
+    if let Some(status) = args.get(1) {
+        let status = crate::shell::cstring(status);
+        crate::eval::savestatus = crate::mystring::number(status.as_ptr());
     }
 
     crate::error::exraise(crate::error::EXEXIT);
