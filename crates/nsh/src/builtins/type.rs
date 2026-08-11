@@ -14,7 +14,6 @@ use libc::{c_char, c_int};
 use std::ffi::CStr;
 use std::io::Write;
 
-use crate::alias::{lookupalias, printalias};
 use crate::builtins::BUILTIN_SPECIAL;
 use crate::exec::{
     CMDBUILTIN, CMDFUNCTION, CMDNORMAL, DO_ABS, DO_ALTPATH, DO_NOFUNC, cmdentry, cmdlookup, find_builtin,

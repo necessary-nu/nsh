@@ -13,12 +13,7 @@ use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 
 use crate::error::{INTOFF, INTON};
-use crate::mystring::{dotdir, homestr, nullstr};
-use crate::options::Options;
-use crate::var::{VEXPORT, bltinlookup, setvar};
-
-const CD_PHYSICAL: c_int = 1;
-const CD_PRINT: c_int = 2;
+use crate::var::{VEXPORT, setvar};
 
 /* The C's `nullstr` sentinel is `None`.  It is a sentinel, not an empty
  * path: `getpwd` never returns an empty string on success and `updatepwd`

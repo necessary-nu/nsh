@@ -132,7 +132,6 @@ unsafe fn scan_options(argc: c_int, argv: *mut *mut c_char) -> Flags {
 // [spec:dash:def:myhistedit.histcmd-fn]
 // [spec:dash:sem:myhistedit.histcmd-fn]
 pub unsafe fn histcmd(args: &[&BStr]) -> c_int {
-    let mut ch: c_int;
     let mut editor: *const c_char = ptr::null();
     let mut lflg: c_int = 0;
     let mut nflg: c_int = 0;

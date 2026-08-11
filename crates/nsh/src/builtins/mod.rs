@@ -151,7 +151,7 @@ pub mod wait;
 /// The C keeps it in `eval.c` beside `evalcommand`, which is the only
 /// thing that reaches for it. It is a table row, so it lives with the
 /// table.
-pub static mut bltin: builtincmd = builtincmd {
+pub(crate) static mut bltin: builtincmd = builtincmd {
     name: c"",
     builtin: Some(bltincmd),
     flags: BUILTIN_REGULAR,
