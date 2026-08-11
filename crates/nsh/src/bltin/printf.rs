@@ -6,14 +6,24 @@
 //! (which calls it with `mbchar = true`), so it is `pub` here and carries
 //! both the `printf.*` and the `system.*` rule ids.
 //!
+//! ## The conversions
+//!
+//! The C builtin parses a conversion only far enough to find its end,
+//! then hands the specification back to C's `printf` as a format string
+//! and lets libc render it. This port renders in [`conv`], from Rust's
+//! own formatting. That removes the three things the C arrangement
+//! needed and this one does not: the `libc::snprintf` bridge with its
+//! `PF`/`ASPF` arity switch, `mklong`'s rewrite of a specification to
+//! `PRIdMAX`, and `print_escape_str`'s run of `X`s — which existed only
+//! because a `%b` result can contain NUL and so could not be handed to a
+//! C string function at all. Rendering over bytes has no such problem.
+//!
 //! Cross-module signatures assumed (see the port report):
-//!   * Nothing from `crate::memalloc`.  The four buffers this file deals
-//!     in — the escaped string, the run of `X`s that stands in for it,
-//!     `mklong`'s widened format, and the block `xasprintf` formats into
-//!     — are all owned, so `USTPUTC`/`STADJUST` below are the two macros
-//!     `conv_escape` still needs to write through a bare cursor and touch
-//!     no region.
-//!   * `crate::output::{out1mem, out1fmt!, outc, out1c, xasprintf!}`
+//!   * Nothing from `crate::memalloc`.  The buffers this file deals in —
+//!     the escaped string and each rendered conversion — are all owned,
+//!     so `USTPUTC`/`STADJUST` below are the two macros `conv_escape`
+//!     still needs to write through a bare cursor and touch no region.
+//!   * `crate::output::stdout`, which is an `io::Write`.
 //!   * `crate::error::{sh_error!, sh_warnx!}` via `bltin.h`'s aliases
 //!   * `crate::mystring::{nullstr, snlfmt}` — `char nullstr[1]`
 //!     (src/shell.h:74) and `const char snlfmt[]` (src/mystring.h:52)
@@ -24,12 +34,15 @@
 //!     (src/mksyntax.c:147,152)
 
 use core::ffi::CStr;
-use core::mem;
 use core::ptr;
-use libc::{c_char, c_double, c_int, c_uint, c_void, intmax_t, uintmax_t};
+use libc::{c_char, c_double, c_int, c_uint, intmax_t, uintmax_t};
 use std::io::Write as _;
 
 use bstr::BString;
+
+mod conv;
+
+use conv::Spec;
 
 // glibc extensions/C99 functions the `libc` crate does not reliably expose.
 //
@@ -41,7 +54,6 @@ use bstr::BString;
 // `__isoc23_strtoimax`, so `printf %d 0b11` prints 3 — link the same
 // symbols here or the port silently loses binary literals.
 unsafe extern "C" {
-    fn strchrnul(s: *const c_char, c: c_int) -> *mut c_char;
     #[link_name = "__isoc23_strtoimax"]
     fn strtoimax(nptr: *const c_char, endptr: *mut *mut c_char, base: c_int) -> intmax_t;
     #[link_name = "__isoc23_strtoumax"]
@@ -111,191 +123,77 @@ fn octtobin(c: c_int) -> c_int {
     c - b'0' as c_int
 }
 
-// ---------------------------------------------------------------------
-// src/bltin/printf.c:62-90 — PF and ASPF.
-//
-// C has no way to build a variadic call at runtime, so both macros switch
-// on how many `*` width/precision values were collected into `array` and
-// write out the three calls longhand. `param` and `array` have to be
-// passed explicitly here because `macro_rules!` is hygienic and cannot
-// reach the caller's locals the way a C macro does.
-// ---------------------------------------------------------------------
+const SKIP1: &core::ffi::CStr = c"#-+ 0";
+const SKIP2: &core::ffi::CStr = c"*0123456789";
 
-/// The builtin's existing single-conversion compatibility boundary.
+/// Write one rendered conversion to standard output.
+unsafe fn emit(bytes: &[u8]) {
+    let _ = (&mut *crate::output::stdout()).write_all(bytes);
+}
+
+/// The number at the front of a `SKIP2` run.
 ///
-/// `printfcmd` has already parsed the user format and temporarily terminated
-/// one conversion. This stays local to the builtin; shell output itself is an
-/// `io::Write` and has no runtime format-string API.
-// [spec:dash:def:output.xasprintf-fn]
-// [spec:dash:sem:output.xasprintf-fn]
-// [spec:dash:def:output.xvasprintf-fn]
-// [spec:dash:sem:output.xvasprintf-fn]
-// [spec:dash:def:output.xvsnprintf-fn]
-// [spec:dash:sem:output.xvsnprintf-fn]
-fn snprintf_conversion(mut render: impl FnMut(*mut c_char, usize) -> c_int) -> Vec<u8> {
-    let len = render(ptr::null_mut(), 0);
-    if len < 0 {
-        unsafe { crate::error::sh_error(b"xvsnprintf failed") };
+/// The C skipped the run without reading it, because printf would parse
+/// the digits again from the same bytes. The run may hold a `*` the C's
+/// own width branch already declined to treat as one — `%5*d` — and the
+/// number ends there, exactly where a C conversion's would.
+unsafe fn leading_number(at: *const c_char, len: usize) -> c_int {
+    let mut value: c_int = 0;
+    for offset in 0..len {
+        let byte = *at.add(offset) as u8;
+        if !byte.is_ascii_digit() {
+            break;
+        }
+        /* An over-long width is a field nobody can print; saturating
+         * keeps it merely enormous rather than wrapping it negative. */
+        value = value
+            .saturating_mul(10)
+            .saturating_add((byte - b'0') as c_int);
     }
-
-    let mut formatted = vec![0; len as usize + 1];
-    let written = render(formatted.as_mut_ptr() as *mut c_char, formatted.len());
-    if written < 0 {
-        unsafe { crate::error::sh_error(b"xvsnprintf failed") };
-    }
-    debug_assert_eq!(written, len);
-    formatted
-}
-
-macro_rules! snprintf_conversion {
-    ($format:expr, $value:expr) => {{
-        let __format = $format;
-        let __value = $value;
-        snprintf_conversion(|__dest, __size| unsafe {
-            libc::snprintf(__dest, __size, __format, __value)
-        })
-    }};
-    ($format:expr, $width:expr, $value:expr) => {{
-        let __format = $format;
-        let __width = $width;
-        let __value = $value;
-        snprintf_conversion(|__dest, __size| unsafe {
-            libc::snprintf(__dest, __size, __format, __width, __value)
-        })
-    }};
-    ($format:expr, $width:expr, $precision:expr, $value:expr) => {{
-        let __format = $format;
-        let __width = $width;
-        let __precision = $precision;
-        let __value = $value;
-        snprintf_conversion(|__dest, __size| unsafe {
-            libc::snprintf(__dest, __size, __format, __width, __precision, __value)
-        })
-    }};
-}
-
-macro_rules! PF {
-    ($param:expr, $array:expr, $f:expr, $func:expr) => {{
-        let __array: *mut c_int = $array;
-        // (char *)param - (char *)array
-        let __formatted = match ($param as usize).wrapping_sub(__array as usize) {
-            // case 0:
-            0 => snprintf_conversion!($f, $func),
-            // case sizeof(*param):
-            __n if __n == mem::size_of::<c_int>() => {
-                snprintf_conversion!($f, *__array.add(0), $func)
-            }
-            // default:
-            _ => snprintf_conversion!($f, *__array.add(0), *__array.add(1), $func),
-        };
-        let _ = (&mut *crate::output::stdout()).write_all(&__formatted[..__formatted.len() - 1]);
-    }};
-}
-
-macro_rules! ASPF {
-    ($param:expr, $array:expr, $sp:expr, $out:expr, $f:expr, $func:expr) => {{
-        let __array: *mut c_int = $array;
-        // (char *)param - (char *)array
-        let __formatted = match ($param as usize).wrapping_sub(__array as usize) {
-            // case 0:
-            0 => snprintf_conversion!($f, $func),
-            // case sizeof(*param):
-            __n if __n == mem::size_of::<c_int>() => {
-                snprintf_conversion!($f, *__array.add(0), $func)
-            }
-            // default:
-            _ => snprintf_conversion!($f, *__array.add(0), *__array.add(1), $func),
-        };
-        let __ret = (__formatted.len() - 1) as c_int;
-        let __out: &mut Vec<u8> = $out;
-        *__out = __formatted;
-        *$sp = __out.as_mut_ptr() as *mut c_char;
-        __ret
-    }};
+    value
 }
 
 // [spec:dash:def:printf.print-escape-str-fn]
 // [spec:dash:sem:printf.print-escape-str-fn]
-unsafe fn print_escape_str(
-    f: *const c_char,
-    param: *mut c_int,
-    array: *mut c_int,
-    s: *mut c_char,
-) -> c_int {
-    let mut p: *const c_char;
+unsafe fn print_escape_str(f: *const c_char, spec: &Spec, s: *mut c_char) -> c_int {
     let done: c_int;
-    let mut len: c_int;
-    let mut total: c_int;
     /* The C's `q` is a cursor into the stack block and `stackblock()` its
-     * base.  Both are this buffer: `len` is its length, `q[-1]` its last
-     * byte, and the `q = stackblock()` the C re-reads after `makestrspace`
-     * is the buffer itself, which cannot move under it. */
+     * base.  Both are this buffer: `len` is its length and `q[-1]` its
+     * last byte. */
     let mut buf = BString::default();
-    /* The block `ASPF` formats into.  It was the region's, bounded by the
-     * `setstackmark`/`popstackmark` pair this replaces; `out1mem` below
-     * reads it, so it has to outlive the `'easy` block and no longer. */
-    let mut formatted: Vec<u8> = Vec::new();
 
     done = conv_escape_str(s, &mut buf);
-    len = buf.len() as c_int;
-    total = len - 1;
+    let len = buf.len();
 
     /* `conv_escape_str`'s do-while exits only on the iteration that writes
      * the terminating NUL, so `q[-1]` always exists. */
     debug_assert!(len >= 1);
 
-    // q[-1] = (!!((f[1] - 's') | done) - 1) & f[2];
+    /* `q[-1] = (!!((f[1] - 's') | done) - 1) & f[2];`
+     *
+     * The mask is all-ones only when the conversion character sits right
+     * after the `%` *and* no `\c` stopped the conversion, so the byte
+     * appended in place of the terminator is `echo`'s own separator —
+     * the space between arguments or the closing newline. Every route in
+     * from `printfcmd` has a NUL there and appends nothing. */
     let close = (((((*f.add(1) as c_int - b's' as c_int) | done) != 0) as c_int - 1)
         & *f.add(2) as c_int) as u8;
-    buf[len as usize - 1] = close;
-    total += (close != 0) as c_int;
+    buf[len - 1] = close;
+    let total = len - 1 + (close != 0) as usize;
 
-    p = buf.as_ptr() as *const c_char;
-
-    'easy: {
-        if *f.add(1) == b's' as c_char {
-            break 'easy; /* goto easy */
-        }
-
-        /* The mask above is 0 whenever `f[1]` is not 's', which is every
-         * path that reaches here, so the run of `X`s is exactly as long as
-         * the converted string. */
-        debug_assert_eq!(total, len - 1);
-
-        /* `p = makestrspace(len, q); memset(p, 'X', total); p[total] = 0;`
-         * The C puts the `X`s directly above the converted string because
-         * the region is the only scratch it has, and nothing ever reads the
-         * two as one string — so here they are a buffer of their own. */
-        let mut xs: Vec<u8> = vec![b'X'; total as usize];
-        xs.push(0);
-
-        let mut r: *mut c_char = xs.as_mut_ptr() as *mut c_char;
-        // `ASPF(&p, f, p)`: the out-parameter has to be a raw pointer, not
-        // `&mut r`, or the borrow would conflict with reading `r` as the
-        // conversion's argument in the same call.
-        total = ASPF!(param, array, ptr::addr_of_mut!(r), &mut formatted, f, r);
-
-        /* The formatted result carries the field width, with the `X`s
-         * standing in for the real bytes — which may contain NUL and so
-         * cannot go through `printf` at all.  Put them back. */
-        len = strchrnul(r, b'X' as c_int).offset_from(r) as c_int;
-        libc::memcpy(
-            r.add(len as usize) as *mut c_void,
-            buf.as_ptr() as *const c_void,
-            libc::strspn(r.add(len as usize), c"X".as_ptr()),
-        );
-        p = r;
+    /* The C could not lay this out itself: a `%b` result may contain NUL,
+     * so it formatted a run of `X`s of the same length and copied the real
+     * bytes back over them afterwards. Rendering over bytes needs no
+     * stand-in — and with nothing to lay out, a bare specification is
+     * still just the converted string. */
+    if spec.is_bare() {
+        emit(&buf[..total]);
+    } else {
+        emit(&spec.string(&buf[..len - 1]));
     }
-
-    // easy:
-    let _ = (&mut *crate::output::stdout())
-        .write_all(core::slice::from_raw_parts(p as *const u8, total as usize));
 
     done
 }
-
-const SKIP1: &core::ffi::CStr = c"#-+ 0";
-const SKIP2: &core::ffi::CStr = c"*0123456789";
 
 // [spec:dash:def:printf.printfcmd-fn]
 // [spec:dash:sem:printf.printfcmd-fn]
@@ -338,13 +236,9 @@ pub unsafe fn printfcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
                     break;
                 }
 
-                let mut start: *mut c_char;
+                let start: *mut c_char;
                 let nextch: c_char;
-                let mut array: [c_int; 2] = [0; 2];
-                let mut param: *mut c_int;
-                /* `mklong`'s widened format, held for as long as the
-                 * conversion that reads it. */
-                let mut longfmt = BString::default();
+                let mut spec = Spec::bare();
 
                 if ch == b'\\' as c_int {
                     let ret: c_uint;
@@ -356,7 +250,7 @@ pub unsafe fn printfcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
                     ret = conv_escape(fmt, cp.as_mut_ptr(), false);
                     fmt = fmt.add((ret >> 4) as usize);
                     debug_assert!((ret & 15) as usize <= CONV_ESCAPE_SLOP);
-                    let _ = (&mut *crate::output::stdout()).write_all(core::slice::from_raw_parts(
+                    emit(core::slice::from_raw_parts(
                         cp.as_ptr() as *const u8,
                         (ret & 15) as usize,
                     ));
@@ -368,36 +262,43 @@ pub unsafe fn printfcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
                         true
                     })
                 {
-                    let _ = (&mut *crate::output::stdout()).write_all(&[ch as u8]);
+                    emit(&[ch as u8]);
                     continue;
                 }
 
-                /* Ok - we've found a format specification,
-                Save its address for a later printf(). */
+                /* Ok - we've found a format specification.  Save its
+                address for the diagnostic, and collect it as we go: the C
+                only had to find the end, because it handed the text
+                itself to printf. */
                 start = fmt.sub(1);
-                param = array.as_mut_ptr();
 
                 /* skip to field width */
-                fmt = fmt.add(libc::strspn(fmt, SKIP1.as_ptr()));
+                let flags = libc::strspn(fmt, SKIP1.as_ptr());
+                for offset in 0..flags {
+                    spec.flag(*fmt.add(offset) as u8);
+                }
+                fmt = fmt.add(flags);
                 if *fmt == b'*' as c_char {
                     fmt = fmt.add(1);
-                    *param = getuintmax(1) as c_int;
-                    param = param.add(1);
+                    spec.set_width(getuintmax(1) as c_int);
                 } else {
                     /* skip to possible '.',
                      * get following precision
                      */
-                    fmt = fmt.add(libc::strspn(fmt, SKIP2.as_ptr()));
+                    let digits = libc::strspn(fmt, SKIP2.as_ptr());
+                    spec.set_width(leading_number(fmt, digits));
+                    fmt = fmt.add(digits);
                 }
 
                 if *fmt == b'.' as c_char {
                     fmt = fmt.add(1);
                     if *fmt == b'*' as c_char {
                         fmt = fmt.add(1);
-                        *param = getuintmax(1) as c_int;
-                        param = param.add(1);
+                        spec.set_precision(getuintmax(1) as c_int);
                     } else {
-                        fmt = fmt.add(libc::strspn(fmt, SKIP2.as_ptr()));
+                        let digits = libc::strspn(fmt, SKIP2.as_ptr());
+                        spec.set_precision(leading_number(fmt, digits));
+                        fmt = fmt.add(digits);
                     }
                 }
 
@@ -411,34 +312,36 @@ pub unsafe fn printfcmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
                 *fmt.add(1) = 0;
                 match ch as u8 {
                     b'b' => {
-                        *fmt = b's' as c_char;
+                        /* The C rewrote the `b` to an `s` here so that its
+                         * printf would accept the specification; nothing
+                         * reads the conversion character now. */
                         /* escape if a \c was encountered */
-                        if print_escape_str(start, param, array.as_mut_ptr(), getstr()) != 0 {
+                        if print_escape_str(start, &spec, getstr()) != 0 {
                             break 'out; /* goto out */
                         }
-                        *fmt = b'b' as c_char;
                     }
                     b'c' => {
                         let p: c_int = getchr();
-                        PF!(param, array.as_mut_ptr(), start, p);
+                        emit(&spec.character(p));
                     }
                     b's' => {
                         let p: *mut c_char = getstr();
-                        PF!(param, array.as_mut_ptr(), start, p);
+                        emit(&spec.string(CStr::from_ptr(p).to_bytes()));
                     }
+                    /* `mklong` widened the specification to `PRIdMAX` so
+                     * that C's printf would read a whole `intmax_t` off
+                     * the varargs. The value arrives typed here. */
                     b'd' | b'i' => {
                         let p: uintmax_t = getuintmax(1);
-                        start = mklong(&mut longfmt, start, fmt);
-                        PF!(param, array.as_mut_ptr(), start, p);
+                        emit(&spec.signed(p as i64));
                     }
                     b'o' | b'u' | b'x' | b'X' => {
                         let p: uintmax_t = getuintmax(0);
-                        start = mklong(&mut longfmt, start, fmt);
-                        PF!(param, array.as_mut_ptr(), start, p);
+                        emit(&spec.unsigned(p, ch as u8));
                     }
                     b'a' | b'A' | b'e' | b'E' | b'f' | b'F' | b'g' | b'G' => {
                         let p: c_double = getdouble();
-                        PF!(param, array.as_mut_ptr(), start, p);
+                        emit(&spec.double(p, ch as u8));
                     }
                     _ => {
                         let mut message = Vec::new();
@@ -755,41 +658,6 @@ pub unsafe fn conv_escape(str0: *mut c_char, out0: *mut c_char, mbchar: bool) ->
     (out.offset_from(out0) as c_uint) | ((str.offset_from(str0) as c_uint) << 4)
 }
 
-/// `PRIdMAX` on glibc/LP64 — `sizeof(PRIdMAX)` counts the NUL.
-const PRIdMAX: &core::ffi::CStr = c"ld";
-const SIZEOF_PRIdMAX: usize = 3;
-
-// [spec:dash:def:printf.mklong-fn]
-// [spec:dash:sem:printf.mklong-fn]
-unsafe fn mklong(dest: &mut BString, str: *const c_char, ch: *const c_char) -> *mut c_char {
-    /*
-     * Replace a string like "%92.3u" with "%92.3"PRIuMAX.
-     *
-     * Although C99 does not guarantee it, we assume PRIiMAX,
-     * PRIoMAX, PRIuMAX, PRIxMAX, and PRIXMAX are all the same
-     * as PRIdMAX with the final 'd' replaced by the corresponding
-     * character.
-     */
-
-    let len: usize;
-
-    len = ch.offset_from(str) as usize + SIZEOF_PRIdMAX;
-    /* `STARTSTACKSTR(copy); copy = makestrspace(len, copy)`.  The C hands
-     * back a pointer into the block, live until the next `stalloc`; the
-     * caller uses it as the format of the very next `printf` and nothing
-     * allocates in between.  Here it is the caller's buffer, live for the
-     * whole conversion. */
-    debug_assert_eq!(PRIdMAX.to_bytes_with_nul().len(), SIZEOF_PRIdMAX);
-    dest.clear();
-    dest.extend_from_slice(core::slice::from_raw_parts(
-        str as *const u8,
-        len - SIZEOF_PRIdMAX,
-    ));
-    dest.extend_from_slice(PRIdMAX.to_bytes_with_nul());
-    dest[len - 2] = *ch as u8;
-    dest.as_mut_ptr() as *mut c_char
-}
-
 // [spec:dash:def:printf.getchr-fn]
 // [spec:dash:sem:printf.getchr-fn]
 unsafe fn getchr() -> c_int {
@@ -916,12 +784,10 @@ pub unsafe fn echocmd(argc: c_int, mut argv: *mut *mut c_char) -> c_int {
             fmt = lastfmt;
         }
 
-        nonl = print_escape_str(
-            fmt,
-            ptr::null_mut(),
-            ptr::null_mut(),
-            if !s.is_null() { s } else { nullstr() },
-        );
+        /* echo's three formats are `%s`, `%s ` and `%s\n`: a bare
+         * conversion, whose trailing byte `print_escape_str` appends as
+         * the separator. */
+        nonl = print_escape_str(fmt, &Spec::bare(), if !s.is_null() { s } else { nullstr() });
 
         if !(nonl == 0 && !(*argv).is_null()) {
             break;
