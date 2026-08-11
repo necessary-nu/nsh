@@ -9,7 +9,7 @@
 use bstr::{BStr, BString};
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 use libc::{c_char, c_int, c_uint, size_t};
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::io::Write;
 
 use crate::error::{INTOFF, INTON};
@@ -193,11 +193,17 @@ pub unsafe fn procargs(mut xargv: *mut *mut c_char) -> c_int {
         optlist[i as usize] = 2;
         i += 1;
     }
-    argptr = xargv;
-    login |= options(1);
-    xargv = argptr;
+    /* `options` reports what the C left in `argptr` and `minusc`: how
+     * far it got, and whether `-c` was given. The pointer the C stores in
+     * `minusc` is only ever read as a flag before the line below
+     * overwrites it with the command itself. */
+    minusc = null_mut();
+    let words = argv_words(xargv);
+    let scan = options(&words, 0, true);
+    login |= scan.login;
+    xargv = xargv.add(scan.next);
     if (*xargv).is_null() {
-        if !minusc.is_null() {
+        if scan.minus_c {
             crate::error::sh_error(b"-c requires an argument");
         }
         optlist[sflag] = 1;
@@ -223,7 +229,7 @@ pub unsafe fn procargs(mut xargv: *mut *mut c_char) -> c_int {
      */
     /* POSIX 1003.2: first arg after -c cmd is $0, remainder $1... */
     let mut setarg0 = false;
-    if !minusc.is_null() {
+    if scan.minus_c {
         minusc = *xargv;
         xargv = xargv.add(1);
         if !(*xargv).is_null() {
@@ -262,6 +268,22 @@ pub unsafe fn optschanged() {
     crate::jobs::setjobctl(optlist[mflag] as c_int);
 }
 
+/// What a pass of [`options`] found.
+///
+/// The C reads all three back out of globals: the return value, `argptr`,
+/// and `minusc`.
+struct Scan {
+    /// The C's return value.
+    login: c_int,
+    /// The first word the scan did not consume: the C's `argptr`.
+    next: usize,
+    /// `-c` was given. The C records it by pointing `minusc` into the
+    /// word, but every reader of that pointer treats it as a flag --
+    /// `procargs` replaces it with the command before anything reads the
+    /// bytes -- so a flag is what it is.
+    minus_c: bool,
+}
+
 /*
  * Process shell options.  The global variable argptr contains a pointer
  * to the argument list; we advance it past the options.
@@ -269,61 +291,58 @@ pub unsafe fn optschanged() {
 
 // [spec:dash:def:options.options-fn]
 // [spec:dash:sem:options.options-fn]
-unsafe fn options(cmdline: c_int) -> c_int {
-    let mut p: *mut c_char;
+unsafe fn options(args: &[&BStr], start: usize, cmdline: bool) -> Scan {
     let mut val: c_int = 0;
-    let mut c: c_int;
-    let mut login: c_int = 0;
+    let mut scan = Scan {
+        login: 0,
+        next: start,
+        minus_c: false,
+    };
 
-    if cmdline != 0 {
-        minusc = null_mut();
-    }
     loop {
-        p = *argptr;
-        if p.is_null() {
+        let Some(word) = args.get(scan.next) else {
             break;
-        }
-        argptr = argptr.add(1);
-        c = *p as c_int;
-        p = p.add(1);
-        if c == b'-' as c_int {
+        };
+        scan.next += 1;
+        /* `c = *p++`: the first byte decides, and the cluster starts at
+         * the second. An empty word takes the `else` and is put back. */
+        let c = word.first().copied().unwrap_or(0);
+        if c == b'-' {
             val = 1;
-            if *p.offset(0) == b'\0' as c_char
-                || (*p.offset(0) == b'-' as c_char && *p.offset(1) == b'\0' as c_char)
-            {
-                if cmdline == 0 {
+            if word.len() == 1 || &word[..] == b"--" {
+                if !cmdline {
                     /* "-" means turn off -x and -v */
-                    if *p.offset(0) == b'\0' as c_char {
+                    if word.len() == 1 {
                         optlist[vflag] = 0;
                         optlist[xflag] = optlist[vflag];
                     }
                     /* "--" means reset params */
-                    else if (*argptr).is_null() {
-                        setparam(argptr);
+                    else if scan.next >= args.len() {
+                        setparam(&args[scan.next..]);
                     }
                 }
                 break; /* "-" or "--" terminates options */
             }
-        } else if c == b'+' as c_int {
+        } else if c == b'+' {
             val = 0;
         } else {
-            argptr = argptr.offset(-1);
+            scan.next -= 1;
             break;
         }
+        let mut i = 1usize;
         loop {
-            c = *p as c_int;
-            p = p.add(1);
-            if c == b'\0' as c_int {
+            let Some(&c) = word.get(i) else {
                 break;
-            }
-            if c == b'c' as c_int && cmdline != 0 {
-                minusc = p; /* command is after shell args */
-            } else if c == b'l' as c_int && cmdline != 0 {
-                login = 1;
-            } else if c == b'o' as c_int {
-                minus_o(*argptr, val);
-                if !(*argptr).is_null() {
-                    argptr = argptr.add(1);
+            };
+            i += 1;
+            if c == b'c' && cmdline {
+                scan.minus_c = true; /* command is after shell args */
+            } else if c == b'l' && cmdline {
+                scan.login = 1;
+            } else if c == b'o' {
+                minus_o(args.get(scan.next).copied(), val);
+                if scan.next < args.len() {
+                    scan.next += 1;
                 }
             } else {
                 setoption(c, val);
@@ -331,15 +350,31 @@ unsafe fn options(cmdline: c_int) -> c_int {
         }
     }
 
-    login
+    scan
+}
+
+/// The words of a NUL-terminated `char **`, for the one caller that is
+/// still handed one: the process's own argv, which the frontend owns.
+unsafe fn argv_words<'a>(argv: *mut *mut c_char) -> Vec<&'a BStr> {
+    let mut words = Vec::new();
+    let mut p = argv;
+    while !(*p).is_null() {
+        words.push(BStr::new(core::slice::from_raw_parts(
+            *p as *const u8,
+            libc::strlen(*p),
+        )));
+        p = p.add(1);
+    }
+    words
 }
 
 // [spec:dash:def:options.minus-o-fn]
 // [spec:dash:sem:options.minus-o-fn]
-unsafe fn minus_o(name: *mut c_char, val: c_int) {
+unsafe fn minus_o(name: Option<&BStr>, val: c_int) {
     let mut i: c_int;
 
-    if name.is_null() {
+    let name = name.map(crate::shell::cstring);
+    if name.is_none() {
         if val != 0 {
             let heading = b"Current option settings\n";
             let _ = (*crate::output::stdout()).write_all(heading);
@@ -374,34 +409,35 @@ unsafe fn minus_o(name: *mut c_char, val: c_int) {
             }
         }
     } else {
+        let name = name.expect("the naming branch");
         i = 0;
         while i < NOPTS as c_int {
-            if libc::strcmp(name, optnames[i as usize]) == 0 {
+            if libc::strcmp(name.as_ptr(), optnames[i as usize]) == 0 {
                 optlist[i as usize] = val as c_char;
                 return;
             }
             i += 1;
         }
         let mut message = b"Illegal option -o ".to_vec();
-        message.extend_from_slice(CStr::from_ptr(name).to_bytes());
+        message.extend_from_slice(name.as_bytes());
         crate::error::sh_error(&message);
     }
 }
 
 // [spec:dash:def:options.setoption-fn]
 // [spec:dash:sem:options.setoption-fn]
-unsafe fn setoption(flag: c_int, val: c_int) {
+unsafe fn setoption(flag: u8, val: c_int) {
     let mut i: c_int;
 
     i = 0;
     while i < NOPTS as c_int {
-        if optletters[i as usize] as c_int == flag {
+        if optletters[i as usize] as u8 == flag {
             optlist[i as usize] = val as c_char;
             if val != 0 {
                 /* #%$ hack for ksh semantics */
-                if flag == b'V' as c_int {
+                if flag == b'V' {
                     optlist[Eflag] = 0;
-                } else if flag == b'E' as c_int {
+                } else if flag == b'E' {
                     optlist[Vflag] = 0;
                 }
             }
@@ -410,7 +446,7 @@ unsafe fn setoption(flag: c_int, val: c_int) {
         i += 1;
     }
     let mut message = b"Illegal option -".to_vec();
-    message.push(flag as u8);
+    message.push(flag);
     crate::error::sh_error(&message);
     /* NOTREACHED */
 }
@@ -421,20 +457,15 @@ unsafe fn setoption(flag: c_int, val: c_int) {
 
 // [spec:dash:def:options.setparam-fn]
 // [spec:dash:sem:options.setparam-fn]
-pub unsafe fn setparam(mut argv: *mut *mut c_char) {
-    let mut nparam: c_int;
+pub unsafe fn setparam(argv: &[&BStr]) {
+    let nparam: c_int = argv.len() as c_int;
 
-    nparam = 0;
-    while !(*argv.offset(nparam as isize)).is_null() {
-        nparam += 1;
-    }
     /* Copied out in full before the old list goes, as the C's
      * `savestr` loop is: `freeparam` comes after the copy there too. */
-    let mut words: Vec<BString> = Vec::with_capacity(nparam as usize);
-    while !(*argv).is_null() {
-        words.push(word(*argv));
-        argv = argv.add(1);
-    }
+    let words: Vec<BString> = argv
+        .iter()
+        .map(|w| BString::from(crate::shell::cstring(w).into_bytes_with_nul()))
+        .collect();
     let param = &mut *addr_of_mut!(shellparam);
     param.owned = Some(Params::new(words));
     param.borrowed = null_mut();
@@ -484,13 +515,15 @@ pub unsafe fn freeparam(param: *mut shparam) {
 
 // [spec:dash:def:options.shiftcmd-fn]
 // [spec:dash:sem:options.shiftcmd-fn]
-pub unsafe fn shiftcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn shiftcmd(args: &[&BStr]) -> c_int {
     let n: c_int;
 
-    n = if argc > 1 {
-        crate::mystring::number(*argv.offset(1))
-    } else {
-        1
+    n = match args.get(1) {
+        Some(count) => {
+            let count = crate::shell::cstring(count);
+            crate::mystring::number(count.as_ptr())
+        }
+        None => 1,
     };
     if n > shellparam.nparam {
         crate::error::sh_error(b"can't shift that many");
@@ -532,15 +565,15 @@ pub unsafe fn shiftcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
 
 // [spec:dash:def:options.setcmd-fn]
 // [spec:dash:sem:options.setcmd-fn]
-pub unsafe fn setcmd(argc: c_int, argv: *mut *mut c_char) -> c_int {
-    if argc == 1 {
+pub unsafe fn setcmd(args: &[&BStr]) -> c_int {
+    if args.len() == 1 {
         return showvars(addr_of!(nullstr) as *const c_char, 0, VUNSET);
     }
     INTOFF();
-    options(0);
+    let scan = options(args, 1, false);
     optschanged();
-    if !(*argptr).is_null() {
-        setparam(argptr);
+    if scan.next < args.len() {
+        setparam(&args[scan.next..]);
     }
     INTON();
     0
@@ -562,30 +595,50 @@ pub unsafe fn getoptsreset(value: *const c_char) {
 
 // [spec:dash:def:options.getoptscmd-fn]
 // [spec:dash:sem:options.getoptscmd-fn]
-pub unsafe fn getoptscmd(mut argc: c_int, mut argv: *mut *mut c_char) -> c_int {
+pub unsafe fn getoptscmd(args: &[&BStr]) -> c_int {
     let optbase: *mut *mut c_char;
 
-    nextopt(addr_of!(nullstr) as *const c_char);
-    argc -= (((argptr as isize - argv as isize) / core::mem::size_of::<*mut c_char>() as isize) - 1)
-        as c_int;
-    argv = argptr.offset(-1);
-    if argc < 3 {
+    let mut opts = Options::new(args);
+    opts.next(b"");
+    let operands = opts.operands();
+    if operands.len() < 2 {
         crate::error::sh_error(b"Usage: getopts optstring var [arg...]");
-    } else if argc == 3 {
+    }
+    let optstr = crate::shell::cstring(operands[0]);
+    let optvar = crate::shell::cstring(operands[1]);
+
+    /* `getopts` walks a `char **` and remembers where it got to as an
+     * index and a byte offset, so the words it is given have to be an
+     * array for the length of the call. The positional parameters
+     * already are one; explicit operands are built into one here, which
+     * is what `evalcommand` was doing for every builtin. */
+    let explicit: Vec<CString>;
+    let mut ptrs: Vec<*mut c_char>;
+    if operands.len() == 2 {
         optbase = shellparam_p();
         if (shellparam.optind as c_uint) > (shellparam.nparam + 1) as c_uint {
             shellparam.optind = 1;
             shellparam.optoff = -1;
         }
     } else {
-        optbase = argv.offset(3);
-        if (shellparam.optind as c_uint) > (argc - 2) as c_uint {
+        explicit = operands[2..]
+            .iter()
+            .map(|w| crate::shell::cstring(w))
+            .collect();
+        ptrs = explicit.iter().map(|w| w.as_ptr() as *mut c_char).collect();
+        ptrs.push(null_mut());
+        optbase = ptrs.as_mut_ptr();
+        if (shellparam.optind as c_uint) > (operands.len() - 1) as c_uint {
             shellparam.optind = 1;
             shellparam.optoff = -1;
         }
     }
 
-    getopts(*argv.offset(1), *argv.offset(2), optbase)
+    getopts(
+        optstr.as_ptr() as *mut c_char,
+        optvar.as_ptr() as *mut c_char,
+        optbase,
+    )
 }
 
 // [spec:dash:def:options.getopts-fn]
@@ -1035,6 +1088,61 @@ mod tests {
 
     /// The empty option string is what a builtin that takes no options
     /// passes: it accepts nothing and exists to eat a `--`.
+    /// The scan `set` and the shell's command line share. What it reports
+    /// is where it stopped, which is what decides the positional
+    /// parameters -- so the boundary between options and operands is the
+    /// property worth pinning.
+    fn scan_options(raw: &[&[u8]], cmdline: bool) -> (usize, bool, c_int) {
+        let _guard = crate::testutil::lock();
+        let saved = unsafe { optlist };
+        let args = words(raw);
+        let scan = unsafe { options(&args, 0, cmdline) };
+        unsafe { optlist = saved };
+        (scan.next, scan.minus_c, scan.login)
+    }
+
+    #[test]
+    fn scan_stops_at_the_first_operand() {
+        let (next, _, _) = scan_options(&[b"-x", b"file", b"-y"], false);
+        assert_eq!(next, 1);
+    }
+
+    #[test]
+    fn scan_consumes_a_double_dash() {
+        let (next, _, _) = scan_options(&[b"--", b"a"], false);
+        assert_eq!(next, 1);
+    }
+
+    /// A lone `-` ends the options and is consumed -- unlike the builtin
+    /// scan, where it stays an operand.
+    #[test]
+    fn scan_consumes_a_lone_dash() {
+        let (next, _, _) = scan_options(&[b"-", b"a"], false);
+        assert_eq!(next, 1);
+    }
+
+    #[test]
+    fn minus_o_takes_next_word() {
+        let (next, _, _) = scan_options(&[b"-o", b"noglob", b"rest"], false);
+        assert_eq!(next, 2);
+    }
+
+    /// `-c` and `-l` are command-line only: as a `set` option `-l` is an
+    /// ordinary letter, and `set -c` is an error rather than a command.
+    #[test]
+    fn minus_c_is_command_line_only() {
+        let (_, minus_c, login) = scan_options(&[b"-c", b"echo hi"], true);
+        assert!(minus_c);
+        let (_, _, login_off) = scan_options(&[b"-l"], true);
+        assert_eq!((login, login_off), (0, 1));
+    }
+
+    #[test]
+    fn empty_word_is_not_an_option() {
+        let (next, _, _) = scan_options(&[b"", b"-x"], false);
+        assert_eq!(next, 0);
+    }
+
     #[test]
     fn empty_optstring_eats_double_dash() {
         let args = words(&[b".", b"--", b"file"]);
