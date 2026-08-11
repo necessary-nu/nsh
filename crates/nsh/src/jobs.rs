@@ -129,14 +129,14 @@ impl Job {
 
 /* mode flags for set_curjob */
 const CUR_DELETE: c_uint = 2;
-const CUR_RUNNING: c_uint = 1;
+pub(crate) const CUR_RUNNING: c_uint = 1;
 const CUR_STOPPED: c_uint = 0;
 
 /* mode flags for dowait */
 const DOWAIT_NONBLOCK: c_int = 0;
 const DOWAIT_BLOCK: c_int = 1;
-const DOWAIT_WAITCMD: c_int = 2;
-const DOWAIT_WAITCMD_ALL: c_int = 4;
+pub(crate) const DOWAIT_WAITCMD: c_int = 2;
+pub(crate) const DOWAIT_WAITCMD_ALL: c_int = 4;
 
 const _PATH_TTY: &[u8] = b"/dev/tty\0";
 const _PATH_DEVNULL: &[u8] = b"/dev/null\0";
@@ -152,7 +152,7 @@ static mut initialpgrp: c_int = 0;
 static mut ttyfd: c_int = -1;
 
 /* current job */
-static mut curjob: Option<usize> = None;
+pub(crate) static mut curjob: Option<usize> = None;
 
 /// The job table.
 ///
@@ -160,7 +160,7 @@ static mut curjob: Option<usize> = None;
 /// call, because `freejob`, `set_curjob` and `showpipe` are all reached
 /// from the middle of a walk over the table.
 #[inline]
-unsafe fn jobs() -> &'static mut Vec<Job> {
+pub(crate) unsafe fn jobs() -> &'static mut Vec<Job> {
     &mut *core::ptr::addr_of_mut!(jobtab)
 }
 
@@ -173,7 +173,7 @@ unsafe fn jobs() -> &'static mut Vec<Job> {
 /// reads out of `ps0`; `ps_cmd` answers with the empty text, where the
 /// C reads `ps0.cmd`, a null pointer it then hands to `%s`.
 #[inline]
-unsafe fn ps_pid(jp: usize, i: usize) -> pid_t {
+pub(crate) unsafe fn ps_pid(jp: usize, i: usize) -> pid_t {
     jobs()[jp].ps.get(i).map_or(0, |p| p.pid)
 }
 
@@ -189,7 +189,7 @@ unsafe fn ps_cmd(jp: usize, i: usize) -> &'static BStr {
 /// puts control bytes 0x81-0x88 in them — so they go out as bytes and
 /// not through a `char *`.
 #[inline]
-unsafe fn outcmd(jp: usize, i: usize, out: *mut Output) {
+pub(crate) unsafe fn outcmd(jp: usize, i: usize, out: *mut Output) {
     let cmd = ps_cmd(jp, i);
     let _ = (&mut *out).write_all(cmd);
 }
@@ -204,7 +204,7 @@ pub static mut jobctl: c_int = 0;
 pub static mut job_warning: c_int = 0;
 
 #[inline]
-unsafe fn errno() -> c_int {
+pub(crate) unsafe fn errno() -> c_int {
     *libc::__errno_location()
 }
 
@@ -258,7 +258,7 @@ unsafe fn link_set(l: Link, v: Option<usize>) {
 
 // [spec:dash:def:jobs.set-curjob-fn]
 // [spec:dash:sem:jobs.set-curjob-fn]
-unsafe fn set_curjob(jp: usize, mode: c_uint) {
+pub(crate) unsafe fn set_curjob(jp: usize, mode: c_uint) {
     let mut jp1: Option<usize>;
     let mut jpp: Link;
     let curp: Link;
@@ -322,7 +322,7 @@ unsafe fn set_curjob(jp: usize, mode: c_uint) {
 
 // [spec:dash:def:jobs.xxtcsetpgrp-fn]
 // [spec:dash:sem:jobs.xxtcsetpgrp-fn]
-unsafe fn xxtcsetpgrp(pgrp: pid_t) {
+pub(crate) unsafe fn xxtcsetpgrp(pgrp: pid_t) {
     let fd: c_int = ttyfd;
 
     if fd < 0 {
@@ -428,217 +428,12 @@ pub unsafe fn setjobctl(on: c_int) {
     jobctl = on;
 }
 
-// [spec:dash:def:jobs.killcmd-fn]
-// [spec:dash:sem:jobs.killcmd-fn]
-pub unsafe fn killcmd(args: &[&BStr]) -> c_int {
-    /* the `usage:` label is a backward goto whose body only calls the
-     * noreturn sh_error, so it is reproduced as two calls with the
-     * same message. */
-    const USAGE: &[u8] =
-        b"Usage: kill [-s sigspec | -signum | -sigspec] [pid | job]... or\nkill -l [exitstatus]\0";
-    let mut signo: c_int = -1;
-    let mut list: c_int = 0;
-    let mut i: c_int;
-    let mut pid: pid_t;
-    let mut jp: usize;
-
-    if args.len() <= 1 {
-        // usage:
-        crate::error::sh_error(&USAGE[..USAGE.len() - 1]);
-    }
-
-    let mut opts = crate::options::Options::new(args);
-    /* `-9` and `-TERM` are a signal, not an option, so the option scan
-     * runs only once the signal reading has failed -- and then from the
-     * same word, which is where `Options` starts. */
-    let mut operands: &[&BStr] = &args[1..];
-    if args[1].first() == Some(&b'-') {
-        let first = crate::shell::cstring(args[1]);
-        signo = crate::trap::decode_signal(first.as_ptr().add(1), 1);
-        if signo < 0 {
-            while let Some(c) = opts.next(b"ls:") {
-                match c {
-                    b's' => {
-                        let name = crate::shell::cstring(opts.arg());
-                        signo = crate::trap::decode_signal(name.as_ptr(), 1);
-                        if signo < 0 {
-                            let mut message = b"invalid signal number or name: ".to_vec();
-                            message.extend_from_slice(name.as_bytes());
-                            crate::error::sh_error(&message);
-                        }
-                    }
-                    /* `default:` (DEBUG: abort()) falls through into 'l' */
-                    _ /* default, 'l' */ => {
-                        list = 1;
-                    }
-                }
-            }
-            operands = opts.operands();
-        } else {
-            operands = &args[2..];
-        }
-    }
-
-    if list == 0 && signo < 0 {
-        signo = libc::SIGTERM;
-    }
-
-    if (((signo < 0 || operands.is_empty()) as c_int) ^ list) != 0 {
-        // goto usage
-        crate::error::sh_error(&USAGE[..USAGE.len() - 1]);
-    }
-
-    if list != 0 {
-        let out: *mut Output;
-
-        out = crate::output::stdout();
-        let Some(status) = operands.first() else {
-            let _ = (&mut *out).write_all(b"0\n");
-            let mut i = 1;
-            while i < crate::signames::NSIG as c_int {
-                let mut record = crate::signames::signal_names[i as usize]
-                    .to_bytes()
-                    .to_vec();
-                record.push(b'\n');
-                let _ = (&mut *out).write_all(&record);
-                i += 1;
-            }
-            return 0;
-        };
-        let status = crate::shell::cstring(status);
-        signo = crate::mystring::number(status.as_ptr());
-        if signo > 128 {
-            signo -= 128;
-        }
-        if 0 < signo && signo < crate::signames::NSIG as c_int {
-            let mut record = crate::signames::signal_names[signo as usize]
-                .to_bytes()
-                .to_vec();
-            record.push(b'\n');
-            let _ = (&mut *out).write_all(&record);
-        } else {
-            let mut message = b"invalid signal number or exit status: ".to_vec();
-            message.extend_from_slice(status.as_bytes());
-            crate::error::sh_error(&message);
-        }
-        return 0;
-    }
-
-    i = 0;
-    for spec in operands {
-        let target = crate::shell::cstring(spec);
-        if spec.first() == Some(&b'%') {
-            jp = getjob(target.as_ptr(), 0);
-            pid = -ps_pid(jp, 0);
-        } else {
-            pid = if spec.first() == Some(&b'-') {
-                -crate::mystring::number(target.as_ptr().add(1))
-            } else {
-                crate::mystring::number(target.as_ptr())
-            };
-        }
-        if libc::kill(pid, signo) != 0 {
-            let mut message = CStr::from_ptr(libc::strerror(errno())).to_bytes().to_vec();
-            message.push(b'\n');
-            crate::error::sh_warnx(&message);
-            i = 1;
-        }
-    }
-
-    i
-}
-
 // [spec:dash:def:jobs.jobno-fn]
 // [spec:dash:sem:jobs.jobno-fn]
 //
 // The C recovers the index by subtracting `jobtab` from the pointer.
-fn jobno(jp: usize) -> c_int {
+pub(crate) fn jobno(jp: usize) -> c_int {
     jp as c_int + 1
-}
-
-// [spec:dash:def:jobs.fgcmd-fn]
-// [spec:dash:sem:jobs.fgcmd-fn]
-pub unsafe fn fgcmd(args: &[&BStr]) -> c_int {
-    let mut jp: usize;
-    let out: *mut Output;
-    let mode: c_int;
-    let mut retval: c_int = 0;
-
-    mode = if args[0].first() == Some(&b'f') {
-        FORK_FG
-    } else {
-        FORK_BG
-    };
-    let mut opts = crate::options::Options::new(args);
-    opts.next(b"");
-    let operands = opts.operands();
-    out = crate::output::stdout();
-    /* `do { ... } while (*argv && *++argv)`: one pass on the current job
-     * when there is no operand, otherwise one pass per operand. */
-    let mut index = 0usize;
-    loop {
-        let spec = operands.get(index).map(|s| crate::shell::cstring(s));
-        jp = getjob(spec.as_ref().map_or(core::ptr::null(), |s| s.as_ptr()), 1);
-        if mode == FORK_BG {
-            set_curjob(jp, CUR_RUNNING);
-            let _ = write!(&mut *out, "[{}] ", jobno(jp));
-        }
-        outcmd(jp, 0, out);
-        showpipe(jp, out);
-        retval = restartjob(jp, mode);
-
-        index += 1;
-        if index >= operands.len() {
-            break;
-        }
-    }
-    retval
-}
-
-// [spec:dash:def:jobs.bgcmd-fn]
-// [spec:dash:sem:jobs.bgcmd-fn]
-//
-// The same function as `fgcmd` — `__attribute__((alias("fgcmd")))`
-// where the compiler supports it; the portable fallback, reproduced
-// here, forwards. `fgcmd` distinguishes the two by `argv[0]`.
-pub unsafe fn bgcmd(args: &[&BStr]) -> c_int {
-    fgcmd(args)
-}
-
-// [spec:dash:def:jobs.restartjob-fn]
-// [spec:dash:sem:jobs.restartjob-fn]
-unsafe fn restartjob(jp: usize, mode: c_int) -> c_int {
-    let status: c_int;
-    let pgid: pid_t;
-
-    INTOFF();
-    'out_lbl: {
-        if jobs()[jp].state as c_int == JOBDONE {
-            break 'out_lbl;
-        }
-        jobs()[jp].state = JOBRUNNING as u8;
-        pgid = ps_pid(jp, 0);
-        if mode == FORK_FG {
-            xxtcsetpgrp(pgid);
-        }
-        libc::killpg(pgid, libc::SIGCONT);
-        /* the C's `do { … } while (--i)` visits `ps[0]` before it looks
-         * at the count, so a job with no processes walks the whole
-         * address space; there is nothing to restart in one. */
-        for i in 0..jobs()[jp].ps.len() {
-            if libc::WIFSTOPPED(jobs()[jp].ps[i].status) {
-                jobs()[jp].ps[i].status = -1;
-            }
-        }
-    }
-    // out:
-    status = if mode == FORK_FG {
-        waitforjob(Some(jp))
-    } else {
-        0
-    };
-    INTON();
-    status
 }
 
 // [spec:dash:def:jobs.sprint-status-fn]
@@ -681,7 +476,7 @@ unsafe fn sprint_status(os: *mut c_char, status: c_int, sigonly: c_int) -> c_int
 
 // [spec:dash:def:jobs.showjob-fn]
 // [spec:dash:sem:jobs.showjob-fn]
-unsafe fn showjob(out: *mut Output, jp: usize, mode: c_int) {
+pub(crate) unsafe fn showjob(out: *mut Output, jp: usize, mode: c_int) {
     let mut ps: usize;
     let psend: usize;
     let mut col: c_int;
@@ -770,36 +565,6 @@ unsafe fn showjob(out: *mut Output, jp: usize, mode: c_int) {
     }
 }
 
-// [spec:dash:def:jobs.jobscmd-fn]
-// [spec:dash:sem:jobs.jobscmd-fn]
-pub unsafe fn jobscmd(args: &[&BStr]) -> c_int {
-    let mut mode: c_int;
-    let out: *mut Output;
-
-    mode = 0;
-    let mut opts = crate::options::Options::new(args);
-    while let Some(m) = opts.next(b"lp") {
-        if m == b'l' {
-            mode = SHOW_PID;
-        } else {
-            mode = SHOW_PGID;
-        }
-    }
-
-    out = crate::output::stdout();
-    let operands = opts.operands();
-    if !operands.is_empty() {
-        for spec in operands {
-            let spec = crate::shell::cstring(spec);
-            showjob(out, getjob(spec.as_ptr(), 0), mode);
-        }
-    } else {
-        showjobs(out, mode);
-    }
-
-    0
-}
-
 /*
  * Print a list of jobs.  If "change" is nonzero, only print jobs whose
  * statuses have changed since the last call to showjobs.
@@ -846,95 +611,13 @@ unsafe fn freejob(jp: usize) {
     INTON();
 }
 
-// [spec:dash:def:jobs.waitcmd-fn]
-// [spec:dash:sem:jobs.waitcmd-fn]
-pub unsafe fn waitcmd(args: &[&BStr]) -> c_int {
-    let mut jobp: Option<usize>;
-    let mut retval: c_int;
-    let mut jp: Option<usize>;
-
-    let mut opts = crate::options::Options::new(args);
-    opts.next(b"");
-    retval = 0;
-
-    let operands = opts.operands();
-    'out_lbl: {
-        if operands.is_empty() {
-            /* wait for all jobs */
-            loop {
-                jp = curjob;
-                loop {
-                    let Some(i) = jp else {
-                        /* no running procs */
-                        break 'out_lbl;
-                    };
-                    if jobs()[i].state as c_int == JOBRUNNING {
-                        break;
-                    }
-                    jobs()[i].waited = 1;
-                    jp = jobs()[i].prev_job;
-                }
-                if dowait(DOWAIT_WAITCMD_ALL, None) == 0 {
-                    // sigout:
-                    retval = 128 + crate::trap::pending_sig;
-                    break 'out_lbl;
-                }
-            }
-        }
-
-        retval = 127;
-        for spec in operands {
-            let target = crate::shell::cstring(spec);
-            'repeat: {
-                if spec.first() != Some(&b'%') {
-                    let pid: pid_t = crate::mystring::number(target.as_ptr());
-                    jobp = curjob;
-                    /* `goto start` enters the do/while at `start:` */
-                    let mut at_start = true;
-                    loop {
-                        if !at_start {
-                            /* C indexes `job->ps[job->nprocs - 1]`, which
-                             * for a job that has not forked yet is
-                             * `ps[-1]`; such a job matches no pid. */
-                            let i = jobp.unwrap();
-                            if jobs()[i].ps.last().map_or(false, |p| p.pid == pid) {
-                                break;
-                            }
-                            jobp = jobs()[i].prev_job;
-                        }
-                        at_start = false;
-                        // start:
-                        if jobp.is_none() {
-                            break 'repeat;
-                        }
-                    }
-                } else {
-                    jobp = Some(getjob(target.as_ptr(), 0));
-                }
-                /* loop until process terminated or stopped */
-                if dowait(DOWAIT_WAITCMD, jobp) == 0 {
-                    // sigout:
-                    retval = 128 + crate::trap::pending_sig;
-                    break 'out_lbl;
-                }
-                let i = jobp.unwrap();
-                jobs()[i].waited = 1;
-                retval = getstatus(i);
-            }
-            // repeat:
-        }
-    }
-    // out:
-    retval
-}
-
 /*
  * Convert a job name to a job structure.
  */
 
 // [spec:dash:def:jobs.getjob-fn]
 // [spec:dash:sem:jobs.getjob-fn]
-unsafe fn getjob(name: *const c_char, getctl: c_int) -> usize {
+pub(crate) unsafe fn getjob(name: *const c_char, getctl: c_int) -> usize {
     enum JobError {
         NoSuch,
         NoPrevious,
@@ -1516,7 +1199,7 @@ unsafe fn waitone(block: c_int, jobp: Option<usize>) -> c_int {
 
 // [spec:dash:def:jobs.dowait-fn]
 // [spec:dash:sem:jobs.dowait-fn]
-unsafe fn dowait(block: c_int, jp: Option<usize>) -> c_int {
+pub(crate) unsafe fn dowait(block: c_int, jp: Option<usize>) -> c_int {
     let gotchld: c_int = core::ptr::read_volatile(addr_of_mut!(crate::trap::gotsigchld));
     let mut rpid: c_int;
     let mut pid: c_int;
@@ -2068,7 +1751,7 @@ unsafe fn cmdputs(s: *const c_char) {
 
 // [spec:dash:def:jobs.showpipe-fn]
 // [spec:dash:sem:jobs.showpipe-fn]
-unsafe fn showpipe(jp: usize, out: *mut Output) {
+pub(crate) unsafe fn showpipe(jp: usize, out: *mut Output) {
     let spend: usize = jobs()[jp].ps.len();
 
     for sp in 1..spend {
@@ -2098,7 +1781,7 @@ unsafe fn xtcsetpgrp(fd: c_int, pgrp: pid_t) {
 
 // [spec:dash:def:jobs.getstatus-fn]
 // [spec:dash:sem:jobs.getstatus-fn]
-unsafe fn getstatus(jobp: usize) -> c_int {
+pub(crate) unsafe fn getstatus(jobp: usize) -> c_int {
     let mut status: c_int;
     let mut retval: c_int;
     let mut ps: usize;

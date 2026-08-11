@@ -71,6 +71,37 @@ impl shparam {
         }
     }
 
+    /// Drop the first `n` parameters: what `shift` does, in the module
+    /// that knows how they are stored.
+    ///
+    /// The C shifts the array down whether or not it owns the words, so a
+    /// `shift` inside a function rewrites the caller's `argv`;
+    /// `evalcommand` discards it when the call returns.
+    pub(crate) unsafe fn drop_first(&mut self, n: c_int) {
+        self.nparam -= n;
+        match &mut self.owned {
+            Some(o) => {
+                o.words.drain(..n as usize);
+                o.reindex();
+            }
+            None => {
+                let mut ap1: *mut *mut c_char = self.borrowed.add(n as usize);
+                let mut ap2: *mut *mut c_char = self.borrowed;
+                loop {
+                    *ap2 = *ap1;
+                    let done = (*ap2).is_null();
+                    ap2 = ap2.add(1);
+                    ap1 = ap1.add(1);
+                    if done {
+                        break;
+                    }
+                }
+            }
+        }
+        self.optind = 1;
+        self.optoff = -1;
+    }
+
     /// `shellparam.p` — the NULL-terminated array, wherever it lives.
     fn p(&mut self) -> *mut *mut c_char {
         match &mut self.owned {
@@ -268,16 +299,16 @@ pub unsafe fn optschanged() {
 ///
 /// The C reads all three back out of globals: the return value, `argptr`,
 /// and `minusc`.
-struct Scan {
+pub(crate) struct Scan {
     /// The C's return value.
-    login: c_int,
+    pub(crate) login: c_int,
     /// The first word the scan did not consume: the C's `argptr`.
-    next: usize,
+    pub(crate) next: usize,
     /// `-c` was given. The C records it by pointing `minusc` into the
     /// word, but every reader of that pointer treats it as a flag --
     /// `procargs` replaces it with the command before anything reads the
     /// bytes -- so a flag is what it is.
-    minus_c: bool,
+    pub(crate) minus_c: bool,
 }
 
 /*
@@ -287,7 +318,7 @@ struct Scan {
 
 // [spec:dash:def:options.options-fn]
 // [spec:dash:sem:options.options-fn]
-unsafe fn options(args: &[&BStr], start: usize, cmdline: bool) -> Scan {
+pub(crate) unsafe fn options(args: &[&BStr], start: usize, cmdline: bool) -> Scan {
     let mut val: c_int = 0;
     let mut scan = Scan {
         login: 0,
@@ -509,71 +540,9 @@ pub unsafe fn freeparam(param: *mut shparam) {
  * The shift builtin command.
  */
 
-// [spec:dash:def:options.shiftcmd-fn]
-// [spec:dash:sem:options.shiftcmd-fn]
-pub unsafe fn shiftcmd(args: &[&BStr]) -> c_int {
-    let n: c_int;
-
-    n = match args.get(1) {
-        Some(count) => {
-            let count = crate::shell::cstring(count);
-            crate::mystring::number(count.as_ptr())
-        }
-        None => 1,
-    };
-    if n > shellparam.nparam {
-        crate::error::sh_error(b"can't shift that many");
-    }
-    INTOFF();
-    shellparam.nparam -= n;
-    let param = &mut *addr_of_mut!(shellparam);
-    match &mut param.owned {
-        Some(o) => {
-            o.words.drain(..n as usize);
-            o.reindex();
-        }
-        None => {
-            /* The C shifts the array down whether or not it owns the words,
-             * so a `shift` inside a function rewrites the caller's `argv`;
-             * `evalcommand` discards it when the call returns. */
-            let mut ap1: *mut *mut c_char = param.borrowed.add(n as usize);
-            let mut ap2: *mut *mut c_char = param.borrowed;
-            loop {
-                *ap2 = *ap1;
-                let done = (*ap2).is_null();
-                ap2 = ap2.add(1);
-                ap1 = ap1.add(1);
-                if done {
-                    break;
-                }
-            }
-        }
-    }
-    param.optind = 1;
-    param.optoff = -1;
-    INTON();
-    0
-}
-
 /*
  * The set command builtin.
  */
-
-// [spec:dash:def:options.setcmd-fn]
-// [spec:dash:sem:options.setcmd-fn]
-pub unsafe fn setcmd(args: &[&BStr]) -> c_int {
-    if args.len() == 1 {
-        return showvars(addr_of!(nullstr) as *const c_char, 0, VUNSET);
-    }
-    INTOFF();
-    let scan = options(args, 1, false);
-    optschanged();
-    if scan.next < args.len() {
-        setparam(&args[scan.next..]);
-    }
-    INTON();
-    0
-}
 
 // [spec:dash:def:options.getoptsreset-fn]
 // [spec:dash:sem:options.getoptsreset-fn]
@@ -588,185 +557,6 @@ pub unsafe fn getoptsreset(value: *const c_char) {
  * be processed in the current argument.  If shellparam.optnext is NULL,
  * then it's the first time getopts has been called.
  */
-
-// [spec:dash:def:options.getoptscmd-fn]
-// [spec:dash:sem:options.getoptscmd-fn]
-pub unsafe fn getoptscmd(args: &[&BStr]) -> c_int {
-    let optbase: *mut *mut c_char;
-
-    let mut opts = Options::new(args);
-    opts.next(b"");
-    let operands = opts.operands();
-    if operands.len() < 2 {
-        crate::error::sh_error(b"Usage: getopts optstring var [arg...]");
-    }
-    let optstr = crate::shell::cstring(operands[0]);
-    let optvar = crate::shell::cstring(operands[1]);
-
-    /* `getopts` walks a `char **` and remembers where it got to as an
-     * index and a byte offset, so the words it is given have to be an
-     * array for the length of the call. The positional parameters
-     * already are one; explicit operands are built into one here, which
-     * is what `evalcommand` was doing for every builtin. */
-    let explicit: Vec<CString>;
-    let mut ptrs: Vec<*mut c_char>;
-    if operands.len() == 2 {
-        optbase = shellparam_p();
-        if (shellparam.optind as c_uint) > (shellparam.nparam + 1) as c_uint {
-            shellparam.optind = 1;
-            shellparam.optoff = -1;
-        }
-    } else {
-        explicit = operands[2..]
-            .iter()
-            .map(|w| crate::shell::cstring(w))
-            .collect();
-        ptrs = explicit.iter().map(|w| w.as_ptr() as *mut c_char).collect();
-        ptrs.push(null_mut());
-        optbase = ptrs.as_mut_ptr();
-        if (shellparam.optind as c_uint) > (operands.len() - 1) as c_uint {
-            shellparam.optind = 1;
-            shellparam.optoff = -1;
-        }
-    }
-
-    getopts(
-        optstr.as_ptr() as *mut c_char,
-        optvar.as_ptr() as *mut c_char,
-        optbase,
-    )
-}
-
-// [spec:dash:def:options.getopts-fn]
-// [spec:dash:sem:options.getopts-fn]
-unsafe fn getopts(optstr: *mut c_char, optvar: *mut c_char, optfirst: *mut *mut c_char) -> c_int {
-    let mut p: *mut c_char;
-    let mut q: *mut c_char;
-    let mut c: c_char = b'?' as c_char;
-    let mut done: c_int = 0;
-    let mut s: [c_char; 2] = [0; 2];
-    let mut optnext: *mut *mut c_char;
-    let mut ind: c_int = shellparam.optind;
-    let off: c_int = shellparam.optoff;
-
-    shellparam.optind = -1;
-    optnext = optfirst.offset(ind as isize - 1);
-
-    if ind <= 1 || off < 0 || (libc::strlen(*optnext.offset(-1)) as size_t) < off as size_t {
-        p = null_mut();
-    } else {
-        p = (*optnext.offset(-1)).offset(off as isize);
-    }
-    'out: loop {
-        if p.is_null() || *p == b'\0' as c_char {
-            /* Current word is done, advance */
-            p = *optnext;
-            if p.is_null() || *p != b'-' as c_char || {
-                p = p.add(1);
-                *p == b'\0' as c_char
-            } {
-                /* atend: */
-                p = null_mut();
-                done = 1;
-                break 'out;
-            }
-            optnext = optnext.add(1);
-            if *p.offset(0) == b'-' as c_char && *p.offset(1) == b'\0' as c_char {
-                /* check for "--" — goto atend */
-                p = null_mut();
-                done = 1;
-                break 'out;
-            }
-        }
-
-        c = *p;
-        p = p.add(1);
-        q = if *optstr.offset(0) == b':' as c_char {
-            optstr.offset(1)
-        } else {
-            optstr
-        };
-        while *q != c {
-            if *q == b'\0' as c_char {
-                if *optstr.offset(0) == b':' as c_char {
-                    s[0] = c;
-                    s[1] = b'\0' as c_char;
-                    setvar(b"OPTARG\0".as_ptr() as *const c_char, s.as_ptr(), 0);
-                } else {
-                    let mut message = b"Illegal option -".to_vec();
-                    message.push(c as u8);
-                    message.push(b'\n');
-                    let _ = (*crate::output::stderr()).write_all(&message);
-                    crate::var::unsetvar(b"OPTARG\0".as_ptr() as *const c_char);
-                }
-                c = b'?' as c_char;
-                break 'out;
-            }
-            q = q.add(1);
-            if *q == b':' as c_char {
-                q = q.add(1);
-            }
-        }
-
-        q = q.add(1);
-        if *q == b':' as c_char {
-            if *p == b'\0' as c_char && {
-                p = *optnext;
-                p.is_null()
-            } {
-                if *optstr.offset(0) == b':' as c_char {
-                    s[0] = c;
-                    s[1] = b'\0' as c_char;
-                    setvar(b"OPTARG\0".as_ptr() as *const c_char, s.as_ptr(), 0);
-                    c = b':' as c_char;
-                } else {
-                    let mut message = b"No arg for -".to_vec();
-                    message.push(c as u8);
-                    message.extend_from_slice(b" option\n");
-                    let _ = (*crate::output::stderr()).write_all(&message);
-                    crate::var::unsetvar(b"OPTARG\0".as_ptr() as *const c_char);
-                    c = b'?' as c_char;
-                }
-                break 'out;
-            }
-
-            if p == *optnext {
-                optnext = optnext.add(1);
-            }
-            setvar(b"OPTARG\0".as_ptr() as *const c_char, p, 0);
-            p = null_mut();
-        } else {
-            setvar(
-                b"OPTARG\0".as_ptr() as *const c_char,
-                addr_of!(nullstr) as *const c_char,
-                0,
-            );
-        }
-        break 'out;
-    }
-
-    /* out: */
-    ind = ((optnext as isize - optfirst as isize) / core::mem::size_of::<*mut c_char>() as isize)
-        as c_int
-        + 1;
-    setvarint(
-        b"OPTIND\0".as_ptr() as *const c_char,
-        ind as libc::intmax_t,
-        VNOFUNC,
-    );
-    s[0] = c;
-    s[1] = b'\0' as c_char;
-    setvar(optvar, s.as_ptr(), 0);
-
-    shellparam.optoff = if !p.is_null() {
-        (p as isize - *optnext.offset(-1) as isize) as c_int
-    } else {
-        -1
-    };
-    shellparam.optind = ind;
-
-    done
-}
 
 /// The option scan a builtin runs over its own arguments.
 ///
