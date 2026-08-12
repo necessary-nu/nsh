@@ -575,7 +575,7 @@ unsafe fn evalsubshell(n: &Node, flags: c_int) -> Result<c_int, Error> {
             break 'nofork;
         }
         jp = crate::jobs::makejob(1);
-        if crate::jobs::forkshell(Some(jp), r.n.as_deref(), backgnd) == 0 {
+        if crate::jobs::forkshell(Some(jp), r.n.as_deref(), backgnd)? == 0 {
             flags |= EV_EXIT;
             if backgnd != 0 {
                 flags &= !EV_TESTED;
@@ -586,7 +586,7 @@ unsafe fn evalsubshell(n: &Node, flags: c_int) -> Result<c_int, Error> {
          * never returns, so it is reached only from here */
         status = 0;
         if backgnd == 0 {
-            status = crate::jobs::waitforjob(Some(jp));
+            status = crate::jobs::waitforjob(Some(jp))?;
         }
         INTON();
         return Ok(status);
@@ -689,7 +689,7 @@ unsafe fn evalpipe(n: &Node, flags: c_int) -> Result<c_int, Error> {
                 return Err(crate::error::sh_error_value(b"Pipe call failed"));
             }
         }
-        if crate::jobs::forkshell(Some(jp), Some(cmd), p.backgnd) == 0 {
+        if crate::jobs::forkshell(Some(jp), Some(cmd), p.backgnd)? == 0 {
             INTON();
             if pip[1] >= 0 {
                 libc::close(pip[0]);
@@ -713,7 +713,7 @@ unsafe fn evalpipe(n: &Node, flags: c_int) -> Result<c_int, Error> {
         libc::close(pip[1]);
     }
     if p.backgnd == 0 {
-        status = crate::jobs::waitforjob(Some(jp));
+        status = crate::jobs::waitforjob(Some(jp))?;
         /* TRACE(("evalpipe:  job done exit status %d\n", status)); */
     }
     INTON();
@@ -748,7 +748,7 @@ pub unsafe fn evalbackcmd(n: Option<&Node>, result: *mut backcmd) -> Result<(), 
         tpip[0] = pip[0];
         tpip[1] = pip[1];
         jp = crate::jobs::makejob(1);
-        pid = crate::jobs::forkshell(Some(jp), n, FORK_NOJOB);
+        pid = crate::jobs::forkshell(Some(jp), n, FORK_NOJOB)?;
         tpip[0] = -1;
         if pid == 0 {
             FORCEINTON();
@@ -1118,7 +1118,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
                     /* Fork off a child process if necessary. */
                     if (flags & EV_EXIT) == 0 || crate::trap::have_traps() != 0 {
                         INTOFF();
-                        jp = Some(crate::jobs::vforkexec(cmd, argv, path, cmdentry.u.index));
+                        jp = Some(crate::jobs::vforkexec(cmd, argv, path, cmdentry.u.index)?);
                     } else {
                         shellexec(argv, path, cmdentry.u.index);
                         /* NOTREACHED */
@@ -1126,7 +1126,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
                 }
             }
 
-            status = crate::jobs::waitforjob(jp);
+            status = crate::jobs::waitforjob(jp)?;
             FORCEINTON();
             break 'out_lbl;
         }

@@ -33,7 +33,7 @@ pub unsafe fn jobscmd(args: &[&BStr]) -> Result<c_int, Error> {
     if !operands.is_empty() {
         for spec in operands {
             let spec = crate::shell::cstring(spec);
-            showjob(out, getjob(spec.as_ptr(), 0), mode);
+            showjob(out, getjob(spec.as_ptr(), 0)?, mode);
         }
     } else {
         showjobs(out, mode);

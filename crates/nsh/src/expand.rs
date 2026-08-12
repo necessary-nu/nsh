@@ -1235,7 +1235,16 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
 
         if in_.fd >= 0 {
             libc::close(in_.fd);
-            crate::eval::back_exitstatus = crate::jobs::waitforjob(in_.jp);
+            /* The one adapter this slice adds, and the next one removes.
+             * `expbackq` is the gateway into `expand`'s single connected
+             * fallible component -- `argstr`, `evalvar`, `subevalvar`,
+             * `expandmeta` and `expandarg` convert together or not at all --
+             * so the module gets its own commit and its own corpus sweep,
+             * per docs/errors-are-values.md 6, which names a silently
+             * swallowed expansion error as this conversion's dangerous
+             * failure mode. Until then this jumps exactly where the C did. */
+            crate::eval::back_exitstatus = crate::jobs::waitforjob(in_.jp)
+                .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
         }
         crate::error::INTON();
 

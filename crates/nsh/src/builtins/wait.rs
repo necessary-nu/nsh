@@ -79,7 +79,7 @@ pub unsafe fn waitcmd(args: &[&BStr]) -> Result<c_int, Error> {
                         }
                     }
                 } else {
-                    jobp = Some(getjob(target.as_ptr(), 0));
+                    jobp = Some(getjob(target.as_ptr(), 0)?);
                 }
                 /* loop until process terminated or stopped */
                 if dowait(DOWAIT_WAITCMD, jobp) == 0 {

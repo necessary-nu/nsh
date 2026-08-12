@@ -26,7 +26,7 @@ use libc::{c_char, c_int, c_uint, pid_t};
 use std::ffi::CStr;
 use std::io::Write as _;
 
-use crate::error::{INTOFF, INTON};
+use crate::error::{Error, INTOFF, INTON};
 use crate::eval::exitstatus;
 use crate::nodes::Node;
 use crate::nodes::{
@@ -319,14 +319,14 @@ pub(crate) unsafe fn set_curjob(jp: usize, mode: c_uint) {
 
 // [spec:dash:def:jobs.xxtcsetpgrp-fn]
 // [spec:dash:sem:jobs.xxtcsetpgrp-fn]
-pub(crate) unsafe fn xxtcsetpgrp(pgrp: pid_t) {
+pub(crate) unsafe fn xxtcsetpgrp(pgrp: pid_t) -> Result<(), Error> {
     let fd: c_int = ttyfd;
 
     if fd < 0 {
-        return;
+        return Ok(());
     }
 
-    xtcsetpgrp(fd, pgrp);
+    xtcsetpgrp(fd, pgrp)
 }
 
 // [spec:dash:def:jobs.setjobctl-fn]
@@ -421,7 +421,10 @@ pub unsafe fn setjobctl(on: c_int) {
     crate::trap::setsignal(libc::SIGTTIN);
     if fd >= 0 {
         libc::setpgid(0, pgrp);
-        xtcsetpgrp(fd, pgrp);
+        /* The same teardown reason as the `sh_open` above: `setjobctl` is
+         * reached from `exitshell`, so it stays infallible and bridges. */
+        xtcsetpgrp(fd, pgrp)
+            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
 
         if on == 0 {
             libc::close(fd);
@@ -627,7 +630,7 @@ unsafe fn freejob(jp: usize) {
 
 // [spec:dash:def:jobs.getjob-fn]
 // [spec:dash:sem:jobs.getjob-fn]
-pub(crate) unsafe fn getjob(name: *const c_char, getctl: c_int) -> usize {
+pub(crate) unsafe fn getjob(name: *const c_char, getctl: c_int) -> Result<usize, Error> {
     enum JobError {
         NoSuch,
         NoPrevious,
@@ -739,7 +742,7 @@ pub(crate) unsafe fn getjob(name: *const c_char, getctl: c_int) -> usize {
         if getctl != 0 && jobs()[i].jobctl == 0 {
             break 'err_lbl; // goto err
         }
-        return i;
+        return Ok(i);
     }
     // err:
     let mut message = Vec::new();
@@ -764,7 +767,7 @@ pub(crate) unsafe fn getjob(name: *const c_char, getctl: c_int) -> usize {
             message.extend_from_slice(b" not created under job control");
         }
     }
-    crate::error::sh_error(&message);
+    Err(crate::error::sh_error_value(&message))
 }
 
 /*
@@ -895,7 +898,15 @@ unsafe fn forkchild(jp: Option<usize>, n: Option<&Node>, mode: c_int) {
         /* This can fail because we are doing it in the parent also */
         libc::setpgid(0, pgrp);
         if mode == FORK_FG {
-            xxtcsetpgrp(pgrp);
+            /* In the child, and under `vforkexec` in a child that shares
+             * the parent's stack. An `Err` returned from here would
+             * propagate through frames the parent owns, which
+             * docs/errors-are-values.md 2.5 names as a hard boundary, so
+             * `forkchild` stays infallible and bridges. In the vforked
+             * case the bridge is a `_exit` before it is a jump. */
+            xxtcsetpgrp(pgrp).unwrap_or_else(|e| {
+                crate::error::raise_reported(crate::error::EXERROR, e)
+            });
         }
         crate::trap::setsignal(libc::SIGTSTP);
         crate::trap::setsignal(libc::SIGTTOU);
@@ -957,19 +968,23 @@ unsafe fn forkchild(jp: Option<usize>, n: Option<&Node>, mode: c_int) {
 
 // [spec:dash:def:jobs.forkparent-fn]
 // [spec:dash:sem:jobs.forkparent-fn]
-unsafe fn forkparent(jp: Option<usize>, n: Option<&Node>, mode: c_int, pid: pid_t) {
+unsafe fn forkparent(
+    jp: Option<usize>,
+    n: Option<&Node>,
+    mode: c_int,
+    pid: pid_t,
+) -> Result<(), Error> {
     if pid < 0 {
         /* TRACE(("Fork failed, errno=%d", errno)); */
         if let Some(i) = jp {
             freejob(i);
         }
-        crate::error::sh_error(b"Cannot fork");
-        /* NOTREACHED */
+        return Err(crate::error::sh_error_value(b"Cannot fork"));
     }
 
     /* TRACE(("In parent shell:  child = %d\n", pid)); */
     let Some(ji) = jp else {
-        return;
+        return Ok(());
     };
     if mode != FORK_NOJOB && jobs()[ji].jobctl != 0 {
         let pgrp: c_int;
@@ -1000,11 +1015,16 @@ unsafe fn forkparent(jp: Option<usize>, n: Option<&Node>, mode: c_int, pid: pid_
         let last = jobs()[ji].ps.len() - 1;
         jobs()[ji].ps[last].cmd = cmd;
     }
+    Ok(())
 }
 
 // [spec:dash:def:jobs.forkshell-fn]
 // [spec:dash:sem:jobs.forkshell-fn]
-pub unsafe fn forkshell(jp: Option<usize>, n: Option<&Node>, mode: c_int) -> c_int {
+pub unsafe fn forkshell(
+    jp: Option<usize>,
+    n: Option<&Node>,
+    mode: c_int,
+) -> Result<c_int, Error> {
     let pid: c_int;
 
     /* TRACE(("forkshell(%%%d, %p, %d) called\n", jobno(jp), n, mode)); */
@@ -1015,10 +1035,10 @@ pub unsafe fn forkshell(jp: Option<usize>, n: Option<&Node>, mode: c_int) -> c_i
     if pid == 0 {
         forkchild(jp, n, mode);
     } else {
-        forkparent(jp, n, mode, pid);
+        forkparent(jp, n, mode, pid)?;
     }
 
-    pid
+    Ok(pid)
 }
 
 // [spec:dash:def:jobs.vforkexec-fn]
@@ -1029,7 +1049,7 @@ pub unsafe fn vforkexec(
     argv: *mut *mut c_char,
     path: *const c_char,
     idx: c_int,
-) -> usize {
+) -> Result<usize, Error> {
     let jp: usize;
     let pid: c_int;
 
@@ -1052,9 +1072,9 @@ pub unsafe fn vforkexec(
     }
 
     vforked = 0;
-    forkparent(Some(jp), Some(n), FORK_FG, pid);
+    forkparent(Some(jp), Some(n), FORK_FG, pid)?;
 
-    jp
+    Ok(jp)
 }
 
 /*
@@ -1080,7 +1100,7 @@ pub unsafe fn vforkexec(
 
 // [spec:dash:def:jobs.waitforjob-fn]
 // [spec:dash:sem:jobs.waitforjob-fn]
-pub unsafe fn waitforjob(jp: Option<usize>) -> c_int {
+pub unsafe fn waitforjob(jp: Option<usize>) -> Result<c_int, Error> {
     let st: c_int;
 
     /* TRACE(("waitforjob(%%%d) called\n", jp ? jobno(jp) : 0)); */
@@ -1093,12 +1113,12 @@ pub unsafe fn waitforjob(jp: Option<usize>) -> c_int {
         jp,
     );
     let Some(jp) = jp else {
-        return exitstatus;
+        return Ok(exitstatus);
     };
 
     st = getstatus(jp);
     if jobs()[jp].jobctl != 0 {
-        xxtcsetpgrp(crate::shellmain::rootpid);
+        xxtcsetpgrp(crate::shellmain::rootpid)?;
         /*
          * This is truly gross.
          * If we're doing job control, then we did a TIOCSPGRP which
@@ -1114,7 +1134,7 @@ pub unsafe fn waitforjob(jp: Option<usize>) -> c_int {
     if JOBS == 0 || jobs()[jp].state as c_int == JOBDONE {
         freejob(jp);
     }
-    st
+    Ok(st)
 }
 
 /*
@@ -1780,7 +1800,7 @@ pub(crate) unsafe fn showpipe(jp: usize, out: *mut Output) {
 
 // [spec:dash:def:jobs.xtcsetpgrp-fn]
 // [spec:dash:sem:jobs.xtcsetpgrp-fn]
-unsafe fn xtcsetpgrp(fd: c_int, pgrp: pid_t) {
+unsafe fn xtcsetpgrp(fd: c_int, pgrp: pid_t) -> Result<(), Error> {
     let err: c_int;
 
     crate::trap::sigblockall(null_mut());
@@ -1791,8 +1811,9 @@ unsafe fn xtcsetpgrp(fd: c_int, pgrp: pid_t) {
         let mut message = b"Cannot set tty process group (".to_vec();
         message.extend_from_slice(CStr::from_ptr(libc::strerror(errno())).to_bytes());
         message.push(b')');
-        crate::error::sh_error(&message);
+        return Err(crate::error::sh_error_value(&message));
     }
+    Ok(())
 }
 
 // [spec:dash:def:jobs.getstatus-fn]

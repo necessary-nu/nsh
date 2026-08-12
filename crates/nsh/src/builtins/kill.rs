@@ -116,7 +116,7 @@ pub unsafe fn killcmd(args: &[&BStr]) -> Result<c_int, Error> {
     for spec in operands {
         let target = crate::shell::cstring(spec);
         if spec.first() == Some(&b'%') {
-            jp = getjob(target.as_ptr(), 0);
+            jp = getjob(target.as_ptr(), 0)?;
             pid = -ps_pid(jp, 0);
         } else {
             pid = if spec.first() == Some(&b'-') {

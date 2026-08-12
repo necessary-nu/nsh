@@ -49,14 +49,14 @@ pub unsafe fn fgcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut index = 0usize;
     loop {
         let spec = operands.get(index).map(|s| crate::shell::cstring(s));
-        jp = getjob(spec.as_ref().map_or(core::ptr::null(), |s| s.as_ptr()), 1);
+        jp = getjob(spec.as_ref().map_or(core::ptr::null(), |s| s.as_ptr()), 1)?;
         if mode == FORK_BG {
             set_curjob(jp, CUR_RUNNING);
             let _ = write!(&mut *out, "[{}] ", jobno(jp));
         }
         outcmd(jp, 0, out);
         showpipe(jp, out);
-        retval = restartjob(jp, mode);
+        retval = restartjob(jp, mode)?;
 
         index += 1;
         if index >= operands.len() {
@@ -68,7 +68,7 @@ pub unsafe fn fgcmd(args: &[&BStr]) -> Result<c_int, Error> {
 
 // [spec:dash:def:jobs.restartjob-fn]
 // [spec:dash:sem:jobs.restartjob-fn]
-unsafe fn restartjob(jp: usize, mode: c_int) -> c_int {
+unsafe fn restartjob(jp: usize, mode: c_int) -> Result<c_int, Error> {
     let status: c_int;
     let pgid: pid_t;
 
@@ -80,7 +80,7 @@ unsafe fn restartjob(jp: usize, mode: c_int) -> c_int {
         jobs()[jp].state = JOBRUNNING as u8;
         pgid = ps_pid(jp, 0);
         if mode == FORK_FG {
-            xxtcsetpgrp(pgid);
+            xxtcsetpgrp(pgid)?;
         }
         libc::killpg(pgid, libc::SIGCONT);
         /* the C's `do { … } while (--i)` visits `ps[0]` before it looks
@@ -94,10 +94,10 @@ unsafe fn restartjob(jp: usize, mode: c_int) -> c_int {
     }
     // out:
     status = if mode == FORK_FG {
-        waitforjob(Some(jp))
+        waitforjob(Some(jp))?
     } else {
         0
     };
     INTON();
-    status
+    Ok(status)
 }
