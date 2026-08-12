@@ -11,7 +11,7 @@
 use bstr::{BStr, BString, ByteSlice};
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 use libc::{c_char, c_int};
-use std::ffi::CStr;
+use std::ffi::{CStr, OsStr};
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 
@@ -175,7 +175,15 @@ unsafe fn docd(mut dest: *const c_char, flags: c_int) -> c_int {
             dest = dir;
         }
     }
-    err = libc::chdir(dest);
+    /* `chdir(2)` either way -- std saves the `CString` and makes the same
+     * call, and the result is folded back to the C's 0/-1 because `docd`
+     * is a `chdir` return code to every one of its callers. */
+    err = match std::env::set_current_dir(std::path::Path::new(OsStr::from_bytes(
+        CStr::from_ptr(dest).to_bytes(),
+    ))) {
+        Ok(()) => 0,
+        Err(_) => -1,
+    };
     if err == 0 {
         setpwd(dir, 1);
         crate::exec::hashcd();

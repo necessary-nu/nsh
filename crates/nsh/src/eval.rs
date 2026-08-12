@@ -390,7 +390,7 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> c_int {
 // it ever comes back.
 pub unsafe fn evaltreenr(n: Option<&Node>, flags: c_int) -> ! {
     evaltree(n, flags);
-    libc::abort();
+    std::process::abort();
 }
 
 // [spec:dash:def:eval.skiploop-fn]

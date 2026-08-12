@@ -54,7 +54,7 @@ pub unsafe fn chkmail() {
             q = q.add(1);
         }
         if crate::shell::DEBUG && *q.offset(-1) != b'/' as c_char {
-            libc::abort();
+            std::process::abort();
         }
         *q.offset(-1) = b'\0' as c_char; /* delete trailing '/' */
         if libc::stat64(p_blk, &mut statb) < 0 {

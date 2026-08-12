@@ -207,7 +207,7 @@ macro_rules! RESTOREINT {
 pub unsafe fn exraise(e: c_int) -> ! {
     if DEBUG {
         if handler.is_null() {
-            libc::abort();
+            std::process::abort();
         }
     }
 

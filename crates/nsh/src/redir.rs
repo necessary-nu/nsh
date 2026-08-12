@@ -283,7 +283,7 @@ unsafe fn openredirect(redir: &Node) -> c_int {
          */
         _ => {
             if crate::shell::DEBUG {
-                libc::abort();
+                std::process::abort();
             }
             f = openhere(redir);
         }
