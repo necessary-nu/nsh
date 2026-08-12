@@ -32,6 +32,12 @@ mentions; comments and doc-references are excluded.
 honest headline: this is a POSIX shell, most of what it does is
 syscalls, and a shell that stopped calling `fork` would not be one.
 
+> Classes A and B are closed; §7 records what the sweep left and which
+> idiom replaced what. The tables below are the *measurement that
+> scheduled the work* and are left at the numbers they were taken at,
+> because a table rewritten to match the outcome stops being evidence
+> that the outcome was earned.
+
 ---
 
 ## 2. Class A — the slice methods
@@ -136,6 +142,11 @@ defence. `std::env::set_var` copies into glibc-owned storage, and
 `exec.rs:127` builds its own `envp` and never reads `environ`, so
 `setlocale` is the only consumer and cannot tell the difference.
 
+**Fixed.** `var.rs`'s `changelocale` calls `std::env::set_var`, and the
+doc comment above it carries the reasoning — including the half of the
+`unset` path that cannot be fixed from inside that function, because by
+the time `varfunc` runs the flags no longer say a value was there.
+
 ## 6. What this changes about the plan
 
 `docs/std-replacements.md` §3 lists libc calls as *riders* — "what to
@@ -154,3 +165,58 @@ find `fork`, `sigprocmask` and `tcsetpgrp` listed here as *deliberately
 kept* will spend an afternoon proposing `std::process::Command`.
 `docs/std-replacements.md` §4.9, §4.11 and §4.12 give the long form of
 why each is the wrong shape.
+
+---
+
+## 7. What the sweep left
+
+`delete-libc-calls` closed classes A and B. Of the 155 sites, 47 had
+already gone as consequences of the nodes this one waited on —
+`delete-memalloc` took the `free`/`malloc`/`realloc` and most of
+`strspn`, `output-is-a-writer` took the stdio four, `owned-vars` took
+`putenv`, and the builtin restructure took `getcwd` and `strtok`. The
+node itself converted the remaining 104. **Four are left, and all four
+are here because std does not have the thing, not because nobody
+looked:**
+
+| Site | Symbol | Why it stays |
+|---|---|---|
+| `input.rs` `set_errno` | `__errno_location` | std can *report* the last OS error and cannot assign one. The value is written back before a `read` retry |
+| `mystring.rs` `atomax` | `__errno_location` | same: `strtoimax` reports overflow through `errno`, so it has to be cleared first |
+| `shellmain.rs` `main` | `__errno_location` | wants the *address*, which std does not expose at all. `main.c` caches it because glibc's `errno` macro repeats the TLS lookup, and the cache is ported for the pointer's sake |
+| `builtins/fc.rs` `scan_options` | `getopt` | std has no `getopt`, so this is not a replacement but a rewrite. `optind` is a libc global and the scan *permutes* `fc`'s array, which `crate::options::Options` does not do; it belongs to `[dec:nsh:no-ambient-state]` and not here |
+
+The replacement idioms, by what the C was asking for:
+
+| C asked for | It is now |
+|---|---|
+| `strlen` | `CStr::count_bytes`, or `to_bytes`/`to_bytes_with_nul` where a slice was being rebuilt around it anyway |
+| `strcmp`, `strncmp` | `==` on the two byte slices; `starts_with` where the question was a prefix |
+| `strcasecmp` | `eq_ignore_ascii_case` |
+| `strchr`, `strpbrk`, `strcspn`, `strstr`, `strchrnul` | `find_byte`, `find_byteset`, `find`, `contains` |
+| `strcpy`, `stpcpy`, `stpncpy`, `memcpy` | `copy_from_slice`, `ptr::copy_nonoverlapping`, and the caller's own length |
+| `memmove` | `ptr::copy` — every site is two cursors into one buffer |
+| `memset` | assignment, or `ptr::write_bytes` where the target is a raw cursor |
+| `__errno_location` (read) | `io::Error::last_os_error()`, behind one `system::errno` |
+| `abort` | `process::abort` |
+| `chdir` | `env::set_current_dir` |
+
+Three conversions are *not* the obvious one, and each says so where it
+stands. `pmatch`'s `strncmp` keeps a byte-by-byte comparison
+(`mystring::ncmp_eq`) because `strncmp` stops at a shared NUL and the C
+relies on that to read past a single stack byte only as far as the
+terminator; a slice compare would read the full count. `argstr`'s
+`strcspn` and `pmatch`'s two scans count to the first stop byte instead
+of taking `CStr`'s whole remaining string, because both re-enter per
+control byte and the slice form would cost a pass per escape rather than
+one per word. And three `strchr` sites keep the terminator *in* the set,
+because `strchr` matches it: that is how `read` escapes a NUL from the
+input, how a NUL character counts as an IFS separator, and what `umask`
+does at the end of a mode.
+
+The walk itself has not gone anywhere — `CStr::from_ptr` still finds the
+NUL, and on this target it still does it by calling `strlen`. What has
+gone is this crate naming libc to ask. That is the whole of what class A
+was ever about, and the rest waits on the operands becoming owned
+values, which is `[dec:nsh:owned-data]`'s other half and not a call-site
+question at all.
