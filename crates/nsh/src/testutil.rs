@@ -9,11 +9,18 @@
 //! [`lock`] for its duration. Tests that only call pure functions do not
 //! need it.
 //!
-//! **Errors are unwinds.** `sh_error` and friends end in
+//! **Errors are becoming values, and both mechanisms are live.** A
+//! function that has been converted by `errors-are-values` returns
+//! `Result<_, error::Error>`, and a test asserts on the returned error --
+//! its `message()` and its `status()` -- which is the better assertion
+//! because it pins what the shell said rather than how it left. A
+//! function that has not been converted yet still ends in
 //! `error::exraise`, which raises the `Longjmp` payload that
-//! `eval::setjmp_catch` catches. A test that wants to assert an error
-//! path must arm a handler with [`raises`] rather than expect a return
-//! value -- these functions are `-> !`.
+//! `eval::setjmp_catch` catches, and a test for one of those must arm a
+//! handler with [`raises`] because the function is `-> !`.
+//!
+//! [`raises`] is deleted with the rest of the machinery when the node
+//! finishes; a new test should prefer the value.
 
 use std::sync::{Mutex, MutexGuard, OnceLock};
 

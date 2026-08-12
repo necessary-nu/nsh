@@ -1,16 +1,67 @@
 # Errors are values: the fixpoint, what the unwind is doing, and the order
 
 Status: analysis and specification for the `errors-are-values` node, which
-is not startable yet. Nothing here is implemented and no file under
-`crates/` was touched. It builds on `[dec:nsh:errors-are-values]`,
-`docs/api-design.md` §3 (which settled the taxonomy and the `set -e`
-question) and `docs/idiomatization.md` §2.3 step 7.
+is now **in progress**. Steps A, B and the first of C have landed; §0.1
+records exactly what, and the rest of this document is still the plan. It
+builds on `[dec:nsh:errors-are-values]`, `docs/api-design.md` §3 (which
+settled the taxonomy and the `set -e` question) and
+`docs/idiomatization.md` §2.3 step 7.
 
 Every number was measured on `faa2253` in the `wt/eav-prep` worktree, with
 the method given in §1.1 so the claims can be re-run and can rot visibly.
 Where a number is compared against `docs/idiomatization.md`'s, it was
 re-measured on that document's own tree (`4463fc6`) as well, so the
 comparison is like for like.
+
+---
+
+## 0.1 What has landed
+
+Three commits, each green on the full corpus:
+
+| commit | step | what |
+|---|---|---|
+| `df3a4ce` | A + B | `error::Error`, `report`, `sh_error_value`, `raise_reported` |
+| `15d764c` | C | `arith_yacc` — ten functions, the first module off the raise path |
+| `354a0a4` | C | the 33 builtin entry points, and `Builtin`'s `Result` |
+
+**The shape.** `Error` is one variant, `Other { line, status, message }`,
+per §3.2's step A and `docs/api-design.md` §3.4. `report(e) -> Error` is
+`exverror` with the raise removed: it writes the three unbuffered bytes to
+`errout` and then `flushall()`s, in that order, and returns the value it
+rendered from. `sh_error_value(msg) -> Error` is `sh_error` without the
+jump — `exitstatus = 2`, then `report` — and the diverging `sh_error` is
+now *defined* as `raise_reported(EXERROR, sh_error_value(msg))`, so both
+spellings are one piece of code and cannot drift.
+
+`raise_reported(cond, e)` is §3.2's bridge. It takes `cond` as a parameter
+rather than reading it off the `Error`, because two of the four exception
+codes are control flow and folding those into the value is what the
+decision forbids; the parameter disappears at step E.
+
+**Deviations from the plan in §3.2, and why.** Steps A and B landed as one
+commit: both are additive, both live in `error.rs`, and splitting them
+after the fact would have bought no bisection that the single corpus sweep
+did not already give. The builtins were taken before the rest of C's
+module order because the dispatch table holds one function-pointer type —
+33 entry points convert together or not at all — and because the result is
+the `Result` half of the signature `[dec:nsh:public-surface]` records.
+
+**What the numbers did.** Unsafe ops went 3781 → 3791. That is the right
+direction for this stage and not a regression: a converted raise site
+trades one unsafe call (`sh_error`) for another (`sh_error_value`), and
+the bridge adds one per adapter. The count falls at step G, when the
+machinery is deleted.
+
+**Where the wavefront is.** Seven raise sites inside the builtins are
+still jumps, and they are the ones whose frames have not moved: four
+inside `fc`'s `setjmp_catch` closure (a catch frame, step D), and
+`dot::find_dot_file`, `fc::scan_options`, `fc::str_to_event`,
+`printf::emit_field` and `test::syntax`, which are helpers whose own
+signatures are still infallible. Everything in §3.2's steps D through G is
+untouched: the seven catch frames, `Flow`, the interrupt, and the
+deletion. `panic = "unwind"` is still pinned on both profiles, and must
+stay pinned until step F lands.
 
 ---
 
