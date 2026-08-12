@@ -15,14 +15,7 @@
 //! script) from `src/builtins.def.in`, so nothing here carries
 //! `[spec:dash:…]` annotations — there is no C source file to annotate.
 //!
-//! **`printf` is deliberately absent.** `builtins.def.in:75` lists it and
-//! the generator emits it, so this table is not that output byte for byte
-//! any more. nsh has no `printf` builtin: the utility's contract is a
-//! runtime `%`-conversion interpreter, and this shell does not carry one.
-//! `printf` therefore resolves the way any other external utility does,
-//! through `PATH`. See `[dec:nsh:no-format-interpreters]`.
-//!
-//! Otherwise the table is the real generator's output for the default Linux build
+//! The table is the real generator's output for the default Linux build
 //! (`JOBS` = 1, `SMALL` undefined, `HAVE_GETRLIMIT` defined), which is the
 //! configuration `plan/.port-manifest.styx` was extracted from — `fc`
 //! (`histcmd`) and `ulimit` are therefore present.
@@ -103,8 +96,8 @@ pub fn args(fields: &[crate::expand::strlist]) -> Vec<&BStr> {
 /// **This is the last raw argument vector in the builtins**, and the
 /// signature `[dec:nsh:public-surface]` records has no room for it: a
 /// built-in that writes to its own arguments cannot be given `&[&BStr]`
-/// and mean it. Deciding whether that scribble survives is
-/// `printf-builtin`'s neighbourhood, not this node's.
+/// and mean it. `fc` is the only builtin that wants one -- `printf`
+/// scans its format out of a copy and writes to nothing.
 pub fn writable_args(args: &[&BStr]) -> Vec<*mut c_char> {
     let mut slots: Vec<*mut c_char> = args.iter().map(|w| w.as_ptr() as *mut c_char).collect();
     slots.push(core::ptr::null_mut());
@@ -127,6 +120,7 @@ pub mod hash;
 pub mod jobs;
 pub mod kill;
 pub mod local;
+pub mod printf;
 pub mod pwd;
 pub mod read;
 pub mod r#break;
@@ -167,7 +161,7 @@ unsafe fn bltincmd(_args: &[&BStr]) -> c_int {
     crate::eval::back_exitstatus
 }
 
-pub const NUMBUILTINS: usize = 39;
+pub const NUMBUILTINS: usize = 40;
 
 pub static builtincmd: [builtincmd; NUMBUILTINS] = [
     builtincmd { name: c".", builtin: Some(dot::dotcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 0
@@ -193,22 +187,23 @@ pub static builtincmd: [builtincmd; NUMBUILTINS] = [
     builtincmd { name: c"jobs", builtin: Some(jobs::jobscmd), flags: BUILTIN_REGULAR }, // 20
     builtincmd { name: c"kill", builtin: Some(kill::killcmd), flags: BUILTIN_REGULAR }, // 21
     builtincmd { name: c"local", builtin: Some(local::localcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 22
-    builtincmd { name: c"pwd", builtin: Some(pwd::pwdcmd), flags: BUILTIN_REGULAR }, // 23
-    builtincmd { name: c"read", builtin: Some(read::readcmd), flags: BUILTIN_REGULAR }, // 24
-    builtincmd { name: c"readonly", builtin: Some(export::exportcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 25
-    builtincmd { name: c"return", builtin: Some(r#return::returncmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 26
-    builtincmd { name: c"set", builtin: Some(set::setcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 27
-    builtincmd { name: c"shift", builtin: Some(shift::shiftcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 28
-    builtincmd { name: c"test", builtin: Some(test::testcmd), flags: 0 }, // 29
-    builtincmd { name: c"times", builtin: Some(times::timescmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 30
-    builtincmd { name: c"trap", builtin: Some(trap::trapcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 31
-    builtincmd { name: c"true", builtin: Some(r#true::truecmd), flags: BUILTIN_REGULAR }, // 32
-    builtincmd { name: c"type", builtin: Some(r#type::typecmd), flags: BUILTIN_REGULAR }, // 33
-    builtincmd { name: c"ulimit", builtin: Some(ulimit::ulimitcmd), flags: BUILTIN_REGULAR }, // 34
-    builtincmd { name: c"umask", builtin: Some(umask::umaskcmd), flags: BUILTIN_REGULAR }, // 35
-    builtincmd { name: c"unalias", builtin: Some(unalias::unaliascmd), flags: BUILTIN_REGULAR }, // 36
-    builtincmd { name: c"unset", builtin: Some(unset::unsetcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 37
-    builtincmd { name: c"wait", builtin: Some(wait::waitcmd), flags: BUILTIN_REGULAR }, // 38
+    builtincmd { name: c"printf", builtin: Some(printf::printfcmd), flags: 0 }, // 23
+    builtincmd { name: c"pwd", builtin: Some(pwd::pwdcmd), flags: BUILTIN_REGULAR }, // 24
+    builtincmd { name: c"read", builtin: Some(read::readcmd), flags: BUILTIN_REGULAR }, // 25
+    builtincmd { name: c"readonly", builtin: Some(export::exportcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 26
+    builtincmd { name: c"return", builtin: Some(r#return::returncmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 27
+    builtincmd { name: c"set", builtin: Some(set::setcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 28
+    builtincmd { name: c"shift", builtin: Some(shift::shiftcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 29
+    builtincmd { name: c"test", builtin: Some(test::testcmd), flags: 0 }, // 30
+    builtincmd { name: c"times", builtin: Some(times::timescmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 31
+    builtincmd { name: c"trap", builtin: Some(trap::trapcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 32
+    builtincmd { name: c"true", builtin: Some(r#true::truecmd), flags: BUILTIN_REGULAR }, // 33
+    builtincmd { name: c"type", builtin: Some(r#type::typecmd), flags: BUILTIN_REGULAR }, // 34
+    builtincmd { name: c"ulimit", builtin: Some(ulimit::ulimitcmd), flags: BUILTIN_REGULAR }, // 35
+    builtincmd { name: c"umask", builtin: Some(umask::umaskcmd), flags: BUILTIN_REGULAR }, // 36
+    builtincmd { name: c"unalias", builtin: Some(unalias::unaliascmd), flags: BUILTIN_REGULAR }, // 37
+    builtincmd { name: c"unset", builtin: Some(unset::unsetcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 38
+    builtincmd { name: c"wait", builtin: Some(wait::waitcmd), flags: BUILTIN_REGULAR }, // 39
 ];
 
 // The `*CMD` pointers of builtins.h: `#define NAME (builtincmd + n)`.
@@ -231,21 +226,22 @@ pub static HISTCMD: &builtincmd = &builtincmd[16];
 pub static JOBSCMD: &builtincmd = &builtincmd[20];
 pub static KILLCMD: &builtincmd = &builtincmd[21];
 pub static LOCALCMD: &builtincmd = &builtincmd[22];
-pub static PWDCMD: &builtincmd = &builtincmd[23];
-pub static READCMD: &builtincmd = &builtincmd[24];
-pub static RETURNCMD: &builtincmd = &builtincmd[26];
-pub static SETCMD: &builtincmd = &builtincmd[27];
-pub static SHIFTCMD: &builtincmd = &builtincmd[28];
+pub static PRINTFCMD: &builtincmd = &builtincmd[23];
+pub static PWDCMD: &builtincmd = &builtincmd[24];
+pub static READCMD: &builtincmd = &builtincmd[25];
+pub static RETURNCMD: &builtincmd = &builtincmd[27];
+pub static SETCMD: &builtincmd = &builtincmd[28];
+pub static SHIFTCMD: &builtincmd = &builtincmd[29];
 pub static TESTCMD: &builtincmd = &builtincmd[2];
-pub static TIMESCMD: &builtincmd = &builtincmd[30];
-pub static TRAPCMD: &builtincmd = &builtincmd[31];
+pub static TIMESCMD: &builtincmd = &builtincmd[31];
+pub static TRAPCMD: &builtincmd = &builtincmd[32];
 pub static TRUECMD: &builtincmd = &builtincmd[1];
-pub static TYPECMD: &builtincmd = &builtincmd[33];
-pub static ULIMITCMD: &builtincmd = &builtincmd[34];
-pub static UMASKCMD: &builtincmd = &builtincmd[35];
-pub static UNALIASCMD: &builtincmd = &builtincmd[36];
-pub static UNSETCMD: &builtincmd = &builtincmd[37];
-pub static WAITCMD: &builtincmd = &builtincmd[38];
+pub static TYPECMD: &builtincmd = &builtincmd[34];
+pub static ULIMITCMD: &builtincmd = &builtincmd[35];
+pub static UMASKCMD: &builtincmd = &builtincmd[36];
+pub static UNALIASCMD: &builtincmd = &builtincmd[37];
+pub static UNSETCMD: &builtincmd = &builtincmd[38];
+pub static WAITCMD: &builtincmd = &builtincmd[39];
 
 #[cfg(test)]
 mod tests {

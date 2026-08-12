@@ -864,29 +864,25 @@ mod tests {
         }
     }
 
-    /// `printf` is not a builtin and must not become one again: the
-    /// utility is a runtime `%`-conversion interpreter, and this shell
-    /// carries none. Not finding it here is what sends `printf` down the
-    /// ordinary PATH search. See `[dec:nsh:no-format-interpreters]`.
+    /// `printf` is a builtin, and finding it here is what keeps a script
+    /// off the PATH search: with `PATH` empty or `printf` missing from
+    /// it, the utility is still there. See
+    /// `[dec:nsh:printf-is-parsed-not-interpreted]`.
     #[test]
-    fn printf_is_not_a_builtin() {
+    fn printf_is_a_builtin() {
         unsafe {
-            assert!(find_builtin(c"printf".as_ptr()).is_null());
+            let found = find_builtin(c"printf".as_ptr());
+            assert!(!found.is_null());
+            assert!(core::ptr::eq(found, crate::builtins::PRINTFCMD));
         }
-        assert!(
-            !crate::builtins::builtincmd
-                .iter()
-                .any(|cmd| cmd.name.to_bytes() == b"printf")
-        );
-        /* echo shares printf.c and stays, so absence above is the
-         * builtin going rather than the module going. */
+        /* `echo` shares printf.c with it and is the neighbouring row. */
         unsafe {
             assert!(!find_builtin(c"echo".as_ptr()).is_null());
         }
     }
 
     /// The table is binary-searched, so its order is load-bearing —
-    /// removing a row must not have disturbed it.
+    /// adding a row must not have disturbed it.
     #[test]
     fn the_builtin_table_stays_sorted() {
         let names: Vec<&[u8]> = crate::builtins::builtincmd

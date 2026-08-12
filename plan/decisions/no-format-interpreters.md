@@ -1,7 +1,7 @@
 ---
 id [dec:nsh:no-format-interpreters]
-epitome "nsh interprets no format strings at runtime. Formatting is a trait applied to typed values at the call site, which means the shell has no printf builtin."
-state @decided
+epitome "nsh interprets no format strings at runtime. While this stood, that was read to include the printf builtin, and the shell had none."
+state @obsolesced
 category @ban
 scope {
     elements ([arch:nsh:shell-core] [arch:nsh:conformance])
@@ -23,7 +23,7 @@ alternatives (
 )
 consequences {
     accepted (
-        "`printf` resolves through PATH like any other external utility, so a script that calls it gets the system's printf(1) -- which is where the utility lives, and which POSIX requires to exist. It is not a builtin, and `type printf` says so."
+        "While this stood, `printf` resolved through PATH like any other external utility, and `type printf` said so. [dec:nsh:printf-is-parsed-not-interpreted] returns it to the builtin table."
         "The builtin table is no longer `mkbuiltins`' output byte for byte. `src/builtins.def.in` lists printf and the generator emits it; `crates/nsh/src/builtins.rs` deliberately does not, and says why."
         "Six differential corpora are retired: they measured the printf utility, and nsh no longer contains it. Comparing nsh-plus-coreutils against dash's builtin measures coreutils against dash, not the shell against the shell."
         "`echo` is unaffected and keeps every escape it had. It shared `print_escape_str` with printf, but only ever passed it `%s`, `%s ` or `%s\\n` -- two bytes of which meant anything -- so it passes those bytes directly now."
@@ -64,10 +64,15 @@ hand-write a `%a` renderer or to excuse 576 cases in the divergence
 register. Both were rejected, and the question they came from was
 rejected with them: the shell does not need to be able to answer it.
 
-The utility still exists. It is in `/usr/bin/printf`, POSIX requires it
-to be somewhere on the path, and a script that calls `printf` gets it.
-What changes is that it is a program the shell runs, not a language the
-shell speaks.
+This decision no longer governs, and the step it got wrong is the one
+above: it treated the builtin and the machinery as one thing. They were
+separable. Once `Output` was an `io::Write` and the builtins took typed
+arguments, `printf` no longer needed a format string built at runtime,
+varargs, or an arity switch — it needed a `%` conversion parsed into a
+descriptor and a typed argument rendered against it, which is the utility
+reading its own operand rather than the shell speaking a language.
+`[dec:nsh:printf-is-parsed-not-interpreted]` supersedes this record and
+returns the builtin. What that decision keeps is everything below.
 
 ## What this does not ban
 

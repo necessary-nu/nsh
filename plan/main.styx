@@ -2479,6 +2479,14 @@ children (
                 title "printf returns as builtins::printf, built clean on typed args and the writer"
                 kind @feat
                 deps (builtins-modules)
+                log (
+                    {
+                        at 2026-08-12T00:02:07.85268395Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+                )
             }
         )
     }

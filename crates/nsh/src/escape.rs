@@ -1,4 +1,4 @@
-//! The C escape decoder, shared by `echo` and the parser.
+//! The C escape decoder, shared by `echo`, `printf` and the parser.
 //!
 //! Port of the escape half of `src/bltin/printf.c`; `conv_escape` is
 //! declared in `system.h` and shared with `parser.c` (which calls it with
@@ -7,7 +7,9 @@
 //!
 //! It lives here rather than inside `builtins::echo` because two callers
 //! is what shared means: a decoder the parser needs cannot sit inside a
-//! builtin without the parser depending on one.
+//! builtin without the parser depending on one. `conv_escape_str` is here
+//! for the same reason -- `echo`'s words and `printf`'s `%b` argument are
+//! the same dialect, the one where an octal escape is written `\0nnn`.
 //!
 //! Cross-module signatures assumed (see the port report):
 //!   * Nothing from `crate::memalloc`.  The one buffer this file deals in
@@ -21,6 +23,7 @@
 
 use core::ptr;
 
+use bstr::BString;
 use libc::{c_char, c_int, c_uint};
 
 // ---------------------------------------------------------------------
@@ -289,4 +292,85 @@ pub unsafe fn conv_escape(str0: *mut c_char, out0: *mut c_char, mbchar: bool) ->
     // out_noput:
     str = str.add(1);
     (out.offset_from(out0) as c_uint) | ((str.offset_from(str0) as c_uint) << 4)
+}
+
+/*
+ * Print SysV echo(1) style escape string
+ *	Halts processing string if a \c escape is encountered.
+ */
+/// Expand a whole string's escapes into `cp`, in the dialect `echo` and
+/// `printf`'s `%b` share.
+///
+/// Returns 0, or 0x100 when a `\c` was found — "stop all further output",
+/// which both callers obey. The value's low byte is 0, which is also what
+/// ends the loop, and what `cp`'s final byte becomes: the terminator the
+/// caller either overwrites with a separator or trims.
+// [spec:dash:def:printf.conv-escape-str-fn]
+// [spec:dash:sem:printf.conv-escape-str-fn]
+pub(crate) unsafe fn conv_escape_str(mut str: *const c_char, cp: &mut BString) -> c_int {
+    let mut c: c_int;
+
+    /* convert string into a temporary buffer... */
+    /* `STARTSTACKSTR(cp)` — the buffer is the caller's, and the C's `*sp =
+     * cp` at the end is its length. */
+    debug_assert!(cp.is_empty());
+
+    loop {
+        let ret: c_uint;
+        let ch: c_int;
+
+        /* `CHECKSTRSPACE(4, cp)` — the room `conv_escape` writes into
+         * through the raw cursor below; see `CONV_ESCAPE_SLOP`. */
+        cp.reserve(CONV_ESCAPE_SLOP);
+
+        // `goto putchar` is taken from two places; the flag replaces it.
+        let mut goto_putchar = false;
+
+        c = *str as c_int;
+        str = str.add(1);
+        if c != b'\\' as c_int {
+            ch = 0; /* unused on this path */
+            goto_putchar = true;
+        } else {
+            ch = *str as c_int;
+            if ch == b'c' as c_int {
+                /* \c as in SYSV echo - abort all processing.... */
+                c = 0x100;
+                goto_putchar = true;
+            }
+        }
+
+        if goto_putchar {
+            // putchar:
+            /* `USTPUTC(c, cp)` truncates to `char`, which is what turns
+             * `\c`'s 0x100 into the terminating NUL. */
+            cp.push(c as u8);
+        } else {
+            /*
+             * %b string octal constants are not like those in C.
+             * They start with a \0, and are followed by 0, 1, 2,
+             * or 3 octal digits.
+             */
+            if ch == b'0' as c_int && isodigit(*str.add(1) as c_int) {
+                str = str.add(1);
+            }
+
+            /* Finally test for sequences valid in the format string */
+            let at = cp.len();
+            ret = conv_escape(str as *mut c_char, cp.as_mut_ptr().add(at) as *mut c_char, false);
+            str = str.add((ret >> 4) as usize);
+            /* `cp += ret & 15` is the commit of what `conv_escape` wrote
+             * past the cursor; what it wrote above that stays uncommitted,
+             * for the next write to overwrite as the C's does. */
+            debug_assert!((ret & 15) as usize <= CONV_ESCAPE_SLOP);
+            cp.set_len(at + (ret & 15) as usize);
+        }
+
+        // } while (c & 0xff);
+        if (c & 0xff) == 0 {
+            break;
+        }
+    }
+
+    c
 }

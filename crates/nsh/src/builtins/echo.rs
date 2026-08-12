@@ -25,9 +25,9 @@ use core::ptr;
 use std::io::Write as _;
 
 use bstr::{BStr, BString};
-use libc::{c_char, c_int, c_uint};
+use libc::{c_char, c_int};
 
-use crate::escape::{CONV_ESCAPE_SLOP, conv_escape, isodigit};
+use crate::escape::conv_escape_str;
 
 #[inline]
 unsafe fn nullstr() -> *mut c_char {
@@ -73,80 +73,6 @@ unsafe fn print_escape_str(separator: u8, s: *mut c_char) -> c_int {
     emit(&buf[..total]);
 
     done
-}
-
-/*
- * Print SysV echo(1) style escape string
- *	Halts processing string if a \c escape is encountered.
- */
-// [spec:dash:def:printf.conv-escape-str-fn]
-// [spec:dash:sem:printf.conv-escape-str-fn]
-unsafe fn conv_escape_str(mut str: *mut c_char, cp: &mut BString) -> c_int {
-    let mut c: c_int;
-
-    /* convert string into a temporary buffer... */
-    /* `STARTSTACKSTR(cp)` — the buffer is the caller's, and the C's `*sp =
-     * cp` at the end is its length. */
-    debug_assert!(cp.is_empty());
-
-    loop {
-        let ret: c_uint;
-        let ch: c_int;
-
-        /* `CHECKSTRSPACE(4, cp)` — the room `conv_escape` writes into
-         * through the raw cursor below; see `CONV_ESCAPE_SLOP`. */
-        cp.reserve(CONV_ESCAPE_SLOP);
-
-        // `goto putchar` is taken from two places; the flag replaces it.
-        let mut goto_putchar = false;
-
-        c = *str as c_int;
-        str = str.add(1);
-        if c != b'\\' as c_int {
-            ch = 0; /* unused on this path */
-            goto_putchar = true;
-        } else {
-            ch = *str as c_int;
-            if ch == b'c' as c_int {
-                /* \c as in SYSV echo - abort all processing.... */
-                c = 0x100;
-                goto_putchar = true;
-            }
-        }
-
-        if goto_putchar {
-            // putchar:
-            /* `USTPUTC(c, cp)` truncates to `char`, which is what turns
-             * `\c`'s 0x100 into the terminating NUL. */
-            cp.push(c as u8);
-        } else {
-            /*
-             * %b string octal constants are not like those in C.
-             * They start with a \0, and are followed by 0, 1, 2,
-             * or 3 octal digits.
-             */
-            if ch == b'0' as c_int && isodigit(*str.add(1) as c_int) {
-                str = str.add(1);
-            }
-
-            /* Finally test for sequences valid in the format string */
-            let at = cp.len();
-            ret = conv_escape(str, cp.as_mut_ptr().add(at) as *mut c_char, false);
-            str = str.add((ret >> 4) as usize);
-            /* `cp += ret & 15` is the commit of what `conv_escape` wrote
-             * past the cursor; what it wrote above that stays uncommitted,
-             * for the next write to overwrite as the C's does. */
-            debug_assert!((ret & 15) as usize <= CONV_ESCAPE_SLOP);
-            cp.set_len(at + (ret & 15) as usize);
-        }
-
-        // } while (c & 0xff);
-        if (c & 0xff) == 0 {
-            break;
-        }
-    }
-
-    c
 }
 
 // [spec:dash:def:printf.echocmd-fn]
