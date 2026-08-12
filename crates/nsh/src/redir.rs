@@ -57,10 +57,7 @@ unsafe fn redirlist_mut() -> &'static mut Vec<redirtab> {
 /* Bit map of currently closed file descriptors. */
 static mut closed_redirs: c_uint = 0;
 
-#[inline]
-unsafe fn errno() -> c_int {
-    *libc::__errno_location()
-}
+use crate::system::errno;
 
 // [spec:dash:def:redir.update-closed-redirs-fn]
 // [spec:dash:sem:redir.update-closed-redirs-fn]

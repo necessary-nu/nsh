@@ -180,7 +180,7 @@ pub unsafe fn install(s: Streams) -> Result<Borrowed, StreamError> {
         if hi < 0 {
             let e = StreamError {
                 fd,
-                errno: *libc::__errno_location(),
+                errno: crate::system::errno(),
             };
             cleanup(&staged);
             return Err(e);
@@ -194,7 +194,7 @@ pub unsafe fn install(s: Streams) -> Result<Borrowed, StreamError> {
     for fd in 0..3i32 {
         let hi = libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 10);
         if hi < 0 {
-            let errno = *libc::__errno_location();
+            let errno = crate::system::errno();
             if errno != libc::EBADF {
                 let e = StreamError { fd, errno };
                 cleanup(&staged);
@@ -209,7 +209,7 @@ pub unsafe fn install(s: Streams) -> Result<Borrowed, StreamError> {
         if libc::dup2(hi, i as c_int) < 0 {
             let e = StreamError {
                 fd: i as c_int,
-                errno: *libc::__errno_location(),
+                errno: crate::system::errno(),
             };
             // Undo the moves already made, then hand the host back what
             // it had. Leaving it half-swapped would be worse than failing.
@@ -452,7 +452,7 @@ mod tests {
             if libc::fcntl(0, libc::F_GETFD) != -1 {
                 libc::_exit(4);
             }
-            if *libc::__errno_location() != libc::EBADF {
+            if crate::system::errno() != libc::EBADF {
                 libc::_exit(5);
             }
             libc::_exit(0);

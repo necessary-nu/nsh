@@ -218,10 +218,7 @@ pub unsafe fn input_set_lleft(pf: &mut ParseFile, len: c_int) {
     pf.lleft = len;
 }
 
-#[inline]
-unsafe fn errno() -> c_int {
-    *libc::__errno_location()
-}
+use crate::system::errno;
 
 #[inline]
 unsafe fn set_errno(e: c_int) {

@@ -156,10 +156,7 @@ pub(crate) unsafe fn cmdtable_mut() -> &'static mut BTreeMap<BString, Box<tblent
     &mut *addr_of_mut!(cmdtable)
 }
 
-#[inline]
-unsafe fn errno() -> c_int {
-    *libc::__errno_location()
-}
+use crate::system::errno;
 
 // ---------------------------------------------------------------------
 

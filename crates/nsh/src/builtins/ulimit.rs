@@ -258,7 +258,7 @@ pub unsafe fn ulimitcmd(args: &[&BStr]) -> c_int {
         if libc::setrlimit((*l).cmd as libc::__rlimit_resource_t, &limit) < 0 {
             let mut message = b"error setting limit (".to_vec();
             message.extend_from_slice(
-                CStr::from_ptr(libc::strerror(*libc::__errno_location())).to_bytes(),
+                CStr::from_ptr(libc::strerror(crate::system::errno())).to_bytes(),
             );
             message.push(b')');
             crate::error::sh_error(&message);

@@ -203,10 +203,7 @@ pub static mut jobctl: c_int = 0;
 /* user was warned about stopped jobs */
 pub static mut job_warning: c_int = 0;
 
-#[inline]
-pub(crate) unsafe fn errno() -> c_int {
-    *libc::__errno_location()
-}
+pub(crate) use crate::system::errno;
 
 /* src/options.h: `#define iflag optlist[3]` and friends. */
 #[inline]

@@ -1216,7 +1216,7 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
                     buf.as_mut_ptr() as *mut c_void,
                     mem::size_of_val(&buf),
                 ) as c_int;
-                if !(i < 0 && *libc::__errno_location() == libc::EINTR) {
+                if !(i < 0 && crate::system::errno() == libc::EINTR) {
                     break;
                 }
             }

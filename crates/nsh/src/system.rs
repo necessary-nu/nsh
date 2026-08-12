@@ -53,6 +53,24 @@ pub unsafe fn sigclearmask() {
     libc::sigprocmask(libc::SIG_SETMASK, &set, core::ptr::null_mut());
 }
 
+/* `errno`, which is a macro on the C side and a thread-local lookup on
+ * either.  `io::Error::last_os_error()` is std's spelling of the same
+ * read; the raw number comes back out of it because every caller either
+ * compares against an `E*` constant or hands it to `strerror`.
+ *
+ * There is deliberately no setter beside it.  std can report the last OS
+ * error and cannot assign one, so the two places the shell *writes*
+ * errno -- `input.rs`'s `set_errno` before a `read` retry and `atomax`'s
+ * clear before `strtoimax` -- still go through libc, and say so.
+ *
+ * `main.c`'s `dash_errno` cache is a separate matter: it exists because
+ * glibc's `errno` macro repeats the TLS lookup, and it is ported in
+ * `shellmain.rs` for the pointer's sake rather than for reading through.
+ */
+pub fn errno() -> c_int {
+    std::io::Error::last_os_error().raw_os_error().unwrap_or(0)
+}
+
 /* `#ifndef HAVE_MEMPCPY`.  `copy_nonoverlapping` plus the length is the
  * whole of it: the callers are raw-pointer cursors, so the signature
  * stays pointer-shaped, but nothing here needs libc to move bytes. */
