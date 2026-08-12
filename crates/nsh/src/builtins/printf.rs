@@ -29,7 +29,7 @@ use crate::escape::{CONV_ESCAPE_SLOP, conv_escape, conv_escape_str};
 
 mod conv;
 
-use conv::Spec;
+use conv::{LIMIT, Spec};
 
 /// What the C skipped with `strspn(fmt, SKIP2)` when the width or
 /// precision was written out rather than taken from an argument.
@@ -46,6 +46,20 @@ const WIDTH: &[u8] = b"*0123456789";
 /// after the builtin returns and folds it into the exit status.
 unsafe fn emit(bytes: &[u8]) {
     let _ = (&mut *crate::output::stdout()).write_all(bytes);
+}
+
+/// Write one rendered conversion, or raise what the C raised when it
+/// could not render it.
+///
+/// `None` is a field longer than `vsnprintf` counts in an `int`. The C
+/// asked glibc to lay every conversion out and `xvasprintf` treated the
+/// refusal as fatal, so the builtin stops there: whatever the format had
+/// already printed stays printed, and the shell's status is 2.
+unsafe fn emit_field(rendered: Option<Vec<u8>>) {
+    match rendered {
+        Some(bytes) => emit(&bytes),
+        None => crate::error::sh_error(b"xvsnprintf failed"),
+    }
 }
 
 /// The operands a conversion reads its value from.
@@ -455,12 +469,18 @@ fn exp2(exponent: i32) -> f64 {
 /// the text to `printf`, which had no argument to match a `*` that
 /// arrived this way; the number is what the specification actually
 /// asked for.
-fn leading_number(bytes: &[u8]) -> c_int {
-    let mut value: c_int = 0;
+///
+/// Digits running past what the C could hold saturate one place beyond
+/// [`LIMIT`], which is the only thing anything downstream asks about
+/// them: a width or precision over the limit is refused whatever its
+/// value, so there is nothing further to count.
+fn leading_number(bytes: &[u8]) -> usize {
+    let mut value = 0usize;
     for byte in bytes.iter().filter(|byte| byte.is_ascii_digit()) {
         value = value
             .saturating_mul(10)
-            .saturating_add(c_int::from(byte - b'0'));
+            .saturating_add(usize::from(byte - b'0'))
+            .min(LIMIT + 1);
     }
     value
 }
@@ -496,7 +516,7 @@ unsafe fn print_escape_str(spec: &Spec, word: &CStr) -> c_int {
     debug_assert!(!buf.is_empty());
     let text = &buf[..buf.len() - 1];
 
-    emit(&spec.string(text));
+    emit_field(spec.string(text));
     done
 }
 
@@ -575,7 +595,7 @@ pub unsafe fn printfcmd(args: &[&BStr]) -> c_int {
             } else {
                 /* skip to possible '.', get following precision */
                 let digits = span(&format[..end], at, WIDTH);
-                spec.set_width(leading_number(&format[at..at + digits]));
+                spec.set_written_width(leading_number(&format[at..at + digits]));
                 at += digits;
             }
 
@@ -586,7 +606,7 @@ pub unsafe fn printfcmd(args: &[&BStr]) -> c_int {
                     spec.set_precision(operands.getuintmax(true) as c_int);
                 } else {
                     let digits = span(&format[..end], at, WIDTH);
-                    spec.set_precision(leading_number(&format[at..at + digits]));
+                    spec.set_written_precision(leading_number(&format[at..at + digits]));
                     at += digits;
                 }
             }
@@ -607,26 +627,26 @@ pub unsafe fn printfcmd(args: &[&BStr]) -> c_int {
                 }
                 b'c' => {
                     let value = operands.getchr();
-                    emit(&spec.character(value));
+                    emit_field(spec.character(value));
                 }
                 b's' => {
                     let value = operands.getstr();
-                    emit(&spec.string(value));
+                    emit_field(spec.string(value));
                 }
                 /* `mklong` widened the specification to `PRIdMAX` so
                  * that C's printf would pull a whole `intmax_t` off the
                  * varargs. The value arrives typed. */
                 b'd' | b'i' => {
                     let value = operands.getuintmax(true);
-                    emit(&spec.signed(value as i64));
+                    emit_field(spec.signed(value as i64));
                 }
                 b'o' | b'u' | b'x' | b'X' => {
                     let value = operands.getuintmax(false);
-                    emit(&spec.unsigned(value, conversion));
+                    emit_field(spec.unsigned(value, conversion));
                 }
                 b'a' | b'A' | b'e' | b'E' | b'f' | b'F' | b'g' | b'G' => {
                     let value = operands.getdouble();
-                    emit(&spec.double(value, conversion));
+                    emit_field(spec.double(value, conversion));
                 }
                 _ => {
                     let mut message = format[start..at].to_vec();
