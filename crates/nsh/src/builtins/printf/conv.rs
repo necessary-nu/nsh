@@ -68,6 +68,9 @@ pub(super) struct Spec {
     /// C held it in. The conversion is refused rather than clamped, so
     /// the flag travels to the field instead of being acted on here.
     over: bool,
+    /// The specification's own text, when it is one glibc could not
+    /// read. See [`Spec::set_literal`].
+    literal: Option<Vec<u8>>,
 }
 
 impl Spec {
@@ -82,6 +85,7 @@ impl Spec {
             width: 0,
             precision: None,
             over: false,
+            literal: None,
         }
     }
 
@@ -129,6 +133,18 @@ impl Spec {
         self.precision = Some(value);
     }
 
+    /// Record that this specification renders as its own text.
+    ///
+    /// A `*` after the digits of a width or precision is a `*` where C's
+    /// `printf` has no argument waiting for one, and glibc answers a
+    /// specification it cannot read by writing it back out. The C handed
+    /// the text over as the format string, so what appears is exactly
+    /// that text -- `mklong`'s inserted `l` and `%b`'s conversion
+    /// character temporarily set to `s` included.
+    pub(super) fn set_literal(&mut self, text: Vec<u8>) {
+        self.literal = Some(text);
+    }
+
     /// Lay a number out in the field, or refuse a conversion the C could
     /// not have counted.
     ///
@@ -139,6 +155,12 @@ impl Spec {
         let len = prefix.len() + body.len();
         if self.over || len > LIMIT || self.width > LIMIT {
             return None;
+        }
+        /* Refusal first: glibc reads the width's digits before it
+         * reaches the `*` that stops it, so digits past `INT_MAX` are
+         * the error whatever follows them. */
+        if let Some(text) = &self.literal {
+            return Some(text.clone());
         }
         let fill = self.width.saturating_sub(len);
         let mut out = Vec::with_capacity(len.max(self.width));
@@ -759,6 +781,21 @@ mod tests {
             double(".65536", 0.0001, b'g'),
             "0.000100000000000000004792173602385929598312941379845142364501953125"
         );
+    }
+
+    /// A specification glibc could not read prints as itself, whatever
+    /// the conversion would have rendered -- but a width past the limit
+    /// is still the error, because glibc reads those digits first.
+    #[test]
+    fn an_unreadable_spec_prints_itself() {
+        let mut left = spec("-5");
+        left.set_literal(b"%-5*ld".to_vec());
+        assert_eq!(text(left.signed(42)), "%-5*ld");
+        assert_eq!(bytes(left.string(b"ab")), b"%-5*ld");
+
+        let mut over = spec("2147483648");
+        over.set_literal(b"%2147483648*ld".to_vec());
+        assert!(over.signed(42).is_none());
     }
 
     /// A field longer than the C counted is refused, and nothing of it
