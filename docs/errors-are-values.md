@@ -17,13 +17,19 @@ comparison is like for like.
 
 ## 0.1 What has landed
 
-Three commits, each green on the full corpus:
+Seven commits, each green:
 
 | commit | step | what |
 |---|---|---|
 | `df3a4ce` | A + B | `error::Error`, `report`, `sh_error_value`, `raise_reported` |
 | `15d764c` | C | `arith_yacc` — ten functions, the first module off the raise path |
 | `354a0a4` | C | the 33 builtin entry points, and `Builtin`'s `Result` |
+| `774ae30` | — | this section, and `testutil`'s module comment |
+| `00e339a` | C | `dot`, `printf` and `test`'s own helpers |
+| `67c26a2` | C | the option scanner (`minus_o`, `setoption`, `options`, `procargs`) and `alias::setalias` |
+| `f09b49f` | C | `mystring`'s `badnum` / `atomax` / `number`, `test::getn`, `var::lookupvarint` |
+
+The raise sites that still jump went 51 → 27 over those commits.
 
 **The shape.** `Error` is one variant, `Other { line, status, message }`,
 per §3.2's step A and `docs/api-design.md` §3.4. `report(e) -> Error` is
@@ -42,26 +48,58 @@ decision forbids; the parameter disappears at step E.
 **Deviations from the plan in §3.2, and why.** Steps A and B landed as one
 commit: both are additive, both live in `error.rs`, and splitting them
 after the fact would have bought no bisection that the single corpus sweep
-did not already give. The builtins were taken before the rest of C's
-module order because the dispatch table holds one function-pointer type —
-33 entry points convert together or not at all — and because the result is
-the `Result` half of the signature `[dec:nsh:public-surface]` records.
+did not already give. §3.2's step-C ordering — by cross-module callers,
+cheapest first — was followed only loosely, and twice deliberately:
 
-**What the numbers did.** Unsafe ops went 3781 → 3791. That is the right
-direction for this stage and not a regression: a converted raise site
-trades one unsafe call (`sh_error`) for another (`sh_error_value`), and
-the bridge adds one per adapter. The count falls at step G, when the
-machinery is deleted.
+* **The builtins came early**, before the modules with fewer callers,
+  because the dispatch table holds one function-pointer type. Thirty-three
+  entry points convert together or the tree does not compile, so this is
+  the one slice in the node that is genuinely atomic, and the result is the
+  `Result` half of the signature `[dec:nsh:public-surface]` records.
+* **`mystring` came before `exec`, `expand`, `redir` and the rest**,
+  against its rank of ten cross-module callers, because taking the
+  builtins first had already made eight of those ten fallible. Its rank
+  was measured on a tree where nothing was converted; the ordering
+  heuristic is a starting estimate and it is worth re-reading after every
+  slice, because each one changes what is cheap next. That commit needed
+  no adapter anywhere.
 
-**Where the wavefront is.** Seven raise sites inside the builtins are
-still jumps, and they are the ones whose frames have not moved: four
-inside `fc`'s `setjmp_catch` closure (a catch frame, step D), and
-`dot::find_dot_file`, `fc::scan_options`, `fc::str_to_event`,
-`printf::emit_field` and `test::syntax`, which are helpers whose own
-signatures are still infallible. Everything in §3.2's steps D through G is
-untouched: the seven catch frames, `Flow`, the interrupt, and the
-deletion. `panic = "unwind"` is still pinned on both profiles, and must
-stay pinned until step F lands.
+**What the numbers did.** Unsafe ops went 3781 → 3791 and then stopped
+moving: the seventh commit measures 3791 too, having converted 24 further
+raise sites. That is the right shape for this stage and not a regression.
+A converted raise site trades one unsafe call (`sh_error`) for another
+(`sh_error_value`) and each bridge adds one, so the metric is flat while
+the conversion is in flight and falls only at step G, when `jmploc`,
+`handler`, `exception`, `raise_longjmp`, `setjmp_catch` and every
+`static mut` read behind them are deleted. Quoting a figure from the
+middle of this node as evidence either way is a mistake; the number to
+compare against 3781 is the one after G.
+
+**Full bar, on the seventh commit.** `runall.sh 8` PASS=61592 FAIL=0
+FLAKY=44 XFAIL=4 with no stale register entries; divtest PASS=44 FAIL=0;
+ptydiff PASS=37 FAIL=0 (including both `^C` cases, `^C with EXIT trap`
+and `subshell in EXIT trap` — the case that found the status-101 bug);
+POSIX cases PASS=660 FAIL=51; `cargo test -p nsh` 184 + 11. Every one is
+the baseline exactly.
+
+**Where the wavefront is.** 27 raise sites still jump, in nine files:
+`fc` 8, `redir` 4, `jobs` 3, `expand` 3, `options` 2 (`getoptsreset`
+alone — it is dispatched through `var::varfunc`, so its signature is
+`var.rs`'s to move), `var` 2, `parser` 2, `exec` 1, `eval` 1. Four
+adapters are live and each names the frame it waits for: `expari` over
+`arith`, `evalbltin` over the builtin table, `main` over `procargs`, and
+`evalcmd`'s own arm. Everything in §3.2's steps D through G is untouched:
+the seven catch frames, `Flow`, the interrupt, and the deletion.
+`panic = "unwind"` is still pinned on both profiles and must stay pinned
+until step F lands.
+
+**One finding worth carrying.** §2.4 predicted that a `?` through an
+`INTOFF`…`INTON` bracket would leak the interrupt counter exactly as the
+unwind does, and that an implementer who "fixed" it with a guard type
+would be changing which instruction a pending SIGINT is delivered at.
+That case is now real and in the tree: `setcmd` returns `options(..)?`
+between its `INTOFF` and its `INTON`. It is left leaking, deliberately,
+and the commit that introduced it says so.
 
 ---
 
