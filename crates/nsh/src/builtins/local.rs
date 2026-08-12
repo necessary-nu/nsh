@@ -24,7 +24,7 @@ pub unsafe fn localcmd(args: &[&BStr]) -> Result<c_int, Error> {
      * name is a name to localise -- including one that starts with `-`. */
     for name in &args[1..] {
         let name = crate::shell::cstring(name);
-        mklocal(name.as_ptr() as *mut c_char, 0);
+        mklocal(name.as_ptr() as *mut c_char, 0)?;
     }
     Ok(0)
 }

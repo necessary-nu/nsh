@@ -479,7 +479,11 @@ unsafe fn evalfor(n: &Node, flags: c_int) -> c_int {
     loopnest += 1;
     flags &= EV_TESTED;
     for sp in &arglist.list {
-        crate::var::setvar(f.var.as_ptr(), sp.textp(), 0);
+        /* The evaluator is not converted yet, so the bridge performs the
+         * jump `setvar`'s `sh_error` performed; it retires when this frame
+         * returns `Result`. */
+        crate::var::setvar(f.var.as_ptr(), sp.textp(), 0)
+            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
         status = evaltree(f.body.as_deref(), flags);
         if (skiploop() & !SKIPCONT) != 0 {
             break;
@@ -1027,10 +1031,17 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
                     "an unsplit expansion is one field"
                 );
 
+                /* Bridges until `evalcommand` returns `Result`. */
+                let raise =
+                    |e| crate::error::raise_reported(crate::error::EXERROR, e);
                 if vlocal != 0 {
-                    crate::var::mklocal(varlist.list[spp].textp(), VEXPORT);
+                    crate::var::mklocal(varlist.list[spp].textp(), VEXPORT)
+                        .unwrap_or_else(raise);
                 } else {
-                    crate::var::setvareq(varlist.list[spp].textp(), vflags);
+                    crate::var::setvareq(varlist.list[spp].textp(), vflags)
+                        .unwrap_or_else(|e| {
+                            crate::error::raise_reported(crate::error::EXERROR, e)
+                        });
                 }
             }
 
@@ -1129,7 +1140,8 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
          * '_' in 'vi' command mode during line editing...
          * However I implemented that within libedit itself.
          */
-        crate::var::setvar(b"_\0".as_ptr() as *const c_char, lastarg, 0);
+        crate::var::setvar(b"_\0".as_ptr() as *const c_char, lastarg, 0)
+            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
     }
 
     status

@@ -1412,7 +1412,10 @@ unsafe fn subevalvar(
     'out: {
         match subtype {
             VSASSIGN => {
-                crate::var::setvar(str, startp, 0);
+                /* Bridges until `subevalvar` returns `Result`. */
+                crate::var::setvar(str, startp, 0).unwrap_or_else(|e| {
+                    crate::error::raise_reported(crate::error::EXERROR, e)
+                });
 
                 loc = startp;
                 break 'out;

@@ -65,16 +65,20 @@ pub unsafe fn getoptscmd(args: &[&BStr]) -> Result<c_int, Error> {
         }
     }
 
-    Ok(getopts(
+    getopts(
         optstr.as_ptr() as *mut c_char,
         optvar.as_ptr() as *mut c_char,
         optbase,
-    ))
+    )
 }
 
 // [spec:dash:def:options.getopts-fn]
 // [spec:dash:sem:options.getopts-fn]
-unsafe fn getopts(optstr: *mut c_char, optvar: *mut c_char, optfirst: *mut *mut c_char) -> c_int {
+unsafe fn getopts(
+    optstr: *mut c_char,
+    optvar: *mut c_char,
+    optfirst: *mut *mut c_char,
+) -> Result<c_int, Error> {
     let mut p: *mut c_char;
     let mut q: *mut c_char;
     let mut c: c_char = b'?' as c_char;
@@ -126,13 +130,13 @@ unsafe fn getopts(optstr: *mut c_char, optvar: *mut c_char, optfirst: *mut *mut 
                 if *optstr.offset(0) == b':' as c_char {
                     s[0] = c;
                     s[1] = b'\0' as c_char;
-                    setvar(b"OPTARG\0".as_ptr() as *const c_char, s.as_ptr(), 0);
+                    setvar(b"OPTARG\0".as_ptr() as *const c_char, s.as_ptr(), 0)?;
                 } else {
                     let mut message = b"Illegal option -".to_vec();
                     message.push(c as u8);
                     message.push(b'\n');
                     let _ = (*crate::output::stderr()).write_all(&message);
-                    crate::var::unsetvar(b"OPTARG\0".as_ptr() as *const c_char);
+                    crate::var::unsetvar(b"OPTARG\0".as_ptr() as *const c_char)?;
                 }
                 c = b'?' as c_char;
                 break 'out;
@@ -152,14 +156,14 @@ unsafe fn getopts(optstr: *mut c_char, optvar: *mut c_char, optfirst: *mut *mut 
                 if *optstr.offset(0) == b':' as c_char {
                     s[0] = c;
                     s[1] = b'\0' as c_char;
-                    setvar(b"OPTARG\0".as_ptr() as *const c_char, s.as_ptr(), 0);
+                    setvar(b"OPTARG\0".as_ptr() as *const c_char, s.as_ptr(), 0)?;
                     c = b':' as c_char;
                 } else {
                     let mut message = b"No arg for -".to_vec();
                     message.push(c as u8);
                     message.extend_from_slice(b" option\n");
                     let _ = (*crate::output::stderr()).write_all(&message);
-                    crate::var::unsetvar(b"OPTARG\0".as_ptr() as *const c_char);
+                    crate::var::unsetvar(b"OPTARG\0".as_ptr() as *const c_char)?;
                     c = b'?' as c_char;
                 }
                 break 'out;
@@ -168,14 +172,14 @@ unsafe fn getopts(optstr: *mut c_char, optvar: *mut c_char, optfirst: *mut *mut 
             if p == *optnext {
                 optnext = optnext.add(1);
             }
-            setvar(b"OPTARG\0".as_ptr() as *const c_char, p, 0);
+            setvar(b"OPTARG\0".as_ptr() as *const c_char, p, 0)?;
             p = null_mut();
         } else {
             setvar(
                 b"OPTARG\0".as_ptr() as *const c_char,
                 addr_of!(nullstr) as *const c_char,
                 0,
-            );
+            )?;
         }
         break 'out;
     }
@@ -188,10 +192,10 @@ unsafe fn getopts(optstr: *mut c_char, optvar: *mut c_char, optfirst: *mut *mut 
         b"OPTIND\0".as_ptr() as *const c_char,
         ind as libc::intmax_t,
         VNOFUNC,
-    );
+    )?;
     s[0] = c;
     s[1] = b'\0' as c_char;
-    setvar(optvar, s.as_ptr(), 0);
+    setvar(optvar, s.as_ptr(), 0)?;
 
     shellparam.optoff = if !p.is_null() {
         (p as isize - *optnext.offset(-1) as isize) as c_int
@@ -200,7 +204,7 @@ unsafe fn getopts(optstr: *mut c_char, optvar: *mut c_char, optfirst: *mut *mut 
     };
     shellparam.optind = ind;
 
-    done
+    Ok(done)
 }
 
 #[cfg(test)]

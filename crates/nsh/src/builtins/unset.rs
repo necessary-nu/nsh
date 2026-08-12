@@ -24,7 +24,7 @@ pub unsafe fn unsetcmd(args: &[&BStr]) -> Result<c_int, Error> {
     for name in opts.operands() {
         let name = crate::shell::cstring(name);
         if flag != b'f' {
-            unsetvar(name.as_ptr());
+            unsetvar(name.as_ptr())?;
             continue;
         }
         if flag != b'v' {

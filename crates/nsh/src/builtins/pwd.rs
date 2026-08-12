@@ -25,7 +25,7 @@ pub unsafe fn pwdcmd(args: &[&BStr]) -> Result<c_int, Error> {
     flags = cdopt(&mut Options::new(args));
     let mut dir = if flags != 0 {
         if (*addr_of!(physdir)).is_none() {
-            setpwd_inner(Pwd::Current, 0);
+            setpwd_inner(Pwd::Current, 0)?;
         }
         cbytes(&*addr_of!(physdir))
     } else {

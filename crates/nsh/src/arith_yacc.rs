@@ -404,7 +404,7 @@ unsafe fn assignment(var: c_int, noeval: c_int) -> Result<intmax_t, Error> {
         return Ok(result);
     }
 
-    Ok(setvarint(
+    setvarint(
         val.name,
         if op == ARITH_ASS {
             result
@@ -412,7 +412,7 @@ unsafe fn assignment(var: c_int, noeval: c_int) -> Result<intmax_t, Error> {
             do_binop(op - 11, lookupvarint(val.name)?, result)?
         },
         0,
-    ))
+    )
 }
 
 // [spec:dash:def:arith-yacc.arith-fn]

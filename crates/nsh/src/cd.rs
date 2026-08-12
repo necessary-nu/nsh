@@ -5,6 +5,7 @@
 //! `getpwd` uses Rust's Unix OS-string cwd query, preserving the bytes that
 //! the selected glibc `getcwd(0, 0)` path returned without its raw allocation.
 
+use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 use libc::{c_char, c_int};
@@ -79,23 +80,23 @@ pub(crate) enum Pwd<'a> {
 
 // [spec:dash:def:cd.setpwd-fn]
 // [spec:dash:sem:cd.setpwd-fn]
-pub unsafe fn setpwd(val: *const c_char, setold: c_int) {
+pub unsafe fn setpwd(val: *const c_char, setold: c_int) -> Result<(), Error> {
     if val.is_null() {
-        setpwd_inner(Pwd::Unknown, setold);
+        setpwd_inner(Pwd::Unknown, setold)
     } else {
         let bytes = CStr::from_ptr(val).to_bytes();
-        setpwd_inner(Pwd::New(BStr::new(bytes)), setold);
+        setpwd_inner(Pwd::New(BStr::new(bytes)), setold)
     }
 }
 
-pub(crate) unsafe fn setpwd_inner(val: Pwd, setold: c_int) {
+pub(crate) unsafe fn setpwd_inner(val: Pwd, setold: c_int) -> Result<(), Error> {
     if setold != 0 {
         let old = cbytes(&*addr_of!(curdir));
         setvar(
             b"OLDPWD\0".as_ptr() as *const c_char,
             old.as_ptr() as *const c_char,
             VEXPORT,
-        );
+        )?;
     }
     INTOFF();
     /* `free(physdir)` guarded by `physdir != oldcur`: the C's `curdir` and
@@ -121,7 +122,8 @@ pub(crate) unsafe fn setpwd_inner(val: Pwd, setold: c_int) {
         b"PWD\0".as_ptr() as *const c_char,
         dir.as_ptr() as *const c_char,
         VEXPORT,
-    );
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]

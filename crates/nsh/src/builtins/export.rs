@@ -52,7 +52,7 @@ pub unsafe fn exportcmd(args: &[&BStr]) -> Result<c_int, Error> {
                     }
                 }
             }
-            setvar(name, p, flag);
+            setvar(name, p, flag)?;
         }
     } else {
         let called = crate::shell::cstring(args[0]);

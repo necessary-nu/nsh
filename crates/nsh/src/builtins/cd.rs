@@ -125,7 +125,7 @@ pub unsafe fn cdcmd(args: &[&BStr]) -> Result<c_int, Error> {
                     flags |= CD_PRINT;
                 }
                 /* docd: */
-                if docd(p, flags) == 0 {
+                if docd(p, flags)? == 0 {
                     out = true; /* goto out */
                     break;
                 }
@@ -141,7 +141,7 @@ pub unsafe fn cdcmd(args: &[&BStr]) -> Result<c_int, Error> {
         /* step6: */
         p = dest;
         /* docd: */
-        if docd(p, flags) != 0 {
+        if docd(p, flags)? != 0 {
             /* err: */
             let mut message = b"can't cd to ".to_vec();
             message.extend_from_slice(CStr::from_ptr(dest).to_bytes());
@@ -161,7 +161,7 @@ pub unsafe fn cdcmd(args: &[&BStr]) -> Result<c_int, Error> {
 
 // [spec:dash:def:cd.docd-fn]
 // [spec:dash:sem:cd.docd-fn]
-unsafe fn docd(mut dest: *const c_char, flags: c_int) -> c_int {
+unsafe fn docd(mut dest: *const c_char, flags: c_int) -> Result<c_int, Error> {
     let mut dir: *const c_char = null_mut();
     let err: c_int;
 
@@ -185,12 +185,15 @@ unsafe fn docd(mut dest: *const c_char, flags: c_int) -> c_int {
         Err(_) => -1,
     };
     if err == 0 {
-        setpwd(dir, 1);
+        /* The `?` returns between the INTOFF above and the INTON below,
+         * leaking the interrupt counter exactly as the longjmp out of
+         * `sh_error` did; see docs/errors-are-values.md 2.4. */
+        setpwd(dir, 1)?;
         crate::exec::hashcd();
     }
     /* out: */
     INTON();
-    err
+    Ok(err)
 }
 
 /// [`updatepwd`]'s result, which the C left in the stack block for its one

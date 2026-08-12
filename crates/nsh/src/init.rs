@@ -50,7 +50,11 @@ pub unsafe fn init() {
     }
 
     /* from var.c: */
-    crate::var::mkinit_init();
+    /* Startup runs inside `main`'s handler, which is still a
+     * `setjmp_catch`; the bridge performs the jump the C performed from
+     * inside `sh_error` and retires when that frame converts. */
+    crate::var::mkinit_init()
+        .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
 }
 
 /*
