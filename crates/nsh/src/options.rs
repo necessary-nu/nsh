@@ -6,6 +6,7 @@
 //! `options.h` become `usize` indices, so a call site reads `optlist[eflag]`
 //! and stays assignable exactly like the C macro.
 
+use crate::error::Error;
 use bstr::{BStr, BString};
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 use libc::{c_char, c_int, c_uint, size_t};
@@ -198,7 +199,7 @@ pub static mut optlist: [c_char; NOPTS] = [0; NOPTS];
 
 // [spec:dash:def:options.procargs-fn]
 // [spec:dash:sem:options.procargs-fn]
-pub unsafe fn procargs(mut xargv: *mut *mut c_char) -> c_int {
+pub unsafe fn procargs(mut xargv: *mut *mut c_char) -> Result<c_int, Error> {
     let mut i: c_int;
     let mut login: c_int;
 
@@ -218,12 +219,12 @@ pub unsafe fn procargs(mut xargv: *mut *mut c_char) -> c_int {
      * overwrites it with the command itself. */
     minusc = null_mut();
     let words = argv_words(xargv);
-    let scan = options(&words, 0, true);
+    let scan = options(&words, 0, true)?;
     login |= scan.login;
     xargv = xargv.add(scan.next);
     if (*xargv).is_null() {
         if scan.minus_c {
-            crate::error::sh_error(b"-c requires an argument");
+            return Err(crate::error::sh_error_value(b"-c requires an argument"));
         }
         optlist[sflag] = 1;
     }
@@ -273,7 +274,7 @@ pub unsafe fn procargs(mut xargv: *mut *mut c_char) -> c_int {
     borrowparam(xargv, nparam);
     optschanged();
 
-    login
+    Ok(login)
 }
 
 // [spec:dash:def:options.optschanged-fn]
@@ -310,7 +311,11 @@ pub(crate) struct Scan {
 
 // [spec:dash:def:options.options-fn]
 // [spec:dash:sem:options.options-fn]
-pub(crate) unsafe fn options(args: &[&BStr], start: usize, cmdline: bool) -> Scan {
+pub(crate) unsafe fn options(
+    args: &[&BStr],
+    start: usize,
+    cmdline: bool,
+) -> Result<Scan, Error> {
     let mut val: c_int = 0;
     let mut scan = Scan {
         login: 0,
@@ -359,17 +364,17 @@ pub(crate) unsafe fn options(args: &[&BStr], start: usize, cmdline: bool) -> Sca
             } else if c == b'l' && cmdline {
                 scan.login = 1;
             } else if c == b'o' {
-                minus_o(args.get(scan.next).copied(), val);
+                minus_o(args.get(scan.next).copied(), val)?;
                 if scan.next < args.len() {
                     scan.next += 1;
                 }
             } else {
-                setoption(c, val);
+                setoption(c, val)?;
             }
         }
     }
 
-    scan
+    Ok(scan)
 }
 
 /// The words of a NUL-terminated `char **`, for the one caller that is
@@ -386,7 +391,7 @@ unsafe fn argv_words<'a>(argv: *mut *mut c_char) -> Vec<&'a BStr> {
 
 // [spec:dash:def:options.minus-o-fn]
 // [spec:dash:sem:options.minus-o-fn]
-unsafe fn minus_o(name: Option<&BStr>, val: c_int) {
+unsafe fn minus_o(name: Option<&BStr>, val: c_int) -> Result<(), Error> {
     let mut i: c_int;
 
     let name = name.map(crate::shell::cstring);
@@ -430,19 +435,20 @@ unsafe fn minus_o(name: Option<&BStr>, val: c_int) {
         while i < NOPTS as c_int {
             if name.as_bytes() == CStr::from_ptr(optnames[i as usize]).to_bytes() {
                 optlist[i as usize] = val as c_char;
-                return;
+                return Ok(());
             }
             i += 1;
         }
         let mut message = b"Illegal option -o ".to_vec();
         message.extend_from_slice(name.as_bytes());
-        crate::error::sh_error(&message);
+        return Err(crate::error::sh_error_value(&message));
     }
+    Ok(())
 }
 
 // [spec:dash:def:options.setoption-fn]
 // [spec:dash:sem:options.setoption-fn]
-unsafe fn setoption(flag: u8, val: c_int) {
+unsafe fn setoption(flag: u8, val: c_int) -> Result<(), Error> {
     let mut i: c_int;
 
     i = 0;
@@ -457,14 +463,13 @@ unsafe fn setoption(flag: u8, val: c_int) {
                     optlist[Vflag] = 0;
                 }
             }
-            return;
+            return Ok(());
         }
         i += 1;
     }
     let mut message = b"Illegal option -".to_vec();
     message.push(flag);
-    crate::error::sh_error(&message);
-    /* NOTREACHED */
+    Err(crate::error::sh_error_value(&message))
 }
 
 /*
@@ -807,7 +812,7 @@ mod tests {
         let _guard = crate::testutil::lock();
         let saved = unsafe { optlist };
         let args = words(raw);
-        let scan = unsafe { options(&args, 0, cmdline) };
+        let scan = unsafe { options(&args, 0, cmdline) }.expect("these cases scan cleanly");
         unsafe { optlist = saved };
         (scan.next, scan.minus_c, scan.login)
     }

@@ -25,7 +25,7 @@ pub unsafe fn setcmd(args: &[&BStr]) -> Result<c_int, Error> {
         return Ok(showvars(addr_of!(nullstr) as *const c_char, 0, VUNSET));
     }
     INTOFF();
-    let scan = options(args, 1, false);
+    let scan = options(args, 1, false)?;
     optschanged();
     if scan.next < args.len() {
         setparam(&args[scan.next..]);

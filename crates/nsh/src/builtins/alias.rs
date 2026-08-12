@@ -52,7 +52,7 @@ pub unsafe fn aliascmd(args: &[&BStr]) -> Result<c_int, Error> {
                 printalias(ap);
             }
         } else {
-            setalias(n, vv.expect("the `=` branch").add(1));
+            setalias(n, vv.expect("the `=` branch").add(1))?;
         }
     }
 

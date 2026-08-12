@@ -7,6 +7,7 @@
 //! this answers it in the container rather than at print time. Registered
 //! in `docs/divergences.md`.
 
+use crate::error::Error;
 use bstr::{BStr, BString};
 use core::ptr::{addr_of_mut, null_mut};
 use libc::{c_char, c_int};
@@ -80,7 +81,7 @@ pub(crate) unsafe fn atab_mut() -> &'static mut BTreeMap<BString, Box<alias>> {
 
 // [spec:dash:def:alias.setalias-fn]
 // [spec:dash:sem:alias.setalias-fn]
-pub(crate) unsafe fn setalias(name: *const c_char, val: *const c_char) {
+pub(crate) unsafe fn setalias(name: *const c_char, val: *const c_char) -> Result<(), Error> {
     let ap: *mut alias;
     let mut p: *const c_char = name;
     let value_offset: usize;
@@ -89,7 +90,7 @@ pub(crate) unsafe fn setalias(name: *const c_char, val: *const c_char) {
         if crate::syntax::BASESYNTAX(*p as i8 as c_int) != crate::syntax::CWORD {
             let mut message = b"Invalid alias name: ".to_vec();
             message.extend_from_slice(CStr::from_ptr(name).to_bytes());
-            crate::error::sh_error(&message);
+            return Err(crate::error::sh_error_value(&message));
         }
         p = p.add(1);
         if *p == b'=' as c_char {
@@ -115,6 +116,7 @@ pub(crate) unsafe fn setalias(name: *const c_char, val: *const c_char) {
             .or_insert_with(|| Box::new(alias::new(text, value_offset)));
     }
     INTON();
+    Ok(())
 }
 
 // [spec:dash:def:alias.unalias-fn]
@@ -223,7 +225,7 @@ mod tests {
             atab_mut().clear();
 
             let initial = CStr0::new("a=old");
-            setalias(initial.p(), initial.p().add(2));
+            setalias(initial.p(), initial.p().add(2)).unwrap();
             let ap = lookupalias(CStr0::new("a").p(), 0);
             assert!(!ap.is_null());
             let address = ap as usize;
@@ -231,12 +233,12 @@ mod tests {
             for i in 0..64 {
                 let definition = CStr0::new(&format!("name{i}=value{i}"));
                 let offset = format!("name{i}=").len();
-                setalias(definition.p(), definition.p().add(offset));
+                setalias(definition.p(), definition.p().add(offset)).unwrap();
             }
             assert_eq!(lookupalias(CStr0::new("a").p(), 0) as usize, address);
 
             let replacement = [b'a' as c_char, b'=' as c_char, -1, 0];
-            setalias(replacement.as_ptr(), replacement.as_ptr().add(2));
+            setalias(replacement.as_ptr(), replacement.as_ptr().add(2)).unwrap();
             let ap = lookupalias(CStr0::new("a").p(), 0);
             assert_eq!(ap as usize, address);
             assert_eq!(core::ffi::CStr::from_ptr((*ap).name).to_bytes(), b"a=\xff");
@@ -247,7 +249,7 @@ mod tests {
 
             let held_definition = CStr0::new("held=old");
             let held_name = CStr0::new("held");
-            setalias(held_definition.p(), held_definition.p().add(5));
+            setalias(held_definition.p(), held_definition.p().add(5)).unwrap();
             let held = lookupalias(held_name.p(), 0);
             (*held).flag |= ALIASINUSE;
             assert!(lookupalias(held_name.p(), 1).is_null());
@@ -259,7 +261,7 @@ mod tests {
             assert_ne!((*deferred).flag & ALIASDEAD, 0);
 
             let held_replacement = CStr0::new("held=new");
-            setalias(held_replacement.p(), held_replacement.p().add(5));
+            setalias(held_replacement.p(), held_replacement.p().add(5)).unwrap();
             let revived = lookupalias(held_name.p(), 0);
             assert_eq!(revived, held);
             assert_ne!((*revived).flag & ALIASINUSE, 0);
@@ -274,8 +276,8 @@ mod tests {
             let kept_name = CStr0::new("kept");
             let dropped_definition = CStr0::new("dropped=value");
             let dropped_name = CStr0::new("dropped");
-            setalias(kept_definition.p(), kept_definition.p().add(5));
-            setalias(dropped_definition.p(), dropped_definition.p().add(8));
+            setalias(kept_definition.p(), kept_definition.p().add(5)).unwrap();
+            setalias(dropped_definition.p(), dropped_definition.p().add(8)).unwrap();
             let kept = lookupalias(kept_name.p(), 0);
             (*kept).flag |= ALIASINUSE;
 

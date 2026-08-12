@@ -139,7 +139,14 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
                         /* `setstackmark(smark)`, popped at `state3` and on
                          * the exception path, bounded what `procargs` and
                          * the profile reads left in the region. */
-                        let login: c_int = crate::options::procargs(argv);
+                        /* `procargs` returns its complaint now. This frame
+                         * is the handler that complaint was aimed at, so
+                         * the bridge performs the jump the C performed from
+                         * inside `sh_error`; it converts with the rest of
+                         * this catch frame. */
+                        let login: c_int = crate::options::procargs(argv).unwrap_or_else(|e| {
+                            crate::error::raise_reported(crate::error::EXERROR, e)
+                        });
                         if login != 0 {
                             *state_p = 1;
                             read_profile(b"/etc/profile\0".as_ptr() as *const c_char);
