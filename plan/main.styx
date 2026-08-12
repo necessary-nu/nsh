@@ -1966,6 +1966,14 @@ children (
                 priority 0
                 kind @refactor
                 deps (delete-memalloc sanctioned-divergences public-api-design)
+                log (
+                    {
+                        at 2026-08-12T12:48:34.059347929Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+                )
             }
 
             {

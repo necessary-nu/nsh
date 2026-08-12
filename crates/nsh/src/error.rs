@@ -14,6 +14,7 @@ use core::sync::atomic::{Ordering, compiler_fence};
 use std::ffi::CStr;
 use std::io::Write;
 
+use bstr::{BStr, BString, ByteSlice};
 use libc::{c_char, c_int};
 
 use crate::shell::{DEBUG, cstr};
@@ -267,6 +268,132 @@ pub unsafe fn onint() -> ! {
  * is nothing for the inner one to accept and `sh_warnx` below carries
  * both rules. */
 
+/// A shell diagnostic, as a value ([dec:nsh:errors-are-values]).
+///
+/// Every one of these is also *written* to the shell's stderr at the point
+/// it happened, in dash's bytes and dash's order — see [`report`], which is
+/// the only constructor that should reach a caller. That is not redundancy:
+/// `tests/harness/dscase.sh` merges stdout and stderr and compares the
+/// result, so where a diagnostic lands in the stream is under test in every
+/// corpus case, and a design that returned the text instead of writing it
+/// would emit every diagnostic at the end of the run.
+///
+/// Control flow is deliberately not here. `exit`, `return`, `break`,
+/// `continue` and the `set -e` abort are not errors and must not sit in the
+/// `Err` position; they keep the exception codes for now and become `Flow`
+/// in the `Ok` position later in this node.
+///
+/// One variant so far. `docs/api-design.md` §3.4 names ten and says why the
+/// conversion starts with `Other` alone: every raise site can be rewritten
+/// mechanically and the interesting ones promoted afterwards, instead of
+/// needing the final taxonomy before the first commit.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum Error {
+    /// A diagnostic with no more specific variant.
+    Other {
+        /// `errlinno` as it stood when the diagnostic was produced.
+        line: c_int,
+        /// The status the shell takes from it.
+        status: c_int,
+        /// dash's text, without the `sh: N: cd: ` prefix.
+        message: BString,
+    },
+}
+
+impl Error {
+    /// A diagnostic with no more specific variant, at the current line and
+    /// the status the shell has already taken.
+    ///
+    /// `sh_error` sets `exitstatus` to 2 before it reports, and `exerror`
+    /// leaves whatever the site chose, so reading it here captures what
+    /// each site meant without a second parameter.
+    pub unsafe fn other(msg: &[u8]) -> Error {
+        Error::Other {
+            line: errlinno,
+            status: crate::eval::exitstatus,
+            message: BString::from(msg),
+        }
+    }
+
+    /// The exit status the shell takes from this error.
+    pub fn status(&self) -> c_int {
+        match self {
+            Error::Other { status, .. } => *status,
+        }
+    }
+
+    /// dash's text for this error, byte for byte, **without** the
+    /// `sh: 1: cd: ` prefix.
+    ///
+    /// The prefix is `$0`, `errlinno` and the running command's name, which
+    /// are shell state and not error state, so an `Error` on its own cannot
+    /// render them. [`sh_warnx`] adds them when it writes.
+    pub fn message(&self) -> &BStr {
+        match self {
+            Error::Other { message, .. } => message.as_bstr(),
+        }
+    }
+
+    /// The line the error was reported at.
+    pub fn line(&self) -> c_int {
+        match self {
+            Error::Other { line, .. } => *line,
+        }
+    }
+}
+
+/// Write a diagnostic where dash writes it, and hand it back as a value.
+///
+/// This is [`exverror`] with the raise removed, and it is the funnel every
+/// diagnostic goes through: the bytes on the stream are rendered from the
+/// same `Error` that is returned, so the two cannot drift.
+///
+/// Two details of dash's write are load-bearing and are preserved by doing
+/// nothing more than the C does. `errout` is unbuffered, so the message is
+/// three raw `write(2)`s and needs no flush of its own; and `flushall()`
+/// runs *after* the message, so a built-in that filled the stdout buffer and
+/// then failed produces its diagnostic before its own output in the merged
+/// stream. Both are pinned by the corpus.
+pub unsafe fn report(e: Error) -> Error {
+    sh_warnx(e.message());
+
+    crate::output::flushall();
+    e
+}
+
+/// Perform the legacy non-local jump for an error that has **already been
+/// reported**.
+///
+/// This is the bridge that lets the conversion proceed one function at a
+/// time. A caller that has not been converted yet writes
+/// `f(..).unwrap_or_else(|e| raise_reported(EXERROR, e))` over a callee that
+/// already returns `Result`, so the wavefront can move outward from the
+/// raise sites towards the catch frames with the harness green at every
+/// commit. It is deleted with the rest of the longjmp machinery at the end
+/// of this node.
+///
+/// It writes nothing. The diagnostic went out when [`report`] built the
+/// value, which is where dash writes it and where it has to stay.
+///
+/// `cond` is a parameter rather than a property of the `Error` because two
+/// of the four exception codes are control flow and not error at all —
+/// `shellexec` reports its text and raises `EXEND` — and folding those into
+/// the value is precisely what [dec:nsh:errors-are-values] forbids. The
+/// parameter disappears when `Flow` takes the control-flow codes out of the
+/// exception mechanism entirely.
+pub unsafe fn raise_reported(cond: c_int, e: Error) -> ! {
+    /* The status the raise site chose travels with the value, so
+     * propagation through any number of `?` cannot lose it. Everything
+     * between `report` and here is `flushall`, which swallows its errors
+     * and cannot touch `exitstatus`, so this assignment is a no-op today
+     * and an invariant once the value does the travelling. */
+    crate::eval::exitstatus = e.status();
+
+    exraise(cond);
+    /* NOTREACHED */
+}
+
 /*
  * Exverror is called to print a complete diagnostic message and raise the
  * error exception.
@@ -286,19 +413,32 @@ unsafe fn exverror(cond: c_int, msg: &[u8]) -> ! {
      * Without DEBUG the `if (msg)` guard is compiled out along with the
      * tracing, so exvwarning runs unconditionally.
      */
-    sh_warnx(msg);
+    /* `exverror` is now exactly its two halves: build-and-write the value,
+     * then jump with it. Callers that still expect a diverging raise keep
+     * this function; the wavefront that replaces it with `Err(e)` starts at
+     * the leaves and works outward. */
+    raise_reported(cond, report(Error::other(msg)))
+}
 
-    crate::output::flushall();
-    exraise(cond);
-    /* NOTREACHED */
+/// `sh_error`'s value half: take the status dash takes, write the
+/// diagnostic where dash writes it, and **return** the error rather than
+/// raising it.
+///
+/// This is what a converted raise site calls —
+/// `return Err(sh_error_value(&msg))` — and it is the same three writes in
+/// the same order as the diverging form below, because both are this
+/// function. When the last caller of `sh_error` is gone this one takes its
+/// name.
+pub unsafe fn sh_error_value(msg: &[u8]) -> Error {
+    crate::eval::exitstatus = 2;
+
+    report(Error::other(msg))
 }
 
 // [spec:dash:def:error.sh-error-fn]
 // [spec:dash:sem:error.sh-error-fn]
 pub unsafe fn sh_error(msg: &[u8]) -> ! {
-    crate::eval::exitstatus = 2;
-
-    exverror(EXERROR, msg);
+    raise_reported(EXERROR, sh_error_value(msg))
     /* NOTREACHED */
 }
 
