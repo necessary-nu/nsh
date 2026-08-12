@@ -32,7 +32,7 @@ pub unsafe fn typecmd(args: &[&BStr]) -> Result<c_int, Error> {
     opts.next(b"");
     for name in opts.operands() {
         let name = crate::shell::cstring(name);
-        err |= describe_command(crate::output::stdout(), name.as_ptr() as *mut c_char, null(), 1);
+        err |= describe_command(crate::output::stdout(), name.as_ptr() as *mut c_char, null(), 1)?;
     }
     Ok(err)
 }
@@ -44,7 +44,7 @@ pub(crate) unsafe fn describe_command(
     command: *mut c_char,
     mut path: *const c_char,
     verbose: c_int,
-) -> c_int {
+) -> Result<c_int, Error> {
     let mut entry: cmdentry = cmdentry {
         cmdtype: 0,
         u: param { index: 0 },
@@ -78,7 +78,7 @@ pub(crate) unsafe fn describe_command(
             } else {
                 let _ = (&mut *out).write_all(b"alias ");
                 crate::alias::printalias(ap);
-                return 0;
+                return Ok(0);
             }
             break 'out_label;
         }
@@ -97,7 +97,7 @@ pub(crate) unsafe fn describe_command(
             (*cmdp).write_to(&mut entry);
         } else {
             /* Finally use brute force */
-            find_command(command, &mut entry, DO_ABS, path);
+            find_command(command, &mut entry, DO_ABS, path)?;
         }
 
         match entry.cmdtype {
@@ -154,11 +154,11 @@ pub(crate) unsafe fn describe_command(
                 if verbose != 0 {
                     let _ = (&mut *out).write_all(b": not found\n");
                 }
-                return 127;
+                return Ok(127);
             }
         }
     }
     // out:
     let _ = (&mut *out).write_all(b"\n");
-    0
+    Ok(0)
 }

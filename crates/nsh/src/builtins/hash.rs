@@ -53,7 +53,7 @@ pub unsafe fn hashcmd(args: &[&BStr]) -> Result<c_int, Error> {
         if !cmdp.is_null() && (*cmdp).path_dependent() {
             delete_cmd_entry(name);
         }
-        find_command(name, &mut entry, DO_ERR, crate::var::pathval());
+        find_command(name, &mut entry, DO_ERR, crate::var::pathval())?;
         if entry.cmdtype == CMDUNKNOWN {
             c = 1;
         }

@@ -39,12 +39,12 @@ pub unsafe fn commandcmd(args: &[&BStr]) -> Result<c_int, Error> {
     if verify != 0 {
         if let Some(cmd) = opts.operands().first() {
             let cmd = crate::shell::cstring(cmd);
-            return Ok(describe_command(
+            return describe_command(
                 crate::output::stdout(),
                 cmd.as_ptr() as *mut c_char,
                 path,
                 verify - VERIFY_BRIEF,
-            ));
+            );
         }
     }
 

@@ -28,7 +28,7 @@ use std::io::Write as _;
 use std::rc::Rc;
 
 use crate::builtins::{BUILTIN_REGULAR, BUILTIN_SPECIAL, builtincmd};
-use crate::error::{E_EXEC, INTOFF, INTON};
+use crate::error::{E_EXEC, Error, INTOFF, INTON};
 use crate::nodes::{Node, funcnode};
 use crate::output::Output;
 
@@ -425,7 +425,7 @@ pub unsafe fn find_command(
     entry: *mut cmdentry,
     mut act: c_int,
     path: *const c_char,
-) {
+) -> Result<(), Error> {
     let mut cmdp: *mut tblentry;
     let mut idx: c_int;
     let mut prev: c_int;
@@ -454,11 +454,11 @@ pub unsafe fn find_command(
                 }
                 // absfail:
                 (*entry).cmdtype = CMDUNKNOWN;
-                return;
+                return Ok(());
             }
         }
         (*entry).cmdtype = CMDNORMAL;
-        return;
+        return Ok(());
     }
 
     updatetbl = (path == crate::var::pathval()) as c_int;
@@ -589,7 +589,7 @@ pub unsafe fn find_command(
                             message.extend_from_slice(CStr::from_ptr(name).to_bytes());
                             message.extend_from_slice(b" not defined in ");
                             message.extend_from_slice(CStr::from_ptr(fullname).to_bytes());
-                            crate::error::sh_error(&message);
+                            return Err(crate::error::sh_error_value(&message));
                         }
                         break 'success;
                     }
@@ -601,7 +601,7 @@ pub unsafe fn find_command(
                     if updatetbl == 0 {
                         (*entry).cmdtype = CMDNORMAL;
                         (*entry).u.index = idx;
-                        return;
+                        return Ok(());
                     }
                     INTOFF();
                     cmdp = cmdlookup(name, 1);
@@ -627,13 +627,13 @@ pub unsafe fn find_command(
             }
             // fail:
             (*entry).cmdtype = CMDUNKNOWN;
-            return;
+            return Ok(());
         }
         // builtin_success:
         if updatetbl == 0 {
             (*entry).cmdtype = CMDBUILTIN;
             (*entry).u.cmd = bcmd;
-            return;
+            return Ok(());
         }
         INTOFF();
         cmdp = cmdlookup(name, 1);
@@ -644,6 +644,7 @@ pub unsafe fn find_command(
     // success:
     (*cmdp).rehash = false;
     (*cmdp).write_to(entry);
+    Ok(())
 }
 
 /*

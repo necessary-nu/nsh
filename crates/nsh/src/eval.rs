@@ -681,7 +681,12 @@ unsafe fn evalpipe(n: &Node, flags: c_int) -> Result<c_int, Error> {
         if has_next {
             if libc::pipe(pip.as_mut_ptr()) < 0 {
                 libc::close(prevfd);
-                crate::error::sh_error(b"Pipe call failed");
+                /* Between this frame's `INTOFF` and its `INTON`, exactly
+                 * where the longjmp was: the jump skipped the same `INTON`
+                 * and left the counter raised. Pairing them with a guard
+                 * would move the instruction a pending SIGINT is delivered
+                 * at, which `docs/errors-are-values.md` §2.4 forbids. */
+                return Err(crate::error::sh_error_value(b"Pipe call failed"));
             }
         }
         if crate::jobs::forkshell(Some(jp), Some(cmd), p.backgnd) == 0 {
@@ -932,7 +937,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
                 &mut cmdentry,
                 cmd_flag | DO_REGBLTIN,
                 crate::var::pathval(),
-            );
+            )?;
 
             vlocal += 1;
 
@@ -1079,7 +1084,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
                 } else {
                     crate::var::pathval()
                 };
-                find_command(*argv.offset(0), &mut cmdentry, cmd_flag | DO_ERR, path);
+                find_command(*argv.offset(0), &mut cmdentry, cmd_flag | DO_ERR, path)?;
             }
 
             jp = None;
@@ -1274,7 +1279,7 @@ unsafe fn prehash(n: &Node) -> Result<(), Error> {
     if n.node_type() == NCMD && !n.ncmd().args.is_empty() {
         let text = n.ncmd().args[0].narg().text.as_ptr();
         if crate::parser::goodname(text) != 0 {
-            find_command(text, &mut entry, 0, crate::var::pathval());
+            find_command(text, &mut entry, 0, crate::var::pathval())?;
         }
     }
     Ok(())
