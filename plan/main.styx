@@ -2479,12 +2479,34 @@ children (
                 title "printf returns as builtins::printf, built clean on typed args and the writer"
                 kind @feat
                 deps (builtins-modules)
+                sealed true
                 log (
                     {
                         at 2026-08-12T00:02:07.85268395Z
                         author "brendan@necessary.nu"
                         kind @status
                         text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-12T08:28:46.992597568Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Restoring the builtin unmasked a pre-existing wait defect."
+                    }
+
+                    {
+                        at 2026-08-12T08:29:16.593638628Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Detail on the wait defect above, and why the POSIX tally drops by one. The case is sig-wait-removes-waited-pid, rule builtin.wait.remove-waited-for-pid: it backgrounds `sh -c 'exit 7'`, waits on the pid, prints the status, then waits on the same pid again and expects 127, because a waited-for pid must be forgotten. The port reports 7 both times. So does dash — both binaries print first=7 second=7, byte for byte. Nothing in the port's wait changed. What changed is that the printf between the two waits used to fork an external process, and reaping it cleared the job entry the second wait would otherwise have found. The case was passing on the strength of a fork that happened only because the builtin was missing, so the suite moving 661/50 to 660/51 against an unchanged reference of 655/56 is a truer number replacing a false one, not a regression in printf. Not fixed here: teaching wait to forget a pid is a job-table change that would make the port diverge from dash deliberately, so it needs its own node and a register entry rather than a lift on the way past. Recorded so the -1 is not misread, and so the defect is not lost now that nothing hides it."
+                    }
+
+                    {
+                        at 2026-08-12T08:29:30.995973456Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }
