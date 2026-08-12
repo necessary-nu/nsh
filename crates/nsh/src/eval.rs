@@ -28,6 +28,7 @@
 //! `DEBUG`, so the calls are dropped; C `goto`s are reproduced with
 //! labelled blocks whose nesting mirrors the order of the C labels.
 
+use crate::error::Error;
 use bstr::{BStr, BString};
 use core::ptr::{addr_of, addr_of_mut, null, null_mut};
 use libc::{c_char, c_int};
@@ -164,7 +165,7 @@ pub(crate) unsafe fn setjmp_catch<F: FnOnce()>(loc: *mut jmploc, body: F) -> c_i
 
 // [spec:dash:def:eval.evalstring-fn]
 // [spec:dash:sem:eval.evalstring-fn]
-pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> c_int {
+pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> Result<c_int, Error> {
     let mut status: c_int;
     /* `sstrdup(s)` and the `stunalloc(s)` at the bottom are one thing:
      * `setinputstring` keeps the pointer rather than copying, so the text
@@ -193,7 +194,7 @@ pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> c_int {
                     } else {
                         EV_EXIT
                     }),
-            );
+            )?;
             if n.is_some() {
                 status = i;
             }
@@ -208,7 +209,7 @@ pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> c_int {
     crate::input::popfile();
     drop(owned);
 
-    status
+    Ok(status)
 }
 
 /*
@@ -218,14 +219,14 @@ pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> c_int {
 
 // [spec:dash:def:eval.evaltree-fn]
 // [spec:dash:sem:eval.evaltree-fn]
-pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> c_int {
+pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> Result<c_int, Error> {
     let mut checkexit: c_int = 0;
     /* C leaves `evalfn` uninitialised; every path that reaches
      * `calleval` assigns it first. Seeded here only so that Rust's
      * definite-initialisation analysis is trivially satisfied — any of
      * the six is as good, and `evaltree` itself no longer fits the type,
      * because the leaf evaluators all dereference their node. */
-    let mut evalfn: unsafe fn(&Node, c_int) -> c_int = evalcommand;
+    let mut evalfn: unsafe fn(&Node, c_int) -> Result<c_int, Error> = evalcommand;
     let isor: libc::c_uint;
     let mut status: c_int = 0;
 
@@ -263,13 +264,13 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> c_int {
                                 if funcline != 0 {
                                     crate::var::lineno -= funcline - 1;
                                 }
-                                expredir(&r.redirect);
+                                expredir(&r.redirect)?;
                                 crate::redir::pushredir(&r.redirect);
                                 status = crate::redir::redirectsafe(&r.redirect, REDIR_PUSH);
                                 if status != 0 {
                                     checkexit = EV_TESTED;
                                 } else {
-                                    status = evaltree(r.n.as_deref(), flags & EV_TESTED);
+                                    status = evaltree(r.n.as_deref(), flags & EV_TESTED)?;
                                 }
                                 if !r.redirect.is_empty() {
                                     crate::redir::popredir(0);
@@ -307,7 +308,7 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> c_int {
                                 status = evaltree(
                                     b.ch1.as_deref(),
                                     (flags | (((isor >> 1).wrapping_sub(1)) as c_int)) & EV_TESTED,
-                                );
+                                )?;
                                 if ((status == 0) as libc::c_uint) == isor || evalskip != 0 {
                                     break 'sw;
                                 }
@@ -316,7 +317,7 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> c_int {
                             }
                             NIF => {
                                 let f = n.nif();
-                                status = evaltree(f.test.as_deref(), EV_TESTED);
+                                status = evaltree(f.test.as_deref(), EV_TESTED)?;
                                 if evalskip != 0 {
                                     break 'sw;
                                 }
@@ -340,7 +341,7 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> c_int {
                              * `evaltree`, so with a tagged union there is
                              * nothing left for the fallthrough to reinterpret. */
                             _ /* default, NNOT */ => {
-                                status = evaltree(n.nnot().com.as_deref(), EV_TESTED);
+                                status = evaltree(n.nnot().com.as_deref(), EV_TESTED)?;
                                 if evalskip == 0 {
                                     status = (status == 0) as c_int;
                                 }
@@ -354,11 +355,11 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> c_int {
                 }
                 // evaln: the C sets `evalfn = evaltree` and falls into
                 // `calleval:`, which with the reassigned node is this call.
-                status = evaltree(nnext, flags);
+                status = evaltree(nnext, flags)?;
                 break 'sw;
             }
             // calleval:
-            status = evalfn(n, flags);
+            status = evalfn(n, flags)?;
         }
 
         exitstatus = status;
@@ -375,7 +376,7 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> c_int {
             break 'exexit;
         }
 
-        return exitstatus;
+        return Ok(exitstatus);
     }
     // exexit:
     crate::error::exraise(crate::error::EXEND);
@@ -389,7 +390,11 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> c_int {
 // portable fallback — reproduced here — calls `evaltree` and aborts if
 // it ever comes back.
 pub unsafe fn evaltreenr(n: Option<&Node>, flags: c_int) -> ! {
-    evaltree(n, flags);
+    /* `evaltree` is fallible now and this one cannot be: it is the
+     * `noreturn` alias, called where the caller has already committed to
+     * not coming back. The bridge performs the jump the raise performed. */
+    evaltree(n, flags)
+        .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
     std::process::abort();
 }
 
@@ -418,7 +423,7 @@ unsafe fn skiploop() -> c_int {
 
 // [spec:dash:def:eval.evalloop-fn]
 // [spec:dash:sem:eval.evalloop-fn]
-unsafe fn evalloop(n: &Node, flags: c_int) -> c_int {
+unsafe fn evalloop(n: &Node, flags: c_int) -> Result<c_int, Error> {
     let mut skip: c_int;
     let mut status: c_int;
     let mut flags: c_int = flags;
@@ -430,7 +435,7 @@ unsafe fn evalloop(n: &Node, flags: c_int) -> c_int {
         {
             let mut i: c_int;
 
-            i = evaltree(n.nbinary().ch1.as_deref(), EV_TESTED);
+            i = evaltree(n.nbinary().ch1.as_deref(), EV_TESTED)?;
             skip = skiploop();
             if skip == SKIPFUNC {
                 status = i;
@@ -444,7 +449,7 @@ unsafe fn evalloop(n: &Node, flags: c_int) -> c_int {
                 if i != 0 {
                     break;
                 }
-                status = evaltree(n.nbinary().ch2.as_deref(), flags);
+                status = evaltree(n.nbinary().ch2.as_deref(), flags)?;
                 skip = skiploop();
             }
         }
@@ -454,12 +459,12 @@ unsafe fn evalloop(n: &Node, flags: c_int) -> c_int {
     }
     loopnest -= 1;
 
-    status
+    Ok(status)
 }
 
 // [spec:dash:def:eval.evalfor-fn]
 // [spec:dash:sem:eval.evalfor-fn]
-unsafe fn evalfor(n: &Node, flags: c_int) -> c_int {
+unsafe fn evalfor(n: &Node, flags: c_int) -> Result<c_int, Error> {
     let mut arglist: arglist = arglist::new();
     let mut status: c_int;
     let mut flags: c_int = flags;
@@ -484,19 +489,19 @@ unsafe fn evalfor(n: &Node, flags: c_int) -> c_int {
          * returns `Result`. */
         crate::var::setvar(f.var.as_ptr(), sp.textp(), 0)
             .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
-        status = evaltree(f.body.as_deref(), flags);
+        status = evaltree(f.body.as_deref(), flags)?;
         if (skiploop() & !SKIPCONT) != 0 {
             break;
         }
     }
     loopnest -= 1;
 
-    status
+    Ok(status)
 }
 
 // [spec:dash:def:eval.evalcase-fn]
 // [spec:dash:sem:eval.evalcase-fn]
-unsafe fn evalcase(n: &Node, flags: c_int) -> c_int {
+unsafe fn evalcase(n: &Node, flags: c_int) -> Result<c_int, Error> {
     let mut arglist: arglist = arglist::new();
     let mut status: c_int = 0;
 
@@ -532,7 +537,7 @@ unsafe fn evalcase(n: &Node, flags: c_int) -> c_int {
                      * exit status.
                      */
                     if evalskip == 0 && cp.nclist().body.is_some() {
-                        status = evaltree(cp.nclist().body.as_deref(), flags);
+                        status = evaltree(cp.nclist().body.as_deref(), flags)?;
                     }
                     break 'out_lbl;
                 }
@@ -540,7 +545,7 @@ unsafe fn evalcase(n: &Node, flags: c_int) -> c_int {
         }
     }
     // out:
-    status
+    Ok(status)
 }
 
 /*
@@ -549,7 +554,7 @@ unsafe fn evalcase(n: &Node, flags: c_int) -> c_int {
 
 // [spec:dash:def:eval.evalsubshell-fn]
 // [spec:dash:sem:eval.evalsubshell-fn]
-unsafe fn evalsubshell(n: &Node, flags: c_int) -> c_int {
+unsafe fn evalsubshell(n: &Node, flags: c_int) -> Result<c_int, Error> {
     let jp: usize;
     let backgnd: c_int = (n.node_type() == NBACKGND) as c_int;
     let mut status: c_int;
@@ -562,7 +567,7 @@ unsafe fn evalsubshell(n: &Node, flags: c_int) -> c_int {
         crate::var::lineno -= funcline - 1;
     }
 
-    expredir(&r.redirect);
+    expredir(&r.redirect)?;
     INTOFF();
     'nofork: {
         if backgnd == 0 && (flags & EV_EXIT) != 0 && crate::trap::have_traps() == 0 {
@@ -584,7 +589,7 @@ unsafe fn evalsubshell(n: &Node, flags: c_int) -> c_int {
             status = crate::jobs::waitforjob(Some(jp));
         }
         INTON();
-        return status;
+        return Ok(status);
     }
     // nofork:
     INTON();
@@ -599,7 +604,7 @@ unsafe fn evalsubshell(n: &Node, flags: c_int) -> c_int {
 
 // [spec:dash:def:eval.expredir-fn]
 // [spec:dash:sem:eval.expredir-fn]
-unsafe fn expredir(n: &[Node]) {
+unsafe fn expredir(n: &[Node]) -> Result<(), Error> {
     for redir in n {
         let mut fnl: arglist = arglist::new();
         match redir.node_type() {
@@ -642,6 +647,7 @@ unsafe fn expredir(n: &[Node]) {
             _ => {}
         }
     }
+    Ok(())
 }
 
 /*
@@ -653,7 +659,7 @@ unsafe fn expredir(n: &[Node]) {
 
 // [spec:dash:def:eval.evalpipe-fn]
 // [spec:dash:sem:eval.evalpipe-fn]
-unsafe fn evalpipe(n: &Node, flags: c_int) -> c_int {
+unsafe fn evalpipe(n: &Node, flags: c_int) -> Result<c_int, Error> {
     let jp: usize;
     let pipelen: c_int;
     let mut prevfd: c_int;
@@ -670,7 +676,7 @@ unsafe fn evalpipe(n: &Node, flags: c_int) -> c_int {
     prevfd = -1;
     for (i, cmd) in p.cmdlist.iter().enumerate() {
         let has_next = i + 1 < p.cmdlist.len();
-        prehash(cmd);
+        prehash(cmd)?;
         pip[1] = -1;
         if has_next {
             if libc::pipe(pip.as_mut_ptr()) < 0 {
@@ -707,7 +713,7 @@ unsafe fn evalpipe(n: &Node, flags: c_int) -> c_int {
     }
     INTON();
 
-    status
+    Ok(status)
 }
 
 /*
@@ -719,7 +725,7 @@ unsafe fn evalpipe(n: &Node, flags: c_int) -> c_int {
 
 // [spec:dash:def:eval.evalbackcmd-fn]
 // [spec:dash:sem:eval.evalbackcmd-fn]
-pub unsafe fn evalbackcmd(n: Option<&Node>, result: *mut backcmd) {
+pub unsafe fn evalbackcmd(n: Option<&Node>, result: *mut backcmd) -> Result<(), Error> {
     let jp: usize;
     let mut pip: [c_int; 2] = [0; 2];
     let pid: c_int;
@@ -756,6 +762,7 @@ pub unsafe fn evalbackcmd(n: Option<&Node>, result: *mut backcmd) {
     }
     // out:
     /* TRACE(("evalbackcmd done: fd=%d buf=0x%x nleft=%d jp=0x%x\n", ...)); */
+    Ok(())
 }
 
 // [spec:dash:def:eval.fill-arglist-fn]
@@ -863,7 +870,7 @@ unsafe fn parse_command_args(
 // The `def` rule quotes the `#ifdef notyet` three-argument prototype;
 // the compiled signature — ported here — is
 // `STATIC int evalcommand(union node *cmd, int flags)`.
-unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
+unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
     let localvar_stop: usize;
     let file_stop: usize;
     let redir_stop: usize;
@@ -1008,7 +1015,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
     }
 
     (*crate::output::previous_stderr()).fd = crate::streams::streams().stderr;
-    expredir(&c.redirect);
+    expredir(&c.redirect)?;
     redir_stop = crate::redir::pushredir(&c.redirect);
     status = crate::redir::redirectsafe(&c.redirect, REDIR_PUSH | REDIR_SAVEFD2);
 
@@ -1144,7 +1151,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> c_int {
             .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
     }
 
-    status
+    Ok(status)
 }
 
 // [spec:dash:def:eval.evalbltin-fn]
@@ -1232,7 +1239,10 @@ unsafe fn evalfun(
         loopnest = 0;
         INTON();
         crate::options::borrowparam(argv.add(1), argc - 1);
-        evaltree((*func).ndefun().body.as_deref(), flags & EV_TESTED);
+        /* Inside `evalfun`'s `setjmp_catch`; the bridge retires with that
+         * frame at step D. */
+        evaltree((*func).ndefun().body.as_deref(), flags & EV_TESTED)
+            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
     });
     // funcdone:
     INTOFF();
@@ -1255,7 +1265,7 @@ unsafe fn evalfun(
 
 // [spec:dash:def:eval.prehash-fn]
 // [spec:dash:sem:eval.prehash-fn]
-unsafe fn prehash(n: &Node) {
+unsafe fn prehash(n: &Node) -> Result<(), Error> {
     let mut entry: cmdentry = cmdentry {
         cmdtype: 0,
         u: param { index: 0 },
@@ -1267,6 +1277,7 @@ unsafe fn prehash(n: &Node) {
             find_command(text, &mut entry, 0, crate::var::pathval());
         }
     }
+    Ok(())
 }
 
 /*

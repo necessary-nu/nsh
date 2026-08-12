@@ -40,7 +40,7 @@ pub(crate) unsafe fn evalcmd(args: &[&BStr], flags: c_int) -> Result<c_int, Erro
             single = crate::shell::cstring(args[1]);
             single.as_ptr() as *mut c_char
         };
-        return Ok(evalstring(p, flags & EV_TESTED));
+        return evalstring(p, flags & EV_TESTED);
     }
     Ok(0)
 }

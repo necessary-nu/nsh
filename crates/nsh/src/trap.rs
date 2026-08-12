@@ -346,7 +346,8 @@ pub unsafe fn dotrap() {
                 continue;
             }
         };
-        crate::eval::evalstring(p.as_mut_ptr() as *mut c_char, 0);
+        crate::eval::evalstring(p.as_mut_ptr() as *mut c_char, 0)
+            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
         if evalskip != SKIPFUNC {
             exitstatus = status;
         }
@@ -403,7 +404,10 @@ pub unsafe fn exitshell() -> ! {
                 }
                 evalskip = 0;
                 let mut p = cbytes(&p);
-                crate::eval::evalstring(p.as_mut_ptr() as *mut c_char, 0);
+                crate::eval::evalstring(p.as_mut_ptr() as *mut c_char, 0)
+                    .unwrap_or_else(|e| {
+                        crate::error::raise_reported(crate::error::EXERROR, e)
+                    });
                 evalskip = SKIPFUNCDEF;
             }
         }

@@ -183,7 +183,10 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
                             crate::eval::evalstring(
                                 crate::options::minusc,
                                 if sflag() != 0 { 0 } else { EV_EXIT },
-                            );
+                            )
+                            .unwrap_or_else(|e| {
+                                crate::error::raise_reported(crate::error::EXERROR, e)
+                            });
                         }
 
                         if sflag() != 0 || crate::options::minusc.is_null() {
@@ -327,7 +330,8 @@ pub(crate) unsafe fn cmdloop(top: c_int) -> c_int {
 
             crate::jobs::job_warning = if crate::jobs::job_warning == 2 { 1 } else { 0 };
             numeof = 0;
-            i = crate::eval::evaltree(n.as_ref(), 0);
+            i = crate::eval::evaltree(n.as_ref(), 0)
+                .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
             if n.is_some() {
                 status = i;
             }

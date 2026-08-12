@@ -366,7 +366,9 @@ pub unsafe fn histcmd(args: &[&BStr]) -> Result<c_int, Error> {
                             .write_all(core::ffi::CStr::from_ptr(s).to_bytes());
                     }
 
-                    crate::eval::evalstring(s, 0);
+                    crate::eval::evalstring(s, 0).unwrap_or_else(|e| {
+                        crate::error::raise_reported(crate::error::EXERROR, e)
+                    });
                     if displayhist != 0 && history_active() {
                         record_history_line(core::ffi::CStr::from_ptr(s).to_bytes(), true);
                     }
@@ -398,7 +400,9 @@ pub unsafe fn histcmd(args: &[&BStr]) -> Result<c_int, Error> {
 
             drop(edit_file.take());
             /* XXX - should use no JC command */
-            crate::eval::evalstring(editcmd, 0);
+            crate::eval::evalstring(editcmd, 0).unwrap_or_else(|e| {
+                crate::error::raise_reported(crate::error::EXERROR, e)
+            });
             INTON();
             /* XXX - should read back - quick tst */
             crate::shellmain::readcmdfile(editfile.as_mut_ptr());

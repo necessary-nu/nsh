@@ -1189,7 +1189,8 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
          * released them afterwards.  The word is not in the region and
          * neither is anything `evalbackcmd` reaches, so both halves are
          * gone. */
-        crate::eval::evalbackcmd(cmd, &mut in_ as *mut crate::eval::backcmd);
+        crate::eval::evalbackcmd(cmd, &mut in_ as *mut crate::eval::backcmd)
+            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
 
         /* `backcmd.buf` is ash's read-ahead buffer.  `evalbackcmd` writes
          * NULL to it and to `nleft` and never writes either again, so the
