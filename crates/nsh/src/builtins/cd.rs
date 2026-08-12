@@ -8,6 +8,7 @@
 //! scan, and the logical-path bookkeeping that `cd ..` needs and `chdir`
 //! alone cannot do.
 
+use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 use libc::{c_char, c_int};
@@ -42,7 +43,7 @@ pub(crate) unsafe fn cdopt(opts: &mut Options) -> c_int {
 
 // [spec:dash:def:cd.cdcmd-fn]
 // [spec:dash:sem:cd.cdcmd-fn]
-pub unsafe fn cdcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn cdcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut dest: *const c_char;
     let mut path: *const c_char;
     let mut p: *const c_char;
@@ -131,7 +132,7 @@ pub unsafe fn cdcmd(args: &[&BStr]) -> c_int {
                 /* goto err */
                 let mut message = b"can't cd to ".to_vec();
                 message.extend_from_slice(CStr::from_ptr(dest).to_bytes());
-                crate::error::sh_error(&message);
+                return Err(crate::error::sh_error_value(&message));
             }
         }
     }
@@ -144,8 +145,7 @@ pub unsafe fn cdcmd(args: &[&BStr]) -> c_int {
             /* err: */
             let mut message = b"can't cd to ".to_vec();
             message.extend_from_slice(CStr::from_ptr(dest).to_bytes());
-            crate::error::sh_error(&message);
-            /* NOTREACHED */
+            return Err(crate::error::sh_error_value(&message));
         }
     }
 
@@ -156,7 +156,7 @@ pub unsafe fn cdcmd(args: &[&BStr]) -> c_int {
         d.push(b'\n');
         let _ = (*crate::output::stdout()).write_all(&d);
     }
-    0
+    Ok(0)
 }
 
 // [spec:dash:def:cd.docd-fn]

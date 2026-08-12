@@ -7,6 +7,7 @@
 //! It shares `cd`'s option scan, because `-L` and `-P` mean the same
 //! thing to both.
 
+use crate::error::Error;
 use bstr::BStr;
 use core::ptr::addr_of;
 use libc::c_int;
@@ -18,7 +19,7 @@ use crate::options::Options;
 
 // [spec:dash:def:cd.pwdcmd-fn]
 // [spec:dash:sem:cd.pwdcmd-fn]
-pub unsafe fn pwdcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn pwdcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let flags: c_int;
 
     flags = cdopt(&mut Options::new(args));
@@ -33,5 +34,5 @@ pub unsafe fn pwdcmd(args: &[&BStr]) -> c_int {
     dir.pop();
     dir.push(b'\n');
     let _ = (*crate::output::stdout()).write_all(&dir);
-    0
+    Ok(0)
 }

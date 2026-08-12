@@ -7,6 +7,7 @@
 //! waits per job, and a pid that names no job is not an error -- the
 //! status for it is 127.
 
+use crate::error::Error;
 use bstr::BStr;
 use libc::{c_int, pid_t};
 
@@ -17,7 +18,7 @@ use crate::options::Options;
 
 // [spec:dash:def:jobs.waitcmd-fn]
 // [spec:dash:sem:jobs.waitcmd-fn]
-pub unsafe fn waitcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn waitcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut jobp: Option<usize>;
     let mut retval: c_int;
     let mut jp: Option<usize>;
@@ -94,5 +95,5 @@ pub unsafe fn waitcmd(args: &[&BStr]) -> c_int {
         }
     }
     // out:
-    retval
+    Ok(retval)
 }

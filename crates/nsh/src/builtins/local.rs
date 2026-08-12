@@ -7,6 +7,7 @@
 //! It scans no options at all, which is why `local -x` localises a
 //! variable called `-x` rather than complaining.
 
+use crate::error::Error;
 use bstr::BStr;
 use libc::{c_char, c_int};
 
@@ -14,9 +15,9 @@ use crate::var::{localvar_stack_mut, mklocal};
 
 // [spec:dash:def:var.localcmd-fn]
 // [spec:dash:sem:var.localcmd-fn]
-pub unsafe fn localcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn localcmd(args: &[&BStr]) -> Result<c_int, Error> {
     if localvar_stack_mut().is_empty() {
-        crate::error::sh_error(b"not in a function");
+        return Err(crate::error::sh_error_value(b"not in a function"));
     }
 
     /* `local` scans no options at all, so every word after the command
@@ -25,5 +26,5 @@ pub unsafe fn localcmd(args: &[&BStr]) -> c_int {
         let name = crate::shell::cstring(name);
         mklocal(name.as_ptr() as *mut c_char, 0);
     }
-    0
+    Ok(0)
 }

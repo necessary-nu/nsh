@@ -4,6 +4,7 @@
 //! flag; called outside a function it does what ksh does and skips the
 //! rest of the file.
 
+use crate::error::Error;
 use bstr::BStr;
 use libc::c_int;
 
@@ -11,7 +12,7 @@ use crate::eval::{SKIPFUNC, SKIPFUNCDEF, evalskip, exitstatus};
 
 // [spec:dash:def:eval.returncmd-fn]
 // [spec:dash:sem:eval.returncmd-fn]
-pub unsafe fn returncmd(args: &[&BStr]) -> c_int {
+pub unsafe fn returncmd(args: &[&BStr]) -> Result<c_int, Error> {
     let skip: c_int;
     let status: c_int;
 
@@ -29,7 +30,7 @@ pub unsafe fn returncmd(args: &[&BStr]) -> c_int {
     }
     evalskip = skip;
 
-    status
+    Ok(status)
 }
 
 #[cfg(test)]
@@ -49,7 +50,7 @@ mod tests {
         unsafe {
             exitstatus = last;
             evalskip = 0;
-            let returned = returncmd(&args);
+            let returned = returncmd(&args).unwrap();
             (evalskip, returned)
         }
     }

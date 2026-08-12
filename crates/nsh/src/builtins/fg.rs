@@ -9,6 +9,7 @@
 //! word the builtin was called as, so the table's `bg` row points here
 //! rather than at a module that would only forward.
 
+use crate::error::Error;
 use bstr::BStr;
 use libc::{c_int, pid_t};
 use std::io::Write;
@@ -28,7 +29,7 @@ use crate::output::Output;
 // names and carries both claims.
 // [spec:dash:def:jobs.bgcmd-fn]
 // [spec:dash:sem:jobs.bgcmd-fn]
-pub unsafe fn fgcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn fgcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut jp: usize;
     let out: *mut Output;
     let mode: c_int;
@@ -62,7 +63,7 @@ pub unsafe fn fgcmd(args: &[&BStr]) -> c_int {
             break;
         }
     }
-    retval
+    Ok(retval)
 }
 
 // [spec:dash:def:jobs.restartjob-fn]

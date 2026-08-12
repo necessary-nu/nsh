@@ -8,6 +8,7 @@
 //! control transfer -- `evalskip` and `skipcount` live in `crate::eval`
 //! because that is what reads them.
 
+use crate::error::Error;
 use bstr::BStr;
 use libc::c_int;
 
@@ -15,7 +16,7 @@ use crate::eval::{SKIPBREAK, SKIPCONT, evalskip, loopnest, skipcount};
 
 // [spec:dash:def:eval.breakcmd-fn]
 // [spec:dash:sem:eval.breakcmd-fn]
-pub unsafe fn breakcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn breakcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut n: c_int = 1;
 
     if let Some(count) = args.get(1) {
@@ -36,7 +37,7 @@ pub unsafe fn breakcmd(args: &[&BStr]) -> c_int {
         };
         skipcount = n;
     }
-    0
+    Ok(0)
 }
 
 #[cfg(test)]
@@ -55,7 +56,7 @@ mod tests {
             loopnest = nest;
             evalskip = 0;
             skipcount = 0;
-            assert_eq!(breakcmd(&args), 0);
+            assert_eq!(breakcmd(&args).unwrap(), 0);
             (evalskip, skipcount)
         }
     }

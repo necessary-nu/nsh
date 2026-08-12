@@ -7,6 +7,7 @@
 //! are the caller's argument array -- the C shifts that array down in
 //! place rather than the list, and so does this.
 
+use crate::error::Error;
 use bstr::BStr;
 use core::ptr::addr_of_mut;
 use libc::c_int;
@@ -16,7 +17,7 @@ use crate::options::shellparam;
 
 // [spec:dash:def:options.shiftcmd-fn]
 // [spec:dash:sem:options.shiftcmd-fn]
-pub unsafe fn shiftcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn shiftcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let n: c_int;
 
     n = match args.get(1) {
@@ -27,12 +28,12 @@ pub unsafe fn shiftcmd(args: &[&BStr]) -> c_int {
         None => 1,
     };
     if n > shellparam.nparam {
-        crate::error::sh_error(b"can't shift that many");
+        return Err(crate::error::sh_error_value(b"can't shift that many"));
     }
     INTOFF();
     (*addr_of_mut!(shellparam)).drop_first(n);
     INTON();
-    0
+    Ok(0)
 }
 
 #[cfg(test)]
@@ -40,7 +41,7 @@ mod tests {
     use super::*;
 
     use crate::options::setparam;
-    use crate::testutil::{lock, raises};
+    use crate::testutil::lock;
 
     unsafe fn params(words: &[&str]) {
         let words: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
@@ -62,7 +63,7 @@ mod tests {
         let _g = lock();
         unsafe {
             params(&["a", "b", "c"]);
-            assert_eq!(shiftcmd(&[BStr::new("shift")]), 0);
+            assert_eq!(shiftcmd(&[BStr::new("shift")]).unwrap(), 0);
             assert_eq!((*addr_of_mut!(shellparam)).nparam, 2);
             assert_eq!(remaining(), vec![b"b".to_vec(), b"c".to_vec()]);
         }
@@ -73,7 +74,7 @@ mod tests {
         let _g = lock();
         unsafe {
             params(&["a", "b", "c"]);
-            assert_eq!(shiftcmd(&[BStr::new("shift"), BStr::new("2")]), 0);
+            assert_eq!(shiftcmd(&[BStr::new("shift"), BStr::new("2")]).unwrap(), 0);
             assert_eq!((*addr_of_mut!(shellparam)).nparam, 1);
             assert_eq!(remaining(), vec![b"c".to_vec()]);
         }
@@ -85,14 +86,18 @@ mod tests {
         let _g = lock();
         unsafe {
             params(&["a", "b"]);
-            assert_eq!(shiftcmd(&[BStr::new("shift"), BStr::new("2")]), 0);
+            assert_eq!(shiftcmd(&[BStr::new("shift"), BStr::new("2")]).unwrap(), 0);
             assert_eq!((*addr_of_mut!(shellparam)).nparam, 0);
         }
-        assert!(raises(|| {
-            unsafe {
-                params(&["a"]);
-                shiftcmd(&[BStr::new("shift"), BStr::new("2")]);
-            }
-        }));
+        /* The diagnostic comes back as a value now rather than as an
+         * unwind, so the assertion is on the error rather than on the
+         * jump. The bytes are unchanged and still go to stderr. */
+        unsafe {
+            params(&["a"]);
+            let e = shiftcmd(&[BStr::new("shift"), BStr::new("2")])
+                .expect_err("shifting past the end fails");
+            assert_eq!(e.message().to_vec(), b"can't shift that many".to_vec());
+            assert_eq!(e.status(), 2);
+        }
     }
 }

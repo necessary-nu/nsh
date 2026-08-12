@@ -1153,10 +1153,19 @@ unsafe fn evalbltin(cmd: *const builtincmd, args: &[&BStr], flags: c_int) -> c_i
         /* `commandname = argv[0]`, and NULL for the command that has no
          * word at all -- the assignment-only one `bltin` stands for. */
         commandname = args.first().map(|name| BString::from(<&BStr as AsRef<[u8]>>::as_ref(name)));
+        /* A builtin hands its diagnostic back now instead of jumping out
+         * with it, and this frame is the handler that jump was aimed at.
+         * The bridge raises it again right here, which skips the `flushall`
+         * and the `outerr` check below exactly as the longjmp did, and
+         * lands in this closure's own `setjmp_catch` with `exception` set
+         * to EXERROR for `evalcommand` to inspect. `evalbltin` itself stops
+         * needing this when the catch frames convert. */
+        let raise = |e| crate::error::raise_reported(crate::error::EXERROR, e);
         if cmd == crate::builtins::EVALCMD {
-            status = crate::builtins::eval::evalcmd(args, flags);
+            status = crate::builtins::eval::evalcmd(args, flags).unwrap_or_else(raise);
         } else {
-            status = (*cmd).builtin.expect("a builtin with no special entry")(args);
+            let entry = (*cmd).builtin.expect("a builtin with no special entry");
+            status = entry(args).unwrap_or_else(raise);
         }
         crate::output::flushall();
         if crate::output::outerr(crate::output::stdout()) != 0 {

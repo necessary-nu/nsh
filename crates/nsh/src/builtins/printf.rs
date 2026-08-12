@@ -19,6 +19,7 @@
 //! `%b`'s escape dialect and the `\` escapes in the format string are
 //! [`crate::escape`], shared with `echo` and the parser.
 
+use crate::error::Error;
 use std::ffi::CStr;
 use std::io::Write as _;
 
@@ -614,14 +615,14 @@ unsafe fn print_escape_str(spec: &Spec, word: &CStr) -> c_int {
 
 // [spec:dash:def:printf.printfcmd-fn]
 // [spec:dash:sem:printf.printfcmd-fn]
-pub unsafe fn printfcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn printfcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut options = crate::options::Options::new(args);
     /* `nextopt(nullstr)`: printf takes no options, so this exists to
      * reject `-x` and to step over a `--`. */
     while options.next(b"").is_some() {}
 
     let Some((format, arguments)) = options.operands().split_first() else {
-        crate::error::sh_error(b"usage: printf format [arg ...]");
+        return Err(crate::error::sh_error_value(b"usage: printf format [arg ...]"));
     };
 
     /* `conv_escape` reads through a raw cursor and stops at a NUL, so
@@ -724,7 +725,7 @@ pub unsafe fn printfcmd(args: &[&BStr]) -> c_int {
 
             let conversion = format[at];
             if conversion == 0 {
-                crate::error::sh_error(b"missing format character");
+                return Err(crate::error::sh_error_value(b"missing format character"));
             }
             at += 1;
             if let Some(stop) = stop {
@@ -766,7 +767,7 @@ pub unsafe fn printfcmd(args: &[&BStr]) -> c_int {
                 _ => {
                     let mut message = format[start..at].to_vec();
                     message.extend_from_slice(b": invalid directive");
-                    crate::error::sh_error(&message);
+                    return Err(crate::error::sh_error_value(&message));
                 }
             }
         }
@@ -777,7 +778,7 @@ pub unsafe fn printfcmd(args: &[&BStr]) -> c_int {
     }
 
     // out:
-    operands.status
+    Ok(operands.status)
 }
 
 #[cfg(test)]

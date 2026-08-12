@@ -4,6 +4,7 @@
 //! variable table and the function table; the last one given wins, and
 //! with neither it is the variable table.
 
+use crate::error::Error;
 use bstr::BStr;
 use libc::c_int;
 
@@ -12,7 +13,7 @@ use crate::var::unsetvar;
 
 // [spec:dash:def:var.unsetcmd-fn]
 // [spec:dash:sem:var.unsetcmd-fn]
-pub unsafe fn unsetcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn unsetcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut flag: u8 = 0;
 
     let mut opts = Options::new(args);
@@ -30,7 +31,7 @@ pub unsafe fn unsetcmd(args: &[&BStr]) -> c_int {
             crate::exec::unsetfunc(name.as_ptr());
         }
     }
-    0
+    Ok(0)
 }
 
 #[cfg(test)]
@@ -49,19 +50,19 @@ mod tests {
             let name = CStr0::new("Tunset");
 
             setvar(name.p(), CStr0::new("v").p(), 0);
-            assert_eq!(unsetcmd(&[BStr::new("unset"), BStr::new("Tunset")]), 0);
+            assert_eq!(unsetcmd(&[BStr::new("unset"), BStr::new("Tunset")]).unwrap(), 0);
             assert!(lookupvar(name.p()).is_null());
 
             setvar(name.p(), CStr0::new("v").p(), 0);
             assert_eq!(
-                unsetcmd(&[BStr::new("unset"), BStr::new("-v"), BStr::new("Tunset")]),
+                unsetcmd(&[BStr::new("unset"), BStr::new("-v"), BStr::new("Tunset")]).unwrap(),
                 0
             );
             assert!(lookupvar(name.p()).is_null());
 
             setvar(name.p(), CStr0::new("v").p(), 0);
             assert_eq!(
-                unsetcmd(&[BStr::new("unset"), BStr::new("-f"), BStr::new("Tunset")]),
+                unsetcmd(&[BStr::new("unset"), BStr::new("-f"), BStr::new("Tunset")]).unwrap(),
                 0
             );
             assert!(!lookupvar(name.p()).is_null(), "-f is the function table");
@@ -82,7 +83,8 @@ mod tests {
                     BStr::new("-f"),
                     BStr::new("-v"),
                     BStr::new("Tunset2"),
-                ]),
+                ])
+                .unwrap(),
                 0
             );
             assert!(lookupvar(name.p()).is_null());

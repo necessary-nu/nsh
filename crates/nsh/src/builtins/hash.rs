@@ -4,6 +4,7 @@
 //! table it prints and clears stays in `crate::exec`, which is what fills
 //! it during a PATH search.
 
+use crate::error::Error;
 use bstr::BStr;
 use libc::{c_char, c_int};
 use std::ffi::CStr;
@@ -16,7 +17,7 @@ use crate::exec::{
 
 // [spec:dash:def:exec.hashcmd-fn]
 // [spec:dash:sem:exec.hashcmd-fn]
-pub unsafe fn hashcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn hashcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut cmdp: *mut tblentry;
     let mut c: c_int;
     let mut entry: cmdentry = cmdentry {
@@ -32,7 +33,7 @@ pub unsafe fn hashcmd(args: &[&BStr]) -> c_int {
     }
     if clear {
         clearcmdentry();
-        return 0;
+        return Ok(0);
     }
 
     let operands = opts.operands();
@@ -42,7 +43,7 @@ pub unsafe fn hashcmd(args: &[&BStr]) -> c_int {
                 printentry(BStr::new(name.as_slice()), cmdp);
             }
         }
-        return 0;
+        return Ok(0);
     }
     c = 0;
     for name in operands {
@@ -57,7 +58,7 @@ pub unsafe fn hashcmd(args: &[&BStr]) -> c_int {
             c = 1;
         }
     }
-    c
+    Ok(c)
 }
 
 // [spec:dash:def:exec.printentry-fn]

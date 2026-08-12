@@ -9,6 +9,7 @@
 //! embedded shell cannot survive it, so the API gates it behind a `Host`
 //! method a frontend grants and an ordinary embedder refuses.
 
+use crate::error::Error;
 use core::ptr::null_mut;
 use std::ffi::CString;
 
@@ -19,7 +20,7 @@ use crate::exec::shellexec;
 
 // [spec:dash:def:eval.execcmd-fn]
 // [spec:dash:sem:eval.execcmd-fn]
-pub unsafe fn execcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn execcmd(args: &[&BStr]) -> Result<c_int, Error> {
     if args.len() > 1 {
         crate::options::optlist[crate::options::iflag] = 0; /* exit on error */
         crate::options::optlist[crate::options::mflag] = 0;
@@ -40,5 +41,5 @@ pub unsafe fn execcmd(args: &[&BStr]) -> c_int {
         argv.push(null_mut());
         shellexec(argv.as_mut_ptr().add(1), crate::var::pathval(), 0);
     }
-    0
+    Ok(0)
 }

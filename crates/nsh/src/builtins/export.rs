@@ -8,6 +8,7 @@
 //! handling: with no operands it prints the set, and with them it sets a
 //! flag on names that exist and creates the ones that do not.
 
+use crate::error::Error;
 use bstr::{BStr, ByteSlice};
 use core::ffi::CStr;
 use core::ptr;
@@ -18,7 +19,7 @@ use crate::var::{VEXPORT, VREADONLY, findvar, setvar, showvars, var};
 
 // [spec:dash:def:var.exportcmd-fn]
 // [spec:dash:sem:var.exportcmd-fn]
-pub unsafe fn exportcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn exportcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut vp: *mut var;
     let mut p: *const c_char;
     /* `export` and `readonly` are one builtin telling itself apart by the
@@ -57,7 +58,7 @@ pub unsafe fn exportcmd(args: &[&BStr]) -> c_int {
         let called = crate::shell::cstring(args[0]);
         showvars(called.as_ptr(), flag, 0);
     }
-    0
+    Ok(0)
 }
 
 #[cfg(test)]
@@ -72,7 +73,7 @@ mod tests {
     fn run(name: &[u8], words: &[&[u8]]) -> c_int {
         let mut args = vec![BStr::new(name)];
         args.extend(words.iter().map(|w| BStr::new(*w)));
-        unsafe { exportcmd(&args) }
+        unsafe { exportcmd(&args).unwrap() }
     }
 
     /// The word the builtin was called as picks the flag, which is the

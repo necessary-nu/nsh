@@ -4,6 +4,7 @@
 //! `crate::alias`'s business -- an alias being read has to survive its
 //! own removal -- so this is the option scan and the diagnostic.
 
+use crate::error::Error;
 use bstr::BStr;
 use libc::c_int;
 use std::io::Write;
@@ -13,14 +14,14 @@ use crate::options::Options;
 
 // [spec:dash:def:alias.unaliascmd-fn]
 // [spec:dash:sem:alias.unaliascmd-fn]
-pub unsafe fn unaliascmd(args: &[&BStr]) -> c_int {
+pub unsafe fn unaliascmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut i: c_int;
 
     let mut opts = Options::new(args);
     while let Some(opt) = opts.next(b"a") {
         if opt == b'a' {
             rmaliases();
-            return 0;
+            return Ok(0);
         }
     }
     i = 0;
@@ -35,5 +36,5 @@ pub unsafe fn unaliascmd(args: &[&BStr]) -> c_int {
         }
     }
 
-    i
+    Ok(i)
 }

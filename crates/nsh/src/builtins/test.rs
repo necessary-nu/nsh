@@ -15,6 +15,7 @@
 //! Cross-module signature assumed (see the port report):
 //! `crate::mystring::atomax10(*const c_char) -> intmax_t`.
 
+use crate::error::Error;
 use core::mem;
 use core::ptr;
 use libc::{c_char, c_int, c_short, intmax_t};
@@ -212,7 +213,7 @@ unsafe fn getop(s: *const c_char) -> *const t_op {
 
 // [spec:dash:def:test.testcmd-fn]
 // [spec:dash:sem:test.testcmd-fn]
-pub unsafe fn testcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn testcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut op: *const t_op;
     let n: token;
     let mut res: c_int = 1;
@@ -231,7 +232,7 @@ pub unsafe fn testcmd(args: &[&BStr]) -> c_int {
     if **argv == b'[' as c_char {
         argc -= 1;
         if *(*argv.add(argc as usize)) != b']' as c_char {
-            crate::error::sh_error(b"missing ]");
+            return Err(crate::error::sh_error_value(b"missing ]"));
         }
         *argv.add(argc as usize) = ptr::null_mut();
     }
@@ -245,7 +246,7 @@ pub unsafe fn testcmd(args: &[&BStr]) -> c_int {
             argc -= 1;
 
             if argc < 1 {
-                return res;
+                return Ok(res);
             }
 
             /*
@@ -289,7 +290,7 @@ pub unsafe fn testcmd(args: &[&BStr]) -> c_int {
         syntax(*argv, c"unexpected operator".as_ptr());
     }
 
-    res
+    Ok(res)
 }
 
 // [spec:dash:def:test.syntax-fn]
@@ -692,7 +693,7 @@ mod tests {
     fn eval(words: &[&[u8]]) -> c_int {
         let _guard = crate::testutil::lock();
         let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
-        unsafe { testcmd(&args) }
+        unsafe { testcmd(&args).unwrap() }
     }
 
     #[test]
@@ -791,9 +792,9 @@ mod tests {
     #[test]
     fn bracket_requires_its_bracket() {
         assert_eq!(eval(&[b"[", b"x", b"]"]), 0);
-        assert!(crate::testutil::raises(|| {
-            let args = [BStr::new(b"["), BStr::new(b"x")];
-            unsafe { testcmd(&args) };
-        }));
+        /* Returned rather than raised, per [dec:nsh:errors-are-values]. */
+        let args = [BStr::new(b"["), BStr::new(b"x")];
+        let e = unsafe { testcmd(&args) }.expect_err("`[ x` is missing its bracket");
+        assert_eq!(e.message().to_vec(), b"missing ]".to_vec());
     }
 }

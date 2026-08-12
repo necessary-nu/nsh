@@ -6,14 +6,15 @@
 //! what turns that unwind into an exit status -- see
 //! `[dec:nsh:shell-as-library]`.
 
+use crate::error::Error;
 use bstr::BStr;
 use libc::c_int;
 
 // [spec:dash:def:main.exitcmd-fn]
 // [spec:dash:sem:main.exitcmd-fn]
-pub unsafe fn exitcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn exitcmd(args: &[&BStr]) -> Result<c_int, Error> {
     if crate::jobs::stoppedjobs() != 0 {
-        return 0;
+        return Ok(0);
     }
 
     if let Some(status) = args.get(1) {

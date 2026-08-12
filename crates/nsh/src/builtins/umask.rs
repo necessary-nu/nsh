@@ -8,6 +8,7 @@
 //! The mask is the process's, not the shell's: there is nothing to keep
 //! here, so the builtin reads it from the kernel and writes it back.
 
+use crate::error::Error;
 use core::ptr::null_mut;
 use libc::{c_char, c_int};
 use std::ffi::CStr;
@@ -29,7 +30,7 @@ use crate::options::Options;
 
 // [spec:dash:def:miscbltin.umaskcmd-fn]
 // [spec:dash:sem:miscbltin.umaskcmd-fn]
-pub unsafe fn umaskcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn umaskcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut ap: *mut c_char;
     let mut mask: c_int;
     let mut i: c_int;
@@ -92,7 +93,7 @@ pub unsafe fn umaskcmd(args: &[&BStr]) -> c_int {
                 if *ap >= b'8' as c_char || *ap < b'0' as c_char {
                     let mut message = b"Illegal number: ".to_vec();
                     message.extend_from_slice(mode.as_ref().expect("a mode to walk").as_bytes());
-                    crate::error::sh_error(&message);
+                    return Err(crate::error::sh_error_value(&message));
                 }
                 new_mask = (new_mask << 3) + (*ap as c_int - '0' as c_int);
                 ap = ap.add(1);
@@ -188,20 +189,21 @@ pub unsafe fn umaskcmd(args: &[&BStr]) -> c_int {
                 // error:
                 let mut message = b"Illegal mode: ".to_vec();
                 message.extend_from_slice(mode.as_ref().expect("a mode to walk").as_bytes());
-                crate::error::sh_error(&message);
-                /* return 1; -- NOTREACHED, sh_error does not return */
+                /* The C's `return 1` after this is unreachable because its
+                 * `sh_error` longjmps; the error is the return now. */
+                return Err(crate::error::sh_error_value(&message));
             }
         }
         libc::umask(new_mask as libc::mode_t);
     }
-    0
+    Ok(0)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use crate::testutil::{lock, raises};
+    use crate::testutil::lock;
 
     /// The umask is the process's, so a test has to put back what it
     /// found -- and reading it is itself a write, which is why the
@@ -217,7 +219,7 @@ mod tests {
 
     fn set(mode: &[u8]) -> libc::mode_t {
         unsafe {
-            assert_eq!(umaskcmd(&[BStr::new("umask"), BStr::new(mode)]), 0);
+            assert_eq!(umaskcmd(&[BStr::new("umask"), BStr::new(mode)]).unwrap(), 0);
             let now = libc::umask(0);
             libc::umask(now);
             now
@@ -258,13 +260,17 @@ mod tests {
 
     #[test]
     fn a_bad_operand_raises() {
-        assert!(raises(|| {
-            let _guard = lock();
-            unsafe { umaskcmd(&[BStr::new("umask"), BStr::new("999")]) };
-        }));
-        assert!(raises(|| {
-            let _guard = lock();
-            unsafe { umaskcmd(&[BStr::new("umask"), BStr::new("q=r")]) };
-        }));
+        /* Returned rather than raised, per [dec:nsh:errors-are-values];
+         * the text and the status are dash's, unchanged. */
+        let _guard = lock();
+        for (mode, text) in [
+            ("999", &b"Illegal number: 999"[..]),
+            ("q=r", &b"Illegal mode: q=r"[..]),
+        ] {
+            let e = unsafe { umaskcmd(&[BStr::new("umask"), BStr::new(mode)]) }
+                .expect_err("a bad mode fails");
+            assert_eq!(e.message().to_vec(), text.to_vec());
+            assert_eq!(e.status(), 2);
+        }
     }
 }

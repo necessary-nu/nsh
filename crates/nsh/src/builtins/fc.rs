@@ -12,6 +12,7 @@
 //! `crate::builtins::writable_args` says why: `getopt(3)` permutes the
 //! array it scans, and `fc -s old=new` splits that word in place.
 
+use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::CStr;
 use core::mem;
@@ -131,7 +132,7 @@ unsafe fn scan_options(argc: c_int, argv: *mut *mut c_char) -> Flags {
 // [spec:dash:sem:histedit.histcmd-fn]
 // [spec:dash:def:myhistedit.histcmd-fn]
 // [spec:dash:sem:myhistedit.histcmd-fn]
-pub unsafe fn histcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn histcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut editor: *const c_char = ptr::null();
     let mut lflg: c_int = 0;
     let mut nflg: c_int = 0;
@@ -162,7 +163,7 @@ pub unsafe fn histcmd(args: &[&BStr]) -> c_int {
     // clobber them; they have no Rust equivalent.
 
     if !history_active() {
-        crate::error::sh_error(b"history not active");
+        return Err(crate::error::sh_error_value(b"history not active"));
     }
 
     /* `getopt(3)` keeps its state in process globals and permutes the
@@ -425,7 +426,7 @@ pub unsafe fn histcmd(args: &[&BStr]) -> c_int {
     } else {
         body();
     }
-    0
+    Ok(0)
 }
 
 // [spec:dash:def:histedit.fc-replace-fn]

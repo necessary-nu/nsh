@@ -4,6 +4,7 @@
 //! `crate::alias`, where the parser and the line editor read it; this is
 //! the command that prints and defines entries in it.
 
+use crate::error::Error;
 use bstr::{BStr, ByteSlice};
 use core::ffi::CStr;
 use core::ptr::null_mut;
@@ -14,7 +15,7 @@ use crate::alias::{__lookupalias, alias, atab_mut, printalias, setalias};
 
 // [spec:dash:def:alias.aliascmd-fn]
 // [spec:dash:sem:alias.aliascmd-fn]
-pub unsafe fn aliascmd(args: &[&BStr]) -> c_int {
+pub unsafe fn aliascmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut ret: c_int = 0;
     let mut ap: *mut alias;
 
@@ -22,7 +23,7 @@ pub unsafe fn aliascmd(args: &[&BStr]) -> c_int {
         for ap in atab_mut().values() {
             printalias(&**ap as *const alias);
         }
-        return 0;
+        return Ok(0);
     }
     for word in &args[1..] {
         /* `setalias` reads the value as an offset into the name, so the
@@ -55,7 +56,7 @@ pub unsafe fn aliascmd(args: &[&BStr]) -> c_int {
         }
     }
 
-    ret
+    Ok(ret)
 }
 
 #[cfg(test)]
@@ -72,7 +73,7 @@ mod tests {
         unsafe {
             atab_mut().clear();
             assert_eq!(
-                aliascmd(&[BStr::new("alias"), BStr::new("ll=ls -l")]),
+                aliascmd(&[BStr::new("alias"), BStr::new("ll=ls -l")]).unwrap(),
                 0
             );
             let found = lookupalias(c"ll".as_ptr(), 0);
@@ -93,7 +94,8 @@ mod tests {
                     BStr::new("alias"),
                     BStr::new("nosuchalias"),
                     BStr::new("after=1"),
-                ]),
+                ])
+                .unwrap(),
                 1
             );
             assert!(!lookupalias(c"after".as_ptr(), 0).is_null());

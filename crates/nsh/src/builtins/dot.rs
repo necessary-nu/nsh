@@ -6,6 +6,7 @@
 //! stack and running the command loop over it, so like `eval` it depends
 //! on its words not borrowing from the shell.
 
+use crate::error::Error;
 use bstr::{BStr, BString};
 use core::ptr::addr_of;
 use libc::{c_char, c_int};
@@ -64,7 +65,7 @@ unsafe fn find_dot_file(basename: *mut c_char, out: &mut Vec<u8>) -> *mut c_char
 
 // [spec:dash:def:main.dotcmd-fn]
 // [spec:dash:sem:main.dotcmd-fn]
-pub unsafe fn dotcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn dotcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut status: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
@@ -90,5 +91,5 @@ pub unsafe fn dotcmd(args: &[&BStr]) -> c_int {
         crate::input::popfile();
     }
 
-    status
+    Ok(status)
 }

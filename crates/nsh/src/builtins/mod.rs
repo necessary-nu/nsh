@@ -53,7 +53,18 @@ pub const BUILTIN_ASSIGN: c_uint = 0x4;
 ///
 /// The C's `int (*)(int, char **)` is gone, and with it the count: a
 /// slice carries its own length, and no builtin has to be told twice.
-pub type Builtin = unsafe fn(&[&BStr]) -> c_int;
+///
+/// The status is a `Result` because a builtin that fails hands its
+/// diagnostic back rather than jumping out with it
+/// ([dec:nsh:errors-are-values]). The `Err` has already been reported: the
+/// bytes went to stderr where dash writes them, and the value is what the
+/// caller -- and eventually an embedder -- gets to inspect.
+///
+/// `[dec:nsh:public-surface]` records the destination as
+/// `fn(&mut Shell, &[&BStr]) -> Result<ExitStatus, Error>`. This is that
+/// signature's `Result`; the receiver and the status type belong to
+/// `no-ambient-state` and `public-api`.
+pub type Builtin = unsafe fn(&[&BStr]) -> Result<c_int, crate::error::Error>;
 
 pub struct builtincmd {
     pub name: &'static CStr,
@@ -153,12 +164,12 @@ pub(crate) static mut bltin: builtincmd = builtincmd {
 
 // [spec:dash:def:eval.bltincmd-fn]
 // [spec:dash:sem:eval.bltincmd-fn]
-unsafe fn bltincmd(_args: &[&BStr]) -> c_int {
+unsafe fn bltincmd(_args: &[&BStr]) -> Result<c_int, crate::error::Error> {
     /*
      * Preserve exitstatus of a previous possible redirection
      * as POSIX mandates
      */
-    crate::eval::back_exitstatus
+    Ok(crate::eval::back_exitstatus)
 }
 
 pub const NUMBUILTINS: usize = 40;

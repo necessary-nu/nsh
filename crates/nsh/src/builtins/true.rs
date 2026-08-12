@@ -3,13 +3,14 @@
 //! Port of `truecmd` from `src/eval.c`. `:` is the same function under
 //! the other name, which is what the C's two table rows say.
 
+use crate::error::Error;
 use bstr::BStr;
 use libc::c_int;
 
 // [spec:dash:def:eval.truecmd-fn]
 // [spec:dash:sem:eval.truecmd-fn]
-pub unsafe fn truecmd(_args: &[&BStr]) -> c_int {
-    0
+pub unsafe fn truecmd(_args: &[&BStr]) -> Result<c_int, Error> {
+    Ok(0)
 }
 
 #[cfg(test)]
@@ -21,8 +22,8 @@ mod tests {
     #[test]
     fn always_succeeds() {
         unsafe {
-            assert_eq!(truecmd(&[BStr::new("true")]), 0);
-            assert_eq!(truecmd(&[BStr::new(":"), BStr::new("ignored")]), 0);
+            assert_eq!(truecmd(&[BStr::new("true")]).unwrap(), 0);
+            assert_eq!(truecmd(&[BStr::new(":"), BStr::new("ignored")]).unwrap(), 0);
         }
     }
 }

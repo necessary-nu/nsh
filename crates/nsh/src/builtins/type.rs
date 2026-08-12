@@ -8,6 +8,7 @@
 //! this one rather than either keeping a copy or pushing it back down
 //! into the search machinery.
 
+use crate::error::Error;
 use bstr::BStr;
 use core::ptr::{null, null_mut};
 use libc::{c_char, c_int};
@@ -24,7 +25,7 @@ use crate::output::Output;
 
 // [spec:dash:def:exec.typecmd-fn]
 // [spec:dash:sem:exec.typecmd-fn]
-pub unsafe fn typecmd(args: &[&BStr]) -> c_int {
+pub unsafe fn typecmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut err: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
@@ -33,7 +34,7 @@ pub unsafe fn typecmd(args: &[&BStr]) -> c_int {
         let name = crate::shell::cstring(name);
         err |= describe_command(crate::output::stdout(), name.as_ptr() as *mut c_char, null(), 1);
     }
-    err
+    Ok(err)
 }
 
 // [spec:dash:def:exec.describe-command-fn]

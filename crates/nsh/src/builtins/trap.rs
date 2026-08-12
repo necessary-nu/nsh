@@ -7,6 +7,7 @@
 //! `trap` with no operands prints the table in a form that can be read
 //! back, which is why the action is single-quoted on the way out.
 
+use crate::error::Error;
 use bstr::{BStr, BString};
 use core::ptr::addr_of;
 use libc::{c_char, c_int};
@@ -22,7 +23,7 @@ use crate::trap::{
 
 // [spec:dash:def:trap.trapcmd-fn]
 // [spec:dash:sem:trap.trapcmd-fn]
-pub unsafe fn trapcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn trapcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut signo: c_int;
 
     let mut opts = Options::new(args);
@@ -46,7 +47,7 @@ pub unsafe fn trapcmd(args: &[&BStr]) -> c_int {
             }
             signo += 1;
         }
-        return 0;
+        return Ok(0);
     }
     if ptrap != 0 {
         clear_traps(None);
@@ -67,7 +68,7 @@ pub unsafe fn trapcmd(args: &[&BStr]) -> c_int {
             message.extend_from_slice(word.as_bytes());
             message.extend_from_slice(b": bad trap\n");
             let _ = (*crate::output::stderr()).write_all(&message);
-            return 1;
+            return Ok(1);
         }
         INTOFF();
         /* The C's `action = savestr(action)` makes the next signal in the
@@ -100,5 +101,5 @@ pub unsafe fn trapcmd(args: &[&BStr]) -> c_int {
         }
         INTON();
     }
-    0
+    Ok(0)
 }

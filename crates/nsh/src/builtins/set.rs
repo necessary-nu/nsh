@@ -8,6 +8,7 @@
 //! With no arguments at all it prints the variables instead, which is the
 //! one thing about `set` that has nothing to do with options.
 
+use crate::error::Error;
 use bstr::BStr;
 use core::ptr::addr_of;
 use libc::{c_char, c_int};
@@ -19,9 +20,9 @@ use crate::var::{VUNSET, showvars};
 
 // [spec:dash:def:options.setcmd-fn]
 // [spec:dash:sem:options.setcmd-fn]
-pub unsafe fn setcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn setcmd(args: &[&BStr]) -> Result<c_int, Error> {
     if args.len() == 1 {
-        return showvars(addr_of!(nullstr) as *const c_char, 0, VUNSET);
+        return Ok(showvars(addr_of!(nullstr) as *const c_char, 0, VUNSET));
     }
     INTOFF();
     let scan = options(args, 1, false);
@@ -30,5 +31,5 @@ pub unsafe fn setcmd(args: &[&BStr]) -> c_int {
         setparam(&args[scan.next..]);
     }
     INTON();
-    0
+    Ok(0)
 }

@@ -6,6 +6,7 @@
 //! here: the table naming each resource, the option letter that selects
 //! it, and the factor its units are reported in.
 
+use crate::error::Error;
 use core::ptr::null_mut;
 use libc::{c_char, c_int};
 use std::ffi::CStr;
@@ -149,7 +150,7 @@ unsafe fn printlim(how: limtype, limit: *const libc::rlimit, l: *const limits) {
 
 // [spec:dash:def:miscbltin.ulimitcmd-fn]
 // [spec:dash:sem:miscbltin.ulimitcmd-fn]
-pub unsafe fn ulimitcmd(args: &[&BStr]) -> c_int {
+pub unsafe fn ulimitcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut c: c_int;
     let mut val: libc::rlim_t = 0;
     let mut how: limtype = SOFT | HARD;
@@ -199,7 +200,7 @@ pub unsafe fn ulimitcmd(args: &[&BStr]) -> c_int {
         let mut p: *mut c_char = limitarg.as_ptr() as *mut c_char;
 
         if all != 0 || operands.len() > 1 {
-            crate::error::sh_error(b"too many arguments");
+            return Err(crate::error::sh_error_value(b"too many arguments"));
         }
         if limitarg.as_bytes() == b"unlimited" {
             val = libc::RLIM_INFINITY;
@@ -224,7 +225,7 @@ pub unsafe fn ulimitcmd(args: &[&BStr]) -> c_int {
                 }
             }
             if c != 0 {
-                crate::error::sh_error(b"bad number");
+                return Err(crate::error::sh_error_value(b"bad number"));
             }
             val = val.wrapping_mul((*l).factor as libc::rlim_t);
         }
@@ -244,7 +245,7 @@ pub unsafe fn ulimitcmd(args: &[&BStr]) -> c_int {
             printlim(how, &limit, l);
             l = l.add(1);
         }
-        return 0;
+        return Ok(0);
     }
 
     libc::getrlimit((*l).cmd as libc::__rlimit_resource_t, &mut limit);
@@ -261,12 +262,12 @@ pub unsafe fn ulimitcmd(args: &[&BStr]) -> c_int {
                 CStr::from_ptr(libc::strerror(crate::system::errno())).to_bytes(),
             );
             message.push(b')');
-            crate::error::sh_error(&message);
+            return Err(crate::error::sh_error_value(&message));
         }
     } else {
         printlim(how, &limit, l);
     }
-    0
+    Ok(0)
 }
 
 #[cfg(test)]
