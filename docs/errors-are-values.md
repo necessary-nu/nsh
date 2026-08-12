@@ -1,8 +1,9 @@
 # Errors are values: the fixpoint, what the unwind is doing, and the order
 
 Status: analysis and specification for the `errors-are-values` node, which
-is now **in progress**. Steps A, B and the first of C have landed; §0.1
-records exactly what, and the rest of this document is still the plan. It
+is now **in progress**. Steps A and B are done and C is nearly done; §0.1
+records exactly what, §0.2 records the one bug it shipped, and the rest of
+this document is still the plan. It
 builds on `[dec:nsh:errors-are-values]`, `docs/api-design.md` §3 (which
 settled the taxonomy and the `set -e` question) and
 `docs/idiomatization.md` §2.3 step 7.
@@ -17,7 +18,7 @@ comparison is like for like.
 
 ## 0.1 What has landed
 
-Seven commits, each green:
+Eleven commits, each green:
 
 | commit | step | what |
 |---|---|---|
@@ -28,8 +29,45 @@ Seven commits, each green:
 | `00e339a` | C | `dot`, `printf` and `test`'s own helpers |
 | `67c26a2` | C | the option scanner (`minus_o`, `setoption`, `options`, `procargs`) and `alias::setalias` |
 | `f09b49f` | C | `mystring`'s `badnum` / `atomax` / `number`, `test::getn`, `var::lookupvarint` |
+| `586bce1` | — | the resumption note this section was written from |
+| `abb908b` | C | `var`'s `setvar` / `setvareq` / `setvarint` / `unsetvar` / `mklocal`, `cd`'s `setpwd`, `getopts`, `read` |
+| `08ceee0` | C | the evaluator: `evaltree` and everything it drives |
+| `96cadd4` | C | `redir`'s open/dup/pipe/savefd chain, `input::setinputfile` |
 
-The raise sites that still jump went 51 → 27 over those commits.
+The raise sites that still jump went 51 → 20 over those commits.
+
+### 0.2 The bug this conversion actually shipped, and the guard that followed
+
+`96cadd4` turned six corpora red, and it is worth recording exactly why
+because the mechanism generalises to every remaining slice.
+
+`redir::sh_open_fail` was `-> !`. Two `goto ecreate` sites called it as a
+bare statement, which was a *stop*. Making it return `Error` — correct in
+itself — silently turned both into report-and-carry-on, so
+`set -C; echo a > f; echo b > f` printed "cannot create" twice and then
+redirected to a descriptor nobody had opened. The shell did not crash. It
+produced a plausible wrong answer, which is the failure mode §6 names as
+the dangerous one, and no unit test would have found it.
+
+**The general rule: converting a diverging function to a value-returning
+one changes the meaning of every call site that ignored its result, and
+the compiler will not say so.** `Result` is `#[must_use]` and so those
+call sites warn; a bare `-> Error` return type carries no such lint by
+default.
+
+`Error` is therefore `#[must_use]` as of that commit, which makes a
+built-and-dropped diagnostic a warning. The audit it enabled found no
+other instance among the five builders that had already been converted
+(`sh_error_value`, `sh_open_fail`, `yyerror`, `badnum`, `test::syntax`).
+It should have been on the type from `df3a4ce`. **Put it on any new
+error-returning type before converting the first site.**
+
+The working discipline that came out of this, and that the last four
+commits used: after every slice, drive both `unused_must_use` *and* the
+lib warning total back to their baselines (zero new, and 75) before
+running anything. Every one of the twelve dropped `Result`s in `abb908b`
+and the nine in `96cadd4` was a place the shell would have carried on
+past a failure.
 
 **The shape.** `Error` is one variant, `Other { line, status, message }`,
 per §3.2's step A and `docs/api-design.md` §3.4. `report(e) -> Error` is
@@ -64,32 +102,34 @@ cheapest first — was followed only loosely, and twice deliberately:
   slice, because each one changes what is cheap next. That commit needed
   no adapter anywhere.
 
-**What the numbers did.** Unsafe ops went 3781 → 3791 and then stopped
-moving: the seventh commit measures 3791 too, having converted 24 further
-raise sites. That is the right shape for this stage and not a regression.
-A converted raise site trades one unsafe call (`sh_error`) for another
-(`sh_error_value`) and each bridge adds one, so the metric is flat while
-the conversion is in flight and falls only at step G, when `jmploc`,
-`handler`, `exception`, `raise_longjmp`, `setjmp_catch` and every
-`static mut` read behind them are deleted. Quoting a figure from the
-middle of this node as evidence either way is a mistake; the number to
-compare against 3781 is the one after G.
+**What the numbers did.** Unsafe ops: 3781 at the node's start, 3791 after
+the first three commits, 3791 still after seven, and 3812 after twelve.
+The rise is the conversion working, not a regression. A converted raise
+site trades one unsafe call (`sh_error`) for another (`sh_error_value`),
+every bridge adds one, and the bridge count is *supposed* to peak just
+before step D. The number falls at step G, when `jmploc`, `handler`,
+`exception`, `raise_longjmp`, `setjmp_catch` and the `static mut` reads
+behind them are deleted. Quoting a figure from the middle of this node as
+evidence either way is a mistake; the number to compare against 3781 is
+the one after G.
 
-**Full bar, on the seventh commit.** `runall.sh 8` PASS=61592 FAIL=0
-FLAKY=44 XFAIL=4 with no stale register entries; divtest PASS=44 FAIL=0;
-ptydiff PASS=37 FAIL=0 (including both `^C` cases, `^C with EXIT trap`
-and `subshell in EXIT trap` — the case that found the status-101 bug);
-POSIX cases PASS=660 FAIL=51; `cargo test -p nsh` 184 + 11. Every one is
-the baseline exactly.
+**Where the wavefront is.** 20 raise sites still jump, in seven files:
+`fc` 8, `jobs` 3, `expand` 3, `parser` 2, `options` 2 (`getoptsreset`,
+which is `var::varfunc`'s to move), `exec` 1, `eval` 1. 30 adapter call
+sites are live, and that count is at its maximum by design: every one is
+now either inside a `setjmp_catch` closure or immediately outside one, so
+step D removes adapters rather than adding them.
 
-**Where the wavefront is.** 27 raise sites still jump, in nine files:
-`fc` 8, `redir` 4, `jobs` 3, `expand` 3, `options` 2 (`getoptsreset`
-alone — it is dispatched through `var::varfunc`, so its signature is
-`var.rs`'s to move), `var` 2, `parser` 2, `exec` 1, `eval` 1. Four
-adapters are live and each names the frame it waits for: `expari` over
-`arith`, `evalbltin` over the builtin table, `main` over `procargs`, and
-`evalcmd`'s own arm. Everything in §3.2's steps D through G is untouched:
-the seven catch frames, `Flow`, the interrupt, and the deletion.
+**The ordering constraint step D is subject to, discovered by inspection
+rather than predicted by §3.2.** A catch frame cannot stop catching until
+step C has emptied it. `evalbltin` is the clearest case: its
+`setjmp_catch` still has to catch an EXERROR raised *beneath* the
+built-in — `read` reaching `setvar`'s "is read only" was the live example
+before `abb908b` — and if the catch were removed while any such jump
+remained, the unwind would skip `evalbltin`'s epilogue (`freestdout`,
+restoring `commandname` and `handler`) instead of running it. So D is
+gated on C finishing, and the seven frames convert last, not in parallel
+with the leaves. Everything in §3.2's steps D through G is untouched.
 `panic = "unwind"` is still pinned on both profiles and must stay pinned
 until step F lands.
 
