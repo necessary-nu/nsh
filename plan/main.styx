@@ -2546,6 +2546,14 @@ children (
                         text "Found under [[printf-errata]] while establishing the oracle for the hexadecimal range report, and not one of the seven that node was opened for. `scan_double`'s *decimal* path reports ERANGE on the wrong rule, at exactly the boundary the hexadecimal path was corrected at.\n\n`printf.rs` asks `nonzero && value.abs() < f64::MIN_POSITIVE`: tininess measured after the value has already been rounded into the destination. C reports IEEE underflow, which is tininess after rounding to 53 bits with *no bound on the exponent*, together with a result that could not be held exactly. The two differ in both directions, and both reproduce against `tests/.build/ref/src/dash` with the value agreeing and only the status and the warning apart:\n\n* `printf '%a' 2.2250738585072012e-308` is `0x1p-1022` in both. The C warns `Numerical result out of range` and exits 1, because rounding the literal to 53 bits leaves it below the smallest normal. The port is silent at exit 0, because the double it landed on is not below it.\n* The exact decimal expansion of 2^-1074, all 751 significant digits of it, is `0x0.0000000000001p-1022` in both. The C is silent because the literal is held exactly. The port warns, because the double is subnormal and the literal was nonzero.\n\nNot fixed under [[printf-errata]], and deliberately so. The hexadecimal path could be corrected because it lays the bits out itself and therefore knows what it dropped; the decimal path hands the digits to `str::parse`, which returns the double and nothing at all about the rounding that produced it. Matching C means scanning a decimal literal into the same mantissa-and-sticky form `round_to_double` already takes -- a decimal-to-binary conversion the port does not have, and a good deal larger than anything in that node's brief. It wants its own node, and a divergence-register entry in the meantime if it is to be left standing.\n\nNo corpus reaches it. None of the three fuzz generators produces a literal within a rounding of the subnormal boundary, which is why 12000 cases across six sweeps have never seen it."
                         after_done true
                     }
+
+                    {
+                        at 2026-08-12T12:25:14.879005321Z
+                        author "brendan@necessary.nu"
+                        kind @errata
+                        text "Second finding from the review under [[printf-errata]], and like the decimal-ERANGE entry above it, not one of the seven and not fixed there. At a field width of exactly `INT_MAX` the *reference* loses the last byte of the conversion, and the port does not.\n\n    $ dash -c 'printf \"%*d\" 2147483647 1' | tr -d \" \" | od -c   ->  \\0\n    $ nsh  -c 'printf \"%*d\" 2147483647 1' | tr -d \" \" | od -c   ->   1\n\nBoth write 2147483647 bytes, so the length has always agreed and every check that counted bytes has passed. The content does not: dash's `xvasprintf` asks `stalloc` for `len + 1` and that addition overflows an `int` at exactly `INT_MAX`, so glibc is handed a size one short and truncates the last character to the terminating NUL. `%2147483647.0f` does the same. One below the limit, and at any smaller width, the two are byte-identical.\n\nThis is a defect in the oracle rather than in the port, and reproducing it means reproducing an integer overflow inside dash's own allocator. It is also expensive to pin: a case costs two gigabytes in each shell, which is why the corpus stops at `%.2147483647a` and at widths of 65536.\n\nLeft standing deliberately. If it is to be kept, it wants a divergence-register entry saying the port declines the C's overflow, which is a decision rather than a defect and belongs to whoever owns that register -- [[printf-errata]] was told to add no entries to it."
+                        after_done true
+                    }
                 )
             }
 
@@ -2554,6 +2562,7 @@ children (
                 title "Fix the printf errata: the %.65536f shell panic and the review's six other reports"
                 kind @fix
                 deps (printf-builtin)
+                sealed true
                 log (
                     {
                         at 2026-08-12T10:17:50.098828971Z
@@ -2574,6 +2583,13 @@ children (
                         author "brendan@necessary.nu"
                         kind @note
                         text "Correcting the entry above: \"Probe of the note path.\" records nothing. It was written to find out why an `errata` entry on this node was refused while a `note` was accepted, which is that errata attaches to work already done. The finding it was clearing the way for is filed where it belongs, as errata on [[printf-builtin]].\n\nVerdict on the seven reports, each checked against `tests/.build/ref/src/dash` before being acted on. All seven were real; none was refuted.\n\n1. `%.65536f` panics the shell. Confirmed, and wider than reported: the same panic sat under `%e` and twice under `%g`, and `%.65536d`, `%65536d` and `%-65536s` were fine because none of them reaches `format!`'s precision. Fixed in `7326edd`.\n2. `\\v` is not a leading blank. Confirmed exactly as described. Fixed in `6c10b10`.\n3. Hexadecimal subnormals collapse to zero. Confirmed, though not by the example given: `%f` prints `0.000000` for the true value too, so the collapse only shows under `%e` or `%a`. Fixed in `7861166`.\n4. Hexadecimal literals never report ERANGE. Confirmed. The rule turned out to be narrower than \"subnormal\": C reports IEEE underflow, which is tininess *after* rounding together with an inexact result, so `0x1p-1074` is silent and `0x1.fffffffffffff8p-1023` is silent while `0x1.fffffffffffffp-1023` warns despite reaching the same double. Fixed in `7861166`.\n5. A width or precision at or above 2^31 emits 2 GiB where C diagnoses. Confirmed, with the boundary one place off from the report: `%2147483647d` emits its two gigabytes in *both* shells and is correct; the refusal starts one past it. The real rule is `vsnprintf`'s `int` return, so a rendered length past `INT_MAX` is refused too even when the precision that named it is in range. Fixed in `7326edd`.\n6. `%#g` differs at a rounding carry. Confirmed. The report's own suggestion was a divergence entry rather than a fix, on the grounds that the port's output is what C99 describes; this node's brief forbids new register entries and names dash the oracle, so it is a fix. Narrower than reported: it applies only when the carry is what moved the style from f to e, so `%#.3g 999999.5` was already right. Fixed in `6604452`.\n7. `%5*d` is undefined and the two disagree. Confirmed. glibc writes an unreadable specification back out verbatim, and what it writes is the text as the C passed it -- with `mklong`'s `l` inserted and `%b`'s conversion character set to `s`. Fixed in `30fe9ff`."
+                    }
+
+                    {
+                        at 2026-08-12T12:44:06.822539927Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }
