@@ -549,21 +549,32 @@ fn leading_number(bytes: &[u8]) -> usize {
     value
 }
 
-/// The specification text the C handed to `printf`, for one glibc reads
-/// back out rather than acts on.
+/// The tail of a specification, as the C handed it to `printf`.
 ///
 /// `mklong` had rewritten the integer conversions to `PRIdMAX` before
 /// the text was passed, so the length modifier it inserted is part of
-/// what gets printed -- one `l` on this target, where `intmax_t` is a
-/// `long`. `%b` was passed with its conversion character set to `s`,
-/// which is how the C reached `printf` with a conversion C has.
-fn spec_text(spec: &[u8], conversion: u8) -> Vec<u8> {
-    let mut text = spec[..spec.len() - 1].to_vec();
+/// what a specification glibc could not read prints -- one `l` on this
+/// target, where `intmax_t` is a `long`. `%b` was passed with its
+/// conversion character set to `s`, which is how the C reached `printf`
+/// with a conversion character C has.
+fn passed_tail(tail: &[u8], conversion: u8) -> Vec<u8> {
+    let mut text = tail.to_vec();
     if matches!(conversion, b'd' | b'i' | b'o' | b'u' | b'x' | b'X') {
         text.push(b'l');
     }
     text.push(if conversion == b'b' { b's' } else { conversion });
     text
+}
+
+/// Where a written-out width or precision holds a `*`, which is where
+/// C's `printf` stops reading the specification.
+///
+/// The C's own scan ran `strspn` over `*` along with the digits and
+/// never looked further, so the digits it collected may straddle a `*`
+/// that C's `printf` would never have got past. Only the ones in front
+/// of it were ever read as a number.
+fn unreadable_at(field: &[u8]) -> Option<usize> {
+    field.iter().position(|&byte| byte == b'*')
 }
 
 /// How many leading bytes of `bytes` from `at` are in `set`.
@@ -665,9 +676,10 @@ pub unsafe fn printfcmd(args: &[&BStr]) -> c_int {
              * address to hand back to `printf`; the port collects it. */
             let start = at - 1;
             let mut spec = Spec::bare();
-            /* A `*` the C's own scan did not take is one it left in the
-             * text for glibc, which has no argument for it there. */
-            let mut unreadable = false;
+            /* Where C's `printf` stopped reading. The C's scan carries on
+             * past it either way -- it is the C's scan that says where
+             * the specification ends and which operands it takes. */
+            let mut stop = None;
 
             /* skip to field width */
             while at < end && spec.flag(format[at]) {
@@ -679,8 +691,12 @@ pub unsafe fn printfcmd(args: &[&BStr]) -> c_int {
             } else {
                 /* skip to possible '.', get following precision */
                 let digits = span(&format[..end], at, WIDTH);
-                unreadable |= format[at..at + digits].contains(&b'*');
-                spec.set_written_width(leading_number(&format[at..at + digits]));
+                let field = &format[at..at + digits];
+                let read = unreadable_at(field);
+                if let Some(k) = read {
+                    stop = Some(at + k);
+                }
+                spec.set_written_width(leading_number(&field[..read.unwrap_or(digits)]));
                 at += digits;
             }
 
@@ -688,11 +704,20 @@ pub unsafe fn printfcmd(args: &[&BStr]) -> c_int {
                 at += 1;
                 if format[at] == b'*' {
                     at += 1;
-                    spec.set_precision(operands.getuintmax(true) as c_int);
+                    let value = operands.getuintmax(true) as c_int;
+                    if stop.is_none() {
+                        spec.set_precision(value);
+                    }
                 } else {
                     let digits = span(&format[..end], at, WIDTH);
-                    unreadable |= format[at..at + digits].contains(&b'*');
-                    spec.set_written_precision(leading_number(&format[at..at + digits]));
+                    let field = &format[at..at + digits];
+                    let read = unreadable_at(field);
+                    if stop.is_none() {
+                        if let Some(k) = read {
+                            stop = Some(at + k);
+                        }
+                        spec.set_written_precision(leading_number(&field[..read.unwrap_or(digits)]));
+                    }
                     at += digits;
                 }
             }
@@ -702,8 +727,9 @@ pub unsafe fn printfcmd(args: &[&BStr]) -> c_int {
                 crate::error::sh_error(b"missing format character");
             }
             at += 1;
-            if unreadable {
-                spec.set_literal(spec_text(&format[start..at], conversion));
+            if let Some(stop) = stop {
+                let tail = passed_tail(&format[stop + 1..at - 1], conversion);
+                spec.set_unreadable(format[stop], &tail);
             }
 
             match conversion {
@@ -999,12 +1025,21 @@ mod tests {
     /// The C widened the integer conversions before handing the text
     /// over, and passed `%b` as `%s`.
     #[test]
-    fn a_passed_spec_carries_c_rewrites() {
-        assert_eq!(spec_text(b"%5*d", b'd'), b"%5*ld");
-        assert_eq!(spec_text(b"%5*i", b'i'), b"%5*li");
-        assert_eq!(spec_text(b"%.5*X", b'X'), b"%.5*lX");
-        assert_eq!(spec_text(b"%5*s", b's'), b"%5*s");
-        assert_eq!(spec_text(b"%5*f", b'f'), b"%5*f");
-        assert_eq!(spec_text(b"%-5*b", b'b'), b"%-5*s");
+    fn a_passed_tail_carries_c_rewrites() {
+        assert_eq!(passed_tail(b"", b'd'), b"ld");
+        assert_eq!(passed_tail(b"2.5", b'i'), b"2.5li");
+        assert_eq!(passed_tail(b".5", b'X'), b".5lX");
+        assert_eq!(passed_tail(b"", b's'), b"s");
+        assert_eq!(passed_tail(b"3", b'f'), b"3f");
+        assert_eq!(passed_tail(b"", b'b'), b"s");
+    }
+
+    /// Only the digits in front of a `*` were ever read as a number.
+    #[test]
+    fn a_star_stops_the_digits() {
+        assert_eq!(unreadable_at(b"5*"), Some(1));
+        assert_eq!(unreadable_at(b"1*2"), Some(1));
+        assert_eq!(unreadable_at(b"12"), None);
+        assert_eq!(unreadable_at(b""), None);
     }
 }

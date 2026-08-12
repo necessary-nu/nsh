@@ -133,15 +133,57 @@ impl Spec {
         self.precision = Some(value);
     }
 
-    /// Record that this specification renders as its own text.
+    /// Record that this specification renders as itself, having stopped
+    /// C's `printf` at `stop` with `rest` still unread.
     ///
     /// A `*` after the digits of a width or precision is a `*` where C's
-    /// `printf` has no argument waiting for one, and glibc answers a
-    /// specification it cannot read by writing it back out. The C handed
-    /// the text over as the format string, so what appears is exactly
-    /// that text -- `mklong`'s inserted `l` and `%b`'s conversion
-    /// character temporarily set to `s` included.
-    pub(super) fn set_literal(&mut self, text: Vec<u8>) {
+    /// `printf` has no argument waiting for one. glibc answers a
+    /// character it has no rule for by writing back what it had
+    /// understood, then that character, and then carrying on with the
+    /// rest of the format as ordinary text -- so `rest` is emitted
+    /// verbatim and never read as a width or precision at all.
+    ///
+    /// What it writes back is its own spelling, not the one the user
+    /// typed. The flags come out in a fixed order however they were
+    /// written, `+` hides a ` `, `-` takes the padding away from `0`, a
+    /// width of zero is not written, and a width that arrived as a `*`
+    /// is written as the digits it stood for.
+    pub(super) fn set_unreadable(&mut self, stop: u8, rest: &[u8]) {
+        let mut text = vec![b'%'];
+        if self.alt {
+            text.push(b'#');
+        }
+        if self.plus {
+            text.push(b'+');
+        } else if self.space {
+            text.push(b' ');
+        }
+        if self.left {
+            text.push(b'-');
+        }
+        if self.zero && !self.left {
+            text.push(b'0');
+        }
+        if self.width != 0 {
+            /* C holds the width in an `int` and negates a `*` that
+             * arrived negative, which leaves `INT_MIN` negative, then
+             * writes it back through an unsigned conversion -- so the
+             * one magnitude an `int` cannot hold is spelt as its sign
+             * extension. A written-out width that large never reaches
+             * here, having been refused for running past the limit. */
+            let spelt = if self.width > LIMIT {
+                i64::from(c_int::MIN) as u64
+            } else {
+                self.width as u64
+            };
+            text.extend_from_slice(format!("{spelt}").as_bytes());
+        }
+        if let Some(precision) = self.precision {
+            text.push(b'.');
+            text.extend_from_slice(format!("{precision}").as_bytes());
+        }
+        text.push(stop);
+        text.extend_from_slice(rest);
         self.literal = Some(text);
     }
 
@@ -164,8 +206,15 @@ impl Spec {
             return Some(text.clone());
         }
         let len = prefix.len() + body.len();
-        if len > LIMIT || self.width > LIMIT {
+        if len > LIMIT {
             return None;
+        }
+        if self.width > LIMIT {
+            /* A width whose magnitude an `int` cannot hold stayed
+             * negative through C's negation, so it never padded
+             * anything. An empty field prints nothing at all; one with
+             * bytes in it is refused. */
+            return (len == 0).then(Vec::new);
         }
 
         let fill = self.width.saturating_sub(len);
@@ -795,18 +844,43 @@ mod tests {
     #[test]
     fn an_unreadable_spec_prints_itself() {
         let mut left = spec("-5");
-        left.set_literal(b"%-5*ld".to_vec());
+        left.set_unreadable(b'*', b"ld");
         assert_eq!(text(left.signed(42)), "%-5*ld");
         assert_eq!(bytes(left.string(b"ab")), b"%-5*ld");
 
+        /* C's own spelling of the flags, not the one that was typed:
+         * one order, `+` over ` `, and `-` taking the padding. */
+        let mut flags = spec("#0-5");
+        flags.set_unreadable(b'*', b"lo");
+        assert_eq!(text(flags.signed(1)), "%#-5*lo");
+        let mut signs = spec("+ 5");
+        signs.set_unreadable(b'*', b"ld");
+        assert_eq!(text(signs.signed(1)), "%+5*ld");
+
+        /* A width of zero is not written; a precision of zero is. */
+        let mut none = spec("");
+        none.set_unreadable(b'*', b"s");
+        assert_eq!(text(none.string(b"ab")), "%*s");
+
+        /* The width C could not negate is spelt as its sign extension. */
+        let mut floor = Spec::bare();
+        floor.set_width(c_int::MIN);
+        floor.set_unreadable(b'*', b"ld");
+        assert_eq!(text(floor.signed(1)), "%-18446744071562067968*ld");
+        let mut empty = spec(".0");
+        empty.set_unreadable(b'*', b"ld");
+        assert_eq!(text(empty.signed(1)), "%.0*ld");
+
+        /* Digits past the limit are read before the `*` that stops the
+         * read, so they are still the error. */
         let mut over = spec("2147483648");
-        over.set_literal(b"%2147483648*ld".to_vec());
+        over.set_unreadable(b'*', b"ld");
         assert!(over.signed(42).is_none());
 
         /* A length only the rendering would have had is no length at
          * all, because the rendering never happens. */
         let mut long = spec(".2147483646");
-        long.set_literal(b"%.2147483646*f".to_vec());
+        long.set_unreadable(b'*', b"f");
         assert_eq!(text(long.double(1.0, b'f')), "%.2147483646*f");
     }
 
@@ -820,10 +894,16 @@ mod tests {
         /* The digits themselves ran past it. */
         assert!(spec("2147483648").signed(1).is_none());
         assert!(spec(".2147483648").string(b"abc").is_none());
-        /* `INT_MIN` is a `-` flag over a magnitude one past the range. */
+        /* `INT_MIN` is a magnitude one past the range, which C could not
+         * negate and so never padded with: it refuses a field with
+         * bytes in it and prints an empty one as nothing. */
         let mut star = Spec::bare();
         star.set_width(c_int::MIN);
         assert!(star.signed(1).is_none());
+        assert_eq!(bytes(star.string(b"")), b"");
+        star.set_precision(0);
+        assert_eq!(bytes(star.string(b"abc")), b"");
+        assert_eq!(bytes(star.signed(0)), b"");
         /* A precision at the limit that no field grows by is not. */
         assert_eq!(bytes(spec(".2147483647").string(b"abc")), b"abc");
     }
