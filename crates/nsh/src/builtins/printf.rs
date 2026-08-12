@@ -333,8 +333,8 @@ fn scan_double(bytes: &[u8]) -> (f64, usize, bool) {
     if let (Some(b'0'), Some(b'x' | b'X')) = (bytes.get(at), bytes.get(at + 1)) {
         let hex = |offset: usize| bytes.get(offset).is_some_and(u8::is_ascii_hexdigit);
         if hex(at + 2) || (bytes.get(at + 2) == Some(&b'.') && hex(at + 3)) {
-            let (magnitude, end) = scan_hexadecimal(bytes, at + 2);
-            return (signed(magnitude), end, false);
+            let (magnitude, end, range) = scan_hexadecimal(bytes, at + 2);
+            return (signed(magnitude), end, range);
         }
     }
 
@@ -384,10 +384,10 @@ fn scan_double(bytes: &[u8]) -> (f64, usize, bool) {
 ///
 /// The digits are the value's bits, so this lays them straight into a
 /// mantissa and a binary exponent rather than converting anything.
-/// Digits past the 16th cannot change a double except by rounding, so
-/// they are gathered into a sticky bit and left to the one rounding
-/// `u128 as f64` already does.
-fn scan_hexadecimal(bytes: &[u8], from: usize) -> (f64, usize) {
+/// Digits past the 31st cannot change a double except by rounding, so
+/// they are gathered into a sticky bit and left to [`round_to_double`],
+/// which rounds the whole thing exactly once.
+fn scan_hexadecimal(bytes: &[u8], from: usize) -> (f64, usize, bool) {
     let mut at = from;
     let mut mantissa = 0u128;
     let mut sticky = false;
@@ -432,35 +432,99 @@ fn scan_hexadecimal(bytes: &[u8], from: usize) -> (f64, usize) {
         }
     }
 
-    let mut magnitude = mantissa as f64;
-    if sticky {
-        /* Below the last bit `mantissa` kept, so it only ever breaks a
-         * tie away from even -- which is what the discarded digits do. */
-        magnitude = f64::from_bits(magnitude.to_bits() | 1);
-    }
-    (magnitude * exp2(exponent), at)
+    let (magnitude, range) = round_to_double(mantissa, sticky, exponent);
+    (magnitude, at, range)
 }
 
-/// Two raised to `exponent`, in steps a double can hold, so that a value
-/// which is representable only after the whole scaling still arrives.
-fn exp2(exponent: i32) -> f64 {
-    let mut value = 1.0f64;
-    let mut left = exponent;
-    while left > 1000 {
-        value *= f64::from_bits(0x7fe0_0000_0000_0000); /* 2^1023 */
-        left -= 1023;
-        if value.is_infinite() {
-            return value;
-        }
+/// The double nearest `mantissa * 2^exponent`, and whether C would call
+/// the conversion out of range.
+///
+/// Scaling a rounded mantissa by a power of two was the wrong shape for
+/// this: a value in the subnormal range is rounded twice that way, and
+/// the power itself underflows to zero well before the value does -- so
+/// `0x1.fffffffffffffp-1023` came out `0` rather than the smallest
+/// normal. Here the bits are shifted into their place and rounded once,
+/// which is the whole of what the conversion is.
+///
+/// `sticky` says nonzero bits already fell off the bottom of `mantissa`,
+/// so the value sits just above what the bits alone say.
+///
+/// Out of range is C's `ERANGE` from `strtod`: an infinite result, or an
+/// underflowing one. IEEE detects underflow as tininess *after*
+/// rounding, together with a result that could not be held exactly, and
+/// both halves of that are load-bearing here. `0x1p-1074` is the
+/// smallest subnormal exactly, so it is tiny and silent; `0x1.8p-1074`
+/// is tiny and cannot be held, so it warns; and
+/// `0x1.fffffffffffff8p-1023` warns in neither shell because rounding it
+/// to 53 bits lands on the smallest normal, which is not tiny at all --
+/// where `0x1.fffffffffffffp-1023`, which needs no rounding at 53 bits
+/// and stays below it, does warn. Both reach the same double.
+fn round_to_double(mantissa: u128, sticky: bool, exponent: i32) -> (f64, bool) {
+    if mantissa == 0 {
+        return (0.0, false);
     }
-    while left < -1000 {
-        value *= f64::from_bits(0x0010_0000_0000_0000); /* 2^-1022 */
-        left += 1022;
-        if value == 0.0 {
-            return value;
-        }
+    let bits = i64::from(128 - mantissa.leading_zeros());
+    /* Where the value's leading bit sits: it is `1.f * 2^top`. */
+    let top = i64::from(exponent) + bits - 1;
+    if top > 1023 {
+        return (f64::INFINITY, true);
     }
-    value * (left as f64).exp2()
+
+    /* Tininess is asked of the value rounded to 53 bits with no bound on
+     * the exponent, where only a carry out of them moves it up a
+     * binade. */
+    let (at_full_precision, _) = round_bits(mantissa, sticky, bits - 53);
+    let tiny = top + i64::from(at_full_precision >> 53 != 0) < -1022;
+
+    /* The result is a multiple of this power of two: the last of the 53
+     * bits for a normal, and the smallest subnormal's own step once the
+     * value falls below the normal range. */
+    let step = top.max(-1022) - 52;
+    let (digits, exact) = round_bits(mantissa, sticky, step - i64::from(exponent));
+    /* Bits narrower than the step are left where they were rather than
+     * padded up to it, so they still count in the literal's own place. */
+    let place = step.max(i64::from(exponent));
+    let value = digits as f64 * power_of_two(place as i32);
+
+    (value, value.is_infinite() || (tiny && !exact))
+}
+
+/// Round `mantissa` to what survives dropping its `shift` lowest bits,
+/// half to even. `sticky` puts the value just above the bits, so it
+/// breaks a tie upwards.
+///
+/// Returns the rounded bits -- one place wider than the shift left room
+/// for, when the rounding carried -- and whether nothing was lost.
+fn round_bits(mantissa: u128, sticky: bool, shift: i64) -> (u128, bool) {
+    if shift <= 0 {
+        return (mantissa, !sticky);
+    }
+    if shift >= 128 {
+        /* Nothing of the mantissa survives, so only a value at or past
+         * the halfway point rounds up -- which needs every bit of it to
+         * sit exactly one place below the last one kept. A tie there
+         * rounds towards the even zero. */
+        let half = 1u128 << 127;
+        let up = shift == 128 && (mantissa > half || (mantissa == half && sticky));
+        return (u128::from(up), false);
+    }
+
+    let shift = shift as u32;
+    let dropped = mantissa & ((1u128 << shift) - 1);
+    let half = 1u128 << (shift - 1);
+    let kept = mantissa >> shift;
+    let up = dropped > half || (dropped == half && (sticky || kept & 1 != 0));
+    (kept + u128::from(up), dropped == 0 && !sticky)
+}
+
+/// Two raised to `exponent`, exactly, for every exponent a double holds
+/// -- the subnormal ones included.
+fn power_of_two(exponent: i32) -> f64 {
+    if exponent >= -1022 {
+        f64::from_bits(((exponent + 1023) as u64) << 52)
+    } else {
+        f64::from_bits(1u64 << (exponent + 1074))
+    }
 }
 
 /// The width or precision a specification wrote out in digits.
@@ -795,10 +859,62 @@ mod tests {
         assert_eq!(double("0x1P-10").0, 1.0 / 1024.0);
         assert_eq!(double("0x1p"), (1.0, 3, false));
         assert_eq!(double("0x10").0, 16.0);
-        /* Scaling runs in steps a double can hold, so the extremes
-         * arrive rather than overflowing the step itself. */
         assert!(double("0x1p2000").0.is_infinite());
         assert_eq!(double("0x1p-2000").0, 0.0);
+    }
+
+    /// The bits are placed and rounded once, so a literal only a
+    /// subnormal can hold arrives instead of collapsing through a scale
+    /// that underflowed before the value did.
+    #[test]
+    fn subnormal_hexadecimal_literals_arrive() {
+        let smallest = 5e-324;
+        assert_eq!(double("0x1p-1074").0, smallest);
+        assert_eq!(double("0x1.8p-1074").0, 2.0 * smallest);
+        assert_eq!(double("0x3p-1075").0, 2.0 * smallest);
+        assert_eq!(double("0x1.8p-1075").0, smallest);
+        /* Exactly half the smallest, which ties towards the even zero. */
+        assert_eq!(double("0x1p-1075").0, 0.0);
+        /* Just under the smallest normal, from either side of the tie. */
+        assert_eq!(double("0x1.fffffffffffffp-1023").0, f64::MIN_POSITIVE);
+        assert_eq!(double("0x1.fffffffffffff8p-1023").0, f64::MIN_POSITIVE);
+        assert_eq!(
+            double("0x1.ffffffffffffep-1023").0,
+            f64::MIN_POSITIVE - smallest
+        );
+        /* More digits than a double has bits, rounded once. */
+        assert_eq!(double("0x1.ffffffffffffffffffffp0").0, 2.0);
+        assert_eq!(double("0x1.fffffffffffff7fffp1023").0, f64::MAX);
+    }
+
+    /// A hexadecimal literal reports the range C reports: an infinite
+    /// result, or one tiny once rounded that could not be held exactly.
+    #[test]
+    fn hexadecimal_literals_report_range() {
+        for out_of_range in [
+            "0x1p9999",
+            "0x1p-9999",
+            "0x1.8p-1074",
+            "0x1p-1075",
+            "0x1.fffffffffffffp-1023",
+            "0x1.ffffffffffffe8p-1023",
+            "0x1.fffffffffffff8p1023",
+        ] {
+            assert!(double(out_of_range).2, "{out_of_range} is out of range");
+        }
+        for held in [
+            "0x1p0",
+            "0x0p0",
+            "0x1p-1022",
+            "0x1p-1074",
+            "0x1.ffffffffffffep-1023",
+            /* Tiny before rounding, but rounded to 53 bits it lands on
+             * the smallest normal, which is not tiny at all. */
+            "0x1.fffffffffffff8p-1023",
+            "0x1.fffffffffffff7fffp1023",
+        ] {
+            assert!(!double(held).2, "{held} is in range");
+        }
     }
 
     /// The C's `get*` helpers each read one argument and hand back a
