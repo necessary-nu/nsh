@@ -1,6 +1,9 @@
 #!name rd0
 printf '?"=a\n*b\t:"\n' | { IFS=' :' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd1
+printf '%*\n' | { IFS=' :' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
 #!name rd2
 printf ''\t \n' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
@@ -34,6 +37,9 @@ printf '[#\tb \000~'b*\000"' | { IFS=':;' read -r v0; echo "rc=$?"; echo "0=[$v0
 #!name rd12
 printf 'b' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
+#!name rd13
+printf '%\\$:\t$"\\b$[\\\n' | { IFS=':' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
 #!name rd14
 printf ']#?[#'\\:'~\t#' | { IFS=':' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
@@ -49,6 +55,9 @@ printf '?]?\n[=""?"$"\t' | { IFS=':;' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]
 #!name rd18
 printf '\\=\t|"#[ $\n' | { IFS=' \t\n' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd19
+printf '?a|\t%\n\000\t*' | { IFS=':' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
 #!name rd20
 printf '\tb\\:\n' | { IFS=':' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
@@ -57,6 +66,15 @@ printf 'b$\n"'\000 %|\n' | { IFS='ab' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; 
 %%%
 #!name rd22
 printf '?$:~"b~\n' | { IFS=' ' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd23
+printf ']%["\\$$%~\n' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd24
+printf '%#|\\\000 "' | { read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd25
+printf '%\000~\\]%\n' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
 #!name rd26
 printf '#''\t\000\n' | { IFS='\t' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
@@ -69,6 +87,12 @@ printf '\\' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; 
 %%%
 #!name rd29
 printf '?*#b*#?\\[\n' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd30
+printf '\\[[~]\000[=a\n""%\n' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd31
+printf ':~|a$$\000%\n' | { IFS=':;' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
 #!name rd32
 printf '|[\n [a$\n' | { IFS=':;' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
@@ -84,6 +108,9 @@ printf ':*\n' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1
 %%%
 #!name rd36
 printf '\n\\\t\000\t$\t \000|b~\n' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd37
+printf '%\n' | { IFS=' \t\n' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd38
 printf ' ]\000##""' | { IFS=':' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
@@ -160,6 +187,9 @@ printf '][b ~~aa:b\\' | { IFS=' \t\n' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$
 #!name rd62
 printf '*\n' | { IFS=':' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
+#!name rd63
+printf '"a\t%\000\t' | { IFS=' ' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
 #!name rd64
 printf '\t\\\n$$:]]\n*\n' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
@@ -211,6 +241,9 @@ printf ']\000:]' | { read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 #!name rd80
 printf '= ]|\n'*\000#:a|\t:\n' | { IFS=':' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd81
+printf ':%\n]\t~%:": ||\n' | { IFS=':' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
 #!name rd82
 printf ' *'~\n'a:\000"\\a\n' | { IFS='ab' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
@@ -256,14 +289,26 @@ printf '\000*[b=*b'"' | { IFS='\t' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; 
 #!name rd96
 printf ':"\n' | { IFS='\t' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
+#!name rd97
+printf '\t% \nb' | { IFS=' \t\n' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
 #!name rd98
 printf '~"$\\\n\n' | { IFS=':;' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd99
+printf '|%\nbb :]\\"' | { IFS='\t' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
 #!name rd100
 printf '\\:??a?'\t*?%\n\t\n' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
 #!name rd101
 printf 'a\n\n' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd102
+printf '$:$=\000\n\000%*~' | { IFS=' ' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd103
+printf '% b \n[=~ ?:\n' | { IFS='\t' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
 #!name rd104
 printf '[a]=#\n' | { IFS=':' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
@@ -273,6 +318,9 @@ printf '\000|\n \\"' | { IFS=' \t\n' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v
 %%%
 #!name rd106
 printf ''\t|\\#\t=\n%\n' | { read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd107
+printf '%#=~|\n' | { IFS=':' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
 #!name rd108
 printf '?][\000:|?$"=?# ' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
@@ -301,17 +349,26 @@ printf '\t|]= \\[b\n[\n\n' | { IFS='\t' read -r v0; echo "rc=$?"; echo "0=[$v0]"
 #!name rd116
 printf '?\n#'\000:\\\000|\n:\n' | { IFS=':' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
+#!name rd117
+printf ' \n?\000\n\t#:[%?\n' | { read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
 #!name rd118
 printf 'a]%%##=\000[\000]b[\n' | { IFS=' \t\n' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
 #!name rd119
 printf '\\[|ba#' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd120
+printf '$%\n]=\n' | { read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
 #!name rd121
 printf 'a~#\n"b*~\n' | { IFS=' ' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd122
 printf '=*'\n' | { IFS=' \t\n' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd123
+printf '*?a|*% ="$%[*:\n' | { IFS=':;' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
 #!name rd124
 printf 'a\\$b\na||:\n' | { IFS=':;' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
@@ -328,8 +385,14 @@ printf 'b\n' | { IFS='\t' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[
 #!name rd128
 printf '''\t:'||\\'\n\\$a?\n' | { IFS=' :' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
+#!name rd129
+printf '*$$~\n||]%?b|~\t\n' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
 #!name rd130
 printf '\\[\ta~\\$:a~\n] #\n' | { read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd131
+printf '"#?%\n]\000~$\t\n' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd132
 printf '[:= ~#* \n' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
@@ -373,11 +436,17 @@ printf ']?|\000\\$\000\n' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]
 #!name rd145
 printf '|' | { IFS=' \t\n' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd146
+printf '%=a:~[:]\n' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
 #!name rd147
 printf '|\n' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
 #!name rd148
 printf 'b*]]\n' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd149
+printf ':|:[:* :%"]?\n' | { IFS='\t' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd150
 printf '\t*#a[#*' | { IFS=' :' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
@@ -388,8 +457,14 @@ printf ':[#b?a\n\\: ' | { IFS='ab' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 #!name rd152
 printf '#aa%]='"]?\n' | { IFS='\t' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
+#!name rd153
+printf 'a%%|*a%[ **\n' | { IFS=' :' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
 #!name rd154
 printf '|\t:\n' | { IFS=':;' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd155
+printf '[? \000\t%\n~:"%\n' | { read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd156
 printf '\t\000\t['?#\000\000\n' | { IFS=':' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
@@ -406,6 +481,9 @@ printf '? #'#\\'#' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[
 #!name rd160
 printf 'b|=?]=\t"$\000' | { IFS=':' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd161
+printf '*%\000\000b[*$##=\t\n#' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
 #!name rd162
 printf '*\\ :\n\n\n' | { read v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
@@ -417,6 +495,9 @@ printf '=]*\t#=#~]\n' | { IFS='ab' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; ech
 %%%
 #!name rd165
 printf '|\n' | { IFS='\t' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd166
+printf '*\n %\n' | { IFS=':;' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
 #!name rd167
 printf '?|"$a]:' | { IFS=' :' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
@@ -445,6 +526,12 @@ printf ''$a\n]~*]#?\n' | { IFS=':;' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]";
 #!name rd175
 printf '? \n' | { IFS='\t' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
+#!name rd176
+printf '\nb\tb*$=%\\|"\n' | { IFS=' ' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd177
+printf '\n#%\\\n' | { IFS=':' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
 #!name rd178
 printf '\n[\n' | { IFS=':;' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
@@ -469,6 +556,9 @@ printf ' #"[\n' | { IFS=':' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo
 #!name rd185
 printf '#\t#|'\n?\000%a\000|\n' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd186
+printf '%]?aa~"$:=*\n' | { IFS=':' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
 #!name rd187
 printf '|\000'\t\\\000#[\000'\n]' | { IFS='ab' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
@@ -487,8 +577,14 @@ printf '\000*b\n' | { IFS=':' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 #!name rd192
 printf '\n ?a\n' | { IFS=' :' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd193
+printf '$=%#[:*\\~#\000"' | { IFS=':;' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
 #!name rd194
 printf '$?\\\n' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd195
+printf '"%\n\n' | { IFS=':;' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd196
 printf '"#$:a~' | { read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
@@ -502,8 +598,17 @@ printf '#$"'\n' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 #!name rd199
 printf '[?\n' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
+#!name rd200
+printf '\000]\\%\000\\a|\n|ba"?\n' | { IFS=':;' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd201
+printf ' ]\t%=b% a\n' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
 #!name rd202
 printf 'a~*\000\na*'":b:|#\n' | { IFS=' :' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd203
+printf '%|*|\t|:%\n' | { IFS=':;' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
 #!name rd204
 printf '\000#|a*\n' | { IFS=' \t\n' read v0; echo "rc=$?"; echo "0=[$v0]"; }
@@ -535,6 +640,9 @@ printf '?$:'['\n$* \n' | { IFS='ab' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]";
 #!name rd213
 printf '?'\t\n\n' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
+#!name rd214
+printf '" =]\t' \000\000\000':\n' | { IFS='\t' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
 #!name rd215
 printf '#=|a\n# ]]\n' | { IFS=':;' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
@@ -550,6 +658,9 @@ printf '\t?$#\n*\t$=b\\\n' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 #!name rd219
 printf '[|'\000\000\000a\\\n?\\ \n' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd220
+printf '|\n|"#\n %\\? \\\n' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
 #!name rd221
 printf '\n**#$# '\n[]*#a' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
@@ -559,8 +670,14 @@ printf '?"\000% \n~'*\n ~~\000\n' | { IFS=':;' read v0 v1; echo "rc=$?"; echo "0
 #!name rd223
 printf '$'|\t"]%*|#= ]\n' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
+#!name rd224
+printf '?"?"\000%"|b\n' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
 #!name rd225
 printf ']\n' | { IFS=':' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd226
+printf '*]'**%[#\\=|':' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
 #!name rd227
 printf ' \n' | { IFS='ab' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
@@ -580,6 +697,12 @@ printf '?:\t|'="a|\\% |\n' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=
 #!name rd232
 printf 'b\n\t\\[' | { IFS='ab' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd233
+printf '\n\t*%\n' | { IFS=':;' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd234
+printf '\\**%\\\000[~=*]~' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
 #!name rd235
 printf '\000[#' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
@@ -597,6 +720,9 @@ printf '*$  \\' | { IFS=' :' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "
 %%%
 #!name rd240
 printf '|'$\n\\\t\n\n' | { IFS='ab' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd241
+printf '?[~$%\n' | { IFS='ab' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
 #!name rd242
 printf ' :\\~"#[| b$|\n' | { IFS=':' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
@@ -631,11 +757,26 @@ printf '*"\000b\n' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1
 #!name rd252
 printf 'b%#a|#\n' | { IFS='ab' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd253
+printf '*:~#\t=|=#b=%\n=\n' | { IFS=' ' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
 #!name rd254
 printf '\t\n' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
+#!name rd255
+printf ']%\n' | { IFS=' :' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
 #!name rd256
 printf '*'\000~' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd257
+printf '%| $=\000b' | { IFS=' \t\n' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd258
+printf '\000[$?=?]%\n' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd259
+printf '%~' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd260
 printf ':\000a\000 $a[:?\n' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
@@ -652,6 +793,9 @@ printf '\n\t' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 #!name rd264
 printf ' [] bb"""==$ \n' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd265
+printf ':%$\t\n' | { IFS='ab' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
 #!name rd266
 printf '"\n' | { read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
@@ -660,6 +804,9 @@ printf '\\\t' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd268
 printf 'a' | { IFS='\t' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd269
+printf '~\\%\000b~\t\\' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
 #!name rd270
 printf '[|#*\t#$?\\~'~\n\n' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
@@ -679,11 +826,20 @@ printf '~b=[=~\t\n' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; ech
 #!name rd275
 printf '|\n\000"#\n' | { IFS='\t' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
+#!name rd276
+printf '*#*|":\t%?ba%\n' | { IFS=':;' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd277
+printf '\t?]\000\\%' | { IFS='\t' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
 #!name rd278
 printf 'b[$\n' | { IFS=':;' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
 #!name rd279
 printf '\\#*\\\t**~=#\n' | { read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd280
+printf '$\\a\\*:]a\\"a%\\' | { IFS='\t' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd281
 printf 'b|=a?a:\t~\n"*\n' | { IFS='ab' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
@@ -691,11 +847,17 @@ printf 'b|=a?a:\t~\n"*\n' | { IFS='ab' read -r v0 v1 v2; echo "rc=$?"; echo "0=[
 #!name rd282
 printf '$] \n' | { IFS=' :' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd283
+printf 'b%\t#['%%~\n'\n' | { IFS=':' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
 #!name rd284
 printf '\n|#[\n' | { read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
 #!name rd285
 printf '%:\000[ \n'   ][' | { IFS='\t' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd286
+printf ':\n%*||:\000\n' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd287
 printf ' [=?\\\000\\]a\n' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
@@ -712,6 +874,9 @@ printf '?:]'%%' ~\n' | { IFS='\t' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 #!name rd291
 printf '\nb'|a\n\t?%#:\n' | { IFS=' :' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd292
+printf '?\\\000||:#a[ b%\n' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
 #!name rd293
 printf '$*\t\\=[\000\000#b\n' | { IFS=' \t\n' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
@@ -720,6 +885,12 @@ printf ']' | { IFS=' :' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v
 %%%
 #!name rd295
 printf ':%"|a~'b\n' | { IFS='ab' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd296
+printf 'ab\000##\000%#' | { IFS=':;' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd297
+printf 'ab%[ "%=\000\n' | { IFS='ab' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
 #!name rd298
 printf ''\n' | { IFS='\t' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
@@ -744,6 +915,9 @@ printf '*' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd305
 printf '|$*b '%\000\n' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd306
+printf '\000:?:%\n\n|\000b\000' | { IFS=' \t\n' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd307
 printf '?[ [:=~%%|\t'%?\n' | { IFS=' ' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
@@ -774,6 +948,15 @@ printf ']\\\n||?\n' | { IFS=' \t\n' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd316
 printf '"~":=\000]*\000=\n' | { IFS='\t' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd317
+printf ']%*|\\'|'=#\n' | { IFS=':;' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd318
+printf ''~%'=\t%"~*\000\n' | { IFS=':' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd319
+printf ':%a%\t\n' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
 #!name rd320
 printf ''\000\n% "\n' | { IFS=' ' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
@@ -811,6 +994,12 @@ printf '~#* ~?]*#*||ab\n' | { IFS='ab' read -r v0; echo "rc=$?"; echo "0=[$v0]";
 #!name rd331
 printf '][\t\000b\\~]]' | { IFS=':;' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd332
+printf '~=\t\t~:]=\t|%*\000a' | { IFS=':;' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
+#!name rd333
+printf ' \000%\n' | { IFS=':' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
 #!name rd334
 printf '\000'%a\t~'|\n' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
@@ -819,6 +1008,12 @@ printf ''=ab%a\\*:]$]~' | { IFS=':;' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd336
 printf '\\\n#*=' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd337
+printf '% ' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd338
+printf '\n%  \ta$\t"[\t:\n' | { IFS=' ' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd339
 printf ' "$\n\000\t#~:\n' | { IFS='\t' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
@@ -838,11 +1033,17 @@ printf '' %|*a b\000\n|:$' | { read v0; echo "rc=$?"; echo "0=[$v0]"; }
 #!name rd344
 printf '''\n' | { IFS='ab' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd345
+printf '# \000'=:%['|\n' | { IFS='\t' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
 #!name rd346
 printf '[$\\*$' | { IFS='\t' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd347
 printf '|'"\000#:%$\n*]$' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd348
+printf '\000%]a\n=\\\n\n' | { IFS=' \t\n' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd349
 printf '| #\\:' | { IFS=' ' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
@@ -865,11 +1066,17 @@ printf '\na\n=b\t\\' | { IFS=' ' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]";
 #!name rd355
 printf '#\t \n" ?*\n' | { IFS=' ' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
+#!name rd356
+printf '%\t' | { IFS=' ' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
 #!name rd357
 printf ': \000 :\t\000\n?\n' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
 #!name rd358
 printf '\\' | { IFS='ab' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd359
+printf ']"=%\n~~?==' | { IFS=' :' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
 #!name rd360
 printf ''\n]\000"]\\?\n' | { read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
@@ -879,6 +1086,9 @@ printf '"=?' | { IFS=' :' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "
 %%%
 #!name rd362
 printf '="#?' | { IFS=' :' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd363
+printf '\000a=[$"\t*"|%"\n' | { IFS='\t' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 %%%
 #!name rd364
 printf '?\\\n' | { IFS=' ' read v0; echo "rc=$?"; echo "0=[$v0]"; }
@@ -892,6 +1102,12 @@ printf '*[~\\][\n|\t' | { IFS=':;' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; 
 #!name rd367
 printf '~:\\]]\000\n' | { IFS='ab' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd368
+printf ' %[#\n' | { IFS=' ' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd369
+printf '?%] \t]]\\b=a\n' | { IFS='ab' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
 #!name rd370
 printf '$\t \n]b\n' | { read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
@@ -901,11 +1117,20 @@ printf '\n?\t\n' | { IFS='ab' read v0; echo "rc=$?"; echo "0=[$v0]"; }
 #!name rd372
 printf '*?]\000=$=[a' | { IFS='ab' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
+#!name rd373
+printf ' |\n=%\ta"|' | { IFS=' ' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
 #!name rd374
 printf '  =\n\\%']|\n' | { IFS=':' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
 %%%
+#!name rd375
+printf '% ]*|~$*\000\n' | { IFS=' \t\n' read v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
 #!name rd376
 printf '= a:\n\n' | { IFS=':;' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }
+%%%
+#!name rd377
+printf '*]]]b\t%~\n' | { IFS=' \t\n' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
 #!name rd378
 printf '|$' | { IFS=' ' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
@@ -913,8 +1138,17 @@ printf '|$' | { IFS=' ' read -r v0; echo "rc=$?"; echo "0=[$v0]"; }
 #!name rd379
 printf '$\000' | { IFS=' \t\n' read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
+#!name rd380
+printf '| %||~~[]a\n?\n' | { read -r v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd381
+printf '*a"\t\000 #$%[\n' | { IFS=' :' read v0; echo "rc=$?"; echo "0=[$v0]"; }
+%%%
 #!name rd382
 printf ']?\\' | { IFS=' ' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
+%%%
+#!name rd383
+printf ']%*#~%[\n\na|:\n' | { IFS='\t' read v0 v1; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; }
 %%%
 #!name rd384
 printf 'b\t' | { IFS='\t' read -r v0 v1 v2; echo "rc=$?"; echo "0=[$v0]"; echo "1=[$v1]"; echo "2=[$v2]"; }

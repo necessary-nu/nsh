@@ -9,10 +9,12 @@ LC_ALL=en_US.utf8; export LC_ALL; test a '<' B; echo $?
 LC_ALL=C; export LC_ALL; test B '<' a; echo $?
 LC_ALL=en_US.utf8; export LC_ALL; test B '<' a; echo $?
 LC_COLLATE=en_US.utf8; export LC_COLLATE; test a '>' B; echo $?
+LC_ALL=C printf '%b\n' 'a\u00e9b' | od -c | head -2
 LC_ALL=en_US.utf8 printf '%b\n' 'a\u00e9b' | od -c | head -2
 printf '%c\n' "$(printf 'A')" | od -c | head -2
 printf '%c|%c|\n' "$(printf '\303\251')" b | od -c | head -2
 printf '%s\n' "$(printf '\303\251')" | od -c | head -2
+printf '%d\n' "'"$(printf '\303\251') 2>&1
 printf '%5c|\n' "$(printf '\303\251')" | od -c | head -2
 echo -- ; echo "[$?]"
 echo -n -- x; echo .
@@ -31,7 +33,10 @@ printf '%b%s\n' 'x\c' 'tail'; echo "[$?]"
 printf '%s%b\n' 'head' 'x\c'; echo "[$?]"
 printf 'a%bb' '\c'; echo "[$?]"
 printf '%b' '\c\c'; echo "[$?]"
+printf '%1b|' 'ab'; echo
 printf '%.0s|' abc; echo
+printf '%.0c|' abc; echo
+printf '%0c|' abc; echo
 printf '%-0d|' 7; echo
 printf '%00005d|' 7; echo
 printf '%.d|' 0; echo

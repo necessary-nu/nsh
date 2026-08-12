@@ -1,6 +1,24 @@
 #!name devfull-echo
 ls -l /dev/full >/dev/null 2>&1 && { echo hi > /dev/full; echo "rc=$?"; } || echo nofull
 %%%
+#!name devfull-1
+s=$(i=0; r=; while [ $i -lt 1 ]; do r="${r}z"; i=$((i+1)); done; echo "$r"); { printf "%s" "$s" > /dev/full; echo "rc=$?"; } 2>&1 | cut -d: -f2-
+%%%
+#!name devfull-100
+s=$(i=0; r=; while [ $i -lt 100 ]; do r="${r}z"; i=$((i+1)); done; echo "$r"); { printf "%s" "$s" > /dev/full; echo "rc=$?"; } 2>&1 | cut -d: -f2-
+%%%
+#!name devfull-8191
+s=$(i=0; r=; while [ $i -lt 8191 ]; do r="${r}z"; i=$((i+1)); done; echo "$r"); { printf "%s" "$s" > /dev/full; echo "rc=$?"; } 2>&1 | cut -d: -f2-
+%%%
+#!name devfull-8192
+s=$(i=0; r=; while [ $i -lt 8192 ]; do r="${r}z"; i=$((i+1)); done; echo "$r"); { printf "%s" "$s" > /dev/full; echo "rc=$?"; } 2>&1 | cut -d: -f2-
+%%%
+#!name devfull-8193
+s=$(i=0; r=; while [ $i -lt 8193 ]; do r="${r}z"; i=$((i+1)); done; echo "$r"); { printf "%s" "$s" > /dev/full; echo "rc=$?"; } 2>&1 | cut -d: -f2-
+%%%
+#!name devfull-20000
+s=$(i=0; r=; while [ $i -lt 20000 ]; do r="${r}z"; i=$((i+1)); done; echo "$r"); { printf "%s" "$s" > /dev/full; echo "rc=$?"; } 2>&1 | cut -d: -f2-
+%%%
 #!name closed-stdout
 exec 1>&-; echo hi; echo "rc=$?" >&2
 %%%

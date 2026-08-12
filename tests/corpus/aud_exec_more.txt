@@ -208,6 +208,10 @@ command -v vcmd | sed "s|$PWD|WD|"
 ( exec >&-; echo hi ) 2>&1 | sed 's/^[^:]*: [0-9]*: //'
 echo "rc=$?"
 %%%
+#!name I/O error printf builtin
+( exec >&-; printf 'x\n' ) 2>&1 | sed 's/^[^:]*: [0-9]*: //'
+echo "rc=$?"
+%%%
 #!name builtin output to full pipe reader gone
 ( yes 2>/dev/null || true ) | head -1
 echo "rc=$?"

@@ -1,0 +1,113 @@
+printf "a\\" | od -c | head -2
+printf "%b\n" "a\\" | od -c | head -2
+printf "%b|" "\\" | od -c | head -2
+printf '%b\n' '\u0041'
+printf '%b\n' '\u41'
+printf '%b\n' '\u00e9' | od -c | head -2
+printf '%b\n' '\uffff' | od -c | head -2
+printf '%b\n' '\U0000ffff' | od -c | head -2
+printf '%b\n' '\U00010000' | od -c | head -2
+printf '%b\n' '\U0010FFFF' | od -c | head -2
+printf '%b\n' '\U00200000' | od -c | head -2
+printf '%b\n' '\UFFFFFFFF' | od -c | head -2
+printf '%b\n' '\u0080' | od -c | head -2
+printf '%b\n' '\u07ff' | od -c | head -2
+printf '%b\n' '\u0800' | od -c | head -2
+printf '\u0041\n'
+printf '\u00e9\n' | od -c | head -2
+printf '\U0001F600\n' | od -c | head -2
+printf '\x81\n' | od -c | head -2
+printf '\201\n' | od -c | head -2
+printf '%b\n' '\201' | od -c | head -2
+printf '%b\n' '\x81' | od -c | head -2
+printf '%b\n' '\c'; echo "[$?]"
+printf '%b' '\c'; echo "[$?]"
+printf '%b\n' '\ca'; echo "[$?]"
+printf 'a%bb%bc\n' '\c' 'x'; echo "[$?]"
+printf '%b\n' 'abc\cdef'; echo "[$?]"
+printf '%05s|\n' ab
+printf '%05b|\n' ab
+printf '%0.2b|\n' abcdef
+printf '%.b|\n' abcdef
+printf '%.0b|\n' abcdef
+printf '%#b|\n' abcdef
+printf '%+b|\n' abcdef
+printf '% b|\n' abcdef
+printf '%-b|\n' abcdef
+printf '%*b|\n' 8 abc
+printf '%.*b|\n' 2 abcdef
+printf '%*.*b|\n' 8 2 abcdef
+printf '%*b|\n' -8 abc
+printf '%20b|\n' 'a\tb'
+printf '%20b|\n' 'a\0101b'
+printf '%b|%b\n' 'a\tb' 'c\nd'
+printf '%3b%3b|\n' a b
+printf '%s|\n' 'XXX'
+printf '%5b|\n' 'XX'
+printf '%5b|\n' 'X'
+printf '%10b|\n' 'aXb'
+printf '%-10b|\n' 'aXb'
+printf '%b\n' 'X\tX' | od -c | head -2
+printf '%20s|\n' 'aXb'
+printf '%c' abc def; echo
+printf '%c%s\n' abc def
+printf '%5c|\n' abc
+printf '%-5c|\n' abc
+printf '%.1c|\n' abc
+printf '%s\n' "$(printf '%c' '')" | od -c | head -2
+printf '%d %d %d\n' 1 2
+printf '%d,' 1 2 3 4 5; echo
+printf '%s\n%d\n' a
+printf '\t%s\n' a
+printf '\\%s\n' a
+printf '\a%s\n' a | od -c | head -2
+printf '\0101%s\n' a
+printf '\101%s\n' a
+printf '\1%s\n' a | od -c | head -2
+printf '\08\n' | od -c | head -2
+printf '\8\n' | od -c | head -2
+printf '\z\n'
+printf '\e\n' | od -c | head -2
+printf '%b\n' '\a\b\f\n\r\t\v' | od -c | head -3
+printf '\a\b\f\n\r\t\v\n' | od -c | head -3
+printf '%s\n' a > /dev/full; echo "[$?]"
+printf '%d\n' 07777777777777777777777
+printf '%o\n' 8
+printf '%x\n' -1
+printf '%X\n' -255
+printf '%o\n' -8
+printf '%d\n' ' '
+printf '%d\n' ' 12 '
+printf '%d\n' '+12'
+printf '%d\n' '- 12'
+printf '%d\n' '0b11'
+printf '%f\n' '0x10'
+printf '%f\n' 'inf'
+printf '%f\n' 'nan'
+printf '%f\n' '1e400'
+printf '%f\n' '1e-400'
+printf '%d\n' '1e10'
+printf '%.20f\n' 0.1
+printf '%s %s\n' "'a" "'b"
+printf '%c\n' "'a"
+printf '%b\n' "'a"
+printf '%d\n' "''"
+printf '%d\n' '""'
+printf '%d\n' '"'
+IFS=; printf '%s\n' a
+printf '%s\n' "$(printf '%b' 'a\0b' | od -c | head -1)"
+printf '%b' 'a\0b' | wc -c
+printf '%b' 'a\0060b' | od -c | head -2
+printf '%b\n' 'a\0400b' | od -c | head -2
+printf '%b\n' 'a\0777b' | od -c | head -2
+printf '%b\n' 'a\777b' | od -c | head -2
+printf '%b\n' 'a\400b' | od -c | head -2
+echo 'a\0101b'
+echo 'a\101b'
+echo 'a\x41b'
+echo 'a\u0041b'
+echo 'a\U0001F600b' | od -c | head -2
+echo 'a\cb' extra; echo "[$?]"
+echo '\c'; echo "[$?]"
+echo -n '\c'; echo "[$?]"
+echo a '\c' b; echo "[$?]"

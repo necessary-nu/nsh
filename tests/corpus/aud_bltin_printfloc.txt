@@ -31,3 +31,9 @@ type .
 # A name that is neither a builtin nor on PATH behaves the same in both.
 type definitelynotacommandhere
 command -v definitelynotacommandhere; echo "rc=$?"
+
+# The utility is present with no PATH at all, which is the whole of what
+# a builtin buys over an external one and the cost the superseded
+# decision had accepted.
+PATH=; printf 'still-here\n'; echo "rc=$?"
+PATH=; type printf
