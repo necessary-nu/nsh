@@ -117,6 +117,10 @@ symbols (
         {verb def, id printf.print-escape-str-fn}
         {verb sem, id printf.print-escape-str-fn}
     )}
+    {id printf.printfcmd-fn, kind @function, name printfcmd, qualified printfcmd, signature "int printfcmd(int argc, char *argv[])", file src/bltin/printf.c, line_start 130, line_end 273, rules (
+        {verb def, id printf.printfcmd-fn}
+        {verb sem, id printf.printfcmd-fn}
+    )}
     {id printf.conv-escape-str-fn, kind @function, name conv_escape_str, qualified conv-escape-str, signature "static int conv_escape_str(char *str, char **sp)", file src/bltin/printf.c, line_start 280, line_end 326, rules (
         {verb def, id printf.conv-escape-str-fn}
         {verb sem, id printf.conv-escape-str-fn}
@@ -124,6 +128,26 @@ symbols (
     {id printf.conv-escape-fn, kind @function, name conv_escape, qualified conv-escape, signature "unsigned conv_escape(char *str0, char *out0, bool mbchar)", file src/bltin/printf.c, line_start 331, line_end 469, rules (
         {verb def, id printf.conv-escape-fn}
         {verb sem, id printf.conv-escape-fn}
+    )}
+    {id printf.getchr-fn, kind @function, name getchr, qualified getchr, signature "static int getchr(void)", file src/bltin/printf.c, line_start 495, line_end 503, rules (
+        {verb def, id printf.getchr-fn}
+        {verb sem, id printf.getchr-fn}
+    )}
+    {id printf.getstr-fn, kind @function, name getstr, qualified getstr, signature "static char * getstr(void)", file src/bltin/printf.c, line_start 505, line_end 513, rules (
+        {verb def, id printf.getstr-fn}
+        {verb sem, id printf.getstr-fn}
+    )}
+    {id printf.getuintmax-fn, kind @function, name getuintmax, qualified getuintmax, signature "static uintmax_t getuintmax(int sign)", file src/bltin/printf.c, line_start 515, line_end 535, rules (
+        {verb def, id printf.getuintmax-fn}
+        {verb sem, id printf.getuintmax-fn}
+    )}
+    {id printf.getdouble-fn, kind @function, name getdouble, qualified getdouble, signature "static double getdouble(void)", file src/bltin/printf.c, line_start 537, line_end 555, rules (
+        {verb def, id printf.getdouble-fn}
+        {verb sem, id printf.getdouble-fn}
+    )}
+    {id printf.check-conversion-fn, kind @function, name check_conversion, qualified check-conversion, signature "static void check_conversion(const char *s, const char *ep)", file src/bltin/printf.c, line_start 557, line_end 570, rules (
+        {verb def, id printf.check-conversion-fn}
+        {verb sem, id printf.check-conversion-fn}
     )}
     {id printf.echocmd-fn, kind @function, name echocmd, qualified echocmd, signature "int echocmd(int argc, char **argv)", file src/bltin/printf.c, line_start 572, line_end 593, rules (
         {verb def, id printf.echocmd-fn}

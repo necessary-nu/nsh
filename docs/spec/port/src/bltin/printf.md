@@ -16,32 +16,30 @@ variadic call at runtime, so the three cases are written out.
 `conv_escape` is declared in `system.h` and shared with the parser; its
 semantics are specified in `system.md` under `system.conv-escape-fn`.
 
-**The printf builtin is retired; seven exported items with it.** nsh has
-no `printf` builtin. The utility's contract is a runtime `%`-conversion
-interpreter — parse a format string at runtime and render each argument
-by a pattern found in it — and this shell carries no such machinery
-anywhere, so `printf` resolves through `PATH` like any other external
-utility. See `[dec:nsh:no-format-interpreters]`, which records the
-decision and what it costs.
+**One exported item retired.** `printf-builtin` parses each conversion
+into a descriptor and renders it from Rust's own formatting rather than
+handing the specification back to C's `printf`, so `mklong` — which
+rewrote a specification like `%92.3u` to `%92.3`PRIuMAX so that `printf`
+would pull a whole `intmax_t` off the varargs — has no format string
+left to widen, and the value arrives typed. `PF` and `ASPF` go with it,
+and with them the `array` of collected `*` values that chose between
+their three arities. The block below keeps describing
+`src/bltin/printf.c`, which still has `mklong`, but carries no
+`[spec:dash:…]` ids.
 
-Retired with it: `printfcmd` itself; `getchr`, `getstr`, `getuintmax`
-and `getdouble`, which read one argument each for a conversion to
-render; `check_conversion`, which reported a malformed numeric argument
-to one; and `mklong`, which rewrote a specification like `%92.3u` to
-`%92.3`PRIuMAX so that C's `printf` would pull a whole `intmax_t` off
-the varargs. `PF` and `ASPF` go too, and with them the `array` of
-collected `*` values that chose between their three arities.
+The port's `%a` is a further departure from the block below, which does
+not describe one: C had libc spell a hexadecimal float and the port has
+nothing to ask, so `conv::Spec::hexadecimal` transcribes the double's
+IEEE-754 fields directly — four mantissa bits to a digit, ties to even,
+and the carry left in the digit before the point. The C reaches the same
+bytes through `printf`, so the specification of the *conversion* is
+unchanged; only who computes it moved. See
+`[dec:nsh:printf-is-parsed-not-interpreted]`.
 
-`echo` stays, and so does the escape conversion it and the parser
-share. `print_escape_str` keeps its id because `echo`'s route through
-it is unchanged, including the `q[-1]` separator rule below; what went
-with `printf` is the other half of its first paragraph, the field width
-and precision, since the only caller that ever passed one is gone. The
-blocks below keep describing `src/bltin/printf.c`, which still has all
-seven, but the seven carry no `[spec:dash:…]` ids.
-
+> [spec:dash:def:printf.check-conversion-fn]
 > static void check_conversion(const char *s, const char *ep)
 
+> [spec:dash:sem:printf.check-conversion-fn]
 > Validate the result of a `strto*` conversion of `s` that stopped at
 > `ep`. Leftover text warns `"%s: expected numeric value"` when nothing
 > at all was consumed and `"%s: not completely converted"` otherwise; a
@@ -92,25 +90,33 @@ seven, but the seven carry no `[spec:dash:…]` ids.
 > Stop early if `print_escape_str` reports that a `\c` escape was
 > encountered. Always returns 0.
 
+> [spec:dash:def:printf.getchr-fn]
 > static int getchr(void)
 
+> [spec:dash:sem:printf.getchr-fn]
 > Consume one argument and return its first character, or 0 when the
 > arguments are exhausted. Note `**gargv++` reads the first byte and then
 > advances the cursor.
 
+> [spec:dash:def:printf.getdouble-fn]
 > static double getdouble(void)
 
+> [spec:dash:sem:printf.getdouble-fn]
 > Consume one argument as a floating-point value, or 0 when exhausted.
 > An argument beginning with `"` or `'` yields the numeric value of the
 > character that follows it — the POSIX rule that lets `printf %d "'A"`
 > print 65. Otherwise `strtod`, validated by `check_conversion`.
 
+> [spec:dash:def:printf.getstr-fn]
 > static char * getstr(void)
 
+> [spec:dash:sem:printf.getstr-fn]
 > Consume one argument and return it, or `nullstr` when exhausted.
 
+> [spec:dash:def:printf.getuintmax-fn]
 > static uintmax_t getuintmax(int sign)
 
+> [spec:dash:sem:printf.getuintmax-fn]
 > Consume one argument as an integer, or 0 when exhausted. `sign`
 > selects `strtoimax` over `strtoumax`. An argument beginning with `"` or
 > `'` yields the value of the following character. Otherwise the string
@@ -168,8 +174,10 @@ seven, but the seven carry no `[spec:dash:…]` ids.
 > with `out1mem`, which takes an explicit length and so tolerates
 > embedded NULs.
 
+> [spec:dash:def:printf.printfcmd-fn]
 > int printfcmd(int argc, char *argv[])
 
+> [spec:dash:sem:printf.printfcmd-fn]
 > The `printf` builtin. Reset `rval`, consume options with
 > `nextopt(nullstr)`, take the first operand as the format — a missing
 > one is `error("usage: printf format [arg ...]")` — and point `gargv` at

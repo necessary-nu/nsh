@@ -31,10 +31,13 @@ mod conv;
 
 use conv::Spec;
 
-/// The characters that may follow a `%` before the field width.
-const FLAGS: &[u8] = b"#-+ 0";
 /// What the C skipped with `strspn(fmt, SKIP2)` when the width or
 /// precision was written out rather than taken from an argument.
+///
+/// The C's companion `SKIP1`, the flag characters, has no constant here:
+/// [`Spec::flag`] recognises them one at a time and records what each
+/// means, so a second spelling of the same set could only disagree with
+/// it.
 const WIDTH: &[u8] = b"*0123456789";
 
 /// Write one rendered conversion to standard output.
