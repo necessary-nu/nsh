@@ -16,7 +16,7 @@
 use bstr::BStr;
 use core::ptr::{addr_of, null_mut};
 use libc::{c_char, c_int, c_uint, size_t};
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::io::Write;
 
 use crate::mystring::nullstr;
@@ -86,7 +86,7 @@ unsafe fn getopts(optstr: *mut c_char, optvar: *mut c_char, optfirst: *mut *mut 
     shellparam.optind = -1;
     optnext = optfirst.offset(ind as isize - 1);
 
-    if ind <= 1 || off < 0 || (libc::strlen(*optnext.offset(-1)) as size_t) < off as size_t {
+    if ind <= 1 || off < 0 || CStr::from_ptr(*optnext.offset(-1)).count_bytes() < off as size_t {
         p = null_mut();
     } else {
         p = (*optnext.offset(-1)).offset(off as isize);

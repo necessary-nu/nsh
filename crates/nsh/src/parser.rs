@@ -969,7 +969,7 @@ unsafe fn parsefname(n: &mut Node) {
          * the new terminator is where the delimiter now ends. */
         let mut mark = takeglobal(addr_of_mut!(wordtext));
         rmescapes(mark.as_mut_ptr() as *mut c_char);
-        let n_mark = libc::strlen(mark.as_ptr() as *const c_char);
+        let n_mark = CStr::from_ptr(mark.as_ptr() as *const c_char).count_bytes();
         mark.truncate(n_mark);
         here.eofmark = mark;
         /* `parseheredoc` asked the node whether it was NXHERE; the type is

@@ -201,8 +201,7 @@ unsafe fn updatepwd(dir: *const c_char) -> *const c_char {
 
     /* `sstrdup(dir)`.  The copy outlives the whole walk because the
      * components below borrow it while `new` grows. */
-    let cdcompbuf: Vec<u8> =
-        core::slice::from_raw_parts(dir as *const u8, libc::strlen(dir)).to_vec();
+    let cdcompbuf: Vec<u8> = CStr::from_ptr(dir).to_bytes().to_vec();
     let new = &mut *addr_of_mut!(pwdbuf);
     new.clear();
     if *dir != b'/' as c_char {
@@ -211,7 +210,7 @@ unsafe fn updatepwd(dir: *const c_char) -> *const c_char {
         };
         new.extend_from_slice(cur);
     }
-    new.reserve(libc::strlen(dir) + 2);
+    new.reserve(cdcompbuf.len() + 2);
     lim = 1;
     if *dir != b'/' as c_char {
         /* `*(new - 1)` reads before the stack block when `curdir` is empty.

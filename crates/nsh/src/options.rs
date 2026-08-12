@@ -116,14 +116,6 @@ pub unsafe fn shellparam_p() -> *mut *mut c_char {
     (*addr_of_mut!(shellparam)).p()
 }
 
-/// A positional parameter's bytes, terminator included.
-unsafe fn word(s: *const c_char) -> BString {
-    BString::from(core::slice::from_raw_parts(
-        s as *const u8,
-        libc::strlen(s) + 1,
-    ))
-}
-
 pub const NOPTS: usize = 18;
 
 /*
@@ -386,10 +378,7 @@ unsafe fn argv_words<'a>(argv: *mut *mut c_char) -> Vec<&'a BStr> {
     let mut words = Vec::new();
     let mut p = argv;
     while !(*p).is_null() {
-        words.push(BStr::new(core::slice::from_raw_parts(
-            *p as *const u8,
-            libc::strlen(*p),
-        )));
+        words.push(BStr::new(CStr::from_ptr(*p).to_bytes()));
         p = p.add(1);
     }
     words

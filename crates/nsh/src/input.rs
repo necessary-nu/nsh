@@ -736,7 +736,7 @@ pub unsafe fn pungetc() {
 pub unsafe fn pushstring(s: *mut c_char, ap: *mut c_void) {
     let len: size_t;
 
-    len = libc::strlen(s) as size_t;
+    len = CStr::from_ptr(s).count_bytes();
     INTOFF();
     /*dprintf("*** calling pushstring: %s, %d\n", s, len);*/
     /* The C picks between `basestrpush` and a `ckmalloc` here; a `Vec`
@@ -849,7 +849,7 @@ unsafe fn setinputfd(fd: c_int, push: c_int) {
 pub unsafe fn setinputstring(string: *mut c_char) {
     INTOFF();
     pushfile();
-    let len: usize = libc::strlen(string);
+    let len: usize = CStr::from_ptr(string).count_bytes();
     let pf = cur_pf();
     /* The C points `nextc` at the caller's string and reads it in place,
      * which is why `evalstring` has to keep its `sstrdup` alive across the

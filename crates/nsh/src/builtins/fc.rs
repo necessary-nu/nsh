@@ -385,11 +385,13 @@ pub unsafe fn histcmd(args: &[&BStr]) -> c_int {
              * and lets `fccmd`'s enclosing mark release it.  `evalstring`
              * copies what it is given, so the buffer is dead as soon as
              * that call returns and can be this block's. */
+            let editor_bytes = CStr::from_ptr(editor).to_bytes();
+            let file_bytes = CStr::from_ptr(editfile.as_ptr()).to_bytes();
             let mut editcmdbuf: Vec<u8> =
-                Vec::with_capacity(libc::strlen(editor) + libc::strlen(editfile.as_ptr()) + 2);
-            editcmdbuf.extend_from_slice(CStr::from_ptr(editor).to_bytes());
+                Vec::with_capacity(editor_bytes.len() + file_bytes.len() + 2);
+            editcmdbuf.extend_from_slice(editor_bytes);
             editcmdbuf.push(b' ');
-            editcmdbuf.extend_from_slice(CStr::from_ptr(editfile.as_ptr()).to_bytes());
+            editcmdbuf.extend_from_slice(file_bytes);
             editcmdbuf.push(0);
             let editcmd: *mut c_char = editcmdbuf.as_mut_ptr() as *mut c_char;
 
