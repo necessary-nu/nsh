@@ -318,8 +318,16 @@ impl Spec {
             let mut text = String::from(significand);
             let mut zeros = significant - 1 - places;
             if self.alt {
-                if significant == 1 {
+                /* Style e reached only because rounding carried the
+                 * value up a decade -- its own exponent, one lower,
+                 * would have chosen style f. C has a single digit to
+                 * show for that and no zeros behind it to keep. */
+                let carried = i64::from(exponent) == significant as i64
+                    && carried_decade(magnitude, exponent);
+                if significant == 1 || carried {
+                    text.truncate(1);
                     text.push('.');
+                    zeros = 0;
                 }
             } else {
                 /* Every counted zero is a trailing one, so trimming
@@ -445,6 +453,25 @@ impl Spec {
         };
         (if upper { b"0X" } else { b"0x" }, body)
     }
+}
+
+/// Whether rounding carried `magnitude` up into the decade `exponent`
+/// names.
+///
+/// It is the only way `%g` reaches style e from a value whose own
+/// exponent would have chosen style f, and C shows a single digit for
+/// it: the carry replaces the whole digit string with one `1`, so `#`
+/// finds no trailing zeros to keep and `printf '%#g' 999999.5` is
+/// `1.e+06` rather than the `1.00000e+06` the standard describes. The
+/// comparison is made against the value's exact decimal expansion, which
+/// terminates well inside the places asked for here, so no second
+/// rounding stands between the two exponents.
+fn carried_decade(magnitude: f64, exponent: i32) -> bool {
+    /// More significant digits than a double's exact expansion has.
+    const EXACT_DIGITS: usize = 767;
+
+    let exact = format!("{magnitude:.*e}", EXACT_DIGITS);
+    split_exponent(&exact).1 < exponent
 }
 
 // ---------------------------------------------------------------------
@@ -679,6 +706,31 @@ mod tests {
         assert_eq!(unsigned("#.4", 8, b'o'), "0010");
         assert_eq!(unsigned("#", 8, b'o'), "010");
         assert_eq!(unsigned("", 0, b'o'), "0");
+    }
+
+    /// A `%g` that reaches style e only because rounding carried the
+    /// value into the next decade has one digit to show for it, so `#`
+    /// finds nothing to keep.
+    #[test]
+    fn a_switching_carry_shows_one_digit() {
+        assert_eq!(double("#", 999999.5, b'g'), "1.e+06");
+        assert_eq!(double("#.3", 999.5, b'g'), "1.e+03");
+        assert_eq!(double("#.2", 99.5, b'g'), "1.e+02");
+        assert_eq!(double("#.1", 9.5, b'g'), "1.e+01");
+        assert_eq!(double("#", 999999.5, b'G'), "1.E+06");
+
+        /* Style e the value chose for itself keeps every digit the
+         * precision asked for, carry or no carry. */
+        assert_eq!(double("#", 1000000.0, b'g'), "1.00000e+06");
+        assert_eq!(double("#.3", 999999.5, b'g'), "1.00e+06");
+        assert_eq!(double("#", 9999999.5, b'g'), "1.00000e+07");
+
+        /* A carry that stays inside style f zero-fills as ever, and
+         * without `#` the zeros go whichever way it went. */
+        assert_eq!(double("#", 9.9999995, b'g'), "10.0000");
+        assert_eq!(double("#.3", 0.9995, b'g'), "1.00");
+        assert_eq!(double("#.2", 0.0000999995, b'g'), "0.00010");
+        assert_eq!(double("", 999999.5, b'g'), "1e+06");
     }
 
     /// A precision naming more places than Rust's formatter holds is a
