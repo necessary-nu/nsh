@@ -287,6 +287,17 @@ pub unsafe fn onint() -> ! {
 /// conversion starts with `Other` alone: every raise site can be rewritten
 /// mechanically and the interesting ones promoted afterwards, instead of
 /// needing the final taxonomy before the first commit.
+/// Constructing one of these is not the same as raising it, and dropping it
+/// on the floor is how a diagnostic gets written while the shell carries on
+/// past a failure it should have abandoned. That is a silent wrong answer
+/// rather than a crash, which is the failure mode
+/// `docs/errors-are-values.md` §6 names as the dangerous one for this whole
+/// conversion -- and it happened: `redir::sh_open_fail` stopped diverging
+/// when it started returning a value, and two `goto ecreate` sites fell
+/// through instead of stopping, printing the diagnostic twice and then
+/// redirecting to a descriptor that was never opened. The corpus caught it.
+/// This attribute is what makes the compiler catch the next one.
+#[must_use = "an Error that is built and not returned reports a failure the shell then ignores"]
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {

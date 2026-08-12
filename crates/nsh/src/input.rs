@@ -13,6 +13,7 @@
 //! whichever text the level is reading -- the frame's own `buf`, or the
 //! string the innermost `strpush` pushed in front of it.
 
+use crate::error::Error;
 use core::ptr::addr_of_mut;
 use libc::{c_char, c_int, c_void, off_t, size_t, tcflag_t};
 use std::ffi::CStr;
@@ -337,16 +338,16 @@ unsafe fn flush_tee(buf: *mut c_void, nr: c_int, mut pending: c_int) {
 
 // [spec:dash:def:input.stdin-tee-fn]
 // [spec:dash:sem:input.stdin-tee-fn]
-unsafe fn stdin_tee(buf: *mut c_void, nr: c_int) -> c_int {
+unsafe fn stdin_tee(buf: *mut c_void, nr: c_int) -> Result<c_int, Error> {
     let err: c_int;
 
     if stdin_state.pip[0] == 0 {
-        crate::redir::sh_pipe(addr_of_mut!(stdin_state.pip) as *mut c_int, 0);
+        crate::redir::sh_pipe(addr_of_mut!(stdin_state.pip) as *mut c_int, 0)?;
         if stdin_state.pip[0] < 10 {
-            stdin_state.pip[0] = crate::redir::savefd(stdin_state.pip[0], stdin_state.pip[0]);
+            stdin_state.pip[0] = crate::redir::savefd(stdin_state.pip[0], stdin_state.pip[0])?;
         }
         if stdin_state.pip[1] < 10 {
-            stdin_state.pip[1] = crate::redir::savefd(stdin_state.pip[1], stdin_state.pip[1]);
+            stdin_state.pip[1] = crate::redir::savefd(stdin_state.pip[1], stdin_state.pip[1])?;
         }
     }
 
@@ -359,7 +360,7 @@ unsafe fn stdin_tee(buf: *mut c_void, nr: c_int) -> c_int {
         err = -1;
     }
     stdin_state.pending = err;
-    err
+    Ok(err)
 }
 
 /// Clear `ALIASINUSE` on everything in `list`, newest first, which is the
@@ -533,7 +534,10 @@ unsafe fn preadfd() -> c_int {
         }
 
         if use_tee {
-            nr = stdin_tee(cur_pf().buf.as_mut_ptr().add(off) as *mut c_void, nr);
+            /* `preadfd` is not converted; the bridge performs the jump the
+             * C's `sh_open`/`savefd` performed from inside the tee. */
+            nr = stdin_tee(cur_pf().buf.as_mut_ptr().add(off) as *mut c_void, nr)
+                .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
             if nr >= 0 {
                 fd = stdin_state.pip[0];
             } else if errno() == libc::EINVAL {
@@ -802,21 +806,21 @@ unsafe fn popstring() {
 
 // [spec:dash:def:input.setinputfile-fn]
 // [spec:dash:sem:input.setinputfile-fn]
-pub unsafe fn setinputfile(fname: *const c_char, flags: c_int) -> c_int {
+pub unsafe fn setinputfile(fname: *const c_char, flags: c_int) -> Result<c_int, Error> {
     let mut fd: c_int;
 
     INTOFF();
-    fd = crate::redir::sh_open(fname, libc::O_RDONLY, flags & INPUT_NOFILE_OK);
+    fd = crate::redir::sh_open(fname, libc::O_RDONLY, flags & INPUT_NOFILE_OK)?;
     if fd < 0 {
         INTON();
-        return fd; /* goto out */
+        return Ok(fd); /* goto out */
     }
     if fd < 10 {
-        fd = crate::redir::savefd(fd, fd);
+        fd = crate::redir::savefd(fd, fd)?;
     }
     setinputfd(fd, flags & INPUT_PUSH_FILE);
     INTON();
-    fd
+    Ok(fd)
 }
 
 /*

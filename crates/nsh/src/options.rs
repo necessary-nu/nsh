@@ -256,7 +256,7 @@ pub unsafe fn procargs(mut xargv: *mut *mut c_char) -> Result<c_int, Error> {
             setarg0 = true; /* goto setarg0 */
         }
     } else if optlist[sflag] == 0 {
-        crate::input::setinputfile(*xargv, 0);
+        crate::input::setinputfile(*xargv, 0)?;
         setarg0 = true;
     }
     if setarg0 {

@@ -341,7 +341,13 @@ pub unsafe fn setjobctl(on: c_int) {
     }
     if on != 0 {
         let ofd: c_int;
-        ofd = crate::redir::sh_open(_PATH_TTY.as_ptr() as *const c_char, libc::O_RDWR, 1);
+        /* `setjobctl` is reached from `exitshell`'s job-control teardown as
+         * well as from `optschanged`, so it stays infallible and bridges:
+         * a failure here longjmps exactly as the C's `sh_open` did. Making
+         * teardown fallible is the shape docs/errors-are-values.md 4.3
+         * argues against. */
+        ofd = crate::redir::sh_open(_PATH_TTY.as_ptr() as *const c_char, libc::O_RDWR, 1)
+            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
         fd = ofd;
         'after_dowhile: {
             'out_lbl: {
@@ -369,7 +375,9 @@ pub unsafe fn setjobctl(on: c_int) {
                             break 'out_lbl; // goto out
                         }
                     }
-                    fd = crate::redir::savefd(fd, ofd);
+                    fd = crate::redir::savefd(fd, ofd).unwrap_or_else(|e| {
+                        crate::error::raise_reported(crate::error::EXERROR, e)
+                    });
                     loop {
                         /* while we are in the background */
                         pgrp = libc::tcgetpgrp(fd);
@@ -902,7 +910,13 @@ unsafe fn forkchild(jp: Option<usize>, n: Option<&Node>, mode: c_int) {
             let sin: c_int = crate::streams::streams().stdin;
             libc::close(sin);
             let f: c_int =
-                crate::redir::sh_open(_PATH_DEVNULL.as_ptr() as *const c_char, libc::O_RDONLY, 0);
+                /* In the forked child. An `Err` returned from here would
+                 * propagate through frames the parent also owns, so the
+                 * child raises as the C does; see 2.5. */
+                crate::redir::sh_open(_PATH_DEVNULL.as_ptr() as *const c_char, libc::O_RDONLY, 0)
+                    .unwrap_or_else(|e| {
+                        crate::error::raise_reported(crate::error::EXERROR, e)
+                    });
             if f != sin {
                 libc::dup2(f, sin);
                 libc::close(f);

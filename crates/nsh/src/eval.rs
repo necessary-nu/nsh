@@ -593,7 +593,7 @@ unsafe fn evalsubshell(n: &Node, flags: c_int) -> Result<c_int, Error> {
     }
     // nofork:
     INTON();
-    crate::redir::redirect(&r.redirect, 0);
+    crate::redir::redirect(&r.redirect, 0)?;
     evaltreenr(r.n.as_deref(), flags)
     /* never returns */
 }
@@ -739,7 +739,7 @@ pub unsafe fn evalbackcmd(n: Option<&Node>, result: *mut backcmd) -> Result<(), 
             break 'out_lbl;
         }
 
-        crate::redir::sh_pipe(pip.as_mut_ptr(), 0);
+        crate::redir::sh_pipe(pip.as_mut_ptr(), 0)?;
         tpip[0] = pip[0];
         tpip[1] = pip[1];
         jp = crate::jobs::makejob(1);

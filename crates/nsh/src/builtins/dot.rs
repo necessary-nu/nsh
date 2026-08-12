@@ -78,7 +78,7 @@ pub unsafe fn dotcmd(args: &[&BStr]) -> Result<c_int, Error> {
         let name = crate::shell::cstring(name);
         let fullname = find_dot_file(name.as_ptr() as *mut c_char, &mut dotfile)?;
 
-        crate::input::setinputfile(fullname, crate::input::INPUT_PUSH_FILE);
+        crate::input::setinputfile(fullname, crate::input::INPUT_PUSH_FILE)?;
         /* `evalbltin`'s epilogue reads `commandname` after this returns —
          * `flushall(); if (outerr(out1)) sh_warnx("%s: I/O error",
          * commandname);` — and the C is safe there only because the block

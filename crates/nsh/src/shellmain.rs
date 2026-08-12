@@ -372,7 +372,9 @@ unsafe fn read_profile(name: *const c_char) {
     if crate::input::setinputfile(
         name,
         crate::input::INPUT_PUSH_FILE | crate::input::INPUT_NOFILE_OK,
-    ) < 0
+    )
+    .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e))
+        < 0
     {
         return;
     }
@@ -388,7 +390,8 @@ unsafe fn read_profile(name: *const c_char) {
 // [spec:dash:def:main.readcmdfile-fn]
 // [spec:dash:sem:main.readcmdfile-fn]
 pub unsafe fn readcmdfile(name: *mut c_char) {
-    crate::input::setinputfile(name, crate::input::INPUT_PUSH_FILE);
+    crate::input::setinputfile(name, crate::input::INPUT_PUSH_FILE)
+        .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
     cmdloop(0);
     crate::input::popfile();
 }

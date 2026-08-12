@@ -1,6 +1,7 @@
 //! Literal port of `src/redir.c` / `src/redir.h`.
 //! Rules: `docs/spec/port/src/redir.md`.
 
+use crate::error::Error;
 use core::ptr::{addr_of_mut, null_mut};
 use libc::{c_char, c_int, c_uint, c_void, size_t};
 use std::ffi::CStr;
@@ -84,7 +85,7 @@ unsafe fn update_closed_redirs(fd: c_int, nfd: c_int) -> c_uint {
 
 // [spec:dash:def:redir.redirect-fn]
 // [spec:dash:sem:redir.redirect-fn]
-pub unsafe fn redirect(redir: &[Node], flags: c_int) {
+pub unsafe fn redirect(redir: &[Node], flags: c_int) -> Result<(), Error> {
     let sv: Option<usize>;
     let mut i: c_int;
     let mut fd: c_int;
@@ -92,7 +93,7 @@ pub unsafe fn redirect(redir: &[Node], flags: c_int) {
 
     /* #if notyet — the `memory[10]` in-memory sink is not compiled. */
     if redir.is_empty() {
-        return;
+        return Ok(());
     }
     INTOFF();
     /* `sv = redirlist` — the frame `pushredir` just pushed, and NULL when
@@ -105,7 +106,7 @@ pub unsafe fn redirect(redir: &[Node], flags: c_int) {
     /* The C walks the list through `n->nfile.next`, which is the same offset
      * in every redirection arm; the list is a `Vec` now. */
     for n in redir {
-        newfd = openredirect(n);
+        newfd = openredirect(n)?;
         if newfd >= -1 {
             fd = n.redir_fd();
             /* The C's `fd == 0` is "this redirection replaced the shell's
@@ -128,7 +129,7 @@ pub unsafe fn redirect(redir: &[Node], flags: c_int) {
                 if i == EMPTY {
                     i = CLOSED;
                     if fd != newfd && closed == 0 {
-                        i = savefd(fd, fd);
+                        i = savefd(fd, fd)?;
                         fd = -1;
                     }
                 }
@@ -137,7 +138,10 @@ pub unsafe fn redirect(redir: &[Node], flags: c_int) {
             }
 
             if fd != newfd {
-                dupredirect(n, newfd);
+                /* The `?` returns between the INTOFF above and the INTON
+                 * below, leaking the counter exactly as the longjmp out of
+                 * `sh_dup2` did; see docs/errors-are-values.md 2.4. */
+                dupredirect(n, newfd)?;
             }
         }
     }
@@ -162,11 +166,12 @@ pub unsafe fn redirect(redir: &[Node], flags: c_int) {
             }
         }
     }
+    Ok(())
 }
 
 // [spec:dash:def:redir.sh-open-fail-fn]
 // [spec:dash:sem:redir.sh-open-fail-fn]
-unsafe fn sh_open_fail(pathname: *const c_char, flags: c_int, e: c_int) -> ! {
+unsafe fn sh_open_fail(pathname: *const c_char, flags: c_int, e: c_int) -> Error {
     let mut word: *const c_char;
     let mut action: c_int;
 
@@ -183,12 +188,16 @@ unsafe fn sh_open_fail(pathname: *const c_char, flags: c_int, e: c_int) -> ! {
     message.extend_from_slice(CStr::from_ptr(pathname).to_bytes());
     message.extend_from_slice(b": ");
     message.extend_from_slice(CStr::from_ptr(crate::error::errmsg(e, action)).to_bytes());
-    crate::error::sh_error(&message)
+    crate::error::sh_error_value(&message)
 }
 
 // [spec:dash:def:redir.sh-open-fn]
 // [spec:dash:sem:redir.sh-open-fn]
-pub unsafe fn sh_open(pathname: *const c_char, flags: c_int, mayfail: c_int) -> c_int {
+pub unsafe fn sh_open(
+    pathname: *const c_char,
+    flags: c_int,
+    mayfail: c_int,
+) -> Result<c_int, Error> {
     let mut fd: c_int;
     let mut e: c_int;
 
@@ -201,15 +210,15 @@ pub unsafe fn sh_open(pathname: *const c_char, flags: c_int, mayfail: c_int) -> 
     }
 
     if mayfail != 0 || fd >= 0 {
-        return fd;
+        return Ok(fd);
     }
 
-    sh_open_fail(pathname, flags, e);
+    Err(sh_open_fail(pathname, flags, e))
 }
 
 // [spec:dash:def:redir.openredirect-fn]
 // [spec:dash:sem:redir.openredirect-fn]
-unsafe fn openredirect(redir: &Node) -> c_int {
+unsafe fn openredirect(redir: &Node) -> Result<c_int, Error> {
     let mut sb: libc::stat64 = core::mem::zeroed();
     let mut fname: *mut c_char = null_mut();
     let mut flags: c_int;
@@ -219,11 +228,11 @@ unsafe fn openredirect(redir: &Node) -> c_int {
         NFROM => {
             flags = libc::O_RDONLY;
             /* do_open: */
-            f = sh_open(redir.nfile().expfname_ptr(), flags, 0);
+            f = sh_open(redir.nfile().expfname_ptr(), flags, 0)?;
         }
         NFROMTO => {
             flags = libc::O_RDWR | libc::O_CREAT;
-            f = sh_open(redir.nfile().expfname_ptr(), flags, 0);
+            f = sh_open(redir.nfile().expfname_ptr(), flags, 0)?;
         }
         NTO | NCLOBBER => {
             let mut fell_through = true;
@@ -240,16 +249,16 @@ unsafe fn openredirect(redir: &Node) -> c_int {
 
                     if (sb.st_mode & libc::S_IFMT) == libc::S_IFREG {
                         /* goto ecreate */
-                        sh_open_fail(fname, libc::O_CREAT, libc::EEXIST);
+                        return Err(sh_open_fail(fname, libc::O_CREAT, libc::EEXIST));
                     }
 
-                    fv = sh_open(fname, libc::O_WRONLY, 0);
+                    fv = sh_open(fname, libc::O_WRONLY, 0)?;
                     if libc::fstat64(fv, &mut sb) == 0
                         && (sb.st_mode & libc::S_IFMT) == libc::S_IFREG
                     {
                         libc::close(fv);
                         /* goto ecreate */
-                        sh_open_fail(fname, libc::O_CREAT, libc::EEXIST);
+                        return Err(sh_open_fail(fname, libc::O_CREAT, libc::EEXIST));
                     }
                     fell_through = false;
                 }
@@ -257,14 +266,14 @@ unsafe fn openredirect(redir: &Node) -> c_int {
             }
             if fell_through {
                 flags = libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC;
-                f = sh_open(redir.nfile().expfname_ptr(), flags, 0);
+                f = sh_open(redir.nfile().expfname_ptr(), flags, 0)?;
             } else {
                 f = fv;
             }
         }
         NAPPEND => {
             flags = libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND;
-            f = sh_open(redir.nfile().expfname_ptr(), flags, 0);
+            f = sh_open(redir.nfile().expfname_ptr(), flags, 0)?;
         }
         NTOFD | NFROMFD => {
             let mut fv = redir.ndup().dupfd.get();
@@ -285,16 +294,16 @@ unsafe fn openredirect(redir: &Node) -> c_int {
             if crate::shell::DEBUG {
                 std::process::abort();
             }
-            f = openhere(redir);
+            f = openhere(redir)?;
         }
     }
 
-    f
+    Ok(f)
 }
 
 // [spec:dash:def:redir.sh-dup2-fn]
 // [spec:dash:sem:redir.sh-dup2-fn]
-unsafe fn sh_dup2(ofd: c_int, nfd: c_int, cfd: c_int) -> c_int {
+unsafe fn sh_dup2(ofd: c_int, nfd: c_int, cfd: c_int) -> Result<c_int, Error> {
     let mut nfd = nfd;
     let mut cfd = cfd;
 
@@ -314,34 +323,35 @@ unsafe fn sh_dup2(ofd: c_int, nfd: c_int, cfd: c_int) -> c_int {
         write!(&mut message, "{}", ofd).expect("writing to a Vec cannot fail");
         message.extend_from_slice(b": ");
         message.extend_from_slice(CStr::from_ptr(libc::strerror(errno())).to_bytes());
-        crate::error::sh_error(&message);
+        return Err(crate::error::sh_error_value(&message));
     }
 
-    nfd
+    Ok(nfd)
 }
 
 // [spec:dash:def:redir.dupredirect-fn]
 // [spec:dash:sem:redir.dupredirect-fn]
 /// The extracted `def` signature carries a stray `#endif`; the real signature
 /// (outside `#ifdef notyet`) is `static void dupredirect(union node *, int)`.
-unsafe fn dupredirect(redir: &Node, f: c_int) {
+unsafe fn dupredirect(redir: &Node, f: c_int) -> Result<(), Error> {
     let fd: c_int = redir.redir_fd();
 
     if redir.node_type() == NTOFD || redir.node_type() == NFROMFD {
         /* if not ">&-" */
         if f >= 0 {
-            sh_dup2(f, fd, -1);
-            return;
+            sh_dup2(f, fd, -1)?;
+            return Ok(());
         }
         libc::close(fd);
     } else {
-        sh_dup2(f, fd, f);
+        sh_dup2(f, fd, f)?;
     }
+    Ok(())
 }
 
 // [spec:dash:def:redir.sh-pipe-fn]
 // [spec:dash:sem:redir.sh-pipe-fn]
-pub unsafe fn sh_pipe(pip: *mut c_int, memfd: c_int) -> c_int {
+pub unsafe fn sh_pipe(pip: *mut c_int, memfd: c_int) -> Result<c_int, Error> {
     if memfd != 0 {
         *pip.offset(0) = if USE_MEMFD_CREATE != 0 {
             libc::memfd_create(b"dash\0".as_ptr() as *const c_char, 0)
@@ -349,16 +359,16 @@ pub unsafe fn sh_pipe(pip: *mut c_int, memfd: c_int) -> c_int {
             -1
         };
         if *pip.offset(0) >= 0 {
-            *pip.offset(1) = sh_dup2(*pip.offset(0), -1, *pip.offset(0));
-            return 1;
+            *pip.offset(1) = sh_dup2(*pip.offset(0), -1, *pip.offset(0))?;
+            return Ok(1);
         }
     }
 
     if libc::pipe(pip) < 0 {
-        crate::error::sh_error(b"Pipe call failed");
+        return Err(crate::error::sh_error_value(b"Pipe call failed"));
     }
 
-    0
+    Ok(0)
 }
 
 /*
@@ -369,7 +379,7 @@ pub unsafe fn sh_pipe(pip: *mut c_int, memfd: c_int) -> c_int {
 
 // [spec:dash:def:redir.openhere-fn]
 // [spec:dash:sem:redir.openhere-fn]
-unsafe fn openhere(redir: &Node) -> c_int {
+unsafe fn openhere(redir: &Node) -> Result<c_int, Error> {
     let len: size_t;
     let mut pip: [c_int; 2] = [0; 2];
     let memfd: c_int;
@@ -392,14 +402,14 @@ unsafe fn openhere(redir: &Node) -> c_int {
     }
 
     len = CStr::from_ptr(p).count_bytes();
-    memfd = sh_pipe(pip.as_mut_ptr(), (len > PIPESIZE) as c_int);
+    memfd = sh_pipe(pip.as_mut_ptr(), (len > PIPESIZE) as c_int)?;
 
     if memfd != 0 || len <= PIPESIZE {
         crate::output::xwrite(pip[1], p as *const c_void, len);
         libc::lseek(pip[1], 0, libc::SEEK_SET);
         /* goto out */
         libc::close(pip[1]);
-        return pip[0];
+        return Ok(pip[0]);
     }
 
     if crate::jobs::forkshell(None, None, crate::jobs::FORK_NOJOB) == 0 {
@@ -415,7 +425,7 @@ unsafe fn openhere(redir: &Node) -> c_int {
     }
     /* out: */
     libc::close(pip[1]);
-    pip[0]
+    Ok(pip[0])
 }
 
 /*
@@ -497,7 +507,7 @@ pub unsafe fn mkinit_forkreset() {
 
 // [spec:dash:def:redir.savefd-fn]
 // [spec:dash:sem:redir.savefd-fn]
-pub unsafe fn savefd(from: c_int, ofd: c_int) -> c_int {
+pub unsafe fn savefd(from: c_int, ofd: c_int) -> Result<c_int, Error> {
     let newfd: c_int;
     let err: c_int;
 
@@ -512,13 +522,13 @@ pub unsafe fn savefd(from: c_int, ofd: c_int) -> c_int {
             write!(&mut message, "{}", from).expect("writing to a Vec cannot fail");
             message.extend_from_slice(b": ");
             message.extend_from_slice(CStr::from_ptr(libc::strerror(err)).to_bytes());
-            crate::error::sh_error(&message);
+            return Err(crate::error::sh_error_value(&message));
         } else if HAVE_F_DUPFD_CLOEXEC == 0 {
             libc::fcntl(newfd, libc::F_SETFD, libc::FD_CLOEXEC);
         }
     }
 
-    newfd
+    Ok(newfd)
 }
 
 // [spec:dash:def:redir.redirectsafe-fn]
@@ -533,7 +543,8 @@ pub unsafe fn redirectsafe(redir: &[Node], flags: c_int) -> c_int {
     crate::SAVEINT!(saveint);
     err = crate::eval::setjmp_catch(jl, || {
         crate::error::handler = jl;
-        redirect(redir, flags);
+        redirect(redir, flags)
+            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
     }) * 2;
     crate::expand::restore_handler_expandarg(savehandler, err);
     crate::RESTOREINT!(saveint);
