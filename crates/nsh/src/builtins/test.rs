@@ -201,7 +201,7 @@ unsafe fn getop(s: *const c_char) -> *const t_op {
 
     op = ptr::addr_of!(ops) as *const t_op;
     while !(*op).op_text.is_null() {
-        if libc::strcmp(s, (*op).op_text) == 0 {
+        if CStr::from_ptr(s).to_bytes() == CStr::from_ptr((*op).op_text).to_bytes() {
             return op;
         }
         op = op.add(1);
@@ -262,14 +262,14 @@ pub unsafe fn testcmd(args: &[&BStr]) -> c_int {
                 /* fall through */
             }
             if argc == 3 || argc == 4 {
-                if libc::strcmp(*argv, c"(".as_ptr()) == 0
-                    && libc::strcmp(*argv.add((argc - 1) as usize), c")".as_ptr()) == 0
+                if CStr::from_ptr(*argv).to_bytes() == b"("
+                    && CStr::from_ptr(*argv.add((argc - 1) as usize)).to_bytes() == b")"
                 {
                     argc -= 1;
                     *argv.add(argc as usize) = ptr::null_mut();
                     argv = argv.add(1);
                     argc -= 1;
-                } else if libc::strcmp(*argv, c"!".as_ptr()) == 0 {
+                } else if CStr::from_ptr(*argv).to_bytes() == b"!" {
                     res = 0;
                     continue 'recheck;
                 }
@@ -389,8 +389,8 @@ unsafe fn primary(n: token) -> c_int {
             syntax((*t_wp_op).op_text, c"argument expected".as_ptr());
         }
         match n {
-            token::STREZ => return (libc::strlen(*t_wp) == 0) as c_int,
-            token::STRNZ => return (libc::strlen(*t_wp) != 0) as c_int,
+            token::STREZ => return CStr::from_ptr(*t_wp).to_bytes().is_empty() as c_int,
+            token::STRNZ => return (!CStr::from_ptr(*t_wp).to_bytes().is_empty()) as c_int,
             token::FILTT => return libc::isatty(getn(*t_wp) as c_int),
             // #ifdef HAVE_FACCESSAT
             token::FILRD => return test_file_access(*t_wp, libc::R_OK),
@@ -407,7 +407,7 @@ unsafe fn primary(n: token) -> c_int {
         return binop();
     }
 
-    (libc::strlen(*t_wp) > 0) as c_int
+    (!CStr::from_ptr(*t_wp).to_bytes().is_empty()) as c_int
 }
 
 // [spec:dash:def:test.binop-fn]
@@ -432,7 +432,7 @@ unsafe fn binop() -> c_int {
     // is not defined here) falling through into `case STREQ`; the `_` arm
     // below is that same default, moved last because Rust requires it.
     match token_of((*op).op_num) {
-        token::STRNE => (libc::strcmp(opnd1, opnd2) != 0) as c_int,
+        token::STRNE => (CStr::from_ptr(opnd1).to_bytes() != CStr::from_ptr(opnd2).to_bytes()) as c_int,
         token::STRLT => (libc::strcoll(opnd1, opnd2) < 0) as c_int,
         token::STRGT => (libc::strcoll(opnd1, opnd2) > 0) as c_int,
         token::INTEQ => (getn(opnd1) == getn(opnd2)) as c_int,
@@ -445,7 +445,7 @@ unsafe fn binop() -> c_int {
         token::FILOT => olderf(opnd1, opnd2) as c_int,
         token::FILEQ => equalf(opnd1, opnd2),
         // case STREQ: (and default:)
-        _ => (libc::strcmp(opnd1, opnd2) == 0) as c_int,
+        _ => (CStr::from_ptr(opnd1).to_bytes() == CStr::from_ptr(opnd2).to_bytes()) as c_int,
     }
 }
 

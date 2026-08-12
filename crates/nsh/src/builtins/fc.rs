@@ -12,7 +12,7 @@
 //! `crate::builtins::writable_args` says why: `getopt(3)` permutes the
 //! array it scans, and `fc -s old=new` splits that word in place.
 
-use bstr::{BStr, BString};
+use bstr::{BStr, BString, ByteSlice};
 use core::ffi::CStr;
 use core::mem;
 use core::ptr;
@@ -431,22 +431,36 @@ pub unsafe fn histcmd(args: &[&BStr]) -> c_int {
 // caller reads it anyway. An owned string carries its own terminator, and
 // returning it makes the lifetime the caller's rather than the enclosing
 // stack mark's, which matters because the caller hands it to `evalstring`.
-unsafe fn fc_replace(mut s: *const c_char, p: *mut c_char, mut r: *mut c_char) -> BString {
-    let mut dest: BString = BString::new(Vec::new());
-    let plen: c_int = libc::strlen(p) as c_int;
-
-    while *s != 0 {
-        if *s == *p && libc::strncmp(s, p, plen as usize) == 0 {
-            while *r != 0 {
-                dest.push(*r as u8);
-                r = r.add(1);
-            }
-            s = s.add(plen as usize);
-            *p = 0; /* so no more matches */
+unsafe fn fc_replace(s: *const c_char, p: *mut c_char, r: *mut c_char) -> BString {
+    let hay = CStr::from_ptr(s).to_bytes();
+    /* The C walks `s` a byte at a time and asks `*s == *p && strncmp(s,
+     * p, plen)` at each position, which is `find`. The leading-byte test
+     * is not an optimisation, though: it is also what makes an *empty*
+     * pattern match nothing, because the loop only runs while `*s` is
+     * non-NUL and `*p` is the NUL. `find` on an empty needle answers 0,
+     * so the emptiness is checked rather than inherited. */
+    let hit = {
+        let pat = CStr::from_ptr(p).to_bytes();
+        if pat.is_empty() {
+            None
         } else {
-            dest.push(*s as u8);
-            s = s.add(1);
+            hay.find(pat).map(|at| (at, pat.len()))
         }
+    };
+
+    let mut dest: BString = BString::new(Vec::new());
+    match hit {
+        Some((at, plen)) => {
+            dest.extend_from_slice(&hay[..at]);
+            dest.extend_from_slice(CStr::from_ptr(r).to_bytes());
+            dest.extend_from_slice(&hay[at + plen..]);
+            /* `so no more matches` — the C truncates the pattern in
+             * place, and the buffer belongs to the caller, so the
+             * suppression carries across the whole range of events and
+             * not just the rest of this line. */
+            *p = 0;
+        }
+        None => dest.extend_from_slice(hay),
     }
     dest.push(0);
 

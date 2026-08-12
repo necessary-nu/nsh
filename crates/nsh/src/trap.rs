@@ -451,10 +451,9 @@ pub unsafe fn decode_signal(string: *const c_char, minsig: c_int) -> c_int {
 
     signo = minsig;
     while signo < NSIG as c_int {
-        if libc::strcasecmp(
-            string,
-            crate::signames::signal_names[signo as usize].as_ptr(),
-        ) == 0
+        if CStr::from_ptr(string)
+            .to_bytes()
+            .eq_ignore_ascii_case(crate::signames::signal_names[signo as usize].to_bytes())
         {
             return signo;
         }

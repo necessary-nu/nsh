@@ -39,12 +39,10 @@ use crate::syntax::{
 // Local transcriptions of the C macros this file uses.
 // ---------------------------------------------------------------------
 
-/// `#define equal(s1, s2) (strcmp(s1, s2) == 0)` — src/mystring.h
-macro_rules! equal {
-    ($s1:expr, $s2:expr) => {
-        libc::strcmp($s1, $s2) == 0
-    };
-}
+/* `#define equal(s1, s2) (strcmp(s1, s2) == 0)` — src/mystring.h.  The
+ * macro had one caller and `strcmp`'s ordering was never wanted there,
+ * only its zero; `issimplecmd` now compares the two byte slices, and the
+ * word's text already knows its own length. */
 
 /// `#define USTPUTC(c, p) (*p++ = (c))` — src/memalloc.h:88
 ///
@@ -386,7 +384,9 @@ pub unsafe fn issimplecmd(n: Option<&Node>, name: *const c_char) -> c_int {
     match n {
         Some(n) if n.node_type() == NCMD => {
             let args = &n.ncmd().args;
-            (!args.is_empty() && equal!(args[0].narg().text.as_ptr(), name)) as c_int
+            (!args.is_empty()
+                && args[0].narg().text.as_bstr() == CStr::from_ptr(name).to_bytes())
+                as c_int
         }
         _ => 0,
     }
@@ -683,8 +683,13 @@ unsafe fn command() -> Option<Node> {
                 synexpect(-1);
             }
         } else {
+            /* The implicit `"$@"` of a `for` with no `in`. `dolatstr` is
+             * seven bytes ending in the NUL that a word's text keeps, so
+             * the value is the static and not what a C reader makes of
+             * it. */
+            let dolatstr: [u8; 7] = crate::mystring::dolatstr.map(|c| c as u8);
             args.push(Node::Arg(narg {
-                text: NodeText::from_ptr(ptr::addr_of!(crate::mystring::dolatstr) as *const c_char),
+                text: NodeText::new(BString::from(&dolatstr[..])),
                 backquote: Vec::new(),
             }));
             /*

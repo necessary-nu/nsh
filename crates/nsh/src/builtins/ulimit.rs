@@ -201,7 +201,7 @@ pub unsafe fn ulimitcmd(args: &[&BStr]) -> c_int {
         if all != 0 || operands.len() > 1 {
             crate::error::sh_error(b"too many arguments");
         }
-        if libc::strcmp(p, b"unlimited\0".as_ptr() as *const c_char) == 0 {
+        if limitarg.as_bytes() == b"unlimited" {
             val = libc::RLIM_INFINITY;
         } else {
             val = 0 as libc::rlim_t;

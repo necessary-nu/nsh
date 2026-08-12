@@ -186,6 +186,32 @@ pub unsafe fn is_number(p: *const c_char) -> c_int {
 }
 
 /*
+ * `strncmp(a, b, n) == 0`, which is the only question either caller asks
+ * of `strncmp`, and not a slice compare.
+ *
+ * The difference is how far it reads. `strncmp` stops at the first shared
+ * NUL, and `expand.rs`'s `pmatch` relies on that: the note there records
+ * that `mbs` points at a *single stack byte* when the string character is
+ * multibyte, and the C gets away with asking for `n` bytes from it only
+ * because the comparison ends at the terminator. `from_raw_parts(.., n)`
+ * on either side would read `n` unconditionally and turn a reproduced
+ * over-read into a certain one, so the loop is here rather than a
+ * `<[u8]>` method.
+ */
+pub unsafe fn ncmp_eq(a: *const c_char, b: *const c_char, n: usize) -> bool {
+    for i in 0..n {
+        let x = *a.add(i);
+        if x != *b.add(i) {
+            return false;
+        }
+        if x == 0 {
+            break;
+        }
+    }
+    true
+}
+
+/*
  * Produce a possibly single quoted string suitable as input to the shell.
  * The return string is allocated on the stack.
  *

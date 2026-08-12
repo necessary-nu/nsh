@@ -25,7 +25,7 @@ use core::mem;
 use core::ptr;
 use std::ffi::CStr;
 
-use bstr::{BStr, BString};
+use bstr::{BStr, BString, ByteSlice};
 use libc::{c_char, c_int, c_uint, c_ulong, c_void, intmax_t, size_t, ssize_t, wchar_t};
 
 // ---------------------------------------------------------------------
@@ -930,7 +930,9 @@ unsafe fn argstr(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
                 CTLQUOTEMARK => {
                     /* "$@" syntax adherence hack */
                     if inquotes == 0
-                        && libc::strcmp(p, crate::mystring::dolatstr.as_ptr().offset(1)) == 0
+                        && CStr::from_ptr(p).to_bytes()
+                            == CStr::from_ptr(crate::mystring::dolatstr.as_ptr().offset(1))
+                                .to_bytes()
                     {
                         p = evalvar(p.offset(1), flag | EXP_QUOTED).offset(1);
                         continue 'start; /* goto start */
@@ -2519,9 +2521,8 @@ unsafe fn expandmeta(words: Vec<strlist>) {
                 if fflag() != 0 {
                     break 'nometa;
                 }
-                if libc::strpbrk(str.textp(), b"*?]\0".as_ptr() as *const c_char).is_null()
-                    || libc::strcmp(str.textp(), b"]\0".as_ptr() as *const c_char) == 0
-                {
+                let text = CStr::from_ptr(str.textp()).to_bytes();
+                if text.find_byteset(b"*?]").is_none() || text == b"]" {
                     break 'nometa;
                 }
                 /* `savelastp = exparg.lastp` — where this word's matches
@@ -3162,7 +3163,7 @@ unsafe fn pmatch(pattern: *mut c_char, string: *const c_char) -> c_int {
                                     found = 1;
                                 }
                                 p = p.offset(1);
-                            } else if libc::strncmp(mbs, q, mb as size_t) == 0 {
+                            } else if crate::mystring::ncmp_eq(mbs, q, mb as usize) {
                                 found = 1;
                             }
                         }
@@ -3187,7 +3188,7 @@ unsafe fn pmatch(pattern: *mut c_char, string: *const c_char) -> c_int {
                     q = q.offset((mb & 0xff) as isize);
                     mb >>= 8;
 
-                    if libc::strncmp(p.offset(-1), q.offset(-1), (mb + 1) as size_t) != 0 {
+                    if !crate::mystring::ncmp_eq(p.offset(-1), q.offset(-1), (mb + 1) as usize) {
                         return 0;
                     }
 

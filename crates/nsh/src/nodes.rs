@@ -41,6 +41,7 @@
 //! with the layout it described.
 
 use core::cell::{Cell, OnceCell, RefCell};
+use core::ffi::CStr;
 use core::ptr;
 use std::rc::Rc;
 
@@ -141,17 +142,11 @@ impl NodeText {
         NodeText(text)
     }
 
-    /// Copy a NUL-terminated C string, NUL included.
-    ///
-    /// # Safety
-    /// `p` must point at a NUL-terminated string.
-    pub unsafe fn from_ptr(p: *const c_char) -> NodeText {
-        let len = libc::strlen(p);
-        NodeText(BString::from(core::slice::from_raw_parts(
-            p as *const u8,
-            len + 1,
-        )))
-    }
+    /* The `from_ptr` constructor is gone with the `strlen` it was built
+     * around. Its one caller in the shell is `parser.rs` handing `for` an
+     * implicit `"$@"`, and `dolatstr` is a fixed seven bytes ending in
+     * the NUL, so the walk was answering a question the static had
+     * already answered. */
 
     /// The C's `char *`. Callers only read through it; nothing in the shell
     /// writes a word's text after the parser has built the node.
@@ -630,17 +625,20 @@ mod tests {
         // `as_ptr` hands the readers that still take a `char *` a string
         // that terminates where the parser said it did.
         unsafe {
-            assert_eq!(libc::strlen(t.as_ptr()), 5);
+            assert_eq!(CStr::from_ptr(t.as_ptr()).count_bytes(), 5);
             assert_eq!(*t.as_ptr() as c_int, CTLQUOTEMARK);
         }
     }
 
     #[test]
-    fn node_text_from_ptr_copies_the_terminator() {
+    fn node_text_keeps_its_terminator() {
+        // `as_bstr` stops one short of the end, so a value built from
+        // bytes that already carry their NUL reads back without it -- and
+        // the C readers that take `as_ptr` still find one.
         let src = quoted_var();
-        let t = unsafe { NodeText::from_ptr(src.as_ptr() as *const c_char) };
+        let t = NodeText::new(BString::from(&src[..]));
         assert_eq!(t.as_bstr(), &src[..5]);
-        assert_ne!(t.as_ptr() as *const u8, src.as_ptr());
+        assert_eq!(unsafe { *t.as_ptr().add(5) }, 0);
     }
 
     #[test]
@@ -659,9 +657,9 @@ mod tests {
     #[test]
     fn a_word_may_contain_a_nul_the_terminator_does_not_hide() {
         // A raw NUL byte reaches the parser from the input, so the value is
-        // its bytes and not what `strlen` makes of them.
+        // its bytes and not what a C reader makes of them.
         let t = NodeText::new(BString::from(vec![b'a', 0, b'b', 0]));
         assert_eq!(t.as_bstr(), b"a\0b".as_slice());
-        assert_eq!(unsafe { libc::strlen(t.as_ptr()) }, 1);
+        assert_eq!(unsafe { CStr::from_ptr(t.as_ptr()) }.count_bytes(), 1);
     }
 }

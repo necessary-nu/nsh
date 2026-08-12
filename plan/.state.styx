@@ -1104,6 +1104,7 @@ assertions (
     {id builtins-take-args, kind @complete, author "brendan@necessary.nu", at 2026-08-11T22:24:41.681268303Z}
     {id builtins-modules, kind @complete, author "brendan@necessary.nu", at 2026-08-11T23:59:03.391843695Z}
     {id printf-builtin, kind @complete, author "brendan@necessary.nu", at 2026-08-12T08:29:30.995973456Z}
+    {id delete-libc-calls, kind @doing, author "brendan@necessary.nu", at 2026-08-12T08:43:23.424730657Z}
 )
 
 impl_evidence (

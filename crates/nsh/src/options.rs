@@ -439,7 +439,7 @@ unsafe fn minus_o(name: Option<&BStr>, val: c_int) {
         let name = name.expect("the naming branch");
         i = 0;
         while i < NOPTS as c_int {
-            if libc::strcmp(name.as_ptr(), optnames[i as usize]) == 0 {
+            if name.as_bytes() == CStr::from_ptr(optnames[i as usize]).to_bytes() {
                 optlist[i as usize] = val as c_char;
                 return;
             }

@@ -28,6 +28,7 @@
 //! declares its own binding and nothing else asked for one — as did the
 //! `conv_escape` prototype alias, which named a type no signature used.
 
+use bstr::ByteSlice;
 use libc::{c_char, c_int, c_void, size_t, ssize_t};
 
 /* `#ifndef SSIZE_MAX #define SSIZE_MAX ((ssize_t)((size_t)-1 >> 1))`.
@@ -52,28 +53,28 @@ pub unsafe fn sigclearmask() {
     libc::sigprocmask(libc::SIG_SETMASK, &set, core::ptr::null_mut());
 }
 
-/* `#ifndef HAVE_MEMPCPY`.  `copy_from_slice` plus the length is this,
- * but the three callers are raw-pointer cursors in `expand.rs`, whose
- * conversion is another task, so rewriting the callee alone would only
- * move the cast. */
+/* `#ifndef HAVE_MEMPCPY`.  `copy_nonoverlapping` plus the length is the
+ * whole of it: the callers are raw-pointer cursors, so the signature
+ * stays pointer-shaped, but nothing here needs libc to move bytes. */
 // [spec:dash:def:system.mempcpy-fn]
 // [spec:dash:sem:system.mempcpy-fn]
 pub unsafe fn mempcpy(dest: *mut c_void, src: *const c_void, n: size_t) -> *mut c_void {
-    (libc::memcpy(dest, src, n) as *mut u8).add(n) as *mut c_void
+    let dest = dest as *mut u8;
+    core::ptr::copy_nonoverlapping(src as *const u8, dest, n);
+    dest.add(n) as *mut c_void
 }
 
-/* `#ifndef HAVE_STRCHRNUL`.  `find_byte(c).unwrap_or(len)` is this, and
- * `mystring.rs` no longer calls it; the remaining callers are `var.rs`'s
- * `name=value` splits and three cursors in `expand.rs`, both other
- * tasks' files. */
+/* `#ifndef HAVE_STRCHRNUL`.  `find_byte(c).unwrap_or(len)` is exactly
+ * this: the miss returns the NUL rather than NULL, which is the only
+ * reason callers prefer it to `strchr`.  Searching for 0 finds the
+ * terminator either way, because `to_bytes` stops there and the miss
+ * lands on it. */
 // [spec:dash:def:system.strchrnul-fn]
 // [spec:dash:sem:system.strchrnul-fn]
 pub unsafe fn strchrnul(s: *const c_char, c: c_int) -> *mut c_char {
-    let mut p: *mut c_char = libc::strchr(s, c);
-    if p.is_null() {
-        p = (s as *mut c_char).add(libc::strlen(s));
-    }
-    p
+    let bytes = core::ffi::CStr::from_ptr(s).to_bytes();
+    let off = bytes.find_byte(c as u8).unwrap_or(bytes.len());
+    (s as *mut c_char).add(off)
 }
 
 /*
