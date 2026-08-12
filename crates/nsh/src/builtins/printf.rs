@@ -177,10 +177,16 @@ impl<'a> Operands<'a> {
 }
 
 /// Skip the blanks a C `strto*` conversion skips before the sign.
+///
+/// The set is C's `isspace` in the C locale, spelled out because Rust's
+/// `is_ascii_whitespace` is a different set: it leaves out the vertical
+/// tab, and a conversion that stopped at one would call
+/// `printf '%d' "$(printf '\v42')"` a malformed number where the C reads
+/// 42. Every numeric conversion and every `*` width reaches here.
 fn skip_blanks(bytes: &[u8]) -> usize {
     bytes
         .iter()
-        .position(|byte| !byte.is_ascii_whitespace())
+        .position(|byte| !matches!(byte, b' ' | 0x09..=0x0d))
         .unwrap_or(bytes.len())
 }
 
@@ -663,6 +669,19 @@ mod tests {
         assert_eq!(integer("0", true), (0, 1, false));
         assert_eq!(integer("  -5", true).0, (-5i64) as u64);
         assert_eq!(integer("+7", true).0, 7);
+    }
+
+    /// Every blank C's `isspace` names is skipped before the sign, the
+    /// vertical tab included.
+    #[test]
+    fn every_c_blank_precedes_a_number() {
+        for blank in [" ", "\t", "\n", "\x0b", "\x0c", "\r"] {
+            assert_eq!(integer(&format!("{blank}42"), true), (42, 3, false));
+            assert_eq!(double(&format!("{blank}2.5")).0, 2.5);
+        }
+        /* Not a blank: the conversion stops before it and converts
+         * nothing at all. */
+        assert_eq!(integer("\x0e42", true), (0, 0, false));
     }
 
     /// A prefix with no digits behind it converts the `0` and stops at

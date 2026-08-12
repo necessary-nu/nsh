@@ -2540,6 +2540,21 @@ children (
                     }
                 )
             }
+
+            {
+                id printf-errata
+                title "Fix the printf errata: the %.65536f shell panic and the review's six other reports"
+                kind @fix
+                deps (printf-builtin)
+                log (
+                    {
+                        at 2026-08-12T10:17:50.098828971Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+                )
+            }
         )
     }
 )
