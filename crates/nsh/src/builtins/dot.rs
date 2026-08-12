@@ -26,7 +26,7 @@ unsafe fn find_dot_file(basename: *mut c_char, out: &mut Vec<u8>) -> *mut c_char
     let mut len: c_int;
 
     /* don't try this for absolute or relative paths */
-    if !libc::strchr(basename, '/' as c_int).is_null() {
+    if CStr::from_ptr(basename).to_bytes().contains(&b'/') {
         return basename;
     }
 

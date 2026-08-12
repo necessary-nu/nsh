@@ -111,10 +111,7 @@ pub unsafe fn umaskcmd(args: &[&BStr]) -> c_int {
             'sym: {
                 'error_lbl: {
                     while *ap != 0 {
-                        while *ap != 0
-                            && !libc::strchr(b"augo\0".as_ptr() as *const c_char, *ap as c_int)
-                                .is_null()
-                        {
+                        while *ap != 0 && b"augo".contains(&(*ap as u8)) {
                             let ch = *ap;
                             ap = ap.add(1);
                             match ch as u8 {
@@ -132,15 +129,12 @@ pub unsafe fn umaskcmd(args: &[&BStr]) -> c_int {
                         if op == 0 {
                             break 'error_lbl; // goto error
                         }
-                        if libc::strchr(b"=+-\0".as_ptr() as *const c_char, op as c_int).is_null() {
+                        if !b"=+-".contains(&(op as u8)) {
                             break;
                         }
                         ap = ap.add(1);
                         new_val = 0;
-                        while *ap != 0
-                            && !libc::strchr(b"rwxugoXs\0".as_ptr() as *const c_char, *ap as c_int)
-                                .is_null()
-                        {
+                        while *ap != 0 && b"rwxugoXs".contains(&(*ap as u8)) {
                             let ch = *ap;
                             ap = ap.add(1);
                             match ch as u8 {
@@ -175,9 +169,13 @@ pub unsafe fn umaskcmd(args: &[&BStr]) -> c_int {
                         if *ap == b',' as c_char {
                             positions = 0;
                             ap = ap.add(1);
-                        } else if libc::strchr(b"=+-\0".as_ptr() as *const c_char, *ap as c_int)
-                            .is_null()
-                        {
+                        /* The terminator stays in the set here, and only
+                         * here: the three scans above run under `*ap != 0`,
+                         * but this one can see the end of the mode, where
+                         * `strchr` matches the NUL and the C falls out
+                         * through the loop condition rather than through
+                         * this break. */
+                        } else if !b"=+-\0".contains(&(*ap as u8)) {
                             break;
                         }
                     }

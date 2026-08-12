@@ -253,7 +253,10 @@ pub unsafe fn histcmd(args: &[&BStr]) -> c_int {
          */
         if sflg != 0 {
             if argc > 0 && {
-                repl = libc::strchr(*argv, b'=' as c_int);
+                repl = CStr::from_ptr(*argv)
+                    .to_bytes()
+                    .find_byte(b'=')
+                    .map_or(ptr::null_mut(), |at| (*argv).add(at));
                 !repl.is_null()
             } {
                 pat = *argv;

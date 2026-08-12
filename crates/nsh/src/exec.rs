@@ -19,7 +19,7 @@
 //! rather than in the order `hashval` happens to chain. Registered in
 //! `docs/divergences.md`.
 
-use bstr::{BStr, BString};
+use bstr::{BStr, BString, ByteSlice};
 use core::ptr::{addr_of, addr_of_mut, null, null_mut};
 use libc::{c_char, c_int, size_t};
 use std::collections::BTreeMap;
@@ -180,7 +180,7 @@ pub unsafe fn shellexec(argv: *mut *mut c_char, path: *const c_char, mut idx: c_
      * owns it, so the `Vec` has to outlive every `execve` below. */
     let envv = crate::var::environment();
     let envp: *mut *mut c_char = envv.as_ptr() as *mut *mut c_char;
-    if !libc::strchr(*argv.offset(0), '/' as c_int).is_null() {
+    if CStr::from_ptr(*argv.offset(0)).to_bytes().contains(&b'/') {
         tryexec(*argv.offset(0), argv, envp);
         e = errno();
     } else {
@@ -265,7 +265,14 @@ unsafe fn legal_pathopt(
         }
 
         _ => {
-            opt = opt.add(libc::strcspn(opt, term));
+            /* `strcspn(opt, term)`: the length of the run before the
+             * first byte that is in `term`, which is `find_byteset`
+             * with the miss meaning "all of it". */
+            let rest = CStr::from_ptr(opt).to_bytes();
+            let end = rest
+                .find_byteset(CStr::from_ptr(term).to_bytes())
+                .unwrap_or(rest.len());
+            opt = opt.add(end);
         }
     }
 
@@ -317,11 +324,17 @@ pub unsafe fn padvance_magic(path: &mut *const c_char, name: *const c_char, magi
         term = b":\0".as_ptr() as *const c_char;
     }
 
-    len = libc::strcspn(start, term);
+    let rest = CStr::from_ptr(start).to_bytes();
+    len = rest
+        .find_byteset(CStr::from_ptr(term).to_bytes())
+        .unwrap_or(rest.len());
     p = start.add(len);
 
     if *p == b'%' as c_char {
-        let extra: size_t = libc::strchrnul(p, ':' as c_int) as usize - p as usize;
+        /* `strchrnul(p, ':') - p` is the distance to the next colon or to
+         * the end, which is what a miss returning the length spells. */
+        let rest = CStr::from_ptr(p).to_bytes();
+        let extra: size_t = rest.find_byte(b':').unwrap_or(rest.len());
 
         if !legal_pathopt(p.add(1), term, magic).is_null() {
             lpathopt = p.add(1);
@@ -426,7 +439,7 @@ pub unsafe fn find_command(
     let mut lpath: *const c_char = path;
 
     /* If name contains a slash, don't use PATH or hash table */
-    if !libc::strchr(name, '/' as c_int).is_null() {
+    if CStr::from_ptr(name).to_bytes().contains(&b'/') {
         (*entry).u.index = -1;
         'absdone: {
             if (act & DO_ABS) != 0 {
@@ -687,12 +700,11 @@ pub unsafe fn changepath(newval: *const c_char) {
             bltin = idx;
             break;
         }
-        new = libc::strchr(new, ':' as c_int);
-        if new.is_null() {
-            break;
+        match CStr::from_ptr(new).to_bytes().find_byte(b':') {
+            Some(at) => new = new.add(at + 1),
+            None => break,
         }
         idx += 1;
-        new = new.add(1);
     }
     builtinloc = bltin;
     clearcmdentry();

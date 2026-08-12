@@ -870,7 +870,20 @@ unsafe fn argstr(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
             let mb: c_uint;
             let end: c_int;
 
-            length += libc::strcspn(p.offset(length as isize), reject);
+            /* `strcspn(p + length, reject)`: the run of bytes that are
+             * neither the terminator nor in the reject set. Counted
+             * rather than found with `find_byteset`, because this loop
+             * re-enters after every control byte and taking the whole
+             * remaining string each time would turn one pass over a word
+             * into one pass per escape. */
+            let rejectset = CStr::from_ptr(reject).to_bytes();
+            let from = p.offset(length as isize);
+            length += (0usize..)
+                .take_while(|&i| {
+                    let c = *from.add(i);
+                    c != 0 && !rejectset.contains(&(c as u8))
+                })
+                .count();
             c = *p.offset(length as isize) as c_int;
             if (c & 0x80) == 0 || c == CTLENDARI as c_int || c == CTLENDVAR as c_int {
                 /*
@@ -1522,7 +1535,15 @@ unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
     quoted = flag & EXP_QUOTED;
     var = p;
     startloc = expdest_off();
-    p = libc::strchr(p, C_EQUALS as c_int).offset(1);
+    /* The parser always writes the `=` that ends the variable name, and
+     * the C dereferences `strchr`'s result without checking. */
+    p = p.add(
+        CStr::from_ptr(p)
+            .to_bytes()
+            .find_byte(C_EQUALS as u8)
+            .expect("the parser ends a variable name with `=`")
+            + 1,
+    );
 
     mbchar = match subtype {
         VSTRIMLEFT | VSTRIMLEFTMAX | VSTRIMRIGHT | VSTRIMRIGHTMAX => EXP_MBCHAR,
@@ -2058,7 +2079,12 @@ unsafe fn ifsisifs(p: *const c_char, ml: c_uint, ifs: *const c_char) -> c_uint {
             isifs = wcifs_chr(wcifsv(), wc);
             ifs0 = wcifsv()[0];
         } else if ml == 0 {
-            isifs = !libc::strchr(ifs, wc as c_int).is_null();
+            /* `strchr` matches the terminator, so a NUL character --
+             * which is what `ml == 0` means -- counts as an IFS byte.
+             * `to_bytes_with_nul` keeps that. */
+            isifs = CStr::from_ptr(ifs)
+                .to_bytes_with_nul()
+                .contains(&(wc as u8));
             ifs0 = *ifs as wchar_t;
         }
 
@@ -2758,7 +2784,11 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
             p = name;
             esc = 0;
             loop {
-                p = libc::strpbrk(p.offset(esc as isize), b"*?]\0".as_ptr() as *const c_char);
+                let from = p.offset(esc as isize);
+                p = CStr::from_ptr(from)
+                    .to_bytes()
+                    .find_byteset(b"*?]")
+                    .map_or(ptr::null_mut(), |at| from.add(at));
                 if p.is_null() {
                     break;
                 }
@@ -2997,10 +3027,10 @@ unsafe fn ccmatch(mut p: *mut c_char, mbc: *const c_char, ml: c_int, r: *mut *mu
     }
     p = p.offset(1);
 
-    q = libc::strstr(p, b":]\0".as_ptr() as *const c_char);
-    if q.is_null() {
-        return 0;
-    }
+    q = match CStr::from_ptr(p).to_bytes().find(b":]") {
+        Some(at) => p.add(at),
+        None => return 0,
+    };
 
     *q = 0;
     type_ = wctype(p);
@@ -3066,15 +3096,28 @@ unsafe fn pmatch(pattern: *mut c_char, string: *const c_char) -> c_int {
                     }
                     loop {
                         if c != CTLESC {
-                            /* Stop should be null-terminated
-                             * as it is passed as a string to
-                             * strpbrk(3).
-                             */
-                            let stop: [c_char; 4] = [c, CTLESC, CTLMBCHAR, 0];
-                            q = libc::strpbrk(q, stop.as_ptr());
-                            if q.is_null() {
+                            /* The C's comment here is `Stop should be
+                             * null-terminated as it is passed as a string
+                             * to strpbrk(3)`, and the terminator was the
+                             * whole reason for the fourth element. The
+                             * set is the three bytes; the scan stops at
+                             * the string's own NUL, which is a miss.
+                             *
+                             * Walked rather than taken as a slice: this
+                             * runs once per candidate position under a
+                             * `*`, and measuring the whole tail each time
+                             * would cost a pass per position. */
+                            let stop: [u8; 3] = [c as u8, CTLESC as u8, CTLMBCHAR as u8];
+                            let at = (0usize..)
+                                .find(|&i| {
+                                    let b = *q.add(i) as u8;
+                                    b == 0 || stop.contains(&b)
+                                })
+                                .expect("the scan ends at the terminator");
+                            if *q.add(at) == C_NUL {
                                 return 0;
                             }
+                            q = q.add(at);
                         }
                         if pmatch(p, q) != 0 {
                             return 1;
@@ -3236,10 +3279,13 @@ pub unsafe fn _rmescapes(
     let mut inquotes: c_int;
     let mut fulllen: size_t = 0;
 
-    p = libc::strpbrk(str, crate::mystring::cqchars.as_ptr());
-    if p.is_null() {
-        return str;
-    }
+    /* `strpbrk`'s set is the string without its terminator: it never
+     * matches a NUL, which is what stops the scan instead. */
+    let cqset = crate::mystring::cqchars.map(|c| c as u8);
+    p = match CStr::from_ptr(str).to_bytes().find_byteset(&cqset[..4]) {
+        Some(at) => str.add(at),
+        None => return str,
+    };
     q = p;
     r = str;
     globbing = flag & RMESCAPE_GLOB;

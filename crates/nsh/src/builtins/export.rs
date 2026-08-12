@@ -8,7 +8,9 @@
 //! handling: with no operands it prints the set, and with them it sets a
 //! flag on names that exist and creates the ones that do not.
 
-use bstr::BStr;
+use bstr::{BStr, ByteSlice};
+use core::ffi::CStr;
+use core::ptr;
 use libc::{c_char, c_int};
 
 use crate::options::Options;
@@ -35,14 +37,18 @@ pub unsafe fn exportcmd(args: &[&BStr]) -> c_int {
             let word = crate::shell::cstring(word);
             let name = word.as_ptr() as *mut c_char;
 
-            p = libc::strchr(name, b'=' as c_int);
-            if !p.is_null() {
-                p = p.add(1);
-            } else {
-                vp = findvar(name);
-                if !vp.is_null() {
-                    (*vp).flags |= flag;
-                    continue;
+            match CStr::from_ptr(name).to_bytes().find_byte(b'=') {
+                /* `setvar` wants the value, which is the byte after the
+                 * `=` in the same buffer -- the C keeps `strchr`'s
+                 * pointer and steps it once. */
+                Some(at) => p = name.add(at + 1),
+                None => {
+                    p = ptr::null();
+                    vp = findvar(name);
+                    if !vp.is_null() {
+                        (*vp).flags |= flag;
+                        continue;
+                    }
                 }
             }
             setvar(name, p, flag);

@@ -4,7 +4,8 @@
 //! `crate::alias`, where the parser and the line editor read it; this is
 //! the command that prints and defines entries in it.
 
-use bstr::BStr;
+use bstr::{BStr, ByteSlice};
+use core::ffi::CStr;
 use core::ptr::null_mut;
 use libc::c_int;
 use std::io::Write;
@@ -31,11 +32,14 @@ pub unsafe fn aliascmd(args: &[&BStr]) -> c_int {
         let n = word.as_ptr();
         /* n + 1: funny ksh stuff (from 44lite) */
         let vv = if *n == 0 {
-            null_mut()
+            None
         } else {
-            libc::strchr(n.add(1), b'=' as c_int)
+            CStr::from_ptr(n.add(1))
+                .to_bytes()
+                .find_byte(b'=')
+                .map(|at| n.add(1 + at))
         };
-        if *n == 0 || vv.is_null() {
+        if *n == 0 || vv.is_none() {
             ap = __lookupalias(n);
             if ap.is_null() {
                 let mut message = b"alias: ".to_vec();
@@ -47,7 +51,7 @@ pub unsafe fn aliascmd(args: &[&BStr]) -> c_int {
                 printalias(ap);
             }
         } else {
-            setalias(n, vv.add(1));
+            setalias(n, vv.expect("the `=` branch").add(1));
         }
     }
 

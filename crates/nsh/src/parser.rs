@@ -2003,9 +2003,11 @@ unsafe fn parsesub(st: &mut Rt1<'_>) -> bool {
                     /*FALLTHROUGH*/
                 }
                 /* default: */
-                let p = libc::strchr(types.as_ptr() as *const c_char, st.c);
-                if !p.is_null() {
-                    subtype |= (p as isize - types.as_ptr() as isize) as c_int + VSNORMAL;
+                /* The search runs over the whole array, terminator
+                 * included, because that is what `strchr` does: a NUL
+                 * `c` lands on index 5 rather than missing. */
+                if let Some(at) = types.iter().position(|&b| b as c_int == st.c) {
+                    subtype |= at as c_int + VSNORMAL;
                 }
             }
         } else {

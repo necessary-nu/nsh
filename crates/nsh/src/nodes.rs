@@ -41,7 +41,6 @@
 //! with the layout it described.
 
 use core::cell::{Cell, OnceCell, RefCell};
-use core::ffi::CStr;
 use core::ptr;
 use std::rc::Rc;
 
@@ -602,6 +601,8 @@ pub unsafe fn freefunc(f: *const funcnode) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::ffi::CStr;
+
     use crate::parser::{CTLENDVAR, CTLESC, CTLQUOTEMARK, CTLVAR};
 
     /// The bytes `"$x"` leaves the parser as: they are invalid UTF-8 by

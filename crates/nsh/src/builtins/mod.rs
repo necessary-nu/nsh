@@ -246,7 +246,7 @@ pub static WAITCMD: &builtincmd = &builtincmd[39];
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bstr::BString;
+    use bstr::{BString, ByteSlice};
 
     use crate::expand::strlist;
 
@@ -295,9 +295,11 @@ mod tests {
         let slots = writable_args(&args);
 
         unsafe {
-            let eq = libc::strchr(slots[0], b'=' as c_int);
-            assert!(!eq.is_null());
-            *eq = 0;
+            let at = CStr::from_ptr(slots[0])
+                .to_bytes()
+                .find_byte(b'=')
+                .expect("the word splits at the `=`");
+            *slots[0].add(at) = 0;
             assert_eq!(CStr::from_ptr(slots[0]).to_bytes(), b"old");
         }
         assert_eq!(fields[0].text, BString::from(&b"old\0new\0"[..]));

@@ -896,14 +896,15 @@ pub unsafe fn mklocal(name: *mut c_char, flags: c_int) {
     if *name.offset(0) == b'-' as c_char && *name.offset(1) == b'\0' as c_char {
         pushlocal(localvar::Options(optlist));
     } else {
-        let eq: *mut c_char;
         let found: *mut var;
 
         found = findvar(name);
-        eq = libc::strchr(name, b'=' as c_int);
+        /* The C keeps `strchr`'s pointer and only ever asks whether it is
+         * NULL: `setvareq` finds the `=` again for itself. */
+        let eq = CStr::from_ptr(name).to_bytes().contains(&b'=');
         if found.is_null() {
             let vp: *mut var;
-            if !eq.is_null() {
+            if eq {
                 vp = setvareq(name, VSTRFIXED | flags);
             } else {
                 vp = setvar(name, null_mut(), VSTRFIXED | flags);
@@ -930,7 +931,7 @@ pub unsafe fn mklocal(name: *mut c_char, flags: c_int) {
                 flags: saved,
                 text,
             });
-            if !eq.is_null() {
+            if eq {
                 setvareq(name, flags);
             }
         }

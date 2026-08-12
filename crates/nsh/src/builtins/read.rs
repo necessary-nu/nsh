@@ -178,11 +178,12 @@ pub unsafe fn readcmd(args: &[&BStr]) -> c_int {
         }
         if pc == L_PUT {
             // put:
-            if !libc::strchr(
-                (core::ptr::addr_of!(crate::mystring::cqchars) as *const c_char).add(1),
-                c,
-            )
-            .is_null()
+            /* `strchr` matches the terminator too, so the set the C
+             * scans is `cqchars[1..]` *including* its NUL -- which is
+             * how a NUL read from the input gets escaped. */
+            if crate::mystring::cqchars[1..]
+                .iter()
+                .any(|&b| b as c_int == c)
             {
                 /* USTPUTC(CTLESC, p) */
                 line.push(crate::parser::CTLESC as u8);
