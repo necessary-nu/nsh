@@ -1,0 +1,33 @@
+# Where the two shells say `printf` is. Both answer "shell builtin", and
+# every case here is expected to PASS outright.
+#
+# The corpus exists because that answer went away once and came back.
+# `printf` was removed from the table under a decision that has since
+# been superseded ([dec:nsh:printf-is-parsed-not-interpreted]), and while
+# it was gone these same cases were the register's XFAIL evidence. They
+# are kept, pointed the other way: a shell that stops calling `printf` a
+# builtin has lost the row out of `builtins::builtincmd`, and `type` is
+# the cheapest place to see it.
+#
+# The echo, test and `.` cases are controls. They share the neighbourhood
+# in the table -- `echo` shares printf.c outright -- so if one of them
+# ever diverges while the printf cases still agree, the difference is in
+# `type` or the table's ordering rather than in printf.
+
+type printf
+command -v printf
+command -V printf
+type printf echo
+echo "[$(type printf > /dev/null 2>&1; echo $?)]"
+command -v printf > /dev/null; echo "found=$?"
+
+# Controls: still builtins, and still reported as such by both shells.
+type echo
+command -v echo
+command -V echo
+type test
+type .
+
+# A name that is neither a builtin nor on PATH behaves the same in both.
+type definitelynotacommandhere
+command -v definitelynotacommandhere; echo "rc=$?"

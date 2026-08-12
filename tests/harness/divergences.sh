@@ -174,7 +174,7 @@ ds_blocks_sorted() {
 # The register
 # ---------------------------------------------------------------------
 
-DS_DIVERGENCES=(sorted_tables sorted_cmdtable printf_is_external)
+DS_DIVERGENCES=(sorted_tables sorted_cmdtable)
 
 # A line the sorted tables produce: an environment entry, `NAME=value`, or
 # an alias listing, which is the same thing inside the single quotes
@@ -261,58 +261,6 @@ dsdiv_sorted_cmdtable() {
 	ds_same_lines "$1" "$2" || return 1
 	ds_moved_lines_match "$1" "$2" "$DS_HASH_LINE" || return 1
 	ds_hash_blocks_sorted "$2"
-}
-
-# `printf` is not a builtin here; it resolves through PATH like any other
-# utility. See docs/divergences.md and [dec:nsh:no-format-interpreters].
-#
-# The entry excuses exactly one thing: the shell's answer to "where is
-# printf". It does NOT excuse running printf. Once the utility is
-# external its output is GNU coreutils' and the reference's is dash's
-# builtin, so a difference there is between two printf implementations
-# rather than between two shells -- the corpus dropped those cases rather
-# than hiding them here, because absorbing them would mean modelling
-# coreutils in the register.
-#
-# Four conditions, each a regression class the entry must not reach:
-#
-#   * the exit status matches. Where printf lives does not change it.
-#   * the case asks about printf with `type` or `command`. A case that
-#     merely runs printf is refused.
-#   * every other line is byte-identical, in order, so an added,
-#     dropped, reordered or altered line still fails.
-#   * on a differing line the reference calls printf a builtin and the
-#     port names an executable ending in `/printf`. A differing line
-#     about any other command is refused -- `echo` is still a builtin
-#     and a case saying otherwise is a regression, not this.
-ds_printf_location_lines() {
-	local -a x y
-	local i
-
-	mapfile -t x <<< "$1"
-	mapfile -t y <<< "$2"
-	[ "${#x[@]}" = "${#y[@]}" ] || return 1
-	for ((i = 0; i < ${#x[@]}; i++)); do
-		[ "${x[i]}" = "${y[i]}" ] && continue
-		# `type printf` / `command -V printf`
-		if [ "${x[i]}" = "printf is a shell builtin" ]; then
-			[[ ${y[i]} =~ ^printf\ is\ /([^/[:space:]]+/)*printf$ ]] || return 1
-			continue
-		fi
-		# `command -v printf`
-		if [ "${x[i]}" = "printf" ]; then
-			[[ ${y[i]} =~ ^/([^/[:space:]]+/)*printf$ ]] || return 1
-			continue
-		fi
-		return 1
-	done
-	return 0
-}
-
-dsdiv_printf_is_external() {
-	[ "$3" = "$4" ] || return 1
-	ds_case_matches "$5" '(^|[;&|(`{][[:space:]]*)(type|command)([[:space:]]+-[a-zA-Z]+)*[[:space:]]+printf([[:space:]]|$|[;&|)`}])' || return 1
-	ds_printf_location_lines "$1" "$2"
 }
 
 # An extra register, for testing the machinery itself. It was written

@@ -250,57 +250,6 @@ printf 'hash -r\n' > "$case_file"
 check "sorted_cmdtable: hash -r is outside the entry" 1 \
 	"$H_BUCKET" "$H_SORTED" 0 0 "$case_file"
 
-# ---- printf_is_external -------------------------------------------
-#
-# The entry excuses the shell's answer to "where is printf" and nothing
-# else. Each case below is a difference it must NOT excuse.
-printf 'type printf\n' > "$case_file"
-T_REF="printf is a shell builtin"
-T_PORT="printf is /usr/bin/printf"
-
-check "printf_is_external: the location difference is excused" 0 \
-	"$T_REF" "$T_PORT" 0 0 "$case_file"
-check "printf_is_external: surrounding lines may be identical" 0 \
-	$'before\nprintf is a shell builtin\nafter' \
-	$'before\nprintf is /usr/bin/printf\nafter' 0 0 "$case_file"
-
-# command -v prints the bare word on one side and the path on the other.
-printf 'command -v printf\n' > "$case_file"
-check "printf_is_external: command -v is excused" 0 \
-	"printf" "/usr/bin/printf" 0 0 "$case_file"
-check "printf_is_external: command -v to a non-printf path is refused" 1 \
-	"printf" "/usr/bin/prontf" 0 0 "$case_file"
-
-printf 'type printf\n' > "$case_file"
-# A differing status is a different behaviour, not a different location.
-check "printf_is_external: a status mismatch is not excused" 1 \
-	"$T_REF" "$T_PORT" 0 1 "$case_file"
-# The port must actually name printf, not some other program.
-check "printf_is_external: naming another program is not excused" 1 \
-	"$T_REF" "printf is /usr/bin/perl" 0 0 "$case_file"
-check "printf_is_external: an unrelated port answer is not excused" 1 \
-	"$T_REF" "printf: not found" 0 0 "$case_file"
-# Any other command losing its builtin status is a regression. echo shares
-# printf.c and stayed, so this is the exact mistake the entry could make.
-check "printf_is_external: echo becoming external is not excused" 1 \
-	"echo is a shell builtin" "echo is /bin/echo" 0 0 "$case_file"
-check "printf_is_external: test becoming external is not excused" 1 \
-	"test is a shell builtin" "test is /usr/bin/test" 0 0 "$case_file"
-# Added, dropped and altered lines all still fail.
-check "printf_is_external: an extra port line is not excused" 1 \
-	"$T_REF" $"$T_PORT"$'\nsurprise' 0 0 "$case_file"
-check "printf_is_external: a dropped port line is not excused" 1 \
-	$'before\n'"$T_REF" "$T_PORT" 0 0 "$case_file"
-check "printf_is_external: a changed neighbouring line is not excused" 1 \
-	$'before\n'"$T_REF" $'BEFORE\n'"$T_PORT" 0 0 "$case_file"
-# Scope: a case that merely runs printf cannot acquire the excuse. Its
-# output belongs to coreutils, and the corpus drops such cases instead.
-printf "printf '%%5b' ab\n" > "$case_file"
-check "printf_is_external: running printf is outside the entry" 1 \
-	"$T_REF" "$T_PORT" 0 0 "$case_file"
-check "printf_is_external: a printf output difference is not excused" 1 \
-	"ab" "printf: %5b: invalid conversion specification" 0 0 "$case_file"
-
 # ---- the dead-harness guard --------------------------------------
 #
 # A shell that stopped existing is not a shell that behaved differently.
