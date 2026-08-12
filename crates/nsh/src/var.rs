@@ -85,13 +85,6 @@ impl VarText {
     }
 }
 
-/// `savestr(p)`: the C string at `p`, terminator included, in a buffer of
-/// its own.
-unsafe fn cstring_box(p: *const c_char) -> Box<[u8]> {
-    let n = libc::strlen(p);
-    core::slice::from_raw_parts(p as *const u8, n + 1).into()
-}
-
 // [spec:dash:def:var.var]
 /// The C carries a `struct var *next` here, the link in the hash chain.
 /// `vartab` is an ordered map now, so the link is the map's business and the
@@ -603,7 +596,7 @@ pub unsafe fn setvar(name: *const c_char, val: *const c_char, mut flags: c_int) 
     if val.is_null() {
         flags |= VUNSET;
     } else {
-        vallen = libc::strlen(val) as size_t;
+        vallen = CStr::from_ptr(val).count_bytes();
     }
     INTOFF();
     /* `ckmalloc(namelen + vallen + 2)` filled by two `mempcpy`s.  The
@@ -671,7 +664,7 @@ pub unsafe fn setvareq(s: *mut c_char, flags: c_int) -> *mut var {
          * statement before the store; the only path between here and there
          * that does not reach the store is the read-only `sh_error`, where
          * the copy is dropped by the unwind. */
-        VarText::Owned(cstring_box(s))
+        VarText::Owned(CStr::from_ptr(s).to_bytes_with_nul().into())
     };
     setvareq_text(text, flags)
 }

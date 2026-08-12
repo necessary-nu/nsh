@@ -172,10 +172,7 @@ pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> c_int {
      * is why the copy is taken *before* the mark is set and released by
      * hand afterwards.  Owning it says both halves at once, and says them
      * on the unwind path too, where the C's `stunalloc` never runs. */
-    let owned: Vec<u8> = {
-        let n = libc::strlen(s);
-        core::slice::from_raw_parts(s as *const u8, n + 1).to_vec()
-    };
+    let owned: Vec<u8> = CStr::from_ptr(s).to_bytes_with_nul().to_vec();
     let s: *mut c_char = owned.as_ptr() as *mut c_char;
 
     crate::input::setinputstring(s);

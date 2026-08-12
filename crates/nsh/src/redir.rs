@@ -394,7 +394,7 @@ unsafe fn openhere(redir: &Node) -> c_int {
         p = crate::expand::expansion_result();
     }
 
-    len = libc::strlen(p) as size_t;
+    len = CStr::from_ptr(p).count_bytes();
     memfd = sh_pipe(pip.as_mut_ptr(), (len > PIPESIZE) as c_int);
 
     if memfd != 0 || len <= PIPESIZE {

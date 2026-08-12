@@ -692,7 +692,7 @@ pub(crate) unsafe fn getjob(name: *const c_char, getctl: c_int) -> usize {
                         p = p.add(1);
                     }
 
-                    let pat: &[u8] = core::slice::from_raw_parts(p as *const u8, libc::strlen(p));
+                    let pat: &[u8] = CStr::from_ptr(p).to_bytes();
                     found = None;
                     while let Some(i) = jp {
                         let cmd = ps_cmd(i, 0);

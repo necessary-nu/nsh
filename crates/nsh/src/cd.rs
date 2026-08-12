@@ -83,7 +83,7 @@ pub unsafe fn setpwd(val: *const c_char, setold: c_int) {
     if val.is_null() {
         setpwd_inner(Pwd::Unknown, setold);
     } else {
-        let bytes = core::slice::from_raw_parts(val as *const u8, libc::strlen(val));
+        let bytes = CStr::from_ptr(val).to_bytes();
         setpwd_inner(Pwd::New(BStr::new(bytes)), setold);
     }
 }

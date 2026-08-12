@@ -149,7 +149,9 @@ impl strlist {
     #[inline]
     pub unsafe fn from_cstr(p: *const c_char) -> strlist {
         strlist {
-            text: crate::shell::cstring_bytes(p),
+            /* The terminator travels: every reader of a word's text
+             * reads it as a C string. */
+            text: BString::from(CStr::from_ptr(p).to_bytes_with_nul()),
         }
     }
 
@@ -172,8 +174,7 @@ impl strlist {
     pub unsafe fn rmescapes(&mut self) {
         let p = self.text.as_mut_ptr() as *mut c_char;
         rmescapes(p);
-        let n = libc::strlen(p);
-        self.text.truncate(n + 1);
+        self.text.truncate(CStr::from_ptr(p).count_bytes() + 1);
     }
 }
 
@@ -1853,7 +1854,7 @@ unsafe fn memtodest(
 // [spec:dash:def:expand.strtodest-fn]
 // [spec:dash:sem:expand.strtodest-fn]
 unsafe fn strtodest(p: *const c_char, flags: c_int, dst: &mut BString) -> size_t {
-    let len: size_t = libc::strlen(p);
+    let len: size_t = CStr::from_ptr(p).count_bytes();
     memtodest(p, len, flags, dst)
 }
 
@@ -2560,7 +2561,7 @@ unsafe fn expandmeta(words: Vec<strlist>) {
                     RMESCAPE_ALLOC | RMESCAPE_HEAP,
                     Some(&mut pattern),
                 );
-                len = libc::strlen(p) as c_uint;
+                len = CStr::from_ptr(p).count_bytes() as c_uint;
 
                 /* The C's top-level `expmeta` starts on whatever block the
                  * region is on and gets away with it because `expdir_len`
@@ -2890,7 +2891,7 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
                     {
                         break 'check_int; /* goto check_int */
                     }
-                    len = libc::strlen(dname) + 1;
+                    len = CStr::from_ptr(dname).to_bytes_with_nul().len();
                     p = dname;
                     if !FNMATCH_IS_ENABLED {
                         /* The C encodes the directory entry's name at
@@ -2962,7 +2963,8 @@ unsafe fn addfname(name: *mut c_char) {
     /* `sstrdup(name)`: the C copies `glob`'s `gl_pathv` entry into the
      * region because `globfree64` is about to free it.  The field owns the
      * copy now, which is the same statement without the allocator. */
-    addfname_common(crate::shell::cstring_bytes(name));
+    /* Terminator included -- `addfname_common`'s readers are C-shaped. */
+    addfname_common(BString::from(CStr::from_ptr(name).to_bytes_with_nul()));
 }
 
 /*
@@ -3292,7 +3294,7 @@ pub unsafe fn _rmescapes(
 
     if (flag & RMESCAPE_ALLOC) != 0 {
         let len: size_t = p.offset_from(str) as size_t;
-        fulllen = libc::strlen(p);
+        fulllen = CStr::from_ptr(p).count_bytes();
 
         if FNMATCH_IS_ENABLED && globbing != 0 {
             fulllen *= 2;

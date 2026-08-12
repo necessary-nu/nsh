@@ -69,18 +69,12 @@ pub fn cstr(s: &'static [u8]) -> *const c_char {
 }
 
 /*
- * The other direction: take a `char *` the shell is about to stop owning
- * and keep its bytes, terminator included.  Not part of shell.h.
- *
- * The terminator travels because every consumer of these bytes reads them
- * as a C string; a buffer that stops at `strlen` would have to have one
- * appended at each of them.
+ * The other direction had a helper here -- take a `char *` the shell is
+ * about to stop owning and keep its bytes, terminator included.  It was
+ * `strlen` plus a `from_raw_parts`, which is one `CStr::to_bytes_with_nul`
+ * and no longer worth a name; its two callers in `expand.rs` spell it and
+ * say why the terminator travels.
  */
-#[inline]
-pub unsafe fn cstring_bytes(p: *const c_char) -> bstr::BString {
-    let n = libc::strlen(p);
-    bstr::BString::from(core::slice::from_raw_parts(p as *const u8, n + 1).to_vec())
-}
 
 /// A word a builtin was handed, as the C string an interface that has not
 /// been converted yet still wants.

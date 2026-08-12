@@ -23,6 +23,7 @@
 //! second, independently mutable view of which destination is selected.
 
 use core::ptr::addr_of_mut;
+use std::ffi::CStr;
 use std::io::{self, Write};
 
 use libc::{c_char, c_int, c_void, size_t};
@@ -207,7 +208,7 @@ pub unsafe fn outmem(p: *const c_char, len: size_t, dest: *mut Output) {
 pub unsafe fn outstr(p: *const c_char, file: *mut Output) {
     let len: size_t;
 
-    len = libc::strlen(p);
+    len = CStr::from_ptr(p).count_bytes();
     outmem(p, len, file);
 }
 
