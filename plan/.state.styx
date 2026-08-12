@@ -1102,7 +1102,7 @@ assertions (
     {id nshedit-in-tree, kind @doing, author "brendan@necessary.nu", at 2026-08-09T22:10:03.872390597Z}
     {id output-is-a-writer, kind @complete, author "brendan@necessary.nu", at 2026-08-11T20:55:43.687147342Z}
     {id builtins-take-args, kind @complete, author "brendan@necessary.nu", at 2026-08-11T22:24:41.681268303Z}
-    {id builtins-modules, kind @doing, author "brendan@necessary.nu", at 2026-08-11T22:24:52.292630241Z}
+    {id builtins-modules, kind @complete, author "brendan@necessary.nu", at 2026-08-11T23:59:03.391843695Z}
 )
 
 impl_evidence (

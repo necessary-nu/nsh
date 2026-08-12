@@ -2456,12 +2456,20 @@ children (
                 title "Every builtin lives in its own builtins::<name> module"
                 kind @refactor
                 deps (builtins-take-args)
+                sealed true
                 log (
                     {
                         at 2026-08-11T22:24:52.292630241Z
                         author "brendan@necessary.nu"
                         kind @status
                         text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-11T23:59:03.391843695Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }
