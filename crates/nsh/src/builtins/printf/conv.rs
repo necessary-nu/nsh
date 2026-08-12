@@ -152,16 +152,22 @@ impl Spec {
     /// what distinguishes it from the space padding either side of a
     /// string; a string reaches here with no prefix and `zeros` false.
     fn field(&self, prefix: &[u8], body: &Number, zeros: bool) -> Option<Vec<u8>> {
-        let len = prefix.len() + body.len();
-        if self.over || len > LIMIT || self.width > LIMIT {
+        /* The three answers in the order glibc arrives at them. Digits
+         * past `INT_MAX` are read before the `*` that would have stopped
+         * it, so they outrank the echo; the echo in turn outranks any
+         * length, because a specification glibc cannot read is one it
+         * never renders and so never measures. */
+        if self.over {
             return None;
         }
-        /* Refusal first: glibc reads the width's digits before it
-         * reaches the `*` that stops it, so digits past `INT_MAX` are
-         * the error whatever follows them. */
         if let Some(text) = &self.literal {
             return Some(text.clone());
         }
+        let len = prefix.len() + body.len();
+        if len > LIMIT || self.width > LIMIT {
+            return None;
+        }
+
         let fill = self.width.saturating_sub(len);
         let mut out = Vec::with_capacity(len.max(self.width));
 
@@ -796,6 +802,12 @@ mod tests {
         let mut over = spec("2147483648");
         over.set_literal(b"%2147483648*ld".to_vec());
         assert!(over.signed(42).is_none());
+
+        /* A length only the rendering would have had is no length at
+         * all, because the rendering never happens. */
+        let mut long = spec(".2147483646");
+        long.set_literal(b"%.2147483646*f".to_vec());
+        assert_eq!(text(long.double(1.0, b'f')), "%.2147483646*f");
     }
 
     /// A field longer than the C counted is refused, and nothing of it
