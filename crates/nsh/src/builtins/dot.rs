@@ -20,7 +20,10 @@ use crate::shellmain::cmdloop;
 /// freed by the caller", meaning `dotcmd`'s enclosing `popstackmark`.
 /// The caller owns the buffer and this fills it, so the copy lasts
 /// exactly as long as the frame that asked for it.
-unsafe fn find_dot_file(basename: *mut c_char, out: &mut Vec<u8>) -> *mut c_char {
+unsafe fn find_dot_file(
+    basename: *mut c_char,
+    out: &mut Vec<u8>,
+) -> Result<*mut c_char, Error> {
     let mut fullname: *mut c_char;
     let mut path: *const c_char = crate::var::pathval();
     let mut statb: libc::stat64 = core::mem::zeroed();
@@ -28,7 +31,7 @@ unsafe fn find_dot_file(basename: *mut c_char, out: &mut Vec<u8>) -> *mut c_char
 
     /* don't try this for absolute or relative paths */
     if CStr::from_ptr(basename).to_bytes().contains(&b'/') {
-        return basename;
+        return Ok(basename);
     }
 
     loop {
@@ -51,7 +54,7 @@ unsafe fn find_dot_file(basename: *mut c_char, out: &mut Vec<u8>) -> *mut c_char
             out.clear();
             out.resize(len as usize, 0);
             out[..candidate.len()].copy_from_slice(candidate);
-            return out.as_mut_ptr() as *mut c_char;
+            return Ok(out.as_mut_ptr() as *mut c_char);
         }
     }
 
@@ -59,8 +62,7 @@ unsafe fn find_dot_file(basename: *mut c_char, out: &mut Vec<u8>) -> *mut c_char
     let mut message = Vec::new();
     message.extend_from_slice(CStr::from_ptr(basename).to_bytes());
     message.extend_from_slice(b": not found");
-    crate::error::sh_error(&message);
-    /* NOTREACHED */
+    Err(crate::error::sh_error_value(&message))
 }
 
 // [spec:dash:def:main.dotcmd-fn]
@@ -74,7 +76,7 @@ pub unsafe fn dotcmd(args: &[&BStr]) -> Result<c_int, Error> {
     if let Some(name) = opts.operands().first() {
         let mut dotfile: Vec<u8> = Vec::new();
         let name = crate::shell::cstring(name);
-        let fullname = find_dot_file(name.as_ptr() as *mut c_char, &mut dotfile);
+        let fullname = find_dot_file(name.as_ptr() as *mut c_char, &mut dotfile)?;
 
         crate::input::setinputfile(fullname, crate::input::INPUT_PUSH_FILE);
         /* `evalbltin`'s epilogue reads `commandname` after this returns —

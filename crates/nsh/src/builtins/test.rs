@@ -283,11 +283,11 @@ pub unsafe fn testcmd(args: &[&BStr]) -> Result<c_int, Error> {
 
     // eval:
     t_wp = argv;
-    res ^= oexpr(n);
+    res ^= oexpr(n)?;
     argv = t_wp;
 
     if !(*argv).is_null() && !(*argv.add(1)).is_null() {
-        syntax(*argv, c"unexpected operator".as_ptr());
+        return Err(syntax(*argv, c"unexpected operator".as_ptr()));
     }
 
     Ok(res)
@@ -295,23 +295,26 @@ pub unsafe fn testcmd(args: &[&BStr]) -> Result<c_int, Error> {
 
 // [spec:dash:def:test.syntax-fn]
 // [spec:dash:sem:test.syntax-fn]
-unsafe fn syntax(op: *const c_char, msg: *const c_char) -> ! {
+// The C's `syntax` does not return, because `sh_error` longjmps out of
+// it. Here it builds the error and the caller's `?` does the leaving --
+// the same bytes, written at the same point, by the same funnel.
+unsafe fn syntax(op: *const c_char, msg: *const c_char) -> Error {
     let mut message = Vec::new();
     if !op.is_null() && *op != 0 {
         message.extend_from_slice(CStr::from_ptr(op).to_bytes());
         message.extend_from_slice(b": ");
     }
     message.extend_from_slice(CStr::from_ptr(msg).to_bytes());
-    crate::error::sh_error(&message)
+    crate::error::sh_error_value(&message)
 }
 
 // [spec:dash:def:test.oexpr-fn]
 // [spec:dash:sem:test.oexpr-fn]
-unsafe fn oexpr(mut n: token) -> c_int {
+unsafe fn oexpr(mut n: token) -> Result<c_int, Error> {
     let mut res: c_int = 0;
 
     loop {
-        res |= aexpr(n);
+        res |= aexpr(n)?;
         if (*t_wp).is_null() {
             break;
         }
@@ -322,16 +325,16 @@ unsafe fn oexpr(mut n: token) -> c_int {
         t_wp = t_wp.add(2);
         n = t_lex(t_wp);
     }
-    res
+    Ok(res)
 }
 
 // [spec:dash:def:test.aexpr-fn]
 // [spec:dash:sem:test.aexpr-fn]
-unsafe fn aexpr(mut n: token) -> c_int {
+unsafe fn aexpr(mut n: token) -> Result<c_int, Error> {
     let mut res: c_int = 1;
 
     loop {
-        if nexpr(n) == 0 {
+        if nexpr(n)? == 0 {
             res = 0;
         }
         if (*t_wp).is_null() {
@@ -344,12 +347,12 @@ unsafe fn aexpr(mut n: token) -> c_int {
         t_wp = t_wp.add(2);
         n = t_lex(t_wp);
     }
-    res
+    Ok(res)
 }
 
 // [spec:dash:def:test.nexpr-fn]
 // [spec:dash:sem:test.nexpr-fn]
-unsafe fn nexpr(mut n: token) -> c_int {
+unsafe fn nexpr(mut n: token) -> Result<c_int, Error> {
     if n != token::UNOT {
         return primary(n);
     }
@@ -358,47 +361,47 @@ unsafe fn nexpr(mut n: token) -> c_int {
     if n != token::EOI {
         t_wp = t_wp.add(1);
     }
-    (nexpr(n) == 0) as c_int
+    Ok((nexpr(n)? == 0) as c_int)
 }
 
 // [spec:dash:def:test.primary-fn]
 // [spec:dash:sem:test.primary-fn]
-unsafe fn primary(n: token) -> c_int {
+unsafe fn primary(n: token) -> Result<c_int, Error> {
     let nn: token;
     let res: c_int;
 
     if n == token::EOI {
-        return 0; /* missing expression */
+        return Ok(0); /* missing expression */
     }
     if n == token::LPAREN {
         t_wp = t_wp.add(1);
         nn = t_lex(t_wp);
         if nn == token::RPAREN {
-            return 0; /* missing expression */
+            return Ok(0); /* missing expression */
         }
-        res = oexpr(nn);
+        res = oexpr(nn)?;
         t_wp = t_wp.add(1);
         if t_lex(t_wp) != token::RPAREN {
-            syntax(ptr::null(), c"closing paren expected".as_ptr());
+            return Err(syntax(ptr::null(), c"closing paren expected".as_ptr()));
         }
-        return res;
+        return Ok(res);
     }
     if !t_wp_op.is_null() && (*t_wp_op).op_type == token_types::UNOP as c_short {
         /* unary expression */
         t_wp = t_wp.add(1);
         if (*t_wp).is_null() {
-            syntax((*t_wp_op).op_text, c"argument expected".as_ptr());
+            return Err(syntax((*t_wp_op).op_text, c"argument expected".as_ptr()));
         }
         match n {
-            token::STREZ => return CStr::from_ptr(*t_wp).to_bytes().is_empty() as c_int,
-            token::STRNZ => return (!CStr::from_ptr(*t_wp).to_bytes().is_empty()) as c_int,
-            token::FILTT => return libc::isatty(getn(*t_wp) as c_int),
+            token::STREZ => return Ok(CStr::from_ptr(*t_wp).to_bytes().is_empty() as c_int),
+            token::STRNZ => return Ok((!CStr::from_ptr(*t_wp).to_bytes().is_empty()) as c_int),
+            token::FILTT => return Ok(libc::isatty(getn(*t_wp) as c_int)),
             // #ifdef HAVE_FACCESSAT
-            token::FILRD => return test_file_access(*t_wp, libc::R_OK),
-            token::FILWR => return test_file_access(*t_wp, libc::W_OK),
-            token::FILEX => return test_file_access(*t_wp, libc::X_OK),
+            token::FILRD => return Ok(test_file_access(*t_wp, libc::R_OK)),
+            token::FILWR => return Ok(test_file_access(*t_wp, libc::W_OK)),
+            token::FILEX => return Ok(test_file_access(*t_wp, libc::X_OK)),
             // #endif
-            _ => return filstat(*t_wp, n),
+            _ => return Ok(filstat(*t_wp, n)),
         }
     }
 
@@ -408,12 +411,12 @@ unsafe fn primary(n: token) -> c_int {
         return binop();
     }
 
-    (!CStr::from_ptr(*t_wp).to_bytes().is_empty()) as c_int
+    Ok((!CStr::from_ptr(*t_wp).to_bytes().is_empty()) as c_int)
 }
 
 // [spec:dash:def:test.binop-fn]
 // [spec:dash:sem:test.binop-fn]
-unsafe fn binop() -> c_int {
+unsafe fn binop() -> Result<c_int, Error> {
     let opnd1: *const c_char;
     let opnd2: *const c_char;
     let op: *const t_op;
@@ -426,13 +429,13 @@ unsafe fn binop() -> c_int {
     t_wp = t_wp.add(1);
     opnd2 = *t_wp;
     if opnd2.is_null() {
-        syntax((*op).op_text, c"argument expected".as_ptr());
+        return Err(syntax((*op).op_text, c"argument expected".as_ptr()));
     }
 
     // The C `switch` opens with `default:` (an `abort()` under DEBUG, which
     // is not defined here) falling through into `case STREQ`; the `_` arm
     // below is that same default, moved last because Rust requires it.
-    match token_of((*op).op_num) {
+    Ok(match token_of((*op).op_num) {
         token::STRNE => (CStr::from_ptr(opnd1).to_bytes() != CStr::from_ptr(opnd2).to_bytes()) as c_int,
         token::STRLT => (libc::strcoll(opnd1, opnd2) < 0) as c_int,
         token::STRGT => (libc::strcoll(opnd1, opnd2) > 0) as c_int,
@@ -447,7 +450,7 @@ unsafe fn binop() -> c_int {
         token::FILEQ => equalf(opnd1, opnd2),
         // case STREQ: (and default:)
         _ => (CStr::from_ptr(opnd1).to_bytes() == CStr::from_ptr(opnd2).to_bytes()) as c_int,
-    }
+    })
 }
 
 // [spec:dash:def:test.filstat-fn]

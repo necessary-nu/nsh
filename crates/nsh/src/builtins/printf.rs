@@ -56,10 +56,13 @@ unsafe fn emit(bytes: &[u8]) {
 /// asked glibc to lay every conversion out and `xvasprintf` treated the
 /// refusal as fatal, so the builtin stops there: whatever the format had
 /// already printed stays printed, and the shell's status is 2.
-unsafe fn emit_field(rendered: Option<Vec<u8>>) {
+unsafe fn emit_field(rendered: Option<Vec<u8>>) -> Result<(), Error> {
     match rendered {
-        Some(bytes) => emit(&bytes),
-        None => crate::error::sh_error(b"xvsnprintf failed"),
+        Some(bytes) => {
+            emit(&bytes);
+            Ok(())
+        }
+        None => Err(crate::error::sh_error_value(b"xvsnprintf failed")),
     }
 }
 
@@ -598,7 +601,7 @@ fn span(bytes: &[u8], at: usize, set: &[u8]) -> usize {
 /// Laying out bytes needs no stand-in.
 // [spec:dash:def:printf.print-escape-str-fn]
 // [spec:dash:sem:printf.print-escape-str-fn]
-unsafe fn print_escape_str(spec: &Spec, word: &CStr) -> c_int {
+unsafe fn print_escape_str(spec: &Spec, word: &CStr) -> Result<c_int, Error> {
     let mut buf = BString::default();
     let done = conv_escape_str(word.as_ptr(), &mut buf);
 
@@ -609,8 +612,8 @@ unsafe fn print_escape_str(spec: &Spec, word: &CStr) -> c_int {
     debug_assert!(!buf.is_empty());
     let text = &buf[..buf.len() - 1];
 
-    emit_field(spec.string(text));
-    done
+    emit_field(spec.string(text))?;
+    Ok(done)
 }
 
 // [spec:dash:def:printf.printfcmd-fn]
@@ -737,32 +740,32 @@ pub unsafe fn printfcmd(args: &[&BStr]) -> Result<c_int, Error> {
                 b'b' => {
                     let word = crate::shell::cstring(BStr::new(operands.getstr()));
                     /* escape if a \c was encountered */
-                    if print_escape_str(&spec, &word) != 0 {
+                    if print_escape_str(&spec, &word)? != 0 {
                         break 'out;
                     }
                 }
                 b'c' => {
                     let value = operands.getchr();
-                    emit_field(spec.character(value));
+                    emit_field(spec.character(value))?;
                 }
                 b's' => {
                     let value = operands.getstr();
-                    emit_field(spec.string(value));
+                    emit_field(spec.string(value))?;
                 }
                 /* `mklong` widened the specification to `PRIdMAX` so
                  * that C's printf would pull a whole `intmax_t` off the
                  * varargs. The value arrives typed. */
                 b'd' | b'i' => {
                     let value = operands.getuintmax(true);
-                    emit_field(spec.signed(value as i64));
+                    emit_field(spec.signed(value as i64))?;
                 }
                 b'o' | b'u' | b'x' | b'X' => {
                     let value = operands.getuintmax(false);
-                    emit_field(spec.unsigned(value, conversion));
+                    emit_field(spec.unsigned(value, conversion))?;
                 }
                 b'a' | b'A' | b'e' | b'E' | b'f' | b'F' | b'g' | b'G' => {
                     let value = operands.getdouble();
-                    emit_field(spec.double(value, conversion));
+                    emit_field(spec.double(value, conversion))?;
                 }
                 _ => {
                     let mut message = format[start..at].to_vec();
