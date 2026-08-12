@@ -281,11 +281,7 @@ pub unsafe fn mkinit_forkreset() {
     if stdin_state.pip[0] != 0 {
         libc::close(stdin_state.pip[0]);
         libc::close(stdin_state.pip[1]);
-        libc::memset(
-            addr_of_mut!(stdin_state.pip) as *mut c_void,
-            0,
-            core::mem::size_of::<[c_int; 2]>() as size_t,
-        );
+        stdin_state.pip = [0; 2];
     }
 }
 

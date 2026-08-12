@@ -44,11 +44,12 @@ unsafe fn find_dot_file(basename: *mut c_char, out: &mut Vec<u8>) -> *mut c_char
             /* `len` is `padvance`'s *allocation* size, one more than the
              * string's length when the PATH component is empty, so the
              * buffer is sized from it and the bytes copied by hand. */
-            out.clear();
+            let candidate = CStr::from_ptr(fullname).to_bytes_with_nul();
             debug_assert!(len > 0);
+            debug_assert!(candidate.len() <= len as usize);
+            out.clear();
             out.resize(len as usize, 0);
-            libc::strcpy(out.as_mut_ptr() as *mut c_char, fullname);
-            debug_assert!(libc::strlen(out.as_ptr() as *const c_char) < len as usize);
+            out[..candidate.len()].copy_from_slice(candidate);
             return out.as_mut_ptr() as *mut c_char;
         }
     }

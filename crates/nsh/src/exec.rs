@@ -352,8 +352,10 @@ pub unsafe fn padvance_magic(path: &mut *const c_char, name: *const c_char, magi
         null()
     };
 
-    /* "2" is for '/' and '\0' */
-    qlen = len + libc::strlen(name) + 2;
+    /* "2" is for '/' and '\0' -- the name's bytes already carry the
+     * second, so what is added here is the separator. */
+    let name_bytes = CStr::from_ptr(name).to_bytes_with_nul();
+    qlen = len + name_bytes.len() + 1;
     let buf = &mut *addr_of_mut!(pathbuf);
     buf.clear();
     buf.reserve(qlen);
@@ -363,11 +365,11 @@ pub unsafe fn padvance_magic(path: &mut *const c_char, name: *const c_char, magi
         buf.push(b'/');
     }
     q = buf.as_mut_ptr().add(buf.len()) as *mut c_char;
-    libc::strcpy(q, name);
-    /* `strcpy` wrote the name and its terminator into the reserved tail;
-     * `qlen` is what the C's `growstackto` guaranteed room for, and it is
-     * one more than the bytes written when `len` is zero. */
-    let n = buf.len() + libc::strlen(q) + 1;
+    /* The name and its terminator go into the reserved tail; `qlen` is
+     * what the C's `growstackto` guaranteed room for, and it is one more
+     * than the bytes written when `len` is zero. */
+    core::ptr::copy_nonoverlapping(name_bytes.as_ptr(), q as *mut u8, name_bytes.len());
+    let n = buf.len() + name_bytes.len();
     buf.set_len(n);
 
     qlen as c_int

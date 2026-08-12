@@ -457,16 +457,25 @@ unsafe fn sprint_status(os: *mut c_char, status: c_int, sigonly: c_int) -> c_int
                     break 'out_lbl;
                 }
             }
-            s = libc::stpncpy(s, libc::strsignal(st), 32);
+            /* `stpncpy(s, …, 32)` copies at most 32 bytes and NUL-pads
+             * the rest of them, which is why the callers' buffers are
+             * sized for 32 whatever the signal is called. `strsignal` is
+             * locale text, not ASCII, so the bytes are copied rather than
+             * routed through `copy_ascii_cstr`. */
+            let name = CStr::from_ptr(libc::strsignal(st)).to_bytes();
+            let n = name.len().min(32);
+            core::ptr::copy_nonoverlapping(name.as_ptr(), s as *mut u8, n);
+            core::ptr::write_bytes((s as *mut u8).add(n), 0, 32 - n);
+            s = s.add(n);
             if libc::WCOREDUMP(status) {
-                s = libc::stpcpy(s, b" (core dumped)\0".as_ptr() as *const c_char);
+                s = s.offset(copy_ascii_cstr(s, 15, " (core dumped)") as isize);
             }
         } else if sigonly == 0 {
             if st != 0 {
                 let status = format!("Done({st})");
                 s = s.offset(copy_ascii_cstr(s, 16, &status) as isize);
             } else {
-                s = libc::stpcpy(s, b"Done\0".as_ptr() as *const c_char);
+                s = s.offset(copy_ascii_cstr(s, 5, "Done") as isize);
             }
         }
     }
@@ -510,11 +519,7 @@ pub(crate) unsafe fn showjob(out: *mut Output, jp: usize, mode: c_int) {
 
     if jobs()[jp].state as c_int == JOBRUNNING {
         /* scopy("Running", s + col) */
-        libc::strcpy(
-            s.as_mut_ptr().offset(col as isize),
-            b"Running\0".as_ptr() as *const c_char,
-        );
-        col += 7; /* strlen("Running") */
+        col += copy_ascii_cstr(s.as_mut_ptr().offset(col as isize), 8, "Running");
     } else {
         /* `psend[-1]`: a job leaves JOBRUNNING only through `waitone`,
          * which needs a process to have exited to do it. */

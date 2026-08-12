@@ -112,13 +112,11 @@ pub unsafe fn cdcmd(args: &[&BStr]) -> c_int {
              * `padvance`'s *allocation* size, one more than the string's
              * length when the PATH component is empty, so the buffer is
              * sized from it and the bytes are copied by hand. */
+            let candidate = CStr::from_ptr(crate::exec::padvance_result()).to_bytes_with_nul();
+            debug_assert!(candidate.len() <= len as usize);
             keptbuf.clear();
             keptbuf.resize(len as usize, 0);
-            libc::strcpy(
-                keptbuf.as_mut_ptr() as *mut c_char,
-                crate::exec::padvance_result(),
-            );
-            debug_assert!(libc::strlen(keptbuf.as_ptr() as *const c_char) < len as usize);
+            keptbuf[..candidate.len()].copy_from_slice(candidate);
             p = keptbuf.as_ptr() as *const c_char;
 
             if libc::stat64(p, &mut statb) >= 0 && (statb.st_mode & libc::S_IFMT) == libc::S_IFDIR {

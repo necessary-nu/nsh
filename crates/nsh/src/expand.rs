@@ -1481,11 +1481,9 @@ unsafe fn subevalvar(
             rmescend = loc;
         }
 
-        libc::memmove(
-            startp as *mut c_void,
-            rmesc as *const c_void,
-            rmescend.offset_from(rmesc) as size_t,
-        );
+        /* The two ranges are cursors into one buffer and may overlap,
+         * so this is `ptr::copy` and not `copy_nonoverlapping`. */
+        core::ptr::copy(rmesc, startp, rmescend.offset_from(rmesc) as usize);
         loc = startp.offset(rmescend.offset_from(rmesc));
     }
 
@@ -2659,7 +2657,9 @@ unsafe fn expmeta_rmescapes(mut enddir: *mut c_char, name: *const c_char) -> *mu
     let mut p: *const c_char;
 
     if !FNMATCH_IS_ENABLED {
-        return crate::system::strchrnul(rmescapes(libc::strcpy(enddir, name)), 0);
+        let src = CStr::from_ptr(name).to_bytes_with_nul();
+        core::ptr::copy_nonoverlapping(src.as_ptr(), enddir as *mut u8, src.len());
+        return crate::system::strchrnul(rmescapes(enddir), 0);
     }
 
     p = name;
@@ -3399,7 +3399,8 @@ pub unsafe fn _rmescapes(
                     tail = 0;
                 }
 
-                libc::memmove(q as *mut c_void, p as *const c_void, ml as size_t);
+                /* `q` trails `p` through the same buffer. */
+                core::ptr::copy(p, q, ml as usize);
                 q = q.offset(ml as isize);
                 p = p.offset((ml + tail) as isize);
                 break 'setnesc; /* goto setnesc */
