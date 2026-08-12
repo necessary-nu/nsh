@@ -1145,7 +1145,12 @@ unsafe fn expari(mut start: *mut c_char, flag: c_int) -> *mut c_char {
 
         removerecordregions(begoff);
 
-        result = crate::arith_yacc::arith(start);
+        /* `arith` returns its diagnostic now instead of raising it. This
+         * frame is not converted yet, so the bridge performs the jump the C
+         * performed from inside `yyerror`. It writes nothing: the value was
+         * reported when it was built. */
+        result = crate::arith_yacc::arith(start)
+            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
 
         len = cvtnum(result, flag, expb()) as c_int;
 

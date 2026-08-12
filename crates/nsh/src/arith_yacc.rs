@@ -14,6 +14,7 @@ use std::ffi::CStr;
 
 use libc::{c_char, c_int};
 
+use crate::error::Error;
 use crate::var::{lookupvarint, setvarint};
 
 pub use libc::intmax_t;
@@ -129,16 +130,18 @@ pub const ARITH_MAX_PREC: c_int = 8;
 
 // [spec:dash:def:arith-yacc.yyerror-fn]
 // [spec:dash:sem:arith-yacc.yyerror-fn]
-#[allow(unreachable_code)]
-unsafe fn yyerror(s: *const c_char) -> ! {
+//
+// The C's `yyerror` does not return, because `sh_error` longjmps out of it.
+// Here it *builds* the error instead: the diagnostic is still written at
+// this point, in these bytes, but the jump is the caller's `?`. Every
+// caller in this file spells it `return Err(yyerror(..))`.
+unsafe fn yyerror(s: *const c_char) -> Error {
     let mut message = b"arithmetic expression: ".to_vec();
     message.extend_from_slice(CStr::from_ptr(s).to_bytes());
     message.extend_from_slice(b": \"");
     message.extend_from_slice(CStr::from_ptr(arith_startbuf).to_bytes());
     message.push(b'"');
-    crate::error::sh_error(&message);
-    /* NOTREACHED */
-    unreachable!()
+    crate::error::sh_error_value(&message)
 }
 
 // [spec:dash:def:arith-yacc.arith-prec-fn]
@@ -159,8 +162,8 @@ unsafe fn higher_prec(op1: c_int, op2: c_int) -> c_int {
 // Signed overflow and out-of-range shift counts are undefined in C; the
 // wrapping forms below are the closest match to what the platforms dash
 // targets actually do.
-unsafe fn do_binop(op: c_int, a: intmax_t, b: intmax_t) -> intmax_t {
-    match op {
+unsafe fn do_binop(op: c_int, a: intmax_t, b: intmax_t) -> Result<intmax_t, Error> {
+    Ok(match op {
         ARITH_MUL => a.wrapping_mul(b),
         ARITH_ADD => a.wrapping_add(b),
         ARITH_SUB => a.wrapping_sub(b),
@@ -178,16 +181,21 @@ unsafe fn do_binop(op: c_int, a: intmax_t, b: intmax_t) -> intmax_t {
         /* default, ARITH_REM, ARITH_DIV */
         _ => {
             if b == 0 || (a == intmax_t::MIN && b == -1) {
-                yyerror(c"division error".as_ptr());
+                return Err(yyerror(c"division error".as_ptr()));
             }
             if op == ARITH_REM { a % b } else { a / b }
         }
-    }
+    })
 }
 
 // [spec:dash:def:arith-yacc.primary-fn]
 // [spec:dash:sem:arith-yacc.primary-fn]
-unsafe fn primary(token: c_int, val: *mut yystype, op: c_int, noeval: c_int) -> intmax_t {
+unsafe fn primary(
+    token: c_int,
+    val: *mut yystype,
+    op: c_int,
+    noeval: c_int,
+) -> Result<intmax_t, Error> {
     let mut token = token;
     let mut op = op;
 
@@ -195,24 +203,24 @@ unsafe fn primary(token: c_int, val: *mut yystype, op: c_int, noeval: c_int) -> 
         /* again: */
         match token {
             ARITH_LPAREN => {
-                let result = assignment(op, noeval);
+                let result = assignment(op, noeval)?;
                 if last_token != ARITH_RPAREN {
-                    yyerror(c"expecting ')'".as_ptr());
+                    return Err(yyerror(c"expecting ')'".as_ptr()));
                 }
                 last_token = yylex();
-                return result;
+                return Ok(result);
             }
             ARITH_NUM => {
                 last_token = op;
-                return (*val).val;
+                return Ok((*val).val);
             }
             ARITH_VAR => {
                 last_token = op;
-                return if noeval != 0 {
+                return Ok(if noeval != 0 {
                     (*val).val
                 } else {
                     lookupvarint((*val).name)
-                };
+                });
             }
             ARITH_ADD => {
                 token = op;
@@ -222,18 +230,18 @@ unsafe fn primary(token: c_int, val: *mut yystype, op: c_int, noeval: c_int) -> 
             }
             ARITH_SUB => {
                 *val = yylval;
-                return primary(op, val, yylex(), noeval).wrapping_neg();
+                return Ok(primary(op, val, yylex(), noeval)?.wrapping_neg());
             }
             ARITH_NOT => {
                 *val = yylval;
-                return (primary(op, val, yylex(), noeval) == 0) as intmax_t;
+                return Ok((primary(op, val, yylex(), noeval)? == 0) as intmax_t);
             }
             ARITH_BNOT => {
                 *val = yylval;
-                return !primary(op, val, yylex(), noeval);
+                return Ok(!primary(op, val, yylex(), noeval)?);
             }
             _ => {
-                yyerror(c"expecting primary".as_ptr());
+                return Err(yyerror(c"expecting primary".as_ptr()));
             }
         }
     }
@@ -244,7 +252,12 @@ unsafe fn primary(token: c_int, val: *mut yystype, op: c_int, noeval: c_int) -> 
 /* The C names the third parameter `prec`, shadowing the file-scope `prec[]`
  * table; Rust forbids a parameter that shadows a static, so it is spelt
  * `prec_` here.  Nothing inside the function reads the table directly. */
-unsafe fn binop2(a: intmax_t, op: c_int, prec_: c_int, noeval: c_int) -> intmax_t {
+unsafe fn binop2(
+    a: intmax_t,
+    op: c_int,
+    prec_: c_int,
+    noeval: c_int,
+) -> Result<intmax_t, Error> {
     let mut a = a;
     let mut op = op;
 
@@ -257,18 +270,18 @@ unsafe fn binop2(a: intmax_t, op: c_int, prec_: c_int, noeval: c_int) -> intmax_
         token = yylex();
         val = yylval;
 
-        b = primary(token, &mut val, yylex(), noeval);
+        b = primary(token, &mut val, yylex(), noeval)?;
 
         op2 = last_token;
         if op2 >= ARITH_BINOP_MIN && op2 < ARITH_BINOP_MAX && higher_prec(op2, op) != 0 {
-            b = binop2(b, op2, arith_prec(op), noeval);
+            b = binop2(b, op2, arith_prec(op), noeval)?;
             op2 = last_token;
         }
 
-        a = if noeval != 0 { b } else { do_binop(op, a, b) };
+        a = if noeval != 0 { b } else { do_binop(op, a, b)? };
 
         if op2 < ARITH_BINOP_MIN || op2 >= ARITH_BINOP_MAX || arith_prec(op2) >= prec_ {
-            return a;
+            return Ok(a);
         }
 
         op = op2;
@@ -277,12 +290,17 @@ unsafe fn binop2(a: intmax_t, op: c_int, prec_: c_int, noeval: c_int) -> intmax_
 
 // [spec:dash:def:arith-yacc.binop-fn]
 // [spec:dash:sem:arith-yacc.binop-fn]
-unsafe fn binop(token: c_int, val: *mut yystype, op: c_int, noeval: c_int) -> intmax_t {
-    let a: intmax_t = primary(token, val, op, noeval);
+unsafe fn binop(
+    token: c_int,
+    val: *mut yystype,
+    op: c_int,
+    noeval: c_int,
+) -> Result<intmax_t, Error> {
+    let a: intmax_t = primary(token, val, op, noeval)?;
     let op = last_token;
 
     if op < ARITH_BINOP_MIN || op >= ARITH_BINOP_MAX {
-        return a;
+        return Ok(a);
     }
 
     binop2(a, op, ARITH_MAX_PREC, noeval)
@@ -290,70 +308,85 @@ unsafe fn binop(token: c_int, val: *mut yystype, op: c_int, noeval: c_int) -> in
 
 // [spec:dash:def:arith-yacc.and-fn]
 // [spec:dash:sem:arith-yacc.and-fn]
-unsafe fn and(token: c_int, val: *mut yystype, op: c_int, noeval: c_int) -> intmax_t {
-    let a: intmax_t = binop(token, val, op, noeval);
+unsafe fn and(
+    token: c_int,
+    val: *mut yystype,
+    op: c_int,
+    noeval: c_int,
+) -> Result<intmax_t, Error> {
+    let a: intmax_t = binop(token, val, op, noeval)?;
     let b: intmax_t;
 
     let op = last_token;
     if op != ARITH_AND {
-        return a;
+        return Ok(a);
     }
 
     let token = yylex();
     *val = yylval;
 
-    b = and(token, val, yylex(), noeval | (a == 0) as c_int);
+    b = and(token, val, yylex(), noeval | (a == 0) as c_int)?;
 
-    (a != 0 && b != 0) as intmax_t
+    Ok((a != 0 && b != 0) as intmax_t)
 }
 
 // [spec:dash:def:arith-yacc.or-fn]
 // [spec:dash:sem:arith-yacc.or-fn]
-unsafe fn or(token: c_int, val: *mut yystype, op: c_int, noeval: c_int) -> intmax_t {
-    let a: intmax_t = and(token, val, op, noeval);
+unsafe fn or(
+    token: c_int,
+    val: *mut yystype,
+    op: c_int,
+    noeval: c_int,
+) -> Result<intmax_t, Error> {
+    let a: intmax_t = and(token, val, op, noeval)?;
     let b: intmax_t;
 
     let op = last_token;
     if op != ARITH_OR {
-        return a;
+        return Ok(a);
     }
 
     let token = yylex();
     *val = yylval;
 
-    b = or(token, val, yylex(), noeval | (a != 0) as c_int);
+    b = or(token, val, yylex(), noeval | (a != 0) as c_int)?;
 
-    (a != 0 || b != 0) as intmax_t
+    Ok((a != 0 || b != 0) as intmax_t)
 }
 
 // [spec:dash:def:arith-yacc.cond-fn]
 // [spec:dash:sem:arith-yacc.cond-fn]
-unsafe fn cond(token: c_int, val: *mut yystype, op: c_int, noeval: c_int) -> intmax_t {
-    let a: intmax_t = or(token, val, op, noeval);
+unsafe fn cond(
+    token: c_int,
+    val: *mut yystype,
+    op: c_int,
+    noeval: c_int,
+) -> Result<intmax_t, Error> {
+    let a: intmax_t = or(token, val, op, noeval)?;
     let b: intmax_t;
     let c: intmax_t;
 
     if last_token != ARITH_QMARK {
-        return a;
+        return Ok(a);
     }
 
-    b = assignment(yylex(), noeval | (a == 0) as c_int);
+    b = assignment(yylex(), noeval | (a == 0) as c_int)?;
 
     if last_token != ARITH_COLON {
-        yyerror(c"expecting ':'".as_ptr());
+        return Err(yyerror(c"expecting ':'".as_ptr()));
     }
 
     let token = yylex();
     *val = yylval;
 
-    c = cond(token, val, yylex(), noeval | (a != 0) as c_int);
+    c = cond(token, val, yylex(), noeval | (a != 0) as c_int)?;
 
-    if a != 0 { b } else { c }
+    Ok(if a != 0 { b } else { c })
 }
 
 // [spec:dash:def:arith-yacc.assignment-fn]
 // [spec:dash:sem:arith-yacc.assignment-fn]
-unsafe fn assignment(var: c_int, noeval: c_int) -> intmax_t {
+unsafe fn assignment(var: c_int, noeval: c_int) -> Result<intmax_t, Error> {
     let mut val: yystype = yylval;
     let op: c_int = yylex();
     let result: intmax_t;
@@ -366,25 +399,25 @@ unsafe fn assignment(var: c_int, noeval: c_int) -> intmax_t {
         return cond(var, &mut val, op, noeval);
     }
 
-    result = assignment(yylex(), noeval);
+    result = assignment(yylex(), noeval)?;
     if noeval != 0 {
-        return result;
+        return Ok(result);
     }
 
-    setvarint(
+    Ok(setvarint(
         val.name,
         if op == ARITH_ASS {
             result
         } else {
-            do_binop(op - 11, lookupvarint(val.name), result)
+            do_binop(op - 11, lookupvarint(val.name), result)?
         },
         0,
-    )
+    ))
 }
 
 // [spec:dash:def:arith-yacc.arith-fn]
 // [spec:dash:sem:arith-yacc.arith-fn]
-pub unsafe fn arith(s: *const c_char) -> intmax_t {
+pub unsafe fn arith(s: *const c_char) -> Result<intmax_t, Error> {
     let result: intmax_t;
 
     arith_startbuf = s;
@@ -393,11 +426,58 @@ pub unsafe fn arith(s: *const c_char) -> intmax_t {
      * `stalloc`s were released by `expari`'s mark, which is here. */
     crate::arith_yylex::arith_names_reset();
 
-    result = assignment(yylex(), 0);
+    result = assignment(yylex(), 0)?;
 
     if last_token != 0 {
-        yyerror(c"expecting EOF".as_ptr());
+        return Err(yyerror(c"expecting EOF".as_ptr()));
     }
 
-    result
+    Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /* `docs/errors-are-values.md` §5 is the list of things the differential
+     * harness cannot see, and the first entry is the error value itself:
+     * "the harness compares bytes on a stream, and the value never reaches
+     * it". These are that test for the first module converted. The bytes
+     * still go to stderr while they run, which is the point -- the
+     * diagnostic is written where dash writes it *and* returned. */
+
+    #[test]
+    fn a_failed_evaluation_returns_its_diagnostic() {
+        let _g = crate::testutil::lock();
+        let expr = crate::testutil::CStr0::new("1/0");
+
+        let e = unsafe { arith(expr.p()) }.expect_err("1/0 must fail");
+
+        assert_eq!(
+            e.message().to_vec(),
+            b"arithmetic expression: division error: \"1/0\"".to_vec()
+        );
+        assert_eq!(e.status(), 2);
+    }
+
+    #[test]
+    fn a_trailing_token_returns_its_diagnostic() {
+        let _g = crate::testutil::lock();
+        let expr = crate::testutil::CStr0::new("1 2");
+
+        let e = unsafe { arith(expr.p()) }.expect_err("`1 2` must fail");
+
+        assert_eq!(
+            e.message().to_vec(),
+            b"arithmetic expression: expecting EOF: \"1 2\"".to_vec()
+        );
+    }
+
+    #[test]
+    fn a_good_expression_still_evaluates() {
+        let _g = crate::testutil::lock();
+        let expr = crate::testutil::CStr0::new("6*7");
+
+        assert_eq!(unsafe { arith(expr.p()) }.expect("6*7 evaluates"), 42);
+    }
 }
