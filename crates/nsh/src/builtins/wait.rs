@@ -57,7 +57,7 @@ pub unsafe fn waitcmd(args: &[&BStr]) -> Result<c_int, Error> {
             let target = crate::shell::cstring(spec);
             'repeat: {
                 if spec.first() != Some(&b'%') {
-                    let pid: pid_t = crate::mystring::number(target.as_ptr());
+                    let pid: pid_t = crate::mystring::number(target.as_ptr())?;
                     jobp = curjob;
                     /* `goto start` enters the do/while at `start:` */
                     let mut at_start = true;

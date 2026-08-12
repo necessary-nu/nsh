@@ -23,7 +23,7 @@ pub unsafe fn returncmd(args: &[&BStr]) -> Result<c_int, Error> {
     if let Some(want) = args.get(1) {
         let want = crate::shell::cstring(want);
         skip = SKIPFUNC;
-        status = crate::mystring::number(want.as_ptr());
+        status = crate::mystring::number(want.as_ptr())?;
     } else {
         skip = SKIPFUNCDEF;
         status = exitstatus;

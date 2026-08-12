@@ -16,6 +16,7 @@
 //! neither, and it requires `set` to print sorted, which the container now
 //! gives for free instead of a `qsort` at print time.
 
+use crate::error::Error;
 use bstr::{BStr, BString};
 use core::ptr::{addr_of, addr_of_mut, null_mut};
 use libc::{c_char, c_int, c_uint, intmax_t, size_t};
@@ -778,7 +779,7 @@ pub unsafe fn lookupvar(name: *const c_char) -> *mut c_char {
 
 // [spec:dash:def:var.lookupvarint-fn]
 // [spec:dash:sem:var.lookupvarint-fn]
-pub unsafe fn lookupvarint(name: *const c_char) -> intmax_t {
+pub unsafe fn lookupvarint(name: *const c_char) -> Result<intmax_t, Error> {
     let p = lookupvar(name);
     crate::mystring::atomax(
         if !p.is_null() {

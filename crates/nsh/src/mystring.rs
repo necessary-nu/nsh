@@ -21,6 +21,7 @@
 //! What is left is here because std is not the same function. Each
 //! survivor says which.
 
+use crate::error::Error;
 use bstr::BString;
 use libc::{c_char, c_int, c_uchar, intmax_t};
 
@@ -94,10 +95,12 @@ pub unsafe fn prefix(string: *const c_char, pfx: *const c_char) -> *mut c_char {
 
 // [spec:dash:def:mystring.badnum-fn]
 // [spec:dash:sem:mystring.badnum-fn]
-pub unsafe fn badnum(s: *const c_char) -> ! {
+// The C's `badnum` does not return; here it builds the diagnostic and the
+// caller's `?` does the leaving. Same bytes, same point, same funnel.
+pub unsafe fn badnum(s: *const c_char) -> Error {
     let mut message = b"Illegal number: ".to_vec();
     message.extend_from_slice(core::ffi::CStr::from_ptr(s).to_bytes());
-    crate::error::sh_error(&message);
+    crate::error::sh_error_value(&message)
 }
 
 /*
@@ -111,7 +114,7 @@ pub unsafe fn badnum(s: *const c_char) -> ! {
  */
 // [spec:dash:def:mystring.atomax-fn]
 // [spec:dash:sem:mystring.atomax-fn]
-pub unsafe fn atomax(s: *const c_char, base: c_int) -> intmax_t {
+pub unsafe fn atomax(s: *const c_char, base: c_int) -> Result<intmax_t, Error> {
     let mut p: *mut c_char = core::ptr::null_mut();
     let r: intmax_t;
 
@@ -123,7 +126,7 @@ pub unsafe fn atomax(s: *const c_char, base: c_int) -> intmax_t {
      * contexts.
      */
     if p == s as *mut c_char && base != 0 {
-        badnum(s);
+        return Err(badnum(s));
     }
 
     /*
@@ -139,15 +142,15 @@ pub unsafe fn atomax(s: *const c_char, base: c_int) -> intmax_t {
     }
 
     if *p != 0 {
-        badnum(s);
+        return Err(badnum(s));
     }
 
-    r
+    Ok(r)
 }
 
 // [spec:dash:def:mystring.atomax10-fn]
 // [spec:dash:sem:mystring.atomax10-fn]
-pub unsafe fn atomax10(s: *const c_char) -> intmax_t {
+pub unsafe fn atomax10(s: *const c_char) -> Result<intmax_t, Error> {
     atomax(s, 10)
 }
 
@@ -158,14 +161,14 @@ pub unsafe fn atomax10(s: *const c_char) -> intmax_t {
 
 // [spec:dash:def:mystring.number-fn]
 // [spec:dash:sem:mystring.number-fn]
-pub unsafe fn number(s: *const c_char) -> c_int {
-    let n: intmax_t = atomax10(s);
+pub unsafe fn number(s: *const c_char) -> Result<c_int, Error> {
+    let n: intmax_t = atomax10(s)?;
 
     if n < 0 || n > c_int::MAX as intmax_t {
-        badnum(s);
+        return Err(badnum(s));
     }
 
-    n as c_int
+    Ok(n as c_int)
 }
 
 /*
@@ -285,7 +288,7 @@ pub(crate) unsafe fn copy_ascii_cstr(out: *mut c_char, capacity: usize, text: &s
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::{CStr0, raises, s};
+    use crate::testutil::{CStr0, s};
 
     // [spec:dash:sem:mystring.prefix-fn/test]
     #[test]
@@ -376,13 +379,13 @@ mod tests {
     fn atomax_parses_in_base_and_allows_trailing_space() {
         let _g = crate::testutil::lock();
         unsafe {
-            assert_eq!(atomax(CStr0::new("42").p(), 10), 42);
-            assert_eq!(atomax(CStr0::new("-42").p(), 10), -42);
-            assert_eq!(atomax(CStr0::new("ff").p(), 16), 255);
-            assert_eq!(atomax(CStr0::new("777").p(), 8), 511);
+            assert_eq!(atomax(CStr0::new("42").p(), 10).unwrap(), 42);
+            assert_eq!(atomax(CStr0::new("-42").p(), 10).unwrap(), -42);
+            assert_eq!(atomax(CStr0::new("ff").p(), 16).unwrap(), 255);
+            assert_eq!(atomax(CStr0::new("777").p(), 8).unwrap(), 511);
             // "Alow trailing spaces" -- the comment's typo is in the C too.
-            assert_eq!(atomax(CStr0::new("42   ").p(), 10), 42);
-            assert_eq!(atomax(CStr0::new("42\t\n").p(), 10), 42);
+            assert_eq!(atomax(CStr0::new("42   ").p(), 10).unwrap(), 42);
+            assert_eq!(atomax(CStr0::new("42\t\n").p(), 10).unwrap(), 42);
         }
     }
 
@@ -392,24 +395,21 @@ mod tests {
     fn atomax_raises_through_badnum_on_junk() {
         let _g = crate::testutil::lock();
         unsafe {
-            // Trailing junk is rejected...
-            assert!(raises(|| {
-                atomax(CStr0::new("42x").p(), 10);
-            }));
+            // Trailing junk is rejected, and the diagnostic is the value
+            // now rather than an unwind, so the test can read it.
+            let e = atomax(CStr0::new("42x").p(), 10).expect_err("trailing junk");
+            assert_eq!(e.message().to_vec(), b"Illegal number: 42x".to_vec());
             // ...and so is a wholly blank string, but only when base != 0.
             // At base 0 the blank check is skipped, which is what lets the
             // arithmetic lexer call this on an empty token.
-            assert!(raises(|| {
-                atomax(CStr0::new("").p(), 10);
-            }));
-            assert!(raises(|| {
-                atomax(CStr0::new("   ").p(), 10);
-            }));
-            assert!(!raises(|| {
-                assert_eq!(atomax(CStr0::new("").p(), 0), 0);
-            }));
-            // badnum itself never returns.
-            assert!(raises(|| badnum(CStr0::new("zzz").p())));
+            assert!(atomax(CStr0::new("").p(), 10).is_err());
+            assert!(atomax(CStr0::new("   ").p(), 10).is_err());
+            assert_eq!(atomax(CStr0::new("").p(), 0).unwrap(), 0);
+            // badnum builds the diagnostic rather than raising it.
+            assert_eq!(
+                badnum(CStr0::new("zzz").p()).message().to_vec(),
+                b"Illegal number: zzz".to_vec()
+            );
         }
     }
 
@@ -418,12 +418,10 @@ mod tests {
     fn atomax10_is_atomax_base_ten() {
         let _g = crate::testutil::lock();
         unsafe {
-            assert_eq!(atomax10(CStr0::new("99").p()), 99);
+            assert_eq!(atomax10(CStr0::new("99").p()).unwrap(), 99);
             // Base 10, so a leading 0 is not octal and 0x is not hex.
-            assert_eq!(atomax10(CStr0::new("010").p()), 10);
-            assert!(raises(|| {
-                atomax10(CStr0::new("0x10").p());
-            }));
+            assert_eq!(atomax10(CStr0::new("010").p()).unwrap(), 10);
+            assert!(atomax10(CStr0::new("0x10").p()).is_err());
         }
     }
 
@@ -432,16 +430,15 @@ mod tests {
     fn number_is_atomax10_clamped_to_int() {
         let _g = crate::testutil::lock();
         unsafe {
-            assert_eq!(number(CStr0::new("7").p()), 7);
-            assert_eq!(number(CStr0::new(&c_int::MAX.to_string()).p()), c_int::MAX);
+            assert_eq!(number(CStr0::new("7").p()).unwrap(), 7);
+            assert_eq!(
+                number(CStr0::new(&c_int::MAX.to_string()).p()).unwrap(),
+                c_int::MAX
+            );
             // Negative and out-of-range both go through badnum.
-            assert!(raises(|| {
-                number(CStr0::new("-1").p());
-            }));
+            assert!(number(CStr0::new("-1").p()).is_err());
             let too_big = (c_int::MAX as i64 + 1).to_string();
-            assert!(raises(|| {
-                number(CStr0::new(&too_big).p());
-            }));
+            assert!(number(CStr0::new(&too_big).p()).is_err());
         }
     }
 

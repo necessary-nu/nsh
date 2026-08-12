@@ -540,3 +540,65 @@ unsafe impl Send for Longjmp {}
  * Reintroducing a setjmp/longjmp shim would make that failure easy to
  * recreate, so the FFI declarations are gone too. Use `setjmp_catch` to
  * arm a handler and `raise_longjmp` to jump to one. */
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /* The funnel itself. `docs/errors-are-values.md` §5 lists the error
+     * value first among what the differential harness cannot see: it
+     * compares bytes on a stream, and the value never reaches it. These
+     * assert the half the corpus cannot, and they are deliberately about
+     * `sh_error_value` rather than `sh_error`, because the diverging form
+     * is now defined as the value form plus a jump. */
+
+    #[test]
+    fn reported_error_carries_its_status() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            crate::eval::exitstatus = 0;
+            let e = sh_error_value(b"a diagnostic");
+
+            /* `sh_error` sets 2 before it reports, and the value has to
+             * carry what the site meant rather than what the global says
+             * later, so that propagation through any number of `?` cannot
+             * lose it. */
+            assert_eq!(e.status(), 2);
+            let took = crate::eval::exitstatus;
+            assert_eq!(took, 2);
+            assert_eq!(e.message().to_vec(), b"a diagnostic".to_vec());
+        }
+    }
+
+    #[test]
+    fn message_drops_the_prefix() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            let saved = errlinno;
+            errlinno = 17;
+            let e = report(Error::other(b"cd: bad directory"));
+            errlinno = saved;
+
+            /* The `sh: 17: ` prefix is `arg0`, `errlinno` and the running
+             * command's name -- shell state, not error state -- so
+             * `sh_warnx` adds it on the way out and the value does not
+             * carry it. */
+            assert_eq!(e.message().to_vec(), b"cd: bad directory".to_vec());
+            assert_eq!(e.line(), 17);
+        }
+    }
+
+    #[test]
+    fn exend_keeps_its_own_status() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            /* `shellexec` reports its text and takes 127 or 126, then
+             * raises EXEND. The status travels with the value even though
+             * the code that goes with it does not. */
+            crate::eval::exitstatus = 127;
+            let e = report(Error::other(b"nosuchcmd: not found"));
+
+            assert_eq!(e.status(), 127);
+        }
+    }
+}

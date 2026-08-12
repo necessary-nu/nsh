@@ -21,9 +21,9 @@ pub unsafe fn breakcmd(args: &[&BStr]) -> Result<c_int, Error> {
 
     if let Some(count) = args.get(1) {
         let count = crate::shell::cstring(count);
-        n = crate::mystring::number(count.as_ptr());
+        n = crate::mystring::number(count.as_ptr())?;
         if n <= 0 {
-            crate::mystring::badnum(count.as_ptr());
+            return Err(crate::mystring::badnum(count.as_ptr()));
         }
     }
     if n > loopnest {

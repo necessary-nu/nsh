@@ -19,7 +19,7 @@ pub unsafe fn exitcmd(args: &[&BStr]) -> Result<c_int, Error> {
 
     if let Some(status) = args.get(1) {
         let status = crate::shell::cstring(status);
-        crate::eval::savestatus = crate::mystring::number(status.as_ptr());
+        crate::eval::savestatus = crate::mystring::number(status.as_ptr())?;
     }
 
     crate::error::exraise(crate::error::EXEXIT);

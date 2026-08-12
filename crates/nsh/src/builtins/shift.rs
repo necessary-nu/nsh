@@ -23,7 +23,7 @@ pub unsafe fn shiftcmd(args: &[&BStr]) -> Result<c_int, Error> {
     n = match args.get(1) {
         Some(count) => {
             let count = crate::shell::cstring(count);
-            crate::mystring::number(count.as_ptr())
+            crate::mystring::number(count.as_ptr())?
         }
         None => 1,
     };

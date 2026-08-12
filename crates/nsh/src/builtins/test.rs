@@ -191,7 +191,7 @@ unsafe fn faccessat_confused_about_superuser() -> c_int {
 // [spec:dash:def:test.getn-fn]
 // [spec:dash:sem:test.getn-fn]
 #[inline]
-unsafe fn getn(s: *const c_char) -> intmax_t {
+unsafe fn getn(s: *const c_char) -> Result<intmax_t, Error> {
     crate::mystring::atomax10(s)
 }
 
@@ -395,7 +395,7 @@ unsafe fn primary(n: token) -> Result<c_int, Error> {
         match n {
             token::STREZ => return Ok(CStr::from_ptr(*t_wp).to_bytes().is_empty() as c_int),
             token::STRNZ => return Ok((!CStr::from_ptr(*t_wp).to_bytes().is_empty()) as c_int),
-            token::FILTT => return Ok(libc::isatty(getn(*t_wp) as c_int)),
+            token::FILTT => return Ok(libc::isatty(getn(*t_wp)? as c_int)),
             // #ifdef HAVE_FACCESSAT
             token::FILRD => return Ok(test_file_access(*t_wp, libc::R_OK)),
             token::FILWR => return Ok(test_file_access(*t_wp, libc::W_OK)),
@@ -439,12 +439,12 @@ unsafe fn binop() -> Result<c_int, Error> {
         token::STRNE => (CStr::from_ptr(opnd1).to_bytes() != CStr::from_ptr(opnd2).to_bytes()) as c_int,
         token::STRLT => (libc::strcoll(opnd1, opnd2) < 0) as c_int,
         token::STRGT => (libc::strcoll(opnd1, opnd2) > 0) as c_int,
-        token::INTEQ => (getn(opnd1) == getn(opnd2)) as c_int,
-        token::INTNE => (getn(opnd1) != getn(opnd2)) as c_int,
-        token::INTGE => (getn(opnd1) >= getn(opnd2)) as c_int,
-        token::INTGT => (getn(opnd1) > getn(opnd2)) as c_int,
-        token::INTLE => (getn(opnd1) <= getn(opnd2)) as c_int,
-        token::INTLT => (getn(opnd1) < getn(opnd2)) as c_int,
+        token::INTEQ => (getn(opnd1)? == getn(opnd2)?) as c_int,
+        token::INTNE => (getn(opnd1)? != getn(opnd2)?) as c_int,
+        token::INTGE => (getn(opnd1)? >= getn(opnd2)?) as c_int,
+        token::INTGT => (getn(opnd1)? > getn(opnd2)?) as c_int,
+        token::INTLE => (getn(opnd1)? <= getn(opnd2)?) as c_int,
+        token::INTLT => (getn(opnd1)? < getn(opnd2)?) as c_int,
         token::FILNT => newerf(opnd1, opnd2) as c_int,
         token::FILOT => olderf(opnd1, opnd2) as c_int,
         token::FILEQ => equalf(opnd1, opnd2),

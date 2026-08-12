@@ -292,6 +292,7 @@ pub unsafe fn optschanged() {
 ///
 /// The C reads all three back out of globals: the return value, `argptr`,
 /// and `minusc`.
+#[derive(Debug)]
 pub(crate) struct Scan {
     /// The C's return value.
     pub(crate) login: c_int,
@@ -703,6 +704,36 @@ impl<'a> Options<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /* The scanner's two complaints, as values. The corpus sees the bytes
+     * on stderr; only this sees which of the two produced them, and that
+     * the scan stopped rather than carried on with a half-applied set of
+     * options. */
+
+    #[test]
+    fn an_unknown_letter_returns_its_complaint() {
+        let _g = crate::testutil::lock();
+        let saved = unsafe { optlist };
+        let args = [BStr::new("set"), BStr::new("-Q")];
+
+        let e = unsafe { options(&args, 1, false) }.expect_err("-Q is not an option");
+
+        unsafe { optlist = saved };
+        assert_eq!(e.message().to_vec(), b"Illegal option -Q".to_vec());
+        assert_eq!(e.status(), 2);
+    }
+
+    #[test]
+    fn an_unknown_name_returns_its_complaint() {
+        let _g = crate::testutil::lock();
+        let saved = unsafe { optlist };
+        let args = [BStr::new("set"), BStr::new("-o"), BStr::new("nosuchopt")];
+
+        let e = unsafe { options(&args, 1, false) }.expect_err("-o nosuchopt is not an option");
+
+        unsafe { optlist = saved };
+        assert_eq!(e.message().to_vec(), b"Illegal option -o nosuchopt".to_vec());
+    }
 
     /// `Options` is `nextopt` with its state made local, so what it has to
     /// agree with is the C's walk, edge for edge. These are the edges:

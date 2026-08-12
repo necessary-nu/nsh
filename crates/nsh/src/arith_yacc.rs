@@ -219,7 +219,7 @@ unsafe fn primary(
                 return Ok(if noeval != 0 {
                     (*val).val
                 } else {
-                    lookupvarint((*val).name)
+                    lookupvarint((*val).name)?
                 });
             }
             ARITH_ADD => {
@@ -409,7 +409,7 @@ unsafe fn assignment(var: c_int, noeval: c_int) -> Result<intmax_t, Error> {
         if op == ARITH_ASS {
             result
         } else {
-            do_binop(op - 11, lookupvarint(val.name), result)?
+            do_binop(op - 11, lookupvarint(val.name)?, result)?
         },
         0,
     ))

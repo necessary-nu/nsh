@@ -94,7 +94,7 @@ pub unsafe fn killcmd(args: &[&BStr]) -> Result<c_int, Error> {
             return Ok(0);
         };
         let status = crate::shell::cstring(status);
-        signo = crate::mystring::number(status.as_ptr());
+        signo = crate::mystring::number(status.as_ptr())?;
         if signo > 128 {
             signo -= 128;
         }
@@ -120,9 +120,9 @@ pub unsafe fn killcmd(args: &[&BStr]) -> Result<c_int, Error> {
             pid = -ps_pid(jp, 0);
         } else {
             pid = if spec.first() == Some(&b'-') {
-                -crate::mystring::number(target.as_ptr().add(1))
+                -crate::mystring::number(target.as_ptr().add(1))?
             } else {
-                crate::mystring::number(target.as_ptr())
+                crate::mystring::number(target.as_ptr())?
             };
         }
         if libc::kill(pid, signo) != 0 {

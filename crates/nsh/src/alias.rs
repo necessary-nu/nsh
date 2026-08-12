@@ -213,6 +213,23 @@ mod tests {
     use super::*;
     use crate::testutil::CStr0;
 
+    /// A name the alias table will not take comes back as a value, and the
+    /// table is left as it was.
+    #[test]
+    fn an_invalid_name_returns_its_complaint() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            atab_mut().clear();
+            let definition = CStr0::new("a b=value");
+
+            let e = setalias(definition.p(), definition.p().add(6))
+                .expect_err("a space is not a word character");
+
+            assert_eq!(e.message().to_vec(), b"Invalid alias name: a b=value".to_vec());
+            assert!(atab_mut().is_empty());
+        }
+    }
+
     // [spec:dash:sem:alias.setalias-fn/test]
     // [spec:dash:sem:alias.lookupalias-pub-fn/test]
     // [spec:dash:sem:alias.unalias-fn/test]
