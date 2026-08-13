@@ -477,7 +477,7 @@ unsafe fn evalfor(n: &Node, flags: c_int) -> Result<c_int, Error> {
     }
 
     for argp in &f.args {
-        crate::expand::expandarg(argp, Some(&mut arglist), EXP_FULL | EXP_TILDE);
+        crate::expand::expandarg(argp, Some(&mut arglist), EXP_FULL | EXP_TILDE)?;
     }
 
     status = 0;
@@ -520,7 +520,7 @@ unsafe fn evalcase(n: &Node, flags: c_int) -> Result<c_int, Error> {
         } else {
             EXP_TILDE | EXP_MBCHAR
         },
-    );
+    )?;
     /* The C reads `arglist.list->text` with no null check, and is right to:
      * `expandarg` without EXP_FULL takes its single-field arm, which appends
      * exactly one entry whatever the word expands to. */
@@ -531,7 +531,7 @@ unsafe fn evalcase(n: &Node, flags: c_int) -> Result<c_int, Error> {
                 break;
             }
             for patp in &cp.nclist().pattern {
-                if crate::expand::casematch(patp, arglist.list[0].textp()) != 0 {
+                if crate::expand::casematch(patp, arglist.list[0].textp())? != 0 {
                     /* Ensure body is non-empty as otherwise
                      * EV_EXIT may prevent us from setting the
                      * exit status.
@@ -613,7 +613,7 @@ unsafe fn expredir(n: &[Node]) -> Result<(), Error> {
                     redir.nfile().fname.as_deref().unwrap(),
                     Some(&mut fnl),
                     EXP_TILDE | EXP_REDIR,
-                );
+                )?;
                 /* `fn.list->text` with no null check: no EXP_FULL means
                  * `expandarg` took its single-field arm. */
                 debug_assert_eq!(fnl.list.len(), 1, "an unsplit expansion is one field");
@@ -634,7 +634,7 @@ unsafe fn expredir(n: &[Node]) -> Result<(), Error> {
                     match vname.as_deref() {
                         None => false,
                         Some(v) => {
-                            crate::expand::expandarg(v, Some(&mut fnl), EXP_TILDE | EXP_REDIR);
+                            crate::expand::expandarg(v, Some(&mut fnl), EXP_TILDE | EXP_REDIR)?;
                             true
                         }
                     }
@@ -779,14 +779,17 @@ pub unsafe fn evalbackcmd(n: Option<&Node>, result: *mut backcmd) -> Result<(), 
 // or NULL if the argument list ran out without producing one. As an index it
 // is the length the list had on entry, so the answer is `Some` exactly when
 // the list grew.
-unsafe fn fill_arglist<'a>(arglist: &mut arglist, argpp: &mut &'a [Node]) -> Option<usize> {
+unsafe fn fill_arglist<'a>(
+    arglist: &mut arglist,
+    argpp: &mut &'a [Node],
+) -> Result<Option<usize>, Error> {
     let lastp: usize = arglist.list.len();
 
     loop {
         let Some((argp, rest)) = argpp.split_first() else {
             break;
         };
-        crate::expand::expandarg(argp, Some(arglist), EXP_FULL | EXP_TILDE);
+        crate::expand::expandarg(argp, Some(arglist), EXP_FULL | EXP_TILDE)?;
         *argpp = rest;
         if arglist.list.len() != lastp {
             break;
@@ -794,9 +797,9 @@ unsafe fn fill_arglist<'a>(arglist: &mut arglist, argpp: &mut &'a [Node]) -> Opt
     }
 
     if arglist.list.len() != lastp {
-        Some(lastp)
+        Ok(Some(lastp))
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -810,7 +813,7 @@ unsafe fn parse_command_args(
     argpp: &mut &[Node],
     path: *mut *const c_char,
     head: &mut usize,
-) -> c_int {
+) -> Result<c_int, Error> {
     let mut sp: usize = *head;
     let mut cp: *mut c_char;
     let mut c: c_char;
@@ -820,9 +823,9 @@ unsafe fn parse_command_args(
         sp = if sp + 1 < arglist.list.len() {
             sp + 1
         } else {
-            match fill_arglist(arglist, argpp) {
+            match fill_arglist(arglist, argpp)? {
                 Some(i) => i,
-                None => return 0,
+                None => return Ok(0),
             }
         };
         cp = arglist.list[sp].textp();
@@ -837,8 +840,8 @@ unsafe fn parse_command_args(
             break;
         }
         if c == b'-' as c_char && *cp == 0 {
-            if sp + 1 >= arglist.list.len() && fill_arglist(arglist, argpp).is_none() {
-                return 0;
+            if sp + 1 >= arglist.list.len() && fill_arglist(arglist, argpp)?.is_none() {
+                return Ok(0);
             }
             sp += 1;
             break;
@@ -850,7 +853,7 @@ unsafe fn parse_command_args(
                 }
                 _ => {
                     /* run 'typecmd' for other options */
-                    return 0;
+                    return Ok(0);
                 }
             }
             c = *cp;
@@ -862,7 +865,7 @@ unsafe fn parse_command_args(
     }
 
     *head = sp;
-    DO_NOFUNC
+    Ok(DO_NOFUNC)
 }
 
 /*
@@ -927,7 +930,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
 
     argc = 0;
     argp = c.args.as_slice();
-    osp = fill_arglist(&mut arglist, &mut argp);
+    osp = fill_arglist(&mut arglist, &mut argp)?;
     if osp.is_some() {
         let mut pseudovarflag: c_int = 0;
 
@@ -956,7 +959,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
                 break;
             }
 
-            cmd_flag = parse_command_args(&mut arglist, &mut argp, &mut path, &mut head);
+            cmd_flag = parse_command_args(&mut arglist, &mut argp, &mut path, &mut head)?;
             if cmd_flag == 0 {
                 break;
             }
@@ -971,7 +974,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
                 } else {
                     EXP_FULL | EXP_TILDE
                 },
-            );
+            )?;
         }
 
         argc = (arglist.list.len() - head) as c_int;
@@ -1034,7 +1037,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
                 let spp: usize;
 
                 spp = varlist.list.len();
-                crate::expand::expandarg(a, Some(&mut varlist), EXP_VARTILDE);
+                crate::expand::expandarg(a, Some(&mut varlist), EXP_VARTILDE)?;
                 /* `(*spp)->text` with no null check: EXP_VARTILDE has no
                  * EXP_FULL, so `expandarg` appended exactly one entry. */
                 debug_assert_eq!(

@@ -2317,7 +2317,15 @@ pub unsafe fn expandstr(ps: *const c_char) -> *const c_char {
             backquote: takeglobal(addr_of_mut!(backquotelist)),
         });
 
-        expandarg(&n, None, EXP_QUOTED);
+        /* Inside `expandstr`'s own `setjmp_catch`, whose closure is
+         * `FnOnce()` and has nowhere to return a `Result` to. The bridge
+         * raises what this frame is still armed to catch, so the swallow
+         * and re-raise in `restore_handler_expandarg` below keep deciding
+         * exactly what they decided before. It retires when step D
+         * converts this frame — the last of the seven, with
+         * `redirectsafe`, per docs/errors-are-values.md 6. */
+        expandarg(&n, None, EXP_QUOTED)
+            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
         /* The C reads the expansion back as `stackblock()`; the expansion
          * buffer is owned now, so the read is named.  The C's pointer was
          * live only until the next `stalloc`; this one is live until the

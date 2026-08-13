@@ -28,6 +28,8 @@ use std::ffi::CStr;
 use bstr::{BStr, BString, ByteSlice};
 use libc::{c_char, c_int, c_uint, c_ulong, c_void, intmax_t, size_t, ssize_t, wchar_t};
 
+use crate::error::Error;
+
 // ---------------------------------------------------------------------
 // Declarations from <wchar.h> / <wctype.h> that the `libc` crate does not
 // expose.  These are plain libc entry points, not ported symbols.
@@ -757,13 +759,23 @@ unsafe fn getpwhome(name: *const c_char) -> *const c_char {
 
 // [spec:dash:def:expand.expandarg-fn]
 // [spec:dash:sem:expand.expandarg-fn]
-pub unsafe fn expandarg(arg: &crate::nodes::Node, arglist: Option<&mut arglist>, flag: c_int) {
+pub unsafe fn expandarg(
+    arg: &crate::nodes::Node,
+    arglist: Option<&mut arglist>,
+    flag: c_int,
+) -> Result<(), Error> {
     let mut p: BString;
 
     argbackq = arg.narg().backquote.as_slice();
     /* STARTSTACKSTR(expdest) */
     expb().clear();
-    argstr(arg.narg().text.as_ptr(), flag);
+    /* The `?`s in this function return past the `ifsfree()` below, exactly
+     * as the longjmp they replace jumped past it. The IFS regions are
+     * reclaimed by the catch frame instead — `restore_handler_expandarg`'s
+     * swallowing arm and `init::exitreset` both call `ifsfree`, which is
+     * docs/errors-are-values.md 2.2's mark-keyed cleanup working as
+     * designed. Adding one here would free them twice. */
+    argstr(arg.narg().text.as_ptr(), flag)?;
     'out: {
         let Some(arglist) = arglist else {
             /* here document expanded — the caller reads the buffer back
@@ -799,7 +811,7 @@ pub unsafe fn expandarg(arg: &crate::nodes::Node, arglist: Option<&mut arglist>,
              * before the write reaches it; taking the `Vec` is both
              * halves. */
             let words = mem::take(expargl());
-            expandmeta(words);
+            expandmeta(words)?;
         } else {
             expargl().push(strlist { text: p });
         }
@@ -812,6 +824,7 @@ pub unsafe fn expandarg(arg: &crate::nodes::Node, arglist: Option<&mut arglist>,
 
     /* out: */
     ifsfree();
+    Ok(())
 }
 
 /*
@@ -822,7 +835,7 @@ pub unsafe fn expandarg(arg: &crate::nodes::Node, arglist: Option<&mut arglist>,
 
 // [spec:dash:def:expand.argstr-fn]
 // [spec:dash:sem:expand.argstr-fn]
-unsafe fn argstr(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
+unsafe fn argstr(mut p: *mut c_char, mut flag: c_int) -> Result<*mut c_char, Error> {
     static spclchars: [c_char; 11] = [
         C_EQUALS,
         C_COLON,
@@ -948,7 +961,7 @@ unsafe fn argstr(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
                             == CStr::from_ptr(crate::mystring::dolatstr.as_ptr().offset(1))
                                 .to_bytes()
                     {
-                        p = evalvar(p.offset(1), flag | EXP_QUOTED).offset(1);
+                        p = evalvar(p.offset(1), flag | EXP_QUOTED)?.offset(1);
                         continue 'start; /* goto start */
                     }
                     inquotes ^= EXP_QUOTED;
@@ -991,22 +1004,22 @@ unsafe fn argstr(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
                     }
                 }
                 CTLVAR => {
-                    p = evalvar(p, flag | inquotes);
+                    p = evalvar(p, flag | inquotes)?;
                     continue 'start; /* goto start */
                 }
                 CTLBACKQ => {
-                    expbackq((&*argbackq)[0].as_ref(), flag | inquotes);
+                    expbackq((&*argbackq)[0].as_ref(), flag | inquotes)?;
                     continue 'start; /* goto start */
                 }
                 CTLARI => {
-                    p = expari(p, flag | inquotes);
+                    p = expari(p, flag | inquotes)?;
                     continue 'start; /* goto start */
                 }
                 _ => {}
             }
         }
     }
-    p.offset(-1)
+    Ok(p.offset(-1))
 }
 
 // [spec:dash:def:expand.exptilde-fn]
@@ -1106,7 +1119,7 @@ pub unsafe fn removerecordregions(endoff: c_int) {
 
 // [spec:dash:def:expand.expari-fn]
 // [spec:dash:sem:expand.expari-fn]
-unsafe fn expari(mut start: *mut c_char, flag: c_int) -> *mut c_char {
+unsafe fn expari(mut start: *mut c_char, flag: c_int) -> Result<*mut c_char, Error> {
     let begoff: c_int;
     let len: c_int;
     let result: intmax_t;
@@ -1115,7 +1128,7 @@ unsafe fn expari(mut start: *mut c_char, flag: c_int) -> *mut c_char {
     let p: *mut c_char;
 
     begoff = expdest_off();
-    p = argstr(start, flag & EXP_DISCARD);
+    p = argstr(start, flag & EXP_DISCARD)?;
 
     'out: {
         if (flag & EXP_DISCARD) != 0 {
@@ -1145,12 +1158,10 @@ unsafe fn expari(mut start: *mut c_char, flag: c_int) -> *mut c_char {
 
         removerecordregions(begoff);
 
-        /* `arith` returns its diagnostic now instead of raising it. This
-         * frame is not converted yet, so the bridge performs the jump the C
-         * performed from inside `yyerror`. It writes nothing: the value was
-         * reported when it was built. */
-        result = crate::arith_yacc::arith(start)
-            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
+        /* `arith` returns its diagnostic now instead of raising it, and as
+         * of this commit so does `expari`, so the bridge that stood here is
+         * gone and the value travels. */
+        result = crate::arith_yacc::arith(start)?;
 
         len = cvtnum(result, flag, expb()) as c_int;
 
@@ -1160,7 +1171,7 @@ unsafe fn expari(mut start: *mut c_char, flag: c_int) -> *mut c_char {
     }
 
     /* out: */
-    p
+    Ok(p)
 }
 
 /*
@@ -1169,7 +1180,7 @@ unsafe fn expari(mut start: *mut c_char, flag: c_int) -> *mut c_char {
 
 // [spec:dash:def:expand.expbackq-fn]
 // [spec:dash:sem:expand.expbackq-fn]
-unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
+unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) -> Result<(), Error> {
     let mut in_: crate::eval::backcmd = mem::zeroed();
     let mut i: c_int;
     let mut buf: [c_char; 128] = [0; 128];
@@ -1189,8 +1200,11 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
          * released them afterwards.  The word is not in the region and
          * neither is anything `evalbackcmd` reaches, so both halves are
          * gone. */
-        crate::eval::evalbackcmd(cmd, &mut in_ as *mut crate::eval::backcmd)
-            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
+        /* This `?` and the one below return between this frame's `INTOFF`
+         * and its `INTON`, which is where the longjmp went too — it skipped
+         * the same `INTON`. docs/errors-are-values.md 2.4: do not pair
+         * them. */
+        crate::eval::evalbackcmd(cmd, &mut in_ as *mut crate::eval::backcmd)?;
 
         /* `backcmd.buf` is ash's read-ahead buffer.  `evalbackcmd` writes
          * NULL to it and to `nleft` and never writes either again, so the
@@ -1235,16 +1249,7 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
 
         if in_.fd >= 0 {
             libc::close(in_.fd);
-            /* The one adapter this slice adds, and the next one removes.
-             * `expbackq` is the gateway into `expand`'s single connected
-             * fallible component -- `argstr`, `evalvar`, `subevalvar`,
-             * `expandmeta` and `expandarg` convert together or not at all --
-             * so the module gets its own commit and its own corpus sweep,
-             * per docs/errors-are-values.md 6, which names a silently
-             * swallowed expansion error as this conversion's dangerous
-             * failure mode. Until then this jumps exactly where the C did. */
-            crate::eval::back_exitstatus = crate::jobs::waitforjob(in_.jp)
-                .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
+            crate::eval::back_exitstatus = crate::jobs::waitforjob(in_.jp)?;
         }
         crate::error::INTON();
 
@@ -1264,6 +1269,7 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) {
 
     /* out: */
     argbackq = (&*argbackq)[1..].as_ref() as *const [Option<crate::nodes::Node>];
+    Ok(())
 }
 
 // [spec:dash:def:expand.scanleft-fn]
@@ -1388,7 +1394,7 @@ unsafe fn subevalvar(
     startloc: c_int,
     varflags: c_int,
     flag: c_int,
-) -> *mut c_char {
+) -> Result<*mut c_char, Error> {
     let mut subtype: c_int = varflags & VSTYPE;
     let quotes: c_int = flag & QUOTES_ESC;
     let mut startp: *mut c_char;
@@ -1412,9 +1418,9 @@ unsafe fn subevalvar(
     p = argstr(
         start,
         (flag & EXP_DISCARD) | EXP_TILDE | (if !str.is_null() { 0 } else { EXP_CASE }),
-    );
+    )?;
     if (flag & EXP_DISCARD) != 0 {
-        return p;
+        return Ok(p);
     }
 
     startp = expbase().offset(startloc as isize);
@@ -1422,18 +1428,20 @@ unsafe fn subevalvar(
     'out: {
         match subtype {
             VSASSIGN => {
-                /* Bridges until `subevalvar` returns `Result`. */
-                crate::var::setvar(str, startp, 0).unwrap_or_else(|e| {
-                    crate::error::raise_reported(crate::error::EXERROR, e)
-                });
+                /* The bridge that stood here retires with this commit. */
+                crate::var::setvar(str, startp, 0)?;
 
                 loc = startp;
                 break 'out;
             }
 
             VSQUESTION => {
-                varunset(start, str, startp, varflags);
-                /* NOTREACHED */
+                /* `varunset` stopped diverging with this commit, so this
+                 * has to be a `return` and not a bare call. It was a stop
+                 * before — docs/errors-are-values.md 0.2 is the bug that
+                 * happens when one of these is missed, and `Error` is
+                 * `#[must_use]` so the compiler now names it. */
+                return Err(varunset(start, str, startp, varflags));
             }
             _ => {}
         }
@@ -1524,7 +1532,7 @@ unsafe fn subevalvar(
     /* Remove any recorded regions beyond start of variable */
     removerecordregions(startloc);
 
-    p
+    Ok(p)
 }
 
 /*
@@ -1534,7 +1542,7 @@ unsafe fn subevalvar(
 
 // [spec:dash:def:expand.evalvar-fn]
 // [spec:dash:sem:expand.evalvar-fn]
-unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
+unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> Result<*mut c_char, Error> {
     let mut subtype: c_int;
     let mut varflags: c_int;
     let var: *mut c_char;
@@ -1571,7 +1579,7 @@ unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
     let mut really_record = false;
 
     'again: loop {
-        varlen = varvalue(var, varflags, (flag | mbchar) as c_uint);
+        varlen = varvalue(var, varflags, (flag | mbchar) as c_uint)?;
         if (varflags & VSNUL) != 0 {
             varlen -= 1;
         }
@@ -1585,7 +1593,7 @@ unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
                     /* fall through */
                 }
 
-                p = argstr(p, flag | EXP_TILDE | EXP_WORD | (discard ^ EXP_DISCARD));
+                p = argstr(p, flag | EXP_TILDE | EXP_WORD | (discard ^ EXP_DISCARD))?;
                 break 'again; /* goto record */
             }
 
@@ -1597,7 +1605,7 @@ unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
                     startloc,
                     varflags,
                     (flag & !QUOTES_ESC) | (discard ^ EXP_DISCARD),
-                );
+                )?;
 
                 if ((flag | !discard) & EXP_DISCARD) != 0 {
                     break 'again; /* goto record */
@@ -1611,13 +1619,14 @@ unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
         }
 
         if (discard & !flag) != 0 && uflag() != 0 {
-            varunset(p, var, ptr::null(), 0);
+            /* A stop before `varunset` stopped diverging, and still one. */
+            return Err(varunset(p, var, ptr::null(), 0));
         }
 
         if subtype == VSLENGTH {
             p = p.offset(1);
             if (flag & EXP_DISCARD) != 0 {
-                return p;
+                return Ok(p);
             }
             cvtnum(
                 (if varlen > 0 { varlen } else { 0 }) as intmax_t,
@@ -1653,14 +1662,14 @@ unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
         }
 
         patloc = expdest_off();
-        p = subevalvar(p, ptr::null_mut(), patloc, startloc, varflags, flag);
+        p = subevalvar(p, ptr::null_mut(), patloc, startloc, varflags, flag)?;
         break 'again;
     }
 
     /* record: */
     if !really_record {
         if ((flag | discard) & EXP_DISCARD) != 0 {
-            return p;
+            return Ok(p);
         }
     }
 
@@ -1668,11 +1677,11 @@ unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> *mut c_char {
     if quoted != 0 {
         quoted = (*var == C_AT && crate::options::shellparam.nparam != 0) as c_int;
         if quoted == 0 {
-            return p;
+            return Ok(p);
         }
     }
     recordregion(startloc, expdest_off(), quoted);
-    p
+    Ok(p)
 }
 
 // [spec:dash:def:expand.chtodest-fn]
@@ -1882,7 +1891,11 @@ unsafe fn strtodest(p: *const c_char, flags: c_int, dst: &mut BString) -> size_t
 
 // [spec:dash:def:expand.varvalue-fn]
 // [spec:dash:sem:expand.varvalue-fn]
-unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssize_t {
+unsafe fn varvalue(
+    name: *mut c_char,
+    varflags: c_int,
+    mut flags: c_uint,
+) -> Result<ssize_t, Error> {
     let subtype: c_int = varflags & VSTYPE;
     let mut seplen: size_t;
     let mut seps: *const c_char;
@@ -1899,10 +1912,10 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
 
     if subtype == 0 {
         if discard != 0 {
-            return -1;
+            return Ok(-1);
         }
 
-        crate::error::sh_error(b"Bad substitution");
+        return Err(crate::error::sh_error_value(b"Bad substitution"));
     }
 
     flags &= if discard != 0 {
@@ -1934,7 +1947,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
                         C_BANG => {
                             num = crate::jobs::backgndpid as c_int;
                             if num == 0 {
-                                return -1;
+                                return Ok(-1);
                             }
                             break 'numvar;
                         }
@@ -1987,7 +2000,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
                         c if c >= C_0 && c <= C_9 => {
                             num = libc::atoi(name);
                             if num < 0 || num > crate::options::shellparam.nparam {
-                                return -1;
+                                return Ok(-1);
                             }
                             p = if num != 0 {
                                 *crate::options::shellparam_p().offset(num as isize - 1)
@@ -2010,7 +2023,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
             /* param: */
             ap = crate::options::shellparam_p();
             if ap.is_null() {
-                return -1;
+                return Ok(-1);
             }
             p = *ap;
             if p.is_null() {
@@ -2031,7 +2044,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
         }
         /* value: */
         if p.is_null() {
-            return -1;
+            return Ok(-1);
         }
 
         len = strtodest(p, flags as c_int, expb()) as ssize_t;
@@ -2041,7 +2054,7 @@ unsafe fn varvalue(name: *mut c_char, varflags: c_int, mut flags: c_uint) -> ssi
         expb().truncate(start);
     }
 
-    len
+    Ok(len)
 }
 
 /*
@@ -2445,7 +2458,7 @@ unsafe extern "C" fn opendir_interruptible(pathname: *const c_char) -> *mut c_vo
 
 // [spec:dash:def:expand.expandmeta-glob-fn]
 // [spec:dash:sem:expand.expandmeta-glob-fn]
-unsafe fn expandmeta_glob(words: Vec<strlist>) {
+unsafe fn expandmeta_glob(words: Vec<strlist>) -> Result<(), Error> {
     for mut str in words {
         let p: *const c_char;
         let mut pglob: crate::system::glob64_t = mem::zeroed();
@@ -2503,8 +2516,9 @@ unsafe fn expandmeta_glob(words: Vec<strlist>) {
                     } else if i == crate::system::GLOB_NOMATCH {
                         break 'nometa2;
                     } else {
-                        /* default:  GLOB_NOSPACE */
-                        crate::error::sh_error(b"Out of space");
+                        /* default:  GLOB_NOSPACE. A stop before and after:
+                         * the arm falls into `nometa2` otherwise. */
+                        return Err(crate::error::sh_error_value(b"Out of space"));
                     }
                 }
                 /* nometa2: */
@@ -2517,6 +2531,7 @@ unsafe fn expandmeta_glob(words: Vec<strlist>) {
             expargl().push(str);
         }
     }
+    Ok(())
 }
 
 /*
@@ -2539,7 +2554,7 @@ unsafe fn addglob(pglob: *const crate::system::glob64_t) {
 
 // [spec:dash:def:expand.expandmeta-fn]
 // [spec:dash:sem:expand.expandmeta-fn]
-unsafe fn expandmeta(words: Vec<strlist>) {
+unsafe fn expandmeta(words: Vec<strlist>) -> Result<(), Error> {
     /* TODO - EXP_REDIR */
 
     if GLOB_IS_ENABLED {
@@ -2618,6 +2633,7 @@ unsafe fn expandmeta(words: Vec<strlist>) {
             expargl().push(str);
         }
     }
+    Ok(())
 }
 
 // [spec:dash:def:expand.addfname-common-fn]
@@ -3481,7 +3497,10 @@ pub unsafe fn _rmescapes(
 
 // [spec:dash:def:expand.casematch-fn]
 // [spec:dash:sem:expand.casematch-fn]
-pub unsafe fn casematch(pattern: &crate::nodes::Node, val: *const c_char) -> c_int {
+pub unsafe fn casematch(
+    pattern: &crate::nodes::Node,
+    val: *const c_char,
+) -> Result<c_int, Error> {
     let result: c_int;
 
     /* `setstackmark(&smark)` — it released what `argstr` allocated from the
@@ -3489,11 +3508,14 @@ pub unsafe fn casematch(pattern: &crate::nodes::Node, val: *const c_char) -> c_i
     argbackq = pattern.narg().backquote.as_slice();
     /* STARTSTACKSTR(expdest) */
     expb().clear();
-    argstr(pattern.narg().text.as_ptr(), EXP_TILDE | EXP_CASE);
+    /* As in `expandarg`: this `?` returns past the `ifsfree()`, which is
+     * where the longjmp went too, and the catch frame reclaims the
+     * regions. */
+    argstr(pattern.narg().text.as_ptr(), EXP_TILDE | EXP_CASE)?;
     ifsfree();
     /* The C reads the word back as `stackblock()`. */
     result = patmatch(expbase(), val);
-    result
+    Ok(result)
 }
 
 /*
@@ -3514,7 +3536,7 @@ unsafe fn varunset(
     var: *const c_char,
     umsg: *const c_char,
     varflags: c_int,
-) -> ! {
+) -> Error {
     let mut msg: *const c_char;
     let mut tail: *const c_char;
 
@@ -3535,7 +3557,7 @@ unsafe fn varunset(
     message.extend_from_slice(b": ");
     message.extend_from_slice(CStr::from_ptr(msg).to_bytes());
     message.extend_from_slice(CStr::from_ptr(tail).to_bytes());
-    crate::error::sh_error(&message)
+    crate::error::sh_error_value(&message)
 }
 
 // [spec:dash:def:expand.restore-handler-expandarg-fn]

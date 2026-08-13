@@ -390,7 +390,7 @@ unsafe fn openhere(redir: &Node) -> Result<c_int, Error> {
     let doc: &Node = redir.nhere().doc.get().unwrap();
     p = doc.narg().text.as_ptr();
     if redir.node_type() == NXHERE {
-        crate::expand::expandarg(doc, None, crate::expand::EXP_QUOTED);
+        crate::expand::expandarg(doc, None, crate::expand::EXP_QUOTED)?;
         /* The C reads the expansion back out of the region as
          * `stackblock()`.  The expansion buffer is owned now, so the read is
          * named.  Two consequences, both in the port's favour: the bytes
