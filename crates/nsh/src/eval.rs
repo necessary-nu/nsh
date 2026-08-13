@@ -179,7 +179,7 @@ pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> Result<c_int, Error> {
     crate::input::setinputstring(s);
     status = 0;
     loop {
-        let n: Option<Node> = match crate::parser::parsecmd(0) {
+        let n: Option<Node> = match crate::parser::parsecmd(0)? {
             crate::parser::ParseResult::Eof => break,
             crate::parser::ParseResult::Tree(n) => n,
         };
@@ -641,7 +641,7 @@ unsafe fn expredir(n: &[Node]) -> Result<(), Error> {
                 };
                 if expand {
                     debug_assert_eq!(fnl.list.len(), 1, "an unsplit expansion is one field");
-                    crate::parser::fixredir(redir, fnl.list[0].textp(), 1);
+                    crate::parser::fixredir(redir, fnl.list[0].textp(), 1)?;
                 }
             }
             _ => {}

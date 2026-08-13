@@ -323,7 +323,13 @@ pub(crate) unsafe fn cmdloop(top: c_int) -> c_int {
             inter += 1;
             crate::mail::chkmail();
         }
-        let parsed = crate::parser::parsecmd(inter);
+        /* `cmdloop` is not fallible: it is the interactive read-eval loop
+         * and its caller is `main`, which is the catch frame. It absorbs a
+         * syntax error exactly as it already absorbs an evaluation error
+         * below, and both bridges retire together when step D converts
+         * that frame. */
+        let parsed = crate::parser::parsecmd(inter)
+            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
         /* showtree(n); DEBUG */
         if let crate::parser::ParseResult::Tree(n) = parsed {
             let i: c_int;

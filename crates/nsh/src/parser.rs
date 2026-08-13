@@ -19,7 +19,7 @@ use std::rc::Rc;
 use bstr::{BStr, BString};
 use libc::{c_char, c_int, c_uint, c_void};
 
-use crate::error::{errlinno, handler, jmploc};
+use crate::error::{Error, errlinno, handler, jmploc};
 use crate::expand::{EXP_QUOTED, expandarg, restore_handler_expandarg, rmescapes};
 use crate::input::{
     PEOA, pgetc, pgetc_eoa, popfile, pungetc, pungetn, pushstring, setinputstring, unwindfiles,
@@ -247,7 +247,7 @@ pub const CHKEOFMARK: c_int = 0x8;
 ///
 /// `union node *` is three things there at once: a tree, `NULL` for a blank
 /// line, and the sentinel `#define NEOF ((union node *)&tokpushback)` for end
-/// of file. Only `list(1)` — that is, `parsecmd` — can produce `NEOF`,
+/// of file. Only `list(1)?` — that is, `parsecmd` — can produce `NEOF`,
 /// because the `n1 = NEOF` assignment is guarded by `chknl == 0` and `chknl`
 /// is only zero when `nlflag & 1`.
 pub enum ParseResult {
@@ -409,7 +409,7 @@ unsafe fn wordtext_node() -> NodeText {
 
 // [spec:dash:def:parser.parsecmd-fn]
 // [spec:dash:sem:parser.parsecmd-fn]
-pub unsafe fn parsecmd(interact: c_int) -> ParseResult {
+pub unsafe fn parsecmd(interact: c_int) -> Result<ParseResult, Error> {
     tokpushback = 0;
     checkkwd = 0;
     heredoclist = Vec::new();
@@ -423,7 +423,7 @@ pub unsafe fn parsecmd(interact: c_int) -> ParseResult {
 
 // [spec:dash:def:parser.list-fn]
 // [spec:dash:sem:parser.list-fn]
-unsafe fn list(nlflag: c_int) -> ParseResult {
+unsafe fn list(nlflag: c_int) -> Result<ParseResult, Error> {
     let mut nlflag = nlflag;
     let chknl = if nlflag & 1 != 0 { 0 } else { CHKNL };
     let mut n1: Option<Node>;
@@ -433,23 +433,23 @@ unsafe fn list(nlflag: c_int) -> ParseResult {
     n1 = None;
     loop {
         checkkwd = chknl | CHKKWD | CHKALIAS;
-        tok = readtoken();
+        tok = readtoken()?;
         match tok {
             TNL => {
-                parseheredoc();
-                return ParseResult::Tree(n1);
+                parseheredoc()?;
+                return Ok(ParseResult::Tree(n1));
             }
 
             TEOF => {
                 let eof = n1.is_none() && chknl == 0;
                 /* out_eof: */
-                parseheredoc();
+                parseheredoc()?;
                 tokpushback += 1;
                 lasttoken = TEOF;
                 return if eof {
-                    ParseResult::Eof
+                    Ok(ParseResult::Eof)
                 } else {
-                    ParseResult::Tree(n1)
+                    Ok(ParseResult::Tree(n1))
                 };
             }
             _ => {}
@@ -457,18 +457,18 @@ unsafe fn list(nlflag: c_int) -> ParseResult {
 
         tokpushback += 1;
         if nlflag == 2 && tokendlist[tok as usize] != 0 {
-            return ParseResult::Tree(n1);
+            return Ok(ParseResult::Tree(n1));
         }
         nlflag |= 2;
 
         /* The line the backgrounded command starts on, captured before
-         * anything consumes it. `command()` and `pipeline()` both take
+         * anything consumes it. `command()?` and `pipeline()?` both take
          * their `savelinno` at this same point, so a wrapper built here
          * records the line its contents record. */
         let savelinno: c_int = crate::plinno!();
 
-        n2 = andor();
-        tok = readtoken();
+        n2 = andor()?;
+        tok = readtoken()?;
         if tok == TBACKGND {
             /* The C dereferences n2 unconditionally here. */
             if n2.as_ref().unwrap().node_type() == NPIPE {
@@ -510,10 +510,10 @@ unsafe fn list(nlflag: c_int) -> ParseResult {
         match tok {
             TEOF => {
                 /* goto out_eof */
-                parseheredoc();
+                parseheredoc()?;
                 tokpushback += 1;
                 lasttoken = TEOF;
-                return ParseResult::Tree(n1);
+                return Ok(ParseResult::Tree(n1));
             }
             TNL => {
                 tokpushback += 1;
@@ -522,10 +522,10 @@ unsafe fn list(nlflag: c_int) -> ParseResult {
             TBACKGND | TSEMI => {}
             _ => {
                 if chknl == 0 {
-                    synexpect(-1);
+                    return Err(synexpect(-1));
                 }
                 tokpushback += 1;
-                return ParseResult::Tree(n1);
+                return Ok(ParseResult::Tree(n1));
             }
         }
     }
@@ -533,23 +533,23 @@ unsafe fn list(nlflag: c_int) -> ParseResult {
 
 // [spec:dash:def:parser.andor-fn]
 // [spec:dash:sem:parser.andor-fn]
-unsafe fn andor() -> Option<Node> {
+unsafe fn andor() -> Result<Option<Node>, Error> {
     let mut n1: Option<Node>;
     let mut t: c_int;
 
-    n1 = pipeline();
+    n1 = pipeline()?;
     loop {
-        t = readtoken();
+        t = readtoken()?;
         if t == TAND {
             t = NAND;
         } else if t == TOR {
             t = NOR;
         } else {
             tokpushback += 1;
-            return n1;
+            return Ok(n1);
         }
         checkkwd = CHKNL | CHKKWD | CHKALIAS;
-        let n2 = pipeline();
+        let n2 = pipeline()?;
         n1 = Some(Node::Binary(nbinary {
             r#type: t,
             ch1: n1.map(Box::new),
@@ -560,28 +560,28 @@ unsafe fn andor() -> Option<Node> {
 
 // [spec:dash:def:parser.pipeline-fn]
 // [spec:dash:sem:parser.pipeline-fn]
-unsafe fn pipeline() -> Option<Node> {
+unsafe fn pipeline() -> Result<Option<Node>, Error> {
     let mut n1: Option<Node>;
     let mut negate: c_int;
 
     negate = 0;
     /* TRACE(("pipeline: entered\n")); */
-    if readtoken() == TNOT {
+    if readtoken()? == TNOT {
         negate = (negate == 0) as c_int;
         checkkwd = CHKKWD | CHKALIAS;
     } else {
         tokpushback += 1;
     }
-    n1 = command();
-    if readtoken() == TPIPE {
+    n1 = command()?;
+    if readtoken()? == TPIPE {
         /* Every `stalloc(sizeof(struct nodelist))` the C does here is one
          * `Vec` slot; the list is built front to back either way, and
-         * `command()` cannot return NULL without having raised first. */
+         * `command()?` cannot return NULL without having raised first. */
         let mut cmdlist: Vec<Node> = vec![n1.take().unwrap()];
         loop {
             checkkwd = CHKNL | CHKKWD | CHKALIAS;
-            cmdlist.push(command().unwrap());
-            if readtoken() != TPIPE {
+            cmdlist.push(command()?.unwrap());
+            if readtoken()? != TPIPE {
                 break;
             }
         }
@@ -592,17 +592,17 @@ unsafe fn pipeline() -> Option<Node> {
     }
     tokpushback += 1;
     if negate != 0 {
-        Some(Node::Not(nnot {
+        Ok(Some(Node::Not(nnot {
             com: n1.map(Box::new),
-        }))
+        })))
     } else {
-        n1
+        Ok(n1)
     }
 }
 
 // [spec:dash:def:parser.command-fn]
 // [spec:dash:sem:parser.command-fn]
-unsafe fn command() -> Option<Node> {
+unsafe fn command() -> Result<Option<Node>, Error> {
     let mut n1: Option<Node>;
     let mut t: c_int;
     let savelinno: c_int;
@@ -610,31 +610,31 @@ unsafe fn command() -> Option<Node> {
     savelinno = crate::plinno!();
 
     let mut goto_redir = false;
-    let tok = readtoken();
+    let tok = readtoken()?;
     if tok == TIF {
         /* The C threads the elif chain through `elsepart` on the way down,
          * writing each new nif into its parent before parsing it.  An owned
          * tree cannot hand out that parent pointer, so the clauses are
          * collected in parse order and folded back up afterwards; the
-         * sequence of `list(0)` calls — and so of everything they read — is
+         * sequence of `list(0)?` calls — and so of everything they read — is
          * unchanged. */
         let mut clauses: Vec<(Option<Node>, Option<Node>)> = Vec::new();
-        let test = list(0).into_node();
-        if readtoken() != TTHEN {
-            synexpect(TTHEN);
+        let test = list(0)?.into_node();
+        if readtoken()? != TTHEN {
+            return Err(synexpect(TTHEN));
         }
-        let ifpart = list(0).into_node();
+        let ifpart = list(0)?.into_node();
         clauses.push((test, ifpart));
-        while readtoken() == TELIF {
-            let test = list(0).into_node();
-            if readtoken() != TTHEN {
-                synexpect(TTHEN);
+        while readtoken()? == TELIF {
+            let test = list(0)?.into_node();
+            if readtoken()? != TTHEN {
+                return Err(synexpect(TTHEN));
             }
-            let ifpart = list(0).into_node();
+            let ifpart = list(0)?.into_node();
             clauses.push((test, ifpart));
         }
         let mut elsepart: Option<Node> = if lasttoken == TELSE {
-            list(0).into_node()
+            list(0)?.into_node()
         } else {
             tokpushback += 1;
             None
@@ -651,12 +651,12 @@ unsafe fn command() -> Option<Node> {
     } else if tok == TWHILE || tok == TUNTIL {
         let got: c_int;
         let ty = if lasttoken == TWHILE { NWHILE } else { NUNTIL };
-        let ch1 = list(0).into_node();
-        got = readtoken();
+        let ch1 = list(0)?.into_node();
+        got = readtoken()?;
         if got != TDO {
-            synexpect(TDO);
+            return Err(synexpect(TDO));
         }
-        let ch2 = list(0).into_node();
+        let ch2 = list(0)?.into_node();
         n1 = Some(Node::Binary(nbinary {
             r#type: ty,
             ch1: ch1.map(Box::new),
@@ -664,23 +664,23 @@ unsafe fn command() -> Option<Node> {
         }));
         t = TDONE;
     } else if tok == TFOR {
-        if readtoken() != TWORD || quoteflag != 0 || goodname(wordtext_ptr()) == 0 {
-            synerror(c"Bad for loop variable".as_ptr());
+        if readtoken()? != TWORD || quoteflag != 0 || goodname(wordtext_ptr()) == 0 {
+            return Err(synerror(c"Bad for loop variable".as_ptr()));
         }
         /* the C stores `wordtext` into the node here, before any further
          * token read can overwrite it */
         let var = wordtext_node();
         let mut args: Vec<Node> = Vec::new();
         checkkwd = CHKNL | CHKKWD | CHKALIAS;
-        if readtoken() == TIN {
-            while readtoken() == TWORD {
+        if readtoken()? == TIN {
+            while readtoken()? == TWORD {
                 args.push(Node::Arg(narg {
                     text: wordtext_node(),
                     backquote: takeglobal(addr_of_mut!(backquotelist)),
                 }));
             }
             if lasttoken != TNL && lasttoken != TSEMI {
-                synexpect(-1);
+                return Err(synexpect(-1));
             }
         } else {
             /* The implicit `"$@"` of a `for` with no `in`. `dolatstr` is
@@ -701,10 +701,10 @@ unsafe fn command() -> Option<Node> {
             }
         }
         checkkwd = CHKNL | CHKKWD | CHKALIAS;
-        if readtoken() != TDO {
-            synexpect(TDO);
+        if readtoken()? != TDO {
+            return Err(synexpect(TDO));
         }
-        let body = list(0).into_node();
+        let body = list(0)?.into_node();
         n1 = Some(Node::For(nfor {
             linno: savelinno,
             args,
@@ -713,53 +713,53 @@ unsafe fn command() -> Option<Node> {
         }));
         t = TDONE;
     } else if tok == TCASE {
-        if readtoken() != TWORD {
-            synexpect(TWORD);
+        if readtoken()? != TWORD {
+            return Err(synexpect(TWORD));
         }
         let expr = Node::Arg(narg {
             text: wordtext_node(),
             backquote: takeglobal(addr_of_mut!(backquotelist)),
         });
         checkkwd = CHKNL | CHKKWD | CHKALIAS;
-        if readtoken() != TIN {
-            synexpect(TIN);
+        if readtoken()? != TIN {
+            return Err(synexpect(TIN));
         }
         let mut cases: Vec<Node> = Vec::new();
         'next_case: loop {
             checkkwd = CHKNL | CHKKWD;
-            t = readtoken();
+            t = readtoken()?;
             while t != TESAC {
                 if lasttoken == TLP {
-                    readtoken();
+                    readtoken()?;
                 }
                 let mut pattern: Vec<Node> = Vec::new();
                 loop {
                     if lasttoken < TWORD {
-                        synexpect(TWORD);
+                        return Err(synexpect(TWORD));
                     }
                     pattern.push(Node::Arg(narg {
                         text: wordtext_node(),
                         backquote: takeglobal(addr_of_mut!(backquotelist)),
                     }));
-                    if readtoken() != TPIPE {
+                    if readtoken()? != TPIPE {
                         break;
                     }
-                    readtoken();
+                    readtoken()?;
                 }
                 if lasttoken != TRP {
-                    synexpect(TRP);
+                    return Err(synexpect(TRP));
                 }
-                let body = list(2).into_node();
+                let body = list(2)?.into_node();
                 cases.push(Node::Clist(nclist {
                     pattern,
                     body: body.map(Box::new),
                 }));
 
                 checkkwd = CHKNL | CHKKWD;
-                t = readtoken();
+                t = readtoken()?;
                 if t != TESAC {
                     if t != TENDCASE {
-                        synexpect(TENDCASE);
+                        return Err(synexpect(TENDCASE));
                     } else {
                         continue 'next_case;
                     }
@@ -774,7 +774,7 @@ unsafe fn command() -> Option<Node> {
         }));
         goto_redir = true;
     } else if tok == TLP {
-        let inner = list(0).into_node();
+        let inner = list(0)?.into_node();
         n1 = Some(Node::Redir(nredir {
             r#type: NSUBSHELL,
             linno: savelinno,
@@ -783,19 +783,19 @@ unsafe fn command() -> Option<Node> {
         }));
         t = TRP;
     } else if tok == TBEGIN {
-        n1 = list(0).into_node();
+        n1 = list(0)?.into_node();
         t = TEND;
     } else if tok == TWORD || tok == TREDIR {
         tokpushback += 1;
         return simplecmd();
     } else {
-        synexpect(-1);
+        return Err(synexpect(-1));
         /* NOTREACHED */
     }
 
     if !goto_redir {
-        if readtoken() != t {
-            synexpect(t);
+        if readtoken()? != t {
+            return Err(synexpect(t));
         }
     }
 
@@ -803,12 +803,12 @@ unsafe fn command() -> Option<Node> {
     /* Now check for redirection which may follow command */
     checkkwd = CHKKWD | CHKALIAS;
     let mut redir: Vec<Node> = Vec::new();
-    while readtoken() == TREDIR {
+    while readtoken()? == TREDIR {
         /* The C copies `redirnode` into a local *before* `parsefname`,
          * because the token read inside it can set the global again.
          * Taking ownership of it here is the same guarantee. */
         let mut n2 = takeglobal(addr_of_mut!(redirnode)).unwrap();
-        parsefname(&mut n2);
+        parsefname(&mut n2)?;
         redir.push(n2);
     }
     tokpushback += 1;
@@ -824,12 +824,12 @@ unsafe fn command() -> Option<Node> {
         n1.as_mut().unwrap().nredir_mut().redirect = redir;
     }
 
-    n1
+    Ok(n1)
 }
 
 // [spec:dash:def:parser.simplecmd-fn]
 // [spec:dash:sem:parser.simplecmd-fn]
-unsafe fn simplecmd() -> Option<Node> {
+unsafe fn simplecmd() -> Result<Option<Node>, Error> {
     let mut args: Vec<Node> = Vec::new();
     let mut vars: Vec<Node> = Vec::new();
     let mut redir: Vec<Node> = Vec::new();
@@ -840,7 +840,7 @@ unsafe fn simplecmd() -> Option<Node> {
     savelinno = crate::plinno!();
     loop {
         checkkwd = savecheckkwd;
-        let tok = readtoken();
+        let tok = readtoken()?;
         if tok == TWORD {
             let n = Node::Arg(narg {
                 text: wordtext_node(),
@@ -854,7 +854,7 @@ unsafe fn simplecmd() -> Option<Node> {
             }
         } else if tok == TREDIR {
             let mut n = takeglobal(addr_of_mut!(redirnode)).unwrap();
-            parsefname(&mut n); /* read name of redirection file */
+            parsefname(&mut n)?; /* read name of redirection file */
             redir.push(n);
         } else {
             /* The C's `app == &args->narg.next` says the argument list holds
@@ -864,8 +864,8 @@ unsafe fn simplecmd() -> Option<Node> {
                 let name: *const c_char;
 
                 /* We have a function */
-                if readtoken() != TRP {
-                    synexpect(TRP);
+                if readtoken()? != TRP {
+                    return Err(synexpect(TRP));
                 }
                 /* the word becomes the function's name; the C keeps the same
                  * `char *` when it relabels the node */
@@ -875,7 +875,7 @@ unsafe fn simplecmd() -> Option<Node> {
                 if goodname(name) == 0
                     || (!bcmd.is_null() && ((*bcmd).flags & crate::builtins::BUILTIN_SPECIAL) != 0)
                 {
-                    synerror(c"Bad function name".as_ptr());
+                    return Err(synerror(c"Bad function name".as_ptr()));
                 }
                 /* The C relabels the NARG node NDEFUN in place: a union
                  * type-pun that copies `narg.text` (offset 16) into
@@ -883,12 +883,12 @@ unsafe fn simplecmd() -> Option<Node> {
                  * NARG's backquote list is dropped either way. */
                 checkkwd = CHKNL | CHKKWD | CHKALIAS;
                 let linno = crate::plinno!();
-                let body = command();
-                return Some(Node::Defun(ndefun {
+                let body = command()?;
+                return Ok(Some(Node::Defun(ndefun {
                     linno,
                     text: word.text,
                     body: body.map(Box::new),
-                }));
+                })));
             }
             /* fall through */
             /* default: */
@@ -897,12 +897,12 @@ unsafe fn simplecmd() -> Option<Node> {
         }
     }
     /* out: */
-    Some(Node::Cmd(ncmd {
+    Ok(Some(Node::Cmd(ncmd {
         linno: savelinno,
         assign: vars,
         args,
         redirect: redir,
-    }))
+    })))
 }
 
 // [spec:dash:def:parser.makename-fn]
@@ -921,7 +921,7 @@ unsafe fn makename() -> Node {
 // still being built (`err == 0`), and from `expredir` on a tree that may be a
 // shared function definition (`err != 0`).  Only the second writes at run
 // time, and it only writes `dupfd`, which is why that field is the `Cell`.
-pub unsafe fn fixredir(n: &Node, text: *const c_char, err: c_int) {
+pub unsafe fn fixredir(n: &Node, text: *const c_char, err: c_int) -> Result<(), Error> {
     /* TRACE(("Fix redir %s %d\n", text, err)); */
     let d = n.ndup();
     if err == 0 {
@@ -936,11 +936,13 @@ pub unsafe fn fixredir(n: &Node, text: *const c_char, err: c_int) {
         if err != 0 {
             let mut message = b"Bad fd number: ".to_vec();
             message.extend_from_slice(CStr::from_ptr(text).to_bytes());
-            crate::error::sh_error(&message);
+            /* A stop before `sh_error` became a value, and still one. */
+            return Err(crate::error::sh_error_value(&message));
         } else {
             *d.vname.borrow_mut() = Some(Box::new(makename()));
         }
     }
+    Ok(())
 }
 
 // [spec:dash:def:parser.parsefname-fn]
@@ -949,12 +951,12 @@ pub unsafe fn fixredir(n: &Node, text: *const c_char, err: c_int) {
 // The C reads the redirection node out of the `redirnode` global; here the
 // caller has already taken ownership of it, because the `readtoken` below can
 // set that global again before this function is done with it.
-unsafe fn parsefname(n: &mut Node) {
+unsafe fn parsefname(n: &mut Node) -> Result<(), Error> {
     if n.node_type() == NHERE {
         checkkwd |= CHKEOFMARK;
     }
-    if readtoken() != TWORD {
-        synexpect(-1);
+    if readtoken()? != TWORD {
+        return Err(synexpect(-1));
     }
     checkkwd &= !CHKEOFMARK;
     if n.node_type() == NHERE {
@@ -977,10 +979,11 @@ unsafe fn parsefname(n: &mut Node) {
         here.expand = n.nhere().r#type == NXHERE;
         (&mut *addr_of_mut!(heredoclist)).push(here);
     } else if n.node_type() == NTOFD || n.node_type() == NFROMFD {
-        fixredir(n, wordtext_ptr(), 0);
+        fixredir(n, wordtext_ptr(), 0)?;
     } else {
         n.nfile_mut().fname = Some(Box::new(makename()));
     }
+    Ok(())
 }
 
 /*
@@ -989,7 +992,7 @@ unsafe fn parsefname(n: &mut Node) {
 
 // [spec:dash:def:parser.parseheredoc-fn]
 // [spec:dash:sem:parser.parseheredoc-fn]
-unsafe fn parseheredoc() {
+unsafe fn parseheredoc() -> Result<(), Error> {
     let list: Vec<heredoc> = takeglobal(addr_of_mut!(heredoclist));
 
     for here in list {
@@ -998,9 +1001,9 @@ unsafe fn parseheredoc() {
         }
         let mark = EofMark::Word(BStr::new(&here.eofmark));
         if !here.expand {
-            readtoken1(pgetc(), SQSYNTAX(), mark, here.striptabs);
+            readtoken1(pgetc(), SQSYNTAX(), mark, here.striptabs)?;
         } else {
-            readtoken1(pgetc_eatbnl(), DQSYNTAX(), mark, here.striptabs);
+            readtoken1(pgetc_eatbnl(), DQSYNTAX(), mark, here.striptabs)?;
         }
         let n = Node::Arg(narg {
             text: wordtext_node(),
@@ -1011,25 +1014,26 @@ unsafe fn parseheredoc() {
          * exactly once, so a second write cannot happen. */
         let _ = here.doc.set(n);
     }
+    Ok(())
 }
 
 // [spec:dash:def:parser.readtoken-fn]
 // [spec:dash:sem:parser.readtoken-fn]
-unsafe fn readtoken() -> c_int {
+unsafe fn readtoken() -> Result<c_int, Error> {
     let mut t: c_int;
     let mut kwd: c_int = checkkwd;
 
     'top: loop {
-        t = xxreadtoken();
+        t = xxreadtoken()?;
 
         /*
          * eat newlines
          */
         if kwd & CHKNL != 0 {
             while t == TNL {
-                parseheredoc();
+                parseheredoc()?;
                 checkkwd = 0;
-                t = xxreadtoken();
+                t = xxreadtoken()?;
             }
         }
 
@@ -1065,7 +1069,7 @@ unsafe fn readtoken() -> c_int {
         break 'top;
     }
     /* out: */
-    t
+    Ok(t)
 }
 
 // [spec:dash:def:parser.nlprompt-fn]
@@ -1095,12 +1099,12 @@ unsafe fn nlnoprompt() {
 
 // [spec:dash:def:parser.xxreadtoken-fn]
 // [spec:dash:sem:parser.xxreadtoken-fn]
-unsafe fn xxreadtoken() -> c_int {
+unsafe fn xxreadtoken() -> Result<c_int, Error> {
     let mut c: c_int;
 
     if tokpushback != 0 {
         tokpushback = 0;
-        return lasttoken;
+        return Ok(lasttoken);
     }
     if needprompt != 0 {
         setprompt(2);
@@ -1124,44 +1128,44 @@ unsafe fn xxreadtoken() -> c_int {
         } else if c == '\n' as c_int {
             nlnoprompt();
             lasttoken = TNL;
-            return TNL;
+            return Ok(TNL);
         } else if c == PEOF {
             lasttoken = TEOF;
-            return TEOF;
+            return Ok(TEOF);
         } else if c == '&' as c_int {
             if pgetc_eatbnl() == '&' as c_int {
                 lasttoken = TAND;
-                return TAND;
+                return Ok(TAND);
             }
             pungetc();
             lasttoken = TBACKGND;
-            return TBACKGND;
+            return Ok(TBACKGND);
         } else if c == '|' as c_int {
             if pgetc_eatbnl() == '|' as c_int {
                 lasttoken = TOR;
-                return TOR;
+                return Ok(TOR);
             }
             pungetc();
             lasttoken = TPIPE;
-            return TPIPE;
+            return Ok(TPIPE);
         } else if c == ';' as c_int {
             if pgetc_eatbnl() == ';' as c_int {
                 lasttoken = TENDCASE;
-                return TENDCASE;
+                return Ok(TENDCASE);
             }
             pungetc();
             lasttoken = TSEMI;
-            return TSEMI;
+            return Ok(TSEMI);
         } else if c == '(' as c_int {
             lasttoken = TLP;
-            return TLP;
+            return Ok(TLP);
         } else if c == ')' as c_int {
             lasttoken = TRP;
-            return TRP;
+            return Ok(TRP);
         }
-        tok = readtoken1(c, BASESYNTAX(), EofMark::None, 0);
+        tok = readtoken1(c, BASESYNTAX(), EofMark::None, 0)?;
         if tok != TBLANK {
-            return tok;
+            return Ok(tok);
         }
     }
 }
@@ -1409,7 +1413,7 @@ unsafe fn readtoken1(
     syntax: *const Syntax,
     eofmark: EofMark<'_>,
     striptabs: c_int,
-) -> c_int {
+) -> Result<c_int, Error> {
     let mut st = Rt1 {
         synstack: vec![synstack {
             syntax,
@@ -1459,7 +1463,7 @@ unsafe fn readtoken1(
                 );
                 if ml == 1 {
                     if st.out.is_empty() {
-                        return TBLANK;
+                        return Ok(TBLANK);
                     }
                     st.c = pgetc();
                     break 'loop_;
@@ -1559,7 +1563,7 @@ unsafe fn readtoken1(
                     }
                 } else if cls == CVAR as c_int {
                     /* '$' */
-                    if parsesub(&mut st) {
+                    if parsesub(&mut st)? {
                         /* parse substitution */
                         lbl = Lbl::Csquote;
                     }
@@ -1606,7 +1610,7 @@ unsafe fn readtoken1(
                         lbl = Lbl::EndBackq;
                     } else {
                         st.out.push('`' as u8);
-                        parsebackq(&mut st, 1);
+                        parsebackq(&mut st, 1)?;
                     }
                 } else if cls == CEOF as c_int {
                     break 'loop_; /* exit outer loop */
@@ -1659,14 +1663,14 @@ unsafe fn readtoken1(
     }
     /* endword: */
     if st.syn().syntax == ARISYNTAX() {
-        synerror(c"Missing '))'".as_ptr());
+        return Err(synerror(c"Missing '))'".as_ptr()));
     }
     if (st.syn().syntax != BASESYNTAX() && st.eofmark.is_none()) || st.syn().backq != 0 {
-        synerror(c"Unterminated quoted string".as_ptr());
+        return Err(synerror(c"Unterminated quoted string".as_ptr()));
     }
     if st.syn().varnest != 0 {
         /* { */
-        synerror(c"Missing '}'".as_ptr());
+        return Err(synerror(c"Missing '}'".as_ptr()));
     }
     st.out.push(b'\0');
     len = st.out.len();
@@ -1678,7 +1682,7 @@ unsafe fn readtoken1(
         {
             parseredir(&mut st);
             lasttoken = TREDIR;
-            return TREDIR;
+            return Ok(TREDIR);
         } else {
             pungetc();
         }
@@ -1690,7 +1694,7 @@ unsafe fn readtoken1(
      * Moving the buffer out is the same guarantee. */
     wordtext = mem::take(&mut st.out);
     lasttoken = TWORD;
-    TWORD
+    Ok(TWORD)
 }
 /* end of readtoken routine */
 
@@ -1869,7 +1873,7 @@ unsafe fn parseredir(st: &mut Rt1<'_>) {
  */
 
 /* parsesub: */
-unsafe fn parsesub(st: &mut Rt1<'_>) -> bool {
+unsafe fn parsesub(st: &mut Rt1<'_>) -> Result<bool, Error> {
     let mut newsyn: *const Syntax = st.syn().syntax;
     static types: [u8; 6] = *b"}-+?=\0";
     let mut subtype: c_int;
@@ -1881,15 +1885,15 @@ unsafe fn parsesub(st: &mut Rt1<'_>) -> bool {
         /* $(command) or $((arith)) */
         st.out.push(st.c as u8);
         if pgetc_eatbnl() == '(' as c_int {
-            parsearith(st);
+            parsearith(st)?;
         } else {
             pungetc();
-            parsebackq(st, 0);
+            parsebackq(st, 0)?;
         }
     } else if st.c == '\'' as c_int && syn_at(newsyn, '&' as c_int) != 0 {
         st.out.pop();
         st.dollarsq = '\\' as c_int;
-        return true; /* goto csquote */
+        return Ok(true); /* goto csquote */
     } else if st.c == '{' as c_int || is_name(st.c) || is_special(st.c) != 0 {
         let typeloc: usize = st.out.len();
         let mut badsub = false;
@@ -2045,7 +2049,7 @@ unsafe fn parsesub(st: &mut Rt1<'_>) -> bool {
     }
 
     /* goto parsesub_return; */
-    false
+    Ok(false)
 }
 
 /*
@@ -2054,14 +2058,14 @@ unsafe fn parsesub(st: &mut Rt1<'_>) -> bool {
  */
 
 /* parsebackq: */
-unsafe fn parsebackq(st: &mut Rt1<'_>, oldstyle: c_int) {
+unsafe fn parsebackq(st: &mut Rt1<'_>, oldstyle: c_int) -> Result<(), Error> {
     let mut saveprompt: c_int = 0;
     let saveheredoclist: Vec<heredoc>;
     let nlpp: usize;
     let n: Option<Node>;
     let mut ml: c_uint;
     /* `grabstackstr(pout)` had to reserve the backquote's text because
-     * `list(2)` builds on the same stack; owning it says the same thing, and
+     * `list(2)?` builds on the same stack; owning it says the same thing, and
      * it has to outlive the `popfile` below because `setinputstring` reads
      * through the pointer rather than copying. */
     let mut pstr: BString = BString::new(Vec::new());
@@ -2075,7 +2079,7 @@ unsafe fn parsebackq(st: &mut Rt1<'_>, oldstyle: c_int) {
         if oldstyle != 0 {
             tokpushback = 0;
         }
-        return;
+        return Ok(());
     }
     /* `STADJUST(oldstyle - 1, out)` drops the '(' of `$(` and leaves the '`'
      * of a backquote in place; either way the last byte becomes CTLBACKQ. */
@@ -2084,7 +2088,7 @@ unsafe fn parsebackq(st: &mut Rt1<'_>, oldstyle: c_int) {
     }
     let last = st.out.len() - 1;
     st.out[last] = CTLBACKQ as u8;
-    /* The word so far is parked while `list(2)` runs, which is what
+    /* The word so far is parked while `list(2)?` runs, which is what
      * `grabstackblock(savelen)` bought the C. */
     str = mem::take(&mut st.out);
     if oldstyle != 0 {
@@ -2118,7 +2122,7 @@ unsafe fn parsebackq(st: &mut Rt1<'_>, oldstyle: c_int) {
                         break 'bqbody; /* continue */
                     }
                 } else if pc == PEOF {
-                    synerror(c"EOF in backquote substitution".as_ptr());
+                    return Err(synerror(c"EOF in backquote substitution".as_ptr()));
                 } else if pc == '\n' as c_int {
                     nlnoprompt();
                 }
@@ -2133,7 +2137,7 @@ unsafe fn parsebackq(st: &mut Rt1<'_>, oldstyle: c_int) {
     }
     /* The C walks to the tail of `bqlist` and appends an empty cell, then
      * fills its `n` after the recursive parse.  Reserving the slot first is
-     * the same order; nothing else can append to this list while `list(2)`
+     * the same order; nothing else can append to this list while `list(2)?`
      * runs, because `bqlist` is a local of *this* `readtoken1`. */
     nlpp = st.bqlist.len();
     st.bqlist.push(None);
@@ -2145,18 +2149,18 @@ unsafe fn parsebackq(st: &mut Rt1<'_>, oldstyle: c_int) {
         doprompt = 0;
     }
 
-    n = list(2).into_node();
+    n = list(2)?.into_node();
 
     if oldstyle != 0 {
         doprompt = saveprompt;
     } else {
-        if readtoken() != TRP {
-            synexpect(TRP);
+        if readtoken()? != TRP {
+            return Err(synexpect(TRP));
         }
         setinputstring(ptr::addr_of!(crate::mystring::nullstr) as *const c_char as *mut c_char);
     }
 
-    parseheredoc();
+    parseheredoc()?;
     heredoclist = saveheredoclist;
 
     st.bqlist[nlpp] = n;
@@ -2172,13 +2176,14 @@ unsafe fn parsebackq(st: &mut Rt1<'_>, oldstyle: c_int) {
          */
         tokpushback = 0;
     }
+    Ok(())
 }
 
 /*
  * Parse an arithmetic expansion (indicate start of one and set state)
  */
 /* parsearith: */
-unsafe fn parsearith(st: &mut Rt1<'_>) {
+unsafe fn parsearith(st: &mut Rt1<'_>) -> Result<(), Error> {
     synstack_ops::push(&mut st.synstack, ARISYNTAX());
     st.syn_mut().dblquote = 1;
     if st.chkeofmark != 0 {
@@ -2191,6 +2196,7 @@ unsafe fn parsearith(st: &mut Rt1<'_>) {
         st.out[last] = CTLARI as u8;
     }
     /* goto parsearith_return; */
+    Ok(())
 }
 
 /*
@@ -2227,7 +2233,7 @@ pub unsafe fn endofname(name: *const c_char) -> *mut c_char {
 
 // [spec:dash:def:parser.synexpect-fn]
 // [spec:dash:sem:parser.synexpect-fn]
-unsafe fn synexpect(token: c_int) -> ! {
+unsafe fn synexpect(token: c_int) -> Error {
     let mut msg: [c_char; 64] = [0; 64];
     let mut message = Vec::new();
 
@@ -2240,20 +2246,16 @@ unsafe fn synexpect(token: c_int) -> ! {
     }
     let copied = message.len().min(msg.len() - 1);
     core::ptr::copy_nonoverlapping(message.as_ptr(), msg.as_mut_ptr() as *mut u8, copied);
-    synerror(msg.as_ptr());
-    /* NOTREACHED */
+    synerror(msg.as_ptr())
 }
 
 // [spec:dash:def:parser.synerror-fn]
 // [spec:dash:sem:parser.synerror-fn]
-#[allow(unreachable_code)]
-unsafe fn synerror(msg: *const c_char) -> ! {
+unsafe fn synerror(msg: *const c_char) -> Error {
     errlinno = crate::plinno!();
     let mut message = b"Syntax error: ".to_vec();
     message.extend_from_slice(CStr::from_ptr(msg).to_bytes());
-    crate::error::sh_error(&message);
-    /* NOTREACHED */
-    unreachable!()
+    crate::error::sh_error_value(&message)
 }
 
 // [spec:dash:def:parser.setprompt-fn]
@@ -2310,20 +2312,21 @@ pub unsafe fn expandstr(ps: *const c_char) -> *const c_char {
     err = crate::eval::setjmp_catch(jl, || unsafe {
         handler = jl;
 
-        readtoken1(pgetc_eatbnl(), DQSYNTAX(), EofMark::Fake, 0);
+        /* Both bridges below are inside `expandstr`'s own `setjmp_catch`,
+         * whose closure is `FnOnce()` and has nowhere to return a `Result`
+         * to. They raise what this frame is still armed to catch, so the
+         * swallow and re-raise in `restore_handler_expandarg` below keep
+         * deciding exactly what they decided before. Both retire when step
+         * D converts this frame — the last of the seven, with
+         * `redirectsafe`, per docs/errors-are-values.md 6. */
+        readtoken1(pgetc_eatbnl(), DQSYNTAX(), EofMark::Fake, 0)
+            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
 
         let n = Node::Arg(narg {
             text: wordtext_node(),
             backquote: takeglobal(addr_of_mut!(backquotelist)),
         });
 
-        /* Inside `expandstr`'s own `setjmp_catch`, whose closure is
-         * `FnOnce()` and has nowhere to return a `Result` to. The bridge
-         * raises what this frame is still armed to catch, so the swallow
-         * and re-raise in `restore_handler_expandarg` below keep deciding
-         * exactly what they decided before. It retires when step D
-         * converts this frame — the last of the seven, with
-         * `redirectsafe`, per docs/errors-are-values.md 6. */
         expandarg(&n, None, EXP_QUOTED)
             .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
         /* The C reads the expansion back as `stackblock()`; the expansion
