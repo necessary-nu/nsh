@@ -9,10 +9,10 @@
 //!     into separate fields of the same widths. Nothing in dash depends
 //!     on the packing: `memset(jp, 0, sizeof *jp)` is the only thing
 //!     that spoke about the layout, and it is an assignment here.
-//!   * `sh.jobs.tab` is a `Vec<Job>` and a job is named by its index, so
-//!     `sh.jobs.curjob` and `prev_job` are indices too. The C's `growjobtab`
+//!   * The job table is a `Vec<Job>` and a job is named by its index, so
+//!     `curjob` and `prev_job` are indices too. The C's `growjobtab`
 //!     relocation pass — which existed because `realloc` moved the
-//!     array out from under `sh.jobs.curjob`, every `prev_job`, and every `ps`
+//!     array out from under `curjob`, every `prev_job`, and every `ps`
 //!     that pointed at its own job's inline `ps0` — has nothing left to
 //!     relocate.
 //!   * C `goto`s are reproduced with labelled blocks; a `goto` *into*
@@ -278,8 +278,8 @@ unsafe fn link_set(sh: &mut crate::context::Shell, l: Link, v: Option<usize>) {
     }
 }
 
-// [spec:dash:def:jobs.set-sh.jobs.curjob-fn]
-// [spec:dash:sem:jobs.set-sh.jobs.curjob-fn]
+// [spec:dash:def:jobs.set-curjob-fn]
+// [spec:dash:sem:jobs.set-curjob-fn]
 pub(crate) unsafe fn set_curjob(sh: &mut crate::context::Shell, jp: usize, mode: c_uint) {
     let mut jp1: Option<usize>;
     let mut jpp: Link;
@@ -320,7 +320,7 @@ pub(crate) unsafe fn set_curjob(sh: &mut crate::context::Shell, jp: usize, mode:
             link_set(sh, jpp, Some(jp));
         }
         CUR_STOPPED => {
-            /* newly stopped job - becomes sh.jobs.curjob */
+            /* newly stopped job - becomes the current job */
             sh.jobs.tab[jp].prev_job = link_get(sh, jpp);
             link_set(sh, jpp, Some(jp));
         }
@@ -492,7 +492,7 @@ pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(),
 // [spec:dash:def:jobs.jobno-fn]
 // [spec:dash:sem:jobs.jobno-fn]
 //
-// The C recovers the index by subtracting `sh.jobs.tab` from the pointer.
+// The C recovers the index by subtracting `jobtab` from the pointer.
 pub(crate) fn jobno(jp: usize) -> c_int {
     jp as c_int + 1
 }
@@ -879,7 +879,7 @@ pub unsafe fn makejob(sh: &mut crate::context::Shell, nprocs: c_int) -> usize {
 // [spec:dash:def:jobs.growjobtab-fn]
 // [spec:dash:sem:jobs.growjobtab-fn]
 //
-// The C's second half — relocating `sh.jobs.curjob`, every `prev_job` and every
+// The C's second half — relocating `curjob`, every `prev_job` and every
 // `ps` that pointed at its own job's `ps0`, because `ckrealloc` may have
 // moved the array — has no counterpart: a job is named by its index and
 // owns its process array, so nothing points into the table.
@@ -968,7 +968,7 @@ unsafe fn forkchild(
         sh.jobs.jobctl = 0;
     }
 
-    /* The C tests `jp->sh.jobs.jobctl` without checking `jp`; `jp` is NULL only
+    /* The C tests `jp->jobctl` without checking `jp`; `jp` is NULL only
      * under FORK_NOJOB, which the first conjunct has already excluded. */
     let ownpgrp = mode != FORK_NOJOB && oldlvl == 0 && jp.map_or(false, |i| sh.jobs.tab[i].jobctl != 0);
     if ownpgrp {
