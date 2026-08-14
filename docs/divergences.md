@@ -276,6 +276,78 @@ content/drop/add/duplicate/status failures, the line shape and feature
 scope, the optional `*`, basename rather than full-path sorting, a bare
 name refusal, and an unsorted nsh permutation.
 
+### `error.interrupt-delivery-point`
+
+**Status:** decided and implemented by `errors-are-values` step F.
+Category 3 — a change the port makes and the C does not.
+
+dash delivers an untrapped SIGINT at one of two instructions. If
+`suppressint` is zero when the signal arrives, `onsig` calls `onint`
+*inside the signal handler* and leaves it by a non-local jump
+(`trap.rs:331-352`, `error.rs:250-263`). If `suppressint` is non-zero, the
+handler sets `intpending` and returns, and the interrupt is delivered by
+whichever `INTON` next brings the counter to zero — that is, at the
+instruction where the counter reaches zero.
+
+The port delivers it at the next **poll site** instead. `onsig` stores
+into the signal inbox and returns, in both cases; `INTON` decrements the
+counter and, when it reaches zero with an interrupt pending, leaves
+`intpending` set; and the interrupt is noticed at the next place the shell
+looks, which is one of the `EINTR` returns or `dotrap`.
+
+**Why this is a divergence and not an implementation detail.** The
+delivery point is an instruction address, and between the old one and the
+new one the shell executes real instructions. A `^C` arriving during an
+`INTOFF` bracket used to be delivered the moment the bracket closed;
+now it is delivered when the shell next reaches a poll site. Nothing in
+between is observable *in the shell language* — no output is produced,
+no syscall is issued that a script can see — but the claim "unobservable"
+is a claim, and this register is where claims of that shape are written
+down rather than assumed.
+
+**Why the port does it.** The C's asynchronous path depends on an
+unwinder walking a kernel signal frame out of `onsig` through
+`__restore_rt`'s CFI. `trap.rs:315-330` records that this was a real bug
+in this port once — `SIGABRT`, status 134, on `kill -INT $$` — fixed only
+by declaring the handler `extern "C-unwind"`. Depending on that is not
+something a library may ask of an embedder, and it is incompatible with
+`panic = "abort"`, which is the Cargo profile constraint
+`[dec:nsh:errors-are-values]` exists to remove. If any part of the
+interrupt stayed an unwind, `panic = "abort"` would still break the shell
+in the one case a user is most likely to hit.
+
+**Why it works at all**, rather than being a hope: `setsignal` sets
+`act.sa_flags = 0` (`trap.rs:288`). dash never sets `SA_RESTART`, so every
+interruptible syscall the shell makes returns `EINTR` when a signal
+arrives, and there is always a synchronous point at which to notice. dash
+already uses this idiom at two of its five `EINTR` sites.
+
+**No executable register entry, and that is deliberate.** An entry in
+`tests/harness/divergences.sh` is a function that explains a *difference
+the corpus observed*. This divergence produces none: the corpus runs
+`-c` without `-i`, so it never sends a signal at a chosen instruction, and
+`error.rs:254-256` makes the `EXINT` path reachable only in an interactive
+root shell. An entry that can never match is a stale excuse by
+construction, and this file's own rule is that a stale excuse is how a
+real regression eventually gets waved through.
+
+The executable half is the pty suite instead, which is where this
+divergence is actually observable. Six cases were added to
+`tests/harness/ptydiff.py` **before** the change, each blocking in a
+different syscall so that a delivery point that moved too far shows up as
+a shell that stops answering `^C`:
+
+    ^C during a blocked read       the `read` builtin, `input.rs`
+    ^C during a slow child         an external command
+    ^C during wait                 `wait3`, `jobs.rs`
+    ^C during a substitution       the command-substitution read, `expand.rs`
+    ^C after a builtin error       the `suppressint` leak, docs 2.4
+    ^C after a nested error        the same leak, one frame deeper
+
+`docs/errors-are-values.md` 6B is the reasoning: the failure mode here is
+not a crash but a shell that stops responding to `^C`, which no batch
+harness can observe because a batch harness never sends one.
+
 ## Candidates not yet decided
 
 ### The port is *more* conformant than dash in two line-editing cases

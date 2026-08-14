@@ -182,6 +182,37 @@ CASES = [
     # tests/corpus/aud_exception_paths.txt; here it also has to survive
     # job control being on.
     ("subshell in EXIT trap",  [], ["trap '(exit 7); echo t=$?' EXIT", "exit"]),
+
+    # --- where the interrupt is noticed ---
+    # These exist for `errors-are-values` step F, and they are here
+    # *before* the change rather than after it, which is what
+    # docs/errors-are-values.md 6B asks for: the failure mode of getting
+    # the interrupt wrong is not a crash but a shell that stops answering
+    # ^C, and no batch harness can see that because a batch harness never
+    # sends one.
+    #
+    # Each one blocks in a different syscall, because the change replaces
+    # "unwind out of the signal handler" with "notice at the EINTR return"
+    # and the five EINTR sites are what has to notice. `sa_flags = 0`
+    # (trap.rs:288) is why there is always an EINTR to notice at: dash
+    # never sets SA_RESTART, so every interruptible syscall returns.
+    ("^C during a blocked read",  [], ["read v", "\x03", "echo ALIVE-$?", "exit"]),
+    ("^C during a slow child",    [], ["sleep 5", "\x03", "echo ALIVE-$?", "exit"]),
+    ("^C during wait",            [], ["sleep 5 &", "wait", "\x03",
+                                       "echo ALIVE-$?", "exit"]),
+    ("^C during a substitution",  [], ["x=$(sleep 5)", "\x03",
+                                       "echo ALIVE-$?", "exit"]),
+    # The counter, not the syscall. 2.4 records that `evalbltin` and
+    # `evalfun` restore neither `suppressint` nor the saved value after a
+    # swallowed builtin error, so the counter comes back one higher than
+    # it started -- dash's behaviour, and 8.4 lists "is it really dash's"
+    # as one of the things this document is not sure about. A stuck
+    # counter is observable in exactly one configuration: an interactive
+    # shell that has stopped answering ^C.
+    ("^C after a builtin error",  [], ["cd /nonexistent-dir", "\x03",
+                                       "echo ALIVE-$?", "exit"]),
+    ("^C after a nested error",   [], ["f() { cd /nonexistent-dir; }", "f", "\x03",
+                                       "echo ALIVE-$?", "exit"]),
 ]
 
 
