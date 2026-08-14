@@ -244,7 +244,7 @@ pub unsafe fn mkinit_init() {
 }
 
 /* mkinit RESET fragment from src/input.c:101-112. */
-pub unsafe fn mkinit_reset() {
+pub unsafe fn mkinit_reset(sh: &mut crate::context::Shell) {
     let mut c: c_int;
 
     /* clear input buffer */
@@ -267,7 +267,7 @@ pub unsafe fn mkinit_reset() {
          * rather than being reported by it. A read that fails for any
          * other reason ends it too, with the diagnostic already
          * written. */
-        match pgetc() {
+        match pgetc(sh) {
             Ok(next) => c = next,
             Err(e) => {
                 drop(e);
@@ -412,7 +412,7 @@ unsafe fn freestrings() {
 
 // [spec:dash:def:input.pgetc-fn]
 // [spec:dash:sem:input.pgetc-fn]
-pub unsafe fn pgetc() -> Result<c_int, Error> {
+pub unsafe fn pgetc(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
     let mut c: c_int;
     /* Re-derived after everything that can push a level, because that is
      * what moves the frames; the C reloads the same global for the same
@@ -445,7 +445,7 @@ pub unsafe fn pgetc() -> Result<c_int, Error> {
                 pf = cur_pf();
                 continue 'again;
             } else {
-                c = preadbuffer()?;
+                c = preadbuffer(sh)?;
                 pf = cur_pf();
             }
 
@@ -464,12 +464,12 @@ pub unsafe fn pgetc() -> Result<c_int, Error> {
 
 // [spec:dash:def:input.pgetc-eoa-fn]
 // [spec:dash:sem:input.pgetc-eoa-fn]
-pub unsafe fn pgetc_eoa() -> Result<c_int, Error> {
+pub unsafe fn pgetc_eoa(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
     let pf = cur_pf();
     if !pf.strpush.is_empty() && pf.nleft == -1 && !pf.strpush[pf.strpush.len() - 1].ap.is_null() {
         Ok(PEOA)
     } else {
-        pgetc()
+        pgetc(sh)
     }
 }
 
@@ -489,7 +489,7 @@ unsafe fn stdin_clear_nonblock() -> c_int {
 
 // [spec:dash:def:input.preadfd-fn]
 // [spec:dash:sem:input.preadfd-fn]
-unsafe fn preadfd() -> Result<c_int, Error> {
+unsafe fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
     let mut fd: c_int = cur_pf().fd;
     let mut use_tee: bool;
     let mut unget: c_int;
@@ -540,7 +540,7 @@ unsafe fn preadfd() -> Result<c_int, Error> {
                 let pf = cur_pf();
                 &mut pf.buf[off..off + nr as usize]
             };
-            return Ok(match crate::histedit::read_edit_line(destination) {
+            return Ok(match crate::histedit::read_edit_line(sh, destination) {
                 Ok(count) => count as c_int,
                 Err(_) => 0,
             });
@@ -604,7 +604,7 @@ unsafe fn preadfd() -> Result<c_int, Error> {
 
 // [spec:dash:def:input.preadbuffer-fn]
 // [spec:dash:sem:input.preadbuffer-fn]
-unsafe fn preadbuffer() -> Result<c_int, Error> {
+unsafe fn preadbuffer(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
     let first: c_int = (whichprompt == 1) as c_int;
     let mut something: c_int;
     let mut savec: u8 = 0;
@@ -632,7 +632,7 @@ unsafe fn preadbuffer() -> Result<c_int, Error> {
             /* again: */
             nr = (q - cur_pf().pos) as c_int;
             input_set_lleft(cur_pf(), nr);
-            more = preadfd()?;
+            more = preadfd(sh)?;
             q = cur_pf().pos + nr as usize;
             if more <= 0 {
                 cur_pf().nleft = 0;

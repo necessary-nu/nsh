@@ -70,11 +70,12 @@ pub unsafe fn editing_active() -> bool {
 
 /// Read edited bytes directly into the parser's owned input buffer.
 pub unsafe fn read_edit_line(
+    sh: &mut crate::context::Shell,
     destination: &mut [u8],
 ) -> Result<usize, crate::linedit::LineEditorError> {
     let state = state_mut();
     match (&mut state.editor, &mut state.history) {
-        (Some(editor), Some(history)) => editor.read_into(history, destination),
+        (Some(editor), Some(history)) => editor.read_into(sh, history, destination),
         _ => Ok(0),
     }
 }

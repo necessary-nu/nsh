@@ -1,28 +1,35 @@
 //! The shell instance, and the parameter that carries it.
 //!
-//! Implements the first half of [dec:nsh:no-ambient-state]: shell state
-//! belongs to a shell instance rather than to the process. That decision
-//! lands in two steps and this module is the seam between them.
+//! Implements [dec:nsh:no-ambient-state]: shell state belongs to a shell
+//! instance rather than to the process. That decision lands in two steps
+//! and this module is where both of them arrive.
 //!
-//! `thread-context` — this step — gives every function that touches shell
-//! state a `&mut Shell` to reach it through. `move-state` then moves the
-//! tables onto this type one at a time, and every function that will need
-//! a receiver already has one, so each table moves without a second sweep
-//! through the crate's signatures.
+//! `thread-context` gave every execution path a `&mut Shell` to reach the
+//! state through. `move-state` — this step — moves the tables onto this
+//! type one at a time, and the functions that read a table take the
+//! receiver in the commit that moves it, so no signature is edited twice.
 //!
-//! ## Why the type is empty
+//! ## Every instance is the shell
 //!
-//! It has no fields yet, and that is the point rather than an oversight.
-//! The state is still in the `static mut`s the literal port inherited from
-//! the C; `docs/api-design.md` §5 lists, field by field, what `move-state`
-//! will put here. Threading the parameter first and moving the state
-//! second keeps each commit small enough to gate against the differential
-//! corpus, which a single commit doing both would not be.
+//! There is exactly one constructor and one call to it, at the entry
+//! point. That is not a convention, it is the invariant the type now
+//! depends on: a second `Shell` made at a call site would carry a second,
+//! empty set of tables, and every field added here makes that a wrong
+//! answer rather than a harmless one. `Shell::detached()` was the
+//! transitional constructor for call sites the threading had not reached;
+//! it is gone, and the last site it served — `parser::getprompt`, called
+//! from the line editor's prompt request — takes the receiver by
+//! parameter instead.
+//!
+//! `docs/api-design.md` §5 lists, field by field, what moves here; §5.1
+//! and §5.2 list what does not, and the one shape that still cannot take
+//! a receiver is the signal handler, which has no frame to thread through
+//! and gets a shared inbox instead.
 //!
 //! A function that has been given the context but whose state has not
 //! moved yet names it `_sh`. The underscore is the marker for "carries the
-//! context, does not read it yet", and it disappears when `move-state`
-//! rewrites the body to read a field.
+//! context, does not read it yet", and it disappears when the commit that
+//! moves its table rewrites the body to read a field.
 //!
 //! ## What it is not
 //!
@@ -35,12 +42,12 @@
 
 /// The shell, as an instance rather than as a process.
 ///
-/// Empty by construction until `move-state` fills it; see the module
-/// documentation for why.
+/// Still empty; `docs/api-design.md` §5 is the list it fills from, one
+/// table per commit.
 pub struct Shell {
     /// Keeps the type from being constructible outside this module, so
-    /// that every instance comes from [`Shell::new`] or
-    /// [`Shell::detached`] and the two are countable.
+    /// that every instance comes from [`Shell::new`] — which is what
+    /// makes "one shell per process" checkable rather than hoped for.
     _private: (),
 }
 
@@ -48,38 +55,9 @@ impl Shell {
     /// The shell the process runs as.
     ///
     /// There is one, made at the entry point, and it is threaded down
-    /// from there. When `move-state` gives this type fields, this is
-    /// where their initial values go — which is what makes it the one
-    /// constructor that survives.
+    /// from there. As tables move onto this type, this is where their
+    /// initial values go — which is what makes it the one constructor.
     pub(crate) fn new() -> Self {
-        Shell { _private: () }
-    }
-
-    /// A context for a call site that cannot be handed one.
-    ///
-    /// **Transitional.** Each of these is an edge the threading did not
-    /// cross: a function that needs the context, called from one that has
-    /// none to give it. The count is this node's progress metric, but it
-    /// is not monotonic and expecting it to fall every commit is a
-    /// misreading — a boundary moves *outward* as the frontier grows, so
-    /// threading a subsystem removes its own sites and can put new ones in
-    /// the callers it just reached. It falls to zero as the frontier meets
-    /// the edges of the call graph.
-    ///
-    /// **One kind of site cannot be removed by threading at all**, and it
-    /// is the kind that is left: a callback the shell is invoked *through*
-    /// rather than called *by*. `parser::getprompt` is handed to the line
-    /// editor as a `fn(*mut c_void)`, and a fixed signature has nowhere to
-    /// put a receiver however much of the crate is threaded. This is the
-    /// same shape as the signal handler `docs/api-design.md` §5.1 excludes
-    /// from the state that moves, and it wants the same kind of answer —
-    /// a handle the callback carries — which belongs to `public-api`.
-    ///
-    /// It is sound only because the type is empty. Two `&mut Shell` that
-    /// alias would be a bug the moment either one names a field, so the
-    /// call sites must be gone — and the callback one answered — *before*
-    /// `move-state` gives the type any.
-    pub(crate) fn detached() -> Self {
         Shell { _private: () }
     }
 }

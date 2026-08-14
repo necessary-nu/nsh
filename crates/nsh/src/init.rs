@@ -135,9 +135,9 @@ pub unsafe fn postexitreset() {
 
 // [spec:dash:def:init.reset-fn]
 // [spec:dash:sem:init.reset-fn]
-pub unsafe fn reset() {
+pub unsafe fn reset(sh: &mut crate::context::Shell) {
     /* from input.c: */
-    crate::input::mkinit_reset();
+    crate::input::mkinit_reset(sh);
 
     /* from output.c: */
     {

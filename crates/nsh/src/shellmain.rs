@@ -271,7 +271,7 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
                 continue;
             }
 
-            crate::init::reset();
+            crate::init::reset(sh);
 
             if interrupted
             /* #if ATTY: && (!attyset() || equal(termval(), "emacs")) */
@@ -368,7 +368,7 @@ pub(crate) unsafe fn cmdloop(
             inter += 1;
             crate::mail::chkmail();
         }
-        let parsed = crate::parser::parsecmd(inter)?;
+        let parsed = crate::parser::parsecmd(sh, inter)?;
         /* showtree(n); DEBUG */
         if let crate::parser::ParseResult::Tree(n) = parsed {
             let i: c_int;

@@ -226,7 +226,7 @@ pub unsafe fn evalstring(sh: &mut Shell, s: *mut c_char, flags: c_int) -> Result
     crate::input::setinputstring(s);
     status = 0;
     loop {
-        let n: Option<Node> = match crate::parser::parsecmd(0)? {
+        let n: Option<Node> = match crate::parser::parsecmd(sh, 0)? {
             crate::parser::ParseResult::Eof => break,
             crate::parser::ParseResult::Tree(n) => n,
         };

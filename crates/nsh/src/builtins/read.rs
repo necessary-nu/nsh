@@ -93,7 +93,7 @@ unsafe fn readcmd_handle_line(line: &mut BString, names: &[&BStr]) -> Result<(),
 
 // [spec:dash:def:miscbltin.readcmd-fn]
 // [spec:dash:sem:miscbltin.readcmd-fn]
-pub unsafe fn readcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut prompt: Option<CString>;
     let mut startloc: c_int = 0;
     let mut newloc: c_int = 0;
@@ -146,7 +146,7 @@ pub unsafe fn readcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             /* CHECKSTRSPACE((MB_LEN_MAX > 16 ? MB_LEN_MAX : 16) + 4, p) —
              * the room `getmbc` writes into through the raw cursor below. */
             line.reserve(READ_MBSLOP);
-            c = crate::input::pgetc()?;
+            c = crate::input::pgetc(sh)?;
             if c == crate::syntax::PEOF {
                 status = 1;
                 break;
@@ -156,7 +156,7 @@ pub unsafe fn readcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 continue;
             }
             let at = line.len();
-            ml = crate::parser::getmbc(c, line.as_mut_ptr().add(at) as *mut c_char, 0)?;
+            ml = crate::parser::getmbc(sh, c, line.as_mut_ptr().add(at) as *mut c_char, 0)?;
             if ml != 0 {
                 /* `p += ml` is the commit of what `getmbc` wrote past the
                  * cursor; a zero return leaves the scribble uncommitted, for

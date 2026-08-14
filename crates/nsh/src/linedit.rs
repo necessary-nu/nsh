@@ -245,6 +245,7 @@ impl LineEditor {
     /// single-threaded global state.
     pub unsafe fn read_into(
         &mut self,
+        sh: &mut crate::context::Shell,
         history: &mut History,
         destination: &mut [u8],
     ) -> Result<usize, LineEditorError> {
@@ -261,7 +262,7 @@ impl LineEditor {
              * unpinned `panic = "unwind"`, under which a panic does not
              * unwind and the guard could never have run. Dead code that
              * looks live is worse than none. */
-            let line = self.drive_line(history)?;
+            let line = self.drive_line(sh, history)?;
             let Some(mut line) = line else {
                 return Ok(0);
             };
@@ -277,6 +278,7 @@ impl LineEditor {
 
     unsafe fn drive_line(
         &mut self,
+        sh: &mut crate::context::Shell,
         history: &mut History,
     ) -> Result<Option<Vec<u8>>, LineEditorError> {
         self.editor_mut().reset_line();
@@ -290,7 +292,7 @@ impl LineEditor {
             step = match step {
                 ReadStep::Prompt(pending) => {
                     let prompt = match pending.request().side {
-                        PromptSide::Left => shell_prompt(),
+                        PromptSide::Left => shell_prompt(sh),
                         PromptSide::Right => Prompt::default(),
                     };
                     let (editor, driver) = self.editor_and_driver();
@@ -966,8 +968,8 @@ fn is_line_blank(unit: &TextUnit) -> bool {
     )
 }
 
-unsafe fn shell_prompt() -> Prompt {
-    let pointer = crate::parser::getprompt(core::ptr::null_mut());
+unsafe fn shell_prompt(sh: &mut crate::context::Shell) -> Prompt {
+    let pointer = crate::parser::getprompt(sh);
     if pointer.is_null() {
         return Prompt::default();
     }
