@@ -28,7 +28,7 @@ pub unsafe fn unsetcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             continue;
         }
         if flag != b'v' {
-            crate::exec::unsetfunc(name.as_ptr());
+            crate::exec::unsetfunc(sh, name.as_ptr());
         }
     }
     Ok(Flow::Done(0))

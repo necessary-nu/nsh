@@ -191,7 +191,7 @@ unsafe fn docd(sh: &mut Shell, mut dest: *const c_char, flags: c_int) -> Result<
          * leaking the interrupt counter exactly as the longjmp out of
          * `sh_error` did; see docs/errors-are-values.md 2.4. */
         setpwd(sh, dir, 1)?;
-        crate::exec::hashcd();
+        crate::exec::hashcd(sh);
     }
     /* out: */
     INTON();

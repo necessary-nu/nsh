@@ -118,7 +118,13 @@ impl tblentry {
         }
     }
 
-    pub(crate) fn path_dependent(&self) -> bool {
+    /// `builtinloc` arrives as a value rather than being read here, and
+    /// that is not a style choice: the only caller is `clearcmdentry`'s
+    /// `retain`, whose closure already holds the table borrowed. Reading
+    /// the sibling field from inside it would be a second borrow of the
+    /// same `Shell`. Copying the `c_int` out first is the whole fix, and
+    /// it is exact -- nothing in the closure can change it.
+    pub(crate) fn path_dependent(&self, builtinloc: c_int) -> bool {
         match self.command {
             Command::Normal(_) => true,
             Command::Builtin(cmd) => unsafe {
@@ -143,18 +149,50 @@ impl tblentry {
 // module globals
 // ---------------------------------------------------------------------
 
-/// Command names include their trailing NUL because C-shaped consumers still
-/// pass the map key straight to `padvance`. `BStr` ordering remains ordering by
-/// the command's bytes: every key has the same trailing terminator.
-static mut cmdtable: BTreeMap<BString, Box<tblentry>> = BTreeMap::new();
-static mut builtinloc: c_int = -1; /* index in path of %builtin, or -1 */
+/// The command hash, and where `%builtin` sits in `PATH`.
+///
+/// The two are one field because they are one question -- "what does
+/// this name run" -- and because `clearcmdentry` reads the second while
+/// rebuilding the first. `docs/api-design.md` 5 groups them, and
+/// function definitions live here too because dash stores them in the
+/// same hash.
+pub struct CmdTable {
+    /// Command names include their trailing NUL because C-shaped
+    /// consumers still pass the map key straight to `padvance`. `BStr`
+    /// ordering remains ordering by the command's bytes: every key has
+    /// the same trailing terminator.
+    map: BTreeMap<BString, Box<tblentry>>,
+    /// index in path of %builtin, or -1
+    builtinloc: c_int,
+}
+
+impl CmdTable {
+    /// An empty hash and `builtinloc = -1`, which is what the two
+    /// statics were declared with.
+    pub(crate) const fn new() -> Self {
+        CmdTable {
+            map: BTreeMap::new(),
+            builtinloc: -1,
+        }
+    }
+
+    /// Whether an entry would be invalidated by a `PATH` change.
+    ///
+    /// Reads `builtinloc` on the caller's behalf, so a caller holding an
+    /// entry does not have to reach for the sibling field itself. The
+    /// two in-module walks cannot use this — they hold the map borrowed
+    /// and take the `c_int` by value instead.
+    pub(crate) fn path_dependent(&self, cmdp: &tblentry) -> bool {
+        cmdp.path_dependent(self.builtinloc)
+    }
+
+    /// Every entry, in name order — what `hash` with no operand prints.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&BString, &tblentry)> {
+        self.map.iter().map(|(name, cmdp)| (name, &**cmdp))
+    }
+}
 
 pub static mut pathopt: *const c_char = null(); /* set by padvance */
-
-#[inline]
-pub(crate) unsafe fn cmdtable_mut() -> &'static mut BTreeMap<BString, Box<tblentry>> {
-    &mut *addr_of_mut!(cmdtable)
-}
 
 use crate::system::errno;
 
@@ -497,7 +535,7 @@ pub unsafe fn find_command(
         'builtin_success: {
             'fail: {
                 /* If name is in the table, check answer will be ok */
-                cmdp = cmdlookup(name, 0);
+                cmdp = cmdlookup(sh, name, 0);
                 if !cmdp.is_null() {
                     let bit: c_int;
 
@@ -535,7 +573,7 @@ pub unsafe fn find_command(
                 if !bcmd.is_null()
                     && ((((*bcmd).flags & BUILTIN_REGULAR) as c_int)
                         | (act & DO_ALTPATH)
-                        | ((builtinloc <= 0) as c_int))
+                        | ((sh.commands.builtinloc <= 0) as c_int))
                         != 0
                 {
                     break 'builtin_success;
@@ -550,7 +588,7 @@ pub unsafe fn find_command(
                 if !cmdp.is_null() && (*cmdp).rehash {
                     /* doing a rehash */
                     if (*cmdp).cmdtype() == CMDBUILTIN {
-                        prev = builtinloc;
+                        prev = sh.commands.builtinloc;
                     } else {
                         prev = (*cmdp).path_index();
                     }
@@ -616,7 +654,7 @@ pub unsafe fn find_command(
                             crate::eval::Flow::Done(_) => {}
                             exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
                         }
-                        cmdp = cmdlookup(name, 0);
+                        cmdp = cmdlookup(sh, name, 0);
                         if cmdp.is_null() || (*cmdp).cmdtype() != CMDFUNCTION {
                             let mut message = Vec::new();
                             message.extend_from_slice(CStr::from_ptr(name).to_bytes());
@@ -637,7 +675,7 @@ pub unsafe fn find_command(
                         return Ok(crate::eval::Flow::Done(0));
                     }
                     INTOFF();
-                    cmdp = cmdlookup(name, 1);
+                    cmdp = cmdlookup(sh, name, 1);
                     (*cmdp).command = Command::Normal(idx);
                     INTON();
                     break 'success;
@@ -645,7 +683,7 @@ pub unsafe fn find_command(
 
                 /* We failed.  If there was an entry for this command, delete it */
                 if !cmdp.is_null() && updatetbl != 0 {
-                    delete_cmd_entry(name);
+                    delete_cmd_entry(sh, name);
                 }
                 if (act & DO_ERR) != 0 {
                     let mut message = Vec::new();
@@ -669,7 +707,7 @@ pub unsafe fn find_command(
             return Ok(crate::eval::Flow::Done(0));
         }
         INTOFF();
-        cmdp = cmdlookup(name, 1);
+        cmdp = cmdlookup(sh, name, 1);
         (*cmdp).command = Command::Builtin(bcmd);
         INTON();
         // fall through into success:
@@ -700,9 +738,12 @@ pub unsafe fn find_builtin(name: *const c_char) -> *const builtincmd {
 
 // [spec:dash:def:exec.hashcd-fn]
 // [spec:dash:sem:exec.hashcd-fn]
-pub unsafe fn hashcd() {
-    for cmdp in cmdtable_mut().values_mut() {
-        if cmdp.path_dependent() {
+pub unsafe fn hashcd(sh: &mut crate::context::Shell) {
+    /* Copied out for the same reason `clearcmdentry` copies it: the
+     * walk below holds the table borrowed. */
+    let builtinloc = sh.commands.builtinloc;
+    for cmdp in sh.commands.map.values_mut() {
+        if cmdp.path_dependent(builtinloc) {
             cmdp.rehash = true;
         }
     }
@@ -717,7 +758,7 @@ pub unsafe fn hashcd() {
 
 // [spec:dash:def:exec.changepath-fn]
 // [spec:dash:sem:exec.changepath-fn]
-pub unsafe fn changepath(_sh: &mut crate::context::Shell, newval: *const c_char) {
+pub unsafe fn changepath(sh: &mut crate::context::Shell, newval: *const c_char) {
     let mut new: *const c_char;
     let mut idx: c_int;
     let mut bltin: c_int;
@@ -739,8 +780,8 @@ pub unsafe fn changepath(_sh: &mut crate::context::Shell, newval: *const c_char)
         }
         idx += 1;
     }
-    builtinloc = bltin;
-    clearcmdentry();
+    sh.commands.builtinloc = bltin;
+    clearcmdentry(sh);
 }
 
 /*
@@ -750,9 +791,10 @@ pub unsafe fn changepath(_sh: &mut crate::context::Shell, newval: *const c_char)
 
 // [spec:dash:def:exec.clearcmdentry-fn]
 // [spec:dash:sem:exec.clearcmdentry-fn]
-pub(crate) unsafe fn clearcmdentry() {
+pub(crate) unsafe fn clearcmdentry(sh: &mut crate::context::Shell) {
     INTOFF();
-    cmdtable_mut().retain(|_, cmdp| !cmdp.path_dependent());
+    let builtinloc = sh.commands.builtinloc;
+    sh.commands.map.retain(|_, cmdp| !cmdp.path_dependent(builtinloc));
     INTON();
 }
 
@@ -764,17 +806,17 @@ pub(crate) unsafe fn clearcmdentry() {
 
 // [spec:dash:def:exec.cmdlookup-fn]
 // [spec:dash:sem:exec.cmdlookup-fn]
-pub(crate) unsafe fn cmdlookup(name: *const c_char, add: c_int) -> *mut tblentry {
+pub(crate) unsafe fn cmdlookup(sh: &mut crate::context::Shell, name: *const c_char, add: c_int) -> *mut tblentry {
     let name = BStr::new(CStr::from_ptr(name).to_bytes_with_nul());
     if add != 0 {
-        &mut **cmdtable_mut().entry(name.to_owned()).or_insert_with(|| {
+        &mut **sh.commands.map.entry(name.to_owned()).or_insert_with(|| {
             Box::new(tblentry {
                 command: Command::Unknown,
                 rehash: false,
             })
         })
     } else {
-        cmdtable_mut()
+        sh.commands.map
             .get_mut(name)
             .map_or(null_mut(), |cmdp| &mut **cmdp)
     }
@@ -786,12 +828,12 @@ pub(crate) unsafe fn cmdlookup(name: *const c_char, add: c_int) -> *mut tblentry
 
 // [spec:dash:def:exec.delete-cmd-entry-fn]
 // [spec:dash:sem:exec.delete-cmd-entry-fn]
-pub(crate) unsafe fn delete_cmd_entry(name: *const c_char) {
+pub(crate) unsafe fn delete_cmd_entry(sh: &mut crate::context::Shell, name: *const c_char) {
     INTOFF();
     /* Own the lookup key before mutating the map. This also makes deletion
      * sound if a future caller passes a pointer into the stored key itself. */
     let name = BStr::new(CStr::from_ptr(name).to_bytes_with_nul()).to_owned();
-    cmdtable_mut().remove(BStr::new(name.as_slice()));
+    sh.commands.map.remove(BStr::new(name.as_slice()));
     INTON();
 }
 
@@ -806,7 +848,7 @@ pub(crate) unsafe fn delete_cmd_entry(name: *const c_char) {
 // translation of the dead C.
 #[cfg(any())]
 pub unsafe fn getcmdentry(name: *mut c_char, entry: *mut cmdentry) {
-    let cmdp: *mut tblentry = cmdlookup(name, 0);
+    let cmdp: *mut tblentry = cmdlookup(sh, name, 0);
 
     if !cmdp.is_null() {
         (*cmdp).write_to(entry);
@@ -823,10 +865,10 @@ pub unsafe fn getcmdentry(name: *mut c_char, entry: *mut cmdentry) {
 
 // [spec:dash:def:exec.addcmdentry-fn]
 // [spec:dash:sem:exec.addcmdentry-fn]
-unsafe fn addcmdentry(name: *mut c_char, command: Command) {
+unsafe fn addcmdentry(sh: &mut crate::context::Shell, name: *mut c_char, command: Command) {
     let cmdp: *mut tblentry;
 
-    cmdp = cmdlookup(name, 1);
+    cmdp = cmdlookup(sh, name, 1);
     (*cmdp).command = command;
     (*cmdp).rehash = false;
 }
@@ -837,9 +879,9 @@ unsafe fn addcmdentry(name: *mut c_char, command: Command) {
 
 // [spec:dash:def:exec.defun-fn]
 // [spec:dash:sem:exec.defun-fn]
-pub unsafe fn defun(func: &Node) {
+pub unsafe fn defun(sh: &mut crate::context::Shell, func: &Node) {
     INTOFF();
-    addcmdentry(
+    addcmdentry(sh, 
         func.ndefun().text.as_ptr(),
         Command::Function(Rc::new(func.clone())),
     );
@@ -852,12 +894,12 @@ pub unsafe fn defun(func: &Node) {
 
 // [spec:dash:def:exec.unsetfunc-fn]
 // [spec:dash:sem:exec.unsetfunc-fn]
-pub unsafe fn unsetfunc(name: *const c_char) {
+pub unsafe fn unsetfunc(sh: &mut crate::context::Shell, name: *const c_char) {
     let cmdp: *mut tblentry;
 
-    cmdp = cmdlookup(name, 0);
+    cmdp = cmdlookup(sh, name, 0);
     if !cmdp.is_null() && (*cmdp).cmdtype() == CMDFUNCTION {
-        delete_cmd_entry(name);
+        delete_cmd_entry(sh, name);
     }
 }
 
@@ -891,6 +933,71 @@ pub unsafe fn test_access(sp: *const libc::stat64, stmode: c_int) -> c_int {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `%builtin`'s position in `PATH` is what makes a cached entry
+    /// stale, and `changepath` is the variable hook that finds it. This
+    /// is the field the hook could not reach before it carried a
+    /// receiver.
+    // [spec:dash:sem:exec.changepath-fn/test]
+    #[test]
+    fn changepath_files_the_builtin_slot() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            let mut owned = crate::context::Shell::new();
+            let sh = &mut owned;
+
+            changepath(sh, c"/bin:%builtin:/usr/bin".as_ptr());
+            assert_eq!(sh.commands.builtinloc, 1);
+
+            changepath(sh, c"%builtin:/bin".as_ptr());
+            assert_eq!(sh.commands.builtinloc, 0);
+
+            changepath(sh, c"/bin:/usr/bin".as_ptr());
+            assert_eq!(sh.commands.builtinloc, -1, "no %builtin is -1, not 0");
+        }
+    }
+
+    /// What `clearcmdentry` keeps, which is the predicate the walk runs
+    /// while it holds the table borrowed. An external command is always
+    /// invalidated by a `PATH` change; an entry that names nothing is
+    /// not. Pinned because the `builtinloc` the predicate reads is now
+    /// copied out before the walk rather than read inside it, and a
+    /// wrong copy would show up here as the wrong survivor.
+    // [spec:dash:sem:exec.clearcmdentry-fn/test]
+    #[test]
+    fn clearing_drops_only_path_dependent_entries() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            let mut owned = crate::context::Shell::new();
+            let sh = &mut owned;
+
+            let external = c"Texternal";
+            let unknown = c"Tunknown";
+            addcmdentry(sh, external.as_ptr() as *mut c_char, Command::Normal(0));
+            cmdlookup(sh, unknown.as_ptr(), 1);
+
+            /* The lookup is hoisted because writing it inline is the
+             * very borrow this commit exists to avoid -- `cmdlookup`
+             * takes `&mut sh` while `path_dependent` holds `&sh`. A raw
+             * pointer parked in a local is the way through, here and at
+             * the call site in `hashcmd`. */
+            let e = cmdlookup(sh, external.as_ptr(), 0);
+            assert!(sh.commands.path_dependent(&*e));
+            let u = cmdlookup(sh, unknown.as_ptr(), 0);
+            assert!(!sh.commands.path_dependent(&*u));
+
+            clearcmdentry(sh);
+
+            assert!(
+                cmdlookup(sh, external.as_ptr(), 0).is_null(),
+                "an external command does not survive a PATH change"
+            );
+            assert!(
+                !cmdlookup(sh, unknown.as_ptr(), 0).is_null(),
+                "an entry naming nothing has nothing to invalidate"
+            );
+        }
+    }
 
     // [spec:dash:sem:exec.find-builtin-fn/test]
     #[test]

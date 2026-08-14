@@ -48,6 +48,9 @@ pub struct Shell {
     /// Every alias, by name. `alias.rs` owns the shape; this owns the
     /// value.
     pub(crate) aliases: crate::alias::AliasTable,
+    /// The command hash and `builtinloc`. Function definitions live
+    /// here too, because dash stores them in the same table.
+    pub(crate) commands: crate::exec::CmdTable,
     /// `$!` — the process id of the last command the shell put in the
     /// background.
     ///
@@ -75,6 +78,7 @@ impl Shell {
         Shell {
             aliases: crate::alias::AliasTable::new(),
             backgndpid: 0,
+            commands: crate::exec::CmdTable::new(),
             redirs: crate::redir::RedirStack::new(),
         }
     }

@@ -404,7 +404,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
                                 break 'sw;
                             }
                             NDEFUN => {
-                                crate::exec::defun(n);
+                                crate::exec::defun(sh, n);
                                 break 'sw;
                             }
                             /* `default:` has no body outside DEBUG, so an

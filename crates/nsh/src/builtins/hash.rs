@@ -13,7 +13,7 @@ use std::io::Write;
 
 use crate::eval::Flow;
 use crate::exec::{
-    CMDNORMAL, CMDUNKNOWN, DO_ERR, clearcmdentry, cmdentry, cmdlookup, cmdtable_mut,
+    CMDNORMAL, CMDUNKNOWN, DO_ERR, clearcmdentry, cmdentry, cmdlookup,
     delete_cmd_entry, find_command, padvance, padvance_result, param, pathopt, tblentry,
 };
 
@@ -34,13 +34,13 @@ pub unsafe fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         clear = true;
     }
     if clear {
-        clearcmdentry();
+        clearcmdentry(sh);
         return Ok(Flow::Done(0));
     }
 
     let operands = opts.operands();
     if operands.is_empty() {
-        for (name, cmdp) in cmdtable_mut().iter() {
+        for (name, cmdp) in sh.commands.iter() {
             if cmdp.cmdtype() == CMDNORMAL {
                 printentry(BStr::new(name.as_slice()), cmdp);
             }
@@ -51,9 +51,9 @@ pub unsafe fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     for name in operands {
         let name = crate::shell::cstring(name);
         let name = name.as_ptr() as *mut c_char;
-        cmdp = cmdlookup(name, 0);
-        if !cmdp.is_null() && (*cmdp).path_dependent() {
-            delete_cmd_entry(name);
+        cmdp = cmdlookup(sh, name, 0);
+        if !cmdp.is_null() && sh.commands.path_dependent(&*cmdp) {
+            delete_cmd_entry(sh, name);
         }
         match find_command(sh, name, &mut entry, DO_ERR, crate::var::pathval())? {
             crate::eval::Flow::Done(_) => {}

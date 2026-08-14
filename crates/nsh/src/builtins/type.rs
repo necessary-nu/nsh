@@ -100,7 +100,7 @@ pub(crate) unsafe fn describe_command(
          */
         if path.is_null() {
             path = crate::var::pathval();
-            cmdp = cmdlookup(command, 0);
+            cmdp = cmdlookup(sh, command, 0);
         } else {
             cmdp = null_mut();
         }
