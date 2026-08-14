@@ -665,7 +665,7 @@ unsafe fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, E
             break 'nofork;
         }
         jp = crate::jobs::makejob(1);
-        if crate::jobs::forkshell(Some(jp), r.n.as_deref(), backgnd)? == 0 {
+        if crate::jobs::forkshell(sh, Some(jp), r.n.as_deref(), backgnd)? == 0 {
             flags |= EV_EXIT;
             if backgnd != 0 {
                 flags &= !EV_TESTED;
@@ -810,7 +810,7 @@ unsafe fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
                 return Err(crate::error::sh_error_value(b"Pipe call failed"));
             }
         }
-        if crate::jobs::forkshell(Some(jp), Some(cmd), p.backgnd)? == 0 {
+        if crate::jobs::forkshell(sh, Some(jp), Some(cmd), p.backgnd)? == 0 {
             INTON();
             if pip[1] >= 0 {
                 libc::close(pip[0]);
@@ -875,7 +875,7 @@ pub unsafe fn evalbackcmd(
         tpip[0] = pip[0];
         tpip[1] = pip[1];
         jp = crate::jobs::makejob(1);
-        pid = crate::jobs::forkshell(Some(jp), n, FORK_NOJOB)?;
+        pid = crate::jobs::forkshell(sh, Some(jp), n, FORK_NOJOB)?;
         tpip[0] = -1;
         if pid == 0 {
             FORCEINTON();
@@ -1308,7 +1308,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                     /* Fork off a child process if necessary. */
                     if (flags & EV_EXIT) == 0 || crate::trap::have_traps() != 0 {
                         INTOFF();
-                        jp = Some(crate::jobs::vforkexec(cmd, argv, path, cmdentry.u.index)?);
+                        jp = Some(crate::jobs::vforkexec(sh, cmd, argv, path, cmdentry.u.index)?);
                     } else {
                         /* `shellexec` replaces the process image or fails;
                          * failing, it reports and is the C's EXEND. */

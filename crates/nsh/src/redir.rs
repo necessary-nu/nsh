@@ -434,7 +434,10 @@ unsafe fn openhere(redir: &Node) -> Result<c_int, Error> {
         return Ok(pip[0]);
     }
 
-    if crate::jobs::forkshell(None, None, crate::jobs::FORK_NOJOB)? == 0 {
+    /* TRANSITIONAL: `openhere` has no context to pass on yet. Threading
+     * `redir.rs` removes this. */
+    let mut sh = crate::context::Shell::detached();
+    if crate::jobs::forkshell(&mut sh, None, None, crate::jobs::FORK_NOJOB)? == 0 {
         libc::close(pip[0]);
         libc::signal(libc::SIGINT, libc::SIG_IGN);
         libc::signal(libc::SIGQUIT, libc::SIG_IGN);

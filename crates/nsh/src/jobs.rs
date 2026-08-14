@@ -899,16 +899,13 @@ unsafe fn growjobtab() -> usize {
 /// is what guarantees (see `shellmain::exit_from_child`). The diagnostic
 /// has already been written either way.
 #[cold]
-unsafe fn forkchild_fatal(e: Error) -> ! {
+unsafe fn forkchild_fatal(sh: &mut crate::context::Shell, e: Error) -> ! {
     if vforked != 0 {
         drop(e);
         crate::shell::flush_coverage();
         libc::_exit(crate::eval::exitstatus);
     }
-    /* TRANSITIONAL: reached from `forkchild`'s closures, which have no
-     * context to capture. Threading `jobs.rs` removes this. */
-    let mut sh = crate::context::Shell::detached();
-    crate::shellmain::exit_from_child(&mut sh, Err(e))
+    crate::shellmain::exit_from_child(sh, Err(e))
 }
 
 // [spec:dash:def:jobs.forkchild-fn]
@@ -920,7 +917,12 @@ unsafe fn forkchild_fatal(e: Error) -> ! {
 // nothing but process-global state, and `vforkexec` passes FORK_FG, so
 // the `/dev/null` branch — the one that would open a descriptor — is not
 // on that path either.
-unsafe fn forkchild(jp: Option<usize>, n: Option<&Node>, mode: c_int) {
+unsafe fn forkchild(
+    sh: &mut crate::context::Shell,
+    jp: Option<usize>,
+    n: Option<&Node>,
+    mode: c_int,
+) {
     let lvforked: c_int;
     let oldlvl: c_int;
 
@@ -957,7 +959,7 @@ unsafe fn forkchild(jp: Option<usize>, n: Option<&Node>, mode: c_int) {
         /* This can fail because we are doing it in the parent also */
         libc::setpgid(0, pgrp);
         if mode == FORK_FG {
-            xxtcsetpgrp(pgrp).unwrap_or_else(|e| forkchild_fatal(e));
+            xxtcsetpgrp(pgrp).unwrap_or_else(|e| forkchild_fatal(sh, e));
         }
         crate::trap::setsignal(libc::SIGTSTP);
         crate::trap::setsignal(libc::SIGTTOU);
@@ -973,7 +975,7 @@ unsafe fn forkchild(jp: Option<usize>, n: Option<&Node>, mode: c_int) {
             libc::close(sin);
             let f: c_int =
                 crate::redir::sh_open(_PATH_DEVNULL.as_ptr() as *const c_char, libc::O_RDONLY, 0)
-                    .unwrap_or_else(|e| forkchild_fatal(e));
+                    .unwrap_or_else(|e| forkchild_fatal(sh, e));
             if f != sin {
                 libc::dup2(f, sin);
                 libc::close(f);
@@ -1067,6 +1069,7 @@ unsafe fn forkparent(
 // [spec:dash:def:jobs.forkshell-fn]
 // [spec:dash:sem:jobs.forkshell-fn]
 pub unsafe fn forkshell(
+    sh: &mut crate::context::Shell,
     jp: Option<usize>,
     n: Option<&Node>,
     mode: c_int,
@@ -1079,7 +1082,7 @@ pub unsafe fn forkshell(
 
     pid = libc::fork();
     if pid == 0 {
-        forkchild(jp, n, mode);
+        forkchild(sh, jp, n, mode);
     } else {
         forkparent(jp, n, mode, pid)?;
     }
@@ -1091,6 +1094,7 @@ pub unsafe fn forkshell(
 // [spec:dash:sem:jobs.vforkexec-fn]
 #[allow(deprecated)] /* libc marks vfork deprecated; dash relies on it */
 pub unsafe fn vforkexec(
+    sh: &mut crate::context::Shell,
     n: &Node,
     argv: *mut *mut c_char,
     path: *const c_char,
@@ -1112,7 +1116,7 @@ pub unsafe fn vforkexec(
         /* Shared address space until `execve`: nothing between here and
          * it may allocate, free or drop. `forkchild` returns at its
          * `lvforked` test without touching the job table's storage. */
-        forkchild(Some(jp), Some(n), FORK_FG);
+        forkchild(sh, Some(jp), Some(n), FORK_FG);
         /* `shellexec` either replaces the image or, in a vforked child,
          * `_exit`s at the failure site. It cannot come back here: this
          * frame belongs to the parent, and returning through it would
@@ -1120,10 +1124,7 @@ pub unsafe fn vforkexec(
          * docs/errors-are-values.md 2.5 is the boundary, and the `_exit`
          * that enforces it is at `shellexec`'s own failure site now
          * rather than inside `exraise`. */
-        /* TRANSITIONAL: `vforkexec` has no context to pass on yet.
-         * Threading `jobs.rs` removes this. */
-        let mut sh = crate::context::Shell::detached();
-        drop(crate::exec::shellexec(&mut sh, argv, path, idx));
+        drop(crate::exec::shellexec(sh, argv, path, idx));
         std::process::abort();
     }
 
