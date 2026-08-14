@@ -22,7 +22,7 @@ use crate::var::{VUNSET, showvars};
 
 // [spec:dash:def:options.setcmd-fn]
 // [spec:dash:sem:options.setcmd-fn]
-pub unsafe fn setcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn setcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if args.len() == 1 {
         return Ok(Flow::Done(showvars(addr_of!(nullstr) as *const c_char, 0, VUNSET)));
     }
@@ -31,7 +31,7 @@ pub unsafe fn setcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* The fourth `?` to return between this frame's INTOFF and its INTON,
      * and left leaking with the other three: 2.4 is explicit that pairing
      * them would move the instruction a pending SIGINT is delivered at. */
-    optschanged()?;
+    optschanged(sh)?;
     if scan.next < args.len() {
         setparam(&args[scan.next..]);
     }

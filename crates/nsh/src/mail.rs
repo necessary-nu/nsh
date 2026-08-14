@@ -80,6 +80,6 @@ pub unsafe fn chkmail() {
 
 // [spec:dash:def:mail.changemail-fn]
 // [spec:dash:sem:mail.changemail-fn]
-pub unsafe fn changemail(val: *const c_char) {
+pub unsafe fn changemail(_sh: &mut crate::context::Shell, val: *const c_char) {
     changed += 1;
 }

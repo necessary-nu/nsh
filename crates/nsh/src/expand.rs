@@ -1170,7 +1170,7 @@ unsafe fn expari(
         /* `arith` returns its diagnostic now instead of raising it, and as
          * of this commit so does `expari`, so the bridge that stood here is
          * gone and the value travels. */
-        result = crate::arith_yacc::arith(start)?;
+        result = crate::arith_yacc::arith(sh, start)?;
 
         len = cvtnum(result, flag, expb()) as c_int;
 
@@ -1451,7 +1451,7 @@ unsafe fn subevalvar(
         match subtype {
             VSASSIGN => {
                 /* The bridge that stood here retires with this commit. */
-                crate::var::setvar(str, startp, 0)?;
+                crate::var::setvar(sh, str, startp, 0)?;
 
                 loc = startp;
                 break 'out;
@@ -2393,7 +2393,7 @@ pub unsafe fn ifsfree() {
 
 // [spec:dash:def:expand.changeifs-fn]
 // [spec:dash:sem:expand.changeifs-fn]
-pub unsafe fn changeifs(mut ifs: *const c_char) {
+pub unsafe fn changeifs(_sh: &mut crate::context::Shell, mut ifs: *const c_char) {
     let mut mbs: libc::mbstate_t = mem::zeroed();
     let mut nwcifs: Vec<wchar_t>;
     let mut mb: c_uint = 0;

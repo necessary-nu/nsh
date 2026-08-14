@@ -144,13 +144,13 @@ unsafe fn Eflag() -> c_char {
 // [spec:dash:sem:histedit.histedit-fn]
 // [spec:dash:def:myhistedit.histedit-fn]
 // [spec:dash:sem:myhistedit.histedit-fn]
-pub unsafe fn histedit() {
+pub unsafe fn histedit(sh: &mut crate::context::Shell) {
     if iflag() != 0 {
         if !history_active() {
             INTOFF!();
             state_mut().history = Some(History::new());
             INTON!();
-            sethistsize(crate::var::histsizeval());
+            sethistsize(sh, crate::var::histsizeval());
         }
 
         let sin: c_int = crate::streams::streams().stdin;
@@ -199,7 +199,7 @@ pub unsafe fn histedit() {
 // [spec:dash:sem:histedit.sethistsize-fn]
 // [spec:dash:def:myhistedit.sethistsize-fn]
 // [spec:dash:sem:myhistedit.sethistsize-fn]
-pub unsafe fn sethistsize(hs: *const c_char) {
+pub unsafe fn sethistsize(_sh: &mut crate::context::Shell, hs: *const c_char) {
     let Some(history) = history_mut() else {
         return;
     };

@@ -199,7 +199,7 @@ pub static mut optlist: [c_char; NOPTS] = [0; NOPTS];
 
 // [spec:dash:def:options.procargs-fn]
 // [spec:dash:sem:options.procargs-fn]
-pub unsafe fn procargs(mut xargv: *mut *mut c_char) -> Result<c_int, Error> {
+pub unsafe fn procargs(sh: &mut crate::context::Shell, mut xargv: *mut *mut c_char) -> Result<c_int, Error> {
     let mut i: c_int;
     let mut login: c_int;
 
@@ -272,7 +272,7 @@ pub unsafe fn procargs(mut xargv: *mut *mut c_char) -> Result<c_int, Error> {
         count = count.add(1);
     }
     borrowparam(xargv, nparam);
-    optschanged()?;
+    optschanged(sh)?;
 
     Ok(login)
 }
@@ -281,12 +281,12 @@ pub unsafe fn procargs(mut xargv: *mut *mut c_char) -> Result<c_int, Error> {
 // [spec:dash:sem:options.optschanged-fn]
 /// Returns rather than raising, because `setjobctl` can fail and one of
 /// this function's callers is teardown. See `jobs::setjobctl`.
-pub unsafe fn optschanged() -> Result<(), crate::error::Error> {
+pub unsafe fn optschanged(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
     /* `#ifdef DEBUG opentrace();` — the dash build does not define DEBUG,
      * so `show.c` compiles to nothing and there is no trace file. */
     crate::trap::setinteractive(optlist[iflag] as c_int);
     /* #ifndef SMALL */
-    crate::histedit::histedit();
+    crate::histedit::histedit(sh);
     crate::jobs::setjobctl(optlist[mflag] as c_int)
 }
 
@@ -543,7 +543,7 @@ pub unsafe fn freeparam(param: *mut shparam) {
 
 // [spec:dash:def:options.getoptsreset-fn]
 // [spec:dash:sem:options.getoptsreset-fn]
-pub unsafe fn getoptsreset(value: *const c_char) {
+pub unsafe fn getoptsreset(_sh: &mut crate::context::Shell, value: *const c_char) {
     shellparam.optind = 1;
     shellparam.optoff = -1;
 }

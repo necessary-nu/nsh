@@ -24,6 +24,7 @@ use std::collections::BTreeMap;
 use std::ffi::CStr;
 use std::io::Write as _;
 
+use crate::context::Shell;
 use crate::error::{INTOFF, INTON};
 use crate::mystring::nullstr;
 use crate::options::{NOPTS, Options, getoptsreset, optlist, optschanged};
@@ -51,7 +52,16 @@ pub const VNOSAVE: c_int = 0x100; /* when text is on the heap before setvareq */
 /// Invoked whenever the variable is set or unset unless `VNOFUNC` is given;
 /// the argument is the value alone, or the whole `"name=value"` when the
 /// variable carries `VFULL` (see `varfunc`).  `None` means no callback.
-pub type varfunc_t = Option<unsafe fn(*const c_char)>;
+///
+/// The receiver is not in the C and is not decoration. Three of the six
+/// hooks reach state that is moving onto the shell — `changepath` writes
+/// `builtinloc` and clears the command table, `getoptsreset` writes the
+/// option state, `changeifs` writes the IFS cache — so a hook that could
+/// not be handed a `&mut Shell` would pin those tables as `static mut`
+/// however much of the crate was threaded. Widening the pointer is what
+/// unblocks them, which is why it lands on its own rather than inside
+/// whichever table move discovers it.
+pub type varfunc_t = Option<unsafe fn(&mut Shell, *const c_char)>;
 
 /// A variable's `NAME=value` bytes, and who they belong to.
 ///
@@ -203,7 +213,7 @@ pub static mut linenovar: [c_char; 19] =
 /// the register, not something to slip into a memory-safety fix. Fixing
 /// it properly means giving the callback the variable rather than a
 /// pointer into its text.
-unsafe fn changelocale(val: *const c_char) {
+unsafe fn changelocale(_sh: &mut Shell, val: *const c_char) {
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
 
@@ -459,7 +469,7 @@ pub unsafe fn bltinlookup(name: *const c_char) -> *mut c_char {
  */
 
 /* mkinit INIT fragment from src/var.c:136-162. */
-pub unsafe fn mkinit_init() -> Result<(), Error> {
+pub unsafe fn mkinit_init(sh: &mut Shell) -> Result<(), Error> {
     let mut envp: *mut *mut c_char;
     static mut ppid: [c_char; 32] = unsafe {
         core::mem::transmute::<[u8; 32], [c_char; 32]>(
@@ -475,13 +485,13 @@ pub unsafe fn mkinit_init() -> Result<(), Error> {
     while !(*envp).is_null() {
         p = crate::parser::endofname(*envp);
         if p != *envp && *p == b'=' as c_char {
-            setvareq(*envp, VEXPORT | VTEXTFIXED)?;
+            setvareq(sh, *envp, VEXPORT | VTEXTFIXED)?;
         }
         envp = envp.add(1);
     }
 
-    setvareq(addr_of_mut!(defifsvar) as *mut c_char, VTEXTFIXED)?;
-    setvareq(addr_of_mut!(defoptindvar) as *mut c_char, VTEXTFIXED)?;
+    setvareq(sh, addr_of_mut!(defifsvar) as *mut c_char, VTEXTFIXED)?;
+    setvareq(sh, addr_of_mut!(defoptindvar) as *mut c_char, VTEXTFIXED)?;
 
     let ppid_text = format!("{}", libc::getppid());
     crate::mystring::copy_ascii_cstr(
@@ -489,7 +499,7 @@ pub unsafe fn mkinit_init() -> Result<(), Error> {
         32 - 5,
         &ppid_text,
     );
-    setvareq(addr_of_mut!(ppid) as *mut c_char, VTEXTFIXED)?;
+    setvareq(sh, addr_of_mut!(ppid) as *mut c_char, VTEXTFIXED)?;
 
     p = lookupvar(b"PWD\0".as_ptr() as *const c_char);
     if !p.is_null() {
@@ -502,12 +512,12 @@ pub unsafe fn mkinit_init() -> Result<(), Error> {
             p = null_mut();
         }
     }
-    crate::cd::setpwd(p, 0)
+    crate::cd::setpwd(sh, p, 0)
 }
 
 /* mkinit RESET fragment from src/var.c:164-166. */
-pub unsafe fn mkinit_reset() {
-    unwindlocalvars(0);
+pub unsafe fn mkinit_reset(sh: &mut Shell) {
+    unwindlocalvars(sh, 0);
 }
 
 // [spec:dash:def:var.varnull-fn]
@@ -519,7 +529,7 @@ unsafe fn varnull(s: *const c_char) -> *mut c_char {
 
 // [spec:dash:def:var.varfunc-fn]
 // [spec:dash:sem:var.varfunc-fn]
-unsafe fn varfunc(vp: *mut var) {
+unsafe fn varfunc(sh: &mut Shell, vp: *mut var) {
     let mut s: *const c_char;
 
     if (*vp).func.is_none() {
@@ -530,7 +540,7 @@ unsafe fn varfunc(vp: *mut var) {
     if ((*vp).flags & VFULL) == 0 {
         s = varnull(s);
     }
-    ((*vp).func.unwrap())(s);
+    ((*vp).func.unwrap())(sh, s);
 }
 
 /*
@@ -576,7 +586,7 @@ pub unsafe fn initvar() {
 
 // [spec:dash:def:var.setvar-fn]
 // [spec:dash:sem:var.setvar-fn]
-pub unsafe fn setvar(name: *const c_char, val: *const c_char, mut flags: c_int) -> Result<*mut var, Error> {
+pub unsafe fn setvar(sh: &mut Shell, name: *const c_char, val: *const c_char, mut flags: c_int) -> Result<*mut var, Error> {
     let p: *mut c_char;
     let q: *mut c_char;
     let namelen: size_t;
@@ -613,7 +623,7 @@ pub unsafe fn setvar(name: *const c_char, val: *const c_char, mut flags: c_int) 
         nameeq.extend_from_slice(core::slice::from_raw_parts(val as *const u8, vallen));
     }
     nameeq.push(b'\0');
-    vp = setvareq_text(VarText::Owned(nameeq.into_boxed_slice()), flags | VNOSAVE)?;
+    vp = setvareq_text(sh, VarText::Owned(nameeq.into_boxed_slice()), flags | VNOSAVE)?;
     INTON();
 
     Ok(vp)
@@ -627,6 +637,7 @@ pub unsafe fn setvar(name: *const c_char, val: *const c_char, mut flags: c_int) 
 // [spec:dash:def:var.setvarint-fn]
 // [spec:dash:sem:var.setvarint-fn]
 pub unsafe fn setvarint(
+    sh: &mut Shell,
     name: *const c_char,
     val: intmax_t,
     flags: c_int,
@@ -637,7 +648,7 @@ pub unsafe fn setvarint(
 
     let value = format!("{val}");
     crate::mystring::copy_ascii_cstr(buf.as_mut_ptr(), len as usize, &value);
-    setvar(name, buf.as_ptr(), flags)?;
+    setvar(sh, name, buf.as_ptr(), flags)?;
     Ok(val)
 }
 
@@ -656,7 +667,7 @@ pub unsafe fn setvarint(
 /// over outright, neither for one to `savestr`.  Only `setvar` ever passed
 /// `VNOSAVE`, and it now hands its buffer to [`setvareq_text`] directly,
 /// so what is left here is the two cases an outside caller can mean.
-pub unsafe fn setvareq(s: *mut c_char, flags: c_int) -> Result<*mut var, Error> {
+pub unsafe fn setvareq(sh: &mut Shell, s: *mut c_char, flags: c_int) -> Result<*mut var, Error> {
     debug_assert_eq!(
         flags & VNOSAVE,
         0,
@@ -671,11 +682,11 @@ pub unsafe fn setvareq(s: *mut c_char, flags: c_int) -> Result<*mut var, Error> 
          * the copy is dropped by the unwind. */
         VarText::Owned(CStr::from_ptr(s).to_bytes_with_nul().into())
     };
-    setvareq_text(text, flags)
+    setvareq_text(sh, text, flags)
 }
 
 /// The body of `setvareq`, over a text whose owner is already settled.
-unsafe fn setvareq_text(text: VarText, mut flags: c_int) -> Result<*mut var, Error> {
+unsafe fn setvareq_text(sh: &mut Shell, text: VarText, mut flags: c_int) -> Result<*mut var, Error> {
     let mut vp: *mut var;
     let s: *const c_char = text.as_ptr();
 
@@ -749,7 +760,7 @@ unsafe fn setvareq_text(text: VarText, mut flags: c_int) -> Result<*mut var, Err
     );
 
     if (flags & VNOFUNC) == 0 {
-        varfunc(vp);
+        varfunc(sh, vp);
     }
 
     Ok(vp)
@@ -889,7 +900,7 @@ pub unsafe fn showvars(prefix: *const c_char, on: c_int, off: c_int) -> c_int {
 
 // [spec:dash:def:var.mklocal-fn]
 // [spec:dash:sem:var.mklocal-fn]
-pub unsafe fn mklocal(name: *mut c_char, flags: c_int) -> Result<(), Error> {
+pub unsafe fn mklocal(sh: &mut Shell, name: *mut c_char, flags: c_int) -> Result<(), Error> {
     INTOFF();
     if *name.offset(0) == b'-' as c_char && *name.offset(1) == b'\0' as c_char {
         pushlocal(localvar::Options(optlist));
@@ -903,9 +914,9 @@ pub unsafe fn mklocal(name: *mut c_char, flags: c_int) -> Result<(), Error> {
         if found.is_null() {
             let vp: *mut var;
             if eq {
-                vp = setvareq(name, VSTRFIXED | flags)?;
+                vp = setvareq(sh, name, VSTRFIXED | flags)?;
             } else {
-                vp = setvar(name, null_mut(), VSTRFIXED | flags)?;
+                vp = setvar(sh, name, null_mut(), VSTRFIXED | flags)?;
             }
             pushlocal(localvar::Unset { vp });
         } else {
@@ -934,7 +945,7 @@ pub unsafe fn mklocal(name: *mut c_char, flags: c_int) -> Result<(), Error> {
                  * below, leaking the interrupt counter exactly as the
                  * longjmp out of `sh_error` did. Not a bracket to pair;
                  * see docs/errors-are-values.md 2.4. */
-                setvareq(name, flags)?;
+                setvareq(sh, name, flags)?;
             }
         }
     }
@@ -958,7 +969,7 @@ unsafe fn pushlocal(lvp: localvar) {
 
 // [spec:dash:def:var.poplocalvars-fn]
 // [spec:dash:sem:var.poplocalvars-fn]
-unsafe fn poplocalvars() {
+unsafe fn poplocalvars(sh: &mut Shell) {
     let mut ll: localvar_list;
 
     INTOFF();
@@ -982,7 +993,7 @@ unsafe fn poplocalvars() {
                  * here; what the C added was a longjmp out of the middle
                  * of restoring a `local -` option set, and that is what
                  * goes. */
-                drop(optschanged());
+                drop(optschanged(sh));
             }
             localvar::Unset { vp } => {
                 (*vp).flags &= !(VSTRFIXED | VREADONLY);
@@ -999,7 +1010,7 @@ unsafe fn poplocalvars() {
                  * is the claim; the drop is what happens if it is ever
                  * wrong, and it keeps the rest of the teardown running
                  * rather than abandoning it. */
-                let unset = unsetvar((*vp).text.as_ptr());
+                let unset = unsetvar(sh, (*vp).text.as_ptr());
                 debug_assert!(
                     unset.is_ok(),
                     "poplocalvars cleared VREADONLY on the entry unsetvar will find"
@@ -1020,7 +1031,7 @@ unsafe fn poplocalvars() {
                     "who owns vp->text and what its flags say must agree"
                 );
                 if ((*vp).flags & VNOFUNC) == 0 {
-                    varfunc(vp);
+                    varfunc(sh, vp);
                 }
             }
         }
@@ -1057,9 +1068,9 @@ pub unsafe fn pushlocalvars(push: c_int) -> usize {
 /// The C's loop is `while (localvar_stack != stop)`, which runs off the
 /// bottom of the stack if `stop` was never on it; `>` is total, and the
 /// only state it declines to reproduce is a NULL dereference.
-pub unsafe fn unwindlocalvars(stop: usize) {
+pub unsafe fn unwindlocalvars(sh: &mut Shell, stop: usize) {
     while localvar_stack_mut().len() > stop {
-        poplocalvars();
+        poplocalvars(sh);
     }
 }
 
@@ -1075,8 +1086,8 @@ pub unsafe fn unwindlocalvars(stop: usize) {
 
 // [spec:dash:def:var.unsetvar-fn]
 // [spec:dash:sem:var.unsetvar-fn]
-pub unsafe fn unsetvar(s: *const c_char) -> Result<(), Error> {
-    setvar(s, null_mut(), 0)?;
+pub unsafe fn unsetvar(sh: &mut Shell, s: *const c_char) -> Result<(), Error> {
+    setvar(sh, s, null_mut(), 0)?;
     Ok(())
 }
 
@@ -1120,15 +1131,17 @@ mod tests {
     fn setvar_files_a_name_equals_value() {
         let _g = lock();
         unsafe {
+            let mut owned = Shell::new();
+            let sh = &mut owned;
             let name = CStr0::new("Tsetvar");
             let val = CStr0::new("hello");
 
-            setvar(name.p(), val.p(), 0);
+            setvar(sh, name.p(), val.p(), 0);
             assert_eq!(text_bytes("Tsetvar", 14), b"Tsetvar=hello\0".to_vec());
             assert_eq!(s(lookupvar(name.p())), "hello");
 
             /* VSTRFIXED so the entry survives being unset and can be read. */
-            setvar(name.p(), null_mut(), VSTRFIXED);
+            setvar(sh, name.p(), null_mut(), VSTRFIXED);
             assert_eq!(text_bytes("Tsetvar", 9), b"Tsetvar\0\0".to_vec());
             let vp = findvar(name.p());
             assert_eq!(s(varnull((*vp).text.as_ptr())), "");
@@ -1143,19 +1156,21 @@ mod tests {
     fn a_frame_restores_in_reverse_order() {
         let _g = lock();
         unsafe {
+            let mut owned = Shell::new();
+            let sh = &mut owned;
             let name = CStr0::new("Tframe");
             let two = CStr0::new("Tframe=two");
             let three = CStr0::new("Tframe=three");
 
-            setvar(name.p(), CStr0::new("one").p(), 0);
+            setvar(sh, name.p(), CStr0::new("one").p(), 0);
             let stop = pushlocalvars(1);
-            mklocal(two.p() as *mut c_char, 0);
-            mklocal(three.p() as *mut c_char, 0);
+            mklocal(sh, two.p() as *mut c_char, 0);
+            mklocal(sh, three.p() as *mut c_char, 0);
             assert_eq!(s(lookupvar(name.p())), "three");
 
-            unwindlocalvars(stop);
+            unwindlocalvars(sh, stop);
             assert_eq!(s(lookupvar(name.p())), "one");
-            unsetvar(name.p());
+            unsetvar(sh, name.p());
         }
     }
 
@@ -1167,26 +1182,28 @@ mod tests {
     fn a_saved_entry_does_not_move() {
         let _g = lock();
         unsafe {
+            let mut owned = Shell::new();
+            let sh = &mut owned;
             let name = CStr0::new("Tchurn");
             let local = CStr0::new("Tchurn=inner");
 
-            setvar(name.p(), CStr0::new("outer").p(), 0);
+            setvar(sh, name.p(), CStr0::new("outer").p(), 0);
             let stop = pushlocalvars(1);
-            mklocal(local.p() as *mut c_char, 0);
+            mklocal(sh, local.p() as *mut c_char, 0);
             let entry = findvar(name.p());
 
             let filler: Vec<CStr0> = (0..200).map(|i| CStr0::new(&format!("Ta{i:04}"))).collect();
             for f in &filler {
-                setvar(f.p(), CStr0::new("x").p(), 0);
+                setvar(sh, f.p(), CStr0::new("x").p(), 0);
             }
             assert_eq!(findvar(name.p()), entry, "the entry moved under the save");
 
-            unwindlocalvars(stop);
+            unwindlocalvars(sh, stop);
             assert_eq!(s(lookupvar(name.p())), "outer");
             for f in &filler {
-                unsetvar(f.p());
+                unsetvar(sh, f.p());
             }
-            unsetvar(name.p());
+            unsetvar(sh, name.p());
         }
     }
 
@@ -1205,6 +1222,8 @@ mod tests {
     fn environ_owns_the_locale_bytes() {
         let _g = lock();
         unsafe {
+            let mut owned = Shell::new();
+            let sh = &mut owned;
             let name = CStr0::new("LC_COLLATE");
             let saved = libc::getenv(name.p());
             let saved = if saved.is_null() {
@@ -1214,7 +1233,7 @@ mod tests {
             };
 
             let text: &[u8] = b"LC_COLLATE=C\0";
-            changelocale(text.as_ptr() as *const c_char);
+            changelocale(sh, text.as_ptr() as *const c_char);
 
             let filed = libc::getenv(name.p());
             assert!(!filed.is_null(), "changelocale reached the environment");
@@ -1228,7 +1247,7 @@ mod tests {
             // An unset arrives as the bare value with no name attached,
             // because `setvareq` drops VFULL; it must not panic and must
             // not disturb what is filed. See the function's own comment.
-            changelocale(b"\0".as_ptr() as *const c_char);
+            changelocale(sh, b"\0".as_ptr() as *const c_char);
             assert_eq!(
                 core::ffi::CStr::from_ptr(libc::getenv(name.p())).to_bytes(),
                 b"C"

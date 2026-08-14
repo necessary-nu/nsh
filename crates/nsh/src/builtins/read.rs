@@ -45,7 +45,7 @@ const READ_MBSLOP: usize = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 4;
 
 // [spec:dash:def:miscbltin.readcmd-handle-line-fn]
 // [spec:dash:sem:miscbltin.readcmd-handle-line-fn]
-unsafe fn readcmd_handle_line(line: &mut BString, names: &[&BStr]) -> Result<(), Error> {
+unsafe fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> Result<(), Error> {
     let mut arglist: arglist = arglist::new();
 
     /* `s = grabstackstr(s)`.  The C is handed the cursor one *past* the
@@ -67,7 +67,7 @@ unsafe fn readcmd_handle_line(line: &mut BString, names: &[&BStr]) -> Result<(),
         let name = crate::shell::cstring(name);
         match arglist.list.get_mut(index) {
             None => {
-                crate::var::setvar(
+                crate::var::setvar(sh, 
                     name.as_ptr(),
                     core::ptr::addr_of!(crate::shell::nullstr) as *const c_char,
                     0,
@@ -76,7 +76,7 @@ unsafe fn readcmd_handle_line(line: &mut BString, names: &[&BStr]) -> Result<(),
             Some(field) => {
                 /* set variable to field */
                 field.rmescapes();
-                crate::var::setvar(name.as_ptr(), field.textp(), 0)?;
+                crate::var::setvar(sh, name.as_ptr(), field.textp(), 0)?;
             }
         }
     }
@@ -219,6 +219,6 @@ pub unsafe fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
      * below then passes `p + 1` — the length *including* it.  Pushing is both
      * halves at once. */
     line.push(b'\0');
-    readcmd_handle_line(&mut line, names)?;
+    readcmd_handle_line(sh, &mut line, names)?;
     Ok(Flow::Done(status))
 }

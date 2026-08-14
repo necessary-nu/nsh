@@ -138,11 +138,11 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
                              *   trputs("Shell args:  ");  trargs(argv); */
                             rootpid = libc::getpid();
                             mypid = rootpid;
-                            crate::init::init()?;
+                            crate::init::init(sh)?;
                             /* `setstackmark(smark)`, popped at `state3` and
                              * on the exception path, bounded what `procargs`
                              * and the profile reads left in the region. */
-                            let login: c_int = crate::options::procargs(argv)?;
+                            let login: c_int = crate::options::procargs(sh, argv)?;
                             if login != 0 {
                                 *state_p = 1;
                                 match read_profile(

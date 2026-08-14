@@ -80,19 +80,19 @@ pub(crate) enum Pwd<'a> {
 
 // [spec:dash:def:cd.setpwd-fn]
 // [spec:dash:sem:cd.setpwd-fn]
-pub unsafe fn setpwd(val: *const c_char, setold: c_int) -> Result<(), Error> {
+pub unsafe fn setpwd(sh: &mut crate::context::Shell, val: *const c_char, setold: c_int) -> Result<(), Error> {
     if val.is_null() {
-        setpwd_inner(Pwd::Unknown, setold)
+        setpwd_inner(sh, Pwd::Unknown, setold)
     } else {
         let bytes = CStr::from_ptr(val).to_bytes();
-        setpwd_inner(Pwd::New(BStr::new(bytes)), setold)
+        setpwd_inner(sh, Pwd::New(BStr::new(bytes)), setold)
     }
 }
 
-pub(crate) unsafe fn setpwd_inner(val: Pwd, setold: c_int) -> Result<(), Error> {
+pub(crate) unsafe fn setpwd_inner(sh: &mut crate::context::Shell, val: Pwd, setold: c_int) -> Result<(), Error> {
     if setold != 0 {
         let old = cbytes(&*addr_of!(curdir));
-        setvar(
+        setvar(sh, 
             b"OLDPWD\0".as_ptr() as *const c_char,
             old.as_ptr() as *const c_char,
             VEXPORT,
@@ -118,7 +118,7 @@ pub(crate) unsafe fn setpwd_inner(val: Pwd, setold: c_int) -> Result<(), Error> 
     }
     let dir = cbytes(&*addr_of!(curdir));
     INTON();
-    setvar(
+    setvar(sh, 
         b"PWD\0".as_ptr() as *const c_char,
         dir.as_ptr() as *const c_char,
         VEXPORT,

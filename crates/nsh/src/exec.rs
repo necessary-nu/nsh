@@ -717,7 +717,7 @@ pub unsafe fn hashcd() {
 
 // [spec:dash:def:exec.changepath-fn]
 // [spec:dash:sem:exec.changepath-fn]
-pub unsafe fn changepath(newval: *const c_char) {
+pub unsafe fn changepath(_sh: &mut crate::context::Shell, newval: *const c_char) {
     let mut new: *const c_char;
     let mut idx: c_int;
     let mut bltin: c_int;

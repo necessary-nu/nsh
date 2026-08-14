@@ -21,7 +21,7 @@ use crate::var::{VEXPORT, VREADONLY, findvar, setvar, showvars, var};
 
 // [spec:dash:def:var.exportcmd-fn]
 // [spec:dash:sem:var.exportcmd-fn]
-pub unsafe fn exportcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn exportcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut vp: *mut var;
     let mut p: *const c_char;
     /* `export` and `readonly` are one builtin telling itself apart by the
@@ -54,7 +54,7 @@ pub unsafe fn exportcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
                     }
                 }
             }
-            setvar(name, p, flag)?;
+            setvar(sh, name, p, flag)?;
         }
     } else {
         let called = crate::shell::cstring(args[0]);
@@ -84,8 +84,10 @@ mod tests {
     fn the_calling_name_picks_the_flag() {
         let _g = lock();
         unsafe {
+            let mut owned = Shell::new();
+            let sh = &mut owned;
             let name = CStr0::new("Texport");
-            setvar(name.p(), CStr0::new("v").p(), VSTRFIXED);
+            setvar(sh, name.p(), CStr0::new("v").p(), VSTRFIXED);
 
             assert_eq!(run(b"export", &[b"Texport"]), Flow::Done(0));
             assert_ne!((*findvar(name.p())).flags & VEXPORT, 0);

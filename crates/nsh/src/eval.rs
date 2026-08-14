@@ -572,7 +572,7 @@ unsafe fn evalfor(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error>
     loopnest += 1;
     flags &= EV_TESTED;
     for sp in &arglist.list {
-        crate::var::setvar(f.var.as_ptr(), sp.textp(), 0)?;
+        crate::var::setvar(sh, f.var.as_ptr(), sp.textp(), 0)?;
         status = flow!(evaltree(sh, f.body.as_deref(), flags));
         if (skiploop() & !SKIPCONT) != 0 {
             break;
@@ -1212,9 +1212,9 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                 );
 
                 if vlocal != 0 {
-                    crate::var::mklocal(varlist.list[spp].textp(), VEXPORT)?;
+                    crate::var::mklocal(sh, varlist.list[spp].textp(), VEXPORT)?;
                 } else {
-                    crate::var::setvareq(varlist.list[spp].textp(), vflags)?;
+                    crate::var::setvareq(sh, varlist.list[spp].textp(), vflags)?;
                 }
             }
 
@@ -1357,13 +1357,13 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
     }
     crate::redir::unwindredir(sh, redir_stop);
     crate::input::unwindfiles(sh, file_stop);
-    crate::var::unwindlocalvars(localvar_stop);
+    crate::var::unwindlocalvars(sh, localvar_stop);
     if !lastarg.is_null() {
         /* dsl: I think this is intended to be used to support
          * '_' in 'vi' command mode during line editing...
          * However I implemented that within libedit itself.
          */
-        crate::var::setvar(b"_\0".as_ptr() as *const c_char, lastarg, 0)?;
+        crate::var::setvar(sh, b"_\0".as_ptr() as *const c_char, lastarg, 0)?;
     }
 
     Ok(Flow::Done(status))

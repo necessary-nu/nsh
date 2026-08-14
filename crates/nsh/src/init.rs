@@ -35,7 +35,7 @@ use crate::nodes::Node;
 
 // [spec:dash:def:init.init-fn]
 // [spec:dash:sem:init.init-fn]
-pub unsafe fn init() -> Result<(), crate::error::Error> {
+pub unsafe fn init(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
     /* from input.c: */
     crate::input::mkinit_init();
 
@@ -49,7 +49,7 @@ pub unsafe fn init() -> Result<(), crate::error::Error> {
     }
 
     /* from var.c: */
-    crate::var::mkinit_init()
+    crate::var::mkinit_init(sh)
 }
 
 /*
@@ -146,5 +146,5 @@ pub unsafe fn reset(sh: &mut crate::context::Shell) {
     }
 
     /* from var.c: */
-    crate::var::mkinit_reset();
+    crate::var::mkinit_reset(sh);
 }

@@ -13,7 +13,7 @@ use crate::var::unsetvar;
 
 // [spec:dash:def:var.unsetcmd-fn]
 // [spec:dash:sem:var.unsetcmd-fn]
-pub unsafe fn unsetcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn unsetcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut flag: u8 = 0;
 
     let mut opts = Options::new(args);
@@ -24,7 +24,7 @@ pub unsafe fn unsetcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     for name in opts.operands() {
         let name = crate::shell::cstring(name);
         if flag != b'f' {
-            unsetvar(name.as_ptr())?;
+            unsetvar(sh, name.as_ptr())?;
             continue;
         }
         if flag != b'v' {
@@ -47,30 +47,32 @@ mod tests {
     fn the_option_picks_the_table() {
         let _g = lock();
         unsafe {
+            let mut owned = Shell::new();
+            let sh = &mut owned;
             let name = CStr0::new("Tunset");
             let sh = &mut Shell::new();
 
-            setvar(name.p(), CStr0::new("v").p(), 0);
+            setvar(sh, name.p(), CStr0::new("v").p(), 0);
             assert_eq!(
                 unsetcmd(sh, &[BStr::new("unset"), BStr::new("Tunset")]).unwrap(),
                 Flow::Done(0)
             );
             assert!(lookupvar(name.p()).is_null());
 
-            setvar(name.p(), CStr0::new("v").p(), 0);
+            setvar(sh, name.p(), CStr0::new("v").p(), 0);
             assert_eq!(
                 unsetcmd(sh, &[BStr::new("unset"), BStr::new("-v"), BStr::new("Tunset")]).unwrap(),
                 Flow::Done(0)
             );
             assert!(lookupvar(name.p()).is_null());
 
-            setvar(name.p(), CStr0::new("v").p(), 0);
+            setvar(sh, name.p(), CStr0::new("v").p(), 0);
             assert_eq!(
                 unsetcmd(sh, &[BStr::new("unset"), BStr::new("-f"), BStr::new("Tunset")]).unwrap(),
                 Flow::Done(0)
             );
             assert!(!lookupvar(name.p()).is_null(), "-f is the function table");
-            unsetvar(name.p());
+            unsetvar(sh, name.p());
         }
     }
 
@@ -79,10 +81,12 @@ mod tests {
     fn the_last_option_wins() {
         let _g = lock();
         unsafe {
+            let mut owned = Shell::new();
+            let sh = &mut owned;
             let name = CStr0::new("Tunset2");
-            setvar(name.p(), CStr0::new("v").p(), 0);
+            setvar(sh, name.p(), CStr0::new("v").p(), 0);
             assert_eq!(
-                unsetcmd(&mut Shell::new(), &[
+                unsetcmd(sh, &[
                     BStr::new("unset"),
                     BStr::new("-f"),
                     BStr::new("-v"),

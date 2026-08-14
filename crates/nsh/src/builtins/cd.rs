@@ -45,7 +45,7 @@ pub(crate) unsafe fn cdopt(opts: &mut Options) -> Result<c_int, Error> {
 
 // [spec:dash:def:cd.cdcmd-fn]
 // [spec:dash:sem:cd.cdcmd-fn]
-pub unsafe fn cdcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut dest: *const c_char;
     let mut path: *const c_char;
     let mut p: *const c_char;
@@ -127,7 +127,7 @@ pub unsafe fn cdcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     flags |= CD_PRINT;
                 }
                 /* docd: */
-                if docd(p, flags)? == 0 {
+                if docd(sh, p, flags)? == 0 {
                     out = true; /* goto out */
                     break;
                 }
@@ -143,7 +143,7 @@ pub unsafe fn cdcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         /* step6: */
         p = dest;
         /* docd: */
-        if docd(p, flags)? != 0 {
+        if docd(sh, p, flags)? != 0 {
             /* err: */
             let mut message = b"can't cd to ".to_vec();
             message.extend_from_slice(CStr::from_ptr(dest).to_bytes());
@@ -163,11 +163,11 @@ pub unsafe fn cdcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
 // [spec:dash:def:cd.docd-fn]
 // [spec:dash:sem:cd.docd-fn]
-unsafe fn docd(mut dest: *const c_char, flags: c_int) -> Result<c_int, Error> {
+unsafe fn docd(sh: &mut Shell, mut dest: *const c_char, flags: c_int) -> Result<c_int, Error> {
     let mut dir: *const c_char = null_mut();
     let err: c_int;
 
-    /* `TRACE(("docd(\"%s\", %d) called\n", dest, flags));` — `#ifdef DEBUG`
+    /* `TRACE(("docd(sh, \"%s\", %d) called\n", dest, flags));` — `#ifdef DEBUG`
      * in `shell.h`, and the dash build does not define it. */
 
     INTOFF();
@@ -190,7 +190,7 @@ unsafe fn docd(mut dest: *const c_char, flags: c_int) -> Result<c_int, Error> {
         /* The `?` returns between the INTOFF above and the INTON below,
          * leaking the interrupt counter exactly as the longjmp out of
          * `sh_error` did; see docs/errors-are-values.md 2.4. */
-        setpwd(dir, 1)?;
+        setpwd(sh, dir, 1)?;
         crate::exec::hashcd();
     }
     /* out: */

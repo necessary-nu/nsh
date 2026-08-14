@@ -21,13 +21,13 @@ use crate::options::Options;
 
 // [spec:dash:def:cd.pwdcmd-fn]
 // [spec:dash:sem:cd.pwdcmd-fn]
-pub unsafe fn pwdcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn pwdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let flags: c_int;
 
     flags = cdopt(&mut Options::new(args))?;
     let mut dir = if flags != 0 {
         if (*addr_of!(physdir)).is_none() {
-            setpwd_inner(Pwd::Current, 0)?;
+            setpwd_inner(sh, Pwd::Current, 0)?;
         }
         cbytes(&*addr_of!(physdir))
     } else {

@@ -17,7 +17,7 @@ use crate::var::{localvar_stack_mut, mklocal};
 
 // [spec:dash:def:var.localcmd-fn]
 // [spec:dash:sem:var.localcmd-fn]
-pub unsafe fn localcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn localcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if localvar_stack_mut().is_empty() {
         return Err(crate::error::sh_error_value(b"not in a function"));
     }
@@ -26,7 +26,7 @@ pub unsafe fn localcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
      * name is a name to localise -- including one that starts with `-`. */
     for name in &args[1..] {
         let name = crate::shell::cstring(name);
-        mklocal(name.as_ptr() as *mut c_char, 0)?;
+        mklocal(sh, name.as_ptr() as *mut c_char, 0)?;
     }
     Ok(Flow::Done(0))
 }
