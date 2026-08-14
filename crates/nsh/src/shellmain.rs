@@ -460,7 +460,7 @@ unsafe fn read_profile(
     if let crate::eval::Flow::Exit { .. } = flow {
         return Ok(flow);
     }
-    crate::input::popfile();
+    crate::input::popfile(sh);
     Ok(flow)
 }
 
@@ -479,7 +479,7 @@ pub unsafe fn readcmdfile(
     if let crate::eval::Flow::Exit { .. } = flow {
         return Ok(flow);
     }
-    crate::input::popfile();
+    crate::input::popfile(sh);
     Ok(flow)
 }
 

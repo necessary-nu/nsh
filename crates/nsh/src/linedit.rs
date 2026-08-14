@@ -416,7 +416,7 @@ impl LineEditor {
                 }
                 ReadStep::Alias(pending) => {
                     let enter_insert = self.editor_mut().keymap_mode() == KeymapMode::ViCommand;
-                    let response = shell_alias(&pending.request().name, enter_insert);
+                    let response = shell_alias(sh, &pending.request().name, enter_insert);
                     let (editor, driver) = self.editor_and_driver();
                     driver.resume_alias(editor, &pending, response)?
                 }
@@ -893,7 +893,7 @@ fn install_terminal_character(
     Ok(())
 }
 
-unsafe fn shell_alias(name: &Text, enter_insert: bool) -> Result<AliasResponse, HostFailure> {
+unsafe fn shell_alias(sh: &mut crate::context::Shell, name: &Text, enter_insert: bool) -> Result<AliasResponse, HostFailure> {
     let mut name = text_to_bytes(name).map_err(host_failure)?;
     if name.contains(&0) {
         return Err(HostFailure::Failed(
@@ -901,7 +901,7 @@ unsafe fn shell_alias(name: &Text, enter_insert: bool) -> Result<AliasResponse, 
         ));
     }
     name.push(0);
-    let alias = crate::alias::lookupalias(name.as_ptr().cast(), 0);
+    let alias = crate::alias::lookupalias(sh, name.as_ptr().cast(), 0);
     if alias.is_null() {
         return Ok(AliasResponse::Missing);
     }

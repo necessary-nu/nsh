@@ -81,7 +81,7 @@ pub(crate) unsafe fn describe_command(
         }
 
         /* Then look at the aliases */
-        ap = crate::alias::lookupalias(command, 0);
+        ap = crate::alias::lookupalias(sh, command, 0);
         if !ap.is_null() {
             if verbose != 0 {
                 let mut record = b" is an alias for ".to_vec();

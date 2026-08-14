@@ -1065,7 +1065,7 @@ unsafe fn readtoken(sh: &mut Shell) -> Result<c_int, Error> {
         }
 
         if kwd & CHKALIAS != 0 {
-            let ap = crate::alias::lookupalias(wordtext_ptr(), 1);
+            let ap = crate::alias::lookupalias(sh, wordtext_ptr(), 1);
             if !ap.is_null() {
                 if *(*ap).val != 0 {
                     pushstring((*ap).val, ap as *mut c_void);
@@ -2176,7 +2176,7 @@ unsafe fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Resul
 
     st.bqlist[nlpp] = n;
     /* Start reading from old file again. */
-    popfile();
+    popfile(sh);
 
     st.out = str;
 
@@ -2354,7 +2354,7 @@ pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<*const c_ch
     let caught = restore_handler_expandarg(caught);
 
     doprompt = saveprompt;
-    unwindfiles(file_stop);
+    unwindfiles(sh, file_stop);
     heredoclist = saveheredoclist;
 
     match caught {

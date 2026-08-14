@@ -213,7 +213,7 @@ pub unsafe fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             pc = L_BODY; /* end of the for body */
         }
     }
-    crate::input::popfile();
+    crate::input::popfile(sh);
     crate::expand::recordregion(startloc, line.len() as c_int, 0);
     /* `STACKSTRNUL(p)` writes the terminator without advancing, and the call
      * below then passes `p + 1` — the length *including* it.  Pushing is both

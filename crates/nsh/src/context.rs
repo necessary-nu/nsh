@@ -42,9 +42,12 @@
 
 /// The shell, as an instance rather than as a process.
 ///
-/// Still empty; `docs/api-design.md` §5 is the list it fills from, one
-/// table per commit.
+/// `docs/api-design.md` §5 is the list this fills from, one table per
+/// commit; the fields here are the ones that have arrived.
 pub struct Shell {
+    /// Every alias, by name. `alias.rs` owns the shape; this owns the
+    /// value.
+    pub(crate) aliases: crate::alias::AliasTable,
     /// The saved-descriptor stack and the closed-descriptor bitmap.
     /// `redir.rs` owns the shape; this owns the value.
     pub(crate) redirs: crate::redir::RedirStack,
@@ -61,6 +64,7 @@ impl Shell {
     /// C began with.
     pub(crate) fn new() -> Self {
         Shell {
+            aliases: crate::alias::AliasTable::new(),
             redirs: crate::redir::RedirStack::new(),
         }
     }

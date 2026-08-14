@@ -102,7 +102,7 @@ pub unsafe fn exitreset(sh: &mut crate::context::Shell, by_exitcmd: bool) {
 // [spec:dash:sem:init.forkreset-fn]
 pub unsafe fn forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
     /* from input.c: */
-    crate::input::mkinit_forkreset();
+    crate::input::mkinit_forkreset(sh);
 
     /* from main.c: `handler = &main_handler`, which pointed the child at
      * `main`'s catch frame so an exception raised in a subshell landed at

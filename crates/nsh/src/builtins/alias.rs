@@ -12,18 +12,18 @@ use core::ptr::null_mut;
 use libc::c_int;
 use std::io::Write;
 
-use crate::alias::{__lookupalias, alias, atab_mut, printalias, setalias};
+use crate::alias::{__lookupalias, alias, printalias, setalias};
 use crate::eval::Flow;
 
 // [spec:dash:def:alias.aliascmd-fn]
 // [spec:dash:sem:alias.aliascmd-fn]
-pub unsafe fn aliascmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn aliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut ret: c_int = 0;
     let mut ap: *mut alias;
 
     if args.len() == 1 {
-        for ap in atab_mut().values() {
-            printalias(&**ap as *const alias);
+        for ap in sh.aliases.iter() {
+            printalias(ap as *const alias);
         }
         return Ok(Flow::Done(0));
     }
@@ -43,7 +43,7 @@ pub unsafe fn aliascmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 .map(|at| n.add(1 + at))
         };
         if *n == 0 || vv.is_none() {
-            ap = __lookupalias(n);
+            ap = __lookupalias(sh, n);
             if ap.is_null() {
                 let mut message = b"alias: ".to_vec();
                 message.extend_from_slice(word.as_bytes());
@@ -54,7 +54,7 @@ pub unsafe fn aliascmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 printalias(ap);
             }
         } else {
-            setalias(n, vv.expect("the `=` branch").add(1))?;
+            setalias(sh, n, vv.expect("the `=` branch").add(1))?;
         }
     }
 
@@ -73,14 +73,18 @@ mod tests {
     fn a_definition_reaches_the_table() {
         let _guard = crate::testutil::lock();
         unsafe {
-            atab_mut().clear();
+            /* One shell, handed to both calls. That the definition and
+             * the lookup have to name the same shell is the whole point
+             * of the table being on it: before, either could have been
+             * reading someone else's leftovers. */
+            let mut owned = Shell::new();
+            let sh = &mut owned;
             assert_eq!(
-                aliascmd(&mut Shell::new(), &[BStr::new("alias"), BStr::new("ll=ls -l")]).unwrap(),
+                aliascmd(sh, &[BStr::new("alias"), BStr::new("ll=ls -l")]).unwrap(),
                 Flow::Done(0)
             );
-            let found = lookupalias(c"ll".as_ptr(), 0);
+            let found = lookupalias(sh, c"ll".as_ptr(), 0);
             assert!(!found.is_null());
-            atab_mut().clear();
         }
     }
 
@@ -90,9 +94,10 @@ mod tests {
     fn an_unknown_name_fails_without_stopping() {
         let _guard = crate::testutil::lock();
         unsafe {
-            atab_mut().clear();
+            let mut owned = Shell::new();
+            let sh = &mut owned;
             assert_eq!(
-                aliascmd(&mut Shell::new(), &[
+                aliascmd(sh, &[
                     BStr::new("alias"),
                     BStr::new("nosuchalias"),
                     BStr::new("after=1"),
@@ -100,8 +105,7 @@ mod tests {
                 .unwrap(),
                 Flow::Done(1)
             );
-            assert!(!lookupalias(c"after".as_ptr(), 0).is_null());
-            atab_mut().clear();
+            assert!(!lookupalias(sh, c"after".as_ptr(), 0).is_null());
         }
     }
 }

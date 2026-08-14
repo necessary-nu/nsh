@@ -257,7 +257,7 @@ pub unsafe fn evalstring(sh: &mut Shell, s: *mut c_char, flags: c_int) -> Result
         /* `popstackmark(&smark)` — one per parsed command, and one on the
          * way out. */
     }
-    crate::input::popfile();
+    crate::input::popfile(sh);
     drop(owned);
 
     Ok(Flow::Done(status))
@@ -1356,7 +1356,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
         crate::redir::popredir(sh, execcmd);
     }
     crate::redir::unwindredir(sh, redir_stop);
-    crate::input::unwindfiles(file_stop);
+    crate::input::unwindfiles(sh, file_stop);
     crate::var::unwindlocalvars(localvar_stop);
     if !lastarg.is_null() {
         /* dsl: I think this is intended to be used to support

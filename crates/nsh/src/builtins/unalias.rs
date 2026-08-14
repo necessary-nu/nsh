@@ -16,20 +16,20 @@ use crate::options::Options;
 
 // [spec:dash:def:alias.unaliascmd-fn]
 // [spec:dash:sem:alias.unaliascmd-fn]
-pub unsafe fn unaliascmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn unaliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut i: c_int;
 
     let mut opts = Options::new(args);
     while let Some(opt) = opts.next(b"a")? {
         if opt == b'a' {
-            rmaliases();
+            rmaliases(sh);
             return Ok(Flow::Done(0));
         }
     }
     i = 0;
     for name in opts.operands() {
         let name = crate::shell::cstring(name);
-        if unalias(name.as_ptr()) != 0 {
+        if unalias(sh, name.as_ptr()) != 0 {
             let mut message = b"unalias: ".to_vec();
             message.extend_from_slice(name.as_bytes());
             message.extend_from_slice(b" not found\n");

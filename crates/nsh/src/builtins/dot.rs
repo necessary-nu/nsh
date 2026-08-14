@@ -99,7 +99,7 @@ pub unsafe fn dotcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             Flow::Done(s) => status = s,
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
-        crate::input::popfile();
+        crate::input::popfile(sh);
     }
 
     Ok(Flow::Done(status))

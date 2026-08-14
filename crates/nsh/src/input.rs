@@ -248,7 +248,7 @@ pub unsafe fn mkinit_reset(sh: &mut crate::context::Shell) {
     let mut c: c_int;
 
     /* clear input buffer */
-    popallfiles();
+    popallfiles(sh);
 
     /* `toppf->nextc - toppf->buf > toppf->unget` is "at least one character
      * past the pushback window has been consumed". The C subtracts `buf`
@@ -278,8 +278,8 @@ pub unsafe fn mkinit_reset(sh: &mut crate::context::Shell) {
 }
 
 /* mkinit FORKRESET fragment from src/input.c:114-125. */
-pub unsafe fn mkinit_forkreset() {
-    popallfiles();
+pub unsafe fn mkinit_forkreset(sh: &mut crate::context::Shell) {
+    popallfiles(sh);
     /* The C tests `> 0`, meaning "an open file that is not stdin". With a
      * frontend-supplied stdin the second half of that is no longer implied
      * by the first, and getting it wrong would close the shell's own
@@ -379,29 +379,29 @@ unsafe fn stdin_tee(buf: *mut c_void, nr: c_int) -> Result<c_int, Error> {
 /// Clear `ALIASINUSE` on everything in `list`, newest first, which is the
 /// order the C's `spfree` chain walks in. The `strpush` nodes themselves are
 /// dropped with the `Vec`; the C's `ckfree` on each is what that replaces.
-unsafe fn release_strpush(mut list: Vec<StrPush>) {
+unsafe fn release_strpush(sh: &mut crate::context::Shell, mut list: Vec<StrPush>) {
     while let Some(mut sp) = list.pop() {
         if !sp.ap.is_null() {
             (*sp.ap).flag &= !crate::alias::ALIASINUSE;
             if ((*sp.ap).flag & crate::alias::ALIASDEAD) != 0 {
-                crate::alias::unalias((*sp.ap).name);
+                crate::alias::unalias(sh, (*sp.ap).name);
             }
         }
         /* Only an entry that is still on `strpush` carries one; `popstring`
          * moves the chain out on the way past. */
         let carry = core::mem::take(&mut sp.spfree);
         if !carry.is_empty() {
-            release_strpush(carry);
+            release_strpush(sh, carry);
         }
     }
 }
 
 // [spec:dash:def:input.freestrings-fn]
 // [spec:dash:sem:input.freestrings-fn]
-unsafe fn freestrings() {
+unsafe fn freestrings(sh: &mut crate::context::Shell) {
     INTOFF();
     let list = core::mem::take(&mut cur_pf().spfree);
-    release_strpush(list);
+    release_strpush(sh, list);
     INTON();
 }
 
@@ -420,7 +420,7 @@ pub unsafe fn pgetc(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
     let mut pf = cur_pf();
 
     if !pf.spfree.is_empty() {
-        freestrings();
+        freestrings(sh);
         pf = cur_pf();
     }
 
@@ -947,7 +947,7 @@ pub unsafe fn pushstdin() {
 
 // [spec:dash:def:input.popfile-fn]
 // [spec:dash:sem:input.popfile-fn]
-pub unsafe fn popfile() {
+pub unsafe fn popfile(sh: &mut crate::context::Shell) {
     let dying: usize = cur;
 
     INTOFF();
@@ -972,7 +972,7 @@ pub unsafe fn popfile() {
     /* `ckfree(pf->buf)` */
     drop(core::mem::take(&mut pf.buf));
     if !cur_pf().spfree.is_empty() {
-        freestrings();
+        freestrings(sh);
     }
     /* `ckfree(pf)` takes the dying level's `spfree` chain with it, and the
      * `ALIASINUSE` bits on it are never cleared: an alias expanded inside an
@@ -993,9 +993,9 @@ pub unsafe fn popfile() {
 
 // [spec:dash:def:input.unwindfiles-fn]
 // [spec:dash:sem:input.unwindfiles-fn]
-pub unsafe fn unwindfiles(stop: usize) {
+pub unsafe fn unwindfiles(sh: &mut crate::context::Shell, stop: usize) {
     while pf_at(0).prev.is_some() || cur != stop {
-        popfile();
+        popfile(sh);
     }
 }
 
@@ -1005,8 +1005,8 @@ pub unsafe fn unwindfiles(stop: usize) {
 
 // [spec:dash:def:input.popallfiles-fn]
 // [spec:dash:sem:input.popallfiles-fn]
-pub unsafe fn popallfiles() {
-    unwindfiles(toppf);
+pub unsafe fn popallfiles(sh: &mut crate::context::Shell) {
+    unwindfiles(sh, toppf);
 }
 
 // [spec:dash:def:input.flush-input-fn]
