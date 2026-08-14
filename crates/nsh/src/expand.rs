@@ -1605,7 +1605,7 @@ unsafe fn evalvar(
     let mut really_record = false;
 
     'again: loop {
-        varlen = varvalue(var, varflags, (flag | mbchar) as c_uint)?;
+        varlen = varvalue(sh, var, varflags, (flag | mbchar) as c_uint)?;
         if (varflags & VSNUL) != 0 {
             varlen -= 1;
         }
@@ -1919,6 +1919,7 @@ unsafe fn strtodest(p: *const c_char, flags: c_int, dst: &mut BString) -> size_t
 // [spec:dash:def:expand.varvalue-fn]
 // [spec:dash:sem:expand.varvalue-fn]
 unsafe fn varvalue(
+    sh: &mut crate::context::Shell,
     name: *mut c_char,
     varflags: c_int,
     mut flags: c_uint,
@@ -1972,7 +1973,7 @@ unsafe fn varvalue(
                             break 'numvar;
                         }
                         C_BANG => {
-                            num = crate::jobs::backgndpid as c_int;
+                            num = sh.backgndpid as c_int;
                             if num == 0 {
                                 return Ok(-1);
                             }

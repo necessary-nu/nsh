@@ -48,6 +48,15 @@ pub struct Shell {
     /// Every alias, by name. `alias.rs` owns the shape; this owns the
     /// value.
     pub(crate) aliases: crate::alias::AliasTable,
+    /// `$!` — the process id of the last command the shell put in the
+    /// background.
+    ///
+    /// The rest of `jobs.rs`'s table has not moved. This member could go
+    /// on its own because it is not part of it in any way that matters:
+    /// one function writes it (`jobs::forkparent`) and one reads it
+    /// (`expand::varvalue`, for `$!`), and neither reaches the job table
+    /// to do so.
+    pub(crate) backgndpid: libc::pid_t,
     /// The saved-descriptor stack and the closed-descriptor bitmap.
     /// `redir.rs` owns the shape; this owns the value.
     pub(crate) redirs: crate::redir::RedirStack,
@@ -65,6 +74,7 @@ impl Shell {
     pub(crate) fn new() -> Self {
         Shell {
             aliases: crate::alias::AliasTable::new(),
+            backgndpid: 0,
             redirs: crate::redir::RedirStack::new(),
         }
     }

@@ -143,9 +143,6 @@ const _PATH_DEVNULL: &[u8] = b"/dev/null\0";
 
 /* array of jobs */
 static mut jobtab: Vec<Job> = Vec::new();
-/* pid of last background process */
-pub static mut backgndpid: pid_t = 0;
-
 /* pgrp of shell on invocation */
 static mut initialpgrp: c_int = 0;
 /* control terminal */
@@ -1017,6 +1014,7 @@ unsafe fn forkchild(
 // [spec:dash:def:jobs.forkparent-fn]
 // [spec:dash:sem:jobs.forkparent-fn]
 unsafe fn forkparent(
+    sh: &mut crate::context::Shell,
     jp: Option<usize>,
     n: Option<&Node>,
     mode: c_int,
@@ -1046,7 +1044,7 @@ unsafe fn forkparent(
         libc::setpgid(pid, pgrp);
     }
     if mode == FORK_BG {
-        backgndpid = pid; /* set $! */
+        sh.backgndpid = pid; /* set $! */
         set_curjob(ji, CUR_RUNNING);
         if crate::options::optlist[crate::options::iflag] != 0 {
             let _ = writeln!(&mut *crate::output::stderr(), "[{}] {pid}", jobno(ji));
@@ -1084,7 +1082,7 @@ pub unsafe fn forkshell(
     if pid == 0 {
         forkchild(sh, jp, n, mode);
     } else {
-        forkparent(jp, n, mode, pid)?;
+        forkparent(sh, jp, n, mode, pid)?;
     }
 
     Ok(pid)
@@ -1129,7 +1127,7 @@ pub unsafe fn vforkexec(
     }
 
     vforked = 0;
-    forkparent(Some(jp), Some(n), FORK_FG, pid)?;
+    forkparent(sh, Some(jp), Some(n), FORK_FG, pid)?;
 
     Ok(jp)
 }
