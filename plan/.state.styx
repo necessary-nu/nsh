@@ -1106,7 +1106,7 @@ assertions (
     {id printf-builtin, kind @complete, author "brendan@necessary.nu", at 2026-08-12T08:29:30.995973456Z}
     {id delete-libc-calls, kind @complete, author "brendan@necessary.nu", at 2026-08-12T10:14:51.965438121Z}
     {id printf-errata, kind @complete, author "brendan@necessary.nu", at 2026-08-12T12:44:06.822539927Z}
-    {id errors-are-values, kind @doing, author "brendan@necessary.nu", at 2026-08-12T17:00:10.983479607Z}
+    {id errors-are-values, kind @complete, author "brendan@necessary.nu", at 2026-08-14T12:52:12.404369098Z}
 )
 
 impl_evidence (
