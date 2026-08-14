@@ -37,7 +37,7 @@ pub unsafe fn umaskcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut symbolic_mode: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
-    while opts.next(b"S").is_some() {
+    while opts.next(b"S")?.is_some() {
         symbolic_mode = 1;
     }
     /* The mode is walked as a cursor, so it stays a C string for the

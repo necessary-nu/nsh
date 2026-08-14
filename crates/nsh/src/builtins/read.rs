@@ -101,7 +101,7 @@ pub unsafe fn readcmd(args: &[&BStr]) -> Result<c_int, Error> {
     rflag = 0;
     prompt = None;
     let mut opts = crate::options::Options::new(args);
-    while let Some(i) = opts.next(b"p:r") {
+    while let Some(i) = opts.next(b"p:r")? {
         if i == b'p' {
             prompt = Some(crate::shell::cstring(opts.arg()));
         } else {

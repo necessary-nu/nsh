@@ -622,7 +622,7 @@ pub unsafe fn printfcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut options = crate::options::Options::new(args);
     /* `nextopt(nullstr)`: printf takes no options, so this exists to
      * reject `-x` and to step over a `--`. */
-    while options.next(b"").is_some() {}
+    while options.next(b"")?.is_some() {}
 
     let Some((format, arguments)) = options.operands().split_first() else {
         return Err(crate::error::sh_error_value(b"usage: printf format [arg ...]"));

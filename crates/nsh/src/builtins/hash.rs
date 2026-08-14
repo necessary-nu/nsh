@@ -28,7 +28,7 @@ pub unsafe fn hashcmd(args: &[&BStr]) -> Result<c_int, Error> {
 
     clear = false;
     let mut opts = crate::options::Options::new(args);
-    while opts.next(b"r").is_some() {
+    while opts.next(b"r")?.is_some() {
         clear = true;
     }
     if clear {

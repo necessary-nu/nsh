@@ -29,7 +29,7 @@ pub unsafe fn typecmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut err: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
-    opts.next(b"");
+    opts.next(b"")?;
     for name in opts.operands() {
         let name = crate::shell::cstring(name);
         err |= describe_command(crate::output::stdout(), name.as_ptr() as *mut c_char, null(), 1)?;

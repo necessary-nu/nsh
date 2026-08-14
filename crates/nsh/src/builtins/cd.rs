@@ -27,18 +27,18 @@ const CD_PRINT: c_int = 2;
 
 // [spec:dash:def:cd.cdopt-fn]
 // [spec:dash:sem:cd.cdopt-fn]
-pub(crate) unsafe fn cdopt(opts: &mut Options) -> c_int {
+pub(crate) unsafe fn cdopt(opts: &mut Options) -> Result<c_int, Error> {
     let mut flags: c_int = 0;
     let mut j: u8 = b'L';
 
-    while let Some(i) = opts.next(b"LP") {
+    while let Some(i) = opts.next(b"LP")? {
         if i != j {
             flags ^= CD_PHYSICAL;
             j = i;
         }
     }
 
-    flags
+    Ok(flags)
 }
 
 // [spec:dash:def:cd.cdcmd-fn]
@@ -53,7 +53,7 @@ pub unsafe fn cdcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut len: c_int;
 
     let mut opts = Options::new(args);
-    flags = cdopt(&mut opts);
+    flags = cdopt(&mut opts)?;
     /* The operand outlives every reader below, which is what the C got
      * from `argv` living in `evalcommand`'s frame. */
     let operand = opts.operands().first().map(|d| crate::shell::cstring(d));
@@ -282,7 +282,7 @@ mod tests {
     fn opts(words: &[&[u8]]) -> c_int {
         let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
         let mut scan = Options::new(&args);
-        unsafe { cdopt(&mut scan) }
+        unsafe { cdopt(&mut scan) }.unwrap()
     }
 
     #[test]
@@ -311,7 +311,7 @@ mod tests {
     fn the_scan_stops_at_the_operand() {
         let args = [BStr::new("cd"), BStr::new("-P"), BStr::new("dir")];
         let mut scan = Options::new(&args);
-        assert_eq!(unsafe { cdopt(&mut scan) }, CD_PHYSICAL);
+        assert_eq!(unsafe { cdopt(&mut scan) }.unwrap(), CD_PHYSICAL);
         assert_eq!(scan.operands(), [BStr::new("dir")]);
     }
 }

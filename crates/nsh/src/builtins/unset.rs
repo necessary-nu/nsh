@@ -17,7 +17,7 @@ pub unsafe fn unsetcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut flag: u8 = 0;
 
     let mut opts = Options::new(args);
-    while let Some(i) = opts.next(b"vf") {
+    while let Some(i) = opts.next(b"vf")? {
         flag = i;
     }
 

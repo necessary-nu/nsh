@@ -609,7 +609,7 @@ impl<'a> Options<'a> {
     /// unwinds through the caller's frame like every other `sh_error`.
     // [spec:dash:def:options.nextopt-fn]
     // [spec:dash:sem:options.nextopt-fn]
-    pub unsafe fn next(&mut self, optstring: &[u8]) -> Option<u8> {
+    pub unsafe fn next(&mut self, optstring: &[u8]) -> Result<Option<u8>, Error> {
         /* `p = optptr; if (p == NULL || *p == '\0')` -- the run in
          * progress is exhausted, so the next word starts a new one. */
         let (word, mut off) = match self.run {
@@ -618,15 +618,19 @@ impl<'a> Options<'a> {
                 let w = self.next;
                 /* `p == NULL || *p != '-' || *++p == '\0'`: the end of
                  * the list, a word that is not an option, or a lone `-`.
-                 * None of the three is consumed. */
-                let word = *self.args.get(w)?;
+                 * None of the three is consumed. The `?` this used to take
+                 * on the `Option` is spelled out now that the scan can
+                 * fail for a second reason. */
+                let Some(&word) = self.args.get(w) else {
+                    return Ok(None);
+                };
                 if word.first() != Some(&b'-') || word.len() < 2 {
-                    return None;
+                    return Ok(None);
                 }
                 self.next = w + 1; /* argptr++ */
                 if &word[..] == b"--" {
                     /* consumed, and it ends the options */
-                    return None;
+                    return Ok(None);
                 }
                 (w, 1)
             }
@@ -647,7 +651,8 @@ impl<'a> Options<'a> {
             if cur == 0 {
                 let mut message = b"Illegal option -".to_vec();
                 message.push(c);
-                crate::error::sh_error(&message);
+                /* A stop: the loop would spin on the terminator. */
+                return Err(crate::error::sh_error_value(&message));
             }
             q += 1;
             if optstring.get(q) == Some(&b':') {
@@ -672,7 +677,9 @@ impl<'a> Options<'a> {
                         let mut message = b"No arg for -".to_vec();
                         message.push(c);
                         message.extend_from_slice(b" option");
-                        crate::error::sh_error(&message);
+                        /* A stop: `arg()` would otherwise be asked for an
+                         * `optionarg` that was never set. */
+                        return Err(crate::error::sh_error_value(&message));
                     }
                 }
             }
@@ -681,7 +688,7 @@ impl<'a> Options<'a> {
             self.run = Some((word, off));
         }
 
-        Some(c)
+        Ok(Some(c))
     }
 
     /// The argument of the option just returned: dash's `optionarg`.
@@ -742,7 +749,13 @@ mod tests {
     fn scan<'a>(args: &'a [&'a BStr], optstring: &[u8]) -> (Vec<u8>, Vec<&'a BStr>) {
         let mut opts = Options::new(args);
         let mut seen = Vec::new();
-        while let Some(c) = unsafe { opts.next(optstring) } {
+        /* `Ok(Some(c))` would end the scan silently on an error and make
+         * a failure look like a short option list, so the error is taken
+         * loudly: every option string these cases use accepts every
+         * option they hand it. */
+        while let Some(c) = unsafe { opts.next(optstring) }
+            .expect("the scan's cases never pass an option the string rejects")
+        {
             seen.push(c);
         }
         (seen, opts.operands().to_vec())
@@ -772,9 +785,9 @@ mod tests {
     fn option_arg_from_same_word() {
         let args = words(&[b"read", b"-pPROMPT", b"var"]);
         let mut opts = Options::new(&args);
-        assert_eq!(unsafe { opts.next(b"p:r") }, Some(b'p'));
+        assert_eq!(unsafe { opts.next(b"p:r") }.unwrap(), Some(b'p'));
         assert_eq!(opts.arg(), BStr::new(b"PROMPT"));
-        assert_eq!(unsafe { opts.next(b"p:r") }, None);
+        assert_eq!(unsafe { opts.next(b"p:r") }.unwrap(), None);
         assert_eq!(opts.operands(), words(&[b"var"]));
     }
 
@@ -782,9 +795,9 @@ mod tests {
     fn option_arg_from_next_word() {
         let args = words(&[b"read", b"-p", b"PROMPT", b"var"]);
         let mut opts = Options::new(&args);
-        assert_eq!(unsafe { opts.next(b"p:r") }, Some(b'p'));
+        assert_eq!(unsafe { opts.next(b"p:r") }.unwrap(), Some(b'p'));
         assert_eq!(opts.arg(), BStr::new(b"PROMPT"));
-        assert_eq!(unsafe { opts.next(b"p:r") }, None);
+        assert_eq!(unsafe { opts.next(b"p:r") }.unwrap(), None);
         assert_eq!(opts.operands(), words(&[b"var"]));
     }
 

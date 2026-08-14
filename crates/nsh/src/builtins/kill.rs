@@ -44,7 +44,7 @@ pub unsafe fn killcmd(args: &[&BStr]) -> Result<c_int, Error> {
         let first = crate::shell::cstring(args[1]);
         signo = crate::trap::decode_signal(first.as_ptr().add(1), 1);
         if signo < 0 {
-            while let Some(c) = opts.next(b"ls:") {
+            while let Some(c) = opts.next(b"ls:")? {
                 match c {
                     b's' => {
                         let name = crate::shell::cstring(opts.arg());

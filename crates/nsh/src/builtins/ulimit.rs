@@ -166,7 +166,7 @@ pub unsafe fn ulimitcmd(args: &[&BStr]) -> Result<c_int, Error> {
      * letter is `#ifdef RLIMIT_*`-guarded in the C source. */
     let mut opts = crate::options::Options::new(args);
     loop {
-        let Some(o) = opts.next(b"HSatfdscmlpnvwr") else {
+        let Some(o) = opts.next(b"HSatfdscmlpnvwr")? else {
             break;
         };
         optc = o as c_int;

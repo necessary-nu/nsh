@@ -18,7 +18,7 @@ pub unsafe fn unaliascmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut i: c_int;
 
     let mut opts = Options::new(args);
-    while let Some(opt) = opts.next(b"a") {
+    while let Some(opt) = opts.next(b"a")? {
         if opt == b'a' {
             rmaliases();
             return Ok(0);

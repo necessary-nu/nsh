@@ -22,7 +22,7 @@ use crate::options::Options;
 pub unsafe fn pwdcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let flags: c_int;
 
-    flags = cdopt(&mut Options::new(args));
+    flags = cdopt(&mut Options::new(args))?;
     let mut dir = if flags != 0 {
         if (*addr_of!(physdir)).is_none() {
             setpwd_inner(Pwd::Current, 0)?;

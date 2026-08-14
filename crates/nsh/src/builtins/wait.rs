@@ -24,7 +24,7 @@ pub unsafe fn waitcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut jp: Option<usize>;
 
     let mut opts = crate::options::Options::new(args);
-    opts.next(b"");
+    opts.next(b"")?;
     retval = 0;
 
     let operands = opts.operands();

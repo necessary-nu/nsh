@@ -71,7 +71,7 @@ pub unsafe fn dotcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut status: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
-    opts.next(b"");
+    opts.next(b"")?;
 
     if let Some(name) = opts.operands().first() {
         let mut dotfile: Vec<u8> = Vec::new();

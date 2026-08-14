@@ -20,7 +20,7 @@ pub unsafe fn jobscmd(args: &[&BStr]) -> Result<c_int, Error> {
 
     mode = 0;
     let mut opts = crate::options::Options::new(args);
-    while let Some(m) = opts.next(b"lp") {
+    while let Some(m) = opts.next(b"lp")? {
         if m == b'l' {
             mode = SHOW_PID;
         } else {
