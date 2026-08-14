@@ -85,7 +85,11 @@ unsafe fn update_closed_redirs(fd: c_int, nfd: c_int) -> c_uint {
 
 // [spec:dash:def:redir.redirect-fn]
 // [spec:dash:sem:redir.redirect-fn]
-pub unsafe fn redirect(redir: &[Node], flags: c_int) -> Result<(), Error> {
+pub unsafe fn redirect(
+    sh: &mut crate::context::Shell,
+    redir: &[Node],
+    flags: c_int,
+) -> Result<(), Error> {
     let sv: Option<usize>;
     let mut i: c_int;
     let mut fd: c_int;
@@ -106,7 +110,7 @@ pub unsafe fn redirect(redir: &[Node], flags: c_int) -> Result<(), Error> {
     /* The C walks the list through `n->nfile.next`, which is the same offset
      * in every redirection arm; the list is a `Vec` now. */
     for n in redir {
-        newfd = openredirect(n)?;
+        newfd = openredirect(sh, n)?;
         if newfd >= -1 {
             fd = n.redir_fd();
             /* The C's `fd == 0` is "this redirection replaced the shell's
@@ -231,7 +235,7 @@ pub unsafe fn sh_open(
 
 // [spec:dash:def:redir.openredirect-fn]
 // [spec:dash:sem:redir.openredirect-fn]
-unsafe fn openredirect(redir: &Node) -> Result<c_int, Error> {
+unsafe fn openredirect(sh: &mut crate::context::Shell, redir: &Node) -> Result<c_int, Error> {
     let mut sb: libc::stat64 = core::mem::zeroed();
     let mut fname: *mut c_char = null_mut();
     let mut flags: c_int;
@@ -307,7 +311,7 @@ unsafe fn openredirect(redir: &Node) -> Result<c_int, Error> {
             if crate::shell::DEBUG {
                 std::process::abort();
             }
-            f = openhere(redir)?;
+            f = openhere(sh, redir)?;
         }
     }
 
@@ -392,7 +396,7 @@ pub unsafe fn sh_pipe(pip: *mut c_int, memfd: c_int) -> Result<c_int, Error> {
 
 // [spec:dash:def:redir.openhere-fn]
 // [spec:dash:sem:redir.openhere-fn]
-unsafe fn openhere(redir: &Node) -> Result<c_int, Error> {
+unsafe fn openhere(sh: &mut crate::context::Shell, redir: &Node) -> Result<c_int, Error> {
     let len: size_t;
     let mut pip: [c_int; 2] = [0; 2];
     let memfd: c_int;
@@ -434,10 +438,7 @@ unsafe fn openhere(redir: &Node) -> Result<c_int, Error> {
         return Ok(pip[0]);
     }
 
-    /* TRANSITIONAL: `openhere` has no context to pass on yet. Threading
-     * `redir.rs` removes this. */
-    let mut sh = crate::context::Shell::detached();
-    if crate::jobs::forkshell(&mut sh, None, None, crate::jobs::FORK_NOJOB)? == 0 {
+    if crate::jobs::forkshell(sh, None, None, crate::jobs::FORK_NOJOB)? == 0 {
         libc::close(pip[0]);
         libc::signal(libc::SIGINT, libc::SIG_IGN);
         libc::signal(libc::SIGQUIT, libc::SIG_IGN);
@@ -575,11 +576,15 @@ pub unsafe fn savefd(from: c_int, ofd: c_int) -> Result<c_int, Error> {
 /// did, and the outermost `FORCEINTON` is what clears the leak.
 // [spec:dash:def:redir.redirectsafe-fn]
 // [spec:dash:sem:redir.redirectsafe-fn]
-pub unsafe fn redirectsafe(redir: &[Node], flags: c_int) -> Result<(), Error> {
+pub unsafe fn redirectsafe(
+    sh: &mut crate::context::Shell,
+    redir: &[Node],
+    flags: c_int,
+) -> Result<(), Error> {
     let mut saveint: c_int = 0;
 
     crate::SAVEINT!(saveint);
-    let caught = crate::expand::restore_handler_expandarg(redirect(redir, flags).err());
+    let caught = crate::expand::restore_handler_expandarg(redirect(sh, redir, flags).err());
     if let Some(e) = caught {
         /* The C's `longjmp` from `restore_handler_expandarg` left before
          * the `RESTOREINT` below; so does this. */

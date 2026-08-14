@@ -325,7 +325,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
                                  * the body is skipped, and the compound
                                  * command's status is the 2 the failure
                                  * took (docs/api-design.md §3.3). */
-                                match crate::redir::redirectsafe(&r.redirect, REDIR_PUSH) {
+                                match crate::redir::redirectsafe(sh, &r.redirect, REDIR_PUSH) {
                                     /* An interrupt is not a redirection
                                      * error and is not swallowed with
                                      * one. */
@@ -685,7 +685,7 @@ unsafe fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, E
     // nofork:
     INTON();
     let outcome = (|| -> Result<Flow, Error> {
-        crate::redir::redirect(&r.redirect, 0)?;
+        crate::redir::redirect(sh, &r.redirect, 0)?;
         evaltreenr(sh, r.n.as_deref(), flags)
     })();
 
@@ -1179,7 +1179,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
      * one place a redirection error is *not* swallowed, and an `int`
      * cannot be re-raised. */
     let mut redir_err: Option<Error> = None;
-    match crate::redir::redirectsafe(&c.redirect, REDIR_PUSH | REDIR_SAVEFD2) {
+    match crate::redir::redirectsafe(sh, &c.redirect, REDIR_PUSH | REDIR_SAVEFD2) {
         /* Same as the `NREDIR` arm: an interrupt leaves rather than
          * becoming this command's status. */
         Err(e) if e.is_interrupt() => return Err(e),
