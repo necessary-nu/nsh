@@ -794,7 +794,7 @@ unsafe fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
     prevfd = -1;
     for (i, cmd) in p.cmdlist.iter().enumerate() {
         let has_next = i + 1 < p.cmdlist.len();
-        match prehash(cmd)? {
+        match prehash(sh, cmd)? {
             Flow::Done(_) => {}
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
@@ -1078,6 +1078,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
               * code and can `exit`; the C's longjmp took that past this
               * frame and so does this. */
             match find_command(
+                sh,
                 arglist.list[head].textp(),
                 &mut cmdentry,
                 cmd_flag | DO_REGBLTIN,
@@ -1240,7 +1241,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                 } else {
                     crate::var::pathval()
                 };
-                match find_command(*argv.offset(0), &mut cmdentry, cmd_flag | DO_ERR, path)? {
+                match find_command(sh, *argv.offset(0), &mut cmdentry, cmd_flag | DO_ERR, path)? {
                     Flow::Done(_) => {}
                     exit @ Flow::Exit { .. } => return Ok(exit),
                 }
@@ -1309,7 +1310,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                     } else {
                         /* `shellexec` replaces the process image or fails;
                          * failing, it reports and is the C's EXEND. */
-                        return shellexec(argv, path, cmdentry.u.index);
+                        return shellexec(sh, argv, path, cmdentry.u.index);
                     }
                 }
             }
@@ -1474,7 +1475,7 @@ unsafe fn evalfun(
 
 // [spec:dash:def:eval.prehash-fn]
 // [spec:dash:sem:eval.prehash-fn]
-unsafe fn prehash(n: &Node) -> Result<Flow, Error> {
+unsafe fn prehash(sh: &mut Shell, n: &Node) -> Result<Flow, Error> {
     let mut entry: cmdentry = cmdentry {
         cmdtype: 0,
         u: param { index: 0 },
@@ -1483,7 +1484,7 @@ unsafe fn prehash(n: &Node) -> Result<Flow, Error> {
     if n.node_type() == NCMD && !n.ncmd().args.is_empty() {
         let text = n.ncmd().args[0].narg().text.as_ptr();
         if crate::parser::goodname(text) != 0 {
-            return find_command(text, &mut entry, 0, crate::var::pathval());
+            return find_command(sh, text, &mut entry, 0, crate::var::pathval());
         }
     }
     Ok(Flow::Done(0))

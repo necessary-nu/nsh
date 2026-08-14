@@ -27,14 +27,20 @@ use crate::output::Output;
 
 // [spec:dash:def:exec.typecmd-fn]
 // [spec:dash:sem:exec.typecmd-fn]
-pub unsafe fn typecmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn typecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut err: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
     opts.next(b"")?;
     for name in opts.operands() {
         let name = crate::shell::cstring(name);
-        match describe_command(crate::output::stdout(), name.as_ptr() as *mut c_char, null(), 1)? {
+        match describe_command(
+            sh,
+            crate::output::stdout(),
+            name.as_ptr() as *mut c_char,
+            null(),
+            1,
+        )? {
             Flow::Done(status) => err |= status,
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
@@ -45,6 +51,7 @@ pub unsafe fn typecmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:dash:def:exec.describe-command-fn]
 // [spec:dash:sem:exec.describe-command-fn]
 pub(crate) unsafe fn describe_command(
+    sh: &mut Shell,
     out: *mut Output,
     command: *mut c_char,
     mut path: *const c_char,
@@ -102,7 +109,7 @@ pub(crate) unsafe fn describe_command(
             (*cmdp).write_to(&mut entry);
         } else {
             /* Finally use brute force */
-            match find_command(command, &mut entry, DO_ABS, path)? {
+            match find_command(sh, command, &mut entry, DO_ABS, path)? {
                 Flow::Done(_) => {}
                 exit @ Flow::Exit { .. } => return Ok(exit),
             }

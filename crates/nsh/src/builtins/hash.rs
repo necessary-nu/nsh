@@ -19,7 +19,7 @@ use crate::exec::{
 
 // [spec:dash:def:exec.hashcmd-fn]
 // [spec:dash:sem:exec.hashcmd-fn]
-pub unsafe fn hashcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut cmdp: *mut tblentry;
     let mut c: c_int;
     let mut entry: cmdentry = cmdentry {
@@ -55,7 +55,7 @@ pub unsafe fn hashcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         if !cmdp.is_null() && (*cmdp).path_dependent() {
             delete_cmd_entry(name);
         }
-        match find_command(name, &mut entry, DO_ERR, crate::var::pathval())? {
+        match find_command(sh, name, &mut entry, DO_ERR, crate::var::pathval())? {
             crate::eval::Flow::Done(_) => {}
             exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
         }

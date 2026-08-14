@@ -20,7 +20,7 @@ use crate::options::Options;
 
 // [spec:dash:def:exec.commandcmd-fn]
 // [spec:dash:sem:exec.commandcmd-fn]
-pub unsafe fn commandcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn commandcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     const VERIFY_BRIEF: c_int = 1;
     const VERIFY_VERBOSE: c_int = 2;
     let mut verify: c_int = 0;
@@ -42,6 +42,7 @@ pub unsafe fn commandcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error>
         if let Some(cmd) = opts.operands().first() {
             let cmd = crate::shell::cstring(cmd);
             return describe_command(
+                sh,
                 crate::output::stdout(),
                 cmd.as_ptr() as *mut c_char,
                 path,

@@ -168,6 +168,7 @@ use crate::system::errno;
 // [spec:dash:def:exec.shellexec-fn]
 // [spec:dash:sem:exec.shellexec-fn]
 pub unsafe fn shellexec(
+    sh: &mut crate::context::Shell,
     argv: *mut *mut c_char,
     path: *const c_char,
     mut idx: c_int,
@@ -444,6 +445,7 @@ unsafe fn test_exec(fullname: *const c_char, statb: *mut libc::stat64) -> c_int 
 // [spec:dash:def:exec.find-command-fn]
 // [spec:dash:sem:exec.find-command-fn]
 pub unsafe fn find_command(
+    sh: &mut crate::context::Shell,
     name: *mut c_char,
     entry: *mut cmdentry,
     mut act: c_int,
@@ -610,10 +612,7 @@ pub unsafe fn find_command(
                          * past `find_command` and its callers, and this
                          * returns it through them instead. It is why
                          * `find_command` carries a `Flow` at all. */
-                        /* TRANSITIONAL: `find_command` has no context to
-                         * pass on yet. Threading `exec.rs` removes this. */
-                        let mut sh = crate::context::Shell::detached();
-                        match crate::shellmain::readcmdfile(&mut sh, fullname)? {
+                        match crate::shellmain::readcmdfile(sh, fullname)? {
                             crate::eval::Flow::Done(_) => {}
                             exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
                         }

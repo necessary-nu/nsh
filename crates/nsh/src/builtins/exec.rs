@@ -22,7 +22,7 @@ use crate::exec::shellexec;
 
 // [spec:dash:def:eval.execcmd-fn]
 // [spec:dash:sem:eval.execcmd-fn]
-pub unsafe fn execcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if args.len() > 1 {
         crate::options::optlist[crate::options::iflag] = 0; /* exit on error */
         crate::options::optlist[crate::options::mflag] = 0;
@@ -42,7 +42,7 @@ pub unsafe fn execcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         argv.push(null_mut());
         argv.extend(words.iter().map(|w| w.as_ptr() as *mut c_char));
         argv.push(null_mut());
-        return shellexec(argv.as_mut_ptr().add(1), crate::var::pathval(), 0);
+        return shellexec(sh, argv.as_mut_ptr().add(1), crate::var::pathval(), 0);
     }
     Ok(Flow::Done(0))
 }

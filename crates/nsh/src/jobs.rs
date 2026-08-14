@@ -1117,7 +1117,10 @@ pub unsafe fn vforkexec(
          * docs/errors-are-values.md 2.5 is the boundary, and the `_exit`
          * that enforces it is at `shellexec`'s own failure site now
          * rather than inside `exraise`. */
-        drop(crate::exec::shellexec(argv, path, idx));
+        /* TRANSITIONAL: `vforkexec` has no context to pass on yet.
+         * Threading `jobs.rs` removes this. */
+        let mut sh = crate::context::Shell::detached();
+        drop(crate::exec::shellexec(&mut sh, argv, path, idx));
         std::process::abort();
     }
 
