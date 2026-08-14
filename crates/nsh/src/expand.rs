@@ -3560,16 +3560,60 @@ unsafe fn varunset(
     crate::error::sh_error_value(&message)
 }
 
+/// The `out:` tail `redirectsafe` and `expandstr` share: restore the
+/// handler, then decide whether what arrived is this frame's to keep.
+///
+/// The C asks that question of a global — `if (err) { if (exception !=
+/// EXERROR) longjmp(handler->loc, 1); ifsfree(); }` — and
+/// `docs/errors-are-values.md` §6 says to rewrite it as a match with an
+/// arm per exception code rather than as a negated comparison, because
+/// getting it wrong in either direction is a silently swallowed error
+/// rather than a crash.
+///
+/// It is now not a comparison at all. The two arms have different *types*:
+/// `caught` is a diagnostic that arrived as a value, which is what
+/// `EXERROR` was, and `jumped` says something arrived by longjmp, which
+/// after step C can only be `EXINT`. So the swallowing arm cannot be
+/// reached by an interrupt and the re-raising arm cannot be reached by a
+/// diagnostic, and neither depends on a global that some other frame may
+/// have written since.
+///
+/// Order is load-bearing twice. The handler is restored *before* the
+/// re-raise, so the jump goes to the frame outside this one rather than
+/// back into this one; and the re-raise happens before either caller's
+/// `RESTOREINT`, so an interrupt travelling through leaks the counter for
+/// the outermost `FORCEINTON` to reset — exactly as it does today. §2.4 is
+/// explicit that the leak is *where a pending SIGINT is delivered* and
+/// that moving it is observable.
+///
+/// `ifsfree` belongs to the swallowing arm alone: the regions the failed
+/// expansion recorded would otherwise mis-split the *next* word, and the
+/// re-raising arm leaves them to the frame that catches.
 // [spec:dash:def:expand.restore-handler-expandarg-fn]
 // [spec:dash:sem:expand.restore-handler-expandarg-fn]
-pub unsafe fn restore_handler_expandarg(savehandler: *mut crate::error::jmploc, err: c_int) {
+pub unsafe fn restore_handler_expandarg(
+    savehandler: *mut crate::error::jmploc,
+    jumped: bool,
+    caught: Option<crate::error::Error>,
+) -> Option<crate::error::Error> {
     crate::error::handler = savehandler;
-    if err != 0 {
-        if crate::error::exception != crate::error::EXERROR {
-            crate::error::raise_longjmp(crate::error::handler, 1);
-        }
+    if jumped {
+        /* §6 asks for an assertion that the swallowing arm is only ever
+         * reached with what is today EXERROR. This is that claim stated
+         * from the side that can still be violated: every diagnostic
+         * beneath these two frames is a value now, so an EXERROR arriving
+         * here as a jump means a raise site was missed — and the frame
+         * would re-raise a diagnostic that dash swallows. */
+        debug_assert!(
+            crate::error::exception != crate::error::EXERROR,
+            "an EXERROR reached a converted catch frame as a jump"
+        );
+        crate::error::raise_longjmp(crate::error::handler, 1);
+    }
+    if caught.is_some() {
         ifsfree();
     }
+    caught
 }
 
 /* #ifdef mkinit
@@ -3628,3 +3672,4 @@ pub unsafe fn arith_lex_reset() {}
 // [spec:dash:def:expand.yylex-fn]
 // [spec:dash:sem:expand.yylex-fn]
 pub use crate::arith_yylex::yylex;
+

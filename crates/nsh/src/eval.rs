@@ -266,11 +266,26 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> Result<c_int, Error> {
                                 }
                                 expredir(&r.redirect)?;
                                 crate::redir::pushredir(&r.redirect);
-                                status = crate::redir::redirectsafe(&r.redirect, REDIR_PUSH);
-                                if status != 0 {
-                                    checkexit = EV_TESTED;
-                                } else {
-                                    status = evaltree(r.n.as_deref(), flags & EV_TESTED)?;
+                                /* The C is `status = redirectsafe(..)`,
+                                 * whose value is `setjmp(..) * 2`. The
+                                 * error is dropped here because dash drops
+                                 * it: the diagnostic is already written,
+                                 * the body is skipped, and the compound
+                                 * command's status is the 2 the failure
+                                 * took (docs/api-design.md §3.3). */
+                                match crate::redir::redirectsafe(&r.redirect, REDIR_PUSH) {
+                                    Err(e) => {
+                                        debug_assert_eq!(
+                                            e.status(),
+                                            2,
+                                            "a redirection error takes status 2"
+                                        );
+                                        status = 2;
+                                        checkexit = EV_TESTED;
+                                    }
+                                    Ok(()) => {
+                                        status = evaltree(r.n.as_deref(), flags & EV_TESTED)?;
+                                    }
                                 }
                                 if !r.redirect.is_empty() {
                                     crate::redir::popredir(0);
@@ -1025,7 +1040,19 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
     (*crate::output::previous_stderr()).fd = crate::streams::streams().stderr;
     expredir(&c.redirect)?;
     redir_stop = crate::redir::pushredir(&c.redirect);
-    status = crate::redir::redirectsafe(&c.redirect, REDIR_PUSH | REDIR_SAVEFD2);
+    /* `status = redirectsafe(..)`, which the C computes as `setjmp(..) *
+     * 2`. The value is kept as well as the status, because `bail:` below
+     * re-raises it when the command is a special built-in — that is the
+     * one place a redirection error is *not* swallowed, and an `int`
+     * cannot be re-raised. */
+    let mut redir_err: Option<Error> = None;
+    match crate::redir::redirectsafe(&c.redirect, REDIR_PUSH | REDIR_SAVEFD2) {
+        Err(e) => {
+            status = 2;
+            redir_err = Some(e);
+        }
+        Ok(()) => status = 0,
+    }
 
     'out_lbl: {
         'bail: {
@@ -1138,7 +1165,26 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
 
         /* We have a redirection error. */
         if spclbltin > 0 {
-            crate::error::exraise(crate::error::EXERROR);
+            match redir_err.take() {
+                /* The error `redirectsafe` handed back, raised again.
+                 * POSIX's "an error in a special built-in exits a
+                 * non-interactive shell" is this line and nothing else.
+                 * The C's `exraise(EXERROR)` writes no text because
+                 * `redirect` already wrote it, and `raise_reported` is the
+                 * same jump over a value that has already been reported.
+                 * The status it takes is the 2 `exitstatus` was just set
+                 * to, which the assertion pins. */
+                Some(e) => {
+                    debug_assert_eq!(e.status(), status, "a redirection error keeps its status");
+                    crate::error::raise_reported(crate::error::EXERROR, e);
+                }
+                /* The other way in is `CMDUNKNOWN` with status 127, where
+                 * no value exists: `find_command` reported "not found" and
+                 * returned normally. dash raises the same textless
+                 * EXERROR here, and this arm is its literal shape until
+                 * step E gives the frame something to carry. */
+                None => crate::error::exraise(crate::error::EXERROR),
+            }
         }
 
         // goto out

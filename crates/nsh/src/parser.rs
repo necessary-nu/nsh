@@ -2287,7 +2287,6 @@ pub unsafe fn expandstr(ps: *const c_char) -> *const c_char {
     let mut result: *const c_char;
     let saveprompt: c_int;
     let mut jmploc: crate::error::jmploc = crate::error::jmploc::new();
-    let err: c_int;
 
     file_stop = crate::input::cur_mark();
 
@@ -2309,35 +2308,49 @@ pub unsafe fn expandstr(ps: *const c_char) -> *const c_char {
      * call, so it lives inside the closure here. */
     let jl: *mut crate::error::jmploc = addr_of_mut!(jmploc);
     let resultp: *mut *const c_char = addr_of_mut!(result);
-    err = crate::eval::setjmp_catch(jl, || unsafe {
+    let mut caught: Option<crate::error::Error> = None;
+    let caughtp: *mut Option<crate::error::Error> = addr_of_mut!(caught);
+    let jumped = crate::eval::setjmp_catch(jl, || unsafe {
         handler = jl;
 
-        /* Both bridges below are inside `expandstr`'s own `setjmp_catch`,
-         * whose closure is `FnOnce()` and has nowhere to return a `Result`
-         * to. They raise what this frame is still armed to catch, so the
-         * swallow and re-raise in `restore_handler_expandarg` below keep
-         * deciding exactly what they decided before. Both retire when step
-         * D converts this frame — the last of the seven, with
-         * `redirectsafe`, per docs/errors-are-values.md 6. */
-        readtoken1(pgetc_eatbnl(), DQSYNTAX(), EofMark::Fake, 0)
-            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
+        /* The two diagnostics this frame can produce are values now, so
+         * its body is an ordinary `?` chain. The closure is `FnOnce()` and
+         * has nowhere to return a `Result` to, so what it caught goes out
+         * through a pointer exactly as `result` already does. What is left
+         * inside the `setjmp_catch` is the interrupt, which is still a
+         * jump until step F. */
+        *caughtp = (|| -> Result<(), crate::error::Error> {
+            readtoken1(pgetc_eatbnl(), DQSYNTAX(), EofMark::Fake, 0)?;
 
-        let n = Node::Arg(narg {
-            text: wordtext_node(),
-            backquote: takeglobal(addr_of_mut!(backquotelist)),
-        });
+            let n = Node::Arg(narg {
+                text: wordtext_node(),
+                backquote: takeglobal(addr_of_mut!(backquotelist)),
+            });
 
-        expandarg(&n, None, EXP_QUOTED)
-            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
-        /* The C reads the expansion back as `stackblock()`; the expansion
-         * buffer is owned now, so the read is named.  The C's pointer was
-         * live only until the next `stalloc`; this one is live until the
-         * next expansion, which is a superset. */
-        *resultp = crate::expand::expansion_result() as *const c_char;
-    });
+            expandarg(&n, None, EXP_QUOTED)?;
+            /* The C reads the expansion back as `stackblock()`; the
+             * expansion buffer is owned now, so the read is named.  The
+             * C's pointer was live only until the next `stalloc`; this one
+             * is live until the next expansion, which is a superset.
+             *
+             * Neither `?` above reaches this line, which is the whole of
+             * the C's `goto out` skipping it: a prompt that fails to parse
+             * or to expand leaves `result` as the `ps` it was seeded with,
+             * and the caller renders the prompt unexpanded. */
+            *resultp = crate::expand::expansion_result() as *const c_char;
+            Ok(())
+        })()
+        .err();
+    }) != 0;
 
     /* out: */
-    restore_handler_expandarg(savehandler, err);
+    /* Dropped, and that is dash. `expandstr` reports its diagnostic and
+     * hands back the string it was given; `docs/api-design.md` §3.3 is the
+     * contract — an error dash carries on past never reaches a return
+     * value — and this frame is why a bad `PS1` or `PS4` cannot abort a
+     * script. `drop` rather than `let _`, so the `#[must_use]` is answered
+     * deliberately at the one site that means it. */
+    drop(restore_handler_expandarg(savehandler, jumped, caught));
 
     doprompt = saveprompt;
     unwindfiles(file_stop);

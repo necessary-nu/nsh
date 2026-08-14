@@ -531,24 +531,43 @@ pub unsafe fn savefd(from: c_int, ofd: c_int) -> Result<c_int, Error> {
     Ok(newfd)
 }
 
+/// `redirect`, with the diagnostic it can produce caught rather than left
+/// to the frame above.
+///
+/// The C returns `setjmp(jmploc.loc) * 2` — 0, or the 2 a redirection
+/// error takes — and `evalcommand` reads it as a status. It returns the
+/// error itself now, because the status is on the value (`sh_error` sets
+/// `exitstatus = 2` before it reports, and `Error::other` reads it back)
+/// and because `evalcommand`'s `bail:` has to *re-raise* that error when
+/// the command is a special built-in. An `int` cannot be re-raised.
+///
+/// What it still is, and must stay, is a catch frame: the interrupt is
+/// not a value yet, so `setjmp_catch` remains armed and
+/// `restore_handler_expandarg` decides between the two. The frame retires
+/// with the rest of the machinery at step G.
 // [spec:dash:def:redir.redirectsafe-fn]
 // [spec:dash:sem:redir.redirectsafe-fn]
-pub unsafe fn redirectsafe(redir: &[Node], flags: c_int) -> c_int {
-    let err: c_int;
+pub unsafe fn redirectsafe(redir: &[Node], flags: c_int) -> Result<(), Error> {
     let mut saveint: c_int = 0;
     let savehandler: *mut jmploc = crate::error::handler;
     let mut jmploc: jmploc = jmploc::new();
     let jl: *mut jmploc = addr_of_mut!(jmploc);
 
     crate::SAVEINT!(saveint);
-    err = crate::eval::setjmp_catch(jl, || {
+    let mut caught: Option<Error> = None;
+    let jumped = crate::eval::setjmp_catch(jl, || {
         crate::error::handler = jl;
-        redirect(redir, flags)
-            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
-    }) * 2;
-    crate::expand::restore_handler_expandarg(savehandler, err);
+        caught = redirect(redir, flags).err();
+    }) != 0;
+    /* The C's `RESTOREINT` is after this call and is therefore skipped
+     * when the re-raising arm jumps. Keep it there. */
+    let caught = crate::expand::restore_handler_expandarg(savehandler, jumped, caught);
     crate::RESTOREINT!(saveint);
-    err
+
+    match caught {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 // [spec:dash:def:redir.unwindredir-fn]
@@ -576,4 +595,125 @@ pub unsafe fn pushredir(redir: &[Node]) -> usize {
     });
 
     q
+}
+
+#[cfg(test)]
+mod tests {
+    //! `redirectsafe`'s half of the decision `expand::restore_handler_expandarg`
+    //! makes for it and for `parser::expandstr`.
+    //!
+    //! The helper lives in `expand.rs` because the C put it there; these
+    //! are here because `redirectsafe` is the caller whose surrounding
+    //! state — a half-applied redirection and a hand-saved interrupt
+    //! counter — is what makes getting it wrong dangerous.
+    //!
+    //! What is pinned here is the decision itself: what comes back, where
+    //! the handler points, and that a jump leaves rather than being
+    //! swallowed. The `ifsfree` half of the swallowing arm is pinned where
+    //! it is actually observable — as the field count of the word after a
+    //! failure, in `tests/errors_are_values.rs`.
+
+    use core::ptr::addr_of_mut;
+
+    use crate::error::{EXERROR, EXINT, Error, jmploc};
+    use crate::expand::restore_handler_expandarg;
+
+    /// The frame ran to completion: the handler goes back, and nothing is
+    /// returned because nothing was caught.
+    // [spec:dash:sem:expand.restore-handler-expandarg-fn/test]
+    #[test]
+    fn clean_frame_restores_handler() {
+        let _guard = crate::testutil::lock();
+        unsafe {
+            let mut outer: jmploc = jmploc::new();
+            let saved = crate::error::handler;
+            crate::error::handler = core::ptr::null_mut();
+
+            let got = restore_handler_expandarg(addr_of_mut!(outer), false, None);
+
+            assert!(got.is_none(), "nothing was caught, so nothing comes back");
+            /* Copied out: `assert_eq!` takes a reference, and a shared
+             * reference to a mutable static is what the lint forbids. */
+            let now = crate::error::handler;
+            assert_eq!(now, addr_of_mut!(outer));
+
+            crate::error::handler = saved;
+        }
+    }
+
+    /// A diagnostic that arrived as a value is handed straight back, with
+    /// its text, status and line intact — this is the arm that used to be
+    /// `exception == EXERROR`.
+    // [spec:dash:sem:expand.restore-handler-expandarg-fn/test]
+    #[test]
+    fn caught_diagnostic_comes_back() {
+        let _guard = crate::testutil::lock();
+        unsafe {
+            let mut outer: jmploc = jmploc::new();
+            let saved = crate::error::handler;
+            crate::error::handler = core::ptr::null_mut();
+
+            let e = Error::Other {
+                line: 7,
+                status: 2,
+                message: bstr::BString::from(&b"Bad substitution"[..]),
+            };
+            let got = restore_handler_expandarg(addr_of_mut!(outer), false, Some(e));
+
+            let got = got.expect("the caught diagnostic is the frame's to return");
+            assert_eq!(got.message(), "Bad substitution");
+            assert_eq!(got.status(), 2);
+            assert_eq!(got.line(), 7);
+            let now = crate::error::handler;
+            assert_eq!(now, addr_of_mut!(outer));
+
+            crate::error::handler = saved;
+        }
+    }
+
+    /// Something that arrived by longjmp is re-raised rather than
+    /// swallowed, and at the *restored* handler — so it leaves this frame
+    /// instead of coming back into it.
+    ///
+    /// This is the arm only an interrupt can reach once the diagnostics
+    /// are values, and its failure mode is a shell that stops answering
+    /// `^C` rather than a shell that crashes.
+    // [spec:dash:sem:expand.restore-handler-expandarg-fn/test]
+    #[test]
+    fn a_jump_is_re_raised() {
+        let _guard = crate::testutil::lock();
+        unsafe {
+            let saved_exception = crate::error::exception;
+
+            let raised = crate::testutil::raises(|| {
+                crate::error::exception = EXINT;
+                /* `raises` armed this and pointed `handler` at it; it
+                 * stands in for the frame outside `redirectsafe`. */
+                let outer = crate::error::handler;
+                drop(restore_handler_expandarg(outer, true, None));
+                unreachable!("the re-raising arm does not return");
+            });
+
+            assert!(raised, "an interrupt must not be swallowed by this frame");
+
+            crate::error::exception = saved_exception;
+        }
+    }
+
+    /// The exception code the C keyed the swallow on is now read by one
+    /// assertion and nothing else, and this is what it asserts: an
+    /// EXERROR arriving as a jump means a raise site was missed, and the
+    /// frame is about to re-raise a diagnostic dash swallows.
+    // [spec:dash:sem:expand.restore-handler-expandarg-fn/test]
+    #[test]
+    #[should_panic(expected = "an EXERROR reached a converted catch frame as a jump")]
+    #[cfg(debug_assertions)]
+    fn exerror_jump_is_a_bug() {
+        let _guard = crate::testutil::lock();
+        unsafe {
+            crate::error::exception = EXERROR;
+            let mut outer: jmploc = jmploc::new();
+            drop(restore_handler_expandarg(addr_of_mut!(outer), true, None));
+        }
+    }
 }
