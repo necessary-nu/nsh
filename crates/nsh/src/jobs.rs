@@ -905,7 +905,10 @@ unsafe fn forkchild_fatal(e: Error) -> ! {
         crate::shell::flush_coverage();
         libc::_exit(crate::eval::exitstatus);
     }
-    crate::shellmain::exit_from_child(Err(e))
+    /* TRANSITIONAL: reached from `forkchild`'s closures, which have no
+     * context to capture. Threading `jobs.rs` removes this. */
+    let mut sh = crate::context::Shell::detached();
+    crate::shellmain::exit_from_child(&mut sh, Err(e))
 }
 
 // [spec:dash:def:jobs.forkchild-fn]

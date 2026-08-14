@@ -295,7 +295,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
             }
         };
 
-        flow!(crate::trap::dotrap());
+        flow!(crate::trap::dotrap(sh));
 
         /* #ifndef SMALL: show history substitutions done with fc */
         crate::histedit::displayhist = 1;
@@ -437,7 +437,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
         exitstatus = status;
     }
     // out:
-    flow!(crate::trap::dotrap());
+    flow!(crate::trap::dotrap(sh));
 
     'exexit: {
         if eflag() != 0 && (!flags & checkexit) != 0 && status != 0 {
@@ -708,7 +708,7 @@ unsafe fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, E
          * The same trap in a different clothing as `shellmain.rs`'s note
          * about `exit:` living inside the loop -- a subshell in an EXIT
          * trap, which the corpus has now caught twice. */
-        crate::shellmain::exit_from_child(outcome);
+        crate::shellmain::exit_from_child(sh, outcome);
     }
     /* Not forked: `forkreset` pointed `handler` at `main_handler` and this
      * is still the same process, so the frames this returns through are
@@ -826,7 +826,8 @@ unsafe fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
             }
             /* In a forked child, which may not return through the
              * parent's frames; see `evalsubshell`. */
-            crate::shellmain::exit_from_child(evaltreenr(sh, Some(cmd), flags));
+            let outcome = evaltreenr(sh, Some(cmd), flags);
+            crate::shellmain::exit_from_child(sh, outcome);
         }
         if prevfd >= 0 {
             libc::close(prevfd);
@@ -897,7 +898,8 @@ pub unsafe fn evalbackcmd(
              * lines, and it is why the sibling children in `evalsubshell`
              * and `evalpipe` may return their `Flow` instead: they reach
              * the same place by the longer road. */
-            crate::shellmain::exit_from_child(evaltreenr(sh, n, EV_EXIT));
+            let outcome = evaltreenr(sh, n, EV_EXIT);
+            crate::shellmain::exit_from_child(sh, outcome);
             /* NOTREACHED */
         }
         libc::close(pip[1]);

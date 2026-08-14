@@ -222,7 +222,7 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
                             // exit:
                             /* #if PROFILE: monitor(0); */
                             /* #if GPROF: _mcleanup(); */
-                            crate::trap::exitshell();
+                            crate::trap::exitshell(sh);
                             /* NOTREACHED — exitshell() ends in _exit(). */
                         }
                     }
@@ -419,6 +419,7 @@ pub(crate) unsafe fn cmdloop(
 /// There is no resume path to reproduce, so the whole of the handler for a
 /// child is `exitreset` and then `exitshell`.
 pub(crate) unsafe fn exit_from_child(
+    sh: &mut Shell,
     outcome: Result<crate::eval::Flow, crate::error::Error>,
 ) -> ! {
     let by_exitcmd = matches!(
@@ -430,7 +431,7 @@ pub(crate) unsafe fn exit_from_child(
     );
     drop(outcome);
     crate::init::exitreset(by_exitcmd);
-    crate::trap::exitshell();
+    crate::trap::exitshell(sh);
 }
 
 /*

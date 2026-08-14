@@ -313,7 +313,7 @@ pub unsafe extern "C" fn onsig(signo: c_int) {
 
 // [spec:dash:def:trap.dotrap-fn]
 // [spec:dash:sem:trap.dotrap-fn]
-pub unsafe fn dotrap() -> Result<Flow, Error> {
+pub unsafe fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
     let mut q: *mut c_char;
     let mut i: c_int;
     let mut status: c_int;
@@ -375,10 +375,7 @@ pub unsafe fn dotrap() -> Result<Flow, Error> {
          * past the `savestatus = last_status` below; a `Flow::Exit`
          * returned from here skips it in exactly the same way, which is
          * what leaves `savestatus` holding what `exit` was told. */
-        /* TRANSITIONAL: `dotrap` has no context to pass on yet. Threading
-         * `trap.rs` removes this. */
-        let mut sh = crate::context::Shell::detached();
-        match crate::eval::evalstring(&mut sh, p.as_mut_ptr() as *mut c_char, 0)? {
+        match crate::eval::evalstring(sh, p.as_mut_ptr() as *mut c_char, 0)? {
             Flow::Done(_) => {}
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
@@ -418,7 +415,7 @@ pub unsafe fn setinteractive(on: c_int) {
 
 // [spec:dash:def:trap.exitshell-fn]
 // [spec:dash:sem:trap.exitshell-fn]
-pub unsafe fn exitshell() -> ! {
+pub unsafe fn exitshell(sh: &mut crate::context::Shell) -> ! {
     savestatus = exitstatus;
     /* `TRACE(("pid %d, exitshell(%d)\n", getpid(), savestatus));` —
      * `#ifdef DEBUG` in `shell.h`, and the dash build does not define it. */
@@ -444,10 +441,7 @@ pub unsafe fn exitshell() -> ! {
              * `out:` with nothing left to inspect it. What must not be
              * dropped is an `exit` *inside* the trap, because it names the
              * status the shell leaves with. */
-            /* TRANSITIONAL: `exitshell` has no context to pass on yet.
-             * Threading `trap.rs` removes this. */
-            let mut sh = crate::context::Shell::detached();
-            match crate::eval::evalstring(&mut sh, p.as_mut_ptr() as *mut c_char, 0) {
+            match crate::eval::evalstring(sh, p.as_mut_ptr() as *mut c_char, 0) {
                 Ok(crate::eval::Flow::Exit { by_exitcmd: b }) => {
                     by_exitcmd = b;
                     break 'out;
