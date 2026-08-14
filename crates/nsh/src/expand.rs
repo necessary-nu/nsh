@@ -1204,7 +1204,10 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) -> Result<(), 
          * and its `INTON`, which is where the longjmp went too — it skipped
          * the same `INTON`. docs/errors-are-values.md 2.4: do not pair
          * them. */
-        crate::eval::evalbackcmd(cmd, &mut in_ as *mut crate::eval::backcmd)?;
+        /* TRANSITIONAL: `expbackq` has no context to pass on yet.
+         * Threading `expand.rs` removes this. */
+        let mut sh = crate::context::Shell::detached();
+        crate::eval::evalbackcmd(&mut sh, cmd, &mut in_ as *mut crate::eval::backcmd)?;
 
         /* `backcmd.buf` is ash's read-ahead buffer.  `evalbackcmd` writes
          * NULL to it and to `nleft` and never writes either again, so the

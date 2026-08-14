@@ -19,6 +19,7 @@
 //!   * `FLUSHERR` is never defined in the dash build, so the
 //!     `flushout(out2)` calls guarded by it are absent here too.
 
+use crate::context::Shell;
 use bstr::{BStr, BString};
 use core::ptr::null_mut;
 use libc::{c_char, c_int};
@@ -91,7 +92,7 @@ unsafe fn etext() -> c_int {
 
 // [spec:dash:def:main.main-fn]
 // [spec:dash:sem:main.main-fn]
-pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int {
     let mut state: c_int; /* volatile */
 
     dash_errno = libc::__errno_location();
@@ -144,7 +145,10 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
                             let login: c_int = crate::options::procargs(argv)?;
                             if login != 0 {
                                 *state_p = 1;
-                                match read_profile(b"/etc/profile\0".as_ptr() as *const c_char)? {
+                                match read_profile(
+                                    sh,
+                                    b"/etc/profile\0".as_ptr() as *const c_char,
+                                )? {
                                     crate::eval::Flow::Done(_) => {}
                                     exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
                                 }
@@ -156,7 +160,7 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
                         1 => {
                             // state1:
                             *state_p = 2;
-                            match read_profile(b"$HOME/.profile\0".as_ptr() as *const c_char)? {
+                            match read_profile(sh, b"$HOME/.profile\0".as_ptr() as *const c_char)? {
                                 crate::eval::Flow::Done(_) => {}
                                 exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
                             }
@@ -172,7 +176,7 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
                                 let shinit: *mut c_char =
                                     crate::var::lookupvar(b"ENV\0".as_ptr() as *const c_char);
                                 if !shinit.is_null() && *shinit != b'\0' as c_char {
-                                    match read_profile(shinit)? {
+                                    match read_profile(sh, shinit)? {
                                         crate::eval::Flow::Done(_) => {}
                                         exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
                                     }
@@ -190,6 +194,7 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
                                  * `goto exit`. Returning it here reaches
                                  * the same place by the same decision. */
                                 match crate::eval::evalstring(
+                                    sh,
                                     crate::options::minusc,
                                     if sflag() != 0 { 0 } else { EV_EXIT },
                                 )? {
@@ -207,7 +212,7 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
                         4 => {
                             /* state4: XXX ??? - why isn't this before the "if"
                              * statement */
-                            match cmdloop(1)? {
+                            match cmdloop(sh, 1)? {
                                 crate::eval::Flow::Done(_) => {}
                                 exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
                             }
@@ -319,8 +324,13 @@ pub fn main_fn(argc: c_int, argv: Vec<Vec<u8>>, streams: crate::streams::Streams
     owned.push(null_mut());
     let p = owned.as_mut_ptr();
     core::mem::forget(owned);
+    /* The shell this process runs as. There is one, it is made here, and
+     * every function that has been threaded so far reaches its state
+     * through the borrow that starts on the next line
+     * ([dec:nsh:no-ambient-state]). */
+    let mut sh = Shell::new();
     unsafe {
-        main(argc, p);
+        main(&mut sh, argc, p);
     }
     /* main() never returns: it ends in exitshell(). */
     std::process::exit(255);
@@ -333,7 +343,10 @@ pub fn main_fn(argc: c_int, argv: Vec<Vec<u8>>, streams: crate::streams::Streams
 
 // [spec:dash:def:main.cmdloop-fn]
 // [spec:dash:sem:main.cmdloop-fn]
-pub(crate) unsafe fn cmdloop(top: c_int) -> Result<crate::eval::Flow, crate::error::Error> {
+pub(crate) unsafe fn cmdloop(
+    sh: &mut Shell,
+    top: c_int,
+) -> Result<crate::eval::Flow, crate::error::Error> {
     let mut inter: c_int;
     let mut status: c_int = 0;
     let mut numeof: c_int = 0;
@@ -362,7 +375,7 @@ pub(crate) unsafe fn cmdloop(top: c_int) -> Result<crate::eval::Flow, crate::err
 
             crate::jobs::job_warning = if crate::jobs::job_warning == 2 { 1 } else { 0 };
             numeof = 0;
-            i = crate::eval::flow!(crate::eval::evaltree(n.as_ref(), 0));
+            i = crate::eval::flow!(crate::eval::evaltree(sh, n.as_ref(), 0));
             if n.is_some() {
                 status = i;
             }
@@ -426,7 +439,10 @@ pub(crate) unsafe fn exit_from_child(
 
 // [spec:dash:def:main.read-profile-fn]
 // [spec:dash:sem:main.read-profile-fn]
-unsafe fn read_profile(name: *const c_char) -> Result<crate::eval::Flow, crate::error::Error> {
+unsafe fn read_profile(
+    sh: &mut Shell,
+    name: *const c_char,
+) -> Result<crate::eval::Flow, crate::error::Error> {
     let name: *const c_char = crate::parser::expandstr(name)?;
 
     if crate::input::setinputfile(
@@ -439,7 +455,7 @@ unsafe fn read_profile(name: *const c_char) -> Result<crate::eval::Flow, crate::
 
     /* An `exit` in a profile ends the shell before it ever reads a
      * command, so this call is one the exit has to travel out of. */
-    let flow = cmdloop(0)?;
+    let flow = cmdloop(sh, 0)?;
     if let crate::eval::Flow::Exit { .. } = flow {
         return Ok(flow);
     }
@@ -453,9 +469,12 @@ unsafe fn read_profile(name: *const c_char) -> Result<crate::eval::Flow, crate::
 
 // [spec:dash:def:main.readcmdfile-fn]
 // [spec:dash:sem:main.readcmdfile-fn]
-pub unsafe fn readcmdfile(name: *mut c_char) -> Result<crate::eval::Flow, crate::error::Error> {
+pub unsafe fn readcmdfile(
+    sh: &mut Shell,
+    name: *mut c_char,
+) -> Result<crate::eval::Flow, crate::error::Error> {
     crate::input::setinputfile(name, crate::input::INPUT_PUSH_FILE)?;
-    let flow = cmdloop(0)?;
+    let flow = cmdloop(sh, 0)?;
     if let crate::eval::Flow::Exit { .. } = flow {
         return Ok(flow);
     }

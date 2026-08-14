@@ -131,7 +131,7 @@ unsafe fn scan_options(argc: c_int, argv: *mut *mut c_char) -> Result<Flags, Err
 // [spec:dash:sem:histedit.histcmd-fn]
 // [spec:dash:def:myhistedit.histcmd-fn]
 // [spec:dash:sem:myhistedit.histcmd-fn]
-pub unsafe fn histcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut editor: *const c_char = ptr::null();
     let mut lflg: c_int = 0;
     let mut nflg: c_int = 0;
@@ -356,7 +356,7 @@ pub unsafe fn histcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     /* `fc -s` runs the recalled line, which can be an
                       * `exit`. It leaves through the cleanup below like
                       * everything else this frame catches. */
-                    crate::eval::flow!(crate::eval::evalstring(s, 0));
+                    crate::eval::flow!(crate::eval::evalstring(sh, s, 0));
                     if displayhist != 0 && history_active() {
                         record_history_line(core::ffi::CStr::from_ptr(s).to_bytes(), true);
                     }
@@ -388,10 +388,10 @@ pub unsafe fn histcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
             drop(edit_file.take());
             /* XXX - should use no JC command */
-            crate::eval::flow!(crate::eval::evalstring(editcmd, 0));
+            crate::eval::flow!(crate::eval::evalstring(sh, editcmd, 0));
             INTON();
             /* XXX - should read back - quick tst */
-            crate::eval::flow!(crate::shellmain::readcmdfile(editfile.as_mut_ptr()));
+            crate::eval::flow!(crate::shellmain::readcmdfile(sh, editfile.as_mut_ptr()));
             libc::unlink(editfile.as_ptr());
         }
 

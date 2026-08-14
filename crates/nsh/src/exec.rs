@@ -610,7 +610,10 @@ pub unsafe fn find_command(
                          * past `find_command` and its callers, and this
                          * returns it through them instead. It is why
                          * `find_command` carries a `Flow` at all. */
-                        match crate::shellmain::readcmdfile(fullname)? {
+                        /* TRANSITIONAL: `find_command` has no context to
+                         * pass on yet. Threading `exec.rs` removes this. */
+                        let mut sh = crate::context::Shell::detached();
+                        match crate::shellmain::readcmdfile(&mut sh, fullname)? {
                             crate::eval::Flow::Done(_) => {}
                             exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
                         }

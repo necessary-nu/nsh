@@ -375,7 +375,10 @@ pub unsafe fn dotrap() -> Result<Flow, Error> {
          * past the `savestatus = last_status` below; a `Flow::Exit`
          * returned from here skips it in exactly the same way, which is
          * what leaves `savestatus` holding what `exit` was told. */
-        match crate::eval::evalstring(p.as_mut_ptr() as *mut c_char, 0)? {
+        /* TRANSITIONAL: `dotrap` has no context to pass on yet. Threading
+         * `trap.rs` removes this. */
+        let mut sh = crate::context::Shell::detached();
+        match crate::eval::evalstring(&mut sh, p.as_mut_ptr() as *mut c_char, 0)? {
             Flow::Done(_) => {}
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
@@ -441,7 +444,10 @@ pub unsafe fn exitshell() -> ! {
              * `out:` with nothing left to inspect it. What must not be
              * dropped is an `exit` *inside* the trap, because it names the
              * status the shell leaves with. */
-            match crate::eval::evalstring(p.as_mut_ptr() as *mut c_char, 0) {
+            /* TRANSITIONAL: `exitshell` has no context to pass on yet.
+             * Threading `trap.rs` removes this. */
+            let mut sh = crate::context::Shell::detached();
+            match crate::eval::evalstring(&mut sh, p.as_mut_ptr() as *mut c_char, 0) {
                 Ok(crate::eval::Flow::Exit { by_exitcmd: b }) => {
                     by_exitcmd = b;
                     break 'out;

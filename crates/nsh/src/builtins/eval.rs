@@ -19,7 +19,7 @@ use crate::eval::{EV_TESTED, Flow, evalstring};
 
 // [spec:dash:def:eval.evalcmd-fn]
 // [spec:dash:sem:eval.evalcmd-fn]
-pub(crate) unsafe fn evalcmd(_sh: &mut Shell, args: &[&BStr], flags: c_int) -> Result<Flow, Error> {
+pub(crate) unsafe fn evalcmd(sh: &mut Shell, args: &[&BStr], flags: c_int) -> Result<Flow, Error> {
     /* `grabstackstr` kept the joined string alive until the enclosing mark
      * popped, which is past the `evalstring` that parses it. Owning it here
      * says the same thing, and it has to be a binding of this frame because
@@ -41,7 +41,7 @@ pub(crate) unsafe fn evalcmd(_sh: &mut Shell, args: &[&BStr], flags: c_int) -> R
             single = crate::shell::cstring(args[1]);
             single.as_ptr() as *mut c_char
         };
-        return evalstring(p, flags & EV_TESTED);
+        return evalstring(sh, p, flags & EV_TESTED);
     }
     Ok(Flow::Done(0))
 }

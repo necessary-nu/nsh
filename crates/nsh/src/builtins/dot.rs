@@ -69,7 +69,7 @@ unsafe fn find_dot_file(
 
 // [spec:dash:def:main.dotcmd-fn]
 // [spec:dash:sem:main.dotcmd-fn]
-pub unsafe fn dotcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn dotcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut status: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
@@ -95,7 +95,7 @@ pub unsafe fn dotcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
          * it leaves through here without the `popfile` -- exactly as the
          * C's longjmp did. The input stack is unwound to a mark by
          * whatever catches, not by the frame it passed through. */
-        match cmdloop(0)? {
+        match cmdloop(sh, 0)? {
             Flow::Done(s) => status = s,
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
