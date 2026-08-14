@@ -112,24 +112,15 @@ fn main() {
         }
     }
 
-    // The port implements C's `longjmp` as an unwind carrying a
-    // `error::Longjmp` payload (see `eval::setjmp_catch`). Those unwinds
-    // are ordinary control flow — every shell error, interrupt, `exit`
-    // and `set -e` raise goes through one — but the default panic hook
-    // prints a "thread 'main' panicked" banner each time it is *raised*,
-    // whether or not it is caught. Filter those out and leave the hook's
-    // normal behaviour intact for genuine bugs.
-    let default_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        if info
-            .payload()
-            .downcast_ref::<nsh::error::Longjmp>()
-            .is_some()
-        {
-            return;
-        }
-        default_hook(info);
-    }));
+    // A panic hook sat here, filtering out the `error::Longjmp` payload
+    // the port used to implement C's `longjmp`: those unwinds were
+    // ordinary control flow -- every shell error, interrupt, `exit` and
+    // `set -e` went through one -- and the default hook printed a
+    // "thread 'main' panicked" banner each time one was *raised*.
+    //
+    // `errors-are-values` deleted the mechanism, so there is no payload
+    // to filter and every panic that reaches the hook is a genuine bug.
+    // The default hook is the right one for that.
 
     // C's `main(int argc, char **argv)` receives raw NUL-terminated byte
     // strings. An argument need not be valid UTF-8, and dash passes such

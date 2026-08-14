@@ -37,7 +37,7 @@ pub unsafe fn jobscmd(args: &[&BStr]) -> Result<Flow, Error> {
             showjob(out, getjob(spec.as_ptr(), 0)?, mode);
         }
     } else {
-        showjobs(out, mode);
+        showjobs(out, mode)?;
     }
 
     Ok(Flow::Done(0))

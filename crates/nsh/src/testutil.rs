@@ -9,18 +9,13 @@
 //! [`lock`] for its duration. Tests that only call pure functions do not
 //! need it.
 //!
-//! **Errors are becoming values, and both mechanisms are live.** A
-//! function that has been converted by `errors-are-values` returns
-//! `Result<_, error::Error>`, and a test asserts on the returned error --
-//! its `message()` and its `status()` -- which is the better assertion
-//! because it pins what the shell said rather than how it left. A
-//! function that has not been converted yet still ends in
-//! `error::exraise`, which raises the `Longjmp` payload that
-//! `eval::setjmp_catch` catches, and a test for one of those must arm a
-//! handler with [`raises`] because the function is `-> !`.
-//!
-//! [`raises`] is deleted with the rest of the machinery when the node
-//! finishes; a new test should prefer the value.
+//! **Errors are values.** A fallible function returns
+//! `Result<_, error::Error>` and a test asserts on the returned error --
+//! its `message()` and its `status()` -- which pins what the shell said
+//! rather than how it left. There was a `raises` helper here for the
+//! functions that were still `-> !`, which armed a handler and reported
+//! whether the body jumped; it went with the machinery when
+//! `errors-are-values` finished, along with the last `-> !`.
 
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -38,26 +33,6 @@ pub fn lock() -> MutexGuard<'static, ()> {
     match LOCK.get_or_init(|| Mutex::new(())).lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
-    }
-}
-
-/// Run `body` with an exception handler armed, and report whether it
-/// raised.
-///
-/// This is the test-side counterpart of the shell's own
-/// `setjmp_catch`/`exraise` pair: the C would `longjmp` to the nearest
-/// handler, and the port unwinds to the nearest `catch_unwind`. Returns
-/// `true` when the body raised, `false` when it ran to completion.
-pub fn raises<F: FnOnce()>(body: F) -> bool {
-    unsafe {
-        let mut loc: crate::error::jmploc = crate::error::jmploc::new();
-        let saved = crate::error::handler;
-        let result = crate::eval::setjmp_catch(addr_of_mut!(loc), || {
-            crate::error::handler = addr_of_mut!(loc);
-            body();
-        });
-        crate::error::handler = saved;
-        result != 0
     }
 }
 

@@ -1239,6 +1239,13 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) -> Result<(), 
                 if !(i < 0 && crate::system::errno() == libc::EINTR) {
                     break;
                 }
+                /* One of the three EINTR sites the C retries blindly.
+                 * Reading a command substitution's output can block for
+                 * as long as the substituted command runs, so this is
+                 * where a ^C during `x=$(sleep 5)` is noticed. */
+                if let Some(e) = crate::error::poll_interrupt() {
+                    return Err(e);
+                }
             }
             /* TRACE(("expbackq: read returns %d\n", i)); */
             if i <= 0 {
@@ -2446,8 +2453,16 @@ pub unsafe fn changeifs(mut ifs: *const c_char) {
 // [spec:dash:sem:expand.opendir-interruptible-fn]
 unsafe extern "C" fn opendir_interruptible(pathname: *const c_char) -> *mut c_void {
     if int_pending() != 0 {
+        /* The C calls `onint()` here, which longjmps *out of glibc* --
+         * back through `glob`'s frames, which own memory it then leaks.
+         * That is the sharpest example of what step F removes, and it is
+         * a callback into a C library, so it could never have unwound
+         * under `panic = "abort"` at all.
+         *
+         * Dropping the counter and returning leaves `intpending` set.
+         * `expmeta`'s own `check_int` already breaks its loop on it, and
+         * delivery happens at the next poll site. */
         crate::error::suppressint = 0;
-        crate::error::onint();
     }
 
     libc::opendir(pathname) as *mut c_void
@@ -2752,13 +2767,8 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
     } else {
         CTLESC
     };
-    let savehandler: *mut crate::error::jmploc;
-    let mut jmploc: crate::error::jmploc = mem::zeroed();
     let mut statb: libc::stat64 = mem::zeroed();
     let mut dp: *mut libc::dirent64;
-    /* `volatile int err` — Rust has no volatile locals; the value is
-     * written by setjmp's return and read twice, which suffices here. */
-    let err: c_int;
     let mut endname: *mut c_char = ptr::null_mut();
     let mut zeroedp: *mut c_char = ptr::null_mut();
     let mut enddir: *mut c_char;
@@ -2780,29 +2790,19 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
 
     /* *(DIR *volatile *)&dirp = NULL; */
     ptr::write_volatile(&mut dirp, ptr::null_mut());
-    savehandler = crate::error::handler;
-    /* The C is `if (unlikely(err = setjmp(jmploc.loc))) goto out;`.
-     *
-     * NOTE (bug-for-bug): the C never does `handler = &jmploc`, so that
-     * handler is never installed — nothing can longjmp into `jmploc`,
-     * `setjmp` can only ever return 0, and both the `goto out` arm and the
-     * `longjmp` at `out_opendir` are unreachable.  The `sem` rule claims
-     * the handler is installed; the code says otherwise.  Reproduced
-     * verbatim — do not "fix".
-     *
-     * `err` is therefore 0 by construction, which is why this is a plain
-     * assignment and not `eval::setjmp_catch`.  Using `setjmp_catch` here
-     * would be wrong in the other direction: it would establish a
-     * `catch_unwind` the C does not have, swallowing exceptions that must
-     * propagate out through `expmeta` to whichever handler is actually
-     * current.  Calling libc's `setjmp` would be pointless too — Rust has
-     * no way to return from it non-locally, and no caller ever tries. */
-    err = 0;
+    /* The C has `if (unlikely(err = setjmp(jmploc.loc))) goto out;` here
+     * and a matching `longjmp` at `out_opendir`, over a `jmploc` it never
+     * installs — `handler = &jmploc` is missing, so nothing can jump into
+     * it, `setjmp` can only return 0, and both arms are unreachable. The
+     * port reproduced that verbatim rather than "fixing" it. It went with
+     * the machinery: there is no `jmploc` left to be dead code over, and
+     * the `sem` rule's claim that the handler is installed was never true
+     * of either language. */
 
     'out_opendir: {
         'out: {
-            if err != 0 {
-                break 'out; /* goto out */
+            if false {
+                break 'out; /* the C's unreachable `goto out` */
             }
 
             /* The glob buffer's invariant, stated where it is relied on:
@@ -2980,10 +2980,6 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
     }
 
     /* out_opendir: */
-    crate::error::handler = savehandler;
-    if err != 0 {
-        crate::error::raise_longjmp(crate::error::handler, 1);
-    }
     cp
 }
 
@@ -3560,58 +3556,30 @@ unsafe fn varunset(
     crate::error::sh_error_value(&message)
 }
 
-/// The `out:` tail `redirectsafe` and `expandstr` share: restore the
-/// handler, then decide whether what arrived is this frame's to keep.
+/// The `out:` tail `redirectsafe` and `expandstr` share: decide whether
+/// what came back is this frame's to keep.
 ///
-/// The C asks that question of a global — `if (err) { if (exception !=
-/// EXERROR) longjmp(handler->loc, 1); ifsfree(); }` — and
-/// `docs/errors-are-values.md` §6 says to rewrite it as a match with an
-/// arm per exception code rather than as a negated comparison, because
-/// getting it wrong in either direction is a silently swallowed error
-/// rather than a crash.
+/// It kept its C name and lost its first job. The C's version restores
+/// `handler` and then asks a global which exception arrived —
+/// `if (err) { if (exception != EXERROR) longjmp(handler->loc, 1); ifsfree(); }`
+/// — and both halves of that are gone: there is no handler to restore,
+/// and nothing to re-raise. What is left is the half that was always the
+/// real decision, and it is a match on the value's own type.
 ///
-/// It is now not a comparison at all. The two arms have different *types*:
-/// `caught` is a diagnostic that arrived as a value, which is what
-/// `EXERROR` was, and `jumped` says something arrived by longjmp, which
-/// after step C can only be `EXINT`. So the swallowing arm cannot be
-/// reached by an interrupt and the re-raising arm cannot be reached by a
-/// diagnostic, and neither depends on a global that some other frame may
-/// have written since.
-///
-/// Order is load-bearing twice. The handler is restored *before* the
-/// re-raise, so the jump goes to the frame outside this one rather than
-/// back into this one; and the re-raise happens before either caller's
-/// `RESTOREINT`, so an interrupt travelling through leaks the counter for
-/// the outermost `FORCEINTON` to reset — exactly as it does today. §2.4 is
-/// explicit that the leak is *where a pending SIGINT is delivered* and
-/// that moving it is observable.
-///
-/// `ifsfree` belongs to the swallowing arm alone: the regions the failed
+/// `ifsfree` belongs to the swallowing arm alone. The regions the failed
 /// expansion recorded would otherwise mis-split the *next* word, and the
-/// re-raising arm leaves them to the frame that catches.
+/// frame that takes an interrupt is not the frame that owns them.
 // [spec:dash:def:expand.restore-handler-expandarg-fn]
 // [spec:dash:sem:expand.restore-handler-expandarg-fn]
 pub unsafe fn restore_handler_expandarg(
-    savehandler: *mut crate::error::jmploc,
-    jumped: bool,
     caught: Option<crate::error::Error>,
 ) -> Option<crate::error::Error> {
-    crate::error::handler = savehandler;
-    if jumped {
-        /* §6 asks for an assertion that the swallowing arm is only ever
-         * reached with what is today EXERROR. This is that claim stated
-         * from the side that can still be violated: every diagnostic
-         * beneath these two frames is a value now, so an EXERROR arriving
-         * here as a jump means a raise site was missed — and the frame
-         * would re-raise a diagnostic that dash swallows. */
-        debug_assert!(
-            crate::error::exception != crate::error::EXERROR,
-            "an EXERROR reached a converted catch frame as a jump"
-        );
-        crate::error::raise_longjmp(crate::error::handler, 1);
-    }
-    if caught.is_some() {
-        ifsfree();
+    match &caught {
+        /* Not this frame's to keep, and never was: the C re-raised it
+         * from here. */
+        Some(e) if e.is_interrupt() => {}
+        Some(_) => ifsfree(),
+        None => {}
     }
     caught
 }

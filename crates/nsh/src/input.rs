@@ -260,7 +260,20 @@ pub unsafe fn mkinit_reset() {
         c = text(top)[top.pos - top.unget as usize - 1] as i8 as c_int;
     }
     while c != b'\n' as c_int && c != PEOF && crate::error::int_pending() == 0 {
-        c = pgetc();
+        /* Teardown: `reset` drains the rest of the bad line and cannot
+         * fail its way out of doing so (§4.3). The loop's own
+         * `int_pending` test is what stops it, and it is tested *before*
+         * the read rather than after, so an interrupt ends the drain
+         * rather than being reported by it. A read that fails for any
+         * other reason ends it too, with the diagnostic already
+         * written. */
+        match pgetc() {
+            Ok(next) => c = next,
+            Err(e) => {
+                drop(e);
+                break;
+            }
+        }
     }
 }
 
@@ -399,7 +412,7 @@ unsafe fn freestrings() {
 
 // [spec:dash:def:input.pgetc-fn]
 // [spec:dash:sem:input.pgetc-fn]
-pub unsafe fn pgetc() -> c_int {
+pub unsafe fn pgetc() -> Result<c_int, Error> {
     let mut c: c_int;
     /* Re-derived after everything that can push a level, because that is
      * what moves the frames; the C reloads the same global for the same
@@ -416,7 +429,7 @@ pub unsafe fn pgetc() -> c_int {
             let unget = pf.unget as usize;
             pf.unget -= 1;
 
-            return text(pf)[pf.pos - unget] as i8 as c_int;
+            return Ok(text(pf)[pf.pos - unget] as i8 as c_int);
         }
 
         'nextc: loop {
@@ -432,7 +445,7 @@ pub unsafe fn pgetc() -> c_int {
                 pf = cur_pf();
                 continue 'again;
             } else {
-                c = preadbuffer();
+                c = preadbuffer()?;
                 pf = cur_pf();
             }
 
@@ -444,17 +457,17 @@ pub unsafe fn pgetc() -> c_int {
                 continue 'nextc;
             }
 
-            return c;
+            return Ok(c);
         }
     }
 }
 
 // [spec:dash:def:input.pgetc-eoa-fn]
 // [spec:dash:sem:input.pgetc-eoa-fn]
-pub unsafe fn pgetc_eoa() -> c_int {
+pub unsafe fn pgetc_eoa() -> Result<c_int, Error> {
     let pf = cur_pf();
     if !pf.strpush.is_empty() && pf.nleft == -1 && !pf.strpush[pf.strpush.len() - 1].ap.is_null() {
-        PEOA
+        Ok(PEOA)
     } else {
         pgetc()
     }
@@ -476,7 +489,7 @@ unsafe fn stdin_clear_nonblock() -> c_int {
 
 // [spec:dash:def:input.preadfd-fn]
 // [spec:dash:sem:input.preadfd-fn]
-unsafe fn preadfd() -> c_int {
+unsafe fn preadfd() -> Result<c_int, Error> {
     let mut fd: c_int = cur_pf().fd;
     let mut use_tee: bool;
     let mut unget: c_int;
@@ -505,7 +518,7 @@ unsafe fn preadfd() -> c_int {
 
     nr = BUFSIZ - nr;
     if !IS_DEFINED_SMALL && nr == 0 {
-        return nr;
+        return Ok(nr);
     }
 
     /* The C's `fd == 0` means "this parse file is the shell's standard
@@ -527,17 +540,14 @@ unsafe fn preadfd() -> c_int {
                 let pf = cur_pf();
                 &mut pf.buf[off..off + nr as usize]
             };
-            return match crate::histedit::read_edit_line(destination) {
+            return Ok(match crate::histedit::read_edit_line(destination) {
                 Ok(count) => count as c_int,
                 Err(_) => 0,
-            };
+            });
         }
 
         if use_tee {
-            /* `preadfd` is not converted; the bridge performs the jump the
-             * C's `sh_open`/`savefd` performed from inside the tee. */
-            nr = stdin_tee(cur_pf().buf.as_mut_ptr().add(off) as *mut c_void, nr)
-                .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
+            nr = stdin_tee(cur_pf().buf.as_mut_ptr().add(off) as *mut c_void, nr)?;
             if nr >= 0 {
                 fd = stdin_state.pip[0];
             } else if errno() == libc::EINVAL {
@@ -564,10 +574,23 @@ unsafe fn preadfd() -> c_int {
                 let _ = (*crate::output::stderr()).write_all(b"sh: turning off NDELAY mode\n");
                 continue 'retry;
             }
+            /* The interactive prompt's read, and the one place the C had
+             * no synchronous alternative: `onsig` used to deliver from
+             * inside the handler and the longjmp abandoned this read
+             * where it stood. Now the read returns EINTR and this is
+             * where the shell looks.
+             *
+             * The C's condition -- retry unless a *nested* input has a
+             * signal pending -- is kept underneath, because it is about
+             * something else: abandoning a here-document or a `.` file
+             * when a trapped signal arrives. */
+            if let Some(e) = crate::error::poll_interrupt() {
+                return Err(e);
+            }
         }
         break 'retry;
     }
-    nr
+    Ok(nr)
 }
 
 /*
@@ -581,7 +604,7 @@ unsafe fn preadfd() -> c_int {
 
 // [spec:dash:def:input.preadbuffer-fn]
 // [spec:dash:sem:input.preadbuffer-fn]
-unsafe fn preadbuffer() -> c_int {
+unsafe fn preadbuffer() -> Result<c_int, Error> {
     let first: c_int = (whichprompt == 1) as c_int;
     let mut something: c_int;
     let mut savec: u8 = 0;
@@ -594,7 +617,7 @@ unsafe fn preadbuffer() -> c_int {
     if (cur_pf().eof & 2) != 0 {
         /* eof: */
         cur_pf().eof = 3;
-        return PEOF;
+        return Ok(PEOF);
     }
     crate::output::flushall();
 
@@ -609,7 +632,7 @@ unsafe fn preadbuffer() -> c_int {
             /* again: */
             nr = (q - cur_pf().pos) as c_int;
             input_set_lleft(cur_pf(), nr);
-            more = preadfd();
+            more = preadfd()?;
             q = cur_pf().pos + nr as usize;
             if more <= 0 {
                 cur_pf().nleft = 0;
@@ -619,9 +642,29 @@ unsafe fn preadbuffer() -> c_int {
                     break 'outer; /* goto save */
                 }
                 INTON();
+                /* **An interrupted read is not end of input.** The C could
+                 * not reach this line with an interrupt pending, because
+                 * its delivery left from *inside* the read by longjmp;
+                 * with delivery moved to a poll site, a `read` that came
+                 * back EINTR arrives here looking exactly like a `read`
+                 * that came back 0, and reporting PEOF makes ^C behave
+                 * like ^D -- the shell exits instead of printing a fresh
+                 * prompt. The pty cases `^C in emacs mode`, `^C in vi
+                 * mode` and `^C during a blocked read` are what said so.
+                 *
+                 * The poll is here rather than inside `preadfd` because
+                 * this frame holds INTOFF across the read, so nothing
+                 * under it is due; this is the instruction where the
+                 * counter comes back to zero, which is where the C
+                 * delivered a *deferred* interrupt too. It also covers
+                 * the line editor, whose failed read reaches the same
+                 * line through `preadfd`'s `Err(_) => 0`. */
+                if let Some(e) = crate::error::poll_interrupt() {
+                    return Err(e);
+                }
                 /* goto eof */
                 cur_pf().eof = 3;
-                return PEOF;
+                return Ok(PEOF);
             }
         }
 
@@ -693,6 +736,14 @@ unsafe fn preadbuffer() -> c_int {
         crate::histedit::record_history_line(bytes, first != 0);
     }
     INTON();
+    /* This frame brackets the read in INTOFF/INTON, so an interrupt that
+     * arrived during it is pending rather than taken, and the C delivered
+     * it right here when the counter reached zero. Polling at the call
+     * site rather than inside `INTON` is what keeps `INTON` infallible
+     * (§4.3) while leaving the delivery point where it was. */
+    if let Some(e) = crate::error::poll_interrupt() {
+        return Err(e);
+    }
 
     if crate::options::optlist[crate::options::vflag] != 0 {
         let _ = (*crate::output::stderr()).write_all(CStr::from_ptr(line).to_bytes());
@@ -706,7 +757,7 @@ unsafe fn preadbuffer() -> c_int {
     let pf = cur_pf();
     let r = pf.buf[pf.pos] as i8 as c_int;
     pf.pos += 1;
-    r
+    Ok(r)
 }
 
 // [spec:dash:def:input.pungetn-fn]

@@ -272,20 +272,22 @@ pub unsafe fn procargs(mut xargv: *mut *mut c_char) -> Result<c_int, Error> {
         count = count.add(1);
     }
     borrowparam(xargv, nparam);
-    optschanged();
+    optschanged()?;
 
     Ok(login)
 }
 
 // [spec:dash:def:options.optschanged-fn]
 // [spec:dash:sem:options.optschanged-fn]
-pub unsafe fn optschanged() {
+/// Returns rather than raising, because `setjobctl` can fail and one of
+/// this function's callers is teardown. See `jobs::setjobctl`.
+pub unsafe fn optschanged() -> Result<(), crate::error::Error> {
     /* `#ifdef DEBUG opentrace();` — the dash build does not define DEBUG,
      * so `show.c` compiles to nothing and there is no trace file. */
     crate::trap::setinteractive(optlist[iflag] as c_int);
     /* #ifndef SMALL */
     crate::histedit::histedit();
-    crate::jobs::setjobctl(optlist[mflag] as c_int);
+    crate::jobs::setjobctl(optlist[mflag] as c_int)
 }
 
 /// What a pass of [`options`] found.

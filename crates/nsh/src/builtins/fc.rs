@@ -16,7 +16,6 @@ use crate::error::Error;
 use crate::eval::Flow;
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::CStr;
-use core::mem;
 use core::ptr;
 use libc::{c_char, c_int};
 use std::fs::File;
@@ -150,11 +149,6 @@ pub unsafe fn histcmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut pat: *mut c_char = ptr::null_mut();
     let mut repl: *mut c_char = ptr::null_mut();
     static mut active: c_int = 0;
-    let mut jmploc: crate::error::jmploc = mem::zeroed();
-    // C leaves this uninitialised (`struct jmploc *volatile savehandler;`);
-    // Rust needs it definitely initialised before the setjmp branch reads
-    // it, and nothing can longjmp here before it is assigned.
-    let mut savehandler: *mut crate::error::jmploc = ptr::null_mut();
     let mut editfile: [c_char; MAXPATHLEN + 1] = [0; MAXPATHLEN + 1];
     let mut edit_file: Option<File> = None;
     // The `(void) &var` statements at src/histedit.c:196-210 exist only to
@@ -193,12 +187,11 @@ pub unsafe fn histcmd(args: &[&BStr]) -> Result<Flow, Error> {
      * The C arms a handler here (`if (setjmp(jmploc.loc)) { ... }`) and
      * leaves it installed for *the whole rest of the function* — there is
      * no `out:` label, and `handler` is deliberately not restored on the
-     * normal path (that dangling `handler` is the C's, and is preserved).
-     * Handlers in this port are established by `eval::setjmp_catch`, so
-     * everything the C guards has to live in the closure and the non-zero
-     * arm becomes the code after the call. When the guard is not entered
-     * (`fc -l`), the C runs the same tail with no handler installed, so
-     * the closure is called directly instead.
+     * normal path, which leaves it dangling into a returned frame. That
+     * was reproduced bug-for-bug while handlers existed; there are none
+     * now, so the hazard is gone rather than preserved. What survives is
+     * the shape: the guarded body is a closure, and what the C's non-zero
+     * arm did is the code after the call.
      */
     let executing: bool = lflg == 0 || !editor.is_null() || sflg != 0;
     if executing {
@@ -207,18 +200,10 @@ pub unsafe fn histcmd(args: &[&BStr]) -> Result<Flow, Error> {
         /*
          * Catch interrupts to reset active counter and
          * cleanup temp files.
-         *
-         * `savehandler = handler` is the C's first statement after
-         * `setjmp` returns 0; hoisting it above the `setjmp_catch` call
-         * is invisible (nothing can jump to `jmploc` before `handler`
-         * points at it) and is what lets the cleanup arm read it.
          */
-        savehandler = crate::error::handler;
     }
-    let jl: *mut crate::error::jmploc = ptr::addr_of_mut!(jmploc);
     let mut body = || {
         if executing {
-            crate::error::handler = jl;
             active += 1;
             if active > MAXHISTLOOPS {
                 active = 0;
@@ -419,37 +404,18 @@ pub unsafe fn histcmd(args: &[&BStr]) -> Result<Flow, Error> {
     };
 
     if executing {
-        /* What this frame still catches is the interrupt, and only the
-         * interrupt. `exit` and the `set -e` abort come back as
-         * `Flow::Exit` now, and a diagnostic as `Err`; both take the same
-         * cleanup as before -- lowering `active` and unlinking the
-         * temporary file, which is the only filesystem side effect on any
-         * catch path in the shell -- and then leave as values. EXINT is
-         * still a jump until step F, so the `setjmp_catch` stays, and its
-         * arm re-raises rather than returning.
-         *
-         * Three ways out of one cleanup path. That is what an honest
-         * hybrid looks like while one of the four exception codes is still
-         * an exception. */
-        let mut outcome: Result<Flow, Error> = Ok(Flow::Done(0));
-        let jumped = crate::eval::setjmp_catch(jl, || {
-            outcome = body();
-        }) != 0;
-
-        let left_early = jumped || !matches!(outcome, Ok(Flow::Done(_)));
-        if left_early {
+        /* The C arms a handler here so that an exception out of
+         * `evalstring` still lowers `active` and unlinks the temporary
+         * file -- the only filesystem side effect on any catch path in
+         * the shell. Everything that used to arrive as an exception is a
+         * value now, so the cleanup runs on the one path that is not a
+         * plain success and the frame itself is gone. */
+        let outcome = body();
+        if !matches!(outcome, Ok(Flow::Done(_))) {
             active = 0;
             drop(edit_file.take());
             if editfile[0] != 0 {
                 libc::unlink(editfile.as_ptr());
-            }
-            crate::error::handler = savehandler;
-            if jumped {
-                debug_assert!(
-                    crate::error::exception != crate::error::EXERROR,
-                    "an EXERROR reached histcmd as a jump"
-                );
-                crate::error::raise_longjmp(crate::error::handler, 1);
             }
             return outcome;
         }

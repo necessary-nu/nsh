@@ -331,13 +331,22 @@ pub(crate) unsafe fn xxtcsetpgrp(pgrp: pid_t) -> Result<(), Error> {
 
 // [spec:dash:def:jobs.setjobctl-fn]
 // [spec:dash:sem:jobs.setjobctl-fn]
-pub unsafe fn setjobctl(on: c_int) {
+/// Turn job control on or off.
+///
+/// Returns its diagnostic rather than raising it. Two of its three
+/// callers are teardown -- `exitshell`, and `optschanged` when
+/// `poplocalvars` restores a `local -` option set -- and 4.3's rule is
+/// that teardown does not become fallible; the `Result` is here so the
+/// callers that *are* ordinary code (`set -m`, `exec`, `procargs`) keep
+/// dash's behaviour of abandoning the command, and the teardown callers
+/// drop it where the C already swallowed it.
+pub unsafe fn setjobctl(on: c_int) -> Result<(), Error> {
     let mut on: c_int = on;
     let mut pgrp: c_int = -1;
     let mut fd: c_int;
 
     if on == jobctl || crate::shellmain::rootshell() == 0 {
-        return;
+        return Ok(());
     }
     if on != 0 {
         let ofd: c_int;
@@ -346,8 +355,9 @@ pub unsafe fn setjobctl(on: c_int) {
          * a failure here longjmps exactly as the C's `sh_open` did. Making
          * teardown fallible is the shape docs/errors-are-values.md 4.3
          * argues against. */
-        ofd = crate::redir::sh_open(_PATH_TTY.as_ptr() as *const c_char, libc::O_RDWR, 1)
-            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
+        /* `mayfail = 1`, so the only thing this can hand back is an
+         * interrupt taken at its EINTR poll. */
+        ofd = crate::redir::sh_open(_PATH_TTY.as_ptr() as *const c_char, libc::O_RDWR, 1)?;
         fd = ofd;
         'after_dowhile: {
             'out_lbl: {
@@ -375,12 +385,32 @@ pub unsafe fn setjobctl(on: c_int) {
                             break 'out_lbl; // goto out
                         }
                     }
-                    fd = crate::redir::savefd(fd, ofd).unwrap_or_else(|e| {
-                        crate::error::raise_reported(crate::error::EXERROR, e)
-                    });
+                    fd = crate::redir::savefd(fd, ofd)?;
                     loop {
                         /* while we are in the background */
-                        pgrp = libc::tcgetpgrp(fd);
+                        loop {
+                            pgrp = libc::tcgetpgrp(fd);
+                            /* The 8.3 audit's one real finding: this is
+                             * the only EINTR-capable syscall in this file
+                             * whose -1 is handled without ever reading
+                             * `errno`, and a -1 here turns job control off
+                             * for the rest of the session with a warning.
+                             * Before step F an interrupt arriving during
+                             * `setjobctl` left by longjmp and never
+                             * reached this test; now the call returns
+                             * EINTR and would be read as "can't access
+                             * tty". Retry, which is what every other
+                             * EINTR site in the shell does when the
+                             * interrupt is not yet due. There is no poll
+                             * here because `setjobctl` is infallible and
+                             * stays so -- it is reached from `exitshell`'s
+                             * teardown -- so the interrupt waits for the
+                             * next real poll site, which is where it would
+                             * have waited anyway. */
+                            if !(pgrp < 0 && errno() == libc::EINTR) {
+                                break;
+                            }
+                        }
                         if pgrp < 0 {
                             break 'close_lbl; // goto close
                         }
@@ -406,7 +436,7 @@ pub unsafe fn setjobctl(on: c_int) {
             crate::options::optlist[crate::options::mflag] = 0;
             on = 0;
             let _ = on;
-            return;
+            return Ok(());
         }
         initialpgrp = pgrp;
         pgrp = crate::shellmain::rootpid;
@@ -421,10 +451,7 @@ pub unsafe fn setjobctl(on: c_int) {
     crate::trap::setsignal(libc::SIGTTIN);
     if fd >= 0 {
         libc::setpgid(0, pgrp);
-        /* The same teardown reason as the `sh_open` above: `setjobctl` is
-         * reached from `exitshell`, so it stays infallible and bridges. */
-        xtcsetpgrp(fd, pgrp)
-            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
+        xtcsetpgrp(fd, pgrp)?;
 
         if on == 0 {
             libc::close(fd);
@@ -434,6 +461,7 @@ pub unsafe fn setjobctl(on: c_int) {
 
     ttyfd = fd;
     jobctl = on;
+    Ok(())
 }
 
 // [spec:dash:def:jobs.jobno-fn]
@@ -585,13 +613,16 @@ pub(crate) unsafe fn showjob(out: *mut Output, jp: usize, mode: c_int) {
 
 // [spec:dash:def:jobs.showjobs-fn]
 // [spec:dash:sem:jobs.showjobs-fn]
-pub unsafe fn showjobs(out: *mut Output, mode: c_int) {
+pub unsafe fn showjobs(out: *mut Output, mode: c_int) -> Result<(), Error> {
     let mut jp: Option<usize>;
 
     /* TRACE(("showjobs(%x) called\n", mode)); */
 
     /* If not even one job changed, there is nothing to do */
-    dowait(DOWAIT_NONBLOCK, None);
+    /* `DOWAIT_NONBLOCK`, so `wait3` cannot block and the poll inside it
+     * has nothing to notice; the `?` is the type saying so rather than a
+     * path anyone expects to take. */
+    dowait(DOWAIT_NONBLOCK, None)?;
 
     jp = curjob;
     /* `showjob` may `freejob` the entry this walk is standing on.
@@ -603,6 +634,7 @@ pub unsafe fn showjobs(out: *mut Output, mode: c_int) {
         }
         jp = jobs()[i].prev_job;
     }
+    Ok(())
 }
 
 /*
@@ -852,6 +884,30 @@ unsafe fn growjobtab() -> usize {
  * Called with interrupts off.
  */
 
+/// What `forkchild` does with a diagnostic it cannot return.
+///
+/// `forkchild` runs in the child, and under `vforkexec` in a child that
+/// *shares the parent's stack*. `docs/errors-are-values.md` §2.5 calls
+/// that a hard boundary rather than a wrinkle: an `Err` returned from
+/// here would travel through frames the parent owns and unwind them under
+/// it. So this is a terminus, and it is the same terminus the C had --
+/// `exraise`'s two arms, written where the boundary is.
+///
+/// Vforked: `_exit` immediately, before anything can run a destructor on
+/// the parent's objects. Otherwise: the child ends the way `main`'s
+/// handler ends every forked child, which `forkchild`'s own `shlvl += 1`
+/// is what guarantees (see `shellmain::exit_from_child`). The diagnostic
+/// has already been written either way.
+#[cold]
+unsafe fn forkchild_fatal(e: Error) -> ! {
+    if vforked != 0 {
+        drop(e);
+        crate::shell::flush_coverage();
+        libc::_exit(crate::eval::exitstatus);
+    }
+    crate::shellmain::exit_from_child(Err(e))
+}
+
 // [spec:dash:def:jobs.forkchild-fn]
 // [spec:dash:sem:jobs.forkchild-fn]
 //
@@ -898,15 +954,7 @@ unsafe fn forkchild(jp: Option<usize>, n: Option<&Node>, mode: c_int) {
         /* This can fail because we are doing it in the parent also */
         libc::setpgid(0, pgrp);
         if mode == FORK_FG {
-            /* In the child, and under `vforkexec` in a child that shares
-             * the parent's stack. An `Err` returned from here would
-             * propagate through frames the parent owns, which
-             * docs/errors-are-values.md 2.5 names as a hard boundary, so
-             * `forkchild` stays infallible and bridges. In the vforked
-             * case the bridge is a `_exit` before it is a jump. */
-            xxtcsetpgrp(pgrp).unwrap_or_else(|e| {
-                crate::error::raise_reported(crate::error::EXERROR, e)
-            });
+            xxtcsetpgrp(pgrp).unwrap_or_else(|e| forkchild_fatal(e));
         }
         crate::trap::setsignal(libc::SIGTSTP);
         crate::trap::setsignal(libc::SIGTTOU);
@@ -921,13 +969,8 @@ unsafe fn forkchild(jp: Option<usize>, n: Option<&Node>, mode: c_int) {
             let sin: c_int = crate::streams::streams().stdin;
             libc::close(sin);
             let f: c_int =
-                /* In the forked child. An `Err` returned from here would
-                 * propagate through frames the parent also owns, so the
-                 * child raises as the C does; see 2.5. */
                 crate::redir::sh_open(_PATH_DEVNULL.as_ptr() as *const c_char, libc::O_RDONLY, 0)
-                    .unwrap_or_else(|e| {
-                        crate::error::raise_reported(crate::error::EXERROR, e)
-                    });
+                    .unwrap_or_else(|e| forkchild_fatal(e));
             if f != sin {
                 libc::dup2(f, sin);
                 libc::close(f);
@@ -1118,7 +1161,7 @@ pub unsafe fn waitforjob(jp: Option<usize>) -> Result<c_int, Error> {
             DOWAIT_NONBLOCK
         },
         jp,
-    );
+    )?;
     let Some(jp) = jp else {
         return Ok(exitstatus);
     };
@@ -1150,7 +1193,7 @@ pub unsafe fn waitforjob(jp: Option<usize>) -> Result<c_int, Error> {
 
 // [spec:dash:def:jobs.waitone-fn]
 // [spec:dash:sem:jobs.waitone-fn]
-unsafe fn waitone(block: c_int, jobp: Option<usize>) -> c_int {
+unsafe fn waitone(block: c_int, jobp: Option<usize>) -> Result<c_int, Error> {
     let pid: c_int;
     let mut status: c_int = 0;
     let mut jp: Option<usize>;
@@ -1159,7 +1202,7 @@ unsafe fn waitone(block: c_int, jobp: Option<usize>) -> c_int {
 
     INTOFF();
     /* TRACE(("dowait(%d) called\n", block)); */
-    pid = waitproc(block, &mut status);
+    pid = waitproc(block, &mut status)?;
     /* TRACE(("wait returns pid %d, status=%d\n", pid, status)); */
     'out_lbl: {
         if pid <= 0 {
@@ -1237,12 +1280,23 @@ unsafe fn waitone(block: c_int, jobp: Option<usize>) -> c_int {
                 (&mut *crate::output::stderr()).write_all(CStr::from_ptr(s.as_ptr()).to_bytes());
         }
     }
-    pid
+    /* This frame brackets the whole wait in INTOFF/INTON, so the poll
+     * inside `waitproc` cannot fire under it -- and the C did not deliver
+     * there either. The C delivered at the `INTON` above, when the
+     * counter reached zero, and this is that instruction. Putting the
+     * poll at the call site rather than inside `INTON` is what keeps
+     * `INTON` infallible (§4.3) without moving the delivery point for the
+     * one path where it would have been visible: a ^C during a foreground
+     * command that does not itself die of the signal. */
+    if let Some(e) = crate::error::poll_interrupt() {
+        return Err(e);
+    }
+    Ok(pid)
 }
 
 // [spec:dash:def:jobs.dowait-fn]
 // [spec:dash:sem:jobs.dowait-fn]
-pub(crate) unsafe fn dowait(block: c_int, jp: Option<usize>) -> c_int {
+pub(crate) unsafe fn dowait(block: c_int, jp: Option<usize>) -> Result<c_int, Error> {
     let gotchld: c_int = core::ptr::read_volatile(addr_of_mut!(crate::trap::gotsigchld));
     let mut rpid: c_int;
     let mut pid: c_int;
@@ -1253,13 +1307,13 @@ pub(crate) unsafe fn dowait(block: c_int, jp: Option<usize>) -> c_int {
     }
 
     if block == DOWAIT_NONBLOCK && gotchld == 0 {
-        return 1;
+        return Ok(1);
     }
 
     rpid = 1;
 
     loop {
-        pid = waitone(block, jp);
+        pid = waitone(block, jp)?;
         rpid &= (pid != 0) as c_int;
 
         block &= !DOWAIT_WAITCMD_ALL;
@@ -1271,7 +1325,7 @@ pub(crate) unsafe fn dowait(block: c_int, jp: Option<usize>) -> c_int {
         }
     }
 
-    rpid
+    Ok(rpid)
 }
 
 /*
@@ -1291,7 +1345,7 @@ pub(crate) unsafe fn dowait(block: c_int, jp: Option<usize>) -> c_int {
 
 // [spec:dash:def:jobs.waitproc-fn]
 // [spec:dash:sem:jobs.waitproc-fn]
-unsafe fn waitproc(block: c_int, status: *mut c_int) -> c_int {
+unsafe fn waitproc(block: c_int, status: *mut c_int) -> Result<c_int, Error> {
     let mut oldmask: libc::sigset_t = core::mem::zeroed();
     let mut flags: c_int = if block == DOWAIT_BLOCK {
         0
@@ -1319,6 +1373,12 @@ unsafe fn waitproc(block: c_int, status: *mut c_int) -> c_int {
             if !(err < 0 && errno() == libc::EINTR) {
                 break;
             }
+            /* One of the three EINTR sites the C retries blindly, and the
+             * one that matters for a ^C during a foreground command that
+             * does not itself die of it. */
+            if let Some(e) = crate::error::poll_interrupt() {
+                return Err(e);
+            }
         }
 
         if err != 0 {
@@ -1344,7 +1404,7 @@ unsafe fn waitproc(block: c_int, status: *mut c_int) -> c_int {
         }
     }
 
-    err
+    Ok(err)
 }
 
 /*

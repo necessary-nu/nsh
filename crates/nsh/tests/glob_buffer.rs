@@ -46,17 +46,6 @@ fn out_of(script: &str) -> Vec<u8> {
         let pid = libc::fork();
         assert!(pid >= 0, "fork failed");
         if pid == 0 {
-            let default_hook = std::panic::take_hook();
-            std::panic::set_hook(Box::new(move |info| {
-                if info
-                    .payload()
-                    .downcast_ref::<nsh::error::Longjmp>()
-                    .is_some()
-                {
-                    return;
-                }
-                default_hook(info);
-            }));
             let lent = streams::install(Streams {
                 stdin: 0,
                 stdout: w,

@@ -227,12 +227,21 @@ Three choices worth defending:
   needing the final taxonomy before the first commit. `Other`'s `message`
   is documented as unstable, so promotion out of it is not a break.
 * **`Interrupted` is an `Err`, and the library does not die of it.**
-  `error.rs:250-263`'s `onint` currently re-raises SIGINT with `SIG_DFL`
-  when the shell is not an interactive root shell — the library killing the
-  process. That moves to the frontend: the library returns
-  `Err(Error::Interrupted(Signal::INT))` and `nsh-cli` re-raises. It is a
-  fifth site for P8 that `docs/idiomatization.md` §1.7 does not count,
-  because it is `raise` rather than `_exit`.
+  `onint` re-raises SIGINT with `SIG_DFL` when the shell is not an
+  interactive root shell — the library killing the process. That should
+  move to the frontend: the library returns `Err(Error::Interrupted)` and
+  `nsh-cli` re-raises. It is a fifth site for P8 that
+  `docs/idiomatization.md` §1.7 does not count, because it is `raise`
+  rather than `_exit`.
+
+  **Half of this is done.** `errors-are-values` step F made the interrupt
+  a value — `Error::Interrupted { signal }`, the first variant promoted
+  out of `Other` — and `onint` returns it instead of raising. What has
+  *not* moved is the `SIG_DFL`-and-`raise`, which is still in the library:
+  it is a frontend-boundary question rather than an exception-mechanism
+  one, and folding it in would have made step F two subjects. The
+  `Signal` newtype is `public-api`'s; the variant carries a `c_int` until
+  then.
 
 ### 3.5 `set -e` stays a flag on the call (§7.4, resolved)
 
@@ -725,13 +734,20 @@ guess about external commands are all superseded above.
    commands under `from_fds` **before** building the table, and treating a
    failure as a reason to keep `install` rather than to weaken the tests.
 
-2. **Whether `EXEND` and `EXEXIT` really differ only in which status is
-   taken.** §3.5 collapses them into `Flow::Exit`. Two sites suggest a
-   possible second difference: `init.rs:65-72` keys `exitreset` on
-   `exception == EXEXIT`, and `shellmain.rs:219-227` tests them together
-   but reaches that test from different raise sites. *Resolved by:* a
-   reading of `exitreset` and `postexitreset` during `errors-are-values`,
-   before `Flow` is written.
+2. ~~**Whether `EXEND` and `EXEXIT` really differ only in which status is
+   taken.**~~ **Resolved, and §3.5's collapse is right.**
+   `errors-are-values` did the reading before writing `Flow`, and found a
+   stronger answer than the reading this entry asked for:
+   `error::exception` was read in exactly *three* places in the crate —
+   `evalcommand`'s built-in arm, `main`'s handler, and `init::exitreset`.
+   Only the last distinguishes the two codes, and all it does with the
+   difference is decide whether to restore `savestatus`. So they differ
+   in one place and in one bit, which is `Flow::Exit`'s `by_exitcmd`, and
+   §3.5's "if the conversion finds a second difference, `Exit` grows a
+   field" does not apply. `docs/errors-are-values.md` §0.3 has the
+   working; the audit is worth more than the conclusion, because a claim
+   about two enum values compared in three places is checkable by reading
+   three lines.
 
 3. **The unwind-floor divergence in §4.2.** `run` making itself the floor
    differs from dash for `sh -ic`, and the differential corpus does not

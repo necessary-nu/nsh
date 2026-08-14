@@ -26,7 +26,6 @@
 //! earlier note here claimed the two disagreed, which was wrong.
 
 use libc::c_void;
-use core::ptr::addr_of_mut;
 
 use crate::nodes::Node;
 
@@ -105,10 +104,11 @@ pub unsafe fn forkreset(n: Option<&Node>) {
     /* from input.c: */
     crate::input::mkinit_forkreset();
 
-    /* from main.c: */
-    {
-        crate::error::handler = addr_of_mut!(crate::shellmain::main_handler);
-    }
+    /* from main.c: `handler = &main_handler`, which pointed the child at
+     * `main`'s catch frame so an exception raised in a subshell landed at
+     * `exit:`. There are no handlers; a forked child reaches the same
+     * place by returning, or by `shellmain::exit_from_child` where it
+     * cannot return. */
 
     /* from redir.c: */
     crate::redir::mkinit_forkreset();

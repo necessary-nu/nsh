@@ -13,7 +13,7 @@ use std::io::Write;
 /// `sig_atomic_t` — `int` on every platform dash supports.
 pub type sig_atomic_t = c_int;
 
-use crate::error::{INTOFF, INTON, jmploc};
+use crate::error::{INTOFF, INTON};
 use crate::error::Error;
 use crate::eval::{Flow, SKIPFUNC, SKIPFUNCDEF, evalskip, exitstatus, savestatus};
 use crate::mystring::nullstr;
@@ -254,23 +254,30 @@ pub unsafe fn ignoresig(signo: c_int) {
 
 // [spec:dash:def:trap.onsig-fn]
 // [spec:dash:sem:trap.onsig-fn]
-/* `extern "C-unwind"`, not `extern "C"`, and this is the whole reason
- * an interactive port survived `kill -INT $$` only in the C.
+/* `extern "C"` again, and getting back here is one of the things step F
+ * was for.
  *
- * `onint()` below does not return: in the C it `longjmp`s out of the
- * signal handler back to whichever handler is armed, which for an
- * interactive shell is `main_handler`. That is how dash abandons a
- * blocked `read()` in `preadfd` — the `EINTR` path there just retries,
- * so an interrupt that merely sets `intpending` and returns would be
- * swallowed and the shell would sit there.
+ * This function used to be `extern "C-unwind"`, and the comment it
+ * carried is worth keeping because it records a real bug rather than a
+ * precaution. In the C, `onint()` does not return: it `longjmp`s out of
+ * the signal handler to whichever handler is armed, which for an
+ * interactive shell is `main_handler`. The port raised that jump as an
+ * unwind, Rust makes unwinding out of an `extern "C"` frame an abort,
+ * and so an interactive port died of SIGABRT with status 134 on
+ * `kill -INT $$` where dash printed a fresh prompt. `extern "C-unwind"`
+ * was the fix: the unwinder walks the kernel signal frame through the
+ * `__restore_rt` trampoline's CFI, the same mechanism that lets a C++
+ * exception leave a handler under `-fnon-call-exceptions`.
  *
- * The port raises that jump as an unwind. Rust makes unwinding out of
- * an `extern "C"` frame an abort, so the handler took the process down
- * with SIGABRT (status 134) instead. `extern "C-unwind"` is the ABI
- * that permits it; the unwinder walks the kernel signal frame through
- * the `__restore_rt` trampoline's CFI, the same mechanism that lets a
- * C++ exception leave a handler under `-fnon-call-exceptions`. */
-pub unsafe extern "C-unwind" fn onsig(signo: c_int) {
+ * Depending on that is not something a library may ask of an embedder,
+ * and it is incompatible with `panic = "abort"` — which is the profile
+ * constraint [dec:nsh:errors-are-values] exists to remove, so leaving
+ * the interrupt as an unwind would have made the decision's first
+ * accepted consequence false in the one case a user is most likely to
+ * hit. The handler now does one store and returns, which is
+ * async-signal-safe by construction and is what
+ * [dec:nsh:host-owns-signals]'s `SignalSink` will formalise. */
+pub unsafe extern "C" fn onsig(signo: c_int) {
     if crate::jobs::vforked != 0 && libc::getpid() != crate::jobs::vforked {
         return;
     }
@@ -286,9 +293,15 @@ pub unsafe extern "C-unwind" fn onsig(signo: c_int) {
     pending_sig = signo;
 
     if signo == libc::SIGINT && (*addr_of!(trap))[libc::SIGINT as usize].is_none() {
-        if crate::error::suppressint == 0 {
-            crate::error::onint();
-        }
+        /* `if (!suppressint) onint();` is gone. The C had two delivery
+         * modes and only one of them was asynchronous; now neither is.
+         * The handler stores, and the shell takes delivery at a poll
+         * site it reached on its own -- one of the EINTR returns, or
+         * `dotrap`, which `evaltree` calls on every command.
+         *
+         * `sa_flags = 0` at `setsignal` below is why there is always a
+         * poll site to reach: dash never sets SA_RESTART, so every
+         * interruptible syscall returns EINTR when a signal arrives. */
         crate::error::intpending = 1;
     }
 }
@@ -305,6 +318,16 @@ pub unsafe fn dotrap() -> Result<Flow, Error> {
     let mut i: c_int;
     let mut status: c_int;
     let last_status: c_int;
+
+    /* The poll site the shell reaches most often: `evaltree` calls
+     * `dotrap` before every command and again at its `out:`, so an
+     * interrupt taken anywhere the shell was not looking is delivered at
+     * the next command boundary at the latest. It is tested before
+     * `pending_sig`, because an *untrapped* SIGINT sets `intpending` and
+     * has no trap action for the loop below to run. */
+    if let Some(e) = crate::error::poll_interrupt() {
+        return Err(e);
+    }
 
     if pending_sig == 0 {
         return Ok(Flow::Done(0));
@@ -393,53 +416,45 @@ pub unsafe fn setinteractive(on: c_int) {
 // [spec:dash:def:trap.exitshell-fn]
 // [spec:dash:sem:trap.exitshell-fn]
 pub unsafe fn exitshell() -> ! {
-    let mut loc: jmploc = jmploc::new();
-    let locp: *mut jmploc = addr_of_mut!(loc);
-
     savestatus = exitstatus;
     /* `TRACE(("pid %d, exitshell(%d)\n", getpid(), savestatus));` —
      * `#ifdef DEBUG` in `shell.h`, and the dash build does not define it. */
-    /* `if (setjmp(loc.loc)) goto out;` — the body below is the fall-through. */
     /* Whether the EXIT trap ended by running out or by calling `exit`
      * itself. It is the C's `exception == EXEXIT` at the `out:` label, and
      * the two ways of reaching `out:` are exactly the two things
      * `exitreset` tests: the trap ran to the end, which is the
      * `evalskip = SKIPFUNCDEF` below, or the trap exited, which is this. */
     let mut by_exitcmd = false;
-    let by_exitcmdp: *mut bool = addr_of_mut!(by_exitcmd);
-    crate::eval::setjmp_catch(locp, || {
-        crate::error::handler = locp;
-        'out: {
-            /* `trap[0] = NULL` with no free: the C leaks the EXIT action on
-             * purpose so `evalstring` can still read it.  Taking it keeps the
-             * action alive for exactly as long and gives the buffer back. */
-            let p = (*addr_of_mut!(trap))[0].take();
-            if let Some(p) = p {
-                if ptrap != 0 {
+    'out: {
+        /* `trap[0] = NULL` with no free: the C leaks the EXIT action on
+         * purpose so `evalstring` can still read it.  Taking it keeps the
+         * action alive for exactly as long and gives the buffer back. */
+        let p = (*addr_of_mut!(trap))[0].take();
+        if let Some(p) = p {
+            if ptrap != 0 {
+                break 'out;
+            }
+            evalskip = 0;
+            let mut p = cbytes(&p);
+            /* An error in the EXIT trap is reported and dropped -- the
+             * shell is already exiting, and the C's `longjmp` landed at
+             * `out:` with nothing left to inspect it. What must not be
+             * dropped is an `exit` *inside* the trap, because it names the
+             * status the shell leaves with. */
+            match crate::eval::evalstring(p.as_mut_ptr() as *mut c_char, 0) {
+                Ok(crate::eval::Flow::Exit { by_exitcmd: b }) => {
+                    by_exitcmd = b;
                     break 'out;
                 }
-                evalskip = 0;
-                let mut p = cbytes(&p);
-                /* An error in the EXIT trap is reported and dropped: the
-                 * shell is already exiting and the C's `longjmp` landed at
-                 * `out:` with nothing left to inspect it. What must not be
-                 * dropped is an `exit` *inside* the trap, because it names
-                 * the status the shell leaves with. */
-                match crate::eval::evalstring(p.as_mut_ptr() as *mut c_char, 0) {
-                    Ok(crate::eval::Flow::Exit { by_exitcmd: b }) => {
-                        *by_exitcmdp = b;
-                        break 'out;
-                    }
-                    Ok(crate::eval::Flow::Done(_)) => {}
-                    Err(e) => {
-                        drop(e);
-                        break 'out;
-                    }
+                Ok(crate::eval::Flow::Done(_)) => {}
+                Err(e) => {
+                    drop(e);
+                    break 'out;
                 }
-                evalskip = SKIPFUNCDEF;
             }
+            evalskip = SKIPFUNCDEF;
         }
-    });
+    }
     /* out: */
     crate::init::exitreset(by_exitcmd);
     crate::init::postexitreset();
@@ -447,9 +462,11 @@ pub unsafe fn exitshell() -> ! {
      * Disable job control so that whoever had the foreground before we
      * started can get it back.
      */
-    crate::eval::setjmp_catch(locp, || {
-        crate::jobs::setjobctl(0);
-    });
+    /* The C wraps this in a second `setjmp(loc.loc)` for one reason: a
+     * raise inside the job-control teardown must not prevent the `_exit`
+     * below. Dropping the diagnostic is that frame, exactly -- it caught
+     * and went on -- and it is why the frame itself can go. */
+    drop(crate::jobs::setjobctl(0));
     crate::output::flushall();
     crate::shell::flush_coverage();
     libc::_exit(exitstatus);

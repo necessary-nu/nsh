@@ -107,10 +107,9 @@ macro_rules! INTOFF {
 
 macro_rules! INTON {
     () => {{
+        /* In step with `error::INTON`, including the `onint()` it no
+         * longer makes -- see there for why the delivery moved. */
         crate::error::suppressint -= 1;
-        if crate::error::suppressint == 0 && crate::error::intpending != 0 {
-            crate::error::onint();
-        }
     }};
 }
 

@@ -27,7 +27,10 @@ pub unsafe fn setcmd(args: &[&BStr]) -> Result<Flow, Error> {
     }
     INTOFF();
     let scan = options(args, 1, false)?;
-    optschanged();
+    /* The fourth `?` to return between this frame's INTOFF and its INTON,
+     * and left leaking with the other three: 2.4 is explicit that pairing
+     * them would move the instruction a pending SIGINT is delivered at. */
+    optschanged()?;
     if scan.next < args.len() {
         setparam(&args[scan.next..]);
     }

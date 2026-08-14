@@ -974,19 +974,37 @@ unsafe fn poplocalvars() {
         match lvp {
             localvar::Options(saved) => {
                 optlist = saved;
-                optschanged();
+                /* Teardown, and 4.3's rule is that teardown does not
+                 * become fallible: cleanup that can fail while handling a
+                 * failure would make every unwind path decide what to do
+                 * with an error raised while handling an error. The
+                 * diagnostic has already been written by the time it gets
+                 * here; what the C added was a longjmp out of the middle
+                 * of restoring a `local -` option set, and that is what
+                 * goes. */
+                drop(optschanged());
             }
             localvar::Unset { vp } => {
                 (*vp).flags &= !(VSTRFIXED | VREADONLY);
                 /* `setvar` copies the name out before `setvareq_text` can
                  * drop the buffer it was read from. */
-                /* Teardown stays infallible: `unsetvar` of a read-only
-                 * variable raises, and the C longjmps straight out of
-                 * `poplocalvars`. The bridge reproduces that rather than
-                 * making every unwind path fallible -- the shape
-                 * docs/errors-are-values.md 4.3 argues against. */
-                unsetvar((*vp).text.as_ptr())
-                    .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
+                /* The C longjmps out of `poplocalvars` when this raises,
+                 * and it cannot raise. `unsetvar` reaches `setvar`, which
+                 * has exactly two failure paths: a malformed name, which
+                 * this text cannot have because it came out of the
+                 * variable table; and the read-only test in
+                 * `setvareq_text`, which reads the flags of the entry
+                 * `findvar` returns -- and that is this very `vp`, whose
+                 * VREADONLY was cleared on the line above. The assertion
+                 * is the claim; the drop is what happens if it is ever
+                 * wrong, and it keeps the rest of the teardown running
+                 * rather than abandoning it. */
+                let unset = unsetvar((*vp).text.as_ptr());
+                debug_assert!(
+                    unset.is_ok(),
+                    "poplocalvars cleared VREADONLY on the entry unsetvar will find"
+                );
+                drop(unset);
             }
             localvar::Saved { vp, flags, text } => {
                 /* The C frees `vp->text` first when the flags say the

@@ -40,13 +40,6 @@ fn run_shell(script: &str, prepare: impl FnOnce()) -> i32 {
             // prints a panic banner for each. The `dash` binary filters
             // them in `main`; do the same so the test's stderr is the
             // shell's, not the runtime's.
-            let default_hook = std::panic::take_hook();
-            std::panic::set_hook(Box::new(move |info| {
-                if info.payload().downcast_ref::<nsh::error::Longjmp>().is_some() {
-                    return;
-                }
-                default_hook(info);
-            }));
             prepare();
             nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, streams::streams());
         }

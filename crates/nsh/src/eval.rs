@@ -36,7 +36,7 @@ use std::ffi::{CStr, CString};
 use std::io::Write as _;
 
 use crate::builtins::{BUILTIN_ASSIGN, BUILTIN_REGULAR, BUILTIN_SPECIAL, Builtin, builtincmd};
-use crate::error::{FORCEINTON, INTOFF, INTON, jmploc};
+use crate::error::{FORCEINTON, INTOFF, INTON};
 use crate::exec::{CMDBUILTIN, CMDFUNCTION, CMDNORMAL, CMDUNKNOWN, DO_ERR, DO_NOFUNC, DO_REGBLTIN};
 use crate::exec::{cmdentry, find_command, param, shellexec};
 use crate::expand::{EXP_FULL, EXP_MBCHAR, EXP_REDIR, EXP_TILDE, EXP_VARTILDE};
@@ -193,35 +193,6 @@ unsafe fn iflag() -> c_int {
     crate::options::optlist[crate::options::iflag] as c_int
 }
 
-// ---------------------------------------------------------------------
-// setjmp/longjmp stand-in (see the module comment)
-// ---------------------------------------------------------------------
-
-/// Literal stand-in for `if ((v = setjmp(loc))) goto label; body label:`.
-///
-/// Runs `body` with `loc` armed as a `longjmp` target. Returns 0 if the
-/// body ran to completion, or the value passed to `longjmp` if one
-/// unwound to exactly this `loc`. A `longjmp` aimed at some *other*
-/// `jmploc`, and any panic that is not a `longjmp` at all, is re-raised
-/// unchanged so it keeps propagating outwards.
-pub(crate) unsafe fn setjmp_catch<F: FnOnce()>(loc: *mut jmploc, body: F) -> c_int {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(body)) {
-        Ok(()) => 0,
-        Err(payload) => match payload.downcast::<crate::error::Longjmp>() {
-            Ok(lj) => {
-                if lj.loc == loc {
-                    lj.val
-                } else {
-                    std::panic::resume_unwind(lj as Box<dyn std::any::Any + Send>)
-                }
-            }
-            Err(other) => std::panic::resume_unwind(other),
-        },
-    }
-}
-
-// ---------------------------------------------------------------------
-
 /*
  * Called to reset things after an exception.
  *
@@ -353,6 +324,10 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> Result<Flow, Error> {
                                  * command's status is the 2 the failure
                                  * took (docs/api-design.md §3.3). */
                                 match crate::redir::redirectsafe(&r.redirect, REDIR_PUSH) {
+                                    /* An interrupt is not a redirection
+                                     * error and is not swallowed with
+                                     * one. */
+                                    Err(e) if e.is_interrupt() => return Err(e),
                                     Err(e) => {
                                         debug_assert_eq!(
                                             e.status(),
@@ -1196,6 +1171,9 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<Flow, Error> {
      * cannot be re-raised. */
     let mut redir_err: Option<Error> = None;
     match crate::redir::redirectsafe(&c.redirect, REDIR_PUSH | REDIR_SAVEFD2) {
+        /* Same as the `NREDIR` arm: an interrupt leaves rather than
+         * becoming this command's status. */
+        Err(e) if e.is_interrupt() => return Err(e),
         Err(e) => {
             status = 2;
             redir_err = Some(e);
@@ -1236,7 +1214,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<Flow, Error> {
 
                 out = crate::output::previous_stderr();
                 inps4 = 1;
-                let prompt = crate::parser::expandstr(crate::var::ps4val());
+                let prompt = crate::parser::expandstr(crate::var::ps4val())?;
                 let _ = (&mut *out).write_all(CStr::from_ptr(prompt).to_bytes());
                 inps4 = 0;
                 sep = 0;
@@ -1289,7 +1267,11 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<Flow, Error> {
                         Ok(Flow::Done(_)) => {}
                         Ok(exit @ Flow::Exit { .. }) => return Ok(exit),
                         Err(e) => {
-                            if spclbltin > 0 {
+                            /* The C's `!(exception == EXERROR && spclbltin
+                             * <= 0)`. An interrupt is not an EXERROR and
+                             * was never swallowed here; now that it is a
+                             * value, saying so is a test on the value. */
+                            if spclbltin > 0 || e.is_interrupt() {
                                 return Err(e);
                             }
                             /* Reported already, and `evalbltin`'s epilogue
@@ -1384,65 +1366,47 @@ unsafe fn evalbltin(
     flags: c_int,
 ) -> Result<Flow, Error> {
     let savecmdname: Option<BString>; /* volatile */
-    let savehandler: *mut jmploc; /* volatile */
-    let mut jmploc_: jmploc = jmploc::new();
 
     savecmdname = core::mem::take(&mut *addr_of_mut!(commandname));
-    savehandler = crate::error::handler;
-    let jl: *mut jmploc = &mut jmploc_;
-    let mut outcome: Result<Flow, Error> = Ok(Flow::Done(0));
-    let outcomep: *mut Result<Flow, Error> = addr_of_mut!(outcome);
-    /* Still armed, and only for the interrupt. Everything a built-in can
-     * say -- a status, an exit, a diagnostic -- is in `outcome` now; what
-     * is left inside is EXINT, which is a jump until step F. The epilogue
-     * below is the C's `cmddone:` and runs on every path, as it must:
-     * `freestdout` and the two restores are what the unwind was skipping. */
-    let jumped = setjmp_catch(jl, || unsafe {
-        crate::error::handler = jl;
-        /* `commandname = argv[0]`, and NULL for the command that has no
-         * word at all -- the assignment-only one `bltin` stands for. */
-        commandname = args.first().map(|name| BString::from(<&BStr as AsRef<[u8]>>::as_ref(name)));
-        *outcomep = (|| -> Result<Flow, Error> {
-            let mut status: c_int = if cmd == crate::builtins::EVALCMD {
-                match crate::builtins::eval::evalcmd(args, flags)? {
-                    Flow::Done(status) => status,
-                    exit @ Flow::Exit { .. } => return Ok(exit),
-                }
-            } else {
-                let entry = (*cmd).builtin.expect("a builtin with no special entry");
-                match entry(args)? {
-                    Flow::Done(status) => status,
-                    exit @ Flow::Exit { .. } => return Ok(exit),
-                }
-            };
-            /* Every `?` and every `Flow::Exit` above skips the rest of
-             * this, exactly as the C's `goto cmddone` skipped it. */
-            crate::output::flushall();
-            if crate::output::outerr(crate::output::stdout()) != 0 {
-                let mut message = Vec::new();
-                if let Some(name) = &*addr_of!(commandname) {
-                    message.extend_from_slice(name);
-                }
-                message.extend_from_slice(b": I/O error");
-                crate::error::sh_warnx(&message);
+    /* `commandname = argv[0]`, and NULL for the command that has no word
+     * at all -- the assignment-only one `bltin` stands for. */
+    commandname = args.first().map(|name| BString::from(<&BStr as AsRef<[u8]>>::as_ref(name)));
+
+    let outcome = (|| -> Result<Flow, Error> {
+        let mut status: c_int = match if cmd == crate::builtins::EVALCMD {
+            crate::builtins::eval::evalcmd(args, flags)?
+        } else {
+            let entry = (*cmd).builtin.expect("a builtin with no special entry");
+            entry(args)?
+        } {
+            Flow::Done(status) => status,
+            exit @ Flow::Exit { .. } => return Ok(exit),
+        };
+        /* Every `?` and every `Flow::Exit` above skips the rest of this,
+         * exactly as the C's `goto cmddone` skipped it. */
+        crate::output::flushall();
+        if crate::output::outerr(crate::output::stdout()) != 0 {
+            let mut message = Vec::new();
+            if let Some(name) = &*addr_of!(commandname) {
+                message.extend_from_slice(name);
             }
-            status |= crate::output::outerr(crate::output::stdout());
-            exitstatus = status;
-            Ok(Flow::Done(status))
-        })();
-    }) != 0;
+            message.extend_from_slice(b": I/O error");
+            crate::error::sh_warnx(&message);
+        }
+        status |= crate::output::outerr(crate::output::stdout());
+        exitstatus = status;
+        Ok(Flow::Done(status))
+    })();
+
     // cmddone:
+    /* The C's epilogue, and the reason it armed a handler at all: an
+     * exception raised *beneath* a built-in had to run `freestdout` and
+     * restore `commandname` on its way out rather than skip them. It runs
+     * on every path here because there is only one way out now. `handler`
+     * was the third thing it restored and there is no handler left. */
     crate::output::freestdout();
     commandname = savecmdname;
-    crate::error::handler = savehandler;
 
-    if jumped {
-        debug_assert!(
-            crate::error::exception != crate::error::EXERROR,
-            "an EXERROR reached evalbltin as a jump"
-        );
-        crate::error::raise_longjmp(crate::error::handler, 1);
-    }
     outcome
 }
 
@@ -1455,8 +1419,6 @@ unsafe fn evalfun(
     flags: c_int,
 ) -> Result<Flow, Error> {
     let saveparam: crate::options::shparam; /* volatile */
-    let savehandler: *mut jmploc; /* volatile */
-    let mut jmploc_: jmploc = jmploc::new();
     let savefuncline: c_int;
     let saveloopnest: c_int;
 
@@ -1466,45 +1428,32 @@ unsafe fn evalfun(
     saveparam = crate::options::takeparam();
     savefuncline = funcline;
     saveloopnest = loopnest;
-    savehandler = crate::error::handler;
-    let jl: *mut jmploc = &mut jmploc_;
-    let mut outcome: Result<Flow, Error> = Ok(Flow::Done(0));
-    let outcomep: *mut Result<Flow, Error> = addr_of_mut!(outcome);
-    let jumped = setjmp_catch(jl, || unsafe {
-        INTOFF();
-        crate::error::handler = jl;
-        /* `func->count++`: the second reference that keeps the body alive if
-         * the function is redefined while it runs. */
-        crate::nodes::reffunc(func);
-        funcline = (*func).ndefun().linno;
-        loopnest = 0;
-        /* This `INTON` can deliver an interrupt, and it is *after*
-         * `reffunc`; the epilogue's `freefunc` is what balances it on both
-         * paths. docs/errors-are-values.md 2.6 records that a conversion
-         * reordering this prologue turns the balance into a use-after-free
-         * that only shows when a function redefines itself while running.
-         * Nothing here is reordered. */
-        INTON();
-        crate::options::borrowparam(argv.add(1), argc - 1);
-        *outcomep = evaltree((*func).ndefun().body.as_deref(), flags & EV_TESTED);
-    }) != 0;
+
+    INTOFF();
+    /* `func->count++`: the second reference that keeps the body alive if
+     * the function is redefined while it runs. */
+    crate::nodes::reffunc(func);
+    funcline = (*func).ndefun().linno;
+    loopnest = 0;
+    /* This `INTON` is *after* `reffunc`, and the epilogue's `freefunc` is
+     * what balances it on both paths. docs/errors-are-values.md 2.6
+     * records that a conversion reordering this prologue turns the
+     * balance into a use-after-free that only shows when a function
+     * redefines itself while running. Nothing here is reordered. */
+    INTON();
+    crate::options::borrowparam(argv.add(1), argc - 1);
+
+    let outcome = evaltree((*func).ndefun().body.as_deref(), flags & EV_TESTED);
+
     // funcdone:
     INTOFF();
     loopnest = saveloopnest;
     funcline = savefuncline;
     crate::nodes::freefunc(func);
     crate::options::restoreparam(saveparam);
-    crate::error::handler = savehandler;
     INTON();
     evalskip &= !(SKIPFUNC | SKIPFUNCDEF);
 
-    if jumped {
-        debug_assert!(
-            crate::error::exception != crate::error::EXERROR,
-            "an EXERROR reached evalfun as a jump"
-        );
-        crate::error::raise_longjmp(crate::error::handler, 1);
-    }
     outcome
 }
 

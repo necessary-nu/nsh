@@ -145,7 +145,7 @@ pub unsafe fn readcmd(args: &[&BStr]) -> Result<Flow, Error> {
             /* CHECKSTRSPACE((MB_LEN_MAX > 16 ? MB_LEN_MAX : 16) + 4, p) —
              * the room `getmbc` writes into through the raw cursor below. */
             line.reserve(READ_MBSLOP);
-            c = crate::input::pgetc();
+            c = crate::input::pgetc()?;
             if c == crate::syntax::PEOF {
                 status = 1;
                 break;
@@ -155,7 +155,7 @@ pub unsafe fn readcmd(args: &[&BStr]) -> Result<Flow, Error> {
                 continue;
             }
             let at = line.len();
-            ml = crate::parser::getmbc(c, line.as_mut_ptr().add(at) as *mut c_char, 0);
+            ml = crate::parser::getmbc(c, line.as_mut_ptr().add(at) as *mut c_char, 0)?;
             if ml != 0 {
                 /* `p += ml` is the commit of what `getmbc` wrote past the
                  * cursor; a zero return leaves the scribble uncommitted, for

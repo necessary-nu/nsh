@@ -55,7 +55,7 @@ use nshedit::domain::{
     Action, ArgumentCommand, Binding, CommandName, CommandSequence, Direction, EditTarget,
     EditingMode, EditorConfig, EffectCommand, HistorySearchCommand, ImmediateCommand, InputMode,
     KeySequence, KeymapMode, Motion, Outcome, Prompt, Refresh, ScreenSize, SignalPolicy,
-    TerminalLiteral, TerminalMode, Text, TextUnit, WordTraversal, YankPlacement,
+    TerminalLiteral, Text, TextUnit, WordTraversal, YankPlacement,
 };
 use nshedit::editor::effect::{
     AliasResponse, HistoryResponse, HistorySearchInput, HistorySearchResponse, HistorySelection,
@@ -74,7 +74,6 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, Write};
 use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -255,18 +254,14 @@ impl LineEditor {
         if self.pending_offset == self.pending_line.len() {
             self.pending_line.clear();
             self.pending_offset = 0;
-            let result = catch_unwind(AssertUnwindSafe(|| self.drive_line(history)));
-            let line = match result {
-                Ok(result) => result?,
-                Err(payload) => {
-                    let _ = self.editor_mut().set_terminal_mode(TerminalMode::Cooked);
-                    self.driver = ReadDriver::default();
-                    self.editor_mut().reset_line();
-                    self.history_cursor.reset();
-                    self.discard_display_image();
-                    resume_unwind(payload);
-                }
-            };
+            /* A `catch_unwind` sat here, to put the terminal back into
+             * cooked mode before re-raising. What it was really catching
+             * was `onint`'s longjmp leaving the line editor on a ^C --
+             * `errors-are-values` made that an ordinary `Err` return, and
+             * unpinned `panic = "unwind"`, under which a panic does not
+             * unwind and the guard could never have run. Dead code that
+             * looks live is worse than none. */
+            let line = self.drive_line(history)?;
             let Some(mut line) = line else {
                 return Ok(0);
             };

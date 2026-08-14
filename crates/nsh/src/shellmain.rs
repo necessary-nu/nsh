@@ -20,12 +20,12 @@
 //!     `flushout(out2)` calls guarded by it are absent here too.
 
 use bstr::{BStr, BString};
-use core::ptr::{addr_of_mut, null_mut};
+use core::ptr::null_mut;
 use libc::{c_char, c_int};
 use std::ffi::CStr;
 use std::io::Write;
 
-use crate::error::{FORCEINTON, jmploc};
+use crate::error::FORCEINTON;
 use crate::eval::{EV_EXIT, SKIPFUNC, SKIPFUNCDEF, evalskip};
 use crate::jobs::SHOW_CHANGED;
 
@@ -42,11 +42,10 @@ pub static mut shlvl: c_int = 0;
  * still populated so anything reading it observes the same pointer. */
 pub static mut dash_errno: *mut c_int = null_mut();
 
-/* `MKINIT struct jmploc main_handler;` — the outermost handler. The
- * generated `FORKRESET` block re-points `handler` at it after a fork so
- * that a child unwinds to its own top level; that block lives in
- * `crate::init`. */
-pub static mut main_handler: jmploc = jmploc::new();
+/* `MKINIT struct jmploc main_handler;` was here — the outermost handler,
+ * which the generated `FORKRESET` block re-pointed `handler` at after a
+ * fork so that a child unwound to its own top level. Nothing unwinds, so
+ * there is no handler and no static to hold one. */
 
 /* src/main.h: `#define rootshell (!shlvl)` */
 #[inline]
@@ -128,17 +127,11 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
          * afterwards. `Ok(Flow::Exit { .. })` is EXEND or EXEXIT, `Err` is
          * EXERROR, and a `jumped` of true is what is left travelling by
          * longjmp -- EXINT, until step F. */
-        let mut outcome: Result<crate::eval::Flow, crate::error::Error> =
-            Ok(crate::eval::Flow::Done(0));
-        let outcomep: *mut Result<crate::eval::Flow, crate::error::Error> =
-            addr_of_mut!(outcome);
-        let jumped = crate::eval::setjmp_catch(addr_of_mut!(main_handler), || unsafe {
-            *outcomep = (|| -> Result<crate::eval::Flow, crate::error::Error> {
+        let outcome = (|| -> Result<crate::eval::Flow, crate::error::Error> {
                 let mut pc: c_int = entry;
                 loop {
                     match pc {
                         0 => {
-                            crate::error::handler = addr_of_mut!(main_handler);
                             /* #ifdef DEBUG:
                              *   opentrace();
                              *   trputs("Shell args:  ");  trargs(argv); */
@@ -229,47 +222,34 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
                         }
                     }
                 }
-            })();
-        }) != 0;
+        })();
 
-        /* The C read `exception` here; the three things it distinguished
+        /* The C read `exception` here. The three things it distinguished
          * arrive as three different shapes now, and `exitreset` is told
-         * which rather than reading the global itself. */
+         * which rather than reading a global. */
         let e_is_exit: bool;
         let by_exitcmd: bool;
         let interrupted: bool;
 
-        if jumped {
-            /* Only EXINT still travels this way. Step F makes it a value
-             * and this arm goes with the `setjmp_catch` around it. */
-            let arrived = crate::error::exception;
-            debug_assert_eq!(
-                arrived,
-                crate::error::EXINT,
-                "only the interrupt still reaches main as a jump"
-            );
-            e_is_exit = false;
-            by_exitcmd = false;
-            interrupted = true;
-        } else {
-            match &outcome {
-                /* `exit:` is the only way out of the body that does not
-                 * come back through here, because `exitshell` ends the
-                 * process. A `Flow::Done` would mean the loop above fell
-                 * out of `pc` without reaching it, which it cannot. */
-                Ok(crate::eval::Flow::Done(_)) => {
-                    unreachable!("main's body leaves only by exiting or by failing")
-                }
-                Ok(crate::eval::Flow::Exit { by_exitcmd: b }) => {
-                    e_is_exit = true;
-                    by_exitcmd = *b;
-                    interrupted = false;
-                }
-                Err(_) => {
-                    e_is_exit = false;
-                    by_exitcmd = false;
-                    interrupted = false;
-                }
+        match &outcome {
+            /* `exit:` is the only way out of the body that does not come
+             * back through here, because `exitshell` ends the process. A
+             * `Flow::Done` would mean the loop above fell out of `pc`
+             * without reaching it, which it cannot. */
+            Ok(crate::eval::Flow::Done(_)) => {
+                unreachable!("main's body leaves only by exiting or by failing")
+            }
+            Ok(crate::eval::Flow::Exit { by_exitcmd: b }) => {
+                e_is_exit = true;
+                by_exitcmd = *b;
+                interrupted = false;
+            }
+            Err(e) => {
+                e_is_exit = false;
+                by_exitcmd = false;
+                /* The C read `exception == EXINT` here, for the bare
+                 * newline it writes before the next prompt. */
+                interrupted = e.is_interrupt();
             }
         }
         drop(outcome);
@@ -366,7 +346,9 @@ pub(crate) unsafe fn cmdloop(top: c_int) -> Result<crate::eval::Flow, crate::err
          * everything the command allocated used to live in the region
          * between them. */
         if crate::jobs::jobctl != 0 {
-            crate::jobs::showjobs(crate::output::stderr(), SHOW_CHANGED);
+            /* An interrupt taken while announcing changed jobs leaves
+             * through the read-eval loop, like any other. */
+            crate::jobs::showjobs(crate::output::stderr(), SHOW_CHANGED)?;
         }
         inter = 0;
         if iflag() != 0 && top != 0 {
@@ -445,7 +427,7 @@ pub(crate) unsafe fn exit_from_child(
 // [spec:dash:def:main.read-profile-fn]
 // [spec:dash:sem:main.read-profile-fn]
 unsafe fn read_profile(name: *const c_char) -> Result<crate::eval::Flow, crate::error::Error> {
-    let name: *const c_char = crate::parser::expandstr(name);
+    let name: *const c_char = crate::parser::expandstr(name)?;
 
     if crate::input::setinputfile(
         name,

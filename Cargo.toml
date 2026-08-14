@@ -7,8 +7,14 @@ edition = "2024"
 rust-version = "1.85"
 license = "BSD-3-Clause"
 
-[profile.dev]
-panic = "unwind"
-
-[profile.release]
-panic = "unwind"
+# `panic = "unwind"` was pinned on both profiles here, and the pin is the
+# constraint `[dec:nsh:errors-are-values]` exists to remove. It was not a
+# preference: the port implemented C's `longjmp` as an unwind carrying a
+# typed payload, so every shell error, every `exit` and every `^C` was a
+# panic, and `panic = "abort"` would have turned each of them into a dead
+# shell. A library that forces its embedder's panic strategy is not one
+# anybody can embed.
+#
+# The mechanism is gone -- a failure is a value and it is returned -- so
+# the pin is gone with it and the strategy is the consumer's choice again.
+# Nothing in this workspace relies on unwinding.

@@ -7,7 +7,7 @@ use libc::{c_char, c_int, c_uint, c_void, size_t};
 use std::ffi::CStr;
 use std::io::Write;
 
-use crate::error::{INTOFF, INTON, jmploc};
+use crate::error::{INTOFF, INTON};
 use crate::nodes::{NAPPEND, NCLOBBER, NFROM, NFROMFD, NFROMTO, NTO, NTOFD, NXHERE, Node};
 
 /* flags passed to redirect (redir.h) */
@@ -204,7 +204,20 @@ pub unsafe fn sh_open(
     loop {
         fd = libc::open64(pathname, flags, 0o666);
         e = errno();
-        if !(fd < 0 && e == libc::EINTR && crate::trap::pending_sig == 0) {
+        if !(fd < 0 && e == libc::EINTR) {
+            break;
+        }
+        /* An EINTR return is a place the shell is looking, so take
+         * delivery here if an interrupt is due. `sa_flags = 0` is why
+         * this return exists at all -- dash never restarts a syscall.
+         * Otherwise retry, which is the C, whose extra `pending_sig == 0`
+         * test this replaces: a signal that is pending but not *due*
+         * (suppressed, or trapped and handled elsewhere) is no reason to
+         * abandon the open. */
+        if let Some(err) = crate::error::poll_interrupt() {
+            return Err(err);
+        }
+        if crate::trap::pending_sig != 0 {
             break;
         }
     }
@@ -405,6 +418,15 @@ unsafe fn openhere(redir: &Node) -> Result<c_int, Error> {
     memfd = sh_pipe(pip.as_mut_ptr(), (len > PIPESIZE) as c_int)?;
 
     if memfd != 0 || len <= PIPESIZE {
+        /* The return is discarded, as the C discards it, and the 8.3
+         * audit flagged both this and the sibling in the forked child
+         * below as places an interrupt could be dropped. They are not:
+         * `output::write_fd` retries EINTR internally and the output path
+         * is deliberately *not* a poll site -- dash collects output
+         * errors in `outerr` and checks them separately rather than
+         * raising, and making it fallible is the shape 4.3 argues
+         * against. They become live the day someone changes that, and
+         * that is a different node's decision. */
         crate::output::xwrite(pip[1], p as *const c_void, len);
         libc::lseek(pip[1], 0, libc::SEEK_SET);
         /* goto out */
@@ -531,43 +553,38 @@ pub unsafe fn savefd(from: c_int, ofd: c_int) -> Result<c_int, Error> {
     Ok(newfd)
 }
 
-/// `redirect`, with the diagnostic it can produce caught rather than left
-/// to the frame above.
+/// `redirect`, with the diagnostic it can produce handed back rather than
+/// jumped with.
 ///
 /// The C returns `setjmp(jmploc.loc) * 2` — 0, or the 2 a redirection
-/// error takes — and `evalcommand` reads it as a status. It returns the
-/// error itself now, because the status is on the value (`sh_error` sets
-/// `exitstatus = 2` before it reports, and `Error::other` reads it back)
-/// and because `evalcommand`'s `bail:` has to *re-raise* that error when
-/// the command is a special built-in. An `int` cannot be re-raised.
+/// error takes. It returns the error itself, because `evalcommand`'s
+/// `bail:` has to *re-raise* it when the command is a special built-in
+/// (POSIX's "an error in a special built-in exits a non-interactive
+/// shell") and an int cannot be re-raised.
 ///
-/// What it still is, and must stay, is a catch frame: the interrupt is
-/// not a value yet, so `setjmp_catch` remains armed and
-/// `restore_handler_expandarg` decides between the two. The frame retires
-/// with the rest of the machinery at step G.
+/// There is no longer a `setjmp` here, or a handler, or a
+/// `SAVEINT`-shaped reason for one. What is left of the C's frame is the
+/// `SAVEINT`/`RESTOREINT` pair itself, and it stays exactly where it was:
+/// this is a catch that returns into the middle of `evalcommand` rather
+/// than to a top level, so it restores the counter's saved value instead
+/// of resetting it (§2.4). `RESTOREINT` is still skipped when the error
+/// leaves, because the `?`-shaped return skips it exactly as the longjmp
+/// did, and the outermost `FORCEINTON` is what clears the leak.
 // [spec:dash:def:redir.redirectsafe-fn]
 // [spec:dash:sem:redir.redirectsafe-fn]
 pub unsafe fn redirectsafe(redir: &[Node], flags: c_int) -> Result<(), Error> {
     let mut saveint: c_int = 0;
-    let savehandler: *mut jmploc = crate::error::handler;
-    let mut jmploc: jmploc = jmploc::new();
-    let jl: *mut jmploc = addr_of_mut!(jmploc);
 
     crate::SAVEINT!(saveint);
-    let mut caught: Option<Error> = None;
-    let jumped = crate::eval::setjmp_catch(jl, || {
-        crate::error::handler = jl;
-        caught = redirect(redir, flags).err();
-    }) != 0;
-    /* The C's `RESTOREINT` is after this call and is therefore skipped
-     * when the re-raising arm jumps. Keep it there. */
-    let caught = crate::expand::restore_handler_expandarg(savehandler, jumped, caught);
+    let caught = crate::expand::restore_handler_expandarg(redirect(redir, flags).err());
+    if let Some(e) = caught {
+        /* The C's `longjmp` from `restore_handler_expandarg` left before
+         * the `RESTOREINT` below; so does this. */
+        return Err(e);
+    }
     crate::RESTOREINT!(saveint);
 
-    match caught {
-        Some(e) => Err(e),
-        None => Ok(()),
-    }
+    Ok(())
 }
 
 // [spec:dash:def:redir.unwindredir-fn]
@@ -604,116 +621,67 @@ mod tests {
     //!
     //! The helper lives in `expand.rs` because the C put it there; these
     //! are here because `redirectsafe` is the caller whose surrounding
-    //! state — a half-applied redirection and a hand-saved interrupt
-    //! counter — is what makes getting it wrong dangerous.
+    //! state -- a half-applied redirection and a hand-saved interrupt
+    //! counter -- is what makes getting it wrong dangerous.
     //!
-    //! What is pinned here is the decision itself: what comes back, where
-    //! the handler points, and that a jump leaves rather than being
-    //! swallowed. The `ifsfree` half of the swallowing arm is pinned where
-    //! it is actually observable — as the field count of the word after a
-    //! failure, in `tests/errors_are_values.rs`.
+    //! What is pinned is the decision, which is now a match on the
+    //! value's own type rather than a comparison against a global that
+    //! some other frame may have written since. The `ifsfree` half is
+    //! pinned where it is observable -- as the field count of the word
+    //! after a failure, in `tests/errors_are_values.rs`.
 
-    use core::ptr::addr_of_mut;
-
-    use crate::error::{EXERROR, EXINT, Error, jmploc};
+    use crate::error::Error;
     use crate::expand::restore_handler_expandarg;
 
-    /// The frame ran to completion: the handler goes back, and nothing is
-    /// returned because nothing was caught.
-    // [spec:dash:sem:expand.restore-handler-expandarg-fn/test]
-    #[test]
-    fn clean_frame_restores_handler() {
-        let _guard = crate::testutil::lock();
-        unsafe {
-            let mut outer: jmploc = jmploc::new();
-            let saved = crate::error::handler;
-            crate::error::handler = core::ptr::null_mut();
-
-            let got = restore_handler_expandarg(addr_of_mut!(outer), false, None);
-
-            assert!(got.is_none(), "nothing was caught, so nothing comes back");
-            /* Copied out: `assert_eq!` takes a reference, and a shared
-             * reference to a mutable static is what the lint forbids. */
-            let now = crate::error::handler;
-            assert_eq!(now, addr_of_mut!(outer));
-
-            crate::error::handler = saved;
+    fn diagnostic() -> Error {
+        Error::Other {
+            line: 7,
+            status: 2,
+            message: bstr::BString::from(&b"Bad substitution"[..]),
         }
     }
 
-    /// A diagnostic that arrived as a value is handed straight back, with
-    /// its text, status and line intact — this is the arm that used to be
-    /// `exception == EXERROR`.
+    /// Nothing went wrong: nothing comes back.
+    // [spec:dash:sem:expand.restore-handler-expandarg-fn/test]
+    #[test]
+    fn a_clean_frame_returns_nothing() {
+        let _guard = crate::testutil::lock();
+        unsafe {
+            assert!(restore_handler_expandarg(None).is_none());
+        }
+    }
+
+    /// A diagnostic is handed straight back, text, status and line
+    /// intact -- the arm that used to be `exception == EXERROR`.
     // [spec:dash:sem:expand.restore-handler-expandarg-fn/test]
     #[test]
     fn caught_diagnostic_comes_back() {
         let _guard = crate::testutil::lock();
         unsafe {
-            let mut outer: jmploc = jmploc::new();
-            let saved = crate::error::handler;
-            crate::error::handler = core::ptr::null_mut();
-
-            let e = Error::Other {
-                line: 7,
-                status: 2,
-                message: bstr::BString::from(&b"Bad substitution"[..]),
-            };
-            let got = restore_handler_expandarg(addr_of_mut!(outer), false, Some(e));
-
-            let got = got.expect("the caught diagnostic is the frame's to return");
+            let got = restore_handler_expandarg(Some(diagnostic()))
+                .expect("the caught diagnostic is the frame's to return");
             assert_eq!(got.message(), "Bad substitution");
             assert_eq!(got.status(), 2);
             assert_eq!(got.line(), 7);
-            let now = crate::error::handler;
-            assert_eq!(now, addr_of_mut!(outer));
-
-            crate::error::handler = saved;
+            assert!(!got.is_interrupt());
         }
     }
 
-    /// Something that arrived by longjmp is re-raised rather than
-    /// swallowed, and at the *restored* handler — so it leaves this frame
-    /// instead of coming back into it.
-    ///
-    /// This is the arm only an interrupt can reach once the diagnostics
-    /// are values, and its failure mode is a shell that stops answering
-    /// `^C` rather than a shell that crashes.
+    /// An interrupt comes back too, and is *not* the same arm: the C
+    /// re-raised it from here rather than swallowing it, and the frames
+    /// above must be able to tell the two apart. Getting this wrong is a
+    /// shell that stops answering `^C`.
     // [spec:dash:sem:expand.restore-handler-expandarg-fn/test]
     #[test]
-    fn a_jump_is_re_raised() {
+    fn an_interrupt_comes_back_as_one() {
         let _guard = crate::testutil::lock();
         unsafe {
-            let saved_exception = crate::error::exception;
-
-            let raised = crate::testutil::raises(|| {
-                crate::error::exception = EXINT;
-                /* `raises` armed this and pointed `handler` at it; it
-                 * stands in for the frame outside `redirectsafe`. */
-                let outer = crate::error::handler;
-                drop(restore_handler_expandarg(outer, true, None));
-                unreachable!("the re-raising arm does not return");
-            });
-
-            assert!(raised, "an interrupt must not be swallowed by this frame");
-
-            crate::error::exception = saved_exception;
-        }
-    }
-
-    /// The exception code the C keyed the swallow on is now read by one
-    /// assertion and nothing else, and this is what it asserts: an
-    /// EXERROR arriving as a jump means a raise site was missed, and the
-    /// frame is about to re-raise a diagnostic dash swallows.
-    // [spec:dash:sem:expand.restore-handler-expandarg-fn/test]
-    #[test]
-    #[should_panic(expected = "an EXERROR reached a converted catch frame as a jump")]
-    #[cfg(debug_assertions)]
-    fn exerror_jump_is_a_bug() {
-        let _guard = crate::testutil::lock();
-        unsafe {
-            crate::error::exception = EXERROR;
-            let mut outer: jmploc = jmploc::new();
-            drop(restore_handler_expandarg(addr_of_mut!(outer), true, None));
+            let got = restore_handler_expandarg(Some(Error::Interrupted {
+                signal: libc::SIGINT,
+            }))
+            .expect("an interrupt must not be swallowed by this frame");
+            assert!(got.is_interrupt());
+            assert_eq!(got.status(), libc::SIGINT + 128);
         }
     }
 }

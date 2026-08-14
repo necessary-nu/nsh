@@ -25,7 +25,7 @@ pub unsafe fn execcmd(args: &[&BStr]) -> Result<Flow, Error> {
     if args.len() > 1 {
         crate::options::optlist[crate::options::iflag] = 0; /* exit on error */
         crate::options::optlist[crate::options::mflag] = 0;
-        crate::options::optschanged();
+        crate::options::optschanged()?;
         crate::input::flush_input();
         /* `execve` wants the array back, so this is where it is built --
          * once, for the one builtin that replaces the process, instead of

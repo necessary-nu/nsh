@@ -68,13 +68,6 @@ fn run(script: &str) -> (String, i32) {
         let pid = libc::fork();
         assert!(pid >= 0, "fork failed");
         if pid == 0 {
-            let default_hook = std::panic::take_hook();
-            std::panic::set_hook(Box::new(move |info| {
-                if info.payload().downcast_ref::<nsh::error::Longjmp>().is_some() {
-                    return;
-                }
-                default_hook(info);
-            }));
             // `install` and not `set`: these scripts run external commands
             // and command substitutions, and only `install` makes the
             // pipe *be* descriptors 1 and 2 inside the shell.

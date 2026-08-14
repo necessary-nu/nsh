@@ -1,10 +1,13 @@
 # Errors are values: the fixpoint, what the unwind is doing, and the order
 
-Status: analysis and specification for the `errors-are-values` node, which
-is now **in progress**. Steps A through E are done; §0.1 records exactly
-what, §0.2 records the two bugs the conversion shipped and the guards that
-followed, and §0.3 answers the question §3.2's step E was told to answer
-before `Flow` was written. F and G are still the plan. It
+Status: **the node is finished.** Steps A through G are done and the
+mechanism this document is about no longer exists: no `catch_unwind`, no
+`panic_any`, no handler, no `exception`, and `panic = "unwind"` is
+unpinned on both profiles. §0.1 records what landed, §0.2 the bugs the
+conversion shipped and the guards that followed, §0.3 the question
+§3.2's step E was told to answer before `Flow` was written, §0.4 what
+step F cost, and §0.5 what the metric actually did — which is not what
+this document predicted. The rest is the plan it was carried out from. It
 builds on `[dec:nsh:errors-are-values]`, `docs/api-design.md` §3 (which
 settled the taxonomy and the `set -e` question) and
 `docs/idiomatization.md` §2.3 step 7.
@@ -42,11 +45,13 @@ Eleven commits, each green:
 | `d29caaf` | C | `fc` — the last eight jumping raise sites |
 | `41bb7b2` | D | the eleven pins for the two dangerous frames, written first |
 | `708437c` | D | `redirectsafe` and `expandstr`, and their shared decision |
-| *this one* | E | `Flow`: `EXEND` and `EXEXIT` stop being exceptions |
+| `acadf4c` | E | `Flow`: `EXEND` and `EXEXIT` stop being exceptions |
+| `b7a5450` | F | the pty cases and the register entry, before the change |
+| `<F>` | F | the interrupt is polled, and `onsig` only stores |
+| *this one* | G | the machinery is deleted and the profile pins come off |
 
-The raise sites that still jump went 51 → 20 → 0 over those commits. What
-still leaves by longjmp after step E is the interrupt, and seven bridges
-in `input`, `var` and `jobs` that step G has to answer for.
+The raise sites that still jump went 51 → 20 → 0 over those commits, and
+after step G there is nothing left to jump *with*.
 
 ### 0.2 The bug this conversion actually shipped, and the guard that followed
 
@@ -208,6 +213,116 @@ This is the same trap as the `exit:`-inside-the-loop note at
 has now caught it twice, once for each mechanism. It is the third bug
 [dec:nsh:errors-are-values]'s rationale predicted the corpus would find,
 arriving exactly where §5 said it would: after the mechanism changed.
+
+### 0.4 What step F cost, and the one thing it broke
+
+§4.2's design held: `onsig` stores and returns, `INTON` leaves
+`intpending` set, `onint` returns an `Error` instead of raising, and the
+shell takes delivery at a poll site. `onsig` is `extern "C"` again, which
+§4.2 lists as a property worth having on its own.
+
+**Six poll sites, not five, and two of them are not where §4.2 predicted.**
+The five `EINTR` returns are the obvious ones, and `dotrap` — which
+`evaltree` calls before every command — is the one that matters most,
+because it is how an interrupt taken anywhere the shell was not looking is
+delivered at the next command boundary. But two of the five sit *inside*
+an `INTOFF`/`INTON` bracket held by their caller (`waitone` around
+`waitproc`, `preadbuffer` around `preadfd`), so a poll there can never be
+due. The delivery for those is at the caller's `INTON` — which is exactly
+where the C delivered a *deferred* interrupt, so putting the poll at the
+call site rather than inside `INTON` keeps `INTON` infallible (§4.3) and
+leaves the delivery point unmoved.
+
+**`output.rs`'s write is deliberately not a poll site.** dash collects
+output errors in `outerr` and checks them separately rather than raising,
+and making the output path fallible is the shape §4.3 argues against. The
+consequence is recorded rather than hidden: the two `xwrite` returns
+`openhere` discards stay discarded, and they become live only if someone
+later makes that path fallible.
+
+**The bug step F shipped.** An interrupted read is not end of input, and
+after the change it looked like one. `preadbuffer` reaches the same line
+for a `read` that returned `0` and a `read` that returned `EINTR`, and the
+C could never arrive there with an interrupt pending because delivery left
+from *inside* the read by longjmp. Reporting `PEOF` made `^C` behave like
+`^D`: the shell exited instead of printing a fresh prompt. Three of the
+interactive cases said so — `^C in emacs mode`, `^C in vi mode` and `^C
+during a blocked read` — and they said so *because they were written
+before the change*, which is the whole of what §6B asked for.
+
+**One frame cannot carry the interrupt out and says so.**
+`parser::getprompt` is a callback the line editor invokes through a
+function pointer; it has no `Result` to return. The C longjmped out of the
+line editor there, the same shape as `opendir_interruptible` unwinding out
+of glibc's `glob`, and neither could survive `panic = "abort"`. Both now
+put the interrupt back in the inbox for the next poll site
+(`error::rearm_interrupt`) instead.
+
+**§8.3 is closed.** Every failable `libc::` call in `jobs.rs` and
+`redir.rs` was classified. There is no sixth blocking syscall hiding
+behind an unchecked `-1`: every unchecked one is either non-blocking or
+already routes through a named `EINTR` site. The audit's one real finding
+is `tcgetpgrp` in `setjobctl`, the only `EINTR`-capable call in either
+file whose `-1` is handled without reading `errno` — a `-1` there turns
+job control off for the session, and before step F an interrupt arriving
+during `setjobctl` left by longjmp and never reached the test. It retries
+now.
+
+**§8.4 is answered, and the answer is "yes, it is dash's".** The
+`suppressint` leak after a swallowed built-in error is now covered by two
+pty cases at two depths (`^C after a builtin error`, `^C after a nested
+error`), and both agree with dash.
+
+### 0.5 What the metric did, and the claim in §0.1 that does not survive
+
+§0.1 says the unsafe-op count "falls at step G" and that "the number to
+compare against 3781 is the one after G". The first half is true and the
+second half is misleading, so it is corrected here rather than left for
+someone to quote.
+
+Measured the same way at both ends — `#![allow(unsafe_op_in_unsafe_fn)]`
+removed from `lib.rs`, total warnings minus the ordinary lib warning
+count — the figures are:
+
+| tree | unsafe ops |
+|---|---|
+| `825fc98`, the commit this node started from | 3824 |
+| after step E | 3852 |
+| after step G | **3833** |
+
+So G *did* take the number down, by 19. It did not take it below where
+the node started: the node is **+9 net**, not negative.
+
+**Two things follow, and the second matters more than the first.**
+
+The count was never going to fall much, and §0.1's reasoning shows why
+without drawing the conclusion. A converted raise site trades one unsafe
+call (`sh_error`) for another (`sh_error_value`) — a wash — while the
+conversion *adds* unsafe calls that did not exist: `poll_interrupt` at
+six sites, `restore_handler_expandarg`, `exit_from_child`,
+`forkchild_fatal`, `rearm_interrupt`, `Error::reported`. What G deletes
+is seven function *bodies*, not seven thousand call sites. An honest
+prediction would have been "roughly flat, and the shape of the code is
+the point".
+
+**The 3781 in §0.1 is not reproducible by the method stated here, and
+that is the second finding.** This document's own §1.4 caught exactly
+this once already — three numbers in `docs/idiomatization.md` §2.1 that
+could not be reproduced on the tree they were measured on — and drew the
+rule that a figure whose provenance is unknown should not be carried
+forward. The same rule applies to its own: 3781 was recorded across
+several stretches by several agents, the method was never written down
+beside it, and measuring `825fc98` by the method above gives 3824. The
+41-op gap is not explained, so **the trajectory 3781 → 3791 → 3812 in
+§0.1 should be read as internally consistent and not comparable with
+anything measured differently.** What is comparable is the table above,
+because both rows were taken in the same hour by the same command.
+
+The thing worth measuring, and the thing the node was actually for, is
+not in the count at all: `grep -rn 'catch_unwind\|panic_any\|resume_unwind'
+crates/nsh/src` is empty, the crate builds and passes its whole suite
+with `panic = "abort"`, and 43 interactive cases including ten `^C`
+cases agree with dash under that profile.
 
 ---
 
@@ -1193,21 +1308,21 @@ size. §3.1.
    351. Recording "not reproducible" is honest; recording "wrong by 95" is
    more precise than the evidence supports.
 
-3. **Whether five `EINTR` sites are all of them.** They are all the sites
-   that *name* `EINTR`. A syscall whose `-1` return is handled without
-   inspecting `errno` would not appear, and `jobs.rs` — the module with the
-   thinnest coverage in the crate — is where one would hide. *Resolved by:*
-   auditing every `libc::` call in `jobs.rs` and `redir.rs` for an
-   unchecked `-1`, before step F.
+3. ~~**Whether five `EINTR` sites are all of them.**~~ **Closed by the
+   audit §0.4 records.** They are all the *blocking* ones. No sixth is
+   hiding behind an unchecked `-1`: every unchecked `-1` in `jobs.rs` and
+   `redir.rs` is either a syscall that cannot block (`close`, `dup2`,
+   `lseek`, `setpgid`, `signal`, `killpg`, `fcntl`) or already routes
+   through a named `EINTR` site. The audit did find one line worth
+   changing — `setjobctl`'s `tcgetpgrp` — and one worth recording rather
+   than changing, `openhere`'s two discarded `xwrite` returns.
 
-4. **Whether `evalbltin`'s and `evalfun`'s `suppressint` leak is really
-   dash's behaviour and not a port bug.** The C reads the same way
-   (`eval.c`'s `cmddone` restores `commandname` and `handler` and nothing
-   else, and `exraise` does `INTOFF` unconditionally), and the harness is
-   green, but the harness cannot see the counter. *Resolved by:* an
-   assertion, or by an interactive experiment — a `^C` after a swallowed
-   builtin error in an interactive dash, which is the one configuration
-   where a stuck counter is observable.
+4. ~~**Whether `evalbltin`'s and `evalfun`'s `suppressint` leak is really
+   dash's behaviour.**~~ **Closed.** The interactive experiment this entry
+   asks for is now two pty cases, `^C after a builtin error` and `^C after
+   a nested error`, which put a `^C` after a swallowed built-in error at
+   two frame depths. Both agree with dash, so the leak is dash's and the
+   port reproduces it.
 
 5. ~~**Whether step E can really wait for `delete-memalloc`.**~~
    **Closed.** `delete-memalloc` finished before step E was written:

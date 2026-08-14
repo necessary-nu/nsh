@@ -45,7 +45,7 @@ pub unsafe fn waitcmd(args: &[&BStr]) -> Result<Flow, Error> {
                     jobs()[i].waited = 1;
                     jp = jobs()[i].prev_job;
                 }
-                if dowait(DOWAIT_WAITCMD_ALL, None) == 0 {
+                if dowait(DOWAIT_WAITCMD_ALL, None)? == 0 {
                     // sigout:
                     retval = 128 + crate::trap::pending_sig;
                     break 'out_lbl;
@@ -83,7 +83,7 @@ pub unsafe fn waitcmd(args: &[&BStr]) -> Result<Flow, Error> {
                     jobp = Some(getjob(target.as_ptr(), 0)?);
                 }
                 /* loop until process terminated or stopped */
-                if dowait(DOWAIT_WAITCMD, jobp) == 0 {
+                if dowait(DOWAIT_WAITCMD, jobp)? == 0 {
                     // sigout:
                     retval = 128 + crate::trap::pending_sig;
                     break 'out_lbl;
