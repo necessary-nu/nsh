@@ -16,7 +16,7 @@ use crate::output::Output;
 
 // [spec:dash:def:jobs.jobscmd-fn]
 // [spec:dash:sem:jobs.jobscmd-fn]
-pub unsafe fn jobscmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn jobscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut mode: c_int;
     let out: *mut Output;
 
@@ -35,10 +35,13 @@ pub unsafe fn jobscmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if !operands.is_empty() {
         for spec in operands {
             let spec = crate::shell::cstring(spec);
-            showjob(out, getjob(spec.as_ptr(), 0)?, mode);
+            /* `getjob` and `showjob` both take the receiver, so the
+             * lookup is its own statement rather than an argument. */
+            let jp = getjob(sh, spec.as_ptr(), 0)?;
+            showjob(sh, out, jp, mode);
         }
     } else {
-        showjobs(out, mode)?;
+        showjobs(sh, out, mode)?;
     }
 
     Ok(Flow::Done(0))

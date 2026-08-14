@@ -358,10 +358,10 @@ pub(crate) unsafe fn cmdloop(
         /* `setstackmark`/`popstackmark` per iteration: the parse tree and
          * everything the command allocated used to live in the region
          * between them. */
-        if crate::jobs::jobctl != 0 {
+        if sh.jobs.jobctl != 0 {
             /* An interrupt taken while announcing changed jobs leaves
              * through the read-eval loop, like any other. */
-            crate::jobs::showjobs(crate::output::stderr(), SHOW_CHANGED)?;
+            crate::jobs::showjobs(sh, crate::output::stderr(), SHOW_CHANGED)?;
         }
         inter = 0;
         if iflag() != 0 && top != 0 {
@@ -373,7 +373,7 @@ pub(crate) unsafe fn cmdloop(
         if let crate::parser::ParseResult::Tree(n) = parsed {
             let i: c_int;
 
-            crate::jobs::job_warning = if crate::jobs::job_warning == 2 { 1 } else { 0 };
+            sh.jobs.job_warning = if sh.jobs.job_warning == 2 { 1 } else { 0 };
             numeof = 0;
             i = crate::eval::flow!(crate::eval::evaltree(sh, n.as_ref(), 0));
             if n.is_some() {
@@ -383,7 +383,7 @@ pub(crate) unsafe fn cmdloop(
             if top == 0 || numeof >= 50 {
                 break;
             }
-            if crate::jobs::stoppedjobs() == 0 {
+            if crate::jobs::stoppedjobs(sh) == 0 {
                 if Iflag() == 0 {
                     if iflag() != 0 {
                         let _ = (*crate::output::stderr()).write_all(b"\n");

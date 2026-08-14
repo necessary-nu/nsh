@@ -21,7 +21,7 @@ use crate::jobs::errno;
 
 // [spec:dash:def:jobs.killcmd-fn]
 // [spec:dash:sem:jobs.killcmd-fn]
-pub unsafe fn killcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* the `usage:` label is a backward goto whose body only raises, so it
      * is reproduced as two returns of the same message. */
     const USAGE: &[u8] =
@@ -118,8 +118,8 @@ pub unsafe fn killcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     for spec in operands {
         let target = crate::shell::cstring(spec);
         if spec.first() == Some(&b'%') {
-            jp = getjob(target.as_ptr(), 0)?;
-            pid = -ps_pid(jp, 0);
+            jp = getjob(sh, target.as_ptr(), 0)?;
+            pid = -ps_pid(sh, jp, 0);
         } else {
             pid = if spec.first() == Some(&b'-') {
                 -crate::mystring::number(target.as_ptr().add(1))?

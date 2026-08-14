@@ -664,7 +664,7 @@ unsafe fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, E
             forked = false;
             break 'nofork;
         }
-        jp = crate::jobs::makejob(1);
+        jp = crate::jobs::makejob(sh, 1);
         if crate::jobs::forkshell(sh, Some(jp), r.n.as_deref(), backgnd)? == 0 {
             flags |= EV_EXIT;
             if backgnd != 0 {
@@ -677,7 +677,7 @@ unsafe fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, E
          * never returns, so it is reached only from here */
         status = 0;
         if backgnd == 0 {
-            status = crate::jobs::waitforjob(Some(jp))?;
+            status = crate::jobs::waitforjob(sh, Some(jp))?;
         }
         INTON();
         return Ok(Flow::Done(status));
@@ -790,7 +790,7 @@ unsafe fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
     pipelen = p.cmdlist.len() as c_int;
     flags |= EV_EXIT;
     INTOFF();
-    jp = crate::jobs::makejob(pipelen);
+    jp = crate::jobs::makejob(sh, pipelen);
     prevfd = -1;
     for (i, cmd) in p.cmdlist.iter().enumerate() {
         let has_next = i + 1 < p.cmdlist.len();
@@ -836,7 +836,7 @@ unsafe fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
         libc::close(pip[1]);
     }
     if p.backgnd == 0 {
-        status = crate::jobs::waitforjob(Some(jp))?;
+        status = crate::jobs::waitforjob(sh, Some(jp))?;
         /* TRACE(("evalpipe:  job done exit status %d\n", status)); */
     }
     INTON();
@@ -874,7 +874,7 @@ pub unsafe fn evalbackcmd(
         crate::redir::sh_pipe(pip.as_mut_ptr(), 0)?;
         tpip[0] = pip[0];
         tpip[1] = pip[1];
-        jp = crate::jobs::makejob(1);
+        jp = crate::jobs::makejob(sh, 1);
         pid = crate::jobs::forkshell(sh, Some(jp), n, FORK_NOJOB)?;
         tpip[0] = -1;
         if pid == 0 {
@@ -1319,7 +1319,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                 }
             }
 
-            status = crate::jobs::waitforjob(jp)?;
+            status = crate::jobs::waitforjob(sh, jp)?;
             FORCEINTON();
             break 'out_lbl;
         }

@@ -1269,7 +1269,7 @@ unsafe fn expbackq(
 
         if in_.fd >= 0 {
             libc::close(in_.fd);
-            crate::eval::back_exitstatus = crate::jobs::waitforjob(in_.jp)?;
+            crate::eval::back_exitstatus = crate::jobs::waitforjob(sh, in_.jp)?;
         }
         crate::error::INTON();
 

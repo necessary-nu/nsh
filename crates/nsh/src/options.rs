@@ -287,7 +287,7 @@ pub unsafe fn optschanged(sh: &mut crate::context::Shell) -> Result<(), crate::e
     crate::trap::setinteractive(optlist[iflag] as c_int);
     /* #ifndef SMALL */
     crate::histedit::histedit(sh);
-    crate::jobs::setjobctl(optlist[mflag] as c_int)
+    crate::jobs::setjobctl(sh, optlist[mflag] as c_int)
 }
 
 /// What a pass of [`options`] found.

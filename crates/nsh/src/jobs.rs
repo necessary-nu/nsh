@@ -9,10 +9,10 @@
 //!     into separate fields of the same widths. Nothing in dash depends
 //!     on the packing: `memset(jp, 0, sizeof *jp)` is the only thing
 //!     that spoke about the layout, and it is an assignment here.
-//!   * `jobtab` is a `Vec<Job>` and a job is named by its index, so
-//!     `curjob` and `prev_job` are indices too. The C's `growjobtab`
+//!   * `sh.jobs.tab` is a `Vec<Job>` and a job is named by its index, so
+//!     `sh.jobs.curjob` and `prev_job` are indices too. The C's `growjobtab`
 //!     relocation pass — which existed because `realloc` moved the
-//!     array out from under `curjob`, every `prev_job`, and every `ps`
+//!     array out from under `sh.jobs.curjob`, every `prev_job`, and every `ps`
 //!     that pointed at its own job's inline `ps0` — has nothing left to
 //!     relocate.
 //!   * C `goto`s are reproduced with labelled blocks; a `goto` *into*
@@ -141,24 +141,55 @@ pub(crate) const DOWAIT_WAITCMD_ALL: c_int = 4;
 const _PATH_TTY: &[u8] = b"/dev/tty\0";
 const _PATH_DEVNULL: &[u8] = b"/dev/null\0";
 
-/* array of jobs */
-static mut jobtab: Vec<Job> = Vec::new();
-/* pgrp of shell on invocation */
-static mut initialpgrp: c_int = 0;
-/* control terminal */
-static mut ttyfd: c_int = -1;
-
-/* current job */
-pub(crate) static mut curjob: Option<usize> = None;
-
-/// The job table.
+/// The shell's jobs, and the terminal state job control needs.
 ///
-/// The borrow is taken fresh at each access and never held across a
-/// call, because `freejob`, `set_curjob` and `showpipe` are all reached
-/// from the middle of a walk over the table.
-#[inline]
-pub(crate) unsafe fn jobs() -> &'static mut Vec<Job> {
-    &mut *core::ptr::addr_of_mut!(jobtab)
+/// `docs/api-design.md` 5 groups these under one field and they belong
+/// together: `setjobctl` writes three of them in one breath, and
+/// `makejob` reads `sh.jobs.jobctl` to decide what to put in `tab`.
+///
+/// **`vforked` is deliberately not here**, though it sits with these in
+/// `jobs.rs`. `trap.rs`'s `onsig` reads it, and a signal handler has no
+/// receiver -- the same exclusion `docs/api-design.md` 5.1 makes for the
+/// handler's own state, found here for the second time. See the blocker
+/// entry on `move-state` for the trap table, which is the same shape.
+pub struct JobTable {
+    /// The jobs themselves.
+    ///
+    /// A borrow of an element is taken fresh at each access and never
+    /// held across a call, because `freejob`, `set_curjob` and
+    /// `showpipe` are all reached from the middle of a walk over it.
+    ///
+    /// `pub(crate)` where `RedirStack` and `AliasTable` keep their
+    /// contents private, and the exception is deliberate rather than
+    /// drift: `fg`, `bg`, `wait`, `jobs` and `kill` all index the table
+    /// and read `Job`'s fields directly, so hiding it behind accessors
+    /// is a rewrite of five builtins and not part of moving it. Worth
+    /// doing later; recorded on the node rather than smuggled in here.
+    pub(crate) tab: Vec<Job>,
+    /// current job
+    pub(crate) curjob: Option<usize>,
+    /// true if doing job control
+    pub(crate) jobctl: c_int,
+    /// pgrp of shell on invocation
+    initialpgrp: c_int,
+    /// control terminal
+    ttyfd: c_int,
+    /// user was warned about stopped jobs
+    pub(crate) job_warning: c_int,
+}
+
+impl JobTable {
+    /// What the six statics were declared with.
+    pub(crate) const fn new() -> Self {
+        JobTable {
+            tab: Vec::new(),
+            curjob: None,
+            jobctl: 0,
+            initialpgrp: 0,
+            ttyfd: -1,
+            job_warning: 0,
+        }
+    }
 }
 
 /// A job that has not forked yet has no `ProcStat` at all; the C reads
@@ -170,13 +201,13 @@ pub(crate) unsafe fn jobs() -> &'static mut Vec<Job> {
 /// reads out of `ps0`; `ps_cmd` answers with the empty text, where the
 /// C reads `ps0.cmd`, a null pointer it then hands to `%s`.
 #[inline]
-pub(crate) unsafe fn ps_pid(jp: usize, i: usize) -> pid_t {
-    jobs()[jp].ps.get(i).map_or(0, |p| p.pid)
+pub(crate) unsafe fn ps_pid(sh: &crate::context::Shell, jp: usize, i: usize) -> pid_t {
+    sh.jobs.tab[jp].ps.get(i).map_or(0, |p| p.pid)
 }
 
 #[inline]
-unsafe fn ps_cmd(jp: usize, i: usize) -> &'static BStr {
-    jobs()[jp]
+unsafe fn ps_cmd(sh: &crate::context::Shell, jp: usize, i: usize) -> &BStr {
+    sh.jobs.tab[jp]
         .ps
         .get(i)
         .map_or(BStr::new(b""), |p| p.cmd.as_bstr())
@@ -186,19 +217,16 @@ unsafe fn ps_cmd(jp: usize, i: usize) -> &'static BStr {
 /// puts control bytes 0x81-0x88 in them — so they go out as bytes and
 /// not through a `char *`.
 #[inline]
-pub(crate) unsafe fn outcmd(jp: usize, i: usize, out: *mut Output) {
-    let cmd = ps_cmd(jp, i);
+pub(crate) unsafe fn outcmd(sh: &mut crate::context::Shell, jp: usize, i: usize, out: *mut Output) {
+    let cmd = ps_cmd(sh, jp, i);
     let _ = (&mut *out).write_all(cmd);
 }
 
-/* Set if we are in the vforked child */
+/* Set if we are in the vforked child.
+ *
+ * Stays a `static mut` because `trap.rs`'s `onsig` reads it, and a
+ * signal handler cannot be handed a `&mut Shell`. See `JobTable`. */
 pub static mut vforked: c_int = 0;
-
-/* true if doing job control */
-pub static mut jobctl: c_int = 0;
-
-/* user was warned about stopped jobs */
-pub static mut job_warning: c_int = 0;
 
 pub(crate) use crate::system::errno;
 
@@ -227,7 +255,7 @@ unsafe fn onsigchild() -> c_int {
 
 /// Where the next link of the current-job chain lives. The C walks the
 /// chain through a `struct job **` so that it can rewrite the link it
-/// arrived by, and that pointer is either `&curjob` or `&jp->prev_job`.
+/// arrived by, and that pointer is either `&sh.jobs.curjob` or `&jp->prev_job`.
 #[derive(Clone, Copy)]
 enum Link {
     Head,
@@ -235,24 +263,24 @@ enum Link {
 }
 
 #[inline]
-unsafe fn link_get(l: Link) -> Option<usize> {
+unsafe fn link_get(sh: &mut crate::context::Shell, l: Link) -> Option<usize> {
     match l {
-        Link::Head => curjob,
-        Link::Prev(i) => jobs()[i].prev_job,
+        Link::Head => sh.jobs.curjob,
+        Link::Prev(i) => sh.jobs.tab[i].prev_job,
     }
 }
 
 #[inline]
-unsafe fn link_set(l: Link, v: Option<usize>) {
+unsafe fn link_set(sh: &mut crate::context::Shell, l: Link, v: Option<usize>) {
     match l {
-        Link::Head => curjob = v,
-        Link::Prev(i) => jobs()[i].prev_job = v,
+        Link::Head => sh.jobs.curjob = v,
+        Link::Prev(i) => sh.jobs.tab[i].prev_job = v,
     }
 }
 
-// [spec:dash:def:jobs.set-curjob-fn]
-// [spec:dash:sem:jobs.set-curjob-fn]
-pub(crate) unsafe fn set_curjob(jp: usize, mode: c_uint) {
+// [spec:dash:def:jobs.set-sh.jobs.curjob-fn]
+// [spec:dash:sem:jobs.set-sh.jobs.curjob-fn]
+pub(crate) unsafe fn set_curjob(sh: &mut crate::context::Shell, jp: usize, mode: c_uint) {
     let mut jp1: Option<usize>;
     let mut jpp: Link;
     let curp: Link;
@@ -261,7 +289,7 @@ pub(crate) unsafe fn set_curjob(jp: usize, mode: c_uint) {
     jpp = Link::Head;
     curp = jpp;
     loop {
-        jp1 = link_get(jpp);
+        jp1 = link_get(sh, jpp);
         if jp1 == Some(jp) {
             break;
         }
@@ -270,7 +298,7 @@ pub(crate) unsafe fn set_curjob(jp: usize, mode: c_uint) {
          * deleting one that is linked. */
         jpp = Link::Prev(jp1.expect("job is not on the current-job chain"));
     }
-    link_set(jpp, jobs()[jp].prev_job);
+    link_set(sh, jpp, sh.jobs.tab[jp].prev_job);
 
     /* Then re-insert in correct position */
     jpp = curp;
@@ -279,22 +307,22 @@ pub(crate) unsafe fn set_curjob(jp: usize, mode: c_uint) {
             /* newly created job or backgrounded job,
             put after all stopped jobs. */
             loop {
-                jp1 = link_get(jpp);
+                jp1 = link_get(sh, jpp);
                 match jp1 {
-                    Some(i) if JOBS != 0 && jobs()[i].state as c_int == JOBSTOPPED => {
+                    Some(i) if JOBS != 0 && sh.jobs.tab[i].state as c_int == JOBSTOPPED => {
                         jpp = Link::Prev(i);
                     }
                     _ => break,
                 }
             }
             /* FALLTHROUGH into CUR_STOPPED */
-            jobs()[jp].prev_job = link_get(jpp);
-            link_set(jpp, Some(jp));
+            sh.jobs.tab[jp].prev_job = link_get(sh, jpp);
+            link_set(sh, jpp, Some(jp));
         }
         CUR_STOPPED => {
-            /* newly stopped job - becomes curjob */
-            jobs()[jp].prev_job = link_get(jpp);
-            link_set(jpp, Some(jp));
+            /* newly stopped job - becomes sh.jobs.curjob */
+            sh.jobs.tab[jp].prev_job = link_get(sh, jpp);
+            link_set(sh, jpp, Some(jp));
         }
         /* `default:` (DEBUG: abort()) falls through into CUR_DELETE:
          * the job is being deleted, so it is not re-inserted. */
@@ -316,8 +344,8 @@ pub(crate) unsafe fn set_curjob(jp: usize, mode: c_uint) {
 
 // [spec:dash:def:jobs.xxtcsetpgrp-fn]
 // [spec:dash:sem:jobs.xxtcsetpgrp-fn]
-pub(crate) unsafe fn xxtcsetpgrp(pgrp: pid_t) -> Result<(), Error> {
-    let fd: c_int = ttyfd;
+pub(crate) unsafe fn xxtcsetpgrp(sh: &mut crate::context::Shell, pgrp: pid_t) -> Result<(), Error> {
+    let fd: c_int = sh.jobs.ttyfd;
 
     if fd < 0 {
         return Ok(());
@@ -337,12 +365,12 @@ pub(crate) unsafe fn xxtcsetpgrp(pgrp: pid_t) -> Result<(), Error> {
 /// callers that *are* ordinary code (`set -m`, `exec`, `procargs`) keep
 /// dash's behaviour of abandoning the command, and the teardown callers
 /// drop it where the C already swallowed it.
-pub unsafe fn setjobctl(on: c_int) -> Result<(), Error> {
+pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error> {
     let mut on: c_int = on;
     let mut pgrp: c_int = -1;
     let mut fd: c_int;
 
-    if on == jobctl || crate::shellmain::rootshell() == 0 {
+    if on == sh.jobs.jobctl || crate::shellmain::rootshell() == 0 {
         return Ok(());
     }
     if on != 0 {
@@ -435,12 +463,12 @@ pub unsafe fn setjobctl(on: c_int) -> Result<(), Error> {
             let _ = on;
             return Ok(());
         }
-        initialpgrp = pgrp;
+        sh.jobs.initialpgrp = pgrp;
         pgrp = crate::shellmain::rootpid;
     } else {
         /* turning job control off */
-        fd = ttyfd;
-        pgrp = initialpgrp;
+        fd = sh.jobs.ttyfd;
+        pgrp = sh.jobs.initialpgrp;
     }
 
     crate::trap::setsignal(libc::SIGTSTP);
@@ -456,15 +484,15 @@ pub unsafe fn setjobctl(on: c_int) -> Result<(), Error> {
         }
     }
 
-    ttyfd = fd;
-    jobctl = on;
+    sh.jobs.ttyfd = fd;
+    sh.jobs.jobctl = on;
     Ok(())
 }
 
 // [spec:dash:def:jobs.jobno-fn]
 // [spec:dash:sem:jobs.jobno-fn]
 //
-// The C recovers the index by subtracting `jobtab` from the pointer.
+// The C recovers the index by subtracting `sh.jobs.tab` from the pointer.
 pub(crate) fn jobno(jp: usize) -> c_int {
     jp as c_int + 1
 }
@@ -518,7 +546,7 @@ unsafe fn sprint_status(os: *mut c_char, status: c_int, sigonly: c_int) -> c_int
 
 // [spec:dash:def:jobs.showjob-fn]
 // [spec:dash:sem:jobs.showjob-fn]
-pub(crate) unsafe fn showjob(out: *mut Output, jp: usize, mode: c_int) {
+pub(crate) unsafe fn showjob(sh: &mut crate::context::Shell, out: *mut Output, jp: usize, mode: c_int) {
     let mut ps: usize;
     let psend: usize;
     let mut col: c_int;
@@ -529,7 +557,7 @@ pub(crate) unsafe fn showjob(out: *mut Output, jp: usize, mode: c_int) {
 
     if (mode & SHOW_PGID) != 0 {
         /* just output process (group) id of pipeline */
-        let _ = writeln!(&mut *out, "{}", ps_pid(jp, ps));
+        let _ = writeln!(&mut *out, "{}", ps_pid(sh, jp, ps));
         return;
     }
 
@@ -537,28 +565,28 @@ pub(crate) unsafe fn showjob(out: *mut Output, jp: usize, mode: c_int) {
     col = copy_ascii_cstr(s.as_mut_ptr(), 16, &heading);
     indent = col;
 
-    if Some(jp) == curjob {
+    if Some(jp) == sh.jobs.curjob {
         s[(col - 2) as usize] = b'+' as c_char;
-    } else if curjob.map_or(false, |c| jobs()[c].prev_job == Some(jp)) {
+    } else if sh.jobs.curjob.map_or(false, |c| sh.jobs.tab[c].prev_job == Some(jp)) {
         s[(col - 2) as usize] = b'-' as c_char;
     }
 
     if (mode & SHOW_PID) != 0 {
-        let pid = format!("{} ", ps_pid(jp, ps));
+        let pid = format!("{} ", ps_pid(sh, jp, ps));
         col += copy_ascii_cstr(s.as_mut_ptr().offset(col as isize), 16, &pid);
     }
 
-    psend = jobs()[jp].ps.len();
+    psend = sh.jobs.tab[jp].ps.len();
 
-    if jobs()[jp].state as c_int == JOBRUNNING {
+    if sh.jobs.tab[jp].state as c_int == JOBRUNNING {
         /* scopy("Running", s + col) */
         col += copy_ascii_cstr(s.as_mut_ptr().offset(col as isize), 8, "Running");
     } else {
         /* `psend[-1]`: a job leaves JOBRUNNING only through `waitone`,
          * which needs a process to have exited to do it. */
-        let mut status: c_int = jobs()[jp].ps[psend - 1].status;
-        if jobs()[jp].state as c_int == JOBSTOPPED {
-            status = jobs()[jp].stopstatus;
+        let mut status: c_int = sh.jobs.tab[jp].ps[psend - 1].status;
+        if sh.jobs.tab[jp].state as c_int == JOBSTOPPED {
+            status = sh.jobs.tab[jp].stopstatus;
         }
         col += sprint_status(s.as_mut_ptr().offset(col as isize), status, 0);
     }
@@ -570,7 +598,7 @@ pub(crate) unsafe fn showjob(out: *mut Output, jp: usize, mode: c_int) {
             /* for each process */
             let continuation = format!(
                 " |\n{space:>width$}{} ",
-                ps_pid(jp, ps),
+                ps_pid(sh, jp, ps),
                 space = ' ',
                 width = indent.max(0) as usize,
             );
@@ -583,9 +611,9 @@ pub(crate) unsafe fn showjob(out: *mut Output, jp: usize, mode: c_int) {
         let width = (33 - col).max(0) as usize;
         record.resize(record.len() + width.max(1), b' ');
         let _ = (&mut *out).write_all(&record);
-        outcmd(jp, ps, out);
+        outcmd(sh, jp, ps, out);
         if (mode & SHOW_PID) == 0 {
-            showpipe(jp, out);
+            showpipe(sh, jp, out);
             break;
         }
         ps += 1;
@@ -595,11 +623,11 @@ pub(crate) unsafe fn showjob(out: *mut Output, jp: usize, mode: c_int) {
         }
     }
 
-    jobs()[jp].changed = 0;
+    sh.jobs.tab[jp].changed = 0;
 
-    if jobs()[jp].state as c_int == JOBDONE {
+    if sh.jobs.tab[jp].state as c_int == JOBDONE {
         /* TRACE(("showjob: freeing job %d\n", jobno(jp))); */
-        freejob(jp);
+        freejob(sh, jp);
     }
 }
 
@@ -610,7 +638,7 @@ pub(crate) unsafe fn showjob(out: *mut Output, jp: usize, mode: c_int) {
 
 // [spec:dash:def:jobs.showjobs-fn]
 // [spec:dash:sem:jobs.showjobs-fn]
-pub unsafe fn showjobs(out: *mut Output, mode: c_int) -> Result<(), Error> {
+pub unsafe fn showjobs(sh: &mut crate::context::Shell, out: *mut Output, mode: c_int) -> Result<(), Error> {
     let mut jp: Option<usize>;
 
     /* TRACE(("showjobs(%x) called\n", mode)); */
@@ -619,17 +647,17 @@ pub unsafe fn showjobs(out: *mut Output, mode: c_int) -> Result<(), Error> {
     /* `DOWAIT_NONBLOCK`, so `wait3` cannot block and the poll inside it
      * has nothing to notice; the `?` is the type saying so rather than a
      * path anyone expects to take. */
-    dowait(DOWAIT_NONBLOCK, None)?;
+    dowait(sh, DOWAIT_NONBLOCK, None)?;
 
-    jp = curjob;
+    jp = sh.jobs.curjob;
     /* `showjob` may `freejob` the entry this walk is standing on.
      * `freejob` unlinks the job from the chain but leaves its own
      * `prev_job` alone, which is what keeps the next step valid. */
     while let Some(i) = jp {
-        if (mode & SHOW_CHANGED) == 0 || jobs()[i].changed != 0 {
-            showjob(out, i, mode);
+        if (mode & SHOW_CHANGED) == 0 || sh.jobs.tab[i].changed != 0 {
+            showjob(sh, out, i, mode);
         }
-        jp = jobs()[i].prev_job;
+        jp = sh.jobs.tab[i].prev_job;
     }
     Ok(())
 }
@@ -640,16 +668,16 @@ pub unsafe fn showjobs(out: *mut Output, mode: c_int) -> Result<(), Error> {
 
 // [spec:dash:def:jobs.freejob-fn]
 // [spec:dash:sem:jobs.freejob-fn]
-unsafe fn freejob(jp: usize) {
+unsafe fn freejob(sh: &mut crate::context::Shell, jp: usize) {
     INTOFF();
     /* The C `ckfree`s each `ps[i].cmd` that is not the shared null
      * string and leaves `nprocs` alone, so freeing the same job twice
      * frees them twice; dropping the array releases each text once and
      * makes the second call the no-op the C only gets away with by
      * never making it. */
-    jobs()[jp].ps.clear();
-    jobs()[jp].used = 0;
-    set_curjob(jp, CUR_DELETE);
+    sh.jobs.tab[jp].ps.clear();
+    sh.jobs.tab[jp].used = 0;
+    set_curjob(sh, jp, CUR_DELETE);
     INTON();
 }
 
@@ -659,7 +687,7 @@ unsafe fn freejob(jp: usize) {
 
 // [spec:dash:def:jobs.getjob-fn]
 // [spec:dash:sem:jobs.getjob-fn]
-pub(crate) unsafe fn getjob(name: *const c_char, getctl: c_int) -> Result<usize, Error> {
+pub(crate) unsafe fn getjob(sh: &mut crate::context::Shell, name: *const c_char, getctl: c_int) -> Result<usize, Error> {
     enum JobError {
         NoSuch,
         NoPrevious,
@@ -683,7 +711,7 @@ pub(crate) unsafe fn getjob(name: *const c_char, getctl: c_int) -> Result<usize,
         'gotit_lbl: {
             'check_lbl: {
                 'currentjob_lbl: {
-                    jp = curjob;
+                    jp = sh.jobs.curjob;
                     p = name;
                     if p.is_null() {
                         break 'currentjob_lbl; // goto currentjob
@@ -704,7 +732,7 @@ pub(crate) unsafe fn getjob(name: *const c_char, getctl: c_int) -> Result<usize,
                             break 'currentjob_lbl; // the currentjob: label body
                         } else if c == '-' as c_int {
                             if let Some(i) = jp {
-                                jp = jobs()[i].prev_job;
+                                jp = sh.jobs.tab[i].prev_job;
                             }
                             job_error = JobError::NoPrevious;
                             break 'check_lbl; // the check: label body
@@ -713,10 +741,10 @@ pub(crate) unsafe fn getjob(name: *const c_char, getctl: c_int) -> Result<usize,
 
                     if crate::mystring::is_number(p) != 0 {
                         num = libc::atoi(p) as c_uint;
-                        if num > 0 && num as usize <= jobs().len() {
+                        if num > 0 && num as usize <= sh.jobs.tab.len() {
                             let i = (num - 1) as usize;
                             jp = Some(i);
-                            if jobs()[i].used != 0 {
+                            if sh.jobs.tab[i].used != 0 {
                                 break 'gotit_lbl; // goto gotit
                             }
                             break 'err_lbl; // goto err
@@ -732,7 +760,7 @@ pub(crate) unsafe fn getjob(name: *const c_char, getctl: c_int) -> Result<usize,
                     let pat: &[u8] = CStr::from_ptr(p).to_bytes();
                     found = None;
                     while let Some(i) = jp {
-                        let cmd = ps_cmd(i, 0);
+                        let cmd = ps_cmd(sh, i, 0);
                         let hit = if substring {
                             cmd.contains_str(pat)
                         } else {
@@ -745,7 +773,7 @@ pub(crate) unsafe fn getjob(name: *const c_char, getctl: c_int) -> Result<usize,
                             found = Some(i);
                             job_error = JobError::Ambiguous;
                         }
-                        jp = jobs()[i].prev_job;
+                        jp = sh.jobs.tab[i].prev_job;
                     }
 
                     if found.is_none() {
@@ -768,7 +796,7 @@ pub(crate) unsafe fn getjob(name: *const c_char, getctl: c_int) -> Result<usize,
         // gotit:
         job_error = JobError::NoControl;
         let i = jp.unwrap();
-        if getctl != 0 && jobs()[i].jobctl == 0 {
+        if getctl != 0 && sh.jobs.tab[i].jobctl == 0 {
             break 'err_lbl; // goto err
         }
         return Ok(i);
@@ -806,44 +834,44 @@ pub(crate) unsafe fn getjob(name: *const c_char, getctl: c_int) -> Result<usize,
 
 // [spec:dash:def:jobs.makejob-fn]
 // [spec:dash:sem:jobs.makejob-fn]
-pub unsafe fn makejob(nprocs: c_int) -> usize {
+pub unsafe fn makejob(sh: &mut crate::context::Shell, nprocs: c_int) -> usize {
     let jp: usize;
     let mut i: usize;
 
     i = 0;
     jp = loop {
-        if i >= jobs().len() {
-            break growjobtab();
+        if i >= sh.jobs.tab.len() {
+            break growjobtab(sh);
         }
-        if jobs()[i].used == 0 {
+        if sh.jobs.tab[i].used == 0 {
             break i;
         }
-        if jobs()[i].state as c_int != JOBDONE || jobs()[i].waited == 0 {
+        if sh.jobs.tab[i].state as c_int != JOBDONE || sh.jobs.tab[i].waited == 0 {
             i += 1;
             continue;
         }
-        if jobctl != 0 {
+        if sh.jobs.jobctl != 0 {
             i += 1;
             continue;
         }
-        freejob(i);
+        freejob(sh, i);
         break i;
     };
     /* C: memset(jp, 0, sizeof *jp) */
-    jobs()[jp] = Job::new();
+    sh.jobs.tab[jp] = Job::new();
     /* The C picks the inline `ps0` for a single process and `ckmalloc`s
      * an array otherwise; all that decided was where the room came from,
      * so it is the capacity here and the processes are pushed as
      * `forkparent` forks them. */
     if nprocs > 0 {
-        jobs()[jp].ps.reserve_exact(nprocs as usize);
+        sh.jobs.tab[jp].ps.reserve_exact(nprocs as usize);
     }
-    if jobctl != 0 {
-        jobs()[jp].jobctl = 1;
+    if sh.jobs.jobctl != 0 {
+        sh.jobs.tab[jp].jobctl = 1;
     }
-    jobs()[jp].prev_job = curjob;
-    curjob = Some(jp);
-    jobs()[jp].used = 1;
+    sh.jobs.tab[jp].prev_job = sh.jobs.curjob;
+    sh.jobs.curjob = Some(jp);
+    sh.jobs.tab[jp].used = 1;
     /* TRACE(("makejob(%d) returns %%%d\n", nprocs, jobno(jp))); */
     jp
 }
@@ -851,15 +879,15 @@ pub unsafe fn makejob(nprocs: c_int) -> usize {
 // [spec:dash:def:jobs.growjobtab-fn]
 // [spec:dash:sem:jobs.growjobtab-fn]
 //
-// The C's second half — relocating `curjob`, every `prev_job` and every
+// The C's second half — relocating `sh.jobs.curjob`, every `prev_job` and every
 // `ps` that pointed at its own job's `ps0`, because `ckrealloc` may have
 // moved the array — has no counterpart: a job is named by its index and
 // owns its process array, so nothing points into the table.
-unsafe fn growjobtab() -> usize {
-    let len: usize = jobs().len();
+unsafe fn growjobtab(sh: &mut crate::context::Shell) -> usize {
+    let len: usize = sh.jobs.tab.len();
 
     for _ in 0..4 {
-        jobs().push(Job::new());
+        sh.jobs.tab.push(Job::new());
     }
     len
 }
@@ -937,33 +965,33 @@ unsafe fn forkchild(
         crate::init::forkreset(sh, if mode == FORK_NOJOB { n } else { None });
 
         /* do job control only in root shell */
-        jobctl = 0;
+        sh.jobs.jobctl = 0;
     }
 
-    /* The C tests `jp->jobctl` without checking `jp`; `jp` is NULL only
+    /* The C tests `jp->sh.jobs.jobctl` without checking `jp`; `jp` is NULL only
      * under FORK_NOJOB, which the first conjunct has already excluded. */
-    let ownpgrp = mode != FORK_NOJOB && oldlvl == 0 && jp.map_or(false, |i| jobs()[i].jobctl != 0);
+    let ownpgrp = mode != FORK_NOJOB && oldlvl == 0 && jp.map_or(false, |i| sh.jobs.tab[i].jobctl != 0);
     if ownpgrp {
         let pgrp: pid_t;
         let ji: usize = jp.unwrap();
 
-        if jobs()[ji].ps.is_empty() {
+        if sh.jobs.tab[ji].ps.is_empty() {
             pgrp = libc::getpid();
             crate::shellmain::mypid = pgrp;
         } else {
-            pgrp = jobs()[ji].ps[0].pid;
+            pgrp = sh.jobs.tab[ji].ps[0].pid;
         }
         /* This can fail because we are doing it in the parent also */
         libc::setpgid(0, pgrp);
         if mode == FORK_FG {
-            xxtcsetpgrp(pgrp).unwrap_or_else(|e| forkchild_fatal(sh, e));
+            xxtcsetpgrp(sh, pgrp).unwrap_or_else(|e| forkchild_fatal(sh, e));
         }
         crate::trap::setsignal(libc::SIGTSTP);
         crate::trap::setsignal(libc::SIGTTOU);
     } else if mode == FORK_BG {
         crate::trap::ignoresig(libc::SIGINT);
         crate::trap::ignoresig(libc::SIGQUIT);
-        if jp.map_or(false, |i| jobs()[i].ps.is_empty()) {
+        if jp.map_or(false, |i| sh.jobs.tab[i].ps.is_empty()) {
             /* The C closes descriptor 0 and reopens /dev/null, relying on
              * `open` returning the lowest free descriptor to land back on
              * 0. That only works when the shell's stdin *is* 0, so put it
@@ -996,7 +1024,7 @@ unsafe fn forkchild(
         return;
     };
 
-    freejob(ji);
+    freejob(sh, ji);
 
     if crate::parser::issimplecmd(n, (*crate::builtins::JOBSCMD).name.as_ptr()) != 0 {
         return;
@@ -1004,10 +1032,10 @@ unsafe fn forkchild(
 
     /* as in `showjobs`, the walk steps through jobs `freejob` has just
      * unlinked, using the `prev_job` it leaves behind */
-    let mut jq = curjob;
+    let mut jq = sh.jobs.curjob;
     while let Some(i) = jq {
-        freejob(i);
-        jq = jobs()[i].prev_job;
+        freejob(sh, i);
+        jq = sh.jobs.tab[i].prev_job;
     }
 }
 
@@ -1023,7 +1051,7 @@ unsafe fn forkparent(
     if pid < 0 {
         /* TRACE(("Fork failed, errno=%d", errno)); */
         if let Some(i) = jp {
-            freejob(i);
+            freejob(sh, i);
         }
         return Err(crate::error::sh_error_value(b"Cannot fork"));
     }
@@ -1032,34 +1060,34 @@ unsafe fn forkparent(
     let Some(ji) = jp else {
         return Ok(());
     };
-    if mode != FORK_NOJOB && jobs()[ji].jobctl != 0 {
+    if mode != FORK_NOJOB && sh.jobs.tab[ji].jobctl != 0 {
         let pgrp: c_int;
 
-        if jobs()[ji].ps.is_empty() {
+        if sh.jobs.tab[ji].ps.is_empty() {
             pgrp = pid;
         } else {
-            pgrp = jobs()[ji].ps[0].pid;
+            pgrp = sh.jobs.tab[ji].ps[0].pid;
         }
         /* This can fail because we are doing it in the child also */
         libc::setpgid(pid, pgrp);
     }
     if mode == FORK_BG {
         sh.backgndpid = pid; /* set $! */
-        set_curjob(ji, CUR_RUNNING);
+        set_curjob(sh, ji, CUR_RUNNING);
         if crate::options::optlist[crate::options::iflag] != 0 {
             let _ = writeln!(&mut *crate::output::stderr(), "[{}] {pid}", jobno(ji));
         }
     }
     /* the C's second `if (jp)` is dead after the early return above */
-    jobs()[ji].ps.push(ProcStat {
+    sh.jobs.tab[ji].ps.push(ProcStat {
         pid,
         status: -1,
         cmd: BString::new(Vec::new()),
     });
-    if jobctl != 0 && n.is_some() {
+    if sh.jobs.jobctl != 0 && n.is_some() {
         let cmd = commandtext(n.unwrap());
-        let last = jobs()[ji].ps.len() - 1;
-        jobs()[ji].ps[last].cmd = cmd;
+        let last = sh.jobs.tab[ji].ps.len() - 1;
+        sh.jobs.tab[ji].ps[last].cmd = cmd;
     }
     Ok(())
 }
@@ -1101,7 +1129,7 @@ pub unsafe fn vforkexec(
     let jp: usize;
     let pid: c_int;
 
-    jp = makejob(1);
+    jp = makejob(sh, 1);
 
     if crate::shellmain::mypid == 0 {
         crate::shellmain::mypid = libc::getpid();
@@ -1155,11 +1183,11 @@ pub unsafe fn vforkexec(
 
 // [spec:dash:def:jobs.waitforjob-fn]
 // [spec:dash:sem:jobs.waitforjob-fn]
-pub unsafe fn waitforjob(jp: Option<usize>) -> Result<c_int, Error> {
+pub unsafe fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c_int, Error> {
     let st: c_int;
 
     /* TRACE(("waitforjob(%%%d) called\n", jp ? jobno(jp) : 0)); */
-    dowait(
+    dowait(sh, 
         if jp.is_some() {
             DOWAIT_BLOCK
         } else {
@@ -1171,9 +1199,9 @@ pub unsafe fn waitforjob(jp: Option<usize>) -> Result<c_int, Error> {
         return Ok(exitstatus);
     };
 
-    st = getstatus(jp);
-    if jobs()[jp].jobctl != 0 {
-        xxtcsetpgrp(crate::shellmain::rootpid)?;
+    st = getstatus(sh, jp);
+    if sh.jobs.tab[jp].jobctl != 0 {
+        xxtcsetpgrp(sh, crate::shellmain::rootpid)?;
         /*
          * This is truly gross.
          * If we're doing job control, then we did a TIOCSPGRP which
@@ -1182,12 +1210,12 @@ pub unsafe fn waitforjob(jp: Option<usize>) -> Result<c_int, Error> {
          * intuit from the subprocess exit status whether a SIGINT
          * occurred, and if so interrupt ourselves.  Yuck.  - mycroft
          */
-        if jobs()[jp].sigint != 0 {
+        if sh.jobs.tab[jp].sigint != 0 {
             libc::raise(libc::SIGINT);
         }
     }
-    if JOBS == 0 || jobs()[jp].state as c_int == JOBDONE {
-        freejob(jp);
+    if JOBS == 0 || sh.jobs.tab[jp].state as c_int == JOBDONE {
+        freejob(sh, jp);
     }
     Ok(st)
 }
@@ -1198,7 +1226,7 @@ pub unsafe fn waitforjob(jp: Option<usize>) -> Result<c_int, Error> {
 
 // [spec:dash:def:jobs.waitone-fn]
 // [spec:dash:sem:jobs.waitone-fn]
-unsafe fn waitone(block: c_int, jobp: Option<usize>) -> Result<c_int, Error> {
+unsafe fn waitone(sh: &mut crate::context::Shell, block: c_int, jobp: Option<usize>) -> Result<c_int, Error> {
     let pid: c_int;
     let mut status: c_int = 0;
     let mut jp: Option<usize>;
@@ -1207,7 +1235,7 @@ unsafe fn waitone(block: c_int, jobp: Option<usize>) -> Result<c_int, Error> {
 
     INTOFF();
     /* TRACE(("dowait(%d) called\n", block)); */
-    pid = waitproc(block, &mut status)?;
+    pid = waitproc(sh, block, &mut status)?;
     /* TRACE(("wait returns pid %d, status=%d\n", pid, status)); */
     'out_lbl: {
         if pid <= 0 {
@@ -1215,10 +1243,10 @@ unsafe fn waitone(block: c_int, jobp: Option<usize>) -> Result<c_int, Error> {
         }
 
         'gotjob: {
-            jp = curjob;
+            jp = sh.jobs.curjob;
             while let Some(ji) = jp {
-                if jobs()[ji].state as c_int == JOBDONE {
-                    jp = jobs()[ji].prev_job;
+                if sh.jobs.tab[ji].state as c_int == JOBDONE {
+                    jp = sh.jobs.tab[ji].prev_job;
                     continue;
                 }
                 state = JOBDONE;
@@ -1227,23 +1255,23 @@ unsafe fn waitone(block: c_int, jobp: Option<usize>) -> Result<c_int, Error> {
                  * costs it one read of its zeroed `ps0`; that read can
                  * match no pid and `state` is only consulted once one
                  * has, so making the loop test first decides nothing */
-                let spend: usize = jobs()[ji].ps.len();
+                let spend: usize = sh.jobs.tab[ji].ps.len();
                 let mut sp: usize = 0;
                 while sp < spend {
-                    if jobs()[ji].ps[sp].pid == pid {
+                    if sh.jobs.tab[ji].ps[sp].pid == pid {
                         /* TRACE(("Job %d: changing status of proc %d ...")); */
-                        jobs()[ji].ps[sp].status = status;
+                        sh.jobs.tab[ji].ps[sp].status = status;
                         thisjob = Some(ji);
                     }
                     'contin: {
-                        if jobs()[ji].ps[sp].status == -1 {
+                        if sh.jobs.tab[ji].ps[sp].status == -1 {
                             state = JOBRUNNING;
                         }
                         if state == JOBRUNNING {
                             break 'contin;
                         }
-                        if libc::WIFSTOPPED(jobs()[ji].ps[sp].status) {
-                            jobs()[ji].stopstatus = jobs()[ji].ps[sp].status;
+                        if libc::WIFSTOPPED(sh.jobs.tab[ji].ps[sp].status) {
+                            sh.jobs.tab[ji].stopstatus = sh.jobs.tab[ji].ps[sp].status;
                             state = JOBSTOPPED;
                         }
                     }
@@ -1252,20 +1280,20 @@ unsafe fn waitone(block: c_int, jobp: Option<usize>) -> Result<c_int, Error> {
                 if thisjob.is_some() {
                     break 'gotjob;
                 }
-                jp = jobs()[ji].prev_job;
+                jp = sh.jobs.tab[ji].prev_job;
             }
             break 'out_lbl;
         }
         // gotjob:
         if state != JOBRUNNING {
             let tj = thisjob.unwrap();
-            jobs()[tj].changed = 1;
+            sh.jobs.tab[tj].changed = 1;
 
-            if jobs()[tj].state as c_int != state {
+            if sh.jobs.tab[tj].state as c_int != state {
                 /* TRACE(("Job %d: changing state from %d to %d\n", ...)); */
-                jobs()[tj].state = state as u8;
+                sh.jobs.tab[tj].state = state as u8;
                 if state == JOBSTOPPED {
-                    set_curjob(tj, CUR_STOPPED);
+                    set_curjob(sh, tj, CUR_STOPPED);
                 }
             }
         }
@@ -1301,13 +1329,13 @@ unsafe fn waitone(block: c_int, jobp: Option<usize>) -> Result<c_int, Error> {
 
 // [spec:dash:def:jobs.dowait-fn]
 // [spec:dash:sem:jobs.dowait-fn]
-pub(crate) unsafe fn dowait(block: c_int, jp: Option<usize>) -> Result<c_int, Error> {
+pub(crate) unsafe fn dowait(sh: &mut crate::context::Shell, block: c_int, jp: Option<usize>) -> Result<c_int, Error> {
     let gotchld: c_int = core::ptr::read_volatile(addr_of_mut!(crate::trap::gotsigchld));
     let mut rpid: c_int;
     let mut pid: c_int;
     let mut block: c_int = block;
 
-    if jp.map_or(false, |i| jobs()[i].state as c_int != JOBRUNNING) {
+    if jp.map_or(false, |i| sh.jobs.tab[i].state as c_int != JOBRUNNING) {
         block = DOWAIT_NONBLOCK;
     }
 
@@ -1318,11 +1346,11 @@ pub(crate) unsafe fn dowait(block: c_int, jp: Option<usize>) -> Result<c_int, Er
     rpid = 1;
 
     loop {
-        pid = waitone(block, jp)?;
+        pid = waitone(sh, block, jp)?;
         rpid &= (pid != 0) as c_int;
 
         block &= !DOWAIT_WAITCMD_ALL;
-        if pid == 0 || jp.map_or(false, |i| jobs()[i].state as c_int != JOBRUNNING) {
+        if pid == 0 || jp.map_or(false, |i| sh.jobs.tab[i].state as c_int != JOBRUNNING) {
             block = DOWAIT_NONBLOCK;
         }
         if !(pid >= 0) {
@@ -1350,7 +1378,7 @@ pub(crate) unsafe fn dowait(block: c_int, jp: Option<usize>) -> Result<c_int, Er
 
 // [spec:dash:def:jobs.waitproc-fn]
 // [spec:dash:sem:jobs.waitproc-fn]
-unsafe fn waitproc(block: c_int, status: *mut c_int) -> Result<c_int, Error> {
+unsafe fn waitproc(sh: &mut crate::context::Shell, block: c_int, status: *mut c_int) -> Result<c_int, Error> {
     let mut oldmask: libc::sigset_t = core::mem::zeroed();
     let mut flags: c_int = if block == DOWAIT_BLOCK {
         0
@@ -1359,7 +1387,7 @@ unsafe fn waitproc(block: c_int, status: *mut c_int) -> Result<c_int, Error> {
     };
     let mut err: c_int;
 
-    if jobctl != 0 {
+    if sh.jobs.jobctl != 0 {
         flags |= libc::WUNTRACED;
     }
 
@@ -1418,7 +1446,7 @@ unsafe fn waitproc(block: c_int, status: *mut c_int) -> Result<c_int, Error> {
 
 // [spec:dash:def:jobs.stoppedjobs-fn]
 // [spec:dash:sem:jobs.stoppedjobs-fn]
-pub unsafe fn stoppedjobs() -> c_int {
+pub unsafe fn stoppedjobs(sh: &mut crate::context::Shell) -> c_int {
     let jp: Option<usize>;
     let mut retval: c_int;
 
@@ -1427,13 +1455,13 @@ pub unsafe fn stoppedjobs() -> c_int {
         if JOBS == 0 {
             break 'out_lbl;
         }
-        if job_warning != 0 {
+        if sh.jobs.job_warning != 0 {
             break 'out_lbl;
         }
-        jp = curjob;
-        if jp.map_or(false, |i| jobs()[i].state as c_int == JOBSTOPPED) {
+        jp = sh.jobs.curjob;
+        if jp.map_or(false, |i| sh.jobs.tab[i].state as c_int == JOBSTOPPED) {
             let _ = (&mut *crate::output::stderr()).write_all(b"You have stopped jobs.\n");
-            job_warning = 2;
+            sh.jobs.job_warning = 2;
             retval += 1;
         }
     }
@@ -1859,12 +1887,12 @@ unsafe fn cmdputs(s: *const c_char) {
 
 // [spec:dash:def:jobs.showpipe-fn]
 // [spec:dash:sem:jobs.showpipe-fn]
-pub(crate) unsafe fn showpipe(jp: usize, out: *mut Output) {
-    let spend: usize = jobs()[jp].ps.len();
+pub(crate) unsafe fn showpipe(sh: &mut crate::context::Shell, jp: usize, out: *mut Output) {
+    let spend: usize = sh.jobs.tab[jp].ps.len();
 
     for sp in 1..spend {
         let _ = (&mut *out).write_all(b" | ");
-        outcmd(jp, sp, out);
+        outcmd(sh, jp, sp, out);
     }
     let _ = (&mut *out).write_all(b"\n");
     crate::output::flushall();
@@ -1890,7 +1918,7 @@ unsafe fn xtcsetpgrp(fd: c_int, pgrp: pid_t) -> Result<(), Error> {
 
 // [spec:dash:def:jobs.getstatus-fn]
 // [spec:dash:sem:jobs.getstatus-fn]
-pub(crate) unsafe fn getstatus(jobp: usize) -> c_int {
+pub(crate) unsafe fn getstatus(sh: &mut crate::context::Shell, jobp: usize) -> c_int {
     let mut status: c_int;
     let mut retval: c_int;
     let mut ps: usize;
@@ -1898,11 +1926,11 @@ pub(crate) unsafe fn getstatus(jobp: usize) -> c_int {
     /* `job->ps + job->nprocs - 1` in C: the bitfield promotes to `int`,
      * so a job that has not forked yet reads `ps[-1]`. It has no status
      * to report; `wait %n` on one answers 0. */
-    ps = jobs()[jobp].ps.len();
+    ps = sh.jobs.tab[jobp].ps.len();
     status = if ps == 0 {
         0
     } else {
-        jobs()[jobp].ps[ps - 1].status
+        sh.jobs.tab[jobp].ps[ps - 1].status
     };
     if pipefail() != 0 {
         loop {
@@ -1913,7 +1941,7 @@ pub(crate) unsafe fn getstatus(jobp: usize) -> c_int {
                 break;
             }
             ps -= 1;
-            status = jobs()[jobp].ps[ps - 1].status;
+            status = sh.jobs.tab[jobp].ps[ps - 1].status;
         }
     }
 
@@ -1924,7 +1952,7 @@ pub(crate) unsafe fn getstatus(jobp: usize) -> c_int {
             /* XXX: limits number of signals */
             retval = libc::WTERMSIG(status);
             if retval == libc::SIGINT {
-                jobs()[jobp].sigint = 1;
+                sh.jobs.tab[jobp].sigint = 1;
             }
         }
         retval += 128;

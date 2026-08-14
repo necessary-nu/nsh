@@ -51,6 +51,9 @@ pub struct Shell {
     /// The command hash and `builtinloc`. Function definitions live
     /// here too, because dash stores them in the same table.
     pub(crate) commands: crate::exec::CmdTable,
+    /// The jobs, and the terminal state job control needs. `jobs.rs`
+    /// owns the shape.
+    pub(crate) jobs: crate::jobs::JobTable,
     /// `$!` — the process id of the last command the shell put in the
     /// background.
     ///
@@ -79,6 +82,7 @@ impl Shell {
             aliases: crate::alias::AliasTable::new(),
             backgndpid: 0,
             commands: crate::exec::CmdTable::new(),
+            jobs: crate::jobs::JobTable::new(),
             redirs: crate::redir::RedirStack::new(),
         }
     }
