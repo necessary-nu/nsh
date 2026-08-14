@@ -14,11 +14,12 @@ use core::ptr::null;
 use libc::{c_char, c_int};
 
 use crate::builtins::r#type::describe_command;
+use crate::eval::Flow;
 use crate::options::Options;
 
 // [spec:dash:def:exec.commandcmd-fn]
 // [spec:dash:sem:exec.commandcmd-fn]
-pub unsafe fn commandcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn commandcmd(args: &[&BStr]) -> Result<Flow, Error> {
     const VERIFY_BRIEF: c_int = 1;
     const VERIFY_VERBOSE: c_int = 2;
     let mut verify: c_int = 0;
@@ -48,5 +49,5 @@ pub unsafe fn commandcmd(args: &[&BStr]) -> Result<c_int, Error> {
         }
     }
 
-    Ok(0)
+    Ok(Flow::Done(0))
 }

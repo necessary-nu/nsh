@@ -327,6 +327,28 @@ impl Error {
         }
     }
 
+    /// A failure whose diagnostic has **already been written**, with no
+    /// text of its own.
+    ///
+    /// The C raises `EXERROR` with no message where the thing that failed
+    /// wrote its own diagnostic and then returned normally — `evalcommand`'s
+    /// `bail:` after a `CMDUNKNOWN`, where `find_command` reported "not
+    /// found" and came back. There is no value to carry there and dash
+    /// carries none; this is that, as a value, so the frame can `return
+    /// Err` instead of raising.
+    ///
+    /// Nothing writes it: [`report`] runs at construction and this is not
+    /// constructed through it. An empty message is therefore never
+    /// rendered, and it must stay that way — a caller that reports one of
+    /// these would emit a bare prefix and a newline dash does not.
+    pub unsafe fn reported(status: c_int) -> Error {
+        Error::Other {
+            line: errlinno,
+            status,
+            message: BString::default(),
+        }
+    }
+
     /// The exit status the shell takes from this error.
     pub fn status(&self) -> c_int {
         match self {

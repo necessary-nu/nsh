@@ -295,3 +295,63 @@ fn redirect_failure_frees_ifs_regions() {
     );
     assert_eq!(status, 0);
 }
+
+// ---------------------------------------------------------------------
+// Flow: exit is control flow, and a forked child ends on its own
+// ---------------------------------------------------------------------
+
+/// `exit` in a subshell inside an EXIT trap.
+///
+/// The child's `exit` must reach a **fresh** `exitshell`, so the child
+/// runs its *own* EXIT trap. It must not resume the parent's `exitshell`,
+/// which is already past its `trap[0].take()` and would skip that trap.
+///
+/// The C never had the choice: a `longjmp` to `main_handler` lands at
+/// `exit:`. Returning an exit as a value does have the choice, and taking
+/// the wrong one prints `2` where dash prints `inner` then `2` — which is
+/// what the port did until `evalsubshell` learned to end its forked child
+/// where it stands. `tests/corpus/aud_exception_paths.txt` is the case
+/// that caught it; this is the same claim in one assertion.
+#[test]
+fn subshell_exit_trap_runs() {
+    let (out, status) = run(r#"trap '( trap "echo inner" EXIT; exit 2 ); echo $?' EXIT"#);
+    assert_eq!(out, "inner\n2\n");
+    assert_eq!(status, 0);
+}
+
+/// The status `exit` names survives the EXIT trap that runs after it.
+/// This is `init::exitreset`'s `savestatus` restore — the single place
+/// where the C's `EXEXIT` ever differed from `EXEND`, and therefore the
+/// whole of what `Flow::Exit`'s `by_exitcmd` has to carry.
+#[test]
+fn exit_status_survives_trap() {
+    let (out, status) = run("trap 'echo T; true' EXIT; exit 5");
+    assert_eq!(out, "T\n");
+    assert_eq!(status, 5);
+
+    // …and an `exit` *inside* the trap overrides it, which is the other
+    // way `exitreset` can be told to take `savestatus`.
+    let (out, status) = run("trap 'echo T; exit 9' EXIT; exit 3");
+    assert_eq!(out, "T\n");
+    assert_eq!(status, 9);
+}
+
+/// An `exit` inside a command substitution ends the substitution's child
+/// and nothing else — the one forked child that cannot hand its `Flow`
+/// back, because it sits under the whole expansion chain.
+#[test]
+fn substitution_exit_ends_child() {
+    let (out, status) = run(r#"x=$(echo a; exit 3; echo b); echo "[$x] $?"; echo after"#);
+    assert_eq!(out, "[a] 3\nafter\n");
+    assert_eq!(status, 0);
+}
+
+/// `set -e` aborts with no error value in flight at all — `false`
+/// produces no diagnostic — which is why the abort is `Flow` and not
+/// `Err`. `docs/api-design.md` §3.5 makes exactly this argument.
+#[test]
+fn set_e_abort_carries_nothing() {
+    let (out, status) = run("set -e; echo a; false; echo unreachable");
+    assert_eq!(out, "a\n");
+    assert_eq!(status, 1);
+}

@@ -14,12 +14,13 @@ use core::ffi::CStr;
 use core::ptr;
 use libc::{c_char, c_int};
 
+use crate::eval::Flow;
 use crate::options::Options;
 use crate::var::{VEXPORT, VREADONLY, findvar, setvar, showvars, var};
 
 // [spec:dash:def:var.exportcmd-fn]
 // [spec:dash:sem:var.exportcmd-fn]
-pub unsafe fn exportcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn exportcmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut vp: *mut var;
     let mut p: *const c_char;
     /* `export` and `readonly` are one builtin telling itself apart by the
@@ -58,7 +59,7 @@ pub unsafe fn exportcmd(args: &[&BStr]) -> Result<c_int, Error> {
         let called = crate::shell::cstring(args[0]);
         showvars(called.as_ptr(), flag, 0);
     }
-    Ok(0)
+    Ok(Flow::Done(0))
 }
 
 #[cfg(test)]
@@ -70,7 +71,7 @@ mod tests {
     use crate::testutil::{CStr0, lock};
     use crate::var::{VSTRFIXED, lookupvar, setvar};
 
-    fn run(name: &[u8], words: &[&[u8]]) -> c_int {
+    fn run(name: &[u8], words: &[&[u8]]) -> Flow {
         let mut args = vec![BStr::new(name)];
         args.extend(words.iter().map(|w| BStr::new(*w)));
         unsafe { exportcmd(&args).unwrap() }
@@ -85,11 +86,11 @@ mod tests {
             let name = CStr0::new("Texport");
             setvar(name.p(), CStr0::new("v").p(), VSTRFIXED);
 
-            assert_eq!(run(b"export", &[b"Texport"]), 0);
+            assert_eq!(run(b"export", &[b"Texport"]), Flow::Done(0));
             assert_ne!((*findvar(name.p())).flags & VEXPORT, 0);
             assert_eq!((*findvar(name.p())).flags & VREADONLY, 0);
 
-            assert_eq!(run(b"readonly", &[b"Texport"]), 0);
+            assert_eq!(run(b"readonly", &[b"Texport"]), Flow::Done(0));
             assert_ne!((*findvar(name.p())).flags & VREADONLY, 0);
         }
     }
@@ -100,7 +101,7 @@ mod tests {
     fn an_operand_may_assign() {
         let _g = lock();
         unsafe {
-            assert_eq!(run(b"export", &[b"Texport2=set"]), 0);
+            assert_eq!(run(b"export", &[b"Texport2=set"]), Flow::Done(0));
             let name = CStr0::new("Texport2");
             assert_eq!(
                 CStr::from_ptr(lookupvar(name.p())).to_bytes(),

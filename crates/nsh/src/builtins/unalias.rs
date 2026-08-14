@@ -10,18 +10,19 @@ use libc::c_int;
 use std::io::Write;
 
 use crate::alias::{rmaliases, unalias};
+use crate::eval::Flow;
 use crate::options::Options;
 
 // [spec:dash:def:alias.unaliascmd-fn]
 // [spec:dash:sem:alias.unaliascmd-fn]
-pub unsafe fn unaliascmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn unaliascmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut i: c_int;
 
     let mut opts = Options::new(args);
     while let Some(opt) = opts.next(b"a")? {
         if opt == b'a' {
             rmaliases();
-            return Ok(0);
+            return Ok(Flow::Done(0));
         }
     }
     i = 0;
@@ -36,5 +37,5 @@ pub unsafe fn unaliascmd(args: &[&BStr]) -> Result<c_int, Error> {
         }
     }
 
-    Ok(i)
+    Ok(Flow::Done(i))
 }

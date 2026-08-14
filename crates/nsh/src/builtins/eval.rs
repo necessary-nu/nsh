@@ -14,11 +14,11 @@ use bstr::{BStr, BString};
 use libc::{c_char, c_int};
 use std::ffi::CString;
 
-use crate::eval::{EV_TESTED, evalstring};
+use crate::eval::{EV_TESTED, Flow, evalstring};
 
 // [spec:dash:def:eval.evalcmd-fn]
 // [spec:dash:sem:eval.evalcmd-fn]
-pub(crate) unsafe fn evalcmd(args: &[&BStr], flags: c_int) -> Result<c_int, Error> {
+pub(crate) unsafe fn evalcmd(args: &[&BStr], flags: c_int) -> Result<Flow, Error> {
     /* `grabstackstr` kept the joined string alive until the enclosing mark
      * popped, which is past the `evalstring` that parses it. Owning it here
      * says the same thing, and it has to be a binding of this frame because
@@ -42,5 +42,5 @@ pub(crate) unsafe fn evalcmd(args: &[&BStr], flags: c_int) -> Result<c_int, Erro
         };
         return evalstring(p, flags & EV_TESTED);
     }
-    Ok(0)
+    Ok(Flow::Done(0))
 }

@@ -29,6 +29,7 @@ use bstr::{BStr, BString};
 use libc::{c_char, c_int};
 
 use crate::escape::conv_escape_str;
+use crate::eval::Flow;
 
 #[inline]
 unsafe fn nullstr() -> *mut c_char {
@@ -78,7 +79,7 @@ unsafe fn print_escape_str(separator: u8, s: *mut c_char) -> c_int {
 
 // [spec:dash:def:printf.echocmd-fn]
 // [spec:dash:sem:printf.echocmd-fn]
-pub unsafe fn echocmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn echocmd(args: &[&BStr]) -> Result<Flow, Error> {
     /* The C picked between the formats `"%s\n"`, `"%s"` and `"%s "`; all
      * that ever differed was the byte after the conversion, so what is
      * chosen here is that byte. `-n` closes with nothing. */
@@ -114,5 +115,5 @@ pub unsafe fn echocmd(args: &[&BStr]) -> Result<c_int, Error> {
             break;
         }
     }
-    Ok(0)
+    Ok(Flow::Done(0))
 }

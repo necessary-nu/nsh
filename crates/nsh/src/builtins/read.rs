@@ -14,6 +14,7 @@ use std::io::Write as _;
 
 use bstr::{BStr, BString};
 
+use crate::eval::Flow;
 use crate::expand::arglist;
 use crate::options::Options;
 
@@ -91,7 +92,7 @@ unsafe fn readcmd_handle_line(line: &mut BString, names: &[&BStr]) -> Result<(),
 
 // [spec:dash:def:miscbltin.readcmd-fn]
 // [spec:dash:sem:miscbltin.readcmd-fn]
-pub unsafe fn readcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn readcmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut prompt: Option<CString>;
     let mut startloc: c_int = 0;
     let mut newloc: c_int = 0;
@@ -218,5 +219,5 @@ pub unsafe fn readcmd(args: &[&BStr]) -> Result<c_int, Error> {
      * halves at once. */
     line.push(b'\0');
     readcmd_handle_line(&mut line, names)?;
-    Ok(status)
+    Ok(Flow::Done(status))
 }

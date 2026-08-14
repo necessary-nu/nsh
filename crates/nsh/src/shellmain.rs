@@ -124,121 +124,171 @@ pub unsafe fn main(argc: c_int, argv: *mut *mut c_char) -> c_int {
     let mut entry: c_int = 0;
 
     loop {
+        /* What the body had to say, which the C read off `exception`
+         * afterwards. `Ok(Flow::Exit { .. })` is EXEND or EXEXIT, `Err` is
+         * EXERROR, and a `jumped` of true is what is left travelling by
+         * longjmp -- EXINT, until step F. */
+        let mut outcome: Result<crate::eval::Flow, crate::error::Error> =
+            Ok(crate::eval::Flow::Done(0));
+        let outcomep: *mut Result<crate::eval::Flow, crate::error::Error> =
+            addr_of_mut!(outcome);
         let jumped = crate::eval::setjmp_catch(addr_of_mut!(main_handler), || unsafe {
-            let mut pc: c_int = entry;
-            loop {
-                match pc {
-                    0 => {
-                        crate::error::handler = addr_of_mut!(main_handler);
-                        /* #ifdef DEBUG:
-                         *   opentrace();
-                         *   trputs("Shell args:  ");  trargs(argv); */
-                        rootpid = libc::getpid();
-                        mypid = rootpid;
-                        crate::init::init();
-                        /* `setstackmark(smark)`, popped at `state3` and on
-                         * the exception path, bounded what `procargs` and
-                         * the profile reads left in the region. */
-                        /* `procargs` returns its complaint now. This frame
-                         * is the handler that complaint was aimed at, so
-                         * the bridge performs the jump the C performed from
-                         * inside `sh_error`; it converts with the rest of
-                         * this catch frame. */
-                        let login: c_int = crate::options::procargs(argv).unwrap_or_else(|e| {
-                            crate::error::raise_reported(crate::error::EXERROR, e)
-                        });
-                        if login != 0 {
-                            *state_p = 1;
-                            read_profile(b"/etc/profile\0".as_ptr() as *const c_char);
-                            pc = 1; /* fall into state1: */
-                        } else {
-                            pc = 2; /* the `if (login)` body is skipped */
-                        }
-                    }
-                    1 => {
-                        // state1:
-                        *state_p = 2;
-                        read_profile(b"$HOME/.profile\0".as_ptr() as *const c_char);
-                        pc = 2;
-                    }
-                    2 => {
-                        // state2:
-                        *state_p = 3;
-                        if
-                        /* #ifndef linux: getuid() == geteuid() &&
-                         *                getgid() == getegid() && */
-                        iflag() != 0 {
-                            let shinit: *mut c_char =
-                                crate::var::lookupvar(b"ENV\0".as_ptr() as *const c_char);
-                            if !shinit.is_null() && *shinit != b'\0' as c_char {
-                                read_profile(shinit);
+            *outcomep = (|| -> Result<crate::eval::Flow, crate::error::Error> {
+                let mut pc: c_int = entry;
+                loop {
+                    match pc {
+                        0 => {
+                            crate::error::handler = addr_of_mut!(main_handler);
+                            /* #ifdef DEBUG:
+                             *   opentrace();
+                             *   trputs("Shell args:  ");  trargs(argv); */
+                            rootpid = libc::getpid();
+                            mypid = rootpid;
+                            crate::init::init()?;
+                            /* `setstackmark(smark)`, popped at `state3` and
+                             * on the exception path, bounded what `procargs`
+                             * and the profile reads left in the region. */
+                            let login: c_int = crate::options::procargs(argv)?;
+                            if login != 0 {
+                                *state_p = 1;
+                                match read_profile(b"/etc/profile\0".as_ptr() as *const c_char)? {
+                                    crate::eval::Flow::Done(_) => {}
+                                    exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
+                                }
+                                pc = 1; /* fall into state1: */
+                            } else {
+                                pc = 2; /* the `if (login)` body is skipped */
                             }
                         }
-                        pc = 3;
-                    }
-                    3 => {
-                        // state3:
-                        *state_p = 4;
-                        if !crate::options::minusc.is_null() {
-                            crate::eval::evalstring(
-                                crate::options::minusc,
-                                if sflag() != 0 { 0 } else { EV_EXIT },
-                            )
-                            .unwrap_or_else(|e| {
-                                crate::error::raise_reported(crate::error::EXERROR, e)
-                            });
+                        1 => {
+                            // state1:
+                            *state_p = 2;
+                            match read_profile(b"$HOME/.profile\0".as_ptr() as *const c_char)? {
+                                crate::eval::Flow::Done(_) => {}
+                                exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
+                            }
+                            pc = 2;
                         }
+                        2 => {
+                            // state2:
+                            *state_p = 3;
+                            if
+                            /* #ifndef linux: getuid() == geteuid() &&
+                             *                getgid() == getegid() && */
+                            iflag() != 0 {
+                                let shinit: *mut c_char =
+                                    crate::var::lookupvar(b"ENV\0".as_ptr() as *const c_char);
+                                if !shinit.is_null() && *shinit != b'\0' as c_char {
+                                    match read_profile(shinit)? {
+                                        crate::eval::Flow::Done(_) => {}
+                                        exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
+                                    }
+                                }
+                            }
+                            pc = 3;
+                        }
+                        3 => {
+                            // state3:
+                            *state_p = 4;
+                            if !crate::options::minusc.is_null() {
+                                /* With EV_EXIT this always ends in
+                                 * `Flow::Exit`, which is the C's EXEND
+                                 * reaching the handler and taking
+                                 * `goto exit`. Returning it here reaches
+                                 * the same place by the same decision. */
+                                match crate::eval::evalstring(
+                                    crate::options::minusc,
+                                    if sflag() != 0 { 0 } else { EV_EXIT },
+                                )? {
+                                    crate::eval::Flow::Done(_) => {}
+                                    exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
+                                }
+                            }
 
-                        if sflag() != 0 || crate::options::minusc.is_null() {
-                            pc = 4;
-                        } else {
-                            pc = 5; /* goto exit */
+                            if sflag() != 0 || crate::options::minusc.is_null() {
+                                pc = 4;
+                            } else {
+                                pc = 5; /* goto exit */
+                            }
                         }
-                    }
-                    4 => {
-                        /* state4: XXX ??? - why isn't this before the "if"
-                         * statement */
-                        cmdloop(1);
-                        pc = 5; /* falls into exit: */
-                    }
-                    _ => {
-                        // exit:
-                        /* #if PROFILE: monitor(0); */
-                        /* #if GPROF: _mcleanup(); */
-                        crate::trap::exitshell();
-                        /* NOTREACHED — exitshell() ends in _exit(). */
+                        4 => {
+                            /* state4: XXX ??? - why isn't this before the "if"
+                             * statement */
+                            match cmdloop(1)? {
+                                crate::eval::Flow::Done(_) => {}
+                                exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
+                            }
+                            pc = 5; /* falls into exit: */
+                        }
+                        _ => {
+                            // exit:
+                            /* #if PROFILE: monitor(0); */
+                            /* #if GPROF: _mcleanup(); */
+                            crate::trap::exitshell();
+                            /* NOTREACHED — exitshell() ends in _exit(). */
+                        }
                     }
                 }
+            })();
+        }) != 0;
+
+        /* The C read `exception` here; the three things it distinguished
+         * arrive as three different shapes now, and `exitreset` is told
+         * which rather than reading the global itself. */
+        let e_is_exit: bool;
+        let by_exitcmd: bool;
+        let interrupted: bool;
+
+        if jumped {
+            /* Only EXINT still travels this way. Step F makes it a value
+             * and this arm goes with the `setjmp_catch` around it. */
+            let arrived = crate::error::exception;
+            debug_assert_eq!(
+                arrived,
+                crate::error::EXINT,
+                "only the interrupt still reaches main as a jump"
+            );
+            e_is_exit = false;
+            by_exitcmd = false;
+            interrupted = true;
+        } else {
+            match &outcome {
+                /* `exit:` is the only way out of the body that does not
+                 * come back through here, because `exitshell` ends the
+                 * process. A `Flow::Done` would mean the loop above fell
+                 * out of `pc` without reaching it, which it cannot. */
+                Ok(crate::eval::Flow::Done(_)) => {
+                    unreachable!("main's body leaves only by exiting or by failing")
+                }
+                Ok(crate::eval::Flow::Exit { by_exitcmd: b }) => {
+                    e_is_exit = true;
+                    by_exitcmd = *b;
+                    interrupted = false;
+                }
+                Err(_) => {
+                    e_is_exit = false;
+                    by_exitcmd = false;
+                    interrupted = false;
+                }
             }
-        });
+        }
+        drop(outcome);
 
-        /* `jumped == 0` is unreachable: every path through the body ends
-         * at `exit:`, and `exitshell()` never returns. */
-        let _ = jumped;
-
-        /* setjmp returned non-zero: an exception unwound to main. */
+        /* the handler */
         {
-            let e: c_int;
             let s: c_int;
 
-            crate::init::exitreset();
-
-            e = crate::error::exception;
+            crate::init::exitreset(by_exitcmd);
 
             s = *state_p;
-            if e == crate::error::EXEND
-                || e == crate::error::EXEXIT
-                || s == 0
-                || iflag() == 0
-                || shlvl != 0
-            {
+            if e_is_exit || s == 0 || iflag() == 0 || shlvl != 0 {
                 entry = 5; // goto exit
                 continue;
             }
 
             crate::init::reset();
 
-            if e == crate::error::EXINT
+            if interrupted
             /* #if ATTY: && (!attyset() || equal(termval(), "emacs")) */
             {
                 let _ = (*crate::output::stderr()).write_all(b"\n");
@@ -303,7 +353,7 @@ pub fn main_fn(argc: c_int, argv: Vec<Vec<u8>>, streams: crate::streams::Streams
 
 // [spec:dash:def:main.cmdloop-fn]
 // [spec:dash:sem:main.cmdloop-fn]
-pub(crate) unsafe fn cmdloop(top: c_int) -> c_int {
+pub(crate) unsafe fn cmdloop(top: c_int) -> Result<crate::eval::Flow, crate::error::Error> {
     let mut inter: c_int;
     let mut status: c_int = 0;
     let mut numeof: c_int = 0;
@@ -323,21 +373,14 @@ pub(crate) unsafe fn cmdloop(top: c_int) -> c_int {
             inter += 1;
             crate::mail::chkmail();
         }
-        /* `cmdloop` is not fallible: it is the interactive read-eval loop
-         * and its caller is `main`, which is the catch frame. It absorbs a
-         * syntax error exactly as it already absorbs an evaluation error
-         * below, and both bridges retire together when step D converts
-         * that frame. */
-        let parsed = crate::parser::parsecmd(inter)
-            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
+        let parsed = crate::parser::parsecmd(inter)?;
         /* showtree(n); DEBUG */
         if let crate::parser::ParseResult::Tree(n) = parsed {
             let i: c_int;
 
             crate::jobs::job_warning = if crate::jobs::job_warning == 2 { 1 } else { 0 };
             numeof = 0;
-            i = crate::eval::evaltree(n.as_ref(), 0)
-                .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
+            i = crate::eval::flow!(crate::eval::evaltree(n.as_ref(), 0));
             if n.is_some() {
                 status = i;
             }
@@ -363,7 +406,36 @@ pub(crate) unsafe fn cmdloop(top: c_int) -> c_int {
         }
     }
 
-    status
+    Ok(crate::eval::Flow::Done(status))
+}
+
+/// End a forked child, the way `main`'s handler ends one.
+///
+/// Three children cannot hand their outcome back — `evalbackcmd`'s, most
+/// sharply, because it sits under the whole expansion chain, which has no
+/// business carrying control flow that exists only on the far side of a
+/// `fork`. This is what would have happened to them if they could.
+///
+/// It is exact rather than approximate, and the reason is `forkchild`'s
+/// `shlvl += 1` (`jobs.rs:877`). `main`'s handler tests
+/// `e_is_exit || s == 0 || iflag() == 0 || shlvl != 0`, so in *any* forked
+/// child the last disjunct is true and every outcome — an exit, a `set -e`
+/// abort, a diagnostic, an interrupt — takes `goto exit` and nothing else.
+/// There is no resume path to reproduce, so the whole of the handler for a
+/// child is `exitreset` and then `exitshell`.
+pub(crate) unsafe fn exit_from_child(
+    outcome: Result<crate::eval::Flow, crate::error::Error>,
+) -> ! {
+    let by_exitcmd = matches!(
+        outcome,
+        Ok(crate::eval::Flow::Exit {
+            by_exitcmd: true,
+            ..
+        })
+    );
+    drop(outcome);
+    crate::init::exitreset(by_exitcmd);
+    crate::trap::exitshell();
 }
 
 /*
@@ -372,21 +444,25 @@ pub(crate) unsafe fn cmdloop(top: c_int) -> c_int {
 
 // [spec:dash:def:main.read-profile-fn]
 // [spec:dash:sem:main.read-profile-fn]
-unsafe fn read_profile(name: *const c_char) {
+unsafe fn read_profile(name: *const c_char) -> Result<crate::eval::Flow, crate::error::Error> {
     let name: *const c_char = crate::parser::expandstr(name);
 
     if crate::input::setinputfile(
         name,
         crate::input::INPUT_PUSH_FILE | crate::input::INPUT_NOFILE_OK,
-    )
-    .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e))
-        < 0
+    )? < 0
     {
-        return;
+        return Ok(crate::eval::Flow::Done(0));
     }
 
-    cmdloop(0);
+    /* An `exit` in a profile ends the shell before it ever reads a
+     * command, so this call is one the exit has to travel out of. */
+    let flow = cmdloop(0)?;
+    if let crate::eval::Flow::Exit { .. } = flow {
+        return Ok(flow);
+    }
     crate::input::popfile();
+    Ok(flow)
 }
 
 /*
@@ -395,11 +471,14 @@ unsafe fn read_profile(name: *const c_char) {
 
 // [spec:dash:def:main.readcmdfile-fn]
 // [spec:dash:sem:main.readcmdfile-fn]
-pub unsafe fn readcmdfile(name: *mut c_char) {
-    crate::input::setinputfile(name, crate::input::INPUT_PUSH_FILE)
-        .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
-    cmdloop(0);
+pub unsafe fn readcmdfile(name: *mut c_char) -> Result<crate::eval::Flow, crate::error::Error> {
+    crate::input::setinputfile(name, crate::input::INPUT_PUSH_FILE)?;
+    let flow = cmdloop(0)?;
+    if let crate::eval::Flow::Exit { .. } = flow {
+        return Ok(flow);
+    }
     crate::input::popfile();
+    Ok(flow)
 }
 
 /*

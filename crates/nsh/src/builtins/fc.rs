@@ -13,6 +13,7 @@
 //! array it scans, and `fc -s old=new` splits that word in place.
 
 use crate::error::Error;
+use crate::eval::Flow;
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::CStr;
 use core::mem;
@@ -130,7 +131,7 @@ unsafe fn scan_options(argc: c_int, argv: *mut *mut c_char) -> Result<Flags, Err
 // [spec:dash:sem:histedit.histcmd-fn]
 // [spec:dash:def:myhistedit.histcmd-fn]
 // [spec:dash:sem:myhistedit.histcmd-fn]
-pub unsafe fn histcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn histcmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut editor: *const c_char = ptr::null();
     let mut lflg: c_int = 0;
     let mut nflg: c_int = 0;
@@ -366,9 +367,10 @@ pub unsafe fn histcmd(args: &[&BStr]) -> Result<c_int, Error> {
                             .write_all(core::ffi::CStr::from_ptr(s).to_bytes());
                     }
 
-                    crate::eval::evalstring(s, 0).unwrap_or_else(|e| {
-                        crate::error::raise_reported(crate::error::EXERROR, e)
-                    });
+                    /* `fc -s` runs the recalled line, which can be an
+                      * `exit`. It leaves through the cleanup below like
+                      * everything else this frame catches. */
+                    crate::eval::flow!(crate::eval::evalstring(s, 0));
                     if displayhist != 0 && history_active() {
                         record_history_line(core::ffi::CStr::from_ptr(s).to_bytes(), true);
                     }
@@ -400,10 +402,10 @@ pub unsafe fn histcmd(args: &[&BStr]) -> Result<c_int, Error> {
 
             drop(edit_file.take());
             /* XXX - should use no JC command */
-            crate::eval::evalstring(editcmd, 0)?;
+            crate::eval::flow!(crate::eval::evalstring(editcmd, 0));
             INTON();
             /* XXX - should read back - quick tst */
-            crate::shellmain::readcmdfile(editfile.as_mut_ptr());
+            crate::eval::flow!(crate::shellmain::readcmdfile(editfile.as_mut_ptr()));
             libc::unlink(editfile.as_ptr());
         }
 
@@ -413,43 +415,50 @@ pub unsafe fn histcmd(args: &[&BStr]) -> Result<c_int, Error> {
         if displayhist != 0 {
             displayhist = 0;
         }
-        Ok(())
+        Ok(Flow::Done(0))
     };
 
     if executing {
-        /* This frame catches two things now, and it has to keep doing so
-         * until step E. The diagnostics beneath it are values and arrive
-         * as `Err`; but `evalstring` above runs arbitrary shell code, and
-         * `exit`, `set -e` and an interrupt are still EXEXIT, EXEND and
-         * EXINT travelling by longjmp. Dismantling the catch now would
-         * let those skip the cleanup below -- leaving `active` raised and
-         * the temporary file on disk -- which is the ordering constraint
-         * docs/errors-are-values.md records for step D, reaching one step
-         * further than it predicted. The two arms perform identical
-         * cleanup and differ only in how they leave. */
-        let mut caught: Option<Error> = None;
+        /* What this frame still catches is the interrupt, and only the
+         * interrupt. `exit` and the `set -e` abort come back as
+         * `Flow::Exit` now, and a diagnostic as `Err`; both take the same
+         * cleanup as before -- lowering `active` and unlinking the
+         * temporary file, which is the only filesystem side effect on any
+         * catch path in the shell -- and then leave as values. EXINT is
+         * still a jump until step F, so the `setjmp_catch` stays, and its
+         * arm re-raises rather than returning.
+         *
+         * Three ways out of one cleanup path. That is what an honest
+         * hybrid looks like while one of the four exception codes is still
+         * an exception. */
+        let mut outcome: Result<Flow, Error> = Ok(Flow::Done(0));
         let jumped = crate::eval::setjmp_catch(jl, || {
-            caught = body().err();
+            outcome = body();
         }) != 0;
 
-        if jumped || caught.is_some() {
+        let left_early = jumped || !matches!(outcome, Ok(Flow::Done(_)));
+        if left_early {
             active = 0;
             drop(edit_file.take());
             if editfile[0] != 0 {
                 libc::unlink(editfile.as_ptr());
             }
             crate::error::handler = savehandler;
-            match caught {
-                Some(e) => return Err(e),
-                None => crate::error::raise_longjmp(crate::error::handler, 1),
+            if jumped {
+                debug_assert!(
+                    crate::error::exception != crate::error::EXERROR,
+                    "an EXERROR reached histcmd as a jump"
+                );
+                crate::error::raise_longjmp(crate::error::handler, 1);
             }
+            return outcome;
         }
     } else {
         /* `fc -l`: the C runs the same tail with no handler installed, so
          * an error here propagates to whatever frame is outermost. */
-        body()?;
+        crate::eval::flow!(body());
     }
-    Ok(0)
+    Ok(Flow::Done(0))
 }
 
 // [spec:dash:def:histedit.fc-replace-fn]

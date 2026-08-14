@@ -36,7 +36,7 @@ use crate::nodes::Node;
 
 // [spec:dash:def:init.init-fn]
 // [spec:dash:sem:init.init-fn]
-pub unsafe fn init() {
+pub unsafe fn init() -> Result<(), crate::error::Error> {
     /* from input.c: */
     crate::input::mkinit_init();
 
@@ -50,11 +50,7 @@ pub unsafe fn init() {
     }
 
     /* from var.c: */
-    /* Startup runs inside `main`'s handler, which is still a
-     * `setjmp_catch`; the bridge performs the jump the C performed from
-     * inside `sh_error` and retires when that frame converts. */
     crate::var::mkinit_init()
-        .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
 }
 
 /*
@@ -65,13 +61,17 @@ pub unsafe fn init() {
 
 // [spec:dash:def:init.exitreset-fn]
 // [spec:dash:sem:init.exitreset-fn]
-pub unsafe fn exitreset() {
+///
+/// `by_exitcmd` is the C's `exception == EXEXIT`, passed in rather than
+/// read off a global. It is the *only* thing that ever told `EXEXIT` from
+/// `EXEND` — see `eval::Flow`, whose doc comment records the audit
+/// `docs/api-design.md` 10.2 asked for — so it is the whole of what the
+/// two callers still have to say about which one arrived.
+pub unsafe fn exitreset(by_exitcmd: bool) {
     /* from eval.c: */
     {
         if crate::eval::savestatus >= 0 {
-            if crate::error::exception == crate::error::EXEXIT
-                || crate::eval::evalskip == crate::eval::SKIPFUNCDEF
-            {
+            if by_exitcmd || crate::eval::evalskip == crate::eval::SKIPFUNCDEF {
                 crate::eval::exitstatus = crate::eval::savestatus;
             }
             crate::eval::savestatus = -1;

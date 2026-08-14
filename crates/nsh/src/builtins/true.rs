@@ -4,13 +4,13 @@
 //! the other name, which is what the C's two table rows say.
 
 use crate::error::Error;
+use crate::eval::Flow;
 use bstr::BStr;
-use libc::c_int;
 
 // [spec:dash:def:eval.truecmd-fn]
 // [spec:dash:sem:eval.truecmd-fn]
-pub unsafe fn truecmd(_args: &[&BStr]) -> Result<c_int, Error> {
-    Ok(0)
+pub unsafe fn truecmd(_args: &[&BStr]) -> Result<Flow, Error> {
+    Ok(Flow::Done(0))
 }
 
 #[cfg(test)]
@@ -22,8 +22,8 @@ mod tests {
     #[test]
     fn always_succeeds() {
         unsafe {
-            assert_eq!(truecmd(&[BStr::new("true")]).unwrap(), 0);
-            assert_eq!(truecmd(&[BStr::new(":"), BStr::new("ignored")]).unwrap(), 0);
+            assert_eq!(truecmd(&[BStr::new("true")]).unwrap(), Flow::Done(0));
+            assert_eq!(truecmd(&[BStr::new(":"), BStr::new("ignored")]).unwrap(), Flow::Done(0));
         }
     }
 }

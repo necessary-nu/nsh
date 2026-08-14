@@ -1,9 +1,10 @@
 # Errors are values: the fixpoint, what the unwind is doing, and the order
 
 Status: analysis and specification for the `errors-are-values` node, which
-is now **in progress**. Steps A and B are done and C is nearly done; §0.1
-records exactly what, §0.2 records the one bug it shipped, and the rest of
-this document is still the plan. It
+is now **in progress**. Steps A through E are done; §0.1 records exactly
+what, §0.2 records the two bugs the conversion shipped and the guards that
+followed, and §0.3 answers the question §3.2's step E was told to answer
+before `Flow` was written. F and G are still the plan. It
 builds on `[dec:nsh:errors-are-values]`, `docs/api-design.md` §3 (which
 settled the taxonomy and the `set -e` question) and
 `docs/idiomatization.md` §2.3 step 7.
@@ -33,8 +34,19 @@ Eleven commits, each green:
 | `abb908b` | C | `var`'s `setvar` / `setvareq` / `setvarint` / `unsetvar` / `mklocal`, `cd`'s `setpwd`, `getopts`, `read` |
 | `08ceee0` | C | the evaluator: `evaltree` and everything it drives |
 | `96cadd4` | C | `redir`'s open/dup/pipe/savefd chain, `input::setinputfile` |
+| `7ac6039` | C | `exec`'s command search |
+| `ac556b3` | C | `jobs`' job table |
+| `144035c` | C | `expand`'s unexpandable word |
+| `f6a59f8` | C | `parser`'s syntax error |
+| `95ed41f` | C | the option scan's rejected option |
+| `d29caaf` | C | `fc` — the last eight jumping raise sites |
+| `41bb7b2` | D | the eleven pins for the two dangerous frames, written first |
+| `708437c` | D | `redirectsafe` and `expandstr`, and their shared decision |
+| *this one* | E | `Flow`: `EXEND` and `EXEXIT` stop being exceptions |
 
-The raise sites that still jump went 51 → 20 over those commits.
+The raise sites that still jump went 51 → 20 → 0 over those commits. What
+still leaves by longjmp after step E is the interrupt, and seven bridges
+in `input`, `var` and `jobs` that step G has to answer for.
 
 ### 0.2 The bug this conversion actually shipped, and the guard that followed
 
@@ -140,6 +152,62 @@ would be changing which instruction a pending SIGINT is delivered at.
 That case is now real and in the tree: `setcmd` returns `options(..)?`
 between its `INTOFF` and its `INTON`. It is left leaking, deliberately,
 and the commit that introduced it says so.
+
+### 0.3 Do `EXEND` and `EXEXIT` differ in anything but the status?
+
+`docs/api-design.md` §10.2 records this as one of the things that design
+is not sure about, and §3.2's step E is told to answer it *before* `Flow`
+is written, by reading `init.rs:64-92` and `shellmain.rs:219-227`. The
+reading was done, and the answer is sharper than either document expected,
+because it does not depend on reading those two sites correctly — it
+depends on how few sites there are.
+
+**`error::exception` is read in exactly three places in the crate.**
+
+| site | what it asks |
+|---|---|
+| `eval.rs`, `evalcommand`'s builtin arm | was it `EXERROR` from a non-special built-in, i.e. may this frame swallow it |
+| `shellmain.rs`, `main`'s handler | was it `EXEND` **or** `EXEXIT`, i.e. go to `exit:` |
+| `init.rs:73`, `exitreset` | was it `EXEXIT`, i.e. restore `savestatus` into `exitstatus` |
+
+Only the third tells the two apart, and all it does with the difference is
+decide whether to take `savestatus`. `main`'s handler tests them together
+and does the same thing for both. So the two codes differ **in one place
+and in one bit**, and §3.5's "if the conversion finds a second difference,
+`Exit` grows a field" does not apply: there is no second difference.
+
+`Flow::Exit { by_exitcmd }` is that bit, and `init::exitreset` takes it as
+a parameter rather than reading a global. The audit is worth more than the
+conclusion: a claim about two enum values that are compared in three places
+is checkable by reading three lines, and that is a much stronger form of
+evidence than reading the two sites the design nominated.
+
+**One consequence for step E that neither document predicted.** Turning
+the exit into a value gives a forked child a choice the C never had. The
+C's child leaves by `longjmp` to `main_handler`, which lands at `exit:`
+and calls a *fresh* `exitshell`. A returned `Flow::Exit` can instead
+travel back through the frames between the raise and `main` — and in a
+forked child those frames are the **parent's**, copied by `fork`, with the
+parent in the middle of using them. `aud_exception_paths` caught it in one
+case:
+
+```
+trap '( trap "echo inner" EXIT; exit 2 ); echo $?' EXIT
+```
+
+The copied frames include `exitshell`, already past its `trap[0].take()`.
+Returning the exit re-entered that frame, so the child skipped its own
+EXIT trap: dash prints `inner` then `2`, and the port printed `2`. The
+fix is that a forked child ends where it stands (`shellmain::exit_from_child`),
+and it is exact rather than approximate because `forkchild` does
+`shlvl += 1`, so `main`'s handler sends *every* outcome in *any* forked
+child to `exit:` and there is no resume path to reproduce.
+
+This is the same trap as the `exit:`-inside-the-loop note at
+`shellmain.rs:111-123`, and the same case — a subshell in an EXIT trap —
+has now caught it twice, once for each mechanism. It is the third bug
+[dec:nsh:errors-are-values]'s rationale predicted the corpus would find,
+arriving exactly where §5 said it would: after the mechanism changed.
 
 ---
 
@@ -1141,9 +1209,11 @@ size. §3.1.
    builtin error in an interactive dash, which is the one configuration
    where a stuck counter is observable.
 
-5. **Whether step E can really wait for `delete-memalloc`.** That node did
-   not finish; `[dec:nsh:owned-data]` records it surviving in two pieces
-   with two different owners, one of which is blocked on
-   `sanctioned-divergences`. If `errors-are-values` has to start first, §2.3
-   is the list of mark placements that must be preserved by hand, and
-   `eval.rs:426`/`:431` is the one that is easy to get wrong.
+5. ~~**Whether step E can really wait for `delete-memalloc`.**~~
+   **Closed.** `delete-memalloc` finished before step E was written:
+   `setstackmark` and `popstackmark` survive only in comments, so the
+   hazard this entry describes — `evaltree` popping at one line and raising
+   **without** popping at the next, and a naive rewrite releasing the
+   region on a path the C never does — cannot arise. There were no mark
+   placements left to preserve by hand, and step E's `Ok(Flow::END)` sits
+   where the `exraise(EXEND)` sat with nothing between them.

@@ -8,13 +8,14 @@ use crate::error::Error;
 use bstr::BStr;
 use libc::c_int;
 
+use crate::eval::Flow;
 use crate::jobs::{SHOW_PGID, SHOW_PID, getjob, showjob, showjobs};
 use crate::options::Options;
 use crate::output::Output;
 
 // [spec:dash:def:jobs.jobscmd-fn]
 // [spec:dash:sem:jobs.jobscmd-fn]
-pub unsafe fn jobscmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn jobscmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut mode: c_int;
     let out: *mut Output;
 
@@ -39,5 +40,5 @@ pub unsafe fn jobscmd(args: &[&BStr]) -> Result<c_int, Error> {
         showjobs(out, mode);
     }
 
-    Ok(0)
+    Ok(Flow::Done(0))
 }

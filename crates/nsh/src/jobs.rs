@@ -1067,8 +1067,15 @@ pub unsafe fn vforkexec(
          * it may allocate, free or drop. `forkchild` returns at its
          * `lvforked` test without touching the job table's storage. */
         forkchild(Some(jp), Some(n), FORK_FG);
-        crate::exec::shellexec(argv, path, idx);
-        /* NOTREACHED */
+        /* `shellexec` either replaces the image or, in a vforked child,
+         * `_exit`s at the failure site. It cannot come back here: this
+         * frame belongs to the parent, and returning through it would
+         * unwind the parent's stack from inside the child.
+         * docs/errors-are-values.md 2.5 is the boundary, and the `_exit`
+         * that enforces it is at `shellexec`'s own failure site now
+         * rather than inside `exraise`. */
+        drop(crate::exec::shellexec(argv, path, idx));
+        std::process::abort();
     }
 
     vforked = 0;

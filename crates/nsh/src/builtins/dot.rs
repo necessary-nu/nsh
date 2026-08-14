@@ -12,6 +12,7 @@ use core::ptr::addr_of;
 use libc::{c_char, c_int};
 use std::ffi::CStr;
 
+use crate::eval::Flow;
 use crate::shellmain::cmdloop;
 
 // [spec:dash:def:main.find-dot-file-fn]
@@ -67,7 +68,7 @@ unsafe fn find_dot_file(
 
 // [spec:dash:def:main.dotcmd-fn]
 // [spec:dash:sem:main.dotcmd-fn]
-pub unsafe fn dotcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn dotcmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut status: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
@@ -89,9 +90,16 @@ pub unsafe fn dotcmd(args: &[&BStr]) -> Result<c_int, Error> {
          * frame allocated can be freed with the frame like any other
          * local, and the static slot that used to hold it is gone. */
         crate::eval::commandname = Some(BString::from(CStr::from_ptr(fullname).to_bytes()));
-        status = cmdloop(0);
+        /* An `exit` inside a dotted file ends the shell, not the file, so
+         * it leaves through here without the `popfile` -- exactly as the
+         * C's longjmp did. The input stack is unwound to a mark by
+         * whatever catches, not by the frame it passed through. */
+        match cmdloop(0)? {
+            Flow::Done(s) => status = s,
+            exit @ Flow::Exit { .. } => return Ok(exit),
+        }
         crate::input::popfile();
     }
 
-    Ok(status)
+    Ok(Flow::Done(status))
 }

@@ -15,11 +15,12 @@ use std::io::Write;
 
 use crate::builtins::cd::cdopt;
 use crate::cd::{Pwd, cbytes, curdir, physdir, setpwd_inner};
+use crate::eval::Flow;
 use crate::options::Options;
 
 // [spec:dash:def:cd.pwdcmd-fn]
 // [spec:dash:sem:cd.pwdcmd-fn]
-pub unsafe fn pwdcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn pwdcmd(args: &[&BStr]) -> Result<Flow, Error> {
     let flags: c_int;
 
     flags = cdopt(&mut Options::new(args))?;
@@ -34,5 +35,5 @@ pub unsafe fn pwdcmd(args: &[&BStr]) -> Result<c_int, Error> {
     dir.pop();
     dir.push(b'\n');
     let _ = (*crate::output::stdout()).write_all(&dir);
-    Ok(0)
+    Ok(Flow::Done(0))
 }

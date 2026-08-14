@@ -14,6 +14,7 @@ use std::io::Write as _;
 
 use bstr::BStr;
 
+use crate::eval::Flow;
 use crate::options::Options;
 
 /*
@@ -150,7 +151,7 @@ unsafe fn printlim(how: limtype, limit: *const libc::rlimit, l: *const limits) {
 
 // [spec:dash:def:miscbltin.ulimitcmd-fn]
 // [spec:dash:sem:miscbltin.ulimitcmd-fn]
-pub unsafe fn ulimitcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn ulimitcmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut c: c_int;
     let mut val: libc::rlim_t = 0;
     let mut how: limtype = SOFT | HARD;
@@ -245,7 +246,7 @@ pub unsafe fn ulimitcmd(args: &[&BStr]) -> Result<c_int, Error> {
             printlim(how, &limit, l);
             l = l.add(1);
         }
-        return Ok(0);
+        return Ok(Flow::Done(0));
     }
 
     libc::getrlimit((*l).cmd as libc::__rlimit_resource_t, &mut limit);
@@ -267,7 +268,7 @@ pub unsafe fn ulimitcmd(args: &[&BStr]) -> Result<c_int, Error> {
     } else {
         printlim(how, &limit, l);
     }
-    Ok(0)
+    Ok(Flow::Done(0))
 }
 
 #[cfg(test)]

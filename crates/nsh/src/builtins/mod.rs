@@ -34,7 +34,7 @@
 use core::ffi::CStr;
 
 use bstr::BStr;
-use libc::{c_char, c_int, c_uint};
+use libc::{c_char, c_uint};
 
 /// posix 'special builtin'
 pub const BUILTIN_SPECIAL: c_uint = 0x1;
@@ -64,7 +64,17 @@ pub const BUILTIN_ASSIGN: c_uint = 0x4;
 /// `fn(&mut Shell, &[&BStr]) -> Result<ExitStatus, Error>`. This is that
 /// signature's `Result`; the receiver and the status type belong to
 /// `no-ambient-state` and `public-api`.
-pub type Builtin = unsafe fn(&[&BStr]) -> Result<c_int, crate::error::Error>;
+///
+/// The `Ok` side is a [`Flow`] rather than a status because `exit` is a
+/// built-in. `exitcmd` used to leave by `exraise(EXEXIT)`, and a table of
+/// one function-pointer type is what makes that everybody's business:
+/// either every entry can say "the shell is exiting" or `exit` has to
+/// keep jumping. Three others need it too, and they need it for the same
+/// reason -- `.`, `fc` and `eval` re-enter evaluation, so an `exit` or a
+/// `set -e` abort inside them has to travel back out through them. The
+/// remaining thirty produce `Flow::Done` and nothing else, which is what
+/// the C's `int` said.
+pub type Builtin = unsafe fn(&[&BStr]) -> Result<crate::eval::Flow, crate::error::Error>;
 
 pub struct builtincmd {
     pub name: &'static CStr,
@@ -164,12 +174,12 @@ pub(crate) static mut bltin: builtincmd = builtincmd {
 
 // [spec:dash:def:eval.bltincmd-fn]
 // [spec:dash:sem:eval.bltincmd-fn]
-unsafe fn bltincmd(_args: &[&BStr]) -> Result<c_int, crate::error::Error> {
+unsafe fn bltincmd(_args: &[&BStr]) -> Result<crate::eval::Flow, crate::error::Error> {
     /*
      * Preserve exitstatus of a previous possible redirection
      * as POSIX mandates
      */
-    Ok(crate::eval::back_exitstatus)
+    Ok(crate::eval::Flow::Done(crate::eval::back_exitstatus))
 }
 
 pub const NUMBUILTINS: usize = 40;

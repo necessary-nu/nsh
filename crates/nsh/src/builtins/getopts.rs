@@ -20,13 +20,14 @@ use libc::{c_char, c_int, c_uint, size_t};
 use std::ffi::{CStr, CString};
 use std::io::Write;
 
+use crate::eval::Flow;
 use crate::mystring::nullstr;
 use crate::options::{Options, shellparam, shellparam_p};
 use crate::var::{VNOFUNC, setvar, setvarint, unsetvar};
 
 // [spec:dash:def:options.getoptscmd-fn]
 // [spec:dash:sem:options.getoptscmd-fn]
-pub unsafe fn getoptscmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn getoptscmd(args: &[&BStr]) -> Result<Flow, Error> {
     let optbase: *mut *mut c_char;
 
     let mut opts = Options::new(args);
@@ -65,11 +66,11 @@ pub unsafe fn getoptscmd(args: &[&BStr]) -> Result<c_int, Error> {
         }
     }
 
-    getopts(
+    Ok(Flow::Done(getopts(
         optstr.as_ptr() as *mut c_char,
         optvar.as_ptr() as *mut c_char,
         optbase,
-    )
+    )?))
 }
 
 // [spec:dash:def:options.getopts-fn]
@@ -235,15 +236,15 @@ mod tests {
             let words = ["getopts", "ab:", "o", "-a", "-bVAL", "rest"];
             let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
 
-            assert_eq!(getoptscmd(&args).unwrap(), 0);
+            assert_eq!(getoptscmd(&args).unwrap(), Flow::Done(0));
             assert_eq!(value("o"), "a");
 
-            assert_eq!(getoptscmd(&args).unwrap(), 0);
+            assert_eq!(getoptscmd(&args).unwrap(), Flow::Done(0));
             assert_eq!(value("o"), "b");
             assert_eq!(value("OPTARG"), "VAL");
 
             /* The operand ends the scan, and OPTIND points at it. */
-            assert_ne!(getoptscmd(&args).unwrap(), 0);
+            assert_ne!(getoptscmd(&args).unwrap(), Flow::Done(0));
             assert_eq!(value("OPTIND"), "3");
         }
     }
@@ -261,7 +262,7 @@ mod tests {
             let words = ["getopts", ":a", "o", "-z"];
             let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
 
-            assert_eq!(getoptscmd(&args).unwrap(), 0);
+            assert_eq!(getoptscmd(&args).unwrap(), Flow::Done(0));
             assert_eq!(value("o"), "?");
             assert_eq!(value("OPTARG"), "z");
         }

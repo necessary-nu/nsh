@@ -16,6 +16,7 @@
 //! `crate::mystring::atomax10(*const c_char) -> intmax_t`.
 
 use crate::error::Error;
+use crate::eval::Flow;
 use core::mem;
 use core::ptr;
 use libc::{c_char, c_int, c_short, intmax_t};
@@ -213,7 +214,7 @@ unsafe fn getop(s: *const c_char) -> *const t_op {
 
 // [spec:dash:def:test.testcmd-fn]
 // [spec:dash:sem:test.testcmd-fn]
-pub unsafe fn testcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn testcmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut op: *const t_op;
     let n: token;
     let mut res: c_int = 1;
@@ -246,7 +247,7 @@ pub unsafe fn testcmd(args: &[&BStr]) -> Result<c_int, Error> {
             argc -= 1;
 
             if argc < 1 {
-                return Ok(res);
+                return Ok(Flow::Done(res));
             }
 
             /*
@@ -290,7 +291,7 @@ pub unsafe fn testcmd(args: &[&BStr]) -> Result<c_int, Error> {
         return Err(syntax(*argv, c"unexpected operator".as_ptr()));
     }
 
-    Ok(res)
+    Ok(Flow::Done(res))
 }
 
 // [spec:dash:def:test.syntax-fn]
@@ -696,7 +697,10 @@ mod tests {
     fn eval(words: &[&[u8]]) -> c_int {
         let _guard = crate::testutil::lock();
         let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
-        unsafe { testcmd(&args).unwrap() }
+        let Flow::Done(status) = (unsafe { testcmd(&args).unwrap() }) else {
+            unreachable!("`test` always finishes")
+        };
+        status
     }
 
     #[test]

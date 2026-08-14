@@ -12,6 +12,7 @@ use libc::{c_int, pid_t};
 use std::ffi::CStr;
 use std::io::Write;
 
+use crate::eval::Flow;
 use crate::jobs::{getjob, ps_pid};
 use crate::options::Options;
 use crate::output::Output;
@@ -19,7 +20,7 @@ use crate::jobs::errno;
 
 // [spec:dash:def:jobs.killcmd-fn]
 // [spec:dash:sem:jobs.killcmd-fn]
-pub unsafe fn killcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn killcmd(args: &[&BStr]) -> Result<Flow, Error> {
     /* the `usage:` label is a backward goto whose body only raises, so it
      * is reproduced as two returns of the same message. */
     const USAGE: &[u8] =
@@ -91,7 +92,7 @@ pub unsafe fn killcmd(args: &[&BStr]) -> Result<c_int, Error> {
                 let _ = (&mut *out).write_all(&record);
                 i += 1;
             }
-            return Ok(0);
+            return Ok(Flow::Done(0));
         };
         let status = crate::shell::cstring(status);
         signo = crate::mystring::number(status.as_ptr())?;
@@ -109,7 +110,7 @@ pub unsafe fn killcmd(args: &[&BStr]) -> Result<c_int, Error> {
             message.extend_from_slice(status.as_bytes());
             return Err(crate::error::sh_error_value(&message));
         }
-        return Ok(0);
+        return Ok(Flow::Done(0));
     }
 
     i = 0;
@@ -133,5 +134,5 @@ pub unsafe fn killcmd(args: &[&BStr]) -> Result<c_int, Error> {
         }
     }
 
-    Ok(i)
+    Ok(Flow::Done(i))
 }

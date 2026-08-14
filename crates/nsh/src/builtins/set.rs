@@ -11,18 +11,19 @@
 use crate::error::Error;
 use bstr::BStr;
 use core::ptr::addr_of;
-use libc::{c_char, c_int};
+use libc::c_char;
 
 use crate::error::{INTOFF, INTON};
+use crate::eval::Flow;
 use crate::mystring::nullstr;
 use crate::options::{options, optschanged, setparam};
 use crate::var::{VUNSET, showvars};
 
 // [spec:dash:def:options.setcmd-fn]
 // [spec:dash:sem:options.setcmd-fn]
-pub unsafe fn setcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn setcmd(args: &[&BStr]) -> Result<Flow, Error> {
     if args.len() == 1 {
-        return Ok(showvars(addr_of!(nullstr) as *const c_char, 0, VUNSET));
+        return Ok(Flow::Done(showvars(addr_of!(nullstr) as *const c_char, 0, VUNSET)));
     }
     INTOFF();
     let scan = options(args, 1, false)?;
@@ -31,5 +32,5 @@ pub unsafe fn setcmd(args: &[&BStr]) -> Result<c_int, Error> {
         setparam(&args[scan.next..]);
     }
     INTON();
-    Ok(0)
+    Ok(Flow::Done(0))
 }

@@ -10,6 +10,7 @@
  */
 
 use crate::error::Error;
+use crate::eval::Flow;
 use core::mem;
 use libc::{c_char, c_int};
 use bstr::BStr;
@@ -17,7 +18,7 @@ use std::io::Write as _;
 
 // [spec:dash:def:times.timescmd-fn]
 // [spec:dash:sem:times.timescmd-fn]
-pub unsafe fn timescmd(_args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn timescmd(_args: &[&BStr]) -> Result<Flow, Error> {
     let mut buf: libc::tms = mem::zeroed();
     let clk_tck: libc::c_long = libc::sysconf(libc::_SC_CLK_TCK);
     let mutime: c_int;
@@ -52,5 +53,5 @@ pub unsafe fn timescmd(_args: &[&BStr]) -> Result<c_int, Error> {
         "{mutime}m{utime:.6}s {mstime}m{stime:.6}s\n\
          {mcutime}m{cutime:.6}s {mcstime}m{cstime:.6}s\n"
     );
-    Ok(0)
+    Ok(Flow::Done(0))
 }

@@ -18,6 +18,7 @@ use std::os::unix::ffi::OsStrExt;
 
 use crate::cd::{cbytes, curdir, setpwd};
 use crate::error::{INTOFF, INTON};
+use crate::eval::Flow;
 use crate::mystring::{dotdir, homestr, nullstr};
 use crate::options::Options;
 use crate::var::bltinlookup;
@@ -43,7 +44,7 @@ pub(crate) unsafe fn cdopt(opts: &mut Options) -> Result<c_int, Error> {
 
 // [spec:dash:def:cd.cdcmd-fn]
 // [spec:dash:sem:cd.cdcmd-fn]
-pub unsafe fn cdcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn cdcmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut dest: *const c_char;
     let mut path: *const c_char;
     let mut p: *const c_char;
@@ -156,7 +157,7 @@ pub unsafe fn cdcmd(args: &[&BStr]) -> Result<c_int, Error> {
         d.push(b'\n');
         let _ = (*crate::output::stdout()).write_all(&d);
     }
-    Ok(0)
+    Ok(Flow::Done(0))
 }
 
 // [spec:dash:def:cd.docd-fn]

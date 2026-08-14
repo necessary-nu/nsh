@@ -167,7 +167,11 @@ use crate::system::errno;
 
 // [spec:dash:def:exec.shellexec-fn]
 // [spec:dash:sem:exec.shellexec-fn]
-pub unsafe fn shellexec(argv: *mut *mut c_char, path: *const c_char, mut idx: c_int) -> ! {
+pub unsafe fn shellexec(
+    argv: *mut *mut c_char,
+    path: *const c_char,
+    mut idx: c_int,
+) -> Result<crate::eval::Flow, crate::error::Error> {
     let mut cmdname: *mut c_char;
     let e: c_int;
     let exerrno: c_int;
@@ -210,8 +214,27 @@ pub unsafe fn shellexec(argv: *mut *mut c_char, path: *const c_char, mut idx: c_
     message.extend_from_slice(CStr::from_ptr(*argv.offset(0)).to_bytes());
     message.extend_from_slice(b": ");
     message.extend_from_slice(CStr::from_ptr(crate::error::errmsg(e, E_EXEC)).to_bytes());
-    crate::error::exerror(crate::error::EXEND, &message);
-    /* NOTREACHED */
+    /* `exerror(EXEND, msg)`: text *and* control flow, which is why the
+     * bridge took the code as a parameter rather than reading it off the
+     * value. The text is written here, where dash writes it, and the value
+     * it rendered from is dropped -- an `exec` that cannot happen ends the
+     * shell, and `docs/api-design.md` 3.3 is explicit that what ends the
+     * run is `Flow`, not `Err`. */
+    drop(crate::error::report(crate::error::Error::other(&message)));
+
+    /* The one place a `Result` may not be returned. `vforkexec` runs this
+     * in a child that shares the parent's stack, so an `Ok` travelling out
+     * of here would return through frames the parent owns and unwind them
+     * under it. docs/errors-are-values.md 2.5 calls this a hard boundary
+     * rather than a wrinkle, and the ending has to happen at the site.
+     * This is the `_exit` that `exraise` performed for every raise and now
+     * performs for the only one that can reach a vforked child. */
+    if crate::jobs::vforked != 0 {
+        crate::shell::flush_coverage();
+        libc::_exit(crate::eval::exitstatus);
+    }
+
+    Ok(crate::eval::Flow::END)
 }
 
 // [spec:dash:def:exec.tryexec-fn]
@@ -425,7 +448,7 @@ pub unsafe fn find_command(
     entry: *mut cmdentry,
     mut act: c_int,
     path: *const c_char,
-) -> Result<(), Error> {
+) -> Result<crate::eval::Flow, Error> {
     let mut cmdp: *mut tblentry;
     let mut idx: c_int;
     let mut prev: c_int;
@@ -454,11 +477,11 @@ pub unsafe fn find_command(
                 }
                 // absfail:
                 (*entry).cmdtype = CMDUNKNOWN;
-                return Ok(());
+                return Ok(crate::eval::Flow::Done(0));
             }
         }
         (*entry).cmdtype = CMDNORMAL;
-        return Ok(());
+        return Ok(crate::eval::Flow::Done(0));
     }
 
     updatetbl = (path == crate::var::pathval()) as c_int;
@@ -582,7 +605,15 @@ pub unsafe fn find_command(
                          * and `stunalloc` is the copy going out of scope. */
                         let kept = (*addr_of!(pathbuf)).clone();
                         let fullname = kept.as_ptr() as *mut c_char;
-                        crate::shellmain::readcmdfile(fullname);
+                        /* A `%func` PATH entry is a file of shell code, so
+                         * it can `exit`; the C's longjmp took that straight
+                         * past `find_command` and its callers, and this
+                         * returns it through them instead. It is why
+                         * `find_command` carries a `Flow` at all. */
+                        match crate::shellmain::readcmdfile(fullname)? {
+                            crate::eval::Flow::Done(_) => {}
+                            exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
+                        }
                         cmdp = cmdlookup(name, 0);
                         if cmdp.is_null() || (*cmdp).cmdtype() != CMDFUNCTION {
                             let mut message = Vec::new();
@@ -601,7 +632,7 @@ pub unsafe fn find_command(
                     if updatetbl == 0 {
                         (*entry).cmdtype = CMDNORMAL;
                         (*entry).u.index = idx;
-                        return Ok(());
+                        return Ok(crate::eval::Flow::Done(0));
                     }
                     INTOFF();
                     cmdp = cmdlookup(name, 1);
@@ -627,13 +658,13 @@ pub unsafe fn find_command(
             }
             // fail:
             (*entry).cmdtype = CMDUNKNOWN;
-            return Ok(());
+            return Ok(crate::eval::Flow::Done(0));
         }
         // builtin_success:
         if updatetbl == 0 {
             (*entry).cmdtype = CMDBUILTIN;
             (*entry).u.cmd = bcmd;
-            return Ok(());
+            return Ok(crate::eval::Flow::Done(0));
         }
         INTOFF();
         cmdp = cmdlookup(name, 1);
@@ -644,7 +675,7 @@ pub unsafe fn find_command(
     // success:
     (*cmdp).rehash = false;
     (*cmdp).write_to(entry);
-    Ok(())
+    Ok(crate::eval::Flow::Done(0))
 }
 
 /*

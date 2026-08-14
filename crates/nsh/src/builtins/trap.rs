@@ -15,6 +15,7 @@ use std::ffi::CStr;
 use std::io::Write;
 
 use crate::error::{INTOFF, INTON};
+use crate::eval::Flow;
 use crate::options::Options;
 use crate::trap::{
     NSIG, cbytes, clear_traps, decode_signal, decode_signum, ptrap, setsignal, trap, trap_mut,
@@ -23,7 +24,7 @@ use crate::trap::{
 
 // [spec:dash:def:trap.trapcmd-fn]
 // [spec:dash:sem:trap.trapcmd-fn]
-pub unsafe fn trapcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn trapcmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut signo: c_int;
 
     let mut opts = Options::new(args);
@@ -47,7 +48,7 @@ pub unsafe fn trapcmd(args: &[&BStr]) -> Result<c_int, Error> {
             }
             signo += 1;
         }
-        return Ok(0);
+        return Ok(Flow::Done(0));
     }
     if ptrap != 0 {
         clear_traps(None);
@@ -68,7 +69,7 @@ pub unsafe fn trapcmd(args: &[&BStr]) -> Result<c_int, Error> {
             message.extend_from_slice(word.as_bytes());
             message.extend_from_slice(b": bad trap\n");
             let _ = (*crate::output::stderr()).write_all(&message);
-            return Ok(1);
+            return Ok(Flow::Done(1));
         }
         INTOFF();
         /* The C's `action = savestr(action)` makes the next signal in the
@@ -101,5 +102,5 @@ pub unsafe fn trapcmd(args: &[&BStr]) -> Result<c_int, Error> {
         }
         INTON();
     }
-    Ok(0)
+    Ok(Flow::Done(0))
 }

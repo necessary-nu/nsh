@@ -14,7 +14,8 @@ use std::io::Write;
 pub type sig_atomic_t = c_int;
 
 use crate::error::{INTOFF, INTON, jmploc};
-use crate::eval::{SKIPFUNC, SKIPFUNCDEF, evalskip, exitstatus, savestatus};
+use crate::error::Error;
+use crate::eval::{Flow, SKIPFUNC, SKIPFUNCDEF, evalskip, exitstatus, savestatus};
 use crate::mystring::nullstr;
 use crate::nodes::Node;
 use crate::options::Options;
@@ -299,14 +300,14 @@ pub unsafe extern "C-unwind" fn onsig(signo: c_int) {
 
 // [spec:dash:def:trap.dotrap-fn]
 // [spec:dash:sem:trap.dotrap-fn]
-pub unsafe fn dotrap() {
+pub unsafe fn dotrap() -> Result<Flow, Error> {
     let mut q: *mut c_char;
     let mut i: c_int;
     let mut status: c_int;
     let last_status: c_int;
 
     if pending_sig == 0 {
-        return;
+        return Ok(Flow::Done(0));
     }
 
     status = savestatus;
@@ -346,8 +347,15 @@ pub unsafe fn dotrap() {
                 continue;
             }
         };
-        crate::eval::evalstring(p.as_mut_ptr() as *mut c_char, 0)
-            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
+        /* A trap action is shell code and can do anything shell code can,
+         * including `exit`. The C's `exit` left here by longjmp, straight
+         * past the `savestatus = last_status` below; a `Flow::Exit`
+         * returned from here skips it in exactly the same way, which is
+         * what leaves `savestatus` holding what `exit` was told. */
+        match crate::eval::evalstring(p.as_mut_ptr() as *mut c_char, 0)? {
+            Flow::Done(_) => {}
+            exit @ Flow::Exit { .. } => return Ok(exit),
+        }
         if evalskip != SKIPFUNC {
             exitstatus = status;
         }
@@ -356,6 +364,7 @@ pub unsafe fn dotrap() {
     }
 
     savestatus = last_status;
+    Ok(Flow::Done(exitstatus))
 }
 
 /*
@@ -391,6 +400,13 @@ pub unsafe fn exitshell() -> ! {
     /* `TRACE(("pid %d, exitshell(%d)\n", getpid(), savestatus));` —
      * `#ifdef DEBUG` in `shell.h`, and the dash build does not define it. */
     /* `if (setjmp(loc.loc)) goto out;` — the body below is the fall-through. */
+    /* Whether the EXIT trap ended by running out or by calling `exit`
+     * itself. It is the C's `exception == EXEXIT` at the `out:` label, and
+     * the two ways of reaching `out:` are exactly the two things
+     * `exitreset` tests: the trap ran to the end, which is the
+     * `evalskip = SKIPFUNCDEF` below, or the trap exited, which is this. */
+    let mut by_exitcmd = false;
+    let by_exitcmdp: *mut bool = addr_of_mut!(by_exitcmd);
     crate::eval::setjmp_catch(locp, || {
         crate::error::handler = locp;
         'out: {
@@ -404,16 +420,28 @@ pub unsafe fn exitshell() -> ! {
                 }
                 evalskip = 0;
                 let mut p = cbytes(&p);
-                crate::eval::evalstring(p.as_mut_ptr() as *mut c_char, 0)
-                    .unwrap_or_else(|e| {
-                        crate::error::raise_reported(crate::error::EXERROR, e)
-                    });
+                /* An error in the EXIT trap is reported and dropped: the
+                 * shell is already exiting and the C's `longjmp` landed at
+                 * `out:` with nothing left to inspect it. What must not be
+                 * dropped is an `exit` *inside* the trap, because it names
+                 * the status the shell leaves with. */
+                match crate::eval::evalstring(p.as_mut_ptr() as *mut c_char, 0) {
+                    Ok(crate::eval::Flow::Exit { by_exitcmd: b }) => {
+                        *by_exitcmdp = b;
+                        break 'out;
+                    }
+                    Ok(crate::eval::Flow::Done(_)) => {}
+                    Err(e) => {
+                        drop(e);
+                        break 'out;
+                    }
+                }
                 evalskip = SKIPFUNCDEF;
             }
         }
     });
     /* out: */
-    crate::init::exitreset();
+    crate::init::exitreset(by_exitcmd);
     crate::init::postexitreset();
     /*
      * Disable job control so that whoever had the foreground before we

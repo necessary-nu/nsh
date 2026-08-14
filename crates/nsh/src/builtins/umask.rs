@@ -17,6 +17,7 @@ use std::io::Write as _;
 use bstr::BStr;
 
 use crate::error::{INTOFF, INTON};
+use crate::eval::Flow;
 use crate::options::Options;
 
 /*
@@ -30,7 +31,7 @@ use crate::options::Options;
 
 // [spec:dash:def:miscbltin.umaskcmd-fn]
 // [spec:dash:sem:miscbltin.umaskcmd-fn]
-pub unsafe fn umaskcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn umaskcmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut ap: *mut c_char;
     let mut mask: c_int;
     let mut i: c_int;
@@ -196,7 +197,7 @@ pub unsafe fn umaskcmd(args: &[&BStr]) -> Result<c_int, Error> {
         }
         libc::umask(new_mask as libc::mode_t);
     }
-    Ok(0)
+    Ok(Flow::Done(0))
 }
 
 #[cfg(test)]
@@ -219,7 +220,7 @@ mod tests {
 
     fn set(mode: &[u8]) -> libc::mode_t {
         unsafe {
-            assert_eq!(umaskcmd(&[BStr::new("umask"), BStr::new(mode)]).unwrap(), 0);
+            assert_eq!(umaskcmd(&[BStr::new("umask"), BStr::new(mode)]).unwrap(), Flow::Done(0));
             let now = libc::umask(0);
             libc::umask(now);
             now

@@ -8,11 +8,11 @@ use crate::error::Error;
 use bstr::BStr;
 use libc::c_int;
 
-use crate::eval::{SKIPFUNC, SKIPFUNCDEF, evalskip, exitstatus};
+use crate::eval::{Flow, SKIPFUNC, SKIPFUNCDEF, evalskip, exitstatus};
 
 // [spec:dash:def:eval.returncmd-fn]
 // [spec:dash:sem:eval.returncmd-fn]
-pub unsafe fn returncmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn returncmd(args: &[&BStr]) -> Result<Flow, Error> {
     let skip: c_int;
     let status: c_int;
 
@@ -30,7 +30,7 @@ pub unsafe fn returncmd(args: &[&BStr]) -> Result<c_int, Error> {
     }
     evalskip = skip;
 
-    Ok(status)
+    Ok(Flow::Done(status))
 }
 
 #[cfg(test)]
@@ -41,7 +41,7 @@ mod tests {
     /// `SKIPFUNC`; without one the status is whatever `$?` already was,
     /// and the skip is the "not in a function" form that abandons the
     /// file instead.
-    fn run(status: Option<&[u8]>, last: c_int) -> (c_int, c_int) {
+    fn run(status: Option<&[u8]>, last: c_int) -> (c_int, Flow) {
         let _guard = crate::testutil::lock();
         let mut args = vec![BStr::new("return")];
         if let Some(status) = status {
@@ -57,11 +57,11 @@ mod tests {
 
     #[test]
     fn an_operand_is_the_status() {
-        assert_eq!(run(Some(b"7"), 3), (SKIPFUNC, 7));
+        assert_eq!(run(Some(b"7"), 3), (SKIPFUNC, Flow::Done(7)));
     }
 
     #[test]
     fn without_one_the_last_status_stands() {
-        assert_eq!(run(None, 3), (SKIPFUNCDEF, 3));
+        assert_eq!(run(None, 3), (SKIPFUNCDEF, Flow::Done(3)));
     }
 }

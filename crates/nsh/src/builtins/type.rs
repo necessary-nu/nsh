@@ -16,6 +16,7 @@ use std::ffi::CStr;
 use std::io::Write;
 
 use crate::builtins::BUILTIN_SPECIAL;
+use crate::eval::Flow;
 use crate::exec::{
     CMDBUILTIN, CMDFUNCTION, CMDNORMAL, DO_ABS, DO_ALTPATH, DO_NOFUNC, cmdentry, cmdlookup, find_builtin,
     find_command, padvance, padvance_result, param, pathopt, tblentry,
@@ -25,16 +26,19 @@ use crate::output::Output;
 
 // [spec:dash:def:exec.typecmd-fn]
 // [spec:dash:sem:exec.typecmd-fn]
-pub unsafe fn typecmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn typecmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut err: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
     opts.next(b"")?;
     for name in opts.operands() {
         let name = crate::shell::cstring(name);
-        err |= describe_command(crate::output::stdout(), name.as_ptr() as *mut c_char, null(), 1)?;
+        match describe_command(crate::output::stdout(), name.as_ptr() as *mut c_char, null(), 1)? {
+            Flow::Done(status) => err |= status,
+            exit @ Flow::Exit { .. } => return Ok(exit),
+        }
     }
-    Ok(err)
+    Ok(Flow::Done(err))
 }
 
 // [spec:dash:def:exec.describe-command-fn]
@@ -44,7 +48,7 @@ pub(crate) unsafe fn describe_command(
     command: *mut c_char,
     mut path: *const c_char,
     verbose: c_int,
-) -> Result<c_int, Error> {
+) -> Result<Flow, Error> {
     let mut entry: cmdentry = cmdentry {
         cmdtype: 0,
         u: param { index: 0 },
@@ -78,7 +82,7 @@ pub(crate) unsafe fn describe_command(
             } else {
                 let _ = (&mut *out).write_all(b"alias ");
                 crate::alias::printalias(ap);
-                return Ok(0);
+                return Ok(Flow::Done(0));
             }
             break 'out_label;
         }
@@ -97,7 +101,10 @@ pub(crate) unsafe fn describe_command(
             (*cmdp).write_to(&mut entry);
         } else {
             /* Finally use brute force */
-            find_command(command, &mut entry, DO_ABS, path)?;
+            match find_command(command, &mut entry, DO_ABS, path)? {
+                Flow::Done(_) => {}
+                exit @ Flow::Exit { .. } => return Ok(exit),
+            }
         }
 
         match entry.cmdtype {
@@ -154,11 +161,11 @@ pub(crate) unsafe fn describe_command(
                 if verbose != 0 {
                     let _ = (&mut *out).write_all(b": not found\n");
                 }
-                return Ok(127);
+                return Ok(Flow::Done(127));
             }
         }
     }
     // out:
     let _ = (&mut *out).write_all(b"\n");
-    Ok(0)
+    Ok(Flow::Done(0))
 }

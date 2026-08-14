@@ -13,11 +13,12 @@ use core::ptr::addr_of_mut;
 use libc::c_int;
 
 use crate::error::{INTOFF, INTON};
+use crate::eval::Flow;
 use crate::options::shellparam;
 
 // [spec:dash:def:options.shiftcmd-fn]
 // [spec:dash:sem:options.shiftcmd-fn]
-pub unsafe fn shiftcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn shiftcmd(args: &[&BStr]) -> Result<Flow, Error> {
     let n: c_int;
 
     n = match args.get(1) {
@@ -33,7 +34,7 @@ pub unsafe fn shiftcmd(args: &[&BStr]) -> Result<c_int, Error> {
     INTOFF();
     (*addr_of_mut!(shellparam)).drop_first(n);
     INTON();
-    Ok(0)
+    Ok(Flow::Done(0))
 }
 
 #[cfg(test)]
@@ -63,7 +64,7 @@ mod tests {
         let _g = lock();
         unsafe {
             params(&["a", "b", "c"]);
-            assert_eq!(shiftcmd(&[BStr::new("shift")]).unwrap(), 0);
+            assert_eq!(shiftcmd(&[BStr::new("shift")]).unwrap(), Flow::Done(0));
             assert_eq!((*addr_of_mut!(shellparam)).nparam, 2);
             assert_eq!(remaining(), vec![b"b".to_vec(), b"c".to_vec()]);
         }
@@ -74,7 +75,7 @@ mod tests {
         let _g = lock();
         unsafe {
             params(&["a", "b", "c"]);
-            assert_eq!(shiftcmd(&[BStr::new("shift"), BStr::new("2")]).unwrap(), 0);
+            assert_eq!(shiftcmd(&[BStr::new("shift"), BStr::new("2")]).unwrap(), Flow::Done(0));
             assert_eq!((*addr_of_mut!(shellparam)).nparam, 1);
             assert_eq!(remaining(), vec![b"c".to_vec()]);
         }
@@ -86,7 +87,7 @@ mod tests {
         let _g = lock();
         unsafe {
             params(&["a", "b"]);
-            assert_eq!(shiftcmd(&[BStr::new("shift"), BStr::new("2")]).unwrap(), 0);
+            assert_eq!(shiftcmd(&[BStr::new("shift"), BStr::new("2")]).unwrap(), Flow::Done(0));
             assert_eq!((*addr_of_mut!(shellparam)).nparam, 0);
         }
         /* The diagnostic comes back as a value now rather than as an

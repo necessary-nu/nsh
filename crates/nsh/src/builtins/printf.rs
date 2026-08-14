@@ -27,6 +27,7 @@ use bstr::{BStr, BString};
 use libc::{c_char, c_int};
 
 use crate::escape::{CONV_ESCAPE_SLOP, conv_escape, conv_escape_str};
+use crate::eval::Flow;
 
 mod conv;
 
@@ -618,7 +619,7 @@ unsafe fn print_escape_str(spec: &Spec, word: &CStr) -> Result<c_int, Error> {
 
 // [spec:dash:def:printf.printfcmd-fn]
 // [spec:dash:sem:printf.printfcmd-fn]
-pub unsafe fn printfcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn printfcmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut options = crate::options::Options::new(args);
     /* `nextopt(nullstr)`: printf takes no options, so this exists to
      * reject `-x` and to step over a `--`. */
@@ -781,7 +782,7 @@ pub unsafe fn printfcmd(args: &[&BStr]) -> Result<c_int, Error> {
     }
 
     // out:
-    Ok(operands.status)
+    Ok(Flow::Done(operands.status))
 }
 
 #[cfg(test)]

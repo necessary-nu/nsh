@@ -12,10 +12,11 @@ use libc::c_int;
 use std::io::Write;
 
 use crate::alias::{__lookupalias, alias, atab_mut, printalias, setalias};
+use crate::eval::Flow;
 
 // [spec:dash:def:alias.aliascmd-fn]
 // [spec:dash:sem:alias.aliascmd-fn]
-pub unsafe fn aliascmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn aliascmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut ret: c_int = 0;
     let mut ap: *mut alias;
 
@@ -23,7 +24,7 @@ pub unsafe fn aliascmd(args: &[&BStr]) -> Result<c_int, Error> {
         for ap in atab_mut().values() {
             printalias(&**ap as *const alias);
         }
-        return Ok(0);
+        return Ok(Flow::Done(0));
     }
     for word in &args[1..] {
         /* `setalias` reads the value as an offset into the name, so the
@@ -56,7 +57,7 @@ pub unsafe fn aliascmd(args: &[&BStr]) -> Result<c_int, Error> {
         }
     }
 
-    Ok(ret)
+    Ok(Flow::Done(ret))
 }
 
 #[cfg(test)]
@@ -74,7 +75,7 @@ mod tests {
             atab_mut().clear();
             assert_eq!(
                 aliascmd(&[BStr::new("alias"), BStr::new("ll=ls -l")]).unwrap(),
-                0
+                Flow::Done(0)
             );
             let found = lookupalias(c"ll".as_ptr(), 0);
             assert!(!found.is_null());
@@ -96,7 +97,7 @@ mod tests {
                     BStr::new("after=1"),
                 ])
                 .unwrap(),
-                1
+                Flow::Done(1)
             );
             assert!(!lookupalias(c"after".as_ptr(), 0).is_null());
             atab_mut().clear();

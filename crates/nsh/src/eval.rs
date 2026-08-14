@@ -100,6 +100,81 @@ pub static mut inps4: c_int = 0; /* MKINIT */
 
 pub static mut tpip: [c_int; 2] = [-1, 0]; /* MKINIT int tpip[2] = { -1 } */
 
+// ---------------------------------------------------------------------
+// control flow, which is not error
+// ---------------------------------------------------------------------
+
+/// What an evaluation hands back when it did not fail.
+///
+/// `[dec:nsh:errors-are-values]` and `docs/api-design.md` §3.1 divide
+/// `error.rs`'s four exception codes three ways: `EXERROR` is the only one
+/// that is an error and it is `Err(Error)`; `EXINT` is the interrupt; and
+/// `EXEND` and `EXEXIT` are *control flow*, which the decision requires to
+/// sit in the `Ok` position rather than the `Err` one. This is that
+/// position.
+///
+/// **What the audit for this commit found, which `docs/api-design.md`
+/// §10.2 asked for before `Flow` was written.** `error::exception` is read
+/// in exactly three places in the crate: `evalcommand`'s test for a
+/// built-in's `EXERROR` (`eval.rs`), `main`'s handler (`shellmain.rs`),
+/// and `init::exitreset` (`init.rs:73`). Only the last one tells `EXEND`
+/// from `EXEXIT`, and all it does with the difference is decide whether to
+/// restore `savestatus` into `exitstatus`. `main`'s handler tests the two
+/// together and does the same thing for both. So the two codes differ in
+/// exactly one place and in exactly one bit, which is [`Flow::Exit`]'s
+/// `by_exitcmd` — and §3.5's "if the conversion finds a second difference,
+/// `Exit` grows a field" does not apply, because there is no second
+/// difference.
+///
+/// `evalskip`'s `break` / `continue` / `return` are **not** here. §3.5
+/// proposes collapsing them into this type as well, and they should be;
+/// but they never travelled by longjmp — they are a global the evaluation
+/// loops already poll — so converting them is idiomatisation riding on
+/// this node rather than part of replacing the exception mechanism.
+/// `docs/idiomatization.md` §2.2 is the rule that says not to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[must_use = "an ignored Flow is an `exit` the shell does not perform"]
+pub enum Flow {
+    /// Evaluation finished. The value is the status, exactly what these
+    /// functions returned before there was anything else to say.
+    Done(c_int),
+    /// The shell is exiting: the C's `EXEND` and `EXEXIT`.
+    ///
+    /// `by_exitcmd` is `EXEXIT` — `exit` ran and left what it was asked
+    /// for in [`savestatus`], which `init::exitreset` restores. `false` is
+    /// `EXEND`: `set -e`, an `EV_EXIT` evaluation, or an `exec` that could
+    /// not happen, none of which name a status.
+    Exit { by_exitcmd: bool },
+}
+
+impl Flow {
+    /// The `EXEND` exit: the shell is ending without a status having been
+    /// named.
+    pub const END: Flow = Flow::Exit { by_exitcmd: false };
+    /// The `EXEXIT` exit: `exit` ran.
+    pub const EXIT: Flow = Flow::Exit { by_exitcmd: true };
+}
+
+/// `?` for [`Flow`]: take the status, or return the exit to the caller.
+///
+/// Every `evaltree(n, f)?` in the C was a call that could not come back at
+/// all once the shell had decided to exit, because the decision travelled
+/// by `longjmp` straight past this frame. `flow!(evaltree(n, f))` is that
+/// same "does not come back" written as a return, and the `?` inside it
+/// keeps propagating the diagnostics.
+///
+/// It is a macro rather than a method because the `return` has to happen
+/// in the *caller's* frame, which is the whole point.
+macro_rules! flow {
+    ($e:expr) => {
+        match $e? {
+            $crate::eval::Flow::Done(status) => status,
+            exit @ $crate::eval::Flow::Exit { .. } => return Ok(exit),
+        }
+    };
+}
+pub(crate) use flow;
+
 /* src/options.h: `#define nflag optlist[5]` and friends. */
 #[inline]
 unsafe fn nflag() -> c_int {
@@ -165,7 +240,7 @@ pub(crate) unsafe fn setjmp_catch<F: FnOnce()>(loc: *mut jmploc, body: F) -> c_i
 
 // [spec:dash:def:eval.evalstring-fn]
 // [spec:dash:sem:eval.evalstring-fn]
-pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> Result<c_int, Error> {
+pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> Result<Flow, Error> {
     let mut status: c_int;
     /* `sstrdup(s)` and the `stunalloc(s)` at the bottom are one thing:
      * `setinputstring` keeps the pointer rather than copying, so the text
@@ -186,7 +261,11 @@ pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> Result<c_int, Error> {
         {
             let i: c_int;
 
-            i = evaltree(
+            /* The C's `longjmp` past this frame skipped the `popfile`
+             * below, and so does a `Flow::Exit` returned through it: the
+             * input stack is unwound to a mark by whoever catches, not by
+             * the frame that was passed through. */
+            i = flow!(evaltree(
                 n.as_ref(),
                 flags
                     & !(if crate::parser::parser_eof() != 0 {
@@ -194,7 +273,7 @@ pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> Result<c_int, Error> {
                     } else {
                         EV_EXIT
                     }),
-            )?;
+            ));
             if n.is_some() {
                 status = i;
             }
@@ -209,7 +288,7 @@ pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> Result<c_int, Error> {
     crate::input::popfile();
     drop(owned);
 
-    Ok(status)
+    Ok(Flow::Done(status))
 }
 
 /*
@@ -219,14 +298,14 @@ pub unsafe fn evalstring(s: *mut c_char, flags: c_int) -> Result<c_int, Error> {
 
 // [spec:dash:def:eval.evaltree-fn]
 // [spec:dash:sem:eval.evaltree-fn]
-pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> Result<c_int, Error> {
+pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> Result<Flow, Error> {
     let mut checkexit: c_int = 0;
     /* C leaves `evalfn` uninitialised; every path that reaches
      * `calleval` assigns it first. Seeded here only so that Rust's
      * definite-initialisation analysis is trivially satisfied — any of
      * the six is as good, and `evaltree` itself no longer fits the type,
      * because the leaf evaluators all dereference their node. */
-    let mut evalfn: unsafe fn(&Node, c_int) -> Result<c_int, Error> = evalcommand;
+    let mut evalfn: unsafe fn(&Node, c_int) -> Result<Flow, Error> = evalcommand;
     let isor: libc::c_uint;
     let mut status: c_int = 0;
 
@@ -243,7 +322,7 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> Result<c_int, Error> {
             }
         };
 
-        crate::trap::dotrap();
+        flow!(crate::trap::dotrap());
 
         /* #ifndef SMALL: show history substitutions done with fc */
         crate::histedit::displayhist = 1;
@@ -284,7 +363,8 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> Result<c_int, Error> {
                                         checkexit = EV_TESTED;
                                     }
                                     Ok(()) => {
-                                        status = evaltree(r.n.as_deref(), flags & EV_TESTED)?;
+                                        status =
+                                            flow!(evaltree(r.n.as_deref(), flags & EV_TESTED));
                                     }
                                 }
                                 if !r.redirect.is_empty() {
@@ -320,10 +400,10 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> Result<c_int, Error> {
                                 /* #if NAND + 1 != NOR / NOR + 1 != NSEMI */
                                 isor = (n.node_type() - NAND) as libc::c_uint;
                                 let b = n.nbinary();
-                                status = evaltree(
+                                status = flow!(evaltree(
                                     b.ch1.as_deref(),
                                     (flags | (((isor >> 1).wrapping_sub(1)) as c_int)) & EV_TESTED,
-                                )?;
+                                ));
                                 if ((status == 0) as libc::c_uint) == isor || evalskip != 0 {
                                     break 'sw;
                                 }
@@ -332,7 +412,7 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> Result<c_int, Error> {
                             }
                             NIF => {
                                 let f = n.nif();
-                                status = evaltree(f.test.as_deref(), EV_TESTED)?;
+                                status = flow!(evaltree(f.test.as_deref(), EV_TESTED));
                                 if evalskip != 0 {
                                     break 'sw;
                                 }
@@ -356,7 +436,7 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> Result<c_int, Error> {
                              * `evaltree`, so with a tagged union there is
                              * nothing left for the fallthrough to reinterpret. */
                             _ /* default, NNOT */ => {
-                                status = evaltree(n.nnot().com.as_deref(), EV_TESTED)?;
+                                status = flow!(evaltree(n.nnot().com.as_deref(), EV_TESTED));
                                 if evalskip == 0 {
                                     status = (status == 0) as c_int;
                                 }
@@ -370,17 +450,17 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> Result<c_int, Error> {
                 }
                 // evaln: the C sets `evalfn = evaltree` and falls into
                 // `calleval:`, which with the reassigned node is this call.
-                status = evaltree(nnext, flags)?;
+                status = flow!(evaltree(nnext, flags));
                 break 'sw;
             }
             // calleval:
-            status = evalfn(n, flags)?;
+            status = flow!(evalfn(n, flags));
         }
 
         exitstatus = status;
     }
     // out:
-    crate::trap::dotrap();
+    flow!(crate::trap::dotrap());
 
     'exexit: {
         if eflag() != 0 && (!flags & checkexit) != 0 && status != 0 {
@@ -391,10 +471,18 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> Result<c_int, Error> {
             break 'exexit;
         }
 
-        return Ok(exitstatus);
+        return Ok(Flow::Done(exitstatus));
     }
     // exexit:
-    crate::error::exraise(crate::error::EXEND);
+    /* `exraise(EXEND)`, which is the `set -e` abort and the end of an
+     * `EV_EXIT` evaluation. Neither names a status -- `exitstatus` already
+     * holds it -- so this is the `by_exitcmd: false` half of `Flow::Exit`,
+     * and it is returned rather than jumped with. Note what is *not* here:
+     * the C raises after the `popstackmark` that the normal return runs
+     * before, and 2.3 warned that a naive rewrite would release the region
+     * on a path the C never does. `delete-memalloc` removed both marks, so
+     * there is nothing left to place. 8.5 is closed. */
+    Ok(Flow::END)
 }
 
 // [spec:dash:def:eval.evaltreenr-fn]
@@ -404,13 +492,21 @@ pub unsafe fn evaltree(n: Option<&Node>, flags: c_int) -> Result<c_int, Error> {
 // `__attribute__((alias))` it is literally the same function; the
 // portable fallback — reproduced here — calls `evaltree` and aborts if
 // it ever comes back.
-pub unsafe fn evaltreenr(n: Option<&Node>, flags: c_int) -> ! {
-    /* `evaltree` is fallible now and this one cannot be: it is the
-     * `noreturn` alias, called where the caller has already committed to
-     * not coming back. The bridge performs the jump the raise performed. */
-    evaltree(n, flags)
-        .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
-    std::process::abort();
+pub unsafe fn evaltreenr(n: Option<&Node>, flags: c_int) -> Result<Flow, Error> {
+    /* The C's `noreturn` was true because every caller passes `EV_EXIT`,
+     * and `evaltree`'s tail raises `EXEND` unconditionally under that
+     * flag. It still cannot come back with a status -- that is what the
+     * assertion says -- but "cannot come back" is now a `Flow::Exit`
+     * travelling out through the caller rather than a jump past it. Each
+     * of the three call sites is in a freshly forked child, whose copy of
+     * every frame between here and `main` is its own, so returning
+     * through them reaches the same `exit:` the longjmp reached. */
+    let flow = evaltree(n, flags)?;
+    debug_assert!(
+        matches!(flow, Flow::Exit { .. }),
+        "evaltreenr's caller passed EV_EXIT, so evaltree cannot finish normally"
+    );
+    Ok(flow)
 }
 
 // [spec:dash:def:eval.skiploop-fn]
@@ -438,7 +534,7 @@ unsafe fn skiploop() -> c_int {
 
 // [spec:dash:def:eval.evalloop-fn]
 // [spec:dash:sem:eval.evalloop-fn]
-unsafe fn evalloop(n: &Node, flags: c_int) -> Result<c_int, Error> {
+unsafe fn evalloop(n: &Node, flags: c_int) -> Result<Flow, Error> {
     let mut skip: c_int;
     let mut status: c_int;
     let mut flags: c_int = flags;
@@ -450,7 +546,7 @@ unsafe fn evalloop(n: &Node, flags: c_int) -> Result<c_int, Error> {
         {
             let mut i: c_int;
 
-            i = evaltree(n.nbinary().ch1.as_deref(), EV_TESTED)?;
+            i = flow!(evaltree(n.nbinary().ch1.as_deref(), EV_TESTED));
             skip = skiploop();
             if skip == SKIPFUNC {
                 status = i;
@@ -464,7 +560,7 @@ unsafe fn evalloop(n: &Node, flags: c_int) -> Result<c_int, Error> {
                 if i != 0 {
                     break;
                 }
-                status = evaltree(n.nbinary().ch2.as_deref(), flags)?;
+                status = flow!(evaltree(n.nbinary().ch2.as_deref(), flags));
                 skip = skiploop();
             }
         }
@@ -474,12 +570,12 @@ unsafe fn evalloop(n: &Node, flags: c_int) -> Result<c_int, Error> {
     }
     loopnest -= 1;
 
-    Ok(status)
+    Ok(Flow::Done(status))
 }
 
 // [spec:dash:def:eval.evalfor-fn]
 // [spec:dash:sem:eval.evalfor-fn]
-unsafe fn evalfor(n: &Node, flags: c_int) -> Result<c_int, Error> {
+unsafe fn evalfor(n: &Node, flags: c_int) -> Result<Flow, Error> {
     let mut arglist: arglist = arglist::new();
     let mut status: c_int;
     let mut flags: c_int = flags;
@@ -499,24 +595,20 @@ unsafe fn evalfor(n: &Node, flags: c_int) -> Result<c_int, Error> {
     loopnest += 1;
     flags &= EV_TESTED;
     for sp in &arglist.list {
-        /* The evaluator is not converted yet, so the bridge performs the
-         * jump `setvar`'s `sh_error` performed; it retires when this frame
-         * returns `Result`. */
-        crate::var::setvar(f.var.as_ptr(), sp.textp(), 0)
-            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
-        status = evaltree(f.body.as_deref(), flags)?;
+        crate::var::setvar(f.var.as_ptr(), sp.textp(), 0)?;
+        status = flow!(evaltree(f.body.as_deref(), flags));
         if (skiploop() & !SKIPCONT) != 0 {
             break;
         }
     }
     loopnest -= 1;
 
-    Ok(status)
+    Ok(Flow::Done(status))
 }
 
 // [spec:dash:def:eval.evalcase-fn]
 // [spec:dash:sem:eval.evalcase-fn]
-unsafe fn evalcase(n: &Node, flags: c_int) -> Result<c_int, Error> {
+unsafe fn evalcase(n: &Node, flags: c_int) -> Result<Flow, Error> {
     let mut arglist: arglist = arglist::new();
     let mut status: c_int = 0;
 
@@ -552,7 +644,7 @@ unsafe fn evalcase(n: &Node, flags: c_int) -> Result<c_int, Error> {
                      * exit status.
                      */
                     if evalskip == 0 && cp.nclist().body.is_some() {
-                        status = evaltree(cp.nclist().body.as_deref(), flags)?;
+                        status = flow!(evaltree(cp.nclist().body.as_deref(), flags));
                     }
                     break 'out_lbl;
                 }
@@ -560,7 +652,7 @@ unsafe fn evalcase(n: &Node, flags: c_int) -> Result<c_int, Error> {
         }
     }
     // out:
-    Ok(status)
+    Ok(Flow::Done(status))
 }
 
 /*
@@ -569,7 +661,7 @@ unsafe fn evalcase(n: &Node, flags: c_int) -> Result<c_int, Error> {
 
 // [spec:dash:def:eval.evalsubshell-fn]
 // [spec:dash:sem:eval.evalsubshell-fn]
-unsafe fn evalsubshell(n: &Node, flags: c_int) -> Result<c_int, Error> {
+unsafe fn evalsubshell(n: &Node, flags: c_int) -> Result<Flow, Error> {
     let jp: usize;
     let backgnd: c_int = (n.node_type() == NBACKGND) as c_int;
     let mut status: c_int;
@@ -584,9 +676,15 @@ unsafe fn evalsubshell(n: &Node, flags: c_int) -> Result<c_int, Error> {
 
     expredir(&r.redirect)?;
     INTOFF();
+    /* Whether the tail below runs in a child of this process or in this
+     * process. The C does not need to know, because its `evaltreenr`
+     * leaves by longjmp either way; a return has to know, and this is the
+     * difference. */
+    let forked: bool;
     'nofork: {
         if backgnd == 0 && (flags & EV_EXIT) != 0 && crate::trap::have_traps() == 0 {
             crate::init::forkreset(None);
+            forked = false;
             break 'nofork;
         }
         jp = crate::jobs::makejob(1);
@@ -595,6 +693,7 @@ unsafe fn evalsubshell(n: &Node, flags: c_int) -> Result<c_int, Error> {
             if backgnd != 0 {
                 flags &= !EV_TESTED;
             }
+            forked = true;
             break 'nofork;
         }
         /* the parent tail of the C function; the child path below
@@ -604,13 +703,40 @@ unsafe fn evalsubshell(n: &Node, flags: c_int) -> Result<c_int, Error> {
             status = crate::jobs::waitforjob(Some(jp))?;
         }
         INTON();
-        return Ok(status);
+        return Ok(Flow::Done(status));
     }
     // nofork:
     INTON();
-    crate::redir::redirect(&r.redirect, 0)?;
-    evaltreenr(r.n.as_deref(), flags)
-    /* never returns */
+    let outcome = (|| -> Result<Flow, Error> {
+        crate::redir::redirect(&r.redirect, 0)?;
+        evaltreenr(r.n.as_deref(), flags)
+    })();
+
+    if forked {
+        /* A child may **not** hand this back. The frames between here and
+         * `main` are the parent's, copied by `fork`, and the parent was in
+         * the middle of using them: returning through them resumes the
+         * parent's work in the child. The case that says so is
+         * `aud_exception_paths`'s
+         *
+         *     trap '( trap "echo inner" EXIT; exit 2 ); echo $?' EXIT
+         *
+         * where the copied frames include `exitshell`, already past its
+         * `trap[0].take()`. Returning the exit re-entered that frame and
+         * the child skipped its own EXIT trap: dash prints `inner` then
+         * `2`, and the port printed only `2`. The C never had the choice,
+         * because a longjmp to `main_handler` lands at `exit:` and calls a
+         * *fresh* `exitshell`. That is what this does.
+         *
+         * The same trap in a different clothing as `shellmain.rs`'s note
+         * about `exit:` living inside the loop -- a subshell in an EXIT
+         * trap, which the corpus has now caught twice. */
+        crate::shellmain::exit_from_child(outcome);
+    }
+    /* Not forked: `forkreset` pointed `handler` at `main_handler` and this
+     * is still the same process, so the frames this returns through are
+     * its own and `main`'s handler is the right destination. */
+    outcome
 }
 
 /*
@@ -674,7 +800,7 @@ unsafe fn expredir(n: &[Node]) -> Result<(), Error> {
 
 // [spec:dash:def:eval.evalpipe-fn]
 // [spec:dash:sem:eval.evalpipe-fn]
-unsafe fn evalpipe(n: &Node, flags: c_int) -> Result<c_int, Error> {
+unsafe fn evalpipe(n: &Node, flags: c_int) -> Result<Flow, Error> {
     let jp: usize;
     let pipelen: c_int;
     let mut prevfd: c_int;
@@ -691,7 +817,10 @@ unsafe fn evalpipe(n: &Node, flags: c_int) -> Result<c_int, Error> {
     prevfd = -1;
     for (i, cmd) in p.cmdlist.iter().enumerate() {
         let has_next = i + 1 < p.cmdlist.len();
-        prehash(cmd)?;
+        match prehash(cmd)? {
+            Flow::Done(_) => {}
+            exit @ Flow::Exit { .. } => return Ok(exit),
+        }
         pip[1] = -1;
         if has_next {
             if libc::pipe(pip.as_mut_ptr()) < 0 {
@@ -718,8 +847,9 @@ unsafe fn evalpipe(n: &Node, flags: c_int) -> Result<c_int, Error> {
                 libc::dup2(pip[1], 1);
                 libc::close(pip[1]);
             }
-            evaltreenr(Some(cmd), flags);
-            /* never returns */
+            /* In a forked child, which may not return through the
+             * parent's frames; see `evalsubshell`. */
+            crate::shellmain::exit_from_child(evaltreenr(Some(cmd), flags));
         }
         if prevfd >= 0 {
             libc::close(prevfd);
@@ -733,7 +863,7 @@ unsafe fn evalpipe(n: &Node, flags: c_int) -> Result<c_int, Error> {
     }
     INTON();
 
-    Ok(status)
+    Ok(Flow::Done(status))
 }
 
 /*
@@ -773,7 +903,20 @@ pub unsafe fn evalbackcmd(n: Option<&Node>, result: *mut backcmd) -> Result<(), 
                 libc::close(pip[1]);
             }
             crate::expand::ifsfree();
-            evaltreenr(n, EV_EXIT);
+            /* The one forked child that cannot hand its `Flow` back: it
+             * sits under the whole expansion chain, which has no business
+             * carrying control flow that only ever exists on the far side
+             * of a `fork`. So it performs the ending here instead.
+             *
+             * That is exact rather than approximate, and the reason is
+             * `forkchild`'s `shlvl += 1` (`jobs.rs:877`): `main`'s handler
+             * tests `... || shlvl != 0`, so in *any* forked child every
+             * outcome -- an exit, a `set -e` abort, a diagnostic -- takes
+             * `goto exit` and nothing else. `exit_from_child` is those two
+             * lines, and it is why the sibling children in `evalsubshell`
+             * and `evalpipe` may return their `Flow` instead: they reach
+             * the same place by the longer road. */
+            crate::shellmain::exit_from_child(evaltreenr(n, EV_EXIT));
             /* NOTREACHED */
         }
         libc::close(pip[1]);
@@ -893,7 +1036,7 @@ unsafe fn parse_command_args(
 // The `def` rule quotes the `#ifdef notyet` three-argument prototype;
 // the compiled signature — ported here — is
 // `STATIC int evalcommand(union node *cmd, int flags)`.
-unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
+unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<Flow, Error> {
     let localvar_stop: usize;
     let file_stop: usize;
     let redir_stop: usize;
@@ -950,12 +1093,18 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
         let mut pseudovarflag: c_int = 0;
 
         loop {
-            find_command(
+            /* `find_command` can run a `%func` PATH file, which is shell
+              * code and can `exit`; the C's longjmp took that past this
+              * frame and so does this. */
+            match find_command(
                 arglist.list[head].textp(),
                 &mut cmdentry,
                 cmd_flag | DO_REGBLTIN,
                 crate::var::pathval(),
-            )?;
+            )? {
+                Flow::Done(_) => {}
+                exit @ Flow::Exit { .. } => return Ok(exit),
+            }
 
             vlocal += 1;
 
@@ -1073,17 +1222,10 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
                     "an unsplit expansion is one field"
                 );
 
-                /* Bridges until `evalcommand` returns `Result`. */
-                let raise =
-                    |e| crate::error::raise_reported(crate::error::EXERROR, e);
                 if vlocal != 0 {
-                    crate::var::mklocal(varlist.list[spp].textp(), VEXPORT)
-                        .unwrap_or_else(raise);
+                    crate::var::mklocal(varlist.list[spp].textp(), VEXPORT)?;
                 } else {
-                    crate::var::setvareq(varlist.list[spp].textp(), vflags)
-                        .unwrap_or_else(|e| {
-                            crate::error::raise_reported(crate::error::EXERROR, e)
-                        });
+                    crate::var::setvareq(varlist.list[spp].textp(), vflags)?;
                 }
             }
 
@@ -1114,7 +1256,10 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
                 } else {
                     crate::var::pathval()
                 };
-                find_command(*argv.offset(0), &mut cmdentry, cmd_flag | DO_ERR, path)?;
+                match find_command(*argv.offset(0), &mut cmdentry, cmd_flag | DO_ERR, path)? {
+                    Flow::Done(_) => {}
+                    exit @ Flow::Exit { .. } => return Ok(exit),
+                }
             }
 
             jp = None;
@@ -1127,18 +1272,42 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
                 }
 
                 CMDBUILTIN => {
-                    if evalbltin(cmdentry.u.cmd, &args, flags) != 0
-                        && !(crate::error::exception == crate::error::EXERROR && spclbltin <= 0)
-                    {
-                        // raise:
-                        crate::error::raise_longjmp(crate::error::handler, 1);
+                    /* `if (evalbltin(..) && !(exception == EXERROR && spclbltin <= 0))
+                     *      goto raise;`
+                     *
+                     * The C asks two questions of one integer and a global:
+                     * did the builtin leave by the exception mechanism, and
+                     * was it the one kind of exception this frame is allowed
+                     * to swallow. Both are answered by the type now. A
+                     * diagnostic is `Err`, and swallowing it -- reporting it
+                     * and carrying on with its status -- is POSIX's rule that
+                     * only a *special* builtin's error ends a non-interactive
+                     * shell, which is `docs/api-design.md` 3.3's contract and
+                     * the mechanism that decides which errors an embedder
+                     * ever sees. Anything else leaves as it arrived. */
+                    match evalbltin(cmdentry.u.cmd, &args, flags) {
+                        Ok(Flow::Done(_)) => {}
+                        Ok(exit @ Flow::Exit { .. }) => return Ok(exit),
+                        Err(e) => {
+                            if spclbltin > 0 {
+                                return Err(e);
+                            }
+                            /* Reported already, and `evalbltin`'s epilogue
+                             * has run. The status it took is `exitstatus`,
+                             * which `bail:` does not touch on this path
+                             * because the C reaches `out:` here. */
+                            drop(e);
+                        }
                     }
                 }
 
                 CMDFUNCTION => {
-                    if evalfun(cmdentry.u.func, argc, argv, flags) != 0 {
-                        // goto raise
-                        crate::error::raise_longjmp(crate::error::handler, 1);
+                    /* `if (evalfun(..)) goto raise;` -- a function body is
+                     * not a builtin, so there is nothing to swallow: both an
+                     * exit and a diagnostic leave through this frame. */
+                    match evalfun(cmdentry.u.func, argc, argv, flags)? {
+                        Flow::Done(_) => {}
+                        exit @ Flow::Exit { .. } => return Ok(exit),
                     }
                 }
 
@@ -1150,8 +1319,9 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
                         INTOFF();
                         jp = Some(crate::jobs::vforkexec(cmd, argv, path, cmdentry.u.index)?);
                     } else {
-                        shellexec(argv, path, cmdentry.u.index);
-                        /* NOTREACHED */
+                        /* `shellexec` replaces the process image or fails;
+                         * failing, it reports and is the C's EXEND. */
+                        return shellexec(argv, path, cmdentry.u.index);
                     }
                 }
             }
@@ -1165,26 +1335,25 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
 
         /* We have a redirection error. */
         if spclbltin > 0 {
-            match redir_err.take() {
-                /* The error `redirectsafe` handed back, raised again.
-                 * POSIX's "an error in a special built-in exits a
-                 * non-interactive shell" is this line and nothing else.
-                 * The C's `exraise(EXERROR)` writes no text because
-                 * `redirect` already wrote it, and `raise_reported` is the
-                 * same jump over a value that has already been reported.
-                 * The status it takes is the 2 `exitstatus` was just set
-                 * to, which the assertion pins. */
+            /* POSIX's "an error in a special built-in exits a
+             * non-interactive shell", and the C's textless
+             * `exraise(EXERROR)`: no diagnostic is written here because
+             * whatever failed wrote its own.
+             *
+             * `redirectsafe` hands its error back, so the usual way in
+             * carries the value. The other way in is `CMDUNKNOWN` with
+             * status 127, where there is no value to carry: `find_command`
+             * reported "not found" and returned normally, which is
+             * `docs/api-design.md` 3.3's "reported and carried on past".
+             * `Error::reported` is that case -- a value with no text,
+             * because the text has already been written. */
+            return Err(match redir_err.take() {
                 Some(e) => {
                     debug_assert_eq!(e.status(), status, "a redirection error keeps its status");
-                    crate::error::raise_reported(crate::error::EXERROR, e);
+                    e
                 }
-                /* The other way in is `CMDUNKNOWN` with status 127, where
-                 * no value exists: `find_command` reported "not found" and
-                 * returned normally. dash raises the same textless
-                 * EXERROR here, and this arm is its literal shape until
-                 * step E gives the frame something to carry. */
-                None => crate::error::exraise(crate::error::EXERROR),
-            }
+                None => crate::error::Error::reported(status),
+            });
         }
 
         // goto out
@@ -1201,63 +1370,80 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<c_int, Error> {
          * '_' in 'vi' command mode during line editing...
          * However I implemented that within libedit itself.
          */
-        crate::var::setvar(b"_\0".as_ptr() as *const c_char, lastarg, 0)
-            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
+        crate::var::setvar(b"_\0".as_ptr() as *const c_char, lastarg, 0)?;
     }
 
-    Ok(status)
+    Ok(Flow::Done(status))
 }
 
 // [spec:dash:def:eval.evalbltin-fn]
 // [spec:dash:sem:eval.evalbltin-fn]
-unsafe fn evalbltin(cmd: *const builtincmd, args: &[&BStr], flags: c_int) -> c_int {
+unsafe fn evalbltin(
+    cmd: *const builtincmd,
+    args: &[&BStr],
+    flags: c_int,
+) -> Result<Flow, Error> {
     let savecmdname: Option<BString>; /* volatile */
     let savehandler: *mut jmploc; /* volatile */
     let mut jmploc_: jmploc = jmploc::new();
-    let i: c_int;
 
     savecmdname = core::mem::take(&mut *addr_of_mut!(commandname));
     savehandler = crate::error::handler;
     let jl: *mut jmploc = &mut jmploc_;
-    i = setjmp_catch(jl, || unsafe {
-        let mut status: c_int;
-
+    let mut outcome: Result<Flow, Error> = Ok(Flow::Done(0));
+    let outcomep: *mut Result<Flow, Error> = addr_of_mut!(outcome);
+    /* Still armed, and only for the interrupt. Everything a built-in can
+     * say -- a status, an exit, a diagnostic -- is in `outcome` now; what
+     * is left inside is EXINT, which is a jump until step F. The epilogue
+     * below is the C's `cmddone:` and runs on every path, as it must:
+     * `freestdout` and the two restores are what the unwind was skipping. */
+    let jumped = setjmp_catch(jl, || unsafe {
         crate::error::handler = jl;
         /* `commandname = argv[0]`, and NULL for the command that has no
          * word at all -- the assignment-only one `bltin` stands for. */
         commandname = args.first().map(|name| BString::from(<&BStr as AsRef<[u8]>>::as_ref(name)));
-        /* A builtin hands its diagnostic back now instead of jumping out
-         * with it, and this frame is the handler that jump was aimed at.
-         * The bridge raises it again right here, which skips the `flushall`
-         * and the `outerr` check below exactly as the longjmp did, and
-         * lands in this closure's own `setjmp_catch` with `exception` set
-         * to EXERROR for `evalcommand` to inspect. `evalbltin` itself stops
-         * needing this when the catch frames convert. */
-        let raise = |e| crate::error::raise_reported(crate::error::EXERROR, e);
-        if cmd == crate::builtins::EVALCMD {
-            status = crate::builtins::eval::evalcmd(args, flags).unwrap_or_else(raise);
-        } else {
-            let entry = (*cmd).builtin.expect("a builtin with no special entry");
-            status = entry(args).unwrap_or_else(raise);
-        }
-        crate::output::flushall();
-        if crate::output::outerr(crate::output::stdout()) != 0 {
-            let mut message = Vec::new();
-            if let Some(name) = &*addr_of!(commandname) {
-                message.extend_from_slice(name);
+        *outcomep = (|| -> Result<Flow, Error> {
+            let mut status: c_int = if cmd == crate::builtins::EVALCMD {
+                match crate::builtins::eval::evalcmd(args, flags)? {
+                    Flow::Done(status) => status,
+                    exit @ Flow::Exit { .. } => return Ok(exit),
+                }
+            } else {
+                let entry = (*cmd).builtin.expect("a builtin with no special entry");
+                match entry(args)? {
+                    Flow::Done(status) => status,
+                    exit @ Flow::Exit { .. } => return Ok(exit),
+                }
+            };
+            /* Every `?` and every `Flow::Exit` above skips the rest of
+             * this, exactly as the C's `goto cmddone` skipped it. */
+            crate::output::flushall();
+            if crate::output::outerr(crate::output::stdout()) != 0 {
+                let mut message = Vec::new();
+                if let Some(name) = &*addr_of!(commandname) {
+                    message.extend_from_slice(name);
+                }
+                message.extend_from_slice(b": I/O error");
+                crate::error::sh_warnx(&message);
             }
-            message.extend_from_slice(b": I/O error");
-            crate::error::sh_warnx(&message);
-        }
-        status |= crate::output::outerr(crate::output::stdout());
-        exitstatus = status;
-    });
+            status |= crate::output::outerr(crate::output::stdout());
+            exitstatus = status;
+            Ok(Flow::Done(status))
+        })();
+    }) != 0;
     // cmddone:
     crate::output::freestdout();
     commandname = savecmdname;
     crate::error::handler = savehandler;
 
-    i
+    if jumped {
+        debug_assert!(
+            crate::error::exception != crate::error::EXERROR,
+            "an EXERROR reached evalbltin as a jump"
+        );
+        crate::error::raise_longjmp(crate::error::handler, 1);
+    }
+    outcome
 }
 
 // [spec:dash:def:eval.evalfun-fn]
@@ -1267,11 +1453,10 @@ unsafe fn evalfun(
     argc: c_int,
     argv: *mut *mut c_char,
     flags: c_int,
-) -> c_int {
+) -> Result<Flow, Error> {
     let saveparam: crate::options::shparam; /* volatile */
     let savehandler: *mut jmploc; /* volatile */
     let mut jmploc_: jmploc = jmploc::new();
-    let e: c_int;
     let savefuncline: c_int;
     let saveloopnest: c_int;
 
@@ -1283,7 +1468,9 @@ unsafe fn evalfun(
     saveloopnest = loopnest;
     savehandler = crate::error::handler;
     let jl: *mut jmploc = &mut jmploc_;
-    e = setjmp_catch(jl, || unsafe {
+    let mut outcome: Result<Flow, Error> = Ok(Flow::Done(0));
+    let outcomep: *mut Result<Flow, Error> = addr_of_mut!(outcome);
+    let jumped = setjmp_catch(jl, || unsafe {
         INTOFF();
         crate::error::handler = jl;
         /* `func->count++`: the second reference that keeps the body alive if
@@ -1291,13 +1478,16 @@ unsafe fn evalfun(
         crate::nodes::reffunc(func);
         funcline = (*func).ndefun().linno;
         loopnest = 0;
+        /* This `INTON` can deliver an interrupt, and it is *after*
+         * `reffunc`; the epilogue's `freefunc` is what balances it on both
+         * paths. docs/errors-are-values.md 2.6 records that a conversion
+         * reordering this prologue turns the balance into a use-after-free
+         * that only shows when a function redefines itself while running.
+         * Nothing here is reordered. */
         INTON();
         crate::options::borrowparam(argv.add(1), argc - 1);
-        /* Inside `evalfun`'s `setjmp_catch`; the bridge retires with that
-         * frame at step D. */
-        evaltree((*func).ndefun().body.as_deref(), flags & EV_TESTED)
-            .unwrap_or_else(|e| crate::error::raise_reported(crate::error::EXERROR, e));
-    });
+        *outcomep = evaltree((*func).ndefun().body.as_deref(), flags & EV_TESTED);
+    }) != 0;
     // funcdone:
     INTOFF();
     loopnest = saveloopnest;
@@ -1307,7 +1497,15 @@ unsafe fn evalfun(
     crate::error::handler = savehandler;
     INTON();
     evalskip &= !(SKIPFUNC | SKIPFUNCDEF);
-    e
+
+    if jumped {
+        debug_assert!(
+            crate::error::exception != crate::error::EXERROR,
+            "an EXERROR reached evalfun as a jump"
+        );
+        crate::error::raise_longjmp(crate::error::handler, 1);
+    }
+    outcome
 }
 
 /*
@@ -1319,7 +1517,7 @@ unsafe fn evalfun(
 
 // [spec:dash:def:eval.prehash-fn]
 // [spec:dash:sem:eval.prehash-fn]
-unsafe fn prehash(n: &Node) -> Result<(), Error> {
+unsafe fn prehash(n: &Node) -> Result<Flow, Error> {
     let mut entry: cmdentry = cmdentry {
         cmdtype: 0,
         u: param { index: 0 },
@@ -1328,10 +1526,10 @@ unsafe fn prehash(n: &Node) -> Result<(), Error> {
     if n.node_type() == NCMD && !n.ncmd().args.is_empty() {
         let text = n.ncmd().args[0].narg().text.as_ptr();
         if crate::parser::goodname(text) != 0 {
-            find_command(text, &mut entry, 0, crate::var::pathval())?;
+            return find_command(text, &mut entry, 0, crate::var::pathval());
         }
     }
-    Ok(())
+    Ok(Flow::Done(0))
 }
 
 /*
@@ -1374,4 +1572,107 @@ unsafe fn eprintlist(out: *mut Output, list: &[strlist], sep: c_int) -> c_int {
     }
 
     sep
+}
+
+#[cfg(test)]
+mod tests {
+    //! `Flow`, and the propagation operator that carries it.
+    //!
+    //! What these pin is not the shape of the enum but the two claims the
+    //! conversion rests on: that `flow!` *returns* rather than falling
+    //! through, which is what makes it the literal stand-in for a longjmp
+    //! past this frame; and that `by_exitcmd` is the single bit telling
+    //! the C's EXEXIT from its EXEND. The behaviour is pinned end to end
+    //! in `tests/errors_are_values.rs`.
+
+    use super::*;
+
+    /// `flow!` on a finished evaluation yields the status and carries on.
+    // [spec:dash:sem:eval.evaltree-fn/test]
+    #[test]
+    fn flow_yields_a_status() {
+        unsafe fn body(inner: Result<Flow, Error>) -> Result<Flow, Error> {
+            let status = flow!(inner);
+            Ok(Flow::Done(status + 100))
+        }
+        let got = unsafe { body(Ok(Flow::Done(7))) };
+        assert_eq!(got.unwrap(), Flow::Done(107));
+    }
+
+    /// …and on an exit it returns, so nothing after it runs. That is the
+    /// whole of what the C got from jumping past the frame, and getting
+    /// it wrong would run epilogues the unwind skipped.
+    // [spec:dash:sem:eval.evaltree-fn/test]
+    #[test]
+    fn flow_returns_an_exit() {
+        unsafe fn body(inner: Result<Flow, Error>) -> Result<Flow, Error> {
+            let _status = flow!(inner);
+            panic!("flow! must not fall through on an exit");
+        }
+        let got = unsafe { body(Ok(Flow::EXIT)) };
+        assert_eq!(got.unwrap(), Flow::Exit { by_exitcmd: true });
+    }
+
+    /// A diagnostic still propagates through it, because the `?` is
+    /// inside: `flow!` adds an arm, it does not replace one.
+    // [spec:dash:sem:eval.evaltree-fn/test]
+    #[test]
+    fn flow_still_propagates_an_error() {
+        unsafe fn body(inner: Result<Flow, Error>) -> Result<Flow, Error> {
+            let _status = flow!(inner);
+            panic!("flow! must not fall through on an error");
+        }
+        let e = Error::Other {
+            line: 3,
+            status: 2,
+            message: bstr::BString::from(&b"nope"[..]),
+        };
+        let got = unsafe { body(Err(e)) };
+        assert_eq!(got.unwrap_err().message(), "nope");
+    }
+
+    /// The two named exits differ in exactly the bit `init::exitreset`
+    /// reads, and in nothing else — which is the audit
+    /// `docs/api-design.md` §10.2 asked for, asserted rather than
+    /// described.
+    // [spec:dash:sem:init.exitreset-fn/test]
+    #[test]
+    fn two_exits_differ_in_one_bit() {
+        assert_eq!(Flow::EXIT, Flow::Exit { by_exitcmd: true });
+        assert_eq!(Flow::END, Flow::Exit { by_exitcmd: false });
+        assert_ne!(Flow::EXIT, Flow::END);
+    }
+
+    /// `exitreset` restores `savestatus` for what was EXEXIT and not for
+    /// what was EXEND. This is the one place in the crate where the two
+    /// C codes were ever told apart.
+    // [spec:dash:sem:init.exitreset-fn/test]
+    #[test]
+    fn exitreset_takes_savestatus_for_an_exit() {
+        let _guard = crate::testutil::lock();
+        unsafe {
+            let (se, ss, sk) = (exitstatus, savestatus, evalskip);
+
+            evalskip = 0;
+            exitstatus = 1;
+            savestatus = 9;
+            crate::init::exitreset(true);
+            /* Copied out: a shared reference to a mutable static is what
+             * the lint forbids, and `assert_eq!` takes one. */
+            let (got, left) = (exitstatus, savestatus);
+            assert_eq!(got, 9, "`exit 9` names the status the shell leaves with");
+            assert_eq!(left, -1, "and it is consumed");
+
+            evalskip = 0;
+            exitstatus = 1;
+            savestatus = 9;
+            crate::init::exitreset(false);
+            let got = exitstatus;
+            assert_eq!(got, 1, "a `set -e` abort names no status");
+
+            exitstatus = se;
+            savestatus = ss;
+            evalskip = sk;
+        }
+    }
 }

@@ -15,6 +15,7 @@ use libc::{c_int, pid_t};
 use std::io::Write;
 
 use crate::error::{INTOFF, INTON};
+use crate::eval::Flow;
 use crate::jobs::{
     CUR_RUNNING, FORK_BG, FORK_FG, JOBDONE, JOBRUNNING, JOBSTOPPED, getjob, jobno, jobs, outcmd,
     ps_pid, set_curjob, showpipe, waitforjob, xxtcsetpgrp,
@@ -29,7 +30,7 @@ use crate::output::Output;
 // names and carries both claims.
 // [spec:dash:def:jobs.bgcmd-fn]
 // [spec:dash:sem:jobs.bgcmd-fn]
-pub unsafe fn fgcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn fgcmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut jp: usize;
     let out: *mut Output;
     let mode: c_int;
@@ -63,7 +64,7 @@ pub unsafe fn fgcmd(args: &[&BStr]) -> Result<c_int, Error> {
             break;
         }
     }
-    Ok(retval)
+    Ok(Flow::Done(retval))
 }
 
 // [spec:dash:def:jobs.restartjob-fn]

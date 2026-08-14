@@ -10,6 +10,7 @@ use libc::{c_char, c_int};
 use std::ffi::CStr;
 use std::io::Write;
 
+use crate::eval::Flow;
 use crate::exec::{
     CMDNORMAL, CMDUNKNOWN, DO_ERR, clearcmdentry, cmdentry, cmdlookup, cmdtable_mut,
     delete_cmd_entry, find_command, padvance, padvance_result, param, pathopt, tblentry,
@@ -17,7 +18,7 @@ use crate::exec::{
 
 // [spec:dash:def:exec.hashcmd-fn]
 // [spec:dash:sem:exec.hashcmd-fn]
-pub unsafe fn hashcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn hashcmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut cmdp: *mut tblentry;
     let mut c: c_int;
     let mut entry: cmdentry = cmdentry {
@@ -33,7 +34,7 @@ pub unsafe fn hashcmd(args: &[&BStr]) -> Result<c_int, Error> {
     }
     if clear {
         clearcmdentry();
-        return Ok(0);
+        return Ok(Flow::Done(0));
     }
 
     let operands = opts.operands();
@@ -43,7 +44,7 @@ pub unsafe fn hashcmd(args: &[&BStr]) -> Result<c_int, Error> {
                 printentry(BStr::new(name.as_slice()), cmdp);
             }
         }
-        return Ok(0);
+        return Ok(Flow::Done(0));
     }
     c = 0;
     for name in operands {
@@ -53,12 +54,15 @@ pub unsafe fn hashcmd(args: &[&BStr]) -> Result<c_int, Error> {
         if !cmdp.is_null() && (*cmdp).path_dependent() {
             delete_cmd_entry(name);
         }
-        find_command(name, &mut entry, DO_ERR, crate::var::pathval())?;
+        match find_command(name, &mut entry, DO_ERR, crate::var::pathval())? {
+            crate::eval::Flow::Done(_) => {}
+            exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
+        }
         if entry.cmdtype == CMDUNKNOWN {
             c = 1;
         }
     }
-    Ok(c)
+    Ok(Flow::Done(c))
 }
 
 // [spec:dash:def:exec.printentry-fn]

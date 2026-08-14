@@ -11,6 +11,7 @@ use crate::error::Error;
 use bstr::BStr;
 use libc::{c_int, pid_t};
 
+use crate::eval::Flow;
 use crate::jobs::{
     DOWAIT_WAITCMD, DOWAIT_WAITCMD_ALL, JOBRUNNING, curjob, dowait, getjob, getstatus, jobs,
 };
@@ -18,7 +19,7 @@ use crate::options::Options;
 
 // [spec:dash:def:jobs.waitcmd-fn]
 // [spec:dash:sem:jobs.waitcmd-fn]
-pub unsafe fn waitcmd(args: &[&BStr]) -> Result<c_int, Error> {
+pub unsafe fn waitcmd(args: &[&BStr]) -> Result<Flow, Error> {
     let mut jobp: Option<usize>;
     let mut retval: c_int;
     let mut jp: Option<usize>;
@@ -95,5 +96,5 @@ pub unsafe fn waitcmd(args: &[&BStr]) -> Result<c_int, Error> {
         }
     }
     // out:
-    Ok(retval)
+    Ok(Flow::Done(retval))
 }
