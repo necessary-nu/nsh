@@ -63,7 +63,7 @@ struct Flags {
 /// `getopt(3)` over `fc`'s own array, stopping at the first word that
 /// could be a history number so that `fc -2` names an entry rather than
 /// an option.
-unsafe fn scan_options(argc: c_int, argv: *mut *mut c_char) -> Flags {
+unsafe fn scan_options(argc: c_int, argv: *mut *mut c_char) -> Result<Flags, Error> {
     let mut ch: c_int;
     let mut flags = Flags {
         editor: ptr::null(),
@@ -109,19 +109,17 @@ unsafe fn scan_options(argc: c_int, argv: *mut *mut c_char) -> Flags {
                 let mut message = b"option -".to_vec();
                 message.push(optopt as u8);
                 message.extend_from_slice(b" expects argument");
-                crate::error::sh_error(&message);
-                /* NOTREACHED */
+                return Err(crate::error::sh_error_value(&message));
             }
             /* case '?': default: */
             _ => {
                 let mut message = b"unknown option: -".to_vec();
                 message.push(optopt as u8);
-                crate::error::sh_error(&message);
-                /* NOTREACHED */
+                return Err(crate::error::sh_error_value(&message));
             }
         }
     }
-    flags
+    Ok(flags)
 }
 
 /*
@@ -177,7 +175,7 @@ pub unsafe fn histcmd(args: &[&BStr]) -> Result<c_int, Error> {
     let mut argc: c_int = args.len() as c_int;
     let mut argv: *mut *mut c_char = slots.as_mut_ptr();
 
-    let flags = scan_options(argc, argv);
+    let flags = scan_options(argc, argv)?;
     editor = flags.editor;
     lflg = flags.lflg;
     nflg = flags.nflg;
@@ -224,7 +222,9 @@ pub unsafe fn histcmd(args: &[&BStr]) -> Result<c_int, Error> {
             if active > MAXHISTLOOPS {
                 active = 0;
                 displayhist = 0;
-                crate::error::sh_error(b"called recursively too many times");
+                return Err(crate::error::sh_error_value(
+                    b"called recursively too many times",
+                ));
             }
             /*
              * Set editor.
@@ -267,7 +267,7 @@ pub unsafe fn histcmd(args: &[&BStr]) -> Result<c_int, Error> {
                 argv = argv.add(1);
             }
             if argc >= 2 {
-                crate::error::sh_error(b"too many args");
+                return Err(crate::error::sh_error_value(b"too many args"));
             }
         }
 
@@ -292,15 +292,14 @@ pub unsafe fn histcmd(args: &[&BStr]) -> Result<c_int, Error> {
                 laststr = *argv.add(1);
             }
             _ => {
-                crate::error::sh_error(b"too many args");
-                /* NOTREACHED */
+                return Err(crate::error::sh_error_value(b"too many args"));
             }
         }
         /*
          * Turn into event numbers.
          */
-        first = str_to_event(firststr, 0);
-        last = str_to_event(laststr, 1);
+        first = str_to_event(firststr, 0)?;
+        last = str_to_event(laststr, 1)?;
 
         if rflg != 0 {
             i = last;
@@ -330,7 +329,8 @@ pub unsafe fn histcmd(args: &[&BStr]) -> Result<c_int, Error> {
             if fd < 0 {
                 let mut message = b"can't create temporary file ".to_vec();
                 message.extend_from_slice(CStr::from_ptr(editfile.as_ptr()).to_bytes());
-                crate::error::sh_error(&message);
+                /* A stop: `from_raw_fd` below would otherwise adopt -1. */
+                return Err(crate::error::sh_error_value(&message));
             }
             edit_file = Some(File::from_raw_fd(fd));
         }
@@ -400,9 +400,7 @@ pub unsafe fn histcmd(args: &[&BStr]) -> Result<c_int, Error> {
 
             drop(edit_file.take());
             /* XXX - should use no JC command */
-            crate::eval::evalstring(editcmd, 0).unwrap_or_else(|e| {
-                crate::error::raise_reported(crate::error::EXERROR, e)
-            });
+            crate::eval::evalstring(editcmd, 0)?;
             INTON();
             /* XXX - should read back - quick tst */
             crate::shellmain::readcmdfile(editfile.as_mut_ptr());
@@ -415,20 +413,41 @@ pub unsafe fn histcmd(args: &[&BStr]) -> Result<c_int, Error> {
         if displayhist != 0 {
             displayhist = 0;
         }
+        Ok(())
     };
 
     if executing {
-        if crate::eval::setjmp_catch(jl, body) != 0 {
+        /* This frame catches two things now, and it has to keep doing so
+         * until step E. The diagnostics beneath it are values and arrive
+         * as `Err`; but `evalstring` above runs arbitrary shell code, and
+         * `exit`, `set -e` and an interrupt are still EXEXIT, EXEND and
+         * EXINT travelling by longjmp. Dismantling the catch now would
+         * let those skip the cleanup below -- leaving `active` raised and
+         * the temporary file on disk -- which is the ordering constraint
+         * docs/errors-are-values.md records for step D, reaching one step
+         * further than it predicted. The two arms perform identical
+         * cleanup and differ only in how they leave. */
+        let mut caught: Option<Error> = None;
+        let jumped = crate::eval::setjmp_catch(jl, || {
+            caught = body().err();
+        }) != 0;
+
+        if jumped || caught.is_some() {
             active = 0;
             drop(edit_file.take());
             if editfile[0] != 0 {
                 libc::unlink(editfile.as_ptr());
             }
             crate::error::handler = savehandler;
-            crate::error::raise_longjmp(crate::error::handler, 1);
+            match caught {
+                Some(e) => return Err(e),
+                None => crate::error::raise_longjmp(crate::error::handler, 1),
+            }
         }
     } else {
-        body();
+        /* `fc -l`: the C runs the same tail with no handler installed, so
+         * an error here propagates to whatever frame is outermost. */
+        body()?;
     }
     Ok(0)
 }
@@ -501,7 +520,7 @@ pub unsafe fn not_fcnumber(mut s: *mut c_char) -> c_int {
 // [spec:dash:sem:histedit.str-to-event-fn]
 // [spec:dash:def:myhistedit.str-to-event-fn]
 // [spec:dash:sem:myhistedit.str-to-event-fn]
-pub unsafe fn str_to_event(str: *const c_char, last: c_int) -> c_int {
+pub unsafe fn str_to_event(str: *const c_char, last: c_int) -> Result<c_int, Error> {
     let mut s: *const c_char = str;
     let mut relative: c_int = 0;
     match *s as u8 {
@@ -541,17 +560,17 @@ pub unsafe fn str_to_event(str: *const c_char, last: c_int) -> c_int {
     };
 
     match event {
-        Some(event) => event.number,
+        Some(event) => Ok(event.number),
         None if crate::mystring::is_number(s) != 0 => {
             let mut message = b"history number ".to_vec();
             message.extend_from_slice(CStr::from_ptr(str).to_bytes());
             message.extend_from_slice(b" not found (internal error)");
-            crate::error::sh_error(&message)
+            Err(crate::error::sh_error_value(&message))
         }
         None => {
             let mut message = b"history pattern not found: ".to_vec();
             message.extend_from_slice(CStr::from_ptr(str).to_bytes());
-            crate::error::sh_error(&message)
+            Err(crate::error::sh_error_value(&message))
         }
     }
 }
