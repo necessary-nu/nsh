@@ -45,10 +45,9 @@
 /// Still empty; `docs/api-design.md` §5 is the list it fills from, one
 /// table per commit.
 pub struct Shell {
-    /// Keeps the type from being constructible outside this module, so
-    /// that every instance comes from [`Shell::new`] — which is what
-    /// makes "one shell per process" checkable rather than hoped for.
-    _private: (),
+    /// The saved-descriptor stack and the closed-descriptor bitmap.
+    /// `redir.rs` owns the shape; this owns the value.
+    pub(crate) redirs: crate::redir::RedirStack,
 }
 
 impl Shell {
@@ -57,7 +56,12 @@ impl Shell {
     /// There is one, made at the entry point, and it is threaded down
     /// from there. As tables move onto this type, this is where their
     /// initial values go — which is what makes it the one constructor.
+    /// Each field starts at what the `static mut` it replaces was
+    /// declared with, so the shell a process begins with is the one the
+    /// C began with.
     pub(crate) fn new() -> Self {
-        Shell { _private: () }
+        Shell {
+            redirs: crate::redir::RedirStack::new(),
+        }
     }
 }

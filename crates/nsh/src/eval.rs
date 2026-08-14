@@ -317,7 +317,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
                                     crate::var::lineno -= funcline - 1;
                                 }
                                 expredir(sh, &r.redirect)?;
-                                crate::redir::pushredir(&r.redirect);
+                                crate::redir::pushredir(sh, &r.redirect);
                                 /* The C is `status = redirectsafe(..)`,
                                  * whose value is `setjmp(..) * 2`. The
                                  * error is dropped here because dash drops
@@ -345,7 +345,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
                                     }
                                 }
                                 if !r.redirect.is_empty() {
-                                    crate::redir::popredir(0);
+                                    crate::redir::popredir(sh, 0);
                                 }
                                 break 'sw;
                             }
@@ -660,7 +660,7 @@ unsafe fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, E
     let forked: bool;
     'nofork: {
         if backgnd == 0 && (flags & EV_EXIT) != 0 && crate::trap::have_traps() == 0 {
-            crate::init::forkreset(None);
+            crate::init::forkreset(sh, None);
             forked = false;
             break 'nofork;
         }
@@ -1174,7 +1174,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
 
     (*crate::output::previous_stderr()).fd = crate::streams::streams().stderr;
     expredir(sh, &c.redirect)?;
-    redir_stop = crate::redir::pushredir(&c.redirect);
+    redir_stop = crate::redir::pushredir(sh, &c.redirect);
     /* `status = redirectsafe(..)`, which the C computes as `setjmp(..) *
      * 2`. The value is kept as well as the status, because `bail:` below
      * re-raises it when the command is a special built-in — that is the
@@ -1353,9 +1353,9 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
     }
     // out:
     if !c.redirect.is_empty() {
-        crate::redir::popredir(execcmd);
+        crate::redir::popredir(sh, execcmd);
     }
-    crate::redir::unwindredir(redir_stop);
+    crate::redir::unwindredir(sh, redir_stop);
     crate::input::unwindfiles(file_stop);
     crate::var::unwindlocalvars(localvar_stop);
     if !lastarg.is_null() {
@@ -1614,11 +1614,18 @@ mod tests {
         let _guard = crate::testutil::lock();
         unsafe {
             let (se, ss, sk) = (exitstatus, savestatus, evalskip);
+            /* A shell of this test's own. `exitreset` also unwinds the
+             * redirection stack, which is on the instance now; one made
+             * here holds the empty stack a process starts with, so that
+             * half stays the no-op it has always been under this test
+             * and the half being asserted is untouched by it. */
+            let mut owned = crate::context::Shell::new();
+            let sh = &mut owned;
 
             evalskip = 0;
             exitstatus = 1;
             savestatus = 9;
-            crate::init::exitreset(true);
+            crate::init::exitreset(sh, true);
             /* Copied out: a shared reference to a mutable static is what
              * the lint forbids, and `assert_eq!` takes one. */
             let (got, left) = (exitstatus, savestatus);
@@ -1628,7 +1635,7 @@ mod tests {
             evalskip = 0;
             exitstatus = 1;
             savestatus = 9;
-            crate::init::exitreset(false);
+            crate::init::exitreset(sh, false);
             let got = exitstatus;
             assert_eq!(got, 1, "a `set -e` abort names no status");
 

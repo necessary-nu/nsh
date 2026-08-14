@@ -263,7 +263,7 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
         {
             let s: c_int;
 
-            crate::init::exitreset(by_exitcmd);
+            crate::init::exitreset(sh, by_exitcmd);
 
             s = *state_p;
             if e_is_exit || s == 0 || iflag() == 0 || shlvl != 0 {
@@ -430,7 +430,7 @@ pub(crate) unsafe fn exit_from_child(
         })
     );
     drop(outcome);
-    crate::init::exitreset(by_exitcmd);
+    crate::init::exitreset(sh, by_exitcmd);
     crate::trap::exitshell(sh);
 }
 

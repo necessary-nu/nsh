@@ -937,7 +937,7 @@ unsafe fn forkchild(
         crate::shellmain::mypid = 0;
         crate::shellmain::shlvl += 1;
 
-        crate::init::forkreset(if mode == FORK_NOJOB { n } else { None });
+        crate::init::forkreset(sh, if mode == FORK_NOJOB { n } else { None });
 
         /* do job control only in root shell */
         jobctl = 0;

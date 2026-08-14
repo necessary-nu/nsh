@@ -66,7 +66,7 @@ pub unsafe fn init() -> Result<(), crate::error::Error> {
 /// `EXEND` — see `eval::Flow`, whose doc comment records the audit
 /// `docs/api-design.md` 10.2 asked for — so it is the whole of what the
 /// two callers still have to say about which one arrived.
-pub unsafe fn exitreset(by_exitcmd: bool) {
+pub unsafe fn exitreset(sh: &mut crate::context::Shell, by_exitcmd: bool) {
     /* from eval.c: */
     {
         if crate::eval::savestatus >= 0 {
@@ -91,7 +91,7 @@ pub unsafe fn exitreset(by_exitcmd: bool) {
     }
 
     /* from redir.c: */
-    crate::redir::mkinit_exitreset();
+    crate::redir::mkinit_exitreset(sh);
 }
 
 /*
@@ -100,7 +100,7 @@ pub unsafe fn exitreset(by_exitcmd: bool) {
 
 // [spec:dash:def:init.forkreset-fn]
 // [spec:dash:sem:init.forkreset-fn]
-pub unsafe fn forkreset(n: Option<&Node>) {
+pub unsafe fn forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
     /* from input.c: */
     crate::input::mkinit_forkreset();
 
@@ -111,7 +111,7 @@ pub unsafe fn forkreset(n: Option<&Node>) {
      * cannot return. */
 
     /* from redir.c: */
-    crate::redir::mkinit_forkreset();
+    crate::redir::mkinit_forkreset(sh);
 
     /* from trap.c: */
     crate::trap::mkinit_forkreset(n);

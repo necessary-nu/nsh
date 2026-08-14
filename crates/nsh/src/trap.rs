@@ -456,7 +456,7 @@ pub unsafe fn exitshell(sh: &mut crate::context::Shell) -> ! {
         }
     }
     /* out: */
-    crate::init::exitreset(by_exitcmd);
+    crate::init::exitreset(sh, by_exitcmd);
     crate::init::postexitreset();
     /*
      * Disable job control so that whoever had the foreground before we

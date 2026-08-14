@@ -2,11 +2,12 @@
 //! Rules: `docs/spec/port/src/redir.md`.
 
 use crate::error::Error;
-use core::ptr::{addr_of_mut, null_mut};
+use core::ptr::null_mut;
 use libc::{c_char, c_int, c_uint, c_void, size_t};
 use std::ffi::CStr;
 use std::io::Write;
 
+use crate::context::Shell;
 use crate::error::{INTOFF, INTON};
 use crate::nodes::{NAPPEND, NCLOBBER, NFROM, NFROMFD, NFROMTO, NTO, NTOFD, NXHERE, Node};
 
@@ -44,32 +45,53 @@ pub struct redirtab {
     pub renamed: [c_int; 10],
 }
 
-/// One frame per redirection scope, innermost last. A frame's *index* is
-/// what outlives a call here, never a borrow: `openredirect` can reach
-/// command substitution, which pushes and pops frames of its own and can
-/// move the vector out from under a reference.
-pub static mut redirlist: Vec<redirtab> = Vec::new();
-
-#[inline]
-unsafe fn redirlist_mut() -> &'static mut Vec<redirtab> {
-    &mut *addr_of_mut!(redirlist)
+/// What this module owns of the shell's descriptor state: the stack of
+/// saved-descriptor frames, and the bitmap of descriptors the shell has
+/// closed rather than saved.
+///
+/// The fields are private to `redir.rs`, so `Shell` owns the value and
+/// this module owns its shape — nothing outside can reach past the
+/// functions below, which is the property the two `static mut`s it
+/// replaces never had.
+///
+/// `docs/api-design.md` §5 puts both inside an `fds: FdTable` together
+/// with a logical-to-real descriptor map that does not exist yet. When
+/// that map arrives this becomes part of it; until then it is its own
+/// field, because inventing the surrounding type to hold two members it
+/// does not yet have would be guessing at the shape.
+pub struct RedirStack {
+    /// One frame per redirection scope, innermost last. A frame's *index*
+    /// is what outlives a call here, never a borrow: `openredirect` can
+    /// reach command substitution, which pushes and pops frames of its
+    /// own and can move the vector out from under a reference.
+    list: Vec<redirtab>,
+    /// Bit map of currently closed file descriptors.
+    closed: c_uint,
 }
 
-/* Bit map of currently closed file descriptors. */
-static mut closed_redirs: c_uint = 0;
+impl RedirStack {
+    /// `redirlist = NULL` and `closed_redirs = 0`, which is what the two
+    /// statics started at.
+    pub(crate) const fn new() -> Self {
+        RedirStack {
+            list: Vec::new(),
+            closed: 0,
+        }
+    }
+}
 
 use crate::system::errno;
 
 // [spec:dash:def:redir.update-closed-redirs-fn]
 // [spec:dash:sem:redir.update-closed-redirs-fn]
-unsafe fn update_closed_redirs(fd: c_int, nfd: c_int) -> c_uint {
-    let val: c_uint = closed_redirs;
+unsafe fn update_closed_redirs(sh: &mut Shell, fd: c_int, nfd: c_int) -> c_uint {
+    let val: c_uint = sh.redirs.closed;
     let bit: c_uint = 1u32 << fd;
 
     if nfd >= 0 {
-        closed_redirs &= !bit;
+        sh.redirs.closed &= !bit;
     } else {
-        closed_redirs |= bit;
+        sh.redirs.closed |= bit;
     }
 
     val & bit
@@ -86,7 +108,7 @@ unsafe fn update_closed_redirs(fd: c_int, nfd: c_int) -> c_uint {
 // [spec:dash:def:redir.redirect-fn]
 // [spec:dash:sem:redir.redirect-fn]
 pub unsafe fn redirect(
-    sh: &mut crate::context::Shell,
+    sh: &mut Shell,
     redir: &[Node],
     flags: c_int,
 ) -> Result<(), Error> {
@@ -103,7 +125,7 @@ pub unsafe fn redirect(
     /* `sv = redirlist` — the frame `pushredir` just pushed, and NULL when
      * there is none, which is what `checked_sub` says. */
     sv = if (flags & REDIR_PUSH) != 0 {
-        redirlist_mut().len().checked_sub(1)
+        sh.redirs.list.len().checked_sub(1)
     } else {
         None
     };
@@ -126,9 +148,9 @@ pub unsafe fn redirect(
                 /* The C takes `p = &sv->renamed[fd]` before `fd` becomes -1,
                  * so the write below lands in the slot the read came from. */
                 let p_slot = fd as usize;
-                i = redirlist_mut()[svi].renamed[p_slot];
+                i = sh.redirs.list[svi].renamed[p_slot];
 
-                closed = update_closed_redirs(fd, newfd);
+                closed = update_closed_redirs(sh, fd, newfd);
 
                 if i == EMPTY {
                     i = CLOSED;
@@ -138,7 +160,7 @@ pub unsafe fn redirect(
                     }
                 }
 
-                redirlist_mut()[svi].renamed[p_slot] = i;
+                sh.redirs.list[svi].renamed[p_slot] = i;
             }
 
             if fd != newfd {
@@ -164,7 +186,7 @@ pub unsafe fn redirect(
          * with it because REDIR_SAVEFD2 is 03: every caller that reaches
          * this line passed REDIR_PUSH and so has a frame. */
         if let Some(svi) = sv {
-            let renamed = redirlist_mut()[svi].renamed;
+            let renamed = sh.redirs.list[svi].renamed;
             if (serr as usize) < renamed.len() && renamed[serr as usize] >= 0 {
                 (*crate::output::previous_stderr()).fd = renamed[serr as usize];
             }
@@ -235,7 +257,7 @@ pub unsafe fn sh_open(
 
 // [spec:dash:def:redir.openredirect-fn]
 // [spec:dash:sem:redir.openredirect-fn]
-unsafe fn openredirect(sh: &mut crate::context::Shell, redir: &Node) -> Result<c_int, Error> {
+unsafe fn openredirect(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
     let mut sb: libc::stat64 = core::mem::zeroed();
     let mut fname: *mut c_char = null_mut();
     let mut flags: c_int;
@@ -396,7 +418,7 @@ pub unsafe fn sh_pipe(pip: *mut c_int, memfd: c_int) -> Result<c_int, Error> {
 
 // [spec:dash:def:redir.openhere-fn]
 // [spec:dash:sem:redir.openhere-fn]
-unsafe fn openhere(sh: &mut crate::context::Shell, redir: &Node) -> Result<c_int, Error> {
+unsafe fn openhere(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
     let len: size_t;
     let mut pip: [c_int; 2] = [0; 2];
     let memfd: c_int;
@@ -460,16 +482,16 @@ unsafe fn openhere(sh: &mut crate::context::Shell, redir: &Node) -> Result<c_int
 
 // [spec:dash:def:redir.popredir-fn]
 // [spec:dash:sem:redir.popredir-fn]
-pub unsafe fn popredir(drop: c_int) {
+pub unsafe fn popredir(sh: &mut Shell, drop: c_int) {
     let rp: usize;
     let mut i: c_int;
 
     INTOFF();
-    rp = redirlist_mut().len() - 1;
+    rp = sh.redirs.list.len() - 1;
     i = 0;
     while i < 10 {
         let closed: c_uint;
-        let renamed: c_int = redirlist_mut()[rp].renamed[i as usize];
+        let renamed: c_int = sh.redirs.list[rp].renamed[i as usize];
 
         if renamed == EMPTY {
             i += 1;
@@ -479,7 +501,7 @@ pub unsafe fn popredir(drop: c_int) {
         closed = if drop != 0 {
             1
         } else {
-            update_closed_redirs(i, renamed)
+            update_closed_redirs(sh, i, renamed)
         };
 
         match renamed {
@@ -502,7 +524,7 @@ pub unsafe fn popredir(drop: c_int) {
     }
     /* `redirlist = rp->next` — which also drops anything pushed above `rp`
      * and never popped, as the C's assignment did. */
-    redirlist_mut().truncate(rp);
+    sh.redirs.list.truncate(rp);
     INTON();
 }
 
@@ -511,19 +533,19 @@ pub unsafe fn popredir(drop: c_int) {
  */
 
 /* mkinit EXITRESET fragment from src/redir.c:443-448. */
-pub unsafe fn mkinit_exitreset() {
+pub unsafe fn mkinit_exitreset(sh: &mut Shell) {
     /*
      * Discard all saved file descriptors.
      */
-    unwindredir(0);
+    unwindredir(sh, 0);
 }
 
 /* mkinit FORKRESET fragment from src/redir.c:450-452. */
-pub unsafe fn mkinit_forkreset() {
+pub unsafe fn mkinit_forkreset(sh: &mut Shell) {
     /* `redirlist = NULL`: the frames are abandoned, not popped, so no
      * descriptor is restored or closed.  The slots are plain integers, so
      * clearing the vector abandons them the same way. */
-    redirlist_mut().clear();
+    sh.redirs.list.clear();
 }
 
 /*
@@ -577,7 +599,7 @@ pub unsafe fn savefd(from: c_int, ofd: c_int) -> Result<c_int, Error> {
 // [spec:dash:def:redir.redirectsafe-fn]
 // [spec:dash:sem:redir.redirectsafe-fn]
 pub unsafe fn redirectsafe(
-    sh: &mut crate::context::Shell,
+    sh: &mut Shell,
     redir: &[Node],
     flags: c_int,
 ) -> Result<(), Error> {
@@ -599,23 +621,23 @@ pub unsafe fn redirectsafe(
 // [spec:dash:sem:redir.unwindredir-fn]
 /// `stop` was the `redirtab *` to unwind back to; a stack in a vector says
 /// the same thing with the depth to unwind back to.
-pub unsafe fn unwindredir(stop: usize) {
-    while redirlist_mut().len() != stop {
-        popredir(0);
+pub unsafe fn unwindredir(sh: &mut Shell, stop: usize) {
+    while sh.redirs.list.len() != stop {
+        popredir(sh, 0);
     }
 }
 
 // [spec:dash:def:redir.pushredir-fn]
 // [spec:dash:sem:redir.pushredir-fn]
-pub unsafe fn pushredir(redir: &[Node]) -> usize {
+pub unsafe fn pushredir(sh: &mut Shell, redir: &[Node]) -> usize {
     let q: usize;
 
-    q = redirlist_mut().len();
+    q = sh.redirs.list.len();
     if redir.is_empty() {
         return q; /* goto out */
     }
 
-    redirlist_mut().push(redirtab {
+    sh.redirs.list.push(redirtab {
         renamed: [EMPTY; 10],
     });
 
