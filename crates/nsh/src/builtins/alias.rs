@@ -4,6 +4,7 @@
 //! `crate::alias`, where the parser and the line editor read it; this is
 //! the command that prints and defines entries in it.
 
+use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, ByteSlice};
 use core::ffi::CStr;
@@ -16,7 +17,7 @@ use crate::eval::Flow;
 
 // [spec:dash:def:alias.aliascmd-fn]
 // [spec:dash:sem:alias.aliascmd-fn]
-pub unsafe fn aliascmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn aliascmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut ret: c_int = 0;
     let mut ap: *mut alias;
 
@@ -74,7 +75,7 @@ mod tests {
         unsafe {
             atab_mut().clear();
             assert_eq!(
-                aliascmd(&[BStr::new("alias"), BStr::new("ll=ls -l")]).unwrap(),
+                aliascmd(&mut Shell::new(), &[BStr::new("alias"), BStr::new("ll=ls -l")]).unwrap(),
                 Flow::Done(0)
             );
             let found = lookupalias(c"ll".as_ptr(), 0);
@@ -91,7 +92,7 @@ mod tests {
         unsafe {
             atab_mut().clear();
             assert_eq!(
-                aliascmd(&[
+                aliascmd(&mut Shell::new(), &[
                     BStr::new("alias"),
                     BStr::new("nosuchalias"),
                     BStr::new("after=1"),

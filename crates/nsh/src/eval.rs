@@ -1263,7 +1263,12 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<Flow, Error> {
                      * shell, which is `docs/api-design.md` 3.3's contract and
                      * the mechanism that decides which errors an embedder
                      * ever sees. Anything else leaves as it arrived. */
-                    match evalbltin(cmdentry.u.cmd, &args, flags) {
+                    /* TRANSITIONAL: `evalcommand` has no context to pass on
+                     * yet, so the builtin's receiver is made here. This is
+                     * the only one on the builtin path, and threading
+                     * `eval.rs` removes it. */
+                    let mut sh = crate::context::Shell::detached();
+                    match evalbltin(&mut sh, cmdentry.u.cmd, &args, flags) {
                         Ok(Flow::Done(_)) => {}
                         Ok(exit @ Flow::Exit { .. }) => return Ok(exit),
                         Err(e) => {
@@ -1361,6 +1366,7 @@ unsafe fn evalcommand(cmd: &Node, flags: c_int) -> Result<Flow, Error> {
 // [spec:dash:def:eval.evalbltin-fn]
 // [spec:dash:sem:eval.evalbltin-fn]
 unsafe fn evalbltin(
+    sh: &mut crate::context::Shell,
     cmd: *const builtincmd,
     args: &[&BStr],
     flags: c_int,
@@ -1374,10 +1380,10 @@ unsafe fn evalbltin(
 
     let outcome = (|| -> Result<Flow, Error> {
         let mut status: c_int = match if cmd == crate::builtins::EVALCMD {
-            crate::builtins::eval::evalcmd(args, flags)?
+            crate::builtins::eval::evalcmd(sh, args, flags)?
         } else {
             let entry = (*cmd).builtin.expect("a builtin with no special entry");
-            entry(args)?
+            entry(sh, args)?
         } {
             Flow::Done(status) => status,
             exit @ Flow::Exit { .. } => return Ok(exit),

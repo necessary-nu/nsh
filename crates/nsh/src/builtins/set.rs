@@ -8,6 +8,7 @@
 //! With no arguments at all it prints the variables instead, which is the
 //! one thing about `set` that has nothing to do with options.
 
+use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 use core::ptr::addr_of;
@@ -21,7 +22,7 @@ use crate::var::{VUNSET, showvars};
 
 // [spec:dash:def:options.setcmd-fn]
 // [spec:dash:sem:options.setcmd-fn]
-pub unsafe fn setcmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn setcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if args.len() == 1 {
         return Ok(Flow::Done(showvars(addr_of!(nullstr) as *const c_char, 0, VUNSET)));
     }

@@ -4,6 +4,7 @@
 //! `crate::jobs::showjob`, which the shell also does unprompted when a
 //! background job changes state, so it stays there.
 
+use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 use libc::c_int;
@@ -15,7 +16,7 @@ use crate::output::Output;
 
 // [spec:dash:def:jobs.jobscmd-fn]
 // [spec:dash:sem:jobs.jobscmd-fn]
-pub unsafe fn jobscmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn jobscmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut mode: c_int;
     let out: *mut Output;
 

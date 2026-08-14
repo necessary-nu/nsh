@@ -6,6 +6,7 @@
 //! `ifsbreakup` -- the same field splitting an unquoted expansion gets,
 //! which is why `read` honours `IFS` without knowing what `IFS` is.
 
+use crate::context::Shell;
 use crate::error::Error;
 use core::ptr::null_mut;
 use libc::{c_char, c_int, c_uint};
@@ -92,7 +93,7 @@ unsafe fn readcmd_handle_line(line: &mut BString, names: &[&BStr]) -> Result<(),
 
 // [spec:dash:def:miscbltin.readcmd-fn]
 // [spec:dash:sem:miscbltin.readcmd-fn]
-pub unsafe fn readcmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn readcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut prompt: Option<CString>;
     let mut startloc: c_int = 0;
     let mut newloc: c_int = 0;

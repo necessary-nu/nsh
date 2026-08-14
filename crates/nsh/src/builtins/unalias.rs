@@ -4,6 +4,7 @@
 //! `crate::alias`'s business -- an alias being read has to survive its
 //! own removal -- so this is the option scan and the diagnostic.
 
+use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 use libc::c_int;
@@ -15,7 +16,7 @@ use crate::options::Options;
 
 // [spec:dash:def:alias.unaliascmd-fn]
 // [spec:dash:sem:alias.unaliascmd-fn]
-pub unsafe fn unaliascmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn unaliascmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut i: c_int;
 
     let mut opts = Options::new(args);

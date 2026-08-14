@@ -6,6 +6,7 @@
 //! here: the table naming each resource, the option letter that selects
 //! it, and the factor its units are reported in.
 
+use crate::context::Shell;
 use crate::error::Error;
 use core::ptr::null_mut;
 use libc::{c_char, c_int};
@@ -151,7 +152,7 @@ unsafe fn printlim(how: limtype, limit: *const libc::rlimit, l: *const limits) {
 
 // [spec:dash:def:miscbltin.ulimitcmd-fn]
 // [spec:dash:sem:miscbltin.ulimitcmd-fn]
-pub unsafe fn ulimitcmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn ulimitcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut c: c_int;
     let mut val: libc::rlim_t = 0;
     let mut how: limtype = SOFT | HARD;

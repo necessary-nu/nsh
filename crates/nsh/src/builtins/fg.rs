@@ -9,6 +9,7 @@
 //! word the builtin was called as, so the table's `bg` row points here
 //! rather than at a module that would only forward.
 
+use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 use libc::{c_int, pid_t};
@@ -30,7 +31,7 @@ use crate::output::Output;
 // names and carries both claims.
 // [spec:dash:def:jobs.bgcmd-fn]
 // [spec:dash:sem:jobs.bgcmd-fn]
-pub unsafe fn fgcmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn fgcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut jp: usize;
     let out: *mut Output;
     let mode: c_int;

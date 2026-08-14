@@ -9,6 +9,7 @@
 //! or handing the shell back would not compile. See
 //! `[dec:nsh:public-surface]`.
 
+use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString};
 use libc::{c_char, c_int};
@@ -18,7 +19,7 @@ use crate::eval::{EV_TESTED, Flow, evalstring};
 
 // [spec:dash:def:eval.evalcmd-fn]
 // [spec:dash:sem:eval.evalcmd-fn]
-pub(crate) unsafe fn evalcmd(args: &[&BStr], flags: c_int) -> Result<Flow, Error> {
+pub(crate) unsafe fn evalcmd(_sh: &mut Shell, args: &[&BStr], flags: c_int) -> Result<Flow, Error> {
     /* `grabstackstr` kept the joined string alive until the enclosing mark
      * popped, which is past the `evalstring` that parses it. Owning it here
      * says the same thing, and it has to be a binding of this frame because

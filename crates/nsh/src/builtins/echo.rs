@@ -21,6 +21,7 @@
 //! The escape decoding itself is [`crate::escape`], because the parser
 //! shares it: `$\'...\'` is the same decoder with `mbchar` set.
 
+use crate::context::Shell;
 use crate::error::Error;
 use core::ptr;
 use std::io::Write as _;
@@ -79,7 +80,7 @@ unsafe fn print_escape_str(separator: u8, s: *mut c_char) -> c_int {
 
 // [spec:dash:def:printf.echocmd-fn]
 // [spec:dash:sem:printf.echocmd-fn]
-pub unsafe fn echocmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn echocmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* The C picked between the formats `"%s\n"`, `"%s"` and `"%s "`; all
      * that ever differed was the byte after the conversion, so what is
      * chosen here is that byte. `-n` closes with nothing. */

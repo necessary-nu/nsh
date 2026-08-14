@@ -4,6 +4,7 @@
 //! variable table and the function table; the last one given wins, and
 //! with neither it is the variable table.
 
+use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 use crate::eval::Flow;
@@ -12,7 +13,7 @@ use crate::var::unsetvar;
 
 // [spec:dash:def:var.unsetcmd-fn]
 // [spec:dash:sem:var.unsetcmd-fn]
-pub unsafe fn unsetcmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn unsetcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut flag: u8 = 0;
 
     let mut opts = Options::new(args);
@@ -47,21 +48,25 @@ mod tests {
         let _g = lock();
         unsafe {
             let name = CStr0::new("Tunset");
-
-            setvar(name.p(), CStr0::new("v").p(), 0);
-            assert_eq!(unsetcmd(&[BStr::new("unset"), BStr::new("Tunset")]).unwrap(), Flow::Done(0));
-            assert!(lookupvar(name.p()).is_null());
+            let sh = &mut Shell::new();
 
             setvar(name.p(), CStr0::new("v").p(), 0);
             assert_eq!(
-                unsetcmd(&[BStr::new("unset"), BStr::new("-v"), BStr::new("Tunset")]).unwrap(),
+                unsetcmd(sh, &[BStr::new("unset"), BStr::new("Tunset")]).unwrap(),
                 Flow::Done(0)
             );
             assert!(lookupvar(name.p()).is_null());
 
             setvar(name.p(), CStr0::new("v").p(), 0);
             assert_eq!(
-                unsetcmd(&[BStr::new("unset"), BStr::new("-f"), BStr::new("Tunset")]).unwrap(),
+                unsetcmd(sh, &[BStr::new("unset"), BStr::new("-v"), BStr::new("Tunset")]).unwrap(),
+                Flow::Done(0)
+            );
+            assert!(lookupvar(name.p()).is_null());
+
+            setvar(name.p(), CStr0::new("v").p(), 0);
+            assert_eq!(
+                unsetcmd(sh, &[BStr::new("unset"), BStr::new("-f"), BStr::new("Tunset")]).unwrap(),
                 Flow::Done(0)
             );
             assert!(!lookupvar(name.p()).is_null(), "-f is the function table");
@@ -77,7 +82,7 @@ mod tests {
             let name = CStr0::new("Tunset2");
             setvar(name.p(), CStr0::new("v").p(), 0);
             assert_eq!(
-                unsetcmd(&[
+                unsetcmd(&mut Shell::new(), &[
                     BStr::new("unset"),
                     BStr::new("-f"),
                     BStr::new("-v"),

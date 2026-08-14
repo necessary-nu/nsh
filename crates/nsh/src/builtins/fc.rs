@@ -12,6 +12,7 @@
 //! `crate::builtins::writable_args` says why: `getopt(3)` permutes the
 //! array it scans, and `fc -s old=new` splits that word in place.
 
+use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
 use bstr::{BStr, BString, ByteSlice};
@@ -130,7 +131,7 @@ unsafe fn scan_options(argc: c_int, argv: *mut *mut c_char) -> Result<Flags, Err
 // [spec:dash:sem:histedit.histcmd-fn]
 // [spec:dash:def:myhistedit.histcmd-fn]
 // [spec:dash:sem:myhistedit.histcmd-fn]
-pub unsafe fn histcmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn histcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut editor: *const c_char = ptr::null();
     let mut lflg: c_int = 0;
     let mut nflg: c_int = 0;

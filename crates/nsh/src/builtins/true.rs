@@ -3,13 +3,14 @@
 //! Port of `truecmd` from `src/eval.c`. `:` is the same function under
 //! the other name, which is what the C's two table rows say.
 
+use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
 use bstr::BStr;
 
 // [spec:dash:def:eval.truecmd-fn]
 // [spec:dash:sem:eval.truecmd-fn]
-pub unsafe fn truecmd(_args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn truecmd(_sh: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> {
     Ok(Flow::Done(0))
 }
 
@@ -22,8 +23,12 @@ mod tests {
     #[test]
     fn always_succeeds() {
         unsafe {
-            assert_eq!(truecmd(&[BStr::new("true")]).unwrap(), Flow::Done(0));
-            assert_eq!(truecmd(&[BStr::new(":"), BStr::new("ignored")]).unwrap(), Flow::Done(0));
+            let sh = &mut Shell::new();
+            assert_eq!(truecmd(sh, &[BStr::new("true")]).unwrap(), Flow::Done(0));
+            assert_eq!(
+                truecmd(sh, &[BStr::new(":"), BStr::new("ignored")]).unwrap(),
+                Flow::Done(0)
+            );
         }
     }
 }

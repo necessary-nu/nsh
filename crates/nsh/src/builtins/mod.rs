@@ -62,8 +62,14 @@ pub const BUILTIN_ASSIGN: c_uint = 0x4;
 ///
 /// `[dec:nsh:public-surface]` records the destination as
 /// `fn(&mut Shell, &[&BStr]) -> Result<ExitStatus, Error>`. This is that
-/// signature's `Result`; the receiver and the status type belong to
-/// `no-ambient-state` and `public-api`.
+/// signature's receiver and `Result`; the status type belongs to
+/// `public-api`.
+///
+/// The receiver arrives ahead of the state it will carry
+/// ([dec:nsh:no-ambient-state]): [`crate::context::Shell`] is still empty
+/// and the tables are still `static mut`, so a builtin whose state has not
+/// moved yet names the parameter `_sh`. `move-state` fills the type in,
+/// and the underscores come off with the bodies that start reading it.
 ///
 /// The `Ok` side is a [`Flow`] rather than a status because `exit` is a
 /// built-in. `exitcmd` used to leave by `exraise(EXEXIT)`, and a table of
@@ -74,7 +80,10 @@ pub const BUILTIN_ASSIGN: c_uint = 0x4;
 /// `set -e` abort inside them has to travel back out through them. The
 /// remaining thirty produce `Flow::Done` and nothing else, which is what
 /// the C's `int` said.
-pub type Builtin = unsafe fn(&[&BStr]) -> Result<crate::eval::Flow, crate::error::Error>;
+pub type Builtin = unsafe fn(
+    &mut crate::context::Shell,
+    &[&BStr],
+) -> Result<crate::eval::Flow, crate::error::Error>;
 
 pub struct builtincmd {
     pub name: &'static CStr,
@@ -174,7 +183,10 @@ pub(crate) static mut bltin: builtincmd = builtincmd {
 
 // [spec:dash:def:eval.bltincmd-fn]
 // [spec:dash:sem:eval.bltincmd-fn]
-unsafe fn bltincmd(_args: &[&BStr]) -> Result<crate::eval::Flow, crate::error::Error> {
+unsafe fn bltincmd(
+    _sh: &mut crate::context::Shell,
+    _args: &[&BStr],
+) -> Result<crate::eval::Flow, crate::error::Error> {
     /*
      * Preserve exitstatus of a previous possible redirection
      * as POSIX mandates

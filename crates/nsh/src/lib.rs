@@ -55,6 +55,12 @@
 #[cfg(feature = "api-sketch")]
 pub mod api;
 
+// ---- the shell instance ----------------------------------------------
+//
+// The receiver every function that touches shell state is being given,
+// ahead of the state itself moving onto it. [dec:nsh:no-ambient-state].
+pub mod context;
+
 // ---- foundation -----------------------------------------------------
 pub mod error;
 pub mod escape;

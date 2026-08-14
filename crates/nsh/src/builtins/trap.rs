@@ -7,6 +7,7 @@
 //! `trap` with no operands prints the table in a form that can be read
 //! back, which is why the action is single-quoted on the way out.
 
+use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString};
 use core::ptr::addr_of;
@@ -24,7 +25,7 @@ use crate::trap::{
 
 // [spec:dash:def:trap.trapcmd-fn]
 // [spec:dash:sem:trap.trapcmd-fn]
-pub unsafe fn trapcmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn trapcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut signo: c_int;
 
     let mut opts = Options::new(args);

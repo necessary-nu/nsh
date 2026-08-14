@@ -6,6 +6,7 @@
 //! the awkward one -- `-9` and `-TERM` are a signal where every other
 //! builtin would read an option.
 
+use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 use libc::{c_int, pid_t};
@@ -20,7 +21,7 @@ use crate::jobs::errno;
 
 // [spec:dash:def:jobs.killcmd-fn]
 // [spec:dash:sem:jobs.killcmd-fn]
-pub unsafe fn killcmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn killcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* the `usage:` label is a backward goto whose body only raises, so it
      * is reproduced as two returns of the same message. */
     const USAGE: &[u8] =

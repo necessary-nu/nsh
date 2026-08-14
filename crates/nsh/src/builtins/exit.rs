@@ -11,13 +11,14 @@
 //! frontend is what turns the returned exit into a process status -- see
 //! `[dec:nsh:shell-as-library]`.
 
+use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
 use bstr::BStr;
 
 // [spec:dash:def:main.exitcmd-fn]
 // [spec:dash:sem:main.exitcmd-fn]
-pub unsafe fn exitcmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn exitcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if crate::jobs::stoppedjobs() != 0 {
         return Ok(Flow::Done(0));
     }

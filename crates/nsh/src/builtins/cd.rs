@@ -8,6 +8,7 @@
 //! scan, and the logical-path bookkeeping that `cd ..` needs and `chdir`
 //! alone cannot do.
 
+use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
 use core::ptr::{addr_of, addr_of_mut, null_mut};
@@ -44,7 +45,7 @@ pub(crate) unsafe fn cdopt(opts: &mut Options) -> Result<c_int, Error> {
 
 // [spec:dash:def:cd.cdcmd-fn]
 // [spec:dash:sem:cd.cdcmd-fn]
-pub unsafe fn cdcmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn cdcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut dest: *const c_char;
     let mut path: *const c_char;
     let mut p: *const c_char;

@@ -7,6 +7,7 @@
 //! are the caller's argument array -- the C shifts that array down in
 //! place rather than the list, and so does this.
 
+use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 use core::ptr::addr_of_mut;
@@ -18,7 +19,7 @@ use crate::options::shellparam;
 
 // [spec:dash:def:options.shiftcmd-fn]
 // [spec:dash:sem:options.shiftcmd-fn]
-pub unsafe fn shiftcmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn shiftcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let n: c_int;
 
     n = match args.get(1) {
@@ -64,7 +65,7 @@ mod tests {
         let _g = lock();
         unsafe {
             params(&["a", "b", "c"]);
-            assert_eq!(shiftcmd(&[BStr::new("shift")]).unwrap(), Flow::Done(0));
+            assert_eq!(shiftcmd(&mut Shell::new(), &[BStr::new("shift")]).unwrap(), Flow::Done(0));
             assert_eq!((*addr_of_mut!(shellparam)).nparam, 2);
             assert_eq!(remaining(), vec![b"b".to_vec(), b"c".to_vec()]);
         }
@@ -75,7 +76,11 @@ mod tests {
         let _g = lock();
         unsafe {
             params(&["a", "b", "c"]);
-            assert_eq!(shiftcmd(&[BStr::new("shift"), BStr::new("2")]).unwrap(), Flow::Done(0));
+            let sh = &mut Shell::new();
+            assert_eq!(
+                shiftcmd(sh, &[BStr::new("shift"), BStr::new("2")]).unwrap(),
+                Flow::Done(0)
+            );
             assert_eq!((*addr_of_mut!(shellparam)).nparam, 1);
             assert_eq!(remaining(), vec![b"c".to_vec()]);
         }
@@ -87,7 +92,11 @@ mod tests {
         let _g = lock();
         unsafe {
             params(&["a", "b"]);
-            assert_eq!(shiftcmd(&[BStr::new("shift"), BStr::new("2")]).unwrap(), Flow::Done(0));
+            let sh = &mut Shell::new();
+            assert_eq!(
+                shiftcmd(sh, &[BStr::new("shift"), BStr::new("2")]).unwrap(),
+                Flow::Done(0)
+            );
             assert_eq!((*addr_of_mut!(shellparam)).nparam, 0);
         }
         /* The diagnostic comes back as a value now rather than as an
@@ -95,7 +104,7 @@ mod tests {
          * jump. The bytes are unchanged and still go to stderr. */
         unsafe {
             params(&["a"]);
-            let e = shiftcmd(&[BStr::new("shift"), BStr::new("2")])
+            let e = shiftcmd(&mut Shell::new(), &[BStr::new("shift"), BStr::new("2")])
                 .expect_err("shifting past the end fails");
             assert_eq!(e.message().to_vec(), b"can't shift that many".to_vec());
             assert_eq!(e.status(), 2);

@@ -8,6 +8,7 @@
 //! with the flags changed, so the dispatch never reaches a builtin. What
 //! this does is describe a name, which is `type`.
 
+use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 use core::ptr::null;
@@ -19,7 +20,7 @@ use crate::options::Options;
 
 // [spec:dash:def:exec.commandcmd-fn]
 // [spec:dash:sem:exec.commandcmd-fn]
-pub unsafe fn commandcmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn commandcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     const VERIFY_BRIEF: c_int = 1;
     const VERIFY_VERBOSE: c_int = 2;
     let mut verify: c_int = 0;

@@ -8,6 +8,7 @@
 //! The mask is the process's, not the shell's: there is nothing to keep
 //! here, so the builtin reads it from the kernel and writes it back.
 
+use crate::context::Shell;
 use crate::error::Error;
 use core::ptr::null_mut;
 use libc::{c_char, c_int};
@@ -31,7 +32,7 @@ use crate::options::Options;
 
 // [spec:dash:def:miscbltin.umaskcmd-fn]
 // [spec:dash:sem:miscbltin.umaskcmd-fn]
-pub unsafe fn umaskcmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn umaskcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut ap: *mut c_char;
     let mut mask: c_int;
     let mut i: c_int;
@@ -220,7 +221,11 @@ mod tests {
 
     fn set(mode: &[u8]) -> libc::mode_t {
         unsafe {
-            assert_eq!(umaskcmd(&[BStr::new("umask"), BStr::new(mode)]).unwrap(), Flow::Done(0));
+            let sh = &mut Shell::new();
+            assert_eq!(
+                umaskcmd(sh, &[BStr::new("umask"), BStr::new(mode)]).unwrap(),
+                Flow::Done(0)
+            );
             let now = libc::umask(0);
             libc::umask(now);
             now
@@ -268,7 +273,7 @@ mod tests {
             ("999", &b"Illegal number: 999"[..]),
             ("q=r", &b"Illegal mode: q=r"[..]),
         ] {
-            let e = unsafe { umaskcmd(&[BStr::new("umask"), BStr::new(mode)]) }
+            let e = unsafe { umaskcmd(&mut Shell::new(), &[BStr::new("umask"), BStr::new(mode)]) }
                 .expect_err("a bad mode fails");
             assert_eq!(e.message().to_vec(), text.to_vec());
             assert_eq!(e.status(), 2);

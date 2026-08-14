@@ -19,6 +19,7 @@
 //! `%b`'s escape dialect and the `\` escapes in the format string are
 //! [`crate::escape`], shared with `echo` and the parser.
 
+use crate::context::Shell;
 use crate::error::Error;
 use std::ffi::CStr;
 use std::io::Write as _;
@@ -619,7 +620,7 @@ unsafe fn print_escape_str(spec: &Spec, word: &CStr) -> Result<c_int, Error> {
 
 // [spec:dash:def:printf.printfcmd-fn]
 // [spec:dash:sem:printf.printfcmd-fn]
-pub unsafe fn printfcmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn printfcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut options = crate::options::Options::new(args);
     /* `nextopt(nullstr)`: printf takes no options, so this exists to
      * reject `-x` and to step over a `--`. */

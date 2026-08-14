@@ -2032,6 +2032,14 @@ children (
                         priority 0
                         kind @refactor
                         deps (errors-are-values public-api-design)
+                        log (
+                            {
+                                at 2026-08-14T12:57:13.56440938Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+                        )
                     }
 
                     {

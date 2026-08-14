@@ -13,6 +13,7 @@
 //! either the positional parameters or its own operands, and the offset
 //! it remembers has to mean the same thing next time.
 
+use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 use core::ptr::{addr_of, null_mut};
@@ -27,7 +28,7 @@ use crate::var::{VNOFUNC, setvar, setvarint, unsetvar};
 
 // [spec:dash:def:options.getoptscmd-fn]
 // [spec:dash:sem:options.getoptscmd-fn]
-pub unsafe fn getoptscmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn getoptscmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let optbase: *mut *mut c_char;
 
     let mut opts = Options::new(args);
@@ -236,15 +237,15 @@ mod tests {
             let words = ["getopts", "ab:", "o", "-a", "-bVAL", "rest"];
             let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
 
-            assert_eq!(getoptscmd(&args).unwrap(), Flow::Done(0));
+            assert_eq!(getoptscmd(&mut Shell::new(), &args).unwrap(), Flow::Done(0));
             assert_eq!(value("o"), "a");
 
-            assert_eq!(getoptscmd(&args).unwrap(), Flow::Done(0));
+            assert_eq!(getoptscmd(&mut Shell::new(), &args).unwrap(), Flow::Done(0));
             assert_eq!(value("o"), "b");
             assert_eq!(value("OPTARG"), "VAL");
 
             /* The operand ends the scan, and OPTIND points at it. */
-            assert_ne!(getoptscmd(&args).unwrap(), Flow::Done(0));
+            assert_ne!(getoptscmd(&mut Shell::new(), &args).unwrap(), Flow::Done(0));
             assert_eq!(value("OPTIND"), "3");
         }
     }
@@ -262,7 +263,7 @@ mod tests {
             let words = ["getopts", ":a", "o", "-z"];
             let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
 
-            assert_eq!(getoptscmd(&args).unwrap(), Flow::Done(0));
+            assert_eq!(getoptscmd(&mut Shell::new(), &args).unwrap(), Flow::Done(0));
             assert_eq!(value("o"), "?");
             assert_eq!(value("OPTARG"), "z");
         }

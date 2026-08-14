@@ -15,6 +15,7 @@
 //! Cross-module signature assumed (see the port report):
 //! `crate::mystring::atomax10(*const c_char) -> intmax_t`.
 
+use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
 use core::mem;
@@ -214,7 +215,7 @@ unsafe fn getop(s: *const c_char) -> *const t_op {
 
 // [spec:dash:def:test.testcmd-fn]
 // [spec:dash:sem:test.testcmd-fn]
-pub unsafe fn testcmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn testcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut op: *const t_op;
     let n: token;
     let mut res: c_int = 1;
@@ -697,7 +698,8 @@ mod tests {
     fn eval(words: &[&[u8]]) -> c_int {
         let _guard = crate::testutil::lock();
         let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
-        let Flow::Done(status) = (unsafe { testcmd(&args).unwrap() }) else {
+        let sh = &mut Shell::new();
+        let Flow::Done(status) = (unsafe { testcmd(sh, &args).unwrap() }) else {
             unreachable!("`test` always finishes")
         };
         status
@@ -801,7 +803,8 @@ mod tests {
         assert_eq!(eval(&[b"[", b"x", b"]"]), 0);
         /* Returned rather than raised, per [dec:nsh:errors-are-values]. */
         let args = [BStr::new(b"["), BStr::new(b"x")];
-        let e = unsafe { testcmd(&args) }.expect_err("`[ x` is missing its bracket");
+        let sh = &mut Shell::new();
+        let e = unsafe { testcmd(sh, &args) }.expect_err("`[ x` is missing its bracket");
         assert_eq!(e.message().to_vec(), b"missing ]".to_vec());
     }
 }

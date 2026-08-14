@@ -8,6 +8,7 @@
 //! this one rather than either keeping a copy or pushing it back down
 //! into the search machinery.
 
+use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 use core::ptr::{null, null_mut};
@@ -26,7 +27,7 @@ use crate::output::Output;
 
 // [spec:dash:def:exec.typecmd-fn]
 // [spec:dash:sem:exec.typecmd-fn]
-pub unsafe fn typecmd(args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn typecmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut err: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
