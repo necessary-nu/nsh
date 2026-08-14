@@ -444,7 +444,7 @@ unsafe fn read_profile(
     sh: &mut Shell,
     name: *const c_char,
 ) -> Result<crate::eval::Flow, crate::error::Error> {
-    let name: *const c_char = crate::parser::expandstr(name)?;
+    let name: *const c_char = crate::parser::expandstr(sh, name)?;
 
     if crate::input::setinputfile(
         name,

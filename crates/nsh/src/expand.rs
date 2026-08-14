@@ -760,6 +760,7 @@ unsafe fn getpwhome(name: *const c_char) -> *const c_char {
 // [spec:dash:def:expand.expandarg-fn]
 // [spec:dash:sem:expand.expandarg-fn]
 pub unsafe fn expandarg(
+    sh: &mut crate::context::Shell,
     arg: &crate::nodes::Node,
     arglist: Option<&mut arglist>,
     flag: c_int,
@@ -775,7 +776,7 @@ pub unsafe fn expandarg(
      * swallowing arm and `init::exitreset` both call `ifsfree`, which is
      * docs/errors-are-values.md 2.2's mark-keyed cleanup working as
      * designed. Adding one here would free them twice. */
-    argstr(arg.narg().text.as_ptr(), flag)?;
+    argstr(sh, arg.narg().text.as_ptr(), flag)?;
     'out: {
         let Some(arglist) = arglist else {
             /* here document expanded — the caller reads the buffer back
@@ -835,7 +836,11 @@ pub unsafe fn expandarg(
 
 // [spec:dash:def:expand.argstr-fn]
 // [spec:dash:sem:expand.argstr-fn]
-unsafe fn argstr(mut p: *mut c_char, mut flag: c_int) -> Result<*mut c_char, Error> {
+unsafe fn argstr(
+    sh: &mut crate::context::Shell,
+    mut p: *mut c_char,
+    mut flag: c_int,
+) -> Result<*mut c_char, Error> {
     static spclchars: [c_char; 11] = [
         C_EQUALS,
         C_COLON,
@@ -961,7 +966,7 @@ unsafe fn argstr(mut p: *mut c_char, mut flag: c_int) -> Result<*mut c_char, Err
                             == CStr::from_ptr(crate::mystring::dolatstr.as_ptr().offset(1))
                                 .to_bytes()
                     {
-                        p = evalvar(p.offset(1), flag | EXP_QUOTED)?.offset(1);
+                        p = evalvar(sh, p.offset(1), flag | EXP_QUOTED)?.offset(1);
                         continue 'start; /* goto start */
                     }
                     inquotes ^= EXP_QUOTED;
@@ -1004,15 +1009,15 @@ unsafe fn argstr(mut p: *mut c_char, mut flag: c_int) -> Result<*mut c_char, Err
                     }
                 }
                 CTLVAR => {
-                    p = evalvar(p, flag | inquotes)?;
+                    p = evalvar(sh, p, flag | inquotes)?;
                     continue 'start; /* goto start */
                 }
                 CTLBACKQ => {
-                    expbackq((&*argbackq)[0].as_ref(), flag | inquotes)?;
+                    expbackq(sh, (&*argbackq)[0].as_ref(), flag | inquotes)?;
                     continue 'start; /* goto start */
                 }
                 CTLARI => {
-                    p = expari(p, flag | inquotes)?;
+                    p = expari(sh, p, flag | inquotes)?;
                     continue 'start; /* goto start */
                 }
                 _ => {}
@@ -1119,7 +1124,11 @@ pub unsafe fn removerecordregions(endoff: c_int) {
 
 // [spec:dash:def:expand.expari-fn]
 // [spec:dash:sem:expand.expari-fn]
-unsafe fn expari(mut start: *mut c_char, flag: c_int) -> Result<*mut c_char, Error> {
+unsafe fn expari(
+    sh: &mut crate::context::Shell,
+    mut start: *mut c_char,
+    flag: c_int,
+) -> Result<*mut c_char, Error> {
     let begoff: c_int;
     let len: c_int;
     let result: intmax_t;
@@ -1128,7 +1137,7 @@ unsafe fn expari(mut start: *mut c_char, flag: c_int) -> Result<*mut c_char, Err
     let p: *mut c_char;
 
     begoff = expdest_off();
-    p = argstr(start, flag & EXP_DISCARD)?;
+    p = argstr(sh, start, flag & EXP_DISCARD)?;
 
     'out: {
         if (flag & EXP_DISCARD) != 0 {
@@ -1180,7 +1189,11 @@ unsafe fn expari(mut start: *mut c_char, flag: c_int) -> Result<*mut c_char, Err
 
 // [spec:dash:def:expand.expbackq-fn]
 // [spec:dash:sem:expand.expbackq-fn]
-unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) -> Result<(), Error> {
+unsafe fn expbackq(
+    sh: &mut crate::context::Shell,
+    cmd: Option<&crate::nodes::Node>,
+    flag: c_int,
+) -> Result<(), Error> {
     let mut in_: crate::eval::backcmd = mem::zeroed();
     let mut i: c_int;
     let mut buf: [c_char; 128] = [0; 128];
@@ -1204,10 +1217,7 @@ unsafe fn expbackq(cmd: Option<&crate::nodes::Node>, flag: c_int) -> Result<(), 
          * and its `INTON`, which is where the longjmp went too — it skipped
          * the same `INTON`. docs/errors-are-values.md 2.4: do not pair
          * them. */
-        /* TRANSITIONAL: `expbackq` has no context to pass on yet.
-         * Threading `expand.rs` removes this. */
-        let mut sh = crate::context::Shell::detached();
-        crate::eval::evalbackcmd(&mut sh, cmd, &mut in_ as *mut crate::eval::backcmd)?;
+        crate::eval::evalbackcmd(sh, cmd, &mut in_ as *mut crate::eval::backcmd)?;
 
         /* `backcmd.buf` is ash's read-ahead buffer.  `evalbackcmd` writes
          * NULL to it and to `nleft` and never writes either again, so the
@@ -1398,6 +1408,7 @@ unsafe fn scanright(
 // [spec:dash:def:expand.subevalvar-fn]
 // [spec:dash:sem:expand.subevalvar-fn]
 unsafe fn subevalvar(
+    sh: &mut crate::context::Shell,
     start: *mut c_char,
     mut str: *mut c_char,
     strloc: c_int,
@@ -1426,6 +1437,7 @@ unsafe fn subevalvar(
     let p: *mut c_char;
 
     p = argstr(
+        sh,
         start,
         (flag & EXP_DISCARD) | EXP_TILDE | (if !str.is_null() { 0 } else { EXP_CASE }),
     )?;
@@ -1552,7 +1564,11 @@ unsafe fn subevalvar(
 
 // [spec:dash:def:expand.evalvar-fn]
 // [spec:dash:sem:expand.evalvar-fn]
-unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> Result<*mut c_char, Error> {
+unsafe fn evalvar(
+    sh: &mut crate::context::Shell,
+    mut p: *mut c_char,
+    mut flag: c_int,
+) -> Result<*mut c_char, Error> {
     let mut subtype: c_int;
     let mut varflags: c_int;
     let var: *mut c_char;
@@ -1603,12 +1619,13 @@ unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> Result<*mut c_char, Er
                     /* fall through */
                 }
 
-                p = argstr(p, flag | EXP_TILDE | EXP_WORD | (discard ^ EXP_DISCARD))?;
+                p = argstr(sh, p, flag | EXP_TILDE | EXP_WORD | (discard ^ EXP_DISCARD))?;
                 break 'again; /* goto record */
             }
 
             VSASSIGN | VSQUESTION => {
                 p = subevalvar(
+                    sh,
                     p,
                     var,
                     0,
@@ -1672,7 +1689,7 @@ unsafe fn evalvar(mut p: *mut c_char, mut flag: c_int) -> Result<*mut c_char, Er
         }
 
         patloc = expdest_off();
-        p = subevalvar(p, ptr::null_mut(), patloc, startloc, varflags, flag)?;
+        p = subevalvar(sh, p, ptr::null_mut(), patloc, startloc, varflags, flag)?;
         break 'again;
     }
 
@@ -3497,6 +3514,7 @@ pub unsafe fn _rmescapes(
 // [spec:dash:def:expand.casematch-fn]
 // [spec:dash:sem:expand.casematch-fn]
 pub unsafe fn casematch(
+    sh: &mut crate::context::Shell,
     pattern: &crate::nodes::Node,
     val: *const c_char,
 ) -> Result<c_int, Error> {
@@ -3510,7 +3528,7 @@ pub unsafe fn casematch(
     /* As in `expandarg`: this `?` returns past the `ifsfree()`, which is
      * where the longjmp went too, and the catch frame reclaims the
      * regions. */
-    argstr(pattern.narg().text.as_ptr(), EXP_TILDE | EXP_CASE)?;
+    argstr(sh, pattern.narg().text.as_ptr(), EXP_TILDE | EXP_CASE)?;
     ifsfree();
     /* The C reads the word back as `stackblock()`. */
     result = patmatch(expbase(), val);

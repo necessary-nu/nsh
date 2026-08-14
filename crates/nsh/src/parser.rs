@@ -2283,7 +2283,10 @@ unsafe fn setprompt(which: c_int) {
 
 // [spec:dash:def:parser.expandstr-fn]
 // [spec:dash:sem:parser.expandstr-fn]
-pub unsafe fn expandstr(ps: *const c_char) -> Result<*const c_char, Error> {
+pub unsafe fn expandstr(
+    sh: &mut crate::context::Shell,
+    ps: *const c_char,
+) -> Result<*const c_char, Error> {
     let file_stop: usize;
     let saveheredoclist: Vec<heredoc>;
     let mut result: *const c_char;
@@ -2318,7 +2321,7 @@ pub unsafe fn expandstr(ps: *const c_char) -> Result<*const c_char, Error> {
             backquote: takeglobal(addr_of_mut!(backquotelist)),
         });
 
-        expandarg(&n, None, EXP_QUOTED)?;
+        expandarg(sh, &n, None, EXP_QUOTED)?;
         /* The C reads the expansion back as `stackblock()`; the expansion
          * buffer is owned now, so the read is named.  The C's pointer was
          * live only until the next `stalloc`; this one is live until the
@@ -2385,7 +2388,16 @@ pub unsafe fn getprompt(unused: *mut c_void) -> *const c_char {
      * dropped, as everywhere `expandstr` is used; an interrupt is put
      * back for the next poll site, because dropping it would lose the
      * user's ^C. See `error::rearm_interrupt`. */
-    match expandstr(prompt) {
+    /* The same fixed signature is why the shell is made here rather than
+     * threaded in. This is not an unthreaded caller waiting its turn: a
+     * `*mut c_void` callback has nowhere to put a `&mut Shell`, so the
+     * receiver cannot arrive by parameter no matter how much of the crate
+     * is threaded. It is the same shape as the signal handler that
+     * `docs/api-design.md` §5.1 excludes for the same reason, and it is
+     * the one site `move-state` has to answer differently -- by giving
+     * the line editor a handle, which is `public-api`'s seam. */
+    let mut sh = crate::context::Shell::detached();
+    match expandstr(&mut sh, prompt) {
         Ok(expanded) => expanded,
         Err(e) => {
             crate::error::rearm_interrupt(e);

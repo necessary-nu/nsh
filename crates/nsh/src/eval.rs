@@ -316,7 +316,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
                                 if funcline != 0 {
                                     crate::var::lineno -= funcline - 1;
                                 }
-                                expredir(&r.redirect)?;
+                                expredir(sh, &r.redirect)?;
                                 crate::redir::pushredir(&r.redirect);
                                 /* The C is `status = redirectsafe(..)`,
                                  * whose value is `setjmp(..) * 2`. The
@@ -565,7 +565,7 @@ unsafe fn evalfor(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error>
     }
 
     for argp in &f.args {
-        crate::expand::expandarg(argp, Some(&mut arglist), EXP_FULL | EXP_TILDE)?;
+        crate::expand::expandarg(sh, argp, Some(&mut arglist), EXP_FULL | EXP_TILDE)?;
     }
 
     status = 0;
@@ -596,7 +596,7 @@ unsafe fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
         crate::var::lineno -= funcline - 1;
     }
 
-    crate::expand::expandarg(
+    crate::expand::expandarg(sh, 
         c.expr.as_deref().unwrap(),
         Some(&mut arglist),
         if crate::mystring::FNMATCH_IS_ENABLED != 0 {
@@ -615,7 +615,7 @@ unsafe fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
                 break;
             }
             for patp in &cp.nclist().pattern {
-                if crate::expand::casematch(patp, arglist.list[0].textp())? != 0 {
+                if crate::expand::casematch(sh, patp, arglist.list[0].textp())? != 0 {
                     /* Ensure body is non-empty as otherwise
                      * EV_EXIT may prevent us from setting the
                      * exit status.
@@ -651,7 +651,7 @@ unsafe fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, E
         crate::var::lineno -= funcline - 1;
     }
 
-    expredir(&r.redirect)?;
+    expredir(sh, &r.redirect)?;
     INTOFF();
     /* Whether the tail below runs in a child of this process or in this
      * process. The C does not need to know, because its `evaltreenr`
@@ -722,12 +722,12 @@ unsafe fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, E
 
 // [spec:dash:def:eval.expredir-fn]
 // [spec:dash:sem:eval.expredir-fn]
-unsafe fn expredir(n: &[Node]) -> Result<(), Error> {
+unsafe fn expredir(sh: &mut Shell, n: &[Node]) -> Result<(), Error> {
     for redir in n {
         let mut fnl: arglist = arglist::new();
         match redir.node_type() {
             NFROMTO | NFROM | NTO | NCLOBBER | NAPPEND => {
-                crate::expand::expandarg(
+                crate::expand::expandarg(sh, 
                     redir.nfile().fname.as_deref().unwrap(),
                     Some(&mut fnl),
                     EXP_TILDE | EXP_REDIR,
@@ -752,7 +752,7 @@ unsafe fn expredir(n: &[Node]) -> Result<(), Error> {
                     match vname.as_deref() {
                         None => false,
                         Some(v) => {
-                            crate::expand::expandarg(v, Some(&mut fnl), EXP_TILDE | EXP_REDIR)?;
+                            crate::expand::expandarg(sh, v, Some(&mut fnl), EXP_TILDE | EXP_REDIR)?;
                             true
                         }
                     }
@@ -921,6 +921,7 @@ pub unsafe fn evalbackcmd(
 // is the length the list had on entry, so the answer is `Some` exactly when
 // the list grew.
 unsafe fn fill_arglist<'a>(
+    sh: &mut Shell,
     arglist: &mut arglist,
     argpp: &mut &'a [Node],
 ) -> Result<Option<usize>, Error> {
@@ -930,7 +931,7 @@ unsafe fn fill_arglist<'a>(
         let Some((argp, rest)) = argpp.split_first() else {
             break;
         };
-        crate::expand::expandarg(argp, Some(arglist), EXP_FULL | EXP_TILDE)?;
+        crate::expand::expandarg(sh, argp, Some(arglist), EXP_FULL | EXP_TILDE)?;
         *argpp = rest;
         if arglist.list.len() != lastp {
             break;
@@ -950,6 +951,7 @@ unsafe fn fill_arglist<'a>(
 // the `command [-p]` words it consumed. A `Vec`'s start does not move, so the
 // head is an index the caller keeps; see [`crate::expand::arglist`].
 unsafe fn parse_command_args(
+    sh: &mut Shell,
     arglist: &mut arglist,
     argpp: &mut &[Node],
     path: *mut *const c_char,
@@ -964,7 +966,7 @@ unsafe fn parse_command_args(
         sp = if sp + 1 < arglist.list.len() {
             sp + 1
         } else {
-            match fill_arglist(arglist, argpp)? {
+            match fill_arglist(sh, arglist, argpp)? {
                 Some(i) => i,
                 None => return Ok(0),
             }
@@ -981,7 +983,7 @@ unsafe fn parse_command_args(
             break;
         }
         if c == b'-' as c_char && *cp == 0 {
-            if sp + 1 >= arglist.list.len() && fill_arglist(arglist, argpp)?.is_none() {
+            if sp + 1 >= arglist.list.len() && fill_arglist(sh, arglist, argpp)?.is_none() {
                 return Ok(0);
             }
             sp += 1;
@@ -1071,7 +1073,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
 
     argc = 0;
     argp = c.args.as_slice();
-    osp = fill_arglist(&mut arglist, &mut argp)?;
+    osp = fill_arglist(sh, &mut arglist, &mut argp)?;
     if osp.is_some() {
         let mut pseudovarflag: c_int = 0;
 
@@ -1107,14 +1109,14 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                 break;
             }
 
-            cmd_flag = parse_command_args(&mut arglist, &mut argp, &mut path, &mut head)?;
+            cmd_flag = parse_command_args(sh, &mut arglist, &mut argp, &mut path, &mut head)?;
             if cmd_flag == 0 {
                 break;
             }
         }
 
         for a in argp {
-            crate::expand::expandarg(
+            crate::expand::expandarg(sh, 
                 a,
                 Some(&mut arglist),
                 if pseudovarflag != 0 && crate::parser::isassignment(a.narg().text.as_ptr()) != 0 {
@@ -1171,7 +1173,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
     }
 
     (*crate::output::previous_stderr()).fd = crate::streams::streams().stderr;
-    expredir(&c.redirect)?;
+    expredir(sh, &c.redirect)?;
     redir_stop = crate::redir::pushredir(&c.redirect);
     /* `status = redirectsafe(..)`, which the C computes as `setjmp(..) *
      * 2`. The value is kept as well as the status, because `bail:` below
@@ -1200,7 +1202,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                 let spp: usize;
 
                 spp = varlist.list.len();
-                crate::expand::expandarg(a, Some(&mut varlist), EXP_VARTILDE)?;
+                crate::expand::expandarg(sh, a, Some(&mut varlist), EXP_VARTILDE)?;
                 /* `(*spp)->text` with no null check: EXP_VARTILDE has no
                  * EXP_FULL, so `expandarg` appended exactly one entry. */
                 debug_assert_eq!(
@@ -1223,7 +1225,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
 
                 out = crate::output::previous_stderr();
                 inps4 = 1;
-                let prompt = crate::parser::expandstr(crate::var::ps4val())?;
+                let prompt = crate::parser::expandstr(sh, crate::var::ps4val())?;
                 let _ = (&mut *out).write_all(CStr::from_ptr(prompt).to_bytes());
                 inps4 = 0;
                 sep = 0;

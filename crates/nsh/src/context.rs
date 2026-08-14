@@ -55,18 +55,30 @@ impl Shell {
         Shell { _private: () }
     }
 
-    /// A context for a call site that has not been threaded yet.
+    /// A context for a call site that cannot be handed one.
     ///
-    /// **Transitional.** Every one of these is a remaining edge in the
-    /// threading graph: a function that needs the context, called from a
-    /// function that does not have one to give it. The count is this
-    /// node's progress metric, it only goes down, and the node is
-    /// finished when it reaches zero.
+    /// **Transitional.** Each of these is an edge the threading did not
+    /// cross: a function that needs the context, called from one that has
+    /// none to give it. The count is this node's progress metric, but it
+    /// is not monotonic and expecting it to fall every commit is a
+    /// misreading — a boundary moves *outward* as the frontier grows, so
+    /// threading a subsystem removes its own sites and can put new ones in
+    /// the callers it just reached. It falls to zero as the frontier meets
+    /// the edges of the call graph.
+    ///
+    /// **One kind of site cannot be removed by threading at all**, and it
+    /// is the kind that is left: a callback the shell is invoked *through*
+    /// rather than called *by*. `parser::getprompt` is handed to the line
+    /// editor as a `fn(*mut c_void)`, and a fixed signature has nowhere to
+    /// put a receiver however much of the crate is threaded. This is the
+    /// same shape as the signal handler `docs/api-design.md` §5.1 excludes
+    /// from the state that moves, and it wants the same kind of answer —
+    /// a handle the callback carries — which belongs to `public-api`.
     ///
     /// It is sound only because the type is empty. Two `&mut Shell` that
-    /// alias would be a bug the moment either one names a field, so this
-    /// must be gone *before* `move-state` gives the type any — which is
-    /// exactly the order the two nodes are sequenced in.
+    /// alias would be a bug the moment either one names a field, so the
+    /// call sites must be gone — and the callback one answered — *before*
+    /// `move-state` gives the type any.
     pub(crate) fn detached() -> Self {
         Shell { _private: () }
     }
