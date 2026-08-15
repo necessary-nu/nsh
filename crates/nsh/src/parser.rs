@@ -2292,17 +2292,17 @@ unsafe fn setprompt(sh: &mut Shell, which: c_int) {
         /* `pushstackmark(&smark, stackblocksize())` bounded the prompt
          * `expandstr` had left in the region for `out2str` to read.  The
          * expansion buffer is owned, so there is nothing to bound. */
-        let prompt = CStr::from_ptr(getprompt(sh)).to_bytes();
-        let _ = (*crate::output::stderr()).write_all(prompt);
+        let prompt = getprompt(sh);
+        let _ = (*crate::output::stderr()).write_all(&prompt);
     }
 }
 
 // [spec:dash:def:parser.expandstr-fn]
 // [spec:dash:sem:parser.expandstr-fn]
-pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<*const c_char, Error> {
+pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<BString, Error> {
     let file_stop: usize;
     let saveheredoclist: Vec<heredoc>;
-    let mut result: *const c_char;
+    let mut result: BString;
     let saveprompt: c_int;
 
     file_stop = crate::input::cur_mark(sh);
@@ -2314,19 +2314,31 @@ pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<*const c_ch
     saveprompt = sh.input.doprompt;
     sh.input.doprompt = 0;
     sh.input.needprompt = 0;
-    result = ps;
+    /* `result = ps` — the C seeds the answer with the string it was given
+     * and the failure path is what leaves the seed standing.
+     *
+     * The seed is a *copy* rather than the pointer, and that is a fix
+     * rather than a transcription. `ps` points into a shell variable's
+     * text, and the expansion about to run can reassign that variable —
+     * `PS1='$(PS1=x; echo)'` reaches it — which reallocates the text and
+     * leaves `ps` dangling for exactly the failure path that reads it.
+     * The C read it anyway. Copying at the point the C takes the seed
+     * keeps the C's sequence and removes the read-after-free. */
+    result = BString::from(CStr::from_ptr(ps).to_bytes());
     /* `if (unlikely(err = setjmp(jmploc.loc))) goto out;` — handlers in
      * this port are established by `eval::setjmp_catch`, not a real
      * `setjmp`, so the body goes in the closure and everything after the
-     * call is the `out:` label. Raw pointers rather than captures keep
-     * the C's aliasing (the closure writes locals the tail then reads).
-     * The C's `union node n` is a bare local it never reads after the
-     * call, so it lives inside the closure here. */
-    let resultp: *mut *const c_char = addr_of_mut!(result);
+     * call is the `out:` label. The C's `union node n` is a bare local it
+     * never reads after the call, so it lives inside the closure here.
+     *
+     * The raw out-pointer this used to need is gone with the pointer it
+     * carried: an immediately-invoked closure can capture the local
+     * mutably, and `result`'s bytes are its own. */
     /* The C's `if (unlikely(err = setjmp(jmploc.loc))) goto out;` and the
      * whole of the frame it armed are gone. What it was for is here as an
      * ordinary `?` chain, and the `out:` label is what follows the call. */
     let caught = (|| -> Result<(), crate::error::Error> {
+        let result = &mut result;
         let firstc = pgetc_eatbnl(sh)?;
         readtoken1(sh, firstc, DQSYNTAX(), EofMark::Fake, 0)?;
 
@@ -2344,8 +2356,16 @@ pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<*const c_ch
          * Neither `?` above reaches this line, which is the whole of the
          * C's `goto out` skipping it: a prompt that fails to parse or to
          * expand leaves `result` as the `ps` it was seeded with, and the
-         * caller renders the prompt unexpanded. */
-        *resultp = crate::expand::expansion_result() as *const c_char;
+         * caller renders the prompt unexpanded.
+         *
+         * The copy is what the C's pointer bought with liveness instead.
+         * It costs one allocation per prompt — drawn at the rate a human
+         * presses return, or once per traced command — and it buys the
+         * caller a value that no later expansion can pull out from under
+         * it. `getprompt` handing back a borrow of the expansion buffer
+         * would have to outlive the next `expandarg` to be useful, and it
+         * cannot. */
+        *result = BString::from(crate::expand::expansion_result());
         Ok(())
     })()
     .err();
@@ -2387,7 +2407,7 @@ pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<*const c_ch
 
 // [spec:dash:def:parser.getprompt-fn]
 // [spec:dash:sem:parser.getprompt-fn]
-pub unsafe fn getprompt(sh: &mut Shell) -> *const c_char {
+pub unsafe fn getprompt(sh: &mut Shell) -> BString {
     let prompt: *const c_char;
 
     match sh.input.whichprompt {
@@ -2397,9 +2417,12 @@ pub unsafe fn getprompt(sh: &mut Shell) -> *const c_char {
         2 => {
             prompt = crate::var::ps2val(sh);
         }
-        /* default: falls into case 0 outside DEBUG builds */
+        /* default: falls into case 0 outside DEBUG builds.  The C returns
+         * `nullstr`, whose *address* is load-bearing at other sites (see
+         * `mystring::nullstr`) but not at this one: both readers here take
+         * its bytes and there are none, so the empty value is exact. */
         _ => {
-            return ptr::addr_of!(crate::mystring::nullstr) as *const c_char;
+            return BString::default();
         }
     }
 
@@ -2424,7 +2447,11 @@ pub unsafe fn getprompt(sh: &mut Shell) -> *const c_char {
         Ok(expanded) => expanded,
         Err(e) => {
             crate::error::rearm_interrupt(e);
-            prompt
+            /* The interrupted prompt is rendered unexpanded, which is the
+             * same answer `expandstr`'s own failure path gives — and the
+             * same read of `prompt`, taken here because this arm never
+             * entered the copy `expandstr` makes. */
+            BString::from(CStr::from_ptr(prompt).to_bytes())
         }
     }
 }

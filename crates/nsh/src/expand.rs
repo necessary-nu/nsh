@@ -481,8 +481,21 @@ unsafe fn grabexpdest() -> BString {
 /// forces the word's closing marker to 0 (`*(q - 1) &= end - 1`), and they
 /// stay valid until the next expansion begins — where the C's were valid
 /// only until the next `stalloc`.
-pub unsafe fn expansion_result() -> *mut c_char {
-    expbase()
+///
+/// This hands back the bytes rather than the base pointer, and it is the
+/// only route by which the expansion buffer left this file as a bare
+/// `char *`.  Both callers did `CStr::from_ptr` on what they got, so the
+/// scan has not moved — it has become [`crate::mystring::cstr_prefix`],
+/// which is safe, and the two `CStr::from_ptr` calls and the pointer that
+/// fed them are gone.
+///
+/// The borrow is `'static` because the buffer is, and the liveness the
+/// callers rely on is unchanged and still theirs to respect: the bytes
+/// last until the next expansion begins.  Nothing between either call and
+/// its read expands — `openhere` only pipes and forks, `expandstr` reads
+/// on the next line.
+pub unsafe fn expansion_result() -> &'static BStr {
+    crate::mystring::cstr_prefix(expb().as_slice())
 }
 
 // ---------------------------------------------------------------------

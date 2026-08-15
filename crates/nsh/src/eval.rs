@@ -1293,7 +1293,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                  * note in `evalcommand`. */
                 let ps4 = crate::var::ps4val(sh);
                 let prompt = crate::parser::expandstr(sh, ps4)?;
-                let _ = (&mut *out).write_all(CStr::from_ptr(prompt).to_bytes());
+                let _ = (&mut *out).write_all(&prompt);
                 sh.eval.inps4 = 0;
                 sep = 0;
                 sep = eprintlist(out, &varlist.list, sep);

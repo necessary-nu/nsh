@@ -423,12 +423,11 @@ unsafe fn openhere(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
     let len: size_t;
     let mut pip: [c_int; 2] = [0; 2];
     let memfd: c_int;
-    let mut p: *mut c_char;
+    let p: &[u8];
 
     /* `redir->nhere.doc` is the slot `parseheredoc` filled; the C would have
      * dereferenced a null pointer had it not run. */
     let doc: &Node = redir.nhere().doc.get().unwrap();
-    p = doc.narg().text.as_ptr();
     if redir.node_type() == NXHERE {
         crate::expand::expandarg(sh, doc, None, crate::expand::EXP_QUOTED)?;
         /* The C reads the expansion back out of the region as
@@ -436,12 +435,23 @@ unsafe fn openhere(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
          * named.  Two consequences, both in the port's favour: the bytes
          * cannot be moved by the `sh_pipe`/`forkshell` allocations below —
          * the C's were only safe because neither happens to `stalloc` — and
-         * they are still NUL-terminated by `argstr`, which is what the
-         * `strlen` on the next line needs. */
+         * they are still NUL-terminated by `argstr`.
+         *
+         * The `strlen` the C applied here has moved *into*
+         * `expansion_result`, which hands back the bytes it would have
+         * counted rather than the base of them. */
         p = crate::expand::expansion_result();
+    } else {
+        /* The unexpanded document is the node's own text. `as_bstr` drops
+         * the counted terminator and `cstr_prefix` stops at the first NUL
+         * within what is left, which together are the C's `strlen` — the
+         * second half matters because a here-document body can carry an
+         * embedded NUL and the terminator is then not the one `strlen`
+         * would have found. */
+        p = crate::mystring::cstr_prefix(doc.narg().text.as_bstr());
     }
 
-    len = CStr::from_ptr(p).count_bytes();
+    len = p.len();
     memfd = sh_pipe(pip.as_mut_ptr(), (len > PIPESIZE) as c_int)?;
 
     if memfd != 0 || len <= PIPESIZE {
@@ -454,7 +464,7 @@ unsafe fn openhere(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
          * raising, and making it fallible is the shape 4.3 argues
          * against. They become live the day someone changes that, and
          * that is a different node's decision. */
-        crate::output::xwrite(pip[1], p as *const c_void, len);
+        crate::output::xwrite(pip[1], p.as_ptr() as *const c_void, len);
         libc::lseek(pip[1], 0, libc::SEEK_SET);
         /* goto out */
         libc::close(pip[1]);
@@ -468,7 +478,7 @@ unsafe fn openhere(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
         libc::signal(libc::SIGHUP, libc::SIG_IGN);
         libc::signal(libc::SIGTSTP, libc::SIG_IGN);
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
-        crate::output::xwrite(pip[1], p as *const c_void, len);
+        crate::output::xwrite(pip[1], p.as_ptr() as *const c_void, len);
         crate::shell::flush_coverage();
         libc::_exit(0);
     }

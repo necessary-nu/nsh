@@ -189,6 +189,26 @@ pub unsafe fn is_number(p: *const c_char) -> c_int {
 }
 
 /*
+ * The bytes `strlen` would count, over a slice that is already owned.
+ *
+ * This is the shape every `CStr::from_ptr(p).to_bytes()` in the port takes
+ * once `p` stops being a pointer, and it is *not* "drop the last byte".
+ * The buffers this port carries — `strlist::text`, `NodeText`, the
+ * expansion buffer — hold a counted terminating NUL, so dropping the last
+ * byte agrees whenever the terminator is the only NUL. It stops agreeing
+ * the moment the bytes hold an embedded one, and the port reaches those:
+ * `read` escapes a NUL out of its input, and a here-document body can
+ * carry one. `strlen` stops at the *first* NUL, and so does this.
+ *
+ * Safe, and that is the point — the `CStr::from_ptr` it replaces is not.
+ */
+pub fn cstr_prefix(b: &[u8]) -> &bstr::BStr {
+    use bstr::ByteSlice;
+    let n = b.find_byte(0).unwrap_or(b.len());
+    b[..n].as_bstr()
+}
+
+/*
  * `strncmp(a, b, n) == 0`, which is the only question either caller asks
  * of `strncmp`, and not a slice compare.
  *

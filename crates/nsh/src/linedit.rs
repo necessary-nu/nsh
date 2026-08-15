@@ -979,11 +979,13 @@ fn is_line_blank(unit: &TextUnit) -> bool {
 }
 
 unsafe fn shell_prompt(sh: &mut crate::context::Shell) -> Prompt {
-    let pointer = crate::parser::getprompt(sh);
-    if pointer.is_null() {
-        return Prompt::default();
-    }
-    prompt_from_text(&text_from_bytes(CStr::from_ptr(pointer).to_bytes()), 0x01)
+    /* The null check this had is gone with the pointer, and it was
+     * already dead: `getprompt`'s three arms are two variable texts and
+     * `nullstr`, and none of them can be null. The empty prompt now
+     * arrives as an empty value and builds an empty `Prompt`, which is
+     * what the unreachable early return produced. */
+    let prompt = crate::parser::getprompt(sh);
+    prompt_from_text(&text_from_bytes(&prompt), 0x01)
 }
 
 fn prompt_from_text(text: &Text, escape: u32) -> Prompt {

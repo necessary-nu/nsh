@@ -455,10 +455,17 @@ unsafe fn read_profile(
     sh: &mut Shell,
     name: *const c_char,
 ) -> Result<crate::eval::Flow, crate::error::Error> {
-    let name: *const c_char = crate::parser::expandstr(sh, name)?;
+    /* `expandstr` hands back the expanded name as bytes now, and
+     * `setinputfile` still opens through a `char *`, so the terminator is
+     * put back here — on a local this frame owns. The C's pointer was the
+     * expansion buffer's base, live only until the next expansion; this
+     * one is live until the frame ends, which covers the `cmdloop` below
+     * that the C's did not. */
+    let mut name: BString = crate::parser::expandstr(sh, name)?;
+    name.push(b'\0');
 
-    if crate::input::setinputfile(sh, 
-        name,
+    if crate::input::setinputfile(sh,
+        name.as_ptr() as *const c_char,
         crate::input::INPUT_PUSH_FILE | crate::input::INPUT_NOFILE_OK,
     )? < 0
     {
