@@ -1308,9 +1308,16 @@ unsafe fn getmbc_at(sh: &mut Shell, out: &mut BString, c: c_int, mode: c_int) ->
 // [spec:dash:def:parser.dollarsq-escape-fn]
 // [spec:dash:sem:parser.dollarsq-escape-fn]
 unsafe fn dollarsq_escape(sh: &mut Shell, dest: &mut BString) -> Result<(), Error> {
-    dest.reserve(MBSLOP);
-    let base = dest.len();
-    let mut out: *mut c_char = dest.as_mut_ptr().add(base) as *mut c_char;
+    /* The C writes into the stack block through a cursor and commits the
+     * prefix. `conv_escape` takes a fixed scratch buffer now -- it writes
+     * above the length it reports, which is why the buffer has to be
+     * `CONV_ESCAPE_SLOP` and not the four bytes the C's `CHECKSTRSPACE`
+     * names -- so the write lands there and the committed prefix is
+     * appended. Same bytes, same length, and the reservation that used to
+     * be a memory-safety contract is gone with the raw cursor. */
+    let mut scratch: [u8; crate::escape::CONV_ESCAPE_SLOP] =
+        [0; crate::escape::CONV_ESCAPE_SLOP];
+    let mut o: usize = 0;
     /* 10 = length of UXXXXXXXX + NUL */
     let mut str: [c_char; 10] = [0; 10];
     let mut len: c_uint;
@@ -1337,9 +1344,9 @@ unsafe fn dollarsq_escape(sh: &mut Shell, dest: &mut BString) -> Result<(), Erro
     if *p != 'c' as c_char {
         let ret: c_uint;
 
-        ret = crate::escape::conv_escape(p, out, true);
+        ret = crate::escape::conv_escape(p, &mut scratch, true);
         p = p.offset((ret >> 4) as isize);
-        out = out.offset((ret & 15) as isize);
+        o += (ret & 15) as usize;
     } else {
         p = p.offset(1);
         if *p != 0 {
@@ -1352,13 +1359,14 @@ unsafe fn dollarsq_escape(sh: &mut Shell, dest: &mut BString) -> Result<(), Erro
             p = p.offset((((c ^ *p as c_int) | (c ^ '\\' as c_int)) == 0) as isize);
 
             conv_ch = (c & !((c & 0x40) >> 1) & 0x7f) ^ 0x40;
-            USTPUTC!(conv_ch, out);
+            /* USTPUTC(conv_ch, out) */
+            scratch[o] = conv_ch as u8;
+            o += 1;
         }
     }
 
     pungetn(sh, (len as isize - (p as isize - str.as_ptr() as isize)) as c_int);
-    let written = out as usize - (dest.as_ptr().add(base) as usize);
-    dest.set_len(base + written);
+    dest.extend_from_slice(&scratch[..o]);
     Ok(())
 }
 

@@ -654,18 +654,15 @@ pub unsafe fn printfcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
                 /* `STARTSTACKSTR(cp); CHECKSTRSPACE(4, cp)` -- one
                  * escape's worth of scratch and nothing else; see
                  * `CONV_ESCAPE_SLOP` for why 4 is not the bound. */
-                let mut scratch: [c_char; CONV_ESCAPE_SLOP] = [0; CONV_ESCAPE_SLOP];
+                let mut scratch: [u8; CONV_ESCAPE_SLOP] = [0; CONV_ESCAPE_SLOP];
                 let ret = conv_escape(
                     format.as_mut_ptr().add(at) as *mut c_char,
-                    scratch.as_mut_ptr(),
+                    &mut scratch,
                     false,
                 );
                 at += (ret >> 4) as usize;
                 debug_assert!((ret & 15) as usize <= CONV_ESCAPE_SLOP);
-                emit(core::slice::from_raw_parts(
-                    scratch.as_ptr() as *const u8,
-                    (ret & 15) as usize,
-                ));
+                emit(&scratch[..(ret & 15) as usize]);
                 continue;
             }
             /* A `%%` is one `%`; a `%` at the very end of the format

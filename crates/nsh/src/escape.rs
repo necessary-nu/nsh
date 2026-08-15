@@ -21,8 +21,6 @@
 //!     tables; `SQSYNTAX` is `sqsyntax + SYNBASE` with `SYNBASE` 129
 //!     (src/mksyntax.c:147,152)
 
-use core::ptr;
-
 use bstr::BString;
 use libc::{c_char, c_int, c_uint};
 
@@ -46,19 +44,25 @@ use libc::{c_char, c_int, c_uint};
 /// 16) + 7, out)` already covers 8.
 pub const CONV_ESCAPE_SLOP: usize = 8;
 
-/// `#define USTPUTC(c, p) (*p++ = (c))`
+/// `#define USTPUTC(c, p) (*p++ = (c))`, over a buffer and an offset.
 macro_rules! USTPUTC {
-    ($c:expr, $p:ident) => {{
-        *$p = $c as c_char;
-        $p = $p.add(1);
+    ($c:expr, $buf:ident, $o:ident) => {{
+        $buf[$o] = $c as u8;
+        $o += 1;
     }};
 }
 
-/// `#define STADJUST(amount, p) (p += (amount))`
+/// `#define STADJUST(amount, p) (p += (amount))`.
+///
+/// The amount is signed and is genuinely negative here — `mboff` is -2 in
+/// the non-`mbchar` case — so the arithmetic is done in `isize` and the
+/// result is asserted back into range rather than wrapped.
 macro_rules! STADJUST {
-    ($amount:expr, $p:ident) => {
-        $p = $p.offset($amount as isize)
-    };
+    ($amount:expr, $o:ident) => {{
+        let adjusted = $o as isize + ($amount) as isize;
+        debug_assert!(adjusted >= 0, "the escape cursor stays inside its scratch");
+        $o = adjusted as usize;
+    }};
 }
 
 
@@ -95,8 +99,29 @@ const CH_V: c_int = b'v' as c_int;
 // [spec:dash:sem:printf.conv-escape-fn]
 // [spec:dash:def:system.conv-escape-fn]
 // [spec:dash:sem:system.conv-escape-fn]
-pub unsafe fn conv_escape(str0: *mut c_char, out0: *mut c_char, mbchar: bool) -> c_uint {
-    let mut out: *mut c_char = out0;
+/// The destination is a fixed scratch buffer rather than a raw cursor,
+/// and its size is the one this function needs.
+///
+/// That turns a comment into a type. The `\u` arm writes *above* the
+/// length it reports — four encoded bytes where `len` are counted, plus a
+/// closing pair — so every caller had to reserve [`CONV_ESCAPE_SLOP`]
+/// rather than the C's 4, and a caller that read the C and reserved 4
+/// would have corrupted whatever followed. Nothing in a signature said
+/// so; the `debug_assert` at the end of that arm was the only guard, and
+/// only in a debug build. An `&mut [u8; CONV_ESCAPE_SLOP]` says it at
+/// every call site, in every profile.
+///
+/// The cursor is an index, which also makes the backward `STADJUST` --
+/// `mboff` is -2 when `!mbchar`, so the framing bytes are deliberately
+/// overwritten by the payload -- ordinary arithmetic instead of pointer
+/// arithmetic that happens to stay in bounds.
+pub unsafe fn conv_escape(
+    str0: *mut c_char,
+    out: &mut [u8; CONV_ESCAPE_SLOP],
+    mbchar: bool,
+) -> c_uint {
+    /* The C's `out`, as the offset it always was. */
+    let mut o: usize = 0;
     let mut str: *mut c_char = str0;
     let mut value: c_uint;
     let och: c_int;
@@ -238,24 +263,26 @@ pub unsafe fn conv_escape(str0: *mut c_char, out0: *mut c_char, mbchar: bool) ->
                     // htonl(): host order to big-endian, i.e. UTF-8 order.
                     value = (value << ((4 - len) * 8)).to_be();
 
-                    USTPUTC!(crate::parser::CTLMBCHAR, out);
-                    USTPUTC!(len, out);
-                    STADJUST!(mboff, out);
-                    ptr::copy_nonoverlapping(
-                        &value as *const c_uint as *const u8,
-                        out as *mut u8,
-                        4,
-                    );
-                    STADJUST!(len, out);
-                    USTPUTC!(len, out);
-                    USTPUTC!(crate::parser::CTLMBCHAR, out);
-                    STADJUST!(mboff, out);
+                    USTPUTC!(crate::parser::CTLMBCHAR, out, o);
+                    USTPUTC!(len, out, o);
+                    STADJUST!(mboff, o);
+                    /* `memcpy(out, &value, 4)` — four bytes written where
+                     * `len` are counted, which is the whole reason the
+                     * scratch has to be bigger than the return value. */
+                    out[o..o + 4].copy_from_slice(&value.to_ne_bytes());
+                    STADJUST!(len, o);
+                    USTPUTC!(len, out, o);
+                    USTPUTC!(crate::parser::CTLMBCHAR, out, o);
+                    STADJUST!(mboff, o);
 
                     /* The highest byte the block above touches, counted from
-                     * `out0`: the four encoded bytes end at `2 + mboff + 3`
-                     * and the closing pair at `2 + mboff + len + 1`.  It is
-                     * past the length this returns, so every caller has to
-                     * have reserved `CONV_ESCAPE_SLOP` and not the C's 4. */
+                     * the start of `out`: the four encoded bytes end at
+                     * `2 + mboff + 3` and the closing pair at
+                     * `2 + mboff + len + 1`.  It is past the length this
+                     * returns, which is why the scratch is `CONV_ESCAPE_SLOP`
+                     * and not the C's 4.  The assertion stays as
+                     * documentation; the indexing above now enforces it in
+                     * every profile rather than only in a debug build. */
                     let highest = 2 + mboff + if len + 1 > 3 { len + 1 } else { 3 };
                     debug_assert!(highest >= 0 && (highest as usize) < CONV_ESCAPE_SLOP);
                 }
@@ -282,16 +309,16 @@ pub unsafe fn conv_escape(str0: *mut c_char, out0: *mut c_char, mbchar: bool) ->
         if goto_backslash {
             // case '\\':
             if mbchar {
-                USTPUTC!(crate::parser::CTLESC, out);
+                USTPUTC!(crate::parser::CTLESC, out, o);
             }
         }
 
-        USTPUTC!(value, out);
+        USTPUTC!(value, out, o);
     }
 
     // out_noput:
     str = str.add(1);
-    (out.offset_from(out0) as c_uint) | ((str.offset_from(str0) as c_uint) << 4)
+    (o as c_uint) | ((str.offset_from(str0) as c_uint) << 4)
 }
 
 /*
@@ -356,14 +383,17 @@ pub(crate) unsafe fn conv_escape_str(mut str: *const c_char, cp: &mut BString) -
             }
 
             /* Finally test for sequences valid in the format string */
-            let at = cp.len();
-            ret = conv_escape(str as *mut c_char, cp.as_mut_ptr().add(at) as *mut c_char, false);
+            /* The C lets `conv_escape` write into the stack block past
+             * the cursor and then commits part of it. Here it writes into
+             * scratch and the committed prefix is appended, which is the
+             * same bytes and the same length -- what the C left above the
+             * cursor for the next write to overwrite is simply not copied
+             * out. */
+            let mut scratch: [u8; CONV_ESCAPE_SLOP] = [0; CONV_ESCAPE_SLOP];
+            ret = conv_escape(str as *mut c_char, &mut scratch, false);
             str = str.add((ret >> 4) as usize);
-            /* `cp += ret & 15` is the commit of what `conv_escape` wrote
-             * past the cursor; what it wrote above that stays uncommitted,
-             * for the next write to overwrite as the C's does. */
             debug_assert!((ret & 15) as usize <= CONV_ESCAPE_SLOP);
-            cp.set_len(at + (ret & 15) as usize);
+            cp.extend_from_slice(&scratch[..(ret & 15) as usize]);
         }
 
         // } while (c & 0xff);
