@@ -259,9 +259,19 @@ pub struct ifsregion {
 }
 
 // [spec:dash:def:expand.ifs-state]
-#[repr(C)]
 pub struct ifs_state {
-    pub ifs: *const c_char,
+    /// The C's `ifst->ifs`, which is a `char *` carrying one bit.
+    ///
+    /// `ifsbreakup` assigns it `nulonly ? nullstr : realifs` and nothing
+    /// else ever assigns it, so the pointer's only content is which of the
+    /// two it is — and its sole reader, `ifsisifs`, can read `IFS` off the
+    /// shell for itself. The bit is stored and the pointer is gone.
+    ///
+    /// Not to be confused with `ifsbreakup_slow`'s `nulonly` *parameter*,
+    /// which the caller passes as `afternul | nulonly` — the previous
+    /// region's bit or'd with this one. They are different values and the
+    /// C gives them the same name.
+    pub nulonly: c_int,
     pub start: *mut c_char,
     pub r: *mut c_char,
     pub maxargs: c_int,
@@ -327,8 +337,21 @@ static mut exparg: arglist = arglist::new();
 pub struct IfsCache {
     /// The single-byte members, as a lookup table.
     ifsmap: [c_char; 128],
-    /// `IFS` itself, borrowed from the variable's text.
-    ncifs: *const c_char,
+    /// `IFS` itself, with its terminating NUL counted.
+    ///
+    /// The C — and this port until now — kept a `const char *` **into the
+    /// IFS variable's text**, refreshed only when the `varfunc_t` hook
+    /// fires. That is a borrow the type system was not being told about
+    /// and the variable table was under no obligation to honour: setting
+    /// `IFS` reallocates the text, and every path that changes a
+    /// variable's storage without going through the hook leaves this
+    /// dangling. It is the shape of the `putenv` use-after-free
+    /// [[owned-vars]] fixed, and the fix is the same one — own the bytes.
+    ///
+    /// The terminator is counted because `ifsisifs` searches *including*
+    /// it: `strchr` matches a NUL, which is how a NUL byte counts as an
+    /// IFS separator.
+    ncifs: BString,
     /// Length of the first multibyte character, or 0.
     ifsmb0len: size_t,
     /// The wide-character form of `IFS`, built by `changeifs`.
@@ -345,7 +368,10 @@ impl IfsCache {
     pub(crate) const fn new() -> Self {
         IfsCache {
             ifsmap: [0; 128],
-            ncifs: ptr::null(),
+            /* The C starts this NULL and `changeifs` runs before any
+             * reader; empty is that, and a reader that arrived early
+             * would now see an empty `IFS` rather than fault. */
+            ncifs: BString::new(Vec::new()),
             ifsmb0len: 0,
             wcifs: Vec::new(),
         }
@@ -485,9 +511,9 @@ unsafe fn grabexpdest() -> BString {
 /// This hands back the bytes rather than the base pointer, and it is the
 /// only route by which the expansion buffer left this file as a bare
 /// `char *`.  Both callers did `CStr::from_ptr` on what they got, so the
-/// scan has not moved — it has become [`crate::mystring::cstr_prefix`],
-/// which is safe, and the two `CStr::from_ptr` calls and the pointer that
-/// fed them are gone.
+/// scan has not moved — it has become [`mystring::cstr_prefix`], which is
+/// safe, and the two `CStr::from_ptr` calls and the pointer that fed them
+/// are gone.
 ///
 /// The borrow is `'static` because the buffer is, and the liveness the
 /// callers rely on is unchanged and still theirs to respect: the bytes
@@ -2058,7 +2084,17 @@ unsafe fn varvalue(
                              */
                             seplen &= (!(flags >> CHAR_BIT)) as size_t;
                             if seplen == 0 {
-                                seps = sh.ifs.ncifs;
+                                /* `seps` is still a `char *` because the
+                                 * separator is written out through
+                                 * `memtodest` a byte at a time; the
+                                 * pointer is taken from storage the shell
+                                 * owns for the whole call rather than
+                                 * from the variable table, so the walk
+                                 * `varvalue` does over it cannot outlive
+                                 * what it reads. `varvalue` itself is
+                                 * cluster F and converts with the scan
+                                 * family. */
+                                seps = sh.ifs.ncifs.as_ptr() as *const c_char;
                             }
                             seplen = (seplen.wrapping_sub(1) & sh.ifs.ifsmb0len.wrapping_sub(1))
                                 .wrapping_add(1);
@@ -2153,7 +2189,7 @@ pub unsafe fn recordregion(start: c_int, end: c_int, nulonly: c_int) {
 
 // [spec:dash:def:expand.ifsisifs-fn]
 // [spec:dash:sem:expand.ifsisifs-fn]
-unsafe fn ifsisifs(sh: &mut Shell, p: *const c_char, ml: c_uint, ifs: *const c_char) -> c_uint {
+unsafe fn ifsisifs(sh: &Shell, p: *const c_char, ml: c_uint, nulonly: c_int) -> c_uint {
     let mut isdefifs: bool = false;
     let mut isifs: bool = false;
     let mut wc: wchar_t = *p as wchar_t;
@@ -2161,8 +2197,20 @@ unsafe fn ifsisifs(sh: &mut Shell, p: *const c_char, ml: c_uint, ifs: *const c_c
      * implies one of the branches below assigned it. */
     let mut ifs0: wchar_t = 0;
 
+    /* The C's `ifst->ifs`: `nullstr` when the region is NUL-only, the
+     * shell's `IFS` otherwise. Both are NUL-terminated and the terminator
+     * is *in* the searched set below, so the empty case is `[0]` rather
+     * than `[]` — a NUL byte in a NUL-only region is a separator, and
+     * that is the whole of what a NUL-only region means. */
+    const NULONLY: &[u8] = &[0];
+    let ifs: &[u8] = if nulonly != 0 {
+        NULONLY
+    } else {
+        sh.ifs.ncifs.as_slice()
+    };
+
     'out: {
-        if *ifs != 0 && !sh.ifs.wcifs.is_empty() {
+        if ifs[0] != 0 && !sh.ifs.wcifs.is_empty() {
             if (wc & 0x80) != 0 {
                 let mut mbst: libc::mbstate_t = mem::zeroed();
                 let mut wc2: wchar_t = 0;
@@ -2178,11 +2226,10 @@ unsafe fn ifsisifs(sh: &mut Shell, p: *const c_char, ml: c_uint, ifs: *const c_c
         } else if ml == 0 {
             /* `strchr` matches the terminator, so a NUL character --
              * which is what `ml == 0` means -- counts as an IFS byte.
-             * `to_bytes_with_nul` keeps that. */
-            isifs = CStr::from_ptr(ifs)
-                .to_bytes_with_nul()
-                .contains(&(wc as u8));
-            ifs0 = *ifs as wchar_t;
+             * The counted terminator on `ncifs` keeps that, and it is why
+             * the slice is searched whole rather than trimmed. */
+            isifs = ifs.contains(&(wc as u8));
+            ifs0 = ifs[0] as wchar_t;
         }
 
         if isifs {
@@ -2198,7 +2245,7 @@ unsafe fn ifsisifs(sh: &mut Shell, p: *const c_char, ml: c_uint, ifs: *const c_c
 // [spec:dash:sem:expand.ifsbreakup-slow-fn]
 unsafe fn ifsbreakup_slow(
     sh: &mut Shell,
-    ifst: *mut ifs_state,
+    ifst: &mut ifs_state,
     arglist: &mut arglist,
     nulonly: c_int,
     mut p: *mut c_char,
@@ -2220,7 +2267,7 @@ unsafe fn ifsbreakup_slow(
         0
     };
 
-    sisifs = ifsisifs(sh, p, ml, (*ifst).ifs);
+    sisifs = ifsisifs(sh, p, ml, ifst.nulonly);
     p = p.offset((ifschar >> 8) as isize);
 
     isifs = (sisifs >> 1) != 0;
@@ -2246,57 +2293,57 @@ unsafe fn ifsbreakup_slow(
      * if no characters should be removed.
      */
     'out_zero_ifsspc: {
-        if (*ifst).maxargs == 0 {
+        if ifst.maxargs == 0 {
             if isdefifs {
-                if (*ifst).r.is_null() {
-                    (*ifst).r = q;
+                if ifst.r.is_null() {
+                    ifst.r = q;
                 }
                 return p;
             }
 
-            if !(isifs && (*ifst).ifsspc != 0) {
-                (*ifst).r = ptr::null_mut();
+            if !(isifs && ifst.ifsspc != 0) {
+                ifst.r = ptr::null_mut();
             }
-        } else if (*ifst).ifsspc != 0 {
+        } else if ifst.ifsspc != 0 {
             if isifs {
                 q = p;
             }
 
-            (*ifst).start = q;
+            ifst.start = q;
 
             if isdefifs {
                 return p;
             }
         } else if isifs {
-            let mut ifsspc: c_int = (*ifst).ifsspc;
+            let mut ifsspc: c_int = ifst.ifsspc;
 
             if nulonly == 0 {
                 ifsspc = isdefifs as c_int;
-                (*ifst).ifsspc = ifsspc;
+                ifst.ifsspc = ifsspc;
             }
 
             /* Ignore IFS whitespace at start */
-            if q == (*ifst).start && ifsspc != 0 {
-                (*ifst).start = p;
+            if q == ifst.start && ifsspc != 0 {
+                ifst.start = p;
                 break 'out_zero_ifsspc; /* goto out_zero_ifsspc */
             }
             /* if (ifst->maxargs > 0 && !--ifst->maxargs) */
-            if (*ifst).maxargs > 0 && {
-                (*ifst).maxargs -= 1;
-                (*ifst).maxargs == 0
+            if ifst.maxargs > 0 && {
+                ifst.maxargs -= 1;
+                ifst.maxargs == 0
             } {
-                (*ifst).r = q;
+                ifst.r = q;
                 return p;
             }
             *q = C_NUL;
-            arglist.list.push(strlist::from_cstr((*ifst).start));
-            (*ifst).start = p;
+            arglist.list.push(strlist::from_cstr(ifst.start));
+            ifst.start = p;
             return p;
         }
     }
 
     /* out_zero_ifsspc: */
-    (*ifst).ifsspc = 0;
+    ifst.ifsspc = 0;
     p
 }
 
@@ -2317,19 +2364,28 @@ pub unsafe fn ifsbreakup(
     arglist: &mut arglist,
 ) {
     let mut ifsp: usize;
-    let mut ifst: ifs_state = mem::zeroed();
-    let realifs: *const c_char;
+    /* `struct ifs_state ifst;` and the three assignments the C makes
+     * before the loop, as one initialiser. `mem::zeroed` was standing in
+     * for the C leaving `ifs` and `ifsspc` unset here, and both are
+     * assigned on every path that reads them; a struct without a pointer
+     * in it can say so directly. */
+    let mut ifst: ifs_state = ifs_state {
+        nulonly: 0,
+        start: string,
+        r: ptr::null_mut(),
+        maxargs,
+        ifsspc: 0,
+    };
     let mut nulonly: c_int;
     let mut p: *mut c_char;
 
-    ifst.r = ptr::null_mut();
-    ifst.start = string;
-    ifst.maxargs = maxargs;
     'add: {
         if !ifsr().is_empty() {
             ifst.ifsspc = 0;
             nulonly = 0;
-            realifs = sh.ifs.ncifs;
+            /* `realifs = ifsset() ? ncifs : nullstr` is gone with the
+             * pointer it cached: `ifsisifs` reads `IFS` off the shell,
+             * and what it needs from here is the one bit below. */
             ifsp = 0;
             loop {
                 let afternul: c_int;
@@ -2338,11 +2394,7 @@ pub unsafe fn ifsbreakup(
                 p = string.offset(ifsr()[ifsp].begoff as isize);
                 afternul = nulonly;
                 nulonly = ifsr()[ifsp].nulonly;
-                ifst.ifs = if nulonly != 0 {
-                    crate::shell::nullstr.as_ptr()
-                } else {
-                    realifs
-                };
+                ifst.nulonly = nulonly;
                 ifst.ifsspc = 0;
                 loop {
                     let p0: *mut c_char = p;
@@ -2442,33 +2494,35 @@ pub unsafe fn changeifs(sh: &mut crate::context::Shell, mut ifs: *const c_char) 
     let mut mbs: libc::mbstate_t = mem::zeroed();
     let mut nwcifs: Vec<wchar_t>;
     let mut mb: c_uint = 0;
-    let mut len: size_t = 0;
+    let len: size_t;
     let mut p: *const c_char;
     let mut ml: size_t;
 
     if crate::var::ifsset(sh) == 0 {
         ifs = crate::var::defifs();
     }
-    sh.ifs.ncifs = ifs;
+    /* The hook is still handed a `char *` by the variable table, so the
+     * scan to the terminator happens once, here, and the bytes are the
+     * shell's from then on. The terminator is kept: `ifsisifs` searches
+     * through it. */
+    sh.ifs.ncifs = BString::from(CStr::from_ptr(ifs).to_bytes_with_nul());
 
     /* memset(ifsmap, 0, sizeof(ifsmap)) */
     sh.ifs.ifsmap = [0; 128];
 
-    p = ifs;
-    loop {
-        let c: c_uint = *(p as *const u8) as c_uint;
+    /* The C walks to the terminator and processes it *before* breaking,
+     * so `ifsmap[0]` is set on every call — the loop below keeps that by
+     * iterating over the counted terminator rather than stopping short of
+     * it. `len` is the length without it, which is what the C's counter
+     * held. */
+    len = sh.ifs.ncifs.len() - 1;
+    for i in 0..sh.ifs.ncifs.len() {
+        let c: c_uint = sh.ifs.ncifs[i] as c_uint;
 
         mb |= c >> 7;
         if (c >> 7) == 0 {
             sh.ifs.ifsmap[c as usize] = 1;
         }
-
-        if c == 0 {
-            break;
-        }
-
-        len += 1;
-        p = p.offset(1);
     }
 
     nwcifs = Vec::new();
@@ -2480,7 +2534,7 @@ pub unsafe fn changeifs(sh: &mut crate::context::Shell, mut ifs: *const c_char) 
             break 'out;
         }
 
-        ml = mbrlen(ifs, len, &mut mbs);
+        ml = mbrlen(sh.ifs.ncifs.as_ptr() as *const c_char, len, &mut mbs);
         if ml == (0 as size_t).wrapping_sub(2) || ml == (0 as size_t).wrapping_sub(1) {
             ml = 1;
         }
@@ -2492,7 +2546,10 @@ pub unsafe fn changeifs(sh: &mut crate::context::Shell, mut ifs: *const c_char) 
          * and `wcifs_chr` still depends on it. */
         nwcifs = vec![0 as wchar_t; len + 1];
 
-        p = ifs;
+        /* `mbsrtowcs` advances the cursor it is given, so it needs a
+         * `char *` and gets one into the shell's own copy rather than
+         * into the variable's text. */
+        p = sh.ifs.ncifs.as_ptr() as *const c_char;
         mbsrtowcs(nwcifs.as_mut_ptr(), &mut p, len + 1, &mut mbs);
 
         /* `mb != 0` means `IFS` holds a high-bit byte, so `len >= 1` and
