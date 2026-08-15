@@ -268,7 +268,7 @@ pub unsafe fn shellexec(
      * rather than a wrinkle, and the ending has to happen at the site.
      * This is the `_exit` that `exraise` performed for every raise and now
      * performs for the only one that can reach a vforked child. */
-    if crate::jobs::vforked != 0 {
+    if crate::siginbox::signals().vforked() != 0 {
         crate::shell::flush_coverage();
         libc::_exit(sh.status);
     }

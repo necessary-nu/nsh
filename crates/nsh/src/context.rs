@@ -91,6 +91,16 @@ pub struct Shell {
     pub(crate) ifs: crate::expand::IfsCache,
     /// `fc -l`: list the history rather than re-running it.
     pub(crate) displayhist: libc::c_int,
+    /// The trap actions, the disposition cache and their two counters.
+    /// `trap.rs` owns the shape; this owns the value.
+    ///
+    /// The last table `move-state` could not take, and not for want of
+    /// effort: `onsig` read it, and a signal handler has no receiver. It
+    /// moves here because the one question the handler asked it — *is a
+    /// trap set for N?* — is now answered by a mirror in the signal
+    /// inbox. `docs/api-design.md` §5.3 has the design and
+    /// `[dec:nsh:host-owns-signals]` the argument.
+    pub(crate) traps: crate::trap::TrapTable,
     /// `$?` — the exit status of the last command.
     ///
     /// Its own field rather than a member of `eval`, because
@@ -127,6 +137,7 @@ impl Shell {
             mail: crate::mail::MailState::new(),
             ifs: crate::expand::IfsCache::new(),
             displayhist: 0,
+            traps: crate::trap::TrapTable::new(),
             input: crate::input::InputStack::new(),
             status: 0,
             vars: crate::var::VarTable::new(),

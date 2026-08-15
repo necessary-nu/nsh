@@ -146,11 +146,11 @@ const _PATH_DEVNULL: &[u8] = b"/dev/null\0";
 /// together: `setjobctl` writes three of them in one breath, and
 /// `makejob` reads `sh.jobs.jobctl` to decide what to put in `tab`.
 ///
-/// **`vforked` is deliberately not here**, though it sits with these in
-/// `jobs.rs`. `trap.rs`'s `onsig` reads it, and a signal handler has no
-/// receiver -- the same exclusion `docs/api-design.md` 5.1 makes for the
-/// handler's own state, found here for the second time. See the blocker
-/// entry on `move-state` for the trap table, which is the same shape.
+/// **`vforked` is deliberately not here**, and is not on `Shell`
+/// either: it is in the signal inbox, `siginbox.rs`. `onsig` reads it
+/// and a handler has no receiver, but the deciding reason is that it
+/// describes an address space rather than a shell -- see the comment at
+/// its old declaration below.
 pub struct JobTable {
     /// The jobs themselves.
     ///
@@ -223,9 +223,14 @@ pub(crate) unsafe fn outcmd(sh: &mut crate::context::Shell, jp: usize, i: usize,
 
 /* Set if we are in the vforked child.
  *
- * Stays a `static mut` because `trap.rs`'s `onsig` reads it, and a
- * signal handler cannot be handed a `&mut Shell`. See `JobTable`. */
-pub static mut vforked: c_int = 0;
+ * Lives in the signal inbox (`siginbox.rs`), not here and not on
+ * `Shell`. `trap.rs`'s `onsig` reads it and a handler has no receiver --
+ * but the reason it is not a field is stronger than that. The *parent*
+ * sets it before `vfork` and clears it after; the child reads it out of
+ * the address space it shares to learn that it is the child. That is a
+ * property of an address space, and a `sh.vforked` would be one shell's
+ * field written by one process and read by another that only accidentally
+ * shares it. See `docs/api-design.md` 5.3 and 6. */
 
 pub(crate) use crate::system::errno;
 
@@ -924,7 +929,7 @@ unsafe fn growjobtab(sh: &mut crate::context::Shell) -> usize {
 /// has already been written either way.
 #[cold]
 unsafe fn forkchild_fatal(sh: &mut crate::context::Shell, e: Error) -> ! {
-    if vforked != 0 {
+    if crate::siginbox::signals().vforked() != 0 {
         /* The `_exit` below is this frame's own ending, so this frame
          * writes the status the error took. */
         sh.status = e.status();
@@ -958,7 +963,7 @@ unsafe fn forkchild(
     crate::shell::reset_coverage();
 
     oldlvl = crate::shellmain::shlvl;
-    lvforked = vforked;
+    lvforked = crate::siginbox::signals().vforked();
 
     if lvforked == 0 {
         crate::shellmain::mypid = 0;
@@ -991,8 +996,8 @@ unsafe fn forkchild(
         crate::trap::setsignal(sh, libc::SIGTSTP);
         crate::trap::setsignal(sh, libc::SIGTTOU);
     } else if mode == FORK_BG {
-        crate::trap::ignoresig(libc::SIGINT);
-        crate::trap::ignoresig(libc::SIGQUIT);
+        crate::trap::ignoresig(sh, libc::SIGINT);
+        crate::trap::ignoresig(sh, libc::SIGQUIT);
         if jp.map_or(false, |i| sh.jobs.tab[i].ps.is_empty()) {
             /* The C closes descriptor 0 and reopens /dev/null, relying on
              * `open` returning the lowest free descriptor to land back on
@@ -1136,7 +1141,7 @@ pub unsafe fn vforkexec(
     if crate::shellmain::mypid == 0 {
         crate::shellmain::mypid = libc::getpid();
     }
-    vforked = crate::shellmain::mypid;
+    crate::siginbox::signals().set_vforked(crate::shellmain::mypid);
 
     pid = libc::vfork();
 
@@ -1156,7 +1161,7 @@ pub unsafe fn vforkexec(
         std::process::abort();
     }
 
-    vforked = 0;
+    crate::siginbox::signals().set_vforked(0);
     forkparent(sh, Some(jp), Some(n), FORK_FG, pid)?;
 
     Ok(jp)

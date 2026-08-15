@@ -5,7 +5,7 @@
 //! by `signo`, slot 0 being the `EXIT` trap.
 
 use bstr::{BStr, BString};
-use core::ptr::{addr_of, addr_of_mut, null, null_mut};
+use core::ptr::{addr_of_mut, null, null_mut};
 use libc::{c_char, c_int, sigset_t};
 use std::ffi::CStr;
 use std::io::Write;
@@ -35,20 +35,6 @@ const S_IGN: c_char = 3; /* signal is ignored (SIG_IGN) */
 const S_HARD_IGN: c_char = 4; /* signal is ignored permenantly */
 const S_RESET: c_char = 5; /* temporary - to reset a hard ignored sig */
 
-/* trap handler commands */
-/// The C's three states are `NULL` (no trap), `""` (the signal is ignored)
-/// and an action; `None` and an empty `BString` keep them apart.
-///
-/// `onsig` reads this array from a kernel-delivered signal frame, so nothing
-/// here may do more than the C's pointer load did: `Option<BString>` carries
-/// its emptiness in the vector's pointer word, and `is_none()` is that load.
-pub(crate) static mut trap: [Option<BString>; NSIG] = [const { None }; NSIG];
-/* traps have not been fully cleared */
-pub(crate) static mut ptrap: c_int = 0;
-/* number of non-null traps */
-pub static mut trapcnt: c_int = 0;
-/* current value of signal */
-pub static mut sigmode: [c_char; NSIG - 1] = [0; NSIG - 1];
 /* indicates specified signal received */
 static mut gotsig: [c_char; NSIG - 1] = [0; NSIG - 1];
 /* last pending signal */
@@ -56,9 +42,91 @@ pub static mut pending_sig: sig_atomic_t = 0;
 /* received SIGCHLD */
 pub static mut gotsigchld: sig_atomic_t = 0;
 
-#[inline]
-pub(crate) unsafe fn trap_mut() -> &'static mut [Option<BString>; NSIG] {
-    &mut *addr_of_mut!(trap)
+/// The trap actions, the disposition cache, and the two counters that go
+/// with them: `trap.c`'s `trap`, `ptrap`, `trapcnt` and `sigmode`.
+///
+/// This could not become a field until `onsig` stopped reading it. The
+/// handler asked the table one question — *is a trap set for N?* — at two
+/// indices, and a handler has no receiver. The answer is now a mirror in
+/// the signal inbox, published by [`TrapTable::set`], which is why that is
+/// the only writer of a slot and why it demands a
+/// [`crate::siginbox::SignalsBlocked`] witness.
+pub struct TrapTable {
+    /// The action for each signal, slot 0 being the `EXIT` trap.
+    ///
+    /// The C's three states are `NULL` (no trap), `""` (the signal is
+    /// ignored) and an action; `None` and an empty `BString` keep them
+    /// apart. The presence bit the handler reads is `is_some()`, so an
+    /// *ignored* signal counts as trapped — which is what dash's
+    /// `trap[signo] != NULL` said.
+    action: [Option<BString>; NSIG],
+    /// traps have not been fully cleared
+    pub(crate) ptrap: c_int,
+    /// number of non-null traps
+    pub(crate) trapcnt: c_int,
+    /// current value of signal, indexed by `signo - 1`
+    sigmode: [c_char; NSIG - 1],
+}
+
+impl TrapTable {
+    /// What the four statics were declared with, which is what a shell
+    /// starts with.
+    pub(crate) fn new() -> Self {
+        /* The mirror is the inbox's and the inbox is the process's, so a
+         * second `Shell` in one process resets the first one's bits. That
+         * is api-design 6's limit rather than a bug here: one process has
+         * one handler and it reports to one inbox. A fresh table has no
+         * traps, so clearing is also simply correct for the only case
+         * that is not that limit. */
+        let sink = crate::siginbox::signals();
+        for signo in 0..NSIG {
+            sink.set_trapped(signo, false);
+        }
+        TrapTable {
+            action: [const { None }; NSIG],
+            ptrap: 0,
+            trapcnt: 0,
+            sigmode: [0; NSIG - 1],
+        }
+    }
+
+    /// The action set for `signo`, if any.
+    #[inline]
+    pub(crate) fn action(&self, signo: usize) -> Option<&BString> {
+        self.action[signo].as_ref()
+    }
+
+    /// Replace `trap[signo]`, publishing the handler's presence bit with
+    /// it. The only writer of either, and it returns what was there.
+    ///
+    /// The `SignalsBlocked` argument is the whole point of routing every
+    /// write through one function: the slot and its bit are two stores,
+    /// and a handler that runs between them reads a pair dash cannot
+    /// produce — its `trap[signo]` is a single pointer. Both halves of the
+    /// disagreement are observable and in opposite senses, so there is no
+    /// safe order to write them in and the window has to be closed rather
+    /// than chosen. `siginbox::SignalsBlocked` carries the argument;
+    /// `docs/api-design.md` 5.3 carries the table.
+    pub(crate) fn set(
+        &mut self,
+        _blocked: &crate::siginbox::SignalsBlocked,
+        signo: usize,
+        to: Option<BString>,
+    ) -> Option<BString> {
+        let was = core::mem::replace(&mut self.action[signo], to);
+        crate::siginbox::signals().set_trapped(signo, self.action[signo].is_some());
+        was
+    }
+
+    /// Take the `EXIT` action.
+    ///
+    /// Slot 0 is `EXIT`, which is not a signal number: `onsig` is never
+    /// called with 0 and never reads the slot, so this needs neither the
+    /// bracket nor the bit. Separating it is what keeps `exitshell` off
+    /// the guarded path.
+    pub(crate) fn take_exit_action(&mut self) -> Option<BString> {
+        self.action[0].take()
+    }
 }
 
 /// A trap action with the terminator its readers — `single_quote`, and
@@ -71,13 +139,13 @@ pub(crate) fn cbytes(s: &BString) -> Vec<u8> {
 
 // [spec:dash:def:trap.have-traps-fn]
 // [spec:dash:sem:trap.have-traps-fn]
-pub unsafe fn have_traps() -> c_int {
-    trapcnt
+pub unsafe fn have_traps(sh: &crate::context::Shell) -> c_int {
+    sh.traps.trapcnt
 }
 
 /* mkinit INIT fragment from src/trap.c:94-97. */
 pub unsafe fn mkinit_init(sh: &mut crate::context::Shell) {
-    sigmode[(libc::SIGCHLD - 1) as usize] = S_DFL;
+    sh.traps.sigmode[(libc::SIGCHLD - 1) as usize] = S_DFL;
     setsignal(sh, libc::SIGCHLD);
 }
 
@@ -102,19 +170,26 @@ pub unsafe fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
     simplecmd = crate::parser::issimplecmd(n, crate::builtins::TRAPCMD.name.as_ptr());
 
     INTOFF();
+    /* One guard for the whole loop -- the fork's single pair -- rather
+     * than one per slot. The `simplecmd` arm below clears a slot and puts
+     * it back with a `setsignal` in between, and a per-write guard would
+     * make each half atomic while leaving the shell observably untrapped
+     * across the pair. Hoisting closes that too, and costs one
+     * `sigprocmask` pair per fork against the ~100us of the fork itself. */
+    let blocked = crate::siginbox::SignalsBlocked::new();
     for signo in 0..NSIG {
         /* trap not NULL or SIG_IGN */
-        match &(*addr_of!(trap))[signo] {
+        match sh.traps.action(signo) {
             Some(t) if !t.is_empty() => {}
             _ => continue,
         }
-        let otp = trap_mut()[signo].take();
+        let otp = sh.traps.set(&blocked, signo, None);
         if signo != 0 {
             setsignal(sh, signo as c_int);
         }
 
         if simplecmd != 0 {
-            trap_mut()[signo] = otp;
+            drop(sh.traps.set(&blocked, signo, otp));
         }
         /* The C's else arm is `ckfree(*tp)` after `*tp = NULL`, so it frees
          * NULL and leaks `otp` (src/trap.c:189).  Dropping `otp` here frees
@@ -122,8 +197,9 @@ pub unsafe fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
          * `exitshell` are the only readers of an action and both take a
          * copy before running it. */
     }
-    trapcnt = 0;
-    ptrap = simplecmd;
+    sh.traps.trapcnt = 0;
+    sh.traps.ptrap = simplecmd;
+    drop(blocked);
     INTON();
 }
 
@@ -140,9 +216,9 @@ pub unsafe fn setsignal(sh: &mut crate::context::Shell, signo: c_int) {
     let mut tsig: c_char;
     let mut act: libc::sigaction = core::mem::zeroed();
 
-    lvforked = crate::jobs::vforked;
+    lvforked = crate::siginbox::signals().vforked();
 
-    action = match &(*addr_of!(trap))[signo as usize] {
+    action = match sh.traps.action(signo as usize) {
         None => S_DFL as c_int,
         Some(t) if !t.is_empty() => S_CATCH as c_int,
         Some(_) => S_IGN as c_int,
@@ -184,8 +260,11 @@ pub unsafe fn setsignal(sh: &mut crate::context::Shell, signo: c_int) {
         action = S_CATCH as c_int;
     }
 
-    let tp: *mut c_char = addr_of_mut!(sigmode[(signo - 1) as usize]);
-    tsig = *tp;
+    /* The C keeps a `char *tp` into `sigmode[]` across the two
+     * `sigaction` calls below. An index says the same thing and does not
+     * hold a raw pointer into `sh` while `sh.options` is read. */
+    let tp = (signo - 1) as usize;
+    tsig = sh.traps.sigmode[tp];
     if tsig == 0 {
         /*
          * current setting unknown
@@ -225,7 +304,7 @@ pub unsafe fn setsignal(sh: &mut crate::context::Shell, signo: c_int) {
         }
     }
     if lvforked == 0 {
-        *tp = action as c_char;
+        sh.traps.sigmode[tp] = action as c_char;
     }
     act.sa_flags = 0;
     libc::sigfillset(&mut act.sa_mask);
@@ -238,13 +317,14 @@ pub unsafe fn setsignal(sh: &mut crate::context::Shell, signo: c_int) {
 
 // [spec:dash:def:trap.ignoresig-fn]
 // [spec:dash:sem:trap.ignoresig-fn]
-pub unsafe fn ignoresig(signo: c_int) {
-    if sigmode[(signo - 1) as usize] == S_IGN || sigmode[(signo - 1) as usize] == S_HARD_IGN {
+pub unsafe fn ignoresig(sh: &mut crate::context::Shell, signo: c_int) {
+    let mode = sh.traps.sigmode[(signo - 1) as usize];
+    if mode == S_IGN || mode == S_HARD_IGN {
         return;
     }
     libc::signal(signo, libc::SIG_IGN);
-    if crate::jobs::vforked == 0 {
-        sigmode[(signo - 1) as usize] = S_IGN;
+    if crate::siginbox::signals().vforked() == 0 {
+        sh.traps.sigmode[(signo - 1) as usize] = S_IGN;
     }
 }
 
@@ -278,13 +358,17 @@ pub unsafe fn ignoresig(signo: c_int) {
  * async-signal-safe by construction and is what
  * [dec:nsh:host-owns-signals]'s `SignalSink` will formalise. */
 pub unsafe extern "C" fn onsig(signo: c_int) {
-    if crate::jobs::vforked != 0 && libc::getpid() != crate::jobs::vforked {
+    /* Read once. The C loads the global twice and cannot observe the
+     * difference, because the only writer is the process this test is
+     * distinguishing itself from; one load says so. */
+    let vforked = crate::siginbox::signals().vforked();
+    if vforked != 0 && libc::getpid() != vforked {
         return;
     }
 
     if signo == libc::SIGCHLD {
         gotsigchld = 1;
-        if (*addr_of!(trap))[libc::SIGCHLD as usize].is_none() {
+        if !crate::siginbox::signals().is_trapped(libc::SIGCHLD) {
             return;
         }
     }
@@ -292,7 +376,7 @@ pub unsafe extern "C" fn onsig(signo: c_int) {
     gotsig[(signo - 1) as usize] = 1;
     pending_sig = signo;
 
-    if signo == libc::SIGINT && (*addr_of!(trap))[libc::SIGINT as usize].is_none() {
+    if signo == libc::SIGINT && !crate::siginbox::signals().is_trapped(libc::SIGINT) {
         /* `if (!suppressint) onint();` is gone. The C had two delivery
          * modes and only one of them was asynchronous; now neither is.
          * The handler stores, and the shell takes delivery at a poll
@@ -362,7 +446,7 @@ pub unsafe fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
          * buffer it is handed and the action it runs may `trap` over this
          * very slot; the C passes the slot's own pointer and keeps reading
          * it after `trapcmd` has freed it. */
-        let mut p = match &(*addr_of!(trap))[(i + 1) as usize] {
+        let mut p = match sh.traps.action((i + 1) as usize) {
             Some(t) => cbytes(t),
             None => {
                 i += 1;
@@ -429,9 +513,9 @@ pub unsafe fn exitshell(sh: &mut crate::context::Shell) -> ! {
         /* `trap[0] = NULL` with no free: the C leaks the EXIT action on
          * purpose so `evalstring` can still read it.  Taking it keeps the
          * action alive for exactly as long and gives the buffer back. */
-        let p = (*addr_of_mut!(trap))[0].take();
+        let p = sh.traps.take_exit_action();
         if let Some(p) = p {
-            if ptrap != 0 {
+            if sh.traps.ptrap != 0 {
                 break 'out;
             }
             sh.eval.evalskip = 0;
@@ -525,4 +609,99 @@ pub unsafe fn sigblockall(oldmask: *mut sigset_t) {
 
     libc::sigfillset(&mut mask);
     libc::sigprocmask(libc::SIG_SETMASK, &mask, oldmask);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::siginbox::{SignalsBlocked, signals};
+
+    /// **The mirror is the table, or it is a bug.** `onsig` cannot reach
+    /// `sh.traps`, so the bit it reads instead has to say the same thing
+    /// the slot does. Every direction of that is a pty case
+    /// (`tests/harness/ptydiff.py`, the job-control block); this states
+    /// the same property where a mutation of `TrapTable::set` fails it in
+    /// milliseconds rather than in a terminal.
+    #[test]
+    fn mirror_follows_the_slot() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            let mut t = TrapTable::new();
+            assert!(!signals().is_trapped(libc::SIGINT), "a new table has no traps");
+
+            let b = SignalsBlocked::new();
+            drop(t.set(&b, libc::SIGINT as usize, Some(BString::from("echo hi"))));
+            assert!(signals().is_trapped(libc::SIGINT), "set an action, set the bit");
+
+            drop(t.set(&b, libc::SIGINT as usize, None));
+            assert!(!signals().is_trapped(libc::SIGINT), "clear the action, clear the bit");
+            drop(b);
+        }
+    }
+
+    /// **The predicate is `is_some()`, not "has an action".** The C's
+    /// three states are `NULL`, `""` and an action, and `onsig` tests
+    /// `trap[signo] != NULL` — so `trap '' INT`, which *ignores* the
+    /// signal, still reads as trapped. A mirror keyed on emptiness passes
+    /// every other test here and gets that one case backwards.
+    #[test]
+    fn ignored_signal_counts_as_trapped() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            let mut t = TrapTable::new();
+            let b = SignalsBlocked::new();
+            drop(t.set(&b, libc::SIGINT as usize, Some(BString::new(Vec::new()))));
+            assert!(
+                signals().is_trapped(libc::SIGINT),
+                "`trap '' INT` is a trap as far as the handler is concerned"
+            );
+            drop(t.set(&b, libc::SIGINT as usize, None));
+            drop(b);
+        }
+    }
+
+    /// A fresh table starts the mirror fresh with it. This is also where
+    /// `docs/api-design.md` 6's limit bites: the inbox is the process's,
+    /// so a second `Shell` in one process resets the first one's bits.
+    /// Stated as a test so it is a known property rather than a surprise.
+    #[test]
+    fn a_new_table_clears_the_mirror() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            let mut t = TrapTable::new();
+            let b = SignalsBlocked::new();
+            drop(t.set(&b, libc::SIGCHLD as usize, Some(BString::from("echo chld"))));
+            drop(b);
+            assert!(signals().is_trapped(libc::SIGCHLD));
+
+            let _fresh = TrapTable::new();
+            assert!(!signals().is_trapped(libc::SIGCHLD), "a new table, a clear mirror");
+        }
+    }
+
+    /// **The guard blocks, and puts the mask back.** Without the `Drop`
+    /// the shell runs on with every signal blocked — which no test above
+    /// would notice, and which would make it stop answering anything.
+    #[test]
+    fn the_guard_blocks_and_restores() {
+        let _g = crate::testutil::lock();
+        unsafe {
+            crate::system::sigclearmask();
+            let mut before: sigset_t = core::mem::zeroed();
+            libc::sigprocmask(libc::SIG_SETMASK, null(), &mut before);
+            assert_eq!(libc::sigismember(&before, libc::SIGINT), 0, "start unblocked");
+
+            {
+                let _b = SignalsBlocked::new();
+                let mut during: sigset_t = core::mem::zeroed();
+                libc::sigprocmask(libc::SIG_SETMASK, null(), &mut during);
+                assert_eq!(libc::sigismember(&during, libc::SIGINT), 1, "blocked inside");
+                assert_eq!(libc::sigismember(&during, libc::SIGCHLD), 1, "all of them");
+            }
+
+            let mut after: sigset_t = core::mem::zeroed();
+            libc::sigprocmask(libc::SIG_SETMASK, null(), &mut after);
+            assert_eq!(libc::sigismember(&after, libc::SIGINT), 0, "restored on drop");
+        }
+    }
 }

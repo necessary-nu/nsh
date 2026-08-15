@@ -67,6 +67,7 @@ pub mod escape;
 pub mod mystring;
 pub mod output;
 pub mod shell;
+pub mod siginbox;
 pub mod streams;
 pub mod system;
 

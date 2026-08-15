@@ -714,7 +714,7 @@ unsafe fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, E
      * difference. */
     let forked: bool;
     'nofork: {
-        if backgnd == 0 && (flags & EV_EXIT) != 0 && crate::trap::have_traps() == 0 {
+        if backgnd == 0 && (flags & EV_EXIT) != 0 && crate::trap::have_traps(sh) == 0 {
             crate::init::forkreset(sh, None);
             forked = false;
             break 'nofork;
@@ -1380,7 +1380,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                     crate::input::flush_input(sh);
 
                     /* Fork off a child process if necessary. */
-                    if (flags & EV_EXIT) == 0 || crate::trap::have_traps() != 0 {
+                    if (flags & EV_EXIT) == 0 || crate::trap::have_traps(sh) != 0 {
                         INTOFF();
                         jp = Some(crate::jobs::vforkexec(sh, cmd, argv, path, cmdentry.u.index)?);
                     } else {
