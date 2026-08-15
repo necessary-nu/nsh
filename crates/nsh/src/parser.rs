@@ -336,17 +336,7 @@ pub struct synstack {
     pub dqvarnest: c_int,  /* levels of variables expansion within double quotes */
 }
 
-pub static mut heredoclist: Vec<heredoc> = Vec::new(); /* list of here documents to read */
-pub static mut doprompt: c_int = 0; /* if set, prompt the user */
-pub static mut needprompt: c_int = 0; /* true if interactive and at start of line */
-pub static mut lasttoken: c_int = 0; /* last token read */
-pub static mut tokpushback: c_int = 0; /* last token pushed back */
-/// text of last word, with the terminating NUL `readtoken1` writes
-pub static mut wordtext: BString = BString::new(Vec::new());
 pub static mut checkkwd: c_int = 0;
-pub static mut backquotelist: Vec<Option<Node>> = Vec::new();
-pub static mut redirnode: Option<Node> = None;
-pub static mut heredoc: Option<heredoc> = None;
 pub static mut quoteflag: c_int = 0; /* set if (part of) last token was quoted */
 
 /// Move one of the parser's globals out and leave it empty.
@@ -393,13 +383,13 @@ pub unsafe fn issimplecmd(n: Option<&Node>, name: *const c_char) -> c_int {
 }
 
 /// The last word read, as the `char *` the C-shaped readers still expect.
-unsafe fn wordtext_ptr() -> *mut c_char {
-    (*ptr::addr_of!(wordtext)).as_ptr() as *mut c_char
+unsafe fn wordtext_ptr(sh: &mut Shell) -> *mut c_char {
+    (*ptr::addr_of!(sh.input.wordtext)).as_ptr() as *mut c_char
 }
 
 /// The last word read, as a node's owned text.
-unsafe fn wordtext_node() -> NodeText {
-    NodeText::new((*ptr::addr_of!(wordtext)).clone())
+unsafe fn wordtext_node(sh: &mut Shell) -> NodeText {
+    NodeText::new((*ptr::addr_of!(sh.input.wordtext)).clone())
 }
 
 /*
@@ -410,14 +400,14 @@ unsafe fn wordtext_node() -> NodeText {
 // [spec:dash:def:parser.parsecmd-fn]
 // [spec:dash:sem:parser.parsecmd-fn]
 pub unsafe fn parsecmd(sh: &mut Shell, interact: c_int) -> Result<ParseResult, Error> {
-    tokpushback = 0;
+    sh.input.tokpushback = 0;
     checkkwd = 0;
-    heredoclist = Vec::new();
-    doprompt = interact;
-    if doprompt != 0 {
-        setprompt(sh, doprompt);
+    sh.input.heredoclist = Vec::new();
+    sh.input.doprompt = interact;
+    if sh.input.doprompt != 0 {
+        setprompt(sh, sh.input.doprompt);
     }
-    needprompt = 0;
+    sh.input.needprompt = 0;
     list(sh, 1)
 }
 
@@ -444,8 +434,8 @@ unsafe fn list(sh: &mut Shell, nlflag: c_int) -> Result<ParseResult, Error> {
                 let eof = n1.is_none() && chknl == 0;
                 /* out_eof: */
                 parseheredoc(sh)?;
-                tokpushback += 1;
-                lasttoken = TEOF;
+                sh.input.tokpushback += 1;
+                sh.input.lasttoken = TEOF;
                 return if eof {
                     Ok(ParseResult::Eof)
                 } else {
@@ -455,7 +445,7 @@ unsafe fn list(sh: &mut Shell, nlflag: c_int) -> Result<ParseResult, Error> {
             _ => {}
         }
 
-        tokpushback += 1;
+        sh.input.tokpushback += 1;
         if nlflag == 2 && tokendlist[tok as usize] != 0 {
             return Ok(ParseResult::Tree(n1));
         }
@@ -511,12 +501,12 @@ unsafe fn list(sh: &mut Shell, nlflag: c_int) -> Result<ParseResult, Error> {
             TEOF => {
                 /* goto out_eof */
                 parseheredoc(sh)?;
-                tokpushback += 1;
-                lasttoken = TEOF;
+                sh.input.tokpushback += 1;
+                sh.input.lasttoken = TEOF;
                 return Ok(ParseResult::Tree(n1));
             }
             TNL => {
-                tokpushback += 1;
+                sh.input.tokpushback += 1;
                 /* fall through */
             }
             TBACKGND | TSEMI => {}
@@ -524,7 +514,7 @@ unsafe fn list(sh: &mut Shell, nlflag: c_int) -> Result<ParseResult, Error> {
                 if chknl == 0 {
                     return Err(synexpect(sh, -1));
                 }
-                tokpushback += 1;
+                sh.input.tokpushback += 1;
                 return Ok(ParseResult::Tree(n1));
             }
         }
@@ -545,7 +535,7 @@ unsafe fn andor(sh: &mut Shell) -> Result<Option<Node>, Error> {
         } else if t == TOR {
             t = NOR;
         } else {
-            tokpushback += 1;
+            sh.input.tokpushback += 1;
             return Ok(n1);
         }
         checkkwd = CHKNL | CHKKWD | CHKALIAS;
@@ -570,7 +560,7 @@ unsafe fn pipeline(sh: &mut Shell) -> Result<Option<Node>, Error> {
         negate = (negate == 0) as c_int;
         checkkwd = CHKKWD | CHKALIAS;
     } else {
-        tokpushback += 1;
+        sh.input.tokpushback += 1;
     }
     n1 = command(sh)?;
     if readtoken(sh)? == TPIPE {
@@ -590,7 +580,7 @@ unsafe fn pipeline(sh: &mut Shell) -> Result<Option<Node>, Error> {
             cmdlist,
         }));
     }
-    tokpushback += 1;
+    sh.input.tokpushback += 1;
     if negate != 0 {
         Ok(Some(Node::Not(nnot {
             com: n1.map(Box::new),
@@ -633,10 +623,10 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
             let ifpart = list(sh, 0)?.into_node();
             clauses.push((test, ifpart));
         }
-        let mut elsepart: Option<Node> = if lasttoken == TELSE {
+        let mut elsepart: Option<Node> = if sh.input.lasttoken == TELSE {
             list(sh, 0)?.into_node()
         } else {
-            tokpushback += 1;
+            sh.input.tokpushback += 1;
             None
         };
         for (test, ifpart) in clauses.into_iter().rev() {
@@ -650,7 +640,7 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
         t = TFI;
     } else if tok == TWHILE || tok == TUNTIL {
         let got: c_int;
-        let ty = if lasttoken == TWHILE { NWHILE } else { NUNTIL };
+        let ty = if sh.input.lasttoken == TWHILE { NWHILE } else { NUNTIL };
         let ch1 = list(sh, 0)?.into_node();
         got = readtoken(sh)?;
         if got != TDO {
@@ -664,22 +654,22 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
         }));
         t = TDONE;
     } else if tok == TFOR {
-        if readtoken(sh)? != TWORD || quoteflag != 0 || goodname(wordtext_ptr()) == 0 {
+        if readtoken(sh)? != TWORD || quoteflag != 0 || goodname(wordtext_ptr(sh)) == 0 {
             return Err(synerror(sh, c"Bad for loop variable".as_ptr()));
         }
         /* the C stores `wordtext` into the node here, before any further
          * token read can overwrite it */
-        let var = wordtext_node();
+        let var = wordtext_node(sh);
         let mut args: Vec<Node> = Vec::new();
         checkkwd = CHKNL | CHKKWD | CHKALIAS;
         if readtoken(sh)? == TIN {
             while readtoken(sh)? == TWORD {
                 args.push(Node::Arg(narg {
-                    text: wordtext_node(),
-                    backquote: takeglobal(addr_of_mut!(backquotelist)),
+                    text: wordtext_node(sh),
+                    backquote: core::mem::take(&mut sh.input.backquotelist),
                 }));
             }
-            if lasttoken != TNL && lasttoken != TSEMI {
+            if sh.input.lasttoken != TNL && sh.input.lasttoken != TSEMI {
                 return Err(synexpect(sh, -1));
             }
         } else {
@@ -696,8 +686,8 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
              * Newline or semicolon here is optional (but note
              * that the original Bourne shell only allowed NL).
              */
-            if lasttoken != TSEMI {
-                tokpushback += 1;
+            if sh.input.lasttoken != TSEMI {
+                sh.input.tokpushback += 1;
             }
         }
         checkkwd = CHKNL | CHKKWD | CHKALIAS;
@@ -717,8 +707,8 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
             return Err(synexpect(sh, TWORD));
         }
         let expr = Node::Arg(narg {
-            text: wordtext_node(),
-            backquote: takeglobal(addr_of_mut!(backquotelist)),
+            text: wordtext_node(sh),
+            backquote: core::mem::take(&mut sh.input.backquotelist),
         });
         checkkwd = CHKNL | CHKKWD | CHKALIAS;
         if readtoken(sh)? != TIN {
@@ -729,24 +719,24 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
             checkkwd = CHKNL | CHKKWD;
             t = readtoken(sh)?;
             while t != TESAC {
-                if lasttoken == TLP {
+                if sh.input.lasttoken == TLP {
                     readtoken(sh)?;
                 }
                 let mut pattern: Vec<Node> = Vec::new();
                 loop {
-                    if lasttoken < TWORD {
+                    if sh.input.lasttoken < TWORD {
                         return Err(synexpect(sh, TWORD));
                     }
                     pattern.push(Node::Arg(narg {
-                        text: wordtext_node(),
-                        backquote: takeglobal(addr_of_mut!(backquotelist)),
+                        text: wordtext_node(sh),
+                        backquote: core::mem::take(&mut sh.input.backquotelist),
                     }));
                     if readtoken(sh)? != TPIPE {
                         break;
                     }
                     readtoken(sh)?;
                 }
-                if lasttoken != TRP {
+                if sh.input.lasttoken != TRP {
                     return Err(synexpect(sh, TRP));
                 }
                 let body = list(sh, 2)?.into_node();
@@ -786,7 +776,7 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
         n1 = list(sh, 0)?.into_node();
         t = TEND;
     } else if tok == TWORD || tok == TREDIR {
-        tokpushback += 1;
+        sh.input.tokpushback += 1;
         return simplecmd(sh);
     } else {
         return Err(synexpect(sh, -1));
@@ -807,11 +797,11 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
         /* The C copies `redirnode` into a local *before* `parsefname`,
          * because the token read inside it can set the global again.
          * Taking ownership of it here is the same guarantee. */
-        let mut n2 = takeglobal(addr_of_mut!(redirnode)).unwrap();
+        let mut n2 = core::mem::take(&mut sh.input.redirnode).unwrap();
         parsefname(sh, &mut n2)?;
         redir.push(n2);
     }
-    tokpushback += 1;
+    sh.input.tokpushback += 1;
     if !redir.is_empty() {
         if n1.as_ref().map_or(true, |n| n.node_type() != NSUBSHELL) {
             n1 = Some(Node::Redir(nredir {
@@ -843,17 +833,17 @@ unsafe fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
         let tok = readtoken(sh)?;
         if tok == TWORD {
             let n = Node::Arg(narg {
-                text: wordtext_node(),
-                backquote: takeglobal(addr_of_mut!(backquotelist)),
+                text: wordtext_node(sh),
+                backquote: core::mem::take(&mut sh.input.backquotelist),
             });
-            if savecheckkwd != 0 && isassignment(wordtext_ptr()) != 0 {
+            if savecheckkwd != 0 && isassignment(wordtext_ptr(sh)) != 0 {
                 vars.push(n);
             } else {
                 args.push(n);
                 savecheckkwd = 0;
             }
         } else if tok == TREDIR {
-            let mut n = takeglobal(addr_of_mut!(redirnode)).unwrap();
+            let mut n = core::mem::take(&mut sh.input.redirnode).unwrap();
             parsefname(sh, &mut n)?; /* read name of redirection file */
             redir.push(n);
         } else {
@@ -892,7 +882,7 @@ unsafe fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
             }
             /* fall through */
             /* default: */
-            tokpushback += 1;
+            sh.input.tokpushback += 1;
             break;
         }
     }
@@ -907,10 +897,10 @@ unsafe fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
 
 // [spec:dash:def:parser.makename-fn]
 // [spec:dash:sem:parser.makename-fn]
-unsafe fn makename() -> Node {
+unsafe fn makename(sh: &mut Shell) -> Node {
     Node::Arg(narg {
-        text: wordtext_node(),
-        backquote: takeglobal(addr_of_mut!(backquotelist)),
+        text: wordtext_node(sh),
+        backquote: core::mem::take(&mut sh.input.backquotelist),
     })
 }
 
@@ -921,7 +911,12 @@ unsafe fn makename() -> Node {
 // still being built (`err == 0`), and from `expredir` on a tree that may be a
 // shared function definition (`err != 0`).  Only the second writes at run
 // time, and it only writes `dupfd`, which is why that field is the `Cell`.
-pub unsafe fn fixredir(n: &Node, text: *const c_char, err: c_int) -> Result<(), Error> {
+pub unsafe fn fixredir(
+    sh: &mut Shell,
+    n: &Node,
+    text: *const c_char,
+    err: c_int,
+) -> Result<(), Error> {
     /* TRACE(("Fix redir %s %d\n", text, err)); */
     let d = n.ndup();
     if err == 0 {
@@ -939,7 +934,7 @@ pub unsafe fn fixredir(n: &Node, text: *const c_char, err: c_int) -> Result<(), 
             /* A stop before `sh_error` became a value, and still one. */
             return Err(crate::error::sh_error_value(&message));
         } else {
-            *d.vname.borrow_mut() = Some(Box::new(makename()));
+            *d.vname.borrow_mut() = Some(Box::new(makename(sh)));
         }
     }
     Ok(())
@@ -961,7 +956,7 @@ unsafe fn parsefname(sh: &mut Shell, n: &mut Node) -> Result<(), Error> {
     checkkwd &= !CHKEOFMARK;
     if n.node_type() == NHERE {
         /* the C reads the `heredoc` global here, after the token read */
-        let mut here: heredoc = takeglobal(addr_of_mut!(heredoc)).unwrap();
+        let mut here: heredoc = core::mem::take(&mut sh.input.heredoc).unwrap();
 
         if quoteflag == 0 {
             n.nhere_mut().r#type = NXHERE;
@@ -969,7 +964,7 @@ unsafe fn parsefname(sh: &mut Shell, n: &mut Node) -> Result<(), Error> {
         /* TRACE(("Here document %d\n", n->type)); */
         /* `rmescapes` rewrites the word in place and can only shorten it, so
          * the new terminator is where the delimiter now ends. */
-        let mut mark = takeglobal(addr_of_mut!(wordtext));
+        let mut mark = core::mem::take(&mut sh.input.wordtext);
         rmescapes(mark.as_mut_ptr() as *mut c_char);
         let n_mark = CStr::from_ptr(mark.as_ptr() as *const c_char).count_bytes();
         mark.truncate(n_mark);
@@ -977,11 +972,12 @@ unsafe fn parsefname(sh: &mut Shell, n: &mut Node) -> Result<(), Error> {
         /* `parseheredoc` asked the node whether it was NXHERE; the type is
          * settled above, so the answer travels with the here-document. */
         here.expand = n.nhere().r#type == NXHERE;
-        (&mut *addr_of_mut!(heredoclist)).push(here);
+        (&mut *addr_of_mut!(sh.input.heredoclist)).push(here);
     } else if n.node_type() == NTOFD || n.node_type() == NFROMFD {
-        fixredir(n, wordtext_ptr(), 0)?;
+        let word = wordtext_ptr(sh);
+        fixredir(sh, n, word, 0)?;
     } else {
-        n.nfile_mut().fname = Some(Box::new(makename()));
+        n.nfile_mut().fname = Some(Box::new(makename(sh)));
     }
     Ok(())
 }
@@ -993,10 +989,10 @@ unsafe fn parsefname(sh: &mut Shell, n: &mut Node) -> Result<(), Error> {
 // [spec:dash:def:parser.parseheredoc-fn]
 // [spec:dash:sem:parser.parseheredoc-fn]
 unsafe fn parseheredoc(sh: &mut Shell) -> Result<(), Error> {
-    let list: Vec<heredoc> = takeglobal(addr_of_mut!(heredoclist));
+    let list: Vec<heredoc> = core::mem::take(&mut sh.input.heredoclist);
 
     for here in list {
-        if needprompt != 0 {
+        if sh.input.needprompt != 0 {
             setprompt(sh, 2);
         }
         let mark = EofMark::Word(BStr::new(&here.eofmark));
@@ -1012,8 +1008,8 @@ unsafe fn parseheredoc(sh: &mut Shell) -> Result<(), Error> {
             readtoken1(sh, firstc, DQSYNTAX(), mark, here.striptabs)?;
         }
         let n = Node::Arg(narg {
-            text: wordtext_node(),
-            backquote: takeglobal(addr_of_mut!(backquotelist)),
+            text: wordtext_node(sh),
+            backquote: core::mem::take(&mut sh.input.backquotelist),
         });
         /* `here->here->nhere.doc = n` in the C — the same slot, reached
          * through a shared handle instead of a back pointer.  It is written
@@ -1063,17 +1059,21 @@ unsafe fn readtoken(sh: &mut Shell) -> Result<c_int, Error> {
          * check for keywords
          */
         if kwd & CHKKWD != 0 {
-            let pp: *const *const c_char = findkwd(wordtext_ptr());
+            let pp: *const *const c_char = findkwd(wordtext_ptr(sh));
 
             if !pp.is_null() {
                 t = pp.offset_from(parsekwd.0.as_ptr()) as c_int + KWDOFFSET;
-                lasttoken = t;
+                sh.input.lasttoken = t;
                 break 'top;
             }
         }
 
         if kwd & CHKALIAS != 0 {
-            let ap = crate::alias::lookupalias(sh, wordtext_ptr(), 1);
+            /* Hoisted: the receiver cannot appear twice in one argument
+             * list. A raw pointer ends its borrow at the `let`, and the
+             * word it points at is the parser's own, not the alias's. */
+            let word = wordtext_ptr(sh);
+            let ap = crate::alias::lookupalias(sh, word, 1);
             if !ap.is_null() {
                 if *(*ap).val != 0 {
                     pushstring(sh, (*ap).val, ap as *mut c_void);
@@ -1091,7 +1091,7 @@ unsafe fn readtoken(sh: &mut Shell) -> Result<c_int, Error> {
 // [spec:dash:sem:parser.nlprompt-fn]
 unsafe fn nlprompt(sh: &mut Shell) {
     crate::plinno!(sh) += 1;
-    if doprompt != 0 {
+    if sh.input.doprompt != 0 {
         setprompt(sh, 2);
     }
 }
@@ -1100,7 +1100,7 @@ unsafe fn nlprompt(sh: &mut Shell) {
 // [spec:dash:sem:parser.nlnoprompt-fn]
 unsafe fn nlnoprompt(sh: &mut Shell) {
     crate::plinno!(sh) += 1;
-    needprompt = doprompt;
+    sh.input.needprompt = sh.input.doprompt;
 }
 
 /*
@@ -1117,11 +1117,11 @@ unsafe fn nlnoprompt(sh: &mut Shell) {
 unsafe fn xxreadtoken(sh: &mut Shell) -> Result<c_int, Error> {
     let mut c: c_int;
 
-    if tokpushback != 0 {
-        tokpushback = 0;
-        return Ok(lasttoken);
+    if sh.input.tokpushback != 0 {
+        sh.input.tokpushback = 0;
+        return Ok(sh.input.lasttoken);
     }
-    if needprompt != 0 {
+    if sh.input.needprompt != 0 {
         setprompt(sh, 2);
     }
     loop {
@@ -1142,40 +1142,40 @@ unsafe fn xxreadtoken(sh: &mut Shell) -> Result<c_int, Error> {
             continue;
         } else if c == '\n' as c_int {
             nlnoprompt(sh);
-            lasttoken = TNL;
+            sh.input.lasttoken = TNL;
             return Ok(TNL);
         } else if c == PEOF {
-            lasttoken = TEOF;
+            sh.input.lasttoken = TEOF;
             return Ok(TEOF);
         } else if c == '&' as c_int {
             if pgetc_eatbnl(sh)? == '&' as c_int {
-                lasttoken = TAND;
+                sh.input.lasttoken = TAND;
                 return Ok(TAND);
             }
             pungetc(sh);
-            lasttoken = TBACKGND;
+            sh.input.lasttoken = TBACKGND;
             return Ok(TBACKGND);
         } else if c == '|' as c_int {
             if pgetc_eatbnl(sh)? == '|' as c_int {
-                lasttoken = TOR;
+                sh.input.lasttoken = TOR;
                 return Ok(TOR);
             }
             pungetc(sh);
-            lasttoken = TPIPE;
+            sh.input.lasttoken = TPIPE;
             return Ok(TPIPE);
         } else if c == ';' as c_int {
             if pgetc_eatbnl(sh)? == ';' as c_int {
-                lasttoken = TENDCASE;
+                sh.input.lasttoken = TENDCASE;
                 return Ok(TENDCASE);
             }
             pungetc(sh);
-            lasttoken = TSEMI;
+            sh.input.lasttoken = TSEMI;
             return Ok(TSEMI);
         } else if c == '(' as c_int {
-            lasttoken = TLP;
+            sh.input.lasttoken = TLP;
             return Ok(TLP);
         } else if c == ')' as c_int {
-            lasttoken = TRP;
+            sh.input.lasttoken = TRP;
             return Ok(TRP);
         }
         tok = readtoken1(sh, c, BASESYNTAX(), EofMark::None, 0)?;
@@ -1698,19 +1698,19 @@ unsafe fn readtoken1(
             && (st.out[0] == 0 || is_digit(st.out[0] as i8 as c_int))
         {
             parseredir(sh, &mut st)?;
-            lasttoken = TREDIR;
+            sh.input.lasttoken = TREDIR;
             return Ok(TREDIR);
         } else {
             pungetc(sh);
         }
     }
     quoteflag = st.quotef;
-    backquotelist = mem::take(&mut st.bqlist);
+    sh.input.backquotelist = mem::take(&mut st.bqlist);
     /* `grabstackblock(len)` reserved the bytes the C had been writing into
      * scratch space, which is what made `wordtext` outlive the next token.
      * Moving the buffer out is the same guarantee. */
-    wordtext = mem::take(&mut st.out);
-    lasttoken = TWORD;
+    sh.input.wordtext = mem::take(&mut st.out);
+    sh.input.lasttoken = TWORD;
     Ok(TWORD)
 }
 /* end of readtoken routine */
@@ -1847,7 +1847,7 @@ unsafe fn parseredir(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
                 here.striptabs = 0;
                 pungetc(sh);
             }
-            heredoc = Some(here);
+            sh.input.heredoc = Some(here);
         } else if st.c == '&' as c_int {
             ty = NFROMFD;
         } else if st.c == '>' as c_int {
@@ -1860,7 +1860,7 @@ unsafe fn parseredir(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
     if fdc != '\0' as c_char {
         fd = digit_val(fdc as c_int);
     }
-    redirnode = Some(match ty {
+    sh.input.redirnode = Some(match ty {
         NTOFD | NFROMFD => Node::Dup(ndup {
             r#type: ty,
             fd,
@@ -2096,7 +2096,7 @@ unsafe fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Resul
         st.printesc = true;
         /* goto parsebackq_out; */
         if oldstyle != 0 {
-            tokpushback = 0;
+            sh.input.tokpushback = 0;
         }
         return Ok(());
     }
@@ -2119,7 +2119,7 @@ unsafe fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Resul
 
         while !done {
             'bqbody: {
-                if needprompt != 0 {
+                if sh.input.needprompt != 0 {
                     setprompt(sh, 2);
                 }
                 pc = pgetc_eatbnl(sh)?;
@@ -2161,17 +2161,17 @@ unsafe fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Resul
     nlpp = st.bqlist.len();
     st.bqlist.push(None);
 
-    saveheredoclist = takeglobal(addr_of_mut!(heredoclist));
+    saveheredoclist = core::mem::take(&mut sh.input.heredoclist);
 
     if oldstyle != 0 {
-        saveprompt = doprompt;
-        doprompt = 0;
+        saveprompt = sh.input.doprompt;
+        sh.input.doprompt = 0;
     }
 
     n = list(sh, 2)?.into_node();
 
     if oldstyle != 0 {
-        doprompt = saveprompt;
+        sh.input.doprompt = saveprompt;
     } else {
         if readtoken(sh)? != TRP {
             return Err(synexpect(sh, TRP));
@@ -2180,7 +2180,7 @@ unsafe fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Resul
     }
 
     parseheredoc(sh)?;
-    heredoclist = saveheredoclist;
+    sh.input.heredoclist = saveheredoclist;
 
     st.bqlist[nlpp] = n;
     /* Start reading from old file again. */
@@ -2193,7 +2193,7 @@ unsafe fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Resul
         /* Ignore any pushed back tokens left from the backquote
          * parsing.
          */
-        tokpushback = 0;
+        sh.input.tokpushback = 0;
     }
     Ok(())
 }
@@ -2256,7 +2256,7 @@ unsafe fn synexpect(sh: &mut Shell, token: c_int) -> Error {
     let mut msg: [c_char; 64] = [0; 64];
     let mut message = Vec::new();
 
-    message.extend_from_slice(CStr::from_ptr(tokname.0[lasttoken as usize]).to_bytes());
+    message.extend_from_slice(CStr::from_ptr(tokname.0[sh.input.lasttoken as usize]).to_bytes());
     message.extend_from_slice(b" unexpected");
     if token >= 0 {
         message.extend_from_slice(b" (expecting ");
@@ -2283,7 +2283,7 @@ unsafe fn synerror(sh: &mut Shell, msg: *const c_char) -> Error {
 unsafe fn setprompt(sh: &mut Shell, which: c_int) {
     let show: c_int;
 
-    needprompt = 0;
+    sh.input.needprompt = 0;
     sh.input.whichprompt = which;
 
     /* #ifdef SMALL: show = 1 */
@@ -2310,10 +2310,10 @@ pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<*const c_ch
     /* XXX Fix (char *) cast. */
     setinputstring(sh, ps as *mut c_char);
 
-    saveheredoclist = takeglobal(addr_of_mut!(heredoclist));
-    saveprompt = doprompt;
-    doprompt = 0;
-    needprompt = 0;
+    saveheredoclist = core::mem::take(&mut sh.input.heredoclist);
+    saveprompt = sh.input.doprompt;
+    sh.input.doprompt = 0;
+    sh.input.needprompt = 0;
     result = ps;
     /* `if (unlikely(err = setjmp(jmploc.loc))) goto out;` — handlers in
      * this port are established by `eval::setjmp_catch`, not a real
@@ -2331,8 +2331,8 @@ pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<*const c_ch
         readtoken1(sh, firstc, DQSYNTAX(), EofMark::Fake, 0)?;
 
         let n = Node::Arg(narg {
-            text: wordtext_node(),
-            backquote: takeglobal(addr_of_mut!(backquotelist)),
+            text: wordtext_node(sh),
+            backquote: core::mem::take(&mut sh.input.backquotelist),
         });
 
         expandarg(sh, &n, None, EXP_QUOTED)?;
@@ -2361,9 +2361,9 @@ pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<*const c_ch
      * both callers are fallible and neither wanted one otherwise. */
     let caught = restore_handler_expandarg(caught);
 
-    doprompt = saveprompt;
+    sh.input.doprompt = saveprompt;
     unwindfiles(sh, file_stop);
-    heredoclist = saveheredoclist;
+    sh.input.heredoclist = saveheredoclist;
 
     match caught {
         Some(e) if e.is_interrupt() => Err(e),
@@ -2462,8 +2462,8 @@ pub unsafe fn goodname(p: *const c_char) -> c_int {
 
 // [spec:dash:def:parser.parser-eof-fn]
 // [spec:dash:sem:parser.parser-eof-fn]
-pub unsafe fn parser_eof() -> c_int {
-    (tokpushback != 0 && lasttoken == TEOF) as c_int
+pub unsafe fn parser_eof(sh: &Shell) -> c_int {
+    (sh.input.tokpushback != 0 && sh.input.lasttoken == TEOF) as c_int
 }
 
 // ---------------------------------------------------------------------

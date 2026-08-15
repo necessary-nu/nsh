@@ -290,7 +290,7 @@ pub unsafe fn evalstring(sh: &mut Shell, s: *mut c_char, flags: c_int) -> Result
             i = flow!(evaltree(sh, 
                 n.as_ref(),
                 flags
-                    & !(if crate::parser::parser_eof() != 0 {
+                    & !(if crate::parser::parser_eof(sh) != 0 {
                         0
                     } else {
                         EV_EXIT
@@ -814,7 +814,8 @@ unsafe fn expredir(sh: &mut Shell, n: &[Node]) -> Result<(), Error> {
                 };
                 if expand {
                     debug_assert_eq!(fnl.list.len(), 1, "an unsplit expansion is one field");
-                    crate::parser::fixredir(redir, fnl.list[0].textp(), 1)?;
+                    let word = fnl.list[0].textp();
+                    crate::parser::fixredir(sh, redir, word, 1)?;
                 }
             }
             _ => {}

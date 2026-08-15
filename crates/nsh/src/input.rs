@@ -157,6 +157,27 @@ pub struct InputStack {
     top: usize,
     /// `parsefile` — the current frame, by index. See `cur_pf`.
     cur: usize,
+    /// `heredoclist` — here-documents read but not yet attached. Filled
+    /// by `parseheredoc` and drained by the node builders, across input
+    /// positions, which is why it is state and not a local.
+    pub(crate) heredoclist: Vec<crate::parser::heredoc>,
+    /// `doprompt` — whether to prompt before the next read.
+    pub(crate) doprompt: c_int,
+    /// `needprompt` — interactive and at the start of a line.
+    pub(crate) needprompt: c_int,
+    /// `lasttoken` — the last token read.
+    pub(crate) lasttoken: c_int,
+    /// `tokpushback` — one token of lookahead, pushed back.
+    pub(crate) tokpushback: c_int,
+    /// `wordtext` — text of the last word, with the terminating NUL
+    /// `readtoken1` writes.
+    pub(crate) wordtext: bstr::BString,
+    /// `backquotelist` — the command substitutions found in the last word.
+    pub(crate) backquotelist: Vec<Option<crate::nodes::Node>>,
+    /// `redirnode` — the redirection the last token opened.
+    pub(crate) redirnode: Option<crate::nodes::Node>,
+    /// `heredoc` — the here-document the last token opened.
+    pub(crate) heredoc: Option<crate::parser::heredoc>,
     /// `stdin_state` — how the shell's standard input behaves.
     pub(crate) stdin_state: stdin_state_t,
     /// `whichprompt` — 1 == PS1, 2 == PS2.
@@ -175,6 +196,15 @@ impl InputStack {
             frames: Vec::new(),
             top: 0,
             cur: 0,
+            heredoclist: Vec::new(),
+            doprompt: 0,
+            needprompt: 0,
+            lasttoken: 0,
+            tokpushback: 0,
+            wordtext: bstr::BString::new(Vec::new()),
+            backquotelist: Vec::new(),
+            redirnode: None,
+            heredoc: None,
             stdin_state: stdin_state_t {
                 seekable: 0,
                 pip: [0, 0],
