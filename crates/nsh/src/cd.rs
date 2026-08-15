@@ -19,8 +19,27 @@ use crate::var::{VEXPORT, setvar};
 /* The C's `nullstr` sentinel is `None`.  It is a sentinel, not an empty
  * path: `getpwd` never returns an empty string on success and `updatepwd`
  * never produces one, so no reachable value collides with it. */
-pub(crate) static mut curdir: Option<BString> = None; /* current working directory */
-pub(crate) static mut physdir: Option<BString> = None; /* physical working directory */
+/// Where the shell thinks it is.
+///
+/// `docs/api-design.md` §5 does not list these, and it should: they are
+/// the C's own `curdir`/`physdir`, the logical-versus-physical `$PWD`
+/// pair, and two shells in different directories cannot share them.
+/// Recorded as a correction to §5 on this node's log.
+pub struct Cwd {
+    /// `curdir` — the logical working directory, as `cd` computed it.
+    pub(crate) curdir: Option<BString>,
+    /// `physdir` — the physical one, after symlinks.
+    pub(crate) physdir: Option<BString>,
+}
+
+impl Cwd {
+    pub(crate) const fn new() -> Self {
+        Cwd {
+            curdir: None,
+            physdir: None,
+        }
+    }
+}
 
 /// The bytes `setvar` and shell output want: a path with the terminator the C's
 /// readers read up to, `nullstr`'s empty string when the sentinel is set.
@@ -91,7 +110,7 @@ pub unsafe fn setpwd(sh: &mut crate::context::Shell, val: *const c_char, setold:
 
 pub(crate) unsafe fn setpwd_inner(sh: &mut crate::context::Shell, val: Pwd, setold: c_int) -> Result<(), Error> {
     if setold != 0 {
-        let old = cbytes(&*addr_of!(curdir));
+        let old = cbytes(&*addr_of!(sh.cwd.curdir));
         setvar(sh, 
             b"OLDPWD\0".as_ptr() as *const c_char,
             old.as_ptr() as *const c_char,
@@ -103,20 +122,20 @@ pub(crate) unsafe fn setpwd_inner(sh: &mut crate::context::Shell, val: Pwd, seto
      * `physdir` are one allocation after a `setpwd(NULL, …)`, and the guard
      * exists only to stop the double free.  Two owned copies say the same
      * thing without the alias. */
-    physdir = None;
+    sh.cwd.physdir = None;
     match val {
         Pwd::Unknown | Pwd::Current => {
             let s = getpwd();
             if matches!(val, Pwd::Unknown) {
-                curdir = s.clone();
+                sh.cwd.curdir = s.clone();
             }
-            physdir = s;
+            sh.cwd.physdir = s;
         }
         Pwd::New(v) => {
-            curdir = Some(v.to_owned());
+            sh.cwd.curdir = Some(v.to_owned());
         }
     }
-    let dir = cbytes(&*addr_of!(curdir));
+    let dir = cbytes(&*addr_of!(sh.cwd.curdir));
     INTON();
     setvar(sh, 
         b"PWD\0".as_ptr() as *const c_char,

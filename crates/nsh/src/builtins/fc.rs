@@ -24,7 +24,7 @@ use std::io::Write;
 use std::os::fd::FromRawFd;
 
 use crate::error::{INTOFF, INTON};
-use crate::histedit::{displayhist, history_active, history_mut, record_history_line};
+use crate::histedit::{history_active, history_mut, record_history_line};
 
 unsafe extern "C" {
     // `<getopt.h>` state. `libc` 0.2 exposes `getopt` but not these.
@@ -208,7 +208,7 @@ pub unsafe fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             active += 1;
             if active > MAXHISTLOOPS {
                 active = 0;
-                displayhist = 0;
+                sh.displayhist = 0;
                 return Err(crate::error::sh_error_value(
                     b"called recursively too many times",
                 ));
@@ -348,7 +348,7 @@ pub unsafe fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 };
 
                 if sflg != 0 {
-                    if displayhist != 0 {
+                    if sh.displayhist != 0 {
                         let _ = (&mut *crate::output::stderr())
                             .write_all(core::ffi::CStr::from_ptr(s).to_bytes());
                     }
@@ -357,7 +357,7 @@ pub unsafe fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                       * `exit`. It leaves through the cleanup below like
                       * everything else this frame catches. */
                     crate::eval::flow!(crate::eval::evalstring(sh, s, 0));
-                    if displayhist != 0 && history_active() {
+                    if sh.displayhist != 0 && history_active() {
                         record_history_line(core::ffi::CStr::from_ptr(s).to_bytes(), true);
                     }
 
@@ -398,8 +398,8 @@ pub unsafe fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         if lflg == 0 && active > 0 {
             active -= 1;
         }
-        if displayhist != 0 {
-            displayhist = 0;
+        if sh.displayhist != 0 {
+            sh.displayhist = 0;
         }
         Ok(Flow::Done(0))
     };

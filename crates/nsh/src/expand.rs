@@ -21,6 +21,7 @@
 #![allow(unknown_lints)]
 #![allow(static_mut_refs)]
 
+use crate::context::Shell;
 use core::mem;
 use core::ptr;
 use std::ffi::CStr;
@@ -315,16 +316,41 @@ static mut ifsregions: Vec<ifsregion> = Vec::new();
 /* holds expanded arg list */
 static mut exparg: arglist = arglist::new();
 
-static mut ifsmap: [c_char; 128] = [0; 128];
-static mut ncifs: *const c_char = ptr::null();
-static mut ifsmb0len: size_t = 0;
-/// The wide-character form of `IFS`, built by `changeifs`.
+/// `IFS`, in the three forms field splitting wants it.
 ///
-/// The C is a `ckmalloc`'d, zero-filled, NUL-terminated `wchar_t *` that
-/// is NULL whenever `IFS` holds no byte with the high bit set.  Empty
-/// **is** NULL here: the C only allocates under `mb != 0`, which needs a
-/// high-bit byte, so the buffer is never zero-length when it exists.
-static mut wcifs: Vec<wchar_t> = Vec::new();
+/// Rebuilt by [`changeifs`], which is the `varfunc_t` hook hanging off
+/// the `IFS` *variable* -- so this is state derived from a shell
+/// variable, and two shells with different `IFS` cannot share it. §5 does
+/// not list it; that it moves cleanly is owed to `f8267bd`, which gave
+/// every variable hook a `&mut Shell` and therefore gave this one
+/// somewhere to write.
+pub struct IfsCache {
+    /// The single-byte members, as a lookup table.
+    ifsmap: [c_char; 128],
+    /// `IFS` itself, borrowed from the variable's text.
+    ncifs: *const c_char,
+    /// Length of the first multibyte character, or 0.
+    ifsmb0len: size_t,
+    /// The wide-character form of `IFS`, built by `changeifs`.
+    ///
+    /// The C is a `ckmalloc`'d, zero-filled, NUL-terminated `wchar_t *`
+    /// that is NULL whenever `IFS` holds no byte with the high bit set.
+    /// Empty **is** NULL here: the C only allocates under `mb != 0`,
+    /// which needs a high-bit byte, so the buffer is never zero-length
+    /// when it exists.
+    wcifs: Vec<wchar_t>,
+}
+
+impl IfsCache {
+    pub(crate) const fn new() -> Self {
+        IfsCache {
+            ifsmap: [0; 128],
+            ncifs: ptr::null(),
+            ifsmb0len: 0,
+            wcifs: Vec::new(),
+        }
+    }
+}
 
 /// `&mut ifsregions`, without ever naming a reference to the `static mut`
 /// twice at once.
@@ -333,11 +359,6 @@ unsafe fn ifsr() -> &'static mut Vec<ifsregion> {
     &mut *ptr::addr_of_mut!(ifsregions)
 }
 
-/// `&mut wcifs`, same.
-#[inline]
-unsafe fn wcifsv() -> &'static mut Vec<wchar_t> {
-    &mut *ptr::addr_of_mut!(wcifs)
-}
 
 /// `&mut exparg.list`, same.  Every `*exparg.lastp = sp` in the C is a
 /// `push` on this, and `exparg.lastp = &exparg.list` — the C's way of
@@ -800,6 +821,7 @@ pub unsafe fn expandarg(
              * outlive them and why the enclosing mark had to be the thing
              * that freed it. */
             ifsbreakup(
+                sh,
                 p.as_mut_ptr() as *mut c_char,
                 -1,
                 &mut *ptr::addr_of_mut!(exparg),
@@ -2023,9 +2045,9 @@ unsafe fn varvalue(
                              */
                             seplen &= (!(flags >> CHAR_BIT)) as size_t;
                             if seplen == 0 {
-                                seps = ncifs;
+                                seps = sh.ifs.ncifs;
                             }
-                            seplen = (seplen.wrapping_sub(1) & ifsmb0len.wrapping_sub(1))
+                            seplen = (seplen.wrapping_sub(1) & sh.ifs.ifsmb0len.wrapping_sub(1))
                                 .wrapping_add(1);
                             break 'param;
                         }
@@ -2118,7 +2140,7 @@ pub unsafe fn recordregion(start: c_int, end: c_int, nulonly: c_int) {
 
 // [spec:dash:def:expand.ifsisifs-fn]
 // [spec:dash:sem:expand.ifsisifs-fn]
-unsafe fn ifsisifs(p: *const c_char, ml: c_uint, ifs: *const c_char) -> c_uint {
+unsafe fn ifsisifs(sh: &mut Shell, p: *const c_char, ml: c_uint, ifs: *const c_char) -> c_uint {
     let mut isdefifs: bool = false;
     let mut isifs: bool = false;
     let mut wc: wchar_t = *p as wchar_t;
@@ -2127,7 +2149,7 @@ unsafe fn ifsisifs(p: *const c_char, ml: c_uint, ifs: *const c_char) -> c_uint {
     let mut ifs0: wchar_t = 0;
 
     'out: {
-        if *ifs != 0 && !wcifsv().is_empty() {
+        if *ifs != 0 && !sh.ifs.wcifs.is_empty() {
             if (wc & 0x80) != 0 {
                 let mut mbst: libc::mbstate_t = mem::zeroed();
                 let mut wc2: wchar_t = 0;
@@ -2138,8 +2160,8 @@ unsafe fn ifsisifs(p: *const c_char, ml: c_uint, ifs: *const c_char) -> c_uint {
                 wc = wc2;
             }
 
-            isifs = wcifs_chr(wcifsv(), wc);
-            ifs0 = wcifsv()[0];
+            isifs = wcifs_chr(&sh.ifs.wcifs, wc);
+            ifs0 = sh.ifs.wcifs[0];
         } else if ml == 0 {
             /* `strchr` matches the terminator, so a NUL character --
              * which is what `ml == 0` means -- counts as an IFS byte.
@@ -2162,6 +2184,7 @@ unsafe fn ifsisifs(p: *const c_char, ml: c_uint, ifs: *const c_char) -> c_uint {
 // [spec:dash:def:expand.ifsbreakup-slow-fn]
 // [spec:dash:sem:expand.ifsbreakup-slow-fn]
 unsafe fn ifsbreakup_slow(
+    sh: &mut Shell,
     ifst: *mut ifs_state,
     arglist: &mut arglist,
     nulonly: c_int,
@@ -2184,7 +2207,7 @@ unsafe fn ifsbreakup_slow(
         0
     };
 
-    sisifs = ifsisifs(p, ml, (*ifst).ifs);
+    sisifs = ifsisifs(sh, p, ml, (*ifst).ifs);
     p = p.offset((ifschar >> 8) as isize);
 
     isifs = (sisifs >> 1) != 0;
@@ -2274,7 +2297,12 @@ unsafe fn ifsbreakup_slow(
 
 // [spec:dash:def:expand.ifsbreakup-fn]
 // [spec:dash:sem:expand.ifsbreakup-fn]
-pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: &mut arglist) {
+pub unsafe fn ifsbreakup(
+    sh: &mut Shell,
+    string: *mut c_char,
+    maxargs: c_int,
+    arglist: &mut arglist,
+) {
     let mut ifsp: usize;
     let mut ifst: ifs_state = mem::zeroed();
     let realifs: *const c_char;
@@ -2288,7 +2316,7 @@ pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: &mut argl
         if !ifsr().is_empty() {
             ifst.ifsspc = 0;
             nulonly = 0;
-            realifs = ncifs;
+            realifs = sh.ifs.ncifs;
             ifsp = 0;
             loop {
                 let afternul: c_int;
@@ -2314,14 +2342,14 @@ pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: &mut argl
                         if (qw & 0x8080808080808080) != 0 {
                             break;
                         }
-                        if (ifsmap[b[0] as usize]
-                            | ifsmap[b[1] as usize]
-                            | ifsmap[b[2] as usize]
-                            | ifsmap[b[3] as usize]
-                            | ifsmap[b[4] as usize]
-                            | ifsmap[b[5] as usize]
-                            | ifsmap[b[6] as usize]
-                            | ifsmap[b[7] as usize])
+                        if (sh.ifs.ifsmap[b[0] as usize]
+                            | sh.ifs.ifsmap[b[1] as usize]
+                            | sh.ifs.ifsmap[b[2] as usize]
+                            | sh.ifs.ifsmap[b[3] as usize]
+                            | sh.ifs.ifsmap[b[4] as usize]
+                            | sh.ifs.ifsmap[b[5] as usize]
+                            | sh.ifs.ifsmap[b[6] as usize]
+                            | sh.ifs.ifsmap[b[7] as usize])
                             != 0
                         {
                             break;
@@ -2342,7 +2370,7 @@ pub unsafe fn ifsbreakup(string: *mut c_char, maxargs: c_int, arglist: &mut argl
                         break;
                     }
 
-                    p = ifsbreakup_slow(&mut ifst, arglist, afternul | nulonly, p);
+                    p = ifsbreakup_slow(sh, &mut ifst, arglist, afternul | nulonly, p);
                 }
 
                 ifsp += 1;
@@ -2408,10 +2436,10 @@ pub unsafe fn changeifs(sh: &mut crate::context::Shell, mut ifs: *const c_char) 
     if crate::var::ifsset(sh) == 0 {
         ifs = crate::var::defifs();
     }
-    ncifs = ifs;
+    sh.ifs.ncifs = ifs;
 
     /* memset(ifsmap, 0, sizeof(ifsmap)) */
-    ifsmap = [0; 128];
+    sh.ifs.ifsmap = [0; 128];
 
     p = ifs;
     loop {
@@ -2419,7 +2447,7 @@ pub unsafe fn changeifs(sh: &mut crate::context::Shell, mut ifs: *const c_char) 
 
         mb |= c >> 7;
         if (c >> 7) == 0 {
-            ifsmap[c as usize] = 1;
+            sh.ifs.ifsmap[c as usize] = 1;
         }
 
         if c == 0 {
@@ -2432,7 +2460,7 @@ pub unsafe fn changeifs(sh: &mut crate::context::Shell, mut ifs: *const c_char) 
 
     nwcifs = Vec::new();
 
-    ifsmb0len = (len != 0) as size_t;
+    sh.ifs.ifsmb0len = (len != 0) as size_t;
 
     'out: {
         if mb == 0 {
@@ -2443,7 +2471,7 @@ pub unsafe fn changeifs(sh: &mut crate::context::Shell, mut ifs: *const c_char) 
         if ml == (0 as size_t).wrapping_sub(2) || ml == (0 as size_t).wrapping_sub(1) {
             ml = 1;
         }
-        ifsmb0len = ml;
+        sh.ifs.ifsmb0len = ml;
 
         /* The C `ckmalloc`s `len + 1` wide characters and zero-fills them
          * before `mbsrtowcs` writes a prefix; the zero fill is what makes
@@ -2465,7 +2493,7 @@ pub unsafe fn changeifs(sh: &mut crate::context::Shell, mut ifs: *const c_char) 
     }
 
     /* out: */
-    *wcifsv() = nwcifs;
+    sh.ifs.wcifs = nwcifs;
 }
 
 /*

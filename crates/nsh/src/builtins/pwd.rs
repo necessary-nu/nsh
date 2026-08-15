@@ -15,7 +15,7 @@ use libc::c_int;
 use std::io::Write;
 
 use crate::builtins::cd::cdopt;
-use crate::cd::{Pwd, cbytes, curdir, physdir, setpwd_inner};
+use crate::cd::{Pwd, cbytes, setpwd_inner};
 use crate::eval::Flow;
 use crate::options::Options;
 
@@ -26,12 +26,12 @@ pub unsafe fn pwdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     flags = cdopt(&mut Options::new(args))?;
     let mut dir = if flags != 0 {
-        if (*addr_of!(physdir)).is_none() {
+        if (*addr_of!(sh.cwd.physdir)).is_none() {
             setpwd_inner(sh, Pwd::Current, 0)?;
         }
-        cbytes(&*addr_of!(physdir))
+        cbytes(&*addr_of!(sh.cwd.physdir))
     } else {
-        cbytes(&*addr_of!(curdir))
+        cbytes(&*addr_of!(sh.cwd.curdir))
     };
     dir.pop();
     dir.push(b'\n');

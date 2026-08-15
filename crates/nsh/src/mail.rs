@@ -11,10 +11,26 @@ use crate::var::{mailval, mpathset, mpathval};
 
 const MAXMBOXES: usize = 10;
 
-/* times of mailboxes */
-static mut mailtime: [time_t; MAXMBOXES] = [0; MAXMBOXES];
-/* Set if MAIL or MAILPATH is changed. */
-static mut changed: c_int = 0;
+/// What `$MAILPATH` checking remembers between prompts.
+///
+/// Another group §5 does not list. The times are per-shell by
+/// construction -- they are compared against the mailboxes of *this*
+/// shell's `$MAILPATH`, which another shell may have set differently.
+pub struct MailState {
+    /* times of mailboxes */
+    mailtime: [time_t; MAXMBOXES],
+    /* Set if MAIL or MAILPATH is changed. */
+    changed: c_int,
+}
+
+impl MailState {
+    pub(crate) const fn new() -> Self {
+        MailState {
+            mailtime: [0; MAXMBOXES],
+            changed: 0,
+        }
+    }
+}
 
 /*
  * Print appropriate message(s) if mail has arrived.  If changed is set,
@@ -23,7 +39,7 @@ static mut changed: c_int = 0;
 
 // [spec:dash:def:mail.chkmail-fn]
 // [spec:dash:sem:mail.chkmail-fn]
-pub unsafe fn chkmail(sh: &crate::context::Shell) {
+pub unsafe fn chkmail(sh: &mut crate::context::Shell) {
     let mut mpath: *const c_char;
     let mut q: *mut c_char;
     let mut mtp: *mut time_t;
@@ -36,8 +52,8 @@ pub unsafe fn chkmail(sh: &crate::context::Shell) {
     } else {
         mailval(sh)
     };
-    mtp = addr_of_mut!(mailtime) as *mut time_t;
-    while mtp < (addr_of_mut!(mailtime) as *mut time_t).add(MAXMBOXES) {
+    mtp = addr_of_mut!(sh.mail.mailtime) as *mut time_t;
+    while mtp < (addr_of_mut!(sh.mail.mailtime) as *mut time_t).add(MAXMBOXES) {
         let len: c_int;
 
         len = crate::exec::padvance_magic(&mut mpath, addr_of!(nullstr) as *const c_char, 2);
@@ -62,7 +78,7 @@ pub unsafe fn chkmail(sh: &crate::context::Shell) {
             mtp = mtp.add(1);
             continue;
         }
-        if changed == 0 && statb.st_mtime != *mtp {
+        if sh.mail.changed == 0 && statb.st_mtime != *mtp {
             let text = if !crate::exec::pathopt.is_null() {
                 crate::exec::pathopt
             } else {
@@ -75,11 +91,11 @@ pub unsafe fn chkmail(sh: &crate::context::Shell) {
         *mtp = statb.st_mtime;
         mtp = mtp.add(1);
     }
-    changed = 0;
+    sh.mail.changed = 0;
 }
 
 // [spec:dash:def:mail.changemail-fn]
 // [spec:dash:sem:mail.changemail-fn]
-pub unsafe fn changemail(_sh: &mut crate::context::Shell, val: *const c_char) {
-    changed += 1;
+pub unsafe fn changemail(sh: &mut crate::context::Shell, val: *const c_char) {
+    sh.mail.changed += 1;
 }

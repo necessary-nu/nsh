@@ -92,7 +92,6 @@ pub unsafe fn record_history_line(bytes: &[u8], first: bool) {
     }
 }
 
-pub static mut displayhist: c_int = 0;
 
 // ---------------------------------------------------------------------
 // src/error.h:84-98 — INTOFF / INTON, expanded literally over the globals

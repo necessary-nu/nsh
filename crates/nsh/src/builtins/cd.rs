@@ -17,7 +17,7 @@ use std::ffi::{CStr, OsStr};
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 
-use crate::cd::{cbytes, curdir, setpwd};
+use crate::cd::{cbytes, setpwd};
 use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
 use crate::mystring::{dotdir, homestr, nullstr};
@@ -153,7 +153,7 @@ pub unsafe fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     /* out: */
     if (flags & CD_PRINT) != 0 {
-        let mut d = cbytes(&*addr_of!(curdir));
+        let mut d = cbytes(&*addr_of!(sh.cwd.curdir));
         d.pop();
         d.push(b'\n');
         let _ = (*crate::output::stdout()).write_all(&d);
@@ -172,7 +172,7 @@ unsafe fn docd(sh: &mut Shell, mut dest: *const c_char, flags: c_int) -> Result<
 
     INTOFF();
     if (flags & CD_PHYSICAL) == 0 {
-        dir = updatepwd(dest);
+        dir = updatepwd(sh, dest);
         if !dir.is_null() {
             dest = dir;
         }
@@ -204,7 +204,7 @@ static mut pwdbuf: BString = BString::new(Vec::new());
 
 // [spec:dash:def:cd.updatepwd-fn]
 // [spec:dash:sem:cd.updatepwd-fn]
-unsafe fn updatepwd(dir: *const c_char) -> *const c_char {
+unsafe fn updatepwd(sh: &mut Shell, dir: *const c_char) -> *const c_char {
     /* `lim` is `stackblock() + 1` in the C, re-read after `makestrspace`
      * because the block can move; against an owned buffer it is just an
      * index, and `new > lim` is a comparison of lengths. */
@@ -218,7 +218,7 @@ unsafe fn updatepwd(dir: *const c_char) -> *const c_char {
     let new = &mut *addr_of_mut!(pwdbuf);
     new.clear();
     if *dir != b'/' as c_char {
-        let Some(cur) = &*addr_of!(curdir) else {
+        let Some(cur) = &*addr_of!(sh.cwd.curdir) else {
             return null_mut();
         };
         new.extend_from_slice(cur);

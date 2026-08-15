@@ -80,6 +80,17 @@ pub struct Shell {
     /// Where the shell is reading from, and what it has read.
     /// `input.rs` owns the shape; this owns the value.
     pub(crate) input: crate::input::InputStack,
+    /// Where the shell thinks it is: the logical and physical working
+    /// directories. `cd.rs` owns the shape.
+    pub(crate) cwd: crate::cd::Cwd,
+    /// What `$MAILPATH` checking remembers between prompts. `mail.rs`
+    /// owns the shape.
+    pub(crate) mail: crate::mail::MailState,
+    /// `IFS` in the forms field splitting wants it, rebuilt by the
+    /// variable hook. `expand.rs` owns the shape.
+    pub(crate) ifs: crate::expand::IfsCache,
+    /// `fc -l`: list the history rather than re-running it.
+    pub(crate) displayhist: libc::c_int,
     /// `$?` — the exit status of the last command.
     ///
     /// Its own field rather than a member of `eval`, because
@@ -112,6 +123,10 @@ impl Shell {
             jobs: crate::jobs::JobTable::new(),
             options: crate::options::ShellOptions::new(),
             redirs: crate::redir::RedirStack::new(),
+            cwd: crate::cd::Cwd::new(),
+            mail: crate::mail::MailState::new(),
+            ifs: crate::expand::IfsCache::new(),
+            displayhist: 0,
             input: crate::input::InputStack::new(),
             status: 0,
             vars: crate::var::VarTable::new(),

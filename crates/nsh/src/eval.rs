@@ -348,7 +348,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
         flow!(crate::trap::dotrap(sh));
 
         /* #ifndef SMALL: show history substitutions done with fc */
-        crate::histedit::displayhist = 1;
+        sh.displayhist = 1;
 
         /* TRACE(("pid %d, evaltree(%p: %d, %d) called\n", ...)); */
         /* The C's `goto evaln` reassigns `n` and jumps; the node it jumps

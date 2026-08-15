@@ -57,7 +57,7 @@ unsafe fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr
     let s: *mut c_char = line.as_mut_ptr() as *mut c_char;
     debug_assert!(!line.is_empty(), "readcmd always pushes the terminator");
 
-    crate::expand::ifsbreakup(s, names.len() as c_int, &mut arglist);
+    crate::expand::ifsbreakup(sh, s, names.len() as c_int, &mut arglist);
     crate::expand::ifsfree();
 
     /* The C walks the names and the fields with two cursors that advance
