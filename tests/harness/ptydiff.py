@@ -213,6 +213,73 @@ CASES = [
                                        "echo ALIVE-$?", "exit"]),
     ("^C after a nested error",   [], ["f() { cd /nonexistent-dir; }", "f", "\x03",
                                        "echo ALIVE-$?", "exit"]),
+
+    # --- job control, and the two presence bits `onsig` reads ---
+    # Here *before* [dec:nsh:host-owns-signals] moves the trap table onto
+    # the shell, for the reason the block above acts on and
+    # docs/errors-are-values.md 6B states: the 61,592-case corpus sends
+    # no signals and has no controlling terminal, so it cannot execute
+    # any of this, and a suite that is green about a path it never runs
+    # is not evidence about that path.
+    #
+    # `onsig` reads the trap table at exactly two indices, and both reads
+    # are presence tests rather than reads of the action --
+    # `trap[SIGCHLD].is_none()` and `trap[SIGINT].is_none()`
+    # (trap.rs:287, :295). When those two bits move into the signal inbox
+    # the mirror can disagree with the table, and it is observable in
+    # *both* directions, so each direction gets the case that catches it:
+    #
+    #   SIGCHLD, trap set     "trap CHLD on a fg command" / "on a bg job"
+    #   SIGCHLD, trap clear   "trap CHLD cleared", read against "wait
+    #                         status no CHLD trap" as its control: a
+    #                         mirror that still says "trapped" sets
+    #                         pending_sig = SIGCHLD, and `wait` answers
+    #                         128 + pending_sig = 145 (bltin/wait.rs:51)
+    #   SIGINT, trap set      "^C a fg job with INT trap" -- the trap
+    #                         runs; a stale mirror takes the interrupt
+    #                         instead
+    #   SIGINT, trap clear    "trap INT cleared then ^C" -- ALIVE-130 is
+    #                         the interrupt being taken; a stale mirror
+    #                         swallows the ^C entirely
+    #
+    # "trap ignore INT then ^C" is the third state of the C's three:
+    # NULL, "" and an action. The bit is `is_some()`, so an *ignored*
+    # signal has it set; a mirror keyed on `is_empty()` instead passes
+    # every case above and fails this one.
+    #
+    # The rest is job control proper, which nothing above reaches:
+    # suspend and resume, the terminal changing hands, SIGTTIN, and the
+    # reaping a shell only reports at a prompt.
+    ("stop then bg",              [], ["sleep 1", "\x1a", "bg", "wait", "echo done", "exit"]),
+    ("fg then read the tty",      [], ["sleep 1", "\x1a", "fg", "read v", "hello",
+                                       "echo got-$v", "exit"]),
+    ("exit with a stopped job",   [], ["sleep 3", "\x1a", "exit", "exit"]),
+    ("^Z at the prompt",          [], ["\x1a", "echo ALIVE-$?", "exit"]),
+    ("trap TSTP then ^Z",         [], ["trap 'echo tstp' TSTP", "\x1a", "echo ALIVE-$?", "exit"]),
+    ("bg job stopped on tty read",[], ["cat /dev/tty &", "sleep 1", "jobs", "exit", "exit"]),
+    ("kill %1 and its notice",    [], ["sleep 5 &", "kill %1", "sleep 1", "echo after", "exit"]),
+    ("trap CHLD on a fg command", [], ["trap 'echo CHLD' CHLD", "/bin/true", "echo done", "exit"]),
+    ("trap CHLD on a bg job",     [], ["trap 'echo CHLD' CHLD", "sleep 1 &", "wait",
+                                       "echo done", "exit"]),
+    ("trap CHLD cleared",         [], ["trap 'echo CHLD' CHLD", "trap - CHLD", "sleep 1 &",
+                                       "wait", "echo done", "exit"]),
+    ("wait status w/ CHLD trap",  [], ["trap 'echo CHLD' CHLD", "sleep 1 &", "wait",
+                                       "echo st=$?", "exit"]),
+    ("wait status no CHLD trap",  [], ["sleep 1 &", "wait", "echo st=$?", "exit"]),
+    ("^C a fg job with INT trap", [], ["trap 'echo caught' INT", "sleep 5", "\x03",
+                                       "echo ALIVE-$?", "exit"]),
+    ("trap INT cleared then ^C",  [], ["trap 'echo caught' INT", "trap - INT", "\x03",
+                                       "echo ALIVE-$?", "exit"]),
+    ("trap ignore INT then ^C",   [], ["trap '' INT", "\x03", "echo ALIVE-$?", "exit"]),
+    # SIGQUIT had no coverage at all. An interactive shell ignores it
+    # (trap.rs:160-167, the S_IGN arm), and a foreground child does not
+    # -- `forkchild` only ignores INT and QUIT for FORK_BG (jobs.rs:994).
+    # `ulimit -c 0` keeps the dump out of the message and off the disk;
+    # without it both shells print "Quit (core dumped)" and both write a
+    # core through the host's core_pattern on every run.
+    ("^backslash at the prompt",  [], ["\x1c", "echo ALIVE-$?", "exit"]),
+    ("^backslash kills a fg job", [], ["ulimit -c 0", "sleep 5", "\x1c",
+                                       "echo ALIVE-$?", "exit"]),
 ]
 
 
