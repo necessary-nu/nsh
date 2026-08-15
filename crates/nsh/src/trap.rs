@@ -76,14 +76,14 @@ pub unsafe fn have_traps() -> c_int {
 }
 
 /* mkinit INIT fragment from src/trap.c:94-97. */
-pub unsafe fn mkinit_init() {
+pub unsafe fn mkinit_init(sh: &mut crate::context::Shell) {
     sigmode[(libc::SIGCHLD - 1) as usize] = S_DFL;
-    setsignal(libc::SIGCHLD);
+    setsignal(sh, libc::SIGCHLD);
 }
 
 /* mkinit FORKRESET fragment from src/trap.c:99-101. */
-pub unsafe fn mkinit_forkreset(n: Option<&Node>) {
-    clear_traps(n);
+pub unsafe fn mkinit_forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
+    clear_traps(sh, n);
 }
 
 /*
@@ -96,7 +96,7 @@ pub unsafe fn mkinit_forkreset(n: Option<&Node>) {
 
 // [spec:dash:def:trap.clear-traps-fn]
 // [spec:dash:sem:trap.clear-traps-fn]
-pub unsafe fn clear_traps(n: Option<&Node>) {
+pub unsafe fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
     let simplecmd: c_int;
 
     simplecmd = crate::parser::issimplecmd(n, crate::builtins::TRAPCMD.name.as_ptr());
@@ -110,7 +110,7 @@ pub unsafe fn clear_traps(n: Option<&Node>) {
         }
         let otp = trap_mut()[signo].take();
         if signo != 0 {
-            setsignal(signo as c_int);
+            setsignal(sh, signo as c_int);
         }
 
         if simplecmd != 0 {
@@ -134,7 +134,7 @@ pub unsafe fn clear_traps(n: Option<&Node>) {
 
 // [spec:dash:def:trap.setsignal-fn]
 // [spec:dash:sem:trap.setsignal-fn]
-pub unsafe fn setsignal(signo: c_int) {
+pub unsafe fn setsignal(sh: &mut crate::context::Shell, signo: c_int) {
     let mut action: c_int;
     let lvforked: c_int;
     let mut tsig: c_char;
@@ -150,29 +150,29 @@ pub unsafe fn setsignal(signo: c_int) {
     if crate::shellmain::rootshell() != 0 && action == S_DFL as c_int && lvforked == 0 {
         match signo {
             libc::SIGINT => {
-                if crate::options::optlist[crate::options::iflag] != 0
+                if sh.options.flag(crate::options::iflag) != 0
                     || !crate::options::minusc.is_null()
-                    || crate::options::optlist[crate::options::sflag] == 0
+                    || sh.options.flag(crate::options::sflag) == 0
                 {
                     action = S_CATCH as c_int;
                 }
             }
             libc::SIGQUIT => {
                 /* #ifdef DEBUG: if (debug) break; */
-                if crate::shell::DEBUG && crate::options::optlist[crate::options::debug] != 0 {
+                if crate::shell::DEBUG && sh.options.flag(crate::options::debug) != 0 {
                     /* break */
-                } else if crate::options::optlist[crate::options::iflag] != 0 {
+                } else if sh.options.flag(crate::options::iflag) != 0 {
                     action = S_IGN as c_int;
                 }
             }
             libc::SIGTERM => {
-                if crate::options::optlist[crate::options::iflag] != 0 {
+                if sh.options.flag(crate::options::iflag) != 0 {
                     action = S_IGN as c_int;
                 }
             }
             /* #if JOBS */
             libc::SIGTSTP | libc::SIGTTOU => {
-                if crate::options::optlist[crate::options::mflag] != 0 {
+                if sh.options.flag(crate::options::mflag) != 0 {
                     action = S_IGN as c_int;
                 }
             }
@@ -199,7 +199,7 @@ pub unsafe fn setsignal(signo: c_int) {
             return;
         }
         if act.sa_sigaction == libc::SIG_IGN {
-            if crate::options::optlist[crate::options::mflag] != 0
+            if sh.options.flag(crate::options::mflag) != 0
                 && (signo == libc::SIGTSTP || signo == libc::SIGTTIN || signo == libc::SIGTTOU)
             {
                 tsig = S_IGN; /* don't hard ignore these */
@@ -325,7 +325,7 @@ pub unsafe fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
      * the next command boundary at the latest. It is tested before
      * `pending_sig`, because an *untrapped* SIGINT sets `intpending` and
      * has no trap action for the loop below to run. */
-    if let Some(e) = crate::error::poll_interrupt() {
+    if let Some(e) = crate::error::poll_interrupt(sh) {
         return Err(e);
     }
 
@@ -396,7 +396,7 @@ pub unsafe fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
 
 // [spec:dash:def:trap.setinteractive-fn]
 // [spec:dash:sem:trap.setinteractive-fn]
-pub unsafe fn setinteractive(on: c_int) {
+pub unsafe fn setinteractive(sh: &mut crate::context::Shell, on: c_int) {
     static mut is_interactive: c_int = 0;
 
     let on = on + 1;
@@ -404,9 +404,9 @@ pub unsafe fn setinteractive(on: c_int) {
         return;
     }
     is_interactive = on;
-    setsignal(libc::SIGINT);
-    setsignal(libc::SIGQUIT);
-    setsignal(libc::SIGTERM);
+    setsignal(sh, libc::SIGINT);
+    setsignal(sh, libc::SIGQUIT);
+    setsignal(sh, libc::SIGTERM);
 }
 
 /*

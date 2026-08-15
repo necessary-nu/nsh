@@ -622,14 +622,14 @@ fn CCTL() -> c_char {
 
 /// `options.h`: `#define fflag optlist[1]`
 #[inline]
-unsafe fn fflag() -> c_char {
-    crate::options::optlist[1]
+unsafe fn fflag(sh: &crate::context::Shell) -> c_char {
+    sh.options.flag(1)
 }
 
 /// `options.h`: `#define uflag optlist[14]`
 #[inline]
-unsafe fn uflag() -> c_char {
-    crate::options::optlist[14]
+unsafe fn uflag(sh: &crate::context::Shell) -> c_char {
+    sh.options.flag(14)
 }
 
 /// `error.h`: `#define int_pending() intpending`
@@ -812,7 +812,7 @@ pub unsafe fn expandarg(
              * before the write reaches it; taking the `Vec` is both
              * halves. */
             let words = mem::take(expargl());
-            expandmeta(words)?;
+            expandmeta(sh, words)?;
         } else {
             expargl().push(strlist { text: p });
         }
@@ -1256,7 +1256,7 @@ unsafe fn expbackq(
                  * Reading a command substitution's output can block for
                  * as long as the substituted command runs, so this is
                  * where a ^C during `x=$(sleep 5)` is noticed. */
-                if let Some(e) = crate::error::poll_interrupt() {
+                if let Some(e) = crate::error::poll_interrupt(sh) {
                     return Err(e);
                 }
             }
@@ -1645,7 +1645,7 @@ unsafe fn evalvar(
             _ => {}
         }
 
-        if (discard & !flag) != 0 && uflag() != 0 {
+        if (discard & !flag) != 0 && uflag(sh) != 0 {
             /* A stop before `varunset` stopped diverging, and still one. */
             return Err(varunset(p, var, ptr::null(), 0));
         }
@@ -1983,7 +1983,7 @@ unsafe fn varvalue(
                             p = expmakestrspace(crate::options::NOPTS as size_t);
                             i = crate::options::NOPTS as c_int - 1;
                             while i >= 0 {
-                                if crate::options::optlist[i as usize] != 0
+                                if sh.options.flag(i as usize) != 0
                                     && crate::options::optletters[i as usize] != 0
                                 {
                                     /* USTPUTC(optletters[i], p) */
@@ -2494,7 +2494,7 @@ unsafe extern "C" fn opendir_interruptible(pathname: *const c_char) -> *mut c_vo
 
 // [spec:dash:def:expand.expandmeta-glob-fn]
 // [spec:dash:sem:expand.expandmeta-glob-fn]
-unsafe fn expandmeta_glob(words: Vec<strlist>) -> Result<(), Error> {
+unsafe fn expandmeta_glob(sh: &crate::context::Shell, words: Vec<strlist>) -> Result<(), Error> {
     for mut str in words {
         let p: *const c_char;
         let mut pglob: crate::system::glob64_t = mem::zeroed();
@@ -2503,7 +2503,7 @@ unsafe fn expandmeta_glob(words: Vec<strlist>) -> Result<(), Error> {
         'sw: {
             'nometa: {
                 'nometa2: {
-                    if fflag() != 0 {
+                    if fflag(sh) != 0 {
                         break 'nometa;
                     }
 
@@ -2590,11 +2590,11 @@ unsafe fn addglob(pglob: *const crate::system::glob64_t) {
 
 // [spec:dash:def:expand.expandmeta-fn]
 // [spec:dash:sem:expand.expandmeta-fn]
-unsafe fn expandmeta(words: Vec<strlist>) -> Result<(), Error> {
+unsafe fn expandmeta(sh: &crate::context::Shell, words: Vec<strlist>) -> Result<(), Error> {
     /* TODO - EXP_REDIR */
 
     if GLOB_IS_ENABLED {
-        return expandmeta_glob(words);
+        return expandmeta_glob(sh, words);
     }
 
     /* The C's `preglob(..., RMESCAPE_HEAP)` result: one `ckmalloc` per
@@ -2612,7 +2612,7 @@ unsafe fn expandmeta(words: Vec<strlist>) -> Result<(), Error> {
 
         'sw: {
             'nometa: {
-                if fflag() != 0 {
+                if fflag(sh) != 0 {
                     break 'nometa;
                 }
                 let text = CStr::from_ptr(str.textp()).to_bytes();

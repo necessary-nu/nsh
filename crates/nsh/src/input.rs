@@ -584,7 +584,7 @@ unsafe fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
              * signal pending -- is kept underneath, because it is about
              * something else: abandoning a here-document or a `.` file
              * when a trapped signal arrives. */
-            if let Some(e) = crate::error::poll_interrupt() {
+            if let Some(e) = crate::error::poll_interrupt(sh) {
                 return Err(e);
             }
         }
@@ -659,7 +659,7 @@ unsafe fn preadbuffer(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
                  * delivered a *deferred* interrupt too. It also covers
                  * the line editor, whose failed read reaches the same
                  * line through `preadfd`'s `Err(_) => 0`. */
-                if let Some(e) = crate::error::poll_interrupt() {
+                if let Some(e) = crate::error::poll_interrupt(sh) {
                     return Err(e);
                 }
                 /* goto eof */
@@ -741,11 +741,11 @@ unsafe fn preadbuffer(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
      * it right here when the counter reached zero. Polling at the call
      * site rather than inside `INTON` is what keeps `INTON` infallible
      * (§4.3) while leaving the delivery point where it was. */
-    if let Some(e) = crate::error::poll_interrupt() {
+    if let Some(e) = crate::error::poll_interrupt(sh) {
         return Err(e);
     }
 
-    if crate::options::optlist[crate::options::vflag] != 0 {
+    if sh.options.flag(crate::options::vflag) != 0 {
         let _ = (*crate::output::stderr()).write_all(CStr::from_ptr(line).to_bytes());
         /* #ifdef FLUSHERR flushout(out2); */
     }
@@ -857,11 +857,11 @@ unsafe fn popstring() {
 
 // [spec:dash:def:input.setinputfile-fn]
 // [spec:dash:sem:input.setinputfile-fn]
-pub unsafe fn setinputfile(fname: *const c_char, flags: c_int) -> Result<c_int, Error> {
+pub unsafe fn setinputfile(sh: &mut crate::context::Shell, fname: *const c_char, flags: c_int) -> Result<c_int, Error> {
     let mut fd: c_int;
 
     INTOFF();
-    fd = crate::redir::sh_open(fname, libc::O_RDONLY, flags & INPUT_NOFILE_OK)?;
+    fd = crate::redir::sh_open(sh, fname, libc::O_RDONLY, flags & INPUT_NOFILE_OK)?;
     if fd < 0 {
         INTON();
         return Ok(fd); /* goto out */

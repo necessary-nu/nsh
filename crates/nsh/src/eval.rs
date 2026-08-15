@@ -178,20 +178,20 @@ pub(crate) use flow;
 
 /* src/options.h: `#define nflag optlist[5]` and friends. */
 #[inline]
-unsafe fn nflag() -> c_int {
-    crate::options::optlist[crate::options::nflag] as c_int
+unsafe fn nflag(sh: &crate::context::Shell) -> c_int {
+    sh.options.flag(crate::options::nflag) as c_int
 }
 #[inline]
-unsafe fn eflag() -> c_int {
-    crate::options::optlist[crate::options::eflag] as c_int
+unsafe fn eflag(sh: &crate::context::Shell) -> c_int {
+    sh.options.flag(crate::options::eflag) as c_int
 }
 #[inline]
-unsafe fn xflag() -> c_int {
-    crate::options::optlist[crate::options::xflag] as c_int
+unsafe fn xflag(sh: &crate::context::Shell) -> c_int {
+    sh.options.flag(crate::options::xflag) as c_int
 }
 #[inline]
-unsafe fn iflag() -> c_int {
-    crate::options::optlist[crate::options::iflag] as c_int
+unsafe fn iflag(sh: &crate::context::Shell) -> c_int {
+    sh.options.flag(crate::options::iflag) as c_int
 }
 
 /*
@@ -283,7 +283,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
     let mut status: c_int = 0;
 
     'out_lbl: {
-        if nflag() != 0 {
+        if nflag(sh) != 0 {
             break 'out_lbl;
         }
 
@@ -440,7 +440,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
     flow!(crate::trap::dotrap(sh));
 
     'exexit: {
-        if eflag() != 0 && (!flags & checkexit) != 0 && status != 0 {
+        if eflag(sh) != 0 && (!flags & checkexit) != 0 && status != 0 {
             break 'exexit;
         }
 
@@ -1168,7 +1168,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
     let args: Vec<&BStr> = crate::builtins::args(&arglist.list[head..]);
 
     lastarg = null_mut();
-    if iflag() != 0 && funcline == 0 && argc > 0 {
+    if iflag(sh) != 0 && funcline == 0 && argc > 0 {
         lastarg = *nargv.offset(-1);
     }
 
@@ -1219,7 +1219,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
             }
 
             /* Print the command if xflag is set. */
-            if xflag() != 0 && inps4 == 0 {
+            if xflag(sh) != 0 && inps4 == 0 {
                 let out: *mut Output;
                 let mut sep: c_int;
 

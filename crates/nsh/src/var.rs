@@ -27,7 +27,7 @@ use std::io::Write as _;
 use crate::context::Shell;
 use crate::error::{INTOFF, INTON};
 use crate::mystring::nullstr;
-use crate::options::{NOPTS, Options, getoptsreset, optlist, optschanged};
+use crate::options::{NOPTS, Options, getoptsreset, optschanged};
 use crate::system::strchrnul;
 
 unsafe extern "C" {
@@ -691,7 +691,7 @@ unsafe fn setvareq_text(sh: &mut Shell, text: VarText, mut flags: c_int) -> Resu
     let s: *const c_char = text.as_ptr();
 
     flags |= VEXPORT
-        & (((1 - crate::options::optlist[crate::options::aflag] as c_int) as c_uint)
+        & (((1 - sh.options.flag(crate::options::aflag) as c_int) as c_uint)
             .wrapping_sub(1)) as c_int;
     vp = findvar(s);
     if !vp.is_null() {
@@ -903,7 +903,7 @@ pub unsafe fn showvars(prefix: *const c_char, on: c_int, off: c_int) -> c_int {
 pub unsafe fn mklocal(sh: &mut Shell, name: *mut c_char, flags: c_int) -> Result<(), Error> {
     INTOFF();
     if *name.offset(0) == b'-' as c_char && *name.offset(1) == b'\0' as c_char {
-        pushlocal(localvar::Options(optlist));
+        pushlocal(localvar::Options(sh.options.snapshot()));
     } else {
         let found: *mut var;
 
@@ -984,7 +984,7 @@ unsafe fn poplocalvars(sh: &mut Shell) {
          * DEBUG` in `shell.h`, and the dash build does not define it. */
         match lvp {
             localvar::Options(saved) => {
-                optlist = saved;
+                sh.options.restore(saved);
                 /* Teardown, and 4.3's rule is that teardown does not
                  * become fallible: cleanup that can fail while handling a
                  * failure would make every unwind path decide what to do

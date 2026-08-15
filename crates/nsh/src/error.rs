@@ -83,9 +83,9 @@ pub unsafe fn INTOFF() -> c_int {
     0
 }
 
-/// `#define INTON ({ barrier(); if (--suppressint == 0 && intpending) onint(); 0; })`
+/// `#define INTON ({ barrier(); if (--suppressint == 0 && intpending) onint(sh); 0; })`
 ///
-/// The `onint()` is gone and the rest is unchanged. That is step F, and
+/// The `onint(sh)` is gone and the rest is unchanged. That is step F, and
 /// it is the whole of the divergence `docs/divergences.md`'s
 /// `error.interrupt-delivery-point` records: the C delivers a pending
 /// interrupt at the instruction where the counter reaches zero, and this
@@ -105,7 +105,7 @@ pub unsafe fn INTON() -> c_int {
     0
 }
 
-/// `#define FORCEINTON ({ barrier(); suppressint = 0; if (intpending) onint(); 0; })`
+/// `#define FORCEINTON ({ barrier(); suppressint = 0; if (intpending) onint(sh); 0; })`
 ///
 /// Same change, same reason. This one *resets* the counter rather than
 /// balancing it (§2.4), which is what makes it the top level's way of
@@ -146,9 +146,9 @@ pub unsafe fn CLEAR_PENDING_INT() {
 /// Returns `Some` at most once per interrupt: [`onint`] clears
 /// `intpending` as it delivers.
 #[inline]
-pub unsafe fn poll_interrupt() -> Option<Error> {
+pub unsafe fn poll_interrupt(sh: &crate::context::Shell) -> Option<Error> {
     if suppressint == 0 && int_pending() != 0 {
-        Some(onint())
+        Some(onint(sh))
     } else {
         None
     }
@@ -219,13 +219,13 @@ macro_rules! SAVEINT {
 /*
  * ```c
  * #define RESTOREINT(v) \
- *	({ barrier(); if ((suppressint = (v)) == 0 && intpending) onint(); 0; })
+ *	({ barrier(); if ((suppressint = (v)) == 0 && intpending) onint(sh); 0; })
  * ```
  */
 #[macro_export]
 macro_rules! RESTOREINT {
     ($v:expr) => {{
-        /* The `if (... && intpending) onint()` is gone with the one in
+        /* The `if (... && intpending) onint(sh)` is gone with the one in
          * `INTON`; see there. */
         $crate::error::barrier();
         $crate::error::suppressint = $v;
@@ -264,12 +264,12 @@ macro_rules! RESTOREINT {
 /// is a frontend boundary question and not this node's.
 // [spec:dash:def:error.onint-fn]
 // [spec:dash:sem:error.onint-fn]
-pub unsafe fn onint() -> Error {
+pub unsafe fn onint(sh: &crate::context::Shell) -> Error {
     core::ptr::write_volatile(addr_of_mut!(intpending), 0);
     crate::system::sigclearmask();
     /* `#define rootshell (!shlvl)` (main.h); `#define iflag optlist[3]`. */
     let rootshell: bool = crate::shellmain::shlvl == 0;
-    let iflag: c_char = crate::options::optlist[crate::options::iflag];
+    let iflag: c_char = sh.options.flag(crate::options::iflag);
     if !(rootshell && iflag != 0) {
         libc::signal(libc::SIGINT as c_int, libc::SIG_DFL);
         libc::raise(libc::SIGINT);
@@ -530,7 +530,7 @@ pub unsafe fn errmsg(e: c_int, action: c_int) -> *const c_char {
 // [spec:dash:def:error.inton-fn]
 // [spec:dash:sem:error.inton-fn]
 pub unsafe fn __inton() {
-    /* In step with `INTON` above, including the `onint()` it no longer
+    /* In step with `INTON` above, including the `onint(sh)` it no longer
      * makes. */
     suppressint -= 1;
 }
@@ -616,14 +616,12 @@ mod tests {
     /// interactive root shell, which in a test process means the test
     /// dies of SIGINT. That branch is dash's and is deliberate; these
     /// cases are about the other one.
-    unsafe fn as_interactive_root() -> c_char {
-        let saved = crate::options::optlist[crate::options::iflag];
-        crate::options::optlist[crate::options::iflag] = 1;
+    unsafe fn as_interactive_root(sh: &mut crate::context::Shell) {
+        sh.options.set_flag(crate::options::iflag, 1);
         /* Copied out: a shared reference to a mutable static is what the
          * lint forbids, and `assert_eq!` takes one. */
         let lvl = crate::shellmain::shlvl;
         assert_eq!(lvl, 0, "a test process is a root shell");
-        saved
     }
 
     /// An interrupt is a value, it knows it is one, and it carries dash's
@@ -633,11 +631,13 @@ mod tests {
     fn an_interrupt_is_a_value() {
         let _g = crate::testutil::lock();
         unsafe {
-            let saved = as_interactive_root();
+            let mut owned = crate::context::Shell::new();
+            let sh = &mut owned;
+            as_interactive_root(sh);
             let saved_status = crate::eval::exitstatus;
             CLEAR_PENDING_INT();
 
-            let e = onint();
+            let e = onint(sh);
 
             assert!(e.is_interrupt());
             assert_eq!(e.status(), libc::SIGINT + 128);
@@ -646,7 +646,6 @@ mod tests {
             assert!(e.message().is_empty(), "dash prints nothing for a ^C");
 
             crate::eval::exitstatus = saved_status;
-            crate::options::optlist[crate::options::iflag] = saved;
         }
     }
 
@@ -659,16 +658,17 @@ mod tests {
     fn delivery_happens_once() {
         let _g = crate::testutil::lock();
         unsafe {
-            let saved = as_interactive_root();
+            let mut owned = crate::context::Shell::new();
+            let sh = &mut owned;
+            as_interactive_root(sh);
             let saved_status = crate::eval::exitstatus;
             suppressint = 0;
             core::ptr::write_volatile(addr_of_mut!(intpending), 1);
 
-            assert!(poll_interrupt().is_some(), "one pending interrupt, one delivery");
-            assert!(poll_interrupt().is_none(), "and not a second time");
+            assert!(poll_interrupt(sh).is_some(), "one pending interrupt, one delivery");
+            assert!(poll_interrupt(sh).is_none(), "and not a second time");
 
             crate::eval::exitstatus = saved_status;
-            crate::options::optlist[crate::options::iflag] = saved;
         }
     }
 
@@ -683,20 +683,21 @@ mod tests {
     fn intoff_still_holds_it_off() {
         let _g = crate::testutil::lock();
         unsafe {
-            let saved = as_interactive_root();
+            let mut owned = crate::context::Shell::new();
+            let sh = &mut owned;
+            as_interactive_root(sh);
             suppressint = 0;
             core::ptr::write_volatile(addr_of_mut!(intpending), 1);
 
             INTOFF();
-            assert!(poll_interrupt().is_none(), "suppressed: not due");
+            assert!(poll_interrupt(sh).is_none(), "suppressed: not due");
             /* And `INTON` does not deliver it either -- that is the
              * divergence, and it is why the counter reaching zero is no
              * longer a delivery point. */
             INTON();
             assert_eq!(int_pending(), 1, "still pending, waiting for a poll site");
-            assert!(poll_interrupt().is_some(), "and due again once unsuppressed");
+            assert!(poll_interrupt(sh).is_some(), "and due again once unsuppressed");
 
-            crate::options::optlist[crate::options::iflag] = saved;
         }
     }
 
@@ -707,7 +708,9 @@ mod tests {
     fn a_rearmed_interrupt_is_taken_later() {
         let _g = crate::testutil::lock();
         unsafe {
-            let saved = as_interactive_root();
+            let mut owned = crate::context::Shell::new();
+            let sh = &mut owned;
+            as_interactive_root(sh);
             suppressint = 0;
             CLEAR_PENDING_INT();
 
@@ -715,9 +718,8 @@ mod tests {
                 signal: libc::SIGINT,
             });
             assert_eq!(int_pending(), 1);
-            assert!(poll_interrupt().is_some(), "the next poll site takes it");
+            assert!(poll_interrupt(sh).is_some(), "the next poll site takes it");
 
-            crate::options::optlist[crate::options::iflag] = saved;
         }
     }
 }

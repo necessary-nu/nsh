@@ -56,16 +56,16 @@ pub unsafe fn rootshell() -> c_int {
 
 /* src/options.h: `#define iflag optlist[3]` and friends. */
 #[inline]
-unsafe fn iflag() -> c_int {
-    crate::options::optlist[crate::options::iflag] as c_int
+unsafe fn iflag(sh: &crate::context::Shell) -> c_int {
+    sh.options.flag(crate::options::iflag) as c_int
 }
 #[inline]
-unsafe fn Iflag() -> c_int {
-    crate::options::optlist[crate::options::Iflag] as c_int
+unsafe fn Iflag(sh: &crate::context::Shell) -> c_int {
+    sh.options.flag(crate::options::Iflag) as c_int
 }
 #[inline]
-unsafe fn sflag() -> c_int {
-    crate::options::optlist[crate::options::sflag] as c_int
+unsafe fn sflag(sh: &crate::context::Shell) -> c_int {
+    sh.options.flag(crate::options::sflag) as c_int
 }
 
 // [spec:dash:def:main.etext-fn]
@@ -172,7 +172,7 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
                             if
                             /* #ifndef linux: getuid() == geteuid() &&
                              *                getgid() == getegid() && */
-                            iflag() != 0 {
+                            iflag(sh) != 0 {
                                 let shinit: *mut c_char =
                                     crate::var::lookupvar(b"ENV\0".as_ptr() as *const c_char);
                                 if !shinit.is_null() && *shinit != b'\0' as c_char {
@@ -196,14 +196,14 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
                                 match crate::eval::evalstring(
                                     sh,
                                     crate::options::minusc,
-                                    if sflag() != 0 { 0 } else { EV_EXIT },
+                                    if sflag(sh) != 0 { 0 } else { EV_EXIT },
                                 )? {
                                     crate::eval::Flow::Done(_) => {}
                                     exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
                                 }
                             }
 
-                            if sflag() != 0 || crate::options::minusc.is_null() {
+                            if sflag(sh) != 0 || crate::options::minusc.is_null() {
                                 pc = 4;
                             } else {
                                 pc = 5; /* goto exit */
@@ -266,7 +266,7 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
             crate::init::exitreset(sh, by_exitcmd);
 
             s = *state_p;
-            if e_is_exit || s == 0 || iflag() == 0 || shlvl != 0 {
+            if e_is_exit || s == 0 || iflag(sh) == 0 || shlvl != 0 {
                 entry = 5; // goto exit
                 continue;
             }
@@ -364,7 +364,7 @@ pub(crate) unsafe fn cmdloop(
             crate::jobs::showjobs(sh, crate::output::stderr(), SHOW_CHANGED)?;
         }
         inter = 0;
-        if iflag() != 0 && top != 0 {
+        if iflag(sh) != 0 && top != 0 {
             inter += 1;
             crate::mail::chkmail();
         }
@@ -384,8 +384,8 @@ pub(crate) unsafe fn cmdloop(
                 break;
             }
             if crate::jobs::stoppedjobs(sh) == 0 {
-                if Iflag() == 0 {
-                    if iflag() != 0 {
+                if Iflag(sh) == 0 {
+                    if iflag(sh) != 0 {
                         let _ = (*crate::output::stderr()).write_all(b"\n");
                     }
                     break;
@@ -446,7 +446,7 @@ unsafe fn read_profile(
 ) -> Result<crate::eval::Flow, crate::error::Error> {
     let name: *const c_char = crate::parser::expandstr(sh, name)?;
 
-    if crate::input::setinputfile(
+    if crate::input::setinputfile(sh, 
         name,
         crate::input::INPUT_PUSH_FILE | crate::input::INPUT_NOFILE_OK,
     )? < 0
@@ -474,7 +474,7 @@ pub unsafe fn readcmdfile(
     sh: &mut Shell,
     name: *mut c_char,
 ) -> Result<crate::eval::Flow, crate::error::Error> {
-    crate::input::setinputfile(name, crate::input::INPUT_PUSH_FILE)?;
+    crate::input::setinputfile(sh, name, crate::input::INPUT_PUSH_FILE)?;
     let flow = cmdloop(sh, 0)?;
     if let crate::eval::Flow::Exit { .. } = flow {
         return Ok(flow);

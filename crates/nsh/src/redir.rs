@@ -220,6 +220,7 @@ unsafe fn sh_open_fail(pathname: *const c_char, flags: c_int, e: c_int) -> Error
 // [spec:dash:def:redir.sh-open-fn]
 // [spec:dash:sem:redir.sh-open-fn]
 pub unsafe fn sh_open(
+    sh: &mut Shell,
     pathname: *const c_char,
     flags: c_int,
     mayfail: c_int,
@@ -240,7 +241,7 @@ pub unsafe fn sh_open(
          * test this replaces: a signal that is pending but not *due*
          * (suppressed, or trapped and handled elsewhere) is no reason to
          * abandon the open. */
-        if let Some(err) = crate::error::poll_interrupt() {
+        if let Some(err) = crate::error::poll_interrupt(sh) {
             return Err(err);
         }
         if crate::trap::pending_sig != 0 {
@@ -267,23 +268,23 @@ unsafe fn openredirect(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
         NFROM => {
             flags = libc::O_RDONLY;
             /* do_open: */
-            f = sh_open(redir.nfile().expfname_ptr(), flags, 0)?;
+            f = sh_open(sh, redir.nfile().expfname_ptr(), flags, 0)?;
         }
         NFROMTO => {
             flags = libc::O_RDWR | libc::O_CREAT;
-            f = sh_open(redir.nfile().expfname_ptr(), flags, 0)?;
+            f = sh_open(sh, redir.nfile().expfname_ptr(), flags, 0)?;
         }
         NTO | NCLOBBER => {
             let mut fell_through = true;
             let mut fv: c_int = 0;
             if redir.node_type() == NTO {
                 /* Take care of noclobber mode. */
-                if crate::options::optlist[crate::options::Cflag] != 0 {
+                if sh.options.flag(crate::options::Cflag) != 0 {
                     fname = redir.nfile().expfname_ptr();
                     if libc::stat64(fname, &mut sb) < 0 {
                         flags = libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL;
                         /* goto do_open */
-                        return sh_open(fname, flags, 0);
+                        return sh_open(sh, fname, flags, 0);
                     }
 
                     if (sb.st_mode & libc::S_IFMT) == libc::S_IFREG {
@@ -291,7 +292,7 @@ unsafe fn openredirect(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
                         return Err(sh_open_fail(fname, libc::O_CREAT, libc::EEXIST));
                     }
 
-                    fv = sh_open(fname, libc::O_WRONLY, 0)?;
+                    fv = sh_open(sh, fname, libc::O_WRONLY, 0)?;
                     if libc::fstat64(fv, &mut sb) == 0
                         && (sb.st_mode & libc::S_IFMT) == libc::S_IFREG
                     {
@@ -305,14 +306,14 @@ unsafe fn openredirect(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
             }
             if fell_through {
                 flags = libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC;
-                f = sh_open(redir.nfile().expfname_ptr(), flags, 0)?;
+                f = sh_open(sh, redir.nfile().expfname_ptr(), flags, 0)?;
             } else {
                 f = fv;
             }
         }
         NAPPEND => {
             flags = libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND;
-            f = sh_open(redir.nfile().expfname_ptr(), flags, 0)?;
+            f = sh_open(sh, redir.nfile().expfname_ptr(), flags, 0)?;
         }
         NTOFD | NFROMFD => {
             let mut fv = redir.ndup().dupfd.get();

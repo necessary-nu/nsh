@@ -120,20 +120,20 @@ macro_rules! INTON {
 
 /// `#define iflag optlist[3]` (src/options.h:50)
 #[inline]
-unsafe fn iflag() -> c_char {
-    crate::options::optlist[3]
+unsafe fn iflag(sh: &crate::context::Shell) -> c_char {
+    sh.options.flag(3)
 }
 
 /// `#define Vflag optlist[9]` (src/options.h:56)
 #[inline]
-unsafe fn Vflag() -> c_char {
-    crate::options::optlist[9]
+unsafe fn Vflag(sh: &crate::context::Shell) -> c_char {
+    sh.options.flag(9)
 }
 
 /// `#define Eflag optlist[10]` (src/options.h:57)
 #[inline]
-unsafe fn Eflag() -> c_char {
-    crate::options::optlist[10]
+unsafe fn Eflag(sh: &crate::context::Shell) -> c_char {
+    sh.options.flag(10)
 }
 
 /*
@@ -145,7 +145,7 @@ unsafe fn Eflag() -> c_char {
 // [spec:dash:def:myhistedit.histedit-fn]
 // [spec:dash:sem:myhistedit.histedit-fn]
 pub unsafe fn histedit(sh: &mut crate::context::Shell) {
-    if iflag() != 0 {
+    if iflag(sh) != 0 {
         if !history_active() {
             INTOFF!();
             state_mut().history = Some(History::new());
@@ -155,9 +155,9 @@ pub unsafe fn histedit(sh: &mut crate::context::Shell) {
 
         let sin: c_int = crate::streams::streams().stdin;
         let serr: c_int = crate::streams::streams().stderr;
-        let mode = if Vflag() != 0 {
+        let mode = if Vflag(sh) != 0 {
             Some(EditingMode::Vi)
-        } else if Eflag() != 0 {
+        } else if Eflag(sh) != 0 {
             Some(EditingMode::Emacs)
         } else {
             None

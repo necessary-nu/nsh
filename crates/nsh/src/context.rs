@@ -51,6 +51,10 @@ pub struct Shell {
     /// The command hash and `builtinloc`. Function definitions live
     /// here too, because dash stores them in the same table.
     pub(crate) commands: crate::exec::CmdTable,
+    /// The shell's option flags. `options.rs` owns the shape; the
+    /// array behind it is private, so the flags are set through named
+    /// accessors rather than by indexing from anywhere.
+    pub(crate) options: crate::options::ShellOptions,
     /// The jobs, and the terminal state job control needs. `jobs.rs`
     /// owns the shape.
     pub(crate) jobs: crate::jobs::JobTable,
@@ -83,6 +87,7 @@ impl Shell {
             backgndpid: 0,
             commands: crate::exec::CmdTable::new(),
             jobs: crate::jobs::JobTable::new(),
+            options: crate::options::ShellOptions::new(),
             redirs: crate::redir::RedirStack::new(),
         }
     }

@@ -191,7 +191,55 @@ pub static optletters: [c_char; NOPTS] = [
     0,
 ];
 
-pub static mut optlist: [c_char; NOPTS] = [0; NOPTS];
+/// The shell's option flags — `set -e`, `set -x`, `-i` and the rest.
+///
+/// `docs/api-design.md` 5 calls the field `options`; the type cannot be
+/// `Options` because that name is already this module's builtin option
+/// *parser*, which is a different thing and stays call-scoped per 5.2.
+///
+/// The array is private and reached through [`ShellOptions::flag`] and
+/// [`ShellOptions::set_flag`]. That is worth the extra characters at 80
+/// call sites: an index into a bare `[c_char; NOPTS]` is exactly the
+/// shape that let any module write any flag, and the accessors are what
+/// make "who sets `-e`" answerable.
+pub struct ShellOptions {
+    flags: [c_char; NOPTS],
+}
+
+impl ShellOptions {
+    /// `optlist` was declared all-zero.
+    pub(crate) const fn new() -> Self {
+        ShellOptions {
+            flags: [0; NOPTS],
+        }
+    }
+
+    #[inline]
+    pub(crate) fn flag(&self, which: usize) -> c_char {
+        self.flags[which]
+    }
+
+    #[inline]
+    pub(crate) fn set_flag(&mut self, which: usize, to: c_char) {
+        self.flags[which] = to;
+    }
+
+    /// The whole flag set, copied.
+    ///
+    /// `local -` saves it and `poplocalvars` puts it back, and that is
+    /// the only place the flags move as a unit. It is also the seam
+    /// where `options` and `vars` are genuinely entangled -- a
+    /// `localvar` holds a copy of this array -- so it is a named pair of
+    /// methods rather than a public field, and whoever moves `vars`
+    /// reads this comment first.
+    pub(crate) fn snapshot(&self) -> [c_char; NOPTS] {
+        self.flags
+    }
+
+    pub(crate) fn restore(&mut self, saved: [c_char; NOPTS]) {
+        self.flags = saved;
+    }
+}
 
 /*
  * Process the shell command line arguments.
@@ -210,7 +258,7 @@ pub unsafe fn procargs(sh: &mut crate::context::Shell, mut xargv: *mut *mut c_ch
     }
     i = 0;
     while i < NOPTS as c_int {
-        optlist[i as usize] = 2;
+        sh.options.set_flag(i as usize, 2);
         i += 1;
     }
     /* `options` reports what the C left in `argptr` and `minusc`: how
@@ -219,28 +267,28 @@ pub unsafe fn procargs(sh: &mut crate::context::Shell, mut xargv: *mut *mut c_ch
      * overwrites it with the command itself. */
     minusc = null_mut();
     let words = argv_words(xargv);
-    let scan = options(&words, 0, true)?;
+    let scan = options(sh, &words, 0, true)?;
     login |= scan.login;
     xargv = xargv.add(scan.next);
     if (*xargv).is_null() {
         if scan.minus_c {
             return Err(crate::error::sh_error_value(b"-c requires an argument"));
         }
-        optlist[sflag] = 1;
+        sh.options.set_flag(sflag, 1);
     }
-    if optlist[iflag] == 2 && optlist[sflag] == 1 {
+    if sh.options.flag(iflag) == 2 && sh.options.flag(sflag) == 1 {
         crate::input::input_init();
         if crate::input::stdin_istty != 0 && libc::isatty(crate::streams::streams().stderr) != 0 {
-            optlist[iflag] = 1;
+            sh.options.set_flag(iflag, 1);
         }
     }
-    if optlist[mflag] == 2 {
-        optlist[mflag] = optlist[iflag];
+    if sh.options.flag(mflag) == 2 {
+        sh.options.set_flag(mflag, sh.options.flag(iflag));
     }
     i = 0;
     while i < NOPTS as c_int {
-        if optlist[i as usize] == 2 {
-            optlist[i as usize] = 0;
+        if sh.options.flag(i as usize) == 2 {
+            sh.options.set_flag(i as usize, 0);
         }
         i += 1;
     }
@@ -255,8 +303,8 @@ pub unsafe fn procargs(sh: &mut crate::context::Shell, mut xargv: *mut *mut c_ch
         if !(*xargv).is_null() {
             setarg0 = true; /* goto setarg0 */
         }
-    } else if optlist[sflag] == 0 {
-        crate::input::setinputfile(*xargv, 0)?;
+    } else if sh.options.flag(sflag) == 0 {
+        crate::input::setinputfile(sh, *xargv, 0)?;
         setarg0 = true;
     }
     if setarg0 {
@@ -284,10 +332,10 @@ pub unsafe fn procargs(sh: &mut crate::context::Shell, mut xargv: *mut *mut c_ch
 pub unsafe fn optschanged(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
     /* `#ifdef DEBUG opentrace();` — the dash build does not define DEBUG,
      * so `show.c` compiles to nothing and there is no trace file. */
-    crate::trap::setinteractive(optlist[iflag] as c_int);
+    crate::trap::setinteractive(sh, sh.options.flag(iflag) as c_int);
     /* #ifndef SMALL */
     crate::histedit::histedit(sh);
-    crate::jobs::setjobctl(sh, optlist[mflag] as c_int)
+    crate::jobs::setjobctl(sh, sh.options.flag(mflag) as c_int)
 }
 
 /// What a pass of [`options`] found.
@@ -315,6 +363,7 @@ pub(crate) struct Scan {
 // [spec:dash:def:options.options-fn]
 // [spec:dash:sem:options.options-fn]
 pub(crate) unsafe fn options(
+    sh: &mut crate::context::Shell,
     args: &[&BStr],
     start: usize,
     cmdline: bool,
@@ -340,8 +389,8 @@ pub(crate) unsafe fn options(
                 if !cmdline {
                     /* "-" means turn off -x and -v */
                     if word.len() == 1 {
-                        optlist[vflag] = 0;
-                        optlist[xflag] = optlist[vflag];
+                        sh.options.set_flag(vflag, 0);
+                        sh.options.set_flag(xflag, sh.options.flag(vflag));
                     }
                     /* "--" means reset params */
                     else if scan.next >= args.len() {
@@ -367,12 +416,12 @@ pub(crate) unsafe fn options(
             } else if c == b'l' && cmdline {
                 scan.login = 1;
             } else if c == b'o' {
-                minus_o(args.get(scan.next).copied(), val)?;
+                minus_o(sh, args.get(scan.next).copied(), val)?;
                 if scan.next < args.len() {
                     scan.next += 1;
                 }
             } else {
-                setoption(c, val)?;
+                setoption(sh, c, val)?;
             }
         }
     }
@@ -394,7 +443,7 @@ unsafe fn argv_words<'a>(argv: *mut *mut c_char) -> Vec<&'a BStr> {
 
 // [spec:dash:def:options.minus-o-fn]
 // [spec:dash:sem:options.minus-o-fn]
-unsafe fn minus_o(name: Option<&BStr>, val: c_int) -> Result<(), Error> {
+unsafe fn minus_o(sh: &mut crate::context::Shell, name: Option<&BStr>, val: c_int) -> Result<(), Error> {
     let mut i: c_int;
 
     let name = name.map(crate::shell::cstring);
@@ -409,7 +458,7 @@ unsafe fn minus_o(name: Option<&BStr>, val: c_int) -> Result<(), Error> {
                 if line.len() < 16 {
                     line.resize(16, b' ');
                 }
-                line.extend_from_slice(if optlist[i as usize] != 0 {
+                line.extend_from_slice(if sh.options.flag(i as usize) != 0 {
                     b"on\n"
                 } else {
                     b"off\n"
@@ -421,7 +470,7 @@ unsafe fn minus_o(name: Option<&BStr>, val: c_int) -> Result<(), Error> {
             i = 0;
             while i < NOPTS as c_int {
                 let mut line = b"set ".to_vec();
-                line.extend_from_slice(if optlist[i as usize] != 0 {
+                line.extend_from_slice(if sh.options.flag(i as usize) != 0 {
                     b"-o "
                 } else {
                     b"+o "
@@ -437,7 +486,7 @@ unsafe fn minus_o(name: Option<&BStr>, val: c_int) -> Result<(), Error> {
         i = 0;
         while i < NOPTS as c_int {
             if name.as_bytes() == CStr::from_ptr(optnames[i as usize]).to_bytes() {
-                optlist[i as usize] = val as c_char;
+                sh.options.set_flag(i as usize, val as c_char);
                 return Ok(());
             }
             i += 1;
@@ -451,19 +500,19 @@ unsafe fn minus_o(name: Option<&BStr>, val: c_int) -> Result<(), Error> {
 
 // [spec:dash:def:options.setoption-fn]
 // [spec:dash:sem:options.setoption-fn]
-unsafe fn setoption(flag: u8, val: c_int) -> Result<(), Error> {
+unsafe fn setoption(sh: &mut crate::context::Shell, flag: u8, val: c_int) -> Result<(), Error> {
     let mut i: c_int;
 
     i = 0;
     while i < NOPTS as c_int {
         if optletters[i as usize] as u8 == flag {
-            optlist[i as usize] = val as c_char;
+            sh.options.set_flag(i as usize, val as c_char);
             if val != 0 {
                 /* #%$ hack for ksh semantics */
                 if flag == b'V' {
-                    optlist[Eflag] = 0;
+                    sh.options.set_flag(Eflag, 0);
                 } else if flag == b'E' {
-                    optlist[Vflag] = 0;
+                    sh.options.set_flag(Vflag, 0);
                 }
             }
             return Ok(());
@@ -722,12 +771,12 @@ mod tests {
     #[test]
     fn an_unknown_letter_returns_its_complaint() {
         let _g = crate::testutil::lock();
-        let saved = unsafe { optlist };
+        let mut owned = crate::context::Shell::new();
+        let sh = &mut owned;
         let args = [BStr::new("set"), BStr::new("-Q")];
 
-        let e = unsafe { options(&args, 1, false) }.expect_err("-Q is not an option");
+        let e = unsafe { options(sh, &args, 1, false) }.expect_err("-Q is not an option");
 
-        unsafe { optlist = saved };
         assert_eq!(e.message().to_vec(), b"Illegal option -Q".to_vec());
         assert_eq!(e.status(), 2);
     }
@@ -735,12 +784,12 @@ mod tests {
     #[test]
     fn an_unknown_name_returns_its_complaint() {
         let _g = crate::testutil::lock();
-        let saved = unsafe { optlist };
+        let mut owned = crate::context::Shell::new();
+        let sh = &mut owned;
         let args = [BStr::new("set"), BStr::new("-o"), BStr::new("nosuchopt")];
 
-        let e = unsafe { options(&args, 1, false) }.expect_err("-o nosuchopt is not an option");
+        let e = unsafe { options(sh, &args, 1, false) }.expect_err("-o nosuchopt is not an option");
 
-        unsafe { optlist = saved };
         assert_eq!(e.message().to_vec(), b"Illegal option -o nosuchopt".to_vec());
     }
 
@@ -856,10 +905,10 @@ mod tests {
     /// property worth pinning.
     fn scan_options(raw: &[&[u8]], cmdline: bool) -> (usize, bool, c_int) {
         let _guard = crate::testutil::lock();
-        let saved = unsafe { optlist };
+        let mut owned = crate::context::Shell::new();
+        let sh = &mut owned;
         let args = words(raw);
-        let scan = unsafe { options(&args, 0, cmdline) }.expect("these cases scan cleanly");
-        unsafe { optlist = saved };
+        let scan = unsafe { options(sh, &args, 0, cmdline) }.expect("these cases scan cleanly");
         (scan.next, scan.minus_c, scan.login)
     }
 

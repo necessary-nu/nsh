@@ -24,8 +24,8 @@ use crate::exec::shellexec;
 // [spec:dash:sem:eval.execcmd-fn]
 pub unsafe fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if args.len() > 1 {
-        crate::options::optlist[crate::options::iflag] = 0; /* exit on error */
-        crate::options::optlist[crate::options::mflag] = 0;
+        sh.options.set_flag(crate::options::iflag, 0); /* exit on error */
+        sh.options.set_flag(crate::options::mflag, 0);
         crate::options::optschanged(sh)?;
         crate::input::flush_input();
         /* `execve` wants the array back, so this is where it is built --

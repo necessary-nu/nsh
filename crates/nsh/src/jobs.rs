@@ -232,12 +232,12 @@ pub(crate) use crate::system::errno;
 
 /* src/options.h: `#define iflag optlist[3]` and friends. */
 #[inline]
-unsafe fn iflag() -> c_int {
-    crate::options::optlist[crate::options::iflag] as c_int
+unsafe fn iflag(sh: &crate::context::Shell) -> c_int {
+    sh.options.flag(crate::options::iflag) as c_int
 }
 #[inline]
-unsafe fn pipefail() -> c_int {
-    crate::options::optlist[crate::options::pipefail] as c_int
+unsafe fn pipefail(sh: &crate::context::Shell) -> c_int {
+    sh.options.flag(crate::options::pipefail) as c_int
 }
 
 // [spec:dash:def:jobs.onsigchild-fn]
@@ -382,7 +382,7 @@ pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(),
          * argues against. */
         /* `mayfail = 1`, so the only thing this can hand back is an
          * interrupt taken at its EINTR poll. */
-        ofd = crate::redir::sh_open(_PATH_TTY.as_ptr() as *const c_char, libc::O_RDWR, 1)?;
+        ofd = crate::redir::sh_open(sh, _PATH_TTY.as_ptr() as *const c_char, libc::O_RDWR, 1)?;
         fd = ofd;
         'after_dowhile: {
             'out_lbl: {
@@ -442,7 +442,7 @@ pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(),
                         if pgrp == libc::getpgrp() {
                             break 'after_dowhile; // `break` of the do/while
                         }
-                        if iflag() == 0 {
+                        if iflag(sh) == 0 {
                             break 'close_lbl; // goto close
                         }
                         libc::killpg(0, libc::SIGTTIN);
@@ -454,11 +454,11 @@ pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(),
                 // falls through into out:
             }
             // out:
-            if iflag() == 0 {
+            if iflag(sh) == 0 {
                 break 'after_dowhile; // `break` of the do/while
             }
             crate::error::sh_warnx(b"can't access tty; job control turned off");
-            crate::options::optlist[crate::options::mflag] = 0;
+            sh.options.set_flag(crate::options::mflag, 0);
             on = 0;
             let _ = on;
             return Ok(());
@@ -471,9 +471,9 @@ pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(),
         pgrp = sh.jobs.initialpgrp;
     }
 
-    crate::trap::setsignal(libc::SIGTSTP);
-    crate::trap::setsignal(libc::SIGTTOU);
-    crate::trap::setsignal(libc::SIGTTIN);
+    crate::trap::setsignal(sh, libc::SIGTSTP);
+    crate::trap::setsignal(sh, libc::SIGTTOU);
+    crate::trap::setsignal(sh, libc::SIGTTIN);
     if fd >= 0 {
         libc::setpgid(0, pgrp);
         xtcsetpgrp(fd, pgrp)?;
@@ -986,8 +986,8 @@ unsafe fn forkchild(
         if mode == FORK_FG {
             xxtcsetpgrp(sh, pgrp).unwrap_or_else(|e| forkchild_fatal(sh, e));
         }
-        crate::trap::setsignal(libc::SIGTSTP);
-        crate::trap::setsignal(libc::SIGTTOU);
+        crate::trap::setsignal(sh, libc::SIGTSTP);
+        crate::trap::setsignal(sh, libc::SIGTTOU);
     } else if mode == FORK_BG {
         crate::trap::ignoresig(libc::SIGINT);
         crate::trap::ignoresig(libc::SIGQUIT);
@@ -999,7 +999,7 @@ unsafe fn forkchild(
             let sin: c_int = crate::streams::streams().stdin;
             libc::close(sin);
             let f: c_int =
-                crate::redir::sh_open(_PATH_DEVNULL.as_ptr() as *const c_char, libc::O_RDONLY, 0)
+                crate::redir::sh_open(sh, _PATH_DEVNULL.as_ptr() as *const c_char, libc::O_RDONLY, 0)
                     .unwrap_or_else(|e| forkchild_fatal(sh, e));
             if f != sin {
                 libc::dup2(f, sin);
@@ -1010,10 +1010,10 @@ unsafe fn forkchild(
              */
         }
     }
-    if oldlvl == 0 && iflag() != 0 {
-        crate::trap::setsignal(libc::SIGINT);
-        crate::trap::setsignal(libc::SIGQUIT);
-        crate::trap::setsignal(libc::SIGTERM);
+    if oldlvl == 0 && iflag(sh) != 0 {
+        crate::trap::setsignal(sh, libc::SIGINT);
+        crate::trap::setsignal(sh, libc::SIGQUIT);
+        crate::trap::setsignal(sh, libc::SIGTERM);
     }
 
     if lvforked != 0 {
@@ -1074,7 +1074,7 @@ unsafe fn forkparent(
     if mode == FORK_BG {
         sh.backgndpid = pid; /* set $! */
         set_curjob(sh, ji, CUR_RUNNING);
-        if crate::options::optlist[crate::options::iflag] != 0 {
+        if sh.options.flag(crate::options::iflag) != 0 {
             let _ = writeln!(&mut *crate::output::stderr(), "[{}] {pid}", jobno(ji));
         }
     }
@@ -1321,7 +1321,7 @@ unsafe fn waitone(sh: &mut crate::context::Shell, block: c_int, jobp: Option<usi
      * `INTON` infallible (§4.3) without moving the delivery point for the
      * one path where it would have been visible: a ^C during a foreground
      * command that does not itself die of the signal. */
-    if let Some(e) = crate::error::poll_interrupt() {
+    if let Some(e) = crate::error::poll_interrupt(sh) {
         return Err(e);
     }
     Ok(pid)
@@ -1409,7 +1409,7 @@ unsafe fn waitproc(sh: &mut crate::context::Shell, block: c_int, status: *mut c_
             /* One of the three EINTR sites the C retries blindly, and the
              * one that matters for a ^C during a foreground command that
              * does not itself die of it. */
-            if let Some(e) = crate::error::poll_interrupt() {
+            if let Some(e) = crate::error::poll_interrupt(sh) {
                 return Err(e);
             }
         }
@@ -1932,7 +1932,7 @@ pub(crate) unsafe fn getstatus(sh: &mut crate::context::Shell, jobp: usize) -> c
     } else {
         sh.jobs.tab[jobp].ps[ps - 1].status
     };
-    if pipefail() != 0 {
+    if pipefail(sh) != 0 {
         loop {
             if status != 0 {
                 break;

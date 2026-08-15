@@ -25,7 +25,7 @@ use crate::trap::{
 
 // [spec:dash:def:trap.trapcmd-fn]
 // [spec:dash:sem:trap.trapcmd-fn]
-pub unsafe fn trapcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut signo: c_int;
 
     let mut opts = Options::new(args);
@@ -52,7 +52,7 @@ pub unsafe fn trapcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         return Ok(Flow::Done(0));
     }
     if ptrap != 0 {
-        clear_traps(None);
+        clear_traps(sh, None);
     }
     /* `trap SIG...` resets, and `trap ACTION SIG...` sets: the first word
      * is the action unless it is itself a signal, or the only word. */
@@ -99,7 +99,7 @@ pub unsafe fn trapcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
          * the same way and never leaves a stale pointer for it to load. */
         drop(core::mem::replace(&mut trap_mut()[signo as usize], newtrap));
         if signo != 0 {
-            setsignal(signo);
+            setsignal(sh, signo);
         }
         INTON();
     }

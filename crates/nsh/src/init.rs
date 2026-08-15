@@ -40,7 +40,7 @@ pub unsafe fn init(sh: &mut crate::context::Shell) -> Result<(), crate::error::E
     crate::input::mkinit_init();
 
     /* from trap.c: */
-    crate::trap::mkinit_init();
+    crate::trap::mkinit_init(sh);
 
     /* from output.c: */
     {
@@ -114,7 +114,7 @@ pub unsafe fn forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
     crate::redir::mkinit_forkreset(sh);
 
     /* from trap.c: */
-    crate::trap::mkinit_forkreset(n);
+    crate::trap::mkinit_forkreset(sh, n);
 }
 
 /*

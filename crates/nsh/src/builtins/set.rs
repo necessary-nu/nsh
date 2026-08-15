@@ -27,7 +27,7 @@ pub unsafe fn setcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         return Ok(Flow::Done(showvars(addr_of!(nullstr) as *const c_char, 0, VUNSET)));
     }
     INTOFF();
-    let scan = options(args, 1, false)?;
+    let scan = options(sh, args, 1, false)?;
     /* The fourth `?` to return between this frame's INTOFF and its INTON,
      * and left leaking with the other three: 2.4 is explicit that pairing
      * them would move the instruction a pending SIGINT is delivered at. */
