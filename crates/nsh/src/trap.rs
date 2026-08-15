@@ -15,7 +15,7 @@ pub type sig_atomic_t = c_int;
 
 use crate::error::{INTOFF, INTON};
 use crate::error::Error;
-use crate::eval::{Flow, SKIPFUNC, SKIPFUNCDEF, evalskip, exitstatus, savestatus};
+use crate::eval::{Flow, SKIPFUNC, SKIPFUNCDEF, exitstatus, savestatus};
 use crate::mystring::nullstr;
 use crate::nodes::Node;
 use crate::options::Options;
@@ -351,7 +351,7 @@ pub unsafe fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
             continue;
         }
 
-        if evalskip != 0 {
+        if sh.eval.evalskip != 0 {
             pending_sig = i + 1;
             break;
         }
@@ -379,7 +379,7 @@ pub unsafe fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
             Flow::Done(_) => {}
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
-        if evalskip != SKIPFUNC {
+        if sh.eval.evalskip != SKIPFUNC {
             exitstatus = status;
         }
         i += 1;
@@ -434,7 +434,7 @@ pub unsafe fn exitshell(sh: &mut crate::context::Shell) -> ! {
             if ptrap != 0 {
                 break 'out;
             }
-            evalskip = 0;
+            sh.eval.evalskip = 0;
             let mut p = cbytes(&p);
             /* An error in the EXIT trap is reported and dropped -- the
              * shell is already exiting, and the C's `longjmp` landed at
@@ -452,7 +452,7 @@ pub unsafe fn exitshell(sh: &mut crate::context::Shell) -> ! {
                     break 'out;
                 }
             }
-            evalskip = SKIPFUNCDEF;
+            sh.eval.evalskip = SKIPFUNCDEF;
         }
     }
     /* out: */

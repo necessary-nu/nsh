@@ -13,11 +13,11 @@ use crate::error::Error;
 use bstr::BStr;
 use libc::c_int;
 
-use crate::eval::{Flow, SKIPBREAK, SKIPCONT, evalskip, loopnest, skipcount};
+use crate::eval::{Flow, SKIPBREAK, SKIPCONT};
 
 // [spec:dash:def:eval.breakcmd-fn]
 // [spec:dash:sem:eval.breakcmd-fn]
-pub unsafe fn breakcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn breakcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut n: c_int = 1;
 
     if let Some(count) = args.get(1) {
@@ -27,16 +27,16 @@ pub unsafe fn breakcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             return Err(crate::mystring::badnum(count.as_ptr()));
         }
     }
-    if n > loopnest {
-        n = loopnest;
+    if n > sh.eval.loopnest {
+        n = sh.eval.loopnest;
     }
     if n > 0 {
-        evalskip = if args[0].first() == Some(&b'c') {
+        sh.eval.evalskip = if args[0].first() == Some(&b'c') {
             SKIPCONT
         } else {
             SKIPBREAK
         };
-        skipcount = n;
+        sh.eval.skipcount = n;
     }
     Ok(Flow::Done(0))
 }
@@ -54,11 +54,14 @@ mod tests {
             args.push(BStr::new(count));
         }
         unsafe {
-            loopnest = nest;
-            evalskip = 0;
-            skipcount = 0;
-            assert_eq!(breakcmd(&mut Shell::new(), &args).unwrap(), Flow::Done(0));
-            (evalskip, skipcount)
+            /* One shell: the state the case arranges and the state the
+             * builtin writes are the same shell's, which is the whole
+             * point of the field. */
+            let mut owned = Shell::new();
+            let sh = &mut owned;
+            sh.eval.loopnest = nest;
+            assert_eq!(breakcmd(sh, &args).unwrap(), Flow::Done(0));
+            (sh.eval.evalskip, sh.eval.skipcount)
         }
     }
 

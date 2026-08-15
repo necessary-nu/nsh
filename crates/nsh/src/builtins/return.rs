@@ -9,11 +9,11 @@ use crate::error::Error;
 use bstr::BStr;
 use libc::c_int;
 
-use crate::eval::{Flow, SKIPFUNC, SKIPFUNCDEF, evalskip, exitstatus};
+use crate::eval::{Flow, SKIPFUNC, SKIPFUNCDEF, exitstatus};
 
 // [spec:dash:def:eval.returncmd-fn]
 // [spec:dash:sem:eval.returncmd-fn]
-pub unsafe fn returncmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn returncmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let skip: c_int;
     let status: c_int;
 
@@ -29,7 +29,7 @@ pub unsafe fn returncmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
         skip = SKIPFUNCDEF;
         status = exitstatus;
     }
-    evalskip = skip;
+    sh.eval.evalskip = skip;
 
     Ok(Flow::Done(status))
 }
@@ -50,9 +50,10 @@ mod tests {
         }
         unsafe {
             exitstatus = last;
-            evalskip = 0;
-            let returned = returncmd(&mut Shell::new(), &args).unwrap();
-            (evalskip, returned)
+            let mut owned = Shell::new();
+            let sh = &mut owned;
+            let returned = returncmd(sh, &args).unwrap();
+            (sh.eval.evalskip, returned)
         }
     }
 

@@ -55,6 +55,9 @@ pub struct Shell {
     /// array behind it is private, so the flags are set through named
     /// accessors rather than by indexing from anywhere.
     pub(crate) options: crate::options::ShellOptions,
+    /// Where the evaluator is: what it is skipping, how deep, and the
+    /// buffers it must not re-enter. `eval.rs` owns the shape.
+    pub(crate) eval: crate::eval::EvalState,
     /// The jobs, and the terminal state job control needs. `jobs.rs`
     /// owns the shape.
     pub(crate) jobs: crate::jobs::JobTable,
@@ -86,6 +89,7 @@ impl Shell {
             aliases: crate::alias::AliasTable::new(),
             backgndpid: 0,
             commands: crate::exec::CmdTable::new(),
+            eval: crate::eval::EvalState::new(),
             jobs: crate::jobs::JobTable::new(),
             options: crate::options::ShellOptions::new(),
             redirs: crate::redir::RedirStack::new(),

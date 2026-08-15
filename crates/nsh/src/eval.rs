@@ -80,10 +80,50 @@ pub struct backcmd {
 // module globals
 // ---------------------------------------------------------------------
 
-pub static mut evalskip: c_int = 0; /* set if we are skipping commands */
-pub(crate) static mut skipcount: c_int = 0; /* number of levels to skip */
-pub static mut loopnest: c_int = 0; /* current loop nesting level (MKINIT) */
-static mut funcline: c_int = 0; /* starting line number of current function, or 0 */
+/// Where the evaluator is: what it is skipping, how deep it is, and the
+/// two buffers it must not re-enter.
+///
+/// These are independent scalars rather than one structure, which is why
+/// the fields are `pub(crate)` where `AliasTable` and `ShellOptions`
+/// keep theirs private: there is no container invariant for a method to
+/// protect, and twelve one-line accessors would be noise.
+///
+/// **One pairing is real and is not enforced here.** `skipcount` only
+/// means anything while `evalskip` is `SKIPBREAK` or `SKIPCONT` — it is
+/// the number of loop levels still to unwind. Anything that sets one
+/// must set the other, as `break`/`continue` do. Making that a single
+/// `skip(kind, count)` setter would be an improvement and is *not* this
+/// commit, which moves state and changes no behaviour.
+pub struct EvalState {
+    /// set if we are skipping commands
+    pub(crate) evalskip: c_int,
+    /// number of levels to skip — see the note above
+    pub(crate) skipcount: c_int,
+    /// current loop nesting level (MKINIT)
+    pub(crate) loopnest: c_int,
+    /// starting line number of current function, or 0
+    ///
+    /// Private: `eval.rs` is the only module that names it.
+    funcline: c_int,
+    /// Prevent PS4 nesting. (MKINIT)
+    pub(crate) inps4: c_int,
+    /// MKINIT `int tpip[2] = { -1 }`
+    pub(crate) tpip: [c_int; 2],
+}
+
+impl EvalState {
+    /// What the six statics were declared with.
+    pub(crate) const fn new() -> Self {
+        EvalState {
+            evalskip: 0,
+            skipcount: 0,
+            loopnest: 0,
+            funcline: 0,
+            inps4: 0,
+            tpip: [-1, 0],
+        }
+    }
+}
 
 /// The name the running builtin was invoked by, for the error prefix.
 ///
@@ -91,15 +131,18 @@ static mut funcline: c_int = 0; /* starting line number of current function, or 
 /// call. Owning the bytes states that lifetime instead of assuming it,
 /// which is what lets `dotcmd` stop keeping its resolved path alive in a
 /// static of its own.
+///
+/// **Still a `static mut`, and deliberately not in `EvalState`.**
+/// `docs/api-design.md` §5 groups it here and it does belong to the
+/// shell, but the only thing that reads it is `error.rs`'s `sh_warnx`,
+/// which builds the diagnostic prefix — so moving it threads the whole
+/// diagnostic spine (`sh_warnx` -> `report` -> `sh_error_value`, which
+/// the parser and expansion call from everywhere). That is its own
+/// slice and a larger one than this. See the node log.
 pub static mut commandname: Option<BString> = None;
 pub static mut exitstatus: c_int = 0; /* exit status of last command */
 pub static mut back_exitstatus: c_int = 0; /* exit status of backquoted command */
 pub static mut savestatus: c_int = -1; /* exit status of last command outside traps */
-
-/* Prevent PS4 nesting. */
-pub static mut inps4: c_int = 0; /* MKINIT */
-
-pub static mut tpip: [c_int; 2] = [-1, 0]; /* MKINIT int tpip[2] = { -1 } */
 
 // ---------------------------------------------------------------------
 // control flow, which is not error
@@ -250,7 +293,7 @@ pub unsafe fn evalstring(sh: &mut Shell, s: *mut c_char, flags: c_int) -> Result
                 status = i;
             }
 
-            if evalskip != 0 {
+            if sh.eval.evalskip != 0 {
                 break;
             }
         }
@@ -313,8 +356,8 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
                                 let r = n.nredir();
                                 crate::error::errlinno = r.linno;
                                 crate::var::lineno = r.linno;
-                                if funcline != 0 {
-                                    crate::var::lineno -= funcline - 1;
+                                if sh.eval.funcline != 0 {
+                                    crate::var::lineno -= sh.eval.funcline - 1;
                                 }
                                 expredir(sh, &r.redirect)?;
                                 crate::redir::pushredir(sh, &r.redirect);
@@ -381,7 +424,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
                                     b.ch1.as_deref(),
                                     (flags | (((isor >> 1).wrapping_sub(1)) as c_int)) & EV_TESTED,
                                 ));
-                                if ((status == 0) as libc::c_uint) == isor || evalskip != 0 {
+                                if ((status == 0) as libc::c_uint) == isor || sh.eval.evalskip != 0 {
                                     break 'sw;
                                 }
                                 nnext = b.ch2.as_deref();
@@ -390,7 +433,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
                             NIF => {
                                 let f = n.nif();
                                 status = flow!(evaltree(sh, f.test.as_deref(), EV_TESTED));
-                                if evalskip != 0 {
+                                if sh.eval.evalskip != 0 {
                                     break 'sw;
                                 }
                                 if status == 0 {
@@ -414,7 +457,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
                              * nothing left for the fallthrough to reinterpret. */
                             _ /* default, NNOT */ => {
                                 status = flow!(evaltree(sh, n.nnot().com.as_deref(), EV_TESTED));
-                                if evalskip == 0 {
+                                if sh.eval.evalskip == 0 {
                                     status = (status == 0) as c_int;
                                 }
                                 break 'sw;
@@ -488,16 +531,16 @@ pub unsafe fn evaltreenr(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Resu
 
 // [spec:dash:def:eval.skiploop-fn]
 // [spec:dash:sem:eval.skiploop-fn]
-unsafe fn skiploop() -> c_int {
-    let mut skip: c_int = evalskip;
+unsafe fn skiploop(sh: &mut crate::context::Shell) -> c_int {
+    let mut skip: c_int = sh.eval.evalskip;
 
     match skip {
         0 => {}
 
         SKIPBREAK | SKIPCONT => {
-            skipcount -= 1;
-            if skipcount <= 0 {
-                evalskip = 0;
+            sh.eval.skipcount -= 1;
+            if sh.eval.skipcount <= 0 {
+                sh.eval.evalskip = 0;
             } else {
                 skip = SKIPBREAK;
             }
@@ -516,7 +559,7 @@ unsafe fn evalloop(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
     let mut status: c_int;
     let mut flags: c_int = flags;
 
-    loopnest += 1;
+    sh.eval.loopnest += 1;
     status = 0;
     flags &= EV_TESTED;
     loop {
@@ -524,7 +567,7 @@ unsafe fn evalloop(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
             let mut i: c_int;
 
             i = flow!(evaltree(sh, n.nbinary().ch1.as_deref(), EV_TESTED));
-            skip = skiploop();
+            skip = skiploop(sh);
             if skip == SKIPFUNC {
                 status = i;
             }
@@ -538,14 +581,14 @@ unsafe fn evalloop(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
                     break;
                 }
                 status = flow!(evaltree(sh, n.nbinary().ch2.as_deref(), flags));
-                skip = skiploop();
+                skip = skiploop(sh);
             }
         }
         if (skip & !SKIPCONT) != 0 {
             break;
         }
     }
-    loopnest -= 1;
+    sh.eval.loopnest -= 1;
 
     Ok(Flow::Done(status))
 }
@@ -560,8 +603,8 @@ unsafe fn evalfor(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error>
     let f = n.nfor();
     crate::error::errlinno = f.linno;
     crate::var::lineno = f.linno;
-    if funcline != 0 {
-        crate::var::lineno -= funcline - 1;
+    if sh.eval.funcline != 0 {
+        crate::var::lineno -= sh.eval.funcline - 1;
     }
 
     for argp in &f.args {
@@ -569,16 +612,16 @@ unsafe fn evalfor(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error>
     }
 
     status = 0;
-    loopnest += 1;
+    sh.eval.loopnest += 1;
     flags &= EV_TESTED;
     for sp in &arglist.list {
         crate::var::setvar(sh, f.var.as_ptr(), sp.textp(), 0)?;
         status = flow!(evaltree(sh, f.body.as_deref(), flags));
-        if (skiploop() & !SKIPCONT) != 0 {
+        if (skiploop(sh) & !SKIPCONT) != 0 {
             break;
         }
     }
-    loopnest -= 1;
+    sh.eval.loopnest -= 1;
 
     Ok(Flow::Done(status))
 }
@@ -592,8 +635,8 @@ unsafe fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
     let c = n.ncase();
     crate::error::errlinno = c.linno;
     crate::var::lineno = c.linno;
-    if funcline != 0 {
-        crate::var::lineno -= funcline - 1;
+    if sh.eval.funcline != 0 {
+        crate::var::lineno -= sh.eval.funcline - 1;
     }
 
     crate::expand::expandarg(sh, 
@@ -611,7 +654,7 @@ unsafe fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
     debug_assert_eq!(arglist.list.len(), 1, "an unsplit expansion is one field");
     'out_lbl: {
         for cp in &c.cases {
-            if evalskip != 0 {
+            if sh.eval.evalskip != 0 {
                 break;
             }
             for patp in &cp.nclist().pattern {
@@ -620,7 +663,7 @@ unsafe fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
                      * EV_EXIT may prevent us from setting the
                      * exit status.
                      */
-                    if evalskip == 0 && cp.nclist().body.is_some() {
+                    if sh.eval.evalskip == 0 && cp.nclist().body.is_some() {
                         status = flow!(evaltree(sh, cp.nclist().body.as_deref(), flags));
                     }
                     break 'out_lbl;
@@ -647,8 +690,8 @@ unsafe fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, E
     let r = n.nredir();
     crate::error::errlinno = r.linno;
     crate::var::lineno = r.linno;
-    if funcline != 0 {
-        crate::var::lineno -= funcline - 1;
+    if sh.eval.funcline != 0 {
+        crate::var::lineno -= sh.eval.funcline - 1;
     }
 
     expredir(sh, &r.redirect)?;
@@ -872,11 +915,11 @@ pub unsafe fn evalbackcmd(
         }
 
         crate::redir::sh_pipe(pip.as_mut_ptr(), 0)?;
-        tpip[0] = pip[0];
-        tpip[1] = pip[1];
+        sh.eval.tpip[0] = pip[0];
+        sh.eval.tpip[1] = pip[1];
         jp = crate::jobs::makejob(sh, 1);
         pid = crate::jobs::forkshell(sh, Some(jp), n, FORK_NOJOB)?;
-        tpip[0] = -1;
+        sh.eval.tpip[0] = -1;
         if pid == 0 {
             FORCEINTON();
             libc::close(pip[0]);
@@ -1052,8 +1095,8 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
     let c = cmd.ncmd();
     crate::error::errlinno = c.linno;
     crate::var::lineno = c.linno;
-    if funcline != 0 {
-        crate::var::lineno -= funcline - 1;
+    if sh.eval.funcline != 0 {
+        crate::var::lineno -= sh.eval.funcline - 1;
     }
 
     /* First expand the arguments. */
@@ -1168,7 +1211,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
     let args: Vec<&BStr> = crate::builtins::args(&arglist.list[head..]);
 
     lastarg = null_mut();
-    if iflag(sh) != 0 && funcline == 0 && argc > 0 {
+    if iflag(sh) != 0 && sh.eval.funcline == 0 && argc > 0 {
         lastarg = *nargv.offset(-1);
     }
 
@@ -1219,15 +1262,15 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
             }
 
             /* Print the command if xflag is set. */
-            if xflag(sh) != 0 && inps4 == 0 {
+            if xflag(sh) != 0 && sh.eval.inps4 == 0 {
                 let out: *mut Output;
                 let mut sep: c_int;
 
                 out = crate::output::previous_stderr();
-                inps4 = 1;
+                sh.eval.inps4 = 1;
                 let prompt = crate::parser::expandstr(sh, crate::var::ps4val())?;
                 let _ = (&mut *out).write_all(CStr::from_ptr(prompt).to_bytes());
-                inps4 = 0;
+                sh.eval.inps4 = 0;
                 sep = 0;
                 sep = eprintlist(out, &varlist.list, sep);
                 /* `eprintlist(out, osp, sep)` prints from the *original*
@@ -1439,15 +1482,15 @@ unsafe fn evalfun(
      * puts inside the protected region so the epilogue's `freeparam` cannot
      * reach what the copy still points at. */
     saveparam = crate::options::takeparam();
-    savefuncline = funcline;
-    saveloopnest = loopnest;
+    savefuncline = sh.eval.funcline;
+    saveloopnest = sh.eval.loopnest;
 
     INTOFF();
     /* `func->count++`: the second reference that keeps the body alive if
      * the function is redefined while it runs. */
     crate::nodes::reffunc(func);
-    funcline = (*func).ndefun().linno;
-    loopnest = 0;
+    sh.eval.funcline = (*func).ndefun().linno;
+    sh.eval.loopnest = 0;
     /* This `INTON` is *after* `reffunc`, and the epilogue's `freefunc` is
      * what balances it on both paths. docs/errors-are-values.md 2.6
      * records that a conversion reordering this prologue turns the
@@ -1460,12 +1503,12 @@ unsafe fn evalfun(
 
     // funcdone:
     INTOFF();
-    loopnest = saveloopnest;
-    funcline = savefuncline;
+    sh.eval.loopnest = saveloopnest;
+    sh.eval.funcline = savefuncline;
     crate::nodes::freefunc(func);
     crate::options::restoreparam(saveparam);
     INTON();
-    evalskip &= !(SKIPFUNC | SKIPFUNCDEF);
+    sh.eval.evalskip &= !(SKIPFUNC | SKIPFUNCDEF);
 
     outcome
 }
@@ -1613,16 +1656,17 @@ mod tests {
     fn exitreset_takes_savestatus_for_an_exit() {
         let _guard = crate::testutil::lock();
         unsafe {
-            let (se, ss, sk) = (exitstatus, savestatus, evalskip);
+            let (se, ss) = (exitstatus, savestatus);
             /* A shell of this test's own. `exitreset` also unwinds the
-             * redirection stack, which is on the instance now; one made
-             * here holds the empty stack a process starts with, so that
-             * half stays the no-op it has always been under this test
-             * and the half being asserted is untouched by it. */
+             * redirection stack and clears `evalskip`, both of which are
+             * on the instance now; one made here holds what a process
+             * starts with, so those halves stay the no-ops they have
+             * always been under this test -- and `evalskip` no longer
+             * needs saving and restoring, because it was never the
+             * process's to begin with. */
             let mut owned = crate::context::Shell::new();
             let sh = &mut owned;
 
-            evalskip = 0;
             exitstatus = 1;
             savestatus = 9;
             crate::init::exitreset(sh, true);
@@ -1632,7 +1676,6 @@ mod tests {
             assert_eq!(got, 9, "`exit 9` names the status the shell leaves with");
             assert_eq!(left, -1, "and it is consumed");
 
-            evalskip = 0;
             exitstatus = 1;
             savestatus = 9;
             crate::init::exitreset(sh, false);
@@ -1641,7 +1684,6 @@ mod tests {
 
             exitstatus = se;
             savestatus = ss;
-            evalskip = sk;
         }
     }
 }

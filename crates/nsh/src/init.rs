@@ -70,18 +70,18 @@ pub unsafe fn exitreset(sh: &mut crate::context::Shell, by_exitcmd: bool) {
     /* from eval.c: */
     {
         if crate::eval::savestatus >= 0 {
-            if by_exitcmd || crate::eval::evalskip == crate::eval::SKIPFUNCDEF {
+            if by_exitcmd || sh.eval.evalskip == crate::eval::SKIPFUNCDEF {
                 crate::eval::exitstatus = crate::eval::savestatus;
             }
             crate::eval::savestatus = -1;
         }
-        crate::eval::evalskip = 0;
-        crate::eval::loopnest = 0;
-        crate::eval::inps4 = 0;
+        sh.eval.evalskip = 0;
+        sh.eval.loopnest = 0;
+        sh.eval.inps4 = 0;
 
-        if crate::eval::tpip[0] >= 0 {
-            libc::close(crate::eval::tpip[0]);
-            libc::close(crate::eval::tpip[1]);
+        if sh.eval.tpip[0] >= 0 {
+            libc::close(sh.eval.tpip[0]);
+            libc::close(sh.eval.tpip[1]);
         }
     }
 

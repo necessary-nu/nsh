@@ -27,7 +27,7 @@ use std::ffi::CStr;
 use std::io::Write;
 
 use crate::error::FORCEINTON;
-use crate::eval::{EV_EXIT, SKIPFUNC, SKIPFUNCDEF, evalskip};
+use crate::eval::{EV_EXIT, SKIPFUNC, SKIPFUNCDEF};
 use crate::jobs::SHOW_CHANGED;
 
 /* pid of main shell */
@@ -394,9 +394,9 @@ pub(crate) unsafe fn cmdloop(
             }
             numeof += 1;
         }
-        skip = evalskip;
+        skip = sh.eval.evalskip;
         if skip != 0 {
-            evalskip &= !(SKIPFUNC | SKIPFUNCDEF);
+            sh.eval.evalskip &= !(SKIPFUNC | SKIPFUNCDEF);
             break;
         }
     }
