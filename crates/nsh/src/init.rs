@@ -38,7 +38,7 @@ use crate::nodes::Node;
 // [spec:dash:sem:init.init-fn]
 pub unsafe fn init(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
     /* from input.c: */
-    crate::input::mkinit_init();
+    crate::input::mkinit_init(sh);
 
     /* from trap.c: */
     crate::trap::mkinit_init(sh);

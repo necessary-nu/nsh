@@ -273,7 +273,7 @@ pub unsafe fn evalstring(sh: &mut Shell, s: *mut c_char, flags: c_int) -> Result
     let owned: Vec<u8> = CStr::from_ptr(s).to_bytes_with_nul().to_vec();
     let s: *mut c_char = owned.as_ptr() as *mut c_char;
 
-    crate::input::setinputstring(s);
+    crate::input::setinputstring(sh, s);
     status = 0;
     loop {
         let n: Option<Node> = match crate::parser::parsecmd(sh, 0)? {
@@ -1113,7 +1113,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
 
     /* First expand the arguments. */
     /* TRACE(("evalcommand(0x%lx, %d) called\n", (long)cmd, flags)); */
-    file_stop = crate::input::cur_mark();
+    file_stop = crate::input::cur_mark(sh);
     sh.eval.back_exitstatus = 0;
 
     cmdentry.cmdtype = CMDBUILTIN;

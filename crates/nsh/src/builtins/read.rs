@@ -126,7 +126,7 @@ pub unsafe fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
      * is `line.len()`, and `USTPUTC` is `push`. */
     let mut line = BString::default();
 
-    crate::input::pushstdin();
+    crate::input::pushstdin(sh);
 
     /* The C body is a `for (;;)` entered by `goto start`, with the
      * labels `put`, `record` and `start` inside it. The label graph is
