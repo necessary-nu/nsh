@@ -27,7 +27,6 @@ use std::ffi::CStr;
 use std::io::Write as _;
 
 use crate::error::{Error, INTOFF, INTON};
-use crate::eval::exitstatus;
 use crate::nodes::Node;
 use crate::nodes::{
     NAND, NAPPEND, NARG, NBACKGND, NCASE, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO,
@@ -928,10 +927,10 @@ unsafe fn forkchild_fatal(sh: &mut crate::context::Shell, e: Error) -> ! {
     if vforked != 0 {
         /* The `_exit` below is this frame's own ending, so this frame
          * writes the status the error took. */
-        crate::eval::exitstatus = e.status();
+        sh.status = e.status();
         drop(e);
         crate::shell::flush_coverage();
-        libc::_exit(crate::eval::exitstatus);
+        libc::_exit(sh.status);
     }
     crate::shellmain::exit_from_child(sh, Err(e))
 }
@@ -1199,7 +1198,7 @@ pub unsafe fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> R
         jp,
     )?;
     let Some(jp) = jp else {
-        return Ok(exitstatus);
+        return Ok(sh.status);
     };
 
     st = getstatus(sh, jp);

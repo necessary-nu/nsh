@@ -77,6 +77,18 @@ pub struct Shell {
     /// buffer and line, and the `local` save stack. `var.rs` owns the
     /// shape; this owns the value.
     pub(crate) vars: crate::var::VarTable,
+    /// `$?` — the exit status of the last command.
+    ///
+    /// Its own field rather than a member of `eval`, because
+    /// `docs/api-design.md` §5 gives it its own row: it is the shell's
+    /// answer to the outside world, and `public-api` replaces the
+    /// `c_int` with an `ExitStatus` without touching the evaluator.
+    ///
+    /// It could only move once the raise path stopped writing it. That
+    /// is what the commit before this one did: an error carries the
+    /// status it took and the frame that catches it writes it here, so
+    /// `sh_error_value`'s 56 call sites need no receiver.
+    pub(crate) status: libc::c_int,
 }
 
 impl Shell {
@@ -97,6 +109,7 @@ impl Shell {
             jobs: crate::jobs::JobTable::new(),
             options: crate::options::ShellOptions::new(),
             redirs: crate::redir::RedirStack::new(),
+            status: 0,
             vars: crate::var::VarTable::new(),
         }
     }

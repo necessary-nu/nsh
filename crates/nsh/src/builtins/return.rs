@@ -9,7 +9,7 @@ use crate::error::Error;
 use bstr::BStr;
 use libc::c_int;
 
-use crate::eval::{Flow, SKIPFUNC, SKIPFUNCDEF, exitstatus};
+use crate::eval::{Flow, SKIPFUNC, SKIPFUNCDEF};
 
 // [spec:dash:def:eval.returncmd-fn]
 // [spec:dash:sem:eval.returncmd-fn]
@@ -27,7 +27,7 @@ pub unsafe fn returncmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         status = crate::mystring::number(want.as_ptr())?;
     } else {
         skip = SKIPFUNCDEF;
-        status = exitstatus;
+        status = sh.status;
     }
     sh.eval.evalskip = skip;
 
@@ -49,9 +49,9 @@ mod tests {
             args.push(BStr::new(status));
         }
         unsafe {
-            exitstatus = last;
             let mut owned = Shell::new();
             let sh = &mut owned;
+            sh.status = last;
             let returned = returncmd(sh, &args).unwrap();
             (sh.eval.evalskip, returned)
         }

@@ -15,7 +15,7 @@ pub type sig_atomic_t = c_int;
 
 use crate::error::{INTOFF, INTON};
 use crate::error::Error;
-use crate::eval::{Flow, SKIPFUNC, SKIPFUNCDEF, exitstatus, savestatus};
+use crate::eval::{Flow, SKIPFUNC, SKIPFUNCDEF};
 use crate::mystring::nullstr;
 use crate::nodes::Node;
 use crate::options::Options;
@@ -333,11 +333,11 @@ pub unsafe fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
         return Ok(Flow::Done(0));
     }
 
-    status = savestatus;
+    status = sh.eval.savestatus;
     last_status = status;
     if status < 0 {
-        status = exitstatus;
-        savestatus = status;
+        status = sh.status;
+        sh.eval.savestatus = status;
     }
     pending_sig = 0;
     crate::error::barrier();
@@ -380,14 +380,14 @@ pub unsafe fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
         if sh.eval.evalskip != SKIPFUNC {
-            exitstatus = status;
+            sh.status = status;
         }
         i += 1;
         q = q.add(1);
     }
 
-    savestatus = last_status;
-    Ok(Flow::Done(exitstatus))
+    sh.eval.savestatus = last_status;
+    Ok(Flow::Done(sh.status))
 }
 
 /*
@@ -416,7 +416,7 @@ pub unsafe fn setinteractive(sh: &mut crate::context::Shell, on: c_int) {
 // [spec:dash:def:trap.exitshell-fn]
 // [spec:dash:sem:trap.exitshell-fn]
 pub unsafe fn exitshell(sh: &mut crate::context::Shell) -> ! {
-    savestatus = exitstatus;
+    sh.eval.savestatus = sh.status;
     /* `TRACE(("pid %d, exitshell(%d)\n", getpid(), savestatus));` —
      * `#ifdef DEBUG` in `shell.h`, and the dash build does not define it. */
     /* Whether the EXIT trap ended by running out or by calling `exit`
@@ -453,7 +453,7 @@ pub unsafe fn exitshell(sh: &mut crate::context::Shell) -> ! {
                      * error's -- written here because the raise no longer
                      * writes it. `trap 'nosuchcmd' EXIT; exit 3` exits
                      * with the trap's status, not 3, and that is dash. */
-                    crate::eval::exitstatus = e.status();
+                    sh.status = e.status();
                     drop(e);
                     break 'out;
                 }
@@ -475,7 +475,7 @@ pub unsafe fn exitshell(sh: &mut crate::context::Shell) -> ! {
     drop(crate::jobs::setjobctl(sh, 0));
     crate::output::flushall();
     crate::shell::flush_coverage();
-    libc::_exit(exitstatus);
+    libc::_exit(sh.status);
     /* NOTREACHED */
 }
 

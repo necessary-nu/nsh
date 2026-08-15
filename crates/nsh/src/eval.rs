@@ -109,10 +109,15 @@ pub struct EvalState {
     pub(crate) inps4: c_int,
     /// MKINIT `int tpip[2] = { -1 }`
     pub(crate) tpip: [c_int; 2],
+    /// exit status of backquoted command
+    pub(crate) back_exitstatus: c_int,
+    /// exit status of the last command outside traps, or -1 when no trap
+    /// is running. `dotrap` seeds it and `exitreset` restores from it.
+    pub(crate) savestatus: c_int,
 }
 
 impl EvalState {
-    /// What the six statics were declared with.
+    /// What the eight statics were declared with.
     pub(crate) const fn new() -> Self {
         EvalState {
             evalskip: 0,
@@ -121,6 +126,8 @@ impl EvalState {
             funcline: 0,
             inps4: 0,
             tpip: [-1, 0],
+            back_exitstatus: 0,
+            savestatus: -1,
         }
     }
 }
@@ -140,9 +147,9 @@ impl EvalState {
 /// the parser and expansion call from everywhere). That is its own
 /// slice and a larger one than this. See the node log.
 pub static mut commandname: Option<BString> = None;
-pub static mut exitstatus: c_int = 0; /* exit status of last command */
-pub static mut back_exitstatus: c_int = 0; /* exit status of backquoted command */
-pub static mut savestatus: c_int = -1; /* exit status of last command outside traps */
+/* int exitstatus;      exit status of last command      -> Shell::status
+ * int back_exitstatus; exit status of backquoted command -> EvalState
+ * int savestatus;      status of last command outside traps -> EvalState */
 
 // ---------------------------------------------------------------------
 // control flow, which is not error
@@ -482,7 +489,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
             status = flow!(evalfn(sh, n, flags));
         }
 
-        exitstatus = status;
+        sh.status = status;
     }
     // out:
     flow!(crate::trap::dotrap(sh));
@@ -496,7 +503,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
             break 'exexit;
         }
 
-        return Ok(Flow::Done(exitstatus));
+        return Ok(Flow::Done(sh.status));
     }
     // exexit:
     /* `exraise(EXEND)`, which is the `set -e` abort and the end of an
@@ -1107,7 +1114,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
     /* First expand the arguments. */
     /* TRACE(("evalcommand(0x%lx, %d) called\n", (long)cmd, flags)); */
     file_stop = crate::input::cur_mark();
-    back_exitstatus = 0;
+    sh.eval.back_exitstatus = 0;
 
     cmdentry.cmdtype = CMDBUILTIN;
     cmdentry.u.cmd = addr_of_mut!(crate::builtins::bltin);
@@ -1352,7 +1359,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                              * which returns `exitstatus` when there is no
                              * job; `bail:` does not touch it on this path
                              * because the C reaches `out:` here. */
-                            crate::eval::exitstatus = e.status();
+                            sh.status = e.status();
                             drop(e);
                         }
                     }
@@ -1388,7 +1395,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
             break 'out_lbl;
         }
         // bail:
-        exitstatus = status;
+        sh.status = status;
 
         /* We have a redirection error. */
         if spclbltin > 0 {
@@ -1470,7 +1477,7 @@ unsafe fn evalbltin(
             crate::error::sh_warnx(&message);
         }
         status |= crate::output::outerr(crate::output::stdout());
-        exitstatus = status;
+        sh.status = status;
         Ok(Flow::Done(status))
     })();
 
@@ -1680,34 +1687,24 @@ mod tests {
     fn exitreset_takes_savestatus_for_an_exit() {
         let _guard = crate::testutil::lock();
         unsafe {
-            let (se, ss) = (exitstatus, savestatus);
-            /* A shell of this test's own. `exitreset` also unwinds the
-             * redirection stack and clears `evalskip`, both of which are
-             * on the instance now; one made here holds what a process
-             * starts with, so those halves stay the no-ops they have
-             * always been under this test -- and `evalskip` no longer
-             * needs saving and restoring, because it was never the
-             * process's to begin with. */
+            /* A shell of this test's own, and nothing to save or
+             * restore around it any more. Both statuses are fields now,
+             * so the process has none to borrow and put back -- the last
+             * of the save/restore this test was written around is gone
+             * with them. */
             let mut owned = crate::context::Shell::new();
             let sh = &mut owned;
 
-            exitstatus = 1;
-            savestatus = 9;
+            sh.status = 1;
+            sh.eval.savestatus = 9;
             crate::init::exitreset(sh, true);
-            /* Copied out: a shared reference to a mutable static is what
-             * the lint forbids, and `assert_eq!` takes one. */
-            let (got, left) = (exitstatus, savestatus);
-            assert_eq!(got, 9, "`exit 9` names the status the shell leaves with");
-            assert_eq!(left, -1, "and it is consumed");
+            assert_eq!(sh.status, 9, "`exit 9` names the status the shell leaves with");
+            assert_eq!(sh.eval.savestatus, -1, "and it is consumed");
 
-            exitstatus = 1;
-            savestatus = 9;
+            sh.status = 1;
+            sh.eval.savestatus = 9;
             crate::init::exitreset(sh, false);
-            let got = exitstatus;
-            assert_eq!(got, 1, "a `set -e` abort names no status");
-
-            exitstatus = se;
-            savestatus = ss;
+            assert_eq!(sh.status, 1, "a `set -e` abort names no status");
         }
     }
 }

@@ -1135,7 +1135,7 @@ unsafe fn poplocalvars(sh: &mut Shell) {
                  * shell's, and the raise no longer writes it. */
                 let changed = optschanged(sh);
                 if let Err(e) = &changed {
-                    crate::eval::exitstatus = e.status();
+                    sh.status = e.status();
                 }
                 drop(changed);
             }
@@ -1160,7 +1160,7 @@ unsafe fn poplocalvars(sh: &mut Shell) {
                     "poplocalvars cleared VREADONLY on the entry unsetvar will find"
                 );
                 if let Err(e) = &unset {
-                    crate::eval::exitstatus = e.status();
+                    sh.status = e.status();
                 }
                 drop(unset);
             }

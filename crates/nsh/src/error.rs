@@ -571,20 +571,18 @@ mod tests {
     fn reported_error_carries_its_status() {
         let _g = crate::testutil::lock();
         unsafe {
-            crate::eval::exitstatus = 0;
             let e = sh_error_value(b"a diagnostic");
 
             /* The value carries what the site took, so propagation
              * through any number of `?` cannot lose it. */
             assert_eq!(e.status(), 2);
-            /* And the raise leaves the shell alone. This is the half that
-             * changed: `sh_error_value` used to write `exitstatus` before
-             * reporting, which made the raise path need the shell at all
-             * 56 of its call sites. The frame that catches the error is
-             * what writes it now. */
-            let untouched = crate::eval::exitstatus;
-            assert_eq!(untouched, 0, "the raise path writes no shell state");
             assert_eq!(e.message().to_vec(), b"a diagnostic".to_vec());
+
+            /* Nothing here asserts that the raise leaves `$?` alone.
+             * The signature says it: `sh_error_value` takes no receiver
+             * and `$?` is a field of one, so there is no shell in scope
+             * for it to write and no way for a test to observe
+             * otherwise. */
         }
     }
 
@@ -613,12 +611,9 @@ mod tests {
             /* `shellexec` reports its text and takes 127 or 126, then
              * raises EXEND. The status travels with the value even though
              * the code that goes with it does not. */
-            crate::eval::exitstatus = 0;
             let e = report(Error::other(127, b"nosuchcmd: not found"));
 
             assert_eq!(e.status(), 127);
-            let untouched = crate::eval::exitstatus;
-            assert_eq!(untouched, 0, "the raise path writes no shell state");
         }
     }
 
@@ -646,7 +641,6 @@ mod tests {
             let mut owned = crate::context::Shell::new();
             let sh = &mut owned;
             as_interactive_root(sh);
-            let saved_status = crate::eval::exitstatus;
             CLEAR_PENDING_INT();
 
             let e = onint(sh);
@@ -654,14 +648,12 @@ mod tests {
             assert!(e.is_interrupt());
             assert_eq!(e.status(), libc::SIGINT + 128);
             /* `onint` used to write this to `exitstatus` as well. It does
-             * not any more: `Error::status()` answers `signal + 128` for
-             * `Interrupted`, so the value already said it, and the catch
-             * is what writes it. */
-            let untouched = crate::eval::exitstatus;
-            assert_eq!(untouched, saved_status, "the raise path writes no shell state");
+             * not any more -- and it could not: it takes `&Shell`, a
+             * shared receiver, so the type says it reads the shell and
+             * does not write it. `Error::status()` answers `signal + 128`
+             * for `Interrupted`, and the frame that catches it writes. */
+            assert_eq!(sh.status, 0, "the raise path writes no shell state");
             assert!(e.message().is_empty(), "dash prints nothing for a ^C");
-
-            crate::eval::exitstatus = saved_status;
         }
     }
 
@@ -677,14 +669,11 @@ mod tests {
             let mut owned = crate::context::Shell::new();
             let sh = &mut owned;
             as_interactive_root(sh);
-            let saved_status = crate::eval::exitstatus;
             suppressint = 0;
             core::ptr::write_volatile(addr_of_mut!(intpending), 1);
 
             assert!(poll_interrupt(sh).is_some(), "one pending interrupt, one delivery");
             assert!(poll_interrupt(sh).is_none(), "and not a second time");
-
-            crate::eval::exitstatus = saved_status;
         }
     }
 

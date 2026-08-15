@@ -260,7 +260,7 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
                  * `exitshell`'s `savestatus = exitstatus` and its
                  * `_exit(exitstatus)`, and an interactive resume's next
                  * `$?` -- reads the shell, so the shell is written here. */
-                crate::eval::exitstatus = e.status();
+                sh.status = e.status();
             }
         }
         drop(outcome);
@@ -438,7 +438,7 @@ pub(crate) unsafe fn exit_from_child(
     /* Same as `main`'s handler: the catch writes the status, because
      * `exitshell` below leaves the process with it. */
     if let Err(e) = &outcome {
-        crate::eval::exitstatus = e.status();
+        sh.status = e.status();
     }
     drop(outcome);
     crate::init::exitreset(sh, by_exitcmd);

@@ -2364,7 +2364,7 @@ pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<*const c_ch
              * used; the status it took is still the shell's, so the catch
              * writes it. */
             if let Some(e) = &other {
-                crate::eval::exitstatus = e.status();
+                sh.status = e.status();
             }
             drop(other);
             Ok(result)

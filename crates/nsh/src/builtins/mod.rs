@@ -184,14 +184,14 @@ pub(crate) static mut bltin: builtincmd = builtincmd {
 // [spec:dash:def:eval.bltincmd-fn]
 // [spec:dash:sem:eval.bltincmd-fn]
 unsafe fn bltincmd(
-    _sh: &mut crate::context::Shell,
+    sh: &mut crate::context::Shell,
     _args: &[&BStr],
 ) -> Result<crate::eval::Flow, crate::error::Error> {
     /*
      * Preserve exitstatus of a previous possible redirection
      * as POSIX mandates
      */
-    Ok(crate::eval::Flow::Done(crate::eval::back_exitstatus))
+    Ok(crate::eval::Flow::Done(sh.eval.back_exitstatus))
 }
 
 pub const NUMBUILTINS: usize = 40;

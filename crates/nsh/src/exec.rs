@@ -247,7 +247,7 @@ pub unsafe fn shellexec(
             exerrno = 126;
         }
     }
-    crate::eval::exitstatus = exerrno;
+    sh.status = exerrno;
     /* TRACE(("shellexec failed for %s, errno %d, suppressint %d\n", ...)); */
     let mut message = Vec::new();
     message.extend_from_slice(CStr::from_ptr(*argv.offset(0)).to_bytes());
@@ -270,7 +270,7 @@ pub unsafe fn shellexec(
      * performs for the only one that can reach a vforked child. */
     if crate::jobs::vforked != 0 {
         crate::shell::flush_coverage();
-        libc::_exit(crate::eval::exitstatus);
+        libc::_exit(sh.status);
     }
 
     Ok(crate::eval::Flow::END)

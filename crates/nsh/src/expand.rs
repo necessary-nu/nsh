@@ -1273,7 +1273,7 @@ unsafe fn expbackq(
 
         if in_.fd >= 0 {
             libc::close(in_.fd);
-            crate::eval::back_exitstatus = crate::jobs::waitforjob(sh, in_.jp)?;
+            sh.eval.back_exitstatus = crate::jobs::waitforjob(sh, in_.jp)?;
         }
         crate::error::INTON();
 
@@ -1969,7 +1969,7 @@ unsafe fn varvalue(
                             break 'numvar;
                         }
                         C_QUESTION => {
-                            num = crate::eval::exitstatus;
+                            num = sh.status;
                             break 'numvar;
                         }
                         C_HASH => {

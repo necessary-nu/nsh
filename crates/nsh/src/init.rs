@@ -69,11 +69,11 @@ pub unsafe fn init(sh: &mut crate::context::Shell) -> Result<(), crate::error::E
 pub unsafe fn exitreset(sh: &mut crate::context::Shell, by_exitcmd: bool) {
     /* from eval.c: */
     {
-        if crate::eval::savestatus >= 0 {
+        if sh.eval.savestatus >= 0 {
             if by_exitcmd || sh.eval.evalskip == crate::eval::SKIPFUNCDEF {
-                crate::eval::exitstatus = crate::eval::savestatus;
+                sh.status = sh.eval.savestatus;
             }
-            crate::eval::savestatus = -1;
+            sh.eval.savestatus = -1;
         }
         sh.eval.evalskip = 0;
         sh.eval.loopnest = 0;
