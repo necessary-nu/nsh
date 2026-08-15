@@ -40,9 +40,18 @@ pub unsafe fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     let operands = opts.operands();
     if operands.is_empty() {
+        /* `PATH` is read before the walk rather than inside
+         * `printentry`: the walk holds `sh.commands` borrowed, and
+         * reading `sh.vars` through the receiver inside it would borrow
+         * the shell twice. This is the "copy the scalar out before the
+         * walk" technique the command table already needed for
+         * `builtinloc`, with a pointer in place of a flag -- and the
+         * value is the same one `printentry` read for itself, since
+         * nothing in the loop assigns to `PATH`. */
+        let path = crate::var::pathval(sh);
         for (name, cmdp) in sh.commands.iter() {
             if cmdp.cmdtype() == CMDNORMAL {
-                printentry(BStr::new(name.as_slice()), cmdp);
+                printentry(BStr::new(name.as_slice()), cmdp, path);
             }
         }
         return Ok(Flow::Done(0));
@@ -55,7 +64,10 @@ pub unsafe fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         if !cmdp.is_null() && sh.commands.path_dependent(&*cmdp) {
             delete_cmd_entry(sh, name);
         }
-        match find_command(sh, name, &mut entry, DO_ERR, crate::var::pathval())? {
+        /* Hoisted out of the argument list; see the note in `eval.rs`'s
+         * `evalcommand`. */
+        let path = crate::var::pathval(sh);
+        match find_command(sh, name, &mut entry, DO_ERR, path)? {
             crate::eval::Flow::Done(_) => {}
             exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
         }
@@ -68,13 +80,19 @@ pub unsafe fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
 // [spec:dash:def:exec.printentry-fn]
 // [spec:dash:sem:exec.printentry-fn]
-unsafe fn printentry(name: &BStr, cmdp: &tblentry) {
+/// `path` is `pathval()`, read by the caller.
+///
+/// The C reads it here. It cannot be read here any more: the only caller
+/// that walks the command table holds it borrowed across this call, so the
+/// read has to happen before the walk starts. Passing it in is what makes
+/// that visible rather than a surprise.
+unsafe fn printentry(name: &BStr, cmdp: &tblentry, pathval: *const c_char) {
     let mut idx: c_int;
     let mut path: *const c_char;
     let fullname: *mut c_char;
 
     idx = cmdp.path_index();
-    path = crate::var::pathval();
+    path = pathval;
     loop {
         padvance(&mut path, name.as_ptr() as *const c_char);
         idx -= 1;

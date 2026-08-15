@@ -150,7 +150,10 @@ pub unsafe fn histedit(sh: &mut crate::context::Shell) {
             INTOFF!();
             state_mut().history = Some(History::new());
             INTON!();
-            sethistsize(sh, crate::var::histsizeval());
+            /* Hoisted out of the argument list, which also takes the
+             * shell; see the note in `eval.rs`'s `evalcommand`. */
+            let size = crate::var::histsizeval(sh);
+            sethistsize(sh, size);
         }
 
         let sin: c_int = crate::streams::streams().stdin;

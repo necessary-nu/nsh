@@ -151,15 +151,50 @@ pub struct localvar_list {
     lv: Vec<localvar>,
 }
 
-/* MKINIT struct localvar_list *localvar_stack; */
-/// The C's `next` chain, outermost first. A frame's index in this stack is
-/// what `pushlocalvars` hands back and `unwindlocalvars` unwinds to, in
-/// place of the address of the frame below it.
-pub static mut localvar_stack: Vec<localvar_list> = Vec::new();
-
-#[inline]
-pub(crate) unsafe fn localvar_stack_mut() -> &'static mut Vec<localvar_list> {
-    &mut *addr_of_mut!(localvar_stack)
+/// Every variable, the sixteen built-in entries, the `LINENO` buffer, the
+/// current line and the `local` save stack — the whole of `docs/api-design.md`
+/// §5's `vars` row, less the constant text it says moves with them.
+///
+/// The fields are private because this module owns an invariant across
+/// them that nothing outside can be trusted with: `tab`'s `VarSlot::Builtin`
+/// names an entry of `init` **by index**, and `init[VLINENO].text` points
+/// into `linenobuf`. Each is resolved in one place -- the index by
+/// [`VarSlot::ptr`] and [`VarTable::builtin`], the buffer's address by
+/// [`VarTable::new`] -- which is what makes them checkable.
+///
+/// ## Why the `LINENO` buffer is boxed
+///
+/// `Shell::new()` returns by value, so the struct moves exactly once and
+/// anything pointing *into* it is left behind. `init[VLINENO].text` is a
+/// `VarText::Fixed` into the `LINENO=` buffer, and it has to stay valid
+/// across that move — so the buffer is a `Box`, whose address is on the
+/// heap and does not move when the struct does.
+///
+/// This is the same answer, for the same reason, that `VarText::Owned` and
+/// `VarSlot::Owned` already gave: "the address has to hold still". The
+/// alternative the scoping note proposed — a third `VarText` arm meaning
+/// "the LINENO buffer" — would need a `&Shell` at every `text.as_ptr()` in
+/// the module to resolve it, which is a far wider change than the one
+/// self-reference it removes.
+pub struct VarTable {
+    /// Every variable, by name. dash's `vartab` is `struct var *[39]`
+    /// walked through `hashval`; this is the same set of separately
+    /// allocated `var`s filed in an order that means something. See the
+    /// module comment.
+    tab: BTreeMap<BString, VarSlot>,
+    /// `varinit`: the sixteen the shell is born with. `var.h`'s
+    /// `#define vifs varinit[0]` / `#define vmail (&vifs)[1]` chain is the
+    /// `V*` index constants below.
+    init: [var; 16],
+    /// `linenovar`, boxed. See the type comment.
+    linenobuf: Box<[c_char; 19]>,
+    /// The line number the parser is on, which `$LINENO` reports.
+    pub(crate) lineno: c_int,
+    /// `MKINIT struct localvar_list *localvar_stack;` — the C's `next`
+    /// chain, outermost first. A frame's index in this stack is what
+    /// `pushlocalvars` hands back and `unwindlocalvars` unwinds to, in
+    /// place of the address of the frame below it.
+    locals: Vec<localvar_list>,
 }
 
 pub static defpathvar: [c_char; 66] = unsafe {
@@ -192,10 +227,14 @@ pub unsafe fn defpath() -> *const c_char {
     (addr_of!(defpathvar) as *const c_char).add(36)
 }
 
-pub static mut lineno: c_int = 0;
+/* int lineno; */
 /* char linenovar[sizeof("LINENO=") + sizeof(int) * CHAR_BIT / 3 + 1] = "LINENO="; */
-pub static mut linenovar: [c_char; 19] =
+/// Both are `VarTable` fields now — `lineno` and `linenobuf`. The buffer's
+/// declared contents live in [`VarTable::new`].
+const LINENOVAR_INIT: [c_char; 19] =
     unsafe { core::mem::transmute::<[u8; 19], [c_char; 19]>(*b"LINENO=\0\0\0\0\0\0\0\0\0\0\0\0") };
+/// `strlen("LINENO=")` — where the digits `lookupvar` writes begin.
+const LINENO_TEXT: usize = 7;
 
 // [spec:dash:def:var.changelocale-fn]
 // [spec:dash:sem:var.changelocale-fn]
@@ -242,171 +281,225 @@ unsafe fn changelocale(_sh: &mut Shell, val: *const c_char) {
 }
 
 /* Some macros in var.h depend on the order, add new variables to the end. */
-pub static mut varinit: [var; 16] = [
-    var {
-        flags: VSTRFIXED | VTEXTFIXED,
-        text: VarText::Fixed(addr_of!(defifsvar) as *const c_char),
-        func: Some(crate::expand::changeifs),
-    },
-    var {
-        flags: VSTRFIXED | VTEXTFIXED | VUNSET,
-        text: VarText::Fixed(b"MAIL\0\0".as_ptr() as *const c_char),
-        func: Some(crate::mail::changemail),
-    },
-    var {
-        flags: VSTRFIXED | VTEXTFIXED | VUNSET,
-        text: VarText::Fixed(b"MAILPATH\0\0".as_ptr() as *const c_char),
-        func: Some(crate::mail::changemail),
-    },
-    var {
-        flags: VSTRFIXED | VTEXTFIXED,
-        text: VarText::Fixed(addr_of!(defpathvar) as *const c_char),
-        func: Some(crate::exec::changepath),
-    },
-    var {
-        flags: VSTRFIXED | VTEXTFIXED,
-        text: VarText::Fixed(b"PS1=$ \0".as_ptr() as *const c_char),
-        func: None,
-    },
-    var {
-        flags: VSTRFIXED | VTEXTFIXED,
-        text: VarText::Fixed(b"PS2=> \0".as_ptr() as *const c_char),
-        func: None,
-    },
-    var {
-        flags: VSTRFIXED | VTEXTFIXED,
-        text: VarText::Fixed(b"PS4=+ \0".as_ptr() as *const c_char),
-        func: None,
-    },
-    var {
-        flags: VSTRFIXED | VTEXTFIXED | VNOFUNC,
-        text: VarText::Fixed(addr_of!(defoptindvar) as *const c_char),
-        func: Some(getoptsreset),
-    },
-    /* #ifdef WITH_LINENO */
-    var {
-        flags: VSTRFIXED | VTEXTFIXED,
-        text: VarText::Fixed(addr_of!(linenovar) as *const c_char),
-        func: None,
-    },
-    /* #ifndef SMALL */
-    var {
-        flags: VSTRFIXED | VTEXTFIXED | VUNSET,
-        text: VarText::Fixed(b"TERM\0\0".as_ptr() as *const c_char),
-        func: None,
-    },
-    var {
-        flags: VSTRFIXED | VTEXTFIXED | VUNSET,
-        text: VarText::Fixed(b"HISTSIZE\0\0".as_ptr() as *const c_char),
-        func: Some(crate::histedit::sethistsize),
-    },
-    var {
-        flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
-        text: VarText::Fixed(b"LC_ALL\0\0".as_ptr() as *const c_char),
-        func: Some(changelocale),
-    },
-    var {
-        flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
-        text: VarText::Fixed(b"LC_COLLATE\0\0".as_ptr() as *const c_char),
-        func: Some(changelocale),
-    },
-    var {
-        flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
-        text: VarText::Fixed(b"LC_CTYPE\0\0".as_ptr() as *const c_char),
-        func: Some(changelocale),
-    },
-    var {
-        flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
-        text: VarText::Fixed(b"LC_NUMERIC\0\0".as_ptr() as *const c_char),
-        func: Some(changelocale),
-    },
-    var {
-        flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
-        text: VarText::Fixed(b"LANG\0\0".as_ptr() as *const c_char),
-        func: Some(changelocale),
-    },
-];
+/// `varinit`: the sixteen entries a shell is born with.
+///
+/// No longer a `static` — it is [`VarTable::init`], and this builds the
+/// value the C declared. `lineno_text` is the address of the table's own
+/// `LINENO=` buffer, passed in rather than taken here because the buffer
+/// belongs to the table this array is going into, and taking it here would
+/// be the self-reference the boxing exists to avoid.
+fn varinit(lineno_text: *const c_char) -> [var; 16] {
+    [
+        var {
+            flags: VSTRFIXED | VTEXTFIXED,
+            text: VarText::Fixed(addr_of!(defifsvar) as *const c_char),
+            func: Some(crate::expand::changeifs),
+        },
+        var {
+            flags: VSTRFIXED | VTEXTFIXED | VUNSET,
+            text: VarText::Fixed(b"MAIL\0\0".as_ptr() as *const c_char),
+            func: Some(crate::mail::changemail),
+        },
+        var {
+            flags: VSTRFIXED | VTEXTFIXED | VUNSET,
+            text: VarText::Fixed(b"MAILPATH\0\0".as_ptr() as *const c_char),
+            func: Some(crate::mail::changemail),
+        },
+        var {
+            flags: VSTRFIXED | VTEXTFIXED,
+            text: VarText::Fixed(addr_of!(defpathvar) as *const c_char),
+            func: Some(crate::exec::changepath),
+        },
+        var {
+            flags: VSTRFIXED | VTEXTFIXED,
+            text: VarText::Fixed(b"PS1=$ \0".as_ptr() as *const c_char),
+            func: None,
+        },
+        var {
+            flags: VSTRFIXED | VTEXTFIXED,
+            text: VarText::Fixed(b"PS2=> \0".as_ptr() as *const c_char),
+            func: None,
+        },
+        var {
+            flags: VSTRFIXED | VTEXTFIXED,
+            text: VarText::Fixed(b"PS4=+ \0".as_ptr() as *const c_char),
+            func: None,
+        },
+        var {
+            flags: VSTRFIXED | VTEXTFIXED | VNOFUNC,
+            text: VarText::Fixed(addr_of!(defoptindvar) as *const c_char),
+            func: Some(getoptsreset),
+        },
+        /* #ifdef WITH_LINENO */
+        var {
+            flags: VSTRFIXED | VTEXTFIXED,
+            text: VarText::Fixed(lineno_text),
+            func: None,
+        },
+        /* #ifndef SMALL */
+        var {
+            flags: VSTRFIXED | VTEXTFIXED | VUNSET,
+            text: VarText::Fixed(b"TERM\0\0".as_ptr() as *const c_char),
+            func: None,
+        },
+        var {
+            flags: VSTRFIXED | VTEXTFIXED | VUNSET,
+            text: VarText::Fixed(b"HISTSIZE\0\0".as_ptr() as *const c_char),
+            func: Some(crate::histedit::sethistsize),
+        },
+        var {
+            flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
+            text: VarText::Fixed(b"LC_ALL\0\0".as_ptr() as *const c_char),
+            func: Some(changelocale),
+        },
+        var {
+            flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
+            text: VarText::Fixed(b"LC_COLLATE\0\0".as_ptr() as *const c_char),
+            func: Some(changelocale),
+        },
+        var {
+            flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
+            text: VarText::Fixed(b"LC_CTYPE\0\0".as_ptr() as *const c_char),
+            func: Some(changelocale),
+        },
+        var {
+            flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
+            text: VarText::Fixed(b"LC_NUMERIC\0\0".as_ptr() as *const c_char),
+            func: Some(changelocale),
+        },
+        var {
+            flags: VSTRFIXED | VTEXTFIXED | VFULL | VUNSET,
+            text: VarText::Fixed(b"LANG\0\0".as_ptr() as *const c_char),
+            func: Some(changelocale),
+        },
+    ]
+}
 
 /*
- * Positional accessors into varinit[].  These reproduce the var.h macros
- * literally: `#define vifs varinit[0]`, `#define vmail (&vifs)[1]`, ...
+ * `var.h` addresses `varinit`'s entries positionally: `#define vifs
+ * varinit[0]`, `#define vmail (&vifs)[1]`, and so on down the array. The
+ * chain of `+ 1`s is these constants, which say the same thing without
+ * pointer arithmetic and can be checked by reading them.
  */
-pub unsafe fn vifs() -> *mut var {
-    addr_of_mut!(varinit) as *mut var
+const VIFS: usize = 0;
+const VMAIL: usize = 1;
+const VMPATH: usize = 2;
+const VPATH: usize = 3;
+const VPS1: usize = 4;
+const VPS2: usize = 5;
+const VPS4: usize = 6;
+const VOPTIND: usize = 7;
+const VLINENO: usize = 8;
+const VTERM: usize = 9;
+const VHISTSIZE: usize = 10;
+
+impl VarTable {
+    /// The table a shell is born with: `varinit`'s sixteen filed under
+    /// their own names, an empty `local` stack, and line zero.
+    ///
+    /// `initvar` used to do the filing at run time from a `static mut`;
+    /// it still exists, because it also asks the effective uid what `PS1`
+    /// should be, which a constructor cannot know for a shell that has
+    /// not started.
+    pub(crate) fn new() -> Self {
+        let linenobuf = Box::new(LINENOVAR_INIT);
+        /* Taken before the box moves into the struct, which does not move
+         * what the box points at -- that is the whole reason it is a box.
+         * See the type comment. */
+        let lineno_text = linenobuf.as_ptr() as *const c_char;
+        VarTable {
+            tab: BTreeMap::new(),
+            init: varinit(lineno_text),
+            linenobuf,
+            lineno: 0,
+            locals: Vec::new(),
+        }
+    }
+
+    /// `&varinit[i]`. The one place that knows where the sixteen live, and
+    /// therefore the only one that changes if they move again.
+    #[inline]
+    fn builtin(&self, i: usize) -> *const var {
+        &self.init[i] as *const var
+    }
+
+    #[inline]
+    fn builtin_mut(&mut self, i: usize) -> *mut var {
+        &mut self.init[i] as *mut var
+    }
+
+    /// `varinit[i]`'s value: its text past the `NAME=`, which the C's
+    /// `*val()` macros skip by a hard-coded byte count.
+    #[inline]
+    unsafe fn builtin_val(&self, i: usize, skip: usize) -> *const c_char {
+        (*self.builtin(i)).text.as_ptr().add(skip)
+    }
+
+    /// `!(varinit[i].flags & VUNSET)` — the C's `ifsset()`/`mpathset()`.
+    #[inline]
+    fn builtin_isset(&self, i: usize) -> c_int {
+        ((self.init[i].flags & VUNSET) == 0) as c_int
+    }
+
+    /// Whether there is a frame for a `local` to record itself in --
+    /// the C's `localvar_stack == NULL` test at the head of `localcmd`.
+    #[inline]
+    pub(crate) fn in_function(&self) -> bool {
+        !self.locals.is_empty()
+    }
+
 }
-pub unsafe fn vmail() -> *mut var {
-    vifs().add(1)
-}
-pub unsafe fn vmpath() -> *mut var {
-    vmail().add(1)
-}
-pub unsafe fn vpath() -> *mut var {
-    vmpath().add(1)
-}
-pub unsafe fn vps1() -> *mut var {
-    vpath().add(1)
-}
-pub unsafe fn vps2() -> *mut var {
-    vps1().add(1)
-}
-pub unsafe fn vps4() -> *mut var {
-    vps2().add(1)
-}
-pub unsafe fn voptind() -> *mut var {
-    vps4().add(1)
-}
-pub unsafe fn vlineno() -> *mut var {
-    voptind().add(1)
-}
-pub unsafe fn vterm() -> *mut var {
-    vlineno().add(1)
-}
-pub unsafe fn vhistsize() -> *mut var {
-    vterm().add(1)
-}
+
 
 /*
  * The following accessors reproduce the var.h value macros.  They have to
  * skip over the name, by a hard-coded byte count.
  */
-pub unsafe fn ifsval() -> *const c_char {
-    (*vifs()).text.as_ptr().add(4)
+/*
+ * These read and do not write, so they take a shared receiver. That is
+ * the standing idiom for a reason worth restating here, because this is
+ * the family it pays off on: `pathval` is read in an argument list that
+ * also passes the shell at five sites, and a shared borrow is the only
+ * kind that can compose beside another borrow without restructuring.
+ */
+pub unsafe fn ifsval(sh: &Shell) -> *const c_char {
+    sh.vars.builtin_val(VIFS, 4)
 }
-pub unsafe fn ifsset() -> c_int {
-    (((*vifs()).flags & VUNSET) == 0) as c_int
+pub unsafe fn ifsset(sh: &Shell) -> c_int {
+    sh.vars.builtin_isset(VIFS)
 }
-pub unsafe fn mailval() -> *const c_char {
-    (*vmail()).text.as_ptr().add(5)
+pub unsafe fn mailval(sh: &Shell) -> *const c_char {
+    sh.vars.builtin_val(VMAIL, 5)
 }
-pub unsafe fn mpathval() -> *const c_char {
-    (*vmpath()).text.as_ptr().add(9)
+pub unsafe fn mpathval(sh: &Shell) -> *const c_char {
+    sh.vars.builtin_val(VMPATH, 9)
 }
-pub unsafe fn pathval() -> *const c_char {
-    (*vpath()).text.as_ptr().add(5)
+pub unsafe fn pathval(sh: &Shell) -> *const c_char {
+    sh.vars.builtin_val(VPATH, 5)
 }
-pub unsafe fn ps1val() -> *const c_char {
-    (*vps1()).text.as_ptr().add(4)
+pub unsafe fn ps1val(sh: &Shell) -> *const c_char {
+    sh.vars.builtin_val(VPS1, 4)
 }
-pub unsafe fn ps2val() -> *const c_char {
-    (*vps2()).text.as_ptr().add(4)
+pub unsafe fn ps2val(sh: &Shell) -> *const c_char {
+    sh.vars.builtin_val(VPS2, 4)
 }
-pub unsafe fn ps4val() -> *const c_char {
-    (*vps4()).text.as_ptr().add(4)
+pub unsafe fn ps4val(sh: &Shell) -> *const c_char {
+    sh.vars.builtin_val(VPS4, 4)
 }
-pub unsafe fn optindval() -> *const c_char {
-    (*voptind()).text.as_ptr().add(7)
+pub unsafe fn optindval(sh: &Shell) -> *const c_char {
+    sh.vars.builtin_val(VOPTIND, 7)
 }
-pub unsafe fn linenoval() -> *const c_char {
-    (*vlineno()).text.as_ptr().add(7)
+pub unsafe fn linenoval(sh: &Shell) -> *const c_char {
+    sh.vars.builtin_val(VLINENO, LINENO_TEXT)
 }
-pub unsafe fn histsizeval() -> *const c_char {
-    (*vhistsize()).text.as_ptr().add(9)
+pub unsafe fn histsizeval(sh: &Shell) -> *const c_char {
+    sh.vars.builtin_val(VHISTSIZE, 9)
 }
-pub unsafe fn termval() -> *const c_char {
-    (*vterm()).text.as_ptr().add(5)
+pub unsafe fn termval(sh: &Shell) -> *const c_char {
+    sh.vars.builtin_val(VTERM, 5)
 }
-pub unsafe fn mpathset() -> c_int {
-    (((*vmpath()).flags & VUNSET) == 0) as c_int
+pub unsafe fn mpathset(sh: &Shell) -> c_int {
+    sh.vars.builtin_isset(VMPATH)
 }
 
 /// `#define environment() listvars(VEXPORT, VUNSET, 0)`
@@ -414,8 +507,8 @@ pub unsafe fn mpathset() -> c_int {
 /// Returns the array `execve` wants: the `text` of every exported, set
 /// variable, in name order, with the terminating NULL. The caller owns it
 /// and must keep it alive across the `execve`.
-pub unsafe fn environment() -> Vec<*mut c_char> {
-    let mut envp = listvars(VEXPORT, VUNSET);
+pub unsafe fn environment(sh: &mut Shell) -> Vec<*mut c_char> {
+    let mut envp = listvars(sh, VEXPORT, VUNSET);
     envp.push(null_mut());
     envp
 }
@@ -439,31 +532,29 @@ enum VarSlot {
     ///
     /// This is the same answer `owned-jobs` gave for the job table ("a
     /// job is named by its index") and `owned-input` for the parse-file
-    /// stack. It is resolved fresh at every use by [`VarSlot::as_ptr`],
+    /// stack. It is resolved fresh at every use by [`VarTable::find`],
     /// which is the one place that has to know where `varinit` lives --
-    /// and therefore the one place that changes when it moves.
+    /// and therefore the one place that changed when it moved onto the
+    /// shell.
     Builtin(usize),
     Owned(Box<var>),
 }
 
 impl VarSlot {
+    /// The entry this slot names, given where `varinit` lives.
+    ///
+    /// The base is a parameter rather than something this reads, because
+    /// every caller is walking or indexing `VarTable::tab` and cannot
+    /// also borrow `VarTable::init` while it does. Taking the base out
+    /// first is the "copy the scalar out before the walk" technique the
+    /// command table settled on, with a pointer in place of a flag.
     #[inline]
-    unsafe fn as_ptr(&mut self) -> *mut var {
+    unsafe fn ptr(&mut self, init: *mut var) -> *mut var {
         match self {
-            VarSlot::Builtin(i) => (addr_of_mut!(varinit) as *mut var).add(*i),
+            VarSlot::Builtin(i) => init.add(*i),
             VarSlot::Owned(b) => &mut **b as *mut var,
         }
     }
-}
-
-/// Every variable, by name. dash's `vartab` is `struct var *[39]` walked
-/// through `hashval`; this is the same set of separately allocated `var`s
-/// filed in an order that means something. See the module comment.
-static mut vartab: BTreeMap<BString, VarSlot> = BTreeMap::new();
-
-#[inline]
-unsafe fn vartab_mut() -> &'static mut BTreeMap<BString, VarSlot> {
-    &mut *addr_of_mut!(vartab)
 }
 
 /// The name `s` is filed under: its bytes up to the first `=`, or all of
@@ -484,8 +575,8 @@ pub(crate) unsafe fn varname<'a>(s: *const c_char) -> &'a BStr {
 
 // [spec:dash:def:var.bltinlookup-fn]
 // [spec:dash:sem:var.bltinlookup-fn]
-pub unsafe fn bltinlookup(name: *const c_char) -> *mut c_char {
-    lookupvar(name)
+pub unsafe fn bltinlookup(sh: &mut Shell, name: *const c_char) -> *mut c_char {
+    lookupvar(sh, name)
 }
 
 /*
@@ -504,7 +595,7 @@ pub unsafe fn mkinit_init(sh: &mut Shell) -> Result<(), Error> {
     let mut st1: libc::stat64 = core::mem::zeroed();
     let mut st2: libc::stat64 = core::mem::zeroed();
 
-    initvar();
+    initvar(sh);
     envp = environ;
     while !(*envp).is_null() {
         p = crate::parser::endofname(*envp);
@@ -525,7 +616,7 @@ pub unsafe fn mkinit_init(sh: &mut Shell) -> Result<(), Error> {
     );
     setvareq(sh, addr_of_mut!(ppid) as *mut c_char, VTEXTFIXED)?;
 
-    p = lookupvar(b"PWD\0".as_ptr() as *const c_char);
+    p = lookupvar(sh, b"PWD\0".as_ptr() as *const c_char);
     if !p.is_null() {
         if *p != b'/' as c_char
             || libc::stat64(p, &mut st1) != 0
@@ -574,8 +665,7 @@ unsafe fn varfunc(sh: &mut Shell, vp: *mut var) {
 
 // [spec:dash:def:var.initvar-fn]
 // [spec:dash:sem:var.initvar-fn]
-pub unsafe fn initvar() {
-    let base: *mut var = addr_of_mut!(varinit) as *mut var;
+pub unsafe fn initvar(sh: &mut Shell) {
     for i in 0..16usize {
         /* The 16 entries stay one array: `vifs`/`vps1`/… address them
          * positionally and their `text` is `VTEXTFIXED`. Only the link
@@ -586,16 +676,15 @@ pub unsafe fn initvar() {
          * the same array and files the index, because the pointer would
          * be a self-reference once both the table and `varinit` live on
          * one `Shell`. See `VarSlot::Builtin`. */
-        vartab_mut().insert(
-            varname((*base.add(i)).text.as_ptr()).to_owned(),
-            VarSlot::Builtin(i),
-        );
+        let name = varname((*sh.vars.builtin(i)).text.as_ptr()).to_owned();
+        sh.vars.tab.insert(name, VarSlot::Builtin(i));
     }
     /*
      * PS1 depends on uid
      */
     if libc::geteuid() == 0 {
-        (*vps1()).text = VarText::Fixed(b"PS1=# \0".as_ptr() as *const c_char);
+        (*sh.vars.builtin_mut(VPS1)).text =
+            VarText::Fixed(b"PS1=# \0".as_ptr() as *const c_char);
     }
 }
 
@@ -713,7 +802,7 @@ unsafe fn setvareq_text(sh: &mut Shell, text: VarText, mut flags: c_int) -> Resu
     flags |= VEXPORT
         & (((1 - sh.options.flag(crate::options::aflag) as c_int) as c_uint)
             .wrapping_sub(1)) as c_int;
-    vp = findvar(s);
+    vp = findvar(sh, s);
     if !vp.is_null() {
         let bits: c_uint;
 
@@ -746,7 +835,7 @@ unsafe fn setvareq_text(sh: &mut Shell, text: VarText, mut flags: c_int) -> Resu
             /* The C unlinks the node, `ckfree`s it and then `ckfree`s `s`;
              * taking the entry out of the map drops the `Box` that is the
              * node and the text inside it, and `text` goes out of scope. */
-            vartab_mut().remove(&key);
+            sh.vars.tab.remove(&key);
             /* out_free, then goto out — NB `vp` has just been dropped and
              * is returned dangling, exactly as the C does
              * (src/var.c:304-309, 331). */
@@ -762,14 +851,17 @@ unsafe fn setvareq_text(sh: &mut Shell, text: VarText, mut flags: c_int) -> Resu
         /* not found */
         /* The C leaves `flags` and `text` uninitialised here and fills
          * them in below, which every path from this point reaches. */
-        vp = vartab_mut()
+        let init = sh.vars.init.as_mut_ptr();
+        vp = sh
+            .vars
+            .tab
             .entry(varname(s).to_owned())
             .or_insert(VarSlot::Owned(Box::new(var {
                 flags: 0,
                 text: VarText::Fixed(null_mut()),
                 func: None,
             })))
-            .as_ptr();
+            .ptr(init);
     }
     (*vp).text = text;
     (*vp).flags = flags;
@@ -792,18 +884,26 @@ unsafe fn setvareq_text(sh: &mut Shell, text: VarText, mut flags: c_int) -> Resu
 
 // [spec:dash:def:var.lookupvar-fn]
 // [spec:dash:sem:var.lookupvar-fn]
-pub unsafe fn lookupvar(name: *const c_char) -> *mut c_char {
+pub unsafe fn lookupvar(sh: &mut Shell, name: *const c_char) -> *mut c_char {
     let v: *mut var;
 
-    v = findvar(name);
+    v = findvar(sh, name);
     if !v.is_null() && ((*v).flags & VUNSET) == 0 {
         /* #ifdef WITH_LINENO */
-        if v == vlineno() && (*v).text.as_ptr() == addr_of!(linenovar) as *const c_char {
-            let current_lineno = lineno;
+        /* Both halves of the C's condition ask "is this the LINENO entry,
+         * still holding its own buffer" -- the user may have assigned to
+         * LINENO, which replaces the text with an owned string and stops
+         * the refresh. The addresses are the table's now rather than two
+         * statics', and the test is otherwise the C's. */
+        if v == sh.vars.builtin_mut(VLINENO)
+            && (*v).text.as_ptr() == sh.vars.linenobuf.as_ptr() as *const c_char
+        {
+            let current_lineno = sh.vars.lineno;
             let value = format!("{current_lineno}");
+            let buf = sh.vars.linenobuf.as_mut_ptr() as *mut c_char;
             crate::mystring::copy_ascii_cstr(
-                (addr_of_mut!(linenovar) as *mut c_char).add(7),
-                19 - 7,
+                buf.add(LINENO_TEXT),
+                19 - LINENO_TEXT,
                 &value,
             );
         }
@@ -814,8 +914,8 @@ pub unsafe fn lookupvar(name: *const c_char) -> *mut c_char {
 
 // [spec:dash:def:var.lookupvarint-fn]
 // [spec:dash:sem:var.lookupvarint-fn]
-pub unsafe fn lookupvarint(name: *const c_char) -> Result<intmax_t, Error> {
-    let p = lookupvar(name);
+pub unsafe fn lookupvarint(sh: &mut Shell, name: *const c_char) -> Result<intmax_t, Error> {
+    let p = lookupvar(sh, name);
     crate::mystring::atomax(
         if !p.is_null() {
             p as *const c_char
@@ -840,12 +940,16 @@ pub unsafe fn lookupvarint(name: *const c_char) -> Result<intmax_t, Error> {
 /// caller gets a count without a second scan. An owned `Vec` carries its own
 /// length, so both go: `environment` appends the NULL that `execve` needs,
 /// and `showvars` just iterates.
-pub unsafe fn listvars(on: c_int, off: c_int) -> Vec<*mut c_char> {
+pub unsafe fn listvars(sh: &mut Shell, on: c_int, off: c_int) -> Vec<*mut c_char> {
     let mask = on | off;
     let mut ep = Vec::new();
 
-    for slot in vartab_mut().values_mut() {
-        let vp = slot.as_ptr();
+    /* Where `varinit` lives, taken before the walk: a `Builtin` slot
+     * names its entry by index, and resolving it inside the loop would
+     * mean borrowing the table while the walk holds it. */
+    let init = sh.vars.init.as_mut_ptr();
+    for slot in sh.vars.tab.values_mut() {
+        let vp = slot.ptr(init);
         if ((*vp).flags & mask) == on {
             ep.push((*vp).text.as_ptr() as *mut c_char);
         }
@@ -868,7 +972,7 @@ pub unsafe fn listvars(on: c_int, off: c_int) -> Vec<*mut c_char> {
 
 // [spec:dash:def:var.showvars-fn]
 // [spec:dash:sem:var.showvars-fn]
-pub unsafe fn showvars(prefix: *const c_char, on: c_int, off: c_int) -> c_int {
+pub unsafe fn showvars(sh: &mut Shell, prefix: *const c_char, on: c_int, off: c_int) -> c_int {
     let sep: *const c_char;
 
     sep = if *prefix != 0 {
@@ -877,7 +981,7 @@ pub unsafe fn showvars(prefix: *const c_char, on: c_int, off: c_int) -> c_int {
         prefix
     };
 
-    for &e in listvars(on, off).iter() {
+    for &e in listvars(sh, on, off).iter() {
         let mut p: *const c_char;
         let mut q: *const c_char;
 
@@ -923,11 +1027,17 @@ pub unsafe fn showvars(prefix: *const c_char, on: c_int, off: c_int) -> c_int {
 pub unsafe fn mklocal(sh: &mut Shell, name: *mut c_char, flags: c_int) -> Result<(), Error> {
     INTOFF();
     if *name.offset(0) == b'-' as c_char && *name.offset(1) == b'\0' as c_char {
-        pushlocal(localvar::Options(sh.options.snapshot()));
+/* The snapshot is copied out before the stack is touched: this
+         * is the one place two *moved* tables meet, and
+         * `sh.vars.pushlocal(..sh.options.snapshot()..)` would borrow
+         * `sh` twice in one expression. `[c_char; NOPTS]` is `Copy`, so
+         * the local is what the call was going to make anyway. */
+        let saved = sh.options.snapshot();
+        sh.vars.pushlocal(localvar::Options(saved));
     } else {
         let found: *mut var;
 
-        found = findvar(name);
+        found = findvar(sh, name);
         /* The C keeps `strchr`'s pointer and only ever asks whether it is
          * NULL: `setvareq` finds the `=` again for itself. */
         let eq = CStr::from_ptr(name).to_bytes().contains(&b'=');
@@ -938,7 +1048,7 @@ pub unsafe fn mklocal(sh: &mut Shell, name: *mut c_char, flags: c_int) -> Result
             } else {
                 vp = setvar(sh, name, null_mut(), VSTRFIXED | flags)?;
             }
-            pushlocal(localvar::Unset { vp });
+            sh.vars.pushlocal(localvar::Unset { vp });
         } else {
             let vp: *mut var = found;
             let saved: c_int = (*vp).flags;
@@ -955,7 +1065,7 @@ pub unsafe fn mklocal(sh: &mut Shell, name: *mut c_char, flags: c_int) -> Result
              * borrowing, so it has to be somewhere an unwind will not drop
              * it.  The C leaks the `localvar` on that path instead, and
              * leaves the variable VSTRFIXED|VTEXTFIXED for good. */
-            pushlocal(localvar::Saved {
+            sh.vars.pushlocal(localvar::Saved {
                 vp,
                 flags: saved,
                 text,
@@ -974,12 +1084,17 @@ pub unsafe fn mklocal(sh: &mut Shell, name: *mut c_char, flags: c_int) -> Result
 }
 
 /// Add a save to the innermost frame.
-unsafe fn pushlocal(lvp: localvar) {
-    localvar_stack_mut()
-        .last_mut()
-        .expect("mklocal runs inside a function")
-        .lv
-        .push(lvp);
+/// A second `impl` block on purpose: `pushlocal` sits here, between
+/// `mklocal` and `poplocalvars`, because that is where `var.c` puts it and
+/// this file follows the C's order.
+impl VarTable {
+    unsafe fn pushlocal(&mut self, lvp: localvar) {
+        self.locals
+            .last_mut()
+            .expect("mklocal runs inside a function")
+            .lv
+            .push(lvp);
+    }
 }
 
 /*
@@ -993,7 +1108,9 @@ unsafe fn poplocalvars(sh: &mut Shell) {
     let mut ll: localvar_list;
 
     INTOFF();
-    ll = localvar_stack_mut()
+    ll = sh
+        .vars
+        .locals
         .pop()
         .expect("poplocalvars runs on a pushed frame");
 
@@ -1068,16 +1185,16 @@ unsafe fn poplocalvars(sh: &mut Shell) {
 /// The C returns the `localvar_list *` that was on top, which the caller
 /// hands back to `unwindlocalvars`; with the stack owned, that address is
 /// the frame's depth.
-pub unsafe fn pushlocalvars(push: c_int) -> usize {
+pub unsafe fn pushlocalvars(sh: &mut Shell, push: c_int) -> usize {
     let top: usize;
 
-    top = localvar_stack_mut().len();
+    top = sh.vars.locals.len();
     if push == 0 {
         return top; /* goto out */
     }
 
     INTOFF();
-    localvar_stack_mut().push(localvar_list { lv: Vec::new() });
+    sh.vars.locals.push(localvar_list { lv: Vec::new() });
     INTON();
 
     top
@@ -1089,7 +1206,7 @@ pub unsafe fn pushlocalvars(push: c_int) -> usize {
 /// bottom of the stack if `stop` was never on it; `>` is total, and the
 /// only state it declines to reproduce is a NULL dereference.
 pub unsafe fn unwindlocalvars(sh: &mut Shell, stop: usize) {
-    while localvar_stack_mut().len() > stop {
+    while sh.vars.locals.len() > stop {
         poplocalvars(sh);
     }
 }
@@ -1121,9 +1238,13 @@ pub unsafe fn unsetvar(sh: &mut Shell, s: *const c_char) -> Result<(), Error> {
 /// so callers test `*result` — because that is what lets `setvareq` unlink
 /// without a second traversal. A map removes by key, so this returns the
 /// entry itself and NULL when there is none.
-pub(crate) unsafe fn findvar(name: *const c_char) -> *mut var {
-    match vartab_mut().get_mut(varname(name)) {
-        Some(slot) => slot.as_ptr(),
+pub(crate) unsafe fn findvar(sh: &mut Shell, name: *const c_char) -> *mut var {
+    /* Where `varinit` lives, taken before the lookup borrows the map: a
+     * `Builtin` slot names its entry by index, and the two are sibling
+     * fields of one table. */
+    let init = sh.vars.init.as_mut_ptr();
+    match sh.vars.tab.get_mut(varname(name)) {
+        Some(slot) => slot.ptr(init),
         None => null_mut(),
     }
 }
@@ -1134,11 +1255,63 @@ mod tests {
     use crate::testutil::{CStr0, lock, s};
 
     /// The whole buffer `vp->text` points at, `len` bytes of it.
-    unsafe fn text_bytes(name: &str, len: usize) -> Vec<u8> {
+    unsafe fn text_bytes(sh: &mut Shell, name: &str, len: usize) -> Vec<u8> {
         let n = CStr0::new(name);
-        let vp = findvar(n.p());
+        let vp = findvar(sh, n.p());
         assert!(!vp.is_null(), "{name} is not in the table");
         core::slice::from_raw_parts((*vp).text.as_ptr() as *const u8, len).to_vec()
+    }
+
+    // [spec:dash:sem:var.lookupvar-fn/test]
+    /// `$LINENO` is read out of a buffer the table owns, and
+    /// `varinit[VLINENO].text` points *into* that buffer -- so the buffer
+    /// has to stay where it is while the shell around it moves.
+    ///
+    /// `Shell::new()` returns by value, which is already one move; this
+    /// does a second one deliberately. A plain `[c_char; 19]` field would
+    /// pass the first test by luck of the return slot and fail this one,
+    /// because the pointer would still name the old location. The `Box`
+    /// is what makes both true, and this is the test that says so.
+    #[test]
+    fn lineno_buffer_survives_a_shell_move() {
+        let _g = lock();
+        unsafe {
+            let name = CStr0::new("LINENO");
+            let mut owned = Shell::new();
+            initvar(&mut owned);
+
+            owned.vars.lineno = 41;
+            assert_eq!(s(lookupvar(&mut owned, name.p())), "41");
+
+            /* The move the boxing exists for. */
+            let mut moved = owned;
+            moved.vars.lineno = 42;
+            assert_eq!(s(lookupvar(&mut moved, name.p())), "42");
+        }
+    }
+
+    // [spec:dash:sem:var.findvar-fn/test]
+    /// A builtin entry is filed by index, not by address, so it must
+    /// resolve against the `varinit` of the shell being asked -- not the
+    /// one the table was built from. Two shells make that observable: the
+    /// same name in each must answer with that shell's own entry.
+    #[test]
+    fn a_builtin_resolves_per_shell() {
+        let _g = lock();
+        unsafe {
+            let name = CStr0::new("PATH");
+            let mut one = Shell::new();
+            let mut two = Shell::new();
+            initvar(&mut one);
+            initvar(&mut two);
+
+            let a = findvar(&mut one, name.p());
+            let b = findvar(&mut two, name.p());
+            assert!(!a.is_null() && !b.is_null(), "PATH is one of the sixteen");
+            assert_ne!(a, b, "each shell answers with its own varinit entry");
+            assert_eq!(a, one.vars.builtin_mut(VPATH));
+            assert_eq!(b, two.vars.builtin_mut(VPATH));
+        }
     }
 
     // [spec:dash:sem:var.setvar-fn/test]
@@ -1157,15 +1330,15 @@ mod tests {
             let val = CStr0::new("hello");
 
             setvar(sh, name.p(), val.p(), 0);
-            assert_eq!(text_bytes("Tsetvar", 14), b"Tsetvar=hello\0".to_vec());
-            assert_eq!(s(lookupvar(name.p())), "hello");
+            assert_eq!(text_bytes(sh, "Tsetvar", 14), b"Tsetvar=hello\0".to_vec());
+            assert_eq!(s(lookupvar(sh, name.p())), "hello");
 
             /* VSTRFIXED so the entry survives being unset and can be read. */
             setvar(sh, name.p(), null_mut(), VSTRFIXED);
-            assert_eq!(text_bytes("Tsetvar", 9), b"Tsetvar\0\0".to_vec());
-            let vp = findvar(name.p());
+            assert_eq!(text_bytes(sh, "Tsetvar", 9), b"Tsetvar\0\0".to_vec());
+            let vp = findvar(sh, name.p());
             assert_eq!(s(varnull((*vp).text.as_ptr())), "");
-            assert!(lookupvar(name.p()).is_null());
+            assert!(lookupvar(sh, name.p()).is_null());
         }
     }
 
@@ -1183,13 +1356,13 @@ mod tests {
             let three = CStr0::new("Tframe=three");
 
             setvar(sh, name.p(), CStr0::new("one").p(), 0);
-            let stop = pushlocalvars(1);
+            let stop = pushlocalvars(sh, 1);
             mklocal(sh, two.p() as *mut c_char, 0);
             mklocal(sh, three.p() as *mut c_char, 0);
-            assert_eq!(s(lookupvar(name.p())), "three");
+            assert_eq!(s(lookupvar(sh, name.p())), "three");
 
             unwindlocalvars(sh, stop);
-            assert_eq!(s(lookupvar(name.p())), "one");
+            assert_eq!(s(lookupvar(sh, name.p())), "one");
             unsetvar(sh, name.p());
         }
     }
@@ -1208,18 +1381,18 @@ mod tests {
             let local = CStr0::new("Tchurn=inner");
 
             setvar(sh, name.p(), CStr0::new("outer").p(), 0);
-            let stop = pushlocalvars(1);
+            let stop = pushlocalvars(sh, 1);
             mklocal(sh, local.p() as *mut c_char, 0);
-            let entry = findvar(name.p());
+            let entry = findvar(sh, name.p());
 
             let filler: Vec<CStr0> = (0..200).map(|i| CStr0::new(&format!("Ta{i:04}"))).collect();
             for f in &filler {
                 setvar(sh, f.p(), CStr0::new("x").p(), 0);
             }
-            assert_eq!(findvar(name.p()), entry, "the entry moved under the save");
+            assert_eq!(findvar(sh, name.p()), entry, "the entry moved under the save");
 
             unwindlocalvars(sh, stop);
-            assert_eq!(s(lookupvar(name.p())), "outer");
+            assert_eq!(s(lookupvar(sh, name.p())), "outer");
             for f in &filler {
                 unsetvar(sh, f.p());
             }

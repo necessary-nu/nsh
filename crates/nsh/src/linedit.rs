@@ -425,7 +425,7 @@ impl LineEditor {
                     driver.resume_editor_command(editor, &pending, Err(HostFailure::Unavailable))?
                 }
                 ReadStep::ExternalEdit(pending) => {
-                    let response = self.external_edit(&pending.request().line);
+                    let response = self.external_edit(sh, &pending.request().line);
                     let (editor, driver) = self.editor_and_driver();
                     driver.resume_external_edit(editor, &pending, response)?
                 }
@@ -542,7 +542,11 @@ impl LineEditor {
         }
     }
 
-    fn external_edit(&mut self, line: &Text) -> Result<Text, HostFailure> {
+    fn external_edit(
+        &mut self,
+        sh: &mut crate::context::Shell,
+        line: &Text,
+    ) -> Result<Text, HostFailure> {
         static NEXT_EDIT_FILE: AtomicU64 = AtomicU64::new(0);
         let serial = NEXT_EDIT_FILE.fetch_add(1, Ordering::Relaxed);
         let mut path = std::env::temp_dir();
@@ -558,7 +562,7 @@ impl LineEditor {
                 .and_then(|()| file.write_all(b"\n"))
                 .and_then(|()| file.flush())
                 .map_err(host_failure)?;
-            let editor = unsafe { shell_editor() };
+            let editor = unsafe { shell_editor(sh) };
             Command::new(editor)
                 .arg(&path)
                 .status()
@@ -1089,9 +1093,9 @@ fn completion_candidates(
         .collect()
 }
 
-unsafe fn shell_editor() -> OsString {
+unsafe fn shell_editor(sh: &mut crate::context::Shell) -> OsString {
     for name in [c"EDITOR", c"VISUAL"] {
-        let value = crate::var::bltinlookup(name.as_ptr());
+        let value = crate::var::bltinlookup(sh, name.as_ptr());
         if !value.is_null() {
             let bytes = CStr::from_ptr(value).to_bytes();
             if !bytes.is_empty() {

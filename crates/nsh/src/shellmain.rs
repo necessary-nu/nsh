@@ -174,7 +174,7 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
                              *                getgid() == getegid() && */
                             iflag(sh) != 0 {
                                 let shinit: *mut c_char =
-                                    crate::var::lookupvar(b"ENV\0".as_ptr() as *const c_char);
+                                    crate::var::lookupvar(sh, b"ENV\0".as_ptr() as *const c_char);
                                 if !shinit.is_null() && *shinit != b'\0' as c_char {
                                     match read_profile(sh, shinit)? {
                                         crate::eval::Flow::Done(_) => {}
@@ -366,7 +366,7 @@ pub(crate) unsafe fn cmdloop(
         inter = 0;
         if iflag(sh) != 0 && top != 0 {
             inter += 1;
-            crate::mail::chkmail();
+            crate::mail::chkmail(sh);
         }
         let parsed = crate::parser::parsecmd(sh, inter)?;
         /* showtree(n); DEBUG */

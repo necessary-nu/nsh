@@ -218,7 +218,7 @@ pub unsafe fn shellexec(
 
     /* The C's `environment()` leaves its array in the stack allocator; ours
      * owns it, so the `Vec` has to outlive every `execve` below. */
-    let envv = crate::var::environment();
+    let envv = crate::var::environment(sh);
     let envp: *mut *mut c_char = envv.as_ptr() as *mut *mut c_char;
     if CStr::from_ptr(*argv.offset(0)).to_bytes().contains(&b'/') {
         tryexec(*argv.offset(0), argv, envp);
@@ -524,7 +524,7 @@ pub unsafe fn find_command(
         return Ok(crate::eval::Flow::Done(0));
     }
 
-    updatetbl = (path == crate::var::pathval()) as c_int;
+    updatetbl = (path == crate::var::pathval(sh)) as c_int;
     if updatetbl == 0 {
         act |= DO_ALTPATH;
     }

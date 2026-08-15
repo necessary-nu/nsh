@@ -47,7 +47,7 @@ pub unsafe fn exportcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 Some(at) => p = name.add(at + 1),
                 None => {
                     p = ptr::null();
-                    vp = findvar(name);
+                    vp = findvar(sh, name);
                     if !vp.is_null() {
                         (*vp).flags |= flag;
                         continue;
@@ -58,7 +58,7 @@ pub unsafe fn exportcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
     } else {
         let called = crate::shell::cstring(args[0]);
-        showvars(called.as_ptr(), flag, 0);
+        showvars(sh, called.as_ptr(), flag, 0);
     }
     Ok(Flow::Done(0))
 }
@@ -72,10 +72,13 @@ mod tests {
     use crate::testutil::{CStr0, lock};
     use crate::var::{VSTRFIXED, lookupvar, setvar};
 
-    fn run(name: &[u8], words: &[&[u8]]) -> Flow {
+    /// The shell is the caller's: `export` reads and writes the variable
+    /// table, which belongs to an instance, so a `Shell` made in here
+    /// would be a different set of variables from the one the test set up.
+    fn run(sh: &mut Shell, name: &[u8], words: &[&[u8]]) -> Flow {
         let mut args = vec![BStr::new(name)];
         args.extend(words.iter().map(|w| BStr::new(*w)));
-        unsafe { exportcmd(&mut Shell::new(), &args).unwrap() }
+        unsafe { exportcmd(sh, &args).unwrap() }
     }
 
     /// The word the builtin was called as picks the flag, which is the
@@ -89,12 +92,12 @@ mod tests {
             let name = CStr0::new("Texport");
             setvar(sh, name.p(), CStr0::new("v").p(), VSTRFIXED);
 
-            assert_eq!(run(b"export", &[b"Texport"]), Flow::Done(0));
-            assert_ne!((*findvar(name.p())).flags & VEXPORT, 0);
-            assert_eq!((*findvar(name.p())).flags & VREADONLY, 0);
+            assert_eq!(run(sh, b"export", &[b"Texport"]), Flow::Done(0));
+            assert_ne!((*findvar(sh, name.p())).flags & VEXPORT, 0);
+            assert_eq!((*findvar(sh, name.p())).flags & VREADONLY, 0);
 
-            assert_eq!(run(b"readonly", &[b"Texport"]), Flow::Done(0));
-            assert_ne!((*findvar(name.p())).flags & VREADONLY, 0);
+            assert_eq!(run(sh, b"readonly", &[b"Texport"]), Flow::Done(0));
+            assert_ne!((*findvar(sh, name.p())).flags & VREADONLY, 0);
         }
     }
 
@@ -104,13 +107,12 @@ mod tests {
     fn an_operand_may_assign() {
         let _g = lock();
         unsafe {
-            assert_eq!(run(b"export", &[b"Texport2=set"]), Flow::Done(0));
+            let mut owned = Shell::new();
+            let sh = &mut owned;
+            assert_eq!(run(sh, b"export", &[b"Texport2=set"]), Flow::Done(0));
             let name = CStr0::new("Texport2");
-            assert_eq!(
-                CStr::from_ptr(lookupvar(name.p())).to_bytes(),
-                b"set"
-            );
-            assert_ne!((*findvar(name.p())).flags & VEXPORT, 0);
+            assert_eq!(CStr::from_ptr(lookupvar(sh, name.p())).to_bytes(), b"set");
+            assert_ne!((*findvar(sh, name.p())).flags & VEXPORT, 0);
         }
     }
 }

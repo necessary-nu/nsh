@@ -23,11 +23,12 @@ use crate::shellmain::cmdloop;
 /// The caller owns the buffer and this fills it, so the copy lasts
 /// exactly as long as the frame that asked for it.
 unsafe fn find_dot_file(
+    sh: &crate::context::Shell,
     basename: *mut c_char,
     out: &mut Vec<u8>,
 ) -> Result<*mut c_char, Error> {
     let mut fullname: *mut c_char;
-    let mut path: *const c_char = crate::var::pathval();
+    let mut path: *const c_char = crate::var::pathval(sh);
     let mut statb: libc::stat64 = core::mem::zeroed();
     let mut len: c_int;
 
@@ -78,7 +79,7 @@ pub unsafe fn dotcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if let Some(name) = opts.operands().first() {
         let mut dotfile: Vec<u8> = Vec::new();
         let name = crate::shell::cstring(name);
-        let fullname = find_dot_file(name.as_ptr() as *mut c_char, &mut dotfile)?;
+        let fullname = find_dot_file(sh, name.as_ptr() as *mut c_char, &mut dotfile)?;
 
         crate::input::setinputfile(sh, fullname, crate::input::INPUT_PUSH_FILE)?;
         /* `evalbltin`'s epilogue reads `commandname` after this returns —

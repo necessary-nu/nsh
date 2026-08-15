@@ -60,9 +60,9 @@ pub unsafe fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
      * from `argv` living in `evalcommand`'s frame. */
     let operand = opts.operands().first().map(|d| crate::shell::cstring(d));
     match &operand {
-        None => dest = bltinlookup(addr_of!(homestr) as *const c_char),
+        None => dest = bltinlookup(sh, addr_of!(homestr) as *const c_char),
         Some(d) if d.as_bytes() == b"-" => {
-            dest = bltinlookup(b"OLDPWD\0".as_ptr() as *const c_char);
+            dest = bltinlookup(sh, b"OLDPWD\0".as_ptr() as *const c_char);
             flags |= CD_PRINT;
         }
         Some(d) => dest = d.as_ptr(),
@@ -101,7 +101,7 @@ pub unsafe fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         if *dest == 0 {
             dest = addr_of!(dotdir) as *const c_char;
         }
-        path = bltinlookup(b"CDPATH\0".as_ptr() as *const c_char);
+        path = bltinlookup(sh, b"CDPATH\0".as_ptr() as *const c_char);
         loop {
             p = path;
             len = crate::exec::padvance_magic(&mut path, dest, 0);

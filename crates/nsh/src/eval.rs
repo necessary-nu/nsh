@@ -355,9 +355,9 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
                             NREDIR => {
                                 let r = n.nredir();
                                 crate::error::errlinno = r.linno;
-                                crate::var::lineno = r.linno;
+                                sh.vars.lineno = r.linno;
                                 if sh.eval.funcline != 0 {
-                                    crate::var::lineno -= sh.eval.funcline - 1;
+                                    sh.vars.lineno -= sh.eval.funcline - 1;
                                 }
                                 expredir(sh, &r.redirect)?;
                                 crate::redir::pushredir(sh, &r.redirect);
@@ -602,9 +602,9 @@ unsafe fn evalfor(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error>
 
     let f = n.nfor();
     crate::error::errlinno = f.linno;
-    crate::var::lineno = f.linno;
+    sh.vars.lineno = f.linno;
     if sh.eval.funcline != 0 {
-        crate::var::lineno -= sh.eval.funcline - 1;
+        sh.vars.lineno -= sh.eval.funcline - 1;
     }
 
     for argp in &f.args {
@@ -634,9 +634,9 @@ unsafe fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
 
     let c = n.ncase();
     crate::error::errlinno = c.linno;
-    crate::var::lineno = c.linno;
+    sh.vars.lineno = c.linno;
     if sh.eval.funcline != 0 {
-        crate::var::lineno -= sh.eval.funcline - 1;
+        sh.vars.lineno -= sh.eval.funcline - 1;
     }
 
     crate::expand::expandarg(sh, 
@@ -689,9 +689,9 @@ unsafe fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, E
 
     let r = n.nredir();
     crate::error::errlinno = r.linno;
-    crate::var::lineno = r.linno;
+    sh.vars.lineno = r.linno;
     if sh.eval.funcline != 0 {
-        crate::var::lineno -= sh.eval.funcline - 1;
+        sh.vars.lineno -= sh.eval.funcline - 1;
     }
 
     expredir(sh, &r.redirect)?;
@@ -1094,9 +1094,9 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
 
     let c = cmd.ncmd();
     crate::error::errlinno = c.linno;
-    crate::var::lineno = c.linno;
+    sh.vars.lineno = c.linno;
     if sh.eval.funcline != 0 {
-        crate::var::lineno -= sh.eval.funcline - 1;
+        sh.vars.lineno -= sh.eval.funcline - 1;
     }
 
     /* First expand the arguments. */
@@ -1124,12 +1124,18 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
             /* `find_command` can run a `%func` PATH file, which is shell
               * code and can `exit`; the C's longjmp took that past this
               * frame and so does this. */
+            /* `pathval` and the call both take the shell, so the read is
+             * hoisted out of the argument list rather than nested in it.
+             * Arguments evaluate left to right and nothing before it here
+             * has an effect, so it is read at the same point as before.
+             * Do not re-inline it. */
+            let regpath = crate::var::pathval(sh);
             match find_command(
                 sh,
                 arglist.list[head].textp(),
                 &mut cmdentry,
                 cmd_flag | DO_REGBLTIN,
-                crate::var::pathval(),
+                regpath,
             )? {
                 Flow::Done(_) => {}
                 exit @ Flow::Exit { .. } => return Ok(exit),
@@ -1177,7 +1183,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
         }
     }
 
-    localvar_stop = crate::var::pushlocalvars(vlocal);
+    localvar_stop = crate::var::pushlocalvars(sh, vlocal);
 
     /* Reserve one extra spot at the front for shellexec.
      *
@@ -1268,7 +1274,10 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
 
                 out = crate::output::previous_stderr();
                 sh.eval.inps4 = 1;
-                let prompt = crate::parser::expandstr(sh, crate::var::ps4val())?;
+                /* Hoisted out of `expandstr`'s argument list; see the
+                 * note in `evalcommand`. */
+                let ps4 = crate::var::ps4val(sh);
+                let prompt = crate::parser::expandstr(sh, ps4)?;
                 let _ = (&mut *out).write_all(CStr::from_ptr(prompt).to_bytes());
                 sh.eval.inps4 = 0;
                 sep = 0;
@@ -1286,7 +1295,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                 path = if !path.is_null() {
                     path
                 } else {
-                    crate::var::pathval()
+                    crate::var::pathval(sh)
                 };
                 match find_command(sh, *argv.offset(0), &mut cmdentry, cmd_flag | DO_ERR, path)? {
                     Flow::Done(_) => {}
@@ -1531,7 +1540,10 @@ unsafe fn prehash(sh: &mut Shell, n: &Node) -> Result<Flow, Error> {
     if n.node_type() == NCMD && !n.ncmd().args.is_empty() {
         let text = n.ncmd().args[0].narg().text.as_ptr();
         if crate::parser::goodname(text) != 0 {
-            return find_command(sh, text, &mut entry, 0, crate::var::pathval());
+            /* Hoisted out of the argument list; see the note in
+             * `evalcommand`. */
+            let path = crate::var::pathval(sh);
+            return find_command(sh, text, &mut entry, 0, path);
         }
     }
     Ok(Flow::Done(0))

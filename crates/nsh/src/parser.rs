@@ -2378,10 +2378,10 @@ pub unsafe fn getprompt(sh: &mut Shell) -> *const c_char {
 
     match whichprompt {
         1 => {
-            prompt = crate::var::ps1val();
+            prompt = crate::var::ps1val(sh);
         }
         2 => {
-            prompt = crate::var::ps2val();
+            prompt = crate::var::ps2val(sh);
         }
         /* default: falls into case 0 outside DEBUG builds */
         _ => {

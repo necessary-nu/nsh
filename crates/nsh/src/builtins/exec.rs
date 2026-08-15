@@ -42,7 +42,10 @@ pub unsafe fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         argv.push(null_mut());
         argv.extend(words.iter().map(|w| w.as_ptr() as *mut c_char));
         argv.push(null_mut());
-        return shellexec(sh, argv.as_mut_ptr().add(1), crate::var::pathval(), 0);
+        /* Hoisted out of `shellexec`'s argument list, which also takes
+         * the shell; see the note in `eval.rs`'s `evalcommand`. */
+        let path = crate::var::pathval(sh);
+        return shellexec(sh, argv.as_mut_ptr().add(1), path, 0);
     }
     Ok(Flow::Done(0))
 }

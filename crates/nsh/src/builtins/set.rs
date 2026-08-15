@@ -24,7 +24,7 @@ use crate::var::{VUNSET, showvars};
 // [spec:dash:sem:options.setcmd-fn]
 pub unsafe fn setcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if args.len() == 1 {
-        return Ok(Flow::Done(showvars(addr_of!(nullstr) as *const c_char, 0, VUNSET)));
+        return Ok(Flow::Done(showvars(sh, addr_of!(nullstr) as *const c_char, 0, VUNSET)));
     }
     INTOFF();
     let scan = options(sh, args, 1, false)?;

@@ -13,12 +13,12 @@ use bstr::BStr;
 use libc::c_char;
 
 use crate::eval::Flow;
-use crate::var::{localvar_stack_mut, mklocal};
+use crate::var::mklocal;
 
 // [spec:dash:def:var.localcmd-fn]
 // [spec:dash:sem:var.localcmd-fn]
 pub unsafe fn localcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    if localvar_stack_mut().is_empty() {
+    if !sh.vars.in_function() {
         return Err(crate::error::sh_error_value(b"not in a function"));
     }
 

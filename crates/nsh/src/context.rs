@@ -73,6 +73,10 @@ pub struct Shell {
     /// The saved-descriptor stack and the closed-descriptor bitmap.
     /// `redir.rs` owns the shape; this owns the value.
     pub(crate) redirs: crate::redir::RedirStack,
+    /// Every variable, the sixteen the shell is born with, the `LINENO`
+    /// buffer and line, and the `local` save stack. `var.rs` owns the
+    /// shape; this owns the value.
+    pub(crate) vars: crate::var::VarTable,
 }
 
 impl Shell {
@@ -93,6 +97,7 @@ impl Shell {
             jobs: crate::jobs::JobTable::new(),
             options: crate::options::ShellOptions::new(),
             redirs: crate::redir::RedirStack::new(),
+            vars: crate::var::VarTable::new(),
         }
     }
 }

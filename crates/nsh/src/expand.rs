@@ -879,7 +879,7 @@ unsafe fn argstr(
             /* tilde: */
             do_tilde = false;
             if *p == C_TILDE {
-                p = exptilde(p, flag);
+                p = exptilde(sh, p, flag);
             }
         }
         /* start: */
@@ -1029,7 +1029,11 @@ unsafe fn argstr(
 
 // [spec:dash:def:expand.exptilde-fn]
 // [spec:dash:sem:expand.exptilde-fn]
-unsafe fn exptilde(startp: *mut c_char, flag: c_int) -> *mut c_char {
+unsafe fn exptilde(
+    sh: &mut crate::context::Shell,
+    startp: *mut c_char,
+    flag: c_int,
+) -> *mut c_char {
     let mut c: c_char;
     let name: *mut c_char;
     let home: *const c_char;
@@ -1063,7 +1067,7 @@ unsafe fn exptilde(startp: *mut c_char, flag: c_int) -> *mut c_char {
         }
         *p = C_NUL;
         if *name == C_NUL {
-            home = crate::var::lookupvar(crate::mystring::homestr.as_ptr());
+            home = crate::var::lookupvar(sh, crate::mystring::homestr.as_ptr());
         } else {
             home = getpwhome(name);
         }
@@ -2039,7 +2043,7 @@ unsafe fn varvalue(
                         }
                         _ => {
                             /* default: */
-                            p = crate::var::lookupvar(name);
+                            p = crate::var::lookupvar(sh, name);
                             break 'value;
                         }
                     }
@@ -2393,7 +2397,7 @@ pub unsafe fn ifsfree() {
 
 // [spec:dash:def:expand.changeifs-fn]
 // [spec:dash:sem:expand.changeifs-fn]
-pub unsafe fn changeifs(_sh: &mut crate::context::Shell, mut ifs: *const c_char) {
+pub unsafe fn changeifs(sh: &mut crate::context::Shell, mut ifs: *const c_char) {
     let mut mbs: libc::mbstate_t = mem::zeroed();
     let mut nwcifs: Vec<wchar_t>;
     let mut mb: c_uint = 0;
@@ -2401,7 +2405,7 @@ pub unsafe fn changeifs(_sh: &mut crate::context::Shell, mut ifs: *const c_char)
     let mut p: *const c_char;
     let mut ml: size_t;
 
-    if crate::var::ifsset() == 0 {
+    if crate::var::ifsset(sh) == 0 {
         ifs = crate::var::defifs();
     }
     ncifs = ifs;

@@ -57,21 +57,21 @@ mod tests {
                 unsetcmd(sh, &[BStr::new("unset"), BStr::new("Tunset")]).unwrap(),
                 Flow::Done(0)
             );
-            assert!(lookupvar(name.p()).is_null());
+            assert!(lookupvar(sh, name.p()).is_null());
 
             setvar(sh, name.p(), CStr0::new("v").p(), 0);
             assert_eq!(
                 unsetcmd(sh, &[BStr::new("unset"), BStr::new("-v"), BStr::new("Tunset")]).unwrap(),
                 Flow::Done(0)
             );
-            assert!(lookupvar(name.p()).is_null());
+            assert!(lookupvar(sh, name.p()).is_null());
 
             setvar(sh, name.p(), CStr0::new("v").p(), 0);
             assert_eq!(
                 unsetcmd(sh, &[BStr::new("unset"), BStr::new("-f"), BStr::new("Tunset")]).unwrap(),
                 Flow::Done(0)
             );
-            assert!(!lookupvar(name.p()).is_null(), "-f is the function table");
+            assert!(!lookupvar(sh, name.p()).is_null(), "-f is the function table");
             unsetvar(sh, name.p());
         }
     }
@@ -95,7 +95,7 @@ mod tests {
                 .unwrap(),
                 Flow::Done(0)
             );
-            assert!(lookupvar(name.p()).is_null());
+            assert!(lookupvar(sh, name.p()).is_null());
         }
     }
 }

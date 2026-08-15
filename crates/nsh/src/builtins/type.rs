@@ -99,7 +99,7 @@ pub(crate) unsafe fn describe_command(
          * a tracked alias.
          */
         if path.is_null() {
-            path = crate::var::pathval();
+            path = crate::var::pathval(sh);
             cmdp = cmdlookup(sh, command, 0);
         } else {
             cmdp = null_mut();

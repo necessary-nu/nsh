@@ -219,11 +219,11 @@ pub unsafe fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             if sflg == 0 {
                 if editor.is_null()
                     && {
-                        editor = crate::var::bltinlookup(c"FCEDIT".as_ptr());
+                        editor = crate::var::bltinlookup(sh, c"FCEDIT".as_ptr());
                         editor.is_null()
                     }
                     && {
-                        editor = crate::var::bltinlookup(c"EDITOR".as_ptr());
+                        editor = crate::var::bltinlookup(sh, c"EDITOR".as_ptr());
                         editor.is_null()
                     }
                 {

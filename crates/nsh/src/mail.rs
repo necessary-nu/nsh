@@ -23,7 +23,7 @@ static mut changed: c_int = 0;
 
 // [spec:dash:def:mail.chkmail-fn]
 // [spec:dash:sem:mail.chkmail-fn]
-pub unsafe fn chkmail() {
+pub unsafe fn chkmail(sh: &crate::context::Shell) {
     let mut mpath: *const c_char;
     let mut q: *mut c_char;
     let mut mtp: *mut time_t;
@@ -31,10 +31,10 @@ pub unsafe fn chkmail() {
 
     /* `setstackmark`/`popstackmark` bounded the candidate paths
      * `padvance` built in the region; it builds them in its own buffer. */
-    mpath = if mpathset() != 0 {
-        mpathval()
+    mpath = if mpathset(sh) != 0 {
+        mpathval(sh)
     } else {
-        mailval()
+        mailval(sh)
     };
     mtp = addr_of_mut!(mailtime) as *mut time_t;
     while mtp < (addr_of_mut!(mailtime) as *mut time_t).add(MAXMBOXES) {

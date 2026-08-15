@@ -217,8 +217,8 @@ mod tests {
     use crate::testutil::{CStr0, lock};
     use crate::var::lookupvar;
 
-    unsafe fn value(name: &str) -> String {
-        let p = lookupvar(CStr0::new(name).p());
+    unsafe fn value(sh: &mut Shell, name: &str) -> String {
+        let p = lookupvar(sh, CStr0::new(name).p());
         if p.is_null() {
             return String::new();
         }
@@ -238,16 +238,24 @@ mod tests {
             let words = ["getopts", "ab:", "o", "-a", "-bVAL", "rest"];
             let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
 
-            assert_eq!(getoptscmd(&mut Shell::new(), &args).unwrap(), Flow::Done(0));
-            assert_eq!(value("o"), "a");
+            /* One shell across the whole scan. The C's `getopts` state
+             * is partly in `shellparam` and partly in the variables it
+             * assigns, and the variables now belong to a shell instance --
+             * so a fresh `Shell` per invocation would be a fresh set of
+             * variables, which is not what a script sees. */
+            let mut owned = Shell::new();
+            let sh = &mut owned;
 
-            assert_eq!(getoptscmd(&mut Shell::new(), &args).unwrap(), Flow::Done(0));
-            assert_eq!(value("o"), "b");
-            assert_eq!(value("OPTARG"), "VAL");
+            assert_eq!(getoptscmd(sh, &args).unwrap(), Flow::Done(0));
+            assert_eq!(value(sh, "o"), "a");
+
+            assert_eq!(getoptscmd(sh, &args).unwrap(), Flow::Done(0));
+            assert_eq!(value(sh, "o"), "b");
+            assert_eq!(value(sh, "OPTARG"), "VAL");
 
             /* The operand ends the scan, and OPTIND points at it. */
-            assert_ne!(getoptscmd(&mut Shell::new(), &args).unwrap(), Flow::Done(0));
-            assert_eq!(value("OPTIND"), "3");
+            assert_ne!(getoptscmd(sh, &args).unwrap(), Flow::Done(0));
+            assert_eq!(value(sh, "OPTIND"), "3");
         }
     }
 
@@ -264,9 +272,12 @@ mod tests {
             let words = ["getopts", ":a", "o", "-z"];
             let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
 
-            assert_eq!(getoptscmd(&mut Shell::new(), &args).unwrap(), Flow::Done(0));
-            assert_eq!(value("o"), "?");
-            assert_eq!(value("OPTARG"), "z");
+            let mut owned = Shell::new();
+            let sh = &mut owned;
+
+            assert_eq!(getoptscmd(sh, &args).unwrap(), Flow::Done(0));
+            assert_eq!(value(sh, "o"), "?");
+            assert_eq!(value(sh, "OPTARG"), "z");
         }
     }
 }

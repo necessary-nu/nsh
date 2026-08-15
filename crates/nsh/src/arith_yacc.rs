@@ -220,7 +220,7 @@ unsafe fn primary(
                 return Ok(if noeval != 0 {
                     (*val).val
                 } else {
-                    lookupvarint((*val).name)?
+                    lookupvarint(sh, (*val).name)?
                 });
             }
             ARITH_ADD => {
@@ -410,15 +410,16 @@ unsafe fn assignment(sh: &mut crate::context::Shell, var: c_int, noeval: c_int) 
         return Ok(result);
     }
 
-    setvarint(sh, 
-        val.name,
-        if op == ARITH_ASS {
-            result
-        } else {
-            do_binop(op - 11, lookupvarint(val.name)?, result)?
-        },
-        0,
-    )
+    /* The C reads the variable inside `setvarint`'s argument list. Both
+     * take the shell now, so the read is hoisted to its own statement --
+     * Rust evaluates arguments left to right, so it ran before the call
+     * before and runs before it now. Do not re-inline it. */
+    let value = if op == ARITH_ASS {
+        result
+    } else {
+        do_binop(op - 11, lookupvarint(sh, val.name)?, result)?
+    };
+    setvarint(sh, val.name, value, 0)
 }
 
 // [spec:dash:def:arith-yacc.arith-fn]
