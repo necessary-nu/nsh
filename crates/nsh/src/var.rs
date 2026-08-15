@@ -167,15 +167,25 @@ pub static defpathvar: [c_char; 66] = unsafe {
         *b"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\0",
     )
 };
-pub static mut defifsvar: [c_char; 8] =
+/// Constant text, and `static` rather than `static mut` on purpose.
+///
+/// The C declares it `char[]` because C has no better way to say "text
+/// a `char *` may point at"; nothing in either shell writes it. Making
+/// that explicit is what takes it out of `move-state`'s way: a
+/// `VarText::Fixed` pointing into an immutable static is valid forever,
+/// so this buffer never has to move onto the shell however the rest of
+/// the variable table is arranged. Same for `defoptindvar` below, and
+/// `defpathvar` above was already this.
+pub static defifsvar: [c_char; 8] =
     unsafe { core::mem::transmute::<[u8; 8], [c_char; 8]>(*b"IFS= \t\n\0") };
 /* MKINIT char defoptindvar[] = "OPTIND=1"; */
-pub static mut defoptindvar: [c_char; 9] =
+/// Constant text; see `defifsvar`.
+pub static defoptindvar: [c_char; 9] =
     unsafe { core::mem::transmute::<[u8; 9], [c_char; 9]>(*b"OPTIND=1\0") };
 
 /// `#define defifs (defifsvar + 4)`
 pub unsafe fn defifs() -> *mut c_char {
-    (addr_of_mut!(defifsvar) as *mut c_char).add(4)
+    (addr_of!(defifsvar) as *mut c_char).add(4)
 }
 /// `#define defpath (defpathvar + 36)`
 pub unsafe fn defpath() -> *const c_char {
@@ -418,7 +428,21 @@ pub unsafe fn environment() -> Vec<*mut c_char> {
 /// remove other names in between — which a `BTreeMap` answers by moving
 /// the values it holds. Boxing keeps the address the C's `ckmalloc` gave.
 enum VarSlot {
-    Builtin(*mut var),
+    /// One of `varinit`'s sixteen, **by index and not by address**.
+    ///
+    /// The C files a `struct var *`, and so did this until `move-state`
+    /// needed the table and `varinit` to be able to live on the same
+    /// `Shell`. A stored pointer into a sibling field is a
+    /// self-reference: `Shell::new` returns by value, so the struct
+    /// moves once, and every such pointer would be left behind. An
+    /// index survives the move because it does not name a location.
+    ///
+    /// This is the same answer `owned-jobs` gave for the job table ("a
+    /// job is named by its index") and `owned-input` for the parse-file
+    /// stack. It is resolved fresh at every use by [`VarSlot::as_ptr`],
+    /// which is the one place that has to know where `varinit` lives --
+    /// and therefore the one place that changes when it moves.
+    Builtin(usize),
     Owned(Box<var>),
 }
 
@@ -426,7 +450,7 @@ impl VarSlot {
     #[inline]
     unsafe fn as_ptr(&mut self) -> *mut var {
         match self {
-            VarSlot::Builtin(p) => *p,
+            VarSlot::Builtin(i) => (addr_of_mut!(varinit) as *mut var).add(*i),
             VarSlot::Owned(b) => &mut **b as *mut var,
         }
     }
@@ -490,8 +514,8 @@ pub unsafe fn mkinit_init(sh: &mut Shell) -> Result<(), Error> {
         envp = envp.add(1);
     }
 
-    setvareq(sh, addr_of_mut!(defifsvar) as *mut c_char, VTEXTFIXED)?;
-    setvareq(sh, addr_of_mut!(defoptindvar) as *mut c_char, VTEXTFIXED)?;
+    setvareq(sh, addr_of!(defifsvar) as *mut c_char, VTEXTFIXED)?;
+    setvareq(sh, addr_of!(defoptindvar) as *mut c_char, VTEXTFIXED)?;
 
     let ppid_text = format!("{}", libc::getppid());
     crate::mystring::copy_ascii_cstr(
@@ -551,25 +575,21 @@ unsafe fn varfunc(sh: &mut Shell, vp: *mut var) {
 // [spec:dash:def:var.initvar-fn]
 // [spec:dash:sem:var.initvar-fn]
 pub unsafe fn initvar() {
-    let mut vp: *mut var;
-    let end: *mut var;
-
-    vp = addr_of_mut!(varinit) as *mut var;
-    end = vp.add(16);
-    loop {
-        /* The 16 entries stay a static array: `vifs`/`vps1`/… address them
-         * positionally, `lookupvar` compares against `vlineno()` by
-         * address, and their `text` is `VTEXTFIXED`. Only the link into the
-         * table changes — the map holds the address, it does not own the
-         * `var`. */
+    let base: *mut var = addr_of_mut!(varinit) as *mut var;
+    for i in 0..16usize {
+        /* The 16 entries stay one array: `vifs`/`vps1`/… address them
+         * positionally and their `text` is `VTEXTFIXED`. Only the link
+         * into the table is here — the map records *which* of the
+         * sixteen, and does not own the `var`.
+         *
+         * The C walks a `struct var *` and files the pointer; this walks
+         * the same array and files the index, because the pointer would
+         * be a self-reference once both the table and `varinit` live on
+         * one `Shell`. See `VarSlot::Builtin`. */
         vartab_mut().insert(
-            varname((*vp).text.as_ptr()).to_owned(),
-            VarSlot::Builtin(vp),
+            varname((*base.add(i)).text.as_ptr()).to_owned(),
+            VarSlot::Builtin(i),
         );
-        vp = vp.add(1);
-        if !(vp < end) {
-            break;
-        }
     }
     /*
      * PS1 depends on uid
