@@ -1901,10 +1901,11 @@ unsafe fn mbtodest(
 // `chtodest` and `mbtodest` already take theirs (`out`, `q`).
 //
 // The destination is an owned buffer and the cursor is its length, so
-// `makestrspace` is `reserve` and the commit is a `set_len` over bytes this
-// function's raw cursor has filled — the same shape `parser::getmbc_at`
-// uses.  `p` never points into `dst`: every caller's source is a variable
-// value, a `read` buffer, a `getpwnam` field or a stack array.
+// `makestrspace` is `reserve` and every `USTPUTC` is a `push`.  There is
+// no commit: the length is correct after each write rather than at the
+// end.  `p` never points into `dst` — every caller's source is a variable
+// value, a `read` buffer, a `getpwnam` field or a stack array — which is
+// what makes appending safe while reading `p`.
 unsafe fn memtodest(
     mut p: *const c_char,
     mut len: size_t,

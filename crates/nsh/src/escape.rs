@@ -26,7 +26,9 @@ use libc::{c_char, c_int, c_uint};
 
 // ---------------------------------------------------------------------
 // src/memalloc.h:78-97 -- the two stack-string macros `conv_escape` still
-// needs.  Both are pure cursor arithmetic; neither touches the region.
+// needs.  Both are pure cursor arithmetic; neither touches the region,
+// and both are now written over a buffer and an offset rather than a raw
+// pointer, so the bound they write within is checked.
 // ---------------------------------------------------------------------
 
 ///
@@ -36,12 +38,13 @@ use libc::{c_char, c_int, c_uint};
 /// USTPUTC(CTLMBCHAR, out)` at `out + len` and `out + len + 1` — bytes 5 and
 /// 6 with `mbchar` false, bytes 7 and 8 with it true. It returns before them,
 /// so they are scratch the next write overwrites; but they are written, and
-/// in a 504-byte stack block nobody notices. Spare capacity is exactly as
-/// long as it is reserved to be, so the port has to reserve what the C
-/// writes rather than what the C says.
+/// in a 504-byte stack block nobody notices. A fixed buffer is exactly as
+/// long as it is declared to be, so the port has to size it by what the C
+/// *writes* rather than by what the C says.
 ///
-/// `parser.rs` reaches the `mbchar` arm and its `CHECKSTRSPACE(MAX(MB_LEN_MAX,
-/// 16) + 7, out)` already covers 8.
+/// This is the size of `conv_escape`'s destination rather than an amount
+/// callers must remember to reserve, which is why every call site can now
+/// pass a `[u8; CONV_ESCAPE_SLOP]` and stop thinking about it.
 pub const CONV_ESCAPE_SLOP: usize = 8;
 
 /// `#define USTPUTC(c, p) (*p++ = (c))`, over a buffer and an offset.

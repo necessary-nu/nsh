@@ -1436,8 +1436,10 @@ struct Rt1<'a> {
     quotef: c_int,
     /// The word being built. The C's `out` is a `char *` cursor into the
     /// stack block and `stackblock()` is the base; here the base is the
-    /// buffer, the cursor is its length, and `STADJUST` is `truncate` or a
-    /// `set_len` over bytes a raw writer has already filled.
+    /// buffer and the cursor is its length, so `STADJUST` is `truncate`
+    /// or `push`. Nothing writes into this buffer's spare capacity any
+    /// more -- the two routines that did, `getmbc` and `dollarsq_escape`,
+    /// have their own scratch and hand back bytes to append.
     out: BString,
     eofmark: EofMark<'a>,
     striptabs: c_int,
@@ -1518,7 +1520,10 @@ unsafe fn readtoken1(
                     0
                 };
                 /* The C's CHECKSTRSPACE, which permits max(MB_LEN_MAX, 23)
-                 * calls to USTPUTC, is `getmbc_at`'s reserve. */
+                 * calls to USTPUTC, has no counterpart here: `getmbc`
+                 * writes into its own scratch and `getmbc_at` appends
+                 * what it reports, so there is no room for this frame to
+                 * make on its behalf. */
                 ml = getmbc_at(sh, 
                     &mut st.out,
                     st.c,

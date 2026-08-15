@@ -24,11 +24,13 @@ const MB_LEN_MAX: usize = 16;
 
 /// `readcmd`'s `CHECKSTRSPACE((MB_LEN_MAX > 16 ? MB_LEN_MAX : 16) + 4, p)`.
 ///
-/// `getmbc` writes through the bare `char *` this makes room for, so the
-/// number has to stay the C's: with `mode` 0 it puts the character's bytes at
-/// `out + 2` and the closing length and marker at `out + 2 + ml` and
-/// `out + 3 + ml`, which for `ml == MB_LEN_MAX` is the twentieth byte and not
-/// one fewer.
+/// `getmbc` no longer writes through a cursor this frame makes room for --
+/// it has its own scratch and hands back the bytes to append -- so this is
+/// not a reservation any more. It survives as the assertion bound on what
+/// `getmbc` may return, and the number is still the C's for the reason it
+/// always was: with `mode` 0 it puts the character's bytes at `out + 2`
+/// and the closing length and marker at `out + 2 + ml` and `out + 3 + ml`,
+/// which for `ml == MB_LEN_MAX` is the twentieth byte and not one fewer.
 const READ_MBSLOP: usize = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 4;
 
 // ---------------------------------------------------------------------
