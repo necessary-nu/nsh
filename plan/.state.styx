@@ -1108,7 +1108,7 @@ assertions (
     {id printf-errata, kind @complete, author "brendan@necessary.nu", at 2026-08-12T12:44:06.822539927Z}
     {id errors-are-values, kind @complete, author "brendan@necessary.nu", at 2026-08-14T12:52:12.404369098Z}
     {id thread-context, kind @complete, author "brendan@necessary.nu", at 2026-08-14T14:26:30.410082996Z}
-    {id move-state, kind @doing, author "brendan@necessary.nu", at 2026-08-14T14:30:31.190554208Z}
+    {id move-state, kind @complete, author "brendan@necessary.nu", at 2026-08-15T15:03:27.901722046Z}
 )
 
 impl_evidence (
