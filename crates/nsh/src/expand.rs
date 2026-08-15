@@ -30,6 +30,7 @@ use bstr::{BStr, BString, ByteSlice};
 use libc::{c_char, c_int, c_uint, c_ulong, c_void, intmax_t, size_t, ssize_t, wchar_t};
 
 use crate::error::Error;
+use crate::mystring::byte_at;
 
 // ---------------------------------------------------------------------
 // Declarations from <wchar.h> / <wctype.h> that the `libc` crate does not
@@ -37,13 +38,13 @@ use crate::error::Error;
 // ---------------------------------------------------------------------
 
 #[allow(non_camel_case_types)]
-type wint_t = c_uint;
+pub(crate) type wint_t = c_uint;
 #[allow(non_camel_case_types)]
-type wctype_t = c_ulong;
+pub(crate) type wctype_t = c_ulong;
 
 unsafe extern "C" {
     fn mbrlen(s: *const c_char, n: size_t, ps: *mut libc::mbstate_t) -> size_t;
-    fn mbrtowc(pwc: *mut wchar_t, s: *const c_char, n: size_t, ps: *mut libc::mbstate_t) -> size_t;
+    pub(crate) fn mbrtowc(pwc: *mut wchar_t, s: *const c_char, n: size_t, ps: *mut libc::mbstate_t) -> size_t;
     fn mbsrtowcs(
         dst: *mut wchar_t,
         src: *mut *const c_char,
@@ -51,8 +52,8 @@ unsafe extern "C" {
         ps: *mut libc::mbstate_t,
     ) -> size_t;
     fn iswspace(wc: wint_t) -> c_int;
-    fn wctype(name: *const c_char) -> wctype_t;
-    fn iswctype(wc: wint_t, desc: wctype_t) -> c_int;
+    pub(crate) fn wctype(name: *const c_char) -> wctype_t;
+    pub(crate) fn iswctype(wc: wint_t, desc: wctype_t) -> c_int;
 }
 
 // ---------------------------------------------------------------------
@@ -64,11 +65,11 @@ unsafe extern "C" {
 // module happens to choose does not matter.
 // ---------------------------------------------------------------------
 
-const CTLESC: c_char = crate::parser::CTLESC as c_char;
+pub(crate) const CTLESC: c_char = crate::parser::CTLESC as c_char;
 const CTLVAR: c_char = crate::parser::CTLVAR as c_char;
 const CTLENDVAR: c_char = crate::parser::CTLENDVAR as c_char;
 const CTLBACKQ: c_char = crate::parser::CTLBACKQ as c_char;
-const CTLMBCHAR: c_char = crate::parser::CTLMBCHAR as c_char;
+pub(crate) const CTLMBCHAR: c_char = crate::parser::CTLMBCHAR as c_char;
 const CTLARI: c_char = crate::parser::CTLARI as c_char;
 const CTLENDARI: c_char = crate::parser::CTLENDARI as c_char;
 const CTLQUOTEMARK: c_char = crate::parser::CTLQUOTEMARK as c_char;
@@ -92,7 +93,7 @@ const VSLENGTH: c_int = crate::parser::VSLENGTH as c_int;
 /// build-time switch between libc `fnmatch(3)`/`glob(3)` and the shell's
 /// own matcher.  `--enable-fnmatch` / `--enable-glob` are opt-in, so both
 /// are false in the shipped build.
-const FNMATCH_IS_ENABLED: bool = crate::mystring::FNMATCH_IS_ENABLED != 0;
+pub(crate) const FNMATCH_IS_ENABLED: bool = crate::mystring::FNMATCH_IS_ENABLED != 0;
 const GLOB_IS_ENABLED: bool = crate::mystring::GLOB_IS_ENABLED != 0;
 
 /// `<limits.h>`
@@ -100,22 +101,22 @@ const CHAR_BIT: c_int = 8;
 
 // C character literals used as `switch` labels; Rust `match` patterns
 // require named constants, so the ones this file switches on get names.
-const C_NUL: c_char = 0;
+pub(crate) const C_NUL: c_char = 0;
 const C_NL: c_char = b'\n' as c_char;
-const C_BANG: c_char = b'!' as c_char;
+pub(crate) const C_BANG: c_char = b'!' as c_char;
 const C_HASH: c_char = b'#' as c_char;
 const C_DOLLAR: c_char = b'$' as c_char;
-const C_STAR: c_char = b'*' as c_char;
-const C_MINUS: c_char = b'-' as c_char;
+pub(crate) const C_STAR: c_char = b'*' as c_char;
+pub(crate) const C_MINUS: c_char = b'-' as c_char;
 const C_DOT: c_char = b'.' as c_char;
 const C_SLASH: c_char = b'/' as c_char;
-const C_COLON: c_char = b':' as c_char;
-const C_QUESTION: c_char = b'?' as c_char;
+pub(crate) const C_COLON: c_char = b':' as c_char;
+pub(crate) const C_QUESTION: c_char = b'?' as c_char;
 const C_AT: c_char = b'@' as c_char;
-const C_LBRACKET: c_char = b'[' as c_char;
-const C_RBRACKET: c_char = b']' as c_char;
+pub(crate) const C_LBRACKET: c_char = b'[' as c_char;
+pub(crate) const C_RBRACKET: c_char = b']' as c_char;
 const C_BACKSLASH: c_char = b'\\' as c_char;
-const C_CARET: c_char = b'^' as c_char;
+pub(crate) const C_CARET: c_char = b'^' as c_char;
 const C_EQUALS: c_char = b'=' as c_char;
 const C_TILDE: c_char = b'~' as c_char;
 const C_0: c_char = b'0' as c_char;
@@ -745,7 +746,7 @@ const _: () = assert!(EXP_QUOTED >> CHAR_BIT == EXP_FULL);
 
 // [spec:dash:def:expand.preglob-fn]
 // [spec:dash:sem:expand.preglob-fn]
-unsafe fn preglob(
+pub(crate) unsafe fn preglob(
     pattern: *const c_char,
     mut flag: c_int,
     heap: Option<&mut Vec<u8>>,
@@ -788,22 +789,34 @@ unsafe fn esclen(start: *const c_char, p: *const c_char) -> size_t {
 // data position* to the end of the encoded character.  The total span
 // from `p` is therefore `(mb & 0xff) + (mb >> 8)`, which is why that
 // expression appears at every call site.
+// The pointer form, for the four callers that still walk with pointers.
+// It reads at most three bytes and which three is decided by the first:
+// only the CTLMBCHAR framing looks past index 0, and that framing always
+// carries its length byte (with an optional CTLESC between), so those
+// three bytes exist whenever the first one is CTLMBCHAR.  Every other
+// byte is answered from index 0 alone.
 #[inline(never)]
 unsafe fn mbnext(p: *const c_char) -> c_uint {
+    let n = if *p == CTLMBCHAR { 3 } else { 1 };
+    mbnext_bytes(core::slice::from_raw_parts(p as *const u8, n))
+}
+
+// The decoding itself, over a slice, so the framing is bounds-checked
+// rather than trusted.
+pub(crate) fn mbnext_bytes(p: &[u8]) -> c_uint {
     let mut start: c_uint = 0;
     let mut end: c_uint = 0;
     let ml: c_uint;
-    let c: c_int;
 
-    c = *p.offset(end as isize) as c_int;
+    let c = byte_at(p, end as usize);
     end += 1;
 
-    match c as c_char {
+    match c {
         CTLMBCHAR => {
-            if *p.offset(end as isize) == CTLESC {
+            if byte_at(p, end as usize) == CTLESC {
                 end += 1;
             }
-            ml = *(p.offset(end as isize) as *const u8) as c_uint;
+            ml = byte_at(p, end as usize) as u8 as c_uint;
             end += 1;
             start = end;
             end = ml + 2;
@@ -1408,7 +1421,7 @@ unsafe fn scanleft(
             *s = C_NUL;
             s = if FNMATCH_IS_ENABLED { rmesc } else { startp };
         }
-        match_ = pmatch(str, s);
+        match_ = crate::pmatch::pmatch(str, s);
         *(if FNMATCH_IS_ENABLED { loc2 } else { loc }) = c;
         if match_ != 0 {
             return if quotes != 0 { loc } else { loc2 };
@@ -1456,7 +1469,7 @@ unsafe fn scanright(
                 *s = C_NUL;
                 s = if FNMATCH_IS_ENABLED { rmesc } else { startp };
             }
-            match_ = pmatch(str, s);
+            match_ = crate::pmatch::pmatch(str, s);
             *(if FNMATCH_IS_ENABLED { loc2 } else { loc }) = c;
             if match_ != 0 {
                 return if quotes != 0 { loc } else { loc2 };
@@ -3107,7 +3120,7 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
                         enddir = cp.offset(expdir_len as isize);
                         p = globenc.as_mut_ptr() as *mut c_char;
                     }
-                    if pmatch(pat, p) != 0 {
+                    if crate::pmatch::pmatch(pat, p) != 0 {
                         enddir = globstnputs(dname, len, enddir);
                         if c == 0 {
                             cp = addfnamealt(enddir, expdir_len);
@@ -3185,266 +3198,6 @@ unsafe fn msort(list: &mut [strlist], len: c_int) {
         return;
     }
     list.sort_by(|p, q| libc::strcoll(p.textp(), q.textp()).cmp(&0));
-}
-
-/*
- * Returns true if the pattern matches the string.
- */
-
-// [spec:dash:def:expand.patmatch-fn]
-// [spec:dash:sem:expand.patmatch-fn]
-#[inline]
-unsafe fn patmatch(pattern: *mut c_char, string: *const c_char) -> c_int {
-    pmatch(preglob(pattern, 0, None), string)
-}
-
-// [spec:dash:def:expand.ccmatch-fn]
-// [spec:dash:sem:expand.ccmatch-fn]
-#[inline(never)]
-unsafe fn ccmatch(mut p: *mut c_char, mbc: *const c_char, ml: c_int, r: *mut *mut c_char) -> c_int {
-    let mut mbst: libc::mbstate_t = mem::zeroed();
-    let type_: wctype_t;
-    let mut wc: wchar_t = 0;
-    let q: *mut c_char;
-
-    *r = ptr::null_mut();
-
-    if *p != C_COLON {
-        return 0;
-    }
-    p = p.offset(1);
-
-    q = match CStr::from_ptr(p).to_bytes().find(b":]") {
-        Some(at) => p.add(at),
-        None => return 0,
-    };
-
-    *q = 0;
-    type_ = wctype(p);
-    *q = C_COLON;
-
-    if type_ == 0 as wctype_t {
-        return 0;
-    }
-
-    *r = q.offset(2);
-
-    if mbrtowc(&mut wc, mbc, ml as size_t, &mut mbst) != ml as size_t {
-        return 0;
-    }
-
-    iswctype(wc as wint_t, type_)
-}
-
-// [spec:dash:def:expand.pmatch-fn]
-// [spec:dash:sem:expand.pmatch-fn]
-unsafe fn pmatch(pattern: *mut c_char, string: *const c_char) -> c_int {
-    let mut q: *const c_char;
-    let mut mb: c_uint;
-    let mut p: *mut c_char;
-    let mut c: c_char;
-
-    if FNMATCH_IS_ENABLED {
-        return (libc::fnmatch(pattern, string, 0) == 0) as c_int;
-    }
-
-    p = pattern;
-    q = string;
-    'forever: loop {
-        'dft: {
-            c = *p;
-            p = p.offset(1);
-            match c {
-                C_NUL => break 'forever, /* goto breakloop */
-                CTLESC => {
-                    c = *p;
-                    p = p.offset(1);
-                    /* break — fall through to dft */
-                }
-                C_QUESTION => {
-                    if *q == C_NUL {
-                        return 0;
-                    }
-                    mb = mbnext(q);
-                    q = q.offset(((mb >> 8) + (mb & 0xff)) as isize);
-                    continue 'forever;
-                }
-                C_STAR => {
-                    c = *p;
-                    while c == C_STAR {
-                        p = p.offset(1);
-                        c = *p;
-                    }
-                    if c == C_NUL {
-                        return 1;
-                    }
-                    if c == C_QUESTION || c == C_LBRACKET {
-                        c = CTLESC;
-                    }
-                    loop {
-                        if c != CTLESC {
-                            /* The C's comment here is `Stop should be
-                             * null-terminated as it is passed as a string
-                             * to strpbrk(3)`, and the terminator was the
-                             * whole reason for the fourth element. The
-                             * set is the three bytes; the scan stops at
-                             * the string's own NUL, which is a miss.
-                             *
-                             * Walked rather than taken as a slice: this
-                             * runs once per candidate position under a
-                             * `*`, and measuring the whole tail each time
-                             * would cost a pass per position. */
-                            let stop: [u8; 3] = [c as u8, CTLESC as u8, CTLMBCHAR as u8];
-                            let at = (0usize..)
-                                .find(|&i| {
-                                    let b = *q.add(i) as u8;
-                                    b == 0 || stop.contains(&b)
-                                })
-                                .expect("the scan ends at the terminator");
-                            if *q.add(at) == C_NUL {
-                                return 0;
-                            }
-                            q = q.add(at);
-                        }
-                        if pmatch(p, q) != 0 {
-                            return 1;
-                        }
-                        if *q == C_NUL {
-                            break;
-                        }
-                        mb = mbnext(q);
-                        q = q.offset(((mb >> 8) + (mb & 0xff)) as isize);
-                    }
-                    return 0;
-                }
-                C_LBRACKET => {
-                    let startp: *mut c_char;
-                    let mut invert: c_int;
-                    let mut found: c_int;
-                    let chr: c_char;
-
-                    startp = p;
-                    invert = 0;
-                    if *p == C_BANG || *p == C_CARET {
-                        invert += 1;
-                        p = p.offset(1);
-                    }
-                    found = 0;
-                    mb = mbnext(q);
-                    q = q.offset((mb & 0xff) as isize);
-                    mb >>= 8;
-                    chr = *q;
-                    if chr == C_NUL {
-                        return 0;
-                    }
-                    c = *p;
-                    p = p.offset(1);
-                    loop {
-                        'cont: {
-                            let mut mbp: c_uint = 0;
-                            /* NOTE (bug-for-bug): `mbs` starts as the
-                             * address of the *local* `c`; when the string
-                             * character is multibyte the `strncmp` below
-                             * reads `mb` bytes from it, past the end of
-                             * that single byte.  Reproduced. */
-                            let mut mbs: *const c_char = &c as *const c_char;
-
-                            if c == C_NUL {
-                                p = startp;
-                                c = C_LBRACKET;
-                                break 'dft; /* goto dft */
-                            }
-                            if c == C_LBRACKET {
-                                let mut r: *mut c_char = ptr::null_mut();
-
-                                found |= (ccmatch(
-                                    p,
-                                    q,
-                                    (if mb > 1 { mb - 2 } else { mb }) as c_int,
-                                    &mut r,
-                                ) != 0) as c_int;
-                                if !r.is_null() {
-                                    p = r;
-                                    break 'cont; /* continue */
-                                }
-                            } else if c == CTLESC {
-                                c = *p;
-                                p = p.offset(1);
-                            } else if c == CTLMBCHAR {
-                                p = p.offset(-1);
-                                mbp = mbnext(p);
-                                p = p.offset((mbp & 0xff) as isize);
-                                mbs = p;
-                                mbp >>= 8;
-                                p = p.offset(mbp as isize);
-                            }
-                            if *p == C_MINUS && *p.offset(1) != C_NUL && *p.offset(1) != C_RBRACKET
-                            {
-                                p = p.offset(1);
-                                if *p == CTLESC {
-                                    p = p.offset(1);
-                                } else if *p == CTLMBCHAR {
-                                    mbp = mbnext(p);
-                                    p = p.offset((mbp & 0xff) as isize);
-                                    p = p.offset((mbp >> 8) as isize);
-                                    break 'cont; /* continue */
-                                }
-                                if (mbp | mb.wrapping_sub(1)) == 0 && chr >= c && chr <= *p {
-                                    found = 1;
-                                }
-                                p = p.offset(1);
-                            } else if crate::mystring::ncmp_eq(mbs, q, mb as usize) {
-                                found = 1;
-                            }
-                        }
-                        /* } while ((c = *p++) != ']'); */
-                        c = *p;
-                        p = p.offset(1);
-                        if c == C_RBRACKET {
-                            break;
-                        }
-                    }
-                    if found == invert {
-                        return 0;
-                    }
-                    q = q.offset(mb as isize);
-                    continue 'forever;
-                }
-                CTLMBCHAR => {
-                    p = p.offset(-1);
-                    mb = mbnext(p);
-                    p = p.offset((mb & 0xff) as isize);
-                    mb = mbnext(q);
-                    q = q.offset((mb & 0xff) as isize);
-                    mb >>= 8;
-
-                    if !crate::mystring::ncmp_eq(p.offset(-1), q.offset(-1), (mb + 1) as usize) {
-                        return 0;
-                    }
-
-                    p = p.offset(mb as isize);
-                    q = q.offset(mb as isize);
-                    continue 'forever;
-                }
-                _ => {}
-            }
-        }
-        /* dft: */
-        mb = mbnext(q);
-        if (mb >> 8) > 1 {
-            return 0;
-        }
-        q = q.offset((mb & 0xff) as isize);
-        if *q != c {
-            return 0;
-        }
-        q = q.offset((mb >> 8) as isize);
-    }
-    /* breakloop: */
-    if *q != C_NUL {
-        return 0;
-    }
-    1
 }
 
 /*
@@ -3666,7 +3419,7 @@ pub unsafe fn casematch(
     argstr(sh, pattern.narg().text.as_ptr(), EXP_TILDE | EXP_CASE)?;
     ifsfree();
     /* The C reads the word back as `stackblock()`. */
-    result = patmatch(expbase(), val);
+    result = crate::pmatch::patmatch(expbase(), val);
     Ok(result)
 }
 

@@ -1812,3 +1812,99 @@ lookup moved to `binary_search_by`, that adapter had no caller and was
 retired with its standalone port rule. `BStr` slice ordering is the same
 unsigned-byte lexicographic comparison, including for invalid UTF-8, so
 the lookup remains byte-exact without making a shell word into `String`.
+
+## What this cost in the port: the pattern matcher
+
+`pmatch` is a pure function over two C strings with three call sites and
+no shell state, and it held the largest single concentration of unsafe
+operations left in `expand.c` -- 82 of them, once `ccmatch` and `mbnext`
+are counted with it. Every cursor in it is an ordinary forward walk that
+becomes an index, and the recursion becomes a pair of suffix slices. One
+line was not mechanical, and it is the reason this section exists.
+
+### A bracket member that is one byte, compared as if it were more
+
+The C's bracket loop keeps a `char *mbs` for "the bytes of the member
+being tested". For a `CTLMBCHAR`-framed member that is a position in the
+pattern. For every other member it is `&c` -- the address of a *local*,
+one byte long -- and the comparison is
+
+```c
+} else if (!strncmp(mbs, q, mb)) {
+```
+
+where `mb` is the byte length of the string's current character. When the
+string's character is multibyte, `strncmp` is asked for more bytes than
+`mbs` has. `strncmp` stops at the first difference and at a NUL, so the
+read only goes past that one byte when `c == q[0] && c != 0`; from there
+the C's answer is whatever the compiler happened to leave on the stack
+beside `c`.
+
+The case is reachable, not theoretical. A lone `\303` in a pattern is not
+valid UTF-8, so nothing frames it as `CTLMBCHAR` and it stays a plain
+byte; `é` in the string is `\303\251` and *is* framed. An instrumented
+build confirms the branch is entered with `c=0xc3 sc=0xc3 mb=4` -- so the
+C reads three bytes it does not own, not one.
+
+**The decision: a one-byte member is not a multibyte character, and does
+not match one.** `single_byte_member` in `expand.rs` is the whole of it.
+
+The alternative readings were "compare only the first byte and call it a
+match" and "prove the case unreachable". The second is false, as above.
+The first says `[\303]` matches `é`, which is not a property anyone would
+choose; it would also make a bracket member match a character it is a
+strict prefix of, which no other arm of the matcher does.
+
+This is a hardening, not a divergence, and it does not get a register
+entry. The register's rule is that an entry must be able to say which
+side is right about an *observable* difference; here the two sides agree
+everywhere the C is defined -- `mb == 1` is plain byte equality, and a
+differing first byte is a miss under both -- and can only part where the
+C's answer was stack contents. The reference build answers "no match" on
+the probe above, 40 runs out of 40, which is the answer this now gives by
+construction rather than by the luck of a stack frame. Registering that
+would be registering a difference that cannot be observed, which is how
+the register acquires entries that can no longer fail.
+
+The precedent is `IS_TYPE_UNBIASED`, three hundred lines up the same
+file, and the reasoning transfers exactly: reproducing an out-of-bounds
+read does not reproduce the C's behaviour, because the byte it yields is
+a property of one binary's layout. That one could make the window real by
+padding the table with the zeros the read was always meant to find. This
+one cannot -- there is no fourth byte of a one-byte member anywhere -- so
+it answers the question the member was actually asking.
+
+### The unsafe half is an adapter, and it is three operations
+
+`pmatch` keeps its `*mut c_char` signature because `fnmatch` wants one
+and because its callers -- `patmatch`, the `scanleft`/`scanright` scan
+family, and `expmeta` -- still hold pointers. It now measures both
+strings once and hands `pmatch_bytes` slices taken with
+`to_bytes_with_nul`, so the terminator is *in* the slice: an index that
+lands on it reads 0 exactly as `*p` did, and no loop needs a separate
+length test. `ccmatch` stopped needing a mutable pattern at the same
+time -- it wrote a NUL over the `:` of `:]` to make a C string for
+`wctype` and put it back, which was the only reason the pattern had to be
+writable -- so it copies the class name instead and the matcher takes
+`&[u8]`.
+
+Reads past the terminator answer NUL rather than panicking. A well-formed
+pattern stops long before, so this agrees with the C wherever the C was
+defined; where it was not, the C read past its allocation and this gives
+the same answer twice. The same holds for the two `p[-1]` reads in the
+`CTLMBCHAR` arms: they land on a frame's length byte when both sides are
+encoded, which is what every caller sets up, and when only the pattern is
+encoded the C read the byte before the string's buffer while this reads
+NUL -- which mismatches the pattern's nonzero length byte, and "a
+multibyte member does not match a single-byte character" is the answer
+that arm should give anyway.
+
+### `mbnext` decodes a slice, and the pointer form is a three-byte window
+
+`mbnext` has four callers outside the matcher that still walk with
+pointers, so it stays, but as an adapter over `mbnext_bytes`. How much it
+may read is decided by the first byte alone: only the `CTLMBCHAR` framing
+looks past index 0, and that framing always carries its length byte, so
+three bytes exist whenever the first byte is `CTLMBCHAR` and one byte is
+enough otherwise. That is the whole safety argument, and writing it down
+is what makes the remaining `from_raw_parts` checkable.

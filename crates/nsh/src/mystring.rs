@@ -506,3 +506,56 @@ mod tests {
         }
     }
 }
+
+/* -------------------------------------------------------------------
+ * Reading a NUL-terminated byte string as a slice.
+ *
+ * `pmatch` and its helpers walk two counted strings that still carry
+ * their terminator (`to_bytes_with_nul`), so an index landing on the
+ * terminator reads 0 exactly as the C's `*p` did and the loops need no
+ * separate length test.
+ *
+ * `byte_at` answers 0 past the terminator as well.  The C read whatever
+ * followed the allocation there; a well-formed pattern or string stops
+ * at its terminator long before, so the two agree wherever the C was
+ * defined, and where it was not this one at least gives the same answer
+ * twice.  The signed variant exists for the two `p[-1]` reads in
+ * `pmatch`'s CTLMBCHAR arms, which are in bounds whenever both sides are
+ * multibyte-encoded and read before the buffer when only one is.
+ * ------------------------------------------------------------------- */
+
+#[inline]
+pub(crate) fn byte_at(s: &[u8], i: usize) -> c_char {
+    match s.get(i) {
+        Some(&b) => b as c_char,
+        None => 0,
+    }
+}
+
+#[inline]
+pub(crate) fn byte_at_i(s: &[u8], i: isize) -> c_char {
+    if i < 0 { 0 } else { byte_at(s, i as usize) }
+}
+
+#[inline]
+pub(crate) fn slice_from(s: &[u8], i: usize) -> &[u8] {
+    match s.get(i..) {
+        Some(t) => t,
+        None => &[],
+    }
+}
+
+// `strncmp(a + ai, b + bi, n) == 0`, stopping at the first difference and
+// at a shared NUL, which is what `mystring::ncmp_eq` does for pointers.
+pub(crate) fn ncmp_eq_at(a: &[u8], ai: isize, b: &[u8], bi: isize, n: usize) -> bool {
+    for k in 0..n as isize {
+        let x = byte_at_i(a, ai + k);
+        if x != byte_at_i(b, bi + k) {
+            return false;
+        }
+        if x == 0 {
+            break;
+        }
+    }
+    true
+}

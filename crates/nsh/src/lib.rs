@@ -98,6 +98,7 @@ pub mod arith_yacc;
 pub mod arith_yylex;
 pub mod expand;
 pub mod parser;
+pub mod pmatch;
 
 // ---- execution --------------------------------------------------------
 pub mod eval;
