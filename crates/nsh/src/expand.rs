@@ -615,23 +615,45 @@ unsafe fn globstnputs(s: *const c_char, n: size_t, p: *mut c_char) -> *mut c_cha
     b.as_mut_ptr().add(off + n) as *mut c_char
 }
 
-/// `syntax.h`: `#define BASESYNTAX (basesyntax + SYNBASE)`
-#[inline]
-unsafe fn BASESYNTAX() -> *const c_char {
-    crate::syntax::basesyntax
-        .as_ptr()
-        .offset(crate::syntax::SYNBASE as isize)
+/// One of the three tables the encoder classifies bytes with, carried the
+/// way `syntax.h` carries it: the whole table, indexed from `SYNBASE`.
+///
+/// The C spells these `basesyntax + SYNBASE` and then indexes with a
+/// *signed* char, so the index runs from -129 up. A raw pointer into the
+/// middle of the array is how the C gets a negative index, and it is also
+/// how the C loses every bound: `mbtodest` probes `syntax[CTLMBCHAR]` at
+/// -123, and under `is_type` unbiased that is a read before the array.
+///
+/// Carried as a slice with the origin folded into the accessor, the
+/// negative index is ordinary arithmetic and the read is bounds-checked.
+/// Nothing is given up: the deliberate deviation `IS_TYPE_UNBIASED`
+/// documents is a *padded* table, so the probe lands on a real zero byte
+/// here as it always has, and now the compiler can see that it does. A
+/// panic out of `at` would mean a classification query this port has
+/// never made.
+#[derive(Clone, Copy)]
+pub struct SyntaxRef(&'static [c_char]);
+
+impl SyntaxRef {
+    /// `syntax[c]`, where `syntax` is the C's `name + SYNBASE`.
+    #[inline]
+    fn at(self, c: c_int) -> c_char {
+        self.0[(c + crate::syntax::SYNBASE) as usize]
+    }
 }
+
+/// `syntax.h`: `#define BASESYNTAX (basesyntax + SYNBASE)`
+///
+/// A `const` rather than a function, which is what the C `#define`
+/// already was. It had to be spelled as a pointer into the middle of an
+/// array to carry the offset; [`SyntaxRef`] puts the offset in the
+/// accessor, so the table is once again just a value.
+const BASESYNTAX: SyntaxRef = SyntaxRef(&crate::syntax::basesyntax);
 
 /// `syntax.h`: `#define SQSYNTAX (sqsyntax + SYNBASE)`
-#[inline]
-unsafe fn SQSYNTAX() -> *const c_char {
-    crate::syntax::sqsyntax
-        .as_ptr()
-        .offset(crate::syntax::SYNBASE as isize)
-}
+const SQSYNTAX: SyntaxRef = SyntaxRef(&crate::syntax::sqsyntax);
 
-/// Backing store for [`is_type_unbiased`]. See that function for why the
+/// Backing store for [`IS_TYPE_UNBIASED`]. See that constant for why the
 /// 129 leading zero bytes exist; they are never read as data, only as the
 /// answer to an out-of-bounds classification query.
 static IS_TYPE_UNBIASED_PAD: [c_char; 129 + 257] = {
@@ -669,10 +691,11 @@ static IS_TYPE_UNBIASED_PAD: [c_char; 129 + 257] = {
 /// `is_type - 123` is `0xE2` in the C binary and the classification is
 /// `!= CCTL` in both. `[spec:dash:sem:expand.memtodest-fn]` requires this
 /// treatment ("a port must not reproduce the out-of-bounds index").
-#[inline]
-unsafe fn is_type_unbiased() -> *const c_char {
-    IS_TYPE_UNBIASED_PAD.as_ptr().add(129)
-}
+///
+/// The 129 leading bytes are exactly `SYNBASE`, so this table indexes by
+/// the same expression as the other two and [`SyntaxRef`] needs no
+/// per-table origin.
+const IS_TYPE_UNBIASED: SyntaxRef = SyntaxRef(&IS_TYPE_UNBIASED_PAD);
 
 /// `syntax.h`: syntax class "like CWORD, except it must be escaped".
 #[inline]
@@ -1778,17 +1801,15 @@ unsafe fn evalvar(
 
 // [spec:dash:def:expand.chtodest-fn]
 // [spec:dash:sem:expand.chtodest-fn]
-unsafe fn chtodest(c: c_int, syntax: *const c_char, mut out: *mut c_char) -> *mut c_char {
-    if *syntax.offset(c as isize) == CCTL() {
+/// The cursor the C returns is the destination's own length now, so this
+/// appends and returns nothing. It performs no unsafe operation at all.
+fn chtodest(c: c_int, syntax: SyntaxRef, out: &mut BString) {
+    if syntax.at(c) == CCTL() {
         /* USTPUTC(CTLESC, out) */
-        *out = CTLESC;
-        out = out.offset(1);
+        out.push(CTLESC as u8);
     }
     /* USTPUTC(c, out) */
-    *out = c as c_char;
-    out = out.offset(1);
-
-    out
+    out.push(c as u8);
 }
 
 // [spec:dash:def:expand.mbpair]
@@ -1802,49 +1823,55 @@ pub struct mbpair {
 // [spec:dash:sem:expand.mbtodest-fn]
 unsafe fn mbtodest(
     mut p: *const c_char,
-    mut q: *mut c_char,
-    syntax: *const c_char,
+    dst: &mut BString,
+    syntax: SyntaxRef,
     len: size_t,
 ) -> mbpair {
     let mut mbs: libc::mbstate_t = mem::zeroed();
     let mbp: mbpair;
-    let q0: *mut c_char = q;
+    /* The C's `q0`: where this call started writing. A length, because
+     * the cursor is one. */
+    let q0: usize = dst.len();
     let mut ml: size_t;
 
     p = p.offset(-1);
     ml = mbrlen(p, len, &mut mbs);
     'out: {
         if ml == (0 as size_t).wrapping_sub(2) || ml == (0 as size_t).wrapping_sub(1) || ml < 2 {
-            q = chtodest(*p as c_int, syntax, q);
+            chtodest(*p as c_int, syntax, dst);
             ml = 1;
             break 'out;
         }
 
         /* `syntax[CTLMBCHAR]` — CTLMBCHAR is negative; see the note in
-         * `memtodest` about the unbiased `is_type` table. */
-        if *syntax.offset(CTLMBCHAR as isize) == CCTL() {
+         * `memtodest` about the unbiased `is_type` table. Negative is an
+         * ordinary index now, and a checked one. */
+        if syntax.at(CTLMBCHAR as c_int) == CCTL() {
             /* USTPUTC(CTLMBCHAR, q); USTPUTC(ml, q); */
-            *q = CTLMBCHAR;
-            q = q.offset(1);
-            *q = ml as c_char;
-            q = q.offset(1);
+            dst.push(CTLMBCHAR as u8);
+            dst.push(ml as u8);
         }
 
-        q = crate::system::mempcpy(q as *mut c_void, p as *const c_void, ml) as *mut c_char;
+        /* `q = mempcpy(q, p, ml)`. The source is the caller's input and
+         * never `dst`'s own buffer -- `memtodest` records why -- so the
+         * append cannot alias what it reads. */
+        dst.extend_from_slice(core::slice::from_raw_parts(p as *const u8, ml));
 
-        if *syntax.offset(CTLMBCHAR as isize) == CCTL() {
+        if syntax.at(CTLMBCHAR as c_int) == CCTL() {
             /* USTPUTC(ml, q); USTPUTC(CTLMBCHAR, q); */
-            *q = ml as c_char;
-            q = q.offset(1);
-            *q = CTLMBCHAR;
-            q = q.offset(1);
+            dst.push(ml as u8);
+            dst.push(CTLMBCHAR as u8);
         }
     }
 
     /* out: */
+    /* `ql` is the C's "how far did q move", which the destination's own
+     * length now answers for the only caller. It is still returned
+     * because `mbpair` is the C's return type and carries a spec rule;
+     * what changed is that nobody has to trust it. */
     mbp = mbpair {
         ml: (ml.wrapping_sub(1)) as c_uint,
-        ql: q.offset_from(q0) as c_uint,
+        ql: (dst.len() - q0) as c_uint,
     };
     mbp
 }
@@ -1884,20 +1911,18 @@ unsafe fn memtodest(
     flags: c_int,
     dst: &mut BString,
 ) -> size_t {
-    let syntax: *const c_char;
+    let syntax: SyntaxRef;
     let mut count: size_t = 0;
     let expq: c_int;
-    let mut q: *mut c_char;
-    let base: *mut c_char;
 
     if len == 0 {
         return 0;
     }
 
-    /* CTLMBCHAR, 2, c, c, 2, CTLMBCHAR */
+    /* CTLMBCHAR, 2, c, c, 2, CTLMBCHAR.  A hint now rather than a
+     * contract: the writes below are appends, so a short reservation
+     * costs a growth instead of running off the end. */
     dst.reserve(len * 3);
-    base = dst.as_mut_ptr() as *mut c_char;
-    q = base.add(dst.len());
 
     /* Guarded by the `assert!(QUOTES_ESC == 0x11 && …)` above, which is
      * this file's port of the matching `#error`. */
@@ -1912,13 +1937,17 @@ unsafe fn memtodest(
                 break;
             }
 
-            ptr::write_unaligned(q.offset(count as isize) as *mut u64, x);
+            /* The C's `write_unaligned(q + count, x)` is a copy of the
+             * eight bytes just read, and `to_ne_bytes` is that copy: the
+             * value round-trips through the same native representation
+             * it was loaded from. The C's `q = q + count` after the loop
+             * is gone because appending has already moved the cursor. */
+            dst.extend_from_slice(&x.to_ne_bytes());
 
             count += 8;
             len -= 8;
         }
 
-        q = q.offset(count as isize);
         p = p.offset(count as isize);
 
         /* NOTE (bug-for-bug): `is_type` is used here *unbiased*, i.e.
@@ -1929,12 +1958,12 @@ unsafe fn memtodest(
          * a read *before* the array; the C relies on that happening to
          * yield a non-CCTL byte.  Reproduced verbatim, not fixed. */
         syntax = if (flags & (QUOTES_ESC | EXP_MBCHAR)) != 0 {
-            BASESYNTAX()
+            BASESYNTAX
         } else {
-            is_type_unbiased()
+            IS_TYPE_UNBIASED
         };
     } else {
-        syntax = SQSYNTAX();
+        syntax = SQSYNTAX;
     }
 
     /* for (; len; len--) */
@@ -1950,23 +1979,25 @@ unsafe fn memtodest(
             count += 1;
 
             if c < 0 {
-                let mbp: mbpair = mbtodest(p, q, syntax, len);
+                let mbp: mbpair = mbtodest(p, dst, syntax, len);
                 let mlm: c_uint;
 
-                q = q.offset(mbp.ql as isize);
+                /* `q += mbp.ql` — the append did it. */
                 mlm = mbp.ml;
                 p = p.offset(mlm as isize);
                 len -= mlm as size_t;
                 break 'cont; /* continue */
             }
 
-            q = chtodest(c, syntax, q);
+            chtodest(c, syntax, dst);
         }
         len -= 1;
     }
 
-    /* `expdest = q` */
-    dst.set_len(q.offset_from(base) as usize);
+    /* The C's `expdest = q` was this port's `set_len` over bytes a raw
+     * cursor had filled. Appending keeps the length correct at every
+     * step, so there is nothing to commit and no window in which `dst`
+     * has a length that disagrees with its contents. */
     count
 }
 
