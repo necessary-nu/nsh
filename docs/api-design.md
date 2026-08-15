@@ -485,6 +485,41 @@ shape in `nshedit-plat/src/signal.rs`.
 `attach` is a **required** method with no default body, so a host cannot
 install `Disposition::Catch` and silently never deliver anything.
 
+**The handler reads as well as writes, which this section missed.**
+`raise(signal)` is not the whole of the handler's contract with the sink.
+`onsig` also *asks* it two questions before storing, and it must answer
+them without a receiver and without allocating:
+
+* **Is a trap set for this signal?** `trap.rs:287` and `:295` index the
+  trap table, and both are presence tests rather than reads of the
+  action. So the sink carries a `[AtomicBool; NSIG]` mirror of
+  "`trap[n].is_some()`" beside the arrival flags. The behavioural surface
+  is two bits — `SIGCHLD` and `SIGINT` — and the array is NSIG-wide only
+  because the writers index by `signo`.
+* **Am I the vforked child?** `trap.rs:281`. `jobs.rs:1139` sets
+  `vforked = mypid` in the *parent* before `vfork`, and the child reads
+  it out of the shared address space. This is a property of an address
+  space rather than of a shell, so it is an `AtomicI32` in the sink and
+  **not** a `Shell` field.
+
+**The mirror's writes must be atomic against delivery, and `INTOFF` will
+not do it.** `INTOFF` defers *taking* an interrupt; it does not stop the
+handler running, and since `errors-are-values` step F `INTON` is not a
+delivery point at all. Nor is there a safe one-sided write order, because
+the two signals want opposite ones: a mirror that reads "trapped" when
+the table says none swallows a `^C` but makes `wait` answer `145` for
+SIGCHLD (`bltin/wait.rs:51`), and a mirror that reads the other way takes
+the interrupt instead of running the user's trap. So the table store and
+the mirror store are bracketed by `sigblockall`/`sigclearmask` —
+`jobs.rs:1908-1910`'s `xtcsetpgrp` is the same idiom for the same reason.
+The bracket is hoisted to the two writers, `trapcmd` and `clear_traps`
+(one pair per `trap` command, one per fork), and `TrapTable::set` takes a
+`&SignalsBlocked` witness so a slot cannot be written outside one.
+
+This restores a property the C has for free and a mirror destroys: in
+dash `trap[signo]` is a single pointer, so a handler reads either the old
+value or the new one and never an inconsistent pair.
+
 ### 5.4 The `Host` trait
 
 ```rust
@@ -590,6 +625,13 @@ that the decision does not list:
   to be the authority and `execve`'s `envp` built from it, rather than
   `putenv` being called at all. That is a change `move-state` has to make
   deliberately, not a consequence it gets for free.
+* **The signal inbox.** §5.3's `SignalSink` is process-wide, and the
+  `Arc` does not make it otherwise. A disposition is installed per
+  *process* and the handler is called with `signo` and nothing else, so
+  it cannot know which `Shell` the signal was meant for. That covers the
+  arrival flags, the pending-signal scalar, `intpending`, the trap-set
+  mirror and `vforked`. Two shells in one process share one inbox, and
+  the second to install a handler is the one it reports to.
 * **The working directory.** `chdir` is per-process. `Builder::cwd` and
   `cd` are per-instance in the sense that `$PWD` is, and process-wide in
   the sense that the syscall is. Two shells in different directories is
@@ -598,9 +640,17 @@ that the decision does not list:
 
 The honest statement, which belongs on the decision:
 
-> Two `Shell` values in one process share nothing this crate owns. They
-> share the C library's locale, `strtok` cursor and `getopt` state, the
-> process environment, and the working directory.
+> Two `Shell` values in one process share the C library's locale,
+> `strtok` cursor and `getopt` state, the process environment, the
+> working directory — and one thing this crate does own, the signal
+> inbox, because a signal disposition and the handler that reads it are
+> per-process facts that no amount of per-instance storage can divide.
+
+The earlier form of that sentence read "share nothing this crate owns",
+and the inbox is the counter-example. It is stated as a shared *fact*
+rather than a shared *field* on purpose: `SignalSink` being an `Arc` is
+what lets a host hold a clone, not what would make two shells
+independent.
 
 ---
 
