@@ -476,10 +476,16 @@ impl LineEditor {
     }
 
     fn read_effect(&mut self, purpose: ReadEffect) -> Result<ReadOutcome, HostFailure> {
-        if purpose == ReadEffect::KeySequence
-            && SystemTerminal::bytes_ready(self.input_borrowed()).unwrap_or(0) == 0
-        {
-            return Ok(ReadOutcome::TimedOut);
+        if let ReadEffect::KeySequence { deadline } = purpose {
+            match nshedit_plat::terminal::wait_for_input(self.input_borrowed(), deadline.remaining())
+            {
+                Ok(true) => {}
+                Ok(false) => return Ok(ReadOutcome::TimedOut),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                    return Err(HostFailure::Interrupted)
+                }
+                Err(error) => return Err(host_failure(error)),
+            }
         }
         let mut byte = [0];
         match self.input.read(&mut byte) {

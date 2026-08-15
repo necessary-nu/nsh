@@ -400,7 +400,13 @@ fn history_matches(line: &Text, pattern: &Text, matching: HistoryMatch) -> bool 
     }
     match matching {
         HistoryMatch::Prefix => line.as_units().starts_with(pattern.as_units()) && line != *pattern,
-        HistoryMatch::Contains => shell_history_pattern_matches(&line, pattern),
+        // The editor's generic rule for search commands is literal-then-regex,
+        // but this host's history search speaks shell pattern notation — the
+        // dash/libedit contract the pty corpora pin. Both variants resolve to
+        // the shell's matcher.
+        HistoryMatch::Contains | HistoryMatch::LiteralOrRegex => {
+            shell_history_pattern_matches(&line, pattern)
+        }
     }
 }
 

@@ -90,7 +90,7 @@ dependencies = [
 [[package]]
 name = "nshedit"
 version = "0.0.0"
-source = "git+https://github.com/necessary-nu/nshedit.git?rev=cfb16cee5c51144a7a7f1b3574add4dd008a79d4#cfb16cee5c51144a7a7f1b3574add4dd008a79d4"
+source = "git+https://github.com/necessary-nu/nshedit.git?rev=8059f66ee3a22e699b65dc60beaa4be933588d60#8059f66ee3a22e699b65dc60beaa4be933588d60"
 dependencies = [
  "bstr",
  "nshedit-plat",
@@ -102,15 +102,16 @@ dependencies = [
 [[package]]
 name = "nshedit-plat"
 version = "0.0.0"
-source = "git+https://github.com/necessary-nu/nshedit.git?rev=cfb16cee5c51144a7a7f1b3574add4dd008a79d4#cfb16cee5c51144a7a7f1b3574add4dd008a79d4"
+source = "git+https://github.com/necessary-nu/nshedit.git?rev=8059f66ee3a22e699b65dc60beaa4be933588d60#8059f66ee3a22e699b65dc60beaa4be933588d60"
 dependencies = [
  "rustix",
+ "windows-sys",
 ]
 
 [[package]]
 name = "nshterm"
 version = "0.1.0"
-source = "git+https://github.com/necessary-nu/nshedit.git?rev=cfb16cee5c51144a7a7f1b3574add4dd008a79d4#cfb16cee5c51144a7a7f1b3574add4dd008a79d4"
+source = "git+https://github.com/necessary-nu/nshedit.git?rev=8059f66ee3a22e699b65dc60beaa4be933588d60#8059f66ee3a22e699b65dc60beaa4be933588d60"
 dependencies = [
  "nshedit-plat",
 ]
