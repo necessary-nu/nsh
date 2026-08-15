@@ -379,7 +379,12 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
                                             2,
                                             "a redirection error takes status 2"
                                         );
-                                        status = 2;
+                                        /* From the value, not hardcoded:
+                                         * the assert above already claimed
+                                         * the two agree, and taking it
+                                         * from the error is what makes the
+                                         * claim structural. */
+                                        status = e.status();
                                         checkexit = EV_TESTED;
                                     }
                                     Ok(()) => {
@@ -1235,7 +1240,9 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
          * becoming this command's status. */
         Err(e) if e.is_interrupt() => return Err(e),
         Err(e) => {
-            status = 2;
+            /* From the value; see the `NREDIR` arm. Read before the move
+             * into `redir_err`, which is where it is re-raised from. */
+            status = e.status();
             redir_err = Some(e);
         }
         Ok(()) => status = 0,
@@ -1338,9 +1345,14 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                                 return Err(e);
                             }
                             /* Reported already, and `evalbltin`'s epilogue
-                             * has run. The status it took is `exitstatus`,
-                             * which `bail:` does not touch on this path
+                             * has run. The status it took travels in the
+                             * error, so this frame -- the one that catches
+                             * it -- is the one that writes it. It reaches
+                             * `status` through `waitforjob(sh, None)`,
+                             * which returns `exitstatus` when there is no
+                             * job; `bail:` does not touch it on this path
                              * because the C reaches `out:` here. */
+                            crate::eval::exitstatus = e.status();
                             drop(e);
                         }
                     }

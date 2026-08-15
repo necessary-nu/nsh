@@ -270,6 +270,7 @@ pub unsafe fn mkinit_reset(sh: &mut crate::context::Shell) {
         match pgetc(sh) {
             Ok(next) => c = next,
             Err(e) => {
+                crate::eval::exitstatus = e.status();
                 drop(e);
                 break;
             }

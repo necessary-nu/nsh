@@ -259,7 +259,7 @@ pub unsafe fn shellexec(
      * it rendered from is dropped -- an `exec` that cannot happen ends the
      * shell, and `docs/api-design.md` 3.3 is explicit that what ends the
      * run is `Flow`, not `Err`. */
-    drop(crate::error::report(crate::error::Error::other(&message)));
+    drop(crate::error::report(crate::error::Error::other(exerrno, &message)));
 
     /* The one place a `Result` may not be returned. `vforkexec` runs this
      * in a child that shares the parent's stack, so an `Ok` travelling out

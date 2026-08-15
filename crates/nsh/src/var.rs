@@ -1130,7 +1130,14 @@ unsafe fn poplocalvars(sh: &mut Shell) {
                  * here; what the C added was a longjmp out of the middle
                  * of restoring a `local -` option set, and that is what
                  * goes. */
-                drop(optschanged(sh));
+                /* Teardown, so the result is dropped rather than
+                 * propagated -- but the status it took is still the
+                 * shell's, and the raise no longer writes it. */
+                let changed = optschanged(sh);
+                if let Err(e) = &changed {
+                    crate::eval::exitstatus = e.status();
+                }
+                drop(changed);
             }
             localvar::Unset { vp } => {
                 (*vp).flags &= !(VSTRFIXED | VREADONLY);
@@ -1152,6 +1159,9 @@ unsafe fn poplocalvars(sh: &mut Shell) {
                     unset.is_ok(),
                     "poplocalvars cleared VREADONLY on the entry unsetvar will find"
                 );
+                if let Err(e) = &unset {
+                    crate::eval::exitstatus = e.status();
+                }
                 drop(unset);
             }
             localvar::Saved { vp, flags, text } => {

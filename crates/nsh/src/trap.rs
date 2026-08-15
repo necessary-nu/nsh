@@ -448,6 +448,12 @@ pub unsafe fn exitshell(sh: &mut crate::context::Shell) -> ! {
                 }
                 Ok(crate::eval::Flow::Done(_)) => {}
                 Err(e) => {
+                    /* The EXIT trap failed. `_exit(exitstatus)` below is
+                     * what leaves, and the status it leaves with is this
+                     * error's -- written here because the raise no longer
+                     * writes it. `trap 'nosuchcmd' EXIT; exit 3` exits
+                     * with the trap's status, not 3, and that is dash. */
+                    crate::eval::exitstatus = e.status();
                     drop(e);
                     break 'out;
                 }

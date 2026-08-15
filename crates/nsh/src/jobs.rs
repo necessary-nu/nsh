@@ -926,6 +926,9 @@ unsafe fn growjobtab(sh: &mut crate::context::Shell) -> usize {
 #[cold]
 unsafe fn forkchild_fatal(sh: &mut crate::context::Shell, e: Error) -> ! {
     if vforked != 0 {
+        /* The `_exit` below is this frame's own ending, so this frame
+         * writes the status the error took. */
+        crate::eval::exitstatus = e.status();
         drop(e);
         crate::shell::flush_coverage();
         libc::_exit(crate::eval::exitstatus);

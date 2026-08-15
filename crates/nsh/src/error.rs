@@ -274,7 +274,8 @@ pub unsafe fn onint(sh: &crate::context::Shell) -> Error {
         libc::signal(libc::SIGINT as c_int, libc::SIG_DFL);
         libc::raise(libc::SIGINT);
     }
-    crate::eval::exitstatus = libc::SIGINT + 128;
+    /* `exitstatus = SIGINT + 128` was here; `Error::status()` answers
+     * exactly that for `Interrupted`, so the value already carries it. */
     Error::Interrupted {
         signal: libc::SIGINT,
     }
@@ -350,15 +351,19 @@ pub enum Error {
 
 impl Error {
     /// A diagnostic with no more specific variant, at the current line and
-    /// the status the shell has already taken.
+    /// the status the site takes.
     ///
-    /// `sh_error` sets `exitstatus` to 2 before it reports, and `exerror`
-    /// leaves whatever the site chose, so reading it here captures what
-    /// each site meant without a second parameter.
-    pub unsafe fn other(msg: &[u8]) -> Error {
+    /// The status is a parameter rather than a read of `exitstatus`. It
+    /// used to be the latter, with the comment "`sh_error` sets
+    /// `exitstatus` to 2 before it reports, so reading it here captures
+    /// what each site meant" -- which made the *value* depend on a global
+    /// the value exists to carry. Now the raise says what it took and the
+    /// frame that catches it is the frame that writes it. Same shape as
+    /// [`Error::reported`], which always took it this way.
+    pub unsafe fn other(status: c_int, msg: &[u8]) -> Error {
         Error::Other {
             line: errlinno,
-            status: crate::eval::exitstatus,
+            status,
             message: BString::from(msg),
         }
     }
@@ -461,9 +466,11 @@ pub unsafe fn report(e: Error) -> Error {
 /// function. When the last caller of `sh_error` is gone this one takes its
 /// name.
 pub unsafe fn sh_error_value(msg: &[u8]) -> Error {
-    crate::eval::exitstatus = 2;
-
-    report(Error::other(msg))
+    /* `exitstatus = 2` was here. It is the returned value's `status`
+     * instead: the error carries what it took and the frame that catches
+     * it writes it, so the raise path touches no shell state at all and
+     * needs no receiver across its 56 call sites. */
+    report(Error::other(2, msg))
 }
 
 /*
@@ -567,13 +574,16 @@ mod tests {
             crate::eval::exitstatus = 0;
             let e = sh_error_value(b"a diagnostic");
 
-            /* `sh_error` sets 2 before it reports, and the value has to
-             * carry what the site meant rather than what the global says
-             * later, so that propagation through any number of `?` cannot
-             * lose it. */
+            /* The value carries what the site took, so propagation
+             * through any number of `?` cannot lose it. */
             assert_eq!(e.status(), 2);
-            let took = crate::eval::exitstatus;
-            assert_eq!(took, 2);
+            /* And the raise leaves the shell alone. This is the half that
+             * changed: `sh_error_value` used to write `exitstatus` before
+             * reporting, which made the raise path need the shell at all
+             * 56 of its call sites. The frame that catches the error is
+             * what writes it now. */
+            let untouched = crate::eval::exitstatus;
+            assert_eq!(untouched, 0, "the raise path writes no shell state");
             assert_eq!(e.message().to_vec(), b"a diagnostic".to_vec());
         }
     }
@@ -584,7 +594,7 @@ mod tests {
         unsafe {
             let saved = errlinno;
             errlinno = 17;
-            let e = report(Error::other(b"cd: bad directory"));
+            let e = report(Error::other(2, b"cd: bad directory"));
             errlinno = saved;
 
             /* The `sh: 17: ` prefix is `arg0`, `errlinno` and the running
@@ -603,10 +613,12 @@ mod tests {
             /* `shellexec` reports its text and takes 127 or 126, then
              * raises EXEND. The status travels with the value even though
              * the code that goes with it does not. */
-            crate::eval::exitstatus = 127;
-            let e = report(Error::other(b"nosuchcmd: not found"));
+            crate::eval::exitstatus = 0;
+            let e = report(Error::other(127, b"nosuchcmd: not found"));
 
             assert_eq!(e.status(), 127);
+            let untouched = crate::eval::exitstatus;
+            assert_eq!(untouched, 0, "the raise path writes no shell state");
         }
     }
 
@@ -641,8 +653,12 @@ mod tests {
 
             assert!(e.is_interrupt());
             assert_eq!(e.status(), libc::SIGINT + 128);
-            let status = crate::eval::exitstatus;
-            assert_eq!(status, libc::SIGINT + 128);
+            /* `onint` used to write this to `exitstatus` as well. It does
+             * not any more: `Error::status()` answers `signal + 128` for
+             * `Interrupted`, so the value already said it, and the catch
+             * is what writes it. */
+            let untouched = crate::eval::exitstatus;
+            assert_eq!(untouched, saved_status, "the raise path writes no shell state");
             assert!(e.message().is_empty(), "dash prints nothing for a ^C");
 
             crate::eval::exitstatus = saved_status;
