@@ -2043,7 +2043,6 @@ unsafe fn varvalue(
     let mut ap: *mut *mut c_char;
     let mut num: c_int = 0;
     let mut p: *mut c_char = ptr::null_mut();
-    let mut i: c_int;
 
     discard =
         ((subtype == VSPLUS || subtype == VSLENGTH) as c_int) | ((flags as c_int) & EXP_DISCARD);
@@ -2090,20 +2089,22 @@ unsafe fn varvalue(
                             break 'numvar;
                         }
                         C_MINUS => {
-                            p = expmakestrspace(crate::options::NOPTS as size_t);
-                            i = crate::options::NOPTS as c_int - 1;
-                            while i >= 0 {
-                                if sh.options.flag(i as usize) != 0
-                                    && crate::options::optletters[i as usize] != 0
-                                {
-                                    /* USTPUTC(optletters[i], p) */
-                                    *p = crate::options::optletters[i as usize];
-                                    p = p.offset(1);
+                            /* `makestrspace(NOPTS, expdest)` and a run of
+                             * `USTPUTC` through the cursor, committed by
+                             * assigning `expdest`.  Appending writes the
+                             * same bytes in the same order and makes the
+                             * reservation the allocator's business rather
+                             * than a bound this loop has to keep -- the
+                             * same trade the encoder took in `02bf791`. */
+                            let mut i = crate::options::NOPTS;
+                            while i > 0 {
+                                i -= 1;
+                                let letter = crate::options::optletters[i];
+                                if sh.options.flag(i) != 0 && letter != 0 {
+                                    expb().push(letter as u8);
                                     len += 1;
                                 }
-                                i -= 1;
                             }
-                            set_expdest(p);
                             break 'sw;
                         }
                         C_AT | C_STAR => {
