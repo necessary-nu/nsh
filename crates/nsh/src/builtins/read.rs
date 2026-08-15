@@ -143,9 +143,11 @@ pub unsafe fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         if pc == L_BODY {
             let ml: c_uint;
 
-            /* CHECKSTRSPACE((MB_LEN_MAX > 16 ? MB_LEN_MAX : 16) + 4, p) —
-             * the room `getmbc` writes into through the raw cursor below. */
-            line.reserve(READ_MBSLOP);
+            /* `CHECKSTRSPACE((MB_LEN_MAX > 16 ? MB_LEN_MAX : 16) + 4, p)`
+             * bought the C the room `getmbc` writes into. `getmbc` has its
+             * own scratch now, so there is nothing to reserve on its
+             * behalf -- the reservation left here would be a guess about
+             * another function's internals. */
             c = crate::input::pgetc(sh)?;
             if c == crate::syntax::PEOF {
                 status = 1;
@@ -155,14 +157,14 @@ pub unsafe fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 pc = L_BODY;
                 continue;
             }
-            let at = line.len();
-            ml = crate::parser::getmbc(sh, c, line.as_mut_ptr().add(at) as *mut c_char, 0)?;
+            let mut scratch: [u8; crate::parser::MBSLOP] = [0; crate::parser::MBSLOP];
+            ml = crate::parser::getmbc(sh, c, &mut scratch, 0)?;
             if ml != 0 {
-                /* `p += ml` is the commit of what `getmbc` wrote past the
-                 * cursor; a zero return leaves the scribble uncommitted, for
-                 * the next write to overwrite exactly as the C's does. */
+                /* `p += ml` is the commit of what `getmbc` wrote; a zero
+                 * return commits nothing, and the scribble it left behind
+                 * stays in the scratch rather than in `line`. */
                 debug_assert!(ml as usize <= READ_MBSLOP);
-                line.set_len(at + ml as usize);
+                line.extend_from_slice(&scratch[..ml as usize]);
                 pc = L_RECORD; /* goto record */
             } else if newloc >= startloc {
                 if c == '\n' as c_int {

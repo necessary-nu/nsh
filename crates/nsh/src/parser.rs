@@ -44,25 +44,18 @@ use crate::syntax::{
  * only its zero; `issimplecmd` now compares the two byte slices, and the
  * word's text already knows its own length. */
 
-/// `#define USTPUTC(c, p) (*p++ = (c))` — src/memalloc.h:88
-///
-/// The C's other stack-string macros read `stacknxt`/`sstrend`; these two
-/// do not touch the allocator, and here the buffer under the cursor is a
-/// `BString`'s spare capacity. `getmbc` and `dollarsq_escape` are the only
-/// callers left, and both reserve `MBSLOP` before they take the cursor.
-macro_rules! USTPUTC {
-    ($c:expr, $p:ident) => {{
-        *$p = $c as c_char;
-        $p = $p.add(1);
-    }};
-}
-
-/// `#define STADJUST(amount, p) (p += (amount))` — src/memalloc.h:93
-macro_rules! STADJUST {
-    ($amount:expr, $p:ident) => {
-        $p = $p.offset($amount as isize)
-    };
-}
+/* `USTPUTC` (src/memalloc.h:88) and `STADJUST` (:93) were the last two
+ * `memalloc.h` macros this file expanded, and they are gone. Neither ever
+ * touched the region allocator -- they were a store-and-advance and an
+ * advance over a `BString`'s spare capacity -- which is why
+ * [[delete-memalloc]] closed with them still here and recorded rehoming
+ * them as bookkeeping.
+ *
+ * What deletes them is not a rehoming. Their two remaining callers,
+ * `getmbc` and `dollarsq_escape`, took a raw cursor because the buffer
+ * they wrote into belonged to someone else; both write into their own
+ * scratch now, so the cursor is an offset and each macro is one indexed
+ * statement written out with the C's name beside it. */
 
 /// `MB_LEN_MAX` from `<limits.h>` (16 on the platforms dash targets).
 const MB_LEN_MAX: usize = 16;
@@ -1220,28 +1213,54 @@ mod synstack_ops;
 
 // [spec:dash:def:parser.getmbc-fn]
 // [spec:dash:sem:parser.getmbc-fn]
-pub unsafe fn getmbc(sh: &mut Shell, c: c_int, out: *mut c_char, mode: c_int) -> Result<c_uint, Error> {
+/// The destination is a fixed scratch buffer sized to what this writes.
+///
+/// The C hands it a cursor into the stack block and it writes the
+/// character's bytes *ahead* of that cursor while it is still deciding
+/// whether they form one -- then either frames them and reports the
+/// length, or reports 0 and leaves the bytes as scribble for the next
+/// write to overwrite. That is a legitimate design, and the room it needs
+/// is `MBSLOP`, which every caller had to know from a comment.
+///
+/// Written into scratch, the speculation is contained by construction:
+/// the caller appends only the prefix this reports, and the scribble is
+/// simply not copied out. Same bytes, same length, and the reservation
+/// stops being a memory-safety contract.
+pub unsafe fn getmbc(
+    sh: &mut Shell,
+    c: c_int,
+    out: &mut [u8; MBSLOP],
+    mode: c_int,
+) -> Result<c_uint, Error> {
     let mut c = c;
-    let mut out = out;
-    let start: *mut c_char = out;
+    /* The C's `out` cursor, and its `start`, as the offsets they were. */
+    let mut o: usize = 0;
     let mut mbst: libc::mbstate_t = mem::zeroed();
     let mut ml: c_uint = 0;
     let mut ml2: usize;
     let mut wc: libc::wchar_t = 0;
-    let mbc: *mut c_char;
+    let mbc: usize;
 
     if c >= 0 || c <= PEOF {
         return Ok(0);
     }
 
     mbc = if (mode & 3) < 2 {
-        out.offset(2 + (mode == 1) as isize)
+        2 + (mode == 1) as usize
     } else {
-        out
+        0
     };
-    *mbc.offset(ml as isize) = c as c_char;
+    out[mbc + ml as usize] = c as u8;
     loop {
-        ml2 = mbrtowc(&mut wc, mbc.offset(ml as isize), 1, &mut mbst);
+        /* `mbrtowc` is asked for exactly one byte, and the slice it is
+         * given starts at the byte just written -- so the pointer is
+         * bounded by the indexing rather than by the caller's promise. */
+        ml2 = mbrtowc(
+            &mut wc,
+            out[mbc + ml as usize..].as_ptr() as *const c_char,
+            1,
+            &mut mbst,
+        );
         ml += 1;
         if ml2 != (-2isize) as usize {
             break;
@@ -1253,7 +1272,7 @@ pub unsafe fn getmbc(sh: &mut Shell, c: c_int, out: *mut c_char, mode: c_int) ->
         if c == PEOA || c == PEOF {
             break;
         }
-        *mbc.offset(ml as isize) = c as c_char;
+        out[mbc + ml as usize] = c as u8;
     }
 
     if ml2 == 1 && ml > 1 {
@@ -1261,20 +1280,36 @@ pub unsafe fn getmbc(sh: &mut Shell, c: c_int, out: *mut c_char, mode: c_int) ->
             return Ok(1);
         }
 
+        /* The last two `memalloc.h` macros this file expanded were here.
+         * Over an offset they are one statement each, so they are written
+         * out with the C's name beside them and the macros are deleted --
+         * the bookkeeping [[delete-memalloc]] left recorded. */
         if (mode & 3) < 2 {
-            USTPUTC!(CTLMBCHAR, out);
+            /* USTPUTC(CTLMBCHAR, out) */
+            out[o] = CTLMBCHAR as u8;
+            o += 1;
             if mode == 1 {
-                USTPUTC!(CTLESC, out);
+                /* USTPUTC(CTLESC, out) */
+                out[o] = CTLESC as u8;
+                o += 1;
             }
-            USTPUTC!(ml, out);
+            /* USTPUTC(ml, out) */
+            out[o] = ml as u8;
+            o += 1;
         }
-        STADJUST!(ml, out);
+        /* STADJUST(ml, out) — step over the bytes written ahead of the
+         * cursor, which are the character itself. */
+        o += ml as usize;
         if (mode & 3) < 2 {
-            USTPUTC!(ml, out);
-            USTPUTC!(CTLMBCHAR, out);
+            /* USTPUTC(ml, out) */
+            out[o] = ml as u8;
+            o += 1;
+            /* USTPUTC(CTLMBCHAR, out) */
+            out[o] = CTLMBCHAR as u8;
+            o += 1;
         }
 
-        return Ok((out as usize - start as usize) as c_uint);
+        return Ok(o as c_uint);
     }
 
     if ml > 1 {
@@ -1290,7 +1325,7 @@ pub unsafe fn getmbc(sh: &mut Shell, c: c_int, out: *mut c_char, mode: c_int) ->
 /// then lets both of them write through a bare `char *`. Reserving is what
 /// makes those writes land in a `Vec`'s spare capacity rather than past the
 /// end of it, so the number has to stay the C's.
-const MBSLOP: usize = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 7;
+pub const MBSLOP: usize = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 7;
 
 /// `getmbc` appending to a growable string.
 ///
@@ -1300,9 +1335,12 @@ const MBSLOP: usize = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 7;
 /// C leaves that scribble for the next write to overwrite — so does this,
 /// because the bytes stay uncommitted.
 unsafe fn getmbc_at(sh: &mut Shell, out: &mut BString, c: c_int, mode: c_int) -> Result<c_uint, Error> {
-    out.reserve(MBSLOP);
-    let len = out.len();
-    getmbc(sh, c, out.as_mut_ptr().add(len) as *mut c_char, mode)
+    let mut scratch: [u8; MBSLOP] = [0; MBSLOP];
+    let ml = getmbc(sh, c, &mut scratch, mode)?;
+    /* The append *is* the commit the callers used to make with `set_len`,
+     * so it happens here once instead of at each of the three of them. */
+    out.extend_from_slice(&scratch[..ml as usize]);
+    Ok(ml)
 }
 
 // [spec:dash:def:parser.dollarsq-escape-fn]
@@ -1493,8 +1531,6 @@ unsafe fn readtoken1(
                     st.c = pgetc(sh)?;
                     break 'loop_;
                 }
-                let grown = st.out.len() + ml as usize;
-                st.out.set_len(grown);
                 if ml != 0 {
                     break 'body; /* continue */
                 }
@@ -1546,8 +1582,6 @@ unsafe fn readtoken1(
                         st.quotef += 1;
 
                         ml = getmbc_at(sh, &mut st.out, st.c, 1)?;
-                        let grown = st.out.len() + ml as usize;
-                        st.out.set_len(grown);
                         if ml == 0 {
                             st.out.push(CTLESC as u8);
                             st.out.push(st.c as u8);
@@ -2143,8 +2177,6 @@ unsafe fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Resul
                         pstr.push(b'\\');
                     }
                     ml = getmbc_at(sh, &mut pstr, pc, 2)?;
-                    let grown = pstr.len() + ml as usize;
-                    pstr.set_len(grown);
                     if ml != 0 {
                         break 'bqbody; /* continue */
                     }
