@@ -1040,10 +1040,19 @@ unsafe fn readtoken(sh: &mut Shell) -> Result<c_int, Error> {
             while t == TNL {
                 parseheredoc(sh)?;
                 checkkwd = 0;
+                /* The alias bit is dropped with the rest: dash clears the
+                 * whole of `checkkwd` here, and the bit lived in it. */
+                crate::input::clear_alias_boundary();
                 t = xxreadtoken(sh)?;
             }
         }
 
+        /* `popstring` sets this while `xxreadtoken` runs, and dash reads
+         * it back out of `checkkwd` right here. The bit is the input
+         * layer's now; this is the same point, and the same bit. */
+        if crate::input::take_alias_boundary() != 0 {
+            kwd |= CHKALIAS;
+        }
         kwd |= checkkwd;
         checkkwd = 0;
 

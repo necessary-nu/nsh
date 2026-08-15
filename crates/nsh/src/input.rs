@@ -145,6 +145,32 @@ pub static mut stdin_state: stdin_state_t = stdin_state_t {
     pending: 0,
     bufferable: 0,
 };
+/// Set when `popstring` finishes an alias whose text ended in a blank.
+///
+/// dash spells this `checkkwd |= CHKALIAS` — the input layer reaching
+/// into a parser global. The bit is per-*input-position* state (it
+/// describes the alias that just ended, not the parse that will read the
+/// next token), so it belongs on this side of the seam, and putting it
+/// here is what leaves `input.rs` naming nothing in `parser.rs`. The
+/// parser consults it at the two points it consumed the flag before —
+/// see [`take_alias_boundary`] and [`clear_alias_boundary`].
+static mut alias_boundary: c_int = 0;
+
+/// Take the flag and clear it: the parser's `kwd |= checkkwd`.
+#[inline]
+pub unsafe fn take_alias_boundary() -> c_int {
+    let v = alias_boundary;
+    alias_boundary = 0;
+    v
+}
+
+/// Drop the flag unread: the parser's `checkkwd = 0` while eating
+/// newlines, which discarded an alias bit set during that eating.
+#[inline]
+pub unsafe fn clear_alias_boundary() {
+    alias_boundary = 0;
+}
+
 pub static mut whichprompt: c_int = 0; /* 1 == PS1, 2 == PS2 */
 pub static mut stdin_istty: c_int = -1;
 
@@ -840,7 +866,7 @@ unsafe fn popstring() {
     if !sp.ap.is_null() && pf.pos > 0 {
         let prev = sp.string[pf.pos - 1];
         if prev == b' ' || prev == b'\t' {
-            crate::parser::checkkwd |= crate::parser::CHKALIAS;
+            alias_boundary = 1;
         }
     }
     pf.pos = sp.prevpos;
