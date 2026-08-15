@@ -241,6 +241,29 @@ def main(argv: list[str] | None = None) -> int:
         print(f"posix-harness: CONTAINMENT FAILURE: {error}", file=sys.stderr)
         print("posix-harness: refusing to run shell cases unconfined", file=sys.stderr)
         return 2
+    # A shell under /tmp is invisible to the cases that need a writable one.
+    #
+    # `_contain` binds a private directory over /tmp for `writable_tmp`
+    # cases, and a bind over /tmp hides everything beneath it -- including
+    # the shell, if that is where it lives. The case then fails with
+    # `setsid: failed to execute <path>: No such file or directory` and
+    # status 127, which reads exactly like a conformance failure and was
+    # miscarried as "known load-flaky fringe" across several stretches of
+    # the port before anyone read the stdout.
+    #
+    # Checking `os.access(shell, X_OK)` does not catch it: the binary is
+    # perfectly executable out here. The question is whether it survives the
+    # bind, and only its location answers that. Refuse rather than warn, for
+    # the same reason the containment check refuses -- a suite that silently
+    # reports two false failures is worse than one that does not run.
+    if args.shell == Path("/tmp") or Path("/tmp") in args.shell.parents:
+        print(f"posix-harness: shell under /tmp: {args.shell}", file=sys.stderr)
+        print(
+            "posix-harness: cases with a writable /tmp bind over it and cannot "
+            "execute it; copy the shell inside the repository and point --shell there",
+            file=sys.stderr,
+        )
+        return 2
     try:
         rules = load_rules(SPEC_DIR)
         cases = validate_registry(rules, CASES)

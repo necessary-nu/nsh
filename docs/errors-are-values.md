@@ -324,6 +324,44 @@ crates/nsh/src` is empty, the crate builds and passes its whole suite
 with `panic = "abort"`, and 43 interactive cases including ten `^C`
 cases agree with dash under that profile.
 
+### 0.6 Two different metrics, and only one of them is this table's
+
+Added by `move-state`, which quotes the table above at every commit and
+got the *other* number wrong once. They are easy to conflate and the
+difference is not cosmetic.
+
+**Unsafe operations — the table above.** Compiler output, not text
+search: remove `#![allow(unsafe_op_in_unsafe_fn)]` from `lib.rs`, build,
+take the `generated N warnings` figure and subtract the ordinary lib
+warning count (74 on the trees `move-state` measured). It counts unsafe
+*operations* inside `unsafe fn` bodies, so one accessor deleted can move
+it by eighty — `move-state` saw exactly that when `jobs()` went, because
+a single `addr_of_mut!` funnel served 84 call sites. Reproducible, and it
+reproduced across nodes: 3833 here is the same 3833 `thread-context`
+recorded, and `move-state` re-derived it before touching anything.
+
+**Mutable statics remaining — not this table's, and not a grep.**
+`grep -rn 'static mut' crates/nsh/src | wc -l` counts doc comments, prose
+about the C, and the `&'static mut` in accessor return types. `move-state`
+reported "114 → 97" from a filtered version of that and had to correct it
+to **86 → 78** — the count of lines that actually declare one:
+
+```
+grep -rhE "^\s*(pub(\([a-z]+\))? )?static mut " crates/nsh/src --include=*.rs | wc -l
+```
+
+This is the third time this document has caught a figure recorded without
+its method beside it (§1.4's three numbers from `docs/idiomatization.md`,
+§0.5's own 3781, and now this). The rule has earned a name: **a metric is
+the command, not the number.** Write the command next to the figure, or
+the figure is not comparable with the next one.
+
+Two consequences for anyone reading `docs/api-design.md` §5: its baseline
+of "124 crate-owned declarations" is a grep figure of the loose kind and
+is stale besides — `move-state`'s survey re-measured it at 107 — and its
+"excluding `gen/`" qualifiers are no-ops, because `crates/nsh/src/gen/`
+does not exist.
+
 ---
 
 ## 0. What this found
