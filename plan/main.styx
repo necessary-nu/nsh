@@ -2599,6 +2599,14 @@ children (
                         title "Word expansion and parsing operate on owned bytes, not C pointers"
                         kind @refactor
                         deps (move-state)
+                        log (
+                            {
+                                at 2026-08-15T16:22:31.806222247Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+                        )
                     }
                 )
             }
