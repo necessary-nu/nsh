@@ -138,10 +138,6 @@ static mut FRAMES: Vec<ParseFile> = Vec::new();
 static mut toppf: usize = 0;
 /// `parsefile` — the current input frame.
 static mut cur: usize = 0;
-/// `parsefile` itself. Derived from `cur`, and re-derived by `set_cur`,
-/// which is the only writer of `cur` and runs after every `FRAMES` push and
-/// pop -- the only two things that move a frame.
-static mut curp: *mut ParseFile = addr_of_mut!(basepf);
 
 pub static mut stdin_state: stdin_state_t = stdin_state_t {
     seekable: 0,
@@ -165,18 +161,26 @@ pub unsafe fn pf_at(i: usize) -> &'static mut ParseFile {
 }
 
 /// The C's `parsefile`, dereferenced.
+///
+/// Resolved from the index rather than read from a cached pointer. The
+/// cache -- `static mut curp`, re-derived by `set_cur` -- was a pointer
+/// *into* `basepf`/`FRAMES`, which is a self-reference of the kind that
+/// cannot be a field of a movable struct: `Shell::new` returns by value,
+/// so the struct moves once and the pointer is left behind. `cur` was
+/// already the authoritative half (it is what `unwindfiles` compares) and
+/// `cur_pf` already carried a `debug_assert_eq!` claiming the two agree,
+/// so deleting the cache removes a duplicated fact rather than a fast
+/// path. Same answer as `VarSlot::Builtin`, `owned-jobs` and
+/// `owned-input`: name the thing, do not store where it lives.
 #[inline(always)]
 pub unsafe fn cur_pf() -> &'static mut ParseFile {
-    debug_assert_eq!(curp as *const ParseFile, pf_at(cur) as *const ParseFile);
-    &mut *curp
+    pf_at(cur)
 }
 
-/// `parsefile = pf`. Both halves, because the pointer is what `pgetc` reads
-/// and the index is what `unwindfiles` compares.
+/// `parsefile = pf`.
 #[inline]
 unsafe fn set_cur(i: usize) {
     cur = i;
-    curp = pf_at(i);
 }
 
 /// What `nextc` indexes: the innermost pushed string if there is one, and
