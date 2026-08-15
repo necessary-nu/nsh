@@ -24,7 +24,6 @@ use crate::error::{Error, errlinno};
 use crate::expand::{EXP_QUOTED, expandarg, restore_handler_expandarg, rmescapes};
 use crate::input::{
     PEOA, pgetc, pgetc_eoa, popfile, pungetc, pungetn, pushstring, setinputstring, unwindfiles,
-    whichprompt,
 };
 use crate::nodes::{
     NAND, NAPPEND, NBACKGND, NCLOBBER, NCMD, NFROM, NFROMFD, NFROMTO, NHERE, NOR, NPIPE, NREDIR,
@@ -1042,7 +1041,7 @@ unsafe fn readtoken(sh: &mut Shell) -> Result<c_int, Error> {
                 checkkwd = 0;
                 /* The alias bit is dropped with the rest: dash clears the
                  * whole of `checkkwd` here, and the bit lived in it. */
-                crate::input::clear_alias_boundary();
+                crate::input::clear_alias_boundary(sh);
                 t = xxreadtoken(sh)?;
             }
         }
@@ -1050,7 +1049,7 @@ unsafe fn readtoken(sh: &mut Shell) -> Result<c_int, Error> {
         /* `popstring` sets this while `xxreadtoken` runs, and dash reads
          * it back out of `checkkwd` right here. The bit is the input
          * layer's now; this is the same point, and the same bit. */
-        if crate::input::take_alias_boundary() != 0 {
+        if crate::input::take_alias_boundary(sh) != 0 {
             kwd |= CHKALIAS;
         }
         kwd |= checkkwd;
@@ -2285,7 +2284,7 @@ unsafe fn setprompt(sh: &mut Shell, which: c_int) {
     let show: c_int;
 
     needprompt = 0;
-    whichprompt = which;
+    sh.input.whichprompt = which;
 
     /* #ifdef SMALL: show = 1 */
     show = (!crate::histedit::editing_active()) as c_int;
@@ -2391,7 +2390,7 @@ pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<*const c_ch
 pub unsafe fn getprompt(sh: &mut Shell) -> *const c_char {
     let prompt: *const c_char;
 
-    match whichprompt {
+    match sh.input.whichprompt {
         1 => {
             prompt = crate::var::ps1val(sh);
         }

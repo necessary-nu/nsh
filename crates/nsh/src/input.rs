@@ -13,6 +13,7 @@
 //! whichever text the level is reading -- the frame's own `buf`, or the
 //! string the innermost `strpush` pushed in front of it.
 
+use crate::context::Shell;
 use crate::error::Error;
 use core::ptr::addr_of_mut;
 use libc::{c_char, c_int, c_void, off_t, size_t, tcflag_t};
@@ -139,12 +140,46 @@ static mut toppf: usize = 0;
 /// `parsefile` — the current input frame.
 static mut cur: usize = 0;
 
-pub static mut stdin_state: stdin_state_t = stdin_state_t {
-    seekable: 0,
-    pip: [0, 0],
-    pending: 0,
-    bufferable: 0,
-};
+/// The shell's input: where it is reading from, and what it has read.
+///
+/// `docs/api-design.md` §5 assigns `input.rs`'s statics and `parser.rs`'s
+/// eleven parser globals to one `input` field. This is that field, being
+/// filled in slices: the independent scalars first, the frame stack next.
+///
+/// `stdin_state`, `whichprompt` and `stdin_istty` are `pub(crate)` --
+/// three unrelated scalars, each meaning one thing, read from
+/// `options.rs` and `parser.rs`; accessors would be noise, by the
+/// criterion the evaluator's state settled. `alias_boundary` is private
+/// because it is a bit this module produces and hands over through
+/// [`take_alias_boundary`], which is the invariant worth keeping.
+pub struct InputStack {
+    /// `stdin_state` — how the shell's standard input behaves.
+    pub(crate) stdin_state: stdin_state_t,
+    /// `whichprompt` — 1 == PS1, 2 == PS2.
+    pub(crate) whichprompt: c_int,
+    /// `stdin_istty` — -1 until asked.
+    pub(crate) stdin_istty: c_int,
+    /// See [`take_alias_boundary`].
+    alias_boundary: c_int,
+}
+
+impl InputStack {
+    /// What the statics were declared with.
+    pub(crate) const fn new() -> Self {
+        InputStack {
+            stdin_state: stdin_state_t {
+                seekable: 0,
+                pip: [0, 0],
+                pending: 0,
+                bufferable: 0,
+            },
+            whichprompt: 0,
+            stdin_istty: -1,
+            alias_boundary: 0,
+        }
+    }
+}
+
 /// Set when `popstring` finishes an alias whose text ended in a blank.
 ///
 /// dash spells this `checkkwd |= CHKALIAS` — the input layer reaching
@@ -154,25 +189,20 @@ pub static mut stdin_state: stdin_state_t = stdin_state_t {
 /// here is what leaves `input.rs` naming nothing in `parser.rs`. The
 /// parser consults it at the two points it consumed the flag before —
 /// see [`take_alias_boundary`] and [`clear_alias_boundary`].
-static mut alias_boundary: c_int = 0;
-
 /// Take the flag and clear it: the parser's `kwd |= checkkwd`.
 #[inline]
-pub unsafe fn take_alias_boundary() -> c_int {
-    let v = alias_boundary;
-    alias_boundary = 0;
+pub unsafe fn take_alias_boundary(sh: &mut Shell) -> c_int {
+    let v = sh.input.alias_boundary;
+    sh.input.alias_boundary = 0;
     v
 }
 
 /// Drop the flag unread: the parser's `checkkwd = 0` while eating
 /// newlines, which discarded an alias bit set during that eating.
 #[inline]
-pub unsafe fn clear_alias_boundary() {
-    alias_boundary = 0;
+pub unsafe fn clear_alias_boundary(sh: &mut Shell) {
+    sh.input.alias_boundary = 0;
 }
-
-pub static mut whichprompt: c_int = 0; /* 1 == PS1, 2 == PS2 */
-pub static mut stdin_istty: c_int = -1;
 
 /// Frame `i`. Index 0 is `basepf`, which is not in `FRAMES` because it
 /// outlives every push and the C gives it a different `popfile`.
@@ -320,29 +350,29 @@ pub unsafe fn mkinit_forkreset(sh: &mut crate::context::Shell) {
         libc::close(cur_pf().fd);
         cur_pf().fd = sin;
     }
-    if stdin_state.pip[0] != 0 {
-        libc::close(stdin_state.pip[0]);
-        libc::close(stdin_state.pip[1]);
-        stdin_state.pip = [0; 2];
+    if sh.input.stdin_state.pip[0] != 0 {
+        libc::close(sh.input.stdin_state.pip[0]);
+        libc::close(sh.input.stdin_state.pip[1]);
+        sh.input.stdin_state.pip = [0; 2];
     }
 }
 
 /* mkinit POSTEXITRESET fragment from src/input.c:127-129. */
-pub unsafe fn mkinit_postexitreset() {
-    flush_input();
+pub unsafe fn mkinit_postexitreset(sh: &mut Shell) {
+    flush_input(sh);
 }
 
 // [spec:dash:def:input.input-init-fn]
 // [spec:dash:sem:input.input-init-fn]
-pub unsafe fn input_init() {
-    let st: *mut stdin_state_t = addr_of_mut!(stdin_state);
+pub unsafe fn input_init(sh: &mut Shell) {
+    let st: *mut stdin_state_t = addr_of_mut!(sh.input.stdin_state);
     let mut tios: libc::termios = core::mem::zeroed();
     let istty: c_int;
 
     let sin: c_int = crate::streams::streams().stdin;
 
     istty = libc::tcgetattr(sin, &mut tios) + 1;
-    stdin_istty = istty;
+    sh.input.stdin_istty = istty;
     if istty != 0 {
         (*st).bufferable = tios.c_lflag & libc::ICANON;
     } else {
@@ -353,11 +383,11 @@ pub unsafe fn input_init() {
 
 // [spec:dash:def:input.stdin-bufferable-fn]
 // [spec:dash:sem:input.stdin-bufferable-fn]
-unsafe fn stdin_bufferable() -> bool {
-    let st: *mut stdin_state_t = addr_of_mut!(stdin_state);
+unsafe fn stdin_bufferable(sh: &mut Shell) -> bool {
+    let st: *mut stdin_state_t = addr_of_mut!(sh.input.stdin_state);
 
-    if stdin_istty < 0 {
-        input_init();
+    if sh.input.stdin_istty < 0 {
+        input_init(sh);
     }
 
     (*st).bufferable != 0
@@ -382,28 +412,28 @@ unsafe fn flush_tee(buf: *mut c_void, nr: c_int, mut pending: c_int) {
 
 // [spec:dash:def:input.stdin-tee-fn]
 // [spec:dash:sem:input.stdin-tee-fn]
-unsafe fn stdin_tee(buf: *mut c_void, nr: c_int) -> Result<c_int, Error> {
+unsafe fn stdin_tee(sh: &mut Shell, buf: *mut c_void, nr: c_int) -> Result<c_int, Error> {
     let err: c_int;
 
-    if stdin_state.pip[0] == 0 {
-        crate::redir::sh_pipe(addr_of_mut!(stdin_state.pip) as *mut c_int, 0)?;
-        if stdin_state.pip[0] < 10 {
-            stdin_state.pip[0] = crate::redir::savefd(stdin_state.pip[0], stdin_state.pip[0])?;
+    if sh.input.stdin_state.pip[0] == 0 {
+        crate::redir::sh_pipe(addr_of_mut!(sh.input.stdin_state.pip) as *mut c_int, 0)?;
+        if sh.input.stdin_state.pip[0] < 10 {
+            sh.input.stdin_state.pip[0] = crate::redir::savefd(sh.input.stdin_state.pip[0], sh.input.stdin_state.pip[0])?;
         }
-        if stdin_state.pip[1] < 10 {
-            stdin_state.pip[1] = crate::redir::savefd(stdin_state.pip[1], stdin_state.pip[1])?;
+        if sh.input.stdin_state.pip[1] < 10 {
+            sh.input.stdin_state.pip[1] = crate::redir::savefd(sh.input.stdin_state.pip[1], sh.input.stdin_state.pip[1])?;
         }
     }
 
-    flush_tee(buf, nr, stdin_state.pending);
+    flush_tee(buf, nr, sh.input.stdin_state.pending);
 
     if USE_TEE != 0 {
-        err = libc::tee(0, stdin_state.pip[1], nr as size_t, 0) as c_int;
+        err = libc::tee(0, sh.input.stdin_state.pip[1], nr as size_t, 0) as c_int;
     } else {
         set_errno(libc::EINVAL);
         err = -1;
     }
-    stdin_state.pending = err;
+    sh.input.stdin_state.pending = err;
     Ok(err)
 }
 
@@ -469,7 +499,7 @@ pub unsafe fn pgetc(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
                 c = text(pf)[pf.pos] as i8 as c_int;
                 pf.pos += 1;
             } else if !pf.strpush.is_empty() {
-                popstring();
+                popstring(sh);
                 /* The freestrings call must be delayed til the next
                  * pgetc call for PEOA to work properly.
                  */
@@ -560,7 +590,7 @@ unsafe fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
     use_tee = fd == sin
         /* #ifndef SMALL */
         && !crate::histedit::editing_active()
-        && !stdin_bufferable();
+        && !stdin_bufferable(sh);
 
     pnr = nr;
     'retry: loop {
@@ -578,9 +608,9 @@ unsafe fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
         }
 
         if use_tee {
-            nr = stdin_tee(cur_pf().buf.as_mut_ptr().add(off) as *mut c_void, nr)?;
+            nr = stdin_tee(sh, cur_pf().buf.as_mut_ptr().add(off) as *mut c_void, nr)?;
             if nr >= 0 {
-                fd = stdin_state.pip[0];
+                fd = sh.input.stdin_state.pip[0];
             } else if errno() == libc::EINVAL {
                 use_tee = false;
                 pnr = 1;
@@ -636,7 +666,7 @@ unsafe fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
 // [spec:dash:def:input.preadbuffer-fn]
 // [spec:dash:sem:input.preadbuffer-fn]
 unsafe fn preadbuffer(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
-    let first: c_int = (whichprompt == 1) as c_int;
+    let first: c_int = (sh.input.whichprompt == 1) as c_int;
     let mut something: c_int;
     let mut savec: u8 = 0;
     let mut more: c_int;
@@ -852,7 +882,7 @@ pub unsafe fn pushstring(s: *mut c_char, ap: *mut c_void) {
 
 // [spec:dash:def:input.popstring-fn]
 // [spec:dash:sem:input.popstring-fn]
-unsafe fn popstring() {
+unsafe fn popstring(sh: &mut Shell) {
     INTOFF();
     let pf = cur_pf();
     let mut sp = pf.strpush.pop().unwrap();
@@ -866,7 +896,7 @@ unsafe fn popstring() {
     if !sp.ap.is_null() && pf.pos > 0 {
         let prev = sp.string[pf.pos - 1];
         if prev == b' ' || prev == b'\t' {
-            alias_boundary = 1;
+            sh.input.alias_boundary = 1;
         }
     }
     pf.pos = sp.prevpos;
@@ -1042,25 +1072,25 @@ pub unsafe fn popallfiles(sh: &mut crate::context::Shell) {
 
 // [spec:dash:def:input.flush-input-fn]
 // [spec:dash:sem:input.flush-input-fn]
-pub unsafe fn flush_input() {
+pub unsafe fn flush_input(sh: &mut Shell) {
     let base = pf_at(0);
     let left: c_int = base.nleft + input_get_lleft(base);
 
     INTOFF();
-    if stdin_state.seekable != 0 && left != 0 {
+    if sh.input.stdin_state.seekable != 0 && left != 0 {
         libc::lseek(
             crate::streams::streams().stdin,
             -(left as off_t),
             libc::SEEK_CUR,
         );
-    } else if stdin_state.pending > left {
+    } else if sh.input.stdin_state.pending > left {
         /* `basebuf` is scratch here; the bytes are being discarded. */
         flush_tee(
             base.buf.as_mut_ptr() as *mut c_void,
             BUFSIZ,
-            stdin_state.pending - left,
+            sh.input.stdin_state.pending - left,
         );
-        stdin_state.pending = 0;
+        sh.input.stdin_state.pending = 0;
     }
     base.nleft = 0;
     input_set_lleft(base, 0);
@@ -1069,8 +1099,8 @@ pub unsafe fn flush_input() {
 
 // [spec:dash:def:input.reset-input-fn]
 // [spec:dash:sem:input.reset-input-fn]
-pub unsafe fn reset_input() {
-    stdin_istty = -1;
+pub unsafe fn reset_input(sh: &mut Shell) {
+    sh.input.stdin_istty = -1;
     pf_at(0).eof = 0;
-    flush_input();
+    flush_input(sh);
 }

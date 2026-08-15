@@ -27,7 +27,7 @@ pub unsafe fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         sh.options.set_flag(crate::options::iflag, 0); /* exit on error */
         sh.options.set_flag(crate::options::mflag, 0);
         crate::options::optschanged(sh)?;
-        crate::input::flush_input();
+        crate::input::flush_input(sh);
         /* `execve` wants the array back, so this is where it is built --
          * once, for the one builtin that replaces the process, instead of
          * for every builtin that does not. `shellexec` writes `argv[-1]`

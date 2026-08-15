@@ -139,7 +139,7 @@ pub unsafe fn redirect(
              * own input", which is what makes the buffered parse state
              * stale -- not descriptor 0 for its own sake. */
             if fd == crate::streams::streams().stdin {
-                crate::input::reset_input();
+                crate::input::reset_input(sh);
             }
 
             if let Some(svi) = sv {
@@ -514,7 +514,7 @@ pub unsafe fn popredir(sh: &mut Shell, drop: c_int) {
             _ => {
                 if drop == 0 {
                     if i == 0 {
-                        crate::input::reset_input();
+                        crate::input::reset_input(sh);
                     }
                     libc::dup2(renamed, i);
                 }

@@ -277,8 +277,8 @@ pub unsafe fn procargs(sh: &mut crate::context::Shell, mut xargv: *mut *mut c_ch
         sh.options.set_flag(sflag, 1);
     }
     if sh.options.flag(iflag) == 2 && sh.options.flag(sflag) == 1 {
-        crate::input::input_init();
-        if crate::input::stdin_istty != 0 && libc::isatty(crate::streams::streams().stderr) != 0 {
+        crate::input::input_init(sh);
+        if sh.input.stdin_istty != 0 && libc::isatty(crate::streams::streams().stderr) != 0 {
             sh.options.set_flag(iflag, 1);
         }
     }

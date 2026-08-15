@@ -25,6 +25,7 @@
 //! `docs/spec/port/src/init.md` states and what this file implements — an
 //! earlier note here claimed the two disagreed, which was wrong.
 
+use crate::context::Shell;
 use libc::c_void;
 
 use crate::nodes::Node;
@@ -123,9 +124,9 @@ pub unsafe fn forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
 
 // [spec:dash:def:init.postexitreset-fn]
 // [spec:dash:sem:init.postexitreset-fn]
-pub unsafe fn postexitreset() {
+pub unsafe fn postexitreset(sh: &mut Shell) {
     /* from input.c: */
-    crate::input::mkinit_postexitreset();
+    crate::input::mkinit_postexitreset(sh);
 }
 
 /*

@@ -871,7 +871,7 @@ unsafe fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
                 libc::close(pip[0]);
             }
             if prevfd > 0 {
-                crate::input::reset_input();
+                crate::input::reset_input(sh);
                 libc::dup2(prevfd, 0);
                 libc::close(prevfd);
             }
@@ -1376,7 +1376,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                 }
 
                 _ => {
-                    crate::input::flush_input();
+                    crate::input::flush_input(sh);
 
                     /* Fork off a child process if necessary. */
                     if (flags & EV_EXIT) == 0 || crate::trap::have_traps() != 0 {

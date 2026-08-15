@@ -77,6 +77,9 @@ pub struct Shell {
     /// buffer and line, and the `local` save stack. `var.rs` owns the
     /// shape; this owns the value.
     pub(crate) vars: crate::var::VarTable,
+    /// Where the shell is reading from, and what it has read.
+    /// `input.rs` owns the shape; this owns the value.
+    pub(crate) input: crate::input::InputStack,
     /// `$?` — the exit status of the last command.
     ///
     /// Its own field rather than a member of `eval`, because
@@ -109,6 +112,7 @@ impl Shell {
             jobs: crate::jobs::JobTable::new(),
             options: crate::options::ShellOptions::new(),
             redirs: crate::redir::RedirStack::new(),
+            input: crate::input::InputStack::new(),
             status: 0,
             vars: crate::var::VarTable::new(),
         }

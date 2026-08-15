@@ -1106,7 +1106,7 @@ pub unsafe fn forkshell(
 
     /* TRACE(("forkshell(%%%d, %p, %d) called\n", jobno(jp), n, mode)); */
 
-    crate::input::flush_input();
+    crate::input::flush_input(sh);
 
     pid = libc::fork();
     if pid == 0 {
