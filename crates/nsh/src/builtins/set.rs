@@ -33,7 +33,7 @@ pub unsafe fn setcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
      * them would move the instruction a pending SIGINT is delivered at. */
     optschanged(sh)?;
     if scan.next < args.len() {
-        setparam(&args[scan.next..]);
+        setparam(sh, &args[scan.next..]);
     }
     INTON();
     Ok(Flow::Done(0))

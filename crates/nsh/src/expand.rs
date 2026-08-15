@@ -1706,7 +1706,7 @@ unsafe fn evalvar(
 
     /* really_record: */
     if quoted != 0 {
-        quoted = (*var == C_AT && crate::options::shellparam.nparam != 0) as c_int;
+        quoted = (*var == C_AT && sh.options.shellparam.nparam != 0) as c_int;
         if quoted == 0 {
             return Ok(p);
         }
@@ -1973,7 +1973,7 @@ unsafe fn varvalue(
                             break 'numvar;
                         }
                         C_HASH => {
-                            num = crate::options::shellparam.nparam;
+                            num = sh.options.shellparam.nparam;
                             break 'numvar;
                         }
                         C_BANG => {
@@ -2031,11 +2031,11 @@ unsafe fn varvalue(
                         }
                         c if c >= C_0 && c <= C_9 => {
                             num = libc::atoi(name);
-                            if num < 0 || num > crate::options::shellparam.nparam {
+                            if num < 0 || num > sh.options.shellparam.nparam {
                                 return Ok(-1);
                             }
                             p = if num != 0 {
-                                *crate::options::shellparam_p().offset(num as isize - 1)
+                                *sh.options.shellparam.p().offset(num as isize - 1)
                             } else {
                                 crate::options::arg0
                             };
@@ -2053,7 +2053,7 @@ unsafe fn varvalue(
                 break 'sw;
             }
             /* param: */
-            ap = crate::options::shellparam_p();
+            ap = sh.options.shellparam.p();
             if ap.is_null() {
                 return Ok(-1);
             }

@@ -1510,7 +1510,7 @@ unsafe fn evalfun(
     /* `saveparam = shellparam` plus the `shellparam.malloc = 0` that the C
      * puts inside the protected region so the epilogue's `freeparam` cannot
      * reach what the copy still points at. */
-    saveparam = crate::options::takeparam();
+    saveparam = crate::options::takeparam(sh);
     savefuncline = sh.eval.funcline;
     saveloopnest = sh.eval.loopnest;
 
@@ -1526,7 +1526,7 @@ unsafe fn evalfun(
      * balance into a use-after-free that only shows when a function
      * redefines itself while running. Nothing here is reordered. */
     INTON();
-    crate::options::borrowparam(argv.add(1), argc - 1);
+    crate::options::borrowparam(sh, argv.add(1), argc - 1);
 
     let outcome = evaltree(sh, (*func).ndefun().body.as_deref(), flags & EV_TESTED);
 
@@ -1535,7 +1535,7 @@ unsafe fn evalfun(
     sh.eval.loopnest = saveloopnest;
     sh.eval.funcline = savefuncline;
     crate::nodes::freefunc(func);
-    crate::options::restoreparam(saveparam);
+    crate::options::restoreparam(sh, saveparam);
     INTON();
     sh.eval.evalskip &= !(SKIPFUNC | SKIPFUNCDEF);
 

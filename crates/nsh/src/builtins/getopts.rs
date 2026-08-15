@@ -23,7 +23,7 @@ use std::io::Write;
 
 use crate::eval::Flow;
 use crate::mystring::nullstr;
-use crate::options::{Options, shellparam, shellparam_p};
+use crate::options::Options;
 use crate::var::{VNOFUNC, setvar, setvarint, unsetvar};
 
 // [spec:dash:def:options.getoptscmd-fn]
@@ -48,10 +48,10 @@ pub unsafe fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
     let explicit: Vec<CString>;
     let mut ptrs: Vec<*mut c_char>;
     if operands.len() == 2 {
-        optbase = shellparam_p();
-        if (shellparam.optind as c_uint) > (shellparam.nparam + 1) as c_uint {
-            shellparam.optind = 1;
-            shellparam.optoff = -1;
+        optbase = sh.options.shellparam.p();
+        if (sh.options.shellparam.optind as c_uint) > (sh.options.shellparam.nparam + 1) as c_uint {
+            sh.options.shellparam.optind = 1;
+            sh.options.shellparam.optoff = -1;
         }
     } else {
         explicit = operands[2..]
@@ -61,9 +61,9 @@ pub unsafe fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
         ptrs = explicit.iter().map(|w| w.as_ptr() as *mut c_char).collect();
         ptrs.push(null_mut());
         optbase = ptrs.as_mut_ptr();
-        if (shellparam.optind as c_uint) > (operands.len() - 1) as c_uint {
-            shellparam.optind = 1;
-            shellparam.optoff = -1;
+        if (sh.options.shellparam.optind as c_uint) > (operands.len() - 1) as c_uint {
+            sh.options.shellparam.optind = 1;
+            sh.options.shellparam.optoff = -1;
         }
     }
 
@@ -88,10 +88,10 @@ unsafe fn getopts(
     let mut done: c_int = 0;
     let mut s: [c_char; 2] = [0; 2];
     let mut optnext: *mut *mut c_char;
-    let mut ind: c_int = shellparam.optind;
-    let off: c_int = shellparam.optoff;
+    let mut ind: c_int = sh.options.shellparam.optind;
+    let off: c_int = sh.options.shellparam.optoff;
 
-    shellparam.optind = -1;
+    sh.options.shellparam.optind = -1;
     optnext = optfirst.offset(ind as isize - 1);
 
     if ind <= 1 || off < 0 || CStr::from_ptr(*optnext.offset(-1)).count_bytes() < off as size_t {
@@ -200,12 +200,12 @@ unsafe fn getopts(
     s[1] = b'\0' as c_char;
     setvar(sh, optvar, s.as_ptr(), 0)?;
 
-    shellparam.optoff = if !p.is_null() {
+    sh.options.shellparam.optoff = if !p.is_null() {
         (p as isize - *optnext.offset(-1) as isize) as c_int
     } else {
         -1
     };
-    shellparam.optind = ind;
+    sh.options.shellparam.optind = ind;
 
     Ok(done)
 }
@@ -232,9 +232,6 @@ mod tests {
     fn a_scan_runs_across_invocations() {
         let _g = lock();
         unsafe {
-            shellparam.optind = 1;
-            shellparam.optoff = -1;
-
             let words = ["getopts", "ab:", "o", "-a", "-bVAL", "rest"];
             let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
 
@@ -245,6 +242,8 @@ mod tests {
              * variables, which is not what a script sees. */
             let mut owned = Shell::new();
             let sh = &mut owned;
+            sh.options.shellparam.optind = 1;
+            sh.options.shellparam.optoff = -1;
 
             assert_eq!(getoptscmd(sh, &args).unwrap(), Flow::Done(0));
             assert_eq!(value(sh, "o"), "a");
@@ -266,14 +265,13 @@ mod tests {
     fn a_leading_colon_reports_quietly() {
         let _g = lock();
         unsafe {
-            shellparam.optind = 1;
-            shellparam.optoff = -1;
-
             let words = ["getopts", ":a", "o", "-z"];
             let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
 
             let mut owned = Shell::new();
             let sh = &mut owned;
+            sh.options.shellparam.optind = 1;
+            sh.options.shellparam.optoff = -1;
 
             assert_eq!(getoptscmd(sh, &args).unwrap(), Flow::Done(0));
             assert_eq!(value(sh, "o"), "?");

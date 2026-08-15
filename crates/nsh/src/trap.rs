@@ -151,7 +151,7 @@ pub unsafe fn setsignal(sh: &mut crate::context::Shell, signo: c_int) {
         match signo {
             libc::SIGINT => {
                 if sh.options.flag(crate::options::iflag) != 0
-                    || !crate::options::minusc.is_null()
+                    || !sh.options.minusc.is_null()
                     || sh.options.flag(crate::options::sflag) == 0
                 {
                     action = S_CATCH as c_int;

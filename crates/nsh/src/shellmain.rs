@@ -187,7 +187,7 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
                         3 => {
                             // state3:
                             *state_p = 4;
-                            if !crate::options::minusc.is_null() {
+                            if !sh.options.minusc.is_null() {
                                 /* With EV_EXIT this always ends in
                                  * `Flow::Exit`, which is the C's EXEND
                                  * reaching the handler and taking
@@ -195,7 +195,7 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
                                  * the same place by the same decision. */
                                 match crate::eval::evalstring(
                                     sh,
-                                    crate::options::minusc,
+                                    sh.options.minusc,
                                     if sflag(sh) != 0 { 0 } else { EV_EXIT },
                                 )? {
                                     crate::eval::Flow::Done(_) => {}
@@ -203,7 +203,7 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
                                 }
                             }
 
-                            if sflag(sh) != 0 || crate::options::minusc.is_null() {
+                            if sflag(sh) != 0 || sh.options.minusc.is_null() {
                                 pc = 4;
                             } else {
                                 pc = 5; /* goto exit */

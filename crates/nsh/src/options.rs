@@ -6,6 +6,7 @@
 //! `options.h` become `usize` indices, so a call site reads `optlist[eflag]`
 //! and stays assignable exactly like the C macro.
 
+use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString};
 use core::ptr::{addr_of, addr_of_mut, null_mut};
@@ -104,17 +105,12 @@ impl shparam {
     }
 
     /// `shellparam.p` — the NULL-terminated array, wherever it lives.
-    fn p(&mut self) -> *mut *mut c_char {
+    pub(crate) fn p(&mut self) -> *mut *mut c_char {
         match &mut self.owned {
             Some(o) => o.ptrs.as_mut_ptr(),
             None => self.borrowed,
         }
     }
-}
-
-/// `shellparam.p`, for the readers outside this file.
-pub unsafe fn shellparam_p() -> *mut *mut c_char {
-    (*addr_of_mut!(shellparam)).p()
 }
 
 pub const NOPTS: usize = 18;
@@ -144,30 +140,32 @@ pub const pipefail: usize = 16;
 pub const debug: usize = 17;
 
 pub static mut arg0: *mut c_char = null_mut(); /* value of $0 */
-pub static mut shellparam: shparam = shparam::new(); /* current positional parameters */
-pub static mut minusc: *mut c_char = null_mut(); /* argument to -c option */
 
-/* `static const char *const optnames[NOPTS]` — `static mut` in Rust only
- * because a `*const c_char` array is not `Sync`; it is never written. */
-static mut optnames: [*const c_char; NOPTS] = [
-    b"errexit\0".as_ptr() as *const c_char,
-    b"noglob\0".as_ptr() as *const c_char,
-    b"ignoreeof\0".as_ptr() as *const c_char,
-    b"interactive\0".as_ptr() as *const c_char,
-    b"monitor\0".as_ptr() as *const c_char,
-    b"noexec\0".as_ptr() as *const c_char,
-    b"stdin\0".as_ptr() as *const c_char,
-    b"xtrace\0".as_ptr() as *const c_char,
-    b"verbose\0".as_ptr() as *const c_char,
-    b"vi\0".as_ptr() as *const c_char,
-    b"emacs\0".as_ptr() as *const c_char,
-    b"noclobber\0".as_ptr() as *const c_char,
-    b"allexport\0".as_ptr() as *const c_char,
-    b"notify\0".as_ptr() as *const c_char,
-    b"nounset\0".as_ptr() as *const c_char,
-    b"nolog\0".as_ptr() as *const c_char,
-    b"pipefail\0".as_ptr() as *const c_char,
-    b"debug\0".as_ptr() as *const c_char,
+/* `static const char *const optnames[NOPTS]`.
+ *
+ * `static` rather than `static mut`: it is never written, and it was only
+ * mutable because a `[*const c_char]` is not `Sync`. `&CStr` is, and it
+ * carries the NUL the readers below rely on in the type instead of in a
+ * comment. Same move `defifsvar` made in `var.rs`. */
+static optnames: [&CStr; NOPTS] = [
+    c"errexit",
+    c"noglob",
+    c"ignoreeof",
+    c"interactive",
+    c"monitor",
+    c"noexec",
+    c"stdin",
+    c"xtrace",
+    c"verbose",
+    c"vi",
+    c"emacs",
+    c"noclobber",
+    c"allexport",
+    c"notify",
+    c"nounset",
+    c"nolog",
+    c"pipefail",
+    c"debug",
 ];
 
 pub static optletters: [c_char; NOPTS] = [
@@ -204,6 +202,17 @@ pub static optletters: [c_char; NOPTS] = [
 /// make "who sets `-e`" answerable.
 pub struct ShellOptions {
     flags: [c_char; NOPTS],
+    /// `shellparam` — the positional parameters, `$1` onwards, and
+    /// `getopts`' place in them.
+    ///
+    /// `pub(crate)` rather than private: `getopts.rs` and `shift.rs`
+    /// read and write its members directly and there is no invariant
+    /// across them the flags array has. It is here because
+    /// `docs/api-design.md` §5 puts it here — one row for everything
+    /// `set` and the option scan own.
+    pub(crate) shellparam: shparam,
+    /// `minusc` — the argument to `-c`, or NULL.
+    pub(crate) minusc: *mut c_char,
 }
 
 impl ShellOptions {
@@ -211,6 +220,8 @@ impl ShellOptions {
     pub(crate) const fn new() -> Self {
         ShellOptions {
             flags: [0; NOPTS],
+            shellparam: shparam::new(),
+            minusc: null_mut(),
         }
     }
 
@@ -265,7 +276,7 @@ pub unsafe fn procargs(sh: &mut crate::context::Shell, mut xargv: *mut *mut c_ch
      * far it got, and whether `-c` was given. The pointer the C stores in
      * `minusc` is only ever read as a flag before the line below
      * overwrites it with the command itself. */
-    minusc = null_mut();
+    sh.options.minusc = null_mut();
     let words = argv_words(xargv);
     let scan = options(sh, &words, 0, true)?;
     login |= scan.login;
@@ -298,7 +309,7 @@ pub unsafe fn procargs(sh: &mut crate::context::Shell, mut xargv: *mut *mut c_ch
     /* POSIX 1003.2: first arg after -c cmd is $0, remainder $1... */
     let mut setarg0 = false;
     if scan.minus_c {
-        minusc = *xargv;
+        sh.options.minusc = *xargv;
         xargv = xargv.add(1);
         if !(*xargv).is_null() {
             setarg0 = true; /* goto setarg0 */
@@ -319,7 +330,7 @@ pub unsafe fn procargs(sh: &mut crate::context::Shell, mut xargv: *mut *mut c_ch
         nparam += 1;
         count = count.add(1);
     }
-    borrowparam(xargv, nparam);
+    borrowparam(sh, xargv, nparam);
     optschanged(sh)?;
 
     Ok(login)
@@ -394,7 +405,7 @@ pub(crate) unsafe fn options(
                     }
                     /* "--" means reset params */
                     else if scan.next >= args.len() {
-                        setparam(&args[scan.next..]);
+                        setparam(sh, &args[scan.next..]);
                     }
                 }
                 break; /* "-" or "--" terminates options */
@@ -453,7 +464,7 @@ unsafe fn minus_o(sh: &mut crate::context::Shell, name: Option<&BStr>, val: c_in
             let _ = (*crate::output::stdout()).write_all(heading);
             i = 0;
             while i < NOPTS as c_int {
-                let name = CStr::from_ptr(optnames[i as usize]).to_bytes();
+                let name = optnames[i as usize].to_bytes();
                 let mut line = name.to_vec();
                 if line.len() < 16 {
                     line.resize(16, b' ');
@@ -475,7 +486,7 @@ unsafe fn minus_o(sh: &mut crate::context::Shell, name: Option<&BStr>, val: c_in
                 } else {
                     b"+o "
                 });
-                line.extend_from_slice(CStr::from_ptr(optnames[i as usize]).to_bytes());
+                line.extend_from_slice(optnames[i as usize].to_bytes());
                 line.push(b'\n');
                 let _ = (*crate::output::stdout()).write_all(&line);
                 i += 1;
@@ -485,7 +496,7 @@ unsafe fn minus_o(sh: &mut crate::context::Shell, name: Option<&BStr>, val: c_in
         let name = name.expect("the naming branch");
         i = 0;
         while i < NOPTS as c_int {
-            if name.as_bytes() == CStr::from_ptr(optnames[i as usize]).to_bytes() {
+            if name.as_bytes() == optnames[i as usize].to_bytes() {
                 sh.options.set_flag(i as usize, val as c_char);
                 return Ok(());
             }
@@ -530,7 +541,7 @@ unsafe fn setoption(sh: &mut crate::context::Shell, flag: u8, val: c_int) -> Res
 
 // [spec:dash:def:options.setparam-fn]
 // [spec:dash:sem:options.setparam-fn]
-pub unsafe fn setparam(argv: &[&BStr]) {
+pub unsafe fn setparam(sh: &mut Shell, argv: &[&BStr]) {
     let nparam: c_int = argv.len() as c_int;
 
     /* Copied out in full before the old list goes, as the C's
@@ -539,7 +550,7 @@ pub unsafe fn setparam(argv: &[&BStr]) {
         .iter()
         .map(|w| BString::from(crate::shell::cstring(w).into_bytes_with_nul()))
         .collect();
-    let param = &mut *addr_of_mut!(shellparam);
+    let param = &mut *addr_of_mut!(sh.options.shellparam);
     param.owned = Some(Params::new(words));
     param.borrowed = null_mut();
     param.nparam = nparam;
@@ -550,8 +561,8 @@ pub unsafe fn setparam(argv: &[&BStr]) {
 /// `shellparam.malloc = 0; shellparam.p = argv` — the parameters a function
 /// call installs are its caller's `argv`, borrowed for the length of the
 /// call and rewritten in place by `shift`.
-pub unsafe fn borrowparam(argv: *mut *mut c_char, nparam: c_int) {
-    let param = &mut *addr_of_mut!(shellparam);
+pub unsafe fn borrowparam(sh: &mut Shell, argv: *mut *mut c_char, nparam: c_int) {
+    let param = &mut *addr_of_mut!(sh.options.shellparam);
     param.owned = None;
     param.borrowed = argv;
     param.nparam = nparam;
@@ -562,14 +573,14 @@ pub unsafe fn borrowparam(argv: *mut *mut c_char, nparam: c_int) {
 /// `saveparam = shellparam`, which is a copy in the C only because
 /// `shellparam.malloc = 0` on the next line disarms the `freeparam` that
 /// would otherwise free what the copy still points at. One move says both.
-pub unsafe fn takeparam() -> shparam {
-    core::mem::replace(&mut *addr_of_mut!(shellparam), shparam::new())
+pub unsafe fn takeparam(sh: &mut Shell) -> shparam {
+    core::mem::replace(&mut *addr_of_mut!(sh.options.shellparam), shparam::new())
 }
 
 /// `freeparam(&shellparam); shellparam = saveparam;`
-pub unsafe fn restoreparam(saved: shparam) {
-    freeparam(addr_of_mut!(shellparam));
-    shellparam = saved;
+pub unsafe fn restoreparam(sh: &mut Shell, saved: shparam) {
+    freeparam(addr_of_mut!(sh.options.shellparam));
+    sh.options.shellparam = saved;
 }
 
 /*
@@ -592,9 +603,9 @@ pub unsafe fn freeparam(param: *mut shparam) {
 
 // [spec:dash:def:options.getoptsreset-fn]
 // [spec:dash:sem:options.getoptsreset-fn]
-pub unsafe fn getoptsreset(_sh: &mut crate::context::Shell, value: *const c_char) {
-    shellparam.optind = 1;
-    shellparam.optoff = -1;
+pub unsafe fn getoptsreset(sh: &mut crate::context::Shell, value: *const c_char) {
+    sh.options.shellparam.optind = 1;
+    sh.options.shellparam.optoff = -1;
 }
 
 /*
