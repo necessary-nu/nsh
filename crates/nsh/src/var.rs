@@ -583,9 +583,36 @@ pub unsafe fn bltinlookup(sh: &mut Shell, name: *const c_char) -> *mut c_char {
  * Initialize the varable symbol tables and import the environment
  */
 
+/// Where a new shell's exported variables come from.
+///
+/// The C had no such choice: `environ` is the only source there is when
+/// the shell *is* the process. A shell built by [`crate::builder::Builder`]
+/// is not, and [dec:nsh:host-owns-the-process] makes reading the host's
+/// environment something the caller asks for rather than something the
+/// library takes.
+pub(crate) enum EnvSource<'a> {
+    /// The process's own `environ`, borrowed rather than copied
+    /// (`VTEXTFIXED`), exactly as `execve` delivered it. What a shell
+    /// started as a process uses.
+    Process,
+    /// Explicit `name`/`value` pairs, copied. The empty slice is the
+    /// library default: a shell that inherits nothing.
+    Explicit(&'a [(BString, BString)]),
+}
+
 /* mkinit INIT fragment from src/var.c:136-162. */
 pub unsafe fn mkinit_init(sh: &mut Shell) -> Result<(), Error> {
-    let mut envp: *mut *mut c_char;
+    mkinit_init_from(sh, EnvSource::Process)
+}
+
+/// `mkinit_init` with the environment's source chosen by the caller.
+///
+/// Everything other than the import loop is identical and stays in one
+/// place, because the order it runs in is load bearing: `initvar` first or
+/// `setvareq` files `PATH` as a fresh entry instead of updating
+/// `varinit[VPATH]`, and the `PWD` validation last because it reads the
+/// environment that was just imported.
+pub(crate) unsafe fn mkinit_init_from(sh: &mut Shell, env: EnvSource<'_>) -> Result<(), Error> {
     static mut ppid: [c_char; 32] = unsafe {
         core::mem::transmute::<[u8; 32], [c_char; 32]>(
             *b"PPID=\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0",
@@ -596,13 +623,18 @@ pub unsafe fn mkinit_init(sh: &mut Shell) -> Result<(), Error> {
     let mut st2: libc::stat64 = core::mem::zeroed();
 
     initvar(sh);
-    envp = environ;
-    while !(*envp).is_null() {
-        p = crate::parser::endofname(*envp);
-        if p != *envp && *p == b'=' as c_char {
-            setvareq(sh, *envp, VEXPORT | VTEXTFIXED)?;
+    match env {
+        EnvSource::Process => {
+            let mut envp: *mut *mut c_char = environ;
+            while !(*envp).is_null() {
+                p = crate::parser::endofname(*envp);
+                if p != *envp && *p == b'=' as c_char {
+                    setvareq(sh, *envp, VEXPORT | VTEXTFIXED)?;
+                }
+                envp = envp.add(1);
+            }
         }
-        envp = envp.add(1);
+        EnvSource::Explicit(pairs) => mkinit_env_pairs(sh, pairs)?,
     }
 
     setvareq(sh, addr_of!(defifsvar) as *mut c_char, VTEXTFIXED)?;
@@ -628,6 +660,41 @@ pub unsafe fn mkinit_init(sh: &mut Shell) -> Result<(), Error> {
         }
     }
     crate::cd::setpwd(sh, p, 0)
+}
+
+/// File explicit `name`/`value` pairs into the variable table, exported.
+///
+/// The copying half of the environment import. `setvareq` is given no
+/// `VTEXTFIXED`, so it takes its copying branch and each buffer dies at
+/// the end of its iteration -- which is the difference from the `environ`
+/// walk, where the shell borrows the process's bytes forever.
+///
+/// Its own function because two callers need it: a shell built with no
+/// `inherit_env` gets only these, and one built with both gets these on
+/// top of the borrowed import.
+pub(crate) unsafe fn mkinit_env_pairs(
+    sh: &mut Shell,
+    pairs: &[(BString, BString)],
+) -> Result<(), Error> {
+    for (name, value) in pairs {
+        /* `NAME=value\0`, which is the shape `setvareq` reads. */
+        let mut entry: Vec<u8> = Vec::with_capacity(name.len() + value.len() + 2);
+        entry.extend_from_slice(&name[..]);
+        entry.push(b'=');
+        entry.extend_from_slice(&value[..]);
+        entry.push(0);
+        let ptr = entry.as_mut_ptr() as *mut c_char;
+        /* The same filter the `environ` walk applies, and for the same
+         * reason: a name the shell cannot express is one no script could
+         * have read back. A pair that fails it is dropped rather than
+         * reported, because that is what `execve` delivery does with the
+         * same bytes. */
+        let p = crate::parser::endofname(ptr);
+        if p != ptr && *p == b'=' as c_char {
+            setvareq(sh, ptr, VEXPORT)?;
+        }
+    }
+    Ok(())
 }
 
 /* mkinit RESET fragment from src/var.c:164-166. */

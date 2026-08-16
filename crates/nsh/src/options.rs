@@ -511,6 +511,36 @@ unsafe fn minus_o(sh: &mut crate::context::Shell, name: Option<&BStr>, val: c_in
 
 // [spec:dash:def:options.setoption-fn]
 // [spec:dash:sem:options.setoption-fn]
+/// Set one option by its `set -o` long name or its single letter.
+///
+/// `set_option_by_name(sh, b"errexit", true)` and
+/// `set_option_by_name(sh, b"e", true)` are the same option, which is what
+/// [`crate::builder::Builder::option`] promises.
+///
+/// This is a third entry point beside `minus_o` and `setoption` rather
+/// than a replacement for either, because those two are shaped by the
+/// command line they parse: `minus_o` doubles as `set -o`'s *listing* when
+/// it is given no name, and `setoption` carries the ksh `-V`/`-E` mutual
+/// exclusion. A builder wants neither, and wants the name and the letter
+/// to be one call.
+///
+/// The caller is responsible for `optschanged` afterwards. It is not done
+/// here because a builder sets several options and the teardown that
+/// `optschanged` triggers -- `setinteractive`, `histedit`, `setjobctl` --
+/// should run once against the finished set, not once per option.
+pub(crate) unsafe fn set_option_by_name(
+    sh: &mut crate::context::Shell,
+    name: &BStr,
+    on: bool,
+) -> Result<(), Error> {
+    let val: c_int = if on { 1 } else { 0 };
+    if name.len() == 1 {
+        setoption(sh, name[0], val)
+    } else {
+        minus_o(sh, Some(name), val)
+    }
+}
+
 unsafe fn setoption(sh: &mut crate::context::Shell, flag: u8, val: c_int) -> Result<(), Error> {
     let mut i: c_int;
 

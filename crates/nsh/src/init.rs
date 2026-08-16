@@ -37,6 +37,17 @@ use crate::nodes::Node;
 // [spec:dash:def:init.init-fn]
 // [spec:dash:sem:init.init-fn]
 pub unsafe fn init(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
+    init_from(sh, crate::var::EnvSource::Process)
+}
+
+/// `init` with the environment's source chosen by the caller.
+///
+/// The only fragment that varies is `var`'s; the other three are the same
+/// whoever is building the shell, and the order of all four is `mkinit`'s.
+pub(crate) unsafe fn init_from(
+    sh: &mut crate::context::Shell,
+    env: crate::var::EnvSource<'_>,
+) -> Result<(), crate::error::Error> {
     /* from input.c: */
     crate::input::mkinit_init(sh);
 
@@ -50,7 +61,7 @@ pub unsafe fn init(sh: &mut crate::context::Shell) -> Result<(), crate::error::E
     }
 
     /* from var.c: */
-    crate::var::mkinit_init(sh)
+    crate::var::mkinit_init_from(sh, env)
 }
 
 /*

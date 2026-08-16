@@ -153,6 +153,16 @@ impl Shell {
     /// 1 and 2, which is what a shell started as a process uses and what
     /// a frontend that has already called [`crate::streams::install`]
     /// passes.
+    /// A [`crate::builder::Builder`] with every setting at its default.
+    ///
+    /// The public way to make a shell. `new` stays `pub(crate)` and stays
+    /// the one place field initial values live; the builder grows on top
+    /// of it rather than around it, so there is still exactly one list of
+    /// what a fresh shell contains.
+    pub fn builder() -> crate::builder::Builder {
+        crate::builder::Builder::new()
+    }
+
     pub(crate) fn new(streams: crate::streams::Streams) -> Self {
         Shell {
             io: crate::output::ShellIo::new(streams.stdout, streams.stderr),
