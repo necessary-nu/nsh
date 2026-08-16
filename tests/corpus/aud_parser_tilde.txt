@@ -1,0 +1,47 @@
+#!name tilde bare
+HOME=/tmp/h; echo ~; echo "~"; echo '~'
+%%%
+#!name tilde with slash
+HOME=/tmp/h; echo ~/a; echo ~/a/b; echo ~//
+%%%
+#!name tilde in assignment
+HOME=/tmp/h; v=~; echo "$v"; w=~/x; echo "$w"; x=a:~:b; echo "$x"
+%%%
+#!name tilde after colon in assignment
+HOME=/tmp/h; PATHX=~:~/b:c; echo "$PATHX"
+%%%
+#!name tilde not at start
+HOME=/tmp/h; echo a~; echo a~/b; echo "a~"
+%%%
+#!name tilde unknown user
+echo ~nosuchuser12345; echo ~nosuchuser12345/x
+%%%
+#!name tilde root user
+echo ~root | sed 's#^/root$#ROOT#'
+%%%
+#!name tilde empty HOME
+HOME=; echo "[~]"; HOME=/tmp/h; echo "[~]"
+%%%
+#!name tilde unset HOME
+unset HOME; echo "[~]" | sed 's#\[/.*\]#[HOMEDIR]#'
+%%%
+#!name tilde then metachar
+HOME=/tmp/h; mkdir -p /tmp/h; touch /tmp/h/zz1 /tmp/h/zz2; echo ~/zz*
+%%%
+#!name tilde in var expansion default
+HOME=/tmp/h; unset u; echo "${u:-~}"; echo "${u:-~/x}"
+%%%
+#!name tilde with colon terminator
+HOME=/tmp/h; echo ~:x; v=~:x; echo "$v"
+%%%
+#!name tilde followed by ctlesc
+HOME=/tmp/h; echo ~\$; echo ~\*; echo ~\\
+%%%
+#!name tilde in quoted context
+HOME=/tmp/h; echo "~/x"; echo ~"/x"; echo ~'/x'
+%%%
+#!name tilde long username
+echo ~aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/x
+%%%
+#!name tilde double
+HOME=/tmp/h; echo ~~; echo ~/~; v=~:~; echo "$v"

@@ -815,7 +815,7 @@ pub unsafe fn expandarg(
      * swallowing arm and `init::exitreset` both call `ifsfree`, which is
      * docs/errors-are-values.md 2.2's mark-keyed cleanup working as
      * designed. Adding one here would free them twice. */
-    argstr(sh, arg.narg().text.as_ptr(), flag)?;
+    argstr(sh, arg.narg().text.as_cbytes(), 0, flag)?;
     'out: {
         let Some(arglist) = arglist else {
             /* here document expanded — the caller reads the buffer back
@@ -878,31 +878,35 @@ pub unsafe fn expandarg(
 // [spec:dash:sem:expand.argstr-fn]
 unsafe fn argstr(
     sh: &mut crate::context::Shell,
-    mut p: *mut c_char,
+    text: &[u8],
+    mut p: usize,
     mut flag: c_int,
-) -> Result<*mut c_char, Error> {
-    static spclchars: [c_char; 11] = [
-        C_EQUALS,
-        C_COLON,
-        CTLQUOTEMARK,
-        CTLENDVAR,
-        CTLESC,
-        CTLVAR,
-        CTLBACKQ,
-        CTLMBCHAR,
-        CTLARI,
-        CTLENDARI,
+) -> Result<usize, Error> {
+    static spclchars: [u8; 11] = [
+        C_EQUALS as u8,
+        C_COLON as u8,
+        CTLQUOTEMARK as u8,
+        CTLENDVAR as u8,
+        CTLESC as u8,
+        CTLVAR as u8,
+        CTLBACKQ as u8,
+        CTLMBCHAR as u8,
+        CTLARI as u8,
+        CTLENDARI as u8,
         0,
     ];
-    let mut reject: *const c_char = spclchars.as_ptr();
+    /* The C advances a `const char *` into `spclchars`; the offset is the
+     * whole of what it carries.  `strcspn`'s set is the array from there to
+     * its terminator, which is index 10. */
+    let mut reject: usize = 0;
     let mut c: c_int;
     let breakall: c_int = ((flag & (EXP_WORD | EXP_QUOTED)) == EXP_WORD) as c_int;
     let mut inquotes: c_int;
     let mut length: size_t;
     let mut startloc: c_int;
 
-    reject = reject.offset(if (flag & EXP_VARTILDE2) != 0 { 1 } else { 0 });
-    reject = reject.offset(if (flag & EXP_VARTILDE) != 0 { 0 } else { 2 });
+    reject += if (flag & EXP_VARTILDE2) != 0 { 1 } else { 0 };
+    reject += if (flag & EXP_VARTILDE) != 0 { 0 } else { 2 };
     inquotes = 0;
     length = 0;
 
@@ -918,8 +922,8 @@ unsafe fn argstr(
         if do_tilde {
             /* tilde: */
             do_tilde = false;
-            if *p == C_TILDE {
-                p = exptilde(sh, p, flag);
+            if byte_at(text, p) == C_TILDE {
+                p = exptilde(sh, text, p, flag);
             }
         }
         /* start: */
@@ -935,15 +939,15 @@ unsafe fn argstr(
              * re-enters after every control byte and taking the whole
              * remaining string each time would turn one pass over a word
              * into one pass per escape. */
-            let rejectset = CStr::from_ptr(reject).to_bytes();
-            let from = p.offset(length as isize);
+            let rejectset = &spclchars[reject..10];
+            let from = p + length;
             length += (0usize..)
                 .take_while(|&i| {
-                    let c = *from.add(i);
+                    let c = byte_at(text, from + i);
                     c != 0 && !rejectset.contains(&(c as u8))
                 })
                 .count();
-            c = *p.offset(length as isize) as c_int;
+            c = byte_at(text, p + length) as c_int;
             if (c & 0x80) == 0 || c == CTLENDARI as c_int || c == CTLENDVAR as c_int {
                 /*
                  * c == '=' || c == ':' || c == '\0' ||
@@ -964,7 +968,7 @@ unsafe fn argstr(
                  * `copy_nonoverlapping` inside the old accessor already
                  * assumed and what makes this an append. */
                 let b = expb();
-                b.extend_from_slice(core::slice::from_raw_parts(p as *const u8, length));
+                b.extend_from_slice(&text[p..p + length]);
                 q = b.len();
                 /* `*(q - 1) &= end - 1` */
                 b[q - 1] &= (end - 1) as u8;
@@ -980,7 +984,7 @@ unsafe fn argstr(
                 }
                 startloc = newloc;
             }
-            p = p.offset(length as isize + 1);
+            p += length + 1;
             length = 0;
 
             if end != 0 {
@@ -991,15 +995,15 @@ unsafe fn argstr(
                 C_EQUALS | C_COLON => {
                     if (c as c_char) == C_EQUALS {
                         flag |= EXP_VARTILDE2;
-                        reject = reject.offset(1);
+                        reject += 1;
                         /* fall through */
                     }
                     /*
                      * sort of a hack - expand tildes in variable
                      * assignments (after the first '=' and after ':'s).
                      */
-                    p = p.offset(-1);
-                    if *p == C_TILDE {
+                    p -= 1;
+                    if byte_at(text, p) == C_TILDE {
                         do_tilde = true;
                         continue 'start; /* goto tilde */
                     }
@@ -1007,26 +1011,27 @@ unsafe fn argstr(
                 }
                 CTLQUOTEMARK => {
                     /* "$@" syntax adherence hack */
+                    /* `dolatstr + 1` is the five bytes the parser emits for
+                     * a bare `"$@"`, terminator excluded. */
+                    let dolat = crate::mystring::dolatstr.map(|c| c as u8);
                     if inquotes == 0
-                        && CStr::from_ptr(p).to_bytes()
-                            == CStr::from_ptr(crate::mystring::dolatstr.as_ptr().offset(1))
-                                .to_bytes()
+                        && crate::mystring::cstr_prefix(slice_from(text, p)) == &dolat[1..6]
                     {
-                        p = evalvar(sh, p.offset(1), flag | EXP_QUOTED)?.offset(1);
+                        p = evalvar(sh, text, p + 1, flag | EXP_QUOTED)? + 1;
                         continue 'start; /* goto start */
                     }
                     inquotes ^= EXP_QUOTED;
                     /* addquote: */
                     if (flag & QUOTES_ESC) != 0 {
-                        p = p.offset(-1);
+                        p -= 1;
                         length += 1;
                         startloc += 1;
                     }
                 }
                 CTLMBCHAR => {
-                    c = *p as c_int;
-                    p = p.offset(-1);
-                    mb = mbnext(p);
+                    c = byte_at(text, p) as c_int;
+                    p -= 1;
+                    mb = mbnext_bytes(slice_from(text, p));
                     ml = (mb >> 8) - 2;
                     if (flag & (QUOTES_ESC | EXP_MBCHAR)) != 0 {
                         length = ((mb >> 8) + (mb & 0xff)) as size_t;
@@ -1037,14 +1042,11 @@ unsafe fn argstr(
                         if c == CTLESC as c_int {
                             startloc += ml as c_int;
                         }
-                        p = p.offset((mb & 0xff) as isize);
+                        p += (mb & 0xff) as usize;
                         if (flag & EXP_DISCARD) == 0 {
-                            expb().extend_from_slice(core::slice::from_raw_parts(
-                                p as *const u8,
-                                ml as usize,
-                            ));
+                            expb().extend_from_slice(&text[p..p + ml as usize]);
                         }
-                        p = p.offset((mb >> 8) as isize);
+                        p += (mb >> 8) as usize;
                     }
                 }
                 CTLESC => {
@@ -1052,13 +1054,13 @@ unsafe fn argstr(
                     length += 1;
                     /* goto addquote */
                     if (flag & QUOTES_ESC) != 0 {
-                        p = p.offset(-1);
+                        p -= 1;
                         length += 1;
                         startloc += 1;
                     }
                 }
                 CTLVAR => {
-                    p = evalvar(sh, p, flag | inquotes)?;
+                    p = evalvar(sh, text, p, flag | inquotes)?;
                     continue 'start; /* goto start */
                 }
                 CTLBACKQ => {
@@ -1066,34 +1068,35 @@ unsafe fn argstr(
                     continue 'start; /* goto start */
                 }
                 CTLARI => {
-                    p = expari(sh, p, flag | inquotes)?;
+                    p = expari(sh, text, p, flag | inquotes)?;
                     continue 'start; /* goto start */
                 }
                 _ => {}
             }
         }
     }
-    Ok(p.offset(-1))
+    Ok(p - 1)
 }
 
 // [spec:dash:def:expand.exptilde-fn]
 // [spec:dash:sem:expand.exptilde-fn]
 unsafe fn exptilde(
     sh: &mut crate::context::Shell,
-    startp: *mut c_char,
+    text: &[u8],
+    startp: usize,
     flag: c_int,
-) -> *mut c_char {
+) -> usize {
     let mut c: c_char;
-    let name: *mut c_char;
+    let name: usize;
     let home: *const c_char;
-    let mut p: *mut c_char;
+    let mut p: usize;
 
     p = startp;
-    name = p.offset(1);
+    name = p + 1;
 
     loop {
-        p = p.offset(1);
-        c = *p;
+        p += 1;
+        c = byte_at(text, p);
         if c == C_NUL {
             break;
         }
@@ -1114,13 +1117,21 @@ unsafe fn exptilde(
         if (flag & EXP_DISCARD) != 0 {
             break 'out;
         }
-        *p = C_NUL;
-        if *name == C_NUL {
+        /* `c = *p; *p = '\0'; ...; *p = c;` — the C terminates the user
+         * name in place because `getpwnam` and `lookupvar` want a C string
+         * and the only one to hand is the word itself.  The word is shared,
+         * borrowed and `&[u8]` now, so the name is copied out instead: it
+         * is at most a login name long, it happens once per tilde, and it
+         * is the last write this cluster made to the text it is reading. */
+        let mut namebuf: Vec<u8> = text[name..p.min(text.len())].to_vec();
+        namebuf.push(0);
+        let namep = namebuf.as_ptr() as *const c_char;
+
+        if namebuf.len() == 1 {
             home = crate::var::lookupvar(sh, crate::mystring::homestr.as_ptr());
         } else {
-            home = getpwhome(name);
+            home = getpwhome(namep);
         }
-        *p = c;
         if home.is_null() {
             /* lose: */
             return startp;
@@ -1179,18 +1190,19 @@ pub unsafe fn removerecordregions(endoff: c_int) {
 // [spec:dash:sem:expand.expari-fn]
 unsafe fn expari(
     sh: &mut crate::context::Shell,
-    mut start: *mut c_char,
+    text: &[u8],
+    start: usize,
     flag: c_int,
-) -> Result<*mut c_char, Error> {
+) -> Result<usize, Error> {
     let begoff: c_int;
     let len: c_int;
     let result: intmax_t;
     /* The C's `p` doubles as a scratch `stackblock()` before it becomes the
      * return value; only the second use survives. */
-    let p: *mut c_char;
+    let p: usize;
 
     begoff = expdest_off();
-    p = argstr(sh, start, flag & EXP_DISCARD)?;
+    p = argstr(sh, text, start, flag & EXP_DISCARD)?;
 
     'out: {
         if (flag & EXP_DISCARD) != 0 {
@@ -1216,14 +1228,17 @@ unsafe fn expari(
          * `arith_yylex`'s variable names, is a list `arith` clears on
          * entry. */
         expb().truncate(begoff as usize);
-        start = expb()[begoff as usize..].as_ptr() as *mut c_char;
+        /* The C reuses `start` for this; it is a position in the
+         * *expansion buffer*, not in the word, and the two stopped being
+         * the same kind of thing when the word became a slice. */
+        let arith_at = expb()[begoff as usize..].as_ptr() as *mut c_char;
 
         removerecordregions(begoff);
 
         /* `arith` returns its diagnostic now instead of raising it, and as
          * of this commit so does `expari`, so the bridge that stood here is
          * gone and the value travels. */
-        result = crate::arith_yacc::arith(sh, start)?;
+        result = crate::arith_yacc::arith(sh, arith_at)?;
 
         len = cvtnum(result, flag, expb()) as c_int;
 
@@ -1499,13 +1514,18 @@ fn scanright(b: &[u8], a: &Scan) -> Option<usize> {
 // [spec:dash:sem:expand.subevalvar-fn]
 unsafe fn subevalvar(
     sh: &mut crate::context::Shell,
-    start: *mut c_char,
-    str: *mut c_char,
+    text: &[u8],
+    start: usize,
+    /* The C's `char *str`, which is the variable's *name* in the word on
+     * entry and NULL for the trimming subtypes.  `Option` is that NULL as
+     * a type; the C then reuses the same local for the pattern, which is
+     * why the pattern has a name of its own below. */
+    str: Option<usize>,
     strloc: c_int,
     startloc: c_int,
     varflags: c_int,
     flag: c_int,
-) -> Result<*mut c_char, Error> {
+) -> Result<usize, Error> {
     let mut subtype: c_int = varflags & VSTYPE;
     let quotes: c_int = flag & QUOTES_ESC;
     /* Every one of the C's `char *` locals here is a position in the
@@ -1524,12 +1544,13 @@ unsafe fn subevalvar(
     let scan: ScanFn;
     let endp: usize;
     let pat: usize;
-    let p: *mut c_char;
+    let p: usize;
 
     p = argstr(
         sh,
+        text,
         start,
-        (flag & EXP_DISCARD) | EXP_TILDE | (if !str.is_null() { 0 } else { EXP_CASE }),
+        (flag & EXP_DISCARD) | EXP_TILDE | (if str.is_some() { 0 } else { EXP_CASE }),
     )?;
     if (flag & EXP_DISCARD) != 0 {
         return Ok(p);
@@ -1541,7 +1562,9 @@ unsafe fn subevalvar(
         match subtype {
             VSASSIGN => {
                 /* The bridge that stood here retires with this commit. */
-                crate::var::setvar(sh, str, expb()[startp..].as_ptr() as *const c_char, 0)?;
+                let name = text[str.expect("VSASSIGN carries the variable's name")..].as_ptr()
+                    as *const c_char;
+                crate::var::setvar(sh, name, expb()[startp..].as_ptr() as *const c_char, 0)?;
 
                 loc = startp;
                 break 'out;
@@ -1554,7 +1577,8 @@ unsafe fn subevalvar(
                  * happens when one of these is missed, and `Error` is
                  * `#[must_use]` so the compiler now names it. */
                 let umsg = crate::mystring::cstr_prefix(&expb()[startp..]);
-                return Err(varunset(start, str, Some(umsg), varflags));
+                let var = str.expect("VSQUESTION carries the variable's name");
+                return Err(varunset(text, start, var, Some(umsg), varflags));
             }
             _ => {}
         }
@@ -1674,12 +1698,13 @@ unsafe fn subevalvar(
 // [spec:dash:sem:expand.evalvar-fn]
 unsafe fn evalvar(
     sh: &mut crate::context::Shell,
-    mut p: *mut c_char,
+    text: &[u8],
+    mut p: usize,
     mut flag: c_int,
-) -> Result<*mut c_char, Error> {
+) -> Result<usize, Error> {
     let mut subtype: c_int;
     let mut varflags: c_int;
-    let var: *mut c_char;
+    let var: usize;
     let patloc: c_int;
     let startloc: c_int;
     let mut varlen: ssize_t;
@@ -1687,8 +1712,8 @@ unsafe fn evalvar(
     let mut quoted: c_int;
     let mbchar: c_int;
 
-    varflags = (*p as c_int) & !VSBIT;
-    p = p.offset(1);
+    varflags = (byte_at(text, p) as c_int) & !VSBIT;
+    p += 1;
     subtype = varflags & VSTYPE;
 
     quoted = flag & EXP_QUOTED;
@@ -1696,13 +1721,10 @@ unsafe fn evalvar(
     startloc = expdest_off();
     /* The parser always writes the `=` that ends the variable name, and
      * the C dereferences `strchr`'s result without checking. */
-    p = p.add(
-        CStr::from_ptr(p)
-            .to_bytes()
-            .find_byte(C_EQUALS as u8)
-            .expect("the parser ends a variable name with `=`")
-            + 1,
-    );
+    p += crate::mystring::cstr_prefix(slice_from(text, p))
+        .find_byte(C_EQUALS as u8)
+        .expect("the parser ends a variable name with `=`")
+        + 1;
 
     mbchar = match subtype {
         VSTRIMLEFT | VSTRIMLEFTMAX | VSTRIMRIGHT | VSTRIMRIGHTMAX => EXP_MBCHAR,
@@ -1713,7 +1735,11 @@ unsafe fn evalvar(
     let mut really_record = false;
 
     'again: loop {
-        varlen = varvalue(sh, var, varflags, (flag | mbchar) as c_uint)?;
+        /* `varvalue` still takes the name as a `char *`: it reaches
+         * `lookupvar` and `atoi`, which measure with `strlen` and `strtol`.
+         * The name is in the word and the word outlives the call. */
+        let namep = text[var..].as_ptr() as *mut c_char;
+        varlen = varvalue(sh, namep, varflags, (flag | mbchar) as c_uint)?;
         if (varflags & VSNUL) != 0 {
             varlen -= 1;
         }
@@ -1727,15 +1753,16 @@ unsafe fn evalvar(
                     /* fall through */
                 }
 
-                p = argstr(sh, p, flag | EXP_TILDE | EXP_WORD | (discard ^ EXP_DISCARD))?;
+                p = argstr(sh, text, p, flag | EXP_TILDE | EXP_WORD | (discard ^ EXP_DISCARD))?;
                 break 'again; /* goto record */
             }
 
             VSASSIGN | VSQUESTION => {
                 p = subevalvar(
                     sh,
+                    text,
                     p,
-                    var,
+                    Some(var),
                     0,
                     startloc,
                     varflags,
@@ -1755,11 +1782,11 @@ unsafe fn evalvar(
 
         if (discard & !flag) != 0 && uflag(sh) != 0 {
             /* A stop before `varunset` stopped diverging, and still one. */
-            return Err(varunset(p, var, None, 0));
+            return Err(varunset(text, p, var, None, 0));
         }
 
         if subtype == VSLENGTH {
-            p = p.offset(1);
+            p += 1;
             if (flag & EXP_DISCARD) != 0 {
                 return Ok(p);
             }
@@ -1797,7 +1824,7 @@ unsafe fn evalvar(
         }
 
         patloc = expdest_off();
-        p = subevalvar(sh, p, ptr::null_mut(), patloc, startloc, varflags, flag)?;
+        p = subevalvar(sh, text, p, None, patloc, startloc, varflags, flag)?;
         break 'again;
     }
 
@@ -1810,7 +1837,7 @@ unsafe fn evalvar(
 
     /* really_record: */
     if quoted != 0 {
-        quoted = (*var == C_AT && sh.options.shellparam.nparam != 0) as c_int;
+        quoted = (byte_at(text, var) == C_AT && sh.options.shellparam.nparam != 0) as c_int;
         if quoted == 0 {
             return Ok(p);
         }
@@ -3597,7 +3624,7 @@ pub unsafe fn casematch(
     /* As in `expandarg`: this `?` returns past the `ifsfree()`, which is
      * where the longjmp went too, and the catch frame reclaims the
      * regions. */
-    argstr(sh, pattern.narg().text.as_ptr(), EXP_TILDE | EXP_CASE)?;
+    argstr(sh, pattern.narg().text.as_cbytes(), 0, EXP_TILDE | EXP_CASE)?;
     ifsfree();
     /* The C reads the word back as `stackblock()`. */
     result = crate::pmatch::patmatch(expb().as_mut_ptr() as *mut c_char, val);
@@ -3618,8 +3645,9 @@ unsafe fn cvtnum(num: intmax_t, flags: c_int, dst: &mut BString) -> size_t {
 // [spec:dash:def:expand.varunset-fn]
 // [spec:dash:sem:expand.varunset-fn]
 unsafe fn varunset(
-    end: *const c_char,
-    var: *const c_char,
+    text: &[u8],
+    end: usize,
+    var: usize,
     umsg: Option<&[u8]>,
     varflags: c_int,
 ) -> Error {
@@ -3634,7 +3662,7 @@ unsafe fn varunset(
     let mut tail: &[u8] = b"";
     let mut msg: &[u8] = b"parameter not set";
     if let Some(umsg) = umsg {
-        if *end == CTLENDVAR {
+        if byte_at(text, end) == CTLENDVAR {
             if (varflags & VSNUL) != 0 {
                 tail = b" or null";
             }
@@ -3642,9 +3670,12 @@ unsafe fn varunset(
             msg = umsg;
         }
     }
-    let name_len = (end.offset_from(var) - 1).max(0) as usize;
+    /* `end - var - 1` — the variable's name, without the `=` the parser
+     * writes after it.  Saturating because the C's subtraction is signed
+     * and it clamped at zero. */
+    let name_len = end.saturating_sub(var + 1);
     let mut message = Vec::new();
-    message.extend_from_slice(core::slice::from_raw_parts(var as *const u8, name_len));
+    message.extend_from_slice(&text[var..(var + name_len).min(text.len())]);
     message.extend_from_slice(b": ");
     message.extend_from_slice(msg);
     message.extend_from_slice(tail);

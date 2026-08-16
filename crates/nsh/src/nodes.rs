@@ -157,6 +157,13 @@ impl NodeText {
     pub fn as_bstr(&self) -> &BStr {
         BStr::new(&self.0[..self.0.len() - 1])
     }
+
+    /// The text **with** its terminating NUL, which is what a reader that
+    /// walks it as the C does needs: the terminator is the stop condition,
+    /// and `argstr` counts it into the run it appends.
+    pub fn as_cbytes(&self) -> &[u8] {
+        &self.0
+    }
 }
 
 /// `NCMD`
