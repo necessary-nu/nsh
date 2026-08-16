@@ -3186,6 +3186,12 @@ children (
                 kind @refactor
                 deps (process-model owned-words host-owns-signals)
             }
+
+            {
+                id locale-sweep
+                title "The corpora sweep under UTF-8, not only LC_ALL=C — ~113 corpora have never differentially tested a multibyte path"
+                kind @test
+            }
         )
         log (
             {
