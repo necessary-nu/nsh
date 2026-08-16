@@ -280,7 +280,7 @@ pub unsafe fn onint(sh: &crate::context::Shell) -> Error {
     /* `exitstatus = SIGINT + 128` was here; `Error::status()` answers
      * exactly that for `Interrupted`, so the value already carries it. */
     Error::Interrupted {
-        signal: libc::SIGINT,
+        signal: crate::status::Signal::from_raw(libc::SIGINT),
     }
 }
 
@@ -336,10 +336,13 @@ pub enum Error {
     /// §3.4 said the taxonomy would do: start with `Other` so every raise
     /// site converts mechanically, promote the interesting ones after.
     Interrupted {
-        /// The signal that arrived. Always `SIGINT` today — it is the only
-        /// one `onsig` delivers this way — and a number rather than a
-        /// `Signal` newtype, which is `public-api`'s to introduce.
-        signal: c_int,
+        /// The signal that arrived. Always `SIGINT` today — it is the
+        /// only one `onsig` delivers this way.
+        ///
+        /// A [`Signal`](crate::status::Signal) since `public-api` step 5.
+        /// `docs/api-design.md` §3.4 recorded that the variant would
+        /// "carry a `c_int` until then", and this is then.
+        signal: crate::status::Signal,
     },
     /// A diagnostic with no more specific variant.
     Other {
@@ -408,7 +411,7 @@ impl Error {
         match self {
             /* `onint` sets `exitstatus` to this before it returns, as the
              * C does before it raises. */
-            Error::Interrupted { signal } => signal + 128,
+            Error::Interrupted { signal } => signal.number() + 128,
             Error::Other { status, .. } => *status,
         }
     }
@@ -762,7 +765,7 @@ mod tests {
             CLEAR_PENDING_INT();
 
             rearm_interrupt(Error::Interrupted {
-                signal: libc::SIGINT,
+                signal: crate::status::Signal::from_raw(libc::SIGINT),
             });
             assert_eq!(int_pending(), 1);
             assert!(poll_interrupt(sh).is_some(), "the next poll site takes it");

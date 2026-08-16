@@ -718,7 +718,7 @@ mod tests {
         let _guard = crate::testutil::lock();
         unsafe {
             let got = restore_handler_expandarg(Some(Error::Interrupted {
-                signal: libc::SIGINT,
+                signal: crate::status::Signal::from_raw(libc::SIGINT),
             }))
             .expect("an interrupt must not be swallowed by this frame");
             assert!(got.is_interrupt());
