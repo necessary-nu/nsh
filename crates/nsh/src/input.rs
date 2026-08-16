@@ -216,6 +216,36 @@ impl InputStack {
             alias_boundary: 0,
         }
     }
+
+    /// `parsefile`, as a value [`unwindfiles`] will accept.
+    ///
+    /// Taken before a source is pushed and given back after it is done, so
+    /// that the stack depth across a [`crate::context::Shell::run`] is the
+    /// depth before it. That is checked rather than asserted in prose --
+    /// see `run`'s own `debug_assert`.
+    #[inline]
+    pub(crate) fn mark(&self) -> usize {
+        self.cur
+    }
+
+    /// `toppf` — the floor [`popallfiles`] unwinds to.
+    #[inline]
+    pub(crate) fn floor(&self) -> usize {
+        self.top
+    }
+
+    /// Move the floor.
+    ///
+    /// `setinputfd` already does this for a file opened without
+    /// `INPUT_PUSH_FILE`, and `setinputstring` deliberately does not --
+    /// which is exactly the asymmetry `docs/api-design.md` §4.2 makes
+    /// [`crate::context::Shell::run`] close. The old value is read with
+    /// [`InputStack::floor`] *before* the push, because for one of the two
+    /// the push is what moves it.
+    #[inline]
+    pub(crate) fn set_floor(&mut self, to: usize) {
+        self.top = to;
+    }
 }
 
 /// Set when `popstring` finishes an alias whose text ended in a blank.

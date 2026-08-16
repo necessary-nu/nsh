@@ -140,6 +140,14 @@ pub struct Shell {
     /// status it took and the frame that catches it writes it here, so
     /// `sh_error_value`'s 56 call sites need no receiver.
     pub(crate) status: libc::c_int,
+    /// The status the shell exited with, once it has.
+    ///
+    /// `docs/api-design.md` §5's last row, and what it says there is what
+    /// it is for: it replaces the `EXEND`/`EXEXIT` unwind reaching `main`.
+    /// A process shell answered "has it exited?" by not existing any more;
+    /// a library shell is still a value afterwards, so the fact has to be
+    /// somewhere, and [`Shell::has_exited`] is where an embedder reads it.
+    pub(crate) exited: Option<crate::status::ExitStatus>,
 }
 
 impl Shell {
@@ -187,6 +195,7 @@ impl Shell {
             traps: crate::trap::TrapTable::new(),
             input: crate::input::InputStack::new(),
             status: 0,
+            exited: None,
             vars: crate::var::VarTable::new(),
             /* [dec:nsh:host-owns-signals]: a shell that was not told who
              * owns the process assumes nobody did, and touches nothing

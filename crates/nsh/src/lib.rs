@@ -62,6 +62,7 @@ pub mod api;
 pub mod builder;
 pub mod host;
 pub mod context;
+pub mod source;
 
 // ---- foundation -----------------------------------------------------
 pub mod error;

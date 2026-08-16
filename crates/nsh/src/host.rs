@@ -253,6 +253,7 @@ mod tests {
     #[test]
     fn the_parent_side_entry_point_asks_the_host() {
         unsafe {
+            let _g = crate::testutil::lock();
             let rec = Recorder::new();
             let mut sh = crate::context::Shell::builder()
                 .host(rec.clone())
@@ -282,6 +283,7 @@ mod tests {
     #[test]
     fn the_child_side_entry_point_does_not_ask_the_host() {
         unsafe {
+            let _g = crate::testutil::lock();
             let rec = Recorder::new();
             let mut sh = crate::context::Shell::builder()
                 .host(rec.clone())

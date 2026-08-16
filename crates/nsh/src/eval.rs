@@ -271,7 +271,6 @@ unsafe fn iflag(sh: &crate::context::Shell) -> c_int {
 // [spec:dash:def:eval.evalstring-fn]
 // [spec:dash:sem:eval.evalstring-fn]
 pub unsafe fn evalstring(sh: &mut Shell, s: *mut c_char, flags: c_int) -> Result<Flow, Error> {
-    let mut status: c_int;
     /* `sstrdup(s)` and the `stunalloc(s)` at the bottom are one thing:
      * `setinputstring` keeps the pointer rather than copying, so the text
      * has to outlive every `popstackmark` the parse below performs — which
@@ -282,7 +281,31 @@ pub unsafe fn evalstring(sh: &mut Shell, s: *mut c_char, flags: c_int) -> Result
     let s: *mut c_char = owned.as_ptr() as *mut c_char;
 
     crate::input::setinputstring(sh, s);
-    status = 0;
+    let status = flow!(parse_execute(sh, flags));
+    crate::input::popfile(sh);
+    drop(owned);
+
+    Ok(Flow::Done(status))
+}
+
+/// Parse and execute until the current input frame runs out.
+///
+/// The middle of [`evalstring`], and the whole of what
+/// [`crate::context::Shell::run`] does with a byte source. It is a
+/// function because the two differ only in what pushed the frame and what
+/// unwinds it: `evalstring` pushes with `setinputstring` and pops one
+/// frame, `run` pushes a [`crate::source::Source`] and unwinds to a mark.
+/// Keeping one body is what stops `run` and `eval` drifting apart, which
+/// they must not — `docs/api-design.md` §4.1's whole finding is that they
+/// are the same primitive.
+///
+/// The caller pushes the frame and the caller takes it down. A
+/// `Flow::Exit` returned through here skips both, which is deliberate and
+/// is what the C's `longjmp` past this frame did: the input stack is
+/// unwound to a mark by whoever catches, not by the frame that was passed
+/// through.
+pub(crate) unsafe fn parse_execute(sh: &mut Shell, flags: c_int) -> Result<Flow, Error> {
+    let mut status: c_int = 0;
     loop {
         let n: Option<Node> = match crate::parser::parsecmd(sh, 0)? {
             crate::parser::ParseResult::Eof => break,
@@ -291,11 +314,7 @@ pub unsafe fn evalstring(sh: &mut Shell, s: *mut c_char, flags: c_int) -> Result
         {
             let i: c_int;
 
-            /* The C's `longjmp` past this frame skipped the `popfile`
-             * below, and so does a `Flow::Exit` returned through it: the
-             * input stack is unwound to a mark by whoever catches, not by
-             * the frame that was passed through. */
-            i = flow!(evaltree(sh, 
+            i = flow!(evaltree(sh,
                 n.as_ref(),
                 flags
                     & !(if crate::parser::parser_eof(sh) != 0 {
@@ -315,9 +334,6 @@ pub unsafe fn evalstring(sh: &mut Shell, s: *mut c_char, flags: c_int) -> Result
         /* `popstackmark(&smark)` — one per parsed command, and one on the
          * way out. */
     }
-    crate::input::popfile(sh);
-    drop(owned);
-
     Ok(Flow::Done(status))
 }
 
