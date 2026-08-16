@@ -984,7 +984,31 @@ unsafe fn forkchild(
 
         if sh.jobs.tab[ji].ps.is_empty() {
             pgrp = libc::getpid();
-            crate::shellmain::mypid = pgrp;
+            /* The C writes `mypid = pgrp = getpid()` unguarded
+             * (`src/jobs.c:891`), and under `vfork` that is a store into
+             * the *parent's* address space -- the one place on the
+             * vforked child's prologue where the parent reads the
+             * location again. Every other write in this function is
+             * already gated on `lvforked == 0`: the block above, and
+             * `setsignal`/`ignoresig`'s `sigmode` stores, which carry
+             * their own guard (`trap.rs:306`, `:326`). This one was
+             * missed, so it joins them.
+             *
+             * What it costs the C: after a foreground external command
+             * under `set -m`, the parent's `mypid` holds its *child's*
+             * pid. `vforkexec`'s `if mypid == 0` then never re-reads it,
+             * so the next `vfork` publishes a stale pid as `vforked`, and
+             * `onsig`'s `getpid() != vforked` answers *true for the
+             * parent* -- which drops any signal arriving between `vfork`
+             * returning and `set_vforked(0)`. Narrow, but it is a
+             * dropped signal, and `[dec:nsh:we-own-the-defects]` says a
+             * defect in the Rust is fixed in the Rust.
+             *
+             * The child does not need the value: it reaches `execve`
+             * without reading `mypid` again. */
+            if lvforked == 0 {
+                crate::shellmain::mypid = pgrp;
+            }
         } else {
             pgrp = sh.jobs.tab[ji].ps[0].pid;
         }
@@ -1148,7 +1172,32 @@ pub unsafe fn vforkexec(
     if pid == 0 {
         /* Shared address space until `execve`: nothing between here and
          * it may allocate, free or drop. `forkchild` returns at its
-         * `lvforked` test without touching the job table's storage. */
+         * `lvforked` test without touching the job table's storage.
+         *
+         * The rule the prologue is audited against is
+         * [dec:nsh:fork-child-is-a-terminus]: **a vforked child writes no
+         * location the parent reads again.** The audit, in the order the
+         * child runs them:
+         *
+         *   * the `mypid = 0` / `shlvl += 1` / `forkreset` / `jobctl = 0`
+         *     block -- skipped, `lvforked != 0`;
+         *   * `mypid = getpid()` in the job-control arm -- guarded there
+         *     now; it was the one violation and it is dash's;
+         *   * `setpgid`, `tcsetpgrp` -- syscalls on the child, not
+         *     memory;
+         *   * `setsignal`/`ignoresig` -- their `sigmode` stores carry
+         *     their own `lvforked` guard, and `sigaction` is per-process,
+         *     so the child's dispositions are the child's;
+         *   * the `freejob` walk -- skipped, `lvforked != 0`.
+         *
+         * Two writes are *permitted* and named rather than removed:
+         * `forkchild_fatal`'s and `shellexec`'s `sh.status = ...`, both
+         * immediately before their own `_exit`. The parent overwrites
+         * `sh.status` from the child's wait status in `waitforjob` before
+         * anything reads it, and `shellexec`'s failure path has to build
+         * and write dash's diagnostic, which allocates in the shared heap
+         * whatever is done about the field. Removing the store would buy
+         * nothing the allocation does not give back. */
         forkchild(sh, Some(jp), Some(n), FORK_FG);
         /* `shellexec` either replaces the image or, in a vforked child,
          * `_exit`s at the failure site. It cannot come back here: this
