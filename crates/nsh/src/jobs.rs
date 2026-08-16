@@ -1007,7 +1007,7 @@ unsafe fn forkchild(
              * location again. Every other write in this function is
              * already gated on `lvforked == 0`: the block above, and
              * `setsignal`/`ignoresig`'s `sigmode` stores, which carry
-             * their own guard (`trap.rs:306`, `:326`). This one was
+             * their own guard (`trap.rs:440`, `:469`). This one was
              * missed, so it joins them.
              *
              * What it costs the C: after a foreground external command
@@ -1033,11 +1033,11 @@ unsafe fn forkchild(
         if mode == FORK_FG {
             xxtcsetpgrp(sh, pgrp).unwrap_or_else(|e| forkchild_fatal(sh, e));
         }
-        crate::trap::setsignal(sh, libc::SIGTSTP);
-        crate::trap::setsignal(sh, libc::SIGTTOU);
+        crate::trap::setsignal_in_child(sh, libc::SIGTSTP);
+        crate::trap::setsignal_in_child(sh, libc::SIGTTOU);
     } else if mode == FORK_BG {
-        crate::trap::ignoresig(sh, libc::SIGINT);
-        crate::trap::ignoresig(sh, libc::SIGQUIT);
+        crate::trap::ignoresig_in_child(sh, libc::SIGINT);
+        crate::trap::ignoresig_in_child(sh, libc::SIGQUIT);
         if jp.map_or(false, |i| sh.jobs.tab[i].ps.is_empty()) {
             /* The C closes descriptor 0 and reopens /dev/null, relying on
              * `open` returning the lowest free descriptor to land back on
@@ -1058,9 +1058,9 @@ unsafe fn forkchild(
         }
     }
     if oldlvl == 0 && iflag(sh) != 0 {
-        crate::trap::setsignal(sh, libc::SIGINT);
-        crate::trap::setsignal(sh, libc::SIGQUIT);
-        crate::trap::setsignal(sh, libc::SIGTERM);
+        crate::trap::setsignal_in_child(sh, libc::SIGINT);
+        crate::trap::setsignal_in_child(sh, libc::SIGQUIT);
+        crate::trap::setsignal_in_child(sh, libc::SIGTERM);
     }
 
     if lvforked != 0 {

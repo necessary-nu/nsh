@@ -162,6 +162,25 @@ pub unsafe fn mkinit_forkreset(sh: &mut crate::context::Shell, n: Option<&Node>)
  * Clear traps on a fork.
  */
 
+/// Clear the traps a fork inherited, and put back the dispositions that
+/// go with having none.
+///
+/// **Its `setsignal` is child-side at every reachable call site**, which
+/// is why it takes [`setsignal_in_child`] and needs no split. The seam was
+/// recorded as "on both paths"; counted through, it is not:
+///
+/// * `mkinit_forkreset` ← `init::forkreset` ← `jobs::forkchild` is the
+///   child.
+/// * `init::forkreset`'s other caller is `evalsubshell`'s no-fork arm,
+///   which runs in the shell's own process — but it is guarded by
+///   `have_traps(sh) == 0`, and `trapcnt` counts exactly the slots with a
+///   non-empty action, which is exactly what the loop below skips. The
+///   loop body is unreachable from there. (It is also `EV_EXIT`-only, so
+///   `Shell::run` cannot reach it at all.)
+/// * `builtins::trap::trapcmd` calls it under `ptrap != 0`, and only this
+///   function ever writes `ptrap`, from `simplecmd` — which is non-zero
+///   only when a fork was made *for* a `trap` command. So that `trapcmd`
+///   is running in that child, and the parent's `ptrap` stays 0.
 // [spec:dash:def:trap.clear-traps-fn]
 // [spec:dash:sem:trap.clear-traps-fn]
 pub unsafe fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
@@ -185,7 +204,7 @@ pub unsafe fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
         }
         let otp = sh.traps.set(&blocked, signo, None);
         if signo != 0 {
-            setsignal(sh, signo as c_int);
+            setsignal_in_child(sh, signo as c_int);
         }
 
         if simplecmd != 0 {
@@ -203,18 +222,131 @@ pub unsafe fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
     INTON();
 }
 
+/// Which side of a `fork` a disposition change is being made on, and so
+/// what performs it.
+///
+/// The call site chooses, and that is the design rather than a shortcut:
+/// whether a caller runs in a forked child is a static property of the
+/// *path*, not a dynamic property of the shell — a child's `Shell` is
+/// bit-for-bit the one that forked it, so there is nothing in shell state
+/// a flag could have been read from.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum Via {
+    /// The parent, where the process belongs to whoever linked the library
+    /// in. [dec:nsh:host-owns-signals]: the shell decides *which*
+    /// disposition, and the host is what installs it.
+    Host,
+    /// A forked child, which goes to libc directly. Two reasons, each
+    /// sufficient on its own:
+    ///
+    /// * Routing it would be an indirect call into embedder code made in
+    ///   a forked — sometimes *vforked* — child, which
+    ///   [dec:nsh:fork-child-is-a-terminus] forbids.
+    /// * Under [`crate::host::NoHost`] a routed call installs nothing, so
+    ///   a background job would go on taking `^C` from the terminal
+    ///   because its `ignoresig(SIGINT)` had been quietly dropped. The
+    ///   child *is* the whole process, so there is no third party for the
+    ///   host to be protecting.
+    Libc,
+}
+
+/// The `struct sigaction` a query filled in, read as a [`Disposition`].
+///
+/// dash asks only "is this `SIG_IGN`", so `Default` and `Catch` are one
+/// answer as far as [`setsignal`] is concerned. They are kept apart
+/// because [`crate::host::Host`] is what an embedder implements, and an
+/// embedder can tell them apart.
+pub(crate) fn disposition_of(act: &libc::sigaction) -> crate::host::Disposition {
+    if act.sa_sigaction == libc::SIG_IGN {
+        crate::host::Disposition::Ignore
+    } else if act.sa_sigaction == libc::SIG_DFL {
+        crate::host::Disposition::Default
+    } else {
+        crate::host::Disposition::Catch
+    }
+}
+
+/// What is installed for `signo` right now, or `Err` if it cannot be read.
+unsafe fn current_disposition(
+    sh: &mut crate::context::Shell,
+    signo: c_int,
+    via: Via,
+) -> std::io::Result<crate::host::Disposition> {
+    match via {
+        Via::Host => sh.host.signal(crate::status::Signal::from_raw(signo)),
+        Via::Libc => {
+            let mut act: libc::sigaction = core::mem::zeroed();
+            if libc::sigaction(signo, null(), &mut act) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(disposition_of(&act))
+        }
+    }
+}
+
+/// Install `to` for `signo`.
+///
+/// The `struct sigaction` the query filled in is not carried into the
+/// install the way the C carries it, and nothing observable is lost:
+/// every field the C reused is overwritten before the second call —
+/// `sa_sigaction` by the choice below, `sa_flags` by the `0`, `sa_mask` by
+/// `sigfillset` — and `sa_restorer` never reaches the kernel at all,
+/// because glibc's `sigaction` writes its own trampoline into the
+/// kernel-facing copy unconditionally. What is left is the signal number
+/// and the disposition, which is exactly what the host is asked for.
+unsafe fn install_disposition(
+    sh: &mut crate::context::Shell,
+    signo: c_int,
+    to: crate::host::Disposition,
+    via: Via,
+) {
+    match via {
+        Via::Host => {
+            /* The C ignores `sigaction`'s return value here, so a shell
+             * that cannot install a disposition carries on with the one it
+             * has; a host that refuses reads the same way. */
+            let _ = sh
+                .host
+                .set_signal(crate::status::Signal::from_raw(signo), to);
+        }
+        Via::Libc => {
+            let mut act: libc::sigaction = core::mem::zeroed();
+            act.sa_sigaction = match to {
+                crate::host::Disposition::Catch => onsig as *const () as usize,
+                crate::host::Disposition::Ignore => libc::SIG_IGN,
+                crate::host::Disposition::Default => libc::SIG_DFL,
+            };
+            act.sa_flags = 0;
+            libc::sigfillset(&mut act.sa_mask);
+            libc::sigaction(signo, &act, null_mut());
+        }
+    }
+}
+
 /*
  * Set the signal handler for the specified signal.  The routine figures
  * out what it should be set to.
  */
 
+/// The parent's entry point: the host installs what the shell decided.
 // [spec:dash:def:trap.setsignal-fn]
 // [spec:dash:sem:trap.setsignal-fn]
 pub unsafe fn setsignal(sh: &mut crate::context::Shell, signo: c_int) {
+    setsignal_via(sh, signo, Via::Host)
+}
+
+/// The forked child's entry point: identical policy, installed directly.
+///
+/// See [`Via::Libc`] for why this is a second entry point rather than an
+/// argument the shell could have answered for itself.
+pub unsafe fn setsignal_in_child(sh: &mut crate::context::Shell, signo: c_int) {
+    setsignal_via(sh, signo, Via::Libc)
+}
+
+unsafe fn setsignal_via(sh: &mut crate::context::Shell, signo: c_int, via: Via) {
     let mut action: c_int;
     let lvforked: c_int;
     let mut tsig: c_char;
-    let mut act: libc::sigaction = core::mem::zeroed();
 
     lvforked = crate::siginbox::signals().vforked();
 
@@ -269,15 +401,22 @@ pub unsafe fn setsignal(sh: &mut crate::context::Shell, signo: c_int) {
         /*
          * current setting unknown
          */
-        if libc::sigaction(signo, null(), &mut act) == -1 {
-            /*
-             * Pretend it worked; maybe we should give a warning
-             * here, but other shells don't. We don't alter
-             * sigmode, so that we retry every time.
-             */
-            return;
-        }
-        if act.sa_sigaction == libc::SIG_IGN {
+        let current = match current_disposition(sh, signo, via) {
+            Ok(d) => d,
+            Err(_) => {
+                /*
+                 * Pretend it worked; maybe we should give a warning
+                 * here, but other shells don't. We don't alter
+                 * sigmode, so that we retry every time.
+                 */
+                return;
+            }
+        };
+        /* This test is the whole reason `Host` has a `signal` as well as
+         * a `set_signal`: a signal already ignored when the shell started
+         * is hard-ignored and can never be trapped, and that rule cannot
+         * be reproduced without reading the inherited disposition. */
+        if current == crate::host::Disposition::Ignore {
             if sh.options.flag(crate::options::mflag) != 0
                 && (signo == libc::SIGTSTP || signo == libc::SIGTTIN || signo == libc::SIGTTOU)
             {
@@ -292,32 +431,35 @@ pub unsafe fn setsignal(sh: &mut crate::context::Shell, signo: c_int) {
     if tsig == S_HARD_IGN || tsig as c_int == action {
         return;
     }
-    match action {
-        x if x == S_CATCH as c_int => {
-            act.sa_sigaction = onsig as *const () as usize;
-        }
-        x if x == S_IGN as c_int => {
-            act.sa_sigaction = libc::SIG_IGN;
-        }
-        _ => {
-            act.sa_sigaction = libc::SIG_DFL;
-        }
-    }
+    let want = match action {
+        x if x == S_CATCH as c_int => crate::host::Disposition::Catch,
+        x if x == S_IGN as c_int => crate::host::Disposition::Ignore,
+        _ => crate::host::Disposition::Default,
+    };
     if lvforked == 0 {
         sh.traps.sigmode[tp] = action as c_char;
     }
-    act.sa_flags = 0;
-    libc::sigfillset(&mut act.sa_mask);
-    libc::sigaction(signo, &act, null_mut());
+    install_disposition(sh, signo, want, via);
 }
 
 /*
  * Ignore a signal.
  */
 
+/// Ignore a signal, in a forked child, directly.
+///
+/// There is no parent-side twin, because there is no parent-side caller:
+/// both call sites are `forkchild`'s `FORK_BG` arm, where the child must
+/// genuinely stop taking `^C` from the terminal. [`Via::Libc`] carries the
+/// argument; a parent-side caller appearing later needs a twin routed
+/// through the host, and the name here is what should make that obvious.
+///
+/// `signal` rather than `sigaction` is dash's spelling and is kept, which
+/// costs nothing: `SIG_IGN` runs no handler, so the flags and mask the two
+/// calls disagree about have nothing to apply to.
 // [spec:dash:def:trap.ignoresig-fn]
 // [spec:dash:sem:trap.ignoresig-fn]
-pub unsafe fn ignoresig(sh: &mut crate::context::Shell, signo: c_int) {
+pub unsafe fn ignoresig_in_child(sh: &mut crate::context::Shell, signo: c_int) {
     let mode = sh.traps.sigmode[(signo - 1) as usize];
     if mode == S_IGN || mode == S_HARD_IGN {
         return;

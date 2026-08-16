@@ -91,6 +91,31 @@ impl SignalSink {
         self.vforked.load(Ordering::Relaxed)
     }
 
+    /// Deliver a signal to the shell. The only thing a host's handler may
+    /// do, and the whole of what it may do.
+    ///
+    /// The body is [`crate::trap::onsig`], which is where it belongs: what
+    /// a delivery *does* is store into four locations — `gotsig`,
+    /// `pending_sig`, `gotsigchld` and `error::intpending` — and those
+    /// live beside the code that polls them, not here. This is the name
+    /// the host knows it by, so an embedder's handler needs no access to
+    /// the crate's internals to be correct.
+    ///
+    /// Everything it does is async-signal-safe by construction: it reads
+    /// two atomics, compares a pid, and stores. It does not allocate, does
+    /// not take a lock, and does not unwind — the last one is a fix rather
+    /// than a precaution, and `onsig`'s own comment records the SIGABRT it
+    /// was.
+    ///
+    /// # Safety
+    ///
+    /// Call it from a signal handler and from nowhere else. `signo` must
+    /// be the number the handler was invoked with.
+    #[inline]
+    pub unsafe fn raise(&self, signo: c_int) {
+        crate::trap::onsig(signo);
+    }
+
     /// Enter or leave the `vfork` window.
     ///
     /// Needs no [`SignalsBlocked`] bracket, and the reason is the

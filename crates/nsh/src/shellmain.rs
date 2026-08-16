@@ -368,6 +368,19 @@ pub fn main_fn(
      * through the borrow that starts on the next line
      * ([dec:nsh:no-ambient-state]). */
     let mut sh = Shell::new(streams);
+    /* And it is a shell that owns its process, so it gets the host that
+     * says so. `Shell::new` defaults to `NoHost` because a *library* shell
+     * must; calling this function is the caller stating that this process
+     * is the shell, which is the grant [dec:nsh:host-owns-signals] asks
+     * for. Without this line the frontend would install no handler at all
+     * and every signal behaviour would change at once.
+     *
+     * `attach` before anything that could ask the host to install one: the
+     * sink is the only part of the shell a handler may touch, so the host
+     * has to be holding it before a handler could exist. Same order
+     * `Builder::build` keeps, for the same reason. */
+    sh.host = Box::new(crate::host::ProcessHost);
+    sh.host.attach(crate::siginbox::signals());
     unsafe { main(&mut sh, argc, p) }
 }
 

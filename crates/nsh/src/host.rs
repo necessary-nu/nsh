@@ -51,6 +51,24 @@ pub type SignalSink = &'static crate::siginbox::SignalSink;
 /// `self.host.set_signal(…)` is a field-disjoint borrow inside a
 /// `&mut self` method, and it makes re-entering the shell from a host
 /// callback a compile error instead of a documented hazard.
+///
+/// **What a host that grants no `SIGCHLD` handler gives up.** The shell
+/// asks for [`Disposition::Catch`] on `SIGCHLD` while it is being built,
+/// and everything it learns about a child finishing *without* being
+/// blocked in `wait` comes from that handler. A host that declines still
+/// gets correct foreground commands — those block in `wait3`, which needs
+/// no handler — but it cannot notice a background job finishing between
+/// commands, and the `wait` builtin's arm suspends on a signal that will
+/// never be delivered. The wait design and this trait are one design, and
+/// this is the seam between them.
+///
+/// **The forked child is not on this trait**, deliberately. The twelve
+/// disposition changes the library makes *after* forking go to libc
+/// directly: routing them would be an indirect call into embedder code
+/// made in a forked — sometimes vforked — child, and under [`NoHost`] a
+/// background job would go on taking `^C` because its `ignoresig` had been
+/// quietly dropped. `trap::Via` carries the argument;
+/// [dec:nsh:fork-child-is-a-terminus] carries the rule.
 pub trait Host: Send {
     /// Take the shell's signal inbox. Called once, from
     /// [`crate::builder::Builder::build`].
@@ -112,6 +130,67 @@ impl Host for NoHost {
     }
 }
 
+/// The host for a program that *is* the shell.
+///
+/// Exactly what dash does, because that is the whole specification: a
+/// query is `sigaction(signo, NULL, &act)`, an install is `sigaction` with
+/// `sigfillset` on `sa_mask` and `sa_flags = 0`, and `exec` is granted.
+///
+/// Both halves of that install are load bearing rather than incidental.
+/// No `SA_RESTART` is why every interruptible syscall returns `EINTR` when
+/// a signal arrives, which is why the shell always has a poll site to
+/// reach; the full mask is why a handler cannot be re-entered by a second
+/// signal while it is storing.
+///
+/// This is what [`crate::shellmain::main_fn`] gives the shell it builds,
+/// and it is not the library acting on its own authority: `main_fn` is the
+/// port of `main()`, so a caller of it has already said that this process
+/// is the shell. An embedder whose program is something else wants
+/// [`NoHost`], which is what [`crate::builder::Builder`] defaults to.
+pub struct ProcessHost;
+
+impl Host for ProcessHost {
+    /// Nothing to keep. This host is in the same crate as the inbox and
+    /// reaches it through [`crate::siginbox::signals`]; a host outside the
+    /// crate has to hold the handle it is given here, because
+    /// [`SignalSink::raise`] is the only thing its handler may call.
+    fn attach(&mut self, _sink: SignalSink) {}
+
+    fn signal(&mut self, signal: Signal) -> std::io::Result<Disposition> {
+        unsafe {
+            let mut act: libc::sigaction = core::mem::zeroed();
+            if libc::sigaction(signal.number(), core::ptr::null(), &mut act) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(crate::trap::disposition_of(&act))
+        }
+    }
+
+    fn set_signal(&mut self, signal: Signal, to: Disposition) -> std::io::Result<()> {
+        unsafe {
+            let mut act: libc::sigaction = core::mem::zeroed();
+            act.sa_sigaction = match to {
+                /* The library's own handler, which is
+                 * `SignalSink::raise`'s trampoline. A host outside this
+                 * crate installs its own and calls `raise` from it. */
+                Disposition::Catch => crate::trap::onsig as *const () as usize,
+                Disposition::Ignore => libc::SIG_IGN,
+                Disposition::Default => libc::SIG_DFL,
+            };
+            act.sa_flags = 0;
+            libc::sigfillset(&mut act.sa_mask);
+            if libc::sigaction(signal.number(), &act, core::ptr::null_mut()) == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        }
+    }
+
+    fn may_replace_process(&mut self) -> bool {
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,5 +210,92 @@ mod tests {
             Disposition::Default
         );
         assert!(h.set_signal(Signal::from_raw(libc::SIGINT), Disposition::Catch).is_ok());
+    }
+
+    /// A host that writes down what it was asked for instead of doing it.
+    ///
+    /// It answers every query `Default`, like [`NoHost`], so the shell's
+    /// own `S_RESET` path is what runs and the recorded asks are the ones
+    /// dash would have made.
+    #[derive(Clone)]
+    struct Recorder(std::sync::Arc<std::sync::Mutex<Vec<(libc::c_int, Disposition)>>>);
+
+    impl Recorder {
+        fn new() -> Recorder {
+            Recorder(std::sync::Arc::new(std::sync::Mutex::new(Vec::new())))
+        }
+
+        fn installs(&self) -> Vec<(libc::c_int, Disposition)> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    impl Host for Recorder {
+        fn attach(&mut self, _sink: SignalSink) {}
+
+        fn signal(&mut self, _signal: Signal) -> std::io::Result<Disposition> {
+            Ok(Disposition::Default)
+        }
+
+        fn set_signal(&mut self, signal: Signal, to: Disposition) -> std::io::Result<()> {
+            self.0.lock().unwrap().push((signal.number(), to));
+            Ok(())
+        }
+
+        fn may_replace_process(&mut self) -> bool {
+            false
+        }
+    }
+
+    /// The parent-side entry point reaches the host, and the shell asks
+    /// for its `SIGCHLD` handler while it is still being built -- which is
+    /// the ask a host declining it is declining.
+    #[test]
+    fn the_parent_side_entry_point_asks_the_host() {
+        unsafe {
+            let rec = Recorder::new();
+            let mut sh = crate::context::Shell::builder()
+                .host(rec.clone())
+                .build()
+                .unwrap();
+            assert!(
+                rec.installs()
+                    .contains(&(libc::SIGCHLD, Disposition::Catch)),
+                "the shell did not ask for a SIGCHLD handler: {:?}",
+                rec.installs()
+            );
+
+            crate::trap::setsignal(&mut sh, libc::SIGTERM);
+            assert!(
+                rec.installs()
+                    .contains(&(libc::SIGTERM, Disposition::Default)),
+                "setsignal did not route through the host: {:?}",
+                rec.installs()
+            );
+        }
+    }
+
+    /// The child-side entry point does not, and that is the whole point of
+    /// it being a second entry point: under a host that installs nothing,
+    /// a forked child that stopped ignoring `SIGINT` would take `^C` from
+    /// the terminal along with the shell that backgrounded it.
+    #[test]
+    fn the_child_side_entry_point_does_not_ask_the_host() {
+        unsafe {
+            let rec = Recorder::new();
+            let mut sh = crate::context::Shell::builder()
+                .host(rec.clone())
+                .build()
+                .unwrap();
+            let before = rec.installs().len();
+            crate::trap::setsignal_in_child(&mut sh, libc::SIGTERM);
+            crate::trap::ignoresig_in_child(&mut sh, libc::SIGTERM);
+            assert_eq!(
+                rec.installs().len(),
+                before,
+                "a child-side call reached the host: {:?}",
+                rec.installs()
+            );
+        }
     }
 }
