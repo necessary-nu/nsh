@@ -669,8 +669,11 @@ error path has less to do, which is the decision's own argument made
 concrete.
 
 Also collected here: the 170 `INTOFF`/`INTON`/`FORCEINTON` sites across
-17 files. `suppressint` and `intpending` live in `error.rs` but they are
-signal state, and the macro pair exists to make allocator and table
+17 files. `intpending` lives in `error.rs` and is signal state; the
+`suppressint` beside it was, and since `errors-are-values` step F is not
+— `onsig` does not read it (`trap.rs:296-306`), so it is a counter
+touched only from ordinary frames. `docs/api-design.md` §5.1 records the
+reclassification. The macro pair exists to make allocator and table
 mutations atomic against SIGINT. Once the allocations are owned and the
 tables are Rust collections, most of the 170 have nothing left to
 protect. What survives is real and belongs with step 9.

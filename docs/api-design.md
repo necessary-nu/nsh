@@ -455,6 +455,19 @@ no `&mut Shell` and cannot be given one. These become the `SignalSink`
 (§5.3): an `Arc`-backed array of atomics that the shell polls where dash
 reads `pending_sig`, and that the host's handler stores into.
 
+**`suppressint` is not on that list, and stopped being signal state
+before this section was written.** `error.rs:61` sits beside `intpending`
+and is named with it in `docs/idiomatization.md` §step-9 — "they are
+signal state" — which was true of dash and is no longer true here. Since
+`errors-are-values` step F the handler does not read it: `onsig`'s
+`if (!suppressint) onint();` is gone (`trap.rs:296-306`), leaving
+`INTOFF`/`INTON` as a counter touched only from ordinary frames. So it is
+ordinary shell state that could become a field — `errors-are-values`' or
+`public-api`'s to place — and counting it against the handler
+overstates what §5.3 has to carry by one. Nothing in this section
+depended on it; the correction is recorded so the next inventory does not
+inherit the mistake.
+
 ### 5.2 Transient aliases scope to a call
 
 `options.rs:64 argptr` and `:66 optptr`, `eval.rs:84 commandname`,
