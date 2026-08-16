@@ -1112,7 +1112,7 @@ assertions (
     {id owned-words, kind @complete, author "brendan@necessary.nu", at 2026-08-16T13:04:57.636490448Z}
     {id host-owns-signals, kind @complete, author "brendan@necessary.nu", at 2026-08-16T11:54:37.641373271Z}
     {id process-model, kind @complete, author "brendan@necessary.nu", at 2026-08-16T12:55:01.103836061Z}
-    {id public-api, kind @doing, author "brendan@necessary.nu", at 2026-08-16T13:02:00.742444928Z}
+    {id public-api, kind @complete, author "brendan@necessary.nu", at 2026-08-16T23:27:45.282676769Z}
 )
 
 impl_evidence (
