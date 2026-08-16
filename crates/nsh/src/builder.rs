@@ -163,7 +163,7 @@ impl Builder {
         if let Some(host) = self.host {
             sh.host = host;
         }
-        sh.host.attach(crate::host::sink_for(&sh.signals));
+        sh.host.attach(crate::siginbox::signals());
         unsafe {
             let source = if self.inherit_env {
                 EnvSource::Process

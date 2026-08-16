@@ -11,10 +11,6 @@
 //! -- because after the status comes back there is nothing left to grant.
 //! What is here is what the shell genuinely cannot finish without.
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-
-use crate::signames::NSIG;
 use crate::status::Signal;
 
 /// What a signal does.
@@ -28,91 +24,20 @@ pub enum Disposition {
     Catch,
 }
 
-/// The shell's signal inbox.
+/// The shell's signal inbox, as the host receives it.
 ///
-/// Cheap to clone, safe to hold across threads, and safe to touch from a
-/// signal handler. A shell polls it where dash reads `pending_sig`.
-#[derive(Clone)]
-pub struct SignalSink {
-    inbox: Arc<SignalInbox>,
-}
-
-impl SignalSink {
-    /// Record that `signal` was delivered.
-    ///
-    /// The only method a signal handler may call, and the reason the type
-    /// exists: one relaxed atomic store, no allocation, no lock, no
-    /// reentrancy. Everything a handler is not allowed to do -- take a
-    /// lock, touch the shell, write a diagnostic -- is impossible from
-    /// here rather than merely documented as forbidden.
-    ///
-    /// A signal outside the table is dropped. That is the same answer the
-    /// kernel would have given, since nothing can deliver a number this
-    /// platform has no slot for.
-    pub fn raise(&self, signal: Signal) {
-        if let Ok(i) = usize::try_from(signal.number())
-            && i < NSIG
-        {
-            self.inbox.pending[i].store(true, Ordering::Relaxed);
-            self.inbox.any.store(true, Ordering::Relaxed);
-        }
-    }
-}
-
-/// The receiving end of a [`SignalSink`].
+/// This is [`crate::siginbox::SignalSink`] -- the one that already exists
+/// -- and not a new type. `siginbox` is §5.3's sink already: it is what a
+/// signal handler may touch and the only place it may touch it, and its
+/// own module argues that process-wide storage is correct rather than a
+/// compromise, because `onsig` is called with `signo` and nothing else and
+/// so cannot know which `Shell` a signal was meant for.
 ///
-/// The shell holds this; the host holds the sink. Split so that the half
-/// a signal handler touches has exactly one method on it.
-pub(crate) struct SignalInbox {
-    /// Set by any `raise`, so the common "nothing arrived" poll is one
-    /// load rather than `NSIG` of them.
-    any: AtomicBool,
-    pending: Vec<AtomicBool>,
-}
-
-impl SignalInbox {
-    pub(crate) fn new() -> Arc<SignalInbox> {
-        Arc::new(SignalInbox {
-            any: AtomicBool::new(false),
-            pending: (0..NSIG).map(|_| AtomicBool::new(false)).collect(),
-        })
-    }
-
-    /// Whether any signal is waiting. `dash`'s `pending_sig` test.
-    pub(crate) fn any_pending(&self) -> bool {
-        self.any.load(Ordering::Relaxed)
-    }
-
-    /// Take one pending signal, clearing it. `None` when none is waiting.
-    ///
-    /// Lowest number first, which is only a tie-break: dash handles one
-    /// signal per check too, and nothing in the shell depends on the order
-    /// two simultaneous signals are seen in.
-    pub(crate) fn take_pending(&self) -> Option<Signal> {
-        if !self.any_pending() {
-            return None;
-        }
-        self.any.store(false, Ordering::Relaxed);
-        for (i, slot) in self.pending.iter().enumerate() {
-            if slot.swap(false, Ordering::Relaxed) {
-                /* Another signal may have arrived while this ran, so the
-                 * summary flag goes back up rather than staying clear. */
-                if self.pending.iter().skip(i + 1).any(|s| s.load(Ordering::Relaxed)) {
-                    self.any.store(true, Ordering::Relaxed);
-                }
-                return Some(Signal::from_raw(i as libc::c_int));
-            }
-        }
-        None
-    }
-}
-
-/// A [`SignalSink`] over an inbox.
-pub(crate) fn sink_for(inbox: &Arc<SignalInbox>) -> SignalSink {
-    SignalSink {
-        inbox: Arc::clone(inbox),
-    }
-}
+/// A `&'static` therefore, rather than the sketch's cloneable `Arc`
+/// handle: there is one inbox per process because there is one set of
+/// dispositions per process, and an `Arc` would buy shareability that the
+/// storage does not need.
+pub type SignalSink = &'static crate::siginbox::SignalSink;
 
 /// What the library will not do on its own authority.
 ///
@@ -192,43 +117,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_raised_signal_comes_back_once() {
-        let inbox = SignalInbox::new();
-        let sink = sink_for(&inbox);
-        assert!(!inbox.any_pending());
-        sink.raise(Signal::from_raw(libc::SIGINT));
-        assert_eq!(inbox.take_pending(), Some(Signal::from_raw(libc::SIGINT)));
-        assert_eq!(inbox.take_pending(), None);
-    }
-
-    #[test]
-    fn two_signals_both_come_back() {
-        let inbox = SignalInbox::new();
-        let sink = sink_for(&inbox);
-        sink.raise(Signal::from_raw(libc::SIGTERM));
-        sink.raise(Signal::from_raw(libc::SIGINT));
-        let mut got = vec![
-            inbox.take_pending().unwrap().number(),
-            inbox.take_pending().unwrap().number(),
-        ];
-        got.sort();
-        assert_eq!(got, vec![libc::SIGINT, libc::SIGTERM]);
-        assert_eq!(inbox.take_pending(), None);
-    }
-
-    /// A number the platform has no slot for cannot be delivered, so
-    /// dropping it loses nothing a real signal could have carried.
-    #[test]
-    fn a_signal_outside_the_table_is_dropped() {
-        let inbox = SignalInbox::new();
-        let sink = sink_for(&inbox);
-        sink.raise(Signal::from_raw(NSIG as libc::c_int + 10));
-        sink.raise(Signal::from_raw(-1));
-        assert!(!inbox.any_pending());
-    }
-
-    #[test]
     fn the_default_host_refuses_to_replace_the_process() {
         assert!(!NoHost.may_replace_process());
+    }
+
+    /// The refusal is total: reading a disposition answers `Default`,
+    /// because that is what a process which has installed nothing has.
+    #[test]
+    fn the_default_host_reports_every_signal_as_default() {
+        let mut h = NoHost;
+        assert_eq!(
+            h.signal(Signal::from_raw(libc::SIGINT)).unwrap(),
+            Disposition::Default
+        );
+        assert!(h.set_signal(Signal::from_raw(libc::SIGINT), Disposition::Catch).is_ok());
     }
 }

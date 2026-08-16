@@ -83,11 +83,6 @@ pub struct Shell {
     /// appears in hundreds of signatures and a parameter would spread to
     /// every one of them, for a choice made once at construction.
     pub(crate) host: Box<dyn crate::host::Host>,
-    /// Signals the host has reported, waiting to be handled.
-    ///
-    /// Shared with the [`crate::host::SignalSink`] the host was given, and
-    /// the only part of the shell a signal handler may reach.
-    pub(crate) signals: std::sync::Arc<crate::host::SignalInbox>,
     /// Where the shell is reading from, and what it has read.
     /// `input.rs` owns the shape; this owns the value.
     pub(crate) input: crate::input::InputStack,
@@ -197,7 +192,6 @@ impl Shell {
              * owns the process assumes nobody did, and touches nothing
              * outside itself. `Builder::host` replaces this. */
             host: Box::new(crate::host::NoHost),
-            signals: crate::host::SignalInbox::new(),
         }
     }
 }
