@@ -2352,7 +2352,7 @@ children (
 
             {
                 id host-owns-signals
-                title "The frontend claims signal dispositions; needs pty cases for job control first"
+                title "Signal delivery reads only the atomic sink; the disposition half (Host trait, §5.4) transfers to public-api"
                 priority 0
                 kind @refactor
                 deps (no-ambient-state)
