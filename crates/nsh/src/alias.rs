@@ -110,7 +110,7 @@ pub(crate) unsafe fn setalias(sh: &mut Shell, name: *const c_char, val: *const c
         if crate::syntax::BASESYNTAX(*p as i8 as c_int) != crate::syntax::CWORD {
             let mut message = b"Invalid alias name: ".to_vec();
             message.extend_from_slice(CStr::from_ptr(name).to_bytes());
-            return Err(crate::error::sh_error_value(&message));
+            return Err(sh.sh_error_value(&message));
         }
         p = p.add(1);
         if *p == b'=' as c_char {

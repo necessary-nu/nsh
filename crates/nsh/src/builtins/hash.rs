@@ -30,7 +30,7 @@ pub unsafe fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     clear = false;
     let mut opts = crate::options::Options::new(args);
-    while opts.next(b"r")?.is_some() {
+    while opts.next(sh, b"r")?.is_some() {
         clear = true;
     }
     if clear {

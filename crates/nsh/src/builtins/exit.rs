@@ -25,7 +25,7 @@ pub unsafe fn exitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     if let Some(status) = args.get(1) {
         let status = crate::shell::cstring(status);
-        sh.eval.savestatus = crate::mystring::number(status.as_ptr())?;
+        sh.eval.savestatus = crate::mystring::number(sh, status.as_ptr())?;
     }
 
     Ok(Flow::EXIT)

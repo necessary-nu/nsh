@@ -193,8 +193,8 @@ unsafe fn faccessat_confused_about_superuser() -> c_int {
 // [spec:dash:def:test.getn-fn]
 // [spec:dash:sem:test.getn-fn]
 #[inline]
-unsafe fn getn(s: *const c_char) -> Result<intmax_t, Error> {
-    crate::mystring::atomax10(s)
+unsafe fn getn(sh: &mut crate::context::Shell, s: *const c_char) -> Result<intmax_t, Error> {
+    crate::mystring::atomax10(sh, s)
 }
 
 // [spec:dash:def:test.getop-fn]
@@ -215,7 +215,7 @@ unsafe fn getop(s: *const c_char) -> *const t_op {
 
 // [spec:dash:def:test.testcmd-fn]
 // [spec:dash:sem:test.testcmd-fn]
-pub unsafe fn testcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn testcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut op: *const t_op;
     let n: token;
     let mut res: c_int = 1;
@@ -234,7 +234,7 @@ pub unsafe fn testcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if **argv == b'[' as c_char {
         argc -= 1;
         if *(*argv.add(argc as usize)) != b']' as c_char {
-            return Err(crate::error::sh_error_value(b"missing ]"));
+            return Err(sh.sh_error_value(b"missing ]"));
         }
         *argv.add(argc as usize) = ptr::null_mut();
     }
@@ -285,11 +285,11 @@ pub unsafe fn testcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     // eval:
     t_wp = argv;
-    res ^= oexpr(n)?;
+    res ^= oexpr(sh, n)?;
     argv = t_wp;
 
     if !(*argv).is_null() && !(*argv.add(1)).is_null() {
-        return Err(syntax(*argv, c"unexpected operator".as_ptr()));
+        return Err(syntax(sh, *argv, c"unexpected operator".as_ptr()));
     }
 
     Ok(Flow::Done(res))
@@ -300,23 +300,23 @@ pub unsafe fn testcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // The C's `syntax` does not return, because `sh_error` longjmps out of
 // it. Here it builds the error and the caller's `?` does the leaving --
 // the same bytes, written at the same point, by the same funnel.
-unsafe fn syntax(op: *const c_char, msg: *const c_char) -> Error {
+unsafe fn syntax(sh: &mut crate::context::Shell, op: *const c_char, msg: *const c_char) -> Error {
     let mut message = Vec::new();
     if !op.is_null() && *op != 0 {
         message.extend_from_slice(CStr::from_ptr(op).to_bytes());
         message.extend_from_slice(b": ");
     }
     message.extend_from_slice(CStr::from_ptr(msg).to_bytes());
-    crate::error::sh_error_value(&message)
+    sh.sh_error_value(&message)
 }
 
 // [spec:dash:def:test.oexpr-fn]
 // [spec:dash:sem:test.oexpr-fn]
-unsafe fn oexpr(mut n: token) -> Result<c_int, Error> {
+unsafe fn oexpr(sh: &mut crate::context::Shell, mut n: token) -> Result<c_int, Error> {
     let mut res: c_int = 0;
 
     loop {
-        res |= aexpr(n)?;
+        res |= aexpr(sh, n)?;
         if (*t_wp).is_null() {
             break;
         }
@@ -332,11 +332,11 @@ unsafe fn oexpr(mut n: token) -> Result<c_int, Error> {
 
 // [spec:dash:def:test.aexpr-fn]
 // [spec:dash:sem:test.aexpr-fn]
-unsafe fn aexpr(mut n: token) -> Result<c_int, Error> {
+unsafe fn aexpr(sh: &mut crate::context::Shell, mut n: token) -> Result<c_int, Error> {
     let mut res: c_int = 1;
 
     loop {
-        if nexpr(n)? == 0 {
+        if nexpr(sh, n)? == 0 {
             res = 0;
         }
         if (*t_wp).is_null() {
@@ -354,21 +354,21 @@ unsafe fn aexpr(mut n: token) -> Result<c_int, Error> {
 
 // [spec:dash:def:test.nexpr-fn]
 // [spec:dash:sem:test.nexpr-fn]
-unsafe fn nexpr(mut n: token) -> Result<c_int, Error> {
+unsafe fn nexpr(sh: &mut crate::context::Shell, mut n: token) -> Result<c_int, Error> {
     if n != token::UNOT {
-        return primary(n);
+        return primary(sh, n);
     }
 
     n = t_lex(t_wp.add(1));
     if n != token::EOI {
         t_wp = t_wp.add(1);
     }
-    Ok((nexpr(n)? == 0) as c_int)
+    Ok((nexpr(sh, n)? == 0) as c_int)
 }
 
 // [spec:dash:def:test.primary-fn]
 // [spec:dash:sem:test.primary-fn]
-unsafe fn primary(n: token) -> Result<c_int, Error> {
+unsafe fn primary(sh: &mut crate::context::Shell, n: token) -> Result<c_int, Error> {
     let nn: token;
     let res: c_int;
 
@@ -381,10 +381,10 @@ unsafe fn primary(n: token) -> Result<c_int, Error> {
         if nn == token::RPAREN {
             return Ok(0); /* missing expression */
         }
-        res = oexpr(nn)?;
+        res = oexpr(sh, nn)?;
         t_wp = t_wp.add(1);
         if t_lex(t_wp) != token::RPAREN {
-            return Err(syntax(ptr::null(), c"closing paren expected".as_ptr()));
+            return Err(syntax(sh, ptr::null(), c"closing paren expected".as_ptr()));
         }
         return Ok(res);
     }
@@ -392,12 +392,12 @@ unsafe fn primary(n: token) -> Result<c_int, Error> {
         /* unary expression */
         t_wp = t_wp.add(1);
         if (*t_wp).is_null() {
-            return Err(syntax((*t_wp_op).op_text, c"argument expected".as_ptr()));
+            return Err(syntax(sh, (*t_wp_op).op_text, c"argument expected".as_ptr()));
         }
         match n {
             token::STREZ => return Ok(CStr::from_ptr(*t_wp).to_bytes().is_empty() as c_int),
             token::STRNZ => return Ok((!CStr::from_ptr(*t_wp).to_bytes().is_empty()) as c_int),
-            token::FILTT => return Ok(libc::isatty(getn(*t_wp)? as c_int)),
+            token::FILTT => return Ok(libc::isatty(getn(sh, *t_wp)? as c_int)),
             // #ifdef HAVE_FACCESSAT
             token::FILRD => return Ok(test_file_access(*t_wp, libc::R_OK)),
             token::FILWR => return Ok(test_file_access(*t_wp, libc::W_OK)),
@@ -410,7 +410,7 @@ unsafe fn primary(n: token) -> Result<c_int, Error> {
     // if (t_lex(t_wp + 1), t_wp_op && t_wp_op->op_type == BINOP)
     t_lex(t_wp.add(1));
     if !t_wp_op.is_null() && (*t_wp_op).op_type == token_types::BINOP as c_short {
-        return binop();
+        return binop(sh);
     }
 
     Ok((!CStr::from_ptr(*t_wp).to_bytes().is_empty()) as c_int)
@@ -418,7 +418,7 @@ unsafe fn primary(n: token) -> Result<c_int, Error> {
 
 // [spec:dash:def:test.binop-fn]
 // [spec:dash:sem:test.binop-fn]
-unsafe fn binop() -> Result<c_int, Error> {
+unsafe fn binop(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
     let opnd1: *const c_char;
     let opnd2: *const c_char;
     let op: *const t_op;
@@ -431,7 +431,7 @@ unsafe fn binop() -> Result<c_int, Error> {
     t_wp = t_wp.add(1);
     opnd2 = *t_wp;
     if opnd2.is_null() {
-        return Err(syntax((*op).op_text, c"argument expected".as_ptr()));
+        return Err(syntax(sh, (*op).op_text, c"argument expected".as_ptr()));
     }
 
     // The C `switch` opens with `default:` (an `abort()` under DEBUG, which
@@ -441,12 +441,12 @@ unsafe fn binop() -> Result<c_int, Error> {
         token::STRNE => (CStr::from_ptr(opnd1).to_bytes() != CStr::from_ptr(opnd2).to_bytes()) as c_int,
         token::STRLT => (libc::strcoll(opnd1, opnd2) < 0) as c_int,
         token::STRGT => (libc::strcoll(opnd1, opnd2) > 0) as c_int,
-        token::INTEQ => (getn(opnd1)? == getn(opnd2)?) as c_int,
-        token::INTNE => (getn(opnd1)? != getn(opnd2)?) as c_int,
-        token::INTGE => (getn(opnd1)? >= getn(opnd2)?) as c_int,
-        token::INTGT => (getn(opnd1)? > getn(opnd2)?) as c_int,
-        token::INTLE => (getn(opnd1)? <= getn(opnd2)?) as c_int,
-        token::INTLT => (getn(opnd1)? < getn(opnd2)?) as c_int,
+        token::INTEQ => (getn(sh, opnd1)? == getn(sh, opnd2)?) as c_int,
+        token::INTNE => (getn(sh, opnd1)? != getn(sh, opnd2)?) as c_int,
+        token::INTGE => (getn(sh, opnd1)? >= getn(sh, opnd2)?) as c_int,
+        token::INTGT => (getn(sh, opnd1)? > getn(sh, opnd2)?) as c_int,
+        token::INTLE => (getn(sh, opnd1)? <= getn(sh, opnd2)?) as c_int,
+        token::INTLT => (getn(sh, opnd1)? < getn(sh, opnd2)?) as c_int,
         token::FILNT => newerf(opnd1, opnd2) as c_int,
         token::FILOT => olderf(opnd1, opnd2) as c_int,
         token::FILEQ => equalf(opnd1, opnd2),

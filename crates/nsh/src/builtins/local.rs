@@ -19,7 +19,7 @@ use crate::var::mklocal;
 // [spec:dash:sem:var.localcmd-fn]
 pub unsafe fn localcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if !sh.vars.in_function() {
-        return Err(crate::error::sh_error_value(b"not in a function"));
+        return Err(sh.sh_error_value(b"not in a function"));
     }
 
     /* `local` scans no options at all, so every word after the command

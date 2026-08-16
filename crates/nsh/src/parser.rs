@@ -19,7 +19,7 @@ use bstr::{BStr, BString};
 use libc::{c_char, c_int, c_uint, c_void};
 
 use crate::context::Shell;
-use crate::error::{Error, errlinno};
+use crate::error::Error;
 use crate::expand::{EXP_QUOTED, expandarg, restore_handler_expandarg, rmescapes_owned};
 use crate::input::{
     PEOA, pgetc, pgetc_eoa, popfile, pungetc, pungetn, pushstring, setinputstring, unwindfiles,
@@ -933,7 +933,7 @@ pub unsafe fn fixredir(
             let mut message = b"Bad fd number: ".to_vec();
             message.extend_from_slice(CStr::from_ptr(text).to_bytes());
             /* A stop before `sh_error` became a value, and still one. */
-            return Err(crate::error::sh_error_value(&message));
+            return Err(sh.sh_error_value(&message));
         } else {
             *d.vname.borrow_mut() = Some(Box::new(makename(sh)));
         }
@@ -2325,10 +2325,10 @@ unsafe fn synexpect(sh: &mut Shell, token: c_int) -> Error {
 // [spec:dash:def:parser.synerror-fn]
 // [spec:dash:sem:parser.synerror-fn]
 unsafe fn synerror(sh: &mut Shell, msg: *const c_char) -> Error {
-    errlinno = crate::plinno!(sh);
+    sh.eval.errlinno = crate::plinno!(sh);
     let mut message = b"Syntax error: ".to_vec();
     message.extend_from_slice(CStr::from_ptr(msg).to_bytes());
-    crate::error::sh_error_value(&message)
+    sh.sh_error_value(&message)
 }
 
 // [spec:dash:def:parser.setprompt-fn]

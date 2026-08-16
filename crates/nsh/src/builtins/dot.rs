@@ -23,7 +23,7 @@ use crate::shellmain::cmdloop;
 /// The caller owns the buffer and this fills it, so the copy lasts
 /// exactly as long as the frame that asked for it.
 unsafe fn find_dot_file(
-    sh: &crate::context::Shell,
+    sh: &mut crate::context::Shell,
     basename: *mut c_char,
     out: &mut Vec<u8>,
 ) -> Result<*mut c_char, Error> {
@@ -65,7 +65,7 @@ unsafe fn find_dot_file(
     let mut message = Vec::new();
     message.extend_from_slice(CStr::from_ptr(basename).to_bytes());
     message.extend_from_slice(b": not found");
-    Err(crate::error::sh_error_value(&message))
+    Err(sh.sh_error_value(&message))
 }
 
 // [spec:dash:def:main.dotcmd-fn]
@@ -74,7 +74,7 @@ pub unsafe fn dotcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut status: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
-    opts.next(b"")?;
+    opts.next(sh, b"")?;
 
     if let Some(name) = opts.operands().first() {
         let mut dotfile: Vec<u8> = Vec::new();
@@ -91,7 +91,7 @@ pub unsafe fn dotcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
          * alive: what the epilogue reads is a copy, so the buffer this
          * frame allocated can be freed with the frame like any other
          * local, and the static slot that used to hold it is gone. */
-        crate::eval::commandname = Some(BString::from(CStr::from_ptr(fullname).to_bytes()));
+        sh.eval.commandname = Some(BString::from(CStr::from_ptr(fullname).to_bytes()));
         /* An `exit` inside a dotted file ends the shell, not the file, so
          * it leaves through here without the `popfile` -- exactly as the
          * C's longjmp did. The input stack is unwound to a mark by

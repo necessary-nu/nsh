@@ -64,7 +64,7 @@ struct Flags {
 /// `getopt(3)` over `fc`'s own array, stopping at the first word that
 /// could be a history number so that `fc -2` names an entry rather than
 /// an option.
-unsafe fn scan_options(argc: c_int, argv: *mut *mut c_char) -> Result<Flags, Error> {
+unsafe fn scan_options(sh: &mut crate::context::Shell, argc: c_int, argv: *mut *mut c_char) -> Result<Flags, Error> {
     let mut ch: c_int;
     let mut flags = Flags {
         editor: ptr::null(),
@@ -110,13 +110,13 @@ unsafe fn scan_options(argc: c_int, argv: *mut *mut c_char) -> Result<Flags, Err
                 let mut message = b"option -".to_vec();
                 message.push(optopt as u8);
                 message.extend_from_slice(b" expects argument");
-                return Err(crate::error::sh_error_value(&message));
+                return Err(sh.sh_error_value(&message));
             }
             /* case '?': default: */
             _ => {
                 let mut message = b"unknown option: -".to_vec();
                 message.push(optopt as u8);
-                return Err(crate::error::sh_error_value(&message));
+                return Err(sh.sh_error_value(&message));
             }
         }
     }
@@ -157,7 +157,7 @@ pub unsafe fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     // clobber them; they have no Rust equivalent.
 
     if !history_active() {
-        return Err(crate::error::sh_error_value(b"history not active"));
+        return Err(sh.sh_error_value(b"history not active"));
     }
 
     /* `getopt(3)` keeps its state in process globals and permutes the
@@ -171,7 +171,7 @@ pub unsafe fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut argc: c_int = args.len() as c_int;
     let mut argv: *mut *mut c_char = slots.as_mut_ptr();
 
-    let flags = scan_options(argc, argv)?;
+    let flags = scan_options(sh, argc, argv)?;
     editor = flags.editor;
     lflg = flags.lflg;
     nflg = flags.nflg;
@@ -209,7 +209,7 @@ pub unsafe fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             if active > MAXHISTLOOPS {
                 active = 0;
                 sh.displayhist = 0;
-                return Err(crate::error::sh_error_value(
+                return Err(sh.sh_error_value(
                     b"called recursively too many times",
                 ));
             }
@@ -254,7 +254,7 @@ pub unsafe fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 argv = argv.add(1);
             }
             if argc >= 2 {
-                return Err(crate::error::sh_error_value(b"too many args"));
+                return Err(sh.sh_error_value(b"too many args"));
             }
         }
 
@@ -279,14 +279,14 @@ pub unsafe fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 laststr = *argv.add(1);
             }
             _ => {
-                return Err(crate::error::sh_error_value(b"too many args"));
+                return Err(sh.sh_error_value(b"too many args"));
             }
         }
         /*
          * Turn into event numbers.
          */
-        first = str_to_event(firststr, 0)?;
-        last = str_to_event(laststr, 1)?;
+        first = str_to_event(sh, firststr, 0)?;
+        last = str_to_event(sh, laststr, 1)?;
 
         if rflg != 0 {
             i = last;
@@ -317,7 +317,7 @@ pub unsafe fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 let mut message = b"can't create temporary file ".to_vec();
                 message.extend_from_slice(CStr::from_ptr(editfile.as_ptr()).to_bytes());
                 /* A stop: `from_raw_fd` below would otherwise adopt -1. */
-                return Err(crate::error::sh_error_value(&message));
+                return Err(sh.sh_error_value(&message));
             }
             edit_file = Some(File::from_raw_fd(fd));
         }
@@ -496,7 +496,7 @@ pub unsafe fn not_fcnumber(mut s: *mut c_char) -> c_int {
 // [spec:dash:sem:histedit.str-to-event-fn]
 // [spec:dash:def:myhistedit.str-to-event-fn]
 // [spec:dash:sem:myhistedit.str-to-event-fn]
-pub unsafe fn str_to_event(str: *const c_char, last: c_int) -> Result<c_int, Error> {
+pub unsafe fn str_to_event(sh: &mut crate::context::Shell, str: *const c_char, last: c_int) -> Result<c_int, Error> {
     let mut s: *const c_char = str;
     let mut relative: c_int = 0;
     match *s as u8 {
@@ -541,12 +541,12 @@ pub unsafe fn str_to_event(str: *const c_char, last: c_int) -> Result<c_int, Err
             let mut message = b"history number ".to_vec();
             message.extend_from_slice(CStr::from_ptr(str).to_bytes());
             message.extend_from_slice(b" not found (internal error)");
-            Err(crate::error::sh_error_value(&message))
+            Err(sh.sh_error_value(&message))
         }
         None => {
             let mut message = b"history pattern not found: ".to_vec();
             message.extend_from_slice(CStr::from_ptr(str).to_bytes());
-            Err(crate::error::sh_error_value(&message))
+            Err(sh.sh_error_value(&message))
         }
     }
 }

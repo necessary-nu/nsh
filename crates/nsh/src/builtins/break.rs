@@ -22,9 +22,9 @@ pub unsafe fn breakcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     if let Some(count) = args.get(1) {
         let count = crate::shell::cstring(count);
-        n = crate::mystring::number(count.as_ptr())?;
+        n = crate::mystring::number(sh, count.as_ptr())?;
         if n <= 0 {
-            return Err(crate::mystring::badnum(count.as_ptr()));
+            return Err(crate::mystring::badnum(sh, count.as_ptr()));
         }
     }
     if n > sh.eval.loopnest {

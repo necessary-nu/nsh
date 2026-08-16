@@ -42,7 +42,7 @@ pub unsafe fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         FORK_BG
     };
     let mut opts = crate::options::Options::new(args);
-    opts.next(b"")?;
+    opts.next(sh, b"")?;
     let operands = opts.operands();
     /* `do { ... } while (*argv && *++argv)`: one pass on the current job
      * when there is no operand, otherwise one pass per operand. */

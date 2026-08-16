@@ -366,7 +366,7 @@ pub(crate) unsafe fn xxtcsetpgrp(sh: &mut crate::context::Shell, pgrp: pid_t) ->
         return Ok(());
     }
 
-    xtcsetpgrp(fd, pgrp)
+    xtcsetpgrp(sh, fd, pgrp)
 }
 
 // [spec:dash:def:jobs.setjobctl-fn]
@@ -425,7 +425,7 @@ pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(),
                             break 'out_lbl; // goto out
                         }
                     }
-                    fd = crate::redir::savefd(fd, ofd)?;
+                    fd = crate::redir::savefd(sh, fd, ofd)?;
                     loop {
                         /* while we are in the background */
                         loop {
@@ -472,7 +472,7 @@ pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(),
             if iflag(sh) == 0 {
                 break 'after_dowhile; // `break` of the do/while
             }
-            crate::error::sh_warnx(b"can't access tty; job control turned off");
+            sh.sh_warnx(b"can't access tty; job control turned off");
             sh.options.set_flag(crate::options::mflag, 0);
             on = 0;
             let _ = on;
@@ -491,7 +491,7 @@ pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(),
     crate::trap::setsignal(sh, libc::SIGTTIN);
     if fd >= 0 {
         libc::setpgid(0, pgrp);
-        xtcsetpgrp(fd, pgrp)?;
+        xtcsetpgrp(sh, fd, pgrp)?;
 
         if on == 0 {
             libc::close(fd);
@@ -844,7 +844,7 @@ pub(crate) unsafe fn getjob(sh: &mut crate::context::Shell, name: *const c_char,
             message.extend_from_slice(b" not created under job control");
         }
     }
-    Err(crate::error::sh_error_value(&message))
+    Err(sh.sh_error_value(&message))
 }
 
 /*
@@ -1100,7 +1100,7 @@ unsafe fn forkparent(
         if let Some(i) = jp {
             freejob(sh, i);
         }
-        return Err(crate::error::sh_error_value(b"Cannot fork"));
+        return Err(sh.sh_error_value(b"Cannot fork"));
     }
 
     /* TRACE(("In parent shell:  child = %d\n", pid)); */
@@ -1972,7 +1972,7 @@ pub(crate) unsafe fn showpipe(sh: &mut crate::context::Shell, jp: usize, dest: D
 
 // [spec:dash:def:jobs.xtcsetpgrp-fn]
 // [spec:dash:sem:jobs.xtcsetpgrp-fn]
-unsafe fn xtcsetpgrp(fd: c_int, pgrp: pid_t) -> Result<(), Error> {
+unsafe fn xtcsetpgrp(sh: &mut crate::context::Shell, fd: c_int, pgrp: pid_t) -> Result<(), Error> {
     let err: c_int;
 
     crate::trap::sigblockall(null_mut());
@@ -1983,7 +1983,7 @@ unsafe fn xtcsetpgrp(fd: c_int, pgrp: pid_t) -> Result<(), Error> {
         let mut message = b"Cannot set tty process group (".to_vec();
         message.extend_from_slice(CStr::from_ptr(libc::strerror(errno())).to_bytes());
         message.push(b')');
-        return Err(crate::error::sh_error_value(&message));
+        return Err(sh.sh_error_value(&message));
     }
     Ok(())
 }

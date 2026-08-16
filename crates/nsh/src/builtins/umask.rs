@@ -32,14 +32,14 @@ use crate::options::Options;
 
 // [spec:dash:def:miscbltin.umaskcmd-fn]
 // [spec:dash:sem:miscbltin.umaskcmd-fn]
-pub unsafe fn umaskcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut ap: *mut c_char;
     let mut mask: c_int;
     let mut i: c_int;
     let mut symbolic_mode: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
-    while opts.next(b"S")?.is_some() {
+    while opts.next(sh, b"S")?.is_some() {
         symbolic_mode = 1;
     }
     /* The mode is walked as a cursor, so it stays a C string for the
@@ -95,7 +95,7 @@ pub unsafe fn umaskcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 if *ap >= b'8' as c_char || *ap < b'0' as c_char {
                     let mut message = b"Illegal number: ".to_vec();
                     message.extend_from_slice(mode.as_ref().expect("a mode to walk").as_bytes());
-                    return Err(crate::error::sh_error_value(&message));
+                    return Err(sh.sh_error_value(&message));
                 }
                 new_mask = (new_mask << 3) + (*ap as c_int - '0' as c_int);
                 ap = ap.add(1);
@@ -193,7 +193,7 @@ pub unsafe fn umaskcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 message.extend_from_slice(mode.as_ref().expect("a mode to walk").as_bytes());
                 /* The C's `return 1` after this is unreachable because its
                  * `sh_error` longjmps; the error is the return now. */
-                return Err(crate::error::sh_error_value(&message));
+                return Err(sh.sh_error_value(&message));
             }
         }
         libc::umask(new_mask as libc::mode_t);

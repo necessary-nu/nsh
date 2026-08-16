@@ -259,7 +259,11 @@ pub unsafe fn shellexec(
      * it rendered from is dropped -- an `exec` that cannot happen ends the
      * shell, and `docs/api-design.md` 3.3 is explicit that what ends the
      * run is `Flow`, not `Err`. */
-    drop(crate::error::report(crate::error::Error::other(exerrno, &message)));
+    /* Built before the call rather than inside its argument list: the
+     * receiver is borrowed for the whole call, so reading the line out of
+     * the same shell in an argument is a conflict. */
+    let e = crate::error::Error::other(sh.eval.errlinno, exerrno, &message);
+    drop(sh.report(e));
 
     /* The one place a `Result` may not be returned. `vforkexec` runs this
      * in a child that shares the parent's stack, so an `Ok` travelling out
@@ -660,7 +664,7 @@ pub unsafe fn find_command(
                             message.extend_from_slice(CStr::from_ptr(name).to_bytes());
                             message.extend_from_slice(b" not defined in ");
                             message.extend_from_slice(CStr::from_ptr(fullname).to_bytes());
-                            return Err(crate::error::sh_error_value(&message));
+                            return Err(sh.sh_error_value(&message));
                         }
                         break 'success;
                     }
@@ -692,7 +696,7 @@ pub unsafe fn find_command(
                     message.extend_from_slice(
                         CStr::from_ptr(crate::error::errmsg(e, E_EXEC)).to_bytes(),
                     );
-                    crate::error::sh_warnx(&message);
+                    sh.sh_warnx(&message);
                 }
                 // fall through into fail:
             }

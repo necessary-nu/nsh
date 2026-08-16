@@ -25,7 +25,7 @@ pub unsafe fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut signo: c_int;
 
     let mut opts = Options::new(args);
-    opts.next(b"")?;
+    opts.next(sh, b"")?;
     let ap = opts.operands();
     if ap.is_empty() {
         signo = 0;

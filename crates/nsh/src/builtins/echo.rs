@@ -53,7 +53,7 @@ unsafe fn emit(bytes: &[u8]) {
 /// `%s ` or `%s\n`, so it passes the byte itself.
 // [spec:dash:def:printf.print-escape-str-fn]
 // [spec:dash:sem:printf.print-escape-str-fn]
-unsafe fn print_escape_str(separator: u8, s: *mut c_char) -> c_int {
+unsafe fn print_escape_str(sh: &mut crate::context::Shell, separator: u8, s: *mut c_char) -> c_int {
     let done: c_int;
     /* The C's `q` is a cursor into the stack block and `stackblock()` its
      * base.  Both are this buffer: `len` is its length and `q[-1]` its
@@ -80,7 +80,7 @@ unsafe fn print_escape_str(separator: u8, s: *mut c_char) -> c_int {
 
 // [spec:dash:def:printf.echocmd-fn]
 // [spec:dash:sem:printf.echocmd-fn]
-pub unsafe fn echocmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn echocmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* The C picked between the formats `"%s\n"`, `"%s"` and `"%s "`; all
      * that ever differed was the byte after the conversion, so what is
      * chosen here is that byte. `-n` closes with nothing. */
@@ -107,7 +107,7 @@ pub unsafe fn echocmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
 
         let s = s.map(|w| crate::shell::cstring(w));
-        nonl = print_escape_str(
+        nonl = print_escape_str(sh, 
             separator,
             s.as_ref().map_or(nullstr(), |w| w.as_ptr() as *mut c_char),
         );

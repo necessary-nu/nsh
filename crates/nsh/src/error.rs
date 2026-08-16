@@ -60,7 +60,10 @@ pub type sig_atomic_t = c_int;
 
 pub static mut suppressint: c_int = 0;
 pub static mut intpending: sig_atomic_t = 0;
-pub static mut errlinno: c_int = 0;
+/* `int errlinno` was here. It is `Shell::eval.errlinno` now: it is the
+ * line a diagnostic reports, six frames write it and the only reader is
+ * the prefix this module builds, so it belongs to the shell that
+ * reports rather than to the process. */
 
 /*
  * These macros allow the user to suspend the handling of interrupt signals
@@ -360,9 +363,9 @@ impl Error {
     /// the value exists to carry. Now the raise says what it took and the
     /// frame that catches it is the frame that writes it. Same shape as
     /// [`Error::reported`], which always took it this way.
-    pub unsafe fn other(status: c_int, msg: &[u8]) -> Error {
+    pub unsafe fn other(line: c_int, status: c_int, msg: &[u8]) -> Error {
         Error::Other {
-            line: errlinno,
+            line,
             status,
             message: BString::from(msg),
         }
@@ -382,9 +385,9 @@ impl Error {
     /// constructed through it. An empty message is therefore never
     /// rendered, and it must stay that way — a caller that reports one of
     /// these would emit a bare prefix and a newline dash does not.
-    pub unsafe fn reported(status: c_int) -> Error {
+    pub unsafe fn reported(line: c_int, status: c_int) -> Error {
         Error::Other {
-            line: errlinno,
+            line,
             status,
             message: BString::default(),
         }
@@ -413,9 +416,10 @@ impl Error {
     /// dash's text for this error, byte for byte, **without** the
     /// `sh: 1: cd: ` prefix.
     ///
-    /// The prefix is `$0`, `errlinno` and the running command's name, which
-    /// are shell state and not error state, so an `Error` on its own cannot
-    /// render them. [`sh_warnx`] adds them when it writes.
+    /// The prefix is `$0`, `eval.errlinno` and the running command's
+    /// name, which are shell state and not error state, so an `Error` on
+    /// its own cannot render them. `Shell::sh_warnx` adds them when it
+    /// writes.
     pub fn message(&self) -> &BStr {
         match self {
             /* dash prints nothing for an interrupt. `main`'s handler
@@ -429,7 +433,7 @@ impl Error {
     pub fn line(&self) -> c_int {
         match self {
             /* No line: an interrupt did not happen *at* a line the way a
-             * diagnostic did, and reading `errlinno` here would report
+             * diagnostic did, and reading `eval.errlinno` here would report
              * whichever line last failed. */
             Error::Interrupted { .. } => 0,
             Error::Other { line, .. } => *line,
@@ -437,74 +441,106 @@ impl Error {
     }
 }
 
-/// Write a diagnostic where dash writes it, and hand it back as a value.
+/// The diagnostic spine, threaded.
 ///
-/// This is [`exverror`] with the raise removed, and it is the funnel every
-/// diagnostic goes through: the bytes on the stream are rendered from the
-/// same `Error` that is returned, so the two cannot drift.
+/// `move-state` transferred `arg0`, `errlinno` and `commandname` here as a
+/// choice between two options — thread the spine, or give the diagnostic
+/// its own sink so the spine never needs a receiver — and recommended the
+/// second in order to avoid the first. **They were never alternatives.**
 ///
-/// Two details of dash's write are load-bearing and are preserved by doing
-/// nothing more than the C does. `errout` is unbuffered, so the message is
-/// three raw `write(2)`s and needs no flush of its own; and `flushall()`
-/// runs *after* the message, so a built-in that filled the stdout buffer and
-/// then failed produces its diagnostic before its own output in the merged
-/// stream. Both are pinned by the corpus.
-pub unsafe fn report(e: Error) -> Error {
-    sh_warnx(e.message());
-
-    crate::output::flushall();
-    e
-}
-
-/// `sh_error`'s value half: take the status dash takes, write the
-/// diagnostic where dash writes it, and **return** the error rather than
-/// raising it.
+/// `docs/api-design.md` §3.2 already fixes `report` as a `&mut self`
+/// method, and it requires the write to happen *at the raise point*: the
+/// interleaving of diagnostics with command output is what `dscase.sh`'s
+/// `2>&1` merge puts under test in every corpus case. A sink that
+/// assembled the prefix elsewhere would have to defer the write to
+/// wherever it is polled, which is the one thing §3.2 forbids. And the
+/// write needs `&mut` on the stderr `Output`, so even a sink owning the
+/// prefix would not free `report` from a receiver. What the sink genuinely
+/// replaces is not the receiver — it is the three *statics*, which become
+/// fields of the shell that reports.
 ///
-/// This is what a converted raise site calls —
-/// `return Err(sh_error_value(&msg))` — and it is the same three writes in
-/// the same order as the diverging form below, because both are this
-/// function. When the last caller of `sh_error` is gone this one takes its
-/// name.
-pub unsafe fn sh_error_value(msg: &[u8]) -> Error {
-    /* `exitstatus = 2` was here. It is the returned value's `status`
-     * instead: the error carries what it took and the frame that catches
-     * it writes it, so the raise path touches no shell state at all and
-     * needs no receiver across its 56 call sites. */
-    report(Error::other(2, msg))
-}
+/// The threading is also much cheaper than it was costed, because
+/// `thread-context` had already put a `&mut Shell` on every execution
+/// path: of the 66 call sites outside this module, 45 already had a
+/// receiver in scope and the 21 that did not were leaf helpers whose
+/// callers did.
+impl crate::context::Shell {
+    /// Write a diagnostic where dash writes it, and hand it back as a
+    /// value.
+    ///
+    /// This is [`exverror`] with the raise removed, and it is the funnel
+    /// every diagnostic goes through: the bytes on the stream are rendered
+    /// from the same `Error` that is returned, so the two cannot drift.
+    ///
+    /// Two details of dash's write are load-bearing and are preserved by
+    /// doing nothing more than the C does. `errout` is unbuffered, so the
+    /// message is three raw `write(2)`s and needs no flush of its own; and
+    /// `flushall()` runs *after* the message, so a built-in that filled
+    /// the stdout buffer and then failed produces its diagnostic before
+    /// its own output in the merged stream. Both are pinned by the corpus.
+    pub unsafe fn report(&mut self, e: Error) -> Error {
+        self.sh_warnx(e.message());
 
-/*
- * error/warning routines for external builtins
- */
-
-// [spec:dash:def:error.sh-warnx-fn]
-// [spec:dash:sem:error.sh-warnx-fn]
-// [spec:dash:def:error.exvwarning2-fn]
-// [spec:dash:sem:error.exvwarning2-fn]
-pub unsafe fn sh_warnx(msg: &[u8]) {
-    let name = if !crate::options::arg0.is_null() {
-        crate::options::arg0
-    } else {
-        cstr(b"sh\0")
-    };
-
-    let mut prefix = Vec::new();
-    prefix.extend_from_slice(CStr::from_ptr(name).to_bytes());
-    prefix.extend_from_slice(b": ");
-    let line = errlinno;
-    write!(&mut prefix, "{line}").expect("writing to a Vec cannot fail");
-    prefix.extend_from_slice(b": ");
-    if let Some(name) = &*core::ptr::addr_of!(crate::eval::commandname) {
-        prefix.extend_from_slice(name);
-        prefix.extend_from_slice(b": ");
+        crate::output::flushall();
+        e
     }
 
-    /* stderr is unbuffered. Keep the C's three output operations visible:
-     * prefix, complete message body, then newline. */
-    let errs = &mut *crate::output::stderr();
-    let _ = errs.write_all(&prefix);
-    let _ = errs.write_all(msg);
-    let _ = errs.write_all(b"\n");
+    /// `sh_error`'s value half: take the status dash takes, write the
+    /// diagnostic where dash writes it, and **return** the error rather
+    /// than raising it.
+    ///
+    /// This is what a converted raise site calls —
+    /// `return Err(sh.sh_error_value(&msg))` — and it is the same three
+    /// writes in the same order as the diverging form, because both are
+    /// this function. When the last caller of `sh_error` is gone this one
+    /// takes its name.
+    pub unsafe fn sh_error_value(&mut self, msg: &[u8]) -> Error {
+        /* `exitstatus = 2` was here. It is the returned value's `status`
+         * instead: the error carries what it took and the frame that
+         * catches it writes it. That is why the *status* needed no
+         * receiver even before this method had one. */
+        let e = Error::other(self.eval.errlinno, 2, msg);
+        self.report(e)
+    }
+
+    /*
+     * error/warning routines for external builtins
+     */
+
+    // [spec:dash:def:error.sh-warnx-fn]
+    // [spec:dash:sem:error.sh-warnx-fn]
+    // [spec:dash:def:error.exvwarning2-fn]
+    // [spec:dash:sem:error.exvwarning2-fn]
+    pub unsafe fn sh_warnx(&mut self, msg: &[u8]) {
+        let name = if !crate::options::arg0.is_null() {
+            crate::options::arg0
+        } else {
+            cstr(b"sh\0")
+        };
+
+        /* The prefix is assembled here, from the shell that is reporting.
+         * `arg0` is still a static because it is `$0` before it is a
+         * diagnostic prefix — `expand.rs` reads it for the parameter and
+         * `docs/api-design.md` §5 puts it in the options table, so it
+         * moves with that row rather than with this one. */
+        let mut prefix = Vec::new();
+        prefix.extend_from_slice(CStr::from_ptr(name).to_bytes());
+        prefix.extend_from_slice(b": ");
+        let line = self.eval.errlinno;
+        write!(&mut prefix, "{line}").expect("writing to a Vec cannot fail");
+        prefix.extend_from_slice(b": ");
+        if let Some(name) = &self.eval.commandname {
+            prefix.extend_from_slice(name);
+            prefix.extend_from_slice(b": ");
+        }
+
+        /* stderr is unbuffered. Keep the C's three output operations
+         * visible: prefix, complete message body, then newline. */
+        let errs = (*crate::output::io()).get(crate::output::Dest::Stderr);
+        let _ = errs.write_all(&prefix);
+        let _ = errs.write_all(msg);
+        let _ = errs.write_all(b"\n");
+    }
 }
 
 /*
@@ -571,7 +607,9 @@ mod tests {
     fn reported_error_carries_its_status() {
         let _g = crate::testutil::lock();
         unsafe {
-            let e = sh_error_value(b"a diagnostic");
+            let mut owned = crate::context::Shell::new();
+            let sh = &mut owned;
+            let e = sh.sh_error_value(b"a diagnostic");
 
             /* The value carries what the site took, so propagation
              * through any number of `?` cannot lose it. */
@@ -590,10 +628,11 @@ mod tests {
     fn message_drops_the_prefix() {
         let _g = crate::testutil::lock();
         unsafe {
-            let saved = errlinno;
-            errlinno = 17;
-            let e = report(Error::other(2, b"cd: bad directory"));
-            errlinno = saved;
+            let mut owned = crate::context::Shell::new();
+            let sh = &mut owned;
+            sh.eval.errlinno = 17;
+            let e = Error::other(sh.eval.errlinno, 2, b"cd: bad directory");
+            let e = sh.report(e);
 
             /* The `sh: 17: ` prefix is `arg0`, `errlinno` and the running
              * command's name -- shell state, not error state -- so
@@ -611,7 +650,10 @@ mod tests {
             /* `shellexec` reports its text and takes 127 or 126, then
              * raises EXEND. The status travels with the value even though
              * the code that goes with it does not. */
-            let e = report(Error::other(127, b"nosuchcmd: not found"));
+            let mut owned = crate::context::Shell::new();
+            let sh = &mut owned;
+            let e = Error::other(sh.eval.errlinno, 127, b"nosuchcmd: not found");
+            let e = sh.report(e);
 
             assert_eq!(e.status(), 127);
         }

@@ -24,7 +24,7 @@ pub unsafe fn returncmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if let Some(want) = args.get(1) {
         let want = crate::shell::cstring(want);
         skip = SKIPFUNC;
-        status = crate::mystring::number(want.as_ptr())?;
+        status = crate::mystring::number(sh, want.as_ptr())?;
     } else {
         skip = SKIPFUNCDEF;
         status = sh.status;

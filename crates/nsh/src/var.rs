@@ -710,7 +710,7 @@ pub unsafe fn setvar(sh: &mut Shell, name: *const c_char, val: *const c_char, mu
         let mut message = Vec::new();
         message.extend_from_slice(core::slice::from_raw_parts(name as *const u8, namelen));
         message.extend_from_slice(b": bad variable name");
-        return Err(crate::error::sh_error_value(&message));
+        return Err(sh.sh_error_value(&message));
     }
     vallen = 0;
     if val.is_null() {
@@ -816,7 +816,7 @@ unsafe fn setvareq_text(sh: &mut Shell, text: VarText, mut flags: c_int) -> Resu
             let mut message = Vec::new();
             message.extend_from_slice(core::slice::from_raw_parts(n as *const u8, name_len));
             message.extend_from_slice(b": is read only");
-            return Err(crate::error::sh_error_value(&message));
+            return Err(sh.sh_error_value(&message));
         }
 
         /* The name this entry is filed under, for the removal path below. */
@@ -916,7 +916,7 @@ pub unsafe fn lookupvar(sh: &mut Shell, name: *const c_char) -> *mut c_char {
 // [spec:dash:sem:var.lookupvarint-fn]
 pub unsafe fn lookupvarint(sh: &mut Shell, name: *const c_char) -> Result<intmax_t, Error> {
     let p = lookupvar(sh, name);
-    crate::mystring::atomax(
+    crate::mystring::atomax(sh, 
         if !p.is_null() {
             p as *const c_char
         } else {

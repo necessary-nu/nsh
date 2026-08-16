@@ -32,10 +32,10 @@ pub unsafe fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
     let optbase: *mut *mut c_char;
 
     let mut opts = Options::new(args);
-    opts.next(b"")?;
+    opts.next(sh, b"")?;
     let operands = opts.operands();
     if operands.len() < 2 {
-        return Err(crate::error::sh_error_value(b"Usage: getopts optstring var [arg...]"));
+        return Err(sh.sh_error_value(b"Usage: getopts optstring var [arg...]"));
     }
     let optstr = crate::shell::cstring(operands[0]);
     let optvar = crate::shell::cstring(operands[1]);

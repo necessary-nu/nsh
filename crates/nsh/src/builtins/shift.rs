@@ -24,12 +24,12 @@ pub unsafe fn shiftcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     n = match args.get(1) {
         Some(count) => {
             let count = crate::shell::cstring(count);
-            crate::mystring::number(count.as_ptr())?
+            crate::mystring::number(sh, count.as_ptr())?
         }
         None => 1,
     };
     if n > sh.options.shellparam.nparam {
-        return Err(crate::error::sh_error_value(b"can't shift that many"));
+        return Err(sh.sh_error_value(b"can't shift that many"));
     }
     INTOFF();
     (*addr_of_mut!(sh.options.shellparam)).drop_first(n);

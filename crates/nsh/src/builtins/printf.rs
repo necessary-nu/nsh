@@ -58,13 +58,13 @@ unsafe fn emit(bytes: &[u8]) {
 /// asked glibc to lay every conversion out and `xvasprintf` treated the
 /// refusal as fatal, so the builtin stops there: whatever the format had
 /// already printed stays printed, and the shell's status is 2.
-unsafe fn emit_field(rendered: Option<Vec<u8>>) -> Result<(), Error> {
+unsafe fn emit_field(sh: &mut crate::context::Shell, rendered: Option<Vec<u8>>) -> Result<(), Error> {
     match rendered {
         Some(bytes) => {
             emit(&bytes);
             Ok(())
         }
-        None => Err(crate::error::sh_error_value(b"xvsnprintf failed")),
+        None => Err(sh.sh_error_value(b"xvsnprintf failed")),
     }
 }
 
@@ -127,7 +127,7 @@ impl<'a> Operands<'a> {
     /// differ in where they saturate; both read base 0.
     // [spec:dash:def:printf.getuintmax-fn]
     // [spec:dash:sem:printf.getuintmax-fn]
-    fn getuintmax(&mut self, signed: bool) -> u64 {
+    fn getuintmax(&mut self, sh: &mut crate::context::Shell, signed: bool) -> u64 {
         let Some(word) = self.next_word() else {
             return 0;
         };
@@ -141,7 +141,7 @@ impl<'a> Operands<'a> {
         }
 
         let (value, end, range) = scan_integer(bytes, signed);
-        self.check_conversion(bytes, end, range);
+        self.check_conversion(sh, bytes, end, range);
         value
     }
 
@@ -149,7 +149,7 @@ impl<'a> Operands<'a> {
     /// exhausted.
     // [spec:dash:def:printf.getdouble-fn]
     // [spec:dash:sem:printf.getdouble-fn]
-    fn getdouble(&mut self) -> f64 {
+    fn getdouble(&mut self, sh: &mut crate::context::Shell) -> f64 {
         let Some(word) = self.next_word() else {
             return 0.0;
         };
@@ -160,7 +160,7 @@ impl<'a> Operands<'a> {
         }
 
         let (value, end, range) = scan_double(bytes);
-        self.check_conversion(bytes, end, range);
+        self.check_conversion(sh, bytes, end, range);
         value
     }
 
@@ -173,7 +173,7 @@ impl<'a> Operands<'a> {
     /// checked first, exactly as the C checked `*ep` before `errno`.
     // [spec:dash:def:printf.check-conversion-fn]
     // [spec:dash:sem:printf.check-conversion-fn]
-    fn check_conversion(&mut self, word: &[u8], end: usize, range: bool) {
+    fn check_conversion(&mut self, sh: &mut crate::context::Shell, word: &[u8], end: usize, range: bool) {
         let mut message = word.to_vec();
         if end < word.len() {
             message.extend_from_slice(if end == 0 {
@@ -191,7 +191,7 @@ impl<'a> Operands<'a> {
             return;
         }
 
-        unsafe { crate::error::sh_warnx(&message) };
+        unsafe { sh.sh_warnx(&message) };
         self.status = 1;
     }
 }
@@ -603,7 +603,7 @@ fn span(bytes: &[u8], at: usize, set: &[u8]) -> usize {
 /// Laying out bytes needs no stand-in.
 // [spec:dash:def:printf.print-escape-str-fn]
 // [spec:dash:sem:printf.print-escape-str-fn]
-unsafe fn print_escape_str(spec: &Spec, word: &CStr) -> Result<c_int, Error> {
+unsafe fn print_escape_str(sh: &mut crate::context::Shell, spec: &Spec, word: &CStr) -> Result<c_int, Error> {
     let mut buf = BString::default();
     let done = conv_escape_str(word.as_ptr(), &mut buf);
 
@@ -614,20 +614,20 @@ unsafe fn print_escape_str(spec: &Spec, word: &CStr) -> Result<c_int, Error> {
     debug_assert!(!buf.is_empty());
     let text = &buf[..buf.len() - 1];
 
-    emit_field(spec.string(text))?;
+    emit_field(sh, spec.string(text))?;
     Ok(done)
 }
 
 // [spec:dash:def:printf.printfcmd-fn]
 // [spec:dash:sem:printf.printfcmd-fn]
-pub unsafe fn printfcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut options = crate::options::Options::new(args);
     /* `nextopt(nullstr)`: printf takes no options, so this exists to
      * reject `-x` and to step over a `--`. */
-    while options.next(b"")?.is_some() {}
+    while options.next(sh, b"")?.is_some() {}
 
     let Some((format, arguments)) = options.operands().split_first() else {
-        return Err(crate::error::sh_error_value(b"usage: printf format [arg ...]"));
+        return Err(sh.sh_error_value(b"usage: printf format [arg ...]"));
     };
 
     /* `conv_escape` reads through a raw cursor and stops at a NUL, so
@@ -690,7 +690,7 @@ pub unsafe fn printfcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
             }
             if format[at] == b'*' {
                 at += 1;
-                spec.set_width(operands.getuintmax(true) as c_int);
+                spec.set_width(operands.getuintmax(sh, true) as c_int);
             } else {
                 /* skip to possible '.', get following precision */
                 let digits = span(&format[..end], at, WIDTH);
@@ -707,7 +707,7 @@ pub unsafe fn printfcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
                 at += 1;
                 if format[at] == b'*' {
                     at += 1;
-                    let value = operands.getuintmax(true) as c_int;
+                    let value = operands.getuintmax(sh, true) as c_int;
                     if stop.is_none() {
                         spec.set_precision(value);
                     }
@@ -727,7 +727,7 @@ pub unsafe fn printfcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
 
             let conversion = format[at];
             if conversion == 0 {
-                return Err(crate::error::sh_error_value(b"missing format character"));
+                return Err(sh.sh_error_value(b"missing format character"));
             }
             at += 1;
             if let Some(stop) = stop {
@@ -739,37 +739,37 @@ pub unsafe fn printfcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
                 b'b' => {
                     let word = crate::shell::cstring(BStr::new(operands.getstr()));
                     /* escape if a \c was encountered */
-                    if print_escape_str(&spec, &word)? != 0 {
+                    if print_escape_str(sh, &spec, &word)? != 0 {
                         break 'out;
                     }
                 }
                 b'c' => {
                     let value = operands.getchr();
-                    emit_field(spec.character(value))?;
+                    emit_field(sh, spec.character(value))?;
                 }
                 b's' => {
                     let value = operands.getstr();
-                    emit_field(spec.string(value))?;
+                    emit_field(sh, spec.string(value))?;
                 }
                 /* `mklong` widened the specification to `PRIdMAX` so
                  * that C's printf would pull a whole `intmax_t` off the
                  * varargs. The value arrives typed. */
                 b'd' | b'i' => {
-                    let value = operands.getuintmax(true);
-                    emit_field(spec.signed(value as i64))?;
+                    let value = operands.getuintmax(sh, true);
+                    emit_field(sh, spec.signed(value as i64))?;
                 }
                 b'o' | b'u' | b'x' | b'X' => {
-                    let value = operands.getuintmax(false);
-                    emit_field(spec.unsigned(value, conversion))?;
+                    let value = operands.getuintmax(sh, false);
+                    emit_field(sh, spec.unsigned(value, conversion))?;
                 }
                 b'a' | b'A' | b'e' | b'E' | b'f' | b'F' | b'g' | b'G' => {
-                    let value = operands.getdouble();
-                    emit_field(spec.double(value, conversion))?;
+                    let value = operands.getdouble(sh);
+                    emit_field(sh, spec.double(value, conversion))?;
                 }
                 _ => {
                     let mut message = format[start..at].to_vec();
                     message.extend_from_slice(b": invalid directive");
-                    return Err(crate::error::sh_error_value(&message));
+                    return Err(sh.sh_error_value(&message));
                 }
             }
         }
@@ -975,13 +975,15 @@ mod tests {
     /// benign default once the list runs out.
     #[test]
     fn exhausted_operands_yield_defaults() {
+        let mut owned_sh = crate::context::Shell::new();
+        let sh = &mut owned_sh;
         let words: Vec<&BStr> = vec![BStr::new("ab")];
         let mut operands = Operands::new(&words);
         assert_eq!(operands.getchr(), b'a');
         assert_eq!(operands.getchr(), 0);
         assert_eq!(operands.getstr(), b"");
-        assert_eq!(operands.getuintmax(true), 0);
-        assert_eq!(operands.getdouble(), 0.0);
+        assert_eq!(operands.getuintmax(sh, true), 0);
+        assert_eq!(operands.getdouble(sh), 0.0);
         assert_eq!(operands.status, 0);
     }
 
@@ -1002,11 +1004,13 @@ mod tests {
     /// whichever quote it is, and a lone quote is nothing.
     #[test]
     fn a_quote_argument_is_one_byte() {
+        let mut owned_sh = crate::context::Shell::new();
+        let sh = &mut owned_sh;
         let words: Vec<&BStr> = vec![BStr::new("'A"), BStr::new("\"z"), BStr::new("'")];
         let mut operands = Operands::new(&words);
-        assert_eq!(operands.getuintmax(true), 65);
-        assert_eq!(operands.getdouble(), 122.0);
-        assert_eq!(operands.getuintmax(false), 0);
+        assert_eq!(operands.getuintmax(sh, true), 65);
+        assert_eq!(operands.getdouble(sh), 122.0);
+        assert_eq!(operands.getuintmax(sh, false), 0);
         assert_eq!(operands.status, 0);
     }
 

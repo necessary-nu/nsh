@@ -27,7 +27,7 @@ pub unsafe fn commandcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
     let mut path: *const c_char = null();
 
     let mut opts = crate::options::Options::new(args);
-    while let Some(c) = opts.next(b"pvV")? {
+    while let Some(c) = opts.next(sh, b"pvV")? {
         if c == b'V' {
             verify |= VERIFY_VERBOSE;
         } else if c == b'v' {

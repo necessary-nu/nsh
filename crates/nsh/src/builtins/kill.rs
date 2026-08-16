@@ -34,7 +34,7 @@ pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     if args.len() <= 1 {
         // usage:
-        return Err(crate::error::sh_error_value(&USAGE[..USAGE.len() - 1]));
+        return Err(sh.sh_error_value(&USAGE[..USAGE.len() - 1]));
     }
 
     let mut opts = crate::options::Options::new(args);
@@ -46,7 +46,7 @@ pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         let first = crate::shell::cstring(args[1]);
         signo = crate::trap::decode_signal(first.as_ptr().add(1), 1);
         if signo < 0 {
-            while let Some(c) = opts.next(b"ls:")? {
+            while let Some(c) = opts.next(sh, b"ls:")? {
                 match c {
                     b's' => {
                         let name = crate::shell::cstring(opts.arg());
@@ -54,7 +54,7 @@ pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                         if signo < 0 {
                             let mut message = b"invalid signal number or name: ".to_vec();
                             message.extend_from_slice(name.as_bytes());
-                            return Err(crate::error::sh_error_value(&message));
+                            return Err(sh.sh_error_value(&message));
                         }
                     }
                     /* `default:` (DEBUG: abort()) falls through into 'l' */
@@ -75,7 +75,7 @@ pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     if (((signo < 0 || operands.is_empty()) as c_int) ^ list) != 0 {
         // goto usage
-        return Err(crate::error::sh_error_value(&USAGE[..USAGE.len() - 1]));
+        return Err(sh.sh_error_value(&USAGE[..USAGE.len() - 1]));
     }
 
     if list != 0 {
@@ -93,7 +93,7 @@ pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             return Ok(Flow::Done(0));
         };
         let status = crate::shell::cstring(status);
-        signo = crate::mystring::number(status.as_ptr())?;
+        signo = crate::mystring::number(sh, status.as_ptr())?;
         if signo > 128 {
             signo -= 128;
         }
@@ -106,7 +106,7 @@ pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         } else {
             let mut message = b"invalid signal number or exit status: ".to_vec();
             message.extend_from_slice(status.as_bytes());
-            return Err(crate::error::sh_error_value(&message));
+            return Err(sh.sh_error_value(&message));
         }
         return Ok(Flow::Done(0));
     }
@@ -119,15 +119,15 @@ pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             pid = -ps_pid(sh, jp, 0);
         } else {
             pid = if spec.first() == Some(&b'-') {
-                -crate::mystring::number(target.as_ptr().add(1))?
+                -crate::mystring::number(sh, target.as_ptr().add(1))?
             } else {
-                crate::mystring::number(target.as_ptr())?
+                crate::mystring::number(sh, target.as_ptr())?
             };
         }
         if libc::kill(pid, signo) != 0 {
             let mut message = CStr::from_ptr(libc::strerror(errno())).to_bytes().to_vec();
             message.push(b'\n');
-            crate::error::sh_warnx(&message);
+            sh.sh_warnx(&message);
             i = 1;
         }
     }

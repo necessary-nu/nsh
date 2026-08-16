@@ -135,13 +135,13 @@ pub const ARITH_MAX_PREC: c_int = 8;
 // Here it *builds* the error instead: the diagnostic is still written at
 // this point, in these bytes, but the jump is the caller's `?`. Every
 // caller in this file spells it `return Err(yyerror(..))`.
-unsafe fn yyerror(s: *const c_char) -> Error {
+unsafe fn yyerror(sh: &mut crate::context::Shell, s: *const c_char) -> Error {
     let mut message = b"arithmetic expression: ".to_vec();
     message.extend_from_slice(CStr::from_ptr(s).to_bytes());
     message.extend_from_slice(b": \"");
     message.extend_from_slice(CStr::from_ptr(arith_startbuf).to_bytes());
     message.push(b'"');
-    crate::error::sh_error_value(&message)
+    sh.sh_error_value(&message)
 }
 
 // [spec:dash:def:arith-yacc.arith-prec-fn]
@@ -162,7 +162,7 @@ unsafe fn higher_prec(op1: c_int, op2: c_int) -> c_int {
 // Signed overflow and out-of-range shift counts are undefined in C; the
 // wrapping forms below are the closest match to what the platforms dash
 // targets actually do.
-unsafe fn do_binop(op: c_int, a: intmax_t, b: intmax_t) -> Result<intmax_t, Error> {
+unsafe fn do_binop(sh: &mut crate::context::Shell, op: c_int, a: intmax_t, b: intmax_t) -> Result<intmax_t, Error> {
     Ok(match op {
         ARITH_MUL => a.wrapping_mul(b),
         ARITH_ADD => a.wrapping_add(b),
@@ -181,7 +181,7 @@ unsafe fn do_binop(op: c_int, a: intmax_t, b: intmax_t) -> Result<intmax_t, Erro
         /* default, ARITH_REM, ARITH_DIV */
         _ => {
             if b == 0 || (a == intmax_t::MIN && b == -1) {
-                return Err(yyerror(c"division error".as_ptr()));
+                return Err(yyerror(sh, c"division error".as_ptr()));
             }
             if op == ARITH_REM { a % b } else { a / b }
         }
@@ -206,7 +206,7 @@ unsafe fn primary(
             ARITH_LPAREN => {
                 let result = assignment(sh, op, noeval)?;
                 if last_token != ARITH_RPAREN {
-                    return Err(yyerror(c"expecting ')'".as_ptr()));
+                    return Err(yyerror(sh, c"expecting ')'".as_ptr()));
                 }
                 last_token = yylex();
                 return Ok(result);
@@ -242,7 +242,7 @@ unsafe fn primary(
                 return Ok(!primary(sh, op, val, yylex(), noeval)?);
             }
             _ => {
-                return Err(yyerror(c"expecting primary".as_ptr()));
+                return Err(yyerror(sh, c"expecting primary".as_ptr()));
             }
         }
     }
@@ -280,7 +280,7 @@ unsafe fn binop2(
             op2 = last_token;
         }
 
-        a = if noeval != 0 { b } else { do_binop(op, a, b)? };
+        a = if noeval != 0 { b } else { do_binop(sh, op, a, b)? };
 
         if op2 < ARITH_BINOP_MIN || op2 >= ARITH_BINOP_MAX || arith_prec(op2) >= prec_ {
             return Ok(a);
@@ -379,7 +379,7 @@ unsafe fn cond(
     b = assignment(sh, yylex(), noeval | (a == 0) as c_int)?;
 
     if last_token != ARITH_COLON {
-        return Err(yyerror(c"expecting ':'".as_ptr()));
+        return Err(yyerror(sh, c"expecting ':'".as_ptr()));
     }
 
     let token = yylex();
@@ -417,7 +417,13 @@ unsafe fn assignment(sh: &mut crate::context::Shell, var: c_int, noeval: c_int) 
     let value = if op == ARITH_ASS {
         result
     } else {
-        do_binop(op - 11, lookupvarint(sh, val.name)?, result)?
+        {
+            /* Hoisted for the borrow, not for the order: it is the third
+             * argument and the two before it have no side effects, so
+             * left-to-right evaluation is unchanged. See the note above. */
+            let current = lookupvarint(sh, val.name)?;
+            do_binop(sh, op - 11, current, result)?
+        }
     };
     setvarint(sh, val.name, value, 0)
 }
@@ -436,7 +442,7 @@ pub unsafe fn arith(sh: &mut crate::context::Shell, s: *const c_char) -> Result<
     result = assignment(sh, yylex(), 0)?;
 
     if last_token != 0 {
-        return Err(yyerror(c"expecting EOF".as_ptr()));
+        return Err(yyerror(sh, c"expecting EOF".as_ptr()));
     }
 
     Ok(result)

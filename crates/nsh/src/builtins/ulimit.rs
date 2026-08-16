@@ -152,7 +152,7 @@ unsafe fn printlim(how: limtype, limit: *const libc::rlimit, l: *const limits) {
 
 // [spec:dash:def:miscbltin.ulimitcmd-fn]
 // [spec:dash:sem:miscbltin.ulimitcmd-fn]
-pub unsafe fn ulimitcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut c: c_int;
     let mut val: libc::rlim_t = 0;
     let mut how: limtype = SOFT | HARD;
@@ -168,7 +168,7 @@ pub unsafe fn ulimitcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
      * letter is `#ifdef RLIMIT_*`-guarded in the C source. */
     let mut opts = crate::options::Options::new(args);
     loop {
-        let Some(o) = opts.next(b"HSatfdscmlpnvwr")? else {
+        let Some(o) = opts.next(sh, b"HSatfdscmlpnvwr")? else {
             break;
         };
         optc = o as c_int;
@@ -202,7 +202,7 @@ pub unsafe fn ulimitcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
         let mut p: *mut c_char = limitarg.as_ptr() as *mut c_char;
 
         if all != 0 || operands.len() > 1 {
-            return Err(crate::error::sh_error_value(b"too many arguments"));
+            return Err(sh.sh_error_value(b"too many arguments"));
         }
         if limitarg.as_bytes() == b"unlimited" {
             val = libc::RLIM_INFINITY;
@@ -227,7 +227,7 @@ pub unsafe fn ulimitcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
                 }
             }
             if c != 0 {
-                return Err(crate::error::sh_error_value(b"bad number"));
+                return Err(sh.sh_error_value(b"bad number"));
             }
             val = val.wrapping_mul((*l).factor as libc::rlim_t);
         }
@@ -264,7 +264,7 @@ pub unsafe fn ulimitcmd(_sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
                 CStr::from_ptr(libc::strerror(crate::system::errno())).to_bytes(),
             );
             message.push(b')');
-            return Err(crate::error::sh_error_value(&message));
+            return Err(sh.sh_error_value(&message));
         }
     } else {
         printlim(how, &limit, l);

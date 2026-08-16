@@ -31,7 +31,7 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString};
-use core::ptr::{addr_of, addr_of_mut, null, null_mut};
+use core::ptr::{addr_of_mut, null, null_mut};
 use libc::{c_char, c_int};
 use std::ffi::{CStr, CString};
 use std::io::Write as _;
@@ -114,6 +114,27 @@ pub struct EvalState {
     /// exit status of the last command outside traps, or -1 when no trap
     /// is running. `dotrap` seeds it and `exitreset` restores from it.
     pub(crate) savestatus: c_int,
+    /// The line a diagnostic reports — the `17` of `sh: 17: cd: ...`.
+    ///
+    /// `error.rs`'s `errlinno`. Six sites write it, five of them here
+    /// from the node being evaluated and one in `parser.rs` from the
+    /// line being parsed, and the only reader is the diagnostic prefix.
+    /// It has no row of its own in `docs/api-design.md` §5; it lands
+    /// beside `commandname` because they are written by the same frames
+    /// and read by the same one function.
+    pub(crate) errlinno: c_int,
+    /// The name the running builtin was invoked by, for the error prefix.
+    ///
+    /// dash points this at `argv[0]` and relies on the word outliving the
+    /// call. Owning the bytes states that lifetime instead of assuming
+    /// it, which is what lets `dotcmd` stop keeping its resolved path
+    /// alive in a static of its own.
+    ///
+    /// `docs/api-design.md` §5 groups it here, and `move-state`'s third
+    /// correction confirmed that placement against §5.2's stale claim
+    /// that it is a transient alias: it describes the C's `char *`, and
+    /// the port owns the bytes.
+    pub(crate) commandname: Option<BString>,
 }
 
 impl EvalState {
@@ -128,25 +149,12 @@ impl EvalState {
             tpip: [-1, 0],
             back_exitstatus: 0,
             savestatus: -1,
+            errlinno: 0,
+            commandname: None,
         }
     }
 }
 
-/// The name the running builtin was invoked by, for the error prefix.
-///
-/// dash points this at `argv[0]` and relies on the word outliving the
-/// call. Owning the bytes states that lifetime instead of assuming it,
-/// which is what lets `dotcmd` stop keeping its resolved path alive in a
-/// static of its own.
-///
-/// **Still a `static mut`, and deliberately not in `EvalState`.**
-/// `docs/api-design.md` §5 groups it here and it does belong to the
-/// shell, but the only thing that reads it is `error.rs`'s `sh_warnx`,
-/// which builds the diagnostic prefix — so moving it threads the whole
-/// diagnostic spine (`sh_warnx` -> `report` -> `sh_error_value`, which
-/// the parser and expansion call from everywhere). That is its own
-/// slice and a larger one than this. See the node log.
-pub static mut commandname: Option<BString> = None;
 /* int exitstatus;      exit status of last command      -> Shell::status
  * int back_exitstatus; exit status of backquoted command -> EvalState
  * int savestatus;      status of last command outside traps -> EvalState */
@@ -361,7 +369,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
                         match n.node_type() {
                             NREDIR => {
                                 let r = n.nredir();
-                                crate::error::errlinno = r.linno;
+                                sh.eval.errlinno = r.linno;
                                 sh.vars.lineno = r.linno;
                                 if sh.eval.funcline != 0 {
                                     sh.vars.lineno -= sh.eval.funcline - 1;
@@ -613,7 +621,7 @@ unsafe fn evalfor(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error>
     let mut flags: c_int = flags;
 
     let f = n.nfor();
-    crate::error::errlinno = f.linno;
+    sh.eval.errlinno = f.linno;
     sh.vars.lineno = f.linno;
     if sh.eval.funcline != 0 {
         sh.vars.lineno -= sh.eval.funcline - 1;
@@ -645,7 +653,7 @@ unsafe fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
     let mut status: c_int = 0;
 
     let c = n.ncase();
-    crate::error::errlinno = c.linno;
+    sh.eval.errlinno = c.linno;
     sh.vars.lineno = c.linno;
     if sh.eval.funcline != 0 {
         sh.vars.lineno -= sh.eval.funcline - 1;
@@ -700,7 +708,7 @@ unsafe fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, E
     let mut flags: c_int = flags;
 
     let r = n.nredir();
-    crate::error::errlinno = r.linno;
+    sh.eval.errlinno = r.linno;
     sh.vars.lineno = r.linno;
     if sh.eval.funcline != 0 {
         sh.vars.lineno -= sh.eval.funcline - 1;
@@ -863,7 +871,7 @@ unsafe fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
                  * and left the counter raised. Pairing them with a guard
                  * would move the instruction a pending SIGINT is delivered
                  * at, which `docs/errors-are-values.md` §2.4 forbids. */
-                return Err(crate::error::sh_error_value(b"Pipe call failed"));
+                return Err(sh.sh_error_value(b"Pipe call failed"));
             }
         }
         if crate::jobs::forkshell(sh, Some(jp), Some(cmd), p.backgnd)? == 0 {
@@ -927,7 +935,7 @@ pub unsafe fn evalbackcmd(
             break 'out_lbl;
         }
 
-        crate::redir::sh_pipe(pip.as_mut_ptr(), 0)?;
+        crate::redir::sh_pipe(sh, pip.as_mut_ptr(), 0)?;
         sh.eval.tpip[0] = pip[0];
         sh.eval.tpip[1] = pip[1];
         jp = crate::jobs::makejob(sh, 1);
@@ -1106,7 +1114,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
     let mut vlocal: c_int;
 
     let c = cmd.ncmd();
-    crate::error::errlinno = c.linno;
+    sh.eval.errlinno = c.linno;
     sh.vars.lineno = c.linno;
     if sh.eval.funcline != 0 {
         sh.vars.lineno -= sh.eval.funcline - 1;
@@ -1424,7 +1432,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                     debug_assert_eq!(e.status(), status, "a redirection error keeps its status");
                     e
                 }
-                None => crate::error::Error::reported(status),
+                None => crate::error::Error::reported(sh.eval.errlinno, status),
             });
         }
 
@@ -1458,10 +1466,10 @@ unsafe fn evalbltin(
 ) -> Result<Flow, Error> {
     let savecmdname: Option<BString>; /* volatile */
 
-    savecmdname = core::mem::take(&mut *addr_of_mut!(commandname));
+    savecmdname = core::mem::take(&mut sh.eval.commandname);
     /* `commandname = argv[0]`, and NULL for the command that has no word
      * at all -- the assignment-only one `bltin` stands for. */
-    commandname = args.first().map(|name| BString::from(<&BStr as AsRef<[u8]>>::as_ref(name)));
+    sh.eval.commandname = args.first().map(|name| BString::from(<&BStr as AsRef<[u8]>>::as_ref(name)));
 
     let outcome = (|| -> Result<Flow, Error> {
         let mut status: c_int = match if cmd == crate::builtins::EVALCMD {
@@ -1478,11 +1486,11 @@ unsafe fn evalbltin(
         crate::output::flushall();
         if crate::output::outerr(crate::output::stdout()) != 0 {
             let mut message = Vec::new();
-            if let Some(name) = &*addr_of!(commandname) {
+            if let Some(name) = &sh.eval.commandname {
                 message.extend_from_slice(name);
             }
             message.extend_from_slice(b": I/O error");
-            crate::error::sh_warnx(&message);
+            sh.sh_warnx(&message);
         }
         status |= crate::output::outerr(crate::output::stdout());
         sh.status = status;
@@ -1496,7 +1504,7 @@ unsafe fn evalbltin(
      * on every path here because there is only one way out now. `handler`
      * was the third thing it restored and there is no handler left. */
     crate::output::freestdout();
-    commandname = savecmdname;
+    sh.eval.commandname = savecmdname;
 
     outcome
 }

@@ -1570,7 +1570,7 @@ unsafe fn subevalvar(
                  * `#[must_use]` so the compiler now names it. */
                 let umsg = crate::mystring::cstr_prefix(&expb()[startp..]);
                 let var = str.expect("VSQUESTION carries the variable's name");
-                return Err(varunset(text, start, var, Some(umsg), varflags));
+                return Err(varunset(sh, text, start, var, Some(umsg), varflags));
             }
             _ => {}
         }
@@ -1774,7 +1774,7 @@ unsafe fn evalvar(
 
         if (discard & !flag) != 0 && uflag(sh) != 0 {
             /* A stop before `varunset` stopped diverging, and still one. */
-            return Err(varunset(text, p, var, None, 0));
+            return Err(varunset(sh, text, p, var, None, 0));
         }
 
         if subtype == VSLENGTH {
@@ -2102,7 +2102,7 @@ unsafe fn varvalue(
             return Ok(-1);
         }
 
-        return Err(crate::error::sh_error_value(b"Bad substitution"));
+        return Err(sh.sh_error_value(b"Bad substitution"));
     }
 
     flags &= if discard != 0 {
@@ -2712,7 +2712,7 @@ unsafe extern "C" fn opendir_interruptible(pathname: *const c_char) -> *mut c_vo
 
 // [spec:dash:def:expand.expandmeta-glob-fn]
 // [spec:dash:sem:expand.expandmeta-glob-fn]
-unsafe fn expandmeta_glob(sh: &crate::context::Shell, words: Vec<strlist>) -> Result<(), Error> {
+unsafe fn expandmeta_glob(sh: &mut crate::context::Shell, words: Vec<strlist>) -> Result<(), Error> {
     for mut str in words {
         let p: *const c_char;
         let mut pglob: crate::system::glob64_t = mem::zeroed();
@@ -2772,7 +2772,7 @@ unsafe fn expandmeta_glob(sh: &crate::context::Shell, words: Vec<strlist>) -> Re
                     } else {
                         /* default:  GLOB_NOSPACE. A stop before and after:
                          * the arm falls into `nometa2` otherwise. */
-                        return Err(crate::error::sh_error_value(b"Out of space"));
+                        return Err(sh.sh_error_value(b"Out of space"));
                     }
                 }
                 /* nometa2: */
@@ -2808,7 +2808,7 @@ unsafe fn addglob(pglob: *const crate::system::glob64_t) {
 
 // [spec:dash:def:expand.expandmeta-fn]
 // [spec:dash:sem:expand.expandmeta-fn]
-unsafe fn expandmeta(sh: &crate::context::Shell, words: Vec<strlist>) -> Result<(), Error> {
+unsafe fn expandmeta(sh: &mut crate::context::Shell, words: Vec<strlist>) -> Result<(), Error> {
     /* TODO - EXP_REDIR */
 
     if GLOB_IS_ENABLED {
@@ -3650,7 +3650,7 @@ unsafe fn cvtnum(num: intmax_t, flags: c_int, dst: &mut BString) -> size_t {
 
 // [spec:dash:def:expand.varunset-fn]
 // [spec:dash:sem:expand.varunset-fn]
-unsafe fn varunset(
+unsafe fn varunset(sh: &mut crate::context::Shell, 
     text: &[u8],
     end: usize,
     var: usize,
@@ -3685,7 +3685,7 @@ unsafe fn varunset(
     message.extend_from_slice(b": ");
     message.extend_from_slice(msg);
     message.extend_from_slice(tail);
-    crate::error::sh_error_value(&message)
+    sh.sh_error_value(&message)
 }
 
 /// The `out:` tail `redirectsafe` and `expandstr` share: decide whether

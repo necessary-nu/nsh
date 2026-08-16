@@ -29,11 +29,11 @@ const CD_PRINT: c_int = 2;
 
 // [spec:dash:def:cd.cdopt-fn]
 // [spec:dash:sem:cd.cdopt-fn]
-pub(crate) unsafe fn cdopt(opts: &mut Options) -> Result<c_int, Error> {
+pub(crate) unsafe fn cdopt(sh: &mut crate::context::Shell, opts: &mut Options) -> Result<c_int, Error> {
     let mut flags: c_int = 0;
     let mut j: u8 = b'L';
 
-    while let Some(i) = opts.next(b"LP")? {
+    while let Some(i) = opts.next(sh, b"LP")? {
         if i != j {
             flags ^= CD_PHYSICAL;
             j = i;
@@ -55,7 +55,7 @@ pub unsafe fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut len: c_int;
 
     let mut opts = Options::new(args);
-    flags = cdopt(&mut opts)?;
+    flags = cdopt(sh, &mut opts)?;
     /* The operand outlives every reader below, which is what the C got
      * from `argv` living in `evalcommand`'s frame. */
     let operand = opts.operands().first().map(|d| crate::shell::cstring(d));
@@ -134,7 +134,7 @@ pub unsafe fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 /* goto err */
                 let mut message = b"can't cd to ".to_vec();
                 message.extend_from_slice(CStr::from_ptr(dest).to_bytes());
-                return Err(crate::error::sh_error_value(&message));
+                return Err(sh.sh_error_value(&message));
             }
         }
     }
@@ -147,7 +147,7 @@ pub unsafe fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             /* err: */
             let mut message = b"can't cd to ".to_vec();
             message.extend_from_slice(CStr::from_ptr(dest).to_bytes());
-            return Err(crate::error::sh_error_value(&message));
+            return Err(sh.sh_error_value(&message));
         }
     }
 
@@ -284,7 +284,8 @@ mod tests {
     fn opts(words: &[&[u8]]) -> c_int {
         let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
         let mut scan = Options::new(&args);
-        unsafe { cdopt(&mut scan) }.unwrap()
+        let mut owned = crate::context::Shell::new();
+        unsafe { cdopt(&mut owned, &mut scan) }.unwrap()
     }
 
     #[test]
@@ -313,7 +314,8 @@ mod tests {
     fn the_scan_stops_at_the_operand() {
         let args = [BStr::new("cd"), BStr::new("-P"), BStr::new("dir")];
         let mut scan = Options::new(&args);
-        assert_eq!(unsafe { cdopt(&mut scan) }.unwrap(), CD_PHYSICAL);
+        let mut owned = crate::context::Shell::new();
+        assert_eq!(unsafe { cdopt(&mut owned, &mut scan) }.unwrap(), CD_PHYSICAL);
         assert_eq!(scan.operands(), [BStr::new("dir")]);
     }
 }

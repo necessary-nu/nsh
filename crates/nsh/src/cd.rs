@@ -69,7 +69,7 @@ pub(crate) unsafe fn cbytes(s: &Option<BString>) -> Vec<u8> {
 
 // [spec:dash:def:cd.getpwd-fn]
 // [spec:dash:sem:cd.getpwd-fn]
-unsafe fn getpwd() -> Option<BString> {
+unsafe fn getpwd(sh: &mut crate::context::Shell) -> Option<BString> {
     match std::env::current_dir() {
         Ok(dir) => return Some(BString::from(dir.as_os_str().as_bytes())),
         Err(err) => {
@@ -78,7 +78,7 @@ unsafe fn getpwd() -> Option<BString> {
             let errno = err.raw_os_error().unwrap_or(libc::EIO);
             let mut message = b"getcwd() failed: ".to_vec();
             message.extend_from_slice(CStr::from_ptr(libc::strerror(errno)).to_bytes());
-            crate::error::sh_warnx(&message);
+            sh.sh_warnx(&message);
         }
     }
     None
@@ -125,7 +125,7 @@ pub(crate) unsafe fn setpwd_inner(sh: &mut crate::context::Shell, val: Pwd, seto
     sh.cwd.physdir = None;
     match val {
         Pwd::Unknown | Pwd::Current => {
-            let s = getpwd();
+            let s = getpwd(sh);
             if matches!(val, Pwd::Unknown) {
                 sh.cwd.curdir = s.clone();
             }
@@ -171,6 +171,8 @@ mod tests {
     // [spec:dash:sem:cd.getpwd-fn/test]
     #[test]
     fn getpwd_preserves_non_utf8_path_bytes() {
+        let mut owned_sh = crate::context::Shell::new();
+        let sh = &mut owned_sh;
         let _g = crate::testutil::lock();
         {
             let old = std::env::current_dir().unwrap();
@@ -184,7 +186,7 @@ mod tests {
             };
             std::env::set_current_dir(&temporary).unwrap();
 
-            let got = unsafe { getpwd().unwrap() };
+            let got = unsafe { getpwd(sh).unwrap() };
             assert_eq!(&got[..], temporary.as_os_str().as_bytes());
             assert!(!got.contains(&0));
         }
@@ -201,7 +203,7 @@ mod tests {
             std::env::set_current_dir(&temporary).unwrap();
             std::fs::remove_dir(&temporary).unwrap();
 
-            assert!(unsafe { getpwd() }.is_none());
+            assert!(unsafe { getpwd(sh) }.is_none());
         }
     }
 }

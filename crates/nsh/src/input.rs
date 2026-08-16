@@ -448,12 +448,16 @@ unsafe fn stdin_tee(sh: &mut Shell, buf: *mut c_void, nr: c_int) -> Result<c_int
     let err: c_int;
 
     if sh.input.stdin_state.pip[0] == 0 {
-        crate::redir::sh_pipe(addr_of_mut!(sh.input.stdin_state.pip) as *mut c_int, 0)?;
+        /* The pointer is taken before the call, not inside its argument
+         * list: `sh_pipe` now borrows the shell, and deriving the pointer
+         * from the same shell in an argument borrows it twice. */
+        let pip = addr_of_mut!(sh.input.stdin_state.pip) as *mut c_int;
+        crate::redir::sh_pipe(sh, pip, 0)?;
         if sh.input.stdin_state.pip[0] < 10 {
-            sh.input.stdin_state.pip[0] = crate::redir::savefd(sh.input.stdin_state.pip[0], sh.input.stdin_state.pip[0])?;
+            sh.input.stdin_state.pip[0] = crate::redir::savefd(sh, sh.input.stdin_state.pip[0], sh.input.stdin_state.pip[0])?;
         }
         if sh.input.stdin_state.pip[1] < 10 {
-            sh.input.stdin_state.pip[1] = crate::redir::savefd(sh.input.stdin_state.pip[1], sh.input.stdin_state.pip[1])?;
+            sh.input.stdin_state.pip[1] = crate::redir::savefd(sh, sh.input.stdin_state.pip[1], sh.input.stdin_state.pip[1])?;
         }
     }
 
@@ -974,7 +978,7 @@ pub unsafe fn setinputfile(sh: &mut crate::context::Shell, fname: *const c_char,
         return Ok(fd); /* goto out */
     }
     if fd < 10 {
-        fd = crate::redir::savefd(fd, fd)?;
+        fd = crate::redir::savefd(sh, fd, fd)?;
     }
     setinputfd(sh, fd, flags & INPUT_PUSH_FILE);
     INTON();

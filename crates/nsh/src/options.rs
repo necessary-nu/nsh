@@ -283,7 +283,7 @@ pub unsafe fn procargs(sh: &mut crate::context::Shell, mut xargv: *mut *mut c_ch
     xargv = xargv.add(scan.next);
     if (*xargv).is_null() {
         if scan.minus_c {
-            return Err(crate::error::sh_error_value(b"-c requires an argument"));
+            return Err(sh.sh_error_value(b"-c requires an argument"));
         }
         sh.options.set_flag(sflag, 1);
     }
@@ -504,7 +504,7 @@ unsafe fn minus_o(sh: &mut crate::context::Shell, name: Option<&BStr>, val: c_in
         }
         let mut message = b"Illegal option -o ".to_vec();
         message.extend_from_slice(name.as_bytes());
-        return Err(crate::error::sh_error_value(&message));
+        return Err(sh.sh_error_value(&message));
     }
     Ok(())
 }
@@ -532,7 +532,7 @@ unsafe fn setoption(sh: &mut crate::context::Shell, flag: u8, val: c_int) -> Res
     }
     let mut message = b"Illegal option -".to_vec();
     message.push(flag);
-    Err(crate::error::sh_error_value(&message))
+    Err(sh.sh_error_value(&message))
 }
 
 /*
@@ -665,13 +665,18 @@ impl<'a> Options<'a> {
     /// `optstring` is the C's, minus its terminator: a letter, optionally
     /// followed by `:` to say the option takes an argument.
     ///
-    /// # Safety
-    ///
-    /// An unrecognised option or a missing option argument raises, so this
-    /// unwinds through the caller's frame like every other `sh_error`.
+    /// The shell is a parameter and not a field, because `Options`
+    /// borrows the caller's argument words and a field would put a borrow
+    /// of caller data next to a borrow of the shell — `docs/api-design.md`
+    /// §5.5's rule. It is here at all because an unrecognised option
+    /// writes a diagnostic, and writing one needs the shell that reports.
     // [spec:dash:def:options.nextopt-fn]
     // [spec:dash:sem:options.nextopt-fn]
-    pub unsafe fn next(&mut self, optstring: &[u8]) -> Result<Option<u8>, Error> {
+    pub unsafe fn next(
+        &mut self,
+        sh: &mut crate::context::Shell,
+        optstring: &[u8],
+    ) -> Result<Option<u8>, Error> {
         /* `p = optptr; if (p == NULL || *p == '\0')` -- the run in
          * progress is exhausted, so the next word starts a new one. */
         let (word, mut off) = match self.run {
@@ -714,7 +719,7 @@ impl<'a> Options<'a> {
                 let mut message = b"Illegal option -".to_vec();
                 message.push(c);
                 /* A stop: the loop would spin on the terminator. */
-                return Err(crate::error::sh_error_value(&message));
+                return Err(sh.sh_error_value(&message));
             }
             q += 1;
             if optstring.get(q) == Some(&b':') {
@@ -741,7 +746,7 @@ impl<'a> Options<'a> {
                         message.extend_from_slice(b" option");
                         /* A stop: `arg()` would otherwise be asked for an
                          * `optionarg` that was never set. */
-                        return Err(crate::error::sh_error_value(&message));
+                        return Err(sh.sh_error_value(&message));
                     }
                 }
             }
@@ -810,12 +815,14 @@ mod tests {
     /// start, and every builtin reads its operands from there.
     fn scan<'a>(args: &'a [&'a BStr], optstring: &[u8]) -> (Vec<u8>, Vec<&'a BStr>) {
         let mut opts = Options::new(args);
+        let mut owned_sh = crate::context::Shell::new();
+        let sh = &mut owned_sh;
         let mut seen = Vec::new();
         /* `Ok(Some(c))` would end the scan silently on an error and make
          * a failure look like a short option list, so the error is taken
          * loudly: every option string these cases use accepts every
          * option they hand it. */
-        while let Some(c) = unsafe { opts.next(optstring) }
+        while let Some(c) = unsafe { opts.next(sh, optstring) }
             .expect("the scan's cases never pass an option the string rejects")
         {
             seen.push(c);
@@ -845,21 +852,25 @@ mod tests {
 
     #[test]
     fn option_arg_from_same_word() {
+        let mut owned_sh = crate::context::Shell::new();
+        let sh = &mut owned_sh;
         let args = words(&[b"read", b"-pPROMPT", b"var"]);
         let mut opts = Options::new(&args);
-        assert_eq!(unsafe { opts.next(b"p:r") }.unwrap(), Some(b'p'));
+        assert_eq!(unsafe { opts.next(sh, b"p:r") }.unwrap(), Some(b'p'));
         assert_eq!(opts.arg(), BStr::new(b"PROMPT"));
-        assert_eq!(unsafe { opts.next(b"p:r") }.unwrap(), None);
+        assert_eq!(unsafe { opts.next(sh, b"p:r") }.unwrap(), None);
         assert_eq!(opts.operands(), words(&[b"var"]));
     }
 
     #[test]
     fn option_arg_from_next_word() {
+        let mut owned_sh = crate::context::Shell::new();
+        let sh = &mut owned_sh;
         let args = words(&[b"read", b"-p", b"PROMPT", b"var"]);
         let mut opts = Options::new(&args);
-        assert_eq!(unsafe { opts.next(b"p:r") }.unwrap(), Some(b'p'));
+        assert_eq!(unsafe { opts.next(sh, b"p:r") }.unwrap(), Some(b'p'));
         assert_eq!(opts.arg(), BStr::new(b"PROMPT"));
-        assert_eq!(unsafe { opts.next(b"p:r") }.unwrap(), None);
+        assert_eq!(unsafe { opts.next(sh, b"p:r") }.unwrap(), None);
         assert_eq!(opts.operands(), words(&[b"var"]));
     }
 
@@ -914,7 +925,7 @@ mod tests {
     /// is where it stopped, which is what decides the positional
     /// parameters -- so the boundary between options and operands is the
     /// property worth pinning.
-    fn scan_options(raw: &[&[u8]], cmdline: bool) -> (usize, bool, c_int) {
+    fn scan_options(sh: &mut crate::context::Shell, raw: &[&[u8]], cmdline: bool) -> (usize, bool, c_int) {
         let _guard = crate::testutil::lock();
         let mut owned = crate::context::Shell::new();
         let sh = &mut owned;
@@ -925,13 +936,17 @@ mod tests {
 
     #[test]
     fn scan_stops_at_the_first_operand() {
-        let (next, _, _) = scan_options(&[b"-x", b"file", b"-y"], false);
+        let mut owned_sh = crate::context::Shell::new();
+        let sh = &mut owned_sh;
+        let (next, _, _) = scan_options(sh, &[b"-x", b"file", b"-y"], false);
         assert_eq!(next, 1);
     }
 
     #[test]
     fn scan_consumes_a_double_dash() {
-        let (next, _, _) = scan_options(&[b"--", b"a"], false);
+        let mut owned_sh = crate::context::Shell::new();
+        let sh = &mut owned_sh;
+        let (next, _, _) = scan_options(sh, &[b"--", b"a"], false);
         assert_eq!(next, 1);
     }
 
@@ -939,13 +954,17 @@ mod tests {
     /// scan, where it stays an operand.
     #[test]
     fn scan_consumes_a_lone_dash() {
-        let (next, _, _) = scan_options(&[b"-", b"a"], false);
+        let mut owned_sh = crate::context::Shell::new();
+        let sh = &mut owned_sh;
+        let (next, _, _) = scan_options(sh, &[b"-", b"a"], false);
         assert_eq!(next, 1);
     }
 
     #[test]
     fn minus_o_takes_next_word() {
-        let (next, _, _) = scan_options(&[b"-o", b"noglob", b"rest"], false);
+        let mut owned_sh = crate::context::Shell::new();
+        let sh = &mut owned_sh;
+        let (next, _, _) = scan_options(sh, &[b"-o", b"noglob", b"rest"], false);
         assert_eq!(next, 2);
     }
 
@@ -953,15 +972,19 @@ mod tests {
     /// ordinary letter, and `set -c` is an error rather than a command.
     #[test]
     fn minus_c_is_command_line_only() {
-        let (_, minus_c, login) = scan_options(&[b"-c", b"echo hi"], true);
+        let mut owned_sh = crate::context::Shell::new();
+        let sh = &mut owned_sh;
+        let (_, minus_c, login) = scan_options(sh, &[b"-c", b"echo hi"], true);
         assert!(minus_c);
-        let (_, _, login_off) = scan_options(&[b"-l"], true);
+        let (_, _, login_off) = scan_options(sh, &[b"-l"], true);
         assert_eq!((login, login_off), (0, 1));
     }
 
     #[test]
     fn empty_word_is_not_an_option() {
-        let (next, _, _) = scan_options(&[b"", b"-x"], false);
+        let mut owned_sh = crate::context::Shell::new();
+        let sh = &mut owned_sh;
+        let (next, _, _) = scan_options(sh, &[b"", b"-x"], false);
         assert_eq!(next, 0);
     }
 

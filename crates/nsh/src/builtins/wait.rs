@@ -26,7 +26,7 @@ pub unsafe fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut jp: Option<usize>;
 
     let mut opts = crate::options::Options::new(args);
-    opts.next(b"")?;
+    opts.next(sh, b"")?;
     retval = 0;
 
     let operands = opts.operands();
@@ -59,7 +59,7 @@ pub unsafe fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             let target = crate::shell::cstring(spec);
             'repeat: {
                 if spec.first() != Some(&b'%') {
-                    let pid: pid_t = crate::mystring::number(target.as_ptr())?;
+                    let pid: pid_t = crate::mystring::number(sh, target.as_ptr())?;
                     jobp = sh.jobs.curjob;
                     /* `goto start` enters the do/while at `start:` */
                     let mut at_start = true;

@@ -33,7 +33,7 @@ pub unsafe fn exportcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     };
 
     let mut opts = Options::new(args);
-    let notp = opts.next(b"p")?.is_none();
+    let notp = opts.next(sh, b"p")?.is_none();
     let operands = opts.operands();
     if notp && !operands.is_empty() {
         for word in operands {

@@ -20,7 +20,7 @@ pub unsafe fn unaliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
     let mut i: c_int;
 
     let mut opts = Options::new(args);
-    while let Some(opt) = opts.next(b"a")? {
+    while let Some(opt) = opts.next(sh, b"a")? {
         if opt == b'a' {
             rmaliases(sh);
             return Ok(Flow::Done(0));

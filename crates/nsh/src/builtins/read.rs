@@ -104,7 +104,7 @@ pub unsafe fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     rflag = 0;
     prompt = None;
     let mut opts = crate::options::Options::new(args);
-    while let Some(i) = opts.next(b"p:r")? {
+    while let Some(i) = opts.next(sh, b"p:r")? {
         if i == b'p' {
             prompt = Some(crate::shell::cstring(opts.arg()));
         } else {
@@ -118,7 +118,7 @@ pub unsafe fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
     let names = opts.operands();
     if names.is_empty() {
-        return Err(crate::error::sh_error_value(b"arg count"));
+        return Err(sh.sh_error_value(b"arg count"));
     }
 
     status = 0;

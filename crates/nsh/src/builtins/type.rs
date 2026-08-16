@@ -31,7 +31,7 @@ pub unsafe fn typecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut err: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
-    opts.next(b"")?;
+    opts.next(sh, b"")?;
     for name in opts.operands() {
         let name = crate::shell::cstring(name);
         match describe_command(
