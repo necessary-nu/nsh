@@ -224,7 +224,7 @@ impl Builder {
 /// The leak is deliberate and bounded: `arg0` is read for the lifetime of
 /// every diagnostic the shell writes, and one buffer per built shell is
 /// what the C had per process.
-unsafe fn set_arg0(arg0: &BStr) {
+pub(crate) unsafe fn set_arg0(arg0: &BStr) {
     let mut bytes: Vec<u8> = Vec::with_capacity(arg0.len() + 1);
     bytes.extend_from_slice(&arg0[..]);
     bytes.push(0);

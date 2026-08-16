@@ -269,6 +269,126 @@ impl Shell {
         }
     }
 
+    /// Run `command` with `args` as its `$0` and positional parameters.
+    ///
+    /// This is `sh -c command name arg…`: `args[0]` is `$0`, and the rest
+    /// are `$1`, `$2`, ….
+    ///
+    /// **Passing data as a positional parameter rather than interpolating
+    /// it into `command` is the only way to keep it out of the parser**,
+    /// so this is the injection-safe form, and that is why it sits on the
+    /// surface beside [`Shell::run`] rather than being left to the caller
+    /// to assemble. A file name with a quote in it, a value that begins
+    /// with `-`, a `$(…)` an attacker chose: all of them are one argument
+    /// here and none of them is syntax.
+    ///
+    /// The parameters persist afterwards, exactly as `sh -c` leaves them.
+    pub fn run_command(&mut self, command: &BStr, args: &[&BStr]) -> Result<ExitStatus, Error> {
+        unsafe {
+            if let Some(arg0) = args.first() {
+                crate::builder::set_arg0(arg0);
+            }
+            let rest: Vec<&BStr> = args.iter().skip(1).copied().collect();
+            crate::options::setparam(self, &rest);
+        }
+        self.run(command)
+    }
+
+    /// Expand one word as the shell would in command position, and give
+    /// back the fields it becomes.
+    ///
+    /// Tilde, parameter, command and arithmetic substitution, then field
+    /// splitting on `$IFS`, then pathname expansion, then quote removal.
+    /// One word is zero, one or many fields: `$x` with `x='a b'` is two,
+    /// `$x` with `x=''` is none, `*.txt` is however many files match.
+    ///
+    /// **This executes.** Command substitution is part of word expansion,
+    /// so `expand_word(b"$(rm -rf /)")` runs the command. There is no mode
+    /// that expands without executing, because the shell language does not
+    /// have one, and offering one that quietly skipped `$(…)` would be a
+    /// different language wearing this one's syntax.
+    pub fn expand_word(&mut self, word: &BStr) -> Result<Vec<BString>, Error> {
+        unsafe {
+            self.expand(
+                word,
+                crate::expand::EXP_FULL | crate::expand::EXP_TILDE,
+            )
+        }
+    }
+
+    /// Expand one word as if it appeared inside double quotes: no field
+    /// splitting, no pathname expansion, always exactly one result.
+    ///
+    /// The same caveat about command substitution applies. This is the
+    /// flag a here-document is expanded under, which is what makes it the
+    /// shell's own idea of "quoted" rather than a second one.
+    pub fn expand_word_quoted(&mut self, word: &BStr) -> Result<BString, Error> {
+        unsafe {
+            let mut fields = self.expand(word, crate::expand::EXP_QUOTED)?;
+            /* `expandarg` without `EXP_FULL` pushes exactly one field, so
+             * the empty case is unreachable rather than defaulted. */
+            Ok(fields.pop().unwrap_or_default())
+        }
+    }
+
+    /// Tokenize `word` as one word and expand it under `flag`.
+    ///
+    /// The tokenizer is not skipped, and that is the point: `expandarg`
+    /// takes an `NARG` node, whose text carries the `CTL*` markers that
+    /// say where a `$` was quoted and where a `*` is a glob. Handing it
+    /// raw bytes would expand a *different* word from the one the shell
+    /// would have seen. So this is what the parser does for an argument —
+    /// `readtoken` into `wordtext`, `makename` into a node — with the
+    /// keyword and alias checks off, because a single word in isolation is
+    /// neither.
+    unsafe fn expand(&mut self, word: &BStr, flag: libc::c_int) -> Result<Vec<BString>, Error> {
+        let mark = self.input.mark();
+        let old_floor = self.input.floor();
+
+        let mut text: Vec<u8> = Vec::with_capacity(word.len() + 1);
+        text.extend_from_slice(word.as_ref());
+        text.push(0);
+        crate::input::setinputstring(self, text.as_mut_ptr() as *mut libc::c_char);
+        self.input.set_floor(self.input.mark());
+        crate::parser::checkkwd = 0;
+
+        let expanded = (|sh: &mut Shell| -> Result<Vec<BString>, Error> {
+            let t = crate::parser::readtoken(sh)?;
+            if t != crate::parser::TWORD {
+                /* An empty word is the honest answer for empty input, and
+                 * anything else here is syntax the caller wrote rather
+                 * than a word — a `;` or a `|` cannot be expanded. */
+                return Ok(Vec::new());
+            }
+            let n = crate::parser::makename(sh);
+            let mut list = crate::expand::arglist::new();
+            crate::expand::expandarg(sh, &n, Some(&mut list), flag)?;
+            Ok(list
+                .list
+                .into_iter()
+                .map(|s| {
+                    /* The unsplit field is the expansion buffer whole,
+                     * terminator and all, because its other readers -- a
+                     * here-document, `expredir` -- go on to read it as a C
+                     * string. A field cannot contain a NUL, so dropping
+                     * one trailing byte is exact rather than a heuristic,
+                     * and it is a no-op for the split fields, which
+                     * `ifsbreakup` already cut short of it. */
+                    let mut t = s.text;
+                    if t.last() == Some(&0) {
+                        t.pop();
+                    }
+                    t
+                })
+                .collect())
+        })(self);
+
+        crate::input::unwindfiles(self, mark);
+        self.input.set_floor(old_floor);
+        drop(text);
+        expanded
+    }
+
     /// The status of the last command the shell ran, which is `$?`.
     pub fn status(&self) -> ExitStatus {
         ExitStatus::from_raw(self.status)
@@ -374,6 +494,95 @@ mod tests {
         let st = sh.run(Source::stream()).unwrap();
         assert_eq!(st.code(), 5);
         unsafe { libc::close(fds[0]) };
+    }
+
+    /// The whole reason `run_command` is on the surface: a value with
+    /// quotes, a `$` and a leading `-` in it goes in as data and comes out
+    /// as data, because it never reaches the parser.
+    #[test]
+    fn a_positional_parameter_is_data_rather_than_syntax() {
+        let _g = crate::testutil::lock();
+        let mut sh = Shell::builder()
+            .streams(crate::streams::Streams::capture().unwrap())
+            .build()
+            .unwrap();
+        let hostile = BStr::new(b"a file with 'quotes' and $HOME in it");
+        sh.run_command(
+            BStr::new(b"printf '%s' \"$1\""),
+            &[BStr::new(b"myapp"), hostile],
+        )
+        .unwrap();
+        let out = sh.take_captured_stdout().unwrap();
+        assert_eq!(out, hostile);
+    }
+
+    /// Capture is a file, so a script that writes more than a pipe buffer
+    /// cannot deadlock against a host that has not read yet -- which is
+    /// the reason it is a file. 256 KiB is well past the 64 KiB pipe.
+    #[test]
+    fn a_capture_holds_more_than_a_pipe_would() {
+        let _g = crate::testutil::lock();
+        let mut sh = Shell::builder()
+            .streams(crate::streams::Streams::capture().unwrap())
+            .build()
+            .unwrap();
+        sh.run(b"i=0; while [ $i -lt 4096 ]; do printf '%064d' $i; i=$((i+1)); done")
+            .unwrap();
+        let out = sh.take_captured_stdout().unwrap();
+        assert_eq!(out.len(), 4096 * 64);
+        /* And it is emptied, so "since the last call" is true. */
+        assert!(sh.take_captured_stdout().unwrap().is_empty());
+    }
+
+    /// One word is zero, one or many fields, and splitting is on `$IFS`.
+    #[test]
+    fn an_unquoted_word_splits_and_a_quoted_one_does_not() {
+        let _g = crate::testutil::lock();
+        let mut sh = Shell::builder().build().unwrap();
+        sh.set_var(BStr::new(b"x"), BStr::new(b"a b c")).unwrap();
+        assert_eq!(sh.expand_word(BStr::new(b"$x")).unwrap().len(), 3);
+        assert_eq!(
+            sh.expand_word_quoted(BStr::new(b"$x")).unwrap(),
+            BStr::new(b"a b c")
+        );
+        sh.set_var(BStr::new(b"e"), BStr::new(b"")).unwrap();
+        assert_eq!(sh.expand_word(BStr::new(b"$e")).unwrap().len(), 0);
+    }
+
+    /// The tokenizer is not skipped, which is what makes a quoted `$` and
+    /// a defaulted parameter mean here what they mean in a script.
+    #[test]
+    fn expansion_sees_the_word_the_parser_would_have() {
+        let _g = crate::testutil::lock();
+        let mut sh = Shell::builder().build().unwrap();
+        assert_eq!(
+            sh.expand_word_quoted(BStr::new(b"${NSH_UNSET_PROBE:-vi}"))
+                .unwrap(),
+            BStr::new(b"vi")
+        );
+        assert_eq!(
+            sh.expand_word(BStr::new(b"\\$HOME")).unwrap(),
+            vec![BString::from(&b"$HOME"[..])]
+        );
+    }
+
+    /// The table, read and written from outside the language.
+    #[test]
+    fn a_variable_set_from_outside_is_the_one_a_script_reads() {
+        let _g = crate::testutil::lock();
+        let mut sh = Shell::builder().build().unwrap();
+        sh.set_var(BStr::new(b"greeting"), BStr::new(b"hello"))
+            .unwrap();
+        assert_eq!(sh.var(BStr::new(b"greeting")), Some(BStr::new(b"hello")));
+        sh.run(b"greeting=$greeting-again").unwrap();
+        assert_eq!(
+            sh.var(BStr::new(b"greeting")),
+            Some(BStr::new(b"hello-again"))
+        );
+        assert!(sh.vars().iter().any(|(k, _)| k == "greeting"));
+        assert!(sh.unset_var(BStr::new(b"greeting")).unwrap());
+        assert_eq!(sh.var(BStr::new(b"greeting")), None);
+        assert!(!sh.unset_var(BStr::new(b"greeting")).unwrap());
     }
 
     /// The `EXIT` trap runs, which is the reason `run` calls `exitshell`

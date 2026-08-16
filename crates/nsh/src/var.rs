@@ -1326,6 +1326,105 @@ pub(crate) unsafe fn findvar(sh: &mut Shell, name: *const c_char) -> *mut var {
     }
 }
 
+/// The variable table, as an embedder reaches it.
+///
+/// `docs/api-design.md` §2. These are the table and not the *language*:
+/// `$?`, `$#`, `$1` and `$@` are not variables and are not here.
+/// [`Shell::status`] is `$?`, and [`Shell::expand_word`] reads the rest.
+impl Shell {
+    /// Read a shell variable.
+    ///
+    /// **`&mut self` where the sketch had `&self`**, and dash is the
+    /// reason rather than an implementation detail: `$LINENO` is computed
+    /// on read. `lookupvar` rewrites the `LINENO` entry's buffer from the
+    /// parser's current line before returning it, so *reading* a variable
+    /// writes one. A `&self` signature would have been a lie about that,
+    /// and would have needed either a second lookup path or interior
+    /// mutability to keep.
+    ///
+    /// The result borrows the table, so a value that has to outlive the
+    /// next [`Shell::run`] must be copied out. That is not a papercut to
+    /// design away: an assignment can move the table, and the borrow is
+    /// what says so.
+    pub fn var(&mut self, name: &bstr::BStr) -> Option<&bstr::BStr> {
+        unsafe {
+            let c = crate::shell::cstring(name);
+            let p = lookupvar(self, c.as_ptr());
+            if p.is_null() {
+                return None;
+            }
+            /* The pointer is into the entry's own `text`, which the table
+             * owns and which `&mut self` is borrowed for. */
+            Some(bstr::BStr::new(CStr::from_ptr(p).to_bytes()))
+        }
+    }
+
+    /// Assign a shell variable, with the meaning `name=value` has in a
+    /// script.
+    ///
+    /// A variable that is already exported stays exported; a new one is
+    /// not, which is why `set_var(b"PATH", …)` reaches child processes and
+    /// `set_var(b"MY_FLAG", …)` does not. The initial exported environment
+    /// is [`crate::builder::Builder::env`].
+    ///
+    /// # Errors
+    ///
+    /// On a name that is not a valid shell name, and on a readonly
+    /// variable — the same diagnostic a script would get, because it is
+    /// the same code path.
+    pub fn set_var(&mut self, name: &bstr::BStr, value: &bstr::BStr) -> Result<(), Error> {
+        unsafe {
+            let n = crate::shell::cstring(name);
+            let v = crate::shell::cstring(value);
+            setvar(self, n.as_ptr(), v.as_ptr(), 0)?;
+            Ok(())
+        }
+    }
+
+    /// Unset a shell variable, and say whether it had been set.
+    ///
+    /// # Errors
+    ///
+    /// **A `Result` where the sketch had a bare `bool`.** Unsetting a
+    /// readonly variable is a shell error, and swallowing it here would
+    /// have made this the one place in the surface where the library
+    /// silently declines what a script is told about.
+    pub fn unset_var(&mut self, name: &bstr::BStr) -> Result<bool, Error> {
+        unsafe {
+            let c = crate::shell::cstring(name);
+            let was_set = !lookupvar(self, c.as_ptr()).is_null();
+            unsetvar(self, c.as_ptr())?;
+            Ok(was_set)
+        }
+    }
+
+    /// Every variable that is set, as `(name, value)`, in the order a bare
+    /// `set` prints them.
+    ///
+    /// **Owned pairs where the sketch had a borrowing iterator.** The
+    /// table is a map whose entries are reached through a raw pointer
+    /// derived from a `&mut` walk (`listvars`), so handing out references
+    /// into it would reintroduce exactly the provenance question
+    /// [`crate::output::Dest`] was created to remove. A listing already
+    /// pays for a walk of the whole table; it now also pays for a copy of
+    /// it, and gets a value that outlives the next `run` in exchange.
+    pub fn vars(&mut self) -> Vec<(bstr::BString, bstr::BString)> {
+        unsafe {
+            listvars(self, 0, VUNSET)
+                .into_iter()
+                .filter_map(|p| {
+                    let text = CStr::from_ptr(p).to_bytes();
+                    let eq = text.iter().position(|&b| b == b'=')?;
+                    Some((
+                        bstr::BString::from(&text[..eq]),
+                        bstr::BString::from(&text[eq + 1..]),
+                    ))
+                })
+                .collect()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

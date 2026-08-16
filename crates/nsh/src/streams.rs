@@ -62,8 +62,136 @@ impl Streams {
         stderr: 2,
     };
 
+    /// [`Streams::INHERIT`] as a function, for a caller building a
+    /// `Streams` in expression position beside the other two.
+    pub fn inherit() -> Streams {
+        Streams::INHERIT
+    }
+
+    /// Three descriptors the caller already has.
+    ///
+    /// The shell does not take ownership and does not close them: they
+    /// outlive it, which is what lets a frontend lend the shell its own
+    /// standard descriptors and take them back.
+    ///
+    /// Under [dec:nsh:no-ambient-state] these are also the base of the
+    /// shell's descriptor table, so they carry further than the shell's
+    /// own reads and writes -- redirection, pipelines and forked external
+    /// commands all resolve through the table and land here.
+    pub fn from_fds(stdin: c_int, stdout: c_int, stderr: c_int) -> Streams {
+        Streams {
+            stdin,
+            stdout,
+            stderr,
+        }
+    }
+
+    /// Standard input from `/dev/null`, and output and error into buffers
+    /// the caller reads back with
+    /// [`crate::context::Shell::take_captured_stdout`].
+    ///
+    /// **An unlinked temporary file rather than a pipe, deliberately.** A
+    /// pipe has a fixed kernel buffer, so a script that writes more than
+    /// it before the host reads would block on the write while the host
+    /// blocks on `run` -- a deadlock with no way out that does not amount
+    /// to "read it on another thread", which is exactly the burden
+    /// capturing is supposed to remove. A file has no such limit, and
+    /// `memfd` keeps it off the filesystem and out of `$TMPDIR`.
+    ///
+    /// The descriptors are the caller's to close. Nothing here closes
+    /// them, for the same reason [`Streams::from_fds`] does not.
+    pub fn capture() -> std::io::Result<Streams> {
+        let stdin = unsafe {
+            let fd = libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY);
+            if fd < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            fd
+        };
+        let out = memfd(c"nsh-stdout")?;
+        let err = memfd(c"nsh-stderr")?;
+        Ok(Streams {
+            stdin,
+            stdout: out,
+            stderr: err,
+        })
+    }
+
     fn as_array(&self) -> [c_int; 3] {
         [self.stdin, self.stdout, self.stderr]
+    }
+}
+
+/// An anonymous file that lives only as long as its descriptor.
+fn memfd(name: &std::ffi::CStr) -> std::io::Result<c_int> {
+    let fd = unsafe { libc::memfd_create(name.as_ptr(), 0) };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(fd)
+}
+
+impl crate::context::Shell {
+    /// Take everything written to the shell's stdout since the last call.
+    ///
+    /// Only meaningful under [`Streams::capture`]; on a descriptor that
+    /// cannot seek -- a terminal, a pipe, the descriptors
+    /// [`Streams::INHERIT`] names -- this is the `ESPIPE` that seeking one
+    /// gives, which is the honest answer rather than an empty string.
+    ///
+    /// Owned bytes rather than a borrow, and that is
+    /// [dec:nsh:public-surface]'s call rather than an oversight: a borrow
+    /// would be tied to the `&mut self` that reads the file, so holding
+    /// the output would lock the shell and `run`, look, `run` again --
+    /// the reason to capture at all -- would not compile.
+    /// `crates/nsh/examples/embed.rs` is where that was discovered.
+    pub fn take_captured_stdout(&mut self) -> std::io::Result<bstr::BString> {
+        /* The shell's stdout is buffered, so what is in the file is what
+         * it has flushed. Everything written since the last flush has to
+         * go in before the file is read, or a capture taken between two
+         * `run`s truncates mid-line. stderr is unbuffered and needs no
+         * equivalent. */
+        self.io.flushall();
+        let fd = self.streams.stdout;
+        take_all(fd)
+    }
+
+    /// Take everything written to the shell's stderr since the last call.
+    pub fn take_captured_stderr(&mut self) -> std::io::Result<bstr::BString> {
+        let fd = self.streams.stderr;
+        take_all(fd)
+    }
+}
+
+/// Read a seekable descriptor from the beginning and empty it.
+///
+/// Truncating rather than remembering an offset is what makes "since the
+/// last call" true after a `run` that the shell reset -- and it keeps the
+/// file from growing without bound across a long-lived shell.
+fn take_all(fd: c_int) -> std::io::Result<bstr::BString> {
+    unsafe {
+        if libc::lseek(fd, 0, libc::SEEK_SET) < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut out: Vec<u8> = Vec::new();
+        let mut buf = [0u8; 8192];
+        loop {
+            let n = libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len());
+            if n < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if n == 0 {
+                break;
+            }
+            out.extend_from_slice(&buf[..n as usize]);
+        }
+        if libc::ftruncate(fd, 0) < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if libc::lseek(fd, 0, libc::SEEK_SET) < 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(bstr::BString::from(out))
     }
 }
 

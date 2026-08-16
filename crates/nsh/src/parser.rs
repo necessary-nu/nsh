@@ -898,7 +898,7 @@ unsafe fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
 
 // [spec:dash:def:parser.makename-fn]
 // [spec:dash:sem:parser.makename-fn]
-unsafe fn makename(sh: &mut Shell) -> Node {
+pub(crate) unsafe fn makename(sh: &mut Shell) -> Node {
     Node::Arg(narg {
         text: wordtext_node(sh),
         backquote: core::mem::take(&mut sh.input.backquotelist),
@@ -1023,7 +1023,7 @@ unsafe fn parseheredoc(sh: &mut Shell) -> Result<(), Error> {
 
 // [spec:dash:def:parser.readtoken-fn]
 // [spec:dash:sem:parser.readtoken-fn]
-unsafe fn readtoken(sh: &mut Shell) -> Result<c_int, Error> {
+pub(crate) unsafe fn readtoken(sh: &mut Shell) -> Result<c_int, Error> {
     let mut t: c_int;
     let mut kwd: c_int = checkkwd;
 
