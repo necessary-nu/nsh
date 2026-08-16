@@ -1908,3 +1908,122 @@ looks past index 0, and that framing always carries its length byte, so
 three bytes exist whenever the first byte is `CTLMBCHAR` and one byte is
 enough otherwise. That is the whole safety argument, and writing it down
 is what makes the remaining `from_raw_parts` checkable.
+
+## What this cost in the port: `_rmescapes`
+
+`_rmescapes` was the last function in `expand.rs` holding a buffer by
+pointer, and it resisted the treatment `expmeta` and the scan family got
+for a reason worth naming: it walks with *three* pointers -- `p` over the
+source, `q` over the destination, `r` at the destination's base -- and
+the destination is one of three different allocations. In place it is the
+source itself; under `RMESCAPE_GROW` it is the expansion buffer above the
+cursor; under `RMESCAPE_HEAP` it is a caller's `Vec`. There is no single
+base to take offsets from, which is why "make it an index" is not by
+itself a plan.
+
+### The output never exceeds the input, and that is what makes it one function
+
+The fact the conversion turns on is not in any comment in dash. Checked
+arm by arm, with `FNMATCH_IS_ENABLED` at 0:
+
+* `CTLQUOTEMARK` consumes one byte and writes none.
+* A naked backslash writes one for one (it may become `CTLESC`, which is
+  still one byte).
+* `CTLESC` consumes two -- itself and the byte it escapes -- and writes
+  two when globbing, one when not.
+* The `CTLMBCHAR` arm without globbing consumes the framing and writes
+  only the character; with globbing it writes exactly what it consumes,
+  and may first step `q` *back* one.
+* The default writes one for one.
+
+So `q <= p` holds at every point, and the in-place path is an ordinary
+**compaction**: two indices over one `&mut [u8]`, the write always at or
+behind the read. Both allocating paths then reach the same engine by
+materialising the source into the destination first and compacting there
+-- `extend_from_within` for the expansion buffer, `extend_from_slice` for
+the heap `Vec` -- so all three destinations run one body and the
+three-pointer walk becomes two indices and a slice.
+
+Two smaller facts fall out of the same audit and are recorded because
+each is a bound that used to be a promise:
+
+* **`*q.offset(-1)` cannot write below the buffer.** Two arms reach back
+  one byte, and both are guarded by `globbing ^ notescaped`, which is
+  nonzero only after `notescaped` has been cleared. The *only* thing that
+  clears it is the naked-backslash arm -- and that arm writes a byte
+  first. So `q` has advanced at least once before either reach-back is
+  reachable. The C relies on this and never says so.
+* **`*q = '\0'` at the end lands inside the original string.** The loop
+  exits with `p` on the terminator and `q <= p`, so the byte written is at
+  worst the terminator itself.
+
+### The growing case is real, is unreachable, and is not carried
+
+There is exactly one configuration in which the output *can* exceed the
+input: `FNMATCH_IS_ENABLED` non-zero **and** `globbing` set, where the
+`CTLESC` arm can write a backslash, then a second backslash, then the
+escaped byte -- three written for two consumed. Compaction cannot express
+that: `q` would overtake `p` and clobber source bytes the walk has not
+read yet.
+
+**The decision: the growing case is asserted unreachable rather than
+given a second engine, and the assertion is a `const` one so it fails at
+compile time rather than in a corner.** The argument is that the case is
+not merely unreached today but *unreachable by construction*:
+
+* growth requires `globbing != 0`;
+* the only producer of `RMESCAPE_GLOB` is `preglob`, which under
+  `FNMATCH_IS_ENABLED` also sets `RMESCAPE_ALLOC` -- so under FNMATCH,
+  globbing implies a separate destination;
+* and with a separate destination the C's own `fulllen` is doubled
+  precisely to hold the growth.
+
+So the growth only ever happens on a path that already has room for it,
+and the port would need a two-buffer engine *solely* for a branch behind a
+`const bool` that is 0. Carrying one would mean shipping a second copy of
+the transform that no test can reach and no differential can compare --
+the same trade `pmatch`'s bracket-member read was refused for, and the
+same one `IS_TYPE_UNBIASED` names three hundred lines up: code whose only
+justification is a constant nobody can flip.
+
+What is *not* given up: every `if FNMATCH_IS_ENABLED` branch inside the
+transform stays transcribed, so the shape of the C is still readable and
+the non-growing FNMATCH behaviour is still there. What goes is the
+*strategy* that only that one combination would need. Flipping the
+constant now fails the build with a message naming this section, which is
+the honest outcome -- better than a silent miscompaction, and better than
+dead code pretending to be tested.
+
+### One arm of the transform is unreachable, and no differential covers it
+
+Recorded because the conversion is only as trustworthy as what could have
+caught it being wrong, and one line could not be.
+
+The `CTLESC` arm's *inner* reach-back -- `*q.offset(-1) = '\\'` under
+`(notescaped ^ inquotes) & inquotes` -- was mutated to write forward
+instead of back, and **nothing failed**: not the 61k-case sweep, not the
+glob or trim or expand corpora, and not 1331 generated patterns built from
+every three-way combination of backslash, single and double quotes,
+metacharacters and quoted metacharacters.
+
+The reason is in the state machine. Firing it needs `notescaped` clear and
+`inquotes` set, and the *only* thing that clears `notescaped` is the
+naked-backslash arm, which also clears `inquotes`; restoring `inquotes`
+needs a `CTLQUOTEMARK`, which `continue`s without touching `notescaped`.
+So the byte sequence must be exactly a naked backslash, then
+`CTLQUOTEMARK`, then `CTLESC` -- a literal backslash as the last byte
+before a closing quote marker. `readtoken1` keeps a backslash literal only
+inside double quotes before a character it does not special-case, and a
+backslash immediately before the closing quote escapes that quote instead.
+So the sequence appears unreachable through the parser.
+
+**It is transcribed unchanged rather than asserted away**, and that is the
+conservative choice on purpose: the argument above is about the parser's
+behaviour, not a constant, so it is weaker than the `FNMATCH_IS_ENABLED`
+one above -- which is why that one gets a `const` assertion and this one
+gets a paragraph. The line is byte-identical in meaning to what it
+replaced, so the conversion introduces no new risk here; what is new is
+that the gap is now written down instead of implied.
+
+The *outer* reach-back, the same write after the loop, **is** covered:
+mutating it fails two `aud_parser_glob` cases.

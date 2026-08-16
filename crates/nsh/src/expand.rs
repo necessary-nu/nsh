@@ -445,49 +445,20 @@ unsafe fn expb() -> &'static mut BString {
     &mut *ptr::addr_of_mut!(expbuf)
 }
 
-/// `stackblock()`, for the expansion buffer.
+/// The C's `stackblock()` and `expdest` as pointers, and
+/// `makestrspace`/`STADJUST` over them, are gone.
 ///
-/// One caller left, and it is the whole of what is not converted: the
-/// `RMESCAPE_GROW` arm of [`_rmescapes`], which still walks with `p`, `q`
-/// and `r` as raw pointers and so still has to be told where the base is
-/// after a growth.  Everything else in this file addresses this buffer by
-/// offset, where a growth is not an event.
-#[inline]
-unsafe fn expbase() -> *mut c_char {
-    expb().as_mut_ptr() as *mut c_char
-}
-
-/// The C's `expdest`, as a pointer.  See [`expbase`] for who still wants
-/// one.
-#[inline]
-unsafe fn expdest() -> *mut c_char {
-    let b = expb();
-    let n = b.len();
-    b.as_mut_ptr().add(n) as *mut c_char
-}
+/// They survived exactly as long as one function still carried a position
+/// in this buffer as a raw pointer. `_rmescapes` was the last, and its
+/// `RMESCAPE_GROW` path now takes and returns an offset
+/// ([`rmescapes_grow`]), so there is nothing left to re-derive after a
+/// growth: an index does not move. What remains is [`expdest_off`], which
+/// is the cursor as the length it always was.
 
 /// `expdest - stackblock()`.
 #[inline]
 unsafe fn expdest_off() -> c_int {
     expb().len() as c_int
-}
-
-/// `expdest = p` / `STADJUST(p - expdest, expdest)`.  `p` must point into
-/// the buffer; the bytes below it have been written by a raw cursor.
-#[inline]
-unsafe fn set_expdest(p: *mut c_char) {
-    let b = expb();
-    let off = p.offset_from(b.as_mut_ptr() as *mut c_char) as usize;
-    b.set_len(off);
-}
-
-/// `makestrspace(n, expdest)`: make `n` bytes writable past the cursor and
-/// return a raw cursor at it.  The caller commits with [`set_expdest`], as
-/// the C commits by assigning `expdest`.
-#[inline]
-unsafe fn expmakestrspace(n: size_t) -> *mut c_char {
-    expb().reserve(n);
-    expdest()
 }
 
 /// `p = grabstackstr(expdest)`.
@@ -1610,10 +1581,9 @@ unsafe fn subevalvar(
              * `startp` past the cursor and moves the cursor over it, so the
              * buffer can have reallocated underneath.  That is what the C's
              * three `stackblock()` re-reads on the lines after this call
-             * were for, and they are gone: an offset survives a growth. */
-            let base = expb().as_mut_ptr() as *mut c_char;
-            rmesc = _rmescapes(base.add(startp), RMESCAPE_ALLOC | RMESCAPE_GROW, None)
-                .offset_from(expb().as_mut_ptr() as *mut c_char) as usize;
+             * were for, and they are gone: an offset survives a growth,
+             * which is why this hands over one and gets one back. */
+            rmesc = rmescapes_grow(expb(), startp, RMESCAPE_ALLOC | RMESCAPE_GROW);
             if rmesc != startp {
                 rmescend = expb().len();
             }
@@ -3358,91 +3328,56 @@ unsafe fn msort(list: &mut [strlist], len: c_int) {
 
 // [spec:dash:def:expand.rmescapes-fn]
 // [spec:dash:sem:expand.rmescapes-fn]
-pub unsafe fn _rmescapes(
-    mut str: *mut c_char,
-    flag: c_int,
-    mut heap: Option<&mut Vec<u8>>,
-) -> *mut c_char {
-    let mut p: *mut c_char;
-    let mut q: *mut c_char;
-    let mut r: *mut c_char;
-    let mut notescaped: c_int;
-    let globbing: c_int;
-    let mut inquotes: c_int;
-    let mut fulllen: size_t = 0;
+/// The transform, over one buffer, in place.
+///
+/// `buf` holds the C string with its terminator; `at` is the index of the
+/// first byte in [`cqchars`], which the caller has already scanned for as
+/// the C does with `strpbrk`. Returns the length of the result, terminator
+/// not counted, and writes the terminator at that index.
+///
+/// In place is the only shape any caller needs, because **the output never
+/// exceeds the input**: `CTLQUOTEMARK` consumes a byte and writes none,
+/// `CTLESC` consumes two and writes at most two, both `CTLMBCHAR` arms
+/// write no more than they consume, and everything else is one for one.
+/// So `q <= p` throughout and the write is always at or behind the read,
+/// which is what lets the two allocating callers reach this same body by
+/// materialising their source into their destination first.
+///
+/// Recorded in plan/decisions/owned-data.md, "What this cost in the port:
+/// `_rmescapes`", together with the two reach-backs' safety argument and
+/// why the one configuration that *could* grow is asserted unreachable
+/// rather than given a second engine.
+fn rmescapes_compact(buf: &mut [u8], at: usize, flag: c_int) -> usize {
+    /* The growing configuration is `FNMATCH_IS_ENABLED` together with
+     * globbing, where the `CTLESC` arm can write three bytes for two.
+     * Compaction cannot express that -- `q` would overtake `p` and clobber
+     * source the walk has not read -- and it is unreachable by
+     * construction, because the only producer of `RMESCAPE_GLOB` is
+     * `preglob`, which under FNMATCH also sets `RMESCAPE_ALLOC` and so
+     * always has the separate, doubled destination the C sized for it.
+     * Checked here rather than believed. */
+    const _: () = assert!(
+        !FNMATCH_IS_ENABLED,
+        "rmescapes_compact: FNMATCH_IS_ENABLED with globbing can grow the string, \
+         which in-place compaction cannot express; see plan/decisions/owned-data.md"
+    );
 
-    /* `strpbrk`'s set is the string without its terminator: it never
-     * matches a NUL, which is what stops the scan instead. */
-    let cqset = crate::mystring::cqchars.map(|c| c as u8);
-    p = match CStr::from_ptr(str).to_bytes().find_byteset(&cqset[..4]) {
-        Some(at) => str.add(at),
-        None => return str,
-    };
-    q = p;
-    r = str;
-    globbing = flag & RMESCAPE_GLOB;
+    let globbing: c_int = flag & RMESCAPE_GLOB;
+    let mut inquotes: c_int = 0;
+    let mut notescaped: c_int = globbing;
+    /* The C's `p` and `q`, which are indices into one buffer here. */
+    let mut p: usize = at;
+    let mut q: usize = at;
 
-    if (flag & RMESCAPE_ALLOC) != 0 {
-        let len: size_t = p.offset_from(str) as size_t;
-        fulllen = CStr::from_ptr(p).count_bytes();
-
-        if FNMATCH_IS_ENABLED && globbing != 0 {
-            fulllen *= 2;
-        }
-
-        fulllen += len + 1;
-
-        if (flag & RMESCAPE_GROW) != 0 {
-            /* RMESCAPE_GROW means "the destination is the expansion
-             * buffer", and `str` is always inside it on this path — the one
-             * caller is `subevalvar`'s `_rmescapes(startp, ALLOC | GROW)`.
-             * `reserve` can reallocate, which is why the C re-reads
-             * `stackblock()` on the next line. */
-            let strloc: c_int = str.offset_from(expbase()) as c_int;
-
-            r = expmakestrspace(fulllen);
-            str = expbase().offset(strloc as isize);
-            p = str.offset(len as isize);
-        } else {
-            /* The C splits this arm in two: `ckmalloc(fulllen)` under
-             * RMESCAPE_HEAP and `stalloc(fulllen)` otherwise.  The
-             * `stalloc` half is unreachable, and the reason is one
-             * constant away: `RMESCAPE_ALLOC` is only ever set by
-             * `preglob`, which sets it under `if (FNMATCH_IS_ENABLED)`,
-             * and by `subevalvar`'s `ALLOC | GROW`, which took the branch
-             * above.  `FNMATCH_IS_ENABLED` is 0, so the only caller that
-             * arrives here is `expandmeta`'s
-             * `preglob(text, RMESCAPE_ALLOC | RMESCAPE_HEAP)` — and that
-             * is the caller supplying `heap`.  Asserted rather than
-             * claimed, because [dec:nsh:owned-data] records this exact
-             * flag being reasoned about wrongly once already. */
-            debug_assert!(
-                (flag & RMESCAPE_HEAP) != 0 && heap.is_some(),
-                "_rmescapes: RMESCAPE_ALLOC without GROW reaches only the HEAP arm"
-            );
-            let out = heap
-                .as_deref_mut()
-                .expect("_rmescapes: RMESCAPE_ALLOC without GROW needs a heap buffer");
-            out.clear();
-            out.reserve(fulllen);
-            r = out.as_mut_ptr() as *mut c_char;
-        }
-        q = r;
-        if len > 0 {
-            q = crate::system::mempcpy(q as *mut c_void, str as *const c_void, len) as *mut c_char;
-        }
-    }
-    inquotes = 0;
-    notescaped = globbing;
-    'whileloop: while *p != C_NUL {
-        let mut c: c_int = *p as c_int;
+    'whileloop: while byte_at(buf, p) != C_NUL {
+        let mut c: c_int = byte_at(buf, p) as c_int;
         let mut newnesc: c_int = globbing;
         let mb: c_uint;
         let mut ml: c_uint;
 
         'setnesc: {
             if c == CTLQUOTEMARK as c_int {
-                p = p.offset(1);
+                p += 1;
                 inquotes ^= globbing;
                 continue 'whileloop;
             } else if c == C_BACKSLASH as c_int {
@@ -3456,94 +3391,188 @@ pub unsafe fn _rmescapes(
             } else if c == CTLESC as c_int {
                 if ((notescaped ^ inquotes) & inquotes) != 0 {
                     if FNMATCH_IS_ENABLED {
-                        *q = C_BACKSLASH;
-                        q = q.offset(1);
+                        buf[q] = C_BACKSLASH as u8;
+                        q += 1;
                     } else {
-                        *q.offset(-1) = C_BACKSLASH;
+                        /* Reaches back one byte.  `notescaped` is cleared
+                         * only by the naked-backslash arm, which writes a
+                         * byte first, so `q` has advanced at least once
+                         * before this is reachable -- and the index is
+                         * checked, where the C's was not. */
+                        buf[q - 1] = C_BACKSLASH as u8;
                     }
                 }
                 if globbing != 0 {
-                    *q = if FNMATCH_IS_ENABLED {
+                    buf[q] = if FNMATCH_IS_ENABLED {
                         C_BACKSLASH
                     } else {
                         CTLESC
-                    };
-                    q = q.offset(1);
+                    } as u8;
+                    q += 1;
                 }
 
-                p = p.offset(1);
-                c = *p as c_int;
+                p += 1;
+                c = byte_at(buf, p) as c_int;
             } else if c == CTLMBCHAR as c_int {
                 let mut tail: c_uint = 2;
 
                 if !FNMATCH_IS_ENABLED && (globbing ^ notescaped) != 0 {
-                    q = q.offset(-1);
+                    q -= 1;
                 }
 
-                mb = mbnext(p);
+                mb = mbnext_bytes(slice_from(buf, p));
                 ml = mb >> 8;
 
                 if globbing == 0 || FNMATCH_IS_ENABLED {
-                    p = p.offset((mb & 0xff) as isize);
+                    p += (mb & 0xff) as usize;
                     ml -= 2;
                 } else {
                     ml += mb & 0xff;
                     tail = 0;
                 }
 
-                /* `q` trails `p` through the same buffer. */
-                core::ptr::copy(p, q, ml as usize);
-                q = q.offset(ml as isize);
-                p = p.offset((ml + tail) as isize);
+                /* `q` trails `p` through the same buffer, which
+                 * `copy_within` already knows -- it is the C's
+                 * `memmove`, bounds-checked. */
+                buf.copy_within(p..p + ml as usize, q);
+                q += ml as usize;
+                p += (ml + tail) as usize;
                 break 'setnesc; /* goto setnesc */
             }
 
-            *q = c as c_char;
-            q = q.offset(1);
-            p = p.offset(1);
+            buf[q] = c as u8;
+            q += 1;
+            p += 1;
         }
         /* setnesc: */
         notescaped = newnesc;
     }
     if !FNMATCH_IS_ENABLED && (globbing ^ notescaped) != 0 {
-        *q.offset(-1) = C_BACKSLASH;
+        /* The same reach-back, and the same argument. */
+        buf[q - 1] = C_BACKSLASH as u8;
     }
-    *q = C_NUL;
-    if (flag & RMESCAPE_GROW) != 0 {
-        /* `expdest = r; STADJUST(q - r + 1, expdest)` — but only when `r`
-         * is in the expansion buffer, which is RMESCAPE_GROW and nothing
-         * else.
-         *
-         * The other live arm is `expandmeta`'s
-         * `preglob(text, RMESCAPE_ALLOC | RMESCAPE_HEAP)`, where `r` is a
-         * `ckmalloc`'d block that the caller `ckfree`s a few lines later.
-         * The C runs this same assignment there and so leaves `expdest`
-         * pointing into freed memory.  It is harmless only because of where
-         * `expandmeta` sits: at the tail of `expandarg`, after
-         * `grabstackstr(expdest)` has taken the word, and every entry to the
-         * expansion re-opens with `STARTSTACKSTR`.  So the value is written
-         * and never read.  An owned buffer cannot hold that pointer and has
-         * no reason to, so the assignment is dropped for the non-GROW arms
-         * rather than transcribed — a deliberate divergence from a store
-         * that has no observable value. */
-        set_expdest(r.offset(q.offset_from(r) + 1));
-    } else if (flag & RMESCAPE_ALLOC) != 0 {
-        /* The bytes went into the caller's buffer through a raw cursor
-         * that carries no bound of its own, so the only thing standing
-         * between `fulllen` and a heap overflow is the C's arithmetic
-         * being right.  Asserted against `fulllen` — the number the C
-         * computed — and *not* against `Vec::capacity()`, which
-         * over-allocates and would make the assertion vacuous. */
-        let written: usize = q.offset_from(r) as usize + 1;
-        debug_assert!(
-            written <= fulllen,
-            "_rmescapes wrote {written} bytes into a {fulllen}-byte reservation"
-        );
-        let out = heap
-            .as_deref_mut()
-            .expect("_rmescapes: RMESCAPE_ALLOC without GROW needs a heap buffer");
-        out.set_len(written);
+    /* `*q = '\0'` — the loop exited with `p` on the terminator and
+     * `q <= p`, so this lands inside the buffer at worst on that
+     * terminator. */
+    buf[q] = C_NUL as u8;
+    q
+}
+
+/// The index of the first byte `_rmescapes` has anything to do with, if
+/// there is one.
+///
+/// `strpbrk`'s set is the string without its terminator: it never matches
+/// a NUL, which is what stops the scan instead.
+fn rmescapes_scan(s: &[u8]) -> Option<usize> {
+    let cqset = crate::mystring::cqchars.map(|c| c as u8);
+    s.find_byteset(&cqset[..4])
+}
+
+// [spec:dash:def:expand.rmescapes-fn]
+// [spec:dash:sem:expand.rmescapes-fn]
+//
+// The in-place and `RMESCAPE_HEAP` entries.  `RMESCAPE_GROW` moved to
+// [`rmescapes_grow`], which takes the offset its one caller already has
+// instead of a pointer into a buffer that can move under it -- that is
+// what retired `expbase`, `expdest`, `set_expdest` and `expmakestrspace`.
+//
+// The C's `fulllen` arithmetic is gone with the raw cursor it bounded:
+// both destinations are appended to, so a short reservation costs a growth
+// instead of a heap overflow, and there is no number left to assert
+// against.
+pub unsafe fn _rmescapes(
+    str: *mut c_char,
+    flag: c_int,
+    heap: Option<&mut Vec<u8>>,
+) -> *mut c_char {
+    debug_assert!(
+        (flag & RMESCAPE_GROW) == 0,
+        "_rmescapes: RMESCAPE_GROW goes to rmescapes_grow"
+    );
+
+    /* The source, terminator included, as the buffer the transform works
+     * over.  In place this *is* the destination. */
+    let n: usize = CStr::from_ptr(str).count_bytes();
+    let src: &mut [u8] = core::slice::from_raw_parts_mut(str as *mut u8, n + 1);
+
+    let Some(at) = rmescapes_scan(&src[..n]) else {
+        return str;
+    };
+
+    if (flag & RMESCAPE_ALLOC) == 0 {
+        rmescapes_compact(src, at, flag);
+        return str;
     }
+
+    /* The C splits the allocating case in two: `ckmalloc(fulllen)` under
+     * RMESCAPE_HEAP and `stalloc(fulllen)` otherwise.  The `stalloc` half
+     * is unreachable, and the reason is one constant away:
+     * `RMESCAPE_ALLOC` is only ever set by `preglob`, which sets it under
+     * `if (FNMATCH_IS_ENABLED)`, and by `subevalvar`'s `ALLOC | GROW`,
+     * which is now [`rmescapes_grow`].  `FNMATCH_IS_ENABLED` is 0, so the
+     * only caller that arrives here is `expandmeta`'s
+     * `preglob(text, RMESCAPE_ALLOC | RMESCAPE_HEAP)` -- and that is the
+     * caller supplying `heap`.  Asserted rather than claimed, because
+     * [dec:nsh:owned-data] records this exact flag being reasoned about
+     * wrongly once already. */
+    debug_assert!(
+        (flag & RMESCAPE_HEAP) != 0 && heap.is_some(),
+        "_rmescapes: RMESCAPE_ALLOC without GROW reaches only the HEAP arm"
+    );
+    let out = heap.expect("_rmescapes: RMESCAPE_ALLOC without GROW needs a heap buffer");
+
+    /* `mempcpy(q, str, len)` copies the verbatim prefix and the walk
+     * writes the rest.  Copying the whole source and compacting it is the
+     * same result -- the transform below `at` is the identity -- and it is
+     * what lets one body serve every destination. */
+    out.clear();
+    out.extend_from_slice(src);
+    let m = rmescapes_compact(out, at, flag);
+    out.truncate(m + 1);
+    out.as_mut_ptr() as *mut c_char
+}
+
+// [spec:dash:def:expand.rmescapes-fn]
+// [spec:dash:sem:expand.rmescapes-fn]
+//
+/// `_rmescapes(b + at, RMESCAPE_ALLOC | RMESCAPE_GROW)`: unescape the C
+/// string at `at` into fresh space at the end of the same buffer, and
+/// return where it landed.
+///
+/// The C takes a pointer, calls `makestrspace`, and then re-reads
+/// `stackblock()` three times because that call can move the block. An
+/// offset does not move, so the caller passes one and gets one back, and
+/// the `expdest`/`stackblock` accessors retire with the last pointer.
+///
+/// `expdest = r; STADJUST(q - r + 1)` is the `truncate` below. The C runs
+/// that assignment on the `RMESCAPE_HEAP` path too, where `r` is a block
+/// the caller frees moments later -- so the C leaves `expdest` pointing
+/// into freed memory. It is harmless only because of where `expandmeta`
+/// sits, after `grabstackstr` has taken the word and before the next
+/// `STARTSTACKSTR`. An owned buffer cannot hold that pointer and has no
+/// reason to, so that store is not transcribed on the heap path: a
+/// deliberate divergence from a write with no observable value.
+pub unsafe fn rmescapes_grow(b: &mut BString, at: usize, flag: c_int) -> usize {
+    debug_assert!(
+        (flag & (RMESCAPE_ALLOC | RMESCAPE_GROW)) == (RMESCAPE_ALLOC | RMESCAPE_GROW),
+        "rmescapes_grow is the RMESCAPE_ALLOC | RMESCAPE_GROW path"
+    );
+
+    let n: usize = crate::mystring::cstr_prefix(&b[at..]).len();
+    if rmescapes_scan(&b[at..at + n]).is_none() {
+        /* `return str` — before the block is grown, so the cursor is
+         * untouched and the caller's `rmesc == startp` test sees it. */
+        return at;
+    }
+    let at_rel = rmescapes_scan(&b[at..at + n]).expect("scanned once already");
+
+    /* `r = makestrspace(fulllen); mempcpy(q, str, len)` — the destination
+     * is the space past the cursor, and the source is below it in the same
+     * buffer, which is exactly what `extend_from_within` is for. */
+    let r: usize = b.len();
+    b.extend_from_within(at..at + n + 1);
+    let m = rmescapes_compact(&mut b[r..], at_rel, flag);
+    b.truncate(r + m + 1);
     r
 }
 
