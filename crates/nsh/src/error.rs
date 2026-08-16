@@ -481,7 +481,7 @@ impl crate::context::Shell {
     pub unsafe fn report(&mut self, e: Error) -> Error {
         self.sh_warnx(e.message());
 
-        crate::output::flushall();
+        self.io.flushall();
         e
     }
 
@@ -536,7 +536,7 @@ impl crate::context::Shell {
 
         /* stderr is unbuffered. Keep the C's three output operations
          * visible: prefix, complete message body, then newline. */
-        let errs = (*crate::output::io()).get(crate::output::Dest::Stderr);
+        let errs = self.io.get(crate::output::Dest::Stderr);
         let _ = errs.write_all(&prefix);
         let _ = errs.write_all(msg);
         let _ = errs.write_all(b"\n");
@@ -607,7 +607,7 @@ mod tests {
     fn reported_error_carries_its_status() {
         let _g = crate::testutil::lock();
         unsafe {
-            let mut owned = crate::context::Shell::new();
+            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             let e = sh.sh_error_value(b"a diagnostic");
 
@@ -628,7 +628,7 @@ mod tests {
     fn message_drops_the_prefix() {
         let _g = crate::testutil::lock();
         unsafe {
-            let mut owned = crate::context::Shell::new();
+            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             sh.eval.errlinno = 17;
             let e = Error::other(sh.eval.errlinno, 2, b"cd: bad directory");
@@ -650,7 +650,7 @@ mod tests {
             /* `shellexec` reports its text and takes 127 or 126, then
              * raises EXEND. The status travels with the value even though
              * the code that goes with it does not. */
-            let mut owned = crate::context::Shell::new();
+            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             let e = Error::other(sh.eval.errlinno, 127, b"nosuchcmd: not found");
             let e = sh.report(e);
@@ -680,7 +680,7 @@ mod tests {
     fn an_interrupt_is_a_value() {
         let _g = crate::testutil::lock();
         unsafe {
-            let mut owned = crate::context::Shell::new();
+            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             as_interactive_root(sh);
             CLEAR_PENDING_INT();
@@ -708,7 +708,7 @@ mod tests {
     fn delivery_happens_once() {
         let _g = crate::testutil::lock();
         unsafe {
-            let mut owned = crate::context::Shell::new();
+            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             as_interactive_root(sh);
             suppressint = 0;
@@ -730,7 +730,7 @@ mod tests {
     fn intoff_still_holds_it_off() {
         let _g = crate::testutil::lock();
         unsafe {
-            let mut owned = crate::context::Shell::new();
+            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             as_interactive_root(sh);
             suppressint = 0;
@@ -755,7 +755,7 @@ mod tests {
     fn a_rearmed_interrupt_is_taken_later() {
         let _g = crate::testutil::lock();
         unsafe {
-            let mut owned = crate::context::Shell::new();
+            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             as_interactive_root(sh);
             suppressint = 0;

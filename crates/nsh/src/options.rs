@@ -289,7 +289,7 @@ pub unsafe fn procargs(sh: &mut crate::context::Shell, mut xargv: *mut *mut c_ch
     }
     if sh.options.flag(iflag) == 2 && sh.options.flag(sflag) == 1 {
         crate::input::input_init(sh);
-        if sh.input.stdin_istty != 0 && libc::isatty(crate::streams::streams().stderr) != 0 {
+        if sh.input.stdin_istty != 0 && libc::isatty(sh.streams.stderr) != 0 {
             sh.options.set_flag(iflag, 1);
         }
     }
@@ -461,7 +461,7 @@ unsafe fn minus_o(sh: &mut crate::context::Shell, name: Option<&BStr>, val: c_in
     if name.is_none() {
         if val != 0 {
             let heading = b"Current option settings\n";
-            let _ = (*crate::output::stdout()).write_all(heading);
+            let _ = sh.io.stdout().write_all(heading);
             i = 0;
             while i < NOPTS as c_int {
                 let name = optnames[i as usize].to_bytes();
@@ -474,7 +474,7 @@ unsafe fn minus_o(sh: &mut crate::context::Shell, name: Option<&BStr>, val: c_in
                 } else {
                     b"off\n"
                 });
-                let _ = (*crate::output::stdout()).write_all(&line);
+                let _ = sh.io.stdout().write_all(&line);
                 i += 1;
             }
         } else {
@@ -488,7 +488,7 @@ unsafe fn minus_o(sh: &mut crate::context::Shell, name: Option<&BStr>, val: c_in
                 });
                 line.extend_from_slice(optnames[i as usize].to_bytes());
                 line.push(b'\n');
-                let _ = (*crate::output::stdout()).write_all(&line);
+                let _ = sh.io.stdout().write_all(&line);
                 i += 1;
             }
         }
@@ -787,7 +787,7 @@ mod tests {
     #[test]
     fn an_unknown_letter_returns_its_complaint() {
         let _g = crate::testutil::lock();
-        let mut owned = crate::context::Shell::new();
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
         let args = [BStr::new("set"), BStr::new("-Q")];
 
@@ -800,7 +800,7 @@ mod tests {
     #[test]
     fn an_unknown_name_returns_its_complaint() {
         let _g = crate::testutil::lock();
-        let mut owned = crate::context::Shell::new();
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
         let args = [BStr::new("set"), BStr::new("-o"), BStr::new("nosuchopt")];
 
@@ -815,7 +815,7 @@ mod tests {
     /// start, and every builtin reads its operands from there.
     fn scan<'a>(args: &'a [&'a BStr], optstring: &[u8]) -> (Vec<u8>, Vec<&'a BStr>) {
         let mut opts = Options::new(args);
-        let mut owned_sh = crate::context::Shell::new();
+        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let mut seen = Vec::new();
         /* `Ok(Some(c))` would end the scan silently on an error and make
@@ -852,7 +852,7 @@ mod tests {
 
     #[test]
     fn option_arg_from_same_word() {
-        let mut owned_sh = crate::context::Shell::new();
+        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let args = words(&[b"read", b"-pPROMPT", b"var"]);
         let mut opts = Options::new(&args);
@@ -864,7 +864,7 @@ mod tests {
 
     #[test]
     fn option_arg_from_next_word() {
-        let mut owned_sh = crate::context::Shell::new();
+        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let args = words(&[b"read", b"-p", b"PROMPT", b"var"]);
         let mut opts = Options::new(&args);
@@ -927,7 +927,7 @@ mod tests {
     /// property worth pinning.
     fn scan_options(sh: &mut crate::context::Shell, raw: &[&[u8]], cmdline: bool) -> (usize, bool, c_int) {
         let _guard = crate::testutil::lock();
-        let mut owned = crate::context::Shell::new();
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
         let args = words(raw);
         let scan = unsafe { options(sh, &args, 0, cmdline) }.expect("these cases scan cleanly");
@@ -936,7 +936,7 @@ mod tests {
 
     #[test]
     fn scan_stops_at_the_first_operand() {
-        let mut owned_sh = crate::context::Shell::new();
+        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let (next, _, _) = scan_options(sh, &[b"-x", b"file", b"-y"], false);
         assert_eq!(next, 1);
@@ -944,7 +944,7 @@ mod tests {
 
     #[test]
     fn scan_consumes_a_double_dash() {
-        let mut owned_sh = crate::context::Shell::new();
+        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let (next, _, _) = scan_options(sh, &[b"--", b"a"], false);
         assert_eq!(next, 1);
@@ -954,7 +954,7 @@ mod tests {
     /// scan, where it stays an operand.
     #[test]
     fn scan_consumes_a_lone_dash() {
-        let mut owned_sh = crate::context::Shell::new();
+        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let (next, _, _) = scan_options(sh, &[b"-", b"a"], false);
         assert_eq!(next, 1);
@@ -962,7 +962,7 @@ mod tests {
 
     #[test]
     fn minus_o_takes_next_word() {
-        let mut owned_sh = crate::context::Shell::new();
+        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let (next, _, _) = scan_options(sh, &[b"-o", b"noglob", b"rest"], false);
         assert_eq!(next, 2);
@@ -972,7 +972,7 @@ mod tests {
     /// ordinary letter, and `set -c` is an error rather than a command.
     #[test]
     fn minus_c_is_command_line_only() {
-        let mut owned_sh = crate::context::Shell::new();
+        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let (_, minus_c, login) = scan_options(sh, &[b"-c", b"echo hi"], true);
         assert!(minus_c);
@@ -982,7 +982,7 @@ mod tests {
 
     #[test]
     fn empty_word_is_not_an_option() {
-        let mut owned_sh = crate::context::Shell::new();
+        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let (next, _, _) = scan_options(sh, &[b"", b"-x"], false);
         assert_eq!(next, 0);

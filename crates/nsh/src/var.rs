@@ -164,7 +164,7 @@ pub struct localvar_list {
 ///
 /// ## Why the `LINENO` buffer is boxed
 ///
-/// `Shell::new()` returns by value, so the struct moves exactly once and
+/// `Shell::new(crate::streams::Streams::INHERIT)` returns by value, so the struct moves exactly once and
 /// anything pointing *into* it is left behind. `init[VLINENO].text` is a
 /// `VarText::Fixed` into the `LINENO=` buffer, and it has to stay valid
 /// across that move — so the buffer is a `Box`, whose address is on the
@@ -1001,7 +1001,7 @@ pub unsafe fn showvars(sh: &mut Shell, prefix: *const c_char, on: c_int, off: c_
         ));
         record.extend_from_slice(CStr::from_ptr(q).to_bytes());
         record.push(b'\n');
-        let _ = (&mut *crate::output::stdout()).write_all(&record);
+        let _ = sh.io.stdout().write_all(&record);
     }
 
     0
@@ -1277,7 +1277,7 @@ mod tests {
     /// `varinit[VLINENO].text` points *into* that buffer -- so the buffer
     /// has to stay where it is while the shell around it moves.
     ///
-    /// `Shell::new()` returns by value, which is already one move; this
+    /// `Shell::new(crate::streams::Streams::INHERIT)` returns by value, which is already one move; this
     /// does a second one deliberately. A plain `[c_char; 19]` field would
     /// pass the first test by luck of the return slot and fail this one,
     /// because the pointer would still name the old location. The `Box`
@@ -1287,7 +1287,7 @@ mod tests {
         let _g = lock();
         unsafe {
             let name = CStr0::new("LINENO");
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             initvar(&mut owned);
 
             owned.vars.lineno = 41;
@@ -1310,8 +1310,8 @@ mod tests {
         let _g = lock();
         unsafe {
             let name = CStr0::new("PATH");
-            let mut one = Shell::new();
-            let mut two = Shell::new();
+            let mut one = Shell::new(crate::streams::Streams::INHERIT);
+            let mut two = Shell::new(crate::streams::Streams::INHERIT);
             initvar(&mut one);
             initvar(&mut two);
 
@@ -1334,7 +1334,7 @@ mod tests {
     fn setvar_files_a_name_equals_value() {
         let _g = lock();
         unsafe {
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             let name = CStr0::new("Tsetvar");
             let val = CStr0::new("hello");
@@ -1359,7 +1359,7 @@ mod tests {
     fn a_frame_restores_in_reverse_order() {
         let _g = lock();
         unsafe {
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             let name = CStr0::new("Tframe");
             let two = CStr0::new("Tframe=two");
@@ -1385,7 +1385,7 @@ mod tests {
     fn a_saved_entry_does_not_move() {
         let _g = lock();
         unsafe {
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             let name = CStr0::new("Tchurn");
             let local = CStr0::new("Tchurn=inner");
@@ -1425,7 +1425,7 @@ mod tests {
     fn environ_owns_the_locale_bytes() {
         let _g = lock();
         unsafe {
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             let name = CStr0::new("LC_COLLATE");
             let saved = libc::getenv(name.p());

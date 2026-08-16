@@ -22,8 +22,15 @@ pub unsafe fn aliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut ap: *mut alias;
 
     if args.len() == 1 {
-        for ap in sh.aliases.iter() {
-            printalias(ap as *const alias);
+        /* Rendered inside the walk, written after it: the walk holds
+         * `sh.aliases` borrowed and the write wants `sh.io`. */
+        let lines: Vec<Vec<u8>> = sh
+            .aliases
+            .iter()
+            .map(|ap| printalias(ap as *const alias))
+            .collect();
+        for line in lines {
+            let _ = sh.io.stdout().write_all(&line);
         }
         return Ok(Flow::Done(0));
     }
@@ -48,10 +55,11 @@ pub unsafe fn aliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 let mut message = b"alias: ".to_vec();
                 message.extend_from_slice(word.as_bytes());
                 message.extend_from_slice(b" not found\n");
-                let _ = (*crate::output::stderr()).write_all(&message);
+                let _ = sh.io.stderr().write_all(&message);
                 ret = 1;
             } else {
-                printalias(ap);
+                let line = printalias(ap);
+                let _ = sh.io.stdout().write_all(&line);
             }
         } else {
             setalias(sh, n, vv.expect("the `=` branch").add(1))?;
@@ -77,7 +85,7 @@ mod tests {
              * the lookup have to name the same shell is the whole point
              * of the table being on it: before, either could have been
              * reading someone else's leftovers. */
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             assert_eq!(
                 aliascmd(sh, &[BStr::new("alias"), BStr::new("ll=ls -l")]).unwrap(),
@@ -94,7 +102,7 @@ mod tests {
     fn an_unknown_name_fails_without_stopping() {
         let _guard = crate::testutil::lock();
         unsafe {
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             assert_eq!(
                 aliascmd(sh, &[

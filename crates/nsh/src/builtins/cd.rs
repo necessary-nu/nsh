@@ -156,7 +156,7 @@ pub unsafe fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         let mut d = cbytes(&*addr_of!(sh.cwd.curdir));
         d.pop();
         d.push(b'\n');
-        let _ = (*crate::output::stdout()).write_all(&d);
+        let _ = sh.io.stdout().write_all(&d);
     }
     Ok(Flow::Done(0))
 }
@@ -284,7 +284,7 @@ mod tests {
     fn opts(words: &[&[u8]]) -> c_int {
         let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
         let mut scan = Options::new(&args);
-        let mut owned = crate::context::Shell::new();
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         unsafe { cdopt(&mut owned, &mut scan) }.unwrap()
     }
 
@@ -314,7 +314,7 @@ mod tests {
     fn the_scan_stops_at_the_operand() {
         let args = [BStr::new("cd"), BStr::new("-P"), BStr::new("dir")];
         let mut scan = Options::new(&args);
-        let mut owned = crate::context::Shell::new();
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         assert_eq!(unsafe { cdopt(&mut owned, &mut scan) }.unwrap(), CD_PHYSICAL);
         assert_eq!(scan.operands(), [BStr::new("dir")]);
     }

@@ -282,7 +282,7 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
             if interrupted
             /* #if ATTY: && (!attyset() || equal(termval(), "emacs")) */
             {
-                let _ = (*crate::output::stderr()).write_all(b"\n");
+                let _ = sh.io.stderr().write_all(b"\n");
             }
             FORCEINTON(); /* enable interrupts */
             entry = if s == 1 {
@@ -317,7 +317,6 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
 /// exception mechanism is C's and `exitshell` terminates the process.
 /// Making it return is [dec:nsh:errors-are-values], not this.
 pub fn main_fn(argc: c_int, argv: Vec<Vec<u8>>, streams: crate::streams::Streams) -> ! {
-    unsafe { crate::streams::set(streams) };
     let mut owned: Vec<*mut c_char> = Vec::with_capacity(argv.len() + 1);
     for a in &argv {
         let mut bytes: Vec<u8> = a.clone();
@@ -334,7 +333,7 @@ pub fn main_fn(argc: c_int, argv: Vec<Vec<u8>>, streams: crate::streams::Streams
      * every function that has been threaded so far reaches its state
      * through the borrow that starts on the next line
      * ([dec:nsh:no-ambient-state]). */
-    let mut sh = Shell::new();
+    let mut sh = Shell::new(streams);
     unsafe {
         main(&mut sh, argc, p);
     }
@@ -392,11 +391,11 @@ pub(crate) unsafe fn cmdloop(
             if crate::jobs::stoppedjobs(sh) == 0 {
                 if Iflag(sh) == 0 {
                     if iflag(sh) != 0 {
-                        let _ = (*crate::output::stderr()).write_all(b"\n");
+                        let _ = sh.io.stderr().write_all(b"\n");
                     }
                     break;
                 }
-                let _ = (*crate::output::stderr()).write_all(b"\nUse \"exit\" to leave shell.\n");
+                let _ = sh.io.stderr().write_all(b"\nUse \"exit\" to leave shell.\n");
             }
             numeof += 1;
         }

@@ -397,7 +397,7 @@ mod tests {
     // [spec:dash:sem:mystring.atomax-fn/test]
     #[test]
     fn atomax_parses_in_base_and_allows_trailing_space() {
-        let mut owned_sh = crate::context::Shell::new();
+        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let _g = crate::testutil::lock();
         unsafe {
@@ -415,7 +415,7 @@ mod tests {
     // [spec:dash:sem:mystring.badnum-fn/test]
     #[test]
     fn atomax_raises_through_badnum_on_junk() {
-        let mut owned_sh = crate::context::Shell::new();
+        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let _g = crate::testutil::lock();
         unsafe {
@@ -440,7 +440,7 @@ mod tests {
     // [spec:dash:sem:mystring.atomax10-fn/test]
     #[test]
     fn atomax10_is_atomax_base_ten() {
-        let mut owned_sh = crate::context::Shell::new();
+        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let _g = crate::testutil::lock();
         unsafe {
@@ -454,7 +454,7 @@ mod tests {
     // [spec:dash:sem:mystring.number-fn/test]
     #[test]
     fn number_is_atomax10_clamped_to_int() {
-        let mut owned_sh = crate::context::Shell::new();
+        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let _g = crate::testutil::lock();
         unsafe {

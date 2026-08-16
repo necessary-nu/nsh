@@ -39,8 +39,8 @@ unsafe fn nullstr() -> *mut c_char {
 
 
 /// Write one rendered conversion to standard output.
-unsafe fn emit(bytes: &[u8]) {
-    let _ = (&mut *crate::output::stdout()).write_all(bytes);
+unsafe fn emit(sh: &mut crate::context::Shell, bytes: &[u8]) {
+    let _ = sh.io.stdout().write_all(bytes);
 }
 
 /// Expand `echo`'s escapes and write the result, followed by `separator`
@@ -73,7 +73,7 @@ unsafe fn print_escape_str(sh: &mut crate::context::Shell, separator: u8, s: *mu
     buf[len - 1] = close;
     let total = len - 1 + (close != 0) as usize;
 
-    emit(&buf[..total]);
+    emit(sh, &buf[..total]);
 
     done
 }

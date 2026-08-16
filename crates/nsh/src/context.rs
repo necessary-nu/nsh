@@ -101,6 +101,27 @@ pub struct Shell {
     /// inbox. `docs/api-design.md` §5.3 has the design and
     /// `[dec:nsh:host-owns-signals]` the argument.
     pub(crate) traps: crate::trap::TrapTable,
+    /// The shell's three writers: buffered stdout, unbuffered stderr,
+    /// and the stderr saved across a redirection that `set -x` traces to.
+    /// `output.rs` owns the shape; this owns the value.
+    ///
+    /// The other half of `move-state`'s blocked group, and it moved for
+    /// the same reason `streams` did — see that field.
+    pub(crate) io: crate::output::ShellIo,
+    /// Where the shell's own three streams come from.
+    ///
+    /// [dec:nsh:host-owns-streams] as a field rather than as a process
+    /// global. `move-state` could not move it: `streams::set` had two
+    /// callers with no shell — `streams::install` and the integration
+    /// cases that stand in for a frontend — and giving `set` a receiver
+    /// would have meant making the constructor public, which is the
+    /// invariant that node existed to establish.
+    ///
+    /// The escape it recorded as (2) is what happened, and it needed no
+    /// builder: `shellmain::main_fn` has taken a `Streams` argument since
+    /// [dec:nsh:host-owns-streams] landed, so the constructor takes one
+    /// too and `io`'s descriptors are the initialiser beside it.
+    pub(crate) streams: crate::streams::Streams,
     /// `$?` — the exit status of the last command.
     ///
     /// Its own field rather than a member of `eval`, because
@@ -116,7 +137,7 @@ pub struct Shell {
 }
 
 impl Shell {
-    /// The shell the process runs as.
+    /// The shell the process runs as, reading and writing `streams`.
     ///
     /// There is one, made at the entry point, and it is threaded down
     /// from there. As tables move onto this type, this is where their
@@ -124,8 +145,18 @@ impl Shell {
     /// Each field starts at what the `static mut` it replaces was
     /// declared with, so the shell a process begins with is the one the
     /// C began with.
-    pub(crate) fn new() -> Self {
+    ///
+    /// `streams` is the one argument, and it is here rather than on a
+    /// setter because the alternative is a process-global that two
+    /// shells would share: `docs/api-design.md` §7 and
+    /// [dec:nsh:host-owns-streams]. `Streams::INHERIT` is descriptors 0,
+    /// 1 and 2, which is what a shell started as a process uses and what
+    /// a frontend that has already called [`crate::streams::install`]
+    /// passes.
+    pub(crate) fn new(streams: crate::streams::Streams) -> Self {
         Shell {
+            io: crate::output::ShellIo::new(streams.stdout, streams.stderr),
+            streams,
             aliases: crate::alias::AliasTable::new(),
             backgndpid: 0,
             commands: crate::exec::CmdTable::new(),

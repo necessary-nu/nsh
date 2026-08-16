@@ -133,7 +133,7 @@ pub const HARD: limtype = 0x2;
 
 // [spec:dash:def:miscbltin.printlim-fn]
 // [spec:dash:sem:miscbltin.printlim-fn]
-unsafe fn printlim(how: limtype, limit: *const libc::rlimit, l: *const limits) {
+unsafe fn printlim(sh: &mut crate::context::Shell, how: limtype, limit: *const libc::rlimit, l: *const limits) {
     let mut val: libc::rlim_t;
 
     val = (*limit).rlim_max;
@@ -142,11 +142,11 @@ unsafe fn printlim(how: limtype, limit: *const libc::rlimit, l: *const limits) {
     }
 
     if val == libc::RLIM_INFINITY {
-        let _ = writeln!(&mut *crate::output::stdout(), "unlimited");
+        let _ = writeln!(sh.io.stdout(), "unlimited");
     } else {
         val /= (*l).factor as libc::rlim_t;
         let signed = val as libc::intmax_t;
-        let _ = writeln!(&mut *crate::output::stdout(), "{signed}");
+        let _ = writeln!(sh.io.stdout(), "{signed}");
     }
 }
 
@@ -243,8 +243,8 @@ pub unsafe fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 record.resize(20, b' ');
             }
             record.push(b' ');
-            let _ = (&mut *crate::output::stdout()).write_all(&record);
-            printlim(how, &limit, l);
+            let _ = sh.io.stdout().write_all(&record);
+            printlim(sh, how, &limit, l);
             l = l.add(1);
         }
         return Ok(Flow::Done(0));
@@ -267,7 +267,7 @@ pub unsafe fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             return Err(sh.sh_error_value(&message));
         }
     } else {
-        printlim(how, &limit, l);
+        printlim(sh, how, &limit, l);
     }
     Ok(Flow::Done(0))
 }

@@ -87,7 +87,7 @@ mod tests {
     fn the_calling_name_picks_the_flag() {
         let _g = lock();
         unsafe {
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             let name = CStr0::new("Texport");
             setvar(sh, name.p(), CStr0::new("v").p(), VSTRFIXED);
@@ -107,7 +107,7 @@ mod tests {
     fn an_operand_may_assign() {
         let _g = lock();
         unsafe {
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             assert_eq!(run(sh, b"export", &[b"Texport2=set"]), Flow::Done(0));
             let name = CStr0::new("Texport2");

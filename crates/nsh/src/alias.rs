@@ -13,7 +13,6 @@ use core::ptr::null_mut;
 use libc::{c_char, c_int};
 use std::collections::BTreeMap;
 use std::ffi::CStr;
-use std::io::Write;
 
 use crate::context::Shell;
 use crate::error::{INTOFF, INTON};
@@ -209,11 +208,19 @@ unsafe fn freealias(ap: &mut alias) -> bool {
 
 // [spec:dash:def:alias.printalias-fn]
 // [spec:dash:sem:alias.printalias-fn]
-pub unsafe fn printalias(ap: *const alias) {
+/// Renders rather than writes, and the difference is a borrow.
+///
+/// Every caller reaches this from inside a walk over `sh.aliases`, which
+/// holds the shell borrowed; writing here would need `sh.io` mutably at
+/// the same time. Handing the bytes back lets the caller write them once
+/// the walk has let go — and it is the shape the rest of the crate is
+/// converging on anyway: the value carries the facts, the call site does
+/// the writing.
+pub unsafe fn printalias(ap: *const alias) -> Vec<u8> {
     let quoted = crate::mystring::single_quote((*ap).name);
     let mut line = CStr::from_ptr(quoted).to_bytes().to_vec();
     line.push(b'\n');
-    let _ = (*crate::output::stdout()).write_all(&line);
+    line
 }
 
 // [spec:dash:def:alias.lookupalias-fn]
@@ -242,7 +249,7 @@ mod tests {
             /* The table is the shell's, so a test that wants an empty one
              * makes a shell rather than clearing a global -- and cannot
              * leave anything behind for the next test to find. */
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             let definition = CStr0::new("a b=value");
 
@@ -263,7 +270,7 @@ mod tests {
     fn owned_alias_views_remain_stable() {
         let _g = crate::testutil::lock();
         unsafe {
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
 
             let initial = CStr0::new("a=old");

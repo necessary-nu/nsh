@@ -92,40 +92,25 @@ impl fmt::Display for StreamError {
 
 impl std::error::Error for StreamError {}
 
-/// Which descriptors the shell's own I/O uses.
-///
-/// Read through [`streams`]; written only by [`set`] and [`install`].
-static mut STREAMS: Streams = Streams::INHERIT;
-
-/// The streams the shell is currently using.
-///
-/// # Safety
-/// Reads a process-global. Sound as long as [`set`] and [`install`] are
-/// not called concurrently with shell execution, which is the same
-/// single-instance constraint the rest of the port is under until
-/// [dec:nsh:no-ambient-state] lands.
-#[inline]
-pub unsafe fn streams() -> Streams {
-    STREAMS
-}
-
-/// Point the shell's own I/O at `s` without disturbing the process's
-/// standard descriptors.
-///
-/// See the module comment for what this does and does not carry: the
-/// shell's own reads and writes follow, the language's descriptor numbers
-/// do not.
-///
-/// # Safety
-/// Must not be called while the shell is running.
-pub unsafe fn set(s: Streams) {
-    STREAMS = s;
-    // `out1` and `out2` are the shell's own writes, so they follow the
-    // streams rather than the numbers. Doing it here rather than in an
-    // init fragment means there is no window in which the buffers point
-    // somewhere the caller did not ask for.
-    crate::output::set_stream_fds(s.stdout, s.stderr);
-}
+/* `static mut STREAMS`, `streams()` and `set()` were here.
+ *
+ * They are gone, and what replaced them is a *parameter*: the shell is
+ * constructed with the streams it is to use (`Shell::new(streams)`), so
+ * `Streams` is a field of the instance and `ShellIo`'s descriptors are a
+ * field initialiser beside it. `move-state` recorded this as escape (2)
+ * and could not take it, because `set` had two callers with no shell to
+ * be given — the five integration cases under `crates/nsh/tests/`. It
+ * turned out they never needed one: `main_fn` has taken a `Streams`
+ * argument since [dec:nsh:host-owns-streams] landed, and three of those
+ * cases were passing a value *through the global* to reach a parameter
+ * that was already there.
+ *
+ * What that costs is stated rather than hidden: `set` moved a *live*
+ * shell's writers and the constructor cannot. Nothing in the crate did
+ * that — `main_fn` called `set` before `Shell::new` — and the two unit
+ * tests that asserted it now assert the constructor's contract instead.
+ * An embedder that wants to redirect a running shell redirects it in the
+ * language, which is what the language is for. */
 
 /// The host's descriptors 0, 1 and 2, saved so [`restore`] can put them
 /// back.
@@ -154,7 +139,6 @@ pub struct Borrowed {
 /// process may be using them for the lifetime of the returned [`Borrowed`].
 pub unsafe fn install(s: Streams) -> Result<Borrowed, StreamError> {
     if s == Streams::INHERIT {
-        set(s);
         return Ok(Borrowed {
             saved: [-1; 3],
             installed: false,
@@ -224,9 +208,11 @@ pub unsafe fn install(s: Streams) -> Result<Borrowed, StreamError> {
     }
     cleanup(&staged);
 
-    // The shell's own I/O now goes through the standard descriptors,
-    // because that is where its streams have been put.
-    set(Streams::INHERIT);
+    // The shell's own I/O needs no adjustment: `s` is on the standard
+    // descriptors now, so a shell built with `Streams::INHERIT` -- which
+    // is what a caller of `install` passes to `Shell::new` -- writes
+    // exactly there. This function no longer touches shell state at all,
+    // which is what lets it stay a process-level helper with no receiver.
     Ok(Borrowed {
         saved,
         installed: true,
@@ -252,7 +238,6 @@ impl Borrowed {
                     libc::close(fd);
                 }
             }
-            set(Streams::INHERIT);
         }
     }
 }
@@ -288,50 +273,62 @@ mod tests {
         let _g = lock();
         unsafe {
             let b = install(Streams::INHERIT).expect("inherit installs");
-            assert_eq!(streams(), Streams::INHERIT);
             b.restore();
-            assert_eq!(streams(), Streams::INHERIT);
+            /* Nothing to read back: `install` no longer writes shell
+             * state, so what it did is visible on the descriptors and
+             * the forked cases below are what check them. */
+            assert!(libc::fcntl(1, libc::F_GETFD) >= 0);
         }
     }
 
-    /// `set` is the mode for a host that cannot have descriptor 1 swapped
-    /// out from under it: the shell's own writes move, the process's
-    /// standard descriptors do not.
+    /// The shell reads and writes the streams it was *built* with, and it
+    /// does so without touching the process's standard descriptors. This
+    /// is what `set` used to assert; the mode is now the constructor's
+    /// argument rather than a global, so the assertion moved with it.
     #[test]
-    fn set_moves_the_shells_own_io_without_touching_descriptor_one() {
+    fn a_shell_is_built_on_the_streams_it_is_given() {
         let _g = lock();
         unsafe {
             let (r, w) = pipe();
-            set(Streams {
+            let sh = crate::context::Shell::new(Streams {
                 stdin: 0,
                 stdout: w,
                 stderr: 2,
             });
-            assert_eq!(streams().stdout, w);
+            assert_eq!(sh.streams.stdout, w);
+            /* Descriptor 1 is untouched: this mode exists for a host that
+             * cannot have it swapped out from under it. */
             assert!(libc::fcntl(1, libc::F_GETFD) >= 0);
-            set(Streams::INHERIT);
             libc::close(r);
             libc::close(w);
         }
     }
 
-    /// `out1` and `out2` are the shell's own writers, so they have to
-    /// follow the streams. If they did not, `echo` would keep writing to
-    /// descriptor 1 while everything else moved.
+    /// The shell's own writers are on the descriptors it was given. If
+    /// they were not, `echo` would keep writing to descriptor 1 while
+    /// everything else moved.
+    ///
+    /// This is the other half of what `set` asserted, and the half that
+    /// made escape (2) look unavailable: `set` moved a *live* shell's
+    /// writers. Nothing in the crate did that -- `main_fn` called `set`
+    /// before `Shell::new` -- so the property that was actually load
+    /// bearing is this one.
     #[test]
-    fn the_shells_writers_follow_the_streams() {
+    fn the_shells_writers_are_the_streams_it_was_built_with() {
         let _g = lock();
         unsafe {
-            set(Streams {
+            let mut sh = crate::context::Shell::new(Streams {
                 stdin: 7,
                 stdout: 8,
                 stderr: 9,
             });
-            let (out, err) = ((*crate::output::stdout()).fd, (*crate::output::stderr()).fd);
-            assert_eq!((out, err), (8, 9));
-            set(Streams::INHERIT);
-            let (out, err) = ((*crate::output::stdout()).fd, (*crate::output::stderr()).fd);
-            assert_eq!((out, err), (1, 2));
+            assert_eq!((sh.io.stdout().fd, sh.io.stderr().fd), (8, 9));
+
+            let mut inherited = crate::context::Shell::new(Streams::INHERIT);
+            assert_eq!(
+                (inherited.io.stdout().fd, inherited.io.stderr().fd),
+                (1, 2)
+            );
         }
     }
 
@@ -484,9 +481,6 @@ mod tests {
             };
             if err.fd != bad || err.errno != libc::EBADF {
                 libc::_exit(3);
-            }
-            if streams() != Streams::INHERIT {
-                libc::_exit(4);
             }
             // A failed install must leave the host's descriptors alone.
             if libc::fcntl(1, libc::F_GETFD) < 0 {

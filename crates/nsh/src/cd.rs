@@ -171,7 +171,7 @@ mod tests {
     // [spec:dash:sem:cd.getpwd-fn/test]
     #[test]
     fn getpwd_preserves_non_utf8_path_bytes() {
-        let mut owned_sh = crate::context::Shell::new();
+        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let _g = crate::testutil::lock();
         {

@@ -138,7 +138,7 @@ unsafe fn getopts(
                     let mut message = b"Illegal option -".to_vec();
                     message.push(c as u8);
                     message.push(b'\n');
-                    let _ = (*crate::output::stderr()).write_all(&message);
+                    let _ = sh.io.stderr().write_all(&message);
                     crate::var::unsetvar(sh, b"OPTARG\0".as_ptr() as *const c_char)?;
                 }
                 c = b'?' as c_char;
@@ -165,7 +165,7 @@ unsafe fn getopts(
                     let mut message = b"No arg for -".to_vec();
                     message.push(c as u8);
                     message.extend_from_slice(b" option\n");
-                    let _ = (*crate::output::stderr()).write_all(&message);
+                    let _ = sh.io.stderr().write_all(&message);
                     crate::var::unsetvar(sh, b"OPTARG\0".as_ptr() as *const c_char)?;
                     c = b'?' as c_char;
                 }
@@ -240,7 +240,7 @@ mod tests {
              * assigns, and the variables now belong to a shell instance --
              * so a fresh `Shell` per invocation would be a fresh set of
              * variables, which is not what a script sees. */
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             sh.options.shellparam.optind = 1;
             sh.options.shellparam.optoff = -1;
@@ -268,7 +268,7 @@ mod tests {
             let words = ["getopts", ":a", "o", "-z"];
             let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
 
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             sh.options.shellparam.optind = 1;
             sh.options.shellparam.optoff = -1;

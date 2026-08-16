@@ -464,7 +464,7 @@ mod tests {
         let _g = crate::testutil::lock();
         let expr = crate::testutil::CStr0::new("1/0");
 
-        let mut owned = crate::context::Shell::new();
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
 
         let sh = &mut owned;
 
@@ -482,7 +482,7 @@ mod tests {
         let _g = crate::testutil::lock();
         let expr = crate::testutil::CStr0::new("1 2");
 
-        let mut owned = crate::context::Shell::new();
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
 
         let sh = &mut owned;
 
@@ -498,7 +498,7 @@ mod tests {
     fn a_good_expression_still_evaluates() {
         let _g = crate::testutil::lock();
         let expr = crate::testutil::CStr0::new("6*7");
-        let mut owned = crate::context::Shell::new();
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
 
         assert_eq!(unsafe { arith(sh, expr.p()) }.expect("6*7 evaluates"), 42);

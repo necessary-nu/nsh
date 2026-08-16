@@ -112,8 +112,8 @@ pub unsafe fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
     }
     if let Some(prompt) = &prompt {
-        if libc::isatty(crate::streams::streams().stdin) != 0 {
-            let _ = (&mut *crate::output::stderr()).write_all(prompt.as_bytes());
+        if libc::isatty(sh.streams.stdin) != 0 {
+            let _ = sh.io.stderr().write_all(prompt.as_bytes());
         }
     }
     let names = opts.operands();

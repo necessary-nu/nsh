@@ -86,7 +86,7 @@ pub unsafe fn chkmail(sh: &mut crate::context::Shell) {
             };
             let mut message = CStr::from_ptr(text).to_bytes().to_vec();
             message.push(b'\n');
-            let _ = (*crate::output::stderr()).write_all(&message);
+            let _ = sh.io.stderr().write_all(&message);
         }
         *mtp = statb.st_mtime;
         mtp = mtp.add(1);

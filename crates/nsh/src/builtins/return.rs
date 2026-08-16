@@ -49,7 +49,7 @@ mod tests {
             args.push(BStr::new(status));
         }
         unsafe {
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             sh.status = last;
             let returned = returncmd(sh, &args).unwrap();

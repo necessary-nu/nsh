@@ -19,7 +19,7 @@ use std::io::Write as _;
 
 // [spec:dash:def:times.timescmd-fn]
 // [spec:dash:sem:times.timescmd-fn]
-pub unsafe fn timescmd(_sh: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> {
+pub unsafe fn timescmd(sh: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> {
     let mut buf: libc::tms = mem::zeroed();
     let clk_tck: libc::c_long = libc::sysconf(libc::_SC_CLK_TCK);
     let mutime: c_int;
@@ -50,7 +50,7 @@ pub unsafe fn timescmd(_sh: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> 
     cstime -= mcstime as f64 * 60.0;
 
     let _ = write!(
-        &mut *crate::output::stdout(),
+        sh.io.stdout(),
         "{mutime}m{utime:.6}s {mstime}m{stime:.6}s\n\
          {mcutime}m{cutime:.6}s {mcstime}m{cstime:.6}s\n"
     );

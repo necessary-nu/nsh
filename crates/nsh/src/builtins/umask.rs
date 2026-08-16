@@ -82,9 +82,9 @@ pub unsafe fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             *ap.offset(-1) = b'\0' as c_char;
             let mut record = CStr::from_ptr(buf.as_ptr()).to_bytes().to_vec();
             record.push(b'\n');
-            let _ = (&mut *crate::output::stdout()).write_all(&record);
+            let _ = sh.io.stdout().write_all(&record);
         } else {
-            let _ = writeln!(&mut *crate::output::stdout(), "{mask:04o}");
+            let _ = writeln!(sh.io.stdout(), "{mask:04o}");
         }
     } else {
         let mut new_mask: c_int;
@@ -221,7 +221,7 @@ mod tests {
 
     fn set(mode: &[u8]) -> libc::mode_t {
         unsafe {
-            let sh = &mut Shell::new();
+            let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
             assert_eq!(
                 umaskcmd(sh, &[BStr::new("umask"), BStr::new(mode)]).unwrap(),
                 Flow::Done(0)
@@ -273,7 +273,7 @@ mod tests {
             ("999", &b"Illegal number: 999"[..]),
             ("q=r", &b"Illegal mode: q=r"[..]),
         ] {
-            let e = unsafe { umaskcmd(&mut Shell::new(), &[BStr::new("umask"), BStr::new(mode)]) }
+            let e = unsafe { umaskcmd(&mut Shell::new(crate::streams::Streams::INHERIT), &[BStr::new("umask"), BStr::new(mode)]) }
                 .expect_err("a bad mode fails");
             assert_eq!(e.message().to_vec(), text.to_vec());
             assert_eq!(e.status(), 2);

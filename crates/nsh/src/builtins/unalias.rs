@@ -33,7 +33,7 @@ pub unsafe fn unaliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
             let mut message = b"unalias: ".to_vec();
             message.extend_from_slice(name.as_bytes());
             message.extend_from_slice(b" not found\n");
-            let _ = (*crate::output::stderr()).write_all(&message);
+            let _ = sh.io.stderr().write_all(&message);
             i = 1;
         }
     }

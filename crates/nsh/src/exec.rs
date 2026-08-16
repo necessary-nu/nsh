@@ -947,7 +947,7 @@ mod tests {
     fn changepath_files_the_builtin_slot() {
         let _g = crate::testutil::lock();
         unsafe {
-            let mut owned = crate::context::Shell::new();
+            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
 
             changepath(sh, c"/bin:%builtin:/usr/bin".as_ptr());
@@ -972,7 +972,7 @@ mod tests {
     fn clearing_drops_only_path_dependent_entries() {
         let _g = crate::testutil::lock();
         unsafe {
-            let mut owned = crate::context::Shell::new();
+            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
 
             let external = c"Texternal";

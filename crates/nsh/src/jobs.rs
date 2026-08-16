@@ -229,7 +229,7 @@ pub(crate) unsafe fn outcmd(sh: &mut crate::context::Shell, jp: usize, i: usize,
         .ps
         .get(i)
         .map_or(BStr::new(b""), |p| p.cmd.as_bstr());
-    let _ = (*crate::output::io()).get(dest).write_all(cmd);
+    let _ = sh.io.get(dest).write_all(cmd);
 }
 
 /* Set if we are in the vforked child.
@@ -410,7 +410,7 @@ pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(),
                          * that order -- which is the shell's stderr,
                          * stdout and stdin, not the numbers for their
                          * own sake. */
-                        let s = crate::streams::streams();
+                        let s = sh.streams;
                         let candidates = [s.stderr, s.stdout, s.stdin];
                         let mut i: usize = 0;
                         fd = -1;
@@ -577,7 +577,7 @@ pub(crate) unsafe fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usi
          * borrows `sh.io`, and evaluating one inside the other is the
          * conflict `Dest` exists to keep out of these functions. */
         let pid = ps_pid(sh, jp, ps);
-        let _ = writeln!((*crate::output::io()).get(dest), "{pid}");
+        let _ = writeln!(sh.io.get(dest), "{pid}");
         return;
     }
 
@@ -630,7 +630,7 @@ pub(crate) unsafe fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usi
         let mut record = CStr::from_ptr(s.as_ptr()).to_bytes().to_vec();
         let width = (33 - col).max(0) as usize;
         record.resize(record.len() + width.max(1), b' ');
-        let _ = (*crate::output::io()).get(dest).write_all(&record);
+        let _ = sh.io.get(dest).write_all(&record);
         outcmd(sh, jp, ps, dest);
         if (mode & SHOW_PID) == 0 {
             showpipe(sh, jp, dest);
@@ -638,7 +638,7 @@ pub(crate) unsafe fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usi
         }
         ps += 1;
         if ps == psend {
-            let _ = (*crate::output::io()).get(dest).write_all(b"\n");
+            let _ = sh.io.get(dest).write_all(b"\n");
             break;
         }
     }
@@ -1043,7 +1043,7 @@ unsafe fn forkchild(
              * `open` returning the lowest free descriptor to land back on
              * 0. That only works when the shell's stdin *is* 0, so put it
              * where it belongs when the frontend said otherwise. */
-            let sin: c_int = crate::streams::streams().stdin;
+            let sin: c_int = sh.streams.stdin;
             libc::close(sin);
             let f: c_int =
                 crate::redir::sh_open(sh, _PATH_DEVNULL.as_ptr() as *const c_char, libc::O_RDONLY, 0)
@@ -1122,7 +1122,7 @@ unsafe fn forkparent(
         sh.backgndpid = pid; /* set $! */
         set_curjob(sh, ji, CUR_RUNNING);
         if sh.options.flag(crate::options::iflag) != 0 {
-            let _ = writeln!(&mut *crate::output::stderr(), "[{}] {pid}", jobno(ji));
+            let _ = writeln!(sh.io.stderr(), "[{}] {pid}", jobno(ji));
         }
     }
     /* the C's second `if (jp)` is dead after the early return above */
@@ -1382,7 +1382,7 @@ unsafe fn waitone(sh: &mut crate::context::Shell, block: c_int, jobp: Option<usi
             s[len as usize] = b'\n' as c_char;
             s[(len + 1) as usize] = 0;
             let _ =
-                (&mut *crate::output::stderr()).write_all(CStr::from_ptr(s.as_ptr()).to_bytes());
+                sh.io.stderr().write_all(CStr::from_ptr(s.as_ptr()).to_bytes());
         }
     }
     /* This frame brackets the whole wait in INTOFF/INTON, so the poll
@@ -1532,7 +1532,7 @@ pub unsafe fn stoppedjobs(sh: &mut crate::context::Shell) -> c_int {
         }
         jp = sh.jobs.curjob;
         if jp.map_or(false, |i| sh.jobs.tab[i].state as c_int == JOBSTOPPED) {
-            let _ = (&mut *crate::output::stderr()).write_all(b"You have stopped jobs.\n");
+            let _ = sh.io.stderr().write_all(b"You have stopped jobs.\n");
             sh.jobs.job_warning = 2;
             retval += 1;
         }
@@ -1963,11 +1963,11 @@ pub(crate) unsafe fn showpipe(sh: &mut crate::context::Shell, jp: usize, dest: D
     let spend: usize = sh.jobs.tab[jp].ps.len();
 
     for sp in 1..spend {
-        let _ = (*crate::output::io()).get(dest).write_all(b" | ");
+        let _ = sh.io.get(dest).write_all(b" | ");
         outcmd(sh, jp, sp, dest);
     }
-    let _ = (*crate::output::io()).get(dest).write_all(b"\n");
-    crate::output::flushall();
+    let _ = sh.io.get(dest).write_all(b"\n");
+    sh.io.flushall();
 }
 
 // [spec:dash:def:jobs.xtcsetpgrp-fn]

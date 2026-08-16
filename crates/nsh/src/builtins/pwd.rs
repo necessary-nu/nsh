@@ -35,6 +35,6 @@ pub unsafe fn pwdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     };
     dir.pop();
     dir.push(b'\n');
-    let _ = (*crate::output::stdout()).write_all(&dir);
+    let _ = sh.io.stdout().write_all(&dir);
     Ok(Flow::Done(0))
 }

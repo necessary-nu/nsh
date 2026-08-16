@@ -1242,7 +1242,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
         lastarg = *nargv.offset(-1);
     }
 
-    (*crate::output::previous_stderr()).fd = crate::streams::streams().stderr;
+    sh.io.previous_stderr().fd = sh.streams.stderr;
     expredir(sh, &c.redirect)?;
     redir_stop = crate::redir::pushredir(sh, &c.redirect);
     /* `status = redirectsafe(..)`, which the C computes as `setjmp(..) *
@@ -1308,16 +1308,16 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                  * note in `evalcommand`. */
                 let ps4 = crate::var::ps4val(sh);
                 let prompt = crate::parser::expandstr(sh, ps4)?;
-                let _ = (*crate::output::io()).get(dest).write_all(&prompt);
+                let _ = sh.io.get(dest).write_all(&prompt);
                 sh.eval.inps4 = 0;
                 sep = 0;
-                sep = eprintlist(dest, &varlist.list, sep);
-                /* `eprintlist(out, osp, sep)` prints from the *original*
+                sep = eprintlist(sh, dest, &varlist.list, sep);
+                /* `eprintlist(sh, out, osp, sep)` prints from the *original*
                  * head, so `command -p foo` traces as it was written and not
                  * as `parse_command_args` left it.  A NULL `osp` prints
                  * nothing, which is the empty slice. */
-                eprintlist(dest, &arglist.list[osp.unwrap_or(arglist.list.len())..], sep);
-                let _ = (*crate::output::io()).get(dest).write_all(b"\n");
+                eprintlist(sh, dest, &arglist.list[osp.unwrap_or(arglist.list.len())..], sep);
+                let _ = sh.io.get(dest).write_all(b"\n");
             }
 
             /* Now locate the command. */
@@ -1483,8 +1483,8 @@ unsafe fn evalbltin(
         };
         /* Every `?` and every `Flow::Exit` above skips the rest of this,
          * exactly as the C's `goto cmddone` skipped it. */
-        crate::output::flushall();
-        if crate::output::outerr(crate::output::stdout()) != 0 {
+        sh.io.flushall();
+        if crate::output::outerr(sh.io.stdout()) != 0 {
             let mut message = Vec::new();
             if let Some(name) = &sh.eval.commandname {
                 message.extend_from_slice(name);
@@ -1492,7 +1492,7 @@ unsafe fn evalbltin(
             message.extend_from_slice(b": I/O error");
             sh.sh_warnx(&message);
         }
-        status |= crate::output::outerr(crate::output::stdout());
+        status |= crate::output::outerr(sh.io.stdout());
         sh.status = status;
         Ok(Flow::Done(status))
     })();
@@ -1503,7 +1503,7 @@ unsafe fn evalbltin(
      * restore `commandname` on its way out rather than skip them. It runs
      * on every path here because there is only one way out now. `handler`
      * was the third thing it restored and there is no handler left. */
-    crate::output::freestdout();
+    crate::output::freestdout(&mut sh.io);
     sh.eval.commandname = savecmdname;
 
     outcome
@@ -1610,7 +1610,7 @@ unsafe fn prehash(sh: &mut Shell, n: &Node) -> Result<Flow, Error> {
 
 // [spec:dash:def:eval.eprintlist-fn]
 // [spec:dash:sem:eval.eprintlist-fn]
-unsafe fn eprintlist(dest: Dest, list: &[strlist], sep: c_int) -> c_int {
+unsafe fn eprintlist(sh: &mut crate::context::Shell, dest: Dest, list: &[strlist], sep: c_int) -> c_int {
     let mut sep: c_int = sep;
 
     for sp in list {
@@ -1620,7 +1620,7 @@ unsafe fn eprintlist(dest: Dest, list: &[strlist], sep: c_int) -> c_int {
         }
         record.extend_from_slice(CStr::from_ptr(sp.textp()).to_bytes());
         sep |= 1;
-        let _ = (*crate::output::io()).get(dest).write_all(&record);
+        let _ = sh.io.get(dest).write_all(&record);
     }
 
     sep
@@ -1708,7 +1708,7 @@ mod tests {
              * so the process has none to borrow and put back -- the last
              * of the save/restore this test was written around is gone
              * with them. */
-            let mut owned = crate::context::Shell::new();
+            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
 
             sh.status = 1;

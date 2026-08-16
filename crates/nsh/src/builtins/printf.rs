@@ -47,8 +47,8 @@ const WIDTH: &[u8] = b"*0123456789";
 ///
 /// Nothing is checked: `evalbltin` reads `Output`'s sticky error flag
 /// after the builtin returns and folds it into the exit status.
-unsafe fn emit(bytes: &[u8]) {
-    let _ = (&mut *crate::output::stdout()).write_all(bytes);
+unsafe fn emit(sh: &mut crate::context::Shell, bytes: &[u8]) {
+    let _ = sh.io.stdout().write_all(bytes);
 }
 
 /// Write one rendered conversion, or raise what the C raised when it
@@ -61,7 +61,7 @@ unsafe fn emit(bytes: &[u8]) {
 unsafe fn emit_field(sh: &mut crate::context::Shell, rendered: Option<Vec<u8>>) -> Result<(), Error> {
     match rendered {
         Some(bytes) => {
-            emit(&bytes);
+            emit(sh, &bytes);
             Ok(())
         }
         None => Err(sh.sh_error_value(b"xvsnprintf failed")),
@@ -662,7 +662,7 @@ pub unsafe fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 );
                 at += (ret >> 4) as usize;
                 debug_assert!((ret & 15) as usize <= CONV_ESCAPE_SLOP);
-                emit(&scratch[..(ret & 15) as usize]);
+                emit(sh, &scratch[..(ret & 15) as usize]);
                 continue;
             }
             /* A `%%` is one `%`; a `%` at the very end of the format
@@ -671,7 +671,7 @@ pub unsafe fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 if ch == b'%' {
                     at += 1;
                 }
-                emit(&[ch]);
+                emit(sh, &[ch]);
                 continue;
             }
 
@@ -975,7 +975,7 @@ mod tests {
     /// benign default once the list runs out.
     #[test]
     fn exhausted_operands_yield_defaults() {
-        let mut owned_sh = crate::context::Shell::new();
+        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let words: Vec<&BStr> = vec![BStr::new("ab")];
         let mut operands = Operands::new(&words);
@@ -1004,7 +1004,7 @@ mod tests {
     /// whichever quote it is, and a lone quote is nothing.
     #[test]
     fn a_quote_argument_is_one_byte() {
-        let mut owned_sh = crate::context::Shell::new();
+        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let words: Vec<&BStr> = vec![BStr::new("'A"), BStr::new("\"z"), BStr::new("'")];
         let mut operands = Operands::new(&words);

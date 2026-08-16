@@ -557,7 +557,7 @@ pub unsafe fn exitshell(sh: &mut crate::context::Shell) -> ! {
      * below. Dropping the diagnostic is that frame, exactly -- it caught
      * and went on -- and it is why the frame itself can go. */
     drop(crate::jobs::setjobctl(sh, 0));
-    crate::output::flushall();
+    sh.io.flushall();
     crate::shell::flush_coverage();
     libc::_exit(sh.status);
     /* NOTREACHED */

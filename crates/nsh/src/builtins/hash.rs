@@ -49,10 +49,14 @@ pub unsafe fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
          * value is the same one `printentry` read for itself, since
          * nothing in the loop assigns to `PATH`. */
         let path = crate::var::pathval(sh);
-        for (name, cmdp) in sh.commands.iter() {
-            if cmdp.cmdtype() == CMDNORMAL {
-                printentry(BStr::new(name.as_slice()), cmdp, path);
-            }
+        let lines: Vec<Vec<u8>> = sh
+            .commands
+            .iter()
+            .filter(|(_, cmdp)| cmdp.cmdtype() == CMDNORMAL)
+            .map(|(name, cmdp)| printentry(BStr::new(name.as_slice()), cmdp, path))
+            .collect();
+        for line in lines {
+            let _ = sh.io.stdout().write_all(&line);
         }
         return Ok(Flow::Done(0));
     }
@@ -86,7 +90,7 @@ pub unsafe fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 /// that walks the command table holds it borrowed across this call, so the
 /// read has to happen before the walk starts. Passing it in is what makes
 /// that visible rather than a surprise.
-unsafe fn printentry(name: &BStr, cmdp: &tblentry, pathval: *const c_char) {
+unsafe fn printentry(name: &BStr, cmdp: &tblentry, pathval: *const c_char) -> Vec<u8> {
     let mut idx: c_int;
     let mut path: *const c_char;
     let fullname: *mut c_char;
@@ -101,8 +105,10 @@ unsafe fn printentry(name: &BStr, cmdp: &tblentry, pathval: *const c_char) {
         }
     }
     fullname = padvance_result();
-    let output = &mut *crate::output::stdout();
-    let _ = output.write_all(CStr::from_ptr(fullname).to_bytes());
-    let suffix: &[u8] = if cmdp.rehash { b"*\n" } else { b"\n" };
-    let _ = output.write_all(suffix);
+    /* Rendered rather than written, for the reason the note above gives
+     * about `pathval`: the walk holds `sh.commands` borrowed, and a write
+     * wants `sh.io` at the same time. */
+    let mut line = CStr::from_ptr(fullname).to_bytes().to_vec();
+    line.extend_from_slice(if cmdp.rehash { b"*\n" } else { b"\n" });
+    line
 }

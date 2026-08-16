@@ -2347,7 +2347,7 @@ unsafe fn setprompt(sh: &mut Shell, which: c_int) {
          * `expandstr` had left in the region for `out2str` to read.  The
          * expansion buffer is owned, so there is nothing to bound. */
         let prompt = getprompt(sh);
-        let _ = (*crate::output::stderr()).write_all(&prompt);
+        let _ = sh.io.stderr().write_all(&prompt);
     }
 }
 

@@ -78,7 +78,12 @@ fn run(script: &str) -> (String, i32) {
             })
             .expect("install");
             core::mem::forget(lent);
-            nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, streams::streams());
+            /* `install` put the supplied descriptors on 0, 1 and 2, so the
+               shell is built on the standard ones. This used to read
+               the value back out of a process-global that `install`
+               wrote; the global is gone and the constant is what it
+               always meant. */
+            nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, Streams::INHERIT);
         }
         libc::close(w);
         let mut wstatus = 0i32;

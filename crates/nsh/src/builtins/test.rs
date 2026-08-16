@@ -698,7 +698,7 @@ mod tests {
     fn eval(words: &[&[u8]]) -> c_int {
         let _guard = crate::testutil::lock();
         let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
-        let sh = &mut Shell::new();
+        let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
         let Flow::Done(status) = (unsafe { testcmd(sh, &args).unwrap() }) else {
             unreachable!("`test` always finishes")
         };
@@ -803,7 +803,7 @@ mod tests {
         assert_eq!(eval(&[b"[", b"x", b"]"]), 0);
         /* Returned rather than raised, per [dec:nsh:errors-are-values]. */
         let args = [BStr::new(b"["), BStr::new(b"x")];
-        let sh = &mut Shell::new();
+        let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
         let e = unsafe { testcmd(sh, &args) }.expect_err("`[ x` is missing its bracket");
         assert_eq!(e.message().to_vec(), b"missing ]".to_vec());
     }

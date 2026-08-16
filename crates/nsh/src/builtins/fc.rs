@@ -331,9 +331,9 @@ pub unsafe fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             let mut line = nul_terminated(&event.line);
             if lflg != 0 {
                 if nflg == 0 {
-                    let _ = write!(&mut *crate::output::stdout(), "{:5} ", event.number);
+                    let _ = write!(sh.io.stdout(), "{:5} ", event.number);
                 }
-                let _ = (&mut *crate::output::stdout()).write_all(
+                let _ = sh.io.stdout().write_all(
                     core::ffi::CStr::from_ptr(line.as_ptr() as *const c_char).to_bytes(),
                 );
             } else {
@@ -349,7 +349,7 @@ pub unsafe fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
                 if sflg != 0 {
                     if sh.displayhist != 0 {
-                        let _ = (&mut *crate::output::stderr())
+                        let _ = sh.io.stderr()
                             .write_all(core::ffi::CStr::from_ptr(s).to_bytes());
                     }
 

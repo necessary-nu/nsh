@@ -52,7 +52,7 @@ pub unsafe fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         jp = getjob(sh, spec.as_ref().map_or(core::ptr::null(), |s| s.as_ptr()), 1)?;
         if mode == FORK_BG {
             set_curjob(sh, jp, CUR_RUNNING);
-            let _ = write!((*crate::output::io()).get(Dest::Stdout), "[{}] ", jobno(jp));
+            let _ = write!(sh.io.get(Dest::Stdout), "[{}] ", jobno(jp));
         }
         outcmd(sh, jp, 0, Dest::Stdout);
         showpipe(sh, jp, Dest::Stdout);

@@ -23,7 +23,7 @@ mod tests {
     #[test]
     fn always_succeeds() {
         unsafe {
-            let sh = &mut Shell::new();
+            let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
             assert_eq!(truecmd(sh, &[BStr::new("true")]).unwrap(), Flow::Done(0));
             assert_eq!(
                 truecmd(sh, &[BStr::new(":"), BStr::new("ignored")]).unwrap(),

@@ -28,8 +28,15 @@ fn read_all(fd: i32) -> String {
 }
 
 /// Run `script` in a forked child, with `prepare` deciding how the child
-/// is given its streams. Returns the child's exit status.
-fn run_shell(script: &str, prepare: impl FnOnce()) -> i32 {
+/// is given its streams: it runs inside the child and *returns* the
+/// `Streams` the shell is built on. Returns the child's exit status.
+///
+/// `prepare` returning the value rather than stashing it in a global is
+/// the whole of what changed when `io` and `streams` moved onto the
+/// instance. Two of the cases below were passing a `Streams` through
+/// `streams::set` to reach `main_fn`'s parameter, which has taken one
+/// since [dec:nsh:host-owns-streams] landed.
+fn run_shell(script: &str, prepare: impl FnOnce() -> Streams) -> i32 {
     let argv: Vec<Vec<u8>> = vec![b"sh".to_vec(), b"-c".to_vec(), script.as_bytes().to_vec()];
     unsafe {
         let pid = libc::fork();
@@ -40,8 +47,8 @@ fn run_shell(script: &str, prepare: impl FnOnce()) -> i32 {
             // prints a panic banner for each. The `dash` binary filters
             // them in `main`; do the same so the test's stderr is the
             // shell's, not the runtime's.
-            prepare();
-            nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, streams::streams());
+            let streams = prepare();
+            nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, streams);
         }
         let mut status = 0i32;
         assert_eq!(libc::waitpid(pid, &mut status, 0), pid);
@@ -53,25 +60,24 @@ fn run_shell(script: &str, prepare: impl FnOnce()) -> i32 {
     }
 }
 
-/// `set` mode: the shell's own writes -- built-ins, errors, prompts --
-/// follow the stream it was handed, with no `dup2` anywhere.
+/// Constructor mode: the shell's own writes -- built-ins, errors,
+/// prompts -- go to the stream it was *built* with, with no `dup2`
+/// anywhere. This was `set` mode.
 #[test]
 fn a_builtin_writes_to_the_stream_the_shell_was_given() {
     let (r, w) = unsafe { pipe() };
-    let st = run_shell("echo from the library", || unsafe {
-        streams::set(Streams {
-            stdin: 0,
-            stdout: w,
-            stderr: 2,
-        });
+    let st = run_shell("echo from the library", || Streams {
+        stdin: 0,
+        stdout: w,
+        stderr: 2,
     });
     unsafe { libc::close(w) };
     assert_eq!(st, 0);
     assert_eq!(read_all(r), "from the library\n");
 }
 
-/// The documented limit of `set` mode, pinned as a test rather than left
-/// as a claim in a comment: the *language's* descriptor numbers still mean
+/// The documented limit of constructor mode, pinned as a test rather than
+/// left as a claim in a comment: the *language's* descriptor numbers still mean
 /// the process's descriptors, so an external command's output goes to
 /// descriptor 1 and not to the stream the shell was handed.
 ///
@@ -81,14 +87,16 @@ fn a_builtin_writes_to_the_stream_the_shell_was_given() {
 fn set_does_not_carry_to_an_external_command() {
     let (shell_r, shell_w) = unsafe { pipe() };
     let (fd1_r, fd1_w) = unsafe { pipe() };
-    let st = run_shell("echo builtin; /bin/echo external", || unsafe {
-        libc::dup2(fd1_w, 1);
-        libc::close(fd1_w);
-        streams::set(Streams {
+    let st = run_shell("echo builtin; /bin/echo external", || {
+        unsafe {
+            libc::dup2(fd1_w, 1);
+            libc::close(fd1_w);
+        }
+        Streams {
             stdin: 0,
             stdout: shell_w,
             stderr: 2,
-        });
+        }
     });
     unsafe {
         libc::close(shell_w);
@@ -106,17 +114,21 @@ fn set_does_not_carry_to_an_external_command() {
 fn install_carries_to_builtins_redirection_and_external_commands() {
     let (r, w) = unsafe { pipe() };
     let script = "echo builtin; /bin/echo external; { echo redirected > /dev/stdout; }";
-    let st = run_shell(script, || unsafe {
+    let st = run_shell(script, || {
         // Deliberately not restored: this child is about to become a
         // shell that ends in `_exit`, so there is no "afterwards" in
         // which to hand the descriptors back.
-        let _lent = streams::install(Streams {
-            stdin: 0,
-            stdout: w,
-            stderr: 2,
-        })
+        let lent = unsafe {
+            streams::install(Streams {
+                stdin: 0,
+                stdout: w,
+                stderr: 2,
+            })
+        }
         .expect("install");
-        core::mem::forget(_lent);
+        core::mem::forget(lent);
+        // `install` put them on 0, 1 and 2, so the shell is built there.
+        Streams::INHERIT
     });
     unsafe { libc::close(w) };
     assert_eq!(st, 0);

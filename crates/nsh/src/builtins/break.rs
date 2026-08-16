@@ -57,7 +57,7 @@ mod tests {
             /* One shell: the state the case arranges and the state the
              * builtin writes are the same shell's, which is the whole
              * point of the field. */
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             sh.eval.loopnest = nest;
             assert_eq!(breakcmd(sh, &args).unwrap(), Flow::Done(0));

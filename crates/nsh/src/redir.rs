@@ -138,7 +138,7 @@ pub unsafe fn redirect(
             /* The C's `fd == 0` is "this redirection replaced the shell's
              * own input", which is what makes the buffered parse state
              * stale -- not descriptor 0 for its own sake. */
-            if fd == crate::streams::streams().stdin {
+            if fd == sh.streams.stdin {
                 crate::input::reset_input(sh);
             }
 
@@ -180,7 +180,7 @@ pub unsafe fn redirect(
      * put past the end of `renamed`, which covers the ten descriptors
      * redirection can name, there is nothing saved to point the trace
      * stream at and it stays where it was. */
-    let serr: c_int = crate::streams::streams().stderr;
+    let serr: c_int = sh.streams.stderr;
     if (flags & REDIR_SAVEFD2) != 0 {
         /* The C dereferences `sv` here without testing it, and gets away
          * with it because REDIR_SAVEFD2 is 03: every caller that reaches
@@ -188,7 +188,7 @@ pub unsafe fn redirect(
         if let Some(svi) = sv {
             let renamed = sh.redirs.list[svi].renamed;
             if (serr as usize) < renamed.len() && renamed[serr as usize] >= 0 {
-                (*crate::output::previous_stderr()).fd = renamed[serr as usize];
+                sh.io.previous_stderr().fd = renamed[serr as usize];
             }
         }
     }

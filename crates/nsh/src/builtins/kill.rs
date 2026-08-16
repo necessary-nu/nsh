@@ -80,14 +80,14 @@ pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     if list != 0 {
         let Some(status) = operands.first() else {
-            let _ = (*crate::output::io()).get(Dest::Stdout).write_all(b"0\n");
+            let _ = sh.io.get(Dest::Stdout).write_all(b"0\n");
             let mut i = 1;
             while i < crate::signames::NSIG as c_int {
                 let mut record = crate::signames::signal_names[i as usize]
                     .to_bytes()
                     .to_vec();
                 record.push(b'\n');
-                let _ = (*crate::output::io()).get(Dest::Stdout).write_all(&record);
+                let _ = sh.io.get(Dest::Stdout).write_all(&record);
                 i += 1;
             }
             return Ok(Flow::Done(0));
@@ -102,7 +102,7 @@ pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 .to_bytes()
                 .to_vec();
             record.push(b'\n');
-            let _ = (*crate::output::io()).get(Dest::Stdout).write_all(&record);
+            let _ = sh.io.get(Dest::Stdout).write_all(&record);
         } else {
             let mut message = b"invalid signal number or exit status: ".to_vec();
             message.extend_from_slice(status.as_bytes());

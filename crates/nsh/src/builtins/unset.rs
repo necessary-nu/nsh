@@ -47,10 +47,10 @@ mod tests {
     fn the_option_picks_the_table() {
         let _g = lock();
         unsafe {
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             let name = CStr0::new("Tunset");
-            let sh = &mut Shell::new();
+            let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
 
             setvar(sh, name.p(), CStr0::new("v").p(), 0);
             assert_eq!(
@@ -81,7 +81,7 @@ mod tests {
     fn the_last_option_wins() {
         let _g = lock();
         unsafe {
-            let mut owned = Shell::new();
+            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             let name = CStr0::new("Tunset2");
             setvar(sh, name.p(), CStr0::new("v").p(), 0);

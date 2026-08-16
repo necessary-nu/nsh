@@ -20,7 +20,7 @@ mod tests {
     #[test]
     fn always_fails() {
         unsafe {
-            let sh = &mut Shell::new();
+            let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
             assert_eq!(falsecmd(sh, &[BStr::new("false")]).unwrap(), Flow::Done(1));
             assert_eq!(
                 falsecmd(sh, &[BStr::new("false"), BStr::new("ignored")]).unwrap(),

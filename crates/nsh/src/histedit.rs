@@ -155,8 +155,8 @@ pub unsafe fn histedit(sh: &mut crate::context::Shell) {
             sethistsize(sh, size);
         }
 
-        let sin: c_int = crate::streams::streams().stdin;
-        let serr: c_int = crate::streams::streams().stderr;
+        let sin: c_int = sh.streams.stdin;
+        let serr: c_int = sh.streams.stderr;
         let mode = if Vflag(sh) != 0 {
             Some(EditingMode::Vi)
         } else if Eflag(sh) != 0 {
@@ -174,7 +174,7 @@ pub unsafe fn histedit(sh: &mut crate::context::Shell) {
                 Ok(editor) => state_mut().editor = Some(editor),
                 Err(_) => {
                     state_mut().editor = None;
-                    let _ = (&mut *crate::output::stderr())
+                    let _ = sh.io.stderr()
                         .write_all(b"sh: can't initialize editing\n");
                 }
             }
@@ -218,7 +218,7 @@ pub unsafe fn sethistsize(_sh: &mut crate::context::Shell, hs: *const c_char) {
 // [spec:dash:sem:histedit.setterm-fn]
 // [spec:dash:def:myhistedit.setterm-fn]
 // [spec:dash:sem:myhistedit.setterm-fn]
-pub unsafe fn setterm(term: *const c_char) {
+pub unsafe fn setterm(sh: &mut crate::context::Shell, term: *const c_char) {
     if term.is_null() {
         return;
     }
@@ -232,7 +232,7 @@ pub unsafe fn setterm(term: *const c_char) {
         let mut message = b"sh: Can't set terminal type ".to_vec();
         message.extend_from_slice(core::ffi::CStr::from_ptr(term).to_bytes());
         message.push(b'\n');
-        let errors = &mut *crate::output::stderr();
+        let errors = sh.io.stderr();
         let _ = errors.write_all(&message);
         let _ = errors.write_all(b"sh: Using dumb terminal settings.\n");
     }

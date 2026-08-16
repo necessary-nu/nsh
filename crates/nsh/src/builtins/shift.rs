@@ -65,7 +65,7 @@ mod tests {
     fn one_by_default() {
         let _g = lock();
         unsafe {
-            let sh = &mut Shell::new();
+            let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
             params(sh, &["a", "b", "c"]);
             assert_eq!(shiftcmd(sh, &[BStr::new("shift")]).unwrap(), Flow::Done(0));
             assert_eq!(sh.options.shellparam.nparam, 2);
@@ -77,7 +77,7 @@ mod tests {
     fn a_count_drops_that_many() {
         let _g = lock();
         unsafe {
-            let sh = &mut Shell::new();
+            let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
             params(sh, &["a", "b", "c"]);
             assert_eq!(
                 shiftcmd(sh, &[BStr::new("shift"), BStr::new("2")]).unwrap(),
@@ -93,7 +93,7 @@ mod tests {
     fn shifting_past_the_end_raises() {
         let _g = lock();
         unsafe {
-            let sh = &mut Shell::new();
+            let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
             params(sh, &["a", "b"]);
             assert_eq!(
                 shiftcmd(sh, &[BStr::new("shift"), BStr::new("2")]).unwrap(),
@@ -105,7 +105,7 @@ mod tests {
          * unwind, so the assertion is on the error rather than on the
          * jump. The bytes are unchanged and still go to stderr. */
         unsafe {
-            let sh = &mut Shell::new();
+            let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
             params(sh, &["a"]);
             let e = shiftcmd(sh, &[BStr::new("shift"), BStr::new("2")])
                 .expect_err("shifting past the end fails");

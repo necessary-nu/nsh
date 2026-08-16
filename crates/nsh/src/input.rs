@@ -320,6 +320,10 @@ unsafe fn set_errno(e: c_int) {
 
 /* mkinit INIT fragment from src/input.c:96-99. */
 pub unsafe fn mkinit_init(sh: &mut Shell) {
+    /* Read before `pf_at` borrows the shell: the base parse file and the
+     * streams are different fields, but `pf_at` borrows the whole shell
+     * to reach one of them. */
+    let stdin_fd = sh.streams.stdin;
     let base = pf_at(sh, 0);
     /* `basebuf` is a static array in the C, so re-entering `init` keeps
      * whatever it held. Only allocate when there is nothing to keep. */
@@ -332,7 +336,7 @@ pub unsafe fn mkinit_init(sh: &mut Shell) {
      * shell reads descriptor 0 by definition. Here the base parse file
      * reads whatever the frontend gave us -- which is 0 unless it said
      * otherwise. See [dec:nsh:host-owns-streams]. */
-    base.fd = crate::streams::streams().stdin;
+    base.fd = stdin_fd;
 }
 
 /* mkinit RESET fragment from src/input.c:101-112. */
@@ -377,7 +381,7 @@ pub unsafe fn mkinit_forkreset(sh: &mut crate::context::Shell) {
      * frontend-supplied stdin the second half of that is no longer implied
      * by the first, and getting it wrong would close the shell's own
      * input. */
-    let sin: c_int = crate::streams::streams().stdin;
+    let sin: c_int = sh.streams.stdin;
     if cur_pf(sh).fd > 0 && cur_pf(sh).fd != sin {
         libc::close(cur_pf(sh).fd);
         cur_pf(sh).fd = sin;
@@ -401,7 +405,7 @@ pub unsafe fn input_init(sh: &mut Shell) {
     let mut tios: libc::termios = core::mem::zeroed();
     let istty: c_int;
 
-    let sin: c_int = crate::streams::streams().stdin;
+    let sin: c_int = sh.streams.stdin;
 
     istty = libc::tcgetattr(sin, &mut tios) + 1;
     sh.input.stdin_istty = istty;
@@ -427,12 +431,12 @@ unsafe fn stdin_bufferable(sh: &mut Shell) -> bool {
 
 // [spec:dash:def:input.flush-tee-fn]
 // [spec:dash:sem:input.flush-tee-fn]
-unsafe fn flush_tee(buf: *mut c_void, nr: c_int, mut pending: c_int) {
+unsafe fn flush_tee(sh: &mut crate::context::Shell, buf: *mut c_void, nr: c_int, mut pending: c_int) {
     while pending > 0 {
         let err: c_int;
 
         err = libc::read(
-            crate::streams::streams().stdin,
+            sh.streams.stdin,
             buf,
             if nr > pending { pending } else { nr } as size_t,
         ) as c_int;
@@ -461,7 +465,7 @@ unsafe fn stdin_tee(sh: &mut Shell, buf: *mut c_void, nr: c_int) -> Result<c_int
         }
     }
 
-    flush_tee(buf, nr, sh.input.stdin_state.pending);
+    flush_tee(sh, buf, nr, sh.input.stdin_state.pending);
 
     if USE_TEE != 0 {
         err = libc::tee(0, sh.input.stdin_state.pip[1], nr as size_t, 0) as c_int;
@@ -572,8 +576,8 @@ pub unsafe fn pgetc_eoa(sh: &mut crate::context::Shell) -> Result<c_int, Error> 
 
 // [spec:dash:def:input.stdin-clear-nonblock-fn]
 // [spec:dash:sem:input.stdin-clear-nonblock-fn]
-unsafe fn stdin_clear_nonblock() -> c_int {
-    let sin: c_int = crate::streams::streams().stdin;
+unsafe fn stdin_clear_nonblock(sh: &mut crate::context::Shell) -> c_int {
+    let sin: c_int = sh.streams.stdin;
     let mut flags: c_int = libc::fcntl(sin, libc::F_GETFL, 0);
 
     if flags >= 0 {
@@ -621,7 +625,7 @@ unsafe fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
     /* The C's `fd == 0` means "this parse file is the shell's standard
      * input", which is the condition for line editing and for teeing --
      * not descriptor 0 for its own sake. */
-    let sin: c_int = crate::streams::streams().stdin;
+    let sin: c_int = sh.streams.stdin;
 
     use_tee = fd == sin
         /* #ifndef SMALL */
@@ -678,8 +682,8 @@ unsafe fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
             {
                 continue 'retry;
             }
-            if fd == 0 && errno() == libc::EWOULDBLOCK && stdin_clear_nonblock() >= 0 {
-                let _ = (*crate::output::stderr()).write_all(b"sh: turning off NDELAY mode\n");
+            if fd == 0 && errno() == libc::EWOULDBLOCK && stdin_clear_nonblock(sh) >= 0 {
+                let _ = sh.io.stderr().write_all(b"sh: turning off NDELAY mode\n");
                 continue 'retry;
             }
             /* The interactive prompt's read, and the one place the C had
@@ -727,7 +731,7 @@ unsafe fn preadbuffer(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
         cur_pf(sh).eof = 3;
         return Ok(PEOF);
     }
-    crate::output::flushall();
+    sh.io.flushall();
 
     q = cur_pf(sh).pos;
     something = (first == 0) as c_int;
@@ -833,7 +837,7 @@ unsafe fn preadbuffer(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
         pf.buf.as_mut_ptr().add(pf.pos) as *mut c_char
     };
 
-    if cur_pf(sh).fd == crate::streams::streams().stdin
+    if cur_pf(sh).fd == sh.streams.stdin
         && crate::histedit::history_active()
         && something != 0
     {
@@ -854,7 +858,7 @@ unsafe fn preadbuffer(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
     }
 
     if sh.options.flag(crate::options::vflag) != 0 {
-        let _ = (*crate::output::stderr()).write_all(CStr::from_ptr(line).to_bytes());
+        let _ = sh.io.stderr().write_all(CStr::from_ptr(line).to_bytes());
         /* #ifdef FLUSHERR flushout(out2); */
     }
 
@@ -1141,14 +1145,14 @@ pub unsafe fn flush_input(sh: &mut Shell) {
     INTOFF();
     if sh.input.stdin_state.seekable != 0 && left != 0 {
         libc::lseek(
-            crate::streams::streams().stdin,
+            sh.streams.stdin,
             -(left as off_t),
             libc::SEEK_CUR,
         );
     } else if sh.input.stdin_state.pending > left {
         /* `basebuf` is scratch here; the bytes are being discarded. */
         let pending = sh.input.stdin_state.pending;
-        flush_tee(scratch, BUFSIZ, pending - left);
+        flush_tee(sh, scratch, BUFSIZ, pending - left);
         sh.input.stdin_state.pending = 0;
     }
     let base = pf_at(sh, 0);

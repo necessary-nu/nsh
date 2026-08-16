@@ -22,7 +22,6 @@
 //! callers; unlike the old `out1`/`out2` pointer statics they cannot carry a
 //! second, independently mutable view of which destination is selected.
 
-use core::ptr::addr_of_mut;
 use std::ffi::CStr;
 use std::io::{self, Write};
 
@@ -152,6 +151,18 @@ impl ShellIo {
         &mut self.previous_stderr
     }
 
+    // [spec:dash:def:output.flushall-fn]
+    // [spec:dash:sem:output.flushall-fn]
+    pub(crate) fn flushall(&mut self) {
+        let _ = self.stdout.flush();
+        /*
+         * #ifdef FLUSHERR
+         *	flushout(&errout);
+         * #endif
+         * — FLUSHERR is not defined in the shipped build.
+         */
+    }
+
     /// The writer `dest` names.
     ///
     /// The borrow lasts exactly as long as one write, which is the whole
@@ -197,46 +208,18 @@ pub enum Dest {
     PreviousStderr,
 }
 
-// The surrounding shell still has ambient state. `move-state` moves this
-// already-owned aggregate onto the concrete Shell instance after
-// `thread-context` makes that instance reachable at every call site.
-static mut SHELL_IO: ShellIo = ShellIo::new(1, 2);
-
-/// The shell's three writers, as an aggregate.
-///
-/// Transitional, and the only reason [`Dest`]'s callers are still
-/// `unsafe`: the aggregate is a static until `io` becomes a `Shell` field,
-/// at which point every `(*crate::output::io()).get(dest)` below becomes
-/// `sh.io.get(dest)` and the `unsafe` goes with the static.
-#[inline]
-pub unsafe fn io() -> *mut ShellIo {
-    addr_of_mut!(SHELL_IO)
-}
-
-/// The shell's buffered standard-output writer.
-#[inline]
-pub unsafe fn stdout() -> *mut Output {
-    addr_of_mut!(SHELL_IO.stdout)
-}
-
-/// The shell's unbuffered standard-error writer.
-#[inline]
-pub unsafe fn stderr() -> *mut Output {
-    addr_of_mut!(SHELL_IO.stderr)
-}
-
-/// The saved standard-error writer used by `set -x` across redirection.
-#[inline]
-pub unsafe fn previous_stderr() -> *mut Output {
-    addr_of_mut!(SHELL_IO.previous_stderr)
-}
-
-/// Point the shell-owned writers at the descriptors supplied by its host.
-#[inline]
-pub unsafe fn set_stream_fds(stdout_fd: c_int, stderr_fd: c_int) {
-    (*stdout()).fd = stdout_fd;
-    (*stderr()).fd = stderr_fd;
-}
+/* `static mut SHELL_IO` was here, with `stdout()`, `stderr()`,
+ * `previous_stderr()`, `set_stream_fds()` and the transitional `io()`
+ * that reached it. All six are gone: the aggregate is `Shell::io`, and
+ * every writer reaches it through the receiver it already had.
+ *
+ * That is the `io` half of `move-state`'s blocked group. It could not
+ * move while `set_stream_fds` was reached from `streams::set`, which has
+ * no shell to be given; it moves now because the constructor takes the
+ * streams instead. That is escape (2) of the two `move-state` recorded,
+ * and the node log predicted it would be the shape. `docs/api-design.md`
+ * 5's `io: ShellIo` row.
+ */
 
 /*
  * #ifdef notyet
@@ -272,18 +255,6 @@ pub unsafe fn outstr(p: *const c_char, file: *mut Output) {
 pub unsafe fn outcslow(c: c_int, dest: *mut Output) {
     let buf: c_char = c as c_char;
     outmem(&buf as *const c_char, 1, dest);
-}
-
-// [spec:dash:def:output.flushall-fn]
-// [spec:dash:sem:output.flushall-fn]
-pub unsafe fn flushall() {
-    let _ = (*stdout()).flush();
-    /*
-     * #ifdef FLUSHERR
-     *	flushout(&errout);
-     * #endif
-     * — FLUSHERR is not defined in the shipped build.
-     */
 }
 
 struct OutputFormatter<'a> {
@@ -483,8 +454,8 @@ pub unsafe fn __closememout() -> c_int {
 // [spec:dash:def:output.freestdout-fn]
 // [spec:dash:sem:output.freestdout-fn]
 #[inline]
-pub unsafe fn freestdout() {
-    (*stdout()).discard();
+pub unsafe fn freestdout(io: &mut ShellIo) {
+    io.stdout().discard();
 }
 
 // [spec:dash:def:output.outc-fn]
@@ -905,54 +876,36 @@ mod tests {
     // [spec:dash:sem:output.freestdout-fn/test]
     #[test]
     fn freestdout_resets_the_buffer_and_error_flag() {
-        let _g = crate::testutil::lock();
         unsafe {
-            let out = stdout();
-            let saved_buf = (*out).buf.take();
-            let saved = ((*out).bufsize, (*out).flags, (*out).fd);
-            (*out).buf = Some(Vec::with_capacity(16));
-            (*out).buf.as_mut().unwrap().extend_from_slice(b"abcde");
-            (*out).bufsize = 16;
-            (*out).flags = OUTPUT_ERR;
+            /* Owned rather than saved-and-restored: the writers are a
+             * shell's, so a test makes one instead of borrowing the
+             * process's and putting it back. */
+            let mut io = ShellIo::new(1, 2);
+            io.stdout().buf = Some(Vec::with_capacity(16));
+            io.stdout().buf.as_mut().unwrap().extend_from_slice(b"abcde");
+            io.stdout().bufsize = 16;
+            io.stdout().flags = OUTPUT_ERR;
 
-            freestdout();
+            freestdout(&mut io);
 
-            let buffered = (*out).buf.as_ref().unwrap().len();
-            let flags = (*out).flags;
-            assert_eq!(buffered, 0);
-            assert_eq!(flags, 0);
-            (*out).buf = saved_buf;
-            ((*out).bufsize, (*out).flags, (*out).fd) = saved;
+            assert_eq!(io.stdout().buf.as_ref().unwrap().len(), 0);
+            assert_eq!(io.stdout().flags, 0);
         }
     }
 
     // [spec:dash:sem:output.flushall-fn/test]
     #[test]
     fn flushall_drains_the_stdout_writer() {
-        let _g = crate::testutil::lock();
         unsafe {
-            let out = stdout();
-            let saved_buf = (*out).buf.take();
-            let saved = ((*out).bufsize, (*out).fd, (*out).flags);
-            let stdout_before = stdout();
             let mut s = Sink::new(64, true);
-            // Point the global stdout stream at the pipe.
-            (*out).buf = None;
-            (*out).bufsize = s.out.bufsize;
-            (*out).fd = s.w;
-            (*out).flags = 0;
+            let mut io = ShellIo::new(s.w, 2);
+            io.stdout().bufsize = s.out.bufsize;
 
-            (*out).write_all(b"n=3").unwrap();
+            io.stdout().write_all(b"n=3").unwrap();
             // Buffered, not yet written.
-            assert_eq!((*out).buf.as_ref().unwrap().len(), 3);
-            flushall();
-            assert_eq!((*out).buf.as_ref().unwrap().len(), 0);
-            let stdout_after = stdout();
-            assert_eq!(stdout_after, stdout_before);
-            assert_eq!(stdout_after, out);
-
-            (*out).buf = saved_buf;
-            ((*out).bufsize, (*out).fd, (*out).flags) = saved;
+            assert_eq!(io.stdout().buf.as_ref().unwrap().len(), 3);
+            io.flushall();
+            assert_eq!(io.stdout().buf.as_ref().unwrap().len(), 0);
             assert_eq!(s.drained(), b"n=3");
         }
     }
@@ -969,23 +922,21 @@ mod tests {
     // [spec:dash:sem:output.closememout-fn/test]
     #[test]
     fn inactive_glibc_stdio_hooks_are_inert() {
-        let _g = crate::testutil::lock();
         unsafe {
-            let out = stdout();
-            let err = stderr();
+            let mut io = ShellIo::new(1, 2);
             let before = (
-                (*out).buf.as_ref().map(|buf| (buf.len(), buf.capacity())),
-                (*out).fd,
-                (*err).fd,
+                io.stdout().buf.as_ref().map(|buf| (buf.len(), buf.capacity())),
+                io.stdout().fd,
+                io.stderr().fd,
             );
             initstreams();
             openmemout();
             assert_eq!(__closememout(), 0);
             assert_eq!(
                 (
-                    (*out).buf.as_ref().map(|buf| (buf.len(), buf.capacity())),
-                    (*out).fd,
-                    (*err).fd,
+                    io.stdout().buf.as_ref().map(|buf| (buf.len(), buf.capacity())),
+                    io.stdout().fd,
+                    io.stderr().fd,
                 ),
                 before,
             );

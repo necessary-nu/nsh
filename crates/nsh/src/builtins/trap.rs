@@ -41,7 +41,7 @@ pub unsafe fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                         .to_bytes(),
                 );
                 line.push(b'\n');
-                let _ = (*crate::output::stdout()).write_all(&line);
+                let _ = sh.io.stdout().write_all(&line);
             }
             signo += 1;
         }
@@ -71,7 +71,7 @@ pub unsafe fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             let mut message = b"trap: ".to_vec();
             message.extend_from_slice(word.as_bytes());
             message.extend_from_slice(b": bad trap\n");
-            let _ = (*crate::output::stderr()).write_all(&message);
+            let _ = sh.io.stderr().write_all(&message);
             return Ok(Flow::Done(1));
         }
         INTOFF();
