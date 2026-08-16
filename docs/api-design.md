@@ -195,6 +195,24 @@ The mechanism that decides which is which already exists and is exact:
 `EXERROR` from a non-special built-in, which is POSIX's "an error in a
 special built-in exits a non-interactive shell".
 
+**The sink is a hook, not a store — settled at `c9c2434`.** `move-state`
+transferred `arg0`, `errlinno` and `commandname` to `public-api` as a
+choice: thread the diagnostic spine, or give the diagnostic its own sink
+here so the spine never needs a receiver. It recommended the second to
+avoid the first. **They were never alternatives.** §3.2 fixes `report` as
+a `&mut self` method and requires the write to happen at the raise point,
+so a sink that assembled the prefix elsewhere would have to defer the
+write to wherever it is polled — the one thing §3.2 forbids. And the
+write needs `&mut` on the stderr `Output`, so even a sink owning the
+prefix would not free `report` from a receiver. What the sink replaces is
+the *statics*: `errlinno` and `commandname` are `EvalState` fields, and
+`arg0` stays in the options table because it is `$0` before it is a
+prefix and `expand.rs` reads it as one.
+
+The threading cost 66 call sites, of which 45 already held a receiver —
+`thread-context` had put one on every execution path — and the 21 that
+did not were leaf helpers whose callers did.
+
 **This is what makes `Builder::on_diagnostic` load-bearing rather than
 decorative.** A `cd` that fails inside a loop under `set +e` is reported,
 the loop continues, `run` returns `Ok`, and the hook is the only way an
@@ -404,28 +422,55 @@ path with no oracle.
 Field by field, at the granularity `no-ambient-state`'s `move-state` will
 commit in. `crates/nsh/src/api.rs` declares exactly this list.
 
-Baseline: `grep -rn 'static mut' crates/nsh/src` is **154**; excluding
-`gen/` it is 134, of which 4 are prose and 6 are `extern` declarations of
-libc globals, leaving **124 crate-owned declarations** to place.
+Baseline, **corrected**. This section originally read: "`grep -rn 'static
+mut' crates/nsh/src` is **154**; excluding `gen/` it is 134, of which 4
+are prose and 6 are `extern` declarations of libc globals, leaving **124
+crate-owned declarations** to place." Two things were wrong with it and
+`move-state` found both.
+
+* **`crates/nsh/src/gen/` does not exist**, and never did in this tree.
+  Every "excluding `gen/`" qualifier in this document is a no-op.
+* **124 was a loose grep**: `grep -n 'static mut'` counts prose and
+  comments as well as declarations. Counting *declarations* —
+  `grep -rhE '^\s*(pub(\([a-z()]*\))?\s+)?static mut\s'` — the figure
+  at the time was **107**.
+
+Run the declaration form at both ends of any delta, in the same hour, or
+the number means nothing. At `ecfd861` it is **39**.
 
 | Field | Absorbs |
 |---|---|
-| `vars: VarTable` | `var.rs:297 vartab`, `:109 varinit` and its backing buffers `:80 defifsvar` / `:83 defoptindvar` / `:97 linenovar` (which `varinit[].text` aliases, so they move together), `:73 localvar_stack`, `:95 lineno` |
+| `vars: VarTable` | `var.rs:297 vartab`, `:109 varinit` and its backing buffers `:80 defifsvar` / `:83 defoptindvar` / `:97 linenovar` (which `varinit[].text` aliases, so they move together — an understatement: the group was *self-referential*, and `defifsvar`, `defoptindvar` and `defpathvar` never move at all, being immutable statics), `:73 localvar_stack`, `:95 lineno` |
 | `aliases: AliasTable` | `alias.rs:28 atab` |
-| `commands: CmdTable` | `exec.rs:91 cmdtable`, `:92 builtinloc`, `:96 lastcmdentry` (becomes a slot index). Function definitions live here because dash stores them in the same hash |
+| `commands: CmdTable` | `exec.rs:91 cmdtable`, `:92 builtinloc`, `:96 lastcmdentry` (became a slot index upstream of this table, as did `jobs.rs:104 njobs`). Function definitions live here because dash stores them in the same hash |
 | `jobs: JobTable` | `jobs.rs:102 jobtab`, `:104 njobs`, `:114 curjob` (becomes an index), `:106 backgndpid`, `:109 initialpgrp`, `:111 ttyfd`, `:120 jobctl`, `:123 job_warning` |
 | `options: Options` | `options.rs:114 optlist`, `:57 shellparam`, `:56 arg0` |
 | `traps: TrapTable` | `trap.rs:38 trap`, `:40 ptrap`, `:42 trapcnt`, `:44 sigmode` |
 | `input: InputStack` | `input.rs:120 parsefile`, `:98 basepf`, `:112 basebuf`, `:113 toppf`, `:114 stdin_state`, `:121 whichprompt`, `:122 stdin_istty`; and `parser.rs`'s eleven parser globals (`:305-315`), which are per-input-position state |
 | `fds: FdTable` | The logical-to-real descriptor map, plus `redir.rs:44 redirlist` and `:47 closed_redirs` |
-| `io: ShellIo` | `output.rs:54 output`, `:62 errout`, `:70 preverrout`; `:83 out1` and `:84 out2` become a pair of fields rather than pointers to statics |
+| `io: ShellIo` | **Done** at `ecfd861`. The row as written is stale: `output-is-a-writer` had already collapsed `output`, `errout`, `preverrout`, `out1` and `out2` into a single `SHELL_IO`, so what moved was one aggregate and not five statics |
 | `eval: EvalState` | `eval.rs:79 evalskip`, `:80 skipcount`, `:81 loopnest`, `:82 funcline`, `:84 commandname`, `:86 back_exitstatus`, `:87 savestatus`, `:90 inps4` |
-| `streams: Streams` | `streams.rs:98 STREAMS` |
+| `streams: Streams` | **Done** at `ecfd861`. `streams.rs:98 STREAMS`, and `streams()` and `set()` with it |
 | `host: Box<dyn Host>` | New. §5.4 |
 | `on_diagnostic: Option<Box<dyn FnMut(&Error) + Send>>` | New. §3.3 |
 | `signals: SignalSink` | `trap.rs:46 gotsig`, `:48 pending_sig`, `:50 gotsigchld`, `error.rs:92 intpending` — see §5.3 |
 | `status: ExitStatus` | `eval.rs:85 exitstatus` |
 | `exited: Option<ExitStatus>` | New. Replaces the `EXEND`/`EXEXIT` unwind reaching `main` |
+
+**This table is not a complete inventory of shell state, and a reader who
+finished its rows would have believed the job done with nine pieces of
+per-shell state still process-global.** `move-state` found them and they
+have since moved: `cd.rs`'s `curdir` and `physdir`, `mail.rs`'s
+`mailtime` and `changed`, `expand.rs`'s `ifsmap`, `ncifs`, `wcifs` and
+`ifsmb0len`, and `histedit.rs`'s `displayhist`. Four more —
+`shellmain.rs`'s `rootpid`, `mypid`, `shlvl` and `dash_errno` — are
+process *identity* rather than shell state and belong in §6 beside the
+locale and the `getopt` limits it already documents.
+
+Two rows have been added since, for state this table did not name:
+`eval.errlinno` (the line a diagnostic reports, `error.rs`'s `errlinno`)
+and `eval.commandname`, which §5.2 wrongly listed as a transient alias —
+see there.
 
 `Shell` is `Send` and deliberately not `Sync`. Every method that can
 observe shell state takes `&mut self`, so there is no shared-reference
@@ -470,7 +515,7 @@ inherit the mistake.
 
 ### 5.2 Transient aliases scope to a call
 
-`options.rs:64 argptr` and `:66 optptr`, `eval.rs:84 commandname`,
+`options.rs:64 argptr` and `:66 optptr`, ~~`eval.rs:84 commandname`~~,
 `exec.rs:94 pathopt`, `expand.rs:209 argbackq`, `arith_yacc.rs:99
 arith_buf`, `bltin/printf.rs:104 gargv`, `bltin/test.rs:169 t_wp` are
 cursors into memory a *caller* owns for the duration of one call. They are
@@ -672,6 +717,12 @@ that the decision does not list:
   arrival flags, the pending-signal scalar, `intpending`, the trap-set
   mirror and `vforked`. Two shells in one process share one inbox, and
   the second to install a handler is the one it reports to.
+* **The process's own identity.** `shellmain.rs`'s `rootpid`, `mypid`,
+  `shlvl` and `dash_errno` are facts about the process rather than about
+  a shell, and they are listed here rather than in §5's table because
+  that is what they are. `mypid` in particular is read by the vforked
+  child out of the shared address space, which is why
+  [dec:nsh:fork-child-is-a-terminus] audits its one write.
 * **The working directory.** `chdir` is per-process. `Builder::cwd` and
   `cd` are per-instance in the sense that `$PWD` is, and process-wide in
   the sense that the syscall is. Two shells in different directories is
