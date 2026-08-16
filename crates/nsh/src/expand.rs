@@ -160,6 +160,18 @@ impl strlist {
         }
     }
 
+    /// The same field, taken from bytes that already know where they end.
+    ///
+    /// `ifsbreakup` terminates each field in the word and then copies it
+    /// out; with the word a slice there is no pointer to hand to
+    /// [`strlist::from_cstr`], and the terminator is re-supplied here
+    /// rather than assumed to be in range.
+    pub fn from_cbytes(s: &[u8]) -> strlist {
+        let mut text = BString::from(crate::mystring::cstr_prefix(s).as_bytes());
+        text.push(0);
+        strlist { text }
+    }
+
     /// `sp->text`, as the `char *` every reader wants.
     #[inline]
     pub fn textp(&self) -> *mut c_char {
@@ -289,8 +301,11 @@ pub struct ifs_state {
     /// region's bit or'd with this one. They are different values and the
     /// C gives them the same name.
     pub nulonly: c_int,
-    pub start: *mut c_char,
-    pub r: *mut c_char,
+    /// Where the field being built starts, as an offset into the word.
+    pub start: usize,
+    /// Where the trailing IFS run to be cut starts, if there is one. The
+    /// C's `NULL` for "nothing to remove" is the `None`.
+    pub r: Option<usize>,
     pub maxargs: c_int,
     pub ifsspc: c_int,
 }
@@ -838,12 +853,7 @@ pub unsafe fn expandarg(
              * offsets into the grabbed block, which is why the block had to
              * outlive them and why the enclosing mark had to be the thing
              * that freed it. */
-            ifsbreakup(
-                sh,
-                p.as_mut_ptr() as *mut c_char,
-                -1,
-                &mut *ptr::addr_of_mut!(exparg),
-            );
+            ifsbreakup(sh, &mut p, -1, &mut *ptr::addr_of_mut!(exparg));
             /* `*exparg.lastp = NULL; exparg.lastp = &exparg.list;` —
              * terminate the fields `ifsbreakup` built, then re-point the
              * tail at the head so `expandmeta` rebuilds the list while
@@ -2299,10 +2309,10 @@ pub unsafe fn recordregion(start: c_int, end: c_int, nulonly: c_int) {
 
 // [spec:dash:def:expand.ifsisifs-fn]
 // [spec:dash:sem:expand.ifsisifs-fn]
-unsafe fn ifsisifs(sh: &Shell, p: *const c_char, ml: c_uint, nulonly: c_int) -> c_uint {
+unsafe fn ifsisifs(sh: &Shell, s: &[u8], ml: c_uint, nulonly: c_int) -> c_uint {
     let mut isdefifs: bool = false;
     let mut isifs: bool = false;
-    let mut wc: wchar_t = *p as wchar_t;
+    let mut wc: wchar_t = byte_at(s, 0) as wchar_t;
     /* C leaves `ifs0` uninitialised; it is only read when `isifs`, which
      * implies one of the branches below assigned it. */
     let mut ifs0: wchar_t = 0;
@@ -2325,7 +2335,13 @@ unsafe fn ifsisifs(sh: &Shell, p: *const c_char, ml: c_uint, nulonly: c_int) -> 
                 let mut mbst: libc::mbstate_t = mem::zeroed();
                 let mut wc2: wchar_t = 0;
 
-                if mbrtowc(&mut wc2, p, ml as size_t, &mut mbst) != ml as size_t {
+                /* `ml` came from `mbnext` over this same slice, so the
+                 * clamp can only bite where the C read past the word's
+                 * end -- and a short read fails the `!= ml` test exactly
+                 * as a malformed character does.  The same trade
+                 * `ccmatch_bytes` records. */
+                let n = (ml as size_t).min(s.len());
+                if mbrtowc(&mut wc2, s.as_ptr() as *const c_char, n, &mut mbst) != ml as size_t {
                     break 'out;
                 }
                 wc = wc2;
@@ -2358,27 +2374,28 @@ unsafe fn ifsbreakup_slow(
     ifst: &mut ifs_state,
     arglist: &mut arglist,
     nulonly: c_int,
-    mut p: *mut c_char,
-) -> *mut c_char {
+    string: &mut [u8],
+    mut p: usize,
+) -> usize {
     let ifschar: c_uint;
     let sisifs: c_uint;
     let isdefifs: bool;
     let ml: c_uint;
     let isifs: bool;
-    let mut q: *mut c_char;
+    let mut q: usize;
 
     q = p;
 
-    ifschar = mbnext(p);
-    p = p.offset((ifschar & 0xff) as isize);
+    ifschar = mbnext_bytes(slice_from(string, p));
+    p += (ifschar & 0xff) as usize;
     ml = if (ifschar >> 8) > 3 {
         (ifschar >> 8) - 2
     } else {
         0
     };
 
-    sisifs = ifsisifs(sh, p, ml, ifst.nulonly);
-    p = p.offset((ifschar >> 8) as isize);
+    sisifs = ifsisifs(sh, slice_from(string, p), ml, ifst.nulonly);
+    p += (ifschar >> 8) as usize;
 
     isifs = (sisifs >> 1) != 0;
     isdefifs = (sisifs & 1) != 0;
@@ -2405,14 +2422,14 @@ unsafe fn ifsbreakup_slow(
     'out_zero_ifsspc: {
         if ifst.maxargs == 0 {
             if isdefifs {
-                if ifst.r.is_null() {
-                    ifst.r = q;
+                if ifst.r.is_none() {
+                    ifst.r = Some(q);
                 }
                 return p;
             }
 
             if !(isifs && ifst.ifsspc != 0) {
-                ifst.r = ptr::null_mut();
+                ifst.r = None;
             }
         } else if ifst.ifsspc != 0 {
             if isifs {
@@ -2442,11 +2459,11 @@ unsafe fn ifsbreakup_slow(
                 ifst.maxargs -= 1;
                 ifst.maxargs == 0
             } {
-                ifst.r = q;
+                ifst.r = Some(q);
                 return p;
             }
-            *q = C_NUL;
-            arglist.list.push(strlist::from_cstr(ifst.start));
+            string[q] = C_NUL as u8;
+            arglist.list.push(strlist::from_cbytes(&string[ifst.start..]));
             ifst.start = p;
             return p;
         }
@@ -2469,7 +2486,7 @@ unsafe fn ifsbreakup_slow(
 // [spec:dash:sem:expand.ifsbreakup-fn]
 pub unsafe fn ifsbreakup(
     sh: &mut Shell,
-    string: *mut c_char,
+    string: &mut [u8],
     maxargs: c_int,
     arglist: &mut arglist,
 ) {
@@ -2481,13 +2498,13 @@ pub unsafe fn ifsbreakup(
      * in it can say so directly. */
     let mut ifst: ifs_state = ifs_state {
         nulonly: 0,
-        start: string,
-        r: ptr::null_mut(),
+        start: 0,
+        r: None,
         maxargs,
         ifsspc: 0,
     };
     let mut nulonly: c_int;
-    let mut p: *mut c_char;
+    let mut p: usize;
 
     'add: {
         if !ifsr().is_empty() {
@@ -2501,18 +2518,25 @@ pub unsafe fn ifsbreakup(
                 let afternul: c_int;
                 let endoff: c_int = ifsr()[ifsp].endoff;
 
-                p = string.offset(ifsr()[ifsp].begoff as isize);
+                p = ifsr()[ifsp].begoff as usize;
+                debug_assert!(
+                    endoff as usize <= string.len(),
+                    "a recorded region ends past the word it was recorded in"
+                );
                 afternul = nulonly;
                 nulonly = ifsr()[ifsp].nulonly;
                 ifst.nulonly = nulonly;
                 ifst.ifsspc = 0;
                 loop {
-                    let p0: *mut c_char = p;
+                    let p0: usize = p;
 
-                    while string.offset(endoff as isize).offset_from(p) >= 8 {
+                    /* `stackblock() + endoff - p >= 8` — eight bytes of
+                     * this region left to look at.  As offsets it is also
+                     * the bound that makes the load below a checked one. */
+                    while endoff as usize >= p + 8 {
                         /* union { uint64_t qw; unsigned char b[8]; } x; */
-                        let qw: u64 = ptr::read_unaligned(p as *const u64);
-                        let b: [u8; 8] = qw.to_ne_bytes();
+                        let b: [u8; 8] = string[p..p + 8].try_into().unwrap();
+                        let qw: u64 = u64::from_ne_bytes(b);
 
                         if (qw & 0x8080808080808080) != 0 {
                             break;
@@ -2529,23 +2553,23 @@ pub unsafe fn ifsbreakup(
                         {
                             break;
                         }
-                        p = p.offset(8);
+                        p += 8;
                     }
 
                     if p != p0 {
                         if ifst.maxargs == 0 {
-                            ifst.r = ptr::null_mut();
+                            ifst.r = None;
                         } else if ifst.ifsspc != 0 {
                             ifst.start = p0;
                         }
                         ifst.ifsspc = 0;
                     }
 
-                    if p >= string.offset(endoff as isize) {
+                    if p >= endoff as usize {
                         break;
                     }
 
-                    p = ifsbreakup_slow(sh, &mut ifst, arglist, afternul | nulonly, p);
+                    p = ifsbreakup_slow(sh, &mut ifst, arglist, afternul | nulonly, string, p);
                 }
 
                 ifsp += 1;
@@ -2556,7 +2580,7 @@ pub unsafe fn ifsbreakup(
             if nulonly != 0 {
                 break 'add; /* goto add */
             }
-            if !ifst.r.is_null() {
+            if let Some(r) = ifst.r {
                 /* This is the one write into `string` that happens after
                  * `ifsbreakup_slow` has stopped emitting fields, and the
                  * fields no longer alias `string` — they copied out at the
@@ -2567,20 +2591,20 @@ pub unsafe fn ifsbreakup(
                  * branches that set it both return without emitting, so no
                  * field is taken between the two points. */
                 debug_assert!(
-                    ifst.r >= ifst.start,
+                    r >= ifst.start,
                     "the trailing-IFS truncation lands in an already-taken field"
                 );
-                *ifst.r = C_NUL;
+                string[r] = C_NUL as u8;
             }
         }
 
-        if *ifst.start == C_NUL {
+        if byte_at(string, ifst.start) == C_NUL {
             return;
         }
     }
 
     /* add: */
-    arglist.list.push(strlist::from_cstr(ifst.start));
+    arglist.list.push(strlist::from_cbytes(&string[ifst.start..]));
 }
 
 // [spec:dash:def:expand.ifsfree-fn]

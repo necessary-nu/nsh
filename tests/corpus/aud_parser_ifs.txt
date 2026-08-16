@@ -1,0 +1,100 @@
+#!mode=stdin
+#!name ifs read three names
+printf 'a b c\n' | { read x y z; echo "[$x][$y][$z]"; }
+%%%
+#!mode=stdin
+#!name ifs read fewer names than fields
+printf 'a b c d e\n' | { read x y; echo "[$x][$y]"; }
+%%%
+#!mode=stdin
+#!name ifs read more names than fields
+printf 'a b\n' | { read x y z; echo "[$x][$y][$z]"; }
+%%%
+#!mode=stdin
+#!name ifs read trailing whitespace
+printf 'a b   \n' | { read x y; echo "[$x][$y]"; }
+%%%
+#!mode=stdin
+#!name ifs read leading whitespace
+printf '   a b\n' | { read x y; echo "[$x][$y]"; }
+%%%
+#!mode=stdin
+#!name ifs read custom separator
+printf 'a:b:c\n' | { IFS=: read x y z; echo "[$x][$y][$z]"; }
+%%%
+#!mode=stdin
+#!name ifs read custom separator fewer names
+printf 'a:b:c:d\n' | { IFS=: read x y; echo "[$x][$y]"; }
+%%%
+#!mode=stdin
+#!name ifs read empty fields
+printf 'a::c\n' | { IFS=: read x y z; echo "[$x][$y][$z]"; }
+%%%
+#!mode=stdin
+#!name ifs read mixed ws and non-ws
+printf 'a : b : c\n' | { IFS=': ' read x y z; echo "[$x][$y][$z]"; }
+%%%
+#!mode=stdin
+#!name ifs read one name whole line
+printf '  a b c  \n' | { read x; echo "[$x]"; }
+%%%
+#!mode=stdin
+#!name ifs read empty line
+printf '\n' | { read x y; echo "[$x][$y]"; }
+%%%
+#!mode=stdin
+#!name ifs read only separators
+printf ':::\n' | { IFS=: read x y; echo "[$x][$y]"; }
+%%%
+#!locale=C.utf8
+#!mode=stdin
+#!name ifs read multibyte separator
+printf 'aébéc\n' | { IFS=é read x y z; echo "[$x][$y][$z]"; }
+%%%
+#!locale=C.utf8
+#!mode=stdin
+#!name ifs read multibyte fields
+printf 'é à î\n' | { read x y z; echo "[$x][$y][$z]"; }
+%%%
+#!name ifs split unquoted expansion
+v='a b c'; set -- $v; echo "$# [$1][$2][$3]"
+%%%
+#!name ifs split custom separator
+v='a:b:c'; IFS=:; set -- $v; echo "$# [$1][$2][$3]"
+%%%
+#!name ifs split empty fields custom
+v='a::c'; IFS=:; set -- $v; echo "$# [$1][$2][$3]"
+%%%
+#!name ifs split trailing separators
+v='a:b::'; IFS=:; set -- $v; echo "$#"; for w in $v; do echo "[$w]"; done
+%%%
+#!name ifs split leading separators
+v=':a:b'; IFS=:; set -- $v; echo "$#"; for w in $v; do echo "[$w]"; done
+%%%
+#!name ifs split whitespace runs
+v='a    b'; set -- $v; echo "$# [$1][$2]"
+%%%
+#!name ifs split mixed ws nonws
+v='a , b ,, c'; IFS=', '; set -- $v; echo "$#"; for w in $v; do echo "[$w]"; done
+%%%
+#!locale=C.utf8
+#!name ifs split multibyte separator
+v='aébéc'; IFS=é; set -- $v; echo "$# [$1][$2][$3]"
+%%%
+#!name ifs split empty ifs
+v='a b c'; IFS=; set -- $v; echo "$# [$1]"
+%%%
+#!name ifs split long word crosses fast path
+v=$(printf 'x%.0s' $(seq 1 40))' '$(printf 'y%.0s' $(seq 1 40)); set -- $v; echo "$# ${#1} ${#2}"
+%%%
+#!name ifs split many fields crosses fast path
+v=$(printf 'q %.0s' $(seq 1 40)); set -- $v; echo "$#"
+%%%
+#!name ifs split of command substitution
+set -- $(printf 'a b\nc\n'); echo "$# [$1][$2][$3]"
+%%%
+#!name ifs split with backslashes
+v='a\ b c'; set -- $v; echo "$# [$1][$2][$3]"
+%%%
+#!name ifs split preserves quoted
+v='a b'; set -- "$v" $v; echo "$# [$1][$2][$3]"

@@ -56,10 +56,9 @@ unsafe fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr
      * An owned line is already its own base and there is nothing to reserve;
      * the fields `ifsbreakup` builds copy out of it rather than pointing
      * into it, so the line only has to outlive that one call. */
-    let s: *mut c_char = line.as_mut_ptr() as *mut c_char;
     debug_assert!(!line.is_empty(), "readcmd always pushes the terminator");
 
-    crate::expand::ifsbreakup(sh, s, names.len() as c_int, &mut arglist);
+    crate::expand::ifsbreakup(sh, line, names.len() as c_int, &mut arglist);
     crate::expand::ifsfree();
 
     /* The C walks the names and the fields with two cursors that advance
