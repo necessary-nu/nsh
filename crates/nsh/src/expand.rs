@@ -292,9 +292,11 @@ pub struct ifs_state {
 ///
 ///   * **The base does not move.** Every `p = stackblock()` re-read in the
 ///     C is there because `makestrspace` may have reallocated. `Vec` has
-///     exactly the same hazard — `reserve` reallocates — so those re-reads
-///     stay, as `expbase()`, and they still mean "a growth can happen
-///     here".
+///     exactly the same hazard — `reserve` reallocates. The answer is not
+///     to keep the re-reads but to stop needing them: a position carried as
+///     an offset survives a growth, and [`_rmescapes`] is the last function
+///     in this file that still carries one as a pointer and so still calls
+///     [`expbase`].
 ///   * **Bytes past the cursor survive a growth.** The region copies the
 ///     whole block; `Vec::reserve` copies only the first `len` bytes. Two
 ///     places write past the cursor and read the byte back: `subevalvar`'s
@@ -428,14 +430,20 @@ unsafe fn expb() -> &'static mut BString {
     &mut *ptr::addr_of_mut!(expbuf)
 }
 
-/// `stackblock()`, for the expansion buffer.  Re-read after anything that
-/// can grow it, exactly where the C re-reads `stackblock()`.
+/// `stackblock()`, for the expansion buffer.
+///
+/// One caller left, and it is the whole of what is not converted: the
+/// `RMESCAPE_GROW` arm of [`_rmescapes`], which still walks with `p`, `q`
+/// and `r` as raw pointers and so still has to be told where the base is
+/// after a growth.  Everything else in this file addresses this buffer by
+/// offset, where a growth is not an event.
 #[inline]
 unsafe fn expbase() -> *mut c_char {
     expb().as_mut_ptr() as *mut c_char
 }
 
-/// The C's `expdest`, as a pointer.
+/// The C's `expdest`, as a pointer.  See [`expbase`] for who still wants
+/// one.
 #[inline]
 unsafe fn expdest() -> *mut c_char {
     let b = expb();
@@ -464,17 +472,6 @@ unsafe fn set_expdest(p: *mut c_char) {
 #[inline]
 unsafe fn expmakestrspace(n: size_t) -> *mut c_char {
     expb().reserve(n);
-    expdest()
-}
-
-/// `stnputs(s, n, expdest)`, returning the new cursor.
-#[inline]
-unsafe fn expstnputs(s: *const c_char, n: size_t) -> *mut c_char {
-    let b = expb();
-    b.reserve(n);
-    let len = b.len();
-    ptr::copy_nonoverlapping(s as *const u8, b.as_mut_ptr().add(len), n);
-    b.set_len(len + n);
     expdest()
 }
 
@@ -974,18 +971,24 @@ unsafe fn argstr(
             }
             if length > 0 && (flag & EXP_DISCARD) == 0 {
                 let newloc: c_int;
-                let q: *mut c_char;
+                let q: usize;
 
-                q = expstnputs(p, length);
-                *q.offset(-1) &= (end - 1) as c_char;
+                /* `q = stnputs(p, length, expdest)`.  `p` walks the word
+                 * text and never the expansion buffer, which is what the
+                 * `copy_nonoverlapping` inside the old accessor already
+                 * assumed and what makes this an append. */
+                let b = expb();
+                b.extend_from_slice(core::slice::from_raw_parts(p as *const u8, length));
+                q = b.len();
+                /* `*(q - 1) &= end - 1` */
+                b[q - 1] &= (end - 1) as u8;
                 /* `end` is 1 exactly when the byte just written closed the
                  * word (NUL, CTLENDVAR or CTLENDARI), and the line above
                  * has already turned it into a NUL.  Under EXP_WORD the
                  * cursor steps back over it, so it lands past the length —
                  * the outer `argstr` overwrites it on its next append. */
-                let q_off = q.offset_from(expbase()) as c_int;
-                set_expdest(q.offset(-((if (flag & EXP_WORD) != 0 { end } else { 0 }) as isize)));
-                newloc = q_off - end;
+                b.truncate(q - (if (flag & EXP_WORD) != 0 { end } else { 0 }) as usize);
+                newloc = q as c_int - end;
                 if breakall != 0 && inquotes == 0 && newloc > startloc {
                     recordregion(startloc, newloc, 0);
                 }
@@ -1050,7 +1053,10 @@ unsafe fn argstr(
                         }
                         p = p.offset((mb & 0xff) as isize);
                         if (flag & EXP_DISCARD) == 0 {
-                            expstnputs(p, ml as size_t);
+                            expb().extend_from_slice(core::slice::from_raw_parts(
+                                p as *const u8,
+                                ml as usize,
+                            ));
                         }
                         p = p.offset((mb >> 8) as isize);
                     }
@@ -1224,7 +1230,7 @@ unsafe fn expari(
          * `arith_yylex`'s variable names, is a list `arith` clears on
          * entry. */
         expb().truncate(begoff as usize);
-        start = expbase().offset(begoff as isize);
+        start = expb()[begoff as usize..].as_ptr() as *mut c_char;
 
         removerecordregions(begoff);
 
@@ -3517,7 +3523,7 @@ pub unsafe fn casematch(
     argstr(sh, pattern.narg().text.as_ptr(), EXP_TILDE | EXP_CASE)?;
     ifsfree();
     /* The C reads the word back as `stackblock()`. */
-    result = crate::pmatch::patmatch(expbase(), val);
+    result = crate::pmatch::patmatch(expb().as_mut_ptr() as *mut c_char, val);
     Ok(result)
 }
 
