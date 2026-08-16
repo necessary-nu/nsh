@@ -43,7 +43,7 @@ pub unsafe fn commandcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
             let cmd = crate::shell::cstring(cmd);
             return describe_command(
                 sh,
-                crate::output::stdout(),
+                crate::output::Dest::Stdout,
                 cmd.as_ptr() as *mut c_char,
                 path,
                 verify - VERIFY_BRIEF,

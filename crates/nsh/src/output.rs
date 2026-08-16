@@ -151,12 +151,67 @@ impl ShellIo {
     pub(crate) fn previous_stderr(&mut self) -> &mut Output {
         &mut self.previous_stderr
     }
+
+    /// The writer `dest` names.
+    ///
+    /// The borrow lasts exactly as long as one write, which is the whole
+    /// point of [`Dest`].
+    pub(crate) fn get(&mut self, dest: Dest) -> &mut Output {
+        match dest {
+            Dest::Stdout => &mut self.stdout,
+            Dest::Stderr => &mut self.stderr,
+            Dest::PreviousStderr => &mut self.previous_stderr,
+        }
+    }
+}
+
+/// Which of the shell's three writers a caller means.
+///
+/// This is the alternative to passing `*mut Output` around, and it exists
+/// for a soundness reason rather than a stylistic one.
+///
+/// Six functions used to take their writer as a raw pointer — `jobs`'
+/// `showjob`, `showjobs`, `showpipe` and `outcmd`, `eval`'s `eprintlist`
+/// and `type`'s `describe_command` — and **nine call sites held that
+/// pointer live across a call taking `&mut Shell`**. While it came from
+/// `addr_of_mut!` on a static that was sound: the static outlives
+/// everything, and no reborrow of the shell can invalidate a pointer that
+/// never came from one. Taken from `&mut sh.io` instead — which is what
+/// `docs/api-design.md` §5 makes `io` — every later reborrow of the shell
+/// puts the pointer's provenance in question under Stacked and Tree
+/// Borrows. It would still compile, and it might be undefined behaviour.
+///
+/// Naming the *destination* rather than pointing at it removes the
+/// pointer, the aliasing and the provenance question together: the callee
+/// resolves the `Dest` against the shell's [`ShellIo`] at each write, so
+/// the borrow never spans a call. This is what has to be true before `io`
+/// can become a field.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Dest {
+    /// The shell's buffered standard output.
+    Stdout,
+    /// The shell's unbuffered standard error.
+    Stderr,
+    /// The standard error saved across a redirection, which is where
+    /// `set -x` tracing goes.
+    PreviousStderr,
 }
 
 // The surrounding shell still has ambient state. `move-state` moves this
 // already-owned aggregate onto the concrete Shell instance after
 // `thread-context` makes that instance reachable at every call site.
 static mut SHELL_IO: ShellIo = ShellIo::new(1, 2);
+
+/// The shell's three writers, as an aggregate.
+///
+/// Transitional, and the only reason [`Dest`]'s callers are still
+/// `unsafe`: the aggregate is a static until `io` becomes a `Shell` field,
+/// at which point every `(*crate::output::io()).get(dest)` below becomes
+/// `sh.io.get(dest)` and the `unsafe` goes with the static.
+#[inline]
+pub unsafe fn io() -> *mut ShellIo {
+    addr_of_mut!(SHELL_IO)
+}
 
 /// The shell's buffered standard-output writer.
 #[inline]

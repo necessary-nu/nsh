@@ -23,7 +23,7 @@ use crate::exec::{
     find_command, padvance, padvance_result, param, pathopt, tblentry,
 };
 use crate::options::Options;
-use crate::output::Output;
+use crate::output::Dest;
 
 // [spec:dash:def:exec.typecmd-fn]
 // [spec:dash:sem:exec.typecmd-fn]
@@ -36,7 +36,7 @@ pub unsafe fn typecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         let name = crate::shell::cstring(name);
         match describe_command(
             sh,
-            crate::output::stdout(),
+            Dest::Stdout,
             name.as_ptr() as *mut c_char,
             null(),
             1,
@@ -52,7 +52,7 @@ pub unsafe fn typecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:dash:sem:exec.describe-command-fn]
 pub(crate) unsafe fn describe_command(
     sh: &mut Shell,
-    out: *mut Output,
+    dest: Dest,
     command: *mut c_char,
     mut path: *const c_char,
     verbose: c_int,
@@ -66,7 +66,7 @@ pub(crate) unsafe fn describe_command(
 
     'out_label: {
         if verbose != 0 {
-            let _ = (&mut *out).write_all(CStr::from_ptr(command).to_bytes());
+            let _ = (*crate::output::io()).get(dest).write_all(CStr::from_ptr(command).to_bytes());
         }
 
         /* First look at the keywords */
@@ -76,7 +76,7 @@ pub(crate) unsafe fn describe_command(
             } else {
                 CStr::from_ptr(command).to_bytes()
             };
-            let _ = (&mut *out).write_all(bytes);
+            let _ = (*crate::output::io()).get(dest).write_all(bytes);
             break 'out_label;
         }
 
@@ -86,9 +86,9 @@ pub(crate) unsafe fn describe_command(
             if verbose != 0 {
                 let mut record = b" is an alias for ".to_vec();
                 record.extend_from_slice(CStr::from_ptr((*ap).val).to_bytes());
-                let _ = (&mut *out).write_all(&record);
+                let _ = (*crate::output::io()).get(dest).write_all(&record);
             } else {
-                let _ = (&mut *out).write_all(b"alias ");
+                let _ = (*crate::output::io()).get(dest).write_all(b"alias ");
                 crate::alias::printalias(ap);
                 return Ok(Flow::Done(0));
             }
@@ -138,17 +138,17 @@ pub(crate) unsafe fn describe_command(
                     }
                     record.push(b' ');
                     record.extend_from_slice(CStr::from_ptr(p).to_bytes());
-                    let _ = (&mut *out).write_all(&record);
+                    let _ = (*crate::output::io()).get(dest).write_all(&record);
                 } else {
-                    let _ = (&mut *out).write_all(CStr::from_ptr(p).to_bytes());
+                    let _ = (*crate::output::io()).get(dest).write_all(CStr::from_ptr(p).to_bytes());
                 }
             }
 
             CMDFUNCTION => {
                 if verbose != 0 {
-                    let _ = (&mut *out).write_all(b" is a shell function");
+                    let _ = (*crate::output::io()).get(dest).write_all(b" is a shell function");
                 } else {
-                    let _ = (&mut *out).write_all(CStr::from_ptr(command).to_bytes());
+                    let _ = (*crate::output::io()).get(dest).write_all(CStr::from_ptr(command).to_bytes());
                 }
             }
 
@@ -159,21 +159,21 @@ pub(crate) unsafe fn describe_command(
                     } else {
                         b" is a shell builtin"
                     };
-                    let _ = (&mut *out).write_all(record);
+                    let _ = (*crate::output::io()).get(dest).write_all(record);
                 } else {
-                    let _ = (&mut *out).write_all(CStr::from_ptr(command).to_bytes());
+                    let _ = (*crate::output::io()).get(dest).write_all(CStr::from_ptr(command).to_bytes());
                 }
             }
 
             _ => {
                 if verbose != 0 {
-                    let _ = (&mut *out).write_all(b": not found\n");
+                    let _ = (*crate::output::io()).get(dest).write_all(b": not found\n");
                 }
                 return Ok(Flow::Done(127));
             }
         }
     }
     // out:
-    let _ = (&mut *out).write_all(b"\n");
+    let _ = (*crate::output::io()).get(dest).write_all(b"\n");
     Ok(Flow::Done(0))
 }

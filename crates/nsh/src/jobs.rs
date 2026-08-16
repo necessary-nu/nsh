@@ -32,7 +32,7 @@ use crate::nodes::{
     NAND, NAPPEND, NARG, NBACKGND, NCASE, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO,
     NHERE, NIF, NNOT, NOR, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE, NXHERE,
 };
-use crate::output::Output;
+use crate::output::Dest;
 use crate::parser::{VSLENGTH, VSNORMAL, VSNUL, VSTYPE};
 
 /// Copy an already-rendered ASCII fragment into the bounded C scratch
@@ -216,9 +216,20 @@ unsafe fn ps_cmd(sh: &crate::context::Shell, jp: usize, i: usize) -> &BStr {
 /// puts control bytes 0x81-0x88 in them — so they go out as bytes and
 /// not through a `char *`.
 #[inline]
-pub(crate) unsafe fn outcmd(sh: &mut crate::context::Shell, jp: usize, i: usize, out: *mut Output) {
-    let cmd = ps_cmd(sh, jp, i);
-    let _ = (&mut *out).write_all(cmd);
+pub(crate) unsafe fn outcmd(sh: &mut crate::context::Shell, jp: usize, i: usize, dest: Dest) {
+    /* The lookup is spelled out here rather than going through `ps_cmd`,
+     * which is otherwise these same three lines. The two borrows have to
+     * be *field*-disjoint: the write takes `sh.io` mutably and the text is
+     * read out of `sh.jobs`, and the compiler can see those are different
+     * fields only when both are direct field paths. `ps_cmd` borrows the
+     * whole shell, so writing through it becomes a conflict the moment
+     * `io` becomes a field. It stays because `getjob`'s command-text
+     * search still uses it, and that one only reads. */
+    let cmd = sh.jobs.tab[jp]
+        .ps
+        .get(i)
+        .map_or(BStr::new(b""), |p| p.cmd.as_bstr());
+    let _ = (*crate::output::io()).get(dest).write_all(cmd);
 }
 
 /* Set if we are in the vforked child.
@@ -550,7 +561,7 @@ unsafe fn sprint_status(os: *mut c_char, status: c_int, sigonly: c_int) -> c_int
 
 // [spec:dash:def:jobs.showjob-fn]
 // [spec:dash:sem:jobs.showjob-fn]
-pub(crate) unsafe fn showjob(sh: &mut crate::context::Shell, out: *mut Output, jp: usize, mode: c_int) {
+pub(crate) unsafe fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mode: c_int) {
     let mut ps: usize;
     let psend: usize;
     let mut col: c_int;
@@ -561,7 +572,12 @@ pub(crate) unsafe fn showjob(sh: &mut crate::context::Shell, out: *mut Output, j
 
     if (mode & SHOW_PGID) != 0 {
         /* just output process (group) id of pipeline */
-        let _ = writeln!(&mut *out, "{}", ps_pid(sh, jp, ps));
+        /* The pid is read out before the write starts rather than inside
+         * its argument list: `ps_pid` borrows the shell and the write
+         * borrows `sh.io`, and evaluating one inside the other is the
+         * conflict `Dest` exists to keep out of these functions. */
+        let pid = ps_pid(sh, jp, ps);
+        let _ = writeln!((*crate::output::io()).get(dest), "{pid}");
         return;
     }
 
@@ -614,15 +630,15 @@ pub(crate) unsafe fn showjob(sh: &mut crate::context::Shell, out: *mut Output, j
         let mut record = CStr::from_ptr(s.as_ptr()).to_bytes().to_vec();
         let width = (33 - col).max(0) as usize;
         record.resize(record.len() + width.max(1), b' ');
-        let _ = (&mut *out).write_all(&record);
-        outcmd(sh, jp, ps, out);
+        let _ = (*crate::output::io()).get(dest).write_all(&record);
+        outcmd(sh, jp, ps, dest);
         if (mode & SHOW_PID) == 0 {
-            showpipe(sh, jp, out);
+            showpipe(sh, jp, dest);
             break;
         }
         ps += 1;
         if ps == psend {
-            let _ = (&mut *out).write_all(b"\n");
+            let _ = (*crate::output::io()).get(dest).write_all(b"\n");
             break;
         }
     }
@@ -642,7 +658,7 @@ pub(crate) unsafe fn showjob(sh: &mut crate::context::Shell, out: *mut Output, j
 
 // [spec:dash:def:jobs.showjobs-fn]
 // [spec:dash:sem:jobs.showjobs-fn]
-pub unsafe fn showjobs(sh: &mut crate::context::Shell, out: *mut Output, mode: c_int) -> Result<(), Error> {
+pub unsafe fn showjobs(sh: &mut crate::context::Shell, dest: Dest, mode: c_int) -> Result<(), Error> {
     let mut jp: Option<usize>;
 
     /* TRACE(("showjobs(%x) called\n", mode)); */
@@ -659,7 +675,7 @@ pub unsafe fn showjobs(sh: &mut crate::context::Shell, out: *mut Output, mode: c
      * `prev_job` alone, which is what keeps the next step valid. */
     while let Some(i) = jp {
         if (mode & SHOW_CHANGED) == 0 || sh.jobs.tab[i].changed != 0 {
-            showjob(sh, out, i, mode);
+            showjob(sh, dest, i, mode);
         }
         jp = sh.jobs.tab[i].prev_job;
     }
@@ -1943,14 +1959,14 @@ unsafe fn cmdputs(s: *const c_char) {
 
 // [spec:dash:def:jobs.showpipe-fn]
 // [spec:dash:sem:jobs.showpipe-fn]
-pub(crate) unsafe fn showpipe(sh: &mut crate::context::Shell, jp: usize, out: *mut Output) {
+pub(crate) unsafe fn showpipe(sh: &mut crate::context::Shell, jp: usize, dest: Dest) {
     let spend: usize = sh.jobs.tab[jp].ps.len();
 
     for sp in 1..spend {
-        let _ = (&mut *out).write_all(b" | ");
-        outcmd(sh, jp, sp, out);
+        let _ = (*crate::output::io()).get(dest).write_all(b" | ");
+        outcmd(sh, jp, sp, dest);
     }
-    let _ = (&mut *out).write_all(b"\n");
+    let _ = (*crate::output::io()).get(dest).write_all(b"\n");
     crate::output::flushall();
 }
 

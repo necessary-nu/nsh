@@ -48,7 +48,7 @@ use crate::nodes::{
     NNOT, NOR, NPIPE, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE,
 };
 use crate::nodes::{Node, funcnode};
-use crate::output::Output;
+use crate::output::Dest;
 use crate::redir::{REDIR_PUSH, REDIR_SAVEFD2};
 use crate::var::VEXPORT;
 
@@ -1284,25 +1284,32 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
 
             /* Print the command if xflag is set. */
             if xflag(sh) != 0 && sh.eval.inps4 == 0 {
-                let out: *mut Output;
                 let mut sep: c_int;
 
-                out = crate::output::previous_stderr();
+                /* This block is why `Dest` exists. It used to open with
+                 * `out = previous_stderr()` and then hold that pointer
+                 * across `ps4val(sh)`, `expandstr(sh, ..)` and two
+                 * `eprintlist` calls — five reborrows of the shell with a
+                 * raw pointer into its I/O still live. Sound while the
+                 * pointer came from a static; undefined the moment it
+                 * comes from `&mut sh.io`. Naming the destination defers
+                 * the resolution to each write, so nothing spans a call. */
+                let dest = Dest::PreviousStderr;
                 sh.eval.inps4 = 1;
                 /* Hoisted out of `expandstr`'s argument list; see the
                  * note in `evalcommand`. */
                 let ps4 = crate::var::ps4val(sh);
                 let prompt = crate::parser::expandstr(sh, ps4)?;
-                let _ = (&mut *out).write_all(&prompt);
+                let _ = (*crate::output::io()).get(dest).write_all(&prompt);
                 sh.eval.inps4 = 0;
                 sep = 0;
-                sep = eprintlist(out, &varlist.list, sep);
+                sep = eprintlist(dest, &varlist.list, sep);
                 /* `eprintlist(out, osp, sep)` prints from the *original*
                  * head, so `command -p foo` traces as it was written and not
                  * as `parse_command_args` left it.  A NULL `osp` prints
                  * nothing, which is the empty slice. */
-                eprintlist(out, &arglist.list[osp.unwrap_or(arglist.list.len())..], sep);
-                let _ = (&mut *out).write_all(b"\n");
+                eprintlist(dest, &arglist.list[osp.unwrap_or(arglist.list.len())..], sep);
+                let _ = (*crate::output::io()).get(dest).write_all(b"\n");
             }
 
             /* Now locate the command. */
@@ -1595,7 +1602,7 @@ unsafe fn prehash(sh: &mut Shell, n: &Node) -> Result<Flow, Error> {
 
 // [spec:dash:def:eval.eprintlist-fn]
 // [spec:dash:sem:eval.eprintlist-fn]
-unsafe fn eprintlist(out: *mut Output, list: &[strlist], sep: c_int) -> c_int {
+unsafe fn eprintlist(dest: Dest, list: &[strlist], sep: c_int) -> c_int {
     let mut sep: c_int = sep;
 
     for sp in list {
@@ -1605,7 +1612,7 @@ unsafe fn eprintlist(out: *mut Output, list: &[strlist], sep: c_int) -> c_int {
         }
         record.extend_from_slice(CStr::from_ptr(sp.textp()).to_bytes());
         sep |= 1;
-        let _ = (&mut *out).write_all(&record);
+        let _ = (*crate::output::io()).get(dest).write_all(&record);
     }
 
     sep

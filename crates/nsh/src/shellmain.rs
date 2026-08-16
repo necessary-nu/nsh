@@ -367,7 +367,7 @@ pub(crate) unsafe fn cmdloop(
         if sh.jobs.jobctl != 0 {
             /* An interrupt taken while announcing changed jobs leaves
              * through the read-eval loop, like any other. */
-            crate::jobs::showjobs(sh, crate::output::stderr(), SHOW_CHANGED)?;
+            crate::jobs::showjobs(sh, crate::output::Dest::Stderr, SHOW_CHANGED)?;
         }
         inter = 0;
         if iflag(sh) != 0 && top != 0 {

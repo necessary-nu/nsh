@@ -22,7 +22,7 @@ use crate::jobs::{
     ps_pid, set_curjob, showpipe, waitforjob, xxtcsetpgrp,
 };
 use crate::options::Options;
-use crate::output::Output;
+use crate::output::Dest;
 
 // [spec:dash:def:jobs.fgcmd-fn]
 // [spec:dash:sem:jobs.fgcmd-fn]
@@ -33,7 +33,6 @@ use crate::output::Output;
 // [spec:dash:sem:jobs.bgcmd-fn]
 pub unsafe fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut jp: usize;
-    let out: *mut Output;
     let mode: c_int;
     let mut retval: c_int = 0;
 
@@ -45,7 +44,6 @@ pub unsafe fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut opts = crate::options::Options::new(args);
     opts.next(b"")?;
     let operands = opts.operands();
-    out = crate::output::stdout();
     /* `do { ... } while (*argv && *++argv)`: one pass on the current job
      * when there is no operand, otherwise one pass per operand. */
     let mut index = 0usize;
@@ -54,10 +52,10 @@ pub unsafe fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         jp = getjob(sh, spec.as_ref().map_or(core::ptr::null(), |s| s.as_ptr()), 1)?;
         if mode == FORK_BG {
             set_curjob(sh, jp, CUR_RUNNING);
-            let _ = write!(&mut *out, "[{}] ", jobno(jp));
+            let _ = write!((*crate::output::io()).get(Dest::Stdout), "[{}] ", jobno(jp));
         }
-        outcmd(sh, jp, 0, out);
-        showpipe(sh, jp, out);
+        outcmd(sh, jp, 0, Dest::Stdout);
+        showpipe(sh, jp, Dest::Stdout);
         retval = restartjob(sh, jp, mode)?;
 
         index += 1;
