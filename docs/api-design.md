@@ -576,14 +576,41 @@ refuses gets the diagnostic and status a failed `exec` produces
 (`exec.rs:143-160`); `nsh-cli`'s host says yes, so dash's behaviour is
 preserved exactly.
 
+**Correction: `exec cmd` is not the only site, and the other one has no
+syntax.** `process-model` counted the `shellexec` callers and there are
+three. `jobs.rs:1160` is inside a vforked child and is the point of the
+exercise. `builtins/exec.rs:48` is the `exec` builtin, which is the site
+this paragraph found. The third is `eval.rs:1389` — `evalcommand`'s
+`EV_EXIT` fast path, which `execve`s the **last command of the script** in
+place, reached from `main`'s `-c` at `shellmain.rs:199`. So `dash -c 'ls'`
+replaces its own image with no `exec` written anywhere, and a
+`Shell::run` built naively on the `-c` path would do that to the embedder
+on `sh.run(b"ls")`.
+
+The fix is not a second `Host` method. It is a constraint on §4:
+**`run` passes no `EV_EXIT`**, so the optimisation stays available to
+`nsh-cli` — which passes it — and is unreachable from the API.
+`[dec:nsh:host-owns-the-process]` records it, and it has a second effect
+worth knowing: `evalsubshell`'s no-fork arm (`eval.rs:717-721`) is
+`EV_EXIT`-only too, so from `run` the shell never runs `forkreset` in its
+own process either.
+
 **What is *not* on the trait.** Terminating the process is not, because
 after this design the library never needs to: `run` returns and `nsh-cli`
 calls `std::process::exit`. The one place the library still ends a process
 is inside a forked child, where `_exit` is forced and correct, and that is
-not the host's decision to make. The forked child's own constraint —
-async-signal-safe work only, no destructors, no allocator, because it
-inherits an embedding host's whole address space — belongs to the
-`process-model` node and is not an API item.
+not the host's decision to make.
+
+The forked child's own constraint was left to `process-model`, which has
+now answered it — and the answer is narrower than the sentence this
+paragraph used to carry. "Async-signal-safe work only, no destructors, no
+allocator" is **unattainable after `fork` and unnecessary**: a subshell is
+a shell, so it allocates because it evaluates, and `forkchild` frees the
+job table before the child runs a command. What holds after `fork` is only
+*it does not return*. The strong form holds after **`vfork`**, where it is
+stated as "writes no location the parent reads again" and has been audited
+line by line. `[dec:nsh:fork-child-is-a-terminus]` carries both, and §11
+below carries what it means for an embedder.
 
 ### 5.5 The borrow problem, solved before it is discovered
 
@@ -650,20 +677,57 @@ that the decision does not list:
   the sense that the syscall is. Two shells in different directories is
   not achievable without `openat`-relative resolution everywhere, which is
   out of scope. Say so in the crate docs.
+* **The children of the process, which are one pool.** `waitproc` calls
+  `wait3(status, flags, NULL)` (`jobs.rs:1412`) — that is `waitpid(-1)`,
+  and it reaps *any* child of the process. Two `Shell`s reap each other's
+  children; a `Shell` and an embedder holding a `std::process::Child` do
+  the same, and the embedder is the one that loses, because its own `wait`
+  then answers `ECHILD` for a status that is sitting in a job table it
+  cannot see. **This is the first entry on the list that is the kernel's
+  rather than the C library's**, and it is the one an embedder is most
+  likely to trip over, because nothing about it looks like shared state.
+  It cannot be fixed by tracking pids: reaping is destructive, so the
+  ownership test has to happen before the reap, and the only primitive
+  that peeks without reaping (`waitid(P_ALL, …, WNOWAIT)`) returns the
+  same foreign child forever and turns a blocking wait into a spin. The
+  shell would have to own `SIGCHLD` for the whole process and dispatch by
+  pid, which is exactly the disposition `[dec:nsh:host-owns-signals]` says
+  it may not claim. `[dec:nsh:host-owns-the-process]` records it.
+* **The process group and the controlling terminal.** `setjobctl(1)`
+  performs `setpgid(0, rootpid)` (`jobs.rs:482`), `tcsetpgrp` (`:483`) and,
+  on the way there, possibly `killpg(0, SIGTTIN)` (`:452`) — all three on
+  the *host's* own process and process group, and none of them undone by
+  anything but `setjobctl(0)`. Two `Shell`s cannot each be the foreground
+  process group, because there is one process. Unlike the entries above
+  this one is *gated* rather than merely documented: job control is off
+  unless the host grants it.
 
 The honest statement, which belongs on the decision:
 
 > Two `Shell` values in one process share the C library's locale,
 > `strtok` cursor and `getopt` state, the process environment, the
-> working directory — and one thing this crate does own, the signal
-> inbox, because a signal disposition and the handler that reads it are
-> per-process facts that no amount of per-instance storage can divide.
+> working directory, the process group and controlling terminal, the
+> kernel's pool of child processes — and one thing this crate does own,
+> the signal inbox, because a signal disposition and the handler that
+> reads it are per-process facts that no amount of per-instance storage
+> can divide.
 
 The earlier form of that sentence read "share nothing this crate owns",
 and the inbox is the counter-example. It is stated as a shared *fact*
 rather than a shared *field* on purpose: `SignalSink` being an `Arc` is
 what lets a host hold a clone, not what would make two shells
 independent.
+
+**One correction to how this section has been read.** The list is not "the
+C library's globals" and never was — it acquired that shape because the
+first three entries happened to be libc statics and §5's `static mut`
+audit was the tool at hand. Three of the seven entries are not libc's at
+all: the working directory and the child-process pool are the kernel's,
+and the signal inbox is this crate's. **A process-wide fact is anything
+one `Shell` can change that another observes, whoever stores it.** That is
+the test to apply when the next one is found, and applying the narrower
+one is how the child-process pool went unlisted through
+`public-api-design`, `move-state` and `host-owns-signals`.
 
 ---
 
@@ -768,7 +832,39 @@ the diagnostic hook load-bearing.
 
 **`[dec:nsh:no-ambient-state]`** — extend the recorded limit to the
 process environment and the working directory (§6), which are the same
-shape as the locale and are not listed.
+shape as the locale and are not listed. `process-model` adds two more and
+one of them is a category error the earlier list encouraged: the
+**child-process pool** (`wait3(-1)` reaps the host's children as well as
+the shell's) and the **process group and controlling terminal**. Neither
+is a libc static, so neither would ever have been found by looking for
+one. §6 now states the test as "anything one `Shell` can change that
+another observes, whoever stores it".
+
+**`[dec:nsh:shell-as-library]`** — its first accepted consequence lists
+what moves into the frontend as "exit, signals, argv, the standard
+descriptors". **"Exit" understates it by a category.** Replacing the
+process image is worse than ending it — the decision's own fifth
+consequence says so — and moving the host's process group and taking its
+controlling terminal are two more. The general form is
+`[dec:nsh:host-owns-the-process]`, which subsumes the `exit` item rather
+than sitting beside it, and §11 is its working.
+
+**`[dec:nsh:host-owns-signals]`** — the seam it transferred to
+`public-api` should be split before it is worked. Of the 21 disposition
+call sites in the crate, **12 run in a child the library just forked** and
+must stay in the library: routing them through a `Box<dyn Host>` would be
+an indirect call into embedder code from a forked child, which is the
+hazard `[dec:nsh:fork-child-is-a-terminus]` exists to bound. The nine
+host-side sites are the trait's. `redir.rs`'s five raw `libc::signal`
+calls, which the transfer lists explicitly, are all in the here-document
+writer child and are five of the twelve.
+
+**`[dec:nsh:minimal-unsafe]`** — its deferred consequence ("where the
+floor actually sits… never been counted separately") is **resolved and
+the edit is applied in this commit**: 255 `libc::` sites, 68 symbols, 13
+more hand-declared, thirteen groups, and the finding that the floor is
+not the syscalls — 85 of the 255 are `stat`, identity, limits, `errno`,
+`getopt` and the C library's locale-dependent string routines. §11.3.
 
 **`[dec:nsh:host-owns-streams]`** — the deferred consequence can be
 retired by §7, and replaced with the two gaps that survive.
@@ -834,3 +930,150 @@ guess about external commands are all superseded above.
    method. Whether that is sufficient for an embedder handling untrusted
    words is a question this design leaves open and does not think it can
    close with a type.
+
+---
+
+## 11. What the library does to the process (`process-model`, resolved)
+
+§5.4 asks what a library may not do on its own authority and answers for
+signals, streams and `exec`. This section answers it for the process
+itself, and it is the artefact `process-model` produces alongside
+`[dec:nsh:host-owns-the-process]` and
+`[dec:nsh:fork-child-is-a-terminus]`.
+
+### 11.1 The line is not the syscall, it is whose process
+
+The tempting formulation — "these syscalls are banned in a library" —
+does not survive contact with `jobs.rs`. `setpgid` appears twice in the
+same fork, eleven lines apart: `jobs.rs:992` in the child, `:1079` in the
+parent, deliberately raced so whichever wins puts the job in its group.
+One of those is ordinary work and one of them is an operation on the
+embedder's process. Same syscall, same function, same second.
+
+So the test is **whose process is the object of the call**:
+
+| Operation | On a child the library forked | On the host's own process |
+|---|---|---|
+| `fork` / `vfork` | — (this *is* the making of it) | n/a |
+| `execve` | free — `jobs.rs:1160` | **grant** — `builtins/exec.rs:48`, `eval.rs:1389` |
+| `_exit` | free — `exit_from_child`, `forkchild_fatal`, `redir.rs:483` | **deleted, not granted** — `trap.rs:562`; after the builder `run` returns |
+| `setpgid` | free — `jobs.rs:992`, `:1079` | **grant** — `jobs.rs:482` |
+| `tcsetpgrp` | **grant** — see below | **grant** — `jobs.rs:483` |
+| `killpg` | free — `builtins/fg.rs:87` (SIGCONT to a job) | **grant** — `jobs.rs:452` (SIGTTIN to our own group) |
+| `sigaction` / `signal` | free — 12 sites, all in a forked child | **host's** — 9 sites, `[dec:nsh:host-owns-signals]` |
+| `wait3` | free | n/a — but see §6, it reaps the host's children too |
+| `kill` | free | free — the *script* named the target, not the library |
+
+`tcsetpgrp` is the one row where a child's operation still needs the
+grant, and the reason is that a child taking the terminal from the host's
+foreground group is the same theft performed one process away. It needs no
+second gate, though: `xxtcsetpgrp` returns `Ok(())` when `ttyfd < 0`
+(`jobs.rs:351-357`) and only `setjobctl` ever sets `ttyfd`. **Gating
+`setjobctl` gates every terminal operation in the crate**, including the
+ones in children.
+
+### 11.2 Three grants, one of which is an absence
+
+* **`Host::may_replace_process`** — already in §5.4, now with two call
+  sites rather than one, and with the `run`-passes-no-`EV_EXIT`
+  constraint that covers the second.
+* **Job control** — a builder input, defaulting to off. It gates
+  `setjobctl(1)`, and through `ttyfd` it gates the terminal.
+* **Ending the process** — no grant, because after the builder the
+  library never needs one. The capability that does not exist is the
+  strongest form of the ban.
+
+### 11.3 The syscall floor, enumerated
+
+`unsafe-is-a-crate`'s directive names the floor as
+"fork/exec/wait/signals/termios/fd ops". Measured at `410e729` over
+`crates/nsh/src` (in-file `#[cfg(test)]` modules included; the command is
+`grep -rhoE 'libc::[a-z_0-9]+\(' src/ --include=*.rs | sort | uniq -c`):
+
+**255 `libc::` call sites across 68 distinct symbols, plus 13 symbols
+hand-declared in 7 `extern "C"` blocks** because `libc` 0.2 does not bind
+them. One vendor: there is no `nix` and no direct `rustix` in the crate.
+
+| Group | Symbols | `libc::` sites |
+|---|---|---|
+| Process creation / exec | `fork` `vfork` `execve` `_exit` | 26 |
+| Wait / reaping | `waitpid` `sigsuspend` — and `wait3`† | 2 |
+| Process groups / terminal | `setpgid` `getpgrp` `tcgetpgrp` `tcsetpgrp` `killpg` `tcgetattr` `isatty` | 14 |
+| Signals | `sigaction` `signal` `sigprocmask` `sigfillset` `sigemptyset` `sigaddset` `sigismember` `kill` `raise` `strsignal` | 34 |
+| Descriptors | `close` `open64` `dup` `dup2` `pipe` `fcntl` `lseek` `read` `write` `memfd_create` `tee` `mkstemp` `unlink` `fpathconf` | 94 |
+| stat family | `stat64` `lstat64` `fstat64` `faccessat` | 20 |
+| Directory iteration | `opendir` `readdir64` `closedir` | 4 |
+| Identity | `getpid` `getppid` `geteuid` `getegid` `getgroups` `getpwnam` | 14 |
+| Limits / times / umask | `umask` `getrlimit` `setrlimit` `times` `sysconf` | 13 |
+| Environment / locale | `setlocale` `getenv` `putenv` — and `environ`† | 5 |
+| errno | `__errno_location` | 3 |
+| `getopt` | `getopt` — and `optind`† `optopt`† `optarg`† | 1 |
+| C library, not syscalls | `strerror` `strcoll` `fnmatch` `atoi` `isalpha` `isalnum` `isspace` `isdigit` — and `strtoimax`† `mbrlen`† `mbrtowc`† `mbsrtowcs`† `iswspace`† `wctype`† `iswctype`† `iswblank`† | 25 |
+
+† hand-declared rather than bound by `libc`, so not counted in the column.
+The column is `libc::` call sites and sums to exactly 255, which is the
+check that the grouping lost nothing. `close` alone is 47 of them and
+`_exit` 22 — most of the latter are the descriptor assertions in
+`streams.rs`'s own test module, which is why the group totals are a map of
+the code rather than of the shell.
+
+Two things this makes visible that the directive's six-word summary does
+not.
+
+**The floor is not six groups, it is thirteen, and the last one is the
+awkward one.** `fork/exec/wait/signals/termios/fd` is 170 of the 255
+sites. The rest are `stat`, identity, limits, locale and the C library's
+string and multibyte routines — not syscalls, but still FFI, and `nsh`
+cannot deny `unsafe_code` while any of them is called directly. So the
+floor crate is "everything below safe Rust", not "the syscalls", and its
+last group is the one where a Rust replacement is a *behaviour* question
+rather than a wrapping exercise: `strcoll`, `isalpha` and `mbrtowc` are
+locale-dependent, and §6's first entry is why that matters.
+
+**The wrapper layer already exists for about half of it and is missing
+for exactly the parts this document has been arguing about.** Real
+`Result`-returning helpers: `redir::{sh_open, sh_pipe, sh_dup2, savefd}`,
+`jobs::{forkshell, vforkexec, xtcsetpgrp, xxtcsetpgrp, waitproc}`,
+`trap::{setsignal, ignoresig, sigblockall}`, `system::{sigclearmask,
+errno}`, `output::{write_fd_once, write_fd, xwrite}`,
+`siginbox::SignalsBlocked`. Unwrapped and called raw from 90-odd sites:
+`setpgid`, `getpgrp`, `tcgetpgrp`, `isatty`, `close`, `stat64`, `kill`,
+`killpg`, `raise`, `_exit`. **The unwrapped list is almost exactly the
+list of grant-bearing operations in §11.1** — which is not a coincidence,
+it is the same observation from the other side: the operations nobody had
+to think about are the ones nobody wrapped.
+
+### 11.4 What the floor's API may not be
+
+One constraint comes out of `[dec:nsh:fork-child-is-a-terminus]` and it
+is worth stating before the crate is written, because it is cheap now and
+expensive later.
+
+**The wrappers a forked child calls must not allocate.** Between `vfork`
+and `execve` the child runs in the parent's address space; between `fork`
+and `execve` in a multithreaded host it may run with the allocator lock
+held by a thread that no longer exists. The wrappers on that path —
+`execve`, `_exit`, `dup2`, `close`, `open`, `setpgid`, `tcsetpgrp`,
+`signal`, `sigaction` — must therefore return an error that is a bare
+`errno`, not a `Box<dyn Error>`, not a `String`, and not something that
+formats a message on construction.
+
+That is the same shape `output-is-a-writer` and
+`[dec:nsh:printf-is-parsed-not-interpreted]` arrived at for unrelated
+reasons: the value carries the facts, the call site does the rendering.
+Three decisions now want it, so the floor crate should be built that way
+from its first commit.
+
+### 11.5 One thing this section is not sure about
+
+**Whether job control can be a builder input at all, or has to be a
+`Host` method.** §11.2 makes it a builder flag, on the reasoning that a
+grant is answered once. But `set -m` can be executed *by the script*, at
+any point, and `optschanged` reaches `setjobctl` from `poplocalvars`
+restoring a `local -` option set. A builder flag makes `set -m` silently
+ineffective in an ungranted shell, which is a divergence the differential
+corpus cannot see — it has no controlling terminal, so `setjobctl` leaves
+`jobctl` at 0 there in *both* shells today. *Resolved by:* a ptydiff case
+that runs `set -m` in a granted and an ungranted embedded shell, written
+when `public-api` builds the grant, and by deciding then whether an
+ungranted `set -m` should warn the way `can't access tty` does.
