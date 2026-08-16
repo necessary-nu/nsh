@@ -1109,7 +1109,7 @@ assertions (
     {id errors-are-values, kind @complete, author "brendan@necessary.nu", at 2026-08-14T12:52:12.404369098Z}
     {id thread-context, kind @complete, author "brendan@necessary.nu", at 2026-08-14T14:26:30.410082996Z}
     {id move-state, kind @complete, author "brendan@necessary.nu", at 2026-08-15T15:03:27.901722046Z}
-    {id owned-words, kind @doing, author "brendan@necessary.nu", at 2026-08-15T16:23:07.087218118Z}
+    {id owned-words, kind @complete, author "brendan@necessary.nu", at 2026-08-16T13:04:57.636490448Z}
     {id host-owns-signals, kind @complete, author "brendan@necessary.nu", at 2026-08-16T11:54:37.641373271Z}
     {id process-model, kind @complete, author "brendan@necessary.nu", at 2026-08-16T12:55:01.103836061Z}
 )
