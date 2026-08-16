@@ -2356,6 +2356,7 @@ children (
                 priority 0
                 kind @refactor
                 deps (no-ambient-state)
+                sealed true
                 log (
                     {
                         at 2026-08-15T15:02:35.382314651Z
@@ -2418,6 +2419,13 @@ children (
                         author "brendan@necessary.nu"
                         kind @note
                         text "**Final gates, on `8a48ec8` (binary `709c0728`, built from the rebased tree in this worktree's own target dir). Green; the six commits are landed on master by fast-forward.**\n\n```\ncargo test -p nsh   231 = the rebased master's 227 + this node's 4\nlib warnings        69  (was 73 before owned-words' expansion slices)\nptydiff             PASS=60 FAIL=0 FLAKY=0  -- all 60, including the\n                    17 job-control/presence-bit cases and all ten ^C cases\nrunall              PASS=61699 FAIL=0 FLAKY=31 XFAIL=4, all 116 corpora,\n                    tests/.build/fail holds 14 .flaky + 4 .xfail and zero .out\nPOSIX               cases PASS=660 FAIL=51 -- the 51-name core EXACTLY,\n                    byte-identical to the earlier quiet run's set,\n                    zero missing, zero extra\nunsafe operations   3075 -> 3044  (-31)\nstatic mut decls    49 -> 44      (-5)\n```\n\n**Both trend figures were re-derived by the method rather than inherited.** Unsafe ops: build with `allow(unsafe_op_in_unsafe_fn)` removed and subtract the ordinary warning count — 3148−73 at `f9dc0ec` in a throwaway worktree, 3117−73 here. That reproduces the 3075 baseline exactly, which is the check that the method was applied the same way twice. `static mut` by `docs/errors-are-values.md`'s documented command, 49 at the node's base against 44 now. The five that left are `trap`, `ptrap`, `trapcnt`, `sigmode` and `jobs.rs`'s `vforked`; the sink that absorbed them is a plain `static` of atomics, so they were removed from the count rather than relocated within it.\n\n**The POSIX run is the third independent confirmation of the sig-kill finding.** At load 4.4 the suite scores the core exactly and both `sig-kill-option-s` and `sig-kill-xsi-signal-forms` pass; the only `sig-kill` name in the failing set is the pre-existing `sig-kill-job-id-operand`. Under load both fail, on the port and on reference dash alike. Quiet run, loaded run, loaded reference run — the same conclusion three ways.\n\n**Two operational notes for whoever runs these next.**\n\n* **`ptydiff` could not run in this worktree at all until its build directory stopped being a symlink.** `tests/.build` was symlinked to the root checkout's, and `sandbox` refuses to create a bind mountpoint through a symlink on a read-only root — every case died with `Can't mkdir parents for …`, `PASS=0 FAIL=60`, which reads exactly like a catastrophic regression and is not one. Reproduced in one command outside the harness: the same bind succeeds against the real path and fails against the symlinked one. Fixed by giving this worktree a real `tests/.build` with only `ref` symlinked back, which also removes the shared-run-root race that made `ptydiff` need to be exclusive.\n* **The corpus sweep's tally shares a line with its progress output.** `runall.sh` writes corpus names to stderr with `\\r` and no newline, so `==== TOTAL … ====` lands after the last name on that same line and `grep '^===='` finds nothing. The sweep had in fact completed — 116 of 116 corpora named, `FAIL=0`, no `.out` — and was very nearly re-run for an hour on the strength of a grep. Match on `TOTAL`, not on a line start."
+                    }
+
+                    {
+                        at 2026-08-16T11:54:37.641373271Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }
