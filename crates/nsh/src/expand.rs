@@ -526,95 +526,38 @@ pub unsafe fn expansion_result() -> &'static BStr {
 }
 
 // ---------------------------------------------------------------------
-// The glob buffer.  See [`globbuf`].
+// The glob buffer.
+//
+// The candidate path `expmeta` is building.  The C has no name for it: it
+// is the stack block, addressed through `expmeta`'s locals `cp` (the base,
+// `growstackto`'s return) and `enddir` (the cursor, `cp + expdir_len` plus
+// whatever has been appended).  Every frame of the recursion owns
+// `[0, expdir_len)` — the directory prefix its parent wrote, ending in `/`
+// — and writes the next component above it.
+//
+// It is now an ordinary `BString` that `expandmeta` owns and passes down by
+// `&mut`, and the whole cursor layer — a `static mut`, a `globb()`
+// accessor, `globbase()`, `globgrowto()`, `globstnputs()` — is gone with
+// the cursors.  Three things paid for it:
+//
+//   * `enddir` is `expdir_len`.  The C's `enddir = cp + expdir_len` after
+//     anything that could grow the block existed to survive a
+//     reallocation; an index does not move, so every re-derivation goes.
+//   * `stnputs(s, n, p)` opens with `len = p - stacknxt`, so an append at
+//     a cursor *below* the end of the buffer discards what was above it.
+//     Said as an index that is **truncate to `p`, then append** — an
+//     ordinary operation on an owned buffer, and the way a frame that a
+//     recursive `expmeta` returned into gets its own `expdir_len` back.
+//   * The bytes are counted as they are written.  The C wrote the
+//     unescaped prefix through a raw cursor and left the block's length
+//     alone; `expmeta_rmescapes` appends, so `addfnamealt` no longer has
+//     to be told how many bytes are really there.  See its comment.
+//
+// A `static` was needed only while the cursors were raw pointers that
+// outlived the borrow producing them.  With `&mut BString` threaded through
+// the recursion, "there is never a second glob in flight" stops being an
+// argument about `INTOFF` and becomes the borrow checker's.
 // ---------------------------------------------------------------------
-
-/// The candidate path `expmeta` is building.
-///
-/// The C has no name for this: it is the stack block, addressed through
-/// `expmeta`'s locals `cp` (the base, `growstackto`'s return) and `enddir`
-/// (the cursor, `cp + expdir_len` plus whatever has been appended). Every
-/// frame of the recursion owns `[0, expdir_len)` — the directory prefix its
-/// parent wrote, ending in `/` — and writes the next component above it.
-///
-/// Owned, the base stops moving for the region's reasons and starts moving
-/// for `Vec`'s, so the C's `cp = ...; enddir = cp + expdir_len` re-derivation
-/// stays exactly where it is. What changes is the one property the region
-/// had and a `Vec` does not: **the region copies the whole block when it
-/// grows, `Vec::reserve` copies only the first `len` bytes.** So the
-/// invariant this buffer is held to is
-///
-/// > at every point where the glob buffer can grow, its length is the
-/// > current frame's `expdir_len`.
-///
-/// which is what makes the prefix survive. It is asserted on entry to
-/// `expmeta`, re-established by hand at the one place `expdir_len` changes
-/// mid-frame, and re-derived from the cursor by [`globstnputs`], exactly as
-/// the C's `makestrspace` derives it (`len = p - stacknxt`).
-///
-/// A `static` rather than a parameter for the same reason [`expbuf`] is one:
-/// the cursors are raw pointers that outlive the borrow that produced them,
-/// and `expmeta` recurses. `expandmeta` is the only entry and holds `INTOFF`
-/// across it, so there is never a second glob in flight.
-static mut globbuf: BString = BString::new(Vec::new());
-
-/// `&mut globbuf`, without ever naming a reference to the `static mut`
-/// twice at once.
-#[inline]
-unsafe fn globb() -> &'static mut BString {
-    &mut *ptr::addr_of_mut!(globbuf)
-}
-
-/// `stackblock()`, for the glob buffer. Re-read after anything that can
-/// grow it, exactly where the C re-reads `stackblock()`.
-#[inline]
-unsafe fn globbase() -> *mut c_char {
-    globb().as_mut_ptr() as *mut c_char
-}
-
-/// `memalloc.c`: `growstackto(len)` — make `len` bytes writable from the
-/// base and return it.
-///
-/// The reservation is the C's number, `expdir_len + name_len + 1`, and it is
-/// exact rather than generous: `expmeta_rmescapes` writes `name` at the
-/// cursor through a raw pointer carrying no bound of its own, and what kept
-/// the C inside the block is that a region block is never smaller than 504
-/// bytes and doubles. So both `expmeta_rmescapes` call sites assert the
-/// bound the C left to that — against `len` rather than against the
-/// capacity, because a `Vec` over-allocates too and a capacity that fits
-/// would prove nothing about the arithmetic.
-///
-/// The arithmetic is right because `name_len == strlen(name)` at every
-/// entry: the top-level call passes `strlen`, and the recursion passes
-/// `name_len - (endname - name)` for a `name` whose temporary NUL at
-/// `zeroedp` sits strictly below `endname` and so cannot shorten it.
-#[inline]
-unsafe fn globgrowto(len: size_t) -> *mut c_char {
-    let b = globb();
-    let have = b.len();
-    b.reserve(len.saturating_sub(have));
-    b.as_mut_ptr() as *mut c_char
-}
-
-/// `memalloc.c`: `stnputs(s, n, p)` — append `n` bytes at the cursor `p`
-/// and return the new cursor.
-///
-/// `p` carries the length, as it does in the C: `makestrspace(n, p)` opens
-/// with `len = p - stacknxt`, so an append at a cursor below the end of the
-/// buffer discards what was above it. That is not incidental here — it is
-/// how the frame that a recursive `expmeta` returned into gets its own
-/// `expdir_len` back.
-#[inline]
-unsafe fn globstnputs(s: *const c_char, n: size_t, p: *mut c_char) -> *mut c_char {
-    let b = globb();
-    let off = p.offset_from(b.as_mut_ptr() as *mut c_char) as size_t;
-    debug_assert!(off <= b.len());
-    b.set_len(off);
-    b.reserve(n);
-    ptr::copy_nonoverlapping(s as *const u8, b.as_mut_ptr().add(off), n);
-    b.set_len(off + n);
-    b.as_mut_ptr().add(off + n) as *mut c_char
-}
 
 /// One of the three tables the encoder classifies bytes with, carried the
 /// way `syntax.h` carries it: the whole table, indexed from `SYNBASE`.
@@ -770,6 +713,22 @@ unsafe fn mesclen(start: *const c_char, mut p: *const c_char, mesc: c_char) -> s
         p = p.offset(-1);
         *p == mesc
     } {
+        esc += 1;
+    }
+    esc
+}
+
+/// [`mesclen`] over a slice: how many `mesc` bytes immediately precede `at`.
+///
+/// The C's `p > start` is `at > 0` — the walk cannot leave the string, and
+/// with the string as a slice that is the bound rather than a promise about
+/// two pointers being into the same allocation.  The pointer form stays for
+/// [`esclen`], whose caller still walks the expansion buffer.
+fn mesclen_bytes(s: &[u8], mut at: usize, mesc: c_char) -> size_t {
+    let mut esc: size_t = 0;
+
+    while at > 0 && s[at - 1] as c_char == mesc {
+        at -= 1;
         esc += 1;
     }
     esc
@@ -2753,10 +2712,15 @@ unsafe fn expandmeta(sh: &crate::context::Shell, words: Vec<strlist>) -> Result<
      * while `FNMATCH_IS_ENABLED` is 0. */
     let mut pattern: Vec<u8> = Vec::new();
 
+    /* The glob buffer, owned here and lent to `expmeta`.  One allocation
+     * per `expandmeta` that globs anything, reused across the word loop
+     * exactly as the region's block was; see the comment above
+     * [`expmeta`]'s neighbours for why it stopped being a `static`. */
+    let mut globbuf: BString = BString::new(Vec::new());
+
     for mut str in words {
         let savelastp: usize;
         let p: *mut c_char;
-        let len: c_uint;
 
         'sw: {
             'nometa: {
@@ -2778,7 +2742,6 @@ unsafe fn expandmeta(sh: &crate::context::Shell, words: Vec<strlist>) -> Result<
                     RMESCAPE_ALLOC | RMESCAPE_HEAP,
                     Some(&mut pattern),
                 );
-                len = CStr::from_ptr(p).count_bytes() as c_uint;
 
                 /* The C's top-level `expmeta` starts on whatever block the
                  * region is on and gets away with it because `expdir_len`
@@ -2787,10 +2750,16 @@ unsafe fn expandmeta(sh: &crate::context::Shell, words: Vec<strlist>) -> Result<
                  * glob's `addfnamealt` left it at that glob's `expdir_len`
                  * — and every consequence of carrying it in is benign,
                  * which is the reason to clear rather than to argue.  The
-                 * invariant [`globbuf`] states is then an equality, and an
-                 * equality is what `expmeta` can assert. */
-                globb().clear();
-                expmeta(p, len, 0);
+                 * frame invariant is then an equality, and an equality is
+                 * what `expmeta` can assert on entry.
+                 *
+                 * `p` is `pattern`'s buffer (or `str.text`, when
+                 * `_rmescapes` found nothing to remove and returned its
+                 * argument).  Neither is the glob buffer, which is what
+                 * makes lending both to `expmeta` at once sound; the
+                 * pattern is read-only from here down. */
+                globbuf.clear();
+                expmeta(&mut globbuf, CStr::from_ptr(p).to_bytes(), 0);
                 /* `if (p != str->text) ckfree(p)` — the C's way of asking
                  * "did `_rmescapes` allocate?".  `pattern` owns the bytes
                  * either way now, and the next iteration reuses it. */
@@ -2828,85 +2797,122 @@ unsafe fn addfname_common(name: BString) {
 
 // [spec:dash:def:expand.addfnamealt-fn]
 // [spec:dash:sem:expand.addfnamealt-fn]
-unsafe fn addfnamealt(enddir: *mut c_char, expdir_len: size_t) -> *mut c_char {
+unsafe fn addfnamealt(b: &mut BString, expdir_len: size_t) {
     /* `name = grabstackstr(enddir)` — in the C this allocates nothing and
      * copies nothing: it moves the region's bump pointer past bytes that
      * are already in place, which is how C says "these outlive the next
      * candidate".
      *
      * The candidate cannot simply be moved out, and that is the one place
-     * in this pass where a copy stays.  The field wants `[0, n)` and the
-     * *next* candidate wants `[0, expdir_len)` — the same bytes — so one of
-     * the two has to take a copy.  The C copies the prefix back
+     * in this pass where a copy stays.  The field wants the whole buffer
+     * and the *next* candidate wants `[0, expdir_len)` — the same bytes —
+     * so one of the two has to take a copy.  The C copies the prefix back
      * (`STARTSTACKSTR(enddir); stnputs(name, expdir_len, enddir)`) because
      * `grabstackstr` had already given the block away; this copies the
      * field out and keeps the buffer, which costs the same order and leaves
-     * the glob buffer's capacity and its `expdir_len` invariant alone.
-     * What has gone is the region: the copy is into the field's own
-     * allocation, not into a block a `popstackmark` has to free.
+     * the glob buffer's capacity alone.  What has gone is the region: the
+     * copy is into the field's own allocation, not into a block a
+     * `popstackmark` has to free.
      *
-     * `n` runs past the length when the caller is the no-metacharacter
-     * branch, whose `expmeta_rmescapes` wrote through a raw cursor without
-     * committing.  Those bytes are written; they are only uncounted, and
-     * counting them here is what makes the read below a read of the
-     * buffer rather than of its spare capacity. */
-    let name: BString = {
-        let b = globb();
-        let n: size_t = enddir.offset_from(b.as_mut_ptr() as *mut c_char) as size_t;
-        debug_assert!(n <= b.capacity());
-        b.set_len(n);
-        debug_assert_eq!(b.last(), Some(&0), "the candidate is a C string");
-        BString::from(b.to_vec())
-    };
-    addfname_common(name);
+     * The C's `enddir` parameter is gone, and it is worth saying why,
+     * because it was the one real coupling in this conversion.  `enddir`
+     * answered "how many bytes of the buffer are the candidate?", and the
+     * answer differed from the buffer's own length in exactly one caller:
+     * the no-metacharacter branch, whose `expmeta_rmescapes` wrote through
+     * a raw cursor and never committed, so the bytes were written but
+     * uncounted and `addfnamealt` had to count them itself.  Now that
+     * `expmeta_rmescapes` appends, both callers arrive with the candidate
+     * counted, `enddir` and `b.len()` say the same number, and the one
+     * that has to go is the parameter. */
+    debug_assert_eq!(b.last(), Some(&0), "the candidate is a C string");
+    addfname_common(BString::from(b.to_vec()));
 
     /* `STARTSTACKSTR(enddir); return stnputs(name, expdir_len, enddir) -
      * expdir_len;` — the C has to start a new block and copy the directory
      * prefix back into it, because `grabstackstr` gave the old one away.
      * Nothing was given away here, so the prefix is still the first
-     * `expdir_len` bytes and re-seeding is `set_len`. */
-    let b = globb();
-    b.set_len(expdir_len);
-    b.as_mut_ptr() as *mut c_char
+     * `expdir_len` bytes and re-seeding is `truncate`. */
+    b.truncate(expdir_len);
 }
 
 // [spec:dash:def:expand.expmeta-rmescapes-fn]
 // [spec:dash:sem:expand.expmeta-rmescapes-fn]
-unsafe fn expmeta_rmescapes(mut enddir: *mut c_char, name: *const c_char) -> *mut c_char {
-    let mut p: *const c_char;
+/// Unescape `name` and **append** it to the glob buffer.
+///
+/// The C takes a cursor and returns where it stopped, which is the position
+/// of the NUL it wrote; both callers then do arithmetic against that
+/// position.  Appending answers both of them with `b.len()` and removes the
+/// cursor, so what is left to decide is who owns the terminator.  It is not
+/// part of the path — one caller wants it (`lstat` needs a C string) and
+/// the other must not have it counted (the terminator is where the next
+/// component gets appended) — so this appends the bytes and nothing else,
+/// and each caller adds the NUL it needs.
+///
+/// The C's other parameter is gone the same way: `name` was NUL-terminated
+/// by the caller writing a temporary NUL into the pattern and putting it
+/// back afterwards (`c = *start; *start = 0; ...; *start = c`).  A subslice
+/// says "just this much of the pattern" without writing to it, which is
+/// what lets `expmeta`'s `name` be a `&[u8]`.
+unsafe fn expmeta_rmescapes(b: &mut BString, name: &[u8]) {
+    let at = b.len();
 
     if !FNMATCH_IS_ENABLED {
-        let src = CStr::from_ptr(name).to_bytes_with_nul();
-        core::ptr::copy_nonoverlapping(src.as_ptr(), enddir as *mut u8, src.len());
-        return crate::system::strchrnul(rmescapes(enddir), 0);
+        /* The C copies `name` to the cursor and unescapes it in place.
+         * `_rmescapes` still speaks C strings — it is the next conversion,
+         * not this one — so the copy lands in the buffer with a terminator,
+         * is unescaped there, and the terminator is dropped again.
+         * `_rmescapes` only ever shortens, so this cannot reach past what
+         * was appended. */
+        b.extend_from_slice(name);
+        b.push(0);
+        let p = b[at..].as_mut_ptr() as *mut c_char;
+        rmescapes(p);
+        let n = CStr::from_ptr(p).count_bytes();
+        debug_assert!(n <= name.len());
+        b.truncate(at + n);
+        return;
     }
 
-    p = name;
+    let mut p: usize = 0;
     loop {
-        let q: *mut c_char = crate::system::strchrnul(p, C_BACKSLASH as c_int);
+        /* `q = strchrnul(p, '\\')`, then `mempcpy(enddir, p, q - p + 1)` —
+         * the copy includes the byte *at* `q`, which is either the
+         * backslash or the string's terminator. */
+        let q: usize = name[p..]
+            .find_byte(C_BACKSLASH as u8)
+            .map_or(name.len(), |at| p + at);
 
-        enddir = crate::system::mempcpy(
-            enddir as *mut c_void,
-            p as *const c_void,
-            (q.offset_from(p) + 1) as size_t,
-        ) as *mut c_char;
+        b.extend_from_slice(&name[p..q]);
+        b.push(byte_at(name, q) as u8);
         p = q;
-        if *p == C_NUL {
+        if p == name.len() {
             break;
         }
-        p = p.offset(1);
-        if *p != C_NUL {
-            *enddir.offset(-1) = *p;
-            p = p.offset(1);
+        p += 1;
+        if p != name.len() {
+            /* `*enddir.offset(-1) = *p` — the escaped byte overwrites the
+             * backslash that was just copied. */
+            let last = b.len() - 1;
+            b[last] = name[p];
+            p += 1;
         }
     }
 
-    enddir.offset(-1)
+    /* `return enddir - 1` — the C hands back the position of the NUL its
+     * last `mempcpy` copied.  Here that NUL is the last byte appended, and
+     * the caller's terminator is its own business. */
+    b.pop();
+    debug_assert!(b.len() >= at);
 }
 
 /* #ifndef HAVE_MEMRCHR */
 // [spec:dash:def:expand.memrchr-fn]
 // [spec:dash:sem:expand.memrchr-fn]
+//
+// The C's fallback for a libc that lacks `memrchr`, and its one caller in
+// `expmeta` is now `rfind_byte` over a slice.  It stays because the C's
+// `#ifndef` does, and because the rules above are about this shim rather
+// than about whoever happened to call it.
 unsafe fn memrchr(s: *const c_void, c: c_int, n: size_t) -> *mut c_void {
     let str: *const u8 = s as *const u8;
     let mut cp: *const u8;
@@ -2930,7 +2936,7 @@ unsafe fn memrchr(s: *const c_void, c: c_int, n: size_t) -> *mut c_void {
 
 // [spec:dash:def:expand.expmeta-fn]
 // [spec:dash:sem:expand.expmeta-fn]
-unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_t) -> *mut c_char {
+unsafe fn expmeta(b: &mut BString, name: &[u8], mut expdir_len: size_t) {
     let mesc: c_char = if FNMATCH_IS_ENABLED {
         C_BACKSLASH
     } else {
@@ -2938,20 +2944,17 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
     };
     let mut statb: libc::stat64 = mem::zeroed();
     let mut dp: *mut libc::dirent64;
-    let mut endname: *mut c_char = ptr::null_mut();
-    let mut zeroedp: *mut c_char = ptr::null_mut();
-    let mut enddir: *mut c_char;
-    let mut matchdot: c_int;
-    let mut esc: c_uint;
-    let mut start: *mut c_char;
-    let mut len: size_t;
+    let mut endname: usize;
+    let mut zeroedp: usize;
+    let mut matchdot: bool;
+    let mut esc: size_t;
+    let start: usize;
     /* `DIR *dirp;` — Rust needs the binding initialised before the
      * volatile store below, which is the C's actual initialisation. */
     let mut dirp: *mut libc::DIR = ptr::null_mut();
-    let pat: *mut c_char;
-    let mut cp: *mut c_char = ptr::null_mut();
-    let mut p: *mut c_char;
-    let mut c: c_int = 0;
+    let pat: &[u8];
+    let mut p: usize;
+    let c: c_char;
     /* Scratch for the encoded form of each directory entry; see the
      * `memtodest` call below.  A local rather than a static because
      * `expmeta` recurses, one frame per path component. */
@@ -2974,117 +2977,135 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
                 break 'out; /* the C's unreachable `goto out` */
             }
 
-            /* The glob buffer's invariant, stated where it is relied on:
-             * this frame's prefix is `[0, expdir_len)` and it is exactly
-             * what the buffer counts as written, so `globgrowto`'s
-             * `reserve` copies it and nothing else.  `expandmeta` clears
-             * for the top-level call; a recursive one arrives straight out
-             * of the `globstnputs` that appended the component. */
-            debug_assert_eq!(globb().len(), expdir_len);
-            len = expdir_len + name_len as size_t + 1;
-            cp = globgrowto(len);
-            enddir = cp.offset(expdir_len as isize);
+            /* The glob buffer's frame invariant, stated where it is relied
+             * on: this frame's prefix is `[0, expdir_len)` and it is
+             * exactly what the buffer counts as written.  `expandmeta`
+             * clears for the top-level call; a recursive one arrives
+             * straight out of the append that wrote the component.
+             *
+             * The C's `growstackto(expdir_len + name_len + 1)` was a
+             * *bound*, because everything below wrote through a raw
+             * cursor.  Appending needs no bound, so the same number is
+             * only a hint that says how big this frame's candidate will
+             * be before its component. */
+            debug_assert_eq!(b.len(), expdir_len);
+            b.reserve(name.len() + 1);
 
-            p = name;
+            /* `for (;;) { p = strpbrk(p + esc, "*?]"); ... }` — find the
+             * first metacharacter that is not itself escaped. */
+            p = 0;
             esc = 0;
-            loop {
-                let from = p.offset(esc as isize);
-                p = CStr::from_ptr(from)
-                    .to_bytes()
-                    .find_byteset(b"*?]")
-                    .map_or(ptr::null_mut(), |at| from.add(at));
-                if p.is_null() {
-                    break;
-                }
-                esc = (mesclen(name, p, mesc) & 1) as c_uint;
+            let meta: Option<usize> = loop {
+                let from = p + esc;
+                let Some(at) = name[from..].find_byteset(b"*?]") else {
+                    break None;
+                };
+                p = from + at;
+                esc = mesclen_bytes(name, p, mesc) & 1;
                 if esc == 0 {
-                    break;
+                    break Some(p);
                 }
-            }
+            };
             /* No meta characters */
-            if p.is_null() {
+            let Some(meta) = meta else {
                 if expdir_len == 0 {
                     break 'out_opendir; /* goto out_opendir */
                 }
-                enddir = expmeta_rmescapes(enddir, name);
-                /* See [`globgrowto`]: `len` is the whole bound on what
-                 * `expmeta_rmescapes` just wrote, and `enddir` is on the
-                 * NUL it wrote last.  Asserted against `len` and not
-                 * against the capacity because `Vec` over-allocates, so a
-                 * capacity that fits proves nothing about the arithmetic. */
-                debug_assert!((enddir.offset_from(cp) as size_t) < len);
-                if libc::lstat64(cp, &mut statb) >= 0 {
-                    cp = addfnamealt(enddir.offset(1), expdir_len);
+                expmeta_rmescapes(b, name);
+                /* The C's `enddir` is on the NUL `expmeta_rmescapes` wrote
+                 * and `addfnamealt` is handed `enddir + 1`, so the
+                 * terminator is part of the candidate.  Appending it here
+                 * says that, and `lstat` needs it anyway. */
+                b.push(0);
+                if libc::lstat64(b.as_ptr() as *const c_char, &mut statb) >= 0 {
+                    addfnamealt(b, expdir_len);
+                } else {
+                    /* The C leaves its uncounted bytes where they are and
+                     * returns the base; counted bytes have to be rewound,
+                     * so that this frame returns with the buffer holding
+                     * its prefix and nothing else. */
+                    b.truncate(expdir_len);
                 }
                 break 'out_opendir; /* goto out_opendir */
+            };
+            match name[..meta].rfind_byte(C_SLASH as u8) {
+                Some(at) => {
+                    /* `c = *start; *start = 0; expmeta_rmescapes(enddir,
+                     * name); *start = c;` — the C borrows the pattern as
+                     * the directory prefix by terminating it in place.  A
+                     * subslice is that without the write, and without the
+                     * restore. */
+                    start = at + 1;
+                    expmeta_rmescapes(b, &name[..start]);
+                    /* `expdir_len = enddir - cp` — this frame's prefix
+                     * grew by the unescaped directory part, and the bytes
+                     * it grew over are counted because they were
+                     * appended. */
+                    expdir_len = b.len();
+                }
+                None => start = 0,
             }
-            start = memrchr(
-                name as *const c_void,
-                C_SLASH as c_int,
-                p.offset_from(name) as size_t,
-            ) as *mut c_char;
-            if !start.is_null() {
-                start = start.offset(1);
-                c = *start as c_int;
-                *start = 0;
-                enddir = expmeta_rmescapes(enddir, name);
-                *start = c as c_char;
-                expdir_len = enddir.offset_from(cp) as size_t;
-                /* `expdir_len` grew, and the bytes it grew over were
-                 * written by `expmeta_rmescapes` through a raw cursor.
-                 * Count them: the invariant above has to hold again before
-                 * the readdir loop, whose `globstnputs` can reallocate.
-                 * The assertion is the same one as in the branch above,
-                 * and here it also covers the `*enddir = 0` below. */
-                debug_assert!(expdir_len < len);
-                globb().set_len(expdir_len);
-            } else {
-                start = name;
-            }
-            *enddir = 0;
 
+            /* `*enddir = 0` — the prefix has to be a C string for
+             * `opendir`, and only for `opendir`: the terminator is not
+             * part of the prefix, which is where the next component goes. */
+            b.push(0);
             /* *(DIR *volatile *)&dirp = opendir(expdir_len ? cp : dotdir); */
             ptr::write_volatile(
                 &mut dirp,
                 libc::opendir(if expdir_len != 0 {
-                    cp
+                    b.as_ptr() as *const c_char
                 } else {
                     crate::mystring::dotdir.as_ptr()
                 }),
             );
+            b.truncate(expdir_len);
             if dirp.is_null() {
                 break 'out_opendir; /* goto out_opendir */
             }
-            esc = 0;
-            p = crate::system::strchrnul(p.offset(1), C_SLASH as c_int);
+            /* `p = strchrnul(p + 1, '/')` — the end of the component the
+             * metacharacter is in.  The C's `esc = 0` before this is a
+             * dead store in both languages: `esc` is read only inside the
+             * branch that sets it. */
+            p = name[meta + 1..]
+                .find_byte(C_SLASH as u8)
+                .map_or(name.len(), |at| meta + 1 + at);
             zeroedp = p;
             endname = p;
-            if *p != C_NUL {
-                esc = (mesclen(name, p, mesc) & 1) as c_uint;
-                zeroedp = zeroedp.offset(-(esc as isize));
-                endname = endname.offset(1);
+            if p != name.len() {
+                let esc = mesclen_bytes(name, p, mesc) & 1;
+                zeroedp -= esc;
+                endname += 1;
             }
-            c = *zeroedp as c_int;
-            *zeroedp = C_NUL;
-            name_len = name_len.wrapping_sub(endname.offset_from(name) as c_uint);
-            matchdot = 0;
-            pat = start;
-            p = pat;
-            if *p == mesc {
-                p = p.offset(1);
+            /* `c = *zeroedp; *zeroedp = 0;` — the C reads the byte it is
+             * about to overwrite so it can put it back, and everything
+             * below tests `c` for "is there another component?".  The
+             * component is a subslice, so nothing is overwritten and
+             * nothing is put back; `c` is just the byte that follows it,
+             * or NUL at the end of the pattern.
+             *
+             * `name_len -= endname - name` is the recursion's argument and
+             * is `name[endname..].len()`, which is why it stopped being a
+             * parameter. */
+            c = byte_at(name, zeroedp);
+            matchdot = false;
+            pat = &name[start..zeroedp];
+            p = 0;
+            if byte_at(pat, p) == mesc {
+                p += 1;
             }
-            if *p == C_DOT {
-                matchdot += 1;
+            if byte_at(pat, p) == C_DOT {
+                matchdot = true;
             }
             loop {
                 dp = libc::readdir64(dirp);
                 if dp.is_null() {
                     break;
                 }
-                let dname: *mut c_char = (*dp).d_name.as_mut_ptr();
+                let dnamep: *const c_char = (*dp).d_name.as_ptr();
 
                 'check_int: {
-                    if *dname == C_DOT && matchdot == 0 {
+                    if *dnamep == C_DOT && !matchdot {
                         break 'check_int; /* goto check_int */
                     }
                     if c != 0
@@ -3094,9 +3115,12 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
                     {
                         break 'check_int; /* goto check_int */
                     }
-                    len = CStr::from_ptr(dname).to_bytes_with_nul().len();
-                    p = dname;
-                    if !FNMATCH_IS_ENABLED {
+                    /* `len = strlen(dname) + 1` — the terminator is part
+                     * of what gets appended, because the candidate is a C
+                     * string and the next component overwrites it. */
+                    let dname: &[u8] = CStr::from_ptr(dnamep).to_bytes_with_nul();
+                    let len: size_t = dname.len();
+                    let subject: &[u8] = if !FNMATCH_IS_ENABLED {
                         /* The C encodes the directory entry's name at
                          * `enddir` — inside the glob buffer, past the
                          * prefix — by parking `enddir` in the global
@@ -3109,28 +3133,42 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
                          * what let the expansion buffer and this one be
                          * converted separately.
                          *
-                         * `cp = stackblock()` is kept and is a no-op:
-                         * `memtodest` writes to `globenc`, so the glob
-                         * buffer cannot have moved across it.  The re-read
-                         * is the C's marker for "a growth can happen here",
-                         * and `globstnputs` in this same loop still is
-                         * one. */
+                         * `cp = stackblock(); enddir = cp + expdir_len` is
+                         * gone with the pointers: it was the C's re-read
+                         * after a possible growth, and an index does not
+                         * move. */
                         globenc.clear();
-                        memtodest(p, len, EXP_MBCHAR | EXP_KEEPNUL, &mut globenc);
-                        cp = globbase();
-                        enddir = cp.offset(expdir_len as isize);
-                        p = globenc.as_mut_ptr() as *mut c_char;
-                    }
-                    if crate::pmatch::pmatch(pat, p) != 0 {
-                        enddir = globstnputs(dname, len, enddir);
+                        memtodest(dnamep, len, EXP_MBCHAR | EXP_KEEPNUL, &mut globenc);
+                        debug_assert_eq!(
+                            globenc.last(),
+                            Some(&0),
+                            "EXP_KEEPNUL carries the entry's terminator through"
+                        );
+                        &globenc
+                    } else {
+                        dname
+                    };
+                    if crate::pmatch::pmatch_slices(pat, subject) != 0 {
+                        /* `enddir = stnputs(dname, len, enddir)` — an
+                         * append at a cursor below the end, which is
+                         * truncate-then-append. */
+                        b.truncate(expdir_len);
+                        b.extend_from_slice(dname);
                         if c == 0 {
-                            cp = addfnamealt(enddir, expdir_len);
+                            addfnamealt(b, expdir_len);
                         } else {
-                            *enddir.offset(-1) = C_SLASH;
-                            len += expdir_len;
-                            cp = expmeta(endname, name_len, len);
+                            /* `*enddir.offset(-1) = C_SLASH` — the entry's
+                             * terminator becomes the separator. */
+                            let last = b.len() - 1;
+                            b[last] = C_SLASH as u8;
+                            expmeta(b, &name[endname..], expdir_len + len);
+                            /* `enddir = cp + expdir_len` — the frame's
+                             * rewind, said out loud.  The child returns
+                             * with the buffer holding *its* prefix, which
+                             * is this one plus the component just
+                             * appended. */
+                            b.truncate(expdir_len);
                         }
-                        enddir = cp.offset(expdir_len as isize);
                     }
                 }
                 /* check_int: */
@@ -3138,7 +3176,6 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
                     break;
                 }
             }
-            *zeroedp = c as c_char;
         }
 
         /* out: */
@@ -3149,7 +3186,13 @@ unsafe fn expmeta(name: *mut c_char, mut name_len: c_uint, mut expdir_len: size_
     }
 
     /* out_opendir: */
-    cp
+    /* The C returns `cp`, the block's base, and every caller immediately
+     * recomputes `cp + expdir_len`.  What that is really saying is a
+     * postcondition, and it is this: on return the buffer holds this
+     * frame's prefix and nothing above it.  `expdir_len` is the frame's
+     * own, which may have grown past the caller's — hence the caller's
+     * rewind after the recursive call. */
+    debug_assert_eq!(b.len(), expdir_len);
 }
 
 /*

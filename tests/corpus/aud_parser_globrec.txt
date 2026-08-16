@@ -1,0 +1,101 @@
+#!name globrec two meta components
+mkdir -p a1/b1 a1/b2 a2/b1; touch a1/b1/f a1/b2/f a2/b1/f; echo a*/b*; echo a*/b*/f
+%%%
+#!name globrec three meta components
+mkdir -p x1/y1/z1 x1/y2/z2 x2/y1/z1; touch x1/y1/z1/k x1/y2/z2/k x2/y1/z1/k; echo x*/y*/z*/k
+%%%
+#!name globrec literal tail after meta
+mkdir -p d1 d2 d3; touch d1/keep d2/keep; echo d*/keep
+%%%
+#!name globrec literal tail that never exists
+mkdir -p e1 e2 e3; touch e1/other; echo e*/keep; echo "rc=$?"
+%%%
+#!name globrec literal tail some present some absent
+mkdir -p f1 f2 f3 f4; touch f1/t f3/t; echo f*/t
+%%%
+#!name globrec deep literal tail
+mkdir -p g1/h1/i1 g1/h2/i2 g2/h1/i1; touch g1/h1/i1/leaf g2/h1/i1/leaf; echo g*/h*/i*/leaf
+%%%
+#!name globrec meta only in the middle
+mkdir -p m1/n m2/n; touch m1/n/tail m2/n/tail; echo m*/n/tail
+%%%
+#!name globrec prefix is literal directory
+mkdir -p lit/sub1 lit/sub2; touch lit/sub1/a lit/sub2/a; echo lit/s*/a; echo lit/*/a
+%%%
+#!name globrec nonmatching middle prunes the branch
+mkdir -p p1/q1 p2/r1; touch p1/q1/z p2/r1/z; echo p*/q*/z; echo "rc=$?"
+%%%
+#!name globrec a middle match that is a plain file
+mkdir -p s1; touch s1/notadir s2file; echo s*/notadir; echo s*/*
+%%%
+#!name globrec question and bracket across components
+mkdir -p c1/d1 c2/d2 c3/d3; touch c1/d1/w c2/d2/w c3/d3/w; echo c?/d?/w; echo c[13]/d[13]/w
+%%%
+#!name globrec escaped star in a directory component
+mkdir -p 'a*b'/inner axb/inner; touch 'a*b'/inner/f axb/inner/f; echo a\*b/i*/f; echo a*b/i*/f
+%%%
+#!name globrec escaped question in a directory component
+mkdir -p 'q?r'/in qXr/in; touch 'q?r'/in/f qXr/in/f; echo q\?r/i*/f
+%%%
+#!name globrec escaped bracket in a directory component
+mkdir -p 'b[1]'/in bX/in; touch 'b[1]'/in/f bX/in/f; echo b\[1\]/i*/f
+%%%
+#!name globrec escape in the prefix before a meta component
+mkdir -p 'e*d'/one 'e*d'/two; touch 'e*d'/one/f 'e*d'/two/f; echo e\*d/*/f
+%%%
+#!name globrec dotfiles are not matched across components
+mkdir -p v1/.hid v1/vis; touch v1/.hid/f v1/vis/f; echo v*/*/f; echo v*/.*/f
+%%%
+#!name globrec leading dot component matched explicitly
+mkdir -p w1/.d1 w1/.d2; touch w1/.d1/f w1/.d2/f; echo w*/.d*/f
+%%%
+#!name globrec symlinked directory in the middle
+mkdir -p real/leaf; touch real/leaf/f; ln -s real slink; echo s*/leaf/f; echo s*/l*/f
+%%%
+#!name globrec dangling symlink as a middle component
+mkdir -p t1/ok; touch t1/ok/f; ln -s nowhere t2; echo t*/ok/f; echo t*/*
+%%%
+#!name globrec trailing slash on a meta component
+mkdir -p u1 u2; touch u3; echo u*/; echo u*
+%%%
+#!name globrec many siblings force repeated rewinds
+mkdir -p r1 r2 r3 r4 r5 r6 r7 r8 r9; for i in 1 2 3 4 5 6 7 8 9; do touch "r$i/leaf$i"; done; echo r*/leaf*
+%%%
+#!name globrec long component names
+mkdir -p aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb; touch aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/cccccccccccccccccccccccccccccccccccccccc; echo a*/b*/c*
+%%%
+#!name globrec long literal tail after a meta component
+mkdir -p L1 L2; touch L1/mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm; echo L*/mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm
+%%%
+#!name globrec deep nesting five levels
+mkdir -p n1/n2/n3/n4/n5; touch n1/n2/n3/n4/n5/end; echo n*/n*/n*/n*/n*/end; echo n*/n*/n*/n*/n*/*
+%%%
+#!name globrec sort order across components
+mkdir -p z2/y2 z1/y3 z1/y1; touch z2/y2/f z1/y3/f z1/y1/f; echo z*/y*/f
+%%%
+#!name globrec absolute path with meta components
+mkdir -p ab1/cd1 ab2/cd2; touch ab1/cd1/f ab2/cd2/f; echo "$PWD"/ab*/cd*/f | sed "s#$PWD#PWD#g"
+%%%
+#!name globrec no match keeps the word verbatim
+echo nosuch*/nosuch*/x; echo "rc=$?"
+%%%
+#!name globrec meta component under an unreadable directory
+mkdir -p k1/k2; touch k1/k2/f; chmod 000 k1; echo k*/k*/f; chmod 755 k1
+%%%
+#!name globrec utf8 names across components
+mkdir -p 'é1/ü1' 'é2/ü2'; touch 'é1/ü1/f' 'é2/ü2/f'; echo é*/ü*/f; echo ?1/?1/f
+%%%
+#!name globrec bracket class across components
+mkdir -p ca1/cb1 ca2/cb2; touch ca1/cb1/f ca2/cb2/f; echo ca[[:digit:]]/cb[[:digit:]]/f
+%%%
+#!name globrec repeated globbing in one command
+mkdir -p h1/j1 h2/j2; touch h1/j1/f h2/j2/f; echo h*/j*/f h*/j* h*
+%%%
+#!name globrec glob result feeds another glob
+mkdir -p i1/i2; touch i1/i2/f; set -- i*/i*; echo "$#" "$1"; echo "$1"/*
+%%%
+#!name globrec component ending in escape
+mkdir -p 'y1'/'y2'; touch y1/y2/f; echo y*/y2/f; echo y1/y*/f
+%%%
+#!name globrec meta then literal then meta
+mkdir -p o1/mid/o2 o3/mid/o4; touch o1/mid/o2/f o3/mid/o4/f; echo o*/mid/o*/f

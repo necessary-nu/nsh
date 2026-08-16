@@ -133,6 +133,30 @@ pub(crate) unsafe fn pmatch(pattern: *mut c_char, string: *const c_char) -> c_in
     ) as c_int
 }
 
+// The same entry for a caller that already holds both strings as bytes.
+//
+// Neither slice has to carry a terminator: `pmatch_bytes` reads past the
+// end as NUL, which is the same answer a terminator would give, and that
+// is what lets `expmeta` hand over a *sub*-slice of the pattern instead of
+// terminating it in place and putting the byte back afterwards.
+//
+// `fnmatch` is the one arm that still wants C strings and cannot be given
+// a sub-slice, so it is the one arm that copies.  It is unreachable while
+// `FNMATCH_IS_ENABLED` is 0.
+pub(crate) unsafe fn pmatch_slices(pattern: &[u8], string: &[u8]) -> c_int {
+    if FNMATCH_IS_ENABLED {
+        let cstr = |s: &[u8]| {
+            let mut v = s[..s.iter().position(|&c| c == 0).unwrap_or(s.len())].to_vec();
+            v.push(0);
+            v
+        };
+        let (p, q) = (cstr(pattern), cstr(string));
+        return (libc::fnmatch(p.as_ptr() as *const c_char, q.as_ptr() as *const c_char, 0) == 0)
+            as c_int;
+    }
+    pmatch_bytes(pattern, string) as c_int
+}
+
 // The matcher.  `pi`/`qi` are the C's `p`/`q`; every `p++` is `pi += 1` and
 // the recursion takes the two tails.  Nothing here is unsafe.
 fn pmatch_bytes(pattern: &[u8], string: &[u8]) -> bool {

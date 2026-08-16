@@ -7,13 +7,21 @@
 //!
 //! `expmeta` builds one candidate path across a recursion that is one frame
 //! per component, and each frame owns the prefix below `expdir_len` while
-//! writing above it. Two things hold that together and neither is visible
-//! in a corpus case that globs a short path in a shallow tree: the append
-//! happens *at the cursor*, which is what cuts the buffer back to the
-//! parent's prefix when a child returns, and the reservation is exactly
-//! `expdir_len + name_len + 1`, which the C could afford to get wrong
-//! because a region block is never smaller than 504 bytes. So the fixtures
-//! here are deliberately deep, wide and long-named.
+//! writing above it. What holds that together is not visible in a corpus
+//! case that globs a short path in a shallow tree: every write to the
+//! buffer is a *truncate to this frame's `expdir_len`, then append*, and a
+//! truncate to the wrong length carries a sibling's or a child's bytes
+//! into the next candidate. So the fixtures here are deliberately deep,
+//! wide and long-named — long enough that the buffer has reallocated
+//! several times before the leaves.
+//!
+//! The C reached the same place through a cursor and a reservation: an
+//! append at `p` opened with `len = p - stacknxt`, so writing at a cursor
+//! below the end discarded what was above it, and
+//! `growstackto(expdir_len + name_len + 1)` was the only bound on writes
+//! that carried none of their own. Both are gone — the truncate says the
+//! first out loud, and appending needs no bound — but the cases that would
+//! have caught an error in either are the same cases, so they stay.
 //!
 //! Expected output was checked against the reference C, not against the
 //! port.
@@ -81,13 +89,14 @@ fn touch(base: &PathBuf, rel: &str) {
     std::fs::File::create(base.join(rel)).expect("create file");
 }
 
-/// The append happens at the cursor, not at the end of the buffer.
+/// The append starts from this frame's prefix, not from the end of the
+/// buffer.
 ///
-/// `stnputs(s, n, p)` derives its length from `p` (`makestrspace` opens
-/// with `len = p - stacknxt`), so a frame that a recursive `expmeta`
-/// returned into cuts the buffer back to its own `expdir_len` simply by
-/// appending at `cp + expdir_len`. Appending at the end instead — the
-/// obvious reading — would carry the child's deeper prefix into the
+/// A frame that a recursive `expmeta` returned into cuts the buffer back to
+/// its own `expdir_len` before writing the next candidate. Appending at the
+/// end instead — the obvious reading, and what the C's `stnputs(s, n, p)`
+/// looks like until you notice `makestrspace` opening with
+/// `len = p - stacknxt` — would carry the child's deeper prefix into the
 /// parent's next candidate.
 ///
 /// The tree has two matching directories at each of two levels, so the
@@ -157,22 +166,25 @@ fn a_kept_candidate_leaves_exactly_the_prefix_behind() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
-/// The reservation is `expdir_len + name_len + 1` and it is exact.
+/// A long literal tail after the last metacharacter, written by
+/// `expmeta_rmescapes` rather than by the readdir loop.
 ///
-/// `expmeta_rmescapes` writes the remaining pattern at the cursor through a
-/// raw pointer with no bound of its own; the only thing keeping it inside
-/// the buffer is that number, and `name_len == strlen(name)` at every
-/// entry. In the C an error there is absorbed by a 504-byte minimum block,
-/// so the case that would expose it is a *long literal tail* after the last
-/// metacharacter — which is what the trailing components below are.
+/// This was written when `expmeta_rmescapes` wrote the remaining pattern at
+/// a raw cursor with no bound of its own, and the only thing keeping it
+/// inside the buffer was `growstackto(expdir_len + name_len + 1)` — a
+/// number the C could afford to get wrong, because a region block is never
+/// smaller than 504 bytes. It appends now, so there is no bound left to be
+/// exact about; what the case still covers is the branch itself, which is
+/// the one place a whole component is unescaped in one go and then handed
+/// to `lstat` instead of matched.
 ///
 /// The escaped `*` in the middle component is the other half: it makes
 /// `expmeta_rmescapes` take its `rmescapes` path over a name whose encoded
-/// form is longer than its decoded one — and so lands one byte *under* the
-/// bound rather than exactly on it, which is why the unescaped tail is
-/// here too.
+/// form is longer than its decoded one, so the appended length and the
+/// pattern's length differ — which is exactly what `addfnamealt` used to
+/// have to be told, and no longer does.
 #[test]
-fn a_long_literal_tail_stays_inside_the_reservation() {
+fn a_literal_tail_after_the_metacharacter() {
     let base = fixture("reservation");
     let pad = "x".repeat(200);
     mkdirs(&base, &format!("m{pad}/n*n/o{pad}"));
@@ -181,8 +193,8 @@ fn a_long_literal_tail_stays_inside_the_reservation() {
     touch(&base, &format!("m{pad}/s{pad}/t{pad}"));
     let dir = base.display();
 
-    // Nothing escaped, so `expmeta_rmescapes` writes `name_len` bytes and
-    // a NUL: the whole reservation, exactly.
+    // Nothing escaped, so `expmeta_rmescapes` appends `name_len` bytes and
+    // the caller adds the NUL that `lstat` needs.
     let out = out_of(&format!("echo {dir}/m*/s{pad}/t{pad}"));
     assert_eq!(
         String::from_utf8_lossy(&out),
@@ -210,6 +222,45 @@ fn a_long_literal_tail_stays_inside_the_reservation() {
         String::from_utf8_lossy(&out),
         format!("{dir}/m*/n*n/o{pad}/q{pad}\n")
     );
+
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// A literal tail that `lstat` rejects leaves the buffer as it found it.
+///
+/// This is the one path with no counterpart in the C. The C unescapes the
+/// tail through a raw cursor and never tells the block about it, so when
+/// `lstat` fails there is nothing to undo: the bytes were never counted.
+/// Appending counts them, so the failure has to rewind, and forgetting to
+/// would leave a rejected candidate's tail glued under the next sibling's.
+///
+/// The fixture alternates: the odd directories have the file and the even
+/// ones do not, so every kept candidate is preceded by a rejected one at
+/// the same `expdir_len`, and the tail is long enough that the buffer grew
+/// to hold it.
+#[test]
+fn a_rejected_tail_rewinds_the_buffer() {
+    let base = fixture("lstat-rewind");
+    let pad = "w".repeat(180);
+    let dirs = ["k1", "k2", "k3", "k4", "k5", "k6"];
+    for (i, d) in dirs.iter().enumerate() {
+        mkdirs(&base, d);
+        if i % 2 == 0 {
+            touch(&base, &format!("{d}/leaf{pad}"));
+        }
+    }
+    let dir = base.display();
+    let out = out_of(&format!("echo {dir}/k*/leaf{pad}"));
+
+    let want = dirs
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| i % 2 == 0)
+        .map(|(_, d)| format!("{dir}/{d}/leaf{pad}"))
+        .collect::<Vec<_>>()
+        .join(" ")
+        + "\n";
+    assert_eq!(String::from_utf8_lossy(&out), want);
 
     let _ = std::fs::remove_dir_all(&base);
 }
