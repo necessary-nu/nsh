@@ -1115,7 +1115,7 @@ reasons: the value carries the facts, the call site does the rendering.
 Three decisions now want it, so the floor crate should be built that way
 from its first commit.
 
-### 11.5 One thing this section is not sure about
+### 11.5 One thing this section was not sure about, now answered
 
 **Whether job control can be a builder input at all, or has to be a
 `Host` method.** §11.2 makes it a builder flag, on the reasoning that a
@@ -1124,7 +1124,34 @@ any point, and `optschanged` reaches `setjobctl` from `poplocalvars`
 restoring a `local -` option set. A builder flag makes `set -m` silently
 ineffective in an ungranted shell, which is a divergence the differential
 corpus cannot see — it has no controlling terminal, so `setjobctl` leaves
-`jobctl` at 0 there in *both* shells today. *Resolved by:* a ptydiff case
-that runs `set -m` in a granted and an ungranted embedded shell, written
-when `public-api` builds the grant, and by deciding then whether an
-ungranted `set -m` should warn the way `can't access tty` does.
+`jobctl` at 0 there in *both* shells today.
+
+**Answered by `public-api`: it is a `Host` method, and the ungranted
+`set -m` is silent.**
+
+`Host::may_control_terminal` sits beside `may_replace_process`, and the
+argument is that it is the same kind of thing — a power over a process the
+library did not create. Turning job control on is `setpgid(0, rootpid)`,
+`tcsetpgrp`, and on the way there possibly a `killpg(0, SIGTTIN)` that
+stops the host and every sibling with it; that belongs where the signal
+dispositions and the `execve` grant already are. A builder flag would have
+been a second gate in a second place, free to disagree with the first.
+
+It is silent because `set -m` is written by the *script*, not by the
+embedder, and `optschanged` reaches it from a `local -` restore — so a
+warning would fire on a line nobody wrote. dash is itself silent when it
+cannot get the tty in the ordinary case.
+
+One gate covers the whole feature, and the interlock was already there:
+`xxtcsetpgrp` returns `Ok(())` when `ttyfd < 0`, and `setjobctl` is the
+only thing that ever sets `ttyfd`. Refusing in `setjobctl` therefore also
+gates `forkchild`'s handoff, `waitforjob`'s hand-back and `fg`'s.
+
+*Covered by:* `host::tests::set_m_without_a_grant_leaves_the_hosts_terminal_alone`,
+which is a unit test rather than the ptydiff case this section asked for.
+The reason is that ptydiff drives *`nsh-cli`*, which grants the terminal
+because it is a frontend, so the ungranted half of the comparison has no
+shell to run in — an embedded shell is not something the pty harness can
+launch. What ptydiff does still carry is the granted half: its seventeen
+job-control cases are the proof that granting still behaves exactly as
+dash, and they pass unchanged.

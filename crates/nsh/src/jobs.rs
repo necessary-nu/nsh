@@ -388,6 +388,26 @@ pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(),
     if on == sh.jobs.jobctl || crate::shellmain::rootshell() == 0 {
         return Ok(());
     }
+    /* Turning job control *on* is three operations on the host's process:
+     * `setpgid(0, rootpid)` and `tcsetpgrp` below, and on the way there
+     * possibly a `killpg(0, SIGTTIN)` that stops the host and every
+     * sibling with it. [dec:nsh:host-owns-signals] is the same argument
+     * that put dispositions behind the host, so the grant lives in the
+     * same place rather than in a second one -- see
+     * `Host::may_control_terminal`, which answers `docs/api-design.md`
+     * §11.5's open question about granularity.
+     *
+     * Turning it *off* is never gated: `exitshell` and a forked child both
+     * do it, and a shell that never had it gives nothing up.
+     *
+     * One test is enough for the whole feature because the interlock was
+     * already there: `xxtcsetpgrp` returns `Ok(())` when `ttyfd < 0`, and
+     * `setjobctl` is the only thing that ever sets `ttyfd`. So refusing
+     * here also gates `forkchild`'s handoff, `waitforjob`'s hand-back and
+     * `fg`'s. */
+    if on != 0 && !sh.host.may_control_terminal() {
+        return Ok(());
+    }
     if on != 0 {
         let ofd: c_int;
         /* `setjobctl` is reached from `exitshell`'s job-control teardown as

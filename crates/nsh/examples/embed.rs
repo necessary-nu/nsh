@@ -181,6 +181,12 @@ impl Host for FrontendHost {
         // `exec cmd` is the point of a shell frontend.
         true
     }
+
+    fn may_control_terminal(&mut self) -> bool {
+        // And so is job control: `set -m` takes the process group and the
+        // terminal, which a frontend owns and an embedder does not.
+        true
+    }
 }
 
 fn frontend(argv: &[BString]) -> ! {

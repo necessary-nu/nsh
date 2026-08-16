@@ -29,6 +29,36 @@
 //! transliterated modules could never have carried it. Closing took it from
 //! unaffordable to sixteen items.
 //!
+//!
+//! ## Three things an embedder has to know, which are not types
+//!
+//! `docs/api-design.md` §6 and §11 carry these; they are here because a
+//! reader of the crate should not have to find the document first.
+//!
+//! **The shell reaps any child of the process.** `wait3(status, flags,
+//! NULL)` is `waitpid(-1)`, so a shell running in your process will reap
+//! a `std::process::Child` you were holding, and your `wait()` gets
+//! `ECHILD` for a status now sitting in a job table you cannot see. This
+//! is not fixable by tracking pids: reaping is destructive, the only
+//! peek-without-reap primitive returns the same foreign child forever and
+//! turns the blocking wait into a spin, and dispatching properly would
+//! need the shell to own `SIGCHLD` for the whole process, which
+//! [dec:nsh:host-owns-signals] forbids. Do not run other children
+//! concurrently with a shell you are driving.
+//!
+//! **`fork` from a multithreaded host carries only the calling thread**,
+//! and the library's children allocate before they `exec` -- or never
+//! `exec` at all, a subshell being a shell. Same caveat as
+//! `Command::pre_exec`, same cause, and not removable.
+//!
+//! **[`Shell`]'s `Drop` neither waits nor kills, and that is a promise
+//! rather than an omission.** A foreground job is waited to completion
+//! before [`Shell::run`] returns; a background job is not, so
+//! `sh.run(b"sleep 10 &")` returns with the child alive, exactly as
+//! `dash -c 'sleep 10 &'` does. A `Drop` that waited would block the host
+//! on a script's `&`; one that killed would exceed every grant on
+//! [`Host`]. Neither is a tidiness fix to add later.
+//!
 //! The command-line shell lives in `crates/nsh-cli` and links this crate
 //! as an external dependency, so anything the frontend needs that is not
 //! `pub` here is a compile error rather than something a reader has to

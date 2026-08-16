@@ -99,6 +99,28 @@ pub trait Host: Send {
     /// a library it destroys the host. A host that refuses gets the same
     /// diagnostic and status a failed `exec` produces.
     fn may_replace_process(&mut self) -> bool;
+
+    /// May the shell take the terminal and the process group?
+    ///
+    /// This is `set -m`, and it is three operations on the *host's*
+    /// process: `setpgid(0, rootpid)`, `tcsetpgrp`, and on the way there
+    /// possibly a `killpg(0, SIGTTIN)` that stops the host and every
+    /// sibling with it. A frontend says yes, because job control is what a
+    /// shell is for; anything else says no, and `set -m` in an ungranted
+    /// shell is quietly ineffective.
+    ///
+    /// **Quietly, and that is the answer to `docs/api-design.md` §11.5's
+    /// open question.** It asked whether the grant belongs on the builder
+    /// and whether an ungranted `set -m` should warn the way `can't access
+    /// tty` does. It belongs here rather than on the builder because it is
+    /// the same kind of thing as the other three -- a power over a process
+    /// the library did not create -- and a second gate in a second place
+    /// would let the two disagree. It is silent because `set -m` is
+    /// executed by the *script*, not by the embedder: `optschanged`
+    /// reaches it from `poplocalvars` restoring a `local -`, so a warning
+    /// would fire on a line no one wrote, and dash itself is silent when
+    /// it cannot get the tty.
+    fn may_control_terminal(&mut self) -> bool;
 }
 
 /// The default host: a shell that touches nothing outside itself.
@@ -126,6 +148,10 @@ impl Host for NoHost {
     }
 
     fn may_replace_process(&mut self) -> bool {
+        false
+    }
+
+    fn may_control_terminal(&mut self) -> bool {
         false
     }
 }
@@ -189,6 +215,10 @@ impl Host for ProcessHost {
     fn may_replace_process(&mut self) -> bool {
         true
     }
+
+    fn may_control_terminal(&mut self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]
@@ -245,6 +275,10 @@ mod tests {
         fn may_replace_process(&mut self) -> bool {
             false
         }
+
+        fn may_control_terminal(&mut self) -> bool {
+            false
+        }
     }
 
     /// The parent-side entry point reaches the host, and the shell asks
@@ -274,6 +308,24 @@ mod tests {
                 rec.installs()
             );
         }
+    }
+
+    /// `set -m` in an ungranted shell leaves the host's process group and
+    /// terminal alone, and is silent about it.
+    ///
+    /// The observable is `jobctl`: `setjobctl` is the only thing that ever
+    /// sets it, and the only thing that ever sets `ttyfd`, so a zero here
+    /// is also `forkchild`'s handoff, `waitforjob`'s hand-back and `fg`'s
+    /// not happening. The corpus cannot see this -- it has no controlling
+    /// terminal, so `jobctl` stays 0 in both shells there -- which is why
+    /// it is pinned here.
+    #[test]
+    fn set_m_without_a_grant_leaves_the_hosts_terminal_alone() {
+        let _g = crate::testutil::lock();
+        let mut sh = crate::context::Shell::builder().build().unwrap();
+        sh.run(b"set -m").unwrap();
+        assert_eq!(sh.jobs.jobctl, 0, "an ungranted shell took job control");
+        assert!(sh.run(b"echo still running").is_ok());
     }
 
     /// The child-side entry point does not, and that is the whole point of
