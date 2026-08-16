@@ -16,7 +16,7 @@
 //!   3. `nsh-cli`, which has to stay byte-for-byte dash
 
 use std::io;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::OnceLock;
 
 use bstr::{BStr, BString};
 use nsh::{Disposition, Error, ExitStatus, Host, Shell, Signal, SignalSink, Source, Streams};
@@ -115,14 +115,13 @@ fn expand_a_word() -> Result<(), Error> {
 /// the sink it reports to cannot be a field it reaches through `self`.
 /// This is why [`Host::attach`] exists, and why the sink is a `&'static`
 /// rather than something a handler would have to clone.
-static SINK: AtomicUsize = AtomicUsize::new(0);
+static SINK: OnceLock<SignalSink> = OnceLock::new();
 
 extern "C" fn on_signal(signo: libc::c_int) {
-    let p = SINK.load(Ordering::Relaxed);
-    if p != 0 {
+    if let Some(sink) = SINK.get() {
         // The only thing a handler may do, and the whole of what it may
         // do. Everything behind it is two atomics and three stores.
-        unsafe { (*(p as *const nsh::siginbox::SignalSink)).raise(signo) };
+        unsafe { sink.raise(signo) };
     }
 }
 
@@ -137,7 +136,7 @@ impl Host for FrontendHost {
     fn attach(&mut self, sink: SignalSink) {
         // Stored where the `extern "C"` handler can reach it. The handler
         // does nothing but `sink.raise(signo)`.
-        SINK.store(sink as *const _ as usize, Ordering::Relaxed);
+        let _ = SINK.set(sink);
     }
 
     fn signal(&mut self, signal: Signal) -> io::Result<Disposition> {

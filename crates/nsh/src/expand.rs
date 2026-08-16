@@ -3740,6 +3740,11 @@ pub unsafe fn restore_handler_expandarg(
 /// the symbol resolves to the real one.
 // [spec:dash:def:expand.arith-fn]
 // [spec:dash:sem:expand.arith-fn]
+/* Unused as an import and kept as a symbol: it is this rule's target
+ * site, and nothing in the crate calls `arith` through `expand`. It was
+ * reachable as `nsh::expand::arith` until the surface closed, which is
+ * what had been standing in for a use. */
+#[allow(unused_imports)]
 pub use crate::arith_yacc::arith;
 
 /// `int expcmd(int, char **)` — declared in `expand.h` but defined
@@ -3771,5 +3776,7 @@ pub unsafe fn arith_lex_reset() {}
 /// arithmetic parser's benefit; the definition lives in `arith_yylex.c`.
 // [spec:dash:def:expand.yylex-fn]
 // [spec:dash:sem:expand.yylex-fn]
+/* Kept for the same reason as `arith` above. */
+#[allow(unused_imports)]
 pub use crate::arith_yylex::yylex;
 

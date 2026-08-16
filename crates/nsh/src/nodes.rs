@@ -670,4 +670,39 @@ mod tests {
         assert_eq!(t.as_bstr(), b"a\0b".as_slice());
         assert_eq!(unsafe { CStr::from_ptr(t.as_ptr()) }.count_bytes(), 1);
     }
+
+    /// `SHELL_ALIGN(sizeof(union node))` for every node struct, so the
+    /// figures can be diffed against the C.
+    ///
+    /// This was `examples/nodesizes.rs`, whose own first line called it a
+    /// temporary check and not part of the shell. It could not stay: an
+    /// example is a separate crate, so it needed `nodes` to be `pub`, and
+    /// the surface closure is exactly the commit that stops an internal
+    /// measurement from holding a module open. Run it for the numbers with
+    /// `cargo test -p nsh --lib node_sizes -- --nocapture`.
+    #[test]
+    fn node_sizes_are_printable_for_a_diff_against_the_c() {
+        const fn align(n: usize) -> usize {
+            (n + 7) & !7
+        }
+        macro_rules! p {
+            ($t:ty, $n:expr) => {
+                println!("{} {}", $n, align(core::mem::size_of::<$t>()))
+            };
+        }
+        p!(ncmd, "ncmd");
+        p!(npipe, "npipe");
+        p!(nredir, "nredir");
+        p!(nbinary, "nbinary");
+        p!(nif, "nif");
+        p!(nfor, "nfor");
+        p!(ncase, "ncase");
+        p!(nclist, "nclist");
+        p!(narg, "narg");
+        p!(nfile, "nfile");
+        p!(ndup, "ndup");
+        p!(nhere, "nhere");
+        p!(nnot, "nnot");
+        println!("node {}", core::mem::size_of::<Node>());
+    }
 }

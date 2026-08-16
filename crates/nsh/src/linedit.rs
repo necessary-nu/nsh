@@ -86,7 +86,7 @@ const CHANGE_TO_FIRST_NONBLANK: &str = "nsh-vi-change-to-first-nonblank";
 const YANK_TO_FIRST_NONBLANK: &str = "nsh-vi-yank-to-first-nonblank";
 
 mod history;
-pub use history::{History, HistoryError, HistoryEvent};
+pub use history::{History, HistoryEvent};
 
 /// A native editor/session integration error.
 #[derive(Debug)]

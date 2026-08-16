@@ -7,17 +7,34 @@
 //! the rule it implements; the corresponding claims for the C source
 //! live in `plan/annotations.styx`.
 //!
-//! It is not a library yet in any sense but Cargo's. Thirty-three public
-//! modules is not an API, it is the transliteration left open — see
-//! [dec:nsh:public-surface]. `docs/idiomatization.md` is the path from
-//! here to a surface an embedder can hold, and the properties that decide
-//! when it has arrived.
+//! **The surface is closed.** It was thirty-eight public modules, which is
+//! not an API but the transliteration left open — see
+//! [dec:nsh:public-surface]. What an embedder writes is now the handful of
+//! names re-exported below: [`Shell`] and its [`Builder`], [`Source`],
+//! [`Streams`], [`ExitStatus`] and [`Signal`], [`Error`], and the [`Host`]
+//! seam with [`Disposition`], [`NoHost`] and [`ProcessHost`].
+//! `crates/nsh/examples/embed.rs` is written against exactly that set and
+//! is run, not merely compiled.
+//!
+//! Two modules stay public because they have callers outside the crate and
+//! nothing smaller would serve them: [`shellmain`], whose `main_fn` is the
+//! port of `main()` and is what the frontend and the four integration
+//! tests invoke, and [`streams`], whose `install` lends the shell the
+//! host's descriptors for the duration. The other thirty-six are
+//! `pub(crate)`.
+//!
+//! `#![deny(missing_docs)]` is on, which is the point of closing rather
+//! than a tidiness measure: [dec:nsh:public-surface] asked for the surface
+//! property to be *measured* under that lint, and a surface of thirty-eight
+//! transliterated modules could never have carried it. Closing took it from
+//! unaffordable to sixteen items.
 //!
 //! The command-line shell lives in `crates/nsh-cli` and links this crate
 //! as an external dependency, so anything the frontend needs that is not
 //! `pub` here is a compile error rather than something a reader has to
 //! notice.
 
+#![deny(missing_docs)]
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
@@ -66,58 +83,58 @@ pub use crate::streams::Streams;
 //
 // The receiver every function that touches shell state is being given,
 // ahead of the state itself moving onto it. [dec:nsh:no-ambient-state].
-pub mod builder;
-pub mod host;
-pub mod context;
-pub mod source;
+pub(crate) mod builder;
+pub(crate) mod host;
+pub(crate) mod context;
+pub(crate) mod source;
 
 // ---- foundation -----------------------------------------------------
-pub mod error;
-pub mod escape;
-pub mod mystring;
-pub mod output;
-pub mod shell;
-pub mod siginbox;
-pub mod status;
+pub(crate) mod error;
+pub(crate) mod escape;
+pub(crate) mod mystring;
+pub(crate) mod output;
+pub(crate) mod shell;
+pub(crate) mod siginbox;
+pub(crate) mod status;
 pub mod streams;
-pub mod system;
+pub(crate) mod system;
 
 // ---- unit-test scaffolding (test builds only) ------------------------
 #[cfg(test)]
-pub mod testutil;
+pub(crate) mod testutil;
 
 // ---- the builtins ----------------------------------------------------
-pub mod builtins;
+pub(crate) mod builtins;
 
 // ---- generated tables ------------------------------------------------
-pub mod nodes;
-pub mod signames;
-pub mod syntax;
+pub(crate) mod nodes;
+pub(crate) mod signames;
+pub(crate) mod syntax;
 
 // ---- shell state -----------------------------------------------------
-pub mod alias;
-pub mod cd;
-pub mod init;
-pub mod input;
-pub mod mail;
-pub mod options;
-pub mod redir;
-pub mod trap;
-pub mod var;
+pub(crate) mod alias;
+pub(crate) mod cd;
+pub(crate) mod init;
+pub(crate) mod input;
+pub(crate) mod mail;
+pub(crate) mod options;
+pub(crate) mod redir;
+pub(crate) mod trap;
+pub(crate) mod var;
 
 // ---- parsing and expansion -------------------------------------------
-pub mod arith_yacc;
-pub mod arith_yylex;
-pub mod expand;
-pub mod parser;
-pub mod pmatch;
+pub(crate) mod arith_yacc;
+pub(crate) mod arith_yylex;
+pub(crate) mod expand;
+pub(crate) mod parser;
+pub(crate) mod pmatch;
 
 // ---- execution --------------------------------------------------------
-pub mod eval;
-pub mod exec;
-pub mod jobs;
+pub(crate) mod eval;
+pub(crate) mod exec;
+pub(crate) mod jobs;
 pub mod shellmain;
 
 // ---- builtins ---------------------------------------------------------
-pub mod histedit;
-pub mod linedit;
+pub(crate) mod histedit;
+pub(crate) mod linedit;

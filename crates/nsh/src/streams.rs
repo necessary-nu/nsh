@@ -48,8 +48,11 @@ use libc::c_int;
 /// The three descriptors the shell uses for its own I/O.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct Streams {
+    /// Where the shell parses from.
     pub stdin: c_int,
+    /// Where the shell and its built-ins write.
     pub stdout: c_int,
+    /// Where the shell writes diagnostics, unbuffered.
     pub stderr: c_int,
 }
 

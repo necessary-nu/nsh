@@ -187,7 +187,7 @@ pub unsafe fn int_pending() -> sig_atomic_t {
     core::ptr::read_volatile(addr_of_mut!(intpending))
 }
 
-/* `#define INTOFF` — macro spelling, for call sites that keep the C shape. */
+/// `#define INTOFF` — macro spelling, for call sites that keep the C shape.
 #[macro_export]
 macro_rules! INTOFF {
     () => {
@@ -195,7 +195,7 @@ macro_rules! INTOFF {
     };
 }
 
-/* `#define INTON` — macro spelling. */
+/// `#define INTON` — macro spelling.
 #[macro_export]
 macro_rules! INTON {
     () => {
@@ -203,7 +203,7 @@ macro_rules! INTON {
     };
 }
 
-/* `#define FORCEINTON` — macro spelling. */
+/// `#define FORCEINTON` — macro spelling.
 #[macro_export]
 macro_rules! FORCEINTON {
     () => {
@@ -211,7 +211,7 @@ macro_rules! FORCEINTON {
     };
 }
 
-/* `#define SAVEINT(v) ((v) = suppressint)` */
+/// `#define SAVEINT(v) ((v) = suppressint)`
 #[macro_export]
 macro_rules! SAVEINT {
     ($v:expr) => {
@@ -219,12 +219,10 @@ macro_rules! SAVEINT {
     };
 }
 
-/*
- * ```c
- * #define RESTOREINT(v) \
- *	({ barrier(); if ((suppressint = (v)) == 0 && intpending) onint(sh); 0; })
- * ```
- */
+/// ```c
+/// #define RESTOREINT(v) \
+///	({ barrier(); if ((suppressint = (v)) == 0 && intpending) onint(sh); 0; })
+/// ```
 #[macro_export]
 macro_rules! RESTOREINT {
     ($v:expr) => {{
@@ -512,6 +510,8 @@ impl crate::context::Shell {
 
     // [spec:dash:def:error.sh-warnx-fn]
     // [spec:dash:sem:error.sh-warnx-fn]
+    /// Write a diagnostic with the `sh: 17: cd: ` prefix the shell puts on
+    /// one, to the shell's own unbuffered stderr.
     // [spec:dash:def:error.exvwarning2-fn]
     // [spec:dash:sem:error.exvwarning2-fn]
     pub unsafe fn sh_warnx(&mut self, msg: &[u8]) {

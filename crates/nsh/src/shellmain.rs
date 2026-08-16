@@ -30,17 +30,17 @@ use crate::error::FORCEINTON;
 use crate::eval::{EV_EXIT, SKIPFUNC, SKIPFUNCDEF};
 use crate::jobs::SHOW_CHANGED;
 
-/* pid of main shell */
+/// pid of main shell
 pub static mut rootpid: c_int = 0;
-/* pid of current shell */
+/// pid of current shell
 pub static mut mypid: c_int = 0;
-/* shell level: 0 for the main shell, 1 for its children, and so on */
+/// shell level: 0 for the main shell, 1 for its children, and so on
 pub static mut shlvl: c_int = 0;
 
-/* glibc sucks — `main()` caches `__errno_location()` here so that the
- * `errno` macro does not repeat the TLS lookup. The port reads errno
- * straight from libc, which is behaviourally identical; the cache is
- * still populated so anything reading it observes the same pointer. */
+/// glibc sucks — `main()` caches `__errno_location()` here so that the
+/// `errno` macro does not repeat the TLS lookup. The port reads errno
+/// straight from libc, which is behaviourally identical; the cache is
+/// still populated so anything reading it observes the same pointer.
 pub static mut dash_errno: *mut c_int = null_mut();
 
 /* `MKINIT struct jmploc main_handler;` was here — the outermost handler,
@@ -48,7 +48,7 @@ pub static mut dash_errno: *mut c_int = null_mut();
  * fork so that a child unwound to its own top level. Nothing unwinds, so
  * there is no handler and no static to hold one. */
 
-/* src/main.h: `#define rootshell (!shlvl)` */
+/// src/main.h: `#define rootshell (!shlvl)`
 #[inline]
 pub unsafe fn rootshell() -> c_int {
     (shlvl == 0) as c_int
@@ -90,6 +90,8 @@ unsafe fn etext() -> c_int {
  * is used to figure out how far we had gotten.
  */
 
+/// The literal port of `main()` in `src/main.c`, taking the shell it is
+/// to run as. [`main_fn`] is what a caller outside the crate reaches.
 // [spec:dash:def:main.main-fn]
 // [spec:dash:sem:main.main-fn]
 pub unsafe fn main(
@@ -534,6 +536,8 @@ unsafe fn read_profile(
  * Read a file containing shell functions.
  */
 
+/// Read and execute a file of commands: the `.` built-in's engine, and
+/// how a login shell reads its profile.
 // [spec:dash:def:main.readcmdfile-fn]
 // [spec:dash:sem:main.readcmdfile-fn]
 pub unsafe fn readcmdfile(
