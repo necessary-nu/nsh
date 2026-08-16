@@ -41,6 +41,7 @@ pub struct Builder {
     inherit_env: bool,
     options: Vec<(BString, bool)>,
     cwd: Option<std::path::PathBuf>,
+    host: Option<Box<dyn crate::host::Host>>,
 }
 
 impl Default for Builder {
@@ -60,6 +61,7 @@ impl Builder {
             inherit_env: false,
             options: Vec::new(),
             cwd: None,
+            host: None,
         }
     }
 
@@ -122,6 +124,16 @@ impl Builder {
         self
     }
 
+    /// What the library may do to the process, and who does it.
+    ///
+    /// Without this the shell gets [`crate::host::NoHost`]: it installs no
+    /// signal handler and refuses `exec`, which is the correct default for
+    /// a library and is not what a shell frontend wants.
+    pub fn host(mut self, host: impl crate::host::Host + 'static) -> Self {
+        self.host = Some(Box::new(host));
+        self
+    }
+
     /// The shell's working directory.
     ///
     /// Per-instance in the sense that `$PWD` is, and process-wide in the
@@ -144,6 +156,14 @@ impl Builder {
     /// table and wants the kernel already moved.
     pub fn build(self) -> Result<Shell, Error> {
         let mut sh = Shell::new(self.streams);
+        /* Before anything else the host might be asked about. `attach` is
+         * specified as happening exactly once, and this is it: the sink is
+         * the only part of the shell a signal handler may touch, so the
+         * host has to be holding it before a handler could exist. */
+        if let Some(host) = self.host {
+            sh.host = host;
+        }
+        sh.host.attach(crate::host::sink_for(&sh.signals));
         unsafe {
             let source = if self.inherit_env {
                 EnvSource::Process

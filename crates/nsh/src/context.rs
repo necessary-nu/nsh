@@ -77,6 +77,17 @@ pub struct Shell {
     /// buffer and line, and the `local` save stack. `var.rs` owns the
     /// shape; this owns the value.
     pub(crate) vars: crate::var::VarTable,
+    /// Who owns the process, and therefore what this shell may do to it.
+    ///
+    /// A `Box<dyn Host>` rather than a type parameter because `Shell`
+    /// appears in hundreds of signatures and a parameter would spread to
+    /// every one of them, for a choice made once at construction.
+    pub(crate) host: Box<dyn crate::host::Host>,
+    /// Signals the host has reported, waiting to be handled.
+    ///
+    /// Shared with the [`crate::host::SignalSink`] the host was given, and
+    /// the only part of the shell a signal handler may reach.
+    pub(crate) signals: std::sync::Arc<crate::host::SignalInbox>,
     /// Where the shell is reading from, and what it has read.
     /// `input.rs` owns the shape; this owns the value.
     pub(crate) input: crate::input::InputStack,
@@ -182,6 +193,11 @@ impl Shell {
             input: crate::input::InputStack::new(),
             status: 0,
             vars: crate::var::VarTable::new(),
+            /* [dec:nsh:host-owns-signals]: a shell that was not told who
+             * owns the process assumes nobody did, and touches nothing
+             * outside itself. `Builder::host` replaces this. */
+            host: Box::new(crate::host::NoHost),
+            signals: crate::host::SignalInbox::new(),
         }
     }
 }

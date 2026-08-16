@@ -807,7 +807,7 @@ pub(crate) fn dot_builtin(sh: &mut Shell, args: &[&BStr]) -> Result<ExitStatus, 
         None => {
             return Err(sh.report(Error::Other {
                 line: 0,
-                status: ExitStatus(2),
+                status: ExitStatus::from_raw(2),
                 message: BString::from(&b"filename argument required"[..]),
             }));
         }

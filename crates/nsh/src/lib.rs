@@ -60,6 +60,7 @@ pub mod api;
 // The receiver every function that touches shell state is being given,
 // ahead of the state itself moving onto it. [dec:nsh:no-ambient-state].
 pub mod builder;
+pub mod host;
 pub mod context;
 
 // ---- foundation -----------------------------------------------------
