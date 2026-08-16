@@ -705,24 +705,19 @@ pub(crate) unsafe fn preglob(
 
 // [spec:dash:def:expand.mesclen-fn]
 // [spec:dash:sem:expand.mesclen-fn]
-unsafe fn mesclen(start: *const c_char, mut p: *const c_char, mesc: c_char) -> size_t {
-    let mut esc: size_t = 0;
-
-    while p > start && {
-        p = p.offset(-1);
-        *p == mesc
-    } {
-        esc += 1;
-    }
-    esc
-}
-
-/// [`mesclen`] over a slice: how many `mesc` bytes immediately precede `at`.
+// [spec:dash:def:expand.esclen-fn]
+// [spec:dash:sem:expand.esclen-fn]
+//
+/// `mesclen`: how many `mesc` bytes immediately precede `at`.
 ///
 /// The C's `p > start` is `at > 0` — the walk cannot leave the string, and
 /// with the string as a slice that is the bound rather than a promise about
-/// two pointers being into the same allocation.  The pointer form stays for
-/// [`esclen`], whose caller still walks the expansion buffer.
+/// two pointers being into the same allocation.
+///
+/// The pointer form and `esclen`, the one-argument wrapper over it, are
+/// gone: `esclen` had a single caller, `scanright`, which walks the
+/// expansion buffer by offset now and passes the subslice from `startp`,
+/// so the floor `esclen` existed to carry is the slice's own start.
 fn mesclen_bytes(s: &[u8], mut at: usize, mesc: c_char) -> size_t {
     let mut esc: size_t = 0;
 
@@ -733,12 +728,6 @@ fn mesclen_bytes(s: &[u8], mut at: usize, mesc: c_char) -> size_t {
     esc
 }
 
-// [spec:dash:def:expand.esclen-fn]
-// [spec:dash:sem:expand.esclen-fn]
-unsafe fn esclen(start: *const c_char, p: *const c_char) -> size_t {
-    mesclen(start, p, CTLESC)
-}
-
 // [spec:dash:def:expand.mbnext-fn]
 // [spec:dash:sem:expand.mbnext-fn]
 //
@@ -747,18 +736,11 @@ unsafe fn esclen(start: *const c_char, p: *const c_char) -> size_t {
 // data position* to the end of the encoded character.  The total span
 // from `p` is therefore `(mb & 0xff) + (mb >> 8)`, which is why that
 // expression appears at every call site.
-// The pointer form, for the four callers that still walk with pointers.
-// It reads at most three bytes and which three is decided by the first:
-// only the CTLMBCHAR framing looks past index 0, and that framing always
-// carries its length byte (with an optional CTLESC between), so those
-// three bytes exist whenever the first one is CTLMBCHAR.  Every other
-// byte is answered from index 0 alone.
-#[inline(never)]
-unsafe fn mbnext(p: *const c_char) -> c_uint {
-    let n = if *p == CTLMBCHAR { 3 } else { 1 };
-    mbnext_bytes(core::slice::from_raw_parts(p as *const u8, n))
-}
-
+// The pointer form is gone with its last caller.  It existed to answer
+// "how much of this may I read?" for a walker holding a bare `*const
+// c_char` -- three bytes when the first is CTLMBCHAR, one otherwise --
+// and every walker that asked now holds a slice that answers it.
+//
 // The decoding itself, over a slice, so the framing is bounds-checked
 // rather than trusted.
 pub(crate) fn mbnext_bytes(p: &[u8]) -> c_uint {
