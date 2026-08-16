@@ -5,10 +5,11 @@
 //! the only thing that shows [dec:nsh:host-owns-streams] is a property of
 //! the shell rather than of one module.
 //!
-//! Everything here forks. `main_fn` ends in `exitshell`, which `_exit`s --
-//! that is dash's shape and undoing it is [dec:nsh:errors-are-values], not
-//! this -- so a test that called it in process would take the test runner
-//! with it.
+//! Everything here forks. `main_fn` runs a whole shell to completion --
+//! including its EXIT trap and its job-control teardown -- so a test that
+//! called it in process would leave the runner holding a shell that had
+//! finished exiting. It returns a status rather than `_exit`ing since
+//! [dec:nsh:host-owns-the-process], so each child ends itself.
 
 use nsh::streams::{self, Streams};
 use std::io::Read;
@@ -48,7 +49,12 @@ fn run_shell(script: &str, prepare: impl FnOnce() -> Streams) -> i32 {
             // them in `main`; do the same so the test's stderr is the
             // shell's, not the runtime's.
             let streams = prepare();
-            nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, streams);
+            /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
+               ending the process the caller's act — so this fork's child
+               has to end itself. Returning would carry it back into the
+               test harness after the fork. */
+            let status = nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, streams);
+            libc::_exit(status.code().into());
         }
         let mut status = 0i32;
         assert_eq!(libc::waitpid(pid, &mut status, 0), pid);
@@ -163,7 +169,12 @@ fn the_shell_reads_a_script_from_the_stream_it_was_given() {
             })
             .expect("install");
             core::mem::forget(lent); // see the note in the test above
-            nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, Streams::INHERIT);
+            /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
+               ending the process the caller's act — so this fork's child
+               has to end itself. Returning would carry it back into the
+               test harness after the fork. */
+            let status = nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, Streams::INHERIT);
+            libc::_exit(status.code().into());
         }
         let mut status = 0i32;
         libc::waitpid(pid, &mut status, 0);

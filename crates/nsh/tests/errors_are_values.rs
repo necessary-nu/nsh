@@ -51,7 +51,7 @@ use nsh::streams::{self, Streams};
 /// therefore the only stream shape whose byte order this crate has an
 /// oracle for — and return the merged bytes with the shell's exit status.
 ///
-/// Forks, because `main_fn` ends in `exitshell`, which `_exit`s.
+/// Forks, because the child becomes a shell and ends there.
 fn run(script: &str) -> (String, i32) {
     let mut fds = [0i32; 2];
     assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
@@ -83,7 +83,12 @@ fn run(script: &str) -> (String, i32) {
                the value back out of a process-global that `install`
                wrote; the global is gone and the constant is what it
                always meant. */
-            nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, Streams::INHERIT);
+            /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
+               ending the process the caller's act — so this fork's child
+               has to end itself. Returning would carry it back into the
+               test harness after the fork. */
+            let status = nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, Streams::INHERIT);
+            libc::_exit(status.code().into());
         }
         libc::close(w);
         let mut wstatus = 0i32;

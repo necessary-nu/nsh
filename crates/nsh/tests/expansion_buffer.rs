@@ -33,7 +33,7 @@ fn read_all(fd: i32) -> Vec<u8> {
 }
 
 /// Run `script` with the shell's stdout on a pipe and return what it
-/// wrote. Forks, because `main_fn` ends in `exitshell`, which `_exit`s.
+/// wrote. Forks, because the child becomes a shell and ends there.
 fn out_of(script: &str) -> Vec<u8> {
     let (r, w) = unsafe { pipe() };
     let argv: Vec<Vec<u8>> = vec![b"sh".to_vec(), b"-c".to_vec(), script.as_bytes().to_vec()];
@@ -57,7 +57,12 @@ fn out_of(script: &str) -> Vec<u8> {
                the value back out of a process-global that `install`
                wrote; the global is gone and the constant is what it
                always meant. */
-            nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, Streams::INHERIT);
+            /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
+               ending the process the caller's act — so this fork's child
+               has to end itself. Returning would carry it back into the
+               test harness after the fork. */
+            let status = nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, Streams::INHERIT);
+            libc::_exit(status.code().into());
         }
         libc::close(w);
         let mut status = 0i32;

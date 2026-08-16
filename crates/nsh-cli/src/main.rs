@@ -139,9 +139,14 @@ fn main() {
     // The frontend is the thing entitled to the process's standard
     // descriptors, so it hands them to the shell explicitly rather than
     // letting the shell assume them. See [dec:nsh:host-owns-streams].
-    nsh::shellmain::main_fn(
+    // The library returns its status rather than ending the process:
+    // [dec:nsh:host-owns-the-process] makes that the frontend's act, and
+    // this is the frontend. `exitshell` has already flushed and torn down
+    // job control, so there is nothing left to do but leave.
+    let status = nsh::shellmain::main_fn(
         argv.len() as libc::c_int,
         argv,
         nsh::streams::Streams::INHERIT,
     );
+    std::process::exit(status.code().into());
 }

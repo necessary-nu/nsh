@@ -499,7 +499,23 @@ pub unsafe fn setinteractive(sh: &mut crate::context::Shell, on: c_int) {
 
 // [spec:dash:def:trap.exitshell-fn]
 // [spec:dash:sem:trap.exitshell-fn]
-pub unsafe fn exitshell(sh: &mut crate::context::Shell) -> ! {
+/// Run the EXIT trap, tear job control down, and **return** the status
+/// the shell leaves with.
+///
+/// It used to end in `_exit`, and that was the one `_exit` in the crate
+/// that ended the *host's* process rather than a child the library
+/// forked. `[dec:nsh:host-owns-the-process]` puts ending the process
+/// outside what a library may do on its own authority, and answers it
+/// with an absence rather than a grant: there is no `Host` method for it
+/// because after this there is nothing to grant — the status is returned,
+/// and whoever owns the process decides what to do with it. `nsh-cli`
+/// calls `std::process::exit`.
+///
+/// The other three `_exit`s stay, and are correct: `shellmain`'s
+/// `exit_from_child`, `jobs`' `forkchild_fatal` and `redir.rs:483` all
+/// end a child the library forked, which `[dec:nsh:fork-child-is-a-terminus]`
+/// says is a terminus rather than a frame.
+pub unsafe fn exitshell(sh: &mut crate::context::Shell) -> crate::status::ExitStatus {
     sh.eval.savestatus = sh.status;
     /* `TRACE(("pid %d, exitshell(%d)\n", getpid(), savestatus));` —
      * `#ifdef DEBUG` in `shell.h`, and the dash build does not define it. */
@@ -559,8 +575,7 @@ pub unsafe fn exitshell(sh: &mut crate::context::Shell) -> ! {
     drop(crate::jobs::setjobctl(sh, 0));
     sh.io.flushall();
     crate::shell::flush_coverage();
-    libc::_exit(sh.status);
-    /* NOTREACHED */
+    crate::status::ExitStatus::from_raw(sh.status)
 }
 
 // [spec:dash:def:trap.decode-signum-fn]

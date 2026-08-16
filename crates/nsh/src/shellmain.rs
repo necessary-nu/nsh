@@ -92,7 +92,11 @@ unsafe fn etext() -> c_int {
 
 // [spec:dash:def:main.main-fn]
 // [spec:dash:sem:main.main-fn]
-pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int {
+pub unsafe fn main(
+    sh: &mut Shell,
+    argc: c_int,
+    argv: *mut *mut c_char,
+) -> crate::status::ExitStatus {
     let mut state: c_int; /* volatile */
 
     dash_errno = libc::__errno_location();
@@ -122,6 +126,13 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
      * `main`, and the child died with Rust's panic status 101, which the
      * trap then reported as `$?`. */
     let mut entry: c_int = 0;
+
+    /* Set by the `exit:` arm, which is what `exitshell` now hands back
+     * instead of ending the process. It has to be a captured local rather
+     * than the closure's return type, because `exit:` must stay *inside*
+     * the loop for the reason the comment above gives, and the closure's
+     * `Result<Flow, Error>` is the shape the handler below reads. */
+    let mut leaving: Option<crate::status::ExitStatus> = None;
 
     loop {
         /* What the body had to say, which the C read off `exception`
@@ -222,12 +233,23 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
                             // exit:
                             /* #if PROFILE: monitor(0); */
                             /* #if GPROF: _mcleanup(); */
-                            crate::trap::exitshell(sh);
-                            /* NOTREACHED — exitshell() ends in _exit(). */
+                            leaving = Some(crate::trap::exitshell(sh));
+                            return Ok(crate::eval::Flow::Exit {
+                                by_exitcmd: false,
+                            });
                         }
                     }
                 }
         })();
+
+        /* `exit:` ran. It used to end the process from inside the closure;
+         * it returns a status now, and this is where the status leaves.
+         * Checked before the handler because the handler would otherwise
+         * run `exitreset` a second time over a shell that has already
+         * finished exiting. */
+        if let Some(status) = leaving {
+            return status;
+        }
 
         /* The C read `exception` here. The three things it distinguished
          * arrive as three different shapes now, and `exitreset` is told
@@ -237,10 +259,10 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
         let interrupted: bool;
 
         match &outcome {
-            /* `exit:` is the only way out of the body that does not come
-             * back through here, because `exitshell` ends the process. A
-             * `Flow::Done` would mean the loop above fell out of `pc`
-             * without reaching it, which it cannot. */
+            /* `exit:` is the only way out of the body that does not
+             * reach here, because the `leaving` check above returns
+             * first. A `Flow::Done` would mean the loop fell out of `pc`
+             * without reaching either, which it cannot. */
             Ok(crate::eval::Flow::Done(_)) => {
                 unreachable!("main's body leaves only by exiting or by failing")
             }
@@ -313,10 +335,22 @@ pub unsafe fn main(sh: &mut Shell, argc: c_int, argv: *mut *mut c_char) -> c_int
 /// and what the `dash` binary wants -- passes
 /// [`crate::streams::Streams::INHERIT`].
 ///
-/// This still ends in `_exit` rather than returning, because the shell's
-/// exception mechanism is C's and `exitshell` terminates the process.
-/// Making it return is [dec:nsh:errors-are-values], not this.
-pub fn main_fn(argc: c_int, argv: Vec<Vec<u8>>, streams: crate::streams::Streams) -> ! {
+/// **It returns now**, with the status the shell left with.
+///
+/// It used to end in `_exit`, because `exitshell` did.
+/// [dec:nsh:host-owns-the-process] makes ending the host's process
+/// something a library may not do on its own authority, and answers it
+/// with an absence rather than a grant — so the status comes back and the
+/// frontend calls `std::process::exit`.
+///
+/// A caller that forks and then calls this **must end the child itself**.
+/// Before, the child could not return; now it can, and it would carry on
+/// executing whatever followed the fork.
+pub fn main_fn(
+    argc: c_int,
+    argv: Vec<Vec<u8>>,
+    streams: crate::streams::Streams,
+) -> crate::status::ExitStatus {
     let mut owned: Vec<*mut c_char> = Vec::with_capacity(argv.len() + 1);
     for a in &argv {
         let mut bytes: Vec<u8> = a.clone();
@@ -334,11 +368,7 @@ pub fn main_fn(argc: c_int, argv: Vec<Vec<u8>>, streams: crate::streams::Streams
      * through the borrow that starts on the next line
      * ([dec:nsh:no-ambient-state]). */
     let mut sh = Shell::new(streams);
-    unsafe {
-        main(&mut sh, argc, p);
-    }
-    /* main() never returns: it ends in exitshell(). */
-    std::process::exit(255);
+    unsafe { main(&mut sh, argc, p) }
 }
 
 /*
@@ -441,7 +471,13 @@ pub(crate) unsafe fn exit_from_child(
     }
     drop(outcome);
     crate::init::exitreset(sh, by_exitcmd);
-    crate::trap::exitshell(sh);
+    /* `exitshell` returns now, and this is one of the three `_exit`s that
+     * stay: it ends a child the library forked, which
+     * [dec:nsh:fork-child-is-a-terminus] makes a terminus rather than a
+     * frame. Returning from here would carry the child back up through
+     * frames the parent owns. */
+    let status = crate::trap::exitshell(sh);
+    libc::_exit(status.code().into());
 }
 
 /*
