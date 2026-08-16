@@ -1,6 +1,10 @@
-//! **The proposed public API. Nothing here is implemented.**
+//! **The proposed public API. Almost nothing here is implemented.**
 //!
-//! Every body is `todo!()`. This module exists so the signatures are
+//! Every body is `todo!()` except where a type has landed for real, in
+//! which case this module re-exports it rather than keeping a second
+//! copy: [`ExitStatus`] and [`Signal`] come from `crate::status` now.
+//! The list shrinks as `public-api` proceeds, and when it is empty this
+//! module goes. This module exists so the signatures are
 //! checked by the compiler rather than by reading: the borrow shapes, the
 //! object safety of [`Host`], and whether a built-in that re-enters
 //! evaluation can be written at all are questions a document cannot
@@ -540,60 +544,22 @@ impl SignalSink {
 // Values
 // =====================================================================
 
-/// A shell exit status: `$?`.
+/// Re-exported from `crate::status`, where they are **implemented**.
 ///
-/// A `u8`, because that is the range `$?` has — `exit 300` leaves 44, in
-/// dash and in this port.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ExitStatus(u8);
-
-impl ExitStatus {
-    /// Zero.
-    pub const SUCCESS: ExitStatus = ExitStatus(0);
-
-    /// The status as a number.
-    pub fn code(self) -> u8 {
-        self.0
-    }
-
-    /// Whether the status is zero.
-    pub fn success(self) -> bool {
-        self.0 == 0
-    }
-
-    /// The signal a command died from, under the shell's `128 + n`
-    /// convention. A command that merely exited 130 is indistinguishable
-    /// from one killed by SIGINT, because in a shell it is.
-    pub fn signal(self) -> Option<Signal> {
-        todo!()
-    }
-}
-
-/// A signal number.
+/// These two were the sketch's first types to become real, because the
+/// rest of the surface is written in terms of them: `run` returns an
+/// `ExitStatus`, `Error::Interrupted` carries a `Signal`, and a `Host`
+/// hands signals back as `Signal`. Sketching them twice would have let
+/// the two copies drift, and the copy the compiler checked would not
+/// have been the one that ran.
 ///
-/// A newtype over the number rather than an enum: signal numbers are
-/// platform-dependent, the shell has to carry ones it does not know a name
-/// for, and an enum would need an `Other(i32)` arm anyway.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Signal(i32);
-
-impl Signal {
-    /// From a raw number.
-    pub fn from_raw(number: i32) -> Signal {
-        Signal(number)
-    }
-
-    /// The raw number.
-    pub fn number(self) -> i32 {
-        self.0
-    }
-
-    /// The name without the `SIG` prefix — `INT`, `TERM` — as `trap -l`
-    /// prints it, or `None` for a number this platform has no name for.
-    pub fn name(self) -> Option<&'static BStr> {
-        todo!()
-    }
-}
+/// The signatures they landed with are wider than what stood here: an
+/// `ExitStatus::from_raw` for the `c_int` the shell computes in,
+/// `NOT_FOUND` and `NOT_EXECUTABLE` beside `SUCCESS`, and a
+/// `Signal::as_status` for the `128 + n` convention in the other
+/// direction. `Signal::name` kept this signature exactly, including the
+/// `Option` — see its own docs for why an unnamed slot is still `Some`.
+pub use crate::status::{ExitStatus, Signal};
 
 // =====================================================================
 // Errors
