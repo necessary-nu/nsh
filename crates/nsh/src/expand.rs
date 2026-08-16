@@ -30,7 +30,8 @@ use bstr::{BStr, BString, ByteSlice};
 use libc::{c_char, c_int, c_uint, c_ulong, c_void, intmax_t, size_t, ssize_t, wchar_t};
 
 use crate::error::Error;
-use crate::mystring::byte_at;
+use crate::mystring::{byte_at, byte_at_i, slice_from};
+use crate::pmatch::{pmatch_slices};
 
 // ---------------------------------------------------------------------
 // Declarations from <wchar.h> / <wctype.h> that the `libc` crate does not
@@ -1258,7 +1259,7 @@ unsafe fn expbackq(
     let mut i: c_int;
     let mut buf: [c_char; 128] = [0; 128];
     let mut p: *mut c_char;
-    let mut dest: *mut c_char;
+    let mut dest: usize;
     let startloc: c_int;
 
     'out: {
@@ -1333,13 +1334,15 @@ unsafe fn expbackq(
         }
         crate::error::INTON();
 
-        /* Eat all trailing newlines */
-        dest = expdest();
-        while dest > expbase().offset(startloc as isize) && *dest.offset(-1) == C_NL {
+        /* Eat all trailing newlines.  The cursor is the length, so the
+         * walk is over the buffer's own bytes and `STADJUST` is a
+         * `truncate`. */
+        dest = expb().len();
+        while dest > startloc as usize && expb()[dest - 1] == C_NL as u8 {
             /* STUNPUTC(dest) */
-            dest = dest.offset(-1);
+            dest -= 1;
         }
-        set_expdest(dest);
+        expb().truncate(dest);
 
         if (flag & EXP_QUOTED) == 0 {
             recordregion(startloc, expdest_off(), 0);
@@ -1354,115 +1357,147 @@ unsafe fn expbackq(
 
 // [spec:dash:def:expand.scanleft-fn]
 // [spec:dash:sem:expand.scanleft-fn]
-unsafe fn scanleft(
-    startp: *mut c_char,
-    endp: *mut c_char,
-    rmesc: *mut c_char,
-    rmescend: *mut c_char,
-    str: *mut c_char,
+/// The C's seven arguments to [`scanleft`] and [`scanright`], five of which
+/// are `char *` into the expansion buffer and are offsets here.
+///
+/// A struct rather than seven parameters because the function-pointer type
+/// `subevalvar` selects between them with was the reason this cluster was
+/// called indivisible: a `fn(*mut c_char, *mut c_char, *mut c_char, *mut
+/// c_char, *mut c_char, c_int, c_int) -> *mut c_char` cannot be changed one
+/// argument at a time. Named, it can.
+///
+/// Both scanners take the buffer by `&[u8]`. The C mutates it — it writes a
+/// NUL at the position it is testing, matches, and writes the byte back —
+/// and that write is the only reason it needed `*mut`. `pmatch_bytes` reads
+/// past the end of a slice as NUL, so the subslice ending where the NUL
+/// went is the same string, and the buffer is never written at all.
+/// `&b[from..to]`, clamped to the buffer at both ends.
+///
+/// The scanners' cursors can leave the value — `scanright`'s walks off the
+/// bottom on purpose — and every read outside it answers NUL rather than
+/// panicking, which is the rule [`byte_at`] already follows and the one
+/// `pmatch_bytes` was written to.
+fn between(b: &[u8], from: usize, to: usize) -> &[u8] {
+    let from = from.min(b.len());
+    &b[from..to.clamp(from, b.len())]
+}
+
+struct Scan {
+    /// The value being trimmed.
+    startp: usize,
+    /// Its last byte. `scanright` walks down from here.
+    endp: usize,
+    /// The unescaped copy `_rmescapes` left above the cursor, and its end.
+    /// Read only when `FNMATCH_IS_ENABLED`; `loc2` tracks them either way,
+    /// because it is what an unquoted match returns.
+    rmesc: usize,
+    rmescend: usize,
+    /// The pattern, `preglob`'d in place.
+    pat: usize,
     quotes: c_int,
     zero: c_int,
-) -> *mut c_char {
-    let mut loc: *mut c_char;
-    let mut loc2: *mut c_char;
-    let mut c: c_char;
+}
 
-    loc = startp;
-    loc2 = rmesc;
+type ScanFn = fn(&[u8], &Scan) -> Option<usize>;
+
+// [spec:dash:def:expand.scanleft-fn]
+// [spec:dash:sem:expand.scanleft-fn]
+fn scanleft(b: &[u8], a: &Scan) -> Option<usize> {
+    let mut loc: usize = a.startp;
+    let mut loc2: usize = a.rmesc;
     loop {
-        let mut s: *mut c_char = if FNMATCH_IS_ENABLED { loc2 } else { loc };
-        let mb: c_uint;
-        let ml: c_uint;
-        let match_: c_int;
+        let s: usize = if FNMATCH_IS_ENABLED { loc2 } else { loc };
+        let c: c_char = byte_at(b, s);
 
-        c = *s;
-        if zero != 0 {
-            *s = C_NUL;
-            s = if FNMATCH_IS_ENABLED { rmesc } else { startp };
-        }
-        match_ = crate::pmatch::pmatch(str, s);
-        *(if FNMATCH_IS_ENABLED { loc2 } else { loc }) = c;
-        if match_ != 0 {
-            return if quotes != 0 { loc } else { loc2 };
+        /* `c = *s; if (zero) { *s = '\0'; s = startp; } pmatch(str, s);
+         * *loc = c;` — the temporary terminator, as a subslice that ends
+         * where it went. */
+        let subject: &[u8] = if a.zero != 0 {
+            let from = if FNMATCH_IS_ENABLED { a.rmesc } else { a.startp };
+            between(b, from, s)
+        } else {
+            slice_from(b, s)
+        };
+        if pmatch_slices(slice_from(b, a.pat), subject) != 0 {
+            return Some(if a.quotes != 0 { loc } else { loc2 });
         }
 
         if c == C_NUL {
             break;
         }
 
-        mb = mbnext(loc);
-        loc = loc.offset(((mb & 0xff) + (mb >> 8)) as isize);
-        ml = if (mb >> 8) > 3 { (mb >> 8) - 2 } else { 1 };
-        loc2 = loc2.offset(ml as isize);
+        let mb: c_uint = mbnext_bytes(slice_from(b, loc));
+        loc += ((mb & 0xff) + (mb >> 8)) as usize;
+        let ml: c_uint = if (mb >> 8) > 3 { (mb >> 8) - 2 } else { 1 };
+        loc2 += ml as usize;
     }
-    ptr::null_mut()
+    None
 }
 
 // [spec:dash:def:expand.scanright-fn]
 // [spec:dash:sem:expand.scanright-fn]
-unsafe fn scanright(
-    startp: *mut c_char,
-    endp: *mut c_char,
-    rmesc: *mut c_char,
-    rmescend: *mut c_char,
-    str: *mut c_char,
-    quotes: c_int,
-    zero: c_int,
-) -> *mut c_char {
+fn scanright(b: &[u8], a: &Scan) -> Option<usize> {
     let mut esc: size_t = 0;
-    let mut loc: *mut c_char;
-    let mut loc2: *mut c_char;
-
-    loc = endp;
-    loc2 = rmescend;
+    /* Signed, because the C's `loc--` walks off the bottom of the value on
+     * purpose and `if (loc < startp) break` is how it notices.  `byte_at_i`
+     * answers 0 for a negative index, so the two `*loc` reads inside the
+     * multibyte rewind — which the C performs without a bounds test, on the
+     * strength of the frame being well formed — cannot read before the
+     * buffer here. */
+    let mut loc: isize = a.endp as isize;
+    let mut loc2: isize = a.rmescend as isize;
     /* `for (;; loc2--)` — the `continue`s below must still run `loc2--`,
      * hence the inner labelled block. */
     'forloop: loop {
         'cont: {
-            let mut s: *mut c_char = if FNMATCH_IS_ENABLED { loc2 } else { loc };
-            let c: c_char = *s;
+            let s: isize = if FNMATCH_IS_ENABLED { loc2 } else { loc };
             let ml: c_uint;
-            let match_: c_int;
 
-            if zero != 0 {
-                *s = C_NUL;
-                s = if FNMATCH_IS_ENABLED { rmesc } else { startp };
+            /* `c = *s; if (zero) { *s = '\0'; s = startp; } pmatch(str, s);
+             * *loc = c;` — see [`Scan`]: the subslice ends where the C's
+             * temporary NUL went, so nothing is written. */
+            let subject: &[u8] = if a.zero != 0 {
+                let from = if FNMATCH_IS_ENABLED { a.rmesc } else { a.startp };
+                between(b, from, s.max(0) as usize)
+            } else {
+                slice_from(b, s.max(0) as usize)
+            };
+            if pmatch_slices(slice_from(b, a.pat), subject) != 0 {
+                return Some(if a.quotes != 0 { loc } else { loc2 } as usize);
             }
-            match_ = crate::pmatch::pmatch(str, s);
-            *(if FNMATCH_IS_ENABLED { loc2 } else { loc }) = c;
-            if match_ != 0 {
-                return if quotes != 0 { loc } else { loc2 };
-            }
-            loc = loc.offset(-1);
-            if loc < startp {
+            loc -= 1;
+            if loc < a.startp as isize {
                 break 'forloop;
             }
             /* if (!esc--) esc = esclen(startp, loc); */
             let was: size_t = esc;
             esc = esc.wrapping_sub(1);
             if was == 0 {
-                esc = esclen(startp, loc);
+                esc = mesclen_bytes(&b[a.startp..], loc as usize - a.startp, CTLESC);
             }
             if esc % 2 != 0 {
                 esc -= 1;
-                loc = loc.offset(-1);
+                loc -= 1;
                 break 'cont; /* continue */
             }
-            if *loc != CTLMBCHAR {
+            if byte_at_i(b, loc) != CTLMBCHAR {
                 break 'cont; /* continue */
             }
 
-            loc = loc.offset(-1);
-            ml = *(loc as *const u8) as c_uint;
-            loc = loc.offset(-((ml + 2) as isize));
-            if *loc == CTLESC {
-                loc = loc.offset(-1);
+            loc -= 1;
+            ml = byte_at_i(b, loc) as u8 as c_uint;
+            loc -= (ml + 2) as isize;
+            if byte_at_i(b, loc) == CTLESC {
+                loc -= 1;
             }
-            loc2 = loc2.offset(-((ml.wrapping_sub(1)) as isize));
+            /* `loc2 -= ml - 1` with `ml` unsigned: when `ml` is 0 the C
+             * subtracts UINT_MAX, not 1, and the widening is zero-extending
+             * on both sides. */
+            loc2 -= ml.wrapping_sub(1) as isize;
         }
-        loc2 = loc2.offset(-1);
+        loc2 -= 1;
     }
-    ptr::null_mut()
+    None
 }
 
 // [spec:dash:def:expand.subevalvar-fn]
@@ -1470,7 +1505,7 @@ unsafe fn scanright(
 unsafe fn subevalvar(
     sh: &mut crate::context::Shell,
     start: *mut c_char,
-    mut str: *mut c_char,
+    str: *mut c_char,
     strloc: c_int,
     startloc: c_int,
     varflags: c_int,
@@ -1478,22 +1513,22 @@ unsafe fn subevalvar(
 ) -> Result<*mut c_char, Error> {
     let mut subtype: c_int = varflags & VSTYPE;
     let quotes: c_int = flag & QUOTES_ESC;
-    let mut startp: *mut c_char;
-    let mut loc: *mut c_char;
-    let mut rmesc: *mut c_char;
-    let mut rmescend: *mut c_char;
+    /* Every one of the C's `char *` locals here is a position in the
+     * expansion buffer and only ever used as one.  As offsets they stop
+     * having to be re-derived: the three `stackblock()` re-reads below the
+     * `_rmescapes` call are gone, because an index does not move when the
+     * buffer grows.  `str` keeps its pointer type because it is not one of
+     * them — it is the variable's *name*, in the word text — and the C
+     * reuses the same local for the pattern, which is why that one gets a
+     * name of its own. */
+    let startp: usize;
+    let loc: usize;
+    let mut rmesc: usize;
+    let mut rmescend: usize;
     let zero: c_int;
-    let scan: unsafe fn(
-        *mut c_char,
-        *mut c_char,
-        *mut c_char,
-        *mut c_char,
-        *mut c_char,
-        c_int,
-        c_int,
-    ) -> *mut c_char;
-    let mut nstrloc: c_int = strloc;
-    let endp: *mut c_char;
+    let scan: ScanFn;
+    let endp: usize;
+    let pat: usize;
     let p: *mut c_char;
 
     p = argstr(
@@ -1505,13 +1540,13 @@ unsafe fn subevalvar(
         return Ok(p);
     }
 
-    startp = expbase().offset(startloc as isize);
+    startp = startloc as usize;
 
     'out: {
         match subtype {
             VSASSIGN => {
                 /* The bridge that stood here retires with this commit. */
-                crate::var::setvar(sh, str, startp, 0)?;
+                crate::var::setvar(sh, str, expb()[startp..].as_ptr() as *const c_char, 0)?;
 
                 loc = startp;
                 break 'out;
@@ -1523,7 +1558,8 @@ unsafe fn subevalvar(
                  * before — docs/errors-are-values.md 0.2 is the bug that
                  * happens when one of these is missed, and `Error` is
                  * `#[must_use]` so the compiler now names it. */
-                return Err(varunset(start, str, startp, varflags));
+                let umsg = crate::mystring::cstr_prefix(&expb()[startp..]);
+                return Err(varunset(start, str, Some(umsg), varflags));
             }
             _ => {}
         }
@@ -1534,31 +1570,31 @@ unsafe fn subevalvar(
          *		abort();
          * #endif */
 
-        rmescend = expbase().offset(strloc as isize);
-        str = preglob(rmescend, 0, None);
-        if FNMATCH_IS_ENABLED {
-            startp = expbase().offset(startloc as isize);
-            rmescend = expbase().offset(strloc as isize);
-            nstrloc = str.offset_from(expbase()) as c_int;
-        }
+        rmescend = strloc as usize;
+        /* `str = preglob(rmescend, 0, NULL)` — in place while
+         * `FNMATCH_IS_ENABLED` is 0, and into the buffer above the cursor
+         * when it is not, so its result is a position in this buffer
+         * either way. */
+        pat = {
+            let base = expb().as_mut_ptr() as *mut c_char;
+            preglob(base.add(rmescend), 0, None).offset_from(base) as usize
+        };
 
         rmesc = startp;
         if FNMATCH_IS_ENABLED || quotes == 0 {
             /* `_rmescapes` with RMESCAPE_GROW appends an unescaped copy of
              * `startp` past the cursor and moves the cursor over it, so the
-             * buffer can have reallocated underneath.  `rmesc` (its return)
-             * and `rmescend` (the cursor it left) are both derived *after*
-             * that growth and stay valid; `startp` and `str` are from
-             * before and are re-derived, which is exactly why the C
-             * re-reads `stackblock()` on these two lines. */
-            rmesc = _rmescapes(startp, RMESCAPE_ALLOC | RMESCAPE_GROW, None);
+             * buffer can have reallocated underneath.  That is what the C's
+             * three `stackblock()` re-reads on the lines after this call
+             * were for, and they are gone: an offset survives a growth. */
+            let base = expb().as_mut_ptr() as *mut c_char;
+            rmesc = _rmescapes(base.add(startp), RMESCAPE_ALLOC | RMESCAPE_GROW, None)
+                .offset_from(expb().as_mut_ptr() as *mut c_char) as usize;
             if rmesc != startp {
-                rmescend = expdest();
+                rmescend = expb().len();
             }
-            startp = expbase().offset(startloc as isize);
-            str = expbase().offset(nstrloc as isize);
         }
-        rmescend = rmescend.offset(-1);
+        rmescend -= 1;
 
         /* zero = subtype == VSTRIMLEFT || subtype == VSTRIMLEFTMAX */
         zero = subtype >> 1;
@@ -1569,47 +1605,65 @@ unsafe fn subevalvar(
             scanright
         };
 
-        endp = expbase().offset(strloc as isize - 1);
-        loc = scan(startp, endp, rmesc, rmescend, str, quotes, zero);
-        if loc.is_null() {
-            if quotes != 0 {
-                rmesc = startp;
+        endp = strloc as usize - 1;
+        let found = scan(
+            expb(),
+            &Scan {
+                startp,
+                endp,
+                rmesc,
+                rmescend,
+                pat,
+                quotes,
+                zero,
+            },
+        );
+        match found {
+            None => {
+                if quotes != 0 {
+                    rmesc = startp;
+                    rmescend = endp;
+                }
+            }
+            Some(at) if quotes == 0 => {
+                if zero != 0 {
+                    rmesc = at;
+                } else {
+                    rmescend = at;
+                }
+            }
+            Some(at) if zero != 0 => {
+                rmesc = at;
                 rmescend = endp;
             }
-        } else if quotes == 0 {
-            if zero != 0 {
-                rmesc = loc;
-            } else {
-                rmescend = loc;
+            Some(at) => {
+                rmesc = startp;
+                rmescend = at;
             }
-        } else if zero != 0 {
-            rmesc = loc;
-            rmescend = endp;
-        } else {
-            rmesc = startp;
-            rmescend = loc;
         }
 
-        /* The two ranges are cursors into one buffer and may overlap,
-         * so this is `ptr::copy` and not `copy_nonoverlapping`. */
-        core::ptr::copy(rmesc, startp, rmescend.offset_from(rmesc) as usize);
-        loc = startp.offset(rmescend.offset_from(rmesc));
+        /* `memmove(startp, rmesc, rmescend - rmesc)` — the two ranges are
+         * in one buffer and may overlap, which `copy_within` already
+         * knows. */
+        expb().copy_within(rmesc..rmescend, startp);
+        loc = startp + (rmescend - rmesc);
     }
 
     /* out: */
     /* `*loc = '\0'; STADJUST(loc - expdest, expdest)` — the terminator is
      * written *at* the new cursor, so it lands one past the length rather
-     * than inside it.  In the region that byte survives; in a `Vec` a later
-     * reallocation would drop it, because `reserve` copies only the first
-     * `len` bytes.  It does not matter: every path out of `argstr` writes
-     * the word's own terminator (`*(q - 1) &= end - 1` forces the closing
-     * NUL, CTLENDVAR or CTLENDARI to 0) before anything reads the buffer as
-     * a string, and `loc` is always strictly below the cursor here, so the
-     * byte is inside the initialised area until then.  `amount` was only
-     * ever `loc - expdest`. */
-    debug_assert!(loc <= expdest());
-    *loc = C_NUL;
-    set_expdest(loc);
+     * than inside it.  `push` then `pop` is how an owned buffer says
+     * "write it, do not count it", and it keeps the byte the C wrote: a
+     * later reallocation would drop it, because `reserve` copies only the
+     * first `len` bytes, but nothing reallocates before `argstr` writes
+     * the word's own terminator over it (`*(q - 1) &= end - 1` forces the
+     * closing NUL, CTLENDVAR or CTLENDARI to 0).  `amount` was only ever
+     * `loc - expdest`. */
+    let b = expb();
+    debug_assert!(loc <= b.len());
+    b.truncate(loc);
+    b.push(0);
+    b.pop();
 
     /* Remove any recorded regions beyond start of variable */
     removerecordregions(startloc);
@@ -1707,7 +1761,7 @@ unsafe fn evalvar(
 
         if (discard & !flag) != 0 && uflag(sh) != 0 {
             /* A stop before `varunset` stopped diverging, and still one. */
-            return Err(varunset(p, var, ptr::null(), 0));
+            return Err(varunset(p, var, None, 0));
         }
 
         if subtype == VSLENGTH {
@@ -3483,18 +3537,23 @@ unsafe fn cvtnum(num: intmax_t, flags: c_int, dst: &mut BString) -> size_t {
 unsafe fn varunset(
     end: *const c_char,
     var: *const c_char,
-    umsg: *const c_char,
+    umsg: Option<&[u8]>,
     varflags: c_int,
 ) -> Error {
-    let mut msg: *const c_char;
-    let mut tail: *const c_char;
-
-    tail = crate::shell::nullstr.as_ptr();
-    msg = b"parameter not set\0".as_ptr() as *const c_char;
-    if !umsg.is_null() {
+    /* The C's three `char *` here are a NULL test and two `%s` arguments,
+     * and every one of them is spent on the next five lines.  `nullstr` was
+     * the empty tail and `msg` a string literal; as byte slices the
+     * terminator is not part of either, so the two `CStr::from_ptr` scans
+     * that used to re-measure them are gone.  `umsg`'s `Option` is the
+     * NULL test said as a type — its one non-null caller hands over the
+     * expansion buffer's message, which is a slice at the call site rather
+     * than a pointer here. */
+    let mut tail: &[u8] = b"";
+    let mut msg: &[u8] = b"parameter not set";
+    if let Some(umsg) = umsg {
         if *end == CTLENDVAR {
             if (varflags & VSNUL) != 0 {
-                tail = b" or null\0".as_ptr() as *const c_char;
+                tail = b" or null";
             }
         } else {
             msg = umsg;
@@ -3504,8 +3563,8 @@ unsafe fn varunset(
     let mut message = Vec::new();
     message.extend_from_slice(core::slice::from_raw_parts(var as *const u8, name_len));
     message.extend_from_slice(b": ");
-    message.extend_from_slice(CStr::from_ptr(msg).to_bytes());
-    message.extend_from_slice(CStr::from_ptr(tail).to_bytes());
+    message.extend_from_slice(msg);
+    message.extend_from_slice(tail);
     crate::error::sh_error_value(&message)
 }
 

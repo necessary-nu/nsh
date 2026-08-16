@@ -143,7 +143,14 @@ pub(crate) unsafe fn pmatch(pattern: *mut c_char, string: *const c_char) -> c_in
 // `fnmatch` is the one arm that still wants C strings and cannot be given
 // a sub-slice, so it is the one arm that copies.  It is unreachable while
 // `FNMATCH_IS_ENABLED` is 0.
-pub(crate) unsafe fn pmatch_slices(pattern: &[u8], string: &[u8]) -> c_int {
+//
+// Safe, unlike the pointer entry above, and for a reason rather than for
+// tidiness: everything it can do to memory it does to two `Vec`s it just
+// built and owns, so there is no obligation left for a caller to discharge.
+// The three operations inside the `unsafe` block have not gone anywhere —
+// they are the same three, in the one branch a `const bool` makes dead —
+// and `ccmatch_bytes` above is written the same way for the same reason.
+pub(crate) fn pmatch_slices(pattern: &[u8], string: &[u8]) -> c_int {
     if FNMATCH_IS_ENABLED {
         let cstr = |s: &[u8]| {
             let mut v = s[..s.iter().position(|&c| c == 0).unwrap_or(s.len())].to_vec();
@@ -151,8 +158,10 @@ pub(crate) unsafe fn pmatch_slices(pattern: &[u8], string: &[u8]) -> c_int {
             v
         };
         let (p, q) = (cstr(pattern), cstr(string));
-        return (libc::fnmatch(p.as_ptr() as *const c_char, q.as_ptr() as *const c_char, 0) == 0)
-            as c_int;
+        return unsafe {
+            (libc::fnmatch(p.as_ptr() as *const c_char, q.as_ptr() as *const c_char, 0) == 0)
+                as c_int
+        };
     }
     pmatch_bytes(pattern, string) as c_int
 }

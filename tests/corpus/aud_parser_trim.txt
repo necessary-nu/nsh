@@ -1,0 +1,204 @@
+#!name trim ascii four forms
+v=aXbXc; echo "${v#*X}" "${v##*X}" "${v%X*}" "${v%%X*}"
+%%%
+#!name trim no match
+v=abc; echo "${v#z}" "${v##z}" "${v%z}" "${v%%z}"
+%%%
+#!name trim whole string
+v=abc; echo "[${v#abc}]" "[${v##*}]" "[${v%abc}]" "[${v%%*}]"
+%%%
+#!name trim empty value
+v=; echo "[${v#a}]" "[${v##*}]" "[${v%a}]" "[${v%%*}]"
+%%%
+#!locale=C.utf8
+#!name trim utf8 prefix
+v=éàbéàc; echo "${v#*é}" "${v##*é}" "${v%é*}" "${v%%é*}"
+%%%
+#!locale=C.utf8
+#!name trim utf8 question
+v=éàb; echo "${v#?}" "${v##?}" "${v%?}" "${v%%?}"
+%%%
+#!locale=C.utf8
+#!name trim utf8 star and question mix
+v=日本語です; echo "${v#?}" "${v%?}" "${v#*本}" "${v%%*語}"
+%%%
+#!locale=C.utf8
+#!name trim utf8 bracket member
+v=éxé; echo "${v#[é]}" "${v%[é]}" "${v#[!é]}" "${v%[!x]}"
+%%%
+#!name trim escaped metachar in pattern
+v='a*b*c'; echo "${v#a\*}" "${v##*\*}" "${v%\*c}" "${v%%\**}"
+%%%
+#!name trim quoted pattern
+v='a*b'; echo "${v#'a*'}" "${v#"a*"}" "${v%'*b'}" "${v%"*b"}"
+%%%
+#!name trim unquoted expansion then split
+v='a b c'; set -- ${v#a}; echo "$#" "$1" "$2"
+%%%
+#!name trim in unquoted context with glob chars
+mkdir -p td; touch td/x; v='td/*'; echo ${v#td/} ${v%/*}
+%%%
+#!name trim nested expansion
+v=abcdef; w=cd; echo "${v#*${w}}" "${v%${w}*}"
+%%%
+#!name trim of positional
+set -- aXbXc; echo "${1#*X}" "${1%%X*}"
+%%%
+#!name trim of star and at
+set -- ab cd; echo "${*#a}" "${@%d}"
+%%%
+#!name trim with backslash in value
+v='a\b\c'; echo "${v#*\\}" "${v%\\*}"
+%%%
+#!name trim with newline in value
+v="$(printf 'a\nb\nc')"; echo "${v#*
+}" | od -An -c | head -2
+%%%
+#!name trim longest vs shortest on repeats
+v=aaa; echo "${v#a}" "${v##a*}" "${v%a}" "${v%%a*}"
+%%%
+#!name assign default and error
+unset u; echo "${u:=set}" "$u"; unset u; echo "${u=set2}" "$u"
+%%%
+#!name error message from expansion
+unset u; (echo "${u:?custom message}") 2>&1 | sed 's/^[^:]*: //'
+%%%
+#!name error message default
+unset u; (echo "${u:?}") 2>&1 | sed 's/^[^:]*: //'
+%%%
+#!name error message unset vs null
+u=; (echo "${u:?nullmsg}") 2>&1 | sed 's/^[^:]*: //'; (echo "${u?unsetmsg}") 2>&1 | sed 's/^[^:]*: //'
+%%%
+#!name error message built by expansion
+unset u; w=xyz; (echo "${u:?prefix-${w}-suffix}") 2>&1 | sed 's/^[^:]*: //'
+%%%
+#!name assign then trim same word
+unset u; echo "${u:=aXb}" "${u#*X}"
+%%%
+#!name backquote trailing newlines eaten
+echo "[$(printf 'a\n\n\n')]"; echo "[$(printf '\n\n')]"; echo "[$(printf 'a')]"
+%%%
+#!name backquote embedded newlines kept
+echo "[$(printf 'a\nb\n')]" | od -An -c | head -2
+%%%
+#!name backquote unquoted splits
+set -- $(printf 'a b\nc\n'); echo "$#" "$1" "$3"
+%%%
+#!name case pattern matching
+for w in abc axc a; do case $w in a?c) echo "q:$w";; a*) echo "s:$w";; *) echo "n:$w";; esac; done
+%%%
+#!locale=C.utf8
+#!name case pattern utf8
+for w in é x; do case $w in [é]) echo "e:$w";; ?) echo "q:$w";; esac; done
+%%%
+#!name trim then glob in one word
+mkdir -p tg; touch tg/f1 tg/f2; v=xxtg; echo ${v#xx}/*
+%%%
+#!name long value trim forces growth
+v=$(printf 'a%.0s' $(seq 1 300))X$(printf 'b%.0s' $(seq 1 300)); echo "${#v}" "${#v#*X}"; w=${v#*X}; echo "${#w}"
+%%%
+#!name trim with ctlesc heavy value
+v='a$b`c\d"e'"'"'f'; echo "${v#a}" "${v%f}" "${v##*\\}"
+%%%
+#!locale=C.utf8
+#!name unquoted utf8 trim short
+v=日本語です; echo ${v#?}; echo ${v%?}; echo ${v#*本}; echo ${v%%*語}
+%%%
+#!locale=C.utf8
+#!name unquoted utf8 trim accents
+v=éàbéàc; echo ${v#*é}; echo ${v##*é}; echo ${v%é*}; echo ${v%%é*}
+%%%
+#!locale=C.utf8
+#!name unquoted utf8 trim one char at a time
+v=àéîôû; echo ${v#?}; echo ${v#??}; echo ${v#???}; echo ${v%?}; echo ${v%??}; echo ${v%???}
+%%%
+#!locale=C.utf8
+#!name unquoted utf8 mixed with ascii
+v=aébéc; echo ${v%é*}; echo ${v%%é*}; echo ${v#*é}; echo ${v##*é}
+%%%
+#!name unquoted trim over escaped bytes
+v='a$b`c'; echo ${v%?}; echo ${v%??}; echo ${v#?}; echo ${v#??}
+%%%
+#!name unquoted trim over backslashes
+v='a\b\c'; echo ${v%?}; echo ${v#?}; echo ${v%%\\*}; echo ${v##*\\}
+%%%
+#!locale=C.utf8
+#!name unquoted trim mixed escape and utf8
+v='é$à`î'; echo ${v%?}; echo ${v%??}; echo ${v#?}; echo ${v#??}
+%%%
+#!name unquoted trim result is split
+v='aX b X c'; set -- ${v#*X}; echo "$#" "[$1]" "[$2]"
+%%%
+#!locale=C.utf8
+#!name unquoted trim utf8 then split
+v='é a é b'; set -- ${v#é}; echo "$#" "[$1]" "[$2]"
+%%%
+#!locale=C.utf8
+#!name unquoted trim longest utf8 suffix
+v=ααββγγ; echo ${v%%α*}; echo ${v%α*}; echo ${v##*γ}; echo ${v#*γ}
+%%%
+#!locale=C.utf8
+#!name unquoted trim four byte utf8
+v=𝒜𝒷𝒸; echo ${v#?}; echo ${v%?}; echo ${v#??}; echo ${v%??}
+%%%
+#!locale=C.utf8
+#!name unquoted trim utf8 bracket
+v=éxé; echo ${v#[é]}; echo ${v%[é]}; echo ${v#[!é]}
+%%%
+#!mode=stdin
+#!locale=C.utf8
+#!name heredoc utf8 trim
+v=日本語です
+cat <<EOF
+${v#?}
+${v%?}
+${v#*本}
+${v%%*語}
+EOF
+%%%
+#!mode=stdin
+#!locale=C.utf8
+#!name heredoc accent trim
+v=éàbéàc
+cat <<EOF
+${v#*é}|${v##*é}|${v%é*}|${v%%é*}
+EOF
+%%%
+#!mode=stdin
+#!name heredoc escaped byte trim
+v='a$b`c\d'
+cat <<EOF
+${v%?}|${v%??}|${v#?}|${v#??}
+EOF
+%%%
+#!mode=stdin
+#!locale=C.utf8
+#!name heredoc four byte utf8 trim
+v=𝒜𝒷𝒸
+cat <<EOF
+${v#?}|${v%?}|${v#??}|${v%??}
+EOF
+%%%
+#!mode=stdin
+#!locale=C.utf8
+#!name heredoc mixed escape and utf8 trim
+v='é$à`î'
+cat <<EOF
+${v%?}|${v%??}|${v#?}|${v#??}
+EOF
+%%%
+#!locale=C.utf8
+#!name redirect target from utf8 trim
+v=x日本; echo hi > ${v#x}; ls | head -3; cat 日本
+%%%
+#!locale=C.utf8
+#!name redirect target from accent trim
+v=aéb.txt; echo ok > ${v%.txt}; ls | head -3; cat aéb
+%%%
+#!mode=stdin
+#!locale=C.utf8
+#!name heredoc trim longest utf8
+v=ααββγγ
+cat <<EOF
+${v%%α*}|${v%α*}|${v##*γ}|${v#*γ}
+EOF

@@ -13,6 +13,10 @@
 #   #!mode=stdin    pipe BODY into `sh` on stdin
 #   #!args a b c    extra argv words after the script / -c body
 #   #!norm=pid      also normalise runs of 3+ digits (for $$, job pids)
+#   #!locale=NAME   run this case under LC_ALL=NAME instead of the sweep's
+#                   default C -- the only way to reach the shell's multibyte
+#                   paths, which are dead code under C.  The corpus is
+#                   refused outright if NAME is not installed.
 #   #!name some text   label for the failure report
 #
 # Every case runs in its own scratch directory and every invocation of
@@ -102,6 +106,22 @@ fi
 for f in "$RUNROOT"/cases/*; do
 	[ -s "$f" ] || rm -f "$f"
 done
+
+# Third layer: a `#!locale=` a case cannot get is worse than no case.
+#
+# `setlocale` falls back to C without saying so, so a case that names a
+# locale the system has not generated runs under C, passes, and reports
+# that it tested a multibyte path it never entered. That is the same
+# failure mode `divergences.sh`'s header warns about, so it aborts the
+# corpus rather than degrading.
+missing=$(grep -h '^#!locale=' "$RUNROOT"/cases/* 2>/dev/null | sed 's/^#!locale=//' | sort -u |
+	while IFS= read -r l; do
+		locale -a 2>/dev/null | grep -qxF "$l" || printf '%s\n' "$l"
+	done)
+if [ -n "$missing" ]; then
+	echo "corpus asks for locales this system has not generated: $(echo "$missing" | tr '\n' ' ')" >&2
+	exit 5
+fi
 
 find "$RUNROOT/cases" -type f -print0 |
 	PORT=$PORT REF=$REF RUNROOT=$RUNROOT xargs -0 -P "$JOBS" -n 1 "$HERE/dscase.sh"

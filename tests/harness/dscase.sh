@@ -19,6 +19,7 @@ shargs=
 name=
 norm=
 extra=
+locale=
 
 # Peel the directive lines off the front of the case.
 body=$CASE.body
@@ -31,6 +32,7 @@ while IFS= read -r line; do
 		'#!args '*) extra=${line#'#!args '}; continue ;;
 		'#!shargs '*) shargs=${line#'#!shargs '}; continue ;;
 		'#!norm='*) norm=${line#'#!norm='}; continue ;;
+		'#!locale='*) locale=${line#'#!locale='}; continue ;;
 		'#!name '*) name=${line#'#!name '}; continue ;;
 		'#!allow-kill') continue ;;
 		esac
@@ -39,6 +41,16 @@ while IFS= read -r line; do
 	printf '%s\n' "$line" >> "$body"
 done < "$CASE"
 [ -n "$name" ] || name=$(head -c 300 "$body" | tr '\n' '~')
+
+# `#!locale=` overrides the sweep's LC_ALL for this case and for both
+# shells alike. The default is C -- see sandboxed.sh for why the locale is
+# pinned at all -- and under C every multibyte path in the shell is dead
+# code: `${v%?}` strips one byte, `pmatch`'s CTLMBCHAR arms are never
+# entered, and a case written to exercise them passes without doing so.
+# dsdiff.sh has already refused the corpus if the locale is not installed,
+# because falling back to C silently is exactly the failure this exists to
+# stop.
+[ -z "$locale" ] || export DS_LOCALE=$locale
 
 run() {  # run SHELL WORKDIR
 	local sh=$1 dir=$2
