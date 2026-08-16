@@ -1263,8 +1263,9 @@ unsafe fn expbackq(
 ) -> Result<(), Error> {
     let mut in_: crate::eval::backcmd = mem::zeroed();
     let mut i: c_int;
-    let mut buf: [c_char; 128] = [0; 128];
-    let mut p: *mut c_char;
+    /* `char buf[128]`, as bytes: it is only ever handed to `read` and to
+     * `memtodest`, and both want the bytes rather than the sign. */
+    let mut buf: [u8; 128] = [0; 128];
     let mut dest: usize;
     let startloc: c_int;
 
@@ -1297,13 +1298,16 @@ unsafe fn expbackq(
             "expbackq: evalbackcmd left a read-ahead buffer nothing frees"
         );
 
-        p = in_.buf;
         i = in_.nleft;
-        /* `if (i == 0) goto read;` — skips the first memtodest only. */
+        /* `if (i == 0) goto read;` — skips the first memtodest only.  The
+         * C's `p = in.buf` is gone with it: the assertion above says that
+         * pointer is always NULL, so the only source this loop ever
+         * encodes is `buf`, and after the first pass `p` was `buf`
+         * anyway. */
         let mut jump_read = i == 0;
         loop {
             if !jump_read {
-                memtodest(p, i as size_t, flag, expb());
+                memtodest(&buf[..i as usize], flag, expb());
             }
             jump_read = false;
             /* read: */
@@ -1331,7 +1335,6 @@ unsafe fn expbackq(
             if i <= 0 {
                 break;
             }
-            p = buf.as_mut_ptr();
         }
 
         if in_.fd >= 0 {
@@ -1853,24 +1856,32 @@ pub struct mbpair {
 
 // [spec:dash:def:expand.mbtodest-fn]
 // [spec:dash:sem:expand.mbtodest-fn]
-unsafe fn mbtodest(
-    mut p: *const c_char,
-    dst: &mut BString,
-    syntax: SyntaxRef,
-    len: size_t,
-) -> mbpair {
-    let mut mbs: libc::mbstate_t = mem::zeroed();
+// `p` and the C's `len` became `src` and the index of the byte *after* the
+// one to decode — the position `memtodest`'s cursor is at when it calls,
+// which is why the first thing both do is step back over it. `len` is not
+// a parameter any more: it was always "bytes from `p - 1` to the end of
+// the input", which a slice answers.
+//
+// Safe, and the slice is the reason: `mbrlen`'s obligation is that `n`
+// bytes are readable from `s`, which used to be a number the caller had to
+// get right and is now the slice's own length. The initial conversion
+// state is all-zero by definition — the C writes `mbstate_t mbs = {}` — so
+// `zeroed` produces a valid `mbstate_t` rather than an uninitialised one.
+// Two operations move inside the block rather than disappearing.
+fn mbtodest(src: &[u8], at: usize, dst: &mut BString, syntax: SyntaxRef) -> mbpair {
+    let mut mbs: libc::mbstate_t = unsafe { mem::zeroed() };
     let mbp: mbpair;
     /* The C's `q0`: where this call started writing. A length, because
      * the cursor is one. */
     let q0: usize = dst.len();
     let mut ml: size_t;
 
-    p = p.offset(-1);
-    ml = mbrlen(p, len, &mut mbs);
+    /* `p = p - 1` */
+    let p: &[u8] = &src[at - 1..];
+    ml = unsafe { mbrlen(p.as_ptr() as *const c_char, p.len(), &mut mbs) };
     'out: {
         if ml == (0 as size_t).wrapping_sub(2) || ml == (0 as size_t).wrapping_sub(1) || ml < 2 {
-            chtodest(*p as c_int, syntax, dst);
+            chtodest(p[0] as c_char as c_int, syntax, dst);
             ml = 1;
             break 'out;
         }
@@ -1886,8 +1897,9 @@ unsafe fn mbtodest(
 
         /* `q = mempcpy(q, p, ml)`. The source is the caller's input and
          * never `dst`'s own buffer -- `memtodest` records why -- so the
-         * append cannot alias what it reads. */
-        dst.extend_from_slice(core::slice::from_raw_parts(p as *const u8, ml));
+         * append cannot alias what it reads.  `ml` came from `mbrlen`
+         * over this same slice, so it cannot exceed it. */
+        dst.extend_from_slice(&p[..ml]);
 
         if syntax.at(CTLMBCHAR as c_int) == CCTL() {
             /* USTPUTC(ml, q); USTPUTC(CTLMBCHAR, q); */
@@ -1938,33 +1950,41 @@ unsafe fn mbtodest(
 // end.  `p` never points into `dst` — every caller's source is a variable
 // value, a `read` buffer, a `getpwnam` field or a stack array — which is
 // what makes appending safe while reading `p`.
-unsafe fn memtodest(
-    mut p: *const c_char,
-    mut len: size_t,
-    flags: c_int,
-    dst: &mut BString,
-) -> size_t {
+// `(p, len)` became `src`.  The C's pair is a slice everywhere it is
+// constructed — a variable's value, a `read` buffer, a directory entry, a
+// stack array — and carrying it as one removes the walk's every bound
+// question at once: `p` cannot run past `len`, the eight-byte fast path
+// reads eight bytes that exist, and `mbtodest`'s `p - 1` is an index into
+// something with a start.
+fn memtodest(src: &[u8], flags: c_int, dst: &mut BString) -> size_t {
     let syntax: SyntaxRef;
     let mut count: size_t = 0;
     let expq: c_int;
+    /* The C's `p` and `len` are one cursor over `src` and the number of
+     * bytes left; `i` is the first and `src.len() - i` the second. */
+    let mut i: usize = 0;
 
-    if len == 0 {
+    if src.is_empty() {
         return 0;
     }
 
     /* CTLMBCHAR, 2, c, c, 2, CTLMBCHAR.  A hint now rather than a
      * contract: the writes below are appends, so a short reservation
      * costs a growth instead of running off the end. */
-    dst.reserve(len * 3);
+    dst.reserve(src.len() * 3);
 
     /* Guarded by the `assert!(QUOTES_ESC == 0x11 && …)` above, which is
      * this file's port of the matching `#error`. */
     expq = flags & EXP_QUOTED;
     if (flags & (expq >> 3 | expq >> 4 | expq >> 8) & (QUOTES_ESC | EXP_MBCHAR)) == 0 {
-        while len >= 8 {
+        while src.len() - i >= 8 {
             let x: u64;
 
-            x = ptr::read_unaligned(p.offset(count as isize) as *const u64);
+            /* `__builtin_memcpy` of eight bytes into a `uint64_t`, which
+             * is an unaligned load the C spells with a cast.  Over a
+             * slice it is a checked eight-byte read, and the check is
+             * the loop condition. */
+            x = u64::from_ne_bytes(src[i..i + 8].try_into().unwrap());
 
             if (x | x.wrapping_sub(0x0101010101010101)) & 0x8080808080808080 != 0 {
                 break;
@@ -1978,10 +1998,8 @@ unsafe fn memtodest(
             dst.extend_from_slice(&x.to_ne_bytes());
 
             count += 8;
-            len -= 8;
+            i += 8;
         }
-
-        p = p.offset(count as isize);
 
         /* NOTE (bug-for-bug): `is_type` is used here *unbiased*, i.e.
          * without the `+ SYNBASE` every other syntax-table user applies.
@@ -2000,10 +2018,10 @@ unsafe fn memtodest(
     }
 
     /* for (; len; len--) */
-    while len != 0 {
+    while i < src.len() {
         'cont: {
-            let c: c_int = *p as c_int;
-            p = p.offset(1);
+            let c: c_int = src[i] as c_char as c_int;
+            i += 1;
 
             if c == 0 && (flags & EXP_KEEPNUL) == 0 {
                 break 'cont; /* continue */
@@ -2012,19 +2030,20 @@ unsafe fn memtodest(
             count += 1;
 
             if c < 0 {
-                let mbp: mbpair = mbtodest(p, dst, syntax, len);
+                /* `mbtodest(p, ...)` is called with `p` already past the
+                 * byte it is about to decode, and starts by stepping
+                 * back over it; `i` is that same position. */
+                let mbp: mbpair = mbtodest(src, i, dst, syntax);
                 let mlm: c_uint;
 
                 /* `q += mbp.ql` — the append did it. */
                 mlm = mbp.ml;
-                p = p.offset(mlm as isize);
-                len -= mlm as size_t;
+                i += mlm as usize;
                 break 'cont; /* continue */
             }
 
             chtodest(c, syntax, dst);
         }
-        len -= 1;
     }
 
     /* The C's `expdest = q` was this port's `set_len` over bytes a raw
@@ -2036,9 +2055,12 @@ unsafe fn memtodest(
 
 // [spec:dash:def:expand.strtodest-fn]
 // [spec:dash:sem:expand.strtodest-fn]
+//
+// The C string entry, for the callers that hold one: a variable's value,
+// a positional parameter, `getpwnam`'s home directory.  The `strlen` the C
+// performs is `to_bytes`, which is the same scan and also the length.
 unsafe fn strtodest(p: *const c_char, flags: c_int, dst: &mut BString) -> size_t {
-    let len: size_t = CStr::from_ptr(p).count_bytes();
-    memtodest(p, len, flags, dst)
+    memtodest(CStr::from_ptr(p).to_bytes(), flags, dst)
 }
 
 /*
@@ -2055,7 +2077,12 @@ unsafe fn varvalue(
 ) -> Result<ssize_t, Error> {
     let subtype: c_int = varflags & VSTYPE;
     let mut seplen: size_t;
-    let mut seps: *const c_char;
+    /* The C's `const char *seps` plus its length.  The comment that stood
+     * at the assignment below owed a conversion — it said the pointer was
+     * safe *because* of where the storage comes from, which is an argument
+     * a slice does not have to make.  Both sources are bytes the shell
+     * owns for the whole call, so both are slices. */
+    let mut seps: &[u8];
     let mut len: ssize_t = 0;
     let start: size_t;
     let discard: c_int;
@@ -2079,7 +2106,10 @@ unsafe fn varvalue(
     } else {
         !(0 as c_uint)
     };
-    seps = crate::shell::nullstr.as_ptr();
+    /* `seps = nullstr` — the empty C string, whose one byte is the
+     * terminator, and the terminator is what gets written when the
+     * separator is a NUL. */
+    seps = &[0u8];
     seplen = ((flags as c_int) & EXP_FULL) as size_t;
     start = expdest_off() as size_t;
 
@@ -2149,17 +2179,7 @@ unsafe fn varvalue(
                              */
                             seplen &= (!(flags >> CHAR_BIT)) as size_t;
                             if seplen == 0 {
-                                /* `seps` is still a `char *` because the
-                                 * separator is written out through
-                                 * `memtodest` a byte at a time; the
-                                 * pointer is taken from storage the shell
-                                 * owns for the whole call rather than
-                                 * from the variable table, so the walk
-                                 * `varvalue` does over it cannot outlive
-                                 * what it reads. `varvalue` itself is
-                                 * cluster F and converts with the scan
-                                 * family. */
-                                seps = sh.ifs.ncifs.as_ptr() as *const c_char;
+                                seps = sh.ifs.ncifs.as_slice();
                             }
                             seplen = (seplen.wrapping_sub(1) & sh.ifs.ifsmb0len.wrapping_sub(1))
                                 .wrapping_add(1);
@@ -2206,7 +2226,20 @@ unsafe fn varvalue(
                     break;
                 }
 
-                len += memtodest(seps, seplen, (flags as c_int) | EXP_KEEPNUL, expb()) as ssize_t;
+                /* `memtodest(seps, seplen, ...)` — the C reads `seplen`
+                 * bytes from `seps`, and the two are set together above:
+                 * one byte of `nullstr`, or `ifsmb0len` bytes of `IFS`,
+                 * which is the length of its first character and so at
+                 * most `IFS`'s own.  Asserted rather than clamped: a
+                 * clamp would turn the C reading past its buffer into a
+                 * shorter separator and say nothing, which is the one
+                 * outcome worse than either. */
+                debug_assert!(
+                    seplen <= seps.len(),
+                    "varvalue: separator length {seplen} exceeds the {} bytes it names",
+                    seps.len()
+                );
+                len += memtodest(&seps[..seplen], (flags as c_int) | EXP_KEEPNUL, expb()) as ssize_t;
             }
             break 'sw;
         }
@@ -3198,7 +3231,7 @@ unsafe fn expmeta(b: &mut BString, name: &[u8], mut expdir_len: size_t) {
                          * after a possible growth, and an index does not
                          * move. */
                         globenc.clear();
-                        memtodest(dnamep, len, EXP_MBCHAR | EXP_KEEPNUL, &mut globenc);
+                        memtodest(dname, EXP_MBCHAR | EXP_KEEPNUL, &mut globenc);
                         debug_assert_eq!(
                             globenc.last(),
                             Some(&0),
@@ -3535,7 +3568,7 @@ pub unsafe fn casematch(
 // [spec:dash:sem:expand.cvtnum-fn]
 unsafe fn cvtnum(num: intmax_t, flags: c_int, dst: &mut BString) -> size_t {
     let value = format!("{num}");
-    memtodest(value.as_ptr() as *const c_char, value.len(), flags, dst)
+    memtodest(value.as_bytes(), flags, dst)
 }
 
 // [spec:dash:def:expand.varunset-fn]

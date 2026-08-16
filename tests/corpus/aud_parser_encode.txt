@@ -1,0 +1,87 @@
+#!name enc star join default ifs
+set -- a b c; echo "$*"; echo "$@"; v="$*"; echo "${#v}"
+%%%
+#!name enc star join custom ifs
+set -- a b c; IFS=:; echo "$*"; IFS=; echo "$*"; IFS=' '; echo "$*"
+%%%
+#!name enc star join empty ifs
+set -- a b c; IFS=; echo "$*"; echo "[$@]"
+%%%
+#!locale=C.utf8
+#!name enc star join multibyte ifs
+set -- a b c; IFS=é; echo "$*" | od -An -c | head -2
+%%%
+#!locale=C.utf8
+#!name enc star join multibyte ifs two chars
+set -- x y z; IFS=éà; echo "$*" | od -An -c | head -2
+%%%
+#!locale=C.utf8
+#!name enc star join multibyte args
+set -- é à î; echo "$*"; echo "$@"; IFS=:; echo "$*"
+%%%
+#!locale=C.utf8
+#!name enc star join four byte ifs
+set -- p q; IFS=𝒜; echo "$*" | od -An -c | head -2
+%%%
+#!name enc star unquoted splits
+set -- 'a b' c; IFS=' '; for w in $*; do echo "[$w]"; done
+%%%
+#!name enc numeric vars
+echo "$#" "$?"; set -- a b c d; echo "$#"; false; echo "$?"; echo "$((1+2))" "$((7*6))"
+%%%
+#!name enc arithmetic negative and large
+echo "$((0-5))" "$((1<<40))" "$((-1))"
+%%%
+#!locale=C.utf8
+#!name enc backquote multibyte output
+echo "[$(printf 'é\nà')]"; echo "[$(printf '日本語')]"
+%%%
+#!name enc backquote long output crosses the fast path
+echo "$(printf 'a%.0s' $(seq 1 300))" | wc -c
+%%%
+#!locale=C.utf8
+#!name enc backquote long multibyte output
+echo "$(printf 'é%.0s' $(seq 1 200))" | wc -c
+%%%
+#!name enc backquote binary-ish output
+printf 'x\001y\002z' > f; echo "[$(cat f)]" | od -An -c | head -2
+%%%
+#!name enc tilde home
+HOME=/tmp/zz; echo ~; echo ~/sub; echo "~"
+%%%
+#!locale=C.utf8
+#!name enc tilde multibyte home
+HOME=/tmp/é; echo ~; echo ~/sub
+%%%
+#!locale=C.utf8
+#!name enc variable value multibyte
+v=日本語です; echo "$v"; echo "${#v}"; echo "$v" | od -An -c | head -2
+%%%
+#!locale=C.utf8
+#!name enc variable value mixed
+v='a é b à c'; echo "$v"; set -- $v; echo "$#"
+%%%
+#!name enc value with control bytes
+v="$(printf 'a\001b\177c')"; echo "$v" | od -An -c | head -2
+%%%
+#!name enc long value crosses eight byte fast path
+v=$(printf 'q%.0s' $(seq 1 64)); echo "${#v}"; echo "$v" | wc -c
+%%%
+#!locale=C.utf8
+#!name enc long value multibyte crosses fast path
+v=$(printf 'ü%.0s' $(seq 1 64)); echo "${#v}"; echo "$v" | wc -c
+%%%
+#!locale=C.utf8
+#!name enc glob entry names multibyte
+mkdir -p e; touch e/é e/ü e/plain; echo e/*; echo e/?
+%%%
+#!name enc positional in quotes with ifs
+set -- 1 2 3; IFS=,; echo "$*"; echo $*; echo "$@"
+%%%
+#!locale=C.utf8
+#!name enc invalid utf8 in value
+v="$(printf '\303')"; echo "$v" | od -An -c | head -2; echo "${#v}"
+%%%
+#!locale=C.utf8
+#!name enc invalid utf8 in ifs
+set -- a b; IFS="$(printf '\303')"; echo "$*" | od -An -c | head -2
