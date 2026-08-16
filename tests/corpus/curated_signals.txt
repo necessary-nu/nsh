@@ -5,3 +5,87 @@
 #!allow-kill
 #!name trap HUP, self-signal
 trap 'echo hup' HUP; kill -HUP $$; echo cont
+%%%
+#!allow-kill
+#!name kill -s NAME uppercase
+trap 'echo hup' HUP; kill -s HUP $$; echo cont
+%%%
+#!allow-kill
+#!name kill -s NAME lowercase
+trap 'echo hup' HUP; kill -s hup $$; echo cont
+%%%
+#!allow-kill
+#!name kill -s NAME mixed case
+trap 'echo alrm' ALRM; kill -s AlRm $$; echo cont
+%%%
+#!allow-kill
+#!name kill -s NUMBER
+trap 'echo hup' HUP; kill -s 1 $$; echo cont
+%%%
+#!allow-kill
+#!name kill -NAME lowercase
+trap 'echo hup' HUP; kill -hup $$; echo cont
+%%%
+#!allow-kill
+#!name kill -NUMBER selects by number not process group
+trap 'echo alrm' ALRM; kill -14 $$; echo cont
+%%%
+#!allow-kill
+#!name kill -s two signals in sequence
+trap 'echo upper' ALRM; kill -s ALRM $$; trap 'echo lower' HUP; kill -s hup $$; kill -s 0 $$; echo signal-zero
+%%%
+#!allow-kill
+#!name kill -NAME then -NUMBER in sequence
+trap 'echo by-name' HUP; kill -HUP $$; trap 'echo by-number' ALRM; kill -14 $$; echo done
+%%%
+#!allow-kill
+#!name kill -s 0 delivers nothing
+trap 'echo hup' HUP; kill -s 0 $$; echo "rc=$?"
+%%%
+#!allow-kill
+#!name kill -0 delivers nothing
+trap 'echo hup' HUP; kill -0 $$; echo "rc=$?"
+%%%
+#!allow-kill
+#!name kill -s rejects the SIG prefix
+kill -s SIGHUP $$; echo "rc=$?"
+%%%
+#!allow-kill
+#!name kill -s rejects an unknown name
+kill -s nosuchsig $$; echo "rc=$?"
+%%%
+#!allow-kill
+#!name kill rejects an unknown -NAME
+kill -nosuchsig $$; echo "rc=$?"
+%%%
+#!allow-kill
+#!name kill -s with no operand
+kill -s HUP; echo "rc=$?"
+%%%
+#!allow-kill
+#!name kill with no arguments
+kill; echo "rc=$?"
+%%%
+#!allow-kill
+#!name kill -l names an exit status
+kill -l 15; kill -l 143; echo "rc=$?"
+%%%
+#!allow-kill
+#!name kill -l rejects an out-of-range status
+kill -l 999; echo "rc=$?"
+%%%
+#!allow-kill
+#!name kill -s NAME with the signal ignored
+trap '' HUP; kill -s hup $$; echo alive
+%%%
+#!allow-kill
+#!name kill -s NAME after the trap is reset
+(trap 'echo hup' HUP; trap - HUP; kill -s hup $$; echo unreached); echo "rc=$?"
+%%%
+#!allow-kill
+#!name kill -s NAME twice with one trap
+trap 'echo hup' HUP; kill -s hup $$; kill -s HUP $$; echo cont
+%%%
+#!allow-kill
+#!name kill -s NAME to a job id
+trap 'echo hup' HUP; kill -s HUP %% 2>&1; echo "rc=$?"
