@@ -439,7 +439,10 @@ then:
   each of the 39 entries in `builtins.rs`'s table; `var::varfunc`
   (`var.rs:407`) gets one to each `func: Some(..)` in `varinit`.
 * **Excludes** `api.rs` (behind the `api-sketch` feature, all bodies
-  `todo!()`), `testutil.rs` (`#[cfg(test)]`) and every `mod tests`.
+  `todo!()` — both the sketch and its feature are gone now, deleted by
+  `public-api` once every type in them was real, so a re-run of this
+  measurement has nothing to exclude on that line), `testutil.rs`
+  (`#[cfg(test)]`) and every `mod tests`.
 
 Seeds are the five functions that actually raise: `error::exraise`,
 `error::sh_error`, `error::exerror`, `error::exverror`,

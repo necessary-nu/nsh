@@ -10,9 +10,6 @@ description = "A POSIX shell as a library"
 name = "nsh"
 path = "src/lib.rs"
 
-[features]
-api-sketch = []
-
 [dependencies]
 bstr = "1"
 libc = "0.2"
@@ -22,4 +19,3 @@ nshterm = { git = "https://github.com/necessary-nu/nshedit.git", rev = "8059f66e
 
 [[example]]
 name = "embed"
-required-features = ["api-sketch"]

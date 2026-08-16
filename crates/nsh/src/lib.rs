@@ -39,21 +39,28 @@
 // affordable. Re-measure by deleting this line.
 #![allow(unsafe_op_in_unsafe_fn)]
 
-// ---- the proposed public API, unimplemented --------------------------
+// ---- the public API --------------------------------------------------
 //
-// `api` is a design artefact, not code: every body is `todo!()` and
-// nothing else in the crate refers to it. It is compiled so that the
-// signatures in `docs/api-design.md` are checked by the compiler rather
-// than by reading. It is deleted by the `public-api` node, which replaces
-// it with the implementation.
+// `api.rs` stood here: a type-checked sketch of `docs/api-design.md`
+// whose every body was `todo!()`, behind a feature nothing enabled,
+// because a surface an embedder can call and that panics on every call
+// would have contradicted [dec:nsh:public-surface] rather than served it.
+// It did the job it was built for -- the borrow shapes, `Host`'s object
+// safety, and whether a built-in that re-enters evaluation can be written
+// at all are questions a document cannot answer and a compiler can -- and
+// it is gone, because all of it is real now. Its module doc said the
+// re-exports would move here when the list was empty. This is that.
 //
-// Behind a feature that nothing enables by default, because leaving it
-// `pub` would put a surface an embedder can call -- and that panics on
-// every call -- into the crate's public API. [dec:nsh:public-surface]
-// exists to make that surface honest, so a sketch shipping as part of it
-// would contradict the decision it was written to serve.
-#[cfg(feature = "api-sketch")]
-pub mod api;
+// The names below are what an embedder writes. Each is implemented in the
+// module that owns the concept, and named here so that reaching one does
+// not mean knowing which module that is.
+pub use crate::builder::Builder;
+pub use crate::context::Shell;
+pub use crate::error::Error;
+pub use crate::host::{Disposition, Host, NoHost, ProcessHost, SignalSink};
+pub use crate::source::Source;
+pub use crate::status::{ExitStatus, Signal};
+pub use crate::streams::Streams;
 
 // ---- the shell instance ----------------------------------------------
 //

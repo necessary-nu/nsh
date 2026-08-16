@@ -74,10 +74,14 @@ impl Streams {
     /// outlive it, which is what lets a frontend lend the shell its own
     /// standard descriptors and take them back.
     ///
-    /// Under [dec:nsh:no-ambient-state] these are also the base of the
-    /// shell's descriptor table, so they carry further than the shell's
-    /// own reads and writes -- redirection, pipelines and forked external
-    /// commands all resolve through the table and land here.
+    /// These are the shell's own three writers and its own parse input.
+    /// The sketch said they were "also the base of the shell's descriptor
+    /// table", so that redirection, pipelines and forked external commands
+    /// would resolve through them; that rests on the per-instance
+    /// logical-to-real table, which `docs/api-design.md` §10 calls the
+    /// largest bet in the document and which is not built. A forked
+    /// command still inherits the process's descriptors. [`install`] is
+    /// what moves those, and it is process-wide.
     pub fn from_fds(stdin: c_int, stdout: c_int, stderr: c_int) -> Streams {
         Streams {
             stdin,
@@ -97,6 +101,19 @@ impl Streams {
     /// to "read it on another thread", which is exactly the burden
     /// capturing is supposed to remove. A file has no such limit, and
     /// `memfd` keeps it off the filesystem and out of `$TMPDIR`.
+    ///
+    /// **What it does and does not hold, measured rather than assumed.**
+    /// It holds everything the shell itself writes -- built-ins, `echo`,
+    /// `printf`, diagnostics -- because those go through the shell's own
+    /// writers, which are these descriptors. It does *not* hold what a
+    /// forked external command writes, because that child inherits the
+    /// process's descriptor 1 rather than the shell's, and the
+    /// logical-to-real descriptor table that would change it is §10's
+    /// largest bet and is not built. A script reaches such output the way
+    /// a script always does -- `$(cmd)` reads a pipe the shell makes, and
+    /// works here unchanged -- and a frontend that wants the real
+    /// descriptors moved wants [`install`], which is process-wide and says
+    /// so. `crates/nsh/examples/embed.rs` demonstrates both halves.
     ///
     /// The descriptors are the caller's to close. Nothing here closes
     /// them, for the same reason [`Streams::from_fds`] does not.
