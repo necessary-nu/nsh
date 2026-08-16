@@ -177,9 +177,9 @@ impl strlist {
     /// makes the assertion in [`strlist::textp`] worth anything.
     #[inline]
     pub unsafe fn rmescapes(&mut self) {
-        let p = self.text.as_mut_ptr() as *mut c_char;
-        rmescapes(p);
-        self.text.truncate(CStr::from_ptr(p).count_bytes() + 1);
+        /* A field keeps its terminator: [`strlist::textp`] asserts it. */
+        let n = rmescapes_owned(&mut self.text);
+        self.text.truncate(n + 1);
     }
 }
 
@@ -228,6 +228,21 @@ pub const EXP_DISCARD: c_int = 0x400; /* discard result of expansion */
 #[inline]
 pub unsafe fn rmescapes(p: *mut c_char) -> *mut c_char {
     _rmescapes(p, 0, None)
+}
+
+/// [`rmescapes`] over a buffer that owns its bytes.
+///
+/// `_rmescapes` shortens the C string in place and says nothing about by
+/// how much, so every caller re-derives the length; two did it by hand and
+/// spelled the same three operations differently. Returns the length of
+/// the unescaped string **without** its terminator, and leaves the
+/// terminator to the caller — a `strlist` field keeps it because
+/// [`strlist::textp`] asserts it is there, and a here-document delimiter
+/// drops it because it is compared as bytes.
+pub unsafe fn rmescapes_owned(s: &mut BString) -> usize {
+    let p = s.as_mut_ptr() as *mut c_char;
+    rmescapes(p);
+    CStr::from_ptr(p).count_bytes()
 }
 
 // ---------------------------------------------------------------------

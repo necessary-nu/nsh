@@ -11,7 +11,6 @@
 use core::cell::{Cell, OnceCell, RefCell};
 use core::mem;
 use core::ptr;
-use core::ptr::addr_of_mut;
 use std::ffi::CStr;
 use std::io::Write;
 use std::rc::Rc;
@@ -21,7 +20,7 @@ use libc::{c_char, c_int, c_uint, c_void};
 
 use crate::context::Shell;
 use crate::error::{Error, errlinno};
-use crate::expand::{EXP_QUOTED, expandarg, restore_handler_expandarg, rmescapes};
+use crate::expand::{EXP_QUOTED, expandarg, restore_handler_expandarg, rmescapes_owned};
 use crate::input::{
     PEOA, pgetc, pgetc_eoa, popfile, pungetc, pungetn, pushstring, setinputstring, unwindfiles,
 };
@@ -376,13 +375,22 @@ pub unsafe fn issimplecmd(n: Option<&Node>, name: *const c_char) -> c_int {
 }
 
 /// The last word read, as the `char *` the C-shaped readers still expect.
-unsafe fn wordtext_ptr(sh: &mut Shell) -> *mut c_char {
-    (*ptr::addr_of!(sh.input.wordtext)).as_ptr() as *mut c_char
+///
+/// `wordtext` is an owned field on the shell and has been since the input
+/// state moved there; the `addr_of!`-and-deref this used to go through was
+/// left over from when it was a `static mut`, and over a field it is a raw
+/// dereference bought nothing.  What is left is the cast, which is real:
+/// `goodname`, `isassignment` and `fixredir` still measure with `strlen`.
+fn wordtext_ptr(sh: &mut Shell) -> *mut c_char {
+    sh.input.wordtext.as_ptr() as *mut c_char
 }
 
 /// The last word read, as a node's owned text.
-unsafe fn wordtext_node(sh: &mut Shell) -> NodeText {
-    NodeText::new((*ptr::addr_of!(sh.input.wordtext)).clone())
+///
+/// Nothing here is a pointer at all — see [`wordtext_ptr`] for what the
+/// `addr_of!` was.
+fn wordtext_node(sh: &mut Shell) -> NodeText {
+    NodeText::new(sh.input.wordtext.clone())
 }
 
 /*
@@ -958,14 +966,15 @@ unsafe fn parsefname(sh: &mut Shell, n: &mut Node) -> Result<(), Error> {
         /* `rmescapes` rewrites the word in place and can only shorten it, so
          * the new terminator is where the delimiter now ends. */
         let mut mark = core::mem::take(&mut sh.input.wordtext);
-        rmescapes(mark.as_mut_ptr() as *mut c_char);
-        let n_mark = CStr::from_ptr(mark.as_ptr() as *const c_char).count_bytes();
+        /* The delimiter is compared as bytes, so the terminator that made
+         * it a C string is not part of it. */
+        let n_mark = rmescapes_owned(&mut mark);
         mark.truncate(n_mark);
         here.eofmark = mark;
         /* `parseheredoc` asked the node whether it was NXHERE; the type is
          * settled above, so the answer travels with the here-document. */
         here.expand = n.nhere().r#type == NXHERE;
-        (&mut *addr_of_mut!(sh.input.heredoclist)).push(here);
+        sh.input.heredoclist.push(here);
     } else if n.node_type() == NTOFD || n.node_type() == NFROMFD {
         let word = wordtext_ptr(sh);
         fixredir(sh, n, word, 0)?;
