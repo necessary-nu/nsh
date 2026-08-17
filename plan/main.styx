@@ -2356,6 +2356,15 @@ children (
                         )
                     }
                 )
+                log (
+                    {
+                        at 2026-08-17T22:56:42.916840627Z
+                        author "brendan@necessary.nu"
+                        kind @errata
+                        text "The recorded consequence that C locale independence is not refactorable does not hold for the embedded, multithreaded library contract. Shell locale assignments currently reach the host process environment/global locale; P0 process-environment-soundness will replace that ambient coupling with per-Shell resolution and a scoped platform boundary."
+                        after_done true
+                    }
+                )
             }
 
             {
@@ -3402,13 +3411,31 @@ children (
                         text "Descriptor-ownership follow-up. RawFd, close_fd, and duplicate_to now have zero code sites. Every descriptor produced by open, pipe, memfd, or duplicate is an OwnedFd; streams own duplicates of host inputs, parse frames own opened input, command substitution and pipelines own their endpoints, redirection saves are Empty/Closed/Open(OwnedFd), and the job-control tty is owned. Ordinary release is Drop; fork-reset deliberately forgets saved redirection handles to preserve abandon-to-kernel semantics. Exact shell-language table slots are the sole numeric boundary through DescriptorSlot. Slots 0/1/2 use safe rustix stdio replacement; arbitrary n>&m and n>&- still require one isolated libc::dup2 and libc::close in nsh-platform because a possibly closed process-table target has no std/rustix ownership-safe representation. Eliminating those two requires the per-instance logical descriptor table, not another wrapper. Validation: workspace 254/0; differential 61768/0 with 40 classified flakes and 4 sanctioned divergences; divergence register 44/0; PTY 60/0/0; POSIX target 660/51 vs C dash 655/56; dash spec coverage 422/422 with 0 stale. The differential oracle caught and fixed close-before-error ordering under low RLIMIT_NOFILE; a targeted test pins direct-open-into-closed-slot restoration."
                         after_done true
                     }
+
+                    {
+                        at 2026-08-17T22:56:42.848472249Z
+                        author "brendan@necessary.nu"
+                        kind @errata
+                        text "The completion claim is too broad: nsh-platform::set_process_environment and set_locale_environment expose safe wrappers around edition-2024 unsafe process-environment mutation without enforcing the required single-threaded exclusivity, and set_locale_environment/refresh_locale also change libc's process-global locale. Tracked by P0 process-environment-soundness."
+                        after_done true
+                    }
                 )
             }
 
             {
                 id locale-sweep
                 title "The corpora sweep under UTF-8, not only LC_ALL=C — ~113 corpora have never differentially tested a multibyte path"
+                priority 0
                 kind @test
+                deps (process-environment-contract)
+                log (
+                    {
+                        at 2026-08-17T22:55:48.513530868Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "priority pinned to 0 — operator override: Brendan: make a WBS for that P0 follow-up."
+                    }
+                )
             }
 
             {
@@ -3451,6 +3478,120 @@ children (
                         kind @errata
                         text "Commit-gate cleanup improved the delivered endpoint without changing descriptor semantics: removed the pass-through nsh_platform::is_terminal wrapper in favor of std::io::IsTerminal at logical-slot call sites, removed trivial logical-close/constructor wrappers, shortened test names, and added ten focused FdTable ownership/replacement/materialization tests. Final workspace unit/integration count is 263 passed (plus one ignored doctest), not 253 as recorded in the prior note."
                         after_done true
+                    }
+                )
+            }
+
+            {
+                id process-environment-soundness
+                title "Make environment and locale handling sound for embedded, multithreaded Unix hosts"
+                priority 0
+                kind @fix
+                deps (
+                    unsafe-is-a-crate
+                    no-ambient-state
+                    public-api
+                    process-model
+                )
+                children (
+                    {
+                        id process-environment-contract
+                        title "Define the nsh embedding-safety contract and correct the locale/environment decisions"
+                        priority 0
+                        kind @docs
+                        deps (
+                            unsafe-is-a-crate
+                            no-ambient-state
+                            public-api
+                            process-model
+                        )
+                        log (
+                            {
+                                at 2026-08-17T22:55:42.88836731Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 0 — operator override: Brendan: make a WBS for that P0 follow-up."
+                            }
+                        )
+                    }
+
+                    {
+                        id scoped-locale-boundary
+                        title "Provide owned, scoped locale state without mutating the process environment or global locale"
+                        priority 0
+                        kind @refactor
+                        deps (process-environment-contract locale-sweep)
+                        log (
+                            {
+                                at 2026-08-17T22:55:56.821581882Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 0 — operator override: Brendan: make a WBS for that P0 follow-up."
+                            }
+                        )
+                    }
+
+                    {
+                        id process-environment-api
+                        title "Delete safe process-environment mutators and make tests inject environments through ShellBuilder"
+                        priority 0
+                        kind @refactor
+                        deps (process-environment-contract locale-sweep)
+                        log (
+                            {
+                                at 2026-08-17T22:56:10.243500925Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 0 — operator override: Brendan: make a WBS for that P0 follow-up."
+                            }
+                        )
+                    }
+
+                    {
+                        id shell-locale-integration
+                        title "Derive each Shell locale with POSIX precedence and route locale-sensitive operations through it"
+                        priority 0
+                        kind @fix
+                        deps (scoped-locale-boundary process-environment-api)
+                        log (
+                            {
+                                at 2026-08-17T22:56:21.505936873Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 0 — operator override: Brendan: make a WBS for that P0 follow-up."
+                            }
+                        )
+                    }
+
+                    {
+                        id process-environment-verification
+                        title "Prove concurrent Shells cannot alter the host environment or each other's locale"
+                        priority 0
+                        kind @test
+                        deps (shell-locale-integration)
+                        log (
+                            {
+                                at 2026-08-17T22:56:26.299072151Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 0 — operator override: Brendan: make a WBS for that P0 follow-up."
+                            }
+                        )
+                    }
+                )
+                log (
+                    {
+                        at 2026-08-17T22:55:36.432751696Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "priority pinned to 0 — operator override: Brendan: make a WBS for that P0 follow-up."
+                    }
+
+                    {
+                        at 2026-08-17T22:56:42.780690228Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Scope and acceptance: remove safe APIs that hide std::env::set_var/remove_var or process-global setlocale; keep the shell environment instance-owned and child exec environments explicit; preserve LC_ALL > LC_* > LANG selection and the distinction between unset and explicitly empty values; isolate locale-sensitive work between concurrent Shell instances and from the embedding host; and pass both C and UTF-8 differential corpora. The existing dash and POSIX namespaces do not express an embedding-soundness guarantee, so process-environment-contract must define an nsh spec namespace/rules before implementation nodes claim coverage."
                     }
                 )
             }
