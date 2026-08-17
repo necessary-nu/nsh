@@ -22,8 +22,8 @@
 //! survivor says which.
 
 use crate::error::Error;
-use bstr::BString;
-use libc::{c_char, c_int, c_uchar, intmax_t};
+use bstr::{BStr, BString};
+use core::ffi::{c_char, c_int};
 
 /*
  * C's `const char foo[] = "…"` becomes `[c_char; N]` here; this const fn
@@ -42,7 +42,7 @@ const fn to_cchar<const N: usize>(b: &[u8; N]) -> [c_char; N] {
 /* Callers compare `nullstr` by *address*, not by content — `cd.rs:241`
  * distinguishes "unset" from "empty" that way — so it cannot become a
  * shared `b""` literal, which the compiler is free to coalesce. */
-pub static mut nullstr: [c_char; 1] = [0]; /* zero length string */
+pub static nullstr: [c_char; 1] = [0]; /* zero length string */
 pub static spcstr: [c_char; 2] = to_cchar(b" \0");
 pub static snlfmt: [c_char; 4] = to_cchar(b"%s\n\0");
 pub static dolatstr: [c_char; 7] = [
@@ -81,30 +81,22 @@ pub const GLOB_IS_ENABLED: c_int = 0;
  * `<[u8]>::strip_prefix` is the same pointer the C loop returned.
  */
 
+// `prefix` became `<[u8]>::strip_prefix` at both callers.
 // [spec:dash:def:mystring.prefix-fn]
 // [spec:dash:sem:mystring.prefix-fn]
-pub unsafe fn prefix(string: *const c_char, pfx: *const c_char) -> *mut c_char {
-    let string_bytes = core::ffi::CStr::from_ptr(string).to_bytes();
-    let prefix_bytes = core::ffi::CStr::from_ptr(pfx).to_bytes();
-    if string_bytes.strip_prefix(prefix_bytes).is_some() {
-        string.add(prefix_bytes.len()) as *mut c_char
-    } else {
-        core::ptr::null_mut()
-    }
-}
 
 // [spec:dash:def:mystring.badnum-fn]
 // [spec:dash:sem:mystring.badnum-fn]
 // The C's `badnum` does not return; here it builds the diagnostic and the
 // caller's `?` does the leaving. Same bytes, same point, same funnel.
-pub unsafe fn badnum(sh: &mut crate::context::Shell, s: *const c_char) -> Error {
+pub fn bad_number(sh: &mut crate::context::Shell, s: &BStr) -> Error {
     let mut message = b"Illegal number: ".to_vec();
-    message.extend_from_slice(core::ffi::CStr::from_ptr(s).to_bytes());
+    message.extend_from_slice(cstr_prefix(s.as_ref()));
     sh.sh_error_value(&message)
 }
 
 /*
- * Convert a string into an integer of type intmax_t.  Alow trailing spaces.
+ * Convert a string into an integer of type i64.  Alow trailing spaces.
  *
  * `str::parse` is not this function: `strtoimax` saturates at
  * `INTMAX_MAX` and reports `ERANGE` where `parse` returns `Err`, it takes
@@ -114,44 +106,116 @@ pub unsafe fn badnum(sh: &mut crate::context::Shell, s: *const c_char) -> Error 
  */
 // [spec:dash:def:mystring.atomax-fn]
 // [spec:dash:sem:mystring.atomax-fn]
-pub unsafe fn atomax(sh: &mut crate::context::Shell, s: *const c_char, base: c_int) -> Result<intmax_t, Error> {
-    let mut p: *mut c_char = core::ptr::null_mut();
-    let r: intmax_t;
+pub fn parse_integer(
+    sh: &mut crate::context::Shell,
+    s: &BStr,
+    requested_base: u32,
+) -> Result<i64, Error> {
+    debug_assert!(requested_base == 0 || (2..=36).contains(&requested_base));
 
-    *libc::__errno_location() = 0;
-    r = crate::system::strtoimax(s, &mut p, base);
+    let bytes: &[u8] = cstr_prefix(s.as_ref()).as_ref();
+    let mut pos = bytes.iter().position(|&b| !is_c_space(b)).unwrap_or(bytes.len());
+    let number_start = pos;
+    let negative = match bytes.get(pos) {
+        Some(b'+') => {
+            pos += 1;
+            false
+        }
+        Some(b'-') => {
+            pos += 1;
+            true
+        }
+        _ => false,
+    };
 
-    /*
-     * Disallow completely blank strings in non-arithmetic (base != 0)
-     * contexts.
-     */
-    if p == s as *mut c_char && base != 0 {
-        return Err(badnum(sh, s));
+    let mut base = requested_base;
+    if base == 0 {
+        base = if bytes.get(pos) == Some(&b'0') {
+            match (bytes.get(pos + 1), bytes.get(pos + 2).and_then(|b| digit_value(*b))) {
+                (Some(b'x' | b'X'), Some(d)) if d < 16 => {
+                    pos += 2;
+                    16
+                }
+                (Some(b'b' | b'B'), Some(d)) if d < 2 => {
+                    pos += 2;
+                    2
+                }
+                _ => 8,
+            }
+        } else {
+            10
+        };
+    } else if ((base == 16 && matches!(bytes.get(pos + 1), Some(b'x' | b'X')))
+        || (base == 2 && matches!(bytes.get(pos + 1), Some(b'b' | b'B'))))
+        && bytes.get(pos) == Some(&b'0')
+        && bytes
+            .get(pos + 2)
+            .and_then(|b| digit_value(*b))
+            .is_some_and(|d| d < base)
+    {
+        pos += 2;
     }
 
-    /*
-     * `u8::is_ascii_whitespace` is not `isspace`: it excludes vertical
-     * tab, and `exit $'1\v'` exits 1 in both shells, so the substitution
-     * is observable from two tokens of shell.  Measured across `C`,
-     * `en_US.utf8` and a generated `en_US.ISO-8859-1`, no byte 0x80-0xFF
-     * is in the space class, so the locale is not what keeps this call —
-     * 0x0B is.
-     */
-    while libc::isspace(*p as c_uchar as c_int) != 0 {
-        p = p.add(1);
+    let digits_start = pos;
+    let limit = if negative {
+        i64::MAX as u64 + 1
+    } else {
+        i64::MAX as u64
+    };
+    let mut magnitude = 0_u64;
+    while let Some(digit) = bytes.get(pos).and_then(|b| digit_value(*b)) {
+        if digit >= base {
+            break;
+        }
+        magnitude = magnitude
+            .saturating_mul(base as u64)
+            .saturating_add(digit as u64)
+            .min(limit);
+        pos += 1;
     }
 
-    if *p != 0 {
-        return Err(badnum(sh, s));
+    if pos == digits_start {
+        // The base-zero caller deliberately accepts a wholly blank value as
+        // zero. That is the one oddity the original `strtoimax` adapter
+        // exposed to arithmetic variable lookup.
+        if requested_base == 0
+            && number_start == bytes.len()
+            && bytes[..number_start].iter().all(|&b| is_c_space(b))
+        {
+            return Ok(0);
+        }
+        return Err(bad_number(sh, s));
     }
 
-    Ok(r)
+    while bytes.get(pos).is_some_and(|&b| is_c_space(b)) {
+        pos += 1;
+    }
+    if pos != bytes.len() {
+        return Err(bad_number(sh, s));
+    }
+
+    Ok(if negative {
+        if magnitude == i64::MAX as u64 + 1 {
+            i64::MIN
+        } else {
+            -(magnitude as i64)
+        }
+    } else {
+        magnitude as i64
+    })
 }
 
-// [spec:dash:def:mystring.atomax10-fn]
-// [spec:dash:sem:mystring.atomax10-fn]
-pub unsafe fn atomax10(sh: &mut crate::context::Shell, s: *const c_char) -> Result<intmax_t, Error> {
-    atomax(sh, s, 10)
+fn digit_value(byte: u8) -> Option<u32> {
+    match byte {
+        b'0'..=b'9' => Some((byte - b'0') as u32),
+        b'a'..=b'z' => Some((byte - b'a' + 10) as u32),
+        b'A'..=b'Z' => Some((byte - b'A' + 10) as u32),
+        _ => None,
+    }
+}
+
+fn is_c_space(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
 }
 
 /*
@@ -161,11 +225,11 @@ pub unsafe fn atomax10(sh: &mut crate::context::Shell, s: *const c_char) -> Resu
 
 // [spec:dash:def:mystring.number-fn]
 // [spec:dash:sem:mystring.number-fn]
-pub unsafe fn number(sh: &mut crate::context::Shell, s: *const c_char) -> Result<c_int, Error> {
-    let n: intmax_t = atomax10(sh, s)?;
+pub fn number(sh: &mut crate::context::Shell, s: &BStr) -> Result<c_int, Error> {
+    let n = parse_integer(sh, s, 10)?;
 
-    if n < 0 || n > c_int::MAX as intmax_t {
-        return Err(badnum(sh, s));
+    if n < 0 || n > c_int::MAX as i64 {
+        return Err(bad_number(sh, s));
     }
 
     Ok(n as c_int)
@@ -183,9 +247,16 @@ pub unsafe fn number(sh: &mut crate::context::Shell, s: *const c_char) -> Result
 
 // [spec:dash:def:mystring.is-number-fn]
 // [spec:dash:sem:mystring.is-number-fn]
-pub unsafe fn is_number(p: *const c_char) -> c_int {
-    let bytes = core::ffi::CStr::from_ptr(p).to_bytes();
-    c_int::from(!bytes.is_empty() && bytes.iter().all(u8::is_ascii_digit))
+pub fn is_number(p: &BStr) -> bool {
+    !p.is_empty() && p.iter().all(u8::is_ascii_digit)
+}
+
+pub fn decimal_digits(p: &BStr) -> Option<u64> {
+    is_number(p).then(|| {
+        p.iter().fold(0_u64, |value, byte| {
+            value.saturating_mul(10).saturating_add((byte - b'0') as u64)
+        })
+    })
 }
 
 /*
@@ -221,19 +292,6 @@ pub fn cstr_prefix(b: &[u8]) -> &bstr::BStr {
  * over-read into a certain one, so the loop is here rather than a
  * `<[u8]>` method.
  */
-pub unsafe fn ncmp_eq(a: *const c_char, b: *const c_char, n: usize) -> bool {
-    for i in 0..n {
-        let x = *a.add(i);
-        if x != *b.add(i) {
-            return false;
-        }
-        if x == 0 {
-            break;
-        }
-    }
-    true
-}
-
 /*
  * Produce a possibly single quoted string suitable as input to the shell.
  * The return string is allocated on the stack.
@@ -246,13 +304,8 @@ pub unsafe fn ncmp_eq(a: *const c_char, b: *const c_char, n: usize) -> bool {
 
 // [spec:dash:def:mystring.single-quote-fn]
 // [spec:dash:sem:mystring.single-quote-fn]
-pub unsafe fn single_quote(s: *const c_char) -> *mut c_char {
-    let mut s = core::ffi::CStr::from_ptr(s).to_bytes();
-    /* The C leaves the result in the stack block without grabbing it, so
-     * the next call overwrites it and every caller reads it before making
-     * another. One buffer, reused, is that contract exactly. */
-    let q = &mut *core::ptr::addr_of_mut!(quoted);
-    q.clear();
+pub fn single_quote(mut s: &BStr) -> BString {
+    let mut q = BString::new(Vec::new());
 
     loop {
         let len = s.iter().position(|&c| c == b'\'').unwrap_or(s.len());
@@ -277,13 +330,8 @@ pub unsafe fn single_quote(s: *const c_char) -> *mut c_char {
         }
     }
 
-    q.push(0);
-
-    q.as_mut_ptr() as *mut c_char
+    q
 }
-
-/// [`single_quote`]'s result, which the C left in the stack block.
-static mut quoted: BString = BString::new(Vec::new());
 
 // ---------------------------------------------------------------------
 // Unit tests for this module's functions.
@@ -295,102 +343,54 @@ static mut quoted: BString = BString::new(Vec::new());
 // ---------------------------------------------------------------------
 /// Copy an already-rendered ASCII number into one of the fixed C buffers
 /// retained by the variable ABI.
-pub(crate) unsafe fn copy_ascii_cstr(out: *mut c_char, capacity: usize, text: &str) {
+pub(crate) fn copy_ascii_cstr(out: &mut [c_char], text: &str) {
     debug_assert!(text.is_ascii());
-    debug_assert!(text.len() < capacity);
-    let copied = text.len().min(capacity.saturating_sub(1));
-    core::ptr::copy_nonoverlapping(text.as_ptr(), out as *mut u8, copied);
-    if capacity != 0 {
-        *out.add(copied) = 0;
+    debug_assert!(text.len() < out.len());
+    let copied = text.len().min(out.len().saturating_sub(1));
+    for (slot, byte) in out.iter_mut().zip(text.bytes()).take(copied) {
+        *slot = byte as c_char;
+    }
+    if let Some(terminator) = out.get_mut(copied) {
+        *terminator = 0;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::{CStr0, s};
-
-    // [spec:dash:sem:mystring.prefix-fn/test]
-    #[test]
-    fn prefix_returns_the_tail_or_null() {
-        unsafe {
-            let str_ = CStr0::new("foobar");
-            let tail = prefix(str_.p(), CStr0::new("foo").p());
-            assert!(!tail.is_null());
-            assert_eq!(s(tail), "bar");
-            // A complete match leaves an empty tail, which is still a
-            // non-NULL pointer -- callers test the pointer, not the byte.
-            assert_eq!(s(prefix(str_.p(), CStr0::new("foobar").p())), "");
-            assert!(!prefix(str_.p(), CStr0::new("foobar").p()).is_null());
-            assert!(prefix(str_.p(), CStr0::new("fox").p()).is_null());
-            // An empty prefix matches anything and consumes nothing.
-            let tail = prefix(str_.p(), CStr0::new("").p());
-            assert!(!tail.is_null());
-            assert_eq!(s(tail), "foobar");
-            // A prefix longer than the string stops at the NUL.
-            assert!(prefix(CStr0::new("fo").p(), CStr0::new("foo").p()).is_null());
-        }
-    }
-
-    // [spec:dash:sem:mystring.prefix-fn/test]
-    #[test]
-    fn prefix_handles_all_non_nul_bytes() {
-        unsafe {
-            for byte in 1_u8..=u8::MAX {
-                let haystack = [byte, b'x', 0];
-                let matching = [byte, 0];
-                let tail = prefix(haystack.as_ptr().cast(), matching.as_ptr().cast());
-
-                assert_eq!(tail.cast_const().cast::<u8>(), haystack.as_ptr().add(1));
-                assert_eq!(core::ffi::CStr::from_ptr(tail).to_bytes(), b"x");
-
-                let different = if byte == 1 { 2 } else { 1 };
-                let missing = [different, 0];
-                assert!(prefix(haystack.as_ptr().cast(), missing.as_ptr().cast()).is_null());
-            }
-        }
-    }
 
     // [spec:dash:sem:mystring.is-number-fn/test]
     #[test]
     fn is_number_accepts_only_all_digits() {
-        unsafe {
-            assert_eq!(is_number(CStr0::new("0").p()), 1);
-            assert_eq!(is_number(CStr0::new("12345").p()), 1);
-            assert_eq!(is_number(CStr0::new("").p()), 0);
-            assert_eq!(is_number(CStr0::new("12a").p()), 0);
-            assert_eq!(is_number(CStr0::new("a12").p()), 0);
-            // No sign is accepted: this is a digit test, not a number
-            // parser, which is why `number()` exists separately.
-            assert_eq!(is_number(CStr0::new("-1").p()), 0);
-            assert_eq!(is_number(CStr0::new("+1").p()), 0);
-            assert_eq!(is_number(CStr0::new(" 1").p()), 0);
-        }
+        assert!(is_number(BStr::new("0")));
+        assert!(is_number(BStr::new("12345")));
+        assert!(!is_number(BStr::new("")));
+        assert!(!is_number(BStr::new("12a")));
+        assert!(!is_number(BStr::new("a12")));
+        assert!(!is_number(BStr::new("-1")));
+        assert!(!is_number(BStr::new("+1")));
+        assert!(!is_number(BStr::new(" 1")));
     }
 
     // [spec:dash:sem:mystring.is-number-fn/test]
     #[test]
     fn is_number_matches_ascii_digits() {
-        unsafe {
-            let empty = [0_u8];
-            assert_eq!(is_number(empty.as_ptr().cast()), 0);
+        assert!(!is_number(BStr::new(b"")));
 
-            for byte in 1_u8..=u8::MAX {
-                let candidate = [byte, 0];
-                assert_eq!(
-                    is_number(candidate.as_ptr().cast()),
-                    c_int::from(byte.is_ascii_digit()),
-                    "classification differed for byte 0x{byte:02x}"
-                );
-            }
+        for byte in 1_u8..=u8::MAX {
+            assert_eq!(
+                is_number(BStr::new(&[byte])),
+                byte.is_ascii_digit(),
+                "classification differed for byte 0x{byte:02x}"
+            );
+        }
 
-            let all_digits = b"0123456789\0";
-            assert_eq!(is_number(all_digits.as_ptr().cast()), 1);
-            for i in 0..all_digits.len() - 1 {
-                let mut candidate = *all_digits;
-                candidate[i] = b'x';
-                assert_eq!(is_number(candidate.as_ptr().cast()), 0);
-            }
+        let all_digits = b"0123456789";
+        assert!(is_number(BStr::new(all_digits)));
+        for i in 0..all_digits.len() {
+            let mut candidate = *all_digits;
+            candidate[i] = b'x';
+            assert!(!is_number(BStr::new(&candidate)));
         }
     }
 
@@ -400,15 +400,13 @@ mod tests {
         let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let _g = crate::testutil::lock();
-        unsafe {
-            assert_eq!(atomax(sh, CStr0::new("42").p(), 10).unwrap(), 42);
-            assert_eq!(atomax(sh, CStr0::new("-42").p(), 10).unwrap(), -42);
-            assert_eq!(atomax(sh, CStr0::new("ff").p(), 16).unwrap(), 255);
-            assert_eq!(atomax(sh, CStr0::new("777").p(), 8).unwrap(), 511);
-            // "Alow trailing spaces" -- the comment's typo is in the C too.
-            assert_eq!(atomax(sh, CStr0::new("42   ").p(), 10).unwrap(), 42);
-            assert_eq!(atomax(sh, CStr0::new("42\t\n").p(), 10).unwrap(), 42);
-        }
+        assert_eq!(parse_integer(sh, BStr::new("42"), 10).unwrap(), 42);
+        assert_eq!(parse_integer(sh, BStr::new("-42"), 10).unwrap(), -42);
+        assert_eq!(parse_integer(sh, BStr::new("ff"), 16).unwrap(), 255);
+        assert_eq!(parse_integer(sh, BStr::new("777"), 8).unwrap(), 511);
+        // "Alow trailing spaces" -- the comment's typo is in the C too.
+        assert_eq!(parse_integer(sh, BStr::new("42   "), 10).unwrap(), 42);
+        assert_eq!(parse_integer(sh, BStr::new("42\t\n"), 10).unwrap(), 42);
     }
 
     // [spec:dash:sem:mystring.atomax-fn/test]
@@ -418,23 +416,22 @@ mod tests {
         let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let _g = crate::testutil::lock();
-        unsafe {
-            // Trailing junk is rejected, and the diagnostic is the value
-            // now rather than an unwind, so the test can read it.
-            let e = atomax(sh, CStr0::new("42x").p(), 10).expect_err("trailing junk");
-            assert_eq!(e.message().to_vec(), b"Illegal number: 42x".to_vec());
-            // ...and so is a wholly blank string, but only when base != 0.
-            // At base 0 the blank check is skipped, which is what lets the
-            // arithmetic lexer call this on an empty token.
-            assert!(atomax(sh, CStr0::new("").p(), 10).is_err());
-            assert!(atomax(sh, CStr0::new("   ").p(), 10).is_err());
-            assert_eq!(atomax(sh, CStr0::new("").p(), 0).unwrap(), 0);
-            // badnum builds the diagnostic rather than raising it.
-            assert_eq!(
-                badnum(sh, CStr0::new("zzz").p()).message().to_vec(),
-                b"Illegal number: zzz".to_vec()
-            );
-        }
+        // Trailing junk is rejected, and the diagnostic is the value
+        // now rather than an unwind, so the test can read it.
+        let e = parse_integer(sh, BStr::new("42x"), 10).expect_err("trailing junk");
+        assert_eq!(e.message().to_vec(), b"Illegal number: 42x".to_vec());
+        // ...and so is a wholly blank string, but only when base != 0.
+        // At base 0 the blank check is skipped, which is what lets
+        // arithmetic variable lookup treat an unset value as zero.
+        assert!(parse_integer(sh, BStr::new(""), 10).is_err());
+        assert!(parse_integer(sh, BStr::new("   "), 10).is_err());
+        assert_eq!(parse_integer(sh, BStr::new(""), 0).unwrap(), 0);
+        assert_eq!(parse_integer(sh, BStr::new("   "), 0).unwrap(), 0);
+        // bad_number builds the diagnostic rather than raising it.
+        assert_eq!(
+            bad_number(sh, BStr::new("zzz")).message().to_vec(),
+            b"Illegal number: zzz".to_vec()
+        );
     }
 
     // [spec:dash:sem:mystring.atomax10-fn/test]
@@ -443,12 +440,10 @@ mod tests {
         let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let _g = crate::testutil::lock();
-        unsafe {
-            assert_eq!(atomax10(sh, CStr0::new("99").p()).unwrap(), 99);
-            // Base 10, so a leading 0 is not octal and 0x is not hex.
-            assert_eq!(atomax10(sh, CStr0::new("010").p()).unwrap(), 10);
-            assert!(atomax10(sh, CStr0::new("0x10").p()).is_err());
-        }
+        assert_eq!(parse_integer(sh, BStr::new("99"), 10).unwrap(), 99);
+        // Base 10, so a leading 0 is not octal and 0x is not hex.
+        assert_eq!(parse_integer(sh, BStr::new("010"), 10).unwrap(), 10);
+        assert!(parse_integer(sh, BStr::new("0x10"), 10).is_err());
     }
 
     // [spec:dash:sem:mystring.number-fn/test]
@@ -457,59 +452,48 @@ mod tests {
         let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let _g = crate::testutil::lock();
-        unsafe {
-            assert_eq!(number(sh, CStr0::new("7").p()).unwrap(), 7);
-            assert_eq!(
-                number(sh, CStr0::new(&c_int::MAX.to_string()).p()).unwrap(),
-                c_int::MAX
-            );
-            // Negative and out-of-range both go through badnum.
-            assert!(number(sh, CStr0::new("-1").p()).is_err());
-            let too_big = (c_int::MAX as i64 + 1).to_string();
-            assert!(number(sh, CStr0::new(&too_big).p()).is_err());
-        }
+        assert_eq!(number(sh, BStr::new("7")).unwrap(), 7);
+        assert_eq!(
+            number(sh, BStr::new(c_int::MAX.to_string().as_bytes())).unwrap(),
+            c_int::MAX
+        );
+        // Negative and out-of-range both go through bad_number.
+        assert!(number(sh, BStr::new("-1")).is_err());
+        let too_big = (c_int::MAX as i64 + 1).to_string();
+        assert!(number(sh, BStr::new(too_big.as_bytes())).is_err());
     }
 
     // [spec:dash:sem:mystring.single-quote-fn/test]
     #[test]
     fn single_quote_produces_a_shell_requotable_string() {
-        let _g = crate::testutil::lock();
-        unsafe {
-            assert_eq!(s(single_quote(CStr0::new("abc").p())), "'abc'");
-            assert_eq!(s(single_quote(CStr0::new("").p())), "''");
-            // An embedded quote has to leave the single-quoted run and
-            // come back. dash uses the '"'"' form, NOT a backslash
-            // escape -- verified against the C, whose `set` prints
-            // A='a'"'"'b' for the same value.
-            assert_eq!(s(single_quote(CStr0::new("a'b").p())), "'a'\"'\"'b'");
-            // A lone quote gives ''"'" -- dash stops without reopening a
-            // trailing empty '' , which both shells agree on:
-            //     A="'" ; set  =>  A=''"'"
-            assert_eq!(s(single_quote(CStr0::new("'").p())), "''\"'\"");
-            // Everything else, blanks and metacharacters included, is
-            // literal inside the quotes.
-            assert_eq!(s(single_quote(CStr0::new("a b|c$d").p())), "'a b|c$d'");
-        }
+        assert_eq!(single_quote(BStr::new(b"abc")), b"'abc'".as_slice());
+        assert_eq!(single_quote(BStr::new(b"")), b"''".as_slice());
+        // An embedded quote has to leave the single-quoted run and come
+        // back. dash uses the '"'"' form, not a backslash escape.
+        assert_eq!(single_quote(BStr::new(b"a'b")), b"'a'\"'\"'b'".as_slice());
+        // A lone quote gives ''"'" -- dash stops without reopening a
+        // trailing empty pair of quotes.
+        assert_eq!(single_quote(BStr::new(b"'")), b"''\"'\"".as_slice());
+        assert_eq!(
+            single_quote(BStr::new(b"a b|c$d")),
+            b"'a b|c$d'".as_slice()
+        );
     }
 
     // [spec:dash:sem:mystring.single-quote-fn/test]
     #[test]
     fn single_quote_handles_all_bytes() {
-        let _g = crate::testutil::lock();
-        unsafe {
-            for byte in 1_u8..=u8::MAX {
-                let input = [byte, 0];
-                let actual =
-                    core::ffi::CStr::from_ptr(single_quote(input.as_ptr().cast())).to_bytes();
+        for byte in 1_u8..=u8::MAX {
+            let input = [byte];
+            let actual = single_quote(BStr::new(&input));
 
-                if byte == b'\'' {
-                    assert_eq!(actual, b"''\"'\"");
-                } else {
-                    assert_eq!(actual.len(), 3);
-                    assert_eq!(actual[0], b'\'');
-                    assert_eq!(actual[1], byte);
-                    assert_eq!(actual[2], b'\'');
-                }
+            if byte == b'\'' {
+                assert_eq!(actual, b"''\"'\"".as_slice());
+            } else {
+                assert_eq!(actual.len(), 3);
+                assert_eq!(actual[0], b'\'');
+                assert_eq!(actual[1], byte);
+                assert_eq!(actual[2], b'\'');
             }
         }
     }

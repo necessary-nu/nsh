@@ -7,7 +7,7 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use libc::c_int;
+use core::ffi::c_int;
 use std::io::Write;
 
 use crate::alias::{rmaliases, unalias};
@@ -16,7 +16,7 @@ use crate::options::Options;
 
 // [spec:dash:def:alias.unaliascmd-fn]
 // [spec:dash:sem:alias.unaliascmd-fn]
-pub unsafe fn unaliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn unaliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut i: c_int;
 
     let mut opts = Options::new(args);
@@ -28,10 +28,9 @@ pub unsafe fn unaliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
     }
     i = 0;
     for name in opts.operands() {
-        let name = crate::shell::cstring(name);
-        if unalias(sh, name.as_ptr()) != 0 {
+        if unalias(sh, name) != 0 {
             let mut message = b"unalias: ".to_vec();
-            message.extend_from_slice(name.as_bytes());
+            message.extend_from_slice(name);
             message.extend_from_slice(b" not found\n");
             let _ = sh.io.stderr().write_all(&message);
             i = 1;

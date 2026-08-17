@@ -9,57 +9,23 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString};
-use core::ptr::{addr_of, addr_of_mut, null_mut};
-use libc::{c_char, c_int, c_uint, size_t};
-use std::ffi::{CStr, CString};
+use core::ffi::{c_char, c_int};
+use std::ffi::CStr;
 use std::io::Write;
 
-use crate::error::{INTOFF, INTON};
-use crate::mystring::nullstr;
-use crate::var::{VNOFUNC, VUNSET, setvar, setvarint, showvars};
-
-/// The positional parameters when the shell owns them — the C's
-/// `shellparam.malloc`.
-///
-/// `ptrs` is the `char **` that `getopts` walks and `$@` iterates, and it
-/// holds the address of each word's bytes, so a word may be dropped or the
-/// whole list rebuilt but a word must never be resized in place. Each word
-/// carries its own terminator because every reader reads it as a C string.
-struct Params {
-    words: Vec<BString>,
-    ptrs: Vec<*mut c_char>,
-}
-
-impl Params {
-    fn new(words: Vec<BString>) -> Params {
-        let mut p = Params {
-            words,
-            ptrs: Vec::new(),
-        };
-        p.reindex();
-        p
-    }
-
-    fn reindex(&mut self) {
-        self.ptrs.clear();
-        self.ptrs.reserve(self.words.len() + 1);
-        for w in &mut self.words {
-            self.ptrs.push(w.as_mut_ptr() as *mut c_char);
-        }
-        self.ptrs.push(null_mut());
-    }
-}
-
 // [spec:dash:def:options.shparam]
-/// The C's `malloc` flag and `p` pointer are one field: `owned` is `Some`
-/// exactly when `malloc` was 1, and `borrowed` is the `argv` `p` pointed
-/// into when it was 0.
+/// The shell's positional parameters.
+///
+/// The C distinguished owned strings from a borrowed `char **` installed
+/// while evaluating a function. Both cases have value semantics here: a
+/// function gets a copy of its argument words, then the caller's list is
+/// moved back when the function returns. This is the same observable
+/// behaviour (including `shift`) without a pointer-lifetime mode.
 pub struct shparam {
     pub nparam: c_int, /* # of positional parameters (without $0) */
     pub optind: c_int, /* next parameter to be processed by getopts */
     pub optoff: c_int, /* used by getopts */
-    owned: Option<Params>,
-    borrowed: *mut *mut c_char,
+    words: Vec<BString>,
 }
 
 impl shparam {
@@ -68,48 +34,32 @@ impl shparam {
             nparam: 0,
             optind: 0,
             optoff: 0,
-            owned: None,
-            borrowed: null_mut(),
+            words: Vec::new(),
         }
     }
 
     /// Drop the first `n` parameters: what `shift` does, in the module
     /// that knows how they are stored.
     ///
-    /// The C shifts the array down whether or not it owns the words, so a
-    /// `shift` inside a function rewrites the caller's `argv`;
-    /// `evalcommand` discards it when the call returns.
-    pub(crate) unsafe fn drop_first(&mut self, n: c_int) {
+    /// A function's parameter list is a call-scoped owned copy, so shifting
+    /// it mutates exactly the list that is restored away on return.
+    pub(crate) fn drop_first(&mut self, n: c_int) {
         self.nparam -= n;
-        match &mut self.owned {
-            Some(o) => {
-                o.words.drain(..n as usize);
-                o.reindex();
-            }
-            None => {
-                let mut ap1: *mut *mut c_char = self.borrowed.add(n as usize);
-                let mut ap2: *mut *mut c_char = self.borrowed;
-                loop {
-                    *ap2 = *ap1;
-                    let done = (*ap2).is_null();
-                    ap2 = ap2.add(1);
-                    ap1 = ap1.add(1);
-                    if done {
-                        break;
-                    }
-                }
-            }
-        }
+        self.words.drain(..n as usize);
         self.optind = 1;
         self.optoff = -1;
     }
 
-    /// `shellparam.p` — the NULL-terminated array, wherever it lives.
-    pub(crate) fn p(&mut self) -> *mut *mut c_char {
-        match &mut self.owned {
-            Some(o) => o.ptrs.as_mut_ptr(),
-            None => self.borrowed,
-        }
+    /// Snapshot positional parameters for expansion and `getopts`.
+    pub(crate) fn words(&self) -> Vec<BString> {
+        self.words.clone()
+    }
+
+    fn replace(&mut self, words: Vec<BString>) {
+        self.nparam = words.len().min(c_int::MAX as usize) as c_int;
+        self.words = words;
+        self.optind = 1;
+        self.optoff = -1;
     }
 }
 
@@ -138,8 +88,6 @@ pub const uflag: usize = 14;
 pub const nolog: usize = 15;
 pub const pipefail: usize = 16;
 pub const debug: usize = 17;
-
-pub static mut arg0: *mut c_char = null_mut(); /* value of $0 */
 
 /* `static const char *const optnames[NOPTS]`.
  *
@@ -211,8 +159,10 @@ pub struct ShellOptions {
     /// `docs/api-design.md` §5 puts it here — one row for everything
     /// `set` and the option scan own.
     pub(crate) shellparam: shparam,
-    /// `minusc` — the argument to `-c`, or NULL.
-    pub(crate) minusc: *mut c_char,
+    /// `minusc` — the argument to `-c`, when one was supplied.
+    pub(crate) minusc: Option<BString>,
+    /// `$0`, owned and NUL-terminated for the remaining C-shaped readers.
+    arg0: Option<BString>,
 }
 
 impl ShellOptions {
@@ -221,7 +171,8 @@ impl ShellOptions {
         ShellOptions {
             flags: [0; NOPTS],
             shellparam: shparam::new(),
-            minusc: null_mut(),
+            minusc: None,
+            arg0: None,
         }
     }
 
@@ -233,6 +184,18 @@ impl ShellOptions {
     #[inline]
     pub(crate) fn set_flag(&mut self, which: usize, to: c_char) {
         self.flags[which] = to;
+    }
+
+    pub(crate) fn set_arg0(&mut self, value: &BStr) {
+        let mut owned = value.to_owned();
+        owned.push(0);
+        self.arg0 = Some(owned);
+    }
+
+    pub(crate) fn arg0(&self) -> Option<&BStr> {
+        self.arg0
+            .as_ref()
+            .map(|value| BStr::new(&value[..value.len() - 1]))
     }
 
     /// The whole flag set, copied.
@@ -258,15 +221,19 @@ impl ShellOptions {
 
 // [spec:dash:def:options.procargs-fn]
 // [spec:dash:sem:options.procargs-fn]
-pub unsafe fn procargs(sh: &mut crate::context::Shell, mut xargv: *mut *mut c_char) -> Result<c_int, Error> {
+pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<c_int, Error> {
     let mut i: c_int;
-    let mut login: c_int;
+    let first = argv.first().map(Vec::as_slice).unwrap_or_default();
+    let mut login = (first.first() == Some(&b'-')) as c_int;
 
-    login = (!(*xargv.offset(0)).is_null() && **xargv.offset(0) == b'-' as c_char) as c_int;
-    arg0 = *xargv.offset(0);
-    if !(*xargv.offset(0)).is_null() {
-        xargv = xargv.add(1);
+    if let Some(first) = argv.first() {
+        sh.options.set_arg0(BStr::new(first.as_slice()));
     }
+    let args: Vec<&BStr> = argv
+        .iter()
+        .skip(1)
+        .map(|word| BStr::new(word.as_slice()))
+        .collect();
     i = 0;
     while i < NOPTS as c_int {
         sh.options.set_flag(i as usize, 2);
@@ -276,12 +243,11 @@ pub unsafe fn procargs(sh: &mut crate::context::Shell, mut xargv: *mut *mut c_ch
      * far it got, and whether `-c` was given. The pointer the C stores in
      * `minusc` is only ever read as a flag before the line below
      * overwrites it with the command itself. */
-    sh.options.minusc = null_mut();
-    let words = argv_words(xargv);
-    let scan = options(sh, &words, 0, true)?;
+    sh.options.minusc = None;
+    let scan = options(sh, &args, 0, true)?;
     login |= scan.login;
-    xargv = xargv.add(scan.next);
-    if (*xargv).is_null() {
+    let mut next = scan.next;
+    if next >= args.len() {
         if scan.minus_c {
             return Err(sh.sh_error_value(b"-c requires an argument"));
         }
@@ -289,7 +255,7 @@ pub unsafe fn procargs(sh: &mut crate::context::Shell, mut xargv: *mut *mut c_ch
     }
     if sh.options.flag(iflag) == 2 && sh.options.flag(sflag) == 1 {
         crate::input::input_init(sh);
-        if sh.input.stdin_istty != 0 && libc::isatty(sh.streams.stderr) != 0 {
+        if sh.input.stdin_istty != 0 && nsh_platform::is_terminal(sh.streams.stderr) {
             sh.options.set_flag(iflag, 1);
         }
     }
@@ -309,28 +275,21 @@ pub unsafe fn procargs(sh: &mut crate::context::Shell, mut xargv: *mut *mut c_ch
     /* POSIX 1003.2: first arg after -c cmd is $0, remainder $1... */
     let mut setarg0 = false;
     if scan.minus_c {
-        sh.options.minusc = *xargv;
-        xargv = xargv.add(1);
-        if !(*xargv).is_null() {
+        sh.options.minusc = Some(args[next].to_owned());
+        next += 1;
+        if next < args.len() {
             setarg0 = true; /* goto setarg0 */
         }
     } else if sh.options.flag(sflag) == 0 {
-        crate::input::setinputfile(sh, *xargv, 0)?;
+        crate::input::setinputfile(sh, args[next], 0)?;
         setarg0 = true;
     }
     if setarg0 {
-        arg0 = *xargv;
-        xargv = xargv.add(1);
+        sh.options.set_arg0(args[next]);
+        next += 1;
     }
 
-    /* assert(shellparam.malloc == 0 && shellparam.nparam == 0); */
-    let mut nparam: c_int = 0;
-    let mut count = xargv;
-    while !(*count).is_null() {
-        nparam += 1;
-        count = count.add(1);
-    }
-    borrowparam(sh, xargv, nparam);
+    setparam(sh, &args[next..]);
     optschanged(sh)?;
 
     Ok(login)
@@ -340,13 +299,19 @@ pub unsafe fn procargs(sh: &mut crate::context::Shell, mut xargv: *mut *mut c_ch
 // [spec:dash:sem:options.optschanged-fn]
 /// Returns rather than raising, because `setjobctl` can fail and one of
 /// this function's callers is teardown. See `jobs::setjobctl`.
-pub unsafe fn optschanged(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
+pub fn optschanged(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
     /* `#ifdef DEBUG opentrace();` — the dash build does not define DEBUG,
      * so `show.c` compiles to nothing and there is no trace file. */
     crate::trap::setinteractive(sh, sh.options.flag(iflag) as c_int);
     /* #ifndef SMALL */
     crate::histedit::histedit(sh);
     crate::jobs::setjobctl(sh, sh.options.flag(mflag) as c_int)
+}
+
+/// Typed entry point for callers that do not participate in the legacy
+/// pointer-based option parser.
+pub(crate) fn options_changed(sh: &mut Shell) -> Result<(), Error> {
+    optschanged(sh)
 }
 
 /// What a pass of [`options`] found.
@@ -373,7 +338,7 @@ pub(crate) struct Scan {
 
 // [spec:dash:def:options.options-fn]
 // [spec:dash:sem:options.options-fn]
-pub(crate) unsafe fn options(
+pub(crate) fn options(
     sh: &mut crate::context::Shell,
     args: &[&BStr],
     start: usize,
@@ -440,21 +405,9 @@ pub(crate) unsafe fn options(
     Ok(scan)
 }
 
-/// The words of a NUL-terminated `char **`, for the one caller that is
-/// still handed one: the process's own argv, which the frontend owns.
-unsafe fn argv_words<'a>(argv: *mut *mut c_char) -> Vec<&'a BStr> {
-    let mut words = Vec::new();
-    let mut p = argv;
-    while !(*p).is_null() {
-        words.push(BStr::new(CStr::from_ptr(*p).to_bytes()));
-        p = p.add(1);
-    }
-    words
-}
-
 // [spec:dash:def:options.minus-o-fn]
 // [spec:dash:sem:options.minus-o-fn]
-unsafe fn minus_o(sh: &mut crate::context::Shell, name: Option<&BStr>, val: c_int) -> Result<(), Error> {
+fn minus_o(sh: &mut crate::context::Shell, name: Option<&BStr>, val: c_int) -> Result<(), Error> {
     let mut i: c_int;
 
     let name = name.map(crate::shell::cstring);
@@ -528,7 +481,7 @@ unsafe fn minus_o(sh: &mut crate::context::Shell, name: Option<&BStr>, val: c_in
 /// here because a builder sets several options and the teardown that
 /// `optschanged` triggers -- `setinteractive`, `histedit`, `setjobctl` --
 /// should run once against the finished set, not once per option.
-pub(crate) unsafe fn set_option_by_name(
+pub(crate) fn set_option_by_name(
     sh: &mut crate::context::Shell,
     name: &BStr,
     on: bool,
@@ -541,7 +494,7 @@ pub(crate) unsafe fn set_option_by_name(
     }
 }
 
-unsafe fn setoption(sh: &mut crate::context::Shell, flag: u8, val: c_int) -> Result<(), Error> {
+fn setoption(sh: &mut crate::context::Shell, flag: u8, val: c_int) -> Result<(), Error> {
     let mut i: c_int;
 
     i = 0;
@@ -571,56 +524,26 @@ unsafe fn setoption(sh: &mut crate::context::Shell, flag: u8, val: c_int) -> Res
 
 // [spec:dash:def:options.setparam-fn]
 // [spec:dash:sem:options.setparam-fn]
-pub unsafe fn setparam(sh: &mut Shell, argv: &[&BStr]) {
-    let nparam: c_int = argv.len() as c_int;
-
+pub fn setparam(sh: &mut Shell, argv: &[&BStr]) {
     /* Copied out in full before the old list goes, as the C's
      * `savestr` loop is: `freeparam` comes after the copy there too. */
     let words: Vec<BString> = argv
         .iter()
-        .map(|w| BString::from(crate::shell::cstring(w).into_bytes_with_nul()))
+        .map(|word| BString::from(crate::mystring::cstr_prefix(word)))
         .collect();
-    let param = &mut *addr_of_mut!(sh.options.shellparam);
-    param.owned = Some(Params::new(words));
-    param.borrowed = null_mut();
-    param.nparam = nparam;
-    param.optind = 1;
-    param.optoff = -1;
-}
-
-/// `shellparam.malloc = 0; shellparam.p = argv` — the parameters a function
-/// call installs are its caller's `argv`, borrowed for the length of the
-/// call and rewritten in place by `shift`.
-pub unsafe fn borrowparam(sh: &mut Shell, argv: *mut *mut c_char, nparam: c_int) {
-    let param = &mut *addr_of_mut!(sh.options.shellparam);
-    param.owned = None;
-    param.borrowed = argv;
-    param.nparam = nparam;
-    param.optind = 1;
-    param.optoff = -1;
+    sh.options.shellparam.replace(words);
 }
 
 /// `saveparam = shellparam`, which is a copy in the C only because
 /// `shellparam.malloc = 0` on the next line disarms the `freeparam` that
 /// would otherwise free what the copy still points at. One move says both.
-pub unsafe fn takeparam(sh: &mut Shell) -> shparam {
-    core::mem::replace(&mut *addr_of_mut!(sh.options.shellparam), shparam::new())
+pub fn takeparam(sh: &mut Shell) -> shparam {
+    core::mem::replace(&mut sh.options.shellparam, shparam::new())
 }
 
-/// `freeparam(&shellparam); shellparam = saveparam;`
-pub unsafe fn restoreparam(sh: &mut Shell, saved: shparam) {
-    freeparam(addr_of_mut!(sh.options.shellparam));
+/// Drop the function's parameters and restore the caller's saved value.
+pub fn restoreparam(sh: &mut Shell, saved: shparam) {
     sh.options.shellparam = saved;
-}
-
-/*
- * Free the list of positional parameters.
- */
-
-// [spec:dash:def:options.freeparam-fn]
-// [spec:dash:sem:options.freeparam-fn]
-pub unsafe fn freeparam(param: *mut shparam) {
-    (*param).owned = None;
 }
 
 /*
@@ -633,7 +556,7 @@ pub unsafe fn freeparam(param: *mut shparam) {
 
 // [spec:dash:def:options.getoptsreset-fn]
 // [spec:dash:sem:options.getoptsreset-fn]
-pub unsafe fn getoptsreset(sh: &mut crate::context::Shell, value: *const c_char) {
+pub fn getoptsreset(sh: &mut crate::context::Shell, _value: &BStr) {
     sh.options.shellparam.optind = 1;
     sh.options.shellparam.optoff = -1;
 }
@@ -702,7 +625,7 @@ impl<'a> Options<'a> {
     /// writes a diagnostic, and writing one needs the shell that reports.
     // [spec:dash:def:options.nextopt-fn]
     // [spec:dash:sem:options.nextopt-fn]
-    pub unsafe fn next(
+    pub fn next(
         &mut self,
         sh: &mut crate::context::Shell,
         optstring: &[u8],
@@ -821,7 +744,7 @@ mod tests {
         let sh = &mut owned;
         let args = [BStr::new("set"), BStr::new("-Q")];
 
-        let e = unsafe { options(sh, &args, 1, false) }.expect_err("-Q is not an option");
+        let e = options(sh, &args, 1, false).expect_err("-Q is not an option");
 
         assert_eq!(e.message().to_vec(), b"Illegal option -Q".to_vec());
         assert_eq!(e.status(), 2);
@@ -834,7 +757,7 @@ mod tests {
         let sh = &mut owned;
         let args = [BStr::new("set"), BStr::new("-o"), BStr::new("nosuchopt")];
 
-        let e = unsafe { options(sh, &args, 1, false) }.expect_err("-o nosuchopt is not an option");
+        let e = options(sh, &args, 1, false).expect_err("-o nosuchopt is not an option");
 
         assert_eq!(e.message().to_vec(), b"Illegal option -o nosuchopt".to_vec());
     }
@@ -852,7 +775,7 @@ mod tests {
          * a failure look like a short option list, so the error is taken
          * loudly: every option string these cases use accepts every
          * option they hand it. */
-        while let Some(c) = unsafe { opts.next(sh, optstring) }
+        while let Some(c) = opts.next(sh, optstring)
             .expect("the scan's cases never pass an option the string rejects")
         {
             seen.push(c);
@@ -886,9 +809,9 @@ mod tests {
         let sh = &mut owned_sh;
         let args = words(&[b"read", b"-pPROMPT", b"var"]);
         let mut opts = Options::new(&args);
-        assert_eq!(unsafe { opts.next(sh, b"p:r") }.unwrap(), Some(b'p'));
+        assert_eq!(opts.next(sh, b"p:r").unwrap(), Some(b'p'));
         assert_eq!(opts.arg(), BStr::new(b"PROMPT"));
-        assert_eq!(unsafe { opts.next(sh, b"p:r") }.unwrap(), None);
+        assert_eq!(opts.next(sh, b"p:r").unwrap(), None);
         assert_eq!(opts.operands(), words(&[b"var"]));
     }
 
@@ -898,9 +821,9 @@ mod tests {
         let sh = &mut owned_sh;
         let args = words(&[b"read", b"-p", b"PROMPT", b"var"]);
         let mut opts = Options::new(&args);
-        assert_eq!(unsafe { opts.next(sh, b"p:r") }.unwrap(), Some(b'p'));
+        assert_eq!(opts.next(sh, b"p:r").unwrap(), Some(b'p'));
         assert_eq!(opts.arg(), BStr::new(b"PROMPT"));
-        assert_eq!(unsafe { opts.next(sh, b"p:r") }.unwrap(), None);
+        assert_eq!(opts.next(sh, b"p:r").unwrap(), None);
         assert_eq!(opts.operands(), words(&[b"var"]));
     }
 
@@ -960,7 +883,7 @@ mod tests {
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
         let args = words(raw);
-        let scan = unsafe { options(sh, &args, 0, cmdline) }.expect("these cases scan cleanly");
+        let scan = options(sh, &args, 0, cmdline).expect("these cases scan cleanly");
         (scan.next, scan.minus_c, scan.login)
     }
 

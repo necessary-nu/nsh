@@ -12,7 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 bstr = "1"
-libc = "0.2"
+nsh-platform = { path = "../nsh-platform" }
 nshedit = { git = "https://github.com/necessary-nu/nshedit.git", rev = "8059f66ee3a22e699b65dc60beaa4be933588d60" }
 nshedit-plat = { git = "https://github.com/necessary-nu/nshedit.git", rev = "8059f66ee3a22e699b65dc60beaa4be933588d60" }
 nshterm = { git = "https://github.com/necessary-nu/nshedit.git", rev = "8059f66ee3a22e699b65dc60beaa4be933588d60" }

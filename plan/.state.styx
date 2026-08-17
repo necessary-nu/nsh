@@ -1113,6 +1113,8 @@ assertions (
     {id host-owns-signals, kind @complete, author "brendan@necessary.nu", at 2026-08-16T11:54:37.641373271Z}
     {id process-model, kind @complete, author "brendan@necessary.nu", at 2026-08-16T12:55:01.103836061Z}
     {id public-api, kind @complete, author "brendan@necessary.nu", at 2026-08-16T23:27:45.282676769Z}
+    {id statics-that-are-not-state, kind @complete, author "brendan@necessary.nu", at 2026-08-17T16:12:31.996289016Z}
+    {id unsafe-is-a-crate, kind @complete, author "brendan@necessary.nu", at 2026-08-17T16:13:01.501479926Z}
 )
 
 impl_evidence (

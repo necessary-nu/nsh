@@ -51,11 +51,12 @@
 // [spec:posix:def:edit.word-bigword-terms]
 // [spec:posix:req:edit.yank-motion]
 
+use bstr::BStr;
 use nshedit::domain::{
     Action, ArgumentCommand, Binding, CommandName, CommandSequence, Direction, EditTarget,
     EditingMode, EditorConfig, EffectCommand, HistorySearchCommand, ImmediateCommand, InputMode,
     KeySequence, KeymapMode, Motion, Outcome, Prompt, Refresh, ScreenSize, SignalPolicy,
-    TerminalLiteral, Text, TextUnit, WordTraversal, YankPlacement,
+    TerminalLiteral, TerminalMode, Text, TextUnit, WordTraversal, YankPlacement,
 };
 use nshedit::editor::effect::{
     AliasResponse, HistoryResponse, HistorySearchInput, HistorySearchResponse, HistorySelection,
@@ -63,22 +64,106 @@ use nshedit::editor::effect::{
 };
 use nshedit::editor::{
     CompletionCandidate, DriverError, Editor, ReadDriver, ReadResult, ReadStep, StartError,
-    SystemTerminal, TerminalProfile,
+    TerminalControl, TerminalProfile,
 };
 use nshedit::history::HistoryCursor;
-use nshedit_plat::terminal::{ControlCharacter, TerminalAttributes};
+use nshedit_plat::terminal::{ApplyWhen, ControlCharacter, TerminalAttributes};
 use std::error::Error as StdError;
-use std::ffi::{CStr, OsStr, OsString};
+use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, Write};
-use std::os::fd::{AsRawFd, BorrowedFd, RawFd};
+use std::os::fd::{AsFd, BorrowedFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-type NativeEditor = Editor<SystemTerminal<'static>>;
+type NativeEditor = Editor<OwnedTerminal>;
+
+/// An editor terminal that owns its duplicated descriptors.
+///
+/// `nshedit::SystemTerminal` is intentionally borrowed. Storing it beside
+/// the files it borrows would require a self-reference, so nsh implements the
+/// same public terminal-control contract over owned files instead.
+struct OwnedTerminal {
+    input: File,
+    output: File,
+    original: Option<TerminalAttributes>,
+    editing: Option<TerminalAttributes>,
+    quoted: Option<TerminalAttributes>,
+    restoration_due: bool,
+}
+
+impl OwnedTerminal {
+    fn new(input: File, output: File) -> Self {
+        Self {
+            input,
+            output,
+            original: None,
+            editing: None,
+            quoted: None,
+            restoration_due: false,
+        }
+    }
+
+    fn screen_size(output: BorrowedFd<'_>) -> io::Result<ScreenSize> {
+        let (rows, columns) = nshedit_plat::terminal::screen_size(output)?;
+        ScreenSize::new(rows, columns)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    }
+
+    fn apply(&self, when: ApplyWhen, attributes: Option<&TerminalAttributes>) -> io::Result<()> {
+        match attributes {
+            Some(attributes) => nshedit_plat::terminal::apply_attributes(
+                self.input.as_fd(),
+                when,
+                attributes,
+            ),
+            None => Ok(()),
+        }
+    }
+}
+
+impl TerminalControl for OwnedTerminal {
+    fn activate(&mut self, _config: EditorConfig) -> io::Result<()> {
+        if !nshedit_plat::terminal::is_terminal(self.output.as_fd())? {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "editor output is not a terminal",
+            ));
+        }
+        let original = nshedit_plat::terminal::read_attributes(self.input.as_fd())
+            .map_err(|error| io::Error::new(io::ErrorKind::NotConnected, format!("editor input: {error}")))?;
+        let editing = original.for_editing();
+        let quoted = editing.for_quoted_input();
+        self.original = Some(original);
+        self.editing = Some(editing);
+        self.quoted = Some(quoted);
+        self.restoration_due = true;
+        self.apply(ApplyWhen::AfterOutput, self.editing.as_ref())
+    }
+
+    fn set_mode(&mut self, mode: TerminalMode) -> io::Result<()> {
+        let attributes = match mode {
+            TerminalMode::Cooked => self.original.as_ref(),
+            TerminalMode::Editing => self.editing.as_ref(),
+            TerminalMode::Quoted => self.quoted.as_ref(),
+        };
+        self.apply(ApplyWhen::AfterOutput, attributes)
+    }
+
+    fn restore(&mut self) -> io::Result<()> {
+        if !self.restoration_due {
+            return Ok(());
+        }
+        self.restoration_due = false;
+        self.apply(
+            ApplyWhen::AfterOutputAndDiscardInput,
+            self.original.as_ref(),
+        )
+    }
+}
 
 const FIRST_NONBLANK: &str = "nsh-vi-first-nonblank";
 const DELETE_TO_FIRST_NONBLANK: &str = "nsh-vi-delete-to-first-nonblank";
@@ -157,8 +242,6 @@ pub struct LineEditor {
     driver: ReadDriver,
     input: File,
     output: File,
-    input_fd: RawFd,
-    output_fd: RawFd,
     history_cursor: HistoryCursor,
     live_history_line: Option<Text>,
     last_history_pattern: Option<Text>,
@@ -169,31 +252,20 @@ pub struct LineEditor {
 impl LineEditor {
     /// Duplicate the shell-owned descriptors and activate a native session.
     ///
-    /// # Safety
-    /// `input_fd` and `output_fd` must be live descriptors for the duration of
-    /// this call.  The constructed value owns duplicates thereafter.
-    pub unsafe fn new(
+    pub fn new(
         input_fd: RawFd,
         output_fd: RawFd,
         mode: EditingMode,
     ) -> Result<Self, LineEditorError> {
-        let input = duplicate_file(input_fd)?;
-        let output = duplicate_file(output_fd)?;
-        let owned_input_fd = input.as_raw_fd();
-        let owned_output_fd = output.as_raw_fd();
-
-        // SAFETY: the two `File`s remain fields of `LineEditor`.  `Drop`
-        // takes and finishes the editor before either file can close its fd.
-        // BorrowedFd stores the descriptor number, not an address into File,
-        // so moving LineEditor does not invalidate the borrow.
-        let terminal_input: BorrowedFd<'static> = BorrowedFd::borrow_raw(owned_input_fd);
-        let terminal_output: BorrowedFd<'static> = BorrowedFd::borrow_raw(owned_output_fd);
-        let terminal_attributes = nshedit_plat::terminal::read_attributes(terminal_input).ok();
+        let input = nsh_platform::duplicate_file(input_fd)?;
+        let output = nsh_platform::duplicate_file(output_fd)?;
+        let terminal_attributes = nshedit_plat::terminal::read_attributes(input.as_fd()).ok();
+        let terminal = OwnedTerminal::new(input.try_clone()?, output.try_clone()?);
         let config = EditorConfig::default()
             .with_editing_mode(mode)
             .with_signal_policy(SignalPolicy::Ignore);
-        let mut editor = Editor::new(config, SystemTerminal::new(terminal_input, terminal_output))?;
-        let size = SystemTerminal::screen_size(terminal_output)
+        let mut editor = Editor::new(config, terminal)?;
+        let size = OwnedTerminal::screen_size(output.as_fd())
             .unwrap_or_else(|_| ScreenSize::new(24, 80).expect("the fallback screen is valid"));
         editor.configure_display(default_terminal_profile(), size);
         install_shell_bindings(&mut editor, terminal_attributes.as_ref())?;
@@ -203,8 +275,6 @@ impl LineEditor {
             driver: ReadDriver::default(),
             input,
             output,
-            input_fd: owned_input_fd,
-            output_fd: owned_output_fd,
             history_cursor: HistoryCursor::new(),
             live_history_line: None,
             last_history_pattern: None,
@@ -240,10 +310,7 @@ impl LineEditor {
     /// Fill a parser buffer from the current edited line, retaining any tail
     /// that did not fit for the next call.
     ///
-    /// # Safety
-    /// Prompt, variable and editor effects call into the shell's legacy
-    /// single-threaded global state.
-    pub unsafe fn read_into(
+    pub fn read_into(
         &mut self,
         sh: &mut crate::context::Shell,
         history: &mut History,
@@ -276,7 +343,7 @@ impl LineEditor {
         Ok(count)
     }
 
-    unsafe fn drive_line(
+    fn drive_line(
         &mut self,
         sh: &mut crate::context::Shell,
         history: &mut History,
@@ -299,7 +366,7 @@ impl LineEditor {
                     driver.resume_prompt(editor, &pending, Ok(prompt))?
                 }
                 ReadStep::Resize(pending) => {
-                    let response = SystemTerminal::screen_size(self.output_borrowed())
+                    let response = OwnedTerminal::screen_size(self.output_borrowed())
                         .map_err(|_| HostFailure::Unavailable);
                     let (editor, driver) = self.editor_and_driver();
                     driver.resume_resize(editor, &pending, response)?
@@ -562,7 +629,7 @@ impl LineEditor {
                 .and_then(|()| file.write_all(b"\n"))
                 .and_then(|()| file.flush())
                 .map_err(host_failure)?;
-            let editor = unsafe { shell_editor(sh) };
+            let editor = shell_editor(sh);
             Command::new(editor)
                 .arg(&path)
                 .status()
@@ -592,17 +659,15 @@ impl LineEditor {
     }
 
     fn input_borrowed(&self) -> BorrowedFd<'_> {
-        // SAFETY: `self.input` owns this descriptor.
-        unsafe { BorrowedFd::borrow_raw(self.input_fd) }
+        self.input.as_fd()
     }
 
     fn output_borrowed(&self) -> BorrowedFd<'_> {
-        // SAFETY: `self.output` owns this descriptor.
-        unsafe { BorrowedFd::borrow_raw(self.output_fd) }
+        self.output.as_fd()
     }
 
     fn screen_size(&self) -> ScreenSize {
-        SystemTerminal::screen_size(self.output_borrowed())
+        OwnedTerminal::screen_size(self.output_borrowed())
             .unwrap_or_else(|_| ScreenSize::new(24, 80).expect("the fallback screen is valid"))
     }
 
@@ -624,12 +689,6 @@ impl Drop for LineEditor {
             let _ = editor.finish();
         }
     }
-}
-
-unsafe fn duplicate_file(fd: RawFd) -> io::Result<File> {
-    let borrowed = BorrowedFd::borrow_raw(fd);
-    let owned = borrowed.try_clone_to_owned()?;
-    Ok(File::from(owned))
 }
 
 fn default_terminal_profile() -> TerminalProfile {
@@ -903,19 +962,16 @@ fn install_terminal_character(
     Ok(())
 }
 
-unsafe fn shell_alias(sh: &mut crate::context::Shell, name: &Text, enter_insert: bool) -> Result<AliasResponse, HostFailure> {
-    let mut name = text_to_bytes(name).map_err(host_failure)?;
+fn shell_alias(sh: &mut crate::context::Shell, name: &Text, enter_insert: bool) -> Result<AliasResponse, HostFailure> {
+    let name = text_to_bytes(name).map_err(host_failure)?;
     if name.contains(&0) {
         return Err(HostFailure::Failed(
             "an editor alias name contains NUL".into(),
         ));
     }
-    name.push(0);
-    let alias = crate::alias::lookupalias(sh, name.as_ptr().cast(), 0);
-    if alias.is_null() {
+    let Some(expansion) = crate::alias::lookup_alias(sh, BStr::new(&name), false) else {
         return Ok(AliasResponse::Missing);
-    }
-    let expansion = CStr::from_ptr((*alias).val).to_bytes();
+    };
     let mut macro_text = Text::default();
     // POSIX `@letter` inserts ordinary alias text.  Starting the native
     // macro in Vi insertion mode gives embedded escape sequences and later
@@ -924,7 +980,7 @@ unsafe fn shell_alias(sh: &mut crate::context::Shell, name: &Text, enter_insert:
     if enter_insert {
         macro_text.push(TextUnit::Scalar('i'));
     }
-    macro_text.extend(text_from_bytes(expansion).as_units().iter().copied());
+    macro_text.extend(text_from_bytes(&expansion).as_units().iter().copied());
     Ok(AliasResponse::Expansion(macro_text))
 }
 
@@ -978,7 +1034,7 @@ fn is_line_blank(unit: &TextUnit) -> bool {
     )
 }
 
-unsafe fn shell_prompt(sh: &mut crate::context::Shell) -> Prompt {
+fn shell_prompt(sh: &mut crate::context::Shell) -> Prompt {
     /* The null check this had is gone with the pointer, and it was
      * already dead: `getprompt`'s three arms are two variable texts and
      * `nullstr`, and none of them can be null. The empty prompt now
@@ -1095,13 +1151,11 @@ fn completion_candidates(
         .collect()
 }
 
-unsafe fn shell_editor(sh: &mut crate::context::Shell) -> OsString {
-    for name in [c"EDITOR", c"VISUAL"] {
-        let value = crate::var::bltinlookup(sh, name.as_ptr());
-        if !value.is_null() {
-            let bytes = CStr::from_ptr(value).to_bytes();
-            if !bytes.is_empty() {
-                return OsString::from_vec(bytes.to_vec());
+fn shell_editor(sh: &mut crate::context::Shell) -> OsString {
+    for name in [b"EDITOR".as_slice(), b"VISUAL".as_slice()] {
+        if let Some(value) = crate::var::lookup_bytes(sh, BStr::new(name)) {
+            if !value.is_empty() {
+                return OsString::from_vec(value.into());
             }
         }
     }

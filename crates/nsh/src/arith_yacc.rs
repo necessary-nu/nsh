@@ -1,450 +1,501 @@
-//! Literal port of `src/arith_yacc.c` / `src/arith_yacc.h`.
-//! Rules: `docs/spec/port/src/arith_yacc.md`.
+//! Arithmetic expansion as a typed Rust lexer and recursive-descent parser.
 //!
-//! Arithmetic expansion.  Despite the name there is no yacc grammar: a
-//! hand-written recursive-descent parser that consumes tokens from
-//! `yylex` (`arith_yylex.rs`) and evaluates as it goes.
+//! Rules: `docs/spec/port/src/arith_yacc.md` and
+//! `docs/spec/port/src/arith_yylex.md`.
 //!
-//! The token codes below are order-sensitive: compound assignments sit at
-//! a fixed offset (11) from the binary operators they derive from, and
-//! `prec[]` is indexed by `op - ARITH_BINOP_MIN`.
+//! The original split a two-token window across four mutable globals and a
+//! `yylex` function. None of that is part of arithmetic semantics. A lexer
+//! now owns its byte offset, tokens carry their values, and a parser owns its
+//! lookahead. One shell evaluation cannot overwrite another's state.
 
-use core::ptr;
-use std::ffi::CStr;
+use bstr::{BStr, ByteSlice};
 
-use libc::{c_char, c_int};
-
+use crate::context::Shell;
 use crate::error::Error;
-use crate::var::{lookupvarint, setvarint};
+use crate::var::{lookupvarint_bytes, setvarint_bytes};
 
-pub use libc::intmax_t;
-
-// ---------------------------------------------------------------------
-// src/arith_yacc.h
-// ---------------------------------------------------------------------
-
-pub const ARITH_ASS: c_int = 1;
-
-pub const ARITH_OR: c_int = 2;
-pub const ARITH_AND: c_int = 3;
-pub const ARITH_BAD: c_int = 4;
-pub const ARITH_NUM: c_int = 5;
-pub const ARITH_VAR: c_int = 6;
-pub const ARITH_NOT: c_int = 7;
-
-pub const ARITH_BINOP_MIN: c_int = 8;
-pub const ARITH_LE: c_int = 8;
-pub const ARITH_GE: c_int = 9;
-pub const ARITH_LT: c_int = 10;
-pub const ARITH_GT: c_int = 11;
-pub const ARITH_EQ: c_int = 12;
-pub const ARITH_REM: c_int = 13;
-pub const ARITH_BAND: c_int = 14;
-pub const ARITH_LSHIFT: c_int = 15;
-pub const ARITH_RSHIFT: c_int = 16;
-pub const ARITH_MUL: c_int = 17;
-pub const ARITH_ADD: c_int = 18;
-pub const ARITH_BOR: c_int = 19;
-pub const ARITH_SUB: c_int = 20;
-pub const ARITH_BXOR: c_int = 21;
-pub const ARITH_DIV: c_int = 22;
-pub const ARITH_NE: c_int = 23;
-pub const ARITH_BINOP_MAX: c_int = 24;
-
-pub const ARITH_ASS_MIN: c_int = 24;
-pub const ARITH_REMASS: c_int = 24;
-pub const ARITH_BANDASS: c_int = 25;
-pub const ARITH_LSHIFTASS: c_int = 26;
-pub const ARITH_RSHIFTASS: c_int = 27;
-pub const ARITH_MULASS: c_int = 28;
-pub const ARITH_ADDASS: c_int = 29;
-pub const ARITH_BORASS: c_int = 30;
-pub const ARITH_SUBASS: c_int = 31;
-pub const ARITH_BXORASS: c_int = 32;
-pub const ARITH_DIVASS: c_int = 33;
-pub const ARITH_ASS_MAX: c_int = 34;
-
-pub const ARITH_LPAREN: c_int = 34;
-pub const ARITH_RPAREN: c_int = 35;
-pub const ARITH_BNOT: c_int = 36;
-pub const ARITH_QMARK: c_int = 37;
-pub const ARITH_COLON: c_int = 38;
 
 // [spec:dash:def:arith-yacc.yystype]
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub union yystype {
-    pub val: intmax_t,
-    pub name: *mut c_char,
+/// The value carried by an arithmetic token.
+///
+/// This is an enum rather than the C `union yystype`: a number cannot be
+/// mistaken for a variable-name pointer, and names borrow the input bytes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Token<'a> {
+    End,
+    Bad,
+    Number(i64),
+    Variable(&'a BStr),
+    Assign(Option<BinOp>),
+    LogicalOr,
+    LogicalAnd,
+    Not,
+    BitNot,
+    Binary(BinOp),
+    LParen,
+    RParen,
+    Question,
+    Colon,
 }
 
-/* `int yylex(void)` — the tokeniser prototype used by this file; the
- * implementation lives in `arith_yylex.rs`. */
-// [spec:dash:def:arith-yacc.yylex-fn]
-// [spec:dash:sem:arith-yacc.yylex-fn]
-pub use crate::arith_yylex::yylex;
-
-// ---------------------------------------------------------------------
-// src/arith_yacc.c
-// ---------------------------------------------------------------------
-
-/* #if ARITH_BOR + 11 != ARITH_BORASS || ARITH_ASS + 11 != ARITH_EQ
- * #error Arithmetic tokens are out of order.
- * #endif
- */
-const _: () = assert!(ARITH_BOR + 11 == ARITH_BORASS && ARITH_ASS + 11 == ARITH_EQ);
-
-static mut arith_startbuf: *const c_char = ptr::null();
-
-pub static mut arith_buf: *const c_char = ptr::null();
-pub static mut yylval: yystype = yystype { val: 0 };
-
-static mut last_token: c_int = 0;
-
-/*
- * #define ARITH_PRECEDENCE(op, prec) [op - ARITH_BINOP_MIN] = prec
- *
- * MUL/DIV/REM 0, ADD/SUB 1, shifts 2, relational 3, equality 4,
- * BAND 5, BXOR 6, BOR 7 — lower binds tighter.
- */
-static prec: [c_char; (ARITH_BINOP_MAX - ARITH_BINOP_MIN) as usize] = [
-    3, /* ARITH_LE */
-    3, /* ARITH_GE */
-    3, /* ARITH_LT */
-    3, /* ARITH_GT */
-    4, /* ARITH_EQ */
-    0, /* ARITH_REM */
-    5, /* ARITH_BAND */
-    2, /* ARITH_LSHIFT */
-    2, /* ARITH_RSHIFT */
-    0, /* ARITH_MUL */
-    1, /* ARITH_ADD */
-    7, /* ARITH_BOR */
-    1, /* ARITH_SUB */
-    6, /* ARITH_BXOR */
-    0, /* ARITH_DIV */
-    4, /* ARITH_NE */
-];
-
-pub const ARITH_MAX_PREC: c_int = 8;
-
-// [spec:dash:def:arith-yacc.yyerror-fn]
-// [spec:dash:sem:arith-yacc.yyerror-fn]
-//
-// The C's `yyerror` does not return, because `sh_error` longjmps out of it.
-// Here it *builds* the error instead: the diagnostic is still written at
-// this point, in these bytes, but the jump is the caller's `?`. Every
-// caller in this file spells it `return Err(yyerror(..))`.
-unsafe fn yyerror(sh: &mut crate::context::Shell, s: *const c_char) -> Error {
-    let mut message = b"arithmetic expression: ".to_vec();
-    message.extend_from_slice(CStr::from_ptr(s).to_bytes());
-    message.extend_from_slice(b": \"");
-    message.extend_from_slice(CStr::from_ptr(arith_startbuf).to_bytes());
-    message.push(b'"');
-    sh.sh_error_value(&message)
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum BinOp {
+    LessEqual,
+    GreaterEqual,
+    Less,
+    Greater,
+    Equal,
+    Remainder,
+    BitAnd,
+    ShiftLeft,
+    ShiftRight,
+    Multiply,
+    Add,
+    BitOr,
+    Subtract,
+    BitXor,
+    Divide,
+    NotEqual,
 }
 
-// [spec:dash:def:arith-yacc.arith-prec-fn]
-// [spec:dash:sem:arith-yacc.arith-prec-fn]
-unsafe fn arith_prec(op: c_int) -> c_int {
-    prec[(op - ARITH_BINOP_MIN) as usize] as c_int
-}
-
-// [spec:dash:def:arith-yacc.higher-prec-fn]
-// [spec:dash:sem:arith-yacc.higher-prec-fn]
-unsafe fn higher_prec(op1: c_int, op2: c_int) -> c_int {
-    (arith_prec(op1) < arith_prec(op2)) as c_int
-}
-
-// [spec:dash:def:arith-yacc.do-binop-fn]
-// [spec:dash:sem:arith-yacc.do-binop-fn]
-//
-// Signed overflow and out-of-range shift counts are undefined in C; the
-// wrapping forms below are the closest match to what the platforms dash
-// targets actually do.
-unsafe fn do_binop(sh: &mut crate::context::Shell, op: c_int, a: intmax_t, b: intmax_t) -> Result<intmax_t, Error> {
-    Ok(match op {
-        ARITH_MUL => a.wrapping_mul(b),
-        ARITH_ADD => a.wrapping_add(b),
-        ARITH_SUB => a.wrapping_sub(b),
-        ARITH_LSHIFT => a.wrapping_shl(b as u32),
-        ARITH_RSHIFT => a.wrapping_shr(b as u32),
-        ARITH_LT => (a < b) as intmax_t,
-        ARITH_LE => (a <= b) as intmax_t,
-        ARITH_GT => (a > b) as intmax_t,
-        ARITH_GE => (a >= b) as intmax_t,
-        ARITH_EQ => (a == b) as intmax_t,
-        ARITH_NE => (a != b) as intmax_t,
-        ARITH_BAND => a & b,
-        ARITH_BXOR => a ^ b,
-        ARITH_BOR => a | b,
-        /* default, ARITH_REM, ARITH_DIV */
-        _ => {
-            if b == 0 || (a == intmax_t::MIN && b == -1) {
-                return Err(yyerror(sh, c"division error".as_ptr()));
-            }
-            if op == ARITH_REM { a % b } else { a / b }
+impl BinOp {
+    // [spec:dash:def:arith-yacc.arith-prec-fn]
+    // [spec:dash:sem:arith-yacc.arith-prec-fn]
+    const fn precedence(self) -> u8 {
+        match self {
+            Self::Multiply | Self::Divide | Self::Remainder => 0,
+            Self::Add | Self::Subtract => 1,
+            Self::ShiftLeft | Self::ShiftRight => 2,
+            Self::LessEqual | Self::GreaterEqual | Self::Less | Self::Greater => 3,
+            Self::Equal | Self::NotEqual => 4,
+            Self::BitAnd => 5,
+            Self::BitXor => 6,
+            Self::BitOr => 7,
         }
-    })
+    }
+
+    // [spec:dash:def:arith-yacc.higher-prec-fn]
+    // [spec:dash:sem:arith-yacc.higher-prec-fn]
+    const fn binding_power(self) -> u8 {
+        8 - self.precedence()
+    }
 }
 
-// [spec:dash:def:arith-yacc.primary-fn]
-// [spec:dash:sem:arith-yacc.primary-fn]
-unsafe fn primary(
-    sh: &mut crate::context::Shell,
-    token: c_int,
-    val: *mut yystype,
-    op: c_int,
-    noeval: c_int,
-) -> Result<intmax_t, Error> {
-    let mut token = token;
-    let mut op = op;
+struct Lexer<'a> {
+    input: &'a [u8],
+    pos: usize,
+}
 
-    loop {
-        /* again: */
-        match token {
-            ARITH_LPAREN => {
-                let result = assignment(sh, op, noeval)?;
-                if last_token != ARITH_RPAREN {
-                    return Err(yyerror(sh, c"expecting ')'".as_ptr()));
+impl<'a> Lexer<'a> {
+    fn new(input: &'a BStr) -> Self {
+        Self {
+            input: input.as_ref(),
+            pos: 0,
+        }
+    }
+
+    fn peek(&self, offset: usize) -> Option<u8> {
+        self.input.get(self.pos + offset).copied()
+    }
+
+    fn take_if(&mut self, byte: u8) -> bool {
+        if self.peek(0) == Some(byte) {
+            self.pos += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    // [spec:dash:def:arith-yacc.yylex-fn]
+    // [spec:dash:sem:arith-yacc.yylex-fn]
+    // [spec:dash:def:arith-yylex.yylex-fn]
+    // [spec:dash:sem:arith-yylex.yylex-fn]
+    // [spec:dash:def:expand.yylex-fn]
+    // [spec:dash:sem:expand.yylex-fn]
+    fn next(&mut self) -> Token<'a> {
+        while matches!(self.peek(0), Some(b' ' | b'\t' | b'\n')) {
+            self.pos += 1;
+        }
+
+        let Some(byte) = self.peek(0) else {
+            return Token::End;
+        };
+
+        if byte.is_ascii_digit() {
+            return self.number();
+        }
+        if byte.is_ascii_alphabetic() || byte == b'_' {
+            let start = self.pos;
+            self.pos += 1;
+            while self
+                .peek(0)
+                .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_')
+            {
+                self.pos += 1;
+            }
+            return Token::Variable(self.input[start..self.pos].as_bstr());
+        }
+
+        self.pos += 1;
+        match byte {
+            b'=' => {
+                if self.take_if(b'=') {
+                    Token::Binary(BinOp::Equal)
+                } else {
+                    Token::Assign(None)
                 }
-                last_token = yylex();
+            }
+            b'>' => {
+                if self.take_if(b'=') {
+                    Token::Binary(BinOp::GreaterEqual)
+                } else if self.take_if(b'>') {
+                    if self.take_if(b'=') {
+                        Token::Assign(Some(BinOp::ShiftRight))
+                    } else {
+                        Token::Binary(BinOp::ShiftRight)
+                    }
+                } else {
+                    Token::Binary(BinOp::Greater)
+                }
+            }
+            b'<' => {
+                if self.take_if(b'=') {
+                    Token::Binary(BinOp::LessEqual)
+                } else if self.take_if(b'<') {
+                    if self.take_if(b'=') {
+                        Token::Assign(Some(BinOp::ShiftLeft))
+                    } else {
+                        Token::Binary(BinOp::ShiftLeft)
+                    }
+                } else {
+                    Token::Binary(BinOp::Less)
+                }
+            }
+            b'|' => {
+                if self.take_if(b'|') {
+                    Token::LogicalOr
+                } else if self.take_if(b'=') {
+                    Token::Assign(Some(BinOp::BitOr))
+                } else {
+                    Token::Binary(BinOp::BitOr)
+                }
+            }
+            b'&' => {
+                if self.take_if(b'&') {
+                    Token::LogicalAnd
+                } else if self.take_if(b'=') {
+                    Token::Assign(Some(BinOp::BitAnd))
+                } else {
+                    Token::Binary(BinOp::BitAnd)
+                }
+            }
+            b'!' => {
+                if self.take_if(b'=') {
+                    Token::Binary(BinOp::NotEqual)
+                } else {
+                    Token::Not
+                }
+            }
+            b'(' => Token::LParen,
+            b')' => Token::RParen,
+            b'~' => Token::BitNot,
+            b'?' => Token::Question,
+            b':' => Token::Colon,
+            b'*' => self.binary_or_assign(BinOp::Multiply),
+            b'/' => self.binary_or_assign(BinOp::Divide),
+            b'%' => self.binary_or_assign(BinOp::Remainder),
+            b'+' => self.binary_or_assign(BinOp::Add),
+            b'-' => self.binary_or_assign(BinOp::Subtract),
+            b'^' => self.binary_or_assign(BinOp::BitXor),
+            _ => Token::Bad,
+        }
+    }
+
+    fn binary_or_assign(&mut self, op: BinOp) -> Token<'a> {
+        if self.take_if(b'=') {
+            Token::Assign(Some(op))
+        } else {
+            Token::Binary(op)
+        }
+    }
+
+    fn number(&mut self) -> Token<'a> {
+        let start = self.pos;
+        let (base, digits) = if self.peek(0) == Some(b'0') {
+            match (self.peek(1), self.peek(2).and_then(digit_value)) {
+                (Some(b'x' | b'X'), Some(d)) if d < 16 => (16, start + 2),
+                (Some(b'b' | b'B'), Some(d)) if d < 2 => (2, start + 2),
+                _ => (8, start),
+            }
+        } else {
+            (10, start)
+        };
+
+        self.pos = digits;
+        let mut value = 0i64;
+        while let Some(digit) = self.peek(0).and_then(digit_value) {
+            if digit >= base {
+                break;
+            }
+            value = value
+                .saturating_mul(base as i64)
+                .saturating_add(digit as i64);
+            self.pos += 1;
+        }
+        Token::Number(value)
+    }
+}
+
+fn digit_value(byte: u8) -> Option<u32> {
+    match byte {
+        b'0'..=b'9' => Some((byte - b'0') as u32),
+        b'a'..=b'z' => Some((byte - b'a' + 10) as u32),
+        b'A'..=b'Z' => Some((byte - b'A' + 10) as u32),
+        _ => None,
+    }
+}
+
+struct Parser<'a, 'sh> {
+    sh: &'sh mut Shell,
+    input: &'a BStr,
+    tokens: Vec<Token<'a>>,
+    pos: usize,
+}
+
+impl<'a, 'sh> Parser<'a, 'sh> {
+    // The C header's `arith_lex_reset()` was an empty macro in this build.
+    // Local lexer state makes reset synonymous with constructing a parser.
+    // [spec:dash:def:expand.arith-lex-reset-fn]
+    // [spec:dash:sem:expand.arith-lex-reset-fn]
+    fn new(sh: &'sh mut Shell, input: &'a BStr) -> Self {
+        let mut lexer = Lexer::new(input);
+        let mut tokens = Vec::new();
+        loop {
+            let token = lexer.next();
+            tokens.push(token);
+            if token == Token::End {
+                break;
+            }
+        }
+        Self {
+            sh,
+            input,
+            tokens,
+            pos: 0,
+        }
+    }
+
+    fn current(&self) -> Token<'a> {
+        self.tokens[self.pos]
+    }
+
+    fn peek(&self, offset: usize) -> Token<'a> {
+        self.tokens
+            .get(self.pos + offset)
+            .copied()
+            .unwrap_or(Token::End)
+    }
+
+    fn advance(&mut self) -> Token<'a> {
+        let token = self.current();
+        if token != Token::End {
+            self.pos += 1;
+        }
+        token
+    }
+
+    // [spec:dash:def:arith-yacc.yyerror-fn]
+    // [spec:dash:sem:arith-yacc.yyerror-fn]
+    fn error(&mut self, message: &[u8]) -> Error {
+        let mut text = b"arithmetic expression: ".to_vec();
+        text.extend_from_slice(message);
+        text.extend_from_slice(b": \"");
+        text.extend_from_slice(self.input.as_ref());
+        text.push(b'"');
+        self.sh.sh_error_value(&text)
+    }
+
+    // [spec:dash:def:arith-yacc.assignment-fn]
+    // [spec:dash:sem:arith-yacc.assignment-fn]
+    fn assignment(&mut self, evaluate: bool) -> Result<i64, Error> {
+        if let (Token::Variable(name), Token::Assign(op)) = (self.current(), self.peek(1)) {
+            self.pos += 2;
+            let result = self.assignment(evaluate)?;
+            if !evaluate {
                 return Ok(result);
             }
-            ARITH_NUM => {
-                last_token = op;
-                return Ok((*val).val);
+            let value = if let Some(op) = op {
+                let current = lookupvarint_bytes(self.sh, name)?;
+                self.apply(op, current, result)?
+            } else {
+                result
+            };
+            return setvarint_bytes(self.sh, name, value, 0);
+        }
+        self.conditional(evaluate)
+    }
+
+    // [spec:dash:def:arith-yacc.cond-fn]
+    // [spec:dash:sem:arith-yacc.cond-fn]
+    fn conditional(&mut self, evaluate: bool) -> Result<i64, Error> {
+        let condition = self.logical_or(evaluate)?;
+        if self.current() != Token::Question {
+            return Ok(condition);
+        }
+        self.advance();
+        let then_value = self.assignment(evaluate && condition != 0)?;
+        if self.current() != Token::Colon {
+            return Err(self.error(b"expecting ':'"));
+        }
+        self.advance();
+        let else_value = self.conditional(evaluate && condition == 0)?;
+        Ok(if condition != 0 {
+            then_value
+        } else {
+            else_value
+        })
+    }
+
+    // [spec:dash:def:arith-yacc.or-fn]
+    // [spec:dash:sem:arith-yacc.or-fn]
+    fn logical_or(&mut self, evaluate: bool) -> Result<i64, Error> {
+        let left = self.logical_and(evaluate)?;
+        if self.current() != Token::LogicalOr {
+            return Ok(left);
+        }
+        self.advance();
+        let right = self.logical_or(evaluate && left == 0)?;
+        Ok((left != 0 || right != 0) as i64)
+    }
+
+    // [spec:dash:def:arith-yacc.and-fn]
+    // [spec:dash:sem:arith-yacc.and-fn]
+    fn logical_and(&mut self, evaluate: bool) -> Result<i64, Error> {
+        let left = self.binary(evaluate)?;
+        if self.current() != Token::LogicalAnd {
+            return Ok(left);
+        }
+        self.advance();
+        let right = self.logical_and(evaluate && left != 0)?;
+        Ok((left != 0 && right != 0) as i64)
+    }
+
+    // [spec:dash:def:arith-yacc.binop-fn]
+    // [spec:dash:sem:arith-yacc.binop-fn]
+    fn binary(&mut self, evaluate: bool) -> Result<i64, Error> {
+        let left = self.primary(evaluate)?;
+        self.binary_rhs(left, 1, evaluate)
+    }
+
+    // [spec:dash:def:arith-yacc.binop2-fn]
+    // [spec:dash:sem:arith-yacc.binop2-fn]
+    fn binary_rhs(
+        &mut self,
+        mut left: i64,
+        min_power: u8,
+        evaluate: bool,
+    ) -> Result<i64, Error> {
+        loop {
+            let Token::Binary(op) = self.current() else {
+                return Ok(left);
+            };
+            let power = op.binding_power();
+            if power < min_power {
+                return Ok(left);
             }
-            ARITH_VAR => {
-                last_token = op;
-                return Ok(if noeval != 0 {
-                    (*val).val
+            self.advance();
+            let mut right = self.primary(evaluate)?;
+            if let Token::Binary(next) = self.current() {
+                if next.binding_power() > power {
+                    right = self.binary_rhs(right, power + 1, evaluate)?;
+                }
+            }
+            left = if evaluate {
+                self.apply(op, left, right)?
+            } else {
+                right
+            };
+        }
+    }
+
+    // [spec:dash:def:arith-yacc.primary-fn]
+    // [spec:dash:sem:arith-yacc.primary-fn]
+    fn primary(&mut self, evaluate: bool) -> Result<i64, Error> {
+        match self.advance() {
+            Token::Number(value) => Ok(value),
+            Token::Variable(name) => {
+                if evaluate {
+                    lookupvarint_bytes(self.sh, name)
                 } else {
-                    lookupvarint(sh, (*val).name)?
-                });
+                    Ok(0)
+                }
             }
-            ARITH_ADD => {
-                token = op;
-                *val = yylval;
-                op = yylex();
-                continue; /* goto again */
+            Token::LParen => {
+                let value = self.assignment(evaluate)?;
+                if self.current() != Token::RParen {
+                    return Err(self.error(b"expecting ')'"));
+                }
+                self.advance();
+                Ok(value)
             }
-            ARITH_SUB => {
-                *val = yylval;
-                return Ok(primary(sh, op, val, yylex(), noeval)?.wrapping_neg());
+            Token::Binary(BinOp::Add) => self.primary(evaluate),
+            Token::Binary(BinOp::Subtract) => {
+                Ok(self.primary(evaluate)?.wrapping_neg())
             }
-            ARITH_NOT => {
-                *val = yylval;
-                return Ok((primary(sh, op, val, yylex(), noeval)? == 0) as intmax_t);
-            }
-            ARITH_BNOT => {
-                *val = yylval;
-                return Ok(!primary(sh, op, val, yylex(), noeval)?);
-            }
-            _ => {
-                return Err(yyerror(sh, c"expecting primary".as_ptr()));
-            }
+            Token::Not => Ok((self.primary(evaluate)? == 0) as i64),
+            Token::BitNot => Ok(!self.primary(evaluate)?),
+            _ => Err(self.error(b"expecting primary")),
         }
     }
-}
 
-// [spec:dash:def:arith-yacc.binop2-fn]
-// [spec:dash:sem:arith-yacc.binop2-fn]
-/* The C names the third parameter `prec`, shadowing the file-scope `prec[]`
- * table; Rust forbids a parameter that shadows a static, so it is spelt
- * `prec_` here.  Nothing inside the function reads the table directly. */
-unsafe fn binop2(
-    sh: &mut crate::context::Shell,
-    a: intmax_t,
-    op: c_int,
-    prec_: c_int,
-    noeval: c_int,
-) -> Result<intmax_t, Error> {
-    let mut a = a;
-    let mut op = op;
-
-    loop {
-        let mut val: yystype;
-        let mut b: intmax_t;
-        let mut op2: c_int;
-        let token: c_int;
-
-        token = yylex();
-        val = yylval;
-
-        b = primary(sh, token, &mut val, yylex(), noeval)?;
-
-        op2 = last_token;
-        if op2 >= ARITH_BINOP_MIN && op2 < ARITH_BINOP_MAX && higher_prec(op2, op) != 0 {
-            b = binop2(sh, b, op2, arith_prec(op), noeval)?;
-            op2 = last_token;
-        }
-
-        a = if noeval != 0 { b } else { do_binop(sh, op, a, b)? };
-
-        if op2 < ARITH_BINOP_MIN || op2 >= ARITH_BINOP_MAX || arith_prec(op2) >= prec_ {
-            return Ok(a);
-        }
-
-        op = op2;
+    // [spec:dash:def:arith-yacc.do-binop-fn]
+    // [spec:dash:sem:arith-yacc.do-binop-fn]
+    fn apply(
+        &mut self,
+        op: BinOp,
+        left: i64,
+        right: i64,
+    ) -> Result<i64, Error> {
+        Ok(match op {
+            BinOp::Multiply => left.wrapping_mul(right),
+            BinOp::Add => left.wrapping_add(right),
+            BinOp::Subtract => left.wrapping_sub(right),
+            BinOp::ShiftLeft => left.wrapping_shl(right as u32),
+            BinOp::ShiftRight => left.wrapping_shr(right as u32),
+            BinOp::Less => (left < right) as i64,
+            BinOp::LessEqual => (left <= right) as i64,
+            BinOp::Greater => (left > right) as i64,
+            BinOp::GreaterEqual => (left >= right) as i64,
+            BinOp::Equal => (left == right) as i64,
+            BinOp::NotEqual => (left != right) as i64,
+            BinOp::BitAnd => left & right,
+            BinOp::BitXor => left ^ right,
+            BinOp::BitOr => left | right,
+            BinOp::Remainder | BinOp::Divide => {
+                if right == 0 || (left == i64::MIN && right == -1) {
+                    return Err(self.error(b"division error"));
+                }
+                if op == BinOp::Remainder {
+                    left % right
+                } else {
+                    left / right
+                }
+            }
+        })
     }
-}
-
-// [spec:dash:def:arith-yacc.binop-fn]
-// [spec:dash:sem:arith-yacc.binop-fn]
-unsafe fn binop(
-    sh: &mut crate::context::Shell,
-    token: c_int,
-    val: *mut yystype,
-    op: c_int,
-    noeval: c_int,
-) -> Result<intmax_t, Error> {
-    let a: intmax_t = primary(sh, token, val, op, noeval)?;
-    let op = last_token;
-
-    if op < ARITH_BINOP_MIN || op >= ARITH_BINOP_MAX {
-        return Ok(a);
-    }
-
-    binop2(sh, a, op, ARITH_MAX_PREC, noeval)
-}
-
-// [spec:dash:def:arith-yacc.and-fn]
-// [spec:dash:sem:arith-yacc.and-fn]
-unsafe fn and(
-    sh: &mut crate::context::Shell,
-    token: c_int,
-    val: *mut yystype,
-    op: c_int,
-    noeval: c_int,
-) -> Result<intmax_t, Error> {
-    let a: intmax_t = binop(sh, token, val, op, noeval)?;
-    let b: intmax_t;
-
-    let op = last_token;
-    if op != ARITH_AND {
-        return Ok(a);
-    }
-
-    let token = yylex();
-    *val = yylval;
-
-    b = and(sh, token, val, yylex(), noeval | (a == 0) as c_int)?;
-
-    Ok((a != 0 && b != 0) as intmax_t)
-}
-
-// [spec:dash:def:arith-yacc.or-fn]
-// [spec:dash:sem:arith-yacc.or-fn]
-unsafe fn or(
-    sh: &mut crate::context::Shell,
-    token: c_int,
-    val: *mut yystype,
-    op: c_int,
-    noeval: c_int,
-) -> Result<intmax_t, Error> {
-    let a: intmax_t = and(sh, token, val, op, noeval)?;
-    let b: intmax_t;
-
-    let op = last_token;
-    if op != ARITH_OR {
-        return Ok(a);
-    }
-
-    let token = yylex();
-    *val = yylval;
-
-    b = or(sh, token, val, yylex(), noeval | (a != 0) as c_int)?;
-
-    Ok((a != 0 || b != 0) as intmax_t)
-}
-
-// [spec:dash:def:arith-yacc.cond-fn]
-// [spec:dash:sem:arith-yacc.cond-fn]
-unsafe fn cond(
-    sh: &mut crate::context::Shell,
-    token: c_int,
-    val: *mut yystype,
-    op: c_int,
-    noeval: c_int,
-) -> Result<intmax_t, Error> {
-    let a: intmax_t = or(sh, token, val, op, noeval)?;
-    let b: intmax_t;
-    let c: intmax_t;
-
-    if last_token != ARITH_QMARK {
-        return Ok(a);
-    }
-
-    b = assignment(sh, yylex(), noeval | (a == 0) as c_int)?;
-
-    if last_token != ARITH_COLON {
-        return Err(yyerror(sh, c"expecting ':'".as_ptr()));
-    }
-
-    let token = yylex();
-    *val = yylval;
-
-    c = cond(sh, token, val, yylex(), noeval | (a != 0) as c_int)?;
-
-    Ok(if a != 0 { b } else { c })
-}
-
-// [spec:dash:def:arith-yacc.assignment-fn]
-// [spec:dash:sem:arith-yacc.assignment-fn]
-unsafe fn assignment(sh: &mut crate::context::Shell, var: c_int, noeval: c_int) -> Result<intmax_t, Error> {
-    let mut val: yystype = yylval;
-    let op: c_int = yylex();
-    let result: intmax_t;
-
-    if var != ARITH_VAR {
-        return cond(sh, var, &mut val, op, noeval);
-    }
-
-    if op != ARITH_ASS && (op < ARITH_ASS_MIN || op >= ARITH_ASS_MAX) {
-        return cond(sh, var, &mut val, op, noeval);
-    }
-
-    result = assignment(sh, yylex(), noeval)?;
-    if noeval != 0 {
-        return Ok(result);
-    }
-
-    /* The C reads the variable inside `setvarint`'s argument list. Both
-     * take the shell now, so the read is hoisted to its own statement --
-     * Rust evaluates arguments left to right, so it ran before the call
-     * before and runs before it now. Do not re-inline it. */
-    let value = if op == ARITH_ASS {
-        result
-    } else {
-        {
-            /* Hoisted for the borrow, not for the order: it is the third
-             * argument and the two before it have no side effects, so
-             * left-to-right evaluation is unchanged. See the note above. */
-            let current = lookupvarint(sh, val.name)?;
-            do_binop(sh, op - 11, current, result)?
-        }
-    };
-    setvarint(sh, val.name, value, 0)
 }
 
 // [spec:dash:def:arith-yacc.arith-fn]
 // [spec:dash:sem:arith-yacc.arith-fn]
-pub unsafe fn arith(sh: &mut crate::context::Shell, s: *const c_char) -> Result<intmax_t, Error> {
-    let result: intmax_t;
-
-    arith_startbuf = s;
-    arith_buf = arith_startbuf;
-    /* The names `yylex` produces belong to this evaluation; the C's
-     * `stalloc`s were released by `expari`'s mark, which is here. */
-    crate::arith_yylex::arith_names_reset();
-
-    result = assignment(sh, yylex(), 0)?;
-
-    if last_token != 0 {
-        return Err(yyerror(sh, c"expecting EOF".as_ptr()));
+// [spec:dash:def:expand.arith-fn]
+// [spec:dash:sem:expand.arith-fn]
+pub fn arith(sh: &mut Shell, input: &BStr) -> Result<i64, Error> {
+    let mut parser = Parser::new(sh, input);
+    let result = parser.assignment(true)?;
+    if parser.current() != Token::End {
+        return Err(parser.error(b"expecting EOF"));
     }
-
     Ok(result)
 }
 
@@ -452,24 +503,14 @@ pub unsafe fn arith(sh: &mut crate::context::Shell, s: *const c_char) -> Result<
 mod tests {
     use super::*;
 
-    /* `docs/errors-are-values.md` §5 is the list of things the differential
-     * harness cannot see, and the first entry is the error value itself:
-     * "the harness compares bytes on a stream, and the value never reaches
-     * it". These are that test for the first module converted. The bytes
-     * still go to stderr while they run, which is the point -- the
-     * diagnostic is written where dash writes it *and* returned. */
+    fn shell() -> Shell {
+        Shell::new(crate::streams::Streams::INHERIT)
+    }
 
     #[test]
     fn a_failed_evaluation_returns_its_diagnostic() {
-        let _g = crate::testutil::lock();
-        let expr = crate::testutil::CStr0::new("1/0");
-
-        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-
-        let sh = &mut owned;
-
-        let e = unsafe { arith(sh, expr.p()) }.expect_err("1/0 must fail");
-
+        let mut sh = shell();
+        let e = arith(&mut sh, BStr::new(b"1/0")).expect_err("1/0 must fail");
         assert_eq!(
             e.message().to_vec(),
             b"arithmetic expression: division error: \"1/0\"".to_vec()
@@ -479,15 +520,8 @@ mod tests {
 
     #[test]
     fn a_trailing_token_returns_its_diagnostic() {
-        let _g = crate::testutil::lock();
-        let expr = crate::testutil::CStr0::new("1 2");
-
-        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-
-        let sh = &mut owned;
-
-        let e = unsafe { arith(sh, expr.p()) }.expect_err("`1 2` must fail");
-
+        let mut sh = shell();
+        let e = arith(&mut sh, BStr::new(b"1 2")).expect_err("`1 2` must fail");
         assert_eq!(
             e.message().to_vec(),
             b"arithmetic expression: expecting EOF: \"1 2\"".to_vec()
@@ -496,11 +530,25 @@ mod tests {
 
     #[test]
     fn a_good_expression_still_evaluates() {
-        let _g = crate::testutil::lock();
-        let expr = crate::testutil::CStr0::new("6*7");
-        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned;
+        let mut sh = shell();
+        assert_eq!(arith(&mut sh, BStr::new(b"6*7")).unwrap(), 42);
+    }
 
-        assert_eq!(unsafe { arith(sh, expr.p()) }.expect("6*7 evaluates"), 42);
+    #[test]
+    fn base_prefixes_and_overflow_match_intmax() {
+        let mut sh = shell();
+        assert_eq!(arith(&mut sh, BStr::new(b"0b11 + 010 + 0x10")).unwrap(), 27);
+        assert_eq!(
+            arith(&mut sh, BStr::new(b"9223372036854775808")).unwrap(),
+            i64::MAX
+        );
+    }
+
+    #[test]
+    fn short_circuit_skips_effects_but_parses_both_sides() {
+        let mut sh = shell();
+        assert_eq!(arith(&mut sh, BStr::new(b"0 && 1 / 0")).unwrap(), 0);
+        assert_eq!(arith(&mut sh, BStr::new(b"1 || 1 / 0")).unwrap(), 1);
+        assert_eq!(arith(&mut sh, BStr::new(b"1 ? 7 : 1 / 0")).unwrap(), 7);
     }
 }

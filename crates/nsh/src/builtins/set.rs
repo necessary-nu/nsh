@@ -11,22 +11,19 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use core::ptr::addr_of;
-use libc::c_char;
 
 use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
-use crate::mystring::nullstr;
 use crate::options::{options, optschanged, setparam};
-use crate::var::{VUNSET, showvars};
+use crate::var::{VUNSET, show_vars};
 
 // [spec:dash:def:options.setcmd-fn]
 // [spec:dash:sem:options.setcmd-fn]
-pub unsafe fn setcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn setcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if args.len() == 1 {
-        return Ok(Flow::Done(showvars(sh, addr_of!(nullstr) as *const c_char, 0, VUNSET)));
+        return Ok(Flow::Done(show_vars(sh, BStr::new(b""), 0, VUNSET)));
     }
-    INTOFF();
+    INTOFF(sh);
     let scan = options(sh, args, 1, false)?;
     /* The fourth `?` to return between this frame's INTOFF and its INTON,
      * and left leaking with the other three: 2.4 is explicit that pairing
@@ -35,6 +32,6 @@ pub unsafe fn setcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if scan.next < args.len() {
         setparam(sh, &args[scan.next..]);
     }
-    INTON();
+    INTON(sh);
     Ok(Flow::Done(0))
 }

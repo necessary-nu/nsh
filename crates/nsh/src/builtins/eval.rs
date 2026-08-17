@@ -11,15 +11,14 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use bstr::{BStr, BString};
-use libc::{c_char, c_int};
-use std::ffi::CString;
+use bstr::{BStr, BString, ByteSlice};
+use core::ffi::c_int;
 
 use crate::eval::{EV_TESTED, Flow, evalstring};
 
 // [spec:dash:def:eval.evalcmd-fn]
 // [spec:dash:sem:eval.evalcmd-fn]
-pub(crate) unsafe fn evalcmd(sh: &mut Shell, args: &[&BStr], flags: c_int) -> Result<Flow, Error> {
+pub(crate) fn evalcmd(sh: &mut Shell, args: &[&BStr], flags: c_int) -> Result<Flow, Error> {
     /* `grabstackstr` kept the joined string alive until the enclosing mark
      * popped, which is past the `evalstring` that parses it. Owning it here
      * says the same thing, and it has to be a binding of this frame because
@@ -27,21 +26,18 @@ pub(crate) unsafe fn evalcmd(sh: &mut Shell, args: &[&BStr], flags: c_int) -> Re
     let mut concat: BString = BString::new(Vec::new());
 
     if args.len() > 1 {
-        let single: CString;
-        let p: *mut c_char = if args.len() > 2 {
+        let text: &BStr = if args.len() > 2 {
             for (i, word) in args[1..].iter().enumerate() {
                 if i > 0 {
                     concat.push(b' ');
                 }
-                concat.extend_from_slice(crate::shell::cstring(word).as_bytes());
+                concat.extend_from_slice(word);
             }
-            concat.push(0);
-            concat.as_mut_ptr() as *mut c_char
+            concat.as_bstr()
         } else {
-            single = crate::shell::cstring(args[1]);
-            single.as_ptr() as *mut c_char
+            args[1]
         };
-        return evalstring(sh, p, flags & EV_TESTED);
+        return evalstring(sh, text, flags & EV_TESTED);
     }
     Ok(Flow::Done(0))
 }

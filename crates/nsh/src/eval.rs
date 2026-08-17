@@ -30,22 +30,19 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use bstr::{BStr, BString};
-use core::ptr::{addr_of_mut, null, null_mut};
-use libc::{c_char, c_int};
-use std::ffi::{CStr, CString};
+use bstr::{BStr, BString, ByteSlice};
+use core::ffi::c_int;
 use std::io::Write as _;
 
-use crate::builtins::{BUILTIN_ASSIGN, BUILTIN_REGULAR, BUILTIN_SPECIAL, Builtin, builtincmd};
+use crate::builtins::{BUILTIN_ASSIGN, BUILTIN_REGULAR, BUILTIN_SPECIAL, builtincmd};
 use crate::error::{FORCEINTON, INTOFF, INTON};
-use crate::exec::{CMDBUILTIN, CMDFUNCTION, CMDNORMAL, CMDUNKNOWN, DO_ERR, DO_NOFUNC, DO_REGBLTIN};
-use crate::exec::{cmdentry, find_command, param, shellexec};
+use crate::exec::{CMDBUILTIN, CMDFUNCTION, CMDUNKNOWN, DO_ERR, DO_NOFUNC, DO_REGBLTIN};
+use crate::exec::{cmdentry, find_command, shellexec};
 use crate::expand::{EXP_FULL, EXP_MBCHAR, EXP_REDIR, EXP_TILDE, EXP_VARTILDE};
 use crate::expand::{arglist, strlist};
 use crate::jobs::FORK_NOJOB;
 use crate::nodes::{
-    NAND, NAPPEND, NBACKGND, NCASE, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO, NIF,
-    NNOT, NOR, NPIPE, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE,
+    NAND, NAPPEND, NBACKGND, NCASE, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO, NIF, NOR, NPIPE, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE,
 };
 use crate::nodes::{Node, funcnode};
 use crate::output::Dest;
@@ -67,12 +64,9 @@ pub const SKIPFUNC: c_int = 1 << 2;
 pub const SKIPFUNCDEF: c_int = 1 << 3;
 
 // [spec:dash:def:eval.backcmd]
-#[repr(C)]
 pub struct backcmd {
     /* result of evalbackcmd */
     pub fd: c_int,         /* file descriptor to read from */
-    pub buf: *mut c_char,  /* buffer */
-    pub nleft: c_int,      /* number of chars in buffer */
     pub jp: Option<usize>, /* index of the job structure for command */
 }
 
@@ -236,19 +230,19 @@ pub(crate) use flow;
 
 /* src/options.h: `#define nflag optlist[5]` and friends. */
 #[inline]
-unsafe fn nflag(sh: &crate::context::Shell) -> c_int {
+fn nflag(sh: &crate::context::Shell) -> c_int {
     sh.options.flag(crate::options::nflag) as c_int
 }
 #[inline]
-unsafe fn eflag(sh: &crate::context::Shell) -> c_int {
+fn eflag(sh: &crate::context::Shell) -> c_int {
     sh.options.flag(crate::options::eflag) as c_int
 }
 #[inline]
-unsafe fn xflag(sh: &crate::context::Shell) -> c_int {
+fn xflag(sh: &crate::context::Shell) -> c_int {
     sh.options.flag(crate::options::xflag) as c_int
 }
 #[inline]
-unsafe fn iflag(sh: &crate::context::Shell) -> c_int {
+fn iflag(sh: &crate::context::Shell) -> c_int {
     sh.options.flag(crate::options::iflag) as c_int
 }
 
@@ -270,20 +264,16 @@ unsafe fn iflag(sh: &crate::context::Shell) -> c_int {
 
 // [spec:dash:def:eval.evalstring-fn]
 // [spec:dash:sem:eval.evalstring-fn]
-pub unsafe fn evalstring(sh: &mut Shell, s: *mut c_char, flags: c_int) -> Result<Flow, Error> {
+pub fn evalstring(sh: &mut Shell, s: &BStr, flags: c_int) -> Result<Flow, Error> {
     /* `sstrdup(s)` and the `stunalloc(s)` at the bottom are one thing:
      * `setinputstring` keeps the pointer rather than copying, so the text
      * has to outlive every `popstackmark` the parse below performs — which
      * is why the copy is taken *before* the mark is set and released by
      * hand afterwards.  Owning it says both halves at once, and says them
      * on the unwind path too, where the C's `stunalloc` never runs. */
-    let owned: Vec<u8> = CStr::from_ptr(s).to_bytes_with_nul().to_vec();
-    let s: *mut c_char = owned.as_ptr() as *mut c_char;
-
     crate::input::setinputstring(sh, s);
     let status = flow!(parse_execute(sh, flags));
     crate::input::popfile(sh);
-    drop(owned);
 
     Ok(Flow::Done(status))
 }
@@ -304,7 +294,7 @@ pub unsafe fn evalstring(sh: &mut Shell, s: *mut c_char, flags: c_int) -> Result
 /// is what the C's `longjmp` past this frame did: the input stack is
 /// unwound to a mark by whoever catches, not by the frame that was passed
 /// through.
-pub(crate) unsafe fn parse_execute(sh: &mut Shell, flags: c_int) -> Result<Flow, Error> {
+pub(crate) fn parse_execute(sh: &mut Shell, flags: c_int) -> Result<Flow, Error> {
     let mut status: c_int = 0;
     loop {
         let n: Option<Node> = match crate::parser::parsecmd(sh, 0)? {
@@ -344,16 +334,16 @@ pub(crate) unsafe fn parse_execute(sh: &mut Shell, flags: c_int) -> Result<Flow,
 
 // [spec:dash:def:eval.evaltree-fn]
 // [spec:dash:sem:eval.evaltree-fn]
-pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, Error> {
+pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, Error> {
     let mut checkexit: c_int = 0;
     /* C leaves `evalfn` uninitialised; every path that reaches
      * `calleval` assigns it first. Seeded here only so that Rust's
      * definite-initialisation analysis is trivially satisfied — any of
      * the six is as good, and `evaltree` itself no longer fits the type,
      * because the leaf evaluators all dereference their node. */
-    let mut evalfn: unsafe fn(&mut Shell, &Node, c_int) -> Result<Flow, Error> =
+    let mut evalfn: fn(&mut Shell, &Node, c_int) -> Result<Flow, Error> =
         evalcommand;
-    let isor: libc::c_uint;
+    let isor: core::ffi::c_uint;
     let mut status: c_int = 0;
 
     'out_lbl: {
@@ -454,13 +444,13 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
                             }
                             NAND | NOR | NSEMI => {
                                 /* #if NAND + 1 != NOR / NOR + 1 != NSEMI */
-                                isor = (n.node_type() - NAND) as libc::c_uint;
+                                isor = (n.node_type() - NAND) as core::ffi::c_uint;
                                 let b = n.nbinary();
                                 status = flow!(evaltree(sh, 
                                     b.ch1.as_deref(),
                                     (flags | (((isor >> 1).wrapping_sub(1)) as c_int)) & EV_TESTED,
                                 ));
-                                if ((status == 0) as libc::c_uint) == isor || sh.eval.evalskip != 0 {
+                                if ((status == 0) as core::ffi::c_uint) == isor || sh.eval.evalskip != 0 {
                                     break 'sw;
                                 }
                                 nnext = b.ch2.as_deref();
@@ -548,7 +538,7 @@ pub unsafe fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result
 // `__attribute__((alias))` it is literally the same function; the
 // portable fallback — reproduced here — calls `evaltree` and aborts if
 // it ever comes back.
-pub unsafe fn evaltreenr(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, Error> {
+pub fn evaltreenr(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, Error> {
     /* The C's `noreturn` was true because every caller passes `EV_EXIT`,
      * and `evaltree`'s tail raises `EXEND` unconditionally under that
      * flag. It still cannot come back with a status -- that is what the
@@ -567,7 +557,7 @@ pub unsafe fn evaltreenr(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Resu
 
 // [spec:dash:def:eval.skiploop-fn]
 // [spec:dash:sem:eval.skiploop-fn]
-unsafe fn skiploop(sh: &mut crate::context::Shell) -> c_int {
+fn skiploop(sh: &mut crate::context::Shell) -> c_int {
     let mut skip: c_int = sh.eval.evalskip;
 
     match skip {
@@ -590,7 +580,7 @@ unsafe fn skiploop(sh: &mut crate::context::Shell) -> c_int {
 
 // [spec:dash:def:eval.evalloop-fn]
 // [spec:dash:sem:eval.evalloop-fn]
-unsafe fn evalloop(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
+fn evalloop(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
     let mut skip: c_int;
     let mut status: c_int;
     let mut flags: c_int = flags;
@@ -631,7 +621,7 @@ unsafe fn evalloop(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
 
 // [spec:dash:def:eval.evalfor-fn]
 // [spec:dash:sem:eval.evalfor-fn]
-unsafe fn evalfor(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
+fn evalfor(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
     let mut arglist: arglist = arglist::new();
     let mut status: c_int;
     let mut flags: c_int = flags;
@@ -651,7 +641,12 @@ unsafe fn evalfor(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error>
     sh.eval.loopnest += 1;
     flags &= EV_TESTED;
     for sp in &arglist.list {
-        crate::var::setvar(sh, f.var.as_ptr(), sp.textp(), 0)?;
+        crate::var::set_bytes(
+            sh,
+            f.var.as_bstr(),
+            Some(crate::mystring::cstr_prefix(&sp.text)),
+            0,
+        )?;
         status = flow!(evaltree(sh, f.body.as_deref(), flags));
         if (skiploop(sh) & !SKIPCONT) != 0 {
             break;
@@ -664,7 +659,7 @@ unsafe fn evalfor(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error>
 
 // [spec:dash:def:eval.evalcase-fn]
 // [spec:dash:sem:eval.evalcase-fn]
-unsafe fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
+fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
     let mut arglist: arglist = arglist::new();
     let mut status: c_int = 0;
 
@@ -694,7 +689,11 @@ unsafe fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
                 break;
             }
             for patp in &cp.nclist().pattern {
-                if crate::expand::casematch(sh, patp, arglist.list[0].textp())? != 0 {
+                if crate::expand::casematch(
+                    sh,
+                    patp,
+                    BStr::new(crate::mystring::cstr_prefix(&arglist.list[0].text)),
+                )? != 0 {
                     /* Ensure body is non-empty as otherwise
                      * EV_EXIT may prevent us from setting the
                      * exit status.
@@ -717,7 +716,7 @@ unsafe fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
 
 // [spec:dash:def:eval.evalsubshell-fn]
 // [spec:dash:sem:eval.evalsubshell-fn]
-unsafe fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
+fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
     let jp: usize;
     let backgnd: c_int = (n.node_type() == NBACKGND) as c_int;
     let mut status: c_int;
@@ -731,7 +730,7 @@ unsafe fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, E
     }
 
     expredir(sh, &r.redirect)?;
-    INTOFF();
+    INTOFF(sh);
     /* Whether the tail below runs in a child of this process or in this
      * process. The C does not need to know, because its `evaltreenr`
      * leaves by longjmp either way; a return has to know, and this is the
@@ -758,11 +757,11 @@ unsafe fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, E
         if backgnd == 0 {
             status = crate::jobs::waitforjob(sh, Some(jp))?;
         }
-        INTON();
+        INTON(sh);
         return Ok(Flow::Done(status));
     }
     // nofork:
-    INTON();
+    INTON(sh);
     let outcome = (|| -> Result<Flow, Error> {
         crate::redir::redirect(sh, &r.redirect, 0)?;
         evaltreenr(sh, r.n.as_deref(), flags)
@@ -801,7 +800,7 @@ unsafe fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, E
 
 // [spec:dash:def:eval.expredir-fn]
 // [spec:dash:sem:eval.expredir-fn]
-unsafe fn expredir(sh: &mut Shell, n: &[Node]) -> Result<(), Error> {
+fn expredir(sh: &mut Shell, n: &[Node]) -> Result<(), Error> {
     for redir in n {
         let mut fnl: arglist = arglist::new();
         match redir.node_type() {
@@ -838,7 +837,7 @@ unsafe fn expredir(sh: &mut Shell, n: &[Node]) -> Result<(), Error> {
                 };
                 if expand {
                     debug_assert_eq!(fnl.list.len(), 1, "an unsplit expansion is one field");
-                    let word = fnl.list[0].textp();
+                    let word = crate::mystring::cstr_prefix(&fnl.list[0].text);
                     crate::parser::fixredir(sh, redir, word, 1)?;
                 }
             }
@@ -857,7 +856,7 @@ unsafe fn expredir(sh: &mut Shell, n: &[Node]) -> Result<(), Error> {
 
 // [spec:dash:def:eval.evalpipe-fn]
 // [spec:dash:sem:eval.evalpipe-fn]
-unsafe fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
+fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
     let jp: usize;
     let pipelen: c_int;
     let mut prevfd: c_int;
@@ -869,7 +868,7 @@ unsafe fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
     let p = n.npipe();
     pipelen = p.cmdlist.len() as c_int;
     flags |= EV_EXIT;
-    INTOFF();
+    INTOFF(sh);
     jp = crate::jobs::makejob(sh, pipelen);
     prevfd = -1;
     for (i, cmd) in p.cmdlist.iter().enumerate() {
@@ -880,29 +879,31 @@ unsafe fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
         }
         pip[1] = -1;
         if has_next {
-            if libc::pipe(pip.as_mut_ptr()) < 0 {
-                libc::close(prevfd);
+            let next_pipe = crate::redir::sh_pipe(sh, false);
+            if next_pipe.is_err() {
+                let _ = nsh_platform::close_fd(prevfd);
                 /* Between this frame's `INTOFF` and its `INTON`, exactly
                  * where the longjmp was: the jump skipped the same `INTON`
                  * and left the counter raised. Pairing them with a guard
                  * would move the instruction a pending SIGINT is delivered
                  * at, which `docs/errors-are-values.md` §2.4 forbids. */
-                return Err(sh.sh_error_value(b"Pipe call failed"));
+                return Err(next_pipe.unwrap_err());
             }
+            pip = next_pipe.expect("the error arm returned").0;
         }
         if crate::jobs::forkshell(sh, Some(jp), Some(cmd), p.backgnd)? == 0 {
-            INTON();
+            INTON(sh);
             if pip[1] >= 0 {
-                libc::close(pip[0]);
+                let _ = nsh_platform::close_fd(pip[0]);
             }
             if prevfd > 0 {
                 crate::input::reset_input(sh);
-                libc::dup2(prevfd, 0);
-                libc::close(prevfd);
+                let _ = nsh_platform::duplicate_to(prevfd, 0);
+                let _ = nsh_platform::close_fd(prevfd);
             }
             if pip[1] > 1 {
-                libc::dup2(pip[1], 1);
-                libc::close(pip[1]);
+                let _ = nsh_platform::duplicate_to(pip[1], 1);
+                let _ = nsh_platform::close_fd(pip[1]);
             }
             /* In a forked child, which may not return through the
              * parent's frames; see `evalsubshell`. */
@@ -910,16 +911,16 @@ unsafe fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
             crate::shellmain::exit_from_child(sh, outcome);
         }
         if prevfd >= 0 {
-            libc::close(prevfd);
+            let _ = nsh_platform::close_fd(prevfd);
         }
         prevfd = pip[0];
-        libc::close(pip[1]);
+        let _ = nsh_platform::close_fd(pip[1]);
     }
     if p.backgnd == 0 {
         status = crate::jobs::waitforjob(sh, Some(jp))?;
         /* TRACE(("evalpipe:  job done exit status %d\n", status)); */
     }
-    INTON();
+    INTON(sh);
 
     Ok(Flow::Done(status))
 }
@@ -933,38 +934,36 @@ unsafe fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error
 
 // [spec:dash:def:eval.evalbackcmd-fn]
 // [spec:dash:sem:eval.evalbackcmd-fn]
-pub unsafe fn evalbackcmd(
+pub fn evalbackcmd(
     sh: &mut Shell,
     n: Option<&Node>,
-    result: *mut backcmd,
+    result: &mut backcmd,
 ) -> Result<(), Error> {
     let jp: usize;
     let mut pip: [c_int; 2] = [0; 2];
     let pid: c_int;
 
-    (*result).fd = -1;
-    (*result).buf = null_mut();
-    (*result).nleft = 0;
-    (*result).jp = None;
+    result.fd = -1;
+    result.jp = None;
     'out_lbl: {
         if n.is_none() {
             break 'out_lbl;
         }
 
-        crate::redir::sh_pipe(sh, pip.as_mut_ptr(), 0)?;
+        pip = crate::redir::sh_pipe(sh, false)?.0;
         sh.eval.tpip[0] = pip[0];
         sh.eval.tpip[1] = pip[1];
         jp = crate::jobs::makejob(sh, 1);
         pid = crate::jobs::forkshell(sh, Some(jp), n, FORK_NOJOB)?;
         sh.eval.tpip[0] = -1;
         if pid == 0 {
-            FORCEINTON();
-            libc::close(pip[0]);
+            FORCEINTON(sh);
+            let _ = nsh_platform::close_fd(pip[0]);
             if pip[1] != 1 {
-                libc::dup2(pip[1], 1);
-                libc::close(pip[1]);
+                let _ = nsh_platform::duplicate_to(pip[1], 1);
+                let _ = nsh_platform::close_fd(pip[1]);
             }
-            crate::expand::ifsfree();
+            crate::expand::ifsfree(&mut sh.expand);
             /* The one forked child that cannot hand its `Flow` back: it
              * sits under the whole expansion chain, which has no business
              * carrying control flow that only ever exists on the far side
@@ -982,9 +981,9 @@ pub unsafe fn evalbackcmd(
             crate::shellmain::exit_from_child(sh, outcome);
             /* NOTREACHED */
         }
-        libc::close(pip[1]);
-        (*result).fd = pip[0];
-        (*result).jp = Some(jp);
+        let _ = nsh_platform::close_fd(pip[1]);
+        result.fd = pip[0];
+        result.jp = Some(jp);
     }
     // out:
     /* TRACE(("evalbackcmd done: fd=%d buf=0x%x nleft=%d jp=0x%x\n", ...)); */
@@ -1000,7 +999,7 @@ pub unsafe fn evalbackcmd(
 // or NULL if the argument list ran out without producing one. As an index it
 // is the length the list had on entry, so the answer is `Some` exactly when
 // the list grew.
-unsafe fn fill_arglist<'a>(
+fn fill_arglist<'a>(
     sh: &mut Shell,
     arglist: &mut arglist,
     argpp: &mut &'a [Node],
@@ -1030,16 +1029,15 @@ unsafe fn fill_arglist<'a>(
 // `head` is the C's `arglist->list`, which this function reassigns to skip
 // the `command [-p]` words it consumed. A `Vec`'s start does not move, so the
 // head is an index the caller keeps; see [`crate::expand::arglist`].
-unsafe fn parse_command_args(
+fn parse_command_args(
     sh: &mut Shell,
     arglist: &mut arglist,
     argpp: &mut &[Node],
-    path: *mut *const c_char,
+    path: &mut Option<BString>,
+    standard_path: &BStr,
     head: &mut usize,
 ) -> Result<c_int, Error> {
     let mut sp: usize = *head;
-    let mut cp: *mut c_char;
-    let mut c: c_char;
 
     loop {
         /* `sp = sp->next ? sp->next : fill_arglist(arglist, argpp)` */
@@ -1051,38 +1049,30 @@ unsafe fn parse_command_args(
                 None => return Ok(0),
             }
         };
-        cp = arglist.list[sp].textp();
-        let c0 = *cp;
-        cp = cp.add(1);
-        if c0 != b'-' as c_char {
+        let word = crate::mystring::cstr_prefix(&arglist.list[sp].text);
+        if word.first() != Some(&b'-') {
             break;
         }
-        c = *cp;
-        cp = cp.add(1);
-        if c == 0 {
+        let options = &word[1..];
+        if options.is_empty() {
             break;
         }
-        if c == b'-' as c_char && *cp == 0 {
+        if options == b"-" {
             if sp + 1 >= arglist.list.len() && fill_arglist(sh, arglist, argpp)?.is_none() {
                 return Ok(0);
             }
             sp += 1;
             break;
         }
-        loop {
-            match c as u8 {
+        for &option in options.as_bytes() {
+            match option {
                 b'p' => {
-                    *path = crate::var::defpath();
+                    *path = Some(standard_path.to_owned());
                 }
                 _ => {
                     /* run 'typecmd' for other options */
                     return Ok(0);
                 }
-            }
-            c = *cp;
-            cp = cp.add(1);
-            if c == 0 {
-                break;
             }
         }
     }
@@ -1101,31 +1091,27 @@ unsafe fn parse_command_args(
 // The `def` rule quotes the `#ifdef notyet` three-argument prototype;
 // the compiled signature — ported here — is
 // `STATIC int evalcommand(union node *cmd, int flags)`.
-unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> {
+fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> {
     let localvar_stop: usize;
     let file_stop: usize;
     let redir_stop: usize;
     let mut argp: &[Node];
     let mut arglist: arglist = arglist::new();
     let mut varlist: arglist = arglist::new();
-    let argv: *mut *mut c_char;
     let mut argc: c_int;
     let osp: Option<usize>;
     /* The C's `arglist.list`, which `parse_command_args` moves past the
      * `command [-p]` words while `osp` keeps the original head for `set -x`. */
     let mut head: usize = 0;
-    let mut cmdentry: cmdentry = cmdentry {
-        cmdtype: 0,
-        u: param { index: 0 },
-    };
+    let mut cmdentry = cmdentry::builtin_command(&crate::builtins::bltin);
     let mut jp: Option<usize>;
-    let mut lastarg: *mut c_char;
-    let mut path: *const c_char;
+    let lastarg: Option<usize>;
+    let mut path: Option<BString> = None;
+    let standard_path = crate::var::defpath();
     let mut spclbltin: c_int;
     let mut cmd_flag: c_int;
     let mut execcmd: c_int;
     let mut status: c_int;
-    let mut nargv: *mut *mut c_char;
     let mut vflags: c_int;
     let mut vlocal: c_int;
 
@@ -1141,16 +1127,11 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
     file_stop = crate::input::cur_mark(sh);
     sh.eval.back_exitstatus = 0;
 
-    cmdentry.cmdtype = CMDBUILTIN;
-    cmdentry.u.cmd = addr_of_mut!(crate::builtins::bltin);
-
     cmd_flag = 0;
     execcmd = 0;
     spclbltin = -1;
     vflags = 0;
     vlocal = 0;
-    path = null();
-
     argc = 0;
     argp = c.args.as_slice();
     osp = fill_arglist(sh, &mut arglist, &mut argp)?;
@@ -1169,10 +1150,10 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
             let regpath = crate::var::pathval(sh);
             match find_command(
                 sh,
-                arglist.list[head].textp(),
+                crate::mystring::cstr_prefix(&arglist.list[head].text),
                 &mut cmdentry,
                 cmd_flag | DO_REGBLTIN,
-                regpath,
+                BStr::new(regpath.as_slice()),
             )? {
                 Flow::Done(_) => {}
                 exit @ Flow::Exit { .. } => return Ok(exit),
@@ -1181,21 +1162,28 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
             vlocal += 1;
 
             /* implement bltin and command here */
-            if cmdentry.cmdtype != CMDBUILTIN {
+            if cmdentry.cmdtype() != CMDBUILTIN {
                 break;
             }
 
-            pseudovarflag = ((*cmdentry.u.cmd).flags & BUILTIN_ASSIGN) as c_int;
+            pseudovarflag = (cmdentry.builtin().flags & BUILTIN_ASSIGN) as c_int;
             if spclbltin < 0 {
-                spclbltin = ((*cmdentry.u.cmd).flags & BUILTIN_SPECIAL) as c_int;
+                spclbltin = (cmdentry.builtin().flags & BUILTIN_SPECIAL) as c_int;
                 vlocal = spclbltin ^ (BUILTIN_SPECIAL as c_int);
             }
-            execcmd = (cmdentry.u.cmd == crate::builtins::EXECCMD) as c_int;
-            if cmdentry.u.cmd != crate::builtins::COMMANDCMD {
+            execcmd = core::ptr::eq(cmdentry.builtin(), crate::builtins::EXECCMD) as c_int;
+            if !core::ptr::eq(cmdentry.builtin(), crate::builtins::COMMANDCMD) {
                 break;
             }
 
-            cmd_flag = parse_command_args(sh, &mut arglist, &mut argp, &mut path, &mut head)?;
+            cmd_flag = parse_command_args(
+                sh,
+                &mut arglist,
+                &mut argp,
+                &mut path,
+                standard_path,
+                &mut head,
+            )?;
             if cmd_flag == 0 {
                 break;
             }
@@ -1205,7 +1193,9 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
             crate::expand::expandarg(sh, 
                 a,
                 Some(&mut arglist),
-                if pseudovarflag != 0 && crate::parser::isassignment(a.narg().text.as_ptr()) != 0 {
+                if pseudovarflag != 0
+                    && crate::parser::isassignment(a.narg().text.as_bstr()) != 0
+                {
                     EXP_VARTILDE
                 } else {
                     EXP_FULL | EXP_TILDE
@@ -1222,41 +1212,11 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
 
     localvar_stop = crate::var::pushlocalvars(sh, vlocal);
 
-    /* Reserve one extra spot at the front for shellexec.
-     *
-     * The C `stalloc`s `argc + 2` pointers and hands out `+ 1`, so
-     * `shellexec` can write `argv[-1]`; the block lives until this
-     * function's `popstackmark`.  A `Vec` of the same length owned by
-     * this frame is the same lifetime, and covers the unwind out of a
-     * builtin that the C's mark covers only because the handler pops
-     * it. */
-    let mut argvbuf: Vec<*mut c_char> = vec![null_mut(); argc as usize + 2];
-    let argvend: *mut *mut c_char = argvbuf.as_mut_ptr().add(argc as usize + 2);
-    nargv = argvbuf.as_mut_ptr().add(1);
-    argv = nargv;
-    for sp in &arglist.list[head..] {
-        /* TRACE(("evalcommand arg: %s\n", sp->text)); */
-        *nargv = sp.textp();
-        nargv = nargv.add(1);
-    }
-    *nargv = null_mut();
-    /* `argc` was counted off the same list a few lines above, so the
-     * terminator lands at `argvbuf[argc + 1]` and the last slot is spare.
-     * A `stalloc`'d block that is one short overruns into whatever the
-     * region hands out next; a `Vec` that is one short is a heap
-     * overflow, so the count is asserted rather than assumed. */
-    debug_assert!(nargv < argvend);
-
-    /* The same words as `argv`, in the shape a builtin takes them: no
-     * terminator, no array, and borrowed from `arglist` -- which this
-     * frame owns, so a builtin that re-enters evaluation is not holding
-     * anything the shell might move underneath it. */
-    let args: Vec<&BStr> = crate::builtins::args(&arglist.list[head..]);
-
-    lastarg = null_mut();
-    if iflag(sh) != 0 && sh.eval.funcline == 0 && argc > 0 {
-        lastarg = *nargv.offset(-1);
-    }
+    lastarg = if iflag(sh) != 0 && sh.eval.funcline == 0 && argc > 0 {
+        Some(arglist.list.len() - 1)
+    } else {
+        None
+    };
 
     sh.io.previous_stderr().fd = sh.streams.stderr;
     expredir(sh, &c.redirect)?;
@@ -1300,9 +1260,17 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                 );
 
                 if vlocal != 0 {
-                    crate::var::mklocal(sh, varlist.list[spp].textp(), VEXPORT)?;
+                    crate::var::make_local_bytes(
+                        sh,
+                        crate::mystring::cstr_prefix(&varlist.list[spp].text),
+                        VEXPORT,
+                    )?;
                 } else {
-                    crate::var::setvareq(sh, varlist.list[spp].textp(), vflags)?;
+                    crate::var::set_assignment_bytes(
+                        sh,
+                        crate::mystring::cstr_prefix(&varlist.list[spp].text),
+                        vflags,
+                    )?;
                 }
             }
 
@@ -1323,7 +1291,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                 /* Hoisted out of `expandstr`'s argument list; see the
                  * note in `evalcommand`. */
                 let ps4 = crate::var::ps4val(sh);
-                let prompt = crate::parser::expandstr(sh, ps4)?;
+                let prompt = crate::parser::expandstr(sh, BStr::new(ps4.as_slice()))?;
                 let _ = sh.io.get(dest).write_all(&prompt);
                 sh.eval.inps4 = 0;
                 sep = 0;
@@ -1337,13 +1305,13 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
             }
 
             /* Now locate the command. */
-            if cmdentry.cmdtype != CMDBUILTIN || ((*cmdentry.u.cmd).flags & BUILTIN_REGULAR) == 0 {
-                path = if !path.is_null() {
-                    path
-                } else {
-                    crate::var::pathval(sh)
-                };
-                match find_command(sh, *argv.offset(0), &mut cmdentry, cmd_flag | DO_ERR, path)? {
+            if cmdentry.cmdtype() != CMDBUILTIN || (cmdentry.builtin().flags & BUILTIN_REGULAR) == 0 {
+                if path.is_none() {
+                    path = Some(crate::var::pathval(sh));
+                }
+                let search_path = BStr::new(path.as_ref().expect("command lookup has a PATH").as_slice());
+                let command_name = crate::mystring::cstr_prefix(&arglist.list[head].text);
+                match find_command(sh, command_name, &mut cmdentry, cmd_flag | DO_ERR, search_path)? {
                     Flow::Done(_) => {}
                     exit @ Flow::Exit { .. } => return Ok(exit),
                 }
@@ -1352,7 +1320,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
             jp = None;
 
             /* Execute the command. */
-            match cmdentry.cmdtype {
+            match cmdentry.cmdtype() {
                 CMDUNKNOWN => {
                     status = 127;
                     break 'bail;
@@ -1372,7 +1340,7 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                      * shell, which is `docs/api-design.md` 3.3's contract and
                      * the mechanism that decides which errors an embedder
                      * ever sees. Anything else leaves as it arrived. */
-                    match evalbltin(sh, cmdentry.u.cmd, &args, flags) {
+                    match evalbltin(sh, cmdentry.builtin(), &mut arglist.list[head..], flags) {
                         Ok(Flow::Done(_)) => {}
                         Ok(exit @ Flow::Exit { .. }) => return Ok(exit),
                         Err(e) => {
@@ -1401,7 +1369,9 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
                     /* `if (evalfun(..)) goto raise;` -- a function body is
                      * not a builtin, so there is nothing to swallow: both an
                      * exit and a diagnostic leave through this frame. */
-                    match evalfun(sh, cmdentry.u.func, argc, argv, flags)? {
+                    let function = cmdentry.function();
+                    let args = crate::builtins::args(&arglist.list[head..]);
+                    match evalfun(sh, &function, &args, flags)? {
                         Flow::Done(_) => {}
                         exit @ Flow::Exit { .. } => return Ok(exit),
                     }
@@ -1409,21 +1379,33 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
 
                 _ => {
                     crate::input::flush_input(sh);
+                    let args = crate::builtins::args(&arglist.list[head..]);
 
                     /* Fork off a child process if necessary. */
                     if (flags & EV_EXIT) == 0 || crate::trap::have_traps(sh) != 0 {
-                        INTOFF();
-                        jp = Some(crate::jobs::vforkexec(sh, cmd, argv, path, cmdentry.u.index)?);
+                        INTOFF(sh);
+                        jp = Some(crate::jobs::forkexec(
+                            sh,
+                            cmd,
+                            &args,
+                            BStr::new(path.as_ref().expect("external command has a PATH").as_slice()),
+                            cmdentry.path_index(),
+                        )?);
                     } else {
                         /* `shellexec` replaces the process image or fails;
                          * failing, it reports and is the C's EXEND. */
-                        return shellexec(sh, argv, path, cmdentry.u.index);
+                        return shellexec(
+                            sh,
+                            &args,
+                            BStr::new(path.as_ref().expect("external command has a PATH").as_slice()),
+                            cmdentry.path_index(),
+                        );
                     }
                 }
             }
 
             status = crate::jobs::waitforjob(sh, jp)?;
-            FORCEINTON();
+            FORCEINTON(sh);
             break 'out_lbl;
         }
         // bail:
@@ -1461,12 +1443,17 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
     crate::redir::unwindredir(sh, redir_stop);
     crate::input::unwindfiles(sh, file_stop);
     crate::var::unwindlocalvars(sh, localvar_stop);
-    if !lastarg.is_null() {
+    if let Some(lastarg) = lastarg {
         /* dsl: I think this is intended to be used to support
          * '_' in 'vi' command mode during line editing...
          * However I implemented that within libedit itself.
          */
-        crate::var::setvar(sh, b"_\0".as_ptr() as *const c_char, lastarg, 0)?;
+        crate::var::set_bytes(
+            sh,
+            BStr::new(b"_"),
+            Some(crate::mystring::cstr_prefix(&arglist.list[lastarg].text)),
+            0,
+        )?;
     }
 
     Ok(Flow::Done(status))
@@ -1474,10 +1461,10 @@ unsafe fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, 
 
 // [spec:dash:def:eval.evalbltin-fn]
 // [spec:dash:sem:eval.evalbltin-fn]
-unsafe fn evalbltin(
+fn evalbltin(
     sh: &mut Shell,
-    cmd: *const builtincmd,
-    args: &[&BStr],
+    cmd: &'static builtincmd,
+    fields: &mut [strlist],
     flags: c_int,
 ) -> Result<Flow, Error> {
     let savecmdname: Option<BString>; /* volatile */
@@ -1485,15 +1472,23 @@ unsafe fn evalbltin(
     savecmdname = core::mem::take(&mut sh.eval.commandname);
     /* `commandname = argv[0]`, and NULL for the command that has no word
      * at all -- the assignment-only one `bltin` stands for. */
-    sh.eval.commandname = args.first().map(|name| BString::from(<&BStr as AsRef<[u8]>>::as_ref(name)));
+    sh.eval.commandname = fields
+        .first()
+        .map(|field| BString::from(crate::mystring::cstr_prefix(&field.text)));
 
     let outcome = (|| -> Result<Flow, Error> {
-        let mut status: c_int = match if cmd == crate::builtins::EVALCMD {
-            crate::builtins::eval::evalcmd(sh, args, flags)?
+        let command_flow = if core::ptr::eq(cmd, crate::builtins::HISTCMD) {
+            crate::builtins::fc::histcmd_fields(sh, fields)?
         } else {
-            let entry = (*cmd).builtin.expect("a builtin with no special entry");
-            entry(sh, args)?
-        } {
+            let args = crate::builtins::args(fields);
+            if core::ptr::eq(cmd, crate::builtins::EVALCMD) {
+                crate::builtins::eval::evalcmd(sh, &args, flags)?
+            } else {
+                let entry = cmd.builtin.expect("a builtin with no special entry");
+                entry(sh, &args)?
+            }
+        };
+        let mut status: c_int = match command_flow {
             Flow::Done(status) => status,
             exit @ Flow::Exit { .. } => return Ok(exit),
         };
@@ -1527,11 +1522,10 @@ unsafe fn evalbltin(
 
 // [spec:dash:def:eval.evalfun-fn]
 // [spec:dash:sem:eval.evalfun-fn]
-unsafe fn evalfun(
+fn evalfun(
     sh: &mut Shell,
-    func: *const funcnode,
-    argc: c_int,
-    argv: *mut *mut c_char,
+    func: &funcnode,
+    args: &[&BStr],
     flags: c_int,
 ) -> Result<Flow, Error> {
     let saveparam: crate::options::shparam; /* volatile */
@@ -1545,29 +1539,27 @@ unsafe fn evalfun(
     savefuncline = sh.eval.funcline;
     saveloopnest = sh.eval.loopnest;
 
-    INTOFF();
-    /* `func->count++`: the second reference that keeps the body alive if
-     * the function is redefined while it runs. */
-    crate::nodes::reffunc(func);
-    sh.eval.funcline = (*func).ndefun().linno;
+    INTOFF(sh);
+    /* `cmdentry::function` cloned the `Rc`, so redefining this function
+     * while it runs cannot pull the body out from under this call. */
+    sh.eval.funcline = func.ndefun().linno;
     sh.eval.loopnest = 0;
     /* This `INTON` is *after* `reffunc`, and the epilogue's `freefunc` is
      * what balances it on both paths. docs/errors-are-values.md 2.6
      * records that a conversion reordering this prologue turns the
      * balance into a use-after-free that only shows when a function
      * redefines itself while running. Nothing here is reordered. */
-    INTON();
-    crate::options::borrowparam(sh, argv.add(1), argc - 1);
+    INTON(sh);
+    crate::options::setparam(sh, args.get(1..).unwrap_or_default());
 
-    let outcome = evaltree(sh, (*func).ndefun().body.as_deref(), flags & EV_TESTED);
+    let outcome = evaltree(sh, func.ndefun().body.as_deref(), flags & EV_TESTED);
 
     // funcdone:
-    INTOFF();
+    INTOFF(sh);
     sh.eval.loopnest = saveloopnest;
     sh.eval.funcline = savefuncline;
-    crate::nodes::freefunc(func);
     crate::options::restoreparam(sh, saveparam);
-    INTON();
+    INTON(sh);
     sh.eval.evalskip &= !(SKIPFUNC | SKIPFUNCDEF);
 
     outcome
@@ -1582,19 +1574,16 @@ unsafe fn evalfun(
 
 // [spec:dash:def:eval.prehash-fn]
 // [spec:dash:sem:eval.prehash-fn]
-unsafe fn prehash(sh: &mut Shell, n: &Node) -> Result<Flow, Error> {
-    let mut entry: cmdentry = cmdentry {
-        cmdtype: 0,
-        u: param { index: 0 },
-    };
+fn prehash(sh: &mut Shell, n: &Node) -> Result<Flow, Error> {
+    let mut entry = cmdentry::unknown();
 
     if n.node_type() == NCMD && !n.ncmd().args.is_empty() {
-        let text = n.ncmd().args[0].narg().text.as_ptr();
+        let text = n.ncmd().args[0].narg().text.as_bstr();
         if crate::parser::goodname(text) != 0 {
             /* Hoisted out of the argument list; see the note in
              * `evalcommand`. */
             let path = crate::var::pathval(sh);
-            return find_command(sh, text, &mut entry, 0, path);
+            return find_command(sh, text, &mut entry, 0, BStr::new(path.as_slice()));
         }
     }
     Ok(Flow::Done(0))
@@ -1626,7 +1615,7 @@ unsafe fn prehash(sh: &mut Shell, n: &Node) -> Result<Flow, Error> {
 
 // [spec:dash:def:eval.eprintlist-fn]
 // [spec:dash:sem:eval.eprintlist-fn]
-unsafe fn eprintlist(sh: &mut crate::context::Shell, dest: Dest, list: &[strlist], sep: c_int) -> c_int {
+fn eprintlist(sh: &mut crate::context::Shell, dest: Dest, list: &[strlist], sep: c_int) -> c_int {
     let mut sep: c_int = sep;
 
     for sp in list {
@@ -1634,7 +1623,7 @@ unsafe fn eprintlist(sh: &mut crate::context::Shell, dest: Dest, list: &[strlist
         if sep != 0 {
             record.push(b' ');
         }
-        record.extend_from_slice(CStr::from_ptr(sp.textp()).to_bytes());
+        record.extend_from_slice(crate::mystring::cstr_prefix(&sp.text));
         sep |= 1;
         let _ = sh.io.get(dest).write_all(&record);
     }
@@ -1659,11 +1648,11 @@ mod tests {
     // [spec:dash:sem:eval.evaltree-fn/test]
     #[test]
     fn flow_yields_a_status() {
-        unsafe fn body(inner: Result<Flow, Error>) -> Result<Flow, Error> {
+        fn body(inner: Result<Flow, Error>) -> Result<Flow, Error> {
             let status = flow!(inner);
             Ok(Flow::Done(status + 100))
         }
-        let got = unsafe { body(Ok(Flow::Done(7))) };
+        let got = body(Ok(Flow::Done(7)));
         assert_eq!(got.unwrap(), Flow::Done(107));
     }
 
@@ -1673,11 +1662,11 @@ mod tests {
     // [spec:dash:sem:eval.evaltree-fn/test]
     #[test]
     fn flow_returns_an_exit() {
-        unsafe fn body(inner: Result<Flow, Error>) -> Result<Flow, Error> {
+        fn body(inner: Result<Flow, Error>) -> Result<Flow, Error> {
             let _status = flow!(inner);
             panic!("flow! must not fall through on an exit");
         }
-        let got = unsafe { body(Ok(Flow::EXIT)) };
+        let got = body(Ok(Flow::EXIT));
         assert_eq!(got.unwrap(), Flow::Exit { by_exitcmd: true });
     }
 
@@ -1686,7 +1675,7 @@ mod tests {
     // [spec:dash:sem:eval.evaltree-fn/test]
     #[test]
     fn flow_still_propagates_an_error() {
-        unsafe fn body(inner: Result<Flow, Error>) -> Result<Flow, Error> {
+        fn body(inner: Result<Flow, Error>) -> Result<Flow, Error> {
             let _status = flow!(inner);
             panic!("flow! must not fall through on an error");
         }
@@ -1695,7 +1684,7 @@ mod tests {
             status: 2,
             message: bstr::BString::from(&b"nope"[..]),
         };
-        let got = unsafe { body(Err(e)) };
+        let got = body(Err(e));
         assert_eq!(got.unwrap_err().message(), "nope");
     }
 
@@ -1718,7 +1707,6 @@ mod tests {
     #[test]
     fn exitreset_takes_savestatus_for_an_exit() {
         let _guard = crate::testutil::lock();
-        unsafe {
             /* A shell of this test's own, and nothing to save or
              * restore around it any more. Both statuses are fields now,
              * so the process has none to borrow and put back -- the last
@@ -1737,6 +1725,5 @@ mod tests {
             sh.eval.savestatus = 9;
             crate::init::exitreset(sh, false);
             assert_eq!(sh.status, 1, "a `set -e` abort names no status");
-        }
     }
 }

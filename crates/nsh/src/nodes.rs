@@ -41,11 +41,10 @@
 //! with the layout it described.
 
 use core::cell::{Cell, OnceCell, RefCell};
-use core::ptr;
 use std::rc::Rc;
 
 use bstr::{BStr, BString};
-use libc::{c_char, c_int};
+use core::ffi::c_int;
 
 // ---- node types (positional in src/nodetypes) ------------------------
 
@@ -128,9 +127,8 @@ pub type heredoc_body = Rc<OnceCell<Node>>;
 /// Here the bytes are owned from the moment the parser produces them, so both
 /// cases are the same case and `Clone` is derived.
 ///
-/// The trailing NUL the parser wrote is *part of the value*: `as_ptr` hands
-/// the bytes to the `char *` readers that are still C-shaped, and `as_bstr`
-/// hides it from the ones that are not.
+/// The trailing NUL the parser wrote is *part of the value*; `as_bstr`
+/// hides it from readers that operate on a length.
 #[derive(Clone)]
 pub struct NodeText(BString);
 
@@ -146,12 +144,6 @@ impl NodeText {
      * implicit `"$@"`, and `dolatstr` is a fixed seven bytes ending in
      * the NUL, so the walk was answering a question the static had
      * already answered. */
-
-    /// The C's `char *`. Callers only read through it; nothing in the shell
-    /// writes a word's text after the parser has built the node.
-    pub fn as_ptr(&self) -> *mut c_char {
-        self.0.as_ptr() as *mut c_char
-    }
 
     /// The text without its terminating NUL.
     pub fn as_bstr(&self) -> &BStr {
@@ -276,22 +268,21 @@ pub struct nfile {
 }
 
 impl nfile {
-    /// `n->nfile.expfname` read as the `char *` its four callers in
-    /// `redir.c:openredirect` want.
-    ///
-    /// The pointer outlives the borrow because a `BString`'s bytes do not
-    /// move when its header does, and because nothing on the path from here
-    /// — `stat64`, `sh_open`, `sh_open_fail` — re-enters expansion, so no
-    /// second `expredir` can write this field while the pointer is in use.
-    pub fn expfname_ptr(&self) -> *mut c_char {
-        match &*self.expfname.borrow() {
-            Some(b) => {
-                debug_assert_eq!(b.last(), Some(&0), "expfname is a C string");
-                b.as_ptr() as *mut c_char
-            }
-            None => ptr::null_mut(),
-        }
+    /// The expanded redirection target as owned shell bytes, without its
+    /// storage terminator. Ownership lets opening the path re-enter shell
+    /// code without retaining a `RefCell` borrow or a raw pointer.
+    pub fn expanded_filename(&self) -> BString {
+        let mut name = self
+            .expfname
+            .borrow()
+            .as_ref()
+            .expect("expredir fills every file redirection target")
+            .clone();
+        debug_assert_eq!(name.last(), Some(&0), "expfname is a C string");
+        name.pop();
+        name
     }
+
 }
 
 impl Clone for nfile {
@@ -563,41 +554,9 @@ impl Node {
 
 // ---- nodes.c ---------------------------------------------------------
 
-/// The C's `struct funcnode { int count; union node n; }`.
-///
-/// `Rc` *is* `count`: the C starts a fresh copy at `count = 0` meaning one
-/// owner and frees at `count < 0`, which is `Rc`'s strong count offset by
-/// one. `exec::tblentry` owns that reference as an `Rc<Node>`; the raw
-/// pointer exposed to the evaluator is only a borrowed view, and `evalfun`
-/// increments the count before running the body.
+/// Compatibility name for a stored function body. Ownership is an `Rc<Node>`
+/// in the command table; there is no separate allocation header.
 pub type funcnode = Node;
-
-/// Make a copy of a parse tree.
-///
-/// The C measured the tree with `calcsize`, allocated one block for the
-/// nodes and the strings together, and laid the copy out inside it with
-/// `copynode`/`copystring`. There is nothing left of that: an owned tree
-/// clones itself, and one allocation for the whole tree was only ever a
-/// consequence of having to free it in one `ckfree`.
-pub unsafe fn copyfunc(n: &Node) -> *const funcnode {
-    Rc::into_raw(Rc::new(n.clone()))
-}
-
-/// `f->count++` — take a second reference to a function that is about to
-/// run, so redefining it mid-execution does not pull the body out from under
-/// the evaluator.
-pub unsafe fn reffunc(f: *const funcnode) {
-    if !f.is_null() {
-        Rc::increment_strong_count(f);
-    }
-}
-
-/// Free a parse tree.
-pub unsafe fn freefunc(f: *const funcnode) {
-    if !f.is_null() {
-        Rc::decrement_strong_count(f);
-    }
-}
 
 // ---------------------------------------------------------------------
 // A word's bytes are not text, and the trailing NUL is part of the value.
@@ -608,9 +567,7 @@ pub unsafe fn freefunc(f: *const funcnode) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::ffi::CStr;
-
-    use crate::parser::{CTLENDVAR, CTLESC, CTLQUOTEMARK, CTLVAR};
+    use crate::parser::{CTLENDVAR, CTLQUOTEMARK, CTLVAR};
 
     /// The bytes `"$x"` leaves the parser as: they are invalid UTF-8 by
     /// construction, so nothing on this path may validate them as text.
@@ -630,23 +587,19 @@ mod tests {
         let t = NodeText::new(quoted_var());
         assert_eq!(t.as_bstr(), &quoted_var()[..5]);
         assert!(core::str::from_utf8(t.as_bstr()).is_err());
-        // `as_ptr` hands the readers that still take a `char *` a string
-        // that terminates where the parser said it did.
-        unsafe {
-            assert_eq!(CStr::from_ptr(t.as_ptr()).count_bytes(), 5);
-            assert_eq!(*t.as_ptr() as c_int, CTLQUOTEMARK);
-        }
+        assert_eq!(t.as_cbytes().len(), 6);
+        assert_eq!(t.as_cbytes()[0], CTLQUOTEMARK as u8);
     }
 
     #[test]
     fn node_text_keeps_its_terminator() {
         // `as_bstr` stops one short of the end, so a value built from
         // bytes that already carry their NUL reads back without it -- and
-        // the C readers that take `as_ptr` still find one.
+        // the storage still carries one.
         let src = quoted_var();
         let t = NodeText::new(BString::from(&src[..]));
         assert_eq!(t.as_bstr(), &src[..5]);
-        assert_eq!(unsafe { *t.as_ptr().add(5) }, 0);
+        assert_eq!(t.as_cbytes()[5], 0);
     }
 
     #[test]
@@ -659,7 +612,7 @@ mod tests {
         });
         let copy = n.clone();
         assert_eq!(copy.narg().text.as_bstr(), n.narg().text.as_bstr());
-        assert_ne!(copy.narg().text.as_ptr(), n.narg().text.as_ptr());
+        assert_ne!(copy.narg().text.as_cbytes().as_ptr(), n.narg().text.as_cbytes().as_ptr());
     }
 
     #[test]
@@ -668,7 +621,7 @@ mod tests {
         // its bytes and not what a C reader makes of them.
         let t = NodeText::new(BString::from(vec![b'a', 0, b'b', 0]));
         assert_eq!(t.as_bstr(), b"a\0b".as_slice());
-        assert_eq!(unsafe { CStr::from_ptr(t.as_ptr()) }.count_bytes(), 1);
+        assert_eq!(t.as_cbytes().iter().position(|byte| *byte == 0), Some(1));
     }
 
     /// `SHELL_ALIGN(sizeof(union node))` for every node struct, so the

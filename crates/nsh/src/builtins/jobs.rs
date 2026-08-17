@@ -7,16 +7,15 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use libc::c_int;
+use core::ffi::c_int;
 
 use crate::eval::Flow;
 use crate::jobs::{SHOW_PGID, SHOW_PID, getjob, showjob, showjobs};
-use crate::options::Options;
 use crate::output::Dest;
 
 // [spec:dash:def:jobs.jobscmd-fn]
 // [spec:dash:sem:jobs.jobscmd-fn]
-pub unsafe fn jobscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn jobscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut mode: c_int;
 
     mode = 0;
@@ -32,10 +31,9 @@ pub unsafe fn jobscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let operands = opts.operands();
     if !operands.is_empty() {
         for spec in operands {
-            let spec = crate::shell::cstring(spec);
             /* `getjob` and `showjob` both take the receiver, so the
              * lookup is its own statement rather than an argument. */
-            let jp = getjob(sh, spec.as_ptr(), 0)?;
+            let jp = getjob(sh, Some(spec), 0)?;
             showjob(sh, Dest::Stdout, jp, mode);
         }
     } else {

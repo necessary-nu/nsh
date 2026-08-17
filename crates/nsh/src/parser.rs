@@ -10,13 +10,12 @@
 
 use core::cell::{Cell, OnceCell, RefCell};
 use core::mem;
-use core::ptr;
 use std::ffi::CStr;
 use std::io::Write;
 use std::rc::Rc;
 
 use bstr::{BStr, BString};
-use libc::{c_char, c_int, c_uint, c_void};
+use core::ffi::{c_char, c_int, c_uint};
 
 use crate::context::Shell;
 use crate::error::Error;
@@ -68,28 +67,47 @@ const MB_LEN_MAX: usize = 16;
  */
 
 /// `#define BASESYNTAX (basesyntax + SYNBASE)`
-fn BASESYNTAX() -> *const Syntax {
-    ptr::addr_of!(crate::syntax::basesyntax)
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum SyntaxKind {
+    Base,
+    DoubleQuoted,
+    SingleQuoted,
+    Arithmetic,
+}
+
+impl SyntaxKind {
+    fn table(self) -> &'static Syntax {
+        match self {
+            Self::Base => &crate::syntax::basesyntax,
+            Self::DoubleQuoted => &crate::syntax::dqsyntax,
+            Self::SingleQuoted => &crate::syntax::sqsyntax,
+            Self::Arithmetic => &crate::syntax::arisyntax,
+        }
+    }
+}
+
+fn BASESYNTAX() -> SyntaxKind {
+    SyntaxKind::Base
 }
 
 /// `#define DQSYNTAX (dqsyntax + SYNBASE)`
-fn DQSYNTAX() -> *const Syntax {
-    ptr::addr_of!(crate::syntax::dqsyntax)
+fn DQSYNTAX() -> SyntaxKind {
+    SyntaxKind::DoubleQuoted
 }
 
 /// `#define SQSYNTAX (sqsyntax + SYNBASE)`
-fn SQSYNTAX() -> *const Syntax {
-    ptr::addr_of!(crate::syntax::sqsyntax)
+fn SQSYNTAX() -> SyntaxKind {
+    SyntaxKind::SingleQuoted
 }
 
 /// `#define ARISYNTAX (arisyntax + SYNBASE)`
-fn ARISYNTAX() -> *const Syntax {
-    ptr::addr_of!(crate::syntax::arisyntax)
+fn ARISYNTAX() -> SyntaxKind {
+    SyntaxKind::Arithmetic
 }
 
 /// `syntax[c]` for a table held in a variable.
-unsafe fn syn_at(tab: *const Syntax, c: c_int) -> c_int {
-    syntax_at(&*tab, c) as c_int
+fn syn_at(tab: SyntaxKind, c: c_int) -> c_int {
+    syntax_at(tab.table(), c) as c_int
 }
 
 // ---------------------------------------------------------------------
@@ -136,64 +154,59 @@ static tokendlist: [c_char; 30] = [
     1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1,
 ];
 
-/// A table of `const char *` needs a `Sync` wrapper to live in a plain
-/// `static`; the contents are exactly the generated C arrays.
-struct CStrTable<const N: usize>([*const c_char; N]);
-unsafe impl<const N: usize> Sync for CStrTable<N> {}
-
-static tokname: CStrTable<30> = CStrTable([
-    c"end of file".as_ptr(),
-    c"blank".as_ptr(),
-    c"newline".as_ptr(),
-    c"\";\"".as_ptr(),
-    c"\"&\"".as_ptr(),
-    c"\"&&\"".as_ptr(),
-    c"\"||\"".as_ptr(),
-    c"\"|\"".as_ptr(),
-    c"\"(\"".as_ptr(),
-    c"\")\"".as_ptr(),
-    c"\";;\"".as_ptr(),
-    c"\"`\"".as_ptr(),
-    c"redirection".as_ptr(),
-    c"word".as_ptr(),
-    c"\"!\"".as_ptr(),
-    c"\"case\"".as_ptr(),
-    c"\"do\"".as_ptr(),
-    c"\"done\"".as_ptr(),
-    c"\"elif\"".as_ptr(),
-    c"\"else\"".as_ptr(),
-    c"\"esac\"".as_ptr(),
-    c"\"fi\"".as_ptr(),
-    c"\"for\"".as_ptr(),
-    c"\"if\"".as_ptr(),
-    c"\"in\"".as_ptr(),
-    c"\"then\"".as_ptr(),
-    c"\"until\"".as_ptr(),
-    c"\"while\"".as_ptr(),
-    c"\"{\"".as_ptr(),
-    c"\"}\"".as_ptr(),
-]);
+static tokname: [&CStr; 30] = [
+    c"end of file",
+    c"blank",
+    c"newline",
+    c"\";\"",
+    c"\"&\"",
+    c"\"&&\"",
+    c"\"||\"",
+    c"\"|\"",
+    c"\"(\"",
+    c"\")\"",
+    c"\";;\"",
+    c"\"`\"",
+    c"redirection",
+    c"word",
+    c"\"!\"",
+    c"\"case\"",
+    c"\"do\"",
+    c"\"done\"",
+    c"\"elif\"",
+    c"\"else\"",
+    c"\"esac\"",
+    c"\"fi\"",
+    c"\"for\"",
+    c"\"if\"",
+    c"\"in\"",
+    c"\"then\"",
+    c"\"until\"",
+    c"\"while\"",
+    c"\"{\"",
+    c"\"}\"",
+];
 
 pub const KWDOFFSET: c_int = 14;
 
-static parsekwd: CStrTable<16> = CStrTable([
-    c"!".as_ptr(),
-    c"case".as_ptr(),
-    c"do".as_ptr(),
-    c"done".as_ptr(),
-    c"elif".as_ptr(),
-    c"else".as_ptr(),
-    c"esac".as_ptr(),
-    c"fi".as_ptr(),
-    c"for".as_ptr(),
-    c"if".as_ptr(),
-    c"in".as_ptr(),
-    c"then".as_ptr(),
-    c"until".as_ptr(),
-    c"while".as_ptr(),
-    c"{".as_ptr(),
-    c"}".as_ptr(),
-]);
+static parsekwd: [&CStr; 16] = [
+    c"!",
+    c"case",
+    c"do",
+    c"done",
+    c"elif",
+    c"else",
+    c"esac",
+    c"fi",
+    c"for",
+    c"if",
+    c"in",
+    c"then",
+    c"until",
+    c"while",
+    c"{",
+    c"}",
+];
 
 // ---------------------------------------------------------------------
 // src/parser.h
@@ -318,7 +331,7 @@ pub struct heredoc {
 /// preceding element and its `prev` link is spare `Vec` capacity left by a
 /// pop. No cursor into the vector survives a push or pop.
 pub struct synstack {
-    pub syntax: *const Syntax,
+    pub syntax: SyntaxKind,
     pub innerdq: c_int,
     pub varpushed: c_int,
     pub dblquote: c_int,
@@ -328,67 +341,55 @@ pub struct synstack {
     pub dqvarnest: c_int,  /* levels of variables expansion within double quotes */
 }
 
-pub static mut checkkwd: c_int = 0;
-pub static mut quoteflag: c_int = 0; /* set if (part of) last token was quoted */
+/// A token together with the word property the C parser carried in the
+/// separate `quoteflag` global.
+#[derive(Clone, Copy)]
+struct Token {
+    kind: c_int,
+    quoted: c_int,
+}
 
-/// Move one of the parser's globals out and leave it empty.
-///
-/// Four of them hand a value to whoever reads next and are not read again
-/// until the next token refills them, which in C is a pointer copy and here
-/// has to be a move:
-///
-///   * `backquotelist` — `n->narg.backquote = backquotelist`, aliased into
-///     the node just built; the next `readtoken1` overwrites the global.
-///   * `heredoclist` — `save = heredoclist; heredoclist = NULL;`.
-///   * `redirnode` — copied into a local at the top of `parsefname`, because
-///     the token read inside it can set the global again.
-///   * `heredoc` — the pending here-document `parseredir` left behind.
-///
-/// Raw rather than `mem::take` so that no `&mut` to a `static mut` exists,
-/// even momentarily.
-unsafe fn takeglobal<T: Default>(p: *mut T) -> T {
-    ptr::replace(p, T::default())
+impl Token {
+    const fn plain(kind: c_int) -> Self {
+        Self { kind, quoted: 0 }
+    }
 }
 
 // [spec:dash:def:parser.isassignment-fn]
 // [spec:dash:sem:parser.isassignment-fn]
-pub unsafe fn isassignment(p: *const c_char) -> c_int {
-    let q = endofname(p);
-    if p == q as *const c_char {
+pub fn isassignment(text: &BStr) -> c_int {
+    let end = endofname(text);
+    if end == 0 {
         return 0;
     }
-    (*q == '=' as c_char) as c_int
+    (text.get(end) == Some(&b'=')) as c_int
 }
 
 // [spec:dash:def:parser.issimplecmd-fn]
 // [spec:dash:sem:parser.issimplecmd-fn]
-pub unsafe fn issimplecmd(n: Option<&Node>, name: *const c_char) -> c_int {
+pub fn issimplecmd(n: Option<&Node>, name: &BStr) -> c_int {
     match n {
         Some(n) if n.node_type() == NCMD => {
             let args = &n.ncmd().args;
             (!args.is_empty()
-                && args[0].narg().text.as_bstr() == CStr::from_ptr(name).to_bytes())
+                && args[0].narg().text.as_bstr() == name)
                 as c_int
         }
         _ => 0,
     }
 }
 
-/// The last word read, as the `char *` the C-shaped readers still expect.
+/// The last word read, as its shell-visible bytes.
 ///
-/// `wordtext` is an owned field on the shell and has been since the input
-/// state moved there; the `addr_of!`-and-deref this used to go through was
-/// left over from when it was a `static mut`, and over a field it is a raw
-/// dereference bought nothing.  What is left is the cast, which is real:
-/// `goodname`, `isassignment` and `fixredir` still measure with `strlen`.
-fn wordtext_ptr(sh: &mut Shell) -> *mut c_char {
-    sh.input.wordtext.as_ptr() as *mut c_char
+/// Input storage retains the terminating NUL expected by the lexer;
+/// `cstr_prefix` removes it without exposing a pointer.
+fn wordtext(sh: &Shell) -> &BStr {
+    crate::mystring::cstr_prefix(&sh.input.wordtext)
 }
 
 /// The last word read, as a node's owned text.
 ///
-/// Nothing here is a pointer at all — see [`wordtext_ptr`] for what the
-/// `addr_of!` was.
+/// The bytes are cloned into the syntax tree's owned storage.
 fn wordtext_node(sh: &mut Shell) -> NodeText {
     NodeText::new(sh.input.wordtext.clone())
 }
@@ -400,9 +401,8 @@ fn wordtext_node(sh: &mut Shell) -> NodeText {
 
 // [spec:dash:def:parser.parsecmd-fn]
 // [spec:dash:sem:parser.parsecmd-fn]
-pub unsafe fn parsecmd(sh: &mut Shell, interact: c_int) -> Result<ParseResult, Error> {
+pub fn parsecmd(sh: &mut Shell, interact: c_int) -> Result<ParseResult, Error> {
     sh.input.tokpushback = 0;
-    checkkwd = 0;
     sh.input.heredoclist = Vec::new();
     sh.input.doprompt = interact;
     if sh.input.doprompt != 0 {
@@ -414,7 +414,7 @@ pub unsafe fn parsecmd(sh: &mut Shell, interact: c_int) -> Result<ParseResult, E
 
 // [spec:dash:def:parser.list-fn]
 // [spec:dash:sem:parser.list-fn]
-unsafe fn list(sh: &mut Shell, nlflag: c_int) -> Result<ParseResult, Error> {
+fn list(sh: &mut Shell, nlflag: c_int) -> Result<ParseResult, Error> {
     let mut nlflag = nlflag;
     let chknl = if nlflag & 1 != 0 { 0 } else { CHKNL };
     let mut n1: Option<Node>;
@@ -423,8 +423,7 @@ unsafe fn list(sh: &mut Shell, nlflag: c_int) -> Result<ParseResult, Error> {
 
     n1 = None;
     loop {
-        checkkwd = chknl | CHKKWD | CHKALIAS;
-        tok = readtoken(sh)?;
+        tok = readtoken(sh, chknl | CHKKWD | CHKALIAS)?;
         match tok {
             TNL => {
                 parseheredoc(sh)?;
@@ -459,7 +458,7 @@ unsafe fn list(sh: &mut Shell, nlflag: c_int) -> Result<ParseResult, Error> {
         let savelinno: c_int = crate::plinno!(sh);
 
         n2 = andor(sh)?;
-        tok = readtoken(sh)?;
+        tok = readtoken(sh, 0)?;
         if tok == TBACKGND {
             /* The C dereferences n2 unconditionally here. */
             if n2.as_ref().unwrap().node_type() == NPIPE {
@@ -524,13 +523,13 @@ unsafe fn list(sh: &mut Shell, nlflag: c_int) -> Result<ParseResult, Error> {
 
 // [spec:dash:def:parser.andor-fn]
 // [spec:dash:sem:parser.andor-fn]
-unsafe fn andor(sh: &mut Shell) -> Result<Option<Node>, Error> {
+fn andor(sh: &mut Shell) -> Result<Option<Node>, Error> {
     let mut n1: Option<Node>;
     let mut t: c_int;
 
-    n1 = pipeline(sh)?;
+    n1 = pipeline(sh, 0)?;
     loop {
-        t = readtoken(sh)?;
+        t = readtoken(sh, 0)?;
         if t == TAND {
             t = NAND;
         } else if t == TOR {
@@ -539,8 +538,7 @@ unsafe fn andor(sh: &mut Shell) -> Result<Option<Node>, Error> {
             sh.input.tokpushback += 1;
             return Ok(n1);
         }
-        checkkwd = CHKNL | CHKKWD | CHKALIAS;
-        let n2 = pipeline(sh)?;
+        let n2 = pipeline(sh, CHKNL | CHKKWD | CHKALIAS)?;
         n1 = Some(Node::Binary(nbinary {
             r#type: t,
             ch1: n1.map(Box::new),
@@ -551,28 +549,28 @@ unsafe fn andor(sh: &mut Shell) -> Result<Option<Node>, Error> {
 
 // [spec:dash:def:parser.pipeline-fn]
 // [spec:dash:sem:parser.pipeline-fn]
-unsafe fn pipeline(sh: &mut Shell) -> Result<Option<Node>, Error> {
+fn pipeline(sh: &mut Shell, kwd: c_int) -> Result<Option<Node>, Error> {
     let mut n1: Option<Node>;
     let mut negate: c_int;
 
     negate = 0;
     /* TRACE(("pipeline: entered\n")); */
-    if readtoken(sh)? == TNOT {
+    let command_kwd = if readtoken(sh, kwd)? == TNOT {
         negate = (negate == 0) as c_int;
-        checkkwd = CHKKWD | CHKALIAS;
+        CHKKWD | CHKALIAS
     } else {
         sh.input.tokpushback += 1;
-    }
-    n1 = command(sh)?;
-    if readtoken(sh)? == TPIPE {
+        0
+    };
+    n1 = command(sh, command_kwd)?;
+    if readtoken(sh, 0)? == TPIPE {
         /* Every `stalloc(sizeof(struct nodelist))` the C does here is one
          * `Vec` slot; the list is built front to back either way, and
          * `command()?` cannot return NULL without having raised first. */
         let mut cmdlist: Vec<Node> = vec![n1.take().unwrap()];
         loop {
-            checkkwd = CHKNL | CHKKWD | CHKALIAS;
-            cmdlist.push(command(sh)?.unwrap());
-            if readtoken(sh)? != TPIPE {
+            cmdlist.push(command(sh, CHKNL | CHKKWD | CHKALIAS)?.unwrap());
+            if readtoken(sh, 0)? != TPIPE {
                 break;
             }
         }
@@ -593,7 +591,7 @@ unsafe fn pipeline(sh: &mut Shell) -> Result<Option<Node>, Error> {
 
 // [spec:dash:def:parser.command-fn]
 // [spec:dash:sem:parser.command-fn]
-unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
+fn command(sh: &mut Shell, kwd: c_int) -> Result<Option<Node>, Error> {
     let mut n1: Option<Node>;
     let mut t: c_int;
     let savelinno: c_int;
@@ -601,7 +599,7 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
     savelinno = crate::plinno!(sh);
 
     let mut goto_redir = false;
-    let tok = readtoken(sh)?;
+    let tok = readtoken(sh, kwd)?;
     if tok == TIF {
         /* The C threads the elif chain through `elsepart` on the way down,
          * writing each new nif into its parent before parsing it.  An owned
@@ -611,14 +609,14 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
          * unchanged. */
         let mut clauses: Vec<(Option<Node>, Option<Node>)> = Vec::new();
         let test = list(sh, 0)?.into_node();
-        if readtoken(sh)? != TTHEN {
+        if readtoken(sh, 0)? != TTHEN {
             return Err(synexpect(sh, TTHEN));
         }
         let ifpart = list(sh, 0)?.into_node();
         clauses.push((test, ifpart));
-        while readtoken(sh)? == TELIF {
+        while readtoken(sh, 0)? == TELIF {
             let test = list(sh, 0)?.into_node();
-            if readtoken(sh)? != TTHEN {
+            if readtoken(sh, 0)? != TTHEN {
                 return Err(synexpect(sh, TTHEN));
             }
             let ifpart = list(sh, 0)?.into_node();
@@ -643,7 +641,7 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
         let got: c_int;
         let ty = if sh.input.lasttoken == TWHILE { NWHILE } else { NUNTIL };
         let ch1 = list(sh, 0)?.into_node();
-        got = readtoken(sh)?;
+        got = readtoken(sh, 0)?;
         if got != TDO {
             return Err(synexpect(sh, TDO));
         }
@@ -655,16 +653,19 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
         }));
         t = TDONE;
     } else if tok == TFOR {
-        if readtoken(sh)? != TWORD || quoteflag != 0 || goodname(wordtext_ptr(sh)) == 0 {
-            return Err(synerror(sh, c"Bad for loop variable".as_ptr()));
+        let var_token = readtoken_with_flags(sh, 0)?;
+        if var_token.kind != TWORD
+            || var_token.quoted != 0
+            || goodname(wordtext(sh)) == 0
+        {
+            return Err(synerror(sh, b"Bad for loop variable"));
         }
         /* the C stores `wordtext` into the node here, before any further
          * token read can overwrite it */
         let var = wordtext_node(sh);
         let mut args: Vec<Node> = Vec::new();
-        checkkwd = CHKNL | CHKKWD | CHKALIAS;
-        if readtoken(sh)? == TIN {
-            while readtoken(sh)? == TWORD {
+        if readtoken(sh, CHKNL | CHKKWD | CHKALIAS)? == TIN {
+            while readtoken(sh, 0)? == TWORD {
                 args.push(Node::Arg(narg {
                     text: wordtext_node(sh),
                     backquote: core::mem::take(&mut sh.input.backquotelist),
@@ -691,8 +692,7 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
                 sh.input.tokpushback += 1;
             }
         }
-        checkkwd = CHKNL | CHKKWD | CHKALIAS;
-        if readtoken(sh)? != TDO {
+        if readtoken(sh, CHKNL | CHKKWD | CHKALIAS)? != TDO {
             return Err(synexpect(sh, TDO));
         }
         let body = list(sh, 0)?.into_node();
@@ -704,24 +704,22 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
         }));
         t = TDONE;
     } else if tok == TCASE {
-        if readtoken(sh)? != TWORD {
+        if readtoken(sh, 0)? != TWORD {
             return Err(synexpect(sh, TWORD));
         }
         let expr = Node::Arg(narg {
             text: wordtext_node(sh),
             backquote: core::mem::take(&mut sh.input.backquotelist),
         });
-        checkkwd = CHKNL | CHKKWD | CHKALIAS;
-        if readtoken(sh)? != TIN {
+        if readtoken(sh, CHKNL | CHKKWD | CHKALIAS)? != TIN {
             return Err(synexpect(sh, TIN));
         }
         let mut cases: Vec<Node> = Vec::new();
         'next_case: loop {
-            checkkwd = CHKNL | CHKKWD;
-            t = readtoken(sh)?;
+            t = readtoken(sh, CHKNL | CHKKWD)?;
             while t != TESAC {
                 if sh.input.lasttoken == TLP {
-                    readtoken(sh)?;
+                    readtoken(sh, 0)?;
                 }
                 let mut pattern: Vec<Node> = Vec::new();
                 loop {
@@ -732,10 +730,10 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
                         text: wordtext_node(sh),
                         backquote: core::mem::take(&mut sh.input.backquotelist),
                     }));
-                    if readtoken(sh)? != TPIPE {
+                    if readtoken(sh, 0)? != TPIPE {
                         break;
                     }
-                    readtoken(sh)?;
+                    readtoken(sh, 0)?;
                 }
                 if sh.input.lasttoken != TRP {
                     return Err(synexpect(sh, TRP));
@@ -746,8 +744,7 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
                     body: body.map(Box::new),
                 }));
 
-                checkkwd = CHKNL | CHKKWD;
-                t = readtoken(sh)?;
+                t = readtoken(sh, CHKNL | CHKKWD)?;
                 if t != TESAC {
                     if t != TENDCASE {
                         return Err(synexpect(sh, TENDCASE));
@@ -785,16 +782,17 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
     }
 
     if !goto_redir {
-        if readtoken(sh)? != t {
+        if readtoken(sh, 0)? != t {
             return Err(synexpect(sh, t));
         }
     }
 
     /* redir: */
     /* Now check for redirection which may follow command */
-    checkkwd = CHKKWD | CHKALIAS;
     let mut redir: Vec<Node> = Vec::new();
-    while readtoken(sh)? == TREDIR {
+    let mut redir_kwd = CHKKWD | CHKALIAS;
+    while readtoken(sh, redir_kwd)? == TREDIR {
+        redir_kwd = 0;
         /* The C copies `redirnode` into a local *before* `parsefname`,
          * because the token read inside it can set the global again.
          * Taking ownership of it here is the same guarantee. */
@@ -820,7 +818,7 @@ unsafe fn command(sh: &mut Shell) -> Result<Option<Node>, Error> {
 
 // [spec:dash:def:parser.simplecmd-fn]
 // [spec:dash:sem:parser.simplecmd-fn]
-unsafe fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
+fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
     let mut args: Vec<Node> = Vec::new();
     let mut vars: Vec<Node> = Vec::new();
     let mut redir: Vec<Node> = Vec::new();
@@ -830,14 +828,13 @@ unsafe fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
     savecheckkwd = CHKALIAS;
     savelinno = crate::plinno!(sh);
     loop {
-        checkkwd = savecheckkwd;
-        let tok = readtoken(sh)?;
+        let tok = readtoken(sh, savecheckkwd)?;
         if tok == TWORD {
             let n = Node::Arg(narg {
                 text: wordtext_node(sh),
                 backquote: core::mem::take(&mut sh.input.backquotelist),
             });
-            if savecheckkwd != 0 && isassignment(wordtext_ptr(sh)) != 0 {
+            if savecheckkwd != 0 && isassignment(wordtext(sh)) != 0 {
                 vars.push(n);
             } else {
                 args.push(n);
@@ -851,30 +848,27 @@ unsafe fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
             /* The C's `app == &args->narg.next` says the argument list holds
              * exactly one word, which is the name being defined. */
             if tok == TLP && args.len() == 1 && vars.is_empty() && redir.is_empty() {
-                let bcmd: *const crate::builtins::builtincmd;
-                let name: *const c_char;
-
                 /* We have a function */
-                if readtoken(sh)? != TRP {
+                if readtoken(sh, 0)? != TRP {
                     return Err(synexpect(sh, TRP));
                 }
                 /* the word becomes the function's name; the C keeps the same
                  * `char *` when it relabels the node */
                 let word: narg = args.pop().unwrap().into_narg();
-                name = word.text.as_ptr();
-                bcmd = crate::exec::find_builtin(name);
-                if goodname(name) == 0
-                    || (!bcmd.is_null() && ((*bcmd).flags & crate::builtins::BUILTIN_SPECIAL) != 0)
+                let bcmd = crate::exec::builtin(word.text.as_bstr());
+                if goodname(word.text.as_bstr()) == 0
+                    || bcmd.is_some_and(|cmd| {
+                        (cmd.flags & crate::builtins::BUILTIN_SPECIAL) != 0
+                    })
                 {
-                    return Err(synerror(sh, c"Bad function name".as_ptr()));
+                    return Err(synerror(sh, b"Bad function name"));
                 }
                 /* The C relabels the NARG node NDEFUN in place: a union
                  * type-pun that copies `narg.text` (offset 16) into
                  * `ndefun.text` (offset 8) and overwrites the rest.  The
                  * NARG's backquote list is dropped either way. */
-                checkkwd = CHKNL | CHKKWD | CHKALIAS;
                 let linno = crate::plinno!(sh);
-                let body = command(sh)?;
+                let body = command(sh, CHKNL | CHKKWD | CHKALIAS)?;
                 return Ok(Some(Node::Defun(ndefun {
                     linno,
                     text: word.text,
@@ -898,7 +892,7 @@ unsafe fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
 
 // [spec:dash:def:parser.makename-fn]
 // [spec:dash:sem:parser.makename-fn]
-pub(crate) unsafe fn makename(sh: &mut Shell) -> Node {
+pub(crate) fn makename(sh: &mut Shell) -> Node {
     Node::Arg(narg {
         text: wordtext_node(sh),
         backquote: core::mem::take(&mut sh.input.backquotelist),
@@ -912,10 +906,10 @@ pub(crate) unsafe fn makename(sh: &mut Shell) -> Node {
 // still being built (`err == 0`), and from `expredir` on a tree that may be a
 // shared function definition (`err != 0`).  Only the second writes at run
 // time, and it only writes `dupfd`, which is why that field is the `Cell`.
-pub unsafe fn fixredir(
+pub fn fixredir(
     sh: &mut Shell,
     n: &Node,
-    text: *const c_char,
+    text: &BStr,
     err: c_int,
 ) -> Result<(), Error> {
     /* TRACE(("Fix redir %s %d\n", text, err)); */
@@ -924,14 +918,15 @@ pub unsafe fn fixredir(
         *d.vname.borrow_mut() = None;
     }
 
-    if is_digit(*text.offset(0) as c_int) && *text.offset(1) == 0 {
-        d.dupfd.set(digit_val(*text.offset(0) as c_int));
-    } else if *text.offset(0) == '-' as c_char && *text.offset(1) == 0 {
+    let text = crate::mystring::cstr_prefix(text);
+    if text.len() == 1 && is_digit(text[0] as c_int) {
+        d.dupfd.set(digit_val(text[0] as c_int));
+    } else if text == BStr::new(b"-") {
         d.dupfd.set(-1);
     } else {
         if err != 0 {
             let mut message = b"Bad fd number: ".to_vec();
-            message.extend_from_slice(CStr::from_ptr(text).to_bytes());
+            message.extend_from_slice(text);
             /* A stop before `sh_error` became a value, and still one. */
             return Err(sh.sh_error_value(&message));
         } else {
@@ -947,19 +942,23 @@ pub unsafe fn fixredir(
 // The C reads the redirection node out of the `redirnode` global; here the
 // caller has already taken ownership of it, because the `readtoken` below can
 // set that global again before this function is done with it.
-unsafe fn parsefname(sh: &mut Shell, n: &mut Node) -> Result<(), Error> {
-    if n.node_type() == NHERE {
-        checkkwd |= CHKEOFMARK;
-    }
-    if readtoken(sh)? != TWORD {
+fn parsefname(sh: &mut Shell, n: &mut Node) -> Result<(), Error> {
+    let token = readtoken_with_flags(
+        sh,
+        if n.node_type() == NHERE {
+            CHKEOFMARK
+        } else {
+            0
+        },
+    )?;
+    if token.kind != TWORD {
         return Err(synexpect(sh, -1));
     }
-    checkkwd &= !CHKEOFMARK;
     if n.node_type() == NHERE {
         /* the C reads the `heredoc` global here, after the token read */
         let mut here: heredoc = core::mem::take(&mut sh.input.heredoc).unwrap();
 
-        if quoteflag == 0 {
+        if token.quoted == 0 {
             n.nhere_mut().r#type = NXHERE;
         }
         /* TRACE(("Here document %d\n", n->type)); */
@@ -976,8 +975,8 @@ unsafe fn parsefname(sh: &mut Shell, n: &mut Node) -> Result<(), Error> {
         here.expand = n.nhere().r#type == NXHERE;
         sh.input.heredoclist.push(here);
     } else if n.node_type() == NTOFD || n.node_type() == NFROMFD {
-        let word = wordtext_ptr(sh);
-        fixredir(sh, n, word, 0)?;
+        let word = wordtext(sh).to_owned();
+        fixredir(sh, n, BStr::new(word.as_slice()), 0)?;
     } else {
         n.nfile_mut().fname = Some(Box::new(makename(sh)));
     }
@@ -990,7 +989,7 @@ unsafe fn parsefname(sh: &mut Shell, n: &mut Node) -> Result<(), Error> {
 
 // [spec:dash:def:parser.parseheredoc-fn]
 // [spec:dash:sem:parser.parseheredoc-fn]
-unsafe fn parseheredoc(sh: &mut Shell) -> Result<(), Error> {
+fn parseheredoc(sh: &mut Shell) -> Result<(), Error> {
     let list: Vec<heredoc> = core::mem::take(&mut sh.input.heredoclist);
 
     for here in list {
@@ -1004,10 +1003,10 @@ unsafe fn parseheredoc(sh: &mut Shell) -> Result<(), Error> {
          * read before `readtoken1` runs. */
         if !here.expand {
             let firstc = pgetc(sh)?;
-            readtoken1(sh, firstc, SQSYNTAX(), mark, here.striptabs)?;
+            readtoken1(sh, firstc, SQSYNTAX(), mark, here.striptabs, 0)?;
         } else {
             let firstc = pgetc_eatbnl(sh)?;
-            readtoken1(sh, firstc, DQSYNTAX(), mark, here.striptabs)?;
+            readtoken1(sh, firstc, DQSYNTAX(), mark, here.striptabs, 0)?;
         }
         let n = Node::Arg(narg {
             text: wordtext_node(sh),
@@ -1023,37 +1022,40 @@ unsafe fn parseheredoc(sh: &mut Shell) -> Result<(), Error> {
 
 // [spec:dash:def:parser.readtoken-fn]
 // [spec:dash:sem:parser.readtoken-fn]
-pub(crate) unsafe fn readtoken(sh: &mut Shell) -> Result<c_int, Error> {
-    let mut t: c_int;
-    let mut kwd: c_int = checkkwd;
+pub(crate) fn readtoken(sh: &mut Shell, kwd: c_int) -> Result<c_int, Error> {
+    Ok(readtoken_with_flags(sh, kwd)?.kind)
+}
+
+/// Read a token without discarding whether a word contained quoting.
+///
+/// `kwd` is the C parser's `checkkwd` value for this read. Making it an
+/// argument prevents one parse from changing the next parse's mode.
+fn readtoken_with_flags(sh: &mut Shell, mut kwd: c_int) -> Result<Token, Error> {
+    let mut token: Token;
 
     'top: loop {
-        t = xxreadtoken(sh)?;
+        token = xxreadtoken(sh, kwd & CHKEOFMARK)?;
 
         /*
          * eat newlines
          */
         if kwd & CHKNL != 0 {
-            while t == TNL {
+            while token.kind == TNL {
                 parseheredoc(sh)?;
-                checkkwd = 0;
                 /* The alias bit is dropped with the rest: dash clears the
                  * whole of `checkkwd` here, and the bit lived in it. */
                 crate::input::clear_alias_boundary(sh);
-                t = xxreadtoken(sh)?;
+                token = xxreadtoken(sh, kwd & CHKEOFMARK)?;
             }
         }
 
-        /* `popstring` sets this while `xxreadtoken` runs, and dash reads
-         * it back out of `checkkwd` right here. The bit is the input
-         * layer's now; this is the same point, and the same bit. */
+        /* `popstring` sets this while `xxreadtoken` runs. The bit belongs
+         * to the input boundary now; this is the same hand-off point. */
         if crate::input::take_alias_boundary(sh) != 0 {
             kwd |= CHKALIAS;
         }
-        kwd |= checkkwd;
-        checkkwd = 0;
 
-        if t != TWORD || quoteflag != 0 {
+        if token.kind != TWORD || token.quoted != 0 {
             break 'top;
         }
 
@@ -1061,11 +1063,9 @@ pub(crate) unsafe fn readtoken(sh: &mut Shell) -> Result<c_int, Error> {
          * check for keywords
          */
         if kwd & CHKKWD != 0 {
-            let pp: *const *const c_char = findkwd(wordtext_ptr(sh));
-
-            if !pp.is_null() {
-                t = pp.offset_from(parsekwd.0.as_ptr()) as c_int + KWDOFFSET;
-                sh.input.lasttoken = t;
+            if let Some(index) = findkwd(wordtext(sh)) {
+                token.kind = index as c_int + KWDOFFSET;
+                sh.input.lasttoken = token.kind;
                 break 'top;
             }
         }
@@ -1074,11 +1074,10 @@ pub(crate) unsafe fn readtoken(sh: &mut Shell) -> Result<c_int, Error> {
             /* Hoisted: the receiver cannot appear twice in one argument
              * list. A raw pointer ends its borrow at the `let`, and the
              * word it points at is the parser's own, not the alias's. */
-            let word = wordtext_ptr(sh);
-            let ap = crate::alias::lookupalias(sh, word, 1);
-            if !ap.is_null() {
-                if *(*ap).val != 0 {
-                    pushstring(sh, (*ap).val, ap as *mut c_void);
+            let name = wordtext(sh).to_owned();
+            if let Some(value) = crate::alias::lookup_alias(sh, BStr::new(name.as_slice()), true) {
+                if !value.is_empty() {
+                    pushstring(sh, BStr::new(value.as_slice()), Some(name));
                 }
                 continue 'top;
             }
@@ -1086,12 +1085,12 @@ pub(crate) unsafe fn readtoken(sh: &mut Shell) -> Result<c_int, Error> {
         break 'top;
     }
     /* out: */
-    Ok(t)
+    Ok(token)
 }
 
 // [spec:dash:def:parser.nlprompt-fn]
 // [spec:dash:sem:parser.nlprompt-fn]
-unsafe fn nlprompt(sh: &mut Shell) {
+fn nlprompt(sh: &mut Shell) {
     crate::plinno!(sh) += 1;
     if sh.input.doprompt != 0 {
         setprompt(sh, 2);
@@ -1100,7 +1099,7 @@ unsafe fn nlprompt(sh: &mut Shell) {
 
 // [spec:dash:def:parser.nlnoprompt-fn]
 // [spec:dash:sem:parser.nlnoprompt-fn]
-unsafe fn nlnoprompt(sh: &mut Shell) {
+fn nlnoprompt(sh: &mut Shell) {
     crate::plinno!(sh) += 1;
     sh.input.needprompt = sh.input.doprompt;
 }
@@ -1116,19 +1115,22 @@ unsafe fn nlnoprompt(sh: &mut Shell) {
 
 // [spec:dash:def:parser.xxreadtoken-fn]
 // [spec:dash:sem:parser.xxreadtoken-fn]
-unsafe fn xxreadtoken(sh: &mut Shell) -> Result<c_int, Error> {
+fn xxreadtoken(sh: &mut Shell, chkeofmark: c_int) -> Result<Token, Error> {
     let mut c: c_int;
 
     if sh.input.tokpushback != 0 {
         sh.input.tokpushback = 0;
-        return Ok(sh.input.lasttoken);
+        return Ok(Token {
+            kind: sh.input.lasttoken,
+            quoted: sh.input.last_quoteflag,
+        });
     }
     if sh.input.needprompt != 0 {
         setprompt(sh, 2);
     }
     loop {
         /* until token or start of word found */
-        let tok: c_int;
+        let tok: Token;
 
         c = pgetc_eatbnl(sh)?;
         if c == ' ' as c_int || c == '\t' as c_int {
@@ -1145,43 +1147,53 @@ unsafe fn xxreadtoken(sh: &mut Shell) -> Result<c_int, Error> {
         } else if c == '\n' as c_int {
             nlnoprompt(sh);
             sh.input.lasttoken = TNL;
-            return Ok(TNL);
+            sh.input.last_quoteflag = 0;
+            return Ok(Token::plain(TNL));
         } else if c == PEOF {
             sh.input.lasttoken = TEOF;
-            return Ok(TEOF);
+            sh.input.last_quoteflag = 0;
+            return Ok(Token::plain(TEOF));
         } else if c == '&' as c_int {
             if pgetc_eatbnl(sh)? == '&' as c_int {
                 sh.input.lasttoken = TAND;
-                return Ok(TAND);
+                sh.input.last_quoteflag = 0;
+                return Ok(Token::plain(TAND));
             }
             pungetc(sh);
             sh.input.lasttoken = TBACKGND;
-            return Ok(TBACKGND);
+            sh.input.last_quoteflag = 0;
+            return Ok(Token::plain(TBACKGND));
         } else if c == '|' as c_int {
             if pgetc_eatbnl(sh)? == '|' as c_int {
                 sh.input.lasttoken = TOR;
-                return Ok(TOR);
+                sh.input.last_quoteflag = 0;
+                return Ok(Token::plain(TOR));
             }
             pungetc(sh);
             sh.input.lasttoken = TPIPE;
-            return Ok(TPIPE);
+            sh.input.last_quoteflag = 0;
+            return Ok(Token::plain(TPIPE));
         } else if c == ';' as c_int {
             if pgetc_eatbnl(sh)? == ';' as c_int {
                 sh.input.lasttoken = TENDCASE;
-                return Ok(TENDCASE);
+                sh.input.last_quoteflag = 0;
+                return Ok(Token::plain(TENDCASE));
             }
             pungetc(sh);
             sh.input.lasttoken = TSEMI;
-            return Ok(TSEMI);
+            sh.input.last_quoteflag = 0;
+            return Ok(Token::plain(TSEMI));
         } else if c == '(' as c_int {
             sh.input.lasttoken = TLP;
-            return Ok(TLP);
+            sh.input.last_quoteflag = 0;
+            return Ok(Token::plain(TLP));
         } else if c == ')' as c_int {
             sh.input.lasttoken = TRP;
-            return Ok(TRP);
+            sh.input.last_quoteflag = 0;
+            return Ok(Token::plain(TRP));
         }
-        tok = readtoken1(sh, c, BASESYNTAX(), EofMark::None, 0)?;
-        if tok != TBLANK {
+        tok = readtoken1(sh, c, BASESYNTAX(), EofMark::None, 0, chkeofmark)?;
+        if tok.kind != TBLANK {
             return Ok(tok);
         }
     }
@@ -1189,7 +1201,7 @@ unsafe fn xxreadtoken(sh: &mut Shell) -> Result<c_int, Error> {
 
 // [spec:dash:def:parser.pgetc-eatbnl-fn]
 // [spec:dash:sem:parser.pgetc-eatbnl-fn]
-unsafe fn pgetc_eatbnl(sh: &mut Shell) -> Result<c_int, Error> {
+fn pgetc_eatbnl(sh: &mut Shell) -> Result<c_int, Error> {
     let mut c: c_int;
 
     loop {
@@ -1210,7 +1222,7 @@ unsafe fn pgetc_eatbnl(sh: &mut Shell) -> Result<c_int, Error> {
 
 // [spec:dash:def:parser.pgetc-top-fn]
 // [spec:dash:sem:parser.pgetc-top-fn]
-unsafe fn pgetc_top(sh: &mut Shell, stack: &synstack) -> Result<c_int, Error> {
+fn pgetc_top(sh: &mut Shell, stack: &synstack) -> Result<c_int, Error> {
     if stack.syntax == SQSYNTAX() {
         pgetc(sh)
     } else {
@@ -1235,7 +1247,7 @@ mod synstack_ops;
 /// the caller appends only the prefix this reports, and the scribble is
 /// simply not copied out. Same bytes, same length, and the reservation
 /// stops being a memory-safety contract.
-pub unsafe fn getmbc(
+pub fn getmbc(
     sh: &mut Shell,
     c: c_int,
     out: &mut [u8; MBSLOP],
@@ -1244,10 +1256,10 @@ pub unsafe fn getmbc(
     let mut c = c;
     /* The C's `out` cursor, and its `start`, as the offsets they were. */
     let mut o: usize = 0;
-    let mut mbst: libc::mbstate_t = mem::zeroed();
+    let mut decoder = nsh_platform::LocaleDecoder::new();
     let mut ml: c_uint = 0;
-    let mut ml2: usize;
-    let mut wc: libc::wchar_t = 0;
+    let mut wc: i32 = 0;
+    let mut complete = false;
     let mbc: usize;
 
     if c >= 0 || c <= PEOF {
@@ -1264,15 +1276,16 @@ pub unsafe fn getmbc(
         /* `mbrtowc` is asked for exactly one byte, and the slice it is
          * given starts at the byte just written -- so the pointer is
          * bounded by the indexing rather than by the caller's promise. */
-        ml2 = mbrtowc(
-            &mut wc,
-            out[mbc + ml as usize..].as_ptr() as *const c_char,
-            1,
-            &mut mbst,
-        );
+        let decoded = decoder.push(out[mbc + ml as usize]);
         ml += 1;
-        if ml2 != (-2isize) as usize {
-            break;
+        match decoded {
+            nsh_platform::LocaleDecode::Incomplete => {}
+            nsh_platform::LocaleDecode::Complete(wide) => {
+                wc = wide;
+                complete = true;
+                break;
+            }
+            nsh_platform::LocaleDecode::Invalid => break,
         }
         if ml as usize >= MB_LEN_MAX {
             break;
@@ -1284,8 +1297,8 @@ pub unsafe fn getmbc(
         out[mbc + ml as usize] = c as u8;
     }
 
-    if ml2 == 1 && ml > 1 {
-        if mode == 4 && iswblank(wc as u32) != 0 {
+    if complete && ml > 1 {
+        if mode == 4 && nsh_platform::locale_wide_is_blank(wc) {
             return Ok(1);
         }
 
@@ -1343,7 +1356,7 @@ pub const MBSLOP: usize = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 7;
 /// also return 0 or 1 having scribbled on the block past the cursor, and the
 /// C leaves that scribble for the next write to overwrite — so does this,
 /// because the bytes stay uncommitted.
-unsafe fn getmbc_at(sh: &mut Shell, out: &mut BString, c: c_int, mode: c_int) -> Result<c_uint, Error> {
+fn getmbc_at(sh: &mut Shell, out: &mut BString, c: c_int, mode: c_int) -> Result<c_uint, Error> {
     let mut scratch: [u8; MBSLOP] = [0; MBSLOP];
     let ml = getmbc(sh, c, &mut scratch, mode)?;
     /* The append *is* the commit the callers used to make with `set_len`,
@@ -1354,7 +1367,7 @@ unsafe fn getmbc_at(sh: &mut Shell, out: &mut BString, c: c_int, mode: c_int) ->
 
 // [spec:dash:def:parser.dollarsq-escape-fn]
 // [spec:dash:sem:parser.dollarsq-escape-fn]
-unsafe fn dollarsq_escape(sh: &mut Shell, dest: &mut BString) -> Result<(), Error> {
+fn dollarsq_escape(sh: &mut Shell, dest: &mut BString) -> Result<(), Error> {
     /* The C writes into the stack block through a cursor and commits the
      * prefix. `conv_escape` takes a fixed scratch buffer now -- it writes
      * above the length it reports, which is why the buffer has to be
@@ -1366,44 +1379,44 @@ unsafe fn dollarsq_escape(sh: &mut Shell, dest: &mut BString) -> Result<(), Erro
         [0; crate::escape::CONV_ESCAPE_SLOP];
     let mut o: usize = 0;
     /* 10 = length of UXXXXXXXX + NUL */
-    let mut str: [c_char; 10] = [0; 10];
-    let mut len: c_uint;
-    let mut p: *mut c_char;
+    let mut text = [0u8; 10];
+    let mut len: usize;
+    let mut at: usize;
 
     len = 0;
-    while (len as usize) < mem::size_of_val(&str) - 1 {
+    while len < text.len() - 1 {
         let c = pgetc(sh)?;
 
         if c <= PEOF {
             break;
         }
 
-        str[len as usize] = c as c_char;
+        text[len] = c as u8;
         len += 1;
 
         if c == '\'' as c_int {
             break;
         }
     }
-    str[len as usize] = 0;
+    text[len] = 0;
 
-    p = str.as_mut_ptr();
-    if *p != 'c' as c_char {
+    at = 0;
+    if text[at] != b'c' {
         let ret: c_uint;
 
-        ret = crate::escape::conv_escape(p, &mut scratch, true);
-        p = p.offset((ret >> 4) as isize);
+        ret = crate::escape::conv_escape(&text[at..], &mut scratch, true);
+        at += (ret >> 4) as usize;
         o += (ret & 15) as usize;
     } else {
-        p = p.offset(1);
-        if *p != 0 {
+        at += 1;
+        if text[at] != 0 {
             let conv_ch: c_int;
             let c: c_int;
 
-            c = *p as u8 as c_int;
-            p = p.offset(1);
+            c = text[at] as c_int;
+            at += 1;
 
-            p = p.offset((((c ^ *p as c_int) | (c ^ '\\' as c_int)) == 0) as isize);
+            at += (((c ^ text[at] as c_int) | (c ^ '\\' as c_int)) == 0) as usize;
 
             conv_ch = (c & !((c & 0x40) >> 1) & 0x7f) ^ 0x40;
             /* USTPUTC(conv_ch, out) */
@@ -1412,7 +1425,7 @@ unsafe fn dollarsq_escape(sh: &mut Shell, dest: &mut BString) -> Result<(), Erro
         }
     }
 
-    pungetn(sh, (len as isize - (p as isize - str.as_ptr() as isize)) as c_int);
+    pungetn(sh, len.saturating_sub(at) as c_int);
     dest.extend_from_slice(&scratch[..o]);
     Ok(())
 }
@@ -1481,13 +1494,14 @@ enum Lbl {
 
 // [spec:dash:def:parser.readtoken1-fn]
 // [spec:dash:sem:parser.readtoken1-fn]
-unsafe fn readtoken1(
+fn readtoken1(
     sh: &mut Shell,
     firstc: c_int,
-    syntax: *const Syntax,
+    syntax: SyntaxKind,
     eofmark: EofMark<'_>,
     striptabs: c_int,
-) -> Result<c_int, Error> {
+    chkeofmark: c_int,
+) -> Result<Token, Error> {
     let mut st = Rt1 {
         synstack: vec![synstack {
             syntax,
@@ -1499,7 +1513,7 @@ unsafe fn readtoken1(
             parenlevel: 0,
             dqvarnest: 0,
         }],
-        chkeofmark: checkkwd & CHKEOFMARK,
+        chkeofmark,
         printesc: syntax == SQSYNTAX(),
         bqlist: Vec::new(),
         dollarsq: 0,
@@ -1540,7 +1554,7 @@ unsafe fn readtoken1(
                 )?;
                 if ml == 1 {
                     if st.out.is_empty() {
-                        return Ok(TBLANK);
+                        return Ok(Token::plain(TBLANK));
                     }
                     st.c = pgetc(sh)?;
                     break 'loop_;
@@ -1736,14 +1750,14 @@ unsafe fn readtoken1(
     }
     /* endword: */
     if st.syn().syntax == ARISYNTAX() {
-        return Err(synerror(sh, c"Missing '))'".as_ptr()));
+        return Err(synerror(sh, b"Missing '))'"));
     }
     if (st.syn().syntax != BASESYNTAX() && st.eofmark.is_none()) || st.syn().backq != 0 {
-        return Err(synerror(sh, c"Unterminated quoted string".as_ptr()));
+        return Err(synerror(sh, b"Unterminated quoted string"));
     }
     if st.syn().varnest != 0 {
         /* { */
-        return Err(synerror(sh, c"Missing '}'".as_ptr()));
+        return Err(synerror(sh, b"Missing '}'"));
     }
     st.out.push(b'\0');
     len = st.out.len();
@@ -1755,19 +1769,23 @@ unsafe fn readtoken1(
         {
             parseredir(sh, &mut st)?;
             sh.input.lasttoken = TREDIR;
-            return Ok(TREDIR);
+            sh.input.last_quoteflag = 0;
+            return Ok(Token::plain(TREDIR));
         } else {
             pungetc(sh);
         }
     }
-    quoteflag = st.quotef;
+    sh.input.last_quoteflag = st.quotef;
     sh.input.backquotelist = mem::take(&mut st.bqlist);
     /* `grabstackblock(len)` reserved the bytes the C had been writing into
      * scratch space, which is what made `wordtext` outlive the next token.
      * Moving the buffer out is the same guarantee. */
     sh.input.wordtext = mem::take(&mut st.out);
     sh.input.lasttoken = TWORD;
-    Ok(TWORD)
+    Ok(Token {
+        kind: TWORD,
+        quoted: st.quotef,
+    })
 }
 /* end of readtoken routine */
 
@@ -1778,7 +1796,7 @@ unsafe fn readtoken1(
  */
 
 /* checkend: */
-unsafe fn checkend(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
+fn checkend(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
     if let Some(mark) = st.eofmark.real() {
         let markloc: usize;
         let mut i: usize;
@@ -1831,17 +1849,7 @@ unsafe fn checkend(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
                 st.c = st.out[start - 1] as i8 as c_int;
 
                 if len != 0 {
-                    let str: *mut c_char;
-
-                    /* str = alloca(len + 1) */
-                    let mut copy: Vec<u8> = Vec::with_capacity(len + 1);
-                    copy.extend_from_slice(&st.out[start..start + len]);
-                    copy.push(0);
-                    st.strpool.push(copy);
-                    let last = st.strpool.len() - 1;
-                    str = st.strpool[last].as_mut_ptr() as *mut c_char;
-
-                    pushstring(sh, str, ptr::null_mut());
+                    pushstring(sh, BStr::new(&st.out[start..start + len]), None);
                 }
             }
         }
@@ -1859,7 +1867,7 @@ unsafe fn checkend(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
  */
 
 /* parseredir: */
-unsafe fn parseredir(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
+fn parseredir(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
     let fdc: c_char = st.out[0] as c_char;
     /* The C carves one `struct nfile` and then decides what it is by
      * assigning `np->type`, re-allocating only because `nhere` is smaller.
@@ -1948,8 +1956,8 @@ unsafe fn parseredir(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
  */
 
 /* parsesub: */
-unsafe fn parsesub(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<bool, Error> {
-    let mut newsyn: *const Syntax = st.syn().syntax;
+fn parsesub(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<bool, Error> {
+    let mut newsyn = st.syn().syntax;
     static types: [u8; 6] = *b"}-+?=\0";
     let mut subtype: c_int;
 
@@ -2010,7 +2018,9 @@ unsafe fn parsesub(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<bool, Error> {
                 if subtype == 0 && cc == '#' as c_int {
                     subtype = VSLENGTH;
 
-                    if st.c == '_' as c_int || libc::isalnum(st.c) != 0 {
+                    if st.c == '_' as c_int
+                        || nsh_platform::locale_is_alphanumeric(st.c as u8)
+                    {
                         if st.chkeofmark != 0 {
                             st.out.push('#' as u8);
                         }
@@ -2133,7 +2143,7 @@ unsafe fn parsesub(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<bool, Error> {
  */
 
 /* parsebackq: */
-unsafe fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Result<(), Error> {
+fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Result<(), Error> {
     let mut saveprompt: c_int = 0;
     let saveheredoclist: Vec<heredoc>;
     let nlpp: usize;
@@ -2195,7 +2205,7 @@ unsafe fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Resul
                         break 'bqbody; /* continue */
                     }
                 } else if pc == PEOF {
-                    return Err(synerror(sh, c"EOF in backquote substitution".as_ptr()));
+                    return Err(synerror(sh, b"EOF in backquote substitution"));
                 } else if pc == '\n' as c_int {
                     nlnoprompt(sh);
                 }
@@ -2206,7 +2216,7 @@ unsafe fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Resul
          * wrote, which is why the buffer is never empty here. */
         let last = pstr.len() - 1;
         pstr[last] = 0;
-        setinputstring(sh, pstr.as_mut_ptr() as *mut c_char);
+        setinputstring(sh, crate::mystring::cstr_prefix(&pstr));
     }
     /* The C walks to the tail of `bqlist` and appends an empty cell, then
      * fills its `n` after the recursive parse.  Reserving the slot first is
@@ -2227,10 +2237,10 @@ unsafe fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Resul
     if oldstyle != 0 {
         sh.input.doprompt = saveprompt;
     } else {
-        if readtoken(sh)? != TRP {
+        if readtoken(sh, 0)? != TRP {
             return Err(synexpect(sh, TRP));
         }
-        setinputstring(sh, ptr::addr_of!(crate::mystring::nullstr) as *const c_char as *mut c_char);
+        setinputstring(sh, BStr::new(b""));
     }
 
     parseheredoc(sh)?;
@@ -2256,7 +2266,7 @@ unsafe fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Resul
  * Parse an arithmetic expansion (indicate start of one and set state)
  */
 /* parsearith: */
-unsafe fn parsearith(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
+fn parsearith(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
     synstack_ops::push(&mut st.synstack, ARISYNTAX());
     st.syn_mut().dblquote = 1;
     if st.chkeofmark != 0 {
@@ -2279,23 +2289,18 @@ unsafe fn parsearith(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
 
 // [spec:dash:def:parser.endofname-fn]
 // [spec:dash:sem:parser.endofname-fn]
-pub unsafe fn endofname(name: *const c_char) -> *mut c_char {
-    let mut p: *mut c_char;
-
-    p = name as *mut c_char;
-    if !is_name(*p as c_int) {
-        return p;
+pub fn endofname(name: &BStr) -> usize {
+    let name = crate::mystring::cstr_prefix(name);
+    let Some(&first) = name.first() else {
+        return 0;
+    };
+    if !is_name(first as c_char as c_int) {
+        return 0;
     }
-    loop {
-        p = p.offset(1);
-        if *p == 0 {
-            break;
-        }
-        if !is_in_name(*p as c_int) {
-            break;
-        }
-    }
-    p
+    1 + name[1..]
+        .iter()
+        .position(|&byte| !is_in_name(byte as c_char as c_int))
+        .unwrap_or(name.len() - 1)
 }
 
 /*
@@ -2306,42 +2311,40 @@ pub unsafe fn endofname(name: *const c_char) -> *mut c_char {
 
 // [spec:dash:def:parser.synexpect-fn]
 // [spec:dash:sem:parser.synexpect-fn]
-unsafe fn synexpect(sh: &mut Shell, token: c_int) -> Error {
-    let mut msg: [c_char; 64] = [0; 64];
+fn synexpect(sh: &mut Shell, token: c_int) -> Error {
     let mut message = Vec::new();
 
-    message.extend_from_slice(CStr::from_ptr(tokname.0[sh.input.lasttoken as usize]).to_bytes());
+    message.extend_from_slice(tokname[sh.input.lasttoken as usize].to_bytes());
     message.extend_from_slice(b" unexpected");
     if token >= 0 {
         message.extend_from_slice(b" (expecting ");
-        message.extend_from_slice(CStr::from_ptr(tokname.0[token as usize]).to_bytes());
+        message.extend_from_slice(tokname[token as usize].to_bytes());
         message.push(b')');
     }
-    let copied = message.len().min(msg.len() - 1);
-    core::ptr::copy_nonoverlapping(message.as_ptr(), msg.as_mut_ptr() as *mut u8, copied);
-    synerror(sh, msg.as_ptr())
+    message.truncate(63);
+    synerror(sh, &message)
 }
 
 // [spec:dash:def:parser.synerror-fn]
 // [spec:dash:sem:parser.synerror-fn]
-unsafe fn synerror(sh: &mut Shell, msg: *const c_char) -> Error {
+fn synerror(sh: &mut Shell, msg: &[u8]) -> Error {
     sh.eval.errlinno = crate::plinno!(sh);
     let mut message = b"Syntax error: ".to_vec();
-    message.extend_from_slice(CStr::from_ptr(msg).to_bytes());
+    message.extend_from_slice(msg);
     sh.sh_error_value(&message)
 }
 
 // [spec:dash:def:parser.setprompt-fn]
 // [spec:dash:sem:parser.setprompt-fn]
 #[inline(never)]
-unsafe fn setprompt(sh: &mut Shell, which: c_int) {
+fn setprompt(sh: &mut Shell, which: c_int) {
     let show: c_int;
 
     sh.input.needprompt = 0;
     sh.input.whichprompt = which;
 
     /* #ifdef SMALL: show = 1 */
-    show = (!crate::histedit::editing_active()) as c_int;
+    show = (!crate::histedit::editing_active(sh)) as c_int;
     if show != 0 && crate::input::cur_pf(sh).nleft == 0 {
         /* `pushstackmark(&smark, stackblocksize())` bounded the prompt
          * `expandstr` had left in the region for `out2str` to read.  The
@@ -2353,7 +2356,7 @@ unsafe fn setprompt(sh: &mut Shell, which: c_int) {
 
 // [spec:dash:def:parser.expandstr-fn]
 // [spec:dash:sem:parser.expandstr-fn]
-pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<BString, Error> {
+pub fn expandstr(sh: &mut Shell, ps: &BStr) -> Result<BString, Error> {
     let file_stop: usize;
     let saveheredoclist: Vec<heredoc>;
     let mut result: BString;
@@ -2362,7 +2365,8 @@ pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<BString, Er
     file_stop = crate::input::cur_mark(sh);
 
     /* XXX Fix (char *) cast. */
-    setinputstring(sh, ps as *mut c_char);
+    let ps = crate::mystring::cstr_prefix(ps);
+    setinputstring(sh, ps);
 
     saveheredoclist = core::mem::take(&mut sh.input.heredoclist);
     saveprompt = sh.input.doprompt;
@@ -2378,7 +2382,7 @@ pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<BString, Er
      * leaves `ps` dangling for exactly the failure path that reads it.
      * The C read it anyway. Copying at the point the C takes the seed
      * keeps the C's sequence and removes the read-after-free. */
-    result = BString::from(CStr::from_ptr(ps).to_bytes());
+    result = BString::from(ps);
     /* `if (unlikely(err = setjmp(jmploc.loc))) goto out;` — handlers in
      * this port are established by `eval::setjmp_catch`, not a real
      * `setjmp`, so the body goes in the closure and everything after the
@@ -2394,7 +2398,7 @@ pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<BString, Er
     let caught = (|| -> Result<(), crate::error::Error> {
         let result = &mut result;
         let firstc = pgetc_eatbnl(sh)?;
-        readtoken1(sh, firstc, DQSYNTAX(), EofMark::Fake, 0)?;
+        readtoken1(sh, firstc, DQSYNTAX(), EofMark::Fake, 0, 0)?;
 
         let n = Node::Arg(narg {
             text: wordtext_node(sh),
@@ -2419,7 +2423,7 @@ pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<BString, Er
          * it. `getprompt` handing back a borrow of the expansion buffer
          * would have to outlive the next `expandarg` to be useful, and it
          * cannot. */
-        *result = BString::from(crate::expand::expansion_result());
+        *result = BString::from(crate::expand::expansion_result(sh));
         Ok(())
     })()
     .err();
@@ -2433,7 +2437,7 @@ pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<BString, Er
      * `restore_handler_expandarg` and there is nothing here that may
      * swallow a ^C. It is why this function returns a `Result` at all;
      * both callers are fallible and neither wanted one otherwise. */
-    let caught = restore_handler_expandarg(caught);
+    let caught = restore_handler_expandarg(sh, caught);
 
     sh.input.doprompt = saveprompt;
     unwindfiles(sh, file_stop);
@@ -2461,16 +2465,10 @@ pub unsafe fn expandstr(sh: &mut Shell, ps: *const c_char) -> Result<BString, Er
 
 // [spec:dash:def:parser.getprompt-fn]
 // [spec:dash:sem:parser.getprompt-fn]
-pub unsafe fn getprompt(sh: &mut Shell) -> BString {
-    let prompt: *const c_char;
-
-    match sh.input.whichprompt {
-        1 => {
-            prompt = crate::var::ps1val(sh);
-        }
-        2 => {
-            prompt = crate::var::ps2val(sh);
-        }
+pub fn getprompt(sh: &mut Shell) -> BString {
+    let prompt = match sh.input.whichprompt {
+        1 => crate::var::ps1val(sh),
+        2 => crate::var::ps2val(sh),
         /* default: falls into case 0 outside DEBUG builds.  The C returns
          * `nullstr`, whose *address* is load-bearing at other sites (see
          * `mystring::nullstr`) but not at this one: both readers here take
@@ -2478,7 +2476,7 @@ pub unsafe fn getprompt(sh: &mut Shell) -> BString {
         _ => {
             return BString::default();
         }
-    }
+    };
 
     /* A callback: the line editor calls this through a function pointer
      * and there is nothing here to return a `Result` to. A diagnostic is
@@ -2497,7 +2495,7 @@ pub unsafe fn getprompt(sh: &mut Shell) -> BString {
      * not the handle `docs/api-design.md` §5.1 keeps for the signal
      * handler -- which is still the one shape that cannot take a
      * parameter, because a handler has no frame to thread through. */
-    match expandstr(sh, prompt) {
+    match expandstr(sh, BStr::new(prompt.as_slice())) {
         Ok(expanded) => expanded,
         Err(e) => {
             crate::error::rearm_interrupt(e);
@@ -2505,7 +2503,7 @@ pub unsafe fn getprompt(sh: &mut Shell) -> BString {
              * same answer `expandstr`'s own failure path gives — and the
              * same read of `prompt`, taken here because this arm never
              * entered the copy `expandstr` makes. */
-            BString::from(CStr::from_ptr(prompt).to_bytes())
+            prompt
         }
     }
 }
@@ -2520,15 +2518,11 @@ pub unsafe fn getprompt(sh: &mut Shell) -> BString {
 /// recovers the token code by subtracting the base.
 // [spec:dash:def:parser.findkwd-fn]
 // [spec:dash:sem:parser.findkwd-fn]
-pub unsafe fn findkwd(s: *const c_char) -> *const *const c_char {
-    let key = core::ffi::CStr::from_ptr(s).to_bytes();
-    match parsekwd
-        .0
-        .binary_search_by(|&kwd| core::ffi::CStr::from_ptr(kwd).to_bytes().cmp(key))
-    {
-        Ok(i) => parsekwd.0.as_ptr().add(i),
-        Err(_) => ptr::null(),
-    }
+pub fn findkwd(s: &BStr) -> Option<usize> {
+    let key = crate::mystring::cstr_prefix(s);
+    parsekwd
+        .binary_search_by(|kwd| kwd.to_bytes().cmp(key.as_ref()))
+        .ok()
 }
 
 // ---------------------------------------------------------------------
@@ -2537,65 +2531,44 @@ pub unsafe fn findkwd(s: *const c_char) -> *const *const c_char {
 
 // [spec:dash:def:parser.goodname-fn]
 // [spec:dash:sem:parser.goodname-fn]
-pub unsafe fn goodname(p: *const c_char) -> c_int {
-    (*endofname(p) == 0) as c_int
+pub fn goodname(name: &BStr) -> c_int {
+    let name = crate::mystring::cstr_prefix(name);
+    (endofname(name) == name.len()) as c_int
 }
 
 // [spec:dash:def:parser.parser-eof-fn]
 // [spec:dash:sem:parser.parser-eof-fn]
-pub unsafe fn parser_eof(sh: &Shell) -> c_int {
+pub fn parser_eof(sh: &Shell) -> c_int {
     (sh.input.tokpushback != 0 && sh.input.lasttoken == TEOF) as c_int
-}
-
-// ---------------------------------------------------------------------
-// C library entry points the libc crate does not declare.
-// ---------------------------------------------------------------------
-
-unsafe extern "C" {
-    fn mbrtowc(
-        pwc: *mut libc::wchar_t,
-        s: *const c_char,
-        n: usize,
-        ps: *mut libc::mbstate_t,
-    ) -> usize;
-    fn iswblank(wc: u32) -> c_int;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::CStr0;
 
     // [spec:dash:sem:parser.findkwd-fn/test]
     #[test]
     fn findkwd_preserves_the_sorted_table_contract() {
-        unsafe {
-            let mut previous: Option<&[u8]> = None;
+        let mut previous: Option<&[u8]> = None;
 
-            for (i, &keyword) in parsekwd.0.iter().enumerate() {
-                let bytes = core::ffi::CStr::from_ptr(keyword).to_bytes();
-                if let Some(previous) = previous {
-                    assert!(previous < bytes, "parsekwd must be strictly sorted");
-                }
-                previous = Some(bytes);
-
-                let found = findkwd(keyword);
-                assert!(!found.is_null(), "keyword {bytes:?} was not found");
-                assert_eq!(*found, keyword);
-                assert_eq!(found.offset_from(parsekwd.0.as_ptr()) as usize, i);
-
-                let mut longer = bytes.to_vec();
-                longer.push(b'x');
-                longer.push(0);
-                assert!(findkwd(longer.as_ptr().cast()).is_null());
+        for (i, keyword) in parsekwd.iter().enumerate() {
+            let bytes = keyword.to_bytes();
+            if let Some(previous) = previous {
+                assert!(previous < bytes, "parsekwd must be strictly sorted");
             }
+            previous = Some(bytes);
 
-            for missing in ["", "cas", "integer", "zebra"] {
-                assert!(findkwd(CStr0::new(missing).p()).is_null());
-            }
+            assert_eq!(findkwd(BStr::new(bytes)), Some(i));
 
-            let non_ascii = [0xff_u8, 0];
-            assert!(findkwd(non_ascii.as_ptr().cast()).is_null());
+            let mut longer = bytes.to_vec();
+            longer.push(b'x');
+            assert_eq!(findkwd(BStr::new(&longer)), None);
         }
+
+        for missing in [b"".as_slice(), b"cas", b"integer", b"zebra"] {
+            assert_eq!(findkwd(BStr::new(missing)), None);
+        }
+
+        assert_eq!(findkwd(BStr::new(&[0xff_u8])), None);
     }
 }

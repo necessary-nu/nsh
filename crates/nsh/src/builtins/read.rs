@@ -8,8 +8,7 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use core::ptr::null_mut;
-use libc::{c_char, c_int, c_uint};
+use core::ffi::{c_int, c_uint};
 use std::ffi::CString;
 use std::io::Write as _;
 
@@ -17,7 +16,6 @@ use bstr::{BStr, BString};
 
 use crate::eval::Flow;
 use crate::expand::arglist;
-use crate::options::Options;
 
 /* glibc <limits.h> */
 const MB_LEN_MAX: usize = 16;
@@ -47,7 +45,7 @@ const READ_MBSLOP: usize = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 4;
 
 // [spec:dash:def:miscbltin.readcmd-handle-line-fn]
 // [spec:dash:sem:miscbltin.readcmd-handle-line-fn]
-unsafe fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> Result<(), Error> {
+fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> Result<(), Error> {
     let mut arglist: arglist = arglist::new();
 
     /* `s = grabstackstr(s)`.  The C is handed the cursor one *past* the
@@ -59,25 +57,25 @@ unsafe fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr
     debug_assert!(!line.is_empty(), "readcmd always pushes the terminator");
 
     crate::expand::ifsbreakup(sh, line, names.len() as c_int, &mut arglist);
-    crate::expand::ifsfree();
+    crate::expand::ifsfree(&mut sh.expand);
 
     /* The C walks the names and the fields with two cursors that advance
      * together, so the field for a name is the field at its index; a name
      * past the last field is the "nullify remaining arguments" case. */
     for (index, name) in names.iter().enumerate() {
-        let name = crate::shell::cstring(name);
         match arglist.list.get_mut(index) {
             None => {
-                crate::var::setvar(sh, 
-                    name.as_ptr(),
-                    core::ptr::addr_of!(crate::shell::nullstr) as *const c_char,
-                    0,
-                )?;
+                crate::var::set_bytes(sh, name, Some(BStr::new(b"")), 0)?;
             }
             Some(field) => {
                 /* set variable to field */
                 field.rmescapes();
-                crate::var::setvar(sh, name.as_ptr(), field.textp(), 0)?;
+                crate::var::set_bytes(
+                    sh,
+                    name,
+                    Some(crate::mystring::cstr_prefix(&field.text)),
+                    0,
+                )?;
             }
         }
     }
@@ -94,7 +92,7 @@ unsafe fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr
 
 // [spec:dash:def:miscbltin.readcmd-fn]
 // [spec:dash:sem:miscbltin.readcmd-fn]
-pub unsafe fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut prompt: Option<CString>;
     let mut startloc: c_int = 0;
     let mut newloc: c_int = 0;
@@ -112,7 +110,7 @@ pub unsafe fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
     }
     if let Some(prompt) = &prompt {
-        if libc::isatty(sh.streams.stdin) != 0 {
+        if nsh_platform::is_terminal(sh.streams.stdin) {
             let _ = sh.io.stderr().write_all(prompt.as_bytes());
         }
     }
@@ -202,7 +200,7 @@ pub unsafe fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         if pc == L_RECORD {
             // record:
             if newloc >= startloc {
-                crate::expand::recordregion(startloc, newloc, 0);
+                crate::expand::recordregion(&mut sh.expand, startloc, newloc, 0);
                 pc = L_START;
             } else {
                 pc = L_BODY; /* end of the for body */
@@ -217,7 +215,7 @@ pub unsafe fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
     }
     crate::input::popfile(sh);
-    crate::expand::recordregion(startloc, line.len() as c_int, 0);
+    crate::expand::recordregion(&mut sh.expand, startloc, line.len() as c_int, 0);
     /* `STACKSTRNUL(p)` writes the terminator without advancing, and the call
      * below then passes `p + 1` — the length *including* it.  Pushing is both
      * halves at once. */

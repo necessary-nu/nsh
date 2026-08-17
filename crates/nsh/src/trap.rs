@@ -4,11 +4,8 @@
 //! Note `sigmode`/`gotsig` are indexed by `signo - 1` while `trap` is indexed
 //! by `signo`, slot 0 being the `EXIT` trap.
 
-use bstr::{BStr, BString};
-use core::ptr::{addr_of_mut, null, null_mut};
-use libc::{c_char, c_int, sigset_t};
-use std::ffi::CStr;
-use std::io::Write;
+use bstr::{BStr, BString, ByteSlice};
+use core::ffi::{c_char, c_int};
 
 /// `sig_atomic_t` — `int` on every platform dash supports.
 pub type sig_atomic_t = c_int;
@@ -16,9 +13,7 @@ pub type sig_atomic_t = c_int;
 use crate::error::{INTOFF, INTON};
 use crate::error::Error;
 use crate::eval::{Flow, SKIPFUNC, SKIPFUNCDEF};
-use crate::mystring::nullstr;
 use crate::nodes::Node;
-use crate::options::Options;
 
 /// glibc's `NSIG` (`_NSIG`) on Linux.
 pub const NSIG: usize = 65;
@@ -34,13 +29,6 @@ const S_CATCH: c_char = 2; /* signal is caught */
 const S_IGN: c_char = 3; /* signal is ignored (SIG_IGN) */
 const S_HARD_IGN: c_char = 4; /* signal is ignored permenantly */
 const S_RESET: c_char = 5; /* temporary - to reset a hard ignored sig */
-
-/* indicates specified signal received */
-static mut gotsig: [c_char; NSIG - 1] = [0; NSIG - 1];
-/* last pending signal */
-pub static mut pending_sig: sig_atomic_t = 0;
-/* received SIGCHLD */
-pub static mut gotsigchld: sig_atomic_t = 0;
 
 /// The trap actions, the disposition cache, and the two counters that go
 /// with them: `trap.c`'s `trap`, `ptrap`, `trapcnt` and `sigmode`.
@@ -66,6 +54,8 @@ pub struct TrapTable {
     pub(crate) trapcnt: c_int,
     /// current value of signal, indexed by `signo - 1`
     sigmode: [c_char; NSIG - 1],
+    /// Cached `setinteractive` mode (`on + 1`, preserving dash's sentinel).
+    interactive: c_int,
 }
 
 impl TrapTable {
@@ -87,6 +77,7 @@ impl TrapTable {
             ptrap: 0,
             trapcnt: 0,
             sigmode: [0; NSIG - 1],
+            interactive: 0,
         }
     }
 
@@ -139,18 +130,19 @@ pub(crate) fn cbytes(s: &BString) -> Vec<u8> {
 
 // [spec:dash:def:trap.have-traps-fn]
 // [spec:dash:sem:trap.have-traps-fn]
-pub unsafe fn have_traps(sh: &crate::context::Shell) -> c_int {
+pub fn have_traps(sh: &crate::context::Shell) -> c_int {
     sh.traps.trapcnt
 }
 
 /* mkinit INIT fragment from src/trap.c:94-97. */
-pub unsafe fn mkinit_init(sh: &mut crate::context::Shell) {
-    sh.traps.sigmode[(libc::SIGCHLD - 1) as usize] = S_DFL;
-    setsignal(sh, libc::SIGCHLD);
+pub fn mkinit_init(sh: &mut crate::context::Shell) {
+    let child = nsh_platform::child_signal();
+    sh.traps.sigmode[(child - 1) as usize] = S_DFL;
+    setsignal(sh, child);
 }
 
 /* mkinit FORKRESET fragment from src/trap.c:99-101. */
-pub unsafe fn mkinit_forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
+pub fn mkinit_forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
     clear_traps(sh, n);
 }
 
@@ -183,12 +175,15 @@ pub unsafe fn mkinit_forkreset(sh: &mut crate::context::Shell, n: Option<&Node>)
 ///   is running in that child, and the parent's `ptrap` stays 0.
 // [spec:dash:def:trap.clear-traps-fn]
 // [spec:dash:sem:trap.clear-traps-fn]
-pub unsafe fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
+pub fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
     let simplecmd: c_int;
 
-    simplecmd = crate::parser::issimplecmd(n, crate::builtins::TRAPCMD.name.as_ptr());
+    simplecmd = crate::parser::issimplecmd(
+        n,
+        BStr::new(crate::builtins::TRAPCMD.name.to_bytes()),
+    );
 
-    INTOFF();
+    INTOFF(sh);
     /* One guard for the whole loop -- the fork's single pair -- rather
      * than one per slot. The `simplecmd` arm below clears a slot and puts
      * it back with a `setsignal` in between, and a per-write guard would
@@ -219,7 +214,7 @@ pub unsafe fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
     sh.traps.trapcnt = 0;
     sh.traps.ptrap = simplecmd;
     drop(blocked);
-    INTON();
+    INTON(sh);
 }
 
 /// Which side of a `fork` a disposition change is being made on, and so
@@ -236,18 +231,19 @@ enum Via {
     /// in. [dec:nsh:host-owns-signals]: the shell decides *which*
     /// disposition, and the host is what installs it.
     Host,
-    /// A forked child, which goes to libc directly. Two reasons, each
+    /// A forked child, which goes through the platform boundary directly.
+    /// Two reasons, each
     /// sufficient on its own:
     ///
     /// * Routing it would be an indirect call into embedder code made in
-    ///   a forked — sometimes *vforked* — child, which
+    ///   a forked child, which
     ///   [dec:nsh:fork-child-is-a-terminus] forbids.
     /// * Under [`crate::host::NoHost`] a routed call installs nothing, so
     ///   a background job would go on taking `^C` from the terminal
     ///   because its `ignoresig(SIGINT)` had been quietly dropped. The
     ///   child *is* the whole process, so there is no third party for the
     ///   host to be protecting.
-    Libc,
+    Platform,
 }
 
 /// The `struct sigaction` a query filled in, read as a [`Disposition`].
@@ -256,31 +252,23 @@ enum Via {
 /// answer as far as [`setsignal`] is concerned. They are kept apart
 /// because [`crate::host::Host`] is what an embedder implements, and an
 /// embedder can tell them apart.
-pub(crate) fn disposition_of(act: &libc::sigaction) -> crate::host::Disposition {
-    if act.sa_sigaction == libc::SIG_IGN {
-        crate::host::Disposition::Ignore
-    } else if act.sa_sigaction == libc::SIG_DFL {
-        crate::host::Disposition::Default
-    } else {
-        crate::host::Disposition::Catch
+pub(crate) fn disposition_of(action: nsh_platform::SignalAction) -> crate::host::Disposition {
+    match action {
+        nsh_platform::SignalAction::Ignore => crate::host::Disposition::Ignore,
+        nsh_platform::SignalAction::Default => crate::host::Disposition::Default,
+        nsh_platform::SignalAction::Catch => crate::host::Disposition::Catch,
     }
 }
 
 /// What is installed for `signo` right now, or `Err` if it cannot be read.
-unsafe fn current_disposition(
+fn current_disposition(
     sh: &mut crate::context::Shell,
     signo: c_int,
     via: Via,
 ) -> std::io::Result<crate::host::Disposition> {
     match via {
         Via::Host => sh.host.signal(crate::status::Signal::from_raw(signo)),
-        Via::Libc => {
-            let mut act: libc::sigaction = core::mem::zeroed();
-            if libc::sigaction(signo, null(), &mut act) == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(disposition_of(&act))
-        }
+        Via::Platform => nsh_platform::signal_action(signo).map(disposition_of),
     }
 }
 
@@ -294,7 +282,7 @@ unsafe fn current_disposition(
 /// because glibc's `sigaction` writes its own trampoline into the
 /// kernel-facing copy unconditionally. What is left is the signal number
 /// and the disposition, which is exactly what the host is asked for.
-unsafe fn install_disposition(
+fn install_disposition(
     sh: &mut crate::context::Shell,
     signo: c_int,
     to: crate::host::Disposition,
@@ -309,16 +297,13 @@ unsafe fn install_disposition(
                 .host
                 .set_signal(crate::status::Signal::from_raw(signo), to);
         }
-        Via::Libc => {
-            let mut act: libc::sigaction = core::mem::zeroed();
-            act.sa_sigaction = match to {
-                crate::host::Disposition::Catch => onsig as *const () as usize,
-                crate::host::Disposition::Ignore => libc::SIG_IGN,
-                crate::host::Disposition::Default => libc::SIG_DFL,
+        Via::Platform => {
+            let action = match to {
+                crate::host::Disposition::Catch => nsh_platform::SignalAction::Catch,
+                crate::host::Disposition::Ignore => nsh_platform::SignalAction::Ignore,
+                crate::host::Disposition::Default => nsh_platform::SignalAction::Default,
             };
-            act.sa_flags = 0;
-            libc::sigfillset(&mut act.sa_mask);
-            libc::sigaction(signo, &act, null_mut());
+            let _ = nsh_platform::install_signal_action(signo, action, onsig);
         }
     }
 }
@@ -331,41 +316,38 @@ unsafe fn install_disposition(
 /// The parent's entry point: the host installs what the shell decided.
 // [spec:dash:def:trap.setsignal-fn]
 // [spec:dash:sem:trap.setsignal-fn]
-pub unsafe fn setsignal(sh: &mut crate::context::Shell, signo: c_int) {
+pub fn setsignal(sh: &mut crate::context::Shell, signo: c_int) {
     setsignal_via(sh, signo, Via::Host)
 }
 
 /// The forked child's entry point: identical policy, installed directly.
 ///
-/// See [`Via::Libc`] for why this is a second entry point rather than an
+/// See [`Via::Platform`] for why this is a second entry point rather than an
 /// argument the shell could have answered for itself.
-pub unsafe fn setsignal_in_child(sh: &mut crate::context::Shell, signo: c_int) {
-    setsignal_via(sh, signo, Via::Libc)
+pub fn setsignal_in_child(sh: &mut crate::context::Shell, signo: c_int) {
+    setsignal_via(sh, signo, Via::Platform)
 }
 
-unsafe fn setsignal_via(sh: &mut crate::context::Shell, signo: c_int, via: Via) {
+fn setsignal_via(sh: &mut crate::context::Shell, signo: c_int, via: Via) {
     let mut action: c_int;
-    let lvforked: c_int;
     let mut tsig: c_char;
-
-    lvforked = crate::siginbox::signals().vforked();
 
     action = match sh.traps.action(signo as usize) {
         None => S_DFL as c_int,
         Some(t) if !t.is_empty() => S_CATCH as c_int,
         Some(_) => S_IGN as c_int,
     };
-    if crate::shellmain::rootshell() != 0 && action == S_DFL as c_int && lvforked == 0 {
+    if crate::shellmain::rootshell(sh) != 0 && action == S_DFL as c_int {
         match signo {
-            libc::SIGINT => {
+            signal if signal == nsh_platform::interrupt_signal() => {
                 if sh.options.flag(crate::options::iflag) != 0
-                    || !sh.options.minusc.is_null()
+                    || sh.options.minusc.is_some()
                     || sh.options.flag(crate::options::sflag) == 0
                 {
                     action = S_CATCH as c_int;
                 }
             }
-            libc::SIGQUIT => {
+            signal if signal == nsh_platform::quit_signal() => {
                 /* #ifdef DEBUG: if (debug) break; */
                 if crate::shell::DEBUG && sh.options.flag(crate::options::debug) != 0 {
                     /* break */
@@ -373,13 +355,14 @@ unsafe fn setsignal_via(sh: &mut crate::context::Shell, signo: c_int, via: Via) 
                     action = S_IGN as c_int;
                 }
             }
-            libc::SIGTERM => {
+            signal if signal == nsh_platform::termination_signal() => {
                 if sh.options.flag(crate::options::iflag) != 0 {
                     action = S_IGN as c_int;
                 }
             }
             /* #if JOBS */
-            libc::SIGTSTP | libc::SIGTTOU => {
+            signal if signal == nsh_platform::terminal_stop_signal()
+                || signal == nsh_platform::terminal_output_signal() => {
                 if sh.options.flag(crate::options::mflag) != 0 {
                     action = S_IGN as c_int;
                 }
@@ -388,7 +371,7 @@ unsafe fn setsignal_via(sh: &mut crate::context::Shell, signo: c_int, via: Via) 
         }
     }
 
-    if signo == libc::SIGCHLD {
+    if signo == nsh_platform::child_signal() {
         action = S_CATCH as c_int;
     }
 
@@ -418,7 +401,9 @@ unsafe fn setsignal_via(sh: &mut crate::context::Shell, signo: c_int, via: Via) 
          * be reproduced without reading the inherited disposition. */
         if current == crate::host::Disposition::Ignore {
             if sh.options.flag(crate::options::mflag) != 0
-                && (signo == libc::SIGTSTP || signo == libc::SIGTTIN || signo == libc::SIGTTOU)
+                && (signo == nsh_platform::terminal_stop_signal()
+                    || signo == nsh_platform::terminal_input_signal()
+                    || signo == nsh_platform::terminal_output_signal())
             {
                 tsig = S_IGN; /* don't hard ignore these */
             } else {
@@ -436,9 +421,7 @@ unsafe fn setsignal_via(sh: &mut crate::context::Shell, signo: c_int, via: Via) 
         x if x == S_IGN as c_int => crate::host::Disposition::Ignore,
         _ => crate::host::Disposition::Default,
     };
-    if lvforked == 0 {
-        sh.traps.sigmode[tp] = action as c_char;
-    }
+    sh.traps.sigmode[tp] = action as c_char;
     install_disposition(sh, signo, want, via);
 }
 
@@ -450,7 +433,7 @@ unsafe fn setsignal_via(sh: &mut crate::context::Shell, signo: c_int, via: Via) 
 ///
 /// There is no parent-side twin, because there is no parent-side caller:
 /// both call sites are `forkchild`'s `FORK_BG` arm, where the child must
-/// genuinely stop taking `^C` from the terminal. [`Via::Libc`] carries the
+/// genuinely stop taking `^C` from the terminal. [`Via::Platform`] carries the
 /// argument; a parent-side caller appearing later needs a twin routed
 /// through the host, and the name here is what should make that obvious.
 ///
@@ -459,15 +442,13 @@ unsafe fn setsignal_via(sh: &mut crate::context::Shell, signo: c_int, via: Via) 
 /// calls disagree about have nothing to apply to.
 // [spec:dash:def:trap.ignoresig-fn]
 // [spec:dash:sem:trap.ignoresig-fn]
-pub unsafe fn ignoresig_in_child(sh: &mut crate::context::Shell, signo: c_int) {
+pub fn ignoresig_in_child(sh: &mut crate::context::Shell, signo: c_int) {
     let mode = sh.traps.sigmode[(signo - 1) as usize];
     if mode == S_IGN || mode == S_HARD_IGN {
         return;
     }
-    libc::signal(signo, libc::SIG_IGN);
-    if crate::siginbox::signals().vforked() == 0 {
-        sh.traps.sigmode[(signo - 1) as usize] = S_IGN;
-    }
+    let _ = nsh_platform::ignore_signal(signo);
+    sh.traps.sigmode[(signo - 1) as usize] = S_IGN;
 }
 
 /*
@@ -499,26 +480,22 @@ pub unsafe fn ignoresig_in_child(sh: &mut crate::context::Shell, signo: c_int) {
  * hit. The handler now does one store and returns, which is
  * async-signal-safe by construction and is what
  * [dec:nsh:host-owns-signals]'s `SignalSink` will formalise. */
-pub unsafe extern "C" fn onsig(signo: c_int) {
-    /* Read once. The C loads the global twice and cannot observe the
-     * difference, because the only writer is the process this test is
-     * distinguishing itself from; one load says so. */
-    let vforked = crate::siginbox::signals().vforked();
-    if vforked != 0 && libc::getpid() != vforked {
-        return;
-    }
+pub extern "C" fn onsig(signo: c_int) {
+    let signals = crate::siginbox::signals();
 
-    if signo == libc::SIGCHLD {
-        gotsigchld = 1;
-        if !crate::siginbox::signals().is_trapped(libc::SIGCHLD) {
+    if signo == nsh_platform::child_signal() {
+        signals.set_child_pending(true);
+        if !signals.is_trapped(nsh_platform::child_signal()) {
             return;
         }
     }
 
-    gotsig[(signo - 1) as usize] = 1;
-    pending_sig = signo;
+    signals.set_signal_pending(signo, true);
+    signals.set_pending_signal(signo);
 
-    if signo == libc::SIGINT && !crate::siginbox::signals().is_trapped(libc::SIGINT) {
+    if signo == nsh_platform::interrupt_signal()
+        && !signals.is_trapped(nsh_platform::interrupt_signal())
+    {
         /* `if (!suppressint) onint();` is gone. The C had two delivery
          * modes and only one of them was asynchronous; now neither is.
          * The handler stores, and the shell takes delivery at a poll
@@ -528,7 +505,7 @@ pub unsafe extern "C" fn onsig(signo: c_int) {
          * `sa_flags = 0` at `setsignal` below is why there is always a
          * poll site to reach: dash never sets SA_RESTART, so every
          * interruptible syscall returns EINTR when a signal arrives. */
-        crate::error::intpending = 1;
+        signals.set_interrupt_pending(true);
     }
 }
 
@@ -539,8 +516,7 @@ pub unsafe extern "C" fn onsig(signo: c_int) {
 
 // [spec:dash:def:trap.dotrap-fn]
 // [spec:dash:sem:trap.dotrap-fn]
-pub unsafe fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
-    let mut q: *mut c_char;
+pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
     let mut i: c_int;
     let mut status: c_int;
     let last_status: c_int;
@@ -555,7 +531,8 @@ pub unsafe fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
         return Err(e);
     }
 
-    if pending_sig == 0 {
+    let signals = crate::siginbox::signals();
+    if signals.pending_signal() == 0 {
         return Ok(Flow::Done(0));
     }
 
@@ -565,34 +542,32 @@ pub unsafe fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
         status = sh.status;
         sh.eval.savestatus = status;
     }
-    pending_sig = 0;
+    signals.set_pending_signal(0);
     crate::error::barrier();
 
     i = 0;
-    q = addr_of_mut!(gotsig) as *mut c_char;
     while i < NSIG as c_int - 1 {
-        if *q == 0 {
+        let signo = i + 1;
+        if !signals.signal_pending(signo) {
             i += 1;
-            q = q.add(1);
             continue;
         }
 
         if sh.eval.evalskip != 0 {
-            pending_sig = i + 1;
+            signals.set_pending_signal(signo);
             break;
         }
 
-        *q = 0;
+        signals.set_signal_pending(signo, false);
 
         /* The action is copied out because `evalstring` parses from the
          * buffer it is handed and the action it runs may `trap` over this
          * very slot; the C passes the slot's own pointer and keeps reading
          * it after `trapcmd` has freed it. */
-        let mut p = match sh.traps.action((i + 1) as usize) {
-            Some(t) => cbytes(t),
+        let p = match sh.traps.action((i + 1) as usize) {
+            Some(t) => t.clone(),
             None => {
                 i += 1;
-                q = q.add(1);
                 continue;
             }
         };
@@ -601,7 +576,7 @@ pub unsafe fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
          * past the `savestatus = last_status` below; a `Flow::Exit`
          * returned from here skips it in exactly the same way, which is
          * what leaves `savestatus` holding what `exit` was told. */
-        match crate::eval::evalstring(sh, p.as_mut_ptr() as *mut c_char, 0)? {
+        match crate::eval::evalstring(sh, p.as_bstr(), 0)? {
             Flow::Done(_) => {}
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
@@ -609,7 +584,6 @@ pub unsafe fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
             sh.status = status;
         }
         i += 1;
-        q = q.add(1);
     }
 
     sh.eval.savestatus = last_status;
@@ -622,17 +596,15 @@ pub unsafe fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
 
 // [spec:dash:def:trap.setinteractive-fn]
 // [spec:dash:sem:trap.setinteractive-fn]
-pub unsafe fn setinteractive(sh: &mut crate::context::Shell, on: c_int) {
-    static mut is_interactive: c_int = 0;
-
+pub fn setinteractive(sh: &mut crate::context::Shell, on: c_int) {
     let on = on + 1;
-    if on == is_interactive {
+    if on == sh.traps.interactive {
         return;
     }
-    is_interactive = on;
-    setsignal(sh, libc::SIGINT);
-    setsignal(sh, libc::SIGQUIT);
-    setsignal(sh, libc::SIGTERM);
+    sh.traps.interactive = on;
+    setsignal(sh, nsh_platform::interrupt_signal());
+    setsignal(sh, nsh_platform::quit_signal());
+    setsignal(sh, nsh_platform::termination_signal());
 }
 
 /*
@@ -657,7 +629,7 @@ pub unsafe fn setinteractive(sh: &mut crate::context::Shell, on: c_int) {
 /// `exit_from_child`, `jobs`' `forkchild_fatal` and `redir.rs:483` all
 /// end a child the library forked, which `[dec:nsh:fork-child-is-a-terminus]`
 /// says is a terminus rather than a frame.
-pub unsafe fn exitshell(sh: &mut crate::context::Shell) -> crate::status::ExitStatus {
+pub fn exitshell(sh: &mut crate::context::Shell) -> crate::status::ExitStatus {
     sh.eval.savestatus = sh.status;
     /* `TRACE(("pid %d, exitshell(%d)\n", getpid(), savestatus));` —
      * `#ifdef DEBUG` in `shell.h`, and the dash build does not define it. */
@@ -677,13 +649,13 @@ pub unsafe fn exitshell(sh: &mut crate::context::Shell) -> crate::status::ExitSt
                 break 'out;
             }
             sh.eval.evalskip = 0;
-            let mut p = cbytes(&p);
+            let p = p;
             /* An error in the EXIT trap is reported and dropped -- the
              * shell is already exiting, and the C's `longjmp` landed at
              * `out:` with nothing left to inspect it. What must not be
              * dropped is an `exit` *inside* the trap, because it names the
              * status the shell leaves with. */
-            match crate::eval::evalstring(sh, p.as_mut_ptr() as *mut c_char, 0) {
+            match crate::eval::evalstring(sh, p.as_bstr(), 0) {
                 Ok(crate::eval::Flow::Exit { by_exitcmd: b }) => {
                     by_exitcmd = b;
                     break 'out;
@@ -722,13 +694,12 @@ pub unsafe fn exitshell(sh: &mut crate::context::Shell) -> crate::status::ExitSt
 
 // [spec:dash:def:trap.decode-signum-fn]
 // [spec:dash:sem:trap.decode-signum-fn]
-pub(crate) unsafe fn decode_signum(string: *const c_char) -> c_int {
+pub(crate) fn decode_signum(string: &BStr) -> c_int {
     let mut signo: c_int = -1;
 
-    if crate::mystring::is_number(string) != 0 {
-        signo = libc::atoi(string);
-        if signo >= NSIG as c_int {
-            signo = -1;
+    if let Some(number) = crate::mystring::decimal_digits(string) {
+        if number < NSIG as u64 {
+            signo = number as c_int;
         }
     }
 
@@ -737,7 +708,7 @@ pub(crate) unsafe fn decode_signum(string: *const c_char) -> c_int {
 
 // [spec:dash:def:trap.decode-signal-fn]
 // [spec:dash:sem:trap.decode-signal-fn]
-pub unsafe fn decode_signal(string: *const c_char, minsig: c_int) -> c_int {
+pub fn decode_signal(string: &BStr, minsig: c_int) -> c_int {
     let mut signo: c_int;
 
     signo = decode_signum(string);
@@ -747,9 +718,7 @@ pub unsafe fn decode_signal(string: *const c_char, minsig: c_int) -> c_int {
 
     signo = minsig;
     while signo < NSIG as c_int {
-        if CStr::from_ptr(string)
-            .to_bytes()
-            .eq_ignore_ascii_case(crate::signames::signal_names[signo as usize].to_bytes())
+        if string.eq_ignore_ascii_case(crate::signames::signal_names[signo as usize].to_bytes())
         {
             return signo;
         }
@@ -757,15 +726,6 @@ pub unsafe fn decode_signal(string: *const c_char, minsig: c_int) -> c_int {
     }
 
     -1
-}
-
-// [spec:dash:def:trap.sigblockall-fn]
-// [spec:dash:sem:trap.sigblockall-fn]
-pub unsafe fn sigblockall(oldmask: *mut sigset_t) {
-    let mut mask: sigset_t = core::mem::zeroed();
-
-    libc::sigfillset(&mut mask);
-    libc::sigprocmask(libc::SIG_SETMASK, &mask, oldmask);
 }
 
 #[cfg(test)]
@@ -782,18 +742,17 @@ mod tests {
     #[test]
     fn mirror_follows_the_slot() {
         let _g = crate::testutil::lock();
-        unsafe {
-            let mut t = TrapTable::new();
-            assert!(!signals().is_trapped(libc::SIGINT), "a new table has no traps");
+        let interrupt = nsh_platform::interrupt_signal();
+        let mut t = TrapTable::new();
+        assert!(!signals().is_trapped(interrupt), "a new table has no traps");
 
-            let b = SignalsBlocked::new();
-            drop(t.set(&b, libc::SIGINT as usize, Some(BString::from("echo hi"))));
-            assert!(signals().is_trapped(libc::SIGINT), "set an action, set the bit");
+        let b = SignalsBlocked::new();
+        drop(t.set(&b, interrupt as usize, Some(BString::from("echo hi"))));
+        assert!(signals().is_trapped(interrupt), "set an action, set the bit");
 
-            drop(t.set(&b, libc::SIGINT as usize, None));
-            assert!(!signals().is_trapped(libc::SIGINT), "clear the action, clear the bit");
-            drop(b);
-        }
+        drop(t.set(&b, interrupt as usize, None));
+        assert!(!signals().is_trapped(interrupt), "clear the action, clear the bit");
+        drop(b);
     }
 
     /// **The predicate is `is_some()`, not "has an action".** The C's
@@ -804,17 +763,16 @@ mod tests {
     #[test]
     fn ignored_signal_counts_as_trapped() {
         let _g = crate::testutil::lock();
-        unsafe {
-            let mut t = TrapTable::new();
-            let b = SignalsBlocked::new();
-            drop(t.set(&b, libc::SIGINT as usize, Some(BString::new(Vec::new()))));
-            assert!(
-                signals().is_trapped(libc::SIGINT),
-                "`trap '' INT` is a trap as far as the handler is concerned"
-            );
-            drop(t.set(&b, libc::SIGINT as usize, None));
-            drop(b);
-        }
+        let interrupt = nsh_platform::interrupt_signal();
+        let mut t = TrapTable::new();
+        let b = SignalsBlocked::new();
+        drop(t.set(&b, interrupt as usize, Some(BString::new(Vec::new()))));
+        assert!(
+            signals().is_trapped(interrupt),
+            "`trap '' INT` is a trap as far as the handler is concerned"
+        );
+        drop(t.set(&b, interrupt as usize, None));
+        drop(b);
     }
 
     /// A fresh table starts the mirror fresh with it. This is also where
@@ -824,16 +782,15 @@ mod tests {
     #[test]
     fn a_new_table_clears_the_mirror() {
         let _g = crate::testutil::lock();
-        unsafe {
-            let mut t = TrapTable::new();
-            let b = SignalsBlocked::new();
-            drop(t.set(&b, libc::SIGCHLD as usize, Some(BString::from("echo chld"))));
-            drop(b);
-            assert!(signals().is_trapped(libc::SIGCHLD));
+        let child = nsh_platform::child_signal();
+        let mut t = TrapTable::new();
+        let b = SignalsBlocked::new();
+        drop(t.set(&b, child as usize, Some(BString::from("echo chld"))));
+        drop(b);
+        assert!(signals().is_trapped(child));
 
-            let _fresh = TrapTable::new();
-            assert!(!signals().is_trapped(libc::SIGCHLD), "a new table, a clear mirror");
-        }
+        let _fresh = TrapTable::new();
+        assert!(!signals().is_trapped(child), "a new table, a clear mirror");
     }
 
     /// **The guard blocks, and puts the mask back.** Without the `Drop`
@@ -842,23 +799,17 @@ mod tests {
     #[test]
     fn the_guard_blocks_and_restores() {
         let _g = crate::testutil::lock();
-        unsafe {
-            crate::system::sigclearmask();
-            let mut before: sigset_t = core::mem::zeroed();
-            libc::sigprocmask(libc::SIG_SETMASK, null(), &mut before);
-            assert_eq!(libc::sigismember(&before, libc::SIGINT), 0, "start unblocked");
+        crate::system::sigclearmask();
+        let interrupt = nsh_platform::interrupt_signal();
+        let child = nsh_platform::child_signal();
+        assert!(!nsh_platform::signal_is_blocked(interrupt).unwrap(), "start unblocked");
 
-            {
-                let _b = SignalsBlocked::new();
-                let mut during: sigset_t = core::mem::zeroed();
-                libc::sigprocmask(libc::SIG_SETMASK, null(), &mut during);
-                assert_eq!(libc::sigismember(&during, libc::SIGINT), 1, "blocked inside");
-                assert_eq!(libc::sigismember(&during, libc::SIGCHLD), 1, "all of them");
-            }
-
-            let mut after: sigset_t = core::mem::zeroed();
-            libc::sigprocmask(libc::SIG_SETMASK, null(), &mut after);
-            assert_eq!(libc::sigismember(&after, libc::SIGINT), 0, "restored on drop");
+        {
+            let _b = SignalsBlocked::new();
+            assert!(nsh_platform::signal_is_blocked(interrupt).unwrap(), "blocked inside");
+            assert!(nsh_platform::signal_is_blocked(child).unwrap(), "all of them");
         }
+
+        assert!(!nsh_platform::signal_is_blocked(interrupt).unwrap(), "restored on drop");
     }
 }

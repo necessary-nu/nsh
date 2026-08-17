@@ -21,27 +21,12 @@
 
 use crate::context::Shell;
 use bstr::{BStr, BString};
-use core::ptr::null_mut;
-use libc::{c_char, c_int};
-use std::ffi::CStr;
+use core::ffi::c_int;
 use std::io::Write;
 
 use crate::error::FORCEINTON;
 use crate::eval::{EV_EXIT, SKIPFUNC, SKIPFUNCDEF};
 use crate::jobs::SHOW_CHANGED;
-
-/// pid of main shell
-pub static mut rootpid: c_int = 0;
-/// pid of current shell
-pub static mut mypid: c_int = 0;
-/// shell level: 0 for the main shell, 1 for its children, and so on
-pub static mut shlvl: c_int = 0;
-
-/// glibc sucks — `main()` caches `__errno_location()` here so that the
-/// `errno` macro does not repeat the TLS lookup. The port reads errno
-/// straight from libc, which is behaviourally identical; the cache is
-/// still populated so anything reading it observes the same pointer.
-pub static mut dash_errno: *mut c_int = null_mut();
 
 /* `MKINIT struct jmploc main_handler;` was here — the outermost handler,
  * which the generated `FORKRESET` block re-pointed `handler` at after a
@@ -50,21 +35,21 @@ pub static mut dash_errno: *mut c_int = null_mut();
 
 /// src/main.h: `#define rootshell (!shlvl)`
 #[inline]
-pub unsafe fn rootshell() -> c_int {
-    (shlvl == 0) as c_int
+pub fn rootshell(sh: &Shell) -> c_int {
+    (sh.shell_level == 0) as c_int
 }
 
 /* src/options.h: `#define iflag optlist[3]` and friends. */
 #[inline]
-unsafe fn iflag(sh: &crate::context::Shell) -> c_int {
+fn iflag(sh: &crate::context::Shell) -> c_int {
     sh.options.flag(crate::options::iflag) as c_int
 }
 #[inline]
-unsafe fn Iflag(sh: &crate::context::Shell) -> c_int {
+fn Iflag(sh: &crate::context::Shell) -> c_int {
     sh.options.flag(crate::options::Iflag) as c_int
 }
 #[inline]
-unsafe fn sflag(sh: &crate::context::Shell) -> c_int {
+fn sflag(sh: &crate::context::Shell) -> c_int {
     sh.options.flag(crate::options::sflag) as c_int
 }
 
@@ -78,7 +63,7 @@ unsafe fn sflag(sh: &crate::context::Shell) -> c_int {
 // this is the annotated no-op that stands in for the profiling-setup
 // site. It is never called.
 #[allow(dead_code)]
-unsafe fn etext() -> c_int {
+fn etext() -> c_int {
     0
 }
 
@@ -94,22 +79,15 @@ unsafe fn etext() -> c_int {
 /// to run as. [`main_fn`] is what a caller outside the crate reaches.
 // [spec:dash:def:main.main-fn]
 // [spec:dash:sem:main.main-fn]
-pub unsafe fn main(
+pub fn main(
     sh: &mut Shell,
-    argc: c_int,
-    argv: *mut *mut c_char,
+    argv: &[Vec<u8>],
 ) -> crate::status::ExitStatus {
     let mut state: c_int; /* volatile */
-
-    dash_errno = libc::__errno_location();
 
     /* #if PROFILE: monitor(4, etext, profile_buf, sizeof profile_buf, 50); */
 
     state = 0;
-
-    /* `state` is live across the jump, so it is reached through a raw
-     * pointer rather than captured by reference. */
-    let state_p: *mut c_int = &mut state;
 
     /* Where the startup sequence resumes: 0 is the top, 1..4 are the
      * `state1`..`state4` labels, and 5 is `exit:`.
@@ -149,18 +127,18 @@ pub unsafe fn main(
                             /* #ifdef DEBUG:
                              *   opentrace();
                              *   trputs("Shell args:  ");  trargs(argv); */
-                            rootpid = libc::getpid();
-                            mypid = rootpid;
+                            sh.root_pid = nsh_platform::process_id() as c_int;
+                            sh.current_pid = sh.root_pid;
                             crate::init::init(sh)?;
                             /* `setstackmark(smark)`, popped at `state3` and
                              * on the exception path, bounded what `procargs`
                              * and the profile reads left in the region. */
                             let login: c_int = crate::options::procargs(sh, argv)?;
                             if login != 0 {
-                                *state_p = 1;
+                                state = 1;
                                 match read_profile(
                                     sh,
-                                    b"/etc/profile\0".as_ptr() as *const c_char,
+                                    BStr::new(b"/etc/profile"),
                                 )? {
                                     crate::eval::Flow::Done(_) => {}
                                     exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
@@ -172,8 +150,8 @@ pub unsafe fn main(
                         }
                         1 => {
                             // state1:
-                            *state_p = 2;
-                            match read_profile(sh, b"$HOME/.profile\0".as_ptr() as *const c_char)? {
+                            state = 2;
+                            match read_profile(sh, BStr::new(b"$HOME/.profile"))? {
                                 crate::eval::Flow::Done(_) => {}
                                 exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
                             }
@@ -181,15 +159,16 @@ pub unsafe fn main(
                         }
                         2 => {
                             // state2:
-                            *state_p = 3;
+                            state = 3;
                             if
                             /* #ifndef linux: getuid() == geteuid() &&
                              *                getgid() == getegid() && */
                             iflag(sh) != 0 {
-                                let shinit: *mut c_char =
-                                    crate::var::lookupvar(sh, b"ENV\0".as_ptr() as *const c_char);
-                                if !shinit.is_null() && *shinit != b'\0' as c_char {
-                                    match read_profile(sh, shinit)? {
+                                if let Some(shinit) =
+                                    crate::var::lookup_bytes(sh, BStr::new(b"ENV"))
+                                        .filter(|value| !value.is_empty())
+                                {
+                                    match read_profile(sh, BStr::new(shinit.as_slice()))? {
                                         crate::eval::Flow::Done(_) => {}
                                         exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
                                     }
@@ -199,8 +178,8 @@ pub unsafe fn main(
                         }
                         3 => {
                             // state3:
-                            *state_p = 4;
-                            if !sh.options.minusc.is_null() {
+                            state = 4;
+                            if let Some(command) = sh.options.minusc.clone() {
                                 /* With EV_EXIT this always ends in
                                  * `Flow::Exit`, which is the C's EXEND
                                  * reaching the handler and taking
@@ -208,7 +187,7 @@ pub unsafe fn main(
                                  * the same place by the same decision. */
                                 match crate::eval::evalstring(
                                     sh,
-                                    sh.options.minusc,
+                                    BStr::new(command.as_slice()),
                                     if sflag(sh) != 0 { 0 } else { EV_EXIT },
                                 )? {
                                     crate::eval::Flow::Done(_) => {}
@@ -216,7 +195,7 @@ pub unsafe fn main(
                                 }
                             }
 
-                            if sflag(sh) != 0 || sh.options.minusc.is_null() {
+                            if sflag(sh) != 0 || sh.options.minusc.is_none() {
                                 pc = 4;
                             } else {
                                 pc = 5; /* goto exit */
@@ -295,8 +274,8 @@ pub unsafe fn main(
 
             crate::init::exitreset(sh, by_exitcmd);
 
-            s = *state_p;
-            if e_is_exit || s == 0 || iflag(sh) == 0 || shlvl != 0 {
+            s = state;
+            if e_is_exit || s == 0 || iflag(sh) == 0 || sh.shell_level != 0 {
                 entry = 5; // goto exit
                 continue;
             }
@@ -308,7 +287,7 @@ pub unsafe fn main(
             {
                 let _ = sh.io.stderr().write_all(b"\n");
             }
-            FORCEINTON(); /* enable interrupts */
+            FORCEINTON(sh); /* enable interrupts */
             entry = if s == 1 {
                 1 /* goto state1 */
             } else if s == 2 {
@@ -349,22 +328,9 @@ pub unsafe fn main(
 /// Before, the child could not return; now it can, and it would carry on
 /// executing whatever followed the fork.
 pub fn main_fn(
-    argc: c_int,
     argv: Vec<Vec<u8>>,
     streams: crate::streams::Streams,
 ) -> crate::status::ExitStatus {
-    let mut owned: Vec<*mut c_char> = Vec::with_capacity(argv.len() + 1);
-    for a in &argv {
-        let mut bytes: Vec<u8> = a.clone();
-        bytes.push(0);
-        bytes.shrink_to_fit();
-        let p = bytes.as_mut_ptr() as *mut c_char;
-        core::mem::forget(bytes);
-        owned.push(p);
-    }
-    owned.push(null_mut());
-    let p = owned.as_mut_ptr();
-    core::mem::forget(owned);
     /* The shell this process runs as. There is one, it is made here, and
      * every function that has been threaded so far reaches its state
      * through the borrow that starts on the next line
@@ -383,7 +349,7 @@ pub fn main_fn(
      * `Builder::build` keeps, for the same reason. */
     sh.host = Box::new(crate::host::ProcessHost);
     sh.host.attach(crate::siginbox::signals());
-    unsafe { main(&mut sh, argc, p) }
+    main(&mut sh, &argv)
 }
 
 /*
@@ -393,7 +359,7 @@ pub fn main_fn(
 
 // [spec:dash:def:main.cmdloop-fn]
 // [spec:dash:sem:main.cmdloop-fn]
-pub(crate) unsafe fn cmdloop(
+pub(crate) fn cmdloop(
     sh: &mut Shell,
     top: c_int,
 ) -> Result<crate::eval::Flow, crate::error::Error> {
@@ -468,7 +434,7 @@ pub(crate) unsafe fn cmdloop(
 /// abort, a diagnostic, an interrupt — takes `goto exit` and nothing else.
 /// There is no resume path to reproduce, so the whole of the handler for a
 /// child is `exitreset` and then `exitshell`.
-pub(crate) unsafe fn exit_from_child(
+pub(crate) fn exit_from_child(
     sh: &mut Shell,
     outcome: Result<crate::eval::Flow, crate::error::Error>,
 ) -> ! {
@@ -492,7 +458,7 @@ pub(crate) unsafe fn exit_from_child(
      * frame. Returning from here would carry the child back up through
      * frames the parent owns. */
     let status = crate::trap::exitshell(sh);
-    libc::_exit(status.code().into());
+    nsh_platform::exit_immediately(status.code().into());
 }
 
 /*
@@ -501,9 +467,9 @@ pub(crate) unsafe fn exit_from_child(
 
 // [spec:dash:def:main.read-profile-fn]
 // [spec:dash:sem:main.read-profile-fn]
-unsafe fn read_profile(
+fn read_profile(
     sh: &mut Shell,
-    name: *const c_char,
+    name: &BStr,
 ) -> Result<crate::eval::Flow, crate::error::Error> {
     /* `expandstr` hands back the expanded name as bytes now, and
      * `setinputfile` still opens through a `char *`, so the terminator is
@@ -515,7 +481,7 @@ unsafe fn read_profile(
     name.push(b'\0');
 
     if crate::input::setinputfile(sh,
-        name.as_ptr() as *const c_char,
+        BStr::new(crate::mystring::cstr_prefix(&name)),
         crate::input::INPUT_PUSH_FILE | crate::input::INPUT_NOFILE_OK,
     )? < 0
     {
@@ -540,11 +506,15 @@ unsafe fn read_profile(
 /// how a login shell reads its profile.
 // [spec:dash:def:main.readcmdfile-fn]
 // [spec:dash:sem:main.readcmdfile-fn]
-pub unsafe fn readcmdfile(
+pub fn readcmdfile(
     sh: &mut Shell,
-    name: *mut c_char,
+    name: &BStr,
 ) -> Result<crate::eval::Flow, crate::error::Error> {
-    crate::input::setinputfile(sh, name, crate::input::INPUT_PUSH_FILE)?;
+    crate::input::setinputfile(
+        sh,
+        name,
+        crate::input::INPUT_PUSH_FILE,
+    )?;
     let flow = cmdloop(sh, 0)?;
     if let crate::eval::Flow::Exit { .. } = flow {
         return Ok(flow);

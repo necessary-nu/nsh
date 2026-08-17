@@ -2980,6 +2980,14 @@ children (
                         kind @status
                         text "Doing → Done (nplan complete)"
                     }
+
+                    {
+                        at 2026-08-17T14:33:29.877953698Z
+                        author "brendan@necessary.nu"
+                        kind @errata
+                        text "2026-08-17: The recorded conclusion that the vfork window could stay allocation-free is false after owned-word/process-argv work (and, in Rust, was not a sound invariant to expose to ordinary heap-owning code). `shellexec` constructs environment/argument/path Vec/CString values in the child. Reproducer before the fix: `nsh -c '/bin/true; /bin/true'` reliably SIGSEGV'd at the parent return from `nsh_platform::vfork_process`; GDB stopped on that return. The implementation now uses fork for the immediate-exec child, deletes the vfork marker and its signal/state exceptions, and keeps the fork-child terminus rule. The rejected `fork everywhere` alternative and vfork-specific accepted consequences in [dec:nsh:fork-child-is-a-terminus] need superseding when this work is recorded."
+                        after_done true
+                    }
                 )
             }
 
@@ -3269,8 +3277,10 @@ children (
             {
                 id statics-that-are-not-state
                 title "Retire the statics that are not shell state: two call-scoped cursors become parameters, four const tables become immutable"
+                priority 0
                 kind @refactor
                 deps (no-ambient-state)
+                sealed true
                 log (
                     {
                         at 2026-08-15T15:03:06.971511109Z
@@ -3285,14 +3295,56 @@ children (
                         kind @note
                         text "**Transfer from [[owned-words]], with the measurement rather than an estimate: `expand.rs`'s remaining unsafe is now *mostly yours*, and the shape of it is four accessors.**\n\n`owned-words` finished converting word expansion to owned bytes at `f9f8ebe`. `expand.rs` went 490 → 242 unsafe operations over that node. Here is what the 242 are, by `cargo check --lib` with `allow(unsafe_op_in_unsafe_fn)` removed, counting `warning[E0133]` headers paired with the `-->` beneath each:\n\n```\n 98  the `static mut` accessors, and INTOFF/INTON\n       expb()        32     the expansion buffer\n       ifsr()        24     ifsregions\n       expargl()     10     exparg.list\n       expdest_off()  8     the expansion buffer's cursor\n       direct `use of mutable static`  8\n       INTON/INTOFF  15     error.rs's suppressint, not expand.rs's\n 23  the libc/FFI floor — transferred to [[unsafe-is-a-crate]] separately\n 21  raw-pointer dereferences (see below)\n100  calls to functions that are still `unsafe fn` for the reasons above\n```\n\n**So 98 of 242 are directly yours, and most of the trailing 100 collapses behind them** — those are calls like `argstr`, `subevalvar`, `expandmeta`, `recordregion`, `strtodest`, which are `unsafe fn` *only* because their bodies still touch a static. They stop being `unsafe fn` when the statics go, and the call sites stop counting.\n\n**The 21 raw dereferences, every one located, because \"raw pointer\" now means something different here than it did.** None of them is a word-text walk any more:\n\n* `419`, `429`, `460` — the bodies of `ifsr()`, `expargl()`, `expb()`: `&mut *ptr::addr_of_mut!(…)`. Yours.\n* `838`, `1059`, `1356` — `&mut *addr_of_mut!(exparg)` in `expandarg`, and the two `argbackq` slice-cursor reads. Yours.\n* `2124`, `2164`, `2198`, `2220`, `2228` — `varvalue`: `*name` twice, `atoi(name)`, `*shellparam.p().offset(n-1)`, and two `*ap` walks of the positional-parameter vector. **Yours** — your own log already inventories `shellparam` at 40 sites. `owned-words` deliberately stopped at this boundary and left `varvalue` taking the variable's *name* as a `char *`, with a comment at its call site in `evalvar` saying so, because past it the work is the variable table's and not the word's.\n* `780` — `(*pw).pw_dir`, `getpwnam`'s result. [[unsafe-is-a-crate]].\n* `3216`, `3219`, `3223`–`3225` — `expmeta`'s `dirent64` fields from `readdir64`. [[unsafe-is-a-crate]].\n* `2798`, `2801`, `2803` — `expandmeta_glob`'s `gl_pathv`. **Dead**: `GLOB_IS_ENABLED` is a `const bool` that is `false` (`mystring.rs:74` → `expand.rs:98`), its sole call site is `if GLOB_IS_ENABLED { … }`, and `system.rs`'s `glob64` stub returns `-1` unconditionally with a test pinning that. Type-checked dead code, not `#[cfg]`, which is why it still counts.\n* `3035` — `memrchr`, the C's `#ifndef HAVE_MEMRCHR` fallback, kept because the `#ifndef` is in the C. Its caller became `rfind_byte`.\n\n**One thing worth knowing before you start on `expbuf`.** Its cursor is already gone: `expdest`, `expbase`, `set_expdest` and `expmakestrspace` were retired at `1e8047c` when `_rmescapes` stopped holding a pointer into it. What is left is `expb()` itself and `expdest_off()`, which is just `expbuf.len()`. So the buffer is a plain `BString` behind a `static mut` and nothing addresses it by pointer — the conversion you face is the ownership question alone, with no aliasing left underneath it."
                     }
+
+                    {
+                        at 2026-08-17T11:16:40.194668784Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-17T11:16:40.194668784Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "claim stolen: The nplan-created worktree is outside this session's writable roots; work is continuing in the writable /tmp linked worktree."
+                    }
+
+                    {
+                        at 2026-08-17T11:16:47.780504109Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "priority pinned to 0 — operator override: Finish the unsafe cleanup before POSIX conformance: there should be no unsafe unless absolutely necessary."
+                    }
+
+                    {
+                        at 2026-08-17T16:12:27.325612369Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Completion result, re-derived from the final tree. All mutable shell state is instance-owned; `crates/nsh`, `nsh-cli`, and the embed example contain zero `static mut`, zero unsafe declarations/blocks/attributes, and zero `libc::` references. `nsh` and `nsh-cli` both deny `unsafe_code`. The call-scoped parser state became typed arguments/returns; immutable C-shaped tables became safe Rust tables; the expansion/eval/parser/builtin cascades are ordinary safe functions. The arithmetic `arith_yylex.rs` module and `yylex` function are deleted: `arith_yacc.rs` now owns a typed lexer and recursive-descent parser with token values and lookahead held per evaluation. All per-shell variables, jobs, options, redirections, streams, input, output, history and scratch buffers live on `Shell` or call frames.\n\nFinal gates on the exact source: `cargo test --workspace` 253 passed (plus one ignored doctest); full differential with the inherited FD hard limit PASS=61768 FAIL=0 FLAKY=25 XFAIL=4, no STALE/invalid corpus; divergence-register self-test 44/0; sandboxed PTY 60/0/0; POSIX target 660/51 vs C dash 655/56, with no target-only locale regression; annotations valid, dash 422/422 covered, 34 tested, 0 stale. `git diff --check` clean."
+                    }
+
+                    {
+                        at 2026-08-17T16:12:31.996289016Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
+                    }
                 )
             }
 
             {
                 id unsafe-is-a-crate
                 title "The necessary unsafe lives in one crate behind safe wrappers; nsh denies unsafe_code"
+                priority 0
                 kind @refactor
-                deps (process-model owned-words host-owns-signals)
+                deps (
+                    process-model
+                    owned-words
+                    host-owns-signals
+                    statics-that-are-not-state
+                )
+                sealed true
                 log (
                     {
                         at 2026-08-16T12:49:39.677727033Z
@@ -3313,6 +3365,34 @@ children (
                         author "brendan@necessary.nu"
                         kind @note
                         text "Ruling on owned-words' framed question (coordinator): the parsing residue — 13 ops in four parser.rs functions, blocked on four callee signatures (`goodname`, `isassignment`, `exec::find_builtin`, `fixredir`; two living in eval.rs/exec.rs) — does NOT get its own node. It rides here: this node's completion criterion (nsh denies unsafe_code) necessarily meets those four callees during the crate sweep, and 13 ops blocked on signatures is signature work of exactly the kind this node's floor-sweep performs. The measurement is in owned-words' completion assessment at `3771d0c`; owned-words' title clause \"and parsing\" is satisfied by transfer, recorded there."
+                    }
+
+                    {
+                        at 2026-08-17T11:16:47.847569685Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "priority pinned to 0 — operator override: Finish the unsafe cleanup before POSIX conformance: there should be no unsafe unless absolutely necessary."
+                    }
+
+                    {
+                        at 2026-08-17T16:12:38.539166748Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-17T16:12:58.282110414Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Completion result. Added `crates/nsh-platform`, whose 102 public functions are safe wrappers; it is the workspace's sole direct `libc` dependency and the only crate containing unsafe syntax. `nsh`, `nsh-cli`, and the embed example have zero unsafe/libc/static-mut and both binaries/libraries deny unsafe code. The old 255 direct `libc` call sites and 13 hand-declared symbols in `nsh` are gone. The platform floor is down to 33 direct libc calls in 22 contained unsafe blocks plus two ABI declaration blocks. What remains is behavior-bearing ABI/process work: pre-runtime inherited-process-state capture, locale ctype/collation/multibyte conversion, named-account lookup for `~user`, exact execve pointer arrays, arbitrary numeric/real-time signals and sigaction/masks/sigsuspend, times(2), raw inherited-fd dup/close, fork, PID-namespace process-group zero handling, and localized strsignal text. Replacing those would either lose dash/POSIX behavior or merely move the same unsafe into another dependency.\n\nAvoidable libc was replaced with std/rustix throughout: `std::process::id`, `ExitStatusExt`, owned environment/path types, safe directory/stat/access/resource/wait/terminal/pipe calls, `OpenOptions::create_new` 0600 temp files, safe OS error rendering, and rustix's safe `exit_group`. Bare `~` continues to use the individual Shell's `$HOME`; `std::env::home_dir` cannot answer `~other-user`, so only that named-account case reaches the passwd wrapper. The CLI already terminates through `std::process::exit`. A forked child cannot: a parallel test caught it deadlocking, and gdb showed `std::process::exit -> std::rt::cleanup -> stack_overflow::drop_handler -> Mutex::lock` on a lock whose owner existed only before fork. `exit_immediately` therefore uses safe `rustix::runtime::exit_group`, with no libc or unsafe at the call site. `vfork` was removed in favor of `fork` after the shared-address-space port corrupted Rust heap/stack state.\n\nValidation on the final source: workspace 253/0; exhaustive differential 61768/0 with 25 classified scheduling flakes and 4 sanctioned divergences; divergence register 44/0; PTY 60/0/0; POSIX 660/51 vs C dash 655/56; annotations clean, dash coverage 422/422 and 0 stale. The POSIX pass caught and fixed one typed-callback regression where explicit `LC_ALL=` had been conflated with unset; a unit test now pins the distinction."
+                    }
+
+                    {
+                        at 2026-08-17T16:13:01.501479926Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }

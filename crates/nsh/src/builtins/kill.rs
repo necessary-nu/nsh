@@ -9,19 +9,16 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use libc::{c_int, pid_t};
-use std::ffi::CStr;
+use core::ffi::{c_int};
 use std::io::Write;
 
 use crate::eval::Flow;
 use crate::jobs::{getjob, ps_pid};
-use crate::options::Options;
 use crate::output::Dest;
-use crate::jobs::errno;
 
 // [spec:dash:def:jobs.killcmd-fn]
 // [spec:dash:sem:jobs.killcmd-fn]
-pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* the `usage:` label is a backward goto whose body only raises, so it
      * is reproduced as two returns of the same message. */
     const USAGE: &[u8] =
@@ -29,7 +26,7 @@ pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut signo: c_int = -1;
     let mut list: c_int = 0;
     let mut i: c_int;
-    let mut pid: pid_t;
+    let mut pid: i32;
     let mut jp: usize;
 
     if args.len() <= 1 {
@@ -43,17 +40,16 @@ pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
      * same word, which is where `Options` starts. */
     let mut operands: &[&BStr] = &args[1..];
     if args[1].first() == Some(&b'-') {
-        let first = crate::shell::cstring(args[1]);
-        signo = crate::trap::decode_signal(first.as_ptr().add(1), 1);
+        signo = crate::trap::decode_signal(BStr::new(&args[1][1..]), 1);
         if signo < 0 {
             while let Some(c) = opts.next(sh, b"ls:")? {
                 match c {
                     b's' => {
-                        let name = crate::shell::cstring(opts.arg());
-                        signo = crate::trap::decode_signal(name.as_ptr(), 1);
+                        let name = opts.arg();
+                        signo = crate::trap::decode_signal(name, 1);
                         if signo < 0 {
                             let mut message = b"invalid signal number or name: ".to_vec();
-                            message.extend_from_slice(name.as_bytes());
+                            message.extend_from_slice(name);
                             return Err(sh.sh_error_value(&message));
                         }
                     }
@@ -70,7 +66,7 @@ pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 
     if list == 0 && signo < 0 {
-        signo = libc::SIGTERM;
+        signo = nsh_platform::termination_signal();
     }
 
     if (((signo < 0 || operands.is_empty()) as c_int) ^ list) != 0 {
@@ -92,8 +88,7 @@ pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             }
             return Ok(Flow::Done(0));
         };
-        let status = crate::shell::cstring(status);
-        signo = crate::mystring::number(sh, status.as_ptr())?;
+        signo = crate::mystring::number(sh, status)?;
         if signo > 128 {
             signo -= 128;
         }
@@ -105,7 +100,7 @@ pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             let _ = sh.io.get(Dest::Stdout).write_all(&record);
         } else {
             let mut message = b"invalid signal number or exit status: ".to_vec();
-            message.extend_from_slice(status.as_bytes());
+            message.extend_from_slice(status);
             return Err(sh.sh_error_value(&message));
         }
         return Ok(Flow::Done(0));
@@ -113,19 +108,18 @@ pub unsafe fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     i = 0;
     for spec in operands {
-        let target = crate::shell::cstring(spec);
         if spec.first() == Some(&b'%') {
-            jp = getjob(sh, target.as_ptr(), 0)?;
+            jp = getjob(sh, Some(spec), 0)?;
             pid = -ps_pid(sh, jp, 0);
         } else {
             pid = if spec.first() == Some(&b'-') {
-                -crate::mystring::number(sh, target.as_ptr().add(1))?
+                -crate::mystring::number(sh, BStr::new(&spec[1..]))?
             } else {
-                crate::mystring::number(sh, target.as_ptr())?
+                crate::mystring::number(sh, spec)?
             };
         }
-        if libc::kill(pid, signo) != 0 {
-            let mut message = CStr::from_ptr(libc::strerror(errno())).to_bytes().to_vec();
+        if let Err(error) = nsh_platform::send_signal(pid, signo) {
+            let mut message = nsh_platform::os_error_message(&error).into_bytes();
             message.push(b'\n');
             sh.sh_warnx(&message);
             i = 1;

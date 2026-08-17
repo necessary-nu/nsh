@@ -25,7 +25,7 @@ use std::ffi::CStr;
 use std::io::Write as _;
 
 use bstr::{BStr, BString};
-use libc::{c_char, c_int};
+use core::ffi::c_int;
 
 use crate::escape::{CONV_ESCAPE_SLOP, conv_escape, conv_escape_str};
 use crate::eval::Flow;
@@ -47,7 +47,7 @@ const WIDTH: &[u8] = b"*0123456789";
 ///
 /// Nothing is checked: `evalbltin` reads `Output`'s sticky error flag
 /// after the builtin returns and folds it into the exit status.
-unsafe fn emit(sh: &mut crate::context::Shell, bytes: &[u8]) {
+fn emit(sh: &mut crate::context::Shell, bytes: &[u8]) {
     let _ = sh.io.stdout().write_all(bytes);
 }
 
@@ -58,7 +58,7 @@ unsafe fn emit(sh: &mut crate::context::Shell, bytes: &[u8]) {
 /// asked glibc to lay every conversion out and `xvasprintf` treated the
 /// refusal as fatal, so the builtin stops there: whatever the format had
 /// already printed stays printed, and the shell's status is 2.
-unsafe fn emit_field(sh: &mut crate::context::Shell, rendered: Option<Vec<u8>>) -> Result<(), Error> {
+fn emit_field(sh: &mut crate::context::Shell, rendered: Option<Vec<u8>>) -> Result<(), Error> {
     match rendered {
         Some(bytes) => {
             emit(sh, &bytes);
@@ -185,13 +185,12 @@ impl<'a> Operands<'a> {
             message.extend_from_slice(b": ");
             /* The C's `strerror(ERANGE)`, so the wording is the
              * platform's rather than this file's. */
-            let text = unsafe { CStr::from_ptr(libc::strerror(libc::ERANGE)) };
-            message.extend_from_slice(text.to_bytes());
+            message.extend_from_slice(nsh_platform::range_error_message().as_bytes());
         } else {
             return;
         }
 
-        unsafe { sh.sh_warnx(&message) };
+        sh.sh_warnx(&message);
         self.status = 1;
     }
 }
@@ -560,7 +559,7 @@ fn leading_number(bytes: &[u8]) -> usize {
 /// `mklong` had rewritten the integer conversions to `PRIdMAX` before
 /// the text was passed, so the length modifier it inserted is part of
 /// what a specification glibc could not read prints -- one `l` on this
-/// target, where `intmax_t` is a `long`. `%b` was passed with its
+/// target, where `i64` is a `long`. `%b` was passed with its
 /// conversion character set to `s`, which is how the C reached `printf`
 /// with a conversion character C has.
 fn passed_tail(tail: &[u8], conversion: u8) -> Vec<u8> {
@@ -603,9 +602,9 @@ fn span(bytes: &[u8], at: usize, set: &[u8]) -> usize {
 /// Laying out bytes needs no stand-in.
 // [spec:dash:def:printf.print-escape-str-fn]
 // [spec:dash:sem:printf.print-escape-str-fn]
-unsafe fn print_escape_str(sh: &mut crate::context::Shell, spec: &Spec, word: &CStr) -> Result<c_int, Error> {
+fn print_escape_str(sh: &mut crate::context::Shell, spec: &Spec, word: &CStr) -> Result<c_int, Error> {
     let mut buf = BString::default();
-    let done = conv_escape_str(word.as_ptr(), &mut buf);
+    let done = conv_escape_str(word.to_bytes(), &mut buf);
 
     /* `conv_escape_str` exits on the iteration that writes the
      * terminating NUL, so there is always one to drop. The C overwrote
@@ -620,7 +619,7 @@ unsafe fn print_escape_str(sh: &mut crate::context::Shell, spec: &Spec, word: &C
 
 // [spec:dash:def:printf.printfcmd-fn]
 // [spec:dash:sem:printf.printfcmd-fn]
-pub unsafe fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut options = crate::options::Options::new(args);
     /* `nextopt(nullstr)`: printf takes no options, so this exists to
      * reject `-x` and to step over a `--`. */
@@ -632,7 +631,7 @@ pub unsafe fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     /* `conv_escape` reads through a raw cursor and stops at a NUL, so
      * the format is copied once with a terminator on it. */
-    let mut format = crate::shell::cstring(format).into_bytes_with_nul();
+    let format = crate::shell::cstring(format).into_bytes_with_nul();
     let end = format.len() - 1;
     let mut operands = Operands::new(arguments);
 
@@ -655,11 +654,7 @@ pub unsafe fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                  * escape's worth of scratch and nothing else; see
                  * `CONV_ESCAPE_SLOP` for why 4 is not the bound. */
                 let mut scratch: [u8; CONV_ESCAPE_SLOP] = [0; CONV_ESCAPE_SLOP];
-                let ret = conv_escape(
-                    format.as_mut_ptr().add(at) as *mut c_char,
-                    &mut scratch,
-                    false,
-                );
+                let ret = conv_escape(&format[at..], &mut scratch, false);
                 at += (ret >> 4) as usize;
                 debug_assert!((ret & 15) as usize <= CONV_ESCAPE_SLOP);
                 emit(sh, &scratch[..(ret & 15) as usize]);
@@ -752,7 +747,7 @@ pub unsafe fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     emit_field(sh, spec.string(value))?;
                 }
                 /* `mklong` widened the specification to `PRIdMAX` so
-                 * that C's printf would pull a whole `intmax_t` off the
+                 * that C's printf would pull a whole `i64` off the
                  * varargs. The value arrives typed. */
                 b'd' | b'i' => {
                     let value = operands.getuintmax(sh, true);

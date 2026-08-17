@@ -40,6 +40,8 @@
 //! the destination as `fn(&mut Shell, &[&BStr]) -> Result<ExitStatus,
 //! Error>`, and the receiver in that signature is this.
 
+use core::ffi::c_int;
+
 /// The shell, as an instance rather than as a process.
 ///
 /// `docs/api-design.md` §5 is the list this fills from, one table per
@@ -69,7 +71,15 @@ pub struct Shell {
     /// one function writes it (`jobs::forkparent`) and one reads it
     /// (`expand::varvalue`, for `$!`), and neither reaches the job table
     /// to do so.
-    pub(crate) backgndpid: libc::pid_t,
+    pub(crate) backgndpid: i32,
+    /// PID of the process that created this shell instance.
+    pub(crate) root_pid: i32,
+    /// Cached PID for the process currently executing the shell.
+    pub(crate) current_pid: i32,
+    /// Zero in the root shell and incremented in forked shell children.
+    pub(crate) shell_level: c_int,
+    /// Nesting depth of regions that defer delivery of SIGINT.
+    pub(crate) interrupt_suppression: c_int,
     /// The saved-descriptor stack and the closed-descriptor bitmap.
     /// `redir.rs` owns the shape; this owns the value.
     pub(crate) redirs: crate::redir::RedirStack,
@@ -95,8 +105,16 @@ pub struct Shell {
     /// `IFS` in the forms field splitting wants it, rebuilt by the
     /// variable hook. `expand.rs` owns the shape.
     pub(crate) ifs: crate::expand::IfsCache,
+    /// Scratch owned by one expansion frame. Top-level expansion moves it
+    /// out while it runs so command substitutions receive an independent
+    /// nested frame.
+    pub(crate) expand: crate::expand::ExpandState,
     /// `fc -l`: list the history rather than re-running it.
-    pub(crate) displayhist: libc::c_int,
+    pub(crate) displayhist: c_int,
+    /// Interactive history, the line editor, and `fc` recursion state.
+    /// `histedit.rs` owns the shape; keeping it here makes two shell
+    /// instances independent instead of sharing a process-global editor.
+    pub(crate) histedit: crate::histedit::HistEditState,
     /// The trap actions, the disposition cache and their two counters.
     /// `trap.rs` owns the shape; this owns the value.
     ///
@@ -139,7 +157,7 @@ pub struct Shell {
     /// is what the commit before this one did: an error carries the
     /// status it took and the frame that catches it writes it here, so
     /// `sh_error_value`'s 56 call sites need no receiver.
-    pub(crate) status: libc::c_int,
+    pub(crate) status: c_int,
     /// The status the shell exited with, once it has.
     ///
     /// `docs/api-design.md` §5's last row, and what it says there is what
@@ -183,6 +201,10 @@ impl Shell {
             streams,
             aliases: crate::alias::AliasTable::new(),
             backgndpid: 0,
+            root_pid: 0,
+            current_pid: 0,
+            shell_level: 0,
+            interrupt_suppression: 0,
             commands: crate::exec::CmdTable::new(),
             eval: crate::eval::EvalState::new(),
             jobs: crate::jobs::JobTable::new(),
@@ -191,7 +213,9 @@ impl Shell {
             cwd: crate::cd::Cwd::new(),
             mail: crate::mail::MailState::new(),
             ifs: crate::expand::IfsCache::new(),
+            expand: crate::expand::ExpandState::new(),
             displayhist: 0,
+            histedit: crate::histedit::HistEditState::new(),
             traps: crate::trap::TrapTable::new(),
             input: crate::input::InputStack::new(),
             status: 0,

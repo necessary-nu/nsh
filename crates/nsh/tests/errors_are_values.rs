@@ -41,9 +41,6 @@
 //! table says the same thing in the row for "the `EXINT` unwind reaching a
 //! handler".
 
-use std::io::Read;
-use std::os::unix::io::FromRawFd;
-
 use nsh::streams::{self, Streams};
 
 /// Run `script` with stdout and stderr merged onto one pipe — which is how
@@ -53,9 +50,7 @@ use nsh::streams::{self, Streams};
 ///
 /// Forks, because the child becomes a shell and ends there.
 fn run(script: &str) -> (String, i32) {
-    let mut fds = [0i32; 2];
-    assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
-    let (r, w) = (fds[0], fds[1]);
+    let (r, w) = nsh_platform::pipe().expect("create pipe");
 
     let argv: Vec<Vec<u8>> = vec![
         b"sh".to_vec(),
@@ -63,11 +58,7 @@ fn run(script: &str) -> (String, i32) {
         script.as_bytes().to_vec(),
     ];
 
-    let status;
-    unsafe {
-        let pid = libc::fork();
-        assert!(pid >= 0, "fork failed");
-        if pid == 0 {
+    let status = nsh_platform::run_in_child(move || {
             // `install` and not `set`: these scripts run external commands
             // and command substitutions, and only `install` makes the
             // pipe *be* descriptors 1 and 2 inside the shell.
@@ -87,22 +78,13 @@ fn run(script: &str) -> (String, i32) {
                ending the process the caller's act — so this fork's child
                has to end itself. Returning would carry it back into the
                test harness after the fork. */
-            let status = nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, Streams::INHERIT);
-            libc::_exit(status.code().into());
-        }
-        libc::close(w);
-        let mut wstatus = 0i32;
-        assert_eq!(libc::waitpid(pid, &mut wstatus, 0), pid);
-        status = if libc::WIFEXITED(wstatus) {
-            libc::WEXITSTATUS(wstatus)
-        } else {
-            128 + libc::WTERMSIG(wstatus)
-        };
-    }
-
-    let mut bytes = Vec::new();
-    let mut f = unsafe { std::fs::File::from_raw_fd(r) };
-    f.read_to_end(&mut bytes).expect("read pipe");
+            let status = nsh::shellmain::main_fn(argv, Streams::INHERIT);
+            nsh_platform::exit_immediately(status.code().into());
+        })
+        .expect("run shell child");
+    nsh_platform::close_fd(w).expect("close pipe writer");
+    let bytes = nsh_platform::read_to_end(r).expect("read pipe");
+    nsh_platform::close_fd(r).expect("close pipe reader");
     (String::from_utf8_lossy(&bytes).into_owned(), status)
 }
 

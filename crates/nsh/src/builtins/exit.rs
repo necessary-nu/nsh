@@ -18,14 +18,13 @@ use bstr::BStr;
 
 // [spec:dash:def:main.exitcmd-fn]
 // [spec:dash:sem:main.exitcmd-fn]
-pub unsafe fn exitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn exitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if crate::jobs::stoppedjobs(sh) != 0 {
         return Ok(Flow::Done(0));
     }
 
     if let Some(status) = args.get(1) {
-        let status = crate::shell::cstring(status);
-        sh.eval.savestatus = crate::mystring::number(sh, status.as_ptr())?;
+        sh.eval.savestatus = crate::mystring::number(sh, status)?;
     }
 
     Ok(Flow::EXIT)

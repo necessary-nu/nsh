@@ -43,7 +43,7 @@
 
 use core::fmt;
 
-use libc::c_int;
+use core::ffi::c_int;
 
 /// The three descriptors the shell uses for its own I/O.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -121,15 +121,9 @@ impl Streams {
     /// The descriptors are the caller's to close. Nothing here closes
     /// them, for the same reason [`Streams::from_fds`] does not.
     pub fn capture() -> std::io::Result<Streams> {
-        let stdin = unsafe {
-            let fd = libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY);
-            if fd < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            fd
-        };
-        let out = memfd(c"nsh-stdout")?;
-        let err = memfd(c"nsh-stderr")?;
+        let stdin = nsh_platform::open_null_input()?;
+        let out = nsh_platform::anonymous_file(c"nsh-stdout")?;
+        let err = nsh_platform::anonymous_file(c"nsh-stderr")?;
         Ok(Streams {
             stdin,
             stdout: out,
@@ -140,15 +134,6 @@ impl Streams {
     fn as_array(&self) -> [c_int; 3] {
         [self.stdin, self.stdout, self.stderr]
     }
-}
-
-/// An anonymous file that lives only as long as its descriptor.
-fn memfd(name: &std::ffi::CStr) -> std::io::Result<c_int> {
-    let fd = unsafe { libc::memfd_create(name.as_ptr(), 0) };
-    if fd < 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(fd)
 }
 
 impl crate::context::Shell {
@@ -189,30 +174,7 @@ impl crate::context::Shell {
 /// last call" true after a `run` that the shell reset -- and it keeps the
 /// file from growing without bound across a long-lived shell.
 fn take_all(fd: c_int) -> std::io::Result<bstr::BString> {
-    unsafe {
-        if libc::lseek(fd, 0, libc::SEEK_SET) < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        let mut out: Vec<u8> = Vec::new();
-        let mut buf = [0u8; 8192];
-        loop {
-            let n = libc::read(fd, buf.as_mut_ptr() as *mut libc::c_void, buf.len());
-            if n < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            if n == 0 {
-                break;
-            }
-            out.extend_from_slice(&buf[..n as usize]);
-        }
-        if libc::ftruncate(fd, 0) < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        if libc::lseek(fd, 0, libc::SEEK_SET) < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        Ok(bstr::BString::from(out))
-    }
+    nsh_platform::take_file_contents(fd).map(bstr::BString::from)
 }
 
 impl Default for Streams {
@@ -282,10 +244,9 @@ pub struct Borrowed {
 ///
 /// Installing [`Streams::INHERIT`] is a no-op, so a frontend pays nothing.
 ///
-/// # Safety
-/// Manipulates the process's standard descriptors, so nothing else in the
-/// process may be using them for the lifetime of the returned [`Borrowed`].
-pub unsafe fn install(s: Streams) -> Result<Borrowed, StreamError> {
+/// This operation is process-wide. The caller must coordinate other users of
+/// descriptors 0, 1, and 2 until the returned guard is restored.
+pub fn install(s: Streams) -> Result<Borrowed, StreamError> {
     if s == Streams::INHERIT {
         return Ok(Borrowed {
             saved: [-1; 3],
@@ -302,21 +263,23 @@ pub unsafe fn install(s: Streams) -> Result<Borrowed, StreamError> {
     let cleanup = |fds: &[c_int]| {
         for &fd in fds {
             if fd >= 0 {
-                libc::close(fd);
+                let _ = nsh_platform::close_fd(fd);
             }
         }
     };
 
     for (i, &fd) in s.as_array().iter().enumerate() {
-        let hi = libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 10);
-        if hi < 0 {
+        let hi = match nsh_platform::duplicate_cloexec(fd, 10) {
+            Ok(hi) => hi,
+            Err(error) => {
             let e = StreamError {
                 fd,
-                errno: crate::system::errno(),
+                errno: error.raw_os_error().unwrap_or(0),
             };
             cleanup(&staged);
             return Err(e);
-        }
+            }
+        };
         staged[i] = hi;
     }
 
@@ -324,24 +287,27 @@ pub unsafe fn install(s: Streams) -> Result<Borrowed, StreamError> {
     // it is a state to reproduce on restore -- so only a failure that is
     // not EBADF aborts.
     for fd in 0..3i32 {
-        let hi = libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 10);
-        if hi < 0 {
-            let errno = crate::system::errno();
-            if errno != libc::EBADF {
+        let hi = match nsh_platform::duplicate_cloexec(fd, 10) {
+            Ok(hi) => hi,
+            Err(error) => {
+            let errno = error.raw_os_error().unwrap_or(0);
+            if errno != nsh_platform::BAD_DESCRIPTOR {
                 let e = StreamError { fd, errno };
                 cleanup(&staged);
                 cleanup(&saved);
                 return Err(e);
             }
-        }
+            -1
+            }
+        };
         saved[fd as usize] = hi;
     }
 
     for (i, &hi) in staged.iter().enumerate() {
-        if libc::dup2(hi, i as c_int) < 0 {
+        if let Err(error) = nsh_platform::duplicate_to(hi, i as c_int) {
             let e = StreamError {
                 fd: i as c_int,
-                errno: crate::system::errno(),
+                errno: error.raw_os_error().unwrap_or(0),
             };
             // Undo the moves already made, then hand the host back what
             // it had. Leaving it half-swapped would be worse than failing.
@@ -376,15 +342,13 @@ impl Borrowed {
         if !self.installed {
             return;
         }
-        unsafe {
-            for fd in 0..3i32 {
-                let old = self.saved[fd as usize];
-                if old >= 0 {
-                    libc::dup2(old, fd);
-                    libc::close(old);
-                } else {
-                    libc::close(fd);
-                }
+        for fd in 0..3i32 {
+            let old = self.saved[fd as usize];
+            if old >= 0 {
+                let _ = nsh_platform::duplicate_to(old, fd);
+                let _ = nsh_platform::close_fd(old);
+            } else {
+                let _ = nsh_platform::close_fd(fd);
             }
         }
     }
@@ -394,24 +358,16 @@ impl Borrowed {
 mod tests {
     use super::*;
     use crate::testutil::{forked, lock};
-    use std::io::Read;
-    use std::os::unix::io::FromRawFd;
-
-    unsafe fn pipe() -> (c_int, c_int) {
-        let mut fds = [0i32; 2];
-        assert_eq!(libc::pipe(fds.as_mut_ptr()), 0);
-        (fds[0], fds[1])
+    fn pipe() -> (c_int, c_int) {
+        nsh_platform::pipe().expect("create pipe")
     }
 
-    unsafe fn wr(fd: c_int, b: &[u8]) -> bool {
-        libc::write(fd, b.as_ptr() as *const libc::c_void, b.len()) == b.len() as isize
+    fn wr(fd: c_int, b: &[u8]) -> bool {
+        nsh_platform::write_all(fd, b).is_ok()
     }
 
     fn read_exactly(fd: c_int, n: usize) -> Vec<u8> {
-        let mut buf = vec![0u8; n];
-        let mut f = unsafe { std::fs::File::from_raw_fd(fd) };
-        f.read_exact(&mut buf).expect("read from pipe");
-        buf
+        nsh_platform::read_exact(fd, n).expect("read from pipe")
     }
 
     // ---- in-process: these touch only this module's own state ----------
@@ -419,14 +375,12 @@ mod tests {
     #[test]
     fn inherit_is_a_no_op() {
         let _g = lock();
-        unsafe {
-            let b = install(Streams::INHERIT).expect("inherit installs");
-            b.restore();
-            /* Nothing to read back: `install` no longer writes shell
-             * state, so what it did is visible on the descriptors and
-             * the forked cases below are what check them. */
-            assert!(libc::fcntl(1, libc::F_GETFD) >= 0);
-        }
+        let b = install(Streams::INHERIT).expect("inherit installs");
+        b.restore();
+        /* Nothing to read back: `install` no longer writes shell
+         * state, so what it did is visible on the descriptors and
+         * the forked cases below are what check them. */
+        assert!(nsh_platform::fd_is_open(1));
     }
 
     /// The shell reads and writes the streams it was *built* with, and it
@@ -436,20 +390,18 @@ mod tests {
     #[test]
     fn a_shell_is_built_on_the_streams_it_is_given() {
         let _g = lock();
-        unsafe {
-            let (r, w) = pipe();
-            let sh = crate::context::Shell::new(Streams {
-                stdin: 0,
-                stdout: w,
-                stderr: 2,
-            });
-            assert_eq!(sh.streams.stdout, w);
-            /* Descriptor 1 is untouched: this mode exists for a host that
-             * cannot have it swapped out from under it. */
-            assert!(libc::fcntl(1, libc::F_GETFD) >= 0);
-            libc::close(r);
-            libc::close(w);
-        }
+        let (r, w) = pipe();
+        let sh = crate::context::Shell::new(Streams {
+            stdin: 0,
+            stdout: w,
+            stderr: 2,
+        });
+        assert_eq!(sh.streams.stdout, w);
+        /* Descriptor 1 is untouched: this mode exists for a host that
+         * cannot have it swapped out from under it. */
+        assert!(nsh_platform::fd_is_open(1));
+        nsh_platform::close_fd(r).unwrap();
+        nsh_platform::close_fd(w).unwrap();
     }
 
     /// The shell's own writers are on the descriptors it was given. If
@@ -464,29 +416,30 @@ mod tests {
     #[test]
     fn the_shells_writers_are_the_streams_it_was_built_with() {
         let _g = lock();
-        unsafe {
-            let mut sh = crate::context::Shell::new(Streams {
-                stdin: 7,
-                stdout: 8,
-                stderr: 9,
-            });
-            assert_eq!((sh.io.stdout().fd, sh.io.stderr().fd), (8, 9));
+        let mut sh = crate::context::Shell::new(Streams {
+            stdin: 7,
+            stdout: 8,
+            stderr: 9,
+        });
+        assert_eq!((sh.io.stdout().fd, sh.io.stderr().fd), (8, 9));
 
-            let mut inherited = crate::context::Shell::new(Streams::INHERIT);
-            assert_eq!(
-                (inherited.io.stdout().fd, inherited.io.stderr().fd),
-                (1, 2)
-            );
-        }
+        let mut inherited = crate::context::Shell::new(Streams::INHERIT);
+        assert_eq!(
+            (inherited.io.stdout().fd, inherited.io.stderr().fd),
+            (1, 2)
+        );
     }
 
     #[test]
     fn a_stream_error_prints_its_descriptor() {
         let e = StreamError {
             fd: 7,
-            errno: libc::EBADF,
+            errno: nsh_platform::BAD_DESCRIPTOR,
         };
-        assert_eq!(e.to_string(), format!("fd 7: errno {}", libc::EBADF));
+        assert_eq!(
+            e.to_string(),
+            format!("fd 7: errno {}", nsh_platform::BAD_DESCRIPTOR)
+        );
     }
 
     // ---- forked: these move the process's standard descriptors ---------
@@ -500,15 +453,15 @@ mod tests {
 
     #[test]
     fn install_redirects_stdout_and_restore_gives_it_back() {
-        let (r, w) = unsafe { pipe() };
-        let (host_r, host_w) = unsafe { pipe() };
+        let (r, w) = pipe();
+        let (host_r, host_w) = pipe();
         const LENT: &[u8] = b"through the lent stream\n";
         const BACK: &[u8] = b"host again\n";
 
-        let st = forked(|| unsafe {
+        let st = forked(|| {
             // What the host has on descriptor 1 before lending it out.
-            libc::dup2(host_w, 1);
-            libc::close(host_w);
+            nsh_platform::duplicate_to(host_w, 1).unwrap();
+            nsh_platform::close_fd(host_w).unwrap();
 
             let b = match install(Streams {
                 stdin: 0,
@@ -516,27 +469,25 @@ mod tests {
                 stderr: 2,
             }) {
                 Ok(b) => b,
-                Err(_) => libc::_exit(2),
+                Err(_) => nsh_platform::exit_immediately(2),
             };
             if !wr(1, LENT) {
-                libc::_exit(3);
+                nsh_platform::exit_immediately(3);
             }
             b.restore();
             // Descriptor 1 is the host's again, so this must land in
             // host_r and not in the stream the shell was lent.
             if !wr(1, BACK) {
-                libc::_exit(4);
+                nsh_platform::exit_immediately(4);
             }
-            libc::_exit(0);
+            nsh_platform::exit_immediately(0);
         });
 
         assert_eq!(st, 0, "child failed at step {}", st);
         assert_eq!(read_exactly(r, LENT.len()), LENT);
         assert_eq!(read_exactly(host_r, BACK.len()), BACK);
-        unsafe {
-            libc::close(w);
-            libc::close(host_w);
-        }
+        let _ = nsh_platform::close_fd(w);
+        let _ = nsh_platform::close_fd(host_w);
     }
 
     /// The staging step in `install` exists for this case: a caller whose
@@ -544,14 +495,14 @@ mod tests {
     /// the source of a stream not yet copied.
     #[test]
     fn aliasing_supplied_descriptors_survive_installation() {
-        let (r, w) = unsafe { pipe() };
+        let (r, w) = pipe();
         const MSG: &[u8] = b"both\n";
 
-        let st = forked(|| unsafe {
+        let st = forked(|| {
             // Put the write end on descriptor 0 -- also the first
             // descriptor `install` writes.
-            libc::dup2(w, 0);
-            libc::close(w);
+            nsh_platform::duplicate_to(w, 0).unwrap();
+            nsh_platform::close_fd(w).unwrap();
 
             let b = match install(Streams {
                 stdin: 0,
@@ -559,18 +510,18 @@ mod tests {
                 stderr: 2,
             }) {
                 Ok(b) => b,
-                Err(_) => libc::_exit(2),
+                Err(_) => nsh_platform::exit_immediately(2),
             };
             if !wr(1, MSG) {
-                libc::_exit(3);
+                nsh_platform::exit_immediately(3);
             }
             b.restore();
-            libc::_exit(0);
+            nsh_platform::exit_immediately(0);
         });
 
         assert_eq!(st, 0, "child failed at step {}", st);
         assert_eq!(read_exactly(r, MSG.len()), MSG);
-        unsafe { libc::close(w) };
+        let _ = nsh_platform::close_fd(w);
     }
 
     /// A descriptor that was closed before `install` must be closed again
@@ -578,63 +529,62 @@ mod tests {
     /// depends on the difference: EBADF, not end-of-file.
     #[test]
     fn a_closed_descriptor_is_restored_closed() {
-        let (r, w) = unsafe { pipe() };
+        let (r, w) = pipe();
 
-        let st = forked(|| unsafe {
-            libc::close(0);
+        let st = forked(|| {
+            let _ = nsh_platform::close_fd(0);
             let b = match install(Streams {
                 stdin: r,
                 stdout: 1,
                 stderr: 2,
             }) {
                 Ok(b) => b,
-                Err(_) => libc::_exit(2),
+                Err(_) => nsh_platform::exit_immediately(2),
             };
-            if libc::fcntl(0, libc::F_GETFD) < 0 {
-                libc::_exit(3);
+            if !nsh_platform::fd_is_open(0) {
+                nsh_platform::exit_immediately(3);
             }
             b.restore();
-            if libc::fcntl(0, libc::F_GETFD) != -1 {
-                libc::_exit(4);
+            if nsh_platform::fd_is_open(0) {
+                nsh_platform::exit_immediately(4);
             }
-            if crate::system::errno() != libc::EBADF {
-                libc::_exit(5);
-            }
-            libc::_exit(0);
+            nsh_platform::exit_immediately(0);
         });
 
         assert_eq!(st, 0, "child failed at step {}", st);
-        unsafe {
-            libc::close(r);
-            libc::close(w);
-        }
+        let _ = nsh_platform::close_fd(r);
+        let _ = nsh_platform::close_fd(w);
     }
 
     #[test]
     fn installing_a_bad_descriptor_reports_it_and_changes_nothing() {
-        let st = forked(|| unsafe {
+        let st = forked(|| {
             // Nothing may allocate a descriptor between the close and the
             // install: the kernel hands out the lowest free number, so a
             // single intervening `dup` makes `bad` valid again.
-            let bad = libc::dup(1);
-            libc::close(bad);
+            // Keep the deliberately invalid number above `install`'s own
+            // staging range. Other tests may have descriptors 3..9 open
+            // when this child is forked, so "lowest available" is not a
+            // stable choice under the parallel test runner.
+            let bad = nsh_platform::duplicate_cloexec(1, 1000).unwrap();
+            nsh_platform::close_fd(bad).unwrap();
 
             let err = match install(Streams {
                 stdin: 0,
                 stdout: bad,
                 stderr: 2,
             }) {
-                Ok(_) => libc::_exit(2),
+                Ok(_) => nsh_platform::exit_immediately(2),
                 Err(e) => e,
             };
-            if err.fd != bad || err.errno != libc::EBADF {
-                libc::_exit(3);
+            if err.fd != bad || err.errno != nsh_platform::BAD_DESCRIPTOR {
+                nsh_platform::exit_immediately(3);
             }
             // A failed install must leave the host's descriptors alone.
-            if libc::fcntl(1, libc::F_GETFD) < 0 {
-                libc::_exit(5);
+            if !nsh_platform::fd_is_open(1) {
+                nsh_platform::exit_immediately(5);
             }
-            libc::_exit(0);
+            nsh_platform::exit_immediately(0);
         });
 
         assert_eq!(st, 0, "child failed at step {}", st);

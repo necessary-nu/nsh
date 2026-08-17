@@ -56,16 +56,16 @@ pub type SignalSink = &'static crate::siginbox::SignalSink;
 /// asks for [`Disposition::Catch`] on `SIGCHLD` while it is being built,
 /// and everything it learns about a child finishing *without* being
 /// blocked in `wait` comes from that handler. A host that declines still
-/// gets correct foreground commands — those block in `wait3`, which needs
+/// gets correct foreground commands — those block waiting for a child, which needs
 /// no handler — but it cannot notice a background job finishing between
 /// commands, and the `wait` builtin's arm suspends on a signal that will
 /// never be delivered. The wait design and this trait are one design, and
 /// this is the seam between them.
 ///
-/// **The forked child is not on this trait**, deliberately. The twelve
-/// disposition changes the library makes *after* forking go to libc
-/// directly: routing them would be an indirect call into embedder code
-/// made in a forked — sometimes vforked — child, and under [`NoHost`] a
+/// **The forked child is not on this trait**, deliberately. Disposition
+/// changes made after forking go through the platform boundary directly:
+/// routing them would be an indirect call into embedder code made in a
+/// forked child, and under [`NoHost`] a
 /// background job would go on taking `^C` because its `ignoresig` had been
 /// quietly dropped. `trap::Via` carries the argument;
 /// [dec:nsh:fork-child-is-a-terminus] carries the rule.
@@ -183,33 +183,20 @@ impl Host for ProcessHost {
     fn attach(&mut self, _sink: SignalSink) {}
 
     fn signal(&mut self, signal: Signal) -> std::io::Result<Disposition> {
-        unsafe {
-            let mut act: libc::sigaction = core::mem::zeroed();
-            if libc::sigaction(signal.number(), core::ptr::null(), &mut act) == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(crate::trap::disposition_of(&act))
-        }
+        nsh_platform::signal_action(signal.number()).map(|action| match action {
+            nsh_platform::SignalAction::Default => Disposition::Default,
+            nsh_platform::SignalAction::Ignore => Disposition::Ignore,
+            nsh_platform::SignalAction::Catch => Disposition::Catch,
+        })
     }
 
     fn set_signal(&mut self, signal: Signal, to: Disposition) -> std::io::Result<()> {
-        unsafe {
-            let mut act: libc::sigaction = core::mem::zeroed();
-            act.sa_sigaction = match to {
-                /* The library's own handler, which is
-                 * `SignalSink::raise`'s trampoline. A host outside this
-                 * crate installs its own and calls `raise` from it. */
-                Disposition::Catch => crate::trap::onsig as *const () as usize,
-                Disposition::Ignore => libc::SIG_IGN,
-                Disposition::Default => libc::SIG_DFL,
-            };
-            act.sa_flags = 0;
-            libc::sigfillset(&mut act.sa_mask);
-            if libc::sigaction(signal.number(), &act, core::ptr::null_mut()) == -1 {
-                return Err(std::io::Error::last_os_error());
-            }
-            Ok(())
-        }
+        let action = match to {
+            Disposition::Default => nsh_platform::SignalAction::Default,
+            Disposition::Ignore => nsh_platform::SignalAction::Ignore,
+            Disposition::Catch => nsh_platform::SignalAction::Catch,
+        };
+        nsh_platform::install_signal_action(signal.number(), action, crate::trap::onsig)
     }
 
     fn may_replace_process(&mut self) -> bool {
@@ -236,10 +223,15 @@ mod tests {
     fn the_default_host_reports_every_signal_as_default() {
         let mut h = NoHost;
         assert_eq!(
-            h.signal(Signal::from_raw(libc::SIGINT)).unwrap(),
+            h.signal(Signal::from_raw(nsh_platform::interrupt_signal())).unwrap(),
             Disposition::Default
         );
-        assert!(h.set_signal(Signal::from_raw(libc::SIGINT), Disposition::Catch).is_ok());
+        assert!(h
+            .set_signal(
+                Signal::from_raw(nsh_platform::interrupt_signal()),
+                Disposition::Catch,
+            )
+            .is_ok());
     }
 
     /// A host that writes down what it was asked for instead of doing it.
@@ -248,14 +240,14 @@ mod tests {
     /// own `S_RESET` path is what runs and the recorded asks are the ones
     /// dash would have made.
     #[derive(Clone)]
-    struct Recorder(std::sync::Arc<std::sync::Mutex<Vec<(libc::c_int, Disposition)>>>);
+    struct Recorder(std::sync::Arc<std::sync::Mutex<Vec<(core::ffi::c_int, Disposition)>>>);
 
     impl Recorder {
         fn new() -> Recorder {
             Recorder(std::sync::Arc::new(std::sync::Mutex::new(Vec::new())))
         }
 
-        fn installs(&self) -> Vec<(libc::c_int, Disposition)> {
+        fn installs(&self) -> Vec<(core::ffi::c_int, Disposition)> {
             self.0.lock().unwrap().clone()
         }
     }
@@ -286,28 +278,26 @@ mod tests {
     /// the ask a host declining it is declining.
     #[test]
     fn the_parent_side_entry_point_asks_the_host() {
-        unsafe {
-            let _g = crate::testutil::lock();
-            let rec = Recorder::new();
-            let mut sh = crate::context::Shell::builder()
-                .host(rec.clone())
-                .build()
-                .unwrap();
-            assert!(
-                rec.installs()
-                    .contains(&(libc::SIGCHLD, Disposition::Catch)),
-                "the shell did not ask for a SIGCHLD handler: {:?}",
-                rec.installs()
-            );
+        let _g = crate::testutil::lock();
+        let rec = Recorder::new();
+        let mut sh = crate::context::Shell::builder()
+            .host(rec.clone())
+            .build()
+            .unwrap();
+        assert!(
+            rec.installs()
+                .contains(&(nsh_platform::child_signal(), Disposition::Catch)),
+            "the shell did not ask for a SIGCHLD handler: {:?}",
+            rec.installs()
+        );
 
-            crate::trap::setsignal(&mut sh, libc::SIGTERM);
-            assert!(
-                rec.installs()
-                    .contains(&(libc::SIGTERM, Disposition::Default)),
-                "setsignal did not route through the host: {:?}",
-                rec.installs()
-            );
-        }
+        crate::trap::setsignal(&mut sh, nsh_platform::termination_signal());
+        assert!(
+            rec.installs()
+                .contains(&(nsh_platform::termination_signal(), Disposition::Default)),
+            "setsignal did not route through the host: {:?}",
+            rec.installs()
+        );
     }
 
     /// `set -m` in an ungranted shell leaves the host's process group and
@@ -334,22 +324,20 @@ mod tests {
     /// the terminal along with the shell that backgrounded it.
     #[test]
     fn the_child_side_entry_point_does_not_ask_the_host() {
-        unsafe {
-            let _g = crate::testutil::lock();
-            let rec = Recorder::new();
-            let mut sh = crate::context::Shell::builder()
-                .host(rec.clone())
-                .build()
-                .unwrap();
-            let before = rec.installs().len();
-            crate::trap::setsignal_in_child(&mut sh, libc::SIGTERM);
-            crate::trap::ignoresig_in_child(&mut sh, libc::SIGTERM);
-            assert_eq!(
-                rec.installs().len(),
-                before,
-                "a child-side call reached the host: {:?}",
-                rec.installs()
-            );
-        }
+        let _g = crate::testutil::lock();
+        let rec = Recorder::new();
+        let mut sh = crate::context::Shell::builder()
+            .host(rec.clone())
+            .build()
+            .unwrap();
+        let before = rec.installs().len();
+        crate::trap::setsignal_in_child(&mut sh, nsh_platform::termination_signal());
+        crate::trap::ignoresig_in_child(&mut sh, nsh_platform::termination_signal());
+        assert_eq!(
+            rec.installs().len(),
+            before,
+            "a child-side call reached the host: {:?}",
+            rec.installs()
+        );
     }
 }

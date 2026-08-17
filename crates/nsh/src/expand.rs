@@ -19,43 +19,17 @@
 //! diffs one-to-one against the C.
 
 #![allow(unknown_lints)]
-#![allow(static_mut_refs)]
-
 use crate::context::Shell;
 use core::mem;
-use core::ptr;
-use std::ffi::CStr;
+use std::ffi::OsStr;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
 use bstr::{BStr, BString, ByteSlice};
-use libc::{c_char, c_int, c_uint, c_ulong, c_void, intmax_t, size_t, ssize_t, wchar_t};
+use core::ffi::{c_char, c_int, c_uint};
 
 use crate::error::Error;
 use crate::mystring::{byte_at, byte_at_i, slice_from};
 use crate::pmatch::{pmatch_slices};
-
-// ---------------------------------------------------------------------
-// Declarations from <wchar.h> / <wctype.h> that the `libc` crate does not
-// expose.  These are plain libc entry points, not ported symbols.
-// ---------------------------------------------------------------------
-
-#[allow(non_camel_case_types)]
-pub(crate) type wint_t = c_uint;
-#[allow(non_camel_case_types)]
-pub(crate) type wctype_t = c_ulong;
-
-unsafe extern "C" {
-    fn mbrlen(s: *const c_char, n: size_t, ps: *mut libc::mbstate_t) -> size_t;
-    pub(crate) fn mbrtowc(pwc: *mut wchar_t, s: *const c_char, n: size_t, ps: *mut libc::mbstate_t) -> size_t;
-    fn mbsrtowcs(
-        dst: *mut wchar_t,
-        src: *mut *const c_char,
-        len: size_t,
-        ps: *mut libc::mbstate_t,
-    ) -> size_t;
-    fn iswspace(wc: wint_t) -> c_int;
-    pub(crate) fn wctype(name: *const c_char) -> wctype_t;
-    pub(crate) fn iswctype(wc: wint_t, desc: wctype_t) -> c_int;
-}
 
 // ---------------------------------------------------------------------
 // Constants mirrored from the headers this file includes.
@@ -149,17 +123,6 @@ pub struct strlist {
 }
 
 impl strlist {
-    /// A field taken out of a buffer the shell is about to stop owning:
-    /// the run `ifsbreakup` has just terminated, or `glob`'s `d_name`.
-    #[inline]
-    pub unsafe fn from_cstr(p: *const c_char) -> strlist {
-        strlist {
-            /* The terminator travels: every reader of a word's text
-             * reads it as a C string. */
-            text: BString::from(CStr::from_ptr(p).to_bytes_with_nul()),
-        }
-    }
-
     /// The same field, taken from bytes that already know where they end.
     ///
     /// `ifsbreakup` terminates each field in the word and then copies it
@@ -172,13 +135,6 @@ impl strlist {
         strlist { text }
     }
 
-    /// `sp->text`, as the `char *` every reader wants.
-    #[inline]
-    pub fn textp(&self) -> *mut c_char {
-        debug_assert_eq!(self.text.last(), Some(&0), "a field is a C string");
-        self.text.as_ptr() as *mut c_char
-    }
-
     /// `rmescapes(sp->text)`, in place as the C does it.
     ///
     /// `_rmescapes` shortens the C string and says nothing about by how
@@ -188,7 +144,7 @@ impl strlist {
     /// the entry's length keeps meaning the string's length, which is what
     /// makes the assertion in [`strlist::textp`] worth anything.
     #[inline]
-    pub unsafe fn rmescapes(&mut self) {
+    pub fn rmescapes(&mut self) {
         /* A field keeps its terminator: [`strlist::textp`] asserts it. */
         let n = rmescapes_owned(&mut self.text);
         self.text.truncate(n + 1);
@@ -236,12 +192,6 @@ pub const EXP_QUOTED: c_int = 0x100; /* expand word in double quotes */
 pub const EXP_KEEPNUL: c_int = 0x200; /* do not skip NUL characters */
 pub const EXP_DISCARD: c_int = 0x400; /* discard result of expansion */
 
-/// `expand.h`: `#define rmescapes(p) _rmescapes((p), 0)`
-#[inline]
-pub unsafe fn rmescapes(p: *mut c_char) -> *mut c_char {
-    _rmescapes(p, 0, None)
-}
-
 /// [`rmescapes`] over a buffer that owns its bytes.
 ///
 /// `_rmescapes` shortens the C string in place and says nothing about by
@@ -251,10 +201,8 @@ pub unsafe fn rmescapes(p: *mut c_char) -> *mut c_char {
 /// terminator to the caller — a `strlist` field keeps it because
 /// [`strlist::textp`] asserts it is there, and a here-document delimiter
 /// drops it because it is compared as bytes.
-pub unsafe fn rmescapes_owned(s: &mut BString) -> usize {
-    let p = s.as_mut_ptr() as *mut c_char;
-    rmescapes(p);
-    CStr::from_ptr(p).count_bytes()
+pub fn rmescapes_owned(s: &mut BString) -> usize {
+    rmescapes_buffer(s, 0)
 }
 
 // ---------------------------------------------------------------------
@@ -334,13 +282,6 @@ pub struct ifs_state {
 ///     before anything reads it) and `expari`'s arithmetic text (read by
 ///     `arith`, which cannot grow this buffer). Both are argued at the
 ///     site.
-static mut expbuf: BString = BString::new(Vec::new());
-/* list of back quote expressions.
- * The C walks a `struct nodelist *` and advances it with `argbackq =
- * argbackq->next`; the list is now the `Vec` inside the NARG node, so what
- * travels is a raw slice cursor over it. */
-static mut argbackq: *const [Option<crate::nodes::Node>] =
-    ptr::slice_from_raw_parts(ptr::null::<Option<crate::nodes::Node>>(), 0);
 /// The list of IFS regions.  The C is two statics — `ifsfirst`, a head
 /// node held in `.bss`, and `ifslastp`, a pointer to the last node —
 /// with every node after the head `ckmalloc`'d and chained through
@@ -356,9 +297,31 @@ static mut argbackq: *const [Option<crate::nodes::Node>] =
 /// hides a live region, and `ifsfirst`'s stale contents are never read —
 /// `recordregion` overwrites them, and every other reader tests
 /// `ifslastp` first.
-static mut ifsregions: Vec<ifsregion> = Vec::new();
-/* holds expanded arg list */
-static mut exparg: arglist = arglist::new();
+pub(crate) struct ExpandState {
+    buffer: BString,
+    backquotes: Vec<Option<crate::nodes::Node>>,
+    next_backquote: usize,
+    ifs_regions: Vec<ifsregion>,
+    args: Vec<strlist>,
+}
+
+impl ExpandState {
+    pub(crate) const fn new() -> Self {
+        Self {
+            buffer: BString::new(Vec::new()),
+            backquotes: Vec::new(),
+            next_backquote: 0,
+            ifs_regions: Vec::new(),
+            args: Vec::new(),
+        }
+    }
+}
+
+impl Default for ExpandState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// `IFS`, in the three forms field splitting wants it.
 ///
@@ -387,15 +350,15 @@ pub struct IfsCache {
     /// IFS separator.
     ncifs: BString,
     /// Length of the first multibyte character, or 0.
-    ifsmb0len: size_t,
+    ifsmb0len: usize,
     /// The wide-character form of `IFS`, built by `changeifs`.
     ///
-    /// The C is a `ckmalloc`'d, zero-filled, NUL-terminated `wchar_t *`
+    /// The C is a `ckmalloc`'d, zero-filled, NUL-terminated `i32 *`
     /// that is NULL whenever `IFS` holds no byte with the high bit set.
     /// Empty **is** NULL here: the C only allocates under `mb != 0`,
     /// which needs a high-bit byte, so the buffer is never zero-length
     /// when it exists.
-    wcifs: Vec<wchar_t>,
+    wcifs: Vec<i32>,
 }
 
 impl IfsCache {
@@ -412,11 +375,9 @@ impl IfsCache {
     }
 }
 
-/// `&mut ifsregions`, without ever naming a reference to the `static mut`
-/// twice at once.
 #[inline]
-unsafe fn ifsr() -> &'static mut Vec<ifsregion> {
-    &mut *ptr::addr_of_mut!(ifsregions)
+fn ifsr(state: &mut ExpandState) -> &mut Vec<ifsregion> {
+    &mut state.ifs_regions
 }
 
 
@@ -425,8 +386,8 @@ unsafe fn ifsr() -> &'static mut Vec<ifsregion> {
 /// throwing away whatever the previous expansion left in the head — is a
 /// `clear`.
 #[inline]
-unsafe fn expargl() -> &'static mut Vec<strlist> {
-    &mut (*ptr::addr_of_mut!(exparg)).list
+fn expargl(state: &mut ExpandState) -> &mut Vec<strlist> {
+    &mut state.args
 }
 
 /// `wcschr(wcifs, wc) != NULL`.
@@ -437,7 +398,7 @@ unsafe fn expargl() -> &'static mut Vec<strlist> {
 /// straight from the byte under the cursor, so a NUL inside an IFS region
 /// takes the `isifs` branch in the C and has to here too.
 #[inline]
-fn wcifs_chr(v: &[wchar_t], wc: wchar_t) -> bool {
+fn wcifs_chr(v: &[i32], wc: i32) -> bool {
     for &c in v {
         if c == wc {
             return true;
@@ -453,11 +414,9 @@ fn wcifs_chr(v: &[wchar_t], wc: wchar_t) -> bool {
 // The expansion buffer.  See [`expbuf`].
 // ---------------------------------------------------------------------
 
-/// `&mut expbuf`, without ever naming a reference to the `static mut`
-/// twice at once.
 #[inline]
-unsafe fn expb() -> &'static mut BString {
-    &mut *ptr::addr_of_mut!(expbuf)
+fn expb(state: &mut ExpandState) -> &mut BString {
+    &mut state.buffer
 }
 
 /// The C's `stackblock()` and `expdest` as pointers, and
@@ -472,8 +431,8 @@ unsafe fn expb() -> &'static mut BString {
 
 /// `expdest - stackblock()`.
 #[inline]
-unsafe fn expdest_off() -> c_int {
-    expb().len() as c_int
+fn expdest_off(state: &mut ExpandState) -> c_int {
+    expb(state).len() as c_int
 }
 
 /// `p = grabstackstr(expdest)`.
@@ -487,8 +446,8 @@ unsafe fn expdest_off() -> c_int {
 /// While `strlist` was still a C structure this was a copy into the region,
 /// because the consumers held `char *`.  They hold their own bytes now, so
 /// the copy is gone rather than smaller.
-unsafe fn grabexpdest() -> BString {
-    let b = expb();
+fn grabexpdest(state: &mut ExpandState) -> BString {
+    let b = expb(state);
     /* `argstr` closes the word by masking its terminating marker to 0
      * (`*(q - 1) &= end - 1`), so the buffer is a C string and the
      * `strlen` `ifsbreakup` and `openhere` perform on it stops inside it.
@@ -520,8 +479,8 @@ unsafe fn grabexpdest() -> BString {
 /// last until the next expansion begins.  Nothing between either call and
 /// its read expands — `openhere` only pipes and forks, `expandstr` reads
 /// on the next line.
-pub unsafe fn expansion_result() -> &'static BStr {
-    crate::mystring::cstr_prefix(expb().as_slice())
+pub fn expansion_result(sh: &crate::context::Shell) -> &BStr {
+    crate::mystring::cstr_prefix(sh.expand.buffer.as_slice())
 }
 
 // ---------------------------------------------------------------------
@@ -648,19 +607,19 @@ fn CCTL() -> c_char {
 
 /// `options.h`: `#define fflag optlist[1]`
 #[inline]
-unsafe fn fflag(sh: &crate::context::Shell) -> c_char {
+fn fflag(sh: &crate::context::Shell) -> c_char {
     sh.options.flag(1)
 }
 
 /// `options.h`: `#define uflag optlist[14]`
 #[inline]
-unsafe fn uflag(sh: &crate::context::Shell) -> c_char {
+fn uflag(sh: &crate::context::Shell) -> c_char {
     sh.options.flag(14)
 }
 
 /// `error.h`: `#define int_pending() intpending`
 #[inline]
-unsafe fn int_pending() -> c_int {
+fn int_pending() -> c_int {
     crate::error::int_pending()
 }
 
@@ -688,21 +647,6 @@ const _: () = assert!(EXP_QUOTED >> CHAR_BIT == EXP_FULL);
 
 // [spec:dash:def:expand.preglob-fn]
 // [spec:dash:sem:expand.preglob-fn]
-pub(crate) unsafe fn preglob(
-    pattern: *const c_char,
-    mut flag: c_int,
-    heap: Option<&mut Vec<u8>>,
-) -> *mut c_char {
-    if FNMATCH_IS_ENABLED {
-        if flag == 0 {
-            flag = RMESCAPE_GROW;
-        }
-        flag |= RMESCAPE_ALLOC;
-    }
-    flag |= RMESCAPE_GLOB;
-    _rmescapes(pattern as *mut c_char, flag, heap)
-}
-
 // [spec:dash:def:expand.mesclen-fn]
 // [spec:dash:sem:expand.mesclen-fn]
 // [spec:dash:def:expand.esclen-fn]
@@ -718,8 +662,8 @@ pub(crate) unsafe fn preglob(
 /// gone: `esclen` had a single caller, `scanright`, which walks the
 /// expansion buffer by offset now and passes the subslice from `startp`,
 /// so the floor `esclen` existed to carry is the slice's own start.
-fn mesclen_bytes(s: &[u8], mut at: usize, mesc: c_char) -> size_t {
-    let mut esc: size_t = 0;
+fn mesclen_bytes(s: &[u8], mut at: usize, mesc: c_char) -> usize {
+    let mut esc: usize = 0;
 
     while at > 0 && s[at - 1] as c_char == mesc {
         at -= 1;
@@ -772,20 +716,6 @@ pub(crate) fn mbnext_bytes(p: &[u8]) -> c_uint {
 
 // [spec:dash:def:expand.getpwhome-fn]
 // [spec:dash:sem:expand.getpwhome-fn]
-#[inline]
-unsafe fn getpwhome(name: *const c_char) -> *const c_char {
-    /* #ifdef HAVE_GETPWNAM */
-    let pw: *mut libc::passwd = libc::getpwnam(name);
-    if !pw.is_null() {
-        (*pw).pw_dir
-    } else {
-        ptr::null()
-    }
-    /* #else
-     *	return 0;
-     * #endif */
-}
-
 /*
  * Perform variable substitution and command substitution on an argument,
  * placing the resulting list of arguments in arglist.  If EXP_FULL is true,
@@ -795,36 +725,50 @@ unsafe fn getpwhome(name: *const c_char) -> *const c_char {
 
 // [spec:dash:def:expand.expandarg-fn]
 // [spec:dash:sem:expand.expandarg-fn]
-pub unsafe fn expandarg(
+pub fn expandarg(
     sh: &mut crate::context::Shell,
+    arg: &crate::nodes::Node,
+    arglist: Option<&mut arglist>,
+    flag: c_int,
+) -> Result<(), Error> {
+    let mut state = mem::take(&mut sh.expand);
+    state.backquotes.clone_from(&arg.narg().backquote);
+    state.next_backquote = 0;
+    let result = expandarg_inner(sh, &mut state, arg, arglist, flag);
+    sh.expand = state;
+    result
+}
+
+fn expandarg_inner(
+    sh: &mut crate::context::Shell,
+    state: &mut ExpandState,
     arg: &crate::nodes::Node,
     arglist: Option<&mut arglist>,
     flag: c_int,
 ) -> Result<(), Error> {
     let mut p: BString;
 
-    argbackq = arg.narg().backquote.as_slice();
     /* STARTSTACKSTR(expdest) */
-    expb().clear();
+    expb(state).clear();
     /* The `?`s in this function return past the `ifsfree()` below, exactly
      * as the longjmp they replace jumped past it. The IFS regions are
      * reclaimed by the catch frame instead — `restore_handler_expandarg`'s
      * swallowing arm and `init::exitreset` both call `ifsfree`, which is
      * docs/errors-are-values.md 2.2's mark-keyed cleanup working as
      * designed. Adding one here would free them twice. */
-    argstr(sh, arg.narg().text.as_cbytes(), 0, flag)?;
+    argstr(sh, state, arg.narg().text.as_cbytes(), 0, flag)?;
     'out: {
         let Some(arglist) = arglist else {
             /* here document expanded — the caller reads the buffer back
              * through `expansion_result()`. */
             break 'out;
         };
-        p = grabexpdest();
+        p = grabexpdest(state);
         /* `exparg.lastp = &exparg.list`.  It re-points the tail at the
          * head, which discards whatever the previous call left there —
          * reachable only when that call unwound between building the list
          * and splicing it into its caller's. */
-        expargl().clear();
+        expargl(state).clear();
         /*
          * TODO - EXP_REDIR
          */
@@ -835,7 +779,13 @@ pub unsafe fn expandarg(
              * offsets into the grabbed block, which is why the block had to
              * outlive them and why the enclosing mark had to be the thing
              * that freed it. */
-            ifsbreakup(sh, &mut p, -1, &mut *ptr::addr_of_mut!(exparg));
+            ifsbreakup_regions(
+                sh,
+                &state.ifs_regions,
+                &mut p,
+                -1,
+                &mut state.args,
+            );
             /* `*exparg.lastp = NULL; exparg.lastp = &exparg.list;` —
              * terminate the fields `ifsbreakup` built, then re-point the
              * tail at the head so `expandmeta` rebuilds the list while
@@ -843,20 +793,20 @@ pub unsafe fn expandarg(
              * overwrites the head, which is why the C can read `str->next`
              * before the write reaches it; taking the `Vec` is both
              * halves. */
-            let words = mem::take(expargl());
-            expandmeta(sh, words)?;
+            let words = mem::take(expargl(state));
+            expandmeta(sh, state, words)?;
         } else {
-            expargl().push(strlist { text: p });
+            expargl(state).push(strlist { text: p });
         }
         /* `if (exparg.list) { *arglist->lastp = exparg.list; arglist->lastp
          * = exparg.lastp; }`.  The C guards on emptiness because splicing a
          * NULL head would leave the caller's tail pointing at `exparg`'s
          * own head; appending an empty `Vec` is already a no-op. */
-        arglist.list.append(expargl());
+        arglist.list.append(expargl(state));
     }
 
     /* out: */
-    ifsfree();
+    ifsfree(state);
     Ok(())
 }
 
@@ -868,8 +818,9 @@ pub unsafe fn expandarg(
 
 // [spec:dash:def:expand.argstr-fn]
 // [spec:dash:sem:expand.argstr-fn]
-unsafe fn argstr(
+fn argstr(
     sh: &mut crate::context::Shell,
+    state: &mut ExpandState,
     text: &[u8],
     mut p: usize,
     mut flag: c_int,
@@ -894,7 +845,7 @@ unsafe fn argstr(
     let mut c: c_int;
     let breakall: c_int = ((flag & (EXP_WORD | EXP_QUOTED)) == EXP_WORD) as c_int;
     let mut inquotes: c_int;
-    let mut length: size_t;
+    let mut length: usize;
     let mut startloc: c_int;
 
     reject += if (flag & EXP_VARTILDE2) != 0 { 1 } else { 0 };
@@ -915,11 +866,11 @@ unsafe fn argstr(
             /* tilde: */
             do_tilde = false;
             if byte_at(text, p) == C_TILDE {
-                p = exptilde(sh, text, p, flag);
+                p = exptilde(sh, state, text, p, flag);
             }
         }
         /* start: */
-        startloc = expdest_off();
+        startloc = expdest_off(state);
         loop {
             let ml: c_uint;
             let mb: c_uint;
@@ -959,7 +910,7 @@ unsafe fn argstr(
                  * text and never the expansion buffer, which is what the
                  * `copy_nonoverlapping` inside the old accessor already
                  * assumed and what makes this an append. */
-                let b = expb();
+                let b = expb(state);
                 b.extend_from_slice(&text[p..p + length]);
                 q = b.len();
                 /* `*(q - 1) &= end - 1` */
@@ -972,7 +923,7 @@ unsafe fn argstr(
                 b.truncate(q - (if (flag & EXP_WORD) != 0 { end } else { 0 }) as usize);
                 newloc = q as c_int - end;
                 if breakall != 0 && inquotes == 0 && newloc > startloc {
-                    recordregion(startloc, newloc, 0);
+                    recordregion(state, startloc, newloc, 0);
                 }
                 startloc = newloc;
             }
@@ -1009,7 +960,7 @@ unsafe fn argstr(
                     if inquotes == 0
                         && crate::mystring::cstr_prefix(slice_from(text, p)) == &dolat[1..6]
                     {
-                        p = evalvar(sh, text, p + 1, flag | EXP_QUOTED)? + 1;
+                        p = evalvar(sh, state, text, p + 1, flag | EXP_QUOTED)? + 1;
                         continue 'start; /* goto start */
                     }
                     inquotes ^= EXP_QUOTED;
@@ -1026,7 +977,7 @@ unsafe fn argstr(
                     mb = mbnext_bytes(slice_from(text, p));
                     ml = (mb >> 8) - 2;
                     if (flag & (QUOTES_ESC | EXP_MBCHAR)) != 0 {
-                        length = ((mb >> 8) + (mb & 0xff)) as size_t;
+                        length = ((mb >> 8) + (mb & 0xff)) as usize;
                         if (c as c_char) == CTLESC {
                             startloc += length as c_int;
                         }
@@ -1036,7 +987,7 @@ unsafe fn argstr(
                         }
                         p += (mb & 0xff) as usize;
                         if (flag & EXP_DISCARD) == 0 {
-                            expb().extend_from_slice(&text[p..p + ml as usize]);
+                            expb(state).extend_from_slice(&text[p..p + ml as usize]);
                         }
                         p += (mb >> 8) as usize;
                     }
@@ -1052,15 +1003,21 @@ unsafe fn argstr(
                     }
                 }
                 CTLVAR => {
-                    p = evalvar(sh, text, p, flag | inquotes)?;
+                    p = evalvar(sh, state, text, p, flag | inquotes)?;
                     continue 'start; /* goto start */
                 }
                 CTLBACKQ => {
-                    expbackq(sh, (&*argbackq)[0].as_ref(), flag | inquotes)?;
+                    let at = state.next_backquote;
+                    state.next_backquote += 1;
+                    let cmd = state
+                        .backquotes
+                        .get_mut(at)
+                        .and_then(Option::take);
+                    expbackq(sh, state, cmd.as_ref(), flag | inquotes)?;
                     continue 'start; /* goto start */
                 }
                 CTLARI => {
-                    p = expari(sh, text, p, flag | inquotes)?;
+                    p = expari(sh, state, text, p, flag | inquotes)?;
                     continue 'start; /* goto start */
                 }
                 _ => {}
@@ -1072,15 +1029,15 @@ unsafe fn argstr(
 
 // [spec:dash:def:expand.exptilde-fn]
 // [spec:dash:sem:expand.exptilde-fn]
-unsafe fn exptilde(
+fn exptilde(
     sh: &mut crate::context::Shell,
+    state: &mut ExpandState,
     text: &[u8],
     startp: usize,
     flag: c_int,
 ) -> usize {
     let mut c: c_char;
     let name: usize;
-    let home: *const c_char;
     let mut p: usize;
 
     p = startp;
@@ -1115,20 +1072,20 @@ unsafe fn exptilde(
          * borrowed and `&[u8]` now, so the name is copied out instead: it
          * is at most a login name long, it happens once per tilde, and it
          * is the last write this cluster made to the text it is reading. */
-        let mut namebuf: Vec<u8> = text[name..p.min(text.len())].to_vec();
-        namebuf.push(0);
-        let namep = namebuf.as_ptr() as *const c_char;
+        let namebuf: &[u8] = &text[name..p.min(text.len())];
 
-        if namebuf.len() == 1 {
-            home = crate::var::lookupvar(sh, crate::mystring::homestr.as_ptr());
+        if namebuf.is_empty() {
+            let Some(home) = crate::var::lookup_bytes(sh, BStr::new(b"HOME")) else {
+                return startp;
+            };
+            memtodest(&home, flag | EXP_QUOTED, expb(state));
         } else {
-            home = getpwhome(namep);
+            let Some(home) = nsh_platform::named_user_home(namebuf) else {
+                /* lose: */
+                return startp;
+            };
+            memtodest(home.as_bytes(), flag | EXP_QUOTED, expb(state));
         }
-        if home.is_null() {
-            /* lose: */
-            return startp;
-        }
-        strtodest(home, flag | EXP_QUOTED, expb());
     }
     /* out: */
     p
@@ -1136,40 +1093,35 @@ unsafe fn exptilde(
 
 // [spec:dash:def:expand.removerecordregions-fn]
 // [spec:dash:sem:expand.removerecordregions-fn]
-pub unsafe fn removerecordregions(endoff: c_int) {
+fn removerecordregions(state: &mut ExpandState, endoff: c_int) {
     /* `ifslastp == NULL` */
-    if ifsr().is_empty() {
+    if ifsr(state).is_empty() {
         return;
     }
 
     /* `ifsfirst` is index 0; `ifslastp` is the index the walk below
-     * settles on, and dropping the tail is `truncate`.  The C frees one
-     * node per INTOFF/INTON pair, so the loops do too. */
-    if ifsr()[0].endoff > endoff {
-        while ifsr().len() > 1 {
-            crate::error::INTOFF();
-            ifsr().pop();
-            crate::error::INTON();
+     * settles on, and dropping the tail is `truncate`. */
+    if ifsr(state)[0].endoff > endoff {
+        while ifsr(state).len() > 1 {
+            ifsr(state).pop();
         }
-        if ifsr()[0].begoff > endoff {
-            ifsr().clear();
+        if ifsr(state)[0].begoff > endoff {
+            ifsr(state).clear();
         } else {
-            ifsr()[0].endoff = endoff;
+            ifsr(state)[0].endoff = endoff;
         }
         return;
     }
 
     let mut last: usize = 0;
-    while last + 1 < ifsr().len() && ifsr()[last + 1].begoff < endoff {
+    while last + 1 < ifsr(state).len() && ifsr(state)[last + 1].begoff < endoff {
         last += 1;
     }
-    while ifsr().len() > last + 1 {
-        crate::error::INTOFF();
-        ifsr().pop();
-        crate::error::INTON();
+    while ifsr(state).len() > last + 1 {
+        ifsr(state).pop();
     }
-    if ifsr()[last].endoff > endoff {
-        ifsr()[last].endoff = endoff;
+    if ifsr(state)[last].endoff > endoff {
+        ifsr(state)[last].endoff = endoff;
     }
 }
 
@@ -1180,21 +1132,22 @@ pub unsafe fn removerecordregions(endoff: c_int) {
 
 // [spec:dash:def:expand.expari-fn]
 // [spec:dash:sem:expand.expari-fn]
-unsafe fn expari(
+fn expari(
     sh: &mut crate::context::Shell,
+    state: &mut ExpandState,
     text: &[u8],
     start: usize,
     flag: c_int,
 ) -> Result<usize, Error> {
     let begoff: c_int;
     let len: c_int;
-    let result: intmax_t;
+    let result: i64;
     /* The C's `p` doubles as a scratch `stackblock()` before it becomes the
      * return value; only the second use survives. */
     let p: usize;
 
-    begoff = expdest_off();
-    p = argstr(sh, text, start, flag & EXP_DISCARD)?;
+    begoff = expdest_off(state);
+    p = argstr(sh, state, text, start, flag & EXP_DISCARD)?;
 
     'out: {
         if (flag & EXP_DISCARD) != 0 {
@@ -1202,40 +1155,24 @@ unsafe fn expari(
         }
 
         /* `start = stackblock() + begoff; STADJUST(start - expdest, expdest)`
-         * winds the cursor back over the arithmetic text, which then stays
-         * where it is and is read by `arith` from *past* the cursor.
-         *
-         * The C protects it with `pushstackmark(&sm, endoff)`, which does
-         * two jobs: `endoff` is how much of the region the half-built word
-         * occupies, and grabbing that much keeps `arith`'s own `stalloc`s
-         * off it, while the save/restore releases them afterwards.  Neither
-         * job has a customer left.
-         *
-         * The reservation is replaced by an argument rather than a
-         * mechanism: `arith` (and `yylex` under it) do not touch this
-         * buffer, so the bytes above the truncated length cannot be moved
-         * or overwritten while `arith` reads them.  `Vec::reserve` would
-         * move them — it copies only the first `len` bytes — but nothing on
-         * this path reserves.  And what the restore released,
-         * `arith_yylex`'s variable names, is a list `arith` clears on
-         * entry. */
-        expb().truncate(begoff as usize);
-        /* The C reuses `start` for this; it is a position in the
-         * *expansion buffer*, not in the word, and the two stopped being
-         * the same kind of thing when the word became a slice. */
-        let arith_at = expb()[begoff as usize..].as_ptr() as *mut c_char;
+         * made the C parser read the expression through a pointer beyond
+         * the stack allocator's restored cursor.  The expression has value
+         * semantics now: copy the counted bytes before rewinding the output
+         * buffer, then lend that slice to the arithmetic parser. */
+        let arithmetic = crate::mystring::cstr_prefix(&expb(state)[begoff as usize..]).to_owned();
+        expb(state).truncate(begoff as usize);
 
-        removerecordregions(begoff);
+        removerecordregions(state, begoff);
 
         /* `arith` returns its diagnostic now instead of raising it, and as
          * of this commit so does `expari`, so the bridge that stood here is
          * gone and the value travels. */
-        result = crate::arith_yacc::arith(sh, arith_at)?;
+        result = crate::arith_yacc::arith(sh, arithmetic.as_bstr())?;
 
-        len = cvtnum(result, flag, expb()) as c_int;
+        len = cvtnum(result, flag, expb(state)) as c_int;
 
         if (flag & EXP_QUOTED) == 0 {
-            recordregion(begoff, begoff + len, 0);
+            recordregion(state, begoff, begoff + len, 0);
         }
     }
 
@@ -1249,12 +1186,13 @@ unsafe fn expari(
 
 // [spec:dash:def:expand.expbackq-fn]
 // [spec:dash:sem:expand.expbackq-fn]
-unsafe fn expbackq(
+fn expbackq(
     sh: &mut crate::context::Shell,
+    state: &mut ExpandState,
     cmd: Option<&crate::nodes::Node>,
     flag: c_int,
 ) -> Result<(), Error> {
-    let mut in_: crate::eval::backcmd = mem::zeroed();
+    let mut in_ = crate::eval::backcmd { fd: -1, jp: None };
     let mut i: c_int;
     /* `char buf[128]`, as bytes: it is only ever handed to `read` and to
      * `memtodest`, and both want the bytes rather than the sign. */
@@ -1267,8 +1205,8 @@ unsafe fn expbackq(
             break 'out;
         }
 
-        crate::error::INTOFF();
-        startloc = expdest_off();
+        crate::error::INTOFF(sh);
+        startloc = expdest_off(state);
         /* `pushstackmark(&smark, startloc)`: the length kept `makejob`'s
          * region allocations off the half-built word, and the save/restore
          * released them afterwards.  The word is not in the region and
@@ -1278,43 +1216,28 @@ unsafe fn expbackq(
          * and its `INTON`, which is where the longjmp went too — it skipped
          * the same `INTON`. docs/errors-are-values.md 2.4: do not pair
          * them. */
-        crate::eval::evalbackcmd(sh, cmd, &mut in_ as *mut crate::eval::backcmd)?;
+        crate::eval::evalbackcmd(sh, cmd, &mut in_)?;
 
-        /* `backcmd.buf` is ash's read-ahead buffer.  `evalbackcmd` writes
-         * NULL to it and to `nleft` and never writes either again, so the
-         * first `memtodest` below is always the one `goto read` skips and
-         * the C's closing `if (in.buf) ckfree(in.buf)` is unreachable.
-         * There is no allocation on this path to own, and the free is
-         * asserted away rather than transcribed. */
-        debug_assert!(
-            in_.buf.is_null() && in_.nleft == 0,
-            "expbackq: evalbackcmd left a read-ahead buffer nothing frees"
-        );
-
-        i = in_.nleft;
-        /* `if (i == 0) goto read;` — skips the first memtodest only.  The
-         * C's `p = in.buf` is gone with it: the assertion above says that
-         * pointer is always NULL, so the only source this loop ever
-         * encodes is `buf`, and after the first pass `p` was `buf`
-         * anyway. */
-        let mut jump_read = i == 0;
+        /* The C could return bytes already buffered in `backcmd`. This
+         * implementation never did: `evalbackcmd` always returned a pipe
+         * with an empty read-ahead area. With those dead fields removed,
+         * the loop starts directly at the `read:` label. */
         loop {
-            if !jump_read {
-                memtodest(&buf[..i as usize], flag, expb());
-            }
-            jump_read = false;
             /* read: */
             if in_.fd < 0 {
                 break;
             }
             loop {
-                i = libc::read(
-                    in_.fd,
-                    buf.as_mut_ptr() as *mut c_void,
-                    mem::size_of_val(&buf),
-                ) as c_int;
-                if !(i < 0 && crate::system::errno() == libc::EINTR) {
-                    break;
+                match nsh_platform::read_once(in_.fd, &mut buf) {
+                    Ok(count) => {
+                        i = count as c_int;
+                        break;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(_) => {
+                        i = -1;
+                        break;
+                    }
                 }
                 /* One of the three EINTR sites the C retries blindly.
                  * Reading a command substitution's output can block for
@@ -1328,32 +1251,33 @@ unsafe fn expbackq(
             if i <= 0 {
                 break;
             }
+            memtodest(&buf[..i as usize], flag, expb(state));
         }
 
         if in_.fd >= 0 {
-            libc::close(in_.fd);
+            let _ = nsh_platform::close_fd(in_.fd);
             sh.eval.back_exitstatus = crate::jobs::waitforjob(sh, in_.jp)?;
         }
-        crate::error::INTON();
+        crate::error::INTON(sh);
 
         /* Eat all trailing newlines.  The cursor is the length, so the
          * walk is over the buffer's own bytes and `STADJUST` is a
          * `truncate`. */
-        dest = expb().len();
-        while dest > startloc as usize && expb()[dest - 1] == C_NL as u8 {
+        dest = expb(state).len();
+        while dest > startloc as usize && expb(state)[dest - 1] == C_NL as u8 {
             /* STUNPUTC(dest) */
             dest -= 1;
         }
-        expb().truncate(dest);
+        expb(state).truncate(dest);
 
         if (flag & EXP_QUOTED) == 0 {
-            recordregion(startloc, expdest_off(), 0);
+            let endloc = expdest_off(state);
+            recordregion(state, startloc, endloc, 0);
         }
         /* TRACE(("evalbackq: size=%d: \"%.*s\"\n", ...)); */
     }
 
     /* out: */
-    argbackq = (&*argbackq)[1..].as_ref() as *const [Option<crate::nodes::Node>];
     Ok(())
 }
 
@@ -1439,7 +1363,7 @@ fn scanleft(b: &[u8], a: &Scan) -> Option<usize> {
 // [spec:dash:def:expand.scanright-fn]
 // [spec:dash:sem:expand.scanright-fn]
 fn scanright(b: &[u8], a: &Scan) -> Option<usize> {
-    let mut esc: size_t = 0;
+    let mut esc: usize = 0;
     /* Signed, because the C's `loc--` walks off the bottom of the value on
      * purpose and `if (loc < startp) break` is how it notices.  `byte_at_i`
      * answers 0 for a negative index, so the two `*loc` reads inside the
@@ -1472,7 +1396,7 @@ fn scanright(b: &[u8], a: &Scan) -> Option<usize> {
                 break 'forloop;
             }
             /* if (!esc--) esc = esclen(startp, loc); */
-            let was: size_t = esc;
+            let was: usize = esc;
             esc = esc.wrapping_sub(1);
             if was == 0 {
                 esc = mesclen_bytes(&b[a.startp..], loc as usize - a.startp, CTLESC);
@@ -1504,8 +1428,9 @@ fn scanright(b: &[u8], a: &Scan) -> Option<usize> {
 
 // [spec:dash:def:expand.subevalvar-fn]
 // [spec:dash:sem:expand.subevalvar-fn]
-unsafe fn subevalvar(
+fn subevalvar(
     sh: &mut crate::context::Shell,
+    state: &mut ExpandState,
     text: &[u8],
     start: usize,
     /* The C's `char *str`, which is the variable's *name* in the word on
@@ -1540,6 +1465,7 @@ unsafe fn subevalvar(
 
     p = argstr(
         sh,
+        state,
         text,
         start,
         (flag & EXP_DISCARD) | EXP_TILDE | (if str.is_some() { 0 } else { EXP_CASE }),
@@ -1553,10 +1479,12 @@ unsafe fn subevalvar(
     'out: {
         match subtype {
             VSASSIGN => {
-                /* The bridge that stood here retires with this commit. */
-                let name = text[str.expect("VSASSIGN carries the variable's name")..].as_ptr()
-                    as *const c_char;
-                crate::var::setvar(sh, name, expb()[startp..].as_ptr() as *const c_char, 0)?;
+                let name = crate::mystring::cstr_prefix(
+                    &text[str.expect("VSASSIGN carries the variable's name")..],
+                );
+                let name = crate::var::varname(name);
+                let value = crate::mystring::cstr_prefix(&expb(state)[startp..]);
+                crate::var::set_bytes(sh, name, Some(value), 0)?;
 
                 loc = startp;
                 break 'out;
@@ -1568,7 +1496,7 @@ unsafe fn subevalvar(
                  * before — docs/errors-are-values.md 0.2 is the bug that
                  * happens when one of these is missed, and `Error` is
                  * `#[must_use]` so the compiler now names it. */
-                let umsg = crate::mystring::cstr_prefix(&expb()[startp..]);
+                let umsg = crate::mystring::cstr_prefix(&expb(state)[startp..]);
                 let var = str.expect("VSQUESTION carries the variable's name");
                 return Err(varunset(sh, text, start, var, Some(umsg), varflags));
             }
@@ -1586,10 +1514,8 @@ unsafe fn subevalvar(
          * `FNMATCH_IS_ENABLED` is 0, and into the buffer above the cursor
          * when it is not, so its result is a position in this buffer
          * either way. */
-        pat = {
-            let base = expb().as_mut_ptr() as *mut c_char;
-            preglob(base.add(rmescend), 0, None).offset_from(base) as usize
-        };
+        rmescapes_buffer(&mut expb(state)[rmescend..], RMESCAPE_GLOB);
+        pat = rmescend;
 
         rmesc = startp;
         if FNMATCH_IS_ENABLED || quotes == 0 {
@@ -1599,9 +1525,9 @@ unsafe fn subevalvar(
              * three `stackblock()` re-reads on the lines after this call
              * were for, and they are gone: an offset survives a growth,
              * which is why this hands over one and gets one back. */
-            rmesc = rmescapes_grow(expb(), startp, RMESCAPE_ALLOC | RMESCAPE_GROW);
+            rmesc = rmescapes_grow(expb(state), startp, RMESCAPE_ALLOC | RMESCAPE_GROW);
             if rmesc != startp {
-                rmescend = expb().len();
+                rmescend = expb(state).len();
             }
         }
         rmescend -= 1;
@@ -1617,7 +1543,7 @@ unsafe fn subevalvar(
 
         endp = strloc as usize - 1;
         let found = scan(
-            expb(),
+            expb(state),
             &Scan {
                 startp,
                 endp,
@@ -1655,7 +1581,7 @@ unsafe fn subevalvar(
         /* `memmove(startp, rmesc, rmescend - rmesc)` — the two ranges are
          * in one buffer and may overlap, which `copy_within` already
          * knows. */
-        expb().copy_within(rmesc..rmescend, startp);
+        expb(state).copy_within(rmesc..rmescend, startp);
         loc = startp + (rmescend - rmesc);
     }
 
@@ -1669,14 +1595,14 @@ unsafe fn subevalvar(
      * the word's own terminator over it (`*(q - 1) &= end - 1` forces the
      * closing NUL, CTLENDVAR or CTLENDARI to 0).  `amount` was only ever
      * `loc - expdest`. */
-    let b = expb();
+    let b = expb(state);
     debug_assert!(loc <= b.len());
     b.truncate(loc);
     b.push(0);
     b.pop();
 
     /* Remove any recorded regions beyond start of variable */
-    removerecordregions(startloc);
+    removerecordregions(state, startloc);
 
     Ok(p)
 }
@@ -1688,8 +1614,9 @@ unsafe fn subevalvar(
 
 // [spec:dash:def:expand.evalvar-fn]
 // [spec:dash:sem:expand.evalvar-fn]
-unsafe fn evalvar(
+fn evalvar(
     sh: &mut crate::context::Shell,
+    state: &mut ExpandState,
     text: &[u8],
     mut p: usize,
     mut flag: c_int,
@@ -1699,7 +1626,7 @@ unsafe fn evalvar(
     let var: usize;
     let patloc: c_int;
     let startloc: c_int;
-    let mut varlen: ssize_t;
+    let mut varlen: isize;
     let mut discard: c_int;
     let mut quoted: c_int;
     let mbchar: c_int;
@@ -1710,7 +1637,7 @@ unsafe fn evalvar(
 
     quoted = flag & EXP_QUOTED;
     var = p;
-    startloc = expdest_off();
+    startloc = expdest_off(state);
     /* The parser always writes the `=` that ends the variable name, and
      * the C dereferences `strchr`'s result without checking. */
     p += crate::mystring::cstr_prefix(slice_from(text, p))
@@ -1727,11 +1654,13 @@ unsafe fn evalvar(
     let mut really_record = false;
 
     'again: loop {
-        /* `varvalue` still takes the name as a `char *`: it reaches
-         * `lookupvar` and `atoi`, which measure with `strlen` and `strtol`.
-         * The name is in the word and the word outlives the call. */
-        let namep = text[var..].as_ptr() as *mut c_char;
-        varlen = varvalue(sh, namep, varflags, (flag | mbchar) as c_uint)?;
+        varlen = varvalue(
+            sh,
+            state,
+            BStr::new(&text[var..p]),
+            varflags,
+            (flag | mbchar) as c_uint,
+        )?;
         if (varflags & VSNUL) != 0 {
             varlen -= 1;
         }
@@ -1745,13 +1674,20 @@ unsafe fn evalvar(
                     /* fall through */
                 }
 
-                p = argstr(sh, text, p, flag | EXP_TILDE | EXP_WORD | (discard ^ EXP_DISCARD))?;
+                p = argstr(
+                    sh,
+                    state,
+                    text,
+                    p,
+                    flag | EXP_TILDE | EXP_WORD | (discard ^ EXP_DISCARD),
+                )?;
                 break 'again; /* goto record */
             }
 
             VSASSIGN | VSQUESTION => {
                 p = subevalvar(
                     sh,
+                    state,
                     text,
                     p,
                     Some(var),
@@ -1783,9 +1719,9 @@ unsafe fn evalvar(
                 return Ok(p);
             }
             cvtnum(
-                (if varlen > 0 { varlen } else { 0 }) as intmax_t,
+                (if varlen > 0 { varlen } else { 0 }) as i64,
                 flag,
-                expb(),
+                expb(state),
             );
             really_record = true;
             break 'again; /* goto really_record */
@@ -1812,11 +1748,13 @@ unsafe fn evalvar(
              * right after it
              */
             /* STPUTC('\0', expdest) */
-            expb().push(0);
+            expb(state).push(0);
         }
 
-        patloc = expdest_off();
-        p = subevalvar(sh, text, p, None, patloc, startloc, varflags, flag)?;
+        patloc = expdest_off(state);
+        p = subevalvar(
+            sh, state, text, p, None, patloc, startloc, varflags, flag,
+        )?;
         break 'again;
     }
 
@@ -1834,7 +1772,8 @@ unsafe fn evalvar(
             return Ok(p);
         }
     }
-    recordregion(startloc, expdest_off(), quoted);
+    let endloc = expdest_off(state);
+    recordregion(state, startloc, endloc, quoted);
     Ok(p)
 }
 
@@ -1873,18 +1812,17 @@ pub struct mbpair {
 // `zeroed` produces a valid `mbstate_t` rather than an uninitialised one.
 // Two operations move inside the block rather than disappearing.
 fn mbtodest(src: &[u8], at: usize, dst: &mut BString, syntax: SyntaxRef) -> mbpair {
-    let mut mbs: libc::mbstate_t = unsafe { mem::zeroed() };
     let mbp: mbpair;
     /* The C's `q0`: where this call started writing. A length, because
      * the cursor is one. */
     let q0: usize = dst.len();
-    let mut ml: size_t;
+    let mut ml: usize;
 
     /* `p = p - 1` */
     let p: &[u8] = &src[at - 1..];
-    ml = unsafe { mbrlen(p.as_ptr() as *const c_char, p.len(), &mut mbs) };
+    ml = nsh_platform::locale_multibyte_len(p).unwrap_or(usize::MAX);
     'out: {
-        if ml == (0 as size_t).wrapping_sub(2) || ml == (0 as size_t).wrapping_sub(1) || ml < 2 {
+        if ml == (0 as usize).wrapping_sub(2) || ml == (0 as usize).wrapping_sub(1) || ml < 2 {
             chtodest(p[0] as c_char as c_int, syntax, dst);
             ml = 1;
             break 'out;
@@ -1960,9 +1898,9 @@ fn mbtodest(src: &[u8], at: usize, dst: &mut BString, syntax: SyntaxRef) -> mbpa
 // question at once: `p` cannot run past `len`, the eight-byte fast path
 // reads eight bytes that exist, and `mbtodest`'s `p - 1` is an index into
 // something with a start.
-fn memtodest(src: &[u8], flags: c_int, dst: &mut BString) -> size_t {
+fn memtodest(src: &[u8], flags: c_int, dst: &mut BString) -> usize {
     let syntax: SyntaxRef;
-    let mut count: size_t = 0;
+    let mut count: usize = 0;
     let expq: c_int;
     /* The C's `p` and `len` are one cursor over `src` and the number of
      * bytes left; `i` is the first and `src.len() - i` the second. */
@@ -2060,11 +1998,11 @@ fn memtodest(src: &[u8], flags: c_int, dst: &mut BString) -> size_t {
 // [spec:dash:def:expand.strtodest-fn]
 // [spec:dash:sem:expand.strtodest-fn]
 //
-// The C string entry, for the callers that hold one: a variable's value,
-// a positional parameter, `getpwnam`'s home directory.  The `strlen` the C
-// performs is `to_bytes`, which is the same scan and also the length.
-unsafe fn strtodest(p: *const c_char, flags: c_int, dst: &mut BString) -> size_t {
-    memtodest(CStr::from_ptr(p).to_bytes(), flags, dst)
+// The C string entry became a counted byte slice. Every caller now already
+// knows the value's bounds, so the old `strlen` scan and its raw pointer are
+// both redundant.
+fn strtodest(value: &[u8], flags: c_int, dst: &mut BString) -> usize {
+    memtodest(value, flags, dst)
 }
 
 /*
@@ -2073,26 +2011,28 @@ unsafe fn strtodest(p: *const c_char, flags: c_int, dst: &mut BString) -> size_t
 
 // [spec:dash:def:expand.varvalue-fn]
 // [spec:dash:sem:expand.varvalue-fn]
-unsafe fn varvalue(
+fn varvalue(
     sh: &mut crate::context::Shell,
-    name: *mut c_char,
+    state: &mut ExpandState,
+    name: &BStr,
     varflags: c_int,
     mut flags: c_uint,
-) -> Result<ssize_t, Error> {
+) -> Result<isize, Error> {
     let subtype: c_int = varflags & VSTYPE;
-    let mut seplen: size_t;
+    let mut seplen: usize;
     /* The C's `const char *seps` plus its length.  The comment that stood
      * at the assignment below owed a conversion — it said the pointer was
      * safe *because* of where the storage comes from, which is an argument
      * a slice does not have to make.  Both sources are bytes the shell
      * owns for the whole call, so both are slices. */
     let mut seps: &[u8];
-    let mut len: ssize_t = 0;
-    let start: size_t;
+    let mut len: isize = 0;
+    let start: usize;
     let discard: c_int;
-    let mut ap: *mut *mut c_char;
     let mut num: c_int = 0;
-    let mut p: *mut c_char = ptr::null_mut();
+    let mut value: Option<BString> = None;
+    let name = crate::var::varname(name);
+    let name_byte = name.first().copied().unwrap_or_default() as c_char;
 
     discard =
         ((subtype == VSPLUS || subtype == VSLENGTH) as c_int) | ((flags as c_int) & EXP_DISCARD);
@@ -2114,16 +2054,16 @@ unsafe fn varvalue(
      * terminator, and the terminator is what gets written when the
      * separator is a NUL. */
     seps = &[0u8];
-    seplen = ((flags as c_int) & EXP_FULL) as size_t;
-    start = expdest_off() as size_t;
+    seplen = ((flags as c_int) & EXP_FULL) as usize;
+    start = expdest_off(state) as usize;
 
     'sw: {
         'value: {
             'param: {
                 'numvar: {
-                    match *name {
+                    match name_byte {
                         C_DOLLAR => {
-                            num = crate::shellmain::rootpid;
+                            num = sh.root_pid;
                             break 'numvar;
                         }
                         C_QUESTION => {
@@ -2154,14 +2094,14 @@ unsafe fn varvalue(
                                 i -= 1;
                                 let letter = crate::options::optletters[i];
                                 if sh.options.flag(i) != 0 && letter != 0 {
-                                    expb().push(letter as u8);
+                                    expb(state).push(letter as u8);
                                     len += 1;
                                 }
                             }
                             break 'sw;
                         }
                         C_AT | C_STAR => {
-                            if *name == C_AT {
+                            if name_byte == C_AT {
                                 if ((flags as c_int) & (EXP_QUOTED | EXP_FULL))
                                     == (EXP_QUOTED | EXP_FULL)
                                 {
@@ -2181,7 +2121,7 @@ unsafe fn varvalue(
                              * the same as EXP_FULL << CHAR_BIT (which is
                              * the only bit that can be set in sep).
                              */
-                            seplen &= (!(flags >> CHAR_BIT)) as size_t;
+                            seplen &= (!(flags >> CHAR_BIT)) as usize;
                             if seplen == 0 {
                                 seps = sh.ifs.ncifs.as_slice();
                             }
@@ -2190,73 +2130,83 @@ unsafe fn varvalue(
                             break 'param;
                         }
                         c if c >= C_0 && c <= C_9 => {
-                            num = libc::atoi(name);
-                            if num < 0 || num > sh.options.shellparam.nparam {
+                            num = crate::mystring::decimal_digits(name)
+                                .unwrap_or(0)
+                                .min(c_int::MAX as u64) as c_int;
+                            if num > sh.options.shellparam.nparam {
                                 return Ok(-1);
                             }
-                            p = if num != 0 {
-                                *sh.options.shellparam.p().offset(num as isize - 1)
+                            value = if num != 0 {
+                                sh.options
+                                    .shellparam
+                                    .words()
+                                    .get(num as usize - 1)
+                                    .cloned()
                             } else {
-                                crate::options::arg0
+                                sh.options.arg0().map(BStr::to_owned)
                             };
                             break 'value;
                         }
                         _ => {
                             /* default: */
-                            p = crate::var::lookupvar(sh, name);
+                            value = crate::var::lookup_bytes(sh, name);
                             break 'value;
                         }
                     }
                 }
                 /* numvar: */
-                len = cvtnum(num as intmax_t, flags as c_int, expb()) as ssize_t;
+                len = cvtnum(num as i64, flags as c_int, expb(state)) as isize;
                 break 'sw;
             }
             /* param: */
-            ap = sh.options.shellparam.p();
-            if ap.is_null() {
-                return Ok(-1);
-            }
-            p = *ap;
-            if p.is_null() {
+            let params = sh.options.shellparam.words();
+            if params.is_empty() {
                 break 'sw;
             }
-            loop {
-                len += strtodest(p, flags as c_int, expb()) as ssize_t;
-
-                ap = ap.offset(1);
-                p = *ap;
-                if p.is_null() {
-                    break;
+            for (index, param) in params.iter().enumerate() {
+                if index != 0 {
+                    /* `memtodest(seps, seplen, ...)` — the C reads `seplen`
+                     * bytes from `seps`, and the two are set together above:
+                     * one byte of `nullstr`, or `ifsmb0len` bytes of `IFS`,
+                     * which is the length of its first character and so at
+                     * most `IFS`'s own.  Asserted rather than clamped: a
+                     * clamp would turn the C reading past its buffer into a
+                     * shorter separator and say nothing, which is the one
+                     * outcome worse than either. */
+                    debug_assert!(
+                        seplen <= seps.len(),
+                        "varvalue: separator length {seplen} exceeds the {} bytes it names",
+                        seps.len()
+                    );
+                    len += memtodest(
+                        &seps[..seplen],
+                        (flags as c_int) | EXP_KEEPNUL,
+                        expb(state),
+                    ) as isize;
                 }
 
-                /* `memtodest(seps, seplen, ...)` — the C reads `seplen`
-                 * bytes from `seps`, and the two are set together above:
-                 * one byte of `nullstr`, or `ifsmb0len` bytes of `IFS`,
-                 * which is the length of its first character and so at
-                 * most `IFS`'s own.  Asserted rather than clamped: a
-                 * clamp would turn the C reading past its buffer into a
-                 * shorter separator and say nothing, which is the one
-                 * outcome worse than either. */
-                debug_assert!(
-                    seplen <= seps.len(),
-                    "varvalue: separator length {seplen} exceeds the {} bytes it names",
-                    seps.len()
-                );
-                len += memtodest(&seps[..seplen], (flags as c_int) | EXP_KEEPNUL, expb()) as ssize_t;
+                len += strtodest(
+                    crate::mystring::cstr_prefix(param).as_bytes(),
+                    flags as c_int,
+                    expb(state),
+                ) as isize;
             }
             break 'sw;
         }
         /* value: */
-        if p.is_null() {
+        let Some(value) = value.as_ref() else {
             return Ok(-1);
-        }
+        };
 
-        len = strtodest(p, flags as c_int, expb()) as ssize_t;
+        len = strtodest(
+            crate::mystring::cstr_prefix(value).as_bytes(),
+            flags as c_int,
+            expb(state),
+        ) as isize;
     }
 
     if discard != 0 {
-        expb().truncate(start);
+        expb(state).truncate(start);
     }
 
     Ok(len)
@@ -2269,35 +2219,30 @@ unsafe fn varvalue(
 
 // [spec:dash:def:expand.recordregion-fn]
 // [spec:dash:sem:expand.recordregion-fn]
-pub unsafe fn recordregion(start: c_int, end: c_int, nulonly: c_int) {
+pub(crate) fn recordregion(
+    state: &mut ExpandState,
+    start: c_int,
+    end: c_int,
+    nulonly: c_int,
+) {
     let r = ifsregion {
         begoff: start,
         endoff: end,
         nulonly,
     };
 
-    /* Reusing the static head node and `ckmalloc`ing a fresh one are the
-     * same push; what differs is the INTOFF/INTON bracket, which the C
-     * only takes on the allocating path and which is kept because it
-     * fixes where a pending SIGINT is delivered. */
-    if ifsr().is_empty() {
-        ifsr().push(r);
-    } else {
-        crate::error::INTOFF();
-        ifsr().push(r);
-        crate::error::INTON();
-    }
+    ifsr(state).push(r);
 }
 
 // [spec:dash:def:expand.ifsisifs-fn]
 // [spec:dash:sem:expand.ifsisifs-fn]
-unsafe fn ifsisifs(sh: &Shell, s: &[u8], ml: c_uint, nulonly: c_int) -> c_uint {
+fn ifsisifs(sh: &Shell, s: &[u8], ml: c_uint, nulonly: c_int) -> c_uint {
     let mut isdefifs: bool = false;
     let mut isifs: bool = false;
-    let mut wc: wchar_t = byte_at(s, 0) as wchar_t;
+    let mut wc: i32 = byte_at(s, 0) as i32;
     /* C leaves `ifs0` uninitialised; it is only read when `isifs`, which
      * implies one of the branches below assigned it. */
-    let mut ifs0: wchar_t = 0;
+    let mut ifs0: i32 = 0;
 
     /* The C's `ifst->ifs`: `nullstr` when the region is NUL-only, the
      * shell's `IFS` otherwise. Both are NUL-terminated and the terminator
@@ -2314,18 +2259,15 @@ unsafe fn ifsisifs(sh: &Shell, s: &[u8], ml: c_uint, nulonly: c_int) -> c_uint {
     'out: {
         if ifs[0] != 0 && !sh.ifs.wcifs.is_empty() {
             if (wc & 0x80) != 0 {
-                let mut mbst: libc::mbstate_t = mem::zeroed();
-                let mut wc2: wchar_t = 0;
-
                 /* `ml` came from `mbnext` over this same slice, so the
                  * clamp can only bite where the C read past the word's
                  * end -- and a short read fails the `!= ml` test exactly
                  * as a malformed character does.  The same trade
                  * `ccmatch_bytes` records. */
-                let n = (ml as size_t).min(s.len());
-                if mbrtowc(&mut wc2, s.as_ptr() as *const c_char, n, &mut mbst) != ml as size_t {
+                let n = (ml as usize).min(s.len());
+                let Some(wc2) = nsh_platform::locale_decode_exact(&s[..n], ml as usize) else {
                     break 'out;
-                }
+                };
                 wc = wc2;
             }
 
@@ -2337,11 +2279,11 @@ unsafe fn ifsisifs(sh: &Shell, s: &[u8], ml: c_uint, nulonly: c_int) -> c_uint {
              * The counted terminator on `ncifs` keeps that, and it is why
              * the slice is searched whole rather than trimmed. */
             isifs = ifs.contains(&(wc as u8));
-            ifs0 = ifs[0] as wchar_t;
+            ifs0 = ifs[0] as i32;
         }
 
         if isifs {
-            isdefifs = iswspace((if wc != 0 { wc } else { ifs0 }) as wint_t) != 0;
+            isdefifs = nsh_platform::locale_wide_is_space(if wc != 0 { wc } else { ifs0 });
         }
     }
 
@@ -2351,10 +2293,10 @@ unsafe fn ifsisifs(sh: &Shell, s: &[u8], ml: c_uint, nulonly: c_int) -> c_uint {
 
 // [spec:dash:def:expand.ifsbreakup-slow-fn]
 // [spec:dash:sem:expand.ifsbreakup-slow-fn]
-unsafe fn ifsbreakup_slow(
-    sh: &mut Shell,
+fn ifsbreakup_slow(
+    sh: &Shell,
     ifst: &mut ifs_state,
-    arglist: &mut arglist,
+    fields: &mut Vec<strlist>,
     nulonly: c_int,
     string: &mut [u8],
     mut p: usize,
@@ -2445,7 +2387,7 @@ unsafe fn ifsbreakup_slow(
                 return p;
             }
             string[q] = C_NUL as u8;
-            arglist.list.push(strlist::from_cbytes(&string[ifst.start..]));
+            fields.push(strlist::from_cbytes(&string[ifst.start..]));
             ifst.start = p;
             return p;
         }
@@ -2466,11 +2408,12 @@ unsafe fn ifsbreakup_slow(
 
 // [spec:dash:def:expand.ifsbreakup-fn]
 // [spec:dash:sem:expand.ifsbreakup-fn]
-pub unsafe fn ifsbreakup(
-    sh: &mut Shell,
+fn ifsbreakup_regions(
+    sh: &Shell,
+    regions: &[ifsregion],
     string: &mut [u8],
     maxargs: c_int,
-    arglist: &mut arglist,
+    fields: &mut Vec<strlist>,
 ) {
     let mut ifsp: usize;
     /* `struct ifs_state ifst;` and the three assignments the C makes
@@ -2489,7 +2432,7 @@ pub unsafe fn ifsbreakup(
     let mut p: usize;
 
     'add: {
-        if !ifsr().is_empty() {
+        if !regions.is_empty() {
             ifst.ifsspc = 0;
             nulonly = 0;
             /* `realifs = ifsset() ? ncifs : nullstr` is gone with the
@@ -2498,15 +2441,15 @@ pub unsafe fn ifsbreakup(
             ifsp = 0;
             loop {
                 let afternul: c_int;
-                let endoff: c_int = ifsr()[ifsp].endoff;
+                let endoff: c_int = regions[ifsp].endoff;
 
-                p = ifsr()[ifsp].begoff as usize;
+                p = regions[ifsp].begoff as usize;
                 debug_assert!(
                     endoff as usize <= string.len(),
                     "a recorded region ends past the word it was recorded in"
                 );
                 afternul = nulonly;
-                nulonly = ifsr()[ifsp].nulonly;
+                nulonly = regions[ifsp].nulonly;
                 ifst.nulonly = nulonly;
                 ifst.ifsspc = 0;
                 loop {
@@ -2551,11 +2494,11 @@ pub unsafe fn ifsbreakup(
                         break;
                     }
 
-                    p = ifsbreakup_slow(sh, &mut ifst, arglist, afternul | nulonly, string, p);
+                    p = ifsbreakup_slow(sh, &mut ifst, fields, afternul | nulonly, string, p);
                 }
 
                 ifsp += 1;
-                if ifsp >= ifsr().len() {
+                if ifsp >= regions.len() {
                     break;
                 }
             }
@@ -2586,42 +2529,41 @@ pub unsafe fn ifsbreakup(
     }
 
     /* add: */
-    arglist.list.push(strlist::from_cbytes(&string[ifst.start..]));
+    fields.push(strlist::from_cbytes(&string[ifst.start..]));
+}
+
+pub fn ifsbreakup(
+    sh: &Shell,
+    string: &mut [u8],
+    maxargs: c_int,
+    arglist: &mut arglist,
+) {
+    ifsbreakup_regions(
+        sh,
+        &sh.expand.ifs_regions,
+        string,
+        maxargs,
+        &mut arglist.list,
+    );
 }
 
 // [spec:dash:def:expand.ifsfree-fn]
 // [spec:dash:sem:expand.ifsfree-fn]
-pub unsafe fn ifsfree() {
-    /* The C frees the chain behind the static head under one
-     * INTOFF/INTON and then nulls `ifslastp`; the head keeps its stale
-     * contents, which is unobservable because every reader tests
-     * `ifslastp` first.  Emptying the `Vec` is both halves. */
-    if ifsr().len() > 1 {
-        crate::error::INTOFF();
-        ifsr().truncate(1);
-        crate::error::INTON();
+pub(crate) fn ifsfree(state: &mut ExpandState) {
+    /* Emptying the owned region list replaces freeing the C chain and
+     * nulling its tail pointer. */
+    if ifsr(state).len() > 1 {
+        ifsr(state).truncate(1);
     }
-    ifsr().clear();
+    ifsr(state).clear();
 }
 
 // [spec:dash:def:expand.changeifs-fn]
 // [spec:dash:sem:expand.changeifs-fn]
-pub unsafe fn changeifs(sh: &mut crate::context::Shell, mut ifs: *const c_char) {
-    let mut mbs: libc::mbstate_t = mem::zeroed();
-    let mut nwcifs: Vec<wchar_t>;
+pub fn changeifs_bytes(sh: &mut crate::context::Shell, ifs: &BStr) {
     let mut mb: c_uint = 0;
-    let len: size_t;
-    let mut p: *const c_char;
-    let mut ml: size_t;
-
-    if crate::var::ifsset(sh) == 0 {
-        ifs = crate::var::defifs();
-    }
-    /* The hook is still handed a `char *` by the variable table, so the
-     * scan to the terminator happens once, here, and the bytes are the
-     * shell's from then on. The terminator is kept: `ifsisifs` searches
-     * through it. */
-    sh.ifs.ncifs = BString::from(CStr::from_ptr(ifs).to_bytes_with_nul());
+    sh.ifs.ncifs = ifs.to_owned();
+    sh.ifs.ncifs.push(0);
 
     /* memset(ifsmap, 0, sizeof(ifsmap)) */
     sh.ifs.ifsmap = [0; 128];
@@ -2631,7 +2573,7 @@ pub unsafe fn changeifs(sh: &mut crate::context::Shell, mut ifs: *const c_char) 
      * iterating over the counted terminator rather than stopping short of
      * it. `len` is the length without it, which is what the C's counter
      * held. */
-    len = sh.ifs.ncifs.len() - 1;
+    let len = sh.ifs.ncifs.len() - 1;
     for i in 0..sh.ifs.ncifs.len() {
         let c: c_uint = sh.ifs.ncifs[i] as c_uint;
 
@@ -2641,45 +2583,14 @@ pub unsafe fn changeifs(sh: &mut crate::context::Shell, mut ifs: *const c_char) 
         }
     }
 
-    nwcifs = Vec::new();
-
-    sh.ifs.ifsmb0len = (len != 0) as size_t;
-
-    'out: {
-        if mb == 0 {
-            break 'out;
-        }
-
-        ml = mbrlen(sh.ifs.ncifs.as_ptr() as *const c_char, len, &mut mbs);
-        if ml == (0 as size_t).wrapping_sub(2) || ml == (0 as size_t).wrapping_sub(1) {
-            ml = 1;
-        }
-        sh.ifs.ifsmb0len = ml;
-
-        /* The C `ckmalloc`s `len + 1` wide characters and zero-fills them
-         * before `mbsrtowcs` writes a prefix; the zero fill is what makes
-         * the result NUL-terminated when the conversion fails part-way,
-         * and `wcifs_chr` still depends on it. */
-        nwcifs = vec![0 as wchar_t; len + 1];
-
-        /* `mbsrtowcs` advances the cursor it is given, so it needs a
-         * `char *` and gets one into the shell's own copy rather than
-         * into the variable's text. */
-        p = sh.ifs.ncifs.as_ptr() as *const c_char;
-        mbsrtowcs(nwcifs.as_mut_ptr(), &mut p, len + 1, &mut mbs);
-
-        /* `mb != 0` means `IFS` holds a high-bit byte, so `len >= 1` and
-         * the allocation is never zero-length — which is what lets
-         * "empty" stand in for the C's NULL, and what lets `ifsisifs`
-         * read `wcifs[0]`. */
-        debug_assert!(
-            len > 0 && !nwcifs.is_empty(),
-            "changeifs: mb != 0 implies IFS holds a high-bit byte, so len >= 1"
-        );
-    }
-
-    /* out: */
-    sh.ifs.wcifs = nwcifs;
+    sh.ifs.ifsmb0len = (len != 0) as usize;
+    sh.ifs.wcifs = if mb == 0 {
+        Vec::new()
+    } else {
+        let (first_len, wide) = nsh_platform::locale_wide_chars(&sh.ifs.ncifs[..len]);
+        sh.ifs.ifsmb0len = first_len;
+        wide
+    };
 }
 
 /*
@@ -2687,133 +2598,24 @@ pub unsafe fn changeifs(sh: &mut crate::context::Shell, mut ifs: *const c_char) 
  * should be escapes.  The results are stored in the list exparg.
  */
 
-/* #ifdef __GLIBC__ */
-// [spec:dash:def:expand.opendir-interruptible-fn]
-// [spec:dash:sem:expand.opendir-interruptible-fn]
-unsafe extern "C" fn opendir_interruptible(pathname: *const c_char) -> *mut c_void {
-    if int_pending() != 0 {
-        /* The C calls `onint()` here, which longjmps *out of glibc* --
-         * back through `glob`'s frames, which own memory it then leaks.
-         * That is the sharpest example of what step F removes, and it is
-         * a callback into a C library, so it could never have unwound
-         * under `panic = "abort"` at all.
-         *
-         * Dropping the counter and returning leaves `intpending` set.
-         * `expmeta`'s own `check_int` already breaks its loop on it, and
-         * delivery happens at the next poll site. */
-        crate::error::suppressint = 0;
-    }
-
-    libc::opendir(pathname) as *mut c_void
-}
-/* #else
- * #define GLOB_ALTDIRFUNC 0
- * #endif */
-
-// [spec:dash:def:expand.expandmeta-glob-fn]
-// [spec:dash:sem:expand.expandmeta-glob-fn]
-unsafe fn expandmeta_glob(sh: &mut crate::context::Shell, words: Vec<strlist>) -> Result<(), Error> {
-    for mut str in words {
-        let p: *const c_char;
-        let mut pglob: crate::system::glob64_t = mem::zeroed();
-        let i: c_int;
-
-        'sw: {
-            'nometa: {
-                'nometa2: {
-                    if fflag(sh) != 0 {
-                        break 'nometa;
-                    }
-
-                    /* #ifdef __GLIBC__ */
-                    pglob.gl_closedir = Some(mem::transmute(libc::closedir as *const () as usize));
-                    pglob.gl_readdir = Some(mem::transmute(libc::readdir64 as *const () as usize));
-                    pglob.gl_opendir = Some(opendir_interruptible);
-                    pglob.gl_lstat = Some(mem::transmute(libc::lstat64 as *const () as usize));
-                    pglob.gl_stat = Some(mem::transmute(libc::stat64 as *const () as usize));
-                    /* #endif */
-
-                    crate::error::INTOFF();
-                    /* No RMESCAPE_ALLOC, so `_rmescapes` rewrites the
-                     * word in place and returns it; the cursor therefore
-                     * has to come from `&mut str` and not from `textp`. */
-                    p = preglob(str.text.as_mut_ptr() as *mut c_char, RMESCAPE_HEAP, None);
-                    i = crate::system::glob64(
-                        p,
-                        crate::system::GLOB_ALTDIRFUNC | crate::system::GLOB_NOMAGIC,
-                        None,
-                        &mut pglob,
-                    );
-                    /* `if (p != str->text) ckfree(p)` — the C asking "did
-                     * `_rmescapes` allocate?".  It allocates only under
-                     * RMESCAPE_ALLOC, which `preglob` sets only
-                     * `if (FNMATCH_IS_ENABLED)`; without it the word was
-                     * rewritten in place and `p` is `str.text`'s own
-                     * pointer, so the answer is a build constant and there
-                     * is nothing to free. */
-                    debug_assert_eq!(
-                        p as *const c_char,
-                        str.text.as_ptr() as *const c_char,
-                        "expandmeta_glob: preglob allocated without RMESCAPE_ALLOC"
-                    );
-                    if i == 0 {
-                        if (pglob.gl_flags
-                            & (crate::system::GLOB_NOMAGIC | crate::system::GLOB_NOCHECK))
-                            == (crate::system::GLOB_NOMAGIC | crate::system::GLOB_NOCHECK)
-                        {
-                            break 'nometa2; /* goto nometa2 */
-                        }
-                        addglob(&pglob);
-                        crate::system::globfree64(&mut pglob);
-                        crate::error::INTON();
-                        break 'sw;
-                    } else if i == crate::system::GLOB_NOMATCH {
-                        break 'nometa2;
-                    } else {
-                        /* default:  GLOB_NOSPACE. A stop before and after:
-                         * the arm falls into `nometa2` otherwise. */
-                        return Err(sh.sh_error_value(b"Out of space"));
-                    }
-                }
-                /* nometa2: */
-                crate::system::globfree64(&mut pglob);
-                crate::error::INTON();
-                /* fall through to nometa */
-            }
-            /* nometa: */
-            str.rmescapes();
-            expargl().push(str);
-        }
-    }
-    Ok(())
-}
-
-/*
- * Add the result of glob(3) to the list.
- */
-
-// [spec:dash:def:expand.addglob-fn]
-// [spec:dash:sem:expand.addglob-fn]
-unsafe fn addglob(pglob: *const crate::system::glob64_t) {
-    let mut p: *mut *mut c_char = (*pglob).gl_pathv;
-
-    loop {
-        addfname(*p);
-        p = p.offset(1);
-        if (*p).is_null() {
-            break;
-        }
-    }
-}
+/* The libc `glob64` arm and its callback table were compile-time dead:
+ * `GLOB_IS_ENABLED` is zero in every supported build. The shell's own
+ * byte-preserving glob implementation below is the only reachable arm.
+ * [spec:dash:def:expand.opendir-interruptible-fn]
+ * [spec:dash:sem:expand.opendir-interruptible-fn]
+ * [spec:dash:def:expand.expandmeta-glob-fn]
+ * [spec:dash:sem:expand.expandmeta-glob-fn]
+ * [spec:dash:def:expand.addglob-fn]
+ * [spec:dash:sem:expand.addglob-fn] */
 
 // [spec:dash:def:expand.expandmeta-fn]
 // [spec:dash:sem:expand.expandmeta-fn]
-unsafe fn expandmeta(sh: &mut crate::context::Shell, words: Vec<strlist>) -> Result<(), Error> {
+fn expandmeta(
+    sh: &mut crate::context::Shell,
+    state: &mut ExpandState,
+    words: Vec<strlist>,
+) -> Result<(), Error> {
     /* TODO - EXP_REDIR */
-
-    if GLOB_IS_ENABLED {
-        return expandmeta_glob(sh, words);
-    }
 
     /* The C's `preglob(..., RMESCAPE_HEAP)` result: one `ckmalloc` per
      * word, `ckfree`d as soon as `expmeta` has read it.  That is a local
@@ -2821,7 +2623,7 @@ unsafe fn expandmeta(sh: &mut crate::context::Shell, words: Vec<strlist>) -> Res
      * only difference — `expmeta` never re-enters `preglob`, because the
      * only `preglob` under it is `patmatch`'s, which does not allocate
      * while `FNMATCH_IS_ENABLED` is 0. */
-    let mut pattern: Vec<u8> = Vec::new();
+    let mut pattern: BString = BString::new(Vec::new());
 
     /* The glob buffer, owned here and lent to `expmeta`.  One allocation
      * per `expandmeta` that globs anything, reused across the word loop
@@ -2831,28 +2633,26 @@ unsafe fn expandmeta(sh: &mut crate::context::Shell, words: Vec<strlist>) -> Res
 
     for mut str in words {
         let savelastp: usize;
-        let p: *mut c_char;
-
         'sw: {
             'nometa: {
                 if fflag(sh) != 0 {
                     break 'nometa;
                 }
-                let text = CStr::from_ptr(str.textp()).to_bytes();
+                let text = crate::mystring::cstr_prefix(&str.text);
                 if text.find_byteset(b"*?]").is_none() || text == b"]" {
                     break 'nometa;
                 }
                 /* `savelastp = exparg.lastp` — where this word's matches
                  * will start, so that the sort below covers them and not
                  * the words already in the list. */
-                savelastp = expargl().len();
+                savelastp = expargl(state).len();
 
-                crate::error::INTOFF();
-                p = preglob(
-                    str.textp(),
-                    RMESCAPE_ALLOC | RMESCAPE_HEAP,
-                    Some(&mut pattern),
-                );
+                crate::error::INTOFF(sh);
+                pattern.clear();
+                pattern.extend_from_slice(text);
+                pattern.push(0);
+                let pattern_len = rmescapes_buffer(&mut pattern, RMESCAPE_GLOB);
+                pattern.truncate(pattern_len + 1);
 
                 /* The C's top-level `expmeta` starts on whatever block the
                  * region is on and gets away with it because `expdir_len`
@@ -2870,12 +2670,17 @@ unsafe fn expandmeta(sh: &mut crate::context::Shell, words: Vec<strlist>) -> Res
                  * makes lending both to `expmeta` at once sound; the
                  * pattern is read-only from here down. */
                 globbuf.clear();
-                expmeta(&mut globbuf, CStr::from_ptr(p).to_bytes(), 0);
+                expmeta(
+                    state,
+                    &mut globbuf,
+                    crate::mystring::cstr_prefix(&pattern),
+                    0,
+                );
                 /* `if (p != str->text) ckfree(p)` — the C's way of asking
                  * "did `_rmescapes` allocate?".  `pattern` owns the bytes
                  * either way now, and the next iteration reuses it. */
-                crate::error::INTON();
-                if expargl().len() == savelastp {
+                crate::error::INTON(sh);
+                if expargl(state).len() == savelastp {
                     /*
                      * no matches
                      */
@@ -2888,13 +2693,13 @@ unsafe fn expandmeta(sh: &mut crate::context::Shell, words: Vec<strlist>) -> Res
                      * new end.  Three of those four exist to re-find the
                      * tail of a list the sort reordered; a slice's tail
                      * does not move. */
-                    expsort(&mut expargl()[savelastp..]);
+                    expsort(&mut expargl(state)[savelastp..]);
                     break 'sw;
                 }
             }
             /* nometa: */
             str.rmescapes();
-            expargl().push(str);
+            expargl(state).push(str);
         }
     }
     Ok(())
@@ -2902,13 +2707,13 @@ unsafe fn expandmeta(sh: &mut crate::context::Shell, words: Vec<strlist>) -> Res
 
 // [spec:dash:def:expand.addfname-common-fn]
 // [spec:dash:sem:expand.addfname-common-fn]
-unsafe fn addfname_common(name: BString) {
-    expargl().push(strlist { text: name });
+fn addfname_common(state: &mut ExpandState, name: BString) {
+    expargl(state).push(strlist { text: name });
 }
 
 // [spec:dash:def:expand.addfnamealt-fn]
 // [spec:dash:sem:expand.addfnamealt-fn]
-unsafe fn addfnamealt(b: &mut BString, expdir_len: size_t) {
+fn addfnamealt(state: &mut ExpandState, b: &mut BString, expdir_len: usize) {
     /* `name = grabstackstr(enddir)` — in the C this allocates nothing and
      * copies nothing: it moves the region's bump pointer past bytes that
      * are already in place, which is how C says "these outlive the next
@@ -2936,7 +2741,7 @@ unsafe fn addfnamealt(b: &mut BString, expdir_len: size_t) {
      * counted, `enddir` and `b.len()` say the same number, and the one
      * that has to go is the parameter. */
     debug_assert_eq!(b.last(), Some(&0), "the candidate is a C string");
-    addfname_common(BString::from(b.to_vec()));
+    addfname_common(state, BString::from(b.to_vec()));
 
     /* `STARTSTACKSTR(enddir); return stnputs(name, expdir_len, enddir) -
      * expdir_len;` — the C has to start a new block and copy the directory
@@ -2964,7 +2769,7 @@ unsafe fn addfnamealt(b: &mut BString, expdir_len: size_t) {
 /// back afterwards (`c = *start; *start = 0; ...; *start = c`).  A subslice
 /// says "just this much of the pattern" without writing to it, which is
 /// what lets `expmeta`'s `name` be a `&[u8]`.
-unsafe fn expmeta_rmescapes(b: &mut BString, name: &[u8]) {
+fn expmeta_rmescapes(b: &mut BString, name: &[u8]) {
     let at = b.len();
 
     if !FNMATCH_IS_ENABLED {
@@ -2976,9 +2781,7 @@ unsafe fn expmeta_rmescapes(b: &mut BString, name: &[u8]) {
          * was appended. */
         b.extend_from_slice(name);
         b.push(0);
-        let p = b[at..].as_mut_ptr() as *mut c_char;
-        rmescapes(p);
-        let n = CStr::from_ptr(p).count_bytes();
+        let n = rmescapes_buffer(&mut b[at..], 0);
         debug_assert!(n <= name.len());
         b.truncate(at + n);
         return;
@@ -3016,53 +2819,28 @@ unsafe fn expmeta_rmescapes(b: &mut BString, name: &[u8]) {
     debug_assert!(b.len() >= at);
 }
 
-/* #ifndef HAVE_MEMRCHR */
-// [spec:dash:def:expand.memrchr-fn]
-// [spec:dash:sem:expand.memrchr-fn]
-//
-// The C's fallback for a libc that lacks `memrchr`, and its one caller in
-// `expmeta` is now `rfind_byte` over a slice.  It stays because the C's
-// `#ifndef` does, and because the rules above are about this shim rather
-// than about whoever happened to call it.
-unsafe fn memrchr(s: *const c_void, c: c_int, n: size_t) -> *mut c_void {
-    let str: *const u8 = s as *const u8;
-    let mut cp: *const u8;
-
-    /* `cp = str + n - 1` is `str - 1` when n == 0, so the arithmetic is
-     * wrapping here — the loop then never runs, as in C. */
-    cp = str.wrapping_offset(n as isize - 1);
-    while cp >= str {
-        if *cp as c_int == c {
-            return cp as *mut c_void;
-        }
-        cp = cp.wrapping_offset(-1);
-    }
-    ptr::null_mut()
-}
-/* #endif */
-
 /*
  * Do metacharacter (i.e. *, ?, [...]) expansion.
  */
 
 // [spec:dash:def:expand.expmeta-fn]
 // [spec:dash:sem:expand.expmeta-fn]
-unsafe fn expmeta(b: &mut BString, name: &[u8], mut expdir_len: size_t) {
+fn expmeta(
+    state: &mut ExpandState,
+    b: &mut BString,
+    name: &[u8],
+    mut expdir_len: usize,
+) {
     let mesc: c_char = if FNMATCH_IS_ENABLED {
         C_BACKSLASH
     } else {
         CTLESC
     };
-    let mut statb: libc::stat64 = mem::zeroed();
-    let mut dp: *mut libc::dirent64;
     let mut endname: usize;
     let mut zeroedp: usize;
     let mut matchdot: bool;
-    let mut esc: size_t;
+    let mut esc: usize;
     let start: usize;
-    /* `DIR *dirp;` — Rust needs the binding initialised before the
-     * volatile store below, which is the C's actual initialisation. */
-    let mut dirp: *mut libc::DIR = ptr::null_mut();
     let pat: &[u8];
     let mut p: usize;
     let c: c_char;
@@ -3071,8 +2849,6 @@ unsafe fn expmeta(b: &mut BString, name: &[u8], mut expdir_len: size_t) {
      * `expmeta` recurses, one frame per path component. */
     let mut globenc: BString = BString::new(Vec::new());
 
-    /* *(DIR *volatile *)&dirp = NULL; */
-    ptr::write_volatile(&mut dirp, ptr::null_mut());
     /* The C has `if (unlikely(err = setjmp(jmploc.loc))) goto out;` here
      * and a matching `longjmp` at `out_opendir`, over a `jmploc` it never
      * installs — `handler = &jmploc` is missing, so nothing can jump into
@@ -3128,8 +2904,12 @@ unsafe fn expmeta(b: &mut BString, name: &[u8], mut expdir_len: size_t) {
                  * terminator is part of the candidate.  Appending it here
                  * says that, and `lstat` needs it anyway. */
                 b.push(0);
-                if libc::lstat64(b.as_ptr() as *const c_char, &mut statb) >= 0 {
-                    addfnamealt(b, expdir_len);
+                let exists = std::fs::symlink_metadata(OsStr::from_bytes(
+                    &b[..b.len() - 1],
+                ))
+                .is_ok();
+                if exists {
+                    addfnamealt(state, b, expdir_len);
                 } else {
                     /* The C leaves its uncounted bytes where they are and
                      * returns the base; counted bytes have to be rewound,
@@ -3157,23 +2937,14 @@ unsafe fn expmeta(b: &mut BString, name: &[u8], mut expdir_len: size_t) {
                 None => start = 0,
             }
 
-            /* `*enddir = 0` — the prefix has to be a C string for
-             * `opendir`, and only for `opendir`: the terminator is not
-             * part of the prefix, which is where the next component goes. */
-            b.push(0);
-            /* *(DIR *volatile *)&dirp = opendir(expdir_len ? cp : dotdir); */
-            ptr::write_volatile(
-                &mut dirp,
-                libc::opendir(if expdir_len != 0 {
-                    b.as_ptr() as *const c_char
-                } else {
-                    crate::mystring::dotdir.as_ptr()
-                }),
-            );
-            b.truncate(expdir_len);
-            if dirp.is_null() {
+            let directory = if expdir_len != 0 {
+                OsStr::from_bytes(&b[..expdir_len])
+            } else {
+                OsStr::new(".")
+            };
+            let Ok(entries) = std::fs::read_dir(directory) else {
                 break 'out_opendir; /* goto out_opendir */
-            }
+            };
             /* `p = strchrnul(p + 1, '/')` — the end of the component the
              * metacharacter is in.  The C's `esc = 0` before this is a
              * dead store in both languages: `esc` is read only inside the
@@ -3208,29 +2979,32 @@ unsafe fn expmeta(b: &mut BString, name: &[u8], mut expdir_len: size_t) {
             if byte_at(pat, p) == C_DOT {
                 matchdot = true;
             }
-            loop {
-                dp = libc::readdir64(dirp);
-                if dp.is_null() {
-                    break;
-                }
-                let dnamep: *const c_char = (*dp).d_name.as_ptr();
+            /* `read_dir` intentionally omits `.` and `..`; `readdir`
+             * included both, so put them back before the native entries. */
+            let synthetic = [(b".".to_vec(), true), (b"..".to_vec(), true)];
+            let entries = synthetic.into_iter().chain(entries.filter_map(|entry| {
+                let entry = entry.ok()?;
+                let may_descend = entry
+                    .file_type()
+                    .map(|kind| kind.is_dir() || kind.is_symlink())
+                    .unwrap_or(true);
+                Some((entry.file_name().into_vec(), may_descend))
+            }));
+            for (mut dname, may_descend) in entries {
+                dname.push(0);
 
                 'check_int: {
-                    if *dnamep == C_DOT && !matchdot {
+                    if dname[0] == C_DOT as u8 && !matchdot {
                         break 'check_int; /* goto check_int */
                     }
-                    if c != 0
-                        && (*dp).d_type != libc::DT_DIR
-                        && (*dp).d_type != libc::DT_LNK
-                        && (*dp).d_type != libc::DT_UNKNOWN
-                    {
+                    if c != 0 && !may_descend {
                         break 'check_int; /* goto check_int */
                     }
                     /* `len = strlen(dname) + 1` — the terminator is part
                      * of what gets appended, because the candidate is a C
                      * string and the next component overwrites it. */
-                    let dname: &[u8] = CStr::from_ptr(dnamep).to_bytes_with_nul();
-                    let len: size_t = dname.len();
+                    let dname: &[u8] = &dname;
+                    let len: usize = dname.len();
                     let subject: &[u8] = if !FNMATCH_IS_ENABLED {
                         /* The C encodes the directory entry's name at
                          * `enddir` — inside the glob buffer, past the
@@ -3266,13 +3040,13 @@ unsafe fn expmeta(b: &mut BString, name: &[u8], mut expdir_len: size_t) {
                         b.truncate(expdir_len);
                         b.extend_from_slice(dname);
                         if c == 0 {
-                            addfnamealt(b, expdir_len);
+                            addfnamealt(state, b, expdir_len);
                         } else {
                             /* `*enddir.offset(-1) = C_SLASH` — the entry's
                              * terminator becomes the separator. */
                             let last = b.len() - 1;
                             b[last] = C_SLASH as u8;
-                            expmeta(b, &name[endname..], expdir_len + len);
+                            expmeta(state, b, &name[endname..], expdir_len + len);
                             /* `enddir = cp + expdir_len` — the frame's
                              * rewind, said out loud.  The child returns
                              * with the buffer holding *its* prefix, which
@@ -3289,11 +3063,7 @@ unsafe fn expmeta(b: &mut BString, name: &[u8], mut expdir_len: size_t) {
             }
         }
 
-        /* out: */
-        /* NOTE: `closedir(NULL)` is reachable here in the C when the
-         * (never-installed) handler fires before `opendir`; glibc
-         * tolerates a NULL argument. */
-        libc::closedir(ptr::read_volatile(&dirp));
+        /* out: the `ReadDir` value closes its descriptor on drop. */
     }
 
     /* out_opendir: */
@@ -3307,20 +3077,6 @@ unsafe fn expmeta(b: &mut BString, name: &[u8], mut expdir_len: size_t) {
 }
 
 /*
- * Add a file name to the list.
- */
-
-// [spec:dash:def:expand.addfname-fn]
-// [spec:dash:sem:expand.addfname-fn]
-unsafe fn addfname(name: *mut c_char) {
-    /* `sstrdup(name)`: the C copies `glob`'s `gl_pathv` entry into the
-     * region because `globfree64` is about to free it.  The field owns the
-     * copy now, which is the same statement without the allocator. */
-    /* Terminator included -- `addfname_common`'s readers are C-shaped. */
-    addfname_common(BString::from(CStr::from_ptr(name).to_bytes_with_nul()));
-}
-
-/*
  * Sort the results of file name expansion.  It calculates the number of
  * strings to sort and then calls msort (short for merge sort) to do the
  * work.
@@ -3328,7 +3084,7 @@ unsafe fn addfname(name: *mut c_char) {
 
 // [spec:dash:def:expand.expsort-fn]
 // [spec:dash:sem:expand.expsort-fn]
-unsafe fn expsort(str: &mut [strlist]) {
+fn expsort(str: &mut [strlist]) {
     /* The C walks the chain to count it and hands the count to `msort`,
      * because a singly-linked list does not know its own length. */
     msort(str, str.len() as c_int)
@@ -3348,11 +3104,11 @@ unsafe fn expsort(str: &mut [strlist]) {
 ///     stable is stable.  `strcoll` can return 0 for byte-different
 ///     strings under a collating locale, so this is not vacuous.
 ///     `slice::sort_by` is stable.
-unsafe fn msort(list: &mut [strlist], len: c_int) {
+fn msort(list: &mut [strlist], len: c_int) {
     if len <= 1 {
         return;
     }
-    list.sort_by(|p, q| libc::strcoll(p.textp(), q.textp()).cmp(&0));
+    list.sort_by(|p, q| nsh_platform::collate(&p.text, &q.text));
 }
 
 /*
@@ -3501,6 +3257,19 @@ fn rmescapes_scan(s: &[u8]) -> Option<usize> {
     s.find_byteset(&cqset[..4])
 }
 
+/// Apply `_rmescapes` to one owned, NUL-terminated byte buffer and return
+/// the resulting length without the terminator.
+fn rmescapes_buffer(bytes: &mut [u8], flag: c_int) -> usize {
+    let len = bytes.iter().position(|&byte| byte == 0).unwrap_or(bytes.len());
+    let Some(at) = rmescapes_scan(&bytes[..len]) else {
+        return len;
+    };
+    if len == bytes.len() {
+        return len;
+    }
+    rmescapes_compact(&mut bytes[..=len], at, flag)
+}
+
 // [spec:dash:def:expand.rmescapes-fn]
 // [spec:dash:sem:expand.rmescapes-fn]
 //
@@ -3513,58 +3282,6 @@ fn rmescapes_scan(s: &[u8]) -> Option<usize> {
 // both destinations are appended to, so a short reservation costs a growth
 // instead of a heap overflow, and there is no number left to assert
 // against.
-pub unsafe fn _rmescapes(
-    str: *mut c_char,
-    flag: c_int,
-    heap: Option<&mut Vec<u8>>,
-) -> *mut c_char {
-    debug_assert!(
-        (flag & RMESCAPE_GROW) == 0,
-        "_rmescapes: RMESCAPE_GROW goes to rmescapes_grow"
-    );
-
-    /* The source, terminator included, as the buffer the transform works
-     * over.  In place this *is* the destination. */
-    let n: usize = CStr::from_ptr(str).count_bytes();
-    let src: &mut [u8] = core::slice::from_raw_parts_mut(str as *mut u8, n + 1);
-
-    let Some(at) = rmescapes_scan(&src[..n]) else {
-        return str;
-    };
-
-    if (flag & RMESCAPE_ALLOC) == 0 {
-        rmescapes_compact(src, at, flag);
-        return str;
-    }
-
-    /* The C splits the allocating case in two: `ckmalloc(fulllen)` under
-     * RMESCAPE_HEAP and `stalloc(fulllen)` otherwise.  The `stalloc` half
-     * is unreachable, and the reason is one constant away:
-     * `RMESCAPE_ALLOC` is only ever set by `preglob`, which sets it under
-     * `if (FNMATCH_IS_ENABLED)`, and by `subevalvar`'s `ALLOC | GROW`,
-     * which is now [`rmescapes_grow`].  `FNMATCH_IS_ENABLED` is 0, so the
-     * only caller that arrives here is `expandmeta`'s
-     * `preglob(text, RMESCAPE_ALLOC | RMESCAPE_HEAP)` -- and that is the
-     * caller supplying `heap`.  Asserted rather than claimed, because
-     * [dec:nsh:owned-data] records this exact flag being reasoned about
-     * wrongly once already. */
-    debug_assert!(
-        (flag & RMESCAPE_HEAP) != 0 && heap.is_some(),
-        "_rmescapes: RMESCAPE_ALLOC without GROW reaches only the HEAP arm"
-    );
-    let out = heap.expect("_rmescapes: RMESCAPE_ALLOC without GROW needs a heap buffer");
-
-    /* `mempcpy(q, str, len)` copies the verbatim prefix and the walk
-     * writes the rest.  Copying the whole source and compacting it is the
-     * same result -- the transform below `at` is the identity -- and it is
-     * what lets one body serve every destination. */
-    out.clear();
-    out.extend_from_slice(src);
-    let m = rmescapes_compact(out, at, flag);
-    out.truncate(m + 1);
-    out.as_mut_ptr() as *mut c_char
-}
-
 // [spec:dash:def:expand.rmescapes-fn]
 // [spec:dash:sem:expand.rmescapes-fn]
 //
@@ -3585,7 +3302,7 @@ pub unsafe fn _rmescapes(
 /// `STARTSTACKSTR`. An owned buffer cannot hold that pointer and has no
 /// reason to, so that store is not transcribed on the heap path: a
 /// deliberate divergence from a write with no observable value.
-pub unsafe fn rmescapes_grow(b: &mut BString, at: usize, flag: c_int) -> usize {
+pub fn rmescapes_grow(b: &mut BString, at: usize, flag: c_int) -> usize {
     debug_assert!(
         (flag & (RMESCAPE_ALLOC | RMESCAPE_GROW)) == (RMESCAPE_ALLOC | RMESCAPE_GROW),
         "rmescapes_grow is the RMESCAPE_ALLOC | RMESCAPE_GROW path"
@@ -3615,25 +3332,48 @@ pub unsafe fn rmescapes_grow(b: &mut BString, at: usize, flag: c_int) -> usize {
 
 // [spec:dash:def:expand.casematch-fn]
 // [spec:dash:sem:expand.casematch-fn]
-pub unsafe fn casematch(
+pub fn casematch(
     sh: &mut crate::context::Shell,
     pattern: &crate::nodes::Node,
-    val: *const c_char,
+    val: &BStr,
+) -> Result<c_int, Error> {
+    let mut state = mem::take(&mut sh.expand);
+    state.backquotes.clone_from(&pattern.narg().backquote);
+    state.next_backquote = 0;
+    let result = casematch_inner(sh, &mut state, pattern, val);
+    sh.expand = state;
+    result
+}
+
+fn casematch_inner(
+    sh: &mut crate::context::Shell,
+    state: &mut ExpandState,
+    pattern: &crate::nodes::Node,
+    val: &BStr,
 ) -> Result<c_int, Error> {
     let result: c_int;
 
     /* `setstackmark(&smark)` — it released what `argstr` allocated from the
      * region for backquotes and arithmetic.  Neither allocates from it. */
-    argbackq = pattern.narg().backquote.as_slice();
     /* STARTSTACKSTR(expdest) */
-    expb().clear();
+    expb(state).clear();
     /* As in `expandarg`: this `?` returns past the `ifsfree()`, which is
      * where the longjmp went too, and the catch frame reclaims the
      * regions. */
-    argstr(sh, pattern.narg().text.as_cbytes(), 0, EXP_TILDE | EXP_CASE)?;
-    ifsfree();
+    argstr(
+        sh,
+        state,
+        pattern.narg().text.as_cbytes(),
+        0,
+        EXP_TILDE | EXP_CASE,
+    )?;
+    ifsfree(state);
     /* The C reads the word back as `stackblock()`. */
-    result = crate::pmatch::patmatch(expb().as_mut_ptr() as *mut c_char, val);
+    rmescapes_buffer(expb(state), RMESCAPE_GLOB);
+    result = crate::pmatch::pmatch_slices(
+        crate::mystring::cstr_prefix(expb(state)),
+        val,
+    );
     Ok(result)
 }
 
@@ -3643,14 +3383,15 @@ pub unsafe fn casematch(
 
 // [spec:dash:def:expand.cvtnum-fn]
 // [spec:dash:sem:expand.cvtnum-fn]
-unsafe fn cvtnum(num: intmax_t, flags: c_int, dst: &mut BString) -> size_t {
+fn cvtnum(num: i64, flags: c_int, dst: &mut BString) -> usize {
     let value = format!("{num}");
     memtodest(value.as_bytes(), flags, dst)
 }
 
 // [spec:dash:def:expand.varunset-fn]
 // [spec:dash:sem:expand.varunset-fn]
-unsafe fn varunset(sh: &mut crate::context::Shell, 
+fn varunset(
+    sh: &mut crate::context::Shell,
     text: &[u8],
     end: usize,
     var: usize,
@@ -3703,14 +3444,15 @@ unsafe fn varunset(sh: &mut crate::context::Shell,
 /// frame that takes an interrupt is not the frame that owns them.
 // [spec:dash:def:expand.restore-handler-expandarg-fn]
 // [spec:dash:sem:expand.restore-handler-expandarg-fn]
-pub unsafe fn restore_handler_expandarg(
+pub fn restore_handler_expandarg(
+    sh: &mut crate::context::Shell,
     caught: Option<crate::error::Error>,
 ) -> Option<crate::error::Error> {
     match &caught {
         /* Not this frame's to keep, and never was: the C re-raised it
          * from here. */
         Some(e) if e.is_interrupt() => {}
-        Some(_) => ifsfree(),
+        Some(_) => ifsfree(&mut sh.expand),
         None => {}
     }
     caught
@@ -3735,7 +3477,7 @@ pub unsafe fn restore_handler_expandarg(
 // They exist here only so that every manifest symbol has a target site.
 // ---------------------------------------------------------------------
 
-/// `intmax_t arith(const char *)` — prototype only; the definition lives
+/// `i64 arith(const char *)` — prototype only; the definition lives
 /// in `arith.y` / `arith_yacc.c`.  Re-exported so that `expand`'s view of
 /// the symbol resolves to the real one.
 // [spec:dash:def:expand.arith-fn]
@@ -3753,30 +3495,7 @@ pub use crate::arith_yacc::arith;
 /// symbol's target site.
 // [spec:dash:def:expand.expcmd-fn]
 // [spec:dash:sem:expand.expcmd-fn]
-pub unsafe fn expcmd(_argc: c_int, _argv: *mut *mut c_char) -> c_int {
+pub fn expcmd(_argc: c_int, _argv: *mut *mut c_char) -> c_int {
     /* No definition exists in the C tree; calling this is a bug. */
     unreachable!("expcmd: declared in expand.h, never defined")
 }
-
-/// ```c
-/// #ifdef USE_LEX
-/// void arith_lex_reset(void);
-/// #else
-/// #define arith_lex_reset()
-/// #endif
-/// ```
-/// In the shipped build (`arith_yylex.c`, no generated lexer) this is a
-/// macro expanding to nothing, so the port is an empty function.
-// [spec:dash:def:expand.arith-lex-reset-fn]
-// [spec:dash:sem:expand.arith-lex-reset-fn]
-#[inline]
-pub unsafe fn arith_lex_reset() {}
-
-/// `int yylex(void)` — prototype only, declared in `expand.h` for the
-/// arithmetic parser's benefit; the definition lives in `arith_yylex.c`.
-// [spec:dash:def:expand.yylex-fn]
-// [spec:dash:sem:expand.yylex-fn]
-/* Kept for the same reason as `arith` above. */
-#[allow(unused_imports)]
-pub use crate::arith_yylex::yylex;
-

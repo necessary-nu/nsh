@@ -36,7 +36,7 @@ fn show(b: &[u8]) -> String {
 /// afterwards, and nothing in the shell has yet needed to *match* on an
 /// I/O failure. Status 2 is what `sh_error` takes.
 fn io_error(e: io::Error) -> Error {
-    unsafe { Error::other(0, 2, e.to_string().as_bytes()) }
+    Error::other(0, 2, e.to_string().as_bytes())
 }
 
 // ---------------------------------------------------------------------
@@ -117,11 +117,11 @@ fn expand_a_word() -> Result<(), Error> {
 /// rather than something a handler would have to clone.
 static SINK: OnceLock<SignalSink> = OnceLock::new();
 
-extern "C" fn on_signal(signo: libc::c_int) {
+extern "C" fn on_signal(signo: i32) {
     if let Some(sink) = SINK.get() {
         // The only thing a handler may do, and the whole of what it may
         // do. Everything behind it is two atomics and three stores.
-        unsafe { sink.raise(signo) };
+        sink.raise(signo);
     }
 }
 
@@ -142,39 +142,23 @@ impl Host for FrontendHost {
     fn signal(&mut self, signal: Signal) -> io::Result<Disposition> {
         // `sigaction(signo, NULL, &old)`. The shell needs the inherited
         // value to reproduce dash's "ignored on entry stays ignored".
-        unsafe {
-            let mut act: libc::sigaction = std::mem::zeroed();
-            if libc::sigaction(signal.number(), std::ptr::null(), &mut act) == -1 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(if act.sa_sigaction == libc::SIG_IGN {
-                Disposition::Ignore
-            } else if act.sa_sigaction == libc::SIG_DFL {
-                Disposition::Default
-            } else {
-                Disposition::Catch
-            })
-        }
+        nsh_platform::signal_action(signal.number()).map(|action| match action {
+            nsh_platform::SignalAction::Ignore => Disposition::Ignore,
+            nsh_platform::SignalAction::Default => Disposition::Default,
+            nsh_platform::SignalAction::Catch => Disposition::Catch,
+        })
     }
 
     fn set_signal(&mut self, signal: Signal, to: Disposition) -> io::Result<()> {
         // `sigaction` with `sigfillset(&sa_mask)` and `sa_flags = 0`. Both
         // are part of the contract: no SA_RESTART is why an interrupted
         // syscall returns EINTR and the shell always has a poll site.
-        unsafe {
-            let mut act: libc::sigaction = std::mem::zeroed();
-            act.sa_sigaction = match to {
-                Disposition::Catch => on_signal as *const () as usize,
-                Disposition::Ignore => libc::SIG_IGN,
-                Disposition::Default => libc::SIG_DFL,
-            };
-            act.sa_flags = 0;
-            libc::sigfillset(&mut act.sa_mask);
-            if libc::sigaction(signal.number(), &act, std::ptr::null_mut()) == -1 {
-                return Err(io::Error::last_os_error());
-            }
-            Ok(())
-        }
+        let action = match to {
+            Disposition::Catch => nsh_platform::SignalAction::Catch,
+            Disposition::Ignore => nsh_platform::SignalAction::Ignore,
+            Disposition::Default => nsh_platform::SignalAction::Default,
+        };
+        nsh_platform::install_signal_action(signal.number(), action, on_signal)
     }
 
     fn may_replace_process(&mut self) -> bool {

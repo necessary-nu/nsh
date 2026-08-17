@@ -6,15 +6,12 @@
 //! the selected glibc `getcwd(0, 0)` path returned without its raw allocation.
 
 use crate::error::Error;
-use bstr::{BStr, BString, ByteSlice};
-use core::ptr::{addr_of, addr_of_mut, null_mut};
-use libc::{c_char, c_int};
-use std::ffi::CStr;
-use std::io::Write;
+use bstr::{BStr, BString};
+use core::ffi::c_int;
 use std::os::unix::ffi::OsStrExt;
 
 use crate::error::{INTOFF, INTON};
-use crate::var::{VEXPORT, setvar};
+use crate::var::{VEXPORT, set_bytes};
 
 /* The C's `nullstr` sentinel is `None`.  It is a sentinel, not an empty
  * path: `getpwd` never returns an empty string on success and `updatepwd`
@@ -43,7 +40,7 @@ impl Cwd {
 
 /// The bytes `setvar` and shell output want: a path with the terminator the C's
 /// readers read up to, `nullstr`'s empty string when the sentinel is set.
-pub(crate) unsafe fn cbytes(s: &Option<BString>) -> Vec<u8> {
+pub(crate) fn cbytes(s: &Option<BString>) -> Vec<u8> {
     let mut v = match s {
         Some(b) => b.to_vec(),
         None => Vec::new(),
@@ -69,15 +66,14 @@ pub(crate) unsafe fn cbytes(s: &Option<BString>) -> Vec<u8> {
 
 // [spec:dash:def:cd.getpwd-fn]
 // [spec:dash:sem:cd.getpwd-fn]
-unsafe fn getpwd(sh: &mut crate::context::Shell) -> Option<BString> {
+fn getpwd(sh: &mut crate::context::Shell) -> Option<BString> {
     match std::env::current_dir() {
         Ok(dir) => return Some(BString::from(dir.as_os_str().as_bytes())),
         Err(err) => {
             /* `current_dir` is an OS query on Unix, so this is the errno
              * `getcwd` would have left for the C's `strerror(errno)` path. */
-            let errno = err.raw_os_error().unwrap_or(libc::EIO);
             let mut message = b"getcwd() failed: ".to_vec();
-            message.extend_from_slice(CStr::from_ptr(libc::strerror(errno)).to_bytes());
+            message.extend_from_slice(err.to_string().as_bytes());
             sh.sh_warnx(&message);
         }
     }
@@ -99,25 +95,12 @@ pub(crate) enum Pwd<'a> {
 
 // [spec:dash:def:cd.setpwd-fn]
 // [spec:dash:sem:cd.setpwd-fn]
-pub unsafe fn setpwd(sh: &mut crate::context::Shell, val: *const c_char, setold: c_int) -> Result<(), Error> {
-    if val.is_null() {
-        setpwd_inner(sh, Pwd::Unknown, setold)
-    } else {
-        let bytes = CStr::from_ptr(val).to_bytes();
-        setpwd_inner(sh, Pwd::New(BStr::new(bytes)), setold)
-    }
-}
-
-pub(crate) unsafe fn setpwd_inner(sh: &mut crate::context::Shell, val: Pwd, setold: c_int) -> Result<(), Error> {
+pub(crate) fn setpwd_inner(sh: &mut crate::context::Shell, val: Pwd, setold: c_int) -> Result<(), Error> {
     if setold != 0 {
-        let old = cbytes(&*addr_of!(sh.cwd.curdir));
-        setvar(sh, 
-            b"OLDPWD\0".as_ptr() as *const c_char,
-            old.as_ptr() as *const c_char,
-            VEXPORT,
-        )?;
+        let old = sh.cwd.curdir.clone().unwrap_or_default();
+        set_bytes(sh, BStr::new("OLDPWD"), Some(BStr::new(&old)), VEXPORT)?;
     }
-    INTOFF();
+    INTOFF(sh);
     /* `free(physdir)` guarded by `physdir != oldcur`: the C's `curdir` and
      * `physdir` are one allocation after a `setpwd(NULL, …)`, and the guard
      * exists only to stop the double free.  Two owned copies say the same
@@ -135,13 +118,9 @@ pub(crate) unsafe fn setpwd_inner(sh: &mut crate::context::Shell, val: Pwd, seto
             sh.cwd.curdir = Some(v.to_owned());
         }
     }
-    let dir = cbytes(&*addr_of!(sh.cwd.curdir));
-    INTON();
-    setvar(sh, 
-        b"PWD\0".as_ptr() as *const c_char,
-        dir.as_ptr() as *const c_char,
-        VEXPORT,
-    )?;
+    let dir = sh.cwd.curdir.clone().unwrap_or_default();
+    INTON(sh);
+    set_bytes(sh, BStr::new("PWD"), Some(BStr::new(&dir)), VEXPORT)?;
     Ok(())
 }
 
@@ -186,7 +165,7 @@ mod tests {
             };
             std::env::set_current_dir(&temporary).unwrap();
 
-            let got = unsafe { getpwd(sh).unwrap() };
+            let got = getpwd(sh).unwrap();
             assert_eq!(&got[..], temporary.as_os_str().as_bytes());
             assert!(!got.contains(&0));
         }
@@ -203,7 +182,7 @@ mod tests {
             std::env::set_current_dir(&temporary).unwrap();
             std::fs::remove_dir(&temporary).unwrap();
 
-            assert!(unsafe { getpwd(sh) }.is_none());
+            assert!(getpwd(sh).is_none());
         }
     }
 }

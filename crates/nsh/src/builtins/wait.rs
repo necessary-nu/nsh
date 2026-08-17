@@ -10,17 +10,16 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use libc::{c_int, pid_t};
+use core::ffi::{c_int};
 
 use crate::eval::Flow;
 use crate::jobs::{
     DOWAIT_WAITCMD, DOWAIT_WAITCMD_ALL, JOBRUNNING, dowait, getjob, getstatus,
 };
-use crate::options::Options;
 
 // [spec:dash:def:jobs.waitcmd-fn]
 // [spec:dash:sem:jobs.waitcmd-fn]
-pub unsafe fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut jobp: Option<usize>;
     let mut retval: c_int;
     let mut jp: Option<usize>;
@@ -48,7 +47,7 @@ pub unsafe fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 }
                 if dowait(sh, DOWAIT_WAITCMD_ALL, None)? == 0 {
                     // sigout:
-                    retval = 128 + crate::trap::pending_sig;
+                    retval = 128 + crate::siginbox::signals().pending_signal();
                     break 'out_lbl;
                 }
             }
@@ -56,10 +55,9 @@ pub unsafe fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
         retval = 127;
         for spec in operands {
-            let target = crate::shell::cstring(spec);
             'repeat: {
                 if spec.first() != Some(&b'%') {
-                    let pid: pid_t = crate::mystring::number(sh, target.as_ptr())?;
+                    let pid: i32 = crate::mystring::number(sh, spec)?;
                     jobp = sh.jobs.curjob;
                     /* `goto start` enters the do/while at `start:` */
                     let mut at_start = true;
@@ -81,12 +79,12 @@ pub unsafe fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                         }
                     }
                 } else {
-                    jobp = Some(getjob(sh, target.as_ptr(), 0)?);
+                    jobp = Some(getjob(sh, Some(spec), 0)?);
                 }
                 /* loop until process terminated or stopped */
                 if dowait(sh, DOWAIT_WAITCMD, jobp)? == 0 {
                     // sigout:
-                    retval = 128 + crate::trap::pending_sig;
+                    retval = 128 + crate::siginbox::signals().pending_signal();
                     break 'out_lbl;
                 }
                 let i = jobp.unwrap();

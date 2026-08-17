@@ -8,7 +8,7 @@
 //! listed in `dash_CFILES`** (src/Makefile.am:18-22):
 //!
 //! ```text
-//! alias arith_yacc arith_yylex cd error eval exec expand histedit input
+//! alias arith_yacc cd error eval exec expand histedit input
 //! jobs mail main memalloc miscbltin mystring options parser redir show
 //! trap output bltin/printf system bltin/test bltin/times var
 //! ```
@@ -26,8 +26,6 @@
 //! earlier note here claimed the two disagreed, which was wrong.
 
 use crate::context::Shell;
-use libc::c_void;
-
 use crate::nodes::Node;
 
 /*
@@ -36,7 +34,7 @@ use crate::nodes::Node;
 
 // [spec:dash:def:init.init-fn]
 // [spec:dash:sem:init.init-fn]
-pub unsafe fn init(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
+pub fn init(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
     init_from(sh, crate::var::EnvSource::Process)
 }
 
@@ -44,7 +42,7 @@ pub unsafe fn init(sh: &mut crate::context::Shell) -> Result<(), crate::error::E
 ///
 /// The only fragment that varies is `var`'s; the other three are the same
 /// whoever is building the shell, and the order of all four is `mkinit`'s.
-pub(crate) unsafe fn init_from(
+pub(crate) fn init_from(
     sh: &mut crate::context::Shell,
     env: crate::var::EnvSource<'_>,
 ) -> Result<(), crate::error::Error> {
@@ -53,12 +51,6 @@ pub(crate) unsafe fn init_from(
 
     /* from trap.c: */
     crate::trap::mkinit_init(sh);
-
-    /* from output.c: */
-    {
-        /* #ifdef USE_GLIBC_STDIO — not defined, so `initstreams()` is not
-         * called in the shipped build. */
-    }
 
     /* from var.c: */
     crate::var::mkinit_init_from(sh, env)
@@ -78,7 +70,7 @@ pub(crate) unsafe fn init_from(
 /// `EXEND` — see `eval::Flow`, whose doc comment records the audit
 /// `docs/api-design.md` 10.2 asked for — so it is the whole of what the
 /// two callers still have to say about which one arrived.
-pub unsafe fn exitreset(sh: &mut crate::context::Shell, by_exitcmd: bool) {
+pub fn exitreset(sh: &mut crate::context::Shell, by_exitcmd: bool) {
     /* from eval.c: */
     {
         if sh.eval.savestatus >= 0 {
@@ -92,14 +84,14 @@ pub unsafe fn exitreset(sh: &mut crate::context::Shell, by_exitcmd: bool) {
         sh.eval.inps4 = 0;
 
         if sh.eval.tpip[0] >= 0 {
-            libc::close(sh.eval.tpip[0]);
-            libc::close(sh.eval.tpip[1]);
+            let _ = nsh_platform::close_fd(sh.eval.tpip[0]);
+            let _ = nsh_platform::close_fd(sh.eval.tpip[1]);
         }
     }
 
     /* from expand.c: */
     {
-        crate::expand::ifsfree();
+        crate::expand::ifsfree(&mut sh.expand);
     }
 
     /* from redir.c: */
@@ -112,7 +104,7 @@ pub unsafe fn exitreset(sh: &mut crate::context::Shell, by_exitcmd: bool) {
 
 // [spec:dash:def:init.forkreset-fn]
 // [spec:dash:sem:init.forkreset-fn]
-pub unsafe fn forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
+pub fn forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
     /* from input.c: */
     crate::input::mkinit_forkreset(sh);
 
@@ -135,7 +127,7 @@ pub unsafe fn forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
 
 // [spec:dash:def:init.postexitreset-fn]
 // [spec:dash:sem:init.postexitreset-fn]
-pub unsafe fn postexitreset(sh: &mut Shell) {
+pub fn postexitreset(sh: &mut Shell) {
     /* from input.c: */
     crate::input::mkinit_postexitreset(sh);
 }
@@ -147,14 +139,13 @@ pub unsafe fn postexitreset(sh: &mut Shell) {
 
 // [spec:dash:def:init.reset-fn]
 // [spec:dash:sem:init.reset-fn]
-pub unsafe fn reset(sh: &mut crate::context::Shell) {
+pub fn reset(sh: &mut crate::context::Shell) {
     /* from input.c: */
     crate::input::mkinit_reset(sh);
 
     /* from output.c: */
     {
         /* #ifdef notyet — the memout teardown is not compiled. */
-        let _: *mut c_void = core::ptr::null_mut();
     }
 
     /* from var.c: */

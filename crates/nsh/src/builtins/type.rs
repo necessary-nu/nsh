@@ -10,37 +10,27 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use bstr::BStr;
-use core::ptr::{null, null_mut};
-use libc::{c_char, c_int};
-use std::ffi::CStr;
+use bstr::{BStr, BString, ByteSlice};
+use core::ffi::c_int;
 use std::io::Write;
 
 use crate::builtins::BUILTIN_SPECIAL;
 use crate::eval::Flow;
 use crate::exec::{
-    CMDBUILTIN, CMDFUNCTION, CMDNORMAL, DO_ABS, DO_ALTPATH, DO_NOFUNC, cmdentry, cmdlookup, find_builtin,
-    find_command, padvance, padvance_result, param, pathopt, tblentry,
+    CMDBUILTIN, CMDFUNCTION, CMDNORMAL, DO_ABS, PathCursor, cmdentry,
+    find_command, padvance,
 };
-use crate::options::Options;
 use crate::output::Dest;
 
 // [spec:dash:def:exec.typecmd-fn]
 // [spec:dash:sem:exec.typecmd-fn]
-pub unsafe fn typecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn typecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut err: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
     opts.next(sh, b"")?;
     for name in opts.operands() {
-        let name = crate::shell::cstring(name);
-        match describe_command(
-            sh,
-            Dest::Stdout,
-            name.as_ptr() as *mut c_char,
-            null(),
-            1,
-        )? {
+        match describe_command(sh, Dest::Stdout, name, None, 1)? {
             Flow::Done(status) => err |= status,
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
@@ -50,45 +40,43 @@ pub unsafe fn typecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
 // [spec:dash:def:exec.describe-command-fn]
 // [spec:dash:sem:exec.describe-command-fn]
-pub(crate) unsafe fn describe_command(
+pub(crate) fn describe_command(
     sh: &mut Shell,
     dest: Dest,
-    command: *mut c_char,
-    mut path: *const c_char,
+    command: &BStr,
+    path: Option<&BStr>,
     verbose: c_int,
 ) -> Result<Flow, Error> {
-    let mut entry: cmdentry = cmdentry {
-        cmdtype: 0,
-        u: param { index: 0 },
-    };
-    let cmdp: *mut tblentry;
-    let ap: *const crate::alias::alias;
+    let standard_search = path.is_none();
+    let path_value = path
+        .map(BString::from)
+        .unwrap_or_else(|| crate::var::pathval(sh));
+    let path = path_value.as_slice().as_bstr();
 
     'out_label: {
         if verbose != 0 {
-            let _ = sh.io.get(dest).write_all(CStr::from_ptr(command).to_bytes());
+            let _ = sh.io.get(dest).write_all(command);
         }
 
         /* First look at the keywords */
-        if !crate::parser::findkwd(command).is_null() {
+        if crate::parser::findkwd(command).is_some() {
             let bytes = if verbose != 0 {
                 b" is a shell keyword" as &[u8]
             } else {
-                CStr::from_ptr(command).to_bytes()
+                command.as_bytes()
             };
             let _ = sh.io.get(dest).write_all(bytes);
             break 'out_label;
         }
 
         /* Then look at the aliases */
-        ap = crate::alias::lookupalias(sh, command, 0);
-        if !ap.is_null() {
+        if let Some(alias) = crate::alias::lookup_alias(sh, command, false) {
             if verbose != 0 {
                 let mut record = b" is an alias for ".to_vec();
-                record.extend_from_slice(CStr::from_ptr((*ap).val).to_bytes());
+                record.extend_from_slice(&alias);
                 let _ = sh.io.get(dest).write_all(&record);
             } else {
-                let line = crate::alias::printalias(ap);
+                let line = crate::alias::printalias(command, alias.as_slice().as_bstr());
                 let io = sh.io.get(dest);
                 let _ = io.write_all(b"alias ");
                 let _ = io.write_all(&line);
@@ -100,16 +88,12 @@ pub(crate) unsafe fn describe_command(
         /* Then if the standard search path is used, check if it is
          * a tracked alias.
          */
-        if path.is_null() {
-            path = crate::var::pathval(sh);
-            cmdp = cmdlookup(sh, command, 0);
-        } else {
-            cmdp = null_mut();
-        }
-
-        if !cmdp.is_null() {
-            (*cmdp).write_to(&mut entry);
-        } else {
+        let tracked = standard_search
+            .then(|| sh.commands.resolved(command))
+            .flatten();
+        let was_tracked = tracked.is_some();
+        let mut entry = tracked.unwrap_or_else(cmdentry::unknown);
+        if !was_tracked {
             /* Finally use brute force */
             match find_command(sh, command, &mut entry, DO_ABS, path)? {
                 Flow::Done(_) => {}
@@ -117,32 +101,37 @@ pub(crate) unsafe fn describe_command(
             }
         }
 
-        match entry.cmdtype {
+        match entry.cmdtype() {
             CMDNORMAL => {
-                let mut j: c_int = entry.u.index;
-                let p: *mut c_char;
-                if j == -1 {
-                    p = command;
+                let mut j = entry.path_index();
+                let resolved: BString;
+                let path_bytes: &BStr = if j == -1 {
+                    command
                 } else {
+                    let mut cursor = PathCursor::new(path);
+                    let mut candidate = None;
                     loop {
-                        padvance(&mut path, command);
+                        candidate = padvance(&mut cursor, command);
                         j -= 1;
                         if j < 0 {
                             break;
                         }
                     }
-                    p = padvance_result();
-                }
+                    resolved = candidate
+                        .expect("a resolved PATH index must name a PATH element")
+                        .path;
+                    crate::mystring::cstr_prefix(&resolved)
+                };
                 if verbose != 0 {
                     let mut record = b" is".to_vec();
-                    if !cmdp.is_null() {
+                    if was_tracked {
                         record.extend_from_slice(b" a tracked alias for");
                     }
                     record.push(b' ');
-                    record.extend_from_slice(CStr::from_ptr(p).to_bytes());
+                    record.extend_from_slice(path_bytes);
                     let _ = sh.io.get(dest).write_all(&record);
                 } else {
-                    let _ = sh.io.get(dest).write_all(CStr::from_ptr(p).to_bytes());
+                    let _ = sh.io.get(dest).write_all(path_bytes);
                 }
             }
 
@@ -150,20 +139,20 @@ pub(crate) unsafe fn describe_command(
                 if verbose != 0 {
                     let _ = sh.io.get(dest).write_all(b" is a shell function");
                 } else {
-                    let _ = sh.io.get(dest).write_all(CStr::from_ptr(command).to_bytes());
+                    let _ = sh.io.get(dest).write_all(command);
                 }
             }
 
             CMDBUILTIN => {
                 if verbose != 0 {
-                    let record: &[u8] = if ((*entry.u.cmd).flags & BUILTIN_SPECIAL) != 0 {
+                    let record: &[u8] = if (entry.builtin().flags & BUILTIN_SPECIAL) != 0 {
                         b" is a special shell builtin"
                     } else {
                         b" is a shell builtin"
                     };
                     let _ = sh.io.get(dest).write_all(record);
                 } else {
-                    let _ = sh.io.get(dest).write_all(CStr::from_ptr(command).to_bytes());
+                    let _ = sh.io.get(dest).write_all(command);
                 }
             }
 

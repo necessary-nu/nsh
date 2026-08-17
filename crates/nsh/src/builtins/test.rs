@@ -1,705 +1,592 @@
-//! Literal port of `src/bltin/test.c` — the `test` / `[` builtin.
+//! The `test` / `[` builtin.
 //! Rules: `docs/spec/port/src/bltin/test.md`.
 //!
-//! `test_access` and `test_file_access` are also declared in `exec.h` and
-//! used by command lookup, so they are `pub` here and carry both the
-//! `test.*` and the `exec.*` rule ids.
-//!
-//! Configuration ported: `HAVE_FACCESSAT` defined (true on Linux/glibc),
-//! `HAVE_TRADITIONAL_FACCESSAT` undefined (configure only turns it on for
-//! FreeBSD / GNU-kFreeBSD), `HAVE_ST_MTIM` defined, `DEBUG` undefined.
-//! The bodies guarded by the other side of each `#if` are kept as comments
-//! where they change behaviour, and `test_access` — the `#else` branch of
-//! `HAVE_FACCESSAT` — is compiled in regardless because `exec.c` needs it.
-//!
-//! Cross-module signature assumed (see the port report):
-//! `crate::mystring::atomax10(*const c_char) -> intmax_t`.
+//! The original parser kept its cursor and last operator in two mutable
+//! globals and walked a synthetic `char **`. Here one parser borrows the
+//! builtin's words. Operators and operands are typed values, and filesystem
+//! questions cross the safe `nsh-platform` boundary.
+
+use std::cmp::Ordering;
+use std::ffi::{OsStr, OsString};
+use std::fs::Metadata;
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt};
+
+use bstr::BStr;
+use nsh_platform::AccessMode;
 
 use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
-use core::mem;
-use core::ptr;
-use libc::{c_char, c_int, c_short, intmax_t};
-use bstr::BStr;
-use std::ffi::{CStr, CString};
-
-/* test(1) accepts the following grammar:
-    oexpr	::= aexpr | aexpr "-o" oexpr ;
-    aexpr	::= nexpr | nexpr "-a" aexpr ;
-    nexpr	::= primary | "!" primary
-    primary	::= unary-operator operand
-        | operand binary-operator operand
-        | operand
-        | "(" oexpr ")"
-        ;
-    unary-operator ::= "-r"|"-w"|"-x"|"-f"|"-d"|"-c"|"-b"|"-p"|
-        "-u"|"-g"|"-k"|"-s"|"-t"|"-z"|"-n"|"-o"|"-O"|"-G"|"-L"|"-S";
-
-    binary-operator ::= "="|"!="|"-eq"|"-ne"|"-ge"|"-gt"|"-le"|"-lt"|
-            "-nt"|"-ot"|"-ef";
-    operand ::= <any legal UNIX file name>
-*/
 
 // [spec:dash:def:test.token]
-#[repr(i32)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum token {
-    EOI = 0,
-    FILRD,
-    FILWR,
-    FILEX,
-    FILEXIST,
-    FILREG,
-    FILDIR,
-    FILCDEV,
-    FILBDEV,
-    FILFIFO,
-    FILSOCK,
-    FILSYM,
-    FILGZ,
-    FILTT,
-    FILSUID,
-    FILSGID,
-    FILSTCK,
-    FILNT,
-    FILOT,
-    FILEQ,
-    FILUID,
-    FILGID,
-    STREZ,
-    STRNZ,
-    STREQ,
-    STRNE,
-    STRLT,
-    STRGT,
-    INTEQ,
-    INTNE,
-    INTGE,
-    INTGT,
-    INTLE,
-    INTLT,
-    UNOT,
-    BAND,
-    BOR,
-    LPAREN,
-    RPAREN,
-    OPERAND,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Token {
+    End,
+    FileReadable,
+    FileWritable,
+    FileExecutable,
+    FileExists,
+    FileRegular,
+    FileDirectory,
+    FileCharDevice,
+    FileBlockDevice,
+    FileFifo,
+    FileSocket,
+    FileSymlink,
+    FileNonempty,
+    FileTerminal,
+    FileSetUid,
+    FileSetGid,
+    FileSticky,
+    FileNewer,
+    FileOlder,
+    FileSame,
+    FileOwnedByUser,
+    FileOwnedByGroup,
+    StringEmpty,
+    StringNonempty,
+    StringEqual,
+    StringNotEqual,
+    StringLess,
+    StringGreater,
+    IntegerEqual,
+    IntegerNotEqual,
+    IntegerGreaterEqual,
+    IntegerGreater,
+    IntegerLessEqual,
+    IntegerLess,
+    Not,
+    And,
+    Or,
+    LeftParen,
+    RightParen,
+    Operand,
 }
 
 // [spec:dash:def:test.token-types]
-#[repr(i32)]
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum token_types {
-    UNOP = 0,
-    BINOP,
-    BUNOP,
-    BBINOP,
-    PAREN,
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OperatorKind {
+    Unary,
+    Binary,
+    BooleanUnary,
+    BooleanBinary,
+    Parenthesis,
 }
 
 // [spec:dash:def:test.t-op]
-#[repr(C)]
 #[derive(Clone, Copy)]
-pub struct t_op {
-    pub op_text: *const c_char,
-    pub op_num: c_short,
-    pub op_type: c_short,
+struct Operator {
+    text: &'static [u8],
+    token: Token,
+    kind: OperatorKind,
 }
 
-/// Table-entry constructor; only exists because Rust has no designated
-/// aggregate initialiser syntax that can call `CStr::as_ptr` inline.
-const fn op(text: &'static core::ffi::CStr, num: token, ty: token_types) -> t_op {
-    t_op {
-        op_text: text.as_ptr(),
-        op_num: num as c_short,
-        op_type: ty as c_short,
-    }
+const fn op(text: &'static [u8], token: Token, kind: OperatorKind) -> Operator {
+    Operator { text, token, kind }
 }
 
-/// `static struct t_op const ops[]` (src/bltin/test.c:91-135).
-///
-/// Rendered as `static mut` rather than `static` only because a `static`
-/// holding a raw pointer would have to be `Sync`; the table is never
-/// written.
-static mut ops: [t_op; 40] = [
-    op(c"-r", token::FILRD, token_types::UNOP),
-    op(c"-w", token::FILWR, token_types::UNOP),
-    op(c"-x", token::FILEX, token_types::UNOP),
-    op(c"-e", token::FILEXIST, token_types::UNOP),
-    op(c"-f", token::FILREG, token_types::UNOP),
-    op(c"-d", token::FILDIR, token_types::UNOP),
-    op(c"-c", token::FILCDEV, token_types::UNOP),
-    op(c"-b", token::FILBDEV, token_types::UNOP),
-    op(c"-p", token::FILFIFO, token_types::UNOP),
-    op(c"-u", token::FILSUID, token_types::UNOP),
-    op(c"-g", token::FILSGID, token_types::UNOP),
-    op(c"-k", token::FILSTCK, token_types::UNOP),
-    op(c"-s", token::FILGZ, token_types::UNOP),
-    op(c"-t", token::FILTT, token_types::UNOP),
-    op(c"-z", token::STREZ, token_types::UNOP),
-    op(c"-n", token::STRNZ, token_types::UNOP),
-    op(c"-h", token::FILSYM, token_types::UNOP), /* for backwards compat */
-    op(c"-O", token::FILUID, token_types::UNOP),
-    op(c"-G", token::FILGID, token_types::UNOP),
-    op(c"-L", token::FILSYM, token_types::UNOP),
-    op(c"-S", token::FILSOCK, token_types::UNOP),
-    op(c"=", token::STREQ, token_types::BINOP),
-    op(c"!=", token::STRNE, token_types::BINOP),
-    op(c"<", token::STRLT, token_types::BINOP),
-    op(c">", token::STRGT, token_types::BINOP),
-    op(c"-eq", token::INTEQ, token_types::BINOP),
-    op(c"-ne", token::INTNE, token_types::BINOP),
-    op(c"-ge", token::INTGE, token_types::BINOP),
-    op(c"-gt", token::INTGT, token_types::BINOP),
-    op(c"-le", token::INTLE, token_types::BINOP),
-    op(c"-lt", token::INTLT, token_types::BINOP),
-    op(c"-nt", token::FILNT, token_types::BINOP),
-    op(c"-ot", token::FILOT, token_types::BINOP),
-    op(c"-ef", token::FILEQ, token_types::BINOP),
-    op(c"!", token::UNOT, token_types::BUNOP),
-    op(c"-a", token::BAND, token_types::BBINOP),
-    op(c"-o", token::BOR, token_types::BBINOP),
-    op(c"(", token::LPAREN, token_types::PAREN),
-    op(c")", token::RPAREN, token_types::PAREN),
-    t_op {
-        op_text: ptr::null(),
-        op_num: 0,
-        op_type: 0,
-    },
+static OPERATORS: [Operator; 39] = [
+    op(b"-r", Token::FileReadable, OperatorKind::Unary),
+    op(b"-w", Token::FileWritable, OperatorKind::Unary),
+    op(b"-x", Token::FileExecutable, OperatorKind::Unary),
+    op(b"-e", Token::FileExists, OperatorKind::Unary),
+    op(b"-f", Token::FileRegular, OperatorKind::Unary),
+    op(b"-d", Token::FileDirectory, OperatorKind::Unary),
+    op(b"-c", Token::FileCharDevice, OperatorKind::Unary),
+    op(b"-b", Token::FileBlockDevice, OperatorKind::Unary),
+    op(b"-p", Token::FileFifo, OperatorKind::Unary),
+    op(b"-u", Token::FileSetUid, OperatorKind::Unary),
+    op(b"-g", Token::FileSetGid, OperatorKind::Unary),
+    op(b"-k", Token::FileSticky, OperatorKind::Unary),
+    op(b"-s", Token::FileNonempty, OperatorKind::Unary),
+    op(b"-t", Token::FileTerminal, OperatorKind::Unary),
+    op(b"-z", Token::StringEmpty, OperatorKind::Unary),
+    op(b"-n", Token::StringNonempty, OperatorKind::Unary),
+    op(b"-h", Token::FileSymlink, OperatorKind::Unary),
+    op(b"-O", Token::FileOwnedByUser, OperatorKind::Unary),
+    op(b"-G", Token::FileOwnedByGroup, OperatorKind::Unary),
+    op(b"-L", Token::FileSymlink, OperatorKind::Unary),
+    op(b"-S", Token::FileSocket, OperatorKind::Unary),
+    op(b"=", Token::StringEqual, OperatorKind::Binary),
+    op(b"!=", Token::StringNotEqual, OperatorKind::Binary),
+    op(b"<", Token::StringLess, OperatorKind::Binary),
+    op(b">", Token::StringGreater, OperatorKind::Binary),
+    op(b"-eq", Token::IntegerEqual, OperatorKind::Binary),
+    op(b"-ne", Token::IntegerNotEqual, OperatorKind::Binary),
+    op(b"-ge", Token::IntegerGreaterEqual, OperatorKind::Binary),
+    op(b"-gt", Token::IntegerGreater, OperatorKind::Binary),
+    op(b"-le", Token::IntegerLessEqual, OperatorKind::Binary),
+    op(b"-lt", Token::IntegerLess, OperatorKind::Binary),
+    op(b"-nt", Token::FileNewer, OperatorKind::Binary),
+    op(b"-ot", Token::FileOlder, OperatorKind::Binary),
+    op(b"-ef", Token::FileSame, OperatorKind::Binary),
+    op(b"!", Token::Not, OperatorKind::BooleanUnary),
+    op(b"-a", Token::And, OperatorKind::BooleanBinary),
+    op(b"-o", Token::Or, OperatorKind::BooleanBinary),
+    op(b"(", Token::LeftParen, OperatorKind::Parenthesis),
+    op(b")", Token::RightParen, OperatorKind::Parenthesis),
 ];
 
-static mut t_wp: *mut *mut c_char = ptr::null_mut();
-static mut t_wp_op: *const t_op = ptr::null();
-
-/// `enum token` is what `t_lex` and `binop` switch on, but the table stores
-/// the code in a `short`; C converts implicitly on return.
-#[inline]
-unsafe fn token_of(n: c_short) -> token {
-    mem::transmute(n as c_int)
+fn operator(word: &BStr) -> Option<&'static Operator> {
+    OPERATORS.iter().find(|candidate| candidate.text == word)
 }
 
-/// configure: `--enable-test-workaround`, defaulted on only for the
-/// FreeBSD / GNU-kFreeBSD kernels (configure.ac:110-126). Off for Linux.
+/// configure's FreeBSD-only `--enable-test-workaround`; false on Linux.
 const HAVE_TRADITIONAL_FACCESSAT: bool = false;
 
 // [spec:dash:def:test.faccessat-confused-about-superuser-fn]
 // [spec:dash:sem:test.faccessat-confused-about-superuser-fn]
 #[inline]
-unsafe fn faccessat_confused_about_superuser() -> c_int {
-    if HAVE_TRADITIONAL_FACCESSAT { 1 } else { 0 }
+fn faccessat_confused_about_superuser() -> bool {
+    HAVE_TRADITIONAL_FACCESSAT
+}
+
+fn is_c_space(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
 }
 
 // [spec:dash:def:test.getn-fn]
 // [spec:dash:sem:test.getn-fn]
-#[inline]
-unsafe fn getn(sh: &mut crate::context::Shell, s: *const c_char) -> Result<intmax_t, Error> {
-    crate::mystring::atomax10(sh, s)
-}
-
-// [spec:dash:def:test.getop-fn]
-// [spec:dash:sem:test.getop-fn]
-unsafe fn getop(s: *const c_char) -> *const t_op {
-    let mut op: *const t_op;
-
-    op = ptr::addr_of!(ops) as *const t_op;
-    while !(*op).op_text.is_null() {
-        if CStr::from_ptr(s).to_bytes() == CStr::from_ptr((*op).op_text).to_bytes() {
-            return op;
-        }
-        op = op.add(1);
+fn getn(sh: &mut Shell, word: &BStr) -> Result<i64, Error> {
+    let bytes: &[u8] = word.as_ref();
+    let mut start = 0;
+    while bytes.get(start).is_some_and(|byte| is_c_space(*byte)) {
+        start += 1;
+    }
+    let mut end = bytes.len();
+    while end > start && is_c_space(bytes[end - 1]) {
+        end -= 1;
     }
 
-    ptr::null()
+    let (negative, digits) = match bytes.get(start) {
+        Some(b'-') => (true, start + 1),
+        Some(b'+') => (false, start + 1),
+        _ => (false, start),
+    };
+    if digits == end || !bytes[digits..end].iter().all(u8::is_ascii_digit) {
+        let mut message = b"Illegal number: ".to_vec();
+        message.extend_from_slice(bytes);
+        return Err(sh.sh_error_value(&message));
+    }
+
+    let limit = if negative {
+        (i64::MAX as u64) + 1
+    } else {
+        i64::MAX as u64
+    };
+    let mut magnitude = 0u64;
+    for &digit in &bytes[digits..end] {
+        magnitude = magnitude
+            .saturating_mul(10)
+            .saturating_add((digit - b'0') as u64)
+            .min(limit);
+    }
+    Ok(if negative {
+        if magnitude == limit {
+            i64::MIN
+        } else {
+            -(magnitude as i64)
+        }
+    } else {
+        magnitude as i64
+    })
+}
+
+struct TestParser<'a> {
+    words: &'a [&'a BStr],
+    pos: usize,
+    last_operator: Option<&'static Operator>,
+}
+
+impl<'a> TestParser<'a> {
+    fn new(words: &'a [&'a BStr]) -> Self {
+        Self {
+            words,
+            pos: 0,
+            last_operator: None,
+        }
+    }
+
+    fn word(&self, pos: usize) -> Option<&'a BStr> {
+        self.words.get(pos).copied()
+    }
+
+    // [spec:dash:def:test.getop-fn]
+    // [spec:dash:sem:test.getop-fn]
+    fn getop(&self, pos: usize) -> Option<&'static Operator> {
+        self.word(pos).and_then(operator)
+    }
+
+    // [spec:dash:def:test.t-lex-fn]
+    // [spec:dash:sem:test.t-lex-fn]
+    fn lex(&mut self, pos: usize) -> Token {
+        let Some(word) = self.word(pos) else {
+            self.last_operator = None;
+            return Token::End;
+        };
+        let Some(candidate) = operator(word) else {
+            self.last_operator = None;
+            return Token::Operand;
+        };
+
+        if (candidate.kind == OperatorKind::Unary && self.is_operand(pos))
+            || (candidate.token == Token::LeftParen && self.word(pos + 1).is_none())
+        {
+            self.last_operator = None;
+            Token::Operand
+        } else {
+            self.last_operator = Some(candidate);
+            candidate.token
+        }
+    }
+
+    // [spec:dash:def:test.isoperand-fn]
+    // [spec:dash:sem:test.isoperand-fn]
+    fn is_operand(&self, pos: usize) -> bool {
+        if self.word(pos + 1).is_none() {
+            return true;
+        }
+        if self.word(pos + 2).is_none() {
+            return false;
+        }
+        self.getop(pos + 1)
+            .is_some_and(|op| op.kind == OperatorKind::Binary)
+    }
+
+    // [spec:dash:def:test.oexpr-fn]
+    // [spec:dash:sem:test.oexpr-fn]
+    fn or_expr(&mut self, sh: &mut Shell, mut token: Token) -> Result<bool, Error> {
+        let mut result = false;
+        loop {
+            result |= self.and_expr(sh, token)?;
+            if self.word(self.pos).is_none() {
+                break;
+            }
+            token = self.lex(self.pos + 1);
+            if token != Token::Or {
+                break;
+            }
+            self.pos += 2;
+            token = self.lex(self.pos);
+        }
+        Ok(result)
+    }
+
+    // [spec:dash:def:test.aexpr-fn]
+    // [spec:dash:sem:test.aexpr-fn]
+    fn and_expr(&mut self, sh: &mut Shell, mut token: Token) -> Result<bool, Error> {
+        let mut result = true;
+        loop {
+            if !self.not_expr(sh, token)? {
+                result = false;
+            }
+            if self.word(self.pos).is_none() {
+                break;
+            }
+            token = self.lex(self.pos + 1);
+            if token != Token::And {
+                break;
+            }
+            self.pos += 2;
+            token = self.lex(self.pos);
+        }
+        Ok(result)
+    }
+
+    // [spec:dash:def:test.nexpr-fn]
+    // [spec:dash:sem:test.nexpr-fn]
+    fn not_expr(&mut self, sh: &mut Shell, mut token: Token) -> Result<bool, Error> {
+        if token != Token::Not {
+            return self.primary(sh, token);
+        }
+        token = self.lex(self.pos + 1);
+        if token != Token::End {
+            self.pos += 1;
+        }
+        Ok(!self.not_expr(sh, token)?)
+    }
+
+    // [spec:dash:def:test.primary-fn]
+    // [spec:dash:sem:test.primary-fn]
+    fn primary(&mut self, sh: &mut Shell, token: Token) -> Result<bool, Error> {
+        if token == Token::End {
+            return Ok(false);
+        }
+        if token == Token::LeftParen {
+            self.pos += 1;
+            let nested = self.lex(self.pos);
+            if nested == Token::RightParen {
+                return Ok(false);
+            }
+            let result = self.or_expr(sh, nested)?;
+            self.pos += 1;
+            if self.lex(self.pos) != Token::RightParen {
+                return Err(syntax(sh, None, b"closing paren expected"));
+            }
+            return Ok(result);
+        }
+
+        if let Some(op) = self
+            .last_operator
+            .filter(|op| op.kind == OperatorKind::Unary)
+        {
+            self.pos += 1;
+            let Some(operand) = self.word(self.pos) else {
+                return Err(syntax(sh, Some(op.text), b"argument expected"));
+            };
+            return self.unary(sh, token, operand);
+        }
+
+        self.lex(self.pos + 1);
+        if self
+            .last_operator
+            .is_some_and(|op| op.kind == OperatorKind::Binary)
+        {
+            return self.binary(sh);
+        }
+
+        Ok(self.word(self.pos).is_some_and(|word| !word.is_empty()))
+    }
+
+    fn unary(&self, sh: &mut Shell, token: Token, operand: &BStr) -> Result<bool, Error> {
+        Ok(match token {
+            Token::StringEmpty => operand.is_empty(),
+            Token::StringNonempty => !operand.is_empty(),
+            Token::FileTerminal => nsh_platform::is_terminal(getn(sh, operand)? as i32),
+            Token::FileReadable => test_file_access(operand, AccessMode::READ_OK),
+            Token::FileWritable => test_file_access(operand, AccessMode::WRITE_OK),
+            Token::FileExecutable => test_file_access(operand, AccessMode::EXEC_OK),
+            _ => file_stat(operand, token),
+        })
+    }
+
+    // [spec:dash:def:test.binop-fn]
+    // [spec:dash:sem:test.binop-fn]
+    fn binary(&mut self, sh: &mut Shell) -> Result<bool, Error> {
+        let left = self.word(self.pos).expect("binary operator has a left operand");
+        self.pos += 1;
+        self.lex(self.pos);
+        let op = self.last_operator.expect("binary token names an operator");
+        self.pos += 1;
+        let Some(right) = self.word(self.pos) else {
+            return Err(syntax(sh, Some(op.text), b"argument expected"));
+        };
+
+        Ok(match op.token {
+            Token::StringNotEqual => left != right,
+            Token::StringLess => nsh_platform::collate(left, right) == Ordering::Less,
+            Token::StringGreater => nsh_platform::collate(left, right) == Ordering::Greater,
+            Token::IntegerEqual => getn(sh, left)? == getn(sh, right)?,
+            Token::IntegerNotEqual => getn(sh, left)? != getn(sh, right)?,
+            Token::IntegerGreaterEqual => getn(sh, left)? >= getn(sh, right)?,
+            Token::IntegerGreater => getn(sh, left)? > getn(sh, right)?,
+            Token::IntegerLessEqual => getn(sh, left)? <= getn(sh, right)?,
+            Token::IntegerLess => getn(sh, left)? < getn(sh, right)?,
+            Token::FileNewer => newer(left, right),
+            Token::FileOlder => older(left, right),
+            Token::FileSame => same_file(left, right),
+            _ => left == right,
+        })
+    }
 }
 
 // [spec:dash:def:test.testcmd-fn]
 // [spec:dash:sem:test.testcmd-fn]
-pub unsafe fn testcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut op: *const t_op;
-    let n: token;
-    let mut res: c_int = 1;
-
-    /* The expression walker below is a recursive descent over the words
-     * sharing one cursor (`t_wp`), and `[` writes into the array to drop
-     * its own `]`. Both want the words as an array for the length of the
-     * call, so this builtin builds one -- rather than `evalcommand`
-     * building one for every builtin whether it wanted one or not. */
-    let words: Vec<CString> = args.iter().map(|w| crate::shell::cstring(w)).collect();
-    let mut slots: Vec<*mut c_char> = words.iter().map(|w| w.as_ptr() as *mut c_char).collect();
-    slots.push(ptr::null_mut());
-    let mut argc: c_int = args.len() as c_int;
-    let mut argv: *mut *mut c_char = slots.as_mut_ptr();
-
-    if **argv == b'[' as c_char {
-        argc -= 1;
-        if *(*argv.add(argc as usize)) != b']' as c_char {
+pub fn testcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+    let Some(command) = args.first() else {
+        return Ok(Flow::Done(1));
+    };
+    let mut expression = &args[1..];
+    if *command == b"[".as_slice() {
+        if expression
+            .last()
+            .is_none_or(|word| word.first() != Some(&b']'))
+        {
             return Err(sh.sh_error_value(b"missing ]"));
         }
-        *argv.add(argc as usize) = ptr::null_mut();
+        expression = &expression[..expression.len() - 1];
     }
 
-    t_wp_op = ptr::null();
-
-    // `goto eval` leaves the loop with `n` already chosen.
-    'eval: {
-        'recheck: loop {
-            argv = argv.add(1);
-            argc -= 1;
-
-            if argc < 1 {
-                return Ok(Flow::Done(res));
-            }
-
-            /*
-             * POSIX prescriptions: he who wrote this deserves the Nobel
-             * peace prize.
-             */
-            // switch (argc) { case 3: ... /* fall through */ case 4: ... }
-            if argc == 3 {
-                op = getop(*argv.add(1));
-                if !op.is_null() && (*op).op_type == token_types::BINOP as c_short {
-                    n = token::OPERAND;
-                    break 'eval;
-                }
-                /* fall through */
-            }
-            if argc == 3 || argc == 4 {
-                if CStr::from_ptr(*argv).to_bytes() == b"("
-                    && CStr::from_ptr(*argv.add((argc - 1) as usize)).to_bytes() == b")"
-                {
-                    argc -= 1;
-                    *argv.add(argc as usize) = ptr::null_mut();
-                    argv = argv.add(1);
-                    argc -= 1;
-                } else if CStr::from_ptr(*argv).to_bytes() == b"!" {
-                    res = 0;
-                    continue 'recheck;
-                }
-            }
-
-            n = t_lex(argv);
-            break 'recheck;
+    let mut result = 1;
+    loop {
+        if expression.is_empty() {
+            return Ok(Flow::Done(result));
         }
+
+        let forced_operand = expression.len() == 3
+            && operator(expression[1]).is_some_and(|op| op.kind == OperatorKind::Binary);
+        if !forced_operand && matches!(expression.len(), 3 | 4) {
+            if expression.first() == Some(&BStr::new(b"("))
+                && expression.last() == Some(&BStr::new(b")"))
+            {
+                expression = &expression[1..expression.len() - 1];
+            } else if expression.first() == Some(&BStr::new(b"!")) {
+                result = 0;
+                expression = &expression[1..];
+                continue;
+            }
+        }
+
+        let mut parser = TestParser::new(expression);
+        let first = if forced_operand {
+            Token::Operand
+        } else {
+            parser.lex(0)
+        };
+        let value = parser.or_expr(sh, first)?;
+        if parser.word(parser.pos).is_some() && parser.word(parser.pos + 1).is_some() {
+            let unexpected = parser.word(parser.pos).unwrap();
+            return Err(syntax(sh, Some(unexpected), b"unexpected operator"));
+        }
+        return Ok(Flow::Done(result ^ i32::from(value)));
     }
-
-    // eval:
-    t_wp = argv;
-    res ^= oexpr(sh, n)?;
-    argv = t_wp;
-
-    if !(*argv).is_null() && !(*argv.add(1)).is_null() {
-        return Err(syntax(sh, *argv, c"unexpected operator".as_ptr()));
-    }
-
-    Ok(Flow::Done(res))
 }
 
 // [spec:dash:def:test.syntax-fn]
 // [spec:dash:sem:test.syntax-fn]
-// The C's `syntax` does not return, because `sh_error` longjmps out of
-// it. Here it builds the error and the caller's `?` does the leaving --
-// the same bytes, written at the same point, by the same funnel.
-unsafe fn syntax(sh: &mut crate::context::Shell, op: *const c_char, msg: *const c_char) -> Error {
-    let mut message = Vec::new();
-    if !op.is_null() && *op != 0 {
-        message.extend_from_slice(CStr::from_ptr(op).to_bytes());
-        message.extend_from_slice(b": ");
+fn syntax(sh: &mut Shell, op: Option<&[u8]>, message: &[u8]) -> Error {
+    let mut text = Vec::new();
+    if let Some(op) = op.filter(|op| !op.is_empty()) {
+        text.extend_from_slice(op);
+        text.extend_from_slice(b": ");
     }
-    message.extend_from_slice(CStr::from_ptr(msg).to_bytes());
-    sh.sh_error_value(&message)
+    text.extend_from_slice(message);
+    sh.sh_error_value(&text)
 }
 
-// [spec:dash:def:test.oexpr-fn]
-// [spec:dash:sem:test.oexpr-fn]
-unsafe fn oexpr(sh: &mut crate::context::Shell, mut n: token) -> Result<c_int, Error> {
-    let mut res: c_int = 0;
-
-    loop {
-        res |= aexpr(sh, n)?;
-        if (*t_wp).is_null() {
-            break;
-        }
-        n = t_lex(t_wp.add(1));
-        if n != token::BOR {
-            break;
-        }
-        t_wp = t_wp.add(2);
-        n = t_lex(t_wp);
-    }
-    Ok(res)
+fn path(word: &BStr) -> OsString {
+    OsString::from_vec(<BStr as AsRef<[u8]>>::as_ref(word).to_vec())
 }
 
-// [spec:dash:def:test.aexpr-fn]
-// [spec:dash:sem:test.aexpr-fn]
-unsafe fn aexpr(sh: &mut crate::context::Shell, mut n: token) -> Result<c_int, Error> {
-    let mut res: c_int = 1;
-
-    loop {
-        if nexpr(sh, n)? == 0 {
-            res = 0;
-        }
-        if (*t_wp).is_null() {
-            break;
-        }
-        n = t_lex(t_wp.add(1));
-        if n != token::BAND {
-            break;
-        }
-        t_wp = t_wp.add(2);
-        n = t_lex(t_wp);
+fn metadata(word: &BStr, follow: bool) -> Option<Metadata> {
+    let path = path(word);
+    if follow {
+        std::fs::metadata(path)
+    } else {
+        std::fs::symlink_metadata(path)
     }
-    Ok(res)
-}
-
-// [spec:dash:def:test.nexpr-fn]
-// [spec:dash:sem:test.nexpr-fn]
-unsafe fn nexpr(sh: &mut crate::context::Shell, mut n: token) -> Result<c_int, Error> {
-    if n != token::UNOT {
-        return primary(sh, n);
-    }
-
-    n = t_lex(t_wp.add(1));
-    if n != token::EOI {
-        t_wp = t_wp.add(1);
-    }
-    Ok((nexpr(sh, n)? == 0) as c_int)
-}
-
-// [spec:dash:def:test.primary-fn]
-// [spec:dash:sem:test.primary-fn]
-unsafe fn primary(sh: &mut crate::context::Shell, n: token) -> Result<c_int, Error> {
-    let nn: token;
-    let res: c_int;
-
-    if n == token::EOI {
-        return Ok(0); /* missing expression */
-    }
-    if n == token::LPAREN {
-        t_wp = t_wp.add(1);
-        nn = t_lex(t_wp);
-        if nn == token::RPAREN {
-            return Ok(0); /* missing expression */
-        }
-        res = oexpr(sh, nn)?;
-        t_wp = t_wp.add(1);
-        if t_lex(t_wp) != token::RPAREN {
-            return Err(syntax(sh, ptr::null(), c"closing paren expected".as_ptr()));
-        }
-        return Ok(res);
-    }
-    if !t_wp_op.is_null() && (*t_wp_op).op_type == token_types::UNOP as c_short {
-        /* unary expression */
-        t_wp = t_wp.add(1);
-        if (*t_wp).is_null() {
-            return Err(syntax(sh, (*t_wp_op).op_text, c"argument expected".as_ptr()));
-        }
-        match n {
-            token::STREZ => return Ok(CStr::from_ptr(*t_wp).to_bytes().is_empty() as c_int),
-            token::STRNZ => return Ok((!CStr::from_ptr(*t_wp).to_bytes().is_empty()) as c_int),
-            token::FILTT => return Ok(libc::isatty(getn(sh, *t_wp)? as c_int)),
-            // #ifdef HAVE_FACCESSAT
-            token::FILRD => return Ok(test_file_access(*t_wp, libc::R_OK)),
-            token::FILWR => return Ok(test_file_access(*t_wp, libc::W_OK)),
-            token::FILEX => return Ok(test_file_access(*t_wp, libc::X_OK)),
-            // #endif
-            _ => return Ok(filstat(*t_wp, n)),
-        }
-    }
-
-    // if (t_lex(t_wp + 1), t_wp_op && t_wp_op->op_type == BINOP)
-    t_lex(t_wp.add(1));
-    if !t_wp_op.is_null() && (*t_wp_op).op_type == token_types::BINOP as c_short {
-        return binop(sh);
-    }
-
-    Ok((!CStr::from_ptr(*t_wp).to_bytes().is_empty()) as c_int)
-}
-
-// [spec:dash:def:test.binop-fn]
-// [spec:dash:sem:test.binop-fn]
-unsafe fn binop(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
-    let opnd1: *const c_char;
-    let opnd2: *const c_char;
-    let op: *const t_op;
-
-    opnd1 = *t_wp;
-    t_wp = t_wp.add(1);
-    t_lex(t_wp);
-    op = t_wp_op;
-
-    t_wp = t_wp.add(1);
-    opnd2 = *t_wp;
-    if opnd2.is_null() {
-        return Err(syntax(sh, (*op).op_text, c"argument expected".as_ptr()));
-    }
-
-    // The C `switch` opens with `default:` (an `abort()` under DEBUG, which
-    // is not defined here) falling through into `case STREQ`; the `_` arm
-    // below is that same default, moved last because Rust requires it.
-    Ok(match token_of((*op).op_num) {
-        token::STRNE => (CStr::from_ptr(opnd1).to_bytes() != CStr::from_ptr(opnd2).to_bytes()) as c_int,
-        token::STRLT => (libc::strcoll(opnd1, opnd2) < 0) as c_int,
-        token::STRGT => (libc::strcoll(opnd1, opnd2) > 0) as c_int,
-        token::INTEQ => (getn(sh, opnd1)? == getn(sh, opnd2)?) as c_int,
-        token::INTNE => (getn(sh, opnd1)? != getn(sh, opnd2)?) as c_int,
-        token::INTGE => (getn(sh, opnd1)? >= getn(sh, opnd2)?) as c_int,
-        token::INTGT => (getn(sh, opnd1)? > getn(sh, opnd2)?) as c_int,
-        token::INTLE => (getn(sh, opnd1)? <= getn(sh, opnd2)?) as c_int,
-        token::INTLT => (getn(sh, opnd1)? < getn(sh, opnd2)?) as c_int,
-        token::FILNT => newerf(opnd1, opnd2) as c_int,
-        token::FILOT => olderf(opnd1, opnd2) as c_int,
-        token::FILEQ => equalf(opnd1, opnd2),
-        // case STREQ: (and default:)
-        _ => (CStr::from_ptr(opnd1).to_bytes() == CStr::from_ptr(opnd2).to_bytes()) as c_int,
-    })
+    .ok()
 }
 
 // [spec:dash:def:test.filstat-fn]
 // [spec:dash:sem:test.filstat-fn]
-unsafe fn filstat(nm: *mut c_char, mode: token) -> c_int {
-    let mut s: libc::stat64 = mem::zeroed();
-
-    if (if mode == token::FILSYM {
-        libc::lstat64(nm, &mut s)
-    } else {
-        libc::stat64(nm, &mut s)
-    }) != 0
-    {
-        return 0;
-    }
-
-    match mode {
-        // #ifndef HAVE_FACCESSAT
-        //   case FILRD: return test_access(&s, R_OK);
-        //   case FILWR: return test_access(&s, W_OK);
-        //   case FILEX: return test_access(&s, X_OK);
-        // #endif
-        token::FILEXIST => 1,
-        token::FILREG => ((s.st_mode & libc::S_IFMT) == libc::S_IFREG) as c_int,
-        token::FILDIR => ((s.st_mode & libc::S_IFMT) == libc::S_IFDIR) as c_int,
-        token::FILCDEV => ((s.st_mode & libc::S_IFMT) == libc::S_IFCHR) as c_int,
-        token::FILBDEV => ((s.st_mode & libc::S_IFMT) == libc::S_IFBLK) as c_int,
-        token::FILFIFO => ((s.st_mode & libc::S_IFMT) == libc::S_IFIFO) as c_int,
-        token::FILSOCK => ((s.st_mode & libc::S_IFMT) == libc::S_IFSOCK) as c_int,
-        token::FILSYM => ((s.st_mode & libc::S_IFMT) == libc::S_IFLNK) as c_int,
-        token::FILSUID => ((s.st_mode & libc::S_ISUID) != 0) as c_int,
-        token::FILSGID => ((s.st_mode & libc::S_ISGID) != 0) as c_int,
-        // #ifdef S_ISVTX
-        token::FILSTCK => ((s.st_mode & libc::S_ISVTX) != 0) as c_int,
-        // #endif
-        token::FILGZ => (s.st_size != 0) as c_int,
-        token::FILUID => (s.st_uid == libc::geteuid()) as c_int,
-        token::FILGID => (s.st_gid == libc::getegid()) as c_int,
-        _ => 1,
+fn file_stat(word: &BStr, token: Token) -> bool {
+    let Some(metadata) = metadata(word, token != Token::FileSymlink) else {
+        return false;
+    };
+    let file_type = metadata.file_type();
+    match token {
+        Token::FileExists => true,
+        Token::FileRegular => file_type.is_file(),
+        Token::FileDirectory => file_type.is_dir(),
+        Token::FileCharDevice => file_type.is_char_device(),
+        Token::FileBlockDevice => file_type.is_block_device(),
+        Token::FileFifo => file_type.is_fifo(),
+        Token::FileSocket => file_type.is_socket(),
+        Token::FileSymlink => file_type.is_symlink(),
+        Token::FileSetUid => metadata.mode() & 0o4000 != 0,
+        Token::FileSetGid => metadata.mode() & 0o2000 != 0,
+        Token::FileSticky => metadata.mode() & 0o1000 != 0,
+        Token::FileNonempty => metadata.size() != 0,
+        Token::FileOwnedByUser => metadata.uid() == nsh_platform::effective_uid().as_raw(),
+        Token::FileOwnedByGroup => metadata.gid() == nsh_platform::effective_gid().as_raw(),
+        _ => true,
     }
 }
 
-// [spec:dash:def:test.t-lex-fn]
-// [spec:dash:sem:test.t-lex-fn]
-unsafe fn t_lex(tp: *mut *mut c_char) -> token {
-    let op: *const t_op;
-    let s: *mut c_char = *tp;
-
-    if s.is_null() {
-        t_wp_op = ptr::null();
-        return token::EOI;
-    }
-
-    op = getop(s);
-    if !op.is_null()
-        && !((*op).op_type == token_types::UNOP as c_short && isoperand(tp) != 0)
-        && !((*op).op_num == token::LPAREN as c_short && (*tp.add(1)).is_null())
-    {
-        t_wp_op = op;
-        return token_of((*op).op_num);
-    }
-
-    t_wp_op = ptr::null();
-    token::OPERAND
-}
-
-// [spec:dash:def:test.isoperand-fn]
-// [spec:dash:sem:test.isoperand-fn]
-unsafe fn isoperand(tp: *mut *mut c_char) -> c_int {
-    let op: *const t_op;
-    let s: *mut c_char;
-
-    s = *tp.add(1);
-    if s.is_null() {
-        return 1;
-    }
-    if (*tp.add(2)).is_null() {
-        return 0;
-    }
-
-    op = getop(s);
-    (!op.is_null() && (*op).op_type == token_types::BINOP as c_short) as c_int
+fn modified(metadata: &Metadata) -> (i64, i64) {
+    (metadata.mtime(), metadata.mtime_nsec())
 }
 
 // [spec:dash:def:test.newerf-fn]
 // [spec:dash:sem:test.newerf-fn]
-unsafe fn newerf(f1: *const c_char, f2: *const c_char) -> bool {
-    let mut b1: libc::stat64 = mem::zeroed();
-    let mut b2: libc::stat64 = mem::zeroed();
-
-    if libc::stat64(f1, &mut b1) != 0 {
+fn newer(left: &BStr, right: &BStr) -> bool {
+    let Some(left) = metadata(left, true) else {
         return false;
-    }
-    if libc::stat64(f2, &mut b2) != 0 {
+    };
+    let Some(right) = metadata(right, true) else {
         return true;
-    }
-
-    // #ifdef HAVE_ST_MTIM — libc names the members st_mtime/st_mtime_nsec.
-    b1.st_mtime > b2.st_mtime || (b1.st_mtime == b2.st_mtime && b1.st_mtime_nsec > b2.st_mtime_nsec)
-    // #else return b1.st_mtime > b2.st_mtime;
+    };
+    modified(&left) > modified(&right)
 }
 
 // [spec:dash:def:test.olderf-fn]
 // [spec:dash:sem:test.olderf-fn]
-unsafe fn olderf(f1: *const c_char, f2: *const c_char) -> bool {
-    let mut b1: libc::stat64 = mem::zeroed();
-    let mut b2: libc::stat64 = mem::zeroed();
-
-    if libc::stat64(f2, &mut b2) != 0 {
+fn older(left: &BStr, right: &BStr) -> bool {
+    let Some(right) = metadata(right, true) else {
         return false;
-    }
-    if libc::stat64(f1, &mut b1) != 0 {
+    };
+    let Some(left) = metadata(left, true) else {
         return true;
-    }
-
-    // #ifdef HAVE_ST_MTIM
-    b1.st_mtime < b2.st_mtime || (b1.st_mtime == b2.st_mtime && b1.st_mtime_nsec < b2.st_mtime_nsec)
-    // #else return b1.st_mtime < b2.st_mtime;
+    };
+    modified(&left) < modified(&right)
 }
 
 // [spec:dash:def:test.equalf-fn]
 // [spec:dash:sem:test.equalf-fn]
-unsafe fn equalf(f1: *const c_char, f2: *const c_char) -> c_int {
-    let mut b1: libc::stat64 = mem::zeroed();
-    let mut b2: libc::stat64 = mem::zeroed();
-
-    (libc::stat64(f1, &mut b1) == 0
-        && libc::stat64(f2, &mut b2) == 0
-        && b1.st_dev == b2.st_dev
-        && b1.st_ino == b2.st_ino) as c_int
+fn same_file(left: &BStr, right: &BStr) -> bool {
+    let (Some(left), Some(right)) = (metadata(left, true), metadata(right, true)) else {
+        return false;
+    };
+    left.dev() == right.dev() && left.ino() == right.ino()
 }
-
-// #ifdef HAVE_FACCESSAT
 
 // [spec:dash:def:test.has-exec-bit-set-fn]
 // [spec:dash:sem:test.has-exec-bit-set-fn]
-unsafe fn has_exec_bit_set(path: *const c_char) -> c_int {
-    let mut st: libc::stat64 = mem::zeroed();
-
-    if libc::stat64(path, &mut st) != 0 {
-        return 0;
-    }
-    (st.st_mode & (libc::S_IXUSR | libc::S_IXGRP | libc::S_IXOTH)) as c_int
+fn has_exec_bit_set(path: &BStr) -> bool {
+    metadata(path, true).is_some_and(|metadata| metadata.mode() & 0o111 != 0)
 }
 
 // [spec:dash:def:test.test-file-access-fn]
 // [spec:dash:sem:test.test-file-access-fn]
 // [spec:dash:def:exec.test-file-access-fn]
 // [spec:dash:sem:exec.test-file-access-fn]
-pub unsafe fn test_file_access(path: *const c_char, mode: c_int) -> c_int {
-    if faccessat_confused_about_superuser() != 0
-        && mode == libc::X_OK
-        && libc::geteuid() == 0
-        && has_exec_bit_set(path) == 0
+pub fn test_file_access(path: &BStr, access: AccessMode) -> bool {
+    if faccessat_confused_about_superuser()
+        && access == AccessMode::EXEC_OK
+        && nsh_platform::effective_uid().is_root()
+        && !has_exec_bit_set(path)
     {
-        return 0;
+        return false;
     }
-    (libc::faccessat(libc::AT_FDCWD, path, mode, libc::AT_EACCESS) == 0) as c_int
+    nsh_platform::effective_access(OsStr::from_bytes(path.as_ref()), access)
 }
-
-// #else	/* HAVE_FACCESSAT */
-/*
- * The manual, and IEEE POSIX 1003.2, suggests this should check the mode
- * bits, not use access():
- *
- *	True shall indicate only that the write flag is on.  The file is not
- *	writable on a read-only file system even if this test indicates true.
- *
- * [... src/bltin/test.c:540-661 carries a long rationale for testing the
- * mode bits directly rather than calling access(); it is not reproduced
- * here in full ...]
- *
- * The ksh93 implementation uses access() for '-r' and '-w' if
- * (euid==uid&&egid==gid), but uses st_mode for '-x' iff running as root.
- * i.e. it does strictly conform to 1003.1-2001 (and presumably 1003.2b).
- */
 
 // [spec:dash:def:test.test-access-fn]
 // [spec:dash:sem:test.test-access-fn]
 // [spec:dash:def:exec.test-access-fn]
 // [spec:dash:sem:exec.test-access-fn]
-pub unsafe fn test_access(sp: *const libc::stat64, mut stmode: c_int) -> c_int {
-    let groups: *mut libc::gid_t;
-    let mut n: c_int;
-    let euid: libc::uid_t;
-    let maxgroups: c_int;
-
-    /*
-     * I suppose we could use access() if not running as root and if we are
-     * running with ((euid == uid) && (egid == gid)), but we've already
-     * done the stat() so we might as well just test the permissions
-     * directly instead of asking the kernel to do it....
-     */
-    euid = libc::geteuid();
-    if euid == 0 {
-        if stmode != libc::X_OK {
-            return 1;
-        }
-
-        /* any bit is good enough */
-        stmode = (stmode << 6) | (stmode << 3) | stmode;
-    } else if (*sp).st_uid == euid {
-        stmode <<= 6;
-    } else if (*sp).st_gid == libc::getegid() {
-        stmode <<= 3;
-    } else {
-        /* XXX stolen almost verbatim from ksh93.... */
-        /* on some systems you can be in several groups */
-        maxgroups = libc::getgroups(0, ptr::null_mut());
-        /* The C `stalloc`s the array and leaves it to the enclosing mark;
-         * nothing reads it after the scan below, so it is a local. */
-        let mut groupbuf: Vec<libc::gid_t> = vec![0; maxgroups.max(0) as usize];
-        groups = groupbuf.as_mut_ptr();
-        n = libc::getgroups(maxgroups, groups);
-        debug_assert!(n <= maxgroups);
-        loop {
-            n -= 1;
-            if n < 0 {
-                break;
-            }
-            if *groups.add(n as usize) == (*sp).st_gid {
-                stmode <<= 3;
-                break;
-            }
-        }
+pub fn test_access(metadata: &Metadata, access: AccessMode) -> bool {
+    let mut bits = match access {
+        AccessMode::READ_OK => 0o4,
+        AccessMode::WRITE_OK => 0o2,
+        AccessMode::EXEC_OK => 0o1,
+        _ => 0,
+    };
+    let uid = nsh_platform::effective_uid();
+    if uid.is_root() {
+        return access != AccessMode::EXEC_OK || metadata.mode() & 0o111 != 0;
     }
-
-    ((*sp).st_mode & stmode as libc::mode_t) as c_int
+    if metadata.uid() == uid.as_raw() {
+        bits <<= 6;
+    } else if metadata.gid() == nsh_platform::effective_gid().as_raw()
+        || nsh_platform::supplementary_groups()
+            .is_ok_and(|groups| groups.iter().any(|gid| gid.as_raw() == metadata.gid()))
+    {
+        bits <<= 3;
+    }
+    metadata.mode() & bits != 0
 }
-// #endif	/* HAVE_FACCESSAT */
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// `test` is a pure expression evaluator over its words, so it can be
-    /// asked a question directly. The differential corpus covers it far
-    /// more widely than this; what these pin is the shape of the answer
-    /// for each arity the POSIX prescription branches on, because that
-    /// branching is what a refactor here would break first.
-    ///
-    /// `t_wp` is a module global, so the lock is the crate's usual one.
-    fn eval(words: &[&[u8]]) -> c_int {
-        let _guard = crate::testutil::lock();
-        let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
+    fn eval(words: &[&[u8]]) -> i32 {
+        let args: Vec<&BStr> = words.iter().map(|word| BStr::new(*word)).collect();
         let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
-        let Flow::Done(status) = (unsafe { testcmd(sh, &args).unwrap() }) else {
+        let Flow::Done(status) = testcmd(sh, &args).unwrap() else {
             unreachable!("`test` always finishes")
         };
         status
@@ -711,12 +598,10 @@ mod tests {
         assert_eq!(eval(&[b"[", b"]"]), 1);
     }
 
-    /// One word is true when it is not empty -- the `argc == 2` arm.
     #[test]
     fn one_word_tests_for_emptiness() {
         assert_eq!(eval(&[b"test", b"x"]), 0);
         assert_eq!(eval(&[b"test", b""]), 1);
-        /* An operator name is still just a word here. */
         assert_eq!(eval(&[b"test", b"-n"]), 0);
         assert_eq!(eval(&[b"test", b"="]), 0);
     }
@@ -736,8 +621,6 @@ mod tests {
         assert_eq!(eval(&[b"test", b"a", b"!=", b"b"]), 0);
     }
 
-    /// The `argc == 3` arm prefers a binary operator in the middle, so a
-    /// word that looks like one wins over the `!` negation reading.
     #[test]
     fn a_middle_operator_wins() {
         assert_eq!(eval(&[b"test", b"!", b"=", b"!"]), 0);
@@ -761,9 +644,6 @@ mod tests {
         assert_eq!(eval(&[b"test", b"1", b"-ge", b"2"]), 1);
     }
 
-    /// The file predicates that ask about permission rather than about
-    /// type. `/` is readable and searchable to every uid that can run
-    /// this suite at all.
     #[test]
     fn permission_predicates() {
         assert_eq!(eval(&[b"test", b"-r", b"/"]), 0);
@@ -780,8 +660,6 @@ mod tests {
         assert_eq!(eval(&[b"test", b"", b"-o", b""]), 1);
     }
 
-    /// Parentheses at the ends of a three- or four-word expression are
-    /// stripped by the same arm that handles `!`.
     #[test]
     fn parentheses_group() {
         assert_eq!(eval(&[b"test", b"(", b"x", b")"]), 0);
@@ -796,15 +674,12 @@ mod tests {
         assert_eq!(eval(&[b"test", b"-e", b"/nonexistent-for-nsh-tests"]), 1);
     }
 
-    /// `[` checks its own closing bracket, and the check is on the last
-    /// word rather than on any word.
     #[test]
     fn bracket_requires_its_bracket() {
         assert_eq!(eval(&[b"[", b"x", b"]"]), 0);
-        /* Returned rather than raised, per [dec:nsh:errors-are-values]. */
         let args = [BStr::new(b"["), BStr::new(b"x")];
         let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
-        let e = unsafe { testcmd(sh, &args) }.expect_err("`[ x` is missing its bracket");
-        assert_eq!(e.message().to_vec(), b"missing ]".to_vec());
+        let error = testcmd(sh, &args).expect_err("`[ x` is missing its bracket");
+        assert_eq!(error.message().to_vec(), b"missing ]".to_vec());
     }
 }

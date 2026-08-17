@@ -23,7 +23,7 @@
 //! `volatile sig_atomic_t` bought the C, which is what these were.
 
 use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use libc::{c_int, sigset_t};
+use core::ffi::{c_int};
 
 use crate::trap::NSIG;
 
@@ -40,20 +40,22 @@ pub struct SignalSink {
     /// Written only by [`crate::trap::TrapTable::set`], and only with
     /// signals blocked: see [`SignalsBlocked`].
     trapped: [AtomicBool; NSIG],
-    /// `jobs.rs`'s `vforked` — the pid of the process that called
-    /// `vfork`, or zero.
-    ///
-    /// Not shell state and not a `Shell` field. `vforkexec` sets it in
-    /// the *parent* before the call and clears it after; the child reads
-    /// it out of the address space it shares to learn that it is the
-    /// child (`getpid() != vforked`). That is a property of an address
-    /// space rather than of a shell.
-    vforked: AtomicI32,
+    /// Signals awaiting their trap action, indexed by `signo - 1`.
+    caught: [AtomicBool; NSIG - 1],
+    /// The most recently delivered trapped signal, or zero.
+    pending: AtomicI32,
+    /// Whether SIGCHLD has arrived since the last reap attempt.
+    child_pending: AtomicBool,
+    /// An untrapped SIGINT waiting for a synchronous poll site.
+    interrupt_pending: AtomicBool,
 }
 
 static SINK: SignalSink = SignalSink {
     trapped: [const { AtomicBool::new(false) }; NSIG],
-    vforked: AtomicI32::new(0),
+    caught: [const { AtomicBool::new(false) }; NSIG - 1],
+    pending: AtomicI32::new(0),
+    child_pending: AtomicBool::new(false),
+    interrupt_pending: AtomicBool::new(false),
 };
 
 /// The process's signal inbox.
@@ -63,6 +65,46 @@ pub fn signals() -> &'static SignalSink {
 }
 
 impl SignalSink {
+    #[inline]
+    pub(crate) fn signal_pending(&self, signo: c_int) -> bool {
+        self.caught[(signo - 1) as usize].load(Ordering::Relaxed)
+    }
+
+    #[inline]
+    pub(crate) fn set_signal_pending(&self, signo: c_int, pending: bool) {
+        self.caught[(signo - 1) as usize].store(pending, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub(crate) fn pending_signal(&self) -> c_int {
+        self.pending.load(Ordering::Relaxed)
+    }
+
+    #[inline]
+    pub(crate) fn set_pending_signal(&self, signo: c_int) {
+        self.pending.store(signo, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub(crate) fn child_pending(&self) -> bool {
+        self.child_pending.load(Ordering::Relaxed)
+    }
+
+    #[inline]
+    pub(crate) fn set_child_pending(&self, pending: bool) {
+        self.child_pending.store(pending, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub(crate) fn interrupt_pending(&self) -> bool {
+        self.interrupt_pending.load(Ordering::Relaxed)
+    }
+
+    #[inline]
+    pub(crate) fn set_interrupt_pending(&self, pending: bool) {
+        self.interrupt_pending.store(pending, Ordering::Relaxed);
+    }
+
     /// Is a trap set for `signo`? The handler's question.
     ///
     /// "Set" is dash's `trap[signo] != NULL`, which includes the empty
@@ -83,12 +125,6 @@ impl SignalSink {
     #[inline]
     pub(crate) fn set_trapped(&self, signo: usize, to: bool) {
         self.trapped[signo].store(to, Ordering::Relaxed);
-    }
-
-    /// The pid that called `vfork`, or zero outside the window.
-    #[inline]
-    pub fn vforked(&self) -> c_int {
-        self.vforked.load(Ordering::Relaxed)
     }
 
     /// Deliver a signal to the shell. The only thing a host's handler may
@@ -112,22 +148,10 @@ impl SignalSink {
     /// Call it from a signal handler and from nowhere else. `signo` must
     /// be the number the handler was invoked with.
     #[inline]
-    pub unsafe fn raise(&self, signo: c_int) {
+    pub fn raise(&self, signo: c_int) {
         crate::trap::onsig(signo);
     }
 
-    /// Enter or leave the `vfork` window.
-    ///
-    /// Needs no [`SignalsBlocked`] bracket, and the reason is the
-    /// handler's own test: `vforked != 0 && getpid() != vforked`. In
-    /// either window — after the store and before `vfork`, or after
-    /// `vfork` and before the clear — the parent reads
-    /// `getpid() == vforked` and carries on, which is what it would have
-    /// done with the store ordered the other way.
-    #[inline]
-    pub fn set_vforked(&self, pid: c_int) {
-        self.vforked.store(pid, Ordering::Relaxed);
-    }
 }
 
 /// Every signal blocked, and the witness that they are.
@@ -155,7 +179,7 @@ impl SignalSink {
 /// `jobs::xtcsetpgrp` brackets `tcsetpgrp` the same way for the same
 /// reason; this one restores the saved mask rather than clearing, so it
 /// composes with a caller that had signals blocked already.
-pub(crate) struct SignalsBlocked(sigset_t);
+pub(crate) struct SignalsBlocked(nsh_platform::BlockedSignals);
 
 impl SignalsBlocked {
     /// Block everything until the guard is dropped.
@@ -169,22 +193,10 @@ impl SignalsBlocked {
     /// `setsignal`, and in the `simplecmd` case puts the action back, and
     /// a per-write guard makes each half atomic while leaving the shell
     /// observably untrapped across the pair.
-    pub(crate) unsafe fn new() -> Self {
-        let mut old: sigset_t = core::mem::zeroed();
-        crate::trap::sigblockall(&mut old);
-        SignalsBlocked(old)
-    }
-}
-
-impl Drop for SignalsBlocked {
-    fn drop(&mut self) {
-        /* `clear_traps` runs in a forked child, where destructors are
-         * ordinarily suspect -- but not in a *vforked* one: `forkchild`
-         * gates `forkreset` on `lvforked == 0`, so this never runs on the
-         * shared-address-space path. `sigprocmask` is async-signal-safe
-         * regardless. */
-        unsafe {
-            libc::sigprocmask(libc::SIG_SETMASK, &self.0, core::ptr::null_mut());
-        }
+    pub(crate) fn new() -> Self {
+        SignalsBlocked(
+            nsh_platform::BlockedSignals::all()
+                .expect("blocking signals for an atomic trap update failed"),
+        )
     }
 }

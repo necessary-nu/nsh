@@ -10,14 +10,13 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use libc::c_char;
 
 use crate::eval::Flow;
-use crate::var::mklocal;
+use crate::var::make_local_bytes;
 
 // [spec:dash:def:var.localcmd-fn]
 // [spec:dash:sem:var.localcmd-fn]
-pub unsafe fn localcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn localcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if !sh.vars.in_function() {
         return Err(sh.sh_error_value(b"not in a function"));
     }
@@ -25,8 +24,7 @@ pub unsafe fn localcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* `local` scans no options at all, so every word after the command
      * name is a name to localise -- including one that starts with `-`. */
     for name in &args[1..] {
-        let name = crate::shell::cstring(name);
-        mklocal(sh, name.as_ptr() as *mut c_char, 0)?;
+        make_local_bytes(sh, name, 0)?;
     }
     Ok(Flow::Done(0))
 }

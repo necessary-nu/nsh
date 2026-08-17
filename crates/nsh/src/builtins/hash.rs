@@ -6,26 +6,22 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use bstr::BStr;
-use libc::{c_char, c_int};
+use bstr::{BStr, ByteSlice};
+use core::ffi::c_int;
 use std::ffi::CStr;
 use std::io::Write;
 
 use crate::eval::Flow;
 use crate::exec::{
-    CMDNORMAL, CMDUNKNOWN, DO_ERR, clearcmdentry, cmdentry, cmdlookup,
-    delete_cmd_entry, find_command, padvance, padvance_result, param, pathopt, tblentry,
+    CMDNORMAL, CMDUNKNOWN, DO_ERR, PathCursor, clearcmdentry, cmdentry,
+    delete_cmd_entry, find_command, padvance, tblentry,
 };
 
 // [spec:dash:def:exec.hashcmd-fn]
 // [spec:dash:sem:exec.hashcmd-fn]
-pub unsafe fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut cmdp: *mut tblentry;
+pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut c: c_int;
-    let mut entry: cmdentry = cmdentry {
-        cmdtype: 0,
-        u: param { index: 0 },
-    };
+    let mut entry = cmdentry::unknown();
     let mut clear: bool;
 
     clear = false;
@@ -53,7 +49,7 @@ pub unsafe fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             .commands
             .iter()
             .filter(|(_, cmdp)| cmdp.cmdtype() == CMDNORMAL)
-            .map(|(name, cmdp)| printentry(BStr::new(name.as_slice()), cmdp, path))
+            .map(|(name, cmdp)| printentry(name.as_slice().as_bstr(), cmdp, path.as_slice().as_bstr()))
             .collect();
         for line in lines {
             let _ = sh.io.stdout().write_all(&line);
@@ -62,20 +58,21 @@ pub unsafe fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
     c = 0;
     for name in operands {
-        let name = crate::shell::cstring(name);
-        let name = name.as_ptr() as *mut c_char;
-        cmdp = cmdlookup(sh, name, 0);
-        if !cmdp.is_null() && sh.commands.path_dependent(&*cmdp) {
+        if sh
+            .commands
+            .get(name)
+            .is_some_and(|cmdp| sh.commands.path_dependent(cmdp))
+        {
             delete_cmd_entry(sh, name);
         }
         /* Hoisted out of the argument list; see the note in `eval.rs`'s
          * `evalcommand`. */
         let path = crate::var::pathval(sh);
-        match find_command(sh, name, &mut entry, DO_ERR, path)? {
+        match find_command(sh, name, &mut entry, DO_ERR, path.as_bstr())? {
             crate::eval::Flow::Done(_) => {}
             exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
         }
-        if entry.cmdtype == CMDUNKNOWN {
+        if entry.cmdtype() == CMDUNKNOWN {
             c = 1;
         }
     }
@@ -90,25 +87,29 @@ pub unsafe fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 /// that walks the command table holds it borrowed across this call, so the
 /// read has to happen before the walk starts. Passing it in is what makes
 /// that visible rather than a surprise.
-unsafe fn printentry(name: &BStr, cmdp: &tblentry, pathval: *const c_char) -> Vec<u8> {
+fn printentry(name: &BStr, cmdp: &tblentry, pathval: &BStr) -> Vec<u8> {
     let mut idx: c_int;
-    let mut path: *const c_char;
-    let fullname: *mut c_char;
+    let mut candidate = None;
 
     idx = cmdp.path_index();
-    path = pathval;
+    let mut path = PathCursor::new(pathval);
     loop {
-        padvance(&mut path, name.as_ptr() as *const c_char);
+        candidate = padvance(&mut path, name);
         idx -= 1;
         if idx < 0 {
             break;
         }
     }
-    fullname = padvance_result();
+    let fullname = candidate
+        .expect("a cached PATH index must still name a PATH element")
+        .path;
     /* Rendered rather than written, for the reason the note above gives
      * about `pathval`: the walk holds `sh.commands` borrowed, and a write
      * wants `sh.io` at the same time. */
-    let mut line = CStr::from_ptr(fullname).to_bytes().to_vec();
+    let mut line = CStr::from_bytes_with_nul(&fullname)
+        .expect("padvance returns one terminated candidate")
+        .to_bytes()
+        .to_vec();
     line.extend_from_slice(if cmdp.rehash { b"*\n" } else { b"\n" });
     line
 }

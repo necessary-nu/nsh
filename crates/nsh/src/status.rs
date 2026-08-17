@@ -34,7 +34,7 @@
 //! ahead of the surface that uses them.
 
 use bstr::BStr;
-use libc::c_int;
+use core::ffi::c_int;
 
 /// A shell exit status: `$?`.
 ///
@@ -157,7 +157,7 @@ mod tests {
     /// The `128 + n` convention, and the ambiguity it carries.
     #[test]
     fn a_signal_and_the_status_it_makes_round_trip() {
-        let int = Signal::from_raw(libc::SIGINT);
+        let int = Signal::from_raw(nsh_platform::interrupt_signal());
         assert_eq!(int.as_status().code(), 130);
         assert_eq!(int.as_status().signal(), Some(int));
 
@@ -174,8 +174,14 @@ mod tests {
     /// this is checking the seam rather than the table.
     #[test]
     fn a_signal_names_itself_without_the_prefix() {
-        assert_eq!(Signal::from_raw(libc::SIGINT).name(), Some(BStr::new("INT")));
-        assert_eq!(Signal::from_raw(libc::SIGKILL).name(), Some(BStr::new("KILL")));
+        assert_eq!(
+            Signal::from_raw(nsh_platform::interrupt_signal()).name(),
+            Some(BStr::new("INT"))
+        );
+        assert_eq!(
+            Signal::from_raw(nsh_platform::kill_signal()).name(),
+            Some(BStr::new("KILL"))
+        );
         /* Index 0 is the exit trap's pseudo-signal, not a signal. */
         assert_eq!(Signal::from_raw(0).name(), Some(BStr::new("EXIT")));
         assert_eq!(Signal::from_raw(crate::signames::NSIG as c_int).name(), None);

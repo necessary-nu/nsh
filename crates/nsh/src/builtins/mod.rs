@@ -34,7 +34,7 @@
 use core::ffi::CStr;
 
 use bstr::BStr;
-use libc::{c_char, c_uint};
+use core::ffi::c_uint;
 
 /// posix 'special builtin'
 pub const BUILTIN_SPECIAL: c_uint = 0x1;
@@ -65,11 +65,9 @@ pub const BUILTIN_ASSIGN: c_uint = 0x4;
 /// signature's receiver and `Result`; the status type belongs to
 /// `public-api`.
 ///
-/// The receiver arrives ahead of the state it will carry
-/// ([dec:nsh:no-ambient-state]): [`crate::context::Shell`] is still empty
-/// and the tables are still `static mut`, so a builtin whose state has not
-/// moved yet names the parameter `_sh`. `move-state` fills the type in,
-/// and the underscores come off with the bodies that start reading it.
+/// The receiver owns all mutable shell state
+/// ([dec:nsh:no-ambient-state]), so builtin entry points are ordinary safe
+/// functions rather than callbacks into ambient globals.
 ///
 /// The `Ok` side is a [`Flow`] rather than a status because `exit` is a
 /// built-in. `exitcmd` used to leave by `exraise(EXEXIT)`, and a table of
@@ -80,7 +78,7 @@ pub const BUILTIN_ASSIGN: c_uint = 0x4;
 /// `set -e` abort inside them has to travel back out through them. The
 /// remaining thirty produce `Flow::Done` and nothing else, which is what
 /// the C's `int` said.
-pub type Builtin = unsafe fn(
+pub type Builtin = fn(
     &mut crate::context::Shell,
     &[&BStr],
 ) -> Result<crate::eval::Flow, crate::error::Error>;
@@ -107,31 +105,6 @@ pub fn args(fields: &[crate::expand::strlist]) -> Vec<&BStr> {
             BStr::new(&field.text[..field.text.len() - 1])
         })
         .collect()
-}
-
-/// The same words as the writable `char **` the C hands every builtin,
-/// for the one builtin that still needs one.
-///
-/// `fc -s old=new` splits that word at the `=` and then truncates it, and
-/// dash's `$_` -- read from the word after the builtin returns -- shows
-/// the result. So the writes have to land on the words the shell
-/// expanded rather than on a copy, or `$_` reports the argument as it was
-/// typed instead of as `fc` left it.
-///
-/// The pointers are C strings because [`args`] took its slices off fields
-/// that end with a NUL and cut only that byte off the length, so the
-/// terminator is still there, one past the end. That is the same reading
-/// of the same invariant that `strlist::textp` makes.
-///
-/// **This is the last raw argument vector in the builtins**, and the
-/// signature `[dec:nsh:public-surface]` records has no room for it: a
-/// built-in that writes to its own arguments cannot be given `&[&BStr]`
-/// and mean it. `fc` is the only builtin that wants one -- `printf`
-/// scans its format out of a copy and writes to nothing.
-pub fn writable_args(args: &[&BStr]) -> Vec<*mut c_char> {
-    let mut slots: Vec<*mut c_char> = args.iter().map(|w| w.as_ptr() as *mut c_char).collect();
-    slots.push(core::ptr::null_mut());
-    slots
 }
 
 pub mod alias;
@@ -175,7 +148,7 @@ pub mod wait;
 /// The C keeps it in `eval.c` beside `evalcommand`, which is the only
 /// thing that reaches for it. It is a table row, so it lives with the
 /// table.
-pub(crate) static mut bltin: builtincmd = builtincmd {
+pub(crate) static bltin: builtincmd = builtincmd {
     name: c"",
     builtin: Some(bltincmd),
     flags: BUILTIN_REGULAR,
@@ -183,7 +156,7 @@ pub(crate) static mut bltin: builtincmd = builtincmd {
 
 // [spec:dash:def:eval.bltincmd-fn]
 // [spec:dash:sem:eval.bltincmd-fn]
-unsafe fn bltincmd(
+fn bltincmd(
     sh: &mut crate::context::Shell,
     _args: &[&BStr],
 ) -> Result<crate::eval::Flow, crate::error::Error> {
@@ -279,11 +252,9 @@ pub static WAITCMD: &builtincmd = &builtincmd[39];
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bstr::{BString, ByteSlice};
+    use bstr::BString;
 
     use crate::expand::strlist;
-
-    use super::*;
 
     /// A field's bytes end with the NUL its C readers stop at, and a
     /// builtin stops at a length, so exactly one byte comes off -- not the
@@ -297,45 +268,6 @@ mod tests {
         ];
         let args = args(&fields);
         assert_eq!(args, vec![BStr::new("echo"), BStr::new(""), BStr::new("a b")]);
-    }
-
-    /// The words `fc` writes through have to still be C strings, which
-    /// they are because the terminator is one past the slice rather than
-    /// gone.
-    #[test]
-    fn writable_args_are_c_strings() {
-        let fields = vec![
-            strlist { text: BString::from(&b"fc\0"[..]) },
-            strlist { text: BString::from(&b"old=new\0"[..]) },
-        ];
-        let args = args(&fields);
-        let slots = writable_args(&args);
-
-        assert_eq!(slots.len(), 3);
-        assert!(slots[2].is_null(), "the array is NULL-terminated");
-        unsafe {
-            assert_eq!(CStr::from_ptr(slots[0]).to_bytes(), b"fc");
-            assert_eq!(CStr::from_ptr(slots[1]).to_bytes(), b"old=new");
-        }
-    }
-
-    /// `fc -s old=new` splits the word where the `=` is and `$_` reads the
-    /// result, so the write has to reach the shell's own word.
-    #[test]
-    fn writable_args_write_through() {
-        let fields = vec![strlist { text: BString::from(&b"old=new\0"[..]) }];
-        let args = args(&fields);
-        let slots = writable_args(&args);
-
-        unsafe {
-            let at = CStr::from_ptr(slots[0])
-                .to_bytes()
-                .find_byte(b'=')
-                .expect("the word splits at the `=`");
-            *slots[0].add(at) = 0;
-            assert_eq!(CStr::from_ptr(slots[0]).to_bytes(), b"old");
-        }
-        assert_eq!(fields[0].text, BString::from(&b"old\0new\0"[..]));
     }
 
     /// Every row the table names resolves, which is the check that a

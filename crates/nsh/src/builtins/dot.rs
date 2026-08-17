@@ -8,80 +8,63 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use bstr::{BStr, BString};
-use core::ptr::addr_of;
-use libc::{c_char, c_int};
-use std::ffi::CStr;
+use bstr::{BStr, BString, ByteSlice};
+use core::ffi::c_int;
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
 
 use crate::eval::Flow;
+use crate::exec::PathCursor;
 use crate::shellmain::cmdloop;
 
 // [spec:dash:def:main.find-dot-file-fn]
 // [spec:dash:sem:main.find-dot-file-fn]
-/// The C returns a `stalloc`'d copy of the candidate — "This will be
-/// freed by the caller", meaning `dotcmd`'s enclosing `popstackmark`.
-/// The caller owns the buffer and this fills it, so the copy lasts
-/// exactly as long as the frame that asked for it.
-unsafe fn find_dot_file(
-    sh: &mut crate::context::Shell,
-    basename: *mut c_char,
-    out: &mut Vec<u8>,
-) -> Result<*mut c_char, Error> {
-    let mut fullname: *mut c_char;
-    let mut path: *const c_char = crate::var::pathval(sh);
-    let mut statb: libc::stat64 = core::mem::zeroed();
-    let mut len: c_int;
+/// The C returns a `stalloc`'d copy of the candidate. Here the caller owns
+/// the returned bytes directly, for exactly the same lifetime.
+fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Result<BString, Error> {
+    let path_value = crate::var::pathval(sh);
 
     /* don't try this for absolute or relative paths */
-    if CStr::from_ptr(basename).to_bytes().contains(&b'/') {
-        return Ok(basename);
+    if basename.contains(&b'/') {
+        return Ok(basename.to_owned());
     }
 
-    loop {
-        len = crate::exec::padvance(&mut path, basename);
-        if len < 0 {
-            break;
-        }
-        fullname = crate::exec::padvance_result();
-        if (crate::exec::pathopt.is_null() || *crate::exec::pathopt == b'f' as c_char)
-            && libc::stat64(fullname, &mut statb) == 0
-            && (statb.st_mode & libc::S_IFMT) == libc::S_IFREG
+    let mut path = PathCursor::new(path_value.as_slice().as_bstr());
+    while let Some(candidate) = crate::exec::padvance(&mut path, basename) {
+        let fullname = crate::mystring::cstr_prefix(&candidate.path);
+        let regular_file = std::fs::metadata(OsStr::from_bytes(fullname))
+            .is_ok_and(|metadata| metadata.is_file());
+        if (candidate.option.is_none()
+            || candidate.option.as_ref().and_then(|option| option.first()) == Some(&b'f'))
+            && regular_file
         {
-            /* This will be freed by the caller. */
-            /* `len` is `padvance`'s *allocation* size, one more than the
-             * string's length when the PATH component is empty, so the
-             * buffer is sized from it and the bytes copied by hand. */
-            let candidate = CStr::from_ptr(fullname).to_bytes_with_nul();
-            debug_assert!(len > 0);
-            debug_assert!(candidate.len() <= len as usize);
-            out.clear();
-            out.resize(len as usize, 0);
-            out[..candidate.len()].copy_from_slice(candidate);
-            return Ok(out.as_mut_ptr() as *mut c_char);
+            return Ok(fullname.to_owned());
         }
     }
 
     /* not found in the PATH */
     let mut message = Vec::new();
-    message.extend_from_slice(CStr::from_ptr(basename).to_bytes());
+    message.extend_from_slice(basename);
     message.extend_from_slice(b": not found");
     Err(sh.sh_error_value(&message))
 }
 
 // [spec:dash:def:main.dotcmd-fn]
 // [spec:dash:sem:main.dotcmd-fn]
-pub unsafe fn dotcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn dotcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut status: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
     opts.next(sh, b"")?;
 
     if let Some(name) = opts.operands().first() {
-        let mut dotfile: Vec<u8> = Vec::new();
-        let name = crate::shell::cstring(name);
-        let fullname = find_dot_file(sh, name.as_ptr() as *mut c_char, &mut dotfile)?;
+        let fullname = find_dot_file(sh, name)?;
 
-        crate::input::setinputfile(sh, fullname, crate::input::INPUT_PUSH_FILE)?;
+        crate::input::setinputfile(
+            sh,
+            fullname.as_slice().as_bstr(),
+            crate::input::INPUT_PUSH_FILE,
+        )?;
         /* `evalbltin`'s epilogue reads `commandname` after this returns —
          * `flushall(); if (outerr(out1)) sh_warnx("%s: I/O error",
          * commandname);` — and the C is safe there only because the block
@@ -91,7 +74,7 @@ pub unsafe fn dotcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
          * alive: what the epilogue reads is a copy, so the buffer this
          * frame allocated can be freed with the frame like any other
          * local, and the static slot that used to hold it is gone. */
-        sh.eval.commandname = Some(BString::from(CStr::from_ptr(fullname).to_bytes()));
+        sh.eval.commandname = Some(fullname);
         /* An `exit` inside a dotted file ends the shell, not the file, so
          * it leaves through here without the `popfile` -- exactly as the
          * C's longjmp did. The input stack is unwound to a mark by

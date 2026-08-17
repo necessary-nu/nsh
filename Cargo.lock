@@ -73,7 +73,7 @@ name = "nsh"
 version = "0.5.13"
 dependencies = [
  "bstr",
- "libc",
+ "nsh-platform",
  "nshedit",
  "nshedit-plat",
  "nshterm",
@@ -83,8 +83,16 @@ dependencies = [
 name = "nsh-cli"
 version = "0.5.13"
 dependencies = [
- "libc",
  "nsh",
+ "nsh-platform",
+]
+
+[[package]]
+name = "nsh-platform"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rustix",
 ]
 
 [[package]]

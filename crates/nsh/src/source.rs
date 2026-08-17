@@ -170,10 +170,10 @@ impl Shell {
     /// evaluator exactly as dash's top-level handler does.
     pub fn run(&mut self, source: impl Into<Source>) -> Result<ExitStatus, Error> {
         let source = source.into();
-        unsafe { self.run_source(source) }
+        self.run_source(source)
     }
 
-    unsafe fn run_source(&mut self, source: Source) -> Result<ExitStatus, Error> {
+    fn run_source(&mut self, source: Source) -> Result<ExitStatus, Error> {
         let mark = self.input.mark();
         /* Read before the push, because for a file the push is what moves
          * it: `setinputfd` sets `toppf` itself when the file was opened
@@ -185,22 +185,18 @@ impl Shell {
          * `evalstring` owns its `sstrdup` across the `popfile`. Holding it
          * here says so on the unwind path too, where the C's `stunalloc`
          * never ran. */
-        let mut text: Vec<u8> = Vec::new();
-
         match &source.0 {
             Kind::Bytes(b) => {
-                text.reserve(b.len() + 1);
-                text.extend_from_slice(b.as_ref());
-                text.push(0);
-                crate::input::setinputstring(self, text.as_mut_ptr() as *mut libc::c_char);
+                crate::input::setinputstring(self, BStr::new(b));
             }
             Kind::File(p) => {
-                let mut name: Vec<u8> =
-                    std::os::unix::ffi::OsStrExt::as_bytes(p.as_os_str()).to_vec();
-                name.push(0);
                 /* Nothing has been pushed and no floor moved when this
                  * fails, so leaving by `?` needs no unwind. */
-                crate::input::setinputfile(self, name.as_ptr() as *const libc::c_char, 0)?;
+                crate::input::setinputfile(
+                    self,
+                    BStr::new(std::os::unix::ffi::OsStrExt::as_bytes(p.as_os_str())),
+                    0,
+                )?;
             }
             Kind::Stream => {
                 /* Nothing to push: the shell's standard input is frame
@@ -229,8 +225,6 @@ impl Shell {
             mark,
             "run left the input stack at a different depth than it found it"
         );
-        drop(text);
-
         match outcome {
             Ok(Flow::Done(status)) => {
                 self.status = status;
@@ -284,13 +278,11 @@ impl Shell {
     ///
     /// The parameters persist afterwards, exactly as `sh -c` leaves them.
     pub fn run_command(&mut self, command: &BStr, args: &[&BStr]) -> Result<ExitStatus, Error> {
-        unsafe {
-            if let Some(arg0) = args.first() {
-                crate::builder::set_arg0(arg0);
-            }
-            let rest: Vec<&BStr> = args.iter().skip(1).copied().collect();
-            crate::options::setparam(self, &rest);
+        if let Some(arg0) = args.first() {
+            self.options.set_arg0(arg0);
         }
+        let rest: Vec<&BStr> = args.iter().skip(1).copied().collect();
+        crate::options::setparam(self, &rest);
         self.run(command)
     }
 
@@ -308,12 +300,10 @@ impl Shell {
     /// have one, and offering one that quietly skipped `$(…)` would be a
     /// different language wearing this one's syntax.
     pub fn expand_word(&mut self, word: &BStr) -> Result<Vec<BString>, Error> {
-        unsafe {
-            self.expand(
-                word,
-                crate::expand::EXP_FULL | crate::expand::EXP_TILDE,
-            )
-        }
+        self.expand(
+            word,
+            crate::expand::EXP_FULL | crate::expand::EXP_TILDE,
+        )
     }
 
     /// Expand one word as if it appeared inside double quotes: no field
@@ -323,12 +313,10 @@ impl Shell {
     /// flag a here-document is expanded under, which is what makes it the
     /// shell's own idea of "quoted" rather than a second one.
     pub fn expand_word_quoted(&mut self, word: &BStr) -> Result<BString, Error> {
-        unsafe {
-            let mut fields = self.expand(word, crate::expand::EXP_QUOTED)?;
-            /* `expandarg` without `EXP_FULL` pushes exactly one field, so
-             * the empty case is unreachable rather than defaulted. */
-            Ok(fields.pop().unwrap_or_default())
-        }
+        let mut fields = self.expand(word, crate::expand::EXP_QUOTED)?;
+        /* `expandarg` without `EXP_FULL` pushes exactly one field, so
+         * the empty case is unreachable rather than defaulted. */
+        Ok(fields.pop().unwrap_or_default())
     }
 
     /// Tokenize `word` as one word and expand it under `flag`.
@@ -341,19 +329,14 @@ impl Shell {
     /// `readtoken` into `wordtext`, `makename` into a node — with the
     /// keyword and alias checks off, because a single word in isolation is
     /// neither.
-    unsafe fn expand(&mut self, word: &BStr, flag: libc::c_int) -> Result<Vec<BString>, Error> {
+    fn expand(&mut self, word: &BStr, flag: core::ffi::c_int) -> Result<Vec<BString>, Error> {
         let mark = self.input.mark();
         let old_floor = self.input.floor();
 
-        let mut text: Vec<u8> = Vec::with_capacity(word.len() + 1);
-        text.extend_from_slice(word.as_ref());
-        text.push(0);
-        crate::input::setinputstring(self, text.as_mut_ptr() as *mut libc::c_char);
+        crate::input::setinputstring(self, word);
         self.input.set_floor(self.input.mark());
-        crate::parser::checkkwd = 0;
-
         let expanded = (|sh: &mut Shell| -> Result<Vec<BString>, Error> {
-            let t = crate::parser::readtoken(sh)?;
+            let t = crate::parser::readtoken(sh, 0)?;
             if t != crate::parser::TWORD {
                 /* An empty word is the honest answer for empty input, and
                  * anything else here is syntax the caller wrote rather
@@ -385,7 +368,6 @@ impl Shell {
 
         crate::input::unwindfiles(self, mark);
         self.input.set_floor(old_floor);
-        drop(text);
         expanded
     }
 
@@ -473,19 +455,12 @@ mod tests {
     #[test]
     fn a_stream_source_reads_the_shells_own_standard_input() {
         let _g = crate::testutil::lock();
-        let mut fds: [libc::c_int; 2] = [0; 2];
-        unsafe {
-            assert_eq!(libc::pipe(fds.as_mut_ptr()), 0);
-            let script = b"exit 5\n";
-            assert_eq!(
-                libc::write(fds[1], script.as_ptr() as *const libc::c_void, script.len()),
-                script.len() as isize
-            );
-            libc::close(fds[1]);
-        }
+        let (read, write) = nsh_platform::pipe().unwrap();
+        nsh_platform::write_all(write, b"exit 5\n").unwrap();
+        nsh_platform::close_fd(write).unwrap();
         let mut sh = Shell::builder()
             .streams(crate::streams::Streams {
-                stdin: fds[0],
+                stdin: read,
                 stdout: 1,
                 stderr: 2,
             })
@@ -493,7 +468,7 @@ mod tests {
             .unwrap();
         let st = sh.run(Source::stream()).unwrap();
         assert_eq!(st.code(), 5);
-        unsafe { libc::close(fds[0]) };
+        nsh_platform::close_fd(read).unwrap();
     }
 
     /// The whole reason `run_command` is on the surface: a value with

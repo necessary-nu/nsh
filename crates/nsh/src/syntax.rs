@@ -19,7 +19,7 @@
 //! (or by [`syntax_at`] for a table held in a variable, which is how
 //! `parser.c` carries `synstack->syntax` around).
 
-use libc::{c_char, c_int, c_uint};
+use core::ffi::{c_char, c_int, c_uint};
 
 // ---- syntax classes (numbered by position in mksyntax.c's synclass[]) ----
 
@@ -121,19 +121,19 @@ pub fn is_digit(c: c_int) -> bool {
 /// `#define is_alpha(c)\tisalpha((unsigned char)(c))`
 #[inline]
 pub fn is_alpha(c: c_int) -> bool {
-    unsafe { libc::isalpha(c as u8 as c_int) != 0 }
+    nsh_platform::locale_is_alpha(c as u8)
 }
 
 /// `#define is_name(c)\t((c) == '_' || isalpha((unsigned char)(c)))`
 #[inline]
 pub fn is_name(c: c_int) -> bool {
-    c == b'_' as c_int || unsafe { libc::isalpha(c as u8 as c_int) != 0 }
+    c == b'_' as c_int || nsh_platform::locale_is_alpha(c as u8)
 }
 
 /// `#define is_in_name(c)\t((c) == '_' || isalnum((unsigned char)(c)))`
 #[inline]
 pub fn is_in_name(c: c_int) -> bool {
-    c == b'_' as c_int || unsafe { libc::isalnum(c as u8 as c_int) != 0 }
+    c == b'_' as c_int || nsh_platform::locale_is_alphanumeric(c as u8)
 }
 
 /// `#define is_special(c)\t((is_type+SYNBASE)[(signed char)(c)] & (ISSPECL|ISDIGIT))`

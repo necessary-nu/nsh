@@ -26,34 +26,22 @@
 //! Expected output was checked against the reference C, not against the
 //! port.
 
-use std::io::Read;
-use std::os::unix::io::FromRawFd;
 use std::path::PathBuf;
 
 use nsh::streams::{self, Streams};
 
-unsafe fn pipe() -> (i32, i32) {
-    let mut fds = [0i32; 2];
-    assert_eq!(libc::pipe(fds.as_mut_ptr()), 0);
-    (fds[0], fds[1])
-}
-
 fn read_all(fd: i32) -> Vec<u8> {
-    let mut v = Vec::new();
-    let mut f = unsafe { std::fs::File::from_raw_fd(fd) };
-    f.read_to_end(&mut v).expect("read pipe");
-    v
+    let bytes = nsh_platform::read_to_end(fd).expect("read pipe");
+    nsh_platform::close_fd(fd).expect("close pipe reader");
+    bytes
 }
 
 /// Run `script` with the shell's stdout on a pipe and return what it wrote.
 /// Forks, because the child becomes a shell and ends there.
 fn out_of(script: &str) -> Vec<u8> {
-    let (r, w) = unsafe { pipe() };
+    let (r, w) = nsh_platform::pipe().expect("create pipe");
     let argv: Vec<Vec<u8>> = vec![b"sh".to_vec(), b"-c".to_vec(), script.as_bytes().to_vec()];
-    unsafe {
-        let pid = libc::fork();
-        assert!(pid >= 0, "fork failed");
-        if pid == 0 {
+    nsh_platform::run_in_child(move || {
             let lent = streams::install(Streams {
                 stdin: 0,
                 stdout: w,
@@ -70,13 +58,11 @@ fn out_of(script: &str) -> Vec<u8> {
                ending the process the caller's act — so this fork's child
                has to end itself. Returning would carry it back into the
                test harness after the fork. */
-            let status = nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, Streams::INHERIT);
-            libc::_exit(status.code().into());
-        }
-        libc::close(w);
-        let mut status = 0i32;
-        assert_eq!(libc::waitpid(pid, &mut status, 0), pid);
-    }
+            let status = nsh::shellmain::main_fn(argv, Streams::INHERIT);
+            nsh_platform::exit_immediately(status.code().into());
+        })
+        .expect("run shell child");
+    nsh_platform::close_fd(w).expect("close pipe writer");
     read_all(r)
 }
 

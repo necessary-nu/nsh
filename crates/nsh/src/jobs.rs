@@ -21,9 +21,7 @@
 //!   * `TRACE(...)` compiles to nothing without `DEBUG` and is dropped.
 
 use bstr::{BStr, BString, ByteSlice};
-use core::ptr::{addr_of_mut, null_mut};
-use libc::{c_char, c_int, c_uint, pid_t};
-use std::ffi::CStr;
+use core::ffi::{c_int, c_uint};
 use std::io::Write as _;
 
 use crate::error::{Error, INTOFF, INTON};
@@ -35,16 +33,12 @@ use crate::nodes::{
 use crate::output::Dest;
 use crate::parser::{VSLENGTH, VSNORMAL, VSNUL, VSTYPE};
 
-/// Copy an already-rendered ASCII fragment into the bounded C scratch
-/// buffers retained by the job display code.  The return value preserves
-/// `fmtstr`'s historical clamp-to-capacity convention.
-unsafe fn copy_ascii_cstr(out: *mut c_char, capacity: usize, text: &str) -> c_int {
+/// Append an already-rendered ASCII fragment with `fmtstr`'s historical
+/// clamp-to-capacity convention.
+fn append_ascii(out: &mut Vec<u8>, capacity: usize, text: &str) -> c_int {
     debug_assert!(text.is_ascii());
     let copied = text.len().min(capacity.saturating_sub(1));
-    if capacity != 0 {
-        core::ptr::copy_nonoverlapping(text.as_ptr(), out as *mut u8, copied);
-        *out.add(copied) = 0;
-    }
+    out.extend_from_slice(&text.as_bytes()[..copied]);
     text.len().min(capacity) as c_int
 }
 
@@ -72,7 +66,7 @@ pub const JOBDONE: c_int = 2; /* all procs are completed */
 
 // [spec:dash:def:jobs.procstat]
 pub struct ProcStat {
-    pub pid: pid_t,    /* process id */
+    pub pid: i32,    /* process id */
     pub status: c_int, /* last process status from wait() */
     /* text of command being run. The C points this at the shared
      * `nullstr` when there is none and at a `savestr` copy otherwise,
@@ -146,11 +140,6 @@ const _PATH_DEVNULL: &[u8] = b"/dev/null\0";
 /// together: `setjobctl` writes three of them in one breath, and
 /// `makejob` reads `sh.jobs.jobctl` to decide what to put in `tab`.
 ///
-/// **`vforked` is deliberately not here**, and is not on `Shell`
-/// either: it is in the signal inbox, `siginbox.rs`. `onsig` reads it
-/// and a handler has no receiver, but the deciding reason is that it
-/// describes an address space rather than a shell -- see the comment at
-/// its old declaration below.
 pub struct JobTable {
     /// The jobs themselves.
     ///
@@ -200,12 +189,12 @@ impl JobTable {
 /// reads out of `ps0`; `ps_cmd` answers with the empty text, where the
 /// C reads `ps0.cmd`, a null pointer it then hands to `%s`.
 #[inline]
-pub(crate) unsafe fn ps_pid(sh: &crate::context::Shell, jp: usize, i: usize) -> pid_t {
+pub(crate) fn ps_pid(sh: &crate::context::Shell, jp: usize, i: usize) -> i32 {
     sh.jobs.tab[jp].ps.get(i).map_or(0, |p| p.pid)
 }
 
 #[inline]
-unsafe fn ps_cmd(sh: &crate::context::Shell, jp: usize, i: usize) -> &BStr {
+fn ps_cmd(sh: &crate::context::Shell, jp: usize, i: usize) -> &BStr {
     sh.jobs.tab[jp]
         .ps
         .get(i)
@@ -216,7 +205,7 @@ unsafe fn ps_cmd(sh: &crate::context::Shell, jp: usize, i: usize) -> &BStr {
 /// puts control bytes 0x81-0x88 in them — so they go out as bytes and
 /// not through a `char *`.
 #[inline]
-pub(crate) unsafe fn outcmd(sh: &mut crate::context::Shell, jp: usize, i: usize, dest: Dest) {
+pub(crate) fn outcmd(sh: &mut crate::context::Shell, jp: usize, i: usize, dest: Dest) {
     /* The lookup is spelled out here rather than going through `ps_cmd`,
      * which is otherwise these same three lines. The two borrows have to
      * be *field*-disjoint: the write takes `sh.io` mutably and the text is
@@ -232,26 +221,13 @@ pub(crate) unsafe fn outcmd(sh: &mut crate::context::Shell, jp: usize, i: usize,
     let _ = sh.io.get(dest).write_all(cmd);
 }
 
-/* Set if we are in the vforked child.
- *
- * Lives in the signal inbox (`siginbox.rs`), not here and not on
- * `Shell`. `trap.rs`'s `onsig` reads it and a handler has no receiver --
- * but the reason it is not a field is stronger than that. The *parent*
- * sets it before `vfork` and clears it after; the child reads it out of
- * the address space it shares to learn that it is the child. That is a
- * property of an address space, and a `sh.vforked` would be one shell's
- * field written by one process and read by another that only accidentally
- * shares it. See `docs/api-design.md` 5.3 and 6. */
-
-pub(crate) use crate::system::errno;
-
 /* src/options.h: `#define iflag optlist[3]` and friends. */
 #[inline]
-unsafe fn iflag(sh: &crate::context::Shell) -> c_int {
+fn iflag(sh: &crate::context::Shell) -> c_int {
     sh.options.flag(crate::options::iflag) as c_int
 }
 #[inline]
-unsafe fn pipefail(sh: &crate::context::Shell) -> c_int {
+fn pipefail(sh: &crate::context::Shell) -> c_int {
     sh.options.flag(crate::options::pipefail) as c_int
 }
 
@@ -264,7 +240,7 @@ unsafe fn pipefail(sh: &crate::context::Shell) -> c_int {
 // body to port; this is the annotated placeholder that records the
 // omission. `#[cfg(any())]` mirrors the never-satisfied `#ifdef SYSV`.
 #[cfg(any())]
-unsafe fn onsigchild() -> c_int {
+fn onsigchild() -> c_int {
     unimplemented!("declared under #ifdef SYSV, never defined in dash")
 }
 
@@ -278,7 +254,7 @@ enum Link {
 }
 
 #[inline]
-unsafe fn link_get(sh: &mut crate::context::Shell, l: Link) -> Option<usize> {
+fn link_get(sh: &mut crate::context::Shell, l: Link) -> Option<usize> {
     match l {
         Link::Head => sh.jobs.curjob,
         Link::Prev(i) => sh.jobs.tab[i].prev_job,
@@ -286,7 +262,7 @@ unsafe fn link_get(sh: &mut crate::context::Shell, l: Link) -> Option<usize> {
 }
 
 #[inline]
-unsafe fn link_set(sh: &mut crate::context::Shell, l: Link, v: Option<usize>) {
+fn link_set(sh: &mut crate::context::Shell, l: Link, v: Option<usize>) {
     match l {
         Link::Head => sh.jobs.curjob = v,
         Link::Prev(i) => sh.jobs.tab[i].prev_job = v,
@@ -295,7 +271,7 @@ unsafe fn link_set(sh: &mut crate::context::Shell, l: Link, v: Option<usize>) {
 
 // [spec:dash:def:jobs.set-curjob-fn]
 // [spec:dash:sem:jobs.set-curjob-fn]
-pub(crate) unsafe fn set_curjob(sh: &mut crate::context::Shell, jp: usize, mode: c_uint) {
+pub(crate) fn set_curjob(sh: &mut crate::context::Shell, jp: usize, mode: c_uint) {
     let mut jp1: Option<usize>;
     let mut jpp: Link;
     let curp: Link;
@@ -359,7 +335,7 @@ pub(crate) unsafe fn set_curjob(sh: &mut crate::context::Shell, jp: usize, mode:
 
 // [spec:dash:def:jobs.xxtcsetpgrp-fn]
 // [spec:dash:sem:jobs.xxtcsetpgrp-fn]
-pub(crate) unsafe fn xxtcsetpgrp(sh: &mut crate::context::Shell, pgrp: pid_t) -> Result<(), Error> {
+pub(crate) fn xxtcsetpgrp(sh: &mut crate::context::Shell, pgrp: i32) -> Result<(), Error> {
     let fd: c_int = sh.jobs.ttyfd;
 
     if fd < 0 {
@@ -380,12 +356,12 @@ pub(crate) unsafe fn xxtcsetpgrp(sh: &mut crate::context::Shell, pgrp: pid_t) ->
 /// callers that *are* ordinary code (`set -m`, `exec`, `procargs`) keep
 /// dash's behaviour of abandoning the command, and the teardown callers
 /// drop it where the C already swallowed it.
-pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error> {
+pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error> {
     let mut on: c_int = on;
     let mut pgrp: c_int = -1;
     let mut fd: c_int;
 
-    if on == sh.jobs.jobctl || crate::shellmain::rootshell() == 0 {
+    if on == sh.jobs.jobctl || crate::shellmain::rootshell(sh) == 0 {
         return Ok(());
     }
     /* Turning job control *on* is three operations on the host's process:
@@ -417,7 +393,12 @@ pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(),
          * argues against. */
         /* `mayfail = 1`, so the only thing this can hand back is an
          * interrupt taken at its EINTR poll. */
-        ofd = crate::redir::sh_open(sh, _PATH_TTY.as_ptr() as *const c_char, libc::O_RDWR, 1)?;
+        ofd = crate::redir::sh_open(
+            sh,
+            BStr::new(&_PATH_TTY[.._PATH_TTY.len() - 1]),
+            nsh_platform::OpenMode::ReadWrite,
+            1,
+        )?;
         fd = ofd;
         'after_dowhile: {
             'out_lbl: {
@@ -435,7 +416,7 @@ pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(),
                         let mut i: usize = 0;
                         fd = -1;
                         while i < candidates.len() {
-                            if libc::isatty(candidates[i]) != 0 {
+                            if nsh_platform::is_terminal(candidates[i]) {
                                 fd = candidates[i];
                                 break;
                             }
@@ -449,7 +430,19 @@ pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(),
                     loop {
                         /* while we are in the background */
                         loop {
-                            pgrp = libc::tcgetpgrp(fd);
+                            match nsh_platform::foreground_process_group(fd) {
+                                Ok(group) => {
+                                    pgrp = group;
+                                    break;
+                                }
+                                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
+                                    continue;
+                                }
+                                Err(_) => {
+                                    pgrp = -1;
+                                    break;
+                                }
+                            }
                             /* The 8.3 audit's one real finding: this is
                              * the only EINTR-capable syscall in this file
                              * whose -1 is handled without ever reading
@@ -467,24 +460,24 @@ pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(),
                              * teardown -- so the interrupt waits for the
                              * next real poll site, which is where it would
                              * have waited anyway. */
-                            if !(pgrp < 0 && errno() == libc::EINTR) {
-                                break;
-                            }
                         }
                         if pgrp < 0 {
                             break 'close_lbl; // goto close
                         }
-                        if pgrp == libc::getpgrp() {
+                        if pgrp == nsh_platform::current_process_group() {
                             break 'after_dowhile; // `break` of the do/while
                         }
                         if iflag(sh) == 0 {
                             break 'close_lbl; // goto close
                         }
-                        libc::killpg(0, libc::SIGTTIN);
+                        let _ = nsh_platform::send_signal_to_process_group(
+                            0,
+                            nsh_platform::terminal_input_signal(),
+                        );
                     }
                 }
                 // close:
-                libc::close(fd);
+                let _ = nsh_platform::close_fd(fd);
                 fd = -1;
                 // falls through into out:
             }
@@ -499,22 +492,22 @@ pub unsafe fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(),
             return Ok(());
         }
         sh.jobs.initialpgrp = pgrp;
-        pgrp = crate::shellmain::rootpid;
+        pgrp = sh.root_pid;
     } else {
         /* turning job control off */
         fd = sh.jobs.ttyfd;
         pgrp = sh.jobs.initialpgrp;
     }
 
-    crate::trap::setsignal(sh, libc::SIGTSTP);
-    crate::trap::setsignal(sh, libc::SIGTTOU);
-    crate::trap::setsignal(sh, libc::SIGTTIN);
+    crate::trap::setsignal(sh, nsh_platform::terminal_stop_signal());
+    crate::trap::setsignal(sh, nsh_platform::terminal_output_signal());
+    crate::trap::setsignal(sh, nsh_platform::terminal_input_signal());
     if fd >= 0 {
-        libc::setpgid(0, pgrp);
+        let _ = nsh_platform::set_process_group(0, pgrp);
         xtcsetpgrp(sh, fd, pgrp)?;
 
         if on == 0 {
-            libc::close(fd);
+            let _ = nsh_platform::close_fd(fd);
             fd = -1;
         }
     }
@@ -534,22 +527,22 @@ pub(crate) fn jobno(jp: usize) -> c_int {
 
 // [spec:dash:def:jobs.sprint-status-fn]
 // [spec:dash:sem:jobs.sprint-status-fn]
-unsafe fn sprint_status(os: *mut c_char, status: c_int, sigonly: c_int) -> c_int {
-    let mut s: *mut c_char = os;
+fn sprint_status(out: &mut Vec<u8>, status: c_int, sigonly: c_int) -> c_int {
+    let start = out.len();
     let mut st: c_int;
 
     'out_lbl: {
-        st = libc::WEXITSTATUS(status);
-        if !libc::WIFEXITED(status) {
-            st = libc::WSTOPSIG(status);
-            if !libc::WIFSTOPPED(status) {
-                st = libc::WTERMSIG(status);
+        st = nsh_platform::wait_status_exit_code(status);
+        if !nsh_platform::wait_status_is_exited(status) {
+            st = nsh_platform::wait_status_stop_signal(status);
+            if !nsh_platform::wait_status_is_stopped(status) {
+                st = nsh_platform::wait_status_term_signal(status);
             }
             if sigonly != 0 {
-                if st == libc::SIGINT || st == libc::SIGPIPE {
+                if st == nsh_platform::interrupt_signal() || st == nsh_platform::pipe_signal() {
                     break 'out_lbl;
                 }
-                if libc::WIFSTOPPED(status) {
+                if nsh_platform::wait_status_is_stopped(status) {
                     break 'out_lbl;
                 }
             }
@@ -558,35 +551,34 @@ unsafe fn sprint_status(os: *mut c_char, status: c_int, sigonly: c_int) -> c_int
              * sized for 32 whatever the signal is called. `strsignal` is
              * locale text, not ASCII, so the bytes are copied rather than
              * routed through `copy_ascii_cstr`. */
-            let name = CStr::from_ptr(libc::strsignal(st)).to_bytes();
+            let description = nsh_platform::signal_description(st);
+            let name = description.as_slice();
             let n = name.len().min(32);
-            core::ptr::copy_nonoverlapping(name.as_ptr(), s as *mut u8, n);
-            core::ptr::write_bytes((s as *mut u8).add(n), 0, 32 - n);
-            s = s.add(n);
-            if libc::WCOREDUMP(status) {
-                s = s.offset(copy_ascii_cstr(s, 15, " (core dumped)") as isize);
+            out.extend_from_slice(&name[..n]);
+            if nsh_platform::wait_status_core_dumped(status) {
+                append_ascii(out, 15, " (core dumped)");
             }
         } else if sigonly == 0 {
             if st != 0 {
                 let status = format!("Done({st})");
-                s = s.offset(copy_ascii_cstr(s, 16, &status) as isize);
+                append_ascii(out, 16, &status);
             } else {
-                s = s.offset(copy_ascii_cstr(s, 5, "Done") as isize);
+                append_ascii(out, 5, "Done");
             }
         }
     }
     // out:
-    (s as usize - os as usize) as c_int
+    (out.len() - start) as c_int
 }
 
 // [spec:dash:def:jobs.showjob-fn]
 // [spec:dash:sem:jobs.showjob-fn]
-pub(crate) unsafe fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mode: c_int) {
+pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mode: c_int) {
     let mut ps: usize;
     let psend: usize;
     let mut col: c_int;
     let indent: c_int;
-    let mut s: [c_char; 80] = [0; 80];
+    let mut s: Vec<u8> = Vec::with_capacity(80);
 
     ps = 0;
 
@@ -602,25 +594,25 @@ pub(crate) unsafe fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usi
     }
 
     let heading = format!("[{}]   ", jobno(jp));
-    col = copy_ascii_cstr(s.as_mut_ptr(), 16, &heading);
+    col = append_ascii(&mut s, 16, &heading);
     indent = col;
 
     if Some(jp) == sh.jobs.curjob {
-        s[(col - 2) as usize] = b'+' as c_char;
+        s[(col - 2) as usize] = b'+';
     } else if sh.jobs.curjob.map_or(false, |c| sh.jobs.tab[c].prev_job == Some(jp)) {
-        s[(col - 2) as usize] = b'-' as c_char;
+        s[(col - 2) as usize] = b'-';
     }
 
     if (mode & SHOW_PID) != 0 {
         let pid = format!("{} ", ps_pid(sh, jp, ps));
-        col += copy_ascii_cstr(s.as_mut_ptr().offset(col as isize), 16, &pid);
+        col += append_ascii(&mut s, 16, &pid);
     }
 
     psend = sh.jobs.tab[jp].ps.len();
 
     if sh.jobs.tab[jp].state as c_int == JOBRUNNING {
         /* scopy("Running", s + col) */
-        col += copy_ascii_cstr(s.as_mut_ptr().offset(col as isize), 8, "Running");
+        col += append_ascii(&mut s, 8, "Running");
     } else {
         /* `psend[-1]`: a job leaves JOBRUNNING only through `waitone`,
          * which needs a process to have exited to do it. */
@@ -628,7 +620,7 @@ pub(crate) unsafe fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usi
         if sh.jobs.tab[jp].state as c_int == JOBSTOPPED {
             status = sh.jobs.tab[jp].stopstatus;
         }
-        col += sprint_status(s.as_mut_ptr().offset(col as isize), status, 0);
+        col += sprint_status(&mut s, status, 0);
     }
 
     /* `goto start` enters the do/while below at the `start:` label */
@@ -642,12 +634,13 @@ pub(crate) unsafe fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usi
                 space = ' ',
                 width = indent.max(0) as usize,
             );
-            col = copy_ascii_cstr(s.as_mut_ptr(), 48, &continuation) - 3;
+            s.clear();
+            col = append_ascii(&mut s, 48, &continuation) - 3;
         }
         at_start = false;
 
         // start:
-        let mut record = CStr::from_ptr(s.as_ptr()).to_bytes().to_vec();
+        let mut record = s.clone();
         let width = (33 - col).max(0) as usize;
         record.resize(record.len() + width.max(1), b' ');
         let _ = sh.io.get(dest).write_all(&record);
@@ -678,13 +671,13 @@ pub(crate) unsafe fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usi
 
 // [spec:dash:def:jobs.showjobs-fn]
 // [spec:dash:sem:jobs.showjobs-fn]
-pub unsafe fn showjobs(sh: &mut crate::context::Shell, dest: Dest, mode: c_int) -> Result<(), Error> {
+pub fn showjobs(sh: &mut crate::context::Shell, dest: Dest, mode: c_int) -> Result<(), Error> {
     let mut jp: Option<usize>;
 
     /* TRACE(("showjobs(%x) called\n", mode)); */
 
     /* If not even one job changed, there is nothing to do */
-    /* `DOWAIT_NONBLOCK`, so `wait3` cannot block and the poll inside it
+    /* `DOWAIT_NONBLOCK`, so the wait cannot block and the poll inside it
      * has nothing to notice; the `?` is the type saying so rather than a
      * path anyone expects to take. */
     dowait(sh, DOWAIT_NONBLOCK, None)?;
@@ -708,8 +701,8 @@ pub unsafe fn showjobs(sh: &mut crate::context::Shell, dest: Dest, mode: c_int) 
 
 // [spec:dash:def:jobs.freejob-fn]
 // [spec:dash:sem:jobs.freejob-fn]
-unsafe fn freejob(sh: &mut crate::context::Shell, jp: usize) {
-    INTOFF();
+fn freejob(sh: &mut crate::context::Shell, jp: usize) {
+    INTOFF(sh);
     /* The C `ckfree`s each `ps[i].cmd` that is not the shared null
      * string and leaves `nprocs` alone, so freeing the same job twice
      * frees them twice; dropping the array releases each text once and
@@ -718,7 +711,7 @@ unsafe fn freejob(sh: &mut crate::context::Shell, jp: usize) {
     sh.jobs.tab[jp].ps.clear();
     sh.jobs.tab[jp].used = 0;
     set_curjob(sh, jp, CUR_DELETE);
-    INTON();
+    INTON(sh);
 }
 
 /*
@@ -727,7 +720,7 @@ unsafe fn freejob(sh: &mut crate::context::Shell, jp: usize) {
 
 // [spec:dash:def:jobs.getjob-fn]
 // [spec:dash:sem:jobs.getjob-fn]
-pub(crate) unsafe fn getjob(sh: &mut crate::context::Shell, name: *const c_char, getctl: c_int) -> Result<usize, Error> {
+pub(crate) fn getjob(sh: &mut crate::context::Shell, name: Option<&BStr>, getctl: c_int) -> Result<usize, Error> {
     enum JobError {
         NoSuch,
         NoPrevious,
@@ -740,8 +733,7 @@ pub(crate) unsafe fn getjob(sh: &mut crate::context::Shell, name: *const c_char,
     let mut found: Option<usize>;
     let mut job_error = JobError::NoSuch;
     let num: c_uint;
-    let c: c_int;
-    let mut p: *const c_char;
+    let c: u8;
     /* C: `char *(*match)(const char *, const char *)`, assigned either
      * `prefix` or `strstr`; the two differ only in whether the pattern
      * has to start at the beginning of the command text. */
@@ -752,25 +744,24 @@ pub(crate) unsafe fn getjob(sh: &mut crate::context::Shell, name: *const c_char,
             'check_lbl: {
                 'currentjob_lbl: {
                     jp = sh.jobs.curjob;
-                    p = name;
-                    if p.is_null() {
+                    let Some(name) = name else {
                         break 'currentjob_lbl; // goto currentjob
-                    }
+                    };
 
-                    if *p != b'%' as c_char {
+                    if name.first() != Some(&b'%') {
                         break 'err_lbl; // goto err
                     }
 
-                    p = p.add(1);
-                    c = *p as c_int;
+                    let mut p = &name[1..];
+                    c = p.first().copied().unwrap_or(0);
                     if c == 0 {
                         break 'currentjob_lbl; // goto currentjob
                     }
 
-                    if *p.offset(1) == 0 {
-                        if c == '+' as c_int || c == '%' as c_int {
+                    if p.len() == 1 {
+                        if c == b'+' || c == b'%' {
                             break 'currentjob_lbl; // the currentjob: label body
-                        } else if c == '-' as c_int {
+                        } else if c == b'-' {
                             if let Some(i) = jp {
                                 jp = sh.jobs.tab[i].prev_job;
                             }
@@ -779,8 +770,8 @@ pub(crate) unsafe fn getjob(sh: &mut crate::context::Shell, name: *const c_char,
                         }
                     }
 
-                    if crate::mystring::is_number(p) != 0 {
-                        num = libc::atoi(p) as c_uint;
+                    if let Some(number) = crate::mystring::decimal_digits(BStr::new(p)) {
+                        num = number.min(c_uint::MAX as u64) as c_uint;
                         if num > 0 && num as usize <= sh.jobs.tab.len() {
                             let i = (num - 1) as usize;
                             jp = Some(i);
@@ -792,12 +783,12 @@ pub(crate) unsafe fn getjob(sh: &mut crate::context::Shell, name: *const c_char,
                     }
 
                     substring = false;
-                    if *p == b'?' as c_char {
+                    if p.first() == Some(&b'?') {
                         substring = true;
-                        p = p.add(1);
+                        p = &p[1..];
                     }
 
-                    let pat: &[u8] = CStr::from_ptr(p).to_bytes();
+                    let pat: &[u8] = p;
                     found = None;
                     while let Some(i) = jp {
                         let cmd = ps_cmd(sh, i, 0);
@@ -846,21 +837,17 @@ pub(crate) unsafe fn getjob(sh: &mut crate::context::Shell, name: *const c_char,
     match job_error {
         JobError::NoSuch => {
             message.extend_from_slice(b"No such job: ");
-            message.extend_from_slice(CStr::from_ptr(name).to_bytes());
+            message.extend_from_slice(name.unwrap_or(BStr::new(b"(null)")));
         }
         JobError::NoPrevious => message.extend_from_slice(b"No previous job"),
         JobError::Ambiguous => {
-            message.extend_from_slice(CStr::from_ptr(name).to_bytes());
+            message.extend_from_slice(name.unwrap_or(BStr::new(b"(null)")));
             message.extend_from_slice(b": ambiguous");
         }
         JobError::NoCurrent => message.extend_from_slice(b"No current job"),
         JobError::NoControl => {
             message.extend_from_slice(b"job ");
-            if name.is_null() {
-                message.extend_from_slice(b"(null)");
-            } else {
-                message.extend_from_slice(CStr::from_ptr(name).to_bytes());
-            }
+            message.extend_from_slice(name.unwrap_or(BStr::new(b"(null)")));
             message.extend_from_slice(b" not created under job control");
         }
     }
@@ -874,7 +861,7 @@ pub(crate) unsafe fn getjob(sh: &mut crate::context::Shell, name: *const c_char,
 
 // [spec:dash:def:jobs.makejob-fn]
 // [spec:dash:sem:jobs.makejob-fn]
-pub unsafe fn makejob(sh: &mut crate::context::Shell, nprocs: c_int) -> usize {
+pub fn makejob(sh: &mut crate::context::Shell, nprocs: c_int) -> usize {
     let jp: usize;
     let mut i: usize;
 
@@ -923,7 +910,7 @@ pub unsafe fn makejob(sh: &mut crate::context::Shell, nprocs: c_int) -> usize {
 // `ps` that pointed at its own job's `ps0`, because `ckrealloc` may have
 // moved the array — has no counterpart: a job is named by its index and
 // owns its process array, so nothing points into the table.
-unsafe fn growjobtab(sh: &mut crate::context::Shell) -> usize {
+fn growjobtab(sh: &mut crate::context::Shell) -> usize {
     let len: usize = sh.jobs.tab.len();
 
     for _ in 0..4 {
@@ -951,126 +938,81 @@ unsafe fn growjobtab(sh: &mut crate::context::Shell) -> usize {
 
 /// What `forkchild` does with a diagnostic it cannot return.
 ///
-/// `forkchild` runs in the child, and under `vforkexec` in a child that
-/// *shares the parent's stack*. `docs/errors-are-values.md` §2.5 calls
-/// that a hard boundary rather than a wrinkle: an `Err` returned from
-/// here would travel through frames the parent owns and unwind them under
-/// it. So this is a terminus, and it is the same terminus the C had --
-/// `exraise`'s two arms, written where the boundary is.
-///
-/// Vforked: `_exit` immediately, before anything can run a destructor on
-/// the parent's objects. Otherwise: the child ends the way `main`'s
+/// `forkchild` runs in the child. An `Err` returned from here would travel
+/// through frames copied from the parent and resume work the child must
+/// never resume, so this is a terminus. The child ends the way `main`'s
 /// handler ends every forked child, which `forkchild`'s own `shlvl += 1`
 /// is what guarantees (see `shellmain::exit_from_child`). The diagnostic
-/// has already been written either way.
+/// has already been written.
 #[cold]
-unsafe fn forkchild_fatal(sh: &mut crate::context::Shell, e: Error) -> ! {
-    if crate::siginbox::signals().vforked() != 0 {
-        /* The `_exit` below is this frame's own ending, so this frame
-         * writes the status the error took. */
-        sh.status = e.status();
-        drop(e);
-        crate::shell::flush_coverage();
-        libc::_exit(sh.status);
-    }
+fn forkchild_fatal(sh: &mut crate::context::Shell, e: Error) -> ! {
     crate::shellmain::exit_from_child(sh, Err(e))
 }
 
 // [spec:dash:def:jobs.forkchild-fn]
 // [spec:dash:sem:jobs.forkchild-fn]
-//
-// Under `vfork` this runs in the parent's address space, so everything
-// before the `lvforked` return must stay allocation- and destructor-free
-// (§4.12 of docs/std-replacements.md); it reads the job table and writes
-// nothing but process-global state, and `vforkexec` passes FORK_FG, so
-// the `/dev/null` branch — the one that would open a descriptor — is not
-// on that path either.
-unsafe fn forkchild(
+fn forkchild(
     sh: &mut crate::context::Shell,
     jp: Option<usize>,
     n: Option<&Node>,
     mode: c_int,
 ) {
-    let lvforked: c_int;
     let oldlvl: c_int;
 
     /* TRACE(("Child shell %d\n", getpid())); */
 
     crate::shell::reset_coverage();
 
-    oldlvl = crate::shellmain::shlvl;
-    lvforked = crate::siginbox::signals().vforked();
+    oldlvl = sh.shell_level;
+    sh.current_pid = 0;
+    sh.shell_level += 1;
 
-    if lvforked == 0 {
-        crate::shellmain::mypid = 0;
-        crate::shellmain::shlvl += 1;
+    crate::init::forkreset(sh, if mode == FORK_NOJOB { n } else { None });
 
-        crate::init::forkreset(sh, if mode == FORK_NOJOB { n } else { None });
-
-        /* do job control only in root shell */
-        sh.jobs.jobctl = 0;
-    }
+    /* do job control only in root shell */
+    sh.jobs.jobctl = 0;
 
     /* The C tests `jp->jobctl` without checking `jp`; `jp` is NULL only
      * under FORK_NOJOB, which the first conjunct has already excluded. */
     let ownpgrp = mode != FORK_NOJOB && oldlvl == 0 && jp.map_or(false, |i| sh.jobs.tab[i].jobctl != 0);
     if ownpgrp {
-        let pgrp: pid_t;
+        let pgrp: i32;
         let ji: usize = jp.unwrap();
 
         if sh.jobs.tab[ji].ps.is_empty() {
-            pgrp = libc::getpid();
-            /* The C writes `mypid = pgrp = getpid()` unguarded
-             * (`src/jobs.c:891`), and under `vfork` that is a store into
-             * the *parent's* address space -- the one place on the
-             * vforked child's prologue where the parent reads the
-             * location again. Every other write in this function is
-             * already gated on `lvforked == 0`: the block above, and
-             * `setsignal`/`ignoresig`'s `sigmode` stores, which carry
-             * their own guard (`trap.rs:440`, `:469`). This one was
-             * missed, so it joins them.
-             *
-             * What it costs the C: after a foreground external command
-             * under `set -m`, the parent's `mypid` holds its *child's*
-             * pid. `vforkexec`'s `if mypid == 0` then never re-reads it,
-             * so the next `vfork` publishes a stale pid as `vforked`, and
-             * `onsig`'s `getpid() != vforked` answers *true for the
-             * parent* -- which drops any signal arriving between `vfork`
-             * returning and `set_vforked(0)`. Narrow, but it is a
-             * dropped signal, and `[dec:nsh:we-own-the-defects]` says a
-             * defect in the Rust is fixed in the Rust.
-             *
-             * The child does not need the value: it reaches `execve`
-             * without reading `mypid` again. */
-            if lvforked == 0 {
-                crate::shellmain::mypid = pgrp;
-            }
+            pgrp = nsh_platform::current_process_id();
+            sh.current_pid = pgrp;
         } else {
             pgrp = sh.jobs.tab[ji].ps[0].pid;
         }
         /* This can fail because we are doing it in the parent also */
-        libc::setpgid(0, pgrp);
+        let _ = nsh_platform::set_process_group(0, pgrp);
         if mode == FORK_FG {
             xxtcsetpgrp(sh, pgrp).unwrap_or_else(|e| forkchild_fatal(sh, e));
         }
-        crate::trap::setsignal_in_child(sh, libc::SIGTSTP);
-        crate::trap::setsignal_in_child(sh, libc::SIGTTOU);
+        crate::trap::setsignal_in_child(sh, nsh_platform::terminal_stop_signal());
+        crate::trap::setsignal_in_child(sh, nsh_platform::terminal_output_signal());
     } else if mode == FORK_BG {
-        crate::trap::ignoresig_in_child(sh, libc::SIGINT);
-        crate::trap::ignoresig_in_child(sh, libc::SIGQUIT);
+        crate::trap::ignoresig_in_child(sh, nsh_platform::interrupt_signal());
+        crate::trap::ignoresig_in_child(sh, nsh_platform::quit_signal());
         if jp.map_or(false, |i| sh.jobs.tab[i].ps.is_empty()) {
             /* The C closes descriptor 0 and reopens /dev/null, relying on
              * `open` returning the lowest free descriptor to land back on
              * 0. That only works when the shell's stdin *is* 0, so put it
              * where it belongs when the frontend said otherwise. */
             let sin: c_int = sh.streams.stdin;
-            libc::close(sin);
+            let _ = nsh_platform::close_fd(sin);
             let f: c_int =
-                crate::redir::sh_open(sh, _PATH_DEVNULL.as_ptr() as *const c_char, libc::O_RDONLY, 0)
+                crate::redir::sh_open(
+                    sh,
+                    BStr::new(&_PATH_DEVNULL[.._PATH_DEVNULL.len() - 1]),
+                    nsh_platform::OpenMode::ReadOnly,
+                    0,
+                )
                     .unwrap_or_else(|e| forkchild_fatal(sh, e));
             if f != sin {
-                libc::dup2(f, sin);
-                libc::close(f);
+                let _ = nsh_platform::duplicate_to(f, sin);
+                let _ = nsh_platform::close_fd(f);
             }
             /* Should call reset_input here, but it's harmless
              * for now.
@@ -1078,13 +1020,9 @@ unsafe fn forkchild(
         }
     }
     if oldlvl == 0 && iflag(sh) != 0 {
-        crate::trap::setsignal_in_child(sh, libc::SIGINT);
-        crate::trap::setsignal_in_child(sh, libc::SIGQUIT);
-        crate::trap::setsignal_in_child(sh, libc::SIGTERM);
-    }
-
-    if lvforked != 0 {
-        return;
+        crate::trap::setsignal_in_child(sh, nsh_platform::interrupt_signal());
+        crate::trap::setsignal_in_child(sh, nsh_platform::quit_signal());
+        crate::trap::setsignal_in_child(sh, nsh_platform::termination_signal());
     }
 
     let Some(ji) = jp else {
@@ -1093,7 +1031,10 @@ unsafe fn forkchild(
 
     freejob(sh, ji);
 
-    if crate::parser::issimplecmd(n, (*crate::builtins::JOBSCMD).name.as_ptr()) != 0 {
+    if crate::parser::issimplecmd(
+        n,
+        BStr::new(crate::builtins::JOBSCMD.name.to_bytes()),
+    ) != 0 {
         return;
     }
 
@@ -1108,12 +1049,12 @@ unsafe fn forkchild(
 
 // [spec:dash:def:jobs.forkparent-fn]
 // [spec:dash:sem:jobs.forkparent-fn]
-unsafe fn forkparent(
+fn forkparent(
     sh: &mut crate::context::Shell,
     jp: Option<usize>,
     n: Option<&Node>,
     mode: c_int,
-    pid: pid_t,
+    pid: i32,
 ) -> Result<(), Error> {
     if pid < 0 {
         /* TRACE(("Fork failed, errno=%d", errno)); */
@@ -1136,7 +1077,7 @@ unsafe fn forkparent(
             pgrp = sh.jobs.tab[ji].ps[0].pid;
         }
         /* This can fail because we are doing it in the child also */
-        libc::setpgid(pid, pgrp);
+        let _ = nsh_platform::set_process_group(pid, pgrp);
     }
     if mode == FORK_BG {
         sh.backgndpid = pid; /* set $! */
@@ -1161,7 +1102,7 @@ unsafe fn forkparent(
 
 // [spec:dash:def:jobs.forkshell-fn]
 // [spec:dash:sem:jobs.forkshell-fn]
-pub unsafe fn forkshell(
+pub fn forkshell(
     sh: &mut crate::context::Shell,
     jp: Option<usize>,
     n: Option<&Node>,
@@ -1173,24 +1114,37 @@ pub unsafe fn forkshell(
 
     crate::input::flush_input(sh);
 
-    pid = libc::fork();
-    if pid == 0 {
-        forkchild(sh, jp, n, mode);
-    } else {
-        forkparent(sh, jp, n, mode, pid)?;
-    }
+    pid = match nsh_platform::fork_process() {
+        Ok(nsh_platform::ForkResult::Child) => {
+            forkchild(sh, jp, n, mode);
+            0
+        }
+        Ok(nsh_platform::ForkResult::Parent(pid)) => {
+            forkparent(sh, jp, n, mode, pid)?;
+            pid
+        }
+        Err(_) => {
+            forkparent(sh, jp, n, mode, -1)?;
+            unreachable!("forkparent returns an error for a failed fork")
+        }
+    };
 
     Ok(pid)
 }
 
 // [spec:dash:def:jobs.vforkexec-fn]
 // [spec:dash:sem:jobs.vforkexec-fn]
-#[allow(deprecated)] /* libc marks vfork deprecated; dash relies on it */
-pub unsafe fn vforkexec(
+/// Fork and immediately execute an external command.
+///
+/// dash uses `vfork` here. Rust command preparation owns and mutates heap
+/// allocations, so sharing the parent's address space is unsound: the
+/// second external command returned through a stack corrupted by the first.
+/// A regular fork preserves the child-terminus rule without shared memory.
+pub fn forkexec(
     sh: &mut crate::context::Shell,
     n: &Node,
-    argv: *mut *mut c_char,
-    path: *const c_char,
+    argv: &[&BStr],
+    path: &BStr,
     idx: c_int,
 ) -> Result<usize, Error> {
     let jp: usize;
@@ -1198,55 +1152,15 @@ pub unsafe fn vforkexec(
 
     jp = makejob(sh, 1);
 
-    if crate::shellmain::mypid == 0 {
-        crate::shellmain::mypid = libc::getpid();
-    }
-    crate::siginbox::signals().set_vforked(crate::shellmain::mypid);
-
-    pid = libc::vfork();
-
-    if pid == 0 {
-        /* Shared address space until `execve`: nothing between here and
-         * it may allocate, free or drop. `forkchild` returns at its
-         * `lvforked` test without touching the job table's storage.
-         *
-         * The rule the prologue is audited against is
-         * [dec:nsh:fork-child-is-a-terminus]: **a vforked child writes no
-         * location the parent reads again.** The audit, in the order the
-         * child runs them:
-         *
-         *   * the `mypid = 0` / `shlvl += 1` / `forkreset` / `jobctl = 0`
-         *     block -- skipped, `lvforked != 0`;
-         *   * `mypid = getpid()` in the job-control arm -- guarded there
-         *     now; it was the one violation and it is dash's;
-         *   * `setpgid`, `tcsetpgrp` -- syscalls on the child, not
-         *     memory;
-         *   * `setsignal`/`ignoresig` -- their `sigmode` stores carry
-         *     their own `lvforked` guard, and `sigaction` is per-process,
-         *     so the child's dispositions are the child's;
-         *   * the `freejob` walk -- skipped, `lvforked != 0`.
-         *
-         * Two writes are *permitted* and named rather than removed:
-         * `forkchild_fatal`'s and `shellexec`'s `sh.status = ...`, both
-         * immediately before their own `_exit`. The parent overwrites
-         * `sh.status` from the child's wait status in `waitforjob` before
-         * anything reads it, and `shellexec`'s failure path has to build
-         * and write dash's diagnostic, which allocates in the shared heap
-         * whatever is done about the field. Removing the store would buy
-         * nothing the allocation does not give back. */
-        forkchild(sh, Some(jp), Some(n), FORK_FG);
-        /* `shellexec` either replaces the image or, in a vforked child,
-         * `_exit`s at the failure site. It cannot come back here: this
-         * frame belongs to the parent, and returning through it would
-         * unwind the parent's stack from inside the child.
-         * docs/errors-are-values.md 2.5 is the boundary, and the `_exit`
-         * that enforces it is at `shellexec`'s own failure site now
-         * rather than inside `exraise`. */
-        drop(crate::exec::shellexec(sh, argv, path, idx));
-        std::process::abort();
-    }
-
-    crate::siginbox::signals().set_vforked(0);
+    pid = match nsh_platform::fork_process() {
+        Ok(nsh_platform::ForkResult::Child) => {
+            forkchild(sh, Some(jp), Some(n), FORK_FG);
+            let outcome = crate::exec::shellexec(sh, argv, path, idx);
+            crate::shellmain::exit_from_child(sh, outcome);
+        }
+        Ok(nsh_platform::ForkResult::Parent(pid)) => pid,
+        Err(_) => -1,
+    };
     forkparent(sh, Some(jp), Some(n), FORK_FG, pid)?;
 
     Ok(jp)
@@ -1275,7 +1189,7 @@ pub unsafe fn vforkexec(
 
 // [spec:dash:def:jobs.waitforjob-fn]
 // [spec:dash:sem:jobs.waitforjob-fn]
-pub unsafe fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c_int, Error> {
+pub fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c_int, Error> {
     let st: c_int;
 
     /* TRACE(("waitforjob(%%%d) called\n", jp ? jobno(jp) : 0)); */
@@ -1293,7 +1207,8 @@ pub unsafe fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> R
 
     st = getstatus(sh, jp);
     if sh.jobs.tab[jp].jobctl != 0 {
-        xxtcsetpgrp(sh, crate::shellmain::rootpid)?;
+        let root_pid = sh.root_pid;
+        xxtcsetpgrp(sh, root_pid)?;
         /*
          * This is truly gross.
          * If we're doing job control, then we did a TIOCSPGRP which
@@ -1303,7 +1218,7 @@ pub unsafe fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> R
          * occurred, and if so interrupt ourselves.  Yuck.  - mycroft
          */
         if sh.jobs.tab[jp].sigint != 0 {
-            libc::raise(libc::SIGINT);
+            let _ = nsh_platform::raise_signal(nsh_platform::interrupt_signal());
         }
     }
     if JOBS == 0 || sh.jobs.tab[jp].state as c_int == JOBDONE {
@@ -1318,14 +1233,14 @@ pub unsafe fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> R
 
 // [spec:dash:def:jobs.waitone-fn]
 // [spec:dash:sem:jobs.waitone-fn]
-unsafe fn waitone(sh: &mut crate::context::Shell, block: c_int, jobp: Option<usize>) -> Result<c_int, Error> {
+fn waitone(sh: &mut crate::context::Shell, block: c_int, jobp: Option<usize>) -> Result<c_int, Error> {
     let pid: c_int;
     let mut status: c_int = 0;
     let mut jp: Option<usize>;
     let mut thisjob: Option<usize> = None;
     let mut state: c_int = 0;
 
-    INTOFF();
+    INTOFF(sh);
     /* TRACE(("dowait(%d) called\n", block)); */
     pid = waitproc(sh, block, &mut status)?;
     /* TRACE(("wait returns pid %d, status=%d\n", pid, status)); */
@@ -1362,7 +1277,7 @@ unsafe fn waitone(sh: &mut crate::context::Shell, block: c_int, jobp: Option<usi
                         if state == JOBRUNNING {
                             break 'contin;
                         }
-                        if libc::WIFSTOPPED(sh.jobs.tab[ji].ps[sp].status) {
+                        if nsh_platform::wait_status_is_stopped(sh.jobs.tab[ji].ps[sp].status) {
                             sh.jobs.tab[ji].stopstatus = sh.jobs.tab[ji].ps[sp].status;
                             state = JOBSTOPPED;
                         }
@@ -1391,18 +1306,14 @@ unsafe fn waitone(sh: &mut crate::context::Shell, block: c_int, jobp: Option<usi
         }
     }
     // out:
-    INTON();
+    INTON(sh);
 
     if thisjob.is_some() && thisjob == jobp {
-        let mut s: [c_char; 48 + 1] = [0; 49];
-        let len: c_int;
-
-        len = sprint_status(s.as_mut_ptr(), status, 1);
-        if len != 0 {
-            s[len as usize] = b'\n' as c_char;
-            s[(len + 1) as usize] = 0;
-            let _ =
-                sh.io.stderr().write_all(CStr::from_ptr(s.as_ptr()).to_bytes());
+        let mut message = Vec::with_capacity(49);
+        sprint_status(&mut message, status, 1);
+        if !message.is_empty() {
+            message.push(b'\n');
+            let _ = sh.io.stderr().write_all(&message);
         }
     }
     /* This frame brackets the whole wait in INTOFF/INTON, so the poll
@@ -1421,8 +1332,8 @@ unsafe fn waitone(sh: &mut crate::context::Shell, block: c_int, jobp: Option<usi
 
 // [spec:dash:def:jobs.dowait-fn]
 // [spec:dash:sem:jobs.dowait-fn]
-pub(crate) unsafe fn dowait(sh: &mut crate::context::Shell, block: c_int, jp: Option<usize>) -> Result<c_int, Error> {
-    let gotchld: c_int = core::ptr::read_volatile(addr_of_mut!(crate::trap::gotsigchld));
+pub(crate) fn dowait(sh: &mut crate::context::Shell, block: c_int, jp: Option<usize>) -> Result<c_int, Error> {
+    let gotchld: c_int = crate::siginbox::signals().child_pending() as c_int;
     let mut rpid: c_int;
     let mut pid: c_int;
     let mut block: c_int = block;
@@ -1458,45 +1369,41 @@ pub(crate) unsafe fn dowait(sh: &mut crate::context::Shell, block: c_int, jp: Op
  * blocking.  If block is DOWAIT_WAITCMD, we return 0 when a signal
  * other than SIGCHLD interrupted the wait.
  *
- * We use sigsuspend in conjunction with a non-blocking wait3 in
+ * We use sigsuspend in conjunction with a non-blocking wait in
  * order to ensure that waitcmd exits promptly upon the reception
  * of a signal.
  *
- * For code paths other than waitcmd we either use a blocking wait3
- * or a non-blocking wait3.  For the latter case the caller of dowait
+ * For code paths other than waitcmd we either use a blocking wait
+ * or a non-blocking wait.  For the latter case the caller of dowait
  * must ensure that it is called over and over again until all dead
  * children have been reaped.  Otherwise zombies may linger.
  */
 
 // [spec:dash:def:jobs.waitproc-fn]
 // [spec:dash:sem:jobs.waitproc-fn]
-unsafe fn waitproc(sh: &mut crate::context::Shell, block: c_int, status: *mut c_int) -> Result<c_int, Error> {
-    let mut oldmask: libc::sigset_t = core::mem::zeroed();
-    let mut flags: c_int = if block == DOWAIT_BLOCK {
-        0
-    } else {
-        libc::WNOHANG
-    };
+fn waitproc(sh: &mut crate::context::Shell, block: c_int, status: &mut c_int) -> Result<c_int, Error> {
+    let nonblocking = block != DOWAIT_BLOCK;
     let mut err: c_int;
 
-    if sh.jobs.jobctl != 0 {
-        flags |= libc::WUNTRACED;
-    }
-
-    /* HAVE_WAIT3; the fallback is `waitpid((pid_t)-1, status, flags, NULL)`.
-     * `wait3` has no binding in the `libc` crate, so it is declared here. */
-    unsafe extern "C" {
-        fn wait3(status: *mut c_int, options: c_int, rusage: *mut libc::rusage) -> pid_t;
-    }
-
-    /* `gotsigchld` and `pending_sig` are `volatile sig_atomic_t` in C, so
-     * every plain C access below is a volatile access; spell that out. */
+    let signals = crate::siginbox::signals();
     loop {
-        core::ptr::write_volatile(addr_of_mut!(crate::trap::gotsigchld), 0);
+        signals.set_child_pending(false);
         loop {
-            err = wait3(status, flags, null_mut());
-            if !(err < 0 && errno() == libc::EINTR) {
-                break;
+            match nsh_platform::wait_for_any_child(nonblocking, sh.jobs.jobctl != 0) {
+                Ok(Some((pid, child_status))) => {
+                    err = pid;
+                    *status = child_status;
+                    break;
+                }
+                Ok(None) => {
+                    err = 0;
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => {
+                    err = -1;
+                    break;
+                }
             }
             /* One of the three EINTR sites the C retries blindly, and the
              * one that matters for a ^C during a foreground command that
@@ -1514,17 +1421,17 @@ unsafe fn waitproc(sh: &mut crate::context::Shell, block: c_int, status: *mut c_
             break;
         }
 
-        crate::trap::sigblockall(&mut oldmask);
+        let blocked = nsh_platform::BlockedSignals::all()
+            .expect("blocking signals around child wait failed");
 
-        while core::ptr::read_volatile(addr_of_mut!(crate::trap::gotsigchld)) == 0
-            && core::ptr::read_volatile(addr_of_mut!(crate::trap::pending_sig)) == 0
+        while !signals.child_pending() && signals.pending_signal() == 0
         {
-            libc::sigsuspend(&oldmask);
+            let _ = blocked.suspend();
         }
 
-        crate::system::sigclearmask();
+        drop(blocked);
 
-        if core::ptr::read_volatile(addr_of_mut!(crate::trap::gotsigchld)) == 0 {
+        if !signals.child_pending() {
             break;
         }
     }
@@ -1538,7 +1445,7 @@ unsafe fn waitproc(sh: &mut crate::context::Shell, block: c_int, status: *mut c_
 
 // [spec:dash:def:jobs.stoppedjobs-fn]
 // [spec:dash:sem:jobs.stoppedjobs-fn]
-pub unsafe fn stoppedjobs(sh: &mut crate::context::Shell) -> c_int {
+pub fn stoppedjobs(sh: &mut crate::context::Shell) -> c_int {
     let jp: Option<usize>;
     let mut retval: c_int;
 
@@ -1566,28 +1473,17 @@ pub unsafe fn stoppedjobs(sh: &mut crate::context::Shell) -> c_int {
  * jobs command).
  */
 
-/// The text `cmdtxt` is building. The C's `cmdnextc` is a `char *` cursor
-/// into the stack block; here the cursor is the buffer's length.
-static mut cmdbuf: BString = BString::new(Vec::new());
-
-/// A fresh borrow of `cmdbuf` per access, so that a `cmdputs` reached
-/// from the middle of `cmdtxt`'s recursion never holds one.
-#[inline]
-unsafe fn cmdtext() -> &'static mut BString {
-    &mut *addr_of_mut!(cmdbuf)
-}
-
 // [spec:dash:def:jobs.commandtext-fn]
 // [spec:dash:sem:jobs.commandtext-fn]
-unsafe fn commandtext(n: &Node) -> BString {
-    cmdtext().clear();
-    cmdtxt(Some(n));
+fn commandtext(n: &Node) -> BString {
+    let mut text = BString::new(Vec::new());
+    cmdtxt(Some(n), &mut text);
     /* `cmdtxt` writes nothing at all for a command with no words — `x=1 &`
      * is one — and the C then hands `savestr` an uninitialised stack block,
      * out of which the reference reads a NUL and prints an empty command
      * text. The empty buffer is that, said on purpose. */
     /* TRACE(("commandtext: name %p, end %p\n", name, cmdnextc)); */
-    cmdtext().clone()
+    text
 }
 
 // [spec:dash:def:jobs.cmdtxt-fn]
@@ -1597,9 +1493,9 @@ unsafe fn commandtext(n: &Node) -> BString {
 // `goto donode` from the redirection tail), so the label graph is
 // expressed as an explicit program counter rather than as nested
 // labelled blocks.
-unsafe fn cmdtxt(n: Option<&Node>) {
-    let mut p: *const c_char = core::ptr::null();
-    let mut s: [c_char; 2] = [0; 2];
+fn cmdtxt(n: Option<&Node>, text: &mut BString) {
+    let mut p: &[u8] = &[];
+    let mut s: [u8; 1] = [0];
 
     const L_SWITCH: c_int = 0;
     const L_BINOP: c_int = 1;
@@ -1626,15 +1522,15 @@ unsafe fn cmdtxt(n: Option<&Node>) {
         match pc {
             L_SWITCH => match cur.node_type() {
                 NSEMI => {
-                    p = b"; \0".as_ptr() as *const c_char;
+                    p = b"; ";
                     pc = L_BINOP;
                 }
                 NAND => {
-                    p = b" && \0".as_ptr() as *const c_char;
+                    p = b" && ";
                     pc = L_BINOP;
                 }
                 NOR => {
-                    p = b" || \0".as_ptr() as *const c_char;
+                    p = b" || ";
                     pc = L_BINOP;
                 }
                 NREDIR | NBACKGND => {
@@ -1642,109 +1538,109 @@ unsafe fn cmdtxt(n: Option<&Node>) {
                     pc = L_DONODE;
                 }
                 NNOT => {
-                    cmdputs(b"!\0".as_ptr() as *const c_char);
+                    cmdputs(b"!", text);
                     n = cur.nnot().com.as_deref();
                     pc = L_DONODE;
                 }
                 NIF => {
                     let f = cur.nif();
-                    cmdputs(b"if \0".as_ptr() as *const c_char);
-                    cmdtxt(f.test.as_deref());
-                    cmdputs(b"; then \0".as_ptr() as *const c_char);
+                    cmdputs(b"if ", text);
+                    cmdtxt(f.test.as_deref(), text);
+                    cmdputs(b"; then ", text);
                     if f.elsepart.is_some() {
-                        cmdtxt(f.ifpart.as_deref());
-                        cmdputs(b"; else \0".as_ptr() as *const c_char);
+                        cmdtxt(f.ifpart.as_deref(), text);
+                        cmdputs(b"; else ", text);
                         n = f.elsepart.as_deref();
                     } else {
                         n = f.ifpart.as_deref();
                     }
-                    p = b"; fi\0".as_ptr() as *const c_char;
+                    p = b"; fi";
                     pc = L_DOTAIL;
                 }
                 NSUBSHELL => {
-                    cmdputs(b"(\0".as_ptr() as *const c_char);
+                    cmdputs(b"(", text);
                     n = cur.nredir().n.as_deref();
-                    p = b")\0".as_ptr() as *const c_char;
+                    p = b")";
                     pc = L_DOTAIL;
                 }
                 NWHILE => {
-                    p = b"while \0".as_ptr() as *const c_char;
+                    p = b"while ";
                     pc = L_UNTIL;
                 }
                 NUNTIL => {
-                    p = b"until \0".as_ptr() as *const c_char;
+                    p = b"until ";
                     pc = L_UNTIL;
                 }
                 NFOR => {
                     let f = cur.nfor();
-                    cmdputs(b"for \0".as_ptr() as *const c_char);
-                    cmdputs(f.var.as_ptr());
-                    cmdputs(b" in \0".as_ptr() as *const c_char);
-                    cmdlist(&f.args, 1);
+                    cmdputs(b"for ", text);
+                    cmdputs(f.var.as_bstr(), text);
+                    cmdputs(b" in ", text);
+                    cmdlist(&f.args, 1, text);
                     n = f.body.as_deref();
-                    p = b"; done\0".as_ptr() as *const c_char;
+                    p = b"; done";
                     pc = L_DODO;
                 }
                 NDEFUN => {
-                    cmdputs(cur.ndefun().text.as_ptr());
-                    p = b"() { ... }\0".as_ptr() as *const c_char;
+                    cmdputs(cur.ndefun().text.as_bstr(), text);
+                    p = b"() { ... }";
                     pc = L_DOTAIL2;
                 }
                 NCMD => {
-                    cmdlist(&cur.ncmd().args, 1);
-                    cmdlist(&cur.ncmd().redirect, 0);
+                    cmdlist(&cur.ncmd().args, 1, text);
+                    cmdlist(&cur.ncmd().redirect, 0, text);
                     return;
                 }
                 NARG => {
-                    p = cur.narg().text.as_ptr();
+                    p = cur.narg().text.as_bstr();
                     pc = L_DOTAIL2;
                 }
                 NHERE | NXHERE => {
-                    p = b"<<...\0".as_ptr() as *const c_char;
+                    p = b"<<...";
                     pc = L_DOTAIL2;
                 }
                 NCASE => {
                     let c = cur.ncase();
-                    cmdputs(b"case \0".as_ptr() as *const c_char);
-                    cmdputs(c.expr.as_deref().unwrap().narg().text.as_ptr());
-                    cmdputs(b" in \0".as_ptr() as *const c_char);
+                    cmdputs(b"case ", text);
+                    cmdputs(c.expr.as_deref().unwrap().narg().text.as_bstr(), text);
+                    cmdputs(b" in ", text);
                     for np in &c.cases {
                         /* the C passes the head of the pattern list, so only
                          * the first pattern of a case ever prints */
-                        cmdtxt(np.nclist().pattern.first());
-                        cmdputs(b") \0".as_ptr() as *const c_char);
-                        cmdtxt(np.nclist().body.as_deref());
-                        cmdputs(b";; \0".as_ptr() as *const c_char);
+                        cmdtxt(np.nclist().pattern.first(), text);
+                        cmdputs(b") ", text);
+                        cmdtxt(np.nclist().body.as_deref(), text);
+                        cmdputs(b";; ", text);
                     }
-                    p = b"esac\0".as_ptr() as *const c_char;
+                    p = b"esac";
                     pc = L_DOTAIL2;
                 }
                 NTO => {
-                    p = b">\0".as_ptr() as *const c_char;
+                    p = b">";
                     pc = L_REDIR;
                 }
                 NCLOBBER => {
-                    p = b">|\0".as_ptr() as *const c_char;
+                    p = b">|";
                     pc = L_REDIR;
                 }
                 NAPPEND => {
-                    p = b">>\0".as_ptr() as *const c_char;
+                    p = b">>";
                     pc = L_REDIR;
                 }
                 NTOFD => {
-                    p = b">&\0".as_ptr() as *const c_char;
+                    p = b">&";
                     pc = L_REDIR;
                 }
                 NFROM => {
-                    p = b"<\0".as_ptr() as *const c_char;
+                    p = b"<";
                     pc = L_REDIR;
                 }
                 NFROMFD => {
-                    p = b"<&\0".as_ptr() as *const c_char;
+                    p = b"<&";
                     pc = L_REDIR;
                 }
                 NFROMTO => {
-                    p = b"<>\0".as_ptr() as *const c_char;
+                    p = b"<>";
                     pc = L_REDIR;
                 }
                 /* `default:` is empty outside DEBUG, so an unrecognised
@@ -1755,60 +1651,59 @@ unsafe fn cmdtxt(n: Option<&Node>) {
                 _ /* default, NPIPE */ => {
                     let cl = &cur.npipe().cmdlist;
                     for (i, c) in cl.iter().enumerate() {
-                        cmdtxt(Some(c));
+                        cmdtxt(Some(c), text);
                         if i + 1 == cl.len() {
                             break;
                         }
-                        cmdputs(b" | \0".as_ptr() as *const c_char);
+                        cmdputs(b" | ", text);
                     }
                     return;
                 }
             },
             L_BINOP => {
                 // binop:
-                cmdtxt(cur.nbinary().ch1.as_deref());
-                cmdputs(p);
+                cmdtxt(cur.nbinary().ch1.as_deref(), text);
+                cmdputs(p, text);
                 n = cur.nbinary().ch2.as_deref();
                 pc = L_DONODE;
             }
             L_DONODE => {
                 // donode:
-                cmdtxt(n);
+                cmdtxt(n, text);
                 return;
             }
             L_UNTIL => {
                 // until:
-                cmdputs(p);
-                cmdtxt(cur.nbinary().ch1.as_deref());
+                cmdputs(p, text);
+                cmdtxt(cur.nbinary().ch1.as_deref(), text);
                 n = cur.nbinary().ch2.as_deref();
-                p = b"; done\0".as_ptr() as *const c_char;
+                p = b"; done";
                 pc = L_DODO;
             }
             L_DODO => {
                 // dodo:
-                cmdputs(b"; do \0".as_ptr() as *const c_char);
+                cmdputs(b"; do ", text);
                 pc = L_DOTAIL;
             }
             L_DOTAIL => {
                 // dotail:
-                cmdtxt(n);
+                cmdtxt(n, text);
                 pc = L_DOTAIL2;
             }
             L_DOTAIL2 => {
                 // dotail2:
-                cmdputs(p);
+                cmdputs(p, text);
                 return;
             }
             _ /* L_REDIR */ => {
                 // redir:
-                s[0] = (cur.redir_fd() + '0' as c_int) as c_char;
-                s[1] = b'\0' as c_char;
-                cmdputs(s.as_ptr());
-                cmdputs(p);
+                s[0] = (cur.redir_fd() + '0' as c_int) as u8;
+                cmdputs(&s, text);
+                cmdputs(p, text);
                 if cur.node_type() == NTOFD || cur.node_type() == NFROMFD {
-                    s[0] = (cur.ndup().dupfd.get() + '0' as c_int) as c_char;
-                    p = s.as_ptr();
-                    pc = L_DOTAIL2;
+                    s[0] = (cur.ndup().dupfd.get() + '0' as c_int) as u8;
+                    cmdputs(&s, text);
+                    return;
                 } else {
                     n = cur.nfile().fname.as_deref();
                     pc = L_DONODE;
@@ -1820,158 +1715,104 @@ unsafe fn cmdtxt(n: Option<&Node>) {
 
 // [spec:dash:def:jobs.cmdlist-fn]
 // [spec:dash:sem:jobs.cmdlist-fn]
-unsafe fn cmdlist(np: &[Node], sep: c_int) {
+fn cmdlist(np: &[Node], sep: c_int, text: &mut BString) {
     for (i, node) in np.iter().enumerate() {
         if sep == 0 {
-            cmdputs(core::ptr::addr_of!(crate::mystring::spcstr) as *const c_char);
+            cmdputs(b" ", text);
         }
-        cmdtxt(Some(node));
+        cmdtxt(Some(node), text);
         if sep != 0 && i + 1 < np.len() {
-            cmdputs(core::ptr::addr_of!(crate::mystring::spcstr) as *const c_char);
+            cmdputs(b" ", text);
         }
     }
 }
 
 // [spec:dash:def:jobs.cmdputs-fn]
 // [spec:dash:sem:jobs.cmdputs-fn]
-unsafe fn cmdputs(s: *const c_char) {
-    const CTLESC_C: c_char = crate::parser::CTLESC as c_char;
-    const CTLVAR_C: c_char = crate::parser::CTLVAR as c_char;
-    const CTLENDVAR_C: c_char = crate::parser::CTLENDVAR as c_char;
-    const CTLBACKQ_C: c_char = crate::parser::CTLBACKQ as c_char;
-    const CTLARI_C: c_char = crate::parser::CTLARI as c_char;
-    const CTLENDARI_C: c_char = crate::parser::CTLENDARI as c_char;
-    const CTLQUOTEMARK_C: c_char = crate::parser::CTLQUOTEMARK as c_char;
+fn cmdputs(s: &[u8], text: &mut BString) {
+    const CTLESC_C: u8 = crate::parser::CTLESC as u8;
+    const CTLVAR_C: u8 = crate::parser::CTLVAR as u8;
+    const CTLENDVAR_C: u8 = crate::parser::CTLENDVAR as u8;
+    const CTLBACKQ_C: u8 = crate::parser::CTLBACKQ as u8;
+    const CTLARI_C: u8 = crate::parser::CTLARI as u8;
+    const CTLENDARI_C: u8 = crate::parser::CTLENDARI as u8;
+    const CTLQUOTEMARK_C: u8 = crate::parser::CTLQUOTEMARK as u8;
 
-    static vstype: [[c_char; 4]; (VSTYPE + 1) as usize] = [
-        [0, 0, 0, 0],
-        [b'}' as c_char, 0, 0, 0],
-        [b'-' as c_char, 0, 0, 0],
-        [b'+' as c_char, 0, 0, 0],
-        [b'?' as c_char, 0, 0, 0],
-        [b'=' as c_char, 0, 0, 0],
-        [b'%' as c_char, 0, 0, 0],
-        [b'%' as c_char, b'%' as c_char, 0, 0],
-        [b'#' as c_char, 0, 0, 0],
-        [b'#' as c_char, b'#' as c_char, 0, 0],
-        [0, 0, 0, 0],
-        [0, 0, 0, 0],
-        [0, 0, 0, 0],
-        [0, 0, 0, 0],
-        [0, 0, 0, 0],
-        [0, 0, 0, 0],
+    static VSTYPE_TEXT: [&[u8]; (VSTYPE + 1) as usize] = [
+        b"", b"}", b"-", b"+", b"?", b"=", b"%", b"%%",
+        b"#", b"##", b"", b"", b"", b"", b"", b"",
     ];
 
-    let mut p: *const c_char;
-    let mut str: *const c_char;
-    let mut cc: [c_char; 2] = [b' ' as c_char, 0];
-    let mut c: c_char;
+    let mut at = 0;
     let mut subtype: c_int = 0;
     let mut quoted: c_int = 0;
 
-    /* The C reserves `(strlen(s) + 1) * 8` — its bound on how far the
-     * cursor can run for this one input string — because a `char *`
-     * cursor cannot grow the block it walks. Pushing does. */
-    p = s;
-    'whileloop: loop {
-        c = *p;
-        p = p.add(1);
-        if c == 0 {
-            break;
-        }
-        str = core::ptr::null();
-        'dostr: {
-            'checkstr: {
-                match c {
-                    CTLESC_C => {
-                        c = *p;
-                        p = p.add(1);
-                    }
-                    CTLVAR_C => {
-                        subtype = *p as c_int;
-                        p = p.add(1);
-                        if (subtype & VSTYPE) == VSLENGTH {
-                            str = b"${#\0".as_ptr() as *const c_char;
-                        } else {
-                            str = b"${\0".as_ptr() as *const c_char;
-                        }
-                        break 'dostr;
-                    }
-                    CTLENDVAR_C => {
-                        str = b"\"}\0".as_ptr() as *const c_char;
-                        str = str.offset(((quoted & 1) == 0) as isize);
-                        quoted >>= 1;
-                        subtype = 0;
-                        break 'dostr;
-                    }
-                    CTLBACKQ_C => {
-                        str = b"$(...)\0".as_ptr() as *const c_char;
-                        break 'dostr;
-                    }
-                    CTLARI_C => {
-                        str = b"$((\0".as_ptr() as *const c_char;
-                        break 'dostr;
-                    }
-                    CTLENDARI_C => {
-                        str = b"))\0".as_ptr() as *const c_char;
-                        break 'dostr;
-                    }
-                    CTLQUOTEMARK_C => {
-                        quoted ^= 1;
-                        c = b'"' as c_char;
-                    }
-                    _ => {
-                        if c == b'=' as c_char {
-                            if subtype == 0 {
-                                /* break out of the switch */
-                            } else {
-                                if (subtype & VSTYPE) != VSNORMAL {
-                                    quoted <<= 1;
-                                }
-                                str = vstype[(subtype & VSTYPE) as usize].as_ptr();
-                                if (subtype & VSNUL) != 0 {
-                                    c = b':' as c_char;
-                                } else {
-                                    break 'checkstr;
-                                }
-                            }
-                        } else if c == b'\'' as c_char
-                            || c == b'\\' as c_char
-                            || c == b'"' as c_char
-                            || c == b'$' as c_char
-                        {
-                            /* These can only happen inside quotes */
-                            cc[0] = c;
-                            str = cc.as_ptr();
-                            c = b'\\' as c_char;
-                        } else {
-                            /* default: break */
-                        }
-                    }
+    while at < s.len() && s[at] != 0 {
+        let mut c = s[at];
+        at += 1;
+        let mut suffix: &[u8] = b"";
+        let mut write_c = true;
+        let mut escaped = [0_u8; 1];
+
+        match c {
+            CTLESC_C => {
+                c = *s.get(at).unwrap_or(&0);
+                at += usize::from(at < s.len());
+            }
+            CTLVAR_C => {
+                subtype = *s.get(at).unwrap_or(&0) as c_int;
+                at += usize::from(at < s.len());
+                suffix = if (subtype & VSTYPE) == VSLENGTH { b"${#" } else { b"${" };
+                write_c = false;
+            }
+            CTLENDVAR_C => {
+                suffix = if (quoted & 1) == 0 { b"}" } else { b"\"}" };
+                quoted >>= 1;
+                subtype = 0;
+                write_c = false;
+            }
+            CTLBACKQ_C => {
+                suffix = b"$(...)";
+                write_c = false;
+            }
+            CTLARI_C => {
+                suffix = b"$((";
+                write_c = false;
+            }
+            CTLENDARI_C => {
+                suffix = b"))";
+                write_c = false;
+            }
+            CTLQUOTEMARK_C => {
+                quoted ^= 1;
+                c = b'"';
+            }
+            b'=' if subtype != 0 => {
+                if (subtype & VSTYPE) != VSNORMAL {
+                    quoted <<= 1;
                 }
-                /* USTPUTC(c, nextc) */
-                cmdtext().push(c as u8);
+                suffix = VSTYPE_TEXT[(subtype & VSTYPE) as usize];
+                if (subtype & VSNUL) != 0 {
+                    c = b':';
+                } else {
+                    write_c = false;
+                }
             }
-            // checkstr:
-            if str.is_null() {
-                continue 'whileloop;
+            b'\'' | b'\\' | b'"' | b'$' => {
+                escaped[0] = c;
+                suffix = &escaped;
+                c = b'\\';
             }
-            // falls into dostr:
+            _ => {}
         }
-        // dostr:
-        loop {
-            c = *str;
-            str = str.add(1);
-            if c == 0 {
-                break;
-            }
-            /* USTPUTC(c, nextc) */
-            cmdtext().push(c as u8);
+
+        if write_c {
+            text.push(c);
         }
+        text.extend_from_slice(suffix);
     }
     if (quoted & 1) != 0 {
-        /* USTPUTC('"', nextc) */
-        cmdtext().push(b'"');
+        text.push(b'"');
     }
     /* The C leaves an unadvanced `*nextc = '\0'` for `commandtext` to
      * read as the end of the text. The length is that. */
@@ -1979,7 +1820,7 @@ unsafe fn cmdputs(s: *const c_char) {
 
 // [spec:dash:def:jobs.showpipe-fn]
 // [spec:dash:sem:jobs.showpipe-fn]
-pub(crate) unsafe fn showpipe(sh: &mut crate::context::Shell, jp: usize, dest: Dest) {
+pub(crate) fn showpipe(sh: &mut crate::context::Shell, jp: usize, dest: Dest) {
     let spend: usize = sh.jobs.tab[jp].ps.len();
 
     for sp in 1..spend {
@@ -1992,16 +1833,15 @@ pub(crate) unsafe fn showpipe(sh: &mut crate::context::Shell, jp: usize, dest: D
 
 // [spec:dash:def:jobs.xtcsetpgrp-fn]
 // [spec:dash:sem:jobs.xtcsetpgrp-fn]
-unsafe fn xtcsetpgrp(sh: &mut crate::context::Shell, fd: c_int, pgrp: pid_t) -> Result<(), Error> {
-    let err: c_int;
+fn xtcsetpgrp(sh: &mut crate::context::Shell, fd: c_int, pgrp: i32) -> Result<(), Error> {
+    let blocked = nsh_platform::BlockedSignals::all()
+        .expect("blocking signals around terminal handoff failed");
+    let result = nsh_platform::set_foreground_process_group(fd, pgrp);
+    drop(blocked);
 
-    crate::trap::sigblockall(null_mut());
-    err = libc::tcsetpgrp(fd, pgrp);
-    crate::system::sigclearmask();
-
-    if err != 0 {
+    if let Err(error) = result {
         let mut message = b"Cannot set tty process group (".to_vec();
-        message.extend_from_slice(CStr::from_ptr(libc::strerror(errno())).to_bytes());
+        message.extend_from_slice(nsh_platform::os_error_message(&error).as_bytes());
         message.push(b')');
         return Err(sh.sh_error_value(&message));
     }
@@ -2010,7 +1850,7 @@ unsafe fn xtcsetpgrp(sh: &mut crate::context::Shell, fd: c_int, pgrp: pid_t) -> 
 
 // [spec:dash:def:jobs.getstatus-fn]
 // [spec:dash:sem:jobs.getstatus-fn]
-pub(crate) unsafe fn getstatus(sh: &mut crate::context::Shell, jobp: usize) -> c_int {
+pub(crate) fn getstatus(sh: &mut crate::context::Shell, jobp: usize) -> c_int {
     let mut status: c_int;
     let mut retval: c_int;
     let mut ps: usize;
@@ -2037,13 +1877,13 @@ pub(crate) unsafe fn getstatus(sh: &mut crate::context::Shell, jobp: usize) -> c
         }
     }
 
-    retval = libc::WEXITSTATUS(status);
-    if !libc::WIFEXITED(status) {
-        retval = libc::WSTOPSIG(status);
-        if !libc::WIFSTOPPED(status) {
+    retval = nsh_platform::wait_status_exit_code(status);
+    if !nsh_platform::wait_status_is_exited(status) {
+        retval = nsh_platform::wait_status_stop_signal(status);
+        if !nsh_platform::wait_status_is_stopped(status) {
             /* XXX: limits number of signals */
-            retval = libc::WTERMSIG(status);
-            if retval == libc::SIGINT {
+            retval = nsh_platform::wait_status_term_signal(status);
+            if retval == nsh_platform::interrupt_signal() {
                 sh.jobs.tab[jobp].sigint = 1;
             }
         }

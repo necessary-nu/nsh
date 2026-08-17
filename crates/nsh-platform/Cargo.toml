@@ -1,0 +1,14 @@
+[package]
+name = "nsh-platform"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Safe operating-system boundary for nsh"
+
+[dependencies]
+libc = "0.2"
+rustix = { version = "1", features = ["fs", "param", "process", "termios", "pipe", "stdio", "runtime"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }

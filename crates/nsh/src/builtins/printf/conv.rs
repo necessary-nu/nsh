@@ -22,7 +22,7 @@
 //! The digit text those conversions are assembled from -- and the ways
 //! Rust spells it differently from C -- is [`digits`].
 
-use libc::c_int;
+use core::ffi::c_int;
 
 mod digits;
 

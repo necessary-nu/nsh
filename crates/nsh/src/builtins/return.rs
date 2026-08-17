@@ -7,13 +7,13 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use libc::c_int;
+use core::ffi::c_int;
 
 use crate::eval::{Flow, SKIPFUNC, SKIPFUNCDEF};
 
 // [spec:dash:def:eval.returncmd-fn]
 // [spec:dash:sem:eval.returncmd-fn]
-pub unsafe fn returncmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn returncmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let skip: c_int;
     let status: c_int;
 
@@ -22,9 +22,8 @@ pub unsafe fn returncmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
      * skip the rest of the file.
      */
     if let Some(want) = args.get(1) {
-        let want = crate::shell::cstring(want);
         skip = SKIPFUNC;
-        status = crate::mystring::number(sh, want.as_ptr())?;
+        status = crate::mystring::number(sh, want)?;
     } else {
         skip = SKIPFUNCDEF;
         status = sh.status;
@@ -48,13 +47,11 @@ mod tests {
         if let Some(status) = status {
             args.push(BStr::new(status));
         }
-        unsafe {
-            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
-            let sh = &mut owned;
-            sh.status = last;
-            let returned = returncmd(sh, &args).unwrap();
-            (sh.eval.evalskip, returned)
-        }
+        let mut owned = Shell::new(crate::streams::Streams::INHERIT);
+        let sh = &mut owned;
+        sh.status = last;
+        let returned = returncmd(sh, &args).unwrap();
+        (sh.eval.evalskip, returned)
     }
 
     #[test]

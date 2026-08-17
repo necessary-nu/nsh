@@ -4,8 +4,7 @@
  *
  * A pure function over two byte strings with no shell state, which is why
  * it is a file rather than three hundred more lines of `expand.rs`. The
- * unsafe surface is the two `CStr::from_ptr` calls in `pmatch` and
- * `fnmatch`; everything below `pmatch_bytes` is safe and indexed.
+ * The matcher is entirely slice based and indexed.
  *
  * See plan/decisions/owned-data.md, "What this cost in the port: the
  * pattern matcher", for the one comparison here that is decided rather
@@ -13,27 +12,13 @@
  */
 
 use bstr::ByteSlice;
-use core::mem;
-use libc::{c_char, c_int, c_uint, size_t, wchar_t};
-use std::ffi::CStr;
+use core::ffi::{c_char, c_int, c_uint};
 
 use crate::mystring::{byte_at, ncmp_eq_at, slice_from};
 use crate::expand::{
     C_BANG, C_CARET, C_COLON, C_LBRACKET, C_MINUS, C_NUL, C_QUESTION, C_RBRACKET, C_STAR, CTLESC,
-    CTLMBCHAR, FNMATCH_IS_ENABLED, iswctype, mbnext_bytes, mbrtowc, preglob, wctype, wctype_t,
-    wint_t,
+    CTLMBCHAR, mbnext_bytes,
 };
-
-/*
- * Returns true if the pattern matches the string.
- */
-
-// [spec:dash:def:expand.patmatch-fn]
-// [spec:dash:sem:expand.patmatch-fn]
-#[inline]
-pub(crate) unsafe fn patmatch(pattern: *mut c_char, string: *const c_char) -> c_int {
-    pmatch(preglob(pattern, 0, None), string)
-}
 
 // [spec:dash:def:expand.ccmatch-fn]
 // [spec:dash:sem:expand.ccmatch-fn]
@@ -61,12 +46,9 @@ fn ccmatch_bytes(p: &[u8], mbc: &[u8], ml: usize) -> (bool, Option<usize>) {
      * pattern itself.  Copying the name costs an allocation on a path that
      * runs once per `[:class:]`, and buys a pattern that `pmatch` never has
      * to be able to write to, which is what lets it take `&[u8]`. */
-    let mut name = body[..close].to_vec();
-    name.push(0);
-    let type_ = unsafe { wctype(name.as_ptr() as *const c_char) };
-    if type_ == 0 as wctype_t {
+    let Some(matches) = nsh_platform::wide_class_matches(&body[..close], mbc, ml) else {
         return (false, None);
-    }
+    };
 
     /* Past the `:` skipped above, and past the `:]` just found. */
     let r = 1 + close + 2;
@@ -76,15 +58,7 @@ fn ccmatch_bytes(p: &[u8], mbc: &[u8], ml: usize) -> (bool, Option<usize>) {
      * slice holds can only change a case where the C read past the
      * string's terminator, and a short read fails the `!= ml` test below
      * exactly as a malformed character does. */
-    let mut wc: wchar_t = 0;
-    let mut mbst: libc::mbstate_t = unsafe { mem::zeroed() };
-    let n = ml.min(mbc.len());
-    let got = unsafe { mbrtowc(&mut wc, mbc.as_ptr() as *const c_char, n as size_t, &mut mbst) };
-    if got != ml as size_t {
-        return (false, Some(r));
-    }
-
-    (unsafe { iswctype(wc as wint_t, type_) } != 0, Some(r))
+    (matches, Some(r))
 }
 
 /*
@@ -117,22 +91,6 @@ fn single_byte_member(c: c_char, sc: c_char, mb: c_uint) -> bool {
     c == sc && (mb <= 1 || c == C_NUL)
 }
 
-// [spec:dash:def:expand.pmatch-fn]
-// [spec:dash:sem:expand.pmatch-fn]
-//
-// The unsafe half is this adapter and nothing else: it measures the two C
-// strings once and hands the matcher slices that carry their terminators.
-// `fnmatch` is the one arm that still wants pointers, and it is libc's.
-pub(crate) unsafe fn pmatch(pattern: *mut c_char, string: *const c_char) -> c_int {
-    if FNMATCH_IS_ENABLED {
-        return (libc::fnmatch(pattern, string, 0) == 0) as c_int;
-    }
-    pmatch_bytes(
-        CStr::from_ptr(pattern).to_bytes_with_nul(),
-        CStr::from_ptr(string).to_bytes_with_nul(),
-    ) as c_int
-}
-
 // The same entry for a caller that already holds both strings as bytes.
 //
 // Neither slice has to carry a terminator: `pmatch_bytes` reads past the
@@ -140,34 +98,14 @@ pub(crate) unsafe fn pmatch(pattern: *mut c_char, string: *const c_char) -> c_in
 // is what lets `expmeta` hand over a *sub*-slice of the pattern instead of
 // terminating it in place and putting the byte back afterwards.
 //
-// `fnmatch` is the one arm that still wants C strings and cannot be given
-// a sub-slice, so it is the one arm that copies.  It is unreachable while
-// `FNMATCH_IS_ENABLED` is 0.
-//
-// Safe, unlike the pointer entry above, and for a reason rather than for
-// tidiness: everything it can do to memory it does to two `Vec`s it just
-// built and owns, so there is no obligation left for a caller to discharge.
-// The three operations inside the `unsafe` block have not gone anywhere —
-// they are the same three, in the one branch a `const bool` makes dead —
-// and `ccmatch_bytes` above is written the same way for the same reason.
+// Both inputs are borrowed slices; the matcher has no pointer adapter or
+// alternate libc implementation.
 pub(crate) fn pmatch_slices(pattern: &[u8], string: &[u8]) -> c_int {
-    if FNMATCH_IS_ENABLED {
-        let cstr = |s: &[u8]| {
-            let mut v = s[..s.iter().position(|&c| c == 0).unwrap_or(s.len())].to_vec();
-            v.push(0);
-            v
-        };
-        let (p, q) = (cstr(pattern), cstr(string));
-        return unsafe {
-            (libc::fnmatch(p.as_ptr() as *const c_char, q.as_ptr() as *const c_char, 0) == 0)
-                as c_int
-        };
-    }
     pmatch_bytes(pattern, string) as c_int
 }
 
 // The matcher.  `pi`/`qi` are the C's `p`/`q`; every `p++` is `pi += 1` and
-// the recursion takes the two tails.  Nothing here is unsafe.
+// the recursion takes the two tails.
 fn pmatch_bytes(pattern: &[u8], string: &[u8]) -> bool {
     let mut pi: usize = 0;
     let mut qi: usize = 0;

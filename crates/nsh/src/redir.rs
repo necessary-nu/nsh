@@ -2,10 +2,10 @@
 //! Rules: `docs/spec/port/src/redir.md`.
 
 use crate::error::Error;
-use core::ptr::null_mut;
-use libc::{c_char, c_int, c_uint, c_void, size_t};
-use std::ffi::CStr;
+use bstr::BStr;
+use core::ffi::{c_int, c_uint};
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 
 use crate::context::Shell;
 use crate::error::{INTOFF, INTON};
@@ -29,7 +29,7 @@ const EMPTY: c_int = -2; /* marks an unused slot in redirtab */
 const CLOSED: c_int = -1; /* fd opened for redir needs to be closed */
 
 /// `PIPE_BUF` where available, 4096 otherwise.  4096 on Linux.
-const PIPESIZE: size_t = 4096;
+const PIPESIZE: usize = 4096;
 
 // [spec:dash:def:redir.redirtab]
 /// `MKINIT struct redirtab { … }` — absent from the port manifest because the
@@ -80,11 +80,9 @@ impl RedirStack {
     }
 }
 
-use crate::system::errno;
-
 // [spec:dash:def:redir.update-closed-redirs-fn]
 // [spec:dash:sem:redir.update-closed-redirs-fn]
-unsafe fn update_closed_redirs(sh: &mut Shell, fd: c_int, nfd: c_int) -> c_uint {
+fn update_closed_redirs(sh: &mut Shell, fd: c_int, nfd: c_int) -> c_uint {
     let val: c_uint = sh.redirs.closed;
     let bit: c_uint = 1u32 << fd;
 
@@ -107,7 +105,7 @@ unsafe fn update_closed_redirs(sh: &mut Shell, fd: c_int, nfd: c_int) -> c_uint 
 
 // [spec:dash:def:redir.redirect-fn]
 // [spec:dash:sem:redir.redirect-fn]
-pub unsafe fn redirect(
+pub fn redirect(
     sh: &mut Shell,
     redir: &[Node],
     flags: c_int,
@@ -121,7 +119,7 @@ pub unsafe fn redirect(
     if redir.is_empty() {
         return Ok(());
     }
-    INTOFF();
+    INTOFF(sh);
     /* `sv = redirlist` — the frame `pushredir` just pushed, and NULL when
      * there is none, which is what `checked_sub` says. */
     sv = if (flags & REDIR_PUSH) != 0 {
@@ -171,7 +169,7 @@ pub unsafe fn redirect(
             }
         }
     }
-    INTON();
+    INTON(sh);
     /* NB: REDIR_SAVEFD2 is 03, so this test also fires for a plain
      * REDIR_PUSH (01); reproduced verbatim (src/redir.c:184).
      *
@@ -197,43 +195,45 @@ pub unsafe fn redirect(
 
 // [spec:dash:def:redir.sh-open-fail-fn]
 // [spec:dash:sem:redir.sh-open-fail-fn]
-unsafe fn sh_open_fail(sh: &mut crate::context::Shell, pathname: *const c_char, flags: c_int, e: c_int) -> Error {
-    let mut word: *const c_char;
-    let mut action: c_int;
-
-    word = b"open\0".as_ptr() as *const c_char;
-    action = crate::error::E_OPEN;
-    if (flags & libc::O_CREAT) != 0 {
-        word = b"create\0".as_ptr() as *const c_char;
-        action = crate::error::E_CREAT;
-    }
-
+fn sh_open_fail(
+    sh: &mut crate::context::Shell,
+    pathname: &BStr,
+    mode: nsh_platform::OpenMode,
+    error: &std::io::Error,
+) -> Error {
+    let (word, action): (&[u8], c_int) = if mode.creates() {
+        (b"create", crate::error::E_CREAT)
+    } else {
+        (b"open", crate::error::E_OPEN)
+    };
     let mut message = b"cannot ".to_vec();
-    message.extend_from_slice(CStr::from_ptr(word).to_bytes());
+    message.extend_from_slice(word);
     message.push(b' ');
-    message.extend_from_slice(CStr::from_ptr(pathname).to_bytes());
+    message.extend_from_slice(pathname);
     message.extend_from_slice(b": ");
-    message.extend_from_slice(CStr::from_ptr(crate::error::errmsg(e, action)).to_bytes());
+    message.extend_from_slice(&crate::error::errmsg(
+        error.raw_os_error().unwrap_or_default(),
+        action,
+    ));
     sh.sh_error_value(&message)
 }
 
 // [spec:dash:def:redir.sh-open-fn]
 // [spec:dash:sem:redir.sh-open-fn]
-pub unsafe fn sh_open(
+pub fn sh_open(
     sh: &mut Shell,
-    pathname: *const c_char,
-    flags: c_int,
+    pathname: &BStr,
+    mode: nsh_platform::OpenMode,
     mayfail: c_int,
 ) -> Result<c_int, Error> {
-    let mut fd: c_int;
-    let mut e: c_int;
-
     loop {
-        fd = libc::open64(pathname, flags, 0o666);
-        e = errno();
-        if !(fd < 0 && e == libc::EINTR) {
-            break;
-        }
+        let result = nsh_platform::open_path(
+            std::ffi::OsStr::from_bytes(pathname),
+            mode,
+        );
+        match result {
+            Ok(fd) => return Ok(fd),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
         /* An EINTR return is a place the shell is looking, so take
          * delivery here if an interrupt is due. `sa_flags = 0` is why
          * this return exists at all -- dash never restarts a syscall.
@@ -241,86 +241,127 @@ pub unsafe fn sh_open(
          * test this replaces: a signal that is pending but not *due*
          * (suppressed, or trapped and handled elsewhere) is no reason to
          * abandon the open. */
-        if let Some(err) = crate::error::poll_interrupt(sh) {
-            return Err(err);
-        }
-        if crate::trap::pending_sig != 0 {
-            break;
+                if let Some(err) = crate::error::poll_interrupt(sh) {
+                    return Err(err);
+                }
+                if crate::siginbox::signals().pending_signal() == 0 {
+                    continue;
+                }
+                if mayfail != 0 {
+                    return Ok(-1);
+                }
+                return Err(sh_open_fail(sh, pathname, mode, &error));
+            }
+            Err(error) if mayfail != 0 => return Ok(-1),
+            Err(error) => return Err(sh_open_fail(sh, pathname, mode, &error)),
         }
     }
+}
 
-    if mayfail != 0 || fd >= 0 {
-        return Ok(fd);
-    }
-
-    Err(sh_open_fail(sh, pathname, flags, e))
+/// Open a path for input without exposing the platform's numeric open flags
+/// to callers outside the redirection subsystem.
+pub fn sh_open_read(
+    sh: &mut Shell,
+    pathname: &BStr,
+    mayfail: c_int,
+) -> Result<c_int, Error> {
+    sh_open(sh, pathname, nsh_platform::OpenMode::ReadOnly, mayfail)
 }
 
 // [spec:dash:def:redir.openredirect-fn]
 // [spec:dash:sem:redir.openredirect-fn]
-unsafe fn openredirect(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
-    let mut sb: libc::stat64 = core::mem::zeroed();
-    let mut fname: *mut c_char = null_mut();
-    let mut flags: c_int;
-    let f: c_int;
-
-    match redir.node_type() {
-        NFROM => {
-            flags = libc::O_RDONLY;
-            /* do_open: */
-            f = sh_open(sh, redir.nfile().expfname_ptr(), flags, 0)?;
-        }
-        NFROMTO => {
-            flags = libc::O_RDWR | libc::O_CREAT;
-            f = sh_open(sh, redir.nfile().expfname_ptr(), flags, 0)?;
-        }
+fn openredirect(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
+    let f = match redir.node_type() {
+        NFROM => sh_open(
+            sh,
+            BStr::new(redir.nfile().expanded_filename().as_slice()),
+            nsh_platform::OpenMode::ReadOnly,
+            0,
+        )?,
+        NFROMTO => sh_open(
+            sh,
+            BStr::new(redir.nfile().expanded_filename().as_slice()),
+            nsh_platform::OpenMode::ReadWriteCreate,
+            0,
+        )?,
         NTO | NCLOBBER => {
             let mut fell_through = true;
             let mut fv: c_int = 0;
             if redir.node_type() == NTO {
                 /* Take care of noclobber mode. */
                 if sh.options.flag(crate::options::Cflag) != 0 {
-                    fname = redir.nfile().expfname_ptr();
-                    if libc::stat64(fname, &mut sb) < 0 {
-                        flags = libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL;
+                    let fname = redir.nfile().expanded_filename();
+                    let pathname = std::ffi::OsStr::from_bytes(&fname);
+                    let metadata = std::fs::metadata(pathname);
+                    if metadata.is_err() {
                         /* goto do_open */
-                        return sh_open(sh, fname, flags, 0);
+                        return sh_open(
+                            sh,
+                            BStr::new(fname.as_slice()),
+                            nsh_platform::OpenMode::WriteCreateExclusive,
+                            0,
+                        );
                     }
 
-                    if (sb.st_mode & libc::S_IFMT) == libc::S_IFREG {
+                    if metadata.is_ok_and(|metadata| metadata.is_file()) {
                         /* goto ecreate */
-                        return Err(sh_open_fail(sh, fname, libc::O_CREAT, libc::EEXIST));
+                        let error = nsh_platform::already_exists_error();
+                        return Err(sh_open_fail(
+                            sh,
+                            BStr::new(fname.as_slice()),
+                            nsh_platform::OpenMode::WriteCreateTruncate,
+                            &error,
+                        ));
                     }
 
-                    fv = sh_open(sh, fname, libc::O_WRONLY, 0)?;
-                    if libc::fstat64(fv, &mut sb) == 0
-                        && (sb.st_mode & libc::S_IFMT) == libc::S_IFREG
-                    {
-                        libc::close(fv);
+                    fv = sh_open(
+                        sh,
+                        BStr::new(fname.as_slice()),
+                        nsh_platform::OpenMode::WriteOnly,
+                        0,
+                    )?;
+                    if nsh_platform::fd_is_regular_file(fv).unwrap_or(false) {
+                        let _ = nsh_platform::close_fd(fv);
                         /* goto ecreate */
-                        return Err(sh_open_fail(sh, fname, libc::O_CREAT, libc::EEXIST));
+                        let error = nsh_platform::already_exists_error();
+                        return Err(sh_open_fail(
+                            sh,
+                            BStr::new(fname.as_slice()),
+                            nsh_platform::OpenMode::WriteCreateTruncate,
+                            &error,
+                        ));
                     }
                     fell_through = false;
                 }
                 /* FALLTHROUGH */
             }
             if fell_through {
-                flags = libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC;
-                f = sh_open(sh, redir.nfile().expfname_ptr(), flags, 0)?;
+                let fname = redir.nfile().expanded_filename();
+                sh_open(
+                    sh,
+                    BStr::new(fname.as_slice()),
+                    nsh_platform::OpenMode::WriteCreateTruncate,
+                    0,
+                )?
             } else {
-                f = fv;
+                fv
             }
         }
         NAPPEND => {
-            flags = libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND;
-            f = sh_open(sh, redir.nfile().expfname_ptr(), flags, 0)?;
+            let fname = redir.nfile().expanded_filename();
+            sh_open(
+                sh,
+                BStr::new(fname.as_slice()),
+                nsh_platform::OpenMode::WriteCreateAppend,
+                0,
+            )?
         }
         NTOFD | NFROMFD => {
             let mut fv = redir.ndup().dupfd.get();
             if fv == redir.ndup().fd {
                 fv = -2;
             }
-            f = fv;
+            fv
         }
         /*
          * default:
@@ -334,37 +375,34 @@ unsafe fn openredirect(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
             if crate::shell::DEBUG {
                 std::process::abort();
             }
-            f = openhere(sh, redir)?;
+            openhere(sh, redir)?
         }
-    }
+    };
 
     Ok(f)
 }
 
 // [spec:dash:def:redir.sh-dup2-fn]
 // [spec:dash:sem:redir.sh-dup2-fn]
-unsafe fn sh_dup2(sh: &mut crate::context::Shell, ofd: c_int, nfd: c_int, cfd: c_int) -> Result<c_int, Error> {
-    let mut nfd = nfd;
-    let mut cfd = cfd;
-
-    if nfd < 0 {
-        nfd = libc::dup(ofd);
-        if nfd >= 0 {
-            cfd = -1;
-        }
+fn sh_dup2(sh: &mut crate::context::Shell, ofd: c_int, nfd: c_int, cfd: c_int) -> Result<c_int, Error> {
+    let result = if nfd < 0 {
+        nsh_platform::duplicate_fd(ofd)
     } else {
-        nfd = libc::dup2(ofd, nfd);
+        nsh_platform::duplicate_to(ofd, nfd).map(|()| nfd)
+    };
+    if cfd >= 0 && (nfd >= 0 || result.is_err()) {
+        let _ = nsh_platform::close_fd(cfd);
     }
-    if cfd >= 0 {
-        libc::close(cfd);
-    }
-    if nfd < 0 {
+    let nfd = match result {
+        Ok(nfd) => nfd,
+        Err(error) => {
         let mut message = Vec::new();
         write!(&mut message, "{}", ofd).expect("writing to a Vec cannot fail");
         message.extend_from_slice(b": ");
-        message.extend_from_slice(CStr::from_ptr(libc::strerror(errno())).to_bytes());
+        message.extend_from_slice(nsh_platform::os_error_message(&error).as_bytes());
         return Err(sh.sh_error_value(&message));
-    }
+        }
+    };
 
     Ok(nfd)
 }
@@ -373,7 +411,7 @@ unsafe fn sh_dup2(sh: &mut crate::context::Shell, ofd: c_int, nfd: c_int, cfd: c
 // [spec:dash:sem:redir.dupredirect-fn]
 /// The extracted `def` signature carries a stray `#endif`; the real signature
 /// (outside `#ifdef notyet`) is `static void dupredirect(union node *, int)`.
-unsafe fn dupredirect(sh: &mut crate::context::Shell, redir: &Node, f: c_int) -> Result<(), Error> {
+fn dupredirect(sh: &mut crate::context::Shell, redir: &Node, f: c_int) -> Result<(), Error> {
     let fd: c_int = redir.redir_fd();
 
     if redir.node_type() == NTOFD || redir.node_type() == NFROMFD {
@@ -382,7 +420,7 @@ unsafe fn dupredirect(sh: &mut crate::context::Shell, redir: &Node, f: c_int) ->
             sh_dup2(sh, f, fd, -1)?;
             return Ok(());
         }
-        libc::close(fd);
+        let _ = nsh_platform::close_fd(fd);
     } else {
         sh_dup2(sh, f, fd, f)?;
     }
@@ -391,24 +429,20 @@ unsafe fn dupredirect(sh: &mut crate::context::Shell, redir: &Node, f: c_int) ->
 
 // [spec:dash:def:redir.sh-pipe-fn]
 // [spec:dash:sem:redir.sh-pipe-fn]
-pub unsafe fn sh_pipe(sh: &mut crate::context::Shell, pip: *mut c_int, memfd: c_int) -> Result<c_int, Error> {
-    if memfd != 0 {
-        *pip.offset(0) = if USE_MEMFD_CREATE != 0 {
-            libc::memfd_create(b"dash\0".as_ptr() as *const c_char, 0)
-        } else {
-            -1
-        };
-        if *pip.offset(0) >= 0 {
-            *pip.offset(1) = sh_dup2(sh, *pip.offset(0), -1, *pip.offset(0))?;
-            return Ok(1);
+pub fn sh_pipe(
+    sh: &mut crate::context::Shell,
+    memfd: bool,
+) -> Result<([c_int; 2], bool), Error> {
+    if memfd && USE_MEMFD_CREATE != 0 {
+        if let Ok(read_fd) = nsh_platform::anonymous_file(c"dash") {
+            let write_fd = sh_dup2(sh, read_fd, -1, read_fd)?;
+            return Ok(([read_fd, write_fd], true));
         }
     }
 
-    if libc::pipe(pip) < 0 {
-        return Err(sh.sh_error_value(b"Pipe call failed"));
-    }
-
-    Ok(0)
+    nsh_platform::pipe()
+        .map(|(read, write)| ([read, write], false))
+        .map_err(|_| sh.sh_error_value(b"Pipe call failed"))
 }
 
 /*
@@ -419,16 +453,16 @@ pub unsafe fn sh_pipe(sh: &mut crate::context::Shell, pip: *mut c_int, memfd: c_
 
 // [spec:dash:def:redir.openhere-fn]
 // [spec:dash:sem:redir.openhere-fn]
-unsafe fn openhere(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
-    let len: size_t;
+fn openhere(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
+    let len: usize;
     let mut pip: [c_int; 2] = [0; 2];
     let memfd: c_int;
-    let p: &[u8];
+    let expanded;
 
     /* `redir->nhere.doc` is the slot `parseheredoc` filled; the C would have
      * dereferenced a null pointer had it not run. */
     let doc: &Node = redir.nhere().doc.get().unwrap();
-    if redir.node_type() == NXHERE {
+    let p: &[u8] = if redir.node_type() == NXHERE {
         crate::expand::expandarg(sh, doc, None, crate::expand::EXP_QUOTED)?;
         /* The C reads the expansion back out of the region as
          * `stackblock()`.  The expansion buffer is owned now, so the read is
@@ -440,7 +474,8 @@ unsafe fn openhere(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
          * The `strlen` the C applied here has moved *into*
          * `expansion_result`, which hands back the bytes it would have
          * counted rather than the base of them. */
-        p = crate::expand::expansion_result();
+        expanded = bstr::BString::from(crate::expand::expansion_result(sh));
+        expanded.as_slice()
     } else {
         /* The unexpanded document is the node's own text. `as_bstr` drops
          * the counted terminator and `cstr_prefix` stops at the first NUL
@@ -448,11 +483,13 @@ unsafe fn openhere(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
          * second half matters because a here-document body can carry an
          * embedded NUL and the terminator is then not the one `strlen`
          * would have found. */
-        p = crate::mystring::cstr_prefix(doc.narg().text.as_bstr());
-    }
+        crate::mystring::cstr_prefix(doc.narg().text.as_bstr())
+    };
 
     len = p.len();
-    memfd = sh_pipe(sh, pip.as_mut_ptr(), (len > PIPESIZE) as c_int)?;
+    let opened = sh_pipe(sh, len > PIPESIZE)?;
+    pip = opened.0;
+    memfd = opened.1 as c_int;
 
     if memfd != 0 || len <= PIPESIZE {
         /* The return is discarded, as the C discards it, and the 8.3
@@ -464,26 +501,22 @@ unsafe fn openhere(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
          * raising, and making it fallible is the shape 4.3 argues
          * against. They become live the day someone changes that, and
          * that is a different node's decision. */
-        crate::output::xwrite(pip[1], p.as_ptr() as *const c_void, len);
-        libc::lseek(pip[1], 0, libc::SEEK_SET);
+        crate::output::xwrite(pip[1], p);
+        let _ = nsh_platform::seek_start(pip[1]);
         /* goto out */
-        libc::close(pip[1]);
+        let _ = nsh_platform::close_fd(pip[1]);
         return Ok(pip[0]);
     }
 
     if crate::jobs::forkshell(sh, None, None, crate::jobs::FORK_NOJOB)? == 0 {
-        libc::close(pip[0]);
-        libc::signal(libc::SIGINT, libc::SIG_IGN);
-        libc::signal(libc::SIGQUIT, libc::SIG_IGN);
-        libc::signal(libc::SIGHUP, libc::SIG_IGN);
-        libc::signal(libc::SIGTSTP, libc::SIG_IGN);
-        libc::signal(libc::SIGPIPE, libc::SIG_DFL);
-        crate::output::xwrite(pip[1], p.as_ptr() as *const c_void, len);
+        let _ = nsh_platform::close_fd(pip[0]);
+        nsh_platform::configure_here_document_writer_signals();
+        crate::output::xwrite(pip[1], p);
         crate::shell::flush_coverage();
-        libc::_exit(0);
+        nsh_platform::exit_immediately(0);
     }
     /* out: */
-    libc::close(pip[1]);
+    let _ = nsh_platform::close_fd(pip[1]);
     Ok(pip[0])
 }
 
@@ -493,11 +526,11 @@ unsafe fn openhere(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
 
 // [spec:dash:def:redir.popredir-fn]
 // [spec:dash:sem:redir.popredir-fn]
-pub unsafe fn popredir(sh: &mut Shell, drop: c_int) {
+pub fn popredir(sh: &mut Shell, drop: c_int) {
     let rp: usize;
     let mut i: c_int;
 
-    INTOFF();
+    INTOFF(sh);
     rp = sh.redirs.list.len() - 1;
     i = 0;
     while i < 10 {
@@ -518,7 +551,7 @@ pub unsafe fn popredir(sh: &mut Shell, drop: c_int) {
         match renamed {
             CLOSED => {
                 if closed == 0 {
-                    libc::close(i);
+                    let _ = nsh_platform::close_fd(i);
                 }
             }
             _ => {
@@ -526,9 +559,9 @@ pub unsafe fn popredir(sh: &mut Shell, drop: c_int) {
                     if i == 0 {
                         crate::input::reset_input(sh);
                     }
-                    libc::dup2(renamed, i);
+                    let _ = nsh_platform::duplicate_to(renamed, i);
                 }
-                libc::close(renamed);
+                let _ = nsh_platform::close_fd(renamed);
             }
         }
         i += 1;
@@ -536,7 +569,7 @@ pub unsafe fn popredir(sh: &mut Shell, drop: c_int) {
     /* `redirlist = rp->next` — which also drops anything pushed above `rp`
      * and never popped, as the C's assignment did. */
     sh.redirs.list.truncate(rp);
-    INTON();
+    INTON(sh);
 }
 
 /*
@@ -544,7 +577,7 @@ pub unsafe fn popredir(sh: &mut Shell, drop: c_int) {
  */
 
 /* mkinit EXITRESET fragment from src/redir.c:443-448. */
-pub unsafe fn mkinit_exitreset(sh: &mut Shell) {
+pub fn mkinit_exitreset(sh: &mut Shell) {
     /*
      * Discard all saved file descriptors.
      */
@@ -552,7 +585,7 @@ pub unsafe fn mkinit_exitreset(sh: &mut Shell) {
 }
 
 /* mkinit FORKRESET fragment from src/redir.c:450-452. */
-pub unsafe fn mkinit_forkreset(sh: &mut Shell) {
+pub fn mkinit_forkreset(sh: &mut Shell) {
     /* `redirlist = NULL`: the frames are abandoned, not popped, so no
      * descriptor is restored or closed.  The slots are plain integers, so
      * clearing the vector abandons them the same way. */
@@ -566,28 +599,22 @@ pub unsafe fn mkinit_forkreset(sh: &mut Shell) {
 
 // [spec:dash:def:redir.savefd-fn]
 // [spec:dash:sem:redir.savefd-fn]
-pub unsafe fn savefd(sh: &mut crate::context::Shell, from: c_int, ofd: c_int) -> Result<c_int, Error> {
-    let newfd: c_int;
-    let err: c_int;
-
-    /* #if HAVE_F_DUPFD_CLOEXEC */
-    newfd = libc::fcntl(from, libc::F_DUPFD_CLOEXEC, 10);
-
-    err = if newfd < 0 { errno() } else { 0 };
-    if err != libc::EBADF {
-        libc::close(ofd);
-        if err != 0 {
+pub fn savefd(sh: &mut crate::context::Shell, from: c_int, ofd: c_int) -> Result<c_int, Error> {
+    match nsh_platform::duplicate_cloexec(from, 10) {
+        Err(error) if nsh_platform::is_bad_descriptor_error(&error) => Ok(-1),
+        Err(error) => {
+            let _ = nsh_platform::close_fd(ofd);
             let mut message = Vec::new();
             write!(&mut message, "{}", from).expect("writing to a Vec cannot fail");
             message.extend_from_slice(b": ");
-            message.extend_from_slice(CStr::from_ptr(libc::strerror(err)).to_bytes());
-            return Err(sh.sh_error_value(&message));
-        } else if HAVE_F_DUPFD_CLOEXEC == 0 {
-            libc::fcntl(newfd, libc::F_SETFD, libc::FD_CLOEXEC);
+            message.extend_from_slice(nsh_platform::os_error_message(&error).as_bytes());
+            Err(sh.sh_error_value(&message))
+        }
+        Ok(newfd) => {
+            let _ = nsh_platform::close_fd(ofd);
+            Ok(newfd)
         }
     }
-
-    Ok(newfd)
 }
 
 /// `redirect`, with the diagnostic it can produce handed back rather than
@@ -609,21 +636,22 @@ pub unsafe fn savefd(sh: &mut crate::context::Shell, from: c_int, ofd: c_int) ->
 /// did, and the outermost `FORCEINTON` is what clears the leak.
 // [spec:dash:def:redir.redirectsafe-fn]
 // [spec:dash:sem:redir.redirectsafe-fn]
-pub unsafe fn redirectsafe(
+pub fn redirectsafe(
     sh: &mut Shell,
     redir: &[Node],
     flags: c_int,
 ) -> Result<(), Error> {
     let mut saveint: c_int = 0;
 
-    crate::SAVEINT!(saveint);
-    let caught = crate::expand::restore_handler_expandarg(redirect(sh, redir, flags).err());
+    crate::SAVEINT!(sh, saveint);
+    let redirect_error = redirect(sh, redir, flags).err();
+    let caught = crate::expand::restore_handler_expandarg(sh, redirect_error);
     if let Some(e) = caught {
         /* The C's `longjmp` from `restore_handler_expandarg` left before
          * the `RESTOREINT` below; so does this. */
         return Err(e);
     }
-    crate::RESTOREINT!(saveint);
+    crate::RESTOREINT!(sh, saveint);
 
     Ok(())
 }
@@ -632,7 +660,7 @@ pub unsafe fn redirectsafe(
 // [spec:dash:sem:redir.unwindredir-fn]
 /// `stop` was the `redirtab *` to unwind back to; a stack in a vector says
 /// the same thing with the depth to unwind back to.
-pub unsafe fn unwindredir(sh: &mut Shell, stop: usize) {
+pub fn unwindredir(sh: &mut Shell, stop: usize) {
     while sh.redirs.list.len() != stop {
         popredir(sh, 0);
     }
@@ -640,7 +668,7 @@ pub unsafe fn unwindredir(sh: &mut Shell, stop: usize) {
 
 // [spec:dash:def:redir.pushredir-fn]
 // [spec:dash:sem:redir.pushredir-fn]
-pub unsafe fn pushredir(sh: &mut Shell, redir: &[Node]) -> usize {
+pub fn pushredir(sh: &mut Shell, redir: &[Node]) -> usize {
     let q: usize;
 
     q = sh.redirs.list.len();
@@ -687,9 +715,8 @@ mod tests {
     #[test]
     fn a_clean_frame_returns_nothing() {
         let _guard = crate::testutil::lock();
-        unsafe {
-            assert!(restore_handler_expandarg(None).is_none());
-        }
+        let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        assert!(restore_handler_expandarg(&mut sh, None).is_none());
     }
 
     /// A diagnostic is handed straight back, text, status and line
@@ -698,14 +725,13 @@ mod tests {
     #[test]
     fn caught_diagnostic_comes_back() {
         let _guard = crate::testutil::lock();
-        unsafe {
-            let got = restore_handler_expandarg(Some(diagnostic()))
-                .expect("the caught diagnostic is the frame's to return");
-            assert_eq!(got.message(), "Bad substitution");
-            assert_eq!(got.status(), 2);
-            assert_eq!(got.line(), 7);
-            assert!(!got.is_interrupt());
-        }
+        let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let got = restore_handler_expandarg(&mut sh, Some(diagnostic()))
+            .expect("the caught diagnostic is the frame's to return");
+        assert_eq!(got.message(), "Bad substitution");
+        assert_eq!(got.status(), 2);
+        assert_eq!(got.line(), 7);
+        assert!(!got.is_interrupt());
     }
 
     /// An interrupt comes back too, and is *not* the same arm: the C
@@ -716,13 +742,15 @@ mod tests {
     #[test]
     fn an_interrupt_comes_back_as_one() {
         let _guard = crate::testutil::lock();
-        unsafe {
-            let got = restore_handler_expandarg(Some(Error::Interrupted {
-                signal: crate::status::Signal::from_raw(libc::SIGINT),
-            }))
-            .expect("an interrupt must not be swallowed by this frame");
-            assert!(got.is_interrupt());
-            assert_eq!(got.status(), libc::SIGINT + 128);
-        }
+        let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let got = restore_handler_expandarg(
+            &mut sh,
+            Some(Error::Interrupted {
+                signal: crate::status::Signal::from_raw(nsh_platform::interrupt_signal()),
+            }),
+        )
+        .expect("an interrupt must not be swallowed by this frame");
+        assert!(got.is_interrupt());
+        assert_eq!(got.status(), nsh_platform::interrupt_signal() + 128);
     }
 }

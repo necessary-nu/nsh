@@ -12,7 +12,7 @@
 //! `[dec:nsh:no-format-interpreters]`.
 //!
 //! What that removed: `printfcmd` and its scanning loop, `mklong`, the
-//! `PF`/`ASPF` arity switch, the `libc::snprintf` bridge behind them, the
+//! `PF`/`ASPF` arity switch, the C `snprintf` bridge behind them, the
 //! four `get*` argument readers and `check_conversion`.
 //! `print_escape_str` kept only what `echo` needs -- the C passed it a
 //! format string of which two bytes ever mattered, and it takes those
@@ -23,23 +23,16 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use core::ptr;
 use std::io::Write as _;
 
 use bstr::{BStr, BString};
-use libc::{c_char, c_int};
+use core::ffi::c_int;
 
 use crate::escape::conv_escape_str;
 use crate::eval::Flow;
 
-#[inline]
-unsafe fn nullstr() -> *mut c_char {
-    ptr::addr_of!(crate::mystring::nullstr) as *const c_char as *mut c_char
-}
-
-
 /// Write one rendered conversion to standard output.
-unsafe fn emit(sh: &mut crate::context::Shell, bytes: &[u8]) {
+fn emit(sh: &mut crate::context::Shell, bytes: &[u8]) {
     let _ = sh.io.stdout().write_all(bytes);
 }
 
@@ -53,7 +46,7 @@ unsafe fn emit(sh: &mut crate::context::Shell, bytes: &[u8]) {
 /// `%s ` or `%s\n`, so it passes the byte itself.
 // [spec:dash:def:printf.print-escape-str-fn]
 // [spec:dash:sem:printf.print-escape-str-fn]
-unsafe fn print_escape_str(sh: &mut crate::context::Shell, separator: u8, s: *mut c_char) -> c_int {
+fn print_escape_str(sh: &mut crate::context::Shell, separator: u8, s: &BStr) -> c_int {
     let done: c_int;
     /* The C's `q` is a cursor into the stack block and `stackblock()` its
      * base.  Both are this buffer: `len` is its length and `q[-1]` its
@@ -80,7 +73,7 @@ unsafe fn print_escape_str(sh: &mut crate::context::Shell, separator: u8, s: *mu
 
 // [spec:dash:def:printf.echocmd-fn]
 // [spec:dash:sem:printf.echocmd-fn]
-pub unsafe fn echocmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn echocmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* The C picked between the formats `"%s\n"`, `"%s"` and `"%s "`; all
      * that ever differed was the byte after the conversion, so what is
      * chosen here is that byte. `-n` closes with nothing. */
@@ -106,11 +99,7 @@ pub unsafe fn echocmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             separator = last;
         }
 
-        let s = s.map(|w| crate::shell::cstring(w));
-        nonl = print_escape_str(sh, 
-            separator,
-            s.as_ref().map_or(nullstr(), |w| w.as_ptr() as *mut c_char),
-        );
+        nonl = print_escape_str(sh, separator, s.copied().unwrap_or(BStr::new(b"")));
 
         if !(nonl == 0 && words.get(index).is_some()) {
             break;

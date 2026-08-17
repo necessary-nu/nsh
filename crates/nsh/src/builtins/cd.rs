@@ -11,25 +11,22 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
-use core::ptr::{addr_of, addr_of_mut, null_mut};
-use libc::{c_char, c_int};
-use std::ffi::{CStr, OsStr};
+use core::ffi::c_int;
+use std::ffi::OsStr;
 use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 
-use crate::cd::{cbytes, setpwd};
+use crate::cd::{Pwd, cbytes, setpwd_inner};
 use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
-use crate::mystring::{dotdir, homestr, nullstr};
 use crate::options::Options;
-use crate::var::bltinlookup;
 
 const CD_PHYSICAL: c_int = 1;
 const CD_PRINT: c_int = 2;
 
 // [spec:dash:def:cd.cdopt-fn]
 // [spec:dash:sem:cd.cdopt-fn]
-pub(crate) unsafe fn cdopt(sh: &mut crate::context::Shell, opts: &mut Options) -> Result<c_int, Error> {
+pub(crate) fn cdopt(sh: &mut crate::context::Shell, opts: &mut Options) -> Result<c_int, Error> {
     let mut flags: c_int = 0;
     let mut j: u8 = b'L';
 
@@ -45,95 +42,56 @@ pub(crate) unsafe fn cdopt(sh: &mut crate::context::Shell, opts: &mut Options) -
 
 // [spec:dash:def:cd.cdcmd-fn]
 // [spec:dash:sem:cd.cdcmd-fn]
-pub unsafe fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut dest: *const c_char;
-    let mut path: *const c_char;
-    let mut p: *const c_char;
-    let mut c: c_char;
-    let mut statb: libc::stat64 = core::mem::zeroed();
+pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut flags: c_int;
-    let mut len: c_int;
 
     let mut opts = Options::new(args);
     flags = cdopt(sh, &mut opts)?;
     /* The operand outlives every reader below, which is what the C got
      * from `argv` living in `evalcommand`'s frame. */
-    let operand = opts.operands().first().map(|d| crate::shell::cstring(d));
-    match &operand {
-        None => dest = bltinlookup(sh, addr_of!(homestr) as *const c_char),
-        Some(d) if d.as_bytes() == b"-" => {
-            dest = bltinlookup(sh, b"OLDPWD\0".as_ptr() as *const c_char);
+    let operand = opts.operands().first().copied();
+    let dest_value = match operand {
+        None => crate::var::lookup_bytes(sh, BStr::new(b"HOME")).unwrap_or_default(),
+        Some(d) if d == b"-" => {
             flags |= CD_PRINT;
+            crate::var::lookup_bytes(sh, BStr::new(b"OLDPWD")).unwrap_or_default()
         }
-        Some(d) => dest = d.as_ptr(),
-    }
-    if dest.is_null() {
-        dest = addr_of!(nullstr) as *const c_char;
-    }
+        Some(d) => d.to_owned(),
+    };
+    let mut dest = dest_value.as_slice().as_bstr();
 
-    let mut step6 = false;
-    if *dest == b'/' as c_char {
-        step6 = true; /* goto step6 */
-    } else if *dest == b'.' as c_char {
-        c = *dest.offset(1);
-        loop {
-            /* dotdot: */
-            if c == b'\0' as c_char || c == b'/' as c_char {
-                step6 = true; /* goto step6 */
-                break;
-            }
-            if c == b'.' as c_char {
-                c = *dest.offset(2);
-                if c != b'.' as c_char {
-                    continue; /* goto dotdot */
-                }
-            }
-            break;
-        }
-    }
+    let step6 = dest.starts_with(b"/")
+        || dest == b"."
+        || dest.starts_with(b"./")
+        || dest == b".."
+        || dest.starts_with(b"../");
 
     let mut out = false;
-    /* The CDPATH candidate `docd` is handed, copied out of `padvance`'s
-     * buffer.  Held across the whole loop rather than per iteration
-     * because `p` still points into it after the `break`. */
-    let mut keptbuf: Vec<u8> = Vec::new();
     if !step6 {
-        if *dest == 0 {
-            dest = addr_of!(dotdir) as *const c_char;
+        if dest.is_empty() {
+            dest = BStr::new(b".");
         }
-        path = bltinlookup(sh, b"CDPATH\0".as_ptr() as *const c_char);
-        loop {
-            p = path;
-            len = crate::exec::padvance_magic(&mut path, dest, 0);
-            if len < 0 {
-                break;
-            }
-            c = *p;
-            /* `stalloc(len)` took the candidate the C had built in the
-             * stack block; the copy is what takes it out of `padvance`'s
-             * buffer, which the `docd` below can overwrite.  `len` is
-             * `padvance`'s *allocation* size, one more than the string's
-             * length when the PATH component is empty, so the buffer is
-             * sized from it and the bytes are copied by hand. */
-            let candidate = CStr::from_ptr(crate::exec::padvance_result()).to_bytes_with_nul();
-            debug_assert!(candidate.len() <= len as usize);
-            keptbuf.clear();
-            keptbuf.resize(len as usize, 0);
-            keptbuf[..candidate.len()].copy_from_slice(candidate);
-            p = keptbuf.as_ptr() as *const c_char;
+        let path_value = crate::var::lookup_bytes(sh, BStr::new(b"CDPATH")).unwrap_or_default();
+        let mut components = path_value.split(|byte| *byte == b':');
+        let mut path = crate::exec::PathCursor::literal(path_value.as_slice().as_bstr());
+        while let Some(candidate) = crate::exec::padvance(&mut path, dest) {
+            let component = components.next().expect("PATH cursor and components advance together");
+            let fullname = crate::mystring::cstr_prefix(&candidate.path);
 
-            if libc::stat64(p, &mut statb) >= 0 && (statb.st_mode & libc::S_IFMT) == libc::S_IFDIR {
-                if c != 0 && c != b':' as c_char {
+            if std::fs::metadata(OsStr::from_bytes(fullname))
+                .is_ok_and(|metadata| metadata.is_dir())
+            {
+                if !component.is_empty() {
                     flags |= CD_PRINT;
                 }
                 /* docd: */
-                if docd(sh, p, flags)? == 0 {
+                if docd(sh, fullname, flags)? == 0 {
                     out = true; /* goto out */
                     break;
                 }
                 /* goto err */
                 let mut message = b"can't cd to ".to_vec();
-                message.extend_from_slice(CStr::from_ptr(dest).to_bytes());
+                message.extend_from_slice(dest);
                 return Err(sh.sh_error_value(&message));
             }
         }
@@ -141,19 +99,18 @@ pub unsafe fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     if !out {
         /* step6: */
-        p = dest;
         /* docd: */
-        if docd(sh, p, flags)? != 0 {
+        if docd(sh, dest, flags)? != 0 {
             /* err: */
             let mut message = b"can't cd to ".to_vec();
-            message.extend_from_slice(CStr::from_ptr(dest).to_bytes());
+            message.extend_from_slice(dest);
             return Err(sh.sh_error_value(&message));
         }
     }
 
     /* out: */
     if (flags & CD_PRINT) != 0 {
-        let mut d = cbytes(&*addr_of!(sh.cwd.curdir));
+        let mut d = cbytes(&sh.cwd.curdir);
         d.pop();
         d.push(b'\n');
         let _ = sh.io.stdout().write_all(&d);
@@ -163,26 +120,25 @@ pub unsafe fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
 // [spec:dash:def:cd.docd-fn]
 // [spec:dash:sem:cd.docd-fn]
-unsafe fn docd(sh: &mut Shell, mut dest: *const c_char, flags: c_int) -> Result<c_int, Error> {
-    let mut dir: *const c_char = null_mut();
+fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<c_int, Error> {
+    let mut logical = None;
     let err: c_int;
 
     /* `TRACE(("docd(sh, \"%s\", %d) called\n", dest, flags));` — `#ifdef DEBUG`
      * in `shell.h`, and the dash build does not define it. */
 
-    INTOFF();
+    INTOFF(sh);
     if (flags & CD_PHYSICAL) == 0 {
-        dir = updatepwd(sh, dest);
-        if !dir.is_null() {
-            dest = dir;
-        }
+        logical = updatepwd(sh, dest);
     }
     /* `chdir(2)` either way -- std saves the `CString` and makes the same
      * call, and the result is folded back to the C's 0/-1 because `docd`
      * is a `chdir` return code to every one of its callers. */
-    err = match std::env::set_current_dir(std::path::Path::new(OsStr::from_bytes(
-        CStr::from_ptr(dest).to_bytes(),
-    ))) {
+    let target = logical
+        .as_ref()
+        .map(|dir| dir.as_slice().as_bstr())
+        .unwrap_or(dest);
+    err = match std::env::set_current_dir(std::path::Path::new(OsStr::from_bytes(target))) {
         Ok(()) => 0,
         Err(_) => -1,
     };
@@ -190,21 +146,20 @@ unsafe fn docd(sh: &mut Shell, mut dest: *const c_char, flags: c_int) -> Result<
         /* The `?` returns between the INTOFF above and the INTON below,
          * leaking the interrupt counter exactly as the longjmp out of
          * `sh_error` did; see docs/errors-are-values.md 2.4. */
-        setpwd(sh, dir, 1)?;
+        match logical.as_ref() {
+            Some(dir) => setpwd_inner(sh, Pwd::New(dir.as_slice().as_bstr()), 1)?,
+            None => setpwd_inner(sh, Pwd::Unknown, 1)?,
+        }
         crate::exec::hashcd(sh);
     }
     /* out: */
-    INTON();
+    INTON(sh);
     Ok(err)
 }
 
-/// [`updatepwd`]'s result, which the C left in the stack block for its one
-/// caller to read before the next `cd`.
-static mut pwdbuf: BString = BString::new(Vec::new());
-
 // [spec:dash:def:cd.updatepwd-fn]
 // [spec:dash:sem:cd.updatepwd-fn]
-unsafe fn updatepwd(sh: &mut Shell, dir: *const c_char) -> *const c_char {
+fn updatepwd(sh: &mut Shell, dir: &BStr) -> Option<BString> {
     /* `lim` is `stackblock() + 1` in the C, re-read after `makestrspace`
      * because the block can move; against an owned buffer it is just an
      * index, and `new > lim` is a comparison of lengths. */
@@ -214,18 +169,17 @@ unsafe fn updatepwd(sh: &mut Shell, dir: *const c_char) -> *const c_char {
 
     /* `sstrdup(dir)`.  The copy outlives the whole walk because the
      * components below borrow it while `new` grows. */
-    let cdcompbuf: Vec<u8> = CStr::from_ptr(dir).to_bytes().to_vec();
-    let new = &mut *addr_of_mut!(pwdbuf);
-    new.clear();
-    if *dir != b'/' as c_char {
-        let Some(cur) = &*addr_of!(sh.cwd.curdir) else {
-            return null_mut();
+    let cdcompbuf = dir.to_vec();
+    let mut new = BString::new(Vec::new());
+    if !dir.starts_with(b"/") {
+        let Some(cur) = &sh.cwd.curdir else {
+            return None;
         };
         new.extend_from_slice(cur);
     }
     new.reserve(cdcompbuf.len() + 2);
     lim = 1;
-    if *dir != b'/' as c_char {
+    if !dir.starts_with(b"/") {
         /* `*(new - 1)` reads before the stack block when `curdir` is empty.
          * It cannot be — `curdir` is either `nullstr`, which returned above,
          * or a path `updatepwd` itself produced — so this only differs from
@@ -238,7 +192,7 @@ unsafe fn updatepwd(sh: &mut Shell, dir: *const c_char) -> *const c_char {
         }
     } else {
         new.push(b'/');
-        if *dir.offset(1) == b'/' as c_char && *dir.offset(2) != b'/' as c_char {
+        if dir.get(1) == Some(&b'/') && dir.get(2) != Some(&b'/') {
             new.push(b'/');
             lim += 1;
         }
@@ -268,10 +222,7 @@ unsafe fn updatepwd(sh: &mut Shell, dir: *const c_char) -> *const c_char {
     if new.len() > lim {
         new.pop();
     }
-    /* `*new = '\0'` — the C writes the terminator at the cursor without
-     * advancing it, and the caller reads the block as a C string. */
-    new.push(0);
-    new.as_ptr() as *const c_char
+    Some(new)
 }
 
 #[cfg(test)]
@@ -285,7 +236,7 @@ mod tests {
         let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
         let mut scan = Options::new(&args);
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        unsafe { cdopt(&mut owned, &mut scan) }.unwrap()
+        cdopt(&mut owned, &mut scan).unwrap()
     }
 
     #[test]
@@ -315,7 +266,7 @@ mod tests {
         let args = [BStr::new("cd"), BStr::new("-P"), BStr::new("dir")];
         let mut scan = Options::new(&args);
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        assert_eq!(unsafe { cdopt(&mut owned, &mut scan) }.unwrap(), CD_PHYSICAL);
+        assert_eq!(cdopt(&mut owned, &mut scan).unwrap(), CD_PHYSICAL);
         assert_eq!(scan.operands(), [BStr::new("dir")]);
     }
 }

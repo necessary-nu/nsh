@@ -22,7 +22,7 @@
 //!     (src/mksyntax.c:147,152)
 
 use bstr::BString;
-use libc::{c_char, c_int, c_uint};
+use core::ffi::{c_char, c_int, c_uint};
 
 // ---------------------------------------------------------------------
 // src/memalloc.h:78-97 -- the two stack-string macros `conv_escape` still
@@ -118,19 +118,26 @@ const CH_V: c_int = b'v' as c_int;
 /// `mboff` is -2 when `!mbchar`, so the framing bytes are deliberately
 /// overwritten by the payload -- ordinary arithmetic instead of pointer
 /// arithmetic that happens to stay in bounds.
-pub unsafe fn conv_escape(
-    str0: *mut c_char,
+pub fn conv_escape(
+    input: &[u8],
     out: &mut [u8; CONV_ESCAPE_SLOP],
     mbchar: bool,
 ) -> c_uint {
     /* The C's `out`, as the offset it always was. */
     let mut o: usize = 0;
-    let mut str: *mut c_char = str0;
+    let mut at: isize = 0;
     let mut value: c_uint;
     let och: c_int;
     let mut ch: c_int;
 
-    ch = *str as c_int;
+    let byte_at = |at: isize| -> c_int {
+        usize::try_from(at)
+            .ok()
+            .and_then(|index| input.get(index))
+            .copied()
+            .unwrap_or(0) as c_char as c_int
+    };
+    ch = byte_at(at);
     value = ch as c_uint;
 
     // The C switch's `default:` label falls into `check_value:`, which falls
@@ -189,16 +196,16 @@ pub unsafe fn conv_escape(
                         value = 0;
                         loop {
                             value <<= 3;
-                            value = value.wrapping_add(octtobin(*str as c_int) as c_uint);
-                            str = str.add(1);
+                            value = value.wrapping_add(octtobin(byte_at(at)) as c_uint);
+                            at += 1;
                             ch -= 1;
-                            if !(ch != 0 && isodigit(*str as c_int)) {
+                            if !(ch != 0 && isodigit(byte_at(at))) {
                                 break;
                             }
                         }
                     }
 
-                    str = str.sub(1);
+                    at -= 1;
 
                     goto_check_value = true;
                 }
@@ -210,8 +217,8 @@ pub unsafe fn conv_escape(
             och = ch;
             value = 0;
             loop {
-                str = str.add(1);
-                let c: c_int = *str as c_int;
+                at += 1;
+                let c: c_int = byte_at(at);
                 let d: c_int;
 
                 if c >= b'0' as c_int && c <= b'9' as c_int {
@@ -223,7 +230,7 @@ pub unsafe fn conv_escape(
                     if cl >= b'A' as c_int && cl <= b'F' as c_int {
                         d = cl - b'A' as c_int + 10;
                     } else {
-                        str = str.sub(1);
+                        at -= 1;
                         break;
                     }
                 }
@@ -320,8 +327,9 @@ pub unsafe fn conv_escape(
     }
 
     // out_noput:
-    str = str.add(1);
-    (o as c_uint) | ((str.offset_from(str0) as c_uint) << 4)
+    at += 1;
+    debug_assert!(at >= 0, "an escape never consumes a negative byte count");
+    (o as c_uint) | ((at as c_uint) << 4)
 }
 
 /*
@@ -337,8 +345,12 @@ pub unsafe fn conv_escape(
 /// caller either overwrites with a separator or trims.
 // [spec:dash:def:printf.conv-escape-str-fn]
 // [spec:dash:sem:printf.conv-escape-str-fn]
-pub(crate) unsafe fn conv_escape_str(mut str: *const c_char, cp: &mut BString) -> c_int {
+pub(crate) fn conv_escape_str(input: &[u8], cp: &mut BString) -> c_int {
     let mut c: c_int;
+    let mut at = 0usize;
+    let byte_at = |index: usize| -> c_int {
+        input.get(index).copied().unwrap_or(0) as c_char as c_int
+    };
 
     /* convert string into a temporary buffer... */
     /* `STARTSTACKSTR(cp)` — the buffer is the caller's, and the C's `*sp =
@@ -356,13 +368,13 @@ pub(crate) unsafe fn conv_escape_str(mut str: *const c_char, cp: &mut BString) -
         // `goto putchar` is taken from two places; the flag replaces it.
         let mut goto_putchar = false;
 
-        c = *str as c_int;
-        str = str.add(1);
+        c = byte_at(at);
+        at += 1;
         if c != b'\\' as c_int {
             ch = 0; /* unused on this path */
             goto_putchar = true;
         } else {
-            ch = *str as c_int;
+            ch = byte_at(at);
             if ch == b'c' as c_int {
                 /* \c as in SYSV echo - abort all processing.... */
                 c = 0x100;
@@ -381,8 +393,8 @@ pub(crate) unsafe fn conv_escape_str(mut str: *const c_char, cp: &mut BString) -
              * They start with a \0, and are followed by 0, 1, 2,
              * or 3 octal digits.
              */
-            if ch == b'0' as c_int && isodigit(*str.add(1) as c_int) {
-                str = str.add(1);
+            if ch == b'0' as c_int && isodigit(byte_at(at + 1)) {
+                at += 1;
             }
 
             /* Finally test for sequences valid in the format string */
@@ -393,8 +405,8 @@ pub(crate) unsafe fn conv_escape_str(mut str: *const c_char, cp: &mut BString) -
              * cursor for the next write to overwrite is simply not copied
              * out. */
             let mut scratch: [u8; CONV_ESCAPE_SLOP] = [0; CONV_ESCAPE_SLOP];
-            ret = conv_escape(str as *mut c_char, &mut scratch, false);
-            str = str.add((ret >> 4) as usize);
+            ret = conv_escape(&input[at.min(input.len())..], &mut scratch, false);
+            at += (ret >> 4) as usize;
             debug_assert!((ret & 15) as usize <= CONV_ESCAPE_SLOP);
             cp.extend_from_slice(&scratch[..(ret & 15) as usize]);
         }

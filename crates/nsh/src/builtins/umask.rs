@@ -10,16 +10,13 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use core::ptr::null_mut;
-use libc::{c_char, c_int};
-use std::ffi::CStr;
+use core::ffi::c_int;
 use std::io::Write as _;
 
 use bstr::BStr;
 
 use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
-use crate::options::Options;
 
 /*
  * umask builtin
@@ -32,171 +29,125 @@ use crate::options::Options;
 
 // [spec:dash:def:miscbltin.umaskcmd-fn]
 // [spec:dash:sem:miscbltin.umaskcmd-fn]
-pub unsafe fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut ap: *mut c_char;
-    let mut mask: c_int;
-    let mut i: c_int;
+pub fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+    let mut mask: u32;
     let mut symbolic_mode: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
     while opts.next(sh, b"S")?.is_some() {
         symbolic_mode = 1;
     }
-    /* The mode is walked as a cursor, so it stays a C string for the
-     * length of the walk. */
-    let mode = opts.operands().first().map(|w| crate::shell::cstring(w));
+    let mode = opts.operands().first().copied();
 
-    INTOFF();
-    mask = libc::umask(0) as c_int;
-    libc::umask(mask as libc::mode_t);
-    INTON();
+    INTOFF(sh);
+    mask = nsh_platform::creation_mask();
+    INTON(sh);
 
-    ap = mode
-        .as_ref()
-        .map_or(null_mut(), |mode| mode.as_ptr() as *mut c_char);
-    if ap.is_null() {
+    if mode.is_none() {
         if symbolic_mode != 0 {
-            let mut buf: [c_char; 18] = [0; 18];
-            let mut j: c_int;
-
-            mask = !mask;
-            ap = buf.as_mut_ptr();
-            i = 0;
-            while i < 3 {
-                *ap = b"ugo"[i as usize] as c_char;
-                ap = ap.add(1);
-                *ap = b'=' as c_char;
-                ap = ap.add(1);
-                j = 0;
-                while j < 3 {
-                    if (mask & (1 << (8 - (3 * i + j)))) != 0 {
-                        *ap = b"rwx"[j as usize] as c_char;
-                        ap = ap.add(1);
+            let allowed = !mask;
+            let mut record = Vec::with_capacity(18);
+            for i in 0..3 {
+                record.push(b"ugo"[i]);
+                record.push(b'=');
+                for j in 0..3 {
+                    if (allowed & (1 << (8 - (3 * i + j)))) != 0 {
+                        record.push(b"rwx"[j]);
                     }
-                    j += 1;
                 }
-                *ap = b',' as c_char;
-                ap = ap.add(1);
-                i += 1;
+                record.push(b',');
             }
-            *ap.offset(-1) = b'\0' as c_char;
-            let mut record = CStr::from_ptr(buf.as_ptr()).to_bytes().to_vec();
+            record.pop();
             record.push(b'\n');
             let _ = sh.io.stdout().write_all(&record);
         } else {
             let _ = writeln!(sh.io.stdout(), "{mask:04o}");
         }
     } else {
-        let mut new_mask: c_int;
+        let mode = mode.expect("checked above");
+        let bytes: &[u8] = mode.as_ref();
+        let mut at = 0usize;
+        let mut new_mask: u32;
 
-        if libc::isdigit(*ap as libc::c_uchar as c_int) != 0 {
+        if bytes.first().is_some_and(u8::is_ascii_digit) {
             new_mask = 0;
-            loop {
-                if *ap >= b'8' as c_char || *ap < b'0' as c_char {
+            for &byte in bytes {
+                if !(b'0'..=b'7').contains(&byte) {
                     let mut message = b"Illegal number: ".to_vec();
-                    message.extend_from_slice(mode.as_ref().expect("a mode to walk").as_bytes());
+                    message.extend_from_slice(bytes);
                     return Err(sh.sh_error_value(&message));
                 }
-                new_mask = (new_mask << 3) + (*ap as c_int - '0' as c_int);
-                ap = ap.add(1);
-                if *ap == b'\0' as c_char {
-                    break;
-                }
+                new_mask = (new_mask << 3) + u32::from(byte - b'0');
             }
         } else {
-            let mut positions: c_int;
-            let mut new_val: c_int;
-            let mut op: c_char;
+            let mut positions: u32;
 
             mask = !mask;
             new_mask = mask;
             positions = 0;
-            'sym: {
-                'error_lbl: {
-                    while *ap != 0 {
-                        while *ap != 0 && b"augo".contains(&(*ap as u8)) {
-                            let ch = *ap;
-                            ap = ap.add(1);
-                            match ch as u8 {
-                                b'a' => positions |= 0o111,
-                                b'u' => positions |= 0o100,
-                                b'g' => positions |= 0o010,
-                                b'o' => positions |= 0o001,
-                                _ => {}
-                            }
+            let valid = 'parse: {
+                while at < bytes.len() {
+                    while at < bytes.len() && b"augo".contains(&bytes[at]) {
+                        match bytes[at] {
+                            b'a' => positions |= 0o111,
+                            b'u' => positions |= 0o100,
+                            b'g' => positions |= 0o010,
+                            b'o' => positions |= 0o001,
+                            _ => unreachable!(),
                         }
-                        if positions == 0 {
-                            positions = 0o111; /* default is a */
+                        at += 1;
+                    }
+                    if positions == 0 {
+                        positions = 0o111;
+                    }
+                    let Some(&op) = bytes.get(at) else {
+                        break 'parse false;
+                    };
+                    if !b"=+-".contains(&op) {
+                        break 'parse false;
+                    }
+                    at += 1;
+                    let mut new_val = 0u32;
+                    while at < bytes.len() && b"rwxugoXs".contains(&bytes[at]) {
+                        match bytes[at] {
+                            b'r' => new_val |= 0o4,
+                            b'w' => new_val |= 0o2,
+                            b'x' => new_val |= 0o1,
+                            b'u' => new_val |= mask >> 6,
+                            b'g' => new_val |= mask >> 3,
+                            b'o' => new_val |= mask,
+                            b'X' if (mask & 0o111) != 0 => new_val |= 0o1,
+                            b'X' | b's' => {}
+                            _ => unreachable!(),
                         }
-                        op = *ap;
-                        if op == 0 {
-                            break 'error_lbl; // goto error
-                        }
-                        if !b"=+-".contains(&(op as u8)) {
-                            break;
-                        }
-                        ap = ap.add(1);
-                        new_val = 0;
-                        while *ap != 0 && b"rwxugoXs".contains(&(*ap as u8)) {
-                            let ch = *ap;
-                            ap = ap.add(1);
-                            match ch as u8 {
-                                b'r' => new_val |= 0o4,
-                                b'w' => new_val |= 0o2,
-                                b'x' => new_val |= 0o1,
-                                b'u' => new_val |= mask >> 6,
-                                b'g' => new_val |= mask >> 3,
-                                b'o' => new_val |= mask >> 0,
-                                b'X' => {
-                                    if (mask & 0o111) != 0 {
-                                        new_val |= 0o1;
-                                    }
-                                }
-                                b's' => { /* ignored */ }
-                                _ => {}
-                            }
-                        }
-                        new_val = (new_val & 0o7) * positions;
-                        match op as u8 {
-                            b'-' => {
-                                new_mask &= !new_val;
-                            }
-                            b'=' => {
-                                new_mask = new_val | (new_mask & !(positions * 0o7));
-                            }
-                            b'+' => {
-                                new_mask |= new_val;
-                            }
-                            _ => {}
-                        }
-                        if *ap == b',' as c_char {
+                        at += 1;
+                    }
+                    new_val = (new_val & 0o7) * positions;
+                    match op {
+                        b'-' => new_mask &= !new_val,
+                        b'=' => new_mask = new_val | (new_mask & !(positions * 0o7)),
+                        b'+' => new_mask |= new_val,
+                        _ => unreachable!(),
+                    }
+                    match bytes.get(at).copied() {
+                        Some(b',') => {
                             positions = 0;
-                            ap = ap.add(1);
-                        /* The terminator stays in the set here, and only
-                         * here: the three scans above run under `*ap != 0`,
-                         * but this one can see the end of the mode, where
-                         * `strchr` matches the NUL and the C falls out
-                         * through the loop condition rather than through
-                         * this break. */
-                        } else if !b"=+-\0".contains(&(*ap as u8)) {
-                            break;
+                            at += 1;
                         }
+                        Some(b'=' | b'+' | b'-') | None => {}
+                        Some(_) => break 'parse false,
                     }
-                    if *ap != 0 {
-                        break 'error_lbl; // fall into error:
-                    }
-                    new_mask = !new_mask;
-                    break 'sym;
                 }
-                // error:
+                true
+            };
+            if !valid {
                 let mut message = b"Illegal mode: ".to_vec();
-                message.extend_from_slice(mode.as_ref().expect("a mode to walk").as_bytes());
-                /* The C's `return 1` after this is unreachable because its
-                 * `sh_error` longjmps; the error is the return now. */
+                message.extend_from_slice(bytes);
                 return Err(sh.sh_error_value(&message));
             }
+            new_mask = !new_mask;
         }
-        libc::umask(new_mask as libc::mode_t);
+        nsh_platform::replace_creation_mask(new_mask);
     }
     Ok(Flow::Done(0))
 }
@@ -212,24 +163,19 @@ mod tests {
     /// builtin sets zero and then restores.
     fn with_mask<T>(body: impl FnOnce() -> T) -> T {
         let _guard = lock();
-        let saved = unsafe { libc::umask(0) };
-        unsafe { libc::umask(saved) };
+        let saved = nsh_platform::creation_mask();
         let out = body();
-        unsafe { libc::umask(saved) };
+        nsh_platform::replace_creation_mask(saved);
         out
     }
 
-    fn set(mode: &[u8]) -> libc::mode_t {
-        unsafe {
-            let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
-            assert_eq!(
-                umaskcmd(sh, &[BStr::new("umask"), BStr::new(mode)]).unwrap(),
-                Flow::Done(0)
-            );
-            let now = libc::umask(0);
-            libc::umask(now);
-            now
-        }
+    fn set(mode: &[u8]) -> u32 {
+        let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
+        assert_eq!(
+            umaskcmd(sh, &[BStr::new("umask"), BStr::new(mode)]).unwrap(),
+            Flow::Done(0)
+        );
+        nsh_platform::creation_mask()
     }
 
     #[test]
@@ -273,7 +219,10 @@ mod tests {
             ("999", &b"Illegal number: 999"[..]),
             ("q=r", &b"Illegal mode: q=r"[..]),
         ] {
-            let e = unsafe { umaskcmd(&mut Shell::new(crate::streams::Streams::INHERIT), &[BStr::new("umask"), BStr::new(mode)]) }
+            let e = umaskcmd(
+                &mut Shell::new(crate::streams::Streams::INHERIT),
+                &[BStr::new("umask"), BStr::new(mode)],
+            )
                 .expect_err("a bad mode fails");
             assert_eq!(e.message().to_vec(), text.to_vec());
             assert_eq!(e.status(), 2);

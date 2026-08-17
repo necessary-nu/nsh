@@ -12,20 +12,11 @@
 //! [dec:nsh:host-owns-the-process], so each child ends itself.
 
 use nsh::streams::{self, Streams};
-use std::io::Read;
-use std::os::unix::io::FromRawFd;
-
-unsafe fn pipe() -> (i32, i32) {
-    let mut fds = [0i32; 2];
-    assert_eq!(libc::pipe(fds.as_mut_ptr()), 0);
-    (fds[0], fds[1])
-}
 
 fn read_all(fd: i32) -> String {
-    let mut s = String::new();
-    let mut f = unsafe { std::fs::File::from_raw_fd(fd) };
-    f.read_to_string(&mut s).expect("read pipe");
-    s
+    let bytes = nsh_platform::read_to_end(fd).expect("read pipe");
+    nsh_platform::close_fd(fd).expect("close pipe reader");
+    String::from_utf8(bytes).expect("pipe output is UTF-8")
 }
 
 /// Run `script` in a forked child, with `prepare` deciding how the child
@@ -39,10 +30,7 @@ fn read_all(fd: i32) -> String {
 /// since [dec:nsh:host-owns-streams] landed.
 fn run_shell(script: &str, prepare: impl FnOnce() -> Streams) -> i32 {
     let argv: Vec<Vec<u8>> = vec![b"sh".to_vec(), b"-c".to_vec(), script.as_bytes().to_vec()];
-    unsafe {
-        let pid = libc::fork();
-        assert!(pid >= 0, "fork failed");
-        if pid == 0 {
+    nsh_platform::run_in_child(move || {
             // The port raises `Longjmp` as ordinary control flow -- every
             // shell error and every `exit` is one -- and the default hook
             // prints a panic banner for each. The `dash` binary filters
@@ -53,17 +41,10 @@ fn run_shell(script: &str, prepare: impl FnOnce() -> Streams) -> i32 {
                ending the process the caller's act — so this fork's child
                has to end itself. Returning would carry it back into the
                test harness after the fork. */
-            let status = nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, streams);
-            libc::_exit(status.code().into());
-        }
-        let mut status = 0i32;
-        assert_eq!(libc::waitpid(pid, &mut status, 0), pid);
-        if libc::WIFEXITED(status) {
-            libc::WEXITSTATUS(status)
-        } else {
-            128 + libc::WTERMSIG(status)
-        }
-    }
+            let status = nsh::shellmain::main_fn(argv, streams);
+            nsh_platform::exit_immediately(status.code().into());
+        })
+        .expect("run shell child")
 }
 
 /// Constructor mode: the shell's own writes -- built-ins, errors,
@@ -71,13 +52,13 @@ fn run_shell(script: &str, prepare: impl FnOnce() -> Streams) -> i32 {
 /// anywhere. This was `set` mode.
 #[test]
 fn a_builtin_writes_to_the_stream_the_shell_was_given() {
-    let (r, w) = unsafe { pipe() };
+    let (r, w) = nsh_platform::pipe().expect("create pipe");
     let st = run_shell("echo from the library", || Streams {
         stdin: 0,
         stdout: w,
         stderr: 2,
     });
-    unsafe { libc::close(w) };
+    nsh_platform::close_fd(w).expect("close pipe writer");
     assert_eq!(st, 0);
     assert_eq!(read_all(r), "from the library\n");
 }
@@ -91,23 +72,19 @@ fn a_builtin_writes_to_the_stream_the_shell_was_given() {
 /// deferred to [dec:nsh:no-ambient-state].
 #[test]
 fn set_does_not_carry_to_an_external_command() {
-    let (shell_r, shell_w) = unsafe { pipe() };
-    let (fd1_r, fd1_w) = unsafe { pipe() };
+    let (shell_r, shell_w) = nsh_platform::pipe().expect("create shell pipe");
+    let (fd1_r, fd1_w) = nsh_platform::pipe().expect("create fd 1 pipe");
     let st = run_shell("echo builtin; /bin/echo external", || {
-        unsafe {
-            libc::dup2(fd1_w, 1);
-            libc::close(fd1_w);
-        }
+        nsh_platform::duplicate_to(fd1_w, 1).expect("install fd 1");
+        nsh_platform::close_fd(fd1_w).expect("close duplicated source");
         Streams {
             stdin: 0,
             stdout: shell_w,
             stderr: 2,
         }
     });
-    unsafe {
-        libc::close(shell_w);
-        libc::close(fd1_w);
-    }
+    nsh_platform::close_fd(shell_w).expect("close shell pipe writer");
+    nsh_platform::close_fd(fd1_w).expect("close fd 1 pipe writer");
     assert_eq!(st, 0);
     assert_eq!(read_all(shell_r), "builtin\n");
     assert_eq!(read_all(fd1_r), "external\n");
@@ -118,25 +95,23 @@ fn set_does_not_carry_to_an_external_command() {
 /// redirection all agree without the shell knowing anything about it.
 #[test]
 fn install_carries_to_builtins_redirection_and_external_commands() {
-    let (r, w) = unsafe { pipe() };
+    let (r, w) = nsh_platform::pipe().expect("create pipe");
     let script = "echo builtin; /bin/echo external; { echo redirected > /dev/stdout; }";
     let st = run_shell(script, || {
         // Deliberately not restored: this child is about to become a
         // shell that ends in `_exit`, so there is no "afterwards" in
         // which to hand the descriptors back.
-        let lent = unsafe {
-            streams::install(Streams {
-                stdin: 0,
-                stdout: w,
-                stderr: 2,
-            })
-        }
+        let lent = streams::install(Streams {
+            stdin: 0,
+            stdout: w,
+            stderr: 2,
+        })
         .expect("install");
         core::mem::forget(lent);
         // `install` put them on 0, 1 and 2, so the shell is built there.
         Streams::INHERIT
     });
-    unsafe { libc::close(w) };
+    nsh_platform::close_fd(w).expect("close pipe writer");
     assert_eq!(st, 0);
     assert_eq!(read_all(r), "builtin\nexternal\nredirected\n");
 }
@@ -145,23 +120,14 @@ fn install_carries_to_builtins_redirection_and_external_commands() {
 /// from descriptor 0.
 #[test]
 fn the_shell_reads_a_script_from_the_stream_it_was_given() {
-    let (script_r, script_w) = unsafe { pipe() };
-    let (out_r, out_w) = unsafe { pipe() };
-    unsafe {
-        let script = b"echo one\necho two\n";
-        assert_eq!(
-            libc::write(script_w, script.as_ptr() as *const libc::c_void, script.len()),
-            script.len() as isize
-        );
-        libc::close(script_w);
-    }
+    let (script_r, script_w) = nsh_platform::pipe().expect("create script pipe");
+    let (out_r, out_w) = nsh_platform::pipe().expect("create output pipe");
+    nsh_platform::write_all(script_w, b"echo one\necho two\n").expect("write script");
+    nsh_platform::close_fd(script_w).expect("close script pipe writer");
 
     // `sh` with no operand reads commands from its standard input.
     let argv: Vec<Vec<u8>> = vec![b"sh".to_vec()];
-    let st = unsafe {
-        let pid = libc::fork();
-        assert!(pid >= 0);
-        if pid == 0 {
+    let st = nsh_platform::run_in_child(move || {
             let lent = streams::install(Streams {
                 stdin: script_r,
                 stdout: out_w,
@@ -173,17 +139,12 @@ fn the_shell_reads_a_script_from_the_stream_it_was_given() {
                ending the process the caller's act — so this fork's child
                has to end itself. Returning would carry it back into the
                test harness after the fork. */
-            let status = nsh::shellmain::main_fn(argv.len() as libc::c_int, argv, Streams::INHERIT);
-            libc::_exit(status.code().into());
-        }
-        let mut status = 0i32;
-        libc::waitpid(pid, &mut status, 0);
-        libc::WEXITSTATUS(status)
-    };
-    unsafe {
-        libc::close(out_w);
-        libc::close(script_r);
-    }
+            let status = nsh::shellmain::main_fn(argv, Streams::INHERIT);
+            nsh_platform::exit_immediately(status.code().into());
+        })
+        .expect("run shell child");
+    nsh_platform::close_fd(out_w).expect("close output pipe writer");
+    nsh_platform::close_fd(script_r).expect("close script pipe reader");
     assert_eq!(st, 0);
     assert_eq!(read_all(out_r), "one\ntwo\n");
 }

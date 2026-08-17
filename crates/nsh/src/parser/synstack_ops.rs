@@ -1,8 +1,8 @@
-use super::{Syntax, synstack};
+use super::{SyntaxKind, synstack};
 
 // [spec:dash:def:parser.synstack-push-fn]
 // [spec:dash:sem:parser.synstack-push-fn]
-pub(super) fn push(stack: &mut Vec<synstack>, syntax: *const Syntax) {
+pub(super) fn push(stack: &mut Vec<synstack>, syntax: SyntaxKind) {
     stack.push(synstack {
         syntax,
         innerdq: 0,
@@ -29,7 +29,7 @@ mod tests {
     #[test]
     fn push_initialises_a_clean_frame() {
         let mut stack = Vec::new();
-        let syntax = core::ptr::null();
+        let syntax = SyntaxKind::Base;
 
         push(&mut stack, syntax);
 
@@ -49,12 +49,12 @@ mod tests {
     #[test]
     fn pop_removes_only_the_top_frame() {
         let mut stack = Vec::new();
-        push(&mut stack, core::ptr::null());
-        push(&mut stack, core::ptr::dangling());
+        push(&mut stack, SyntaxKind::Base);
+        push(&mut stack, SyntaxKind::DoubleQuoted);
 
         pop(&mut stack);
         assert_eq!(stack.len(), 1);
-        assert!(stack[0].syntax.is_null());
+        assert_eq!(stack[0].syntax, SyntaxKind::Base);
 
         pop(&mut stack);
         assert!(stack.is_empty());

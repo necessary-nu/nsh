@@ -11,41 +11,24 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use core::ptr::null_mut;
-use std::ffi::CString;
 
-use bstr::BStr;
-use libc::c_char;
+use bstr::{BStr, ByteSlice};
 
 use crate::eval::Flow;
 use crate::exec::shellexec;
 
 // [spec:dash:def:eval.execcmd-fn]
 // [spec:dash:sem:eval.execcmd-fn]
-pub unsafe fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if args.len() > 1 {
         sh.options.set_flag(crate::options::iflag, 0); /* exit on error */
         sh.options.set_flag(crate::options::mflag, 0);
         crate::options::optschanged(sh)?;
         crate::input::flush_input(sh);
-        /* `execve` wants the array back, so this is where it is built --
-         * once, for the one builtin that replaces the process, instead of
-         * for every builtin that does not. `shellexec` writes `argv[-1]`
-         * when it retries a script through the shell, so the spare slot
-         * `evalcommand` reserves is reserved here too.
-         *
-         * `shellexec` either replaces the image or reports and hands back
-         * the C's EXEND -- an `exec` that cannot happen ends the shell --
-         * so neither the words nor the array outlive their use. */
-        let words: Vec<CString> = args[1..].iter().map(|a| crate::shell::cstring(a)).collect();
-        let mut argv: Vec<*mut c_char> = Vec::with_capacity(words.len() + 2);
-        argv.push(null_mut());
-        argv.extend(words.iter().map(|w| w.as_ptr() as *mut c_char));
-        argv.push(null_mut());
         /* Hoisted out of `shellexec`'s argument list, which also takes
          * the shell; see the note in `eval.rs`'s `evalcommand`. */
         let path = crate::var::pathval(sh);
-        return shellexec(sh, argv.as_mut_ptr().add(1), path, 0);
+        return shellexec(sh, &args[1..], path.as_slice().as_bstr(), 0);
     }
     Ok(Flow::Done(0))
 }

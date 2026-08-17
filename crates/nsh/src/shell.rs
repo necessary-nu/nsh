@@ -7,7 +7,7 @@
 //! `TRACEV`) have no runtime meaning here and are recorded as plain
 //! constants or comments.
 
-use libc::{c_char, c_int, c_void};
+use core::ffi::{c_int, c_void};
 
 /* JOBS -> 1 if you have Berkeley job control, 0 otherwise. */
 pub const JOBS: c_int = 1;
@@ -30,7 +30,6 @@ pub type pointer = *mut c_void;
  * `extern char nullstr[1];` — the null string is defined in
  * `mystring.c`, so it lives in `crate::mystring`.
  */
-pub use crate::mystring::nullstr;
 
 /*
  * `likely`/`unlikely` are branch hints only; they have no effect on
@@ -56,16 +55,6 @@ pub fn unlikely(x: bool) -> bool {
 #[inline]
 pub fn max_int_length(bytes: c_int) -> c_int {
     ((bytes * 8 - 1) as f64 * 0.30102999566398119521 + 14.0) as c_int
-}
-
-/*
- * Helper used throughout the port to spell a C string literal: `b"…\0"`
- * byte strings stand in for C's `"…"`, and this turns one into the
- * `const char *` the ported signatures expect.  Not part of shell.h.
- */
-#[inline(always)]
-pub fn cstr(s: &'static [u8]) -> *const c_char {
-    s.as_ptr() as *const c_char
 }
 
 /*
@@ -106,14 +95,8 @@ pub fn cstring(arg: &bstr::BStr) -> std::ffi::CString {
 /// identical sandbox produced one. The sandbox was innocent; `_exit` was
 /// the whole story.
 #[inline]
-pub unsafe fn flush_coverage() {
-    #[cfg(coverage)]
-    {
-        extern "C" {
-            fn __llvm_profile_write_file() -> libc::c_int;
-        }
-        __llvm_profile_write_file();
-    }
+pub fn flush_coverage() {
+    nsh_platform::flush_coverage_profile();
 }
 
 /// Zero the coverage counters in a freshly forked child.
@@ -131,12 +114,6 @@ pub unsafe fn flush_coverage() {
 /// Resetting here means a child reports only what the child ran. What it
 /// executed before the fork is not lost -- the parent already counted it.
 #[inline]
-pub unsafe fn reset_coverage() {
-    #[cfg(coverage)]
-    {
-        extern "C" {
-            fn __llvm_profile_reset_counters();
-        }
-        __llvm_profile_reset_counters();
-    }
+pub fn reset_coverage() {
+    nsh_platform::reset_coverage_counters();
 }

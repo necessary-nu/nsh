@@ -1,281 +1,220 @@
-//! `getopts`.
+//! The script-visible `getopts` scanner.
 //!
-//! Port of `getoptscmd` and its engine from `src/options.c`.
-//!
-//! This is the option scanner a *script* runs, which makes it the one
-//! that cannot be `crate::options::Options`: it has to survive between
-//! invocations, because the loop calling it is in the script. Its
-//! position lives in `shellparam` as `OPTIND` plus a byte offset, and it
-//! reports through the shell variables `OPTIND` and `OPTARG` rather than
-//! by returning.
-//!
-//! It walks a `char **` for the same reason: the array it is given is
-//! either the positional parameters or its own operands, and the offset
-//! it remembers has to mean the same thing next time.
+//! Its persistent cursor remains in `shellparam`; each invocation scans an
+//! owned snapshot of either the positional parameters or explicit operands.
+
+use bstr::{BStr, BString};
+use core::ffi::{c_int, c_uint};
+use std::io::Write;
 
 use crate::context::Shell;
 use crate::error::Error;
-use bstr::BStr;
-use core::ptr::{addr_of, null_mut};
-use libc::{c_char, c_int, c_uint, size_t};
-use std::ffi::{CStr, CString};
-use std::io::Write;
-
 use crate::eval::Flow;
-use crate::mystring::nullstr;
 use crate::options::Options;
-use crate::var::{VNOFUNC, setvar, setvarint, unsetvar};
+use crate::var::{VNOFUNC, set_bytes, setvarint_bytes, unset_bytes};
 
 // [spec:dash:def:options.getoptscmd-fn]
 // [spec:dash:sem:options.getoptscmd-fn]
-pub unsafe fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let optbase: *mut *mut c_char;
-
+pub fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut opts = Options::new(args);
     opts.next(sh, b"")?;
     let operands = opts.operands();
     if operands.len() < 2 {
         return Err(sh.sh_error_value(b"Usage: getopts optstring var [arg...]"));
     }
-    let optstr = crate::shell::cstring(operands[0]);
-    let optvar = crate::shell::cstring(operands[1]);
 
-    /* `getopts` walks a `char **` and remembers where it got to as an
-     * index and a byte offset, so the words it is given have to be an
-     * array for the length of the call. The positional parameters
-     * already are one; explicit operands are built into one here, which
-     * is what `evalcommand` was doing for every builtin. */
-    let explicit: Vec<CString>;
-    let mut ptrs: Vec<*mut c_char>;
-    if operands.len() == 2 {
-        optbase = sh.options.shellparam.p();
-        if (sh.options.shellparam.optind as c_uint) > (sh.options.shellparam.nparam + 1) as c_uint {
+    let words: Vec<BString> = if operands.len() == 2 {
+        let words = sh.options.shellparam.words();
+        if (sh.options.shellparam.optind as c_uint)
+            > (sh.options.shellparam.nparam + 1) as c_uint
+        {
             sh.options.shellparam.optind = 1;
             sh.options.shellparam.optoff = -1;
         }
+        words
     } else {
-        explicit = operands[2..]
-            .iter()
-            .map(|w| crate::shell::cstring(w))
-            .collect();
-        ptrs = explicit.iter().map(|w| w.as_ptr() as *mut c_char).collect();
-        ptrs.push(null_mut());
-        optbase = ptrs.as_mut_ptr();
         if (sh.options.shellparam.optind as c_uint) > (operands.len() - 1) as c_uint {
             sh.options.shellparam.optind = 1;
             sh.options.shellparam.optoff = -1;
         }
-    }
+        operands[2..].iter().map(|word| (*word).to_owned()).collect()
+    };
 
-    Ok(Flow::Done(getopts(sh, 
-        optstr.as_ptr() as *mut c_char,
-        optvar.as_ptr() as *mut c_char,
-        optbase,
-    )?))
+    Ok(Flow::Done(getopts(sh, operands[0], operands[1], &words)?))
 }
 
 // [spec:dash:def:options.getopts-fn]
 // [spec:dash:sem:options.getopts-fn]
-unsafe fn getopts(
+fn getopts(
     sh: &mut Shell,
-    optstr: *mut c_char,
-    optvar: *mut c_char,
-    optfirst: *mut *mut c_char,
+    optstr: &BStr,
+    optvar: &BStr,
+    words: &[BString],
 ) -> Result<c_int, Error> {
-    let mut p: *mut c_char;
-    let mut q: *mut c_char;
-    let mut c: c_char = b'?' as c_char;
-    let mut done: c_int = 0;
-    let mut s: [c_char; 2] = [0; 2];
-    let mut optnext: *mut *mut c_char;
-    let mut ind: c_int = sh.options.shellparam.optind;
-    let off: c_int = sh.options.shellparam.optoff;
-
+    let mut option = b'?';
+    let mut done = 0;
+    let mut next = sh.options.shellparam.optind.saturating_sub(1) as usize;
+    let offset = sh.options.shellparam.optoff;
     sh.options.shellparam.optind = -1;
-    optnext = optfirst.offset(ind as isize - 1);
 
-    if ind <= 1 || off < 0 || CStr::from_ptr(*optnext.offset(-1)).count_bytes() < off as size_t {
-        p = null_mut();
+    let mut cursor = if next > 0
+        && offset >= 0
+        && words
+            .get(next - 1)
+            .is_some_and(|word| word.len() >= offset as usize)
+    {
+        Some((next - 1, offset as usize))
     } else {
-        p = (*optnext.offset(-1)).offset(off as isize);
-    }
-    'out: loop {
-        if p.is_null() || *p == b'\0' as c_char {
-            /* Current word is done, advance */
-            p = *optnext;
-            if p.is_null() || *p != b'-' as c_char || {
-                p = p.add(1);
-                *p == b'\0' as c_char
-            } {
-                /* atend: */
-                p = null_mut();
+        None
+    };
+
+    'scan: loop {
+        if cursor.is_none()
+            || cursor.is_some_and(|(word, at)| at >= words[word].len())
+        {
+            let Some(word) = words.get(next) else {
                 done = 1;
-                break 'out;
-            }
-            optnext = optnext.add(1);
-            if *p.offset(0) == b'-' as c_char && *p.offset(1) == b'\0' as c_char {
-                /* check for "--" — goto atend */
-                p = null_mut();
+                cursor = None;
+                break 'scan;
+            };
+            if word.first() != Some(&b'-') || word.len() == 1 {
                 done = 1;
-                break 'out;
+                cursor = None;
+                break 'scan;
             }
+            next += 1;
+            if word.as_slice() == b"--" {
+                done = 1;
+                cursor = None;
+                break 'scan;
+            }
+            cursor = Some((next - 1, 1));
         }
 
-        c = *p;
-        p = p.add(1);
-        q = if *optstr.offset(0) == b':' as c_char {
-            optstr.offset(1)
-        } else {
-            optstr
-        };
-        while *q != c {
-            if *q == b'\0' as c_char {
-                if *optstr.offset(0) == b':' as c_char {
-                    s[0] = c;
-                    s[1] = b'\0' as c_char;
-                    setvar(sh, b"OPTARG\0".as_ptr() as *const c_char, s.as_ptr(), 0)?;
-                } else {
-                    let mut message = b"Illegal option -".to_vec();
-                    message.push(c as u8);
-                    message.push(b'\n');
-                    let _ = sh.io.stderr().write_all(&message);
-                    crate::var::unsetvar(sh, b"OPTARG\0".as_ptr() as *const c_char)?;
-                }
-                c = b'?' as c_char;
-                break 'out;
-            }
-            q = q.add(1);
-            if *q == b':' as c_char {
-                q = q.add(1);
+        let (word_index, at) = cursor.expect("a current option word");
+        option = words[word_index][at];
+        cursor = Some((word_index, at + 1));
+
+        let quiet = optstr.first() == Some(&b':');
+        let mut spec = usize::from(quiet);
+        while spec < optstr.len() && optstr[spec] != option {
+            spec += 1;
+            if optstr.get(spec) == Some(&b':') {
+                spec += 1;
             }
         }
+        if spec == optstr.len() {
+            if quiet {
+                set_bytes(
+                    sh,
+                    BStr::new(b"OPTARG"),
+                    Some(BStr::new(&[option])),
+                    0,
+                )?;
+            } else {
+                let mut message = b"Illegal option -".to_vec();
+                message.push(option);
+                message.push(b'\n');
+                let _ = sh.io.stderr().write_all(&message);
+                unset_bytes(sh, BStr::new(b"OPTARG"))?;
+            }
+            option = b'?';
+            break 'scan;
+        }
 
-        q = q.add(1);
-        if *q == b':' as c_char {
-            if *p == b'\0' as c_char && {
-                p = *optnext;
-                p.is_null()
-            } {
-                if *optstr.offset(0) == b':' as c_char {
-                    s[0] = c;
-                    s[1] = b'\0' as c_char;
-                    setvar(sh, b"OPTARG\0".as_ptr() as *const c_char, s.as_ptr(), 0)?;
-                    c = b':' as c_char;
+        if optstr.get(spec + 1) == Some(&b':') {
+            let (word_index, at) = cursor.expect("the option cursor");
+            let argument = if at < words[word_index].len() {
+                let argument = BString::from(&words[word_index][at..]);
+                cursor = None;
+                Some(argument)
+            } else if let Some(argument) = words.get(next) {
+                next += 1;
+                cursor = None;
+                Some(argument.clone())
+            } else {
+                None
+            };
+
+            let Some(argument) = argument else {
+                if quiet {
+                    set_bytes(
+                        sh,
+                        BStr::new(b"OPTARG"),
+                        Some(BStr::new(&[option])),
+                        0,
+                    )?;
+                    option = b':';
                 } else {
                     let mut message = b"No arg for -".to_vec();
-                    message.push(c as u8);
+                    message.push(option);
                     message.extend_from_slice(b" option\n");
                     let _ = sh.io.stderr().write_all(&message);
-                    crate::var::unsetvar(sh, b"OPTARG\0".as_ptr() as *const c_char)?;
-                    c = b'?' as c_char;
+                    unset_bytes(sh, BStr::new(b"OPTARG"))?;
+                    option = b'?';
                 }
-                break 'out;
-            }
-
-            if p == *optnext {
-                optnext = optnext.add(1);
-            }
-            setvar(sh, b"OPTARG\0".as_ptr() as *const c_char, p, 0)?;
-            p = null_mut();
-        } else {
-            setvar(sh, 
-                b"OPTARG\0".as_ptr() as *const c_char,
-                addr_of!(nullstr) as *const c_char,
+                break 'scan;
+            };
+            set_bytes(
+                sh,
+                BStr::new(b"OPTARG"),
+                Some(BStr::new(argument.as_slice())),
                 0,
             )?;
+        } else {
+            set_bytes(sh, BStr::new(b"OPTARG"), Some(BStr::new(b"")), 0)?;
         }
-        break 'out;
+        break 'scan;
     }
 
-    /* out: */
-    ind = ((optnext as isize - optfirst as isize) / core::mem::size_of::<*mut c_char>() as isize)
-        as c_int
-        + 1;
-    setvarint(sh, 
-        b"OPTIND\0".as_ptr() as *const c_char,
-        ind as libc::intmax_t,
-        VNOFUNC,
-    )?;
-    s[0] = c;
-    s[1] = b'\0' as c_char;
-    setvar(sh, optvar, s.as_ptr(), 0)?;
-
-    sh.options.shellparam.optoff = if !p.is_null() {
-        (p as isize - *optnext.offset(-1) as isize) as c_int
-    } else {
-        -1
-    };
-    sh.options.shellparam.optind = ind;
-
+    let index = next as c_int + 1;
+    setvarint_bytes(sh, BStr::new(b"OPTIND"), index as i64, VNOFUNC)?;
+    set_bytes(sh, optvar, Some(BStr::new(&[option])), 0)?;
+    sh.options.shellparam.optoff = cursor.map_or(-1, |(_, at)| at as c_int);
+    sh.options.shellparam.optind = index;
     Ok(done)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::lock;
+    use crate::var::lookup_bytes;
 
-    use crate::testutil::{CStr0, lock};
-    use crate::var::lookupvar;
-
-    unsafe fn value(sh: &mut Shell, name: &str) -> String {
-        let p = lookupvar(sh, CStr0::new(name).p());
-        if p.is_null() {
-            return String::new();
-        }
-        String::from_utf8_lossy(std::ffi::CStr::from_ptr(p).to_bytes()).into_owned()
+    fn value(sh: &mut Shell, name: &str) -> String {
+        lookup_bytes(sh, BStr::new(name))
+            .map_or_else(String::new, |value| String::from_utf8_lossy(&value).into_owned())
     }
 
-    /// A script's scan has to survive between invocations, so what it
-    /// reports is `OPTIND` and `OPTARG` rather than a return value; the
-    /// loop below is the shape every `while getopts` has.
     #[test]
     fn a_scan_runs_across_invocations() {
-        let _g = lock();
-        unsafe {
-            let words = ["getopts", "ab:", "o", "-a", "-bVAL", "rest"];
-            let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
+        let _guard = lock();
+        let words = ["getopts", "ab:", "o", "-a", "-bVAL", "rest"];
+        let args: Vec<&BStr> = words.iter().map(|word| BStr::new(*word)).collect();
+        let mut shell = Shell::new(crate::streams::Streams::INHERIT);
+        shell.options.shellparam.optind = 1;
+        shell.options.shellparam.optoff = -1;
 
-            /* One shell across the whole scan. The C's `getopts` state
-             * is partly in `shellparam` and partly in the variables it
-             * assigns, and the variables now belong to a shell instance --
-             * so a fresh `Shell` per invocation would be a fresh set of
-             * variables, which is not what a script sees. */
-            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
-            let sh = &mut owned;
-            sh.options.shellparam.optind = 1;
-            sh.options.shellparam.optoff = -1;
-
-            assert_eq!(getoptscmd(sh, &args).unwrap(), Flow::Done(0));
-            assert_eq!(value(sh, "o"), "a");
-
-            assert_eq!(getoptscmd(sh, &args).unwrap(), Flow::Done(0));
-            assert_eq!(value(sh, "o"), "b");
-            assert_eq!(value(sh, "OPTARG"), "VAL");
-
-            /* The operand ends the scan, and OPTIND points at it. */
-            assert_ne!(getoptscmd(sh, &args).unwrap(), Flow::Done(0));
-            assert_eq!(value(sh, "OPTIND"), "3");
-        }
+        assert_eq!(getoptscmd(&mut shell, &args).unwrap(), Flow::Done(0));
+        assert_eq!(value(&mut shell, "o"), "a");
+        assert_eq!(getoptscmd(&mut shell, &args).unwrap(), Flow::Done(0));
+        assert_eq!(value(&mut shell, "o"), "b");
+        assert_eq!(value(&mut shell, "OPTARG"), "VAL");
+        assert_ne!(getoptscmd(&mut shell, &args).unwrap(), Flow::Done(0));
+        assert_eq!(value(&mut shell, "OPTIND"), "3");
     }
 
-    /// A leading `:` in the option string is the quiet form: an unknown
-    /// option is reported through `OPTARG` and the variable instead of on
-    /// stderr.
     #[test]
     fn a_leading_colon_reports_quietly() {
-        let _g = lock();
-        unsafe {
-            let words = ["getopts", ":a", "o", "-z"];
-            let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
+        let _guard = lock();
+        let words = ["getopts", ":a", "o", "-z"];
+        let args: Vec<&BStr> = words.iter().map(|word| BStr::new(*word)).collect();
+        let mut shell = Shell::new(crate::streams::Streams::INHERIT);
+        shell.options.shellparam.optind = 1;
+        shell.options.shellparam.optoff = -1;
 
-            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
-            let sh = &mut owned;
-            sh.options.shellparam.optind = 1;
-            sh.options.shellparam.optoff = -1;
-
-            assert_eq!(getoptscmd(sh, &args).unwrap(), Flow::Done(0));
-            assert_eq!(value(sh, "o"), "?");
-            assert_eq!(value(sh, "OPTARG"), "z");
-        }
+        assert_eq!(getoptscmd(&mut shell, &args).unwrap(), Flow::Done(0));
+        assert_eq!(value(&mut shell, "o"), "?");
+        assert_eq!(value(&mut shell, "OPTARG"), "z");
     }
 }

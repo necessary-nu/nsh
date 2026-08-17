@@ -1,11 +1,11 @@
 //! nsh — a POSIX shell as a library.
 //!
-//! Today this is still the literal port of dash 0.5.13.5 it began as:
-//! every module mirrors the C source file of the same name, function for
-//! function, with the same control flow and the same names. Each item
-//! carries the `[spec:dash:def:…]` / `[spec:dash:sem:…]` annotations of
-//! the rule it implements; the corresponding claims for the C source
-//! live in `plan/annotations.styx`.
+//! It began as a port of dash 0.5.13.5, whose observable behavior remains
+//! the reference. The implementation now uses owned Rust data, explicit
+//! state and typed control flow rather than preserving C representations.
+//! Items carry `[spec:dash:def:…]` / `[spec:dash:sem:…]` annotations for
+//! the rules they implement; corresponding C-source claims live in
+//! `plan/annotations.styx`.
 //!
 //! **The surface is closed.** It was thirty-eight public modules, which is
 //! not an API but the transliteration left open — see
@@ -65,26 +65,13 @@
 //! notice.
 
 #![deny(missing_docs)]
+#![deny(unsafe_code)]
 #![allow(dead_code)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![allow(unused_variables)]
 #![allow(clippy::all)]
-// Edition 2024 turns this on, and on this crate it fires 5,010 times:
-// 2,747 calls to an unsafe function, 1,221 raw-pointer dereferences,
-// 1,018 reads of a mutable static, 24 union-field accesses. Every one is
-// inside a function already declared `unsafe`, so wrapping the bodies
-// restates what the signature says and buries the warnings that mean
-// something.
-//
-// The count is the point. [dec:nsh:minimal-unsafe] tracks unsafe
-// *functions* — 598 of 794 — which says nothing about how much unsafe is
-// inside them. 5,010 operations is the figure that falls as `owned-data`,
-// `errors-are-values` and `no-ambient-state` remove raw pointers and
-// statics, and it is what to turn this lint on against once it is
-// affordable. Re-measure by deleting this line.
-#![allow(unsafe_op_in_unsafe_fn)]
 
 // ---- the public API --------------------------------------------------
 //
@@ -154,7 +141,6 @@ pub(crate) mod var;
 
 // ---- parsing and expansion -------------------------------------------
 pub(crate) mod arith_yacc;
-pub(crate) mod arith_yylex;
 pub(crate) mod expand;
 pub(crate) mod parser;
 pub(crate) mod pmatch;

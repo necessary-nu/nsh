@@ -1,36 +1,23 @@
-//! Literal port of `src/exec.c` / `src/exec.h`.
+//! Command lookup, hashing and external-program execution.
 //! Rules: `docs/spec/port/src/exec.md`.
-//!
-//! Translation notes (literal, bug-for-bug):
-//!   * C `goto`s are reproduced with Rust labelled blocks and `loop`s.
-//!     The block nesting mirrors the *order* of the C labels, so that
-//!     `break 'label` is a forward `goto` and fall-through between two
-//!     adjacent labels still happens.
-//!   * `TRACE(...)` is a no-op unless `DEBUG` is defined; the default C
-//!     build compiles it out, so the calls are dropped and left as
-//!     comments where the trace text documented something.
-//!   * `errno` is read through `__errno_location()`. `main.c` caches
-//!     that pointer in `dash_errno` and the caching is reproduced in
-//!     `shellmain`, but reads here go straight to libc, which is
-//!     behaviourally identical.
 //!
 //! `cmdtable` is a `BTreeMap` keyed by command name, not the C's 31
 //! chained hash buckets, so `hash` with no operands prints in name order
 //! rather than in the order `hashval` happens to chain. Registered in
-//! `docs/divergences.md`.
+//! `docs/divergences.md`. Commands are represented by a Rust enum; no
+//! tagged union or borrowed C argument vector crosses this module.
 
 use bstr::{BStr, BString, ByteSlice};
-use core::ptr::{addr_of, addr_of_mut, null, null_mut};
-use libc::{c_char, c_int, size_t};
+use core::ffi::c_int;
 use std::collections::BTreeMap;
-use std::ffi::CStr;
-use std::io::Write as _;
+use std::ffi::{CStr, CString};
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::PermissionsExt;
 use std::rc::Rc;
 
-use crate::builtins::{BUILTIN_REGULAR, BUILTIN_SPECIAL, builtincmd};
+use crate::builtins::{BUILTIN_REGULAR, builtincmd};
 use crate::error::{E_EXEC, Error, INTOFF, INTON};
 use crate::nodes::{Node, funcnode};
-use crate::output::Output;
 
 // ---------------------------------------------------------------------
 // src/exec.h constants
@@ -56,30 +43,61 @@ const _PATH_BSHELL: &[u8] = b"/bin/sh\0";
 // ---------------------------------------------------------------------
 
 // [spec:dash:def:exec.cmdentry.param]
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub union param {
-    pub index: c_int,
-    pub cmd: *const builtincmd,
-    /// A borrowed view of the `Rc<Node>` owned by the command table. The
-    /// evaluator increments the strong count before running the body, so a
-    /// function can still redefine itself without invalidating this pointer.
-    pub func: *const funcnode,
-}
+// The C union is represented by `Command`; its tag and payload cannot
+// disagree in Rust.
 
 // [spec:dash:def:exec.cmdentry]
-#[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct cmdentry {
-    pub cmdtype: c_int,
-    pub u: param,
+    command: Command,
 }
 
+#[derive(Clone)]
 enum Command {
     Unknown,
     Normal(c_int),
     Function(Rc<funcnode>),
-    Builtin(*const builtincmd),
+    Builtin(&'static builtincmd),
+}
+
+impl cmdentry {
+    pub(crate) fn unknown() -> Self {
+        Self { command: Command::Unknown }
+    }
+
+    pub(crate) fn builtin_command(command: &'static builtincmd) -> Self {
+        Self { command: Command::Builtin(command) }
+    }
+
+    pub(crate) fn cmdtype(&self) -> c_int {
+        match self.command {
+            Command::Unknown => CMDUNKNOWN,
+            Command::Normal(_) => CMDNORMAL,
+            Command::Function(_) => CMDFUNCTION,
+            Command::Builtin(_) => CMDBUILTIN,
+        }
+    }
+
+    pub(crate) fn path_index(&self) -> c_int {
+        match self.command {
+            Command::Normal(index) => index,
+            _ => unreachable!("only external commands have PATH indices"),
+        }
+    }
+
+    pub(crate) fn builtin(&self) -> &'static builtincmd {
+        match self.command {
+            Command::Builtin(command) => command,
+            _ => unreachable!("only builtin commands have builtin entries"),
+        }
+    }
+
+    pub(crate) fn function(&self) -> Rc<funcnode> {
+        match &self.command {
+            Command::Function(function) => Rc::clone(function),
+            _ => unreachable!("only shell functions have function bodies"),
+        }
+    }
 }
 
 // [spec:dash:def:exec.tblentry]
@@ -111,7 +129,7 @@ impl tblentry {
         }
     }
 
-    fn builtin(&self) -> *const builtincmd {
+    pub(crate) fn builtin(&self) -> &'static builtincmd {
         match self.command {
             Command::Builtin(cmd) => cmd,
             _ => unreachable!("only builtin entries have builtin pointers"),
@@ -127,20 +145,14 @@ impl tblentry {
     pub(crate) fn path_dependent(&self, builtinloc: c_int) -> bool {
         match self.command {
             Command::Normal(_) => true,
-            Command::Builtin(cmd) => unsafe {
-                ((*cmd).flags & BUILTIN_REGULAR) == 0 && builtinloc > 0
-            },
+            Command::Builtin(cmd) => (cmd.flags & BUILTIN_REGULAR) == 0 && builtinloc > 0,
             _ => false,
         }
     }
 
-    pub(crate) unsafe fn write_to(&self, entry: *mut cmdentry) {
-        (*entry).cmdtype = self.cmdtype();
-        match &self.command {
-            Command::Unknown => (*entry).u.index = 0,
-            Command::Normal(index) => (*entry).u.index = *index,
-            Command::Function(func) => (*entry).u.func = Rc::as_ptr(func),
-            Command::Builtin(cmd) => (*entry).u.cmd = *cmd,
+    pub(crate) fn resolved(&self) -> cmdentry {
+        cmdentry {
+            command: self.command.clone(),
         }
     }
 }
@@ -157,11 +169,8 @@ impl tblentry {
 /// function definitions live here too because dash stores them in the
 /// same hash.
 pub struct CmdTable {
-    /// Command names include their trailing NUL because C-shaped
-    /// consumers still pass the map key straight to `padvance`. `BStr`
-    /// ordering remains ordering by the command's bytes: every key has
-    /// the same trailing terminator.
-    map: BTreeMap<BString, Box<tblentry>>,
+    /// Command names are shell bytes, without an artificial C terminator.
+    map: BTreeMap<BString, tblentry>,
     /// index in path of %builtin, or -1
     builtinloc: c_int,
 }
@@ -188,13 +197,17 @@ impl CmdTable {
 
     /// Every entry, in name order — what `hash` with no operand prints.
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&BString, &tblentry)> {
-        self.map.iter().map(|(name, cmdp)| (name, &**cmdp))
+        self.map.iter()
+    }
+
+    pub(crate) fn get(&self, name: &BStr) -> Option<&tblentry> {
+        self.map.get(name)
+    }
+
+    pub(crate) fn resolved(&self, name: &BStr) -> Option<cmdentry> {
+        self.get(name).map(tblentry::resolved)
     }
 }
-
-pub static mut pathopt: *const c_char = null(); /* set by padvance */
-
-use crate::system::errno;
 
 // ---------------------------------------------------------------------
 
@@ -205,33 +218,34 @@ use crate::system::errno;
 
 // [spec:dash:def:exec.shellexec-fn]
 // [spec:dash:sem:exec.shellexec-fn]
-pub unsafe fn shellexec(
+pub fn shellexec(
     sh: &mut crate::context::Shell,
-    argv: *mut *mut c_char,
-    path: *const c_char,
+    argv: &[&BStr],
+    path: &BStr,
     mut idx: c_int,
 ) -> Result<crate::eval::Flow, crate::error::Error> {
-    let mut cmdname: *mut c_char;
     let e: c_int;
     let exerrno: c_int;
-    let mut lpath: *const c_char = path;
+    let command = argv.first().expect("shellexec needs a command name");
 
     /* The C's `environment()` leaves its array in the stack allocator; ours
      * owns it, so the `Vec` has to outlive every `execve` below. */
     let envv = crate::var::environment(sh);
-    let envp: *mut *mut c_char = envv.as_ptr() as *mut *mut c_char;
-    if CStr::from_ptr(*argv.offset(0)).to_bytes().contains(&b'/') {
-        tryexec(*argv.offset(0), argv, envp);
-        e = errno();
+    let words: Vec<CString> = argv.iter().map(|word| crate::shell::cstring(word)).collect();
+    let arguments: Vec<&CStr> = words.iter().map(|word| word.as_c_str()).collect();
+    if command.contains(&b'/') {
+        e = tryexec(arguments[0], &arguments, &envv);
     } else {
-        let mut se: c_int = libc::ENOENT;
-        while padvance(&mut lpath, *argv.offset(0)) >= 0 {
-            cmdname = padvance_result();
+        let mut se: c_int = nsh_platform::not_found_error_code();
+        let mut cursor = PathCursor::new(path);
+        while let Some(candidate) = padvance(&mut cursor, command) {
             idx -= 1;
-            if idx < 0 && pathopt.is_null() {
-                tryexec(cmdname, argv, envp);
-                if errno() != libc::ENOENT && errno() != libc::ENOTDIR {
-                    se = errno();
+            if idx < 0 && candidate.option.is_none() {
+                let candidate = CStr::from_bytes_with_nul(&candidate.path)
+                    .expect("PATH candidates are terminated");
+                let candidate_error = tryexec(candidate, &arguments, &envv);
+                if !nsh_platform::is_path_not_found_error(candidate_error) {
+                    se = candidate_error;
                 }
             }
         }
@@ -239,20 +253,13 @@ pub unsafe fn shellexec(
     }
 
     /* Map to POSIX errors */
-    match e {
-        libc::ELOOP | libc::ENAMETOOLONG | libc::ENOENT | libc::ENOTDIR => {
-            exerrno = 127;
-        }
-        _ => {
-            exerrno = 126;
-        }
-    }
+    exerrno = nsh_platform::command_exec_failure_status(e);
     sh.status = exerrno;
     /* TRACE(("shellexec failed for %s, errno %d, suppressint %d\n", ...)); */
     let mut message = Vec::new();
-    message.extend_from_slice(CStr::from_ptr(*argv.offset(0)).to_bytes());
+    message.extend_from_slice(command);
     message.extend_from_slice(b": ");
-    message.extend_from_slice(CStr::from_ptr(crate::error::errmsg(e, E_EXEC)).to_bytes());
+    message.extend_from_slice(&crate::error::errmsg(e, E_EXEC));
     /* `exerror(EXEND, msg)`: text *and* control flow, which is why the
      * bridge took the code as a parameter rather than reading it off the
      * value. The text is written here, where dash writes it, and the value
@@ -265,218 +272,155 @@ pub unsafe fn shellexec(
     let e = crate::error::Error::other(sh.eval.errlinno, exerrno, &message);
     drop(sh.report(e));
 
-    /* The one place a `Result` may not be returned. `vforkexec` runs this
-     * in a child that shares the parent's stack, so an `Ok` travelling out
-     * of here would return through frames the parent owns and unwind them
-     * under it. docs/errors-are-values.md 2.5 calls this a hard boundary
-     * rather than a wrinkle, and the ending has to happen at the site.
-     * This is the `_exit` that `exraise` performed for every raise and now
-     * performs for the only one that can reach a vforked child. */
-    if crate::siginbox::signals().vforked() != 0 {
-        crate::shell::flush_coverage();
-        libc::_exit(sh.status);
-    }
-
     Ok(crate::eval::Flow::END)
 }
 
 // [spec:dash:def:exec.tryexec-fn]
 // [spec:dash:sem:exec.tryexec-fn]
-unsafe fn tryexec(mut cmd: *mut c_char, mut argv: *mut *mut c_char, envp: *mut *mut c_char) {
-    let path_bshell: *mut c_char = _PATH_BSHELL.as_ptr() as *mut c_char;
-
-    loop {
-        // repeat:
-        libc::execve(
-            cmd,
-            argv as *const *const c_char,
-            envp as *const *const c_char,
-        );
-        if cmd != path_bshell && errno() == libc::ENOEXEC {
-            /* *argv-- = cmd; */
-            *argv = cmd;
-            argv = argv.offset(-1);
-            /* *argv = cmd = path_bshell; */
-            cmd = path_bshell;
-            *argv = cmd;
-            continue; // goto repeat
-        }
-        break;
+fn tryexec(command: &CStr, arguments: &[&CStr], env: &[CString]) -> c_int {
+    let error = nsh_platform::execute_program(command, &arguments, env);
+    if nsh_platform::is_exec_format_error(&error) && command.to_bytes_with_nul() != _PATH_BSHELL {
+        let shell = CStr::from_bytes_with_nul(_PATH_BSHELL)
+            .expect("the fallback shell path is terminated");
+        let mut shell_arguments = Vec::with_capacity(arguments.len() + 1);
+        shell_arguments.push(shell);
+        shell_arguments.push(command);
+        shell_arguments.extend(arguments.iter().skip(1).copied());
+        return nsh_platform::execute_program(shell, &shell_arguments, env)
+            .raw_os_error()
+            .unwrap_or(0);
     }
+    error.raw_os_error().unwrap_or(0)
 }
 
 // [spec:dash:def:exec.legal-pathopt-fn]
 // [spec:dash:sem:exec.legal-pathopt-fn]
-unsafe fn legal_pathopt(
-    mut opt: *const c_char,
-    term: *const c_char,
-    magic: c_int,
-) -> *const c_char {
-    match magic {
-        0 => {
-            opt = null();
-        }
-
-        1 => {
-            /* GNU `?:` — prefix(opt, "builtin") ?: prefix(opt, "func") */
-            let p = crate::mystring::prefix(opt, b"builtin\0".as_ptr() as *const c_char);
-            opt = if !p.is_null() {
-                p as *const c_char
-            } else {
-                crate::mystring::prefix(opt, b"func\0".as_ptr() as *const c_char) as *const c_char
-            };
-        }
-
-        _ => {
-            /* `strcspn(opt, term)`: the length of the run before the
-             * first byte that is in `term`, which is `find_byteset`
-             * with the miss meaning "all of it". */
-            let rest = CStr::from_ptr(opt).to_bytes();
-            let end = rest
-                .find_byteset(CStr::from_ptr(term).to_bytes())
-                .unwrap_or(rest.len());
-            opt = opt.add(end);
-        }
-    }
-
-    if !opt.is_null() && *opt == b'%' as c_char {
-        opt = opt.add(1);
-    }
-
-    opt
+fn legal_path_option(option: &[u8]) -> bool {
+    option.starts_with(b"builtin") || option.starts_with(b"func")
 }
 
 /*
  * Do a path search.  The variable path (passed by reference) should be
  * set to the start of the path before the first call; padvance will update
  * this value as it proceeds.  Successive calls to padvance will return
- * the possible path expansions in sequence.  If an option (indicated by
- * a percent sign) appears in the path entry then the global variable
- * pathopt will be set to point to it; otherwise pathopt will be set to
- * NULL.
+ * the possible path expansions in sequence. An option (indicated by a
+ * percent sign) is returned with the candidate instead of being published
+ * through process-global scratch state.
  *
  * If magic is 0 then pathopt recognition will be disabled.  If magic is
  * 1 we shall recognise %builtin/%func.  Otherwise we shall accept any
  * pathopt.
  */
 
-// [spec:dash:def:exec.padvance-magic-fn]
-// [spec:dash:sem:exec.padvance-magic-fn]
-pub unsafe fn padvance_magic(path: &mut *const c_char, name: *const c_char, magic: c_int) -> c_int {
-    let mut term: *const c_char = b"%:\0".as_ptr() as *const c_char;
-    let mut lpathopt: *const c_char;
-    let mut p: *const c_char;
-    let mut q: *mut c_char;
-    let mut start: *const c_char;
-    let qlen: size_t;
-    let mut len: size_t;
-
-    if (*path).is_null() {
-        return -1;
-    }
-
-    lpathopt = null();
-    start = *path;
-
-    if *start == b'%' as c_char && {
-        p = legal_pathopt(start.add(1), term, magic);
-        !p.is_null()
-    } {
-        lpathopt = start.add(1);
-        start = p;
-        term = b":\0".as_ptr() as *const c_char;
-    }
-
-    let rest = CStr::from_ptr(start).to_bytes();
-    len = rest
-        .find_byteset(CStr::from_ptr(term).to_bytes())
-        .unwrap_or(rest.len());
-    p = start.add(len);
-
-    if *p == b'%' as c_char {
-        /* `strchrnul(p, ':') - p` is the distance to the next colon or to
-         * the end, which is what a miss returning the length spells. */
-        let rest = CStr::from_ptr(p).to_bytes();
-        let extra: size_t = rest.find_byte(b':').unwrap_or(rest.len());
-
-        if !legal_pathopt(p.add(1), term, magic).is_null() {
-            lpathopt = p.add(1);
-        } else {
-            len += extra;
-        }
-
-        p = p.add(extra);
-    }
-
-    pathopt = lpathopt;
-    *path = if *p == b':' as c_char {
-        p.add(1)
-    } else {
-        null()
-    };
-
-    /* "2" is for '/' and '\0' -- the name's bytes already carry the
-     * second, so what is added here is the separator. */
-    let name_bytes = CStr::from_ptr(name).to_bytes_with_nul();
-    qlen = len + name_bytes.len() + 1;
-    let buf = &mut *addr_of_mut!(pathbuf);
-    buf.clear();
-    buf.reserve(qlen);
-
-    if len != 0 {
-        buf.extend_from_slice(core::slice::from_raw_parts(start as *const u8, len));
-        buf.push(b'/');
-    }
-    q = buf.as_mut_ptr().add(buf.len()) as *mut c_char;
-    /* The name and its terminator go into the reserved tail; `qlen` is
-     * what the C's `growstackto` guaranteed room for, and it is one more
-     * than the bytes written when `len` is zero. */
-    core::ptr::copy_nonoverlapping(name_bytes.as_ptr(), q as *mut u8, name_bytes.len());
-    let n = buf.len() + name_bytes.len();
-    buf.set_len(n);
-
-    qlen as c_int
+/// Stateful walk over the components of one `PATH` value.
+pub struct PathCursor<'a> {
+    remaining: Option<&'a [u8]>,
+    magic: bool,
 }
 
-/// The candidate path [`padvance_magic`] builds.
-///
-/// The C builds it at `stackblock()` and hands the caller the *length* it
-/// reserved room for, so a caller that wants to keep the candidate calls
-/// `stalloc(len)` to take exactly that block. That is why `len` is the
-/// return value and not the string: it is an allocation size, not a
-/// strlen, and it is two larger than the path when the path component is
-/// empty. Callers that kept the candidate now copy it instead.
-static mut pathbuf: BString = BString::new(Vec::new());
+impl<'a> PathCursor<'a> {
+    pub fn new(path: &'a BStr) -> Self {
+        Self {
+            remaining: Some(path.as_bytes()),
+            magic: true,
+        }
+    }
 
-/// The candidate path the last `padvance` built, as a C string.
-pub unsafe fn padvance_result() -> *mut c_char {
-    (*addr_of_mut!(pathbuf)).as_mut_ptr() as *mut c_char
+    pub fn literal(path: &'a BStr) -> Self {
+        Self {
+            remaining: Some(path.as_bytes()),
+            magic: false,
+        }
+    }
+
+    // [spec:dash:def:exec.padvance-magic-fn]
+    // [spec:dash:sem:exec.padvance-magic-fn]
+    pub fn advance(&mut self, name: &BStr) -> Option<PathAdvance> {
+        let rest = self.remaining.take()?;
+        let (component, remaining) = match rest.find_byte(b':') {
+            Some(colon) => (&rest[..colon], Some(&rest[colon + 1..])),
+            None => (rest, None),
+        };
+        self.remaining = remaining;
+
+        let mut directory = component;
+        let mut option = None;
+        if self.magic {
+            if let Some(stripped) = component.strip_prefix(b"%") {
+                if legal_path_option(stripped) {
+                    option = Some(BString::from(stripped));
+                    directory = if stripped.starts_with(b"builtin") {
+                        &stripped[b"builtin".len()..]
+                    } else {
+                        &stripped[b"func".len()..]
+                    };
+                }
+            } else if let Some(percent) = component.find_byte(b'%') {
+                let candidate = &component[percent + 1..];
+                if legal_path_option(candidate) {
+                    option = Some(BString::from(candidate));
+                    directory = &component[..percent];
+                }
+            }
+        }
+
+        /* "2" is the possible slash and terminator. An empty component
+         * keeps the spare slash byte in its allocation, as dash does. */
+        let allocation_len = directory.len() + name.len() + 2;
+        let mut path = BString::new(Vec::with_capacity(allocation_len));
+        if !directory.is_empty() {
+            path.extend_from_slice(directory);
+            path.push(b'/');
+        }
+        path.extend_from_slice(name);
+        path.push(0);
+
+        Some(PathAdvance {
+            path,
+            option,
+            allocation_len,
+        })
+    }
+}
+
+/// One independently owned result from a PATH walk.
+pub struct PathAdvance {
+    /// Candidate path including its trailing NUL.
+    pub path: BString,
+    /// `%option`, if the PATH element carried one.
+    pub option: Option<BString>,
+    /// The allocation size dash returned, including its spare byte for an
+    /// empty PATH component.
+    pub allocation_len: usize,
 }
 
 // [spec:dash:def:exec.padvance-fn]
 // [spec:dash:sem:exec.padvance-fn]
 #[inline]
-pub unsafe fn padvance(path: &mut *const c_char, name: *const c_char) -> c_int {
-    padvance_magic(path, name, 1)
+pub fn padvance(cursor: &mut PathCursor<'_>, name: &BStr) -> Option<PathAdvance> {
+    cursor.advance(name)
 }
 
 /*** Command hashing code ***/
 
 // [spec:dash:def:exec.test-exec-fn]
 // [spec:dash:sem:exec.test-exec-fn]
-unsafe fn test_exec(fullname: *const c_char, statb: *mut libc::stat64) -> c_int {
-    if ((*statb).st_mode & libc::S_IFMT) != libc::S_IFREG {
-        return 0;
+fn test_exec(fullname: &std::ffi::OsStr, metadata: &std::fs::Metadata) -> bool {
+    if !metadata.is_file() {
+        return false;
     }
 
-    if ((*statb).st_mode & 0o111) != 0o111 &&
+    if (metadata.permissions().mode() & 0o111) != 0o111 &&
         /* HAVE_FACCESSAT; the non-faccessat build uses test_access(statb, X_OK) */
-        test_file_access(fullname, libc::X_OK) == 0
+        !crate::builtins::test::test_file_access(
+            fullname.as_bytes().as_bstr(),
+            nsh_platform::AccessMode::EXEC_OK,
+        )
     {
-        return 0;
+        return false;
     }
 
-    1
+    true
 }
 
 /*
@@ -486,239 +430,177 @@ unsafe fn test_exec(fullname: *const c_char, statb: *mut libc::stat64) -> c_int 
 
 // [spec:dash:def:exec.find-command-fn]
 // [spec:dash:sem:exec.find-command-fn]
-pub unsafe fn find_command(
+pub fn find_command(
     sh: &mut crate::context::Shell,
-    name: *mut c_char,
-    entry: *mut cmdentry,
+    name: &BStr,
+    entry: &mut cmdentry,
     mut act: c_int,
-    path: *const c_char,
+    path: &BStr,
 ) -> Result<crate::eval::Flow, Error> {
-    let mut cmdp: *mut tblentry;
-    let mut idx: c_int;
-    let mut prev: c_int;
-    let mut fullname: *mut c_char;
-    let mut statb: libc::stat64 = core::mem::zeroed();
-    let mut e: c_int;
-    let mut updatetbl: c_int;
-    let mut bcmd: *const builtincmd;
-    let mut len: c_int;
-    let mut lpath: *const c_char = path;
-
     /* If name contains a slash, don't use PATH or hash table */
-    if CStr::from_ptr(name).to_bytes().contains(&b'/') {
-        (*entry).u.index = -1;
-        'absdone: {
-            if (act & DO_ABS) != 0 {
-                'absfail: {
-                    while libc::stat64(name, &mut statb) < 0 {
-                        /* SYSV: retry on EINTR */
-                        break 'absfail;
-                    }
-                    if test_exec(name, &mut statb) == 0 {
-                        break 'absfail;
-                    }
-                    break 'absdone;
-                }
-                // absfail:
-                (*entry).cmdtype = CMDUNKNOWN;
+    if name.contains(&b'/') {
+        if (act & DO_ABS) != 0 {
+            let fullname = std::ffi::OsStr::from_bytes(name);
+            let executable = std::fs::metadata(fullname)
+                .is_ok_and(|metadata| test_exec(fullname, &metadata));
+            if !executable {
+                *entry = cmdentry::unknown();
                 return Ok(crate::eval::Flow::Done(0));
             }
         }
-        (*entry).cmdtype = CMDNORMAL;
+        entry.command = Command::Normal(-1);
         return Ok(crate::eval::Flow::Done(0));
     }
 
-    updatetbl = (path == crate::var::pathval(sh)) as c_int;
-    if updatetbl == 0 {
+    let configured_path = crate::var::pathval(sh);
+    let mut update_table = path.as_bytes() == configured_path.as_slice();
+    if !update_table {
         act |= DO_ALTPATH;
     }
 
-    bcmd = null();
+    let mut cached = sh
+        .commands
+        .map
+        .get(name)
+        .map(|stored| (stored.command.clone(), stored.rehash));
 
-    'success: {
-        'builtin_success: {
-            'fail: {
-                /* If name is in the table, check answer will be ok */
-                cmdp = cmdlookup(sh, name, 0);
-                if !cmdp.is_null() {
-                    let bit: c_int;
-
-                    match (*cmdp).cmdtype() {
-                        CMDFUNCTION => {
-                            bit = DO_NOFUNC;
-                        }
-                        CMDBUILTIN => {
-                            bit = if ((*(*cmdp).builtin()).flags & BUILTIN_REGULAR) != 0 {
-                                0
-                            } else {
-                                DO_REGBLTIN
-                            };
-                        }
-                        /* `default:` (DEBUG: abort()) falls through to CMDNORMAL */
-                        _ => {
-                            bit = DO_ALTPATH | DO_REGBLTIN;
-                        }
-                    }
-                    if (act & bit) != 0 {
-                        if (act & bit & DO_REGBLTIN) != 0 {
-                            break 'fail;
-                        }
-
-                        updatetbl = 0;
-                        cmdp = null_mut();
-                    } else if !(*cmdp).rehash {
-                        /* if not invalidated by cd, we're done */
-                        break 'success;
-                    }
-                }
-
-                /* If %builtin not in path, check for builtin next */
-                bcmd = find_builtin(name);
-                if !bcmd.is_null()
-                    && ((((*bcmd).flags & BUILTIN_REGULAR) as c_int)
-                        | (act & DO_ALTPATH)
-                        | ((sh.commands.builtinloc <= 0) as c_int))
-                        != 0
-                {
-                    break 'builtin_success;
-                }
-
-                if (act & DO_REGBLTIN) != 0 {
-                    break 'fail;
-                }
-
-                /* We have to search path. */
-                prev = -1; /* where to start */
-                if !cmdp.is_null() && (*cmdp).rehash {
-                    /* doing a rehash */
-                    if (*cmdp).cmdtype() == CMDBUILTIN {
-                        prev = sh.commands.builtinloc;
-                    } else {
-                        prev = (*cmdp).path_index();
-                    }
-                }
-
-                e = libc::ENOENT;
-                idx = -1;
-                'padvloop: loop {
-                    // loop:
-                    len = padvance(&mut lpath, name);
-                    if len < 0 {
-                        break 'padvloop;
-                    }
-                    let lpathopt: *const c_char = pathopt;
-
-                    fullname = padvance_result();
-                    idx += 1;
-                    if !lpathopt.is_null() {
-                        if *lpathopt == b'b' as c_char {
-                            if !bcmd.is_null() {
-                                break 'builtin_success;
-                            }
-                            continue 'padvloop;
-                        } else if (act & DO_NOFUNC) == 0 {
-                            /* handled below */
-                        } else {
-                            /* ignore unimplemented options */
-                            continue 'padvloop;
-                        }
-                    }
-                    /* if rehash, don't redo absolute path names */
-                    if *fullname.offset(0) == b'/' as c_char && idx <= prev {
-                        if idx < prev {
-                            continue 'padvloop;
-                        }
-                        /* TRACE(("searchexec \"%s\": no change\n", name)); */
-                        break 'success;
-                    }
-                    loop {
-                        if libc::stat64(fullname, &mut statb) >= 0 {
-                            break;
-                        }
-                        /* SYSV: retry on EINTR */
-                        if errno() != libc::ENOENT && errno() != libc::ENOTDIR {
-                            e = errno();
-                        }
-                        continue 'padvloop; // goto loop
-                    }
-                    if !lpathopt.is_null() {
-                        /* this is a %func directory */
-                        /* `stalloc(len)` took the candidate out of the way
-                         * because `readcmdfile` runs shell code that can
-                         * search the path again; the copy is what keeps it,
-                         * and `stunalloc` is the copy going out of scope. */
-                        let kept = (*addr_of!(pathbuf)).clone();
-                        let fullname = kept.as_ptr() as *mut c_char;
-                        /* A `%func` PATH entry is a file of shell code, so
-                         * it can `exit`; the C's longjmp took that straight
-                         * past `find_command` and its callers, and this
-                         * returns it through them instead. It is why
-                         * `find_command` carries a `Flow` at all. */
-                        match crate::shellmain::readcmdfile(sh, fullname)? {
-                            crate::eval::Flow::Done(_) => {}
-                            exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
-                        }
-                        cmdp = cmdlookup(sh, name, 0);
-                        if cmdp.is_null() || (*cmdp).cmdtype() != CMDFUNCTION {
-                            let mut message = Vec::new();
-                            message.extend_from_slice(CStr::from_ptr(name).to_bytes());
-                            message.extend_from_slice(b" not defined in ");
-                            message.extend_from_slice(CStr::from_ptr(fullname).to_bytes());
-                            return Err(sh.sh_error_value(&message));
-                        }
-                        break 'success;
-                    }
-                    e = libc::EACCES; /* if we fail, this will be the error */
-                    if test_exec(fullname, &mut statb) == 0 {
-                        continue 'padvloop;
-                    }
-                    /* TRACE(("searchexec \"%s\" returns \"%s\"\n", name, fullname)); */
-                    if updatetbl == 0 {
-                        (*entry).cmdtype = CMDNORMAL;
-                        (*entry).u.index = idx;
-                        return Ok(crate::eval::Flow::Done(0));
-                    }
-                    INTOFF();
-                    cmdp = cmdlookup(sh, name, 1);
-                    (*cmdp).command = Command::Normal(idx);
-                    INTON();
-                    break 'success;
-                }
-
-                /* We failed.  If there was an entry for this command, delete it */
-                if !cmdp.is_null() && updatetbl != 0 {
-                    delete_cmd_entry(sh, name);
-                }
-                if (act & DO_ERR) != 0 {
-                    let mut message = Vec::new();
-                    message.extend_from_slice(CStr::from_ptr(name).to_bytes());
-                    message.extend_from_slice(b": ");
-                    message.extend_from_slice(
-                        CStr::from_ptr(crate::error::errmsg(e, E_EXEC)).to_bytes(),
-                    );
-                    sh.sh_warnx(&message);
-                }
-                // fall through into fail:
+    if let Some((command, rehash)) = &cached {
+        let bit = match command {
+            Command::Function(_) => DO_NOFUNC,
+            Command::Builtin(command) => {
+                if (command.flags & BUILTIN_REGULAR) != 0 { 0 } else { DO_REGBLTIN }
             }
-            // fail:
-            (*entry).cmdtype = CMDUNKNOWN;
+            _ => DO_ALTPATH | DO_REGBLTIN,
+        };
+        if (act & bit) != 0 {
+            if (act & bit & DO_REGBLTIN) != 0 {
+                *entry = cmdentry::unknown();
+                return Ok(crate::eval::Flow::Done(0));
+            }
+            update_table = false;
+            cached = None;
+        } else if !rehash {
+            entry.command = command.clone();
             return Ok(crate::eval::Flow::Done(0));
         }
-        // builtin_success:
-        if updatetbl == 0 {
-            (*entry).cmdtype = CMDBUILTIN;
-            (*entry).u.cmd = bcmd;
-            return Ok(crate::eval::Flow::Done(0));
-        }
-        INTOFF();
-        cmdp = cmdlookup(sh, name, 1);
-        (*cmdp).command = Command::Builtin(bcmd);
-        INTON();
-        // fall through into success:
     }
-    // success:
-    (*cmdp).rehash = false;
-    (*cmdp).write_to(entry);
+
+    let builtin_command = builtin(name);
+    if let Some(command) = builtin_command
+        && ((command.flags & BUILTIN_REGULAR) != 0
+            || (act & DO_ALTPATH) != 0
+            || sh.commands.builtinloc <= 0)
+    {
+        if update_table {
+            addcmdentry(sh, name, Command::Builtin(command));
+        }
+        entry.command = Command::Builtin(command);
+        return Ok(crate::eval::Flow::Done(0));
+    }
+
+    if (act & DO_REGBLTIN) != 0 {
+        *entry = cmdentry::unknown();
+        return Ok(crate::eval::Flow::Done(0));
+    }
+
+    let previous = cached.as_ref().filter(|(_, rehash)| *rehash).map_or(-1, |(command, _)| {
+        match command {
+            Command::Builtin(_) => sh.commands.builtinloc,
+            Command::Normal(index) => *index,
+            _ => -1,
+        }
+    });
+    let mut error = nsh_platform::not_found_error_code();
+    let mut index = -1;
+    let mut cursor = PathCursor::new(path);
+    while let Some(candidate) = padvance(&mut cursor, name) {
+        index += 1;
+        if let Some(option) = &candidate.option {
+            if option.first() == Some(&b'b') {
+                if let Some(command) = builtin_command {
+                    if update_table {
+                        addcmdentry(sh, name, Command::Builtin(command));
+                    }
+                    entry.command = Command::Builtin(command);
+                    return Ok(crate::eval::Flow::Done(0));
+                }
+                continue;
+            }
+            if (act & DO_NOFUNC) != 0 {
+                continue;
+            }
+        }
+
+        let fullname = crate::mystring::cstr_prefix(&candidate.path).to_owned();
+        if fullname.first() == Some(&b'/') && index <= previous {
+            if index < previous {
+                continue;
+            }
+            if let Some((command, _)) = cached {
+                if let Some(stored) = sh.commands.map.get_mut(name) {
+                    stored.rehash = false;
+                }
+                entry.command = command;
+                return Ok(crate::eval::Flow::Done(0));
+            }
+        }
+
+        let fullname_os = std::ffi::OsStr::from_bytes(&fullname);
+        let metadata = match std::fs::metadata(fullname_os) {
+            Ok(metadata) => metadata,
+            Err(io_error) => {
+                if let Some(code) = io_error.raw_os_error()
+                    && !nsh_platform::is_path_not_found_error(code)
+                {
+                    error = code;
+                }
+                continue;
+            }
+        };
+
+        if candidate.option.is_some() {
+            let flow = crate::shellmain::readcmdfile(sh, BStr::new(fullname.as_slice()))?;
+            if let exit @ crate::eval::Flow::Exit { .. } = flow {
+                return Ok(exit);
+            }
+            let Some(stored) = sh.commands.map.get_mut(name) else {
+                let mut message = name.to_vec();
+                message.extend_from_slice(b" not defined in ");
+                message.extend_from_slice(&fullname);
+                return Err(sh.sh_error_value(&message));
+            };
+            if stored.cmdtype() != CMDFUNCTION {
+                let mut message = name.to_vec();
+                message.extend_from_slice(b" not defined in ");
+                message.extend_from_slice(&fullname);
+                return Err(sh.sh_error_value(&message));
+            }
+            stored.rehash = false;
+            *entry = stored.resolved();
+            return Ok(crate::eval::Flow::Done(0));
+        }
+
+        error = nsh_platform::permission_denied_error_code();
+        if !test_exec(fullname_os, &metadata) {
+            continue;
+        }
+        if update_table {
+            addcmdentry(sh, name, Command::Normal(index));
+        }
+        entry.command = Command::Normal(index);
+        return Ok(crate::eval::Flow::Done(0));
+    }
+
+    if cached.is_some() && update_table {
+        delete_cmd_entry(sh, name);
+    }
+    if (act & DO_ERR) != 0 {
+        let mut message = name.to_vec();
+        message.extend_from_slice(b": ");
+        message.extend_from_slice(&crate::error::errmsg(error, E_EXEC));
+        sh.sh_warnx(&message);
+    }
+    *entry = cmdentry::unknown();
     Ok(crate::eval::Flow::Done(0))
 }
 
@@ -728,11 +610,11 @@ pub unsafe fn find_command(
 
 // [spec:dash:def:exec.find-builtin-fn]
 // [spec:dash:sem:exec.find-builtin-fn]
-pub unsafe fn find_builtin(name: *const c_char) -> *const builtincmd {
-    let name = BStr::new(CStr::from_ptr(name).to_bytes());
+pub fn builtin(name: &BStr) -> Option<&'static builtincmd> {
     crate::builtins::builtincmd
         .binary_search_by(|cmd| BStr::new(cmd.name.to_bytes()).cmp(name))
-        .map_or(null(), |index| &crate::builtins::builtincmd[index])
+        .ok()
+        .map(|index| &crate::builtins::builtincmd[index])
 }
 
 /*
@@ -742,7 +624,7 @@ pub unsafe fn find_builtin(name: *const c_char) -> *const builtincmd {
 
 // [spec:dash:def:exec.hashcd-fn]
 // [spec:dash:sem:exec.hashcd-fn]
-pub unsafe fn hashcd(sh: &mut crate::context::Shell) {
+pub fn hashcd(sh: &mut crate::context::Shell) {
     /* Copied out for the same reason `clearcmdentry` copies it: the
      * walk below holds the table borrowed. */
     let builtinloc = sh.commands.builtinloc;
@@ -762,28 +644,11 @@ pub unsafe fn hashcd(sh: &mut crate::context::Shell) {
 
 // [spec:dash:def:exec.changepath-fn]
 // [spec:dash:sem:exec.changepath-fn]
-pub unsafe fn changepath(sh: &mut crate::context::Shell, newval: *const c_char) {
-    let mut new: *const c_char;
-    let mut idx: c_int;
-    let mut bltin: c_int;
-
-    new = newval;
-    idx = 0;
-    bltin = -1;
-    loop {
-        if *new == b'%' as c_char
-            && !crate::mystring::prefix(new.add(1), b"builtin\0".as_ptr() as *const c_char)
-                .is_null()
-        {
-            bltin = idx;
-            break;
-        }
-        match CStr::from_ptr(new).to_bytes().find_byte(b':') {
-            Some(at) => new = new.add(at + 1),
-            None => break,
-        }
-        idx += 1;
-    }
+pub fn changepath(sh: &mut crate::context::Shell, newval: &BStr) {
+    let bltin = newval
+        .split(|&byte| byte == b':')
+        .position(|component| component.starts_with(b"%builtin"))
+        .map_or(-1, |index| index as c_int);
     sh.commands.builtinloc = bltin;
     clearcmdentry(sh);
 }
@@ -795,11 +660,11 @@ pub unsafe fn changepath(sh: &mut crate::context::Shell, newval: *const c_char) 
 
 // [spec:dash:def:exec.clearcmdentry-fn]
 // [spec:dash:sem:exec.clearcmdentry-fn]
-pub(crate) unsafe fn clearcmdentry(sh: &mut crate::context::Shell) {
-    INTOFF();
+pub(crate) fn clearcmdentry(sh: &mut crate::context::Shell) {
+    INTOFF(sh);
     let builtinloc = sh.commands.builtinloc;
     sh.commands.map.retain(|_, cmdp| !cmdp.path_dependent(builtinloc));
-    INTON();
+    INTON(sh);
 }
 
 /*
@@ -810,19 +675,20 @@ pub(crate) unsafe fn clearcmdentry(sh: &mut crate::context::Shell) {
 
 // [spec:dash:def:exec.cmdlookup-fn]
 // [spec:dash:sem:exec.cmdlookup-fn]
-pub(crate) unsafe fn cmdlookup(sh: &mut crate::context::Shell, name: *const c_char, add: c_int) -> *mut tblentry {
-    let name = BStr::new(CStr::from_ptr(name).to_bytes_with_nul());
-    if add != 0 {
-        &mut **sh.commands.map.entry(name.to_owned()).or_insert_with(|| {
-            Box::new(tblentry {
+pub(crate) fn cmdlookup<'a>(
+    sh: &'a mut crate::context::Shell,
+    name: &BStr,
+    add: bool,
+) -> Option<&'a mut tblentry> {
+    if add {
+        Some(sh.commands.map.entry(name.to_owned()).or_insert_with(|| {
+            tblentry {
                 command: Command::Unknown,
                 rehash: false,
-            })
-        })
+            }
+        }))
     } else {
-        sh.commands.map
-            .get_mut(name)
-            .map_or(null_mut(), |cmdp| &mut **cmdp)
+        sh.commands.map.get_mut(name)
     }
 }
 
@@ -832,13 +698,10 @@ pub(crate) unsafe fn cmdlookup(sh: &mut crate::context::Shell, name: *const c_ch
 
 // [spec:dash:def:exec.delete-cmd-entry-fn]
 // [spec:dash:sem:exec.delete-cmd-entry-fn]
-pub(crate) unsafe fn delete_cmd_entry(sh: &mut crate::context::Shell, name: *const c_char) {
-    INTOFF();
-    /* Own the lookup key before mutating the map. This also makes deletion
-     * sound if a future caller passes a pointer into the stored key itself. */
-    let name = BStr::new(CStr::from_ptr(name).to_bytes_with_nul()).to_owned();
-    sh.commands.map.remove(BStr::new(name.as_slice()));
-    INTON();
+pub(crate) fn delete_cmd_entry(sh: &mut crate::context::Shell, name: &BStr) {
+    INTOFF(sh);
+    sh.commands.map.remove(name);
+    INTON(sh);
 }
 
 // [spec:dash:def:exec.getcmdentry-fn]
@@ -851,15 +714,8 @@ pub(crate) unsafe fn delete_cmd_entry(sh: &mut crate::context::Shell, name: *con
 // unsatisfiable `#ifdef notdef` guard, and the body is the literal
 // translation of the dead C.
 #[cfg(any())]
-pub unsafe fn getcmdentry(name: *mut c_char, entry: *mut cmdentry) {
-    let cmdp: *mut tblentry = cmdlookup(sh, name, 0);
-
-    if !cmdp.is_null() {
-        (*cmdp).write_to(entry);
-    } else {
-        (*entry).cmdtype = CMDUNKNOWN;
-        (*entry).u.index = 0;
-    }
+pub fn getcmdentry(sh: &crate::context::Shell, name: &BStr) -> cmdentry {
+    sh.commands.resolved(name).unwrap_or_else(cmdentry::unknown)
 }
 
 /*
@@ -869,12 +725,10 @@ pub unsafe fn getcmdentry(name: *mut c_char, entry: *mut cmdentry) {
 
 // [spec:dash:def:exec.addcmdentry-fn]
 // [spec:dash:sem:exec.addcmdentry-fn]
-unsafe fn addcmdentry(sh: &mut crate::context::Shell, name: *mut c_char, command: Command) {
-    let cmdp: *mut tblentry;
-
-    cmdp = cmdlookup(sh, name, 1);
-    (*cmdp).command = command;
-    (*cmdp).rehash = false;
+fn addcmdentry(sh: &mut crate::context::Shell, name: &BStr, command: Command) {
+    let cmdp = cmdlookup(sh, name, true).expect("adding returns an entry");
+    cmdp.command = command;
+    cmdp.rehash = false;
 }
 
 /*
@@ -883,13 +737,14 @@ unsafe fn addcmdentry(sh: &mut crate::context::Shell, name: *mut c_char, command
 
 // [spec:dash:def:exec.defun-fn]
 // [spec:dash:sem:exec.defun-fn]
-pub unsafe fn defun(sh: &mut crate::context::Shell, func: &Node) {
-    INTOFF();
-    addcmdentry(sh, 
-        func.ndefun().text.as_ptr(),
+pub fn defun(sh: &mut crate::context::Shell, func: &Node) {
+    INTOFF(sh);
+    addcmdentry(
+        sh,
+        func.ndefun().text.as_bstr(),
         Command::Function(Rc::new(func.clone())),
     );
-    INTON();
+    INTON(sh);
 }
 
 /*
@@ -898,11 +753,8 @@ pub unsafe fn defun(sh: &mut crate::context::Shell, func: &Node) {
 
 // [spec:dash:def:exec.unsetfunc-fn]
 // [spec:dash:sem:exec.unsetfunc-fn]
-pub unsafe fn unsetfunc(sh: &mut crate::context::Shell, name: *const c_char) {
-    let cmdp: *mut tblentry;
-
-    cmdp = cmdlookup(sh, name, 0);
-    if !cmdp.is_null() && (*cmdp).cmdtype() == CMDFUNCTION {
+pub fn unsetfunc(sh: &mut crate::context::Shell, name: &BStr) {
+    if cmdlookup(sh, name, false).is_some_and(|cmdp| cmdp.cmdtype() == CMDFUNCTION) {
         delete_cmd_entry(sh, name);
     }
 }
@@ -910,29 +762,6 @@ pub unsafe fn unsetfunc(sh: &mut crate::context::Shell, name: *const c_char) {
 /*
  * Locate and print what a word is...
  */
-
-// ---------------------------------------------------------------------
-// src/exec.h declarations whose definitions live in src/bltin/test.c.
-//
-// The manifest attributes these two symbols to `src/exec.h` (the
-// declaration site), while the bodies are owned by the `test.*` rules
-// in `src/bltin/test.c`. Rust has no separate declaration form, so the
-// `exec.*` annotation is carried on a forwarding wrapper.
-// ---------------------------------------------------------------------
-
-// [spec:dash:def:exec.test-file-access-fn]
-// [spec:dash:sem:exec.test-file-access-fn]
-#[inline]
-pub unsafe fn test_file_access(path: *const c_char, mode: c_int) -> c_int {
-    crate::builtins::test::test_file_access(path, mode)
-}
-
-// [spec:dash:def:exec.test-access-fn]
-// [spec:dash:sem:exec.test-access-fn]
-#[inline]
-pub unsafe fn test_access(sp: *const libc::stat64, stmode: c_int) -> c_int {
-    crate::builtins::test::test_access(sp, stmode)
-}
 
 #[cfg(test)]
 mod tests {
@@ -946,19 +775,17 @@ mod tests {
     #[test]
     fn changepath_files_the_builtin_slot() {
         let _g = crate::testutil::lock();
-        unsafe {
-            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-            let sh = &mut owned;
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let sh = &mut owned;
 
-            changepath(sh, c"/bin:%builtin:/usr/bin".as_ptr());
-            assert_eq!(sh.commands.builtinloc, 1);
+        changepath(sh, BStr::new(b"/bin:%builtin:/usr/bin"));
+        assert_eq!(sh.commands.builtinloc, 1);
 
-            changepath(sh, c"%builtin:/bin".as_ptr());
-            assert_eq!(sh.commands.builtinloc, 0);
+        changepath(sh, BStr::new(b"%builtin:/bin"));
+        assert_eq!(sh.commands.builtinloc, 0);
 
-            changepath(sh, c"/bin:/usr/bin".as_ptr());
-            assert_eq!(sh.commands.builtinloc, -1, "no %builtin is -1, not 0");
-        }
+        changepath(sh, BStr::new(b"/bin:/usr/bin"));
+        assert_eq!(sh.commands.builtinloc, -1, "no %builtin is -1, not 0");
     }
 
     /// What `clearcmdentry` keeps, which is the predicate the walk runs
@@ -971,52 +798,37 @@ mod tests {
     #[test]
     fn clearing_drops_only_path_dependent_entries() {
         let _g = crate::testutil::lock();
-        unsafe {
-            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-            let sh = &mut owned;
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let sh = &mut owned;
 
-            let external = c"Texternal";
-            let unknown = c"Tunknown";
-            addcmdentry(sh, external.as_ptr() as *mut c_char, Command::Normal(0));
-            cmdlookup(sh, unknown.as_ptr(), 1);
+        let external = BStr::new(b"Texternal");
+        let unknown = BStr::new(b"Tunknown");
+        addcmdentry(sh, external, Command::Normal(0));
+        cmdlookup(sh, unknown, true);
 
-            /* The lookup is hoisted because writing it inline is the
-             * very borrow this commit exists to avoid -- `cmdlookup`
-             * takes `&mut sh` while `path_dependent` holds `&sh`. A raw
-             * pointer parked in a local is the way through, here and at
-             * the call site in `hashcmd`. */
-            let e = cmdlookup(sh, external.as_ptr(), 0);
-            assert!(sh.commands.path_dependent(&*e));
-            let u = cmdlookup(sh, unknown.as_ptr(), 0);
-            assert!(!sh.commands.path_dependent(&*u));
+        let e = sh.commands.get(external).expect("external entry");
+        assert!(sh.commands.path_dependent(e));
+        let u = sh.commands.get(unknown).expect("unknown entry");
+        assert!(!sh.commands.path_dependent(u));
 
-            clearcmdentry(sh);
+        clearcmdentry(sh);
 
-            assert!(
-                cmdlookup(sh, external.as_ptr(), 0).is_null(),
-                "an external command does not survive a PATH change"
-            );
-            assert!(
-                !cmdlookup(sh, unknown.as_ptr(), 0).is_null(),
-                "an entry naming nothing has nothing to invalidate"
-            );
-        }
+        assert!(sh.commands.get(external).is_none(), "an external command does not survive a PATH change");
+        assert!(sh.commands.get(unknown).is_some(), "an entry naming nothing has nothing to invalidate");
     }
 
     // [spec:dash:sem:exec.find-builtin-fn/test]
     #[test]
     fn generated_builtin_lookup_round_trips() {
-        unsafe {
-            for expected in &crate::builtins::builtincmd {
-                assert!(core::ptr::eq(
-                    find_builtin(expected.name.as_ptr()),
-                    expected,
-                ));
-            }
+        for expected in &crate::builtins::builtincmd {
+            assert!(core::ptr::eq(
+                builtin(BStr::new(expected.name.to_bytes())).expect("generated builtin"),
+                expected,
+            ));
+        }
 
-            for absent in [c"", c"/", c"alia", c"aliasx", c"waitx", c"zz"] {
-                assert!(find_builtin(absent.as_ptr()).is_null());
-            }
+        for absent in [b"" as &[u8], b"/", b"alia", b"aliasx", b"waitx", b"zz"] {
+            assert!(builtin(BStr::new(absent)).is_none());
         }
     }
 
@@ -1026,15 +838,10 @@ mod tests {
     /// `[dec:nsh:printf-is-parsed-not-interpreted]`.
     #[test]
     fn printf_is_a_builtin() {
-        unsafe {
-            let found = find_builtin(c"printf".as_ptr());
-            assert!(!found.is_null());
-            assert!(core::ptr::eq(found, crate::builtins::PRINTFCMD));
-        }
+        let found = builtin(BStr::new(b"printf")).expect("printf builtin");
+        assert!(core::ptr::eq(found, crate::builtins::PRINTFCMD));
         /* `echo` shares printf.c with it and is the neighbouring row. */
-        unsafe {
-            assert!(!find_builtin(c"echo".as_ptr()).is_null());
-        }
+        assert!(builtin(BStr::new(b"echo")).is_some());
     }
 
     /// The table is binary-searched, so its order is load-bearing —

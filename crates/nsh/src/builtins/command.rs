@@ -11,20 +11,18 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use core::ptr::null;
-use libc::{c_char, c_int};
+use core::ffi::c_int;
 
 use crate::builtins::r#type::describe_command;
 use crate::eval::Flow;
-use crate::options::Options;
 
 // [spec:dash:def:exec.commandcmd-fn]
 // [spec:dash:sem:exec.commandcmd-fn]
-pub unsafe fn commandcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn commandcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     const VERIFY_BRIEF: c_int = 1;
     const VERIFY_VERBOSE: c_int = 2;
     let mut verify: c_int = 0;
-    let mut path: *const c_char = null();
+    let mut use_default_path = false;
 
     let mut opts = crate::options::Options::new(args);
     while let Some(c) = opts.next(sh, b"pvV")? {
@@ -34,18 +32,17 @@ pub unsafe fn commandcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> 
             verify |= VERIFY_BRIEF;
         } else {
             /* DEBUG: `else if (c != 'p') abort();` */
-            path = crate::var::defpath();
+            use_default_path = true;
         }
     }
 
     if verify != 0 {
         if let Some(cmd) = opts.operands().first() {
-            let cmd = crate::shell::cstring(cmd);
             return describe_command(
                 sh,
                 crate::output::Dest::Stdout,
-                cmd.as_ptr() as *mut c_char,
-                path,
+                cmd,
+                use_default_path.then(crate::var::defpath),
                 verify - VERIFY_BRIEF,
             );
         }

@@ -10,8 +10,7 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString};
-use libc::{c_char, c_int};
-use std::ffi::CStr;
+use core::ffi::c_int;
 use std::io::Write;
 
 use crate::error::{INTOFF, INTON};
@@ -21,7 +20,7 @@ use crate::trap::{NSIG, cbytes, clear_traps, decode_signal, decode_signum, setsi
 
 // [spec:dash:def:trap.trapcmd-fn]
 // [spec:dash:sem:trap.trapcmd-fn]
-pub unsafe fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut signo: c_int;
 
     let mut opts = Options::new(args);
@@ -32,14 +31,11 @@ pub unsafe fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         while signo < NSIG as c_int {
             if let Some(t) = sh.traps.action(signo as usize) {
                 let t = cbytes(t);
-                let quoted = crate::mystring::single_quote(t.as_ptr() as *const c_char);
+                let quoted = crate::mystring::single_quote(BStr::new(&t));
                 let mut line = b"trap -- ".to_vec();
-                line.extend_from_slice(CStr::from_ptr(quoted).to_bytes());
+                line.extend_from_slice(&quoted);
                 line.push(b' ');
-                line.extend_from_slice(
-                    CStr::from_ptr(crate::signames::signal_names[signo as usize].as_ptr())
-                        .to_bytes(),
-                );
+                line.extend_from_slice(crate::signames::signal_names[signo as usize].to_bytes());
                 line.push(b'\n');
                 let _ = sh.io.stdout().write_all(&line);
             }
@@ -52,11 +48,11 @@ pub unsafe fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
     /* `trap SIG...` resets, and `trap ACTION SIG...` sets: the first word
      * is the action unless it is itself a signal, or the only word. */
-    let first = crate::shell::cstring(ap[0]);
-    let (mut action, signals) = if ap.len() < 2 || decode_signum(first.as_ptr()) >= 0 {
+    let first = ap[0];
+    let (mut action, signals) = if ap.len() < 2 || decode_signum(first) >= 0 {
         (None, ap)
     } else {
-        (Some(first), &ap[1..])
+        (Some(BString::from(first)), &ap[1..])
     };
     /* One guard for the whole command, which is the recorded granularity:
      * `trap 'act' INT TERM HUP` blocks once, not three times. It sits
@@ -65,29 +61,28 @@ pub unsafe fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
      * is this loop rather than that bracket. */
     let blocked = crate::siginbox::SignalsBlocked::new();
     for word in signals {
-        let word = crate::shell::cstring(word);
-        signo = decode_signal(word.as_ptr(), 0);
+        signo = decode_signal(word, 0);
         if signo < 0 {
             let mut message = b"trap: ".to_vec();
-            message.extend_from_slice(word.as_bytes());
+            message.extend_from_slice(word);
             message.extend_from_slice(b": bad trap\n");
             let _ = sh.io.stderr().write_all(&message);
             return Ok(Flow::Done(1));
         }
-        INTOFF();
+        INTOFF(sh);
         /* The C's `action = savestr(action)` makes the next signal in the
          * list copy the previous copy; copying the argument word each time
          * gives the same bytes and leaves `action` pointing at what the
          * `'-'` test reads. */
         let mut newtrap: Option<BString> = None;
         if let Some(text) = &action {
-            if text.as_bytes() == b"-" {
+            if text.as_slice() == b"-" {
                 action = None;
             } else {
-                if !text.as_bytes().is_empty() {
+                if !text.is_empty() {
                     sh.traps.trapcnt += 1;
                 }
-                newtrap = Some(BString::from(text.as_bytes()));
+                newtrap = Some(text.clone());
             }
         }
         /* Asked as a `bool` first: the count is a field of the table the
@@ -110,7 +105,7 @@ pub unsafe fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         if signo != 0 {
             setsignal(sh, signo);
         }
-        INTON();
+        INTON(sh);
     }
     Ok(Flow::Done(0))
 }

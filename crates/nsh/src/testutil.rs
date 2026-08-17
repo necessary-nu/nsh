@@ -2,12 +2,12 @@
 //!
 //! Two facts about this codebase shape every test in the crate.
 //!
-//! **The shell's state is process-global.** It is a literal port of C
-//! that keeps its variables, its stack allocator, its open files and its
-//! exception handler in statics. Cargo runs tests on multiple threads in
-//! one process, so any test that touches that state has to hold
-//! [`lock`] for its duration. Tests that only call pure functions do not
-//! need it.
+//! **A few operating-system properties are process-global.** Shell-owned
+//! variables, files, and control state live on each `Shell`, but locale,
+//! signal dispositions, the current directory, and inherited descriptors
+//! still belong to the hosting process. Cargo runs tests on multiple threads,
+//! so a test that changes one of those properties holds [`lock`] for its
+//! duration. Tests confined to one shell instance do not need it.
 //!
 //! **Errors are values.** A fallible function returns
 //! `Result<_, error::Error>` and a test asserts on the returned error --
@@ -19,8 +19,7 @@
 
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use core::ptr::addr_of_mut;
-use libc::{c_char, c_int};
+use core::ffi::c_int;
 
 /// Serialises tests that touch shell globals.
 ///
@@ -34,30 +33,6 @@ pub fn lock() -> MutexGuard<'static, ()> {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
     }
-}
-
-/// A NUL-terminated C string that lives as long as the test.
-///
-/// `CString::as_ptr()` on a temporary dangles at the end of the
-/// statement, which is a real hazard when every function under test
-/// takes `*const c_char`.
-pub struct CStr0(std::ffi::CString);
-
-impl CStr0 {
-    pub fn new(s: &str) -> Self {
-        CStr0(std::ffi::CString::new(s).expect("test string contains NUL"))
-    }
-    pub fn p(&self) -> *const c_char {
-        self.0.as_ptr()
-    }
-}
-
-/// Borrow a `*const c_char` as a Rust `&str` for comparison.
-///
-/// # Safety
-/// `p` must be non-NULL and NUL-terminated.
-pub unsafe fn s(p: *const c_char) -> String {
-    std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
 }
 
 /// Run `body` in a forked child and return the child's exit status.
@@ -74,21 +49,5 @@ pub unsafe fn s(p: *const c_char) -> String {
 /// tests on several threads by default.
 pub fn forked(body: impl FnOnce()) -> c_int {
     let _g = lock();
-    unsafe {
-        let pid = libc::fork();
-        assert!(pid >= 0, "fork failed");
-        if pid == 0 {
-            body();
-            // Only reached if `body` did NOT exit on its own.
-            libc::_exit(0);
-        }
-        let mut status: c_int = 0;
-        assert_eq!(libc::waitpid(pid, &mut status, 0), pid);
-        if libc::WIFEXITED(status) {
-            libc::WEXITSTATUS(status)
-        } else {
-            // Encode a signal death as 128+n, the shell's own convention.
-            128 + libc::WTERMSIG(status)
-        }
-    }
+    nsh_platform::run_in_child(body).expect("forked test process failed")
 }

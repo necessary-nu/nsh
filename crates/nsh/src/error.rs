@@ -10,15 +10,12 @@
 //!   mechanism is gone; a failure is a value and it is returned. See
 //!   `[dec:nsh:errors-are-values]` and `docs/errors-are-values.md`.
 
-use core::ptr::addr_of_mut;
 use core::sync::atomic::{Ordering, compiler_fence};
-use std::ffi::CStr;
 use std::io::Write;
 
 use bstr::{BStr, BString, ByteSlice};
-use libc::{c_char, c_int};
+use core::ffi::{c_char, c_int};
 
-use crate::shell::cstr;
 
 /*
  * Types of operations (passed to the errmsg routine).
@@ -58,8 +55,6 @@ pub type sig_atomic_t = c_int;
  * live stack frame cannot be a field of a `Shell`, and there is no longer
  * a pointer. */
 
-pub static mut suppressint: c_int = 0;
-pub static mut intpending: sig_atomic_t = 0;
 /* `int errlinno` was here. It is `Shell::eval.errlinno` now: it is the
  * line a diagnostic reports, six frames write it and the only reader is
  * the prefix this module builds, so it belongs to the shell that
@@ -80,8 +75,8 @@ pub fn barrier() {
 
 /* `#define INTOFF ({ suppressint++; barrier(); 0; })` */
 #[inline(always)]
-pub unsafe fn INTOFF() -> c_int {
-    suppressint += 1;
+pub fn INTOFF(sh: &mut crate::context::Shell) -> c_int {
+    sh.interrupt_suppression += 1;
     barrier();
     0
 }
@@ -102,9 +97,9 @@ pub unsafe fn INTOFF() -> c_int {
 /// every call site would have to decide what to do with an error raised
 /// while handling an error.
 #[inline(always)]
-pub unsafe fn INTON() -> c_int {
+pub fn INTON(sh: &mut crate::context::Shell) -> c_int {
     barrier();
-    suppressint -= 1;
+    sh.interrupt_suppression -= 1;
     0
 }
 
@@ -115,16 +110,16 @@ pub unsafe fn INTON() -> c_int {
 /// discarding a leak; discarding the leak and taking delivery were one
 /// operation in the C and are two now.
 #[inline(always)]
-pub unsafe fn FORCEINTON() -> c_int {
+pub fn FORCEINTON(sh: &mut crate::context::Shell) -> c_int {
     barrier();
-    suppressint = 0;
+    sh.interrupt_suppression = 0;
     0
 }
 
 /* `#define CLEAR_PENDING_INT intpending = 0` */
 #[inline(always)]
-pub unsafe fn CLEAR_PENDING_INT() {
-    core::ptr::write_volatile(addr_of_mut!(intpending), 0);
+pub fn CLEAR_PENDING_INT() {
+    crate::siginbox::signals().set_interrupt_pending(false);
 }
 
 /// Take delivery of a pending interrupt, if one is due.
@@ -149,8 +144,8 @@ pub unsafe fn CLEAR_PENDING_INT() {
 /// Returns `Some` at most once per interrupt: [`onint`] clears
 /// `intpending` as it delivers.
 #[inline]
-pub unsafe fn poll_interrupt(sh: &crate::context::Shell) -> Option<Error> {
-    if suppressint == 0 && int_pending() != 0 {
+pub fn poll_interrupt(sh: &crate::context::Shell) -> Option<Error> {
+    if sh.interrupt_suppression == 0 && int_pending() != 0 {
         Some(onint(sh))
     } else {
         None
@@ -172,50 +167,50 @@ pub unsafe fn poll_interrupt(sh: &crate::context::Shell) -> Option<Error> {
 /// reason it cannot survive `panic = "abort"`. This is the honest
 /// alternative: the interrupt goes back in the inbox and the next poll
 /// site takes it, which is one prompt-expansion later.
-pub unsafe fn rearm_interrupt(e: Error) {
+pub fn rearm_interrupt(e: Error) {
     debug_assert!(
         e.is_interrupt(),
         "only an interrupt may be put back; a diagnostic has already been written"
     );
     drop(e);
-    core::ptr::write_volatile(addr_of_mut!(intpending), 1);
+    crate::siginbox::signals().set_interrupt_pending(true);
 }
 
 /* `#define int_pending() intpending` */
 #[inline(always)]
-pub unsafe fn int_pending() -> sig_atomic_t {
-    core::ptr::read_volatile(addr_of_mut!(intpending))
+pub fn int_pending() -> sig_atomic_t {
+    crate::siginbox::signals().interrupt_pending() as sig_atomic_t
 }
 
 /// `#define INTOFF` — macro spelling, for call sites that keep the C shape.
 #[macro_export]
 macro_rules! INTOFF {
-    () => {
-        $crate::error::INTOFF()
+    ($sh:expr) => {
+        $crate::error::INTOFF($sh)
     };
 }
 
 /// `#define INTON` — macro spelling.
 #[macro_export]
 macro_rules! INTON {
-    () => {
-        $crate::error::INTON()
+    ($sh:expr) => {
+        $crate::error::INTON($sh)
     };
 }
 
 /// `#define FORCEINTON` — macro spelling.
 #[macro_export]
 macro_rules! FORCEINTON {
-    () => {
-        $crate::error::FORCEINTON()
+    ($sh:expr) => {
+        $crate::error::FORCEINTON($sh)
     };
 }
 
 /// `#define SAVEINT(v) ((v) = suppressint)`
 #[macro_export]
 macro_rules! SAVEINT {
-    ($v:expr) => {
-        $v = $crate::error::suppressint
+    ($sh:expr, $v:expr) => {
+        $v = $sh.interrupt_suppression
     };
 }
 
@@ -225,11 +220,11 @@ macro_rules! SAVEINT {
 /// ```
 #[macro_export]
 macro_rules! RESTOREINT {
-    ($v:expr) => {{
+    ($sh:expr, $v:expr) => {{
         /* The `if (... && intpending) onint(sh)` is gone with the one in
          * `INTON`; see there. */
         $crate::error::barrier();
-        $crate::error::suppressint = $v;
+        $sh.interrupt_suppression = $v;
         0
     }};
 }
@@ -265,20 +260,19 @@ macro_rules! RESTOREINT {
 /// is a frontend boundary question and not this node's.
 // [spec:dash:def:error.onint-fn]
 // [spec:dash:sem:error.onint-fn]
-pub unsafe fn onint(sh: &crate::context::Shell) -> Error {
-    core::ptr::write_volatile(addr_of_mut!(intpending), 0);
+pub fn onint(sh: &crate::context::Shell) -> Error {
+    crate::siginbox::signals().set_interrupt_pending(false);
     crate::system::sigclearmask();
     /* `#define rootshell (!shlvl)` (main.h); `#define iflag optlist[3]`. */
-    let rootshell: bool = crate::shellmain::shlvl == 0;
+    let rootshell: bool = sh.shell_level == 0;
     let iflag: c_char = sh.options.flag(crate::options::iflag);
     if !(rootshell && iflag != 0) {
-        libc::signal(libc::SIGINT as c_int, libc::SIG_DFL);
-        libc::raise(libc::SIGINT);
+        nsh_platform::terminate_with_interrupt();
     }
     /* `exitstatus = SIGINT + 128` was here; `Error::status()` answers
      * exactly that for `Interrupted`, so the value already carries it. */
     Error::Interrupted {
-        signal: crate::status::Signal::from_raw(libc::SIGINT),
+        signal: crate::status::Signal::from_raw(nsh_platform::interrupt_signal()),
     }
 }
 
@@ -364,7 +358,7 @@ impl Error {
     /// the value exists to carry. Now the raise says what it took and the
     /// frame that catches it is the frame that writes it. Same shape as
     /// [`Error::reported`], which always took it this way.
-    pub unsafe fn other(line: c_int, status: c_int, msg: &[u8]) -> Error {
+    pub fn other(line: c_int, status: c_int, msg: &[u8]) -> Error {
         Error::Other {
             line,
             status,
@@ -386,7 +380,7 @@ impl Error {
     /// constructed through it. An empty message is therefore never
     /// rendered, and it must stay that way — a caller that reports one of
     /// these would emit a bare prefix and a newline dash does not.
-    pub unsafe fn reported(line: c_int, status: c_int) -> Error {
+    pub fn reported(line: c_int, status: c_int) -> Error {
         Error::Other {
             line,
             status,
@@ -479,7 +473,7 @@ impl crate::context::Shell {
     /// `flushall()` runs *after* the message, so a built-in that filled
     /// the stdout buffer and then failed produces its diagnostic before
     /// its own output in the merged stream. Both are pinned by the corpus.
-    pub unsafe fn report(&mut self, e: Error) -> Error {
+    pub fn report(&mut self, e: Error) -> Error {
         self.sh_warnx(e.message());
 
         self.io.flushall();
@@ -495,7 +489,7 @@ impl crate::context::Shell {
     /// writes in the same order as the diverging form, because both are
     /// this function. When the last caller of `sh_error` is gone this one
     /// takes its name.
-    pub unsafe fn sh_error_value(&mut self, msg: &[u8]) -> Error {
+    pub fn sh_error_value(&mut self, msg: &[u8]) -> Error {
         /* `exitstatus = 2` was here. It is the returned value's `status`
          * instead: the error carries what it took and the frame that
          * catches it writes it. That is why the *status* needed no
@@ -514,20 +508,12 @@ impl crate::context::Shell {
     /// one, to the shell's own unbuffered stderr.
     // [spec:dash:def:error.exvwarning2-fn]
     // [spec:dash:sem:error.exvwarning2-fn]
-    pub unsafe fn sh_warnx(&mut self, msg: &[u8]) {
-        let name = if !crate::options::arg0.is_null() {
-            crate::options::arg0
-        } else {
-            cstr(b"sh\0")
-        };
+    pub fn sh_warnx(&mut self, msg: &[u8]) {
+        let name = self.options.arg0().unwrap_or(BStr::new(b"sh"));
 
-        /* The prefix is assembled here, from the shell that is reporting.
-         * `arg0` is still a static because it is `$0` before it is a
-         * diagnostic prefix — `expand.rs` reads it for the parameter and
-         * `docs/api-design.md` §5 puts it in the options table, so it
-         * moves with that row rather than with this one. */
+        /* The prefix is assembled here from the reporting shell. */
         let mut prefix = Vec::new();
-        prefix.extend_from_slice(CStr::from_ptr(name).to_bytes());
+        prefix.extend_from_slice(name);
         prefix.extend_from_slice(b": ");
         let line = self.eval.errlinno;
         write!(&mut prefix, "{line}").expect("writing to a Vec cannot fail");
@@ -554,17 +540,17 @@ impl crate::context::Shell {
 
 // [spec:dash:def:error.errmsg-fn]
 // [spec:dash:sem:error.errmsg-fn]
-pub unsafe fn errmsg(e: c_int, action: c_int) -> *const c_char {
-    if e != libc::ENOENT && e != libc::ENOTDIR {
-        return libc::strerror(e);
+pub fn errmsg(e: c_int, action: c_int) -> bstr::BString {
+    if !nsh_platform::is_path_not_found_error(e) {
+        return bstr::BString::from(nsh_platform::os_error_message_code(e));
     }
 
     if action & E_OPEN != 0 {
-        cstr(b"No such file\0")
+        bstr::BString::from("No such file")
     } else if action & E_CREAT != 0 {
-        cstr(b"Directory nonexistent\0")
+        bstr::BString::from("Directory nonexistent")
     } else {
-        cstr(b"not found\0")
+        bstr::BString::from("not found")
     }
 }
 
@@ -575,10 +561,10 @@ pub unsafe fn errmsg(e: c_int, action: c_int) -> *const c_char {
  */
 // [spec:dash:def:error.inton-fn]
 // [spec:dash:sem:error.inton-fn]
-pub unsafe fn __inton() {
+pub fn __inton(sh: &mut crate::context::Shell) {
     /* In step with `INTON` above, including the `onint(sh)` it no longer
      * makes. */
-    suppressint -= 1;
+    sh.interrupt_suppression -= 1;
 }
 
 /* There is no setjmp/longjmp here, no stand-in for one, and no FFI
@@ -609,7 +595,6 @@ mod tests {
     #[test]
     fn reported_error_carries_its_status() {
         let _g = crate::testutil::lock();
-        unsafe {
             let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             let e = sh.sh_error_value(b"a diagnostic");
@@ -624,13 +609,11 @@ mod tests {
              * and `$?` is a field of one, so there is no shell in scope
              * for it to write and no way for a test to observe
              * otherwise. */
-        }
     }
 
     #[test]
     fn message_drops_the_prefix() {
         let _g = crate::testutil::lock();
-        unsafe {
             let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             sh.eval.errlinno = 17;
@@ -643,13 +626,11 @@ mod tests {
              * carry it. */
             assert_eq!(e.message().to_vec(), b"cd: bad directory".to_vec());
             assert_eq!(e.line(), 17);
-        }
     }
 
     #[test]
     fn exend_keeps_its_own_status() {
         let _g = crate::testutil::lock();
-        unsafe {
             /* `shellexec` reports its text and takes 127 or 126, then
              * raises EXEND. The status travels with the value even though
              * the code that goes with it does not. */
@@ -659,7 +640,6 @@ mod tests {
             let e = sh.report(e);
 
             assert_eq!(e.status(), 127);
-        }
     }
 
     /// Arrange for `onint` to be able to *return*.
@@ -668,11 +648,11 @@ mod tests {
     /// interactive root shell, which in a test process means the test
     /// dies of SIGINT. That branch is dash's and is deliberate; these
     /// cases are about the other one.
-    unsafe fn as_interactive_root(sh: &mut crate::context::Shell) {
+    fn as_interactive_root(sh: &mut crate::context::Shell) {
         sh.options.set_flag(crate::options::iflag, 1);
         /* Copied out: a shared reference to a mutable static is what the
          * lint forbids, and `assert_eq!` takes one. */
-        let lvl = crate::shellmain::shlvl;
+        let lvl = sh.shell_level;
         assert_eq!(lvl, 0, "a test process is a root shell");
     }
 
@@ -682,7 +662,6 @@ mod tests {
     #[test]
     fn an_interrupt_is_a_value() {
         let _g = crate::testutil::lock();
-        unsafe {
             let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             as_interactive_root(sh);
@@ -691,7 +670,7 @@ mod tests {
             let e = onint(sh);
 
             assert!(e.is_interrupt());
-            assert_eq!(e.status(), libc::SIGINT + 128);
+            assert_eq!(e.status(), nsh_platform::interrupt_signal() + 128);
             /* `onint` used to write this to `exitstatus` as well. It does
              * not any more -- and it could not: it takes `&Shell`, a
              * shared receiver, so the type says it reads the shell and
@@ -699,7 +678,6 @@ mod tests {
              * for `Interrupted`, and the frame that catches it writes. */
             assert_eq!(sh.status, 0, "the raise path writes no shell state");
             assert!(e.message().is_empty(), "dash prints nothing for a ^C");
-        }
     }
 
     /// `poll_interrupt` takes delivery once and only once: `onint` clears
@@ -710,16 +688,14 @@ mod tests {
     #[test]
     fn delivery_happens_once() {
         let _g = crate::testutil::lock();
-        unsafe {
             let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             as_interactive_root(sh);
-            suppressint = 0;
-            core::ptr::write_volatile(addr_of_mut!(intpending), 1);
+            sh.interrupt_suppression = 0;
+            crate::siginbox::signals().set_interrupt_pending(true);
 
             assert!(poll_interrupt(sh).is_some(), "one pending interrupt, one delivery");
             assert!(poll_interrupt(sh).is_none(), "and not a second time");
-        }
     }
 
     /// **The INTOFF discipline, which the polling must not break.** An
@@ -732,23 +708,20 @@ mod tests {
     #[test]
     fn intoff_still_holds_it_off() {
         let _g = crate::testutil::lock();
-        unsafe {
             let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             as_interactive_root(sh);
-            suppressint = 0;
-            core::ptr::write_volatile(addr_of_mut!(intpending), 1);
+            sh.interrupt_suppression = 0;
+            crate::siginbox::signals().set_interrupt_pending(true);
 
-            INTOFF();
+            INTOFF(sh);
             assert!(poll_interrupt(sh).is_none(), "suppressed: not due");
             /* And `INTON` does not deliver it either -- that is the
              * divergence, and it is why the counter reaching zero is no
              * longer a delivery point. */
-            INTON();
+            INTON(sh);
             assert_eq!(int_pending(), 1, "still pending, waiting for a poll site");
             assert!(poll_interrupt(sh).is_some(), "and due again once unsuppressed");
-
-        }
     }
 
     /// A frame that cannot carry the interrupt out puts it back rather
@@ -757,19 +730,16 @@ mod tests {
     #[test]
     fn a_rearmed_interrupt_is_taken_later() {
         let _g = crate::testutil::lock();
-        unsafe {
             let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
             let sh = &mut owned;
             as_interactive_root(sh);
-            suppressint = 0;
+            sh.interrupt_suppression = 0;
             CLEAR_PENDING_INT();
 
             rearm_interrupt(Error::Interrupted {
-                signal: crate::status::Signal::from_raw(libc::SIGINT),
+                signal: crate::status::Signal::from_raw(nsh_platform::interrupt_signal()),
             });
             assert_eq!(int_pending(), 1);
             assert!(poll_interrupt(sh).is_some(), "the next poll site takes it");
-
-        }
     }
 }

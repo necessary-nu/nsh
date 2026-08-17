@@ -2,7 +2,7 @@
 
 use super::{text_from_bytes, text_to_bytes};
 use bstr::BString;
-use libc::c_int;
+use core::ffi::c_int;
 use nshedit::domain::{Direction, EditingMode, Text, TextUnit};
 use nshedit::editor::effect::{
     HistoryMatch, HistoryPosition, HistoryResponse, HistoryWordPosition, HistoryWordResponse,
@@ -432,12 +432,7 @@ fn shell_history_pattern_matches(line: &Text, pattern: &Text) -> bool {
     }
     expression.extend_from_slice(pattern);
     expression.push(b'*');
-    expression.push(0);
-    let mut line = line;
-    line.push(0);
-    // SAFETY: both buffers are explicitly NUL-terminated and contain no
-    // interior NUL. `fnmatch` retains neither pointer.
-    unsafe { libc::fnmatch(expression.as_ptr().cast(), line.as_ptr().cast(), 0) == 0 }
+    crate::pmatch::pmatch_slices(&expression, &line) != 0
 }
 
 fn is_history_space(unit: &TextUnit) -> bool {

@@ -11,5 +11,5 @@ name = "nsh"
 path = "src/main.rs"
 
 [dependencies]
-libc = "0.2"
 nsh = { path = "../nsh" }
+nsh-platform = { path = "../nsh-platform" }
