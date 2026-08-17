@@ -463,7 +463,7 @@ have since moved: `cd.rs`'s `curdir` and `physdir`, `mail.rs`'s
 `ifsmb0len`, and `histedit.rs`'s `displayhist`. Four more —
 `shellmain.rs`'s `rootpid`, `mypid`, `shlvl` and `dash_errno` — are
 process *identity* rather than shell state and belong in §6 beside the
-locale and the `getopt` limits it already documents.
+working-directory and child-reaping limits it already documents.
 
 Two rows have been added since, for state this table did not name:
 `eval.errlinno` (the line a diagnostic reports, `error.rs`'s `errlinno`)
@@ -685,29 +685,29 @@ That has three concrete consequences for `no-ambient-state`:
 
 ---
 
-## 6. Two shells are independent, except where they are not
+## 6. Two shells are independent, except where the process is indivisible
 
-`[dec:nsh:no-ambient-state]` records the limit and it cannot be designed
-away. The API represents it as a documented property of the crate, not as a
-type:
+`[dec:nsh:no-ambient-state]` is the rule; [dec:nsh:per-shell-locale] closes
+the C-library exception that this section formerly accepted. Each `Shell`
+owns an explicit locale object. Locale-dependent operations borrow it, and a
+short thread-locale selection is restored before control returns to the host;
+neither `environ` nor process-global `setlocale` is a configuration channel.
 
-* **The locale.** `var.rs:103-106 changelocale` calls `putenv` then
-  `setlocale(LC_ALL, "")`. One `Shell` assigning `LC_COLLATE` changes how
-  another sorts a glob. `expand.rs`'s multibyte IFS cache (`:226-229`)
-  depends on it too.
+The variable table is likewise authoritative. `Builder::inherit_env` takes an
+owned snapshot when asked, and `execve` receives an envp built from the shell's
+exported variables. Two Shells may therefore hold different environments and
+locales without publishing either one into their host process.
+
+The remaining limits are facilities whose underlying process or C-library
+state is still indivisible:
+
 * **`strtok`.** `cd.rs:218,237`. A process-global tokeniser cursor.
 * **`getopt` / `optind`.** `histedit.rs:41-43` declare the externs and
   `:508` calls `getopt`, resetting `optind` by hand at `:497,539`.
 
 None is counted by a `static mut` audit, because the static is in libc.
-There are two further process-wide facts the API has to be honest about and
-that the decision does not list:
+There are further process-wide facts the API has to be honest about:
 
-* **The environment.** `var.rs:23 environ` is libc's. Two shells with
-  different `Builder::env` cannot both own it; the per-instance table has
-  to be the authority and `execve`'s `envp` built from it, rather than
-  `putenv` being called at all. That is a change `move-state` has to make
-  deliberately, not a consequence it gets for free.
 * **The signal inbox.** §5.3's `SignalSink` is process-wide, and the
   `Arc` does not make it otherwise. A disposition is installed per
   *process* and the handler is called with `signo` and nothing else, so
@@ -751,15 +751,14 @@ that the decision does not list:
   this one is *gated* rather than merely documented: job control is off
   unless the host grants it.
 
-The honest statement, which belongs on the decision:
+The honest statement, which belongs on the decision, is now:
 
-> Two `Shell` values in one process share the C library's locale,
-> `strtok` cursor and `getopt` state, the process environment, the
-> working directory, the process group and controlling terminal, the
-> kernel's pool of child processes — and one thing this crate does own,
-> the signal inbox, because a signal disposition and the handler that
-> reads it are per-process facts that no amount of per-instance storage
-> can divide.
+> Two `Shell` values in one process have independent variables and locales.
+> They still share the C library's `strtok` cursor and `getopt` state, the
+> working directory, the process group and controlling terminal, the kernel's
+> pool of child processes — and one thing this crate does own, the signal
+> inbox, because a signal disposition and the handler that reads it are
+> per-process facts that no amount of per-instance storage can divide.
 
 The earlier form of that sentence read "share nothing this crate owns",
 and the inbox is the counter-example. It is stated as a shared *fact*

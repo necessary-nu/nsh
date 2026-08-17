@@ -274,19 +274,16 @@ target.
 | P6 | Bytes, not text | no `String`/`&str` in any signature carrying shell data; `bstr` is a dependency | `bstr` not yet a dependency | `BStr`/`BString` throughout |
 | P7 | Minimal unsafe | `unsafe fn` count; `#![deny(unsafe_op_in_unsafe_fn)]`; every `unsafe` block has `// SAFETY:` | 611 of 800 `fn` are `unsafe` (76%) | budget: syscall wrappers, the signal handler, redirection's fd work. Order 30, not 611. |
 | P8 | The library does not end the process | `libc::_exit\|process::exit\|libc::abort` in the library | 4 (`error.rs:217`, `trap.rs:475`, `redir.rs:393`, `shellmain.rs:287`) | 0 outside a forked child |
-| P9 | Re-entrant | two `Shell`s, one thread and two, pass the suite; `testutil::lock()` deleted | one shell per process, `lock()` required | both pass, *except the locale* — see below |
+| P9 | Re-entrant | two `Shell`s, one thread and two, pass the suite; locale selection is per Shell | one shell per process, `lock()` required | locale follow-up tracked by [dec:nsh:per-shell-locale] |
 | P10 | Publishable | no unpublished deps; `cargo package` succeeds; lint allows removed | `nshedit`, `nshedit-plat` and `nshterm` are exact authenticated Git pins, not registry releases; `lib.rs` has 6 blanket `allow`s including `clippy::all` and `dead_code` | clean |
 
-**P9 has a limit that cannot be refactored away.** `var.rs:103-106
-changelocale` calls `putenv` and then `setlocale(LC_ALL, "")`, and the C
-library's locale is process-global. One `Shell` assigning `LC_COLLATE`
-changes how another sorts a glob, however cleanly the rest of the state
-is separated. Two more libc globals are the same shape and are invisible
-to P1 because the static lives in libc rather than here: `strtok`
-(`cd.rs:218,237`) and `getopt` with `optind = 0` (`histedit.rs`). P9's
-honest target is "independent except for the C library's own globals",
-and the exceptions belong on [dec:nsh:no-ambient-state] as recorded
-limits rather than being discovered by an embedder.
+**P9's locale exception is refactorable without changing locale semantics.**
+[dec:nsh:per-shell-locale] owns a POSIX locale object per `Shell`; explicit
+locale-taking functions and restoring `uselocale` scopes replace `putenv` plus
+process-global `setlocale`. The remaining libc globals are separate concerns:
+`strtok` (`cd.rs:218,237`) and `getopt` with `optind = 0` (`histedit.rs`). They
+remain visible to P1 because their static storage lives in libc rather than in
+this crate.
 | P11 | The API is a surface, not the source | count of `pub` items reachable from `lib.rs`; `#![deny(missing_docs)]` | 35 `pub mod`, ~1,129 `pub` items | order 20 items, all documented |
 
 P11 is the one most obviously missing from the current four, and it is

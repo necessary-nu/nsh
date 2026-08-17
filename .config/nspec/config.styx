@@ -1,4 +1,4 @@
-// Two specs are tracked against this repo, and they answer different
+// Three specs are tracked against this repo, and they answer different
 // questions. Keep them apart in your head:
 //
 //   dash   — "does the Rust port behave exactly like dash's C?"
@@ -10,6 +10,11 @@
 //            the standard REQUIRES. 1,130 rules cover XCU chapters 1
 //            and 2, the `sh` page, and every intrinsic built-in. See
 //            posix/README.md.
+//
+//   nsh    — "what does the Rust library promise its embedder?"
+//            These rules govern isolation and ownership properties that
+//            neither the dash source nor the POSIX shell language can
+//            express.
 //
 // These will disagree, and that is the point: dash deliberately
 // deviates from POSIX in places. An uncovered posix rule therefore
@@ -50,6 +55,19 @@ specs (
                 name shell
                 languages (@rust @python)
                 include (crates/**/*.rs posix/harness/**/*.py)
+                exclude (target/**)
+                mode @both
+            }
+        )
+    }
+    {
+        name nsh,
+        include (docs/spec/nsh/**/*.md),
+        impls (
+            {
+                name nsh-library
+                languages (@rust)
+                include (crates/**/*.rs)
                 exclude (target/**)
                 mode @both
             }

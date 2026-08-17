@@ -23,14 +23,15 @@ alternatives (
 )
 consequences {
     accepted (
-        "**Independence stops at the C library's own globals, and that is not refactorable.** `var.rs:103-106 changelocale` calls `putenv` then `setlocale(LC_ALL, \"\")`, and the locale is process-global -- so one `Shell` assigning `LC_COLLATE` changes how another sorts a glob, however cleanly this crate's state is separated. `strtok` (`cd.rs:218,237`) and `getopt` with `optind = 0` (`histedit.rs`) are the same shape, and none of the three is counted by a `static mut` audit because the static is in libc. Recorded as a limit rather than left for an embedder to find; escaping it means not calling those functions at all, which is a larger question than this decision."
+        "Independence includes the C library's locale. [dec:nsh:per-shell-locale] gives each Shell an owned locale object and confines any thread-locale selection to a restoring platform guard; no durable shell state lives in a Rust or libc thread-local. Other process-wide facilities remain separate questions governed by their own decisions."
         "Nearly every function in the crate changes shape. This is the largest single piece of wave 4."
         "The unit tests' `testutil::lock()` becomes unnecessary: tests serialise today only because the state is shared."
     )
-    deferred ("Until it lands, `cargo test` must keep serialising anything that touches shell state, and an embedder gets one shell per process.")
+    deferred ("The current directory, process group, controlling terminal, child-reaping pool and signal inbox remain process-wide for reasons that are not storage placement and are recorded by their owning decisions.")
 }
 edges {
     requires ([dec:nsh:shell-as-library])
+    related_to ([dec:nsh:per-shell-locale])
 }
 ---
 
@@ -51,3 +52,9 @@ The scaffolding this already forces is visible in the test suite.
 one process and the state is shared -- every test that touches the shell
 has to hold a mutex. That is the embedder's problem in miniature, and it
 arrived before any embedder did.
+
+Selecting a POSIX locale for one bounded operation does not weaken the ban on
+thread-local shell state. The selected handle is borrowed from a `Shell`, the
+previous selection is restored before the operation returns, and no later call
+can discover which Shell ran last. [dec:nsh:per-shell-locale] owns that ABI
+mechanism and its lifetime constraints.

@@ -3424,7 +3424,7 @@ children (
 
             {
                 id locale-sweep
-                title "The corpora sweep under UTF-8, not only LC_ALL=C — ~113 corpora have never differentially tested a multibyte path"
+                title "Baseline the corpora under C, UTF-8, and a generated single-byte locale before locale isolation"
                 priority 0
                 kind @test
                 deps (process-environment-contract)
@@ -3434,6 +3434,13 @@ children (
                         author "brendan@necessary.nu"
                         kind @decision
                         text "priority pinned to 0 — operator override: Brendan: make a WBS for that P0 follow-up."
+                    }
+
+                    {
+                        at 2026-08-17T23:24:02.986288422Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "The baseline includes a generated single-byte locale in addition to C and UTF-8. UTF-8 alone hides byte-classification differences such as isalpha(0xE9); the operator approved this correction with the implementation plan."
                     }
                 )
             }
@@ -3505,12 +3512,34 @@ children (
                             public-api
                             process-model
                         )
+                        sealed true
                         log (
                             {
                                 at 2026-08-17T22:55:42.88836731Z
                                 author "brendan@necessary.nu"
                                 kind @decision
                                 text "priority pinned to 0 — operator override: Brendan: make a WBS for that P0 follow-up."
+                            }
+
+                            {
+                                at 2026-08-17T23:23:45.948678952Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-17T23:28:15.465984065Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "The embedding contract is a third nspec namespace, distinct from dash's source-derived behavior and POSIX language conformance. process-environment-api owns host-environ immutability; scoped-locale-boundary owns locale handle/selection lifetime; shell-locale-integration owns precedence, invalid-selection behavior, explicit operation binding and instance isolation. Verification supplies the /test facets rather than duplicating rule ownership."
+                            }
+
+                            {
+                                at 2026-08-17T23:28:19.757024423Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }
@@ -3520,6 +3549,9 @@ children (
                         title "Provide owned, scoped locale state without mutating the process environment or global locale"
                         priority 0
                         kind @refactor
+                        implements {
+                            nsh-library ([spec:nsh:req:embedding-safety.process-locale-is-unchanged] [spec:nsh:def:shell-locale.owned-locale] [spec:nsh:req:shell-locale.handle-lifetime])
+                        }
                         deps (process-environment-contract locale-sweep)
                         log (
                             {
@@ -3536,6 +3568,9 @@ children (
                         title "Delete safe process-environment mutators and make tests inject environments through ShellBuilder"
                         priority 0
                         kind @refactor
+                        implements {
+                            nsh-library ([spec:nsh:req:embedding-safety.process-environment-is-read-only])
+                        }
                         deps (process-environment-contract locale-sweep)
                         log (
                             {
@@ -3552,6 +3587,14 @@ children (
                         title "Derive each Shell locale with POSIX precedence and route locale-sensitive operations through it"
                         priority 0
                         kind @fix
+                        implements {
+                            nsh-library (
+                                [spec:nsh:sem:shell-locale.selection]
+                                [spec:nsh:sem:shell-locale.invalid-selection]
+                                [spec:nsh:req:shell-locale.operation-binding]
+                                [spec:nsh:req:shell-locale.instance-isolation]
+                            )
+                        }
                         deps (scoped-locale-boundary process-environment-api)
                         log (
                             {
