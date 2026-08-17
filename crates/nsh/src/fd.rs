@@ -1,0 +1,313 @@
+//! Per-shell logical descriptors.
+//!
+//! Shell syntax names descriptor *slots*. Those slots are state owned by a
+//! [`Shell`](crate::context::Shell), not borrowed views of the host process's
+//! descriptor table. Each open slot shares an owned, close-on-exec backing
+//! descriptor above the shell-language range. Redirection changes the slot;
+//! dropping the last handle closes the backing descriptor automatically.
+
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
+use std::sync::{Arc, Mutex, MutexGuard};
+
+/// The descriptor numbers accepted by shell redirection syntax.
+pub(crate) const SLOT_COUNT: usize = 10;
+
+/// Shared ownership of one open file description.
+///
+/// Sharing models `2>&1`: the two logical slots are independently replaceable
+/// while retaining the same underlying open file description and offset.
+#[derive(Clone, Debug)]
+pub(crate) struct SharedFd(Arc<OwnedFd>);
+
+impl SharedFd {
+    /// Move an owned descriptor into the shell's hidden backing range.
+    pub(crate) fn from_owned(fd: OwnedFd) -> std::io::Result<Self> {
+        let fd = nsh_platform::duplicate_cloexec(&fd, SLOT_COUNT as i32)?;
+        Ok(Self(Arc::new(fd)))
+    }
+
+    /// Adopt a descriptor already created in the hidden backing range with
+    /// close-on-exec set.
+    pub(crate) fn from_backing(fd: OwnedFd) -> Self {
+        debug_assert!(fd.as_raw_fd() >= SLOT_COUNT as i32);
+        Self(Arc::new(fd))
+    }
+}
+
+impl AsFd for SharedFd {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.0.as_fd()
+    }
+}
+
+/// A stable reference to one logical descriptor slot.
+///
+/// Writers retain this reference, so `echo >file` changes where an existing
+/// buffered `Output` writes without changing or borrowing the host's process
+/// descriptor table.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct FdRef(Arc<Mutex<Option<SharedFd>>>);
+
+impl FdRef {
+    fn lock(&self) -> MutexGuard<'_, Option<SharedFd>> {
+        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub(crate) fn get(&self) -> Option<SharedFd> {
+        self.lock().clone()
+    }
+
+    pub(crate) fn replace(&self, value: Option<SharedFd>) -> Option<SharedFd> {
+        std::mem::replace(&mut *self.lock(), value)
+    }
+
+    pub(crate) fn is_open(&self) -> bool {
+        self.lock().is_some()
+    }
+
+    pub(crate) fn write_once(&self, bytes: &[u8]) -> std::io::Result<usize> {
+        let fd = self.get().ok_or_else(bad_descriptor)?;
+        nsh_platform::write_once(&fd, bytes)
+    }
+
+    pub(crate) fn write_all(&self, bytes: &[u8]) -> std::io::Result<()> {
+        let fd = self.get().ok_or_else(bad_descriptor)?;
+        nsh_platform::write_all(&fd, bytes)
+    }
+}
+
+/// All descriptor slots in one shell execution environment.
+#[derive(Debug)]
+pub(crate) struct FdTable {
+    slots: [FdRef; SLOT_COUNT],
+}
+
+impl FdTable {
+    pub(crate) fn from_streams(
+        streams: &crate::streams::Streams,
+    ) -> std::io::Result<Self> {
+        let initial = streams.initial_descriptors()?;
+        Ok(Self {
+            slots: std::array::from_fn(|number| {
+                let slot = FdRef::default();
+                slot.replace(initial[number].clone());
+                slot
+            }),
+        })
+    }
+
+    pub(crate) fn slot(&self, number: i32) -> std::io::Result<FdRef> {
+        let index = usize::try_from(number).map_err(|_| bad_descriptor())?;
+        self.slots.get(index).cloned().ok_or_else(bad_descriptor)
+    }
+
+    pub(crate) fn get(&self, number: i32) -> std::io::Result<Option<SharedFd>> {
+        Ok(self.slot(number)?.get())
+    }
+
+    pub(crate) fn replace(
+        &self,
+        number: i32,
+        value: Option<SharedFd>,
+    ) -> std::io::Result<Option<SharedFd>> {
+        Ok(self.slot(number)?.replace(value))
+    }
+
+    pub(crate) fn install_owned(
+        &self,
+        number: i32,
+        fd: OwnedFd,
+    ) -> std::io::Result<Option<SharedFd>> {
+        self.replace(number, Some(SharedFd::from_owned(fd)?))
+    }
+
+    pub(crate) fn is_open(&self, number: i32) -> bool {
+        self.slot(number).is_ok_and(|slot| slot.is_open())
+    }
+
+    /// Install this shell's logical table into exact process slots.
+    ///
+    /// This is the only route from logical descriptor state to process-wide
+    /// state. It is called at the process terminus immediately before exec.
+    pub(crate) fn materialize(&self) -> std::io::Result<()> {
+        let mut changes = Vec::with_capacity(SLOT_COUNT);
+        for (number, slot) in self.slots.iter().enumerate() {
+            let source = match slot.get() {
+                Some(fd) => Some(nsh_platform::duplicate_cloexec(
+                    &fd,
+                    SLOT_COUNT as i32,
+                )?),
+                None => None,
+            };
+            changes.push((number as i32, source));
+        }
+        nsh_platform::ProcessFdChanges::new(changes)?.apply()
+    }
+}
+
+pub(crate) fn bad_descriptor() -> std::io::Error {
+    std::io::Error::from_raw_os_error(nsh_platform::BAD_DESCRIPTOR)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CStr;
+
+    fn shared(name: &'static CStr) -> SharedFd {
+        SharedFd::from_owned(nsh_platform::anonymous_file(name).unwrap()).unwrap()
+    }
+
+    fn empty_table() -> FdTable {
+        FdTable {
+            slots: std::array::from_fn(|_| FdRef::default()),
+        }
+    }
+
+    fn detached(fd: SharedFd) -> FdRef {
+        let slot = FdRef::default();
+        slot.replace(Some(fd));
+        slot
+    }
+
+    #[test]
+    fn slots_reject_out_of_range_numbers() {
+        let table = empty_table();
+
+        assert_eq!(
+            table.slot(-1).unwrap_err().raw_os_error(),
+            Some(nsh_platform::BAD_DESCRIPTOR)
+        );
+        assert_eq!(
+            table.slot(SLOT_COUNT as i32).unwrap_err().raw_os_error(),
+            Some(nsh_platform::BAD_DESCRIPTOR)
+        );
+    }
+
+    #[test]
+    fn slot_refs_follow_replacement() {
+        let table = empty_table();
+        let retained = table.slot(4).unwrap();
+        let first = shared(c"fd-first");
+        let second = shared(c"fd-second");
+
+        assert!(retained.get().is_none());
+        table.replace(4, Some(first.clone())).unwrap();
+        assert!(Arc::ptr_eq(&retained.get().unwrap().0, &first.0));
+        table.replace(4, Some(second.clone())).unwrap();
+        assert!(Arc::ptr_eq(&retained.get().unwrap().0, &second.0));
+    }
+
+    #[test]
+    fn replacement_returns_saved_value() {
+        let table = empty_table();
+        let first = shared(c"fd-saved");
+        let second = shared(c"fd-current");
+        table.replace(6, Some(first.clone())).unwrap();
+
+        let saved = table.replace(6, Some(second.clone())).unwrap().unwrap();
+
+        assert!(Arc::ptr_eq(&saved.0, &first.0));
+        assert!(Arc::ptr_eq(&table.get(6).unwrap().unwrap().0, &second.0));
+    }
+
+    #[test]
+    fn logical_dup_survives_replacement() {
+        let original = shared(c"fd-dup-original");
+        let replacement = shared(c"fd-dup-replacement");
+        let left = detached(original.clone());
+        let right = detached(original.clone());
+
+        left.replace(Some(replacement.clone()));
+
+        assert!(Arc::ptr_eq(&left.get().unwrap().0, &replacement.0));
+        assert!(Arc::ptr_eq(&right.get().unwrap().0, &original.0));
+    }
+
+    #[test]
+    fn writes_follow_current_slot() {
+        let first = shared(c"fd-write-first");
+        let second = shared(c"fd-write-second");
+        let slot = detached(first.clone());
+
+        slot.write_all(b"before").unwrap();
+        slot.replace(Some(second.clone()));
+        slot.write_all(b"after").unwrap();
+
+        assert_eq!(nsh_platform::take_file_contents(&first).unwrap(), b"before");
+        assert_eq!(nsh_platform::take_file_contents(&second).unwrap(), b"after");
+    }
+
+    #[test]
+    fn closed_slot_reports_bad_descriptor() {
+        let slot = FdRef::default();
+
+        let error = slot.write_all(b"nowhere").unwrap_err();
+
+        assert_eq!(error.raw_os_error(), Some(nsh_platform::BAD_DESCRIPTOR));
+        assert!(!slot.is_open());
+    }
+
+    #[test]
+    fn owned_fd_moves_above_slots() {
+        let source = nsh_platform::open_null_input().unwrap();
+        let shared = SharedFd::from_owned(source).unwrap();
+
+        assert!(shared.as_fd().as_raw_fd() >= SLOT_COUNT as i32);
+        assert_eq!(nsh_platform::read_to_end(&shared).unwrap(), b"");
+    }
+
+    #[test]
+    fn install_owned_replaces_slot() {
+        let table = empty_table();
+        let original = shared(c"fd-install-original");
+        table.replace(5, Some(original.clone())).unwrap();
+        let replacement = nsh_platform::anonymous_file(c"fd-install-new").unwrap();
+
+        let saved = table.install_owned(5, replacement).unwrap().unwrap();
+
+        assert!(Arc::ptr_eq(&saved.0, &original.0));
+        assert!(!Arc::ptr_eq(&table.get(5).unwrap().unwrap().0, &original.0));
+    }
+
+    #[test]
+    fn poisoned_slot_keeps_its_state() {
+        let value = shared(c"fd-poison");
+        let slot = detached(value.clone());
+        let other = slot.clone();
+        let result = std::thread::spawn(move || {
+            let _held = other.0.lock().unwrap();
+            panic!("poison the test mutex");
+        })
+        .join();
+
+        assert!(result.is_err());
+        assert!(Arc::ptr_eq(&slot.get().unwrap().0, &value.0));
+    }
+
+    #[test]
+    fn materialize_installs_complete_map() {
+        let (read, write) = nsh_platform::pipe().unwrap();
+        let status = nsh_platform::run_in_child(move || {
+            let table = empty_table();
+            table.install_owned(7, write).unwrap();
+            table.materialize().unwrap();
+
+            let seven = nsh_platform::snapshot_process_fd(7, SLOT_COUNT as i32)
+                .unwrap()
+                .unwrap();
+            nsh_platform::write_all(&seven, b"logical").unwrap();
+            if nsh_platform::snapshot_process_fd(8, SLOT_COUNT as i32)
+                .unwrap()
+                .is_some()
+            {
+                nsh_platform::exit_immediately(2);
+            }
+            nsh_platform::exit_immediately(0);
+        })
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(nsh_platform::read_exact(&read, 7).unwrap(), b"logical");
+    }
+}

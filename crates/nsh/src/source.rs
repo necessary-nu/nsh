@@ -25,13 +25,11 @@ use crate::status::ExitStatus;
 
 /// Where [`Shell::run`] reads commands.
 ///
-/// Bytes or a descriptor, and nothing else. There is deliberately no
-/// `impl Read` source: the input stack is descriptor-based, and not
-/// incidentally. `preadfd`'s `fd == 0` test is the question "is this parse
-/// file the shell's standard input", and it gates both line editing and
-/// the stdin tee; `forkreset` closes `parsefile->fd` across a fork;
-/// `basepf.fd` is what the line editor is handed. A `dyn Read` can be
-/// given to none of them.
+/// Bytes or an owned descriptor-backed source, and nothing else. There is
+/// deliberately no `impl Read` source: the input stack must distinguish the
+/// shell's logical stdin from files it owns. That identity gates line editing
+/// and the stdin tee, follows logical redirection, and determines which file
+/// frame fork reset drops. A `dyn Read` can express none of those semantics.
 ///
 /// A caller holding a reader writes it to a pipe or a file. That is the
 /// honest cost, and it is a sentence of documentation instead of a second
@@ -433,6 +431,21 @@ mod tests {
         let st = sh.run(b"exit 3").unwrap();
         assert_eq!(st.code(), 3);
         assert!(sh.has_exited());
+    }
+
+    #[test]
+    fn exec_requires_host_authority() {
+        let _g = crate::testutil::lock();
+        let mut sh = Shell::builder()
+            .streams(crate::streams::Streams::capture().unwrap())
+            .build()
+            .unwrap();
+
+        let status = sh.run(b"exec /bin/echo replaced").unwrap();
+        assert_eq!(status.code(), 126);
+        assert!(sh.has_exited());
+        let diagnostic = sh.take_captured_stderr().unwrap();
+        assert!(diagnostic.as_slice().ends_with(b"Permission denied\n"));
     }
 
     /// `Source::file` opens and reads it, and the stack it pushed comes

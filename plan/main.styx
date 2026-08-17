@@ -3410,6 +3410,50 @@ children (
                 title "The corpora sweep under UTF-8, not only LC_ALL=C — ~113 corpora have never differentially tested a multibyte path"
                 kind @test
             }
+
+            {
+                id logical-descriptor-table
+                title "Own shell descriptor semantics in a per-instance logical table and materialize them only at a process terminus"
+                kind @refactor
+                deps (
+                    host-owns-streams
+                    no-ambient-state
+                    process-model
+                    public-api
+                    unsafe-is-a-crate
+                )
+                sealed true
+                log (
+                    {
+                        at 2026-08-17T21:00:39.555999614Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-17T22:09:26.244005341Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Implemented the model correction. Each Shell now owns a ten-slot FdTable; open slots share close-on-exec OwnedFd backing handles above the language range. Builtin output, input, redirection save/restore, pipelines, command substitution, background stdin, terminal probes and line editing resolve logical slots without mutating the host descriptor table. Streams::install, RawFd, DescriptorSlot, replace/move/clear exact-slot APIs, numeric close, and the redundant ParseFile fd shadow are gone. FdTable::materialize constructs a validated ProcessFdChanges transaction immediately before exec; its private platform implementation contains the only remaining libc::dup2 and libc::close calls. NoHost refuses root image replacement before materialization; forked children and ProcessHost termini may exec. Red tests now prove supplied stdout reaches direct external commands and pipelines and survives command-scoped redirection. Validation on the final tree: cargo check --workspace --all-targets; cargo test --workspace (253 passed, 1 ignored doctest); embed example; differential PASS=39349 FAIL=0 FLAKY=25 XFAIL=4; divergence register PASS=44 FAIL=0; PTY PASS=60 FAIL=0 FLAKY=0; POSIX target PASS=660 FAIL=51 versus C dash PASS=655 FAIL=56. Final searches: zero RawFd/DescriptorSlot/ambient exact-slot APIs in crates, zero unsafe code in nsh, and exactly one dup2 plus one close in ProcessFdChanges. Documented surviving semantic gap: builtin opens of /dev/fd/N-style paths observe the kernel table until an exec terminus materializes the logical map."
+                    }
+
+                    {
+                        at 2026-08-17T22:09:30.050387716Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
+                    }
+
+                    {
+                        at 2026-08-17T22:15:12.399749211Z
+                        author "brendan@necessary.nu"
+                        kind @errata
+                        text "Commit-gate cleanup improved the delivered endpoint without changing descriptor semantics: removed the pass-through nsh_platform::is_terminal wrapper in favor of std::io::IsTerminal at logical-slot call sites, removed trivial logical-close/constructor wrappers, shortened test names, and added ten focused FdTable ownership/replacement/materialization tests. Final workspace unit/integration count is 263 passed (plus one ignored doctest), not 253 as recorded in the prior note."
+                        after_done true
+                    }
+                )
+            }
         )
         log (
             {

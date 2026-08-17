@@ -95,13 +95,11 @@ rather than met by under-counting. §9 proposes the edit.
 
 ### 2.1 Three items are not on the list, deliberately
 
-**`Streams::install` goes.** It exists today because `main_fn` needed the
-process's descriptors on 0, 1 and 2 to get full fidelity
-(`crates/nsh/src/streams.rs:156`). Once the shell has a per-instance
-descriptor table — which `no-ambient-state` builds, and which
-`[dec:nsh:host-owns-streams]` already records as the fix — `from_fds` gets
-that fidelity without touching the process's descriptors at all, and two
-modes collapse into one. §7 is the argument and the two gaps it leaves.
+**`Streams::install` is gone.** It existed because `main_fn` needed the
+process's descriptors on 0, 1 and 2 to get full fidelity. The per-instance
+descriptor table now gives `from_fds` that fidelity without touching the
+host's process descriptors, so the two modes collapsed into one. §7 records
+the implementation and the two gaps it deliberately leaves.
 
 **No `Shell::args()` reader, no `export_var`.** No concrete embedder wants
 either. `expand_word(b"$1")` reads a positional parameter; `Builder::env`
@@ -789,12 +787,12 @@ that cannot be fixed, because they "inherit real descriptors and cannot be
 lied to by a per-instance table". **That is backwards: external commands
 are the easy part.**
 
-The shell forks before it execs (`jobs.rs:1094-1180 forkchild`, then
-`exec.rs:118 shellexec`). The child is the shell's own process. So the
-child can materialise the logical-to-real map with `dup2` immediately
-before `execve`, and the external command sees exactly the descriptors the
-script asked for. Pipelines, `exec 3>&1`, `>file` and `2>&1` are all table
-operations in the parent and `dup2` calls in the child.
+The shell forks before it execs (`forkchild`, then `shellexec`). The child is
+the shell's own process. It now materialises the logical-to-real map through
+`nsh_platform::ProcessFdChanges` immediately before `execve`, and the
+external command sees exactly the descriptors the script asked for.
+Pipelines, `exec 3>&1`, `>file` and `2>&1` are all logical table operations;
+only materialisation changes exact process slots.
 
 That is what lets `install` go (§2.1) and what retires
 `[dec:nsh:host-owns-streams]`'s deferred consequence. Two gaps remain, and
@@ -810,13 +808,14 @@ they are the promises that get weakened:
    descriptors — precisely what `from_fds` exists to avoid. It goes through
    `Host::may_replace_process` (§5.4), and an embedder's host refuses.
 
-Under `Streams::inherit()` the map is the identity and both gaps close, so
-`nsh-cli` is unaffected and the differential harness cannot see any of
-this. That is also the risk: the harness runs one configuration
-(`docs/idiomatization.md` §4.1), so the table's correctness is decided
-entirely by `crates/nsh/tests/streams_embed.rs`, which today pins the
-*limitation* rather than the capability. **Write those tests before writing
-the table** — §7.5 already says so and it is right.
+`Streams::inherit()` begins as an identity snapshot, but a logical
+redirection can make `/dev/fd/N` differ from the still-unmodified host table;
+that documented gap therefore applies to inherited and supplied streams.
+External commands are unaffected because materialisation precedes `execve`.
+The differential harness still exercises only the inherited frontend
+configuration, so `crates/nsh/tests/streams_embed.rs` separately pins
+redirection restore, pipelines, and direct external commands under
+`Streams::from_fds`. Those tests were written red first and now pass.
 
 **`Streams::capture()` is backed by an unlinked temporary file, not a
 pipe.** A pipe with no concurrent reader blocks the shell as soon as the
@@ -933,16 +932,13 @@ guess about external commands are all superseded above.
 
 ## 10. What this is not sure about
 
-1. **The per-instance descriptor table is the largest bet here.** §7 says
-   external commands are fixable because the forked child can materialise
-   the map, and §2.1 retires `Streams::install` on the strength of it. The
-   argument is sound for every path that goes through `redir.rs`; what it
-   cannot rule out is a site that passes a raw descriptor number to a
-   syscall without consulting the map, which under `Streams::inherit()` is
-   invisible because the map is the identity. *Resolved by:* writing the
-   `streams_embed.rs` cases for redirection, pipelines and external
-   commands under `from_fds` **before** building the table, and treating a
-   failure as a reason to keep `install` rather than to weaken the tests.
+1. ~~**The per-instance descriptor table is the largest bet here.**~~
+   **Resolved.** The `streams_embed.rs` cases for redirection, pipelines and
+   external commands under `from_fds` were written first and failed against
+   the ambient process-table model. They pass with the logical table. Core
+   searches also find no `RawFd`, `DescriptorSlot`, or ambient exact-slot
+   operation; the only raw `dup2`/`close` pair is private to the platform
+   materialisation transaction.
 
 2. ~~**Whether `EXEND` and `EXEXIT` really differ only in which status is
    taken.**~~ **Resolved, and §3.5's collapse is right.**

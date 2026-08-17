@@ -541,21 +541,25 @@ anything that could run a destructor.
 too conservative once the error mechanism and interrupt brackets had already
 become explicit. Every descriptor produced by open, pipe, memfd, or duplicate
 is now an `OwnedFd`. Pipes own both ends, parse-input frames own files they
-open, command substitution owns its read end, job control owns its tty, and a
-redirection save slot is `Empty`, `Closed`, or `Open(OwnedFd)`. Normal paths
-close none of those by number; scope and unwind drop the owning values. The
-fork-reset path remains exceptional and deliberately forgets saved handles,
-preserving dash's abandon-without-close behaviour.
+open, command substitution owns its read end, and job control owns its tty.
+Normal paths close none of those by number; scope and unwind drop the owning
+values.
 
-The only numbers left at the platform boundary are process descriptor-table
-slots named by shell syntax. They have a purpose-specific `DescriptorSlot`
-type rather than `RawFd`. Replacing `n` for `n>&m` and clearing `n` for
-`n>&-` cannot be represented by `std`: the target may be an arbitrary closed
-slot and no Rust value owns it. Standard slots 0, 1, and 2 use rustix's safe
-stdio operations; the arbitrary-slot operations remain the two isolated raw
-process-table primitives in `nsh-platform`. Removing those requires the
-per-instance logical descriptor table described in `docs/api-design.md` §7,
-not another syscall wrapper.
+The subsequent model correction removed shell-language slots from the
+process descriptor table altogether. Each `Shell` owns ten logical slots;
+an open slot is a shared `OwnedFd` backing handle above that range, and a
+redirection save frame holds `Option<SharedFd>`. `n>&m`, `n>&-`, pipeline
+endpoints, restoration, and built-in output only replace logical values.
+Fork reset simply drops obsolete saved values because the active logical
+table owns everything that must survive.
+
+Exact process slots exist at one terminus only. Immediately before `execve`,
+`FdTable::materialize` hands a complete map to `ProcessFdChanges`. That safe
+platform object stages every source above the target range before applying
+the map, so overlap cannot corrupt a later source. Its private implementation
+contains the remaining raw `dup2` and `close` calls. There is no `RawFd`,
+`DescriptorSlot`, ambient replace/clear API, or numeric close in the core
+library.
 
 ### 4.10 `input.rs` — why `BufRead` is not the model
 

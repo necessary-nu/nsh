@@ -22,8 +22,8 @@
 
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::{c_int, c_uint};
-use std::io::Write as _;
-use std::os::fd::{AsRawFd, OwnedFd};
+use std::io::{IsTerminal as _, Write as _};
+use std::os::fd::{AsFd as _, AsRawFd, OwnedFd};
 
 use crate::error::{Error, INTOFF, INTON};
 use crate::nodes::Node;
@@ -337,11 +337,12 @@ pub(crate) fn set_curjob(sh: &mut crate::context::Shell, jp: usize, mode: c_uint
 // [spec:dash:def:jobs.xxtcsetpgrp-fn]
 // [spec:dash:sem:jobs.xxtcsetpgrp-fn]
 pub(crate) fn xxtcsetpgrp(sh: &mut crate::context::Shell, pgrp: i32) -> Result<(), Error> {
-    let Some(fd) = sh.jobs.ttyfd.as_ref().map(AsRawFd::as_raw_fd) else {
+    let Some(fd) = sh.jobs.ttyfd.take() else {
         return Ok(());
     };
-
-    xtcsetpgrp(sh, crate::fd_slot(fd), pgrp)
+    let result = xtcsetpgrp(sh, &fd, pgrp);
+    sh.jobs.ttyfd = Some(fd);
+    result
 }
 
 // [spec:dash:def:jobs.setjobctl-fn]
@@ -412,15 +413,18 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
                          * that order -- which is the shell's stderr,
                          * stdout and stdin, not the numbers for their
                          * own sake. */
-                        let candidates = [
-                            sh.streams.stderr,
-                            sh.streams.stdout,
-                            sh.streams.stdin,
-                        ];
+                        let candidates = [2, 1, 0];
                         let mut i: usize = 0;
                         let mut candidate = None;
                         while i < candidates.len() {
-                            if nsh_platform::is_terminal(crate::fd_slot(candidates[i])) {
+                            if sh
+                                .fds
+                                .get(candidates[i])
+                                .ok()
+                                .flatten()
+                                .as_ref()
+                                .is_some_and(|fd| fd.as_fd().is_terminal())
+                            {
                                 candidate = Some(candidates[i]);
                                 break;
                             }
@@ -509,8 +513,7 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
     crate::trap::setsignal(sh, nsh_platform::terminal_input_signal());
     if let Some(tty) = fd.as_ref() {
         let _ = nsh_platform::set_process_group(0, pgrp);
-        let number = tty.as_raw_fd();
-        xtcsetpgrp(sh, crate::fd_slot(number), pgrp)?;
+        xtcsetpgrp(sh, tty, pgrp)?;
 
         if on == 0 {
             drop(fd.take());
@@ -1005,8 +1008,6 @@ fn forkchild(
              * `open` returning the lowest free descriptor to land back on
              * 0. That only works when the shell's stdin *is* 0, so put it
              * where it belongs when the frontend said otherwise. */
-            let sin: c_int = sh.streams.stdin;
-            let _ = nsh_platform::clear_descriptor(crate::fd_slot(sin));
             let f = crate::redir::sh_open(
                     sh,
                     BStr::new(&_PATH_DEVNULL[.._PATH_DEVNULL.len() - 1]),
@@ -1015,7 +1016,11 @@ fn forkchild(
                 )
                 .unwrap_or_else(|e| forkchild_fatal(sh, e))
                 .expect("a mandatory open returns a descriptor");
-            let _ = nsh_platform::move_to_descriptor(f, crate::fd_slot(sin));
+            let number = f.as_raw_fd();
+            if let Err(error) = sh.fds.install_owned(0, f) {
+                let error = crate::redir::descriptor_error(sh, number, error);
+                forkchild_fatal(sh, error);
+            }
             /* Should call reset_input here, but it's harmless
              * for now.
              */
@@ -1837,7 +1842,7 @@ pub(crate) fn showpipe(sh: &mut crate::context::Shell, jp: usize, dest: Dest) {
 // [spec:dash:sem:jobs.xtcsetpgrp-fn]
 fn xtcsetpgrp(
     sh: &mut crate::context::Shell,
-    fd: nsh_platform::DescriptorSlot,
+    fd: &impl std::os::fd::AsFd,
     pgrp: i32,
 ) -> Result<(), Error> {
     let blocked = nsh_platform::BlockedSignals::all()

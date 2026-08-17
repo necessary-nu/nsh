@@ -3,7 +3,7 @@
 
 use crate::error::Error;
 use bstr::BStr;
-use core::ffi::{c_int, c_uint};
+use core::ffi::c_int;
 use std::io::Write;
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
@@ -39,59 +39,41 @@ pub struct Pipe {
 enum RedirectSource {
     Noop,
     Close,
-    Slot(c_int),
+    Shared(crate::fd::SharedFd),
     Owned(OwnedFd),
-}
-
-impl RedirectSource {
-    fn is_open(&self) -> bool {
-        matches!(self, Self::Slot(_) | Self::Owned(_))
-    }
-
-    fn already_occupies(&self, target: c_int) -> bool {
-        matches!(self, Self::Owned(fd) if fd.as_raw_fd() == target)
-    }
 }
 
 // [spec:dash:def:redir.redirtab]
 /// `MKINIT struct redirtab { … }` — absent from the port manifest because the
 /// `MKINIT` marker defeated the extractor.
 ///
-/// The C's `next` is gone with the intrusive stack. Saved descriptors are
-/// owned: ordinary unwind restores and drops them; fork reset deliberately
-/// forgets them to preserve the C's abandon-without-close path.
+/// The C's `next` is gone with the intrusive stack. Saved logical values are
+/// shared owners: ordinary unwind restores them, while fork reset drops
+/// obsolete backups without changing the active table.
 pub struct redirtab {
     renamed: [SavedDescriptor; 10],
 }
 
 enum SavedDescriptor {
     Empty,
-    Closed,
-    Open(OwnedFd),
+    Saved(Option<crate::fd::SharedFd>),
 }
 
-/// What this module owns of the shell's descriptor state: the stack of
-/// saved-descriptor frames, and the bitmap of descriptors the shell has
-/// closed rather than saved.
+/// The stack of saved logical-descriptor states.
 ///
 /// The fields are private to `redir.rs`, so `Shell` owns the value and
 /// this module owns its shape — nothing outside can reach past the
 /// functions below, which is the property the two `static mut`s it
 /// replaces never had.
 ///
-/// `docs/api-design.md` §5 puts both inside an `fds: FdTable` together
-/// with a logical-to-real descriptor map that does not exist yet. When
-/// that map arrives this becomes part of it; until then it is its own
-/// field, because inventing the surrounding type to hold two members it
-/// does not yet have would be guessing at the shape.
+/// The live map is [`crate::fd::FdTable`]; this stack records only the
+/// values needed to restore command-scoped redirections.
 pub struct RedirStack {
     /// One frame per redirection scope, innermost last. A frame's *index*
     /// is what outlives a call here, never a borrow: `openredirect` can
     /// reach command substitution, which pushes and pops frames of its
     /// own and can move the vector out from under a reference.
     list: Vec<redirtab>,
-    /// Bit map of currently closed file descriptors.
-    closed: c_uint,
 }
 
 impl RedirStack {
@@ -100,24 +82,8 @@ impl RedirStack {
     pub(crate) const fn new() -> Self {
         RedirStack {
             list: Vec::new(),
-            closed: 0,
         }
     }
-}
-
-// [spec:dash:def:redir.update-closed-redirs-fn]
-// [spec:dash:sem:redir.update-closed-redirs-fn]
-fn update_closed_redirs(sh: &mut Shell, fd: c_int, open: bool) -> c_uint {
-    let val: c_uint = sh.redirs.closed;
-    let bit: c_uint = 1u32 << fd;
-
-    if open {
-        sh.redirs.closed &= !bit;
-    } else {
-        sh.redirs.closed |= bit;
-    }
-
-    val & bit
 }
 
 /*
@@ -158,31 +124,18 @@ pub fn redirect(
             /* The C's `fd == 0` is "this redirection replaced the shell's
              * own input", which is what makes the buffered parse state
              * stale -- not descriptor 0 for its own sake. */
-            if fd == sh.streams.stdin {
+            if fd == 0 {
                 crate::input::reset_input(sh);
             }
 
             if let Some(svi) = sv {
-                let closed: c_uint;
-
                 let p_slot = fd as usize;
-                closed = update_closed_redirs(sh, fd, source.is_open());
-
                 if matches!(sh.redirs.list[svi].renamed[p_slot], SavedDescriptor::Empty) {
-                    /* An open can itself claim an inherited closed target:
-                     * `3>file` commonly returns descriptor 3. There was then
-                     * nothing to save. The old integer path expressed this
-                     * as `fd == newfd`; with ownership it has to be tested
-                     * before `source` moves into `install_redirect`. */
-                    let saved = if closed != 0 || source.already_occupies(fd) {
-                        SavedDescriptor::Closed
-                    } else {
-                        match save_slot(sh, fd)? {
-                            Some(saved) => SavedDescriptor::Open(saved),
-                            None => SavedDescriptor::Closed,
-                        }
-                    };
-                    sh.redirs.list[svi].renamed[p_slot] = saved;
+                    let saved = sh
+                        .fds
+                        .get(fd)
+                        .map_err(|error| descriptor_error(sh, fd, error))?;
+                    sh.redirs.list[svi].renamed[p_slot] = SavedDescriptor::Saved(saved);
                 }
             }
 
@@ -201,15 +154,18 @@ pub fn redirect(
      * put past the end of `renamed`, which covers the ten descriptors
      * redirection can name, there is nothing saved to point the trace
      * stream at and it stays where it was. */
-    let serr: c_int = sh.streams.stderr;
     if (flags & REDIR_SAVEFD2) != 0 {
         /* The C dereferences `sv` here without testing it, and gets away
          * with it because REDIR_SAVEFD2 is 03: every caller that reaches
          * this line passed REDIR_PUSH and so has a frame. */
         if let Some(svi) = sv {
             let renamed = &sh.redirs.list[svi].renamed;
-            if let Some(SavedDescriptor::Open(saved)) = renamed.get(serr as usize) {
-                sh.io.previous_stderr().fd = saved.as_raw_fd();
+            if let Some(SavedDescriptor::Saved(Some(saved))) = renamed.get(2) {
+                let destination = crate::fd::FdRef::default();
+                destination.replace(Some(saved.clone()));
+                sh.io
+                    .previous_stderr()
+                    .set_destination(destination);
             }
         }
     }
@@ -387,7 +343,12 @@ fn openredirect(sh: &mut Shell, redir: &Node) -> Result<RedirectSource, Error> {
             } else if source < 0 {
                 RedirectSource::Close
             } else {
-                RedirectSource::Slot(source)
+                let source_fd = sh
+                    .fds
+                    .get(source)
+                    .map_err(|error| descriptor_error(sh, source, error))?
+                    .ok_or_else(|| descriptor_error(sh, source, crate::fd::bad_descriptor()))?;
+                RedirectSource::Shared(source_fd)
             }
         }
         /*
@@ -409,7 +370,7 @@ fn openredirect(sh: &mut Shell, redir: &Node) -> Result<RedirectSource, Error> {
     Ok(f)
 }
 
-fn descriptor_error(sh: &mut Shell, source: c_int, error: std::io::Error) -> Error {
+pub(crate) fn descriptor_error(sh: &mut Shell, source: c_int, error: std::io::Error) -> Error {
     let mut message = Vec::new();
     write!(&mut message, "{}", source).expect("writing to a Vec cannot fail");
     message.extend_from_slice(b": ");
@@ -422,20 +383,23 @@ fn descriptor_error(sh: &mut Shell, source: c_int, error: std::io::Error) -> Err
 // [spec:dash:def:redir.sh-dup2-fn]
 // [spec:dash:sem:redir.sh-dup2-fn]
 fn install_redirect(sh: &mut Shell, target: c_int, source: RedirectSource) -> Result<(), Error> {
-    let target = crate::fd_slot(target);
     match source {
         RedirectSource::Noop => Ok(()),
-        RedirectSource::Close => {
-            let _ = nsh_platform::clear_descriptor(target);
-            Ok(())
-        }
-        RedirectSource::Slot(source) => {
-            nsh_platform::replace_descriptor(crate::fd_slot(source), target)
-                .map_err(|error| descriptor_error(sh, source, error))
-        }
+        RedirectSource::Close => sh
+            .fds
+            .replace(target, None)
+            .map(|_| ())
+            .map_err(|error| descriptor_error(sh, target, error)),
+        RedirectSource::Shared(source) => sh
+            .fds
+            .replace(target, Some(source))
+            .map(|_| ())
+            .map_err(|error| descriptor_error(sh, target, error)),
         RedirectSource::Owned(source) => {
             let number = source.as_raw_fd();
-            nsh_platform::move_to_descriptor(source, target)
+            sh.fds
+                .install_owned(target, source)
+                .map(|_| ())
                 .map_err(|error| descriptor_error(sh, number, error))
         }
     }
@@ -546,7 +510,6 @@ pub fn popredir(sh: &mut Shell, drop: c_int) {
     rp = sh.redirs.list.len() - 1;
     i = 0;
     while i < 10 {
-        let closed: c_uint;
         let renamed = std::mem::replace(
             &mut sh.redirs.list[rp].renamed[i as usize],
             SavedDescriptor::Empty,
@@ -557,24 +520,13 @@ pub fn popredir(sh: &mut Shell, drop: c_int) {
             continue;
         }
 
-        closed = if drop != 0 {
-            1
-        } else {
-            update_closed_redirs(sh, i, matches!(renamed, SavedDescriptor::Open(_)))
-        };
-
         match renamed {
-            SavedDescriptor::Closed => {
-                if closed == 0 {
-                    let _ = nsh_platform::clear_descriptor(crate::fd_slot(i));
-                }
-            }
-            SavedDescriptor::Open(saved) => {
+            SavedDescriptor::Saved(saved) => {
                 if drop == 0 {
                     if i == 0 {
                         crate::input::reset_input(sh);
                     }
-                    let _ = nsh_platform::replace_descriptor(&saved, crate::fd_slot(i));
+                    let _ = sh.fds.replace(i, saved);
                 }
             }
             SavedDescriptor::Empty => unreachable!(),
@@ -601,16 +553,9 @@ pub fn mkinit_exitreset(sh: &mut Shell) {
 
 /* mkinit FORKRESET fragment from src/redir.c:450-452. */
 pub fn mkinit_forkreset(sh: &mut Shell) {
-    /* `redirlist = NULL`: the frames are abandoned, not popped, so no
-     * descriptor is restored or closed. Forget the owning handles in this
-     * forked child before clearing the frames. */
-    for frame in sh.redirs.list.drain(..) {
-        for saved in frame.renamed {
-            if let SavedDescriptor::Open(fd) = saved {
-                std::mem::forget(fd);
-            }
-        }
-    }
+    /* `redirlist = NULL`: abandon saved states without restoring them. The
+     * current logical table owns what survives in the child. */
+    sh.redirs.list.clear();
 }
 
 /*
@@ -620,28 +565,6 @@ pub fn mkinit_forkreset(sh: &mut Shell) {
 
 // [spec:dash:def:redir.savefd-fn]
 // [spec:dash:sem:redir.savefd-fn]
-fn duplicate_slot_above(from: c_int) -> std::io::Result<Option<OwnedFd>> {
-    match nsh_platform::duplicate_cloexec(crate::fd_slot(from), 10) {
-        Err(error) if nsh_platform::is_bad_descriptor_error(&error) => Ok(None),
-        Err(error) => Err(error),
-        Ok(newfd) => Ok(Some(newfd)),
-    }
-}
-
-fn save_slot(sh: &mut Shell, from: c_int) -> Result<Option<OwnedFd>, Error> {
-    match duplicate_slot_above(from) {
-        Ok(None) => Ok(None),
-        result => {
-            /* `savefd` closed `ofd` before raising a non-EBADF error. That
-             * ordering is observable when `ofd` is stderr: the diagnostic
-             * itself then has nowhere to go. Keep the close before building
-             * the returned error value. */
-            let _ = nsh_platform::clear_descriptor(crate::fd_slot(from));
-            result.map_err(|error| descriptor_error(sh, from, error))
-        }
-    }
-}
-
 /// Move an owned descriptor above the shell redirection range.
 pub fn move_fd_above(sh: &mut Shell, fd: OwnedFd) -> Result<OwnedFd, Error> {
     if fd.as_raw_fd() >= 10 {
@@ -655,7 +578,14 @@ pub fn move_fd_above(sh: &mut Shell, fd: OwnedFd) -> Result<OwnedFd, Error> {
 
 /// Duplicate a process-table slot above the shell redirection range.
 pub fn copy_slot_above(sh: &mut Shell, from: c_int) -> Result<Option<OwnedFd>, Error> {
-    duplicate_slot_above(from).map_err(|error| descriptor_error(sh, from, error))
+    let source = sh
+        .fds
+        .get(from)
+        .map_err(|error| descriptor_error(sh, from, error))?;
+    source
+        .map(|source| nsh_platform::duplicate_cloexec(&source, 10))
+        .transpose()
+        .map_err(|error| descriptor_error(sh, from, error))
 }
 
 /// `redirect`, with the diagnostic it can produce handed back rather than
@@ -804,12 +734,11 @@ mod tests {
     fn open_into_target_restores_closed_slot() {
         let status = nsh_platform::run_in_child(|| {
             let mut sh = Shell::builder().build().unwrap();
-            let slot = crate::fd_slot(3);
-            let _ = nsh_platform::clear_descriptor(slot);
+            sh.fds.replace(3, None).unwrap();
             if sh.run(b"{ :; } 3>/dev/null").is_err() {
                 nsh_platform::exit_immediately(2);
             }
-            if nsh_platform::fd_is_open(slot) {
+            if sh.fds.is_open(3) {
                 nsh_platform::exit_immediately(3);
             }
             nsh_platform::exit_immediately(0);

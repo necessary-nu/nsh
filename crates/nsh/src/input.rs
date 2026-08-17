@@ -18,7 +18,7 @@ use crate::error::Error;
 use bstr::{BStr, BString};
 use core::ffi::c_int;
 use std::io::Write;
-use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::fd::OwnedFd;
 
 use crate::error::{INTOFF, INTON};
 use crate::syntax::PEOF;
@@ -80,11 +80,12 @@ pub struct ParseFile {
     pub prev: Option<usize>,
     /// current line
     pub linno: c_int,
-    /// file descriptor (or -1 if string)
-    pub fd: c_int,
-    /// Ownership when this frame opened the descriptor itself. The base
-    /// stream is borrowed from `Streams` and therefore has no handle here.
-    owned_fd: Option<OwnedFd>,
+    /// Whether this frame reads logical descriptor 0. Keeping the logical
+    /// identity separate from the backing descriptor is what lets a later
+    /// redirection change stdin without invalidating this parse frame.
+    uses_stdin: bool,
+    /// Ownership when this frame opened the descriptor itself.
+    owned_fd: Option<crate::fd::SharedFd>,
     /// number of chars left in this line
     pub nleft: c_int,
     /// do not read again once we hit EOF
@@ -109,7 +110,7 @@ impl ParseFile {
     pub const EMPTY: ParseFile = ParseFile {
         prev: None,
         linno: 0,
-        fd: 0,
+        uses_stdin: false,
         owned_fd: None,
         nleft: 0,
         eof: 0,
@@ -353,7 +354,6 @@ pub fn mkinit_init(sh: &mut Shell) {
     /* Read before `pf_at` borrows the shell: the base parse file and the
      * streams are different fields, but `pf_at` borrows the whole shell
      * to reach one of them. */
-    let stdin_fd = sh.streams.stdin;
     let base = pf_at(sh, 0);
     /* `basebuf` is a static array in the C, so re-entering `init` keeps
      * whatever it held. Only allocate when there is nothing to keep. */
@@ -362,11 +362,10 @@ pub fn mkinit_init(sh: &mut Shell) {
     }
     base.pos = 0;
     base.linno = 1;
-    /* Not in the C: `basepf` is statically `.fd = 0` there because the
-     * shell reads descriptor 0 by definition. Here the base parse file
-     * reads whatever the frontend gave us -- which is 0 unless it said
-     * otherwise. See [dec:nsh:host-owns-streams]. */
-    base.fd = stdin_fd;
+    /* The C's `basepf.fd = 0` means that this frame follows the shell's
+     * standard input. Preserve that identity directly rather than caching
+     * a process descriptor number. See [dec:nsh:host-owns-streams]. */
+    base.uses_stdin = true;
     base.owned_fd = None;
 }
 
@@ -412,11 +411,10 @@ pub fn mkinit_forkreset(sh: &mut crate::context::Shell) {
      * frontend-supplied stdin the second half of that is no longer implied
      * by the first, and getting it wrong would close the shell's own
      * input. */
-    let sin: c_int = sh.streams.stdin;
-    if cur_pf(sh).fd > 0 && cur_pf(sh).fd != sin {
+    if !cur_pf(sh).uses_stdin && cur_pf(sh).owned_fd.is_some() {
         let pf = cur_pf(sh);
         drop(pf.owned_fd.take());
-        pf.fd = sin;
+        pf.uses_stdin = true;
     }
     drop(sh.input.stdin_state.pip.take());
 }
@@ -429,14 +427,19 @@ pub fn mkinit_postexitreset(sh: &mut Shell) {
 // [spec:dash:def:input.input-init-fn]
 // [spec:dash:sem:input.input-init-fn]
 pub fn input_init(sh: &mut Shell) {
-    let sin: c_int = sh.streams.stdin;
-    if let Some(canonical) = nsh_platform::terminal_canonical_mode(crate::fd_slot(sin)) {
+    let stdin = sh.fds.get(0).ok().flatten();
+    if let Some(canonical) = stdin
+        .as_ref()
+        .and_then(|fd| nsh_platform::terminal_canonical_mode(fd))
+    {
         sh.input.stdin_istty = 1;
         sh.input.stdin_state.bufferable = canonical;
         sh.input.stdin_state.seekable = 0;
     } else {
         sh.input.stdin_istty = 0;
-        sh.input.stdin_state.seekable = nsh_platform::fd_is_seekable(crate::fd_slot(sin)) as i64;
+        sh.input.stdin_state.seekable = stdin
+            .as_ref()
+            .is_some_and(|fd| nsh_platform::fd_is_seekable(fd)) as i64;
         sh.input.stdin_state.bufferable = sh.input.stdin_state.seekable != 0;
     }
 }
@@ -454,9 +457,13 @@ fn stdin_bufferable(sh: &mut Shell) -> bool {
 // [spec:dash:sem:input.flush-tee-fn]
 fn flush_tee(sh: &mut crate::context::Shell, nr: c_int, mut pending: c_int) {
     let mut scratch = [0_u8; BUFSIZ as usize];
+    let stdin = sh.fds.get(0).ok().flatten();
     while pending > 0 {
         let length = nr.min(pending).max(0) as usize;
-        match nsh_platform::read_once(crate::fd_slot(sh.streams.stdin), &mut scratch[..length]) {
+        let Some(stdin) = &stdin else {
+            break;
+        };
+        match nsh_platform::read_once(stdin, &mut scratch[..length]) {
             Ok(count) if count > 0 => pending -= count as c_int,
             _ => break,
         }
@@ -477,11 +484,10 @@ fn stdin_tee(sh: &mut Shell, nr: c_int) -> Result<std::io::Result<usize>, Error>
 
     let pipe = sh.input.stdin_state.pip.as_ref().expect("stdin tee pipe exists");
     let result = if USE_TEE != 0 {
-        nsh_platform::tee(
-            crate::fd_slot(sh.streams.stdin),
-            &pipe.write,
-            nr as usize,
-        )
+        match sh.fds.get(0).ok().flatten() {
+            Some(stdin) => nsh_platform::tee(&stdin, &pipe.write, nr as usize),
+            None => Err(crate::fd::bad_descriptor()),
+        }
     } else {
         Err(std::io::Error::from(std::io::ErrorKind::InvalidInput))
     };
@@ -589,13 +595,17 @@ pub fn pgetc_eoa(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
 // [spec:dash:def:input.stdin-clear-nonblock-fn]
 // [spec:dash:sem:input.stdin-clear-nonblock-fn]
 fn stdin_clear_nonblock(sh: &mut crate::context::Shell) -> bool {
-    nsh_platform::set_nonblocking(crate::fd_slot(sh.streams.stdin), false).is_ok()
+    sh.fds
+        .get(0)
+        .ok()
+        .flatten()
+        .is_some_and(|fd| nsh_platform::set_nonblocking(&fd, false).is_ok())
 }
 
 // [spec:dash:def:input.preadfd-fn]
 // [spec:dash:sem:input.preadfd-fn]
 fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
-    let mut fd: c_int = cur_pf(sh).fd;
+    let uses_stdin = cur_pf(sh).uses_stdin;
     let mut use_tee: bool;
     let mut unget: c_int;
     let mut pnr: c_int;
@@ -629,9 +639,7 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
     /* The C's `fd == 0` means "this parse file is the shell's standard
      * input", which is the condition for line editing and for teeing --
      * not descriptor 0 for its own sake. */
-    let sin: c_int = sh.streams.stdin;
-
-    use_tee = fd == sin
+    use_tee = uses_stdin
         /* #ifndef SMALL */
         && !crate::histedit::editing_active(sh)
         && !stdin_bufferable(sh);
@@ -640,7 +648,7 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
     'retry: loop {
         nr = pnr;
         /* #ifndef SMALL */
-        if fd == sin && crate::histedit::editing_active(sh) {
+        if uses_stdin && crate::histedit::editing_active(sh) {
             /* `docs/api-design.md` §5.5: nothing the shell hands to a
              * callee may borrow from the shell, and `read_edit_line`
              * takes the shell too. The buffer is moved out, filled, and
@@ -659,36 +667,53 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
             });
         }
 
+        let mut reading_tee = false;
+        let mut read_error = None;
         if use_tee {
             match stdin_tee(sh, nr)? {
                 Ok(count) => {
                     nr = count as c_int;
-                    fd = sh
-                        .input
-                        .stdin_state
-                        .pip
-                        .as_ref()
-                        .expect("stdin tee pipe exists")
-                        .read
-                        .as_raw_fd();
+                    reading_tee = true;
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
                     use_tee = false;
                     pnr = 1;
                     nr = 1;
                 }
-                Err(_) => nr = -1,
+                Err(error) => {
+                    nr = -1;
+                    read_error = Some(error);
+                }
             }
         }
 
-        let mut read_error = None;
         if nr > 0 {
-            let result = {
-                let pf = cur_pf(sh);
-                nsh_platform::read_once(crate::fd_slot(fd), &mut pf.buf[off..off + nr as usize])
+            let source = if reading_tee {
+                None
+            } else if uses_stdin {
+                sh.fds.get(0).ok().flatten()
+            } else {
+                cur_pf(sh).owned_fd.clone()
+            };
+            let mut scratch = [0_u8; BUFSIZ as usize];
+            let result = if reading_tee {
+                let pipe = sh
+                    .input
+                    .stdin_state
+                    .pip
+                    .as_ref()
+                    .expect("stdin tee pipe exists");
+                nsh_platform::read_once(&pipe.read, &mut scratch[..nr as usize])
+            } else if let Some(source) = &source {
+                nsh_platform::read_once(source, &mut scratch[..nr as usize])
+            } else {
+                Err(crate::fd::bad_descriptor())
             };
             match result {
-                Ok(count) => nr = count as c_int,
+                Ok(count) => {
+                    cur_pf(sh).buf[off..off + count].copy_from_slice(&scratch[..count]);
+                    nr = count as c_int;
+                }
                 Err(error) => {
                     nr = -1;
                     read_error = Some(error);
@@ -707,7 +732,7 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
             {
                 continue 'retry;
             }
-            if fd == sin
+            if uses_stdin
                 && error_kind == std::io::ErrorKind::WouldBlock
                 && stdin_clear_nonblock(sh)
             {
@@ -863,7 +888,7 @@ fn preadbuffer(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
         pf.buf[pf.pos..q].to_vec()
     };
 
-    if cur_pf(sh).fd == sh.streams.stdin
+    if cur_pf(sh).uses_stdin
         && crate::histedit::history_active(sh)
         && something != 0
     {
@@ -997,17 +1022,20 @@ fn popstring(sh: &mut Shell) {
 
 // [spec:dash:def:input.setinputfile-fn]
 // [spec:dash:sem:input.setinputfile-fn]
-pub fn setinputfile(sh: &mut crate::context::Shell, fname: &BStr, flags: c_int) -> Result<c_int, Error> {
+pub fn setinputfile(
+    sh: &mut crate::context::Shell,
+    fname: &BStr,
+    flags: c_int,
+) -> Result<bool, Error> {
     INTOFF(sh);
     let Some(mut fd) = crate::redir::sh_open_read(sh, fname, flags & INPUT_NOFILE_OK)? else {
         INTON(sh);
-        return Ok(-1); /* goto out */
+        return Ok(false); /* goto out */
     };
     fd = crate::redir::move_fd_above(sh, fd)?;
-    let number = fd.as_raw_fd();
     setinputfd(sh, fd, flags & INPUT_PUSH_FILE);
     INTON(sh);
-    Ok(number)
+    Ok(true)
 }
 
 /*
@@ -1023,8 +1051,8 @@ fn setinputfd(sh: &mut Shell, fd: OwnedFd, push: c_int) {
         sh.input.top = sh.input.cur;
     }
     let pf = cur_pf(sh);
-    pf.fd = fd.as_raw_fd();
-    pf.owned_fd = Some(fd);
+    pf.uses_stdin = false;
+    pf.owned_fd = Some(crate::fd::SharedFd::from_backing(fd));
     pf.buf = vec![0u8; IBUFSIZ];
     pf.pos = 0;
 }
@@ -1065,7 +1093,7 @@ fn pushfile(sh: &mut Shell) {
     sh.input.frames.push(ParseFile {
         prev: Some(prev),
         linno: 1,
-        fd: -1,
+        uses_stdin: false,
         ..ParseFile::EMPTY
     });
     let depth = sh.input.frames.len();
@@ -1161,7 +1189,9 @@ pub fn flush_input(sh: &mut Shell) {
     let left: c_int = base.nleft + input_get_lleft(base);
     INTOFF(sh);
     if sh.input.stdin_state.seekable != 0 && left != 0 {
-        let _ = nsh_platform::seek_relative(crate::fd_slot(sh.streams.stdin), -(left as i64));
+        if let Some(stdin) = sh.fds.get(0).ok().flatten() {
+            let _ = nsh_platform::seek_relative(&stdin, -(left as i64));
+        }
     } else if sh.input.stdin_state.pending > left {
         /* `basebuf` is scratch here; the bytes are being discarded. */
         let pending = sh.input.stdin_state.pending;

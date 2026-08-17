@@ -19,7 +19,7 @@ use crate::var::EnvSource;
 /// The default is a shell that is inert with respect to the process it is
 /// built in: no variables inherited, `$0` unchanged, no positional
 /// parameters, every option off, the working directory left alone, and
-/// [`Streams::INHERIT`] for its three descriptors.
+/// [`Streams::INHERIT`] for its descriptor namespace.
 ///
 /// `Streams::INHERIT` is the one default that is *not* inert, and it is
 /// the exception on purpose: a shell whose output went nowhere by default
@@ -153,7 +153,9 @@ impl Builder {
     /// comes last because `setpwd` writes `PWD` through the variable
     /// table and wants the kernel already moved.
     pub fn build(self) -> Result<Shell, Error> {
-        let mut sh = Shell::new(self.streams);
+        let mut sh = Shell::try_new(self.streams).map_err(|error| {
+            Error::other(0, 2, format!("cannot snapshot shell streams: {error}").as_bytes())
+        })?;
         /* Before anything else the host might be asked about. `attach` is
          * specified as happening exactly once, and this is it: the sink is
          * the only part of the shell a signal handler may touch, so the

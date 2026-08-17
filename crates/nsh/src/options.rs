@@ -11,7 +11,8 @@ use crate::error::Error;
 use bstr::{BStr, BString};
 use core::ffi::{c_char, c_int};
 use std::ffi::CStr;
-use std::io::Write;
+use std::io::{IsTerminal as _, Write};
+use std::os::fd::AsFd as _;
 
 // [spec:dash:def:options.shparam]
 /// The shell's positional parameters.
@@ -256,7 +257,13 @@ pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<c_in
     if sh.options.flag(iflag) == 2 && sh.options.flag(sflag) == 1 {
         crate::input::input_init(sh);
         if sh.input.stdin_istty != 0
-            && nsh_platform::is_terminal(crate::fd_slot(sh.streams.stderr))
+            && sh
+                .fds
+                .get(2)
+                .ok()
+                .flatten()
+                .as_ref()
+                .is_some_and(|fd| fd.as_fd().is_terminal())
         {
             sh.options.set_flag(iflag, 1);
         }

@@ -896,19 +896,17 @@ fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
                 pipe.write
             });
             if let Some(previous) = prevfd.take() {
-                if previous.as_raw_fd() > 0 {
-                    crate::input::reset_input(sh);
-                    let _ = nsh_platform::move_to_descriptor(previous, crate::fd_slot(0));
-                } else {
-                    std::mem::forget(previous);
-                }
+                let number = previous.as_raw_fd();
+                crate::input::reset_input(sh);
+                sh.fds
+                    .install_owned(0, previous)
+                    .map_err(|error| crate::redir::descriptor_error(sh, number, error))?;
             }
             if let Some(write) = write {
-                if write.as_raw_fd() > 1 {
-                    let _ = nsh_platform::move_to_descriptor(write, crate::fd_slot(1));
-                } else {
-                    std::mem::forget(write);
-                }
+                let number = write.as_raw_fd();
+                sh.fds
+                    .install_owned(1, write)
+                    .map_err(|error| crate::redir::descriptor_error(sh, number, error))?;
             }
             /* In a forked child, which may not return through the
              * parent's frames; see `evalsubshell`. */
@@ -960,11 +958,10 @@ pub fn evalbackcmd(
         if pid == 0 {
             FORCEINTON(sh);
             drop(pipe.read);
-            if pipe.write.as_raw_fd() != 1 {
-                let _ = nsh_platform::move_to_descriptor(pipe.write, crate::fd_slot(1));
-            } else {
-                std::mem::forget(pipe.write);
-            }
+            let number = pipe.write.as_raw_fd();
+            sh.fds
+                .install_owned(1, pipe.write)
+                .map_err(|error| crate::redir::descriptor_error(sh, number, error))?;
             crate::expand::ifsfree(&mut sh.expand);
             /* The one forked child that cannot hand its `Flow` back: it
              * sits under the whole expansion chain, which has no business
@@ -1220,7 +1217,8 @@ fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> 
         None
     };
 
-    sh.io.previous_stderr().fd = sh.streams.stderr;
+    let stderr = sh.fds.slot(2).expect("standard logical descriptor");
+    sh.io.previous_stderr().set_destination(stderr);
     expredir(sh, &c.redirect)?;
     redir_stop = crate::redir::pushredir(sh, &c.redirect);
     /* `status = redirectsafe(..)`, which the C computes as `setjmp(..) *

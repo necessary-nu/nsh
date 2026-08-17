@@ -41,7 +41,7 @@
 //! table says the same thing in the row for "the `EXINT` unwind reaching a
 //! handler".
 
-use nsh::streams::{self, Streams};
+use nsh::streams::Streams;
 
 /// Run `script` with stdout and stderr merged onto one pipe — which is how
 /// `tests/harness/dscase.sh:64-71` runs all 61,498 differential cases, and
@@ -59,23 +59,13 @@ fn run(script: &str) -> (String, i32) {
     ];
 
     let status = nsh_platform::run_in_child(move || {
-            // `install` and not `set`: these scripts run external commands
-            // and command substitutions, and only `install` makes the
-            // pipe *be* descriptors 1 and 2 inside the shell.
             let supplied = Streams::from_fds(std::io::stdin(), &w, &w)
                 .expect("duplicate streams");
-            let lent = streams::install(&supplied).expect("install");
-            core::mem::forget(lent);
-            /* `install` put the supplied descriptors on 0, 1 and 2, so the
-               shell is built on the standard ones. This used to read
-               the value back out of a process-global that `install`
-               wrote; the global is gone and the constant is what it
-               always meant. */
             /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
                ending the process the caller's act — so this fork's child
                has to end itself. Returning would carry it back into the
                test harness after the fork. */
-            let status = nsh::shellmain::main_fn(argv, Streams::INHERIT);
+            let status = nsh::shellmain::main_fn(argv, supplied);
             nsh_platform::exit_immediately(status.code().into());
         })
         .expect("run shell child");

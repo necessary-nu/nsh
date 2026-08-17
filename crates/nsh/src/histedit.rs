@@ -21,7 +21,8 @@
 use bstr::BStr;
 use core::ffi::{c_char, c_int};
 use nshedit::domain::EditingMode;
-use std::io::Write;
+use std::io::{IsTerminal as _, Write};
+use std::os::fd::AsFd as _;
 
 use crate::linedit::{History, LineEditor};
 
@@ -140,8 +141,8 @@ pub fn histedit(sh: &mut crate::context::Shell) {
             sethistsize(sh, BStr::new(size.as_slice()));
         }
 
-        let sin: c_int = sh.streams.stdin;
-        let serr: c_int = sh.streams.stderr;
+        let stdin = sh.fds.get(0).ok().flatten();
+        let stderr = sh.fds.get(2).ok().flatten();
         let mode = if Vflag(sh) != 0 {
             Some(EditingMode::Vi)
         } else if Eflag(sh) != 0 {
@@ -152,10 +153,14 @@ pub fn histedit(sh: &mut crate::context::Shell) {
 
         if let Some(mode) = mode
             && !editing_active(sh)
-            && nsh_platform::is_terminal(crate::fd_slot(sin))
+            && stdin.as_ref().is_some_and(|fd| fd.as_fd().is_terminal())
         {
             crate::error::INTOFF(sh);
-            match LineEditor::new(crate::fd_slot(sin), crate::fd_slot(serr), mode) {
+            let editor = match (stdin.as_ref(), stderr.as_ref()) {
+                (Some(input), Some(output)) => LineEditor::new(input, output, mode),
+                _ => Err(std::io::Error::from(std::io::ErrorKind::NotConnected).into()),
+            };
+            match editor {
                 Ok(editor) => sh.histedit.editor = Some(editor),
                 Err(_) => {
                     sh.histedit.editor = None;

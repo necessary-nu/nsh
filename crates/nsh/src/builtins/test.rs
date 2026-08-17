@@ -9,6 +9,8 @@
 use std::cmp::Ordering;
 use std::ffi::{OsStr, OsString};
 use std::fs::Metadata;
+use std::io::IsTerminal as _;
+use std::os::fd::AsFd as _;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::{FileTypeExt, MetadataExt};
 
@@ -355,8 +357,12 @@ impl<'a> TestParser<'a> {
             Token::StringNonempty => !operand.is_empty(),
             Token::FileTerminal => {
                 let fd = getn(sh, operand)? as i32;
-                nsh_platform::DescriptorSlot::new(fd)
-                    .is_ok_and(nsh_platform::is_terminal)
+                sh.fds
+                    .get(fd)
+                    .ok()
+                    .flatten()
+                    .as_ref()
+                    .is_some_and(|fd| fd.as_fd().is_terminal())
             }
             Token::FileReadable => test_file_access(operand, AccessMode::READ_OK),
             Token::FileWritable => test_file_access(operand, AccessMode::WRITE_OK),

@@ -177,8 +177,9 @@ are the parts that only a process may do:
   `sanitize_standard_fds` behaviour. All of it is a property of the Rust
   runtime, not of the shell, and it must not move into a library.
 * argv as `Vec<Vec<u8>>` via `args_os`.
-* `Streams::install(Streams::INHERIT)` — the frontend is entitled to the
-  process's descriptors, so it is the thing that lends them out.
+* `Streams::INHERIT` — the frontend is entitled to the process's descriptor
+  table, so shell construction snapshots its shell-language slots into the
+  instance-owned logical table.
 * Installing the signal dispositions the shell asks for, via the `Host`
   trait ([dec:nsh:host-owns-signals]).
 * `std::process::exit(status)` at the end, and `_exit` in a forked child.
@@ -268,7 +269,7 @@ target.
 | P1 | No ambient state | `grep -rc 'static mut' src` ; no `thread_local!` | 154 decls, 204 names | 0 |
 | P2 | Errors are values | `grep -rn 'catch_unwind\|panic_any\|resume_unwind' src` ; both profiles build with `panic = "abort"` and the harness passes | 8 catch sites, 1 raise, profiles pinned to `unwind` | 0; pins removed |
 | P3 | Host owns signals | `libc::signal\|sigaction` outside the `host` seam | signal calls in `trap.rs`, `jobs.rs`, `error.rs`, `main.rs` | 0 in the library |
-| P4 | Host owns streams | literal `0`/`1`/`2` as an fd outside `streams.rs`; `Streams::set` passes the same suite as `install` | `install` full fidelity, `set` partial (recorded as deferred on the decision) | parity |
+| P4 | Host owns streams | `Streams::from_fds` integration tests cover builtins, redirection, pipelines and external commands; exact-slot mutation occurs only at the exec terminus | per-instance logical table; no ambient install API | achieved, with the documented `/dev/fd/N` gap |
 | P5 | Owned data | `memalloc.rs` exists; `grep -c '\*mut c_char'` | 99 memalloc sites / 22 files; 1,257 `c_char` pointer occurrences | file deleted; 0 |
 | P6 | Bytes, not text | no `String`/`&str` in any signature carrying shell data; `bstr` is a dependency | `bstr` not yet a dependency | `BStr`/`BString` throughout |
 | P7 | Minimal unsafe | `unsafe fn` count; `#![deny(unsafe_op_in_unsafe_fn)]`; every `unsafe` block has `// SAFETY:` | 611 of 800 `fn` are `unsafe` (76%) | budget: syscall wrappers, the signal handler, redirection's fd work. Order 30, not 611. |
@@ -622,12 +623,10 @@ second only to `error` — and holds four of the process globals
 `bltin/mod.rs` remaps BSD stdio names onto it for the imported builtins.
 
 *Why it is its own step:* `host-owns-streams` moved *which descriptors*
-the shell uses. It did not move *what writes to them*. The deferred
-consequence on that decision — that under `Streams::set` the shell's own
-writes follow but the language's descriptor numbers do not — is a
-consequence of the buffers being global, not of the fds being global.
-Making `output` a per-instance writer is the other half of
-`host-owns-streams`, and it is prerequisite to P4 parity.
+the shell uses. It did not move *what writes to them*. Making `output` a
+per-instance writer was the other half of `host-owns-streams`, and was a
+prerequisite to P4 parity. The implemented writer retains a stable logical
+slot reference, so later redirections affect already-created output values.
 
 *If it is later:* it is 134 call sites and four statics, and it is on the
 critical path of `no-ambient-state` anyway. Doing it inside
@@ -722,9 +721,10 @@ merging them makes the largest step in the project unbisectable:
   `optlist`/`shellparam` (`options.rs`), the trap table, the job table,
   `parsefile` and the input stack, `out1`/`out2`. No signature moves.
 
-This also unblocks the deferred consequence on
-[dec:nsh:host-owns-streams]: the per-instance descriptor table that makes
-`Streams::set` and `Streams::install` agree.
+This also unblocked the deferred consequence on
+[dec:nsh:host-owns-streams]. The implemented per-instance descriptor table
+eliminated both `Streams::set` and `Streams::install`; construction now
+snapshots or duplicates the requested streams directly.
 
 *If it is earlier than 7:* see step 7.
 *If it is later than 9:* a signal handler needs to find the shell it
@@ -937,11 +937,11 @@ For each axis, the replacement and the step it must exist by:
 
 | Axis | Harness coverage | Replacement | Needed by |
 |---|---|---|---|
-| Supplied streams | zero (identity only) | `crates/nsh/tests/streams_embed.rs` — exists, 4 tests, and currently pins a *limitation* rather than a capability | already overdue |
+| Supplied streams | zero (identity only) | `crates/nsh/tests/streams_embed.rs` — 5 tests covering input, builtins, redirection restore, pipelines and external commands | implemented |
 | Two shells in one process | zero | API tests: two `Shell`s, same thread and two threads, interleaved | step 8 |
 | Errors as values | zero | API tests asserting the `Error` variant and `status()` for each raise site; plus the `panic = "abort"` build | step 7 |
 | Host-owned signals | 31 pty cases | pty cases for job control (the plan says so); plus `/proc/self/status` `SigCgt`/`SigIgn` assertions across fork and exec, which is how the SIGPIPE bug was found | step 9 |
-| Per-instance fd table | zero | API tests: `echo hi >file` under `Streams::set` must reach the supplied stream | step 8 |
+| Per-instance fd table | zero | supplied-stream API tests plus platform materialisation transaction tests | implemented |
 | Unreached code | `system.rs` 15.38% of functions, `linedit.rs` 26.09%, `mystring.rs` 66.67%, `syntax.rs` 58.33%, `show.rs` 0% | unit tests, or deletion | continuous |
 
 The last row is the one that will be skipped and should not be.
@@ -1142,16 +1142,12 @@ Stated rather than smoothed over.
    `evaltree`. Whether that stays a flag on the call or becomes a
    property of the `Error` is not settled here.
 
-5. **Whether `Streams::set` parity is achievable at all** without an
-   fd-remapping layer that intercepts the language's descriptor numbers.
-   [dec:nsh:host-owns-streams] says a per-instance descriptor table
-   suffices. That is plausible for the shell's own bookkeeping and it is
-   not obvious for an external command, which inherits real descriptors
-   and cannot be lied to. P4's target may have to be weakened to
-   "`install` is full fidelity; `set` is full fidelity for everything
-   except external commands", and that would be a divergence worth
-   registering. *Resolved by:* writing the test before writing the
-   feature.
+5. ~~**Whether supplied-stream parity is achievable at all** without an
+   fd-remapping layer that intercepts the language's descriptor numbers.~~
+   **Resolved.** A `Shell` owns logical slots backed by shared `OwnedFd`s.
+   The forked child materialises them immediately before `execve`, so direct
+   external commands and pipelines receive supplied streams too. The tests
+   were written before the feature and now cover all three paths.
 
 6. **What `Shell::run` does about the parse-file stack when it is called
    twice.** dash's input stack is global and `-` reads. Two `run` calls

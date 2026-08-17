@@ -39,18 +39,22 @@ pub struct Output {
     /// allocation state; `Some(_)` is the initialized buffer state.
     pub buf: Option<Vec<u8>>,
     pub bufsize: usize,
-    pub fd: c_int,
+    destination: crate::fd::FdRef,
     pub flags: c_int,
 }
 
 impl Output {
-    const fn new(fd: c_int, bufsize: usize) -> Self {
+    fn new(destination: crate::fd::FdRef, bufsize: usize) -> Self {
         Self {
             buf: None,
             bufsize,
-            fd,
+            destination,
             flags: 0,
         }
+    }
+
+    pub(crate) fn set_destination(&mut self, destination: crate::fd::FdRef) {
+        self.destination = destination;
     }
 
     fn remember_error<T>(&mut self, result: io::Result<T>) -> io::Result<T> {
@@ -95,7 +99,7 @@ impl Output {
          * path above. */
         if nleft > bytes.len() {
             self.buf.as_mut().unwrap().extend_from_slice(bytes);
-        } else if let Err(error) = self.remember_error(write_fd(bytes, self.fd)) {
+        } else if let Err(error) = self.remember_error(write_fd(bytes, &self.destination)) {
             if first_error.is_none() {
                 first_error = Some(error);
             }
@@ -127,11 +131,14 @@ pub struct ShellIo {
 }
 
 impl ShellIo {
-    pub(crate) const fn new(stdout_fd: c_int, stderr_fd: c_int) -> Self {
+    pub(crate) fn new(
+        stdout: crate::fd::FdRef,
+        stderr: crate::fd::FdRef,
+    ) -> Self {
         Self {
-            stdout: Output::new(stdout_fd, OUTBUFSIZ),
-            stderr: Output::new(stderr_fd, 0),
-            previous_stderr: Output::new(0, 0),
+            stdout: Output::new(stdout, OUTBUFSIZ),
+            stderr: Output::new(stderr, 0),
+            previous_stderr: Output::new(crate::fd::FdRef::default(), 0),
         }
     }
 
@@ -301,7 +308,7 @@ impl Write for Output {
             self.buf.as_mut().unwrap().extend_from_slice(bytes);
             Ok(bytes.len())
         } else {
-            let result = write_fd_once(bytes, self.fd);
+            let result = write_fd_once(bytes, &self.destination);
             self.remember_error(result)
         }
     }
@@ -315,7 +322,7 @@ impl Write for Output {
     // [spec:dash:sem:output.flushout-fn]
     fn flush(&mut self) -> io::Result<()> {
         let len = self.buf.as_ref().map_or(0, Vec::len);
-        if len == 0 || self.fd < 0 {
+        if len == 0 {
             return Ok(());
         }
 
@@ -323,7 +330,7 @@ impl Write for Output {
         /* Reset the pending range before writing. A failed or interrupted
          * write must not leave bytes queued for a second attempt. The
          * allocation stays live, so the raw range remains readable. */
-        let result = write_fd(&pending[..len], self.fd);
+        let result = write_fd(&pending[..len], &self.destination);
         pending.clear();
         self.buf = Some(pending);
         self.remember_error(result)
@@ -352,12 +359,12 @@ impl Write for Output {
  * Version of write which resumes after a signal is caught.
  */
 
-fn write_fd_once(bytes: &[u8], fd: c_int) -> io::Result<usize> {
+fn write_fd_once(bytes: &[u8], fd: &crate::fd::FdRef) -> io::Result<usize> {
     let amount = bytes.len().min(isize::MAX as usize);
-    nsh_platform::write_once(crate::fd_slot(fd), &bytes[..amount])
+    fd.write_once(&bytes[..amount])
 }
 
-fn write_fd(mut bytes: &[u8], fd: c_int) -> io::Result<()> {
+fn write_fd(mut bytes: &[u8], fd: &crate::fd::FdRef) -> io::Result<()> {
     while !bytes.is_empty() {
         let written = write_fd_once(bytes, fd)?;
         bytes = &bytes[written..];
@@ -367,8 +374,8 @@ fn write_fd(mut bytes: &[u8], fd: c_int) -> io::Result<()> {
 
 // [spec:dash:def:output.xwrite-fn]
 // [spec:dash:sem:output.xwrite-fn]
-pub fn xwrite<'a>(fd: impl Into<nsh_platform::Descriptor<'a>>, bytes: &[u8]) -> c_int {
-    if nsh_platform::write_all(fd, bytes).is_ok() { 0 } else { -1 }
+pub fn xwrite(fd: impl std::os::fd::AsFd, bytes: &[u8]) -> c_int {
+    if nsh_platform::write_all(&fd, bytes).is_ok() { 0 } else { -1 }
 }
 
 // The reference's three C-stdio routines are inside both `#ifdef notyet`
@@ -428,22 +435,29 @@ pub fn outerr(f: &Output) -> c_int {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::fd::{AsRawFd, OwnedFd};
+    use std::os::fd::OwnedFd;
+
+    fn destination(fd: Option<crate::fd::SharedFd>) -> crate::fd::FdRef {
+        let destination = crate::fd::FdRef::default();
+        destination.replace(fd);
+        destination
+    }
 
     /// A `struct output` writing into a pipe, with a buffer of `bufsize`.
     struct Sink {
         out: Box<Output>,
         r: Option<OwnedFd>,
-        w: Option<OwnedFd>,
+        w: Option<crate::fd::SharedFd>,
     }
 
     impl Sink {
         fn new(bufsize: usize, allocated: bool) -> Sink {
             let (read, write) = nsh_platform::pipe().expect("create output test pipe");
+            let write = crate::fd::SharedFd::from_owned(write).unwrap();
             let out = Box::new(Output {
                 buf: allocated.then(|| Vec::with_capacity(bufsize)),
                 bufsize: bufsize as usize,
-                fd: write.as_raw_fd(),
+                destination: destination(Some(write.clone())),
                 flags: 0,
             });
             Sink {
@@ -455,15 +469,22 @@ mod tests {
         fn read(&self) -> &OwnedFd {
             self.r.as_ref().expect("reader is still owned")
         }
-        fn write(&self) -> &OwnedFd {
+        fn write(&self) -> &crate::fd::SharedFd {
             self.w.as_ref().expect("writer is still owned")
         }
-        fn write_number(&self) -> c_int {
-            self.write().as_raw_fd()
+        fn close_output(&mut self) {
+            self.out
+                .set_destination(crate::fd::FdRef::default());
+        }
+        fn restore_output(&mut self) {
+            let write = self.write().clone();
+            self.out
+                .set_destination(destination(Some(write)));
         }
         /// Bytes that have actually reached the pipe.
         fn drained(&mut self) -> Vec<u8> {
             // Close the writer so the read sees EOF rather than blocking.
+            self.close_output();
             drop(self.w.take());
             nsh_platform::read_to_end(self.read()).expect("drain output test pipe")
         }
@@ -507,14 +528,14 @@ mod tests {
         let base = failed.out.buf.as_ref().unwrap().as_ptr();
         let capacity = failed.out.buf.as_ref().unwrap().capacity();
         outmem(b"discarded", &mut failed.out);
-        failed.out.fd = 9999;
+        failed.close_output();
         let _ = failed.out.flush();
         assert_ne!(failed.out.flags & OUTPUT_ERR, 0);
         assert_eq!(failed.buffered(), 0);
         assert_eq!(failed.out.buf.as_ref().unwrap().as_ptr(), base);
         assert_eq!(failed.out.buf.as_ref().unwrap().capacity(), capacity);
 
-        failed.out.fd = failed.write_number();
+        failed.restore_output();
         failed.out.flags = 0;
         outmem(b"kept", &mut failed.out);
         let _ = failed.out.flush();
@@ -540,17 +561,15 @@ mod tests {
 
     // [spec:dash:sem:output.flushout-fn/test]
     #[test]
-    fn flushout_is_a_noop_when_empty_or_closed() {
+    fn flushout_reports_a_closed_logical_descriptor() {
         let mut s = Sink::new(16, true);
         let _ = s.out.flush();
         assert_eq!(s.out.flags & OUTPUT_ERR, 0);
         outmem(b"xy", &mut s.out);
-        s.out.fd = -1;
-        let _ = s.out.flush();
-        assert_eq!(s.buffered(), 2);
-        s.out.fd = s.write_number();
-        let _ = s.out.flush();
-        assert_eq!(s.drained(), b"xy");
+        s.close_output();
+        assert!(s.out.flush().is_err());
+        assert_eq!(s.buffered(), 0);
+        assert_ne!(s.out.flags & OUTPUT_ERR, 0);
     }
 
     // [spec:dash:sem:output.flushout-fn/test]
@@ -558,11 +577,10 @@ mod tests {
     fn flushout_records_an_error_on_a_bad_descriptor() {
         let mut s = Sink::new(16, true);
         outmem(b"z", &mut s.out);
-        s.out.fd = 9999; // never opened
+        s.close_output();
         let _ = s.out.flush();
         assert_ne!(s.out.flags & OUTPUT_ERR, 0);
         assert_ne!(outerr(&s.out), 0);
-        s.out.fd = -1; // keep Drop quiet
     }
 
     // [spec:dash:sem:output.outstr-fn/test]
@@ -584,10 +602,10 @@ mod tests {
     fn write_reports_the_current_operation() {
         let mut s = Sink::new(0, false);
         s.out.flags = OUTPUT_ERR;
-        s.out.fd = 9999;
+        s.close_output();
         assert!(s.out.write_all(b"bad").is_err());
 
-        s.out.fd = s.write_number();
+        s.restore_output();
         assert!(s.out.write_all(b"good").is_ok());
         assert_ne!(s.out.flags & OUTPUT_ERR, 0);
         assert_eq!(s.drained(), b"good");
@@ -602,7 +620,7 @@ mod tests {
         assert_eq!(buffered.drained(), b"x=42");
 
         let mut failed = Sink::new(0, false);
-        failed.out.fd = 9999;
+        failed.close_output();
         assert!(write!(&mut *failed.out, "{}", "bad").is_err());
     }
 
@@ -610,13 +628,13 @@ mod tests {
     fn write_consumes_nothing_when_flush_fails() {
         let mut s = Sink::new(4, true);
         s.out.buf.as_mut().unwrap().extend_from_slice(b"abc");
-        s.out.fd = 9999;
+        s.close_output();
 
         assert!(s.out.write(b"xy").is_err());
         assert_eq!(s.out.buf.as_deref(), Some(&b""[..]));
         assert_ne!(s.out.flags & OUTPUT_ERR, 0);
 
-        s.out.fd = s.write_number();
+        s.restore_output();
         assert_eq!(s.out.write(b"xy").unwrap(), 2);
         s.out.flush().unwrap();
         assert_eq!(s.drained(), b"xy");
@@ -626,13 +644,13 @@ mod tests {
     fn outmem_continues_past_a_flush_error() {
         let mut s = Sink::new(4, true);
         outmem(b"abc", &mut s.out);
-        s.out.fd = 9999;
+        s.close_output();
 
         outmem(b"xy", &mut s.out);
         assert_eq!(s.out.buf.as_deref(), Some(&b"xy"[..]));
         assert_ne!(s.out.flags & OUTPUT_ERR, 0);
 
-        s.out.fd = s.write_number();
+        s.restore_output();
         let _ = s.out.flush();
         assert_eq!(s.drained(), b"xy");
     }
@@ -669,19 +687,32 @@ mod tests {
 
     #[test]
     fn shell_io_instances_own_independent_writers() {
-        let mut first = ShellIo::new(10, 11);
-        let mut second = ShellIo::new(20, 21);
+        let open = || {
+            let fd = nsh_platform::anonymous_file(c"shell-io-test").unwrap();
+            destination(Some(crate::fd::SharedFd::from_owned(fd).unwrap()))
+        };
+        let mut first = ShellIo::new(open(), open());
+        let mut second = ShellIo::new(open(), open());
 
         first.stdout().flags = OUTPUT_ERR;
-        first.stderr().fd = 12;
-        first.previous_stderr().fd = 13;
+        first
+            .stderr()
+            .set_destination(crate::fd::FdRef::default());
+        first
+            .previous_stderr()
+            .set_destination(destination(Some(
+                crate::fd::SharedFd::from_owned(
+                    nsh_platform::anonymous_file(c"previous-stderr").unwrap(),
+                )
+                .unwrap(),
+            )));
 
-        assert_eq!(first.stdout().fd, 10);
-        assert_eq!(first.stderr().fd, 12);
-        assert_eq!(first.previous_stderr().fd, 13);
-        assert_eq!(second.stdout().fd, 20);
-        assert_eq!(second.stderr().fd, 21);
-        assert_eq!(second.previous_stderr().fd, 0);
+        assert!(first.stdout().destination.is_open());
+        assert!(!first.stderr().destination.is_open());
+        assert!(first.previous_stderr().destination.is_open());
+        assert!(second.stdout().destination.is_open());
+        assert!(second.stderr().destination.is_open());
+        assert!(!second.previous_stderr().destination.is_open());
         assert_eq!(second.stdout().flags, 0);
     }
 
@@ -695,15 +726,20 @@ mod tests {
             move || nsh_platform::read_to_end(&r).unwrap().len()
         });
         assert_eq!(xwrite(s.write(), &payload), 0);
+        s.close_output();
         drop(s.w.take());
         assert_eq!(reader.join().unwrap(), 200_000);
-        assert_eq!(xwrite(crate::fd_slot(9999), &payload[..1]), -1);
+        let read_only = nsh_platform::open_null_input().unwrap();
+        assert_eq!(xwrite(&read_only, &payload[..1]), -1);
     }
 
     // [spec:dash:sem:output.freestdout-fn/test]
     #[test]
     fn freestdout_resets_the_buffer_and_error_flag() {
-        let mut io = ShellIo::new(1, 2);
+        let mut io = ShellIo::new(
+            crate::fd::FdRef::default(),
+            crate::fd::FdRef::default(),
+        );
         io.stdout().buf = Some(Vec::with_capacity(16));
         io.stdout().buf.as_mut().unwrap().extend_from_slice(b"abcde");
         io.stdout().bufsize = 16;
@@ -719,13 +755,17 @@ mod tests {
     #[test]
     fn flushall_drains_the_stdout_writer() {
         let mut s = Sink::new(64, true);
-        let mut io = ShellIo::new(s.write_number(), 2);
+        let mut io = ShellIo::new(
+            s.out.destination.clone(),
+            crate::fd::FdRef::default(),
+        );
         io.stdout().bufsize = s.out.bufsize;
 
         io.stdout().write_all(b"n=3").unwrap();
         assert_eq!(io.stdout().buf.as_ref().unwrap().len(), 3);
         io.flushall();
         assert_eq!(io.stdout().buf.as_ref().unwrap().len(), 0);
+        drop(io);
         assert_eq!(s.drained(), b"n=3");
     }
 

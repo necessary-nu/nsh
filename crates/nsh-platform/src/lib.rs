@@ -7,10 +7,11 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use std::cmp::Ordering;
+use std::collections::BTreeSet;
 use std::collections::hash_map::RandomState;
 use std::ffi::{CStr, CString, OsStr, OsString};
 use std::hash::BuildHasher as _;
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::os::unix::process::ExitStatusExt as _;
@@ -72,11 +73,11 @@ pub fn restore_shell_process_runtime_state() {
     }
 
     let closed = CLOSED_STANDARD_FDS.load(AtomicOrdering::Relaxed);
-    for fd in 0..3 {
-        if closed & (1 << fd) != 0 {
-            let slot = DescriptorSlot::new(fd).expect("standard descriptor");
-            let _ = clear_descriptor(slot);
-        }
+    let changes = (0..3)
+        .filter(|fd| closed & (1 << fd) != 0)
+        .map(|fd| (fd as i32, None));
+    if let Ok(changes) = ProcessFdChanges::new(changes) {
+        let _ = changes.apply();
     }
 }
 
@@ -350,17 +351,10 @@ pub fn effective_access(path: &OsStr, access: Access) -> bool {
     accessat(CWD, path, access, AtFlags::EACCESS).is_ok()
 }
 
-/// Whether a descriptor currently refers to a terminal.
-pub fn is_terminal<'a>(fd: impl Into<Descriptor<'a>>) -> bool {
-    let descriptor = fd.into();
-    rustix::termios::isatty(descriptor.borrow())
-}
-
 /// Whether a terminal descriptor is in canonical input mode. `None` means
 /// the descriptor is not a terminal (or its attributes cannot be queried).
-pub fn terminal_canonical_mode<'a>(fd: impl Into<Descriptor<'a>>) -> Option<bool> {
-    let descriptor = fd.into();
-    let attributes = rustix::termios::tcgetattr(descriptor.borrow()).ok()?;
+pub fn terminal_canonical_mode(fd: impl AsFd) -> Option<bool> {
+    let attributes = rustix::termios::tcgetattr(fd.as_fd()).ok()?;
     Some(
         attributes
             .local_modes
@@ -369,28 +363,25 @@ pub fn terminal_canonical_mode<'a>(fd: impl Into<Descriptor<'a>>) -> Option<bool
 }
 
 /// Probe whether the descriptor has a current seek position.
-pub fn fd_is_seekable<'a>(fd: impl Into<Descriptor<'a>>) -> bool {
-    let descriptor = fd.into();
-    rustix::fs::seek(descriptor.borrow(), rustix::fs::SeekFrom::Current(0))
+pub fn fd_is_seekable(fd: impl AsFd) -> bool {
+    rustix::fs::seek(fd.as_fd(), rustix::fs::SeekFrom::Current(0))
         .map(|_| ())
         .map_err(std::io::Error::from)
         .is_ok()
 }
 
 /// Move a descriptor's current position relative to where it is now.
-pub fn seek_relative<'a>(
-    fd: impl Into<Descriptor<'a>>,
+pub fn seek_relative(
+    fd: impl AsFd,
     offset: i64,
 ) -> std::io::Result<u64> {
-    let descriptor = fd.into();
-    rustix::fs::seek(descriptor.borrow(), rustix::fs::SeekFrom::Current(offset))
+    rustix::fs::seek(fd.as_fd(), rustix::fs::SeekFrom::Current(offset))
         .map_err(std::io::Error::from)
 }
 
 /// Rewind a descriptor to its beginning.
-pub fn seek_start<'a>(fd: impl Into<Descriptor<'a>>) -> std::io::Result<u64> {
-    let descriptor = fd.into();
-    rustix::fs::seek(descriptor.borrow(), rustix::fs::SeekFrom::Start(0))
+pub fn seek_start(fd: impl AsFd) -> std::io::Result<u64> {
+    rustix::fs::seek(fd.as_fd(), rustix::fs::SeekFrom::Start(0))
         .map_err(std::io::Error::from)
 }
 
@@ -871,65 +862,118 @@ pub fn process_times() -> ProcessTimes {
     }
 }
 
-/// A numbered entry in the process descriptor table.
+/// A staged set of changes to exact process descriptor-table slots.
 ///
-/// This is deliberately not an ownership type. Shell syntax names descriptor
-/// table slots (`2>&1`, `9>&-`), including slots which are currently closed.
-/// Files opened by this crate are returned as [`OwnedFd`] instead; this type is
-/// reserved for those exact-number language and process boundaries.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct DescriptorSlot(i32);
-
-impl DescriptorSlot {
-    /// Name a non-negative process descriptor slot.
-    pub fn new(number: i32) -> std::io::Result<Self> {
-        if number < 0 {
-            Err(std::io::Error::from(rustix::io::Errno::BADF))
-        } else {
-            Ok(Self(number))
-        }
-    }
-
-    /// The number shell syntax uses for this slot.
-    pub const fn number(self) -> i32 {
-        self.0
-    }
-
-    fn borrow(&self) -> BorrowedFd<'_> {
-        // SAFETY: `DescriptorSlot` is used only as a syscall-duration view of
-        // process descriptor-table state. It is never returned as a borrow or
-        // converted into an owning Rust value.
-        unsafe { BorrowedFd::borrow_raw(self.0) }
-    }
-}
-
-/// Either an owned/borrowed Rust descriptor or an exact process-table slot.
+/// Ordinary descriptor ownership belongs to [`OwnedFd`]. Exact slot numbers
+/// are different: `exec` must make the shell's logical descriptor 2 become
+/// process descriptor 2, and a logically closed descriptor must be absent
+/// from the process table. This object is the safe boundary for that final
+/// operation. It owns every source, moves sources above every target before
+/// changing anything, rejects duplicate or negative targets, and consumes
+/// itself when the changes are applied.
 ///
-/// Callers pass `&OwnedFd`, `&File`, or a [`DescriptorSlot`]. The latter is the
-/// explicit escape hatch for shell-language descriptor numbers.
-pub enum Descriptor<'a> {
-    Borrowed(BorrowedFd<'a>),
-    Slot(DescriptorSlot),
+/// Applying changes is process-wide. It is intended for a forked child just
+/// before `exec`, or for a process whose owner has explicitly granted image
+/// replacement. No Rust descriptor object may own one of the target slots.
+#[derive(Debug)]
+pub struct ProcessFdChanges {
+    changes: Vec<(i32, Option<OwnedFd>)>,
 }
 
-impl<'a, Fd: AsFd + ?Sized> From<&'a Fd> for Descriptor<'a> {
-    fn from(fd: &'a Fd) -> Self {
-        Self::Borrowed(fd.as_fd())
-    }
-}
-
-impl From<DescriptorSlot> for Descriptor<'_> {
-    fn from(slot: DescriptorSlot) -> Self {
-        Self::Slot(slot)
-    }
-}
-
-impl Descriptor<'_> {
-    fn borrow(&self) -> BorrowedFd<'_> {
-        match self {
-            Self::Borrowed(fd) => *fd,
-            Self::Slot(slot) => slot.borrow(),
+impl ProcessFdChanges {
+    /// Validate and stage exact-slot changes without modifying the process.
+    ///
+    /// `Some(fd)` duplicates `fd` into the target when [`apply`](Self::apply)
+    /// runs; `None` closes the target. Every source is first moved above the
+    /// highest target with close-on-exec set, so target/source aliasing and
+    /// cycles cannot affect the result.
+    pub fn new(
+        changes: impl IntoIterator<Item = (i32, Option<OwnedFd>)>,
+    ) -> std::io::Result<Self> {
+        let changes: Vec<_> = changes.into_iter().collect();
+        let mut targets = BTreeSet::new();
+        let mut highest = -1;
+        for (target, _) in &changes {
+            if *target < 0 || !targets.insert(*target) {
+                return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+            }
+            highest = highest.max(*target);
         }
+
+        let minimum = highest.saturating_add(1).max(10);
+        let mut staged = Vec::with_capacity(changes.len());
+        for (target, source) in changes {
+            let source = match source {
+                Some(source) if source.as_raw_fd() < minimum => {
+                    Some(duplicate_cloexec(&source, minimum)?)
+                }
+                source => source,
+            };
+            staged.push((target, source));
+        }
+        Ok(Self { changes: staged })
+    }
+
+    /// Apply all staged changes to the process descriptor table.
+    ///
+    /// Resource failures happen during [`new`](Self::new), before any target
+    /// is touched. Once this begins, the caller is at a process terminus: a
+    /// later syscall error can leave a prefix applied and must be followed by
+    /// process termination rather than returning to ordinary Rust code.
+    pub fn apply(self) -> std::io::Result<()> {
+        for (target, source) in &self.changes {
+            match source {
+                Some(source) => loop {
+                    // SAFETY: `source` is a live owned descriptor staged above
+                    // every target. The target is a validated non-negative
+                    // process-table number, and the kernel retains no borrow.
+                    let result = unsafe { libc::dup2(source.as_raw_fd(), *target) };
+                    if result >= 0 {
+                        break;
+                    }
+                    let error = std::io::Error::last_os_error();
+                    if error.kind() != std::io::ErrorKind::Interrupted {
+                        return Err(error);
+                    }
+                },
+                None => {
+                    // SAFETY: exact closed slots have no Rust owner. Closing
+                    // an already absent slot is the requested final state.
+                    if unsafe { libc::close(*target) } < 0 {
+                        let error = std::io::Error::last_os_error();
+                        if !is_bad_descriptor_error(&error) {
+                            return Err(error);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Duplicate an exact process descriptor into an owned close-on-exec handle.
+///
+/// A closed slot is `Ok(None)`. This is used only to snapshot inherited
+/// process state into an owning logical descriptor table; callers never
+/// receive a borrowed view of a possibly closed slot.
+pub fn snapshot_process_fd(number: i32, minimum: i32) -> std::io::Result<Option<OwnedFd>> {
+    if number < 0 || minimum < 0 {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+    }
+    // SAFETY: `fcntl` receives scalar descriptor numbers and returns a new
+    // owned descriptor on success. It retains no pointer or Rust borrow.
+    let result = unsafe { libc::fcntl(number, libc::F_DUPFD_CLOEXEC, minimum) };
+    if result >= 0 {
+        // SAFETY: a successful F_DUPFD_CLOEXEC returns a fresh descriptor
+        // whose ownership is transferred to the caller.
+        return Ok(Some(unsafe { OwnedFd::from_raw_fd(result) }));
+    }
+    let error = std::io::Error::last_os_error();
+    if is_bad_descriptor_error(&error) {
+        Ok(None)
+    } else {
+        Err(error)
     }
 }
 
@@ -979,22 +1023,21 @@ impl OpenMode {
 pub fn open_path(path: &OsStr, mode: OpenMode) -> std::io::Result<OwnedFd> {
     rustix::fs::open(
         path,
-        mode.flags(),
+        mode.flags() | rustix::fs::OFlags::CLOEXEC,
         rustix::fs::Mode::from_bits_retain(0o666),
     )
     .map_err(std::io::Error::from)
 }
 
 /// Whether an open descriptor refers to a regular file.
-pub fn fd_is_regular_file<'a>(fd: impl Into<Descriptor<'a>>) -> std::io::Result<bool> {
-    let fd = fd.into();
-    let metadata = rustix::fs::fstat(fd.borrow()).map_err(std::io::Error::from)?;
+pub fn fd_is_regular_file(fd: impl AsFd) -> std::io::Result<bool> {
+    let metadata = rustix::fs::fstat(fd.as_fd()).map_err(std::io::Error::from)?;
     Ok(rustix::fs::FileType::from_raw_mode(metadata.st_mode).is_file())
 }
 
 /// Create an anonymous in-memory file and transfer ownership of its descriptor.
 pub fn anonymous_file(name: &std::ffi::CStr) -> std::io::Result<OwnedFd> {
-    rustix::fs::memfd_create(name, rustix::fs::MemfdFlags::empty())
+    rustix::fs::memfd_create(name, rustix::fs::MemfdFlags::CLOEXEC)
         .map_err(std::io::Error::from)
 }
 
@@ -1037,9 +1080,8 @@ pub fn create_temporary_file(template: &OsStr) -> std::io::Result<(std::fs::File
 }
 
 /// Read a seekable descriptor from the beginning, then truncate and rewind it.
-pub fn take_file_contents<'a>(fd: impl Into<Descriptor<'a>>) -> std::io::Result<Vec<u8>> {
-    let descriptor = fd.into();
-    let fd = descriptor.borrow();
+pub fn take_file_contents(fd: impl AsFd) -> std::io::Result<Vec<u8>> {
+    let fd = fd.as_fd();
     rustix::fs::seek(fd, rustix::fs::SeekFrom::Start(0)).map_err(std::io::Error::from)?;
     let mut out = Vec::new();
     let mut buf = [0_u8; 8192];
@@ -1056,103 +1098,36 @@ pub fn take_file_contents<'a>(fd: impl Into<Descriptor<'a>>) -> std::io::Result<
 }
 
 /// Duplicate a descriptor at or above `minimum`, setting close-on-exec.
-pub fn duplicate_cloexec<'a>(
-    fd: impl Into<Descriptor<'a>>,
+pub fn duplicate_cloexec(
+    fd: impl AsFd,
     minimum: i32,
 ) -> std::io::Result<OwnedFd> {
-    let descriptor = fd.into();
-    rustix::io::fcntl_dupfd_cloexec(descriptor.borrow(), minimum)
+    rustix::io::fcntl_dupfd_cloexec(fd.as_fd(), minimum)
         .map_err(std::io::Error::from)
 }
 
-/// Replace one exact descriptor-table slot with a duplicate of `source`.
-///
-/// Standard slots use rustix's safe dedicated operations. Arbitrary numbered
-/// shell slots have no `std`/rustix ownership-safe API because the target may
-/// be closed; that irreducible table mutation is confined to the final arm.
-pub fn replace_descriptor<'a>(
-    source: impl Into<Descriptor<'a>>,
-    target: DescriptorSlot,
-) -> std::io::Result<()> {
-    let source = source.into();
-    let fd = source.borrow();
-    match target.number() {
-        0 => rustix::stdio::dup2_stdin(fd).map_err(std::io::Error::from),
-        1 => rustix::stdio::dup2_stdout(fd).map_err(std::io::Error::from),
-        2 => rustix::stdio::dup2_stderr(fd).map_err(std::io::Error::from),
-        number => {
-            // SAFETY: this is the process-table operation shell redirection
-            // requires. Both values are scalar descriptor numbers, and the
-            // kernel validates them without retaining any Rust borrow.
-            if unsafe { libc::dup2(fd.as_raw_fd(), number) } < 0 {
-                Err(std::io::Error::last_os_error())
-            } else {
-                Ok(())
-            }
-        }
-    }
+/// Duplicate a descriptor to the lowest available descriptor number, with
+/// close-on-exec set.
+pub fn duplicate_fd(fd: impl AsFd) -> std::io::Result<OwnedFd> {
+    rustix::io::fcntl_dupfd_cloexec(fd.as_fd(), 0).map_err(std::io::Error::from)
 }
 
-/// Move an owned descriptor into an exact process-table slot.
-///
-/// If it already occupies that slot, ownership is intentionally released to
-/// the process table. Otherwise the slot is replaced and the source handle is
-/// dropped after duplication.
-pub fn move_to_descriptor(source: OwnedFd, target: DescriptorSlot) -> std::io::Result<()> {
-    if source.as_raw_fd() == target.number() {
-        std::mem::forget(source);
-        Ok(())
-    } else {
-        replace_descriptor(&source, target)
-    }
-}
-
-/// Duplicate a descriptor to the lowest available descriptor number.
-pub fn duplicate_fd<'a>(fd: impl Into<Descriptor<'a>>) -> std::io::Result<OwnedFd> {
-    let descriptor = fd.into();
-    rustix::io::dup(descriptor.borrow())
-        .map_err(std::io::Error::from)
-}
-
-/// Duplicate a descriptor and return an owning Rust file.
-pub fn duplicate_file<'a>(fd: impl Into<Descriptor<'a>>) -> std::io::Result<std::fs::File> {
-    let descriptor = fd.into();
-    rustix::io::dup(descriptor.borrow())
+/// Duplicate a descriptor with close-on-exec and return an owning Rust file.
+pub fn duplicate_file(fd: impl AsFd) -> std::io::Result<std::fs::File> {
+    rustix::io::fcntl_dupfd_cloexec(fd.as_fd(), 0)
         .map(std::fs::File::from)
         .map_err(std::io::Error::from)
 }
 
-/// Clear an exact process descriptor-table slot.
-///
-/// Owned descriptors are closed by `OwnedFd::drop`; this exists only for the
-/// shell-language operation `n>&-` and restoration of a previously closed
-/// numbered slot.
-pub fn clear_descriptor(slot: DescriptorSlot) -> std::io::Result<()> {
-    // SAFETY: no Rust object owns a `DescriptorSlot`. This operation is the
-    // explicit process-table boundary and consumes only its scalar number.
-    if unsafe { libc::close(slot.number()) } < 0 {
-        Err(std::io::Error::last_os_error())
-    } else {
-        Ok(())
-    }
-}
-
-/// Whether the descriptor currently names an open file description.
-pub fn fd_is_open(slot: DescriptorSlot) -> bool {
-    rustix::io::fcntl_getfd(slot.borrow())
-        .map_err(std::io::Error::from)
-        .is_ok()
-}
-
 /// Create a pipe and return both owned ends.
 pub fn pipe() -> std::io::Result<(OwnedFd, OwnedFd)> {
-    rustix::pipe::pipe().map_err(std::io::Error::from)
+    rustix::pipe::pipe_with(rustix::pipe::PipeFlags::CLOEXEC)
+        .map_err(std::io::Error::from)
 }
 
 /// Write the complete buffer to a descriptor.
-pub fn write_all<'a>(fd: impl Into<Descriptor<'a>>, mut bytes: &[u8]) -> std::io::Result<()> {
-    let descriptor = fd.into();
-    let fd = descriptor.borrow();
+pub fn write_all(fd: impl AsFd, mut bytes: &[u8]) -> std::io::Result<()> {
+    let fd = fd.as_fd();
     while !bytes.is_empty() {
         let count = match rustix::io::write(fd, bytes) {
             Ok(count) => count,
@@ -1171,9 +1146,8 @@ pub fn write_all<'a>(fd: impl Into<Descriptor<'a>>, mut bytes: &[u8]) -> std::io
 }
 
 /// Perform one descriptor write, retrying only when interrupted.
-pub fn write_once<'a>(fd: impl Into<Descriptor<'a>>, bytes: &[u8]) -> std::io::Result<usize> {
-    let descriptor = fd.into();
-    let fd = descriptor.borrow();
+pub fn write_once(fd: impl AsFd, bytes: &[u8]) -> std::io::Result<usize> {
+    let fd = fd.as_fd();
     loop {
         match rustix::io::write(fd, bytes) {
             Ok(count) => return Ok(count),
@@ -1184,9 +1158,8 @@ pub fn write_once<'a>(fd: impl Into<Descriptor<'a>>, bytes: &[u8]) -> std::io::R
 }
 
 /// Read exactly `length` bytes from a descriptor.
-pub fn read_exact<'a>(fd: impl Into<Descriptor<'a>>, length: usize) -> std::io::Result<Vec<u8>> {
-    let descriptor = fd.into();
-    let fd = descriptor.borrow();
+pub fn read_exact(fd: impl AsFd, length: usize) -> std::io::Result<Vec<u8>> {
+    let fd = fd.as_fd();
     let mut out = vec![0_u8; length];
     let mut filled = 0;
     while filled < length {
@@ -1203,9 +1176,8 @@ pub fn read_exact<'a>(fd: impl Into<Descriptor<'a>>, length: usize) -> std::io::
 }
 
 /// Read until EOF from a descriptor.
-pub fn read_to_end<'a>(fd: impl Into<Descriptor<'a>>) -> std::io::Result<Vec<u8>> {
-    let descriptor = fd.into();
-    let fd = descriptor.borrow();
+pub fn read_to_end(fd: impl AsFd) -> std::io::Result<Vec<u8>> {
+    let fd = fd.as_fd();
     let mut out = Vec::new();
     let mut buf = [0_u8; 8192];
     loop {
@@ -1218,26 +1190,23 @@ pub fn read_to_end<'a>(fd: impl Into<Descriptor<'a>>) -> std::io::Result<Vec<u8>
 }
 
 /// Read at most `bytes.len()` bytes from a descriptor.
-pub fn read_once<'a>(
-    fd: impl Into<Descriptor<'a>>,
+pub fn read_once(
+    fd: impl AsFd,
     bytes: &mut [u8],
 ) -> std::io::Result<usize> {
-    let descriptor = fd.into();
-    rustix::io::read(descriptor.borrow(), bytes).map_err(std::io::Error::from)
+    rustix::io::read(fd.as_fd(), bytes).map_err(std::io::Error::from)
 }
 
 /// Copy bytes from one pipe to another without consuming the source.
 #[cfg(target_os = "linux")]
-pub fn tee<'a, 'b>(
-    fd_in: impl Into<Descriptor<'a>>,
-    fd_out: impl Into<Descriptor<'b>>,
+pub fn tee(
+    fd_in: impl AsFd,
+    fd_out: impl AsFd,
     length: usize,
 ) -> std::io::Result<usize> {
-    let fd_in = fd_in.into();
-    let fd_out = fd_out.into();
     rustix::pipe::tee(
-        fd_in.borrow(),
-        fd_out.borrow(),
+        fd_in.as_fd(),
+        fd_out.as_fd(),
         length,
         rustix::pipe::SpliceFlags::empty(),
     )
@@ -1245,12 +1214,11 @@ pub fn tee<'a, 'b>(
 }
 
 /// Add or remove nonblocking mode on a descriptor.
-pub fn set_nonblocking<'a>(
-    fd: impl Into<Descriptor<'a>>,
+pub fn set_nonblocking(
+    fd: impl AsFd,
     enabled: bool,
 ) -> std::io::Result<()> {
-    let descriptor = fd.into();
-    let fd = descriptor.borrow();
+    let fd = fd.as_fd();
     let mut flags = rustix::fs::fcntl_getfl(fd).map_err(std::io::Error::from)?;
     flags.set(rustix::fs::OFlags::NONBLOCK, enabled);
     rustix::fs::fcntl_setfl(fd, flags).map_err(std::io::Error::from)
@@ -1344,12 +1312,11 @@ pub fn current_process_group() -> i32 {
     unsafe { libc::getpgrp() }
 }
 
-pub fn foreground_process_group<'a>(fd: impl Into<Descriptor<'a>>) -> std::io::Result<i32> {
-    let descriptor = fd.into();
+pub fn foreground_process_group(fd: impl AsFd) -> std::io::Result<i32> {
     // SAFETY: the kernel validates the descriptor and returns only an
     // integer process-group id. As above, zero is a meaningful transient
     // result in a PID namespace and must not be rejected by a PID newtype.
-    let group = unsafe { libc::tcgetpgrp(descriptor.borrow().as_raw_fd()) };
+    let group = unsafe { libc::tcgetpgrp(fd.as_fd().as_raw_fd()) };
     if group < 0 {
         Err(std::io::Error::last_os_error())
     } else {
@@ -1368,18 +1335,17 @@ pub fn set_process_group(pid: i32, group: i32) -> std::io::Result<()> {
     .map_err(std::io::Error::from)
 }
 
-pub fn set_foreground_process_group<'a>(
-    fd: impl Into<Descriptor<'a>>,
+pub fn set_foreground_process_group(
+    fd: impl AsFd,
     group: i32,
 ) -> std::io::Result<()> {
     if group < 0 {
         return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
     }
-    let descriptor = fd.into();
     // SAFETY: both arguments are scalar values validated above. Passing
     // group zero preserves the kernel's ESRCH result during teardown in a
     // fresh PID namespace, matching the underlying terminal API exactly.
-    if unsafe { libc::tcsetpgrp(descriptor.borrow().as_raw_fd(), group) } < 0 {
+    if unsafe { libc::tcsetpgrp(fd.as_fd().as_raw_fd(), group) } < 0 {
         Err(std::io::Error::last_os_error())
     } else {
         Ok(())
@@ -1513,6 +1479,35 @@ mod tests {
 
         let mut byte = [0];
         assert_eq!(read_once(&duplicate, &mut byte).unwrap(), 0);
+    }
+
+    #[test]
+    fn fd_changes_install_and_close_slots() {
+        let (read, write) = pipe().unwrap();
+        let status = run_in_child(move || {
+            let source = duplicate_cloexec(&write, 10).unwrap();
+            ProcessFdChanges::new([(7, Some(source)), (8, None)])
+                .unwrap()
+                .apply()
+                .unwrap();
+
+            let seven = snapshot_process_fd(7, 10).unwrap().unwrap();
+            write_all(&seven, b"staged").unwrap();
+            if snapshot_process_fd(8, 10).unwrap().is_some() {
+                exit_immediately(2);
+            }
+            exit_immediately(0);
+        })
+        .unwrap();
+
+        assert_eq!(status, 0);
+        assert_eq!(read_exact(&read, 6).unwrap(), b"staged");
+    }
+
+    #[test]
+    fn fd_changes_reject_invalid_targets() {
+        assert!(ProcessFdChanges::new([(-1, None)]).is_err());
+        assert!(ProcessFdChanges::new([(4, None), (4, None)]).is_err());
     }
 }
 

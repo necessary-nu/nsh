@@ -80,7 +80,11 @@ pub struct Shell {
     pub(crate) shell_level: c_int,
     /// Nesting depth of regions that defer delivery of SIGINT.
     pub(crate) interrupt_suppression: c_int,
-    /// The saved-descriptor stack and the closed-descriptor bitmap.
+    /// The shell-language descriptor namespace. Open entries own hidden
+    /// close-on-exec backing descriptors; redirection changes this table,
+    /// never the host process table.
+    pub(crate) fds: crate::fd::FdTable,
+    /// The stack of logical descriptor values saved for restoration.
     /// `redir.rs` owns the shape; this owns the value.
     pub(crate) redirs: crate::redir::RedirStack,
     /// Every variable, the sixteen the shell is born with, the `LINENO`
@@ -135,16 +139,10 @@ pub struct Shell {
     /// Where the shell's own three streams come from.
     ///
     /// [dec:nsh:host-owns-streams] as a field rather than as a process
-    /// global. `move-state` could not move it: `streams::set` had two
-    /// callers with no shell — `streams::install` and the integration
-    /// cases that stand in for a frontend — and giving `set` a receiver
-    /// would have meant making the constructor public, which is the
-    /// invariant that node existed to establish.
-    ///
-    /// The escape it recorded as (2) is what happened, and it needed no
-    /// builder: `shellmain::main_fn` has taken a `Streams` argument since
-    /// [dec:nsh:host-owns-streams] landed, so the constructor takes one
-    /// too and `io`'s descriptors are the initialiser beside it.
+    /// global. `shellmain::main_fn` has taken a `Streams` argument since
+    /// that decision landed; the constructor snapshots those streams into
+    /// `fds`, and `io` retains stable references to its logical output
+    /// slots. No process-global stream installation step remains.
     pub(crate) streams: crate::streams::Streams,
     /// `$?` — the exit status of the last command.
     ///
@@ -181,10 +179,10 @@ impl Shell {
     /// `streams` is the one argument, and it is here rather than on a
     /// setter because the alternative is a process-global that two
     /// shells would share: `docs/api-design.md` §7 and
-    /// [dec:nsh:host-owns-streams]. `Streams::INHERIT` is descriptors 0,
-    /// 1 and 2, which is what a shell started as a process uses and what
-    /// a frontend that has already called [`crate::streams::install`]
-    /// passes.
+    /// [dec:nsh:host-owns-streams]. `Streams::INHERIT` snapshots the
+    /// process's shell-language descriptor range, which is what a shell
+    /// started as a process uses. Explicit streams seed only logical
+    /// descriptors 0, 1 and 2.
     /// A [`crate::builder::Builder`] with every setting at its default.
     ///
     /// The public way to make a shell. `new` stays `pub(crate)` and stays
@@ -195,10 +193,18 @@ impl Shell {
         crate::builder::Builder::new()
     }
 
+    #[cfg(test)]
     pub(crate) fn new(streams: crate::streams::Streams) -> Self {
-        Shell {
-            io: crate::output::ShellIo::new(streams.stdout, streams.stderr),
+        Self::try_new(streams).expect("test shell snapshots its standard streams")
+    }
+
+    pub(crate) fn try_new(streams: crate::streams::Streams) -> std::io::Result<Self> {
+        let fds = crate::fd::FdTable::from_streams(&streams)?;
+        let io = crate::output::ShellIo::new(fds.slot(1)?, fds.slot(2)?);
+        Ok(Shell {
+            io,
             streams,
+            fds,
             aliases: crate::alias::AliasTable::new(),
             backgndpid: 0,
             root_pid: 0,
@@ -225,6 +231,6 @@ impl Shell {
              * owns the process assumes nobody did, and touches nothing
              * outside itself. `Builder::host` replaces this. */
             host: Box::new(crate::host::NoHost),
-        }
+        })
     }
 }

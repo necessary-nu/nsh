@@ -10,7 +10,8 @@ use crate::context::Shell;
 use crate::error::Error;
 use core::ffi::{c_int, c_uint};
 use std::ffi::CString;
-use std::io::Write as _;
+use std::io::{IsTerminal as _, Write as _};
+use std::os::fd::AsFd as _;
 
 use bstr::{BStr, BString};
 
@@ -110,7 +111,14 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
     }
     if let Some(prompt) = &prompt {
-        if nsh_platform::is_terminal(crate::fd_slot(sh.streams.stdin)) {
+        if sh
+            .fds
+            .get(0)
+            .ok()
+            .flatten()
+            .as_ref()
+            .is_some_and(|fd| fd.as_fd().is_terminal())
+        {
             let _ = sh.io.stderr().write_all(prompt.as_bytes());
         }
     }

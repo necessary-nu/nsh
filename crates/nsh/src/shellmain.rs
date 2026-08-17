@@ -311,10 +311,9 @@ pub fn main(
 ///
 /// The `streams` argument is [dec:nsh:host-owns-streams] at the entry
 /// point: the shell is *given* its three streams rather than assuming
-/// descriptors 0, 1 and 2. A frontend that has already lent the shell the
-/// standard descriptors -- which is what `crate::streams::install` does,
-/// and what the `dash` binary wants -- passes
-/// [`crate::streams::Streams::INHERIT`].
+/// descriptors 0, 1 and 2. [`crate::streams::Streams::INHERIT`] snapshots
+/// the frontend process's descriptor table into the shell's owned logical
+/// table; supplied streams need no process-wide installation step.
 ///
 /// **It returns now**, with the status the shell left with.
 ///
@@ -335,7 +334,9 @@ pub fn main_fn(
      * every function that has been threaded so far reaches its state
      * through the borrow that starts on the next line
      * ([dec:nsh:no-ambient-state]). */
-    let mut sh = Shell::new(streams);
+    let Ok(mut sh) = Shell::try_new(streams) else {
+        return crate::status::ExitStatus::from_raw(2);
+    };
     /* And it is a shell that owns its process, so it gets the host that
      * says so. `Shell::new` defaults to `NoHost` because a *library* shell
      * must; calling this function is the caller stating that this process
@@ -480,11 +481,11 @@ fn read_profile(
     let mut name: BString = crate::parser::expandstr(sh, name)?;
     name.push(b'\0');
 
-    if crate::input::setinputfile(sh,
+    if !crate::input::setinputfile(
+        sh,
         BStr::new(crate::mystring::cstr_prefix(&name)),
         crate::input::INPUT_PUSH_FILE | crate::input::INPUT_NOFILE_OK,
-    )? < 0
-    {
+    )? {
         return Ok(crate::eval::Flow::Done(0));
     }
 

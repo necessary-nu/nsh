@@ -225,14 +225,29 @@ pub fn shellexec(
     mut idx: c_int,
 ) -> Result<crate::eval::Flow, crate::error::Error> {
     let e: c_int;
-    let exerrno: c_int;
     let command = argv.first().expect("shellexec needs a command name");
+
+    /* A library shell may fork children, but it may not replace the host
+     * process itself without the host's explicit grant. A forked shell owns
+     * the child terminus regardless of which host policy its parent used. */
+    if sh.shell_level == 0 && !sh.host.may_replace_process() {
+        return exec_failure(sh, command, nsh_platform::permission_denied_error_code());
+    }
 
     /* The C's `environment()` leaves its array in the stack allocator; ours
      * owns it, so the `Vec` has to outlive every `execve` below. */
     let envv = crate::var::environment(sh);
     let words: Vec<CString> = argv.iter().map(|word| crate::shell::cstring(word)).collect();
     let arguments: Vec<&CStr> = words.iter().map(|word| word.as_c_str()).collect();
+    if let Err(error) = sh.fds.materialize() {
+        return exec_failure(
+            sh,
+            command,
+            error
+                .raw_os_error()
+                .unwrap_or_else(nsh_platform::permission_denied_error_code),
+        );
+    }
     if command.contains(&b'/') {
         e = tryexec(arguments[0], &arguments, &envv);
     } else {
@@ -252,14 +267,22 @@ pub fn shellexec(
         e = se;
     }
 
+    exec_failure(sh, command, e)
+}
+
+fn exec_failure(
+    sh: &mut crate::context::Shell,
+    command: &BStr,
+    error: c_int,
+) -> Result<crate::eval::Flow, crate::error::Error> {
     /* Map to POSIX errors */
-    exerrno = nsh_platform::command_exec_failure_status(e);
+    let exerrno = nsh_platform::command_exec_failure_status(error);
     sh.status = exerrno;
     /* TRACE(("shellexec failed for %s, errno %d, suppressint %d\n", ...)); */
     let mut message = Vec::new();
     message.extend_from_slice(command);
     message.extend_from_slice(b": ");
-    message.extend_from_slice(&crate::error::errmsg(e, E_EXEC));
+    message.extend_from_slice(&crate::error::errmsg(error, E_EXEC));
     /* `exerror(EXEND, msg)`: text *and* control flow, which is why the
      * bridge took the code as a parameter rather than reading it off the
      * value. The text is written here, where dash writes it, and the value

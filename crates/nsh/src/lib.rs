@@ -18,10 +18,9 @@
 //!
 //! Two modules stay public because they have callers outside the crate and
 //! nothing smaller would serve them: [`shellmain`], whose `main_fn` is the
-//! port of `main()` and is what the frontend and the four integration
-//! tests invoke, and [`streams`], whose `install` lends the shell the
-//! host's descriptors for the duration. The other thirty-six are
-//! `pub(crate)`.
+//! port of `main()` and is what the frontend and integration tests invoke,
+//! and [`streams`], which owns the shell's initial logical standard streams.
+//! The other thirty-six are `pub(crate)`.
 //!
 //! `#![deny(missing_docs)]` is on, which is the point of closing rather
 //! than a tidiness measure: [dec:nsh:public-surface] asked for the surface
@@ -96,14 +95,6 @@ pub use crate::source::Source;
 pub use crate::status::{ExitStatus, Signal};
 pub use crate::streams::Streams;
 
-/// Turn a shell-language descriptor number into the platform boundary's
-/// explicit process-table slot type.
-#[inline]
-pub(crate) fn fd_slot(number: i32) -> nsh_platform::DescriptorSlot {
-    nsh_platform::DescriptorSlot::new(number)
-        .expect("a live shell descriptor slot must be non-negative")
-}
-
 // ---- the shell instance ----------------------------------------------
 //
 // The receiver every function that touches shell state is being given,
@@ -116,6 +107,7 @@ pub(crate) mod source;
 // ---- foundation -----------------------------------------------------
 pub(crate) mod error;
 pub(crate) mod escape;
+pub(crate) mod fd;
 pub(crate) mod mystring;
 pub(crate) mod output;
 pub(crate) mod shell;

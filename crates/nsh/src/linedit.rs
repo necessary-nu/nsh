@@ -253,12 +253,12 @@ impl LineEditor {
     /// Duplicate the shell-owned descriptors and activate a native session.
     ///
     pub fn new(
-        input_fd: nsh_platform::DescriptorSlot,
-        output_fd: nsh_platform::DescriptorSlot,
+        input_fd: impl AsFd,
+        output_fd: impl AsFd,
         mode: EditingMode,
     ) -> Result<Self, LineEditorError> {
-        let input = nsh_platform::duplicate_file(input_fd)?;
-        let output = nsh_platform::duplicate_file(output_fd)?;
+        let input = nsh_platform::duplicate_file(&input_fd)?;
+        let output = nsh_platform::duplicate_file(&output_fd)?;
         let terminal_attributes = nshedit_plat::terminal::read_attributes(input.as_fd()).ok();
         let terminal = OwnedTerminal::new(input.try_clone()?, output.try_clone()?);
         let config = EditorConfig::default()

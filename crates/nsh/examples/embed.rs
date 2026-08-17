@@ -52,11 +52,9 @@ fn run_and_capture() -> Result<(), Error> {
 
     sh.set_var(BStr::new(b"PATH"), BStr::new(b"/usr/bin:/bin"))?;
 
-    // Command substitution reads the child through a pipe the shell makes,
-    // so an external command's output reaches the script whatever the
-    // shell's own stdout is. What the *capture* holds is what the shell
-    // itself wrote — see `Streams::capture`, and §10 for the per-instance
-    // descriptor table that would extend it to a forked command's writes.
+    // Command substitution and direct external commands resolve the same
+    // per-instance logical descriptors as builtins, so capture covers all
+    // of them without replacing the host process's stdout.
     let status: ExitStatus = sh.run(b"for f in /etc/hostname; do echo \"$(wc -l < \"$f\") $f\"; done")?;
     let out: BString = sh.take_captured_stdout().map_err(io_error)?;
 

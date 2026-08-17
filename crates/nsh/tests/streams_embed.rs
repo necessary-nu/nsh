@@ -1,9 +1,9 @@
 //! Does the library actually run on streams it is given?
 //!
-//! The unit tests in `streams.rs` check `install` and `restore` in
-//! isolation. These run the whole shell and read what came out, which is
-//! the only thing that shows [dec:nsh:host-owns-streams] is a property of
-//! the shell rather than of one module.
+//! The unit tests in `streams.rs` check ownership in isolation. These run
+//! the whole shell and read what came out, which is the only thing that
+//! shows [dec:nsh:host-owns-streams] is a property of the shell rather than
+//! of one module.
 //!
 //! Everything here forks. `main_fn` runs a whole shell to completion --
 //! including its EXIT trap and its job-control teardown -- so a test that
@@ -11,7 +11,7 @@
 //! finished exiting. It returns a status rather than `_exit`ing since
 //! [dec:nsh:host-owns-the-process], so each child ends itself.
 
-use nsh::streams::{self, Streams};
+use nsh::streams::Streams;
 
 fn read_all(fd: &std::os::fd::OwnedFd) -> String {
     let bytes = nsh_platform::read_to_end(fd).expect("read pipe");
@@ -60,51 +60,87 @@ fn a_builtin_writes_to_the_stream_the_shell_was_given() {
     assert_eq!(read_all(&r), "from the library\n");
 }
 
-/// The documented limit of constructor mode, pinned as a test rather than
-/// left as a claim in a comment: the *language's* descriptor numbers still mean
-/// the process's descriptors, so an external command's output goes to
-/// descriptor 1 and not to the stream the shell was handed.
-///
-/// Making these agree needs a per-instance descriptor table, which is
-/// deferred to [dec:nsh:no-ambient-state].
+/// External commands materialize the shell's logical descriptor table in the
+/// child. The host's descriptor 1 is deliberately a different pipe so this
+/// also proves that materialization never leaks into the parent process.
 #[test]
-fn set_does_not_carry_to_an_external_command() {
+fn supplied_stdout_reaches_external_commands() {
     let (shell_r, shell_w) = nsh_platform::pipe().expect("create shell pipe");
     let (fd1_r, fd1_w) = nsh_platform::pipe().expect("create fd 1 pipe");
     let st = run_shell("echo builtin; /bin/echo external", move || {
-        nsh_platform::replace_descriptor(
-            &fd1_w,
-            nsh_platform::DescriptorSlot::new(1).unwrap(),
-        )
+        nsh_platform::ProcessFdChanges::new([(
+            1,
+            Some(nsh_platform::duplicate_cloexec(&fd1_w, 10).unwrap()),
+        )])
+        .unwrap()
+        .apply()
         .expect("install fd 1");
         Streams::from_fds(std::io::stdin(), &shell_w, std::io::stderr())
             .expect("duplicate streams")
     });
     assert_eq!(st, 0);
-    assert_eq!(read_all(&shell_r), "builtin\n");
-    assert_eq!(read_all(&fd1_r), "external\n");
+    assert_eq!(read_all(&shell_r), "builtin\nexternal\n");
+    assert_eq!(read_all(&fd1_r), "");
 }
 
-/// `install` mode is the one with full fidelity: descriptor 1 *is* the
-/// stream inside the shell, so built-ins, external commands and
-/// redirection all agree without the shell knowing anything about it.
+/// A pipeline changes the logical endpoints inherited by both children, not
+/// the host's process-wide standard descriptors.
 #[test]
-fn install_carries_to_builtins_redirection_and_external_commands() {
-    let (r, w) = nsh_platform::pipe().expect("create pipe");
-    let script = "echo builtin; /bin/echo external; { echo redirected > /dev/stdout; }";
-    let st = run_shell(script, move || {
-        // Deliberately not restored: this child is about to become a
-        // shell that ends in `_exit`, so there is no "afterwards" in
-        // which to hand the descriptors back.
-        let supplied = Streams::from_fds(std::io::stdin(), &w, std::io::stderr())
-            .expect("duplicate streams");
-        let lent = streams::install(&supplied).expect("install");
-        core::mem::forget(lent);
-        // `install` put them on 0, 1 and 2, so the shell is built there.
-        Streams::INHERIT
+fn supplied_stdout_reaches_pipeline_output() {
+    let (shell_r, shell_w) = nsh_platform::pipe().expect("create shell pipe");
+    let (fd1_r, fd1_w) = nsh_platform::pipe().expect("create fd 1 pipe");
+    let st = run_shell("printf pipeline | /usr/bin/tr a-z A-Z", move || {
+        nsh_platform::ProcessFdChanges::new([(
+            1,
+            Some(nsh_platform::duplicate_cloexec(&fd1_w, 10).unwrap()),
+        )])
+        .unwrap()
+        .apply()
+        .expect("install fd 1");
+        Streams::from_fds(std::io::stdin(), &shell_w, std::io::stderr())
+            .expect("duplicate streams")
     });
     assert_eq!(st, 0);
-    assert_eq!(read_all(&r), "builtin\nexternal\nredirected\n");
+    assert_eq!(read_all(&shell_r), "PIPELINE");
+    assert_eq!(read_all(&fd1_r), "");
+}
+
+/// A command-scoped redirection replaces and restores the shell's logical
+/// stdout. The redirected bytes go to the file, then `cat` inherits the
+/// restored supplied stream.
+#[test]
+fn supplied_stdout_survives_redirection() {
+    let mut template = std::env::temp_dir();
+    template.push(format!(
+        "nsh-logical-descriptor-test-{}-XXXXXX",
+        std::process::id()
+    ));
+    let (file, path) =
+        nsh_platform::create_temporary_file(template.as_os_str()).expect("create target");
+    drop(file);
+    let path_text = path.to_string_lossy();
+    let script = format!(
+        "echo redirected > '{path_text}'; echo restored; /bin/cat '{path_text}'"
+    );
+
+    let (shell_r, shell_w) = nsh_platform::pipe().expect("create shell pipe");
+    let (fd1_r, fd1_w) = nsh_platform::pipe().expect("create fd 1 pipe");
+    let st = run_shell(&script, move || {
+        nsh_platform::ProcessFdChanges::new([(
+            1,
+            Some(nsh_platform::duplicate_cloexec(&fd1_w, 10).unwrap()),
+        )])
+        .unwrap()
+        .apply()
+        .expect("install fd 1");
+        Streams::from_fds(std::io::stdin(), &shell_w, std::io::stderr())
+            .expect("duplicate streams")
+    });
+    let _ = std::fs::remove_file(path);
+
+    assert_eq!(st, 0);
+    assert_eq!(read_all(&shell_r), "restored\nredirected\n");
+    assert_eq!(read_all(&fd1_r), "");
 }
 
 /// A shell reading its script from a stream it was given, rather than
@@ -121,13 +157,11 @@ fn the_shell_reads_a_script_from_the_stream_it_was_given() {
     let st = nsh_platform::run_in_child(move || {
             let supplied = Streams::from_fds(&script_r, &out_w, std::io::stderr())
                 .expect("duplicate streams");
-            let lent = streams::install(&supplied).expect("install");
-            core::mem::forget(lent); // see the note in the test above
             /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
                ending the process the caller's act — so this fork's child
                has to end itself. Returning would carry it back into the
                test harness after the fork. */
-            let status = nsh::shellmain::main_fn(argv, Streams::INHERIT);
+            let status = nsh::shellmain::main_fn(argv, supplied);
             nsh_platform::exit_immediately(status.code().into());
         })
         .expect("run shell child");
