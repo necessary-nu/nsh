@@ -456,19 +456,22 @@ mod tests {
     fn a_stream_source_reads_the_shells_own_standard_input() {
         let _g = crate::testutil::lock();
         let (read, write) = nsh_platform::pipe().unwrap();
-        nsh_platform::write_all(write, b"exit 5\n").unwrap();
-        nsh_platform::close_fd(write).unwrap();
+        nsh_platform::write_all(&write, b"exit 5\n").unwrap();
+        drop(write);
         let mut sh = Shell::builder()
-            .streams(crate::streams::Streams {
-                stdin: read,
-                stdout: 1,
-                stderr: 2,
-            })
+            .streams(
+                crate::streams::Streams::from_fds(
+                    &read,
+                    std::io::stdout(),
+                    std::io::stderr(),
+                )
+                .unwrap(),
+            )
             .build()
             .unwrap();
         let st = sh.run(Source::stream()).unwrap();
         assert_eq!(st.code(), 5);
-        nsh_platform::close_fd(read).unwrap();
+        drop(read);
     }
 
     /// The whole reason `run_command` is on the surface: a value with

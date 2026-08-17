@@ -83,10 +83,6 @@ pub fn exitreset(sh: &mut crate::context::Shell, by_exitcmd: bool) {
         sh.eval.loopnest = 0;
         sh.eval.inps4 = 0;
 
-        if sh.eval.tpip[0] >= 0 {
-            let _ = nsh_platform::close_fd(sh.eval.tpip[0]);
-            let _ = nsh_platform::close_fd(sh.eval.tpip[1]);
-        }
     }
 
     /* from expand.c: */

@@ -354,7 +354,7 @@ impl Write for Output {
 
 fn write_fd_once(bytes: &[u8], fd: c_int) -> io::Result<usize> {
     let amount = bytes.len().min(isize::MAX as usize);
-    nsh_platform::write_once(fd, &bytes[..amount])
+    nsh_platform::write_once(crate::fd_slot(fd), &bytes[..amount])
 }
 
 fn write_fd(mut bytes: &[u8], fd: c_int) -> io::Result<()> {
@@ -367,8 +367,8 @@ fn write_fd(mut bytes: &[u8], fd: c_int) -> io::Result<()> {
 
 // [spec:dash:def:output.xwrite-fn]
 // [spec:dash:sem:output.xwrite-fn]
-pub fn xwrite(fd: c_int, bytes: &[u8]) -> c_int {
-    if write_fd(bytes, fd).is_ok() { 0 } else { -1 }
+pub fn xwrite<'a>(fd: impl Into<nsh_platform::Descriptor<'a>>, bytes: &[u8]) -> c_int {
+    if nsh_platform::write_all(fd, bytes).is_ok() { 0 } else { -1 }
 }
 
 // The reference's three C-stdio routines are inside both `#ifdef notyet`
@@ -428,12 +428,13 @@ pub fn outerr(f: &Output) -> c_int {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::fd::{AsRawFd, OwnedFd};
 
     /// A `struct output` writing into a pipe, with a buffer of `bufsize`.
     struct Sink {
         out: Box<Output>,
-        r: c_int,
-        w: c_int,
+        r: Option<OwnedFd>,
+        w: Option<OwnedFd>,
     }
 
     impl Sink {
@@ -442,34 +443,33 @@ mod tests {
             let out = Box::new(Output {
                 buf: allocated.then(|| Vec::with_capacity(bufsize)),
                 bufsize: bufsize as usize,
-                fd: write,
+                fd: write.as_raw_fd(),
                 flags: 0,
             });
             Sink {
                 out,
-                r: read,
-                w: write,
+                r: Some(read),
+                w: Some(write),
             }
+        }
+        fn read(&self) -> &OwnedFd {
+            self.r.as_ref().expect("reader is still owned")
+        }
+        fn write(&self) -> &OwnedFd {
+            self.w.as_ref().expect("writer is still owned")
+        }
+        fn write_number(&self) -> c_int {
+            self.write().as_raw_fd()
         }
         /// Bytes that have actually reached the pipe.
         fn drained(&mut self) -> Vec<u8> {
             // Close the writer so the read sees EOF rather than blocking.
-            let _ = nsh_platform::close_fd(self.w);
-            self.w = -1;
-            nsh_platform::read_to_end(self.r).expect("drain output test pipe")
+            drop(self.w.take());
+            nsh_platform::read_to_end(self.read()).expect("drain output test pipe")
         }
         /// Bytes still sitting in the buffer, unflushed.
         fn buffered(&self) -> usize {
             self.out.buf.as_ref().map_or(0, Vec::len)
-        }
-    }
-
-    impl Drop for Sink {
-        fn drop(&mut self) {
-            if self.w >= 0 {
-                let _ = nsh_platform::close_fd(self.w);
-            }
-            let _ = nsh_platform::close_fd(self.r);
         }
     }
 
@@ -514,7 +514,7 @@ mod tests {
         assert_eq!(failed.out.buf.as_ref().unwrap().as_ptr(), base);
         assert_eq!(failed.out.buf.as_ref().unwrap().capacity(), capacity);
 
-        failed.out.fd = failed.w;
+        failed.out.fd = failed.write_number();
         failed.out.flags = 0;
         outmem(b"kept", &mut failed.out);
         let _ = failed.out.flush();
@@ -548,7 +548,7 @@ mod tests {
         s.out.fd = -1;
         let _ = s.out.flush();
         assert_eq!(s.buffered(), 2);
-        s.out.fd = s.w;
+        s.out.fd = s.write_number();
         let _ = s.out.flush();
         assert_eq!(s.drained(), b"xy");
     }
@@ -587,7 +587,7 @@ mod tests {
         s.out.fd = 9999;
         assert!(s.out.write_all(b"bad").is_err());
 
-        s.out.fd = s.w;
+        s.out.fd = s.write_number();
         assert!(s.out.write_all(b"good").is_ok());
         assert_ne!(s.out.flags & OUTPUT_ERR, 0);
         assert_eq!(s.drained(), b"good");
@@ -616,7 +616,7 @@ mod tests {
         assert_eq!(s.out.buf.as_deref(), Some(&b""[..]));
         assert_ne!(s.out.flags & OUTPUT_ERR, 0);
 
-        s.out.fd = s.w;
+        s.out.fd = s.write_number();
         assert_eq!(s.out.write(b"xy").unwrap(), 2);
         s.out.flush().unwrap();
         assert_eq!(s.drained(), b"xy");
@@ -632,7 +632,7 @@ mod tests {
         assert_eq!(s.out.buf.as_deref(), Some(&b"xy"[..]));
         assert_ne!(s.out.flags & OUTPUT_ERR, 0);
 
-        s.out.fd = s.w;
+        s.out.fd = s.write_number();
         let _ = s.out.flush();
         assert_eq!(s.drained(), b"xy");
     }
@@ -641,20 +641,20 @@ mod tests {
     #[test]
     fn write_reports_a_kernel_short_write() {
         let mut s = Sink::new(0, false);
-        nsh_platform::set_nonblocking(s.w, true).unwrap();
+        nsh_platform::set_nonblocking(s.write(), true).unwrap();
 
         let pipe_buf = nsh_platform::PIPE_BUFFER;
         let fill = vec![b'q'; pipe_buf];
         let mut filled = 0usize;
         loop {
-            match nsh_platform::write_once(s.w, &fill) {
+            match nsh_platform::write_once(s.write(), &fill) {
                 Ok(written) => filled += written,
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
                 Err(error) => panic!("unexpected pipe fill error: {error}"),
             }
         }
 
-        let _ = nsh_platform::read_exact(s.r, pipe_buf).unwrap();
+        let _ = nsh_platform::read_exact(s.read(), pipe_buf).unwrap();
 
         let payload = vec![b'x'; pipe_buf * 2];
         let written = s.out.write(&payload).unwrap();
@@ -690,16 +690,14 @@ mod tests {
     fn xwrite_writes_everything_or_reports_failure() {
         let mut s = Sink::new(1, true);
         let payload = vec![b'q'; 200_000];
-        let w = s.w;
         let reader = std::thread::spawn({
-            let r = s.r;
-            move || nsh_platform::read_to_end(r).unwrap().len()
+            let r = s.r.take().expect("reader is still owned");
+            move || nsh_platform::read_to_end(&r).unwrap().len()
         });
-        assert_eq!(xwrite(w, &payload), 0);
-        nsh_platform::close_fd(w).unwrap();
-        s.w = -1;
+        assert_eq!(xwrite(s.write(), &payload), 0);
+        drop(s.w.take());
         assert_eq!(reader.join().unwrap(), 200_000);
-        assert_eq!(xwrite(9999, &payload[..1]), -1);
+        assert_eq!(xwrite(crate::fd_slot(9999), &payload[..1]), -1);
     }
 
     // [spec:dash:sem:output.freestdout-fn/test]
@@ -721,7 +719,7 @@ mod tests {
     #[test]
     fn flushall_drains_the_stdout_writer() {
         let mut s = Sink::new(64, true);
-        let mut io = ShellIo::new(s.w, 2);
+        let mut io = ShellIo::new(s.write_number(), 2);
         io.stdout().bufsize = s.out.bufsize;
 
         io.stdout().write_all(b"n=3").unwrap();

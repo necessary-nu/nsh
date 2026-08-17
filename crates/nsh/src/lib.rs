@@ -96,6 +96,14 @@ pub use crate::source::Source;
 pub use crate::status::{ExitStatus, Signal};
 pub use crate::streams::Streams;
 
+/// Turn a shell-language descriptor number into the platform boundary's
+/// explicit process-table slot type.
+#[inline]
+pub(crate) fn fd_slot(number: i32) -> nsh_platform::DescriptorSlot {
+    nsh_platform::DescriptorSlot::new(number)
+        .expect("a live shell descriptor slot must be non-negative")
+}
+
 // ---- the shell instance ----------------------------------------------
 //
 // The receiver every function that touches shell state is being given,

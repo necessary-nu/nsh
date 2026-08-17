@@ -152,10 +152,10 @@ pub fn histedit(sh: &mut crate::context::Shell) {
 
         if let Some(mode) = mode
             && !editing_active(sh)
-            && nsh_platform::is_terminal(sin)
+            && nsh_platform::is_terminal(crate::fd_slot(sin))
         {
             crate::error::INTOFF(sh);
-            match LineEditor::new(sin, serr, mode) {
+            match LineEditor::new(crate::fd_slot(sin), crate::fd_slot(serr), mode) {
                 Ok(editor) => sh.histedit.editor = Some(editor),
                 Err(_) => {
                     sh.histedit.editor = None;

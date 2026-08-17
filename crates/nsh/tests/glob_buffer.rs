@@ -30,10 +30,8 @@ use std::path::PathBuf;
 
 use nsh::streams::{self, Streams};
 
-fn read_all(fd: i32) -> Vec<u8> {
-    let bytes = nsh_platform::read_to_end(fd).expect("read pipe");
-    nsh_platform::close_fd(fd).expect("close pipe reader");
-    bytes
+fn read_all(fd: &std::os::fd::OwnedFd) -> Vec<u8> {
+    nsh_platform::read_to_end(fd).expect("read pipe")
 }
 
 /// Run `script` with the shell's stdout on a pipe and return what it wrote.
@@ -42,12 +40,9 @@ fn out_of(script: &str) -> Vec<u8> {
     let (r, w) = nsh_platform::pipe().expect("create pipe");
     let argv: Vec<Vec<u8>> = vec![b"sh".to_vec(), b"-c".to_vec(), script.as_bytes().to_vec()];
     nsh_platform::run_in_child(move || {
-            let lent = streams::install(Streams {
-                stdin: 0,
-                stdout: w,
-                stderr: 2,
-            })
-            .expect("install");
+            let supplied = Streams::from_fds(std::io::stdin(), &w, std::io::stderr())
+                .expect("duplicate streams");
+            let lent = streams::install(&supplied).expect("install");
             core::mem::forget(lent);
             /* `install` put the supplied descriptors on 0, 1 and 2, so the
                shell is built on the standard ones. This used to read
@@ -62,8 +57,7 @@ fn out_of(script: &str) -> Vec<u8> {
             nsh_platform::exit_immediately(status.code().into());
         })
         .expect("run shell child");
-    nsh_platform::close_fd(w).expect("close pipe writer");
-    read_all(r)
+    read_all(&r)
 }
 
 /// A fresh directory under the system temporary directory. Its own name

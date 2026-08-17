@@ -62,12 +62,9 @@ fn run(script: &str) -> (String, i32) {
             // `install` and not `set`: these scripts run external commands
             // and command substitutions, and only `install` makes the
             // pipe *be* descriptors 1 and 2 inside the shell.
-            let lent = streams::install(Streams {
-                stdin: 0,
-                stdout: w,
-                stderr: w,
-            })
-            .expect("install");
+            let supplied = Streams::from_fds(std::io::stdin(), &w, &w)
+                .expect("duplicate streams");
+            let lent = streams::install(&supplied).expect("install");
             core::mem::forget(lent);
             /* `install` put the supplied descriptors on 0, 1 and 2, so the
                shell is built on the standard ones. This used to read
@@ -82,9 +79,7 @@ fn run(script: &str) -> (String, i32) {
             nsh_platform::exit_immediately(status.code().into());
         })
         .expect("run shell child");
-    nsh_platform::close_fd(w).expect("close pipe writer");
-    let bytes = nsh_platform::read_to_end(r).expect("read pipe");
-    nsh_platform::close_fd(r).expect("close pipe reader");
+    let bytes = nsh_platform::read_to_end(&r).expect("read pipe");
     (String::from_utf8_lossy(&bytes).into_owned(), status)
 }
 

@@ -537,6 +537,26 @@ anything that could run a destructor.
 **Risk R2. Which node.** `process-model` for ownership types;
 `move-state` for `redirlist`/`closed_redirs`.
 
+**Implemented follow-up (2026-08-17).** The ownership conclusion above was
+too conservative once the error mechanism and interrupt brackets had already
+become explicit. Every descriptor produced by open, pipe, memfd, or duplicate
+is now an `OwnedFd`. Pipes own both ends, parse-input frames own files they
+open, command substitution owns its read end, job control owns its tty, and a
+redirection save slot is `Empty`, `Closed`, or `Open(OwnedFd)`. Normal paths
+close none of those by number; scope and unwind drop the owning values. The
+fork-reset path remains exceptional and deliberately forgets saved handles,
+preserving dash's abandon-without-close behaviour.
+
+The only numbers left at the platform boundary are process descriptor-table
+slots named by shell syntax. They have a purpose-specific `DescriptorSlot`
+type rather than `RawFd`. Replacing `n` for `n>&m` and clearing `n` for
+`n>&-` cannot be represented by `std`: the target may be an arbitrary closed
+slot and no Rust value owns it. Standard slots 0, 1, and 2 use rustix's safe
+stdio operations; the arbitrary-slot operations remain the two isolated raw
+process-table primitives in `nsh-platform`. Removing those requires the
+per-instance logical descriptor table described in `docs/api-design.md` §7,
+not another syscall wrapper.
+
 ### 4.10 `input.rs` — why `BufRead` is not the model
 
 **What it is.** 892 lines, 9 `static mut`. `struct parsefile`

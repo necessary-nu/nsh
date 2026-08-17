@@ -110,7 +110,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
     }
     if let Some(prompt) = &prompt {
-        if nsh_platform::is_terminal(sh.streams.stdin) {
+        if nsh_platform::is_terminal(crate::fd_slot(sh.streams.stdin)) {
             let _ = sh.io.stderr().write_all(prompt.as_bytes());
         }
     }

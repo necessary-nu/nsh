@@ -5,6 +5,7 @@ use crate::error::Error;
 use bstr::BStr;
 use core::ffi::{c_int, c_uint};
 use std::io::Write;
+use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
 
 use crate::context::Shell;
@@ -25,24 +26,48 @@ pub const REDIR_SAVEFD2: c_int = 0o3; /* set preverrout */
 pub const USE_MEMFD_CREATE: c_int = 1;
 pub const HAVE_F_DUPFD_CLOEXEC: c_int = 1;
 
-const EMPTY: c_int = -2; /* marks an unused slot in redirtab */
-const CLOSED: c_int = -1; /* fd opened for redir needs to be closed */
-
 /// `PIPE_BUF` where available, 4096 otherwise.  4096 on Linux.
 const PIPESIZE: usize = 4096;
+
+/// Both owned ends of a pipe. Dropping either field closes that endpoint.
+#[derive(Debug)]
+pub struct Pipe {
+    pub read: OwnedFd,
+    pub write: OwnedFd,
+}
+
+enum RedirectSource {
+    Noop,
+    Close,
+    Slot(c_int),
+    Owned(OwnedFd),
+}
+
+impl RedirectSource {
+    fn is_open(&self) -> bool {
+        matches!(self, Self::Slot(_) | Self::Owned(_))
+    }
+
+    fn already_occupies(&self, target: c_int) -> bool {
+        matches!(self, Self::Owned(fd) if fd.as_raw_fd() == target)
+    }
+}
 
 // [spec:dash:def:redir.redirtab]
 /// `MKINIT struct redirtab { … }` — absent from the port manifest because the
 /// `MKINIT` marker defeated the extractor.
 ///
-/// The C's `next` is gone with the intrusive stack. The slots stay plain
-/// `c_int`s rather than `OwnedFd`s on purpose: `popredir` restores with
-/// `dup2` and then closes, it is reached from the unwind path, and giving a
-/// slot a destructor would move a descriptor close to a point the C never
-/// had one. `docs/std-replacements.md` §4.9.
-#[repr(C)]
+/// The C's `next` is gone with the intrusive stack. Saved descriptors are
+/// owned: ordinary unwind restores and drops them; fork reset deliberately
+/// forgets them to preserve the C's abandon-without-close path.
 pub struct redirtab {
-    pub renamed: [c_int; 10],
+    renamed: [SavedDescriptor; 10],
+}
+
+enum SavedDescriptor {
+    Empty,
+    Closed,
+    Open(OwnedFd),
 }
 
 /// What this module owns of the shell's descriptor state: the stack of
@@ -82,11 +107,11 @@ impl RedirStack {
 
 // [spec:dash:def:redir.update-closed-redirs-fn]
 // [spec:dash:sem:redir.update-closed-redirs-fn]
-fn update_closed_redirs(sh: &mut Shell, fd: c_int, nfd: c_int) -> c_uint {
+fn update_closed_redirs(sh: &mut Shell, fd: c_int, open: bool) -> c_uint {
     let val: c_uint = sh.redirs.closed;
     let bit: c_uint = 1u32 << fd;
 
-    if nfd >= 0 {
+    if open {
         sh.redirs.closed &= !bit;
     } else {
         sh.redirs.closed |= bit;
@@ -111,9 +136,6 @@ pub fn redirect(
     flags: c_int,
 ) -> Result<(), Error> {
     let sv: Option<usize>;
-    let mut i: c_int;
-    let mut fd: c_int;
-    let mut newfd: c_int;
 
     /* #if notyet — the `memory[10]` in-memory sink is not compiled. */
     if redir.is_empty() {
@@ -130,9 +152,9 @@ pub fn redirect(
     /* The C walks the list through `n->nfile.next`, which is the same offset
      * in every redirection arm; the list is a `Vec` now. */
     for n in redir {
-        newfd = openredirect(sh, n)?;
-        if newfd >= -1 {
-            fd = n.redir_fd();
+        let source = openredirect(sh, n)?;
+        if !matches!(source, RedirectSource::Noop) {
+            let fd = n.redir_fd();
             /* The C's `fd == 0` is "this redirection replaced the shell's
              * own input", which is what makes the buffered parse state
              * stale -- not descriptor 0 for its own sake. */
@@ -143,30 +165,31 @@ pub fn redirect(
             if let Some(svi) = sv {
                 let closed: c_uint;
 
-                /* The C takes `p = &sv->renamed[fd]` before `fd` becomes -1,
-                 * so the write below lands in the slot the read came from. */
                 let p_slot = fd as usize;
-                i = sh.redirs.list[svi].renamed[p_slot];
+                closed = update_closed_redirs(sh, fd, source.is_open());
 
-                closed = update_closed_redirs(sh, fd, newfd);
-
-                if i == EMPTY {
-                    i = CLOSED;
-                    if fd != newfd && closed == 0 {
-                        i = savefd(sh, fd, fd)?;
-                        fd = -1;
-                    }
+                if matches!(sh.redirs.list[svi].renamed[p_slot], SavedDescriptor::Empty) {
+                    /* An open can itself claim an inherited closed target:
+                     * `3>file` commonly returns descriptor 3. There was then
+                     * nothing to save. The old integer path expressed this
+                     * as `fd == newfd`; with ownership it has to be tested
+                     * before `source` moves into `install_redirect`. */
+                    let saved = if closed != 0 || source.already_occupies(fd) {
+                        SavedDescriptor::Closed
+                    } else {
+                        match save_slot(sh, fd)? {
+                            Some(saved) => SavedDescriptor::Open(saved),
+                            None => SavedDescriptor::Closed,
+                        }
+                    };
+                    sh.redirs.list[svi].renamed[p_slot] = saved;
                 }
-
-                sh.redirs.list[svi].renamed[p_slot] = i;
             }
 
-            if fd != newfd {
-                /* The `?` returns between the INTOFF above and the INTON
-                 * below, leaking the counter exactly as the longjmp out of
-                 * `sh_dup2` did; see docs/errors-are-values.md 2.4. */
-                dupredirect(sh, n, newfd)?;
-            }
+            /* The `?` returns between the INTOFF above and the INTON below,
+             * leaking the counter exactly as the old `sh_dup2` error path
+             * did; see docs/errors-are-values.md 2.4. */
+            install_redirect(sh, fd, source)?;
         }
     }
     INTON(sh);
@@ -184,9 +207,9 @@ pub fn redirect(
          * with it because REDIR_SAVEFD2 is 03: every caller that reaches
          * this line passed REDIR_PUSH and so has a frame. */
         if let Some(svi) = sv {
-            let renamed = sh.redirs.list[svi].renamed;
-            if (serr as usize) < renamed.len() && renamed[serr as usize] >= 0 {
-                sh.io.previous_stderr().fd = renamed[serr as usize];
+            let renamed = &sh.redirs.list[svi].renamed;
+            if let Some(SavedDescriptor::Open(saved)) = renamed.get(serr as usize) {
+                sh.io.previous_stderr().fd = saved.as_raw_fd();
             }
         }
     }
@@ -225,22 +248,22 @@ pub fn sh_open(
     pathname: &BStr,
     mode: nsh_platform::OpenMode,
     mayfail: c_int,
-) -> Result<c_int, Error> {
+) -> Result<Option<OwnedFd>, Error> {
     loop {
         let result = nsh_platform::open_path(
             std::ffi::OsStr::from_bytes(pathname),
             mode,
         );
         match result {
-            Ok(fd) => return Ok(fd),
+            Ok(fd) => return Ok(Some(fd)),
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
-        /* An EINTR return is a place the shell is looking, so take
-         * delivery here if an interrupt is due. `sa_flags = 0` is why
-         * this return exists at all -- dash never restarts a syscall.
-         * Otherwise retry, which is the C, whose extra `pending_sig == 0`
-         * test this replaces: a signal that is pending but not *due*
-         * (suppressed, or trapped and handled elsewhere) is no reason to
-         * abandon the open. */
+                /* An EINTR return is a place the shell is looking, so take
+                 * delivery here if an interrupt is due. `sa_flags = 0` is why
+                 * this return exists at all -- dash never restarts a syscall.
+                 * Otherwise retry, which is the C, whose extra
+                 * `pending_sig == 0` test this replaces: a signal that is
+                 * pending but not *due* (suppressed, or trapped and handled
+                 * elsewhere) is no reason to abandon the open. */
                 if let Some(err) = crate::error::poll_interrupt(sh) {
                     return Err(err);
                 }
@@ -248,11 +271,11 @@ pub fn sh_open(
                     continue;
                 }
                 if mayfail != 0 {
-                    return Ok(-1);
+                    return Ok(None);
                 }
                 return Err(sh_open_fail(sh, pathname, mode, &error));
             }
-            Err(error) if mayfail != 0 => return Ok(-1),
+            Err(error) if mayfail != 0 => return Ok(None),
             Err(error) => return Err(sh_open_fail(sh, pathname, mode, &error)),
         }
     }
@@ -264,29 +287,29 @@ pub fn sh_open_read(
     sh: &mut Shell,
     pathname: &BStr,
     mayfail: c_int,
-) -> Result<c_int, Error> {
+) -> Result<Option<OwnedFd>, Error> {
     sh_open(sh, pathname, nsh_platform::OpenMode::ReadOnly, mayfail)
 }
 
 // [spec:dash:def:redir.openredirect-fn]
 // [spec:dash:sem:redir.openredirect-fn]
-fn openredirect(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
+fn openredirect(sh: &mut Shell, redir: &Node) -> Result<RedirectSource, Error> {
     let f = match redir.node_type() {
-        NFROM => sh_open(
+        NFROM => RedirectSource::Owned(sh_open(
             sh,
             BStr::new(redir.nfile().expanded_filename().as_slice()),
             nsh_platform::OpenMode::ReadOnly,
             0,
-        )?,
-        NFROMTO => sh_open(
+        )?.expect("a mandatory open returns a descriptor")),
+        NFROMTO => RedirectSource::Owned(sh_open(
             sh,
             BStr::new(redir.nfile().expanded_filename().as_slice()),
             nsh_platform::OpenMode::ReadWriteCreate,
             0,
-        )?,
+        )?.expect("a mandatory open returns a descriptor")),
         NTO | NCLOBBER => {
             let mut fell_through = true;
-            let mut fv: c_int = 0;
+            let mut opened = None;
             if redir.node_type() == NTO {
                 /* Take care of noclobber mode. */
                 if sh.options.flag(crate::options::Cflag) != 0 {
@@ -295,12 +318,12 @@ fn openredirect(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
                     let metadata = std::fs::metadata(pathname);
                     if metadata.is_err() {
                         /* goto do_open */
-                        return sh_open(
+                        return Ok(RedirectSource::Owned(sh_open(
                             sh,
                             BStr::new(fname.as_slice()),
                             nsh_platform::OpenMode::WriteCreateExclusive,
                             0,
-                        );
+                        )?.expect("a mandatory open returns a descriptor")));
                     }
 
                     if metadata.is_ok_and(|metadata| metadata.is_file()) {
@@ -314,14 +337,14 @@ fn openredirect(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
                         ));
                     }
 
-                    fv = sh_open(
+                    let fv = sh_open(
                         sh,
                         BStr::new(fname.as_slice()),
                         nsh_platform::OpenMode::WriteOnly,
                         0,
-                    )?;
-                    if nsh_platform::fd_is_regular_file(fv).unwrap_or(false) {
-                        let _ = nsh_platform::close_fd(fv);
+                    )?.expect("a mandatory open returns a descriptor");
+                    if nsh_platform::fd_is_regular_file(&fv).unwrap_or(false) {
+                        drop(fv);
                         /* goto ecreate */
                         let error = nsh_platform::already_exists_error();
                         return Err(sh_open_fail(
@@ -331,37 +354,41 @@ fn openredirect(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
                             &error,
                         ));
                     }
+                    opened = Some(fv);
                     fell_through = false;
                 }
                 /* FALLTHROUGH */
             }
             if fell_through {
                 let fname = redir.nfile().expanded_filename();
-                sh_open(
+                RedirectSource::Owned(sh_open(
                     sh,
                     BStr::new(fname.as_slice()),
                     nsh_platform::OpenMode::WriteCreateTruncate,
                     0,
-                )?
+                )?.expect("a mandatory open returns a descriptor"))
             } else {
-                fv
+                RedirectSource::Owned(opened.expect("the noclobber path opened a descriptor"))
             }
         }
         NAPPEND => {
             let fname = redir.nfile().expanded_filename();
-            sh_open(
+            RedirectSource::Owned(sh_open(
                 sh,
                 BStr::new(fname.as_slice()),
                 nsh_platform::OpenMode::WriteCreateAppend,
                 0,
-            )?
+            )?.expect("a mandatory open returns a descriptor"))
         }
         NTOFD | NFROMFD => {
-            let mut fv = redir.ndup().dupfd.get();
-            if fv == redir.ndup().fd {
-                fv = -2;
+            let source = redir.ndup().dupfd.get();
+            if source == redir.ndup().fd {
+                RedirectSource::Noop
+            } else if source < 0 {
+                RedirectSource::Close
+            } else {
+                RedirectSource::Slot(source)
             }
-            fv
         }
         /*
          * default:
@@ -375,56 +402,43 @@ fn openredirect(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
             if crate::shell::DEBUG {
                 std::process::abort();
             }
-            openhere(sh, redir)?
+            RedirectSource::Owned(openhere(sh, redir)?)
         }
     };
 
     Ok(f)
 }
 
-// [spec:dash:def:redir.sh-dup2-fn]
-// [spec:dash:sem:redir.sh-dup2-fn]
-fn sh_dup2(sh: &mut crate::context::Shell, ofd: c_int, nfd: c_int, cfd: c_int) -> Result<c_int, Error> {
-    let result = if nfd < 0 {
-        nsh_platform::duplicate_fd(ofd)
-    } else {
-        nsh_platform::duplicate_to(ofd, nfd).map(|()| nfd)
-    };
-    if cfd >= 0 && (nfd >= 0 || result.is_err()) {
-        let _ = nsh_platform::close_fd(cfd);
-    }
-    let nfd = match result {
-        Ok(nfd) => nfd,
-        Err(error) => {
-        let mut message = Vec::new();
-        write!(&mut message, "{}", ofd).expect("writing to a Vec cannot fail");
-        message.extend_from_slice(b": ");
-        message.extend_from_slice(nsh_platform::os_error_message(&error).as_bytes());
-        return Err(sh.sh_error_value(&message));
-        }
-    };
-
-    Ok(nfd)
+fn descriptor_error(sh: &mut Shell, source: c_int, error: std::io::Error) -> Error {
+    let mut message = Vec::new();
+    write!(&mut message, "{}", source).expect("writing to a Vec cannot fail");
+    message.extend_from_slice(b": ");
+    message.extend_from_slice(nsh_platform::os_error_message(&error).as_bytes());
+    sh.sh_error_value(&message)
 }
 
 // [spec:dash:def:redir.dupredirect-fn]
 // [spec:dash:sem:redir.dupredirect-fn]
-/// The extracted `def` signature carries a stray `#endif`; the real signature
-/// (outside `#ifdef notyet`) is `static void dupredirect(union node *, int)`.
-fn dupredirect(sh: &mut crate::context::Shell, redir: &Node, f: c_int) -> Result<(), Error> {
-    let fd: c_int = redir.redir_fd();
-
-    if redir.node_type() == NTOFD || redir.node_type() == NFROMFD {
-        /* if not ">&-" */
-        if f >= 0 {
-            sh_dup2(sh, f, fd, -1)?;
-            return Ok(());
+// [spec:dash:def:redir.sh-dup2-fn]
+// [spec:dash:sem:redir.sh-dup2-fn]
+fn install_redirect(sh: &mut Shell, target: c_int, source: RedirectSource) -> Result<(), Error> {
+    let target = crate::fd_slot(target);
+    match source {
+        RedirectSource::Noop => Ok(()),
+        RedirectSource::Close => {
+            let _ = nsh_platform::clear_descriptor(target);
+            Ok(())
         }
-        let _ = nsh_platform::close_fd(fd);
-    } else {
-        sh_dup2(sh, f, fd, f)?;
+        RedirectSource::Slot(source) => {
+            nsh_platform::replace_descriptor(crate::fd_slot(source), target)
+                .map_err(|error| descriptor_error(sh, source, error))
+        }
+        RedirectSource::Owned(source) => {
+            let number = source.as_raw_fd();
+            nsh_platform::move_to_descriptor(source, target)
+                .map_err(|error| descriptor_error(sh, number, error))
+        }
     }
-    Ok(())
 }
 
 // [spec:dash:def:redir.sh-pipe-fn]
@@ -432,16 +446,18 @@ fn dupredirect(sh: &mut crate::context::Shell, redir: &Node, f: c_int) -> Result
 pub fn sh_pipe(
     sh: &mut crate::context::Shell,
     memfd: bool,
-) -> Result<([c_int; 2], bool), Error> {
+) -> Result<(Pipe, bool), Error> {
     if memfd && USE_MEMFD_CREATE != 0 {
         if let Ok(read_fd) = nsh_platform::anonymous_file(c"dash") {
-            let write_fd = sh_dup2(sh, read_fd, -1, read_fd)?;
-            return Ok(([read_fd, write_fd], true));
+            let source = read_fd.as_raw_fd();
+            let write_fd = nsh_platform::duplicate_fd(&read_fd)
+                .map_err(|error| descriptor_error(sh, source, error))?;
+            return Ok((Pipe { read: read_fd, write: write_fd }, true));
         }
     }
 
     nsh_platform::pipe()
-        .map(|(read, write)| ([read, write], false))
+        .map(|(read, write)| (Pipe { read, write }, false))
         .map_err(|_| sh.sh_error_value(b"Pipe call failed"))
 }
 
@@ -453,10 +469,8 @@ pub fn sh_pipe(
 
 // [spec:dash:def:redir.openhere-fn]
 // [spec:dash:sem:redir.openhere-fn]
-fn openhere(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
+fn openhere(sh: &mut Shell, redir: &Node) -> Result<OwnedFd, Error> {
     let len: usize;
-    let mut pip: [c_int; 2] = [0; 2];
-    let memfd: c_int;
     let expanded;
 
     /* `redir->nhere.doc` is the slot `parseheredoc` filled; the C would have
@@ -487,11 +501,9 @@ fn openhere(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
     };
 
     len = p.len();
-    let opened = sh_pipe(sh, len > PIPESIZE)?;
-    pip = opened.0;
-    memfd = opened.1 as c_int;
+    let (pip, memfd) = sh_pipe(sh, len > PIPESIZE)?;
 
-    if memfd != 0 || len <= PIPESIZE {
+    if memfd || len <= PIPESIZE {
         /* The return is discarded, as the C discards it, and the 8.3
          * audit flagged both this and the sibling in the forked child
          * below as places an interrupt could be dropped. They are not:
@@ -501,23 +513,23 @@ fn openhere(sh: &mut Shell, redir: &Node) -> Result<c_int, Error> {
          * raising, and making it fallible is the shape 4.3 argues
          * against. They become live the day someone changes that, and
          * that is a different node's decision. */
-        crate::output::xwrite(pip[1], p);
-        let _ = nsh_platform::seek_start(pip[1]);
+        crate::output::xwrite(&pip.write, p);
+        let _ = nsh_platform::seek_start(&pip.write);
         /* goto out */
-        let _ = nsh_platform::close_fd(pip[1]);
-        return Ok(pip[0]);
+        drop(pip.write);
+        return Ok(pip.read);
     }
 
     if crate::jobs::forkshell(sh, None, None, crate::jobs::FORK_NOJOB)? == 0 {
-        let _ = nsh_platform::close_fd(pip[0]);
+        drop(pip.read);
         nsh_platform::configure_here_document_writer_signals();
-        crate::output::xwrite(pip[1], p);
+        crate::output::xwrite(&pip.write, p);
         crate::shell::flush_coverage();
         nsh_platform::exit_immediately(0);
     }
     /* out: */
-    let _ = nsh_platform::close_fd(pip[1]);
-    Ok(pip[0])
+    drop(pip.write);
+    Ok(pip.read)
 }
 
 /*
@@ -535,9 +547,12 @@ pub fn popredir(sh: &mut Shell, drop: c_int) {
     i = 0;
     while i < 10 {
         let closed: c_uint;
-        let renamed: c_int = sh.redirs.list[rp].renamed[i as usize];
+        let renamed = std::mem::replace(
+            &mut sh.redirs.list[rp].renamed[i as usize],
+            SavedDescriptor::Empty,
+        );
 
-        if renamed == EMPTY {
+        if matches!(renamed, SavedDescriptor::Empty) {
             i += 1;
             continue;
         }
@@ -545,24 +560,24 @@ pub fn popredir(sh: &mut Shell, drop: c_int) {
         closed = if drop != 0 {
             1
         } else {
-            update_closed_redirs(sh, i, renamed)
+            update_closed_redirs(sh, i, matches!(renamed, SavedDescriptor::Open(_)))
         };
 
         match renamed {
-            CLOSED => {
+            SavedDescriptor::Closed => {
                 if closed == 0 {
-                    let _ = nsh_platform::close_fd(i);
+                    let _ = nsh_platform::clear_descriptor(crate::fd_slot(i));
                 }
             }
-            _ => {
+            SavedDescriptor::Open(saved) => {
                 if drop == 0 {
                     if i == 0 {
                         crate::input::reset_input(sh);
                     }
-                    let _ = nsh_platform::duplicate_to(renamed, i);
+                    let _ = nsh_platform::replace_descriptor(&saved, crate::fd_slot(i));
                 }
-                let _ = nsh_platform::close_fd(renamed);
             }
+            SavedDescriptor::Empty => unreachable!(),
         }
         i += 1;
     }
@@ -587,9 +602,15 @@ pub fn mkinit_exitreset(sh: &mut Shell) {
 /* mkinit FORKRESET fragment from src/redir.c:450-452. */
 pub fn mkinit_forkreset(sh: &mut Shell) {
     /* `redirlist = NULL`: the frames are abandoned, not popped, so no
-     * descriptor is restored or closed.  The slots are plain integers, so
-     * clearing the vector abandons them the same way. */
-    sh.redirs.list.clear();
+     * descriptor is restored or closed. Forget the owning handles in this
+     * forked child before clearing the frames. */
+    for frame in sh.redirs.list.drain(..) {
+        for saved in frame.renamed {
+            if let SavedDescriptor::Open(fd) = saved {
+                std::mem::forget(fd);
+            }
+        }
+    }
 }
 
 /*
@@ -599,22 +620,42 @@ pub fn mkinit_forkreset(sh: &mut Shell) {
 
 // [spec:dash:def:redir.savefd-fn]
 // [spec:dash:sem:redir.savefd-fn]
-pub fn savefd(sh: &mut crate::context::Shell, from: c_int, ofd: c_int) -> Result<c_int, Error> {
-    match nsh_platform::duplicate_cloexec(from, 10) {
-        Err(error) if nsh_platform::is_bad_descriptor_error(&error) => Ok(-1),
-        Err(error) => {
-            let _ = nsh_platform::close_fd(ofd);
-            let mut message = Vec::new();
-            write!(&mut message, "{}", from).expect("writing to a Vec cannot fail");
-            message.extend_from_slice(b": ");
-            message.extend_from_slice(nsh_platform::os_error_message(&error).as_bytes());
-            Err(sh.sh_error_value(&message))
-        }
-        Ok(newfd) => {
-            let _ = nsh_platform::close_fd(ofd);
-            Ok(newfd)
+fn duplicate_slot_above(from: c_int) -> std::io::Result<Option<OwnedFd>> {
+    match nsh_platform::duplicate_cloexec(crate::fd_slot(from), 10) {
+        Err(error) if nsh_platform::is_bad_descriptor_error(&error) => Ok(None),
+        Err(error) => Err(error),
+        Ok(newfd) => Ok(Some(newfd)),
+    }
+}
+
+fn save_slot(sh: &mut Shell, from: c_int) -> Result<Option<OwnedFd>, Error> {
+    match duplicate_slot_above(from) {
+        Ok(None) => Ok(None),
+        result => {
+            /* `savefd` closed `ofd` before raising a non-EBADF error. That
+             * ordering is observable when `ofd` is stderr: the diagnostic
+             * itself then has nowhere to go. Keep the close before building
+             * the returned error value. */
+            let _ = nsh_platform::clear_descriptor(crate::fd_slot(from));
+            result.map_err(|error| descriptor_error(sh, from, error))
         }
     }
+}
+
+/// Move an owned descriptor above the shell redirection range.
+pub fn move_fd_above(sh: &mut Shell, fd: OwnedFd) -> Result<OwnedFd, Error> {
+    if fd.as_raw_fd() >= 10 {
+        return Ok(fd);
+    }
+    let number = fd.as_raw_fd();
+    nsh_platform::duplicate_cloexec(&fd, 10)
+        .map_err(|error| descriptor_error(sh, number, error))
+    // `fd` drops after the duplicate is made.
+}
+
+/// Duplicate a process-table slot above the shell redirection range.
+pub fn copy_slot_above(sh: &mut Shell, from: c_int) -> Result<Option<OwnedFd>, Error> {
+    duplicate_slot_above(from).map_err(|error| descriptor_error(sh, from, error))
 }
 
 /// `redirect`, with the diagnostic it can produce handed back rather than
@@ -677,7 +718,7 @@ pub fn pushredir(sh: &mut Shell, redir: &[Node]) -> usize {
     }
 
     sh.redirs.list.push(redirtab {
-        renamed: [EMPTY; 10],
+        renamed: std::array::from_fn(|_| SavedDescriptor::Empty),
     });
 
     q
@@ -701,6 +742,7 @@ mod tests {
 
     use crate::error::Error;
     use crate::expand::restore_handler_expandarg;
+    use crate::Shell;
 
     fn diagnostic() -> Error {
         Error::Other {
@@ -752,5 +794,28 @@ mod tests {
         .expect("an interrupt must not be swallowed by this frame");
         assert!(got.is_interrupt());
         assert_eq!(got.status(), nsh_platform::interrupt_signal() + 128);
+    }
+
+    /// Opening directly into the target means the target was closed before
+    /// the redirection. Unwind must close it again, not save and restore the
+    /// file that the open itself just placed there.
+    // [spec:dash:sem:redir.popredir-fn/test]
+    #[test]
+    fn open_into_target_restores_closed_slot() {
+        let status = nsh_platform::run_in_child(|| {
+            let mut sh = Shell::builder().build().unwrap();
+            let slot = crate::fd_slot(3);
+            let _ = nsh_platform::clear_descriptor(slot);
+            if sh.run(b"{ :; } 3>/dev/null").is_err() {
+                nsh_platform::exit_immediately(2);
+            }
+            if nsh_platform::fd_is_open(slot) {
+                nsh_platform::exit_immediately(3);
+            }
+            nsh_platform::exit_immediately(0);
+        })
+        .unwrap();
+
+        assert_eq!(status, 0, "child failed at step {status}");
     }
 }

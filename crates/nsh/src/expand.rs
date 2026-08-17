@@ -1192,7 +1192,7 @@ fn expbackq(
     cmd: Option<&crate::nodes::Node>,
     flag: c_int,
 ) -> Result<(), Error> {
-    let mut in_ = crate::eval::backcmd { fd: -1, jp: None };
+    let mut in_ = crate::eval::backcmd { fd: None, jp: None };
     let mut i: c_int;
     /* `char buf[128]`, as bytes: it is only ever handed to `read` and to
      * `memtodest`, and both want the bytes rather than the sign. */
@@ -1224,11 +1224,11 @@ fn expbackq(
          * the loop starts directly at the `read:` label. */
         loop {
             /* read: */
-            if in_.fd < 0 {
+            let Some(fd) = in_.fd.as_ref() else {
                 break;
-            }
+            };
             loop {
-                match nsh_platform::read_once(in_.fd, &mut buf) {
+                match nsh_platform::read_once(fd, &mut buf) {
                     Ok(count) => {
                         i = count as c_int;
                         break;
@@ -1254,8 +1254,7 @@ fn expbackq(
             memtodest(&buf[..i as usize], flag, expb(state));
         }
 
-        if in_.fd >= 0 {
-            let _ = nsh_platform::close_fd(in_.fd);
+        if in_.fd.take().is_some() {
             sh.eval.back_exitstatus = crate::jobs::waitforjob(sh, in_.jp)?;
         }
         crate::error::INTON(sh);

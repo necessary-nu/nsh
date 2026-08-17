@@ -3394,6 +3394,14 @@ children (
                         kind @status
                         text "Doing → Done (nplan complete)"
                     }
+
+                    {
+                        at 2026-08-17T20:11:23.118054702Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Descriptor-ownership follow-up. RawFd, close_fd, and duplicate_to now have zero code sites. Every descriptor produced by open, pipe, memfd, or duplicate is an OwnedFd; streams own duplicates of host inputs, parse frames own opened input, command substitution and pipelines own their endpoints, redirection saves are Empty/Closed/Open(OwnedFd), and the job-control tty is owned. Ordinary release is Drop; fork-reset deliberately forgets saved redirection handles to preserve abandon-to-kernel semantics. Exact shell-language table slots are the sole numeric boundary through DescriptorSlot. Slots 0/1/2 use safe rustix stdio replacement; arbitrary n>&m and n>&- still require one isolated libc::dup2 and libc::close in nsh-platform because a possibly closed process-table target has no std/rustix ownership-safe representation. Eliminating those two requires the per-instance logical descriptor table, not another wrapper. Validation: workspace 254/0; differential 61768/0 with 40 classified flakes and 4 sanctioned divergences; divergence register 44/0; PTY 60/0/0; POSIX target 660/51 vs C dash 655/56; dash spec coverage 422/422 with 0 stale. The differential oracle caught and fixed close-before-error ordering under low RLIMIT_NOFILE; a targeted test pins direct-open-into-closed-slot restoration."
+                        after_done true
+                    }
                 )
             }
 

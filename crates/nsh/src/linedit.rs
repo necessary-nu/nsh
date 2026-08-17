@@ -73,7 +73,7 @@ use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, Write};
-use std::os::fd::{AsFd, BorrowedFd, RawFd};
+use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::PathBuf;
 use std::process::Command;
@@ -253,8 +253,8 @@ impl LineEditor {
     /// Duplicate the shell-owned descriptors and activate a native session.
     ///
     pub fn new(
-        input_fd: RawFd,
-        output_fd: RawFd,
+        input_fd: nsh_platform::DescriptorSlot,
+        output_fd: nsh_platform::DescriptorSlot,
         mode: EditingMode,
     ) -> Result<Self, LineEditorError> {
         let input = nsh_platform::duplicate_file(input_fd)?;

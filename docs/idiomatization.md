@@ -120,7 +120,7 @@ have to come apart, because only one of them is an error:
 pub enum Error {
     Syntax   { line: u32, message: BString },
     Expansion{ line: u32, kind: ExpansionErrorKind, word: BString },
-    Redirect { fd: RawFd, source: io::Error },
+    Redirect { fd: i32, source: io::Error }, // a shell-language slot number
     NotFound { name: BString },        // status 127
     NotExecutable { name: BString },   // status 126
     Builtin  { name: &'static BStr, status: u8, message: BString },

@@ -23,6 +23,7 @@
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::{c_int, c_uint};
 use std::io::Write as _;
+use std::os::fd::{AsRawFd, OwnedFd};
 
 use crate::error::{Error, INTOFF, INTON};
 use crate::nodes::Node;
@@ -161,7 +162,7 @@ pub struct JobTable {
     /// pgrp of shell on invocation
     initialpgrp: c_int,
     /// control terminal
-    ttyfd: c_int,
+    ttyfd: Option<OwnedFd>,
     /// user was warned about stopped jobs
     pub(crate) job_warning: c_int,
 }
@@ -174,7 +175,7 @@ impl JobTable {
             curjob: None,
             jobctl: 0,
             initialpgrp: 0,
-            ttyfd: -1,
+            ttyfd: None,
             job_warning: 0,
         }
     }
@@ -336,13 +337,11 @@ pub(crate) fn set_curjob(sh: &mut crate::context::Shell, jp: usize, mode: c_uint
 // [spec:dash:def:jobs.xxtcsetpgrp-fn]
 // [spec:dash:sem:jobs.xxtcsetpgrp-fn]
 pub(crate) fn xxtcsetpgrp(sh: &mut crate::context::Shell, pgrp: i32) -> Result<(), Error> {
-    let fd: c_int = sh.jobs.ttyfd;
-
-    if fd < 0 {
+    let Some(fd) = sh.jobs.ttyfd.as_ref().map(AsRawFd::as_raw_fd) else {
         return Ok(());
-    }
+    };
 
-    xtcsetpgrp(sh, fd, pgrp)
+    xtcsetpgrp(sh, crate::fd_slot(fd), pgrp)
 }
 
 // [spec:dash:def:jobs.setjobctl-fn]
@@ -359,7 +358,7 @@ pub(crate) fn xxtcsetpgrp(sh: &mut crate::context::Shell, pgrp: i32) -> Result<(
 pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error> {
     let mut on: c_int = on;
     let mut pgrp: c_int = -1;
-    let mut fd: c_int;
+    let mut fd: Option<OwnedFd>;
 
     if on == sh.jobs.jobctl || crate::shellmain::rootshell(sh) == 0 {
         return Ok(());
@@ -385,7 +384,6 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
         return Ok(());
     }
     if on != 0 {
-        let ofd: c_int;
         /* `setjobctl` is reached from `exitshell`'s job-control teardown as
          * well as from `optschanged`, so it stays infallible and bridges:
          * a failure here longjmps exactly as the C's `sh_open` did. Making
@@ -393,17 +391,20 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
          * argues against. */
         /* `mayfail = 1`, so the only thing this can hand back is an
          * interrupt taken at its EINTR poll. */
-        ofd = crate::redir::sh_open(
+        let opened = crate::redir::sh_open(
             sh,
             BStr::new(&_PATH_TTY[.._PATH_TTY.len() - 1]),
             nsh_platform::OpenMode::ReadWrite,
             1,
         )?;
-        fd = ofd;
+        fd = match opened {
+            Some(opened) => Some(crate::redir::move_fd_above(sh, opened)?),
+            None => None,
+        };
         'after_dowhile: {
             'out_lbl: {
                 'close_lbl: {
-                    if fd < 0 {
+                    if fd.is_none() {
                         /* `/dev/tty` would not open, so fall back to
                          * whichever of the shell's own streams is a
                          * terminal. The C writes this as `fd += 3` from
@@ -411,26 +412,31 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
                          * that order -- which is the shell's stderr,
                          * stdout and stdin, not the numbers for their
                          * own sake. */
-                        let s = sh.streams;
-                        let candidates = [s.stderr, s.stdout, s.stdin];
+                        let candidates = [
+                            sh.streams.stderr,
+                            sh.streams.stdout,
+                            sh.streams.stdin,
+                        ];
                         let mut i: usize = 0;
-                        fd = -1;
+                        let mut candidate = None;
                         while i < candidates.len() {
-                            if nsh_platform::is_terminal(candidates[i]) {
-                                fd = candidates[i];
+                            if nsh_platform::is_terminal(crate::fd_slot(candidates[i])) {
+                                candidate = Some(candidates[i]);
                                 break;
                             }
                             i += 1;
                         }
-                        if fd < 0 {
+                        let Some(candidate) = candidate else {
                             break 'out_lbl; // goto out
-                        }
+                        };
+                        fd = crate::redir::copy_slot_above(sh, candidate)?;
                     }
-                    fd = crate::redir::savefd(sh, fd, ofd)?;
                     loop {
                         /* while we are in the background */
                         loop {
-                            match nsh_platform::foreground_process_group(fd) {
+                            match nsh_platform::foreground_process_group(
+                                fd.as_ref().expect("tty descriptor exists"),
+                            ) {
                                 Ok(group) => {
                                     pgrp = group;
                                     break;
@@ -477,8 +483,7 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
                     }
                 }
                 // close:
-                let _ = nsh_platform::close_fd(fd);
-                fd = -1;
+                drop(fd.take());
                 // falls through into out:
             }
             // out:
@@ -495,20 +500,20 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
         pgrp = sh.root_pid;
     } else {
         /* turning job control off */
-        fd = sh.jobs.ttyfd;
+        fd = sh.jobs.ttyfd.take();
         pgrp = sh.jobs.initialpgrp;
     }
 
     crate::trap::setsignal(sh, nsh_platform::terminal_stop_signal());
     crate::trap::setsignal(sh, nsh_platform::terminal_output_signal());
     crate::trap::setsignal(sh, nsh_platform::terminal_input_signal());
-    if fd >= 0 {
+    if let Some(tty) = fd.as_ref() {
         let _ = nsh_platform::set_process_group(0, pgrp);
-        xtcsetpgrp(sh, fd, pgrp)?;
+        let number = tty.as_raw_fd();
+        xtcsetpgrp(sh, crate::fd_slot(number), pgrp)?;
 
         if on == 0 {
-            let _ = nsh_platform::close_fd(fd);
-            fd = -1;
+            drop(fd.take());
         }
     }
 
@@ -1001,19 +1006,16 @@ fn forkchild(
              * 0. That only works when the shell's stdin *is* 0, so put it
              * where it belongs when the frontend said otherwise. */
             let sin: c_int = sh.streams.stdin;
-            let _ = nsh_platform::close_fd(sin);
-            let f: c_int =
-                crate::redir::sh_open(
+            let _ = nsh_platform::clear_descriptor(crate::fd_slot(sin));
+            let f = crate::redir::sh_open(
                     sh,
                     BStr::new(&_PATH_DEVNULL[.._PATH_DEVNULL.len() - 1]),
                     nsh_platform::OpenMode::ReadOnly,
                     0,
                 )
-                    .unwrap_or_else(|e| forkchild_fatal(sh, e));
-            if f != sin {
-                let _ = nsh_platform::duplicate_to(f, sin);
-                let _ = nsh_platform::close_fd(f);
-            }
+                .unwrap_or_else(|e| forkchild_fatal(sh, e))
+                .expect("a mandatory open returns a descriptor");
+            let _ = nsh_platform::move_to_descriptor(f, crate::fd_slot(sin));
             /* Should call reset_input here, but it's harmless
              * for now.
              */
@@ -1833,7 +1835,11 @@ pub(crate) fn showpipe(sh: &mut crate::context::Shell, jp: usize, dest: Dest) {
 
 // [spec:dash:def:jobs.xtcsetpgrp-fn]
 // [spec:dash:sem:jobs.xtcsetpgrp-fn]
-fn xtcsetpgrp(sh: &mut crate::context::Shell, fd: c_int, pgrp: i32) -> Result<(), Error> {
+fn xtcsetpgrp(
+    sh: &mut crate::context::Shell,
+    fd: nsh_platform::DescriptorSlot,
+    pgrp: i32,
+) -> Result<(), Error> {
     let blocked = nsh_platform::BlockedSignals::all()
         .expect("blocking signals around terminal handoff failed");
     let result = nsh_platform::set_foreground_process_group(fd, pgrp);

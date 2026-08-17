@@ -255,7 +255,9 @@ pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<c_in
     }
     if sh.options.flag(iflag) == 2 && sh.options.flag(sflag) == 1 {
         crate::input::input_init(sh);
-        if sh.input.stdin_istty != 0 && nsh_platform::is_terminal(sh.streams.stderr) {
+        if sh.input.stdin_istty != 0
+            && nsh_platform::is_terminal(crate::fd_slot(sh.streams.stderr))
+        {
             sh.options.set_flag(iflag, 1);
         }
     }

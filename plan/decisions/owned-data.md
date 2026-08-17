@@ -2027,3 +2027,24 @@ that the gap is now written down instead of implied.
 
 The *outer* reach-back, the same write after the loop, **is** covered:
 mutating it fails two `aud_parser_glob` cases.
+
+## 2026-08-17 follow-up: descriptor ownership
+
+The deferred syscall question is now answered more narrowly than the original
+note anticipated. Descriptor-producing operations no longer return integers:
+open, pipe, memfd and duplicate return `OwnedFd`, and every ordinary release is
+therefore a drop. Redirection save frames use an `Empty` / `Closed` /
+`Open(OwnedFd)` enum; input frames, command substitution, stream configuration
+and the job-control tty likewise retain owned handles instead of numbers that
+must later be closed manually. `RawFd`, `close_fd` and `duplicate_to` have no
+code sites in the workspace.
+
+What remains numeric is not ownership. Shell syntax denotes exact entries in
+the process descriptor table (`2>&1`, `9>&-`), including entries that are
+closed. `nsh-platform::DescriptorSlot` names that semantic boundary. Rustix's
+safe stdio operations cover replacement of slots 0, 1 and 2; arbitrary-slot
+replacement and clearing remain one isolated raw primitive each because
+neither `std` nor rustix can take ownership of a target that may be closed.
+Eliminating those last two operations is the logical descriptor-table design,
+not an `OwnedFd` substitution: the mapping would be materialised only in a
+forked child before exec.

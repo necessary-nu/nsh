@@ -23,13 +23,13 @@
 //! standard descriptors really are standard. This is the mode with full
 //! fidelity, and it is what a frontend should use.
 //!
-//! [`set`] is for a host that cannot afford that. `dup2` on descriptor 1
-//! is process-wide: a host embedding the shell on a worker thread, or
-//! while its own code is writing to stdout, cannot have its descriptors
-//! swapped out from under it. Such a host names three descriptors it
-//! already owns and the shell writes there instead. The cost is exact:
-//! the shell's own I/O follows, but the *language's* descriptor numbers
-//! do not. `echo hi` reaches the supplied stream;
+//! [`Streams::from_fds`] is for a host that cannot afford that. Replacing
+//! descriptor 1 is process-wide: a host embedding the shell on a worker
+//! thread, or while its own code is writing to stdout, cannot have its
+//! descriptors swapped out from under it. Such a host lends three open
+//! descriptors; the shell owns duplicates and writes there instead. The
+//! cost is exact: the shell's own I/O follows, but the *language's*
+//! descriptor numbers do not. `echo hi` reaches the supplied stream;
 //! `echo hi >file` and any external command still mean the process's
 //! descriptor 1, because that is what the number in the script denotes.
 //!
@@ -44,16 +44,17 @@
 use core::fmt;
 
 use core::ffi::c_int;
+use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 
 /// The three descriptors the shell uses for its own I/O.
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Streams {
-    /// Where the shell parses from.
-    pub stdin: c_int,
-    /// Where the shell and its built-ins write.
-    pub stdout: c_int,
-    /// Where the shell writes diagnostics, unbuffered.
-    pub stderr: c_int,
+    pub(crate) stdin: c_int,
+    pub(crate) stdout: c_int,
+    pub(crate) stderr: c_int,
+    /// Keeps non-inherited streams alive for exactly as long as the
+    /// `Streams` value (and therefore its `Shell`).
+    owned: Option<[OwnedFd; 3]>,
 }
 
 impl Streams {
@@ -63,6 +64,7 @@ impl Streams {
         stdin: 0,
         stdout: 1,
         stderr: 2,
+        owned: None,
     };
 
     /// [`Streams::INHERIT`] as a function, for a caller building a
@@ -73,9 +75,9 @@ impl Streams {
 
     /// Three descriptors the caller already has.
     ///
-    /// The shell does not take ownership and does not close them: they
-    /// outlive it, which is what lets a frontend lend the shell its own
-    /// standard descriptors and take them back.
+    /// The shell duplicates them and owns those duplicates. The caller keeps
+    /// its originals, while the shell cannot outlive a borrowed descriptor or
+    /// leak a descriptor number that somebody must remember to close.
     ///
     /// These are the shell's own three writers and its own parse input.
     /// The sketch said they were "also the base of the shell's descriptor
@@ -85,12 +87,17 @@ impl Streams {
     /// largest bet in the document and which is not built. A forked
     /// command still inherits the process's descriptors. [`install`] is
     /// what moves those, and it is process-wide.
-    pub fn from_fds(stdin: c_int, stdout: c_int, stderr: c_int) -> Streams {
-        Streams {
-            stdin,
-            stdout,
-            stderr,
-        }
+    pub fn from_fds(
+        stdin: impl AsFd,
+        stdout: impl AsFd,
+        stderr: impl AsFd,
+    ) -> std::io::Result<Streams> {
+        let owned = [
+            stdin.as_fd().try_clone_to_owned()?,
+            stdout.as_fd().try_clone_to_owned()?,
+            stderr.as_fd().try_clone_to_owned()?,
+        ];
+        Ok(Self::from_owned(owned))
     }
 
     /// Standard input from `/dev/null`, and output and error into buffers
@@ -118,21 +125,41 @@ impl Streams {
     /// descriptors moved wants [`install`], which is process-wide and says
     /// so. `crates/nsh/examples/embed.rs` demonstrates both halves.
     ///
-    /// The descriptors are the caller's to close. Nothing here closes
-    /// them, for the same reason [`Streams::from_fds`] does not.
+    /// The descriptors are owned by the returned value and close
+    /// automatically with it.
     pub fn capture() -> std::io::Result<Streams> {
-        let stdin = nsh_platform::open_null_input()?;
-        let out = nsh_platform::anonymous_file(c"nsh-stdout")?;
-        let err = nsh_platform::anonymous_file(c"nsh-stderr")?;
-        Ok(Streams {
-            stdin,
-            stdout: out,
-            stderr: err,
-        })
+        Ok(Self::from_owned([
+            nsh_platform::open_null_input()?,
+            nsh_platform::anonymous_file(c"nsh-stdout")?,
+            nsh_platform::anonymous_file(c"nsh-stderr")?,
+        ]))
+    }
+
+    fn from_owned(owned: [OwnedFd; 3]) -> Streams {
+        Streams {
+            stdin: owned[0].as_raw_fd(),
+            stdout: owned[1].as_raw_fd(),
+            stderr: owned[2].as_raw_fd(),
+            owned: Some(owned),
+        }
     }
 
     fn as_array(&self) -> [c_int; 3] {
         [self.stdin, self.stdout, self.stderr]
+    }
+
+    fn descriptor(&self, index: usize) -> nsh_platform::Descriptor<'_> {
+        if let Some(owned) = &self.owned {
+            (&owned[index]).into()
+        } else {
+            nsh_platform::DescriptorSlot::new(self.as_array()[index])
+                .expect("standard descriptors are non-negative")
+                .into()
+        }
+    }
+
+    fn is_inherit(&self) -> bool {
+        self.owned.is_none() && self.as_array() == [0, 1, 2]
     }
 }
 
@@ -157,14 +184,12 @@ impl crate::context::Shell {
          * `run`s truncates mid-line. stderr is unbuffered and needs no
          * equivalent. */
         self.io.flushall();
-        let fd = self.streams.stdout;
-        take_all(fd)
+        take_all(self.streams.descriptor(1))
     }
 
     /// Take everything written to the shell's stderr since the last call.
     pub fn take_captured_stderr(&mut self) -> std::io::Result<bstr::BString> {
-        let fd = self.streams.stderr;
-        take_all(fd)
+        take_all(self.streams.descriptor(2))
     }
 }
 
@@ -173,7 +198,7 @@ impl crate::context::Shell {
 /// Truncating rather than remembering an offset is what makes "since the
 /// last call" true after a `run` that the shell reset -- and it keeps the
 /// file from growing without bound across a long-lived shell.
-fn take_all(fd: c_int) -> std::io::Result<bstr::BString> {
+fn take_all(fd: nsh_platform::Descriptor<'_>) -> std::io::Result<bstr::BString> {
     nsh_platform::take_file_contents(fd).map(bstr::BString::from)
 }
 
@@ -232,7 +257,7 @@ impl std::error::Error for StreamError {}
 #[derive(Debug)]
 #[must_use = "the host's descriptors stay swapped out until this is restored"]
 pub struct Borrowed {
-    saved: [c_int; 3],
+    saved: [Option<OwnedFd>; 3],
     installed: bool,
 }
 
@@ -246,10 +271,10 @@ pub struct Borrowed {
 ///
 /// This operation is process-wide. The caller must coordinate other users of
 /// descriptors 0, 1, and 2 until the returned guard is restored.
-pub fn install(s: Streams) -> Result<Borrowed, StreamError> {
-    if s == Streams::INHERIT {
+pub fn install(s: &Streams) -> Result<Borrowed, StreamError> {
+    if s.is_inherit() {
         return Ok(Borrowed {
-            saved: [-1; 3],
+            saved: std::array::from_fn(|_| None),
             installed: false,
         });
     }
@@ -258,53 +283,46 @@ pub fn install(s: Streams) -> Result<Borrowed, StreamError> {
     // any of them into it. Without this an aliasing set -- stdout on 0,
     // say -- would have its source overwritten by an earlier `dup2` and
     // the shell would end up with two copies of one stream.
-    let mut staged = [-1i32; 3];
-    let mut saved = [-1i32; 3];
-    let cleanup = |fds: &[c_int]| {
-        for &fd in fds {
-            if fd >= 0 {
-                let _ = nsh_platform::close_fd(fd);
-            }
-        }
-    };
+    let mut staged: [Option<OwnedFd>; 3] = std::array::from_fn(|_| None);
+    let mut saved: [Option<OwnedFd>; 3] = std::array::from_fn(|_| None);
 
     for (i, &fd) in s.as_array().iter().enumerate() {
-        let hi = match nsh_platform::duplicate_cloexec(fd, 10) {
+        let hi = match nsh_platform::duplicate_cloexec(s.descriptor(i), 10) {
             Ok(hi) => hi,
             Err(error) => {
-            let e = StreamError {
-                fd,
-                errno: error.raw_os_error().unwrap_or(0),
-            };
-            cleanup(&staged);
-            return Err(e);
+                let e = StreamError {
+                    fd,
+                    errno: error.raw_os_error().unwrap_or(0),
+                };
+                return Err(e);
             }
         };
-        staged[i] = hi;
+        staged[i] = Some(hi);
     }
 
     // Save the host's originals. A closed descriptor is not an error --
     // it is a state to reproduce on restore -- so only a failure that is
     // not EBADF aborts.
     for fd in 0..3i32 {
-        let hi = match nsh_platform::duplicate_cloexec(fd, 10) {
+        let slot = nsh_platform::DescriptorSlot::new(fd).expect("standard descriptor");
+        let hi = match nsh_platform::duplicate_cloexec(slot, 10) {
             Ok(hi) => hi,
             Err(error) => {
-            let errno = error.raw_os_error().unwrap_or(0);
-            if errno != nsh_platform::BAD_DESCRIPTOR {
-                let e = StreamError { fd, errno };
-                cleanup(&staged);
-                cleanup(&saved);
-                return Err(e);
-            }
-            -1
+                let errno = error.raw_os_error().unwrap_or(0);
+                if errno != nsh_platform::BAD_DESCRIPTOR {
+                    let e = StreamError { fd, errno };
+                    return Err(e);
+                }
+                continue;
             }
         };
-        saved[fd as usize] = hi;
+        saved[fd as usize] = Some(hi);
     }
 
-    for (i, &hi) in staged.iter().enumerate() {
-        if let Err(error) = nsh_platform::duplicate_to(hi, i as c_int) {
+    for (i, hi) in staged.iter().enumerate() {
+        let hi = hi.as_ref().expect("all supplied streams were staged");
+        let target = nsh_platform::DescriptorSlot::new(i as c_int).expect("standard descriptor");
+        if let Err(error) = nsh_platform::replace_descriptor(hi, target) {
             let e = StreamError {
                 fd: i as c_int,
                 errno: error.raw_os_error().unwrap_or(0),
@@ -316,11 +334,10 @@ pub fn install(s: Streams) -> Result<Borrowed, StreamError> {
                 installed: true,
             };
             partial.restore();
-            cleanup(&staged);
             return Err(e);
         }
     }
-    cleanup(&staged);
+    drop(staged);
 
     // The shell's own I/O needs no adjustment: `s` is on the standard
     // descriptors now, so a shell built with `Streams::INHERIT` -- which
@@ -343,12 +360,11 @@ impl Borrowed {
             return;
         }
         for fd in 0..3i32 {
-            let old = self.saved[fd as usize];
-            if old >= 0 {
-                let _ = nsh_platform::duplicate_to(old, fd);
-                let _ = nsh_platform::close_fd(old);
+            let target = nsh_platform::DescriptorSlot::new(fd).expect("standard descriptor");
+            if let Some(old) = &self.saved[fd as usize] {
+                let _ = nsh_platform::replace_descriptor(old, target);
             } else {
-                let _ = nsh_platform::close_fd(fd);
+                let _ = nsh_platform::clear_descriptor(target);
             }
         }
     }
@@ -358,15 +374,15 @@ impl Borrowed {
 mod tests {
     use super::*;
     use crate::testutil::{forked, lock};
-    fn pipe() -> (c_int, c_int) {
+    fn pipe() -> (OwnedFd, OwnedFd) {
         nsh_platform::pipe().expect("create pipe")
     }
 
     fn wr(fd: c_int, b: &[u8]) -> bool {
-        nsh_platform::write_all(fd, b).is_ok()
+        nsh_platform::write_all(crate::fd_slot(fd), b).is_ok()
     }
 
-    fn read_exactly(fd: c_int, n: usize) -> Vec<u8> {
+    fn read_exactly(fd: &OwnedFd, n: usize) -> Vec<u8> {
         nsh_platform::read_exact(fd, n).expect("read from pipe")
     }
 
@@ -375,12 +391,12 @@ mod tests {
     #[test]
     fn inherit_is_a_no_op() {
         let _g = lock();
-        let b = install(Streams::INHERIT).expect("inherit installs");
+        let b = install(&Streams::INHERIT).expect("inherit installs");
         b.restore();
         /* Nothing to read back: `install` no longer writes shell
          * state, so what it did is visible on the descriptors and
          * the forked cases below are what check them. */
-        assert!(nsh_platform::fd_is_open(1));
+        assert!(nsh_platform::fd_is_open(crate::fd_slot(1)));
     }
 
     /// The shell reads and writes the streams it was *built* with, and it
@@ -391,17 +407,16 @@ mod tests {
     fn a_shell_is_built_on_the_streams_it_is_given() {
         let _g = lock();
         let (r, w) = pipe();
-        let sh = crate::context::Shell::new(Streams {
-            stdin: 0,
-            stdout: w,
-            stderr: 2,
-        });
-        assert_eq!(sh.streams.stdout, w);
+        let original = w.as_raw_fd();
+        let mut sh = crate::context::Shell::new(
+            Streams::from_fds(std::io::stdin(), &w, std::io::stderr()).unwrap(),
+        );
+        assert_eq!(sh.io.stdout().fd, sh.streams.stdout);
+        assert_ne!(sh.streams.stdout, original);
         /* Descriptor 1 is untouched: this mode exists for a host that
          * cannot have it swapped out from under it. */
-        assert!(nsh_platform::fd_is_open(1));
-        nsh_platform::close_fd(r).unwrap();
-        nsh_platform::close_fd(w).unwrap();
+        assert!(nsh_platform::fd_is_open(crate::fd_slot(1)));
+        drop((r, w));
     }
 
     /// The shell's own writers are on the descriptors it was given. If
@@ -416,12 +431,16 @@ mod tests {
     #[test]
     fn the_shells_writers_are_the_streams_it_was_built_with() {
         let _g = lock();
-        let mut sh = crate::context::Shell::new(Streams {
-            stdin: 7,
-            stdout: 8,
-            stderr: 9,
-        });
-        assert_eq!((sh.io.stdout().fd, sh.io.stderr().fd), (8, 9));
+        let input = nsh_platform::open_null_input().unwrap();
+        let output = nsh_platform::anonymous_file(c"streams-out").unwrap();
+        let error = nsh_platform::anonymous_file(c"streams-err").unwrap();
+        let mut sh = crate::context::Shell::new(
+            Streams::from_fds(&input, &output, &error).unwrap(),
+        );
+        assert_eq!(
+            (sh.io.stdout().fd, sh.io.stderr().fd),
+            (sh.streams.stdout, sh.streams.stderr),
+        );
 
         let mut inherited = crate::context::Shell::new(Streams::INHERIT);
         assert_eq!(
@@ -460,14 +479,10 @@ mod tests {
 
         let st = forked(|| {
             // What the host has on descriptor 1 before lending it out.
-            nsh_platform::duplicate_to(host_w, 1).unwrap();
-            nsh_platform::close_fd(host_w).unwrap();
+            nsh_platform::replace_descriptor(&host_w, crate::fd_slot(1)).unwrap();
 
-            let b = match install(Streams {
-                stdin: 0,
-                stdout: w,
-                stderr: 2,
-            }) {
+            let streams = Streams::from_fds(std::io::stdin(), &w, std::io::stderr()).unwrap();
+            let b = match install(&streams) {
                 Ok(b) => b,
                 Err(_) => nsh_platform::exit_immediately(2),
             };
@@ -484,10 +499,9 @@ mod tests {
         });
 
         assert_eq!(st, 0, "child failed at step {}", st);
-        assert_eq!(read_exactly(r, LENT.len()), LENT);
-        assert_eq!(read_exactly(host_r, BACK.len()), BACK);
-        let _ = nsh_platform::close_fd(w);
-        let _ = nsh_platform::close_fd(host_w);
+        assert_eq!(read_exactly(&r, LENT.len()), LENT);
+        assert_eq!(read_exactly(&host_r, BACK.len()), BACK);
+        drop((w, host_w));
     }
 
     /// The staging step in `install` exists for this case: a caller whose
@@ -501,14 +515,15 @@ mod tests {
         let st = forked(|| {
             // Put the write end on descriptor 0 -- also the first
             // descriptor `install` writes.
-            nsh_platform::duplicate_to(w, 0).unwrap();
-            nsh_platform::close_fd(w).unwrap();
+            nsh_platform::replace_descriptor(&w, crate::fd_slot(0)).unwrap();
 
-            let b = match install(Streams {
-                stdin: 0,
-                stdout: 0,
-                stderr: 2,
-            }) {
+            let streams = Streams::from_fds(
+                std::io::stdin(),
+                std::io::stdin(),
+                std::io::stderr(),
+            )
+            .unwrap();
+            let b = match install(&streams) {
                 Ok(b) => b,
                 Err(_) => nsh_platform::exit_immediately(2),
             };
@@ -520,8 +535,8 @@ mod tests {
         });
 
         assert_eq!(st, 0, "child failed at step {}", st);
-        assert_eq!(read_exactly(r, MSG.len()), MSG);
-        let _ = nsh_platform::close_fd(w);
+        assert_eq!(read_exactly(&r, MSG.len()), MSG);
+        drop(w);
     }
 
     /// A descriptor that was closed before `install` must be closed again
@@ -532,61 +547,33 @@ mod tests {
         let (r, w) = pipe();
 
         let st = forked(|| {
-            let _ = nsh_platform::close_fd(0);
-            let b = match install(Streams {
-                stdin: r,
-                stdout: 1,
-                stderr: 2,
-            }) {
+            let _ = nsh_platform::clear_descriptor(crate::fd_slot(0));
+            let streams = Streams::from_fds(&r, std::io::stdout(), std::io::stderr()).unwrap();
+            let b = match install(&streams) {
                 Ok(b) => b,
                 Err(_) => nsh_platform::exit_immediately(2),
             };
-            if !nsh_platform::fd_is_open(0) {
+            if !nsh_platform::fd_is_open(crate::fd_slot(0)) {
                 nsh_platform::exit_immediately(3);
             }
             b.restore();
-            if nsh_platform::fd_is_open(0) {
+            if nsh_platform::fd_is_open(crate::fd_slot(0)) {
                 nsh_platform::exit_immediately(4);
             }
             nsh_platform::exit_immediately(0);
         });
 
         assert_eq!(st, 0, "child failed at step {}", st);
-        let _ = nsh_platform::close_fd(r);
-        let _ = nsh_platform::close_fd(w);
+        drop((r, w));
     }
 
     #[test]
-    fn installing_a_bad_descriptor_reports_it_and_changes_nothing() {
-        let st = forked(|| {
-            // Nothing may allocate a descriptor between the close and the
-            // install: the kernel hands out the lowest free number, so a
-            // single intervening `dup` makes `bad` valid again.
-            // Keep the deliberately invalid number above `install`'s own
-            // staging range. Other tests may have descriptors 3..9 open
-            // when this child is forked, so "lowest available" is not a
-            // stable choice under the parallel test runner.
-            let bad = nsh_platform::duplicate_cloexec(1, 1000).unwrap();
-            nsh_platform::close_fd(bad).unwrap();
-
-            let err = match install(Streams {
-                stdin: 0,
-                stdout: bad,
-                stderr: 2,
-            }) {
-                Ok(_) => nsh_platform::exit_immediately(2),
-                Err(e) => e,
-            };
-            if err.fd != bad || err.errno != nsh_platform::BAD_DESCRIPTOR {
-                nsh_platform::exit_immediately(3);
-            }
-            // A failed install must leave the host's descriptors alone.
-            if !nsh_platform::fd_is_open(1) {
-                nsh_platform::exit_immediately(5);
-            }
-            nsh_platform::exit_immediately(0);
-        });
-
-        assert_eq!(st, 0, "child failed at step {}", st);
+    fn streams_own_duplicate_descriptors() {
+        let source = nsh_platform::anonymous_file(c"streams-owned").unwrap();
+        let source_number = source.as_raw_fd();
+        let streams = Streams::from_fds(&source, &source, &source).unwrap();
+        assert_ne!(streams.stdin, source_number);
+        drop(source);
+        assert!(nsh_platform::fd_is_open(crate::fd_slot(streams.stdin)));
     }
 }

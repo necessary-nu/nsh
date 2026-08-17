@@ -353,7 +353,11 @@ impl<'a> TestParser<'a> {
         Ok(match token {
             Token::StringEmpty => operand.is_empty(),
             Token::StringNonempty => !operand.is_empty(),
-            Token::FileTerminal => nsh_platform::is_terminal(getn(sh, operand)? as i32),
+            Token::FileTerminal => {
+                let fd = getn(sh, operand)? as i32;
+                nsh_platform::DescriptorSlot::new(fd)
+                    .is_ok_and(nsh_platform::is_terminal)
+            }
             Token::FileReadable => test_file_access(operand, AccessMode::READ_OK),
             Token::FileWritable => test_file_access(operand, AccessMode::WRITE_OK),
             Token::FileExecutable => test_file_access(operand, AccessMode::EXEC_OK),

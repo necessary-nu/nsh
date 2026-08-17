@@ -33,6 +33,7 @@ use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::c_int;
 use std::io::Write as _;
+use std::os::fd::{AsRawFd, OwnedFd};
 
 use crate::builtins::{BUILTIN_ASSIGN, BUILTIN_REGULAR, BUILTIN_SPECIAL, builtincmd};
 use crate::error::{FORCEINTON, INTOFF, INTON};
@@ -66,7 +67,7 @@ pub const SKIPFUNCDEF: c_int = 1 << 3;
 // [spec:dash:def:eval.backcmd]
 pub struct backcmd {
     /* result of evalbackcmd */
-    pub fd: c_int,         /* file descriptor to read from */
+    pub fd: Option<OwnedFd>, /* descriptor to read from */
     pub jp: Option<usize>, /* index of the job structure for command */
 }
 
@@ -101,8 +102,6 @@ pub struct EvalState {
     funcline: c_int,
     /// Prevent PS4 nesting. (MKINIT)
     pub(crate) inps4: c_int,
-    /// MKINIT `int tpip[2] = { -1 }`
-    pub(crate) tpip: [c_int; 2],
     /// exit status of backquoted command
     pub(crate) back_exitstatus: c_int,
     /// exit status of the last command outside traps, or -1 when no trap
@@ -140,7 +139,6 @@ impl EvalState {
             loopnest: 0,
             funcline: 0,
             inps4: 0,
-            tpip: [-1, 0],
             back_exitstatus: 0,
             savestatus: -1,
             errlinno: 0,
@@ -859,8 +857,7 @@ fn expredir(sh: &mut Shell, n: &[Node]) -> Result<(), Error> {
 fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
     let jp: usize;
     let pipelen: c_int;
-    let mut prevfd: c_int;
-    let mut pip: [c_int; 2] = [0; 2];
+    let mut prevfd: Option<OwnedFd>;
     let mut status: c_int = 0;
     let mut flags: c_int = flags;
 
@@ -870,51 +867,59 @@ fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
     flags |= EV_EXIT;
     INTOFF(sh);
     jp = crate::jobs::makejob(sh, pipelen);
-    prevfd = -1;
+    prevfd = None;
     for (i, cmd) in p.cmdlist.iter().enumerate() {
         let has_next = i + 1 < p.cmdlist.len();
         match prehash(sh, cmd)? {
             Flow::Done(_) => {}
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
-        pip[1] = -1;
-        if has_next {
-            let next_pipe = crate::redir::sh_pipe(sh, false);
-            if next_pipe.is_err() {
-                let _ = nsh_platform::close_fd(prevfd);
+        let mut pipe = if has_next {
+            match crate::redir::sh_pipe(sh, false) {
+                Ok((pipe, _)) => Some(pipe),
+                Err(error) => {
                 /* Between this frame's `INTOFF` and its `INTON`, exactly
                  * where the longjmp was: the jump skipped the same `INTON`
                  * and left the counter raised. Pairing them with a guard
                  * would move the instruction a pending SIGINT is delivered
                  * at, which `docs/errors-are-values.md` §2.4 forbids. */
-                return Err(next_pipe.unwrap_err());
+                    return Err(error);
+                }
             }
-            pip = next_pipe.expect("the error arm returned").0;
-        }
+        } else {
+            None
+        };
         if crate::jobs::forkshell(sh, Some(jp), Some(cmd), p.backgnd)? == 0 {
             INTON(sh);
-            if pip[1] >= 0 {
-                let _ = nsh_platform::close_fd(pip[0]);
+            let write = pipe.take().map(|pipe| {
+                drop(pipe.read);
+                pipe.write
+            });
+            if let Some(previous) = prevfd.take() {
+                if previous.as_raw_fd() > 0 {
+                    crate::input::reset_input(sh);
+                    let _ = nsh_platform::move_to_descriptor(previous, crate::fd_slot(0));
+                } else {
+                    std::mem::forget(previous);
+                }
             }
-            if prevfd > 0 {
-                crate::input::reset_input(sh);
-                let _ = nsh_platform::duplicate_to(prevfd, 0);
-                let _ = nsh_platform::close_fd(prevfd);
-            }
-            if pip[1] > 1 {
-                let _ = nsh_platform::duplicate_to(pip[1], 1);
-                let _ = nsh_platform::close_fd(pip[1]);
+            if let Some(write) = write {
+                if write.as_raw_fd() > 1 {
+                    let _ = nsh_platform::move_to_descriptor(write, crate::fd_slot(1));
+                } else {
+                    std::mem::forget(write);
+                }
             }
             /* In a forked child, which may not return through the
              * parent's frames; see `evalsubshell`. */
             let outcome = evaltreenr(sh, Some(cmd), flags);
             crate::shellmain::exit_from_child(sh, outcome);
         }
-        if prevfd >= 0 {
-            let _ = nsh_platform::close_fd(prevfd);
+        drop(prevfd.take());
+        if let Some(pipe) = pipe {
+            prevfd = Some(pipe.read);
+            drop(pipe.write);
         }
-        prevfd = pip[0];
-        let _ = nsh_platform::close_fd(pip[1]);
     }
     if p.backgnd == 0 {
         status = crate::jobs::waitforjob(sh, Some(jp))?;
@@ -940,28 +945,25 @@ pub fn evalbackcmd(
     result: &mut backcmd,
 ) -> Result<(), Error> {
     let jp: usize;
-    let mut pip: [c_int; 2] = [0; 2];
     let pid: c_int;
 
-    result.fd = -1;
+    result.fd = None;
     result.jp = None;
     'out_lbl: {
         if n.is_none() {
             break 'out_lbl;
         }
 
-        pip = crate::redir::sh_pipe(sh, false)?.0;
-        sh.eval.tpip[0] = pip[0];
-        sh.eval.tpip[1] = pip[1];
+        let pipe = crate::redir::sh_pipe(sh, false)?.0;
         jp = crate::jobs::makejob(sh, 1);
         pid = crate::jobs::forkshell(sh, Some(jp), n, FORK_NOJOB)?;
-        sh.eval.tpip[0] = -1;
         if pid == 0 {
             FORCEINTON(sh);
-            let _ = nsh_platform::close_fd(pip[0]);
-            if pip[1] != 1 {
-                let _ = nsh_platform::duplicate_to(pip[1], 1);
-                let _ = nsh_platform::close_fd(pip[1]);
+            drop(pipe.read);
+            if pipe.write.as_raw_fd() != 1 {
+                let _ = nsh_platform::move_to_descriptor(pipe.write, crate::fd_slot(1));
+            } else {
+                std::mem::forget(pipe.write);
             }
             crate::expand::ifsfree(&mut sh.expand);
             /* The one forked child that cannot hand its `Flow` back: it
@@ -981,8 +983,8 @@ pub fn evalbackcmd(
             crate::shellmain::exit_from_child(sh, outcome);
             /* NOTREACHED */
         }
-        let _ = nsh_platform::close_fd(pip[1]);
-        result.fd = pip[0];
+        drop(pipe.write);
+        result.fd = Some(pipe.read);
         result.jp = Some(jp);
     }
     // out:
