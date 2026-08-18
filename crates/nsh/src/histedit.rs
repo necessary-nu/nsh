@@ -29,6 +29,8 @@ use std::os::unix::ffi::OsStrExt as _;
 
 use crate::linedit::{History, LineEditor};
 
+const DEFAULT_HISTORY_SIZE: usize = 128;
+
 /// `#include <sys/param.h>` — MAXPATHLEN.
 
 // The old myhistedit typedefs now map to owned semantic fields in this state.
@@ -264,9 +266,10 @@ pub(crate) fn save_history(sh: &mut crate::context::Shell) {
 // [spec:dash:sem:histedit.sethistsize-fn]
 // [spec:dash:def:myhistedit.sethistsize-fn]
 // [spec:dash:sem:myhistedit.sethistsize-fn]
+// [spec:posix:req:builtin.fc.env-histsize]
 pub fn sethistsize(sh: &mut crate::context::Shell, hs: &BStr) {
     let histsize = if hs.is_empty() {
-        100
+        DEFAULT_HISTORY_SIZE
     } else {
         let mut input = hs
             .iter()
@@ -281,7 +284,11 @@ pub fn sethistsize(sh: &mut crate::context::Shell, hs: &BStr) {
             .fold(0usize, |value, digit| {
                 value.saturating_mul(10).saturating_add((digit - b'0') as usize)
             });
-        if negative && value != 0 { 100 } else { value }
+        if negative && value != 0 {
+            DEFAULT_HISTORY_SIZE
+        } else {
+            value
+        }
     };
     let Some(history) = history_mut(sh) else {
         return;
@@ -319,5 +326,23 @@ mod tests {
     fn history_file_starts_unconfigured() {
         let state = HistEditState::new();
         assert!(state.history_file.is_none());
+    }
+
+    // [spec:posix:req:builtin.fc.env-histsize/test]
+    #[test]
+    fn unset_histsize_retains_posix_minimum() {
+        let mut shell = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        shell.histedit.history = Some(History::new());
+        sethistsize(&mut shell, BStr::new(b""));
+
+        let history = shell.histedit.history.as_mut().unwrap();
+        for number in 1..=DEFAULT_HISTORY_SIZE {
+            history.enter(number.to_string().as_bytes(), false).unwrap();
+        }
+        assert_eq!(history.len(), DEFAULT_HISTORY_SIZE);
+
+        history.enter(b"newest", false).unwrap();
+        assert_eq!(history.len(), DEFAULT_HISTORY_SIZE);
+        assert_eq!(history.oldest().unwrap().number, 2);
     }
 }

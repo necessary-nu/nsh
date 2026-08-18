@@ -1935,6 +1935,21 @@ children (
                             shell ([spec:posix:req:builtin.fc.env-histsize])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T03:49:45.044095025Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T03:50:57.154877736Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Replace the inherited 100-entry default with the POSIX minimum of 128 and use that same safe default when a negative nonzero value is parsed. Keep explicit decimal values, including zero, unchanged. Verification: fc-env-histsize-default passes; a unit test retains entries 1 through 128 and proves insertion 129 evicts only entry 1; cargo test -p nsh passes 275 tests with one doctest ignored."
+                            }
+                        )
                     }
 
                     {

@@ -3434,4 +3434,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.fc.env-histfile}
     )}
+    {id fix-builtin-fc-env-histsize, covered_rules (
+        builtin.fc.env-histsize
+    ), covered_claims (
+        {impl_name shell, rule builtin.fc.env-histsize}
+    )}
 )
