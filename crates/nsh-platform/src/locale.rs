@@ -436,6 +436,8 @@ mod tests {
         assert_send_sync::<Locale>();
     }
 
+    // [spec:nsh:def:shell-locale.owned-locale/test]
+    // [spec:nsh:req:embedding-safety.process-locale-is-unchanged/test]
     #[test]
     fn construction_preserves_thread_locale() {
         let before = current();
@@ -443,6 +445,7 @@ mod tests {
         assert_eq!(current(), before);
     }
 
+    // [spec:nsh:req:embedding-safety.process-locale-is-unchanged/test]
     #[test]
     fn nested_selections_restore_in_stack_order() {
         let before = current();
@@ -456,6 +459,7 @@ mod tests {
         assert_eq!(current(), before);
     }
 
+    // [spec:nsh:req:embedding-safety.process-locale-is-unchanged/test]
     #[test]
     fn selection_is_restored_while_unwinding() {
         let before = current();
@@ -467,6 +471,7 @@ mod tests {
         assert_eq!(current(), before);
     }
 
+    // [spec:nsh:req:shell-locale.handle-lifetime/test]
     #[test]
     fn decoder_keeps_locale_handle_alive() {
         let mut decoder = Locale::c().unwrap().decoder();

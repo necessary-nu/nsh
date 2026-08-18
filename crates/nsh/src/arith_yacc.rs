@@ -127,7 +127,9 @@ impl<'a> Lexer<'a> {
         if byte.is_ascii_digit() {
             return self.number();
         }
-        if self.locale.is_alpha(byte) || byte == b'_' {
+        /* The C switch lists ASCII letters and `_` explicitly for the first
+         * byte, then uses locale-sensitive `is_in_name` only for the tail. */
+        if byte.is_ascii_alphabetic() || byte == b'_' {
             let start = self.pos;
             self.pos += 1;
             while self

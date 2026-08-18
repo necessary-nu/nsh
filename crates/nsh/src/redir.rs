@@ -440,9 +440,13 @@ fn openhere(sh: &mut Shell, redir: &Node) -> Result<OwnedFd, Error> {
 
     /* `redir->nhere.doc` is the slot `parseheredoc` filled; the C would have
      * dereferenced a null pointer had it not run. */
-    let doc: &Node = redir.nhere().doc.get().unwrap();
+    let doc = redir
+        .nhere()
+        .doc
+        .snapshot()
+        .expect("parseheredoc fills every here-document body");
     let p: &[u8] = if redir.node_type() == NXHERE {
-        crate::expand::expandarg(sh, doc, None, crate::expand::EXP_QUOTED)?;
+        crate::expand::expandarg(sh, &doc, None, crate::expand::EXP_QUOTED)?;
         /* The C reads the expansion back out of the region as
          * `stackblock()`.  The expansion buffer is owned now, so the read is
          * named.  Two consequences, both in the port's favour: the bytes

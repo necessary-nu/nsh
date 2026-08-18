@@ -13,7 +13,7 @@
 //! [dec:nsh:owned-data] takes the allocator away, so what is here now is an
 //! owned Rust tree: children are `Option<Box<Node>>`, the `next`-linked
 //! sibling lists are `Vec<Node>`, and the whole deep-copy apparatus is
-//! `Rc::new` of a derived `Clone`.
+//! a derived `Clone`.
 //!
 //! Two things the C's layout did that an enum cannot, and how they are
 //! spelled here instead:
@@ -40,8 +40,8 @@
 //! `copynode` — has a counterpart here, so the port of that generator went
 //! with the layout it described.
 
-use core::cell::{Cell, OnceCell, RefCell};
-use std::rc::Rc;
+use core::cell::{Cell, RefCell};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use bstr::{BStr, BString};
 use core::ffi::c_int;
@@ -111,10 +111,32 @@ pub const NNOT: c_int = 25;
 /// pointer out of `struct heredoc` into the tree (`here->here->nhere.doc =
 /// n`). A back pointer into an owned tree is the one thing Rust will not
 /// give you, so the *slot* is shared instead: the node and the pending
-/// `struct heredoc` hold one handle each. `OnceCell` rather than `RefCell`
-/// because the write happens exactly once and readers must be able to hold a
-/// plain `&Node` across an expansion that can re-enter the tree.
-pub type heredoc_body = Rc<OnceCell<Node>>;
+/// `struct heredoc` hold one handle each. The body is filled exactly once,
+/// then readers take an owned snapshot before an expansion can re-enter the
+/// tree. The mutex makes sharing the delayed write safe without preventing a
+/// complete [`Shell`](crate::context::Shell) from moving to another thread.
+#[allow(non_camel_case_types)]
+#[derive(Clone)]
+pub struct heredoc_body(Arc<Mutex<Option<Node>>>);
+
+impl heredoc_body {
+    pub fn new() -> Self {
+        Self(Arc::new(Mutex::new(None)))
+    }
+
+    pub fn fill(&self, node: Node) {
+        let mut body = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        assert!(body.is_none(), "a here-document body is filled only once");
+        *body = Some(node);
+    }
+
+    pub fn snapshot(&self) -> Option<Node> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
 
 /// The text of a word, a `for` variable or a function name.
 ///
@@ -328,9 +350,9 @@ impl Clone for nhere {
     /// node needs its own body, not a second handle on this one — otherwise
     /// the copy would keep pointing at text in the stack allocator.
     fn clone(&self) -> nhere {
-        let doc: heredoc_body = Rc::new(OnceCell::new());
-        if let Some(n) = self.doc.get() {
-            let _ = doc.set(n.clone());
+        let doc = heredoc_body::new();
+        if let Some(n) = self.doc.snapshot() {
+            doc.fill(n);
         }
         nhere {
             r#type: self.r#type,
@@ -554,8 +576,8 @@ impl Node {
 
 // ---- nodes.c ---------------------------------------------------------
 
-/// Compatibility name for a stored function body. Ownership is an `Rc<Node>`
-/// in the command table; there is no separate allocation header.
+/// Compatibility name for a stored function body. The command table owns the
+/// node directly; there is no separate allocation header.
 pub type funcnode = Node;
 
 // ---------------------------------------------------------------------

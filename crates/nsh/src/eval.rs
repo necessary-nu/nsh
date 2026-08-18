@@ -1540,7 +1540,7 @@ fn evalfun(
     saveloopnest = sh.eval.loopnest;
 
     INTOFF(sh);
-    /* `cmdentry::function` cloned the `Rc`, so redefining this function
+    /* `cmdentry::function` cloned the owned body, so redefining this function
      * while it runs cannot pull the body out from under this call. */
     sh.eval.funcline = func.ndefun().linno;
     sh.eval.loopnest = 0;

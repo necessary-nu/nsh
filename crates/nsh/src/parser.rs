@@ -8,11 +8,10 @@
 //! `parsesub`, `parsebackq`, `parsearith`) are reached by `goto` in C and
 //! are plain functions taking the shared state by `&mut` here.
 
-use core::cell::{Cell, OnceCell, RefCell};
+use core::cell::{Cell, RefCell};
 use core::mem;
 use std::ffi::CStr;
 use std::io::Write;
-use std::rc::Rc;
 
 use bstr::{BStr, BString};
 use core::ffi::{c_char, c_int, c_uint};
@@ -1015,7 +1014,7 @@ fn parseheredoc(sh: &mut Shell) -> Result<(), Error> {
         /* `here->here->nhere.doc = n` in the C — the same slot, reached
          * through a shared handle instead of a back pointer.  It is written
          * exactly once, so a second write cannot happen. */
-        let _ = here.doc.set(n);
+        here.doc.fill(n);
     }
     Ok(())
 }
@@ -1896,9 +1895,9 @@ fn parseredir(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
         st.c = pgetc_eatbnl(sh)?;
         if st.c == '<' as c_int {
             ty = NHERE;
-            let slot: heredoc_body = Rc::new(OnceCell::new());
+            let slot = heredoc_body::new();
             let mut here = heredoc {
-                doc: Rc::clone(&slot),
+                doc: slot.clone(),
                 expand: false,
                 eofmark: BString::new(Vec::new()),
                 striptabs: 0,

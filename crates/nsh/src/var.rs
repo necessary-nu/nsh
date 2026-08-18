@@ -766,6 +766,7 @@ mod tests {
     use super::*;
     use crate::testutil::lock;
 
+    // [spec:nsh:sem:shell-locale.selection/test]
     #[test]
     fn an_empty_locale_assignment_is_not_an_unset() {
         let _guard = lock();
@@ -786,9 +787,19 @@ mod tests {
                 .map(|value| value.as_slice()),
             Some(&b""[..])
         );
+        assert!(
+            environment(&shell)
+                .iter()
+                .any(|entry| entry.to_bytes() == b"LC_ALL=")
+        );
 
         unset_bytes(&mut shell, BStr::new(b"LC_ALL")).unwrap();
         assert_eq!(lookup_bytes(&mut shell, BStr::new(b"LC_ALL")), None);
+        assert!(
+            environment(&shell)
+                .iter()
+                .all(|entry| entry.to_bytes() != b"LC_ALL=")
+        );
     }
 
     // [spec:dash:sem:var.lookupvar-fn/test]

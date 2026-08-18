@@ -321,6 +321,7 @@ mod tests {
         );
     }
 
+    // [spec:nsh:req:embedding-safety.process-environment-is-read-only/test]
     #[test]
     fn build_preserves_process_environment() {
         let before = nsh_platform::process_environment();

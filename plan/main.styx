@@ -3683,6 +3683,20 @@ children (
                                 kind @decision
                                 text "priority pinned to 0 — operator override: Brendan: make a WBS for that P0 follow-up."
                             }
+
+                            {
+                                at 2026-08-18T00:51:01.686073027Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T01:35:40.488379031Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Verification complete: all 8 nsh embedding/locale rules are covered and tested. LOCPATH=tests/.build/locales cargo test --workspace passes (234 nsh unit tests plus all integrations; 11 nsh-platform tests), cargo check --workspace --all-targets passes, and the final ISO-8859-1 differential run records PASS=39340 FAIL=9 FLAKY=24 XFAIL=4—the same nine stable differences as C and UTF-8, with all four pre-P0 locale-only failures removed. Concurrent distinct-Shell verification required making Shell Send: stored function bodies are owned clones and delayed heredoc bodies use an Arc<Mutex<Option<Node>>> snapshot boundary, with no unsafe core code."
+                            }
                         )
                     }
                 )

@@ -13,7 +13,6 @@ use std::collections::BTreeMap;
 use std::ffi::{CStr, CString};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
-use std::rc::Rc;
 
 use crate::builtins::{BUILTIN_REGULAR, builtincmd};
 use crate::error::{E_EXEC, Error, INTOFF, INTON};
@@ -56,7 +55,7 @@ pub struct cmdentry {
 enum Command {
     Unknown,
     Normal(c_int),
-    Function(Rc<funcnode>),
+    Function(funcnode),
     Builtin(&'static builtincmd),
 }
 
@@ -92,9 +91,9 @@ impl cmdentry {
         }
     }
 
-    pub(crate) fn function(&self) -> Rc<funcnode> {
+    pub(crate) fn function(&self) -> funcnode {
         match &self.command {
-            Command::Function(function) => Rc::clone(function),
+            Command::Function(function) => function.clone(),
             _ => unreachable!("only shell functions have function bodies"),
         }
     }
@@ -765,7 +764,7 @@ pub fn defun(sh: &mut crate::context::Shell, func: &Node) {
     addcmdentry(
         sh,
         func.ndefun().text.as_bstr(),
-        Command::Function(Rc::new(func.clone())),
+        Command::Function(func.clone()),
     );
     INTON(sh);
 }
