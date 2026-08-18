@@ -54,10 +54,10 @@ for corpus in "$ROOT"/tests/corpus/*.txt; do
 	out=$(FAILOUT=$OUT/$name.out FLAKYOUT=$OUT/$name.flaky \
 		XFAILOUT=$OUT/$name.xfail \
 		"$HERE/dsdiff.sh" "$corpus" "$JOBS" 2>&1)
-	line=$(printf '%s\n' "$out" | grep -m1 '^PASS=')
+	line=$(printf '%s\n' "$out" | LC_ALL=C grep -a -m1 '^PASS=')
 	while IFS= read -r id; do
 		[ -n "$id" ] && seen_any[${id#XFAILID=}]=1
-	done < <(printf '%s\n' "$out" | grep '^XFAILID=')
+	done < <(printf '%s\n' "$out" | LC_ALL=C grep -a '^XFAILID=')
 	case $line in
 	PASS=*) ;;
 	*) echo "!! $name: harness did not report a tally"; bad=$((bad + 1)); continue ;;

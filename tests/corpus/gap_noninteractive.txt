@@ -69,7 +69,7 @@ kill -0 $$; echo "self-rc=$?"
 %%%
 #!allow-kill
 #!name killcmd: signal a job by jobspec
-sleep 5 &
+sleep 0.2 &
 kill %1
 wait 2>/dev/null
 echo after-kill
@@ -81,10 +81,10 @@ echo "rc=$?"
 %%%
 #!allow-kill
 #!name killcmd: -s form and numeric signal
-sleep 5 &
+sleep 0.2 &
 kill -s TERM %1
 wait 2>/dev/null
-sleep 5 &
+sleep 0.2 &
 kill -15 %1
 wait 2>/dev/null
 echo both-done

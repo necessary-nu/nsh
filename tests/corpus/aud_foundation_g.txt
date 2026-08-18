@@ -31,10 +31,10 @@ false; echo $?; (exit 200); echo $?; true; echo $?
 times | wc -l
 %%%
 #!name ulimit-all', 'x
-ulimit -a | md5sum
+ulimit -a
 %%%
-#!name set-o-md5
-set -o | md5sum; set +o | md5sum
+#!name set-o-listings
+set -o; set +o
 %%%
 #!name umask-all
 for m in 0 1 7 22 77 177 777 7777; do umask $m; umask; umask -S; done

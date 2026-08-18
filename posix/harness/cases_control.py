@@ -482,13 +482,15 @@ CASES: tuple[Case, ...] = (
         pace=0.02,
     ),
     # The option is explicitly limited to interactive shells. Enabling it in
-    # a script must not rearm a command file after its physical end-of-file.
+    # a script must not rearm a command file after its physical end-of-file,
+    # even if the script also toggles dash's runtime `-i` extension.
     # [spec:posix:req:builtin.set.opt-o-ignoreeof/test]
     Case(
         id="set-opt-o-ignoreeof-non-interactive",
         rules=("builtin.set.opt-o-ignoreeof",),
-        script="set -o ignoreeof\nprintf 'DONE\\n'\n",
+        script="set -i\nset -o ignoreeof\nprintf 'DONE\\n'\n",
         mode="stdin",
+        environment={"PS1": "", "PS2": ""},
         stdout="DONE\n",
         stderr="",
         timeout=1.0,

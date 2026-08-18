@@ -84,21 +84,22 @@ REF=$(ds_pin "$REF" ref) || { echo "cannot pin the reference binary" >&2; exit 2
 LINTED=$RUNROOT/corpus.linted
 "$HERE/corpus-lint.sh" "$CORPUS" > "$LINTED" 2> "$RUNROOT/lint.log"
 tail -1 "$RUNROOT/lint.log"
-grep '^DROP' "$RUNROOT/lint.log" | head -20
+LC_ALL=C grep -a '^DROP' "$RUNROOT/lint.log" | head -20
 CORPUS=$LINTED
 
 # Split the corpus into one file per case.
 if grep -qx '%%%' "$CORPUS"; then
 	awk -v dir="$RUNROOT/cases" '
 		BEGIN { n = 0; f = sprintf("%s/%06d", dir, n) }
-		/^%%%$/ { n++; f = sprintf("%s/%06d", dir, n); next }
+		/^%%%$/ { close(f); n++; f = sprintf("%s/%06d", dir, n); next }
 		{ print > f }
+		END { close(f) }
 	' "$CORPUS"
 else
 	awk -v dir="$RUNROOT/cases" '
 		/^[[:space:]]*$/ { next }
 		/^[[:space:]]*#/ { next }
-		{ printf "%s\n", $0 > sprintf("%s/%06d", dir, ++n) }
+		{ f = sprintf("%s/%06d", dir, ++n); printf "%s\n", $0 > f; close(f) }
 	' "$CORPUS"
 fi
 
@@ -169,8 +170,13 @@ for f in "$RUNROOT"/out/*.xfail; do
 	[ -e "$f" ] || continue
 	cat "$f" >> "$XFAILOUT"
 	nxfail=$((nxfail + 1))
-	id=$(sed -n '1s/^### XFAIL(\([^)]*\)).*/\1/p' "$f")
-	[ -n "$id" ] && seen_div[$id]=1
+	id=$(LC_ALL=C sed -n '1s/^### XFAIL(\([^)]*\)).*/\1/p' "$f")
+	if [ -n "$id" ]; then
+		IFS=, read -r -a matched_ids <<< "$id"
+		for id in "${matched_ids[@]}"; do
+			[ -n "$id" ] && seen_div[$id]=1
+		done
+	fi
 done
 
 echo "PASS=$pass FAIL=$fail FLAKY=$nflaky XFAIL=$nxfail"

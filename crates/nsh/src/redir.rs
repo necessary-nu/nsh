@@ -516,13 +516,34 @@ pub fn sh_pipe(
             let source = read_fd.as_raw_fd();
             let write_fd = nsh_platform::duplicate_fd(&read_fd)
                 .map_err(|error| descriptor_error(sh, source, error))?;
-            return Ok((Pipe { read: read_fd, write: write_fd }, true));
+            let read = nsh_platform::move_fd_cloexec(
+                read_fd,
+                crate::fd::SLOT_COUNT as i32,
+            )
+            .map_err(|error| descriptor_error(sh, source, error))?;
+            let source = write_fd.as_raw_fd();
+            let write = nsh_platform::move_fd_cloexec(
+                write_fd,
+                crate::fd::SLOT_COUNT as i32,
+            )
+            .map_err(|error| descriptor_error(sh, source, error))?;
+            return Ok((Pipe { read, write }, true));
         }
     }
 
-    nsh_platform::pipe()
-        .map(|(read, write)| (Pipe { read, write }, false))
-        .map_err(|_| sh.sh_error_value(b"Pipe call failed"))
+    let (read, write) = nsh_platform::pipe()
+        .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
+    let read = nsh_platform::move_fd_cloexec(
+        read,
+        crate::fd::SLOT_COUNT as i32,
+    )
+    .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
+    let write = nsh_platform::move_fd_cloexec(
+        write,
+        crate::fd::SLOT_COUNT as i32,
+    )
+    .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
+    Ok((Pipe { read, write }, false))
 }
 
 /*
@@ -673,13 +694,9 @@ pub fn mkinit_forkreset(sh: &mut Shell) {
 // [spec:dash:sem:redir.savefd-fn]
 /// Move an owned descriptor above the shell redirection range.
 pub fn move_fd_above(sh: &mut Shell, fd: OwnedFd) -> Result<OwnedFd, Error> {
-    if fd.as_raw_fd() >= 10 {
-        return Ok(fd);
-    }
     let number = fd.as_raw_fd();
-    nsh_platform::duplicate_cloexec(&fd, 10)
+    nsh_platform::move_fd_cloexec(fd, 10)
         .map_err(|error| descriptor_error(sh, number, error))
-    // `fd` drops after the duplicate is made.
 }
 
 /// Duplicate a process-table slot above the shell redirection range.

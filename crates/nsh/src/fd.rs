@@ -22,7 +22,7 @@ pub(crate) struct SharedFd(Arc<OwnedFd>);
 impl SharedFd {
     /// Move an owned descriptor into the shell's hidden backing range.
     pub(crate) fn from_owned(fd: OwnedFd) -> std::io::Result<Self> {
-        let fd = nsh_platform::duplicate_cloexec(&fd, SLOT_COUNT as i32)?;
+        let fd = nsh_platform::move_fd_cloexec(fd, SLOT_COUNT as i32)?;
         Ok(Self(Arc::new(fd)))
     }
 

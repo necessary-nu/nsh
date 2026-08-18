@@ -48,7 +48,7 @@ alias echo='echo pre'; echo hi
 #!mode=file
 B0=$PWD
 set +o nounset; echo "$-"
-set +o | md5sum
+set +o
 read v <<E
 value
 E
@@ -71,7 +71,7 @@ set --; echo "$#"
 #!mode=file
 B0=$PWD
 g() { local IFS; echo "[${IFS-U}]"; }; IFS=outer 2>/dev/null; g; echo "[${IFS-U}]"
-set -o | md5sum
+set -o
 %%%
 #!name gen11
 #!mode=file
@@ -158,7 +158,7 @@ mkdir -p cp/t; CDPATH=./cp; cd t >/dev/null 2>&1; echo "rc=$? ${PWD#$B0}"
 #!name gen24
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 trap 'echo X' 1 2>&1; (trap); echo ---; trap
 %%%
 #!name gen25
@@ -737,7 +737,7 @@ g() { local A; echo "[${A-U}]"; }; A=outer 2>/dev/null; g; echo "[${A-U}]"
 B0=$PWD
 readonly PS4='/tmp'
 mkdir -p o1 o2; cd o1; cd ../o2; echo "${OLDPWD#$B0}|${PWD#$B0}"
-set +o | md5sum
+set +o
 %%%
 #!name gen118
 #!mode=file
@@ -962,13 +962,13 @@ env | grep -c '^LC_CTYPE='
 #!mode=file
 B0=$PWD
 trap '' 10 2>&1; trap; echo rc=$?
-set -o | md5sum
+set -o
 %%%
 #!name gen154
 #!mode=file
 B0=$PWD
 g() { local OPTIND B; echo "[${OPTIND-U}]"; }; OPTIND=outer 2>/dev/null; g; echo "[${OPTIND-U}]"
-set +o | md5sum
+set +o
 read v <<E
 value
 E
@@ -1106,7 +1106,7 @@ set --  c; echo "$#:$*"
 #!name gen175
 #!mode=file
 B0=$PWD
-set +o | md5sum
+set +o
 g() { local -; set +I; echo "in:$-"; }; g; echo "out:$-"
 %%%
 #!name gen176
@@ -1344,7 +1344,7 @@ alias echo='echo pre'; echo hi
 #!name gen213
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 set -C; echo a > nc.txt; echo b > nc.txt 2>&1; echo rc=$?; cat nc.txt
 %%%
 #!name gen214
@@ -1423,7 +1423,7 @@ read v <&5; echo "[$v]"; exec 5<&-
 #!name gen225
 #!mode=file
 B0=$PWD
-set +o | md5sum
+set +o
 %%%
 #!name gen226
 #!mode=file
@@ -1494,7 +1494,7 @@ set -- x -ab -a -b; OPTIND=1; while getopts abc o 2>&1; do echo "$o|${OPTARG-U}|
 #!name gen237
 #!mode=file
 B0=$PWD
-set +o | md5sum
+set +o
 %%%
 #!name gen238
 #!mode=file
@@ -1646,7 +1646,7 @@ g() { local V1='POSIX'; echo "[${V1}]"; }; V1=outer 2>/dev/null; g; echo "[${V1-
 #!mode=file
 B0=$PWD
 echo z > nz.txt; echo y >> nz.txt; cat nz.txt
-set -o | md5sum
+set -o
 trap 'echo E' EXIT; echo body
 %%%
 #!name gen262
@@ -1720,7 +1720,7 @@ set | grep -c '^vv='
 #!mode=file
 B0=$PWD
 alias 'a b'=1 2>&1; echo rc=$?
-set -o | md5sum
+set -o
 %%%
 #!name gen273
 #!mode=file
@@ -2111,7 +2111,7 @@ alias 'a b'=1 2>&1; echo rc=$?
 B0=$PWD
 export LC_NUMERIC='0'
 alias a='echo A'; f() { a; }; f; unalias a; f 2>&1; echo rc=$?
-set -o | md5sum
+set -o
 %%%
 #!name gen335
 #!mode=file
@@ -2293,7 +2293,7 @@ set -- x; OPTIND=1; while getopts abc o 2>&1; do echo "$o|${OPTARG-U}|$OPTIND"; 
 #!mode=file
 B0=$PWD
 echo z > nz.txt; echo y >> nz.txt; cat nz.txt
-set -o | md5sum
+set -o
 %%%
 #!name gen364
 #!mode=file
@@ -2362,7 +2362,7 @@ set -- -- -c -b; unset OPTIND; while getopts :a:b o 2>&1; do echo "$o|${OPTARG-U
 #!name gen375
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 %%%
 #!name gen376
 #!mode=file
@@ -2469,7 +2469,7 @@ pwd -L > /dev/null; pwd -P > /dev/null; echo pwdok
 B0=$PWD
 pwd -L > /dev/null; pwd -P > /dev/null; echo pwdok
 trap 'echo X' 0 2>&1; (trap); echo ---; trap
-set -o | md5sum
+set -o
 %%%
 #!name gen394
 #!mode=file
@@ -2524,7 +2524,7 @@ E
 #!mode=file
 B0=$PWD
 trap 'echo T' PIPE 2>&1; trap; echo rc=$?
-set -o | md5sum
+set -o
 alias a='echo A'; a; alias a
 %%%
 #!name gen402
@@ -2714,7 +2714,7 @@ echo "[${CDPATH-U}]"
 #!mode=file
 B0=$PWD
 export TERM
-set +o | md5sum
+set +o
 g() { local IFS='.'; IFS='.'; echo "[${IFS}]"; }; IFS=outer 2>/dev/null; g; echo "[${IFS-U}]"
 %%%
 #!name gen432
@@ -3102,7 +3102,7 @@ g() { local OPTIND='\t'; OPTIND='\t'; echo "[${OPTIND}]"; }; OPTIND=outer 2>/dev
 #!name gen494
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 %%%
 #!name gen495
 #!mode=file
@@ -3115,7 +3115,7 @@ g() { local PATH B; echo "[${PATH-U}]"; }; PATH=outer 2>/dev/null; g; echo "[${P
 #!mode=file
 B0=$PWD
 unset -v LC_ALL
-set +o | md5sum
+set +o
 trap 'echo A' ALRM 2>&1; trap - ALRM 2>&1; trap; echo rc=$?
 %%%
 #!name gen497
@@ -3188,7 +3188,7 @@ trap '' 10 2>&1; trap; echo rc=$?
 #!name gen507
 #!mode=file
 B0=$PWD
-set +o | md5sum
+set +o
 %%%
 #!name gen508
 #!mode=file
@@ -3300,7 +3300,7 @@ set -Iv; echo "$-"
 #!name gen525
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 alias a='echo A'; f() { a; }; f; unalias a; f 2>&1; echo rc=$?
 echo z > nz.txt; echo y >> nz.txt; cat nz.txt
 %%%
@@ -3531,7 +3531,7 @@ export HOME='/tmp'
 #!name gen564
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 trap 'echo A' ALRM 2>&1; trap - ALRM 2>&1; trap; echo rc=$?
 %%%
 #!name gen565
@@ -3588,7 +3588,7 @@ set -C; echo a > nc.txt; echo b > nc.txt 2>&1; echo rc=$?; cat nc.txt
 #!name gen574
 #!mode=file
 B0=$PWD
-set +o | md5sum
+set +o
 set -- -b -bvalue x; OPTIND=1; while getopts ab o 2>&1; do echo "$o|${OPTARG-U}|$OPTIND"; done; echo "end $OPTIND"
 alias 'a b'=1 2>&1; echo rc=$?
 %%%
@@ -3695,7 +3695,7 @@ echo z > nz.txt; echo y >> nz.txt; cat nz.txt
 #!name gen591
 #!mode=file
 B0=$PWD
-set +o | md5sum
+set +o
 %%%
 #!name gen592
 #!mode=file
@@ -3748,7 +3748,7 @@ env | grep -c '^LANG='
 #!name gen599
 #!mode=file
 B0=$PWD
-set +o | md5sum
+set +o
 g() { local A; A='C'; echo "[${A}]"; }; A=outer 2>/dev/null; g; echo "[${A-U}]"
 %%%
 #!name gen600
@@ -3785,7 +3785,7 @@ alias a=1 b=2 c=3; unalias -a; alias; echo rc=$?
 #!mode=file
 B0=$PWD
 mkdir -p l1; ln -s l1 s1; cd -L s1; echo "${PWD#$B0}"; cd ..; echo "R${PWD#$B0}"
-set -o | md5sum
+set -o
 %%%
 #!name gen606
 #!mode=file
@@ -4143,7 +4143,7 @@ mkdir -p l1; ln -s l1 s1; cd -L s1; echo "${PWD#$B0}"; cd ..; echo "R${PWD#$B0}"
 #!mode=file
 B0=$PWD
 set -C; echo a > nc.txt; echo b > nc.txt 2>&1; echo rc=$?; cat nc.txt
-set +o | md5sum
+set +o
 %%%
 #!name gen666
 #!mode=file
@@ -4580,7 +4580,7 @@ alias a=1 b=2 c=3; unalias -a; alias; echo rc=$?
 B0=$PWD
 set -- -a x; unset OPTIND; while getopts a:b o 2>&1; do echo "$o|${OPTARG-U}|$OPTIND"; done; echo "end $OPTIND"
 mkdir -p c1/c2; cd c1/c2; echo "${PWD#$B0}"; cd ../..; echo "R${PWD#$B0}"
-set -o | md5sum
+set -o
 %%%
 #!name gen736
 #!mode=file
@@ -4658,7 +4658,7 @@ g() { local PATH B; echo "[${PATH-U}]"; }; PATH=outer 2>/dev/null; g; echo "[${P
 #!name gen748
 #!mode=file
 B0=$PWD
-set +o | md5sum
+set +o
 %%%
 #!name gen749
 #!mode=file
@@ -4696,7 +4696,7 @@ E
 B0=$PWD
 g() { local -; set -o notify; echo "in:$-"; }; g; echo "out:$-"
 set | grep -c '^vv='
-set +o | md5sum
+set +o
 %%%
 #!name gen755
 #!mode=file
@@ -4821,7 +4821,7 @@ g() { local B B; B='\t'; echo "[${B}]"; }; B=outer 2>/dev/null; g; echo "[${B-U}
 #!mode=file
 B0=$PWD
 alias a='unalias a; echo A'; a; a 2>&1; echo rc=$?
-set -o | md5sum
+set -o
 %%%
 #!name gen776
 #!mode=file
@@ -5073,7 +5073,7 @@ unset IFS
 B0=$PWD
 exec 3>r3.txt; echo hi >&3; exec 3>&-; cat r3.txt
 alias a='x'; unalias a; unalias a 2>&1; echo rc=$?
-set -o | md5sum
+set -o
 %%%
 #!name gen817
 #!mode=file
@@ -5124,7 +5124,7 @@ g() { local V1; echo "[${V1-U}]"; }; V1=outer 2>/dev/null; g; echo "[${V1-U}]"
 #!name gen824
 #!mode=file
 B0=$PWD
-set +o | md5sum
+set +o
 g() { local -; set +E; echo "in:$-"; }; g; echo "out:$-"
 set +o nounset; echo "$-"
 %%%
@@ -5191,7 +5191,7 @@ alias a='echo A'; a; alias a
 #!mode=file
 B0=$PWD
 g() { local IFS='POSIX'; echo "[${IFS}]"; }; IFS=outer 2>/dev/null; g; echo "[${IFS-U}]"
-set +o | md5sum
+set +o
 %%%
 #!name gen836
 #!mode=file
@@ -5492,7 +5492,7 @@ g() { local V1 B; V1='"q"'; echo "[${V1}]"; }; V1=outer 2>/dev/null; g; echo "[$
 #!name gen884
 #!mode=file
 B0=$PWD
-set +o | md5sum
+set +o
 %%%
 #!name gen885
 #!mode=file
@@ -5541,7 +5541,7 @@ set -- -a -b -c; OPTIND=1; while getopts :a:bc: o 2>&1; do echo "$o|${OPTARG-U}|
 B0=$PWD
 trap 'echo E' EXIT; echo body
 g() { local OPTIND='a'b'; echo "[${OPTIND-U}]"; }; OPTIND=outer 2>/dev/null; g; echo "[${OPTIND-U}]"
-set +o | md5sum
+set +o
 %%%
 #!name gen893
 #!mode=file
@@ -5659,12 +5659,12 @@ alias a='echo A'; a; alias a
 #!name gen911
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 %%%
 #!name gen912
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 %%%
 #!name gen913
 #!mode=file
@@ -5863,7 +5863,7 @@ cd /nope 2>&1; echo rc=$?
 #!mode=file
 B0=$PWD
 alias echo='echo pre'; echo hi
-set -o | md5sum
+set -o
 %%%
 #!name gen946
 #!mode=file
@@ -6278,7 +6278,7 @@ env | grep -c '^IFS='
 #!name gen1009
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 %%%
 #!name gen1010
 #!mode=file
@@ -6440,7 +6440,7 @@ trap 'echo X' 1 2>&1; (trap); echo ---; trap
 #!name gen1036
 #!mode=file
 B0=$PWD
-set +o | md5sum
+set +o
 %%%
 #!name gen1037
 #!mode=file
@@ -6468,7 +6468,7 @@ unset PWD
 #!name gen1041
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 alias a='b'; alias b='echo B'; a
 %%%
 #!name gen1042
@@ -6544,7 +6544,7 @@ trap '' USR2 2>&1; trap; echo rc=$?
 #!name gen1054
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 set -- -z -a -b -z; unset OPTIND; while getopts :ab o 2>&1; do echo "$o|${OPTARG-U}|$OPTIND"; done; echo "end $OPTIND"
 %%%
 #!name gen1055
@@ -7261,7 +7261,7 @@ export HISTSIZE='\t'
 B0=$PWD
 (trap 'echo SE' EXIT; echo sub); echo main
 exec 5<&-; read v <&5 2>&1; echo rc=$?
-set +o | md5sum
+set +o
 %%%
 #!name gen1169
 #!mode=file
@@ -7466,7 +7466,7 @@ B0=$PWD
 #!mode=file
 B0=$PWD
 alias a='x'; unalias a; unalias a 2>&1; echo rc=$?
-set +o | md5sum
+set +o
 %%%
 #!name gen1202
 #!mode=file
@@ -7547,7 +7547,7 @@ mkdir -p c1/c2; cd c1/c2; echo "${PWD#$B0}"; cd ../..; echo "R${PWD#$B0}"
 B0=$PWD
 alias a='unalias a; echo A'; a; a 2>&1; echo rc=$?
 set -o monitor; echo "$-"
-set +o | md5sum
+set +o
 %%%
 #!name gen1214
 #!mode=file
@@ -7681,7 +7681,7 @@ mkdir -p cp/t; CDPATH=./cp; cd t >/dev/null 2>&1; echo "rc=$? ${PWD#$B0}"
 #!name gen1234
 #!mode=file
 B0=$PWD
-set +o | md5sum
+set +o
 g() { local V1 B; echo "[${V1}]"; }; V1=outer 2>/dev/null; g; echo "[${V1-U}]"
 %%%
 #!name gen1235
@@ -7906,7 +7906,7 @@ V1='x=y'
 #!name gen1271
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 %%%
 #!name gen1272
 #!mode=file
@@ -7948,7 +7948,7 @@ g() { local A='\t'; A='\t'; echo "[${A}]"; }; A=outer 2>/dev/null; g; echo "[${A
 #!name gen1278
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 %%%
 #!name gen1279
 #!mode=file
@@ -7989,7 +7989,7 @@ trap 'echo A' 0 2>&1; trap - 0 2>&1; trap; echo rc=$?
 #!name gen1285
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 %%%
 #!name gen1286
 #!mode=file
@@ -8350,7 +8350,7 @@ g() { local B='abc'; echo "[${B-U}]"; }; B=outer 2>/dev/null; g; echo "[${B-U}]"
 #!name gen1344
 #!mode=file
 B0=$PWD
-set +o | md5sum
+set +o
 alias a='b '; alias b='echo B'; alias c='echo C'; a c
 %%%
 #!name gen1345
@@ -8413,7 +8413,7 @@ alias a='echo A'; f() { a; }; f; unalias a; f 2>&1; echo rc=$?
 #!name gen1355
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 %%%
 #!name gen1356
 #!mode=file
@@ -8458,7 +8458,7 @@ echo "[${LC_ALL}]"
 #!name gen1363
 #!mode=file
 B0=$PWD
-set +o | md5sum
+set +o
 set -- a b c d e; shift 1 2>&1; echo "rc=$? $#:$*"
 %%%
 #!name gen1364
@@ -8580,7 +8580,7 @@ exec 3>r3.txt; echo hi >&3; exec 3>&-; cat r3.txt
 #!name gen1383
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 %%%
 #!name gen1384
 #!mode=file
@@ -8616,7 +8616,7 @@ g() { local A B; echo "[${A}]"; }; A=outer 2>/dev/null; g; echo "[${A-U}]"
 #!name gen1389
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 set -- -c -a x -a; unset OPTIND; while getopts :a:bc: o 2>&1; do echo "$o|${OPTARG-U}|$OPTIND"; done; echo "end $OPTIND"
 alias 'a b'=1 2>&1; echo rc=$?
 %%%
@@ -8726,7 +8726,7 @@ alias a='b '; alias b='echo B'; alias c='echo C'; a c
 #!mode=file
 B0=$PWD
 alias a='b '; alias b='echo B'; alias c='echo C'; a c
-set +o | md5sum
+set +o
 export OPTIND='C'
 %%%
 #!name gen1408
@@ -8879,7 +8879,7 @@ g() { local V1; V1='abc'; echo "[${V1}]"; }; V1=outer 2>/dev/null; g; echo "[${V
 #!name gen1431
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 trap 'echo E' EXIT; echo body
 %%%
 #!name gen1432
@@ -8944,7 +8944,7 @@ trap 'echo A' USR1 2>&1; trap - USR1 2>&1; trap; echo rc=$?
 #!name gen1442
 #!mode=file
 B0=$PWD
-set +o | md5sum
+set +o
 %%%
 #!name gen1443
 #!mode=file
@@ -9173,7 +9173,7 @@ trap 'echo T' PIPE 2>&1; trap; echo rc=$?
 #!name gen1481
 #!mode=file
 B0=$PWD
-set +o | md5sum
+set +o
 g() { local IFS='x=y'; echo "[${IFS}]"; }; IFS=outer 2>/dev/null; g; echo "[${IFS-U}]"
 set -- a b c d e; shift 2 2>&1; echo "rc=$? $#:$*"
 %%%
@@ -9241,7 +9241,7 @@ mkdir -p cp/t; CDPATH=./cp; cd t >/dev/null 2>&1; echo "rc=$? ${PWD#$B0}"
 B0=$PWD
 set -- -z -a -ab; OPTIND=1; while getopts :ab o 2>&1; do echo "$o|${OPTARG-U}|$OPTIND"; done; echo "end $OPTIND"
 trap 'echo T' USR2 2>&1; trap; echo rc=$?
-set -o | md5sum
+set -o
 %%%
 #!name gen1492
 #!mode=file
@@ -9290,6 +9290,6 @@ trap 'echo A' USR2 2>&1; trap - USR2 2>&1; trap; echo rc=$?
 #!name gen1499
 #!mode=file
 B0=$PWD
-set -o | md5sum
+set -o
 g() { local B='POSIX'; echo "[${B-U}]"; }; B=outer 2>/dev/null; g; echo "[${B-U}]"
 { echo a; echo b >&2; } 2>&1 > o.txt; cat o.txt

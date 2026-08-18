@@ -44,7 +44,7 @@ NetBSD import.
 
 The harness reads a register, so a sanctioned divergence no longer spends
 `FAIL=0`. The prose lives here; the executable half is
-`tests/harness/divergences.sh`, and an entry is a shell function:
+`tests/harness/divergences.sh`. A decision-style entry is a shell function:
 
 ```
 dsdiv_<id> REF_OUT PORT_OUT REF_RC PORT_RC CASE_FILE  ->  0 = this explains it
@@ -54,6 +54,14 @@ A case that matches is reported as `XFAIL(<id>)` and counted as passing,
 with the detail in `tests/.build/xfail.out`. An entry that matches
 nothing is reported too — a stale excuse is how a real regression
 eventually gets waved through.
+
+There is a second form for corrections that can occur together in one
+generated case. A `dsnorm_<id>` function performs one narrow transformation
+from dash's observed output to the port's specified output and records that it
+acted. All enabled normalizers run, and the case is sanctioned only if the two
+complete outputs and statuses are then identical. The report carries every ID
+that participated, comma-separated. This is composition, not partial credit:
+one unexplained byte still makes the case fail.
 
 It is a function rather than a pattern in a config file because a
 divergence is a claim about *behaviour*, and the only honest way to say
@@ -294,6 +302,102 @@ mistake unrelated output or a diagnostic for a hash-table line.
 content/drop/add/duplicate/status failures, the line shape and feature
 scope, the optional `*`, basename rather than full-path sorting, a bare
 name refusal, and an unsorted nsh permutation.
+
+### POSIX corrections retained over dash
+
+**Status:** implemented in the Rust; dash unchanged. Category 3. Every ID
+below is registered in `tests/harness/divergences.sh`. Its 188 focused checks
+exercise the intended matches and adversarial content, status and scope
+boundaries.
+
+These are the deliberate results of the POSIX conformance pass. Most are
+normalizers because the generated state corpus routinely observes more than
+one in the same shell process.
+
+* `getopts_optarg_unset`: when an option has no argument, `getopts` unsets
+  `OPTARG`; dash leaves it set to an empty value. The entry changes only a
+  complete `${OPTARG-U}` result record.
+* `getopts_diagnostic_prefix`: a `getopts` diagnostic identifies the invoking
+  program (`SH` or `./script.sh`). dash omits it. Only the two exact option
+  diagnostics and those two invocation forms qualify.
+* `getopts_optind_reset`: assigning `OPTIND=1` restarts the scan. dash retains
+  a hidden cursor and continues or stops; nsh makes `OPTIND` the authoritative
+  state and re-observes the first `-a` operand.
+* `set_hashall_option`: `set -h` is implemented, so `set -o` and `set +o`
+  contain the corresponding disabled `hashall` record. The normalizer removes
+  only those exact report lines before comparing the rest.
+* `ignoreeof_noninteractive_eof`: `ignoreeof` applies only to an interactive
+  input source. A command file or stdin script still terminates at physical
+  EOF even if it executes `set -i` and enables `ignoreeof`; dash prints fifty
+  retry diagnostics first. nsh captures the input-source classification when
+  the command loop begins, rather than allowing an option mutation to
+  reclassify the source.
+* `fc_listing_format`: `fc -l` separates the event number and command with a
+  tab, uses a leading tab with `-n`, and indents continuation lines. dash uses
+  four spaces before the number, one after it, and no continuation indent.
+* `fc_substitution_status`: `fc -s true=false` returns the status of the
+  resulting `false` command. dash reports success.
+* `fc_recursion_error_status`: exhausting the recursive `fc -s` guard is a
+  utility error and returns 2. dash prints the same diagnostic but leaves the
+  interactive command status at zero.
+* `ulimit_all_format`: every `ulimit -a` row names the resource, units, option
+  and value in the POSIX.1-2024 form. The register maps all twelve exact nsh
+  labels to dash's older labels while leaving every value untouched.
+* `ulimit_default_soft_report`: with neither `-H` nor `-S`, a no-operand query
+  reports the soft limit. dash suppresses one such query in the exercised
+  set/query sequences; the entry accepts exactly one additional line equal to
+  the value just set.
+* `jobs_command_text`: the default `jobs` record contains its `<command>`
+  field. dash prints a padded status with that field empty. The entry removes
+  a suffix only when the complete command text occurs in the case itself.
+* `jobs_waited_removal`: a successfully waited job is removed from the known
+  jobs. dash retains it and a later `jobs` prints a stale `Done` record.
+* `wait_consumed_status`: after a successful wait consumes a PID's saved
+  status, waiting for it again returns 127. dash returns the stale zero status.
+  The normalizer changes only the final result of `wait $! $!` or the one
+  `second=0` record in the named-PID probe.
+* `wait_consumed_jobspec`: the same consumption rule removes a job ID. After a
+  bare `wait`, `wait %1` is an unknown-job utility error in nsh; dash returns
+  the stale success. The exact `%1` diagnostic and its one `rc=2` record are
+  paired before either is normalized.
+* `kill_jobspec`: `kill` resolves a job-control job ID such as `%1`. dash hands
+  the string to `kill(2)` as a PID and diagnoses `No such process`.
+* `trap_subshell_listing`: POSIX.1-2024 preserves the inherited trap commands
+  for an initial no-operand `trap` listing in a subshell, even though live
+  dispositions were reset. Added lines must be byte-identical to the outer
+  listing and are bounded by the number of lexical subshell listings.
+* `trap_p_option`: POSIX.1-2024 `trap -p PIPE` prints the selected trap. dash
+  rejects `-p`; the decision entry pins both its exact diagnostic and nsh's
+  exact listing.
+* `case_fallthrough_diagnostic`: nsh tokenizes the POSIX.1-2024 `;&` case
+  operator as one token, so its unsupported-operator diagnostic names `;&`;
+  dash stops at `;` or `&`. No other syntax diagnostic is changed.
+* `missing_command_file_status`: failure to open the command-file operand to
+  `sh` has status 127. dash routes it through its generic shell-error status 2.
+
+Three registered differences are consequences of the safe logical-descriptor
+model rather than POSIX corrections:
+
+* `closed_input_read_error` reports EBADF and status 128 when `read` is asked
+  to consume a logically closed input slot, where dash's stdio path treats it
+  as ordinary EOF and returns 1. Both fail; nsh preserves the cause.
+* `closed_output_dup_diagnostic` diagnoses the closed source in
+  `1>&- 2>&1`; dash exits 2 silently. Redirections are still applied in the
+  same left-to-right order.
+* `logical_fd_introspection` and `logical_fd_low_nofile_survival` keep host
+  descriptor numbers out of shell semantics. Consequently `/dev/stdin`
+  cannot reveal whether a here-document uses a pipe or anonymous file, and a
+  shell can still query a logical `RLIMIT_NOFILE` of zero or one after the host
+  backing descriptors already exist. The content, limits and redirection
+  behavior remain compared exactly.
+
+The implementation still honors real exhaustion. Pipe ends are moved into the
+hidden backing range before a pipeline forks; if `RLIMIT_NOFILE` leaves no
+number in that range, construction fails once as `Pipe call failed`. Linux's
+`F_DUPFD_CLOEXEC` encodes that lower-bound failure as `EINVAL`; the platform
+boundary translates it to `EMFILE`, so ordinary redirection exhaustion retains
+the useful `Too many open files` diagnostic. Ownership stays with `OwnedFd` and
+`SharedFd`, so partial construction closes every acquired endpoint by drop.
 
 ### `error.interrupt-delivery-point`
 

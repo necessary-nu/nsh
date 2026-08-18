@@ -47,7 +47,7 @@ trap 'echo x' 999 2>&1; echo "rc=$?"
 trap 'echo E' EXIT; true
 %%%
 #!name trap subshell forked simple trap cmd
-trap 'echo P' USR1; ( trap ) ; echo done
+trap 'echo P' USR1; ( trap ) ; echo ---; trap; echo done
 %%%
 #!name cd basic
 b=$PWD; mkdir -p d1/d2; cd d1; pwd | sed "s|^$b||"; cd ..; pwd | sed "s|^$b|ROOT|"

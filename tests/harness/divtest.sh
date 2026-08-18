@@ -209,6 +209,24 @@ check "alias_stdout_format: a reordered diagnostic is not excused" 1 \
 printf "alias AA=1\n" > "$case_file"
 check "alias_stdout_format: definition-only command is outside the entry" 1 \
 	"'AA=1'" "AA='1'" 0 0 "$case_file"
+printf "alias AA=1; command -v AA\n" > "$case_file"
+check "alias_stdout_format: command -v displays the definition" 0 \
+	"alias 'AA=1'" "alias AA='1'" 0 0 "$case_file"
+check "alias_stdout_format: command -v changed value is not excused" 1 \
+	"alias 'AA=1'" "alias AA='2'" 0 0 "$case_file"
+printf "alias AA=1 BB=2; alias AA BB\n" > "$case_file"
+check "alias_stdout_format: multiple name operands display definitions" 0 \
+	$'\047AA=1\047\n\047BB=2\047' $'AA=\0471\047\nBB=\0472\047' 0 0 "$case_file"
+printf "alias AA=1; alias 2>&1\n" > "$case_file"
+check "alias_stdout_format: a redirected bare listing is display" 0 \
+	"'AA=1'" "AA='1'" 0 0 "$case_file"
+printf "alias ia='echo IA'; alias\n" > "$case_file"
+check "alias_stdout_format: an interactive prompt prefix is preserved" 0 \
+	"$ 'ia=echo IA'" "$ ia='echo IA'" 0 0 "$case_file"
+check "alias_stdout_format: prompted listings still sort by alias name" 0 \
+	$'$ \047bb=2\047\n\047aa=1\047' $'$ aa=\0471\047\nbb=\0472\047' 0 0 "$case_file"
+check "alias_stdout_format: changed prompted output is not excused" 1 \
+	"$ 'ia=echo IA'" "$ ia='echo OTHER'" 0 0 "$case_file"
 printf "echo alias\n" > "$case_file"
 check "alias_stdout_format: a mention is outside the entry" 1 \
 	"'AA=1'" "AA='1'" 0 0 "$case_file"
@@ -290,6 +308,385 @@ check "sorted_cmdtable: hash with an operand is outside the entry" 1 \
 printf 'hash -r\n' > "$case_file"
 check "sorted_cmdtable: hash -r is outside the entry" 1 \
 	"$H_BUCKET" "$H_SORTED" 0 0 "$case_file"
+
+# ---- composable POSIX-over-dash normalizers -------------------------
+#
+# Generated state cases routinely exercise several corrected behaviours in
+# one process.  Each normalizer is therefore tested both alone and in a
+# composition, plus against nearby output it must not be able to excuse.
+
+printf '%s\n' 'set -- -a; while getopts ab o; do echo "$o|${OPTARG-U}|$OPTIND"; done' > "$case_file"
+check "getopts_optarg_unset: the exact observation is normalized" 0 \
+	'a||2' 'a|U|2' 0 0 "$case_file"
+[ "$DS_DIVERGENCE" = getopts_optarg_unset ] || no \
+	"getopts_optarg_unset: reports its own id (got ${DS_DIVERGENCE:-none})"
+check "getopts_optarg_unset: a changed option is not excused" 1 \
+	'a||2' 'b|U|2' 0 0 "$case_file"
+check "getopts_optarg_unset: a changed OPTIND is not excused" 1 \
+	'a||2' 'a|U|3' 0 0 "$case_file"
+check "getopts_optarg_unset: an alias prefix composes with the record" 0 \
+	'pre a||2' 'pre a|U|2' 0 0 "$case_file"
+check "getopts_optarg_unset: an arbitrary empty field is not excused" 1 \
+	'value||2' 'value|U|2' 0 0 "$case_file"
+printf '%s\n' 'set -- -a; while getopts ab o; do echo "$o|$OPTARG|$OPTIND"; done' > "$case_file"
+check "getopts_optarg_unset: literal defaulting observation is required" 1 \
+	'a||2' 'a|U|2' 0 0 "$case_file"
+
+printf '%s\n' 'set -- -z; while getopts ab o; do :; done' > "$case_file"
+check "getopts_diagnostic_prefix: command-mode program name" 0 \
+	'Illegal option -z' 'SH: Illegal option -z' 0 0 "$case_file"
+check "getopts_diagnostic_prefix: file-mode program name" 0 \
+	'No arg for -a option' './script.sh: No arg for -a option' 0 0 "$case_file"
+check "getopts_diagnostic_prefix: an unknown prefix is not excused" 1 \
+	'Illegal option -z' 'other: Illegal option -z' 0 0 "$case_file"
+check "getopts_diagnostic_prefix: changed diagnostic text is not excused" 1 \
+	'Illegal option -z' 'SH: Illegal option -x' 0 0 "$case_file"
+check "getopts_diagnostic_prefix: a differing status is not excused" 1 \
+	'Illegal option -z' 'SH: Illegal option -z' 2 0 "$case_file"
+
+printf '%s\n' 'set -o' > "$case_file"
+check "set_hashall_option: long option record" 0 \
+	$'errexit         off\nnoglob          off' \
+	$'errexit         off\nhashall         off\nnoglob          off' 0 0 "$case_file"
+check "set_hashall_option: changed neighboring state is not excused" 1 \
+	$'errexit         off\nnoglob          off' \
+	$'errexit         on\nhashall         off\nnoglob          off' 0 0 "$case_file"
+check "set_hashall_option: enabled hashall is not excused" 1 \
+	$'errexit         off\nnoglob          off' \
+	$'errexit         off\nhashall         on\nnoglob          off' 0 0 "$case_file"
+printf '%s\n' 'set +o' > "$case_file"
+check "set_hashall_option: reusable command record" 0 \
+	$'set +o errexit\nset +o noglob' \
+	$'set +o errexit\nset +o hashall\nset +o noglob' 0 0 "$case_file"
+check "set_hashall_option: an arbitrary digest is not excused" 1 \
+	'b5ee36cae31777da8e73f63f693f97fe  -' \
+	'00000000000000000000000000000000  -' 0 0 "$case_file"
+
+printf '%s\n' 'set -o; set -- -z; while getopts ab o; do echo "$o|${OPTARG-U}|$OPTIND"; done' > "$case_file"
+check "normalizers compose without hiding any residual output" 0 \
+	$'errexit         off\nIllegal option -z\n?|z|2' \
+	$'errexit         off\nhashall         off\nSH: Illegal option -z\n?|z|2' 0 0 "$case_file"
+[ "$DS_DIVERGENCE" = getopts_diagnostic_prefix,set_hashall_option ] || no \
+	"normalizers: reports every composed id (got ${DS_DIVERGENCE:-none})"
+check "normalizers: a residual changed line is not excused" 1 \
+	$'errexit         off\nIllegal option -z\n?|z|2\nend' \
+	$'errexit         off\nhashall         off\nSH: Illegal option -z\n?|z|2\nchanged' 0 0 "$case_file"
+
+printf '%s\n' 'set -I' > "$case_file"
+IGNORE50=$'\nUse "exit" to leave shell.'
+for ((i = 1; i < 50; i++)); do
+	IGNORE50+=$'\n\nUse "exit" to leave shell.'
+done
+IGNORE49=${IGNORE50%$'\n\nUse "exit" to leave shell.'}
+check "ignoreeof_noninteractive_eof: exact fifty-retry suffix" 0 \
+	"$IGNORE50" '' 0 0 "$case_file"
+[ "$DS_DIVERGENCE" = ignoreeof_noninteractive_eof ] || no \
+	"ignoreeof_noninteractive_eof: reports its own id (got ${DS_DIVERGENCE:-none})"
+check "ignoreeof_noninteractive_eof: preserves preceding output" 0 \
+	$'READY\n'"$IGNORE50" 'READY' 0 0 "$case_file"
+PROMPTED50=
+for ((i = 0; i < 50; i++)); do
+	PROMPTED50+=$'\nUse "exit" to leave shell.\n$ '
+done
+printf '%s\n' 'set -i; set -I' > "$case_file"
+check "ignoreeof_noninteractive_eof: runtime interactive prompts" 0 \
+	'$ '"$PROMPTED50" '$ ' 0 0 "$case_file"
+check "ignoreeof_noninteractive_eof: forty-nine retries are not excused" 1 \
+	"$IGNORE49" '' 0 0 "$case_file"
+check "ignoreeof_noninteractive_eof: changed diagnostic is not excused" 1 \
+	"${IGNORE50%?}!" '' 0 0 "$case_file"
+check "ignoreeof_noninteractive_eof: a differing status is not excused" 1 \
+	"$IGNORE50" '' 0 2 "$case_file"
+printf '%s\n' 'echo ignoreeof' > "$case_file"
+check "ignoreeof_noninteractive_eof: a mention is outside the entry" 1 \
+	"$IGNORE50" '' 0 0 "$case_file"
+
+printf '%s\n' 'fc -l' > "$case_file"
+check "fc_listing_format: numbered and continuation records" 0 \
+	$'    1 echo one\ncontinued' $'1\techo one\n\tcontinued' 0 0 "$case_file"
+check "fc_listing_format: changed command text is not excused" 1 \
+	'    1 echo one' $'1\techo two' 0 0 "$case_file"
+check "fc_listing_format: a missing continuation is not excused" 1 \
+	$'    1 echo one\ncontinued' $'1\techo one' 0 0 "$case_file"
+check "fc_listing_format: a differing status is not excused" 1 \
+	'    1 echo one' $'1\techo one' 0 1 "$case_file"
+printf '%s\n' 'fc -ln' > "$case_file"
+check "fc_listing_format: number-suppressed records retain a tab" 0 \
+	'echo one' $'\techo one' 0 0 "$case_file"
+printf '%s\n' 'echo listing' > "$case_file"
+check "fc_listing_format: an unrelated case is outside the entry" 1 \
+	'    1 echo one' $'1\techo one' 0 0 "$case_file"
+
+printf '%s\n' 'ulimit -a' > "$case_file"
+ULIMIT_REF=$'time(seconds)        unlimited\nfile(blocks)         N\ndata(kbytes)         unlimited\nstack(kbytes)        N\ncoredump(blocks)     N\nmemory(kbytes)       unlimited\nlocked memory(kbytes) N\nprocess              N\nnofiles              N\nvmemory(kbytes)      unlimited\nlocks                unlimited\nrtprio               N'
+ULIMIT_PORT=$'CPU time (seconds) (-t) unlimited\nfile size (N-byte units) (-f) N\ndata segment size (N-byte units) (-d) unlimited\nstack size (N-byte units) (-s) N\ncore file size (N-byte units) (-c) N\nresident memory (N-byte units) (-m) unlimited\nlocked memory (N-byte units) (-l) N\nprocesses (-p) N\nopen files (-n) N\naddress space (N-byte units) (-v) unlimited\nfile locks (-w) unlimited\nrealtime priority (-r) N'
+check "ulimit_all_format: every resource row is normalized" 0 \
+	"$ULIMIT_REF" "$ULIMIT_PORT" 0 0 "$case_file"
+check "ulimit_all_format: a changed value is not excused" 1 \
+	"$ULIMIT_REF" "${ULIMIT_PORT/open files (-n) N/open files (-n) 9}" 0 0 "$case_file"
+check "ulimit_all_format: a wrong resource label is not excused" 1 \
+	'nofiles              N' 'file descriptors (-n) N' 0 0 "$case_file"
+check "ulimit_all_format: a differing status is not excused" 1 \
+	'nofiles              N' 'open files (-n) N' 0 2 "$case_file"
+printf '%s\n' 'echo limits' > "$case_file"
+check "ulimit_all_format: an unrelated case is outside the entry" 1 \
+	'nofiles              N' 'open files (-n) N' 0 0 "$case_file"
+
+JOB_RUNNING='[1] + 123 Running                    '
+printf '%s\n' 'sleep 1 & jobs' > "$case_file"
+check "jobs_command_text: command text is removed from a status record" 0 \
+	"$JOB_RUNNING" "${JOB_RUNNING}sleep 1" 0 0 "$case_file"
+check "jobs_command_text: command text absent from the case is refused" 1 \
+	"$JOB_RUNNING" "${JOB_RUNNING}other 1" 0 0 "$case_file"
+check "jobs_command_text: a changed status prefix is not excused" 1 \
+	"$JOB_RUNNING" "[1] + 123 Done                       sleep 1" 0 0 "$case_file"
+check "jobs_command_text: a differing status is not excused" 1 \
+	"$JOB_RUNNING" "${JOB_RUNNING}sleep 1" 0 1 "$case_file"
+JOB_PIPE='[1] + 123 Running                    |'
+printf '%s\n' 'sleep 1 | cat & jobs' > "$case_file"
+check "jobs_command_text: pipeline component text is removed" 0 \
+	"$JOB_PIPE" '[1] + 123 Running                    sleep 1 |' 0 0 "$case_file"
+printf '%s\n' 'echo jobs' > "$case_file"
+check "jobs_command_text: a mention is outside the entry" 1 \
+	"$JOB_RUNNING" "${JOB_RUNNING}sleep 1" 0 0 "$case_file"
+
+JOB_DONE='[1] + Done                       '
+printf '%s\n' 'sleep 0 & wait; jobs' > "$case_file"
+check "jobs_waited_removal: a waited Done record is removed" 0 \
+	$'before\n'"$JOB_DONE"$'\nafter' $'before\nafter' 0 0 "$case_file"
+check "jobs_waited_removal: a Running record is not removed" 1 \
+	$'before\n'"$JOB_RUNNING"$'\nafter' $'before\nafter' 0 0 "$case_file"
+check "jobs_waited_removal: changed surrounding output is not excused" 1 \
+	$'before\n'"$JOB_DONE"$'\nafter' $'before\nchanged' 0 0 "$case_file"
+check "jobs_waited_removal: a differing status is not excused" 1 \
+	"$JOB_DONE" '' 0 1 "$case_file"
+printf '%s\n' 'sleep 0 & jobs; wait' > "$case_file"
+check "jobs_waited_removal: jobs before wait is outside the entry" 1 \
+	"$JOB_DONE" '' 0 0 "$case_file"
+
+printf '%s\n' 'case x in x) : ;& esac' > "$case_file"
+CASE_REF='SH: 1: Syntax error: "&" unexpected'
+CASE_PORT='SH: 1: Syntax error: ";&" unexpected'
+check "case_fallthrough_diagnostic: the complete operator is named" 0 \
+	"$CASE_REF" "$CASE_PORT" 2 2 "$case_file"
+check "case_fallthrough_diagnostic: changed surrounding text is not excused" 1 \
+	"$CASE_REF" 'SH: 2: Syntax error: ";&" unexpected' 2 2 "$case_file"
+check "case_fallthrough_diagnostic: a differing status is not excused" 1 \
+	"$CASE_REF" "$CASE_PORT" 2 0 "$case_file"
+printf '%s\n' 'echo case' > "$case_file"
+check "case_fallthrough_diagnostic: a case without the operator is outside" 1 \
+	"$CASE_REF" "$CASE_PORT" 2 2 "$case_file"
+
+printf '%s\n' 'fc -s true=false 2>&1; echo "rc=$?"' > "$case_file"
+check "fc_substitution_status: executed command status is propagated" 0 \
+	'rc=0' 'rc=1' 0 0 "$case_file"
+check "fc_substitution_status: another status is not excused" 1 \
+	'rc=0' 'rc=2' 0 0 "$case_file"
+check "fc_substitution_status: changed output is not excused" 1 \
+	$'false\nrc=0' $'changed\nrc=1' 0 0 "$case_file"
+check "fc_substitution_status: a differing shell status is not excused" 1 \
+	'rc=0' 'rc=1' 0 1 "$case_file"
+printf '%s\n' 'fc -s false=true' > "$case_file"
+check "fc_substitution_status: another substitution is outside the entry" 1 \
+	'rc=0' 'rc=1' 0 0 "$case_file"
+
+printf '%s\n' ': & q=$!; wait $q; wait $q; echo second=$?' > "$case_file"
+check "wait_consumed_status: repeated variable wait becomes 127" 0 \
+	'second=0' 'second=127' 0 0 "$case_file"
+check "wait_consumed_status: an unrelated line is preserved" 1 \
+	$'unrelated=0\nsecond=0' $'unrelated=127\nsecond=127' 0 0 "$case_file"
+check "wait_consumed_status: a different second status is not excused" 1 \
+	'second=0' 'second=126' 0 0 "$case_file"
+check "wait_consumed_status: a differing shell status is not excused" 1 \
+	'second=0' 'second=127' 0 1 "$case_file"
+printf '%s\n' ': & q=$!; wait $q; echo second=$?' > "$case_file"
+check "wait_consumed_status: a single wait is outside the entry" 1 \
+	'second=0' 'second=127' 0 0 "$case_file"
+printf '%s\n' ': & wait $! $!; echo $?' > "$case_file"
+check "wait_consumed_status: repeated positional PID becomes 127" 0 \
+	'0' '127' 0 0 "$case_file"
+check "wait_consumed_status: only the final status record may change" 1 \
+	$'0\n0' $'127\n127' 0 0 "$case_file"
+
+printf '%s\n' 'sleep 0 & wait; wait %1 2>&1; echo "rc=$?"' > "$case_file"
+WAIT_JOB_DIAG='SH: 2: wait: No such job: %1'
+check "wait_consumed_jobspec: stale job diagnostic and status" 0 \
+	'rc=0' "$WAIT_JOB_DIAG"$'\nrc=2' 0 0 "$case_file"
+check "wait_consumed_jobspec: a changed job number is not excused" 1 \
+	'rc=0' 'SH: 2: wait: No such job: %2'$'\nrc=2' 0 0 "$case_file"
+check "wait_consumed_jobspec: an extra diagnostic is not excused" 1 \
+	'rc=0' "$WAIT_JOB_DIAG"$'\nSH: other\nrc=2' 0 0 "$case_file"
+check "wait_consumed_jobspec: a differing shell status is not excused" 1 \
+	'rc=0' "$WAIT_JOB_DIAG"$'\nrc=2' 0 1 "$case_file"
+printf '%s\n' 'sleep 0 & wait %1 2>&1; echo "rc=$?"' > "$case_file"
+check "wait_consumed_jobspec: no prior bare wait is outside the entry" 1 \
+	'rc=0' "$WAIT_JOB_DIAG"$'\nrc=2' 0 0 "$case_file"
+
+printf '%s\n' 'OPTIND=1; set -- -a; getopts a o; echo "$o"; OPTIND=1; getopts a o; echo "$o"' > "$case_file"
+check "getopts_optind_reset: a second scan restarts at option a" 0 \
+	$'a\n?' $'a\na' 0 0 "$case_file"
+check "getopts_optind_reset: a changed first scan is not excused" 1 \
+	$'b\n?' $'a\na' 0 0 "$case_file"
+check "getopts_optind_reset: a wrong restarted option is not excused" 1 \
+	$'a\n?' $'a\nb' 0 0 "$case_file"
+check "getopts_optind_reset: a differing status is not excused" 1 \
+	$'a\n?' $'a\na' 0 1 "$case_file"
+printf '%s\n' 'set -- -a -b; while getopts ab o; do echo "1:$o"; done; OPTIND=1; while getopts ab o; do echo "2:$o"; done; echo "optind=$OPTIND"' > "$case_file"
+check "getopts_optind_reset: a loop reproduces every first-pass option" 0 \
+	$'1:a\n1:b\noptind=3' $'1:a\n1:b\n2:a\n2:b\noptind=3' 0 0 "$case_file"
+printf '%s\n' 'set -- -b; getopts b o; OPTIND=1; getopts b o' > "$case_file"
+check "getopts_optind_reset: a non-a operand is outside the entry" 1 \
+	'?' 'b' 0 0 "$case_file"
+
+printf '%s\n' 'sleep 1 & kill %1; wait 2>/dev/null; echo after-kill' > "$case_file"
+KILL_DIAG='SH: 2: kill: No such process'
+check "kill_jobspec: dash ESRCH diagnostic is removed" 0 \
+	"$KILL_DIAG"$'\n\nafter-kill' 'after-kill' 0 0 "$case_file"
+check "kill_jobspec: changed diagnostic text is not excused" 1 \
+	$'SH: 2: kill: Permission denied\n\nafter-kill' 'after-kill' 0 0 "$case_file"
+check "kill_jobspec: additional output is not excused" 1 \
+	"$KILL_DIAG"$'\nextra\nafter-kill' 'after-kill' 0 0 "$case_file"
+check "kill_jobspec: too many exact diagnostics are not excused" 1 \
+	"$KILL_DIAG"$'\n\n'"$KILL_DIAG"$'\n\nafter-kill' 'after-kill' 0 0 "$case_file"
+check "kill_jobspec: a differing status is not excused" 1 \
+	"$KILL_DIAG"$'\n\nafter-kill' 'after-kill' 0 1 "$case_file"
+printf '%s\n' 'kill 999999; echo after-kill' > "$case_file"
+check "kill_jobspec: a numeric PID is outside the entry" 1 \
+	"$KILL_DIAG"$'\n\nafter-kill' 'after-kill' 0 0 "$case_file"
+
+printf '%s\n' 'exec 0<&-; read x; echo "rc=$?"' > "$case_file"
+check "closed_input_read_error: EBADF maps to failed read" 0 \
+	'rc=1' $'Bad file descriptor\nrc=128' 0 0 "$case_file"
+check "closed_input_read_error: changed diagnostic is not excused" 1 \
+	'rc=1' $'Input/output error\nrc=128' 0 0 "$case_file"
+check "closed_input_read_error: changed status is not excused" 1 \
+	'rc=1' $'Bad file descriptor\nrc=129' 0 0 "$case_file"
+check "closed_input_read_error: a differing shell status is not excused" 1 \
+	'rc=1' $'Bad file descriptor\nrc=128' 0 1 "$case_file"
+printf '%s\n' "sh -c 'read x; echo \"rc=\$? x=[\$x]\"' 0<&-" > "$case_file"
+check "closed_input_read_error: nested read status keeps its suffix" 0 \
+	'rc=1 x=[]' $'sh: 1: read: read error: Bad file descriptor\nrc=128 x=[]' 0 0 "$case_file"
+printf '%s\n' 'read x; echo "rc=$?"' > "$case_file"
+check "closed_input_read_error: open input is outside the entry" 1 \
+	'rc=1' $'Bad file descriptor\nrc=128' 0 0 "$case_file"
+
+printf '%s\n' 'sh -c : 1>&- 2>&1' > "$case_file"
+CLOSED_DUP_DIAG='SH: 1: 1: Bad file descriptor'
+check "closed_output_dup_diagnostic: exact EBADF diagnostic is removed" 0 \
+	'' "$CLOSED_DUP_DIAG" 2 2 "$case_file"
+check "closed_output_dup_diagnostic: changed descriptor is not excused" 1 \
+	'' 'SH: 1: 2: Bad file descriptor' 2 2 "$case_file"
+check "closed_output_dup_diagnostic: a differing status is not excused" 1 \
+	'' "$CLOSED_DUP_DIAG" 2 1 "$case_file"
+printf '%s\n' 'sh -c : 2>&1 1>&-' > "$case_file"
+check "closed_output_dup_diagnostic: another order is outside the entry" 1 \
+	'' "$CLOSED_DUP_DIAG" 2 2 "$case_file"
+
+printf '%s\n' '"$0" - -c '\''echo dash'\'' 2>&1; echo "rc=$?"' > "$case_file"
+check "missing_command_file_status: missing script is status 127" 0 \
+	$'cannot open -c\nrc=2' $'cannot open -c\nrc=127' 0 0 "$case_file"
+check "missing_command_file_status: changed diagnostic is not excused" 1 \
+	$'cannot open -c\nrc=2' $'different\nrc=127' 0 0 "$case_file"
+check "missing_command_file_status: another status is not excused" 1 \
+	'rc=2' 'rc=126' 0 0 "$case_file"
+check "missing_command_file_status: a differing outer status is not excused" 1 \
+	'rc=2' 'rc=127' 0 1 "$case_file"
+printf '%s\n' 'echo "rc=$?"' > "$case_file"
+check "missing_command_file_status: an ordinary status is outside the entry" 1 \
+	'rc=2' 'rc=127' 0 0 "$case_file"
+
+printf '%s\n' 'if [ -f /dev/stdin ]; then echo REGFILE; else echo OTHER; fi <<EOF' > "$case_file"
+check "logical_fd_introspection: regular here-doc backing is hidden" 0 \
+	'REGFILE' 'OTHER' 0 0 "$case_file"
+check "logical_fd_introspection: changed surrounding output is not excused" 1 \
+	$'REGFILE\ndata' $'OTHER\nchanged' 0 0 "$case_file"
+check "logical_fd_introspection: a differing status is not excused" 1 \
+	'REGFILE' 'OTHER' 0 1 "$case_file"
+printf '%s\n' 'if [ -p /dev/stdin ]; then echo PIPE; else echo OTHER; fi <<EOF' > "$case_file"
+check "logical_fd_introspection: pipe here-doc backing is hidden" 0 \
+	'PIPE' 'OTHER' 0 0 "$case_file"
+printf '%s\n' 'test -f /dev/stdin' > "$case_file"
+check "logical_fd_introspection: no here-doc is outside the entry" 1 \
+	'REGFILE' 'OTHER' 0 0 "$case_file"
+
+printf '%s\n' '( ulimit -S -n 10; echo rc=$?; ulimit -n; ulimit -Hn )' > "$case_file"
+check "ulimit_default_soft_report: one soft-limit line is retained" 0 \
+	$'rc=0\n20' $'rc=0\n10\n20' 0 0 "$case_file"
+check "ulimit_default_soft_report: a wrong soft value is not excused" 1 \
+	$'rc=0\n20' $'rc=0\n11\n20' 0 0 "$case_file"
+check "ulimit_default_soft_report: two added lines are not excused" 1 \
+	$'rc=0\n20' $'rc=0\n10\n10\n20' 0 0 "$case_file"
+check "ulimit_default_soft_report: changed surrounding output is not excused" 1 \
+	$'rc=0\n20' $'rc=1\n10\n20' 0 0 "$case_file"
+check "ulimit_default_soft_report: a differing status is not excused" 1 \
+	$'rc=0\n20' $'rc=0\n10\n20' 0 1 "$case_file"
+printf '%s\n' 'ulimit -n' > "$case_file"
+check "ulimit_default_soft_report: a query without a set is outside" 1 \
+	'20' $'10\n20' 0 0 "$case_file"
+
+# ---- decision-style POSIX corrections -------------------------------
+
+printf '%s\n' 'fc -s' > "$case_file"
+FC_RECURSION='fc: called recursively too many times'
+check "fc_recursion_error_status: exact utility error status" 0 \
+	"$FC_RECURSION" "$FC_RECURSION" 0 2 "$case_file"
+check "fc_recursion_error_status: changed diagnostic is not excused" 1 \
+	"$FC_RECURSION" 'fc: another failure' 0 2 "$case_file"
+check "fc_recursion_error_status: another status pair is not excused" 1 \
+	"$FC_RECURSION" "$FC_RECURSION" 0 1 "$case_file"
+printf '%s\n' 'fc -l' > "$case_file"
+check "fc_recursion_error_status: another fc operation is outside" 1 \
+	"$FC_RECURSION" "$FC_RECURSION" 0 2 "$case_file"
+
+printf '%s\n' '( ulimit -S -n 1; echo rc=$?; ulimit -Sn; ulimit -Hn )' > "$case_file"
+check "logical_fd_low_nofile_survival: soft limit one probe" 0 \
+	'rc=0' $'rc=0\n1\n1024' 2 0 "$case_file"
+check "logical_fd_low_nofile_survival: changed query output is not excused" 1 \
+	'rc=0' $'rc=0\n2\n1024' 2 0 "$case_file"
+check "logical_fd_low_nofile_survival: another status pair is not excused" 1 \
+	'rc=0' $'rc=0\n1\n1024' 1 0 "$case_file"
+printf '%s\n' '( ulimit -HS -n 0; echo rc=$?; ulimit -Sn; ulimit -Hn )' > "$case_file"
+check "logical_fd_low_nofile_survival: hard and soft zero probe" 0 \
+	'rc=0' $'rc=0\n0\n0' 2 0 "$case_file"
+printf '%s\n' '( ulimit -n 0; echo rc=$?; ulimit -Sn; ulimit -Hn )' > "$case_file"
+check "logical_fd_low_nofile_survival: default zero probe" 0 \
+	'rc=0' $'rc=0\n0\n0' 2 0 "$case_file"
+printf '%s\n' '( ulimit -n 2; echo rc=$? )' > "$case_file"
+check "logical_fd_low_nofile_survival: another limit is outside" 1 \
+	'rc=0' $'rc=0\n2\n2' 2 0 "$case_file"
+
+printf '%s\n' "trap 'echo caught' PIPE; trap -p PIPE" > "$case_file"
+TRAP_P_REF='SH: 1: trap: Illegal option -p'
+TRAP_P_PORT="trap -- 'echo caught' PIPE"
+check "trap_p_option: exact option diagnostic and listing" 0 \
+	"$TRAP_P_REF" "$TRAP_P_PORT" 2 0 "$case_file"
+check "trap_p_option: a changed diagnostic is not excused" 1 \
+	'SH: 1: trap: Illegal option -x' "$TRAP_P_PORT" 2 0 "$case_file"
+check "trap_p_option: a changed listing is not excused" 1 \
+	"$TRAP_P_REF" "trap -- 'echo other' PIPE" 2 0 "$case_file"
+check "trap_p_option: another status pair is not excused" 1 \
+	"$TRAP_P_REF" "$TRAP_P_PORT" 1 0 "$case_file"
+printf '%s\n' "trap 'echo caught' PIPE; trap PIPE" > "$case_file"
+check "trap_p_option: no -p operand is outside the entry" 1 \
+	"$TRAP_P_REF" "$TRAP_P_PORT" 2 0 "$case_file"
+
+printf '%s\n' "trap 'echo X' TERM; (trap); echo ---; trap" > "$case_file"
+TRAP_LINE="trap -- 'echo X' TERM"
+check "trap_subshell_listing: inherited listing is added" 0 \
+	$'---\n'"$TRAP_LINE" "$TRAP_LINE"$'\n---\n'"$TRAP_LINE" 0 0 "$case_file"
+[ "$DS_DIVERGENCE" = trap_subshell_listing ] || no \
+	"trap_subshell_listing: reports its own id (got ${DS_DIVERGENCE:-none})"
+check "trap_subshell_listing: changed inherited listing is not excused" 1 \
+	$'---\n'"$TRAP_LINE" $'trap -- '\''echo Y'\'' TERM\n---\n'"$TRAP_LINE" 0 0 "$case_file"
+check "trap_subshell_listing: arbitrary added output is not excused" 1 \
+	$'---\n'"$TRAP_LINE" $'extra\n---\n'"$TRAP_LINE" 0 0 "$case_file"
+check "trap_subshell_listing: too many inherited listings are not excused" 1 \
+	$'---\n'"$TRAP_LINE" "$TRAP_LINE"$'\n'"$TRAP_LINE"$'\n---\n'"$TRAP_LINE" 0 0 "$case_file"
+check "trap_subshell_listing: a differing status is not excused" 1 \
+	$'---\n'"$TRAP_LINE" "$TRAP_LINE"$'\n---\n'"$TRAP_LINE" 0 1 "$case_file"
+printf '%s\n' "trap 'echo X' TERM; echo ---; trap" > "$case_file"
+check "trap_subshell_listing: no subshell listing is outside the entry" 1 \
+	$'---\n'"$TRAP_LINE" "$TRAP_LINE"$'\n---\n'"$TRAP_LINE" 0 0 "$case_file"
 
 # ---- the dead-harness guard --------------------------------------
 #

@@ -404,6 +404,11 @@ pub(crate) fn cmdloop(
     let mut inter: c_int;
     let mut status: c_int = 0;
     let mut numeof: c_int = 0;
+    /* `set -i` can change prompting and the other live interactive option
+     * effects, but it cannot turn a command file into an interactive input
+     * source. Capture that property before the first command can mutate the
+     * option table. */
+    let interactive_input = iflag(sh) != 0 && top != 0;
 
     /* TRACE(("cmdloop(%d) called\n", top)); */
     loop {
@@ -437,7 +442,16 @@ pub(crate) fn cmdloop(
             // Only the interactive top-level loop may treat EOF as a request
             // for another input record. A command file has ended even when a
             // script enabled the interactive-only `ignoreeof` option.
-            if inter == 0 || (Iflag(sh) == 0 && numeof >= 50) {
+            if !interactive_input {
+                /* Preserve dash's line termination when a command file used
+                 * the runtime `set -i` extension: prompting may be live, but
+                 * EOF still terminates this non-interactive input source. */
+                if Iflag(sh) == 0 && iflag(sh) != 0 {
+                    let _ = sh.io.stderr().write_all(b"\n");
+                }
+                break;
+            }
+            if Iflag(sh) == 0 && numeof >= 50 {
                 break;
             }
             if crate::jobs::stoppedjobs(sh) == 0 {

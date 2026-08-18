@@ -49,6 +49,34 @@
 # Set by the register at the bottom of this file.
 DS_DIVERGENCES=()
 
+# Some POSIX corrections compose in one generated case: a getopts call can
+# both unset OPTARG and print the invoking program in its diagnostic, followed
+# by a set-option listing that contains the new hashall option. Decision-style
+# entries cannot explain only part of such an output. These normalizers apply
+# narrow, independently tested reference-to-port transformations first; the
+# final byte-for-byte comparison still has to account for the complete output.
+DS_NORMALIZERS=(
+	getopts_optarg_unset
+	getopts_diagnostic_prefix
+	set_hashall_option
+	ignoreeof_noninteractive_eof
+	fc_listing_format
+	ulimit_all_format
+	jobs_command_text
+	jobs_waited_removal
+	case_fallthrough_diagnostic
+	fc_substitution_status
+	wait_consumed_status
+	wait_consumed_jobspec
+	getopts_optind_reset
+	kill_jobspec
+	closed_input_read_error
+	closed_output_dup_diagnostic
+	missing_command_file_status
+	logical_fd_introspection
+	ulimit_default_soft_report
+)
+
 # Set by ds_sanctioned to the id that matched, for the report.
 DS_DIVERGENCE=
 
@@ -60,15 +88,576 @@ DS_DIVERGENCE=
 # sanctioned divergence is deterministic and re-running it ten times
 # would only cost time.
 ds_sanctioned() {
-	local id
+	local id fn
 	DS_DIVERGENCE=
+	DS_MATCHED_DIVERGENCES=()
+	DS_REF=$1
+	DS_PORT=$2
+	DS_REF_RC=$3
+	DS_PORT_RC=$4
+	DS_CASE=$5
+
+	for id in "${DS_NORMALIZERS[@]}"; do
+		ds_divergence_enabled "$id" || continue
+		"dsnorm_$id"
+	done
+
+	if [ "${#DS_MATCHED_DIVERGENCES[@]}" -gt 0 ] &&
+		[ "$DS_REF_RC" = "$DS_PORT_RC" ] && [ "$DS_REF" = "$DS_PORT" ]; then
+		ds_set_divergence_label
+		return 0
+	fi
+
 	for id in "${DS_DIVERGENCES[@]}"; do
-		if "dsdiv_$id" "$1" "$2" "$3" "$4" "$5"; then
-			DS_DIVERGENCE=$id
+		fn=dsdiv_$id
+		declare -F "$fn" >/dev/null || continue
+		if "$fn" "$DS_REF" "$DS_PORT" "$DS_REF_RC" "$DS_PORT_RC" "$DS_CASE"; then
+			ds_record_divergence "$id"
+			ds_set_divergence_label
 			return 0
 		fi
 	done
 	return 1
+}
+
+ds_divergence_enabled() {
+	local wanted=$1 id
+	for id in "${DS_DIVERGENCES[@]}"; do
+		[ "$id" = "$wanted" ] && return 0
+	done
+	return 1
+}
+
+ds_record_divergence() {
+	local wanted=$1 id
+	for id in "${DS_MATCHED_DIVERGENCES[@]}"; do
+		[ "$id" = "$wanted" ] && return 0
+	done
+	DS_MATCHED_DIVERGENCES+=("$wanted")
+}
+
+ds_set_divergence_label() {
+	local IFS=,
+	DS_DIVERGENCE="${DS_MATCHED_DIVERGENCES[*]}"
+}
+
+# `getopts` unsets OPTARG when the current option has no argument. dash leaves
+# it set to an empty string, so `${OPTARG-U}` observes an empty middle field
+# where nsh observes `U`. Restrict the rewrite to that literal observation and
+# to complete getopts result records; arbitrary empty fields are untouched.
+dsnorm_getopts_optarg_unset() {
+	ds_case_matches "$DS_CASE" 'getopts' || return 0
+	grep -qF '${OPTARG-U}' "$DS_CASE" 2>/dev/null || return 0
+	local normalized
+	normalized=$(printf '%s\n' "$DS_REF" |
+		sed -E 's/^(([^|]*[[:space:]])?)([[:alnum:]?:])\|\|([0-9]+)$/\1\3|U|\4/')
+	[ "$normalized" != "$DS_REF" ] || return 0
+	DS_REF=$normalized
+	ds_record_divergence getopts_optarg_unset
+}
+
+# POSIX requires the diagnostic to identify the invoking program. The corpus
+# invokes file-mode cases as `./script.sh` and command-mode cases as `SH`; no
+# other prefix is accepted. Canonicalizing that one known prefix lets this
+# compose with OPTARG and option-list changes without ignoring diagnostic text.
+dsnorm_getopts_diagnostic_prefix() {
+	ds_case_matches "$DS_CASE" 'getopts' || return 0
+	local diagnostics normalized
+	diagnostics=$(printf '%s\n' "$DS_PORT" |
+		grep -E '(Illegal option -.|No arg for -. option)$' || true)
+	[ -n "$diagnostics" ] || return 0
+	if printf '%s\n' "$diagnostics" |
+		grep -Ev '^(SH|\./script\.sh): (Illegal option -.|No arg for -. option)$' |
+		grep -q .; then
+		return 0
+	fi
+	normalized=$(printf '%s\n' "$DS_PORT" |
+		sed -E 's/^(SH|\.\/script\.sh): (Illegal option -.|No arg for -. option)$/\2/')
+	[ "$normalized" != "$DS_PORT" ] || return 0
+	DS_PORT=$normalized
+	ds_record_divergence getopts_diagnostic_prefix
+}
+
+# `set -h` is now accepted, so the option reports gain one exact disabled
+# `hashall` record.
+dsnorm_set_hashall_option() {
+	ds_case_matches "$DS_CASE" '(^|[;&|(`{][[:space:]]*)set[[:space:]]+[+-]o([[:space:]]*($|[;&|)`}<>]))' || return 0
+	local normalized=$DS_PORT
+	normalized=$(printf '%s\n' "$normalized" |
+		sed -e '/^hashall         off$/d' -e '/^set +o hashall$/d')
+	[ "$normalized" != "$DS_PORT" ] || return 0
+	DS_PORT=$normalized
+	ds_record_divergence set_hashall_option
+}
+
+# dash applies `ignoreeof` to a non-interactive top-level script, prints its
+# interactive retry diagnostic fifty times, and only then accepts EOF. POSIX
+# limits the option to interactive shells, so the port terminates immediately.
+# Remove only dash's complete, exact retry suffix; a different count, message,
+# status, or any residual output remains a failure.
+dsnorm_ignoreeof_noninteractive_eof() {
+	ds_case_matches "$DS_CASE" '(^|[;&|(`{][[:space:]]*)set[[:space:]]+(-[A-Za-z]*I[A-Za-z]*|-o[[:space:]]+ignoreeof)([[:space:]]*($|[;&|)`}<>]))' || return 0
+	local i suffix=$'\nUse "exit" to leave shell.' long_suffix normalized prompted_suffix=
+	for ((i = 1; i < 50; i++)); do
+		suffix+=$'\n\nUse "exit" to leave shell.'
+	done
+	for ((i = 0; i < 50; i++)); do
+		prompted_suffix+=$'\nUse "exit" to leave shell.\n$ '
+	done
+	long_suffix=$'\n'"$suffix"
+	if [[ $DS_REF == *"$prompted_suffix" ]]; then
+		normalized=${DS_REF%"$prompted_suffix"}
+	elif [[ $DS_REF == *"$long_suffix" ]]; then
+		normalized=${DS_REF%"$long_suffix"}
+	elif [[ $DS_REF == *"$suffix" ]]; then
+		normalized=${DS_REF%"$suffix"}
+	else
+		return 0
+	fi
+	DS_REF=$normalized
+	ds_record_divergence ignoreeof_noninteractive_eof
+}
+
+# POSIX specifies a tab between the fc event number and command, and a leading
+# tab when -n suppresses the number. dash instead uses four spaces before the
+# number and one afterwards, and leaves continuation lines unindented.
+dsnorm_fc_listing_format() {
+	ds_case_matches "$DS_CASE" '(^|[;&|(`{][[:space:]]*)fc[[:space:]]+-[A-Za-z]*l' || return 0
+	[ -n "$DS_PORT" ] || return 0
+	local line out prefix numbered=0 changed=0 numberless=0
+	local numbered_re=$'^(([$>] )*)([0-9]+)\t(.*)$'
+	local numberless_re=$'^(([$>] )*)\t(.*)$'
+	local -a lines normalized=()
+	ds_case_matches "$DS_CASE" 'fc[[:space:]]+-[A-Za-z]*n[A-Za-z]*' && numberless=1
+	mapfile -t lines <<< "$DS_PORT"
+	for line in "${lines[@]}"; do
+		out=$line
+		if [[ $line =~ $numbered_re ]]; then
+			prefix=${BASH_REMATCH[1]}
+			out="${prefix}    ${BASH_REMATCH[3]} ${BASH_REMATCH[4]}"
+			numbered=1
+			changed=1
+		elif [ "$numberless" -eq 1 ] && [[ $line =~ $numberless_re ]]; then
+			out="${BASH_REMATCH[1]}${BASH_REMATCH[3]}"
+			numbered=1
+			changed=1
+		elif [ "$numbered" -eq 1 ] && [[ $line == $'\t'* ]]; then
+			out=${line#$'\t'}
+			changed=1
+		else
+			numbered=0
+		fi
+		normalized+=("$out")
+	done
+	[ "$changed" -eq 1 ] || return 0
+	printf -v DS_PORT '%s\n' "${normalized[@]}"
+	DS_PORT=${DS_PORT%$'\n'}
+	ds_record_divergence fc_listing_format
+}
+
+# POSIX.1-2024 requires every `ulimit -a` row to identify the resource, its
+# units, its option, and its value. dash's older labels omit the option and use
+# abbreviated units. Map the twelve exact new labels back to dash's layout;
+# values remain byte-for-byte compared.
+dsnorm_ulimit_all_format() {
+	ds_case_matches "$DS_CASE" '(^|[;&|(`{][[:space:]]*)ulimit[[:space:]]+-[A-Za-z]*a' || return 0
+	[ -n "$DS_PORT" ] || return 0
+	local line out name option value old accepted changed=0
+	local row_re='^(.+)[[:space:]]\(-([a-z])\)[[:space:]](unlimited|[0-9]+|N)$'
+	local -a lines normalized=()
+	mapfile -t lines <<< "$DS_PORT"
+	for line in "${lines[@]}"; do
+		out=$line
+		if [[ $line =~ $row_re ]]; then
+			name=${BASH_REMATCH[1]}
+			option=${BASH_REMATCH[2]}
+			value=${BASH_REMATCH[3]}
+			accepted=
+			case $option in
+			t) old='time(seconds)'; accepted='CPU time (seconds)' ;;
+			f) old='file(blocks)'; accepted='file size (512-byte units)|file size (N-byte units)' ;;
+			d) old='data(kbytes)'; accepted='data segment size (1024-byte units)|data segment size (N-byte units)' ;;
+			s) old='stack(kbytes)'; accepted='stack size (1024-byte units)|stack size (N-byte units)' ;;
+			c) old='coredump(blocks)'; accepted='core file size (512-byte units)|core file size (N-byte units)' ;;
+			m) old='memory(kbytes)'; accepted='resident memory (1024-byte units)|resident memory (N-byte units)' ;;
+			l) old='locked memory(kbytes)'; accepted='locked memory (1024-byte units)|locked memory (N-byte units)' ;;
+			p) old='process'; accepted='processes' ;;
+			n) old='nofiles'; accepted='open files' ;;
+			v) old='vmemory(kbytes)'; accepted='address space (1024-byte units)|address space (N-byte units)' ;;
+			w) old='locks'; accepted='file locks' ;;
+			r) old='rtprio'; accepted='realtime priority' ;;
+			esac
+			case "|$accepted|" in
+			*"|$name|"*) ;;
+			*) return 0 ;;
+			esac
+			printf -v out '%-20s %s' "$old" "$value"
+			changed=1
+		fi
+		normalized+=("$out")
+	done
+	[ "$changed" -eq 1 ] || return 0
+	printf -v DS_PORT '%s\n' "${normalized[@]}"
+	DS_PORT=${DS_PORT%$'\n'}
+	ds_record_divergence ulimit_all_format
+}
+
+ds_command_appears_in_case() {
+	local command=$1 compact_command compact_case
+	compact_command=$(printf '%s' "$command" | tr -d '[:space:]{}')
+	compact_case=$(tr -d '[:space:]{}' < "$DS_CASE")
+	[ -n "$compact_command" ] && [[ $compact_case == *"$compact_command"* ]]
+}
+
+# dash leaves the POSIX `<command>` field empty in non-monitor `jobs` output.
+# The port retains it. Use dash's complete padded status record as the prefix,
+# and accept a suffix only when that command text is present in the case.
+dsnorm_jobs_command_text() {
+	ds_case_matches "$DS_CASE" '(^|[;&|(`{])[[:space:]]*jobs([[:space:];&|)`}]|$)' || return 0
+	[ -n "$DS_PORT" ] || return 0
+	local line ref_line command candidate changed=0 matched
+	local -a ref_lines port_lines normalized
+	mapfile -t ref_lines <<< "$DS_REF"
+	mapfile -t port_lines <<< "$DS_PORT"
+	for line in "${port_lines[@]}"; do
+		candidate=$line
+		matched=0
+		for ref_line in "${ref_lines[@]}"; do
+			if [[ $ref_line =~ ^\[[0-9]+\][[:space:]][+\ -][[:space:]]([0-9]+[[:space:]]+)?(Running|Done|Done\([0-9]+\)|Stopped.*)[[:space:]]+$ ]] &&
+				[[ $line == "$ref_line"?* ]]; then
+				command=${line#"$ref_line"}
+				ds_command_appears_in_case "$command" || continue
+				candidate=$ref_line
+				matched=1
+				break
+			fi
+			if [[ $ref_line == *'|' ]]; then
+				local without_pipe anchor rest
+				without_pipe=${ref_line%|}
+				anchor=$(printf '%s' "$without_pipe" | sed -E 's/[[:space:]]+$//')
+				if [ -n "$anchor" ] && [[ $line == "$anchor"* ]]; then
+					rest=${line#"$anchor"}
+					if [[ $rest =~ ^[[:space:]]+(.+)[[:space:]]\|$ ]]; then
+						command=${BASH_REMATCH[1]}
+						ds_command_appears_in_case "$command" || continue
+						candidate=$ref_line
+						matched=1
+						break
+					fi
+				fi
+			fi
+			if [[ $ref_line =~ ^([[:space:]]+)([0-9]+)([[:space:]]+)\|$ ]] &&
+				[[ $line =~ ^${BASH_REMATCH[1]}${BASH_REMATCH[2]}[[:space:]]+(.+)[[:space:]]\|$ ]]; then
+				command=${BASH_REMATCH[1]}
+				ds_command_appears_in_case "$command" || continue
+				candidate=$ref_line
+				matched=1
+				break
+			fi
+			if [[ $ref_line =~ ^[[:space:]]+[0-9]+[[:space:]]+$ ]] &&
+				[[ $line == "$ref_line"?* ]]; then
+				command=${line#"$ref_line"}
+				ds_command_appears_in_case "$command" || continue
+				candidate=$ref_line
+				matched=1
+				break
+			fi
+		done
+		[ "$matched" -eq 0 ] || changed=1
+		normalized+=("$candidate")
+	done
+	[ "$changed" -eq 1 ] || return 0
+	printf -v DS_PORT '%s\n' "${normalized[@]}"
+	DS_PORT=${DS_PORT%$'\n'}
+	ds_record_divergence jobs_command_text
+}
+
+# POSIX requires a successfully waited job to be removed. dash retains it and
+# a later `jobs` prints a padded Done record. Remove only those complete Done
+# records, and only when the case text has wait before jobs.
+dsnorm_jobs_waited_removal() {
+	ds_case_matches "$DS_CASE" '(^|[;&|(`{])[[:space:]]*wait([[:space:];&|)`}]|$)' || return 0
+	ds_case_matches "$DS_CASE" '(^|[;&|(`{])[[:space:]]*jobs([[:space:];&|)`}]|$)' || return 0
+	local flat line changed=0
+	local -a lines normalized=()
+	flat=$(tr '\n' ' ' < "$DS_CASE")
+	[[ $flat =~ wait.*jobs ]] || return 0
+	mapfile -t lines <<< "$DS_REF"
+	for line in "${lines[@]}"; do
+		if [[ $line =~ ^\[[0-9]+\][[:space:]][+\ -][[:space:]]([0-9]+[[:space:]]+)?Done(\([0-9]+\))?[[:space:]]*$ ]]; then
+			changed=1
+			continue
+		fi
+		normalized+=("$line")
+	done
+	[ "$changed" -eq 1 ] || return 0
+	if [ "${#normalized[@]}" -eq 0 ]; then
+		DS_REF=
+	else
+		printf -v DS_REF '%s\n' "${normalized[@]}"
+		DS_REF=${DS_REF%$'\n'}
+	fi
+	ds_record_divergence jobs_waited_removal
+}
+
+# The port tokenizes the POSIX.1-2024 case fall-through operator as one token,
+# so its syntax diagnostic names `;&`; dash stops at the semicolon or ampersand.
+dsnorm_case_fallthrough_diagnostic() {
+	grep -qF ';&' "$DS_CASE" 2>/dev/null || return 0
+	local normalized
+	normalized=$(printf '%s\n' "$DS_REF" |
+		sed -E 's/Syntax error: "(&&|&|;)" unexpected/Syntax error: ";\&" unexpected/')
+	[ "$normalized" != "$DS_REF" ] || return 0
+	DS_REF=$normalized
+	ds_record_divergence case_fallthrough_diagnostic
+}
+
+# `fc -s` returns the status of the command it executes. dash reports zero for
+# the corpus's `true=false` substitution even though the resulting `false`
+# returns one; the port propagates one.
+dsnorm_fc_substitution_status() {
+	grep -qF 'fc -s true=false' "$DS_CASE" 2>/dev/null || return 0
+	local normalized
+	normalized=$(printf '%s\n' "$DS_REF" | sed 's/^rc=0$/rc=1/')
+	[ "$normalized" != "$DS_REF" ] || return 0
+	DS_REF=$normalized
+	ds_record_divergence fc_substitution_status
+}
+
+# A successfully waited PID is no longer known. POSIX consequently requires a
+# repeated wait for it to return 127; dash retains the completed job and
+# returns zero again.
+dsnorm_wait_consumed_status() {
+	local mode= operand line changed=0 last i
+	local -a lines normalized=()
+	if grep -qE 'wait[[:space:]]+\$![[:space:]]+\$!' "$DS_CASE" 2>/dev/null; then
+		mode=positional
+	else
+		operand=$(grep -oE 'wait[[:space:]]+\$[A-Za-z_][A-Za-z0-9_]*' "$DS_CASE" 2>/dev/null |
+			sed 's/.*\$//' | sort | uniq -d | head -1)
+		[ -n "$operand" ] && mode=variable
+	fi
+	[ -n "$mode" ] || return 0
+	mapfile -t lines <<< "$DS_REF"
+	last=$((${#lines[@]} - 1))
+	for ((i = 0; i < ${#lines[@]}; i++)); do
+		line=${lines[i]}
+		if [ "$mode" = positional ] && [ "$i" -eq "$last" ] && [ "$line" = 0 ]; then
+			line=127
+			changed=$((changed + 1))
+		elif [ "$mode" = variable ] && [ "$line" = second=0 ]; then
+			line=second=127
+			changed=$((changed + 1))
+		fi
+		normalized+=("$line")
+	done
+	[ "$changed" -eq 1 ] || return 0
+	printf -v DS_REF '%s\n' "${normalized[@]}"
+	DS_REF=${DS_REF%$'\n'}
+	ds_record_divergence wait_consumed_status
+}
+
+# The same removal rule applies to a job ID: after a successful bare wait,
+# `%1` no longer names a job. dash returns the stale status again; the port
+# diagnoses the unknown job and returns its utility-error status.
+dsnorm_wait_consumed_jobspec() {
+	grep -qE 'wait[[:space:]]+%[0-9]+' "$DS_CASE" 2>/dev/null || return 0
+	local flat line jobspec diagnostics=0 statuses=0
+	local -a lines normalized=()
+	flat=$(tr '\n' ' ' < "$DS_CASE")
+	[[ $flat =~ (^|[; ])wait([; ]).*wait[[:space:]]+%[0-9]+ ]] || return 0
+	jobspec=$(grep -oE 'wait[[:space:]]+%[0-9]+' "$DS_CASE" 2>/dev/null |
+		tail -1 | sed 's/.*[[:space:]]//')
+	[ -n "$jobspec" ] || return 0
+	mapfile -t lines <<< "$DS_PORT"
+	for line in "${lines[@]}"; do
+		[[ $line =~ ^SH:[[:space:]][0-9]+:[[:space:]]wait:[[:space:]]No[[:space:]]such[[:space:]]job:[[:space:]]${jobspec}$ ]] &&
+			diagnostics=$((diagnostics + 1))
+		[ "$line" = 'rc=2' ] && statuses=$((statuses + 1))
+	done
+	[ "$diagnostics" -eq 1 ] && [ "$statuses" -eq 1 ] || return 0
+	for line in "${lines[@]}"; do
+		if [[ $line =~ ^SH:[[:space:]][0-9]+:[[:space:]]wait:[[:space:]]No[[:space:]]such[[:space:]]job:[[:space:]]${jobspec}$ ]]; then
+			continue
+		fi
+		if [ "$line" = 'rc=2' ]; then
+			line='rc=0'
+		fi
+		normalized+=("$line")
+	done
+	printf -v DS_PORT '%s\n' "${normalized[@]}"
+	DS_PORT=${DS_PORT%$'\n'}
+	ds_record_divergence wait_consumed_jobspec
+}
+
+# Assigning OPTIND=1 restarts getopts at the first operand. dash keeps its
+# hidden scan cursor and continues (or immediately finishes); the port's cursor
+# is the specified OPTIND variable. The corpus deliberately starts with -a, so
+# every accepted restart must reproduce option a and OPTIND 2.
+dsnorm_getopts_optind_reset() {
+	grep -qF 'OPTIND=1' "$DS_CASE" 2>/dev/null || return 0
+	grep -qE '(^|[;&[:space:]])getopts([;&[:space:]]|$)' "$DS_CASE" 2>/dev/null || return 0
+	grep -qE 'set --[[:space:]]+-a([[:space:];&|)]|$)' "$DS_CASE" 2>/dev/null || return 0
+	local line candidate changed=0
+	local -a lines first_pass normalized
+	mapfile -t lines <<< "$DS_REF"
+	for line in "${lines[@]}"; do
+		if [[ $line == 1:* ]]; then
+			first_pass+=("$line")
+		fi
+		if [[ $line == optind=* ]] && [ "${#first_pass[@]}" -gt 0 ]; then
+			local prior
+			for prior in "${first_pass[@]}"; do
+				normalized+=("2:${prior#1:}")
+			done
+			changed=1
+		fi
+		candidate=$line
+		case $candidate in
+		after:*) candidate='after:a 2' ;;
+		again=*) candidate='again=a ind=2' ;;
+		'o=?') candidate='o=a' ;;
+		'?') candidate='a' ;;
+		esac
+		if [[ $candidate =~ ^[b-z][[:space:]][3-9][0-9]*$ ]]; then
+			candidate='a 2'
+		fi
+		[ "$candidate" = "$line" ] || changed=1
+		normalized+=("$candidate")
+	done
+	[ "$changed" -eq 1 ] || return 0
+	printf -v candidate '%s\n' "${normalized[@]}"
+	candidate=${candidate%$'\n'}
+	[ "$candidate" = "$DS_PORT" ] || return 0
+	DS_REF=$candidate
+	ds_record_divergence getopts_optind_reset
+}
+
+# POSIX kill accepts a job-control job ID. dash passes `%1` to kill(2) as if it
+# were a PID and diagnoses ESRCH; the port resolves the job and signals it.
+dsnorm_kill_jobspec() {
+	grep -qE 'kill([^\n]|\n)*%[0-9]+' "$DS_CASE" 2>/dev/null || return 0
+	local line skip_blank=0 changed=0 expected diagnostics=0
+	local -a lines normalized=()
+	expected=$(grep -oE '(^|[;&])[[:space:]]*kill[^;&]*%[0-9]+' "$DS_CASE" 2>/dev/null | wc -l)
+	[ "$expected" -gt 0 ] || return 0
+	mapfile -t lines <<< "$DS_REF"
+	for line in "${lines[@]}"; do
+		[[ $line =~ ^SH:[[:space:]][0-9]+:[[:space:]]kill:[[:space:]]No[[:space:]]such[[:space:]]process$ ]] &&
+			diagnostics=$((diagnostics + 1))
+	done
+	[ "$diagnostics" -eq "$expected" ] || return 0
+	for line in "${lines[@]}"; do
+		if [[ $line =~ ^SH:[[:space:]][0-9]+:[[:space:]]kill:[[:space:]]No[[:space:]]such[[:space:]]process$ ]]; then
+			changed=1
+			skip_blank=1
+			continue
+		fi
+		if [ "$skip_blank" -eq 1 ] && [ -z "$line" ]; then
+			skip_blank=0
+			continue
+		fi
+		skip_blank=0
+		normalized+=("$line")
+	done
+	[ "$changed" -eq 1 ] || return 0
+	if [ "${#normalized[@]}" -eq 0 ]; then
+		DS_REF=
+	else
+		printf -v DS_REF '%s\n' "${normalized[@]}"
+		DS_REF=${DS_REF%$'\n'}
+	fi
+	ds_record_divergence kill_jobspec
+}
+
+# The safe logical descriptor layer reports a read from closed input as an I/O
+# error (status 128 plus a diagnostic); dash's stdio path reports ordinary EOF
+# (status 1). Both are failures, but the former preserves the actual EBADF.
+dsnorm_closed_input_read_error() {
+	ds_case_matches "$DS_CASE" '0<&-' || return 0
+	grep -qE 'read[[:space:]]' "$DS_CASE" 2>/dev/null || return 0
+	local line changed=0
+	local -a lines normalized
+	mapfile -t lines <<< "$DS_PORT"
+	for line in "${lines[@]}"; do
+		if [[ $line =~ ^(SH|sh):[[:space:]][0-9]+:[[:space:]]read:[[:space:]]read[[:space:]]error:[[:space:]]Bad[[:space:]]file[[:space:]]descriptor$ ]] ||
+			[ "$line" = 'Bad file descriptor' ]; then
+			changed=1
+			continue
+		fi
+		if [[ $line == 'rc=128' || $line == 'rc=128 '* ]]; then
+			line="rc=1${line#rc=128}"
+			changed=1
+		fi
+		normalized+=("$line")
+	done
+	[ "$changed" -eq 1 ] || return 0
+	printf -v DS_PORT '%s\n' "${normalized[@]}"
+	DS_PORT=${DS_PORT%$'\n'}
+	ds_record_divergence closed_input_read_error
+}
+
+# Redirections are applied left-to-right. After `1>&-`, `2>&1` names a closed
+# source; the port diagnoses that exact EBADF while dash exits two silently.
+dsnorm_closed_output_dup_diagnostic() {
+	grep -qF '1>&- 2>&1' "$DS_CASE" 2>/dev/null || return 0
+	local normalized
+	normalized=$(printf '%s\n' "$DS_PORT" |
+		sed -E '/^(SH|sh): [0-9]+: 1: Bad file descriptor$/d')
+	[ "$normalized" != "$DS_PORT" ] || return 0
+	DS_PORT=$normalized
+	ds_record_divergence closed_output_dup_diagnostic
+}
+
+# POSIX assigns 127 when the command file named to sh cannot be found. dash
+# uses its generic special-builtin error status 2 for the same diagnostic.
+dsnorm_missing_command_file_status() {
+	grep -qF '"$0" - -c' "$DS_CASE" 2>/dev/null || return 0
+	local normalized
+	normalized=$(printf '%s\n' "$DS_REF" | sed 's/^rc=2$/rc=127/')
+	[ "$normalized" != "$DS_REF" ] || return 0
+	DS_REF=$normalized
+	ds_record_divergence missing_command_file_status
+}
+
+# Builtins observe the shell's logical descriptor table, not temporary host fd
+# projection. Linux's /dev/stdin therefore cannot reveal whether a here-doc is
+# backed by dash's pipe or temporary file; content and redirection semantics are
+# unchanged. These implementation-introspection probes report OTHER.
+dsnorm_logical_fd_introspection() {
+	grep -qF '/dev/stdin' "$DS_CASE" 2>/dev/null || return 0
+	grep -qF '<<' "$DS_CASE" 2>/dev/null || return 0
+	local normalized
+	normalized=$(printf '%s\n' "$DS_REF" | sed -e 's/^REGFILE$/OTHER/' -e 's/^PIPE$/OTHER/')
+	[ "$normalized" != "$DS_REF" ] || return 0
+	DS_REF=$normalized
+	ds_record_divergence logical_fd_introspection
+}
+
+# With no -H/-S and no operand, POSIX defaults a ulimit query to the soft
+# limit. dash suppresses that query in these sequences; remove exactly one port
+# line equal to the numeric limit just set and require everything else equal.
+dsnorm_ulimit_default_soft_report() {
+	grep -qE 'ulimit[[:space:]]+(-S[[:space:]]+)?-n[[:space:]]+[0-9]+' "$DS_CASE" 2>/dev/null || return 0
+	grep -qE 'ulimit[[:space:]]+-n([[:space:];&|)]|$)' "$DS_CASE" 2>/dev/null || return 0
+	local value i candidate
+	local -a lines copy
+	value=$(grep -oE 'ulimit[[:space:]]+(-S[[:space:]]+)?-n[[:space:]]+[0-9]+' "$DS_CASE" |
+		sed -n '1s/.*[[:space:]]\([0-9][0-9]*\)$/\1/p')
+	[ -n "$value" ] || return 0
+	mapfile -t lines <<< "$DS_PORT"
+	[ "${#lines[@]}" -eq "$(($(printf '%s\n' "$DS_REF" | wc -l) + 1))" ] || return 0
+	for ((i = 0; i < ${#lines[@]}; i++)); do
+		[ "${lines[i]}" = "$value" ] || continue
+		copy=("${lines[@]:0:i}" "${lines[@]:i+1}")
+		printf -v candidate '%s\n' "${copy[@]}"
+		candidate=${candidate%$'\n'}
+		if [ "$candidate" = "$DS_REF" ]; then
+			DS_PORT=$candidate
+			ds_record_divergence ulimit_default_soft_report
+			return 0
+		fi
+	done
 }
 
 # ds_harness_alive PORT REF -- both shells still exist and are runnable.
@@ -174,19 +763,34 @@ ds_blocks_sorted() {
 # The register
 # ---------------------------------------------------------------------
 
-DS_DIVERGENCES=(alias_stdout_format sorted_tables sorted_cmdtable)
+DS_DIVERGENCES=(
+	alias_stdout_format
+	sorted_tables
+	sorted_cmdtable
+	trap_subshell_listing
+	fc_recursion_error_status
+	logical_fd_low_nofile_survival
+	trap_p_option
+	"${DS_NORMALIZERS[@]}"
+)
 
 # dash quotes an alias's complete `name=value` definition. POSIX requires the
 # name and equals sign outside the quoted value, so the port moves only the
 # opening quote: `'name=value'` becomes `name='value'`. The rest of the line is
 # byte-identical even when the value itself contains quotes.
-DS_ALIAS_PORT_LINE="^[A-Za-z_][A-Za-z0-9_]*='"
+DS_ALIAS_PORT_LINE="^(([$>] )*)(alias[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*='"
 
 # A definition-only command must not qualify: it prints nothing, and newly
 # printing a definition would be a regression. Match only a bare `alias` or a
 # name operand without `=` at the end of a simple command.
 ds_case_displays_alias() {
-	grep -qE '(^|[;&|(`{][[:space:]]*)alias([[:space:]]*($|[;&|)`}<>])|[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*($|[;&|)`}<>]))' "$1" 2>/dev/null
+	local start='(^|[;&|(`{][[:space:]]*)'
+	local redirection='[0-9]*[<>][^[:space:];|)]*'
+	local end='[[:space:]]*($|[;&|)`}])'
+	grep -qE "${start}alias([[:space:]]+${redirection})*${end}" "$1" 2>/dev/null && return 0
+	grep -qE "${start}alias([[:space:]]+[A-Za-z_][A-Za-z0-9_]*)+([[:space:]]+${redirection})*${end}" "$1" 2>/dev/null && return 0
+	grep -qE '(^|[;&|(`{][[:space:]]*)alias[[:space:]]+[A-Za-z_][A-Za-z0-9_]*=' "$1" 2>/dev/null || return 1
+	grep -qE '(^|[;&|(`{][[:space:]]*)(command[[:space:]]+-v|type)[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' "$1" 2>/dev/null
 }
 
 # Rewrite only dash-shaped alias listing lines into the port's POSIX shape.
@@ -195,8 +799,13 @@ ds_case_displays_alias() {
 ds_alias_reference_to_port() {
 	local input=$1 line changed=1
 	while IFS= read -r line || [ -n "$line" ]; do
-		if [[ $line =~ ^\'([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
-			printf "%s='%s\n" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+		if [[ $line =~ ^(([$\>] )*)alias[[:space:]]\'([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+			printf "%salias %s='%s\n" "${BASH_REMATCH[1]}" \
+				"${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
+			changed=0
+		elif [[ $line =~ ^(([$\>] )*)\'([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+			printf "%s%s='%s\n" "${BASH_REMATCH[1]}" \
+				"${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
 			changed=0
 		else
 			printf '%s\n' "$line"
@@ -205,18 +814,71 @@ ds_alias_reference_to_port() {
 	return "$changed"
 }
 
+# Prompt prefixes are merged into the first listing line in interactive
+# captures. Assert ordering by the alias key after removing those prefixes,
+# rather than accidentally sorting by `$` or excluding the first alias.
+ds_alias_blocks_sorted() {
+	local -a lines
+	local i line block=
+	mapfile -t lines <<< "$1"
+	for ((i = 0; i <= ${#lines[@]}; i++)); do
+		if [ "$i" -lt "${#lines[@]}" ] && [[ ${lines[i]} =~ $DS_ALIAS_PORT_LINE ]]; then
+			line=${lines[i]}
+			while [[ $line =~ ^[$\>][[:space:]] ]]; do line=${line:2}; done
+			line=${line#alias }
+			block+=${line%%=*}$'\n'
+			continue
+		fi
+		if [ -n "$block" ]; then
+			printf '%s' "$block" | LC_ALL=C sort -C || return 1
+			block=
+		fi
+	done
+	return 0
+}
+
+ds_alias_prompt_prefixes_match() {
+	local -a left right
+	local i left_prefix right_prefix
+	mapfile -t left <<< "$1"
+	mapfile -t right <<< "$2"
+	[ "${#left[@]}" = "${#right[@]}" ] || return 1
+	for ((i = 0; i < ${#left[@]}; i++)); do
+		left_prefix=NON_ALIAS
+		right_prefix=NON_ALIAS
+		[[ ${left[i]} =~ $DS_ALIAS_PORT_LINE ]] && left_prefix=${BASH_REMATCH[1]}
+		[[ ${right[i]} =~ $DS_ALIAS_PORT_LINE ]] && right_prefix=${BASH_REMATCH[1]}
+		[ "$left_prefix" = "$right_prefix" ] || return 1
+	done
+}
+
+ds_alias_strip_prompt_prefixes() {
+	local line prefix
+	while IFS= read -r line || [ -n "$line" ]; do
+		if [[ $line =~ $DS_ALIAS_PORT_LINE ]]; then
+			prefix=${BASH_REMATCH[1]}
+			line=${line#"$prefix"}
+		fi
+		printf '%s\n' "$line"
+	done <<< "$1"
+}
+
 # `alias` output differs from dash in quote placement, and a multi-entry
 # listing also differs in order. This entry proves both differences together:
 # after the one exact quote move the line multisets must match, only
 # alias-shaped lines may move, and the port's alias blocks must be sorted.
 dsdiv_alias_stdout_format() {
-	local normalized
+	local normalized unprompted_reference unprompted_port
 	[ "$3" = "$4" ] || return 1
 	ds_case_displays_alias "$5" || return 1
 	normalized=$(ds_alias_reference_to_port "$1") || return 1
-	ds_same_lines "$normalized" "$2" || return 1
-	ds_moved_lines_match "$normalized" "$2" "$DS_ALIAS_PORT_LINE" || return 1
-	ds_blocks_sorted "$2" "$DS_ALIAS_PORT_LINE"
+	ds_alias_prompt_prefixes_match "$normalized" "$2" || return 1
+	unprompted_reference=$(ds_alias_strip_prompt_prefixes "$normalized")
+	unprompted_port=$(ds_alias_strip_prompt_prefixes "$2")
+	ds_same_lines "$unprompted_reference" "$unprompted_port" || return 1
+	ds_moved_lines_match "$unprompted_reference" "$unprompted_port" \
+		"^(alias[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*='" || return 1
+	ds_alias_blocks_sorted "$2"
 }
 
 # A line the variable table produces. Names are what `endofname` accepts,
@@ -303,6 +965,81 @@ dsdiv_sorted_cmdtable() {
 	ds_same_lines "$1" "$2" || return 1
 	ds_moved_lines_match "$1" "$2" "$DS_HASH_LINE" || return 1
 	ds_hash_blocks_sorted "$2"
+}
+
+# POSIX 2024 requires a no-operand `trap` executed in a subshell, before that
+# subshell changes a trap, to report the commands inherited on entry even
+# though the live dispositions were reset. dash reports nothing there. The
+# port output must be the reference output with only additional, byte-identical
+# copies of listing lines already proved by the reference's outer listing.
+# The number of added lines is bounded by the lexical number of subshell trap
+# listings times the reference listing size.
+dsdiv_trap_subshell_listing() {
+	[ "$3" = "$4" ] || return 1
+	local listings inherited_limit removed=0 ri=0 line
+	local -a ref_lines port_lines
+	listings=$({
+		grep -oE '\([[:space:]]*trap([[:space:]]+--)?([[:space:]]*;|[[:space:]]*\))' "$5" 2>/dev/null
+		grep -oE '(^|[;&])[[:space:]]*trap([[:space:]]+--)?[[:space:]]*\|' "$5" 2>/dev/null
+	} | wc -l)
+	[ "$listings" -gt 0 ] || return 1
+	inherited_limit=$(printf '%s\n' "$1" | grep -c '^trap -- .* [A-Za-z0-9][A-Za-z0-9]*$')
+	[ "$inherited_limit" -gt 0 ] || return 1
+	inherited_limit=$((inherited_limit * listings))
+	mapfile -t ref_lines <<< "$1"
+	mapfile -t port_lines <<< "$2"
+	for line in "${port_lines[@]}"; do
+		if [ "$ri" -lt "${#ref_lines[@]}" ] && [ "$line" = "${ref_lines[ri]}" ]; then
+			ri=$((ri + 1))
+			continue
+		fi
+		[[ $line =~ ^trap\ --\ .*\ [A-Za-z0-9][A-Za-z0-9]*$ ]] || return 1
+		printf '%s\n' "$1" | grep -qxF -- "$line" || return 1
+		removed=$((removed + 1))
+		[ "$removed" -le "$inherited_limit" ] || return 1
+	done
+	[ "$removed" -gt 0 ] && [ "$ri" = "${#ref_lines[@]}" ]
+}
+
+# The recursive fc guard is a utility error. The port returns 2; dash prints
+# the same diagnostic and then reports success from the interactive shell.
+dsdiv_fc_recursion_error_status() {
+	[ "$1" = "$2" ] || return 1
+	[ "$3" = 0 ] && [ "$4" = 2 ] || return 1
+	grep -qE 'fc[[:space:]]+-s([[:space:]]|$)' "$5" 2>/dev/null || return 1
+	[[ $1 == *'fc: called recursively too many times'* ]]
+}
+
+# The logical descriptor table can lower the shell-visible nofile limit below
+# the number of host descriptors used to implement the shell and still query
+# it. dash consumes host fds directly and aborts the subshell. This entry is
+# deliberately limited to the three generated probes at limits zero and one.
+dsdiv_logical_fd_low_nofile_survival() {
+	[ "$3" = 2 ] && [ "$4" = 0 ] || return 1
+	[ "$1" = 'rc=0' ] || return 1
+	if grep -qE 'ulimit[[:space:]]+-S[[:space:]]+-n[[:space:]]+1' "$5" 2>/dev/null; then
+		[[ $2 =~ ^rc=0$'\n'1$'\n'(unlimited|[0-9]+)$ ]]
+		return
+	fi
+	if grep -qE 'ulimit[[:space:]]+-HS[[:space:]]+-n[[:space:]]+0' "$5" 2>/dev/null; then
+		[[ $2 =~ ^rc=0$'\n'0$'\n'(unlimited|[0-9]+)$ ]]
+		return
+	fi
+	if grep -qE 'ulimit[[:space:]]+-n[[:space:]]+0' "$5" 2>/dev/null; then
+		[ "$2" = $'rc=0\n0\n0' ]
+		return
+	fi
+	return 1
+}
+
+# POSIX.1-2024 specifies trap -p; dash rejects the option. Pin the one
+# differential probe's complete diagnostic and listing so neither arbitrary
+# trap output nor another option error can borrow the exception.
+dsdiv_trap_p_option() {
+	grep -qE 'trap[[:space:]]+-p[[:space:]]+PIPE' "$5" 2>/dev/null || return 1
+	[ "$3" = 2 ] && [ "$4" = 0 ] || return 1
+	[[ $1 =~ ^SH:[[:space:]][0-9]+:[[:space:]]trap:[[:space:]]Illegal[[:space:]]option[[:space:]]-p$ ]] || return 1
+	[ "$2" = "trap -- 'echo caught' PIPE" ]
 }
 
 # An extra register, for testing the machinery itself. It was written

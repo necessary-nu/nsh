@@ -21,6 +21,8 @@ use rustix::process::{Gid, Uid};
 
 mod locale;
 pub use locale::{Locale, LocaleCategory, LocaleDecode, LocaleDecoder};
+mod descriptor;
+pub use descriptor::move_fd_cloexec;
 mod terminal;
 pub use terminal::TerminalSettings;
 
@@ -854,7 +856,7 @@ pub fn duplicate_cloexec(
     minimum: i32,
 ) -> std::io::Result<OwnedFd> {
     rustix::io::fcntl_dupfd_cloexec(fd.as_fd(), minimum)
-        .map_err(std::io::Error::from)
+        .map_err(|error| descriptor::normalize_dupfd_error(error, minimum))
 }
 
 /// Duplicate a descriptor to the lowest available descriptor number, with

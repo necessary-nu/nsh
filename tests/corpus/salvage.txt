@@ -1116,7 +1116,7 @@ v=""; export v; export -p | grep "^export v"
 v="no quotes"; export v; export -p | grep "^export v"
 alias "q1=a'b"; alias -p | grep q1
 trap 'echo a'"'"'b' EXIT; trap
-trap "echo '" USR1; trap | cat
+trap "echo '" USR1; trap | cat; echo ---; trap
 v=$(printf '%4000d' 1); echo ${#v}
 v=$(printf '%40000d' 1); echo ${#v}
 set -- $(echo a b c d e f g h i j); echo $#; echo "$@"
@@ -1242,7 +1242,7 @@ trap ':' EXIT INT; trap - EXIT; trap
 trap 'echo one' USR1; trap 'echo two' USR1; kill -USR1 $$
 trap 'echo E$?' EXIT; false
 trap 'exit 5' USR1; kill -USR1 $$; echo unreached
-trap 'echo t' USR1; ( trap; echo insub )
+trap 'echo t' USR1; ( trap; echo insub ); echo ---; trap
 trap 'echo t' USR1; ( trap - USR1; trap; echo insub ); trap
 trap 'echo x' USR1; f() { trap; }; f
 trap 'echo E' EXIT; exit 2
@@ -1440,8 +1440,8 @@ set -f; echo *; set +f
 set -u; echo "${nope-ok}"; set +u
 set -u; echo "$nope" 2>&1 | sed 's|^[^:]*: ||'; echo rc=$?
 set -o nounset; set +o nounset; echo ok
-set -o | grep -c .
-set +o | grep -c .
+set -o
+set +o
 set -o noglob; set -o | grep noglob
 set -a; v=1; env | grep -c '^v=1$'; set +a
 set -e; false; echo notreached
