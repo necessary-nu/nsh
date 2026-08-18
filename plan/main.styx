@@ -1959,6 +1959,21 @@ children (
                             shell ([spec:posix:req:builtin.fc.exit-status])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T03:51:28.293092275Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T03:53:47.93145923Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "The existing status flow already meets the rule: listing returns zero, lookup and editor failures return nonzero, executed -s and edited commands return their command status, and evalbltin flushes stdout then ORs the recorded output error into the builtin status. Add the missing implementation claim and extend executable coverage across all five branches, including closed stdout. Verification: 5 direct cases, 3 neighboring editor cases, and cargo test -p nsh (275 tests, one ignored doctest) pass."
+                            }
+                        )
                     }
 
                     {

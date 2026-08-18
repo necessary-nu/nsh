@@ -36,6 +36,11 @@ FAILING_EDITOR = FileFixture(
     mode=0o755,
 )
 
+STATUS_EDITOR = FileFixture(
+    content="#!/bin/sh\nprintf '( exit 6 )\\n' > \"$1\"\n",
+    mode=0o755,
+)
+
 
 CASES: tuple[Case, ...] = (
     # [spec:posix:req:builtin.fc.opt-e/test]
@@ -113,9 +118,10 @@ CASES: tuple[Case, ...] = (
         timeout=15.0,
     ),
     # [spec:posix:req:builtin.fc.edit-and-reexecute/test]
+    # [spec:posix:req:builtin.fc.exit-status/test]
     Case(
         id="fc-failed-editor-suppresses-reexecution",
-        rules=("builtin.fc.edit-and-reexecute",),
+        rules=("builtin.fc.edit-and-reexecute", "builtin.fc.exit-status"),
         mode="interactive",
         writable_tmp=True,
         script=(
@@ -133,6 +139,25 @@ CASES: tuple[Case, ...] = (
         environment={"PS1": "", "PS2": ""},
         stdout=None,
         stdout_contains=("status=7,ran=no,kept=no",),
+        status="any",
+        timeout=15.0,
+    ),
+    # [spec:posix:req:builtin.fc.exit-status/test]
+    Case(
+        id="fc-edited-command-exit-status",
+        rules=("builtin.fc.exit-status",),
+        mode="interactive",
+        writable_tmp=True,
+        script=(
+            ": ORIGINAL\n"
+            "fc -e statusedit >/dev/null 2>&1\n"
+            "printf 'edited-status=%s\\n' \"$?\"\n"
+            "exit 0\n"
+        ),
+        files={".bin/statusedit": STATUS_EDITOR},
+        environment={"PS1": "", "PS2": ""},
+        stdout=None,
+        stdout_contains=("edited-status=6",),
         status="any",
         timeout=15.0,
     ),

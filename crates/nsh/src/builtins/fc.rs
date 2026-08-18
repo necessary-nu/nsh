@@ -145,6 +145,7 @@ pub fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 /// one observable mutation made by `fc -s old=new` remains a normal indexed
 /// write and `$_` sees the same truncated word dash exposes.
 // [spec:posix:req:builtin.fc.edit-and-reexecute]
+// [spec:posix:req:builtin.fc.exit-status]
 pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<Flow, Error> {
     let args = crate::builtins::args(fields);
     let flags = scan_options(sh, &args)?;

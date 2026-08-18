@@ -3439,4 +3439,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.fc.env-histsize}
     )}
+    {id fix-builtin-fc-exit-status, covered_rules (
+        builtin.fc.exit-status
+    ), covered_claims (
+        {impl_name shell, rule builtin.fc.exit-status}
+    )}
 )

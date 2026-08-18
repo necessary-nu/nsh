@@ -1036,6 +1036,22 @@ CASES: tuple[Case, ...] = (
     ),
     # [spec:posix:req:builtin.fc.exit-status/test]
     Case(
+        id="fc-exit-status-output-error",
+        rules=("builtin.fc.exit-status",),
+        mode="interactive",
+        requires=("UP",),
+        script=(
+            ": ALPHA\n"
+            "fc -l 1>&- 2>/dev/null\n"
+            "printf 'output-error=%s\\n' \"$?\"\n"
+            "exit 0\n"
+        ),
+        stdout=None,
+        status="any",
+        stdout_contains=("output-error=1",),
+    ),
+    # [spec:posix:req:builtin.fc.exit-status/test]
+    Case(
         id="fc-exit-status-reexecuted",
         rules=("builtin.fc.exit-status",),
         mode="interactive",
