@@ -254,6 +254,7 @@ pub struct LineEditor {
     history_cursor: HistoryCursor,
     // [spec:posix:def:edit.edit-line]
     live_history_line: Option<Text>,
+    // [spec:posix:syn:edit.history-search-pattern]
     last_history_pattern: Option<Text>,
     pending_line: Vec<u8>,
     pending_offset: usize,

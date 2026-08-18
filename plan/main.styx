@@ -2892,6 +2892,28 @@ children (
                             shell ([spec:posix:syn:edit.history-search-pattern])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:18:15.138638297Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:19:45.564324451Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "nsh stores the last non-empty prompted history pattern in owned session state and reuses it for an empty prompt; absent state returns Cancelled, which restores the live line and alerts. shell_history_pattern_matches uses the shell matcher against command strings, adds implicit leading/trailing wildcards, and strips a leading `^` to anchor at the beginning. Map the syntax rule at both boundaries. Verification: all four pattern PTY cases, all 17 linedit tests, 14 harness unit tests, and git diff --check pass."
+                            }
+
+                            {
+                                at 2026-08-18T05:20:02.380698628Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Corrected the empty-pattern harness sequence: after the first `/alpha` match it now moves forward to the live edit line before invoking empty `/`, rather than moving backward to the oldest entry and asking a backward search to find a newer command."
+                            }
+                        )
                     }
 
                     {

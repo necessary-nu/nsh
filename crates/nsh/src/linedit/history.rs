@@ -474,6 +474,7 @@ fn history_matches(
 
 /// Vi history searches use shell pattern notation against any part of a
 /// history line. A leading `^` removes that implicit leading wildcard.
+// [spec:posix:syn:edit.history-search-pattern]
 fn shell_history_pattern_matches(
     locale: &nsh_platform::Locale,
     line: &Text,

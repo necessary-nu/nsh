@@ -1263,7 +1263,7 @@ CASES: tuple[Case, ...] = (
         id="edit-history-search-pattern-empty-reuses",
         rules=("edit.history-search-pattern",),
         # An empty pattern repeats the last non-empty one.
-        script=VI + "r alpha\nr beta\n" + ESC + "/alpha\n" + ESC + "kk/\nA ok; exit\n",
+        script=VI + "r alpha\nr beta\n" + ESC + "/alpha\n" + "jj/\nA ok; exit\n",
         stdout=None,
         stdout_contains=("R:alpha ok\n",),
         mode="interactive",
