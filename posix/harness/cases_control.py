@@ -374,8 +374,7 @@ CASES: tuple[Case, ...] = (
         rules=("builtin.set.opt-b-notify",),
         script=(
             "(sleep 0.2) &\n"
-            "sleep 1.0\n"
-            "printf 'LATER\\n'\n"
+            "sleep 1.0; printf 'LATER\\n'\n"
             "exit 0\n"
         ),
         mode="interactive",
@@ -395,8 +394,7 @@ CASES: tuple[Case, ...] = (
         script=(
             "set -b\n"
             "(sleep 0.2) &\n"
-            "sleep 1.0\n"
-            "printf 'LATER\\n'\n"
+            "sleep 1.0; printf 'LATER\\n'\n"
             "exit 0\n"
         ),
         mode="interactive",

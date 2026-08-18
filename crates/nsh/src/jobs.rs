@@ -132,6 +132,22 @@ const DOWAIT_BLOCK: c_int = 1;
 pub(crate) const DOWAIT_WAITCMD: c_int = 2;
 pub(crate) const DOWAIT_WAITCMD_ALL: c_int = 4;
 
+fn notify_completion_now(
+    block: c_int,
+    state: c_int,
+    shell_jobctl: bool,
+    notify: bool,
+    job_jobctl: bool,
+    is_waited_for: bool,
+) -> bool {
+    block == DOWAIT_BLOCK
+        && state == JOBDONE
+        && shell_jobctl
+        && notify
+        && job_jobctl
+        && !is_waited_for
+}
+
 const _PATH_TTY: &[u8] = b"/dev/tty\0";
 const _PATH_DEVNULL: &[u8] = b"/dev/null\0";
 
@@ -1296,6 +1312,7 @@ pub fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c
 // [spec:dash:sem:jobs.waitone-fn]
 // [spec:posix:req:jobctl.suspend-on-catchable-signal]
 // [spec:posix:req:jobctl.suspend-on-sigstop]
+// [spec:posix:req:builtin.set.opt-b-notify]
 fn waitone(sh: &mut crate::context::Shell, block: c_int, jobp: Option<usize>) -> Result<c_int, Error> {
     let pid: c_int;
     let mut status: c_int = 0;
@@ -1389,6 +1406,22 @@ fn waitone(sh: &mut crate::context::Shell, block: c_int, jobp: Option<usize>) ->
      * command that does not itself die of the signal. */
     if let Some(e) = crate::error::poll_interrupt(sh) {
         return Err(e);
+    }
+    /* A blocking wait for one foreground job can reap a different,
+     * background job first.  `-b` makes that completion observable here,
+     * before the wait resumes; non-blocking callers already render changed
+    * jobs themselves, and a waited-for job is reported by its caller. */
+    if let Some(changed_job) = thisjob {
+        if notify_completion_now(
+            block,
+            state,
+            sh.jobs.jobctl != 0,
+            sh.options.flag(crate::options::bflag) != 0,
+            sh.jobs.tab[changed_job].jobctl != 0,
+            Some(changed_job) == jobp,
+        ) {
+            showjob(sh, Dest::Stderr, changed_job, 0);
+        }
     }
     Ok(pid)
 }
@@ -1960,4 +1993,69 @@ pub(crate) fn getstatus(sh: &mut crate::context::Shell, jobp: usize) -> c_int {
     }
     /* TRACE(("getstatus: job %d, nproc %d, status %x, retval %x\n", ...)); */
     retval
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn immediate_notification_gates() {
+        assert!(notify_completion_now(
+            DOWAIT_BLOCK,
+            JOBDONE,
+            true,
+            true,
+            true,
+            false,
+        ));
+        assert!(!notify_completion_now(
+            DOWAIT_NONBLOCK,
+            JOBDONE,
+            true,
+            true,
+            true,
+            false,
+        ));
+        assert!(!notify_completion_now(
+            DOWAIT_BLOCK,
+            JOBSTOPPED,
+            true,
+            true,
+            true,
+            false,
+        ));
+        assert!(!notify_completion_now(
+            DOWAIT_BLOCK,
+            JOBDONE,
+            false,
+            true,
+            true,
+            false,
+        ));
+        assert!(!notify_completion_now(
+            DOWAIT_BLOCK,
+            JOBDONE,
+            true,
+            false,
+            true,
+            false,
+        ));
+        assert!(!notify_completion_now(
+            DOWAIT_BLOCK,
+            JOBDONE,
+            true,
+            true,
+            false,
+            false,
+        ));
+        assert!(!notify_completion_now(
+            DOWAIT_BLOCK,
+            JOBDONE,
+            true,
+            true,
+            true,
+            true,
+        ));
+    }
 }

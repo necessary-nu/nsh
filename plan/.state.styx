@@ -3504,4 +3504,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.read.syn}
     )}
+    {id fix-builtin-set-opt-b-notify, covered_rules (
+        builtin.set.opt-b-notify
+    ), covered_claims (
+        {impl_name shell, rule builtin.set.opt-b-notify}
+    )}
 )

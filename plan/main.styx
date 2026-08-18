@@ -2278,6 +2278,28 @@ children (
                             shell ([spec:posix:req:builtin.set.opt-b-notify])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:20:10.347440223Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:23:31.273964259Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Correct the timing oracle by keeping foreground sleep and the LATER marker in one parsed list; separate lines introduced a normal prompt boundary and could not distinguish -b. During a blocking foreground-job wait, when another job reaches JOBDONE, immediately render and release it only if global job control, that job's jobctl flag, and notify (-b) are all enabled. Nonblocking showjobs callers and the waited-for job keep their existing ownership paths. Verification: default-deferred, async-notify, long-form notify, and background-completion cases pass; POSIX harness unit tests pass; cargo test -p nsh passes 276 tests with one ignored doctest; git diff --check passes."
+                            }
+
+                            {
+                                at 2026-08-18T04:24:56.502324985Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Added an in-crate decision test for every immediate-notification gate after the test-footprint gate rejected production-only coverage. The full Rust suite now passes 277 tests with one ignored doctest; no gate bypass is used."
+                            }
+                        )
                     }
 
                     {
