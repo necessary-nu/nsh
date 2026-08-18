@@ -2549,6 +2549,21 @@ children (
                             shell ([spec:posix:req:builtin.ulimit.stdout-all-format])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:45:25.579380537Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:47:17.355959842Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Make every `ulimit -a` row self-contained: a human-readable resource phrase, explicit POSIX byte/time units where specified, the canonical `(-x)` option, and the same numeric or `unlimited` value formatter used for single limits. Strengthen the case to match all seven standard resource records and reject any row without an option plus valid final value. Verification: proc-ulimit-all-format passes; focused Rust ulimit tests, POSIX harness unit tests, and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

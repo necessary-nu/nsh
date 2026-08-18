@@ -3559,4 +3559,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.trap.synopsis}
     )}
+    {id fix-builtin-ulimit-stdout-all-format, covered_rules (
+        builtin.ulimit.stdout-all-format
+    ), covered_claims (
+        {impl_name shell, rule builtin.ulimit.stdout-all-format}
+    )}
 )

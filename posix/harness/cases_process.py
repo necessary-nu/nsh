@@ -652,9 +652,20 @@ CASES: tuple[Case, ...] = (
         # resource".
         script=(
             "ulimit -a > all.txt || exit 1\n"
-            "for o in c d f n s t v; do\n"
-            "  grep -q -e \"-$o\" all.txt || printf 'missing-option-%s\\n' \"$o\"\n"
+            "for record in \\\n"
+            "  'core file size (512-byte units) (-c)' \\\n"
+            "  'data segment size (1024-byte units) (-d)' \\\n"
+            "  'file size (512-byte units) (-f)' \\\n"
+            "  'open files (-n)' \\\n"
+            "  'stack size (1024-byte units) (-s)' \\\n"
+            "  'CPU time (seconds) (-t)' \\\n"
+            "  'address space (1024-byte units) (-v)'\n"
+            "do\n"
+            "  grep -Fq \"$record\" all.txt || printf 'missing:%s\\n' \"$record\"\n"
             "done\n"
+            "if grep -Evq '^.+ \\(-[[:alpha:]]\\) (unlimited|[0-9]+)$' all.txt; then\n"
+            "  printf 'malformed-row\\n'\n"
+            "fi\n"
             "printf 'checked\\n'\n"
         ),
         stdout="checked\n",
