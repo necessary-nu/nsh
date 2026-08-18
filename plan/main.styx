@@ -3615,6 +3615,20 @@ children (
                                 kind @decision
                                 text "priority pinned to 0 — operator override: Brendan: make a WBS for that P0 follow-up."
                             }
+
+                            {
+                                at 2026-08-18T00:30:41.465904676Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T00:35:52.382627879Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Replaced all shell-side process environment mutation with owned snapshots. Builder composition now snapshots inherited pairs once, overlays explicit pairs before initialization, and locale variables update only the Shell-owned Locale; cargo test -p nsh passes (229 unit tests plus all integration tests)."
+                            }
                         )
                     }
 

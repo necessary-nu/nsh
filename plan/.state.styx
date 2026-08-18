@@ -1334,4 +1334,9 @@ impl_evidence (
         {impl_name nsh-library, rule shell-locale.handle-lifetime}
         {impl_name nsh-library, rule shell-locale.owned-locale}
     )}
+    {id process-environment-api, covered_rules (
+        embedding-safety.process-environment-is-read-only
+    ), covered_claims (
+        {impl_name nsh-library, rule embedding-safety.process-environment-is-read-only}
+    )}
 )

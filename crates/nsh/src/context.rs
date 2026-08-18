@@ -47,6 +47,10 @@ use core::ffi::c_int;
 /// `docs/api-design.md` §5 is the list this fills from, one table per
 /// commit; the fields here are the ones that have arrived.
 pub struct Shell {
+    /// The immutable POSIX locale object selected by this shell's locale
+    /// variables. Raw handles and temporary thread selection stay inside
+    /// `nsh-platform`.
+    pub(crate) locale: nsh_platform::Locale,
     /// Every alias, by name. `alias.rs` owns the shape; this owns the
     /// value.
     pub(crate) aliases: crate::alias::AliasTable,
@@ -201,7 +205,9 @@ impl Shell {
     pub(crate) fn try_new(streams: crate::streams::Streams) -> std::io::Result<Self> {
         let fds = crate::fd::FdTable::from_streams(&streams)?;
         let io = crate::output::ShellIo::new(fds.slot(1)?, fds.slot(2)?);
+        let locale = nsh_platform::Locale::c()?;
         Ok(Shell {
+            locale,
             io,
             streams,
             fds,

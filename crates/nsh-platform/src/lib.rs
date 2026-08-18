@@ -360,6 +360,7 @@ pub fn supplementary_groups() -> std::io::Result<Vec<Gid>> {
 /// Ownership is intentional: a shell instance must not retain pointers
 /// into the process-global environment, which can be replaced by another
 /// thread or by the host after construction.
+// [spec:nsh:req:embedding-safety.process-environment-is-read-only]
 pub fn process_environment() -> Vec<(OsString, OsString)> {
     std::env::vars_os().collect()
 }
@@ -367,12 +368,6 @@ pub fn process_environment() -> Vec<(OsString, OsString)> {
 #[inline]
 pub fn process_id() -> u32 {
     std::process::id()
-}
-
-/// Change one process-environment entry at the process boundary.
-pub fn set_process_environment(name: &OsStr, value: &OsStr) {
-    // SAFETY: callers serialize process-global environment mutation.
-    unsafe { std::env::set_var(name, value) }
 }
 
 #[inline]
@@ -750,33 +745,6 @@ pub fn signal_is_blocked(signal: i32) -> std::io::Result<bool> {
         } else {
             Ok(result != 0)
         }
-    }
-}
-
-/// Update one process-global locale variable and ask the C runtime to
-/// rebuild its locale state from the environment.
-///
-/// Process-environment mutation is inherently global, so the shell keeps it
-/// at this boundary with the other process-wide operations.
-pub fn set_locale_environment(name: &OsStr, value: Option<&OsStr>) {
-    // SAFETY: callers serialize shell process-global state changes. `set_var`
-    // and `remove_var` copy the supplied owned OS strings.
-    unsafe {
-        match value {
-            Some(value) => std::env::set_var(name, value),
-            None => std::env::remove_var(name),
-        }
-        libc::setlocale(libc::LC_ALL, c"".as_ptr());
-    }
-}
-
-/// Re-read locale settings after a shell variable callback that deliberately
-/// leaves the process environment unchanged.
-pub fn refresh_locale() {
-    // SAFETY: the empty C string asks libc to read its own environment and
-    // does not expose or retain a Rust pointer.
-    unsafe {
-        libc::setlocale(libc::LC_ALL, c"".as_ptr());
     }
 }
 

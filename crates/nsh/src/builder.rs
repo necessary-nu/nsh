@@ -8,6 +8,7 @@
 //! each becomes a setting here and the defaults are the inert ones.
 
 use bstr::{BStr, BString};
+use std::os::unix::ffi::OsStrExt as _;
 
 use crate::context::Shell;
 use crate::error::Error;
@@ -164,47 +165,48 @@ impl Builder {
             sh.host = host;
         }
         sh.host.attach(crate::siginbox::signals());
-        let source = if self.inherit_env {
-            EnvSource::Process
+        let mut environment = if self.inherit_env {
+            nsh_platform::process_environment()
+                .into_iter()
+                .map(|(name, value)| {
+                    (
+                        BString::from(name.as_os_str().as_bytes()),
+                        BString::from(value.as_os_str().as_bytes()),
+                    )
+                })
+                .collect()
         } else {
-            EnvSource::Explicit(&self.env)
+            Vec::new()
         };
-        crate::init::init_from(&mut sh, source)?;
+        environment.extend(self.env);
+        crate::init::init_from(&mut sh, EnvSource::Explicit(&environment))?;
 
-            /* `inherit_env` picked the process snapshot, so explicit pairs
-             * have not been applied yet. They go on top, which is what
-             * makes the two settings compose rather than conflict. */
-            if self.inherit_env && !self.env.is_empty() {
-                crate::var::mkinit_env_pairs(&mut sh, &self.env)?;
-            }
+        if let Some(arg0) = &self.arg0 {
+            sh.options.set_arg0(BStr::new(&arg0[..]));
+        }
 
-            if let Some(arg0) = &self.arg0 {
-                sh.options.set_arg0(BStr::new(&arg0[..]));
-            }
+        if !self.args.is_empty() {
+            let refs: Vec<&BStr> = self.args.iter().map(|a| BStr::new(&a[..])).collect();
+            crate::options::setparam(&mut sh, &refs);
+        }
 
-            if !self.args.is_empty() {
-                let refs: Vec<&BStr> =
-                    self.args.iter().map(|a| BStr::new(&a[..])).collect();
-                crate::options::setparam(&mut sh, &refs);
-            }
-
-            for (name, on) in &self.options {
-                crate::options::set_option_by_name(&mut sh, BStr::new(&name[..]), *on)?;
-            }
-            crate::options::optschanged(&mut sh)?;
+        for (name, on) in &self.options {
+            crate::options::set_option_by_name(&mut sh, BStr::new(&name[..]), *on)?;
+        }
+        crate::options::optschanged(&mut sh)?;
 
         if let Some(dir) = &self.cwd {
-                /* `Error::Other` because the taxonomy's `Io` variant is
-                 * not promoted yet -- §3.4's "start with `Other`, promote
-                 * the interesting ones after". Status 2 is what dash's
-                 * `sh_error` takes, and what a failed `cd` leaves. */
-                std::env::set_current_dir(dir).map_err(|e| {
-                    Error::other(
-                        0,
-                        2,
-                        format!("can't cd to {}: {}", dir.display(), e).as_bytes(),
-                    )
-                })?;
+            /* `Error::Other` because the taxonomy's `Io` variant is
+             * not promoted yet -- §3.4's "start with `Other`, promote
+             * the interesting ones after". Status 2 is what dash's
+             * `sh_error` takes, and what a failed `cd` leaves. */
+            std::env::set_current_dir(dir).map_err(|e| {
+                Error::other(
+                    0,
+                    2,
+                    format!("can't cd to {}: {}", dir.display(), e).as_bytes(),
+                )
+            })?;
             crate::cd::setpwd_inner(&mut sh, crate::cd::Pwd::Unknown, 0)?;
         }
         Ok(sh)
@@ -217,33 +219,44 @@ mod tests {
 
     /// `lookupvar` as a byte string, or `None` when the shell has no such
     /// variable.
-    fn var(sh: &mut Shell, name: &str) -> Option<Vec<u8>> {
-        crate::var::lookup_bytes(sh, bstr::BStr::new(name)).map(Vec::from)
+    fn var(sh: &mut Shell, name: &BStr) -> Option<Vec<u8>> {
+        crate::var::lookup_bytes(sh, name).map(Vec::from)
+    }
+
+    fn process_probe() -> (BString, BString) {
+        let mut empty = Shell::builder().build().unwrap();
+        nsh_platform::process_environment()
+            .into_iter()
+            .map(|(name, value)| {
+                (
+                    BString::from(name.as_os_str().as_bytes()),
+                    BString::from(value.as_os_str().as_bytes()),
+                )
+            })
+            .find(|(name, _)| {
+                let mut bytes = name.iter().copied();
+                matches!(bytes.next(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'_'))
+                    && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+                    && var(&mut empty, BStr::new(name.as_slice())).is_none()
+            })
+            .expect("the test process has a non-builtin environment entry")
     }
 
     #[test]
     fn a_builder_with_no_env_setting_inherits_nothing_from_the_process() {
-        nsh_platform::set_process_environment(
-            std::ffi::OsStr::new("NSH_BUILDER_PROBE"),
-            std::ffi::OsStr::new("from-the-process"),
-        );
+        let (name, _) = process_probe();
         let mut sh = Shell::builder().build().unwrap();
-        assert_eq!(var(&mut sh, "NSH_BUILDER_PROBE"), None);
+        assert_eq!(var(&mut sh, BStr::new(name.as_slice())), None);
     }
 
     #[test]
     fn inherit_env_takes_the_processs_environment() {
-        {
-            nsh_platform::set_process_environment(
-                std::ffi::OsStr::new("NSH_BUILDER_PROBE2"),
-                std::ffi::OsStr::new("from-the-process"),
-            );
-            let mut sh = Shell::builder().inherit_env().build().unwrap();
-            assert_eq!(
-                var(&mut sh, "NSH_BUILDER_PROBE2").as_deref(),
-                Some(&b"from-the-process"[..])
-            );
-        }
+        let (name, value) = process_probe();
+        let mut sh = Shell::builder().inherit_env().build().unwrap();
+        assert_eq!(
+            var(&mut sh, BStr::new(name.as_slice())).as_deref(),
+            Some(value.as_slice())
+        );
     }
 
     #[test]
@@ -253,7 +266,7 @@ mod tests {
             .build()
             .unwrap();
         assert_eq!(
-            var(&mut sh, "NSH_EXPLICIT").as_deref(),
+            var(&mut sh, BStr::new(b"NSH_EXPLICIT")).as_deref(),
             Some(&b"a value with spaces"[..])
         );
     }
@@ -291,20 +304,27 @@ mod tests {
     /// pair is applied on top of the borrowed import.
     #[test]
     fn explicit_pairs_override_the_inherited_environment() {
-        {
-            nsh_platform::set_process_environment(
-                std::ffi::OsStr::new("NSH_BUILDER_PROBE3"),
-                std::ffi::OsStr::new("inherited"),
-            );
-            let mut sh = Shell::builder()
-                .inherit_env()
-                .env([("NSH_BUILDER_PROBE3", "explicit")])
-                .build()
-                .unwrap();
-            assert_eq!(
-                var(&mut sh, "NSH_BUILDER_PROBE3").as_deref(),
-                Some(&b"explicit"[..])
-            );
-        }
+        let (name, _) = process_probe();
+        let mut sh = Shell::builder()
+            .inherit_env()
+            .env([(name.clone(), BString::from("explicit"))])
+            .build()
+            .unwrap();
+        assert_eq!(
+            var(&mut sh, BStr::new(name.as_slice())).as_deref(),
+            Some(&b"explicit"[..])
+        );
+    }
+
+    #[test]
+    fn build_preserves_process_environment() {
+        let before = nsh_platform::process_environment();
+        let _shell = Shell::builder()
+            .inherit_env()
+            .env([("LC_ALL", "C"), ("LANG", "nsh-invalid-locale")])
+            .build()
+            .unwrap();
+        let after = nsh_platform::process_environment();
+        assert_eq!(after, before);
     }
 }

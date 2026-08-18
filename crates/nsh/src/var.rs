@@ -195,10 +195,58 @@ pub(crate) fn varname(text: &BStr) -> &BStr {
     BStr::new(text.split_once_str(b"=").map_or(text.as_bytes(), |(name, _)| name))
 }
 
-fn valid_name(name: &BStr) -> bool {
+fn valid_name(locale: &nsh_platform::Locale, name: &BStr) -> bool {
     let mut bytes = name.iter().copied();
-    matches!(bytes.next(), Some(b'a'..=b'z' | b'A'..=b'Z' | b'_'))
-        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+    bytes
+        .next()
+        .is_some_and(|byte| byte == b'_' || locale.is_alpha(byte))
+        && bytes.all(|byte| byte == b'_' || locale.is_alphanumeric(byte))
+}
+
+const LOCALE_CATEGORIES: [(nsh_platform::LocaleCategory, &[u8]); 6] = [
+    (nsh_platform::LocaleCategory::Collate, b"LC_COLLATE"),
+    (nsh_platform::LocaleCategory::Ctype, b"LC_CTYPE"),
+    (nsh_platform::LocaleCategory::Messages, b"LC_MESSAGES"),
+    (nsh_platform::LocaleCategory::Monetary, b"LC_MONETARY"),
+    (nsh_platform::LocaleCategory::Numeric, b"LC_NUMERIC"),
+    (nsh_platform::LocaleCategory::Time, b"LC_TIME"),
+];
+
+macro_rules! is_locale_variable {
+    ($name:expr) => {
+        $name == b"LC_ALL"
+        || $name == b"LANG"
+        || LOCALE_CATEGORIES
+            .iter()
+            .any(|(_, category_name)| $name == *category_name)
+    };
+}
+
+fn selected_locale(sh: &Shell) -> std::io::Result<nsh_platform::Locale> {
+    let nonempty = |name: &[u8]| {
+        sh.vars.tab.get(BStr::new(name)).and_then(|var| {
+            (var.flags & VUNSET == 0)
+                .then_some(var.value.as_ref())
+                .flatten()
+                .filter(|value| !value.is_empty())
+                .cloned()
+        })
+    };
+    let selected: Vec<_> = LOCALE_CATEGORIES
+        .iter()
+        .map(|(category, name)| {
+            let locale = nonempty(b"LC_ALL")
+                .or_else(|| nonempty(name))
+                .or_else(|| nonempty(b"LANG"))
+                .unwrap_or_else(|| BString::from("C"));
+            (*category, locale)
+        })
+        .collect();
+    let overrides: Vec<_> = selected
+        .iter()
+        .map(|(category, name)| (*category, OsStr::from_bytes(name.as_slice())))
+        .collect();
+    nsh_platform::Locale::new(OsStr::new("C"), &overrides)
 }
 
 fn builtin(name: &[u8], value: Option<&[u8]>, flags: c_int, callback: Callback) -> (BString, Var) {
@@ -255,9 +303,10 @@ pub(crate) fn mkinit_init_from(sh: &mut Shell, env: EnvSource<'_>) -> Result<(),
     use std::os::unix::fs::MetadataExt;
 
     initvar(sh);
-    match env {
+    let process_env;
+    let pairs = match env {
         EnvSource::Process => {
-            let process_env: Vec<(BString, BString)> = nsh_platform::process_environment()
+            process_env = nsh_platform::process_environment()
                 .into_iter()
                 .map(|(name, value)| {
                     (
@@ -265,11 +314,32 @@ pub(crate) fn mkinit_init_from(sh: &mut Shell, env: EnvSource<'_>) -> Result<(),
                         BString::from(value.as_os_str().as_bytes()),
                     )
                 })
-                .collect();
-            mkinit_env_pairs(sh, &process_env)?;
+                .collect::<Vec<_>>();
+            process_env.as_slice()
         }
-        EnvSource::Explicit(pairs) => mkinit_env_pairs(sh, pairs)?,
+        EnvSource::Explicit(pairs) => pairs,
+    };
+
+    for (name, value) in pairs {
+        let name = BStr::new(name.as_slice());
+        if !is_locale_variable!(name) {
+            continue;
+        }
+        let entry = sh.vars.tab.entry(name.to_owned()).or_insert_with(|| Var {
+            flags: 0,
+            value: None,
+            callback: Callback::Locale,
+            dynamic_lineno: false,
+        });
+        entry.flags = (entry.flags | VEXPORT) & !VUNSET;
+        entry.value = Some(value.clone());
+        entry.callback = Callback::Locale;
+        entry.dynamic_lineno = false;
     }
+    if let Ok(locale) = selected_locale(sh) {
+        sh.locale = locale;
+    }
+    mkinit_env_pairs(sh, pairs)?;
 
     set_bytes(sh, BStr::new(b"IFS"), Some(defifs()), VTEXTFIXED)?;
     set_bytes(sh, BStr::new(b"OPTIND"), Some(BStr::new(b"1")), VTEXTFIXED)?;
@@ -304,7 +374,10 @@ pub(crate) fn mkinit_env_pairs(
     for (name, value) in pairs {
         let name = BStr::new(name.as_slice());
         let value = BStr::new(value.as_slice());
-        if valid_name(name) {
+        if is_locale_variable!(name) {
+            continue;
+        }
+        if valid_name(&sh.locale, name) {
             set_bytes(sh, name, Some(value), VEXPORT)?;
         }
     }
@@ -327,22 +400,19 @@ fn run_callback(sh: &mut Shell, callback: Callback, name: &BStr, value: Option<&
         Callback::Path => crate::exec::changepath(sh, effective),
         Callback::Getopts => crate::options::getoptsreset(sh, effective),
         Callback::History => crate::histedit::sethistsize(sh, effective),
-        Callback::Locale => match value {
-            None => {
-                // Preserve dash's observable unset behaviour: the old
-                // process-environment entry remains, then locale is refreshed.
-                nsh_platform::refresh_locale();
+        Callback::Locale => {
+            // Locale selection depends on the complete variable table, not
+            // merely on the entry that triggered this callback.
+            if let Ok(locale) = selected_locale(sh) {
+                sh.locale = locale;
+                let ifs = if ifsset(sh) != 0 {
+                    ifsval(sh)
+                } else {
+                    defifs().to_owned()
+                };
+                crate::expand::changeifs_bytes(sh, BStr::new(ifs.as_slice()));
             }
-            Some(value) => {
-                // An explicitly empty value is not an unset value. In
-                // particular, `LC_ALL=` removes LC_ALL's override and lets
-                // LANG/LC_* select the category locale.
-                nsh_platform::set_locale_environment(
-                    OsStr::from_bytes(name),
-                    Some(OsStr::from_bytes(value)),
-                );
-            }
-        },
+        }
     }
 }
 
@@ -352,7 +422,7 @@ fn set_entry(
     value: Option<&BStr>,
     mut flags: c_int,
 ) -> Result<(), Error> {
-    if !valid_name(name) {
+    if !valid_name(&sh.locale, name) {
         let mut message = name.to_vec();
         message.extend_from_slice(b": bad variable name");
         return Err(sh.sh_error_value(&message));
@@ -369,15 +439,23 @@ fn set_entry(
         if flags & (VEXPORT | VREADONLY | VSTRFIXED | VUNSET) == VUNSET {
             return Ok(());
         }
+        let callback = if is_locale_variable!(name) {
+            Callback::Locale
+        } else {
+            Callback::None
+        };
         sh.vars.tab.insert(
             name.to_owned(),
             Var {
                 flags,
                 value: value.map(BStr::to_owned),
-                callback: Callback::None,
+                callback,
                 dynamic_lineno: false,
             },
         );
+        if flags & VNOFUNC == 0 {
+            run_callback(sh, callback, name, value);
+        }
         return Ok(());
     };
 
@@ -393,6 +471,9 @@ fn set_entry(
         flags |= VSTRFIXED;
     } else {
         sh.vars.tab.remove(name);
+        if old.callback == Callback::Locale {
+            run_callback(sh, old.callback, name, None);
+        }
         return Ok(());
     }
 
@@ -606,7 +687,14 @@ fn poplocalvars(sh: &mut Shell) {
                 }
             }
             LocalVar::Created(name) => {
-                sh.vars.tab.remove(&name);
+                let callback = sh
+                    .vars
+                    .tab
+                    .remove(&name)
+                    .map_or(Callback::None, |var| var.callback);
+                if callback == Callback::Locale {
+                    run_callback(sh, callback, BStr::new(name.as_slice()), None);
+                }
             }
             LocalVar::Saved { name, previous } => {
                 let callback = previous.callback;
@@ -675,40 +763,29 @@ mod tests {
     use super::*;
     use crate::testutil::lock;
 
-    struct RestoreLocale(Option<std::ffi::OsString>);
-
-    impl Drop for RestoreLocale {
-        fn drop(&mut self) {
-            nsh_platform::set_locale_environment(
-                OsStr::new("LC_ALL"),
-                self.0.as_deref(),
-            );
-        }
-    }
-
-    // [spec:dash:sem:var.changelocale-fn/test]
     #[test]
     fn an_empty_locale_assignment_is_not_an_unset() {
         let _guard = lock();
-        let _restore = RestoreLocale(std::env::var_os("LC_ALL"));
-        nsh_platform::set_locale_environment(OsStr::new("LC_ALL"), Some(OsStr::new("C")));
-
-        let mut shell = Shell::new(crate::streams::Streams::INHERIT);
-        run_callback(
+        let mut shell = Shell::builder()
+            .env([("LC_ALL", "C")])
+            .build()
+            .unwrap();
+        set_bytes(
             &mut shell,
-            Callback::Locale,
             BStr::new(b"LC_ALL"),
             Some(BStr::new(b"")),
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            lookup_bytes(&mut shell, BStr::new(b"LC_ALL"))
+                .as_ref()
+                .map(|value| value.as_slice()),
+            Some(&b""[..])
         );
-        assert_eq!(std::env::var_os("LC_ALL").as_deref(), Some(OsStr::new("")));
 
-        run_callback(
-            &mut shell,
-            Callback::Locale,
-            BStr::new(b"LC_ALL"),
-            None,
-        );
-        assert_eq!(std::env::var_os("LC_ALL").as_deref(), Some(OsStr::new("")));
+        unset_bytes(&mut shell, BStr::new(b"LC_ALL")).unwrap();
+        assert_eq!(lookup_bytes(&mut shell, BStr::new(b"LC_ALL")), None);
     }
 
     // [spec:dash:sem:var.lookupvar-fn/test]
