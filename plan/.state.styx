@@ -3599,4 +3599,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule edit.command-alias-insert}
     )}
+    {id fix-edit-command-complete-unique, covered_rules (
+        edit.command-complete-unique
+    ), covered_claims (
+        {impl_name shell, rule edit.command-complete-unique}
+    )}
 )

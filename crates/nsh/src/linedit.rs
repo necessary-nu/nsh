@@ -805,6 +805,11 @@ fn install_shell_bindings(
             editor.bind(mode, KeySequence::try_from(*sequence)?, binding.clone());
         }
     }
+    editor.bind(
+        KeymapMode::ViInsert,
+        KeySequence::try_from("\t")?,
+        Binding::Effect(EffectCommand::Complete),
+    );
 
     let vi_command_bindings = [
         (
@@ -859,6 +864,10 @@ fn install_shell_bindings(
             "0",
             Binding::Immediate(ImmediateCommand::StartOfLineOrArgument),
         ),
+        // Entering insert mode after the cursor before requesting ordinary
+        // insert-mode completion makes the command-mode cursor's character
+        // part of the current bigword and leaves the editor in insert mode.
+        ("\\", Binding::Macro(Text::from("a\t"))),
         ("_", Binding::Effect(EffectCommand::InsertHistoryWord)),
         (
             "^",
@@ -1177,6 +1186,7 @@ fn host_failure(error: impl fmt::Display) -> HostFailure {
     HostFailure::Failed(message.into_boxed_str())
 }
 
+// [spec:posix:req:edit.command-complete-unique]
 fn completion_candidates(
     query: &nshedit::editor::CompletionQuery,
 ) -> nshedit::editor::CompletionCandidates {

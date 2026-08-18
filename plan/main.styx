@@ -2717,6 +2717,21 @@ children (
                             shell ([spec:posix:req:edit.command-complete-unique])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:00:56.085434649Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:04:05.572044492Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Bind vi command-mode `\\\\` as the macro `a<Tab>` and explicitly bind vi insert-mode Tab to the typed completion effect. Entering insert after the cursor first includes the command-mode cursor character in the current bigword; the completion engine then supplies maximal common-prefix replacement and file/directory suffixes and leaves the editor in insert mode. Strengthen the PTY case by typing immediately after completion and expecting `beta tail`, proving both the required file-space suffix and insert-mode transition. Verification: focused PTY case, all 15 linedit tests, 14 harness unit tests, and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

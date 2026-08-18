@@ -311,9 +311,9 @@ CASES: tuple[Case, ...] = (
     Case(
         id="edit-command-complete-unique",
         rules=("edit.command-complete-unique",),
-        script=VI + "r bet" + ESC + "\\" + "\n" + "exit\n",
+        script=VI + "r bet" + ESC + "\\" + "tail\n" + "exit\n",
         stdout=None,
-        stdout_contains=("R:beta\n",),
+        stdout_contains=("R:beta tail\n",),
         mode="interactive",
         environment=TERMINAL,
         files=GLOB,
