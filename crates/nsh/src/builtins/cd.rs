@@ -207,6 +207,26 @@ fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<CdResult, Error> {
         .unwrap_or(dest);
     err = match std::env::set_current_dir(std::path::Path::new(OsStr::from_bytes(target))) {
         Ok(()) => 0,
+        // [spec:posix:req:builtin.cd.step9-path-max-relative]
+        // `updatepwd` constructed this absolute path by prefixing PWD. If the
+        // kernel rejects only that combined spelling as too long, POSIX says
+        // the original short relative operand must still be used when that
+        // conversion is possible.
+        Err(error)
+            if logical.is_some()
+                && !dest.starts_with(b"/")
+                && error.raw_os_error().is_some_and(|code| {
+                    nsh_platform::path_error_is(
+                        code,
+                        nsh_platform::PathErrorKind::NameTooLong,
+                    )
+                }) =>
+        {
+            match std::env::set_current_dir(std::path::Path::new(OsStr::from_bytes(dest))) {
+                Ok(()) => 0,
+                Err(_) => -1,
+            }
+        }
         Err(_) => -1,
     };
     if err == 0 {

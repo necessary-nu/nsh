@@ -272,7 +272,10 @@ pub fn shellexec(
                 let candidate = CStr::from_bytes_with_nul(&candidate.path)
                     .expect("PATH candidates are terminated");
                 let candidate_error = tryexec(candidate, &arguments, &envv);
-                if !nsh_platform::is_path_not_found_error(candidate_error) {
+                if !nsh_platform::path_error_is(
+                    candidate_error,
+                    nsh_platform::PathErrorKind::NotFound,
+                ) {
                     se = candidate_error;
                 }
             }
@@ -600,7 +603,10 @@ pub fn find_command(
             Ok(metadata) => metadata,
             Err(io_error) => {
                 if let Some(code) = io_error.raw_os_error()
-                    && !nsh_platform::is_path_not_found_error(code)
+                    && !nsh_platform::path_error_is(
+                        code,
+                        nsh_platform::PathErrorKind::NotFound,
+                    )
                 {
                     error = code;
                 }

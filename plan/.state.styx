@@ -3399,4 +3399,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.cd.step8-canonical-form-dot-dot}
     )}
+    {id fix-builtin-cd-step9-path-max-relative, covered_rules (
+        builtin.cd.step9-path-max-relative
+    ), covered_claims (
+        {impl_name shell, rule builtin.cd.step9-path-max-relative}
+    )}
 )

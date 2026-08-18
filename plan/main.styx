@@ -1746,6 +1746,21 @@ children (
                             shell ([spec:posix:req:builtin.cd.step9-path-max-relative])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T03:10:31.86553016Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T03:11:46.959628189Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "When logical updatepwd prefixes PWD and the resulting absolute spelling is rejected with ENAMETOOLONG, docd now retries the original relative operand and retains the computed logical PWD. Error classification lives in the safe nsh-platform boundary; core sees only io::Error. The focused >PATH_MAX case passes, nsh-platform tests are 12/0, and cargo test -p nsh is 262/0."
+                            }
+                        )
                     }
 
                     {

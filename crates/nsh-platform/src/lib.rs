@@ -219,12 +219,20 @@ pub fn process_id() -> u32 {
     std::process::id()
 }
 
-pub fn is_path_not_found_error(code: i32) -> bool {
-    matches!(
-        code,
-        value if value == rustix::io::Errno::NOENT.raw_os_error()
-            || value == rustix::io::Errno::NOTDIR.raw_os_error()
-    )
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PathErrorKind {
+    NotFound,
+    NameTooLong,
+}
+
+/// Classify a raw OS error without exposing platform errno constants to core.
+pub fn path_error_is(code: i32, kind: PathErrorKind) -> bool {
+    match kind {
+        PathErrorKind::NotFound => [rustix::io::Errno::NOENT, rustix::io::Errno::NOTDIR]
+            .iter()
+            .any(|error| code == error.raw_os_error()),
+        PathErrorKind::NameTooLong => code == rustix::io::Errno::NAMETOOLONG.raw_os_error(),
+    }
 }
 
 /// The error number used when a command candidate exists but is not
@@ -1170,11 +1178,28 @@ mod tests {
     use std::os::unix::fs::PermissionsExt as _;
 
     #[test]
-    fn os_error_text_omits_rusts_numeric_suffix() {
+    fn os_error_boundaries_are_classified() {
         let error = std::io::Error::from(rustix::io::Errno::NOENT);
         let message = Locale::c().unwrap().error_message(&error);
         assert!(!message.contains("(os error"));
         assert!(!message.is_empty());
+
+        assert!(path_error_is(
+            rustix::io::Errno::NAMETOOLONG.raw_os_error(),
+            PathErrorKind::NameTooLong
+        ));
+        assert!(path_error_is(
+            rustix::io::Errno::NOENT.raw_os_error(),
+            PathErrorKind::NotFound
+        ));
+        assert!(path_error_is(
+            rustix::io::Errno::NOTDIR.raw_os_error(),
+            PathErrorKind::NotFound
+        ));
+        assert!(!path_error_is(
+            rustix::io::Errno::ACCESS.raw_os_error(),
+            PathErrorKind::NotFound
+        ));
     }
 
     #[test]
