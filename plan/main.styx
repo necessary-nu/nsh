@@ -2772,6 +2772,21 @@ children (
                             shell ([spec:posix:req:edit.command-expand-all])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:08:38.372551242Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:10:35.796575838Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Implement vi `*` as an nsh-owned editor command. Include the command-mode cursor character when selecting the current token, replace that token with every sorted completion candidate separated by exactly one space, move the insertion point immediately after the replacement, and enter vi insert mode; no-match and no-token paths still enter insert mode without corrupting the line. Strengthen the PTY case by typing `tail` immediately after expansion, and add a Rust test proving candidate suffix metadata is excluded from the joined pathname words. Verification: focused PTY case, all 17 linedit tests, 14 harness unit tests, and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

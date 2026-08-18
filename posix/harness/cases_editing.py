@@ -325,9 +325,9 @@ CASES: tuple[Case, ...] = (
     Case(
         id="edit-command-expand-all",
         rules=("edit.command-expand-all",),
-        script=VI + "r alph" + ESC + "*" + "\n" + "exit\n",
+        script=VI + "r alph" + ESC + "*" + "tail\n" + "exit\n",
         stdout=None,
-        stdout_contains=("R:alpha1 alpha2\n",),
+        stdout_contains=("R:alpha1 alpha2tail\n",),
         mode="interactive",
         environment=TERMINAL,
         files=GLOB,

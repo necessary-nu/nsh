@@ -177,6 +177,7 @@ const DELETE_TO_FIRST_NONBLANK: &str = "nsh-vi-delete-to-first-nonblank";
 const CHANGE_TO_FIRST_NONBLANK: &str = "nsh-vi-change-to-first-nonblank";
 const YANK_TO_FIRST_NONBLANK: &str = "nsh-vi-yank-to-first-nonblank";
 const DISPLAY_EXPANSIONS: &str = "nsh-vi-display-expansions";
+const EXPAND_ALL: &str = "nsh-vi-expand-all";
 
 mod history;
 pub use history::{History, HistoryEvent};
@@ -535,10 +536,10 @@ impl LineEditor {
                     driver.resume_completion(editor, &pending, response)?
                 }
                 ReadStep::UserCommand(pending) => {
-                    let response = if pending.request().name.as_str() == DISPLAY_EXPANSIONS {
-                        self.display_expansions()
-                    } else {
-                        shell_user_command(self.editor_mut(), pending.request().name.as_str())
+                    let response = match pending.request().name.as_str() {
+                        DISPLAY_EXPANSIONS => self.display_expansions(),
+                        EXPAND_ALL => self.expand_all(),
+                        name => shell_user_command(self.editor_mut(), name),
                     };
                     let (editor, driver) = self.editor_and_driver();
                     driver.resume_user_command(editor, &pending, response)?
@@ -760,6 +761,62 @@ impl LineEditor {
             .map_err(host_failure)
     }
 
+    // [spec:posix:req:edit.command-expand-all]
+    fn expand_all(&mut self) -> Result<Outcome, HostFailure> {
+        let (line, cursor, command_mode) = {
+            let editor = self.editor_mut();
+            (
+                editor.line().clone(),
+                editor.cursor(),
+                editor.keymap_mode() == KeymapMode::ViCommand,
+            )
+        };
+        let cursor = if command_mode && cursor.get() < line.len() {
+            line.index(cursor.get() + 1).map_err(host_failure)?
+        } else {
+            cursor
+        };
+        let parsed = Tokenizer::default()
+            .tokenize(&line, cursor)
+            .map_err(host_failure)?;
+        let token_index = parsed.line().cursor().token().get();
+        let Some(token) = parsed.line().tokens().get(token_index) else {
+            return self.enter_vi_insert_mode();
+        };
+        let candidates = completion_candidates_for_stem(token.value());
+        if candidates.is_empty() {
+            return self.enter_vi_insert_mode();
+        }
+        let replacement = all_completion_insertions(&candidates);
+        let replacement_start = token.source().start().get();
+        let editor = self.editor_mut();
+        editor
+            .replace(token.source(), replacement.clone())
+            .map_err(host_failure)?;
+        let cursor = editor
+            .line()
+            .index(replacement_start + replacement.len())
+            .map_err(host_failure)?;
+        editor
+            .execute(Action::Move(Motion::Absolute(cursor)))
+            .map_err(host_failure)?;
+        editor
+            .execute(Action::SetModes {
+                input: InputMode::Insert,
+                keymap: KeymapMode::ViInsert,
+            })
+            .map_err(host_failure)
+    }
+
+    fn enter_vi_insert_mode(&mut self) -> Result<Outcome, HostFailure> {
+        self.editor_mut()
+            .execute(Action::SetModes {
+                input: InputMode::Insert,
+                keymap: KeymapMode::ViInsert,
+            })
+            .map_err(host_failure)
+    }
+
     fn editor_mut(&mut self) -> &mut NativeEditor {
         self.editor.as_mut().expect("live native editor")
     }
@@ -930,6 +987,12 @@ fn install_shell_bindings(
             Binding::User(
                 CommandName::new(DISPLAY_EXPANSIONS)
                     .expect("static shell command name is valid"),
+            ),
+        ),
+        (
+            "*",
+            Binding::User(
+                CommandName::new(EXPAND_ALL).expect("static shell command name is valid"),
             ),
         ),
         (
@@ -1271,7 +1334,7 @@ fn completion_candidates_for_stem(
     let Ok(entries) = std::fs::read_dir(directory) else {
         return Vec::new().into();
     };
-    entries
+    let mut candidates = entries
         .filter_map(Result::ok)
         .filter_map(|entry| {
             let name = entry.file_name();
@@ -1288,7 +1351,20 @@ fn completion_candidates_for_stem(
                 .map_or(" ", |_| "/");
             Some(CompletionCandidate::new(text_from_bytes(&insertion)).with_suffix(suffix))
         })
-        .collect()
+        .collect::<Vec<_>>();
+    candidates.sort_by(|left, right| left.insertion().cmp(right.insertion()));
+    candidates.into()
+}
+
+fn all_completion_insertions(candidates: &nshedit::editor::CompletionCandidates) -> Text {
+    let mut expansion = Text::default();
+    for candidate in candidates.iter() {
+        if !expansion.is_empty() {
+            expansion.push(TextUnit::Scalar(' '));
+        }
+        expansion.extend(candidate.insertion().as_units().iter().copied());
+    }
+    expansion
 }
 
 fn shell_editor(sh: &mut crate::context::Shell) -> OsString {
@@ -1352,5 +1428,18 @@ mod tests {
         assert_eq!(suffixes[1].1, Some(Text::from(" ")));
 
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn all_insertions_have_single_spaces() {
+        let candidates = vec![
+            CompletionCandidate::new("alpha1").with_suffix(" "),
+            CompletionCandidate::new("alpha2").with_suffix("/"),
+        ]
+        .into();
+        assert_eq!(
+            all_completion_insertions(&candidates),
+            Text::from("alpha1 alpha2")
+        );
     }
 }
