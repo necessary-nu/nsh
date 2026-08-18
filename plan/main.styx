@@ -5386,6 +5386,7 @@ children (
                 id import-oils-osh-corpus
                 title "Import the active Oils OSH corpus and its required fixtures"
                 deps (pin-oils-spec-corpus)
+                sealed true
                 log (
                     {
                         at 2026-08-18T13:04:49.496804008Z
@@ -5406,6 +5407,20 @@ children (
                         author "brendan@necessary.nu"
                         kind @note
                         text "Importer progress: the safe Rust nsh-survey tool verifies the locked git commit/tree and Apache-2.0 license digest, selects exactly 134 active OSH files/2,755 cases, copies the explicit 35-file fixture closure, writes a SHA-256 inventory, and rejects inventory/count/hash drift. Disposable-checkout verification passed with 170 inventoried payload files."
+                    }
+
+                    {
+                        at 2026-08-18T13:26:59.516329131Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Completion evidence: in-place verification reports 170 inventoried payload files, 134 active OSH specs, and 2,755 cases. Unit tests pass. Disposable negative controls reject a missing payload file, a modified payload hash, an unlisted extra file, and a checkout whose commit differs from SOURCE.toml."
+                    }
+
+                    {
+                        at 2026-08-18T13:26:59.601425552Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }

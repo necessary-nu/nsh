@@ -1215,7 +1215,7 @@ assertions (
     {id register-posix-dash-divergences, kind @complete, author "brendan@necessary.nu", at 2026-08-18T11:45:38.225345042Z}
     {id spec-default-history-navigation, kind @complete, author "brendan@necessary.nu", at 2026-08-18T12:02:47.032570368Z}
     {id pin-oils-spec-corpus, kind @complete, author "brendan@necessary.nu", at 2026-08-18T13:13:53.358034773Z}
-    {id import-oils-osh-corpus, kind @doing, author "brendan@necessary.nu", at 2026-08-18T13:14:32.286162514Z}
+    {id import-oils-osh-corpus, kind @complete, author "brendan@necessary.nu", at 2026-08-18T13:26:59.601425552Z}
 )
 
 impl_evidence (
