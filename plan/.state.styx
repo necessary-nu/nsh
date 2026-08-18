@@ -3674,4 +3674,14 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule edit.undo}
     )}
+    {id fix-exit-shell-error-consequences, covered_rules (
+        exit.shell-error-consequences
+    ), covered_claims (
+        {impl_name shell, rule exit.shell-error-consequences}
+    )}
+    {id fix-exit-unrecoverable-read-error, covered_rules (
+        exit.unrecoverable-read-error
+    ), covered_claims (
+        {impl_name shell, rule exit.unrecoverable-read-error}
+    )}
 )

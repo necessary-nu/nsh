@@ -44,6 +44,7 @@ pub const USE_TEE: c_int = 1;
 
 pub const INPUT_PUSH_FILE: c_int = 1;
 pub const INPUT_NOFILE_OK: c_int = 2;
+pub const INPUT_DOT_FILE: c_int = 4;
 
 // [spec:dash:def:input.strpush]
 /// The C's `struct strpush`.
@@ -86,6 +87,8 @@ pub struct ParseFile {
     uses_stdin: bool,
     /// Ownership when this frame opened the descriptor itself.
     owned_fd: Option<crate::fd::SharedFd>,
+    /// Whether this file is the operand of the `.` special built-in.
+    dot_operand: bool,
     /// number of chars left in this line
     pub nleft: c_int,
     /// do not read again once we hit EOF
@@ -112,6 +115,7 @@ impl ParseFile {
         linno: 0,
         uses_stdin: false,
         owned_fd: None,
+        dot_operand: false,
         nleft: 0,
         eof: 0,
         pos: 0,
@@ -637,8 +641,10 @@ fn stdin_clear_nonblock(sh: &mut crate::context::Shell) -> bool {
 // [spec:posix:req:sh.input-file-blank-or-comments]
 // [spec:posix:req:xcurel.file-contents-nbytes]
 // [spec:posix:sem:xcurel.file-contents-read-error]
+// [spec:posix:req:exit.unrecoverable-read-error]
 fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
     let uses_stdin = cur_pf(sh).uses_stdin;
+    let dot_operand = cur_pf(sh).dot_operand;
     let mut use_tee: bool;
     let mut unget: c_int;
     let mut pnr: c_int;
@@ -694,10 +700,20 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
                 &mut buf[off..off + nr as usize],
             );
             cur_pf(sh).buf = buf;
-            return Ok(match result {
-                Ok(count) => count as c_int,
-                Err(_) => 0,
-            });
+            return match result {
+                Ok(count) => Ok(count as c_int),
+                Err(error) => {
+                    let mut message = BString::from("read error: ");
+                    message.extend_from_slice(error.to_string().as_bytes());
+                    let failure = Error::unrecoverable_read(
+                        sh.eval.errlinno,
+                        2,
+                        &message,
+                        dot_operand,
+                    );
+                    Err(sh.report(failure))
+                }
+            };
         }
 
         let mut reading_tee = false;
@@ -785,6 +801,16 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
             if let Some(e) = crate::error::poll_interrupt(sh) {
                 return Err(e);
             }
+            let error = read_error.expect("a failed read retains its error");
+            let mut message = BString::from("read error: ");
+            message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
+            let failure = Error::unrecoverable_read(
+                sh.eval.errlinno,
+                2,
+                &message,
+                dot_operand,
+            );
+            return Err(sh.report(failure));
         }
         break 'retry;
     }
@@ -1067,7 +1093,12 @@ pub fn setinputfile(
         return Ok(false); /* goto out */
     };
     fd = crate::redir::move_fd_above(sh, fd)?;
-    setinputfd(sh, fd, flags & INPUT_PUSH_FILE);
+    setinputfd(
+        sh,
+        fd,
+        flags & INPUT_PUSH_FILE,
+        flags & INPUT_DOT_FILE != 0,
+    );
     INTON(sh);
     Ok(true)
 }
@@ -1079,7 +1110,7 @@ pub fn setinputfile(
 
 // [spec:dash:def:input.setinputfd-fn]
 // [spec:dash:sem:input.setinputfd-fn]
-fn setinputfd(sh: &mut Shell, fd: OwnedFd, push: c_int) {
+fn setinputfd(sh: &mut Shell, fd: OwnedFd, push: c_int, dot_operand: bool) {
     pushfile(sh);
     if push == 0 {
         sh.input.top = sh.input.cur;
@@ -1087,6 +1118,7 @@ fn setinputfd(sh: &mut Shell, fd: OwnedFd, push: c_int) {
     let pf = cur_pf(sh);
     pf.uses_stdin = false;
     pf.owned_fd = Some(crate::fd::SharedFd::from_backing(fd));
+    pf.dot_operand = dot_operand;
     pf.buf = vec![0u8; IBUFSIZ];
     pf.pos = 0;
 }

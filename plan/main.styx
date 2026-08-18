@@ -2995,6 +2995,21 @@ children (
                             shell ([spec:posix:req:exit.shell-error-consequences])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:40:37.713889587Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:44:48.28959639Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Do not collapse a negative command-source read into EOF. `preadfd` now reports both descriptor and native line-editor failures as an owned `Error::UnrecoverableRead`, preserving status, line and diagnostic text. The outer shell handler recognizes that typed error and exits even when interactive. A parse-file provenance bit marks only the file operand of the `.` special built-in; those failures are constructed as ordinary special-builtin errors so the existing direct/via-command and interactive/non-interactive consequence rules remain authoritative. This also prevents a partial command buffered before a later read failure from being executed, because the error propagates before `preadbuffer`'s partial-line save path. Verification: five shell-error consequence cases, both unrecoverable-read cases, all 251 core tests plus workspace companion tests/doctests, 14 harness unit tests, and git diff --check pass."
+                            }
+                        )
                     }
 
                     {
@@ -3004,6 +3019,21 @@ children (
                             shell ([spec:posix:req:exit.unrecoverable-read-error])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:40:49.65602541Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:44:48.367478479Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Do not collapse a negative command-source read into EOF. `preadfd` now reports both descriptor and native line-editor failures as an owned `Error::UnrecoverableRead`, preserving status, line and diagnostic text. The outer shell handler recognizes that typed error and exits even when interactive. A parse-file provenance bit marks only the file operand of the `.` special built-in; those failures are constructed as ordinary special-builtin errors so the existing direct/via-command and interactive/non-interactive consequence rules remain authoritative. This also prevents a partial command buffered before a later read failure from being executed, because the error propagates before `preadbuffer`'s partial-line save path. Verification: five shell-error consequence cases, both unrecoverable-read cases, all 251 core tests plus workspace companion tests/doctests, 14 harness unit tests, and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

@@ -264,6 +264,7 @@ pub fn main(
         let e_is_exit: bool;
         let by_exitcmd: bool;
         let interrupted: bool;
+        let unrecoverable_read: bool;
 
         match &outcome {
             /* `exit:` is the only way out of the body that does not
@@ -277,6 +278,7 @@ pub fn main(
                 e_is_exit = true;
                 by_exitcmd = *b;
                 interrupted = false;
+                unrecoverable_read = false;
             }
             Err(e) => {
                 e_is_exit = false;
@@ -284,6 +286,7 @@ pub fn main(
                 /* The C read `exception == EXINT` here, for the bare
                  * newline it writes before the next prompt. */
                 interrupted = e.is_interrupt();
+                unrecoverable_read = e.is_unrecoverable_read();
                 /* This is the outermost catch, and the status the raise
                  * took travels in the value now. Everything downstream --
                  * `exitshell`'s `savestatus = exitstatus` and its
@@ -301,7 +304,14 @@ pub fn main(
             crate::init::exitreset(sh, by_exitcmd);
 
             s = state;
-            if e_is_exit || s == 0 || iflag(sh) == 0 || sh.shell_level != 0 {
+            // [spec:posix:req:exit.shell-error-consequences]
+            // [spec:posix:req:exit.unrecoverable-read-error]
+            if e_is_exit
+                || unrecoverable_read
+                || s == 0
+                || iflag(sh) == 0
+                || sh.shell_level != 0
+            {
                 entry = 5; // goto exit
                 continue;
             }

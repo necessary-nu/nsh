@@ -73,7 +73,7 @@ pub fn dotcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         crate::input::setinputfile(
             sh,
             fullname.as_slice().as_bstr(),
-            crate::input::INPUT_PUSH_FILE,
+            crate::input::INPUT_PUSH_FILE | crate::input::INPUT_DOT_FILE,
         )?;
         /* `evalbltin`'s epilogue reads `commandname` after this returns —
          * `flushall(); if (outerr(out1)) sh_warnx("%s: I/O error",

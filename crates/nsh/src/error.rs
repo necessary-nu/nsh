@@ -336,6 +336,16 @@ pub enum Error {
         /// "carry a `c_int` until then", and this is then.
         signal: crate::status::Signal,
     },
+    /// A command input source failed before it reached end-of-file.
+    // [spec:posix:req:exit.unrecoverable-read-error]
+    UnrecoverableRead {
+        /// `errlinno` as it stood when the read failed.
+        line: c_int,
+        /// The status the shell takes from the failure.
+        status: c_int,
+        /// The already-rendered read diagnostic.
+        message: BString,
+    },
     /// A diagnostic with no more specific variant.
     Other {
         /// `errlinno` as it stood when the diagnostic was produced.
@@ -388,6 +398,25 @@ impl Error {
         }
     }
 
+    /// Build a command-input read error, retaining the special-builtin
+    /// treatment required for the file operand of `.`.
+    pub fn unrecoverable_read(
+        line: c_int,
+        status: c_int,
+        msg: &[u8],
+        dot_operand: bool,
+    ) -> Error {
+        if dot_operand {
+            Error::other(line, status, msg)
+        } else {
+            Error::UnrecoverableRead {
+                line,
+                status,
+                message: BString::from(msg),
+            }
+        }
+    }
+
     /// Is this the user's interrupt rather than a diagnostic?
     ///
     /// The question every frame that swallows an error has to ask. There
@@ -398,13 +427,18 @@ impl Error {
         matches!(self, Error::Interrupted { .. })
     }
 
+    /// Whether POSIX requires this error to end even an interactive shell.
+    pub fn is_unrecoverable_read(&self) -> bool {
+        matches!(self, Error::UnrecoverableRead { .. })
+    }
+
     /// The exit status the shell takes from this error.
     pub fn status(&self) -> c_int {
         match self {
             /* `onint` sets `exitstatus` to this before it returns, as the
              * C does before it raises. */
             Error::Interrupted { signal } => signal.number() + 128,
-            Error::Other { status, .. } => *status,
+            Error::UnrecoverableRead { status, .. } | Error::Other { status, .. } => *status,
         }
     }
 
@@ -420,7 +454,9 @@ impl Error {
             /* dash prints nothing for an interrupt. `main`'s handler
              * writes a bare newline and that is the whole of it. */
             Error::Interrupted { .. } => BStr::new(b""),
-            Error::Other { message, .. } => message.as_bstr(),
+            Error::UnrecoverableRead { message, .. } | Error::Other { message, .. } => {
+                message.as_bstr()
+            }
         }
     }
 
@@ -431,7 +467,7 @@ impl Error {
              * diagnostic did, and reading `eval.errlinno` here would report
              * whichever line last failed. */
             Error::Interrupted { .. } => 0,
-            Error::Other { line, .. } => *line,
+            Error::UnrecoverableRead { line, .. } | Error::Other { line, .. } => *line,
         }
     }
 }
@@ -618,6 +654,22 @@ mod tests {
              * and `$?` is a field of one, so there is no shell in scope
              * for it to write and no way for a test to observe
              * otherwise. */
+    }
+
+    // [spec:posix:req:exit.unrecoverable-read-error/test]
+    // [spec:posix:req:exit.shell-error-consequences/test]
+    #[test]
+    fn read_error_classifies_dot_operand() {
+        let input = Error::unrecoverable_read(7, 2, b"read failed", false);
+        assert!(input.is_unrecoverable_read());
+        assert_eq!(input.line(), 7);
+        assert_eq!(input.status(), 2);
+        assert_eq!(input.message(), BStr::new(b"read failed"));
+
+        let dot = Error::unrecoverable_read(8, 2, b"dot read failed", true);
+        assert!(!dot.is_unrecoverable_read());
+        assert_eq!(dot.line(), 8);
+        assert_eq!(dot.message(), BStr::new(b"dot read failed"));
     }
 
     #[test]
