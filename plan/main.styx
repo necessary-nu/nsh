@@ -4299,6 +4299,7 @@ children (
                         title "Register and verify intentional POSIX-over-dash divergences"
                         kind @test
                         deps (fix-ignoreeof-noninteractive-eof)
+                        sealed true
                         log (
                             {
                                 at 2026-08-18T10:14:23.195334099Z
@@ -4312,6 +4313,13 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @decision
                                 text "Register all intentional POSIX-over-dash results as byte-exact decision entries or composable normalizers. A composed XFAIL is accepted only after the complete normalized outputs and shell statuses agree, and reports every participating ID. Replace digest/count probes with raw set/ulimit output so differences remain reviewable; bound every removal by command shape and observed records; close split-corpus files as they are emitted. Pipe endpoints enter the hidden OwnedFd range before fork, F_DUPFD_CLOEXEC lower-bound EINVAL is classified as EMFILE, and partial construction closes by ownership. Verification: 188 divergence-register checks; 15 nsh-platform tests; 255 nsh core tests plus companion suites; 14 POSIX harness tests; POSIX 731/731 cases and 973/973 automatic rules; complete differential sweep PASS=61768 FAIL=0 FLAKY=33 XFAIL=1222 with every registered ID exercised and no stale entries."
+                            }
+
+                            {
+                                at 2026-08-18T11:45:38.225345042Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }
