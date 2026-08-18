@@ -3190,6 +3190,21 @@ children (
                             shell ([spec:posix:req:xcu.exit-status.listed-values-binding])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T06:27:59.450125655Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T06:28:26.14262806Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Bind XCU's generic listed-value requirement at the typed command-file open classifier introduced by its dependency: the implementation returns the exact listed 127 for a missing command file, and both the direct classifier test and invocation corpus case verify the numeric value. No additional behavior change is needed because fix-sh-exit-status-values delivered the shared status path first."
+                            }
+                        )
                     }
 
                     {

@@ -230,6 +230,7 @@ enum OpenFailureContext {
 
 impl OpenFailureContext {
     // [spec:posix:req:sh.exit-status-values]
+    // [spec:posix:req:xcu.exit-status.listed-values-binding]
     fn status(self, error: &std::io::Error) -> crate::status::ExitStatus {
         if matches!(self, OpenFailureContext::CommandFile)
             && error.raw_os_error().is_some_and(|code| {
@@ -789,6 +790,7 @@ mod tests {
     }
 
     // [spec:posix:req:sh.exit-status-values/test]
+    // [spec:posix:req:xcu.exit-status.listed-values-binding/test]
     #[test]
     fn command_file_open_status() {
         let missing = std::io::Error::from_raw_os_error(nsh_platform::not_found_error_code());

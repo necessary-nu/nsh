@@ -3719,4 +3719,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule sh.exit-status-values}
     )}
+    {id fix-xcu-exit-status-listed-values-binding, covered_rules (
+        xcu.exit-status.listed-values-binding
+    ), covered_claims (
+        {impl_name shell, rule xcu.exit-status.listed-values-binding}
+    )}
 )
