@@ -529,6 +529,7 @@ pub extern "C" fn onsig(signo: c_int) {
 // [spec:dash:sem:trap.dotrap-fn]
 // [spec:posix:req:builtin.trap.action-overrides-and-exit-status]
 // [spec:posix:req:builtin.trap.action-executed-as-eval]
+// [spec:posix:sem:signal.pending-trap-order]
 pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
     let mut i: c_int;
     let mut status: c_int;

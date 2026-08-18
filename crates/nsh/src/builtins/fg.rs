@@ -88,6 +88,9 @@ pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:builtin.fg.removes-known-process-id]
 // [spec:posix:req:builtin.fg.exit-status]
 // [spec:posix:req:builtin.fg.job-control-disabled]
+// [spec:posix:req:jobctl.background-job-brought-to-foreground]
+// [spec:posix:req:jobctl.continue-suspended-job]
+// [spec:posix:req:jobctl.fg-terminal-settings-restore]
 fn restartjob(sh: &mut Shell, jp: usize, mode: c_int) -> Result<c_int, Error> {
     let status: c_int;
     let pgid: i32;

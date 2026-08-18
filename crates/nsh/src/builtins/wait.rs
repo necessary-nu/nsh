@@ -19,6 +19,7 @@ use crate::jobs::{
 
 // [spec:dash:def:jobs.waitcmd-fn]
 // [spec:dash:sem:jobs.waitcmd-fn]
+// [spec:posix:req:signal.trap-during-wait]
 pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut jobp: Option<usize>;
     let mut retval: c_int;

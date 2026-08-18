@@ -46,6 +46,7 @@ use core::ffi::c_int;
 ///
 /// `docs/api-design.md` §5 is the list this fills from, one table per
 /// commit; the fields here are the ones that have arrived.
+// [spec:posix:def:shenv.components]
 pub struct Shell {
     /// The immutable POSIX locale object selected by this shell's locale
     /// variables. Raw handles and temporary thread selection stay inside

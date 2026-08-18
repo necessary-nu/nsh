@@ -347,6 +347,8 @@ pub(crate) fn xxtcsetpgrp(sh: &mut crate::context::Shell, pgrp: i32) -> Result<(
 
 // [spec:dash:def:jobs.setjobctl-fn]
 // [spec:dash:sem:jobs.setjobctl-fn]
+// [spec:posix:def:jobctl.definition]
+// [spec:posix:req:jobctl.initial-foreground-process-group]
 /// Turn job control on or off.
 ///
 /// Returns its diagnostic rather than raising it. Two of its three
@@ -591,6 +593,7 @@ fn sprint_status(
 // [spec:posix:req:builtin.jobs.stdout-current-field]
 // [spec:posix:req:builtin.jobs.stdout-state-substitution]
 // [spec:posix:req:builtin.jobs.stdout-l-format]
+// [spec:posix:req:jobctl.suspended-job-message]
 pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mode: c_int) {
     let mut ps: usize;
     let psend: usize;
@@ -689,6 +692,9 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mod
 
 // [spec:dash:def:jobs.showjobs-fn]
 // [spec:dash:sem:jobs.showjobs-fn]
+// [spec:posix:req:jobctl.background-job-suspended-message]
+// [spec:posix:req:jobctl.background-job-completion-message]
+// [spec:posix:req:jobctl.non-interactive-message-timing]
 pub fn showjobs(sh: &mut crate::context::Shell, dest: Dest, mode: c_int) -> Result<(), Error> {
     let mut jp: Option<usize>;
 
@@ -879,6 +885,7 @@ pub(crate) fn getjob(sh: &mut crate::context::Shell, name: Option<&BStr>, getctl
 
 // [spec:dash:def:jobs.makejob-fn]
 // [spec:dash:sem:jobs.makejob-fn]
+// [spec:posix:req:jobctl.job-creation]
 pub fn makejob(sh: &mut crate::context::Shell, nprocs: c_int) -> usize {
     let jp: usize;
     let mut i: usize;
@@ -969,6 +976,12 @@ fn forkchild_fatal(sh: &mut crate::context::Shell, e: Error) -> ! {
 
 // [spec:dash:def:jobs.forkchild-fn]
 // [spec:dash:sem:jobs.forkchild-fn]
+// [spec:posix:req:jobctl.pipeline-process-group]
+// [spec:posix:req:jobctl.foreground-process-group-assignment]
+// [spec:posix:req:signal.async-list-sigint-sigquit-ignored]
+// [spec:posix:req:signal.inherited-actions]
+// [spec:posix:req:shenv.subshell-creation]
+// [spec:posix:req:shenv.subshell-isolation]
 fn forkchild(
     sh: &mut crate::context::Shell,
     jp: Option<usize>,
@@ -1066,6 +1079,7 @@ fn forkchild(
 
 // [spec:dash:def:jobs.forkparent-fn]
 // [spec:dash:sem:jobs.forkparent-fn]
+// [spec:posix:req:jobctl.job-number-and-process-id]
 fn forkparent(
     sh: &mut crate::context::Shell,
     jp: Option<usize>,
@@ -1119,6 +1133,7 @@ fn forkparent(
 
 // [spec:dash:def:jobs.forkshell-fn]
 // [spec:dash:sem:jobs.forkshell-fn]
+// [spec:posix:req:shenv.subshell-contexts]
 pub fn forkshell(
     sh: &mut crate::context::Shell,
     jp: Option<usize>,
@@ -1207,6 +1222,8 @@ pub fn forkexec(
 // [spec:dash:def:jobs.waitforjob-fn]
 // [spec:dash:sem:jobs.waitforjob-fn]
 // [spec:posix:sem:shell.exit-status-collection]
+// [spec:posix:req:jobctl.foreground-process-group-restored]
+// [spec:posix:req:signal.trap-deferred-until-foreground-command-completes]
 pub fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c_int, Error> {
     let st: c_int;
 
@@ -1251,6 +1268,8 @@ pub fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c
 
 // [spec:dash:def:jobs.waitone-fn]
 // [spec:dash:sem:jobs.waitone-fn]
+// [spec:posix:req:jobctl.suspend-on-catchable-signal]
+// [spec:posix:req:jobctl.suspend-on-sigstop]
 fn waitone(sh: &mut crate::context::Shell, block: c_int, jobp: Option<usize>) -> Result<c_int, Error> {
     let pid: c_int;
     let mut status: c_int = 0;

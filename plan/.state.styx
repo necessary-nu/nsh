@@ -1207,7 +1207,69 @@ assertions (
 )
 
 impl_evidence (
-    {id posix-execution}
+    {id posix-execution, covered_rules (
+        jobctl.background-job
+        jobctl.background-job-brought-to-foreground
+        jobctl.background-job-completion-message
+        jobctl.background-job-suspended-message
+        jobctl.continue-suspended-job
+        jobctl.definition
+        jobctl.fg-terminal-settings-restore
+        jobctl.foreground-job
+        jobctl.foreground-process-group-assignment
+        jobctl.foreground-process-group-restored
+        jobctl.initial-foreground-process-group
+        jobctl.job-creation
+        jobctl.job-number-and-process-id
+        jobctl.list-splitting
+        jobctl.non-interactive-message-timing
+        jobctl.pipeline-process-group
+        jobctl.suspend-on-catchable-signal
+        jobctl.suspend-on-sigstop
+        jobctl.suspended-job-message
+        shenv.components
+        shenv.subshell-contexts
+        shenv.subshell-creation
+        shenv.subshell-isolation
+        shenv.utility-does-not-change-shell-environment
+        shenv.utility-environment
+        signal.async-list-sigint-sigquit-ignored
+        signal.inherited-actions
+        signal.pending-trap-order
+        signal.trap-deferred-until-foreground-command-completes
+        signal.trap-during-wait
+    ), covered_claims (
+        {impl_name shell, rule jobctl.background-job}
+        {impl_name shell, rule jobctl.background-job-brought-to-foreground}
+        {impl_name shell, rule jobctl.background-job-completion-message}
+        {impl_name shell, rule jobctl.background-job-suspended-message}
+        {impl_name shell, rule jobctl.continue-suspended-job}
+        {impl_name shell, rule jobctl.definition}
+        {impl_name shell, rule jobctl.fg-terminal-settings-restore}
+        {impl_name shell, rule jobctl.foreground-job}
+        {impl_name shell, rule jobctl.foreground-process-group-assignment}
+        {impl_name shell, rule jobctl.foreground-process-group-restored}
+        {impl_name shell, rule jobctl.initial-foreground-process-group}
+        {impl_name shell, rule jobctl.job-creation}
+        {impl_name shell, rule jobctl.job-number-and-process-id}
+        {impl_name shell, rule jobctl.list-splitting}
+        {impl_name shell, rule jobctl.non-interactive-message-timing}
+        {impl_name shell, rule jobctl.pipeline-process-group}
+        {impl_name shell, rule jobctl.suspend-on-catchable-signal}
+        {impl_name shell, rule jobctl.suspend-on-sigstop}
+        {impl_name shell, rule jobctl.suspended-job-message}
+        {impl_name shell, rule shenv.components}
+        {impl_name shell, rule shenv.subshell-contexts}
+        {impl_name shell, rule shenv.subshell-creation}
+        {impl_name shell, rule shenv.subshell-isolation}
+        {impl_name shell, rule shenv.utility-does-not-change-shell-environment}
+        {impl_name shell, rule shenv.utility-environment}
+        {impl_name shell, rule signal.async-list-sigint-sigquit-ignored}
+        {impl_name shell, rule signal.inherited-actions}
+        {impl_name shell, rule signal.pending-trap-order}
+        {impl_name shell, rule signal.trap-deferred-until-foreground-command-completes}
+        {impl_name shell, rule signal.trap-during-wait}
+    )}
     {id posix-line-editing, covered_rules (
         edit.block-mode-terminals
         edit.change-motion

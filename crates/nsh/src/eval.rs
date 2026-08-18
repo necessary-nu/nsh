@@ -714,6 +714,9 @@ fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
 
 // [spec:dash:def:eval.evalsubshell-fn]
 // [spec:dash:sem:eval.evalsubshell-fn]
+// [spec:posix:req:jobctl.list-splitting]
+// [spec:posix:def:jobctl.background-job]
+// [spec:posix:def:jobctl.foreground-job]
 fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
     let jp: usize;
     let backgnd: c_int = (n.node_type() == NBACKGND) as c_int;
@@ -1101,6 +1104,7 @@ fn parse_command_args(
 // [spec:posix:sem:shell.command-execution]
 // [spec:posix:req:grammar.word-expansion-timing]
 // [spec:posix:req:grammar.assignment-word-processing]
+// [spec:posix:req:shenv.utility-does-not-change-shell-environment]
 //
 // The `def` rule quotes the `#ifdef notyet` three-argument prototype;
 // the compiled signature — ported here — is
