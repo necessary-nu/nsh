@@ -5350,12 +5350,34 @@ children (
             {
                 id pin-oils-spec-corpus
                 title "Pin the Oils shell-spec corpus, provenance, and update boundary"
+                sealed true
                 log (
                     {
                         at 2026-08-18T13:04:49.421311929Z
                         author "brendan@necessary.nu"
                         kind @note
                         text "Definition of done: pin oils-for-unix/oils at 15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380; record source URL, Apache-2.0 provenance, corpus format version, and a deterministic update procedure; prohibit live-network inputs during ordinary test runs; make any upstream drift an explicit reviewed change."
+                    }
+
+                    {
+                        at 2026-08-18T13:12:15.82313367Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T13:13:53.173973916Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Implemented the immutable source boundary in tests/surveys/oils: SOURCE.toml pins commit 15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380, tree f95f91004abcfdb82dd413e6ef2a7c71591f23d6, Apache-2.0 license hash, spec format, and observed counts; README.md defines offline execution and the reviewed update protocol. Verified all lock fields against the detached upstream checkout, including 222/3,964 total and 134/2,755 active OSH files/cases; git diff --check passes."
+                    }
+
+                    {
+                        at 2026-08-18T13:13:53.358034773Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }

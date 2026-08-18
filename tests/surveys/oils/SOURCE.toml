@@ -1,0 +1,14 @@
+schema = 1
+repository = "https://github.com/oils-for-unix/oils.git"
+commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
+tree = "f95f91004abcfdb82dd413e6ef2a7c71591f23d6"
+license = "Apache-2.0"
+license_path = "LICENSE.txt"
+license_sha256 = "1908bfaf2f61195b2ca1601deec0e69bc0c6937be21bae18120d655e44c6d501"
+spec_format = "2023-06"
+
+[observed]
+all_files = 222
+all_cases = 3964
+active_osh_files = 134
+active_osh_cases = 2755
