@@ -1213,6 +1213,7 @@ assertions (
     {id test-fc-histfile-reload-format, kind @complete, author "brendan@necessary.nu", at 2026-08-18T10:11:25.747215108Z}
     {id fix-ignoreeof-noninteractive-eof, kind @complete, author "brendan@necessary.nu", at 2026-08-18T10:13:56.638277641Z}
     {id register-posix-dash-divergences, kind @complete, author "brendan@necessary.nu", at 2026-08-18T11:45:38.225345042Z}
+    {id spec-default-history-navigation, kind @complete, author "brendan@necessary.nu", at 2026-08-18T12:02:47.032570368Z}
 )
 
 impl_evidence (

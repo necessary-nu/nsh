@@ -1082,6 +1082,46 @@ children (
                             }
                         )
                     }
+
+                    {
+                        id spec-default-history-navigation
+                        title "Specify baseline interactive history navigation"
+                        kind @docs
+                        deps (fix-edit-stty-character-refresh)
+                        sealed true
+                        log (
+                            {
+                                at 2026-08-18T12:02:24.097465517Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T12:02:46.955813943Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Define native line editing as the baseline for interactive terminal sessions: Up selects older retained commands and Down selects newer commands or the live line. The vi and emacs shell options select extended keymaps and do not gate editor initialization."
+                            }
+
+                            {
+                                at 2026-08-18T12:02:47.032570368Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
+                            }
+                        )
+                    }
+
+                    {
+                        id enable-default-history-navigation
+                        title "Enable baseline up/down history navigation"
+                        kind @fix
+                        implements {
+                            nsh-library ([spec:nsh:req:interactive.default-history-navigation])
+                        }
+                        deps (spec-default-history-navigation)
+                    }
                 )
             }
 
