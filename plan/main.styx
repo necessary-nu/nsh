@@ -3042,6 +3042,21 @@ children (
                             shell ([spec:posix:req:edit.history-prev-next])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:15:16.533967547Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:16:14.666798119Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "The published nshedit history effects and nsh History::navigate_editor already implement counted k/- and j/+ with first-character restoration, vi-specific unchanged retreat boundaries, live-line restoration, and alerts only when crossing a boundary. Map the rule at navigate_editor and extend the harness with explicit -/+ aliases plus advancing past the edit line, proving BEL and live-line restoration. Verification: all five mapped PTY cases, all 17 linedit tests, 14 harness unit tests, and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

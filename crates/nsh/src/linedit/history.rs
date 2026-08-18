@@ -278,6 +278,7 @@ impl History {
             .map(|entry| editor_history_text(entry.line()))
     }
 
+    // [spec:posix:req:edit.history-prev-next]
     pub(super) fn navigate_editor(
         &self,
         cursor: &mut HistoryCursor,

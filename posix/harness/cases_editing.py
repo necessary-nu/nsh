@@ -1073,6 +1073,34 @@ CASES: tuple[Case, ...] = (
         timeout=TIMEOUT,
         requires=("UP",),
     ),
+    # [spec:posix:req:edit.history-prev-next/test]
+    Case(
+        id="edit-history-minus-plus",
+        rules=("edit.history-prev-next",),
+        script=VI + "r one\nr two\n" + ESC + "--+A ok; exit\n",
+        stdout=None,
+        stdout_contains=("R:two ok\n",),
+        mode="interactive",
+        environment=TERMINAL,
+        files=R,
+        status="any",
+        timeout=TIMEOUT,
+        requires=("UP",),
+    ),
+    # [spec:posix:req:edit.history-prev-next/test]
+    Case(
+        id="edit-history-next-past-edit-line",
+        rules=("edit.history-prev-next",),
+        script=VI + "r old\n" + "r live" + ESC + "k99jA; exit\n",
+        stdout=None,
+        stdout_contains=(BEL, "R:live\n"),
+        mode="interactive",
+        environment=TERMINAL,
+        files=R,
+        status="any",
+        timeout=TIMEOUT,
+        requires=("UP",),
+    ),
     # [spec:posix:req:edit.history-goto/test]
     Case(
         id="edit-history-goto-oldest",
