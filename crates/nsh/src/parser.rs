@@ -2615,6 +2615,7 @@ pub fn expandstr(sh: &mut Shell, ps: &BStr) -> Result<BString, Error> {
 // [spec:dash:def:parser.getprompt-fn]
 // [spec:dash:sem:parser.getprompt-fn]
 // [spec:posix:req:param.ps1]
+// [spec:posix:req:param.ps1-two-pass]
 // [spec:posix:req:param.ps2]
 pub fn getprompt(sh: &mut Shell) -> BString {
     let prompt = match sh.input.whichprompt {

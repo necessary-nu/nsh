@@ -3704,4 +3704,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule param.ps1-exclamation-expansion}
     )}
+    {id fix-param-ps1-two-pass, covered_rules (
+        param.ps1-two-pass
+    ), covered_claims (
+        {impl_name shell, rule param.ps1-two-pass}
+    )}
 )

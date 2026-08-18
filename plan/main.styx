@@ -3125,6 +3125,14 @@ children (
                             shell ([spec:posix:req:param.ps1-two-pass])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T06:05:28.256891313Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+                        )
                     }
 
                     {
