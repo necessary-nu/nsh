@@ -27,6 +27,7 @@ pub const VSTRFIXED: c_int = 0x04;
 pub const VTEXTFIXED: c_int = 0x08;
 pub const VSTACK: c_int = 0x10;
 pub const VUNSET: c_int = 0x20;
+/// Suppress the variable callback for this update; never retained on `Var`.
 pub const VNOFUNC: c_int = 0x40;
 pub const VFULL: c_int = 0x80;
 pub const VNOSAVE: c_int = 0x100;
@@ -296,7 +297,7 @@ pub fn initvar(sh: &mut Shell) {
         builtin(b"PS1", Some(prompt), 0, Callback::None),
         builtin(b"PS2", Some(b"> "), 0, Callback::None),
         builtin(b"PS4", Some(b"+ "), 0, Callback::None),
-        builtin(b"OPTIND", Some(b"1"), VNOFUNC, Callback::Getopts),
+        builtin(b"OPTIND", Some(b"1"), 0, Callback::Getopts),
         builtin(b"LINENO", Some(b"0"), 0, Callback::None),
         builtin(b"TERM", None, 0, Callback::None),
         builtin(b"HISTSIZE", None, 0, Callback::History),
@@ -464,6 +465,8 @@ fn set_entry(
     value: Option<&BStr>,
     mut flags: c_int,
 ) -> Result<(), Error> {
+    let run_variable_callback = flags & VNOFUNC == 0;
+    flags &= !VNOFUNC;
     if !valid_name(&sh.locale, name) {
         let mut message = name.to_vec();
         message.extend_from_slice(b": bad variable name");
@@ -495,7 +498,7 @@ fn set_entry(
                 dynamic_lineno: false,
             },
         );
-        if flags & VNOFUNC == 0 {
+        if run_variable_callback {
             run_callback(sh, callback, name, value);
         }
         return Ok(());
@@ -508,7 +511,7 @@ fn set_entry(
     }
 
     if flags & (VEXPORT | VREADONLY | VSTRFIXED | VUNSET) != VUNSET {
-        flags |= old.flags & !(VTEXTFIXED | VSTACK | VNOSAVE | VUNSET);
+        flags |= old.flags & !(VTEXTFIXED | VSTACK | VNOFUNC | VNOSAVE | VUNSET);
     } else if old.flags & VSTRFIXED != 0 {
         flags |= VSTRFIXED;
     } else {
@@ -530,7 +533,7 @@ fn set_entry(
             dynamic_lineno: false,
         },
     );
-    if flags & VNOFUNC == 0 {
+    if run_variable_callback {
         run_callback(
             sh,
             callback,
@@ -855,6 +858,7 @@ mod tests {
     }
 
     // [spec:dash:sem:var.setvar-fn/test]
+    // [spec:posix:req:builtin.getopts.env-optind/test]
     #[test]
     fn set_and_unset_variable() {
         let _guard = lock();
@@ -863,6 +867,19 @@ mod tests {
         assert_eq!(lookup_bytes(&mut shell, BStr::new(b"Tsetvar")).as_ref().map(|value| value.as_slice()), Some(b"hello".as_slice()));
         unset_bytes(&mut shell, BStr::new(b"Tsetvar")).unwrap();
         assert_eq!(lookup_bytes(&mut shell, BStr::new(b"Tsetvar")), None);
+
+        initvar(&mut shell);
+        shell.options.shellparam.optind = 7;
+        shell.options.shellparam.optoff = 3;
+
+        set_bytes(&mut shell, BStr::new(b"OPTIND"), Some(BStr::new(b"8")), VNOFUNC).unwrap();
+        assert_eq!(shell.options.shellparam.optind, 7);
+        assert_eq!(shell.options.shellparam.optoff, 3);
+
+        set_bytes(&mut shell, BStr::new(b"OPTIND"), Some(BStr::new(b"1")), 0).unwrap();
+        assert_eq!(shell.options.shellparam.optind, 1);
+        assert_eq!(shell.options.shellparam.optoff, -1);
+        assert_eq!(flags_bytes(&mut shell, BStr::new(b"OPTIND")).unwrap() & VNOFUNC, 0);
     }
 
     // [spec:dash:sem:var.poplocalvars-fn/test]

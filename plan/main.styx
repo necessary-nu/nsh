@@ -2007,6 +2007,28 @@ children (
                             shell ([spec:posix:req:builtin.getopts.env-optind])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T03:56:09.487550719Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T03:59:57.328695731Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Treat VNOFUNC as a per-update callback-suppression bit rather than persistent Var state. getopts' own OPTIND write remains callback-free, while a later script assignment runs getoptsreset and synchronizes optind/optoff. Verification: the direct OPTIND reset case passes; 12 of 14 neighboring getopts cases pass, with the two failures owned by separate OPTARG and diagnostic rules; cargo test -p nsh passes 277 tests with one doctest ignored."
+                            }
+
+                            {
+                                at 2026-08-18T04:00:40.009273089Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Folded the callback assertions into the existing variable-update test to respect var.rs's grandfathered 53-function cap. Final suite count is 276 passing tests with one doctest ignored; no gate bypass."
+                            }
+                        )
                     }
 
                     {

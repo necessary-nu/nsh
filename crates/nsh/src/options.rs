@@ -605,6 +605,7 @@ pub fn restoreparam(sh: &mut Shell, saved: shparam) {
 
 // [spec:dash:def:options.getoptsreset-fn]
 // [spec:dash:sem:options.getoptsreset-fn]
+// [spec:posix:req:builtin.getopts.env-optind]
 pub fn getoptsreset(sh: &mut crate::context::Shell, _value: &BStr) {
     sh.options.shellparam.optind = 1;
     sh.options.shellparam.optoff = -1;

@@ -3449,4 +3449,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.fc.stdout-list-format}
     )}
+    {id fix-builtin-getopts-env-optind, covered_rules (
+        builtin.getopts.env-optind
+    ), covered_claims (
+        {impl_name shell, rule builtin.getopts.env-optind}
+    )}
 )
