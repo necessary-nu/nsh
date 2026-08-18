@@ -407,6 +407,9 @@ fn wordtext_node(sh: &mut Shell) -> NodeText {
 // [spec:dash:def:parser.parsecmd-fn]
 // [spec:dash:sem:parser.parsecmd-fn]
 // [spec:posix:syn:grammar.program]
+// [spec:posix:def:cmd.command-kinds]
+// [spec:posix:syn:cmd.format-descriptions-informal]
+// [spec:posix:req:cmd.no-size-limit]
 pub fn parsecmd(sh: &mut Shell, interact: c_int) -> Result<ParseResult, Error> {
     sh.input.tokpushback = 0;
     sh.input.heredoclist = Vec::new();
@@ -421,6 +424,9 @@ pub fn parsecmd(sh: &mut Shell, interact: c_int) -> Result<ParseResult, Error> {
 // [spec:dash:def:parser.list-fn]
 // [spec:dash:sem:parser.list-fn]
 // [spec:posix:syn:grammar.separators]
+// [spec:posix:def:cmd.list-definition]
+// [spec:posix:def:cmd.compound-list-definition]
+// [spec:posix:req:cmd.list-separator-semantics]
 fn list(sh: &mut Shell, nlflag: c_int) -> Result<ParseResult, Error> {
     let mut nlflag = nlflag;
     let chknl = if nlflag & 1 != 0 { 0 } else { CHKNL };
@@ -531,6 +537,10 @@ fn list(sh: &mut Shell, nlflag: c_int) -> Result<ParseResult, Error> {
 // [spec:dash:def:parser.andor-fn]
 // [spec:dash:sem:parser.andor-fn]
 // [spec:posix:syn:grammar.list-and-or]
+// [spec:posix:def:cmd.and-or-list-definition]
+// [spec:posix:req:cmd.and-or-precedence]
+// [spec:posix:syn:cmd.and-list-format]
+// [spec:posix:syn:cmd.or-list-format]
 fn andor(sh: &mut Shell) -> Result<Option<Node>, Error> {
     let mut n1: Option<Node>;
     let mut t: c_int;
@@ -558,6 +568,9 @@ fn andor(sh: &mut Shell) -> Result<Option<Node>, Error> {
 // [spec:dash:def:parser.pipeline-fn]
 // [spec:dash:sem:parser.pipeline-fn]
 // [spec:posix:syn:grammar.pipeline]
+// [spec:posix:def:cmd.pipeline-definition]
+// [spec:posix:syn:cmd.pipeline-format]
+// [spec:posix:req:cmd.pipeline-bang-subshell-separation]
 fn pipeline(sh: &mut Shell, kwd: c_int) -> Result<Option<Node>, Error> {
     let mut n1: Option<Node>;
     let mut negate: c_int;
@@ -609,6 +622,15 @@ fn pipeline(sh: &mut Shell, kwd: c_int) -> Result<Option<Node>, Error> {
 // [spec:posix:syn:grammar.if-clause]
 // [spec:posix:syn:grammar.while-until-clause]
 // [spec:posix:syn:grammar.brace-group-and-do-group]
+// [spec:posix:def:cmd.compound-definition]
+// [spec:posix:req:cmd.group-double-paren-ambiguity]
+// [spec:posix:req:cmd.for-do-done-delimiters]
+// [spec:posix:syn:cmd.for-format]
+// [spec:posix:syn:cmd.case-clause-syntax]
+// [spec:posix:syn:cmd.case-format]
+// [spec:posix:syn:cmd.if-format]
+// [spec:posix:syn:cmd.while-format]
+// [spec:posix:syn:cmd.until-format]
 fn command(sh: &mut Shell, kwd: c_int) -> Result<Option<Node>, Error> {
     let mut n1: Option<Node>;
     let mut t: c_int;
@@ -843,6 +865,11 @@ fn command(sh: &mut Shell, kwd: c_int) -> Result<Option<Node>, Error> {
 // [spec:posix:syn:grammar.function-definition]
 // [spec:posix:syn:grammar.function-name]
 // [spec:posix:req:grammar.function-body-no-expansion]
+// [spec:posix:def:cmd.simple-definition]
+// [spec:posix:def:cmd.function-definition-term]
+// [spec:posix:syn:cmd.function-format]
+// [spec:posix:req:cmd.function-name-requirements]
+// [spec:posix:req:cmd.function-no-expansion-at-definition]
 fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
     let mut args: Vec<Node> = Vec::new();
     let mut vars: Vec<Node> = Vec::new();

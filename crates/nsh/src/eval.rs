@@ -334,6 +334,19 @@ pub(crate) fn parse_execute(sh: &mut Shell, flags: c_int) -> Result<Flow, Error>
 // [spec:dash:def:eval.evaltree-fn]
 // [spec:dash:sem:eval.evaltree-fn]
 // [spec:posix:def:exit.command-status]
+// [spec:posix:req:cmd.default-exit-status]
+// [spec:posix:req:cmd.sequential-execution]
+// [spec:posix:req:cmd.sequential-exit-status]
+// [spec:posix:req:cmd.sequential-foreground-job]
+// [spec:posix:req:cmd.and-list-execution]
+// [spec:posix:req:cmd.and-list-exit-status]
+// [spec:posix:req:cmd.or-list-execution]
+// [spec:posix:req:cmd.or-list-exit-status]
+// [spec:posix:req:cmd.compound-list-exit-status]
+// [spec:posix:req:cmd.compound-redirection-scope]
+// [spec:posix:sem:cmd.group-brace-current-environment]
+// [spec:posix:req:cmd.if-execution]
+// [spec:posix:req:cmd.if-exit-status]
 pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, Error> {
     let mut checkexit: c_int = 0;
     /* C leaves `evalfn` uninitialised; every path that reaches
@@ -580,6 +593,10 @@ fn skiploop(sh: &mut crate::context::Shell) -> c_int {
 
 // [spec:dash:def:eval.evalloop-fn]
 // [spec:dash:sem:eval.evalloop-fn]
+// [spec:posix:req:cmd.while-execution]
+// [spec:posix:req:cmd.while-exit-status]
+// [spec:posix:req:cmd.until-execution]
+// [spec:posix:req:cmd.until-exit-status]
 fn evalloop(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
     let mut skip: c_int;
     let mut status: c_int;
@@ -621,6 +638,9 @@ fn evalloop(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
 
 // [spec:dash:def:eval.evalfor-fn]
 // [spec:dash:sem:eval.evalfor-fn]
+// [spec:posix:req:cmd.for-iteration]
+// [spec:posix:req:cmd.for-omitted-in]
+// [spec:posix:req:cmd.for-exit-status]
 fn evalfor(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
     let mut arglist: arglist = arglist::new();
     let mut status: c_int;
@@ -659,6 +679,10 @@ fn evalfor(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
 
 // [spec:dash:def:eval.evalcase-fn]
 // [spec:dash:sem:eval.evalcase-fn]
+// [spec:posix:req:cmd.case-selection]
+// [spec:posix:req:cmd.case-pattern-expansion]
+// [spec:posix:req:cmd.case-multiple-pattern-order-unspecified]
+// [spec:posix:req:cmd.case-exit-status]
 fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
     let mut arglist: arglist = arglist::new();
     let mut status: c_int = 0;
@@ -720,6 +744,10 @@ fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
 // [spec:posix:def:jobctl.background-job]
 // [spec:posix:def:jobctl.foreground-job]
 // [spec:posix:req:exit.subshell-error-exit]
+// [spec:posix:req:cmd.group-subshell]
+// [spec:posix:req:cmd.group-exit-status]
+// [spec:posix:req:cmd.async-subshell-background]
+// [spec:posix:req:cmd.async-exit-status]
 fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
     let jp: usize;
     let backgnd: c_int = (n.node_type() == NBACKGND) as c_int;
@@ -863,6 +891,11 @@ fn expredir(sh: &mut Shell, n: &[Node]) -> Result<(), Error> {
 
 // [spec:dash:def:eval.evalpipe-fn]
 // [spec:dash:sem:eval.evalpipe-fn]
+// [spec:posix:req:cmd.pipeline-connects-stdio]
+// [spec:posix:req:cmd.pipeline-assignment-precedes-redirection]
+// [spec:posix:req:cmd.pipeline-foreground-wait]
+// [spec:posix:req:cmd.pipeline-exit-status]
+// [spec:posix:req:cmd.pipeline-pipefail-setting-at-start]
 fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
     let jp: usize;
     let pipelen: c_int;
@@ -1108,6 +1141,23 @@ fn parse_command_args(
 // [spec:posix:req:grammar.word-expansion-timing]
 // [spec:posix:req:grammar.assignment-word-processing]
 // [spec:posix:req:shenv.utility-does-not-change-shell-environment]
+// [spec:posix:req:cmd.simple-processing-order]
+// [spec:posix:req:cmd.simple-command-name-determination]
+// [spec:posix:req:cmd.simple-declaration-utility-expansion]
+// [spec:posix:req:cmd.simple-argument-expansion]
+// [spec:posix:req:cmd.simple-redirections-performed]
+// [spec:posix:req:cmd.simple-assignment-expansion]
+// [spec:posix:req:cmd.simple-step-order-reversal]
+// [spec:posix:req:cmd.declaration-utility-lexical-analysis]
+// [spec:posix:req:cmd.assign-no-command-name]
+// [spec:posix:req:cmd.assign-exported-to-command]
+// [spec:posix:req:cmd.assign-standard-utility-as-function]
+// [spec:posix:req:cmd.assign-special-builtin]
+// [spec:posix:req:cmd.assign-function]
+// [spec:posix:req:cmd.assign-readonly-error]
+// [spec:posix:req:cmd.no-name-redirections-subshell]
+// [spec:posix:req:cmd.no-name-redirection-failure]
+// [spec:posix:req:cmd.no-name-exit-status]
 //
 // The `def` rule quotes the `#ifdef notyet` three-argument prototype;
 // the compiled signature — ported here — is
@@ -1544,6 +1594,10 @@ fn evalbltin(
 
 // [spec:dash:def:eval.evalfun-fn]
 // [spec:dash:sem:eval.evalfun-fn]
+// [spec:posix:req:cmd.function-invocation-positional-parameters]
+// [spec:posix:req:cmd.function-return]
+// [spec:posix:req:cmd.function-exit-status]
+// [spec:posix:req:cmd.function-syntax-error-properties]
 fn evalfun(
     sh: &mut Shell,
     func: &funcnode,

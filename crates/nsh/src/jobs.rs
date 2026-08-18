@@ -886,6 +886,9 @@ pub(crate) fn getjob(sh: &mut crate::context::Shell, name: Option<&BStr>, getctl
 // [spec:dash:def:jobs.makejob-fn]
 // [spec:dash:sem:jobs.makejob-fn]
 // [spec:posix:req:jobctl.job-creation]
+// [spec:posix:req:cmd.async-job-number]
+// [spec:posix:sem:cmd.async-job-control]
+// [spec:posix:req:cmd.async-known-pid-retention]
 pub fn makejob(sh: &mut crate::context::Shell, nprocs: c_int) -> usize {
     let jp: usize;
     let mut i: usize;
@@ -982,6 +985,7 @@ fn forkchild_fatal(sh: &mut crate::context::Shell, e: Error) -> ! {
 // [spec:posix:req:signal.inherited-actions]
 // [spec:posix:req:shenv.subshell-creation]
 // [spec:posix:req:shenv.subshell-isolation]
+// [spec:posix:req:cmd.async-stdin-devnull]
 fn forkchild(
     sh: &mut crate::context::Shell,
     jp: Option<usize>,
@@ -1080,6 +1084,9 @@ fn forkchild(
 // [spec:dash:def:jobs.forkparent-fn]
 // [spec:dash:sem:jobs.forkparent-fn]
 // [spec:posix:req:jobctl.job-number-and-process-id]
+// [spec:posix:req:cmd.async-process-id-known]
+// [spec:posix:req:cmd.async-job-notification-format]
+// [spec:posix:req:cmd.async-non-job-pid-message]
 fn forkparent(
     sh: &mut crate::context::Shell,
     jp: Option<usize>,
@@ -1168,6 +1175,7 @@ pub fn forkshell(
 
 // [spec:dash:def:jobs.vforkexec-fn]
 // [spec:dash:sem:jobs.vforkexec-fn]
+// [spec:posix:req:cmd.nonbuiltin-separate-environment]
 /// Fork and immediately execute an external command.
 ///
 /// dash uses `vfork` here. Rust command preparation owns and mutates heap
@@ -1226,6 +1234,7 @@ pub fn forkexec(
 // [spec:posix:sem:shell.exit-status-collection]
 // [spec:posix:req:jobctl.foreground-process-group-restored]
 // [spec:posix:req:signal.trap-deferred-until-foreground-command-completes]
+// [spec:posix:sem:cmd.async-status-via-wait]
 pub fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c_int, Error> {
     let st: c_int;
 

@@ -223,6 +223,14 @@ impl CmdTable {
 // [spec:posix:req:xcurel.file-removal-effects]
 // [spec:posix:req:xcurel.file-time-values]
 // [spec:posix:req:xcurel.mathematical-functions]
+// [spec:posix:req:cmd.nonbuiltin-exec-replaces-environment]
+// [spec:posix:req:cmd.nonbuiltin-path-search-execl]
+// [spec:posix:req:cmd.nonbuiltin-invalid-name-env-unspecified]
+// [spec:posix:req:cmd.nonbuiltin-path-search-unsuccessful]
+// [spec:posix:req:cmd.nonbuiltin-slash-execl]
+// [spec:posix:req:cmd.nonbuiltin-slash-not-found]
+// [spec:posix:req:cmd.std-fd-closed]
+// [spec:posix:req:cmd.std-fd-nonconforming-environment]
 pub fn shellexec(
     sh: &mut crate::context::Shell,
     argv: &[&BStr],
@@ -307,6 +315,8 @@ fn exec_failure(
 
 // [spec:dash:def:exec.tryexec-fn]
 // [spec:dash:sem:exec.tryexec-fn]
+// [spec:posix:req:cmd.nonbuiltin-enoexec-script]
+// [spec:posix:req:cmd.nonbuiltin-slash-enoexec-script]
 fn tryexec(command: &CStr, arguments: &[&CStr], env: &[CString]) -> c_int {
     let error = nsh_platform::execute_program(command, &arguments, env);
     if nsh_platform::is_exec_format_error(&error) && command.to_bytes_with_nul() != _PATH_BSHELL {
@@ -460,6 +470,16 @@ fn test_exec(fullname: &std::ffi::OsStr, metadata: &std::fs::Metadata) -> bool {
 
 // [spec:dash:def:exec.find-command-fn]
 // [spec:dash:sem:exec.find-command-fn]
+// [spec:posix:req:cmd.search-applies]
+// [spec:posix:req:cmd.search-special-builtin]
+// [spec:posix:req:cmd.search-unspecified-utility-names]
+// [spec:posix:req:cmd.search-function]
+// [spec:posix:req:cmd.search-intrinsic-utility]
+// [spec:posix:req:cmd.search-path-associated-builtin]
+// [spec:posix:req:cmd.search-path-non-builtin]
+// [spec:posix:req:cmd.search-remembered-location]
+// [spec:posix:req:cmd.search-path-unsuccessful]
+// [spec:posix:req:cmd.search-name-with-slash]
 pub fn find_command(
     sh: &mut crate::context::Shell,
     name: &BStr,

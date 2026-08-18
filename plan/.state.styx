@@ -3156,4 +3156,227 @@ impl_evidence (
         {impl_name shell, rule exit.status-signal-terminated}
         {impl_name shell, rule exit.subshell-error-exit}
     )}
+    {id posix-commands, covered_rules (
+        cmd.and-list-execution
+        cmd.and-list-exit-status
+        cmd.and-list-format
+        cmd.and-or-list-definition
+        cmd.and-or-precedence
+        cmd.assign-exported-to-command
+        cmd.assign-function
+        cmd.assign-no-command-name
+        cmd.assign-readonly-error
+        cmd.assign-special-builtin
+        cmd.assign-standard-utility-as-function
+        cmd.async-exit-status
+        cmd.async-job-control
+        cmd.async-job-notification-format
+        cmd.async-job-number
+        cmd.async-known-pid-retention
+        cmd.async-non-job-pid-message
+        cmd.async-process-id-known
+        cmd.async-status-via-wait
+        cmd.async-stdin-devnull
+        cmd.async-subshell-background
+        cmd.case-clause-syntax
+        cmd.case-exit-status
+        cmd.case-format
+        cmd.case-multiple-pattern-order-unspecified
+        cmd.case-pattern-expansion
+        cmd.case-selection
+        cmd.command-kinds
+        cmd.compound-definition
+        cmd.compound-list-definition
+        cmd.compound-list-exit-status
+        cmd.compound-redirection-scope
+        cmd.declaration-utility-lexical-analysis
+        cmd.default-exit-status
+        cmd.for-do-done-delimiters
+        cmd.for-exit-status
+        cmd.for-format
+        cmd.for-iteration
+        cmd.for-omitted-in
+        cmd.format-descriptions-informal
+        cmd.function-definition-term
+        cmd.function-exit-status
+        cmd.function-format
+        cmd.function-invocation-positional-parameters
+        cmd.function-name-requirements
+        cmd.function-no-expansion-at-definition
+        cmd.function-return
+        cmd.function-syntax-error-properties
+        cmd.group-brace-current-environment
+        cmd.group-double-paren-ambiguity
+        cmd.group-exit-status
+        cmd.group-subshell
+        cmd.if-execution
+        cmd.if-exit-status
+        cmd.if-format
+        cmd.list-definition
+        cmd.list-separator-semantics
+        cmd.no-name-exit-status
+        cmd.no-name-redirection-failure
+        cmd.no-name-redirections-subshell
+        cmd.no-size-limit
+        cmd.nonbuiltin-enoexec-script
+        cmd.nonbuiltin-exec-replaces-environment
+        cmd.nonbuiltin-invalid-name-env-unspecified
+        cmd.nonbuiltin-path-search-execl
+        cmd.nonbuiltin-path-search-unsuccessful
+        cmd.nonbuiltin-separate-environment
+        cmd.nonbuiltin-slash-enoexec-script
+        cmd.nonbuiltin-slash-execl
+        cmd.nonbuiltin-slash-not-found
+        cmd.or-list-execution
+        cmd.or-list-exit-status
+        cmd.or-list-format
+        cmd.pipeline-assignment-precedes-redirection
+        cmd.pipeline-bang-subshell-separation
+        cmd.pipeline-connects-stdio
+        cmd.pipeline-definition
+        cmd.pipeline-exit-status
+        cmd.pipeline-foreground-wait
+        cmd.pipeline-format
+        cmd.pipeline-pipefail-setting-at-start
+        cmd.search-applies
+        cmd.search-function
+        cmd.search-intrinsic-utility
+        cmd.search-name-with-slash
+        cmd.search-path-associated-builtin
+        cmd.search-path-non-builtin
+        cmd.search-path-unsuccessful
+        cmd.search-remembered-location
+        cmd.search-special-builtin
+        cmd.search-unspecified-utility-names
+        cmd.sequential-execution
+        cmd.sequential-exit-status
+        cmd.sequential-foreground-job
+        cmd.simple-argument-expansion
+        cmd.simple-assignment-expansion
+        cmd.simple-command-name-determination
+        cmd.simple-declaration-utility-expansion
+        cmd.simple-definition
+        cmd.simple-processing-order
+        cmd.simple-redirections-performed
+        cmd.simple-step-order-reversal
+        cmd.std-fd-closed
+        cmd.std-fd-nonconforming-environment
+        cmd.until-execution
+        cmd.until-exit-status
+        cmd.until-format
+        cmd.while-execution
+        cmd.while-exit-status
+        cmd.while-format
+    ), covered_claims (
+        {impl_name shell, rule cmd.and-list-execution}
+        {impl_name shell, rule cmd.and-list-exit-status}
+        {impl_name shell, rule cmd.and-list-format}
+        {impl_name shell, rule cmd.and-or-list-definition}
+        {impl_name shell, rule cmd.and-or-precedence}
+        {impl_name shell, rule cmd.assign-exported-to-command}
+        {impl_name shell, rule cmd.assign-function}
+        {impl_name shell, rule cmd.assign-no-command-name}
+        {impl_name shell, rule cmd.assign-readonly-error}
+        {impl_name shell, rule cmd.assign-special-builtin}
+        {impl_name shell, rule cmd.assign-standard-utility-as-function}
+        {impl_name shell, rule cmd.async-exit-status}
+        {impl_name shell, rule cmd.async-job-control}
+        {impl_name shell, rule cmd.async-job-notification-format}
+        {impl_name shell, rule cmd.async-job-number}
+        {impl_name shell, rule cmd.async-known-pid-retention}
+        {impl_name shell, rule cmd.async-non-job-pid-message}
+        {impl_name shell, rule cmd.async-process-id-known}
+        {impl_name shell, rule cmd.async-status-via-wait}
+        {impl_name shell, rule cmd.async-stdin-devnull}
+        {impl_name shell, rule cmd.async-subshell-background}
+        {impl_name shell, rule cmd.case-clause-syntax}
+        {impl_name shell, rule cmd.case-exit-status}
+        {impl_name shell, rule cmd.case-format}
+        {impl_name shell, rule cmd.case-multiple-pattern-order-unspecified}
+        {impl_name shell, rule cmd.case-pattern-expansion}
+        {impl_name shell, rule cmd.case-selection}
+        {impl_name shell, rule cmd.command-kinds}
+        {impl_name shell, rule cmd.compound-definition}
+        {impl_name shell, rule cmd.compound-list-definition}
+        {impl_name shell, rule cmd.compound-list-exit-status}
+        {impl_name shell, rule cmd.compound-redirection-scope}
+        {impl_name shell, rule cmd.declaration-utility-lexical-analysis}
+        {impl_name shell, rule cmd.default-exit-status}
+        {impl_name shell, rule cmd.for-do-done-delimiters}
+        {impl_name shell, rule cmd.for-exit-status}
+        {impl_name shell, rule cmd.for-format}
+        {impl_name shell, rule cmd.for-iteration}
+        {impl_name shell, rule cmd.for-omitted-in}
+        {impl_name shell, rule cmd.format-descriptions-informal}
+        {impl_name shell, rule cmd.function-definition-term}
+        {impl_name shell, rule cmd.function-exit-status}
+        {impl_name shell, rule cmd.function-format}
+        {impl_name shell, rule cmd.function-invocation-positional-parameters}
+        {impl_name shell, rule cmd.function-name-requirements}
+        {impl_name shell, rule cmd.function-no-expansion-at-definition}
+        {impl_name shell, rule cmd.function-return}
+        {impl_name shell, rule cmd.function-syntax-error-properties}
+        {impl_name shell, rule cmd.group-brace-current-environment}
+        {impl_name shell, rule cmd.group-double-paren-ambiguity}
+        {impl_name shell, rule cmd.group-exit-status}
+        {impl_name shell, rule cmd.group-subshell}
+        {impl_name shell, rule cmd.if-execution}
+        {impl_name shell, rule cmd.if-exit-status}
+        {impl_name shell, rule cmd.if-format}
+        {impl_name shell, rule cmd.list-definition}
+        {impl_name shell, rule cmd.list-separator-semantics}
+        {impl_name shell, rule cmd.no-name-exit-status}
+        {impl_name shell, rule cmd.no-name-redirection-failure}
+        {impl_name shell, rule cmd.no-name-redirections-subshell}
+        {impl_name shell, rule cmd.no-size-limit}
+        {impl_name shell, rule cmd.nonbuiltin-enoexec-script}
+        {impl_name shell, rule cmd.nonbuiltin-exec-replaces-environment}
+        {impl_name shell, rule cmd.nonbuiltin-invalid-name-env-unspecified}
+        {impl_name shell, rule cmd.nonbuiltin-path-search-execl}
+        {impl_name shell, rule cmd.nonbuiltin-path-search-unsuccessful}
+        {impl_name shell, rule cmd.nonbuiltin-separate-environment}
+        {impl_name shell, rule cmd.nonbuiltin-slash-enoexec-script}
+        {impl_name shell, rule cmd.nonbuiltin-slash-execl}
+        {impl_name shell, rule cmd.nonbuiltin-slash-not-found}
+        {impl_name shell, rule cmd.or-list-execution}
+        {impl_name shell, rule cmd.or-list-exit-status}
+        {impl_name shell, rule cmd.or-list-format}
+        {impl_name shell, rule cmd.pipeline-assignment-precedes-redirection}
+        {impl_name shell, rule cmd.pipeline-bang-subshell-separation}
+        {impl_name shell, rule cmd.pipeline-connects-stdio}
+        {impl_name shell, rule cmd.pipeline-definition}
+        {impl_name shell, rule cmd.pipeline-exit-status}
+        {impl_name shell, rule cmd.pipeline-foreground-wait}
+        {impl_name shell, rule cmd.pipeline-format}
+        {impl_name shell, rule cmd.pipeline-pipefail-setting-at-start}
+        {impl_name shell, rule cmd.search-applies}
+        {impl_name shell, rule cmd.search-function}
+        {impl_name shell, rule cmd.search-intrinsic-utility}
+        {impl_name shell, rule cmd.search-name-with-slash}
+        {impl_name shell, rule cmd.search-path-associated-builtin}
+        {impl_name shell, rule cmd.search-path-non-builtin}
+        {impl_name shell, rule cmd.search-path-unsuccessful}
+        {impl_name shell, rule cmd.search-remembered-location}
+        {impl_name shell, rule cmd.search-special-builtin}
+        {impl_name shell, rule cmd.search-unspecified-utility-names}
+        {impl_name shell, rule cmd.sequential-execution}
+        {impl_name shell, rule cmd.sequential-exit-status}
+        {impl_name shell, rule cmd.sequential-foreground-job}
+        {impl_name shell, rule cmd.simple-argument-expansion}
+        {impl_name shell, rule cmd.simple-assignment-expansion}
+        {impl_name shell, rule cmd.simple-command-name-determination}
+        {impl_name shell, rule cmd.simple-declaration-utility-expansion}
+        {impl_name shell, rule cmd.simple-definition}
+        {impl_name shell, rule cmd.simple-processing-order}
+        {impl_name shell, rule cmd.simple-redirections-performed}
+        {impl_name shell, rule cmd.simple-step-order-reversal}
+        {impl_name shell, rule cmd.std-fd-closed}
+        {impl_name shell, rule cmd.std-fd-nonconforming-environment}
+        {impl_name shell, rule cmd.until-execution}
+        {impl_name shell, rule cmd.until-exit-status}
+        {impl_name shell, rule cmd.until-format}
+        {impl_name shell, rule cmd.while-execution}
+        {impl_name shell, rule cmd.while-exit-status}
+        {impl_name shell, rule cmd.while-format}
+    )}
 )

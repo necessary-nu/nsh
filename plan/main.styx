@@ -502,6 +502,28 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T02:37:48.249474385Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T02:37:48.249474385Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "claim stolen: Recovering an abandoned claim: recorded PID 167126 is not running, the dedicated worktree has no source changes or commits, and this branch contains the completed POSIX coverage sequence."
+                    }
+
+                    {
+                        at 2026-08-18T02:41:40.471548784Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Recovered the abandoned dead-PID claim without source changes, then mapped all 110 command-language rules across parser, evaluator, command resolution/exec, and job lifecycle boundaries. Focused harness for all 109 registered rules: 62 PASS, 0 FAIL; cmd.format-descriptions-informal is the planned non-runnable meta-rule. cargo test -p nsh: 262 passed, 0 failed, 1 ignored; git diff --check clean."
+                    }
+                )
             }
 
             {
