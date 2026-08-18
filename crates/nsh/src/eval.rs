@@ -333,6 +333,7 @@ pub(crate) fn parse_execute(sh: &mut Shell, flags: c_int) -> Result<Flow, Error>
 
 // [spec:dash:def:eval.evaltree-fn]
 // [spec:dash:sem:eval.evaltree-fn]
+// [spec:posix:def:exit.command-status]
 pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, Error> {
     let mut checkexit: c_int = 0;
     /* C leaves `evalfn` uninitialised; every path that reaches
@@ -718,6 +719,7 @@ fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
 // [spec:posix:req:jobctl.list-splitting]
 // [spec:posix:def:jobctl.background-job]
 // [spec:posix:def:jobctl.foreground-job]
+// [spec:posix:req:exit.subshell-error-exit]
 fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
     let jp: usize;
     let backgnd: c_int = (n.node_type() == NBACKGND) as c_int;

@@ -3137,4 +3137,23 @@ impl_evidence (
         {impl_name shell, rule xcurel.pathname-resolution}
         {impl_name shell, rule xcurel.process-attributes-additional}
     )}
+    {id posix-exit-status, covered_rules (
+        exit.command-status
+        exit.expansion-error
+        exit.interactive-abandons-command
+        exit.status-command-not-found
+        exit.status-normal-termination
+        exit.status-not-executable
+        exit.status-signal-terminated
+        exit.subshell-error-exit
+    ), covered_claims (
+        {impl_name shell, rule exit.command-status}
+        {impl_name shell, rule exit.expansion-error}
+        {impl_name shell, rule exit.interactive-abandons-command}
+        {impl_name shell, rule exit.status-command-not-found}
+        {impl_name shell, rule exit.status-normal-termination}
+        {impl_name shell, rule exit.status-not-executable}
+        {impl_name shell, rule exit.status-signal-terminated}
+        {impl_name shell, rule exit.subshell-error-exit}
+    )}
 )

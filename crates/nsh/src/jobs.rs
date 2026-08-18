@@ -1893,6 +1893,8 @@ fn xtcsetpgrp(
 
 // [spec:dash:def:jobs.getstatus-fn]
 // [spec:dash:sem:jobs.getstatus-fn]
+// [spec:posix:req:exit.status-normal-termination]
+// [spec:posix:req:exit.status-signal-terminated]
 pub(crate) fn getstatus(sh: &mut crate::context::Shell, jobp: usize) -> c_int {
     let mut status: c_int;
     let mut retval: c_int;

@@ -275,6 +275,8 @@ pub fn shellexec(
     exec_failure(sh, command, e)
 }
 
+// [spec:posix:req:exit.status-command-not-found]
+// [spec:posix:req:exit.status-not-executable]
 fn exec_failure(
     sh: &mut crate::context::Shell,
     command: &BStr,

@@ -2087,6 +2087,7 @@ fn strtodest(
 // [spec:posix:req:param.special-dollar]
 // [spec:posix:req:param.special-bang]
 // [spec:posix:req:param.special-zero]
+// [spec:posix:def:exit.expansion-error]
 fn varvalue(
     sh: &mut crate::context::Shell,
     state: &mut ExpandState,

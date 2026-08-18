@@ -366,6 +366,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T02:35:27.982970353Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T02:37:10.437357138Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Mapped all 8 exit-status/error rules to expansion classification, evaluator propagation, subshell containment, interactive recovery, exec failure mapping, and wait-status decoding. Focused POSIX harness: 8 PASS, 0 FAIL; cargo test -p nsh: 262 passed, 0 failed, 1 ignored; git diff --check clean."
+                    }
+                )
             }
 
             {

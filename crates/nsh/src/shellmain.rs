@@ -104,6 +104,7 @@ fn etext() -> c_int {
 // [spec:posix:req:param.env]
 // [spec:posix:def:shell.command-language-interpreter]
 // [spec:posix:sem:shell.input-sources]
+// [spec:posix:req:exit.interactive-abandons-command]
 pub fn main(
     sh: &mut Shell,
     argv: &[Vec<u8>],
