@@ -2972,4 +2972,65 @@ impl_evidence (
         {impl_name shell, rule builtin.wait.stderr}
         {impl_name shell, rule builtin.wait.synopsis}
     )}
+    {id posix-pattern-matching, covered_rules (
+        pattern.asterisk
+        pattern.asterisk-longest-match
+        pattern.asterisk-matches-any-string
+        pattern.backslash-escape-with-shell-quoting
+        pattern.backslash-escape-without-shell-quoting
+        pattern.concatenation
+        pattern.directory-permissions
+        pattern.escaping-follows-quoting-rules
+        pattern.filename-expansion-qualification
+        pattern.filename-expansion-trigger
+        pattern.invalid-byte-sequence-unspecified
+        pattern.leading-period
+        pattern.leading-period-in-bracket-unspecified
+        pattern.left-bracket-literal
+        pattern.match-by-bit-pattern
+        pattern.no-match-unchanged
+        pattern.no-special-chars-unchanged
+        pattern.notation-purpose
+        pattern.ordinary-character
+        pattern.permission-errors-not-fatal
+        pattern.question-mark
+        pattern.quote-to-match-literally
+        pattern.replacement-sorted
+        pattern.single-character-patterns
+        pattern.slash-explicit-match
+        pattern.slash-terminates-bracket
+        pattern.special-pattern-characters
+        pattern.trailing-backslash-unspecified
+        pattern.unmatched-open-bracket-unspecified
+    ), covered_claims (
+        {impl_name shell, rule pattern.asterisk}
+        {impl_name shell, rule pattern.asterisk-longest-match}
+        {impl_name shell, rule pattern.asterisk-matches-any-string}
+        {impl_name shell, rule pattern.backslash-escape-with-shell-quoting}
+        {impl_name shell, rule pattern.backslash-escape-without-shell-quoting}
+        {impl_name shell, rule pattern.concatenation}
+        {impl_name shell, rule pattern.directory-permissions}
+        {impl_name shell, rule pattern.escaping-follows-quoting-rules}
+        {impl_name shell, rule pattern.filename-expansion-qualification}
+        {impl_name shell, rule pattern.filename-expansion-trigger}
+        {impl_name shell, rule pattern.invalid-byte-sequence-unspecified}
+        {impl_name shell, rule pattern.leading-period}
+        {impl_name shell, rule pattern.leading-period-in-bracket-unspecified}
+        {impl_name shell, rule pattern.left-bracket-literal}
+        {impl_name shell, rule pattern.match-by-bit-pattern}
+        {impl_name shell, rule pattern.no-match-unchanged}
+        {impl_name shell, rule pattern.no-special-chars-unchanged}
+        {impl_name shell, rule pattern.notation-purpose}
+        {impl_name shell, rule pattern.ordinary-character}
+        {impl_name shell, rule pattern.permission-errors-not-fatal}
+        {impl_name shell, rule pattern.question-mark}
+        {impl_name shell, rule pattern.quote-to-match-literally}
+        {impl_name shell, rule pattern.replacement-sorted}
+        {impl_name shell, rule pattern.single-character-patterns}
+        {impl_name shell, rule pattern.slash-explicit-match}
+        {impl_name shell, rule pattern.slash-terminates-bracket}
+        {impl_name shell, rule pattern.special-pattern-characters}
+        {impl_name shell, rule pattern.trailing-backslash-unspecified}
+        {impl_name shell, rule pattern.unmatched-open-bracket-unspecified}
+    )}
 )

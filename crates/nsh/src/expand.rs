@@ -2703,6 +2703,8 @@ pub fn changeifs_bytes(sh: &mut crate::context::Shell, ifs: &BStr) {
 // [spec:dash:def:expand.expandmeta-fn]
 // [spec:dash:sem:expand.expandmeta-fn]
 // [spec:posix:req:expand.pathname]
+// [spec:posix:req:pattern.no-match-unchanged]
+// [spec:posix:req:pattern.no-special-chars-unchanged]
 fn expandmeta(
     sh: &mut crate::context::Shell,
     state: &mut ExpandState,
@@ -2919,6 +2921,15 @@ fn expmeta_rmescapes(b: &mut BString, name: &[u8]) {
 
 // [spec:dash:def:expand.expmeta-fn]
 // [spec:dash:sem:expand.expmeta-fn]
+// [spec:posix:def:pattern.filename-expansion-qualification]
+// [spec:posix:req:pattern.slash-explicit-match]
+// [spec:posix:syn:pattern.slash-terminates-bracket]
+// [spec:posix:req:pattern.leading-period]
+// [spec:posix:req:pattern.leading-period-in-bracket-unspecified]
+// [spec:posix:req:pattern.filename-expansion-trigger]
+// [spec:posix:req:pattern.directory-permissions]
+// [spec:posix:req:pattern.permission-errors-not-fatal]
+// [spec:posix:req:pattern.unmatched-open-bracket-unspecified]
 fn expmeta(
     locale: &nsh_platform::Locale,
     state: &mut ExpandState,
@@ -3179,6 +3190,7 @@ fn expmeta(
 
 // [spec:dash:def:expand.expsort-fn]
 // [spec:dash:sem:expand.expsort-fn]
+// [spec:posix:req:pattern.replacement-sorted]
 fn expsort(locale: &nsh_platform::Locale, str: &mut [strlist]) {
     /* The C walks the chain to count it and hands the count to `msort`,
      * because a singly-linked list does not know its own length. */
@@ -3231,6 +3243,11 @@ fn msort(locale: &nsh_platform::Locale, list: &mut [strlist], len: c_int) {
 /// `_rmescapes`", together with the two reach-backs' safety argument and
 /// why the one configuration that *could* grow is asserted unreachable
 /// rather than given a second engine.
+// [spec:posix:syn:pattern.backslash-escape-with-shell-quoting]
+// [spec:posix:syn:pattern.backslash-escape-without-shell-quoting]
+// [spec:posix:req:pattern.escaping-follows-quoting-rules]
+// [spec:posix:syn:pattern.trailing-backslash-unspecified]
+// [spec:posix:req:pattern.quote-to-match-literally]
 fn rmescapes_compact(buf: &mut [u8], at: usize, flag: c_int) -> usize {
     /* The growing configuration is `FNMATCH_IS_ENABLED` together with
      * globbing, where the `CTLESC` arm can write three bytes for two.

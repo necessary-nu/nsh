@@ -115,6 +115,18 @@ pub(crate) fn pmatch_slices(
 
 // The matcher.  `pi`/`qi` are the C's `p`/`q`; every `p++` is `pi += 1` and
 // the recursion takes the two tails.
+// [spec:posix:def:pattern.notation-purpose]
+// [spec:posix:req:pattern.invalid-byte-sequence-unspecified]
+// [spec:posix:req:pattern.match-by-bit-pattern]
+// [spec:posix:syn:pattern.single-character-patterns]
+// [spec:posix:def:pattern.ordinary-character]
+// [spec:posix:def:pattern.special-pattern-characters]
+// [spec:posix:sem:pattern.question-mark]
+// [spec:posix:sem:pattern.asterisk]
+// [spec:posix:sem:pattern.left-bracket-literal]
+// [spec:posix:sem:pattern.asterisk-matches-any-string]
+// [spec:posix:syn:pattern.concatenation]
+// [spec:posix:sem:pattern.asterisk-longest-match]
 fn pmatch_bytes(locale: &nsh_platform::Locale, pattern: &[u8], string: &[u8]) -> bool {
     let mut pi: usize = 0;
     let mut qi: usize = 0;

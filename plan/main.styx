@@ -626,6 +626,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T02:28:29.6182273Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T02:29:54.362509095Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Mapped all 29 assigned XCU 2.14 rules across quote-marker normalization, the recursive matcher, pathname-component traversal, permission/error handling, no-match preservation, and locale-aware result sorting. Verification: focused POSIX harness PASS=9 FAIL=0, cargo test -p nsh --quiet passed (230 unit tests plus all integration suites), git diff --check clean."
+                    }
+                )
             }
 
             {
