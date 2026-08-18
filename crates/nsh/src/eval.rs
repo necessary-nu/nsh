@@ -292,6 +292,7 @@ pub fn evalstring(sh: &mut Shell, s: &BStr, flags: c_int) -> Result<Flow, Error>
 /// is what the C's `longjmp` past this frame did: the input stack is
 /// unwound to a mark by whoever catches, not by the frame that was passed
 /// through.
+// [spec:posix:req:token.incremental-execution]
 pub(crate) fn parse_execute(sh: &mut Shell, flags: c_int) -> Result<Flow, Error> {
     let mut status: c_int = 0;
     loop {

@@ -25,6 +25,7 @@ pub struct AliasTable {
 }
 
 impl AliasTable {
+    // [spec:posix:req:token.alias-not-inherited]
     pub(crate) const fn new() -> Self {
         Self {
             map: BTreeMap::new(),
@@ -50,6 +51,7 @@ fn valid_name(name: &BStr) -> bool {
 
 // [spec:dash:def:alias.setalias-fn]
 // [spec:dash:sem:alias.setalias-fn]
+// [spec:posix:req:token.alias-change-timing]
 pub(crate) fn setalias(sh: &mut Shell, name: &BStr, value: &BStr) -> Result<(), Error> {
     if !valid_name(name) {
         let mut message = b"Invalid alias name: ".to_vec();

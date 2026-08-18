@@ -190,6 +190,10 @@ static tokname: [&CStr; 30] = [
 pub const KWDOFFSET: c_int = 14;
 
 // [spec:posix:def:grammar.reserved-word-tokens]
+// [spec:posix:def:token.reserved-words]
+// [spec:posix:def:token.reserved-words-optional]
+// [spec:posix:req:token.reserved-word-time]
+// [spec:posix:def:token.reserved-words-trailing-colon]
 static parsekwd: [&CStr; 16] = [
     c"!",
     c"case",
@@ -1017,6 +1021,7 @@ fn parsefname(sh: &mut Shell, n: &mut Node) -> Result<(), Error> {
 // [spec:posix:req:redir.here-doc-backslash]
 // [spec:posix:req:redir.here-doc-multiple]
 // [spec:posix:req:redir.here-doc-ps2]
+// [spec:posix:req:token.here-document-mode]
 fn parseheredoc(sh: &mut Shell) -> Result<(), Error> {
     let list: Vec<heredoc> = core::mem::take(&mut sh.input.heredoclist);
 
@@ -1061,6 +1066,11 @@ pub(crate) fn readtoken(sh: &mut Shell, kwd: c_int) -> Result<c_int, Error> {
 // [spec:posix:syn:grammar.token-context-dependent-distinction]
 // [spec:posix:req:grammar.highest-numbered-rule-applies]
 // [spec:posix:syn:grammar.command-name]
+// [spec:posix:sem:token.categorization]
+// [spec:posix:req:token.alias-substitution-conditions]
+// [spec:posix:req:token.alias-reserved-word-unspecified]
+// [spec:posix:req:token.alias-replacement]
+// [spec:posix:req:token.reserved-word-recognition-contexts]
 fn readtoken_with_flags(sh: &mut Shell, mut kwd: c_int) -> Result<Token, Error> {
     let mut token: Token;
 
@@ -1147,6 +1157,15 @@ fn nlnoprompt(sh: &mut Shell) {
 // [spec:dash:def:parser.xxreadtoken-fn]
 // [spec:dash:sem:parser.xxreadtoken-fn]
 // [spec:posix:syn:grammar.token-classification]
+// [spec:posix:req:token.input-lines]
+// [spec:posix:syn:token.recognition-algorithm]
+// [spec:posix:syn:token.delimit-at-end-of-input]
+// [spec:posix:syn:token.operator-continue]
+// [spec:posix:syn:token.operator-delimit]
+// [spec:posix:syn:token.start-new-operator]
+// [spec:posix:syn:token.unquoted-blank-delimits]
+// [spec:posix:syn:token.comment]
+// [spec:posix:syn:token.start-new-word]
 fn xxreadtoken(sh: &mut Shell, chkeofmark: c_int) -> Result<Token, Error> {
     let mut c: c_int;
 
@@ -1558,6 +1577,9 @@ enum Lbl {
 // [spec:posix:req:quote.double-quotes-expansion-result]
 // [spec:posix:req:quote.double-quotes-embedded-double-quote]
 // [spec:posix:req:quote.dollar-single-quotes]
+// [spec:posix:syn:token.quoting-characters]
+// [spec:posix:syn:token.expansion-candidates]
+// [spec:posix:syn:token.append-to-word]
 fn readtoken1(
     sh: &mut Shell,
     firstc: c_int,

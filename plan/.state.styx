@@ -3033,4 +3033,59 @@ impl_evidence (
         {impl_name shell, rule pattern.trailing-backslash-unspecified}
         {impl_name shell, rule pattern.unmatched-open-bracket-unspecified}
     )}
+    {id posix-tokens, covered_rules (
+        token.alias-change-timing
+        token.alias-not-inherited
+        token.alias-replacement
+        token.alias-reserved-word-unspecified
+        token.alias-substitution-conditions
+        token.alias-trailing-blank-chaining
+        token.append-to-word
+        token.categorization
+        token.comment
+        token.delimit-at-end-of-input
+        token.expansion-candidates
+        token.here-document-mode
+        token.incremental-execution
+        token.input-lines
+        token.operator-continue
+        token.operator-delimit
+        token.quoting-characters
+        token.recognition-algorithm
+        token.reserved-word-recognition-contexts
+        token.reserved-word-time
+        token.reserved-words
+        token.reserved-words-optional
+        token.reserved-words-trailing-colon
+        token.start-new-operator
+        token.start-new-word
+        token.unquoted-blank-delimits
+    ), covered_claims (
+        {impl_name shell, rule token.alias-change-timing}
+        {impl_name shell, rule token.alias-not-inherited}
+        {impl_name shell, rule token.alias-replacement}
+        {impl_name shell, rule token.alias-reserved-word-unspecified}
+        {impl_name shell, rule token.alias-substitution-conditions}
+        {impl_name shell, rule token.alias-trailing-blank-chaining}
+        {impl_name shell, rule token.append-to-word}
+        {impl_name shell, rule token.categorization}
+        {impl_name shell, rule token.comment}
+        {impl_name shell, rule token.delimit-at-end-of-input}
+        {impl_name shell, rule token.expansion-candidates}
+        {impl_name shell, rule token.here-document-mode}
+        {impl_name shell, rule token.incremental-execution}
+        {impl_name shell, rule token.input-lines}
+        {impl_name shell, rule token.operator-continue}
+        {impl_name shell, rule token.operator-delimit}
+        {impl_name shell, rule token.quoting-characters}
+        {impl_name shell, rule token.recognition-algorithm}
+        {impl_name shell, rule token.reserved-word-recognition-contexts}
+        {impl_name shell, rule token.reserved-word-time}
+        {impl_name shell, rule token.reserved-words}
+        {impl_name shell, rule token.reserved-words-optional}
+        {impl_name shell, rule token.reserved-words-trailing-colon}
+        {impl_name shell, rule token.start-new-operator}
+        {impl_name shell, rule token.start-new-word}
+        {impl_name shell, rule token.unquoted-blank-delimits}
+    )}
 )

@@ -110,6 +110,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T02:30:19.088459757Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T02:31:51.437069868Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Mapped all 26 assigned XCU 2.3-2.4 rules across ordinary/here-document token modes, operator and word recognition, contextual categorization, alias push/pop recursion boundaries, immediate ordered alias updates, per-shell alias initialization, reserved-word selection, and parse-then-execute sequencing. Followed parser-tests-when-syn-rules using the existing token corpus. Verification: focused POSIX harness PASS=15 FAIL=0, cargo test -p nsh --quiet passed (230 unit tests plus all integration suites), git diff --check clean."
+                    }
+                )
             }
 
             {

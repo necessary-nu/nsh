@@ -996,6 +996,7 @@ pub fn pushstring(sh: &mut Shell, s: &BStr, alias_name: Option<BString>) {
 
 // [spec:dash:def:input.popstring-fn]
 // [spec:dash:sem:input.popstring-fn]
+// [spec:posix:req:token.alias-trailing-blank-chaining]
 fn popstring(sh: &mut Shell) {
     INTOFF(sh);
     let pf = cur_pf(sh);
