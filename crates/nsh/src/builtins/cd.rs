@@ -77,6 +77,10 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* The operand outlives every reader below, which is what the C got
      * from `argv` living in `evalcommand`'s frame. */
     let operand = opts.operands().first().copied();
+    // [spec:posix:req:builtin.cd.operand-empty-string]
+    if operand.is_some_and(|directory| directory.is_empty()) {
+        return Err(sh.sh_error_value(b"can't cd to an empty directory"));
+    }
     let dest_value = match operand {
         None => crate::var::lookup_bytes(sh, BStr::new(b"HOME")).unwrap_or_default(),
         Some(d) if d == b"-" => {
@@ -303,5 +307,17 @@ mod tests {
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         assert_eq!(cdopt(&mut owned, &mut scan).unwrap(), CD_PHYSICAL);
         assert_eq!(scan.operands(), [BStr::new("dir")]);
+    }
+
+    // [spec:posix:req:builtin.cd.operand-empty-string/test]
+    #[test]
+    fn empty_operand_is_an_error() {
+        let mut shell = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let error = cdcmd(&mut shell, &[BStr::new(b"cd"), BStr::new(b"")])
+            .expect_err("an explicit empty operand must not mean the current directory");
+        assert_eq!(
+            error.message(),
+            BStr::new(b"can't cd to an empty directory")
+        );
     }
 }

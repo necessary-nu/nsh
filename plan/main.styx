@@ -1674,6 +1674,21 @@ children (
                             shell ([spec:posix:req:builtin.cd.operand-empty-string])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T03:04:56.127234365Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T03:06:08.39305469Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "An explicit empty operand now fails before CDPATH processing instead of being rewritten to dot. The no-operand HOME path is unchanged. Focused POSIX case passes, a direct unit test pins the returned diagnostic, and cargo test -p nsh is 260/0."
+                            }
+                        )
                     }
 
                     {

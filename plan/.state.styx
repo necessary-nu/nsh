@@ -3384,4 +3384,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.alias.stdout-format}
     )}
+    {id fix-builtin-cd-operand-empty-string, covered_rules (
+        builtin.cd.operand-empty-string
+    ), covered_claims (
+        {impl_name shell, rule builtin.cd.operand-empty-string}
+    )}
 )
