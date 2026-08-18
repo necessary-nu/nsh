@@ -333,6 +333,7 @@ impl History {
         }
     }
 
+    // [spec:posix:req:edit.history-search-backward]
     pub(super) fn search_editor(
         &self,
         locale: &nsh_platform::Locale,

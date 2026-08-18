@@ -1159,6 +1159,20 @@ CASES: tuple[Case, ...] = (
         timeout=TIMEOUT,
         requires=("UP",),
     ),
+    # [spec:posix:req:edit.history-search-backward/test]
+    Case(
+        id="edit-history-search-backward-missing",
+        rules=("edit.history-search-backward",),
+        script=VI + "r alpha\n" + "r keep" + ESC + "/missing\nA; exit\n",
+        stdout=None,
+        stdout_contains=(BEL, "R:keep\n"),
+        mode="interactive",
+        environment=TERMINAL,
+        files=R,
+        status="any",
+        timeout=TIMEOUT,
+        requires=("UP",),
+    ),
     # [spec:posix:req:edit.history-search-forward/test]
     Case(
         id="edit-history-search-forward",

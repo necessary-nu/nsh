@@ -3639,4 +3639,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule edit.history-prev-next}
     )}
+    {id fix-edit-history-search-backward, covered_rules (
+        edit.history-search-backward
+    ), covered_claims (
+        {impl_name shell, rule edit.history-search-backward}
+    )}
 )
