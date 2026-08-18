@@ -149,6 +149,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T02:12:01.404631895Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T02:13:43.263967303Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Mapped all 43 XCU parameter rules to variable storage/initialization, positional and special expansion, prompt expansion, positional assignment, ENV startup, trace-prefix expansion, and PWD maintenance. Verification: cargo test -p nsh passes; selected POSIX harness PASS=37 FAIL=0 with 46 exercised assertions; git diff --check clean."
+                    }
+                )
             }
 
             {

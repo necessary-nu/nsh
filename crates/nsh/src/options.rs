@@ -572,6 +572,7 @@ fn setoption(sh: &mut crate::context::Shell, flag: u8, val: c_int) -> Result<(),
 
 // [spec:dash:def:options.setparam-fn]
 // [spec:dash:sem:options.setparam-fn]
+// [spec:posix:sem:param.positional-assignment]
 pub fn setparam(sh: &mut Shell, argv: &[&BStr]) {
     /* Copied out in full before the old list goes, as the C's
      * `savestr` loop is: `freeparam` comes after the copy there too. */

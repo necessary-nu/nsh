@@ -2070,6 +2070,22 @@ fn strtodest(
 
 // [spec:dash:def:expand.varvalue-fn]
 // [spec:dash:sem:expand.varvalue-fn]
+// [spec:posix:def:param.positional-definition]
+// [spec:posix:req:param.positional-decimal-digits]
+// [spec:posix:syn:param.positional-multi-digit-braces]
+// [spec:posix:sem:param.positional-zero-not-positional]
+// [spec:posix:def:param.special-parameters]
+// [spec:posix:req:param.special-at]
+// [spec:posix:req:param.special-at-double-quotes]
+// [spec:posix:req:param.special-at-no-positional]
+// [spec:posix:req:param.special-asterisk]
+// [spec:posix:req:param.special-hash]
+// [spec:posix:req:param.special-question]
+// [spec:posix:sem:param.special-question-assignment]
+// [spec:posix:req:param.special-hyphen]
+// [spec:posix:req:param.special-dollar]
+// [spec:posix:req:param.special-bang]
+// [spec:posix:req:param.special-zero]
 fn varvalue(
     sh: &mut crate::context::Shell,
     state: &mut ExpandState,

@@ -91,6 +91,10 @@ pub struct LocalVarList {
 
 // [spec:posix:req:xcu.env.effects-confined-to-section]
 // [spec:posix:req:xcu.env.eight-bit-transparency]
+// [spec:posix:req:param.byte-values]
+// [spec:posix:def:param.denotation]
+// [spec:posix:def:param.set-state]
+// [spec:posix:sem:param.variable-creation]
 pub struct VarTable {
     tab: BTreeMap<BString, Var>,
     pub(crate) lineno: c_int,
@@ -262,6 +266,21 @@ fn builtin(name: &[u8], value: Option<&[u8]>, flags: c_int, callback: Callback) 
 
 // [spec:dash:def:var.initvar-fn]
 // [spec:dash:sem:var.initvar-fn]
+// [spec:posix:def:param.shell-variables]
+// [spec:posix:def:param.home]
+// [spec:posix:def:param.ifs]
+// [spec:posix:req:param.ifs-unset]
+// [spec:posix:req:param.ifs-initial-value]
+// [spec:posix:req:param.lang]
+// [spec:posix:req:param.lc-all]
+// [spec:posix:req:param.lc-collate]
+// [spec:posix:req:param.lc-ctype]
+// [spec:posix:req:param.lc-messages]
+// [spec:posix:req:param.lineno]
+// [spec:posix:req:param.nlspath]
+// [spec:posix:def:param.path]
+// [spec:posix:req:param.ppid]
+// [spec:posix:req:param.ps1-default]
 pub fn initvar(sh: &mut Shell) {
     let prompt: &[u8] = if nsh_platform::effective_uid().is_root() {
         b"# "
@@ -303,6 +322,7 @@ pub fn mkinit_init(sh: &mut Shell) -> Result<(), Error> {
 }
 
 // [spec:nsh:sem:shell-locale.invalid-selection]
+// [spec:posix:req:param.variable-environment-initialization]
 // [spec:posix:def:sh.environment-variables]
 // [spec:posix:req:sh.envvar-env]
 // [spec:posix:req:sh.envvar-fcedit]

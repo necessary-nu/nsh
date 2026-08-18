@@ -2462,4 +2462,93 @@ impl_evidence (
         {impl_name shell, rule builtin.type.stdout}
         {impl_name shell, rule builtin.type.synopsis}
     )}
+    {id posix-parameters, covered_rules (
+        param.byte-values
+        param.denotation
+        param.env
+        param.home
+        param.ifs
+        param.ifs-initial-value
+        param.ifs-unset
+        param.lang
+        param.lc-all
+        param.lc-collate
+        param.lc-ctype
+        param.lc-messages
+        param.lineno
+        param.nlspath
+        param.path
+        param.positional-assignment
+        param.positional-decimal-digits
+        param.positional-definition
+        param.positional-multi-digit-braces
+        param.positional-zero-not-positional
+        param.ppid
+        param.ps1
+        param.ps1-default
+        param.ps2
+        param.ps4
+        param.pwd
+        param.pwd-assignment
+        param.set-state
+        param.shell-variables
+        param.special-asterisk
+        param.special-at
+        param.special-at-double-quotes
+        param.special-at-no-positional
+        param.special-bang
+        param.special-dollar
+        param.special-hash
+        param.special-hyphen
+        param.special-parameters
+        param.special-question
+        param.special-question-assignment
+        param.special-zero
+        param.variable-creation
+        param.variable-environment-initialization
+    ), covered_claims (
+        {impl_name shell, rule param.byte-values}
+        {impl_name shell, rule param.denotation}
+        {impl_name shell, rule param.env}
+        {impl_name shell, rule param.home}
+        {impl_name shell, rule param.ifs}
+        {impl_name shell, rule param.ifs-initial-value}
+        {impl_name shell, rule param.ifs-unset}
+        {impl_name shell, rule param.lang}
+        {impl_name shell, rule param.lc-all}
+        {impl_name shell, rule param.lc-collate}
+        {impl_name shell, rule param.lc-ctype}
+        {impl_name shell, rule param.lc-messages}
+        {impl_name shell, rule param.lineno}
+        {impl_name shell, rule param.nlspath}
+        {impl_name shell, rule param.path}
+        {impl_name shell, rule param.positional-assignment}
+        {impl_name shell, rule param.positional-decimal-digits}
+        {impl_name shell, rule param.positional-definition}
+        {impl_name shell, rule param.positional-multi-digit-braces}
+        {impl_name shell, rule param.positional-zero-not-positional}
+        {impl_name shell, rule param.ppid}
+        {impl_name shell, rule param.ps1}
+        {impl_name shell, rule param.ps1-default}
+        {impl_name shell, rule param.ps2}
+        {impl_name shell, rule param.ps4}
+        {impl_name shell, rule param.pwd}
+        {impl_name shell, rule param.pwd-assignment}
+        {impl_name shell, rule param.set-state}
+        {impl_name shell, rule param.shell-variables}
+        {impl_name shell, rule param.special-asterisk}
+        {impl_name shell, rule param.special-at}
+        {impl_name shell, rule param.special-at-double-quotes}
+        {impl_name shell, rule param.special-at-no-positional}
+        {impl_name shell, rule param.special-bang}
+        {impl_name shell, rule param.special-dollar}
+        {impl_name shell, rule param.special-hash}
+        {impl_name shell, rule param.special-hyphen}
+        {impl_name shell, rule param.special-parameters}
+        {impl_name shell, rule param.special-question}
+        {impl_name shell, rule param.special-question-assignment}
+        {impl_name shell, rule param.special-zero}
+        {impl_name shell, rule param.variable-creation}
+        {impl_name shell, rule param.variable-environment-initialization}
+    )}
 )

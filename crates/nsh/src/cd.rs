@@ -95,6 +95,8 @@ pub(crate) enum Pwd<'a> {
 
 // [spec:dash:def:cd.setpwd-fn]
 // [spec:dash:sem:cd.setpwd-fn]
+// [spec:posix:req:param.pwd]
+// [spec:posix:req:param.pwd-assignment]
 pub(crate) fn setpwd_inner(sh: &mut crate::context::Shell, val: Pwd, setold: c_int) -> Result<(), Error> {
     if setold != 0 {
         let old = sh.cwd.curdir.clone().unwrap_or_default();
