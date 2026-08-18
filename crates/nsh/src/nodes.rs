@@ -249,6 +249,8 @@ pub struct nclist {
     /// list of patterns for this case (C: a `narg.next`-linked list)
     pub pattern: Vec<Node>,
     pub body: Option<Box<Node>>,
+    /// `;&` executes later clause bodies without testing their patterns.
+    pub fallthrough: bool,
 }
 
 /// `NDEFUN`

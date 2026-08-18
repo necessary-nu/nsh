@@ -683,9 +683,11 @@ fn evalfor(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
 // [spec:posix:req:cmd.case-pattern-expansion]
 // [spec:posix:req:cmd.case-multiple-pattern-order-unspecified]
 // [spec:posix:req:cmd.case-exit-status]
+// [spec:posix:req:cmd.case-clause-terminators]
 fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
     let mut arglist: arglist = arglist::new();
     let mut status: c_int = 0;
+    let mut fallthrough = false;
 
     let c = n.ncase();
     sh.eval.errlinno = c.linno;
@@ -712,21 +714,33 @@ fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
             if sh.eval.evalskip != 0 {
                 break;
             }
-            for patp in &cp.nclist().pattern {
-                if crate::expand::casematch(
-                    sh,
-                    patp,
-                    BStr::new(crate::mystring::cstr_prefix(&arglist.list[0].text)),
-                )? != 0 {
-                    /* Ensure body is non-empty as otherwise
-                     * EV_EXIT may prevent us from setting the
-                     * exit status.
-                     */
-                    if sh.eval.evalskip == 0 && cp.nclist().body.is_some() {
-                        status = flow!(evaltree(sh, cp.nclist().body.as_deref(), flags));
+            let clause = cp.nclist();
+            let mut selected = fallthrough;
+            if !selected {
+                for patp in &clause.pattern {
+                    if crate::expand::casematch(
+                        sh,
+                        patp,
+                        BStr::new(crate::mystring::cstr_prefix(&arglist.list[0].text)),
+                    )? != 0
+                    {
+                        selected = true;
+                        break;
                     }
-                    break 'out_lbl;
                 }
+            }
+            if !selected {
+                continue;
+            }
+            /* Ensure body is non-empty as otherwise EV_EXIT may prevent us
+             * from setting the exit status. */
+            if sh.eval.evalskip == 0 && clause.body.is_some() {
+                status = flow!(evaltree(sh, clause.body.as_deref(), flags));
+            }
+            if clause.fallthrough {
+                fallthrough = true;
+            } else {
+                break 'out_lbl;
             }
         }
     }

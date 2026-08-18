@@ -1715,7 +1715,10 @@ fn cmdtxt(n: Option<&Node>, text: &mut BString) {
                         cmdtxt(np.nclist().pattern.first(), text);
                         cmdputs(b") ", text);
                         cmdtxt(np.nclist().body.as_deref(), text);
-                        cmdputs(b";; ", text);
+                        cmdputs(
+                            if np.nclist().fallthrough { b";& " } else { b";; " },
+                            text,
+                        );
                     }
                     p = b"esac";
                     pc = L_DOTAIL2;

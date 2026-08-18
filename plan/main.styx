@@ -2669,6 +2669,21 @@ children (
                             shell ([spec:posix:req:cmd.case-clause-terminators])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:52:39.437062098Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:56:30.226559024Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Add TFALLTHRU for the POSIX `;&` operator, carry it as a boolean on each case clause, preserve it in command rendering, and have evalcase execute subsequent bodies without pattern tests until a non-fallthrough `;;` clause. Insert the token below TWORD so operator tokens cannot be mistaken for case pattern words; shift keyword offsets and token metadata together. Strengthen the case with two consecutive fallthroughs over deliberately nonmatching patterns and a final `;;` that suppresses the remaining clause. Verification: lang-cmd-case-semi-and passes all three mapped grammar/behavior rules; cargo test -p nsh passes 279 tests with one ignored doctest; POSIX harness unit tests and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

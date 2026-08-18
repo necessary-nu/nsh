@@ -1887,13 +1887,14 @@ CASES: tuple[Case, ...] = (
             r"""
             case a in
             a) printf '1';&
-            b) printf '2';;
-            c) printf '3';;
+            never) printf '2';&
+            still-never) printf '3';;
+            c) printf '4';;
             esac
             printf '\n'
             """
         ),
-        stdout="12\n",
+        stdout="123\n",
     ),
     # -----------------------------------------------------------------
     # Rules formerly excused as `not-applicable` on the grounds that they

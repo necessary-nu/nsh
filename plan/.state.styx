@@ -3584,4 +3584,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.wait.remove-waited-for-pid}
     )}
+    {id fix-cmd-case-clause-terminators, covered_rules (
+        cmd.case-clause-terminators
+    ), covered_claims (
+        {impl_name shell, rule cmd.case-clause-terminators}
+    )}
 )
