@@ -3389,4 +3389,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.cd.operand-empty-string}
     )}
+    {id fix-builtin-cd-opt-e, covered_rules (
+        builtin.cd.opt-e
+    ), covered_claims (
+        {impl_name shell, rule builtin.cd.opt-e}
+    )}
 )

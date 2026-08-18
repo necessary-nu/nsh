@@ -23,6 +23,14 @@ use crate::options::Options;
 
 const CD_PHYSICAL: c_int = 1;
 const CD_PRINT: c_int = 2;
+const CD_ERROR_IF_UNKNOWN: c_int = 4;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CdResult {
+    Changed,
+    ChangedPwdUnknown,
+    Failed,
+}
 
 // [spec:dash:def:cd.cdopt-fn]
 // [spec:dash:sem:cd.cdopt-fn]
@@ -31,11 +39,16 @@ const CD_PRINT: c_int = 2;
 // [spec:posix:req:builtin.cd.opt-l]
 // [spec:posix:req:builtin.cd.opt-p]
 // [spec:posix:req:builtin.cd.opt-l-p-last-wins]
+// [spec:posix:req:builtin.cd.opt-e]
 pub(crate) fn cdopt(sh: &mut crate::context::Shell, opts: &mut Options) -> Result<c_int, Error> {
     let mut flags: c_int = 0;
     let mut j: u8 = b'L';
 
-    while let Some(i) = opts.next(sh, b"LP")? {
+    while let Some(i) = opts.next(sh, b"LPe")? {
+        if i == b'e' {
+            flags |= CD_ERROR_IF_UNKNOWN;
+            continue;
+        }
         if i != j {
             flags ^= CD_PHYSICAL;
             j = i;
@@ -90,6 +103,7 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         Some(d) => d.to_owned(),
     };
     let mut dest = dest_value.as_slice().as_bstr();
+    let mut pwd_unknown = false;
 
     let step6 = dest.starts_with(b"/")
         || dest == b"."
@@ -116,9 +130,17 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     flags |= CD_PRINT;
                 }
                 /* docd: */
-                if docd(sh, fullname, flags)? == 0 {
-                    out = true; /* goto out */
-                    break;
+                match docd(sh, fullname, flags)? {
+                    CdResult::Changed => {
+                        out = true; /* goto out */
+                        break;
+                    }
+                    CdResult::ChangedPwdUnknown => {
+                        out = true;
+                        pwd_unknown = true;
+                        break;
+                    }
+                    CdResult::Failed => {}
                 }
                 /* goto err */
                 let mut message = b"can't cd to ".to_vec();
@@ -131,11 +153,15 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if !out {
         /* step6: */
         /* docd: */
-        if docd(sh, dest, flags)? != 0 {
-            /* err: */
-            let mut message = b"can't cd to ".to_vec();
-            message.extend_from_slice(dest);
-            return Err(sh.sh_error_value(&message));
+        match docd(sh, dest, flags)? {
+            CdResult::Changed => {}
+            CdResult::ChangedPwdUnknown => pwd_unknown = true,
+            CdResult::Failed => {
+                /* err: */
+                let mut message = b"can't cd to ".to_vec();
+                message.extend_from_slice(dest);
+                return Err(sh.sh_error_value(&message));
+            }
         }
     }
 
@@ -146,7 +172,12 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         d.push(b'\n');
         let _ = sh.io.stdout().write_all(&d);
     }
-    Ok(Flow::Done(0))
+    let status = i32::from(
+        pwd_unknown
+            && (flags & CD_PHYSICAL) != 0
+            && (flags & CD_ERROR_IF_UNKNOWN) != 0,
+    );
+    Ok(Flow::Done(status))
 }
 
 // [spec:dash:def:cd.docd-fn]
@@ -156,7 +187,7 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:builtin.cd.step10-pwd-physical]
 // [spec:posix:req:builtin.cd.oldpwd-set]
 // [spec:posix:req:xcurel.change-cwd]
-fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<c_int, Error> {
+fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<CdResult, Error> {
     let mut logical = None;
     let err: c_int;
 
@@ -190,7 +221,13 @@ fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<c_int, Error> {
     }
     /* out: */
     INTON(sh);
-    Ok(err)
+    Ok(if err != 0 {
+        CdResult::Failed
+    } else if logical.is_none() && sh.cwd.curdir.is_none() {
+        CdResult::ChangedPwdUnknown
+    } else {
+        CdResult::Changed
+    })
 }
 
 // [spec:dash:def:cd.updatepwd-fn]
@@ -267,6 +304,15 @@ fn updatepwd(sh: &mut Shell, dir: &BStr) -> Option<BString> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    struct RestoreCwd(PathBuf);
+
+    impl Drop for RestoreCwd {
+        fn drop(&mut self) {
+            std::env::set_current_dir(&self.0).unwrap();
+        }
+    }
 
     /// `-L` and `-P` are a toggle rather than two flags: the C tracks
     /// which it saw last and flips only when the next one differs, so a
@@ -290,6 +336,54 @@ mod tests {
         assert_eq!(opts(&[b"cd", b"-L"]), 0);
         assert_eq!(opts(&[b"cd", b"-P", b"-L"]), 0);
         assert_eq!(opts(&[b"cd", b"-L", b"-P"]), CD_PHYSICAL);
+    }
+
+    // [spec:posix:req:builtin.cd.opt-e/test]
+    #[test]
+    fn error_if_pwd_unknown_is_independent() {
+        assert_eq!(opts(&[b"cd", b"-e"]), CD_ERROR_IF_UNKNOWN);
+        assert_eq!(
+            opts(&[b"cd", b"-Pe"]),
+            CD_PHYSICAL | CD_ERROR_IF_UNKNOWN
+        );
+        assert_eq!(opts(&[b"cd", b"-eP", b"-L"]), CD_ERROR_IF_UNKNOWN);
+    }
+
+    // [spec:posix:req:builtin.cd.opt-e/test]
+    #[test]
+    fn physical_e_reports_unknown_pwd() {
+        let _guard = crate::testutil::lock();
+        let old = std::env::current_dir().unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "nsh-cd-e-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&path).unwrap();
+        std::env::set_current_dir(&path).unwrap();
+        let _restore = RestoreCwd(old);
+        std::fs::remove_dir(&path).unwrap();
+
+        let mut shell = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        assert_eq!(
+            cdcmd(
+                &mut shell,
+                &[BStr::new(b"cd"), BStr::new(b"-e"), BStr::new(b".")]
+            )
+            .unwrap(),
+            Flow::Done(0)
+        );
+        assert_eq!(
+            cdcmd(
+                &mut shell,
+                &[BStr::new(b"cd"), BStr::new(b"-Pe"), BStr::new(b".")]
+            )
+            .unwrap(),
+            Flow::Done(1)
+        );
     }
 
     /// A repeat is not a flip, whether clustered or spread.

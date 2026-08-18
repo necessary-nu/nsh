@@ -1698,6 +1698,21 @@ children (
                             shell ([spec:posix:req:builtin.cd.opt-e])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T03:06:33.62309451Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T03:08:46.581561965Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Add -e as an independent cd option bit and preserve -L/-P last-one-wins semantics. docd now distinguishes a failed chdir from a successful change whose physical PWD cannot be recovered; only the latter combined with effective -P and -e returns status 1, without misreporting the directory change as a chdir failure. A deleted-cwd unit test pins the real getcwd-failure path. Focused POSIX case passes; cargo test -p nsh is 262/0."
+                            }
+                        )
                     }
 
                     {
