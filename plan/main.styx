@@ -2230,6 +2230,21 @@ children (
                             shell ([spec:posix:req:builtin.read.option-d])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:16:27.341667196Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:19:00.75668731Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Parse -d with an option argument, using its sole byte as the delimiter and mapping an empty argument to NUL; multi-byte arguments use their first byte as permitted unspecified behavior. Keep backslash-newline continuation tied to newline while ending only on an unescaped selected delimiter. Add a scoped pgetc_preserve_nul path so read -d '' can observe NUL without changing normal parser filtering or using raw descriptors. Verification: all 19 read cases pass (including ':' and NUL delimiters), cargo test -p nsh passes 276 tests with one ignored doctest, and git diff --check passes."
+                            }
+                        )
                     }
 
                     {

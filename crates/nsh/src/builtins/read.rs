@@ -113,6 +113,7 @@ fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> R
 // [spec:posix:req:builtin.read.env-nlspath]
 // [spec:posix:req:builtin.read.exit-status]
 // [spec:posix:req:builtin.read.interfaces]
+// [spec:posix:req:builtin.read.option-d]
 // [spec:posix:req:builtin.read.option-r]
 // [spec:posix:req:builtin.read.stderr]
 // [spec:posix:req:builtin.read.stdin]
@@ -124,15 +125,16 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut newloc: c_int = 0;
     let mut status: c_int;
     let mut rflag: c_int;
+    let mut delimiter = b'\n';
 
     rflag = 0;
     prompt = None;
     let mut opts = crate::options::Options::new(args);
-    while let Some(i) = opts.next(sh, b"p:r")? {
-        if i == b'p' {
-            prompt = Some(crate::shell::cstring(opts.arg()));
-        } else {
-            rflag = 1;
+    while let Some(i) = opts.next(sh, b"d:p:r")? {
+        match i {
+            b'd' => delimiter = opts.arg().first().copied().unwrap_or(b'\0'),
+            b'p' => prompt = Some(crate::shell::cstring(opts.arg())),
+            _ => rflag = 1,
         }
     }
     if let Some(prompt) = &prompt {
@@ -188,12 +190,16 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
              * own scratch now, so there is nothing to reserve on its
              * behalf -- the reservation left here would be a guess about
              * another function's internals. */
-            c = crate::input::pgetc(sh)?;
+            c = if delimiter == b'\0' {
+                crate::input::pgetc_preserve_nul(sh)?
+            } else {
+                crate::input::pgetc(sh)?
+            };
             if c == crate::syntax::PEOF {
                 status = 1;
                 break;
             }
-            if c == '\0' as c_int {
+            if c == '\0' as c_int && delimiter != b'\0' {
                 pc = L_BODY;
                 continue;
             }
@@ -220,7 +226,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 newloc = line.len() as c_int;
                 pc = L_BODY;
                 continue;
-            } else if c == '\n' as c_int {
+            } else if c as u8 == delimiter {
                 break;
             } else {
                 pc = L_PUT; /* fall through to put: */

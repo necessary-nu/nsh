@@ -536,12 +536,25 @@ fn freestrings(sh: &mut crate::context::Shell) {
 
 /*
  * Read a character from the script, returning PEOF on end of file.
- * Nul characters in the input are silently discarded.
+ * Nul characters in the input are silently discarded by the normal entry
+ * point; `read -d ''` uses the preserving entry point below.
  */
 
 // [spec:dash:def:input.pgetc-fn]
 // [spec:dash:sem:input.pgetc-fn]
 pub fn pgetc(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
+    pgetc_inner(sh, false)
+}
+
+/// Read one input byte without applying the parser's normal NUL filtering.
+///
+/// This is intentionally narrower than [`pgetc`]: shell input remains text,
+/// while `read -d ''` needs to observe the NUL that terminates its record.
+pub(crate) fn pgetc_preserve_nul(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
+    pgetc_inner(sh, true)
+}
+
+fn pgetc_inner(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<c_int, Error> {
     let mut c: c_int;
     /* Re-derived after everything that can push a level, because that is
      * what moves the frames; the C reloads the same global for the same
@@ -574,12 +587,12 @@ pub fn pgetc(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
                 pf = cur_pf(sh);
                 continue 'again;
             } else {
-                c = preadbuffer(sh)?;
+                c = preadbuffer(sh, preserve_nul)?;
                 pf = cur_pf(sh);
             }
 
             /* delete nul characters */
-            if IS_DEFINED_SMALL && c == 0 {
+            if IS_DEFINED_SMALL && !preserve_nul && c == 0 {
                 let n = pf.nleft as usize;
                 pf.buf.copy_within(pf.pos..pf.pos + n, pf.pos - 1);
                 pf.pos -= 1;
@@ -784,12 +797,12 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
  * 1) If a string was pushed back on the input, pop it;
  * 2) If we are reading from a string we can't refill the buffer, return EOF.
  * 3) If there is more stuff in this buffer, use it else call read to fill it.
- * 4) Process input up to the next newline, deleting nul characters.
+ * 4) Process input up to the next newline, normally deleting nul characters.
  */
 
 // [spec:dash:def:input.preadbuffer-fn]
 // [spec:dash:sem:input.preadbuffer-fn]
-fn preadbuffer(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
+fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<c_int, Error> {
     let first: c_int = (sh.input.whichprompt == 1) as c_int;
     let mut something: c_int;
     let mut savec: u8 = 0;
@@ -866,7 +879,7 @@ fn preadbuffer(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
             more -= 1;
             c = cur_pf(sh).buf[q] as i8 as c_int;
 
-            if c == 0 {
+            if c == 0 && !preserve_nul {
                 let pf = cur_pf(sh);
                 pf.buf.copy_within(q + 1..q + 1 + more as usize, q);
                 /* goto check */

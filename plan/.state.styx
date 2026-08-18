@@ -3494,4 +3494,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.read.env-ps2}
     )}
+    {id fix-builtin-read-option-d, covered_rules (
+        builtin.read.option-d
+    ), covered_claims (
+        {impl_name shell, rule builtin.read.option-d}
+    )}
 )
