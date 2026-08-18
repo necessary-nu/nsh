@@ -94,6 +94,7 @@ pub fn read_edit_line(
 }
 
 /// Retain one physical input line, either starting or continuing a command.
+// [spec:posix:req:edit.history-list]
 pub fn record_history_line(
     sh: &mut crate::context::Shell,
     bytes: &[u8],
@@ -147,6 +148,7 @@ fn Eflag(sh: &crate::context::Shell) -> c_char {
 // [spec:posix:req:builtin.fc.env-histfile-initialization]
 // [spec:posix:req:builtin.fc.env-histfile-sharing-and-deletion]
 // [spec:posix:req:builtin.fc.env-histfile]
+// [spec:posix:req:edit.history-list]
 pub fn histedit(sh: &mut crate::context::Shell) {
     if iflag(sh) != 0 {
         if !history_active(sh) {

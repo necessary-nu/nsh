@@ -2868,6 +2868,21 @@ children (
                             shell ([spec:posix:req:edit.history-list])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:14:14.64454922Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:15:00.638904323Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "The interactive history lifecycle already opens/creates HISTFILE, loads existing newline-delimited entries into the owned History store, records each physical input line, and persists the retained store after every update. Map the rule at initialization and record/persist entry points. Verification: HISTFILE PTY case, both focused histedit tests, and git diff --check pass."
+                            }
+                        )
                     }
 
                     {
