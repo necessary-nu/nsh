@@ -1081,6 +1081,8 @@ CASES: tuple[Case, ...] = (
         script=(
             "wait 999999 2>/dev/null\n"
             "printf 'unknown=%s\\n' \"$?\"\n"
+            "wait not-a-pid 2>/dev/null\n"
+            "printf 'error=%s\\n' \"$?\"\n"
             "sh -c 'exit 0' &\n"
             "wait\n"
             "printf 'none=%s\\n' \"$?\"\n"
@@ -1089,7 +1091,7 @@ CASES: tuple[Case, ...] = (
             "wait \"$p\"\n"
             "printf 'known=%s\\n' \"$?\"\n"
         ),
-        stdout="unknown=127\nnone=0\nknown=9\n",
+        stdout="unknown=127\nerror=2\nnone=0\nknown=9\n",
     ),
     # [spec:posix:req:builtin.wait.exit-status-signal/test]
     Case(

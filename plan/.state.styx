@@ -3569,4 +3569,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.wait.exit-status-last-operand}
     )}
+    {id fix-builtin-wait-exit-status-values, covered_rules (
+        builtin.wait.exit-status-values
+    ), covered_claims (
+        {impl_name shell, rule builtin.wait.exit-status-values}
+    )}
 )

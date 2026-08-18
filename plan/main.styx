@@ -2597,6 +2597,21 @@ children (
                             shell ([spec:posix:req:builtin.wait.exit-status-values])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:48:35.708271641Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:49:19.772670925Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Map waitcmd's explicit no-operand, unknown-PID, parse-error, and known-child status paths to the POSIX value table. Extend sig-wait-exit-status-values with an invalid PID spelling to prove the detected-error result lies in 1-126 (status 2), alongside existing 0, 127, and known status 9 checks. Verification: both cases covering the rule and POSIX harness unit tests pass; git diff --check passes."
+                            }
+                        )
                     }
 
                     {
