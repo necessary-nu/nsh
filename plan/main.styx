@@ -2971,6 +2971,21 @@ children (
                             shell ([spec:posix:req:edit.undo])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:31:18.397197974Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:36:30.67844186Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Keep lowercase `u` on nshedit's typed single-edit undo action. Replace uppercase `U`'s incorrect RestoreHistoryLine binding with an nsh-owned original-edit-line snapshot: capture the first transition from vi insert to command mode, replace it only when navigation or search actually copies a history line, and restore it as one checked editor replacement. This preserves the POSIX boundary that undo-all must not undo a command line copied into the edit line. Add a PTY regression for a copied history line. Verification: all three edit.undo PTY cases, all 18 linedit tests, 14 harness unit tests, and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

@@ -179,6 +179,7 @@ const CHANGE_TO_FIRST_NONBLANK: &str = "nsh-vi-change-to-first-nonblank";
 const YANK_TO_FIRST_NONBLANK: &str = "nsh-vi-yank-to-first-nonblank";
 const DISPLAY_EXPANSIONS: &str = "nsh-vi-display-expansions";
 const EXPAND_ALL: &str = "nsh-vi-expand-all";
+const UNDO_ALL_CHANGES: &str = "nsh-vi-undo-all-changes";
 const REPEAT_HISTORY_SEARCH: Binding = Binding::Effect(EffectCommand::SearchHistory(
     HistorySearchCommand::Repeat(HistorySearchRepetition::SameDirection),
 ));
@@ -261,6 +262,7 @@ pub struct LineEditor {
     history_cursor: HistoryCursor,
     // [spec:posix:def:edit.edit-line]
     live_history_line: Option<Text>,
+    vi_original_line: Option<Text>,
     // [spec:posix:syn:edit.history-search-pattern]
     last_history_pattern: Option<Text>,
     pending_line: Vec<u8>,
@@ -312,6 +314,7 @@ impl LineEditor {
             output,
             history_cursor: HistoryCursor::new(),
             live_history_line: None,
+            vi_original_line: None,
             last_history_pattern: None,
             pending_line: Vec::new(),
             pending_offset: 0,
@@ -386,6 +389,7 @@ impl LineEditor {
         self.editor_mut().reset_line();
         self.history_cursor.reset();
         self.live_history_line = None;
+        self.vi_original_line = None;
         let mut step = {
             let (editor, driver) = self.editor_and_driver();
             driver.begin(editor)?
@@ -407,9 +411,14 @@ impl LineEditor {
                     driver.resume_resize(editor, &pending, response)?
                 }
                 ReadStep::Read(pending) => {
+                    let was_vi_insert = self.editor_mut().keymap_mode() == KeymapMode::ViInsert;
                     let response = self.read_effect(&sh.locale, *pending.request());
-                    let (editor, driver) = self.editor_and_driver();
-                    driver.resume_read(editor, &pending, response)?
+                    let next = {
+                        let (editor, driver) = self.editor_and_driver();
+                        driver.resume_read(editor, &pending, response)?
+                    };
+                    self.update_vi_original_line(Some(was_vi_insert), false);
+                    next
                 }
                 ReadStep::History(pending) => {
                     let request = pending.request();
@@ -438,8 +447,16 @@ impl LineEditor {
                             HistoryResponse::entry(line)
                         };
                     }
-                    let (editor, driver) = self.editor_and_driver();
-                    driver.resume_history(editor, &pending, Ok(response))?
+                    let copied_history_line = !matches!(
+                        response.selection(),
+                        HistorySelection::Unchanged
+                    );
+                    let next = {
+                        let (editor, driver) = self.editor_and_driver();
+                        driver.resume_history(editor, &pending, Ok(response))?
+                    };
+                    self.update_vi_original_line(None, copied_history_line);
+                    next
                 }
                 ReadStep::HistorySearch(pending) => {
                     let request = pending.request();
@@ -474,6 +491,7 @@ impl LineEditor {
                             self.read_host_text(&sh.locale, &prompt, true)
                         }
                     };
+                    let mut copied_history_line = false;
                     let response = match pattern {
                         Ok(pattern) => {
                             let mut selection = history.search_editor(
@@ -482,6 +500,10 @@ impl LineEditor {
                                 &pattern,
                                 direction,
                                 matching,
+                            );
+                            copied_history_line = !matches!(
+                                selection.selection(),
+                                HistorySelection::Unchanged
                             );
                             if matches!(selection.selection(), HistorySelection::Unchanged)
                                 && let Some(line) = live_line
@@ -504,14 +526,26 @@ impl LineEditor {
                         }
                         Err(error) => Err(error),
                     };
-                    let (editor, driver) = self.editor_and_driver();
-                    driver.resume_history_search(editor, &pending, response)?
+                    let next = {
+                        let (editor, driver) = self.editor_and_driver();
+                        driver.resume_history_search(editor, &pending, response)?
+                    };
+                    self.update_vi_original_line(None, copied_history_line);
+                    next
                 }
                 ReadStep::HistoryLine(pending) => {
                     let response = history
                         .select_editor_line(&mut self.history_cursor, pending.request().position());
-                    let (editor, driver) = self.editor_and_driver();
-                    driver.resume_history_line(editor, &pending, Ok(response))?
+                    let copied_history_line = !matches!(
+                        response.selection(),
+                        HistorySelection::Unchanged
+                    );
+                    let next = {
+                        let (editor, driver) = self.editor_and_driver();
+                        driver.resume_history_line(editor, &pending, Ok(response))?
+                    };
+                    self.update_vi_original_line(None, copied_history_line);
+                    next
                 }
                 ReadStep::HistoryWord(pending) => {
                     let response = history.newest_word(pending.request().position);
@@ -546,10 +580,15 @@ impl LineEditor {
                     driver.resume_completion(editor, &pending, response)?
                 }
                 ReadStep::UserCommand(pending) => {
+                    let vi_original_line = self.vi_original_line.clone();
                     let response = match pending.request().name.as_str() {
                         DISPLAY_EXPANSIONS => self.display_expansions(),
                         EXPAND_ALL => self.expand_all(),
-                        name => shell_user_command(self.editor_mut(), name),
+                        name => shell_user_command(
+                            self.editor_mut(),
+                            name,
+                            vi_original_line.as_ref(),
+                        ),
                     };
                     let (editor, driver) = self.editor_and_driver();
                     driver.resume_user_command(editor, &pending, response)?
@@ -588,7 +627,7 @@ impl LineEditor {
         purpose: ReadEffect,
     ) -> Result<ReadOutcome, HostFailure> {
         if let ReadEffect::KeySequence { deadline } = purpose {
-            match nshedit_plat::terminal::wait_for_input(self.input_borrowed(), deadline.remaining())
+            match nshedit_plat::terminal::wait_for_input(self.input.as_fd(), deadline.remaining())
             {
                 Ok(true) => {}
                 Ok(false) => return Ok(ReadOutcome::TimedOut),
@@ -837,8 +876,17 @@ impl LineEditor {
         )
     }
 
-    fn input_borrowed(&self) -> BorrowedFd<'_> {
-        self.input.as_fd()
+    fn update_vi_original_line(&mut self, was_vi_insert: Option<bool>, copied_line: bool) {
+        let entered_command_mode = matches!(was_vi_insert, Some(true))
+            && self.editor_mut().keymap_mode() == KeymapMode::ViCommand
+            && self.vi_original_line.is_none();
+        let current_line = self.editor_mut().line().clone();
+        self.vi_original_line = next_vi_original_line(
+            self.vi_original_line.take(),
+            &current_line,
+            entered_command_mode,
+            copied_line,
+        );
     }
 
     fn output_borrowed(&self) -> BorrowedFd<'_> {
@@ -1020,7 +1068,14 @@ fn install_shell_bindings(
             "P",
             Binding::Immediate(ImmediateCommand::PasteRegister(YankPlacement::AtCursor)),
         ),
-        ("U", Binding::Effect(EffectCommand::RestoreHistoryLine)),
+        ("u", Binding::Action(Action::Undo)),
+        (
+            "U",
+            Binding::User(
+                CommandName::new(UNDO_ALL_CHANGES)
+                    .expect("static shell command name is valid"),
+            ),
+        ),
         (
             "Y",
             Binding::Action(Action::Copy(EditTarget::Motion(Motion::EndOfLine))),
@@ -1194,7 +1249,11 @@ fn shell_alias(sh: &mut crate::context::Shell, name: &Text, enter_insert: bool) 
     Ok(AliasResponse::Expansion(macro_text))
 }
 
-fn shell_user_command(editor: &mut NativeEditor, name: &str) -> Result<Outcome, HostFailure> {
+fn shell_user_command(
+    editor: &mut NativeEditor,
+    name: &str,
+    vi_original_line: Option<&Text>,
+) -> Result<Outcome, HostFailure> {
     let first_nonblank = first_nonblank_index(editor.line());
     let destination = editor.line().index(first_nonblank).map_err(host_failure)?;
     match name {
@@ -1226,6 +1285,25 @@ fn shell_user_command(editor: &mut NativeEditor, name: &str) -> Result<Outcome, 
                 Ok(outcome)
             }
         }
+        // [spec:posix:req:edit.undo]
+        UNDO_ALL_CHANGES => {
+            let whole_line = editor
+                .line()
+                .span(0..editor.line().len())
+                .map_err(host_failure)?;
+            editor
+                .replace(whole_line, vi_original_line.cloned().unwrap_or_default())
+                .map_err(host_failure)?;
+            if editor.line().is_empty() {
+                editor
+                    .execute(Action::Refresh(Refresh::Full))
+                    .map_err(host_failure)
+            } else {
+                editor
+                    .execute(Action::Move(Motion::Character(Direction::Previous)))
+                    .map_err(host_failure)
+            }
+        }
         _ => Err(HostFailure::Unavailable),
     }
 }
@@ -1233,15 +1311,26 @@ fn shell_user_command(editor: &mut NativeEditor, name: &str) -> Result<Outcome, 
 fn first_nonblank_index(line: &Text) -> usize {
     line.as_units()
         .iter()
-        .position(|unit| !is_line_blank(unit))
+        .position(|unit| {
+            !matches!(
+                unit,
+                TextUnit::Scalar(' ' | '\t') | TextUnit::RawByte(b' ' | b'\t')
+            )
+        })
         .unwrap_or(0)
 }
 
-fn is_line_blank(unit: &TextUnit) -> bool {
-    matches!(
-        unit,
-        TextUnit::Scalar(' ' | '\t') | TextUnit::RawByte(b' ' | b'\t')
-    )
+fn next_vi_original_line(
+    original: Option<Text>,
+    current: &Text,
+    entered_command_mode: bool,
+    copied_line: bool,
+) -> Option<Text> {
+    if copied_line || (entered_command_mode && original.is_none()) {
+        Some(current.clone())
+    } else {
+        original
+    }
 }
 
 fn shell_prompt(sh: &mut crate::context::Shell) -> Prompt {
@@ -1403,10 +1492,26 @@ mod tests {
     }
 
     #[test]
-    fn first_nonblank_preserves_raw_bytes() {
+    fn line_state_preserves_owned_text() {
         assert_eq!(first_nonblank_index(&Text::from(" \tword")), 2);
         assert_eq!(first_nonblank_index(&text_from_bytes(b" \t\xffword")), 2);
         assert_eq!(first_nonblank_index(&Text::default()), 0);
+
+        let typed = text_from_bytes(b"typed\xff");
+        let original = next_vi_original_line(None, &typed, true, false);
+        assert_eq!(original, Some(typed.clone()));
+
+        let changed = Text::from("changed");
+        let original = next_vi_original_line(original, &changed, true, false);
+        assert_eq!(original, Some(typed));
+
+        let history = Text::from("history");
+        let original = next_vi_original_line(original, &history, false, true);
+        assert_eq!(original, Some(history.clone()));
+        assert_eq!(
+            next_vi_original_line(original, &changed, false, false),
+            Some(history)
+        );
     }
 
     #[test]

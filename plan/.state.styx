@@ -3669,4 +3669,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule edit.insert-literal-next}
     )}
+    {id fix-edit-undo, covered_rules (
+        edit.undo
+    ), covered_claims (
+        {impl_name shell, rule edit.undo}
+    )}
 )

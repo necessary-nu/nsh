@@ -1029,6 +1029,20 @@ CASES: tuple[Case, ...] = (
         timeout=TIMEOUT,
         requires=("UP",),
     ),
+    # [spec:posix:req:edit.undo/test]
+    Case(
+        id="edit-undo-all-preserves-history-copy",
+        rules=("edit.undo",),
+        script=VI + "r original\n" + ESC + "kxUA ok; exit\n",
+        stdout=None,
+        stdout_contains=("R:original ok\n",),
+        mode="interactive",
+        environment=TERMINAL,
+        files=R,
+        status="any",
+        timeout=TIMEOUT,
+        requires=("UP",),
+    ),
     # ------------------------------------------------------------------
     # Command history navigation and search
     # ------------------------------------------------------------------
