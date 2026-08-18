@@ -515,6 +515,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T02:21:42.644620599Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T02:23:19.17056322Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Mapped all 32 assigned XCU 2.10 rules to token classification, context-sensitive keyword handling, recursive-descent productions, delayed expansion, and command-time assignment processing. Followed parser-tests-when-syn-rules using the existing shell grammar corpus. Verification: focused POSIX harness PASS=24 FAIL=0, cargo test -p nsh --quiet passed (230 unit tests plus all integration suites), git diff --check clean."
+                    }
+                )
             }
 
             {

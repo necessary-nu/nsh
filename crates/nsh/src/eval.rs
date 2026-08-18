@@ -800,6 +800,7 @@ fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
 // [spec:dash:sem:eval.expredir-fn]
 // [spec:posix:req:redir.word-expansion]
 // [spec:posix:req:redir.word-pathname-expansion]
+// [spec:posix:req:grammar.redirection-filename]
 fn expredir(sh: &mut Shell, n: &[Node]) -> Result<(), Error> {
     for redir in n {
         let mut fnl: arglist = arglist::new();
@@ -1098,6 +1099,8 @@ fn parse_command_args(
 // [spec:posix:req:builtin.special.error-may-abort-shell]
 // [spec:posix:req:builtin.special.preceding-assignments-persist]
 // [spec:posix:sem:shell.command-execution]
+// [spec:posix:req:grammar.word-expansion-timing]
+// [spec:posix:req:grammar.assignment-word-processing]
 //
 // The `def` rule quotes the `#ifdef notyet` three-argument prototype;
 // the compiled signature — ported here — is

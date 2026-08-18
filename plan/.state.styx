@@ -2782,4 +2782,71 @@ impl_evidence (
         {impl_name shell, rule redir.word-expansion}
         {impl_name shell, rule redir.word-pathname-expansion}
     )}
+    {id posix-grammar, covered_rules (
+        grammar.assignment-first-word
+        grammar.assignment-word-processing
+        grammar.assignment-word-recognition
+        grammar.brace-group-and-do-group
+        grammar.case-statement-termination
+        grammar.command
+        grammar.command-name
+        grammar.for-clause
+        grammar.for-name
+        grammar.function-body-no-expansion
+        grammar.function-definition
+        grammar.function-name
+        grammar.here-doc-redirection
+        grammar.highest-numbered-rule-applies
+        grammar.if-clause
+        grammar.io-file
+        grammar.io-here
+        grammar.io-redirect
+        grammar.list-and-or
+        grammar.pipeline
+        grammar.program
+        grammar.redirection-filename
+        grammar.reserved-word-tokens
+        grammar.separators
+        grammar.simple-command
+        grammar.subshell-and-compound-list
+        grammar.third-word-of-for-and-case
+        grammar.token-classification
+        grammar.token-context-dependent-distinction
+        grammar.token-symbols
+        grammar.while-until-clause
+        grammar.word-expansion-timing
+    ), covered_claims (
+        {impl_name shell, rule grammar.assignment-first-word}
+        {impl_name shell, rule grammar.assignment-word-processing}
+        {impl_name shell, rule grammar.assignment-word-recognition}
+        {impl_name shell, rule grammar.brace-group-and-do-group}
+        {impl_name shell, rule grammar.case-statement-termination}
+        {impl_name shell, rule grammar.command}
+        {impl_name shell, rule grammar.command-name}
+        {impl_name shell, rule grammar.for-clause}
+        {impl_name shell, rule grammar.for-name}
+        {impl_name shell, rule grammar.function-body-no-expansion}
+        {impl_name shell, rule grammar.function-definition}
+        {impl_name shell, rule grammar.function-name}
+        {impl_name shell, rule grammar.here-doc-redirection}
+        {impl_name shell, rule grammar.highest-numbered-rule-applies}
+        {impl_name shell, rule grammar.if-clause}
+        {impl_name shell, rule grammar.io-file}
+        {impl_name shell, rule grammar.io-here}
+        {impl_name shell, rule grammar.io-redirect}
+        {impl_name shell, rule grammar.list-and-or}
+        {impl_name shell, rule grammar.pipeline}
+        {impl_name shell, rule grammar.program}
+        {impl_name shell, rule grammar.redirection-filename}
+        {impl_name shell, rule grammar.reserved-word-tokens}
+        {impl_name shell, rule grammar.separators}
+        {impl_name shell, rule grammar.simple-command}
+        {impl_name shell, rule grammar.subshell-and-compound-list}
+        {impl_name shell, rule grammar.third-word-of-for-and-case}
+        {impl_name shell, rule grammar.token-classification}
+        {impl_name shell, rule grammar.token-context-dependent-distinction}
+        {impl_name shell, rule grammar.token-symbols}
+        {impl_name shell, rule grammar.while-until-clause}
+        {impl_name shell, rule grammar.word-expansion-timing}
+    )}
 )
