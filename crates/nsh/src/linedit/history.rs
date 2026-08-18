@@ -95,6 +95,8 @@ impl History {
     }
 
     /// Insert a complete first physical line and make it the append target.
+    // [spec:posix:req:builtin.fc.history-numbering]
+    // [spec:posix:req:builtin.fc.history-number-wrap]
     pub fn enter(&mut self, bytes: &[u8]) -> Result<c_int, HistoryError> {
         let number = self.next_number.ok_or(HistoryError::NumberExhausted)?;
         self.next_number = number.checked_add(1);

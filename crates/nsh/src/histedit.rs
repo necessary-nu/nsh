@@ -129,6 +129,8 @@ fn Eflag(sh: &crate::context::Shell) -> c_char {
 // [spec:dash:sem:histedit.histedit-fn]
 // [spec:dash:def:myhistedit.histedit-fn]
 // [spec:dash:sem:myhistedit.histedit-fn]
+// [spec:posix:req:builtin.fc.env-histfile-initialization]
+// [spec:posix:req:builtin.fc.env-histfile-sharing-and-deletion]
 pub fn histedit(sh: &mut crate::context::Shell) {
     if iflag(sh) != 0 {
         if !history_active(sh) {

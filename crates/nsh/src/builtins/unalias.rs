@@ -16,6 +16,16 @@ use crate::options::Options;
 
 // [spec:dash:def:alias.unaliascmd-fn]
 // [spec:dash:sem:alias.unaliascmd-fn]
+// [spec:posix:syn:builtin.unalias.synopsis]
+// [spec:posix:req:builtin.unalias.remove-definitions]
+// [spec:posix:req:builtin.unalias.utility-syntax-guidelines]
+// [spec:posix:req:builtin.unalias.opt-a]
+// [spec:posix:req:builtin.unalias.operand-alias-name]
+// [spec:posix:req:builtin.unalias.env-locale]
+// [spec:posix:sem:builtin.unalias.env-nlspath]
+// [spec:posix:req:builtin.unalias.stderr]
+// [spec:posix:req:builtin.unalias.interfaces]
+// [spec:posix:req:builtin.unalias.exit-status]
 pub fn unaliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut i: c_int;
 

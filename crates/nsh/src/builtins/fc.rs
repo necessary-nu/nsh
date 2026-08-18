@@ -48,6 +48,13 @@ struct Flags {
 
 /// Scan `fc` options, stopping at the first operand. A negative decimal
 /// number is an operand, not an option (`fc -2`).
+// [spec:posix:syn:builtin.fc.synopsis]
+// [spec:posix:req:builtin.fc.utility-syntax-guidelines]
+// [spec:posix:req:builtin.fc.opt-e]
+// [spec:posix:req:builtin.fc.opt-l]
+// [spec:posix:req:builtin.fc.opt-n]
+// [spec:posix:req:builtin.fc.opt-r]
+// [spec:posix:req:builtin.fc.opt-s]
 fn scan_options(sh: &mut crate::context::Shell, args: &[&BStr]) -> Result<Flags, Error> {
     let mut flags = Flags {
         editor: None,
@@ -114,6 +121,18 @@ fn scan_options(sh: &mut crate::context::Shell, args: &[&BStr]) -> Result<Flags,
 // [spec:posix:req:xcu.output-files.temp-file-naming]
 // [spec:posix:req:xcu.output-files.temp-file-removal]
 // [spec:posix:req:xcu.output-files.sigquit-bypasses-recovery]
+// [spec:posix:req:builtin.fc.list-or-edit]
+// [spec:posix:syn:builtin.fc.operand-first-last]
+// [spec:posix:req:builtin.fc.operand-default-s]
+// [spec:posix:req:builtin.fc.operand-defaults-no-s]
+// [spec:posix:req:builtin.fc.operand-range]
+// [spec:posix:req:builtin.fc.operand-range-clamping]
+// [spec:posix:req:builtin.fc.operand-old-new]
+// [spec:posix:req:builtin.fc.env-fcedit]
+// [spec:posix:req:builtin.fc.env-locale]
+// [spec:posix:sem:builtin.fc.env-nlspath]
+// [spec:posix:req:builtin.fc.stderr]
+// [spec:posix:req:builtin.fc.interfaces]
 pub fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut fields: Vec<strlist> = args
         .iter()

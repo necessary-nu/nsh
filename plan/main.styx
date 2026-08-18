@@ -1347,6 +1347,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T02:08:23.05086831Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T02:09:52.22325329Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Mapped all 43 assigned alias, unalias, and fc rules to the builtin entry points, fc option/operand processing, history initialization, and semantic history numbering. Verification: cargo test -p nsh passes; selected POSIX harness PASS=28 FAIL=0 with 38 exercised rule assertions; git diff --check clean."
+                    }
+                )
             }
 
             {

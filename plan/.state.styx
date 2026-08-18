@@ -2284,4 +2284,93 @@ impl_evidence (
         {impl_name shell, rule builtin.read.var-assignment-order}
         {impl_name shell, rule builtin.read.variable-set-error}
     )}
+    {id posix-builtins-alias, covered_rules (
+        builtin.alias.create-or-display
+        builtin.alias.definition
+        builtin.alias.env-locale
+        builtin.alias.env-nlspath
+        builtin.alias.execution-environment
+        builtin.alias.exit-status
+        builtin.alias.interfaces
+        builtin.alias.operands
+        builtin.alias.stderr
+        builtin.alias.synopsis
+        builtin.fc.env-fcedit
+        builtin.fc.env-histfile-initialization
+        builtin.fc.env-histfile-sharing-and-deletion
+        builtin.fc.env-locale
+        builtin.fc.env-nlspath
+        builtin.fc.history-number-wrap
+        builtin.fc.history-numbering
+        builtin.fc.interfaces
+        builtin.fc.list-or-edit
+        builtin.fc.operand-default-s
+        builtin.fc.operand-defaults-no-s
+        builtin.fc.operand-first-last
+        builtin.fc.operand-old-new
+        builtin.fc.operand-range
+        builtin.fc.operand-range-clamping
+        builtin.fc.opt-e
+        builtin.fc.opt-l
+        builtin.fc.opt-n
+        builtin.fc.opt-r
+        builtin.fc.opt-s
+        builtin.fc.stderr
+        builtin.fc.synopsis
+        builtin.fc.utility-syntax-guidelines
+        builtin.unalias.env-locale
+        builtin.unalias.env-nlspath
+        builtin.unalias.exit-status
+        builtin.unalias.interfaces
+        builtin.unalias.operand-alias-name
+        builtin.unalias.opt-a
+        builtin.unalias.remove-definitions
+        builtin.unalias.stderr
+        builtin.unalias.synopsis
+        builtin.unalias.utility-syntax-guidelines
+    ), covered_claims (
+        {impl_name shell, rule builtin.alias.create-or-display}
+        {impl_name shell, rule builtin.alias.definition}
+        {impl_name shell, rule builtin.alias.env-locale}
+        {impl_name shell, rule builtin.alias.env-nlspath}
+        {impl_name shell, rule builtin.alias.execution-environment}
+        {impl_name shell, rule builtin.alias.exit-status}
+        {impl_name shell, rule builtin.alias.interfaces}
+        {impl_name shell, rule builtin.alias.operands}
+        {impl_name shell, rule builtin.alias.stderr}
+        {impl_name shell, rule builtin.alias.synopsis}
+        {impl_name shell, rule builtin.fc.env-fcedit}
+        {impl_name shell, rule builtin.fc.env-histfile-initialization}
+        {impl_name shell, rule builtin.fc.env-histfile-sharing-and-deletion}
+        {impl_name shell, rule builtin.fc.env-locale}
+        {impl_name shell, rule builtin.fc.env-nlspath}
+        {impl_name shell, rule builtin.fc.history-number-wrap}
+        {impl_name shell, rule builtin.fc.history-numbering}
+        {impl_name shell, rule builtin.fc.interfaces}
+        {impl_name shell, rule builtin.fc.list-or-edit}
+        {impl_name shell, rule builtin.fc.operand-default-s}
+        {impl_name shell, rule builtin.fc.operand-defaults-no-s}
+        {impl_name shell, rule builtin.fc.operand-first-last}
+        {impl_name shell, rule builtin.fc.operand-old-new}
+        {impl_name shell, rule builtin.fc.operand-range}
+        {impl_name shell, rule builtin.fc.operand-range-clamping}
+        {impl_name shell, rule builtin.fc.opt-e}
+        {impl_name shell, rule builtin.fc.opt-l}
+        {impl_name shell, rule builtin.fc.opt-n}
+        {impl_name shell, rule builtin.fc.opt-r}
+        {impl_name shell, rule builtin.fc.opt-s}
+        {impl_name shell, rule builtin.fc.stderr}
+        {impl_name shell, rule builtin.fc.synopsis}
+        {impl_name shell, rule builtin.fc.utility-syntax-guidelines}
+        {impl_name shell, rule builtin.unalias.env-locale}
+        {impl_name shell, rule builtin.unalias.env-nlspath}
+        {impl_name shell, rule builtin.unalias.exit-status}
+        {impl_name shell, rule builtin.unalias.interfaces}
+        {impl_name shell, rule builtin.unalias.operand-alias-name}
+        {impl_name shell, rule builtin.unalias.opt-a}
+        {impl_name shell, rule builtin.unalias.remove-definitions}
+        {impl_name shell, rule builtin.unalias.stderr}
+        {impl_name shell, rule builtin.unalias.synopsis}
+        {impl_name shell, rule builtin.unalias.utility-syntax-guidelines}
+    )}
 )

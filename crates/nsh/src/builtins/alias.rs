@@ -15,6 +15,16 @@ use crate::eval::Flow;
 
 // [spec:dash:def:alias.aliascmd-fn]
 // [spec:dash:sem:alias.aliascmd-fn]
+// [spec:posix:syn:builtin.alias.synopsis]
+// [spec:posix:req:builtin.alias.create-or-display]
+// [spec:posix:def:builtin.alias.definition]
+// [spec:posix:req:builtin.alias.execution-environment]
+// [spec:posix:req:builtin.alias.operands]
+// [spec:posix:req:builtin.alias.env-locale]
+// [spec:posix:sem:builtin.alias.env-nlspath]
+// [spec:posix:req:builtin.alias.stderr]
+// [spec:posix:req:builtin.alias.interfaces]
+// [spec:posix:req:builtin.alias.exit-status]
 pub fn aliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut ret: c_int = 0;
 
