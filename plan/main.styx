@@ -3582,6 +3582,20 @@ children (
                                 kind @decision
                                 text "priority pinned to 0 — operator override: Brendan: make a WBS for that P0 follow-up."
                             }
+
+                            {
+                                at 2026-08-18T00:26:15.751745919Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T00:28:44.252658298Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Implemented an Arc-owned POSIX locale_t in nsh-platform. newlocale builds only from explicit non-empty names; RawLocale frees exactly once; a lifetime-bound Rc-marked guard makes thread migration impossible and restores uselocale in Drop. Short scopes cover ctype, multibyte conversion, collation, error rendering, and strsignal; only strsignal's documented shared buffer is mutex-protected. Platform tests prove construction neutrality, nested stack restoration, unwind restoration, Send+Sync ownership, and decoder lifetime. cargo test -p nsh-platform: 11/0; cargo check --workspace --all-targets clean apart from the existing ten nsh warnings."
+                            }
                         )
                     }
 

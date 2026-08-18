@@ -20,6 +20,9 @@ use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use rustix::fs::{Access, AtFlags, CWD, accessat};
 use rustix::process::{Gid, Uid};
 
+mod locale;
+pub use locale::{Locale, LocaleCategory, LocaleDecode, LocaleDecoder};
+
 // Rust's runtime changes three pieces of inherited process state before
 // `main`: it ignores SIGPIPE, installs stack-overflow handlers, and opens
 // /dev/null over closed standard descriptors. A shell must present the state
@@ -121,53 +124,6 @@ unsafe extern "C" {
     ) -> usize;
     fn iswblank(wc: core::ffi::c_uint) -> core::ffi::c_int;
     fn iswspace(wc: core::ffi::c_uint) -> core::ffi::c_int;
-}
-
-pub enum LocaleDecode {
-    Incomplete,
-    Complete(i32),
-    Invalid,
-}
-
-/// Incremental decoder for one character in the process locale.
-pub struct LocaleDecoder {
-    state: libc::mbstate_t,
-}
-
-impl LocaleDecoder {
-    pub fn new() -> Self {
-        // SAFETY: an all-zero `mbstate_t` is the initial conversion state.
-        Self {
-            state: unsafe { std::mem::zeroed() },
-        }
-    }
-
-    pub fn push(&mut self, byte: u8) -> LocaleDecode {
-        let mut wide = 0_i32;
-        // SAFETY: the one-byte input and both output records are live for
-        // the call; `mbrtowc` retains no pointers.
-        let result = unsafe {
-            mbrtowc(
-                &mut wide,
-                (&byte as *const u8).cast(),
-                1,
-                &mut self.state,
-            )
-        };
-        if result == usize::MAX - 1 {
-            LocaleDecode::Incomplete
-        } else if result == 1 {
-            LocaleDecode::Complete(wide)
-        } else {
-            LocaleDecode::Invalid
-        }
-    }
-}
-
-impl Default for LocaleDecoder {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 pub fn locale_wide_is_blank(wide: i32) -> bool {

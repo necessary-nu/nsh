@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-08-04T17:27:26.574005603Z
+last_sync_at 2026-08-18T00:28:34.316571429Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -649,6 +649,8 @@ rule_versions (
     {id edit.vi-mode-editing, version 0}
     {id edit.word-bigword-terms, version 0}
     {id edit.yank-motion, version 0}
+    {id embedding-safety.process-environment-is-read-only, version 0}
+    {id embedding-safety.process-locale-is-unchanged, version 0}
     {id exit.command-status, version 0}
     {id exit.expansion-error, version 0}
     {id exit.interactive-abandons-command, version 0}
@@ -968,6 +970,12 @@ rule_versions (
     {id sh.stdin-used-only-if, version 0}
     {id sh.synopsis, version 0}
     {id sh.utility-syntax-guidelines, version 0}
+    {id shell-locale.handle-lifetime, version 0}
+    {id shell-locale.instance-isolation, version 0}
+    {id shell-locale.invalid-selection, version 0}
+    {id shell-locale.operation-binding, version 0}
+    {id shell-locale.owned-locale, version 0}
+    {id shell-locale.selection, version 0}
     {id shell.command-execution, version 0}
     {id shell.command-language-interpreter, version 0}
     {id shell.exit-status-collection, version 0}
@@ -1087,6 +1095,83 @@ rule_versions (
     {id xcurel.process-attributes-additional, version 0}
 )
 
+derived_priorities (
+    {id builtins-modules, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-alias-stdout-format, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-cd-operand-empty-string, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-cd-opt-e, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-cd-step8-canonical-form-dot-dot, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-cd-step9-path-max-relative, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-command-opt-v, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-dot-path-search, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-exec-failure-interactive-up, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-exec-utility-syntax-guidelines, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-fc-edit-and-reexecute, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-fc-env-histfile, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-fc-env-histsize, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-fc-exit-status, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-fc-stdout-list-format, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-getopts-env-optind, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-getopts-optarg, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-getopts-reset, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-getopts-stderr-diagnostic, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-jobs-stdout-default-format, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-jobs-stdout-state-strings, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-kill-operand-pid-job-id, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-read-continuation-prompt, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-read-env-ps2, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-read-option-d, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-read-syn, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-set-opt-b-notify, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-set-opt-h, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-set-opt-o-ignoreeof, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-set-opt-o-noclobber, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-set-opt-o-report, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-set-opt-u-nounset, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-set-options-both-forms, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-trap-list-in-subshell, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-trap-opt-p, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-trap-opt-p-suitable-for-reinput, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-trap-synopsis, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-ulimit-stdout-all-format, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-wait-exit-status-last-operand, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-wait-exit-status-values, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-wait-pid-operands, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-builtin-wait-remove-waited-for-pid, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-cmd-case-clause-terminators, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-append-last-bigword, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-command-alias-insert, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-command-complete-unique, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-command-display-expansions, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-command-expand-all, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-edit-line, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-edit-line-replacement, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-history-goto, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-history-list, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-history-prev-next, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-history-search-backward, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-history-search-forward, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-history-search-pattern, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-history-search-repeat, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-insert-end-of-file, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-insert-literal-next, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-edit-undo, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-exit-shell-error-consequences, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-exit-unrecoverable-read-error, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-grammar-case-clause, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-grammar-operator-tokens, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-jobctl-save-terminal-settings, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-param-ps1-exclamation-expansion, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-param-ps1-two-pass, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-pattern-bracket-expression, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-sh-exit-status-values, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-xcu-exit-status-listed-values-binding, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id logical-descriptor-table, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id owned-words, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id printf-builtin, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id printf-errata, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+)
+
 assertions (
     {id posix-harness, kind @complete, author "brendan@necessary.nu", at 2026-08-04T00:31:09.803718675Z}
     {id host-owns-streams, kind @complete, author "brendan@necessary.nu", at 2026-08-07T09:33:13.662151863Z}
@@ -1121,55 +1206,7 @@ assertions (
 )
 
 impl_evidence (
-    {id posix-execution, covered_rules (
-        jobctl.background-job
-        jobctl.definition
-        jobctl.job-creation
-        jobctl.list-splitting
-        jobctl.pipeline-process-group
-        shenv.components
-        shenv.subshell-contexts
-        shenv.subshell-creation
-        shenv.subshell-isolation
-        shenv.utility-does-not-change-shell-environment
-        shenv.utility-environment
-        signal.async-list-sigint-sigquit-ignored
-        signal.inherited-actions
-        signal.trap-deferred-until-foreground-command-completes
-        signal.trap-during-wait
-    ), covered_claims (
-        {impl_name shell, rule jobctl.background-job}
-        {impl_name shell, rule jobctl.definition}
-        {impl_name shell, rule jobctl.job-creation}
-        {impl_name shell, rule jobctl.list-splitting}
-        {impl_name shell, rule jobctl.pipeline-process-group}
-        {impl_name shell, rule shenv.components}
-        {impl_name shell, rule shenv.subshell-contexts}
-        {impl_name shell, rule shenv.subshell-creation}
-        {impl_name shell, rule shenv.subshell-isolation}
-        {impl_name shell, rule shenv.utility-does-not-change-shell-environment}
-        {impl_name shell, rule shenv.utility-environment}
-        {impl_name shell, rule signal.async-list-sigint-sigquit-ignored}
-        {impl_name shell, rule signal.inherited-actions}
-        {impl_name shell, rule signal.trap-deferred-until-foreground-command-completes}
-        {impl_name shell, rule signal.trap-during-wait}
-    ), rule_versions_seen (
-        {id jobctl.background-job, version 0}
-        {id jobctl.definition, version 0}
-        {id jobctl.job-creation, version 0}
-        {id jobctl.list-splitting, version 0}
-        {id jobctl.pipeline-process-group, version 0}
-        {id shenv.components, version 0}
-        {id shenv.subshell-contexts, version 0}
-        {id shenv.subshell-creation, version 0}
-        {id shenv.subshell-isolation, version 0}
-        {id shenv.utility-does-not-change-shell-environment, version 0}
-        {id shenv.utility-environment, version 0}
-        {id signal.async-list-sigint-sigquit-ignored, version 0}
-        {id signal.inherited-actions, version 0}
-        {id signal.trap-deferred-until-foreground-command-completes, version 0}
-        {id signal.trap-during-wait, version 0}
-    )}
+    {id posix-execution}
     {id posix-line-editing, covered_rules (
         edit.block-mode-terminals
         edit.change-motion
@@ -1248,5 +1285,53 @@ impl_evidence (
         {impl_name shell, rule edit.vi-mode-editing}
         {impl_name shell, rule edit.word-bigword-terms}
         {impl_name shell, rule edit.yank-motion}
+    ), rule_versions_seen (
+        {id edit.block-mode-terminals, version 0}
+        {id edit.change-motion, version 0}
+        {id edit.change-to-end-and-line, version 0}
+        {id edit.command-case-toggle, version 0}
+        {id edit.command-comment, version 0}
+        {id edit.command-count, version 0}
+        {id edit.command-invoke-vi, version 0}
+        {id edit.command-newline, version 0}
+        {id edit.command-redraw, version 0}
+        {id edit.command-repeat, version 0}
+        {id edit.cursor-terminology, version 0}
+        {id edit.delete-char, version 0}
+        {id edit.delete-motion, version 0}
+        {id edit.enter-insert-mode, version 0}
+        {id edit.escape-to-command-mode, version 0}
+        {id edit.insert-deletion, version 0}
+        {id edit.insert-escape, version 0}
+        {id edit.insert-interrupt, version 0}
+        {id edit.insert-mode-default, version 0}
+        {id edit.insert-mode-special-characters, version 0}
+        {id edit.insert-newline, version 0}
+        {id edit.motion-char, version 0}
+        {id edit.motion-char-search, version 0}
+        {id edit.motion-char-search-repeat, version 0}
+        {id edit.motion-command-set, version 0}
+        {id edit.motion-line-position, version 0}
+        {id edit.motion-word-backward, version 0}
+        {id edit.motion-word-end, version 0}
+        {id edit.motion-word-forward, version 0}
+        {id edit.put-save-buffer, version 0}
+        {id edit.replace-char, version 0}
+        {id edit.set-o-vi, version 0}
+        {id edit.sigint-command-mode, version 0}
+        {id edit.stty-characters, version 0}
+        {id edit.up-option, version 0}
+        {id edit.vi-mode-editing, version 0}
+        {id edit.word-bigword-terms, version 0}
+        {id edit.yank-motion, version 0}
+    )}
+    {id scoped-locale-boundary, covered_rules (
+        embedding-safety.process-locale-is-unchanged
+        shell-locale.handle-lifetime
+        shell-locale.owned-locale
+    ), covered_claims (
+        {impl_name nsh-library, rule embedding-safety.process-locale-is-unchanged}
+        {impl_name nsh-library, rule shell-locale.handle-lifetime}
+        {impl_name nsh-library, rule shell-locale.owned-locale}
     )}
 )
