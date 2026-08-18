@@ -3549,4 +3549,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.trap.opt-p}
     )}
+    {id fix-builtin-trap-opt-p-suitable-for-reinput, covered_rules (
+        builtin.trap.opt-p-suitable-for-reinput
+    ), covered_claims (
+        {impl_name shell, rule builtin.trap.opt-p-suitable-for-reinput}
+    )}
 )

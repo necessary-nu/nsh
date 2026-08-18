@@ -2501,6 +2501,21 @@ children (
                             shell ([spec:posix:req:builtin.trap.opt-p-suitable-for-reinput])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:42:57.413258114Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:44:04.311730352Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Map the reinput rule to listing_line, which serializes set, ignored, and default actions through one path. Replace substring inspection with a round trip: save selected USR1 and default INT records, mutate both, source the listing, and prove a quoted apostrophe plus deferred HOME expansion survives while INT returns to default. Retain no-operand -p assertions for both default and set records. Verification: trap-p-option and adjacent trap cases pass; focused Rust trap tests, POSIX harness unit tests, and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

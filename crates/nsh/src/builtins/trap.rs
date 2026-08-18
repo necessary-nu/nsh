@@ -18,6 +18,7 @@ use crate::eval::Flow;
 use crate::options::Options;
 use crate::trap::{NSIG, clear_traps, decode_signal, decode_signum, setsignal};
 
+// [spec:posix:req:builtin.trap.opt-p-suitable-for-reinput]
 fn listing_line(signo: usize, action: Option<&BString>) -> Vec<u8> {
     let mut line = b"trap -- ".to_vec();
     if let Some(action) = action {
