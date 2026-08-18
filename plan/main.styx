@@ -5429,12 +5429,34 @@ children (
                 id define-oils-survey-manifests
                 title "Define reproducible full, POSIX-candidate, and Bash-extension manifests"
                 deps (import-oils-osh-corpus)
+                sealed true
                 log (
                     {
                         at 2026-08-18T13:04:49.573614201Z
                         author "brendan@necessary.nu"
                         kind @note
                         text "Definition of done: generate manifests from upstream metadata rather than hand-maintained filenames, with asserted baseline counts for active OSH (134 files/2,755 cases), POSIX-candidate via compare_shells containing dash (76/1,614), Bash comparison (130/2,735), Bash-extension via Bash without Dash (54/1,121), and the named *-bash diagnostic slice (7/112). Preserve per-case shell qualifiers. Label the Dash-selected set POSIX-candidate, not normative POSIX."
+                    }
+
+                    {
+                        at 2026-08-18T13:27:38.082319072Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T13:31:55.345193331Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Completion evidence: generation from imported compare_shells metadata and payload hashes is byte-reproducible. Locked selections verify as full 134/2,755; POSIX-candidate 76/1,614; Bash comparison 130/2,735; Bash-without-Dash 54/1,121; and named *-bash 7/112. The generated manifest records per-file source hashes and qualified-assertion counts. Unit tests, clippy with warnings denied, fresh re-import comparison, altered-manifest rejection, and altered-baseline rejection all pass."
+                    }
+
+                    {
+                        at 2026-08-18T13:31:55.474877325Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }

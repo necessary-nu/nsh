@@ -1,4 +1,4 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -22,6 +22,7 @@ struct SourceLock {
     license_sha256: String,
     spec_format: String,
     observed: Observed,
+    manifests: Option<ManifestExpectations>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -30,6 +31,21 @@ struct Observed {
     all_cases: usize,
     active_osh_files: usize,
     active_osh_cases: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct ManifestExpectations {
+    full: ExpectedCount,
+    posix_candidate: ExpectedCount,
+    bash_comparison: ExpectedCount,
+    bash_extension: ExpectedCount,
+    bash_named_diagnostic: ExpectedCount,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+struct ExpectedCount {
+    files: usize,
+    cases: usize,
 }
 
 fn main() {
@@ -54,12 +70,17 @@ fn run() -> Result<()> {
             reject_extra_args(args)?;
             verify_oils(&root)
         }
+        Some(command) if command == OsStr::new("generate-oils-manifests") => {
+            let root = args.next().map(PathBuf::from).unwrap_or_else(survey_root);
+            reject_extra_args(args)?;
+            generate_oils_manifests(&root)
+        }
         _ => Err(usage().into()),
     }
 }
 
 fn usage() -> &'static str {
-    "usage: nsh-survey import-oils OILS_CHECKOUT [OUTPUT]\n       nsh-survey verify-oils [ROOT]"
+    "usage: nsh-survey import-oils OILS_CHECKOUT [OUTPUT]\n       nsh-survey verify-oils [ROOT]\n       nsh-survey generate-oils-manifests [ROOT]"
 }
 
 fn required_path(value: Option<std::ffi::OsString>, name: &str) -> Result<PathBuf> {
@@ -218,6 +239,9 @@ fn generate_import(
     // intentionally covers LICENSE.txt and spec/ only.
     for name in ["SOURCE.toml", "FIXTURES.txt"] {
         copy_file(&metadata_root.join(name), &staging.join(name))?;
+    }
+    if lock.manifests.is_some() {
+        write_oils_manifest(staging, lock)?;
     }
     Ok(())
 }
@@ -383,14 +407,21 @@ fn install_import(staging: &Path, output: &Path) -> Result<()> {
             "FILES.sha256",
             "SOURCE.toml",
             "FIXTURES.txt",
+            "MANIFEST.toml",
         ] {
             let old = output.join(name);
+            let new = staging.join(name);
+            if !new.exists() {
+                if old.is_file() && name == "MANIFEST.toml" {
+                    fs::remove_file(old)?;
+                }
+                continue;
+            }
             if old.is_dir() {
                 fs::remove_dir_all(&old)?;
             } else if old.exists() {
                 fs::remove_file(&old)?;
             }
-            let new = staging.join(name);
             fs::rename(new, old)?;
         }
     } else {
@@ -402,11 +433,32 @@ fn install_import(staging: &Path, output: &Path) -> Result<()> {
 fn verify_oils(root: &Path) -> Result<()> {
     let lock = read_lock(root)?;
     verify_import(root, &lock)?;
+    if lock.manifests.is_some() {
+        verify_oils_manifest(root, &lock)?;
+    }
     println!(
         "verified {} imported Oils files and {} active OSH cases at {}",
         inventory(root)?.len(),
         lock.observed.active_osh_cases,
         lock.commit
+    );
+    Ok(())
+}
+
+fn generate_oils_manifests(root: &Path) -> Result<()> {
+    let lock = read_lock(root)?;
+    if lock.manifests.is_none() {
+        return Err(format!(
+            "{} has no manifest baselines",
+            root.join("SOURCE.toml").display()
+        )
+        .into());
+    }
+    write_oils_manifest(root, &lock)?;
+    verify_oils_manifest(root, &lock)?;
+    println!(
+        "generated and verified {}",
+        root.join("MANIFEST.toml").display()
     );
     Ok(())
 }
@@ -453,6 +505,227 @@ fn verify_import(root: &Path, lock: &SourceLock) -> Result<()> {
         .into());
     }
     Ok(())
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct OilsManifest {
+    schema: u32,
+    source_commit: String,
+    source_tree: String,
+    spec_format: String,
+    groups: Vec<ManifestGroup>,
+    specs: Vec<ManifestSpec>,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct ManifestGroup {
+    id: String,
+    label: String,
+    selector: String,
+    files: usize,
+    cases: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct ManifestSpec {
+    path: String,
+    cases: usize,
+    compare_shells: Vec<String>,
+    groups: Vec<String>,
+    qualified_assertions: usize,
+    sha256: String,
+}
+
+fn write_oils_manifest(root: &Path, lock: &SourceLock) -> Result<()> {
+    let manifest = build_oils_manifest(root, lock)?;
+    let text = toml::to_string_pretty(&manifest)?;
+    fs::write(root.join("MANIFEST.toml"), text)?;
+    Ok(())
+}
+
+fn verify_oils_manifest(root: &Path, lock: &SourceLock) -> Result<()> {
+    let path = root.join("MANIFEST.toml");
+    let text = fs::read_to_string(&path)?;
+    let actual: OilsManifest = toml::from_str(&text)?;
+    let expected = build_oils_manifest(root, lock)?;
+    if actual != expected {
+        return Err(format!("{} does not match the imported corpus", path.display()).into());
+    }
+    let canonical = toml::to_string_pretty(&expected)?;
+    if text != canonical {
+        return Err(format!("{} is not in canonical generated form", path.display()).into());
+    }
+    Ok(())
+}
+
+fn build_oils_manifest(root: &Path, lock: &SourceLock) -> Result<OilsManifest> {
+    let expected = lock
+        .manifests
+        .as_ref()
+        .ok_or("SOURCE.toml has no manifest baselines")?;
+    let payload = inventory(root)?;
+    let (_, cases, active) = discover_specs(root)?;
+    if active.len() != lock.observed.active_osh_files || cases != lock.observed.active_osh_cases {
+        return Err("cannot manifest an incomplete active OSH corpus".into());
+    }
+
+    let mut counts = BTreeMap::<String, ExpectedCount>::new();
+    let mut specs = Vec::with_capacity(active.len());
+    for spec in active {
+        let bytes = fs::read(&spec.path)?;
+        let compare_shells = metadata_words(&bytes, "compare_shells")?;
+        let groups = manifest_groups(&spec.file_name, &compare_shells);
+        for group in &groups {
+            let count = counts
+                .entry(group.clone())
+                .or_insert(ExpectedCount { files: 0, cases: 0 });
+            count.files += 1;
+            count.cases += spec.cases;
+        }
+        let relative = PathBuf::from("spec").join(&spec.file_name);
+        let hash = payload
+            .get(&relative)
+            .ok_or_else(|| format!("{} is absent from FILES.sha256", relative.display()))?;
+        specs.push(ManifestSpec {
+            path: relative.to_string_lossy().replace('\\', "/"),
+            cases: spec.cases,
+            compare_shells,
+            groups,
+            qualified_assertions: count_qualified_assertions(&bytes),
+            sha256: hash.clone(),
+        });
+    }
+
+    let definitions = [
+        (
+            "full",
+            "Active OSH corpus",
+            "suite is active OSH",
+            expected.full,
+        ),
+        (
+            "posix-candidate",
+            "Dash-selected POSIX candidate survey",
+            "compare_shells contains dash; this is not the normative POSIX oracle",
+            expected.posix_candidate,
+        ),
+        (
+            "bash-comparison",
+            "Bash comparison survey",
+            "compare_shells contains bash or a bash-* version token",
+            expected.bash_comparison,
+        ),
+        (
+            "bash-extension",
+            "Bash extension survey",
+            "Bash comparison selection without dash",
+            expected.bash_extension,
+        ),
+        (
+            "bash-named-diagnostic",
+            "Named *-bash diagnostic slice",
+            "file stem ends with -bash",
+            expected.bash_named_diagnostic,
+        ),
+    ];
+    let mut groups = Vec::with_capacity(definitions.len());
+    for (id, label, selector, baseline) in definitions {
+        let observed = counts
+            .get(id)
+            .copied()
+            .unwrap_or(ExpectedCount { files: 0, cases: 0 });
+        if observed != baseline {
+            return Err(format!(
+                "manifest {id} has {}/{} files/cases; locked baseline is {}/{}",
+                observed.files, observed.cases, baseline.files, baseline.cases
+            )
+            .into());
+        }
+        groups.push(ManifestGroup {
+            id: id.to_owned(),
+            label: label.to_owned(),
+            selector: selector.to_owned(),
+            files: observed.files,
+            cases: observed.cases,
+        });
+    }
+
+    Ok(OilsManifest {
+        schema: 1,
+        source_commit: lock.commit.clone(),
+        source_tree: lock.tree.clone(),
+        spec_format: lock.spec_format.clone(),
+        groups,
+        specs,
+    })
+}
+
+fn metadata_words(bytes: &[u8], name: &str) -> Result<Vec<String>> {
+    let text = std::str::from_utf8(bytes)?;
+    let prefix = format!("## {name}:");
+    let mut value = None;
+    for line in text.lines() {
+        if line.starts_with("####") {
+            break;
+        }
+        if let Some(rest) = line.strip_prefix(&prefix) {
+            if value.replace(rest.trim()).is_some() {
+                return Err(format!("duplicate {name} file metadata").into());
+            }
+        }
+    }
+    Ok(value
+        .unwrap_or("")
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect())
+}
+
+fn manifest_groups(file_name: &str, compare_shells: &[String]) -> Vec<String> {
+    let has_dash = compare_shells.iter().any(|shell| shell == "dash");
+    let has_bash = compare_shells.iter().any(|shell| shell.starts_with("bash"));
+    let bash_named = file_name
+        .strip_suffix(".test.sh")
+        .is_some_and(|stem| stem.ends_with("-bash"));
+    let mut groups = vec!["full".to_owned()];
+    if has_dash {
+        groups.push("posix-candidate".to_owned());
+    }
+    if has_bash {
+        groups.push("bash-comparison".to_owned());
+    }
+    if has_bash && !has_dash {
+        groups.push("bash-extension".to_owned());
+    }
+    if bash_named {
+        groups.push("bash-named-diagnostic".to_owned());
+    }
+    groups
+}
+
+fn count_qualified_assertions(bytes: &[u8]) -> usize {
+    bytes
+        .split(|byte| *byte == b'\n')
+        .filter_map(|line| line.strip_prefix(b"## "))
+        .filter(|line| {
+            let token = line
+                .split(|byte| byte.is_ascii_whitespace())
+                .next()
+                .unwrap_or_default();
+            token == b"OK"
+                || token == b"BUG"
+                || token == b"N-I"
+                || token.strip_prefix(b"OK-").is_some_and(|suffix| {
+                    !suffix.is_empty() && suffix.iter().all(u8::is_ascii_digit)
+                })
+                || token.strip_prefix(b"BUG-").is_some_and(|suffix| {
+                    !suffix.is_empty() && suffix.iter().all(u8::is_ascii_digit)
+                })
+        })
+        .count()
 }
 
 fn inventory(root: &Path) -> Result<BTreeMap<PathBuf, String>> {
@@ -512,5 +785,31 @@ mod tests {
             result,
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    #[test]
+    fn manifest_groups_split_dash_and_bash() {
+        let both = vec!["dash".to_owned(), "bash-4.4".to_owned()];
+        assert_eq!(
+            manifest_groups("plain.test.sh", &both),
+            ["full", "posix-candidate", "bash-comparison"]
+        );
+
+        let bash = vec!["bash".to_owned()];
+        assert_eq!(
+            manifest_groups("builtin-bash.test.sh", &bash),
+            [
+                "full",
+                "bash-comparison",
+                "bash-extension",
+                "bash-named-diagnostic",
+            ]
+        );
+    }
+
+    #[test]
+    fn qualified_assertion_records_are_counted_once() {
+        let spec = b"#### case\n## BUG bash stdout: bad\n## OK-2 dash STDERR:\ntext\n## END\n";
+        assert_eq!(count_qualified_assertions(spec), 2);
     }
 }

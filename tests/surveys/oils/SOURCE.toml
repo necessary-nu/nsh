@@ -12,3 +12,23 @@ all_files = 222
 all_cases = 3964
 active_osh_files = 134
 active_osh_cases = 2755
+
+[manifests.full]
+files = 134
+cases = 2755
+
+[manifests.posix_candidate]
+files = 76
+cases = 1614
+
+[manifests.bash_comparison]
+files = 130
+cases = 2735
+
+[manifests.bash_extension]
+files = 54
+cases = 1121
+
+[manifests.bash_named_diagnostic]
+files = 7
+cases = 112

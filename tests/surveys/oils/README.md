@@ -33,3 +33,30 @@ an incidental test result.
 The initial pin is Oils commit
 `15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380`, whose metadata reports 222 total
 spec files with 3,964 cases and 134 active OSH files with 2,755 cases.
+
+## Generated survey manifest
+
+`MANIFEST.toml` is generated from the imported file metadata and
+`FILES.sha256`; do not edit it by hand. Regenerate and verify it with:
+
+```text
+cargo run -p nsh-survey -- generate-oils-manifests
+cargo run -p nsh-survey -- verify-oils
+```
+
+The manifest exposes five stable selections:
+
+- `full`: all 134 active OSH files and 2,755 cases;
+- `posix-candidate`: the 76 files and 1,614 cases whose `compare_shells`
+  metadata contains Dash;
+- `bash-comparison`: the 130 files and 2,735 cases whose metadata contains a
+  Bash token;
+- `bash-extension`: the 54 Bash-selected files and 1,121 cases not selected
+  for Dash; and
+- `bash-named-diagnostic`: the seven `*-bash` files and 112 cases.
+
+The Dash-selected set is a differential POSIX candidate survey, not a claim
+that each case is normative POSIX. Normative conformance remains under
+`posix/`. Each manifest entry records its complete source hash and qualified
+assertion count; the native runner reads the exact per-case shell qualifiers
+from those hashed source files.

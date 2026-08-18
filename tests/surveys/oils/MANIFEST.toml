@@ -1,0 +1,2145 @@
+schema = 1
+source_commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
+source_tree = "f95f91004abcfdb82dd413e6ef2a7c71591f23d6"
+spec_format = "2023-06"
+
+[[groups]]
+id = "full"
+label = "Active OSH corpus"
+selector = "suite is active OSH"
+files = 134
+cases = 2755
+
+[[groups]]
+id = "posix-candidate"
+label = "Dash-selected POSIX candidate survey"
+selector = "compare_shells contains dash; this is not the normative POSIX oracle"
+files = 76
+cases = 1614
+
+[[groups]]
+id = "bash-comparison"
+label = "Bash comparison survey"
+selector = "compare_shells contains bash or a bash-* version token"
+files = 130
+cases = 2735
+
+[[groups]]
+id = "bash-extension"
+label = "Bash extension survey"
+selector = "Bash comparison selection without dash"
+files = 54
+cases = 1121
+
+[[groups]]
+id = "bash-named-diagnostic"
+label = "Named *-bash diagnostic slice"
+selector = "file stem ends with -bash"
+files = 7
+cases = 112
+
+[[specs]]
+path = "spec/alias.test.sh"
+cases = 48
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 31
+sha256 = "38a3cc72a2a71d3ec45c6b2b11c936886a975755312674e73e5ccb84d307550d"
+
+[[specs]]
+path = "spec/append.test.sh"
+cases = 20
+compare_shells = [
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 38
+sha256 = "bde256737abf228308339cda2c8c210e3a847c34c95056ed75e6c392031ef4d0"
+
+[[specs]]
+path = "spec/arg-parse.test.sh"
+cases = 3
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 3
+sha256 = "66423d91c2691600e790a86ce6c8f0af644accfd8923a6f9c72545165b4ddc9a"
+
+[[specs]]
+path = "spec/arith-context.test.sh"
+cases = 16
+compare_shells = [
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 26
+sha256 = "b2075192c79fe30002951df2857edfbe2136bd345147a45c8547a7198af19d74"
+
+[[specs]]
+path = "spec/arith-dynamic.test.sh"
+cases = 4
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 20
+sha256 = "c5c7720aed613d5d8c7293e2d797b8789f7cb3ed0f4d1f44de19cdec0a61e461"
+
+[[specs]]
+path = "spec/arith.test.sh"
+cases = 74
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 141
+sha256 = "755dd45155283eaea498293e5decfd7507f7057395d7da1d0c3dd89b61ccd748"
+
+[[specs]]
+path = "spec/array-assign.test.sh"
+cases = 11
+compare_shells = [
+    "bash",
+    "zsh",
+    "mksh",
+    "ash",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 21
+sha256 = "1ed6163a2d853d772f7129e8e4649a6580a5534b77cbe4c5bde77a4c6e359e92"
+
+[[specs]]
+path = "spec/array-assoc.test.sh"
+cases = 42
+compare_shells = ["bash-4.4"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 17
+sha256 = "21a6ececfb891c37e4a06f64832d26cae7036ecae6aa9afb04e151f6269722d8"
+
+[[specs]]
+path = "spec/array-basic.test.sh"
+cases = 5
+compare_shells = [
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 3
+sha256 = "339e0dfc629553c72e7877f5dab5dcfb400695fab07833c79dc873ad290edb3b"
+
+[[specs]]
+path = "spec/array-compat.test.sh"
+cases = 12
+compare_shells = [
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 10
+sha256 = "f16458055fa45d1ea85266729ed8fb811e7eef488c6c355af28f4a72a7493bb4"
+
+[[specs]]
+path = "spec/array-literal.test.sh"
+cases = 19
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 9
+sha256 = "4e931628804cf82d9c617d168cd76030303f7f5dbe99b67a41fd3eedfa1e9197"
+
+[[specs]]
+path = "spec/array-sparse.test.sh"
+cases = 40
+compare_shells = [
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 63
+sha256 = "96e1659a8843c5bb1996d138c2bcce86ca5a13846bb29a22f5ba929ce7b710d5"
+
+[[specs]]
+path = "spec/array.test.sh"
+cases = 78
+compare_shells = [
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 72
+sha256 = "1778a4b28d9d5c234b9a42942c313b0bf0b129259e1472d8412c3f3abe79a59b"
+
+[[specs]]
+path = "spec/assign-deferred.test.sh"
+cases = 9
+compare_shells = [
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 13
+sha256 = "45cd72b10a97cb54facdf01e118661767ee16ae861610699098e2afca585d2cd"
+
+[[specs]]
+path = "spec/assign-dialects.test.sh"
+cases = 4
+compare_shells = [
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 4
+sha256 = "2e210b5dc9fbed77e717673c9e2c3ae70947cb27196860afa4b4ad7e2eec21a7"
+
+[[specs]]
+path = "spec/assign-extended.test.sh"
+cases = 39
+compare_shells = [
+    "bash-4.4",
+    "mksh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 74
+sha256 = "c1bc6327b614abe9b17bb3ba2dcdacac1259db8e53b9044c1f63785aac34beba"
+
+[[specs]]
+path = "spec/assign.test.sh"
+cases = 48
+compare_shells = [
+    "dash",
+    "bash-4.4",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 61
+sha256 = "4b55dd7cf67de7c045db92adc52e3c8bbb0f10ab915a63759512cd4ec4dca0e6"
+
+[[specs]]
+path = "spec/background.test.sh"
+cases = 27
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 16
+sha256 = "778a143f13e77a6b19f728dd102dfb3938bc1d6c8b1699a7517681733e0da0c6"
+
+[[specs]]
+path = "spec/ble-features.test.sh"
+cases = 9
+compare_shells = [
+    "bash",
+    "zsh",
+    "mksh",
+    "ash",
+    "dash",
+    "yash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 25
+sha256 = "2429f066a32f13b1271a688fe66df931163ab56020043d494c14fba1843d5f84"
+
+[[specs]]
+path = "spec/ble-idioms.test.sh"
+cases = 26
+compare_shells = [
+    "bash",
+    "zsh",
+    "mksh",
+    "ash",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 61
+sha256 = "43116d1383d2c07b3a061317fc7c99188c7e200b5c36f9cd6e70b6bf031d35d8"
+
+[[specs]]
+path = "spec/ble-unset.test.sh"
+cases = 5
+compare_shells = [
+    "bash",
+    "zsh",
+    "mksh",
+    "ash",
+    "dash",
+    "yash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 12
+sha256 = "7f6f154b3c7752cefc234ea541ba85d196f40189eec2660db980293e47913660"
+
+[[specs]]
+path = "spec/blog1.test.sh"
+cases = 9
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 14
+sha256 = "66f17bcb8e2a65a1deac3eaaa0c446ddfeba1acbf0c202ccadd2a307a195f590"
+
+[[specs]]
+path = "spec/blog2.test.sh"
+cases = 8
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 4
+sha256 = "3512da62798f08592335709b5135216b08807fffff938e086d2c862dfddd0801"
+
+[[specs]]
+path = "spec/bool-parse.test.sh"
+cases = 8
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 15
+sha256 = "59f1396609e9208f1395be6c6c20f46c5de133571857eedd44e7384145171eab"
+
+[[specs]]
+path = "spec/brace-expansion.test.sh"
+cases = 55
+compare_shells = [
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 60
+sha256 = "1d87e145a815a731943972feb083c2cbe4ae489655624367abc2b8e985ca2c83"
+
+[[specs]]
+path = "spec/bugs.test.sh"
+cases = 29
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 47
+sha256 = "f9649f4f57e8a1ae007130f146355964e0a8d5ab9057e8a5be571618dd2c8921"
+
+[[specs]]
+path = "spec/builtin-bash.test.sh"
+cases = 13
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+    "bash-named-diagnostic",
+]
+qualified_assertions = 9
+sha256 = "68eda89d4b2cc35e575f906cbe4e3d2ea3461ba792cc2e5598b16b1d31df207f"
+
+[[specs]]
+path = "spec/builtin-bind.test.sh"
+cases = 9
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 0
+sha256 = "9cd511c0ed2a1e15258514488e93cf5273857eebc94d79ac3a22b351e8f84262"
+
+[[specs]]
+path = "spec/builtin-bracket.test.sh"
+cases = 52
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 21
+sha256 = "a1028e25ce97346ab8860ee8d5e89524dc7be8b79bd388c31808ed1edfded383"
+
+[[specs]]
+path = "spec/builtin-cd.test.sh"
+cases = 30
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 17
+sha256 = "ba160e75bb733be279a603ebc424f59dbf759acb74885471e54eae427b90b1ad"
+
+[[specs]]
+path = "spec/builtin-completion.test.sh"
+cases = 51
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 6
+sha256 = "a56a451c00c007e507d025a69dd3c536c7a1864da426092721e04202d2f8cf2c"
+
+[[specs]]
+path = "spec/builtin-dirs.test.sh"
+cases = 18
+compare_shells = [
+    "bash",
+    "zsh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 9
+sha256 = "e76ab9b5c07e64bc8fe3d81287f91897c22e021df6314cfcd334e1985f357a21"
+
+[[specs]]
+path = "spec/builtin-echo.test.sh"
+cases = 27
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 27
+sha256 = "7c888fbb7de1f79370fb7dc2ec0224704e9cc8fcde6d1fa27017e8a2e4ad874e"
+
+[[specs]]
+path = "spec/builtin-eval-source.test.sh"
+cases = 23
+compare_shells = [
+    "dash",
+    "bash-4.4",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 42
+sha256 = "2bab6e004982d0478758602149e66e9a7998a2bfe5116998200d5b3d9e79a394"
+
+[[specs]]
+path = "spec/builtin-fc.test.sh"
+cases = 14
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 1
+sha256 = "eef865e8131eda35ddf61082bfdd6c1e5c9fb5310f22032d480c7f0c5fcf2667"
+
+[[specs]]
+path = "spec/builtin-getopts.test.sh"
+cases = 31
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 14
+sha256 = "aff4b7c3d53416a809decbc05410f01e362b43bb513e89b0ef85a8746818ece3"
+
+[[specs]]
+path = "spec/builtin-history.test.sh"
+cases = 17
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 3
+sha256 = "7044bac4e07f8dbda73ee4e859f50cccba89732e1e82d5b56dea4bda48d99b46"
+
+[[specs]]
+path = "spec/builtin-kill.test.sh"
+cases = 20
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 28
+sha256 = "8c3b1a1a69ae6fa7a684d12600c9f2a3fd1368ebf7743b98418bf8d8bcc01307"
+
+[[specs]]
+path = "spec/builtin-meta-assign.test.sh"
+cases = 11
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 21
+sha256 = "890ee0b3d3f42c7768711a186858ab82d6b5140265a4561d910af9fb67d62a63"
+
+[[specs]]
+path = "spec/builtin-meta.test.sh"
+cases = 18
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 25
+sha256 = "78a7d921bfa073b953b4eacc574641d89047e8d0acb48f4a7b8748b4571164b2"
+
+[[specs]]
+path = "spec/builtin-misc.test.sh"
+cases = 7
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 11
+sha256 = "cc36392bef7f3311fe9b5d3ce15632f856e514ece3f3b8f048ec6cc3dbc3e6c2"
+
+[[specs]]
+path = "spec/builtin-printf.test.sh"
+cases = 63
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 100
+sha256 = "fc682f0349791265dda9fe3f8eadebd7218e5ee75814c5be04c006af28bf494b"
+
+[[specs]]
+path = "spec/builtin-process.test.sh"
+cases = 26
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 37
+sha256 = "cbc37934d84d70873d136738544e98e47ee8aa3c561a6ac0b5e553ef90cc82ac"
+
+[[specs]]
+path = "spec/builtin-read.test.sh"
+cases = 64
+compare_shells = [
+    "bash",
+    "mksh",
+    "zsh",
+    "ash",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 90
+sha256 = "b5b155bce7f5d41f4c7f5ed80ed41a002bfe7de4b2df65c8fa0c3bdc7d0ac632"
+
+[[specs]]
+path = "spec/builtin-set.test.sh"
+cases = 24
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 18
+sha256 = "1f75caaea68719a940839199ae3529bf3b884f341db1078419ba407cc2e9cd2e"
+
+[[specs]]
+path = "spec/builtin-special.test.sh"
+cases = 12
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+    "ash",
+    "yash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 20
+sha256 = "194710e869fcc77039b92df8b7bea2c3770e68661efbfceb405edb7f4cfc0be6"
+
+[[specs]]
+path = "spec/builtin-times.test.sh"
+cases = 1
+compare_shells = [
+    "bash",
+    "zsh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 0
+sha256 = "20f57808de62657fe7b03a5436624f71ebfe3f4c793786d3a4a372bdd6ce7a36"
+
+[[specs]]
+path = "spec/builtin-trap-bash.test.sh"
+cases = 23
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+    "bash-named-diagnostic",
+]
+qualified_assertions = 10
+sha256 = "ed029f5b25a594af00279708f14f02a994de0a9b7db2f4cf503769f9040cb260"
+
+[[specs]]
+path = "spec/builtin-trap-err.test.sh"
+cases = 23
+compare_shells = [
+    "bash",
+    "mksh",
+    "ash",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 20
+sha256 = "0eedbc8966eaba6f816d32b6abfab01c38ca34702ac0adbc14a59adcd6d95c1a"
+
+[[specs]]
+path = "spec/builtin-trap.test.sh"
+cases = 33
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 30
+sha256 = "8b64f28c00258b99fa4be84e6c1636e72b292b06fd2fc881bd0da45fa82f5453"
+
+[[specs]]
+path = "spec/builtin-type-bash.test.sh"
+cases = 31
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+    "bash-named-diagnostic",
+]
+qualified_assertions = 7
+sha256 = "65cce5e547398cc38b217a57c54c909bde093f5956bd110da877c466b0ecd59f"
+
+[[specs]]
+path = "spec/builtin-type.test.sh"
+cases = 6
+compare_shells = [
+    "bash",
+    "zsh",
+    "mksh",
+    "dash",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 12
+sha256 = "4564655457a61035ea44c0228a2b5461154ac1c15cd6f8c8222876cd1a1fc0f8"
+
+[[specs]]
+path = "spec/builtin-umask.test.sh"
+cases = 24
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 19
+sha256 = "ce54645d4a717591a9ab3f3e284536db4839f99c6d76fcfae56aca490ec1b8d7"
+
+[[specs]]
+path = "spec/builtin-vars.test.sh"
+cases = 41
+compare_shells = [
+    "dash",
+    "bash-4.4",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 70
+sha256 = "35b8550e4d77cee8a970b96189120c7bb29efaf4f84e5b58c30f28d09f6030af"
+
+[[specs]]
+path = "spec/case_.test.sh"
+cases = 13
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 12
+sha256 = "303fac1d6b62ff4b6f01cb88db046d4a697499c7bf900fb71c0a2efbab105adb"
+
+[[specs]]
+path = "spec/command-parsing.test.sh"
+cases = 5
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 6
+sha256 = "857cd781c18ef991e4494eb45417f7dca278d61c181a2e4f593c036f694bb605"
+
+[[specs]]
+path = "spec/command-sub-ksh.test.sh"
+cases = 4
+compare_shells = ["mksh"]
+groups = ["full"]
+qualified_assertions = 0
+sha256 = "0d72107081422a174e3dea861af3cbd5830e74c611e00de750227373cf65f680"
+
+[[specs]]
+path = "spec/command-sub.test.sh"
+cases = 30
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 4
+sha256 = "6f94a704840269d1e9ddc987f12e440b0c177456cc099d610b69917597dce5af"
+
+[[specs]]
+path = "spec/command_.test.sh"
+cases = 16
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 9
+sha256 = "7397795525477da706f54dbae1c5b45d8c08cc5a8c3b504badcf4e220ce702b5"
+
+[[specs]]
+path = "spec/comments.test.sh"
+cases = 2
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 0
+sha256 = "e9afc2a39413ea8d25ff230c08c9ea5067cb3f99c683b55aeeb8f63db69e203a"
+
+[[specs]]
+path = "spec/dbracket.test.sh"
+cases = 49
+compare_shells = [
+    "bash-4.4",
+    "mksh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 19
+sha256 = "be66a9a3111a8b23042bbdd23269d675d30196a03440ebabbf2a0f046624a75d"
+
+[[specs]]
+path = "spec/divergence.test.sh"
+cases = 4
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 3
+sha256 = "f83c57d58990232a18a560c48487420f8c945c2752b9f75fd6f0f9ae28140420"
+
+[[specs]]
+path = "spec/dparen.test.sh"
+cases = 15
+compare_shells = [
+    "bash-4.4",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 26
+sha256 = "b12a39de14f6d7461410939fba17d4c4e044ab534663a3822fb35157bd7343eb"
+
+[[specs]]
+path = "spec/empty-bodies.test.sh"
+cases = 3
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 6
+sha256 = "ebe98e2db3390735dd20b626511de4614e2ffd245d7eb4c3be45b5e77ff1c575"
+
+[[specs]]
+path = "spec/errexit-osh.test.sh"
+cases = 35
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 49
+sha256 = "40c696919c03443344b6e0926775947b2334a4ad16e5548707baa66ecafe9ca3"
+
+[[specs]]
+path = "spec/errexit.test.sh"
+cases = 35
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 17
+sha256 = "80c4092adbcd3b3393547b6bb2b8b941dfbe58b7bb17f3489cb4441ea8ed297b"
+
+[[specs]]
+path = "spec/exit-status.test.sh"
+cases = 11
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 9
+sha256 = "2b461c9664498df4a26a5d7f32958217ccf732ab265f2a40a2ddfd189d59fb95"
+
+[[specs]]
+path = "spec/explore-parsing.test.sh"
+cases = 5
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 3
+sha256 = "682d0b3d211a6c541722db754f0a302f313f6d82b7b5a15fccfdf2d585438b3d"
+
+[[specs]]
+path = "spec/extglob-files.test.sh"
+cases = 23
+compare_shells = [
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 12
+sha256 = "ceed536afbcdbc41f9c24b26767e6f2d9959f24d2caf53d023d230e8d8312eb8"
+
+[[specs]]
+path = "spec/extglob-match.test.sh"
+cases = 29
+compare_shells = [
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 10
+sha256 = "ad911567e4791772b846e324a2f19330540c05dfb0ebe2dde8722aeff8785d63"
+
+[[specs]]
+path = "spec/fatal-errors.test.sh"
+cases = 5
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 13
+sha256 = "013d1111488e3bffb2ba6d9f11c811e302ddb022836c2c7d7928c5f0dec58d54"
+
+[[specs]]
+path = "spec/for-expr.test.sh"
+cases = 9
+compare_shells = [
+    "bash-4.4",
+    "zsh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 2
+sha256 = "8c1cf43c84d023bc65e81e8f0f91a3e2f81a6df2741848bbc7711eb299231cf9"
+
+[[specs]]
+path = "spec/func-parsing.test.sh"
+cases = 15
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 14
+sha256 = "7d3972734e04b97e39b54998584439f1e274525a3cd6e22fb6828892ae3888c0"
+
+[[specs]]
+path = "spec/glob-bash.test.sh"
+cases = 8
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+    "bash-named-diagnostic",
+]
+qualified_assertions = 13
+sha256 = "e1812a63c2d5c9b1e3c7ffcf9b01b5f94bbab082dfc3fe13c9d6bed6f71b6b84"
+
+[[specs]]
+path = "spec/glob.test.sh"
+cases = 39
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 21
+sha256 = "7f4ac7b755470313e3499132d08bf141f430369c616356681edec649291d6d47"
+
+[[specs]]
+path = "spec/globignore.test.sh"
+cases = 18
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 2
+sha256 = "929060ceda0d62ce94d858ae3c8c7187dc2d638eea1946eb029d12872a3a762b"
+
+[[specs]]
+path = "spec/globstar.test.sh"
+cases = 5
+compare_shells = [
+    "bash",
+    "zsh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 3
+sha256 = "2c7ccb5c05053e660176bb2f619a7d0730c6470293074681ce85a42795a15a38"
+
+[[specs]]
+path = "spec/here-doc.test.sh"
+cases = 36
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 11
+sha256 = "a325feb3972fef3db6ccdfa3393b60ef0a851da0e10349ab5ecbe3586c85620f"
+
+[[specs]]
+path = "spec/if_.test.sh"
+cases = 5
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 2
+sha256 = "570526740f6e6b5a50648ed37a8e3f3f456f459ea086729aa05a27ad57c89524"
+
+[[specs]]
+path = "spec/interactive.test.sh"
+cases = 18
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 5
+sha256 = "680e1f0494b898d1af255f4546b60e7d0f55cf6474af86d22e4a0bd2ee5f20cf"
+
+[[specs]]
+path = "spec/introspect.test.sh"
+cases = 13
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 1
+sha256 = "cd9f5f3925f64d92a0e80a6bb9b8ed767c687364656fad99ba2b82ab1555437f"
+
+[[specs]]
+path = "spec/known-differences.test.sh"
+cases = 2
+compare_shells = [
+    "ash",
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 3
+sha256 = "3d69ee97caa654c0002874355709922e9ea4ed27fa436724d395792c45368361"
+
+[[specs]]
+path = "spec/let.test.sh"
+cases = 2
+compare_shells = [
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 4
+sha256 = "07003d9e4d95cad3a779e29e56e3ed8062dd1755777666814a2a4b863854dbd7"
+
+[[specs]]
+path = "spec/loop.test.sh"
+cases = 29
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 24
+sha256 = "b1d66814dc6da30b018a78909d1e934e4317afbe5b6dde48331d572b8e9a8b0f"
+
+[[specs]]
+path = "spec/nameref.test.sh"
+cases = 32
+compare_shells = [
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 41
+sha256 = "8aa55ed6c5dbf24d414175c988819411b60ba459ae8e43f3b1e543b6c492f304"
+
+[[specs]]
+path = "spec/nix-idioms.test.sh"
+cases = 6
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 1
+sha256 = "884d5ba92f100b4f340c717ad0bb6bc62a97a5dd2a79a6c2f9daba4bf307c763"
+
+[[specs]]
+path = "spec/nocasematch-match.test.sh"
+cases = 6
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 0
+sha256 = "c5a8976818a4e64a7339cff46451b39ba0c4e6ef505de47da8f8d4fb955d94d1"
+
+[[specs]]
+path = "spec/nul-bytes.test.sh"
+cases = 16
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 26
+sha256 = "39ae31c6377172db225373aebdc787c8f2d00174a8be8439b1d64d4c2763a481"
+
+[[specs]]
+path = "spec/osh-bugs.test.sh"
+cases = 4
+compare_shells = []
+groups = ["full"]
+qualified_assertions = 0
+sha256 = "b572db5c062153dfc87d47bfd09af5f2f33403e2e94342f149ca2c517523e210"
+
+[[specs]]
+path = "spec/paren-ambiguity.test.sh"
+cases = 9
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 5
+sha256 = "9211a832ac84fa232ae52cab796764a0a96ac9d7a76039e1dc304a91439cc134"
+
+[[specs]]
+path = "spec/parse-errors.test.sh"
+cases = 27
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 26
+sha256 = "911071eb4f1e4b3f9a92b26694abcdfeeb6bff33255f7a4f0f265dedb7d5c421"
+
+[[specs]]
+path = "spec/pipeline.test.sh"
+cases = 26
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 24
+sha256 = "682e88c5201cca5ed5433dee956c958c468b5071fab806e5de1d529aad293799"
+
+[[specs]]
+path = "spec/posix.test.sh"
+cases = 15
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 2
+sha256 = "3c14e55c5db8d4b0b903732e69ac15689de3aa06bd59c780f4d49d30cd8915a6"
+
+[[specs]]
+path = "spec/print-source-code.test.sh"
+cases = 4
+compare_shells = [
+    "bash-4.4",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 0
+sha256 = "1fdd6fcf182c3cbe6642ee0aaa41a7aa643ea4f7afbb4b8601eddcaed1da1222"
+
+[[specs]]
+path = "spec/process-sub.test.sh"
+cases = 9
+compare_shells = [
+    "bash-4.4",
+    "zsh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 5
+sha256 = "619326b1f74e4d4664b3ec204545cdb3ee5394c5c100413fa1c2a4c8d859cd1b"
+
+[[specs]]
+path = "spec/prompt.test.sh"
+cases = 33
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 0
+sha256 = "cb56630b60adf5b75b92b4e56625b189481f752a9bc827880044896fefd55f03"
+
+[[specs]]
+path = "spec/quote.test.sh"
+cases = 35
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 18
+sha256 = "c0224640332b29c238641713ff29a1ee0cf441505e46660663a1aca4d2587d1b"
+
+[[specs]]
+path = "spec/redir-order.test.sh"
+cases = 5
+compare_shells = []
+groups = ["full"]
+qualified_assertions = 1
+sha256 = "c3af9d98738db3ba4516488ed52c960f6ca8e637a936701252f361c778231852"
+
+[[specs]]
+path = "spec/redirect-command.test.sh"
+cases = 23
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 13
+sha256 = "921f6d24b39cdf52589bc1ae9efe4d59a5c89693bff815af03cc6cabef9ec0e3"
+
+[[specs]]
+path = "spec/redirect-multi.test.sh"
+cases = 13
+compare_shells = [
+    "bash",
+    "mksh",
+    "zsh",
+    "ash",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 29
+sha256 = "dd91c983599e238a9340f2a37c64793d7d94037729cf4437914b7348faecf73c"
+
+[[specs]]
+path = "spec/redirect.test.sh"
+cases = 41
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 47
+sha256 = "138eefdc16caf1a7892bce0e9f72b4cbb62def25178c0d9e30c91e5bb79a64cd"
+
+[[specs]]
+path = "spec/regex.test.sh"
+cases = 37
+compare_shells = [
+    "bash-4.4",
+    "zsh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 36
+sha256 = "c10d4898f568446fe2a3a6370861e7a19eae186c7b3e2c8c6c5a6f34ae8a1452"
+
+[[specs]]
+path = "spec/serialize.test.sh"
+cases = 10
+compare_shells = [
+    "bash",
+    "mksh",
+    "zsh",
+    "ash",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 26
+sha256 = "3aa8ea530c342f50a3baf8c40ef7a4c7df3501a4bf2a2dc0a258e28bdbd8ace6"
+
+[[specs]]
+path = "spec/sh-func.test.sh"
+cases = 12
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 5
+sha256 = "79425ecb8953ac67b4ca6af369f13d9cbd7dab85330cd69cd61c2d2d6a33abcf"
+
+[[specs]]
+path = "spec/sh-options-bash.test.sh"
+cases = 9
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+    "bash-named-diagnostic",
+]
+qualified_assertions = 7
+sha256 = "e086be0ec18cf076ba4aaa72465f3cfbf3b78f5547f1ba1c2edcc55eb2d3b356"
+
+[[specs]]
+path = "spec/sh-options.test.sh"
+cases = 39
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 61
+sha256 = "548806e453f113d54fecadc434fc4bd79c9fe3f5232eaa0a5d4a141f85ab0926"
+
+[[specs]]
+path = "spec/sh-usage.test.sh"
+cases = 24
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 21
+sha256 = "8bf7a4bdd2e77390f8fee091352cb02e57a1a80af6dd76751dd6612dd1ec4ae7"
+
+[[specs]]
+path = "spec/smoke.test.sh"
+cases = 18
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 0
+sha256 = "e9f120e0f92837f6eeda85f6094396cfa29341ffb9a12a167265a1b717c3c4cb"
+
+[[specs]]
+path = "spec/strict-options.test.sh"
+cases = 17
+compare_shells = [
+    "dash",
+    "bash-4.4",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 24
+sha256 = "39745e9c8db8e1663ea38d47c08f8f27c0e9dcedc5ca3d355d7ac0948f69e67a"
+
+[[specs]]
+path = "spec/subshell.test.sh"
+cases = 2
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 0
+sha256 = "7580cd237685926e78589772366d533d17374fb71b6fdcffb60d0d38649ceaaf"
+
+[[specs]]
+path = "spec/temp-binding.test.sh"
+cases = 4
+compare_shells = [
+    "dash",
+    "bash",
+    "zsh",
+    "mksh",
+    "ash",
+    "yash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 3
+sha256 = "83b1a8c08f3a703f5479560df17ebfe6bec62326ea504d08a1bdc0d4f5a0a3a6"
+
+[[specs]]
+path = "spec/tilde.test.sh"
+cases = 14
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 12
+sha256 = "f1bffaefd0b3b8e7ef2db705b1fcadde4494c14d4d4f0e9f5b40fd757248bd33"
+
+[[specs]]
+path = "spec/toysh-posix.test.sh"
+cases = 23
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+    "ash",
+    "yash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 36
+sha256 = "a279f95b0c048b75b69abfe5953f798e219fbb07d9c1cb1403483a87654cfaae"
+
+[[specs]]
+path = "spec/toysh.test.sh"
+cases = 8
+compare_shells = [
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 11
+sha256 = "096155f8568d58159e3c0cc76b1128ac0ed722f918872e12f55f120ef1e72798"
+
+[[specs]]
+path = "spec/type-compat.test.sh"
+cases = 7
+compare_shells = ["bash-4.4"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 6
+sha256 = "e7c4302bfa528d4f14ea560c03a79bd7d6a2a1d3189e2a52fea9200aad023e3d"
+
+[[specs]]
+path = "spec/unicode.test.sh"
+cases = 7
+compare_shells = [
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 9
+sha256 = "21a8aaffde8f69aa80e481452c75307b3526f60fa1301050e0ce91a576f7fe81"
+
+[[specs]]
+path = "spec/var-num.test.sh"
+cases = 7
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 0
+sha256 = "53d2faa0ea65d7c9cf78c27bad44c2df83164469ccd2fdd8d296d6e021e94083"
+
+[[specs]]
+path = "spec/var-op-bash.test.sh"
+cases = 27
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+    "bash-named-diagnostic",
+]
+qualified_assertions = 7
+sha256 = "d97124fa65a7e1ab80fd9636428fb5113d5a11807e252189a80b1a8fbe07b2a3"
+
+[[specs]]
+path = "spec/var-op-len.test.sh"
+cases = 9
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 22
+sha256 = "a0857be3473b81952af30a2e2f8d39ec1fb8b0bee644b48b859406f4e081624a"
+
+[[specs]]
+path = "spec/var-op-patsub.test.sh"
+cases = 28
+compare_shells = [
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 23
+sha256 = "05f126caf7e10950bfff9b50c9a68207e1c2cc61584733c46d2d9608adfe6ba5"
+
+[[specs]]
+path = "spec/var-op-slice.test.sh"
+cases = 22
+compare_shells = [
+    "bash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 35
+sha256 = "b0fabd133aaa9d6adebd9472ad9a93c116e15975e947b585e5b1cafec4b75d00"
+
+[[specs]]
+path = "spec/var-op-strip.test.sh"
+cases = 29
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 27
+sha256 = "8b0f8a2af4320d4c0eb338304f0f3dc3e45e057ec75f5ba47f23968af05c5aed"
+
+[[specs]]
+path = "spec/var-op-test.test.sh"
+cases = 37
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 48
+sha256 = "7ce236983c9fa4d1d95ac3f3415e57f33499ec18d41134c5a94956d7b96b7a29"
+
+[[specs]]
+path = "spec/var-ref.test.sh"
+cases = 31
+compare_shells = ["bash"]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 8
+sha256 = "9cecca23817faa8dffb0e24d68cd8529df74457582db8addc60a9b61aaec0a9d"
+
+[[specs]]
+path = "spec/var-sub-quote.test.sh"
+cases = 41
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 18
+sha256 = "1262900cbe8d90c569ae384cbad07ef861bbad9bbf500006a1e3874d43f14c9a"
+
+[[specs]]
+path = "spec/var-sub.test.sh"
+cases = 6
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 4
+sha256 = "e753ded2e63229be24df849077c6fd9ba9890c4441b7f5726716342c7589c86c"
+
+[[specs]]
+path = "spec/vars-bash.test.sh"
+cases = 1
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+    "bash-named-diagnostic",
+]
+qualified_assertions = 1
+sha256 = "9541289b5f2e146d10c6d2c9cd37fb440fd633a3bc7107cc60c66adf72a587fd"
+
+[[specs]]
+path = "spec/vars-special.test.sh"
+cases = 42
+compare_shells = [
+    "dash",
+    "bash-4.4",
+    "mksh",
+    "zsh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 49
+sha256 = "f13a4b129415ccb4653bada8046abe875b0a8c48d91a68b4e393ade8577739c9"
+
+[[specs]]
+path = "spec/whitespace.test.sh"
+cases = 5
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+    "zsh",
+    "ash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 3
+sha256 = "2de6897f1cd7eafa1feec57d627f6616d272829218b4539cb34f61518942745d"
+
+[[specs]]
+path = "spec/word-eval.test.sh"
+cases = 8
+compare_shells = [
+    "dash",
+    "bash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 4
+sha256 = "8d26bc18a007412df7e6db434929ae132d170543b5a42d988c141d5361a6fcc6"
+
+[[specs]]
+path = "spec/word-split.test.sh"
+cases = 55
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+    "ash",
+    "yash",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 20
+sha256 = "c8264763e417fec62c8cec8cfc88dc059bc161d905fff01603879780ad37caff"
+
+[[specs]]
+path = "spec/xtrace.test.sh"
+cases = 19
+compare_shells = [
+    "bash",
+    "dash",
+    "mksh",
+]
+groups = [
+    "full",
+    "posix-candidate",
+    "bash-comparison",
+]
+qualified_assertions = 43
+sha256 = "867794119cf94313b4ca1de5e58e6d9dea86790c4bc8489d85085ba2943a3d1f"
+
+[[specs]]
+path = "spec/zsh-assoc.test.sh"
+cases = 7
+compare_shells = ["zsh-5.9"]
+groups = ["full"]
+qualified_assertions = 0
+sha256 = "1d19608b70ccb3e93dc7aab4d2049f09abe7a5402219d330c19164ba187a8fb8"
+
+[[specs]]
+path = "spec/zsh-idioms.test.sh"
+cases = 3
+compare_shells = [
+    "bash",
+    "zsh",
+    "mksh",
+]
+groups = [
+    "full",
+    "bash-comparison",
+    "bash-extension",
+]
+qualified_assertions = 4
+sha256 = "b7580661a197dcb6987f74c6fe5945fa4c8bf93cd9b6fdec6e90b1f3e8b2605a"
