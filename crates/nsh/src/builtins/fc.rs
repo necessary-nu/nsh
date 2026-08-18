@@ -293,10 +293,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
         }
         for event in events {
             if lflg != 0 {
-                if nflg == 0 {
-                    let _ = write!(sh.io.stdout(), "{:5} ", event.number);
-                }
-                let _ = sh.io.stdout().write_all(&event.line);
+                let _ = write_listing(sh.io.stdout(), &event, nflg == 0);
             } else {
                 let line = fc_replace(
                     BStr::new(event.line.as_slice()),
@@ -416,6 +413,39 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
         crate::eval::flow!(body());
     }
     Ok(Flow::Done(0))
+}
+
+/// Write one listed history event with a tab before its first command line
+/// and every continuation line. Output errors remain recorded by `Output`
+/// for the builtin epilogue to fold into the exit status.
+// [spec:posix:req:builtin.fc.stdout-list-format]
+fn write_listing(
+    output: &mut impl Write,
+    event: &HistoryEvent,
+    numbered: bool,
+) -> std::io::Result<()> {
+    if numbered {
+        write!(output, "{}\t", event.number)?;
+    } else {
+        output.write_all(b"\t")?;
+    }
+    if event.line.is_empty() {
+        return output.write_all(b"\n");
+    }
+    for (index, line) in event
+        .line
+        .split_inclusive(|byte| *byte == b'\n')
+        .enumerate()
+    {
+        if index != 0 {
+            output.write_all(b"\t")?;
+        }
+        output.write_all(line)?;
+        if !line.ends_with(b"\n") {
+            output.write_all(b"\n")?;
+        }
+    }
+    Ok(())
 }
 
 // [spec:dash:def:histedit.fc-replace-fn]
@@ -590,5 +620,21 @@ mod tests {
             BString::from("abc"),
         );
         assert_eq!(pattern, Some(BString::from("")));
+    }
+
+    // [spec:posix:req:builtin.fc.stdout-list-format/test]
+    #[test]
+    fn listing_prefixes_first_and_continued_lines() {
+        let event = HistoryEvent {
+            number: 12,
+            line: BString::from("first\nsecond"),
+        };
+        let mut numbered = Vec::new();
+        write_listing(&mut numbered, &event, true).unwrap();
+        assert_eq!(numbered, b"12\tfirst\n\tsecond\n");
+
+        let mut plain = Vec::new();
+        write_listing(&mut plain, &event, false).unwrap();
+        assert_eq!(plain, b"\tfirst\n\tsecond\n");
     }
 }

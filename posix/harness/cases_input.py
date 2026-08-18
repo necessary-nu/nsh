@@ -965,6 +965,25 @@ CASES: tuple[Case, ...] = (
         status="any",
         stdout_contains=("numbered=[1T: ALPHA]", "plain=[T: ALPHA]"),
     ),
+    # [spec:posix:req:builtin.fc.stdout-list-format/test]
+    Case(
+        id="fc-stdout-list-format-multiline",
+        rules=("builtin.fc.stdout-list-format",),
+        mode="interactive",
+        requires=("UP",),
+        script=(
+            "if true\n"
+            "then\n"
+            "    : CONTINUED\n"
+            "fi\n"
+            "printf 'multi=[%s]\\n' "
+            "\"$(fc -l -n 1 1 | tr '\\t\\n' 'TN')\"\n"
+            "exit 0\n"
+        ),
+        stdout=None,
+        status="any",
+        stdout_contains=("multi=[Tif trueNTthenNT    : CONTINUEDNTfiN]",),
+    ),
     # [spec:posix:req:builtin.fc.env-histsize/test]
     Case(
         id="fc-env-histsize-default",

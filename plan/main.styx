@@ -1983,6 +1983,21 @@ children (
                             shell ([spec:posix:req:builtin.fc.stdout-list-format])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T03:54:09.436012083Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T03:55:42.82608885Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Render each listed event as decimal event number plus tab (or tab alone under -n), then prefix every continuation physical line with a tab and terminate a final unterminated line. Keep output errors on the shell Output so evalbltin preserves its existing I/O-status handling. Verification: both direct format cases, four neighboring -n/-r/range cases, and cargo test -p nsh pass (276 tests, one ignored doctest)."
+                            }
+                        )
                     }
 
                     {

@@ -3444,4 +3444,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.fc.exit-status}
     )}
+    {id fix-builtin-fc-stdout-list-format, covered_rules (
+        builtin.fc.stdout-list-format
+    ), covered_claims (
+        {impl_name shell, rule builtin.fc.stdout-list-format}
+    )}
 )
