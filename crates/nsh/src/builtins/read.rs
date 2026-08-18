@@ -107,6 +107,7 @@ fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> R
 // [spec:posix:req:builtin.read.logical-line]
 // [spec:posix:req:builtin.read.backslash-escape]
 // [spec:posix:req:builtin.read.backslash-line-continuation]
+// [spec:posix:req:builtin.read.continuation-prompt]
 // [spec:posix:req:builtin.read.end-of-file]
 // [spec:posix:req:builtin.read.env-nlspath]
 // [spec:posix:req:builtin.read.exit-status]
@@ -145,6 +146,14 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             let _ = sh.io.stderr().write_all(prompt.as_bytes());
         }
     }
+    let prompt_for_continuation = sh.options.flag(crate::options::iflag) != 0
+        && sh
+            .fds
+            .get(0)
+            .ok()
+            .flatten()
+            .as_ref()
+            .is_some_and(|fd| fd.as_fd().is_terminal());
     let names = opts.operands();
     if names.is_empty() {
         return Err(sh.sh_error_value(b"arg count"));
@@ -198,6 +207,10 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 pc = L_RECORD; /* goto record */
             } else if newloc >= startloc {
                 if c == '\n' as c_int {
+                    if prompt_for_continuation {
+                        let ps2 = crate::var::ps2val(sh);
+                        let _ = sh.io.stderr().write_all(&ps2);
+                    }
                     pc = L_RECORD; /* goto record */
                 } else {
                     pc = L_PUT; /* goto put */

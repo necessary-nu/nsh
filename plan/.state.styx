@@ -3484,4 +3484,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.kill.operand-pid-job-id}
     )}
+    {id fix-builtin-read-continuation-prompt, covered_rules (
+        builtin.read.continuation-prompt
+    ), covered_claims (
+        {impl_name shell, rule builtin.read.continuation-prompt}
+    )}
 )

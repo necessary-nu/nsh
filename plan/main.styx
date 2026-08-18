@@ -2182,6 +2182,21 @@ children (
                             shell ([spec:posix:req:builtin.read.continuation-prompt])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:13:51.632392823Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:15:23.606948492Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "After read removes a backslash-newline, write the current PS2 value to unbuffered stderr only when the invoking shell is interactive, fd 0 is a terminal, and -r is not active. Verification: continuation-prompt, backslash-continuation, and option-r cases pass; the read case family has only the separately tracked -d failure; cargo test -p nsh passes 276 tests with one ignored doctest; git diff --check passes."
+                            }
+                        )
                     }
 
                     {
