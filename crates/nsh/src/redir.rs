@@ -96,6 +96,7 @@ impl RedirStack {
 
 // [spec:dash:def:redir.redirect-fn]
 // [spec:dash:sem:redir.redirect-fn]
+// [spec:posix:sem:shell.redirection-processing]
 pub fn redirect(
     sh: &mut Shell,
     redir: &[Node],

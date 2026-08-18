@@ -2632,4 +2632,83 @@ impl_evidence (
         {impl_name shell, rule builtin.jobs.synopsis}
         {impl_name shell, rule builtin.jobs.utility-syntax-guidelines}
     )}
+    {id posix-quoting, covered_rules (
+        quote.always-special-characters
+        quote.backslash-literal
+        quote.backslash-newline
+        quote.conditionally-special-characters
+        quote.dollar-single-quotes
+        quote.dollar-single-quotes-control-escape
+        quote.dollar-single-quotes-escape-termination
+        quote.dollar-single-quotes-escapes
+        quote.dollar-single-quotes-hex-escape
+        quote.dollar-single-quotes-null-byte
+        quote.dollar-single-quotes-octal-escape
+        quote.dollar-single-quotes-octal-overflow
+        quote.dollar-single-quotes-processing-time
+        quote.dollar-single-quotes-quote-escape-not-terminator
+        quote.dollar-single-quotes-undefined-escape
+        quote.dollar-single-quotes-unencodable
+        quote.double-quotes-backquote
+        quote.double-quotes-backquote-undefined
+        quote.double-quotes-backslash
+        quote.double-quotes-command-substitution
+        quote.double-quotes-dollar-sign
+        quote.double-quotes-embedded-double-quote
+        quote.double-quotes-expansion-result
+        quote.double-quotes-literal
+        quote.double-quotes-other-parameter-expansion
+        quote.double-quotes-substring-parameter-expansion
+        quote.future-special-characters
+        quote.mechanisms
+        quote.purpose
+        quote.single-quotes
+        shell.command-execution
+        shell.command-language-interpreter
+        shell.exit-status-collection
+        shell.hashbang-unspecified
+        shell.input-sources
+        shell.redirection-processing
+        shell.tokenization-and-parsing
+        shell.word-processing
+    ), covered_claims (
+        {impl_name shell, rule quote.always-special-characters}
+        {impl_name shell, rule quote.backslash-literal}
+        {impl_name shell, rule quote.backslash-newline}
+        {impl_name shell, rule quote.conditionally-special-characters}
+        {impl_name shell, rule quote.dollar-single-quotes}
+        {impl_name shell, rule quote.dollar-single-quotes-control-escape}
+        {impl_name shell, rule quote.dollar-single-quotes-escape-termination}
+        {impl_name shell, rule quote.dollar-single-quotes-escapes}
+        {impl_name shell, rule quote.dollar-single-quotes-hex-escape}
+        {impl_name shell, rule quote.dollar-single-quotes-null-byte}
+        {impl_name shell, rule quote.dollar-single-quotes-octal-escape}
+        {impl_name shell, rule quote.dollar-single-quotes-octal-overflow}
+        {impl_name shell, rule quote.dollar-single-quotes-processing-time}
+        {impl_name shell, rule quote.dollar-single-quotes-quote-escape-not-terminator}
+        {impl_name shell, rule quote.dollar-single-quotes-undefined-escape}
+        {impl_name shell, rule quote.dollar-single-quotes-unencodable}
+        {impl_name shell, rule quote.double-quotes-backquote}
+        {impl_name shell, rule quote.double-quotes-backquote-undefined}
+        {impl_name shell, rule quote.double-quotes-backslash}
+        {impl_name shell, rule quote.double-quotes-command-substitution}
+        {impl_name shell, rule quote.double-quotes-dollar-sign}
+        {impl_name shell, rule quote.double-quotes-embedded-double-quote}
+        {impl_name shell, rule quote.double-quotes-expansion-result}
+        {impl_name shell, rule quote.double-quotes-literal}
+        {impl_name shell, rule quote.double-quotes-other-parameter-expansion}
+        {impl_name shell, rule quote.double-quotes-substring-parameter-expansion}
+        {impl_name shell, rule quote.future-special-characters}
+        {impl_name shell, rule quote.mechanisms}
+        {impl_name shell, rule quote.purpose}
+        {impl_name shell, rule quote.single-quotes}
+        {impl_name shell, rule shell.command-execution}
+        {impl_name shell, rule shell.command-language-interpreter}
+        {impl_name shell, rule shell.exit-status-collection}
+        {impl_name shell, rule shell.hashbang-unspecified}
+        {impl_name shell, rule shell.input-sources}
+        {impl_name shell, rule shell.redirection-processing}
+        {impl_name shell, rule shell.tokenization-and-parsing}
+        {impl_name shell, rule shell.word-processing}
+    )}
 )

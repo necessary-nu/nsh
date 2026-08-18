@@ -1095,6 +1095,7 @@ fn parse_command_args(
 // [spec:dash:sem:eval.evalcommand-fn]
 // [spec:posix:req:builtin.special.error-may-abort-shell]
 // [spec:posix:req:builtin.special.preceding-assignments-persist]
+// [spec:posix:sem:shell.command-execution]
 //
 // The `def` rule quotes the `#ifdef notyet` three-argument prototype;
 // the compiled signature — ported here — is

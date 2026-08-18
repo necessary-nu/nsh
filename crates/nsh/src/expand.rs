@@ -735,6 +735,7 @@ pub(crate) fn mbnext_bytes(p: &[u8]) -> c_uint {
 // [spec:posix:def:expand.dollar-introducer]
 // [spec:posix:req:expand.dollar-invalid-follower]
 // [spec:posix:req:expand.dollar-literal]
+// [spec:posix:sem:shell.word-processing]
 pub fn expandarg(
     sh: &mut crate::context::Shell,
     arg: &crate::nodes::Node,

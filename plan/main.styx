@@ -58,6 +58,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T02:15:51.968220458Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T02:19:00.798106977Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Mapped all 38 assigned XCU 2.1-2.2 rules to their concrete shell phase boundaries. Verification: focused POSIX harness PASS=22 FAIL=0 (35 executable rules; remaining rules manual/not-applicable), cargo test -p nsh --quiet passed (230 unit tests plus all integration suites), git diff --check clean."
+                    }
+                )
             }
 
             {

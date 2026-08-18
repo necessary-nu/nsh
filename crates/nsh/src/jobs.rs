@@ -1206,6 +1206,7 @@ pub fn forkexec(
 
 // [spec:dash:def:jobs.waitforjob-fn]
 // [spec:dash:sem:jobs.waitforjob-fn]
+// [spec:posix:sem:shell.exit-status-collection]
 pub fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c_int, Error> {
     let st: c_int;
 

@@ -1200,6 +1200,7 @@ fn xxreadtoken(sh: &mut Shell, chkeofmark: c_int) -> Result<Token, Error> {
 
 // [spec:dash:def:parser.pgetc-eatbnl-fn]
 // [spec:dash:sem:parser.pgetc-eatbnl-fn]
+// [spec:posix:req:quote.backslash-newline]
 fn pgetc_eatbnl(sh: &mut Shell) -> Result<c_int, Error> {
     let mut c: c_int;
 
@@ -1366,6 +1367,17 @@ fn getmbc_at(sh: &mut Shell, out: &mut BString, c: c_int, mode: c_int) -> Result
 
 // [spec:dash:def:parser.dollarsq-escape-fn]
 // [spec:dash:sem:parser.dollarsq-escape-fn]
+// [spec:posix:def:quote.dollar-single-quotes-escapes]
+// [spec:posix:def:quote.dollar-single-quotes-control-escape]
+// [spec:posix:def:quote.dollar-single-quotes-hex-escape]
+// [spec:posix:def:quote.dollar-single-quotes-octal-escape]
+// [spec:posix:req:quote.dollar-single-quotes-undefined-escape]
+// [spec:posix:syn:quote.dollar-single-quotes-escape-termination]
+// [spec:posix:req:quote.dollar-single-quotes-processing-time]
+// [spec:posix:req:quote.dollar-single-quotes-null-byte]
+// [spec:posix:req:quote.dollar-single-quotes-octal-overflow]
+// [spec:posix:req:quote.dollar-single-quotes-unencodable]
+// [spec:posix:req:quote.dollar-single-quotes-quote-escape-not-terminator]
 fn dollarsq_escape(sh: &mut Shell, dest: &mut BString) -> Result<(), Error> {
     /* The C writes into the stack block through a cursor and commits the
      * prefix. `conv_escape` takes a fixed scratch buffer now -- it writes
@@ -1493,6 +1505,26 @@ enum Lbl {
 
 // [spec:dash:def:parser.readtoken1-fn]
 // [spec:dash:sem:parser.readtoken1-fn]
+// [spec:posix:req:shell.hashbang-unspecified]
+// [spec:posix:sem:shell.tokenization-and-parsing]
+// [spec:posix:def:quote.purpose]
+// [spec:posix:req:quote.always-special-characters]
+// [spec:posix:req:quote.conditionally-special-characters]
+// [spec:posix:req:quote.future-special-characters]
+// [spec:posix:def:quote.mechanisms]
+// [spec:posix:req:quote.backslash-literal]
+// [spec:posix:req:quote.single-quotes]
+// [spec:posix:req:quote.double-quotes-literal]
+// [spec:posix:req:quote.double-quotes-dollar-sign]
+// [spec:posix:req:quote.double-quotes-command-substitution]
+// [spec:posix:req:quote.double-quotes-substring-parameter-expansion]
+// [spec:posix:req:quote.double-quotes-other-parameter-expansion]
+// [spec:posix:req:quote.double-quotes-backquote]
+// [spec:posix:req:quote.double-quotes-backquote-undefined]
+// [spec:posix:req:quote.double-quotes-backslash]
+// [spec:posix:req:quote.double-quotes-expansion-result]
+// [spec:posix:req:quote.double-quotes-embedded-double-quote]
+// [spec:posix:req:quote.dollar-single-quotes]
 fn readtoken1(
     sh: &mut Shell,
     firstc: c_int,

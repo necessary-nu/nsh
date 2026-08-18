@@ -102,6 +102,8 @@ fn etext() -> c_int {
 // [spec:posix:req:xcu.arbitrary-file-size]
 // [spec:posix:req:xcu.defaults.exit-status-successful-completion]
 // [spec:posix:req:param.env]
+// [spec:posix:def:shell.command-language-interpreter]
+// [spec:posix:sem:shell.input-sources]
 pub fn main(
     sh: &mut Shell,
     argv: &[Vec<u8>],
