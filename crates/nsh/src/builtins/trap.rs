@@ -43,6 +43,7 @@ fn write_listing(sh: &mut Shell, signo: usize, include_default: bool) {
 
 // [spec:dash:def:trap.trapcmd-fn]
 // [spec:dash:sem:trap.trapcmd-fn]
+// [spec:posix:syn:builtin.trap.synopsis]
 // [spec:posix:req:builtin.trap.operand-interpretation]
 // [spec:posix:req:builtin.trap.action-values]
 // [spec:posix:def:builtin.trap.condition]

@@ -494,6 +494,8 @@ CASES: tuple[Case, ...] = (
             "trap -p USR1 >pout 2>perr\n"
             "printf 'p-status=%s\\n' \"$?\"\n"
             "grep -q USR1 pout && printf 'p-lists-condition\\n'\n"
+            "trap -p >/dev/null\n"
+            "trap >/dev/null\n"
             "trap 0\n"
             "printf 'n-form=%s\\n' \"$?\"\n"
         ),
