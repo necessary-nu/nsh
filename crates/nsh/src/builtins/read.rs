@@ -46,6 +46,17 @@ const READ_MBSLOP: usize = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 4;
 
 // [spec:dash:def:miscbltin.readcmd-handle-line-fn]
 // [spec:dash:sem:miscbltin.readcmd-handle-line-fn]
+// [spec:posix:req:builtin.read.ifs-empty]
+// [spec:posix:req:builtin.read.field-splitting-modified]
+// [spec:posix:req:builtin.read.field-splitting-leftover]
+// [spec:posix:req:builtin.read.var-assignment-order]
+// [spec:posix:req:builtin.read.unprocessed-vars-empty]
+// [spec:posix:thm:builtin.read.single-var-unsplit]
+// [spec:posix:req:builtin.read.affects-current-environment]
+// [spec:posix:req:builtin.read.variable-set-error]
+// [spec:posix:def:builtin.read.operand-var]
+// [spec:posix:sem:builtin.read.operand-var-locale]
+// [spec:posix:req:builtin.read.env]
 fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> Result<(), Error> {
     let mut arglist: arglist = arglist::new();
 
@@ -93,6 +104,18 @@ fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> R
 
 // [spec:dash:def:miscbltin.readcmd-fn]
 // [spec:dash:sem:miscbltin.readcmd-fn]
+// [spec:posix:req:builtin.read.logical-line]
+// [spec:posix:req:builtin.read.backslash-escape]
+// [spec:posix:req:builtin.read.backslash-line-continuation]
+// [spec:posix:req:builtin.read.end-of-file]
+// [spec:posix:req:builtin.read.env-nlspath]
+// [spec:posix:req:builtin.read.exit-status]
+// [spec:posix:req:builtin.read.interfaces]
+// [spec:posix:req:builtin.read.option-r]
+// [spec:posix:req:builtin.read.stderr]
+// [spec:posix:req:builtin.read.stdin]
+// [spec:posix:req:builtin.read.terminating-delimiter-removed]
+// [spec:posix:req:builtin.read.utility-syntax-guidelines]
 pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut prompt: Option<CString>;
     let mut startloc: c_int = 0;

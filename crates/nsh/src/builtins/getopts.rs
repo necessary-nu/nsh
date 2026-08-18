@@ -15,6 +15,17 @@ use crate::var::{VNOFUNC, set_bytes, setvarint_bytes, unset_bytes};
 
 // [spec:dash:def:options.getoptscmd-fn]
 // [spec:dash:sem:options.getoptscmd-fn]
+// [spec:posix:syn:builtin.getopts.syn]
+// [spec:posix:req:builtin.getopts.retrieve-options]
+// [spec:posix:req:builtin.getopts.optind-initialized]
+// [spec:posix:req:builtin.getopts.no-export]
+// [spec:posix:sem:builtin.getopts.affects-current-environment]
+// [spec:posix:def:builtin.getopts.operand-optstring]
+// [spec:posix:def:builtin.getopts.operand-name]
+// [spec:posix:req:builtin.getopts.operand-param]
+// [spec:posix:req:builtin.getopts.env]
+// [spec:posix:req:builtin.getopts.env-nlspath]
+// [spec:posix:req:builtin.getopts.interfaces]
 pub fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut opts = Options::new(args);
     opts.next(sh, b"")?;
@@ -45,6 +56,17 @@ pub fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
 // [spec:dash:def:options.getopts-fn]
 // [spec:dash:sem:options.getopts-fn]
+// [spec:posix:req:builtin.getopts.optind-after-invocation]
+// [spec:posix:req:builtin.getopts.unknown-option]
+// [spec:posix:req:builtin.getopts.missing-option-argument]
+// [spec:posix:req:builtin.getopts.end-of-options]
+// [spec:posix:def:builtin.getopts.end-of-options-identification]
+// [spec:posix:req:builtin.getopts.variable-set-error]
+// [spec:posix:req:builtin.getopts.optstring-separate-arguments]
+// [spec:posix:syn:builtin.getopts.optstring-character-restrictions]
+// [spec:posix:req:builtin.getopts.optarg-content]
+// [spec:posix:sem:builtin.getopts.optstring-first-character]
+// [spec:posix:req:builtin.getopts.exit-status]
 fn getopts(
     sh: &mut Shell,
     optstr: &BStr,

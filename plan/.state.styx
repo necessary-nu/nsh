@@ -2191,4 +2191,97 @@ impl_evidence (
         {impl_name shell, rule xcu.stdout.env-independence}
         {impl_name shell, rule xcu.stdout.terminal-background}
     )}
+    {id posix-builtins-input, covered_rules (
+        builtin.getopts.affects-current-environment
+        builtin.getopts.end-of-options
+        builtin.getopts.end-of-options-identification
+        builtin.getopts.env
+        builtin.getopts.env-nlspath
+        builtin.getopts.exit-status
+        builtin.getopts.interfaces
+        builtin.getopts.missing-option-argument
+        builtin.getopts.no-export
+        builtin.getopts.operand-name
+        builtin.getopts.operand-optstring
+        builtin.getopts.operand-param
+        builtin.getopts.optarg-content
+        builtin.getopts.optind-after-invocation
+        builtin.getopts.optind-initialized
+        builtin.getopts.optstring-character-restrictions
+        builtin.getopts.optstring-first-character
+        builtin.getopts.optstring-separate-arguments
+        builtin.getopts.retrieve-options
+        builtin.getopts.syn
+        builtin.getopts.unknown-option
+        builtin.getopts.variable-set-error
+        builtin.read.affects-current-environment
+        builtin.read.backslash-escape
+        builtin.read.backslash-line-continuation
+        builtin.read.end-of-file
+        builtin.read.env
+        builtin.read.env-nlspath
+        builtin.read.exit-status
+        builtin.read.field-splitting-leftover
+        builtin.read.field-splitting-modified
+        builtin.read.ifs-empty
+        builtin.read.interfaces
+        builtin.read.logical-line
+        builtin.read.operand-var
+        builtin.read.operand-var-locale
+        builtin.read.option-r
+        builtin.read.single-var-unsplit
+        builtin.read.stderr
+        builtin.read.stdin
+        builtin.read.terminating-delimiter-removed
+        builtin.read.unprocessed-vars-empty
+        builtin.read.utility-syntax-guidelines
+        builtin.read.var-assignment-order
+        builtin.read.variable-set-error
+    ), covered_claims (
+        {impl_name shell, rule builtin.getopts.affects-current-environment}
+        {impl_name shell, rule builtin.getopts.end-of-options}
+        {impl_name shell, rule builtin.getopts.end-of-options-identification}
+        {impl_name shell, rule builtin.getopts.env}
+        {impl_name shell, rule builtin.getopts.env-nlspath}
+        {impl_name shell, rule builtin.getopts.exit-status}
+        {impl_name shell, rule builtin.getopts.interfaces}
+        {impl_name shell, rule builtin.getopts.missing-option-argument}
+        {impl_name shell, rule builtin.getopts.no-export}
+        {impl_name shell, rule builtin.getopts.operand-name}
+        {impl_name shell, rule builtin.getopts.operand-optstring}
+        {impl_name shell, rule builtin.getopts.operand-param}
+        {impl_name shell, rule builtin.getopts.optarg-content}
+        {impl_name shell, rule builtin.getopts.optind-after-invocation}
+        {impl_name shell, rule builtin.getopts.optind-initialized}
+        {impl_name shell, rule builtin.getopts.optstring-character-restrictions}
+        {impl_name shell, rule builtin.getopts.optstring-first-character}
+        {impl_name shell, rule builtin.getopts.optstring-separate-arguments}
+        {impl_name shell, rule builtin.getopts.retrieve-options}
+        {impl_name shell, rule builtin.getopts.syn}
+        {impl_name shell, rule builtin.getopts.unknown-option}
+        {impl_name shell, rule builtin.getopts.variable-set-error}
+        {impl_name shell, rule builtin.read.affects-current-environment}
+        {impl_name shell, rule builtin.read.backslash-escape}
+        {impl_name shell, rule builtin.read.backslash-line-continuation}
+        {impl_name shell, rule builtin.read.end-of-file}
+        {impl_name shell, rule builtin.read.env}
+        {impl_name shell, rule builtin.read.env-nlspath}
+        {impl_name shell, rule builtin.read.exit-status}
+        {impl_name shell, rule builtin.read.field-splitting-leftover}
+        {impl_name shell, rule builtin.read.field-splitting-modified}
+        {impl_name shell, rule builtin.read.ifs-empty}
+        {impl_name shell, rule builtin.read.interfaces}
+        {impl_name shell, rule builtin.read.logical-line}
+        {impl_name shell, rule builtin.read.operand-var}
+        {impl_name shell, rule builtin.read.operand-var-locale}
+        {impl_name shell, rule builtin.read.option-r}
+        {impl_name shell, rule builtin.read.single-var-unsplit}
+        {impl_name shell, rule builtin.read.stderr}
+        {impl_name shell, rule builtin.read.stdin}
+        {impl_name shell, rule builtin.read.terminating-delimiter-removed}
+        {impl_name shell, rule builtin.read.unprocessed-vars-empty}
+        {impl_name shell, rule builtin.read.utility-syntax-guidelines}
+        {impl_name shell, rule builtin.read.var-assignment-order}
+        {impl_name shell, rule builtin.read.variable-set-error}
+    )}
 )

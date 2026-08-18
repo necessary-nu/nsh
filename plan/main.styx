@@ -1403,6 +1403,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T02:06:39.677877538Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T02:07:53.28924863Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Mapped all 45 assigned read/getopts rules onto their scanner, input, field-splitting, assignment, and persistent cursor implementations. Verification: cargo test -p nsh (all unit/integration suites pass); selected POSIX harness PASS=28 FAIL=0 with 41 exercised rule assertions; git diff --check clean."
+                    }
+                )
             }
 
             {
