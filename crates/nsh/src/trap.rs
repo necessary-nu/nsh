@@ -325,6 +325,8 @@ fn install_disposition(
 // [spec:posix:req:sh.interactive-sigquit-sigterm]
 // [spec:posix:req:sh.interactive-stop-signals]
 // [spec:posix:req:sh.signal-actions-overridable]
+// [spec:posix:req:xcu.defaults.asynchronous-events-default]
+// [spec:posix:req:xcu.async.may-catch-and-resignal]
 pub fn setsignal(sh: &mut crate::context::Shell, signo: c_int) {
     setsignal_via(sh, signo, Via::Host)
 }

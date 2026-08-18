@@ -151,6 +151,13 @@ pub struct stdin_state_t {
 /// criterion the evaluator's state settled. `alias_boundary` is private
 /// because it is a bit this module produces and hands over through
 /// [`take_alias_boundary`], which is the invariant worth keeping.
+// [spec:posix:req:xcu.stdin.input-file-restrictions-apply]
+// [spec:posix:req:xcu.stdin.terminal-background]
+// [spec:posix:req:xcu.stdin.env-independence]
+// [spec:posix:req:xcu.input-files.eight-bit-transparency]
+// [spec:posix:req:xcu.input-files.seekable-file-offset]
+// [spec:posix:req:xcu.input-files.document-size-limits]
+// [spec:posix:req:xcu.input-files.text-file-and-line-continuation]
 pub struct InputStack {
     /// `basepf` — the top-level input file, frame 0. Never popped.
     base: ParseFile,

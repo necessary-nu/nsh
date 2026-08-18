@@ -473,6 +473,15 @@ impl crate::context::Shell {
     /// `flushall()` runs *after* the message, so a built-in that filled
     /// the stdout buffer and then failed produces its diagnostic before
     /// its own output in the merged stream. Both are pinned by the corpus.
+    // [spec:posix:req:xcu.defaults.stderr-diagnostics-only]
+    // [spec:posix:req:xcu.stderr.terminal-background]
+    // [spec:posix:req:xcu.stderr.message-language]
+    // [spec:posix:req:xcu.stderr.env-independence]
+    // [spec:posix:req:xcu.errors.failure-reasons-unspecified]
+    // [spec:posix:req:xcu.errors.operand-failure-continues]
+    // [spec:posix:req:xcu.errors.option-failure]
+    // [spec:posix:req:xcu.errors.unrecoverable-exit-status]
+    // [spec:posix:req:xcu.errors.diagnostic-message-required]
     pub fn report(&mut self, e: Error) -> Error {
         self.sh_warnx(e.message());
 

@@ -124,6 +124,10 @@ impl Output {
 /// This is one field in the designed `Shell`; keeping the aggregate intact
 /// here makes moving it onto that instance a move rather than another output
 /// rewrite.
+// [spec:posix:req:xcu.stdout.terminal-background]
+// [spec:posix:req:xcu.stdout.env-independence]
+// [spec:posix:req:xcu.stdout.display-verb]
+// [spec:posix:req:xcu.defaults.output-files-none]
 pub struct ShellIo {
     stdout: Output,
     stderr: Output,

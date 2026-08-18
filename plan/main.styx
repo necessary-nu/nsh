@@ -1026,6 +1026,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T02:02:10.97027657Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T02:06:10.176577438Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Mapped all 48 XCU 1.2-1.7 rules to the shared builtin table, option scanner, byte-oriented input/environment machinery, PATH execution, diagnostic/output funnels, signal policy, and fc temporary-file lifecycle. Verification: cargo test -p nsh (230 unit plus integration suites, all pass); selected POSIX harness PASS=22 FAIL=0 with 28 exercised rule assertions; git diff --check clean."
+                    }
+                )
             }
 
             {

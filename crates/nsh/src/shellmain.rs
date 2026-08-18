@@ -90,6 +90,17 @@ fn etext() -> c_int {
 // [spec:posix:sem:sh.output-files]
 // [spec:posix:req:sh.exit-status-otherwise]
 // [spec:posix:req:sh.consequences-of-errors]
+// [spec:posix:req:xcu.limits.minimum-values]
+// [spec:posix:req:xcu.limits.more-liberal-values]
+// [spec:posix:sem:xcu.limits.symbol-retrieval]
+// [spec:posix:sem:xcu.limits.reachability-not-guaranteed]
+// [spec:posix:def:xcu.limits.symbolic]
+// [spec:posix:req:xcu.limits.posix2-symlinks]
+// [spec:posix:req:xcu.grammar-notation.implementation-freedom]
+// [spec:posix:req:xcu.description.equivalent-functionality]
+// [spec:posix:req:xcu.description.declaration-utility]
+// [spec:posix:req:xcu.arbitrary-file-size]
+// [spec:posix:req:xcu.defaults.exit-status-successful-completion]
 pub fn main(
     sh: &mut Shell,
     argv: &[Vec<u8>],

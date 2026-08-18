@@ -110,6 +110,10 @@ fn scan_options(sh: &mut crate::context::Shell, args: &[&BStr]) -> Result<Flags,
 // [spec:dash:sem:histedit.histcmd-fn]
 // [spec:dash:def:myhistedit.histcmd-fn]
 // [spec:dash:sem:myhistedit.histcmd-fn]
+// [spec:posix:req:xcu.output-files.tmpdir]
+// [spec:posix:req:xcu.output-files.temp-file-naming]
+// [spec:posix:req:xcu.output-files.temp-file-removal]
+// [spec:posix:req:xcu.output-files.sigquit-bypasses-recovery]
 pub fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut fields: Vec<strlist> = args
         .iter()

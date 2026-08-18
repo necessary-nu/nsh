@@ -89,6 +89,8 @@ pub struct LocalVarList {
     entries: Vec<LocalVar>,
 }
 
+// [spec:posix:req:xcu.env.effects-confined-to-section]
+// [spec:posix:req:xcu.env.eight-bit-transparency]
 pub struct VarTable {
     tab: BTreeMap<BString, Var>,
     pub(crate) lineno: c_int,

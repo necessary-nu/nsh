@@ -217,6 +217,7 @@ impl CmdTable {
 
 // [spec:dash:def:exec.shellexec-fn]
 // [spec:dash:sem:exec.shellexec-fn]
+// [spec:posix:req:xcu.env.utility-selection-path-search]
 pub fn shellexec(
     sh: &mut crate::context::Shell,
     argv: &[&BStr],

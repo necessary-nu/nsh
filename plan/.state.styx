@@ -2092,4 +2092,103 @@ impl_evidence (
         {impl_name shell, rule sh.synopsis}
         {impl_name shell, rule sh.utility-syntax-guidelines}
     )}
+    {id posix-utility-defaults, covered_rules (
+        xcu.arbitrary-file-size
+        xcu.async.may-catch-and-resignal
+        xcu.builtin.exec-accessible
+        xcu.builtin.regular-permitted
+        xcu.defaults.asynchronous-events-default
+        xcu.defaults.exit-status-successful-completion
+        xcu.defaults.output-files-none
+        xcu.defaults.stderr-diagnostics-only
+        xcu.description.declaration-utility
+        xcu.description.equivalent-functionality
+        xcu.env.effects-confined-to-section
+        xcu.env.eight-bit-transparency
+        xcu.env.utility-selection-path-search
+        xcu.errors.diagnostic-message-required
+        xcu.errors.failure-reasons-unspecified
+        xcu.errors.operand-failure-continues
+        xcu.errors.option-failure
+        xcu.errors.unrecoverable-exit-status
+        xcu.grammar-notation.implementation-freedom
+        xcu.input-files.document-size-limits
+        xcu.input-files.eight-bit-transparency
+        xcu.input-files.seekable-file-offset
+        xcu.input-files.text-file-and-line-continuation
+        xcu.intrinsic-utilities
+        xcu.intrinsic.additional-implementation-defined
+        xcu.limits.minimum-values
+        xcu.limits.more-liberal-values
+        xcu.limits.posix2-symlinks
+        xcu.limits.reachability-not-guaranteed
+        xcu.limits.symbol-retrieval
+        xcu.limits.symbolic
+        xcu.operands.hyphen-means-stdin
+        xcu.operands.processing-order
+        xcu.options.eight-bit-transparency
+        xcu.options.unrecognized-diagnostic
+        xcu.output-files.sigquit-bypasses-recovery
+        xcu.output-files.temp-file-naming
+        xcu.output-files.temp-file-removal
+        xcu.output-files.tmpdir
+        xcu.stderr.env-independence
+        xcu.stderr.message-language
+        xcu.stderr.terminal-background
+        xcu.stdin.env-independence
+        xcu.stdin.input-file-restrictions-apply
+        xcu.stdin.terminal-background
+        xcu.stdout.display-verb
+        xcu.stdout.env-independence
+        xcu.stdout.terminal-background
+    ), covered_claims (
+        {impl_name shell, rule xcu.arbitrary-file-size}
+        {impl_name shell, rule xcu.async.may-catch-and-resignal}
+        {impl_name shell, rule xcu.builtin.exec-accessible}
+        {impl_name shell, rule xcu.builtin.regular-permitted}
+        {impl_name shell, rule xcu.defaults.asynchronous-events-default}
+        {impl_name shell, rule xcu.defaults.exit-status-successful-completion}
+        {impl_name shell, rule xcu.defaults.output-files-none}
+        {impl_name shell, rule xcu.defaults.stderr-diagnostics-only}
+        {impl_name shell, rule xcu.description.declaration-utility}
+        {impl_name shell, rule xcu.description.equivalent-functionality}
+        {impl_name shell, rule xcu.env.effects-confined-to-section}
+        {impl_name shell, rule xcu.env.eight-bit-transparency}
+        {impl_name shell, rule xcu.env.utility-selection-path-search}
+        {impl_name shell, rule xcu.errors.diagnostic-message-required}
+        {impl_name shell, rule xcu.errors.failure-reasons-unspecified}
+        {impl_name shell, rule xcu.errors.operand-failure-continues}
+        {impl_name shell, rule xcu.errors.option-failure}
+        {impl_name shell, rule xcu.errors.unrecoverable-exit-status}
+        {impl_name shell, rule xcu.grammar-notation.implementation-freedom}
+        {impl_name shell, rule xcu.input-files.document-size-limits}
+        {impl_name shell, rule xcu.input-files.eight-bit-transparency}
+        {impl_name shell, rule xcu.input-files.seekable-file-offset}
+        {impl_name shell, rule xcu.input-files.text-file-and-line-continuation}
+        {impl_name shell, rule xcu.intrinsic-utilities}
+        {impl_name shell, rule xcu.intrinsic.additional-implementation-defined}
+        {impl_name shell, rule xcu.limits.minimum-values}
+        {impl_name shell, rule xcu.limits.more-liberal-values}
+        {impl_name shell, rule xcu.limits.posix2-symlinks}
+        {impl_name shell, rule xcu.limits.reachability-not-guaranteed}
+        {impl_name shell, rule xcu.limits.symbol-retrieval}
+        {impl_name shell, rule xcu.limits.symbolic}
+        {impl_name shell, rule xcu.operands.hyphen-means-stdin}
+        {impl_name shell, rule xcu.operands.processing-order}
+        {impl_name shell, rule xcu.options.eight-bit-transparency}
+        {impl_name shell, rule xcu.options.unrecognized-diagnostic}
+        {impl_name shell, rule xcu.output-files.sigquit-bypasses-recovery}
+        {impl_name shell, rule xcu.output-files.temp-file-naming}
+        {impl_name shell, rule xcu.output-files.temp-file-removal}
+        {impl_name shell, rule xcu.output-files.tmpdir}
+        {impl_name shell, rule xcu.stderr.env-independence}
+        {impl_name shell, rule xcu.stderr.message-language}
+        {impl_name shell, rule xcu.stderr.terminal-background}
+        {impl_name shell, rule xcu.stdin.env-independence}
+        {impl_name shell, rule xcu.stdin.input-file-restrictions-apply}
+        {impl_name shell, rule xcu.stdin.terminal-background}
+        {impl_name shell, rule xcu.stdout.display-verb}
+        {impl_name shell, rule xcu.stdout.env-independence}
+        {impl_name shell, rule xcu.stdout.terminal-background}
+    )}
 )

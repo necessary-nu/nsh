@@ -631,6 +631,10 @@ pub fn getoptsreset(sh: &mut crate::context::Shell, _value: &BStr) {
 /// Neither can this one, which is why it is a value.
 ///
 /// [`Options::operands`] is the `argptr` a builtin reads afterwards.
+// [spec:posix:req:xcu.options.unrecognized-diagnostic]
+// [spec:posix:req:xcu.options.eight-bit-transparency]
+// [spec:posix:req:xcu.operands.hyphen-means-stdin]
+// [spec:posix:req:xcu.operands.processing-order]
 pub struct Options<'a> {
     args: &'a [&'a BStr],
     /// The next word to look at: dash's `argptr`.
