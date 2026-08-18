@@ -20,6 +20,16 @@ use crate::jobs::{
 // [spec:dash:def:jobs.waitcmd-fn]
 // [spec:dash:sem:jobs.waitcmd-fn]
 // [spec:posix:req:signal.trap-during-wait]
+// [spec:posix:syn:builtin.wait.synopsis]
+// [spec:posix:req:builtin.wait.await-children]
+// [spec:posix:req:builtin.wait.no-operands]
+// [spec:posix:def:builtin.wait.operand-pid-number]
+// [spec:posix:req:builtin.wait.operand-pid-job-id]
+// [spec:posix:req:builtin.wait.env-vars]
+// [spec:posix:sem:builtin.wait.env-nlspath]
+// [spec:posix:req:builtin.wait.stderr]
+// [spec:posix:req:builtin.wait.interfaces]
+// [spec:posix:req:builtin.wait.exit-status-signal]
 pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut jobp: Option<usize>;
     let mut retval: c_int;

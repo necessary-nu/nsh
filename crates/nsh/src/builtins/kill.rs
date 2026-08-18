@@ -18,6 +18,25 @@ use crate::output::Dest;
 
 // [spec:dash:def:jobs.killcmd-fn]
 // [spec:dash:sem:jobs.killcmd-fn]
+// [spec:posix:syn:builtin.kill.synopsis]
+// [spec:posix:syn:builtin.kill.synopsis-xsi]
+// [spec:posix:req:builtin.kill.send-signal]
+// [spec:posix:req:builtin.kill.utility-syntax-guidelines]
+// [spec:posix:req:builtin.kill.option-l]
+// [spec:posix:req:builtin.kill.option-s]
+// [spec:posix:req:builtin.kill.option-signal-name]
+// [spec:posix:req:builtin.kill.option-signal-number]
+// [spec:posix:req:builtin.kill.negative-first-argument]
+// [spec:posix:req:builtin.kill.operand-pid-number]
+// [spec:posix:def:builtin.kill.operand-exit-status]
+// [spec:posix:req:builtin.kill.env-vars]
+// [spec:posix:sem:builtin.kill.env-nlspath]
+// [spec:posix:req:builtin.kill.stdout-unused-without-l]
+// [spec:posix:req:builtin.kill.stdout-signal-list-format]
+// [spec:posix:req:builtin.kill.stdout-exit-status-format]
+// [spec:posix:req:builtin.kill.stderr]
+// [spec:posix:req:builtin.kill.interfaces]
+// [spec:posix:req:builtin.kill.exit-status]
 pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* the `usage:` label is a backward goto whose body only raises, so it
      * is reproduced as two returns of the same message. */

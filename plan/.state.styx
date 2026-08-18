@@ -2911,4 +2911,65 @@ impl_evidence (
         {impl_name shell, rule grammar.while-until-clause}
         {impl_name shell, rule grammar.word-expansion-timing}
     )}
+    {id posix-builtins-signals, covered_rules (
+        builtin.kill.env-nlspath
+        builtin.kill.env-vars
+        builtin.kill.exit-status
+        builtin.kill.interfaces
+        builtin.kill.negative-first-argument
+        builtin.kill.operand-exit-status
+        builtin.kill.operand-pid-number
+        builtin.kill.option-l
+        builtin.kill.option-s
+        builtin.kill.option-signal-name
+        builtin.kill.option-signal-number
+        builtin.kill.send-signal
+        builtin.kill.stderr
+        builtin.kill.stdout-exit-status-format
+        builtin.kill.stdout-signal-list-format
+        builtin.kill.stdout-unused-without-l
+        builtin.kill.synopsis
+        builtin.kill.synopsis-xsi
+        builtin.kill.utility-syntax-guidelines
+        builtin.wait.await-children
+        builtin.wait.env-nlspath
+        builtin.wait.env-vars
+        builtin.wait.exit-status-signal
+        builtin.wait.interfaces
+        builtin.wait.no-operands
+        builtin.wait.operand-pid-job-id
+        builtin.wait.operand-pid-number
+        builtin.wait.stderr
+        builtin.wait.synopsis
+    ), covered_claims (
+        {impl_name shell, rule builtin.kill.env-nlspath}
+        {impl_name shell, rule builtin.kill.env-vars}
+        {impl_name shell, rule builtin.kill.exit-status}
+        {impl_name shell, rule builtin.kill.interfaces}
+        {impl_name shell, rule builtin.kill.negative-first-argument}
+        {impl_name shell, rule builtin.kill.operand-exit-status}
+        {impl_name shell, rule builtin.kill.operand-pid-number}
+        {impl_name shell, rule builtin.kill.option-l}
+        {impl_name shell, rule builtin.kill.option-s}
+        {impl_name shell, rule builtin.kill.option-signal-name}
+        {impl_name shell, rule builtin.kill.option-signal-number}
+        {impl_name shell, rule builtin.kill.send-signal}
+        {impl_name shell, rule builtin.kill.stderr}
+        {impl_name shell, rule builtin.kill.stdout-exit-status-format}
+        {impl_name shell, rule builtin.kill.stdout-signal-list-format}
+        {impl_name shell, rule builtin.kill.stdout-unused-without-l}
+        {impl_name shell, rule builtin.kill.synopsis}
+        {impl_name shell, rule builtin.kill.synopsis-xsi}
+        {impl_name shell, rule builtin.kill.utility-syntax-guidelines}
+        {impl_name shell, rule builtin.wait.await-children}
+        {impl_name shell, rule builtin.wait.env-nlspath}
+        {impl_name shell, rule builtin.wait.env-vars}
+        {impl_name shell, rule builtin.wait.exit-status-signal}
+        {impl_name shell, rule builtin.wait.interfaces}
+        {impl_name shell, rule builtin.wait.no-operands}
+        {impl_name shell, rule builtin.wait.operand-pid-job-id}
+        {impl_name shell, rule builtin.wait.operand-pid-number}
+        {impl_name shell, rule builtin.wait.stderr}
+        {impl_name shell, rule builtin.wait.synopsis}
+    )}
 )
