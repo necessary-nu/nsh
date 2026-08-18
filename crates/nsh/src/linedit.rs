@@ -764,6 +764,7 @@ fn default_terminal_profile() -> TerminalProfile {
         .unwrap_or_else(TerminalProfile::ansi)
 }
 
+// [spec:posix:sem:edit.append-last-bigword]
 fn install_shell_bindings(
     editor: &mut NativeEditor,
     terminal_attributes: Option<&TerminalAttributes>,
@@ -858,6 +859,7 @@ fn install_shell_bindings(
             "0",
             Binding::Immediate(ImmediateCommand::StartOfLineOrArgument),
         ),
+        ("_", Binding::Effect(EffectCommand::InsertHistoryWord)),
         (
             "^",
             Binding::User(

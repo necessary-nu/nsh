@@ -2891,6 +2891,21 @@ children (
                             shell ([spec:posix:sem:edit.append-last-bigword])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:57:01.704179937Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:59:35.189095987Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "The published nshedit 0.1.0 already implements vi command-mode `_` through EffectCommand::InsertHistoryWord, including a numeric prefix selecting the corresponding whitespace-delimited word and transition to insert mode. Make nsh explicitly install that binding instead of depending on nshedit's undocumented default, and map the POSIX rule both at binding installation and at History::newest_word. Verification: both PTY cases pass, all 15 linedit unit tests pass, and git diff --check passes."
+                            }
+                        )
                     }
 
                     {

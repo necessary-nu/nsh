@@ -3589,4 +3589,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule cmd.case-clause-terminators}
     )}
+    {id fix-edit-append-last-bigword, covered_rules (
+        edit.append-last-bigword
+    ), covered_claims (
+        {impl_name shell, rule edit.append-last-bigword}
+    )}
 )

@@ -406,6 +406,7 @@ impl History {
         }
     }
 
+    // [spec:posix:sem:edit.append-last-bigword]
     pub(super) fn newest_word(&self, position: HistoryWordPosition) -> HistoryWordResponse {
         let Some(entry) = self.store.newest() else {
             return HistoryWordResponse::Missing;
