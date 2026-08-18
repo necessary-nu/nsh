@@ -104,6 +104,7 @@ fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> R
 
 // [spec:dash:def:miscbltin.readcmd-fn]
 // [spec:dash:sem:miscbltin.readcmd-fn]
+// [spec:posix:syn:builtin.read.syn]
 // [spec:posix:req:builtin.read.logical-line]
 // [spec:posix:req:builtin.read.backslash-escape]
 // [spec:posix:req:builtin.read.backslash-line-continuation]

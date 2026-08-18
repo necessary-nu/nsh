@@ -3499,4 +3499,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.read.option-d}
     )}
+    {id fix-builtin-read-syn, covered_rules (
+        builtin.read.syn
+    ), covered_claims (
+        {impl_name shell, rule builtin.read.syn}
+    )}
 )
