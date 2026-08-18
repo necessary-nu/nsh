@@ -2309,6 +2309,21 @@ children (
                             shell ([spec:posix:req:builtin.set.opt-h])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:25:31.772685686Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:27:13.525965741Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Represent POSIX's obsolescent -h as an appended hashall shell-option slot so no existing option index moves. The generic option machinery now accepts -h/+h, exposes the state through $-, snapshots it for local option scopes, and can re-input it through set +o; command lookup remains always cached because POSIX says -h may (not shall) speed PATH search. Verification: set-obsolescent-h plus synopsis, option-argument, and +o re-input neighbors pass; focused minus/plus Rust test passes; cargo test -p nsh passes 278 tests with one ignored doctest; git diff --check passes."
+                            }
+                        )
                     }
 
                     {

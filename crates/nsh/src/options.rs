@@ -64,7 +64,7 @@ impl shparam {
     }
 }
 
-pub const NOPTS: usize = 18;
+pub const NOPTS: usize = 19;
 
 /*
  * options.h spells these `#define eflag optlist[0]` etc.  The port keeps the
@@ -89,6 +89,7 @@ pub const uflag: usize = 14;
 pub const nolog: usize = 15;
 pub const pipefail: usize = 16;
 pub const debug: usize = 17;
+pub const hflag: usize = 18;
 
 /* `static const char *const optnames[NOPTS]`.
  *
@@ -115,6 +116,7 @@ static optnames: [&CStr; NOPTS] = [
     c"nolog",
     c"pipefail",
     c"debug",
+    c"hashall",
 ];
 
 pub static optletters: [c_char; NOPTS] = [
@@ -136,6 +138,7 @@ pub static optletters: [c_char; NOPTS] = [
     0,
     0,
     0,
+    b'h' as c_char,
 ];
 
 /// The shell's option flags — `set -e`, `set -x`, `-i` and the rest.
@@ -365,6 +368,7 @@ pub(crate) struct Scan {
 // [spec:posix:req:builtin.set.opt-e-errexit]
 // [spec:posix:req:builtin.set.opt-e-per-environment]
 // [spec:posix:req:builtin.set.opt-f-noglob]
+// [spec:posix:req:builtin.set.opt-h]
 // [spec:posix:req:builtin.set.opt-m-monitor]
 // [spec:posix:req:builtin.set.opt-n-noexec]
 // [spec:posix:req:builtin.set.opt-v-verbose]
@@ -994,6 +998,18 @@ mod tests {
         let sh = &mut owned_sh;
         let (next, _, _) = scan_options(sh, &[b"", b"-x"], false);
         assert_eq!(next, 0);
+    }
+
+    #[test]
+    fn hashall_tracks_minus_and_plus_forms() {
+        let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let enable = words(&[b"-h"]);
+        options(&mut sh, &enable, 0, false).unwrap();
+        assert_eq!(sh.options.flag(hflag), 1);
+
+        let disable = words(&[b"+h"]);
+        options(&mut sh, &disable, 0, false).unwrap();
+        assert_eq!(sh.options.flag(hflag), 0);
     }
 
     #[test]

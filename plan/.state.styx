@@ -3509,4 +3509,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.set.opt-b-notify}
     )}
+    {id fix-builtin-set-opt-h, covered_rules (
+        builtin.set.opt-h
+    ), covered_claims (
+        {impl_name shell, rule builtin.set.opt-h}
+    )}
 )
