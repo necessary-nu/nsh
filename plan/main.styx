@@ -2844,6 +2844,21 @@ children (
                             shell ([spec:posix:req:edit.history-goto])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:12:26.276956899Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:13:52.498049465Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "History::select_editor_line implements all three `G` outcomes: Oldest selects the tail of the newest-first store, Number searches stable event metadata, and a missing/overflowed number returns the typed unchanged boundary response that nshedit turns into an alert. Map the rule there and add a missing-event PTY case proving both BEL and unchanged input. Verification: all three G cases, all 17 linedit tests, 14 harness unit tests, and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

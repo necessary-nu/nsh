@@ -3624,4 +3624,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule edit.edit-line-replacement}
     )}
+    {id fix-edit-history-goto, covered_rules (
+        edit.history-goto
+    ), covered_claims (
+        {impl_name shell, rule edit.history-goto}
+    )}
 )

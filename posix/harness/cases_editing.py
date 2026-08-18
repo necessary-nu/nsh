@@ -1102,6 +1102,21 @@ CASES: tuple[Case, ...] = (
         timeout=TIMEOUT,
         requires=("UP",),
     ),
+    # [spec:posix:req:edit.history-goto/test]
+    Case(
+        id="edit-history-goto-missing",
+        rules=("edit.history-goto",),
+        # A missing event alerts and leaves the current command unchanged.
+        script=VI + "r keep" + ESC + "99GA; exit\n",
+        stdout=None,
+        stdout_contains=(BEL, "R:keep\n"),
+        mode="interactive",
+        environment=TERMINAL,
+        files=R,
+        status="any",
+        timeout=TIMEOUT,
+        requires=("UP",),
+    ),
     # [spec:posix:req:edit.history-search-backward/test]
     Case(
         id="edit-history-search-backward",

@@ -370,6 +370,7 @@ impl History {
             .map_or_else(HistoryResponse::boundary, HistoryResponse::entry)
     }
 
+    // [spec:posix:req:edit.history-goto]
     pub(super) fn select_editor_line(
         &self,
         cursor: &mut HistoryCursor,
