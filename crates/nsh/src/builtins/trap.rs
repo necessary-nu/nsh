@@ -20,6 +20,20 @@ use crate::trap::{NSIG, cbytes, clear_traps, decode_signal, decode_signum, setsi
 
 // [spec:dash:def:trap.trapcmd-fn]
 // [spec:dash:sem:trap.trapcmd-fn]
+// [spec:posix:req:builtin.trap.operand-interpretation]
+// [spec:posix:req:builtin.trap.action-values]
+// [spec:posix:def:builtin.trap.condition]
+// [spec:posix:req:builtin.trap.signal-name-extensions]
+// [spec:posix:req:builtin.trap.kill-stop-undefined]
+// [spec:posix:req:builtin.trap.list-condition-set]
+// [spec:posix:syn:builtin.trap.list-format]
+// [spec:posix:req:builtin.trap.list-suitable-for-reinput]
+// [spec:posix:req:builtin.trap.xsi-signal-numbers]
+// [spec:posix:req:builtin.trap.invalid-condition-warning]
+// [spec:posix:req:builtin.trap.utility-syntax-guidelines]
+// [spec:posix:req:builtin.trap.utility-defaults]
+// [spec:posix:req:builtin.trap.stderr-usage]
+// [spec:posix:req:builtin.trap.exit-status]
 pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut signo: c_int;
 

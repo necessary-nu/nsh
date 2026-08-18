@@ -1666,4 +1666,123 @@ impl_evidence (
         {impl_name shell, rule expand.tilde-replacement-pathname}
         {impl_name shell, rule expand.tilde-result-quoted}
     )}
+    {id posix-builtins-set-trap, covered_rules (
+        builtin.set.double-hyphen
+        builtin.set.exit-status
+        builtin.set.first-argument-hyphen
+        builtin.set.no-operands-writes-variables
+        builtin.set.opt-a-allexport
+        builtin.set.opt-a-separate-environments
+        builtin.set.opt-c-noclobber
+        builtin.set.opt-e-errexit
+        builtin.set.opt-e-per-environment
+        builtin.set.opt-f-noglob
+        builtin.set.opt-m-monitor
+        builtin.set.opt-n-noexec
+        builtin.set.opt-o-allexport
+        builtin.set.opt-o-errexit
+        builtin.set.opt-o-monitor
+        builtin.set.opt-o-noexec
+        builtin.set.opt-o-noglob
+        builtin.set.opt-o-nolog
+        builtin.set.opt-o-notify
+        builtin.set.opt-o-nounset
+        builtin.set.opt-o-option
+        builtin.set.opt-o-pipefail
+        builtin.set.opt-o-verbose
+        builtin.set.opt-o-vi
+        builtin.set.opt-o-xtrace
+        builtin.set.opt-v-verbose
+        builtin.set.opt-x-xtrace
+        builtin.set.options-and-arguments
+        builtin.set.options-default-off
+        builtin.set.plus-o-report
+        builtin.set.positional-parameters
+        builtin.set.stderr-diagnostics-only
+        builtin.set.synopsis
+        builtin.set.utility-defaults
+        builtin.set.utility-syntax-guidelines
+        builtin.set.variable-output-reinput
+        builtin.trap.action-executed-as-eval
+        builtin.trap.action-overrides-and-exit-status
+        builtin.trap.action-values
+        builtin.trap.condition
+        builtin.trap.exit-action-environment
+        builtin.trap.exit-condition
+        builtin.trap.exit-status
+        builtin.trap.invalid-condition-warning
+        builtin.trap.kill-stop-undefined
+        builtin.trap.list-condition-set
+        builtin.trap.list-format
+        builtin.trap.list-suitable-for-reinput
+        builtin.trap.operand-interpretation
+        builtin.trap.persistence
+        builtin.trap.signal-name-extensions
+        builtin.trap.signals-ignored-on-entry
+        builtin.trap.stderr-usage
+        builtin.trap.subshell-lexical-check
+        builtin.trap.subshell-reset
+        builtin.trap.utility-defaults
+        builtin.trap.utility-syntax-guidelines
+        builtin.trap.xsi-signal-numbers
+    ), covered_claims (
+        {impl_name shell, rule builtin.set.double-hyphen}
+        {impl_name shell, rule builtin.set.exit-status}
+        {impl_name shell, rule builtin.set.first-argument-hyphen}
+        {impl_name shell, rule builtin.set.no-operands-writes-variables}
+        {impl_name shell, rule builtin.set.opt-a-allexport}
+        {impl_name shell, rule builtin.set.opt-a-separate-environments}
+        {impl_name shell, rule builtin.set.opt-c-noclobber}
+        {impl_name shell, rule builtin.set.opt-e-errexit}
+        {impl_name shell, rule builtin.set.opt-e-per-environment}
+        {impl_name shell, rule builtin.set.opt-f-noglob}
+        {impl_name shell, rule builtin.set.opt-m-monitor}
+        {impl_name shell, rule builtin.set.opt-n-noexec}
+        {impl_name shell, rule builtin.set.opt-o-allexport}
+        {impl_name shell, rule builtin.set.opt-o-errexit}
+        {impl_name shell, rule builtin.set.opt-o-monitor}
+        {impl_name shell, rule builtin.set.opt-o-noexec}
+        {impl_name shell, rule builtin.set.opt-o-noglob}
+        {impl_name shell, rule builtin.set.opt-o-nolog}
+        {impl_name shell, rule builtin.set.opt-o-notify}
+        {impl_name shell, rule builtin.set.opt-o-nounset}
+        {impl_name shell, rule builtin.set.opt-o-option}
+        {impl_name shell, rule builtin.set.opt-o-pipefail}
+        {impl_name shell, rule builtin.set.opt-o-verbose}
+        {impl_name shell, rule builtin.set.opt-o-vi}
+        {impl_name shell, rule builtin.set.opt-o-xtrace}
+        {impl_name shell, rule builtin.set.opt-v-verbose}
+        {impl_name shell, rule builtin.set.opt-x-xtrace}
+        {impl_name shell, rule builtin.set.options-and-arguments}
+        {impl_name shell, rule builtin.set.options-default-off}
+        {impl_name shell, rule builtin.set.plus-o-report}
+        {impl_name shell, rule builtin.set.positional-parameters}
+        {impl_name shell, rule builtin.set.stderr-diagnostics-only}
+        {impl_name shell, rule builtin.set.synopsis}
+        {impl_name shell, rule builtin.set.utility-defaults}
+        {impl_name shell, rule builtin.set.utility-syntax-guidelines}
+        {impl_name shell, rule builtin.set.variable-output-reinput}
+        {impl_name shell, rule builtin.trap.action-executed-as-eval}
+        {impl_name shell, rule builtin.trap.action-overrides-and-exit-status}
+        {impl_name shell, rule builtin.trap.action-values}
+        {impl_name shell, rule builtin.trap.condition}
+        {impl_name shell, rule builtin.trap.exit-action-environment}
+        {impl_name shell, rule builtin.trap.exit-condition}
+        {impl_name shell, rule builtin.trap.exit-status}
+        {impl_name shell, rule builtin.trap.invalid-condition-warning}
+        {impl_name shell, rule builtin.trap.kill-stop-undefined}
+        {impl_name shell, rule builtin.trap.list-condition-set}
+        {impl_name shell, rule builtin.trap.list-format}
+        {impl_name shell, rule builtin.trap.list-suitable-for-reinput}
+        {impl_name shell, rule builtin.trap.operand-interpretation}
+        {impl_name shell, rule builtin.trap.persistence}
+        {impl_name shell, rule builtin.trap.signal-name-extensions}
+        {impl_name shell, rule builtin.trap.signals-ignored-on-entry}
+        {impl_name shell, rule builtin.trap.stderr-usage}
+        {impl_name shell, rule builtin.trap.subshell-lexical-check}
+        {impl_name shell, rule builtin.trap.subshell-reset}
+        {impl_name shell, rule builtin.trap.utility-defaults}
+        {impl_name shell, rule builtin.trap.utility-syntax-guidelines}
+        {impl_name shell, rule builtin.trap.xsi-signal-numbers}
+    )}
 )

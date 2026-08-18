@@ -175,6 +175,9 @@ pub fn mkinit_forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
 ///   is running in that child, and the parent's `ptrap` stays 0.
 // [spec:dash:def:trap.clear-traps-fn]
 // [spec:dash:sem:trap.clear-traps-fn]
+// [spec:posix:req:builtin.trap.persistence]
+// [spec:posix:req:builtin.trap.subshell-reset]
+// [spec:posix:req:builtin.trap.subshell-lexical-check]
 pub fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
     let simplecmd: c_int;
 
@@ -316,6 +319,7 @@ fn install_disposition(
 /// The parent's entry point: the host installs what the shell decided.
 // [spec:dash:def:trap.setsignal-fn]
 // [spec:dash:sem:trap.setsignal-fn]
+// [spec:posix:req:builtin.trap.signals-ignored-on-entry]
 pub fn setsignal(sh: &mut crate::context::Shell, signo: c_int) {
     setsignal_via(sh, signo, Via::Host)
 }
@@ -516,6 +520,8 @@ pub extern "C" fn onsig(signo: c_int) {
 
 // [spec:dash:def:trap.dotrap-fn]
 // [spec:dash:sem:trap.dotrap-fn]
+// [spec:posix:req:builtin.trap.action-overrides-and-exit-status]
+// [spec:posix:req:builtin.trap.action-executed-as-eval]
 pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
     let mut i: c_int;
     let mut status: c_int;
@@ -613,6 +619,8 @@ pub fn setinteractive(sh: &mut crate::context::Shell, on: c_int) {
 
 // [spec:dash:def:trap.exitshell-fn]
 // [spec:dash:sem:trap.exitshell-fn]
+// [spec:posix:req:builtin.trap.exit-condition]
+// [spec:posix:req:builtin.trap.exit-action-environment]
 /// Run the EXIT trap, tear job control down, and **return** the status
 /// the shell leaves with.
 ///

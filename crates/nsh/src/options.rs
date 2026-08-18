@@ -347,6 +347,20 @@ pub(crate) struct Scan {
 
 // [spec:dash:def:options.options-fn]
 // [spec:dash:sem:options.options-fn]
+// [spec:posix:req:builtin.set.utility-syntax-guidelines]
+// [spec:posix:req:builtin.set.opt-a-allexport]
+// [spec:posix:sem:builtin.set.opt-a-separate-environments]
+// [spec:posix:req:builtin.set.opt-c-noclobber]
+// [spec:posix:req:builtin.set.opt-e-errexit]
+// [spec:posix:req:builtin.set.opt-e-per-environment]
+// [spec:posix:req:builtin.set.opt-f-noglob]
+// [spec:posix:req:builtin.set.opt-m-monitor]
+// [spec:posix:req:builtin.set.opt-n-noexec]
+// [spec:posix:req:builtin.set.opt-v-verbose]
+// [spec:posix:req:builtin.set.opt-x-xtrace]
+// [spec:posix:req:builtin.set.options-default-off]
+// [spec:posix:req:builtin.set.first-argument-hyphen]
+// [spec:posix:req:builtin.set.double-hyphen]
 pub(crate) fn options(
     sh: &mut crate::context::Shell,
     args: &[&BStr],
@@ -416,6 +430,20 @@ pub(crate) fn options(
 
 // [spec:dash:def:options.minus-o-fn]
 // [spec:dash:sem:options.minus-o-fn]
+// [spec:posix:sem:builtin.set.plus-o-report]
+// [spec:posix:req:builtin.set.opt-o-option]
+// [spec:posix:def:builtin.set.opt-o-allexport]
+// [spec:posix:def:builtin.set.opt-o-errexit]
+// [spec:posix:req:builtin.set.opt-o-monitor]
+// [spec:posix:def:builtin.set.opt-o-noglob]
+// [spec:posix:def:builtin.set.opt-o-noexec]
+// [spec:posix:req:builtin.set.opt-o-nolog]
+// [spec:posix:def:builtin.set.opt-o-notify]
+// [spec:posix:def:builtin.set.opt-o-nounset]
+// [spec:posix:sem:builtin.set.opt-o-pipefail]
+// [spec:posix:def:builtin.set.opt-o-verbose]
+// [spec:posix:req:builtin.set.opt-o-vi]
+// [spec:posix:def:builtin.set.opt-o-xtrace]
 fn minus_o(sh: &mut crate::context::Shell, name: Option<&BStr>, val: c_int) -> Result<(), Error> {
     let mut i: c_int;
 

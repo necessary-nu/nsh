@@ -743,6 +743,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T01:56:11.889968891Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T01:57:28.957687656Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Established implementation coverage for all 58 claimed set and trap rules across the built-in entry points, shared option parser, trap disposition state, action delivery, and EXIT handling. The rule-selected POSIX harness passed all 40 cases and 59 exercised rule assertions."
+                    }
+                )
             }
 
             {

@@ -19,6 +19,14 @@ use crate::var::{VUNSET, show_vars};
 
 // [spec:dash:def:options.setcmd-fn]
 // [spec:dash:sem:options.setcmd-fn]
+// [spec:posix:syn:builtin.set.synopsis]
+// [spec:posix:req:builtin.set.no-operands-writes-variables]
+// [spec:posix:req:builtin.set.variable-output-reinput]
+// [spec:posix:sem:builtin.set.options-and-arguments]
+// [spec:posix:req:builtin.set.positional-parameters]
+// [spec:posix:req:builtin.set.utility-defaults]
+// [spec:posix:req:builtin.set.stderr-diagnostics-only]
+// [spec:posix:req:builtin.set.exit-status]
 pub fn setcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if args.len() == 1 {
         return Ok(Flow::Done(show_vars(sh, BStr::new(b""), 0, VUNSET)));
