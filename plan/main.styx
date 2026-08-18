@@ -5393,6 +5393,20 @@ children (
                         kind @note
                         text "Definition of done: reproducibly import the 134 active OSH files and 2,755 cases observed at the pin, plus only their required spec/bin and testdata fixture closure; retain provenance/licensing; exclude YSH and disabled suites; verify source hashes and fail closed on missing or silently dropped files/cases."
                     }
+
+                    {
+                        at 2026-08-18T13:14:32.286162514Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T13:23:16.773123052Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Importer progress: the safe Rust nsh-survey tool verifies the locked git commit/tree and Apache-2.0 license digest, selects exactly 134 active OSH files/2,755 cases, copies the explicit 35-file fixture closure, writes a SHA-256 inventory, and rejects inventory/count/hash drift. Disposable-checkout verification passed with 170 inventoried payload files."
+                    }
                 )
             }
 

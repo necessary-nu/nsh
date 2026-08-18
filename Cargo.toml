@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/nsh", "crates/nsh-cli", "crates/nsh-platform"]
+members = ["crates/nsh", "crates/nsh-cli", "crates/nsh-platform", "crates/nsh-survey"]
 resolver = "3"
 
 [workspace.package]

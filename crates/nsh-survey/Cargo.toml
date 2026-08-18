@@ -1,0 +1,17 @@
+[package]
+name = "nsh-survey"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Offline importer and native runner for nsh shell compatibility surveys"
+publish = false
+
+[[bin]]
+name = "nsh-survey"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+toml = "0.8"
