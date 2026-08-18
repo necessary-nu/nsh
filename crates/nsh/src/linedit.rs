@@ -54,9 +54,10 @@
 use bstr::BStr;
 use nshedit::domain::{
     Action, ArgumentCommand, Binding, CommandName, CommandSequence, Direction, EditTarget,
-    EditingMode, EditorConfig, EffectCommand, HistorySearchCommand, ImmediateCommand, InputMode,
-    KeySequence, KeymapMode, Motion, Outcome, Prompt, Refresh, ScreenSize, SignalPolicy,
-    TerminalLiteral, TerminalMode, Text, TextUnit, WordTraversal, YankPlacement,
+    EditingMode, EditorConfig, EffectCommand, HistorySearchCommand, HistorySearchRepetition,
+    ImmediateCommand, InputMode, KeySequence, KeymapMode, Motion, Outcome, Prompt, Refresh,
+    ScreenSize, SignalPolicy, TerminalLiteral, TerminalMode, Text, TextUnit, WordTraversal,
+    YankPlacement,
 };
 use nshedit::editor::effect::{
     AliasResponse, HistoryResponse, HistorySearchInput, HistorySearchResponse, HistorySelection,
@@ -178,6 +179,12 @@ const CHANGE_TO_FIRST_NONBLANK: &str = "nsh-vi-change-to-first-nonblank";
 const YANK_TO_FIRST_NONBLANK: &str = "nsh-vi-yank-to-first-nonblank";
 const DISPLAY_EXPANSIONS: &str = "nsh-vi-display-expansions";
 const EXPAND_ALL: &str = "nsh-vi-expand-all";
+const REPEAT_HISTORY_SEARCH: Binding = Binding::Effect(EffectCommand::SearchHistory(
+    HistorySearchCommand::Repeat(HistorySearchRepetition::SameDirection),
+));
+const REVERSE_HISTORY_SEARCH: Binding = Binding::Effect(EffectCommand::SearchHistory(
+    HistorySearchCommand::Repeat(HistorySearchRepetition::OppositeDirection),
+));
 
 mod history;
 pub use history::{History, HistoryEvent};
@@ -766,6 +773,14 @@ impl LineEditor {
 
     // [spec:posix:req:edit.command-expand-all]
     fn expand_all(&mut self) -> Result<Outcome, HostFailure> {
+        let enter_insert = |editor: &mut NativeEditor| {
+            editor
+                .execute(Action::SetModes {
+                    input: InputMode::Insert,
+                    keymap: KeymapMode::ViInsert,
+                })
+                .map_err(host_failure)
+        };
         let (line, cursor, command_mode) = {
             let editor = self.editor_mut();
             (
@@ -784,11 +799,11 @@ impl LineEditor {
             .map_err(host_failure)?;
         let token_index = parsed.line().cursor().token().get();
         let Some(token) = parsed.line().tokens().get(token_index) else {
-            return self.enter_vi_insert_mode();
+            return enter_insert(self.editor_mut());
         };
         let candidates = completion_candidates_for_stem(token.value());
         if candidates.is_empty() {
-            return self.enter_vi_insert_mode();
+            return enter_insert(self.editor_mut());
         }
         let replacement = all_completion_insertions(&candidates);
         let replacement_start = token.source().start().get();
@@ -804,15 +819,6 @@ impl LineEditor {
             .execute(Action::Move(Motion::Absolute(cursor)))
             .map_err(host_failure)?;
         editor
-            .execute(Action::SetModes {
-                input: InputMode::Insert,
-                keymap: KeymapMode::ViInsert,
-            })
-            .map_err(host_failure)
-    }
-
-    fn enter_vi_insert_mode(&mut self) -> Result<Outcome, HostFailure> {
-        self.editor_mut()
             .execute(Action::SetModes {
                 input: InputMode::Insert,
                 keymap: KeymapMode::ViInsert,
@@ -1035,6 +1041,9 @@ fn install_shell_bindings(
             "k",
             Binding::Effect(EffectCommand::NavigateHistory(Direction::Previous)),
         ),
+        // [spec:posix:req:edit.history-search-repeat]
+        ("n", REPEAT_HISTORY_SEARCH),
+        ("N", REVERSE_HISTORY_SEARCH),
         (
             "p",
             Binding::Immediate(ImmediateCommand::PasteRegister(YankPlacement::AfterCursor)),
@@ -1444,5 +1453,16 @@ mod tests {
             all_completion_insertions(&candidates),
             Text::from("alpha1 alpha2")
         );
+    }
+
+    #[test]
+    fn history_repeat_directions_are_distinct() {
+        assert_eq!(
+            REPEAT_HISTORY_SEARCH,
+            Binding::Effect(EffectCommand::SearchHistory(HistorySearchCommand::Repeat(
+                HistorySearchRepetition::SameDirection,
+            )))
+        );
+        assert_ne!(REPEAT_HISTORY_SEARCH, REVERSE_HISTORY_SEARCH);
     }
 }

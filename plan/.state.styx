@@ -3654,4 +3654,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule edit.history-search-pattern}
     )}
+    {id fix-edit-history-search-repeat, covered_rules (
+        edit.history-search-repeat
+    ), covered_claims (
+        {impl_name shell, rule edit.history-search-repeat}
+    )}
 )

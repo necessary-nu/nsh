@@ -3136,6 +3136,28 @@ children (
                             shell ([spec:posix:req:edit.history-search-repeat])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:20:21.879379674Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:21:10.740914482Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Explicitly install nsh's vi `n` and `N` bindings to typed same-direction and opposite-direction history-search repetition, rather than depending on nshedit's default map. nshedit owns the last completed search tuple and alerts without changing the line when none exists. Add separate no-previous cases for both commands. Verification: all four repeat PTY cases, all 17 linedit tests, 14 harness unit tests, and git diff --check pass."
+                            }
+
+                            {
+                                at 2026-08-18T05:21:46.176854117Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Factored repeat-history-search binding construction into a typed helper and added a Rust test proving same-direction and opposite-direction bindings remain distinct. Focused linedit suite now passes 18 tests."
+                            }
+                        )
                     }
                 )
             }

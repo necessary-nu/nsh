@@ -1229,6 +1229,34 @@ CASES: tuple[Case, ...] = (
         timeout=TIMEOUT,
         requires=("UP",),
     ),
+    # [spec:posix:req:edit.history-search-repeat/test]
+    Case(
+        id="edit-history-search-repeat-no-previous",
+        rules=("edit.history-search-repeat",),
+        script=VI + "r keep" + ESC + "nA; exit\n",
+        stdout=None,
+        stdout_contains=(BEL, "R:keep\n"),
+        mode="interactive",
+        environment=TERMINAL,
+        files=R,
+        status="any",
+        timeout=TIMEOUT,
+        requires=("UP",),
+    ),
+    # [spec:posix:req:edit.history-search-repeat/test]
+    Case(
+        id="edit-history-search-reverse-no-previous",
+        rules=("edit.history-search-repeat",),
+        script=VI + "r keep" + ESC + "NA; exit\n",
+        stdout=None,
+        stdout_contains=(BEL, "R:keep\n"),
+        mode="interactive",
+        environment=TERMINAL,
+        files=R,
+        status="any",
+        timeout=TIMEOUT,
+        requires=("UP",),
+    ),
     # [spec:posix:syn:edit.history-search-pattern/test]
     Case(
         id="edit-history-search-pattern-glob",
