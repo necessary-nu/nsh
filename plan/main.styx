@@ -2820,6 +2820,21 @@ children (
                             shell ([spec:posix:req:edit.edit-line-replacement])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:11:49.544981965Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:12:11.413220604Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "On every history navigation, compare the editor's owned line to the selected history entry before moving. A difference promotes that modified recalled line into live_history_line; reaching the live boundary restores it, making the recalled line the edit line while history storage itself remains unchanged. Map the rule at that promotion boundary. Verification: the combined PTY case passes and git diff --check passes."
+                            }
+                        )
                     }
 
                     {

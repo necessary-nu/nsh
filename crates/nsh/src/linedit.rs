@@ -408,6 +408,7 @@ impl LineEditor {
                     let direction = request.direction;
                     let count = request.count.get();
                     let edited_line = self.editor_mut().line().clone();
+                    // [spec:posix:req:edit.edit-line-replacement]
                     match history.current_editor_text(&self.history_cursor) {
                         Some(selected) if selected != edited_line => {
                             self.live_history_line = Some(edited_line);
