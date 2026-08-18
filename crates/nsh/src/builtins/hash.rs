@@ -19,6 +19,21 @@ use crate::exec::{
 
 // [spec:dash:def:exec.hashcmd-fn]
 // [spec:dash:sem:exec.hashcmd-fn]
+// [spec:posix:syn:builtin.hash.synopsis]
+// [spec:posix:req:builtin.hash.remembered-locations]
+// [spec:posix:req:builtin.hash.builtins-and-functions-not-reported]
+// [spec:posix:req:builtin.hash.utility-syntax-guidelines]
+// [spec:posix:req:builtin.hash.opt-r]
+// [spec:posix:def:builtin.hash.operand-utility]
+// [spec:posix:sem:builtin.hash.operand-utility-unspecified]
+// [spec:posix:req:builtin.hash.env-locale]
+// [spec:posix:sem:builtin.hash.env-nlspath]
+// [spec:posix:sem:builtin.hash.env-path]
+// [spec:posix:req:builtin.hash.stdout-report]
+// [spec:posix:req:builtin.hash.list-cleared-on-path-change]
+// [spec:posix:req:builtin.hash.stderr]
+// [spec:posix:req:builtin.hash.interfaces]
+// [spec:posix:req:builtin.hash.exit-status]
 pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut c: c_int;
     let mut entry = cmdentry::unknown();

@@ -18,6 +18,18 @@ use crate::eval::Flow;
 
 // [spec:dash:def:exec.commandcmd-fn]
 // [spec:dash:sem:exec.commandcmd-fn]
+// [spec:posix:syn:builtin.command.synopsis]
+// [spec:posix:req:builtin.command.v-options-report-interpretation]
+// [spec:posix:req:builtin.command.utility-syntax-guidelines]
+// [spec:posix:req:builtin.command.opt-p]
+// [spec:posix:req:builtin.command.opt-v-uppercase]
+// [spec:posix:req:builtin.command.env-locale]
+// [spec:posix:sem:builtin.command.env-nlspath]
+// [spec:posix:sem:builtin.command.env-path]
+// [spec:posix:req:builtin.command.stdout-format]
+// [spec:posix:req:builtin.command.stderr]
+// [spec:posix:req:builtin.command.interfaces]
+// [spec:posix:req:builtin.command.exit-status-v-options]
 pub fn commandcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     const VERIFY_BRIEF: c_int = 1;
     const VERIFY_VERBOSE: c_int = 2;

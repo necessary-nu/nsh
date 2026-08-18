@@ -24,6 +24,16 @@ use crate::output::Dest;
 
 // [spec:dash:def:exec.typecmd-fn]
 // [spec:dash:sem:exec.typecmd-fn]
+// [spec:posix:syn:builtin.type.synopsis]
+// [spec:posix:req:builtin.type.indicate-interpretation]
+// [spec:posix:def:builtin.type.operand-name]
+// [spec:posix:req:builtin.type.env-locale]
+// [spec:posix:sem:builtin.type.env-nlspath]
+// [spec:posix:sem:builtin.type.env-path]
+// [spec:posix:sem:builtin.type.stdout]
+// [spec:posix:req:builtin.type.stderr]
+// [spec:posix:req:builtin.type.interfaces]
+// [spec:posix:req:builtin.type.exit-status]
 pub fn typecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut err: c_int = 0;
 

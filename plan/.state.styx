@@ -2373,4 +2373,93 @@ impl_evidence (
         {impl_name shell, rule builtin.unalias.synopsis}
         {impl_name shell, rule builtin.unalias.utility-syntax-guidelines}
     )}
+    {id posix-builtins-command, covered_rules (
+        builtin.command.declaration-utility
+        builtin.command.env-locale
+        builtin.command.env-nlspath
+        builtin.command.env-path
+        builtin.command.equivalent-to-omitting-command
+        builtin.command.exit-status-invocation
+        builtin.command.exit-status-v-options
+        builtin.command.interfaces
+        builtin.command.operands
+        builtin.command.opt-p
+        builtin.command.opt-v-uppercase
+        builtin.command.special-builtin-properties-suppressed
+        builtin.command.stderr
+        builtin.command.stdout-format
+        builtin.command.suppress-function-lookup
+        builtin.command.synopsis
+        builtin.command.utility-syntax-guidelines
+        builtin.command.v-options-report-interpretation
+        builtin.hash.builtins-and-functions-not-reported
+        builtin.hash.env-locale
+        builtin.hash.env-nlspath
+        builtin.hash.env-path
+        builtin.hash.exit-status
+        builtin.hash.interfaces
+        builtin.hash.list-cleared-on-path-change
+        builtin.hash.operand-utility
+        builtin.hash.operand-utility-unspecified
+        builtin.hash.opt-r
+        builtin.hash.remembered-locations
+        builtin.hash.stderr
+        builtin.hash.stdout-report
+        builtin.hash.synopsis
+        builtin.hash.utility-syntax-guidelines
+        builtin.type.env-locale
+        builtin.type.env-nlspath
+        builtin.type.env-path
+        builtin.type.exit-status
+        builtin.type.indicate-interpretation
+        builtin.type.interfaces
+        builtin.type.operand-name
+        builtin.type.stderr
+        builtin.type.stdout
+        builtin.type.synopsis
+    ), covered_claims (
+        {impl_name shell, rule builtin.command.declaration-utility}
+        {impl_name shell, rule builtin.command.env-locale}
+        {impl_name shell, rule builtin.command.env-nlspath}
+        {impl_name shell, rule builtin.command.env-path}
+        {impl_name shell, rule builtin.command.equivalent-to-omitting-command}
+        {impl_name shell, rule builtin.command.exit-status-invocation}
+        {impl_name shell, rule builtin.command.exit-status-v-options}
+        {impl_name shell, rule builtin.command.interfaces}
+        {impl_name shell, rule builtin.command.operands}
+        {impl_name shell, rule builtin.command.opt-p}
+        {impl_name shell, rule builtin.command.opt-v-uppercase}
+        {impl_name shell, rule builtin.command.special-builtin-properties-suppressed}
+        {impl_name shell, rule builtin.command.stderr}
+        {impl_name shell, rule builtin.command.stdout-format}
+        {impl_name shell, rule builtin.command.suppress-function-lookup}
+        {impl_name shell, rule builtin.command.synopsis}
+        {impl_name shell, rule builtin.command.utility-syntax-guidelines}
+        {impl_name shell, rule builtin.command.v-options-report-interpretation}
+        {impl_name shell, rule builtin.hash.builtins-and-functions-not-reported}
+        {impl_name shell, rule builtin.hash.env-locale}
+        {impl_name shell, rule builtin.hash.env-nlspath}
+        {impl_name shell, rule builtin.hash.env-path}
+        {impl_name shell, rule builtin.hash.exit-status}
+        {impl_name shell, rule builtin.hash.interfaces}
+        {impl_name shell, rule builtin.hash.list-cleared-on-path-change}
+        {impl_name shell, rule builtin.hash.operand-utility}
+        {impl_name shell, rule builtin.hash.operand-utility-unspecified}
+        {impl_name shell, rule builtin.hash.opt-r}
+        {impl_name shell, rule builtin.hash.remembered-locations}
+        {impl_name shell, rule builtin.hash.stderr}
+        {impl_name shell, rule builtin.hash.stdout-report}
+        {impl_name shell, rule builtin.hash.synopsis}
+        {impl_name shell, rule builtin.hash.utility-syntax-guidelines}
+        {impl_name shell, rule builtin.type.env-locale}
+        {impl_name shell, rule builtin.type.env-nlspath}
+        {impl_name shell, rule builtin.type.env-path}
+        {impl_name shell, rule builtin.type.exit-status}
+        {impl_name shell, rule builtin.type.indicate-interpretation}
+        {impl_name shell, rule builtin.type.interfaces}
+        {impl_name shell, rule builtin.type.operand-name}
+        {impl_name shell, rule builtin.type.stderr}
+        {impl_name shell, rule builtin.type.stdout}
+        {impl_name shell, rule builtin.type.synopsis}
+    )}
 )

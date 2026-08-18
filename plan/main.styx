@@ -1095,6 +1095,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T02:10:15.974756935Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T02:11:39.508844696Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Mapped all 43 assigned command, type, and hash rules to command-option reporting, evalcommand's plain-command semantics, name description, and remembered PATH locations. Verification: cargo test -p nsh passes; selected POSIX harness PASS=29 FAIL=0 with 40 exercised rule assertions; git diff --check clean."
+                    }
+                )
             }
 
             {

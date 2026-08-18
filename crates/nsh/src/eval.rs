@@ -1025,6 +1025,12 @@ fn fill_arglist<'a>(
 
 // [spec:dash:def:eval.parse-command-args-fn]
 // [spec:dash:sem:eval.parse-command-args-fn]
+// [spec:posix:req:builtin.command.suppress-function-lookup]
+// [spec:posix:req:builtin.command.special-builtin-properties-suppressed]
+// [spec:posix:req:builtin.command.equivalent-to-omitting-command]
+// [spec:posix:req:builtin.command.declaration-utility]
+// [spec:posix:def:builtin.command.operands]
+// [spec:posix:req:builtin.command.exit-status-invocation]
 // `head` is the C's `arglist->list`, which this function reassigns to skip
 // the `command [-p]` words it consumed. A `Vec`'s start does not move, so the
 // head is an index the caller keeps; see [`crate::expand::arglist`].
