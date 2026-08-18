@@ -30,6 +30,20 @@ use crate::output::Dest;
 // names and carries both claims.
 // [spec:dash:def:jobs.bgcmd-fn]
 // [spec:dash:sem:jobs.bgcmd-fn]
+// [spec:posix:syn:builtin.bg.synopsis]
+// [spec:posix:req:builtin.bg.operand-job-id]
+// [spec:posix:req:builtin.bg.env-locale]
+// [spec:posix:sem:builtin.bg.env-nlspath]
+// [spec:posix:req:builtin.bg.stdout-format]
+// [spec:posix:req:builtin.bg.stderr]
+// [spec:posix:req:builtin.bg.interfaces]
+// [spec:posix:syn:builtin.fg.synopsis]
+// [spec:posix:req:builtin.fg.operand-job-id]
+// [spec:posix:req:builtin.fg.env-locale]
+// [spec:posix:sem:builtin.fg.env-nlspath]
+// [spec:posix:req:builtin.fg.stdout-format]
+// [spec:posix:req:builtin.fg.stderr]
+// [spec:posix:req:builtin.fg.interfaces]
 pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut jp: usize;
     let mode: c_int;
@@ -66,6 +80,14 @@ pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
 // [spec:dash:def:jobs.restartjob-fn]
 // [spec:dash:sem:jobs.restartjob-fn]
+// [spec:posix:req:builtin.bg.resume-suspended-jobs]
+// [spec:posix:req:builtin.bg.already-running-no-effect]
+// [spec:posix:req:builtin.bg.exit-status]
+// [spec:posix:req:builtin.bg.job-control-disabled]
+// [spec:posix:req:builtin.fg.move-job-to-foreground]
+// [spec:posix:req:builtin.fg.removes-known-process-id]
+// [spec:posix:req:builtin.fg.exit-status]
+// [spec:posix:req:builtin.fg.job-control-disabled]
 fn restartjob(sh: &mut Shell, jp: usize, mode: c_int) -> Result<c_int, Error> {
     let status: c_int;
     let pgid: i32;

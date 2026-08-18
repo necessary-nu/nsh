@@ -1283,6 +1283,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T02:14:09.967760806Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T02:15:27.750150193Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Mapped all 39 bg, fg, and jobs rules to restart selection/control, job listing options, rendering, and retirement of reported jobs. Verification: cargo test -p nsh passes; selected POSIX harness PASS=15 FAIL=0 with 37 exercised assertions; git diff --check clean."
+                    }
+                )
             }
 
             {

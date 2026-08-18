@@ -2551,4 +2551,85 @@ impl_evidence (
         {impl_name shell, rule param.variable-creation}
         {impl_name shell, rule param.variable-environment-initialization}
     )}
+    {id posix-builtins-jobs, covered_rules (
+        builtin.bg.already-running-no-effect
+        builtin.bg.env-locale
+        builtin.bg.env-nlspath
+        builtin.bg.exit-status
+        builtin.bg.interfaces
+        builtin.bg.job-control-disabled
+        builtin.bg.operand-job-id
+        builtin.bg.resume-suspended-jobs
+        builtin.bg.stderr
+        builtin.bg.stdout-format
+        builtin.bg.synopsis
+        builtin.fg.env-locale
+        builtin.fg.env-nlspath
+        builtin.fg.exit-status
+        builtin.fg.interfaces
+        builtin.fg.job-control-disabled
+        builtin.fg.move-job-to-foreground
+        builtin.fg.operand-job-id
+        builtin.fg.removes-known-process-id
+        builtin.fg.stderr
+        builtin.fg.stdout-format
+        builtin.fg.synopsis
+        builtin.jobs.default-display
+        builtin.jobs.display-background-jobs
+        builtin.jobs.env-locale
+        builtin.jobs.env-nlspath
+        builtin.jobs.exit-status
+        builtin.jobs.interfaces
+        builtin.jobs.operand-job-id
+        builtin.jobs.option-l
+        builtin.jobs.option-p
+        builtin.jobs.remove-reported-job
+        builtin.jobs.stderr
+        builtin.jobs.stdout-current-field
+        builtin.jobs.stdout-l-format
+        builtin.jobs.stdout-p-format
+        builtin.jobs.stdout-state-substitution
+        builtin.jobs.synopsis
+        builtin.jobs.utility-syntax-guidelines
+    ), covered_claims (
+        {impl_name shell, rule builtin.bg.already-running-no-effect}
+        {impl_name shell, rule builtin.bg.env-locale}
+        {impl_name shell, rule builtin.bg.env-nlspath}
+        {impl_name shell, rule builtin.bg.exit-status}
+        {impl_name shell, rule builtin.bg.interfaces}
+        {impl_name shell, rule builtin.bg.job-control-disabled}
+        {impl_name shell, rule builtin.bg.operand-job-id}
+        {impl_name shell, rule builtin.bg.resume-suspended-jobs}
+        {impl_name shell, rule builtin.bg.stderr}
+        {impl_name shell, rule builtin.bg.stdout-format}
+        {impl_name shell, rule builtin.bg.synopsis}
+        {impl_name shell, rule builtin.fg.env-locale}
+        {impl_name shell, rule builtin.fg.env-nlspath}
+        {impl_name shell, rule builtin.fg.exit-status}
+        {impl_name shell, rule builtin.fg.interfaces}
+        {impl_name shell, rule builtin.fg.job-control-disabled}
+        {impl_name shell, rule builtin.fg.move-job-to-foreground}
+        {impl_name shell, rule builtin.fg.operand-job-id}
+        {impl_name shell, rule builtin.fg.removes-known-process-id}
+        {impl_name shell, rule builtin.fg.stderr}
+        {impl_name shell, rule builtin.fg.stdout-format}
+        {impl_name shell, rule builtin.fg.synopsis}
+        {impl_name shell, rule builtin.jobs.default-display}
+        {impl_name shell, rule builtin.jobs.display-background-jobs}
+        {impl_name shell, rule builtin.jobs.env-locale}
+        {impl_name shell, rule builtin.jobs.env-nlspath}
+        {impl_name shell, rule builtin.jobs.exit-status}
+        {impl_name shell, rule builtin.jobs.interfaces}
+        {impl_name shell, rule builtin.jobs.operand-job-id}
+        {impl_name shell, rule builtin.jobs.option-l}
+        {impl_name shell, rule builtin.jobs.option-p}
+        {impl_name shell, rule builtin.jobs.remove-reported-job}
+        {impl_name shell, rule builtin.jobs.stderr}
+        {impl_name shell, rule builtin.jobs.stdout-current-field}
+        {impl_name shell, rule builtin.jobs.stdout-l-format}
+        {impl_name shell, rule builtin.jobs.stdout-p-format}
+        {impl_name shell, rule builtin.jobs.stdout-state-substitution}
+        {impl_name shell, rule builtin.jobs.synopsis}
+        {impl_name shell, rule builtin.jobs.utility-syntax-guidelines}
+    )}
 )

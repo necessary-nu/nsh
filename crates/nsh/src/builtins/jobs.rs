@@ -15,6 +15,18 @@ use crate::output::Dest;
 
 // [spec:dash:def:jobs.jobscmd-fn]
 // [spec:dash:sem:jobs.jobscmd-fn]
+// [spec:posix:syn:builtin.jobs.synopsis]
+// [spec:posix:req:builtin.jobs.display-background-jobs]
+// [spec:posix:req:builtin.jobs.utility-syntax-guidelines]
+// [spec:posix:req:builtin.jobs.option-l]
+// [spec:posix:req:builtin.jobs.option-p]
+// [spec:posix:req:builtin.jobs.default-display]
+// [spec:posix:req:builtin.jobs.operand-job-id]
+// [spec:posix:req:builtin.jobs.env-locale]
+// [spec:posix:sem:builtin.jobs.env-nlspath]
+// [spec:posix:req:builtin.jobs.stderr]
+// [spec:posix:req:builtin.jobs.exit-status]
+// [spec:posix:req:builtin.jobs.interfaces]
 pub fn jobscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut mode: c_int;
 

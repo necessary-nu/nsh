@@ -586,6 +586,11 @@ fn sprint_status(
 
 // [spec:dash:def:jobs.showjob-fn]
 // [spec:dash:sem:jobs.showjob-fn]
+// [spec:posix:req:builtin.jobs.remove-reported-job]
+// [spec:posix:req:builtin.jobs.stdout-p-format]
+// [spec:posix:req:builtin.jobs.stdout-current-field]
+// [spec:posix:req:builtin.jobs.stdout-state-substitution]
+// [spec:posix:req:builtin.jobs.stdout-l-format]
 pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mode: c_int) {
     let mut ps: usize;
     let psend: usize;
