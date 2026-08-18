@@ -18,6 +18,13 @@ struct Limit {
     option: u8,
 }
 
+// [spec:posix:req:builtin.ulimit.opt-core]
+// [spec:posix:req:builtin.ulimit.opt-data]
+// [spec:posix:req:builtin.ulimit.opt-fsize]
+// [spec:posix:req:builtin.ulimit.opt-nofile]
+// [spec:posix:req:builtin.ulimit.opt-stack]
+// [spec:posix:req:builtin.ulimit.opt-cpu]
+// [spec:posix:req:builtin.ulimit.opt-as]
 static LIMITS: [Limit; 12] = [
     Limit { name: b"time(seconds)", resource: LimitResource::Cpu, factor: 1, option: b't' },
     Limit { name: b"file(blocks)", resource: LimitResource::FileSize, factor: 512, option: b'f' },
@@ -40,6 +47,7 @@ const HARD: LimitType = 0x2;
 
 // [spec:dash:def:miscbltin.printlim-fn]
 // [spec:dash:sem:miscbltin.printlim-fn]
+// [spec:posix:req:builtin.ulimit.stdout-single-limit-format]
 fn print_limit(sh: &mut Shell, how: LimitType, values: ResourceLimit, limit: Limit) {
     let value = if how & SOFT != 0 {
         values.current
@@ -57,6 +65,8 @@ fn print_limit(sh: &mut Shell, how: LimitType, values: ResourceLimit, limit: Lim
     }
 }
 
+// [spec:posix:req:builtin.ulimit.unlimited-value]
+// [spec:posix:def:builtin.ulimit.operand-newlimit]
 fn parse_value(sh: &mut Shell, text: &BStr, factor: u64) -> Result<Option<u64>, Error> {
     if text == b"unlimited" {
         return Ok(None);
@@ -72,6 +82,23 @@ fn parse_value(sh: &mut Shell, text: &BStr, factor: u64) -> Result<Option<u64>, 
 
 // [spec:dash:def:miscbltin.ulimitcmd-fn]
 // [spec:dash:sem:miscbltin.ulimitcmd-fn]
+// [spec:posix:syn:builtin.ulimit.syn]
+// [spec:posix:req:builtin.ulimit.report-or-set]
+// [spec:posix:sem:builtin.ulimit.soft-and-hard-limits]
+// [spec:posix:req:builtin.ulimit.limits-exceeded]
+// [spec:posix:req:builtin.ulimit.utility-syntax-guidelines]
+// [spec:posix:req:builtin.ulimit.opt-hard]
+// [spec:posix:req:builtin.ulimit.opt-soft]
+// [spec:posix:req:builtin.ulimit.opt-all]
+// [spec:posix:req:builtin.ulimit.default-hard-and-soft]
+// [spec:posix:req:builtin.ulimit.default-f-option]
+// [spec:posix:sem:builtin.ulimit.repeated-option-unspecified]
+// [spec:posix:req:builtin.ulimit.env-locale]
+// [spec:posix:req:builtin.ulimit.env-nlspath]
+// [spec:posix:req:builtin.ulimit.stdout-used-when-reporting]
+// [spec:posix:req:builtin.ulimit.stderr]
+// [spec:posix:req:builtin.ulimit.interfaces]
+// [spec:posix:req:builtin.ulimit.exit-status]
 pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut how = SOFT | HARD;
     let mut all = false;

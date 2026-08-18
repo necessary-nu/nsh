@@ -26,6 +26,11 @@ const CD_PRINT: c_int = 2;
 
 // [spec:dash:def:cd.cdopt-fn]
 // [spec:dash:sem:cd.cdopt-fn]
+// [spec:posix:syn:builtin.cd.syn]
+// [spec:posix:req:builtin.cd.utility-syntax-guidelines]
+// [spec:posix:req:builtin.cd.opt-l]
+// [spec:posix:req:builtin.cd.opt-p]
+// [spec:posix:req:builtin.cd.opt-l-p-last-wins]
 pub(crate) fn cdopt(sh: &mut crate::context::Shell, opts: &mut Options) -> Result<c_int, Error> {
     let mut flags: c_int = 0;
     let mut j: u8 = b'L';
@@ -42,6 +47,28 @@ pub(crate) fn cdopt(sh: &mut crate::context::Shell, opts: &mut Options) -> Resul
 
 // [spec:dash:def:cd.cdcmd-fn]
 // [spec:dash:sem:cd.cdcmd-fn]
+// [spec:posix:req:builtin.cd.change-working-directory]
+// [spec:posix:def:builtin.cd.curpath]
+// [spec:posix:req:builtin.cd.step1-no-operand-no-home]
+// [spec:posix:req:builtin.cd.step2-home-as-operand]
+// [spec:posix:sem:builtin.cd.step3-absolute-operand]
+// [spec:posix:sem:builtin.cd.step4-dot-or-dot-dot]
+// [spec:posix:sem:builtin.cd.step5-cdpath-search]
+// [spec:posix:sem:builtin.cd.step6-operand-as-curpath]
+// [spec:posix:def:builtin.cd.operand-directory]
+// [spec:posix:req:builtin.cd.operand-hyphen]
+// [spec:posix:req:builtin.cd.env-cdpath]
+// [spec:posix:def:builtin.cd.env-home]
+// [spec:posix:req:builtin.cd.env-locale]
+// [spec:posix:req:builtin.cd.env-nlspath]
+// [spec:posix:req:builtin.cd.env-oldpwd]
+// [spec:posix:req:builtin.cd.stdout-new-directory]
+// [spec:posix:sem:builtin.cd.stdout-undeterminable-pathname]
+// [spec:posix:req:builtin.cd.stdout-no-output]
+// [spec:posix:req:builtin.cd.stderr]
+// [spec:posix:req:builtin.cd.interfaces]
+// [spec:posix:req:builtin.cd.exit-status]
+// [spec:posix:req:builtin.cd.consequences-of-errors]
 pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut flags: c_int;
 
@@ -120,6 +147,10 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
 // [spec:dash:def:cd.docd-fn]
 // [spec:dash:sem:cd.docd-fn]
+// [spec:posix:sem:builtin.cd.step7-prefix-pwd]
+// [spec:posix:req:builtin.cd.step10-chdir]
+// [spec:posix:req:builtin.cd.step10-pwd-physical]
+// [spec:posix:req:builtin.cd.oldpwd-set]
 fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<c_int, Error> {
     let mut logical = None;
     let err: c_int;
@@ -159,6 +190,9 @@ fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<c_int, Error> {
 
 // [spec:dash:def:cd.updatepwd-fn]
 // [spec:dash:sem:cd.updatepwd-fn]
+// [spec:posix:req:builtin.cd.step8-canonical-form-dot]
+// [spec:posix:req:builtin.cd.step8-further-simplification]
+// [spec:posix:req:builtin.cd.env-pwd]
 fn updatepwd(sh: &mut Shell, dir: &BStr) -> Option<BString> {
     /* `lim` is `stackblock() + 1` in the C, re-read after `makestrspace`
      * because the block can move; against an owned buffer it is just an

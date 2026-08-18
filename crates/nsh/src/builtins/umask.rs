@@ -29,6 +29,27 @@ use crate::eval::Flow;
 
 // [spec:dash:def:miscbltin.umaskcmd-fn]
 // [spec:dash:sem:miscbltin.umaskcmd-fn]
+// [spec:posix:syn:builtin.umask.syn]
+// [spec:posix:req:builtin.umask.set-mask]
+// [spec:posix:req:builtin.umask.subshell-no-effect]
+// [spec:posix:req:builtin.umask.report-when-no-operand]
+// [spec:posix:req:builtin.umask.utility-syntax-guidelines]
+// [spec:posix:req:builtin.umask.opt-s]
+// [spec:posix:req:builtin.umask.default-output-style]
+// [spec:posix:def:builtin.umask.operand-mask]
+// [spec:posix:req:builtin.umask.symbolic-mode-complement]
+// [spec:posix:req:builtin.umask.symbolic-op-characters]
+// [spec:posix:sem:builtin.umask.non-permission-bits-unspecified]
+// [spec:posix:req:builtin.umask.octal-form]
+// [spec:posix:req:builtin.umask.prior-default-output-as-operand]
+// [spec:posix:req:builtin.umask.env-locale]
+// [spec:posix:req:builtin.umask.env-nlspath]
+// [spec:posix:req:builtin.umask.stdout-no-operand]
+// [spec:posix:req:builtin.umask.stdout-symbolic-format]
+// [spec:posix:req:builtin.umask.stdout-operand-no-output]
+// [spec:posix:req:builtin.umask.stderr]
+// [spec:posix:req:builtin.umask.interfaces]
+// [spec:posix:req:builtin.umask.exit-status]
 pub fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut mask: u32;
     let mut symbolic_mode: c_int = 0;

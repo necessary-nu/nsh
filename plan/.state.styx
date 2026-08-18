@@ -1362,4 +1362,171 @@ impl_evidence (
         {id shell-locale.operation-binding, version 0}
         {id shell-locale.selection, version 0}
     )}
+    {id posix-builtins-process, covered_rules (
+        builtin.cd.change-working-directory
+        builtin.cd.consequences-of-errors
+        builtin.cd.curpath
+        builtin.cd.env-cdpath
+        builtin.cd.env-home
+        builtin.cd.env-locale
+        builtin.cd.env-nlspath
+        builtin.cd.env-oldpwd
+        builtin.cd.env-pwd
+        builtin.cd.exit-status
+        builtin.cd.interfaces
+        builtin.cd.oldpwd-set
+        builtin.cd.operand-directory
+        builtin.cd.operand-hyphen
+        builtin.cd.opt-l
+        builtin.cd.opt-l-p-last-wins
+        builtin.cd.opt-p
+        builtin.cd.stderr
+        builtin.cd.stdout-new-directory
+        builtin.cd.stdout-no-output
+        builtin.cd.stdout-undeterminable-pathname
+        builtin.cd.step1-no-operand-no-home
+        builtin.cd.step10-chdir
+        builtin.cd.step10-pwd-physical
+        builtin.cd.step2-home-as-operand
+        builtin.cd.step3-absolute-operand
+        builtin.cd.step4-dot-or-dot-dot
+        builtin.cd.step5-cdpath-search
+        builtin.cd.step6-operand-as-curpath
+        builtin.cd.step7-prefix-pwd
+        builtin.cd.step8-canonical-form-dot
+        builtin.cd.step8-further-simplification
+        builtin.cd.syn
+        builtin.cd.utility-syntax-guidelines
+        builtin.ulimit.default-f-option
+        builtin.ulimit.default-hard-and-soft
+        builtin.ulimit.env-locale
+        builtin.ulimit.env-nlspath
+        builtin.ulimit.exit-status
+        builtin.ulimit.interfaces
+        builtin.ulimit.limits-exceeded
+        builtin.ulimit.operand-newlimit
+        builtin.ulimit.opt-all
+        builtin.ulimit.opt-as
+        builtin.ulimit.opt-core
+        builtin.ulimit.opt-cpu
+        builtin.ulimit.opt-data
+        builtin.ulimit.opt-fsize
+        builtin.ulimit.opt-hard
+        builtin.ulimit.opt-nofile
+        builtin.ulimit.opt-soft
+        builtin.ulimit.opt-stack
+        builtin.ulimit.repeated-option-unspecified
+        builtin.ulimit.report-or-set
+        builtin.ulimit.soft-and-hard-limits
+        builtin.ulimit.stderr
+        builtin.ulimit.stdout-single-limit-format
+        builtin.ulimit.stdout-used-when-reporting
+        builtin.ulimit.syn
+        builtin.ulimit.unlimited-value
+        builtin.ulimit.utility-syntax-guidelines
+        builtin.umask.default-output-style
+        builtin.umask.env-locale
+        builtin.umask.env-nlspath
+        builtin.umask.exit-status
+        builtin.umask.interfaces
+        builtin.umask.non-permission-bits-unspecified
+        builtin.umask.octal-form
+        builtin.umask.operand-mask
+        builtin.umask.opt-s
+        builtin.umask.prior-default-output-as-operand
+        builtin.umask.report-when-no-operand
+        builtin.umask.set-mask
+        builtin.umask.stderr
+        builtin.umask.stdout-no-operand
+        builtin.umask.stdout-operand-no-output
+        builtin.umask.stdout-symbolic-format
+        builtin.umask.subshell-no-effect
+        builtin.umask.symbolic-mode-complement
+        builtin.umask.symbolic-op-characters
+        builtin.umask.syn
+        builtin.umask.utility-syntax-guidelines
+    ), covered_claims (
+        {impl_name shell, rule builtin.cd.change-working-directory}
+        {impl_name shell, rule builtin.cd.consequences-of-errors}
+        {impl_name shell, rule builtin.cd.curpath}
+        {impl_name shell, rule builtin.cd.env-cdpath}
+        {impl_name shell, rule builtin.cd.env-home}
+        {impl_name shell, rule builtin.cd.env-locale}
+        {impl_name shell, rule builtin.cd.env-nlspath}
+        {impl_name shell, rule builtin.cd.env-oldpwd}
+        {impl_name shell, rule builtin.cd.env-pwd}
+        {impl_name shell, rule builtin.cd.exit-status}
+        {impl_name shell, rule builtin.cd.interfaces}
+        {impl_name shell, rule builtin.cd.oldpwd-set}
+        {impl_name shell, rule builtin.cd.operand-directory}
+        {impl_name shell, rule builtin.cd.operand-hyphen}
+        {impl_name shell, rule builtin.cd.opt-l}
+        {impl_name shell, rule builtin.cd.opt-l-p-last-wins}
+        {impl_name shell, rule builtin.cd.opt-p}
+        {impl_name shell, rule builtin.cd.stderr}
+        {impl_name shell, rule builtin.cd.stdout-new-directory}
+        {impl_name shell, rule builtin.cd.stdout-no-output}
+        {impl_name shell, rule builtin.cd.stdout-undeterminable-pathname}
+        {impl_name shell, rule builtin.cd.step1-no-operand-no-home}
+        {impl_name shell, rule builtin.cd.step10-chdir}
+        {impl_name shell, rule builtin.cd.step10-pwd-physical}
+        {impl_name shell, rule builtin.cd.step2-home-as-operand}
+        {impl_name shell, rule builtin.cd.step3-absolute-operand}
+        {impl_name shell, rule builtin.cd.step4-dot-or-dot-dot}
+        {impl_name shell, rule builtin.cd.step5-cdpath-search}
+        {impl_name shell, rule builtin.cd.step6-operand-as-curpath}
+        {impl_name shell, rule builtin.cd.step7-prefix-pwd}
+        {impl_name shell, rule builtin.cd.step8-canonical-form-dot}
+        {impl_name shell, rule builtin.cd.step8-further-simplification}
+        {impl_name shell, rule builtin.cd.syn}
+        {impl_name shell, rule builtin.cd.utility-syntax-guidelines}
+        {impl_name shell, rule builtin.ulimit.default-f-option}
+        {impl_name shell, rule builtin.ulimit.default-hard-and-soft}
+        {impl_name shell, rule builtin.ulimit.env-locale}
+        {impl_name shell, rule builtin.ulimit.env-nlspath}
+        {impl_name shell, rule builtin.ulimit.exit-status}
+        {impl_name shell, rule builtin.ulimit.interfaces}
+        {impl_name shell, rule builtin.ulimit.limits-exceeded}
+        {impl_name shell, rule builtin.ulimit.operand-newlimit}
+        {impl_name shell, rule builtin.ulimit.opt-all}
+        {impl_name shell, rule builtin.ulimit.opt-as}
+        {impl_name shell, rule builtin.ulimit.opt-core}
+        {impl_name shell, rule builtin.ulimit.opt-cpu}
+        {impl_name shell, rule builtin.ulimit.opt-data}
+        {impl_name shell, rule builtin.ulimit.opt-fsize}
+        {impl_name shell, rule builtin.ulimit.opt-hard}
+        {impl_name shell, rule builtin.ulimit.opt-nofile}
+        {impl_name shell, rule builtin.ulimit.opt-soft}
+        {impl_name shell, rule builtin.ulimit.opt-stack}
+        {impl_name shell, rule builtin.ulimit.repeated-option-unspecified}
+        {impl_name shell, rule builtin.ulimit.report-or-set}
+        {impl_name shell, rule builtin.ulimit.soft-and-hard-limits}
+        {impl_name shell, rule builtin.ulimit.stderr}
+        {impl_name shell, rule builtin.ulimit.stdout-single-limit-format}
+        {impl_name shell, rule builtin.ulimit.stdout-used-when-reporting}
+        {impl_name shell, rule builtin.ulimit.syn}
+        {impl_name shell, rule builtin.ulimit.unlimited-value}
+        {impl_name shell, rule builtin.ulimit.utility-syntax-guidelines}
+        {impl_name shell, rule builtin.umask.default-output-style}
+        {impl_name shell, rule builtin.umask.env-locale}
+        {impl_name shell, rule builtin.umask.env-nlspath}
+        {impl_name shell, rule builtin.umask.exit-status}
+        {impl_name shell, rule builtin.umask.interfaces}
+        {impl_name shell, rule builtin.umask.non-permission-bits-unspecified}
+        {impl_name shell, rule builtin.umask.octal-form}
+        {impl_name shell, rule builtin.umask.operand-mask}
+        {impl_name shell, rule builtin.umask.opt-s}
+        {impl_name shell, rule builtin.umask.prior-default-output-as-operand}
+        {impl_name shell, rule builtin.umask.report-when-no-operand}
+        {impl_name shell, rule builtin.umask.set-mask}
+        {impl_name shell, rule builtin.umask.stderr}
+        {impl_name shell, rule builtin.umask.stdout-no-operand}
+        {impl_name shell, rule builtin.umask.stdout-operand-no-output}
+        {impl_name shell, rule builtin.umask.stdout-symbolic-format}
+        {impl_name shell, rule builtin.umask.subshell-no-effect}
+        {impl_name shell, rule builtin.umask.symbolic-mode-complement}
+        {impl_name shell, rule builtin.umask.symbolic-op-characters}
+        {impl_name shell, rule builtin.umask.syn}
+        {impl_name shell, rule builtin.umask.utility-syntax-guidelines}
+    )}
 )

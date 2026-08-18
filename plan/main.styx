@@ -1098,6 +1098,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T01:39:07.205105179Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T01:53:20.502754922Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Established implementation coverage for all 82 claimed cd, umask, and ulimit rules. Verification: cargo build -p nsh-cli --bin nsh passed; full target harness reproduced the stable baseline at PASS=660 FAIL=51, with none of this node's rules failing. The five process-builtin failures remain owned by their dedicated fix nodes."
+                    }
+                )
             }
 
             {
