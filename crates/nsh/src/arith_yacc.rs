@@ -494,6 +494,11 @@ impl<'a, 'sh> Parser<'a, 'sh> {
 // [spec:dash:sem:arith-yacc.arith-fn]
 // [spec:dash:def:expand.arith-fn]
 // [spec:dash:sem:expand.arith-fn]
+// [spec:posix:req:expand.arith-evaluation]
+// [spec:posix:req:expand.arith-variable-changes]
+// [spec:posix:req:expand.arith-variable-reference]
+// [spec:posix:req:expand.arith-extensions]
+// [spec:posix:req:expand.arith-invalid-expression]
 pub fn arith(sh: &mut Shell, input: &BStr) -> Result<i64, Error> {
     let mut parser = Parser::new(sh, input);
     let result = parser.assignment(true)?;

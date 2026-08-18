@@ -2140,6 +2140,16 @@ fn parsesub(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<bool, Error> {
  */
 
 /* parsebackq: */
+// [spec:posix:def:expand.cmdsub-forms]
+// [spec:posix:req:expand.cmdsub-backquote-backslash]
+// [spec:posix:req:expand.cmdsub-backquote-matching]
+// [spec:posix:syn:expand.cmdsub-dollar-paren-extent]
+// [spec:posix:req:expand.cmdsub-parsing]
+// [spec:posix:req:expand.cmdsub-redirections-only]
+// [spec:posix:req:expand.cmdsub-alias-substitution]
+// [spec:posix:req:expand.cmdsub-terminating-paren]
+// [spec:posix:req:expand.cmdsub-nesting]
+// [spec:posix:req:expand.cmdsub-arith-ambiguity]
 fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Result<(), Error> {
     let mut saveprompt: c_int = 0;
     let saveheredoclist: Vec<heredoc>;
@@ -2263,6 +2273,7 @@ fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Result<(), E
  * Parse an arithmetic expansion (indicate start of one and set state)
  */
 /* parsearith: */
+// [spec:posix:syn:expand.arith-format]
 fn parsearith(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
     synstack_ops::push(&mut st.synstack, ARISYNTAX());
     st.syn_mut().dblquote = 1;

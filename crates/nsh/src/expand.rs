@@ -201,6 +201,8 @@ pub const EXP_DISCARD: c_int = 0x400; /* discard result of expansion */
 /// terminator to the caller — a `strlist` field keeps it because
 /// [`strlist::textp`] asserts it is there, and a here-document delimiter
 /// drops it because it is compared as bytes.
+// [spec:posix:req:expand.quote-removal]
+// [spec:posix:sem:expand.quote-removal-quoting-remembered]
 pub fn rmescapes_owned(s: &mut BString) -> usize {
     rmescapes_buffer(s, 0)
 }
@@ -725,6 +727,14 @@ pub(crate) fn mbnext_bytes(p: &[u8]) -> c_uint {
 
 // [spec:dash:def:expand.expandarg-fn]
 // [spec:dash:sem:expand.expandarg-fn]
+// [spec:posix:req:expand.order]
+// [spec:posix:req:expand.single-field]
+// [spec:posix:req:expand.brace-implementation-defined]
+// [spec:posix:req:expand.execution-environment]
+// [spec:posix:req:expand.assignment-redirection-environment]
+// [spec:posix:def:expand.dollar-introducer]
+// [spec:posix:req:expand.dollar-invalid-follower]
+// [spec:posix:req:expand.dollar-literal]
 pub fn expandarg(
     sh: &mut crate::context::Shell,
     arg: &crate::nodes::Node,
@@ -1029,6 +1039,13 @@ fn argstr(
 
 // [spec:dash:def:expand.exptilde-fn]
 // [spec:dash:sem:expand.exptilde-fn]
+// [spec:posix:def:expand.tilde-prefix]
+// [spec:posix:def:expand.tilde-prefix-in-assignment]
+// [spec:posix:req:expand.tilde-home]
+// [spec:posix:req:expand.tilde-login-name]
+// [spec:posix:sem:expand.tilde-no-further-expansion]
+// [spec:posix:req:expand.tilde-replacement-pathname]
+// [spec:posix:req:expand.tilde-result-quoted]
 fn exptilde(
     sh: &mut crate::context::Shell,
     state: &mut ExpandState,
@@ -1137,6 +1154,7 @@ fn removerecordregions(state: &mut ExpandState, endoff: c_int) {
 
 // [spec:dash:def:expand.expari-fn]
 // [spec:dash:sem:expand.expari-fn]
+// [spec:posix:req:expand.arith-token-expansion]
 fn expari(
     sh: &mut crate::context::Shell,
     state: &mut ExpandState,
@@ -1191,6 +1209,8 @@ fn expari(
 
 // [spec:dash:def:expand.expbackq-fn]
 // [spec:dash:sem:expand.expbackq-fn]
+// [spec:posix:req:expand.cmdsub-semantics]
+// [spec:posix:req:expand.cmdsub-no-reexpansion]
 fn expbackq(
     sh: &mut crate::context::Shell,
     state: &mut ExpandState,
@@ -1619,6 +1639,23 @@ fn subevalvar(
 
 // [spec:dash:def:expand.evalvar-fn]
 // [spec:dash:sem:expand.evalvar-fn]
+// [spec:posix:syn:expand.param-format]
+// [spec:posix:req:expand.param-simple]
+// [spec:posix:syn:expand.param-braces-optional]
+// [spec:posix:syn:expand.param-unbraced-resolution]
+// [spec:posix:req:expand.param-word-expansion]
+// [spec:posix:req:expand.param-use-default]
+// [spec:posix:req:expand.param-assign-default]
+// [spec:posix:req:expand.param-error-if-unset]
+// [spec:posix:req:expand.param-use-alternative]
+// [spec:posix:req:expand.param-colon-effect]
+// [spec:posix:req:expand.param-hash-requires-word]
+// [spec:posix:req:expand.param-string-length]
+// [spec:posix:req:expand.param-substring-common]
+// [spec:posix:req:expand.param-remove-smallest-suffix]
+// [spec:posix:req:expand.param-remove-largest-suffix]
+// [spec:posix:req:expand.param-remove-smallest-prefix]
+// [spec:posix:req:expand.param-remove-largest-prefix]
 fn evalvar(
     sh: &mut crate::context::Shell,
     state: &mut ExpandState,
@@ -2557,6 +2594,19 @@ fn ifsbreakup_regions(
     fields.push(strlist::from_cbytes(&string[ifst.start..]));
 }
 
+// [spec:posix:req:expand.field-splitting-applies]
+// [spec:posix:def:expand.field-splitting-results-of-expansion]
+// [spec:posix:req:expand.field-splitting-empty-ifs]
+// [spec:posix:req:expand.field-splitting-order]
+// [spec:posix:req:expand.field-splitting-unexpanded-fields]
+// [spec:posix:def:expand.ifs-white-space]
+// [spec:posix:req:expand.ifs-unset-default]
+// [spec:posix:req:expand.ifs-delimiters]
+// [spec:posix:sem:expand.field-splitting-arbitrary-bytes]
+// [spec:posix:req:expand.field-splitting-zero-fields]
+// [spec:posix:def:expand.field-splitting-delimited]
+// [spec:posix:req:expand.field-splitting-algorithm]
+// [spec:posix:req:expand.field-splitting-output-replaces-input]
 pub fn ifsbreakup(
     sh: &Shell,
     string: &mut [u8],
@@ -2635,6 +2685,7 @@ pub fn changeifs_bytes(sh: &mut crate::context::Shell, ifs: &BStr) {
 
 // [spec:dash:def:expand.expandmeta-fn]
 // [spec:dash:sem:expand.expandmeta-fn]
+// [spec:posix:req:expand.pathname]
 fn expandmeta(
     sh: &mut crate::context::Shell,
     state: &mut ExpandState,

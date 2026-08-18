@@ -227,6 +227,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T01:53:57.067926803Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T01:55:46.438158997Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Established implementation coverage for all 67 claimed word-expansion rules at their parser, arithmetic, expansion, field-splitting, pathname-expansion, and quote-removal sites. Verification: cargo test -p nsh passed (262 executable tests plus doc tests); the rule-selected POSIX harness passed all 37 cases and 69 exercised rule assertions."
+                    }
+                )
             }
 
             {

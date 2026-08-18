@@ -1529,4 +1529,141 @@ impl_evidence (
         {impl_name shell, rule builtin.umask.syn}
         {impl_name shell, rule builtin.umask.utility-syntax-guidelines}
     )}
+    {id posix-expansion, covered_rules (
+        expand.arith-evaluation
+        expand.arith-extensions
+        expand.arith-format
+        expand.arith-invalid-expression
+        expand.arith-token-expansion
+        expand.arith-variable-changes
+        expand.arith-variable-reference
+        expand.assignment-redirection-environment
+        expand.brace-implementation-defined
+        expand.cmdsub-alias-substitution
+        expand.cmdsub-arith-ambiguity
+        expand.cmdsub-backquote-backslash
+        expand.cmdsub-backquote-matching
+        expand.cmdsub-dollar-paren-extent
+        expand.cmdsub-forms
+        expand.cmdsub-nesting
+        expand.cmdsub-no-reexpansion
+        expand.cmdsub-parsing
+        expand.cmdsub-redirections-only
+        expand.cmdsub-semantics
+        expand.cmdsub-terminating-paren
+        expand.dollar-introducer
+        expand.dollar-invalid-follower
+        expand.dollar-literal
+        expand.execution-environment
+        expand.field-splitting-algorithm
+        expand.field-splitting-applies
+        expand.field-splitting-arbitrary-bytes
+        expand.field-splitting-delimited
+        expand.field-splitting-empty-ifs
+        expand.field-splitting-order
+        expand.field-splitting-output-replaces-input
+        expand.field-splitting-results-of-expansion
+        expand.field-splitting-unexpanded-fields
+        expand.field-splitting-zero-fields
+        expand.ifs-delimiters
+        expand.ifs-unset-default
+        expand.ifs-white-space
+        expand.order
+        expand.param-assign-default
+        expand.param-braces-optional
+        expand.param-colon-effect
+        expand.param-error-if-unset
+        expand.param-format
+        expand.param-hash-requires-word
+        expand.param-remove-largest-prefix
+        expand.param-remove-largest-suffix
+        expand.param-remove-smallest-prefix
+        expand.param-remove-smallest-suffix
+        expand.param-simple
+        expand.param-string-length
+        expand.param-substring-common
+        expand.param-unbraced-resolution
+        expand.param-use-alternative
+        expand.param-use-default
+        expand.param-word-expansion
+        expand.pathname
+        expand.quote-removal
+        expand.quote-removal-quoting-remembered
+        expand.single-field
+        expand.tilde-home
+        expand.tilde-login-name
+        expand.tilde-no-further-expansion
+        expand.tilde-prefix
+        expand.tilde-prefix-in-assignment
+        expand.tilde-replacement-pathname
+        expand.tilde-result-quoted
+    ), covered_claims (
+        {impl_name shell, rule expand.arith-evaluation}
+        {impl_name shell, rule expand.arith-extensions}
+        {impl_name shell, rule expand.arith-format}
+        {impl_name shell, rule expand.arith-invalid-expression}
+        {impl_name shell, rule expand.arith-token-expansion}
+        {impl_name shell, rule expand.arith-variable-changes}
+        {impl_name shell, rule expand.arith-variable-reference}
+        {impl_name shell, rule expand.assignment-redirection-environment}
+        {impl_name shell, rule expand.brace-implementation-defined}
+        {impl_name shell, rule expand.cmdsub-alias-substitution}
+        {impl_name shell, rule expand.cmdsub-arith-ambiguity}
+        {impl_name shell, rule expand.cmdsub-backquote-backslash}
+        {impl_name shell, rule expand.cmdsub-backquote-matching}
+        {impl_name shell, rule expand.cmdsub-dollar-paren-extent}
+        {impl_name shell, rule expand.cmdsub-forms}
+        {impl_name shell, rule expand.cmdsub-nesting}
+        {impl_name shell, rule expand.cmdsub-no-reexpansion}
+        {impl_name shell, rule expand.cmdsub-parsing}
+        {impl_name shell, rule expand.cmdsub-redirections-only}
+        {impl_name shell, rule expand.cmdsub-semantics}
+        {impl_name shell, rule expand.cmdsub-terminating-paren}
+        {impl_name shell, rule expand.dollar-introducer}
+        {impl_name shell, rule expand.dollar-invalid-follower}
+        {impl_name shell, rule expand.dollar-literal}
+        {impl_name shell, rule expand.execution-environment}
+        {impl_name shell, rule expand.field-splitting-algorithm}
+        {impl_name shell, rule expand.field-splitting-applies}
+        {impl_name shell, rule expand.field-splitting-arbitrary-bytes}
+        {impl_name shell, rule expand.field-splitting-delimited}
+        {impl_name shell, rule expand.field-splitting-empty-ifs}
+        {impl_name shell, rule expand.field-splitting-order}
+        {impl_name shell, rule expand.field-splitting-output-replaces-input}
+        {impl_name shell, rule expand.field-splitting-results-of-expansion}
+        {impl_name shell, rule expand.field-splitting-unexpanded-fields}
+        {impl_name shell, rule expand.field-splitting-zero-fields}
+        {impl_name shell, rule expand.ifs-delimiters}
+        {impl_name shell, rule expand.ifs-unset-default}
+        {impl_name shell, rule expand.ifs-white-space}
+        {impl_name shell, rule expand.order}
+        {impl_name shell, rule expand.param-assign-default}
+        {impl_name shell, rule expand.param-braces-optional}
+        {impl_name shell, rule expand.param-colon-effect}
+        {impl_name shell, rule expand.param-error-if-unset}
+        {impl_name shell, rule expand.param-format}
+        {impl_name shell, rule expand.param-hash-requires-word}
+        {impl_name shell, rule expand.param-remove-largest-prefix}
+        {impl_name shell, rule expand.param-remove-largest-suffix}
+        {impl_name shell, rule expand.param-remove-smallest-prefix}
+        {impl_name shell, rule expand.param-remove-smallest-suffix}
+        {impl_name shell, rule expand.param-simple}
+        {impl_name shell, rule expand.param-string-length}
+        {impl_name shell, rule expand.param-substring-common}
+        {impl_name shell, rule expand.param-unbraced-resolution}
+        {impl_name shell, rule expand.param-use-alternative}
+        {impl_name shell, rule expand.param-use-default}
+        {impl_name shell, rule expand.param-word-expansion}
+        {impl_name shell, rule expand.pathname}
+        {impl_name shell, rule expand.quote-removal}
+        {impl_name shell, rule expand.quote-removal-quoting-remembered}
+        {impl_name shell, rule expand.single-field}
+        {impl_name shell, rule expand.tilde-home}
+        {impl_name shell, rule expand.tilde-login-name}
+        {impl_name shell, rule expand.tilde-no-further-expansion}
+        {impl_name shell, rule expand.tilde-prefix}
+        {impl_name shell, rule expand.tilde-prefix-in-assignment}
+        {impl_name shell, rule expand.tilde-replacement-pathname}
+        {impl_name shell, rule expand.tilde-result-quoted}
+    )}
 )
