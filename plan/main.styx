@@ -2062,6 +2062,21 @@ children (
                             shell ([spec:posix:sem:builtin.getopts.reset])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:02:30.303662039Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:03:15.585726261Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Cover the getoptsreset callback fixed with per-update VNOFUNC semantics, and strengthen the executable case so OPTIND=1 switches from explicit operands '-a -b' to a different vector '-b -a'. This distinguishes a real reset from merely continuing compatible parameters. Verification: direct reset case, two neighboring cursor/operand cases, and cargo test -p nsh pass (276 tests, one ignored doctest)."
+                            }
+                        )
                     }
 
                     {

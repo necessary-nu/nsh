@@ -433,14 +433,13 @@ CASES: tuple[Case, ...] = (
         id="getopts-optind-reset",
         rules=("builtin.getopts.reset", "builtin.getopts.env-optind"),
         script=(
-            "set -- -a -b\n"
-            "getopts ab o\n"
+            "getopts ab o -a -b\n"
             "printf 'first=%s;' \"$o\"\n"
             "OPTIND=1\n"
-            "getopts ab o\n"
+            "getopts ab o -b -a\n"
             "printf 'second=%s,ind=%s\\n' \"$o\" \"$OPTIND\"\n"
         ),
-        stdout="first=a;second=a,ind=2\n",
+        stdout="first=a;second=b,ind=2\n",
     ),
     # [spec:posix:req:builtin.getopts.operand-param/test]
     Case(

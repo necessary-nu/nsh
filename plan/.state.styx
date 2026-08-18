@@ -3459,4 +3459,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.getopts.optarg}
     )}
+    {id fix-builtin-getopts-reset, covered_rules (
+        builtin.getopts.reset
+    ), covered_claims (
+        {impl_name shell, rule builtin.getopts.reset}
+    )}
 )
