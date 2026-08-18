@@ -434,7 +434,10 @@ pub(crate) fn cmdloop(
                 status = i;
             }
         } else {
-            if top == 0 || (Iflag(sh) == 0 && numeof >= 50) {
+            // Only the interactive top-level loop may treat EOF as a request
+            // for another input record. A command file has ended even when a
+            // script enabled the interactive-only `ignoreeof` option.
+            if inter == 0 || (Iflag(sh) == 0 && numeof >= 50) {
                 break;
             }
             if crate::jobs::stoppedjobs(sh) == 0 {

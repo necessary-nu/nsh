@@ -481,6 +481,19 @@ CASES: tuple[Case, ...] = (
         requires=("UP",),
         pace=0.02,
     ),
+    # The option is explicitly limited to interactive shells. Enabling it in
+    # a script must not rearm a command file after its physical end-of-file.
+    # [spec:posix:req:builtin.set.opt-o-ignoreeof/test]
+    Case(
+        id="set-opt-o-ignoreeof-non-interactive",
+        rules=("builtin.set.opt-o-ignoreeof",),
+        script="set -o ignoreeof\nprintf 'DONE\\n'\n",
+        mode="stdin",
+        stdout="DONE\n",
+        stderr="",
+        timeout=1.0,
+        requires=("UP",),
+    ),
     # ------------------------------------------------------------------
     # trap
     # ------------------------------------------------------------------

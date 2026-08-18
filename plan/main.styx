@@ -1924,6 +1924,7 @@ children (
                                 id test-fc-histfile-reload-format
                                 title "Align the HISTFILE reload fixture with fc -ln output"
                                 kind @test
+                                sealed true
                                 log (
                                     {
                                         at 2026-08-18T06:44:32.333198774Z
@@ -1937,6 +1938,13 @@ children (
                                         author "brendan@necessary.nu"
                                         kind @decision
                                         text "Correct the fixture rather than the shell: POSIX's fc -ln record format begins with a tab, so the observed output was conforming and the old expected string was wrong. Keep the leading tab explicit while documenting that it is listing syntax, not persisted command data. Verification: the focused HISTFILE case, 14 harness tests, and the complete harness pass with 730/730 cases and 973/973 automatic rules."
+                                    }
+
+                                    {
+                                        at 2026-08-18T10:11:25.747215108Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Doing → Done (nplan complete)"
                                     }
                                 )
                             }
@@ -2390,6 +2398,14 @@ children (
                                 author "brendan@necessary.nu"
                                 kind @decision
                                 text "On a non-exiting interactive EOF, clear only the base input frame's EOF latch so the next loop iteration performs a fresh blocking terminal read without flushing newly arrived bytes. When ignoreeof is enabled, remove the historical 50-EOF escape hatch and saturate the diagnostic counter; retain the cap for the separate stopped-jobs retry path. Pace the conformance case through 51 real control-D inputs to prove both re-arming and explicit-exit-only behavior. Verification: the case survives all 51 EOFs, prints STILL-ALIVE, and exits explicitly with status 7; POSIX harness unit tests pass; cargo test -p nsh passes 278 tests with one ignored doctest; git diff --check passes."
+                            }
+
+                            {
+                                at 2026-08-18T10:11:25.837325063Z
+                                author "brendan@necessary.nu"
+                                kind @errata
+                                text "The interactive EOF rearm also ran when ignoreeof was set in a non-interactive command file. At physical EOF, nsh repeatedly rearmed the file and emitted the interactive logout diagnostic instead of terminating; the dash differential corpus exposed the unbounded retry."
+                                after_done true
                             }
                         )
                     }
@@ -3377,6 +3393,36 @@ children (
                             }
                         )
                     }
+
+                    {
+                        id fix-ignoreeof-noninteractive-eof
+                        title "Restrict ignoreeof rearming to interactive command input"
+                        kind @fix
+                        deps (fix-builtin-set-opt-o-ignoreeof)
+                        sealed true
+                        log (
+                            {
+                                at 2026-08-18T10:11:43.437550894Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T10:13:56.548887414Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Gate EOF rearming on the command loop's existing interactive-input classifier. A top-level command file or stdin script terminates at physical EOF even if it set ignoreeof; an interactive root loop with ignoreeof continues indefinitely, while the stopped-job retry cap remains unchanged. Verification: both focused POSIX cases, 14 harness tests, the complete 731-case POSIX harness, and 255 nsh core tests pass."
+                            }
+
+                            {
+                                at 2026-08-18T10:13:56.638277641Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
+                            }
+                        )
+                    }
                 )
             }
         )
@@ -4239,6 +4285,14 @@ children (
                 title "Make the differential tally mean what it says: sanctioned divergences, and a dead harness that reports as one"
                 priority 0
                 kind @test
+                children (
+                    {
+                        id register-posix-dash-divergences
+                        title "Register and verify intentional POSIX-over-dash divergences"
+                        kind @test
+                        deps (fix-ignoreeof-noninteractive-eof)
+                    }
+                )
                 log (
                     {
                         at 2026-08-08T08:24:19.29009759Z
