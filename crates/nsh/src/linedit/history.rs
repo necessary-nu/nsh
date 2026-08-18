@@ -96,6 +96,11 @@ impl History {
         self.store.is_empty()
     }
 
+    #[must_use]
+    pub(crate) fn next_number(&self) -> Option<c_int> {
+        self.next_number
+    }
+
     /// Insert a complete first physical line and make it the append target.
     // [spec:posix:req:builtin.fc.history-numbering]
     // [spec:posix:req:builtin.fc.history-number-wrap]
@@ -527,6 +532,7 @@ mod tests {
     #[test]
     fn history_numbers_and_ranges_are_semantic() {
         let history = history(&[b"one\n", b"two\n", b"three\n"]);
+        assert_eq!(history.next_number(), Some(4));
         assert_eq!(history.newest().unwrap().number, 3);
         assert_eq!(history.oldest().unwrap().number, 1);
         assert_eq!(

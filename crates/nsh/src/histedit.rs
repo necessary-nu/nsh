@@ -18,7 +18,7 @@
 //!   * `crate::parser::getprompt`
 //!   * `crate::shellmain::readcmdfile` (src/main.c:283)
 
-use bstr::BStr;
+use bstr::{BStr, BString};
 use core::ffi::{c_char, c_int};
 use nshedit::domain::EditingMode;
 use std::ffi::OsStr;
@@ -52,6 +52,31 @@ impl HistEditState {
             editor: None,
             fc_depth: 0,
         }
+    }
+
+    // [spec:posix:req:param.ps1-exclamation-expansion]
+    pub(crate) fn expand_prompt_exclamation_marks(&self, prompt: &BStr) -> BString {
+        let number = self
+            .history
+            .as_ref()
+            .and_then(History::next_number)
+            .unwrap_or(1)
+            .to_string();
+        let mut expanded = Vec::with_capacity(prompt.len());
+        let mut index = 0;
+        while index < prompt.len() {
+            if prompt[index] != b'!' {
+                expanded.push(prompt[index]);
+                index += 1;
+            } else if prompt.get(index + 1) == Some(&b'!') {
+                expanded.push(b'!');
+                index += 2;
+            } else {
+                expanded.extend_from_slice(number.as_bytes());
+                index += 1;
+            }
+        }
+        BString::from(expanded)
     }
 }
 
@@ -328,6 +353,10 @@ mod tests {
     fn history_file_starts_unconfigured() {
         let state = HistEditState::new();
         assert!(state.history_file.is_none());
+        assert_eq!(
+            state.expand_prompt_exclamation_marks(BStr::new(b"[!][!!][!!!]")),
+            BString::from("[1][!][!1]")
+        );
     }
 
     // [spec:posix:req:builtin.fc.env-histsize/test]

@@ -3108,6 +3108,14 @@ children (
                             shell ([spec:posix:req:param.ps1-exclamation-expansion])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T06:01:29.553572133Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+                        )
                     }
 
                     {

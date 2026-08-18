@@ -3699,4 +3699,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule jobctl.save-terminal-settings}
     )}
+    {id fix-param-ps1-exclamation-expansion, covered_rules (
+        param.ps1-exclamation-expansion
+    ), covered_claims (
+        {impl_name shell, rule param.ps1-exclamation-expansion}
+    )}
 )

@@ -1662,11 +1662,11 @@ CASES: tuple[Case, ...] = (
         rules=("param.ps1-exclamation-expansion", "param.ps1-two-pass"),
         mode="interactive",
         requires=("UP",),
-        environment={"PS1": "[!!]"},
+        environment={"PS1": "[!][!!]", "HISTFILE": "{ROOT}/history"},
         script="printf 'A\\n'\nexit\n",
         stdout=None,
         status="any",
-        stdout_contains=("[!]",),
+        stdout_contains=("[1][!]", "[2][!]"),
         stdout_excludes=("[!!]",),
     ),
     # -----------------------------------------------------------------

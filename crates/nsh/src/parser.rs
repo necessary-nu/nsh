@@ -2618,7 +2618,11 @@ pub fn expandstr(sh: &mut Shell, ps: &BStr) -> Result<BString, Error> {
 // [spec:posix:req:param.ps2]
 pub fn getprompt(sh: &mut Shell) -> BString {
     let prompt = match sh.input.whichprompt {
-        1 => crate::var::ps1val(sh),
+        1 => {
+            let prompt = crate::var::ps1val(sh);
+            sh.histedit
+                .expand_prompt_exclamation_marks(BStr::new(prompt.as_slice()))
+        }
         2 => crate::var::ps2val(sh),
         /* default: falls into case 0 outside DEBUG builds.  The C returns
          * `nullstr`, whose *address* is load-bearing at other sites (see
