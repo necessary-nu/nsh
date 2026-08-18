@@ -1375,11 +1375,19 @@ pub fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c
         }
         let root_pid = sh.root_pid;
         xxtcsetpgrp(sh, root_pid)?;
-        if let Some(settings) = sh.jobs.shell_terminal_settings.take() {
-            let result = sh.jobs.ttyfd.as_ref().map(|fd| settings.apply(fd));
-            if let Some(Err(error)) = result {
-                terminal_error = Some((b"Cannot restore shell tty settings", error));
+        if sh.jobs.tab[jp].state as c_int == JOBSTOPPED {
+            if let Some(settings) = sh.jobs.shell_terminal_settings.take() {
+                let result = sh.jobs.ttyfd.as_ref().map(|fd| settings.apply(fd));
+                if let Some(Err(error)) = result {
+                    terminal_error = Some((b"Cannot restore shell tty settings", error));
+                }
             }
+        } else {
+            /* A completed foreground utility owns intentional changes made
+             * with `stty`. The saved snapshot exists so a suspended job's
+             * private modes cannot strand the shell; applying it after a
+             * normal exit would erase the utility's successful result. */
+            sh.jobs.shell_terminal_settings = None;
         }
         /*
          * This is truly gross.

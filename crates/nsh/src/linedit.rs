@@ -68,7 +68,7 @@ use nshedit::editor::{
     TerminalControl, TerminalProfile, Tokenizer,
 };
 use nshedit::history::HistoryCursor;
-use nshedit_plat::terminal::{ApplyWhen, ControlCharacter, TerminalAttributes};
+use nshedit_plat::terminal::{ControlCharacter, TerminalAttributes};
 use std::error::Error as StdError;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
@@ -79,99 +79,12 @@ use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+
+mod terminal;
+use terminal::{OwnedTerminal, TerminalSnapshots};
 
 type NativeEditor = Editor<OwnedTerminal>;
-
-/// An editor terminal that owns its duplicated descriptors.
-///
-/// `nshedit::SystemTerminal` is intentionally borrowed. Storing it beside
-/// the files it borrows would require a self-reference, so nsh implements the
-/// same public terminal-control contract over owned files instead.
-struct OwnedTerminal {
-    input: File,
-    output: File,
-    locale: nsh_platform::Locale,
-    original: Option<TerminalAttributes>,
-    editing: Option<TerminalAttributes>,
-    quoted: Option<TerminalAttributes>,
-    restoration_due: bool,
-}
-
-impl OwnedTerminal {
-    fn new(input: File, output: File, locale: nsh_platform::Locale) -> Self {
-        Self {
-            input,
-            output,
-            locale,
-            original: None,
-            editing: None,
-            quoted: None,
-            restoration_due: false,
-        }
-    }
-
-    fn screen_size(output: BorrowedFd<'_>) -> io::Result<ScreenSize> {
-        let (rows, columns) = nshedit_plat::terminal::screen_size(output)?;
-        ScreenSize::new(rows, columns)
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
-    }
-
-    fn apply(&self, when: ApplyWhen, attributes: Option<&TerminalAttributes>) -> io::Result<()> {
-        match attributes {
-            Some(attributes) => nshedit_plat::terminal::apply_attributes(
-                self.input.as_fd(),
-                when,
-                attributes,
-            ),
-            None => Ok(()),
-        }
-    }
-}
-
-impl TerminalControl for OwnedTerminal {
-    fn activate(&mut self, _config: EditorConfig) -> io::Result<()> {
-        if !nshedit_plat::terminal::is_terminal(self.output.as_fd())? {
-            return Err(io::Error::new(
-                io::ErrorKind::NotConnected,
-                "editor output is not a terminal",
-            ));
-        }
-        let original = nshedit_plat::terminal::read_attributes(self.input.as_fd())
-            .map_err(|error| {
-                io::Error::new(
-                    io::ErrorKind::NotConnected,
-                    format!("editor input: {}", self.locale.error_message(&error)),
-                )
-            })?;
-        let editing = original.for_editing();
-        let quoted = editing.for_quoted_input();
-        self.original = Some(original);
-        self.editing = Some(editing);
-        self.quoted = Some(quoted);
-        self.restoration_due = true;
-        self.apply(ApplyWhen::AfterOutput, self.editing.as_ref())
-    }
-
-    fn set_mode(&mut self, mode: TerminalMode) -> io::Result<()> {
-        let attributes = match mode {
-            TerminalMode::Cooked => self.original.as_ref(),
-            TerminalMode::Editing => self.editing.as_ref(),
-            TerminalMode::Quoted => self.quoted.as_ref(),
-        };
-        self.apply(ApplyWhen::AfterOutput, attributes)
-    }
-
-    fn restore(&mut self) -> io::Result<()> {
-        if !self.restoration_due {
-            return Ok(());
-        }
-        self.restoration_due = false;
-        self.apply(
-            ApplyWhen::AfterOutputAndDiscardInput,
-            self.original.as_ref(),
-        )
-    }
-}
 
 const FIRST_NONBLANK: &str = "nsh-vi-first-nonblank";
 const DELETE_TO_FIRST_NONBLANK: &str = "nsh-vi-delete-to-first-nonblank";
@@ -256,6 +169,7 @@ impl From<nshedit::domain::Error> for LineEditorError {
 pub struct LineEditor {
     /// Taken and finished before the descriptor-owning files are dropped.
     editor: Option<NativeEditor>,
+    terminal_snapshots: Arc<Mutex<TerminalSnapshots>>,
     driver: ReadDriver,
     input: File,
     output: File,
@@ -286,7 +200,7 @@ impl LineEditor {
             &output_fd,
             crate::fd::SLOT_COUNT as i32,
         )?);
-        let terminal_attributes = nshedit_plat::terminal::read_attributes(input.as_fd()).ok();
+        let terminal_snapshots = Arc::new(Mutex::new(TerminalSnapshots::default()));
         let terminal = OwnedTerminal::new(
             File::from(nsh_platform::duplicate_cloexec(
                 &input,
@@ -297,6 +211,7 @@ impl LineEditor {
                 crate::fd::SLOT_COUNT as i32,
             )?),
             locale.clone(),
+            terminal_snapshots.clone(),
         );
         let config = EditorConfig::default()
             .with_editing_mode(mode)
@@ -305,10 +220,15 @@ impl LineEditor {
         let size = OwnedTerminal::screen_size(output.as_fd())
             .unwrap_or_else(|_| ScreenSize::new(24, 80).expect("the fallback screen is valid"));
         editor.configure_display(default_terminal_profile(), size);
+        let terminal_attributes = terminal_snapshots
+            .lock()
+            .expect("terminal snapshots are not poisoned")
+            .original;
         install_shell_bindings(&mut editor, terminal_attributes.as_ref())?;
 
         Ok(Self {
             editor: Some(editor),
+            terminal_snapshots,
             driver: ReadDriver::default(),
             input,
             output,
@@ -324,6 +244,23 @@ impl LineEditor {
     pub fn set_mode(&mut self, mode: EditingMode) {
         let editor = self.editor_mut();
         editor.reconfigure(editor.config().with_editing_mode(mode));
+    }
+
+    // [spec:posix:def:edit.stty-characters]
+    fn refresh_terminal_configuration(&mut self) -> Result<(), LineEditorError> {
+        if self.editor_mut().terminal_mode() != TerminalMode::Cooked {
+            return Ok(());
+        }
+        let Ok(attributes) = nshedit_plat::terminal::read_attributes(self.input.as_fd()) else {
+            return Ok(());
+        };
+
+        self.terminal_snapshots
+            .lock()
+            .expect("terminal snapshots are not poisoned")
+            .replace(attributes);
+        refresh_shell_bindings(self.editor_mut(), Some(&attributes))?;
+        Ok(())
     }
 
     pub fn set_terminal(&mut self, name: &[u8]) -> Result<(), LineEditorError> {
@@ -386,6 +323,7 @@ impl LineEditor {
         sh: &mut crate::context::Shell,
         history: &mut History,
     ) -> Result<Option<Vec<u8>>, LineEditorError> {
+        self.refresh_terminal_configuration()?;
         self.editor_mut().reset_line();
         self.history_cursor.reset();
         self.live_history_line = None;
@@ -927,8 +865,8 @@ fn default_terminal_profile() -> TerminalProfile {
 }
 
 // [spec:posix:sem:edit.append-last-bigword]
-fn install_shell_bindings(
-    editor: &mut NativeEditor,
+fn install_shell_bindings<T: TerminalControl>(
+    editor: &mut Editor<T>,
     terminal_attributes: Option<&TerminalAttributes>,
 ) -> Result<(), nshedit::domain::Error> {
     let terminal_bindings = [
@@ -1211,8 +1149,8 @@ fn install_shell_bindings(
     Ok(())
 }
 
-fn install_terminal_character(
-    editor: &mut NativeEditor,
+fn install_terminal_character<T: TerminalControl>(
+    editor: &mut Editor<T>,
     attributes: &TerminalAttributes,
     character: ControlCharacter,
     modes: &[KeymapMode],
@@ -1224,6 +1162,15 @@ fn install_terminal_character(
         editor.bind(*mode, sequence.clone(), binding.clone());
     }
     Ok(())
+}
+
+fn refresh_shell_bindings<T: TerminalControl>(
+    editor: &mut Editor<T>,
+    attributes: Option<&TerminalAttributes>,
+) -> Result<(), nshedit::domain::Error> {
+    let mode = editor.config().editing_mode();
+    editor.reset_bindings(mode);
+    install_shell_bindings(editor, attributes)
 }
 
 // [spec:posix:req:edit.command-alias-insert]

@@ -1053,6 +1053,28 @@ children (
                     )
                 }
                 deps (posix-harness)
+                children (
+                    {
+                        id fix-edit-stty-character-refresh
+                        title "Refresh line-editor terminal characters after stty changes"
+                        kind @fix
+                        log (
+                            {
+                                at 2026-08-18T06:33:12.007967412Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T06:42:02.030903837Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Preserve successful tty changes from completed foreground utilities by restoring the shell snapshot only when a job stops. Before each subsequent edited line, read the cooked terminal attributes, replace the editor terminal's safe shared snapshots, reset stale keymaps, and reinstall shell bindings from the current control characters. This keeps stopped-job restoration intact while making `stty erase` observable immediately. Verification: the stty-erase case, adjacent erase/kill/word-erase case, all three foreground/suspension terminal cases, 255 core tests plus companion tests/doctests, and git diff --check pass."
+                            }
+                        )
+                    }
+                )
             }
 
             {
@@ -1897,6 +1919,13 @@ children (
                             shell ([spec:posix:req:builtin.fc.env-histfile])
                         }
                         deps (shell-as-library)
+                        children (
+                            {
+                                id test-fc-histfile-reload-format
+                                title "Align the HISTFILE reload fixture with fc -ln output"
+                                kind @test
+                            }
+                        )
                         log (
                             {
                                 at 2026-08-18T03:36:37.926543745Z
