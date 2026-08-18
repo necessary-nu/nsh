@@ -689,6 +689,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T01:59:30.23401114Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T02:00:23.787893316Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Established implementation coverage for all 50 claimed export, readonly, return, shift, times, and unset rules at their shared and individual built-in entry points. The rule-selected POSIX harness passed all 21 cases and 47 executable rule assertions; remaining selected facets are non-executable dispositions."
+                    }
+                )
             }
 
             {

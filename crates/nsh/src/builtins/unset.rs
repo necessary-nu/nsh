@@ -13,6 +13,17 @@ use crate::var::unset_bytes;
 
 // [spec:dash:def:var.unsetcmd-fn]
 // [spec:dash:sem:var.unsetcmd-fn]
+// [spec:posix:syn:builtin.unset.synopsis]
+// [spec:posix:req:builtin.unset.unset-names]
+// [spec:posix:req:builtin.unset.v-option]
+// [spec:posix:req:builtin.unset.f-option]
+// [spec:posix:req:builtin.unset.no-option]
+// [spec:posix:req:builtin.unset.not-previously-set]
+// [spec:posix:req:builtin.unset.utility-syntax-guidelines]
+// [spec:posix:sem:builtin.unset.empty-assignment-and-special-parameters]
+// [spec:posix:req:builtin.unset.stderr]
+// [spec:posix:req:builtin.unset.exit-status]
+// [spec:posix:sem:builtin.unset.utility-defaults]
 pub fn unsetcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut flag: u8 = 0;
 

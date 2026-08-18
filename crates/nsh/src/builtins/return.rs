@@ -13,6 +13,11 @@ use crate::eval::{Flow, SKIPFUNC, SKIPFUNCDEF};
 
 // [spec:dash:def:eval.returncmd-fn]
 // [spec:dash:sem:eval.returncmd-fn]
+// [spec:posix:syn:builtin.return.synopsis]
+// [spec:posix:req:builtin.return.stop-function-or-dot-script]
+// [spec:posix:req:builtin.return.stderr]
+// [spec:posix:req:builtin.return.exit-status]
+// [spec:posix:sem:builtin.return.utility-defaults]
 pub fn returncmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let skip: c_int;
     let status: c_int;

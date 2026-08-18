@@ -18,6 +18,12 @@ use std::io::Write as _;
 
 // [spec:dash:def:times.timescmd-fn]
 // [spec:dash:sem:times.timescmd-fn]
+// [spec:posix:syn:builtin.times.synopsis]
+// [spec:posix:req:builtin.times.output-format]
+// [spec:posix:req:builtin.times.tms-correspondence]
+// [spec:posix:req:builtin.times.stderr]
+// [spec:posix:req:builtin.times.exit-status]
+// [spec:posix:sem:builtin.times.utility-defaults]
 pub fn timescmd(sh: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> {
     let times = nsh_platform::process_times();
     let mutime: c_int;

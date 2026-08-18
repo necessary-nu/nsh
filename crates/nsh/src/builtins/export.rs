@@ -19,6 +19,28 @@ use crate::var::{VEXPORT, VREADONLY, add_flags, set_bytes, show_vars};
 
 // [spec:dash:def:var.exportcmd-fn]
 // [spec:dash:sem:var.exportcmd-fn]
+// [spec:posix:syn:builtin.export.synopsis]
+// [spec:posix:req:builtin.export.set-attribute]
+// [spec:posix:req:builtin.export.declaration-utility]
+// [spec:posix:req:builtin.export.utility-syntax-guidelines]
+// [spec:posix:req:builtin.export.p-output-format]
+// [spec:posix:req:builtin.export.p-output-reinput]
+// [spec:posix:sem:builtin.export.no-arguments]
+// [spec:posix:req:builtin.export.stderr]
+// [spec:posix:req:builtin.export.exit-status]
+// [spec:posix:sem:builtin.export.utility-defaults]
+// [spec:posix:syn:builtin.readonly.synopsis]
+// [spec:posix:req:builtin.readonly.set-attribute]
+// [spec:posix:def:builtin.readonly.attribute]
+// [spec:posix:req:builtin.readonly.application-constraint]
+// [spec:posix:req:builtin.readonly.declaration-utility]
+// [spec:posix:req:builtin.readonly.utility-syntax-guidelines]
+// [spec:posix:sem:builtin.readonly.p-output-format]
+// [spec:posix:req:builtin.readonly.p-output-reinput]
+// [spec:posix:sem:builtin.readonly.no-arguments]
+// [spec:posix:req:builtin.readonly.stderr]
+// [spec:posix:req:builtin.readonly.exit-status]
+// [spec:posix:sem:builtin.readonly.utility-defaults]
 pub fn exportcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* `export` and `readonly` are one builtin telling itself apart by the
      * word it was called as. */

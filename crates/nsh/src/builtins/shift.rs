@@ -17,6 +17,12 @@ use crate::eval::Flow;
 
 // [spec:dash:def:options.shiftcmd-fn]
 // [spec:dash:sem:options.shiftcmd-fn]
+// [spec:posix:syn:builtin.shift.synopsis]
+// [spec:posix:req:builtin.shift.positional-parameters]
+// [spec:posix:req:builtin.shift.operand-value]
+// [spec:posix:req:builtin.shift.stderr]
+// [spec:posix:req:builtin.shift.exit-status]
+// [spec:posix:sem:builtin.shift.utility-defaults]
 pub fn shiftcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let n: c_int;
 

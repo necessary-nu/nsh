@@ -1890,4 +1890,107 @@ impl_evidence (
         {impl_name shell, rule builtin.special.supported-and-output}
         {impl_name shell, rule builtin.special.term-built-in}
     )}
+    {id posix-builtins-variables, covered_rules (
+        builtin.export.declaration-utility
+        builtin.export.exit-status
+        builtin.export.no-arguments
+        builtin.export.p-output-format
+        builtin.export.p-output-reinput
+        builtin.export.set-attribute
+        builtin.export.stderr
+        builtin.export.synopsis
+        builtin.export.utility-defaults
+        builtin.export.utility-syntax-guidelines
+        builtin.readonly.application-constraint
+        builtin.readonly.attribute
+        builtin.readonly.declaration-utility
+        builtin.readonly.exit-status
+        builtin.readonly.no-arguments
+        builtin.readonly.p-output-format
+        builtin.readonly.p-output-reinput
+        builtin.readonly.set-attribute
+        builtin.readonly.stderr
+        builtin.readonly.synopsis
+        builtin.readonly.utility-defaults
+        builtin.readonly.utility-syntax-guidelines
+        builtin.return.exit-status
+        builtin.return.stderr
+        builtin.return.stop-function-or-dot-script
+        builtin.return.synopsis
+        builtin.return.utility-defaults
+        builtin.shift.exit-status
+        builtin.shift.operand-value
+        builtin.shift.positional-parameters
+        builtin.shift.stderr
+        builtin.shift.synopsis
+        builtin.shift.utility-defaults
+        builtin.times.exit-status
+        builtin.times.output-format
+        builtin.times.stderr
+        builtin.times.synopsis
+        builtin.times.tms-correspondence
+        builtin.times.utility-defaults
+        builtin.unset.empty-assignment-and-special-parameters
+        builtin.unset.exit-status
+        builtin.unset.f-option
+        builtin.unset.no-option
+        builtin.unset.not-previously-set
+        builtin.unset.stderr
+        builtin.unset.synopsis
+        builtin.unset.unset-names
+        builtin.unset.utility-defaults
+        builtin.unset.utility-syntax-guidelines
+        builtin.unset.v-option
+    ), covered_claims (
+        {impl_name shell, rule builtin.export.declaration-utility}
+        {impl_name shell, rule builtin.export.exit-status}
+        {impl_name shell, rule builtin.export.no-arguments}
+        {impl_name shell, rule builtin.export.p-output-format}
+        {impl_name shell, rule builtin.export.p-output-reinput}
+        {impl_name shell, rule builtin.export.set-attribute}
+        {impl_name shell, rule builtin.export.stderr}
+        {impl_name shell, rule builtin.export.synopsis}
+        {impl_name shell, rule builtin.export.utility-defaults}
+        {impl_name shell, rule builtin.export.utility-syntax-guidelines}
+        {impl_name shell, rule builtin.readonly.application-constraint}
+        {impl_name shell, rule builtin.readonly.attribute}
+        {impl_name shell, rule builtin.readonly.declaration-utility}
+        {impl_name shell, rule builtin.readonly.exit-status}
+        {impl_name shell, rule builtin.readonly.no-arguments}
+        {impl_name shell, rule builtin.readonly.p-output-format}
+        {impl_name shell, rule builtin.readonly.p-output-reinput}
+        {impl_name shell, rule builtin.readonly.set-attribute}
+        {impl_name shell, rule builtin.readonly.stderr}
+        {impl_name shell, rule builtin.readonly.synopsis}
+        {impl_name shell, rule builtin.readonly.utility-defaults}
+        {impl_name shell, rule builtin.readonly.utility-syntax-guidelines}
+        {impl_name shell, rule builtin.return.exit-status}
+        {impl_name shell, rule builtin.return.stderr}
+        {impl_name shell, rule builtin.return.stop-function-or-dot-script}
+        {impl_name shell, rule builtin.return.synopsis}
+        {impl_name shell, rule builtin.return.utility-defaults}
+        {impl_name shell, rule builtin.shift.exit-status}
+        {impl_name shell, rule builtin.shift.operand-value}
+        {impl_name shell, rule builtin.shift.positional-parameters}
+        {impl_name shell, rule builtin.shift.stderr}
+        {impl_name shell, rule builtin.shift.synopsis}
+        {impl_name shell, rule builtin.shift.utility-defaults}
+        {impl_name shell, rule builtin.times.exit-status}
+        {impl_name shell, rule builtin.times.output-format}
+        {impl_name shell, rule builtin.times.stderr}
+        {impl_name shell, rule builtin.times.synopsis}
+        {impl_name shell, rule builtin.times.tms-correspondence}
+        {impl_name shell, rule builtin.times.utility-defaults}
+        {impl_name shell, rule builtin.unset.empty-assignment-and-special-parameters}
+        {impl_name shell, rule builtin.unset.exit-status}
+        {impl_name shell, rule builtin.unset.f-option}
+        {impl_name shell, rule builtin.unset.no-option}
+        {impl_name shell, rule builtin.unset.not-previously-set}
+        {impl_name shell, rule builtin.unset.stderr}
+        {impl_name shell, rule builtin.unset.synopsis}
+        {impl_name shell, rule builtin.unset.unset-names}
+        {impl_name shell, rule builtin.unset.utility-defaults}
+        {impl_name shell, rule builtin.unset.utility-syntax-guidelines}
+        {impl_name shell, rule builtin.unset.v-option}
+    )}
 )
