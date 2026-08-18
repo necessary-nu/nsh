@@ -2947,6 +2947,21 @@ children (
                             shell ([spec:posix:sem:edit.insert-literal-next])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:29:23.907473305Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:30:55.706121327Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "nsh already maps the terminal's configured literal-next character to nshedit's Quote command in vi insert mode, which safely consumes the following byte as literal input. The PTY case needed pacing because an unpaced Ctrl-V is handled by the canonical line discipline before `set -o vi` establishes the raw editor; the following Ctrl-W then reaches the editor alone and correctly erases a word. Map the POSIX rule at the terminal-character binding and pace delivery onto the raw-mode edit line. Verification: all 18 linedit tests, 14 harness unit tests, and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

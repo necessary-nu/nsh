@@ -1137,6 +1137,7 @@ fn install_shell_bindings(
                 operation: WordTraversal::Kill,
             }),
         )?;
+        // [spec:posix:sem:edit.insert-literal-next]
         install_terminal_character(
             editor,
             attributes,

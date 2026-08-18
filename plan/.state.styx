@@ -3664,4 +3664,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule edit.insert-end-of-file}
     )}
+    {id fix-edit-insert-literal-next, covered_rules (
+        edit.insert-literal-next
+    ), covered_claims (
+        {impl_name shell, rule edit.insert-literal-next}
+    )}
 )
