@@ -1818,6 +1818,28 @@ children (
                             shell ([spec:posix:req:builtin.exec.failure-interactive-up])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T03:16:27.616674542Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T03:26:26.662280741Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Interactive root exec now preserves interactive mode and unread input across the attempt, temporarily disables/restores monitor mode, and translates a returned exec failure to Flow::Done(sh.status) so evalcommand retains exec redirections. The conformance case enables emacs editing: before moving the editor's owned duplicates above the 0-9 shell descriptor namespace, failed materialization caused Rust's IO-safety abort; with the range invariant it survives and fd 3 remains usable. Verification: focused interactive case 1/0, the other non-syntax exec cases 4/0, and cargo test -p nsh 262/0 (234 unit + 28 integration; one doctest ignored). The separate exec -- syntax case remains the next tracked failure."
+                            }
+
+                            {
+                                at 2026-08-18T03:26:43.202681063Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Verification count correction: cargo test -p nsh passed 266 tests (234 + 15 + 4 + 4 + 4 + 5); one doctest was ignored."
+                            }
+                        )
                     }
 
                     {

@@ -3414,4 +3414,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.dot.path-search}
     )}
+    {id fix-builtin-exec-failure-interactive-up, covered_rules (
+        builtin.exec.failure-interactive-up
+    ), covered_claims (
+        {impl_name shell, rule builtin.exec.failure-interactive-up}
+    )}
 )

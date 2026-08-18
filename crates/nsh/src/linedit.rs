@@ -265,12 +265,24 @@ impl LineEditor {
         output_fd: impl AsFd,
         mode: EditingMode,
     ) -> Result<Self, LineEditorError> {
-        let input = nsh_platform::duplicate_file(&input_fd)?;
-        let output = nsh_platform::duplicate_file(&output_fd)?;
+        let input = File::from(nsh_platform::duplicate_cloexec(
+            &input_fd,
+            crate::fd::SLOT_COUNT as i32,
+        )?);
+        let output = File::from(nsh_platform::duplicate_cloexec(
+            &output_fd,
+            crate::fd::SLOT_COUNT as i32,
+        )?);
         let terminal_attributes = nshedit_plat::terminal::read_attributes(input.as_fd()).ok();
         let terminal = OwnedTerminal::new(
-            input.try_clone()?,
-            output.try_clone()?,
+            File::from(nsh_platform::duplicate_cloexec(
+                &input,
+                crate::fd::SLOT_COUNT as i32,
+            )?),
+            File::from(nsh_platform::duplicate_cloexec(
+                &output,
+                crate::fd::SLOT_COUNT as i32,
+            )?),
             locale.clone(),
         );
         let config = EditorConfig::default()

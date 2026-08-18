@@ -988,6 +988,7 @@ CASES: tuple[Case, ...] = (
         id="ctl-exec-failure-interactive",
         rules=("builtin.exec.failure-interactive-up",),
         script=(
+            "set -o emacs\n"
             "exec 3>fd3 ./nosuchutility\n"
             "printf 'STILL-ALIVE\\n'\n"
             "printf 'via-fd3\\n' >&3\n"
