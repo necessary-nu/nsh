@@ -9,6 +9,8 @@ use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
+mod oils_runner;
+
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 #[derive(Debug, Deserialize)]
@@ -49,6 +51,9 @@ struct ExpectedCount {
 }
 
 fn main() {
+    if let Some(status) = oils_runner::helpers::status_if_invoked() {
+        std::process::exit(status);
+    }
     if let Err(error) = run() {
         eprintln!("nsh-survey: {error}");
         std::process::exit(1);
@@ -75,12 +80,19 @@ fn run() -> Result<()> {
             reject_extra_args(args)?;
             generate_oils_manifests(&root)
         }
+        Some(command) if command == OsStr::new("run-oils") => {
+            if oils_runner::command(args, survey_root())? {
+                Ok(())
+            } else {
+                std::process::exit(1)
+            }
+        }
         _ => Err(usage().into()),
     }
 }
 
 fn usage() -> &'static str {
-    "usage: nsh-survey import-oils OILS_CHECKOUT [OUTPUT]\n       nsh-survey verify-oils [ROOT]\n       nsh-survey generate-oils-manifests [ROOT]"
+    "usage: nsh-survey import-oils OILS_CHECKOUT [OUTPUT]\n       nsh-survey verify-oils [ROOT]\n       nsh-survey generate-oils-manifests [ROOT]\n       nsh-survey run-oils [OPTIONS] [ROOT]"
 }
 
 fn required_path(value: Option<std::ffi::OsString>, name: &str) -> Result<PathBuf> {

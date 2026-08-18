@@ -52,4 +52,7 @@ comment-smells {
 
 quality {
     exempt-paths (tests/surveys/oils/spec/**)
+    test-footprint {
+        scope "crate"
+    }
 }

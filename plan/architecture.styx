@@ -76,15 +76,15 @@ elements (
     }
     {
         id [arch:nsh:conformance]
-        name "The behavioural oracles"
+        name "The behavioural evidence"
         kind @capability
         lifecycle @active
-        // Not shipped. The differential harness against the C dash, and the
-        // rule-indexed POSIX suite. With no per-function test suite, these
-        // are the only thing standing between a restructuring of the shell
-        // and a silent divergence from it -- which is why how much of the
-        // code they reach is a first-class question and not a metric.
-        // See [dec:nsh:differential-is-the-oracle].
+        // Not shipped. The differential harness against the C dash, the
+        // rule-indexed normative POSIX suite, and pinned external surveys.
+        // Their authority is deliberately tiered: external compatibility
+        // evidence does not become normative merely by living beside the
+        // oracle. See [dec:nsh:differential-is-the-oracle] and
+        // [dec:nsh:survey-evidence-has-tiers].
         //
         // The differential contract attaches to [arch:nsh:shell-bin], not
         // to the core: what it asserts is "the frontend, in dash's
@@ -92,10 +92,12 @@ elements (
         // INHERIT streams, one shell per process, signals claimed, exit by
         // `_exit` -- so every library axis the core grows is outside what
         // it can see, and each such axis owes its own test.
-        exposes ("tests/harness" "posix/harness")
-        decisions ([dec:nsh:differential-is-the-oracle] [dec:nsh:we-own-the-defects])
+        exposes ("tests/harness" "posix/harness" "tests/surveys" "crates/nsh-survey")
+        decisions ([dec:nsh:differential-is-the-oracle] [dec:nsh:we-own-the-defects]
+                   [dec:nsh:survey-evidence-has-tiers])
         log (
             {at "2026-08-07T00:00:00Z", kind @established, by "[dec:nsh:differential-is-the-oracle]"}
+            {at "2026-08-18T00:00:00Z", kind @modified, by "[dec:nsh:survey-evidence-has-tiers]"}
         )
     }
 )

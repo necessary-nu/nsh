@@ -5465,12 +5465,34 @@ children (
                 id native-oils-spec-runner
                 title "Replace Oils' Python 2 and Bash harness with an nsh-native runner"
                 deps (import-oils-osh-corpus)
+                sealed true
                 log (
                     {
                         at 2026-08-18T13:04:49.654170077Z
                         author "brendan@necessary.nu"
                         kind @note
                         text "Definition of done: a repository-native Rust runner replaces Python 2 and Bash orchestration; parses Oils file/case metadata and byte-exact status/stdout/stderr assertions including multiline, JSON, and per-shell qualifiers; gives every case an isolated working directory and environment; enforces bounded execution and descendant cleanup; runs the release nsh binary; emits human-readable and machine-consumable totals with explicit pass/fail/skip/unsupported accounting; and has parser plus execution regression tests."
+                    }
+
+                    {
+                        at 2026-08-18T13:32:39.418713809Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T13:56:22.620430947Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Completion evidence: safe Rust parser accepts all 134 files/2,755 cases and covers multiline, JSON, repeated ideal metadata, qualified overrides, and malformed qualifier controls. Sixteen unit/regression tests cover parsing, byte/status judgments, isolation, output bounds, deadlines, and descendant cleanup; clippy passes with warnings denied for nsh-survey. Release nsh smoke is 18/18. Full real runs emitted valid JSON with zero runner errors and zero timeouts: full 1,107 pass/1,638 fail/10 unsupported; POSIX-candidate 1,016/597/1; Bash comparison 1,103/1,629/3; Bash extension 87/1,032/2; named Bash diagnostic 4/108/0. The behavioral failures are explicit survey backlog, not harness failures."
+                    }
+
+                    {
+                        at 2026-08-18T13:56:22.707009617Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }

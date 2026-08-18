@@ -60,3 +60,33 @@ that each case is normative POSIX. Normative conformance remains under
 `posix/`. Each manifest entry records its complete source hash and qualified
 assertion count; the native runner reads the exact per-case shell qualifiers
 from those hashed source files.
+
+## Native runner
+
+Build the release shell, then run any manifest selection without Python 2 or
+the upstream Bash harness:
+
+```text
+cargo build --release --bin nsh
+cargo run -p nsh-survey -- run-oils --group posix-candidate
+cargo run -p nsh-survey -- run-oils --group bash-extension --format json
+```
+
+The default target is `target/release/nsh`, the default group is `full`, and
+the default expectation namespace is `osh`. Use `--expect-shell` to select a
+different per-shell qualifier namespace. Qualified `OK` results count as
+passes, matching `N-I` results count as unsupported, matching `BUG` results
+are reported separately as known bugs, and any byte or status mismatch is a
+failure. The command exits nonzero for failures, timeouts, or runner errors.
+
+`--spec NAME`, `--case TEXT`, and `--max-cases N` provide reproducible focused
+runs; excluded cases are counted as skipped. `--timeout-ms` bounds every case.
+Each execution receives a fresh working directory, a cleared deterministic
+environment, bounded stdout and stderr capture, and a dedicated process group
+that is terminated as a unit on timeout and cleaned after normal exit.
+
+The runner mounts a disposable fixture view over the byte-pinned corpus.
+Native Rust entry points replace the imported Python 2 helpers, including the
+small `python2 -c` surface used by the corpus; compatible complex snippets are
+forwarded to the repository's existing Python 3 test dependency. No user-home
+checkout, network access, Python 2 interpreter, or Bash orchestration is used.
