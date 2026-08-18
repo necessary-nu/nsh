@@ -452,17 +452,18 @@ CASES: tuple[Case, ...] = (
         requires=("UP",),
     ),
     # ignoreeof must keep the interactive shell alive across end-of-file so
-    # that the user can still type `exit`. The control-D below arrives at
-    # the start of a line, so it is a genuine end-of-file.
+    # that the user can still type `exit`. Pacing makes every control-D arrive
+    # at the start of a fresh input line; 51 of them also prove there is no
+    # hidden retry cap after which the shell exits anyway.
     # [spec:posix:req:builtin.set.opt-o-ignoreeof/test]
     Case(
         id="set-opt-o-ignoreeof",
         rules=("builtin.set.opt-o-ignoreeof",),
         script=(
             "set -o ignoreeof\n"
-            "\x04"
-            "printf 'STILL-ALIVE\\n'\n"
-            "exit 7\n"
+            + "\x04\n" * 51
+            + "printf 'STILL-ALIVE\\n'\n"
+            + "exit 7\n"
         ),
         mode="interactive",
         environment={"PS1": "", "PS2": ""},
@@ -471,6 +472,7 @@ CASES: tuple[Case, ...] = (
         stdout_contains=("STILL-ALIVE\n",),
         timeout=15.0,
         requires=("UP",),
+        pace=0.02,
     ),
     # ------------------------------------------------------------------
     # trap

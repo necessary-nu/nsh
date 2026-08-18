@@ -2333,6 +2333,21 @@ children (
                             shell ([spec:posix:req:builtin.set.opt-o-ignoreeof])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:27:37.993016086Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:30:21.186819588Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "On a non-exiting interactive EOF, clear only the base input frame's EOF latch so the next loop iteration performs a fresh blocking terminal read without flushing newly arrived bytes. When ignoreeof is enabled, remove the historical 50-EOF escape hatch and saturate the diagnostic counter; retain the cap for the separate stopped-jobs retry path. Pace the conformance case through 51 real control-D inputs to prove both re-arming and explicit-exit-only behavior. Verification: the case survives all 51 EOFs, prints STILL-ALIVE, and exits explicitly with status 7; POSIX harness unit tests pass; cargo test -p nsh passes 278 tests with one ignored doctest; git diff --check passes."
+                            }
+                        )
                     }
 
                     {

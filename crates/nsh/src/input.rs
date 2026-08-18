@@ -1245,3 +1245,13 @@ pub fn reset_input(sh: &mut Shell) {
     pf_at(sh, 0).eof = 0;
     flush_input(sh);
 }
+
+/// Let the interactive command loop try standard input again after EOF.
+///
+/// The parser latches EOF on its input frame so files and strings cannot be
+/// polled forever. `ignoreeof` is the one boundary that deliberately asks a
+/// terminal for a new record, without discarding any bytes that arrived in
+/// the meantime.
+pub(crate) fn rearm_stdin_after_eof(sh: &mut Shell) {
+    pf_at(sh, 0).eof = 0;
+}

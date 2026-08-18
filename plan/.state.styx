@@ -3514,4 +3514,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.set.opt-h}
     )}
+    {id fix-builtin-set-opt-o-ignoreeof, covered_rules (
+        builtin.set.opt-o-ignoreeof
+    ), covered_claims (
+        {impl_name shell, rule builtin.set.opt-o-ignoreeof}
+    )}
 )

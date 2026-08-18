@@ -386,6 +386,7 @@ pub fn main_fn(
 
 // [spec:dash:def:main.cmdloop-fn]
 // [spec:dash:sem:main.cmdloop-fn]
+// [spec:posix:req:builtin.set.opt-o-ignoreeof]
 pub(crate) fn cmdloop(
     sh: &mut Shell,
     top: c_int,
@@ -423,7 +424,7 @@ pub(crate) fn cmdloop(
                 status = i;
             }
         } else {
-            if top == 0 || numeof >= 50 {
+            if top == 0 || (Iflag(sh) == 0 && numeof >= 50) {
                 break;
             }
             if crate::jobs::stoppedjobs(sh) == 0 {
@@ -435,7 +436,8 @@ pub(crate) fn cmdloop(
                 }
                 let _ = sh.io.stderr().write_all(b"\nUse \"exit\" to leave shell.\n");
             }
-            numeof += 1;
+            crate::input::rearm_stdin_after_eof(sh);
+            numeof = numeof.saturating_add(1);
         }
         skip = sh.eval.evalskip;
         if skip != 0 {
