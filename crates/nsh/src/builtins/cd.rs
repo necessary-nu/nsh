@@ -151,6 +151,7 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:builtin.cd.step10-chdir]
 // [spec:posix:req:builtin.cd.step10-pwd-physical]
 // [spec:posix:req:builtin.cd.oldpwd-set]
+// [spec:posix:req:xcurel.change-cwd]
 fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<c_int, Error> {
     let mut logical = None;
     let err: c_int;

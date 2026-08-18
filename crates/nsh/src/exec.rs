@@ -219,6 +219,10 @@ impl CmdTable {
 // [spec:dash:sem:exec.shellexec-fn]
 // [spec:posix:req:xcu.env.utility-selection-path-search]
 // [spec:posix:req:shenv.utility-environment]
+// [spec:posix:req:xcurel.file-removal-active-directory]
+// [spec:posix:req:xcurel.file-removal-effects]
+// [spec:posix:req:xcurel.file-time-values]
+// [spec:posix:req:xcurel.mathematical-functions]
 pub fn shellexec(
     sh: &mut crate::context::Shell,
     argv: &[&BStr],

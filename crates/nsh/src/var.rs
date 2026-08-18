@@ -229,6 +229,7 @@ macro_rules! is_locale_variable {
 }
 
 // [spec:nsh:sem:shell-locale.selection]
+// [spec:posix:req:xcurel.establish-locale]
 fn selected_locale(sh: &Shell) -> std::io::Result<nsh_platform::Locale> {
     let nonempty = |name: &[u8]| {
         sh.vars.tab.get(BStr::new(name)).and_then(|var| {

@@ -1072,6 +1072,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T02:32:19.086104383Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T02:35:03.67829733Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Mapped all 23 XCU relationship rules to the shell boundaries that implement or delegate them. Focused POSIX harness: 16 PASS, 0 FAIL; cargo test -p nsh: 262 passed, 0 failed, 1 ignored; git diff --check clean."
+                    }
+                )
             }
 
             {

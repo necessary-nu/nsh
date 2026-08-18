@@ -203,6 +203,9 @@ fn sh_open_fail(
 
 // [spec:dash:def:redir.sh-open-fn]
 // [spec:dash:sem:redir.sh-open-fn]
+// [spec:posix:req:xcurel.file-access-permissions]
+// [spec:posix:req:xcurel.file-open-access-mode]
+// [spec:posix:req:xcurel.pathname-resolution]
 pub fn sh_open(
     sh: &mut Shell,
     pathname: &BStr,
@@ -264,6 +267,11 @@ pub fn sh_open_read(
 // [spec:posix:req:redir.dup-output]
 // [spec:posix:req:redir.dup-output-close]
 // [spec:posix:req:redir.open-read-write]
+// [spec:posix:req:xcurel.file-create-if-absent]
+// [spec:posix:req:xcurel.file-creation-attributes]
+// [spec:posix:req:xcurel.file-create-existing-actions]
+// [spec:posix:def:xcurel.file-create-existing-codes]
+// [spec:posix:req:xcurel.file-append-mode]
 fn openredirect(sh: &mut Shell, redir: &Node) -> Result<RedirectSource, Error> {
     let f = match redir.node_type() {
         NFROM => RedirectSource::Owned(sh_open(

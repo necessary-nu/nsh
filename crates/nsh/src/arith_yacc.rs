@@ -499,6 +499,11 @@ impl<'a, 'sh> Parser<'a, 'sh> {
 // [spec:posix:req:expand.arith-variable-reference]
 // [spec:posix:req:expand.arith-extensions]
 // [spec:posix:req:expand.arith-invalid-expression]
+// [spec:posix:req:xcurel.iso-c-concepts]
+// [spec:posix:req:xcurel.arithmetic-precision]
+// [spec:posix:req:xcurel.arithmetic-variable-initialization]
+// [spec:posix:req:xcurel.arithmetic-operators]
+// [spec:posix:req:xcurel.arithmetic-expression-evaluation]
 pub fn arith(sh: &mut Shell, input: &BStr) -> Result<i64, Error> {
     let mut parser = Parser::new(sh, input);
     let result = parser.assignment(true)?;

@@ -1134,6 +1134,8 @@ fn forkparent(
 // [spec:dash:def:jobs.forkshell-fn]
 // [spec:dash:sem:jobs.forkshell-fn]
 // [spec:posix:req:shenv.subshell-contexts]
+// [spec:posix:req:xcurel.process-attributes-additional]
+// [spec:posix:req:xcurel.concurrent-execution]
 pub fn forkshell(
     sh: &mut crate::context::Shell,
     jp: Option<usize>,

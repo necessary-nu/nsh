@@ -616,6 +616,8 @@ fn stdin_clear_nonblock(sh: &mut crate::context::Shell) -> bool {
 // [spec:posix:req:sh.stdin-blocking-reads]
 // [spec:posix:req:sh.input-file-contents]
 // [spec:posix:req:sh.input-file-blank-or-comments]
+// [spec:posix:req:xcurel.file-contents-nbytes]
+// [spec:posix:sem:xcurel.file-contents-read-error]
 fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
     let uses_stdin = cur_pf(sh).uses_stdin;
     let mut use_tee: bool;

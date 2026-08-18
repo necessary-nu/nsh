@@ -3088,4 +3088,53 @@ impl_evidence (
         {impl_name shell, rule token.start-new-word}
         {impl_name shell, rule token.unquoted-blank-delimits}
     )}
+    {id posix-relationship, covered_rules (
+        xcurel.arithmetic-expression-evaluation
+        xcurel.arithmetic-operators
+        xcurel.arithmetic-precision
+        xcurel.arithmetic-variable-initialization
+        xcurel.change-cwd
+        xcurel.concurrent-execution
+        xcurel.establish-locale
+        xcurel.file-access-permissions
+        xcurel.file-append-mode
+        xcurel.file-contents-nbytes
+        xcurel.file-contents-read-error
+        xcurel.file-create-existing-actions
+        xcurel.file-create-existing-codes
+        xcurel.file-create-if-absent
+        xcurel.file-creation-attributes
+        xcurel.file-open-access-mode
+        xcurel.file-removal-active-directory
+        xcurel.file-removal-effects
+        xcurel.file-time-values
+        xcurel.iso-c-concepts
+        xcurel.mathematical-functions
+        xcurel.pathname-resolution
+        xcurel.process-attributes-additional
+    ), covered_claims (
+        {impl_name shell, rule xcurel.arithmetic-expression-evaluation}
+        {impl_name shell, rule xcurel.arithmetic-operators}
+        {impl_name shell, rule xcurel.arithmetic-precision}
+        {impl_name shell, rule xcurel.arithmetic-variable-initialization}
+        {impl_name shell, rule xcurel.change-cwd}
+        {impl_name shell, rule xcurel.concurrent-execution}
+        {impl_name shell, rule xcurel.establish-locale}
+        {impl_name shell, rule xcurel.file-access-permissions}
+        {impl_name shell, rule xcurel.file-append-mode}
+        {impl_name shell, rule xcurel.file-contents-nbytes}
+        {impl_name shell, rule xcurel.file-contents-read-error}
+        {impl_name shell, rule xcurel.file-create-existing-actions}
+        {impl_name shell, rule xcurel.file-create-existing-codes}
+        {impl_name shell, rule xcurel.file-create-if-absent}
+        {impl_name shell, rule xcurel.file-creation-attributes}
+        {impl_name shell, rule xcurel.file-open-access-mode}
+        {impl_name shell, rule xcurel.file-removal-active-directory}
+        {impl_name shell, rule xcurel.file-removal-effects}
+        {impl_name shell, rule xcurel.file-time-values}
+        {impl_name shell, rule xcurel.iso-c-concepts}
+        {impl_name shell, rule xcurel.mathematical-functions}
+        {impl_name shell, rule xcurel.pathname-resolution}
+        {impl_name shell, rule xcurel.process-attributes-additional}
+    )}
 )
