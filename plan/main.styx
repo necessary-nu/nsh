@@ -1924,6 +1924,21 @@ children (
                                 id test-fc-histfile-reload-format
                                 title "Align the HISTFILE reload fixture with fc -ln output"
                                 kind @test
+                                log (
+                                    {
+                                        at 2026-08-18T06:44:32.333198774Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
+
+                                    {
+                                        at 2026-08-18T06:46:29.871595758Z
+                                        author "brendan@necessary.nu"
+                                        kind @decision
+                                        text "Correct the fixture rather than the shell: POSIX's fc -ln record format begins with a tab, so the observed output was conforming and the old expected string was wrong. Keep the leading tab explicit while documenting that it is listing syntax, not persisted command data. Verification: the focused HISTFILE case, 14 harness tests, and the complete harness pass with 730/730 cases and 973/973 automatic rules."
+                                    }
+                                )
                             }
                         )
                         log (

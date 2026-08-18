@@ -761,7 +761,9 @@ CASES: tuple[Case, ...] = (
             "printf ': PERSISTED\\nexit\\n' | sh -i >/dev/null 2>&1\n"
             "printf 'fc -l -n 1 1\\nexit\\n' | sh -i 2>/dev/null\n"
         ),
-        stdout=": PERSISTED\n",
+        # POSIX requires a leading tab for `fc -ln`. It is listing syntax,
+        # not part of the command reloaded from HISTFILE.
+        stdout="\t: PERSISTED\n",
         timeout=8.0,
     ),
     # [spec:posix:req:builtin.fc.env-histfile/test]
