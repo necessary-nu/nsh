@@ -825,6 +825,24 @@ CASES: tuple[Case, ...] = (
         ),
         stdout="AB[C][D][E]\n",
     ),
+    # [spec:posix:def:grammar.operator-tokens/test]
+    Case(
+        id="lang-grammar-remaining-redirection-operators",
+        rules=("grammar.operator-tokens",),
+        script=(
+            "printf 'fd\\n' > input\n"
+            "exec 8< input\n"
+            "cat <&8\n"
+            "exec 8<&-\n"
+            "cat <<EOF\n"
+            "here\n"
+            "EOF\n"
+            "cat <<-EOF\n"
+            "\ttabbed\n"
+            "\tEOF\n"
+        ),
+        stdout="fd\nhere\ntabbed\n",
+    ),
     # [spec:posix:syn:grammar.io-here/test]
     # [spec:posix:def:redir.here-doc/test]
     # [spec:posix:syn:redir.here-doc-format/test]

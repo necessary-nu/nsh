@@ -3689,4 +3689,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule grammar.case-clause}
     )}
+    {id fix-grammar-operator-tokens, covered_rules (
+        grammar.operator-tokens
+    ), covered_claims (
+        {impl_name shell, rule grammar.operator-tokens}
+    )}
 )

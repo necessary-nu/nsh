@@ -1197,6 +1197,7 @@ fn nlnoprompt(sh: &mut Shell) {
 // [spec:posix:syn:token.operator-continue]
 // [spec:posix:syn:token.operator-delimit]
 // [spec:posix:syn:token.start-new-operator]
+// [spec:posix:def:grammar.operator-tokens]
 // [spec:posix:syn:token.unquoted-blank-delimits]
 // [spec:posix:syn:token.comment]
 // [spec:posix:syn:token.start-new-word]
@@ -2005,6 +2006,7 @@ fn checkend(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
 // [spec:posix:syn:grammar.io-redirect]
 // [spec:posix:syn:grammar.io-file]
 // [spec:posix:syn:grammar.io-here]
+// [spec:posix:def:grammar.operator-tokens]
 fn parseredir(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
     let fdc: c_char = st.out[0] as c_char;
     /* The C carves one `struct nfile` and then decides what it is by
