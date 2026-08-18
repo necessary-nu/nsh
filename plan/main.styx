@@ -2923,6 +2923,21 @@ children (
                             shell ([spec:posix:req:edit.insert-end-of-file])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:23:23.586537404Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:28:59.790210197Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "nsh maps the terminal's configured EOF character to nshedit's EndOfInputIfEmpty command in vi insert and command maps. The failing harness case had delivered its automatically appended control-D bytes before `set -o vi` switched the terminal out of canonical mode; Linux later exposed those queued EOF markers as NUL bytes, so the editor correctly treated them as unbound input. Pace the setup so EOF arrives at the fresh raw-mode edit line, and map the rule at the terminal-character binding. Verification: focused PTY case, all 18 linedit tests, 14 harness unit tests, and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

@@ -223,6 +223,7 @@ CASES: tuple[Case, ...] = (
         status="any",
         timeout=2.0,
         requires=("UP",),
+        pace=0.02,
     ),
     # [spec:posix:sem:edit.insert-escape/test]
     # [spec:posix:req:edit.escape-to-command-mode/test]

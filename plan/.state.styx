@@ -3659,4 +3659,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule edit.history-search-repeat}
     )}
+    {id fix-edit-insert-end-of-file, covered_rules (
+        edit.insert-end-of-file
+    ), covered_claims (
+        {impl_name shell, rule edit.insert-end-of-file}
+    )}
 )

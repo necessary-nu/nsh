@@ -1115,6 +1115,7 @@ fn install_shell_bindings(
             &[KeymapMode::Emacs, KeymapMode::ViInsert],
             Binding::Action(Action::Kill(EditTarget::Buffer)),
         )?;
+        // [spec:posix:req:edit.insert-end-of-file]
         install_terminal_character(
             editor,
             attributes,
