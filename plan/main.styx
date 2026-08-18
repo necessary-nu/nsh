@@ -2134,6 +2134,21 @@ children (
                             shell ([spec:posix:def:builtin.jobs.stdout-state-strings])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:08:20.497922508Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:10:10.460064095Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "For stopped wait statuses, render the fixed POSIX state prefix 'Stopped' and append the portable symbolic signal name as '(SIG...)' when available; leave locale signal descriptions for terminated jobs, whose format is separately allowed to vary. Verification: both direct stopped/done cases, terminated-state and default-format neighbors, and cargo test -p nsh pass (276 tests, one ignored doctest)."
+                            }
+                        )
                     }
 
                     {

@@ -537,6 +537,7 @@ pub(crate) fn jobno(jp: usize) -> c_int {
 
 // [spec:dash:def:jobs.sprint-status-fn]
 // [spec:dash:sem:jobs.sprint-status-fn]
+// [spec:posix:def:builtin.jobs.stdout-state-strings]
 fn sprint_status(
     locale: &nsh_platform::Locale,
     out: &mut Vec<u8>,
@@ -560,6 +561,19 @@ fn sprint_status(
                 if nsh_platform::wait_status_is_stopped(status) {
                     break 'out_lbl;
                 }
+            }
+            if nsh_platform::wait_status_is_stopped(status) {
+                let signal_name = usize::try_from(st)
+                    .ok()
+                    .and_then(|signal| crate::signames::signal_names.get(signal))
+                    .map_or(BStr::new(b""), |name| BStr::new(name.to_bytes()));
+                out.extend_from_slice(b"Stopped");
+                if !signal_name.is_empty() {
+                    out.extend_from_slice(b" (SIG");
+                    out.extend_from_slice(signal_name);
+                    out.push(b')');
+                }
+                break 'out_lbl;
             }
             /* `stpncpy(s, …, 32)` copies at most 32 bytes and NUL-pads
              * the rest of them, which is why the callers' buffers are

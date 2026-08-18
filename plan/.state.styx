@@ -3474,4 +3474,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.jobs.stdout-default-format}
     )}
+    {id fix-builtin-jobs-stdout-state-strings, covered_rules (
+        builtin.jobs.stdout-state-strings
+    ), covered_claims (
+        {impl_name shell, rule builtin.jobs.stdout-state-strings}
+    )}
 )
