@@ -38,3 +38,18 @@ adoption {
 annotations {
     mode @both
 }
+
+// Oils shell-spec files are pinned third-party survey inputs. Their bytes are
+// verified by nsh-survey and must not be rewritten to satisfy local source
+// heuristics; repository-owned survey code and metadata remain gated.
+stub-scan {
+    exempt-paths (tests/surveys/oils/spec/**)
+}
+
+comment-smells {
+    exempt-paths (tests/surveys/oils/spec/**)
+}
+
+quality {
+    exempt-paths (tests/surveys/oils/spec/**)
+}
