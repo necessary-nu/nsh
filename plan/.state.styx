@@ -3424,4 +3424,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.exec.utility-syntax-guidelines}
     )}
+    {id fix-builtin-fc-edit-and-reexecute, covered_rules (
+        builtin.fc.edit-and-reexecute
+    ), covered_claims (
+        {impl_name shell, rule builtin.fc.edit-and-reexecute}
+    )}
 )

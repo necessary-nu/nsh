@@ -144,6 +144,7 @@ pub fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 /// The evaluator's entry point. It receives the owned expanded fields so the
 /// one observable mutation made by `fc -s old=new` remains a normal indexed
 /// write and `$_` sees the same truncated word dash exposes.
+// [spec:posix:req:builtin.fc.edit-and-reexecute]
 pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<Flow, Error> {
     let args = crate::builtins::args(fields);
     let flags = scan_options(sh, &args)?;
@@ -163,6 +164,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
     if !history_active(sh) {
         return Err(sh.sh_error_value(b"history not active"));
     }
+    let discard_input_entry = crate::input::cur_pf(sh).uses_stdin();
 
     /*
      * If executing...
@@ -186,6 +188,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
          */
     }
     let mut body = || {
+        let mut result_status = 0;
         if executing {
             sh.histedit.fc_depth += 1;
             if sh.histedit.fc_depth > MAXHISTLOOPS {
@@ -282,6 +285,11 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
         let events = history_mut(sh)
             .map(|history| history.range(first, last))
             .unwrap_or_default();
+        if lflg == 0 && discard_input_entry {
+            if let Some(history) = history_mut(sh) {
+                history.discard_input_entry();
+            }
+        }
         for event in events {
             if lflg != 0 {
                 if nflg == 0 {
@@ -300,17 +308,18 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
                         let _ = sh.io.stderr().write_all(&line);
                     }
 
+                    if history_active(sh) {
+                        record_history_line(sh, &line, true, false);
+                    }
+
                     /* `fc -s` runs the recalled line, which can be an
-                      * `exit`. It leaves through the cleanup below like
-                      * everything else this frame catches. */
-                    crate::eval::flow!(crate::eval::evalstring(
+                     * `exit`. It leaves through the cleanup below like
+                     * everything else this frame catches. */
+                    result_status = crate::eval::flow!(crate::eval::evalstring(
                         sh,
                         BStr::new(line.as_slice()),
                         0,
                     ));
-                    if sh.displayhist != 0 && history_active(sh) {
-                        record_history_line(sh, &line, true);
-                    }
 
                     break;
                 } else {
@@ -327,32 +336,50 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
              * and lets `fccmd`'s enclosing mark release it.  `evalstring`
              * copies what it is given, so the buffer is dead as soon as
              * that call returns and can be this block's. */
-            let file_bytes = editfile
-                .as_ref()
-                .expect("fc created an edit file")
-                .as_os_str()
-                .as_bytes();
-            let mut editcmdbuf: Vec<u8> =
-                Vec::with_capacity(editor.len() + file_bytes.len() + 1);
+            let path = editfile.as_ref().expect("fc created an edit file").clone();
+            let file_bytes = path.as_os_str().as_bytes();
+            let mut editcmdbuf: Vec<u8> = Vec::with_capacity(editor.len() + file_bytes.len() + 1);
             editcmdbuf.extend_from_slice(editor);
             editcmdbuf.push(b' ');
             editcmdbuf.extend_from_slice(file_bytes);
 
             drop(edit_file.take());
             /* XXX - should use no JC command */
-            crate::eval::flow!(crate::eval::evalstring(
+            let editor_status = crate::eval::flow!(crate::eval::evalstring(
                 sh,
                 BStr::new(&editcmdbuf),
                 0,
             ));
             INTON(sh);
-            /* XXX - should read back - quick tst */
-            crate::eval::flow!(crate::shellmain::readcmdfile(
-                sh,
-                BStr::new(file_bytes),
-            ));
-            if let Some(path) = editfile.take() {
-                let _ = std::fs::remove_file(path);
+
+            if editor_status == 0 {
+                let edited = std::fs::read(&path).map_err(|error| {
+                    let mut message = b"can't read temporary file ".to_vec();
+                    message.extend_from_slice(file_bytes);
+                    message.extend_from_slice(b": ");
+                    message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
+                    sh.sh_error_value(&message)
+                })?;
+                if let Some(path) = editfile.take() {
+                    let _ = std::fs::remove_file(path);
+                }
+                if edited
+                    .iter()
+                    .any(|byte| !matches!(*byte, b' ' | b'\t' | b'\n'))
+                    && history_active(sh)
+                {
+                    record_history_line(sh, &edited, true, false);
+                }
+                result_status = crate::eval::flow!(crate::eval::evalstring(
+                    sh,
+                    BStr::new(&edited),
+                    0,
+                ));
+            } else {
+                result_status = editor_status;
+                if let Some(path) = editfile.take() {
+                    let _ = std::fs::remove_file(path);
+                }
             }
         }
 
@@ -362,7 +389,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
         if sh.displayhist != 0 {
             sh.displayhist = 0;
         }
-        Ok(Flow::Done(0))
+        Ok(Flow::Done(result_status))
     };
 
     if executing {
@@ -381,6 +408,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
             }
             return outcome;
         }
+        return outcome;
     } else {
         /* `fc -l`: the C runs the same tail with no handler installed, so
          * an error here propagates to whatever frame is outermost. */

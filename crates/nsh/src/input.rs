@@ -121,6 +121,12 @@ impl ParseFile {
         lleft: 0,
         unget: 0,
     };
+
+    /// Whether evaluation is still attached to interactive standard input,
+    /// rather than a sourced file or an `eval` string.
+    pub(crate) const fn uses_stdin(&self) -> bool {
+        self.uses_stdin
+    }
 }
 
 // [spec:dash:def:input.stdin-state]
@@ -911,7 +917,7 @@ fn preadbuffer(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
             &pf.buf[pf.pos..q]
         };
         let bytes = bytes.to_vec();
-        crate::histedit::record_history_line(sh, &bytes, first != 0);
+        crate::histedit::record_history_line(sh, &bytes, first != 0, true);
     }
     INTON(sh);
     /* This frame brackets the read in INTOFF/INTON, so an interrupt that

@@ -1873,6 +1873,21 @@ children (
                             shell ([spec:posix:req:builtin.fc.edit-and-reexecute])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T03:28:46.339383308Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T03:36:10.108846609Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Model the current interactive input record by HistoryId so fc removes exactly its triggering entry after resolving the selected range, rewinding the event number when safe; replayed entries never replace that marker. Both -s and editor output are entered before eval, editor output is read with std and evaluated from owned bytes, and a nonzero editor status suppresses insertion/reexecution and becomes fc's status. Verification: all four direct rule cases pass, 11 nearby fc cases pass, and cargo test -p nsh passes 267 tests with one doctest ignored."
+                            }
+                        )
                     }
 
                     {

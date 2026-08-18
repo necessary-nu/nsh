@@ -27,6 +27,15 @@ EDITOR = FileFixture(
     mode=0o755,
 )
 
+FAILING_EDITOR = FileFixture(
+    content=(
+        "#!/bin/sh\n"
+        "printf \"%s\\n\" \"printf 'SHOULD-NOT-RUN\\\\n' > ran\" > \"$1\"\n"
+        "exit 7\n"
+    ),
+    mode=0o755,
+)
+
 
 CASES: tuple[Case, ...] = (
     # [spec:posix:req:builtin.fc.opt-e/test]
@@ -78,6 +87,52 @@ CASES: tuple[Case, ...] = (
         environment={"PS1": "", "PS2": "", "FCEDIT": "fakeed"},
         stdout=None,
         stdout_contains=("EDITED",),
+        status="any",
+        timeout=15.0,
+    ),
+    # [spec:posix:req:builtin.fc.edit-and-reexecute/test]
+    Case(
+        id="fc-edited-line-enters-history",
+        rules=("builtin.fc.edit-and-reexecute",),
+        mode="interactive",
+        writable_tmp=True,
+        script=(
+            ": ORIGINAL\n"
+            "fc -e fakeed >/dev/null\n"
+            "printf 'edited-history=%s\\n' "
+            "\"$(fc -l -n | grep -c 'printf EDITED')\"\n"
+            "printf 'fc-history=%s\\n' "
+            "\"$(fc -l -n | grep -c 'fc -e fakeed')\"\n"
+            "exit 0\n"
+        ),
+        files={".bin/fakeed": EDITOR},
+        environment={"PS1": "", "PS2": ""},
+        stdout=None,
+        stdout_contains=("edited-history=1", "fc-history=0"),
+        status="any",
+        timeout=15.0,
+    ),
+    # [spec:posix:req:builtin.fc.edit-and-reexecute/test]
+    Case(
+        id="fc-failed-editor-suppresses-reexecution",
+        rules=("builtin.fc.edit-and-reexecute",),
+        mode="interactive",
+        writable_tmp=True,
+        script=(
+            ": ORIGINAL\n"
+            "fc -e failededit >/dev/null 2>&1\n"
+            "editor_status=$?\n"
+            "if [ -e ran ]; then ran=yes; else ran=no; fi\n"
+            "if fc -l -n | grep -q 'fc -e failededit'; "
+            "then kept=yes; else kept=no; fi\n"
+            "printf 'status=%s,ran=%s,kept=%s\\n' "
+            "\"$editor_status\" \"$ran\" \"$kept\"\n"
+            "exit 0\n"
+        ),
+        files={".bin/failededit": FAILING_EDITOR},
+        environment={"PS1": "", "PS2": ""},
+        stdout=None,
+        stdout_contains=("status=7,ran=no,kept=no",),
         status="any",
         timeout=15.0,
     ),

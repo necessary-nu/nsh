@@ -87,12 +87,17 @@ pub fn read_edit_line(
 }
 
 /// Retain one physical input line, either starting or continuing a command.
-pub fn record_history_line(sh: &mut crate::context::Shell, bytes: &[u8], first: bool) {
+pub fn record_history_line(
+    sh: &mut crate::context::Shell,
+    bytes: &[u8],
+    first: bool,
+    from_input: bool,
+) {
     let Some(history) = history_mut(sh) else {
         return;
     };
     if first {
-        let _ = history.enter(bytes);
+        let _ = history.enter(bytes, from_input);
     } else {
         let _ = history.append(bytes);
     }

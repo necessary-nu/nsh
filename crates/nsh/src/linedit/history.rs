@@ -59,6 +59,7 @@ pub struct History {
     limit: usize,
     next_number: Option<c_int>,
     append_target: Option<HistoryId>,
+    input_entry: Option<HistoryId>,
 }
 
 impl Default for History {
@@ -75,6 +76,7 @@ impl History {
             limit: 0,
             next_number: Some(1),
             append_target: None,
+            input_entry: None,
         }
     }
 
@@ -97,7 +99,7 @@ impl History {
     /// Insert a complete first physical line and make it the append target.
     // [spec:posix:req:builtin.fc.history-numbering]
     // [spec:posix:req:builtin.fc.history-number-wrap]
-    pub fn enter(&mut self, bytes: &[u8]) -> Result<c_int, HistoryError> {
+    pub fn enter(&mut self, bytes: &[u8], from_input: bool) -> Result<c_int, HistoryError> {
         let number = self.next_number.ok_or(HistoryError::NumberExhausted)?;
         self.next_number = number.checked_add(1);
         let metadata = EntryMetadata {
@@ -115,6 +117,9 @@ impl History {
             }
         };
         self.append_target = Some(id);
+        if from_input {
+            self.input_entry = Some(id);
+        }
         self.enforce_limit();
         Ok(number)
     }
@@ -141,6 +146,32 @@ impl History {
                 break;
             };
             let _ = self.store.remove(id);
+            if self.append_target == Some(id) {
+                self.append_target = None;
+            }
+            if self.input_entry == Some(id) {
+                self.input_entry = None;
+            }
+        }
+    }
+
+    /// Remove the history record created from the command currently being
+    /// read from interactive input. Replayed commands do not replace this
+    /// marker, so two `fc` invocations on one input line cannot delete each
+    /// other's recalled entries.
+    pub fn discard_input_entry(&mut self) {
+        let Some(id) = self.input_entry.take() else {
+            return;
+        };
+        if self.append_target == Some(id) {
+            self.append_target = None;
+        }
+        let Some(removed) = self.store.remove(id) else {
+            return;
+        };
+        let number = removed.metadata().number.0;
+        if self.next_number == number.checked_add(1) {
+            self.next_number = Some(number);
         }
     }
 
@@ -466,7 +497,7 @@ mod tests {
         let mut history = History::new();
         history.set_limit(100);
         for line in lines {
-            history.enter(line).unwrap();
+            history.enter(line, false).unwrap();
         }
         history
     }
@@ -499,24 +530,49 @@ mod tests {
         let mut history = history(&[b"one\n", b"two\n", b"three\n"]);
         history.set_limit(1);
         assert_eq!(history.len(), 3);
-        assert_eq!(history.enter(b"four\n").unwrap(), 4);
+        assert_eq!(history.enter(b"four\n", false).unwrap(), 4);
         assert_eq!(history.len(), 1);
         assert_eq!(history.newest().unwrap().line, BString::from("four\n"));
         history.set_limit(0);
-        assert_eq!(history.enter(b"five\n").unwrap(), 5);
+        assert_eq!(history.enter(b"five\n", false).unwrap(), 5);
         assert!(history.is_empty());
         history.set_limit(1);
-        assert_eq!(history.enter(b"six\n").unwrap(), 6);
+        assert_eq!(history.enter(b"six\n", false).unwrap(), 6);
     }
 
     #[test]
     fn append_targets_entered_entry() {
         let mut history = history(&[b"one\n"]);
-        history.enter(b"if true\n").unwrap();
+        history.enter(b"if true\n", false).unwrap();
         assert!(history.append(b"then echo yes\n"));
         assert_eq!(
             history.newest().unwrap().line,
             BString::from("if true\nthen echo yes\n")
+        );
+    }
+
+    // [spec:posix:req:builtin.fc.edit-and-reexecute/test]
+    #[test]
+    fn discard_input_keeps_replayed_entry() {
+        let mut history = history(&[b"original\n"]);
+        assert_eq!(history.enter(b"fc -s\n", true).unwrap(), 2);
+
+        history.discard_input_entry();
+        assert_eq!(history.enter(b"original\n", false).unwrap(), 2);
+        history.discard_input_entry();
+
+        assert_eq!(
+            history.range(1, 2),
+            vec![
+                HistoryEvent {
+                    number: 1,
+                    line: BString::from("original\n"),
+                },
+                HistoryEvent {
+                    number: 2,
+                    line: BString::from("original\n"),
+                },
+            ]
         );
     }
 
