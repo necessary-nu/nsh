@@ -750,6 +750,36 @@ CASES: tuple[Case, ...] = (
         stdout_contains=("histfile=used",),
         timeout=8.0,
     ),
+    # [spec:posix:req:builtin.fc.env-histfile/test]
+    Case(
+        id="fc-histfile-reloads-commands",
+        rules=("builtin.fc.env-histfile",),
+        requires=("UP",),
+        environment={"HISTFILE": "{ROOT}/histfile"},
+        script=(
+            "printf ': PERSISTED\\nexit\\n' | sh -i >/dev/null 2>&1\n"
+            "printf 'fc -l -n 1 1\\nexit\\n' | sh -i 2>/dev/null\n"
+        ),
+        stdout=": PERSISTED\n",
+        timeout=8.0,
+    ),
+    # [spec:posix:req:builtin.fc.env-histfile/test]
+    Case(
+        id="fc-histfile-falls-back-in-memory",
+        rules=("builtin.fc.env-histfile",),
+        mode="interactive",
+        requires=("UP",),
+        environment={"HISTFILE": "{ROOT}/missing/history"},
+        script=(
+            ": ALPHA\n"
+            "printf 'fallback=%s\\n' "
+            "\"$(fc -l -n 1 1 | tr -d '\\t' | tr -d '\\n')\"\n"
+            "exit 0\n"
+        ),
+        stdout=None,
+        status="any",
+        stdout_contains=("fallback=: ALPHA",),
+    ),
     # [spec:posix:req:builtin.fc.opt-n/test]
     Case(
         id="fc-opt-n",

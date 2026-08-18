@@ -3429,4 +3429,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.fc.edit-and-reexecute}
     )}
+    {id fix-builtin-fc-env-histfile, covered_rules (
+        builtin.fc.env-histfile
+    ), covered_claims (
+        {impl_name shell, rule builtin.fc.env-histfile}
+    )}
 )

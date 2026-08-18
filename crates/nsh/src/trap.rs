@@ -692,6 +692,7 @@ pub fn exitshell(sh: &mut crate::context::Shell) -> crate::status::ExitStatus {
         }
     }
     /* out: */
+    crate::histedit::save_history(sh);
     crate::init::exitreset(sh, by_exitcmd);
     crate::init::postexitreset(sh);
     /*

@@ -240,6 +240,22 @@ impl History {
         }
     }
 
+    /// Serialize retained entries in execution order for `HISTFILE`.
+    // [spec:posix:req:builtin.fc.env-histfile]
+    pub fn file_contents(&self) -> Vec<u8> {
+        let mut entries: Vec<_> = self.store.iter().collect();
+        entries.reverse();
+        let mut contents = Vec::new();
+        for entry in entries {
+            let bytes = &entry.metadata().bytes;
+            contents.extend_from_slice(bytes);
+            if !bytes.ends_with(b"\n") {
+                contents.push(b'\n');
+            }
+        }
+        contents
+    }
+
     fn cursor_index(&self, cursor: &mut HistoryCursor) -> Option<usize> {
         let current = cursor.current()?;
         let position = self.store.iter().position(|entry| entry.id() == current);
@@ -574,6 +590,61 @@ mod tests {
                 },
             ]
         );
+    }
+
+    // [spec:posix:req:builtin.fc.env-histfile/test]
+    #[test]
+    fn history_file_preserves_execution_order() {
+        let history = history(&[b"first\n", b"second", b"third\nline\n"]);
+
+        assert_eq!(
+            history.file_contents(),
+            b"first\nsecond\nthird\nline\n"
+        );
+    }
+
+    // [spec:posix:req:builtin.fc.env-histfile/test]
+    #[test]
+    fn history_file_contains_only_retained_entries() {
+        let mut history = history(&[b"first\n", b"second\n"]);
+        history.set_limit(1);
+        history.enter(b"third\n", false).unwrap();
+
+        assert_eq!(history.len(), 1);
+        assert_eq!(history.file_contents(), b"third\n");
+    }
+
+    // [spec:posix:req:builtin.fc.env-histfile/test]
+    #[test]
+    fn empty_history_file_is_empty() {
+        assert!(History::new().file_contents().is_empty());
+    }
+
+    // [spec:posix:req:builtin.fc.env-histfile/test]
+    #[test]
+    fn history_file_preserves_raw_bytes() {
+        let history = history(&[b"echo \xff"]);
+
+        assert_eq!(history.file_contents(), b"echo \xff\n");
+    }
+
+    // [spec:posix:req:builtin.fc.env-histfile/test]
+    #[test]
+    fn history_file_includes_continuations() {
+        let mut history = history(&[b"if true\n"]);
+        assert!(history.append(b"then echo yes\nfi\n"));
+
+        assert_eq!(history.file_contents(), b"if true\nthen echo yes\nfi\n");
+    }
+
+    // [spec:posix:req:builtin.fc.env-histfile/test]
+    #[test]
+    fn history_file_excludes_discarded_input() {
+        let mut history = history(&[b"retained\n"]);
+        history.enter(b"fc -l\n", true).unwrap();
+        history.discard_input_entry();
+
+        assert_eq!(history.file_contents(), b"retained\n");
     }
 
     #[test]

@@ -1897,6 +1897,35 @@ children (
                             shell ([spec:posix:req:builtin.fc.env-histfile])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T03:36:37.926543745Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T03:42:18.541477203Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Resolve a non-empty HISTFILE once when interactive history initializes, retain it as a safe owned File duplicated above the shell's 0-9 descriptor namespace, load retained entries oldest-first under HISTSIZE, and rewrite retained history after each input update and at shell exit. If open, read, seek, write, or create cannot establish a usable file, keep in-memory history working without failing the shell. Verification: all 3 direct HISTFILE cases and the existing edit-history-list HISTFILE case pass; cargo test -p nsh passes 268 tests with one doctest ignored."
+                            }
+
+                            {
+                                at 2026-08-18T03:43:12.783821788Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Added focused serialization tests for an empty history and HISTSIZE-trimmed retained entries to preserve the crate test footprint. Final cargo test -p nsh result: 270 passed with one doctest ignored."
+                            }
+
+                            {
+                                at 2026-08-18T03:49:19.274078097Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Final verification after direct HistEditState coverage and retained-history edge cases: cargo test -p nsh passes 274 tests with one doctest ignored; the direct source-directory test footprint improves from the 0.135 pre-image rather than regressing."
+                            }
+                        )
                     }
 
                     {
