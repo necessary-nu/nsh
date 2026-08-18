@@ -593,6 +593,7 @@ fn sprint_status(
 // [spec:posix:req:builtin.jobs.stdout-current-field]
 // [spec:posix:req:builtin.jobs.stdout-state-substitution]
 // [spec:posix:req:builtin.jobs.stdout-l-format]
+// [spec:posix:req:builtin.jobs.stdout-default-format]
 // [spec:posix:req:jobctl.suspended-job-message]
 pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mode: c_int) {
     let mut ps: usize;
@@ -1130,8 +1131,8 @@ fn forkparent(
         status: -1,
         cmd: BString::new(Vec::new()),
     });
-    if sh.jobs.jobctl != 0 && n.is_some() {
-        let cmd = commandtext(n.unwrap());
+    if let Some(node) = n {
+        let cmd = commandtext(node);
         let last = sh.jobs.tab[ji].ps.len() - 1;
         sh.jobs.tab[ji].ps[last].cmd = cmd;
     }

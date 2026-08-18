@@ -2110,6 +2110,21 @@ children (
                             shell ([spec:posix:req:builtin.jobs.stdout-default-format])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:05:55.228926509Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:07:50.452717012Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Retain command text for every forked job with an AST node, independently of monitor-mode process-group control. showjob's existing default renderer can then always emit the required command field. Verification: both direct format cases pass; 8 of 9 neighboring jobs cases pass with only the separately tracked stopped-state spelling remaining; cargo test -p nsh passes 276 tests with one doctest ignored."
+                            }
+                        )
                     }
 
                     {
