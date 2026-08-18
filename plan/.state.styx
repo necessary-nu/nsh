@@ -4872,4 +4872,9 @@ impl_evidence (
         {id shell-locale.operation-binding, version 0}
         {id shell-locale.selection, version 0}
     )}
+    {id enable-default-history-navigation, covered_rules (
+        interactive.default-history-navigation
+    ), covered_claims (
+        {impl_name nsh-library, rule interactive.default-history-navigation}
+    )}
 )

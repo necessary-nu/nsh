@@ -13,3 +13,6 @@ path = "src/main.rs"
 [dependencies]
 nsh = { path = "../nsh" }
 nsh-platform = { path = "../nsh-platform" }
+
+[dev-dependencies]
+rustix = { version = "1", features = ["pty"] }

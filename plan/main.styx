@@ -1121,6 +1121,14 @@ children (
                             nsh-library ([spec:nsh:req:interactive.default-history-navigation])
                         }
                         deps (spec-default-history-navigation)
+                        log (
+                            {
+                                at 2026-08-18T12:03:10.455801243Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+                        )
                     }
                 )
             }

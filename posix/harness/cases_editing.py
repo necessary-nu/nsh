@@ -184,7 +184,9 @@ CASES: tuple[Case, ...] = (
     Case(
         id="edit-stty-erase-character",
         rules=("edit.stty-characters",),
-        script="stty erase '" + CAN + "'\n" + VI + "r abcQ" + CAN + "; exit\n",
+        # Printable control-character notation reaches stty whether the
+        # startup bytes first pass through the tty line discipline or nshedit.
+        script="stty erase '^X'\n" + VI + "r abcQ" + CAN + "; exit\n",
         stdout=None,
         stdout_contains=("R:abc\n",),
         mode="interactive",

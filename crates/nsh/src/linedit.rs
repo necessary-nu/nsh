@@ -864,6 +864,24 @@ fn default_terminal_profile() -> TerminalProfile {
         .unwrap_or_else(TerminalProfile::ansi)
 }
 
+/// Whether the terminal named by the environment can safely host the
+/// baseline editor. Explicit `vi` or `emacs` selection may still request the
+/// editor on a less capable terminal; this gate governs automatic activation.
+pub(crate) fn declared_terminal_supports_line_editing() -> bool {
+    std::env::var("TERM")
+        .ok()
+        .and_then(|name| nshterm::TermInfo::from_name(&name).ok())
+        .is_some_and(|entry| terminfo_supports_line_editing(&entry))
+}
+
+fn terminfo_supports_line_editing(entry: &nshterm::TermInfo) -> bool {
+    ["sc", "rc", "cuu1", "cud1"].into_iter().all(|name| {
+        entry
+            .string(nshterm::CapabilityName::Terminfo(name))
+            .is_some_and(|sequence| !sequence.is_empty())
+    })
+}
+
 // [spec:posix:sem:edit.append-last-bigword]
 fn install_shell_bindings<T: TerminalControl>(
     editor: &mut Editor<T>,
@@ -1431,6 +1449,24 @@ fn shell_editor(sh: &mut crate::context::Shell) -> OsString {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn baseline_requires_redisplay_capabilities() {
+        let capable = nshterm::TermInfoBuilder::default()
+            .named("capable")
+            .string("sc", b"\x1b7".to_vec())
+            .string("rc", b"\x1b8".to_vec())
+            .string("cuu1", b"\x1b[A".to_vec())
+            .string("cud1", b"\x1b[B".to_vec())
+            .build();
+        let dumb = nshterm::TermInfoBuilder::default()
+            .named("dumb")
+            .string("cud1", b"\n".to_vec())
+            .build();
+
+        assert!(terminfo_supports_line_editing(&capable));
+        assert!(!terminfo_supports_line_editing(&dumb));
+    }
 
     #[test]
     fn prompt_literals_do_not_contribute_columns() {

@@ -174,6 +174,7 @@ fn Eflag(sh: &crate::context::Shell) -> c_char {
 // [spec:posix:req:builtin.fc.env-histfile-sharing-and-deletion]
 // [spec:posix:req:builtin.fc.env-histfile]
 // [spec:posix:req:edit.history-list]
+// [spec:nsh:req:interactive.default-history-navigation]
 pub fn histedit(sh: &mut crate::context::Shell) {
     if iflag(sh) != 0 {
         if !history_active(sh) {
@@ -223,7 +224,10 @@ pub fn histedit(sh: &mut crate::context::Shell) {
         let stderr = sh.fds.get(2).ok().flatten();
         let mode = if Vflag(sh) != 0 {
             Some(EditingMode::Vi)
-        } else if Eflag(sh) != 0 {
+        } else if Eflag(sh) != 0 || crate::linedit::declared_terminal_supports_line_editing() {
+            // Every native editor needs a command family. Emacs is nshedit's
+            // insertion-oriented baseline; selecting it here does not mutate
+            // the shell's `emacs` option.
             Some(EditingMode::Emacs)
         } else {
             None
@@ -235,17 +239,14 @@ pub fn histedit(sh: &mut crate::context::Shell) {
         {
             crate::error::INTOFF(sh);
             let editor = match (stdin.as_ref(), stderr.as_ref()) {
-                (Some(input), Some(output)) => {
-                    LineEditor::new(&sh.locale, input, output, mode)
-                }
+                (Some(input), Some(output)) => LineEditor::new(&sh.locale, input, output, mode),
                 _ => Err(std::io::Error::from(std::io::ErrorKind::NotConnected).into()),
             };
             match editor {
                 Ok(editor) => sh.histedit.editor = Some(editor),
                 Err(_) => {
                     sh.histedit.editor = None;
-                    let _ = sh.io.stderr()
-                        .write_all(b"sh: can't initialize editing\n");
+                    let _ = sh.io.stderr().write_all(b"sh: can't initialize editing\n");
                 }
             }
             crate::error::INTON(sh);
@@ -347,6 +348,18 @@ pub fn setterm(sh: &mut crate::context::Shell, term: &BStr) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn noninteractive_ignores_editor_request() {
+        let streams = crate::streams::Streams::capture().unwrap();
+        let mut shell = crate::context::Shell::new(streams);
+        shell.options.set_flag(crate::options::Eflag, 1);
+
+        histedit(&mut shell);
+
+        assert!(!editing_active(&shell));
+        assert!(!history_active(&shell));
+    }
 
     // [spec:posix:req:builtin.fc.env-histfile/test]
     #[test]

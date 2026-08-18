@@ -85,6 +85,7 @@ version = "0.5.13"
 dependencies = [
  "nsh",
  "nsh-platform",
+ "rustix",
 ]
 
 [[package]]
