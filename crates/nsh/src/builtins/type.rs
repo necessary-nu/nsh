@@ -12,7 +12,9 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::c_int;
+use std::ffi::OsStr;
 use std::io::Write;
+use std::os::unix::ffi::OsStrExt;
 
 use crate::builtins::BUILTIN_SPECIAL;
 use crate::eval::Flow;
@@ -116,7 +118,17 @@ pub(crate) fn describe_command(
                 let mut j = entry.path_index();
                 let resolved: BString;
                 let path_bytes: &BStr = if j == -1 {
-                    command
+                    // [spec:posix:req:builtin.command.opt-v]
+                    if verbose == 0 && command.contains(&b'/') {
+                        resolved = std::path::absolute(std::path::Path::new(
+                            OsStr::from_bytes(command),
+                        ))
+                        .map(|path| BString::from(path.as_os_str().as_bytes()))
+                        .unwrap_or_else(|_| command.to_owned());
+                        resolved.as_slice().as_bstr()
+                    } else {
+                        command
+                    }
                 } else {
                     let mut cursor = PathCursor::new(path);
                     let mut candidate = None;

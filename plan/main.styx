@@ -1770,6 +1770,21 @@ children (
                             shell ([spec:posix:req:builtin.command.opt-v])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T03:13:44.002898715Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T03:14:42.327873784Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "For command -v only, a resolved command name containing slash is now rendered through std::path::absolute, preserving non-UTF-8 bytes while removing relative dot components without resolving symlinks. type and command -V retain their descriptive spelling. Focused POSIX cases are 3/3 and cargo test -p nsh is 262/0."
+                            }
+                        )
                     }
 
                     {

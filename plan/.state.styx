@@ -3404,4 +3404,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.cd.step9-path-max-relative}
     )}
+    {id fix-builtin-command-opt-v, covered_rules (
+        builtin.command.opt-v
+    ), covered_claims (
+        {impl_name shell, rule builtin.command.opt-v}
+    )}
 )
