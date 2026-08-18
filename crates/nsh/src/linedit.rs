@@ -866,6 +866,7 @@ fn install_shell_bindings(
                 CommandName::new(FIRST_NONBLANK).expect("static shell command name is valid"),
             ),
         ),
+        ("@", Binding::Effect(EffectCommand::ExpandAlias)),
         (":", Binding::Effect(EffectCommand::ReadEditorCommand)),
         (
             "J",
@@ -1029,6 +1030,7 @@ fn install_terminal_character(
     Ok(())
 }
 
+// [spec:posix:req:edit.command-alias-insert]
 fn shell_alias(sh: &mut crate::context::Shell, name: &Text, enter_insert: bool) -> Result<AliasResponse, HostFailure> {
     let name = text_to_bytes(name).map_err(host_failure)?;
     if name.contains(&0) {

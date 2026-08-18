@@ -2693,6 +2693,21 @@ children (
                             shell ([spec:posix:req:edit.command-alias-insert])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:59:59.454254049Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:00:41.408846633Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "nsh already adapts `@letter` to shell aliases by looking up `_letter`, prepending vi insert mode, and feeding the expansion back through nshedit's editor-command stream; a missing alias returns Missing and has no effect. Explicitly install the `@` binding so the shell owns the POSIX command instead of relying on nshedit's default keymap, and attach the rule to the shell alias boundary. Verification: the PTY case (including embedded editing commands) and all 15 linedit tests pass; git diff --check passes."
+                            }
+                        )
                     }
 
                     {

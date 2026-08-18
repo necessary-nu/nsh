@@ -3594,4 +3594,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule edit.append-last-bigword}
     )}
+    {id fix-edit-command-alias-insert, covered_rules (
+        edit.command-alias-insert
+    ), covered_claims (
+        {impl_name shell, rule edit.command-alias-insert}
+    )}
 )
