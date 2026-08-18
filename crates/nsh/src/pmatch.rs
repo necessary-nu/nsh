@@ -31,7 +31,12 @@ use crate::expand::{
 // character is tested, so a non-matching `[:alpha:]` is still consumed
 // rather than re-read as ordinary bracket members.
 #[inline(never)]
-fn ccmatch_bytes(p: &[u8], mbc: &[u8], ml: usize) -> (bool, Option<usize>) {
+fn ccmatch_bytes(
+    locale: &nsh_platform::Locale,
+    p: &[u8],
+    mbc: &[u8],
+    ml: usize,
+) -> (bool, Option<usize>) {
     if byte_at(p, 0) != C_COLON {
         return (false, None);
     }
@@ -46,7 +51,7 @@ fn ccmatch_bytes(p: &[u8], mbc: &[u8], ml: usize) -> (bool, Option<usize>) {
      * pattern itself.  Copying the name costs an allocation on a path that
      * runs once per `[:class:]`, and buys a pattern that `pmatch` never has
      * to be able to write to, which is what lets it take `&[u8]`. */
-    let Some(matches) = nsh_platform::wide_class_matches(&body[..close], mbc, ml) else {
+    let Some(matches) = locale.wide_class_matches(&body[..close], mbc, ml) else {
         return (false, None);
     };
 
@@ -100,13 +105,17 @@ fn single_byte_member(c: c_char, sc: c_char, mb: c_uint) -> bool {
 //
 // Both inputs are borrowed slices; the matcher has no pointer adapter or
 // alternate libc implementation.
-pub(crate) fn pmatch_slices(pattern: &[u8], string: &[u8]) -> c_int {
-    pmatch_bytes(pattern, string) as c_int
+pub(crate) fn pmatch_slices(
+    locale: &nsh_platform::Locale,
+    pattern: &[u8],
+    string: &[u8],
+) -> c_int {
+    pmatch_bytes(locale, pattern, string) as c_int
 }
 
 // The matcher.  `pi`/`qi` are the C's `p`/`q`; every `p++` is `pi += 1` and
 // the recursion takes the two tails.
-fn pmatch_bytes(pattern: &[u8], string: &[u8]) -> bool {
+fn pmatch_bytes(locale: &nsh_platform::Locale, pattern: &[u8], string: &[u8]) -> bool {
     let mut pi: usize = 0;
     let mut qi: usize = 0;
     let mut mb: c_uint;
@@ -170,7 +179,7 @@ fn pmatch_bytes(pattern: &[u8], string: &[u8]) -> bool {
                             }
                             qi += k;
                         }
-                        if pmatch_bytes(slice_from(pattern, pi), slice_from(string, qi)) {
+                        if pmatch_bytes(locale, slice_from(pattern, pi), slice_from(string, qi)) {
                             return true;
                         }
                         if byte_at(string, qi) == C_NUL {
@@ -222,8 +231,12 @@ fn pmatch_bytes(pattern: &[u8], string: &[u8]) -> bool {
                             }
                             if c == C_LBRACKET {
                                 let ml = if mb > 1 { mb - 2 } else { mb } as usize;
-                                let (hit, r) =
-                                    ccmatch_bytes(slice_from(pattern, pi), slice_from(string, qi), ml);
+                                let (hit, r) = ccmatch_bytes(
+                                    locale,
+                                    slice_from(pattern, pi),
+                                    slice_from(string, qi),
+                                    ml,
+                                );
                                 found |= hit as c_int;
                                 if let Some(r) = r {
                                     pi += r;

@@ -540,9 +540,9 @@ impl crate::context::Shell {
 
 // [spec:dash:def:error.errmsg-fn]
 // [spec:dash:sem:error.errmsg-fn]
-pub fn errmsg(e: c_int, action: c_int) -> bstr::BString {
+pub fn errmsg(locale: &nsh_platform::Locale, e: c_int, action: c_int) -> bstr::BString {
     if !nsh_platform::is_path_not_found_error(e) {
-        return bstr::BString::from(nsh_platform::os_error_message_code(e));
+        return bstr::BString::from(locale.error_message_code(e));
     }
 
     if action & E_OPEN != 0 {

@@ -1078,13 +1078,18 @@ fn exptilde(
             let Some(home) = crate::var::lookup_bytes(sh, BStr::new(b"HOME")) else {
                 return startp;
             };
-            memtodest(&home, flag | EXP_QUOTED, expb(state));
+            memtodest(&sh.locale, &home, flag | EXP_QUOTED, expb(state));
         } else {
             let Some(home) = nsh_platform::named_user_home(namebuf) else {
                 /* lose: */
                 return startp;
             };
-            memtodest(home.as_bytes(), flag | EXP_QUOTED, expb(state));
+            memtodest(
+                &sh.locale,
+                home.as_bytes(),
+                flag | EXP_QUOTED,
+                expb(state),
+            );
         }
     }
     /* out: */
@@ -1169,7 +1174,7 @@ fn expari(
          * gone and the value travels. */
         result = crate::arith_yacc::arith(sh, arithmetic.as_bstr())?;
 
-        len = cvtnum(result, flag, expb(state)) as c_int;
+        len = cvtnum(&sh.locale, result, flag, expb(state)) as c_int;
 
         if (flag & EXP_QUOTED) == 0 {
             recordregion(state, begoff, begoff + len, 0);
@@ -1251,7 +1256,7 @@ fn expbackq(
             if i <= 0 {
                 break;
             }
-            memtodest(&buf[..i as usize], flag, expb(state));
+            memtodest(&sh.locale, &buf[..i as usize], flag, expb(state));
         }
 
         if in_.fd.take().is_some() {
@@ -1323,11 +1328,11 @@ struct Scan {
     zero: c_int,
 }
 
-type ScanFn = fn(&[u8], &Scan) -> Option<usize>;
+type ScanFn = fn(&nsh_platform::Locale, &[u8], &Scan) -> Option<usize>;
 
 // [spec:dash:def:expand.scanleft-fn]
 // [spec:dash:sem:expand.scanleft-fn]
-fn scanleft(b: &[u8], a: &Scan) -> Option<usize> {
+fn scanleft(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize> {
     let mut loc: usize = a.startp;
     let mut loc2: usize = a.rmesc;
     loop {
@@ -1343,7 +1348,7 @@ fn scanleft(b: &[u8], a: &Scan) -> Option<usize> {
         } else {
             slice_from(b, s)
         };
-        if pmatch_slices(slice_from(b, a.pat), subject) != 0 {
+        if pmatch_slices(locale, slice_from(b, a.pat), subject) != 0 {
             return Some(if a.quotes != 0 { loc } else { loc2 });
         }
 
@@ -1361,7 +1366,7 @@ fn scanleft(b: &[u8], a: &Scan) -> Option<usize> {
 
 // [spec:dash:def:expand.scanright-fn]
 // [spec:dash:sem:expand.scanright-fn]
-fn scanright(b: &[u8], a: &Scan) -> Option<usize> {
+fn scanright(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize> {
     let mut esc: usize = 0;
     /* Signed, because the C's `loc--` walks off the bottom of the value on
      * purpose and `if (loc < startp) break` is how it notices.  `byte_at_i`
@@ -1387,7 +1392,7 @@ fn scanright(b: &[u8], a: &Scan) -> Option<usize> {
             } else {
                 slice_from(b, s.max(0) as usize)
             };
-            if pmatch_slices(slice_from(b, a.pat), subject) != 0 {
+            if pmatch_slices(locale, slice_from(b, a.pat), subject) != 0 {
                 return Some(if a.quotes != 0 { loc } else { loc2 } as usize);
             }
             loc -= 1;
@@ -1542,6 +1547,7 @@ fn subevalvar(
 
         endp = strloc as usize - 1;
         let found = scan(
+            &sh.locale,
             expb(state),
             &Scan {
                 startp,
@@ -1718,6 +1724,7 @@ fn evalvar(
                 return Ok(p);
             }
             cvtnum(
+                &sh.locale,
                 (if varlen > 0 { varlen } else { 0 }) as i64,
                 flag,
                 expb(state),
@@ -1810,7 +1817,13 @@ pub struct mbpair {
 // state is all-zero by definition — the C writes `mbstate_t mbs = {}` — so
 // `zeroed` produces a valid `mbstate_t` rather than an uninitialised one.
 // Two operations move inside the block rather than disappearing.
-fn mbtodest(src: &[u8], at: usize, dst: &mut BString, syntax: SyntaxRef) -> mbpair {
+fn mbtodest(
+    locale: &nsh_platform::Locale,
+    src: &[u8],
+    at: usize,
+    dst: &mut BString,
+    syntax: SyntaxRef,
+) -> mbpair {
     let mbp: mbpair;
     /* The C's `q0`: where this call started writing. A length, because
      * the cursor is one. */
@@ -1819,7 +1832,7 @@ fn mbtodest(src: &[u8], at: usize, dst: &mut BString, syntax: SyntaxRef) -> mbpa
 
     /* `p = p - 1` */
     let p: &[u8] = &src[at - 1..];
-    ml = nsh_platform::locale_multibyte_len(p).unwrap_or(usize::MAX);
+    ml = locale.multibyte_len(p).unwrap_or(usize::MAX);
     'out: {
         if ml == (0 as usize).wrapping_sub(2) || ml == (0 as usize).wrapping_sub(1) || ml < 2 {
             chtodest(p[0] as c_char as c_int, syntax, dst);
@@ -1897,7 +1910,12 @@ fn mbtodest(src: &[u8], at: usize, dst: &mut BString, syntax: SyntaxRef) -> mbpa
 // question at once: `p` cannot run past `len`, the eight-byte fast path
 // reads eight bytes that exist, and `mbtodest`'s `p - 1` is an index into
 // something with a start.
-fn memtodest(src: &[u8], flags: c_int, dst: &mut BString) -> usize {
+fn memtodest(
+    locale: &nsh_platform::Locale,
+    src: &[u8],
+    flags: c_int,
+    dst: &mut BString,
+) -> usize {
     let syntax: SyntaxRef;
     let mut count: usize = 0;
     let expq: c_int;
@@ -1974,7 +1992,7 @@ fn memtodest(src: &[u8], flags: c_int, dst: &mut BString) -> usize {
                 /* `mbtodest(p, ...)` is called with `p` already past the
                  * byte it is about to decode, and starts by stepping
                  * back over it; `i` is that same position. */
-                let mbp: mbpair = mbtodest(src, i, dst, syntax);
+                let mbp: mbpair = mbtodest(locale, src, i, dst, syntax);
                 let mlm: c_uint;
 
                 /* `q += mbp.ql` — the append did it. */
@@ -2000,8 +2018,13 @@ fn memtodest(src: &[u8], flags: c_int, dst: &mut BString) -> usize {
 // The C string entry became a counted byte slice. Every caller now already
 // knows the value's bounds, so the old `strlen` scan and its raw pointer are
 // both redundant.
-fn strtodest(value: &[u8], flags: c_int, dst: &mut BString) -> usize {
-    memtodest(value, flags, dst)
+fn strtodest(
+    locale: &nsh_platform::Locale,
+    value: &[u8],
+    flags: c_int,
+    dst: &mut BString,
+) -> usize {
+    memtodest(locale, value, flags, dst)
 }
 
 /*
@@ -2154,7 +2177,7 @@ fn varvalue(
                     }
                 }
                 /* numvar: */
-                len = cvtnum(num as i64, flags as c_int, expb(state)) as isize;
+                len = cvtnum(&sh.locale, num as i64, flags as c_int, expb(state)) as isize;
                 break 'sw;
             }
             /* param: */
@@ -2178,6 +2201,7 @@ fn varvalue(
                         seps.len()
                     );
                     len += memtodest(
+                        &sh.locale,
                         &seps[..seplen],
                         (flags as c_int) | EXP_KEEPNUL,
                         expb(state),
@@ -2185,6 +2209,7 @@ fn varvalue(
                 }
 
                 len += strtodest(
+                    &sh.locale,
                     crate::mystring::cstr_prefix(param).as_bytes(),
                     flags as c_int,
                     expb(state),
@@ -2198,6 +2223,7 @@ fn varvalue(
         };
 
         len = strtodest(
+            &sh.locale,
             crate::mystring::cstr_prefix(value).as_bytes(),
             flags as c_int,
             expb(state),
@@ -2264,7 +2290,7 @@ fn ifsisifs(sh: &Shell, s: &[u8], ml: c_uint, nulonly: c_int) -> c_uint {
                  * as a malformed character does.  The same trade
                  * `ccmatch_bytes` records. */
                 let n = (ml as usize).min(s.len());
-                let Some(wc2) = nsh_platform::locale_decode_exact(&s[..n], ml as usize) else {
+                let Some(wc2) = sh.locale.decode_exact(&s[..n], ml as usize) else {
                     break 'out;
                 };
                 wc = wc2;
@@ -2282,7 +2308,7 @@ fn ifsisifs(sh: &Shell, s: &[u8], ml: c_uint, nulonly: c_int) -> c_uint {
         }
 
         if isifs {
-            isdefifs = nsh_platform::locale_wide_is_space(if wc != 0 { wc } else { ifs0 });
+            isdefifs = sh.locale.wide_is_space(if wc != 0 { wc } else { ifs0 });
         }
     }
 
@@ -2586,7 +2612,7 @@ pub fn changeifs_bytes(sh: &mut crate::context::Shell, ifs: &BStr) {
     sh.ifs.wcifs = if mb == 0 {
         Vec::new()
     } else {
-        let (first_len, wide) = nsh_platform::locale_wide_chars(&sh.ifs.ncifs[..len]);
+        let (first_len, wide) = sh.locale.wide_chars(&sh.ifs.ncifs[..len]);
         sh.ifs.ifsmb0len = first_len;
         wide
     };
@@ -2670,6 +2696,7 @@ fn expandmeta(
                  * pattern is read-only from here down. */
                 globbuf.clear();
                 expmeta(
+                    &sh.locale,
                     state,
                     &mut globbuf,
                     crate::mystring::cstr_prefix(&pattern),
@@ -2692,7 +2719,7 @@ fn expandmeta(
                      * new end.  Three of those four exist to re-find the
                      * tail of a list the sort reordered; a slice's tail
                      * does not move. */
-                    expsort(&mut expargl(state)[savelastp..]);
+                    expsort(&sh.locale, &mut expargl(state)[savelastp..]);
                     break 'sw;
                 }
             }
@@ -2825,6 +2852,7 @@ fn expmeta_rmescapes(b: &mut BString, name: &[u8]) {
 // [spec:dash:def:expand.expmeta-fn]
 // [spec:dash:sem:expand.expmeta-fn]
 fn expmeta(
+    locale: &nsh_platform::Locale,
     state: &mut ExpandState,
     b: &mut BString,
     name: &[u8],
@@ -3022,7 +3050,7 @@ fn expmeta(
                          * after a possible growth, and an index does not
                          * move. */
                         globenc.clear();
-                        memtodest(dname, EXP_MBCHAR | EXP_KEEPNUL, &mut globenc);
+                        memtodest(locale, dname, EXP_MBCHAR | EXP_KEEPNUL, &mut globenc);
                         debug_assert_eq!(
                             globenc.last(),
                             Some(&0),
@@ -3032,7 +3060,7 @@ fn expmeta(
                     } else {
                         dname
                     };
-                    if crate::pmatch::pmatch_slices(pat, subject) != 0 {
+                    if crate::pmatch::pmatch_slices(locale, pat, subject) != 0 {
                         /* `enddir = stnputs(dname, len, enddir)` — an
                          * append at a cursor below the end, which is
                          * truncate-then-append. */
@@ -3045,7 +3073,7 @@ fn expmeta(
                              * terminator becomes the separator. */
                             let last = b.len() - 1;
                             b[last] = C_SLASH as u8;
-                            expmeta(state, b, &name[endname..], expdir_len + len);
+                            expmeta(locale, state, b, &name[endname..], expdir_len + len);
                             /* `enddir = cp + expdir_len` — the frame's
                              * rewind, said out loud.  The child returns
                              * with the buffer holding *its* prefix, which
@@ -3083,10 +3111,10 @@ fn expmeta(
 
 // [spec:dash:def:expand.expsort-fn]
 // [spec:dash:sem:expand.expsort-fn]
-fn expsort(str: &mut [strlist]) {
+fn expsort(locale: &nsh_platform::Locale, str: &mut [strlist]) {
     /* The C walks the chain to count it and hands the count to `msort`,
      * because a singly-linked list does not know its own length. */
-    msort(str, str.len() as c_int)
+    msort(locale, str, str.len() as c_int)
 }
 
 // [spec:dash:def:expand.msort-fn]
@@ -3103,11 +3131,11 @@ fn expsort(str: &mut [strlist]) {
 ///     stable is stable.  `strcoll` can return 0 for byte-different
 ///     strings under a collating locale, so this is not vacuous.
 ///     `slice::sort_by` is stable.
-fn msort(list: &mut [strlist], len: c_int) {
+fn msort(locale: &nsh_platform::Locale, list: &mut [strlist], len: c_int) {
     if len <= 1 {
         return;
     }
-    list.sort_by(|p, q| nsh_platform::collate(&p.text, &q.text));
+    list.sort_by(|p, q| locale.collate(&p.text, &q.text));
 }
 
 /*
@@ -3370,6 +3398,7 @@ fn casematch_inner(
     /* The C reads the word back as `stackblock()`. */
     rmescapes_buffer(expb(state), RMESCAPE_GLOB);
     result = crate::pmatch::pmatch_slices(
+        &sh.locale,
         crate::mystring::cstr_prefix(expb(state)),
         val,
     );
@@ -3382,9 +3411,14 @@ fn casematch_inner(
 
 // [spec:dash:def:expand.cvtnum-fn]
 // [spec:dash:sem:expand.cvtnum-fn]
-fn cvtnum(num: i64, flags: c_int, dst: &mut BString) -> usize {
+fn cvtnum(
+    locale: &nsh_platform::Locale,
+    num: i64,
+    flags: c_int,
+    dst: &mut BString,
+) -> usize {
     let value = format!("{num}");
-    memtodest(value.as_bytes(), flags, dst)
+    memtodest(locale, value.as_bytes(), flags, dst)
 }
 
 // [spec:dash:def:expand.varunset-fn]

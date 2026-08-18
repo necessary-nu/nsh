@@ -84,13 +84,15 @@ impl BinOp {
 struct Lexer<'a> {
     input: &'a [u8],
     pos: usize,
+    locale: nsh_platform::Locale,
 }
 
 impl<'a> Lexer<'a> {
-    fn new(input: &'a BStr) -> Self {
+    fn new(input: &'a BStr, locale: nsh_platform::Locale) -> Self {
         Self {
             input: input.as_ref(),
             pos: 0,
+            locale,
         }
     }
 
@@ -125,12 +127,12 @@ impl<'a> Lexer<'a> {
         if byte.is_ascii_digit() {
             return self.number();
         }
-        if byte.is_ascii_alphabetic() || byte == b'_' {
+        if self.locale.is_alpha(byte) || byte == b'_' {
             let start = self.pos;
             self.pos += 1;
             while self
                 .peek(0)
-                .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_')
+                .is_some_and(|b| self.locale.is_alphanumeric(b) || b == b'_')
             {
                 self.pos += 1;
             }
@@ -269,7 +271,7 @@ impl<'a, 'sh> Parser<'a, 'sh> {
     // [spec:dash:def:expand.arith-lex-reset-fn]
     // [spec:dash:sem:expand.arith-lex-reset-fn]
     fn new(sh: &'sh mut Shell, input: &'a BStr) -> Self {
-        let mut lexer = Lexer::new(input);
+        let mut lexer = Lexer::new(input, sh.locale.clone());
         let mut tokens = Vec::new();
         loop {
             let token = lexer.next();

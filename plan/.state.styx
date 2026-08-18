@@ -1203,6 +1203,7 @@ assertions (
     {id logical-descriptor-table, kind @complete, author "brendan@necessary.nu", at 2026-08-17T22:09:30.050387716Z}
     {id process-environment-contract, kind @complete, author "brendan@necessary.nu", at 2026-08-17T23:28:19.757024423Z}
     {id locale-sweep, kind @complete, author "brendan@necessary.nu", at 2026-08-18T00:25:43.344831243Z}
+    {id shell-locale-integration, kind @doing, author "brendan@necessary.nu", at 2026-08-18T00:38:26.402049312Z}
 )
 
 impl_evidence (

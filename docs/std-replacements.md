@@ -16,6 +16,14 @@ review, and the identical deletion as its own project costs a plan node, a
 differential sweep and a bisect. Two entries do not attach anywhere, and
 §7 proposes a node for them.
 
+**2026-08-18 locale resolution.** The locale analysis below was the risk
+record that prevented ASCII substitutions; its old process-global limitation
+has since been removed. Each `Shell` now owns an immutable POSIX locale handle,
+all classification, multibyte, collation, error-text and signal-text operations
+take that handle explicitly, and short `uselocale` scopes restore the host
+thread before returning. The locale sweep now runs under `C`, UTF-8, and a
+generated ISO-8859-1 locale, so the single-byte ctype difference is measured.
+
 Every number was measured on `crates/nsh/src` — 27,312 lines across 37
 modules — after the `crates/dash` → `crates/nsh` rename. Commands are
 given so the claims can rot visibly. Behavioural claims were measured
@@ -869,23 +877,16 @@ and a Rust `vec![b"a", b"B", b"c", b"D"].sort()` gives `["B","D","a","c"]`
 change for every user whose `LANG` is not `C`, in the most-used feature
 of the shell. It is not a crash; it is `ls` order.
 
-**What makes this dangerous rather than merely wrong:** whether the
-differential harness catches it depends on the ambient locale.
-`tests/harness/sandboxed.sh:55-70` sets only `TMPDIR` and `PATH` with
-`--setenv` and does not clear the environment, so `LANG` reaches both
-shells. This box has `LANG=en_US.UTF-8`, so a sweep run here *would*
-catch the swap. A sweep run under `LC_ALL=C` — which is what CI usually
-does, and what a careful person sets to make output stable — would not.
-**The oracle's coverage of this replacement is an undeclared property of
-whoever runs it.**
+**The harness risk was real and is now closed.** The original differential
+run inherited its caller's locale, so a C-locale run could not catch this
+swap. `tests/harness/locale-sweep.sh` now makes locale a declared test axis
+and records C, UTF-8 and generated ISO-8859-1 runs separately.
 
-*Resolution:* keep `strcoll`.
-`Vec::sort_by(|a, b| strcoll(a, b))` is correct and much shorter —
+*Resolution:* keep `strcoll` semantics behind the shell's owned Locale.
+`Vec::sort_by(|a, b| locale.collate(a, b))` is correct and much shorter —
 `msort` takes the first half on ties and so is stable, and
 `slice::sort_by` is stable, so that substitution is safe. What is not
-safe is dropping `strcoll`. Separately: pin the locale in
-`sandboxed.sh`, and record which locale, because either choice is a
-decision.
+safe is dropping locale collation.
 
 ### 5.3 `cd -L` is not `fs::canonicalize`, and `updatepwd` is not `Path`
 
@@ -971,16 +972,13 @@ Note the asymmetry that makes this easy to miss: `is_digit`
 (`syntax.rs:115`) is the unsigned-wrap trick and is locale-free, so one
 of the four neighbours genuinely *is* replaceable. Three are not.
 
-*Unresolved on this box.* Demonstrating the divergence needs a
-single-byte locale (ISO-8859-1), where `isalpha(0xE9)` is true; only
-`en_US.utf8` is generated here, and in a UTF-8 locale no single byte
-0x80-0xFF is alphabetic, so the two agree. *Resolved by:*
-`localedef -i en_US -f ISO-8859-1 en_US.ISO-8859-1` then
-`LC_ALL=en_US.ISO-8859-1 dash -c $'\xe9=1; echo $\xe9'`.
+*Measured.* `tests/harness/locale-sweep.sh` generates a single-byte
+ISO-8859-1 locale. There `isalpha(0xE9)` is true, and the raw-0xE9 parser
+cases distinguish locale-aware classification from ASCII classification.
 
-*Resolution regardless:* keep `libc::isalpha`. It costs one `unsafe`
-call; the alternative is a divergence visible only to users whose locale
-is not the developer's.
+*Resolution:* keep `libc::isalpha` semantics inside `nsh-platform::Locale`.
+Core code calls a safe, locale-explicit method; the alternative would be a
+divergence visible only to users whose locale is not the developer's.
 
 ### 5.6 The `printf` builtin's conversions have no `std::fmt` equivalent
 
@@ -1133,45 +1131,30 @@ one crate (`rustix`) at exactly one node (`process-model`).**
 
 ### Against a decision, or against a stated property
 
-* **P9 ("two shells in one process are independent") cannot be made true
-  for the locale.** `var.rs:103-106 changelocale` calls `libc::putenv`
-  and `libc::setlocale(LC_ALL, "")` in response to an assignment to
-  `LC_ALL`, `LC_COLLATE` or `LC_CTYPE` (`var.rs:181-193`). Both are
-  process-global. Because `strcoll` (§5.2), the ctype functions (§5.5)
-  and `mbrtowc` (§5.4) all read that global, one `Shell` setting
-  `LC_COLLATE` changes how another sorts a glob. This is a property of
-  the C library, not of the refactor, and no amount of `move-state` fixes
-  it. It belongs on [dec:nsh:no-ambient-state] as a recorded limit, and
-  P9's check needs an exception clause naming `LC_*` — otherwise the
-  property is stated, believed, and false.
+* **P9's locale exception is resolved.** The old `changelocale` path used
+  `putenv` plus process-global `setlocale`, so the original warning was
+  correct. It has been replaced by one owned locale object per `Shell` and
+  locale-explicit operations behind restoring thread-local selection. Two
+  shells can therefore select different locales without changing each other
+  or the embedding host.
 * **Two more libc globals of the same class.** `libc::strtok` in
   `cd.rs:218,237` (§3 step 3) and `libc::getopt` + `optind = 0` in
   `histedit.rs` (§4.14). Both are process-global parser state inside what
   is becoming a library. Neither is in P1's `static mut` count, because
   the static is in libc.
-* **`libc::putenv` gives libc a pointer into shell-owned storage**
-  (`var.rs:104`; glibc's `putenv` does not copy). `exec.rs:125,171`
-  builds its own `envp` and never reads `environ`, so the only consumer
-  is `setlocale` — meaning the `putenv` can go when the locale question
-  is answered, and not before. `unset LC_ALL` is the case where that
-  pointer is already wrong today: the buffer is freed, `changelocale` is
-  handed the empty string because `VFULL` is not inherited on the unset
-  path, `putenv("")` fails with `EINVAL` for want of an `=`, and the
-  `environ` slot keeps pointing at freed memory that the `setlocale` on
-  the next line reads. dash does the same; `[dec:nsh:owned-data]` records
-  it under the variable table.
+* **The `libc::putenv` dangling-pointer defect is resolved.** The shell no
+  longer writes `environ` at all. Its exported child environment is assembled
+  from owned variable entries, and locale selection reads those same owned
+  entries directly.
 * **`trap.rs:331 onsig` unwinds out of a kernel signal frame** (§4.11).
   Documented at the site (`trap.rs:315-330`), absent from every
   cross-cutting document. It belongs on [dec:nsh:errors-are-values] as an
   additional argument for that step — it is why `panic = "unwind"` is
   pinned in both profiles — and on [dec:nsh:minimal-unsafe] as the one
   `unsafe` that is not a syscall wrapper.
-* **The differential harness does not pin the locale**
-  (`tests/harness/sandboxed.sh:55-70`). Not a contradiction of anything
-  written down, because nothing is written down — which is the point.
-  [dec:nsh:differential-is-the-oracle] says the harness "tests exactly
-  one configuration"; the locale is a second axis of that configuration
-  and it is currently set by whoever types the command.
+* **The locale axis is now explicit in the differential harness.**
+  `tests/harness/locale-sweep.sh` runs the corpus under `C`, UTF-8, and a
+  generated ISO-8859-1 locale and records each configuration separately.
 
 **Nothing here contradicts a decision's substance.**
 [dec:nsh:owned-data]'s deferred consequence — "the syscall surface stays
@@ -1198,12 +1181,10 @@ one deliberate act rather than five incidental ones.
 
 ## 8. What this document is not sure about
 
-1. **The ctype/locale divergence (§5.5) is argued, not measured.** Only
-   `en_US.utf8` is generated on this box and a UTF-8 locale hides the
-   difference. *Resolved by:* generating a single-byte locale and running
-   the two-line probe in §5.5. If the divergence is not real,
-   `is_alpha`/`is_name`/`is_in_name` become `is_ascii_*` and §5.5 leaves
-   the trap list.
+1. **Resolved: the ctype/locale divergence (§5.5) is measured.** The locale
+   sweep generates ISO-8859-1; its raw-0xE9 cases distinguish locale-aware
+   `isalpha`/`isalnum` from ASCII classification and justify keeping the
+   explicit locale operations.
 
 2. **§4.2's "42 lines survive" assumes the printf builtin's
    single-conversion property holds for every arm.** `%b` goes through

@@ -157,7 +157,9 @@ pub fn histedit(sh: &mut crate::context::Shell) {
         {
             crate::error::INTOFF(sh);
             let editor = match (stdin.as_ref(), stderr.as_ref()) {
-                (Some(input), Some(output)) => LineEditor::new(input, output, mode),
+                (Some(input), Some(output)) => {
+                    LineEditor::new(&sh.locale, input, output, mode)
+                }
                 _ => Err(std::io::Error::from(std::io::ErrorKind::NotConnected).into()),
             };
             match editor {
@@ -194,7 +196,10 @@ pub fn sethistsize(sh: &mut crate::context::Shell, hs: &BStr) {
     let histsize = if hs.is_empty() {
         100
     } else {
-        let mut input = hs.iter().copied().skip_while(u8::is_ascii_whitespace);
+        let mut input = hs
+            .iter()
+            .copied()
+            .skip_while(|byte| sh.locale.is_space(*byte));
         let negative = matches!(input.clone().next(), Some(b'-'));
         if matches!(input.clone().next(), Some(b'-' | b'+')) {
             input.next();

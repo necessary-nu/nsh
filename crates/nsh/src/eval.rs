@@ -1193,7 +1193,7 @@ fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> 
                 a,
                 Some(&mut arglist),
                 if pseudovarflag != 0
-                    && crate::parser::isassignment(a.narg().text.as_bstr()) != 0
+                    && crate::parser::isassignment(&sh.locale, a.narg().text.as_bstr()) != 0
                 {
                     EXP_VARTILDE
                 } else {
@@ -1579,7 +1579,7 @@ fn prehash(sh: &mut Shell, n: &Node) -> Result<Flow, Error> {
 
     if n.node_type() == NCMD && !n.ncmd().args.is_empty() {
         let text = n.ncmd().args[0].narg().text.as_bstr();
-        if crate::parser::goodname(text) != 0 {
+        if crate::parser::goodname(&sh.locale, text) != 0 {
             /* Hoisted out of the argument list; see the note in
              * `evalcommand`. */
             let path = crate::var::pathval(sh);

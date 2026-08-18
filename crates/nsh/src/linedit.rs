@@ -89,6 +89,7 @@ type NativeEditor = Editor<OwnedTerminal>;
 struct OwnedTerminal {
     input: File,
     output: File,
+    locale: nsh_platform::Locale,
     original: Option<TerminalAttributes>,
     editing: Option<TerminalAttributes>,
     quoted: Option<TerminalAttributes>,
@@ -96,10 +97,11 @@ struct OwnedTerminal {
 }
 
 impl OwnedTerminal {
-    fn new(input: File, output: File) -> Self {
+    fn new(input: File, output: File, locale: nsh_platform::Locale) -> Self {
         Self {
             input,
             output,
+            locale,
             original: None,
             editing: None,
             quoted: None,
@@ -134,7 +136,12 @@ impl TerminalControl for OwnedTerminal {
             ));
         }
         let original = nshedit_plat::terminal::read_attributes(self.input.as_fd())
-            .map_err(|error| io::Error::new(io::ErrorKind::NotConnected, format!("editor input: {error}")))?;
+            .map_err(|error| {
+                io::Error::new(
+                    io::ErrorKind::NotConnected,
+                    format!("editor input: {}", self.locale.error_message(&error)),
+                )
+            })?;
         let editing = original.for_editing();
         let quoted = editing.for_quoted_input();
         self.original = Some(original);
@@ -253,6 +260,7 @@ impl LineEditor {
     /// Duplicate the shell-owned descriptors and activate a native session.
     ///
     pub fn new(
+        locale: &nsh_platform::Locale,
         input_fd: impl AsFd,
         output_fd: impl AsFd,
         mode: EditingMode,
@@ -260,7 +268,11 @@ impl LineEditor {
         let input = nsh_platform::duplicate_file(&input_fd)?;
         let output = nsh_platform::duplicate_file(&output_fd)?;
         let terminal_attributes = nshedit_plat::terminal::read_attributes(input.as_fd()).ok();
-        let terminal = OwnedTerminal::new(input.try_clone()?, output.try_clone()?);
+        let terminal = OwnedTerminal::new(
+            input.try_clone()?,
+            output.try_clone()?,
+            locale.clone(),
+        );
         let config = EditorConfig::default()
             .with_editing_mode(mode)
             .with_signal_policy(SignalPolicy::Ignore);
@@ -372,7 +384,7 @@ impl LineEditor {
                     driver.resume_resize(editor, &pending, response)?
                 }
                 ReadStep::Read(pending) => {
-                    let response = self.read_effect(*pending.request());
+                    let response = self.read_effect(&sh.locale, *pending.request());
                     let (editor, driver) = self.editor_and_driver();
                     driver.resume_read(editor, &pending, response)?
                 }
@@ -419,7 +431,7 @@ impl LineEditor {
                                 Direction::Previous => Text::from("\n/"),
                                 Direction::Next => Text::from("\n?"),
                             };
-                            self.read_host_text(&prompt, true).and_then(|pattern| {
+                            self.read_host_text(&sh.locale, &prompt, true).and_then(|pattern| {
                                 if pattern.is_empty() {
                                     self.last_history_pattern
                                         .clone()
@@ -435,12 +447,13 @@ impl LineEditor {
                                 Direction::Previous => Text::from("\nbck: "),
                                 Direction::Next => Text::from("\nfwd: "),
                             };
-                            self.read_host_text(&prompt, true)
+                            self.read_host_text(&sh.locale, &prompt, true)
                         }
                     };
                     let response = match pattern {
                         Ok(pattern) => {
                             let mut selection = history.search_editor(
+                                &sh.locale,
                                 &mut self.history_cursor,
                                 &pattern,
                                 direction,
@@ -542,7 +555,11 @@ impl LineEditor {
         }
     }
 
-    fn read_effect(&mut self, purpose: ReadEffect) -> Result<ReadOutcome, HostFailure> {
+    fn read_effect(
+        &mut self,
+        locale: &nsh_platform::Locale,
+        purpose: ReadEffect,
+    ) -> Result<ReadOutcome, HostFailure> {
         if let ReadEffect::KeySequence { deadline } = purpose {
             match nshedit_plat::terminal::wait_for_input(self.input_borrowed(), deadline.remaining())
             {
@@ -551,7 +568,11 @@ impl LineEditor {
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => {
                     return Err(HostFailure::Interrupted)
                 }
-                Err(error) => return Err(host_failure(error)),
+                Err(error) => {
+                    return Err(HostFailure::Failed(
+                        locale.error_message(&error).into_boxed_str(),
+                    ));
+                }
             }
         }
         let mut byte = [0];
@@ -561,19 +582,24 @@ impl LineEditor {
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {
                 Err(HostFailure::Interrupted)
             }
-            Err(error) => Err(host_failure(error)),
+            Err(error) => Err(HostFailure::Failed(
+                locale.error_message(&error).into_boxed_str(),
+            )),
         }
     }
 
     fn read_host_text(
         &mut self,
+        locale: &nsh_platform::Locale,
         prompt: &Text,
         cancel_on_escape: bool,
     ) -> Result<Text, HostFailure> {
         self.output
             .write_all(&text_to_bytes(prompt).map_err(host_failure)?)
             .and_then(|()| self.output.flush())
-            .map_err(host_failure)?;
+            .map_err(|error| {
+                HostFailure::Failed(locale.error_message(&error).into_boxed_str())
+            })?;
         let mut bytes = Vec::new();
         loop {
             let mut byte = [0];
@@ -583,18 +609,30 @@ impl LineEditor {
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => {
                     return Err(HostFailure::Interrupted);
                 }
-                Err(error) => return Err(host_failure(error)),
+                Err(error) => {
+                    return Err(HostFailure::Failed(
+                        locale.error_message(&error).into_boxed_str(),
+                    ));
+                }
             }
             match byte[0] {
                 b'\r' | b'\n' => {
-                    self.output.write_all(b"\n").map_err(host_failure)?;
+                    self.output
+                        .write_all(b"\n")
+                        .map_err(|error| {
+                            HostFailure::Failed(locale.error_message(&error).into_boxed_str())
+                        })?;
                     return Ok(text_from_bytes(&bytes));
                 }
                 0x1b if cancel_on_escape => return Err(HostFailure::Cancelled),
                 0x07 => return Err(HostFailure::Cancelled),
                 0x08 | 0x7f => {
                     if bytes.pop().is_some() {
-                        self.output.write_all(b"\x08 \x08").map_err(host_failure)?;
+                        self.output
+                            .write_all(b"\x08 \x08")
+                            .map_err(|error| {
+                                HostFailure::Failed(locale.error_message(&error).into_boxed_str())
+                            })?;
                     }
                 }
                 byte if bytes.len() == 4096 => {
@@ -603,7 +641,11 @@ impl LineEditor {
                 }
                 byte => {
                     bytes.push(byte);
-                    self.output.write_all(&[byte]).map_err(host_failure)?;
+                    self.output
+                        .write_all(&[byte])
+                        .map_err(|error| {
+                            HostFailure::Failed(locale.error_message(&error).into_boxed_str())
+                        })?;
                 }
             }
         }
@@ -623,20 +665,31 @@ impl LineEditor {
             .write(true)
             .create_new(true)
             .open(&path)
-            .map_err(host_failure)?;
+            .map_err(|error| {
+                HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
+            })?;
         let result = (|| {
             file.write_all(&text_to_bytes(line).map_err(host_failure)?)
                 .and_then(|()| file.write_all(b"\n"))
                 .and_then(|()| file.flush())
-                .map_err(host_failure)?;
+                .map_err(|error| {
+                    HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
+                })?;
             let editor = shell_editor(sh);
             Command::new(editor)
                 .arg(&path)
                 .status()
-                .map_err(host_failure)?;
-            file.rewind().map_err(host_failure)?;
+                .map_err(|error| {
+                    HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
+                })?;
+            file.rewind()
+                .map_err(|error| {
+                    HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
+                })?;
             let mut edited = Vec::new();
-            file.read_to_end(&mut edited).map_err(host_failure)?;
+            file.read_to_end(&mut edited).map_err(|error| {
+                HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
+            })?;
             if edited.last() == Some(&b'\n') {
                 edited.pop();
             }

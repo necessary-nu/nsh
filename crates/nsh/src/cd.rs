@@ -73,7 +73,7 @@ fn getpwd(sh: &mut crate::context::Shell) -> Option<BString> {
             /* `current_dir` is an OS query on Unix, so this is the errno
              * `getcwd` would have left for the C's `strerror(errno)` path. */
             let mut message = b"getcwd() failed: ".to_vec();
-            message.extend_from_slice(err.to_string().as_bytes());
+            message.extend_from_slice(sh.locale.error_message(&err).as_bytes());
             sh.sh_warnx(&message);
         }
     }

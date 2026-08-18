@@ -37,44 +37,12 @@ pub enum LocaleDecode {
 /// Incremental decoder for one character.
 pub struct LocaleDecoder {
     state: libc::mbstate_t,
-    locale: Option<Locale>,
+    locale: Locale,
 }
 
 impl LocaleDecoder {
-    /// Construct a legacy decoder using the calling thread's current locale.
-    ///
-    /// New shell code obtains an explicitly bound decoder from
-    /// [`Locale::decoder`]. This constructor remains only during the staged
-    /// integration and is removed with the ambient call sites.
-    pub fn new() -> Self {
-        // SAFETY: an all-zero `mbstate_t` is the initial conversion state.
-        Self {
-            state: unsafe { std::mem::zeroed() },
-            locale: None,
-        }
-    }
-
     pub fn push(&mut self, byte: u8) -> LocaleDecode {
-        if let Some(locale) = &self.locale {
-            return locale.decode_byte(&mut self.state, byte);
-        }
-        let mut wide = 0_i32;
-        // SAFETY: the one-byte input and both output records are live for
-        // the call; `mbrtowc` retains no pointers.
-        let result = unsafe { mbrtowc(&mut wide, (&byte as *const u8).cast(), 1, &mut self.state) };
-        if result == usize::MAX - 1 {
-            LocaleDecode::Incomplete
-        } else if result == 1 {
-            LocaleDecode::Complete(wide)
-        } else {
-            LocaleDecode::Invalid
-        }
-    }
-}
-
-impl Default for LocaleDecoder {
-    fn default() -> Self {
-        Self::new()
+        self.locale.decode_byte(&mut self.state, byte)
     }
 }
 
@@ -223,6 +191,7 @@ impl Locale {
     }
 
     // [spec:nsh:req:embedding-safety.process-locale-is-unchanged]
+    // [spec:nsh:req:shell-locale.operation-binding]
     pub(crate) fn with_selected<T>(&self, operation: impl FnOnce() -> T) -> T {
         let guard = self.select();
         let result = operation();
@@ -234,7 +203,7 @@ impl Locale {
     pub fn decoder(&self) -> LocaleDecoder {
         LocaleDecoder {
             state: unsafe { std::mem::zeroed() },
-            locale: Some(self.clone()),
+            locale: self.clone(),
         }
     }
 
@@ -265,6 +234,13 @@ impl Locale {
         self.with_selected(|| {
             // SAFETY: `isalnum` accepts every unsigned-char value.
             unsafe { libc::isalnum(byte.into()) != 0 }
+        })
+    }
+
+    pub fn is_space(&self, byte: u8) -> bool {
+        self.with_selected(|| {
+            // SAFETY: `isspace` accepts every unsigned-char value.
+            unsafe { libc::isspace(byte.into()) != 0 }
         })
     }
 

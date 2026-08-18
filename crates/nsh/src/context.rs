@@ -50,6 +50,7 @@ pub struct Shell {
     /// The immutable POSIX locale object selected by this shell's locale
     /// variables. Raw handles and temporary thread selection stay inside
     /// `nsh-platform`.
+    // [spec:nsh:req:shell-locale.instance-isolation]
     pub(crate) locale: nsh_platform::Locale,
     /// Every alias, by name. `alias.rs` owns the shape; this owns the
     /// value.

@@ -3653,6 +3653,20 @@ children (
                                 kind @decision
                                 text "priority pinned to 0 — operator override: Brendan: make a WBS for that P0 follow-up."
                             }
+
+                            {
+                                at 2026-08-18T00:38:26.402049312Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T00:49:57.764787099Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Bound every core locale-sensitive path to Shell.locale: variable and arithmetic identifiers, parser multibyte decoding, IFS, pattern classes and history matching, glob/test collation, ctype whitespace, OS diagnostics, and signal text. Removed all ambient locale helpers and the unbound LocaleDecoder constructor from nsh-platform. LOCPATH=tests/.build/locales cargo test --workspace passes."
+                            }
                         )
                     }
 

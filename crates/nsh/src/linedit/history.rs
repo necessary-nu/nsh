@@ -285,6 +285,7 @@ impl History {
 
     pub(super) fn search_editor(
         &self,
+        locale: &nsh_platform::Locale,
         cursor: &mut HistoryCursor,
         pattern: &Text,
         direction: Direction,
@@ -297,7 +298,7 @@ impl History {
                 .iter()
                 .enumerate()
                 .skip(current.map_or(0, |index| index + 1))
-                .find(|(_, entry)| history_matches(entry.line(), pattern, matching))
+                .find(|(_, entry)| history_matches(locale, entry.line(), pattern, matching))
                 .map(|(index, _)| index),
             Direction::Next => {
                 let Some(index) = current else {
@@ -307,7 +308,9 @@ impl History {
                     self.store
                         .iter()
                         .nth(*candidate)
-                        .is_some_and(|entry| history_matches(entry.line(), pattern, matching))
+                        .is_some_and(|entry| {
+                            history_matches(locale, entry.line(), pattern, matching)
+                        })
                 })
             }
         };
@@ -393,7 +396,12 @@ fn editor_history_text(line: &Text) -> Text {
     units[..end].iter().copied().collect()
 }
 
-fn history_matches(line: &Text, pattern: &Text, matching: HistoryMatch) -> bool {
+fn history_matches(
+    locale: &nsh_platform::Locale,
+    line: &Text,
+    pattern: &Text,
+    matching: HistoryMatch,
+) -> bool {
     let line = editor_history_text(line);
     if pattern.is_empty() {
         return true;
@@ -405,14 +413,18 @@ fn history_matches(line: &Text, pattern: &Text, matching: HistoryMatch) -> bool 
         // dash/libedit contract the pty corpora pin. Both variants resolve to
         // the shell's matcher.
         HistoryMatch::Contains | HistoryMatch::LiteralOrRegex => {
-            shell_history_pattern_matches(&line, pattern)
+            shell_history_pattern_matches(locale, &line, pattern)
         }
     }
 }
 
 /// Vi history searches use shell pattern notation against any part of a
 /// history line. A leading `^` removes that implicit leading wildcard.
-fn shell_history_pattern_matches(line: &Text, pattern: &Text) -> bool {
+fn shell_history_pattern_matches(
+    locale: &nsh_platform::Locale,
+    line: &Text,
+    pattern: &Text,
+) -> bool {
     let Ok(line) = text_to_bytes(line) else {
         return false;
     };
@@ -432,7 +444,7 @@ fn shell_history_pattern_matches(line: &Text, pattern: &Text) -> bool {
     }
     expression.extend_from_slice(pattern);
     expression.push(b'*');
-    crate::pmatch::pmatch_slices(&expression, &line) != 0
+    crate::pmatch::pmatch_slices(locale, &expression, &line) != 0
 }
 
 fn is_history_space(unit: &TextUnit) -> bool {
@@ -523,11 +535,25 @@ mod tests {
 
     #[test]
     fn history_patterns_use_shell_globs() {
+        let locale = nsh_platform::Locale::c().unwrap();
         let line = Text::from("printf beta");
-        assert!(shell_history_pattern_matches(&line, &Text::from("b?t*")));
-        assert!(shell_history_pattern_matches(&line, &Text::from("^printf")));
-        assert!(!shell_history_pattern_matches(&line, &Text::from("^beta")));
+        assert!(shell_history_pattern_matches(
+            &locale,
+            &line,
+            &Text::from("b?t*")
+        ));
+        assert!(shell_history_pattern_matches(
+            &locale,
+            &line,
+            &Text::from("^printf")
+        ));
         assert!(!shell_history_pattern_matches(
+            &locale,
+            &line,
+            &Text::from("^beta")
+        ));
+        assert!(!shell_history_pattern_matches(
+            &locale,
             &text_from_bytes(b"has\0nul"),
             &Text::from("nul")
         ));

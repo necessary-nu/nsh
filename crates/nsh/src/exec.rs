@@ -282,7 +282,7 @@ fn exec_failure(
     let mut message = Vec::new();
     message.extend_from_slice(command);
     message.extend_from_slice(b": ");
-    message.extend_from_slice(&crate::error::errmsg(error, E_EXEC));
+    message.extend_from_slice(&crate::error::errmsg(&sh.locale, error, E_EXEC));
     /* `exerror(EXEND, msg)`: text *and* control flow, which is why the
      * bridge took the code as a parameter rather than reading it off the
      * value. The text is written here, where dash writes it, and the value
@@ -620,7 +620,7 @@ pub fn find_command(
     if (act & DO_ERR) != 0 {
         let mut message = name.to_vec();
         message.extend_from_slice(b": ");
-        message.extend_from_slice(&crate::error::errmsg(error, E_EXEC));
+        message.extend_from_slice(&crate::error::errmsg(&sh.locale, error, E_EXEC));
         sh.sh_warnx(&message);
     }
     *entry = cmdentry::unknown();

@@ -120,20 +120,20 @@ pub fn is_digit(c: c_int) -> bool {
 
 /// `#define is_alpha(c)\tisalpha((unsigned char)(c))`
 #[inline]
-pub fn is_alpha(c: c_int) -> bool {
-    nsh_platform::locale_is_alpha(c as u8)
+pub fn is_alpha(locale: &nsh_platform::Locale, c: c_int) -> bool {
+    locale.is_alpha(c as u8)
 }
 
 /// `#define is_name(c)\t((c) == '_' || isalpha((unsigned char)(c)))`
 #[inline]
-pub fn is_name(c: c_int) -> bool {
-    c == b'_' as c_int || nsh_platform::locale_is_alpha(c as u8)
+pub fn is_name(locale: &nsh_platform::Locale, c: c_int) -> bool {
+    c == b'_' as c_int || locale.is_alpha(c as u8)
 }
 
 /// `#define is_in_name(c)\t((c) == '_' || isalnum((unsigned char)(c)))`
 #[inline]
-pub fn is_in_name(c: c_int) -> bool {
-    c == b'_' as c_int || nsh_platform::locale_is_alphanumeric(c as u8)
+pub fn is_in_name(locale: &nsh_platform::Locale, c: c_int) -> bool {
+    c == b'_' as c_int || locale.is_alphanumeric(c as u8)
 }
 
 /// `#define is_special(c)\t((is_type+SYNBASE)[(signed char)(c)] & (ISSPECL|ISDIGIT))`

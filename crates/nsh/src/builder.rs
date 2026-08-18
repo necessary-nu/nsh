@@ -204,7 +204,12 @@ impl Builder {
                 Error::other(
                     0,
                     2,
-                    format!("can't cd to {}: {}", dir.display(), e).as_bytes(),
+                    format!(
+                        "can't cd to {}: {}",
+                        dir.display(),
+                        sh.locale.error_message(&e)
+                    )
+                    .as_bytes(),
                 )
             })?;
             crate::cd::setpwd_inner(&mut sh, crate::cd::Pwd::Unknown, 0)?;

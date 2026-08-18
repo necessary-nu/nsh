@@ -357,8 +357,8 @@ impl Token {
 
 // [spec:dash:def:parser.isassignment-fn]
 // [spec:dash:sem:parser.isassignment-fn]
-pub fn isassignment(text: &BStr) -> c_int {
-    let end = endofname(text);
+pub fn isassignment(locale: &nsh_platform::Locale, text: &BStr) -> c_int {
+    let end = endofname(locale, text);
     if end == 0 {
         return 0;
     }
@@ -656,7 +656,7 @@ fn command(sh: &mut Shell, kwd: c_int) -> Result<Option<Node>, Error> {
         let var_token = readtoken_with_flags(sh, 0)?;
         if var_token.kind != TWORD
             || var_token.quoted != 0
-            || goodname(wordtext(sh)) == 0
+            || goodname(&sh.locale, wordtext(sh)) == 0
         {
             return Err(synerror(sh, b"Bad for loop variable"));
         }
@@ -834,7 +834,7 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
                 text: wordtext_node(sh),
                 backquote: core::mem::take(&mut sh.input.backquotelist),
             });
-            if savecheckkwd != 0 && isassignment(wordtext(sh)) != 0 {
+            if savecheckkwd != 0 && isassignment(&sh.locale, wordtext(sh)) != 0 {
                 vars.push(n);
             } else {
                 args.push(n);
@@ -856,7 +856,7 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
                  * `char *` when it relabels the node */
                 let word: narg = args.pop().unwrap().into_narg();
                 let bcmd = crate::exec::builtin(word.text.as_bstr());
-                if goodname(word.text.as_bstr()) == 0
+                if goodname(&sh.locale, word.text.as_bstr()) == 0
                     || bcmd.is_some_and(|cmd| {
                         (cmd.flags & crate::builtins::BUILTIN_SPECIAL) != 0
                     })
@@ -1256,7 +1256,7 @@ pub fn getmbc(
     let mut c = c;
     /* The C's `out` cursor, and its `start`, as the offsets they were. */
     let mut o: usize = 0;
-    let mut decoder = nsh_platform::LocaleDecoder::new();
+    let mut decoder = sh.locale.decoder();
     let mut ml: c_uint = 0;
     let mut wc: i32 = 0;
     let mut complete = false;
@@ -1298,7 +1298,7 @@ pub fn getmbc(
     }
 
     if complete && ml > 1 {
-        if mode == 4 && nsh_platform::locale_wide_is_blank(wc) {
+        if mode == 4 && sh.locale.wide_is_blank(wc) {
             return Ok(1);
         }
 
@@ -1977,7 +1977,7 @@ fn parsesub(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<bool, Error> {
         st.out.pop();
         st.dollarsq = '\\' as c_int;
         return Ok(true); /* goto csquote */
-    } else if st.c == '{' as c_int || is_name(st.c) || is_special(st.c) != 0 {
+    } else if st.c == '{' as c_int || is_name(&sh.locale, st.c) || is_special(st.c) != 0 {
         let typeloc: usize = st.out.len();
         let mut badsub = false;
 
@@ -1994,11 +1994,11 @@ fn parsesub(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<bool, Error> {
             subtype = 0;
         }
         'varname: loop {
-            if is_name(st.c) {
+            if is_name(&sh.locale, st.c) {
                 loop {
                     st.out.push(st.c as u8);
                     st.c = pgetc_eatbnl(sh)?;
-                    if !is_in_name(st.c) {
+                    if !is_in_name(&sh.locale, st.c) {
                         break;
                     }
                 }
@@ -2018,9 +2018,7 @@ fn parsesub(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<bool, Error> {
                 if subtype == 0 && cc == '#' as c_int {
                     subtype = VSLENGTH;
 
-                    if st.c == '_' as c_int
-                        || nsh_platform::locale_is_alphanumeric(st.c as u8)
-                    {
+                    if st.c == '_' as c_int || sh.locale.is_alphanumeric(st.c as u8) {
                         if st.chkeofmark != 0 {
                             st.out.push('#' as u8);
                         }
@@ -2289,17 +2287,17 @@ fn parsearith(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
 
 // [spec:dash:def:parser.endofname-fn]
 // [spec:dash:sem:parser.endofname-fn]
-pub fn endofname(name: &BStr) -> usize {
+pub fn endofname(locale: &nsh_platform::Locale, name: &BStr) -> usize {
     let name = crate::mystring::cstr_prefix(name);
     let Some(&first) = name.first() else {
         return 0;
     };
-    if !is_name(first as c_char as c_int) {
+    if !is_name(locale, first as c_char as c_int) {
         return 0;
     }
     1 + name[1..]
         .iter()
-        .position(|&byte| !is_in_name(byte as c_char as c_int))
+        .position(|&byte| !is_in_name(locale, byte as c_char as c_int))
         .unwrap_or(name.len() - 1)
 }
 
@@ -2531,9 +2529,9 @@ pub fn findkwd(s: &BStr) -> Option<usize> {
 
 // [spec:dash:def:parser.goodname-fn]
 // [spec:dash:sem:parser.goodname-fn]
-pub fn goodname(name: &BStr) -> c_int {
+pub fn goodname(locale: &nsh_platform::Locale, name: &BStr) -> c_int {
     let name = crate::mystring::cstr_prefix(name);
-    (endofname(name) == name.len()) as c_int
+    (endofname(locale, name) == name.len()) as c_int
 }
 
 // [spec:dash:def:parser.parser-eof-fn]

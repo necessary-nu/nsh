@@ -535,7 +535,12 @@ pub(crate) fn jobno(jp: usize) -> c_int {
 
 // [spec:dash:def:jobs.sprint-status-fn]
 // [spec:dash:sem:jobs.sprint-status-fn]
-fn sprint_status(out: &mut Vec<u8>, status: c_int, sigonly: c_int) -> c_int {
+fn sprint_status(
+    locale: &nsh_platform::Locale,
+    out: &mut Vec<u8>,
+    status: c_int,
+    sigonly: c_int,
+) -> c_int {
     let start = out.len();
     let mut st: c_int;
 
@@ -559,7 +564,7 @@ fn sprint_status(out: &mut Vec<u8>, status: c_int, sigonly: c_int) -> c_int {
              * sized for 32 whatever the signal is called. `strsignal` is
              * locale text, not ASCII, so the bytes are copied rather than
              * routed through `copy_ascii_cstr`. */
-            let description = nsh_platform::signal_description(st);
+            let description = locale.signal_description(st);
             let name = description.as_slice();
             let n = name.len().min(32);
             out.extend_from_slice(&name[..n]);
@@ -628,7 +633,7 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mod
         if sh.jobs.tab[jp].state as c_int == JOBSTOPPED {
             status = sh.jobs.tab[jp].stopstatus;
         }
-        col += sprint_status(&mut s, status, 0);
+        col += sprint_status(&sh.locale, &mut s, status, 0);
     }
 
     /* `goto start` enters the do/while below at the `start:` label */
@@ -1317,7 +1322,7 @@ fn waitone(sh: &mut crate::context::Shell, block: c_int, jobp: Option<usize>) ->
 
     if thisjob.is_some() && thisjob == jobp {
         let mut message = Vec::with_capacity(49);
-        sprint_status(&mut message, status, 1);
+        sprint_status(&sh.locale, &mut message, status, 1);
         if !message.is_empty() {
             message.push(b'\n');
             let _ = sh.io.stderr().write_all(&message);
@@ -1852,7 +1857,7 @@ fn xtcsetpgrp(
 
     if let Err(error) = result {
         let mut message = b"Cannot set tty process group (".to_vec();
-        message.extend_from_slice(nsh_platform::os_error_message(&error).as_bytes());
+        message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
         message.push(b')');
         return Err(sh.sh_error_value(&message));
     }

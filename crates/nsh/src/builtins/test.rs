@@ -385,8 +385,8 @@ impl<'a> TestParser<'a> {
 
         Ok(match op.token {
             Token::StringNotEqual => left != right,
-            Token::StringLess => nsh_platform::collate(left, right) == Ordering::Less,
-            Token::StringGreater => nsh_platform::collate(left, right) == Ordering::Greater,
+            Token::StringLess => sh.locale.collate(left, right) == Ordering::Less,
+            Token::StringGreater => sh.locale.collate(left, right) == Ordering::Greater,
             Token::IntegerEqual => getn(sh, left)? == getn(sh, right)?,
             Token::IntegerNotEqual => getn(sh, left)? != getn(sh, right)?,
             Token::IntegerGreaterEqual => getn(sh, left)? >= getn(sh, right)?,

@@ -142,10 +142,14 @@ defence. `std::env::set_var` copies into glibc-owned storage, and
 `exec.rs:127` builds its own `envp` and never reads `environ`, so
 `setlocale` is the only consumer and cannot tell the difference.
 
-**Fixed.** `var.rs`'s `changelocale` calls `std::env::set_var`, and the
-doc comment above it carries the reasoning — including the half of the
-`unset` path that cannot be fixed from inside that function, because by
-the time `varfunc` runs the flags no longer say a value was there.
+**Fixed without process mutation.** The intermediate `std::env::set_var`
+repair removed the dangling pointer but still made an embedded shell rewrite
+its host's environment. The final model snapshots inherited pairs once,
+stores locale variables only in the shell's owned variable table, and derives
+an owned `nsh_platform::Locale` for each `Shell`. Locale-sensitive operations
+temporarily select that handle on the calling thread and restore the previous
+selection before returning. Neither `environ` nor process-global `setlocale`
+is now a configuration channel.
 
 ## 6. What this changes about the plan
 

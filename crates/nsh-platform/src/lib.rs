@@ -6,7 +6,6 @@
 
 #![deny(unsafe_op_in_unsafe_fn)]
 
-use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::collections::hash_map::RandomState;
 use std::ffi::{CStr, CString, OsStr, OsString};
@@ -108,70 +107,6 @@ pub fn reset_coverage_counters() {
     }
 }
 
-unsafe extern "C" {
-    fn wctype(name: *const core::ffi::c_char) -> core::ffi::c_ulong;
-    fn iswctype(wc: core::ffi::c_uint, desc: core::ffi::c_ulong) -> core::ffi::c_int;
-    fn mbrtowc(
-        wide: *mut i32,
-        bytes: *const core::ffi::c_char,
-        len: usize,
-        state: *mut libc::mbstate_t,
-    ) -> usize;
-    fn mbrlen(
-        bytes: *const core::ffi::c_char,
-        len: usize,
-        state: *mut libc::mbstate_t,
-    ) -> usize;
-    fn iswblank(wc: core::ffi::c_uint) -> core::ffi::c_int;
-    fn iswspace(wc: core::ffi::c_uint) -> core::ffi::c_int;
-}
-
-pub fn locale_wide_is_blank(wide: i32) -> bool {
-    // SAFETY: every `i32` value can be passed as a `wint_t`; invalid values
-    // simply do not match.
-    unsafe { iswblank(wide as core::ffi::c_uint) != 0 }
-}
-
-/// Length of the first complete multibyte character in the process locale.
-/// Invalid and incomplete byte sequences return `None`.
-pub fn locale_multibyte_len(bytes: &[u8]) -> Option<usize> {
-    let mut state = unsafe { std::mem::zeroed() };
-    // SAFETY: the input is bounded by the slice and the conversion state is
-    // initialized local storage retained only for this call.
-    let length = unsafe { mbrlen(bytes.as_ptr().cast(), bytes.len(), &mut state) };
-    if length == usize::MAX || length == usize::MAX - 1 {
-        None
-    } else {
-        Some(length)
-    }
-}
-
-/// Decode exactly one locale multibyte character of `expected_len` bytes.
-pub fn locale_decode_exact(bytes: &[u8], expected_len: usize) -> Option<i32> {
-    if expected_len > bytes.len() {
-        return None;
-    }
-    let mut state = unsafe { std::mem::zeroed() };
-    let mut wide = 0_i32;
-    // SAFETY: the byte count is bounded by the slice and both output records
-    // are initialized local storage retained only for this call.
-    let converted = unsafe {
-        mbrtowc(
-            &mut wide,
-            bytes.as_ptr().cast(),
-            expected_len,
-            &mut state,
-        )
-    };
-    (converted == expected_len).then_some(wide)
-}
-
-pub fn locale_wide_is_space(wide: i32) -> bool {
-    // SAFETY: every `i32` value is accepted as a `wint_t`; invalid values
-    // simply do not match.
-    unsafe { iswspace(wide as core::ffi::c_uint) != 0 }
-}
-
 /// Look up the home directory named by a `~user` expansion.
 ///
 /// `std::env::home_dir` answers only for the current user, while this lookup
@@ -214,92 +149,6 @@ pub fn named_user_home(name: &[u8]) -> Option<OsString> {
             unsafe { CStr::from_ptr(directory) }.to_bytes().to_vec(),
         ));
     }
-}
-
-/// Test one locale multibyte character against a POSIX wide-character class.
-/// `None` means the class name is unknown; a known class with malformed
-/// character bytes is a non-match.
-pub fn wide_class_matches(name: &[u8], bytes: &[u8], expected_len: usize) -> Option<bool> {
-    let name = CString::new(name).ok()?;
-    // SAFETY: the class name is terminated, the output/state pointers name
-    // initialized local storage, and the byte count is bounded by `bytes`.
-    unsafe {
-        let class = wctype(name.as_ptr());
-        if class == 0 {
-            return None;
-        }
-        let mut wide = 0_i32;
-        let mut state = std::mem::zeroed();
-        let converted = mbrtowc(
-            &mut wide,
-            bytes.as_ptr().cast(),
-            expected_len.min(bytes.len()),
-            &mut state,
-        );
-        Some(converted == expected_len && iswctype(wide as core::ffi::c_uint, class) != 0)
-    }
-}
-
-/// Decode locale multibyte bytes for the shell's IFS cache.
-pub fn locale_wide_chars(bytes: &[u8]) -> (usize, Vec<i32>) {
-    if bytes.is_empty() {
-        return (0, Vec::new());
-    }
-    // SAFETY: every conversion is bounded by the remaining slice and writes
-    // only to local initialized storage.
-    unsafe {
-        let mut first_state = std::mem::zeroed();
-        let mut first = 0_i32;
-        let first_len = mbrtowc(
-            &mut first,
-            bytes.as_ptr().cast(),
-            bytes.len(),
-            &mut first_state,
-        );
-        let first_len = if first_len == usize::MAX || first_len == usize::MAX - 1 {
-            1
-        } else {
-            first_len
-        };
-
-        let mut decoded = vec![0_i32; bytes.len() + 1];
-        let mut state = std::mem::zeroed();
-        let mut offset = 0;
-        let mut output = 0;
-        while offset < bytes.len() {
-            let mut wide = 0_i32;
-            let count = mbrtowc(
-                &mut wide,
-                bytes[offset..].as_ptr().cast(),
-                bytes.len() - offset,
-                &mut state,
-            );
-            if count == usize::MAX || count == usize::MAX - 1 || count == 0 {
-                break;
-            }
-            decoded[output] = wide;
-            output += 1;
-            offset += count;
-        }
-        (first_len, decoded)
-    }
-}
-
-/// Compare two byte strings with the process locale's collation rules.
-///
-/// The shell cannot contain a NUL in an argument; accepting slices here
-/// makes that invariant explicit at the boundary. If a caller violates it,
-/// compare the C-visible prefixes, which is what `strcoll` would have seen.
-pub fn collate(left: &[u8], right: &[u8]) -> Ordering {
-    fn c_string(bytes: &[u8]) -> CString {
-        let visible = bytes.split(|&byte| byte == 0).next().unwrap_or_default();
-        CString::new(visible).expect("the C-visible prefix contains no NUL")
-    }
-
-    let left = c_string(left);
-    let right = c_string(right);
-    // SAFETY: both pointers name live, NUL-terminated strings for the call.
-    unsafe { libc::strcoll(left.as_ptr(), right.as_ptr()).cmp(&0) }
 }
 
 /// Test access using effective rather than real credentials.
@@ -368,38 +217,6 @@ pub fn process_environment() -> Vec<(OsString, OsString)> {
 #[inline]
 pub fn process_id() -> u32 {
     std::process::id()
-}
-
-#[inline]
-pub fn locale_is_alpha(byte: u8) -> bool {
-    // SAFETY: `isalpha` accepts EOF or an unsigned-char value; `u8` is in range.
-    unsafe { libc::isalpha(byte.into()) != 0 }
-}
-
-#[inline]
-pub fn locale_is_alphanumeric(byte: u8) -> bool {
-    // SAFETY: `isalnum` accepts EOF or an unsigned-char value; `u8` is in range.
-    unsafe { libc::isalnum(byte.into()) != 0 }
-}
-
-pub fn range_error_message() -> String {
-    os_error_message_code(rustix::io::Errno::RANGE.raw_os_error())
-}
-
-pub fn os_error_message(error: &std::io::Error) -> String {
-    let Some(code) = error.raw_os_error() else {
-        return error.to_string();
-    };
-    let rendered = error.to_string();
-    let suffix = format!(" (os error {code})");
-    rendered
-        .strip_suffix(&suffix)
-        .unwrap_or(&rendered)
-        .to_owned()
-}
-
-pub fn os_error_message_code(code: i32) -> String {
-    os_error_message(&std::io::Error::from_raw_os_error(code))
 }
 
 pub fn is_path_not_found_error(code: i32) -> bool {
@@ -1298,18 +1115,6 @@ pub fn wait_status_core_dumped(status: i32) -> bool {
     std::process::ExitStatus::from_raw(status).core_dumped()
 }
 
-pub fn signal_description(signal: i32) -> Vec<u8> {
-    // SAFETY: `strsignal` returns a process-owned terminated string for a
-    // signal number; copy it before returning.
-    let description = unsafe { libc::strsignal(signal) };
-    if description.is_null() {
-        signal.to_string().into_bytes()
-    } else {
-        // SAFETY: a non-null `strsignal` result is terminated.
-        unsafe { CStr::from_ptr(description) }.to_bytes().to_vec()
-    }
-}
-
 /// Wait for any child. `None` is the successful nonblocking "not yet" case.
 pub fn wait_for_any_child(
     nonblocking: bool,
@@ -1367,7 +1172,7 @@ mod tests {
     #[test]
     fn os_error_text_omits_rusts_numeric_suffix() {
         let error = std::io::Error::from(rustix::io::Errno::NOENT);
-        let message = os_error_message(&error);
+        let message = Locale::c().unwrap().error_message(&error);
         assert!(!message.contains("(os error"));
         assert!(!message.is_empty());
     }

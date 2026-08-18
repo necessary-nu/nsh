@@ -119,7 +119,7 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             };
         }
         if let Err(error) = nsh_platform::send_signal(pid, signo) {
-            let mut message = nsh_platform::os_error_message(&error).into_bytes();
+            let mut message = sh.locale.error_message(&error).into_bytes();
             message.push(b'\n');
             sh.sh_warnx(&message);
             i = 1;

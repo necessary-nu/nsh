@@ -222,6 +222,7 @@ macro_rules! is_locale_variable {
     };
 }
 
+// [spec:nsh:sem:shell-locale.selection]
 fn selected_locale(sh: &Shell) -> std::io::Result<nsh_platform::Locale> {
     let nonempty = |name: &[u8]| {
         sh.vars.tab.get(BStr::new(name)).and_then(|var| {
@@ -299,6 +300,7 @@ pub fn mkinit_init(sh: &mut Shell) -> Result<(), Error> {
     mkinit_init_from(sh, EnvSource::Process)
 }
 
+// [spec:nsh:sem:shell-locale.invalid-selection]
 pub(crate) fn mkinit_init_from(sh: &mut Shell, env: EnvSource<'_>) -> Result<(), Error> {
     use std::os::unix::fs::MetadataExt;
 
@@ -388,6 +390,7 @@ pub fn mkinit_reset(sh: &mut Shell) {
     unwindlocalvars(sh, 0);
 }
 
+// [spec:nsh:sem:shell-locale.invalid-selection]
 fn run_callback(sh: &mut Shell, callback: Callback, name: &BStr, value: Option<&BStr>) {
     let effective = value.unwrap_or_else(|| BStr::new(b""));
     match callback {

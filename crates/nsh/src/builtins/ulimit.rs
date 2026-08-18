@@ -120,7 +120,7 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         if let Err(error) = nsh_platform::set_resource_limit(limit.resource, values) {
             let message = format!(
                 "error setting limit ({})",
-                nsh_platform::os_error_message(&error)
+                sh.locale.error_message(&error)
             );
             return Err(sh.sh_error_value(message.as_bytes()));
         }

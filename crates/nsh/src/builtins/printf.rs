@@ -140,7 +140,7 @@ impl<'a> Operands<'a> {
             return u64::from(bytes.get(1).copied().unwrap_or(0));
         }
 
-        let (value, end, range) = scan_integer(bytes, signed);
+        let (value, end, range) = scan_integer(&sh.locale, bytes, signed);
         self.check_conversion(sh, bytes, end, range);
         value
     }
@@ -159,7 +159,7 @@ impl<'a> Operands<'a> {
             return f64::from(bytes.get(1).copied().unwrap_or(0));
         }
 
-        let (value, end, range) = scan_double(bytes);
+        let (value, end, range) = scan_double(&sh.locale, bytes);
         self.check_conversion(sh, bytes, end, range);
         value
     }
@@ -185,7 +185,7 @@ impl<'a> Operands<'a> {
             message.extend_from_slice(b": ");
             /* The C's `strerror(ERANGE)`, so the wording is the
              * platform's rather than this file's. */
-            message.extend_from_slice(nsh_platform::range_error_message().as_bytes());
+            message.extend_from_slice(sh.locale.range_error_message().as_bytes());
         } else {
             return;
         }
@@ -197,15 +197,16 @@ impl<'a> Operands<'a> {
 
 /// Skip the blanks a C `strto*` conversion skips before the sign.
 ///
-/// The set is C's `isspace` in the C locale, spelled out because Rust's
-/// `is_ascii_whitespace` is a different set: it leaves out the vertical
-/// tab, and a conversion that stopped at one would call
+/// Rust's `is_ascii_whitespace` is a different set even in the C locale: it
+/// leaves out the vertical tab, and a conversion that stopped at one would call
 /// `printf '%d' "$(printf '\v42')"` a malformed number where the C reads
-/// 42. Every numeric conversion and every `*` width reaches here.
-fn skip_blanks(bytes: &[u8]) -> usize {
+/// 42. The explicit locale also preserves any additional single-byte space
+/// characters selected by the shell. Every numeric conversion and every `*`
+/// width reaches here.
+fn skip_blanks(locale: &nsh_platform::Locale, bytes: &[u8]) -> usize {
     bytes
         .iter()
-        .position(|byte| !matches!(byte, b' ' | 0x09..=0x0d))
+        .position(|byte| !locale.is_space(*byte))
         .unwrap_or(bytes.len())
 }
 
@@ -227,8 +228,12 @@ fn digit_value(byte: Option<&u8>, radix: u64) -> Option<u64> {
 ///
 /// A signed overflow saturates at the ends of the range and an unsigned
 /// one wraps, which is what the C's two functions do.
-fn scan_integer(bytes: &[u8], signed: bool) -> (u64, usize, bool) {
-    let mut at = skip_blanks(bytes);
+fn scan_integer(
+    locale: &nsh_platform::Locale,
+    bytes: &[u8],
+    signed: bool,
+) -> (u64, usize, bool) {
+    let mut at = skip_blanks(locale, bytes);
     let negative = matches!(bytes.get(at), Some(b'-'));
     if let Some(b'-' | b'+') = bytes.get(at) {
         at += 1;
@@ -307,8 +312,8 @@ fn starts_with_ignoring_case(bytes: &[u8], word: &[u8]) -> bool {
 /// parser wants a whole string and no hexadecimal, so the prefix is
 /// measured here and handed over -- except the hexadecimal form, which
 /// is exact bit-laying and done in [`scan_hexadecimal`].
-fn scan_double(bytes: &[u8]) -> (f64, usize, bool) {
-    let from = skip_blanks(bytes);
+fn scan_double(locale: &nsh_platform::Locale, bytes: &[u8]) -> (f64, usize, bool) {
+    let from = skip_blanks(locale, bytes);
     let mut at = from;
     let negative = matches!(bytes.get(at), Some(b'-'));
     if let Some(b'-' | b'+') = bytes.get(at) {
@@ -783,11 +788,15 @@ mod tests {
     use super::*;
 
     fn integer(text: &str, signed: bool) -> (u64, usize, bool) {
-        scan_integer(text.as_bytes(), signed)
+        scan_integer(
+            &nsh_platform::Locale::c().unwrap(),
+            text.as_bytes(),
+            signed,
+        )
     }
 
     fn double(text: &str) -> (f64, usize, bool) {
-        scan_double(text.as_bytes())
+        scan_double(&nsh_platform::Locale::c().unwrap(), text.as_bytes())
     }
 
     /// The base a `strto*` conversion picks is written into the digits,

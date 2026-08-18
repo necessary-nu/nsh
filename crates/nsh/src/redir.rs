@@ -191,6 +191,7 @@ fn sh_open_fail(
     message.extend_from_slice(pathname);
     message.extend_from_slice(b": ");
     message.extend_from_slice(&crate::error::errmsg(
+        &sh.locale,
         error.raw_os_error().unwrap_or_default(),
         action,
     ));
@@ -374,7 +375,7 @@ pub(crate) fn descriptor_error(sh: &mut Shell, source: c_int, error: std::io::Er
     let mut message = Vec::new();
     write!(&mut message, "{}", source).expect("writing to a Vec cannot fail");
     message.extend_from_slice(b": ");
-    message.extend_from_slice(nsh_platform::os_error_message(&error).as_bytes());
+    message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
     sh.sh_error_value(&message)
 }
 
