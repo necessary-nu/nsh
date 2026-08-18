@@ -151,11 +151,31 @@ contents record.
 An upstream fix would be welcome and is not blocked by anything here; it
 just is not a precondition. See [dec:nsh:we-own-the-defects].
 
+### `alias` displays `name=quoted-value`
+
+**Status:** fixed in the Rust; dash unchanged. Category 3. Registered as
+`alias_stdout_format` in `tests/harness/divergences.sh`.
+
+POSIX specifies alias output as `name=value`, with quoting applied to the
+value so the definition can be fed back to the shell. dash instead passes the
+complete `name=value` string through its quoting helper and prints
+`'name=value'`. Both forms can be re-entered, but only the first has the
+required unquoted name and equals sign. The port now prints `name='value'`.
+
+The byte-level relationship is deliberately narrow: moving dash's first quote
+from before the name to immediately after the equals sign produces the port's
+line exactly, including values that contain quotes. The executable register
+performs only that transformation, requires equal statuses and equal line
+multisets afterwards, refuses definition-only commands, and permits only
+alias-shaped lines to move. It also proves that multi-entry port listings are
+sorted, because quote placement and the existing alias-table ordering
+divergence occur in the same output and cannot be sanctioned independently.
+
 ### `env` and `alias` print in sorted order
 
 **Status:** fixed in the Rust; dash unchanged. Category 3. Registered as
-`sorted_tables` in `tests/harness/divergences.sh` -- the register's first
-real entry.
+`sorted_tables` for environment output and by `alias_stdout_format` for alias
+output in `tests/harness/divergences.sh`.
 
 dash keeps variables and aliases in 39-bucket chained hash tables and
 walks the buckets to produce output. `var.rs listvars` is what builds
@@ -213,14 +233,13 @@ export XV=1 YV=2; echo "$XV$YV"; env | grep -E '^(XV|YV)='
 cases print one alias, or none after `unalias -a`. So the sweep goes
 `XFAIL=1`, not the thirty this section used to predict.
 
-**What the entry refuses.** Five conditions, each one a regression class
-the entry must not be able to reach: the exit status must match; the case
-must run `env`, `printenv` or `alias`; the two outputs must hold the same
-lines, so a changed value, a dropped line, an extra line or a duplicate
-still fails; only assignment-shaped lines may have moved, so a
-diagnostic that raced stdout is not this; and the port's blocks of those
-lines must be *sorted*, without which the entry would excuse any
-environment order at all rather than this one.
+**What the entries refuse.** Both require matching exit status and equal line
+multisets after their one stated normalization, so a changed value, dropped
+line, extra line or duplicate still fails. Only assignment-shaped lines may
+move, a diagnostic that raced stdout is not excused, and the port's blocks
+must be *sorted*. `sorted_tables` is scoped only to `env` and `printenv`;
+`alias_stdout_format` is scoped to alias display and additionally requires the
+exact quote move described above.
 
 `export -p` and `set` are deliberately absent from the scoping pattern
 even though the old heading named them. Both already print sorted on both

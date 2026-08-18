@@ -174,23 +174,65 @@ ds_blocks_sorted() {
 # The register
 # ---------------------------------------------------------------------
 
-DS_DIVERGENCES=(sorted_tables sorted_cmdtable)
+DS_DIVERGENCES=(alias_stdout_format sorted_tables sorted_cmdtable)
 
-# A line the sorted tables produce: an environment entry, `NAME=value`, or
-# an alias listing, which is the same thing inside the single quotes
-# `single_quote` puts round it. Names are what `endofname` accepts, because
-# that is the only way a name reaches either table.
-DS_ORDERED_LINE="^'?[A-Za-z_][A-Za-z0-9_]*="
+# dash quotes an alias's complete `name=value` definition. POSIX requires the
+# name and equals sign outside the quoted value, so the port moves only the
+# opening quote: `'name=value'` becomes `name='value'`. The rest of the line is
+# byte-identical even when the value itself contains quotes.
+DS_ALIAS_PORT_LINE="^[A-Za-z_][A-Za-z0-9_]*='"
 
-# `env`, `printenv` and `alias` print in name order; dash prints in the
-# order its 39 hash buckets happen to chain. See `docs/divergences.md` for
-# why the port sorts.
+# A definition-only command must not qualify: it prints nothing, and newly
+# printing a definition would be a regression. Match only a bare `alias` or a
+# name operand without `=` at the end of a simple command.
+ds_case_displays_alias() {
+	grep -qE '(^|[;&|(`{][[:space:]]*)alias([[:space:]]*($|[;&|)`}<>])|[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]*($|[;&|)`}<>]))' "$1" 2>/dev/null
+}
+
+# Rewrite only dash-shaped alias listing lines into the port's POSIX shape.
+# Return failure unless at least one line changed, so an arbitrary permutation
+# in a case that merely runs `alias` cannot borrow this entry.
+ds_alias_reference_to_port() {
+	local input=$1 line changed=1
+	while IFS= read -r line || [ -n "$line" ]; do
+		if [[ $line =~ ^\'([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+			printf "%s='%s\n" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+			changed=0
+		else
+			printf '%s\n' "$line"
+		fi
+	done <<< "$input"
+	return "$changed"
+}
+
+# `alias` output differs from dash in quote placement, and a multi-entry
+# listing also differs in order. This entry proves both differences together:
+# after the one exact quote move the line multisets must match, only
+# alias-shaped lines may move, and the port's alias blocks must be sorted.
+dsdiv_alias_stdout_format() {
+	local normalized
+	[ "$3" = "$4" ] || return 1
+	ds_case_displays_alias "$5" || return 1
+	normalized=$(ds_alias_reference_to_port "$1") || return 1
+	ds_same_lines "$normalized" "$2" || return 1
+	ds_moved_lines_match "$normalized" "$2" "$DS_ALIAS_PORT_LINE" || return 1
+	ds_blocks_sorted "$2" "$DS_ALIAS_PORT_LINE"
+}
+
+# A line the variable table produces. Names are what `endofname` accepts,
+# because that is the only way a name reaches the table.
+DS_ORDERED_LINE="^[A-Za-z_][A-Za-z0-9_]*="
+
+# `env` and `printenv` print in name order; dash prints in the order its 39
+# hash buckets happen to chain. Alias ordering is checked by
+# `alias_stdout_format`, because its quote-placement difference composes with
+# the ordering difference. See `docs/divergences.md` for why the port sorts.
 #
 # Five conditions, and each one is a regression class the entry must not
 # reach:
 #
 #   * the exit status matches. Reordering output changes nothing else.
-#   * the case runs `env`, `printenv` or `alias`. `export -p` and `set`
+#   * the case runs `env` or `printenv`. `export -p` and `set`
 #     are deliberately *not* in that list even though they print
 #     variables: dash already `qsort`s them in `showvars`, so both shells
 #     print those sorted and always did. A permutation there is a
@@ -211,7 +253,7 @@ DS_ORDERED_LINE="^'?[A-Za-z_][A-Za-z0-9_]*="
 # drift silently.
 dsdiv_sorted_tables() {
 	[ "$3" = "$4" ] || return 1
-	ds_case_matches "$5" '(^|[;&|(`{ ])(env|printenv|alias)([ ;&|)`}]|$)' || return 1
+	ds_case_matches "$5" '(^|[;&|(`{ ])(env|printenv)([ ;&|)`}]|$)' || return 1
 	ds_same_lines "$1" "$2" || return 1
 	ds_moved_lines_match "$1" "$2" "$DS_ORDERED_LINE" || return 1
 	ds_blocks_sorted "$2" "$DS_ORDERED_LINE"

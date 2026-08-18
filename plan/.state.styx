@@ -3379,4 +3379,9 @@ impl_evidence (
         {impl_name shell, rule cmd.while-exit-status}
         {impl_name shell, rule cmd.while-format}
     )}
+    {id fix-builtin-alias-stdout-format, covered_rules (
+        builtin.alias.stdout-format
+    ), covered_claims (
+        {impl_name shell, rule builtin.alias.stdout-format}
+    )}
 )

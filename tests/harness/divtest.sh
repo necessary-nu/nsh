@@ -154,23 +154,64 @@ printf 'echo "the environment"\n' > "$case_file"
 check "sorted_tables: a mention in a string is not excused" 1 \
 	$'BB=2\nAA=1' $'AA=1\nBB=2' 0 0 "$case_file"
 
-# ---- alias listings, the other half of the entry --------------------
+# ---- the live register: alias_stdout_format -------------------------
 #
-# `printalias` runs the whole `name=value` through `single_quote`, so an
-# alias listing is an environment entry inside a pair of quotes.
+# dash quotes the complete definition; the port follows POSIX's
+# `name=quoted-value` format. The entry also carries the alias table's sorting
+# difference, because the two differences occur in the same listing.
 printf "alias AA=1 FF=6 BB=2; alias\n" > "$case_file"
 A_BUCKET="'AA=1'
 'FF=6'
 'BB=2'"
-A_SORTED="'AA=1'
-'BB=2'
-'FF=6'"
-check "sorted_tables: alias listings sort too" 0 \
+A_SORTED="AA='1'
+BB='2'
+FF='6'"
+check "alias_stdout_format: quote placement and sorting" 0 \
 	"$A_BUCKET" "$A_SORTED" 0 0 "$case_file"
-check "sorted_tables: a changed alias value is not excused" 1 \
+
+printf "alias AA=1; alias AA\n" > "$case_file"
+check "alias_stdout_format: one named alias" 0 \
+	"'AA=1'" "AA='1'" 0 0 "$case_file"
+
+check "alias_stdout_format: a changed value is not excused" 1 \
+	"$A_BUCKET" "AA='1'
+BB='2'
+FF='9'" 0 0 "$case_file"
+check "alias_stdout_format: a missing alias is not excused" 1 \
+	"$A_BUCKET" "AA='1'
+BB='2'" 0 0 "$case_file"
+check "alias_stdout_format: an extra alias is not excused" 1 \
+	"$A_BUCKET" "AA='1'
+BB='2'
+FF='6'
+ZZ='9'" 0 0 "$case_file"
+check "alias_stdout_format: a duplicate is not excused" 1 \
+	"'AA=1'
+'BB=2'" "AA='1'
+AA='1'" 0 0 "$case_file"
+check "alias_stdout_format: a differing exit status is not excused" 1 \
+	"$A_BUCKET" "$A_SORTED" 0 1 "$case_file"
+check "alias_stdout_format: the old whole-definition quoting is refused" 1 \
 	"$A_BUCKET" "'AA=1'
 'BB=2'
-'FF=9'" 0 0 "$case_file"
+'FF=6'" 0 0 "$case_file"
+check "alias_stdout_format: an unsorted port listing is refused" 1 \
+	"$A_BUCKET" "BB='2'
+AA='1'
+FF='6'" 0 0 "$case_file"
+A_WITH_DIAG="'AA=1'"$'\n'"SH: error"
+P_WITH_DIAG="SH: error"$'\n'"AA='1'"
+check "alias_stdout_format: a reordered diagnostic is not excused" 1 \
+	"$A_WITH_DIAG" "$P_WITH_DIAG" 0 0 "$case_file"
+
+# A definition alone prints nothing. Merely mentioning alias must not let a
+# newly printed line borrow the formatting exception.
+printf "alias AA=1\n" > "$case_file"
+check "alias_stdout_format: definition-only command is outside the entry" 1 \
+	"'AA=1'" "AA='1'" 0 0 "$case_file"
+printf "echo alias\n" > "$case_file"
+check "alias_stdout_format: a mention is outside the entry" 1 \
+	"'AA=1'" "AA='1'" 0 0 "$case_file"
 
 # ---- the entry's documented limit -----------------------------------
 #

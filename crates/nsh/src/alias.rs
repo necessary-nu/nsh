@@ -145,12 +145,13 @@ pub fn rmaliases(sh: &mut Shell) {
 
 // [spec:dash:def:alias.printalias-fn]
 // [spec:dash:sem:alias.printalias-fn]
+// [spec:posix:req:builtin.alias.stdout-format]
 pub(crate) fn printalias(name: &BStr, value: &BStr) -> Vec<u8> {
-    let mut definition = Vec::with_capacity(name.len() + value.len() + 1);
-    definition.extend_from_slice(name);
-    definition.push(b'=');
-    definition.extend_from_slice(value);
-    let mut line = crate::mystring::single_quote(BStr::new(&definition)).to_vec();
+    let quoted = crate::mystring::single_quote(value);
+    let mut line = Vec::with_capacity(name.len() + quoted.len() + 2);
+    line.extend_from_slice(name);
+    line.push(b'=');
+    line.extend_from_slice(&quoted);
     line.push(b'\n');
     line
 }
@@ -158,6 +159,15 @@ pub(crate) fn printalias(name: &BStr, value: &BStr) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // [spec:posix:req:builtin.alias.stdout-format/test]
+    #[test]
+    fn alias_display_quotes_only_value() {
+        assert_eq!(
+            printalias(BStr::new(b"sample"), BStr::new(b"a'b")),
+            b"sample='a'\"'\"'b'\n".as_slice()
+        );
+    }
 
     #[test]
     fn an_invalid_name_returns_its_complaint() {

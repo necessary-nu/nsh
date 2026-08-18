@@ -1650,6 +1650,21 @@ children (
                             shell ([spec:posix:req:builtin.alias.stdout-format])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T03:00:18.483873053Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T03:04:10.456619004Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Implement POSIX's name=quoted-value form by quoting only the alias value. dash quotes the complete name=value definition, so the differential register gains alias_stdout_format: it performs exactly the one opening-quote move, requires matching status and line multisets, refuses definition-only commands and non-alias movement, and separately proves the port's alias blocks remain sorted. Verification: focused POSIX rule 2/2, unit regression, divtest 54/0, aud_state_trapcd 50/0 with 2 sanctioned alias-format cases, aud_parser_alias 30/0, cargo test -p nsh 259/0."
+                            }
+                        )
                     }
 
                     {
