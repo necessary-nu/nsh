@@ -20,50 +20,127 @@ use crate::expand::{
     CTLMBCHAR, mbnext_bytes,
 };
 
+/// Remove the shell's quote and multibyte framing from a pattern fragment.
+fn decode_pattern_bytes(encoded: &[u8]) -> Vec<u8> {
+    let mut decoded = Vec::with_capacity(encoded.len());
+    let mut at = 0;
+    while at < encoded.len() {
+        match byte_at(encoded, at) {
+            CTLESC => {
+                at += 1;
+                if let Some(byte) = encoded.get(at) {
+                    decoded.push(*byte);
+                    at += 1;
+                }
+            }
+            CTLMBCHAR => {
+                let frame = mbnext_bytes(slice_from(encoded, at));
+                let start = (frame & 0xff) as usize;
+                let span = (frame >> 8) as usize;
+                let data_len = span.saturating_sub(2);
+                let data_start = at + start;
+                if data_start >= encoded.len() {
+                    break;
+                }
+                let data_end = data_start.saturating_add(data_len).min(encoded.len());
+                decoded.extend_from_slice(&encoded[data_start..data_end]);
+                let next = at.saturating_add(start).saturating_add(span);
+                if next <= at {
+                    break;
+                }
+                at = next.min(encoded.len());
+            }
+            _ => {
+                decoded.push(encoded[at]);
+                at += 1;
+            }
+        }
+    }
+    decoded
+}
+
+fn is_nested_bracket_delimiter(byte: c_char) -> bool {
+    byte == C_COLON || byte == b'.' as c_char || byte == b'=' as c_char
+}
+
 // [spec:dash:def:expand.ccmatch-fn]
 // [spec:dash:sem:expand.ccmatch-fn]
 //
 // Returns whether the character matched and, separately, where the pattern
-// continues.  The C signalled the second through an out-parameter `char **r`
-// left NULL when `p` did not open a well-formed `[:class:]`; `Option<usize>`
-// is that signal as a value.  The order the C fixed is kept: the
-// continuation is set as soon as the class *name* is good, before the
-// character is tested, so a non-matching `[:alpha:]` is still consumed
-// rather than re-read as ordinary bracket members.
+// continues and how many subject bytes the member consumes. The C signalled
+// the continuation through an out-parameter `char **r` left NULL when `p`
+// did not open a well-formed `[:class:]`; the option is that signal as a
+// value. POSIX adds the sibling `[.element.]` and `[=element=]` forms, which
+// have the same nested closing-bracket requirement.
 #[inline(never)]
 fn ccmatch_bytes(
     locale: &nsh_platform::Locale,
     p: &[u8],
     mbc: &[u8],
     ml: usize,
-) -> (bool, Option<usize>) {
-    if byte_at(p, 0) != C_COLON {
+) -> (bool, Option<(usize, usize)>) {
+    let delimiter = byte_at(p, 0);
+    if delimiter != C_COLON && delimiter != b'.' as c_char && delimiter != b'=' as c_char {
         return (false, None);
     }
     let body = slice_from(p, 1);
-    let close = match body.find(b":]") {
+    let closing = [delimiter as u8, b']'];
+    let close = match body.find(closing) {
         Some(at) => at,
         None => return (false, None),
     };
+
+    let encoded_member = &body[..close];
+    if encoded_member.is_empty() {
+        return (false, None);
+    }
+
+    /* Past the delimiter skipped above, and past the two-byte close. */
+    let continuation = 1 + close + 2;
+    let first_span = if byte_at(mbc, ml) == ml as c_char && byte_at(mbc, ml + 1) == CTLMBCHAR {
+        ml + 2
+    } else {
+        ml
+    };
+
+    if delimiter != C_COLON {
+        let member = decode_pattern_bytes(encoded_member);
+        let mut expression = Vec::with_capacity(member.len() + 5);
+        expression.extend_from_slice(b"[[");
+        expression.push(delimiter as u8);
+        expression.extend_from_slice(&member);
+        expression.extend_from_slice(&[delimiter as u8, b']', b']']);
+
+        if !locale.collating_bracket_matches(&expression, &member) {
+            return (false, None);
+        }
+
+        for (subject_len, consumed) in [(ml, first_span), (member.len(), member.len())] {
+            if subject_len != 0
+                && subject_len <= mbc.len()
+                && locale.collating_bracket_matches(&expression, &mbc[..subject_len])
+            {
+                return (true, Some((continuation, consumed)));
+            }
+        }
+        return (false, Some((continuation, first_span)));
+    }
 
     /* The C wrote a NUL over the `:` of `:]`, called `wctype`, and put the
      * `:` back -- it needed a C string and the only one to hand was the
      * pattern itself.  Copying the name costs an allocation on a path that
      * runs once per `[:class:]`, and buys a pattern that `pmatch` never has
      * to be able to write to, which is what lets it take `&[u8]`. */
-    let Some(matches) = locale.wide_class_matches(&body[..close], mbc, ml) else {
+    let Some(matches) = locale.wide_class_matches(encoded_member, mbc, ml) else {
         return (false, None);
     };
-
-    /* Past the `:` skipped above, and past the `:]` just found. */
-    let r = 1 + close + 2;
 
     /* `ml` is what the caller measured of the string's character.  The C
      * passed that count straight to `mbrtowc`; clamping it to what the
      * slice holds can only change a case where the C read past the
      * string's terminator, and a short read fails the `!= ml` test below
      * exactly as a malformed character does. */
-    (matches, Some(r))
+    (matches, Some((continuation, first_span)))
 }
 
 /*
@@ -123,6 +200,7 @@ pub(crate) fn pmatch_slices(
 // [spec:posix:def:pattern.special-pattern-characters]
 // [spec:posix:sem:pattern.question-mark]
 // [spec:posix:sem:pattern.asterisk]
+// [spec:posix:syn:pattern.bracket-expression]
 // [spec:posix:sem:pattern.left-bracket-literal]
 // [spec:posix:sem:pattern.asterisk-matches-any-string]
 // [spec:posix:syn:pattern.concatenation]
@@ -206,6 +284,7 @@ fn pmatch_bytes(locale: &nsh_platform::Locale, pattern: &[u8], string: &[u8]) ->
                     let startp: usize;
                     let invert: c_int;
                     let mut found: c_int;
+                    let mut matched_span: usize;
                     let chr: c_char;
 
                     startp = pi;
@@ -219,6 +298,7 @@ fn pmatch_bytes(locale: &nsh_platform::Locale, pattern: &[u8], string: &[u8]) ->
                     mb = mbnext_bytes(slice_from(string, qi));
                     qi += (mb & 0xff) as usize;
                     mb >>= 8;
+                    matched_span = mb as usize;
                     chr = byte_at(string, qi);
                     if chr == C_NUL {
                         return false;
@@ -242,17 +322,26 @@ fn pmatch_bytes(locale: &nsh_platform::Locale, pattern: &[u8], string: &[u8]) ->
                                 break 'dft; /* goto dft */
                             }
                             if c == C_LBRACKET {
+                                let nested_delimiter = byte_at(pattern, pi);
                                 let ml = if mb > 1 { mb - 2 } else { mb } as usize;
-                                let (hit, r) = ccmatch_bytes(
+                                let (hit, nested) = ccmatch_bytes(
                                     locale,
                                     slice_from(pattern, pi),
                                     slice_from(string, qi),
                                     ml,
                                 );
                                 found |= hit as c_int;
-                                if let Some(r) = r {
-                                    pi += r;
+                                if let Some((continuation, span)) = nested {
+                                    if hit {
+                                        matched_span = span;
+                                    }
+                                    pi += continuation;
                                     break 'cont; /* continue */
+                                }
+                                if is_nested_bracket_delimiter(nested_delimiter) {
+                                    pi = startp;
+                                    c = C_LBRACKET;
+                                    break 'dft;
                                 }
                             } else if c == CTLESC {
                                 c = byte_at(pattern, pi);
@@ -311,7 +400,7 @@ fn pmatch_bytes(locale: &nsh_platform::Locale, pattern: &[u8], string: &[u8]) ->
                     if found == invert {
                         return false;
                     }
-                    qi += mb as usize;
+                    qi += matched_span;
                     continue 'forever;
                 }
                 CTLMBCHAR => {
@@ -359,4 +448,37 @@ fn pmatch_bytes(locale: &nsh_platform::Locale, pattern: &[u8], string: &[u8]) ->
     }
     /* breakloop: */
     byte_at(string, qi) == C_NUL
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn matches(locale: &nsh_platform::Locale, pattern: &[u8], subject: &[u8]) -> bool {
+        pmatch_slices(locale, pattern, subject) != 0
+    }
+
+    #[test]
+    fn nested_bracket_members_are_atomic() {
+        let locale = nsh_platform::Locale::c().unwrap();
+        for (pattern, subject) in [
+            (b"[[.-.]]".as_slice(), b"-".as_slice()),
+            (b"[[.].]]", b"]"),
+            (b"[[=-=]]", b"-"),
+            (b"[[=]=]]", b"]"),
+            (b"[[:alpha:]]", b"a"),
+        ] {
+            assert!(matches(&locale, pattern, subject));
+        }
+    }
+
+    #[test]
+    fn bracket_members_preserve_pattern_continuation() {
+        let locale = nsh_platform::Locale::c().unwrap();
+        assert!(matches(&locale, b"[[.-.]]x", b"-x"));
+        assert!(matches(&locale, b"*[[=]=]]", b"prefix]"));
+        assert!(matches(&locale, b"[![:digit:]]", b"a"));
+        assert!(!matches(&locale, b"[![:digit:]]", b"7"));
+        assert!(!matches(&locale, b"[[.zz.]]", b"zz"));
+    }
 }

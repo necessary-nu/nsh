@@ -3709,4 +3709,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule param.ps1-two-pass}
     )}
+    {id fix-pattern-bracket-expression, covered_rules (
+        pattern.bracket-expression
+    ), covered_claims (
+        {impl_name shell, rule pattern.bracket-expression}
+    )}
 )

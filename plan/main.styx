@@ -3142,6 +3142,21 @@ children (
                             shell ([spec:posix:syn:pattern.bracket-expression])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T06:06:33.545795545Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T06:15:15.292901732Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Keep shell quoting and pattern traversal in pmatch; delegate only the locale-database question for `[.element.]` and `[=element=]` to the safe Locale::collating_bracket_matches boundary. Decode the shell's internal quote/multibyte framing before that query, consume the nested closing bracket atomically, preserve the encoded subject span, and treat an unrecognized nested member as an invalid outer bracket expression. This implements XBD 9.3.5 without introducing a second shell matcher in core. Verification: both bracket-expression corpus cases, eight adjacent pattern/LC_CTYPE/LC_COLLATE cases, 251 core tests plus companion tests/doctests, 13 platform tests, 14 harness unit tests, and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

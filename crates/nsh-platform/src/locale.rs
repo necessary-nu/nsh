@@ -377,6 +377,26 @@ impl Locale {
         })
     }
 
+    /// Ask the selected locale whether one collating bracket member matches.
+    ///
+    /// This is intentionally narrower than a second shell pattern matcher:
+    /// the platform owns the locale database needed to resolve collating
+    /// symbols and primary equivalence classes, while `nsh` owns all pattern
+    /// traversal and shell quoting.
+    pub fn collating_bracket_matches(&self, pattern: &[u8], subject: &[u8]) -> bool {
+        let Ok(pattern) = CString::new(pattern) else {
+            return false;
+        };
+        let Ok(subject) = CString::new(subject) else {
+            return false;
+        };
+        self.with_selected(|| {
+            // SAFETY: both inputs are live, terminated strings and fnmatch
+            // retains neither pointer.
+            unsafe { libc::fnmatch(pattern.as_ptr(), subject.as_ptr(), 0) == 0 }
+        })
+    }
+
     pub fn error_message(&self, error: &std::io::Error) -> String {
         self.with_selected(|| {
             let Some(code) = error.raw_os_error() else {
@@ -443,6 +463,14 @@ mod tests {
         let before = current();
         let _locale = Locale::c().unwrap();
         assert_eq!(current(), before);
+    }
+
+    #[test]
+    fn locale_collating_members_match() {
+        let locale = Locale::c().unwrap();
+        assert!(locale.collating_bracket_matches(b"[[.-.]]", b"-"));
+        assert!(locale.collating_bracket_matches(b"[[=a=]]", b"a"));
+        assert!(!locale.collating_bracket_matches(b"[[.zz.]]", b"zz"));
     }
 
     // [spec:nsh:req:embedding-safety.process-locale-is-unchanged/test]
