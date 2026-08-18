@@ -3479,4 +3479,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.jobs.stdout-state-strings}
     )}
+    {id fix-builtin-kill-operand-pid-job-id, covered_rules (
+        builtin.kill.operand-pid-job-id
+    ), covered_claims (
+        {impl_name shell, rule builtin.kill.operand-pid-job-id}
+    )}
 )

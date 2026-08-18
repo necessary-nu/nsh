@@ -9,7 +9,7 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use core::ffi::{c_int};
+use core::ffi::c_int;
 use std::io::Write;
 
 use crate::eval::Flow;
@@ -28,6 +28,7 @@ use crate::output::Dest;
 // [spec:posix:req:builtin.kill.option-signal-number]
 // [spec:posix:req:builtin.kill.negative-first-argument]
 // [spec:posix:req:builtin.kill.operand-pid-number]
+// [spec:posix:def:builtin.kill.operand-pid-job-id]
 // [spec:posix:def:builtin.kill.operand-exit-status]
 // [spec:posix:req:builtin.kill.env-vars]
 // [spec:posix:sem:builtin.kill.env-nlspath]
@@ -129,7 +130,10 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     for spec in operands {
         if spec.first() == Some(&b'%') {
             jp = getjob(sh, Some(spec), 0)?;
-            pid = -ps_pid(sh, jp, 0);
+            pid = ps_pid(sh, jp, 0);
+            if sh.jobs.tab[jp].jobctl != 0 {
+                pid = -pid;
+            }
         } else {
             pid = if spec.first() == Some(&b'-') {
                 -crate::mystring::number(sh, BStr::new(&spec[1..]))?

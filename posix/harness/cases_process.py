@@ -892,6 +892,31 @@ CASES: tuple[Case, ...] = (
         stdout="signaled\nterminated-by-signal\n",
         timeout=15.0,
     ),
+    Case(
+        id="sig-kill-job-id-process-group",
+        rules=("builtin.kill.operand-pid-job-id",),
+        mode="interactive",
+        # With job control, the job ID identifies the whole process group.
+        # A positive PID would signal only the first sleep and leave the
+        # pipeline's last process (and therefore wait) running to timeout.
+        script=(
+            "set -m\n"
+            "sleep 10 | sleep 10 &\n"
+            "p=$!\n"
+            "if kill -s TERM %1 2>/dev/null; then printf 'group-signaled\\n';"
+            " else printf 'kill-failed\\n'; fi\n"
+            "wait \"$p\"\n"
+            "s=$?\n"
+            "if [ \"$s\" -gt 128 ]; then printf 'group-terminated\\n';"
+            " else printf 'status=%s\\n' \"$s\"; fi\n"
+            "exit\n"
+        ),
+        environment={"PS1": "", "PS2": ""},
+        stdout=None,
+        stdout_contains=("group-signaled\n", "group-terminated\n"),
+        status="any",
+        timeout=15.0,
+    ),
     # [spec:posix:req:builtin.kill.stdout-unused-without-l/test]
     Case(
         id="sig-kill-stdout-unused",

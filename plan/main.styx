@@ -2158,6 +2158,21 @@ children (
                             shell ([spec:posix:def:builtin.kill.operand-pid-job-id])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:10:37.351650027Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:13:25.594752211Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Resolve a %job operand to the recorded process PID when that job was created without job control, and to the negated first-process PID (the process-group ID) when the job's jobctl flag is set. Verification: both non-monitor PID and monitor-mode pipeline-group cases pass, all 11 sig-kill cases pass, POSIX harness unit tests pass, cargo test -p nsh passes 276 tests with one ignored doctest, and git diff --check passes."
+                            }
+                        )
                     }
 
                     {
