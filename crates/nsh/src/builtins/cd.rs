@@ -281,6 +281,18 @@ fn updatepwd(sh: &mut Shell, dir: &BStr) -> Option<BString> {
             continue;
         }
         if p == b".." {
+            // [spec:posix:req:builtin.cd.step8-canonical-form-dot-dot]
+            // POSIX requires the component being removed to resolve to a
+            // directory. `metadata` follows symbolic links, matching pathname
+            // resolution; leaving `dir` uncanonicalized on failure makes the
+            // real chdir produce the diagnostic instead of incorrectly
+            // changing to the collapsed path.
+            if new.len() > lim
+                && !std::fs::metadata(std::path::Path::new(OsStr::from_bytes(&new)))
+                    .is_ok_and(|metadata| metadata.is_dir())
+            {
+                return None;
+            }
             while new.len() > lim {
                 new.pop();
                 if new[new.len() - 1] == b'/' {

@@ -3394,4 +3394,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.cd.opt-e}
     )}
+    {id fix-builtin-cd-step8-canonical-form-dot-dot, covered_rules (
+        builtin.cd.step8-canonical-form-dot-dot
+    ), covered_claims (
+        {impl_name shell, rule builtin.cd.step8-canonical-form-dot-dot}
+    )}
 )

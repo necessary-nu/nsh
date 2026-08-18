@@ -1722,6 +1722,21 @@ children (
                             shell ([spec:posix:req:builtin.cd.step8-canonical-form-dot-dot])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T03:09:11.686436238Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T03:10:03.975943352Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Before removing a preceding component for dot-dot, logical canonicalization now checks that the accumulated component resolves (following symlinks) to a directory. On failure it leaves the original operand for the real chdir, which produces the appropriate diagnostic instead of silently changing to the collapsed parent. Focused POSIX cases are 2/2 and cargo test -p nsh is 262/0."
+                            }
+                        )
                     }
 
                     {
