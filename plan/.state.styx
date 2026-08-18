@@ -3604,4 +3604,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule edit.command-complete-unique}
     )}
+    {id fix-edit-command-display-expansions, covered_rules (
+        edit.command-display-expansions
+    ), covered_claims (
+        {impl_name shell, rule edit.command-display-expansions}
+    )}
 )

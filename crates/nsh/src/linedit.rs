@@ -64,7 +64,7 @@ use nshedit::editor::effect::{
 };
 use nshedit::editor::{
     CompletionCandidate, DriverError, Editor, ReadDriver, ReadResult, ReadStep, StartError,
-    TerminalControl, TerminalProfile,
+    TerminalControl, TerminalProfile, Tokenizer,
 };
 use nshedit::history::HistoryCursor;
 use nshedit_plat::terminal::{ApplyWhen, ControlCharacter, TerminalAttributes};
@@ -176,6 +176,7 @@ const FIRST_NONBLANK: &str = "nsh-vi-first-nonblank";
 const DELETE_TO_FIRST_NONBLANK: &str = "nsh-vi-delete-to-first-nonblank";
 const CHANGE_TO_FIRST_NONBLANK: &str = "nsh-vi-change-to-first-nonblank";
 const YANK_TO_FIRST_NONBLANK: &str = "nsh-vi-yank-to-first-nonblank";
+const DISPLAY_EXPANSIONS: &str = "nsh-vi-display-expansions";
 
 mod history;
 pub use history::{History, HistoryEvent};
@@ -534,8 +535,11 @@ impl LineEditor {
                     driver.resume_completion(editor, &pending, response)?
                 }
                 ReadStep::UserCommand(pending) => {
-                    let response =
-                        shell_user_command(self.editor_mut(), pending.request().name.as_str());
+                    let response = if pending.request().name.as_str() == DISPLAY_EXPANSIONS {
+                        self.display_expansions()
+                    } else {
+                        shell_user_command(self.editor_mut(), pending.request().name.as_str())
+                    };
                     let (editor, driver) = self.editor_and_driver();
                     driver.resume_user_command(editor, &pending, response)?
                 }
@@ -712,6 +716,50 @@ impl LineEditor {
         result
     }
 
+    // [spec:posix:req:edit.command-display-expansions]
+    fn display_expansions(&mut self) -> Result<Outcome, HostFailure> {
+        let (line, cursor, command_mode) = {
+            let editor = self.editor_mut();
+            (
+                editor.line().clone(),
+                editor.cursor(),
+                editor.keymap_mode() == KeymapMode::ViCommand,
+            )
+        };
+        let cursor = if command_mode && cursor.get() < line.len() {
+            line.index(cursor.get() + 1).map_err(host_failure)?
+        } else {
+            cursor
+        };
+        let parsed = Tokenizer::default()
+            .tokenize(&line, cursor)
+            .map_err(host_failure)?;
+        let token_index = parsed.line().cursor().token().get();
+        let candidates = parsed
+            .line()
+            .tokens()
+            .get(token_index)
+            .map(|token| completion_candidates_for_stem(token.value()))
+            .unwrap_or_default();
+
+        self.output.write_all(b"\r\n").map_err(host_failure)?;
+        for candidate in candidates.iter() {
+            self.output
+                .write_all(&text_to_bytes(candidate.display()).map_err(host_failure)?)
+                .map_err(host_failure)?;
+            if candidate.suffix().is_some_and(|suffix| {
+                suffix.as_units() == [TextUnit::Scalar('/')]
+            }) {
+                self.output.write_all(b"/").map_err(host_failure)?;
+            }
+            self.output.write_all(b"\r\n").map_err(host_failure)?;
+        }
+        self.output.flush().map_err(host_failure)?;
+        self.editor_mut()
+            .execute(Action::Refresh(Refresh::Full))
+            .map_err(host_failure)
+    }
+
     fn editor_mut(&mut self) -> &mut NativeEditor {
         self.editor.as_mut().expect("live native editor")
     }
@@ -877,6 +925,13 @@ fn install_shell_bindings(
         ),
         ("@", Binding::Effect(EffectCommand::ExpandAlias)),
         (":", Binding::Effect(EffectCommand::ReadEditorCommand)),
+        (
+            "=",
+            Binding::User(
+                CommandName::new(DISPLAY_EXPANSIONS)
+                    .expect("static shell command name is valid"),
+            ),
+        ),
         (
             "J",
             Binding::Effect(EffectCommand::SearchHistory(HistorySearchCommand::Prefix(
@@ -1190,7 +1245,13 @@ fn host_failure(error: impl fmt::Display) -> HostFailure {
 fn completion_candidates(
     query: &nshedit::editor::CompletionQuery,
 ) -> nshedit::editor::CompletionCandidates {
-    let Ok(stem) = text_to_bytes(query.stem()) else {
+    completion_candidates_for_stem(query.stem())
+}
+
+fn completion_candidates_for_stem(
+    stem: &Text,
+) -> nshedit::editor::CompletionCandidates {
+    let Ok(stem) = text_to_bytes(stem) else {
         return Vec::new().into();
     };
     let split = stem
@@ -1256,5 +1317,40 @@ mod tests {
         assert_eq!(first_nonblank_index(&Text::from(" \tword")), 2);
         assert_eq!(first_nonblank_index(&text_from_bytes(b" \t\xffword")), 2);
         assert_eq!(first_nonblank_index(&Text::default()), 0);
+    }
+
+    #[test]
+    fn completion_marks_files_and_directories() {
+        static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+        let serial = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
+        let directory = std::env::temp_dir().join(format!(
+            "nsh-completion-test-{}-{serial}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::write(directory.join("alpha-file"), []).unwrap();
+        std::fs::create_dir(directory.join("alpha-directory")).unwrap();
+        std::fs::write(directory.join("beta"), []).unwrap();
+
+        let mut stem = directory.as_os_str().as_bytes().to_vec();
+        stem.extend_from_slice(b"/alpha");
+        let candidates = completion_candidates_for_stem(&text_from_bytes(&stem));
+        assert_eq!(candidates.len(), 2);
+        let mut suffixes = candidates
+            .iter()
+            .map(|candidate| {
+                (
+                    text_to_bytes(candidate.insertion()).unwrap(),
+                    candidate.suffix().cloned(),
+                )
+            })
+            .collect::<Vec<_>>();
+        suffixes.sort_by(|left, right| left.0.cmp(&right.0));
+        assert!(suffixes[0].0.ends_with(b"alpha-directory"));
+        assert_eq!(suffixes[0].1, Some(Text::from("/")));
+        assert!(suffixes[1].0.ends_with(b"alpha-file"));
+        assert_eq!(suffixes[1].1, Some(Text::from(" ")));
+
+        std::fs::remove_dir_all(directory).unwrap();
     }
 }

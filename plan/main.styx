@@ -2741,6 +2741,28 @@ children (
                             shell ([spec:posix:req:edit.command-display-expansions])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:04:21.326113609Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:07:12.969703156Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Implement `=` as an nsh-owned editor user command. Adjust the vi command cursor by one logical unit so the character under it belongs to the selected bigword, tokenize the unchanged line, reuse the pathname completion provider, write each candidate on a subsequent terminal line with `/` only for directory suffixes, then request a full redisplay without leaving command mode. Strengthen the PTY case to require `R:alph`, proving `=A; exit` operated on the original line after listing. Verification: focused PTY case, all 15 linedit tests, 14 harness unit tests, and git diff --check pass."
+                            }
+
+                            {
+                                at 2026-08-18T05:08:10.571901696Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Added a Rust filesystem test that filters out an unrelated basename and verifies the completion provider marks a matched directory with `/` and a regular file with a space. Focused linedit suite now passes 16 tests."
+                            }
+                        )
                     }
 
                     {

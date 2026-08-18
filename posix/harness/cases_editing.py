@@ -299,7 +299,7 @@ CASES: tuple[Case, ...] = (
         # No '?', '*' or '[' in the bigword, so '*' is implicitly assumed.
         script=VI + "r alph" + ESC + "=A; exit\n",
         stdout=None,
-        stdout_contains=("alpha1", "alpha2"),
+        stdout_contains=("alpha1", "alpha2", "R:alph\n"),
         mode="interactive",
         environment=TERMINAL,
         files=GLOB,
