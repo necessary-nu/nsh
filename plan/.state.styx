@@ -3544,4 +3544,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.trap.list-in-subshell}
     )}
+    {id fix-builtin-trap-opt-p, covered_rules (
+        builtin.trap.opt-p
+    ), covered_claims (
+        {impl_name shell, rule builtin.trap.opt-p}
+    )}
 )

@@ -787,9 +787,20 @@ CASES: tuple[Case, ...] = (
             "builtin.trap.opt-p",
             "builtin.trap.opt-p-suitable-for-reinput",
         ),
-        script="trap 'echo hello' USR1\ntrap -p USR1\n",
-        stdout=None,
-        stdout_contains=("USR1", "echo hello"),
+        script=(
+            "trap 'echo hello' USR1\n"
+            "trap -p USR1 INT\n"
+            "trap -p >all\n"
+            "grep -Fqx 'trap -- - EXIT' all && printf 'all-default\\n'\n"
+            "grep -Fqx \"trap -- 'echo hello' USR1\" all && "
+            "printf 'all-set\\n'\n"
+        ),
+        stdout=(
+            "trap -- 'echo hello' USR1\n"
+            "trap -- - INT\n"
+            "all-default\n"
+            "all-set\n"
+        ),
     ),
     # [spec:posix:req:builtin.trap.list-in-subshell/test]
     Case(

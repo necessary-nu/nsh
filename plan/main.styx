@@ -2477,6 +2477,21 @@ children (
                             shell ([spec:posix:req:builtin.trap.opt-p])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:40:05.880797187Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:42:35.846138865Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Implement -p in trap's option scan as a read-only listing query. With condition operands, decode and report each requested condition, emitting `trap -- - CONDITION` for default state; without operands, report all conditions through the same formatter. Read from the effective subshell listing view without invalidating it. Strengthen trap-p-option to assert exact selected output and prove the no-operand report includes both default and set conditions. Verification: trap-p-option and adjacent trap listing cases pass; cargo test -p nsh passes 279 tests with one ignored doctest; POSIX harness unit tests and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

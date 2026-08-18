@@ -18,6 +18,28 @@ use crate::eval::Flow;
 use crate::options::Options;
 use crate::trap::{NSIG, clear_traps, decode_signal, decode_signum, setsignal};
 
+fn listing_line(signo: usize, action: Option<&BString>) -> Vec<u8> {
+    let mut line = b"trap -- ".to_vec();
+    if let Some(action) = action {
+        line.extend_from_slice(&crate::mystring::single_quote(BStr::new(action.as_slice())));
+    } else {
+        line.push(b'-');
+    }
+    line.push(b' ');
+    line.extend_from_slice(crate::signames::signal_names[signo].to_bytes());
+    line.push(b'\n');
+    line
+}
+
+fn write_listing(sh: &mut Shell, signo: usize, include_default: bool) {
+    let line = match sh.traps.listed_action(signo) {
+        Some(action) => listing_line(signo, Some(action)),
+        None if include_default => listing_line(signo, None),
+        None => return,
+    };
+    let _ = sh.io.stdout().write_all(&line);
+}
+
 // [spec:dash:def:trap.trapcmd-fn]
 // [spec:dash:sem:trap.trapcmd-fn]
 // [spec:posix:req:builtin.trap.operand-interpretation]
@@ -29,6 +51,7 @@ use crate::trap::{NSIG, clear_traps, decode_signal, decode_signum, setsignal};
 // [spec:posix:syn:builtin.trap.list-format]
 // [spec:posix:req:builtin.trap.list-in-subshell]
 // [spec:posix:req:builtin.trap.list-suitable-for-reinput]
+// [spec:posix:req:builtin.trap.opt-p]
 // [spec:posix:req:builtin.trap.xsi-signal-numbers]
 // [spec:posix:req:builtin.trap.invalid-condition-warning]
 // [spec:posix:req:builtin.trap.utility-syntax-guidelines]
@@ -38,22 +61,31 @@ use crate::trap::{NSIG, clear_traps, decode_signal, decode_signum, setsignal};
 pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut signo: c_int;
 
+    let mut print = false;
     let mut opts = Options::new(args);
-    opts.next(sh, b"")?;
+    while let Some(option) = opts.next(sh, b"p")? {
+        print |= option == b'p';
+    }
     let ap = opts.operands();
     if ap.is_empty() {
         signo = 0;
         while signo < NSIG as c_int {
-            if let Some(t) = sh.traps.listed_action(signo as usize) {
-                let quoted = crate::mystring::single_quote(BStr::new(t.as_slice()));
-                let mut line = b"trap -- ".to_vec();
-                line.extend_from_slice(&quoted);
-                line.push(b' ');
-                line.extend_from_slice(crate::signames::signal_names[signo as usize].to_bytes());
-                line.push(b'\n');
-                let _ = sh.io.stdout().write_all(&line);
-            }
+            write_listing(sh, signo as usize, print);
             signo += 1;
+        }
+        return Ok(Flow::Done(0));
+    }
+    if print {
+        for word in ap {
+            signo = decode_signal(word, 0);
+            if signo < 0 {
+                let mut message = b"trap: ".to_vec();
+                message.extend_from_slice(word);
+                message.extend_from_slice(b": bad trap\n");
+                let _ = sh.io.stderr().write_all(&message);
+                return Ok(Flow::Done(1));
+            }
+            write_listing(sh, signo as usize, true);
         }
         return Ok(Flow::Done(0));
     }
