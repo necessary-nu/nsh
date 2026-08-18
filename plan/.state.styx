@@ -1184,7 +1184,7 @@ assertions (
     {id owned-strings, kind @complete, author "brendan@necessary.nu", at 2026-08-09T16:24:36.630845046Z}
     {id edition-2024, kind @complete, author "brendan@necessary.nu", at 2026-08-09T19:30:39.321605436Z}
     {id delete-memalloc, kind @complete, author "brendan@necessary.nu", at 2026-08-09T22:07:54.34344606Z}
-    {id nshedit-in-tree, kind @doing, author "brendan@necessary.nu", at 2026-08-09T22:10:03.872390597Z}
+    {id nshedit-in-tree, kind @complete, author "brendan@necessary.nu", at 2026-08-18T02:59:21.452184578Z}
     {id output-is-a-writer, kind @complete, author "brendan@necessary.nu", at 2026-08-11T20:55:43.687147342Z}
     {id builtins-take-args, kind @complete, author "brendan@necessary.nu", at 2026-08-11T22:24:41.681268303Z}
     {id builtins-modules, kind @complete, author "brendan@necessary.nu", at 2026-08-11T23:59:03.391843695Z}

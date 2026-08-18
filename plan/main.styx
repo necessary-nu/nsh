@@ -3170,6 +3170,7 @@ children (
                 title "Publish nshedit so nsh can be published; the git dep only fixes clone-and-build"
                 priority 2
                 kind @build
+                sealed true
                 log (
                     {
                         at 2026-08-09T16:23:27.678365136Z
@@ -3211,6 +3212,20 @@ children (
                         author "brendan@necessary.nu"
                         kind @unblock
                         text "Pin-bump blocker resolved. Upstream fix `8059f66` (\"Own a single-line render region without emitting anchor bytes\") lands the lazy region claim: single-row frames own an Inline region at zero bytes, multi-row anchoring byte-identical, contract pinned upstream by a test asserting `$ echo X\\n` with no ESC byte. Consumer repinned in `39f2bce` with the two API adaptations applied; gates on the repinned binary `8142664c`: cargo 6/6 suites, divtest 44/0, ptydiff 43/0 FLAKY=0, POSIX 660/51 with the failing set exactly the 51-name core (zero extras — even the flaky fringe passed this run). The scratchpad patch is consumed; remaining node scope is unchanged (distribution/publishing)."
+                    }
+
+                    {
+                        at 2026-08-18T02:59:17.871240313Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Distribution blocker closed upstream at necessary-nu/nshedit commit 160d7c9. Published nshedit-plat 0.1.0, nshterm 0.1.0, and nshedit 0.1.0 to crates.io after clean workspace checks and per-package dry runs in dependency order. nsh now resolves all three from the registry; cargo check --workspace --all-targets succeeds, cargo test -p nsh is 258/0, divtest is 44/0, and ptydiff is 60/0 with FLAKY=0."
+                    }
+
+                    {
+                        at 2026-08-18T02:59:21.452184578Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }
