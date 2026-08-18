@@ -2405,6 +2405,21 @@ children (
                             shell ([spec:posix:req:builtin.set.opt-u-nounset])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:32:57.405042711Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:35:23.731716937Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Honor nounset at lookupvarint_bytes, the boundary used only when an arithmetic variable's value is actually read. Preserve assignment to a new name and parser-level short-circuiting by leaving non-evaluated branches out of lookup. Emit the same '<name>: parameter not set' diagnostic shape used by parameter expansion. Verification: nounset-arithmetic passes with status 2; the Rust regression covers an evaluated read, a direct assignment, and a skipped branch; cargo test -p nsh passes 279 tests with one ignored doctest; POSIX harness unit tests and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

@@ -565,4 +565,22 @@ mod tests {
         assert_eq!(arith(&mut sh, BStr::new(b"1 || 1 / 0")).unwrap(), 1);
         assert_eq!(arith(&mut sh, BStr::new(b"1 ? 7 : 1 / 0")).unwrap(), 7);
     }
+
+    // [spec:posix:req:builtin.set.opt-u-nounset/test]
+    #[test]
+    fn nounset_rejects_evaluated_arithmetic_reads() {
+        let mut sh = shell();
+        sh.options.set_flag(crate::options::uflag, 1);
+
+        let error = arith(&mut sh, BStr::new(b"undefined_name + 1"))
+            .expect_err("an evaluated unset variable must fail under nounset");
+        assert_eq!(
+            error.message().to_vec(),
+            b"undefined_name: parameter not set".to_vec()
+        );
+        assert_eq!(error.status(), 2);
+
+        assert_eq!(arith(&mut sh, BStr::new(b"assigned_name = 7")).unwrap(), 7);
+        assert_eq!(arith(&mut sh, BStr::new(b"0 && skipped_name")).unwrap(), 0);
+    }
 }

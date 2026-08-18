@@ -3529,4 +3529,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.set.opt-o-report}
     )}
+    {id fix-builtin-set-opt-u-nounset, covered_rules (
+        builtin.set.opt-u-nounset
+    ), covered_claims (
+        {impl_name shell, rule builtin.set.opt-u-nounset}
+    )}
 )

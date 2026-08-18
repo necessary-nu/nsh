@@ -596,8 +596,17 @@ pub(crate) fn setvarint_bytes(
 
 // [spec:dash:def:var.lookupvarint-fn]
 // [spec:dash:sem:var.lookupvarint-fn]
+// [spec:posix:req:builtin.set.opt-u-nounset]
 pub(crate) fn lookupvarint_bytes(sh: &mut Shell, name: &BStr) -> Result<i64, Error> {
-    let value = lookup_bytes(sh, name).unwrap_or_default();
+    let value = match lookup_bytes(sh, name) {
+        Some(value) => value,
+        None if sh.options.flag(crate::options::uflag) != 0 => {
+            let mut message = name.to_vec();
+            message.extend_from_slice(b": parameter not set");
+            return Err(sh.sh_error_value(&message));
+        }
+        None => BString::default(),
+    };
     crate::mystring::parse_integer(sh, BStr::new(&value), 0)
 }
 
