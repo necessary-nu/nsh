@@ -3419,4 +3419,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.exec.failure-interactive-up}
     )}
+    {id fix-builtin-exec-utility-syntax-guidelines, covered_rules (
+        builtin.exec.utility-syntax-guidelines
+    ), covered_claims (
+        {impl_name shell, rule builtin.exec.utility-syntax-guidelines}
+    )}
 )

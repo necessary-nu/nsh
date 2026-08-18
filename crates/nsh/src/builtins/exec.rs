@@ -24,12 +24,21 @@ use crate::exec::shellexec;
 // [spec:posix:req:builtin.exec.utility-operand]
 // [spec:posix:req:builtin.exec.failure-non-interactive-exits]
 // [spec:posix:req:builtin.exec.failure-interactive-up]
+// [spec:posix:req:builtin.exec.utility-syntax-guidelines]
 // [spec:posix:req:builtin.exec.env-path]
 // [spec:posix:req:builtin.exec.stderr]
 // [spec:posix:req:builtin.exec.interfaces]
 // [spec:posix:req:builtin.exec.exit-status]
 pub fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    if args.len() > 1 {
+    let mut utility = args.get(1..).unwrap_or_default();
+    if utility
+        .first()
+        .is_some_and(|argument| *argument == BStr::new(b"--"))
+    {
+        utility = &utility[1..];
+    }
+
+    if !utility.is_empty() {
         let interactive_root = sh.options.flag(crate::options::iflag) != 0 && sh.shell_level == 0;
         let saved_iflag = sh.options.flag(crate::options::iflag);
         let saved_mflag = sh.options.flag(crate::options::mflag);
@@ -44,7 +53,7 @@ pub fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         /* Hoisted out of `shellexec`'s argument list, which also takes
          * the shell; see the note in `eval.rs`'s `evalcommand`. */
         let path = crate::var::pathval(sh);
-        let outcome = shellexec(sh, &args[1..], path.as_slice().as_bstr(), 0);
+        let outcome = shellexec(sh, utility, path.as_slice().as_bstr(), 0);
 
         if interactive_root {
             /* A successful exec never returns. On failure, restore the

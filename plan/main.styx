@@ -1849,6 +1849,21 @@ children (
                             shell ([spec:posix:req:builtin.exec.utility-syntax-guidelines])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T03:27:35.721983808Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T03:28:23.312167445Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Treat a leading -- after exec as the Guideline 10 end-of-options marker and remove it before deciding whether a utility operand exists. This also makes bare exec -- the no-utility form. Verification: all six exec harness cases pass (8 rules), and cargo test -p nsh passes 266 tests with one doctest ignored."
+                            }
+                        )
                     }
 
                     {
