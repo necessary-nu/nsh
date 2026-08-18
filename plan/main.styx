@@ -2086,6 +2086,21 @@ children (
                             shell ([spec:posix:req:builtin.getopts.stderr-diagnostic])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:03:48.12349103Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:05:30.092002002Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Prefix both non-quiet getopts diagnostics with the current shell special parameter 0, falling back to 'sh' only if no arg0 exists, while retaining the invalid option character and distinct unknown/missing-argument wording. Quiet-mode behavior remains silent. Verification: direct diagnostic case, both quiet/loud error neighbors, captured-stream unit coverage, and cargo test -p nsh pass (276 tests, one ignored doctest)."
+                            }
+                        )
                     }
 
                     {

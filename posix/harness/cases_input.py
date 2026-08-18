@@ -462,10 +462,12 @@ CASES: tuple[Case, ...] = (
             "getopts ab o 2>err\n"
             "set -- -f\n"
             "getopts f: o 2>>err\n"
-            "cat err\n"
+            "{ IFS= read -r unknown; IFS= read -r missing; } < err\n"
+            "case $unknown in *mygetoptsprog*x*) unknown=ok;; *) unknown=bad;; esac\n"
+            "case $missing in *mygetoptsprog*f*) missing=ok;; *) missing=bad;; esac\n"
+            "printf 'unknown=%s;missing=%s\\n' \"$unknown\" \"$missing\"\n"
         ),
-        stdout=None,
-        stdout_contains=("mygetoptsprog", "x", "f"),
+        stdout="unknown=ok;missing=ok\n",
     ),
     # [spec:posix:req:builtin.getopts.interfaces/test]
     Case(

@@ -67,6 +67,7 @@ pub fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:builtin.getopts.optarg-content]
 // [spec:posix:req:builtin.getopts.optarg]
 // [spec:posix:sem:builtin.getopts.optstring-first-character]
+// [spec:posix:req:builtin.getopts.stderr-diagnostic]
 // [spec:posix:req:builtin.getopts.exit-status]
 fn getopts(
     sh: &mut Shell,
@@ -135,7 +136,12 @@ fn getopts(
                     0,
                 )?;
             } else {
-                let mut message = b"Illegal option -".to_vec();
+                let mut message = sh
+                    .options
+                    .arg0()
+                    .unwrap_or_else(|| BStr::new(b"sh"))
+                    .to_vec();
+                message.extend_from_slice(b": Illegal option -");
                 message.push(option);
                 message.push(b'\n');
                 let _ = sh.io.stderr().write_all(&message);
@@ -169,7 +175,12 @@ fn getopts(
                     )?;
                     option = b':';
                 } else {
-                    let mut message = b"No arg for -".to_vec();
+                    let mut message = sh
+                        .options
+                        .arg0()
+                        .unwrap_or_else(|| BStr::new(b"sh"))
+                        .to_vec();
+                    message.extend_from_slice(b": No arg for -");
                     message.push(option);
                     message.extend_from_slice(b" option\n");
                     let _ = sh.io.stderr().write_all(&message);
@@ -234,17 +245,29 @@ mod tests {
         assert_eq!(value(&mut shell, "OPTIND"), "3");
     }
 
+    // [spec:posix:req:builtin.getopts.stderr-diagnostic/test]
     #[test]
-    fn a_leading_colon_reports_quietly() {
+    fn diagnostics_obey_leading_colon() {
         let _guard = lock();
         let words = ["getopts", ":a", "o", "-z"];
         let args: Vec<&BStr> = words.iter().map(|word| BStr::new(*word)).collect();
-        let mut shell = Shell::new(crate::streams::Streams::INHERIT);
+        let mut shell = Shell::new(crate::streams::Streams::capture().unwrap());
+        shell.options.set_arg0(BStr::new(b"my-program"));
         shell.options.shellparam.optind = 1;
         shell.options.shellparam.optoff = -1;
 
         assert_eq!(getoptscmd(&mut shell, &args).unwrap(), Flow::Done(0));
         assert_eq!(value(&mut shell, "o"), "?");
         assert_eq!(value(&mut shell, "OPTARG"), "z");
+
+        let loud_words = ["getopts", "a", "o", "-z"];
+        let loud_args: Vec<&BStr> = loud_words.iter().map(|word| BStr::new(*word)).collect();
+        shell.options.shellparam.optind = 1;
+        shell.options.shellparam.optoff = -1;
+        assert_eq!(getoptscmd(&mut shell, &loud_args).unwrap(), Flow::Done(0));
+        assert_eq!(
+            shell.take_captured_stderr().unwrap(),
+            BString::from("my-program: Illegal option -z\n")
+        );
     }
 }
