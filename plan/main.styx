@@ -317,6 +317,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T02:19:29.999250369Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T02:21:20.345766951Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Mapped all 34 XCU 2.7 rules to parser recognition, here-document parsing, operand expansion, redirection evaluation, descriptor installation, and here-document delivery. Followed parser-tests-when-syn-rules: retained the existing shell corpus as verification for syn rules. Verification: focused POSIX harness PASS=19 FAIL=0, cargo test -p nsh --quiet passed (230 unit tests plus all integration suites), git diff --check clean."
+                    }
+                )
             }
 
             {

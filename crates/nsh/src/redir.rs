@@ -97,6 +97,8 @@ impl RedirStack {
 // [spec:dash:def:redir.redirect-fn]
 // [spec:dash:sem:redir.redirect-fn]
 // [spec:posix:sem:shell.redirection-processing]
+// [spec:posix:def:redir.purpose]
+// [spec:posix:sem:redir.evaluation-order]
 pub fn redirect(
     sh: &mut Shell,
     redir: &[Node],
@@ -251,6 +253,17 @@ pub fn sh_open_read(
 
 // [spec:dash:def:redir.openredirect-fn]
 // [spec:dash:sem:redir.openredirect-fn]
+// [spec:posix:req:redir.open-failure]
+// [spec:posix:req:redir.input]
+// [spec:posix:req:redir.output-noclobber]
+// [spec:posix:req:redir.output-noclobber-atomicity]
+// [spec:posix:req:redir.output-truncate]
+// [spec:posix:req:redir.append]
+// [spec:posix:req:redir.dup-input]
+// [spec:posix:req:redir.dup-input-close]
+// [spec:posix:req:redir.dup-output]
+// [spec:posix:req:redir.dup-output-close]
+// [spec:posix:req:redir.open-read-write]
 fn openredirect(sh: &mut Shell, redir: &Node) -> Result<RedirectSource, Error> {
     let f = match redir.node_type() {
         NFROM => RedirectSource::Owned(sh_open(
@@ -435,6 +448,8 @@ pub fn sh_pipe(
 
 // [spec:dash:def:redir.openhere-fn]
 // [spec:dash:sem:redir.openhere-fn]
+// [spec:posix:sem:redir.here-doc-fd-type]
+// [spec:posix:req:redir.here-doc-expansion]
 fn openhere(sh: &mut Shell, redir: &Node) -> Result<OwnedFd, Error> {
     let len: usize;
     let expanded;

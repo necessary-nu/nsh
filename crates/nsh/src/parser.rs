@@ -817,6 +817,7 @@ fn command(sh: &mut Shell, kwd: c_int) -> Result<Option<Node>, Error> {
 
 // [spec:dash:def:parser.simplecmd-fn]
 // [spec:dash:sem:parser.simplecmd-fn]
+// [spec:posix:req:redir.not-in-command-arguments]
 fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
     let mut args: Vec<Node> = Vec::new();
     let mut vars: Vec<Node> = Vec::new();
@@ -937,6 +938,8 @@ pub fn fixredir(
 
 // [spec:dash:def:parser.parsefname-fn]
 // [spec:dash:sem:parser.parsefname-fn]
+// [spec:posix:req:redir.here-doc-quoted-delimiter]
+// [spec:posix:req:redir.here-doc-unquoted-delimiter]
 //
 // The C reads the redirection node out of the `redirnode` global; here the
 // caller has already taken ownership of it, because the `readtoken` below can
@@ -988,6 +991,10 @@ fn parsefname(sh: &mut Shell, n: &mut Node) -> Result<(), Error> {
 
 // [spec:dash:def:parser.parseheredoc-fn]
 // [spec:dash:sem:parser.parseheredoc-fn]
+// [spec:posix:req:redir.here-doc-line-continuation]
+// [spec:posix:req:redir.here-doc-backslash]
+// [spec:posix:req:redir.here-doc-multiple]
+// [spec:posix:req:redir.here-doc-ps2]
 fn parseheredoc(sh: &mut Shell) -> Result<(), Error> {
     let list: Vec<heredoc> = core::mem::take(&mut sh.input.heredoclist);
 
@@ -1827,6 +1834,8 @@ fn readtoken1(
  */
 
 /* checkend: */
+// [spec:posix:req:redir.here-doc-delimiter]
+// [spec:posix:req:redir.here-doc-tab-strip]
 fn checkend(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
     if let Some(mark) = st.eofmark.real() {
         let markloc: usize;
@@ -1898,6 +1907,14 @@ fn checkend(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
  */
 
 /* parseredir: */
+// [spec:posix:syn:redir.format]
+// [spec:posix:syn:redir.quoting-suppresses-recognition]
+// [spec:posix:req:redir.location-format]
+// [spec:posix:req:redir.max-fd-number]
+// [spec:posix:syn:redir.output-format]
+// [spec:posix:syn:redir.append-format]
+// [spec:posix:def:redir.here-doc]
+// [spec:posix:syn:redir.here-doc-format]
 fn parseredir(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
     let fdc: c_char = st.out[0] as c_char;
     /* The C carves one `struct nfile` and then decides what it is by

@@ -2711,4 +2711,75 @@ impl_evidence (
         {impl_name shell, rule shell.tokenization-and-parsing}
         {impl_name shell, rule shell.word-processing}
     )}
+    {id posix-redirection, covered_rules (
+        redir.append
+        redir.append-format
+        redir.dup-input
+        redir.dup-input-close
+        redir.dup-output
+        redir.dup-output-close
+        redir.evaluation-order
+        redir.format
+        redir.here-doc
+        redir.here-doc-backslash
+        redir.here-doc-delimiter
+        redir.here-doc-expansion
+        redir.here-doc-fd-type
+        redir.here-doc-format
+        redir.here-doc-line-continuation
+        redir.here-doc-multiple
+        redir.here-doc-ps2
+        redir.here-doc-quoted-delimiter
+        redir.here-doc-tab-strip
+        redir.here-doc-unquoted-delimiter
+        redir.input
+        redir.location-format
+        redir.max-fd-number
+        redir.not-in-command-arguments
+        redir.open-failure
+        redir.open-read-write
+        redir.output-format
+        redir.output-noclobber
+        redir.output-noclobber-atomicity
+        redir.output-truncate
+        redir.purpose
+        redir.quoting-suppresses-recognition
+        redir.word-expansion
+        redir.word-pathname-expansion
+    ), covered_claims (
+        {impl_name shell, rule redir.append}
+        {impl_name shell, rule redir.append-format}
+        {impl_name shell, rule redir.dup-input}
+        {impl_name shell, rule redir.dup-input-close}
+        {impl_name shell, rule redir.dup-output}
+        {impl_name shell, rule redir.dup-output-close}
+        {impl_name shell, rule redir.evaluation-order}
+        {impl_name shell, rule redir.format}
+        {impl_name shell, rule redir.here-doc}
+        {impl_name shell, rule redir.here-doc-backslash}
+        {impl_name shell, rule redir.here-doc-delimiter}
+        {impl_name shell, rule redir.here-doc-expansion}
+        {impl_name shell, rule redir.here-doc-fd-type}
+        {impl_name shell, rule redir.here-doc-format}
+        {impl_name shell, rule redir.here-doc-line-continuation}
+        {impl_name shell, rule redir.here-doc-multiple}
+        {impl_name shell, rule redir.here-doc-ps2}
+        {impl_name shell, rule redir.here-doc-quoted-delimiter}
+        {impl_name shell, rule redir.here-doc-tab-strip}
+        {impl_name shell, rule redir.here-doc-unquoted-delimiter}
+        {impl_name shell, rule redir.input}
+        {impl_name shell, rule redir.location-format}
+        {impl_name shell, rule redir.max-fd-number}
+        {impl_name shell, rule redir.not-in-command-arguments}
+        {impl_name shell, rule redir.open-failure}
+        {impl_name shell, rule redir.open-read-write}
+        {impl_name shell, rule redir.output-format}
+        {impl_name shell, rule redir.output-noclobber}
+        {impl_name shell, rule redir.output-noclobber-atomicity}
+        {impl_name shell, rule redir.output-truncate}
+        {impl_name shell, rule redir.purpose}
+        {impl_name shell, rule redir.quoting-suppresses-recognition}
+        {impl_name shell, rule redir.word-expansion}
+        {impl_name shell, rule redir.word-pathname-expansion}
+    )}
 )

@@ -798,6 +798,8 @@ fn evalsubshell(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
 
 // [spec:dash:def:eval.expredir-fn]
 // [spec:dash:sem:eval.expredir-fn]
+// [spec:posix:req:redir.word-expansion]
+// [spec:posix:req:redir.word-pathname-expansion]
 fn expredir(sh: &mut Shell, n: &[Node]) -> Result<(), Error> {
     for redir in n {
         let mut fnl: arglist = arglist::new();
