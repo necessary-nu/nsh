@@ -18,8 +18,9 @@ use std::io::Write;
 use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
 use crate::jobs::{
-    CUR_RUNNING, FORK_BG, FORK_FG, JOBDONE, JOBRUNNING, getjob, jobno, outcmd,
-    ps_pid, set_curjob, showpipe, waitforjob, xxtcsetpgrp,
+    CUR_RUNNING, FORK_BG, FORK_FG, JOBDONE, JOBRUNNING, apply_saved_job_terminal_settings,
+    capture_shell_terminal_settings, getjob, jobno, outcmd, ps_pid, set_curjob, showpipe,
+    terminal_settings_error, waitforjob, xxtcsetpgrp,
 };
 use crate::output::Dest;
 
@@ -92,18 +93,24 @@ pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:jobctl.continue-suspended-job]
 // [spec:posix:req:jobctl.fg-terminal-settings-restore]
 fn restartjob(sh: &mut Shell, jp: usize, mode: c_int) -> Result<c_int, Error> {
-    let status: c_int;
     let pgid: i32;
+    let mut terminal_error = None;
 
     INTOFF(sh);
     'out_lbl: {
         if sh.jobs.tab[jp].state as c_int == JOBDONE {
             break 'out_lbl;
         }
+        if mode == FORK_FG {
+            capture_shell_terminal_settings(sh)?;
+        }
         sh.jobs.tab[jp].state = JOBRUNNING as u8;
         pgid = ps_pid(sh, jp, 0);
         if mode == FORK_FG {
             xxtcsetpgrp(sh, pgid)?;
+            if let Err(error) = apply_saved_job_terminal_settings(sh, jp) {
+                terminal_error = Some(error);
+            }
         }
         let _ = nsh_platform::send_continue_to_process_group(pgid);
         /* the C's `do { … } while (--i)` visits `ps[0]` before it looks
@@ -116,11 +123,19 @@ fn restartjob(sh: &mut Shell, jp: usize, mode: c_int) -> Result<c_int, Error> {
         }
     }
     // out:
-    status = if mode == FORK_FG {
-        waitforjob(sh, Some(jp))?
+    let status = if mode == FORK_FG {
+        waitforjob(sh, Some(jp))
     } else {
-        0
+        Ok(0)
     };
     INTON(sh);
+    let status = status?;
+    if let Some(error) = terminal_error {
+        return Err(terminal_settings_error(
+            sh,
+            b"Cannot restore job tty settings",
+            error,
+        ));
+    }
     Ok(status)
 }

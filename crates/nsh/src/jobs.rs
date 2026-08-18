@@ -98,6 +98,9 @@ pub struct Job {
     pub used: u8,                /* true if this entry is in used */
     pub changed: u8,             /* true if status has changed */
     pub prev_job: Option<usize>, /* previous job */
+    /// Terminal state in effect when this foreground job most recently
+    /// stopped. It is opaque outside the safe platform boundary.
+    terminal_settings: Option<nsh_platform::TerminalSettings>,
 }
 
 impl Job {
@@ -113,6 +116,7 @@ impl Job {
             used: 0,
             changed: 0,
             prev_job: None,
+            terminal_settings: None,
         }
     }
 }
@@ -179,6 +183,8 @@ pub struct JobTable {
     initialpgrp: c_int,
     /// control terminal
     ttyfd: Option<OwnedFd>,
+    /// Terminal state the interactive shell needs while it owns the terminal.
+    shell_terminal_settings: Option<nsh_platform::TerminalSettings>,
     /// user was warned about stopped jobs
     pub(crate) job_warning: c_int,
 }
@@ -192,6 +198,7 @@ impl JobTable {
             jobctl: 0,
             initialpgrp: 0,
             ttyfd: None,
+            shell_terminal_settings: None,
             job_warning: 0,
         }
     }
@@ -359,6 +366,55 @@ pub(crate) fn xxtcsetpgrp(sh: &mut crate::context::Shell, pgrp: i32) -> Result<(
     let result = xtcsetpgrp(sh, &fd, pgrp);
     sh.jobs.ttyfd = Some(fd);
     result
+}
+
+// [spec:posix:req:jobctl.save-terminal-settings]
+pub(crate) fn capture_shell_terminal_settings(sh: &mut crate::context::Shell) -> Result<(), Error> {
+    if sh.jobs.jobctl == 0 || sh.jobs.shell_terminal_settings.is_some() {
+        return Ok(());
+    }
+    let result = {
+        let Some(fd) = sh.jobs.ttyfd.as_ref() else {
+            return Ok(());
+        };
+        nsh_platform::TerminalSettings::capture(fd)
+    };
+    match result {
+        Ok(settings) => {
+            sh.jobs.shell_terminal_settings = Some(settings);
+            Ok(())
+        }
+        Err(error) => Err(terminal_settings_error(
+            sh,
+            b"Cannot save shell tty settings",
+            error,
+        )),
+    }
+}
+
+pub(crate) fn apply_saved_job_terminal_settings(
+    sh: &crate::context::Shell,
+    jp: usize,
+) -> std::io::Result<()> {
+    let Some(settings) = sh.jobs.tab[jp].terminal_settings.as_ref() else {
+        return Ok(());
+    };
+    let Some(fd) = sh.jobs.ttyfd.as_ref() else {
+        return Ok(());
+    };
+    settings.apply(fd)
+}
+
+pub(crate) fn terminal_settings_error(
+    sh: &mut crate::context::Shell,
+    operation: &[u8],
+    error: std::io::Error,
+) -> Error {
+    let mut message = operation.to_vec();
+    message.extend_from_slice(b" (");
+    message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
+    message.push(b')');
+    sh.sh_error_value(&message)
 }
 
 // [spec:dash:def:jobs.setjobctl-fn]
@@ -764,6 +820,7 @@ fn freejob(sh: &mut crate::context::Shell, jp: usize) {
      * makes the second call the no-op the C only gets away with by
      * never making it. */
     sh.jobs.tab[jp].ps.clear();
+    sh.jobs.tab[jp].terminal_settings = None;
     sh.jobs.tab[jp].used = 0;
     set_curjob(sh, jp, CUR_DELETE);
     INTON(sh);
@@ -1195,6 +1252,10 @@ pub fn forkshell(
 
     crate::input::flush_input(sh);
 
+    if mode == FORK_FG && jp.is_some_and(|i| sh.jobs.tab[i].jobctl != 0) {
+        capture_shell_terminal_settings(sh)?;
+    }
+
     pid = match nsh_platform::fork_process() {
         Ok(nsh_platform::ForkResult::Child) => {
             forkchild(sh, jp, n, mode);
@@ -1233,6 +1294,10 @@ pub fn forkexec(
     let pid: c_int;
 
     jp = makejob(sh, 1);
+
+    if sh.jobs.tab[jp].jobctl != 0 {
+        capture_shell_terminal_settings(sh)?;
+    }
 
     pid = match nsh_platform::fork_process() {
         Ok(nsh_platform::ForkResult::Child) => {
@@ -1277,6 +1342,7 @@ pub fn forkexec(
 // [spec:posix:sem:cmd.async-status-via-wait]
 pub fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c_int, Error> {
     let st: c_int;
+    let mut terminal_error: Option<(&'static [u8], std::io::Error)> = None;
 
     /* TRACE(("waitforjob(%%%d) called\n", jp ? jobno(jp) : 0)); */
     dowait(sh, 
@@ -1293,8 +1359,28 @@ pub fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c
 
     st = getstatus(sh, jp);
     if sh.jobs.tab[jp].jobctl != 0 {
+        if sh.jobs.tab[jp].state as c_int == JOBSTOPPED {
+            let result = sh
+                .jobs
+                .ttyfd
+                .as_ref()
+                .map(nsh_platform::TerminalSettings::capture);
+            match result {
+                Some(Ok(settings)) => sh.jobs.tab[jp].terminal_settings = Some(settings),
+                Some(Err(error)) => {
+                    terminal_error = Some((b"Cannot save job tty settings", error));
+                }
+                None => {}
+            }
+        }
         let root_pid = sh.root_pid;
         xxtcsetpgrp(sh, root_pid)?;
+        if let Some(settings) = sh.jobs.shell_terminal_settings.take() {
+            let result = sh.jobs.ttyfd.as_ref().map(|fd| settings.apply(fd));
+            if let Some(Err(error)) = result {
+                terminal_error = Some((b"Cannot restore shell tty settings", error));
+            }
+        }
         /*
          * This is truly gross.
          * If we're doing job control, then we did a TIOCSPGRP which
@@ -1309,6 +1395,9 @@ pub fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c
     }
     if JOBS == 0 || sh.jobs.tab[jp].state as c_int == JOBDONE {
         freejob(sh, jp);
+    }
+    if let Some((operation, error)) = terminal_error {
+        return Err(terminal_settings_error(sh, operation, error));
     }
     Ok(st)
 }

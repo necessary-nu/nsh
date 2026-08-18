@@ -8,7 +8,7 @@ description = "Safe operating-system boundary for nsh"
 
 [dependencies]
 libc = "0.2"
-rustix = { version = "1", features = ["fs", "param", "process", "termios", "pipe", "stdio", "runtime"] }
+rustix = { version = "1", features = ["fs", "param", "process", "termios", "pipe", "pty", "stdio", "runtime"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }

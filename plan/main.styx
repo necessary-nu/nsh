@@ -3091,6 +3091,14 @@ children (
                             shell ([spec:posix:req:jobctl.save-terminal-settings])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:48:22.892102268Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+                        )
                     }
 
                     {

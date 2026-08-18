@@ -3694,4 +3694,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule grammar.operator-tokens}
     )}
+    {id fix-jobctl-save-terminal-settings, covered_rules (
+        jobctl.save-terminal-settings
+    ), covered_claims (
+        {impl_name shell, rule jobctl.save-terminal-settings}
+    )}
 )

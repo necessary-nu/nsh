@@ -21,6 +21,8 @@ use rustix::process::{Gid, Uid};
 
 mod locale;
 pub use locale::{Locale, LocaleCategory, LocaleDecode, LocaleDecoder};
+mod terminal;
+pub use terminal::TerminalSettings;
 
 // Rust's runtime changes three pieces of inherited process state before
 // `main`: it ignores SIGPIPE, installs stack-overflow handlers, and opens
@@ -1263,6 +1265,7 @@ mod tests {
         assert!(ProcessFdChanges::new([(-1, None)]).is_err());
         assert!(ProcessFdChanges::new([(4, None), (4, None)]).is_err());
     }
+
 }
 
 pub use rustix::fs::Access as AccessMode;
