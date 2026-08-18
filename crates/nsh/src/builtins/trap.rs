@@ -16,7 +16,7 @@ use std::io::Write;
 use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
 use crate::options::Options;
-use crate::trap::{NSIG, cbytes, clear_traps, decode_signal, decode_signum, setsignal};
+use crate::trap::{NSIG, clear_traps, decode_signal, decode_signum, setsignal};
 
 // [spec:dash:def:trap.trapcmd-fn]
 // [spec:dash:sem:trap.trapcmd-fn]
@@ -27,6 +27,7 @@ use crate::trap::{NSIG, cbytes, clear_traps, decode_signal, decode_signum, setsi
 // [spec:posix:req:builtin.trap.kill-stop-undefined]
 // [spec:posix:req:builtin.trap.list-condition-set]
 // [spec:posix:syn:builtin.trap.list-format]
+// [spec:posix:req:builtin.trap.list-in-subshell]
 // [spec:posix:req:builtin.trap.list-suitable-for-reinput]
 // [spec:posix:req:builtin.trap.xsi-signal-numbers]
 // [spec:posix:req:builtin.trap.invalid-condition-warning]
@@ -43,9 +44,8 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if ap.is_empty() {
         signo = 0;
         while signo < NSIG as c_int {
-            if let Some(t) = sh.traps.action(signo as usize) {
-                let t = cbytes(t);
-                let quoted = crate::mystring::single_quote(BStr::new(&t));
+            if let Some(t) = sh.traps.listed_action(signo as usize) {
+                let quoted = crate::mystring::single_quote(BStr::new(t.as_slice()));
                 let mut line = b"trap -- ".to_vec();
                 line.extend_from_slice(&quoted);
                 line.push(b' ');
@@ -57,6 +57,7 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
         return Ok(Flow::Done(0));
     }
+    sh.traps.end_subshell_listing();
     if sh.traps.ptrap != 0 {
         clear_traps(sh, None);
     }

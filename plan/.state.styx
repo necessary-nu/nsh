@@ -3539,4 +3539,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.set.options-both-forms}
     )}
+    {id fix-builtin-trap-list-in-subshell, covered_rules (
+        builtin.trap.list-in-subshell
+    ), covered_claims (
+        {impl_name shell, rule builtin.trap.list-in-subshell}
+    )}
 )

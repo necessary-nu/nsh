@@ -48,6 +48,10 @@ pub struct TrapTable {
     /// *ignored* signal counts as trapped — which is what dash's
     /// `trap[signo] != NULL` said.
     action: [Option<BString>; NSIG],
+    /// The actions visible to a listing before this subshell executes a
+    /// `trap` command with operands.  Live dispositions are still reset on
+    /// entry; POSIX requires only the pre-entry commands to remain reportable.
+    subshell_listing: Option<Box<[Option<BString>; NSIG]>>,
     /// traps have not been fully cleared
     pub(crate) ptrap: c_int,
     /// number of non-null traps
@@ -74,6 +78,7 @@ impl TrapTable {
         }
         TrapTable {
             action: [const { None }; NSIG],
+            subshell_listing: None,
             ptrap: 0,
             trapcnt: 0,
             sigmode: [0; NSIG - 1],
@@ -85,6 +90,34 @@ impl TrapTable {
     #[inline]
     pub(crate) fn action(&self, signo: usize) -> Option<&BString> {
         self.action[signo].as_ref()
+    }
+
+    /// The action a no-operand `trap` command must report.
+    pub(crate) fn listed_action(&self, signo: usize) -> Option<&BString> {
+        self.subshell_listing
+            .as_ref()
+            .map_or(&self.action, AsRef::as_ref)[signo]
+            .as_ref()
+    }
+
+    /// Preserve the listing inherited by a newly entered subshell.
+    ///
+    /// A nested subshell entered before any operand-bearing `trap` command
+    /// inherits the same reportable list even though its parent's live table
+    /// has already been reset.
+    fn begin_subshell_listing(&mut self) {
+        let inherited = self
+            .subshell_listing
+            .as_deref()
+            .unwrap_or(&self.action)
+            .clone();
+        self.subshell_listing = Some(Box::new(inherited));
+    }
+
+    /// An operand-bearing `trap` command makes subsequent listings reflect
+    /// the current subshell table.
+    pub(crate) fn end_subshell_listing(&mut self) {
+        self.subshell_listing = None;
     }
 
     /// Replace `trap[signo]`, publishing the handler's presence bit with
@@ -120,14 +153,6 @@ impl TrapTable {
     }
 }
 
-/// A trap action with the terminator its readers — `single_quote`, and
-/// `evalstring` by way of `strlen` — read up to.
-pub(crate) fn cbytes(s: &BString) -> Vec<u8> {
-    let mut v = s.to_vec();
-    v.push(0);
-    v
-}
-
 // [spec:dash:def:trap.have-traps-fn]
 // [spec:dash:sem:trap.have-traps-fn]
 pub fn have_traps(sh: &crate::context::Shell) -> c_int {
@@ -143,6 +168,7 @@ pub fn mkinit_init(sh: &mut crate::context::Shell) {
 
 /* mkinit FORKRESET fragment from src/trap.c:99-101. */
 pub fn mkinit_forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
+    sh.traps.begin_subshell_listing();
     clear_traps(sh, n);
 }
 

@@ -795,9 +795,16 @@ CASES: tuple[Case, ...] = (
     Case(
         id="trap-list-in-subshell",
         rules=("builtin.trap.list-in-subshell",),
-        script="trap 'echo bye' EXIT\n(trap)\n",
-        stdout=None,
-        stdout_contains=("trap -- 'echo bye' EXIT", "bye"),
+        script=(
+            "trap 'echo bye' EXIT\n"
+            "((trap); trap; trap 'echo current' USR1; trap)\n"
+        ),
+        stdout=(
+            "trap -- 'echo bye' EXIT\n"
+            "trap -- 'echo bye' EXIT\n"
+            "trap -- 'echo current' USR1\n"
+            "bye\n"
+        ),
     ),
     # [spec:posix:req:builtin.trap.action-executed-as-eval/test]
     Case(

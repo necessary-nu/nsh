@@ -2453,6 +2453,21 @@ children (
                             shell ([spec:posix:req:builtin.trap.list-in-subshell])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:37:09.871152115Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:39:49.300651612Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Separate reportable inherited trap commands from the live trap table. forkreset snapshots the effective listing before clearing live non-ignored actions; nested subshells inherit that snapshot; a bare trap lists it; and the first operand-bearing trap discards it so later listings show current child state. Remove the obsolete cbytes adapter because it appended a terminator that single_quote treated as output data. Strengthen the case to cover direct and nested inherited listings, snapshot invalidation, exact current-state output, and absence of NUL. Verification: trap-list-in-subshell and trap-list-reinput pass; cargo test -p nsh passes 279 tests with one ignored doctest; POSIX harness unit tests and git diff --check pass."
+                            }
+                        )
                     }
 
                     {
