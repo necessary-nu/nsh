@@ -2357,6 +2357,21 @@ children (
                             shell ([spec:posix:def:builtin.set.opt-o-noclobber])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:30:44.50003302Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:31:43.869167756Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Map the long-form noclobber rule to minus_o's shared Cflag slot. Correct the case so the expected redirection error occurs inside a subshell rather than terminating the outer non-interactive shell as a special-builtin error, and verify bidirectional state equivalence between -C/+C and -o/+o noclobber. Verification: the direct case and all four state/behavior assertions pass; POSIX harness unit tests and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

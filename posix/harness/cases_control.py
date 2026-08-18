@@ -264,14 +264,20 @@ CASES: tuple[Case, ...] = (
         rules=("builtin.set.opt-o-noclobber",),
         script=(
             "set -o noclobber\n"
+            "case $- in *C*) printf 'long-on\\n';; esac\n"
             ": >nc\n"
-            "if : >nc 2>/dev/null; then\n"
+            "if (: >nc) 2>/dev/null; then\n"
             "  printf 'BAD-OVERWRITE\\n'\n"
             "else\n"
             "  printf 'blocked\\n'\n"
             "fi\n"
+            "set +C\n"
+            ": >nc && printf 'short-off\\n'\n"
+            "set -C\n"
+            "set +o noclobber\n"
+            ": >nc && printf 'long-off\\n'\n"
         ),
-        stdout="blocked\n",
+        stdout="long-on\nblocked\nshort-off\nlong-off\n",
     ),
     # [spec:posix:def:builtin.set.opt-o-noglob/test]
     Case(

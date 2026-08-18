@@ -452,6 +452,7 @@ pub(crate) fn options(
 // [spec:posix:req:builtin.set.opt-o-monitor]
 // [spec:posix:def:builtin.set.opt-o-noglob]
 // [spec:posix:def:builtin.set.opt-o-noexec]
+// [spec:posix:def:builtin.set.opt-o-noclobber]
 // [spec:posix:req:builtin.set.opt-o-nolog]
 // [spec:posix:def:builtin.set.opt-o-notify]
 // [spec:posix:def:builtin.set.opt-o-nounset]
