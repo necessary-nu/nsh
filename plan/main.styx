@@ -5501,6 +5501,7 @@ children (
                 id integrate-smoosh-posix
                 title "Pin and integrate Smoosh as a separate POSIX conformance corpus"
                 deps (native-oils-spec-runner)
+                sealed true
                 log (
                     {
                         at 2026-08-18T13:04:49.740943072Z
@@ -5514,6 +5515,20 @@ children (
                         author "brendan@necessary.nu"
                         kind @status
                         text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T14:24:51.702485386Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Implemented an independent Smoosh boundary pinned to cc67dbe6a4953e51431997eac025b5e3f46c3d2d (tree 482255edc8f922f8ff32b93a86a28ac7d83071a8, MIT license hash locked). Reproducibly imported and verified 362 upstream shell payloads: 186 tests, 147 stdout, 14 stderr, 15 status oracles, and one preserved inactive oracle. Generated distinct full=186, regular=179, known-hang=7 manifests with five-second/default and one-second/hazard deadlines. Added a safe Rust runner with byte/status semantics, isolated HOME/cwd/env, TEST_SHELL/TEST_SHELL_FLAGS/TEST_UTIL, repeatable all-invocation shell flags, safe native replacements for argv/fds/getenv/readdir, bounded capture, and process-group TERM/KILL cleanup; no unsafe, RawFd, or libc use in nsh-survey. Full release-nsh survey: pass=155 fail=31 timeout=0 error=0, recorded in RESULTS.toml. Verification: reproducible clean import diff; 26 nsh-survey tests; strict package clippy; workspace tests green; Oils verify plus 18/18 smoke; final POSIX.1-2024 harness 731/731 cases and 973/973 automatic rules."
+                    }
+
+                    {
+                        at 2026-08-18T14:24:55.39603219Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }

@@ -19,6 +19,7 @@ pub(crate) struct SourceLock {
     license_path: String,
     license_sha256: String,
     suite_path: String,
+    known_hang_provenance: KnownHangProvenance,
     observed: Observed,
     manifests: ManifestExpectations,
     pub(crate) timeouts: Timeouts,
@@ -62,6 +63,14 @@ pub(crate) struct Timeouts {
 struct KnownHang {
     test: String,
     reason: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct KnownHangProvenance {
+    repository: String,
+    commit: String,
+    path: String,
 }
 
 #[derive(Debug)]
@@ -190,6 +199,9 @@ pub(crate) fn read_lock(root: &Path) -> Result<SourceLock> {
         || lock.license_path.is_empty()
         || lock.license_sha256.len() != 64
         || lock.suite_path != "tests/shell"
+        || lock.known_hang_provenance.repository != "https://github.com/oils-for-unix/oils.git"
+        || lock.known_hang_provenance.commit.len() != 40
+        || lock.known_hang_provenance.path != "test/smoosh.sh"
         || lock.timeouts.default_ms == 0
         || lock.timeouts.known_hang_ms == 0
     {
@@ -601,6 +613,28 @@ mod tests {
     }
 
     #[test]
+    fn payload_hash_drift_is_rejected() {
+        let source = survey_root();
+        let scratch = crate::process::ScratchTree::new().unwrap();
+        let root = scratch.path().join("smoosh");
+        copy_verified_root(&source, &root);
+        fs::write(root.join("shell/semantics.empty.test"), b"changed\n").unwrap();
+        let error = verify(&root).unwrap_err().to_string();
+        assert!(error.contains("hash"), "{error}");
+    }
+
+    #[test]
+    fn extra_payload_is_rejected() {
+        let source = survey_root();
+        let scratch = crate::process::ScratchTree::new().unwrap();
+        let root = scratch.path().join("smoosh");
+        copy_verified_root(&source, &root);
+        fs::write(root.join("shell/unreviewed.test"), b":\n").unwrap();
+        let error = verify(&root).unwrap_err().to_string();
+        assert!(error.contains("inventory mismatch"), "{error}");
+    }
+
+    #[test]
     fn status_oracle_is_trimmed_and_bounded() {
         let root = std::env::temp_dir().join(format!("nsh-smoosh-status-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
@@ -637,5 +671,25 @@ mod tests {
                     .ends_with(**suffix)),
             Some(&".test")
         );
+    }
+
+    fn copy_verified_root(source: &Path, destination: &Path) {
+        fs::create_dir_all(destination.join("shell")).unwrap();
+        for name in [
+            "SOURCE.toml",
+            "MANIFEST.toml",
+            "FILES.sha256",
+            "LICENSE.txt",
+        ] {
+            fs::copy(source.join(name), destination.join(name)).unwrap();
+        }
+        for entry in fs::read_dir(source.join("shell")).unwrap() {
+            let entry = entry.unwrap();
+            fs::copy(
+                entry.path(),
+                destination.join("shell").join(entry.file_name()),
+            )
+            .unwrap();
+        }
     }
 }

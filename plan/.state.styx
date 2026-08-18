@@ -1218,7 +1218,7 @@ assertions (
     {id import-oils-osh-corpus, kind @complete, author "brendan@necessary.nu", at 2026-08-18T13:26:59.601425552Z}
     {id define-oils-survey-manifests, kind @complete, author "brendan@necessary.nu", at 2026-08-18T13:31:55.474877325Z}
     {id native-oils-spec-runner, kind @complete, author "brendan@necessary.nu", at 2026-08-18T13:56:22.707009617Z}
-    {id integrate-smoosh-posix, kind @doing, author "brendan@necessary.nu", at 2026-08-18T13:57:52.925266499Z}
+    {id integrate-smoosh-posix, kind @complete, author "brendan@necessary.nu", at 2026-08-18T14:24:55.39603219Z}
 )
 
 impl_evidence (

@@ -9,6 +9,8 @@ shell-spec survey under `tests/surveys/oils/`.
 timeouts, and legacy known-hang classification. Ordinary verification is
 offline: it consumes only the checked-in files below this directory and does
 not require OPAM, Smoosh itself, or a checkout under the user's home directory.
+The origin of the known-hang classification is pinned separately to the exact
+Oils revision and `test/smoosh.sh` path that defined it.
 
 The generated `MANIFEST.toml` exposes three selections: `regular`,
 `known-hang`, and `full`. The known-hang cases are never discarded; they run
@@ -35,6 +37,7 @@ cargo build --release --bin nsh
 cargo run -p nsh-survey -- run-smoosh
 cargo run -p nsh-survey -- run-smoosh --group known-hang
 cargo run -p nsh-survey -- run-smoosh --group full --format json
+cargo run -p nsh-survey -- run-smoosh --group full --summary results.toml
 ```
 
 The native harness creates an isolated directory per script, supplies
@@ -43,3 +46,17 @@ only the streams for which upstream supplies an oracle, and defaults a missing
 `.ec` oracle to status zero exactly like `tests/shell_tests.sh`. Its helper
 executables are safe Rust implementations; no upstream C utility or shell
 driver is built or invoked.
+
+`--shell-flag` is repeatable. The native `smoosh-shell` wrapper process-replaces
+itself with the selected shell, ensuring those flags apply to the top-level
+script and every nested `$TEST_SHELL` invocation without changing parent-PID
+semantics. `nsh` needs no extra flag because its baseline language is POSIX;
+for example, use `--shell /bin/bash --shell-flag --posix` when surveying Bash.
+
+## Recorded result
+
+`RESULTS.toml` is a deterministic summary from the complete `full` group. It
+records the tested release binary's SHA-256, both timeout classes, totals, and
+every non-passing script without conflating those observations with normative
+POSIX.1-2024 conformance. The initial nsh result is 155 pass and 31 fail, with
+zero timeouts and zero harness errors across all 186 scripts.

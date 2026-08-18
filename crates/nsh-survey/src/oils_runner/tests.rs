@@ -55,14 +55,6 @@ fn rejects_qualified_metadata_conflicts() {
 }
 
 #[test]
-fn capture_discards_bytes_past_the_bound() {
-    let input = vec![b'x'; OUTPUT_LIMIT + 17];
-    let captured = capture(std::io::Cursor::new(input)).unwrap();
-    assert!(captured.truncated);
-    assert_eq!(captured.bytes.len(), OUTPUT_LIMIT);
-}
-
-#[test]
 fn parses_every_imported_oils_case() {
     let root = crate::survey_root();
     let manifest: crate::OilsManifest =
@@ -102,7 +94,7 @@ fn process_timeout_kills_background_descendants() {
     )
     .unwrap();
     assert!(process.timed_out);
-    thread::sleep(Duration::from_millis(1_100));
+    std::thread::sleep(Duration::from_millis(1_100));
     assert!(!case_dir.join("leak").exists());
 }
 

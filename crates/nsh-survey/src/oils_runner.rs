@@ -5,22 +5,19 @@ use std::env;
 use std::error::Error;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::{Read, Write};
-use std::os::unix::process::{CommandExt, ExitStatusExt};
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::thread;
 use std::time::{Duration, Instant};
+
+use crate::process::{
+    OUTPUT_LIMIT, Output as ProcessResult, Request as ProcessRequest, ScratchTree,
+};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 pub(crate) mod helpers;
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
-const TERM_GRACE_MS: u64 = 100;
-const POLL_MS: u64 = 5;
-const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
 
 pub(crate) fn command(args: env::ArgsOs, default_root: PathBuf) -> Result<bool> {
     let Some(options) = Options::parse(args, default_root)? else {
@@ -346,126 +343,34 @@ fn safe_component(name: &str) -> String {
         .collect()
 }
 
-#[derive(Debug)]
-struct ProcessResult {
-    status: ExitStatus,
-    stdout: Captured,
-    stderr: Captured,
-    timed_out: bool,
-    duration: Duration,
-    writer_error: Option<String>,
-}
-
-#[derive(Debug)]
-struct Captured {
-    bytes: Vec<u8>,
-    truncated: bool,
-}
-
 fn run_process(context: &RunContext<'_>, directory: &Path, code: &[u8]) -> Result<ProcessResult> {
-    let mut command = Command::new(context.shell);
+    let mut arguments = Vec::new();
     if context.posix {
-        command.args(["-o", "posix"]);
+        arguments.extend([OsString::from("-o"), OsString::from("posix")]);
     }
-    command
-        .current_dir(directory)
-        .env_clear()
-        .env("PATH", &context.survey_path)
-        .env("LC_ALL", "C.UTF-8")
-        .env(
-            "LOCALE_ARCHIVE",
+    let environment = vec![
+        (OsString::from("PATH"), context.survey_path.clone()),
+        (OsString::from("LC_ALL"), OsString::from("C.UTF-8")),
+        (
+            OsString::from("LOCALE_ARCHIVE"),
             env::var_os("LOCALE_ARCHIVE").unwrap_or_default(),
-        )
-        .env("OILS_GC_ON_EXIT", "")
-        .env("REPO_ROOT", context.root)
-        .env("SH", context.shell)
-        .env("TMP", directory)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
-    let started = Instant::now();
-    let mut child = command.spawn()?;
-    let group = i32::try_from(child.id()).map_err(|_| "child pid does not fit i32")?;
-    let mut input = child.stdin.take().ok_or("child stdin was not piped")?;
-    let output = child.stdout.take().ok_or("child stdout was not piped")?;
-    let errors = child.stderr.take().ok_or("child stderr was not piped")?;
-    let script = code.to_vec();
-    let writer = thread::spawn(move || input.write_all(&script));
-    let stdout_reader = thread::spawn(move || capture(output));
-    let stderr_reader = thread::spawn(move || capture(errors));
-
-    let deadline = started + context.timeout;
-    let mut timed_out = false;
-    let status = 'wait: loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            timed_out = true;
-            let signalled = nsh_platform::send_signal_to_process_group(
-                group,
-                nsh_platform::termination_signal(),
-            )
-            .is_ok();
-            if !signalled {
-                let _ = child.kill();
-            }
-            let grace_deadline = Instant::now() + Duration::from_millis(TERM_GRACE_MS);
-            loop {
-                if let Some(status) = child.try_wait()? {
-                    break 'wait status;
-                }
-                if Instant::now() >= grace_deadline {
-                    let _ = nsh_platform::send_signal_to_process_group(
-                        group,
-                        nsh_platform::kill_signal(),
-                    );
-                    let _ = child.kill();
-                    break 'wait child.wait()?;
-                }
-                thread::sleep(Duration::from_millis(POLL_MS));
-            }
-        }
-        thread::sleep(Duration::from_millis(POLL_MS));
-    };
-    let _ = nsh_platform::send_signal_to_process_group(group, nsh_platform::kill_signal());
-    let writer_error = writer
-        .join()
-        .map_err(|_| "stdin writer thread panicked")?
-        .err()
-        .filter(|error| error.kind() != std::io::ErrorKind::BrokenPipe)
-        .map(|error| error.to_string());
-    let stdout = stdout_reader
-        .join()
-        .map_err(|_| "stdout reader thread panicked")??;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| "stderr reader thread panicked")??;
-    Ok(ProcessResult {
-        status,
-        stdout,
-        stderr,
-        timed_out,
-        duration: started.elapsed(),
-        writer_error,
+        ),
+        (OsString::from("OILS_GC_ON_EXIT"), OsString::new()),
+        (
+            OsString::from("REPO_ROOT"),
+            context.root.as_os_str().to_owned(),
+        ),
+        (OsString::from("SH"), context.shell.as_os_str().to_owned()),
+        (OsString::from("TMP"), directory.as_os_str().to_owned()),
+    ];
+    crate::process::run(&ProcessRequest {
+        program: context.shell,
+        arguments: &arguments,
+        directory,
+        environment: &environment,
+        input: code,
+        timeout: context.timeout,
     })
-}
-
-fn capture(mut reader: impl Read) -> std::io::Result<Captured> {
-    let mut bytes = Vec::new();
-    let mut truncated = false;
-    let mut buffer = [0_u8; 16 * 1024];
-    loop {
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        let remaining = OUTPUT_LIMIT.saturating_sub(bytes.len());
-        bytes.extend_from_slice(&buffer[..count.min(remaining)]);
-        truncated |= count > remaining;
-    }
-    Ok(Captured { bytes, truncated })
 }
 
 fn evaluate_case(
@@ -1410,41 +1315,7 @@ fn hex(value: &[u8]) -> String {
 }
 
 fn duration_millis(duration: Duration) -> u64 {
-    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
-}
-
-static SCRATCH_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-struct ScratchTree {
-    path: PathBuf,
-}
-
-impl ScratchTree {
-    fn new() -> std::io::Result<Self> {
-        for _ in 0..100 {
-            let serial = SCRATCH_COUNTER.fetch_add(1, Ordering::Relaxed);
-            let path = env::temp_dir().join(format!("nsh-survey-{}-{serial}", std::process::id()));
-            match fs::create_dir(&path) {
-                Ok(()) => return Ok(Self { path }),
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(error),
-            }
-        }
-        Err(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "could not allocate a unique survey scratch directory",
-        ))
-    }
-
-    fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl Drop for ScratchTree {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
+    crate::process::duration_millis(duration)
 }
 
 #[cfg(test)]

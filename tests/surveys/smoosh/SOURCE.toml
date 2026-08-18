@@ -7,6 +7,11 @@ license_path = "LICENSE"
 license_sha256 = "1df561402110a26f08e593508eaad7a76677a4dae5fb1d64f265e5e5e6ee140f"
 suite_path = "tests/shell"
 
+[known_hang_provenance]
+repository = "https://github.com/oils-for-unix/oils.git"
+commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
+path = "test/smoosh.sh"
+
 [observed]
 tests = 186
 payload_files = 362
@@ -28,7 +33,9 @@ tests = 7
 default_ms = 5000
 known_hang_ms = 1000
 
-# Oils historically separated these scripts from the ordinary Smoosh run.
+# The pinned Oils revision above separated these scripts from its ordinary
+# Smoosh run. The classification is copied here so this corpus stays
+# independently runnable and does not need an Oils checkout.
 # They remain present and runnable, but always receive their own bounded group.
 [[known_hangs]]
 test = "semantics.empty.test"

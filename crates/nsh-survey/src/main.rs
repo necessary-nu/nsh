@@ -10,7 +10,9 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 mod oils_runner;
+mod process;
 mod smoosh;
+mod smoosh_runner;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -53,6 +55,9 @@ struct ExpectedCount {
 
 fn main() {
     if let Some(status) = oils_runner::helpers::status_if_invoked() {
+        std::process::exit(status);
+    }
+    if let Some(status) = smoosh_runner::helpers::status_if_invoked() {
         std::process::exit(status);
     }
     if let Err(error) = run() {
@@ -113,12 +118,19 @@ fn run() -> Result<()> {
             reject_extra_args(args)?;
             smoosh::generate_manifest(&root)
         }
+        Some(command) if command == OsStr::new("run-smoosh") => {
+            if smoosh_runner::command(args, smoosh::survey_root())? {
+                Ok(())
+            } else {
+                std::process::exit(1)
+            }
+        }
         _ => Err(usage().into()),
     }
 }
 
 fn usage() -> &'static str {
-    "usage: nsh-survey import-oils OILS_CHECKOUT [OUTPUT]\n       nsh-survey verify-oils [ROOT]\n       nsh-survey generate-oils-manifests [ROOT]\n       nsh-survey run-oils [OPTIONS] [ROOT]\n       nsh-survey import-smoosh SMOOSH_CHECKOUT [OUTPUT]\n       nsh-survey verify-smoosh [ROOT]\n       nsh-survey generate-smoosh-manifest [ROOT]"
+    "usage: nsh-survey import-oils OILS_CHECKOUT [OUTPUT]\n       nsh-survey verify-oils [ROOT]\n       nsh-survey generate-oils-manifests [ROOT]\n       nsh-survey run-oils [OPTIONS] [ROOT]\n       nsh-survey import-smoosh SMOOSH_CHECKOUT [OUTPUT]\n       nsh-survey verify-smoosh [ROOT]\n       nsh-survey generate-smoosh-manifest [ROOT]\n       nsh-survey run-smoosh [OPTIONS] [ROOT]"
 }
 
 fn required_path(value: Option<std::ffi::OsString>, name: &str) -> Result<PathBuf> {
