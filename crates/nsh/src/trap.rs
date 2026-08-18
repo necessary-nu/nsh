@@ -320,6 +320,11 @@ fn install_disposition(
 // [spec:dash:def:trap.setsignal-fn]
 // [spec:dash:sem:trap.setsignal-fn]
 // [spec:posix:req:builtin.trap.signals-ignored-on-entry]
+// [spec:posix:req:sh.signals-standard-action]
+// [spec:posix:req:sh.interactive-sigint]
+// [spec:posix:req:sh.interactive-sigquit-sigterm]
+// [spec:posix:req:sh.interactive-stop-signals]
+// [spec:posix:req:sh.signal-actions-overridable]
 pub fn setsignal(sh: &mut crate::context::Shell, signo: c_int) {
     setsignal_via(sh, signo, Via::Host)
 }

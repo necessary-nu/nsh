@@ -301,6 +301,22 @@ pub fn mkinit_init(sh: &mut Shell) -> Result<(), Error> {
 }
 
 // [spec:nsh:sem:shell-locale.invalid-selection]
+// [spec:posix:def:sh.environment-variables]
+// [spec:posix:req:sh.envvar-env]
+// [spec:posix:req:sh.envvar-fcedit]
+// [spec:posix:req:sh.envvar-histfile]
+// [spec:posix:req:sh.envvar-histsize]
+// [spec:posix:sem:sh.envvar-home]
+// [spec:posix:sem:sh.envvar-lang-and-lc-all]
+// [spec:posix:sem:sh.envvar-lc-collate]
+// [spec:posix:sem:sh.envvar-lc-ctype]
+// [spec:posix:req:sh.envvar-lc-messages]
+// [spec:posix:req:sh.envvar-mail]
+// [spec:posix:req:sh.envvar-mailcheck]
+// [spec:posix:req:sh.envvar-mailpath]
+// [spec:posix:sem:sh.envvar-nlspath]
+// [spec:posix:sem:sh.envvar-path]
+// [spec:posix:req:sh.envvar-pwd]
 pub(crate) fn mkinit_init_from(sh: &mut Shell, env: EnvSource<'_>) -> Result<(), Error> {
     use std::os::unix::fs::MetadataExt;
 

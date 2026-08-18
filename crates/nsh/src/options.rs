@@ -222,6 +222,17 @@ impl ShellOptions {
 
 // [spec:dash:def:options.procargs-fn]
 // [spec:dash:sem:options.procargs-fn]
+// [spec:posix:req:sh.option-o-without-option-argument]
+// [spec:posix:req:sh.option-c]
+// [spec:posix:req:sh.option-i]
+// [spec:posix:req:sh.option-s]
+// [spec:posix:req:sh.option-s-assumed]
+// [spec:posix:req:sh.operand-hyphen]
+// [spec:posix:req:sh.operand-argument]
+// [spec:posix:req:sh.operand-command-file]
+// [spec:posix:req:sh.special-parameter-0]
+// [spec:posix:req:sh.operand-command-name]
+// [spec:posix:req:sh.operand-command-string]
 pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<c_int, Error> {
     let mut i: c_int;
     let first = argv.first().map(Vec::as_slice).unwrap_or_default();

@@ -1993,4 +1993,103 @@ impl_evidence (
         {impl_name shell, rule builtin.unset.utility-syntax-guidelines}
         {impl_name shell, rule builtin.unset.v-option}
     )}
+    {id posix-invocation, covered_rules (
+        sh.command-language-interpreter
+        sh.consequences-of-errors
+        sh.environment-variables
+        sh.envvar-env
+        sh.envvar-fcedit
+        sh.envvar-histfile
+        sh.envvar-histsize
+        sh.envvar-home
+        sh.envvar-lang-and-lc-all
+        sh.envvar-lc-collate
+        sh.envvar-lc-ctype
+        sh.envvar-lc-messages
+        sh.envvar-mail
+        sh.envvar-mailcheck
+        sh.envvar-mailpath
+        sh.envvar-nlspath
+        sh.envvar-path
+        sh.envvar-pwd
+        sh.exit-status-otherwise
+        sh.input-file-blank-or-comments
+        sh.input-file-contents
+        sh.interactive
+        sh.interactive-sigint
+        sh.interactive-sigquit-sigterm
+        sh.interactive-stop-signals
+        sh.operand-argument
+        sh.operand-command-file
+        sh.operand-command-name
+        sh.operand-command-string
+        sh.operand-hyphen
+        sh.option-c
+        sh.option-i
+        sh.option-o-without-option-argument
+        sh.option-s
+        sh.option-s-assumed
+        sh.output-files
+        sh.pathname-expansion-file-size
+        sh.redirection-offset-maximum
+        sh.set-derived-options
+        sh.signal-actions-overridable
+        sh.signals-standard-action
+        sh.special-parameter-0
+        sh.stderr-diagnostics-only
+        sh.stdin-blocking-reads
+        sh.stdin-no-read-ahead
+        sh.stdin-used-only-if
+        sh.synopsis
+        sh.utility-syntax-guidelines
+    ), covered_claims (
+        {impl_name shell, rule sh.command-language-interpreter}
+        {impl_name shell, rule sh.consequences-of-errors}
+        {impl_name shell, rule sh.environment-variables}
+        {impl_name shell, rule sh.envvar-env}
+        {impl_name shell, rule sh.envvar-fcedit}
+        {impl_name shell, rule sh.envvar-histfile}
+        {impl_name shell, rule sh.envvar-histsize}
+        {impl_name shell, rule sh.envvar-home}
+        {impl_name shell, rule sh.envvar-lang-and-lc-all}
+        {impl_name shell, rule sh.envvar-lc-collate}
+        {impl_name shell, rule sh.envvar-lc-ctype}
+        {impl_name shell, rule sh.envvar-lc-messages}
+        {impl_name shell, rule sh.envvar-mail}
+        {impl_name shell, rule sh.envvar-mailcheck}
+        {impl_name shell, rule sh.envvar-mailpath}
+        {impl_name shell, rule sh.envvar-nlspath}
+        {impl_name shell, rule sh.envvar-path}
+        {impl_name shell, rule sh.envvar-pwd}
+        {impl_name shell, rule sh.exit-status-otherwise}
+        {impl_name shell, rule sh.input-file-blank-or-comments}
+        {impl_name shell, rule sh.input-file-contents}
+        {impl_name shell, rule sh.interactive}
+        {impl_name shell, rule sh.interactive-sigint}
+        {impl_name shell, rule sh.interactive-sigquit-sigterm}
+        {impl_name shell, rule sh.interactive-stop-signals}
+        {impl_name shell, rule sh.operand-argument}
+        {impl_name shell, rule sh.operand-command-file}
+        {impl_name shell, rule sh.operand-command-name}
+        {impl_name shell, rule sh.operand-command-string}
+        {impl_name shell, rule sh.operand-hyphen}
+        {impl_name shell, rule sh.option-c}
+        {impl_name shell, rule sh.option-i}
+        {impl_name shell, rule sh.option-o-without-option-argument}
+        {impl_name shell, rule sh.option-s}
+        {impl_name shell, rule sh.option-s-assumed}
+        {impl_name shell, rule sh.output-files}
+        {impl_name shell, rule sh.pathname-expansion-file-size}
+        {impl_name shell, rule sh.redirection-offset-maximum}
+        {impl_name shell, rule sh.set-derived-options}
+        {impl_name shell, rule sh.signal-actions-overridable}
+        {impl_name shell, rule sh.signals-standard-action}
+        {impl_name shell, rule sh.special-parameter-0}
+        {impl_name shell, rule sh.stderr-diagnostics-only}
+        {impl_name shell, rule sh.stdin-blocking-reads}
+        {impl_name shell, rule sh.stdin-no-read-ahead}
+        {impl_name shell, rule sh.stdin-used-only-if}
+        {impl_name shell, rule sh.synopsis}
+        {impl_name shell, rule sh.utility-syntax-guidelines}
+    )}
 )

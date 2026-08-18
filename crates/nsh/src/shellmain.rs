@@ -79,6 +79,17 @@ fn etext() -> c_int {
 /// to run as. [`main_fn`] is what a caller outside the crate reaches.
 // [spec:dash:def:main.main-fn]
 // [spec:dash:sem:main.main-fn]
+// [spec:posix:syn:sh.synopsis]
+// [spec:posix:req:sh.command-language-interpreter]
+// [spec:posix:req:sh.pathname-expansion-file-size]
+// [spec:posix:sem:sh.redirection-offset-maximum]
+// [spec:posix:req:sh.utility-syntax-guidelines]
+// [spec:posix:req:sh.set-derived-options]
+// [spec:posix:def:sh.interactive]
+// [spec:posix:req:sh.stderr-diagnostics-only]
+// [spec:posix:sem:sh.output-files]
+// [spec:posix:req:sh.exit-status-otherwise]
+// [spec:posix:req:sh.consequences-of-errors]
 pub fn main(
     sh: &mut Shell,
     argv: &[Vec<u8>],

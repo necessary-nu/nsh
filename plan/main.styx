@@ -847,6 +847,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T02:00:44.535759978Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T02:01:49.093502007Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Established implementation coverage for all 48 claimed sh invocation rules across startup orchestration, command-line option/operand parsing, input discipline, environment initialization, and signal policy. The rule-selected POSIX harness passed all 39 cases and 49 exercised rule assertions."
+                    }
+                )
             }
 
             {
