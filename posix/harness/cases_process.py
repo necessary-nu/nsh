@@ -1023,18 +1023,19 @@ CASES: tuple[Case, ...] = (
             "builtin.wait.operand-pid-number",
         ),
         script=(
-            "sh -c 'exit 3' &\n"
+            "( sleep 0.2; : >first-done; exit 3 ) &\n"
             "a=$!\n"
             "sh -c 'exit 5' &\n"
             "b=$!\n"
             "wait \"$a\" \"$b\"\n"
             "printf 'last=%s\\n' \"$?\"\n"
+            "test -f first-done && printf 'all-terminated\\n'\n"
             "sh -c 'exit 6' &\n"
             "c=$!\n"
             "wait 999999 \"$c\" 2>/dev/null\n"
             "printf 'unknown-first=%s\\n' \"$?\"\n"
         ),
-        stdout="last=5\nunknown-first=6\n",
+        stdout="last=5\nall-terminated\nunknown-first=6\n",
         timeout=15.0,
     ),
     # [spec:posix:req:builtin.wait.pid-operands/test]

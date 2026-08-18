@@ -25,6 +25,7 @@ use crate::jobs::{
 // [spec:posix:req:builtin.wait.no-operands]
 // [spec:posix:req:builtin.wait.exit-status-last-operand]
 // [spec:posix:req:builtin.wait.exit-status-values]
+// [spec:posix:req:builtin.wait.pid-operands]
 // [spec:posix:def:builtin.wait.operand-pid-number]
 // [spec:posix:req:builtin.wait.operand-pid-job-id]
 // [spec:posix:req:builtin.wait.env-vars]

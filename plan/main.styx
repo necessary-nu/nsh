@@ -2621,6 +2621,21 @@ children (
                             shell ([spec:posix:req:builtin.wait.pid-operands])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:49:40.812540936Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:50:27.193111569Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Map waitcmd's operand loop to the PID-operand rule. Keep the paired known/unknown ordering assertions, and make the first of two known children deliberately slower with a completion marker while the final child exits quickly; the marker proves wait waits for every requested known PID even though it returns the final operand's status. Verification: both PID-operand cases and POSIX harness unit tests pass; git diff --check passes."
+                            }
+                        )
                     }
 
                     {

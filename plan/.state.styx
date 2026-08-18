@@ -3574,4 +3574,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.wait.exit-status-values}
     )}
+    {id fix-builtin-wait-pid-operands, covered_rules (
+        builtin.wait.pid-operands
+    ), covered_claims (
+        {impl_name shell, rule builtin.wait.pid-operands}
+    )}
 )
