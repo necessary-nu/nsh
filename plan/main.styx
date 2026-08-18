@@ -3428,6 +3428,7 @@ children (
                 priority 0
                 kind @test
                 deps (process-environment-contract)
+                sealed true
                 log (
                     {
                         at 2026-08-17T22:55:48.513530868Z
@@ -3441,6 +3442,27 @@ children (
                         author "brendan@necessary.nu"
                         kind @decision
                         text "The baseline includes a generated single-byte locale in addition to C and UTF-8. UTF-8 alone hides byte-classification differences such as isalpha(0xE9); the operator approved this correction with the implementation plan."
+                    }
+
+                    {
+                        at 2026-08-17T23:29:08.697751778Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T00:25:38.842642149Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Reproducible pre-isolation baseline at db17c629 (target sha256 2fcb5c0d, reference ef8aa92e) with a generated LOCPATH en_US.ISO-8859-1 fixture. UTF-8: PASS=39340 FAIL=9 FLAKY=32 XFAIL=4. ISO-8859-1: PASS=39336 FAIL=13 FLAKY=26 XFAIL=4. The stable common nine are ul1/ul76/ul108/ul177, pipe-failure-via-fd-limit, fd-exhaustion-on-redirect, heredoc-fd-type-big/small, and closed-stdout-stays-closed; all are pre-existing logical-descriptor/low-RLIMIT behavior. ISO adds exactly four stable bad-variable-name differences: one aud_parser_bytes24 case, two aud_parser_bz31 cases, and one aud_parser_bz34 case, plus the direct raw-E9 probe. C reported 39339/10 because one background-output ordering case in aud_parser_bz31 was nondeterministic in reference dash (3 distinct reference outputs); an immediate isolated rerun was PASS=1020 FAIL=0 FLAKY=4, confirming it is load-sensitive rather than a locale difference. Artifacts are frozen under tests/.build/locale-before-p0."
+                    }
+
+                    {
+                        at 2026-08-18T00:25:43.344831243Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }

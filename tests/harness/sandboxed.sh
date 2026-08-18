@@ -68,6 +68,8 @@ DS_TIMEOUT=${DS_TIMEOUT:-10}
 # doing, and doing it by accident is not.
 ds_sandboxed() {  # ds_sandboxed WORKDIR SHELL [ARGS...]
 	local dir=$1; shift
+	local -a locale_path=()
+	[ -z "${LOCPATH:-}" ] || locale_path=(--setenv LOCPATH "$LOCPATH")
 	timeout $((DS_TIMEOUT + 5)) \
 	"$DS_SANDBOX" --quiet \
 		--unshare all \
@@ -81,6 +83,7 @@ ds_sandboxed() {  # ds_sandboxed WORKDIR SHELL [ARGS...]
 		--setenv TMPDIR "$dir" \
 		--setenv PATH "$dir/.bin:/usr/bin:/bin" \
 		--setenv LC_ALL "${DS_LOCALE:-C}" \
+		"${locale_path[@]}" \
 		--unsetenv LANG \
 		--unsetenv LANGUAGE \
 		--unsetenv LC_COLLATE \
@@ -91,6 +94,21 @@ ds_sandboxed() {  # ds_sandboxed WORKDIR SHELL [ARGS...]
 		${DS_COVDIR:+--bind "$DS_COVDIR:$DS_COVDIR"} \
 		${DS_COVDIR:+--setenv LLVM_PROFILE_FILE "$DS_COVDIR/dash-%8m.profraw"} \
 		-- timeout "$DS_TIMEOUT" env --default-signal -- "$@"
+}
+
+# `locale -a` only reports the system archive.  A locale generated with
+# `localedef --no-archive` is nevertheless loadable through LOCPATH, so the
+# harness has to recognize both forms or its reproducible single-byte fixture
+# is rejected before a case runs.
+ds_locale_available() {  # ds_locale_available NAME
+	local name=$1 path
+	local -a locale_paths
+	locale -a 2>/dev/null | grep -qxF "$name" && return 0
+	IFS=: read -r -a locale_paths <<< "${LOCPATH:-}"
+	for path in "${locale_paths[@]}"; do
+		[ -n "$path" ] && [ -d "$path/$name" ] && return 0
+	done
+	return 1
 }
 
 # DS_COVDIR, when set, is one writable directory bound into the namespace

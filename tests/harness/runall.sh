@@ -14,7 +14,15 @@ JOBS=${1:-8}
 # reported at the end of the run.
 . "$HERE/divergences.sh"
 
-OUT=$ROOT/tests/.build/fail
+BUILD_ROOT=$(realpath -m -- "$ROOT/tests/.build")
+OUT=$(realpath -m -- "${RUNALL_OUT:-$BUILD_ROOT/fail}")
+case $OUT in
+"$BUILD_ROOT"/*) ;;
+*)
+	echo "RUNALL_OUT must be below $BUILD_ROOT" >&2
+	exit 2
+	;;
+esac
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
@@ -66,7 +74,8 @@ for corpus in "$ROOT"/tests/corpus/*.txt; do
 	[ "$FAIL" -gt 0 ] && printf '%-32s %s\n' "$name" "$line"
 done
 
-echo "==== TOTAL PASS=$total_pass FAIL=$total_fail FLAKY=$total_flaky XFAIL=$total_xfail ===="
+printf '\n==== TOTAL PASS=%s FAIL=%s FLAKY=%s XFAIL=%s ====\n' \
+	"$total_pass" "$total_fail" "$total_flaky" "$total_xfail"
 # A registered divergence that no corpus in a whole run triggers is an
 # excuse for a difference the shell no longer produces, and a stale excuse
 # is how a real regression eventually gets waved through. This is the only

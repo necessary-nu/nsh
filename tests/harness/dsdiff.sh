@@ -116,7 +116,7 @@ done
 # corpus rather than degrading.
 missing=$(grep -h '^#!locale=' "$RUNROOT"/cases/* 2>/dev/null | sed 's/^#!locale=//' | sort -u |
 	while IFS= read -r l; do
-		locale -a 2>/dev/null | grep -qxF "$l" || printf '%s\n' "$l"
+		ds_locale_available "$l" || printf '%s\n' "$l"
 	done)
 if [ -n "$missing" ]; then
 	echo "corpus asks for locales this system has not generated: $(echo "$missing" | tr '\n' ' ')" >&2
