@@ -3090,6 +3090,21 @@ children (
                             shell ([spec:posix:req:edit.history-search-forward])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:17:28.182934357Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:17:58.767040209Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "The stale nshedit blocker is resolved. nsh's prompted `?` path searches toward newer entries beginning strictly after the selected entry; a miss returns the typed unchanged boundary response and alerts. Map the rule at History::search_editor and add a forward miss case from an older entry, proving BEL and line preservation. Verification: both forward-search PTY cases, all 17 linedit tests, 14 harness unit tests, and git diff --check pass."
+                            }
+                        )
                     }
 
                     {
