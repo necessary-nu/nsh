@@ -10,6 +10,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 mod oils_runner;
+mod smoosh;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -87,12 +88,37 @@ fn run() -> Result<()> {
                 std::process::exit(1)
             }
         }
+        Some(command) if command == OsStr::new("import-smoosh") => {
+            let checkout = required_path(args.next(), "SMOOSH_CHECKOUT")?;
+            let output = args
+                .next()
+                .map(PathBuf::from)
+                .unwrap_or_else(smoosh::survey_root);
+            reject_extra_args(args)?;
+            smoosh::import(&checkout, &output, &smoosh::survey_root())
+        }
+        Some(command) if command == OsStr::new("verify-smoosh") => {
+            let root = args
+                .next()
+                .map(PathBuf::from)
+                .unwrap_or_else(smoosh::survey_root);
+            reject_extra_args(args)?;
+            smoosh::verify(&root)
+        }
+        Some(command) if command == OsStr::new("generate-smoosh-manifest") => {
+            let root = args
+                .next()
+                .map(PathBuf::from)
+                .unwrap_or_else(smoosh::survey_root);
+            reject_extra_args(args)?;
+            smoosh::generate_manifest(&root)
+        }
         _ => Err(usage().into()),
     }
 }
 
 fn usage() -> &'static str {
-    "usage: nsh-survey import-oils OILS_CHECKOUT [OUTPUT]\n       nsh-survey verify-oils [ROOT]\n       nsh-survey generate-oils-manifests [ROOT]\n       nsh-survey run-oils [OPTIONS] [ROOT]"
+    "usage: nsh-survey import-oils OILS_CHECKOUT [OUTPUT]\n       nsh-survey verify-oils [ROOT]\n       nsh-survey generate-oils-manifests [ROOT]\n       nsh-survey run-oils [OPTIONS] [ROOT]\n       nsh-survey import-smoosh SMOOSH_CHECKOUT [OUTPUT]\n       nsh-survey verify-smoosh [ROOT]\n       nsh-survey generate-smoosh-manifest [ROOT]"
 }
 
 fn required_path(value: Option<std::ffi::OsString>, name: &str) -> Result<PathBuf> {

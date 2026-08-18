@@ -1,0 +1,59 @@
+schema = 1
+repository = "https://github.com/mgree/smoosh.git"
+commit = "cc67dbe6a4953e51431997eac025b5e3f46c3d2d"
+tree = "482255edc8f922f8ff32b93a86a28ac7d83071a8"
+license = "MIT"
+license_path = "LICENSE"
+license_sha256 = "1df561402110a26f08e593508eaad7a76677a4dae5fb1d64f265e5e5e6ee140f"
+suite_path = "tests/shell"
+
+[observed]
+tests = 186
+payload_files = 362
+stdout_oracles = 147
+stderr_oracles = 14
+status_oracles = 15
+orphan_oracles = 1
+
+[manifests.full]
+tests = 186
+
+[manifests.regular]
+tests = 179
+
+[manifests.known_hang]
+tests = 7
+
+[timeouts]
+default_ms = 5000
+known_hang_ms = 1000
+
+# Oils historically separated these scripts from the ordinary Smoosh run.
+# They remain present and runnable, but always receive their own bounded group.
+[[known_hangs]]
+test = "semantics.empty.test"
+reason = "empty input could not be represented by the legacy translated spec format"
+
+[[known_hangs]]
+test = "builtin.history.nonposix.test"
+reason = "interactive execution was observed to hang under the comparison harness"
+
+[[known_hangs]]
+test = "parse.error.test"
+reason = "interactive parse-error execution was observed to hang under the comparison harness"
+
+[[known_hangs]]
+test = "semantics.interactive.expansion.exit.test"
+reason = "interactive expansion-error execution was observed to hang under the comparison harness"
+
+[[known_hangs]]
+test = "sh.interactive.ps1.test"
+reason = "interactive prompt execution was observed to hang under the comparison harness"
+
+[[known_hangs]]
+test = "sh.ps1.override.test"
+reason = "interactive prompt override execution was observed to hang under the comparison harness"
+
+[[known_hangs]]
+test = "builtin.readonly.assign.interactive.test"
+reason = "interactive readonly execution was observed to hang under the comparison harness"

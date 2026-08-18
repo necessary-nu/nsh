@@ -5508,6 +5508,13 @@ children (
                         kind @note
                         text "Definition of done: pin Smoosh independently with source and license provenance; import or deterministically translate its shell tests into the native runner without requiring OPAM or a user-home checkout at test time; preserve TEST_SHELL, POSIX-mode, fixture, timeout, and known-hang semantics; publish a distinct Smoosh manifest and result summary so its formal POSIX evidence is never conflated with the Oils survey."
                     }
+
+                    {
+                        at 2026-08-18T13:57:52.925266499Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
                 )
             }
         )
