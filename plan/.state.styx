@@ -1209,7 +1209,7 @@ assertions (
     {id process-environment-contract, kind @complete, author "brendan@necessary.nu", at 2026-08-17T23:28:19.757024423Z}
     {id locale-sweep, kind @complete, author "brendan@necessary.nu", at 2026-08-18T00:25:43.344831243Z}
     {id process-environment-verification, kind @complete, author "brendan@necessary.nu", at 2026-08-18T02:43:02.931653061Z}
-    {id fix-edit-stty-character-refresh, kind @doing, author "brendan@necessary.nu", at 2026-08-18T06:33:12.007967412Z}
+    {id fix-edit-stty-character-refresh, kind @complete, author "brendan@necessary.nu", at 2026-08-18T12:02:07.487828669Z}
     {id test-fc-histfile-reload-format, kind @complete, author "brendan@necessary.nu", at 2026-08-18T10:11:25.747215108Z}
     {id fix-ignoreeof-noninteractive-eof, kind @complete, author "brendan@necessary.nu", at 2026-08-18T10:13:56.638277641Z}
     {id register-posix-dash-divergences, kind @complete, author "brendan@necessary.nu", at 2026-08-18T11:45:38.225345042Z}
