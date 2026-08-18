@@ -2206,6 +2206,21 @@ children (
                             shell ([spec:posix:req:builtin.read.env-ps2])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:15:44.425140656Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:16:00.231092026Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Attach the PS2 environment rule to readcmd's live lookup of crate::var::ps2val at each continuation, so assignment immediately before read is observed and the bytes go to unbuffered stderr. Verification: read-continuation-prompt passes both continuation-prompt and env-ps2 rules; git diff --check passes."
+                            }
+                        )
                     }
 
                     {

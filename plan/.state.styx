@@ -3489,4 +3489,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.read.continuation-prompt}
     )}
+    {id fix-builtin-read-env-ps2, covered_rules (
+        builtin.read.env-ps2
+    ), covered_claims (
+        {impl_name shell, rule builtin.read.env-ps2}
+    )}
 )

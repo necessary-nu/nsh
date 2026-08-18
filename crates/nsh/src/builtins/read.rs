@@ -108,6 +108,7 @@ fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> R
 // [spec:posix:req:builtin.read.backslash-escape]
 // [spec:posix:req:builtin.read.backslash-line-continuation]
 // [spec:posix:req:builtin.read.continuation-prompt]
+// [spec:posix:req:builtin.read.env-ps2]
 // [spec:posix:req:builtin.read.end-of-file]
 // [spec:posix:req:builtin.read.env-nlspath]
 // [spec:posix:req:builtin.read.exit-status]
