@@ -3534,4 +3534,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.set.opt-u-nounset}
     )}
+    {id fix-builtin-set-options-both-forms, covered_rules (
+        builtin.set.options-both-forms
+    ), covered_claims (
+        {impl_name shell, rule builtin.set.options-both-forms}
+    )}
 )

@@ -737,7 +737,15 @@ CASES: tuple[Case, ...] = (
     Case(
         id="set-obsolescent-h",
         rules=("builtin.set.options-both-forms", "builtin.set.opt-h"),
-        script="set -h\nprintf 'accepted\\n'\n",
+        script=(
+            "set -h\n"
+            "case $- in *h*) : ;; *) exit 10 ;; esac\n"
+            "set +h\n"
+            "case $- in *h*) exit 11 ;; *) : ;; esac\n"
+            "sh -h -c 'case $- in *h*) : ;; *) exit 12 ;; esac' || exit $?\n"
+            "sh +h -c 'case $- in *h*) exit 13 ;; *) : ;; esac' || exit $?\n"
+            "printf 'accepted\\n'\n"
+        ),
         stdout="accepted\n",
     ),
     # [spec:posix:req:builtin.trap.action-overrides-and-exit-status/test]

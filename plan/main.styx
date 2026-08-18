@@ -2429,6 +2429,21 @@ children (
                             shell ([spec:posix:req:builtin.set.options-both-forms])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:35:45.507494922Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:36:54.512664462Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Map the common options scanner to the both-forms rule because it is shared by the set builtin and procargs, and every supported letter is resolved through the same optletters table with the leading '-' or '+' selecting the value. Strengthen the safe representative -h case to assert enable and disable state through both `set` and a nested `sh` command line. Verification: set-obsolescent-h passes all four paths; POSIX harness unit tests and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

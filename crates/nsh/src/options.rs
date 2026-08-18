@@ -361,6 +361,7 @@ pub(crate) struct Scan {
 
 // [spec:dash:def:options.options-fn]
 // [spec:dash:sem:options.options-fn]
+// [spec:posix:req:builtin.set.options-both-forms]
 // [spec:posix:req:builtin.set.utility-syntax-guidelines]
 // [spec:posix:req:builtin.set.opt-a-allexport]
 // [spec:posix:sem:builtin.set.opt-a-separate-environments]
