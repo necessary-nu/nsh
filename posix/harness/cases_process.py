@@ -1068,12 +1068,14 @@ CASES: tuple[Case, ...] = (
             "p=$!\n"
             "wait \"$p\"\n"
             "printf 'first=%s\\n' \"$?\"\n"
+            "jobs >jobs-after\n"
+            "test ! -s jobs-after && printf 'job-removed\\n'\n"
             "wait \"$p\" 2>/dev/null\n"
             "printf 'second=%s\\n' \"$?\"\n"
         ),
         # The pid is removed once waited for, so the second wait sees an
         # unknown process ID and must report 127.
-        stdout="first=7\nsecond=127\n",
+        stdout="first=7\njob-removed\nsecond=127\n",
     ),
     # [spec:posix:req:builtin.wait.exit-status-values/test]
     Case(

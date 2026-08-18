@@ -769,6 +769,15 @@ fn freejob(sh: &mut crate::context::Shell, jp: usize) {
     INTON(sh);
 }
 
+/// Remove a successfully waited, completed job from both the job list and
+/// the set of process IDs known to this shell environment.
+// [spec:posix:req:builtin.wait.remove-waited-for-pid]
+pub(crate) fn remove_waited_job(sh: &mut crate::context::Shell, jp: usize) {
+    if sh.jobs.tab[jp].state as c_int == JOBDONE {
+        freejob(sh, jp);
+    }
+}
+
 /*
  * Convert a job name to a job structure.
  */

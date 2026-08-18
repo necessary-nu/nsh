@@ -15,6 +15,7 @@ use core::ffi::{c_int};
 use crate::eval::Flow;
 use crate::jobs::{
     DOWAIT_WAITCMD, DOWAIT_WAITCMD_ALL, JOBRUNNING, dowait, getjob, getstatus,
+    remove_waited_job,
 };
 
 // [spec:dash:def:jobs.waitcmd-fn]
@@ -26,6 +27,7 @@ use crate::jobs::{
 // [spec:posix:req:builtin.wait.exit-status-last-operand]
 // [spec:posix:req:builtin.wait.exit-status-values]
 // [spec:posix:req:builtin.wait.pid-operands]
+// [spec:posix:req:builtin.wait.remove-waited-for-pid]
 // [spec:posix:def:builtin.wait.operand-pid-number]
 // [spec:posix:req:builtin.wait.operand-pid-job-id]
 // [spec:posix:req:builtin.wait.env-vars]
@@ -56,8 +58,10 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     if sh.jobs.tab[i].state as c_int == JOBRUNNING {
                         break;
                     }
+                    let previous = sh.jobs.tab[i].prev_job;
                     sh.jobs.tab[i].waited = 1;
-                    jp = sh.jobs.tab[i].prev_job;
+                    remove_waited_job(sh, i);
+                    jp = previous;
                 }
                 if dowait(sh, DOWAIT_WAITCMD_ALL, None)? == 0 {
                     // sigout:
@@ -104,6 +108,7 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 let i = jobp.unwrap();
                 sh.jobs.tab[i].waited = 1;
                 retval = getstatus(sh, i);
+                remove_waited_job(sh, i);
             }
             // repeat:
         }

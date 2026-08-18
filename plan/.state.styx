@@ -3579,4 +3579,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.wait.pid-operands}
     )}
+    {id fix-builtin-wait-remove-waited-for-pid, covered_rules (
+        builtin.wait.remove-waited-for-pid
+    ), covered_claims (
+        {impl_name shell, rule builtin.wait.remove-waited-for-pid}
+    )}
 )

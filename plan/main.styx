@@ -2645,6 +2645,21 @@ children (
                             shell ([spec:posix:req:builtin.wait.remove-waited-for-pid])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:50:47.572852071Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:52:09.135869433Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Introduce remove_waited_job as the single lifecycle boundary: it unlinks only JOBDONE entries after the caller has successfully waited and captured status. Use it in both operand waits and the no-operand traversal, retaining stopped jobs. Extend the case to prove both `jobs` removal and subsequent PID status 127. Verification: removal, no-operand, and multi-operand wait cases pass; cargo test -p nsh passes 279 tests with one ignored doctest; POSIX harness unit tests and git diff --check pass."
+                            }
+                        )
                     }
 
                     {
