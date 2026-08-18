@@ -65,6 +65,7 @@ pub fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:builtin.getopts.optstring-separate-arguments]
 // [spec:posix:syn:builtin.getopts.optstring-character-restrictions]
 // [spec:posix:req:builtin.getopts.optarg-content]
+// [spec:posix:req:builtin.getopts.optarg]
 // [spec:posix:sem:builtin.getopts.optstring-first-character]
 // [spec:posix:req:builtin.getopts.exit-status]
 fn getopts(
@@ -184,9 +185,13 @@ fn getopts(
                 0,
             )?;
         } else {
-            set_bytes(sh, BStr::new(b"OPTARG"), Some(BStr::new(b"")), 0)?;
+            unset_bytes(sh, BStr::new(b"OPTARG"))?;
         }
         break 'scan;
+    }
+
+    if done != 0 {
+        unset_bytes(sh, BStr::new(b"OPTARG"))?;
     }
 
     let index = next as c_int + 1;
@@ -208,6 +213,7 @@ mod tests {
             .map_or_else(String::new, |value| String::from_utf8_lossy(&value).into_owned())
     }
 
+    // [spec:posix:req:builtin.getopts.optarg/test]
     #[test]
     fn a_scan_runs_across_invocations() {
         let _guard = lock();
@@ -219,10 +225,12 @@ mod tests {
 
         assert_eq!(getoptscmd(&mut shell, &args).unwrap(), Flow::Done(0));
         assert_eq!(value(&mut shell, "o"), "a");
+        assert_eq!(lookup_bytes(&mut shell, BStr::new(b"OPTARG")), None);
         assert_eq!(getoptscmd(&mut shell, &args).unwrap(), Flow::Done(0));
         assert_eq!(value(&mut shell, "o"), "b");
         assert_eq!(value(&mut shell, "OPTARG"), "VAL");
         assert_ne!(getoptscmd(&mut shell, &args).unwrap(), Flow::Done(0));
+        assert_eq!(lookup_bytes(&mut shell, BStr::new(b"OPTARG")), None);
         assert_eq!(value(&mut shell, "OPTIND"), "3");
     }
 

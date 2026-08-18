@@ -3454,4 +3454,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.getopts.env-optind}
     )}
+    {id fix-builtin-getopts-optarg, covered_rules (
+        builtin.getopts.optarg
+    ), covered_claims (
+        {impl_name shell, rule builtin.getopts.optarg}
+    )}
 )

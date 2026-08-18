@@ -2038,6 +2038,21 @@ children (
                             shell ([spec:posix:req:builtin.getopts.optarg])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:01:02.103532389Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:01:58.443779019Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Unset OPTARG after a successfully recognized option that takes no argument and whenever no option is found; preserve the existing specified OPTARG values for quiet-mode unknown/missing-argument errors. Verification: direct rule case, four neighboring argument/error/end cases, and cargo test -p nsh pass (276 tests, one ignored doctest)."
+                            }
+                        )
                     }
 
                     {
