@@ -1794,6 +1794,21 @@ children (
                             shell ([spec:posix:req:builtin.dot.path-search])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T03:15:14.285029513Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T03:15:55.717174089Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "PATH search for dot now requires both a regular file and effective read access before selecting a candidate. The check uses nsh-platform's safe effective-credential access wrapper, so an unreadable earlier candidate no longer prevents a later readable file from being sourced. Focused POSIX case passes and cargo test -p nsh is 262/0."
+                            }
+                        )
                     }
 
                     {

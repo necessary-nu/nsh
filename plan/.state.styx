@@ -3409,4 +3409,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.command.opt-v}
     )}
+    {id fix-builtin-dot-path-search, covered_rules (
+        builtin.dot.path-search
+    ), covered_claims (
+        {impl_name shell, rule builtin.dot.path-search}
+    )}
 )

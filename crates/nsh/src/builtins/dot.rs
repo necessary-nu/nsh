@@ -19,6 +19,7 @@ use crate::shellmain::cmdloop;
 
 // [spec:dash:def:main.find-dot-file-fn]
 // [spec:dash:sem:main.find-dot-file-fn]
+// [spec:posix:req:builtin.dot.path-search]
 /// The C returns a `stalloc`'d copy of the candidate. Here the caller owns
 /// the returned bytes directly, for exactly the same lifetime.
 fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Result<BString, Error> {
@@ -32,11 +33,14 @@ fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Result<BStr
     let mut path = PathCursor::new(path_value.as_slice().as_bstr());
     while let Some(candidate) = crate::exec::padvance(&mut path, basename) {
         let fullname = crate::mystring::cstr_prefix(&candidate.path);
-        let regular_file = std::fs::metadata(OsStr::from_bytes(fullname))
+        let path = OsStr::from_bytes(fullname);
+        let regular_file = std::fs::metadata(path)
             .is_ok_and(|metadata| metadata.is_file());
+        let readable = nsh_platform::effective_access(path, nsh_platform::AccessMode::READ_OK);
         if (candidate.option.is_none()
             || candidate.option.as_ref().and_then(|option| option.first()) == Some(&b'f'))
             && regular_file
+            && readable
         {
             return Ok(fullname.to_owned());
         }
