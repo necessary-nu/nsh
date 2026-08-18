@@ -252,6 +252,7 @@ pub struct LineEditor {
     input: File,
     output: File,
     history_cursor: HistoryCursor,
+    // [spec:posix:def:edit.edit-line]
     live_history_line: Option<Text>,
     last_history_pattern: Option<Text>,
     pending_line: Vec<u8>,

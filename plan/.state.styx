@@ -3614,4 +3614,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule edit.command-expand-all}
     )}
+    {id fix-edit-edit-line, covered_rules (
+        edit.edit-line
+    ), covered_claims (
+        {impl_name shell, rule edit.edit-line}
+    )}
 )

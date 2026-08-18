@@ -2796,6 +2796,21 @@ children (
                             shell ([spec:posix:def:edit.edit-line])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:10:53.416128894Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:11:30.305379855Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "The live_history_line snapshot is nsh's distinguished vi edit line: it is reset for each new interactive read, captures the newest typed line before history traversal, receives modifications made to recalled entries, and is restored when traversal returns to the live boundary. Map the definition at that owned state field. Verification: the combined edit-line/replacement PTY case and all 17 linedit tests pass; git diff --check passes."
+                            }
+                        )
                     }
 
                     {
