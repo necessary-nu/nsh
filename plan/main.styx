@@ -613,6 +613,21 @@ children (
                     )
                 }
                 deps (posix-harness)
+                log (
+                    {
+                        at 2026-08-18T01:57:53.97978913Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-18T01:59:07.129705723Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Established implementation coverage for all 51 claimed special-control built-in rules across registration, special-built-in evaluation, and the break/continue, colon, dot, eval, exec, and exit entry points. The rule-selected POSIX harness passed all 22 cases and 49 executable rule assertions; remaining selected facets are non-executable dispositions."
+                    }
+                )
             }
 
             {

@@ -17,6 +17,19 @@ use crate::eval::{Flow, SKIPBREAK, SKIPCONT};
 
 // [spec:dash:def:eval.breakcmd-fn]
 // [spec:dash:sem:eval.breakcmd-fn]
+// [spec:posix:syn:builtin.break.syn]
+// [spec:posix:req:builtin.break.exit-nth-loop]
+// [spec:posix:def:builtin.break.lexically-enclosing]
+// [spec:posix:sem:builtin.break.non-lexical-loop-unspecified]
+// [spec:posix:req:builtin.break.stderr]
+// [spec:posix:req:builtin.break.interfaces]
+// [spec:posix:req:builtin.break.exit-status]
+// [spec:posix:syn:builtin.continue.syn]
+// [spec:posix:req:builtin.continue.return-to-top]
+// [spec:posix:req:builtin.continue.n-operand]
+// [spec:posix:req:builtin.continue.stderr]
+// [spec:posix:req:builtin.continue.interfaces]
+// [spec:posix:req:builtin.continue.exit-status]
 pub fn breakcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut n: c_int = 1;
 

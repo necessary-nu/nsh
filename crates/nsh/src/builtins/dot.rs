@@ -51,6 +51,12 @@ fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Result<BStr
 
 // [spec:dash:def:main.dotcmd-fn]
 // [spec:dash:sem:main.dotcmd-fn]
+// [spec:posix:syn:builtin.dot.syn]
+// [spec:posix:req:builtin.dot.execute-in-current-environment]
+// [spec:posix:req:builtin.dot.utility-syntax-guidelines]
+// [spec:posix:req:builtin.dot.stderr]
+// [spec:posix:req:builtin.dot.interfaces]
+// [spec:posix:req:builtin.dot.exit-status]
 pub fn dotcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut status: c_int = 0;
 

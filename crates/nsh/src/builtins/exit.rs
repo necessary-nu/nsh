@@ -18,6 +18,15 @@ use bstr::BStr;
 
 // [spec:dash:def:main.exitcmd-fn]
 // [spec:dash:sem:main.exitcmd-fn]
+// [spec:posix:syn:builtin.exit.syn]
+// [spec:posix:req:builtin.exit.cause-shell-exit]
+// [spec:posix:req:builtin.exit.wait-status-from-n]
+// [spec:posix:sem:builtin.exit.invalid-n-unspecified]
+// [spec:posix:req:builtin.exit.default-n]
+// [spec:posix:req:builtin.exit.exit-trap]
+// [spec:posix:req:builtin.exit.stderr]
+// [spec:posix:req:builtin.exit.interfaces]
+// [spec:posix:sem:builtin.exit.exit-status]
 pub fn exitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if crate::jobs::stoppedjobs(sh) != 0 {
         return Ok(Flow::Done(0));

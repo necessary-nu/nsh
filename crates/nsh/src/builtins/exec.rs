@@ -19,6 +19,14 @@ use crate::exec::shellexec;
 
 // [spec:dash:def:eval.execcmd-fn]
 // [spec:dash:sem:eval.execcmd-fn]
+// [spec:posix:syn:builtin.exec.syn]
+// [spec:posix:req:builtin.exec.no-operands-redirections]
+// [spec:posix:req:builtin.exec.utility-operand]
+// [spec:posix:req:builtin.exec.failure-non-interactive-exits]
+// [spec:posix:req:builtin.exec.env-path]
+// [spec:posix:req:builtin.exec.stderr]
+// [spec:posix:req:builtin.exec.interfaces]
+// [spec:posix:req:builtin.exec.exit-status]
 pub fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if args.len() > 1 {
         sh.options.set_flag(crate::options::iflag, 0); /* exit on error */

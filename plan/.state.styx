@@ -1785,4 +1785,109 @@ impl_evidence (
         {impl_name shell, rule builtin.trap.utility-syntax-guidelines}
         {impl_name shell, rule builtin.trap.xsi-signal-numbers}
     )}
+    {id posix-builtins-control, covered_rules (
+        builtin.break.exit-nth-loop
+        builtin.break.exit-status
+        builtin.break.interfaces
+        builtin.break.lexically-enclosing
+        builtin.break.non-lexical-loop-unspecified
+        builtin.break.stderr
+        builtin.break.syn
+        builtin.colon.exit-status
+        builtin.colon.interfaces
+        builtin.colon.no-options
+        builtin.colon.null-utility
+        builtin.colon.syn
+        builtin.continue.exit-status
+        builtin.continue.interfaces
+        builtin.continue.n-operand
+        builtin.continue.return-to-top
+        builtin.continue.stderr
+        builtin.continue.syn
+        builtin.dot.execute-in-current-environment
+        builtin.dot.exit-status
+        builtin.dot.interfaces
+        builtin.dot.stderr
+        builtin.dot.syn
+        builtin.dot.utility-syntax-guidelines
+        builtin.eval.construct-and-execute
+        builtin.eval.exit-status
+        builtin.eval.interfaces
+        builtin.eval.stderr
+        builtin.eval.syn
+        builtin.exec.env-path
+        builtin.exec.exit-status
+        builtin.exec.failure-non-interactive-exits
+        builtin.exec.interfaces
+        builtin.exec.no-operands-redirections
+        builtin.exec.stderr
+        builtin.exec.syn
+        builtin.exec.utility-operand
+        builtin.exit.cause-shell-exit
+        builtin.exit.default-n
+        builtin.exit.exit-status
+        builtin.exit.exit-trap
+        builtin.exit.interfaces
+        builtin.exit.invalid-n-unspecified
+        builtin.exit.stderr
+        builtin.exit.syn
+        builtin.exit.wait-status-from-n
+        builtin.special.error-may-abort-shell
+        builtin.special.not-exec-accessible
+        builtin.special.preceding-assignments-persist
+        builtin.special.supported-and-output
+        builtin.special.term-built-in
+    ), covered_claims (
+        {impl_name shell, rule builtin.break.exit-nth-loop}
+        {impl_name shell, rule builtin.break.exit-status}
+        {impl_name shell, rule builtin.break.interfaces}
+        {impl_name shell, rule builtin.break.lexically-enclosing}
+        {impl_name shell, rule builtin.break.non-lexical-loop-unspecified}
+        {impl_name shell, rule builtin.break.stderr}
+        {impl_name shell, rule builtin.break.syn}
+        {impl_name shell, rule builtin.colon.exit-status}
+        {impl_name shell, rule builtin.colon.interfaces}
+        {impl_name shell, rule builtin.colon.no-options}
+        {impl_name shell, rule builtin.colon.null-utility}
+        {impl_name shell, rule builtin.colon.syn}
+        {impl_name shell, rule builtin.continue.exit-status}
+        {impl_name shell, rule builtin.continue.interfaces}
+        {impl_name shell, rule builtin.continue.n-operand}
+        {impl_name shell, rule builtin.continue.return-to-top}
+        {impl_name shell, rule builtin.continue.stderr}
+        {impl_name shell, rule builtin.continue.syn}
+        {impl_name shell, rule builtin.dot.execute-in-current-environment}
+        {impl_name shell, rule builtin.dot.exit-status}
+        {impl_name shell, rule builtin.dot.interfaces}
+        {impl_name shell, rule builtin.dot.stderr}
+        {impl_name shell, rule builtin.dot.syn}
+        {impl_name shell, rule builtin.dot.utility-syntax-guidelines}
+        {impl_name shell, rule builtin.eval.construct-and-execute}
+        {impl_name shell, rule builtin.eval.exit-status}
+        {impl_name shell, rule builtin.eval.interfaces}
+        {impl_name shell, rule builtin.eval.stderr}
+        {impl_name shell, rule builtin.eval.syn}
+        {impl_name shell, rule builtin.exec.env-path}
+        {impl_name shell, rule builtin.exec.exit-status}
+        {impl_name shell, rule builtin.exec.failure-non-interactive-exits}
+        {impl_name shell, rule builtin.exec.interfaces}
+        {impl_name shell, rule builtin.exec.no-operands-redirections}
+        {impl_name shell, rule builtin.exec.stderr}
+        {impl_name shell, rule builtin.exec.syn}
+        {impl_name shell, rule builtin.exec.utility-operand}
+        {impl_name shell, rule builtin.exit.cause-shell-exit}
+        {impl_name shell, rule builtin.exit.default-n}
+        {impl_name shell, rule builtin.exit.exit-status}
+        {impl_name shell, rule builtin.exit.exit-trap}
+        {impl_name shell, rule builtin.exit.interfaces}
+        {impl_name shell, rule builtin.exit.invalid-n-unspecified}
+        {impl_name shell, rule builtin.exit.stderr}
+        {impl_name shell, rule builtin.exit.syn}
+        {impl_name shell, rule builtin.exit.wait-status-from-n}
+        {impl_name shell, rule builtin.special.error-may-abort-shell}
+        {impl_name shell, rule builtin.special.not-exec-accessible}
+        {impl_name shell, rule builtin.special.preceding-assignments-persist}
+        {impl_name shell, rule builtin.special.supported-and-output}
+        {impl_name shell, rule builtin.special.term-built-in}
+    )}
 )

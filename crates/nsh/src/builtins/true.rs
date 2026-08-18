@@ -10,6 +10,11 @@ use bstr::BStr;
 
 // [spec:dash:def:eval.truecmd-fn]
 // [spec:dash:sem:eval.truecmd-fn]
+// [spec:posix:syn:builtin.colon.syn]
+// [spec:posix:req:builtin.colon.null-utility]
+// [spec:posix:req:builtin.colon.no-options]
+// [spec:posix:req:builtin.colon.interfaces]
+// [spec:posix:req:builtin.colon.exit-status]
 pub fn truecmd(_sh: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> {
     Ok(Flow::Done(0))
 }

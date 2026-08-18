@@ -169,6 +169,9 @@ fn bltincmd(
 
 pub const NUMBUILTINS: usize = 40;
 
+// [spec:posix:req:builtin.special.supported-and-output]
+// [spec:posix:def:builtin.special.term-built-in]
+// [spec:posix:req:builtin.special.not-exec-accessible]
 pub static builtincmd: [builtincmd; NUMBUILTINS] = [
     builtincmd { name: c".", builtin: Some(dot::dotcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 0
     builtincmd { name: c":", builtin: Some(r#true::truecmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 1

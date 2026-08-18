@@ -18,6 +18,11 @@ use crate::eval::{EV_TESTED, Flow, evalstring};
 
 // [spec:dash:def:eval.evalcmd-fn]
 // [spec:dash:sem:eval.evalcmd-fn]
+// [spec:posix:syn:builtin.eval.syn]
+// [spec:posix:req:builtin.eval.construct-and-execute]
+// [spec:posix:req:builtin.eval.stderr]
+// [spec:posix:req:builtin.eval.interfaces]
+// [spec:posix:req:builtin.eval.exit-status]
 pub(crate) fn evalcmd(sh: &mut Shell, args: &[&BStr], flags: c_int) -> Result<Flow, Error> {
     /* `grabstackstr` kept the joined string alive until the enclosing mark
      * popped, which is past the `evalstring` that parses it. Owning it here
