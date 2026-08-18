@@ -2573,6 +2573,21 @@ children (
                             shell ([spec:posix:req:builtin.wait.exit-status-last-operand])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:47:37.317772846Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:48:16.984870346Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Reset wait's default unknown-PID status to 127 at the start of each operand rather than once before the operand loop. This preserves a known last operand's status and prevents an unknown last operand from inheriting an earlier known status. Verification: sig-wait-pid-operands covers unknown-first/known-last and sig-wait-unknown-last-operand covers known-first/unknown-last; both pass after rebuilding, and git diff --check passes."
+                            }
+                        )
                     }
 
                     {

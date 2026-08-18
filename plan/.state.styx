@@ -3564,4 +3564,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.ulimit.stdout-all-format}
     )}
+    {id fix-builtin-wait-exit-status-last-operand, covered_rules (
+        builtin.wait.exit-status-last-operand
+    ), covered_claims (
+        {impl_name shell, rule builtin.wait.exit-status-last-operand}
+    )}
 )

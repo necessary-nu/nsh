@@ -23,6 +23,7 @@ use crate::jobs::{
 // [spec:posix:syn:builtin.wait.synopsis]
 // [spec:posix:req:builtin.wait.await-children]
 // [spec:posix:req:builtin.wait.no-operands]
+// [spec:posix:req:builtin.wait.exit-status-last-operand]
 // [spec:posix:def:builtin.wait.operand-pid-number]
 // [spec:posix:req:builtin.wait.operand-pid-job-id]
 // [spec:posix:req:builtin.wait.env-vars]
@@ -64,8 +65,8 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             }
         }
 
-        retval = 127;
         for spec in operands {
+            retval = 127;
             'repeat: {
                 if spec.first() != Some(&b'%') {
                     let pid: i32 = crate::mystring::number(sh, spec)?;
