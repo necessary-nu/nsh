@@ -2381,6 +2381,21 @@ children (
                             shell ([spec:posix:sem:builtin.set.opt-o-report])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T04:32:07.616523402Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T04:32:35.87358631Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Map the no-argument -o report rule to minus_o's current-settings branch. Preserve the conformance case's intended status assertion by ending after the stderr probe with a successful no-op; the previous final false test made a conforming report case exit 1. Verification: both set-opt-o-report and executable set-plus-o-report cases pass; POSIX harness unit tests and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

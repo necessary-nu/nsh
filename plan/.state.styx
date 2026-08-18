@@ -3524,4 +3524,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule builtin.set.opt-o-noclobber}
     )}
+    {id fix-builtin-set-opt-o-report, covered_rules (
+        builtin.set.opt-o-report
+    ), covered_claims (
+        {impl_name shell, rule builtin.set.opt-o-report}
+    )}
 )

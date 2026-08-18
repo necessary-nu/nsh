@@ -445,6 +445,7 @@ pub(crate) fn options(
 
 // [spec:dash:def:options.minus-o-fn]
 // [spec:dash:sem:options.minus-o-fn]
+// [spec:posix:sem:builtin.set.opt-o-report]
 // [spec:posix:sem:builtin.set.plus-o-report]
 // [spec:posix:req:builtin.set.opt-o-option]
 // [spec:posix:def:builtin.set.opt-o-allexport]

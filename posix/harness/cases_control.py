@@ -218,6 +218,7 @@ CASES: tuple[Case, ...] = (
             "printf 'status=%s\\n' \"$?\"\n"
             "test -s oreport && printf 'wrote-standard-output\\n'\n"
             "test -s oerr && printf 'UNEXPECTED-STDERR\\n'\n"
+            ":\n"
         ),
         stdout="status=0\nwrote-standard-output\n",
     ),
