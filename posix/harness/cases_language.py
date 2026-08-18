@@ -714,6 +714,31 @@ CASES: tuple[Case, ...] = (
         ),
         stdout="ABC\n",
     ),
+    # [spec:posix:syn:grammar.case-clause/test]
+    Case(
+        id="lang-grammar-case-pattern-reserved-words",
+        rules=("grammar.case-clause",),
+        script=_s(
+            r"""
+            case in in
+            (in) printf 'paren\n';;
+            esac
+            case esac in
+            x|esac) printf 'pipe\n';;
+            esac
+            """
+        ),
+        stdout="paren\npipe\n",
+    ),
+    # [spec:posix:syn:grammar.case-clause/test]
+    Case(
+        id="lang-grammar-case-first-pattern-rule-four",
+        rules=("grammar.case-clause",),
+        script="case x in esac) :;; esac\n",
+        stdout="",
+        status="nonzero",
+        stderr_contains=("Syntax error",),
+    ),
     # [spec:posix:syn:grammar.if-clause/test]
     Case(
         id="lang-grammar-if-clause",

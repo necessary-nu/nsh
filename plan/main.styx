@@ -3043,6 +3043,21 @@ children (
                             shell ([spec:posix:syn:grammar.case-clause])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T05:45:18.795248399Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T05:46:39.986634466Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "The parser already implements POSIX's Rule 4 boundary exactly: the first case-item token is read with CHKKWD before the optional `(` is consumed, while every pattern word after `(` or `|` is read with flags 0. Map the rule at that lexer-mode transition and strengthen the grammar corpus with reserved-word patterns proving both sides: `in` after `(` and `esac` after `|` remain WORDs, while unparenthesized `esac` in the first production is recognized as the reserved terminator and makes the following `)` invalid. Verification: all four grammar.case-clause cases, four focused parser tests, 14 harness unit tests, and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

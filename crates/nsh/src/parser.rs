@@ -758,6 +758,10 @@ fn command(sh: &mut Shell, kwd: c_int) -> Result<Option<Node>, Error> {
         }
         let mut cases: Vec<Node> = Vec::new();
         'next_case: loop {
+            // [spec:posix:syn:grammar.case-clause]
+            // Rule 4 applies here, before an optional `(`, and nowhere in
+            // the pattern loop below: words after `(` or `|` stay patterns
+            // even when their spelling is otherwise a reserved word.
             t = readtoken(sh, CHKNL | CHKKWD)?;
             while t != TESAC {
                 if sh.input.lasttoken == TLP {

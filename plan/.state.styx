@@ -3684,4 +3684,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule exit.unrecoverable-read-error}
     )}
+    {id fix-grammar-case-clause, covered_rules (
+        grammar.case-clause
+    ), covered_claims (
+        {impl_name shell, rule grammar.case-clause}
+    )}
 )
