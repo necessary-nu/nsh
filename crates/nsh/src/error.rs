@@ -341,8 +341,6 @@ pub enum Error {
     UnrecoverableRead {
         /// `errlinno` as it stood when the read failed.
         line: c_int,
-        /// The status the shell takes from the failure.
-        status: c_int,
         /// The already-rendered read diagnostic.
         message: BString,
     },
@@ -400,18 +398,12 @@ impl Error {
 
     /// Build a command-input read error, retaining the special-builtin
     /// treatment required for the file operand of `.`.
-    pub fn unrecoverable_read(
-        line: c_int,
-        status: c_int,
-        msg: &[u8],
-        dot_operand: bool,
-    ) -> Error {
+    pub fn unrecoverable_read(line: c_int, msg: &[u8], dot_operand: bool) -> Error {
         if dot_operand {
-            Error::other(line, status, msg)
+            Error::other(line, 2, msg)
         } else {
             Error::UnrecoverableRead {
                 line,
-                status,
                 message: BString::from(msg),
             }
         }
@@ -438,7 +430,11 @@ impl Error {
             /* `onint` sets `exitstatus` to this before it returns, as the
              * C does before it raises. */
             Error::Interrupted { signal } => signal.number() + 128,
-            Error::UnrecoverableRead { status, .. } | Error::Other { status, .. } => *status,
+            // [spec:posix:req:sh.exit-status-values]
+            Error::UnrecoverableRead { .. } => {
+                c_int::from(crate::status::ExitStatus::UNRECOVERABLE_READ.code())
+            }
+            Error::Other { status, .. } => *status,
         }
     }
 
@@ -658,17 +654,19 @@ mod tests {
 
     // [spec:posix:req:exit.unrecoverable-read-error/test]
     // [spec:posix:req:exit.shell-error-consequences/test]
+    // [spec:posix:req:sh.exit-status-values/test]
     #[test]
     fn read_error_classifies_dot_operand() {
-        let input = Error::unrecoverable_read(7, 2, b"read failed", false);
+        let input = Error::unrecoverable_read(7, b"read failed", false);
         assert!(input.is_unrecoverable_read());
         assert_eq!(input.line(), 7);
-        assert_eq!(input.status(), 2);
+        assert_eq!(input.status(), 128);
         assert_eq!(input.message(), BStr::new(b"read failed"));
 
-        let dot = Error::unrecoverable_read(8, 2, b"dot read failed", true);
+        let dot = Error::unrecoverable_read(8, b"dot read failed", true);
         assert!(!dot.is_unrecoverable_read());
         assert_eq!(dot.line(), 8);
+        assert_eq!(dot.status(), 2);
         assert_eq!(dot.message(), BStr::new(b"dot read failed"));
     }
 

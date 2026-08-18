@@ -54,6 +54,9 @@ impl ExitStatus {
     /// The status a command that could not be executed produces.
     pub const NOT_EXECUTABLE: ExitStatus = ExitStatus(126);
 
+    /// The status of an unrecoverable error while reading shell commands.
+    pub const UNRECOVERABLE_READ: ExitStatus = ExitStatus(128);
+
     /// From a raw status.
     ///
     /// Truncating, and that is the shell's own arithmetic rather than a

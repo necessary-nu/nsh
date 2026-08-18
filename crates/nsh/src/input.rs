@@ -707,7 +707,6 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
                     message.extend_from_slice(error.to_string().as_bytes());
                     let failure = Error::unrecoverable_read(
                         sh.eval.errlinno,
-                        2,
                         &message,
                         dot_operand,
                     );
@@ -806,7 +805,6 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
             message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
             let failure = Error::unrecoverable_read(
                 sh.eval.errlinno,
-                2,
                 &message,
                 dot_operand,
             );
@@ -1088,19 +1086,29 @@ pub fn setinputfile(
     flags: c_int,
 ) -> Result<bool, Error> {
     INTOFF(sh);
-    let Some(mut fd) = crate::redir::sh_open_read(sh, fname, flags & INPUT_NOFILE_OK)? else {
+    let Some(fd) = crate::redir::sh_open_read(sh, fname, flags & INPUT_NOFILE_OK)? else {
         INTON(sh);
         return Ok(false); /* goto out */
     };
-    fd = crate::redir::move_fd_above(sh, fd)?;
-    setinputfd(
-        sh,
-        fd,
-        flags & INPUT_PUSH_FILE,
-        flags & INPUT_DOT_FILE != 0,
-    );
+    install_input_file(sh, fd, flags)?;
     INTON(sh);
     Ok(true)
+}
+
+/// Set the top-level input from the command file named on `sh`'s command line.
+// [spec:posix:req:sh.exit-status-values]
+pub fn set_command_input_file(sh: &mut crate::context::Shell, fname: &BStr) -> Result<(), Error> {
+    INTOFF(sh);
+    let fd = crate::redir::sh_open_command_file(sh, fname)?;
+    install_input_file(sh, fd, 0)?;
+    INTON(sh);
+    Ok(())
+}
+
+fn install_input_file(sh: &mut Shell, mut fd: OwnedFd, flags: c_int) -> Result<(), Error> {
+    fd = crate::redir::move_fd_above(sh, fd)?;
+    setinputfd(sh, fd, flags & INPUT_PUSH_FILE, flags & INPUT_DOT_FILE != 0);
+    Ok(())
 }
 
 /*

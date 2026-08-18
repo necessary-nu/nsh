@@ -3166,6 +3166,21 @@ children (
                             shell ([spec:posix:req:sh.exit-status-values])
                         }
                         deps (shell-as-library)
+                        log (
+                            {
+                                at 2026-08-18T06:16:52.79501924Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-18T06:26:53.729572757Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Model the two exceptional invocation statuses at their provenance: command-file opens carry a typed CommandFile purpose so only a not-found path becomes 127, while Error::UnrecoverableRead owns status 128 instead of accepting a caller-supplied integer. A dot-file read still becomes Error::Other with status 2. Verification: 254 core tests plus companion tests/doctests, 14 harness tests, all five adjacent status-value corpus cases, and git diff --check pass."
+                            }
+                        )
                     }
 
                     {

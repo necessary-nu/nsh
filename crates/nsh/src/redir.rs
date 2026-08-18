@@ -183,6 +183,22 @@ fn sh_open_fail(
     mode: nsh_platform::OpenMode,
     error: &std::io::Error,
 ) -> Error {
+    sh_open_fail_with_context(
+        sh,
+        pathname,
+        mode,
+        error,
+        OpenFailureContext::Ordinary,
+    )
+}
+
+fn sh_open_fail_with_context(
+    sh: &mut crate::context::Shell,
+    pathname: &BStr,
+    mode: nsh_platform::OpenMode,
+    error: &std::io::Error,
+    context: OpenFailureContext,
+) -> Error {
     let (word, action): (&[u8], c_int) = if mode.creates() {
         (b"create", crate::error::E_CREAT)
     } else {
@@ -198,7 +214,33 @@ fn sh_open_fail(
         error.raw_os_error().unwrap_or_default(),
         action,
     ));
-    sh.sh_error_value(&message)
+    let status = context.status(error);
+    sh.report(Error::other(
+        sh.eval.errlinno,
+        c_int::from(status.code()),
+        &message,
+    ))
+}
+
+#[derive(Copy, Clone)]
+enum OpenFailureContext {
+    Ordinary,
+    CommandFile,
+}
+
+impl OpenFailureContext {
+    // [spec:posix:req:sh.exit-status-values]
+    fn status(self, error: &std::io::Error) -> crate::status::ExitStatus {
+        if matches!(self, OpenFailureContext::CommandFile)
+            && error.raw_os_error().is_some_and(|code| {
+                nsh_platform::path_error_is(code, nsh_platform::PathErrorKind::NotFound)
+            })
+        {
+            crate::status::ExitStatus::NOT_FOUND
+        } else {
+            crate::status::ExitStatus::from_raw(2)
+        }
+    }
 }
 
 // [spec:dash:def:redir.sh-open-fn]
@@ -211,6 +253,22 @@ pub fn sh_open(
     pathname: &BStr,
     mode: nsh_platform::OpenMode,
     mayfail: c_int,
+) -> Result<Option<OwnedFd>, Error> {
+    sh_open_with_context(
+        sh,
+        pathname,
+        mode,
+        mayfail,
+        OpenFailureContext::Ordinary,
+    )
+}
+
+fn sh_open_with_context(
+    sh: &mut Shell,
+    pathname: &BStr,
+    mode: nsh_platform::OpenMode,
+    mayfail: c_int,
+    context: OpenFailureContext,
 ) -> Result<Option<OwnedFd>, Error> {
     loop {
         let result = nsh_platform::open_path(
@@ -236,10 +294,16 @@ pub fn sh_open(
                 if mayfail != 0 {
                     return Ok(None);
                 }
-                return Err(sh_open_fail(sh, pathname, mode, &error));
+                return Err(sh_open_fail_with_context(
+                    sh, pathname, mode, &error, context,
+                ));
             }
             Err(error) if mayfail != 0 => return Ok(None),
-            Err(error) => return Err(sh_open_fail(sh, pathname, mode, &error)),
+            Err(error) => {
+                return Err(sh_open_fail_with_context(
+                    sh, pathname, mode, &error, context,
+                ));
+            }
         }
     }
 }
@@ -252,6 +316,18 @@ pub fn sh_open_read(
     mayfail: c_int,
 ) -> Result<Option<OwnedFd>, Error> {
     sh_open(sh, pathname, nsh_platform::OpenMode::ReadOnly, mayfail)
+}
+
+/// Open `sh`'s command-file operand, preserving its POSIX status class.
+pub fn sh_open_command_file(sh: &mut Shell, pathname: &BStr) -> Result<OwnedFd, Error> {
+    sh_open_with_context(
+        sh,
+        pathname,
+        nsh_platform::OpenMode::ReadOnly,
+        0,
+        OpenFailureContext::CommandFile,
+    )
+    .map(|fd| fd.expect("a mandatory command-file open returns a descriptor"))
 }
 
 // [spec:dash:def:redir.openredirect-fn]
@@ -699,6 +775,7 @@ mod tests {
     //! pinned where it is observable -- as the field count of the word
     //! after a failure, in `tests/errors_are_values.rs`.
 
+    use super::OpenFailureContext;
     use crate::error::Error;
     use crate::expand::restore_handler_expandarg;
     use crate::Shell;
@@ -709,6 +786,27 @@ mod tests {
             status: 2,
             message: bstr::BString::from(&b"Bad substitution"[..]),
         }
+    }
+
+    // [spec:posix:req:sh.exit-status-values/test]
+    #[test]
+    fn command_file_open_status() {
+        let missing = std::io::Error::from_raw_os_error(nsh_platform::not_found_error_code());
+        let denied =
+            std::io::Error::from_raw_os_error(nsh_platform::permission_denied_error_code());
+
+        assert_eq!(
+            OpenFailureContext::CommandFile.status(&missing),
+            crate::status::ExitStatus::NOT_FOUND,
+        );
+        assert_eq!(
+            OpenFailureContext::Ordinary.status(&missing).code(),
+            2,
+        );
+        assert_eq!(
+            OpenFailureContext::CommandFile.status(&denied).code(),
+            2,
+        );
     }
 
     /// Nothing went wrong: nothing comes back.

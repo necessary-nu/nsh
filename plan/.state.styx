@@ -3714,4 +3714,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name shell, rule pattern.bracket-expression}
     )}
+    {id fix-sh-exit-status-values, covered_rules (
+        sh.exit-status-values
+    ), covered_claims (
+        {impl_name shell, rule sh.exit-status-values}
+    )}
 )

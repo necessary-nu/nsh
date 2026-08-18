@@ -304,7 +304,7 @@ pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<c_in
             setarg0 = true; /* goto setarg0 */
         }
     } else if sh.options.flag(sflag) == 0 {
-        crate::input::setinputfile(sh, args[next], 0)?;
+        crate::input::set_command_input_file(sh, args[next])?;
         setarg0 = true;
     }
     if setarg0 {
