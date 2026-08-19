@@ -37,7 +37,12 @@ fn a_non_native_export_does_not_break_builtins() {
 
 #[test]
 fn inherited_path_is_the_process_path() {
-    let expected = std::env::var_os("PATH").unwrap().to_shell_bytes();
+    let expected: Vec<_> = std::env::var_os("PATH")
+        .unwrap()
+        .to_shell_bytes()
+        .into_iter()
+        .map(|byte| if byte == b'\\' { b'/' } else { byte })
+        .collect();
     let mut shell = Shell::builder()
         .inherit_env()
         .streams(Streams::capture().unwrap())
@@ -46,4 +51,5 @@ fn inherited_path_is_the_process_path() {
     let status = shell.run(b"printf %s \"$PATH\"").unwrap();
     assert!(status.success());
     assert_eq!(shell.take_captured_stdout().unwrap(), expected);
+    assert!(!expected.contains(&b'\\'));
 }

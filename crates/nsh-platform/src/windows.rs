@@ -203,14 +203,28 @@ pub fn process_arguments() -> Vec<OsString> {
 pub fn process_environment() -> Vec<(OsString, OsString)> {
     std::env::vars_os()
         .map(|(name, value)| {
-            let name = if name.eq_ignore_ascii_case(OsStr::new("PATH")) {
-                OsString::from("PATH")
+            if name.eq_ignore_ascii_case(OsStr::new("PATH")) {
+                (OsString::from("PATH"), with_shell_path_separators(value))
             } else {
-                name
-            };
-            (name, value)
+                (name, value)
+            }
         })
         .collect()
+}
+
+fn with_shell_path_separators(value: OsString) -> OsString {
+    OsString::from_wide(
+        &value
+            .encode_wide()
+            .map(|unit| {
+                if unit == u16::from(b'\\') {
+                    u16::from(b'/')
+                } else {
+                    unit
+                }
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 pub fn process_id() -> u32 {
@@ -242,7 +256,7 @@ fn build_default_search_path() -> OsString {
         }
         path.push(directory);
     }
-    path
+    with_shell_path_separators(path)
 }
 
 type WindowsDirectoryQuery = unsafe extern "system" fn(*mut u16, u32) -> u32;
@@ -282,7 +296,7 @@ pub const fn search_path_separator() -> u8 {
 }
 
 pub const fn shell_directory_separator() -> u8 {
-    b'\\'
+    b'/'
 }
 
 pub fn resolve_command_path(path: &Path, environment: &[(OsString, OsString)]) -> PathBuf {
@@ -3241,6 +3255,7 @@ mod tests {
 
     #[test]
     fn slash_is_the_shells_path_separator() {
+        assert_eq!(shell_directory_separator(), b'/');
         assert!(shell_path_is_absolute(b"/rooted"));
         assert!(shell_path_is_absolute(b"C:/rooted"));
         assert!(!shell_path_is_absolute(b"relative/path"));
@@ -3285,16 +3300,19 @@ mod tests {
             expected
         );
         assert!(expected.iter().all(|path| path.is_absolute()));
+        assert!(!default_search_path().to_shell_bytes().contains(&b'\\'));
     }
 
     #[test]
     fn inherited_path_uses_the_shells_canonical_name() {
-        let expected = std::env::var_os("PATH").expect("test process has PATH");
+        let expected =
+            with_shell_path_separators(std::env::var_os("PATH").expect("test process has PATH"));
         let inherited: Vec<_> = process_environment()
             .into_iter()
             .filter(|(name, _)| name.eq_ignore_ascii_case(OsStr::new("PATH")))
             .collect();
         assert_eq!(inherited, [(OsString::from("PATH"), expected)]);
+        assert!(!inherited[0].1.to_shell_bytes().contains(&b'\\'));
     }
 
     #[test]
