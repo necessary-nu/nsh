@@ -5913,6 +5913,364 @@ children (
                     }
                 )
             }
+
+            {
+                id bash-compatibility-mode
+                title "Add an opt-in GNU Bash 5.3 compatibility mode"
+                kind @feat
+                children (
+                    {
+                        id specify-bash-compatibility-profile
+                        title "Specify Bash mode selection, language scope, safety, and closure"
+                        kind @docs
+                        deps (record-bash-oracle-baseline verify-smoosh-zero-failures)
+                        sealed true
+                        log (
+                            {
+                                at 2026-08-19T18:32:53.272008398Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-19T18:36:05.741796472Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Definition of done: the profile names the reference authority, exact activation semantics, parse and state isolation, grouped language surface, interactive boundary, safe-core constraint, and closure gates; every new rule has one WBS owner and the dependency graph is lint-clean."
+                            }
+
+                            {
+                                at 2026-08-19T18:36:22.237930781Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
+                            }
+                        )
+                    }
+
+                    {
+                        id calibrate-bash-5-3-oracle
+                        title "Calibrate and pin the exact GNU Bash 5.3 oracle"
+                        kind @test
+                        implements {
+                            nsh-library ([spec:nsh:req:compat.bash.reference-profile])
+                        }
+                        deps (specify-bash-compatibility-profile)
+                        log (
+                            {
+                                at 2026-08-19T18:36:05.88018244Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Definition of done: build the exact current GNU Bash 5.3 patch release reproducibly inside containment; record source digest, patch level, build flags, locale and environment; run the pinned Oils manifests; emit an immutable eligible-case list and explicit disposition for every excluded case."
+                            }
+                        )
+                    }
+
+                    {
+                        id bash-compatibility-foundation
+                        title "Build the mode-aware parser and runtime foundations"
+                        kind @feat
+                        children (
+                            {
+                                id implement-bash-mode-selection
+                                title "Implement per-shell Bash mode selection and parse boundaries"
+                                implements {
+                                    nsh-library (
+                                        [spec:nsh:def:compat.bash.mode]
+                                        [spec:nsh:req:compat.bash.selection]
+                                        [spec:nsh:req:compat.bash.parse-boundary]
+                                        [spec:nsh:req:compat.bash.state-isolation]
+                                        [spec:nsh:req:compat.bash.default-isolation]
+                                    )
+                                }
+                                deps (calibrate-bash-5-3-oracle)
+                                log (
+                                    {
+                                        at 2026-08-19T18:36:06.017297803Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Definition of done: append a no-letter bash option without reindexing existing options; infer only from the frontend's raw argv[0] basename; make explicit +o win; keep Builder::arg0 as $0 only; cover nsh, -o/+o, bash, -bash, and nsh -c script bash cases plus two-Shell isolation and next-parse-unit behavior."
+                                    }
+                                )
+                            }
+
+                            {
+                                id extend-bash-mode-aware-parser
+                                title "Extend the owned parser and AST for Bash grammar"
+                                implements {
+                                    nsh-library ([spec:nsh:req:compat.bash.parser-ast])
+                                }
+                                deps (implement-bash-mode-selection)
+                                log (
+                                    {
+                                        at 2026-08-19T18:36:06.148025558Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Definition of done: thread a compact Dialect view through the existing parser, add owned AST nodes for gated Bash grammar, retain parsed function bodies, reject or preserve baseline interpretation when the mode is off, and add parser tests for each syntax gate without a parser fork or lexer callback interface."
+                                    }
+                                )
+                            }
+
+                            {
+                                id introduce-bash-value-model
+                                title "Introduce structural scalar and array values"
+                                implements {
+                                    nsh-library ([spec:nsh:req:compat.bash.value-model])
+                                }
+                                deps (implement-bash-mode-selection)
+                                log (
+                                    {
+                                        at 2026-08-19T18:36:06.272150201Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Definition of done: replace scalar-only storage with an explicit scalar/indexed/associative representation, preserve byte-oriented scalar APIs and unset-versus-empty behavior, define sparse key and attribute operations, and keep the complete default-mode regression suite green."
+                                    }
+                                )
+                            }
+
+                            {
+                                id gate-bash-builtins-options
+                                title "Make built-in and option dispatch dialect-aware"
+                                implements {
+                                    nsh-library ([spec:nsh:req:compat.bash.options-builtins-dispatch])
+                                }
+                                deps (implement-bash-mode-selection)
+                                log (
+                                    {
+                                        at 2026-08-19T18:36:06.401093063Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Definition of done: make builtin and option discovery use the per-Shell dialect, add truthful set/shopt reporting and restorable output, invalidate affected command caches, and prove that Bash-only entries do not leak into default mode."
+                                    }
+                                )
+                            }
+                        )
+                    }
+
+                    {
+                        id bash-language-compatibility
+                        title "Implement the Bash language and interactive surface"
+                        kind @feat
+                        children (
+                            {
+                                id implement-bash-arrays-declarations
+                                title "Implement Bash arrays and declaration semantics"
+                                implements {
+                                    nsh-library ([spec:nsh:req:compat.bash.arrays-declarations])
+                                }
+                                deps (extend-bash-mode-aware-parser introduce-bash-value-model gate-bash-builtins-options)
+                                log (
+                                    {
+                                        at 2026-08-19T18:36:06.54255616Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Definition of done: close the calibrated array and declaration case subset for indexed and associative arrays, compound assignment, sparse access, attributes, scope, append, expansion, and unset, with focused unit tests and imported differential cases."
+                                    }
+                                )
+                            }
+
+                            {
+                                id implement-bash-conditionals-arithmetic
+                                title "Implement Bash conditionals and arithmetic syntax"
+                                implements {
+                                    nsh-library ([spec:nsh:req:compat.bash.conditionals-arithmetic])
+                                }
+                                deps (extend-bash-mode-aware-parser introduce-bash-value-model)
+                                log (
+                                    {
+                                        at 2026-08-19T18:36:06.68106815Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Definition of done: close the calibrated [[, regex, pattern, arithmetic-command, and arithmetic-for subset, including quoting, precedence, side effects, diagnostics, and truth statuses, while retaining POSIX test behavior in default mode."
+                                    }
+                                )
+                            }
+
+                            {
+                                id implement-bash-expansion-globbing
+                                title "Implement Bash expansion and globbing semantics"
+                                implements {
+                                    nsh-library ([spec:nsh:req:compat.bash.expansion-globbing])
+                                }
+                                deps (extend-bash-mode-aware-parser introduce-bash-value-model gate-bash-builtins-options)
+                                log (
+                                    {
+                                        at 2026-08-19T18:36:06.813472866Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Definition of done: close the calibrated brace, tilde, advanced parameter, indirect, extglob, globstar, and glob-option subset in the existing expansion pipeline, with ordering and quoting tests and an explicit default-mode negative matrix."
+                                    }
+                                )
+                            }
+
+                            {
+                                id implement-bash-process-substitution
+                                title "Implement owned process substitution"
+                                implements {
+                                    nsh-library ([spec:nsh:req:compat.bash.process-substitution])
+                                }
+                                deps (extend-bash-mode-aware-parser implement-bash-expansion-globbing)
+                                log (
+                                    {
+                                        at 2026-08-19T18:36:06.919311622Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Definition of done: parse and execute input and output process substitution with owned endpoint lifetimes, deterministic cleanup, child-status containment, and no RawFd-facing core API or manual descriptor duplication/closure; cover success, early consumer exit, redirection failure, and nested substitutions."
+                                    }
+                                )
+                            }
+
+                            {
+                                id implement-bash-functions-scoping
+                                title "Implement Bash functions, locals, and namerefs"
+                                implements {
+                                    nsh-library ([spec:nsh:req:compat.bash.functions-scoping])
+                                }
+                                deps (extend-bash-mode-aware-parser introduce-bash-value-model gate-bash-builtins-options)
+                                log (
+                                    {
+                                        at 2026-08-19T18:36:07.054795996Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Definition of done: close the calibrated function-form, positional frame, dynamic local, declaration attribute, nameref, recursion, and return subset using retained owned ASTs, with nested scope and mode-transition tests."
+                                    }
+                                )
+                            }
+
+                            {
+                                id implement-bash-traps-introspection
+                                title "Implement Bash trap inheritance and call introspection"
+                                implements {
+                                    nsh-library ([spec:nsh:req:compat.bash.traps-introspection])
+                                }
+                                deps (implement-bash-functions-scoping gate-bash-builtins-options)
+                                log (
+                                    {
+                                        at 2026-08-19T18:36:07.18470754Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Definition of done: close calibrated DEBUG, RETURN, ERR, functrace, errtrace, caller, and call-stack observations without regressing the POSIX/Smoosh trap contracts; cover nesting, source files, functions, subshells, and disabled-option cases."
+                                    }
+                                )
+                            }
+
+                            {
+                                id implement-bash-builtins-special-vars
+                                title "Implement Bash built-ins and special variables"
+                                implements {
+                                    nsh-library ([spec:nsh:req:compat.bash.builtins-special-variables])
+                                }
+                                deps (
+                                    implement-bash-arrays-declarations
+                                    implement-bash-conditionals-arithmetic
+                                    implement-bash-expansion-globbing
+                                    implement-bash-functions-scoping
+                                    implement-bash-traps-introspection
+                                    gate-bash-builtins-options
+                                )
+                                log (
+                                    {
+                                        at 2026-08-19T18:36:07.295423447Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Definition of done: implement the calibrated builtin flags and special-variable subset on the completed value, function, trap, conditional, and expansion foundations; values must be truthful per Shell and SHELLOPTS/BASHOPTS must round-trip effective state."
+                                    }
+                                )
+                            }
+
+                            {
+                                id implement-bash-interactive-profile
+                                title "Implement Bash prompts, history, bind, and completion"
+                                implements {
+                                    nsh-library ([spec:nsh:req:compat.bash.interactive])
+                                }
+                                deps (implement-bash-builtins-special-vars implement-bash-expansion-globbing implement-bash-functions-scoping)
+                                log (
+                                    {
+                                        at 2026-08-19T18:36:07.408360542Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Definition of done: close calibrated prompt expansion, history controls, bind, and programmable-completion cases in nshterm/nshedit, retain mode-independent up/down history, and prove non-interactive shells allocate no editor, terminal, completion, or persistent history state."
+                                    }
+                                )
+                            }
+                        )
+                    }
+
+                    {
+                        id bash-compatibility-verification
+                        title "Enforce safety and close the pinned Bash profile"
+                        kind @test
+                        children (
+                            {
+                                id enforce-bash-safe-core
+                                title "Enforce safe ownership boundaries across Bash mode"
+                                implements {
+                                    nsh-library ([spec:nsh:req:compat.bash.safe-core])
+                                }
+                                deps (
+                                    implement-bash-arrays-declarations
+                                    implement-bash-conditionals-arithmetic
+                                    implement-bash-expansion-globbing
+                                    implement-bash-process-substitution
+                                    implement-bash-functions-scoping
+                                    implement-bash-traps-introspection
+                                    implement-bash-builtins-special-vars
+                                    implement-bash-interactive-profile
+                                )
+                                log (
+                                    {
+                                        at 2026-08-19T18:36:07.526551331Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Definition of done: add a repository gate over the compatibility delta and relevant core/platform surfaces for unsafe, direct libc, RawFd, dup2, and close; audit every process-substitution ownership edge; run the gate and its self-tests only through process-tree containment."
+                                    }
+                                )
+                            }
+
+                            {
+                                id verify-bash-compatibility-profile
+                                title "Prove the pinned Bash profile and default-mode regressions"
+                                implements {
+                                    nsh-library ([spec:nsh:req:compat.bash.survey-closure])
+                                }
+                                deps (enforce-bash-safe-core)
+                                log (
+                                    {
+                                        at 2026-08-19T18:36:07.654123667Z
+                                        author "brendan@necessary.nu"
+                                        kind @note
+                                        text "Definition of done: the exact eligible Bash manifest has zero unexpected failures, timeouts, or harness errors; exclusions all match recorded dispositions; argv[0] and set-mode entry matrices pass; default Bash-negative tests pass; pinned POSIX and Smoosh suites remain green; all evidence commands run through scripts/sandboxed."
+                                    }
+                                )
+                            }
+                        )
+                    }
+                )
+                log (
+                    {
+                        at 2026-08-19T18:36:05.375554588Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "Target the published GNU Bash 5.3 language contract, calibrated against one exact release-and-patch build. The Oils Bash survey supplies pinned differential evidence; an ambient bash executable or a mixed-version imported expectation does not define the target."
+                    }
+
+                    {
+                        at 2026-08-19T18:36:05.51088525Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "Bash mode is per Shell and off by default. It is selected by set or invocation -o bash, inferred from the raw bash or -bash invocation basename, and overridden by explicit +o bash. One mode-aware owned parser applies changes at subsequent parser entries."
+                    }
+
+                    {
+                        at 2026-08-19T18:36:05.627086765Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "Arrays use a structural value model. Process substitution and the rest of the compatibility work preserve safe Rust and owned descriptor APIs, with no new unsafe, libc, RawFd, manual dup2, or manual close in the core or public library."
+                    }
+                )
+            }
         )
         log (
             {

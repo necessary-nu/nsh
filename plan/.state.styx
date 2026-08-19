@@ -1250,6 +1250,7 @@ assertions (
     {id record-bash-oracle-baseline, kind @complete, author "brendan@necessary.nu", at 2026-08-19T15:26:03.079941802Z}
     {id specify-smoosh-failure-contracts, kind @complete, author "brendan@necessary.nu", at 2026-08-19T15:36:02.180018603Z}
     {id verify-smoosh-zero-failures, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:31:28.927290215Z}
+    {id specify-bash-compatibility-profile, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:36:22.237930781Z}
 )
 
 impl_evidence (
