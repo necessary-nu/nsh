@@ -5532,6 +5532,184 @@ children (
                     }
                 )
             }
+
+            {
+                id record-bash-oracle-baseline
+                title "Record release nsh against the Oils Bash expectation oracle"
+                kind @test
+                deps (enforce-survey-test-containment)
+                log (
+                    {
+                        at 2026-08-19T14:55:08.137012179Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Definition of done: build release nsh and execute the Oils bash-comparison, bash-extension, and bash-named-diagnostic groups with the expectation namespace explicitly set to bash. Persist deterministic machine-readable summaries that identify the pinned Oils source, release-shell hash, expectation namespace, totals, every non-passing case, timeouts, and runner errors. The results are a Bash compatibility baseline, not the normative POSIX oracle."
+                    }
+                )
+            }
+
+            {
+                id close-smoosh-survey-gaps
+                title "Close every observed Smoosh survey gap"
+                kind @fix
+                children (
+                    {
+                        id specify-smoosh-failure-contracts
+                        title "Classify and specify all 31 Smoosh failure contracts"
+                        kind @docs
+                        deps (record-bash-oracle-baseline integrate-smoosh-posix)
+                        log (
+                            {
+                                at 2026-08-19T14:55:08.269972916Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Definition of done: account for each of the 31 recorded Smoosh failures exactly once; map normative behavior to existing POSIX rules, preserve relevant dash-port contracts, define nsh compatibility rules for adopted extensions or exact conventions that neither corpus specifies, and register every intentional POSIX-over-dash or extension-over-dash decision. Oracle bytes may change only when the pinned upstream test is demonstrably contaminated by the native runner; no failure may be hidden, skipped, or reclassified merely to make totals green."
+                            }
+                        )
+                    }
+
+                    {
+                        id fix-smoosh-runner-fidelity
+                        title "Remove Smoosh runner path and environment artifacts"
+                        kind @fix
+                        deps (specify-smoosh-failure-contracts)
+                        log (
+                            {
+                                at 2026-08-19T14:55:08.428108583Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Owns sh.set.ifs.test. Definition of done: TEST_SHELL and all fixture entry points remain invocable under arbitrary shell IFS values, including IFS=123, without depending on digits or other split characters in generated paths. Add a regression that proves the upstream script reaches all three nested shell invocations; retain isolated HOME/cwd/env, bounded capture, process-group cleanup, and the no-unsafe/no-RawFd/no-libc survey-runner boundary."
+                            }
+                        )
+                    }
+
+                    {
+                        id fix-smoosh-control-flow-boundaries
+                        title "Fix loop-control behavior across lexical, dot, and subshell boundaries"
+                        kind @fix
+                        deps (fix-smoosh-runner-fidelity)
+                        log (
+                            {
+                                at 2026-08-19T14:55:08.556352884Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Owns builtin.dot.break.test and semantics.subshell.break.test. Definition of done: break and continue unwind only the execution contexts selected by the adopted lexical/dot/subshell contract; sourced input and subshell execution cannot accidentally consume or leak a caller's loop-control state. Add focused Rust regressions and make both pinned Smoosh cases byte/status exact."
+                            }
+                        )
+                    }
+
+                    {
+                        id fix-smoosh-exit-trap-semantics
+                        title "Fix EXIT and signal-trap status propagation"
+                        kind @fix
+                        deps (fix-smoosh-runner-fidelity)
+                        log (
+                            {
+                                at 2026-08-19T14:55:08.694121037Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Owns builtin.trap.chained.test, builtin.trap.exitcode.test, builtin.trap.subshell.false.exit.test, builtin.trap.subshell.loud.test, builtin.trap.subshell.loud2.test, builtin.trap.subshell.true.ec1.test, and semantics.return.trap.test. Definition of done: EXIT and signal trap actions execute in the correct environment, nested exit/return/signal control flow is preserved, and the trap action's final status follows the specified replacement/preservation rules. Add direct regressions for every distinct status transition and make all seven Smoosh cases exact."
+                            }
+                        )
+                    }
+
+                    {
+                        id fix-smoosh-error-status-diagnostics
+                        title "Fix special-builtin, expansion, redirection, and diagnostic contracts"
+                        kind @fix
+                        deps (fix-smoosh-runner-fidelity)
+                        log (
+                            {
+                                at 2026-08-19T14:55:08.882418912Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Owns builtin.command.nospecial.test, builtin.dot.nonexistent.test, builtin.exec.badredir.test, builtin.readonly.assign.noninteractive.test, builtin.special.redir.error.test, builtin.times.ioerror.test, builtin.unset.test, semantics.error.noninteractive.test, semantics.interactive.expansion.exit.test, semantics.noninteractive.expansion.exit.test, and semantics.redir.close.test. Definition of done: special-builtin demotion, fatal versus recoverable errors, parameter-expansion failure, descriptor errors, write errors, exit statuses, and diagnostic prefixes/text match the adopted contracts without weakening descriptor ownership. Add focused regressions and make all eleven Smoosh cases exact."
+                            }
+                        )
+                    }
+
+                    {
+                        id fix-smoosh-extension-builtins-options
+                        title "Implement surveyed source, history, hash, and control-flow extensions"
+                        kind @fix
+                        deps (fix-smoosh-runner-fidelity)
+                        log (
+                            {
+                                at 2026-08-19T14:55:09.089740609Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Owns builtin.break.nonlexical.test, builtin.continue.nonlexical.test, builtin.history.nonposix.test, builtin.source.nonexistent.earlyexit.test, builtin.source.nonexistent.test, builtin.source.setvar.test, and semantics.-h.nonposix.test. Definition of done: implement the surveyed source alias, history interface, hash-all option, and non-lexical control option with explicit nsh compatibility contracts; preserve interactive-only history creation; define failure and status behavior; and make all seven extension cases exact without gating baseline line editing on vi or emacs mode."
+                            }
+                        )
+                    }
+
+                    {
+                        id fix-smoosh-interactive-job-control
+                        title "Fix interactive prompt and monitor-mode job behavior"
+                        kind @fix
+                        deps (fix-smoosh-runner-fidelity)
+                        log (
+                            {
+                                at 2026-08-19T14:55:09.219981994Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Owns builtin.kill.jobs.test, sh.interactive.ps1.test, and sh.ps1.override.test. Definition of done: job identifiers are accepted or rejected according to monitor mode, forced-interactive non-tty sessions emit only the adopted diagnostics, and PS1 default/override prompts are byte-exact without corrupting command output. Add PTY and non-PTY regressions and make all three Smoosh cases exact."
+                            }
+                        )
+                    }
+
+                    {
+                        id verify-smoosh-zero-failures
+                        title "Prove the complete Smoosh survey passes 186 of 186"
+                        kind @test
+                        deps (
+                            fix-smoosh-control-flow-boundaries
+                            fix-smoosh-exit-trap-semantics
+                            fix-smoosh-error-status-diagnostics
+                            fix-smoosh-extension-builtins-options
+                            fix-smoosh-interactive-job-control
+                        )
+                        log (
+                            {
+                                at 2026-08-19T14:55:09.357010637Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Definition of done: build release nsh; regenerate the deterministic Smoosh result summary; obtain selected=186, executed=186, pass=186, fail=0, timeout=0, error=0, skip=0; and leave every regular and known-hang case enabled under its locked deadline. The workspace tests, strict nsh-survey clippy, normative POSIX.1-2024 run, Oils verification, and a representative Oils release-nsh smoke must also remain green."
+                            }
+                        )
+                    }
+                )
+                log (
+                    {
+                        at 2026-08-19T14:55:08.004256105Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "Operator approved the dependency shape: establish the Bash-expectation baseline first; specify every Smoosh contract; eliminate runner artifacts; then fix control flow, traps, errors and diagnostics, extensions, and interactive/job-control behavior; finally require a complete 186/186 release-shell result. All 31 observed failures remain in scope, including non-POSIX extensions and byte-exact oracles."
+                    }
+
+                    {
+                        at 2026-08-19T14:55:50.629959406Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "Operator added a fail-closed execution constraint after approving the original graph: test processes must not share the host session or be able to signal tmux. enforce-survey-test-containment now precedes record-bash-oracle-baseline, so the containment gate transitively blocks every specification, implementation, and final-verification node in this work."
+                    }
+                )
+            }
+
+            {
+                id enforce-survey-test-containment
+                title "Confine every survey and conformance test process tree"
+                kind @fix
+                deps (native-oils-spec-runner integrate-smoosh-posix)
+                log (
+                    {
+                        at 2026-08-19T14:55:50.494443449Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Definition of done: every Oils, Smoosh, POSIX, differential, PTY, workspace-test, and focused regression command used by this work runs inside a fail-closed PID namespace before any shell-controlled input executes. Reuse or extend the repository sandbox boundary: host processes must be invisible; the root is read-only except explicit scratch/build/result binds; network is unshared; nproc is bounded; inherited signal dispositions are reset; non-PTY runs start a new session; PTY runs acquire only their private controlling terminal; leaked descendants die with the namespace. A containment probe and execution canary must pass before reporting results, and there is no unsandboxed fallback."
+                    }
+                )
+            }
         )
         log (
             {
