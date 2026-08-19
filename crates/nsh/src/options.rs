@@ -279,8 +279,10 @@ pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<c_in
         }
         sh.options.set_flag(sflag, 1);
     }
-    if sh.options.flag(iflag) == 2 && sh.options.flag(sflag) == 1 {
+    if sh.options.flag(sflag) == 1 && sh.input.stdin_istty < 0 {
         crate::input::input_init(sh);
+    }
+    if sh.options.flag(iflag) == 2 && sh.options.flag(sflag) == 1 {
         if sh.input.stdin_istty != 0
             && sh
                 .fds
@@ -294,7 +296,17 @@ pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<c_in
         }
     }
     if sh.options.flag(mflag) == 2 {
-        sh.options.set_flag(mflag, sh.options.flag(iflag));
+        // [spec:nsh:req:compat.smoosh.interactive-job-prompt]
+        // `-i` makes a pipe an interactive input source, but it does not
+        // conjure up the terminal that monitor mode needs. Leave monitor
+        // mode off in that one case; an explicit `set -m` remains distinct
+        // and still reaches `setjobctl`.
+        let monitor = if sh.options.flag(sflag) == 1 && sh.input.stdin_istty == 0 {
+            0
+        } else {
+            sh.options.flag(iflag)
+        };
+        sh.options.set_flag(mflag, monitor);
     }
     i = 0;
     while i < NOPTS as c_int {

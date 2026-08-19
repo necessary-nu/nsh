@@ -129,11 +129,14 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     i = 0;
     for spec in operands {
         if spec.first() == Some(&b'%') {
-            jp = getjob(sh, Some(spec), 0)?;
+            // [spec:nsh:req:compat.smoosh.interactive-job-prompt]
+            // A `%job` names a process group, not the first process that
+            // happened to be recorded for a background command. Requiring
+            // a job-control job here prevents the latter from silently
+            // becoming the former while monitor mode is disabled.
+            jp = getjob(sh, Some(spec), 1)?;
             pid = ps_pid(sh, jp, 0);
-            if sh.jobs.tab[jp].jobctl != 0 {
-                pid = -pid;
-            }
+            pid = -pid;
         } else {
             pid = if spec.first() == Some(&b'-') {
                 -crate::mystring::number(sh, BStr::new(&spec[1..]))?

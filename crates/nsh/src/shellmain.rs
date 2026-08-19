@@ -460,7 +460,12 @@ pub(crate) fn cmdloop(
             }
             if crate::jobs::stoppedjobs(sh) == 0 {
                 if Iflag(sh) == 0 {
-                    if iflag(sh) != 0 {
+                    // [spec:nsh:req:compat.smoosh.interactive-job-prompt]
+                    // A real terminal needs a line ending after the user's
+                    // EOF keystroke. A forced-interactive pipe has no echoed
+                    // keystroke to terminate, so the prompt is already the
+                    // complete byte stream.
+                    if iflag(sh) != 0 && sh.input.stdin_istty != 0 {
                         let _ = sh.io.stderr().write_all(b"\n");
                     }
                     break;

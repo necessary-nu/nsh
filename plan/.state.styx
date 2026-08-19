@@ -4945,4 +4945,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule compat.smoosh.trap-status}
     )}
+    {id fix-smoosh-interactive-job-control, covered_rules (
+        compat.smoosh.interactive-job-prompt
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.smoosh.interactive-job-prompt}
+    )}
 )

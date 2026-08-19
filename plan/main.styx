@@ -5792,6 +5792,20 @@ children (
                                 kind @note
                                 text "Owns builtin.kill.jobs.test, sh.interactive.ps1.test, and sh.ps1.override.test. Definition of done: job identifiers are accepted or rejected according to monitor mode, forced-interactive non-tty sessions emit only the adopted diagnostics, and PS1 default/override prompts are byte-exact without corrupting command output. Add PTY and non-PTY regressions and make all three Smoosh cases exact."
                             }
+
+                            {
+                                at 2026-08-19T16:59:23.413568449Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-19T17:14:08.632731851Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Implemented monitor-aware kill job operands and forced-interactive non-TTY prompt handling. Exact focused Smoosh cases pass; full pinned Smoosh is 186/186 with zero failures, timeouts, or errors. The focused real-PTY monitor regression passes against dash. Sandboxed cargo tests pass for nsh, nsh-cli, and nsh-survey. No unsafe, libc, RawFd, dup2, or close additions."
+                            }
                         )
                     }
 

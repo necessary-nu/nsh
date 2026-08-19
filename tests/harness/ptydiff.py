@@ -150,6 +150,9 @@ CASES = [
                                     "wait %2", "wait %1", "echo done", "exit"]),
     ("job refs by name",       [], ["sleep 3 &", "jobs %sleep", "jobs %?lee", "wait", "exit"]),
     ("bg pipeline + jobs",     [], ["sleep 3 | cat &", "jobs", "wait", "echo done", "exit"]),
+    # [spec:nsh:req:compat.smoosh.interactive-job-prompt/test]
+    ("monitor flag on tty",    [], ["case $- in *m*) echo MONITOR-ON;; *) echo MONITOR-OFF;; esac",
+                                    "exit"]),
     ("fg a bg job",            [], ["sleep 2 &", "fg", "echo done", "exit"]),
     ("stop then fg",           [], ["sleep 2", "\x1a", "jobs", "fg", "echo done", "exit"]),
     # --- the line-editor paths, which only exist with -E/-V ---
