@@ -201,7 +201,16 @@ pub fn process_arguments() -> Vec<OsString> {
 }
 
 pub fn process_environment() -> Vec<(OsString, OsString)> {
-    std::env::vars_os().collect()
+    std::env::vars_os()
+        .map(|(name, value)| {
+            let name = if name.eq_ignore_ascii_case(OsStr::new("PATH")) {
+                OsString::from("PATH")
+            } else {
+                name
+            };
+            (name, value)
+        })
+        .collect()
 }
 
 pub fn process_id() -> u32 {
@@ -3276,6 +3285,16 @@ mod tests {
             expected
         );
         assert!(expected.iter().all(|path| path.is_absolute()));
+    }
+
+    #[test]
+    fn inherited_path_uses_the_shells_canonical_name() {
+        let expected = std::env::var_os("PATH").expect("test process has PATH");
+        let inherited: Vec<_> = process_environment()
+            .into_iter()
+            .filter(|(name, _)| name.eq_ignore_ascii_case(OsStr::new("PATH")))
+            .collect();
+        assert_eq!(inherited, [(OsString::from("PATH"), expected)]);
     }
 
     #[test]
