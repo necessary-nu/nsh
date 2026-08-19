@@ -104,9 +104,14 @@ pub struct EvalState {
     pub(crate) inps4: c_int,
     /// exit status of backquoted command
     pub(crate) back_exitstatus: c_int,
-    /// exit status of the last command outside traps, or -1 when no trap
-    /// is running. `dotrap` seeds it and `exitreset` restores from it.
-    pub(crate) savestatus: c_int,
+    /// Number of signal trap actions currently being evaluated.
+    ///
+    /// A special-builtin failure ordinarily terminates a non-interactive
+    /// shell. A signal action is a catch boundary instead: the action's
+    /// command status is discarded and the interrupted status is restored.
+    /// Keeping that mode on the shell makes it survive functions and `eval`
+    /// without adding a process-global trap flag.
+    pub(crate) signal_trap_depth: usize,
     /// The line a diagnostic reports — the `17` of `sh: 17: cd: ...`.
     ///
     /// `error.rs`'s `errlinno`. Six sites write it, five of them here
@@ -140,7 +145,7 @@ impl EvalState {
             funcline: 0,
             inps4: 0,
             back_exitstatus: 0,
-            savestatus: -1,
+            signal_trap_depth: 0,
             errlinno: 0,
             commandname: None,
         }
@@ -149,7 +154,7 @@ impl EvalState {
 
 /* int exitstatus;      exit status of last command      -> Shell::status
  * int back_exitstatus; exit status of backquoted command -> EvalState
- * int savestatus;      status of last command outside traps -> EvalState */
+ * int savestatus;      replaced by local trap status and `Flow::Exit::status` */
 
 // ---------------------------------------------------------------------
 // control flow, which is not error
@@ -164,18 +169,12 @@ impl EvalState {
 /// sit in the `Ok` position rather than the `Err` one. This is that
 /// position.
 ///
-/// **What the audit for this commit found, which `docs/api-design.md`
-/// §10.2 asked for before `Flow` was written.** `error::exception` is read
-/// in exactly three places in the crate: `evalcommand`'s test for a
-/// built-in's `EXERROR` (`eval.rs`), `main`'s handler (`shellmain.rs`),
-/// and `init::exitreset` (`init.rs:73`). Only the last one tells `EXEND`
-/// from `EXEXIT`, and all it does with the difference is decide whether to
-/// restore `savestatus` into `exitstatus`. `main`'s handler tests the two
-/// together and does the same thing for both. So the two codes differ in
-/// exactly one place and in exactly one bit, which is [`Flow::Exit`]'s
-/// `by_exitcmd` — and §3.5's "if the conversion finds a second difference,
-/// `Exit` grows a field" does not apply, because there is no second
-/// difference.
+/// `EXEND` carries no newly selected status: the command status already in
+/// [`Shell::status`](crate::context::Shell::status) is the one to use.
+/// `EXEXIT` carries the status selected by `exit`, including the then-current
+/// status when no operand was supplied. Keeping that status in this value
+/// avoids pairing control flow with a second ambient field and lets nested
+/// traps carry independent exit decisions.
 ///
 /// `evalskip`'s `break` / `continue` / `return` are **not** here. §3.5
 /// proposes collapsing them into this type as well, and they should be;
@@ -191,19 +190,24 @@ pub enum Flow {
     Done(c_int),
     /// The shell is exiting: the C's `EXEND` and `EXEXIT`.
     ///
-    /// `by_exitcmd` is `EXEXIT` — `exit` ran and left what it was asked
-    /// for in [`savestatus`], which `init::exitreset` restores. `false` is
-    /// `EXEND`: `set -e`, an `EV_EXIT` evaluation, or an `exec` that could
-    /// not happen, none of which name a status.
-    Exit { by_exitcmd: bool },
+    /// `status` is `Some` when the `exit` builtin selected a status and
+    /// `None` for `EXEND`: `set -e`, an `EV_EXIT` evaluation, or an `exec`
+    /// that could not happen. The latter already left its status on the
+    /// shell.
+    Exit { status: Option<c_int> },
 }
 
 impl Flow {
     /// The `EXEND` exit: the shell is ending without a status having been
     /// named.
-    pub const END: Flow = Flow::Exit { by_exitcmd: false };
-    /// The `EXEXIT` exit: `exit` ran.
-    pub const EXIT: Flow = Flow::Exit { by_exitcmd: true };
+    pub const END: Flow = Flow::Exit { status: None };
+
+    /// The `EXEXIT` exit: `exit` ran and selected `status`.
+    pub const fn exit(status: c_int) -> Flow {
+        Flow::Exit {
+            status: Some(status),
+        }
+    }
 }
 
 /// `?` for [`Flow`]: take the status, or return the exit to the caller.
@@ -361,6 +365,10 @@ fn redirection_only_status(
     }
 }
 
+fn builtin_error_is_fatal(sh: &Shell, spclbltin: c_int, error: &Error) -> bool {
+    error.is_interrupt() || (spclbltin > 0 && sh.eval.signal_trap_depth == 0)
+}
+
 fn eval_interactive_sequence(
     sh: &mut Shell,
     n: Option<&Node>,
@@ -384,7 +392,7 @@ fn eval_interactive_sequence(
             let status = error.status();
             sh.status = status;
             drop(error);
-            crate::init::exitreset(sh, false);
+            crate::init::exitreset(sh);
             crate::input::unwindfiles(sh, input_stop);
             crate::var::mkinit_reset(sh);
             crate::error::FORCEINTON(sh);
@@ -605,8 +613,8 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
     // exexit:
     /* `exraise(EXEND)`, which is the `set -e` abort and the end of an
      * `EV_EXIT` evaluation. Neither names a status -- `exitstatus` already
-     * holds it -- so this is the `by_exitcmd: false` half of `Flow::Exit`,
-     * and it is returned rather than jumped with. Note what is *not* here:
+     * holds it -- so this is the status-less half of `Flow::Exit`, and it
+     * is returned rather than jumped with. Note what is *not* here:
      * the C raises after the `popstackmark` that the normal return runs
      * before, and 2.3 warned that a naive rewrite would release the region
      * on a path the C never does. `delete-memalloc` removed both marks, so
@@ -1503,8 +1511,16 @@ fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> 
                             /* The C's `!(exception == EXERROR && spclbltin
                              * <= 0)`. An interrupt is not an EXERROR and
                              * was never swallowed here; now that it is a
-                             * value, saying so is a test on the value. */
-                            if spclbltin > 0 || e.is_interrupt() {
+                             * value, saying so is a test on the value.
+                             *
+                             * A signal trap adds one catch boundary. Its
+                             * command failures must reach `dotrap` as a
+                             * status so the interrupted status can be
+                             * restored; returning the typed special-builtin
+                             * error here would instead abort the shell and
+                             * skip this command's ordinary cleanup. */
+                            // [spec:nsh:req:compat.smoosh.trap-status]
+                            if builtin_error_is_fatal(sh, spclbltin, &e) {
                                 return Err(e);
                             }
                             /* Reported already, and `evalbltin`'s epilogue
@@ -1866,9 +1882,9 @@ mod tests {
     //! What these pin is not the shape of the enum but the two claims the
     //! conversion rests on: that `flow!` *returns* rather than falling
     //! through, which is what makes it the literal stand-in for a longjmp
-    //! past this frame; and that `by_exitcmd` is the single bit telling
-    //! the C's EXEXIT from its EXEND. The behaviour is pinned end to end
-    //! in `tests/errors_are_values.rs`.
+    //! past this frame; and that an explicit exit carries its selected
+    //! status while EXEND does not. The behaviour is pinned end to end in
+    //! `tests/errors_are_values.rs`.
 
     use super::*;
 
@@ -1894,8 +1910,8 @@ mod tests {
             let _status = flow!(inner);
             panic!("flow! must not fall through on an exit");
         }
-        let got = body(Ok(Flow::EXIT));
-        assert_eq!(got.unwrap(), Flow::Exit { by_exitcmd: true });
+        let got = body(Ok(Flow::exit(9)));
+        assert_eq!(got.unwrap(), Flow::Exit { status: Some(9) });
     }
 
     /// A diagnostic still propagates through it, because the `?` is
@@ -1916,42 +1932,31 @@ mod tests {
         assert_eq!(got.unwrap_err().message(), "nope");
     }
 
-    /// The two named exits differ in exactly the bit `init::exitreset`
-    /// reads, and in nothing else — which is the audit
-    /// `docs/api-design.md` §10.2 asked for, asserted rather than
-    /// described.
+    /// EXEXIT owns the selected status while EXEND uses the status already
+    /// on the shell.
     // [spec:dash:sem:init.exitreset-fn/test]
+    // [spec:nsh:req:compat.smoosh.trap-status/test]
     #[test]
-    fn two_exits_differ_in_one_bit() {
-        assert_eq!(Flow::EXIT, Flow::Exit { by_exitcmd: true });
-        assert_eq!(Flow::END, Flow::Exit { by_exitcmd: false });
-        assert_ne!(Flow::EXIT, Flow::END);
+    fn explicit_exit_carries_status() {
+        assert_eq!(Flow::exit(9), Flow::Exit { status: Some(9) });
+        assert_eq!(Flow::END, Flow::Exit { status: None });
+        assert_ne!(Flow::exit(9), Flow::END);
     }
 
-    /// `exitreset` restores `savestatus` for what was EXEXIT and not for
-    /// what was EXEND. This is the one place in the crate where the two
-    /// C codes were ever told apart.
+    /// The catch frame applies any selected status before cleanup. Reset
+    /// therefore cannot overwrite the status chosen by either exit path.
     // [spec:dash:sem:init.exitreset-fn/test]
+    // [spec:nsh:req:compat.smoosh.trap-status/test]
     #[test]
-    fn exitreset_takes_savestatus_for_an_exit() {
+    fn exitreset_preserves_status() {
         let _guard = crate::testutil::lock();
-            /* A shell of this test's own, and nothing to save or
-             * restore around it any more. Both statuses are fields now,
-             * so the process has none to borrow and put back -- the last
-             * of the save/restore this test was written around is gone
-             * with them. */
-            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-            let sh = &mut owned;
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let sh = &mut owned;
 
-            sh.status = 1;
-            sh.eval.savestatus = 9;
-            crate::init::exitreset(sh, true);
-            assert_eq!(sh.status, 9, "`exit 9` names the status the shell leaves with");
-            assert_eq!(sh.eval.savestatus, -1, "and it is consumed");
-
-            sh.status = 1;
-            sh.eval.savestatus = 9;
-            crate::init::exitreset(sh, false);
-            assert_eq!(sh.status, 1, "a `set -e` abort names no status");
+        sh.status = 9;
+        sh.eval.evalskip = SKIPFUNCDEF;
+        crate::init::exitreset(sh);
+        assert_eq!(sh.status, 9);
+        assert_eq!(sh.eval.evalskip, 0);
     }
 }

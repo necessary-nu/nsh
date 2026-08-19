@@ -181,11 +181,12 @@ and does the same thing for both. So the two codes differ **in one place
 and in one bit**, and §3.5's "if the conversion finds a second difference,
 `Exit` grows a field" does not apply: there is no second difference.
 
-`Flow::Exit { by_exitcmd }` is that bit, and `init::exitreset` takes it as
-a parameter rather than reading a global. The audit is worth more than the
-conclusion: a claim about two enum values that are compared in three places
-is checkable by reading three lines, and that is a much stronger form of
-evidence than reading the two sites the design nominated.
+That was the original `Flow::Exit { by_exitcmd }` representation. The later
+Smoosh trap-status correction kept the audit but changed the model:
+`Flow::Exit { status: Option<c_int> }` carries an explicit exit status in the
+control-flow value, and `init::exitreset` only performs cleanup. This matters
+when an EXIT action receives a nested signal; a single ambient `savestatus`
+slot cannot represent both action boundaries independently.
 
 **One consequence for step E that neither document predicted.** Turning
 the exit into a value gives a forked child a choice the C never had. The
@@ -666,7 +667,7 @@ list that must keep happening, and none of it is `Drop`.
 | what | where | why it is observable |
 |---|---|---|
 | `init::exitreset()` | `shellmain.rs:214` | below |
-| — restore `exitstatus` from `savestatus`; clear `savestatus`, `evalskip`, `loopnest`, `inps4` | `init.rs:67-78` | `$?` after a trapped exit |
+| — clear `evalskip`, `loopnest`, `inps4`; an explicit status is applied from `Flow::Exit` before reset | `init.rs` and the calling catch frame | `$?` after a trapped exit |
 | — `close(eval::tpip[0])`, `close(tpip[1])` | `init.rs:79-82` | **two file descriptors**, the command-substitution pipe left open by a raise between `sh_pipe` and `forkshell` (`eval.rs:775-779`) |
 | — `expand::ifsfree()` | `init.rs:87` | frees the IFS region list; a stale region mis-splits the *next* word |
 | — `redir::unwindredir(NULL)` | `init.rs:91` → `redir.rs:525` | discards **every** saved descriptor: `popredir` `dup2`s each back and `close`s the save (`redir.rs:413-452`) |

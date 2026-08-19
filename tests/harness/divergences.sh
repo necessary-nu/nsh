@@ -768,6 +768,7 @@ DS_DIVERGENCES=(
 	sorted_tables
 	sorted_cmdtable
 	trap_subshell_listing
+	exit_trap_final_status
 	fc_recursion_error_status
 	logical_fd_low_nofile_survival
 	trap_p_option
@@ -999,6 +1000,17 @@ dsdiv_trap_subshell_listing() {
 		[ "$removed" -le "$inherited_limit" ] || return 1
 	done
 	[ "$removed" -gt 0 ] && [ "$ri" = "${#ref_lines[@]}" ]
+}
+
+# The adopted Smoosh EXIT-action rule makes a normally completed action's
+# final command status the subshell status. dash instead restores the status
+# originally supplied to `exit`. This exact differential witness has a nested
+# child EXIT action whose successful `echo inner` changes 2 to 0; no other
+# bytes or status pair are excused.
+dsdiv_exit_trap_final_status() {
+	[ "$3" = 0 ] && [ "$4" = 0 ] || return 1
+	[ "$1" = $'inner\n2' ] && [ "$2" = $'inner\n0' ] || return 1
+	grep -Fqx 'trap '\''( trap "echo inner" EXIT; exit 2 ); echo $?'\'' EXIT' "$5" 2>/dev/null
 }
 
 # The recursive fc guard is a utility error. The port returns 2; dash prints

@@ -45,7 +45,7 @@ pub type sig_atomic_t = c_int;
  *   EXERROR  a diagnostic          -> `Err(Error)`
  *   EXINT    the user's interrupt  -> `Err(Error::Interrupted)`
  *   EXEND    the shell is ending   -> `Ok(Flow::END)`
- *   EXEXIT   `exit` ran            -> `Ok(Flow::EXIT)`
+ *   EXEXIT   `exit` ran            -> `Ok(Flow::exit(status))`
  *
  * `[dec:nsh:errors-are-values]` is the decision that says the middle
  * column is the right division and the last two belong in the `Ok`

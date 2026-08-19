@@ -4940,4 +4940,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule compat.smoosh.error-contracts}
     )}
+    {id fix-smoosh-exit-trap-semantics, covered_rules (
+        compat.smoosh.trap-status
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.smoosh.trap-status}
+    )}
 )

@@ -298,11 +298,11 @@ codes:
 pub(crate) enum Flow { Normal, Break(u32), Continue(u32), Return, Exit }
 ```
 
-`EXEND` and `EXEXIT` both become `Exit`; they differ only in which status
-is taken (`shellmain.rs:456` sets `savestatus` from `exit`'s argument,
-`init.rs:65-72` restores it), and `Flow::Exit` plus the `status` field
-carries that. If the conversion finds a second difference, `Exit` grows a
-field.
+`EXEND` and `EXEXIT` both become `Exit`. `EXEND` carries no selected status;
+`EXEXIT` carries the status selected by `exit` in the `Flow` value itself.
+The first implementation preserved C's separate `savestatus` field, but the
+Smoosh trap-status correction removed it: one ambient slot cannot represent an
+EXIT action interrupted by a nested signal action.
 
 The status itself stays a **field** rather than becoming the `Ok` payload,
 because a dozen sites read `exitstatus` out of band (`eval.rs:399`,
@@ -447,7 +447,7 @@ the number means nothing. At `ecfd861` it is **39**.
 | `input: InputStack` | `input.rs:120 parsefile`, `:98 basepf`, `:112 basebuf`, `:113 toppf`, `:114 stdin_state`, `:121 whichprompt`, `:122 stdin_istty`; and `parser.rs`'s eleven parser globals (`:305-315`), which are per-input-position state |
 | `fds: FdTable` | The logical-to-real descriptor map, plus `redir.rs:44 redirlist` and `:47 closed_redirs` |
 | `io: ShellIo` | **Done** at `ecfd861`. The row as written is stale: `output-is-a-writer` had already collapsed `output`, `errout`, `preverrout`, `out1` and `out2` into a single `SHELL_IO`, so what moved was one aggregate and not five statics |
-| `eval: EvalState` | `eval.rs:79 evalskip`, `:80 skipcount`, `:81 loopnest`, `:82 funcline`, `:84 commandname`, `:86 back_exitstatus`, `:87 savestatus`, `:90 inps4` |
+| `eval: EvalState` | `evalskip`, `skipcount`, `loopnest`, `funcline`, `commandname`, `back_exitstatus`, `inps4`, and the per-shell nested `signal_trap_depth` catch mode |
 | `streams: Streams` | **Done** at `ecfd861`. `streams.rs:98 STREAMS`, and `streams()` and `set()` with it |
 | `host: Box<dyn Host>` | New. §5.4 |
 | `on_diagnostic: Option<Box<dyn FnMut(&Error) + Send>>` | New. §3.3 |
@@ -945,14 +945,13 @@ guess about external commands are all superseded above.
    stronger answer than the reading this entry asked for:
    `error::exception` was read in exactly *three* places in the crate —
    `evalcommand`'s built-in arm, `main`'s handler, and `init::exitreset`.
-   Only the last distinguishes the two codes, and all it does with the
-   difference is decide whether to restore `savestatus`. So they differ
-   in one place and in one bit, which is `Flow::Exit`'s `by_exitcmd`, and
-   §3.5's "if the conversion finds a second difference, `Exit` grows a
-   field" does not apply. `docs/errors-are-values.md` §0.3 has the
-   working; the audit is worth more than the conclusion, because a claim
-   about two enum values compared in three places is checkable by reading
-   three lines.
+   Only the last distinguished the two codes, by deciding whether to restore
+   `savestatus`. That audit correctly described the C mechanism, but the
+   adopted nested-trap semantics exposed its representation as
+   non-compositional. `Flow::Exit` now carries `Option<c_int>`: `Some` is the
+   status selected by `exit`, while `None` leaves the shell's current status
+   in force. `docs/errors-are-values.md` §0.3 records both the original audit
+   and this later correction.
 
 3. **The unwind-floor divergence in §4.2.** `run` making itself the floor
    differs from dash for `sh -ic`, and the differential corpus does not

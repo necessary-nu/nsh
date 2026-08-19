@@ -279,29 +279,29 @@ fn redirect_failure_frees_ifs_regions() {
 ///
 /// The C never had the choice: a `longjmp` to `main_handler` lands at
 /// `exit:`. Returning an exit as a value does have the choice, and taking
-/// the wrong one prints `2` where dash prints `inner` then `2` — which is
-/// what the port did until `evalsubshell` learned to end its forked child
-/// where it stands. `tests/corpus/aud_exception_paths.txt` is the case
-/// that caught it; this is the same claim in one assertion.
+/// the wrong one skips `inner`. The action's final successful `echo` is
+/// then the child's status under the adopted Smoosh EXIT-action rule, so
+/// the parent observes zero rather than the status initially given to
+/// `exit`.
+// [spec:nsh:req:compat.smoosh.trap-status/test]
 #[test]
 fn subshell_exit_trap_runs() {
     let (out, status) = run(r#"trap '( trap "echo inner" EXIT; exit 2 ); echo $?' EXIT"#);
-    assert_eq!(out, "inner\n2\n");
+    assert_eq!(out, "inner\n0\n");
     assert_eq!(status, 0);
 }
 
-/// The status `exit` names survives the EXIT trap that runs after it.
-/// This is `init::exitreset`'s `savestatus` restore — the single place
-/// where the C's `EXEXIT` ever differed from `EXEND`, and therefore the
-/// whole of what `Flow::Exit`'s `by_exitcmd` has to carry.
+/// A normally completed EXIT action contributes its final command status.
+/// An explicit `exit` inside that action instead contributes the status it
+/// selects and cannot re-enter the action, which was already taken.
+// [spec:nsh:req:compat.smoosh.trap-status/test]
 #[test]
-fn exit_status_survives_trap() {
+fn exit_trap_final_status_wins() {
     let (out, status) = run("trap 'echo T; true' EXIT; exit 5");
     assert_eq!(out, "T\n");
-    assert_eq!(status, 5);
+    assert_eq!(status, 0);
 
-    // …and an `exit` *inside* the trap overrides it, which is the other
-    // way `exitreset` can be told to take `savestatus`.
+    // An `exit` inside the action makes its own status the final one.
     let (out, status) = run("trap 'echo T; exit 9' EXIT; exit 3");
     assert_eq!(out, "T\n");
     assert_eq!(status, 9);

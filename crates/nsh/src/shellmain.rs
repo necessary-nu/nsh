@@ -241,9 +241,7 @@ pub fn main(
                             /* #if PROFILE: monitor(0); */
                             /* #if GPROF: _mcleanup(); */
                             leaving = Some(crate::trap::exitshell(sh));
-                            return Ok(crate::eval::Flow::Exit {
-                                by_exitcmd: false,
-                            });
+                            return Ok(crate::eval::Flow::END);
                         }
                     }
                 }
@@ -259,10 +257,10 @@ pub fn main(
         }
 
         /* The C read `exception` here. The three things it distinguished
-         * arrive as three different shapes now, and `exitreset` is told
-         * which rather than reading a global. */
+         * arrive as three different shapes now, and an explicit exit's
+         * selected status travels with its control-flow value. */
         let e_is_exit: bool;
-        let by_exitcmd: bool;
+        let selected_status: Option<c_int>;
         let interrupted: bool;
         let unrecoverable_read: bool;
 
@@ -274,24 +272,23 @@ pub fn main(
             Ok(crate::eval::Flow::Done(_)) => {
                 unreachable!("main's body leaves only by exiting or by failing")
             }
-            Ok(crate::eval::Flow::Exit { by_exitcmd: b }) => {
+            Ok(crate::eval::Flow::Exit { status }) => {
                 e_is_exit = true;
-                by_exitcmd = *b;
+                selected_status = *status;
                 interrupted = false;
                 unrecoverable_read = false;
             }
             Err(e) => {
                 e_is_exit = false;
-                by_exitcmd = false;
+                selected_status = None;
                 /* The C read `exception == EXINT` here, for the bare
                  * newline it writes before the next prompt. */
                 interrupted = e.is_interrupt();
                 unrecoverable_read = e.is_unrecoverable_read();
                 /* This is the outermost catch, and the status the raise
                  * took travels in the value now. Everything downstream --
-                 * `exitshell`'s `savestatus = exitstatus` and its
-                 * `_exit(exitstatus)`, and an interactive resume's next
-                 * `$?` -- reads the shell, so the shell is written here. */
+                 * `exitshell`, and an interactive resume's next `$?` --
+                 * reads the shell, so the shell is written here. */
                 sh.status = e.status();
             }
         }
@@ -301,7 +298,10 @@ pub fn main(
         {
             let s: c_int;
 
-            crate::init::exitreset(sh, by_exitcmd);
+            if let Some(status) = selected_status {
+                sh.status = status;
+            }
+            crate::init::exitreset(sh);
 
             s = state;
             // [spec:posix:req:exit.shell-error-consequences]
@@ -498,20 +498,20 @@ pub(crate) fn exit_from_child(
     sh: &mut Shell,
     outcome: Result<crate::eval::Flow, crate::error::Error>,
 ) -> ! {
-    let by_exitcmd = matches!(
-        outcome,
-        Ok(crate::eval::Flow::Exit {
-            by_exitcmd: true,
-            ..
-        })
-    );
+    let selected_status = match &outcome {
+        Ok(crate::eval::Flow::Exit { status }) => *status,
+        _ => None,
+    };
     /* Same as `main`'s handler: the catch writes the status, because
      * `exitshell` below leaves the process with it. */
     if let Err(e) = &outcome {
         sh.status = e.status();
     }
     drop(outcome);
-    crate::init::exitreset(sh, by_exitcmd);
+    if let Some(status) = selected_status {
+        sh.status = status;
+    }
+    crate::init::exitreset(sh);
     /* `exitshell` returns now, and this is one of the three `_exit`s that
      * stay: it ends a child the library forked, which
      * [dec:nsh:fork-child-is-a-terminus] makes a terminus rather than a

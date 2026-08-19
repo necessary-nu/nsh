@@ -366,6 +366,11 @@ one in the same shell process.
   for an initial no-operand `trap` listing in a subshell, even though live
   dispositions were reset. Added lines must be byte-identical to the outer
   listing and are bounded by the number of lexical subshell listings.
+* `exit_trap_final_status`: the adopted Smoosh compatibility rule uses a
+  normally completed EXIT action's final command status as the shell or
+  subshell status. dash restores the status that entered the action. The
+  register pins the nested-child witness exactly: `inner` remains unchanged
+  and only the reported child status changes from 2 to 0.
 * `trap_p_option`: POSIX.1-2024 `trap -p PIPE` prints the selected trap. dash
   rejects `-p`; the decision entry pins both its exact diagnostic and nsh's
   exact listing.

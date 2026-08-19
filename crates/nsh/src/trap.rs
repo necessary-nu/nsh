@@ -12,7 +12,7 @@ pub type sig_atomic_t = c_int;
 
 use crate::error::{INTOFF, INTON};
 use crate::error::Error;
-use crate::eval::{Flow, SKIPFUNC, SKIPFUNCDEF};
+use crate::eval::{Flow, SKIPFUNC};
 use crate::nodes::Node;
 
 /// glibc's `NSIG` (`_NSIG`) on Linux.
@@ -558,8 +558,7 @@ pub extern "C" fn onsig(signo: c_int) {
 // [spec:posix:sem:signal.pending-trap-order]
 pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
     let mut i: c_int;
-    let mut status: c_int;
-    let last_status: c_int;
+    let status: c_int;
 
     /* The poll site the shell reaches most often: `evaltree` calls
      * `dotrap` before every command and again at its `out:`, so an
@@ -576,12 +575,11 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
         return Ok(Flow::Done(0));
     }
 
-    status = sh.eval.savestatus;
-    last_status = status;
-    if status < 0 {
-        status = sh.status;
-        sh.eval.savestatus = status;
-    }
+    /* Each invocation owns the status it interrupted. In particular, a
+     * signal delivered while an EXIT action is running must save that
+     * action's current status, not reuse the status that entered EXIT. */
+    // [spec:nsh:req:compat.smoosh.trap-status]
+    status = sh.status;
     signals.set_pending_signal(0);
     crate::error::barrier();
 
@@ -611,12 +609,15 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
                 continue;
             }
         };
-        /* A trap action is shell code and can do anything shell code can,
-         * including `exit`. The C's `exit` left here by longjmp, straight
-         * past the `savestatus = last_status` below; a `Flow::Exit`
-         * returned from here skips it in exactly the same way, which is
-         * what leaves `savestatus` holding what `exit` was told. */
-        match crate::eval::evalstring(sh, p.as_bstr(), 0)? {
+        /* A signal action is an evaluation catch boundary. The depth lets
+         * `evalcommand` turn a special-builtin command failure into its
+         * ordinary status, so the command performs its own redirection,
+         * input, and local-variable cleanup before returning here. Syntax
+         * and interrupt errors still arrive as `Err` and propagate. */
+        sh.eval.signal_trap_depth += 1;
+        let outcome = crate::eval::evalstring(sh, p.as_bstr(), 0);
+        sh.eval.signal_trap_depth -= 1;
+        match outcome? {
             Flow::Done(_) => {}
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
@@ -626,7 +627,6 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
         i += 1;
     }
 
-    sh.eval.savestatus = last_status;
     Ok(Flow::Done(sh.status))
 }
 
@@ -655,6 +655,7 @@ pub fn setinteractive(sh: &mut crate::context::Shell, on: c_int) {
 // [spec:dash:sem:trap.exitshell-fn]
 // [spec:posix:req:builtin.trap.exit-condition]
 // [spec:posix:req:builtin.trap.exit-action-environment]
+// [spec:nsh:req:compat.smoosh.trap-status]
 /// Run the EXIT trap, tear job control down, and **return** the status
 /// the shell leaves with.
 ///
@@ -672,15 +673,6 @@ pub fn setinteractive(sh: &mut crate::context::Shell, on: c_int) {
 /// end a child the library forked, which `[dec:nsh:fork-child-is-a-terminus]`
 /// says is a terminus rather than a frame.
 pub fn exitshell(sh: &mut crate::context::Shell) -> crate::status::ExitStatus {
-    sh.eval.savestatus = sh.status;
-    /* `TRACE(("pid %d, exitshell(%d)\n", getpid(), savestatus));` —
-     * `#ifdef DEBUG` in `shell.h`, and the dash build does not define it. */
-    /* Whether the EXIT trap ended by running out or by calling `exit`
-     * itself. It is the C's `exception == EXEXIT` at the `out:` label, and
-     * the two ways of reaching `out:` are exactly the two things
-     * `exitreset` tests: the trap ran to the end, which is the
-     * `evalskip = SKIPFUNCDEF` below, or the trap exited, which is this. */
-    let mut by_exitcmd = false;
     'out: {
         /* `trap[0] = NULL` with no free: the C leaks the EXIT action on
          * purpose so `evalstring` can still read it.  Taking it keeps the
@@ -698,11 +690,14 @@ pub fn exitshell(sh: &mut crate::context::Shell) -> crate::status::ExitStatus {
              * dropped is an `exit` *inside* the trap, because it names the
              * status the shell leaves with. */
             match crate::eval::evalstring(sh, p.as_bstr(), 0) {
-                Ok(crate::eval::Flow::Exit { by_exitcmd: b }) => {
-                    by_exitcmd = b;
+                Ok(crate::eval::Flow::Exit {
+                    status: Some(status),
+                }) => {
+                    sh.status = status;
                     break 'out;
                 }
-                Ok(crate::eval::Flow::Done(_)) => {}
+                Ok(crate::eval::Flow::Exit { status: None }) => break 'out,
+                Ok(crate::eval::Flow::Done(status)) => sh.status = status,
                 Err(e) => {
                     /* The EXIT trap failed. `_exit(exitstatus)` below is
                      * what leaves, and the status it leaves with is this
@@ -714,12 +709,11 @@ pub fn exitshell(sh: &mut crate::context::Shell) -> crate::status::ExitStatus {
                     break 'out;
                 }
             }
-            sh.eval.evalskip = SKIPFUNCDEF;
         }
     }
     /* out: */
     crate::histedit::save_history(sh);
-    crate::init::exitreset(sh, by_exitcmd);
+    crate::init::exitreset(sh);
     crate::init::postexitreset(sh);
     /*
      * Disable job control so that whoever had the foreground before we

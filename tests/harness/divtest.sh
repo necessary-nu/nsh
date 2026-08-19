@@ -688,6 +688,19 @@ printf '%s\n' "trap 'echo X' TERM; echo ---; trap" > "$case_file"
 check "trap_subshell_listing: no subshell listing is outside the entry" 1 \
 	$'---\n'"$TRAP_LINE" "$TRAP_LINE"$'\n---\n'"$TRAP_LINE" 0 0 "$case_file"
 
+printf '%s\n' 'trap '\''( trap "echo inner" EXIT; exit 2 ); echo $?'\'' EXIT' > "$case_file"
+check "exit_trap_final_status: exact nested action" 0 \
+	$'inner\n2' $'inner\n0' 0 0 "$case_file"
+[ "$DS_DIVERGENCE" = exit_trap_final_status ] || no \
+	"exit_trap_final_status: reports its own id (got ${DS_DIVERGENCE:-none})"
+check "exit_trap_final_status: changed output is not excused" 1 \
+	$'inner\n2' $'inner\n1' 0 0 "$case_file"
+check "exit_trap_final_status: differing status is not excused" 1 \
+	$'inner\n2' $'inner\n0' 0 1 "$case_file"
+printf '%s\n' 'trap '\''echo inner; exit 2'\'' EXIT' > "$case_file"
+check "exit_trap_final_status: another action is outside" 1 \
+	$'inner\n2' $'inner\n0' 0 0 "$case_file"
+
 # ---- the dead-harness guard --------------------------------------
 #
 # A shell that stopped existing is not a shell that behaved differently.

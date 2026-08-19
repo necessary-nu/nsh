@@ -65,20 +65,12 @@ pub(crate) fn init_from(
 // [spec:dash:def:init.exitreset-fn]
 // [spec:dash:sem:init.exitreset-fn]
 ///
-/// `by_exitcmd` is the C's `exception == EXEXIT`, passed in rather than
-/// read off a global. It is the *only* thing that ever told `EXEXIT` from
-/// `EXEND` — see `eval::Flow`, whose doc comment records the audit
-/// `docs/api-design.md` 10.2 asked for — so it is the whole of what the
-/// two callers still have to say about which one arrived.
-pub fn exitreset(sh: &mut crate::context::Shell, by_exitcmd: bool) {
+/// A status selected by `exit` travels in `eval::Flow` and is applied by
+/// the catch frame before this reset runs. The old `savestatus` side channel
+/// is therefore absent: reset owns cleanup, not exit-status selection.
+pub fn exitreset(sh: &mut crate::context::Shell) {
     /* from eval.c: */
     {
-        if sh.eval.savestatus >= 0 {
-            if by_exitcmd || sh.eval.evalskip == crate::eval::SKIPFUNCDEF {
-                sh.status = sh.eval.savestatus;
-            }
-            sh.eval.savestatus = -1;
-        }
         sh.eval.evalskip = 0;
         sh.eval.loopnest = 0;
         sh.eval.inps4 = 0;

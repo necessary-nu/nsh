@@ -228,20 +228,19 @@ impl Shell {
                 self.status = status;
                 Ok(ExitStatus::from_raw(status))
             }
-            Ok(Flow::Exit { by_exitcmd }) => {
-                /* The two calls, in dash's order, and the order is the
-                 * whole of how `exit 3` keeps its 3. `exitcmd` leaves the
-                 * number in `savestatus` and says so with `by_exitcmd`;
-                 * `exitreset` is what moves it into `$?`; and `exitshell`
-                 * reads `$?` on its first line to hand it to the EXIT
-                 * trap. Calling `exitshell` alone would run the trap with
-                 * the status of whatever ran before the `exit`.
+            Ok(Flow::Exit { status }) => {
+                /* Apply the status carried by `exit` before entering the
+                 * EXIT action. `Flow::END` carries `None` because the
+                 * command status already on the shell is authoritative.
                  *
                  * `exitshell` then runs the EXIT trap, gives job control
                  * back and flushes -- and returns the status rather than
                  * ending the process, which is the whole of
                  * [dec:nsh:host-owns-the-process] at this seam. */
-                crate::init::exitreset(self, by_exitcmd);
+                if let Some(status) = status {
+                    self.status = status;
+                }
+                crate::init::exitreset(self);
                 let status = crate::trap::exitshell(self);
                 self.exited = Some(status);
                 Ok(status)
@@ -255,7 +254,7 @@ impl Shell {
                  * `break` that escaped its loop would still be pending on
                  * the next call. */
                 self.status = e.status();
-                crate::init::exitreset(self, false);
+                crate::init::exitreset(self);
                 Err(e)
             }
         }

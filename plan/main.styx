@@ -5705,6 +5705,20 @@ children (
                                 kind @note
                                 text "Owns builtin.trap.chained.test, builtin.trap.exitcode.test, builtin.trap.subshell.false.exit.test, builtin.trap.subshell.loud.test, builtin.trap.subshell.loud2.test, builtin.trap.subshell.true.ec1.test, and semantics.return.trap.test. Definition of done: EXIT and signal trap actions execute in the correct environment, nested exit/return/signal control flow is preserved, and the trap action's final status follows the specified replacement/preservation rules. Add direct regressions for every distinct status transition and make all seven Smoosh cases exact."
                             }
+
+                            {
+                                at 2026-08-19T16:25:36.971232531Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-19T16:58:17.246086434Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Replaced the ambient savestatus side channel with an explicit optional status carried by Flow::Exit, so nested signal and EXIT actions own independent statuses. Signal trap actions now demote special-builtin command failures at the evaluator boundary, allowing ordinary cleanup before dotrap restores the interrupted status. Added exact integration witnesses for all seven pinned trap cases and an exact, negatively tested dash-divergence entry for the nested-child EXIT result. Sandboxed cargo test -p nsh passes 258 unit tests plus all integrations; cargo test -p nsh-survey passes 33 unit and 1 integration test; the seven focused Smoosh cases pass 7/7; the full pinned survey improves to 183/186 with only the next interactive/job-control node's three cases remaining. No unsafe, libc, RawFd, dup2, or close usage was added."
+                            }
                         )
                     }
 
