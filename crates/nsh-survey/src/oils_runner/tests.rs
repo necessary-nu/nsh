@@ -88,6 +88,8 @@ fn process_timeout_kills_background_descendants() {
         survey_path: path,
         scratch: scratch.path(),
         containment: &containment,
+        timezone: None,
+        locale_archive: None,
     };
     let process = run_process(
         &context,
@@ -119,6 +121,8 @@ fn process_gets_isolated_env_and_cwd() {
         survey_path: env::var_os("PATH").unwrap_or_default(),
         scratch: scratch.path(),
         containment: &containment,
+        timezone: None,
+        locale_archive: None,
     };
     let process = run_process(
         &context,
@@ -157,6 +161,8 @@ fn evaluation_applies_json_status_and_qualifier() {
         survey_path: env::var_os("PATH").unwrap_or_default(),
         scratch: scratch.path(),
         containment: &containment,
+        timezone: None,
+        locale_archive: None,
     };
     let process = run_process(&context, &case_dir, &parsed.cases[0].code).unwrap();
     let record = evaluate_case(&context, "fixture.test.sh", 0, &parsed.cases[0], process);
@@ -185,6 +191,8 @@ fn evaluation_reports_byte_exact_mismatch() {
         survey_path: env::var_os("PATH").unwrap_or_default(),
         scratch: scratch.path(),
         containment: &containment,
+        timezone: None,
+        locale_archive: None,
     };
     let process = run_process(&context, &case_dir, &parsed.cases[0].code).unwrap();
     let record = evaluate_case(&context, "fixture.test.sh", 0, &parsed.cases[0], process);

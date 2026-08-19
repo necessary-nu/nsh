@@ -1,4 +1,4 @@
-# Recorded Bash-oracle results
+# Recorded nsh results against Bash expectations
 
 These TOML files are deterministic summaries of release `nsh` against the
 three Bash-selected Oils groups. Each records the pinned Oils commit, release

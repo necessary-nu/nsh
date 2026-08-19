@@ -16,6 +16,12 @@ use crate::process::{
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 pub(crate) mod helpers;
+mod reference;
+
+pub(crate) use reference::{
+    CatalogCase, ReferenceCase, ReferenceOutcome, ReferenceReport, ReferenceTotals,
+    bash_case_catalog, run_reference_group,
+};
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 
@@ -55,6 +61,9 @@ struct Options {
     summary: Option<PathBuf>,
     posix: bool,
     verbose: bool,
+    base_path: Option<OsString>,
+    timezone: Option<OsString>,
+    locale_archive: Option<OsString>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -78,6 +87,9 @@ impl Options {
             summary: None,
             posix: false,
             verbose: false,
+            base_path: None,
+            timezone: None,
+            locale_archive: None,
         };
         let mut root_seen = false;
         while let Some(argument) = args.next() {
@@ -191,7 +203,10 @@ fn run_manifest(options: &Options, manifest: &crate::OilsManifest) -> Result<Run
     let scratch = ScratchTree::new()?;
     let containment = Containment::verified(scratch.path())?;
     let fixture_view = helpers::install(scratch.path(), &options.root)?;
-    let inherited_path = env::var_os("PATH").unwrap_or_default();
+    let inherited_path = options
+        .base_path
+        .clone()
+        .unwrap_or_else(|| env::var_os("PATH").unwrap_or_default());
     let mut path_parts = vec![fixture_view.bin.clone()];
     path_parts.extend(env::split_paths(&inherited_path));
     let survey_path = env::join_paths(path_parts)?;
@@ -204,6 +219,8 @@ fn run_manifest(options: &Options, manifest: &crate::OilsManifest) -> Result<Run
         survey_path,
         scratch: scratch.path(),
         containment: &containment,
+        timezone: options.timezone.as_deref(),
+        locale_archive: options.locale_archive.as_deref(),
     };
 
     let started = Instant::now();
@@ -317,6 +334,8 @@ struct RunContext<'a> {
     survey_path: OsString,
     scratch: &'a Path,
     containment: &'a Containment,
+    timezone: Option<&'a OsStr>,
+    locale_archive: Option<&'a OsStr>,
 }
 
 fn execute_case(
@@ -366,12 +385,15 @@ fn run_process(context: &RunContext<'_>, directory: &Path, code: &[u8]) -> Resul
     if context.posix {
         arguments.extend([OsString::from("-o"), OsString::from("posix")]);
     }
-    let environment = vec![
+    let mut environment = vec![
         (OsString::from("PATH"), context.survey_path.clone()),
         (OsString::from("LC_ALL"), OsString::from("C.UTF-8")),
         (
             OsString::from("LOCALE_ARCHIVE"),
-            env::var_os("LOCALE_ARCHIVE").unwrap_or_default(),
+            context
+                .locale_archive
+                .map(OsStr::to_owned)
+                .unwrap_or_else(|| env::var_os("LOCALE_ARCHIVE").unwrap_or_default()),
         ),
         (OsString::from("OILS_GC_ON_EXIT"), OsString::new()),
         (
@@ -381,6 +403,9 @@ fn run_process(context: &RunContext<'_>, directory: &Path, code: &[u8]) -> Resul
         (OsString::from("SH"), context.shell.as_os_str().to_owned()),
         (OsString::from("TMP"), directory.as_os_str().to_owned()),
     ];
+    if let Some(timezone) = context.timezone {
+        environment.push((OsString::from("TZ"), timezone.to_owned()));
+    }
     crate::process::run(&ProcessRequest {
         containment: context.containment,
         program: context.shell,

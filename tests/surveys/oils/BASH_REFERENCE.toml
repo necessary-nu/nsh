@@ -1,0 +1,209 @@
+schema = 1
+name = "GNU Bash 5.3 differential reference"
+release = "5.3"
+patch_level = 15
+version = "5.3.15(1)-release"
+
+[source]
+archive = "bash-5.3.tar.gz"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz"
+signature_url = "https://ftp.gnu.org/gnu/bash/bash-5.3.tar.gz.sig"
+sha256 = "0d5cd86965f869a26cf64f4b71be7b96f90a3ba8b3d74e27e8e9d9d5550f31ba"
+
+[[patches]]
+level = 1
+file = "bash53-001"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-001"
+sha256 = "1f608434364af86b9b45c8b0ea3fb3b165fb830d27697e6cdfc7ac17dee3287f"
+
+[[patches]]
+level = 2
+file = "bash53-002"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-002"
+sha256 = "e385548a00130765ec7938a56fbdca52447ab41fabc95a25f19ade527e282001"
+
+[[patches]]
+level = 3
+file = "bash53-003"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-003"
+sha256 = "f245d9c7dc3f5a20d84b53d249334747940936f09dc97e1dcb89fc3ab37d60ed"
+
+[[patches]]
+level = 4
+file = "bash53-004"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-004"
+sha256 = "9591d245045529f32f0812f94180b9d9ce9023f5a765c039b852e5dfc99747d0"
+
+[[patches]]
+level = 5
+file = "bash53-005"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-005"
+sha256 = "cca1ef52dbbf433bc98e33269b64b2c814028efe2538be1e2c9a377da90bc99d"
+
+[[patches]]
+level = 6
+file = "bash53-006"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-006"
+sha256 = "29119addefed8eff91ae37fd51822c31780ee30d4a28376e96002706c995ff10"
+
+[[patches]]
+level = 7
+file = "bash53-007"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-007"
+sha256 = "c0976bbfffa1453c7cfdd62058f206a318568ff2d690f5d4fa048793fa3eb299"
+
+[[patches]]
+level = 8
+file = "bash53-008"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-008"
+sha256 = "097cd723cbfb8907674ac32214063a3fd85282657ec5b4e544d2c0f719653fb4"
+
+[[patches]]
+level = 9
+file = "bash53-009"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-009"
+sha256 = "eee30fe78a4b0cb2fe20e010e00308899cfc613e0774ebb3c8557a1552f24f8c"
+
+[[patches]]
+level = 10
+file = "bash53-010"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-010"
+sha256 = "cf76f1cce2ea300c18bff9f002d21f280cc931acd17c28518110b93fe6e72569"
+
+[[patches]]
+level = 11
+file = "bash53-011"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-011"
+sha256 = "0298df8f5ea2a31d3be43ed7d269c5b3c7c342dd5b570bea7f64d66dcbbe7531"
+
+[[patches]]
+level = 12
+file = "bash53-012"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-012"
+sha256 = "d71379b39bebaedaf123414414e77fb458a0a43b9ad3116594c6df7ca6754573"
+
+[[patches]]
+level = 13
+file = "bash53-013"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-013"
+sha256 = "042f9cda967e24bf4211944697441e93d06ff42b4b998629a98a1b249279f200"
+
+[[patches]]
+level = 14
+file = "bash53-014"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-014"
+sha256 = "bd4360b401d38507e358783dcad8536a99c6789f0d3a5bd0cfb8c4a34144696c"
+
+[[patches]]
+level = 15
+file = "bash53-015"
+url = "https://ftp.gnu.org/gnu/bash/bash-5.3-patches/bash53-015"
+sha256 = "55b79ceee2fc27f6767eed697e939a7eb2fe2a28c01556bd75f18d581014f46e"
+
+[build]
+system = "x86_64-pc-linux-gnu"
+prefix = "/opt/nsh-bash-5.3.15"
+configure_args = [
+    "--prefix=/opt/nsh-bash-5.3.15",
+    "--without-bash-malloc",
+    "--disable-nls",
+]
+cc = "/usr/bin/cc"
+cflags_template = "-O2 -g0 -ffile-prefix-map={output}=/usr/src/bash-5.3.15"
+make_args = [
+    "-s",
+    "-j2",
+]
+source_date_epoch = 1753833600
+
+[build.environment]
+HOME = "{output}/home"
+LC_ALL = "C"
+PATH = "/usr/bin:/bin"
+TZ = "UTC"
+
+[build.tools]
+cc = "cc (Debian 14.2.0-19) 14.2.0"
+make = "GNU Make 4.4.1"
+tar = "tar (GNU tar) 1.35"
+patch = "GNU patch 2.8"
+bison = "bison (GNU Bison) 3.8.2"
+libc = "ldd (Debian GLIBC 2.41-12+deb13u3) 2.41"
+
+[execution]
+kernel = "Linux 6.12.100+deb13-amd64 x86_64"
+containment = "sandbox-pid-net-ro-root"
+locale = "C.UTF-8"
+timezone = "UTC"
+base_path = "/usr/bin:/bin"
+environment_is_cleared = true
+unset = [
+    "BASH_ENV",
+    "ENV",
+    "HOME",
+]
+
+[execution.environment]
+LC_ALL = "C.UTF-8"
+LOCALE_ARCHIVE = ""
+OILS_GC_ON_EXIT = ""
+PATH = "{fixture-bin}:/usr/bin:/bin"
+REPO_ROOT = "{fixture-root}"
+SH = "{oracle-binary}"
+TMP = "{case-scratch}"
+TZ = "UTC"
+
+[oils]
+commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
+tree = "f95f91004abcfdb82dd413e6ef2a7c71591f23d6"
+spec_format = "2023-06"
+manifest = "MANIFEST.toml"
+manifest_sha256 = "448346a8c8fadfca10425af22e2fb80a3dafdd0763a3a8d0ecf38100556d80a2"
+expectation_shell = "bash"
+groups = [
+    "bash-comparison",
+    "bash-extension",
+    "bash-named-diagnostic",
+]
+
+[calibration]
+date = "2026-08-19"
+binary_sha256 = "5aca12bd46aaef0d8183df3d9ba1de80cd36d2d52f179ec448d3b007a297d173"
+timeout_ms = 5000
+case_manifest = "BASH_REFERENCE_CASES.json"
+case_manifest_sha256 = "fc025ca46063679ff50f39f991dec86438089b4ea7f023d8a7611a9efa4f813a"
+eligible = 2447
+excluded = 288
+
+[[calibration.groups]]
+id = "bash-comparison"
+selected = 2735
+eligible = 2447
+reference_failure = 108
+unsupported = 52
+known_upstream_bug = 94
+timeout = 0
+harness_error = 0
+version_inapplicable = 34
+
+[[calibration.groups]]
+id = "bash-extension"
+selected = 1121
+eligible = 977
+reference_failure = 63
+unsupported = 21
+known_upstream_bug = 40
+timeout = 0
+harness_error = 0
+version_inapplicable = 20
+
+[[calibration.groups]]
+id = "bash-named-diagnostic"
+selected = 112
+eligible = 107
+reference_failure = 2
+unsupported = 0
+known_upstream_bug = 3
+timeout = 0
+harness_error = 0
+version_inapplicable = 0

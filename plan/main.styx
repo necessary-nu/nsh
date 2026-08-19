@@ -5964,6 +5964,20 @@ children (
                                 kind @note
                                 text "Definition of done: build the exact current GNU Bash 5.3 patch release reproducibly inside containment; record source digest, patch level, build flags, locale and environment; run the pinned Oils manifests; emit an immutable eligible-case list and explicit disposition for every excluded case."
                             }
+
+                            {
+                                at 2026-08-19T19:03:36.744355143Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-19T19:29:43.130310934Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Pinned GNU Bash 5.3.15 from the official base archive plus patches 001-015. Two clean contained builds were byte-identical at SHA-256 5aca12bd46aaef0d8183df3d9ba1de80cd36d2d52f179ec448d3b007a297d173; two contained calibrations were byte-identical and classified the 2,735 Bash-comparison cases as 2,447 eligible, 108 reference failures, 52 unsupported, 94 known upstream bugs, and 34 version-inapplicable, with zero timeouts or harness errors."
+                            }
                         )
                     }
 

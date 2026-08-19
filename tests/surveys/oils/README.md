@@ -95,7 +95,44 @@ Use `scripts/sandboxed -- COMMAND` for the top-level Cargo or regression-test
 command as well. That outer boundary protects the caller if harness code
 regresses before it reaches the runner's per-case sandbox.
 
-## Recorded Bash oracle
+## Pinned GNU Bash 5.3 reference
+
+`BASH_REFERENCE.toml` is the machine-readable reference profile. It pins GNU
+Bash 5.3 patch level 15, the base archive and all 15 patch digests, the exact
+compiler and libc environment, build flags, the contained runtime environment,
+the Oils revision, the reference binary digest, and disposition totals.
+`BASH_REFERENCE_CASES.json` is the immutable case-level evidence: every case
+in `bash-comparison` is either named in the eligible list because the reference
+passed it or has one explicit exclusion disposition. The extension and named
+diagnostic selections are independently executed and checked against the same
+case observations.
+
+Place the official `bash-5.3.tar.gz` and `bash53-001` through `bash53-015`
+files in a local source cache. The native builder verifies every digest before
+extracting or executing anything, refuses a non-empty output directory, applies
+the patches in order, and emits a build receipt. Run the complete workflow
+through the fail-closed outer sandbox:
+
+```text
+scripts/sandboxed --writable /path/to/source-cache -- cargo run -p nsh-survey -- build-bash-reference /path/to/source-cache target/bash-reference
+scripts/sandboxed --writable /path/to/source-cache --writable tests/surveys/oils -- cargo run -p nsh-survey -- calibrate-bash-reference --shell target/bash-reference/bash-5.3/bash --sources /path/to/source-cache
+scripts/sandboxed -- cargo run -p nsh-survey -- verify-bash-reference
+```
+
+Ordinary verification is offline and does not require the GNU source cache or
+binary. Supplying `--sources` and `--shell` additionally proves that local
+artifacts match the profile. Calibration verifies the imported corpus before
+running it and never edits imported expectations.
+
+The 2026-08-19 calibration executed all three Bash selections against
+`5.3.15(1)-release`. Of the 2,735 comparison cases, 2,447 are eligible and 288
+are explicitly excluded: 108 reference failures, 52 unsupported expectations,
+94 known upstream bugs, and 34 expectations scoped to another Bash version.
+No case timed out or produced a harness error. Two clean builds in distinct
+output directories produced the recorded binary SHA-256
+`5aca12bd46aaef0d8183df3d9ba1de80cd36d2d52f179ec448d3b007a297d173`.
+
+## Recorded nsh baseline against Bash expectations
 
 `results/` contains deterministic release-shell summaries for
 `bash-comparison`, `bash-extension`, and `bash-named-diagnostic`, each run with

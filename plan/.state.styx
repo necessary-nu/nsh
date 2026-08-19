@@ -5004,4 +5004,9 @@ impl_evidence (
         {id shell-locale.operation-binding, version 0}
         {id shell-locale.selection, version 0}
     )}
+    {id calibrate-bash-5-3-oracle, covered_rules (
+        compat.bash.reference-profile
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.reference-profile}
+    )}
 )
