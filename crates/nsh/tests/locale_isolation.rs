@@ -1,14 +1,12 @@
 //! Black-box verification for each Shell's owned locale.
 
-use std::ffi::OsStr;
-
 use bstr::{BStr, BString};
 use nsh::{Shell, Streams};
 
 const ISO: &str = "en_US.ISO-8859-1";
 
 fn has_single_byte_fixture() -> bool {
-    nsh_platform::Locale::new(OsStr::new(ISO), &[]).is_ok()
+    nsh_platform::Locale::new(ISO.as_bytes(), &[]).is_ok()
 }
 
 // [spec:nsh:sem:shell-locale.selection/test]
@@ -22,7 +20,11 @@ fn locale_precedence_is_posix() {
         .env([("LC_CTYPE", ISO), ("LANG", "C")])
         .build()
         .unwrap();
-    assert!(category.set_var(BStr::new(&[0xe9]), BStr::new(b"yes")).is_ok());
+    assert!(
+        category
+            .set_var(BStr::new(&[0xe9]), BStr::new(b"yes"))
+            .is_ok()
+    );
 
     let mut all = Shell::builder()
         .env([("LC_ALL", "C"), ("LC_CTYPE", ISO), ("LANG", ISO)])
@@ -44,7 +46,11 @@ fn locale_precedence_is_posix() {
         .env([("LC_ALL", ""), ("LC_CTYPE", ""), ("LANG", ISO)])
         .build()
         .unwrap();
-    assert!(language.set_var(BStr::new(&[0xe9]), BStr::new(b"yes")).is_ok());
+    assert!(
+        language
+            .set_var(BStr::new(&[0xe9]), BStr::new(b"yes"))
+            .is_ok()
+    );
 
     let mut irrelevant_invalid = Shell::builder()
         .env([
@@ -78,10 +84,7 @@ fn invalid_locale_retains_effective_state() {
             .is_err()
     );
 
-    let mut runtime = Shell::builder()
-        .env([("LC_ALL", ISO)])
-        .build()
-        .unwrap();
+    let mut runtime = Shell::builder().env([("LC_ALL", ISO)]).build().unwrap();
     runtime
         .set_var(BStr::new(b"LC_ALL"), BStr::new(b"nsh-invalid-locale"))
         .unwrap();
@@ -89,7 +92,11 @@ fn invalid_locale_retains_effective_state() {
         runtime.var(BStr::new(b"LC_ALL")),
         Some(BStr::new(b"nsh-invalid-locale"))
     );
-    assert!(runtime.set_var(BStr::new(&[0xe9]), BStr::new(b"yes")).is_ok());
+    assert!(
+        runtime
+            .set_var(BStr::new(&[0xe9]), BStr::new(b"yes"))
+            .is_ok()
+    );
 }
 
 // [spec:nsh:req:shell-locale.operation-binding/test]
@@ -105,9 +112,9 @@ fn raw_names_follow_shell_locale() {
         .build()
         .unwrap();
     let script = BString::from(vec![
-        b'x', 0xe9, b'=', b'6', b'\n', b':', b' ', b'$', b'(', b'(', b'x', 0xe9, b'+', b'=',
-        b'1', b')', b')', b'\n', b'[', b' ', b'"', b'$', b'x', 0xe9, b'"', b' ', b'=', b' ',
-        b'7', b' ', b']',
+        b'x', 0xe9, b'=', b'6', b'\n', b':', b' ', b'$', b'(', b'(', b'x', 0xe9, b'+', b'=', b'1',
+        b')', b')', b'\n', b'[', b' ', b'"', b'$', b'x', 0xe9, b'"', b' ', b'=', b' ', b'7', b' ',
+        b']',
     ]);
     assert!(shell.run(script).unwrap().success());
     assert_eq!(shell.var(BStr::new(&[b'x', 0xe9])), Some(BStr::new(b"7")));

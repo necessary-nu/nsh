@@ -10,12 +10,11 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use core::ffi::{c_int};
+use core::ffi::c_int;
 
 use crate::eval::Flow;
 use crate::jobs::{
-    DOWAIT_WAITCMD, DOWAIT_WAITCMD_ALL, JOBRUNNING, dowait, getjob, getstatus,
-    remove_waited_job,
+    DOWAIT_WAITCMD, DOWAIT_WAITCMD_ALL, JOBRUNNING, dowait, getjob, getstatus, remove_waited_job,
 };
 
 // [spec:dash:def:jobs.waitcmd-fn]

@@ -5,7 +5,7 @@
 //! instance's logical descriptor table; no process-wide installation guard
 //! or ambient descriptor swap is involved.
 
-use std::os::fd::{AsFd, OwnedFd};
+use nsh_platform::{AsDescriptor, Descriptor};
 
 use crate::fd::SharedFd;
 
@@ -37,9 +37,9 @@ impl Streams {
     /// redirections, pipelines, builtins and external commands all start from
     /// the supplied streams without changing the host's process descriptors.
     pub fn from_fds(
-        stdin: impl AsFd,
-        stdout: impl AsFd,
-        stderr: impl AsFd,
+        stdin: impl AsDescriptor,
+        stdout: impl AsDescriptor,
+        stderr: impl AsDescriptor,
     ) -> std::io::Result<Streams> {
         Ok(Streams {
             owned: Some([
@@ -66,7 +66,7 @@ impl Streams {
         ])
     }
 
-    fn from_owned(owned: [OwnedFd; 3]) -> std::io::Result<Streams> {
+    fn from_owned(owned: [Descriptor; 3]) -> std::io::Result<Streams> {
         let [stdin, stdout, stderr] = owned;
         Ok(Streams {
             owned: Some([
@@ -89,11 +89,10 @@ impl Streams {
             return Ok(result);
         }
 
-        let mut result: [Option<SharedFd>; crate::fd::SLOT_COUNT] =
-            std::array::from_fn(|_| None);
+        let mut result: [Option<SharedFd>; crate::fd::SLOT_COUNT] = std::array::from_fn(|_| None);
         for (number, slot) in result.iter_mut().enumerate() {
-            *slot = nsh_platform::snapshot_process_fd(number as i32, 10)?
-                .map(SharedFd::from_backing);
+            *slot =
+                nsh_platform::snapshot_process_fd(number as i32, 10)?.map(SharedFd::from_backing);
         }
         Ok(result)
     }
@@ -134,20 +133,18 @@ impl crate::context::Shell {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::fd::AsRawFd;
-
     #[test]
     fn supplied_streams_own_hidden_fds() {
         let source = nsh_platform::anonymous_file(c"streams-owned").unwrap();
-        let source_number = source.as_raw_fd();
+        let source_number = source.number();
         let streams = Streams::from_fds(&source, &source, &source).unwrap();
         let descriptors = streams.initial_descriptors().unwrap();
         drop(source);
 
         for descriptor in &descriptors[..3] {
             let descriptor = descriptor.as_ref().expect("supplied stream is open");
-            assert_ne!(descriptor.as_fd().as_raw_fd(), source_number);
-            assert!(descriptor.as_fd().as_raw_fd() >= 10);
+            assert_ne!(descriptor.number(), source_number);
+            assert!(descriptor.number() >= 10);
         }
         assert!(descriptors[3..].iter().all(Option::is_none));
     }

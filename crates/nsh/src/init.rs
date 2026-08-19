@@ -74,7 +74,6 @@ pub fn exitreset(sh: &mut crate::context::Shell) {
         sh.eval.evalskip = 0;
         sh.eval.loopnest = 0;
         sh.eval.inps4 = 0;
-
     }
 
     /* from expand.c: */
@@ -141,9 +140,7 @@ pub fn reset(sh: &mut crate::context::Shell) {
     crate::input::mkinit_reset(sh);
 
     /* from output.c: */
-    {
-        /* #ifdef notyet — the memout teardown is not compiled. */
-    }
+    { /* #ifdef notyet — the memout teardown is not compiled. */ }
 
     /* from var.c: */
     crate::var::mkinit_reset(sh);

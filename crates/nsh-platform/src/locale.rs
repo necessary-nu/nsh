@@ -5,11 +5,20 @@
 //! values and use safe methods whose selection is restored before they return.
 
 use std::cmp::Ordering;
-use std::ffi::{CStr, CString, OsStr};
+use std::ffi::{CStr, CString};
 use std::marker::PhantomData;
-use std::os::unix::ffi::OsStrExt as _;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+
+#[cfg(not(target_vendor = "apple"))]
+type MbState = libc::mbstate_t;
+
+// Darwin's libc keeps `mbstate_t` opaque and its Rust libc bindings do not
+// export the typedef. The system ABI defines it as a 128-byte union aligned
+// for a 64-bit integer.
+#[cfg(target_vendor = "apple")]
+#[repr(C, align(8))]
+pub(crate) struct MbState([u8; 128]);
 
 unsafe extern "C" {
     fn wctype(name: *const core::ffi::c_char) -> core::ffi::c_ulong;
@@ -18,9 +27,9 @@ unsafe extern "C" {
         wide: *mut i32,
         bytes: *const core::ffi::c_char,
         len: usize,
-        state: *mut libc::mbstate_t,
+        state: *mut MbState,
     ) -> usize;
-    fn mbrlen(bytes: *const core::ffi::c_char, len: usize, state: *mut libc::mbstate_t) -> usize;
+    fn mbrlen(bytes: *const core::ffi::c_char, len: usize, state: *mut MbState) -> usize;
     fn iswblank(wc: core::ffi::c_uint) -> core::ffi::c_int;
     fn iswspace(wc: core::ffi::c_uint) -> core::ffi::c_int;
 }
@@ -36,7 +45,7 @@ pub enum LocaleDecode {
 
 /// Incremental decoder for one character.
 pub struct LocaleDecoder {
-    state: libc::mbstate_t,
+    state: MbState,
     locale: Locale,
 }
 
@@ -94,7 +103,7 @@ impl Drop for RawLocale {
     fn drop(&mut self) {
         // SAFETY: this is the one owning handle returned by `newlocale`, and
         // `Arc` proves that no user remains when this destructor runs.
-        unsafe { libc::freelocale(self.0) }
+        unsafe { libc::freelocale(self.0) };
     }
 }
 
@@ -121,15 +130,15 @@ impl Locale {
     ///
     /// Empty names are rejected rather than interpreted as requests to read
     /// the process environment.  Overrides are applied in slice order.
-    pub fn new(base: &OsStr, overrides: &[(LocaleCategory, &OsStr)]) -> std::io::Result<Self> {
-        fn explicit_name(name: &OsStr) -> std::io::Result<CString> {
+    pub fn new(base: &[u8], overrides: &[(LocaleCategory, &[u8])]) -> std::io::Result<Self> {
+        fn explicit_name(name: &[u8]) -> std::io::Result<CString> {
             if name.is_empty() {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     "a locale name cannot be empty",
                 ));
             }
-            CString::new(name.as_bytes()).map_err(|_| {
+            CString::new(name).map_err(|_| {
                 std::io::Error::new(
                     std::io::ErrorKind::InvalidInput,
                     "a locale name cannot contain NUL",
@@ -174,7 +183,7 @@ impl Locale {
 
     /// Construct the portable POSIX `C` locale.
     pub fn c() -> std::io::Result<Self> {
-        Self::new(OsStr::new("C"), &[])
+        Self::new(b"C", &[])
     }
 
     fn select(&self) -> LocaleGuard<'_> {
@@ -207,7 +216,7 @@ impl Locale {
         }
     }
 
-    pub(crate) fn decode_byte(&self, state: &mut libc::mbstate_t, byte: u8) -> LocaleDecode {
+    pub(crate) fn decode_byte(&self, state: &mut MbState, byte: u8) -> LocaleDecode {
         self.with_selected(|| {
             let mut wide = 0_i32;
             // SAFETY: the byte and conversion records are live for the call;

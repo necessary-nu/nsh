@@ -38,6 +38,8 @@ fn select_invocation_mode(argv: &mut Vec<Vec<u8>>) {
     }
 }
 
+use nsh_platform::NativeStrExt as _;
+
 fn main() {
     nsh_platform::restore_shell_process_runtime_state();
 
@@ -58,12 +60,11 @@ fn main() {
     // any non-UTF-8 argument, so the port died with status 101 where the
     // C ran normally.
     //
-    // These stay `Vec<u8>` rather than `String`: a `String` holding
-    // non-UTF-8 bytes violates its own invariant, and building one with
-    // `from_utf8_unchecked` would be undefined behaviour even though the
-    // only thing done with it here is `as_bytes`.
-    let mut argv: Vec<Vec<u8>> = std::env::args_os()
-        .map(std::os::unix::ffi::OsStringExt::into_vec)
+    // Keep the operating-system representation intact until this explicit
+    // handoff to the byte-oriented shell language engine.
+    let mut argv = nsh_platform::process_arguments()
+        .iter()
+        .map(|argument| argument.to_shell_bytes())
         .collect();
     select_invocation_mode(&mut argv);
     // The frontend is the thing entitled to the process's standard

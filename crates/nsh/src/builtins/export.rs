@@ -63,12 +63,7 @@ pub fn exportcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                         message.extend_from_slice(b": is read only");
                         return Err(sh.builtin_error_value(1, &message));
                     }
-                    set_bytes(
-                        sh,
-                        name,
-                        Some(BStr::new(&word[at + 1..])),
-                        flag,
-                    )?;
+                    set_bytes(sh, name, Some(BStr::new(&word[at + 1..])), flag)?;
                 }
                 None => {
                     if !add_flags(sh, word, flag) {

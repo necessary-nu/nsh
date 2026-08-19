@@ -52,23 +52,18 @@ use nsh::streams::Streams;
 fn run(script: &str) -> (String, i32) {
     let (r, w) = nsh_platform::pipe().expect("create pipe");
 
-    let argv: Vec<Vec<u8>> = vec![
-        b"sh".to_vec(),
-        b"-c".to_vec(),
-        script.as_bytes().to_vec(),
-    ];
+    let argv: Vec<Vec<u8>> = vec![b"sh".to_vec(), b"-c".to_vec(), script.as_bytes().to_vec()];
 
     let status = nsh_platform::run_in_child(move || {
-            let supplied = Streams::from_fds(std::io::stdin(), &w, &w)
-                .expect("duplicate streams");
-            /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
-               ending the process the caller's act — so this fork's child
-               has to end itself. Returning would carry it back into the
-               test harness after the fork. */
-            let status = nsh::shellmain::main_fn(argv, supplied);
-            nsh_platform::exit_immediately(status.code().into());
-        })
-        .expect("run shell child");
+        let supplied = Streams::from_fds(std::io::stdin(), &w, &w).expect("duplicate streams");
+        /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
+        ending the process the caller's act — so this fork's child
+        has to end itself. Returning would carry it back into the
+        test harness after the fork. */
+        let status = nsh::shellmain::main_fn(argv, supplied);
+        nsh_platform::exit_immediately(status.code().into());
+    })
+    .expect("run shell child");
     let bytes = nsh_platform::read_to_end(&r).expect("read pipe");
     (String::from_utf8_lossy(&bytes).into_owned(), status)
 }
@@ -78,6 +73,10 @@ fn scratch(tag: &str) -> String {
     let path = std::env::temp_dir().join(format!("nsh-eav-{}-{}", tag, std::process::id()));
     let _ = std::fs::remove_file(&path);
     path.to_string_lossy().into_owned()
+}
+
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
 }
 
 // ---------------------------------------------------------------------
@@ -169,15 +168,21 @@ fn failing_exec_redirect_aborts() {
 #[test]
 fn noclobber_failure_writes_nothing() {
     let f = scratch("noclobber");
+    let quoted = shell_quote(&f);
     let script = format!(
-        "echo original > {f}; set -C; echo a > {f}; echo b > {f}; set +C; cat {f}; rm -f {f}"
+        "echo original > {quoted}; set -C; echo a > {quoted}; echo b > {quoted}; \
+         set +C; IFS= read -r saved < {quoted}; printf '%s\\n' \"$saved\""
     );
     let (out, status) = run(&script);
+    let exists = nsh_platform::Locale::c()
+        .unwrap()
+        .error_message(&nsh_platform::already_exists_error());
+    let _ = std::fs::remove_file(&f);
     assert_eq!(
         out,
         format!(
-            "sh: 1: cannot create {f}: File exists\n\
-             sh: 1: cannot create {f}: File exists\n\
+            "sh: 1: cannot create {f}: {exists}\n\
+             sh: 1: cannot create {f}: {exists}\n\
              original\n"
         )
     );
@@ -243,9 +248,8 @@ fn failing_prompt_swallowed_each_time() {
 /// process: three colon-separated fields must still be three.
 #[test]
 fn prompt_failure_frees_ifs_regions() {
-    let (out, status) = run(
-        "PS4='${nope?bad}'; set -x; IFS=:; v=a:b:c; set -- $v; set +x; echo \"$#/$1/$2/$3\"",
-    );
+    let (out, status) =
+        run("PS4='${nope?bad}'; set -x; IFS=:; v=a:b:c; set -- $v; set +x; echo \"$#/$1/$2/$3\"");
     assert!(
         out.ends_with("3/a/b/c\n"),
         "field splitting after a swallowed prompt failure: {out:?}"
@@ -257,9 +261,8 @@ fn prompt_failure_frees_ifs_regions() {
 /// next word still splits into the fields `IFS` asks for.
 #[test]
 fn redirect_failure_frees_ifs_regions() {
-    let (out, status) = run(
-        "IFS=:; v=a:b:c; echo x > /nonexistent-dir/q; set -- $v; echo \"$#/$1/$2/$3\"",
-    );
+    let (out, status) =
+        run("IFS=:; v=a:b:c; echo x > /nonexistent-dir/q; set -- $v; echo \"$#/$1/$2/$3\"");
     assert_eq!(
         out,
         "sh: 1: cannot create /nonexistent-dir/q: Directory nonexistent\n3/a/b/c\n"

@@ -50,11 +50,12 @@ pub fn commandcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     if verify != 0 {
         if let Some(cmd) = opts.operands().first() {
+            let default_path = use_default_path.then(crate::var::defpath);
             return describe_command(
                 sh,
                 crate::output::Dest::Stdout,
                 cmd,
-                use_default_path.then(crate::var::defpath),
+                default_path.as_ref().map(|path| BStr::new(path.as_slice())),
                 verify - VERIFY_BRIEF,
             );
         }

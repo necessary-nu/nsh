@@ -20,12 +20,10 @@
 
 use bstr::{BStr, BString};
 use core::ffi::{c_char, c_int};
+use nsh_platform::ShellBytesExt as _;
 use nshedit::domain::EditingMode;
-use std::ffi::OsStr;
-use std::fs::{File, OpenOptions};
-use std::io::{IsTerminal as _, Read as _, Seek as _, Write};
-use std::os::fd::AsFd as _;
-use std::os::unix::ffi::OsStrExt as _;
+use std::fs::File;
+use std::io::{Read as _, Seek as _, Write};
 
 use crate::linedit::{History, LineEditor};
 
@@ -139,7 +137,6 @@ pub fn record_history_line(
     save_history(sh);
 }
 
-
 // ---------------------------------------------------------------------
 // src/options.h:47-63 — the option flags are `#define`s over optlist[].
 // ---------------------------------------------------------------------
@@ -183,15 +180,11 @@ pub fn histedit(sh: &mut crate::context::Shell) {
             sh.histedit.history_file = crate::var::lookup_bytes(sh, BStr::new(b"HISTFILE"))
                 .filter(|name| !name.is_empty())
                 .and_then(|name| {
-                    let file = OpenOptions::new()
-                        .read(true)
-                        .write(true)
-                        .create(true)
-                        .open(OsStr::from_bytes(&name))
-                        .ok()?;
+                    let path = name.try_to_path_buf().ok()?;
+                    let file = nsh_platform::open_history_file(&path).ok()?;
                     nsh_platform::duplicate_cloexec(&file, crate::fd::SLOT_COUNT as i32)
                         .ok()
-                        .map(File::from)
+                        .map(nsh_platform::Descriptor::into_file)
                 });
             crate::error::INTON(sh);
             /* Hoisted out of the argument list, which also takes the
@@ -235,7 +228,7 @@ pub fn histedit(sh: &mut crate::context::Shell) {
 
         if let Some(mode) = mode
             && !editing_active(sh)
-            && stdin.as_ref().is_some_and(|fd| fd.as_fd().is_terminal())
+            && stdin.as_ref().is_some_and(nsh_platform::is_terminal)
         {
             crate::error::INTOFF(sh);
             let editor = match (stdin.as_ref(), stderr.as_ref()) {
@@ -310,7 +303,9 @@ pub fn sethistsize(sh: &mut crate::context::Shell, hs: &BStr) {
         let value = input
             .take_while(u8::is_ascii_digit)
             .fold(0usize, |value, digit| {
-                value.saturating_mul(10).saturating_add((digit - b'0') as usize)
+                value
+                    .saturating_mul(10)
+                    .saturating_add((digit - b'0') as usize)
             });
         if negative && value != 0 {
             DEFAULT_HISTORY_SIZE
@@ -332,10 +327,7 @@ pub fn setterm(sh: &mut crate::context::Shell, term: &BStr) {
     let Some(editor) = sh.histedit.editor.as_mut() else {
         return;
     };
-    if editor
-        .set_terminal(term)
-        .is_err()
-    {
+    if editor.set_terminal(term).is_err() {
         let mut message = b"sh: Can't set terminal type ".to_vec();
         message.extend_from_slice(term);
         message.push(b'\n');

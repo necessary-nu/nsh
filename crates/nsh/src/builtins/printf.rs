@@ -173,7 +173,13 @@ impl<'a> Operands<'a> {
     /// checked first, exactly as the C checked `*ep` before `errno`.
     // [spec:dash:def:printf.check-conversion-fn]
     // [spec:dash:sem:printf.check-conversion-fn]
-    fn check_conversion(&mut self, sh: &mut crate::context::Shell, word: &[u8], end: usize, range: bool) {
+    fn check_conversion(
+        &mut self,
+        sh: &mut crate::context::Shell,
+        word: &[u8],
+        end: usize,
+        range: bool,
+    ) {
         let mut message = word.to_vec();
         if end < word.len() {
             message.extend_from_slice(if end == 0 {
@@ -228,11 +234,7 @@ fn digit_value(byte: Option<&u8>, radix: u64) -> Option<u64> {
 ///
 /// A signed overflow saturates at the ends of the range and an unsigned
 /// one wraps, which is what the C's two functions do.
-fn scan_integer(
-    locale: &nsh_platform::Locale,
-    bytes: &[u8],
-    signed: bool,
-) -> (u64, usize, bool) {
+fn scan_integer(locale: &nsh_platform::Locale, bytes: &[u8], signed: bool) -> (u64, usize, bool) {
     let mut at = skip_blanks(locale, bytes);
     let negative = matches!(bytes.get(at), Some(b'-'));
     if let Some(b'-' | b'+') = bytes.get(at) {
@@ -277,7 +279,11 @@ fn scan_integer(
     }
 
     let limit = if signed {
-        if negative { 1u64 << 63 } else { i64::MAX as u64 }
+        if negative {
+            1u64 << 63
+        } else {
+            i64::MAX as u64
+        }
     } else {
         u64::MAX
     };
@@ -434,7 +440,9 @@ fn scan_hexadecimal(bytes: &[u8], from: usize) -> (f64, usize, bool) {
         if bytes.get(probe).is_some_and(u8::is_ascii_digit) {
             let mut value = 0i32;
             while let Some(digit) = bytes.get(probe).filter(|byte| byte.is_ascii_digit()) {
-                value = value.saturating_mul(10).saturating_add(i32::from(digit - b'0'));
+                value = value
+                    .saturating_mul(10)
+                    .saturating_add(i32::from(digit - b'0'));
                 probe += 1;
             }
             exponent = exponent.saturating_add(if negative { -value } else { value });
@@ -607,7 +615,11 @@ fn span(bytes: &[u8], at: usize, set: &[u8]) -> usize {
 /// Laying out bytes needs no stand-in.
 // [spec:dash:def:printf.print-escape-str-fn]
 // [spec:dash:sem:printf.print-escape-str-fn]
-fn print_escape_str(sh: &mut crate::context::Shell, spec: &Spec, word: &CStr) -> Result<c_int, Error> {
+fn print_escape_str(
+    sh: &mut crate::context::Shell,
+    spec: &Spec,
+    word: &CStr,
+) -> Result<c_int, Error> {
     let mut buf = BString::default();
     let done = conv_escape_str(word.to_bytes(), &mut buf);
 
@@ -719,7 +731,9 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                         if let Some(k) = read {
                             stop = Some(at + k);
                         }
-                        spec.set_written_precision(leading_number(&field[..read.unwrap_or(digits)]));
+                        spec.set_written_precision(leading_number(
+                            &field[..read.unwrap_or(digits)],
+                        ));
                     }
                     at += digits;
                 }
@@ -788,11 +802,7 @@ mod tests {
     use super::*;
 
     fn integer(text: &str, signed: bool) -> (u64, usize, bool) {
-        scan_integer(
-            &nsh_platform::Locale::c().unwrap(),
-            text.as_bytes(),
-            signed,
-        )
+        scan_integer(&nsh_platform::Locale::c().unwrap(), text.as_bytes(), signed)
     }
 
     fn double(text: &str) -> (f64, usize, bool) {
@@ -851,14 +861,23 @@ mod tests {
     /// ones wrap, so a negative argument to `%u` is its complement.
     #[test]
     fn overflow_saturates_then_wraps() {
-        assert_eq!(integer("99999999999999999999999", true), (i64::MAX as u64, 23, true));
+        assert_eq!(
+            integer("99999999999999999999999", true),
+            (i64::MAX as u64, 23, true)
+        );
         assert_eq!(
             integer("-99999999999999999999999", false),
             (u64::MAX, 24, true)
         );
         assert_eq!(integer("-1", false).0, u64::MAX);
-        assert_eq!(integer("-9223372036854775808", true), (i64::MIN as u64, 20, false));
-        assert_eq!(integer("18446744073709551615", false), (u64::MAX, 20, false));
+        assert_eq!(
+            integer("-9223372036854775808", true),
+            (i64::MIN as u64, 20, false)
+        );
+        assert_eq!(
+            integer("18446744073709551615", false),
+            (u64::MAX, 20, false)
+        );
     }
 
     #[test]

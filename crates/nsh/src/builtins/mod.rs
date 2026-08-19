@@ -78,10 +78,8 @@ pub const BUILTIN_ASSIGN: c_uint = 0x4;
 /// `set -e` abort inside them has to travel back out through them. The
 /// remaining thirty produce `Flow::Done` and nothing else, which is what
 /// the C's `int` said.
-pub type Builtin = fn(
-    &mut crate::context::Shell,
-    &[&BStr],
-) -> Result<crate::eval::Flow, crate::error::Error>;
+pub type Builtin =
+    fn(&mut crate::context::Shell, &[&BStr]) -> Result<crate::eval::Flow, crate::error::Error>;
 
 pub struct builtincmd {
     pub name: &'static CStr,
@@ -108,6 +106,7 @@ pub fn args(fields: &[crate::expand::strlist]) -> Vec<&BStr> {
 }
 
 pub mod alias;
+pub mod r#break;
 pub mod cd;
 pub mod command;
 pub mod dot;
@@ -116,6 +115,7 @@ pub mod eval;
 pub mod exec;
 pub mod exit;
 pub mod export;
+pub mod r#false;
 pub mod fc;
 pub mod fg;
 pub mod getopts;
@@ -127,19 +127,17 @@ pub mod local;
 pub mod printf;
 pub mod pwd;
 pub mod read;
-pub mod r#break;
-pub mod r#false;
 pub mod r#return;
-pub mod r#true;
 pub mod set;
 pub mod shift;
 pub mod shopt;
+pub mod test;
+pub mod times;
+pub mod trap;
+pub mod r#true;
 pub mod r#type;
 pub mod ulimit;
 pub mod umask;
-pub mod test;
-pub mod trap;
-pub mod times;
 pub mod unalias;
 pub mod unset;
 pub mod wait;
@@ -179,48 +177,216 @@ pub const NUMBUILTINS: usize = 42;
 // [spec:posix:req:xcu.intrinsic-utilities]
 // [spec:posix:req:xcu.intrinsic.additional-implementation-defined]
 pub static builtincmd: [builtincmd; NUMBUILTINS] = [
-    builtincmd { name: c".", builtin: Some(dot::dotcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 0
-    builtincmd { name: c":", builtin: Some(r#true::truecmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 1
-    builtincmd { name: c"[", builtin: Some(test::testcmd), flags: 0 }, // 2
-    builtincmd { name: c"alias", builtin: Some(alias::aliascmd), flags: BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 3
-    builtincmd { name: c"bg", builtin: Some(fg::fgcmd), flags: BUILTIN_REGULAR }, // 4
-    builtincmd { name: c"break", builtin: Some(r#break::breakcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 5
-    builtincmd { name: c"cd", builtin: Some(cd::cdcmd), flags: BUILTIN_REGULAR }, // 6
-    builtincmd { name: c"chdir", builtin: Some(cd::cdcmd), flags: 0 }, // 7
-    builtincmd { name: c"command", builtin: Some(command::commandcmd), flags: BUILTIN_REGULAR }, // 8
-    builtincmd { name: c"continue", builtin: Some(r#break::breakcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 9
-    builtincmd { name: c"echo", builtin: Some(echo::echocmd), flags: 0 }, // 10
-    builtincmd { name: c"eval", builtin: None, flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 11
-    builtincmd { name: c"exec", builtin: Some(exec::execcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 12
-    builtincmd { name: c"exit", builtin: Some(exit::exitcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 13
-    builtincmd { name: c"export", builtin: Some(export::exportcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 14
-    builtincmd { name: c"false", builtin: Some(r#false::falsecmd), flags: BUILTIN_REGULAR }, // 15
-    builtincmd { name: c"fc", builtin: Some(fc::histcmd), flags: BUILTIN_REGULAR }, // 16
-    builtincmd { name: c"fg", builtin: Some(fg::fgcmd), flags: BUILTIN_REGULAR }, // 17
-    builtincmd { name: c"getopts", builtin: Some(getopts::getoptscmd), flags: BUILTIN_REGULAR }, // 18
-    builtincmd { name: c"hash", builtin: Some(hash::hashcmd), flags: BUILTIN_REGULAR }, // 19
-    builtincmd { name: c"history", builtin: Some(history::historycmd), flags: BUILTIN_REGULAR }, // 20
-    builtincmd { name: c"jobs", builtin: Some(jobs::jobscmd), flags: BUILTIN_REGULAR }, // 21
-    builtincmd { name: c"kill", builtin: Some(kill::killcmd), flags: BUILTIN_REGULAR }, // 22
-    builtincmd { name: c"local", builtin: Some(local::localcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 23
-    builtincmd { name: c"printf", builtin: Some(printf::printfcmd), flags: 0 }, // 24
-    builtincmd { name: c"pwd", builtin: Some(pwd::pwdcmd), flags: BUILTIN_REGULAR }, // 25
-    builtincmd { name: c"read", builtin: Some(read::readcmd), flags: BUILTIN_REGULAR }, // 26
-    builtincmd { name: c"readonly", builtin: Some(export::exportcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN }, // 27
-    builtincmd { name: c"return", builtin: Some(r#return::returncmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 28
-    builtincmd { name: c"set", builtin: Some(set::setcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 29
-    builtincmd { name: c"shift", builtin: Some(shift::shiftcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 30
-    builtincmd { name: c"source", builtin: Some(dot::sourcecmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 31
-    builtincmd { name: c"test", builtin: Some(test::testcmd), flags: 0 }, // 32
-    builtincmd { name: c"times", builtin: Some(times::timescmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 33
-    builtincmd { name: c"trap", builtin: Some(trap::trapcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 34
-    builtincmd { name: c"true", builtin: Some(r#true::truecmd), flags: BUILTIN_REGULAR }, // 35
-    builtincmd { name: c"type", builtin: Some(r#type::typecmd), flags: BUILTIN_REGULAR }, // 36
-    builtincmd { name: c"ulimit", builtin: Some(ulimit::ulimitcmd), flags: BUILTIN_REGULAR }, // 37
-    builtincmd { name: c"umask", builtin: Some(umask::umaskcmd), flags: BUILTIN_REGULAR }, // 38
-    builtincmd { name: c"unalias", builtin: Some(unalias::unaliascmd), flags: BUILTIN_REGULAR }, // 39
-    builtincmd { name: c"unset", builtin: Some(unset::unsetcmd), flags: BUILTIN_SPECIAL | BUILTIN_REGULAR }, // 40
-    builtincmd { name: c"wait", builtin: Some(wait::waitcmd), flags: BUILTIN_REGULAR }, // 41
+    builtincmd {
+        name: c".",
+        builtin: Some(dot::dotcmd),
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    }, // 0
+    builtincmd {
+        name: c":",
+        builtin: Some(r#true::truecmd),
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    }, // 1
+    builtincmd {
+        name: c"[",
+        builtin: Some(test::testcmd),
+        flags: 0,
+    }, // 2
+    builtincmd {
+        name: c"alias",
+        builtin: Some(alias::aliascmd),
+        flags: BUILTIN_REGULAR | BUILTIN_ASSIGN,
+    }, // 3
+    builtincmd {
+        name: c"bg",
+        builtin: Some(fg::fgcmd),
+        flags: BUILTIN_REGULAR,
+    }, // 4
+    builtincmd {
+        name: c"break",
+        builtin: Some(r#break::breakcmd),
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    }, // 5
+    builtincmd {
+        name: c"cd",
+        builtin: Some(cd::cdcmd),
+        flags: BUILTIN_REGULAR,
+    }, // 6
+    builtincmd {
+        name: c"chdir",
+        builtin: Some(cd::cdcmd),
+        flags: 0,
+    }, // 7
+    builtincmd {
+        name: c"command",
+        builtin: Some(command::commandcmd),
+        flags: BUILTIN_REGULAR,
+    }, // 8
+    builtincmd {
+        name: c"continue",
+        builtin: Some(r#break::breakcmd),
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    }, // 9
+    builtincmd {
+        name: c"echo",
+        builtin: Some(echo::echocmd),
+        flags: 0,
+    }, // 10
+    builtincmd {
+        name: c"eval",
+        builtin: None,
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    }, // 11
+    builtincmd {
+        name: c"exec",
+        builtin: Some(exec::execcmd),
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    }, // 12
+    builtincmd {
+        name: c"exit",
+        builtin: Some(exit::exitcmd),
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    }, // 13
+    builtincmd {
+        name: c"export",
+        builtin: Some(export::exportcmd),
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN,
+    }, // 14
+    builtincmd {
+        name: c"false",
+        builtin: Some(r#false::falsecmd),
+        flags: BUILTIN_REGULAR,
+    }, // 15
+    builtincmd {
+        name: c"fc",
+        builtin: Some(fc::histcmd),
+        flags: BUILTIN_REGULAR,
+    }, // 16
+    builtincmd {
+        name: c"fg",
+        builtin: Some(fg::fgcmd),
+        flags: BUILTIN_REGULAR,
+    }, // 17
+    builtincmd {
+        name: c"getopts",
+        builtin: Some(getopts::getoptscmd),
+        flags: BUILTIN_REGULAR,
+    }, // 18
+    builtincmd {
+        name: c"hash",
+        builtin: Some(hash::hashcmd),
+        flags: BUILTIN_REGULAR,
+    }, // 19
+    builtincmd {
+        name: c"history",
+        builtin: Some(history::historycmd),
+        flags: BUILTIN_REGULAR,
+    }, // 20
+    builtincmd {
+        name: c"jobs",
+        builtin: Some(jobs::jobscmd),
+        flags: BUILTIN_REGULAR,
+    }, // 21
+    builtincmd {
+        name: c"kill",
+        builtin: Some(kill::killcmd),
+        flags: BUILTIN_REGULAR,
+    }, // 22
+    builtincmd {
+        name: c"local",
+        builtin: Some(local::localcmd),
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN,
+    }, // 23
+    builtincmd {
+        name: c"printf",
+        builtin: Some(printf::printfcmd),
+        flags: 0,
+    }, // 24
+    builtincmd {
+        name: c"pwd",
+        builtin: Some(pwd::pwdcmd),
+        flags: BUILTIN_REGULAR,
+    }, // 25
+    builtincmd {
+        name: c"read",
+        builtin: Some(read::readcmd),
+        flags: BUILTIN_REGULAR,
+    }, // 26
+    builtincmd {
+        name: c"readonly",
+        builtin: Some(export::exportcmd),
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN,
+    }, // 27
+    builtincmd {
+        name: c"return",
+        builtin: Some(r#return::returncmd),
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    }, // 28
+    builtincmd {
+        name: c"set",
+        builtin: Some(set::setcmd),
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    }, // 29
+    builtincmd {
+        name: c"shift",
+        builtin: Some(shift::shiftcmd),
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    }, // 30
+    builtincmd {
+        name: c"source",
+        builtin: Some(dot::sourcecmd),
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    }, // 31
+    builtincmd {
+        name: c"test",
+        builtin: Some(test::testcmd),
+        flags: 0,
+    }, // 32
+    builtincmd {
+        name: c"times",
+        builtin: Some(times::timescmd),
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    }, // 33
+    builtincmd {
+        name: c"trap",
+        builtin: Some(trap::trapcmd),
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    }, // 34
+    builtincmd {
+        name: c"true",
+        builtin: Some(r#true::truecmd),
+        flags: BUILTIN_REGULAR,
+    }, // 35
+    builtincmd {
+        name: c"type",
+        builtin: Some(r#type::typecmd),
+        flags: BUILTIN_REGULAR,
+    }, // 36
+    builtincmd {
+        name: c"ulimit",
+        builtin: Some(ulimit::ulimitcmd),
+        flags: BUILTIN_REGULAR,
+    }, // 37
+    builtincmd {
+        name: c"umask",
+        builtin: Some(umask::umaskcmd),
+        flags: BUILTIN_REGULAR,
+    }, // 38
+    builtincmd {
+        name: c"unalias",
+        builtin: Some(unalias::unaliascmd),
+        flags: BUILTIN_REGULAR,
+    }, // 39
+    builtincmd {
+        name: c"unset",
+        builtin: Some(unset::unsetcmd),
+        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    }, // 40
+    builtincmd {
+        name: c"wait",
+        builtin: Some(wait::waitcmd),
+        flags: BUILTIN_REGULAR,
+    }, // 41
 ];
 
 /// Bash-only built-ins, searched before the baseline table only while the
@@ -283,12 +449,21 @@ mod tests {
     #[test]
     fn args_drop_only_the_terminator() {
         let fields = vec![
-            strlist { text: BString::from(&b"echo\0"[..]) },
-            strlist { text: BString::from(&b"\0"[..]) },
-            strlist { text: BString::from(&b"a b\0"[..]) },
+            strlist {
+                text: BString::from(&b"echo\0"[..]),
+            },
+            strlist {
+                text: BString::from(&b"\0"[..]),
+            },
+            strlist {
+                text: BString::from(&b"a b\0"[..]),
+            },
         ];
         let args = args(&fields);
-        assert_eq!(args, vec![BStr::new("echo"), BStr::new(""), BStr::new("a b")]);
+        assert_eq!(
+            args,
+            vec![BStr::new("echo"), BStr::new(""), BStr::new("a b")]
+        );
     }
 
     /// Every row the table names resolves, which is the check that a
@@ -304,7 +479,10 @@ mod tests {
             );
         }
         for cmd in &bash_builtincmd {
-            assert!(cmd.builtin.is_some(), "Bash-only rows use ordinary entry points");
+            assert!(
+                cmd.builtin.is_some(),
+                "Bash-only rows use ordinary entry points"
+            );
         }
     }
 }

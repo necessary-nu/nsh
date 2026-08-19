@@ -16,7 +16,6 @@ use std::io::Write;
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::{c_char, c_int};
 
-
 /*
  * Types of operations (passed to the errmsg routine).
  */
@@ -472,9 +471,7 @@ impl Error {
             Error::Interrupted { .. } => BStr::new(b""),
             Error::UnrecoverableRead { message, .. }
             | Error::Expansion { message, .. }
-            | Error::Other { message, .. } => {
-                message.as_bstr()
-            }
+            | Error::Other { message, .. } => message.as_bstr(),
         }
     }
 
@@ -716,20 +713,20 @@ mod tests {
     #[test]
     fn reported_error_carries_its_status() {
         let _g = crate::testutil::lock();
-            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-            let sh = &mut owned;
-            let e = sh.sh_error_value(b"a diagnostic");
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let sh = &mut owned;
+        let e = sh.sh_error_value(b"a diagnostic");
 
-            /* The value carries what the site took, so propagation
-             * through any number of `?` cannot lose it. */
-            assert_eq!(e.status(), 2);
-            assert_eq!(e.message().to_vec(), b"a diagnostic".to_vec());
+        /* The value carries what the site took, so propagation
+         * through any number of `?` cannot lose it. */
+        assert_eq!(e.status(), 2);
+        assert_eq!(e.message().to_vec(), b"a diagnostic".to_vec());
 
-            /* Nothing here asserts that the raise leaves `$?` alone.
-             * The signature says it: `sh_error_value` takes no receiver
-             * and `$?` is a field of one, so there is no shell in scope
-             * for it to write and no way for a test to observe
-             * otherwise. */
+        /* Nothing here asserts that the raise leaves `$?` alone.
+         * The signature says it: `sh_error_value` takes no receiver
+         * and `$?` is a field of one, so there is no shell in scope
+         * for it to write and no way for a test to observe
+         * otherwise. */
     }
 
     // [spec:posix:req:exit.unrecoverable-read-error/test]
@@ -753,32 +750,32 @@ mod tests {
     #[test]
     fn message_drops_the_prefix() {
         let _g = crate::testutil::lock();
-            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-            let sh = &mut owned;
-            sh.eval.errlinno = 17;
-            let e = Error::other(sh.eval.errlinno, 2, b"cd: bad directory");
-            let e = sh.report(e);
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let sh = &mut owned;
+        sh.eval.errlinno = 17;
+        let e = Error::other(sh.eval.errlinno, 2, b"cd: bad directory");
+        let e = sh.report(e);
 
-            /* The `sh: 17: ` prefix is `arg0`, `errlinno` and the running
-             * command's name -- shell state, not error state -- so
-             * `sh_warnx` adds it on the way out and the value does not
-             * carry it. */
-            assert_eq!(e.message().to_vec(), b"cd: bad directory".to_vec());
-            assert_eq!(e.line(), 17);
+        /* The `sh: 17: ` prefix is `arg0`, `errlinno` and the running
+         * command's name -- shell state, not error state -- so
+         * `sh_warnx` adds it on the way out and the value does not
+         * carry it. */
+        assert_eq!(e.message().to_vec(), b"cd: bad directory".to_vec());
+        assert_eq!(e.line(), 17);
     }
 
     #[test]
     fn exend_keeps_its_own_status() {
         let _g = crate::testutil::lock();
-            /* `shellexec` reports its text and takes 127 or 126, then
-             * raises EXEND. The status travels with the value even though
-             * the code that goes with it does not. */
-            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-            let sh = &mut owned;
-            let e = Error::other(sh.eval.errlinno, 127, b"nosuchcmd: not found");
-            let e = sh.report(e);
+        /* `shellexec` reports its text and takes 127 or 126, then
+         * raises EXEND. The status travels with the value even though
+         * the code that goes with it does not. */
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let sh = &mut owned;
+        let e = Error::other(sh.eval.errlinno, 127, b"nosuchcmd: not found");
+        let e = sh.report(e);
 
-            assert_eq!(e.status(), 127);
+        assert_eq!(e.status(), 127);
     }
 
     /// Arrange for `onint` to be able to *return*.
@@ -801,22 +798,22 @@ mod tests {
     #[test]
     fn an_interrupt_is_a_value() {
         let _g = crate::testutil::lock();
-            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-            let sh = &mut owned;
-            as_interactive_root(sh);
-            CLEAR_PENDING_INT();
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let sh = &mut owned;
+        as_interactive_root(sh);
+        CLEAR_PENDING_INT();
 
-            let e = onint(sh);
+        let e = onint(sh);
 
-            assert!(e.is_interrupt());
-            assert_eq!(e.status(), nsh_platform::interrupt_signal() + 128);
-            /* `onint` used to write this to `exitstatus` as well. It does
-             * not any more -- and it could not: it takes `&Shell`, a
-             * shared receiver, so the type says it reads the shell and
-             * does not write it. `Error::status()` answers `signal + 128`
-             * for `Interrupted`, and the frame that catches it writes. */
-            assert_eq!(sh.status, 0, "the raise path writes no shell state");
-            assert!(e.message().is_empty(), "dash prints nothing for a ^C");
+        assert!(e.is_interrupt());
+        assert_eq!(e.status(), nsh_platform::interrupt_signal() + 128);
+        /* `onint` used to write this to `exitstatus` as well. It does
+         * not any more -- and it could not: it takes `&Shell`, a
+         * shared receiver, so the type says it reads the shell and
+         * does not write it. `Error::status()` answers `signal + 128`
+         * for `Interrupted`, and the frame that catches it writes. */
+        assert_eq!(sh.status, 0, "the raise path writes no shell state");
+        assert!(e.message().is_empty(), "dash prints nothing for a ^C");
     }
 
     /// `poll_interrupt` takes delivery once and only once: `onint` clears
@@ -827,14 +824,17 @@ mod tests {
     #[test]
     fn delivery_happens_once() {
         let _g = crate::testutil::lock();
-            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-            let sh = &mut owned;
-            as_interactive_root(sh);
-            sh.interrupt_suppression = 0;
-            crate::siginbox::signals().set_interrupt_pending(true);
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let sh = &mut owned;
+        as_interactive_root(sh);
+        sh.interrupt_suppression = 0;
+        crate::siginbox::signals().set_interrupt_pending(true);
 
-            assert!(poll_interrupt(sh).is_some(), "one pending interrupt, one delivery");
-            assert!(poll_interrupt(sh).is_none(), "and not a second time");
+        assert!(
+            poll_interrupt(sh).is_some(),
+            "one pending interrupt, one delivery"
+        );
+        assert!(poll_interrupt(sh).is_none(), "and not a second time");
     }
 
     /// **The INTOFF discipline, which the polling must not break.** An
@@ -847,20 +847,23 @@ mod tests {
     #[test]
     fn intoff_still_holds_it_off() {
         let _g = crate::testutil::lock();
-            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-            let sh = &mut owned;
-            as_interactive_root(sh);
-            sh.interrupt_suppression = 0;
-            crate::siginbox::signals().set_interrupt_pending(true);
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let sh = &mut owned;
+        as_interactive_root(sh);
+        sh.interrupt_suppression = 0;
+        crate::siginbox::signals().set_interrupt_pending(true);
 
-            INTOFF(sh);
-            assert!(poll_interrupt(sh).is_none(), "suppressed: not due");
-            /* And `INTON` does not deliver it either -- that is the
-             * divergence, and it is why the counter reaching zero is no
-             * longer a delivery point. */
-            INTON(sh);
-            assert_eq!(int_pending(), 1, "still pending, waiting for a poll site");
-            assert!(poll_interrupt(sh).is_some(), "and due again once unsuppressed");
+        INTOFF(sh);
+        assert!(poll_interrupt(sh).is_none(), "suppressed: not due");
+        /* And `INTON` does not deliver it either -- that is the
+         * divergence, and it is why the counter reaching zero is no
+         * longer a delivery point. */
+        INTON(sh);
+        assert_eq!(int_pending(), 1, "still pending, waiting for a poll site");
+        assert!(
+            poll_interrupt(sh).is_some(),
+            "and due again once unsuppressed"
+        );
     }
 
     /// A frame that cannot carry the interrupt out puts it back rather
@@ -869,16 +872,16 @@ mod tests {
     #[test]
     fn a_rearmed_interrupt_is_taken_later() {
         let _g = crate::testutil::lock();
-            let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-            let sh = &mut owned;
-            as_interactive_root(sh);
-            sh.interrupt_suppression = 0;
-            CLEAR_PENDING_INT();
+        let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let sh = &mut owned;
+        as_interactive_root(sh);
+        sh.interrupt_suppression = 0;
+        CLEAR_PENDING_INT();
 
-            rearm_interrupt(Error::Interrupted {
-                signal: crate::status::Signal::from_raw(nsh_platform::interrupt_signal()),
-            });
-            assert_eq!(int_pending(), 1);
-            assert!(poll_interrupt(sh).is_some(), "the next poll site takes it");
+        rearm_interrupt(Error::Interrupted {
+            signal: crate::status::Signal::from_raw(nsh_platform::interrupt_signal()),
+        });
+        assert_eq!(int_pending(), 1);
+        assert!(poll_interrupt(sh).is_some(), "the next poll site takes it");
     }
 }

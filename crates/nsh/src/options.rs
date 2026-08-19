@@ -11,8 +11,7 @@ use crate::error::Error;
 use bstr::{BStr, BString};
 use core::ffi::{c_char, c_int};
 use std::ffi::CStr;
-use std::io::{IsTerminal as _, Write};
-use std::os::fd::AsFd as _;
+use std::io::Write;
 
 mod dialect;
 pub(crate) use dialect::Dialect;
@@ -309,7 +308,7 @@ pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<c_in
                 .ok()
                 .flatten()
                 .as_ref()
-                .is_some_and(|fd| fd.as_fd().is_terminal())
+                .is_some_and(|fd| nsh_platform::is_terminal(fd))
         {
             sh.options.set_flag(iflag, 1);
         }
@@ -864,7 +863,10 @@ mod tests {
 
         let e = options(sh, &args, 1, false).expect_err("-o nosuchopt is not an option");
 
-        assert_eq!(e.message().to_vec(), b"Illegal option -o nosuchopt".to_vec());
+        assert_eq!(
+            e.message().to_vec(),
+            b"Illegal option -o nosuchopt".to_vec()
+        );
     }
 
     /// `Options` is `nextopt` with its state made local, so what it has to
@@ -880,7 +882,8 @@ mod tests {
          * a failure look like a short option list, so the error is taken
          * loudly: every option string these cases use accepts every
          * option they hand it. */
-        while let Some(c) = opts.next(sh, optstring)
+        while let Some(c) = opts
+            .next(sh, optstring)
             .expect("the scan's cases never pass an option the string rejects")
         {
             seen.push(c);
@@ -983,7 +986,11 @@ mod tests {
     /// is where it stopped, which is what decides the positional
     /// parameters -- so the boundary between options and operands is the
     /// property worth pinning.
-    fn scan_options(sh: &mut crate::context::Shell, raw: &[&[u8]], cmdline: bool) -> (usize, bool, c_int) {
+    fn scan_options(
+        sh: &mut crate::context::Shell,
+        raw: &[&[u8]],
+        cmdline: bool,
+    ) -> (usize, bool, c_int) {
         let _guard = crate::testutil::lock();
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;

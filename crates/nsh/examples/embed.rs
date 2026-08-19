@@ -55,7 +55,8 @@ fn run_and_capture() -> Result<(), Error> {
     // Command substitution and direct external commands resolve the same
     // per-instance logical descriptors as builtins, so capture covers all
     // of them without replacing the host process's stdout.
-    let status: ExitStatus = sh.run(b"for f in /etc/hostname; do echo \"$(wc -l < \"$f\") $f\"; done")?;
+    let status: ExitStatus =
+        sh.run(b"for f in /etc/hostname; do echo \"$(wc -l < \"$f\") $f\"; done")?;
     let out: BString = sh.take_captured_stdout().map_err(io_error)?;
 
     // Two runs compose like two lines of one script: `count` is still set.
@@ -71,11 +72,18 @@ fn run_and_capture() -> Result<(), Error> {
     // Untrusted data goes in as a positional parameter, never spliced into
     // the script text. This is the whole quoting problem, gone.
     let name = BStr::new(b"a file with 'quotes' and $HOME in it");
-    sh.run_command(BStr::new(b"printf '%s\\n' \"$1\""), &[BStr::new(b"myapp"), name])?;
+    sh.run_command(
+        BStr::new(b"printf '%s\\n' \"$1\""),
+        &[BStr::new(b"myapp"), name],
+    )?;
     let echoed: BString = sh.take_captured_stdout().map_err(io_error)?;
     assert_eq!(echoed.trim_ascii_end(), &name[..]);
 
-    println!("1. status {}, the script said {}", status.code(), show(&out));
+    println!(
+        "1. status {}, the script said {}",
+        status.code(),
+        show(&out)
+    );
     println!("   two runs later: {}", show(&counted));
     println!(
         "   $HOME was {}, and the hostile argument survived intact",
@@ -98,7 +106,10 @@ fn expand_a_word() -> Result<(), Error> {
     // As if double-quoted: exactly one, no splitting, no globbing.
     let one: BString = sh.expand_word_quoted(BStr::new(b"${EDITOR:-vi}"))?;
 
-    println!("2. {} field(s) from the glob, and ${{EDITOR:-vi}} is {one:?}", fields.len());
+    println!(
+        "2. {} field(s) from the glob, and ${{EDITOR:-vi}} is {one:?}",
+        fields.len()
+    );
     Ok(())
 }
 
@@ -221,7 +232,9 @@ fn a_shell_with_a_host() -> Result<(), Error> {
 }
 
 fn main() {
-    let argv: Vec<BString> = std::env::args().map(|a| BString::from(a.into_bytes())).collect();
+    let argv: Vec<BString> = std::env::args()
+        .map(|a| BString::from(a.into_bytes()))
+        .collect();
     if argv.iter().any(|a| a.as_slice() == b"--frontend") {
         frontend(&argv);
     }

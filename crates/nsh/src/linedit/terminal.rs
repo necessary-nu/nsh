@@ -1,11 +1,10 @@
 //! Owned terminal state shared with the shell's long-lived line editor.
 
+use nsh_platform::{EditorTerminalAttributes as TerminalAttributes, TerminalApply as ApplyWhen};
 use nshedit::domain::{EditorConfig, ScreenSize, TerminalMode};
 use nshedit::editor::TerminalControl;
-use nshedit_plat::terminal::{ApplyWhen, TerminalAttributes};
 use std::fs::File;
 use std::io;
-use std::os::fd::{AsFd, BorrowedFd};
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
@@ -62,19 +61,17 @@ impl OwnedTerminal {
         }
     }
 
-    pub(super) fn screen_size(output: BorrowedFd<'_>) -> io::Result<ScreenSize> {
-        let (rows, columns) = nshedit_plat::terminal::screen_size(output)?;
+    pub(super) fn screen_size(output: &File) -> io::Result<ScreenSize> {
+        let (rows, columns) = nsh_platform::editor_terminal_size(output)?;
         ScreenSize::new(rows, columns)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 
     fn apply(&self, when: ApplyWhen, attributes: Option<&TerminalAttributes>) -> io::Result<()> {
         match attributes {
-            Some(attributes) => nshedit_plat::terminal::apply_attributes(
-                self.input.as_fd(),
-                when,
-                attributes,
-            ),
+            Some(attributes) => {
+                nsh_platform::apply_editor_terminal_attributes(&self.input, when, attributes)
+            }
             None => Ok(()),
         }
     }
@@ -82,19 +79,18 @@ impl OwnedTerminal {
 
 impl TerminalControl for OwnedTerminal {
     fn activate(&mut self, _config: EditorConfig) -> io::Result<()> {
-        if !nshedit_plat::terminal::is_terminal(self.output.as_fd())? {
+        if !nsh_platform::is_terminal(&self.output) {
             return Err(io::Error::new(
                 io::ErrorKind::NotConnected,
                 "editor output is not a terminal",
             ));
         }
-        let original = nshedit_plat::terminal::read_attributes(self.input.as_fd())
-            .map_err(|error| {
-                io::Error::new(
-                    io::ErrorKind::NotConnected,
-                    format!("editor input: {}", self.locale.error_message(&error)),
-                )
-            })?;
+        let original = nsh_platform::editor_terminal_attributes(&self.input).map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::NotConnected,
+                format!("editor input: {}", self.locale.error_message(&error)),
+            )
+        })?;
         self.snapshots
             .lock()
             .expect("terminal snapshots are not poisoned")
@@ -127,10 +123,7 @@ impl TerminalControl for OwnedTerminal {
             .lock()
             .expect("terminal snapshots are not poisoned")
             .original;
-        self.apply(
-            ApplyWhen::AfterOutputAndDiscardInput,
-            original.as_ref(),
-        )
+        self.apply(ApplyWhen::AfterOutputAndDiscardInput, original.as_ref())
     }
 }
 

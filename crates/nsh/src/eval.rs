@@ -32,8 +32,8 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::c_int;
+use nsh_platform::Descriptor;
 use std::io::Write as _;
-use std::os::fd::{AsRawFd, OwnedFd};
 
 use crate::builtins::{BUILTIN_ASSIGN, BUILTIN_REGULAR, BUILTIN_SPECIAL, builtincmd};
 use crate::error::{FORCEINTON, INTOFF, INTON};
@@ -43,7 +43,8 @@ use crate::expand::{EXP_FULL, EXP_MBCHAR, EXP_REDIR, EXP_TILDE, EXP_VARTILDE};
 use crate::expand::{arglist, strlist};
 use crate::jobs::FORK_NOJOB;
 use crate::nodes::{
-    NAND, NAPPEND, NBACKGND, NBASH, NCASE, NCLOBBER, NCLIST, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO, NIF, NNOT, NOR, NPIPE, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE,
+    NAND, NAPPEND, NBACKGND, NBASH, NCASE, NCLIST, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD,
+    NFROMTO, NIF, NNOT, NOR, NPIPE, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE,
 };
 use crate::nodes::{Node, funcnode};
 use crate::output::Dest;
@@ -67,8 +68,8 @@ pub const SKIPFUNCDEF: c_int = 1 << 3;
 // [spec:dash:def:eval.backcmd]
 pub struct backcmd {
     /* result of evalbackcmd */
-    pub fd: Option<OwnedFd>, /* descriptor to read from */
-    pub jp: Option<usize>, /* index of the job structure for command */
+    pub fd: Option<Descriptor>, /* descriptor to read from */
+    pub jp: Option<usize>,      /* index of the job structure for command */
 }
 
 // ---------------------------------------------------------------------
@@ -319,7 +320,8 @@ pub(crate) fn parse_execute(sh: &mut Shell, flags: c_int) -> Result<Flow, Error>
         {
             let i: c_int;
 
-            i = flow!(eval_top_level(sh,
+            i = flow!(eval_top_level(
+                sh,
                 n.as_ref(),
                 flags
                     & !(if crate::parser::parser_eof(sh) != 0 {
@@ -438,8 +440,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
      * definite-initialisation analysis is trivially satisfied — any of
      * the six is as good, and `evaltree` itself no longer fits the type,
      * because the leaf evaluators all dereference their node. */
-    let mut evalfn: fn(&mut Shell, &Node, c_int) -> Result<Flow, Error> =
-        evalcommand;
+    let mut evalfn: fn(&mut Shell, &Node, c_int) -> Result<Flow, Error> = evalcommand;
     let isor: core::ffi::c_uint;
     let mut status: c_int = 0;
 
@@ -542,11 +543,14 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
                                 /* #if NAND + 1 != NOR / NOR + 1 != NSEMI */
                                 isor = (n.node_type() - NAND) as core::ffi::c_uint;
                                 let b = n.nbinary();
-                                status = flow!(evaltree(sh,
+                                status = flow!(evaltree(
+                                    sh,
                                     b.ch1.as_deref(),
                                     (flags | (((isor >> 1).wrapping_sub(1)) as c_int)) & EV_TESTED,
                                 ));
-                                if ((status == 0) as core::ffi::c_uint) == isor || sh.eval.evalskip != 0 {
+                                if ((status == 0) as core::ffi::c_uint) == isor
+                                    || sh.eval.evalskip != 0
+                                {
                                     break 'sw;
                                 }
                                 nnext = b.ch2.as_deref();
@@ -783,7 +787,8 @@ fn evalcase(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
         sh.vars.lineno -= sh.eval.funcline - 1;
     }
 
-    crate::expand::expandarg(sh, 
+    crate::expand::expandarg(
+        sh,
         c.expr.as_deref().unwrap(),
         Some(&mut arglist),
         if crate::mystring::FNMATCH_IS_ENABLED != 0 {
@@ -941,7 +946,8 @@ fn expredir(sh: &mut Shell, n: &[Node]) -> Result<(), Error> {
         let mut fnl: arglist = arglist::new();
         match redir.node_type() {
             NFROMTO | NFROM | NTO | NCLOBBER | NAPPEND => {
-                crate::expand::expandarg(sh, 
+                crate::expand::expandarg(
+                    sh,
                     redir.nfile().fname.as_deref().unwrap(),
                     Some(&mut fnl),
                     EXP_TILDE | EXP_REDIR,
@@ -1000,7 +1006,7 @@ fn expredir(sh: &mut Shell, n: &[Node]) -> Result<(), Error> {
 fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
     let jp: usize;
     let pipelen: c_int;
-    let mut prevfd: Option<OwnedFd>;
+    let mut prevfd: Option<Descriptor>;
     let mut status: c_int = 0;
     let mut flags: c_int = flags;
 
@@ -1021,11 +1027,11 @@ fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
             match crate::redir::sh_pipe(sh, false) {
                 Ok((pipe, _)) => Some(pipe),
                 Err(error) => {
-                /* Between this frame's `INTOFF` and its `INTON`, exactly
-                 * where the longjmp was: the jump skipped the same `INTON`
-                 * and left the counter raised. Pairing them with a guard
-                 * would move the instruction a pending SIGINT is delivered
-                 * at, which `docs/errors-are-values.md` §2.4 forbids. */
+                    /* Between this frame's `INTOFF` and its `INTON`, exactly
+                     * where the longjmp was: the jump skipped the same `INTON`
+                     * and left the counter raised. Pairing them with a guard
+                     * would move the instruction a pending SIGINT is delivered
+                     * at, which `docs/errors-are-values.md` §2.4 forbids. */
                     return Err(error);
                 }
             }
@@ -1039,14 +1045,14 @@ fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
                 pipe.write
             });
             if let Some(previous) = prevfd.take() {
-                let number = previous.as_raw_fd();
+                let number = previous.number();
                 crate::input::reset_input(sh);
                 sh.fds
                     .install_owned(0, previous)
                     .map_err(|error| crate::redir::descriptor_error(sh, number, error))?;
             }
             if let Some(write) = write {
-                let number = write.as_raw_fd();
+                let number = write.number();
                 sh.fds
                     .install_owned(1, write)
                     .map_err(|error| crate::redir::descriptor_error(sh, number, error))?;
@@ -1080,11 +1086,7 @@ fn evalpipe(sh: &mut Shell, n: &Node, flags: c_int) -> Result<Flow, Error> {
 
 // [spec:dash:def:eval.evalbackcmd-fn]
 // [spec:dash:sem:eval.evalbackcmd-fn]
-pub fn evalbackcmd(
-    sh: &mut Shell,
-    n: Option<&Node>,
-    result: &mut backcmd,
-) -> Result<(), Error> {
+pub fn evalbackcmd(sh: &mut Shell, n: Option<&Node>, result: &mut backcmd) -> Result<(), Error> {
     let jp: usize;
     let pid: c_int;
 
@@ -1101,7 +1103,7 @@ pub fn evalbackcmd(
         if pid == 0 {
             FORCEINTON(sh);
             drop(pipe.read);
-            let number = pipe.write.as_raw_fd();
+            let number = pipe.write.number();
             sh.fds
                 .install_owned(1, pipe.write)
                 .map_err(|error| crate::redir::descriptor_error(sh, number, error))?;
@@ -1293,8 +1295,7 @@ fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> 
     if sh.eval.funcline != 0 {
         sh.vars.lineno -= sh.eval.funcline - 1;
     }
-    if c
-        .assign
+    if c.assign
         .iter()
         .chain(c.args.iter())
         .any(|node| node.node_type() == NBASH)
@@ -1320,8 +1321,8 @@ fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> 
 
         loop {
             /* `find_command` can run a `%func` PATH file, which is shell
-              * code and can `exit`; the C's longjmp took that past this
-              * frame and so does this. */
+             * code and can `exit`; the C's longjmp took that past this
+             * frame and so does this. */
             /* `pathval` and the call both take the shell, so the read is
              * hoisted out of the argument list rather than nested in it.
              * Arguments evaluate left to right and nothing before it here
@@ -1361,7 +1362,7 @@ fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> 
                 &mut arglist,
                 &mut argp,
                 &mut path,
-                standard_path,
+                standard_path.as_slice().as_bstr(),
                 &mut head,
             )?;
             if cmd_flag == 0 {
@@ -1370,7 +1371,8 @@ fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> 
         }
 
         for a in argp {
-            crate::expand::expandarg(sh, 
+            crate::expand::expandarg(
+                sh,
                 a,
                 Some(&mut arglist),
                 if pseudovarflag != 0
@@ -1481,18 +1483,31 @@ fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> 
                  * head, so `command -p foo` traces as it was written and not
                  * as `parse_command_args` left it.  A NULL `osp` prints
                  * nothing, which is the empty slice. */
-                eprintlist(sh, dest, &arglist.list[osp.unwrap_or(arglist.list.len())..], sep);
+                eprintlist(
+                    sh,
+                    dest,
+                    &arglist.list[osp.unwrap_or(arglist.list.len())..],
+                    sep,
+                );
                 let _ = sh.io.get(dest).write_all(b"\n");
             }
 
             /* Now locate the command. */
-            if cmdentry.cmdtype() != CMDBUILTIN || (cmdentry.builtin().flags & BUILTIN_REGULAR) == 0 {
+            if cmdentry.cmdtype() != CMDBUILTIN || (cmdentry.builtin().flags & BUILTIN_REGULAR) == 0
+            {
                 if path.is_none() {
                     path = Some(crate::var::pathval(sh));
                 }
-                let search_path = BStr::new(path.as_ref().expect("command lookup has a PATH").as_slice());
+                let search_path =
+                    BStr::new(path.as_ref().expect("command lookup has a PATH").as_slice());
                 let command_name = crate::mystring::cstr_prefix(&arglist.list[head].text);
-                match find_command(sh, command_name, &mut cmdentry, cmd_flag | DO_ERR, search_path)? {
+                match find_command(
+                    sh,
+                    command_name,
+                    &mut cmdentry,
+                    cmd_flag | DO_ERR,
+                    search_path,
+                )? {
                     Flow::Done(_) => {}
                     exit @ Flow::Exit { .. } => return Ok(exit),
                 }
@@ -1577,7 +1592,11 @@ fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> 
                             sh,
                             cmd,
                             &args,
-                            BStr::new(path.as_ref().expect("external command has a PATH").as_slice()),
+                            BStr::new(
+                                path.as_ref()
+                                    .expect("external command has a PATH")
+                                    .as_slice(),
+                            ),
                             cmdentry.path_index(),
                         )?);
                     } else {
@@ -1586,7 +1605,11 @@ fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> 
                         return shellexec(
                             sh,
                             &args,
-                            BStr::new(path.as_ref().expect("external command has a PATH").as_slice()),
+                            BStr::new(
+                                path.as_ref()
+                                    .expect("external command has a PATH")
+                                    .as_slice(),
+                            ),
                             cmdentry.path_index(),
                         );
                     }
@@ -1627,7 +1650,10 @@ fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> 
                 }
                 None => crate::error::Error::reported(sh.eval.errlinno, status),
             };
-            debug_assert!(!error.is_expansion(), "expansion errors bypass redirection status");
+            debug_assert!(
+                !error.is_expansion(),
+                "expansion errors bypass redirection status"
+            );
             // Smoosh's adopted POSIX closure profile assigns status 1 to a
             // redirection failure on a directly invoked special builtin.
             // Its diagnostic was already written by the redirection layer.
@@ -1724,12 +1750,7 @@ fn evalbltin(
 // [spec:posix:req:cmd.function-return]
 // [spec:posix:req:cmd.function-exit-status]
 // [spec:posix:req:cmd.function-syntax-error-properties]
-fn evalfun(
-    sh: &mut Shell,
-    func: &funcnode,
-    args: &[&BStr],
-    flags: c_int,
-) -> Result<Flow, Error> {
+fn evalfun(sh: &mut Shell, func: &funcnode, args: &[&BStr], flags: c_int) -> Result<Flow, Error> {
     let saveparam: crate::options::shparam; /* volatile */
     let savefuncline: c_int;
     let saveloopnest: c_int;

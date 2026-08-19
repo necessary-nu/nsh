@@ -1,12 +1,10 @@
 //! Literal port of `src/mail.c` / `src/mail.h`.
 //! Rules: `docs/spec/port/src/mail.md`.
 
-use core::ffi::c_int;
 use bstr::BStr;
-use std::ffi::OsStr;
+use core::ffi::c_int;
+use nsh_platform::ShellBytesExt as _;
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::MetadataExt;
 
 use crate::var::{mailval, mpathset, mpathval};
 
@@ -54,21 +52,22 @@ pub fn chkmail(sh: &mut crate::context::Shell) {
         let (path, message) = component
             .iter()
             .position(|&byte| byte == b'%')
-            .map_or((component, None), |at| (&component[..at], Some(&component[at + 1..])));
+            .map_or((component, None), |at| {
+                (&component[..at], Some(&component[at + 1..]))
+            });
         if path.is_empty() {
             continue;
         }
-        let modified = std::fs::metadata(OsStr::from_bytes(path))
-            .map(|metadata| metadata.mtime())
+        let modified = path
+            .try_to_path_buf()
+            .and_then(|path| nsh_platform::path_metadata(&path, true))
+            .map(|metadata| metadata.modified_seconds)
             .unwrap_or(0);
         if modified == 0 {
             sh.mail.mailtime[index] = 0;
         } else {
             if sh.mail.changed == 0 && modified != sh.mail.mailtime[index] {
-                let mut notice = message.map_or_else(
-                    || b"you have mail".to_vec(),
-                    <[u8]>::to_vec,
-                );
+                let mut notice = message.map_or_else(|| b"you have mail".to_vec(), <[u8]>::to_vec);
                 notice.push(b'\n');
                 let _ = sh.io.stderr().write_all(&notice);
             }

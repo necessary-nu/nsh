@@ -21,15 +21,14 @@
 #![allow(unknown_lints)]
 use crate::context::Shell;
 use core::mem;
-use std::ffi::OsStr;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::{c_char, c_int, c_uint};
 
 use crate::error::Error;
 use crate::mystring::{byte_at, byte_at_i, slice_from};
-use crate::pmatch::{pmatch_slices};
+use crate::pmatch::pmatch_slices;
 
 // ---------------------------------------------------------------------
 // Constants mirrored from the headers this file includes.
@@ -77,7 +76,6 @@ const CHAR_BIT: c_int = 8;
 // C character literals used as `switch` labels; Rust `match` patterns
 // require named constants, so the ones this file switches on get names.
 pub(crate) const C_NUL: c_char = 0;
-const C_NL: c_char = b'\n' as c_char;
 pub(crate) const C_BANG: c_char = b'!' as c_char;
 const C_HASH: c_char = b'#' as c_char;
 const C_DOLLAR: c_char = b'$' as c_char;
@@ -381,7 +379,6 @@ impl IfsCache {
 fn ifsr(state: &mut ExpandState) -> &mut Vec<ifsregion> {
     &mut state.ifs_regions
 }
-
 
 /// `&mut exparg.list`, same.  Every `*exparg.lastp = sp` in the C is a
 /// `push` on this, and `exparg.lastp = &exparg.list` — the C's way of
@@ -790,13 +787,7 @@ fn expandarg_inner(
              * offsets into the grabbed block, which is why the block had to
              * outlive them and why the enclosing mark had to be the thing
              * that freed it. */
-            ifsbreakup_regions(
-                sh,
-                &state.ifs_regions,
-                &mut p,
-                -1,
-                &mut state.args,
-            );
+            ifsbreakup_regions(sh, &state.ifs_regions, &mut p, -1, &mut state.args);
             /* `*exparg.lastp = NULL; exparg.lastp = &exparg.list;` —
              * terminate the fields `ifsbreakup` built, then re-point the
              * tail at the head so `expandmeta` rebuilds the list while
@@ -1020,10 +1011,7 @@ fn argstr(
                 CTLBACKQ => {
                     let at = state.next_backquote;
                     state.next_backquote += 1;
-                    let cmd = state
-                        .backquotes
-                        .get_mut(at)
-                        .and_then(Option::take);
+                    let cmd = state.backquotes.get_mut(at).and_then(Option::take);
                     expbackq(sh, state, cmd.as_ref(), flag | inquotes)?;
                     continue 'start; /* goto start */
                 }
@@ -1098,16 +1086,15 @@ fn exptilde(
             };
             memtodest(&sh.locale, &home, flag | EXP_QUOTED, expb(state));
         } else {
-            let Some(home) = nsh_platform::named_user_home(namebuf) else {
+            let Ok(name) = namebuf.try_to_os_string() else {
+                return startp;
+            };
+            let Some(home) = nsh_platform::named_user_home(&name) else {
                 /* lose: */
                 return startp;
             };
-            memtodest(
-                &sh.locale,
-                home.as_bytes(),
-                flag | EXP_QUOTED,
-                expb(state),
-            );
+            let home = home.to_shell_bytes();
+            memtodest(&sh.locale, &home, flag | EXP_QUOTED, expb(state));
         }
     }
     /* out: */
@@ -1223,7 +1210,6 @@ fn expbackq(
     /* `char buf[128]`, as bytes: it is only ever handed to `read` and to
      * `memtodest`, and both want the bytes rather than the sign. */
     let mut buf: [u8; 128] = [0; 128];
-    let mut dest: usize;
     let startloc: c_int;
 
     'out: {
@@ -1288,12 +1274,7 @@ fn expbackq(
         /* Eat all trailing newlines.  The cursor is the length, so the
          * walk is over the buffer's own bytes and `STADJUST` is a
          * `truncate`. */
-        dest = expb(state).len();
-        while dest > startloc as usize && expb(state)[dest - 1] == C_NL as u8 {
-            /* STUNPUTC(dest) */
-            dest -= 1;
-        }
-        expb(state).truncate(dest);
+        nsh_platform::trim_command_substitution_output(expb(state), startloc as usize);
 
         if (flag & EXP_QUOTED) == 0 {
             let endloc = expdest_off(state);
@@ -1364,7 +1345,11 @@ fn scanleft(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize> 
          * *loc = c;` — the temporary terminator, as a subslice that ends
          * where it went. */
         let subject: &[u8] = if a.zero != 0 {
-            let from = if FNMATCH_IS_ENABLED { a.rmesc } else { a.startp };
+            let from = if FNMATCH_IS_ENABLED {
+                a.rmesc
+            } else {
+                a.startp
+            };
             between(b, from, s)
         } else {
             slice_from(b, s)
@@ -1408,7 +1393,11 @@ fn scanright(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize>
              * *loc = c;` — see [`Scan`]: the subslice ends where the C's
              * temporary NUL went, so nothing is written. */
             let subject: &[u8] = if a.zero != 0 {
-                let from = if FNMATCH_IS_ENABLED { a.rmesc } else { a.startp };
+                let from = if FNMATCH_IS_ENABLED {
+                    a.rmesc
+                } else {
+                    a.startp
+                };
                 between(b, from, s.max(0) as usize)
             } else {
                 slice_from(b, s.max(0) as usize)
@@ -1796,9 +1785,7 @@ fn evalvar(
         }
 
         patloc = expdest_off(state);
-        p = subevalvar(
-            sh, state, text, p, None, patloc, startloc, varflags, flag,
-        )?;
+        p = subevalvar(sh, state, text, p, None, patloc, startloc, varflags, flag)?;
         break 'again;
     }
 
@@ -1948,12 +1935,7 @@ fn mbtodest(
 // question at once: `p` cannot run past `len`, the eight-byte fast path
 // reads eight bytes that exist, and `mbtodest`'s `p - 1` is an index into
 // something with a start.
-fn memtodest(
-    locale: &nsh_platform::Locale,
-    src: &[u8],
-    flags: c_int,
-    dst: &mut BString,
-) -> usize {
+fn memtodest(locale: &nsh_platform::Locale, src: &[u8], flags: c_int, dst: &mut BString) -> usize {
     let syntax: SyntaxRef;
     let mut count: usize = 0;
     let expq: c_int;
@@ -2214,11 +2196,7 @@ fn varvalue(
                                 return Ok(-1);
                             }
                             value = if num != 0 {
-                                sh.options
-                                    .shellparam
-                                    .words()
-                                    .get(num as usize - 1)
-                                    .cloned()
+                                sh.options.shellparam.words().get(num as usize - 1).cloned()
                             } else {
                                 sh.options.arg0().map(BStr::to_owned)
                             };
@@ -2299,12 +2277,7 @@ fn varvalue(
 
 // [spec:dash:def:expand.recordregion-fn]
 // [spec:dash:sem:expand.recordregion-fn]
-pub(crate) fn recordregion(
-    state: &mut ExpandState,
-    start: c_int,
-    end: c_int,
-    nulonly: c_int,
-) {
+pub(crate) fn recordregion(state: &mut ExpandState, start: c_int, end: c_int, nulonly: c_int) {
     let r = ifsregion {
         begoff: start,
         endoff: end,
@@ -2625,12 +2598,7 @@ fn ifsbreakup_regions(
 // [spec:posix:def:expand.field-splitting-delimited]
 // [spec:posix:req:expand.field-splitting-algorithm]
 // [spec:posix:req:expand.field-splitting-output-replaces-input]
-pub fn ifsbreakup(
-    sh: &Shell,
-    string: &mut [u8],
-    maxargs: c_int,
-    arglist: &mut arglist,
-) {
+pub fn ifsbreakup(sh: &Shell, string: &mut [u8], maxargs: c_int, arglist: &mut arglist) {
     ifsbreakup_regions(
         sh,
         &sh.expand.ifs_regions,
@@ -3011,10 +2979,9 @@ fn expmeta(
                  * terminator is part of the candidate.  Appending it here
                  * says that, and `lstat` needs it anyway. */
                 b.push(0);
-                let exists = std::fs::symlink_metadata(OsStr::from_bytes(
-                    &b[..b.len() - 1],
-                ))
-                .is_ok();
+                let exists = b[..b.len() - 1]
+                    .try_to_path_buf()
+                    .is_ok_and(|path| nsh_platform::path_metadata(&path, false).is_ok());
                 if exists {
                     addfnamealt(state, b, expdir_len);
                 } else {
@@ -3045,11 +3012,14 @@ fn expmeta(
             }
 
             let directory = if expdir_len != 0 {
-                OsStr::from_bytes(&b[..expdir_len])
+                &b[..expdir_len]
             } else {
-                OsStr::new(".")
+                b"."
             };
-            let Ok(entries) = std::fs::read_dir(directory) else {
+            let Ok(directory) = directory.try_to_path_buf() else {
+                break 'out_opendir;
+            };
+            let Ok(entries) = nsh_platform::read_directory(&directory) else {
                 break 'out_opendir; /* goto out_opendir */
             };
             /* `p = strchrnul(p + 1, '/')` — the end of the component the
@@ -3089,14 +3059,11 @@ fn expmeta(
             /* `read_dir` intentionally omits `.` and `..`; `readdir`
              * included both, so put them back before the native entries. */
             let synthetic = [(b".".to_vec(), true), (b"..".to_vec(), true)];
-            let entries = synthetic.into_iter().chain(entries.filter_map(|entry| {
-                let entry = entry.ok()?;
-                let may_descend = entry
-                    .file_type()
-                    .map(|kind| kind.is_dir() || kind.is_symlink())
-                    .unwrap_or(true);
-                Some((entry.file_name().into_vec(), may_descend))
-            }));
+            let entries = synthetic.into_iter().chain(
+                entries
+                    .into_iter()
+                    .map(|entry| (entry.name.to_shell_bytes(), entry.may_descend)),
+            );
             for (mut dname, may_descend) in entries {
                 dname.push(0);
 
@@ -3373,7 +3340,10 @@ fn rmescapes_scan(s: &[u8]) -> Option<usize> {
 /// Apply `_rmescapes` to one owned, NUL-terminated byte buffer and return
 /// the resulting length without the terminator.
 fn rmescapes_buffer(bytes: &mut [u8], flag: c_int) -> usize {
-    let len = bytes.iter().position(|&byte| byte == 0).unwrap_or(bytes.len());
+    let len = bytes
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(bytes.len());
     let Some(at) = rmescapes_scan(&bytes[..len]) else {
         return len;
     };
@@ -3483,11 +3453,8 @@ fn casematch_inner(
     ifsfree(state);
     /* The C reads the word back as `stackblock()`. */
     rmescapes_buffer(expb(state), RMESCAPE_GLOB);
-    result = crate::pmatch::pmatch_slices(
-        &sh.locale,
-        crate::mystring::cstr_prefix(expb(state)),
-        val,
-    );
+    result =
+        crate::pmatch::pmatch_slices(&sh.locale, crate::mystring::cstr_prefix(expb(state)), val);
     Ok(result)
 }
 
@@ -3497,12 +3464,7 @@ fn casematch_inner(
 
 // [spec:dash:def:expand.cvtnum-fn]
 // [spec:dash:sem:expand.cvtnum-fn]
-fn cvtnum(
-    locale: &nsh_platform::Locale,
-    num: i64,
-    flags: c_int,
-    dst: &mut BString,
-) -> usize {
+fn cvtnum(locale: &nsh_platform::Locale, num: i64, flags: c_int, dst: &mut BString) -> usize {
     let value = format!("{num}");
     memtodest(locale, value.as_bytes(), flags, dst)
 }

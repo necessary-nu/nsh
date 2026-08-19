@@ -46,7 +46,12 @@ pub fn aliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     for word in &args[1..] {
         /* n + 1: funny ksh stuff (from 44lite) */
         let equals = (!word.is_empty())
-            .then(|| word[1..].iter().position(|&byte| byte == b'=').map(|at| at + 1))
+            .then(|| {
+                word[1..]
+                    .iter()
+                    .position(|&byte| byte == b'=')
+                    .map(|at| at + 1)
+            })
             .flatten();
         if word.is_empty() || equals.is_none() {
             if let Some(value) = lookup_alias(sh, word, false) {
@@ -61,7 +66,11 @@ pub fn aliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             }
         } else {
             let equals = equals.expect("the definition branch");
-            setalias(sh, BStr::new(&word[..equals]), BStr::new(&word[equals + 1..]))?;
+            setalias(
+                sh,
+                BStr::new(&word[..equals]),
+                BStr::new(&word[equals + 1..]),
+            )?;
         }
     }
 
@@ -96,11 +105,14 @@ mod tests {
         let mut owned = Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
         assert_eq!(
-            aliascmd(sh, &[
-                BStr::new("alias"),
-                BStr::new("nosuchalias"),
-                BStr::new("after=1"),
-            ])
+            aliascmd(
+                sh,
+                &[
+                    BStr::new("alias"),
+                    BStr::new("nosuchalias"),
+                    BStr::new("after=1"),
+                ]
+            )
             .unwrap(),
             Flow::Done(1)
         );

@@ -20,10 +20,8 @@ fn run(script: &[u8]) -> (Vec<u8>, i32) {
 fn dot_break_stays_in_dot_context() {
     let path = std::env::temp_dir().join(format!("nsh-dot-break-{}", std::process::id()));
     std::fs::write(&path, b"break\n").expect("write dot script");
-    let script = format!(
-        "for x in a b c; do echo $x; . {}; done",
-        path.display()
-    );
+    let shell_path = path.to_string_lossy().replace('\\', "/");
+    let script = format!("for x in a b c; do echo $x; . {shell_path}; done");
 
     let result = run(script.as_bytes());
     std::fs::remove_file(path).expect("remove dot script");

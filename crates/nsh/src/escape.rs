@@ -68,7 +68,6 @@ macro_rules! STADJUST {
     }};
 }
 
-
 /// `#define isodigit(c) ((c) >= '0' && (c) <= '7')`
 #[inline]
 pub(crate) fn isodigit(c: c_int) -> bool {
@@ -118,11 +117,7 @@ const CH_V: c_int = b'v' as c_int;
 /// `mboff` is -2 when `!mbchar`, so the framing bytes are deliberately
 /// overwritten by the payload -- ordinary arithmetic instead of pointer
 /// arithmetic that happens to stay in bounds.
-pub fn conv_escape(
-    input: &[u8],
-    out: &mut [u8; CONV_ESCAPE_SLOP],
-    mbchar: bool,
-) -> c_uint {
+pub fn conv_escape(input: &[u8], out: &mut [u8; CONV_ESCAPE_SLOP], mbchar: bool) -> c_uint {
     /* The C's `out`, as the offset it always was. */
     let mut o: usize = 0;
     let mut at: isize = 0;
@@ -348,9 +343,8 @@ pub fn conv_escape(
 pub(crate) fn conv_escape_str(input: &[u8], cp: &mut BString) -> c_int {
     let mut c: c_int;
     let mut at = 0usize;
-    let byte_at = |index: usize| -> c_int {
-        input.get(index).copied().unwrap_or(0) as c_char as c_int
-    };
+    let byte_at =
+        |index: usize| -> c_int { input.get(index).copied().unwrap_or(0) as c_char as c_int };
 
     /* convert string into a temporary buffer... */
     /* `STARTSTACKSTR(cp)` — the buffer is the caller's, and the C's `*sp =

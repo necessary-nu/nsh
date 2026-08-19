@@ -9,10 +9,10 @@
 
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::c_int;
+use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 use std::collections::BTreeMap;
-use std::ffi::{CStr, CString};
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::PermissionsExt;
+use std::ffi::{OsStr, OsString};
+use std::path::Path;
 
 use crate::builtins::{BUILTIN_REGULAR, builtincmd};
 use crate::error::{E_EXEC, Error, INTOFF, INTON};
@@ -41,8 +41,6 @@ pub const DO_NOFUNC: c_int = 0x04; /* don't return shell functions, for command 
 pub const DO_ALTPATH: c_int = 0x08; /* using alternate path */
 pub const DO_REGBLTIN: c_int = 0x10; /* regular built-ins and functions only */
 
-const _PATH_BSHELL: &[u8] = b"/bin/sh\0";
-
 // ---------------------------------------------------------------------
 // src/exec.h types
 // ---------------------------------------------------------------------
@@ -67,11 +65,15 @@ enum Command {
 
 impl cmdentry {
     pub(crate) fn unknown() -> Self {
-        Self { command: Command::Unknown }
+        Self {
+            command: Command::Unknown,
+        }
     }
 
     pub(crate) fn builtin_command(command: &'static builtincmd) -> Self {
-        Self { command: Command::Builtin(command) }
+        Self {
+            command: Command::Builtin(command),
+        }
     }
 
     pub(crate) fn cmdtype(&self) -> c_int {
@@ -257,10 +259,20 @@ pub fn shellexec(
     }
 
     /* The C's `environment()` leaves its array in the stack allocator; ours
-     * owns it, so the `Vec` has to outlive every `execve` below. */
-    let envv = crate::var::environment(sh);
-    let words: Vec<CString> = argv.iter().map(|word| crate::shell::cstring(word)).collect();
-    let arguments: Vec<&CStr> = words.iter().map(|word| word.as_c_str()).collect();
+     * owns native strings, so the `Vec` has to outlive every execution
+     * attempt below. */
+    let envv = match crate::var::environment(sh) {
+        Ok(environment) => environment,
+        Err(error) => return native_exec_failure(sh, command, &error),
+    };
+    let arguments: Vec<OsString> = match argv
+        .iter()
+        .map(|word| word.try_to_os_string())
+        .collect::<std::io::Result<_>>()
+    {
+        Ok(arguments) => arguments,
+        Err(error) => return native_exec_failure(sh, command, &error),
+    };
     if let Err(error) = sh.fds.materialize() {
         return exec_failure(
             sh,
@@ -270,17 +282,21 @@ pub fn shellexec(
                 .unwrap_or_else(nsh_platform::permission_denied_error_code),
         );
     }
-    if command.contains(&b'/') {
-        e = tryexec(arguments[0], &arguments, &envv);
+    if nsh_platform::shell_path_has_separator(command) {
+        let resolved = nsh_platform::resolve_command_path(Path::new(&arguments[0]), &envv);
+        e = tryexec(resolved.as_os_str(), &arguments, &envv);
     } else {
         let mut se: c_int = nsh_platform::not_found_error_code();
         let mut cursor = PathCursor::new(path);
         while let Some(candidate) = padvance(&mut cursor, command) {
             idx -= 1;
             if idx < 0 && candidate.option.is_none() {
-                let candidate = CStr::from_bytes_with_nul(&candidate.path)
-                    .expect("PATH candidates are terminated");
-                let candidate_error = tryexec(candidate, &arguments, &envv);
+                let candidate = match candidate.path[..candidate.path.len() - 1].try_to_path_buf() {
+                    Ok(candidate) => candidate,
+                    Err(error) => return native_exec_failure(sh, command, &error),
+                };
+                let candidate = nsh_platform::resolve_command_path(&candidate, &envv);
+                let candidate_error = tryexec(candidate.as_os_str(), &arguments, &envv);
                 if !nsh_platform::path_error_is(
                     candidate_error,
                     nsh_platform::PathErrorKind::NotFound,
@@ -293,6 +309,21 @@ pub fn shellexec(
     }
 
     exec_failure(sh, command, e)
+}
+
+fn native_exec_failure(
+    sh: &mut crate::context::Shell,
+    command: &BStr,
+    error: &std::io::Error,
+) -> Result<crate::eval::Flow, crate::error::Error> {
+    let status = 126;
+    sh.status = status;
+    let mut message = command.to_vec();
+    message.extend_from_slice(b": ");
+    message.extend_from_slice(sh.locale.error_message(error).as_bytes());
+    let diagnostic = crate::error::Error::other(sh.eval.errlinno, status, &message);
+    drop(sh.report(diagnostic));
+    Ok(crate::eval::Flow::END)
 }
 
 // [spec:posix:req:exit.status-command-not-found]
@@ -329,15 +360,14 @@ fn exec_failure(
 // [spec:dash:sem:exec.tryexec-fn]
 // [spec:posix:req:cmd.nonbuiltin-enoexec-script]
 // [spec:posix:req:cmd.nonbuiltin-slash-enoexec-script]
-fn tryexec(command: &CStr, arguments: &[&CStr], env: &[CString]) -> c_int {
+fn tryexec(command: &OsStr, arguments: &[OsString], env: &[(OsString, OsString)]) -> c_int {
     let error = nsh_platform::execute_program(command, &arguments, env);
-    if nsh_platform::is_exec_format_error(&error) && command.to_bytes_with_nul() != _PATH_BSHELL {
-        let shell = CStr::from_bytes_with_nul(_PATH_BSHELL)
-            .expect("the fallback shell path is terminated");
+    let shell = nsh_platform::fallback_shell();
+    if nsh_platform::is_exec_format_error(&error) && command != shell {
         let mut shell_arguments = Vec::with_capacity(arguments.len() + 1);
-        shell_arguments.push(shell);
-        shell_arguments.push(command);
-        shell_arguments.extend(arguments.iter().skip(1).copied());
+        shell_arguments.push(shell.to_os_string());
+        shell_arguments.push(command.to_os_string());
+        shell_arguments.extend(arguments.iter().skip(1).cloned());
         return nsh_platform::execute_program(shell, &shell_arguments, env)
             .raw_os_error()
             .unwrap_or(0);
@@ -389,8 +419,9 @@ impl<'a> PathCursor<'a> {
     // [spec:dash:sem:exec.padvance-magic-fn]
     pub fn advance(&mut self, name: &BStr) -> Option<PathAdvance> {
         let rest = self.remaining.take()?;
-        let (component, remaining) = match rest.find_byte(b':') {
-            Some(colon) => (&rest[..colon], Some(&rest[colon + 1..])),
+        let separator = nsh_platform::search_path_separator();
+        let (component, remaining) = match rest.find_byte(separator) {
+            Some(at) => (&rest[..at], Some(&rest[at + 1..])),
             None => (rest, None),
         };
         self.remaining = remaining;
@@ -422,7 +453,7 @@ impl<'a> PathCursor<'a> {
         let mut path = BString::new(Vec::with_capacity(allocation_len));
         if !directory.is_empty() {
             path.extend_from_slice(directory);
-            path.push(b'/');
+            path.push(nsh_platform::shell_directory_separator());
         }
         path.extend_from_slice(name);
         path.push(0);
@@ -457,15 +488,15 @@ pub fn padvance(cursor: &mut PathCursor<'_>, name: &BStr) -> Option<PathAdvance>
 
 // [spec:dash:def:exec.test-exec-fn]
 // [spec:dash:sem:exec.test-exec-fn]
-fn test_exec(fullname: &std::ffi::OsStr, metadata: &std::fs::Metadata) -> bool {
-    if !metadata.is_file() {
+fn test_exec(fullname: &[u8], metadata: &nsh_platform::FileMetadata) -> bool {
+    if metadata.kind != nsh_platform::FileKind::Regular {
         return false;
     }
 
-    if (metadata.permissions().mode() & 0o111) != 0o111 &&
+    if (metadata.mode & 0o111) != 0o111 &&
         /* HAVE_FACCESSAT; the non-faccessat build uses test_access(statb, X_OK) */
         !crate::builtins::test::test_file_access(
-            fullname.as_bytes().as_bstr(),
+            fullname.as_bstr(),
             nsh_platform::AccessMode::EXEC_OK,
         )
     {
@@ -503,11 +534,17 @@ pub fn find_command(
     sh.commands.ensure_dispatch(dialect);
 
     /* If name contains a slash, don't use PATH or hash table */
-    if name.contains(&b'/') {
+    if nsh_platform::shell_path_has_separator(name) {
         if (act & DO_ABS) != 0 {
-            let fullname = std::ffi::OsStr::from_bytes(name);
-            let executable = std::fs::metadata(fullname)
-                .is_ok_and(|metadata| test_exec(fullname, &metadata));
+            let environment = crate::var::environment(sh)
+                .map_err(|error| native_string_error(sh, name, &error))?;
+            let native = name
+                .try_to_path_buf()
+                .map_err(|error| native_string_error(sh, name, &error))?;
+            let resolved = nsh_platform::resolve_command_path(&native, &environment);
+            let resolved_bytes = resolved.to_shell_bytes();
+            let executable = nsh_platform::path_metadata(&resolved, true)
+                .is_ok_and(|metadata| test_exec(&resolved_bytes, &metadata));
             if !executable {
                 *entry = cmdentry::unknown();
                 return Ok(crate::eval::Flow::Done(0));
@@ -533,7 +570,11 @@ pub fn find_command(
         let bit = match command {
             Command::Function(_) => DO_NOFUNC,
             Command::Builtin(command) => {
-                if (command.flags & BUILTIN_REGULAR) != 0 { 0 } else { DO_REGBLTIN }
+                if (command.flags & BUILTIN_REGULAR) != 0 {
+                    0
+                } else {
+                    DO_REGBLTIN
+                }
             }
             _ => DO_ALTPATH | DO_REGBLTIN,
         };
@@ -568,13 +609,17 @@ pub fn find_command(
         return Ok(crate::eval::Flow::Done(0));
     }
 
-    let previous = cached.as_ref().filter(|(_, rehash)| *rehash).map_or(-1, |(command, _)| {
-        match command {
+    let environment =
+        crate::var::environment(sh).map_err(|error| native_string_error(sh, name, &error))?;
+
+    let previous = cached
+        .as_ref()
+        .filter(|(_, rehash)| *rehash)
+        .map_or(-1, |(command, _)| match command {
             Command::Builtin(_) => sh.commands.builtinloc,
             Command::Normal(index) => *index,
             _ => -1,
-        }
-    });
+        });
     let mut error = nsh_platform::not_found_error_code();
     let mut index = -1;
     let mut cursor = PathCursor::new(path);
@@ -597,7 +642,7 @@ pub fn find_command(
         }
 
         let fullname = crate::mystring::cstr_prefix(&candidate.path).to_owned();
-        if fullname.first() == Some(&b'/') && index <= previous {
+        if nsh_platform::shell_path_is_absolute(&fullname) && index <= previous {
             if index < previous {
                 continue;
             }
@@ -610,15 +655,16 @@ pub fn find_command(
             }
         }
 
-        let fullname_os = std::ffi::OsStr::from_bytes(&fullname);
-        let metadata = match std::fs::metadata(fullname_os) {
+        let native = fullname.try_to_path_buf().map_err(|io_error| {
+            native_string_error(sh, BStr::new(fullname.as_slice()), &io_error)
+        })?;
+        let resolved = nsh_platform::resolve_command_path(&native, &environment);
+        let resolved_bytes = resolved.to_shell_bytes();
+        let metadata = match nsh_platform::path_metadata(&resolved, true) {
             Ok(metadata) => metadata,
             Err(io_error) => {
                 if let Some(code) = io_error.raw_os_error()
-                    && !nsh_platform::path_error_is(
-                        code,
-                        nsh_platform::PathErrorKind::NotFound,
-                    )
+                    && !nsh_platform::path_error_is(code, nsh_platform::PathErrorKind::NotFound)
                 {
                     error = code;
                 }
@@ -649,7 +695,7 @@ pub fn find_command(
         }
 
         error = nsh_platform::permission_denied_error_code();
-        if !test_exec(fullname_os, &metadata) {
+        if !test_exec(&resolved_bytes, &metadata) {
             continue;
         }
         if update_table {
@@ -670,6 +716,17 @@ pub fn find_command(
     }
     *entry = cmdentry::unknown();
     Ok(crate::eval::Flow::Done(0))
+}
+
+fn native_string_error(
+    sh: &mut crate::context::Shell,
+    subject: &BStr,
+    error: &std::io::Error,
+) -> Error {
+    let mut message = subject.to_vec();
+    message.extend_from_slice(b": ");
+    message.extend_from_slice(sh.locale.error_message(error).as_bytes());
+    sh.sh_error_value(&message)
 }
 
 /*
@@ -720,7 +777,7 @@ pub fn hashcd(sh: &mut crate::context::Shell) {
 // [spec:dash:sem:exec.changepath-fn]
 pub fn changepath(sh: &mut crate::context::Shell, newval: &BStr) {
     let bltin = newval
-        .split(|&byte| byte == b':')
+        .split(|&byte| byte == nsh_platform::search_path_separator())
         .position(|component| component.starts_with(b"%builtin"))
         .map_or(-1, |index| index as c_int);
     sh.commands.builtinloc = bltin;
@@ -737,7 +794,9 @@ pub fn changepath(sh: &mut crate::context::Shell, newval: &BStr) {
 pub(crate) fn clearcmdentry(sh: &mut crate::context::Shell) {
     INTOFF(sh);
     let builtinloc = sh.commands.builtinloc;
-    sh.commands.map.retain(|_, cmdp| !cmdp.path_dependent(builtinloc));
+    sh.commands
+        .map
+        .retain(|_, cmdp| !cmdp.path_dependent(builtinloc));
     INTON(sh);
 }
 
@@ -755,12 +814,15 @@ pub(crate) fn cmdlookup<'a>(
     add: bool,
 ) -> Option<&'a mut tblentry> {
     if add {
-        Some(sh.commands.map.entry(name.to_owned()).or_insert_with(|| {
-            tblentry {
-                command: Command::Unknown,
-                rehash: false,
-            }
-        }))
+        Some(
+            sh.commands
+                .map
+                .entry(name.to_owned())
+                .or_insert_with(|| tblentry {
+                    command: Command::Unknown,
+                    rehash: false,
+                }),
+        )
     } else {
         sh.commands.map.get_mut(name)
     }
@@ -852,13 +914,17 @@ mod tests {
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
 
-        changepath(sh, BStr::new(b"/bin:%builtin:/usr/bin"));
+        let separator = [nsh_platform::search_path_separator()];
+        let first = [b"/bin".as_slice(), b"%builtin", b"/usr/bin"].join(separator.as_slice());
+        changepath(sh, BStr::new(&first));
         assert_eq!(sh.commands.builtinloc, 1);
 
-        changepath(sh, BStr::new(b"%builtin:/bin"));
+        let second = [b"%builtin".as_slice(), b"/bin"].join(separator.as_slice());
+        changepath(sh, BStr::new(&second));
         assert_eq!(sh.commands.builtinloc, 0);
 
-        changepath(sh, BStr::new(b"/bin:/usr/bin"));
+        let third = [b"/bin".as_slice(), b"/usr/bin"].join(separator.as_slice());
+        changepath(sh, BStr::new(&third));
         assert_eq!(sh.commands.builtinloc, -1, "no %builtin is -1, not 0");
     }
 
@@ -887,8 +953,14 @@ mod tests {
 
         clearcmdentry(sh);
 
-        assert!(sh.commands.get(external).is_none(), "an external command does not survive a PATH change");
-        assert!(sh.commands.get(unknown).is_some(), "an entry naming nothing has nothing to invalidate");
+        assert!(
+            sh.commands.get(external).is_none(),
+            "an external command does not survive a PATH change"
+        );
+        assert!(
+            sh.commands.get(unknown).is_some(),
+            "an entry naming nothing has nothing to invalidate"
+        );
     }
 
     // [spec:dash:sem:exec.find-builtin-fn/test]

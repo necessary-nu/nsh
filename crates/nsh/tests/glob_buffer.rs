@@ -30,7 +30,7 @@ use std::path::PathBuf;
 
 use nsh::streams::Streams;
 
-fn read_all(fd: &std::os::fd::OwnedFd) -> Vec<u8> {
+fn read_all(fd: &nsh_platform::Descriptor) -> Vec<u8> {
     nsh_platform::read_to_end(fd).expect("read pipe")
 }
 
@@ -40,16 +40,16 @@ fn out_of(script: &str) -> Vec<u8> {
     let (r, w) = nsh_platform::pipe().expect("create pipe");
     let argv: Vec<Vec<u8>> = vec![b"sh".to_vec(), b"-c".to_vec(), script.as_bytes().to_vec()];
     nsh_platform::run_in_child(move || {
-            let supplied = Streams::from_fds(std::io::stdin(), &w, std::io::stderr())
-                .expect("duplicate streams");
-            /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
-               ending the process the caller's act — so this fork's child
-               has to end itself. Returning would carry it back into the
-               test harness after the fork. */
-            let status = nsh::shellmain::main_fn(argv, supplied);
-            nsh_platform::exit_immediately(status.code().into());
-        })
-        .expect("run shell child");
+        let supplied =
+            Streams::from_fds(std::io::stdin(), &w, std::io::stderr()).expect("duplicate streams");
+        /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
+        ending the process the caller's act — so this fork's child
+        has to end itself. Returning would carry it back into the
+        test harness after the fork. */
+        let status = nsh::shellmain::main_fn(argv, supplied);
+        nsh_platform::exit_immediately(status.code().into());
+    })
+    .expect("run shell child");
     read_all(&r)
 }
 
@@ -70,6 +70,10 @@ fn mkdirs(base: &PathBuf, rel: &str) {
 
 fn touch(base: &PathBuf, rel: &str) {
     std::fs::File::create(base.join(rel)).expect("create file");
+}
+
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
 }
 
 /// The append starts from this frame's prefix, not from the end of the
@@ -97,7 +101,10 @@ fn an_append_after_a_recursion_starts_from_the_parents_prefix() {
         }
     }
     let dir = base.display();
-    let out = out_of(&format!("echo {dir}/d*/e*/leaf"));
+    let quoted = shell_quote(&base.to_string_lossy());
+    let out = out_of(&format!(
+        "set -- {quoted}/d*/e*/leaf; printf '%s\\n' \"$*\""
+    ));
 
     let mut want = String::new();
     for one in ["a", "b"] {
@@ -136,7 +143,8 @@ fn a_kept_candidate_leaves_exactly_the_prefix_behind() {
         touch(&base, &format!("g{pad}/h{pad}/{n}"));
     }
     let dir = base.display();
-    let out = out_of(&format!("echo {dir}/g*/h*/f*"));
+    let quoted = shell_quote(&base.to_string_lossy());
+    let out = out_of(&format!("set -- {quoted}/g*/h*/f*; printf '%s\\n' \"$*\""));
 
     let want = names
         .iter()
@@ -168,6 +176,9 @@ fn a_kept_candidate_leaves_exactly_the_prefix_behind() {
 /// have to be told, and no longer does.
 #[test]
 fn a_literal_tail_after_the_metacharacter() {
+    if !nsh_platform::supports_glob_metacharacters_in_filenames() {
+        return;
+    }
     let base = fixture("reservation");
     let pad = "x".repeat(200);
     mkdirs(&base, &format!("m{pad}/n*n/o{pad}"));
@@ -175,16 +186,21 @@ fn a_literal_tail_after_the_metacharacter() {
     mkdirs(&base, &format!("m{pad}/s{pad}"));
     touch(&base, &format!("m{pad}/s{pad}/t{pad}"));
     let dir = base.display();
+    let quoted = shell_quote(&base.to_string_lossy());
 
     // Nothing escaped, so `expmeta_rmescapes` appends `name_len` bytes and
     // the caller adds the NUL that `lstat` needs.
-    let out = out_of(&format!("echo {dir}/m*/s{pad}/t{pad}"));
+    let out = out_of(&format!(
+        "set -- {quoted}/m*/s{pad}/t{pad}; printf '%s\\n' \"$*\""
+    ));
     assert_eq!(
         String::from_utf8_lossy(&out),
         format!("{dir}/m{pad}/s{pad}/t{pad}\n")
     );
 
-    let out = out_of(&format!("echo {dir}/m*/n\\*n/o{pad}/p{pad}"));
+    let out = out_of(&format!(
+        "set -- {quoted}/m*/n\\*n/o{pad}/p{pad}; printf '%s\\n' \"$*\""
+    ));
     assert_eq!(
         String::from_utf8_lossy(&out),
         format!("{dir}/m{pad}/n*n/o{pad}/p{pad}\n")
@@ -192,7 +208,9 @@ fn a_literal_tail_after_the_metacharacter() {
 
     // Same tail, reached through a metacharacter in the last component, so
     // the loop's `stnputs` rather than `expmeta_rmescapes` writes it.
-    let out = out_of(&format!("echo {dir}/m*/n\\*n/o*/p*"));
+    let out = out_of(&format!(
+        "set -- {quoted}/m*/n\\*n/o*/p*; printf '%s\\n' \"$*\""
+    ));
     assert_eq!(
         String::from_utf8_lossy(&out),
         format!("{dir}/m{pad}/n*n/o{pad}/p{pad}\n")
@@ -200,7 +218,9 @@ fn a_literal_tail_after_the_metacharacter() {
 
     // A pattern that matches nothing is echoed verbatim, with the escape
     // removed by `rmescapes` rather than by the glob.
-    let out = out_of(&format!("echo {dir}/m*/n\\*n/o{pad}/q{pad}"));
+    let out = out_of(&format!(
+        "set -- {quoted}/m*/n\\*n/o{pad}/q{pad}; printf '%s\\n' \"$*\""
+    ));
     assert_eq!(
         String::from_utf8_lossy(&out),
         format!("{dir}/m*/n*n/o{pad}/q{pad}\n")
@@ -233,7 +253,10 @@ fn a_rejected_tail_rewinds_the_buffer() {
         }
     }
     let dir = base.display();
-    let out = out_of(&format!("echo {dir}/k*/leaf{pad}"));
+    let quoted = shell_quote(&base.to_string_lossy());
+    let out = out_of(&format!(
+        "set -- {quoted}/k*/leaf{pad}; printf '%s\\n' \"$*\""
+    ));
 
     let want = dirs
         .iter()

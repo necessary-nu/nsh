@@ -52,6 +52,10 @@
 // [spec:posix:req:edit.yank-motion]
 
 use bstr::BStr;
+use nsh_platform::{
+    EditorTerminalAttributes as TerminalAttributes, NativeStrExt as _, ShellBytesExt as _,
+    TerminalControlCharacter as ControlCharacter,
+};
 use nshedit::domain::{
     Action, ArgumentCommand, Binding, CommandName, CommandSequence, Direction, EditTarget,
     EditingMode, EditorConfig, EffectCommand, HistorySearchCommand, HistorySearchRepetition,
@@ -68,17 +72,10 @@ use nshedit::editor::{
     TerminalControl, TerminalProfile, Tokenizer,
 };
 use nshedit::history::HistoryCursor;
-use nshedit_plat::terminal::{ControlCharacter, TerminalAttributes};
 use std::error::Error as StdError;
-use std::ffi::{OsStr, OsString};
 use std::fmt;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{self, Read, Seek, Write};
-use std::os::fd::{AsFd, BorrowedFd};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::path::PathBuf;
-use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 mod terminal;
@@ -188,28 +185,18 @@ impl LineEditor {
     ///
     pub fn new(
         locale: &nsh_platform::Locale,
-        input_fd: impl AsFd,
-        output_fd: impl AsFd,
+        input_fd: &impl nsh_platform::AsDescriptor,
+        output_fd: &impl nsh_platform::AsDescriptor,
         mode: EditingMode,
     ) -> Result<Self, LineEditorError> {
-        let input = File::from(nsh_platform::duplicate_cloexec(
-            &input_fd,
-            crate::fd::SLOT_COUNT as i32,
-        )?);
-        let output = File::from(nsh_platform::duplicate_cloexec(
-            &output_fd,
-            crate::fd::SLOT_COUNT as i32,
-        )?);
+        let input =
+            nsh_platform::duplicate_cloexec(input_fd, crate::fd::SLOT_COUNT as i32)?.into_file();
+        let output =
+            nsh_platform::duplicate_cloexec(output_fd, crate::fd::SLOT_COUNT as i32)?.into_file();
         let terminal_snapshots = Arc::new(Mutex::new(TerminalSnapshots::default()));
         let terminal = OwnedTerminal::new(
-            File::from(nsh_platform::duplicate_cloexec(
-                &input,
-                crate::fd::SLOT_COUNT as i32,
-            )?),
-            File::from(nsh_platform::duplicate_cloexec(
-                &output,
-                crate::fd::SLOT_COUNT as i32,
-            )?),
+            nsh_platform::duplicate_cloexec(&input, crate::fd::SLOT_COUNT as i32)?.into_file(),
+            nsh_platform::duplicate_cloexec(&output, crate::fd::SLOT_COUNT as i32)?.into_file(),
             locale.clone(),
             terminal_snapshots.clone(),
         );
@@ -217,7 +204,7 @@ impl LineEditor {
             .with_editing_mode(mode)
             .with_signal_policy(SignalPolicy::Ignore);
         let mut editor = Editor::new(config, terminal)?;
-        let size = OwnedTerminal::screen_size(output.as_fd())
+        let size = OwnedTerminal::screen_size(&output)
             .unwrap_or_else(|_| ScreenSize::new(24, 80).expect("the fallback screen is valid"));
         editor.configure_display(default_terminal_profile(), size);
         let terminal_attributes = terminal_snapshots
@@ -251,7 +238,7 @@ impl LineEditor {
         if self.editor_mut().terminal_mode() != TerminalMode::Cooked {
             return Ok(());
         }
-        let Ok(attributes) = nshedit_plat::terminal::read_attributes(self.input.as_fd()) else {
+        let Ok(attributes) = nsh_platform::editor_terminal_attributes(&self.input) else {
             return Ok(());
         };
 
@@ -343,7 +330,7 @@ impl LineEditor {
                     driver.resume_prompt(editor, &pending, Ok(prompt))?
                 }
                 ReadStep::Resize(pending) => {
-                    let response = OwnedTerminal::screen_size(self.output_borrowed())
+                    let response = OwnedTerminal::screen_size(&self.output)
                         .map_err(|_| HostFailure::Unavailable);
                     let (editor, driver) = self.editor_and_driver();
                     driver.resume_resize(editor, &pending, response)?
@@ -385,10 +372,8 @@ impl LineEditor {
                             HistoryResponse::entry(line)
                         };
                     }
-                    let copied_history_line = !matches!(
-                        response.selection(),
-                        HistorySelection::Unchanged
-                    );
+                    let copied_history_line =
+                        !matches!(response.selection(), HistorySelection::Unchanged);
                     let next = {
                         let (editor, driver) = self.editor_and_driver();
                         driver.resume_history(editor, &pending, Ok(response))?
@@ -410,16 +395,17 @@ impl LineEditor {
                                 Direction::Previous => Text::from("\n/"),
                                 Direction::Next => Text::from("\n?"),
                             };
-                            self.read_host_text(&sh.locale, &prompt, true).and_then(|pattern| {
-                                if pattern.is_empty() {
-                                    self.last_history_pattern
-                                        .clone()
-                                        .ok_or(HostFailure::Cancelled)
-                                } else {
-                                    self.last_history_pattern = Some(pattern.clone());
-                                    Ok(pattern)
-                                }
-                            })
+                            self.read_host_text(&sh.locale, &prompt, true)
+                                .and_then(|pattern| {
+                                    if pattern.is_empty() {
+                                        self.last_history_pattern
+                                            .clone()
+                                            .ok_or(HostFailure::Cancelled)
+                                    } else {
+                                        self.last_history_pattern = Some(pattern.clone());
+                                        Ok(pattern)
+                                    }
+                                })
                         }
                         HistorySearchInput::Incremental(_) => {
                             let prompt = match direction {
@@ -439,10 +425,8 @@ impl LineEditor {
                                 direction,
                                 matching,
                             );
-                            copied_history_line = !matches!(
-                                selection.selection(),
-                                HistorySelection::Unchanged
-                            );
+                            copied_history_line =
+                                !matches!(selection.selection(), HistorySelection::Unchanged);
                             if matches!(selection.selection(), HistorySelection::Unchanged)
                                 && let Some(line) = live_line
                             {
@@ -474,10 +458,8 @@ impl LineEditor {
                 ReadStep::HistoryLine(pending) => {
                     let response = history
                         .select_editor_line(&mut self.history_cursor, pending.request().position());
-                    let copied_history_line = !matches!(
-                        response.selection(),
-                        HistorySelection::Unchanged
-                    );
+                    let copied_history_line =
+                        !matches!(response.selection(), HistorySelection::Unchanged);
                     let next = {
                         let (editor, driver) = self.editor_and_driver();
                         driver.resume_history_line(editor, &pending, Ok(response))?
@@ -522,11 +504,9 @@ impl LineEditor {
                     let response = match pending.request().name.as_str() {
                         DISPLAY_EXPANSIONS => self.display_expansions(),
                         EXPAND_ALL => self.expand_all(),
-                        name => shell_user_command(
-                            self.editor_mut(),
-                            name,
-                            vi_original_line.as_ref(),
-                        ),
+                        name => {
+                            shell_user_command(self.editor_mut(), name, vi_original_line.as_ref())
+                        }
                     };
                     let (editor, driver) = self.editor_and_driver();
                     driver.resume_user_command(editor, &pending, response)?
@@ -565,12 +545,11 @@ impl LineEditor {
         purpose: ReadEffect,
     ) -> Result<ReadOutcome, HostFailure> {
         if let ReadEffect::KeySequence { deadline } = purpose {
-            match nshedit_plat::terminal::wait_for_input(self.input.as_fd(), deadline.remaining())
-            {
+            match nsh_platform::wait_for_terminal_input(&self.input, deadline.remaining()) {
                 Ok(true) => {}
                 Ok(false) => return Ok(ReadOutcome::TimedOut),
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => {
-                    return Err(HostFailure::Interrupted)
+                    return Err(HostFailure::Interrupted);
                 }
                 Err(error) => {
                     return Err(HostFailure::Failed(
@@ -601,9 +580,7 @@ impl LineEditor {
         self.output
             .write_all(&text_to_bytes(prompt).map_err(host_failure)?)
             .and_then(|()| self.output.flush())
-            .map_err(|error| {
-                HostFailure::Failed(locale.error_message(&error).into_boxed_str())
-            })?;
+            .map_err(|error| HostFailure::Failed(locale.error_message(&error).into_boxed_str()))?;
         let mut bytes = Vec::new();
         loop {
             let mut byte = [0];
@@ -621,22 +598,18 @@ impl LineEditor {
             }
             match byte[0] {
                 b'\r' | b'\n' => {
-                    self.output
-                        .write_all(b"\n")
-                        .map_err(|error| {
-                            HostFailure::Failed(locale.error_message(&error).into_boxed_str())
-                        })?;
+                    self.output.write_all(b"\n").map_err(|error| {
+                        HostFailure::Failed(locale.error_message(&error).into_boxed_str())
+                    })?;
                     return Ok(text_from_bytes(&bytes));
                 }
                 0x1b if cancel_on_escape => return Err(HostFailure::Cancelled),
                 0x07 => return Err(HostFailure::Cancelled),
                 0x08 | 0x7f => {
                     if bytes.pop().is_some() {
-                        self.output
-                            .write_all(b"\x08 \x08")
-                            .map_err(|error| {
-                                HostFailure::Failed(locale.error_message(&error).into_boxed_str())
-                            })?;
+                        self.output.write_all(b"\x08 \x08").map_err(|error| {
+                            HostFailure::Failed(locale.error_message(&error).into_boxed_str())
+                        })?;
                     }
                 }
                 byte if bytes.len() == 4096 => {
@@ -645,11 +618,9 @@ impl LineEditor {
                 }
                 byte => {
                     bytes.push(byte);
-                    self.output
-                        .write_all(&[byte])
-                        .map_err(|error| {
-                            HostFailure::Failed(locale.error_message(&error).into_boxed_str())
-                        })?;
+                    self.output.write_all(&[byte]).map_err(|error| {
+                        HostFailure::Failed(locale.error_message(&error).into_boxed_str())
+                    })?;
                 }
             }
         }
@@ -660,16 +631,8 @@ impl LineEditor {
         sh: &mut crate::context::Shell,
         line: &Text,
     ) -> Result<Text, HostFailure> {
-        static NEXT_EDIT_FILE: AtomicU64 = AtomicU64::new(0);
-        let serial = NEXT_EDIT_FILE.fetch_add(1, Ordering::Relaxed);
-        let mut path = std::env::temp_dir();
-        path.push(format!("nsh-edit-{}-{serial}.tmp", std::process::id()));
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|error| {
+        let (mut file, path) =
+            nsh_platform::create_temporary_file("nsh-edit").map_err(|error| {
                 HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
             })?;
         let result = (|| {
@@ -680,16 +643,15 @@ impl LineEditor {
                     HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
                 })?;
             let editor = shell_editor(sh);
-            Command::new(editor)
-                .arg(&path)
-                .status()
-                .map_err(|error| {
-                    HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
-                })?;
-            file.rewind()
-                .map_err(|error| {
-                    HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
-                })?;
+            let editor = editor.try_to_os_string().map_err(|error| {
+                HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
+            })?;
+            nsh_platform::run_editor(&editor, &path).map_err(|error| {
+                HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
+            })?;
+            file.rewind().map_err(|error| {
+                HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
+            })?;
             let mut edited = Vec::new();
             file.read_to_end(&mut edited).map_err(|error| {
                 HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
@@ -700,7 +662,7 @@ impl LineEditor {
             Ok(text_from_bytes(&edited))
         })();
         drop(file);
-        let _ = std::fs::remove_file(path);
+        let _ = nsh_platform::remove_file(&path);
         result
     }
 
@@ -735,9 +697,10 @@ impl LineEditor {
             self.output
                 .write_all(&text_to_bytes(candidate.display()).map_err(host_failure)?)
                 .map_err(host_failure)?;
-            if candidate.suffix().is_some_and(|suffix| {
-                suffix.as_units() == [TextUnit::Scalar('/')]
-            }) {
+            if candidate
+                .suffix()
+                .is_some_and(|suffix| suffix.as_units() == [TextUnit::Scalar('/')])
+            {
                 self.output.write_all(b"/").map_err(host_failure)?;
             }
             self.output.write_all(b"\r\n").map_err(host_failure)?;
@@ -827,12 +790,8 @@ impl LineEditor {
         );
     }
 
-    fn output_borrowed(&self) -> BorrowedFd<'_> {
-        self.output.as_fd()
-    }
-
     fn screen_size(&self) -> ScreenSize {
-        OwnedTerminal::screen_size(self.output_borrowed())
+        OwnedTerminal::screen_size(&self.output)
             .unwrap_or_else(|_| ScreenSize::new(24, 80).expect("the fallback screen is valid"))
     }
 
@@ -857,8 +816,7 @@ impl Drop for LineEditor {
 }
 
 fn default_terminal_profile() -> TerminalProfile {
-    std::env::var("TERM")
-        .ok()
+    nsh_platform::environment_text("TERM")
         .and_then(|name| nshterm::TermInfo::from_name(&name).ok())
         .map(|entry| TerminalProfile::from_terminfo(&entry))
         .unwrap_or_else(TerminalProfile::ansi)
@@ -868,8 +826,7 @@ fn default_terminal_profile() -> TerminalProfile {
 /// baseline editor. Explicit `vi` or `emacs` selection may still request the
 /// editor on a less capable terminal; this gate governs automatic activation.
 pub(crate) fn declared_terminal_supports_line_editing() -> bool {
-    std::env::var("TERM")
-        .ok()
+    nsh_platform::environment_text("TERM")
         .and_then(|name| nshterm::TermInfo::from_name(&name).ok())
         .is_some_and(|entry| terminfo_supports_line_editing(&entry))
 }
@@ -998,8 +955,7 @@ fn install_shell_bindings<T: TerminalControl>(
         (
             "=",
             Binding::User(
-                CommandName::new(DISPLAY_EXPANSIONS)
-                    .expect("static shell command name is valid"),
+                CommandName::new(DISPLAY_EXPANSIONS).expect("static shell command name is valid"),
             ),
         ),
         (
@@ -1028,8 +984,7 @@ fn install_shell_bindings<T: TerminalControl>(
         (
             "U",
             Binding::User(
-                CommandName::new(UNDO_ALL_CHANGES)
-                    .expect("static shell command name is valid"),
+                CommandName::new(UNDO_ALL_CHANGES).expect("static shell command name is valid"),
             ),
         ),
         (
@@ -1192,7 +1147,11 @@ fn refresh_shell_bindings<T: TerminalControl>(
 }
 
 // [spec:posix:req:edit.command-alias-insert]
-fn shell_alias(sh: &mut crate::context::Shell, name: &Text, enter_insert: bool) -> Result<AliasResponse, HostFailure> {
+fn shell_alias(
+    sh: &mut crate::context::Shell,
+    name: &Text,
+    enter_insert: bool,
+) -> Result<AliasResponse, HostFailure> {
     let name = text_to_bytes(name).map_err(host_failure)?;
     if name.contains(&0) {
         return Err(HostFailure::Failed(
@@ -1379,44 +1338,36 @@ fn completion_candidates(
     completion_candidates_for_stem(query.stem())
 }
 
-fn completion_candidates_for_stem(
-    stem: &Text,
-) -> nshedit::editor::CompletionCandidates {
+fn completion_candidates_for_stem(stem: &Text) -> nshedit::editor::CompletionCandidates {
     let Ok(stem) = text_to_bytes(stem) else {
         return Vec::new().into();
     };
-    let split = stem
-        .iter()
-        .rposition(|byte| *byte == b'/')
+    let split = nsh_platform::shell_path_last_separator(&stem)
         .map_or((b"".as_slice(), stem.as_slice()), |position| {
             (&stem[..=position], &stem[position + 1..])
         });
     let (prefix, basename) = split;
     let directory = if prefix.is_empty() {
-        PathBuf::from(".")
-    } else if prefix == b"/" {
-        PathBuf::from("/")
+        b".".as_slice()
     } else {
-        PathBuf::from(OsStr::from_bytes(&prefix[..prefix.len() - 1]))
+        prefix
     };
-    let Ok(entries) = std::fs::read_dir(directory) else {
+    let Ok(directory) = directory.try_to_path_buf() else {
+        return Vec::new().into();
+    };
+    let Ok(entries) = nsh_platform::read_directory(&directory) else {
         return Vec::new().into();
     };
     let mut candidates = entries
-        .filter_map(Result::ok)
+        .into_iter()
         .filter_map(|entry| {
-            let name = entry.file_name();
-            let name = name.as_bytes();
+            let name = entry.name.to_shell_bytes();
             if !name.starts_with(basename) {
                 return None;
             }
             let mut insertion = prefix.to_vec();
-            insertion.extend_from_slice(name);
-            let suffix = entry
-                .file_type()
-                .ok()
-                .filter(|kind| kind.is_dir())
-                .map_or(" ", |_| "/");
+            insertion.extend_from_slice(&name);
+            let suffix = if entry.is_directory { "/" } else { " " };
             Some(CompletionCandidate::new(text_from_bytes(&insertion)).with_suffix(suffix))
         })
         .collect::<Vec<_>>();
@@ -1435,20 +1386,21 @@ fn all_completion_insertions(candidates: &nshedit::editor::CompletionCandidates)
     expansion
 }
 
-fn shell_editor(sh: &mut crate::context::Shell) -> OsString {
+fn shell_editor(sh: &mut crate::context::Shell) -> Vec<u8> {
     for name in [b"EDITOR".as_slice(), b"VISUAL".as_slice()] {
         if let Some(value) = crate::var::lookup_bytes(sh, BStr::new(name)) {
             if !value.is_empty() {
-                return OsString::from_vec(value.into());
+                return value.into();
             }
         }
     }
-    OsString::from("vi")
+    b"vi".to_vec()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     #[test]
     fn baseline_requires_redisplay_capabilities() {
@@ -1510,7 +1462,7 @@ mod tests {
         std::fs::create_dir(directory.join("alpha-directory")).unwrap();
         std::fs::write(directory.join("beta"), []).unwrap();
 
-        let mut stem = directory.as_os_str().as_bytes().to_vec();
+        let mut stem = directory.to_shell_bytes();
         stem.extend_from_slice(b"/alpha");
         let candidates = completion_candidates_for_stem(&text_from_bytes(&stem));
         assert_eq!(candidates.len(), 2);

@@ -100,8 +100,8 @@ pub use crate::streams::Streams;
 // The receiver every function that touches shell state is being given,
 // ahead of the state itself moving onto it. [dec:nsh:no-ambient-state].
 pub(crate) mod builder;
-pub(crate) mod host;
 pub(crate) mod context;
+pub(crate) mod host;
 pub(crate) mod source;
 
 // ---- foundation -----------------------------------------------------

@@ -10,8 +10,7 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::c_int;
-use std::ffi::OsStr;
-use std::os::unix::ffi::OsStrExt;
+use nsh_platform::ShellBytesExt as _;
 
 use crate::eval::Flow;
 use crate::exec::PathCursor;
@@ -29,21 +28,23 @@ fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Option<BStr
      * readable regular file. Classifying a missing explicit operand here
      * keeps `.`'s own diagnostic/status contract instead of leaking the
      * input subsystem's generic open failure. */
-    if basename.contains(&b'/') {
-        let path = OsStr::from_bytes(basename);
-        let regular_file = std::fs::metadata(path)
-            .is_ok_and(|metadata| metadata.is_file());
-        let readable = nsh_platform::effective_access(path, nsh_platform::AccessMode::READ_OK);
+    if nsh_platform::shell_path_has_separator(basename) {
+        let Ok(path) = basename.try_to_path_buf() else {
+            return None;
+        };
+        let regular_file = nsh_platform::path_is_file(&path);
+        let readable = nsh_platform::effective_access(&path, nsh_platform::AccessMode::READ_OK);
         return (regular_file && readable).then(|| basename.to_owned());
     }
 
     let mut path = PathCursor::new(path_value.as_slice().as_bstr());
     while let Some(candidate) = crate::exec::padvance(&mut path, basename) {
         let fullname = crate::mystring::cstr_prefix(&candidate.path);
-        let path = OsStr::from_bytes(fullname);
-        let regular_file = std::fs::metadata(path)
-            .is_ok_and(|metadata| metadata.is_file());
-        let readable = nsh_platform::effective_access(path, nsh_platform::AccessMode::READ_OK);
+        let Ok(native) = fullname.try_to_path_buf() else {
+            continue;
+        };
+        let regular_file = nsh_platform::path_is_file(&native);
+        let readable = nsh_platform::effective_access(&native, nsh_platform::AccessMode::READ_OK);
         if (candidate.option.is_none()
             || candidate.option.as_ref().and_then(|option| option.first()) == Some(&b'f'))
             && regular_file

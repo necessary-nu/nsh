@@ -22,8 +22,8 @@
 //! from one thread are coherent whatever the ordering. Relaxed is what
 //! `volatile sig_atomic_t` bought the C, which is what these were.
 
+use core::ffi::c_int;
 use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use core::ffi::{c_int};
 
 use crate::trap::NSIG;
 
@@ -151,7 +151,6 @@ impl SignalSink {
     pub fn raise(&self, signo: c_int) {
         crate::trap::onsig(signo);
     }
-
 }
 
 /// Every signal blocked, and the witness that they are.

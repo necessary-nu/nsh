@@ -14,11 +14,11 @@
 use bstr::ByteSlice;
 use core::ffi::{c_char, c_int, c_uint};
 
-use crate::mystring::{byte_at, ncmp_eq_at, slice_from};
 use crate::expand::{
     C_BANG, C_CARET, C_COLON, C_LBRACKET, C_MINUS, C_NUL, C_QUESTION, C_RBRACKET, C_STAR, CTLESC,
     CTLMBCHAR, mbnext_bytes,
 };
+use crate::mystring::{byte_at, ncmp_eq_at, slice_from};
 
 /// Remove the shell's quote and multibyte framing from a pattern fragment.
 fn decode_pattern_bytes(encoded: &[u8]) -> Vec<u8> {
@@ -182,11 +182,7 @@ fn single_byte_member(c: c_char, sc: c_char, mb: c_uint) -> bool {
 //
 // Both inputs are borrowed slices; the matcher has no pointer adapter or
 // alternate libc implementation.
-pub(crate) fn pmatch_slices(
-    locale: &nsh_platform::Locale,
-    pattern: &[u8],
-    string: &[u8],
-) -> c_int {
+pub(crate) fn pmatch_slices(locale: &nsh_platform::Locale, pattern: &[u8], string: &[u8]) -> c_int {
     pmatch_bytes(locale, pattern, string) as c_int
 }
 

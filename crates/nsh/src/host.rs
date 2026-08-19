@@ -223,15 +223,17 @@ mod tests {
     fn the_default_host_reports_every_signal_as_default() {
         let mut h = NoHost;
         assert_eq!(
-            h.signal(Signal::from_raw(nsh_platform::interrupt_signal())).unwrap(),
+            h.signal(Signal::from_raw(nsh_platform::interrupt_signal()))
+                .unwrap(),
             Disposition::Default
         );
-        assert!(h
-            .set_signal(
+        assert!(
+            h.set_signal(
                 Signal::from_raw(nsh_platform::interrupt_signal()),
                 Disposition::Catch,
             )
-            .is_ok());
+            .is_ok()
+        );
     }
 
     /// A host that writes down what it was asked for instead of doing it.

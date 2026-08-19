@@ -13,9 +13,22 @@
 
 use nsh::streams::Streams;
 
-fn read_all(fd: &std::os::fd::OwnedFd) -> String {
+fn read_all(fd: &nsh_platform::Descriptor) -> String {
     let bytes = nsh_platform::read_to_end(fd).expect("read pipe");
     String::from_utf8(bytes).expect("pipe output is UTF-8")
+}
+
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
+fn this_test_command(test: &str) -> String {
+    let executable = std::env::current_exe().expect("test executable path");
+    format!(
+        "{} {} --exact --list",
+        shell_quote(&executable.to_string_lossy()),
+        shell_quote(test)
+    )
 }
 
 /// Run `script` in a forked child, with `prepare` deciding how the child
@@ -30,20 +43,20 @@ fn read_all(fd: &std::os::fd::OwnedFd) -> String {
 fn run_shell(script: &str, prepare: impl FnOnce() -> Streams) -> i32 {
     let argv: Vec<Vec<u8>> = vec![b"sh".to_vec(), b"-c".to_vec(), script.as_bytes().to_vec()];
     nsh_platform::run_in_child(move || {
-            // The port raises `Longjmp` as ordinary control flow -- every
-            // shell error and every `exit` is one -- and the default hook
-            // prints a panic banner for each. The `dash` binary filters
-            // them in `main`; do the same so the test's stderr is the
-            // shell's, not the runtime's.
-            let streams = prepare();
-            /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
-               ending the process the caller's act — so this fork's child
-               has to end itself. Returning would carry it back into the
-               test harness after the fork. */
-            let status = nsh::shellmain::main_fn(argv, streams);
-            nsh_platform::exit_immediately(status.code().into());
-        })
-        .expect("run shell child")
+        // The port raises `Longjmp` as ordinary control flow -- every
+        // shell error and every `exit` is one -- and the default hook
+        // prints a panic banner for each. The `dash` binary filters
+        // them in `main`; do the same so the test's stderr is the
+        // shell's, not the runtime's.
+        let streams = prepare();
+        /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
+        ending the process the caller's act — so this fork's child
+        has to end itself. Returning would carry it back into the
+        test harness after the fork. */
+        let status = nsh::shellmain::main_fn(argv, streams);
+        nsh_platform::exit_immediately(status.code().into());
+    })
+    .expect("run shell child")
 }
 
 /// Constructor mode: the shell's own writes -- built-ins, errors,
@@ -53,8 +66,7 @@ fn run_shell(script: &str, prepare: impl FnOnce() -> Streams) -> i32 {
 fn a_builtin_writes_to_the_stream_the_shell_was_given() {
     let (r, w) = nsh_platform::pipe().expect("create pipe");
     let st = run_shell("echo from the library", move || {
-        Streams::from_fds(std::io::stdin(), &w, std::io::stderr())
-            .expect("duplicate streams")
+        Streams::from_fds(std::io::stdin(), &w, std::io::stderr()).expect("duplicate streams")
     });
     assert_eq!(st, 0);
     assert_eq!(read_all(&r), "from the library\n");
@@ -67,7 +79,9 @@ fn a_builtin_writes_to_the_stream_the_shell_was_given() {
 fn supplied_stdout_reaches_external_commands() {
     let (shell_r, shell_w) = nsh_platform::pipe().expect("create shell pipe");
     let (fd1_r, fd1_w) = nsh_platform::pipe().expect("create fd 1 pipe");
-    let st = run_shell("echo builtin; /bin/echo external", move || {
+    let external = this_test_command("supplied_stdout_reaches_external_commands");
+    let script = format!("echo builtin; {external}");
+    let st = run_shell(&script, move || {
         nsh_platform::ProcessFdChanges::new([(
             1,
             Some(nsh_platform::duplicate_cloexec(&fd1_w, 10).unwrap()),
@@ -75,11 +89,15 @@ fn supplied_stdout_reaches_external_commands() {
         .unwrap()
         .apply()
         .expect("install fd 1");
-        Streams::from_fds(std::io::stdin(), &shell_w, std::io::stderr())
-            .expect("duplicate streams")
+        Streams::from_fds(std::io::stdin(), &shell_w, std::io::stderr()).expect("duplicate streams")
     });
     assert_eq!(st, 0);
-    assert_eq!(read_all(&shell_r), "builtin\nexternal\n");
+    let output = read_all(&shell_r);
+    assert!(output.starts_with("builtin\n"), "{output:?}");
+    assert!(
+        output.contains("supplied_stdout_reaches_external_commands: test"),
+        "{output:?}"
+    );
     assert_eq!(read_all(&fd1_r), "");
 }
 
@@ -89,7 +107,9 @@ fn supplied_stdout_reaches_external_commands() {
 fn supplied_stdout_reaches_pipeline_output() {
     let (shell_r, shell_w) = nsh_platform::pipe().expect("create shell pipe");
     let (fd1_r, fd1_w) = nsh_platform::pipe().expect("create fd 1 pipe");
-    let st = run_shell("printf pipeline | /usr/bin/tr a-z A-Z", move || {
+    let external = this_test_command("supplied_stdout_reaches_pipeline_output");
+    let script = format!("{external} | {{ IFS= read -r line; printf 'PIPE:%s' \"$line\"; }}");
+    let st = run_shell(&script, move || {
         nsh_platform::ProcessFdChanges::new([(
             1,
             Some(nsh_platform::duplicate_cloexec(&fd1_w, 10).unwrap()),
@@ -97,11 +117,13 @@ fn supplied_stdout_reaches_pipeline_output() {
         .unwrap()
         .apply()
         .expect("install fd 1");
-        Streams::from_fds(std::io::stdin(), &shell_w, std::io::stderr())
-            .expect("duplicate streams")
+        Streams::from_fds(std::io::stdin(), &shell_w, std::io::stderr()).expect("duplicate streams")
     });
     assert_eq!(st, 0);
-    assert_eq!(read_all(&shell_r), "PIPELINE");
+    assert_eq!(
+        read_all(&shell_r),
+        "PIPE:supplied_stdout_reaches_pipeline_output: test"
+    );
     assert_eq!(read_all(&fd1_r), "");
 }
 
@@ -110,17 +132,13 @@ fn supplied_stdout_reaches_pipeline_output() {
 /// restored supplied stream.
 #[test]
 fn supplied_stdout_survives_redirection() {
-    let mut template = std::env::temp_dir();
-    template.push(format!(
-        "nsh-logical-descriptor-test-{}-XXXXXX",
-        std::process::id()
-    ));
     let (file, path) =
-        nsh_platform::create_temporary_file(template.as_os_str()).expect("create target");
+        nsh_platform::create_temporary_file("nsh-stream-target").expect("create target");
     drop(file);
     let path_text = path.to_string_lossy();
     let script = format!(
-        "echo redirected > '{path_text}'; echo restored; /bin/cat '{path_text}'"
+        "echo redirected > '{path_text}'; echo restored; \
+         IFS= read -r line < '{path_text}'; printf '%s\\n' \"$line\""
     );
 
     let (shell_r, shell_w) = nsh_platform::pipe().expect("create shell pipe");
@@ -133,10 +151,9 @@ fn supplied_stdout_survives_redirection() {
         .unwrap()
         .apply()
         .expect("install fd 1");
-        Streams::from_fds(std::io::stdin(), &shell_w, std::io::stderr())
-            .expect("duplicate streams")
+        Streams::from_fds(std::io::stdin(), &shell_w, std::io::stderr()).expect("duplicate streams")
     });
-    let _ = std::fs::remove_file(path);
+    let _ = nsh_platform::remove_file(&path);
 
     assert_eq!(st, 0);
     assert_eq!(read_all(&shell_r), "restored\nredirected\n");
@@ -155,16 +172,16 @@ fn the_shell_reads_a_script_from_the_stream_it_was_given() {
     // `sh` with no operand reads commands from its standard input.
     let argv: Vec<Vec<u8>> = vec![b"sh".to_vec()];
     let st = nsh_platform::run_in_child(move || {
-            let supplied = Streams::from_fds(&script_r, &out_w, std::io::stderr())
-                .expect("duplicate streams");
-            /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
-               ending the process the caller's act — so this fork's child
-               has to end itself. Returning would carry it back into the
-               test harness after the fork. */
-            let status = nsh::shellmain::main_fn(argv, supplied);
-            nsh_platform::exit_immediately(status.code().into());
-        })
-        .expect("run shell child");
+        let supplied =
+            Streams::from_fds(&script_r, &out_w, std::io::stderr()).expect("duplicate streams");
+        /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
+        ending the process the caller's act — so this fork's child
+        has to end itself. Returning would carry it back into the
+        test harness after the fork. */
+        let status = nsh::shellmain::main_fn(argv, supplied);
+        nsh_platform::exit_immediately(status.code().into());
+    })
+    .expect("run shell child");
     assert_eq!(st, 0);
     assert_eq!(read_all(&out_r), "one\ntwo\n");
 }

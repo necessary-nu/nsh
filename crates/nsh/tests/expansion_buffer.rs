@@ -16,7 +16,7 @@
 
 use nsh::streams::Streams;
 
-fn read_all(fd: &std::os::fd::OwnedFd) -> Vec<u8> {
+fn read_all(fd: &nsh_platform::Descriptor) -> Vec<u8> {
     nsh_platform::read_to_end(fd).expect("read pipe")
 }
 
@@ -26,16 +26,16 @@ fn out_of(script: &str) -> Vec<u8> {
     let (r, w) = nsh_platform::pipe().expect("create pipe");
     let argv: Vec<Vec<u8>> = vec![b"sh".to_vec(), b"-c".to_vec(), script.as_bytes().to_vec()];
     nsh_platform::run_in_child(move || {
-            let supplied = Streams::from_fds(std::io::stdin(), &w, std::io::stderr())
-                .expect("duplicate streams");
-            /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
-               ending the process the caller's act — so this fork's child
-               has to end itself. Returning would carry it back into the
-               test harness after the fork. */
-            let status = nsh::shellmain::main_fn(argv, supplied);
-            nsh_platform::exit_immediately(status.code().into());
-        })
-        .expect("run shell child");
+        let supplied =
+            Streams::from_fds(std::io::stdin(), &w, std::io::stderr()).expect("duplicate streams");
+        /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
+        ending the process the caller's act — so this fork's child
+        has to end itself. Returning would carry it back into the
+        test harness after the fork. */
+        let status = nsh::shellmain::main_fn(argv, supplied);
+        nsh_platform::exit_immediately(status.code().into());
+    })
+    .expect("run shell child");
     read_all(&r)
 }
 
@@ -90,7 +90,11 @@ fn the_ungrabbed_result_reaches_ps4_and_a_here_document() {
     assert_eq!(String::from_utf8_lossy(&out), "traced\n");
 
     let pad = "h".repeat(300);
-    let script = format!("v=V; cat <<EOF\n{pad}$v${{v}}$(echo S)$((6*7))\nEOF\n");
+    let script = format!(
+        "v=V; while IFS= read -r line; do printf '%s\\n' \"$line\"; done <<EOF\n\
+         {pad}$v${{v}}$(echo S)$((6*7))\n\
+         EOF\n"
+    );
     let out = out_of(&script);
     assert_eq!(String::from_utf8_lossy(&out), format!("{pad}VVS42\n"));
 }

@@ -244,7 +244,7 @@ mod tests {
                 &mut Shell::new(crate::streams::Streams::INHERIT),
                 &[BStr::new("umask"), BStr::new(mode)],
             )
-                .expect_err("a bad mode fails");
+            .expect_err("a bad mode fails");
             assert_eq!(e.message().to_vec(), text.to_vec());
             assert_eq!(e.status(), 2);
         }

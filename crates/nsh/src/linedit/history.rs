@@ -362,12 +362,9 @@ impl History {
                     return HistoryResponse::boundary();
                 };
                 (0..index).rev().find(|candidate| {
-                    self.store
-                        .iter()
-                        .nth(*candidate)
-                        .is_some_and(|entry| {
-                            history_matches(locale, entry.line(), pattern, matching)
-                        })
+                    self.store.iter().nth(*candidate).is_some_and(|entry| {
+                        history_matches(locale, entry.line(), pattern, matching)
+                    })
                 })
             }
         };
@@ -609,10 +606,7 @@ mod tests {
     fn history_file_preserves_execution_order() {
         let history = history(&[b"first\n", b"second", b"third\nline\n"]);
 
-        assert_eq!(
-            history.file_contents(),
-            b"first\nsecond\nthird\nline\n"
-        );
+        assert_eq!(history.file_contents(), b"first\nsecond\nthird\nline\n");
     }
 
     // [spec:posix:req:builtin.fc.env-histfile/test]

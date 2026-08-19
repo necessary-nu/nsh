@@ -153,8 +153,7 @@ pub const TDBLPAREN: c_int = 31;
 
 /// Array indicating which tokens mark the end of a list.
 static tokendlist: [c_char; 32] = [
-    1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1,
-    0,
+    1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0,
 ];
 
 static tokname: [&CStr; 32] = [
@@ -200,22 +199,8 @@ pub const KWDOFFSET: c_int = 15;
 // [spec:posix:req:token.reserved-word-time]
 // [spec:posix:def:token.reserved-words-trailing-colon]
 static parsekwd: [&CStr; 16] = [
-    c"!",
-    c"case",
-    c"do",
-    c"done",
-    c"elif",
-    c"else",
-    c"esac",
-    c"fi",
-    c"for",
-    c"if",
-    c"in",
-    c"then",
-    c"until",
-    c"while",
-    c"{",
-    c"}",
+    c"!", c"case", c"do", c"done", c"elif", c"else", c"esac", c"fi", c"for", c"if", c"in", c"then",
+    c"until", c"while", c"{", c"}",
 ];
 
 // ---------------------------------------------------------------------
@@ -381,9 +366,7 @@ pub fn issimplecmd(n: Option<&Node>, name: &BStr) -> c_int {
     match n {
         Some(n) if n.node_type() == NCMD => {
             let args = &n.ncmd().args;
-            (!args.is_empty()
-                && args[0].narg().text.as_bstr() == name)
-                as c_int
+            (!args.is_empty() && args[0].narg().text.as_bstr() == name) as c_int
         }
         _ => 0,
     }
@@ -691,7 +674,11 @@ fn command(sh: &mut Shell, kwd: c_int) -> Result<Option<Node>, Error> {
         t = TFI;
     } else if tok == TWHILE || tok == TUNTIL {
         let got: c_int;
-        let ty = if sh.input.lasttoken == TWHILE { NWHILE } else { NUNTIL };
+        let ty = if sh.input.lasttoken == TWHILE {
+            NWHILE
+        } else {
+            NUNTIL
+        };
         let ch1 = list(sh, 0)?.into_node();
         got = readtoken(sh, 0)?;
         if got != TDO {
@@ -908,9 +895,7 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
                 text: wordtext_node(sh),
                 backquote: core::mem::take(&mut sh.input.backquotelist),
             });
-            if bash::active(sh)
-                && (savecheckkwd != 0 || bash::declaration_context(&args))
-            {
+            if bash::active(sh) && (savecheckkwd != 0 || bash::declaration_context(&args)) {
                 n = match n {
                     Node::Arg(arg) => match bash::array_word(sh, arg) {
                         Ok(array) => array,
@@ -919,10 +904,8 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
                     _ => unreachable!("a freshly parsed word is an argument node"),
                 };
             }
-            let bash_assignment = matches!(
-                n,
-                Node::Bash(crate::nodes::BashNode::ArrayAssignment(_))
-            );
+            let bash_assignment =
+                matches!(n, Node::Bash(crate::nodes::BashNode::ArrayAssignment(_)));
             if savecheckkwd != 0 && (ordinary_assignment || bash_assignment) {
                 vars.push(n);
             } else {
@@ -934,10 +917,7 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
             parsefname(sh, &mut n)?; /* read name of redirection file */
             redir.push(n);
         } else {
-            if tok == TLP
-                && bash::active(sh)
-                && bash::compound_array(sh, &mut vars, &mut args)?
-            {
+            if tok == TLP && bash::active(sh) && bash::compound_array(sh, &mut vars, &mut args)? {
                 continue;
             }
             /* The C's `app == &args->narg.next` says the argument list holds
@@ -952,9 +932,7 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
                 let word: narg = args.pop().unwrap().into_narg();
                 let bcmd = crate::exec::builtin(sh, word.text.as_bstr());
                 if goodname(&sh.locale, word.text.as_bstr()) == 0
-                    || bcmd.is_some_and(|cmd| {
-                        (cmd.flags & crate::builtins::BUILTIN_SPECIAL) != 0
-                    })
+                    || bcmd.is_some_and(|cmd| (cmd.flags & crate::builtins::BUILTIN_SPECIAL) != 0)
                 {
                     return Err(synerror(sh, b"Bad function name"));
                 }
@@ -1001,12 +979,7 @@ pub(crate) fn makename(sh: &mut Shell) -> Node {
 // still being built (`err == 0`), and from `expredir` on a tree that may be a
 // shared function definition (`err != 0`).  Only the second writes at run
 // time, and it only writes `dupfd`, which is why that field is the `Cell`.
-pub fn fixredir(
-    sh: &mut Shell,
-    n: &Node,
-    text: &BStr,
-    err: c_int,
-) -> Result<(), Error> {
+pub fn fixredir(sh: &mut Shell, n: &Node, text: &BStr, err: c_int) -> Result<(), Error> {
     /* TRACE(("Fix redir %s %d\n", text, err)); */
     let d = n.ndup();
     if err == 0 {
@@ -1181,11 +1154,7 @@ fn readtoken_with_flags(sh: &mut Shell, mut kwd: c_int) -> Result<Token, Error> 
             }
         }
 
-        if kwd & CHKALIAS != 0
-            && sh
-                .options
-                .alias_expansion_enabled(sh.input.parse_dialect())
-        {
+        if kwd & CHKALIAS != 0 && sh.options.alias_expansion_enabled(sh.input.parse_dialect()) {
             /* Hoisted: the receiver cannot appear twice in one argument
              * list. A raw pointer ends its borrow at the `let`, and the
              * word it points at is the parser's own, not the alias's. */
@@ -1526,8 +1495,7 @@ fn dollarsq_escape(sh: &mut Shell, dest: &mut BString) -> Result<(), Error> {
      * names -- so the write lands there and the committed prefix is
      * appended. Same bytes, same length, and the reservation that used to
      * be a memory-safety contract is gone with the raw cursor. */
-    let mut scratch: [u8; crate::escape::CONV_ESCAPE_SLOP] =
-        [0; crate::escape::CONV_ESCAPE_SLOP];
+    let mut scratch: [u8; crate::escape::CONV_ESCAPE_SLOP] = [0; crate::escape::CONV_ESCAPE_SLOP];
     let mut o: usize = 0;
     /* 10 = length of UXXXXXXXX + NUL */
     let mut text = [0u8; 10];
@@ -1722,7 +1690,8 @@ fn readtoken1(
                  * writes into its own scratch and `getmbc_at` appends
                  * what it reports, so there is no room for this frame to
                  * make on its behalf. */
-                ml = getmbc_at(sh, 
+                ml = getmbc_at(
+                    sh,
                     &mut st.out,
                     st.c,
                     fieldsplitting | (if st.printesc { 2 } else { 0 }),

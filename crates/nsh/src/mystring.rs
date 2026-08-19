@@ -114,7 +114,10 @@ pub fn parse_integer(
     debug_assert!(requested_base == 0 || (2..=36).contains(&requested_base));
 
     let bytes: &[u8] = cstr_prefix(s.as_ref()).as_ref();
-    let mut pos = bytes.iter().position(|&b| !is_c_space(b)).unwrap_or(bytes.len());
+    let mut pos = bytes
+        .iter()
+        .position(|&b| !is_c_space(b))
+        .unwrap_or(bytes.len());
     let number_start = pos;
     let negative = match bytes.get(pos) {
         Some(b'+') => {
@@ -131,7 +134,10 @@ pub fn parse_integer(
     let mut base = requested_base;
     if base == 0 {
         base = if bytes.get(pos) == Some(&b'0') {
-            match (bytes.get(pos + 1), bytes.get(pos + 2).and_then(|b| digit_value(*b))) {
+            match (
+                bytes.get(pos + 1),
+                bytes.get(pos + 2).and_then(|b| digit_value(*b)),
+            ) {
                 (Some(b'x' | b'X'), Some(d)) if d < 16 => {
                     pos += 2;
                     16
@@ -254,7 +260,9 @@ pub fn is_number(p: &BStr) -> bool {
 pub fn decimal_digits(p: &BStr) -> Option<u64> {
     is_number(p).then(|| {
         p.iter().fold(0_u64, |value, byte| {
-            value.saturating_mul(10).saturating_add((byte - b'0') as u64)
+            value
+                .saturating_mul(10)
+                .saturating_add((byte - b'0') as u64)
         })
     })
 }
@@ -474,10 +482,7 @@ mod tests {
         // A lone quote gives ''"'" -- dash stops without reopening a
         // trailing empty pair of quotes.
         assert_eq!(single_quote(BStr::new(b"'")), b"''\"'\"".as_slice());
-        assert_eq!(
-            single_quote(BStr::new(b"a b|c$d")),
-            b"'a b|c$d'".as_slice()
-        );
+        assert_eq!(single_quote(BStr::new(b"a b|c$d")), b"'a b|c$d'".as_slice());
     }
 
     // [spec:dash:sem:mystring.single-quote-fn/test]

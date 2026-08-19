@@ -6,10 +6,10 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use bstr::BStr;
 use crate::eval::Flow;
 use crate::options::Options;
 use crate::var::{VREADONLY, flags_bytes, unset_bytes};
+use bstr::BStr;
 
 // [spec:dash:def:var.unsetcmd-fn]
 // [spec:dash:sem:var.unsetcmd-fn]
@@ -61,50 +61,61 @@ mod tests {
     #[test]
     fn the_option_picks_the_table() {
         let _g = lock();
-            let name = BStr::new("Tunset");
-            let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
+        let name = BStr::new("Tunset");
+        let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
 
-            set_bytes(sh, name, Some(BStr::new("v")), 0).unwrap();
-            assert_eq!(
-                unsetcmd(sh, &[BStr::new("unset"), BStr::new("Tunset")]).unwrap(),
-                Flow::Done(0)
-            );
-            assert!(lookup_bytes(sh, name).is_none());
+        set_bytes(sh, name, Some(BStr::new("v")), 0).unwrap();
+        assert_eq!(
+            unsetcmd(sh, &[BStr::new("unset"), BStr::new("Tunset")]).unwrap(),
+            Flow::Done(0)
+        );
+        assert!(lookup_bytes(sh, name).is_none());
 
-            set_bytes(sh, name, Some(BStr::new("v")), 0).unwrap();
-            assert_eq!(
-                unsetcmd(sh, &[BStr::new("unset"), BStr::new("-v"), BStr::new("Tunset")]).unwrap(),
-                Flow::Done(0)
-            );
-            assert!(lookup_bytes(sh, name).is_none());
+        set_bytes(sh, name, Some(BStr::new("v")), 0).unwrap();
+        assert_eq!(
+            unsetcmd(
+                sh,
+                &[BStr::new("unset"), BStr::new("-v"), BStr::new("Tunset")]
+            )
+            .unwrap(),
+            Flow::Done(0)
+        );
+        assert!(lookup_bytes(sh, name).is_none());
 
-            set_bytes(sh, name, Some(BStr::new("v")), 0).unwrap();
-            assert_eq!(
-                unsetcmd(sh, &[BStr::new("unset"), BStr::new("-f"), BStr::new("Tunset")]).unwrap(),
-                Flow::Done(0)
-            );
-            assert!(lookup_bytes(sh, name).is_some(), "-f is the function table");
-            unset_bytes(sh, name).unwrap();
+        set_bytes(sh, name, Some(BStr::new("v")), 0).unwrap();
+        assert_eq!(
+            unsetcmd(
+                sh,
+                &[BStr::new("unset"), BStr::new("-f"), BStr::new("Tunset")]
+            )
+            .unwrap(),
+            Flow::Done(0)
+        );
+        assert!(lookup_bytes(sh, name).is_some(), "-f is the function table");
+        unset_bytes(sh, name).unwrap();
     }
 
     /// The last option given wins, so `-f -v` unsets the variable.
     #[test]
     fn the_last_option_wins() {
         let _g = lock();
-            let mut owned = Shell::new(crate::streams::Streams::INHERIT);
-            let sh = &mut owned;
-            let name = BStr::new("Tunset2");
-            set_bytes(sh, name, Some(BStr::new("v")), 0).unwrap();
-            assert_eq!(
-                unsetcmd(sh, &[
+        let mut owned = Shell::new(crate::streams::Streams::INHERIT);
+        let sh = &mut owned;
+        let name = BStr::new("Tunset2");
+        set_bytes(sh, name, Some(BStr::new("v")), 0).unwrap();
+        assert_eq!(
+            unsetcmd(
+                sh,
+                &[
                     BStr::new("unset"),
                     BStr::new("-f"),
                     BStr::new("-v"),
                     BStr::new("Tunset2"),
-                ])
-                .unwrap(),
-                Flow::Done(0)
-            );
-            assert!(lookup_bytes(sh, name).is_none());
+                ]
+            )
+            .unwrap(),
+            Flow::Done(0)
+        );
+        assert!(lookup_bytes(sh, name).is_none());
     }
 }

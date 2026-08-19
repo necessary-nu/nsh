@@ -6,8 +6,9 @@
 //! descriptor above the shell-language range. Redirection changes the slot;
 //! dropping the last handle closes the backing descriptor automatically.
 
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use std::sync::{Arc, Mutex, MutexGuard};
+
+use nsh_platform::{AsDescriptor, BorrowedDescriptor, Descriptor};
 
 /// The descriptor numbers accepted by shell redirection syntax.
 pub(crate) const SLOT_COUNT: usize = 10;
@@ -17,26 +18,30 @@ pub(crate) const SLOT_COUNT: usize = 10;
 /// Sharing models `2>&1`: the two logical slots are independently replaceable
 /// while retaining the same underlying open file description and offset.
 #[derive(Clone, Debug)]
-pub(crate) struct SharedFd(Arc<OwnedFd>);
+pub(crate) struct SharedFd(Arc<Descriptor>);
 
 impl SharedFd {
     /// Move an owned descriptor into the shell's hidden backing range.
-    pub(crate) fn from_owned(fd: OwnedFd) -> std::io::Result<Self> {
+    pub(crate) fn from_owned(fd: Descriptor) -> std::io::Result<Self> {
         let fd = nsh_platform::move_fd_cloexec(fd, SLOT_COUNT as i32)?;
         Ok(Self(Arc::new(fd)))
     }
 
     /// Adopt a descriptor already created in the hidden backing range with
     /// close-on-exec set.
-    pub(crate) fn from_backing(fd: OwnedFd) -> Self {
-        debug_assert!(fd.as_raw_fd() >= SLOT_COUNT as i32);
+    pub(crate) fn from_backing(fd: Descriptor) -> Self {
+        debug_assert!(fd.number() >= SLOT_COUNT as i32);
         Self(Arc::new(fd))
+    }
+
+    pub(crate) fn number(&self) -> i32 {
+        self.0.number()
     }
 }
 
-impl AsFd for SharedFd {
-    fn as_fd(&self) -> BorrowedFd<'_> {
-        self.0.as_fd()
+impl AsDescriptor for SharedFd {
+    fn as_platform_descriptor(&self) -> BorrowedDescriptor<'_> {
+        self.0.as_platform_descriptor()
     }
 }
 
@@ -50,7 +55,9 @@ pub(crate) struct FdRef(Arc<Mutex<Option<SharedFd>>>);
 
 impl FdRef {
     fn lock(&self) -> MutexGuard<'_, Option<SharedFd>> {
-        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     pub(crate) fn get(&self) -> Option<SharedFd> {
@@ -83,9 +90,7 @@ pub(crate) struct FdTable {
 }
 
 impl FdTable {
-    pub(crate) fn from_streams(
-        streams: &crate::streams::Streams,
-    ) -> std::io::Result<Self> {
+    pub(crate) fn from_streams(streams: &crate::streams::Streams) -> std::io::Result<Self> {
         let initial = streams.initial_descriptors()?;
         Ok(Self {
             slots: std::array::from_fn(|number| {
@@ -116,7 +121,7 @@ impl FdTable {
     pub(crate) fn install_owned(
         &self,
         number: i32,
-        fd: OwnedFd,
+        fd: Descriptor,
     ) -> std::io::Result<Option<SharedFd>> {
         self.replace(number, Some(SharedFd::from_owned(fd)?))
     }
@@ -133,10 +138,7 @@ impl FdTable {
         let mut changes = Vec::with_capacity(SLOT_COUNT);
         for (number, slot) in self.slots.iter().enumerate() {
             let source = match slot.get() {
-                Some(fd) => Some(nsh_platform::duplicate_cloexec(
-                    &fd,
-                    SLOT_COUNT as i32,
-                )?),
+                Some(fd) => Some(nsh_platform::duplicate_cloexec(&fd, SLOT_COUNT as i32)?),
                 None => None,
             };
             changes.push((number as i32, source));
@@ -253,7 +255,7 @@ mod tests {
         let source = nsh_platform::open_null_input().unwrap();
         let shared = SharedFd::from_owned(source).unwrap();
 
-        assert!(shared.as_fd().as_raw_fd() >= SLOT_COUNT as i32);
+        assert!(shared.number() >= SLOT_COUNT as i32);
         assert_eq!(nsh_platform::read_to_end(&shared).unwrap(), b"");
     }
 

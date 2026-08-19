@@ -1,21 +1,9 @@
-use rustix::pty::{grantpt, openpt, ptsname, unlockpt, OpenptFlags};
-use std::ffi::OsStr;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{Read, Write};
-use std::os::unix::ffi::OsStrExt as _;
 use std::process::{Command, Stdio};
 
 fn terminal_pair() -> (File, File) {
-    let controller = openpt(OpenptFlags::RDWR | OpenptFlags::NOCTTY).unwrap();
-    grantpt(&controller).unwrap();
-    unlockpt(&controller).unwrap();
-    let slave_name = ptsname(&controller, Vec::new()).unwrap();
-    let terminal = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(OsStr::from_bytes(slave_name.to_bytes()))
-        .unwrap();
-    (File::from(controller), terminal)
+    nsh_platform::open_pseudoterminal().unwrap()
 }
 
 fn read_terminal(mut controller: File) -> Vec<u8> {
@@ -25,7 +13,7 @@ fn read_terminal(mut controller: File) -> Vec<u8> {
         match controller.read(&mut buffer) {
             Ok(0) => break,
             Ok(count) => transcript.extend_from_slice(&buffer[..count]),
-            Err(error) if error.raw_os_error() == Some(rustix::io::Errno::IO.raw_os_error()) => {
+            Err(error) if nsh_platform::is_pseudoterminal_end(&error) => {
                 break;
             }
             Err(error) => panic!("cannot read pseudo-terminal: {error}"),
@@ -37,6 +25,9 @@ fn read_terminal(mut controller: File) -> Vec<u8> {
 // [spec:nsh:req:interactive.default-history-navigation/test]
 #[test]
 fn interactive_default_uses_arrow_history() {
+    if !nsh_platform::supports_bidirectional_pseudoterminal_pair() {
+        return;
+    }
     let (mut controller, terminal) = terminal_pair();
     let mut child = Command::new(env!("CARGO_BIN_EXE_nsh"))
         .env("TERM", "xterm")

@@ -36,9 +36,7 @@ pub fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     let words: Vec<BString> = if operands.len() == 2 {
         let words = sh.options.shellparam.words();
-        if (sh.options.shellparam.optind as c_uint)
-            > (sh.options.shellparam.nparam + 1) as c_uint
-        {
+        if (sh.options.shellparam.optind as c_uint) > (sh.options.shellparam.nparam + 1) as c_uint {
             sh.options.shellparam.optind = 1;
             sh.options.shellparam.optoff = -1;
         }
@@ -48,7 +46,10 @@ pub fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             sh.options.shellparam.optind = 1;
             sh.options.shellparam.optoff = -1;
         }
-        operands[2..].iter().map(|word| (*word).to_owned()).collect()
+        operands[2..]
+            .iter()
+            .map(|word| (*word).to_owned())
+            .collect()
     };
 
     Ok(Flow::Done(getopts(sh, operands[0], operands[1], &words)?))
@@ -93,9 +94,7 @@ fn getopts(
     };
 
     'scan: loop {
-        if cursor.is_none()
-            || cursor.is_some_and(|(word, at)| at >= words[word].len())
-        {
+        if cursor.is_none() || cursor.is_some_and(|(word, at)| at >= words[word].len()) {
             let Some(word) = words.get(next) else {
                 done = 1;
                 cursor = None;
@@ -129,12 +128,7 @@ fn getopts(
         }
         if spec == optstr.len() {
             if quiet {
-                set_bytes(
-                    sh,
-                    BStr::new(b"OPTARG"),
-                    Some(BStr::new(&[option])),
-                    0,
-                )?;
+                set_bytes(sh, BStr::new(b"OPTARG"), Some(BStr::new(&[option])), 0)?;
             } else {
                 let mut message = sh
                     .options
@@ -167,12 +161,7 @@ fn getopts(
 
             let Some(argument) = argument else {
                 if quiet {
-                    set_bytes(
-                        sh,
-                        BStr::new(b"OPTARG"),
-                        Some(BStr::new(&[option])),
-                        0,
-                    )?;
+                    set_bytes(sh, BStr::new(b"OPTARG"), Some(BStr::new(&[option])), 0)?;
                     option = b':';
                 } else {
                     let mut message = sh
@@ -220,8 +209,9 @@ mod tests {
     use crate::var::lookup_bytes;
 
     fn value(sh: &mut Shell, name: &str) -> String {
-        lookup_bytes(sh, BStr::new(name))
-            .map_or_else(String::new, |value| String::from_utf8_lossy(&value).into_owned())
+        lookup_bytes(sh, BStr::new(name)).map_or_else(String::new, |value| {
+            String::from_utf8_lossy(&value).into_owned()
+        })
     }
 
     // [spec:posix:req:builtin.getopts.optarg/test]

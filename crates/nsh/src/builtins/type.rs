@@ -12,15 +12,13 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::c_int;
-use std::ffi::OsStr;
+use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 
 use crate::builtins::BUILTIN_SPECIAL;
 use crate::eval::Flow;
 use crate::exec::{
-    CMDBUILTIN, CMDFUNCTION, CMDNORMAL, DO_ABS, PathCursor, cmdentry,
-    find_command, padvance,
+    CMDBUILTIN, CMDFUNCTION, CMDNORMAL, DO_ABS, PathCursor, cmdentry, find_command, padvance,
 };
 use crate::output::Dest;
 
@@ -119,12 +117,12 @@ pub(crate) fn describe_command(
                 let resolved: BString;
                 let path_bytes: &BStr = if j == -1 {
                     // [spec:posix:req:builtin.command.opt-v]
-                    if verbose == 0 && command.contains(&b'/') {
-                        resolved = std::path::absolute(std::path::Path::new(
-                            OsStr::from_bytes(command),
-                        ))
-                        .map(|path| BString::from(path.as_os_str().as_bytes()))
-                        .unwrap_or_else(|_| command.to_owned());
+                    if verbose == 0 && nsh_platform::shell_path_has_separator(command) {
+                        resolved = command
+                            .try_to_path_buf()
+                            .and_then(|path| nsh_platform::absolute_path(&path))
+                            .map(|path| BString::from(path.to_shell_bytes()))
+                            .unwrap_or_else(|_| command.to_owned());
                         resolved.as_slice().as_bstr()
                     } else {
                         command

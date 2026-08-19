@@ -8,7 +8,7 @@
 //! each becomes a setting here and the defaults are the inert ones.
 
 use bstr::{BStr, BString};
-use std::os::unix::ffi::OsStrExt as _;
+use nsh_platform::NativeStrExt as _;
 
 use crate::context::Shell;
 use crate::error::Error;
@@ -96,8 +96,9 @@ impl Builder {
 
     /// Take the calling process's environment.
     ///
-    /// Separate from [`Builder::env`] because `std::env::vars_os` yields
-    /// `OsString`, which is bytes on Unix but is not `Into<BString>`.
+    /// Separate from [`Builder::env`] because the process environment is
+    /// read in its native `OsString` representation and crosses into the
+    /// byte-oriented shell variable table only while the shell is built.
     ///
     /// The environment is snapshotted into storage owned by the shell;
     /// no pointer into the process-global environment survives the build.
@@ -155,7 +156,11 @@ impl Builder {
     /// table and wants the kernel already moved.
     pub fn build(self) -> Result<Shell, Error> {
         let mut sh = Shell::try_new(self.streams).map_err(|error| {
-            Error::other(0, 2, format!("cannot snapshot shell streams: {error}").as_bytes())
+            Error::other(
+                0,
+                2,
+                format!("cannot snapshot shell streams: {error}").as_bytes(),
+            )
         })?;
         /* Before anything else the host might be asked about. `attach` is
          * specified as happening exactly once, and this is it: the sink is
@@ -170,8 +175,8 @@ impl Builder {
                 .into_iter()
                 .map(|(name, value)| {
                     (
-                        BString::from(name.as_os_str().as_bytes()),
-                        BString::from(value.as_os_str().as_bytes()),
+                        BString::from(name.to_shell_bytes()),
+                        BString::from(value.to_shell_bytes()),
                     )
                 })
                 .collect()
@@ -200,7 +205,7 @@ impl Builder {
              * not promoted yet -- §3.4's "start with `Other`, promote
              * the interesting ones after". Status 2 is what dash's
              * `sh_error` takes, and what a failed `cd` leaves. */
-            std::env::set_current_dir(dir).map_err(|e| {
+            nsh_platform::set_current_directory(dir).map_err(|e| {
                 Error::other(
                     0,
                     2,
@@ -234,8 +239,8 @@ mod tests {
             .into_iter()
             .map(|(name, value)| {
                 (
-                    BString::from(name.as_os_str().as_bytes()),
-                    BString::from(value.as_os_str().as_bytes()),
+                    BString::from(name.to_shell_bytes()),
+                    BString::from(value.to_shell_bytes()),
                 )
             })
             .find(|(name, _)| {

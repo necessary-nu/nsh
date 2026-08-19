@@ -26,18 +26,78 @@ struct Limit {
 // [spec:posix:req:builtin.ulimit.opt-cpu]
 // [spec:posix:req:builtin.ulimit.opt-as]
 static LIMITS: [Limit; 12] = [
-    Limit { name: b"CPU time (seconds)", resource: LimitResource::Cpu, factor: 1, option: b't' },
-    Limit { name: b"file size (512-byte units)", resource: LimitResource::FileSize, factor: 512, option: b'f' },
-    Limit { name: b"data segment size (1024-byte units)", resource: LimitResource::Data, factor: 1024, option: b'd' },
-    Limit { name: b"stack size (1024-byte units)", resource: LimitResource::Stack, factor: 1024, option: b's' },
-    Limit { name: b"core file size (512-byte units)", resource: LimitResource::Core, factor: 512, option: b'c' },
-    Limit { name: b"resident memory (1024-byte units)", resource: LimitResource::ResidentSet, factor: 1024, option: b'm' },
-    Limit { name: b"locked memory (1024-byte units)", resource: LimitResource::LockedMemory, factor: 1024, option: b'l' },
-    Limit { name: b"processes", resource: LimitResource::Processes, factor: 1, option: b'p' },
-    Limit { name: b"open files", resource: LimitResource::OpenFiles, factor: 1, option: b'n' },
-    Limit { name: b"address space (1024-byte units)", resource: LimitResource::AddressSpace, factor: 1024, option: b'v' },
-    Limit { name: b"file locks", resource: LimitResource::Locks, factor: 1, option: b'w' },
-    Limit { name: b"realtime priority", resource: LimitResource::RealtimePriority, factor: 1, option: b'r' },
+    Limit {
+        name: b"CPU time (seconds)",
+        resource: LimitResource::Cpu,
+        factor: 1,
+        option: b't',
+    },
+    Limit {
+        name: b"file size (512-byte units)",
+        resource: LimitResource::FileSize,
+        factor: 512,
+        option: b'f',
+    },
+    Limit {
+        name: b"data segment size (1024-byte units)",
+        resource: LimitResource::Data,
+        factor: 1024,
+        option: b'd',
+    },
+    Limit {
+        name: b"stack size (1024-byte units)",
+        resource: LimitResource::Stack,
+        factor: 1024,
+        option: b's',
+    },
+    Limit {
+        name: b"core file size (512-byte units)",
+        resource: LimitResource::Core,
+        factor: 512,
+        option: b'c',
+    },
+    Limit {
+        name: b"resident memory (1024-byte units)",
+        resource: LimitResource::ResidentSet,
+        factor: 1024,
+        option: b'm',
+    },
+    Limit {
+        name: b"locked memory (1024-byte units)",
+        resource: LimitResource::LockedMemory,
+        factor: 1024,
+        option: b'l',
+    },
+    Limit {
+        name: b"processes",
+        resource: LimitResource::Processes,
+        factor: 1,
+        option: b'p',
+    },
+    Limit {
+        name: b"open files",
+        resource: LimitResource::OpenFiles,
+        factor: 1,
+        option: b'n',
+    },
+    Limit {
+        name: b"address space (1024-byte units)",
+        resource: LimitResource::AddressSpace,
+        factor: 1024,
+        option: b'v',
+    },
+    Limit {
+        name: b"file locks",
+        resource: LimitResource::Locks,
+        factor: 1,
+        option: b'w',
+    },
+    Limit {
+        name: b"realtime priority",
+        resource: LimitResource::RealtimePriority,
+        factor: 1,
+        option: b'r',
+    },
 ];
 
 // [spec:dash:def:miscbltin.limtype]
@@ -136,8 +196,8 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         return Ok(Flow::Done(0));
     }
 
-    let mut values = nsh_platform::resource_limit(limit.resource)
-        .expect("a supported resource has a limit");
+    let mut values =
+        nsh_platform::resource_limit(limit.resource).expect("a supported resource has a limit");
     if let Some(argument) = operands.first() {
         let value = parse_value(sh, argument, limit.factor)?;
         if how & HARD != 0 {
@@ -147,10 +207,7 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             values.current = value;
         }
         if let Err(error) = nsh_platform::set_resource_limit(limit.resource, values) {
-            let message = format!(
-                "error setting limit ({})",
-                sh.locale.error_message(&error)
-            );
+            let message = format!("error setting limit ({})", sh.locale.error_message(&error));
             return Err(sh.sh_error_value(message.as_bytes()));
         }
     } else {
@@ -172,6 +229,10 @@ mod tests {
 
     #[test]
     fn hard_and_soft_are_not_resources() {
-        assert!(LIMITS.iter().all(|limit| !matches!(limit.option, b'H' | b'S')));
+        assert!(
+            LIMITS
+                .iter()
+                .all(|limit| !matches!(limit.option, b'H' | b'S'))
+        );
     }
 }

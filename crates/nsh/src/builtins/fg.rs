@@ -12,7 +12,7 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use core::ffi::{c_int};
+use core::ffi::c_int;
 use std::io::Write;
 
 use crate::error::{INTOFF, INTON};

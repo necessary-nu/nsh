@@ -316,7 +316,6 @@ impl nfile {
         name.pop();
         name
     }
-
 }
 
 impl Clone for nfile {
@@ -648,7 +647,10 @@ mod tests {
         });
         let copy = n.clone();
         assert_eq!(copy.narg().text.as_bstr(), n.narg().text.as_bstr());
-        assert_ne!(copy.narg().text.as_cbytes().as_ptr(), n.narg().text.as_cbytes().as_ptr());
+        assert_ne!(
+            copy.narg().text.as_cbytes().as_ptr(),
+            n.narg().text.as_cbytes().as_ptr()
+        );
     }
 
     #[test]

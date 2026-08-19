@@ -133,9 +133,7 @@ impl Signal {
         if index >= crate::signames::NSIG {
             return None;
         }
-        Some(BStr::new(
-            crate::signames::signal_names[index].to_bytes(),
-        ))
+        Some(BStr::new(crate::signames::signal_names[index].to_bytes()))
     }
 
     /// The status a command killed by this signal produces: `128 + n`.
@@ -187,7 +185,10 @@ mod tests {
         );
         /* Index 0 is the exit trap's pseudo-signal, not a signal. */
         assert_eq!(Signal::from_raw(0).name(), Some(BStr::new("EXIT")));
-        assert_eq!(Signal::from_raw(crate::signames::NSIG as c_int).name(), None);
+        assert_eq!(
+            Signal::from_raw(crate::signames::NSIG as c_int).name(),
+            None
+        );
         assert_eq!(Signal::from_raw(-1).name(), None);
     }
 }

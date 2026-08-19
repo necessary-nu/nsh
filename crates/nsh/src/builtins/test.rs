@@ -6,16 +6,9 @@
 //! builtin's words. Operators and operands are typed values, and filesystem
 //! questions cross the safe `nsh-platform` boundary.
 
-use std::cmp::Ordering;
-use std::ffi::{OsStr, OsString};
-use std::fs::Metadata;
-use std::io::IsTerminal as _;
-use std::os::fd::AsFd as _;
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::os::unix::fs::{FileTypeExt, MetadataExt};
-
 use bstr::BStr;
-use nsh_platform::AccessMode;
+use nsh_platform::{AccessMode, FileKind, FileMetadata, ShellBytesExt as _};
+use std::cmp::Ordering;
 
 use crate::context::Shell;
 use crate::error::Error;
@@ -362,7 +355,7 @@ impl<'a> TestParser<'a> {
                     .ok()
                     .flatten()
                     .as_ref()
-                    .is_some_and(|fd| fd.as_fd().is_terminal())
+                    .is_some_and(|fd| nsh_platform::is_terminal(fd))
             }
             Token::FileReadable => test_file_access(operand, AccessMode::READ_OK),
             Token::FileWritable => test_file_access(operand, AccessMode::WRITE_OK),
@@ -374,7 +367,9 @@ impl<'a> TestParser<'a> {
     // [spec:dash:def:test.binop-fn]
     // [spec:dash:sem:test.binop-fn]
     fn binary(&mut self, sh: &mut Shell) -> Result<bool, Error> {
-        let left = self.word(self.pos).expect("binary operator has a left operand");
+        let left = self
+            .word(self.pos)
+            .expect("binary operator has a left operand");
         self.pos += 1;
         self.lex(self.pos);
         let op = self.last_operator.expect("binary token names an operator");
@@ -465,57 +460,51 @@ fn syntax(sh: &mut Shell, op: Option<&[u8]>, message: &[u8]) -> Error {
     sh.sh_error_value(&text)
 }
 
-fn path(word: &BStr) -> OsString {
-    OsString::from_vec(<BStr as AsRef<[u8]>>::as_ref(word).to_vec())
-}
-
-fn metadata(word: &BStr, follow: bool) -> Option<Metadata> {
-    let path = path(word);
-    if follow {
-        std::fs::metadata(path)
-    } else {
-        std::fs::symlink_metadata(path)
-    }
-    .ok()
-}
-
 // [spec:dash:def:test.filstat-fn]
 // [spec:dash:sem:test.filstat-fn]
 fn file_stat(word: &BStr, token: Token) -> bool {
-    let Some(metadata) = metadata(word, token != Token::FileSymlink) else {
+    let Ok(path) = word.try_to_path_buf() else {
         return false;
     };
-    let file_type = metadata.file_type();
+    let Ok(metadata) = nsh_platform::path_metadata(&path, token != Token::FileSymlink) else {
+        return false;
+    };
     match token {
         Token::FileExists => true,
-        Token::FileRegular => file_type.is_file(),
-        Token::FileDirectory => file_type.is_dir(),
-        Token::FileCharDevice => file_type.is_char_device(),
-        Token::FileBlockDevice => file_type.is_block_device(),
-        Token::FileFifo => file_type.is_fifo(),
-        Token::FileSocket => file_type.is_socket(),
-        Token::FileSymlink => file_type.is_symlink(),
-        Token::FileSetUid => metadata.mode() & 0o4000 != 0,
-        Token::FileSetGid => metadata.mode() & 0o2000 != 0,
-        Token::FileSticky => metadata.mode() & 0o1000 != 0,
-        Token::FileNonempty => metadata.size() != 0,
-        Token::FileOwnedByUser => metadata.uid() == nsh_platform::effective_uid().as_raw(),
-        Token::FileOwnedByGroup => metadata.gid() == nsh_platform::effective_gid().as_raw(),
+        Token::FileRegular => metadata.kind == FileKind::Regular,
+        Token::FileDirectory => metadata.kind == FileKind::Directory,
+        Token::FileCharDevice => metadata.kind == FileKind::CharacterDevice,
+        Token::FileBlockDevice => metadata.kind == FileKind::BlockDevice,
+        Token::FileFifo => metadata.kind == FileKind::Fifo,
+        Token::FileSocket => metadata.kind == FileKind::Socket,
+        Token::FileSymlink => metadata.kind == FileKind::Symlink,
+        Token::FileSetUid => metadata.mode & 0o4000 != 0,
+        Token::FileSetGid => metadata.mode & 0o2000 != 0,
+        Token::FileSticky => metadata.mode & 0o1000 != 0,
+        Token::FileNonempty => metadata.size != 0,
+        Token::FileOwnedByUser => metadata.user == nsh_platform::effective_uid().as_raw(),
+        Token::FileOwnedByGroup => metadata.group == nsh_platform::effective_gid().as_raw(),
         _ => true,
     }
 }
 
-fn modified(metadata: &Metadata) -> (i64, i64) {
-    (metadata.mtime(), metadata.mtime_nsec())
+fn modified(metadata: &FileMetadata) -> (i64, i64) {
+    (metadata.modified_seconds, metadata.modified_nanoseconds)
 }
 
 // [spec:dash:def:test.newerf-fn]
 // [spec:dash:sem:test.newerf-fn]
 fn newer(left: &BStr, right: &BStr) -> bool {
-    let Some(left) = metadata(left, true) else {
+    let Ok(left) = left
+        .try_to_path_buf()
+        .and_then(|path| nsh_platform::path_metadata(&path, true))
+    else {
         return false;
     };
-    let Some(right) = metadata(right, true) else {
+    let Ok(right) = right
+        .try_to_path_buf()
+        .and_then(|path| nsh_platform::path_metadata(&path, true))
+    else {
         return true;
     };
     modified(&left) > modified(&right)
@@ -524,10 +513,16 @@ fn newer(left: &BStr, right: &BStr) -> bool {
 // [spec:dash:def:test.olderf-fn]
 // [spec:dash:sem:test.olderf-fn]
 fn older(left: &BStr, right: &BStr) -> bool {
-    let Some(right) = metadata(right, true) else {
+    let Ok(right) = right
+        .try_to_path_buf()
+        .and_then(|path| nsh_platform::path_metadata(&path, true))
+    else {
         return false;
     };
-    let Some(left) = metadata(left, true) else {
+    let Ok(left) = left
+        .try_to_path_buf()
+        .and_then(|path| nsh_platform::path_metadata(&path, true))
+    else {
         return true;
     };
     modified(&left) < modified(&right)
@@ -536,16 +531,18 @@ fn older(left: &BStr, right: &BStr) -> bool {
 // [spec:dash:def:test.equalf-fn]
 // [spec:dash:sem:test.equalf-fn]
 fn same_file(left: &BStr, right: &BStr) -> bool {
-    let (Some(left), Some(right)) = (metadata(left, true), metadata(right, true)) else {
+    let (Ok(left), Ok(right)) = (left.try_to_path_buf(), right.try_to_path_buf()) else {
         return false;
     };
-    left.dev() == right.dev() && left.ino() == right.ino()
+    nsh_platform::path_is_same_file(&left, &right)
 }
 
 // [spec:dash:def:test.has-exec-bit-set-fn]
 // [spec:dash:sem:test.has-exec-bit-set-fn]
 fn has_exec_bit_set(path: &BStr) -> bool {
-    metadata(path, true).is_some_and(|metadata| metadata.mode() & 0o111 != 0)
+    path.try_to_path_buf()
+        .and_then(|path| nsh_platform::path_metadata(&path, true))
+        .is_ok_and(|metadata| metadata.mode & 0o111 != 0)
 }
 
 // [spec:dash:def:test.test-file-access-fn]
@@ -560,33 +557,33 @@ pub fn test_file_access(path: &BStr, access: AccessMode) -> bool {
     {
         return false;
     }
-    nsh_platform::effective_access(OsStr::from_bytes(path.as_ref()), access)
+    path.try_to_path_buf()
+        .is_ok_and(|path| nsh_platform::effective_access(&path, access))
 }
 
 // [spec:dash:def:test.test-access-fn]
 // [spec:dash:sem:test.test-access-fn]
 // [spec:dash:def:exec.test-access-fn]
 // [spec:dash:sem:exec.test-access-fn]
-pub fn test_access(metadata: &Metadata, access: AccessMode) -> bool {
+pub fn test_access(metadata: &FileMetadata, access: AccessMode) -> bool {
     let mut bits = match access {
         AccessMode::READ_OK => 0o4,
         AccessMode::WRITE_OK => 0o2,
         AccessMode::EXEC_OK => 0o1,
-        _ => 0,
     };
     let uid = nsh_platform::effective_uid();
     if uid.is_root() {
-        return access != AccessMode::EXEC_OK || metadata.mode() & 0o111 != 0;
+        return access != AccessMode::EXEC_OK || metadata.mode & 0o111 != 0;
     }
-    if metadata.uid() == uid.as_raw() {
+    if metadata.user == uid.as_raw() {
         bits <<= 6;
-    } else if metadata.gid() == nsh_platform::effective_gid().as_raw()
+    } else if metadata.group == nsh_platform::effective_gid().as_raw()
         || nsh_platform::supplementary_groups()
-            .is_ok_and(|groups| groups.iter().any(|gid| gid.as_raw() == metadata.gid()))
+            .is_ok_and(|groups| groups.iter().any(|gid| gid.as_raw() == metadata.group))
     {
         bits <<= 3;
     }
-    metadata.mode() & bits != 0
+    metadata.mode & bits != 0
 }
 
 #[cfg(test)]

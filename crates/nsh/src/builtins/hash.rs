@@ -13,8 +13,8 @@ use std::io::Write;
 
 use crate::eval::Flow;
 use crate::exec::{
-    CMDNORMAL, CMDUNKNOWN, DO_ERR, PathCursor, clearcmdentry, cmdentry,
-    delete_cmd_entry, find_command, padvance, tblentry,
+    CMDNORMAL, CMDUNKNOWN, DO_ERR, PathCursor, clearcmdentry, cmdentry, delete_cmd_entry,
+    find_command, padvance, tblentry,
 };
 
 // [spec:dash:def:exec.hashcmd-fn]
@@ -64,7 +64,9 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             .commands
             .iter()
             .filter(|(_, cmdp)| cmdp.cmdtype() == CMDNORMAL)
-            .map(|(name, cmdp)| printentry(name.as_slice().as_bstr(), cmdp, path.as_slice().as_bstr()))
+            .map(|(name, cmdp)| {
+                printentry(name.as_slice().as_bstr(), cmdp, path.as_slice().as_bstr())
+            })
             .collect();
         for line in lines {
             let _ = sh.io.stdout().write_all(&line);

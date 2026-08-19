@@ -22,8 +22,8 @@
 
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::{c_int, c_uint};
-use std::io::{IsTerminal as _, Write as _};
-use std::os::fd::{AsFd as _, AsRawFd, OwnedFd};
+use nsh_platform::{Descriptor, NativeStrExt as _};
+use std::io::Write as _;
 
 use crate::error::{Error, INTOFF, INTON};
 use crate::nodes::Node;
@@ -67,7 +67,7 @@ pub const JOBDONE: c_int = 2; /* all procs are completed */
 
 // [spec:dash:def:jobs.procstat]
 pub struct ProcStat {
-    pub pid: i32,    /* process id */
+    pub pid: i32,      /* process id */
     pub status: c_int, /* last process status from wait() */
     /* text of command being run. The C points this at the shared
      * `nullstr` when there is none and at a `savestr` copy otherwise,
@@ -152,9 +152,6 @@ fn notify_completion_now(
         && !is_waited_for
 }
 
-const _PATH_TTY: &[u8] = b"/dev/tty\0";
-const _PATH_DEVNULL: &[u8] = b"/dev/null\0";
-
 /// The shell's jobs, and the terminal state job control needs.
 ///
 /// `docs/api-design.md` 5 groups these under one field and they belong
@@ -182,7 +179,7 @@ pub struct JobTable {
     /// pgrp of shell on invocation
     initialpgrp: c_int,
     /// control terminal
-    ttyfd: Option<OwnedFd>,
+    ttyfd: Option<Descriptor>,
     /// Terminal state the interactive shell needs while it owns the terminal.
     shell_terminal_settings: Option<nsh_platform::TerminalSettings>,
     /// user was warned about stopped jobs
@@ -433,7 +430,7 @@ pub(crate) fn terminal_settings_error(
 pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error> {
     let mut on: c_int = on;
     let mut pgrp: c_int = -1;
-    let mut fd: Option<OwnedFd>;
+    let mut fd: Option<Descriptor>;
 
     if on == sh.jobs.jobctl || crate::shellmain::rootshell(sh) == 0 {
         return Ok(());
@@ -466,9 +463,10 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
          * argues against. */
         /* `mayfail = 1`, so the only thing this can hand back is an
          * interrupt taken at its EINTR poll. */
+        let terminal_path = nsh_platform::controlling_terminal_path().to_shell_bytes();
         let opened = crate::redir::sh_open(
             sh,
-            BStr::new(&_PATH_TTY[.._PATH_TTY.len() - 1]),
+            BStr::new(&terminal_path),
             nsh_platform::OpenMode::ReadWrite,
             1,
         )?;
@@ -497,7 +495,7 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
                                 .ok()
                                 .flatten()
                                 .as_ref()
-                                .is_some_and(|fd| fd.as_fd().is_terminal())
+                                .is_some_and(|fd| nsh_platform::is_terminal(fd))
                             {
                                 candidate = Some(candidates[i]);
                                 break;
@@ -707,7 +705,11 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mod
 
     if Some(jp) == sh.jobs.curjob {
         s[(col - 2) as usize] = b'+';
-    } else if sh.jobs.curjob.map_or(false, |c| sh.jobs.tab[c].prev_job == Some(jp)) {
+    } else if sh
+        .jobs
+        .curjob
+        .map_or(false, |c| sh.jobs.tab[c].prev_job == Some(jp))
+    {
         s[(col - 2) as usize] = b'-';
     }
 
@@ -841,7 +843,11 @@ pub(crate) fn remove_waited_job(sh: &mut crate::context::Shell, jp: usize) {
 
 // [spec:dash:def:jobs.getjob-fn]
 // [spec:dash:sem:jobs.getjob-fn]
-pub(crate) fn getjob(sh: &mut crate::context::Shell, name: Option<&BStr>, getctl: c_int) -> Result<usize, Error> {
+pub(crate) fn getjob(
+    sh: &mut crate::context::Shell,
+    name: Option<&BStr>,
+    getctl: c_int,
+) -> Result<usize, Error> {
     enum JobError {
         NoSuch,
         NoPrevious,
@@ -1083,12 +1089,7 @@ fn forkchild_fatal(sh: &mut crate::context::Shell, e: Error) -> ! {
 // [spec:posix:req:shenv.subshell-creation]
 // [spec:posix:req:shenv.subshell-isolation]
 // [spec:posix:req:cmd.async-stdin-devnull]
-fn forkchild(
-    sh: &mut crate::context::Shell,
-    jp: Option<usize>,
-    n: Option<&Node>,
-    mode: c_int,
-) {
+fn forkchild(sh: &mut crate::context::Shell, jp: Option<usize>, n: Option<&Node>, mode: c_int) {
     let oldlvl: c_int;
 
     /* TRACE(("Child shell %d\n", getpid())); */
@@ -1106,7 +1107,8 @@ fn forkchild(
 
     /* The C tests `jp->jobctl` without checking `jp`; `jp` is NULL only
      * under FORK_NOJOB, which the first conjunct has already excluded. */
-    let ownpgrp = mode != FORK_NOJOB && oldlvl == 0 && jp.map_or(false, |i| sh.jobs.tab[i].jobctl != 0);
+    let ownpgrp =
+        mode != FORK_NOJOB && oldlvl == 0 && jp.map_or(false, |i| sh.jobs.tab[i].jobctl != 0);
     if ownpgrp {
         let pgrp: i32;
         let ji: usize = jp.unwrap();
@@ -1132,15 +1134,16 @@ fn forkchild(
              * `open` returning the lowest free descriptor to land back on
              * 0. That only works when the shell's stdin *is* 0, so put it
              * where it belongs when the frontend said otherwise. */
+            let null_path = nsh_platform::null_device_path().to_shell_bytes();
             let f = crate::redir::sh_open(
-                    sh,
-                    BStr::new(&_PATH_DEVNULL[.._PATH_DEVNULL.len() - 1]),
-                    nsh_platform::OpenMode::ReadOnly,
-                    0,
-                )
-                .unwrap_or_else(|e| forkchild_fatal(sh, e))
-                .expect("a mandatory open returns a descriptor");
-            let number = f.as_raw_fd();
+                sh,
+                BStr::new(&null_path),
+                nsh_platform::OpenMode::ReadOnly,
+                0,
+            )
+            .unwrap_or_else(|e| forkchild_fatal(sh, e))
+            .expect("a mandatory open returns a descriptor");
+            let number = f.number();
             if let Err(error) = sh.fds.install_owned(0, f) {
                 let error = crate::redir::descriptor_error(sh, number, error);
                 forkchild_fatal(sh, error);
@@ -1162,10 +1165,7 @@ fn forkchild(
 
     freejob(sh, ji);
 
-    if crate::parser::issimplecmd(
-        n,
-        BStr::new(crate::builtins::JOBSCMD.name.to_bytes()),
-    ) != 0 {
+    if crate::parser::issimplecmd(n, BStr::new(crate::builtins::JOBSCMD.name.to_bytes())) != 0 {
         return;
     }
 
@@ -1345,7 +1345,8 @@ pub fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c
     let mut terminal_error: Option<(&'static [u8], std::io::Error)> = None;
 
     /* TRACE(("waitforjob(%%%d) called\n", jp ? jobno(jp) : 0)); */
-    dowait(sh, 
+    dowait(
+        sh,
         if jp.is_some() {
             DOWAIT_BLOCK
         } else {
@@ -1419,7 +1420,11 @@ pub fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c
 // [spec:posix:req:jobctl.suspend-on-catchable-signal]
 // [spec:posix:req:jobctl.suspend-on-sigstop]
 // [spec:posix:req:builtin.set.opt-b-notify]
-fn waitone(sh: &mut crate::context::Shell, block: c_int, jobp: Option<usize>) -> Result<c_int, Error> {
+fn waitone(
+    sh: &mut crate::context::Shell,
+    block: c_int,
+    jobp: Option<usize>,
+) -> Result<c_int, Error> {
     let pid: c_int;
     let mut status: c_int = 0;
     let mut jp: Option<usize>;
@@ -1516,7 +1521,7 @@ fn waitone(sh: &mut crate::context::Shell, block: c_int, jobp: Option<usize>) ->
     /* A blocking wait for one foreground job can reap a different,
      * background job first.  `-b` makes that completion observable here,
      * before the wait resumes; non-blocking callers already render changed
-    * jobs themselves, and a waited-for job is reported by its caller. */
+     * jobs themselves, and a waited-for job is reported by its caller. */
     if let Some(changed_job) = thisjob {
         if notify_completion_now(
             block,
@@ -1534,7 +1539,11 @@ fn waitone(sh: &mut crate::context::Shell, block: c_int, jobp: Option<usize>) ->
 
 // [spec:dash:def:jobs.dowait-fn]
 // [spec:dash:sem:jobs.dowait-fn]
-pub(crate) fn dowait(sh: &mut crate::context::Shell, block: c_int, jp: Option<usize>) -> Result<c_int, Error> {
+pub(crate) fn dowait(
+    sh: &mut crate::context::Shell,
+    block: c_int,
+    jp: Option<usize>,
+) -> Result<c_int, Error> {
     let gotchld: c_int = crate::siginbox::signals().child_pending() as c_int;
     let mut rpid: c_int;
     let mut pid: c_int;
@@ -1583,7 +1592,11 @@ pub(crate) fn dowait(sh: &mut crate::context::Shell, block: c_int, jp: Option<us
 
 // [spec:dash:def:jobs.waitproc-fn]
 // [spec:dash:sem:jobs.waitproc-fn]
-fn waitproc(sh: &mut crate::context::Shell, block: c_int, status: &mut c_int) -> Result<c_int, Error> {
+fn waitproc(
+    sh: &mut crate::context::Shell,
+    block: c_int,
+    status: &mut c_int,
+) -> Result<c_int, Error> {
     let nonblocking = block != DOWAIT_BLOCK;
     let mut err: c_int;
 
@@ -1623,11 +1636,10 @@ fn waitproc(sh: &mut crate::context::Shell, block: c_int, status: &mut c_int) ->
             break;
         }
 
-        let blocked = nsh_platform::BlockedSignals::all()
-            .expect("blocking signals around child wait failed");
+        let blocked =
+            nsh_platform::BlockedSignals::all().expect("blocking signals around child wait failed");
 
-        while !signals.child_pending() && signals.pending_signal() == 0
-        {
+        while !signals.child_pending() && signals.pending_signal() == 0 {
             let _ = blocked.suspend();
         }
 
@@ -1944,8 +1956,7 @@ fn cmdputs(s: &[u8], text: &mut BString) {
     const CTLQUOTEMARK_C: u8 = crate::parser::CTLQUOTEMARK as u8;
 
     static VSTYPE_TEXT: [&[u8]; (VSTYPE + 1) as usize] = [
-        b"", b"}", b"-", b"+", b"?", b"=", b"%", b"%%",
-        b"#", b"##", b"", b"", b"", b"", b"", b"",
+        b"", b"}", b"-", b"+", b"?", b"=", b"%", b"%%", b"#", b"##", b"", b"", b"", b"", b"", b"",
     ];
 
     let mut at = 0;
@@ -1967,7 +1978,11 @@ fn cmdputs(s: &[u8], text: &mut BString) {
             CTLVAR_C => {
                 subtype = *s.get(at).unwrap_or(&0) as c_int;
                 at += usize::from(at < s.len());
-                suffix = if (subtype & VSTYPE) == VSLENGTH { b"${#" } else { b"${" };
+                suffix = if (subtype & VSTYPE) == VSLENGTH {
+                    b"${#"
+                } else {
+                    b"${"
+                };
                 write_c = false;
             }
             CTLENDVAR_C => {
@@ -2040,7 +2055,7 @@ pub(crate) fn showpipe(sh: &mut crate::context::Shell, jp: usize, dest: Dest) {
 // [spec:dash:sem:jobs.xtcsetpgrp-fn]
 fn xtcsetpgrp(
     sh: &mut crate::context::Shell,
-    fd: &impl std::os::fd::AsFd,
+    fd: &impl nsh_platform::AsDescriptor,
     pgrp: i32,
 ) -> Result<(), Error> {
     let blocked = nsh_platform::BlockedSignals::all()

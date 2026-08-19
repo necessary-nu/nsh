@@ -12,9 +12,9 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::c_int;
-use std::ffi::OsStr;
+use nsh_platform::NativeStrExt as _;
+use nsh_platform::ShellBytesExt as _;
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 
 use crate::cd::{Pwd, cbytes, setpwd_inner};
 use crate::error::{INTOFF, INTON};
@@ -105,7 +105,7 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut dest = dest_value.as_slice().as_bstr();
     let mut pwd_unknown = false;
 
-    let step6 = dest.starts_with(b"/")
+    let step6 = nsh_platform::shell_path_is_absolute(dest)
         || dest == b"."
         || dest.starts_with(b"./")
         || dest == b".."
@@ -117,14 +117,18 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             dest = BStr::new(b".");
         }
         let path_value = crate::var::lookup_bytes(sh, BStr::new(b"CDPATH")).unwrap_or_default();
-        let mut components = path_value.split(|byte| *byte == b':');
+        let mut components =
+            path_value.split(|byte| *byte == nsh_platform::search_path_separator());
         let mut path = crate::exec::PathCursor::literal(path_value.as_slice().as_bstr());
         while let Some(candidate) = crate::exec::padvance(&mut path, dest) {
-            let component = components.next().expect("PATH cursor and components advance together");
+            let component = components
+                .next()
+                .expect("PATH cursor and components advance together");
             let fullname = crate::mystring::cstr_prefix(&candidate.path);
 
-            if std::fs::metadata(OsStr::from_bytes(fullname))
-                .is_ok_and(|metadata| metadata.is_dir())
+            if fullname
+                .try_to_path_buf()
+                .is_ok_and(|path| nsh_platform::path_is_directory(&path))
             {
                 if !component.is_empty() {
                     flags |= CD_PRINT;
@@ -172,11 +176,8 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         d.push(b'\n');
         let _ = sh.io.stdout().write_all(&d);
     }
-    let status = i32::from(
-        pwd_unknown
-            && (flags & CD_PHYSICAL) != 0
-            && (flags & CD_ERROR_IF_UNKNOWN) != 0,
-    );
+    let status =
+        i32::from(pwd_unknown && (flags & CD_PHYSICAL) != 0 && (flags & CD_ERROR_IF_UNKNOWN) != 0);
     Ok(Flow::Done(status))
 }
 
@@ -205,7 +206,10 @@ fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<CdResult, Error> {
         .as_ref()
         .map(|dir| dir.as_slice().as_bstr())
         .unwrap_or(dest);
-    err = match std::env::set_current_dir(std::path::Path::new(OsStr::from_bytes(target))) {
+    err = match target
+        .try_to_path_buf()
+        .and_then(|path| nsh_platform::set_current_directory(&path))
+    {
         Ok(()) => 0,
         // [spec:posix:req:builtin.cd.step9-path-max-relative]
         // `updatepwd` constructed this absolute path by prefixing PWD. If the
@@ -214,15 +218,15 @@ fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<CdResult, Error> {
         // conversion is possible.
         Err(error)
             if logical.is_some()
-                && !dest.starts_with(b"/")
+                && !nsh_platform::shell_path_is_absolute(dest)
                 && error.raw_os_error().is_some_and(|code| {
-                    nsh_platform::path_error_is(
-                        code,
-                        nsh_platform::PathErrorKind::NameTooLong,
-                    )
+                    nsh_platform::path_error_is(code, nsh_platform::PathErrorKind::NameTooLong)
                 }) =>
         {
-            match std::env::set_current_dir(std::path::Path::new(OsStr::from_bytes(dest))) {
+            match dest
+                .try_to_path_buf()
+                .and_then(|path| nsh_platform::set_current_directory(&path))
+            {
                 Ok(()) => 0,
                 Err(_) => -1,
             }
@@ -256,81 +260,14 @@ fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<CdResult, Error> {
 // [spec:posix:req:builtin.cd.step8-further-simplification]
 // [spec:posix:req:builtin.cd.env-pwd]
 fn updatepwd(sh: &mut Shell, dir: &BStr) -> Option<BString> {
-    /* `lim` is `stackblock() + 1` in the C, re-read after `makestrspace`
-     * because the block can move; against an owned buffer it is just an
-     * index, and `new > lim` is a comparison of lengths. */
-    let mut lim: usize;
-
-    /* #ifdef __CYGWIN__ — not selected. */
-
-    /* `sstrdup(dir)`.  The copy outlives the whole walk because the
-     * components below borrow it while `new` grows. */
-    let cdcompbuf = dir.to_vec();
-    let mut new = BString::new(Vec::new());
-    if !dir.starts_with(b"/") {
-        let Some(cur) = &sh.cwd.curdir else {
-            return None;
-        };
-        new.extend_from_slice(cur);
-    }
-    new.reserve(cdcompbuf.len() + 2);
-    lim = 1;
-    if !dir.starts_with(b"/") {
-        /* `*(new - 1)` reads before the stack block when `curdir` is empty.
-         * It cannot be — `curdir` is either `nullstr`, which returned above,
-         * or a path `updatepwd` itself produced — so this only differs from
-         * the C on a path the C reads out of bounds on. */
-        if new.last() != Some(&b'/') {
-            new.push(b'/');
-        }
-        if new.len() > lim && new[lim] == b'/' {
-            lim += 1;
-        }
-    } else {
-        new.push(b'/');
-        if dir.get(1) == Some(&b'/') && dir.get(2) != Some(&b'/') {
-            new.push(b'/');
-            lim += 1;
-        }
-    }
-    /* `strtok(cdcomppath, "/")` walked from just past the leading slashes the
-     * arm above consumed; an empty field is exactly what `strtok` never
-     * yields, so skipping them here would change nothing. */
-    for p in cdcompbuf.split_str(b"/") {
-        if p.is_empty() {
-            continue;
-        }
-        if p == b".." {
-            // [spec:posix:req:builtin.cd.step8-canonical-form-dot-dot]
-            // POSIX requires the component being removed to resolve to a
-            // directory. `metadata` follows symbolic links, matching pathname
-            // resolution; leaving `dir` uncanonicalized on failure makes the
-            // real chdir produce the diagnostic instead of incorrectly
-            // changing to the collapsed path.
-            if new.len() > lim
-                && !std::fs::metadata(std::path::Path::new(OsStr::from_bytes(&new)))
-                    .is_ok_and(|metadata| metadata.is_dir())
-            {
-                return None;
-            }
-            while new.len() > lim {
-                new.pop();
-                if new[new.len() - 1] == b'/' {
-                    break;
-                }
-            }
-        } else if p == b"." {
-            /* nothing */
-        } else {
-            /* fall through / default: */
-            new.extend_from_slice(p);
-            new.push(b'/');
-        }
-    }
-    if new.len() > lim {
-        new.pop();
-    }
-    Some(new)
+    let current = sh
+        .cwd
+        .curdir
+        .as_ref()
+        .and_then(|path| path.try_to_path_buf().ok());
+    let directory = dir.try_to_path_buf().ok()?;
+    nsh_platform::logical_path(current.as_deref(), &directory)
+        .map(|path| BString::from(path.to_shell_bytes()))
 }
 
 #[cfg(test)]
@@ -374,16 +311,16 @@ mod tests {
     #[test]
     fn error_if_pwd_unknown_is_independent() {
         assert_eq!(opts(&[b"cd", b"-e"]), CD_ERROR_IF_UNKNOWN);
-        assert_eq!(
-            opts(&[b"cd", b"-Pe"]),
-            CD_PHYSICAL | CD_ERROR_IF_UNKNOWN
-        );
+        assert_eq!(opts(&[b"cd", b"-Pe"]), CD_PHYSICAL | CD_ERROR_IF_UNKNOWN);
         assert_eq!(opts(&[b"cd", b"-eP", b"-L"]), CD_ERROR_IF_UNKNOWN);
     }
 
     // [spec:posix:req:builtin.cd.opt-e/test]
     #[test]
     fn physical_e_reports_unknown_pwd() {
+        if !nsh_platform::can_unlink_current_directory() {
+            return;
+        }
         let _guard = crate::testutil::lock();
         let old = std::env::current_dir().unwrap();
         let path = std::env::temp_dir().join(format!(

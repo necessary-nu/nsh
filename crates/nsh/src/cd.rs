@@ -8,7 +8,7 @@
 use crate::error::Error;
 use bstr::{BStr, BString};
 use core::ffi::c_int;
-use std::os::unix::ffi::OsStrExt;
+use nsh_platform::NativeStrExt as _;
 
 use crate::error::{INTOFF, INTON};
 use crate::var::{VEXPORT, set_bytes};
@@ -67,8 +67,8 @@ pub(crate) fn cbytes(s: &Option<BString>) -> Vec<u8> {
 // [spec:dash:def:cd.getpwd-fn]
 // [spec:dash:sem:cd.getpwd-fn]
 fn getpwd(sh: &mut crate::context::Shell) -> Option<BString> {
-    match std::env::current_dir() {
-        Ok(dir) => return Some(BString::from(dir.as_os_str().as_bytes())),
+    match nsh_platform::current_directory() {
+        Ok(dir) => return Some(BString::from(dir.to_shell_bytes())),
         Err(err) => {
             /* `current_dir` is an OS query on Unix, so this is the errno
              * `getcwd` would have left for the C's `strerror(errno)` path. */
@@ -97,7 +97,11 @@ pub(crate) enum Pwd<'a> {
 // [spec:dash:sem:cd.setpwd-fn]
 // [spec:posix:req:param.pwd]
 // [spec:posix:req:param.pwd-assignment]
-pub(crate) fn setpwd_inner(sh: &mut crate::context::Shell, val: Pwd, setold: c_int) -> Result<(), Error> {
+pub(crate) fn setpwd_inner(
+    sh: &mut crate::context::Shell,
+    val: Pwd,
+    setold: c_int,
+) -> Result<(), Error> {
     if setold != 0 {
         let old = sh.cwd.curdir.clone().unwrap_or_default();
         set_bytes(sh, BStr::new("OLDPWD"), Some(BStr::new(&old)), VEXPORT)?;
@@ -129,8 +133,7 @@ pub(crate) fn setpwd_inner(sh: &mut crate::context::Shell, val: Pwd, setold: c_i
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::OsString;
-    use std::os::unix::ffi::OsStringExt;
+    use nsh_platform::ShellBytesExt as _;
     use std::path::PathBuf;
 
     struct CwdGuard {
@@ -158,8 +161,11 @@ mod tests {
         {
             let old = std::env::current_dir().unwrap();
             let mut component = format!("nsh-cd-test-{}-", std::process::id()).into_bytes();
+            #[cfg(unix)]
             component.push(0xff);
-            let temporary = std::env::temp_dir().join(OsString::from_vec(component));
+            #[cfg(windows)]
+            component.extend_from_slice(&[0xed, 0xa0, 0x80]);
+            let temporary = std::env::temp_dir().join(component.try_to_os_string().unwrap());
             std::fs::create_dir(&temporary).unwrap();
             let _restore = CwdGuard {
                 old,
@@ -168,8 +174,12 @@ mod tests {
             std::env::set_current_dir(&temporary).unwrap();
 
             let got = getpwd(sh).unwrap();
-            assert_eq!(&got[..], temporary.as_os_str().as_bytes());
+            assert_eq!(&got[..], temporary.to_shell_bytes());
             assert!(!got.contains(&0));
+        }
+
+        if !nsh_platform::can_unlink_current_directory() {
+            return;
         }
 
         {

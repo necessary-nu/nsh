@@ -1,6 +1,6 @@
 //! Safe terminal-settings snapshots.
 
-use std::os::fd::AsFd;
+use crate::AsDescriptor;
 
 /// An opaque snapshot of every setting associated with a terminal.
 ///
@@ -10,8 +10,8 @@ pub struct TerminalSettings(rustix::termios::Termios);
 
 impl TerminalSettings {
     /// Capture the terminal settings currently associated with `fd`.
-    pub fn capture(fd: impl AsFd) -> std::io::Result<Self> {
-        let fd = fd.as_fd();
+    pub fn capture(fd: &impl AsDescriptor) -> std::io::Result<Self> {
+        let fd = fd.as_platform_descriptor().0;
         loop {
             match rustix::termios::tcgetattr(fd) {
                 Ok(attributes) => return Ok(Self(attributes)),
@@ -22,8 +22,8 @@ impl TerminalSettings {
     }
 
     /// Apply this snapshot to `fd` immediately.
-    pub fn apply(&self, fd: impl AsFd) -> std::io::Result<()> {
-        let fd = fd.as_fd();
+    pub fn apply(&self, fd: &impl AsDescriptor) -> std::io::Result<()> {
+        let fd = fd.as_platform_descriptor().0;
         loop {
             match rustix::termios::tcsetattr(fd, rustix::termios::OptionalActions::Now, &self.0) {
                 Ok(()) => return Ok(()),

@@ -17,8 +17,8 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString};
 use core::ffi::c_int;
+use nsh_platform::Descriptor;
 use std::io::Write;
-use std::os::fd::OwnedFd;
 
 use crate::error::{INTOFF, INTON};
 use crate::syntax::PEOF;
@@ -34,13 +34,6 @@ pub const IBUFSIZ: usize = BUFSIZ as usize + PUNGETC_MAX + 1;
 
 /// `#ifdef SMALL / #define IS_DEFINED_SMALL 1 #else 0` — this port is !SMALL.
 pub const IS_DEFINED_SMALL: bool = false;
-
-/*
- * config.h knobs used by this file.  The reference build has `HAVE_TEE 1` /
- * `USE_TEE 1`, so `tee(2)` comes from glibc and system.h's
- * `#ifndef HAVE_TEE` stub is not compiled.
- */
-pub const USE_TEE: c_int = 1;
 
 pub const INPUT_PUSH_FILE: c_int = 1;
 pub const INPUT_NOFILE_OK: c_int = 2;
@@ -471,7 +464,8 @@ pub fn input_init(sh: &mut Shell) {
         sh.input.stdin_istty = 0;
         sh.input.stdin_state.seekable = stdin
             .as_ref()
-            .is_some_and(|fd| nsh_platform::fd_is_seekable(fd)) as i64;
+            .is_some_and(|fd| nsh_platform::fd_is_seekable(fd))
+            as i64;
         sh.input.stdin_state.bufferable = sh.input.stdin_state.seekable != 0;
     }
 }
@@ -514,8 +508,13 @@ fn stdin_tee(sh: &mut Shell, nr: c_int) -> Result<std::io::Result<usize>, Error>
 
     flush_tee(sh, nr, sh.input.stdin_state.pending);
 
-    let pipe = sh.input.stdin_state.pip.as_ref().expect("stdin tee pipe exists");
-    let result = if USE_TEE != 0 {
+    let pipe = sh
+        .input
+        .stdin_state
+        .pip
+        .as_ref()
+        .expect("stdin tee pipe exists");
+    let result = if nsh_platform::supports_tee() {
         match sh.fds.get(0).ok().flatten() {
             Some(stdin) => nsh_platform::tee(&stdin, &pipe.write, nr as usize),
             None => Err(crate::fd::bad_descriptor()),
@@ -710,21 +709,15 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
              * a copy. Nothing can reach this frame's buffer while it is
              * out, which is the same thing the borrow used to assert. */
             let mut buf = core::mem::take(&mut cur_pf(sh).buf);
-            let result = crate::histedit::read_edit_line(
-                sh,
-                &mut buf[off..off + nr as usize],
-            );
+            let result = crate::histedit::read_edit_line(sh, &mut buf[off..off + nr as usize]);
             cur_pf(sh).buf = buf;
             return match result {
                 Ok(count) => Ok(count as c_int),
                 Err(error) => {
                     let mut message = BString::from("read error: ");
                     message.extend_from_slice(error.to_string().as_bytes());
-                    let failure = Error::unrecoverable_read(
-                        sh.eval.errlinno,
-                        &message,
-                        dot_operand,
-                    );
+                    let failure =
+                        Error::unrecoverable_read(sh.eval.errlinno, &message, dot_operand);
                     Err(sh.report(failure))
                 }
             };
@@ -818,11 +811,7 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
             let error = read_error.expect("a failed read retains its error");
             let mut message = BString::from("read error: ");
             message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
-            let failure = Error::unrecoverable_read(
-                sh.eval.errlinno,
-                &message,
-                dot_operand,
-            );
+            let failure = Error::unrecoverable_read(sh.eval.errlinno, &message, dot_operand);
             return Err(sh.report(failure));
         }
         break 'retry;
@@ -1074,9 +1063,8 @@ fn popstring(sh: &mut Shell) {
      * cursor. Against the copy the same test means "at least one character
      * consumed", and the two agree: with none consumed the C reads the `=`
      * that ends the alias name, which is neither a space nor a tab. */
-    let boundary = sp.alias_name.is_some()
-        && pf.pos > 0
-        && matches!(sp.string[pf.pos - 1], b' ' | b'\t');
+    let boundary =
+        sp.alias_name.is_some() && pf.pos > 0 && matches!(sp.string[pf.pos - 1], b' ' | b'\t');
     pf.pos = sp.prevpos;
     pf.nleft = sp.prevnleft;
     pf.unget = sp.unget;
@@ -1126,7 +1114,7 @@ pub fn set_command_input_file(sh: &mut crate::context::Shell, fname: &BStr) -> R
     Ok(())
 }
 
-fn install_input_file(sh: &mut Shell, mut fd: OwnedFd, flags: c_int) -> Result<(), Error> {
+fn install_input_file(sh: &mut Shell, mut fd: Descriptor, flags: c_int) -> Result<(), Error> {
     fd = crate::redir::move_fd_above(sh, fd)?;
     setinputfd(sh, fd, flags & INPUT_PUSH_FILE, flags & INPUT_DOT_FILE != 0);
     Ok(())
@@ -1139,7 +1127,7 @@ fn install_input_file(sh: &mut Shell, mut fd: OwnedFd, flags: c_int) -> Result<(
 
 // [spec:dash:def:input.setinputfd-fn]
 // [spec:dash:sem:input.setinputfd-fn]
-fn setinputfd(sh: &mut Shell, fd: OwnedFd, push: c_int, dot_operand: bool) {
+fn setinputfd(sh: &mut Shell, fd: Descriptor, push: c_int, dot_operand: bool) {
     pushfile(sh);
     if push == 0 {
         sh.input.top = sh.input.cur;

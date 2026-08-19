@@ -14,7 +14,6 @@ use crate::context::Shell;
 use crate::error::Error;
 use crate::var::{lookupvarint_bytes, setvarint_bytes};
 
-
 // [spec:dash:def:arith-yacc.yystype]
 /// The value carried by an arithmetic token.
 ///
@@ -394,12 +393,7 @@ impl<'a, 'sh> Parser<'a, 'sh> {
 
     // [spec:dash:def:arith-yacc.binop2-fn]
     // [spec:dash:sem:arith-yacc.binop2-fn]
-    fn binary_rhs(
-        &mut self,
-        mut left: i64,
-        min_power: u8,
-        evaluate: bool,
-    ) -> Result<i64, Error> {
+    fn binary_rhs(&mut self, mut left: i64, min_power: u8, evaluate: bool) -> Result<i64, Error> {
         loop {
             let Token::Binary(op) = self.current() else {
                 return Ok(left);
@@ -444,9 +438,7 @@ impl<'a, 'sh> Parser<'a, 'sh> {
                 Ok(value)
             }
             Token::Binary(BinOp::Add) => self.primary(evaluate),
-            Token::Binary(BinOp::Subtract) => {
-                Ok(self.primary(evaluate)?.wrapping_neg())
-            }
+            Token::Binary(BinOp::Subtract) => Ok(self.primary(evaluate)?.wrapping_neg()),
             Token::Not => Ok((self.primary(evaluate)? == 0) as i64),
             Token::BitNot => Ok(!self.primary(evaluate)?),
             _ => Err(self.error(b"expecting primary")),
@@ -455,12 +447,7 @@ impl<'a, 'sh> Parser<'a, 'sh> {
 
     // [spec:dash:def:arith-yacc.do-binop-fn]
     // [spec:dash:sem:arith-yacc.do-binop-fn]
-    fn apply(
-        &mut self,
-        op: BinOp,
-        left: i64,
-        right: i64,
-    ) -> Result<i64, Error> {
+    fn apply(&mut self, op: BinOp, left: i64, right: i64) -> Result<i64, Error> {
         Ok(match op {
             BinOp::Multiply => left.wrapping_mul(right),
             BinOp::Add => left.wrapping_add(right),

@@ -4,9 +4,8 @@
 use crate::error::Error;
 use bstr::BStr;
 use core::ffi::c_int;
+use nsh_platform::{Descriptor, ShellBytesExt as _};
 use std::io::Write;
-use std::os::fd::{AsRawFd, OwnedFd};
-use std::os::unix::ffi::OsStrExt;
 
 use crate::context::Shell;
 use crate::error::{INTOFF, INTON};
@@ -32,15 +31,15 @@ const PIPESIZE: usize = 4096;
 /// Both owned ends of a pipe. Dropping either field closes that endpoint.
 #[derive(Debug)]
 pub struct Pipe {
-    pub read: OwnedFd,
-    pub write: OwnedFd,
+    pub read: Descriptor,
+    pub write: Descriptor,
 }
 
 enum RedirectSource {
     Noop,
     Close,
     Shared(crate::fd::SharedFd),
-    Owned(OwnedFd),
+    Owned(Descriptor),
 }
 
 // [spec:dash:def:redir.redirtab]
@@ -80,9 +79,7 @@ impl RedirStack {
     /// `redirlist = NULL` and `closed_redirs = 0`, which is what the two
     /// statics started at.
     pub(crate) const fn new() -> Self {
-        RedirStack {
-            list: Vec::new(),
-        }
+        RedirStack { list: Vec::new() }
     }
 }
 
@@ -99,11 +96,7 @@ impl RedirStack {
 // [spec:posix:sem:shell.redirection-processing]
 // [spec:posix:def:redir.purpose]
 // [spec:posix:sem:redir.evaluation-order]
-pub fn redirect(
-    sh: &mut Shell,
-    redir: &[Node],
-    flags: c_int,
-) -> Result<(), Error> {
+pub fn redirect(sh: &mut Shell, redir: &[Node], flags: c_int) -> Result<(), Error> {
     let sv: Option<usize>;
 
     /* #if notyet — the `memory[10]` in-memory sink is not compiled. */
@@ -166,9 +159,7 @@ pub fn redirect(
             if let Some(SavedDescriptor::Saved(Some(saved))) = renamed.get(2) {
                 let destination = crate::fd::FdRef::default();
                 destination.replace(Some(saved.clone()));
-                sh.io
-                    .previous_stderr()
-                    .set_destination(destination);
+                sh.io.previous_stderr().set_destination(destination);
             }
         }
     }
@@ -183,13 +174,7 @@ fn sh_open_fail(
     mode: nsh_platform::OpenMode,
     error: &std::io::Error,
 ) -> Error {
-    sh_open_fail_with_context(
-        sh,
-        pathname,
-        mode,
-        error,
-        OpenFailureContext::Ordinary,
-    )
+    sh_open_fail_with_context(sh, pathname, mode, error, OpenFailureContext::Ordinary)
 }
 
 fn sh_open_fail_with_context(
@@ -254,14 +239,8 @@ pub fn sh_open(
     pathname: &BStr,
     mode: nsh_platform::OpenMode,
     mayfail: c_int,
-) -> Result<Option<OwnedFd>, Error> {
-    sh_open_with_context(
-        sh,
-        pathname,
-        mode,
-        mayfail,
-        OpenFailureContext::Ordinary,
-    )
+) -> Result<Option<Descriptor>, Error> {
+    sh_open_with_context(sh, pathname, mode, mayfail, OpenFailureContext::Ordinary)
 }
 
 fn sh_open_with_context(
@@ -270,12 +249,11 @@ fn sh_open_with_context(
     mode: nsh_platform::OpenMode,
     mayfail: c_int,
     context: OpenFailureContext,
-) -> Result<Option<OwnedFd>, Error> {
+) -> Result<Option<Descriptor>, Error> {
     loop {
-        let result = nsh_platform::open_path(
-            std::ffi::OsStr::from_bytes(pathname),
-            mode,
-        );
+        let result = pathname
+            .try_to_path_buf()
+            .and_then(|path| nsh_platform::open_path(&path, mode));
         match result {
             Ok(fd) => return Ok(Some(fd)),
             Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
@@ -315,12 +293,12 @@ pub fn sh_open_read(
     sh: &mut Shell,
     pathname: &BStr,
     mayfail: c_int,
-) -> Result<Option<OwnedFd>, Error> {
+) -> Result<Option<Descriptor>, Error> {
     sh_open(sh, pathname, nsh_platform::OpenMode::ReadOnly, mayfail)
 }
 
 /// Open `sh`'s command-file operand, preserving its POSIX status class.
-pub fn sh_open_command_file(sh: &mut Shell, pathname: &BStr) -> Result<OwnedFd, Error> {
+pub fn sh_open_command_file(sh: &mut Shell, pathname: &BStr) -> Result<Descriptor, Error> {
     sh_open_with_context(
         sh,
         pathname,
@@ -351,18 +329,24 @@ pub fn sh_open_command_file(sh: &mut Shell, pathname: &BStr) -> Result<OwnedFd, 
 // [spec:posix:req:xcurel.file-append-mode]
 fn openredirect(sh: &mut Shell, redir: &Node) -> Result<RedirectSource, Error> {
     let f = match redir.node_type() {
-        NFROM => RedirectSource::Owned(sh_open(
-            sh,
-            BStr::new(redir.nfile().expanded_filename().as_slice()),
-            nsh_platform::OpenMode::ReadOnly,
-            0,
-        )?.expect("a mandatory open returns a descriptor")),
-        NFROMTO => RedirectSource::Owned(sh_open(
-            sh,
-            BStr::new(redir.nfile().expanded_filename().as_slice()),
-            nsh_platform::OpenMode::ReadWriteCreate,
-            0,
-        )?.expect("a mandatory open returns a descriptor")),
+        NFROM => RedirectSource::Owned(
+            sh_open(
+                sh,
+                BStr::new(redir.nfile().expanded_filename().as_slice()),
+                nsh_platform::OpenMode::ReadOnly,
+                0,
+            )?
+            .expect("a mandatory open returns a descriptor"),
+        ),
+        NFROMTO => RedirectSource::Owned(
+            sh_open(
+                sh,
+                BStr::new(redir.nfile().expanded_filename().as_slice()),
+                nsh_platform::OpenMode::ReadWriteCreate,
+                0,
+            )?
+            .expect("a mandatory open returns a descriptor"),
+        ),
         NTO | NCLOBBER => {
             let mut fell_through = true;
             let mut opened = None;
@@ -370,19 +354,26 @@ fn openredirect(sh: &mut Shell, redir: &Node) -> Result<RedirectSource, Error> {
                 /* Take care of noclobber mode. */
                 if sh.options.flag(crate::options::Cflag) != 0 {
                     let fname = redir.nfile().expanded_filename();
-                    let pathname = std::ffi::OsStr::from_bytes(&fname);
-                    let metadata = std::fs::metadata(pathname);
-                    if metadata.is_err() {
+                    if !fname
+                        .try_to_path_buf()
+                        .is_ok_and(|path| nsh_platform::path_exists(&path))
+                    {
                         /* goto do_open */
-                        return Ok(RedirectSource::Owned(sh_open(
-                            sh,
-                            BStr::new(fname.as_slice()),
-                            nsh_platform::OpenMode::WriteCreateExclusive,
-                            0,
-                        )?.expect("a mandatory open returns a descriptor")));
+                        return Ok(RedirectSource::Owned(
+                            sh_open(
+                                sh,
+                                BStr::new(fname.as_slice()),
+                                nsh_platform::OpenMode::WriteCreateExclusive,
+                                0,
+                            )?
+                            .expect("a mandatory open returns a descriptor"),
+                        ));
                     }
 
-                    if metadata.is_ok_and(|metadata| metadata.is_file()) {
+                    if fname
+                        .try_to_path_buf()
+                        .is_ok_and(|path| nsh_platform::path_is_file(&path))
+                    {
                         /* goto ecreate */
                         let error = nsh_platform::already_exists_error();
                         return Err(sh_open_fail(
@@ -398,7 +389,8 @@ fn openredirect(sh: &mut Shell, redir: &Node) -> Result<RedirectSource, Error> {
                         BStr::new(fname.as_slice()),
                         nsh_platform::OpenMode::WriteOnly,
                         0,
-                    )?.expect("a mandatory open returns a descriptor");
+                    )?
+                    .expect("a mandatory open returns a descriptor");
                     if nsh_platform::fd_is_regular_file(&fv).unwrap_or(false) {
                         drop(fv);
                         /* goto ecreate */
@@ -417,24 +409,30 @@ fn openredirect(sh: &mut Shell, redir: &Node) -> Result<RedirectSource, Error> {
             }
             if fell_through {
                 let fname = redir.nfile().expanded_filename();
-                RedirectSource::Owned(sh_open(
-                    sh,
-                    BStr::new(fname.as_slice()),
-                    nsh_platform::OpenMode::WriteCreateTruncate,
-                    0,
-                )?.expect("a mandatory open returns a descriptor"))
+                RedirectSource::Owned(
+                    sh_open(
+                        sh,
+                        BStr::new(fname.as_slice()),
+                        nsh_platform::OpenMode::WriteCreateTruncate,
+                        0,
+                    )?
+                    .expect("a mandatory open returns a descriptor"),
+                )
             } else {
                 RedirectSource::Owned(opened.expect("the noclobber path opened a descriptor"))
             }
         }
         NAPPEND => {
             let fname = redir.nfile().expanded_filename();
-            RedirectSource::Owned(sh_open(
-                sh,
-                BStr::new(fname.as_slice()),
-                nsh_platform::OpenMode::WriteCreateAppend,
-                0,
-            )?.expect("a mandatory open returns a descriptor"))
+            RedirectSource::Owned(
+                sh_open(
+                    sh,
+                    BStr::new(fname.as_slice()),
+                    nsh_platform::OpenMode::WriteCreateAppend,
+                    0,
+                )?
+                .expect("a mandatory open returns a descriptor"),
+            )
         }
         NTOFD | NFROMFD => {
             let source = redir.ndup().dupfd.get();
@@ -496,7 +494,7 @@ fn install_redirect(sh: &mut Shell, target: c_int, source: RedirectSource) -> Re
             .map(|_| ())
             .map_err(|error| descriptor_error(sh, target, error)),
         RedirectSource::Owned(source) => {
-            let number = source.as_raw_fd();
+            let number = source.number();
             sh.fds
                 .install_owned(target, source)
                 .map(|_| ())
@@ -507,42 +505,26 @@ fn install_redirect(sh: &mut Shell, target: c_int, source: RedirectSource) -> Re
 
 // [spec:dash:def:redir.sh-pipe-fn]
 // [spec:dash:sem:redir.sh-pipe-fn]
-pub fn sh_pipe(
-    sh: &mut crate::context::Shell,
-    memfd: bool,
-) -> Result<(Pipe, bool), Error> {
+pub fn sh_pipe(sh: &mut crate::context::Shell, memfd: bool) -> Result<(Pipe, bool), Error> {
     if memfd && USE_MEMFD_CREATE != 0 {
         if let Ok(read_fd) = nsh_platform::anonymous_file(c"dash") {
-            let source = read_fd.as_raw_fd();
+            let source = read_fd.number();
             let write_fd = nsh_platform::duplicate_fd(&read_fd)
                 .map_err(|error| descriptor_error(sh, source, error))?;
-            let read = nsh_platform::move_fd_cloexec(
-                read_fd,
-                crate::fd::SLOT_COUNT as i32,
-            )
-            .map_err(|error| descriptor_error(sh, source, error))?;
-            let source = write_fd.as_raw_fd();
-            let write = nsh_platform::move_fd_cloexec(
-                write_fd,
-                crate::fd::SLOT_COUNT as i32,
-            )
-            .map_err(|error| descriptor_error(sh, source, error))?;
+            let read = nsh_platform::move_fd_cloexec(read_fd, crate::fd::SLOT_COUNT as i32)
+                .map_err(|error| descriptor_error(sh, source, error))?;
+            let source = write_fd.number();
+            let write = nsh_platform::move_fd_cloexec(write_fd, crate::fd::SLOT_COUNT as i32)
+                .map_err(|error| descriptor_error(sh, source, error))?;
             return Ok((Pipe { read, write }, true));
         }
     }
 
-    let (read, write) = nsh_platform::pipe()
+    let (read, write) = nsh_platform::pipe().map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
+    let read = nsh_platform::move_fd_cloexec(read, crate::fd::SLOT_COUNT as i32)
         .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
-    let read = nsh_platform::move_fd_cloexec(
-        read,
-        crate::fd::SLOT_COUNT as i32,
-    )
-    .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
-    let write = nsh_platform::move_fd_cloexec(
-        write,
-        crate::fd::SLOT_COUNT as i32,
-    )
-    .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
+    let write = nsh_platform::move_fd_cloexec(write, crate::fd::SLOT_COUNT as i32)
+        .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
     Ok((Pipe { read, write }, false))
 }
 
@@ -556,7 +538,7 @@ pub fn sh_pipe(
 // [spec:dash:sem:redir.openhere-fn]
 // [spec:posix:sem:redir.here-doc-fd-type]
 // [spec:posix:req:redir.here-doc-expansion]
-fn openhere(sh: &mut Shell, redir: &Node) -> Result<OwnedFd, Error> {
+fn openhere(sh: &mut Shell, redir: &Node) -> Result<Descriptor, Error> {
     let len: usize;
     let expanded;
 
@@ -693,14 +675,13 @@ pub fn mkinit_forkreset(sh: &mut Shell) {
 // [spec:dash:def:redir.savefd-fn]
 // [spec:dash:sem:redir.savefd-fn]
 /// Move an owned descriptor above the shell redirection range.
-pub fn move_fd_above(sh: &mut Shell, fd: OwnedFd) -> Result<OwnedFd, Error> {
-    let number = fd.as_raw_fd();
-    nsh_platform::move_fd_cloexec(fd, 10)
-        .map_err(|error| descriptor_error(sh, number, error))
+pub fn move_fd_above(sh: &mut Shell, fd: Descriptor) -> Result<Descriptor, Error> {
+    let number = fd.number();
+    nsh_platform::move_fd_cloexec(fd, 10).map_err(|error| descriptor_error(sh, number, error))
 }
 
 /// Duplicate a process-table slot above the shell redirection range.
-pub fn copy_slot_above(sh: &mut Shell, from: c_int) -> Result<Option<OwnedFd>, Error> {
+pub fn copy_slot_above(sh: &mut Shell, from: c_int) -> Result<Option<Descriptor>, Error> {
     let source = sh
         .fds
         .get(from)
@@ -730,11 +711,7 @@ pub fn copy_slot_above(sh: &mut Shell, from: c_int) -> Result<Option<OwnedFd>, E
 /// did, and the outermost `FORCEINTON` is what clears the leak.
 // [spec:dash:def:redir.redirectsafe-fn]
 // [spec:dash:sem:redir.redirectsafe-fn]
-pub fn redirectsafe(
-    sh: &mut Shell,
-    redir: &[Node],
-    flags: c_int,
-) -> Result<(), Error> {
+pub fn redirectsafe(sh: &mut Shell, redir: &[Node], flags: c_int) -> Result<(), Error> {
     let mut saveint: c_int = 0;
 
     crate::SAVEINT!(sh, saveint);
@@ -794,9 +771,9 @@ mod tests {
     //! after a failure, in `tests/errors_are_values.rs`.
 
     use super::OpenFailureContext;
+    use crate::Shell;
     use crate::error::Error;
     use crate::expand::restore_handler_expandarg;
-    use crate::Shell;
 
     fn diagnostic() -> Error {
         Error::Other {
@@ -818,14 +795,8 @@ mod tests {
             OpenFailureContext::CommandFile.status(&missing),
             crate::status::ExitStatus::NOT_FOUND,
         );
-        assert_eq!(
-            OpenFailureContext::Ordinary.status(&missing).code(),
-            2,
-        );
-        assert_eq!(
-            OpenFailureContext::CommandFile.status(&denied).code(),
-            2,
-        );
+        assert_eq!(OpenFailureContext::Ordinary.status(&missing).code(), 2,);
+        assert_eq!(OpenFailureContext::CommandFile.status(&denied).code(), 2,);
     }
 
     /// Nothing went wrong: nothing comes back.

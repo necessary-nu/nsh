@@ -10,13 +10,12 @@ use core::ffi::{c_char, c_int};
 /// `sig_atomic_t` — `int` on every platform dash supports.
 pub type sig_atomic_t = c_int;
 
-use crate::error::{INTOFF, INTON};
-use crate::error::Error;
+use crate::error::{Error, INTOFF, INTON};
 use crate::eval::{Flow, SKIPFUNC};
 use crate::nodes::Node;
 
-/// glibc's `NSIG` (`_NSIG`) on Linux.
-pub const NSIG: usize = 65;
+/// The active platform's signal-table width.
+pub const NSIG: usize = nsh_platform::SIGNAL_COUNT;
 
 /*
  * Sigmode records the current value of the signal handlers for the various
@@ -207,10 +206,7 @@ pub fn mkinit_forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
 pub fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
     let simplecmd: c_int;
 
-    simplecmd = crate::parser::issimplecmd(
-        n,
-        BStr::new(crate::builtins::TRAPCMD.name.to_bytes()),
-    );
+    simplecmd = crate::parser::issimplecmd(n, BStr::new(crate::builtins::TRAPCMD.name.to_bytes()));
 
     INTOFF(sh);
     /* One guard for the whole loop -- the fork's single pair -- rather
@@ -398,8 +394,10 @@ fn setsignal_via(sh: &mut crate::context::Shell, signo: c_int, via: Via) {
                 }
             }
             /* #if JOBS */
-            signal if signal == nsh_platform::terminal_stop_signal()
-                || signal == nsh_platform::terminal_output_signal() => {
+            signal
+                if signal == nsh_platform::terminal_stop_signal()
+                    || signal == nsh_platform::terminal_output_signal() =>
+            {
                 if sh.options.flag(crate::options::mflag) != 0 {
                     action = S_IGN as c_int;
                 }
@@ -698,10 +696,7 @@ pub fn exitshell(
              * dropped is an `exit` *inside* the trap, because it names the
              * status the shell leaves with. */
             let trap_entry_status = sh.status;
-            let outer_trap_status = sh
-                .eval
-                .trap_default_exit_status
-                .replace(trap_entry_status);
+            let outer_trap_status = sh.eval.trap_default_exit_status.replace(trap_entry_status);
             let outcome = crate::eval::evalstring(sh, p.as_bstr(), 0);
             sh.eval.trap_default_exit_status = outer_trap_status;
             match outcome {
@@ -776,8 +771,7 @@ pub fn decode_signal(string: &BStr, minsig: c_int) -> c_int {
 
     signo = minsig;
     while signo < NSIG as c_int {
-        if string.eq_ignore_ascii_case(crate::signames::signal_names[signo as usize].to_bytes())
-        {
+        if string.eq_ignore_ascii_case(crate::signames::signal_names[signo as usize].to_bytes()) {
             return signo;
         }
         signo += 1;
@@ -806,10 +800,16 @@ mod tests {
 
         let b = SignalsBlocked::new();
         drop(t.set(&b, interrupt as usize, Some(BString::from("echo hi"))));
-        assert!(signals().is_trapped(interrupt), "set an action, set the bit");
+        assert!(
+            signals().is_trapped(interrupt),
+            "set an action, set the bit"
+        );
 
         drop(t.set(&b, interrupt as usize, None));
-        assert!(!signals().is_trapped(interrupt), "clear the action, clear the bit");
+        assert!(
+            !signals().is_trapped(interrupt),
+            "clear the action, clear the bit"
+        );
         drop(b);
     }
 
@@ -860,14 +860,26 @@ mod tests {
         crate::system::sigclearmask();
         let interrupt = nsh_platform::interrupt_signal();
         let child = nsh_platform::child_signal();
-        assert!(!nsh_platform::signal_is_blocked(interrupt).unwrap(), "start unblocked");
+        assert!(
+            !nsh_platform::signal_is_blocked(interrupt).unwrap(),
+            "start unblocked"
+        );
 
         {
             let _b = SignalsBlocked::new();
-            assert!(nsh_platform::signal_is_blocked(interrupt).unwrap(), "blocked inside");
-            assert!(nsh_platform::signal_is_blocked(child).unwrap(), "all of them");
+            assert!(
+                nsh_platform::signal_is_blocked(interrupt).unwrap(),
+                "blocked inside"
+            );
+            assert!(
+                nsh_platform::signal_is_blocked(child).unwrap(),
+                "all of them"
+            );
         }
 
-        assert!(!nsh_platform::signal_is_blocked(interrupt).unwrap(), "restored on drop");
+        assert!(
+            !nsh_platform::signal_is_blocked(interrupt).unwrap(),
+            "restored on drop"
+        );
     }
 }

@@ -10,8 +10,7 @@ use crate::context::Shell;
 use crate::error::Error;
 use core::ffi::{c_int, c_uint};
 use std::ffi::CString;
-use std::io::{IsTerminal as _, Write as _};
-use std::os::fd::AsFd as _;
+use std::io::Write as _;
 
 use bstr::{BStr, BString};
 
@@ -145,7 +144,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             .ok()
             .flatten()
             .as_ref()
-            .is_some_and(|fd| fd.as_fd().is_terminal())
+            .is_some_and(|fd| nsh_platform::is_terminal(fd))
         {
             let _ = sh.io.stderr().write_all(prompt.as_bytes());
         }
@@ -157,7 +156,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             .ok()
             .flatten()
             .as_ref()
-            .is_some_and(|fd| fd.as_fd().is_terminal());
+            .is_some_and(|fd| nsh_platform::is_terminal(fd));
     let names = opts.operands();
     if names.is_empty() {
         return Err(sh.sh_error_value(b"arg count"));

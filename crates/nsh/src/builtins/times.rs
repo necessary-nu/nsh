@@ -12,8 +12,8 @@
 use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
-use core::ffi::c_int;
 use bstr::BStr;
+use core::ffi::c_int;
 use std::io::Write as _;
 
 // [spec:dash:def:times.timescmd-fn]

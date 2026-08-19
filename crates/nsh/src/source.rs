@@ -17,6 +17,7 @@
 use std::path::{Path, PathBuf};
 
 use bstr::{BStr, BString};
+use nsh_platform::NativeStrExt as _;
 
 use crate::context::Shell;
 use crate::error::Error;
@@ -190,11 +191,8 @@ impl Shell {
             Kind::File(p) => {
                 /* Nothing has been pushed and no floor moved when this
                  * fails, so leaving by `?` needs no unwind. */
-                crate::input::setinputfile(
-                    self,
-                    BStr::new(std::os::unix::ffi::OsStrExt::as_bytes(p.as_os_str())),
-                    0,
-                )?;
+                let path = p.to_shell_bytes();
+                crate::input::setinputfile(self, BStr::new(&path), 0)?;
             }
             Kind::Stream => {
                 /* Nothing to push: the shell's standard input is frame
@@ -297,10 +295,7 @@ impl Shell {
     /// have one, and offering one that quietly skipped `$(…)` would be a
     /// different language wearing this one's syntax.
     pub fn expand_word(&mut self, word: &BStr) -> Result<Vec<BString>, Error> {
-        self.expand(
-            word,
-            crate::expand::EXP_FULL | crate::expand::EXP_TILDE,
-        )
+        self.expand(word, crate::expand::EXP_FULL | crate::expand::EXP_TILDE)
     }
 
     /// Expand one word as if it appeared inside double quotes: no field
@@ -440,11 +435,22 @@ mod tests {
             .build()
             .unwrap();
 
-        let status = sh.run(b"exec /bin/echo replaced").unwrap();
+        let executable = std::env::current_exe().unwrap().to_shell_bytes();
+        let mut command = BString::from("exec ");
+        command.extend_from_slice(&crate::mystring::single_quote(BStr::new(&executable)));
+        command.extend_from_slice(b" replaced");
+        let status = sh.run(BStr::new(command.as_slice())).unwrap();
         assert_eq!(status.code(), 126);
         assert!(sh.has_exited());
         let diagnostic = sh.take_captured_stderr().unwrap();
-        assert!(diagnostic.as_slice().ends_with(b"Permission denied\n"));
+        let denied =
+            std::io::Error::from_raw_os_error(nsh_platform::permission_denied_error_code());
+        let mut suffix = nsh_platform::Locale::c()
+            .unwrap()
+            .error_message(&denied)
+            .into_bytes();
+        suffix.push(b'\n');
+        assert!(diagnostic.as_slice().ends_with(&suffix));
     }
 
     /// `Source::file` opens and reads it, and the stack it pushed comes
@@ -472,12 +478,8 @@ mod tests {
         drop(write);
         let mut sh = Shell::builder()
             .streams(
-                crate::streams::Streams::from_fds(
-                    &read,
-                    std::io::stdout(),
-                    std::io::stderr(),
-                )
-                .unwrap(),
+                crate::streams::Streams::from_fds(&read, std::io::stdout(), std::io::stderr())
+                    .unwrap(),
             )
             .build()
             .unwrap();

@@ -17,15 +17,15 @@ use crate::error::Error;
 use crate::eval::Flow;
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::c_int;
+use nsh_platform::NativeStrExt as _;
 use std::fs::File;
 use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
 use crate::error::{INTOFF, INTON};
+use crate::expand::strlist;
 use crate::histedit::{history_active, history_mut, record_history_line};
 use crate::linedit::HistoryEvent;
-use crate::expand::strlist;
 
 /// max recursions through fc
 const MAXHISTLOOPS: c_int = 4;
@@ -134,10 +134,7 @@ fn scan_options(sh: &mut crate::context::Shell, args: &[&BStr]) -> Result<Flags,
 // [spec:posix:req:builtin.fc.stderr]
 // [spec:posix:req:builtin.fc.interfaces]
 pub fn histcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut fields: Vec<strlist> = args
-        .iter()
-        .map(|word| strlist::from_cbytes(word))
-        .collect();
+    let mut fields: Vec<strlist> = args.iter().map(|word| strlist::from_cbytes(word)).collect();
     histcmd_fields(sh, &mut fields)
 }
 
@@ -195,9 +192,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
             if sh.histedit.fc_depth > MAXHISTLOOPS {
                 sh.histedit.fc_depth = 0;
                 sh.displayhist = 0;
-                return Err(sh.sh_error_value(
-                    b"called recursively too many times",
-                ));
+                return Err(sh.sh_error_value(b"called recursively too many times"));
             }
             /*
              * Set editor.
@@ -208,7 +203,10 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
                         .or_else(|| crate::var::lookup_bytes(sh, BStr::new(b"EDITOR")));
                     editor.get_or_insert_with(|| BString::from(DEFEDITOR));
                 }
-                if editor.as_ref().is_some_and(|value| value.as_slice() == b"-") {
+                if editor
+                    .as_ref()
+                    .is_some_and(|value| value.as_slice() == b"-")
+                {
                     sflg = 1; /* no edit */
                     editor = None;
                 }
@@ -250,7 +248,11 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
             ),
             [first] => (
                 BStr::new(first.as_slice()),
-                if lflg != 0 { BStr::new(b"-1") } else { BStr::new(first.as_slice()) },
+                if lflg != 0 {
+                    BStr::new(b"-1")
+                } else {
+                    BStr::new(first.as_slice())
+                },
             ),
             [first, last] => (BStr::new(first.as_slice()), BStr::new(last.as_slice())),
             _ => {
@@ -271,13 +273,10 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
          */
         if editor.is_some() {
             INTOFF(sh); /* easier */
-            let template = std::ffi::OsStr::from_bytes(b"/tmp/_shXXXXXX");
-            let Ok((file, path)) = nsh_platform::create_temporary_file(template) else {
-                let mut message = b"can't create temporary file ".to_vec();
-                message.extend_from_slice(template.as_bytes());
-                return Err(sh.sh_error_value(&message));
+            let Ok((file, path)) = nsh_platform::create_temporary_file("nsh-fc") else {
+                return Err(sh.sh_error_value(b"can't create temporary file"));
             };
-            editfile = Some(path.into());
+            editfile = Some(path);
             edit_file = Some(file);
         }
 
@@ -335,31 +334,28 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
              * copies what it is given, so the buffer is dead as soon as
              * that call returns and can be this block's. */
             let path = editfile.as_ref().expect("fc created an edit file").clone();
-            let file_bytes = path.as_os_str().as_bytes();
+            let file_bytes = path.to_shell_bytes();
             let mut editcmdbuf: Vec<u8> = Vec::with_capacity(editor.len() + file_bytes.len() + 1);
             editcmdbuf.extend_from_slice(editor);
             editcmdbuf.push(b' ');
-            editcmdbuf.extend_from_slice(file_bytes);
+            editcmdbuf.extend_from_slice(&file_bytes);
 
             drop(edit_file.take());
             /* XXX - should use no JC command */
-            let editor_status = crate::eval::flow!(crate::eval::evalstring(
-                sh,
-                BStr::new(&editcmdbuf),
-                0,
-            ));
+            let editor_status =
+                crate::eval::flow!(crate::eval::evalstring(sh, BStr::new(&editcmdbuf), 0,));
             INTON(sh);
 
             if editor_status == 0 {
-                let edited = std::fs::read(&path).map_err(|error| {
+                let edited = nsh_platform::read_path(&path).map_err(|error| {
                     let mut message = b"can't read temporary file ".to_vec();
-                    message.extend_from_slice(file_bytes);
+                    message.extend_from_slice(&file_bytes);
                     message.extend_from_slice(b": ");
                     message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
                     sh.sh_error_value(&message)
                 })?;
                 if let Some(path) = editfile.take() {
-                    let _ = std::fs::remove_file(path);
+                    let _ = nsh_platform::remove_file(&path);
                 }
                 if edited
                     .iter()
@@ -368,15 +364,12 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
                 {
                     record_history_line(sh, &edited, true, false);
                 }
-                result_status = crate::eval::flow!(crate::eval::evalstring(
-                    sh,
-                    BStr::new(&edited),
-                    0,
-                ));
+                result_status =
+                    crate::eval::flow!(crate::eval::evalstring(sh, BStr::new(&edited), 0,));
             } else {
                 result_status = editor_status;
                 if let Some(path) = editfile.take() {
-                    let _ = std::fs::remove_file(path);
+                    let _ = nsh_platform::remove_file(&path);
                 }
             }
         }
@@ -402,7 +395,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
             sh.histedit.fc_depth = 0;
             drop(edit_file.take());
             if let Some(path) = editfile.take() {
-                let _ = std::fs::remove_file(path);
+                let _ = nsh_platform::remove_file(&path);
             }
             return outcome;
         }
@@ -456,11 +449,7 @@ fn write_listing(
 // caller reads it anyway. An owned string carries its own terminator, and
 // returning it makes the lifetime the caller's rather than the enclosing
 // stack mark's, which matters because the caller hands it to `evalstring`.
-fn fc_replace(
-    hay: &BStr,
-    pattern: &mut Option<BString>,
-    replacement: &BStr,
-) -> BString {
+fn fc_replace(hay: &BStr, pattern: &mut Option<BString>, replacement: &BStr) -> BString {
     /* The C walks `s` a byte at a time and asks `*s == *p && strncmp(s,
      * p, plen)` at each position, which is `find`. The leading-byte test
      * is not an optimisation, though: it is also what makes an *empty*
@@ -507,7 +496,11 @@ pub fn is_fc_number(word: &BStr) -> bool {
 // [spec:dash:sem:histedit.str-to-event-fn]
 // [spec:dash:def:myhistedit.str-to-event-fn]
 // [spec:dash:sem:myhistedit.str-to-event-fn]
-pub fn str_to_event(sh: &mut crate::context::Shell, word: &BStr, last: c_int) -> Result<c_int, Error> {
+pub fn str_to_event(
+    sh: &mut crate::context::Shell,
+    word: &BStr,
+    last: c_int,
+) -> Result<c_int, Error> {
     let mut number_bytes = word;
     let mut relative: c_int = 0;
     match word.first().copied() {

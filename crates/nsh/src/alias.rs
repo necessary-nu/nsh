@@ -44,9 +44,9 @@ impl AliasTable {
 
 fn valid_name(name: &BStr) -> bool {
     !name.is_empty()
-        && name.iter().all(|&byte| {
-            crate::syntax::BASESYNTAX(byte as i8 as c_int) == crate::syntax::CWORD
-        })
+        && name
+            .iter()
+            .all(|&byte| crate::syntax::BASESYNTAX(byte as i8 as c_int) == crate::syntax::CWORD)
 }
 
 // [spec:dash:def:alias.setalias-fn]
@@ -87,9 +87,10 @@ pub(crate) fn setalias(sh: &mut Shell, name: &BStr, value: &BStr) -> Result<(), 
 // [spec:dash:def:alias.lookupalias-pub-fn]
 // [spec:dash:sem:alias.lookupalias-pub-fn]
 pub(crate) fn lookup_alias(sh: &Shell, name: &BStr, check_in_use: bool) -> Option<BString> {
-    sh.aliases.map.get(name).and_then(|alias| {
-        (!check_in_use || !alias.in_use).then(|| alias.value.clone())
-    })
+    sh.aliases
+        .map
+        .get(name)
+        .and_then(|alias| (!check_in_use || !alias.in_use).then(|| alias.value.clone()))
 }
 
 /// Mark an alias expansion active until the corresponding input string is

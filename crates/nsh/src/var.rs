@@ -11,10 +11,10 @@
 
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::{c_char, c_int};
+use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 use std::collections::BTreeMap;
-use std::ffi::{CString, OsStr};
+use std::ffi::OsString;
 use std::io::Write as _;
-use std::os::unix::ffi::OsStrExt;
 
 use crate::context::Shell;
 use crate::error::{Error, INTOFF, INTON};
@@ -36,7 +36,6 @@ pub const VFULL: c_int = 0x80;
 pub const VNOSAVE: c_int = 0x100;
 
 const DEFAULT_IFS: &[u8] = b" \t\n";
-const DEFAULT_PATH: &[u8] = b"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Callback {
@@ -90,7 +89,10 @@ enum LocalVar {
     /// The declaration created this name; remove it on return.
     Created(BString),
     /// Restore the complete previous entry on return.
-    Saved { name: BString, previous: Var },
+    Saved {
+        name: BString,
+        previous: Var,
+    },
 }
 
 // [spec:dash:def:var.localvar-list]
@@ -149,8 +151,8 @@ pub fn defifs() -> &'static BStr {
     BStr::new(DEFAULT_IFS)
 }
 
-pub fn defpath() -> &'static BStr {
-    BStr::new(DEFAULT_PATH)
+pub fn defpath() -> BString {
+    BString::from(nsh_platform::default_search_path().to_shell_bytes())
 }
 
 fn builtin_value(sh: &Shell, name: &[u8]) -> BString {
@@ -209,7 +211,10 @@ pub fn mpathset(sh: &Shell) -> c_int {
 
 /// The name portion of `name` or `name=value`.
 pub(crate) fn varname(text: &BStr) -> &BStr {
-    BStr::new(text.split_once_str(b"=").map_or(text.as_bytes(), |(name, _)| name))
+    BStr::new(
+        text.split_once_str(b"=")
+            .map_or(text.as_bytes(), |(name, _)| name),
+    )
 }
 
 fn valid_name(locale: &nsh_platform::Locale, name: &BStr) -> bool {
@@ -232,10 +237,10 @@ const LOCALE_CATEGORIES: [(nsh_platform::LocaleCategory, &[u8]); 6] = [
 macro_rules! is_locale_variable {
     ($name:expr) => {
         $name == b"LC_ALL"
-        || $name == b"LANG"
-        || LOCALE_CATEGORIES
-            .iter()
-            .any(|(_, category_name)| $name == *category_name)
+            || $name == b"LANG"
+            || LOCALE_CATEGORIES
+                .iter()
+                .any(|(_, category_name)| $name == *category_name)
     };
 }
 
@@ -262,9 +267,9 @@ fn selected_locale(sh: &Shell) -> std::io::Result<nsh_platform::Locale> {
         .collect();
     let overrides: Vec<_> = selected
         .iter()
-        .map(|(category, name)| (*category, OsStr::from_bytes(name.as_slice())))
+        .map(|(category, name)| (*category, name.as_slice()))
         .collect();
-    nsh_platform::Locale::new(OsStr::new("C"), &overrides)
+    nsh_platform::Locale::new(b"C", &overrides)
 }
 
 fn builtin(name: &[u8], value: Option<&[u8]>, flags: c_int, callback: Callback) -> (BString, Var) {
@@ -298,11 +303,12 @@ pub fn initvar(sh: &mut Shell) {
     } else {
         b"$ "
     };
+    let default_path = nsh_platform::default_search_path().to_shell_bytes();
     let mut entries = [
         builtin(b"IFS", Some(DEFAULT_IFS), 0, Callback::Ifs),
         builtin(b"MAIL", None, 0, Callback::Mail),
         builtin(b"MAILPATH", None, 0, Callback::Mail),
-        builtin(b"PATH", Some(DEFAULT_PATH), 0, Callback::Path),
+        builtin(b"PATH", Some(&default_path), 0, Callback::Path),
         builtin(b"PS1", Some(prompt), 0, Callback::None),
         builtin(b"PS2", Some(b"> "), 0, Callback::None),
         builtin(b"PS4", Some(b"+ "), 0, Callback::None),
@@ -351,8 +357,6 @@ pub fn mkinit_init(sh: &mut Shell) -> Result<(), Error> {
 // [spec:posix:sem:sh.envvar-path]
 // [spec:posix:req:sh.envvar-pwd]
 pub(crate) fn mkinit_init_from(sh: &mut Shell, env: EnvSource<'_>) -> Result<(), Error> {
-    use std::os::unix::fs::MetadataExt;
-
     initvar(sh);
     let process_env;
     let pairs = match env {
@@ -361,8 +365,8 @@ pub(crate) fn mkinit_init_from(sh: &mut Shell, env: EnvSource<'_>) -> Result<(),
                 .into_iter()
                 .map(|(name, value)| {
                     (
-                        BString::from(name.as_os_str().as_bytes()),
-                        BString::from(value.as_os_str().as_bytes()),
+                        BString::from(name.to_shell_bytes()),
+                        BString::from(value.to_shell_bytes()),
                     )
                 })
                 .collect::<Vec<_>>();
@@ -398,20 +402,21 @@ pub(crate) fn mkinit_init_from(sh: &mut Shell, env: EnvSource<'_>) -> Result<(),
     set_bytes(
         sh,
         BStr::new(b"PPID"),
-        Some(BStr::new(nsh_platform::parent_process_id().to_string().as_bytes())),
+        Some(BStr::new(
+            nsh_platform::parent_process_id().to_string().as_bytes(),
+        )),
         0,
     )?;
 
     let pwd = lookup_bytes(sh, BStr::new(b"PWD"));
     let valid_pwd = pwd.as_ref().filter(|path| {
-        if path.first() != Some(&b'/') {
+        if !nsh_platform::shell_path_is_absolute(path) {
             return false;
         }
-        let path = std::path::Path::new(OsStr::from_bytes(path));
-        match (std::fs::metadata(path), std::fs::metadata(".")) {
-            (Ok(want), Ok(actual)) => want.dev() == actual.dev() && want.ino() == actual.ino(),
-            _ => false,
-        }
+        let (Ok(path), Ok(dot)) = (path.try_to_path_buf(), b"."[..].try_to_path_buf()) else {
+            return false;
+        };
+        nsh_platform::path_is_same_file(&path, &dot)
     });
     match valid_pwd {
         Some(path) => crate::cd::setpwd_inner(sh, crate::cd::Pwd::New(BStr::new(path)), 0),
@@ -419,10 +424,7 @@ pub(crate) fn mkinit_init_from(sh: &mut Shell, env: EnvSource<'_>) -> Result<(),
     }
 }
 
-pub(crate) fn mkinit_env_pairs(
-    sh: &mut Shell,
-    pairs: &[(BString, BString)],
-) -> Result<(), Error> {
+pub(crate) fn mkinit_env_pairs(sh: &mut Shell, pairs: &[(BString, BString)]) -> Result<(), Error> {
     for (name, value) in pairs {
         let name = BStr::new(name.as_slice());
         let value = BStr::new(value.as_slice());
@@ -541,9 +543,7 @@ fn set_entry(
         (None, Some(value)) => next_value = Some(VariableValue::Scalar(value.to_owned())),
         (_, None) => next_value = None,
     }
-    let callback_value = next_value
-        .as_ref()
-        .and_then(VariableValue::scalar_owned);
+    let callback_value = next_value.as_ref().and_then(VariableValue::scalar_owned);
     sh.vars.tab.insert(
         name.to_owned(),
         Var {
@@ -559,7 +559,9 @@ fn set_entry(
             sh,
             callback,
             name,
-            callback_value.as_ref().map(|value| BStr::new(value.as_slice())),
+            callback_value
+                .as_ref()
+                .map(|value| BStr::new(value.as_slice())),
         );
     }
     Ok(())
@@ -647,21 +649,15 @@ pub(crate) fn flags_bytes(sh: &mut Shell, name: &BStr) -> Option<c_int> {
     sh.vars.tab.get(name).map(|var| var.flags)
 }
 
-/// Build the exported environment as owned `NAME=value` strings.
-pub fn environment(sh: &Shell) -> Vec<CString> {
+/// Build the exported environment as owned native name/value pairs.
+pub fn environment(sh: &Shell) -> std::io::Result<Vec<(OsString, OsString)>> {
     sh.vars
         .tab
         .iter()
         .filter(|(_, var)| var.flags & (VEXPORT | VUNSET) == VEXPORT)
         .map(|(name, var)| {
-            let value = var
-                .scalar()
-                .unwrap_or_else(|| BStr::new(b""));
-            let mut entry = Vec::with_capacity(name.len() + value.len() + 1);
-            entry.extend_from_slice(name);
-            entry.push(b'=');
-            entry.extend_from_slice(value);
-            CString::new(entry).expect("shell variables contain no NUL")
+            let value = var.scalar().unwrap_or_else(|| BStr::new(b""));
+            Ok((name.try_to_os_string()?, value.try_to_os_string()?))
         })
         .collect()
 }
@@ -738,7 +734,9 @@ pub fn pushlocalvars(sh: &mut Shell, push: c_int) -> usize {
     let top = sh.vars.locals.len();
     if push != 0 {
         INTOFF(sh);
-        sh.vars.locals.push(LocalVarList { entries: Vec::new() });
+        sh.vars.locals.push(LocalVarList {
+            entries: Vec::new(),
+        });
         INTON(sh);
     }
     top
@@ -801,11 +799,10 @@ impl Shell {
     /// returned, which is why this method takes `&mut self`.
     pub fn var(&mut self, name: &BStr) -> Option<&BStr> {
         self.vars.refresh_lineno(name);
-        self.vars.tab.get(name).and_then(|var| {
-            (var.flags & VUNSET == 0)
-                .then(|| var.scalar())
-                .flatten()
-        })
+        self.vars
+            .tab
+            .get(name)
+            .and_then(|var| (var.flags & VUNSET == 0).then(|| var.scalar()).flatten())
     }
 
     /// Assign a shell variable with normal script-assignment semantics.
@@ -840,17 +837,8 @@ mod tests {
     #[test]
     fn an_empty_locale_assignment_is_not_an_unset() {
         let _guard = lock();
-        let mut shell = Shell::builder()
-            .env([("LC_ALL", "C")])
-            .build()
-            .unwrap();
-        set_bytes(
-            &mut shell,
-            BStr::new(b"LC_ALL"),
-            Some(BStr::new(b"")),
-            0,
-        )
-        .unwrap();
+        let mut shell = Shell::builder().env([("LC_ALL", "C")]).build().unwrap();
+        set_bytes(&mut shell, BStr::new(b"LC_ALL"), Some(BStr::new(b"")), 0).unwrap();
         assert_eq!(
             lookup_bytes(&mut shell, BStr::new(b"LC_ALL"))
                 .as_ref()
@@ -859,16 +847,18 @@ mod tests {
         );
         assert!(
             environment(&shell)
+                .unwrap()
                 .iter()
-                .any(|entry| entry.to_bytes() == b"LC_ALL=")
+                .any(|(name, value)| name.to_shell_bytes() == b"LC_ALL" && value.is_empty())
         );
 
         unset_bytes(&mut shell, BStr::new(b"LC_ALL")).unwrap();
         assert_eq!(lookup_bytes(&mut shell, BStr::new(b"LC_ALL")), None);
         assert!(
             environment(&shell)
+                .unwrap()
                 .iter()
-                .all(|entry| entry.to_bytes() != b"LC_ALL=")
+                .all(|(name, _)| name.to_shell_bytes() != b"LC_ALL")
         );
     }
 
@@ -879,10 +869,20 @@ mod tests {
         let mut shell = Shell::new(crate::streams::Streams::INHERIT);
         initvar(&mut shell);
         shell.vars.lineno = 41;
-        assert_eq!(lookup_bytes(&mut shell, BStr::new(b"LINENO")).as_ref().map(|value| value.as_slice()), Some(b"41".as_slice()));
+        assert_eq!(
+            lookup_bytes(&mut shell, BStr::new(b"LINENO"))
+                .as_ref()
+                .map(|value| value.as_slice()),
+            Some(b"41".as_slice())
+        );
         let mut moved = shell;
         moved.vars.lineno = 42;
-        assert_eq!(lookup_bytes(&mut moved, BStr::new(b"LINENO")).as_ref().map(|value| value.as_slice()), Some(b"42".as_slice()));
+        assert_eq!(
+            lookup_bytes(&mut moved, BStr::new(b"LINENO"))
+                .as_ref()
+                .map(|value| value.as_slice()),
+            Some(b"42".as_slice())
+        );
     }
 
     // [spec:dash:sem:var.setvar-fn/test]
@@ -891,8 +891,19 @@ mod tests {
     fn set_and_unset_variable() {
         let _guard = lock();
         let mut shell = Shell::new(crate::streams::Streams::INHERIT);
-        set_bytes(&mut shell, BStr::new(b"Tsetvar"), Some(BStr::new(b"hello")), 0).unwrap();
-        assert_eq!(lookup_bytes(&mut shell, BStr::new(b"Tsetvar")).as_ref().map(|value| value.as_slice()), Some(b"hello".as_slice()));
+        set_bytes(
+            &mut shell,
+            BStr::new(b"Tsetvar"),
+            Some(BStr::new(b"hello")),
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            lookup_bytes(&mut shell, BStr::new(b"Tsetvar"))
+                .as_ref()
+                .map(|value| value.as_slice()),
+            Some(b"hello".as_slice())
+        );
         unset_bytes(&mut shell, BStr::new(b"Tsetvar")).unwrap();
         assert_eq!(lookup_bytes(&mut shell, BStr::new(b"Tsetvar")), None);
 
@@ -900,14 +911,23 @@ mod tests {
         shell.options.shellparam.optind = 7;
         shell.options.shellparam.optoff = 3;
 
-        set_bytes(&mut shell, BStr::new(b"OPTIND"), Some(BStr::new(b"8")), VNOFUNC).unwrap();
+        set_bytes(
+            &mut shell,
+            BStr::new(b"OPTIND"),
+            Some(BStr::new(b"8")),
+            VNOFUNC,
+        )
+        .unwrap();
         assert_eq!(shell.options.shellparam.optind, 7);
         assert_eq!(shell.options.shellparam.optoff, 3);
 
         set_bytes(&mut shell, BStr::new(b"OPTIND"), Some(BStr::new(b"1")), 0).unwrap();
         assert_eq!(shell.options.shellparam.optind, 1);
         assert_eq!(shell.options.shellparam.optoff, -1);
-        assert_eq!(flags_bytes(&mut shell, BStr::new(b"OPTIND")).unwrap() & VNOFUNC, 0);
+        assert_eq!(
+            flags_bytes(&mut shell, BStr::new(b"OPTIND")).unwrap() & VNOFUNC,
+            0
+        );
     }
 
     // [spec:dash:sem:var.poplocalvars-fn/test]
@@ -919,21 +939,50 @@ mod tests {
         let stop = pushlocalvars(&mut shell, 1);
         make_local_bytes(&mut shell, BStr::new(b"Tframe=two"), 0).unwrap();
         make_local_bytes(&mut shell, BStr::new(b"Tframe=three"), 0).unwrap();
-        assert_eq!(lookup_bytes(&mut shell, BStr::new(b"Tframe")).as_ref().map(|value| value.as_slice()), Some(b"three".as_slice()));
+        assert_eq!(
+            lookup_bytes(&mut shell, BStr::new(b"Tframe"))
+                .as_ref()
+                .map(|value| value.as_slice()),
+            Some(b"three".as_slice())
+        );
         unwindlocalvars(&mut shell, stop);
-        assert_eq!(lookup_bytes(&mut shell, BStr::new(b"Tframe")).as_ref().map(|value| value.as_slice()), Some(b"one".as_slice()));
+        assert_eq!(
+            lookup_bytes(&mut shell, BStr::new(b"Tframe"))
+                .as_ref()
+                .map(|value| value.as_slice()),
+            Some(b"one".as_slice())
+        );
     }
 
     #[test]
     fn environment_is_owned_and_sorted() {
         let _guard = lock();
         let mut shell = Shell::new(crate::streams::Streams::INHERIT);
-        set_bytes(&mut shell, BStr::new(b"ZED"), Some(BStr::new(b"z")), VEXPORT).unwrap();
-        set_bytes(&mut shell, BStr::new(b"ALPHA"), Some(BStr::new(b"a")), VEXPORT).unwrap();
-        let environment: Vec<Vec<u8>> = environment(&shell)
+        set_bytes(
+            &mut shell,
+            BStr::new(b"ZED"),
+            Some(BStr::new(b"z")),
+            VEXPORT,
+        )
+        .unwrap();
+        set_bytes(
+            &mut shell,
+            BStr::new(b"ALPHA"),
+            Some(BStr::new(b"a")),
+            VEXPORT,
+        )
+        .unwrap();
+        let environment: Vec<(Vec<u8>, Vec<u8>)> = environment(&shell)
+            .unwrap()
             .iter()
-            .map(|entry| entry.as_bytes().to_vec())
+            .map(|(name, value)| (name.to_shell_bytes(), value.to_shell_bytes()))
             .collect();
-        assert_eq!(environment, [b"ALPHA=a".as_slice(), b"ZED=z".as_slice()]);
+        assert_eq!(
+            environment,
+            [
+                (b"ALPHA".to_vec(), b"a".to_vec()),
+                (b"ZED".to_vec(), b"z".to_vec()),
+            ]
+        );
     }
 }
