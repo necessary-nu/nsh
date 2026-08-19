@@ -5680,6 +5680,13 @@ children (
                                 kind @note
                                 text "Owns builtin.dot.break.test and semantics.subshell.break.test. Definition of done: break and continue unwind only the execution contexts selected by the adopted lexical/dot/subshell contract; sourced input and subshell execution cannot accidentally consume or leak a caller's loop-control state. Add focused Rust regressions and make both pinned Smoosh cases byte/status exact."
                             }
+
+                            {
+                                at 2026-08-19T16:03:14.378409231Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
                         )
                     }
 

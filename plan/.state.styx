@@ -4930,4 +4930,9 @@ impl_evidence (
         {impl_name nsh-library, rule compat.smoosh.nonlexical-control}
         {impl_name nsh-library, rule compat.smoosh.source-builtin}
     )}
+    {id fix-smoosh-control-flow-boundaries, covered_rules (
+        compat.smoosh.control-boundaries
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.smoosh.control-boundaries}
+    )}
 )

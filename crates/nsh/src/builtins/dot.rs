@@ -110,7 +110,14 @@ fn dotcmd_with_missing_status(
          * it leaves through here without the `popfile` -- exactly as the
          * C's longjmp did. The input stack is unwound to a mark by
          * whatever catches, not by the frame it passed through. */
-        match cmdloop(sh, 0)? {
+        // A dot script is a fresh lexical command context for loop control:
+        // loops active in its caller do not enclose commands read here.
+        // [spec:nsh:req:compat.smoosh.control-boundaries]
+        let caller_loopnest = sh.eval.loopnest;
+        sh.eval.loopnest = 0;
+        let outcome = cmdloop(sh, 0);
+        sh.eval.loopnest = caller_loopnest;
+        match outcome? {
             Flow::Done(s) => status = s,
             exit @ Flow::Exit { .. } => return Ok(exit),
         }

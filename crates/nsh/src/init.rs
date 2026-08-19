@@ -101,6 +101,12 @@ pub fn exitreset(sh: &mut crate::context::Shell, by_exitcmd: bool) {
 // [spec:dash:def:init.forkreset-fn]
 // [spec:dash:sem:init.forkreset-fn]
 pub fn forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
+    /* `loopnest` is MKINIT state in eval.c. A forked execution environment
+     * starts outside every loop in its parent, so a count cannot cross that
+     * boundary. */
+    // [spec:nsh:req:compat.smoosh.control-boundaries]
+    sh.eval.loopnest = 0;
+
     /* from input.c: */
     crate::input::mkinit_forkreset(sh);
 
