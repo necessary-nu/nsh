@@ -31,6 +31,9 @@ pub(crate) fn command(args: env::ArgsOs, default_root: PathBuf) -> Result<bool> 
     let manifest: crate::OilsManifest =
         toml::from_str(&fs::read_to_string(options.root.join("MANIFEST.toml"))?)?;
     let report = run_manifest(&options, &manifest)?;
+    if let Some(path) = &options.summary {
+        write_summary(path, &report)?;
+    }
     match options.format {
         OutputFormat::Text => report.write_text(options.verbose),
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&report)?),
@@ -49,6 +52,7 @@ struct Options {
     specs: BTreeSet<String>,
     case_filter: Option<String>,
     max_cases: Option<usize>,
+    summary: Option<PathBuf>,
     posix: bool,
     verbose: bool,
 }
@@ -71,6 +75,7 @@ impl Options {
             specs: BTreeSet::new(),
             case_filter: None,
             max_cases: None,
+            summary: None,
             posix: false,
             verbose: false,
         };
@@ -112,6 +117,7 @@ impl Options {
                 Some("--max-cases") => {
                     options.max_cases = Some(required_string(&mut args, "--max-cases")?.parse()?);
                 }
+                Some("--summary") => options.summary = Some(required_path(&mut args, "--summary")?),
                 Some("--posix") => options.posix = true,
                 Some("--verbose") => options.verbose = true,
                 Some(value) if value.starts_with('-') => {
@@ -148,7 +154,7 @@ impl Options {
     fn usage() -> &'static str {
         "usage: nsh-survey run-oils [--group ID] [--shell PATH] [--expect-shell LABEL]\n\
                 [--timeout-ms N] [--format text|json] [--spec NAME] [--case TEXT]\n\
-                [--max-cases N] [--posix] [--verbose] [ROOT]"
+                [--max-cases N] [--summary PATH] [--posix] [--verbose] [ROOT]"
     }
 }
 
@@ -157,6 +163,12 @@ fn required_string(args: &mut env::ArgsOs, option: &str) -> Result<String> {
         .ok_or_else(|| format!("{option} requires a value"))?
         .into_string()
         .map_err(|_| format!("{option} requires UTF-8 text").into())
+}
+
+fn required_path(args: &mut env::ArgsOs, option: &str) -> Result<PathBuf> {
+    args.next()
+        .map(PathBuf::from)
+        .ok_or_else(|| format!("{option} requires a path").into())
 }
 
 fn run_manifest(options: &Options, manifest: &crate::OilsManifest) -> Result<RunReport> {
@@ -279,9 +291,11 @@ fn run_manifest(options: &Options, manifest: &crate::OilsManifest) -> Result<Run
         source_commit: manifest.source_commit.clone(),
         group: group.id.clone(),
         group_label: group.label.clone(),
-        shell: options.shell.display().to_string(),
+        shell: display_shell(&options.shell),
+        shell_sha256: crate::sha256_file(&options.shell)?,
         expectation_shell: options.expectation_shell.clone(),
         containment: containment.label().to_owned(),
+        posix: options.posix,
         timeout_ms: duration_millis(options.timeout),
         elapsed_ms: duration_millis(started.elapsed()),
         totals,
@@ -1041,8 +1055,10 @@ struct RunReport {
     group: String,
     group_label: String,
     shell: String,
+    shell_sha256: String,
     expectation_shell: String,
     containment: String,
+    posix: bool,
     timeout_ms: u64,
     elapsed_ms: u64,
     totals: Totals,
@@ -1053,8 +1069,13 @@ impl RunReport {
     fn write_text(&self, verbose: bool) {
         println!("Oils shell-spec survey: {}", self.group_label);
         println!("shell: {}", self.shell);
+        println!("shell sha256: {}", self.shell_sha256);
         println!("expectations: {}", self.expectation_shell);
         println!("containment: {}", self.containment);
+        println!(
+            "POSIX mode: {}",
+            if self.posix { "enabled" } else { "disabled" }
+        );
         for case in &self.cases {
             if verbose || !matches!(case.outcome, Outcome::Pass | Outcome::Skip) {
                 println!(
@@ -1150,6 +1171,92 @@ impl Totals {
     fn is_success(&self) -> bool {
         self.fail == 0 && self.timeout == 0 && self.error == 0
     }
+}
+
+#[derive(Serialize)]
+struct ResultSummary<'a> {
+    schema: u32,
+    survey: &'a str,
+    source_commit: &'a str,
+    group: &'a str,
+    group_label: &'a str,
+    shell: &'a str,
+    shell_sha256: &'a str,
+    expectation_shell: &'a str,
+    containment: &'a str,
+    posix: bool,
+    timeout_ms: u64,
+    totals: &'a Totals,
+    nonpassing: Vec<SummaryCase<'a>>,
+}
+
+#[derive(Serialize)]
+struct SummaryCase<'a> {
+    spec: &'a str,
+    index: usize,
+    line: usize,
+    description: &'a str,
+    outcome: Outcome,
+    status: Option<i32>,
+    qualifier: Option<&'a str>,
+    difference_fields: Vec<&'a str>,
+    note: Option<&'a str>,
+}
+
+fn write_summary(path: &Path, report: &RunReport) -> Result<()> {
+    let nonpassing = report
+        .cases
+        .iter()
+        .filter(|case| case.outcome != Outcome::Pass)
+        .map(|case| SummaryCase {
+            spec: &case.spec,
+            index: case.index,
+            line: case.line,
+            description: &case.description,
+            outcome: case.outcome,
+            status: case.status,
+            qualifier: case.qualifier.as_deref(),
+            difference_fields: case
+                .differences
+                .iter()
+                .map(|difference| difference.field.as_str())
+                .collect(),
+            note: case.note.as_deref(),
+        })
+        .collect();
+    let summary = ResultSummary {
+        schema: 1,
+        survey: report.survey,
+        source_commit: &report.source_commit,
+        group: &report.group,
+        group_label: &report.group_label,
+        shell: &report.shell,
+        shell_sha256: &report.shell_sha256,
+        expectation_shell: &report.expectation_shell,
+        containment: &report.containment,
+        posix: report.posix,
+        timeout_ms: report.timeout_ms,
+        totals: &report.totals,
+        nonpassing,
+    };
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, toml::to_string_pretty(&summary)?)?;
+    Ok(())
+}
+
+fn display_shell(shell: &Path) -> String {
+    let project = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    fs::canonicalize(project)
+        .ok()
+        .and_then(|root| shell.strip_prefix(root).ok().map(Path::to_owned))
+        .unwrap_or_else(|| shell.to_owned())
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 #[derive(Debug, Serialize)]

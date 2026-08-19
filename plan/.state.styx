@@ -1220,6 +1220,7 @@ assertions (
     {id native-oils-spec-runner, kind @complete, author "brendan@necessary.nu", at 2026-08-18T13:56:22.707009617Z}
     {id integrate-smoosh-posix, kind @complete, author "brendan@necessary.nu", at 2026-08-18T14:24:55.39603219Z}
     {id enforce-survey-test-containment, kind @complete, author "brendan@necessary.nu", at 2026-08-19T15:16:19.694214821Z}
+    {id record-bash-oracle-baseline, kind @complete, author "brendan@necessary.nu", at 2026-08-19T15:26:03.079941802Z}
 )
 
 impl_evidence (

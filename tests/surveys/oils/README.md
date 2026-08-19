@@ -70,6 +70,7 @@ the upstream Bash harness:
 cargo build --release --bin nsh
 cargo run -p nsh-survey -- run-oils --group posix-candidate
 cargo run -p nsh-survey -- run-oils --group bash-extension --format json
+cargo run -p nsh-survey -- run-oils --group bash-extension --expect-shell bash --summary results.toml
 ```
 
 The default target is `target/release/nsh`, the default group is `full`, and
@@ -93,6 +94,15 @@ or any containment check fails; reports record the active containment mode.
 Use `scripts/sandboxed -- COMMAND` for the top-level Cargo or regression-test
 command as well. That outer boundary protects the caller if harness code
 regresses before it reaches the runner's per-case sandbox.
+
+## Recorded Bash oracle
+
+`results/` contains deterministic release-shell summaries for
+`bash-comparison`, `bash-extension`, and `bash-named-diagnostic`, each run with
+`--expect-shell bash`. These are Bash compatibility observations, not claims
+of normative POSIX conformance. The summaries omit timings while retaining the
+pinned source identity, release binary hash, complete totals, and every
+non-passing case.
 
 The runner mounts a disposable fixture view over the byte-pinned corpus.
 Native Rust entry points replace the imported Python 2 helpers, including the

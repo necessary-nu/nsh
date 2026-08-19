@@ -5538,12 +5538,34 @@ children (
                 title "Record release nsh against the Oils Bash expectation oracle"
                 kind @test
                 deps (enforce-survey-test-containment)
+                sealed true
                 log (
                     {
                         at 2026-08-19T14:55:08.137012179Z
                         author "brendan@necessary.nu"
                         kind @note
                         text "Definition of done: build release nsh and execute the Oils bash-comparison, bash-extension, and bash-named-diagnostic groups with the expectation namespace explicitly set to bash. Persist deterministic machine-readable summaries that identify the pinned Oils source, release-shell hash, expectation namespace, totals, every non-passing case, timeouts, and runner errors. The results are a Bash compatibility baseline, not the normative POSIX oracle."
+                    }
+
+                    {
+                        at 2026-08-19T15:19:39.639356823Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-19T15:26:00.08517671Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Built release nsh and nsh-survey, then ran all three pinned Bash-selected Oils groups with --expect-shell bash through scripts/sandboxed and the runner's per-case containment. Recorded deterministic TOML summaries under tests/surveys/oils/results with release-shell SHA-256 f72ebfa60ed098d4a0849ae8448f09e4a95e415a99f84a2d14cf8353d2acdf4a. Results: bash-comparison 2735 selected, 1086 pass, 1613 fail, 26 unsupported, 10 known-bug; bash-extension 1121 selected, 70 pass, 1043 fail, 6 unsupported, 2 known-bug; bash-named-diagnostic 112 selected, 4 pass, 107 fail, 1 known-bug. All had zero skip, timeout, and runner error. Every non-passing case is listed; timings are omitted. A complete rerun of bash-named-diagnostic reproduced the result file byte-for-byte (SHA-256 789a0b6e9dbb79ef98b24796ad7d22ee8a95c046360b58929b64c79b30b282e4). Sandboxed nsh-survey suite: 33/33 pass."
+                    }
+
+                    {
+                        at 2026-08-19T15:26:03.079941802Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }

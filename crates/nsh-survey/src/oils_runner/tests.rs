@@ -192,3 +192,108 @@ fn evaluation_reports_byte_exact_mismatch() {
     assert_eq!(record.differences.len(), 1);
     assert_eq!(record.differences[0].field, "stdout");
 }
+
+#[test]
+fn summary_omits_timing_and_lists_failures() {
+    let scratch = ScratchTree::new().unwrap();
+    let path = scratch.path().join("result.toml");
+    let report = RunReport {
+        schema: 1,
+        survey: "oils-shell-spec",
+        source_commit: "0123456789abcdef".to_owned(),
+        group: "bash-extension".to_owned(),
+        group_label: "Bash extension survey".to_owned(),
+        shell: "target/release/nsh".to_owned(),
+        shell_sha256: "abcdef".to_owned(),
+        expectation_shell: "bash".to_owned(),
+        containment: "sandbox-pid-net-ro-root".to_owned(),
+        posix: false,
+        timeout_ms: 5_000,
+        elapsed_ms: 999,
+        totals: Totals {
+            selected: 2,
+            executed: 2,
+            pass: 1,
+            fail: 1,
+            ..Totals::default()
+        },
+        cases: vec![
+            CaseRecord {
+                spec: "sample.test.sh".to_owned(),
+                index: 0,
+                line: 7,
+                description: "passes".to_owned(),
+                outcome: Outcome::Pass,
+                status: Some(0),
+                duration_ms: 101,
+                qualifier: None,
+                differences: Vec::new(),
+                note: None,
+            },
+            CaseRecord {
+                spec: "sample.test.sh".to_owned(),
+                index: 1,
+                line: 12,
+                description: "fails".to_owned(),
+                outcome: Outcome::Fail,
+                status: Some(1),
+                duration_ms: 202,
+                qualifier: Some("BUG bash".to_owned()),
+                differences: vec![Difference::integer("status", 0, 1)],
+                note: None,
+            },
+        ],
+    };
+
+    write_summary(&path, &report).unwrap();
+    let text = fs::read_to_string(path).unwrap();
+    let summary: toml::Value = toml::from_str(&text).unwrap();
+    let nonpassing = summary["nonpassing"].as_array().unwrap();
+    assert_eq!(nonpassing.len(), 1);
+    assert_eq!(nonpassing[0]["index"].as_integer(), Some(1));
+    assert_eq!(
+        nonpassing[0]["difference_fields"][0].as_str(),
+        Some("status")
+    );
+    assert!(summary.get("elapsed_ms").is_none());
+    assert!(!text.contains("duration_ms"));
+}
+
+#[test]
+fn recorded_bash_summaries_are_complete() {
+    let root = crate::survey_root();
+    let manifest: crate::OilsManifest =
+        toml::from_str(&fs::read_to_string(root.join("MANIFEST.toml")).unwrap()).unwrap();
+    for group_id in ["bash-comparison", "bash-extension", "bash-named-diagnostic"] {
+        let path = root.join("results").join(format!("{group_id}.toml"));
+        let summary: toml::Value = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let group = manifest
+            .groups
+            .iter()
+            .find(|group| group.id == group_id)
+            .unwrap();
+        let totals = summary["totals"].as_table().unwrap();
+        let selected = usize::try_from(totals["selected"].as_integer().unwrap()).unwrap();
+        let executed = usize::try_from(totals["executed"].as_integer().unwrap()).unwrap();
+        let pass = usize::try_from(totals["pass"].as_integer().unwrap()).unwrap();
+        let nonpassing = summary["nonpassing"].as_array().unwrap();
+
+        assert_eq!(
+            summary["source_commit"].as_str(),
+            Some(manifest.source_commit.as_str())
+        );
+        assert_eq!(summary["group"].as_str(), Some(group_id));
+        assert_eq!(summary["expectation_shell"].as_str(), Some("bash"));
+        assert_eq!(
+            summary["containment"].as_str(),
+            Some("sandbox-pid-net-ro-root")
+        );
+        assert_eq!(selected, group.cases);
+        assert_eq!(executed, selected);
+        assert_eq!(totals["skip"].as_integer(), Some(0));
+        assert_eq!(totals["timeout"].as_integer(), Some(0));
+        assert_eq!(totals["error"].as_integer(), Some(0));
+        assert_eq!(nonpassing.len(), selected - pass);
+        assert_eq!(summary["shell_sha256"].as_str().unwrap().len(), 64);
+    }
+}
