@@ -46,7 +46,13 @@ fn shell(arguments: &[OsString]) -> Result<i32> {
     let encoded = env::var("NSH_SURVEY_SMOOSH_FLAGS_JSON")
         .map_err(|_| "NSH_SURVEY_SMOOSH_FLAGS_JSON is not set")?;
     let flags: Vec<String> = serde_json::from_str(&encoded)?;
-    let error = Command::new(shell).args(flags).args(arguments).exec();
+    // The imported byte oracles were authored for the `smoosh` executable.
+    // Preserve that invocation persona while process-replacing this wrapper.
+    let error = Command::new(shell)
+        .arg0("smoosh")
+        .args(flags)
+        .args(arguments)
+        .exec();
     Err(error.into())
 }
 

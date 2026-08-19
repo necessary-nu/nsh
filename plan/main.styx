@@ -5648,6 +5648,20 @@ children (
                                 kind @note
                                 text "Owns sh.set.ifs.test. Definition of done: TEST_SHELL and all fixture entry points remain invocable under arbitrary shell IFS values, including IFS=123, without depending on digits or other split characters in generated paths. Add a regression that proves the upstream script reaches all three nested shell invocations; retain isolated HOME/cwd/env, bounded capture, process-group cleanup, and the no-unsafe/no-RawFd/no-libc survey-runner boundary."
                             }
+
+                            {
+                                at 2026-08-19T15:36:43.925762577Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-19T15:41:38.214690782Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Made TEST_SHELL a stable relative spelling from every per-case working directory, so the generated scratch PID/counter cannot be split by the pinned exported IFS=123. The native wrapper still process-replaces the selected shell and now supplies the upstream smoosh argv[0] persona without unsafe/libc/RawFd handling. Added an integration regression that invokes the real nsh-survey binary and proves the pinned sh.set.ifs.test reaches all three nested /bin/sh invocations. Sandboxed cargo test -p nsh-survey passes 33 unit plus 1 integration test; the targeted release-nsh survey passes 1/1 with zero failures, timeouts, or errors."
+                            }
                         )
                     }
 

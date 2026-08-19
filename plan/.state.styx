@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-08-19T15:36:12.898154662Z
+last_sync_at 2026-08-19T15:41:28.449453464Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -1737,7 +1737,11 @@ impl_evidence (
     ), rule_versions_seen (
         {id sh.exit-status-values, version 0}
     )}
-    {id fix-smoosh-runner-fidelity}
+    {id fix-smoosh-runner-fidelity, covered_rules (
+        compat.smoosh.ifs-launch
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.smoosh.ifs-launch}
+    )}
     {id fix-xcu-exit-status-listed-values-binding, covered_rules (
         xcu.exit-status.listed-values-binding
     ), covered_claims (

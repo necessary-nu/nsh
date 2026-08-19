@@ -205,7 +205,7 @@ fn run_manifest(options: &Options, manifest: &crate::smoosh::Manifest) -> Result
         (OsString::from("LOGNAME"), logname),
         (
             OsString::from("TEST_SHELL"),
-            fixture.shell.as_os_str().to_owned(),
+            fixture.test_shell.as_os_str().to_owned(),
         ),
         (
             OsString::from("TEST_SHELL_FLAGS"),
@@ -295,11 +295,13 @@ fn matches_test(filter: &str, name: &str) -> bool {
 
 struct Fixture {
     shell: PathBuf,
+    test_shell: PathBuf,
     util: PathBuf,
     home: PathBuf,
 }
 
 impl Fixture {
+    // [spec:nsh:req:compat.smoosh.ifs-launch]
     fn install(scratch: &Path) -> Result<Self> {
         let root = scratch.join("smoosh-fixture");
         let util = root.join("util");
@@ -312,7 +314,17 @@ impl Fixture {
         for name in ["argv", "fds", "getenv", "readdir"] {
             symlink(&executable, util.join(name))?;
         }
-        Ok(Self { shell, util, home })
+        // Every case starts exactly two levels below `scratch`. Keep
+        // TEST_SHELL independent of the generated scratch component, whose
+        // decimal PID used to be split after the upstream test exported
+        // IFS=123. The top-level launch still uses the canonical absolute path.
+        let test_shell = PathBuf::from("../../smoosh-fixture/smoosh-shell");
+        Ok(Self {
+            shell,
+            test_shell,
+            util,
+            home,
+        })
     }
 }
 
