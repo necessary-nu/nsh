@@ -915,6 +915,17 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<c_i
                 q += 1;
 
                 if c == b'\n' as c_int {
+                    let previous = {
+                        let pf = cur_pf(sh);
+                        (q - pf.pos >= 2).then(|| pf.buf[q - 2])
+                    };
+                    if nsh_platform::input_newline_width(previous) == 2 {
+                        // Keep the unread tail contiguous when the platform
+                        // treats the preceding CR as part of this newline.
+                        let pf = cur_pf(sh);
+                        pf.buf.copy_within(q - 1..q + more as usize, q - 2);
+                        q -= 1;
+                    }
                     break 'outer; /* goto done */
                 }
                 if c != b'\t' as c_int && c != b' ' as c_int {

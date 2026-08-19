@@ -299,6 +299,13 @@ pub const fn shell_directory_separator() -> u8 {
     b'/'
 }
 
+pub const fn input_newline_width(previous: Option<u8>) -> usize {
+    match previous {
+        Some(b'\r') => 2,
+        _ => 1,
+    }
+}
+
 pub fn resolve_command_path(path: &Path, environment: &[(OsString, OsString)]) -> PathBuf {
     if path.is_file() || path.extension().is_some() {
         return path.to_path_buf();
@@ -3260,6 +3267,13 @@ mod tests {
         assert!(shell_path_is_absolute(b"C:/rooted"));
         assert!(!shell_path_is_absolute(b"relative/path"));
         assert!(!shell_path_is_absolute(br"\rooted"));
+    }
+
+    #[test]
+    fn crlf_is_one_input_newline() {
+        assert_eq!(input_newline_width(None), 1);
+        assert_eq!(input_newline_width(Some(b'x')), 1);
+        assert_eq!(input_newline_width(Some(b'\r')), 2);
     }
 
     #[test]

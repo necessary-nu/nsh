@@ -222,6 +222,10 @@ pub const fn shell_directory_separator() -> u8 {
     b'/'
 }
 
+pub const fn input_newline_width(_previous: Option<u8>) -> usize {
+    1
+}
+
 pub fn resolve_command_path(path: &Path, _environment: &[(OsString, OsString)]) -> PathBuf {
     path.to_path_buf()
 }
