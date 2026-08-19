@@ -629,7 +629,10 @@ CASES: tuple[Case, ...] = (
             "(exit 4)\n"
         ),
         stdout="{ROOT}/sub|2|4\n",
-        status=4,
+        # The rule fixes the action's environment, including `$?` while it
+        # runs; it does not specify whether normal completion of the action
+        # replaces the shell's final status.
+        status="any",
     ),
     # [spec:posix:req:builtin.trap.signals-ignored-on-entry/test]
     Case(

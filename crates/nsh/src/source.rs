@@ -241,9 +241,9 @@ impl Shell {
                     self.status = status;
                 }
                 crate::init::exitreset(self);
-                let status = crate::trap::exitshell(self);
-                self.exited = Some(status);
-                Ok(status)
+                let exit_status = crate::trap::exitshell(self, status);
+                self.exited = Some(exit_status);
+                Ok(exit_status)
             }
             Err(e) => {
                 /* What dash's top-level handler does with an exception,

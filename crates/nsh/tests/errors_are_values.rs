@@ -279,27 +279,28 @@ fn redirect_failure_frees_ifs_regions() {
 ///
 /// The C never had the choice: a `longjmp` to `main_handler` lands at
 /// `exit:`. Returning an exit as a value does have the choice, and taking
-/// the wrong one skips `inner`. The action's final successful `echo` is
-/// then the child's status under the adopted Smoosh EXIT-action rule, so
-/// the parent observes zero rather than the status initially given to
-/// `exit`.
+/// the wrong one skips `inner`. The child's explicit `exit 2` remains its
+/// status after its own EXIT action; the parent observes 2, then its
+/// successful `echo` becomes the parent's implicit-shutdown status.
+// [spec:posix:req:builtin.exit.wait-status-from-n/test]
 // [spec:nsh:req:compat.smoosh.trap-status/test]
 #[test]
 fn subshell_exit_trap_runs() {
     let (out, status) = run(r#"trap '( trap "echo inner" EXIT; exit 2 ); echo $?' EXIT"#);
-    assert_eq!(out, "inner\n0\n");
+    assert_eq!(out, "inner\n2\n");
     assert_eq!(status, 0);
 }
 
-/// A normally completed EXIT action contributes its final command status.
-/// An explicit `exit` inside that action instead contributes the status it
-/// selects and cannot re-enter the action, which was already taken.
+/// An explicit outer `exit n` survives a normally completed EXIT action. An
+/// `exit` inside that action instead selects a replacement and cannot re-enter
+/// the action, which was already taken.
+// [spec:posix:req:builtin.exit.wait-status-from-n/test]
 // [spec:nsh:req:compat.smoosh.trap-status/test]
 #[test]
-fn exit_trap_final_status_wins() {
+fn explicit_exit_survives_action() {
     let (out, status) = run("trap 'echo T; true' EXIT; exit 5");
     assert_eq!(out, "T\n");
-    assert_eq!(status, 0);
+    assert_eq!(status, 5);
 
     // An `exit` inside the action makes its own status the final one.
     let (out, status) = run("trap 'echo T; exit 9' EXIT; exit 3");

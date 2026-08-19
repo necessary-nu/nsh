@@ -5827,6 +5827,20 @@ children (
                                 kind @note
                                 text "Definition of done: build release nsh; regenerate the deterministic Smoosh result summary; obtain selected=186, executed=186, pass=186, fail=0, timeout=0, error=0, skip=0; and leave every regular and known-hang case enabled under its locked deadline. The workspace tests, strict nsh-survey clippy, normative POSIX.1-2024 run, Oils verification, and a representative Oils release-nsh smoke must also remain green."
                             }
+
+                            {
+                                at 2026-08-19T17:15:14.983635468Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-19T17:33:28.987447064Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Final sandboxed evidence: release nsh/nsh-survey build passes; full Smoosh selected=186 executed=186 pass=186 fail=0 timeout=0 error=0 skip=0 and RESULTS.toml regenerated from shell sha256 80ff7f94a3a46ce170e0c67ce0ea30aa180520ae6ff83ba897b0d0230ef; POSIX.1-2024 harness cases PASS=731 FAIL=0 and rules PASS=973 FAIL=0; Oils import verification covers 170 files/2755 active OSH cases at 15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380; representative Oils smoke 18/18; cargo test --workspace -j 1 passed; strict nsh-survey clippy passes; POSIX harness unit tests pass; added-line scan found no unsafe/libc::/RawFd/dup2/close additions; git diff --check passes. Every executable test/build/survey command ran through scripts/sandboxed."
+                            }
                         )
                     }
                 )

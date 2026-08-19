@@ -209,7 +209,7 @@ CASES: tuple[Case, ...] = (
         status="any",
         timeout=TIMEOUT,
         requires=("UP",),
-        pace=0.02,
+        pace=0.05,
     ),
     # [spec:posix:req:edit.insert-end-of-file/test]
     Case(

@@ -112,6 +112,13 @@ pub struct EvalState {
     /// Keeping that mode on the shell makes it survive functions and `eval`
     /// without adding a process-global trap flag.
     pub(crate) signal_trap_depth: usize,
+    /// Status used by operand-less `exit` when that command directly ends
+    /// the currently executing trap action.
+    ///
+    /// A fork clears this: `exit` in a subshell ends the subshell, not the
+    /// parent's trap action. Signal actions temporarily replace the value
+    /// with the status they interrupted, then restore the outer action.
+    pub(crate) trap_default_exit_status: Option<c_int>,
     /// The line a diagnostic reports — the `17` of `sh: 17: cd: ...`.
     ///
     /// `error.rs`'s `errlinno`. Six sites write it, five of them here
@@ -146,6 +153,7 @@ impl EvalState {
             inps4: 0,
             back_exitstatus: 0,
             signal_trap_depth: 0,
+            trap_default_exit_status: None,
             errlinno: 0,
             commandname: None,
         }

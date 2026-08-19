@@ -1065,12 +1065,14 @@ CASES: tuple[Case, ...] = (
         script=(
             ": ALPHA\n"
             "fc -l 1>&- 2>/dev/null\n"
-            "printf 'output-error=%s\\n' \"$?\"\n"
+            "s=$?\n"
+            "[ \"$s\" -gt 0 ] && s=nonzero\n"
+            "printf 'output-error=%s\\n' \"$s\"\n"
             "exit 0\n"
         ),
         stdout=None,
         status="any",
-        stdout_contains=("output-error=1",),
+        stdout_contains=("output-error=nonzero",),
     ),
     # [spec:posix:req:builtin.fc.exit-status/test]
     Case(

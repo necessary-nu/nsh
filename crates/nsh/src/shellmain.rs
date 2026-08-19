@@ -139,6 +139,7 @@ pub fn main(
      * the loop for the reason the comment above gives, and the closure's
      * `Result<Flow, Error>` is the shape the handler below reads. */
     let mut leaving: Option<crate::status::ExitStatus> = None;
+    let mut explicit_exit_status: Option<c_int> = None;
 
     loop {
         /* What the body had to say, which the C read off `exception`
@@ -240,7 +241,7 @@ pub fn main(
                             // exit:
                             /* #if PROFILE: monitor(0); */
                             /* #if GPROF: _mcleanup(); */
-                            leaving = Some(crate::trap::exitshell(sh));
+                            leaving = Some(crate::trap::exitshell(sh, explicit_exit_status.take()));
                             return Ok(crate::eval::Flow::END);
                         }
                     }
@@ -312,6 +313,7 @@ pub fn main(
                 || iflag(sh) == 0
                 || sh.shell_level != 0
             {
+                explicit_exit_status = if e_is_exit { selected_status } else { None };
                 entry = 5; // goto exit
                 continue;
             }
@@ -522,7 +524,7 @@ pub(crate) fn exit_from_child(
      * [dec:nsh:fork-child-is-a-terminus] makes a terminus rather than a
      * frame. Returning from here would carry the child back up through
      * frames the parent owns. */
-    let status = crate::trap::exitshell(sh);
+    let status = crate::trap::exitshell(sh, selected_status);
     nsh_platform::exit_immediately(status.code().into());
 }
 

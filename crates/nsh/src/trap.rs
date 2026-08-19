@@ -614,9 +614,11 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
          * ordinary status, so the command performs its own redirection,
          * input, and local-variable cleanup before returning here. Syntax
          * and interrupt errors still arrive as `Err` and propagate. */
+        let outer_trap_status = sh.eval.trap_default_exit_status.replace(status);
         sh.eval.signal_trap_depth += 1;
         let outcome = crate::eval::evalstring(sh, p.as_bstr(), 0);
         sh.eval.signal_trap_depth -= 1;
+        sh.eval.trap_default_exit_status = outer_trap_status;
         match outcome? {
             Flow::Done(_) => {}
             exit @ Flow::Exit { .. } => return Ok(exit),
@@ -672,7 +674,13 @@ pub fn setinteractive(sh: &mut crate::context::Shell, on: c_int) {
 /// `exit_from_child`, `jobs`' `forkchild_fatal` and `redir.rs:483` all
 /// end a child the library forked, which `[dec:nsh:fork-child-is-a-terminus]`
 /// says is a terminus rather than a frame.
-pub fn exitshell(sh: &mut crate::context::Shell) -> crate::status::ExitStatus {
+pub fn exitshell(
+    sh: &mut crate::context::Shell,
+    explicit_status: Option<c_int>,
+) -> crate::status::ExitStatus {
+    if let Some(status) = explicit_status {
+        sh.status = status;
+    }
     'out: {
         /* `trap[0] = NULL` with no free: the C leaks the EXIT action on
          * purpose so `evalstring` can still read it.  Taking it keeps the
@@ -689,22 +697,35 @@ pub fn exitshell(sh: &mut crate::context::Shell) -> crate::status::ExitStatus {
              * `out:` with nothing left to inspect it. What must not be
              * dropped is an `exit` *inside* the trap, because it names the
              * status the shell leaves with. */
-            match crate::eval::evalstring(sh, p.as_bstr(), 0) {
+            let trap_entry_status = sh.status;
+            let outer_trap_status = sh
+                .eval
+                .trap_default_exit_status
+                .replace(trap_entry_status);
+            let outcome = crate::eval::evalstring(sh, p.as_bstr(), 0);
+            sh.eval.trap_default_exit_status = outer_trap_status;
+            match outcome {
                 Ok(crate::eval::Flow::Exit {
                     status: Some(status),
                 }) => {
                     sh.status = status;
                     break 'out;
                 }
-                Ok(crate::eval::Flow::Exit { status: None }) => break 'out,
-                Ok(crate::eval::Flow::Done(status)) => sh.status = status,
+                Ok(crate::eval::Flow::Exit { status: None }) => {
+                    if let Some(status) = explicit_status {
+                        sh.status = status;
+                    }
+                    break 'out;
+                }
+                Ok(crate::eval::Flow::Done(status)) => {
+                    sh.status = explicit_status.unwrap_or(status);
+                }
                 Err(e) => {
-                    /* The EXIT trap failed. `_exit(exitstatus)` below is
-                     * what leaves, and the status it leaves with is this
-                     * error's -- written here because the raise no longer
-                     * writes it. `trap 'nosuchcmd' EXIT; exit 3` exits
-                     * with the trap's status, not 3, and that is dash. */
-                    sh.status = e.status();
+                    /* The EXIT trap failed. An explicit outer `exit n`
+                     * still names the status; implicit shutdown instead
+                     * uses the action error. Write the selected value here
+                     * because raising the error no longer writes it. */
+                    sh.status = explicit_status.unwrap_or_else(|| e.status());
                     drop(e);
                     break 'out;
                 }

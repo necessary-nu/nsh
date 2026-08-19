@@ -33,12 +33,14 @@ pub fn exitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     let status = match args.get(1) {
         Some(status) => crate::mystring::number(sh, status)?,
-        None => sh.status,
+        // POSIX gives operand-less `exit` the status immediately preceding
+        // a trap action when the command directly ends that action. A
+        // subshell clears this context, so the Smoosh nested-action case
+        // still uses the subshell's then-current status.
+        None => sh.eval.trap_default_exit_status.unwrap_or(sh.status),
     };
 
-    // In an EXIT action, the operand-free form uses the action's
-    // then-current status rather than the status that entered the action.
-    // Carrying the value now also keeps nested traps independent.
+    // Carrying the selected value keeps nested traps independent.
     // [spec:nsh:req:compat.smoosh.trap-status]
     Ok(Flow::exit(status))
 }

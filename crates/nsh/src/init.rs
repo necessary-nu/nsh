@@ -98,6 +98,9 @@ pub fn forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
      * boundary. */
     // [spec:nsh:req:compat.smoosh.control-boundaries]
     sh.eval.loopnest = 0;
+    // An `exit` in the child ends this forked execution environment rather
+    // than the trap action whose syntax happened to create it.
+    sh.eval.trap_default_exit_status = None;
 
     /* from input.c: */
     crate::input::mkinit_forkreset(sh);

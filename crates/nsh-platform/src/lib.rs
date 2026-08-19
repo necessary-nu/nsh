@@ -81,7 +81,7 @@ pub fn restore_shell_process_runtime_state() {
     let closed = CLOSED_STANDARD_FDS.load(AtomicOrdering::Relaxed);
     let changes = (0..3)
         .filter(|fd| closed & (1 << fd) != 0)
-        .map(|fd| (fd as i32, None));
+        .map(|fd| (fd, None));
     if let Ok(changes) = ProcessFdChanges::new(changes) {
         let _ = changes.apply();
     }
