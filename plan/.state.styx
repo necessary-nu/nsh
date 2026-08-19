@@ -5032,4 +5032,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule compat.bash.options-builtins-dispatch}
     )}
+    {id introduce-bash-value-model, covered_rules (
+        compat.bash.value-model
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.value-model}
+    )}
 )

@@ -20,6 +20,9 @@ use crate::context::Shell;
 use crate::error::{Error, INTOFF, INTON};
 use crate::options::{NOPTS, options_changed};
 
+pub(crate) mod value;
+use value::{BashAttributes, VariableValue};
+
 /* flags */
 pub const VEXPORT: c_int = 0x01;
 pub const VREADONLY: c_int = 0x02;
@@ -50,7 +53,10 @@ enum Callback {
 #[derive(Clone, Debug)]
 struct Var {
     flags: c_int,
-    value: Option<BString>,
+    /// `None` is declared-but-unset; a set value records its structural kind.
+    value: Option<VariableValue>,
+    /// Declaration attributes that do not already have a dash flag.
+    bash_attributes: BashAttributes,
     callback: Callback,
     /// `$LINENO` is computed on read until a script assigns to it.
     dynamic_lineno: bool,
@@ -60,7 +66,8 @@ impl Var {
     fn set(value: &[u8], flags: c_int, callback: Callback) -> Self {
         Self {
             flags,
-            value: Some(BString::from(value)),
+            value: Some(VariableValue::Scalar(BString::from(value))),
+            bash_attributes: BashAttributes::new(),
             callback,
             dynamic_lineno: false,
         }
@@ -70,6 +77,7 @@ impl Var {
         Self {
             flags: flags | VUNSET,
             value: None,
+            bash_attributes: BashAttributes::new(),
             callback,
             dynamic_lineno: false,
         }
@@ -128,7 +136,9 @@ impl VarTable {
         if name == b"LINENO" {
             if let Some(var) = self.tab.get_mut(name) {
                 if var.dynamic_lineno && var.flags & VUNSET == 0 {
-                    var.value = Some(BString::from(self.lineno.to_string().into_bytes()));
+                    var.value = Some(VariableValue::Scalar(BString::from(
+                        self.lineno.to_string().as_bytes(),
+                    )));
                 }
             }
         }
@@ -147,7 +157,7 @@ fn builtin_value(sh: &Shell, name: &[u8]) -> BString {
     sh.vars
         .tab
         .get(BStr::new(name))
-        .and_then(|var| var.value.clone())
+        .and_then(Var::scalar_owned)
         .unwrap_or_default()
 }
 
@@ -235,10 +245,9 @@ fn selected_locale(sh: &Shell) -> std::io::Result<nsh_platform::Locale> {
     let nonempty = |name: &[u8]| {
         sh.vars.tab.get(BStr::new(name)).and_then(|var| {
             (var.flags & VUNSET == 0)
-                .then_some(var.value.as_ref())
+                .then(|| var.scalar_owned())
                 .flatten()
                 .filter(|value| !value.is_empty())
-                .cloned()
         })
     };
     let selected: Vec<_> = LOCALE_CATEGORIES
@@ -370,11 +379,12 @@ pub(crate) fn mkinit_init_from(sh: &mut Shell, env: EnvSource<'_>) -> Result<(),
         let entry = sh.vars.tab.entry(name.to_owned()).or_insert_with(|| Var {
             flags: 0,
             value: None,
+            bash_attributes: BashAttributes::new(),
             callback: Callback::Locale,
             dynamic_lineno: false,
         });
         entry.flags = (entry.flags | VEXPORT) & !VUNSET;
-        entry.value = Some(value.clone());
+        entry.value = Some(VariableValue::Scalar(value.clone()));
         entry.callback = Callback::Locale;
         entry.dynamic_lineno = false;
     }
@@ -493,7 +503,8 @@ fn set_entry(
             name.to_owned(),
             Var {
                 flags,
-                value: value.map(BStr::to_owned),
+                value: value.map(|value| VariableValue::Scalar(value.to_owned())),
+                bash_attributes: BashAttributes::new(),
                 callback,
                 dynamic_lineno: false,
             },
@@ -523,12 +534,22 @@ fn set_entry(
     }
 
     let callback = old.callback;
-    let callback_value = value.map(BStr::to_owned);
+    let bash_attributes = old.bash_attributes;
+    let mut next_value = old.value;
+    match (next_value.as_mut(), value) {
+        (Some(existing), Some(value)) => existing.assign_scalar(value),
+        (None, Some(value)) => next_value = Some(VariableValue::Scalar(value.to_owned())),
+        (_, None) => next_value = None,
+    }
+    let callback_value = next_value
+        .as_ref()
+        .and_then(VariableValue::scalar_owned);
     sh.vars.tab.insert(
         name.to_owned(),
         Var {
             flags,
-            value: callback_value.clone(),
+            value: next_value,
+            bash_attributes,
             callback,
             dynamic_lineno: false,
         },
@@ -551,7 +572,7 @@ pub(crate) fn lookup_bytes(sh: &mut Shell, name: &BStr) -> Option<BString> {
     sh.vars.refresh_lineno(name);
     sh.vars.tab.get(name).and_then(|var| {
         (var.flags & VUNSET == 0)
-            .then(|| var.value.clone())
+            .then(|| var.scalar_owned())
             .flatten()
     })
 }
@@ -634,9 +655,8 @@ pub fn environment(sh: &Shell) -> Vec<CString> {
         .filter(|(_, var)| var.flags & (VEXPORT | VUNSET) == VEXPORT)
         .map(|(name, var)| {
             let value = var
-                .value
-                .as_ref()
-                .map_or_else(|| BStr::new(b""), |value| BStr::new(value.as_slice()));
+                .scalar()
+                .unwrap_or_else(|| BStr::new(b""));
             let mut entry = Vec::with_capacity(name.len() + value.len() + 1);
             entry.extend_from_slice(name);
             entry.push(b'=');
@@ -662,9 +682,9 @@ pub(crate) fn show_vars(sh: &mut Shell, prefix: &BStr, on: c_int, off: c_int) ->
                 record.push(b' ');
             }
             record.extend_from_slice(name);
-            if let Some(value) = &var.value {
+            if let Some(value) = var.scalar() {
                 record.push(b'=');
-                record.extend_from_slice(&crate::mystring::single_quote(BStr::new(value.as_slice())));
+                record.extend_from_slice(&crate::mystring::single_quote(value));
             }
             record.push(b'\n');
             record
@@ -752,7 +772,7 @@ fn poplocalvars(sh: &mut Shell) {
             LocalVar::Saved { name, previous } => {
                 let callback = previous.callback;
                 let flags = previous.flags;
-                let value = previous.value.clone();
+                let value = previous.scalar_owned();
                 sh.vars.tab.insert(name.clone(), previous);
                 if flags & VNOFUNC == 0 {
                     run_callback(
@@ -783,7 +803,7 @@ impl Shell {
         self.vars.refresh_lineno(name);
         self.vars.tab.get(name).and_then(|var| {
             (var.flags & VUNSET == 0)
-                .then(|| var.value.as_ref().map(|value| BStr::new(value.as_slice())))
+                .then(|| var.scalar())
                 .flatten()
         })
     }
@@ -806,7 +826,7 @@ impl Shell {
             .tab
             .iter()
             .filter(|(_, var)| var.flags & VUNSET == 0)
-            .filter_map(|(name, var)| Some((name.clone(), var.value.clone()?)))
+            .filter_map(|(name, var)| Some((name.clone(), var.scalar_owned()?)))
             .collect()
     }
 }

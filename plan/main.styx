@@ -6054,6 +6054,13 @@ children (
                                         kind @note
                                         text "Definition of done: replace scalar-only storage with an explicit scalar/indexed/associative representation, preserve byte-oriented scalar APIs and unset-versus-empty behavior, define sparse key and attribute operations, and keep the complete default-mode regression suite green."
                                     }
+
+                                    {
+                                        at 2026-08-19T20:58:11.740631384Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
 
