@@ -5580,12 +5580,55 @@ children (
                         title "Classify and specify all 31 Smoosh failure contracts"
                         kind @docs
                         deps (record-bash-oracle-baseline integrate-smoosh-posix)
+                        sealed true
                         log (
                             {
                                 at 2026-08-19T14:55:08.269972916Z
                                 author "brendan@necessary.nu"
                                 kind @note
                                 text "Definition of done: account for each of the 31 recorded Smoosh failures exactly once; map normative behavior to existing POSIX rules, preserve relevant dash-port contracts, define nsh compatibility rules for adopted extensions or exact conventions that neither corpus specifies, and register every intentional POSIX-over-dash or extension-over-dash decision. Oracle bytes may change only when the pinned upstream test is demonstrably contaminated by the native runner; no failure may be hidden, skipped, or reclassified merely to make totals green."
+                            }
+
+                            {
+                                at 2026-08-19T15:26:42.952964678Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-19T15:35:43.14927146Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "For the 31-case closure only, an existing POSIX requirement or the new nsh Smoosh compatibility profile takes precedence over a conflicting observable dash-port result. This is an intentional, case-scoped departure from bug-for-bug dash behavior; dash rules remain implementation anchors and all internal ownership, unwinding, descriptor, and execution contracts not determining the named oracle remain required."
+                            }
+
+                            {
+                                at 2026-08-19T15:35:43.305216881Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Adopt the surveyed non-POSIX surface as explicit nsh compatibility behavior: set -o nonlexicalctrl with dynamic caller-loop control, the interactive history builtin with history -c and nolog, source as a fatal dot alias, and set -h hash-all behavior. These are extensions over dash rather than claims that POSIX requires them."
+                            }
+
+                            {
+                                at 2026-08-19T15:35:43.433875993Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "Treat the pinned Smoosh byte and status oracles as the closure profile. The native runner may correct only its own launch contamination: use an IFS-safe wrapper spelling for sh.set.ifs.test and present the upstream 'smoosh' argv[0] persona for program-name diagnostics. No imported test, expected byte stream, timeout class, or failure classification is changed."
+                            }
+
+                            {
+                                at 2026-08-19T15:36:02.05658928Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Specified the pinned 31-case baseline in docs/spec/nsh/smoosh-compatibility.md. The inventory contains 31 unique failure rows: 1 runner artifact, 2 control-boundary cases, 7 trap cases, 11 error/status/diagnostic cases, 7 adopted extensions, and 3 interactive/job-control cases. Each maps to an existing POSIX rule and relevant dash-port anchor while one of nine new nsh compatibility rules freezes runner fidelity, an unspecified choice, extension behavior, or exact byte/status convention. Assigned those nine rules to the six downstream implementation leaves; nplan lint is clean and git diff --check passes."
+                            }
+
+                            {
+                                at 2026-08-19T15:36:02.180018603Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Doing → Done (nplan complete)"
                             }
                         )
                     }
@@ -5594,6 +5637,9 @@ children (
                         id fix-smoosh-runner-fidelity
                         title "Remove Smoosh runner path and environment artifacts"
                         kind @fix
+                        implements {
+                            nsh-library ([spec:nsh:req:compat.smoosh.ifs-launch])
+                        }
                         deps (specify-smoosh-failure-contracts)
                         log (
                             {
@@ -5609,6 +5655,9 @@ children (
                         id fix-smoosh-control-flow-boundaries
                         title "Fix loop-control behavior across lexical, dot, and subshell boundaries"
                         kind @fix
+                        implements {
+                            nsh-library ([spec:nsh:req:compat.smoosh.control-boundaries])
+                        }
                         deps (fix-smoosh-runner-fidelity)
                         log (
                             {
@@ -5624,6 +5673,9 @@ children (
                         id fix-smoosh-exit-trap-semantics
                         title "Fix EXIT and signal-trap status propagation"
                         kind @fix
+                        implements {
+                            nsh-library ([spec:nsh:req:compat.smoosh.trap-status])
+                        }
                         deps (fix-smoosh-runner-fidelity)
                         log (
                             {
@@ -5639,6 +5691,9 @@ children (
                         id fix-smoosh-error-status-diagnostics
                         title "Fix special-builtin, expansion, redirection, and diagnostic contracts"
                         kind @fix
+                        implements {
+                            nsh-library ([spec:nsh:req:compat.smoosh.error-contracts])
+                        }
                         deps (fix-smoosh-runner-fidelity)
                         log (
                             {
@@ -5654,6 +5709,14 @@ children (
                         id fix-smoosh-extension-builtins-options
                         title "Implement surveyed source, history, hash, and control-flow extensions"
                         kind @fix
+                        implements {
+                            nsh-library (
+                                [spec:nsh:req:compat.smoosh.nonlexical-control]
+                                [spec:nsh:req:compat.smoosh.history-builtin]
+                                [spec:nsh:req:compat.smoosh.source-builtin]
+                                [spec:nsh:req:compat.smoosh.hash-all]
+                            )
+                        }
                         deps (fix-smoosh-runner-fidelity)
                         log (
                             {
@@ -5669,6 +5732,9 @@ children (
                         id fix-smoosh-interactive-job-control
                         title "Fix interactive prompt and monitor-mode job behavior"
                         kind @fix
+                        implements {
+                            nsh-library ([spec:nsh:req:compat.smoosh.interactive-job-prompt])
+                        }
                         deps (fix-smoosh-runner-fidelity)
                         log (
                             {

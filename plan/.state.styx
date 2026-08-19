@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-08-18T11:45:22.55395116Z
+last_sync_at 2026-08-19T15:36:12.898154662Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -595,6 +595,15 @@ rule_versions (
     {id cmd.while-execution, version 0}
     {id cmd.while-exit-status, version 0}
     {id cmd.while-format, version 0}
+    {id compat.smoosh.control-boundaries, version 0}
+    {id compat.smoosh.error-contracts, version 0}
+    {id compat.smoosh.hash-all, version 0}
+    {id compat.smoosh.history-builtin, version 0}
+    {id compat.smoosh.ifs-launch, version 0}
+    {id compat.smoosh.interactive-job-prompt, version 0}
+    {id compat.smoosh.nonlexical-control, version 0}
+    {id compat.smoosh.source-builtin, version 0}
+    {id compat.smoosh.trap-status, version 0}
     {id edit.append-last-bigword, version 0}
     {id edit.block-mode-terminals, version 0}
     {id edit.change-motion, version 0}
@@ -763,6 +772,7 @@ rule_versions (
     {id grammar.token-symbols, version 0}
     {id grammar.while-until-clause, version 0}
     {id grammar.word-expansion-timing, version 0}
+    {id interactive.default-history-navigation, version 0}
     {id jobctl.background-job, version 0}
     {id jobctl.background-job-brought-to-foreground, version 0}
     {id jobctl.background-job-completion-message, version 0}
@@ -1098,6 +1108,9 @@ rule_versions (
 
 derived_priorities (
     {id builtins-modules, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id define-oils-survey-manifests, priority 2, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id enable-default-history-navigation, priority 2, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id enforce-survey-test-containment, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
     {id fix-builtin-alias-stdout-format, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
     {id fix-builtin-cd-operand-empty-string, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
     {id fix-builtin-cd-opt-e, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
@@ -1168,13 +1181,27 @@ derived_priorities (
     {id fix-param-ps1-two-pass, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
     {id fix-pattern-bracket-expression, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
     {id fix-sh-exit-status-values, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id fix-smoosh-control-flow-boundaries, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id fix-smoosh-error-status-diagnostics, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id fix-smoosh-exit-trap-semantics, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id fix-smoosh-extension-builtins-options, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id fix-smoosh-interactive-job-control, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id fix-smoosh-runner-fidelity, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
     {id fix-xcu-exit-status-listed-values-binding, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id import-oils-osh-corpus, priority 1, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id integrate-smoosh-posix, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
     {id logical-descriptor-table, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id native-oils-spec-runner, priority 2, derived_at 2026-08-19T15:35:34.038807321Z}
     {id owned-words, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id pin-oils-spec-corpus, priority 0, derived_at 2026-08-19T15:35:34.038807321Z}
     {id printf-builtin, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
     {id printf-errata, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id record-bash-oracle-baseline, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
     {id register-posix-dash-divergences, priority 0, derived_at 2026-08-18T11:45:22.55395116Z}
+    {id spec-default-history-navigation, priority 1, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id specify-smoosh-failure-contracts, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
     {id test-fc-histfile-reload-format, priority 0, derived_at 2026-08-18T11:45:22.55395116Z}
+    {id verify-smoosh-zero-failures, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
 )
 
 assertions (
@@ -1221,9 +1248,17 @@ assertions (
     {id integrate-smoosh-posix, kind @complete, author "brendan@necessary.nu", at 2026-08-18T14:24:55.39603219Z}
     {id enforce-survey-test-containment, kind @complete, author "brendan@necessary.nu", at 2026-08-19T15:16:19.694214821Z}
     {id record-bash-oracle-baseline, kind @complete, author "brendan@necessary.nu", at 2026-08-19T15:26:03.079941802Z}
+    {id specify-smoosh-failure-contracts, kind @complete, author "brendan@necessary.nu", at 2026-08-19T15:36:02.180018603Z}
 )
 
 impl_evidence (
+    {id enable-default-history-navigation, covered_rules (
+        interactive.default-history-navigation
+    ), covered_claims (
+        {impl_name nsh-library, rule interactive.default-history-navigation}
+    ), rule_versions_seen (
+        {id interactive.default-history-navigation, version 0}
+    )}
     {id fix-builtin-alias-stdout-format, covered_rules (
         builtin.alias.stdout-format
     ), covered_claims (
@@ -1702,6 +1737,7 @@ impl_evidence (
     ), rule_versions_seen (
         {id sh.exit-status-values, version 0}
     )}
+    {id fix-smoosh-runner-fidelity}
     {id fix-xcu-exit-status-listed-values-binding, covered_rules (
         xcu.exit-status.listed-values-binding
     ), covered_claims (
@@ -4878,10 +4914,5 @@ impl_evidence (
         {id shell-locale.invalid-selection, version 0}
         {id shell-locale.operation-binding, version 0}
         {id shell-locale.selection, version 0}
-    )}
-    {id enable-default-history-navigation, covered_rules (
-        interactive.default-history-navigation
-    ), covered_claims (
-        {impl_name nsh-library, rule interactive.default-history-navigation}
     )}
 )
