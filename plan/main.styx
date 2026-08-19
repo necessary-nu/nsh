@@ -5739,6 +5739,13 @@ children (
                                 kind @note
                                 text "Owns builtin.break.nonlexical.test, builtin.continue.nonlexical.test, builtin.history.nonposix.test, builtin.source.nonexistent.earlyexit.test, builtin.source.nonexistent.test, builtin.source.setvar.test, and semantics.-h.nonposix.test. Definition of done: implement the surveyed source alias, history interface, hash-all option, and non-lexical control option with explicit nsh compatibility contracts; preserve interactive-only history creation; define failure and status behavior; and make all seven extension cases exact without gating baseline line editing on vi or emacs mode."
                             }
+
+                            {
+                                at 2026-08-19T15:42:34.744211452Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
                         )
                     }
 

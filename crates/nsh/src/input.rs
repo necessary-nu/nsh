@@ -945,8 +945,14 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<c_i
         pf.buf[pf.pos..q].to_vec()
     };
 
-    if cur_pf(sh).uses_stdin
+    // A forced-interactive command file is the shell's top-level input even
+    // though it is not descriptor 0. Retain it, but not nested `source`,
+    // dot, eval, or command-substitution frames.
+    // [spec:nsh:req:compat.smoosh.history-builtin]
+    let top_level_history_input = cur_pf(sh).uses_stdin || sh.input.cur == sh.input.top;
+    if top_level_history_input
         && crate::histedit::history_active(sh)
+        && sh.options.flag(crate::options::nolog) == 0
         && something != 0
     {
         let bytes = {

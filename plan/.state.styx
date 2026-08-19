@@ -4919,4 +4919,15 @@ impl_evidence (
         {id shell-locale.operation-binding, version 0}
         {id shell-locale.selection, version 0}
     )}
+    {id fix-smoosh-extension-builtins-options, covered_rules (
+        compat.smoosh.hash-all
+        compat.smoosh.history-builtin
+        compat.smoosh.nonlexical-control
+        compat.smoosh.source-builtin
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.smoosh.hash-all}
+        {impl_name nsh-library, rule compat.smoosh.history-builtin}
+        {impl_name nsh-library, rule compat.smoosh.nonlexical-control}
+        {impl_name nsh-library, rule compat.smoosh.source-builtin}
+    )}
 )

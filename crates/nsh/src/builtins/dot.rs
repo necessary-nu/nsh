@@ -11,6 +11,7 @@ use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::c_int;
 use std::ffi::OsStr;
+use std::io::Write as _;
 use std::os::unix::ffi::OsStrExt;
 
 use crate::eval::Flow;
@@ -22,12 +23,12 @@ use crate::shellmain::cmdloop;
 // [spec:posix:req:builtin.dot.path-search]
 /// The C returns a `stalloc`'d copy of the candidate. Here the caller owns
 /// the returned bytes directly, for exactly the same lifetime.
-fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Result<BString, Error> {
+fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Option<BString> {
     let path_value = crate::var::pathval(sh);
 
     /* don't try this for absolute or relative paths */
     if basename.contains(&b'/') {
-        return Ok(basename.to_owned());
+        return Some(basename.to_owned());
     }
 
     let mut path = PathCursor::new(path_value.as_slice().as_bstr());
@@ -42,15 +43,10 @@ fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Result<BStr
             && regular_file
             && readable
         {
-            return Ok(fullname.to_owned());
+            return Some(fullname.to_owned());
         }
     }
-
-    /* not found in the PATH */
-    let mut message = Vec::new();
-    message.extend_from_slice(basename);
-    message.extend_from_slice(b": not found");
-    Err(sh.sh_error_value(&message))
+    None
 }
 
 // [spec:dash:def:main.dotcmd-fn]
@@ -62,13 +58,38 @@ fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Result<BStr
 // [spec:posix:req:builtin.dot.interfaces]
 // [spec:posix:req:builtin.dot.exit-status]
 pub fn dotcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+    dotcmd_with_missing_status(sh, args, 2)
+}
+
+// [spec:nsh:req:compat.smoosh.source-builtin]
+pub fn sourcecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+    dotcmd_with_missing_status(sh, args, 1)
+}
+
+fn dotcmd_with_missing_status(
+    sh: &mut Shell,
+    args: &[&BStr],
+    missing_status: c_int,
+) -> Result<Flow, Error> {
     let mut status: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
     opts.next(sh, b"")?;
 
     if let Some(name) = opts.operands().first() {
-        let fullname = find_dot_file(sh, name)?;
+        let Some(fullname) = find_dot_file(sh, name) else {
+            let mut message = name.to_vec();
+            message.extend_from_slice(b": not found");
+            if missing_status == 1 {
+                let errors = sh.io.stderr();
+                let _ = errors.write_all(b"source: ");
+                let _ = errors.write_all(&message);
+                let _ = errors.write_all(b"\n");
+                return Err(Error::reported(sh.eval.errlinno, missing_status));
+            }
+            let error = Error::other(sh.eval.errlinno, missing_status, &message);
+            return Err(sh.report(error));
+        };
 
         crate::input::setinputfile(
             sh,

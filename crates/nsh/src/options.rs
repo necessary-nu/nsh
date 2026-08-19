@@ -64,7 +64,7 @@ impl shparam {
     }
 }
 
-pub const NOPTS: usize = 19;
+pub const NOPTS: usize = 20;
 
 /*
  * options.h spells these `#define eflag optlist[0]` etc.  The port keeps the
@@ -90,6 +90,7 @@ pub const nolog: usize = 15;
 pub const pipefail: usize = 16;
 pub const debug: usize = 17;
 pub const hflag: usize = 18;
+pub const nonlexicalctrl: usize = 19;
 
 /* `static const char *const optnames[NOPTS]`.
  *
@@ -117,6 +118,7 @@ static optnames: [&CStr; NOPTS] = [
     c"pipefail",
     c"debug",
     c"hashall",
+    c"nonlexicalctrl",
 ];
 
 pub static optletters: [c_char; NOPTS] = [
@@ -139,6 +141,7 @@ pub static optletters: [c_char; NOPTS] = [
     0,
     0,
     b'h' as c_char,
+    0,
 ];
 
 /// The shell's option flags — `set -e`, `set -x`, `-i` and the rest.
@@ -1013,6 +1016,19 @@ mod tests {
         let disable = words(&[b"+h"]);
         options(&mut sh, &disable, 0, false).unwrap();
         assert_eq!(sh.options.flag(hflag), 0);
+    }
+
+    // [spec:nsh:req:compat.smoosh.nonlexical-control/test]
+    #[test]
+    fn nonlexical_control_tracks_long_option_forms() {
+        let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let enable = words(&[b"-o", b"nonlexicalctrl"]);
+        options(&mut sh, &enable, 0, false).unwrap();
+        assert_eq!(sh.options.flag(nonlexicalctrl), 1);
+
+        let disable = words(&[b"+o", b"nonlexicalctrl"]);
+        options(&mut sh, &disable, 0, false).unwrap();
+        assert_eq!(sh.options.flag(nonlexicalctrl), 0);
     }
 
     #[test]

@@ -43,7 +43,7 @@ use crate::expand::{EXP_FULL, EXP_MBCHAR, EXP_REDIR, EXP_TILDE, EXP_VARTILDE};
 use crate::expand::{arglist, strlist};
 use crate::jobs::FORK_NOJOB;
 use crate::nodes::{
-    NAND, NAPPEND, NBACKGND, NCASE, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO, NIF, NOR, NPIPE, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE,
+    NAND, NAPPEND, NBACKGND, NCASE, NCLOBBER, NCLIST, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO, NIF, NNOT, NOR, NPIPE, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE,
 };
 use crate::nodes::{Node, funcnode};
 use crate::output::Dest;
@@ -242,6 +242,10 @@ fn xflag(sh: &crate::context::Shell) -> c_int {
 #[inline]
 fn iflag(sh: &crate::context::Shell) -> c_int {
     sh.options.flag(crate::options::iflag) as c_int
+}
+#[inline]
+fn hflag(sh: &crate::context::Shell) -> c_int {
+    sh.options.flag(crate::options::hflag) as c_int
 }
 
 /*
@@ -459,7 +463,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
                                 /* #if NAND + 1 != NOR / NOR + 1 != NSEMI */
                                 isor = (n.node_type() - NAND) as core::ffi::c_uint;
                                 let b = n.nbinary();
-                                status = flow!(evaltree(sh, 
+                                status = flow!(evaltree(sh,
                                     b.ch1.as_deref(),
                                     (flags | (((isor >> 1).wrapping_sub(1)) as c_int)) & EV_TESTED,
                                 ));
@@ -486,6 +490,9 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
                                 break 'sw;
                             }
                             NDEFUN => {
+                                if hflag(sh) != 0 {
+                                    let _ = flow!(prehash_tree(sh, n.ndefun().body.as_deref()));
+                                }
                                 crate::exec::defun(sh, n);
                                 break 'sw;
                             }
@@ -1633,7 +1640,13 @@ fn evalfun(
     /* `cmdentry::function` cloned the owned body, so redefining this function
      * while it runs cannot pull the body out from under this call. */
     sh.eval.funcline = func.ndefun().linno;
-    sh.eval.loopnest = 0;
+    // [spec:nsh:req:compat.smoosh.nonlexical-control]
+    // Ordinarily only loops lexically inside the function are visible.
+    // The explicit extension preserves the caller's dynamic loop depth so
+    // break/continue can leave through this frame and be consumed there.
+    if sh.options.flag(crate::options::nonlexicalctrl) == 0 {
+        sh.eval.loopnest = 0;
+    }
     /* This `INTON` is *after* `reffunc`, and the epilogue's `freefunc` is
      * what balances it on both paths. docs/errors-are-values.md 2.6
      * records that a conversion reordering this prologue turns the
@@ -1676,6 +1689,59 @@ fn prehash(sh: &mut Shell, n: &Node) -> Result<Flow, Error> {
             return find_command(sh, text, &mut entry, 0, BStr::new(path.as_slice()));
         }
     }
+    Ok(Flow::Done(0))
+}
+
+/// With `set -h`, remember literal command names while a function is
+/// defined. This walks only command-bearing tree edges; words, redirection
+/// operands and here-documents are not executed or expanded.
+// [spec:nsh:req:compat.smoosh.hash-all]
+fn prehash_tree(sh: &mut Shell, n: Option<&Node>) -> Result<Flow, Error> {
+    let Some(n) = n else {
+        return Ok(Flow::Done(0));
+    };
+
+    match n.node_type() {
+        NCMD => return prehash(sh, n),
+        NPIPE => {
+            for command in &n.npipe().cmdlist {
+                let _ = flow!(prehash_tree(sh, Some(command)));
+            }
+        }
+        NREDIR | NBACKGND | NSUBSHELL => {
+            let _ = flow!(prehash_tree(sh, n.nredir().n.as_deref()));
+        }
+        NAND | NOR | NSEMI | NWHILE | NUNTIL => {
+            let binary = n.nbinary();
+            let _ = flow!(prehash_tree(sh, binary.ch1.as_deref()));
+            let _ = flow!(prehash_tree(sh, binary.ch2.as_deref()));
+        }
+        NIF => {
+            let conditional = n.nif();
+            let _ = flow!(prehash_tree(sh, conditional.test.as_deref()));
+            let _ = flow!(prehash_tree(sh, conditional.ifpart.as_deref()));
+            let _ = flow!(prehash_tree(sh, conditional.elsepart.as_deref()));
+        }
+        NFOR => {
+            let _ = flow!(prehash_tree(sh, n.nfor().body.as_deref()));
+        }
+        NCASE => {
+            for clause in &n.ncase().cases {
+                let _ = flow!(prehash_tree(sh, Some(clause)));
+            }
+        }
+        NCLIST => {
+            let _ = flow!(prehash_tree(sh, n.nclist().body.as_deref()));
+        }
+        NDEFUN => {
+            let _ = flow!(prehash_tree(sh, n.ndefun().body.as_deref()));
+        }
+        NNOT => {
+            let _ = flow!(prehash_tree(sh, n.nnot().com.as_deref()));
+        }
+        _ => {}
+    }
+
     Ok(Flow::Done(0))
 }
 
