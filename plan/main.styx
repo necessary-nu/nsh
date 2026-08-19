@@ -6071,6 +6071,13 @@ children (
                                         kind @note
                                         text "Definition of done: make builtin and option discovery use the per-Shell dialect, add truthful set/shopt reporting and restorable output, invalidate affected command caches, and prove that Bash-only entries do not leak into default mode."
                                     }
+
+                                    {
+                                        at 2026-08-19T20:38:46.032121462Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
                         )

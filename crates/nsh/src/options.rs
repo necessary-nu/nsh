@@ -17,6 +17,9 @@ use std::os::fd::AsFd as _;
 mod dialect;
 pub(crate) use dialect::Dialect;
 
+mod bash_options;
+pub(crate) use bash_options::NAMES as BASH_OPTION_NAMES;
+
 #[cfg(test)]
 mod bash_mode_tests;
 
@@ -168,6 +171,10 @@ pub static optletters: [c_char; NOPTS] = [
 // [spec:nsh:req:compat.bash.state-isolation]
 pub struct ShellOptions {
     flags: [c_char; NOPTS],
+    /// Bash's `shopt` namespace. An explicit value is distinct from the
+    /// interactive default, so `shopt -u expand_aliases` remains off in an
+    /// interactive shell.
+    bash_options: bash_options::BashOptions,
     /// `shellparam` — the positional parameters, `$1` onwards, and
     /// `getopts`' place in them.
     ///
@@ -192,6 +199,7 @@ impl ShellOptions {
     pub(crate) const fn new() -> Self {
         ShellOptions {
             flags: [0; NOPTS],
+            bash_options: bash_options::BashOptions::new(),
             shellparam: shparam::new(),
             minusc: None,
             arg0: None,
@@ -357,6 +365,7 @@ pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<c_in
 /// Returns rather than raising, because `setjobctl` can fail and one of
 /// this function's callers is teardown. See `jobs::setjobctl`.
 pub fn optschanged(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
+    crate::exec::dispatch_changed(sh);
     /* `#ifdef DEBUG opentrace();` — the dash build does not define DEBUG,
      * so `show.c` compiles to nothing and there is no trace file. */
     crate::trap::setinteractive(sh, sh.options.flag(iflag) as c_int);

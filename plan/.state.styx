@@ -5027,4 +5027,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule compat.bash.parser-ast}
     )}
+    {id gate-bash-builtins-options, covered_rules (
+        compat.bash.options-builtins-dispatch
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.options-builtins-dispatch}
+    )}
 )

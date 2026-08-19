@@ -133,6 +133,7 @@ pub mod r#return;
 pub mod r#true;
 pub mod set;
 pub mod shift;
+pub mod shopt;
 pub mod r#type;
 pub mod ulimit;
 pub mod umask;
@@ -222,6 +223,16 @@ pub static builtincmd: [builtincmd; NUMBUILTINS] = [
     builtincmd { name: c"wait", builtin: Some(wait::waitcmd), flags: BUILTIN_REGULAR }, // 41
 ];
 
+/// Bash-only built-ins, searched before the baseline table only while the
+/// current shell has Bash Compatibility Mode enabled. Keeping a separate
+/// sorted table prevents profile-only names from leaking into default mode
+/// and permits a future Bash implementation to override a baseline entry.
+pub static bash_builtincmd: [builtincmd; 1] = [builtincmd {
+    name: c"shopt",
+    builtin: Some(shopt::shoptcmd),
+    flags: 0,
+}];
+
 // The `*CMD` pointers of builtins.h: `#define NAME (builtincmd + n)`.
 pub static ALIASCMD: &builtincmd = &builtincmd[3];
 pub static BGCMD: &builtincmd = &builtincmd[4];
@@ -291,6 +302,9 @@ mod tests {
                 name == b"eval",
                 "only `eval` has a special entry point"
             );
+        }
+        for cmd in &bash_builtincmd {
+            assert!(cmd.builtin.is_some(), "Bash-only rows use ordinary entry points");
         }
     }
 }

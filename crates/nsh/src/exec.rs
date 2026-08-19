@@ -18,6 +18,12 @@ use crate::builtins::{BUILTIN_REGULAR, builtincmd};
 use crate::error::{E_EXEC, Error, INTOFF, INTON};
 use crate::nodes::{Node, funcnode};
 
+mod dialect_dispatch;
+pub(crate) use dialect_dispatch::dispatch_changed;
+
+#[cfg(test)]
+mod bash_dispatch_tests;
+
 // ---------------------------------------------------------------------
 // src/exec.h constants
 // ---------------------------------------------------------------------
@@ -172,6 +178,8 @@ pub struct CmdTable {
     map: BTreeMap<BString, tblentry>,
     /// index in path of %builtin, or -1
     builtinloc: c_int,
+    /// Dialect under which cached built-in entries were classified.
+    dispatch_dialect: crate::options::Dialect,
 }
 
 impl CmdTable {
@@ -181,6 +189,7 @@ impl CmdTable {
         CmdTable {
             map: BTreeMap::new(),
             builtinloc: -1,
+            dispatch_dialect: crate::options::Dialect::Posix,
         }
     }
 
@@ -490,6 +499,9 @@ pub fn find_command(
     mut act: c_int,
     path: &BStr,
 ) -> Result<crate::eval::Flow, Error> {
+    let dialect = sh.options.dialect();
+    sh.commands.ensure_dispatch(dialect);
+
     /* If name contains a slash, don't use PATH or hash table */
     if name.contains(&b'/') {
         if (act & DO_ABS) != 0 {
@@ -538,7 +550,7 @@ pub fn find_command(
         }
     }
 
-    let builtin_command = builtin(name);
+    let builtin_command = builtin(sh, name);
     if let Some(command) = builtin_command
         && ((command.flags & BUILTIN_REGULAR) != 0
             || (act & DO_ALTPATH) != 0
@@ -666,7 +678,13 @@ pub fn find_command(
 
 // [spec:dash:def:exec.find-builtin-fn]
 // [spec:dash:sem:exec.find-builtin-fn]
-pub fn builtin(name: &BStr) -> Option<&'static builtincmd> {
+pub fn builtin(sh: &crate::context::Shell, name: &BStr) -> Option<&'static builtincmd> {
+    if sh.options.dialect() == crate::options::Dialect::Bash
+        && let Ok(index) = crate::builtins::bash_builtincmd
+            .binary_search_by(|cmd| BStr::new(cmd.name.to_bytes()).cmp(name))
+    {
+        return Some(&crate::builtins::bash_builtincmd[index]);
+    }
     crate::builtins::builtincmd
         .binary_search_by(|cmd| BStr::new(cmd.name.to_bytes()).cmp(name))
         .ok()
@@ -876,15 +894,16 @@ mod tests {
     // [spec:dash:sem:exec.find-builtin-fn/test]
     #[test]
     fn generated_builtin_lookup_round_trips() {
+        let sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         for expected in &crate::builtins::builtincmd {
             assert!(core::ptr::eq(
-                builtin(BStr::new(expected.name.to_bytes())).expect("generated builtin"),
+                builtin(&sh, BStr::new(expected.name.to_bytes())).expect("generated builtin"),
                 expected,
             ));
         }
 
         for absent in [b"" as &[u8], b"/", b"alia", b"aliasx", b"waitx", b"zz"] {
-            assert!(builtin(BStr::new(absent)).is_none());
+            assert!(builtin(&sh, BStr::new(absent)).is_none());
         }
     }
 
@@ -894,10 +913,11 @@ mod tests {
     /// `[dec:nsh:printf-is-parsed-not-interpreted]`.
     #[test]
     fn printf_is_a_builtin() {
-        let found = builtin(BStr::new(b"printf")).expect("printf builtin");
+        let sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let found = builtin(&sh, BStr::new(b"printf")).expect("printf builtin");
         assert!(core::ptr::eq(found, crate::builtins::PRINTFCMD));
         /* `echo` shares printf.c with it and is the neighbouring row. */
-        assert!(builtin(BStr::new(b"echo")).is_some());
+        assert!(builtin(&sh, BStr::new(b"echo")).is_some());
     }
 
     /// The table is binary-searched, so its order is load-bearing —

@@ -950,7 +950,7 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
                 /* the word becomes the function's name; the C keeps the same
                  * `char *` when it relabels the node */
                 let word: narg = args.pop().unwrap().into_narg();
-                let bcmd = crate::exec::builtin(word.text.as_bstr());
+                let bcmd = crate::exec::builtin(sh, word.text.as_bstr());
                 if goodname(&sh.locale, word.text.as_bstr()) == 0
                     || bcmd.is_some_and(|cmd| {
                         (cmd.flags & crate::builtins::BUILTIN_SPECIAL) != 0
@@ -1181,7 +1181,11 @@ fn readtoken_with_flags(sh: &mut Shell, mut kwd: c_int) -> Result<Token, Error> 
             }
         }
 
-        if kwd & CHKALIAS != 0 {
+        if kwd & CHKALIAS != 0
+            && sh
+                .options
+                .alias_expansion_enabled(sh.input.parse_dialect())
+        {
             /* Hoisted: the receiver cannot appear twice in one argument
              * list. A raw pointer ends its borrow at the `let`, and the
              * word it points at is the parser's own, not the alias's. */
