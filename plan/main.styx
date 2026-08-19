@@ -6388,4 +6388,28 @@ children (
             }
         )
     }
+
+    {
+        id implement-cli-metadata-options
+        title "Implement --help and --version"
+        kind @fix
+        implements {
+            nsh-library ([spec:nsh:req:cli.metadata-options])
+        }
+        log (
+            {
+                at 2026-08-19T23:09:43.063843715Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Todo → Doing (nplan start)"
+            }
+
+            {
+                at 2026-08-19T23:09:43.063843715Z
+                author "brendan@necessary.nu"
+                kind @note
+                text "single-flight overridden: started while implement-bash-arrays-declarations had uncommitted WIP"
+            }
+        )
+    }
 )

@@ -19,6 +19,46 @@
 
 #![deny(unsafe_code)]
 
+use std::io::Write as _;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FrontendAction {
+    Help,
+    Version,
+}
+
+const HELP: &[u8] = concat!(
+    "nsh ",
+    env!("CARGO_PKG_VERSION"),
+    "\n\n",
+    "Usage:\n",
+    "  nsh [OPTION]... [SCRIPT [ARG]...]\n",
+    "  nsh [OPTION]... -c COMMAND [NAME [ARG]...]\n\n",
+    "Frontend options:\n",
+    "      --help       show this help and exit\n",
+    "      --version    show version information and exit\n\n",
+    "Shell options include -i, -s, -o NAME, and the ordinary set flags.\n",
+    "Run `nsh -c 'set -o'` to list the complete shell-option state.\n",
+)
+.as_bytes();
+
+const VERSION: &[u8] = concat!("nsh ", env!("CARGO_PKG_VERSION"), "\n").as_bytes();
+
+// [spec:nsh:req:cli.metadata-options]
+fn frontend_action(argv: &[Vec<u8>]) -> Option<FrontendAction> {
+    match argv.get(1).map(Vec::as_slice) {
+        Some(b"--help") => Some(FrontendAction::Help),
+        Some(b"--version") => Some(FrontendAction::Version),
+        _ => None,
+    }
+}
+
+fn write_frontend_output(bytes: &[u8]) {
+    if std::io::stdout().lock().write_all(bytes).is_err() {
+        std::process::exit(1);
+    }
+}
+
 fn bash_invocation(raw_arg0: &[u8]) -> bool {
     let basename = raw_arg0
         .rsplit(|byte| *byte == b'/')
@@ -41,8 +81,6 @@ fn select_invocation_mode(argv: &mut Vec<Vec<u8>>) {
 use nsh_platform::NativeStrExt as _;
 
 fn main() {
-    nsh_platform::restore_shell_process_runtime_state();
-
     // A panic hook sat here, filtering out the `error::Longjmp` payload
     // the port used to implement C's `longjmp`: those unwinds were
     // ordinary control flow -- every shell error, interrupt, `exit` and
@@ -62,10 +100,19 @@ fn main() {
     //
     // Keep the operating-system representation intact until this explicit
     // handoff to the byte-oriented shell language engine.
-    let mut argv = nsh_platform::process_arguments()
+    let mut argv: Vec<Vec<u8>> = nsh_platform::process_arguments()
         .iter()
         .map(|argument| argument.to_shell_bytes())
         .collect();
+    if let Some(action) = frontend_action(&argv) {
+        write_frontend_output(match action {
+            FrontendAction::Help => HELP,
+            FrontendAction::Version => VERSION,
+        });
+        return;
+    }
+
+    nsh_platform::restore_shell_process_runtime_state();
     select_invocation_mode(&mut argv);
     // The frontend is the thing entitled to the process's standard
     // descriptors, so it hands them to the shell explicitly rather than
@@ -122,5 +169,28 @@ mod tests {
                 b":"
             ]
         );
+    }
+
+    // [spec:nsh:req:cli.metadata-options/test]
+    #[test]
+    fn metadata_options_are_frontend_only() {
+        let argv = vec![b"nsh".to_vec(), b"--help".to_vec()];
+        assert_eq!(frontend_action(&argv), Some(FrontendAction::Help));
+        let argv = vec![b"nsh".to_vec(), b"--version".to_vec()];
+        assert_eq!(frontend_action(&argv), Some(FrontendAction::Version));
+        let argv = vec![b"nsh".to_vec(), b"-h".to_vec()];
+        assert_eq!(frontend_action(&argv), None);
+
+        for argv in [
+            vec![b"nsh".to_vec(), b"script".to_vec(), b"--help".to_vec()],
+            vec![
+                b"nsh".to_vec(),
+                b"-c".to_vec(),
+                b":".to_vec(),
+                b"--version".to_vec(),
+            ],
+        ] {
+            assert_eq!(frontend_action(&argv), None);
+        }
     }
 }
