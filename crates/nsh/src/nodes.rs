@@ -46,6 +46,14 @@ use std::sync::{Arc, Mutex, PoisonError};
 use bstr::{BStr, BString};
 use core::ffi::c_int;
 
+mod bash;
+
+pub(crate) use bash::{
+    BashArithmeticCommand, BashArithmeticFor, BashArrayAssignment, BashArrayElement,
+    BashArrayValue, BashAssignmentOperator, BashConditional, BashConditionalExpr, BashFunction,
+    BashFunctionStyle, BashNode, BashProcessDirection, BashProcessSubstitution,
+};
+
 // ---- node types (positional in src/nodetypes) ------------------------
 
 /// a simple command
@@ -100,6 +108,8 @@ pub const NHERE: c_int = 23;
 pub const NXHERE: c_int = 24;
 /// ! command  (actually pipeline)
 pub const NNOT: c_int = 25;
+/// Bash-only grammar represented by an owned [`BashNode`]
+pub const NBASH: c_int = 26;
 
 // ---- the per-tag structs --------------------------------------------
 
@@ -387,6 +397,7 @@ pub enum Node {
     Dup(ndup),
     Here(nhere),
     Not(nnot),
+    Bash(BashNode),
 }
 
 /* The C spells this `union node`; ported modules refer to it by both names. */
@@ -422,6 +433,7 @@ impl Node {
             Node::Dup(n) => n.r#type,
             Node::Here(n) => n.r#type,
             Node::Not(_) => NNOT,
+            Node::Bash(_) => NBASH,
         }
     }
 

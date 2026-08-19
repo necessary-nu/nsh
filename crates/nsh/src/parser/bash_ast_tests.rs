@@ -1,0 +1,168 @@
+use bstr::BStr;
+
+use super::{ParseResult, parsecmd};
+use crate::context::Shell;
+use crate::error::Error;
+use crate::nodes::{
+    BashArrayValue, BashAssignmentOperator, BashConditionalExpr, BashFunctionStyle, BashNode,
+    BashProcessDirection, Node,
+};
+
+fn parse(source: &[u8], bash: bool) -> Result<Node, Error> {
+    let mut sh = Shell::builder()
+        .streams(crate::streams::Streams::capture().unwrap())
+        .build()
+        .unwrap();
+    if bash {
+        crate::options::set_option_by_name(&mut sh, BStr::new(b"bash"), true).unwrap();
+    }
+    crate::input::setinputstring(&mut sh, BStr::new(source));
+    match parsecmd(&mut sh, 0)? {
+        ParseResult::Tree(Some(tree)) => Ok(tree),
+        ParseResult::Tree(None) => panic!("expected a command, found a blank parse unit"),
+        ParseResult::Eof => panic!("expected a command, found EOF"),
+    }
+}
+
+// [spec:nsh:req:compat.bash.parser-ast/test]
+#[test]
+fn conditional_has_owned_precedence_tree() {
+    let tree = parse(b"[[ x == y && ! -z x ]]\n", true).unwrap();
+    let Node::Bash(BashNode::Conditional(conditional)) = tree else {
+        panic!("[[ must be a Bash conditional node");
+    };
+    let BashConditionalExpr::And(left, right) = conditional.expression else {
+        panic!("&& must be represented structurally");
+    };
+    assert!(matches!(*left, BashConditionalExpr::Binary { .. }));
+    assert!(matches!(
+        *right,
+        BashConditionalExpr::Not(inner)
+            if matches!(*inner, BashConditionalExpr::Unary { .. })
+    ));
+
+    let baseline = parse(b"[[ x ]]\n", false).unwrap();
+    assert!(matches!(baseline, Node::Cmd(_)));
+    assert_eq!(
+        baseline.ncmd().args[0].narg().text.as_bstr(),
+        BStr::new(b"[[")
+    );
+}
+
+#[test]
+fn arithmetic_forms_have_distinct_nodes() {
+    let command = parse(b"((i += 1))\n", true).unwrap();
+    let Node::Bash(BashNode::ArithmeticCommand(command)) = command else {
+        panic!("(( expression )) must be an arithmetic-command node");
+    };
+    assert_eq!(command.expression.as_bstr(), BStr::new(b"i += 1"));
+    assert!(!matches!(
+        parse(b"((i += 1))\n", false).unwrap(),
+        Node::Bash(_)
+    ));
+
+    let loop_node = parse(b"for ((i=0; i<3; i++)); do :; done\n", true).unwrap();
+    let Node::Bash(BashNode::ArithmeticFor(loop_node)) = loop_node else {
+        panic!("arithmetic for must have its own node");
+    };
+    assert_eq!(loop_node.init.as_bstr(), BStr::new(b"i=0"));
+    assert_eq!(loop_node.test.as_bstr(), BStr::new(b" i<3"));
+    assert_eq!(loop_node.update.as_bstr(), BStr::new(b" i++"));
+    assert!(loop_node.body.is_some());
+}
+
+#[test]
+fn bash_function_retains_owned_body() {
+    let function = parse(b"function bash-name() { :; }\n", true).unwrap();
+    let cloned = function.clone();
+    let Node::Bash(BashNode::Function(function)) = cloned else {
+        panic!("function reserved-word form must have its own node");
+    };
+    assert_eq!(function.name.as_bstr(), BStr::new(b"bash-name"));
+    assert_eq!(function.style, BashFunctionStyle::FunctionParens);
+    assert!(function.body.is_some());
+
+    let bare = parse(b"function slash/name { :; }\n", true).unwrap();
+    let Node::Bash(BashNode::Function(bare)) = bare else {
+        panic!("bare function reserved-word form must have its own node");
+    };
+    assert_eq!(bare.name.as_bstr(), BStr::new(b"slash/name"));
+    assert_eq!(bare.style, BashFunctionStyle::Function);
+    assert!(bare.body.is_some());
+
+    let baseline = parse(b"function bash-name\n", false).unwrap();
+    assert!(matches!(baseline, Node::Cmd(_)));
+}
+
+#[test]
+fn array_assignments_are_structural() {
+    let indexed = parse(b"a[2]+=x\n", true).unwrap();
+    let Node::Bash(BashNode::ArrayAssignment(indexed)) = &indexed.ncmd().assign[0] else {
+        panic!("indexed assignment must be structural");
+    };
+    assert_eq!(indexed.name.as_bstr(), BStr::new(b"a"));
+    assert_eq!(
+        indexed.subscript.as_ref().unwrap().text.as_bstr(),
+        BStr::new(b"2")
+    );
+    assert_eq!(indexed.operator, BashAssignmentOperator::Append);
+    let BashArrayValue::Word(value) = &indexed.value else {
+        panic!("simple indexed assignment must retain a word value");
+    };
+    assert_eq!(value.text.as_bstr(), BStr::new(b"x"));
+
+    let compound = parse(b"a=(zero [2]=two)\n", true).unwrap();
+    let Node::Bash(BashNode::ArrayAssignment(compound)) = &compound.ncmd().assign[0] else {
+        panic!("compound assignment must be structural");
+    };
+    let BashArrayValue::Compound(elements) = &compound.value else {
+        panic!("compound assignment needs element structure");
+    };
+    assert_eq!(elements.len(), 2);
+    assert!(elements[0].subscript.is_none());
+    assert_eq!(
+        elements[1].subscript.as_ref().unwrap().text.as_bstr(),
+        BStr::new(b"2")
+    );
+    assert_eq!(elements[1].value.text.as_bstr(), BStr::new(b"two"));
+
+    let declaration = parse(b"declare -a a=(x)\n", true).unwrap();
+    assert!(matches!(
+        declaration.ncmd().args[2],
+        Node::Bash(BashNode::ArrayAssignment(_))
+    ));
+
+    assert!(parse(b"a=(zero)\n", false).is_err());
+}
+
+#[test]
+fn array_parameter_subscript_is_dialect_gated() {
+    let tree = parse(b"echo ${a[1]}\n", true).unwrap();
+    assert_eq!(tree.ncmd().args.len(), 2);
+    let baseline = parse(b"echo ${a[1]}\n", false).unwrap();
+    assert_ne!(
+        tree.ncmd().args[1].narg().text.as_cbytes(),
+        baseline.ncmd().args[1].narg().text.as_cbytes()
+    );
+}
+
+#[test]
+fn process_substitutions_own_their_commands() {
+    let tree = parse(b"echo <(printf x) >(cat)\n", true).unwrap();
+    let args = &tree.ncmd().args;
+    assert_eq!(args.len(), 3);
+
+    for (argument, expected) in [
+        (&args[1], BashProcessDirection::Input),
+        (&args[2], BashProcessDirection::Output),
+    ] {
+        let substitution = argument.narg().backquote[0].as_ref().unwrap();
+        let Node::Bash(BashNode::ProcessSubstitution(substitution)) = substitution else {
+            panic!("process substitution must not masquerade as command substitution");
+        };
+        assert_eq!(substitution.direction, expected);
+        assert!(substitution.body.is_some());
+    }
+
+    assert!(parse(b"echo <(printf x)\n", false).is_err());
+}

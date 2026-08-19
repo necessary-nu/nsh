@@ -5022,4 +5022,9 @@ impl_evidence (
         {impl_name nsh-library, rule compat.bash.selection}
         {impl_name nsh-library, rule compat.bash.state-isolation}
     )}
+    {id extend-bash-mode-aware-parser, covered_rules (
+        compat.bash.parser-ast
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.parser-ast}
+    )}
 )

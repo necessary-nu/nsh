@@ -6030,6 +6030,13 @@ children (
                                         kind @note
                                         text "Definition of done: thread a compact Dialect view through the existing parser, add owned AST nodes for gated Bash grammar, retain parsed function bodies, reject or preserve baseline interpretation when the mode is off, and add parser tests for each syntax gate without a parser fork or lexer callback interface."
                                     }
+
+                                    {
+                                        at 2026-08-19T20:10:03.528355488Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
 

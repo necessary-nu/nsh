@@ -43,7 +43,7 @@ use crate::expand::{EXP_FULL, EXP_MBCHAR, EXP_REDIR, EXP_TILDE, EXP_VARTILDE};
 use crate::expand::{arglist, strlist};
 use crate::jobs::FORK_NOJOB;
 use crate::nodes::{
-    NAND, NAPPEND, NBACKGND, NCASE, NCLOBBER, NCLIST, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO, NIF, NNOT, NOR, NPIPE, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE,
+    NAND, NAPPEND, NBACKGND, NBASH, NCASE, NCLOBBER, NCLIST, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO, NIF, NNOT, NOR, NPIPE, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE,
 };
 use crate::nodes::{Node, funcnode};
 use crate::output::Dest;
@@ -575,18 +575,19 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
                                 crate::exec::defun(sh, n);
                                 break 'sw;
                             }
-                            /* `default:` has no body outside DEBUG, so an
-                             * unrecognised node type falls straight through
-                             * into `case NNOT:`. No other node type reaches
-                             * `evaltree`, so with a tagged union there is
-                             * nothing left for the fallthrough to reinterpret. */
-                            _ /* default, NNOT */ => {
+                            NBASH => {
+                                return Err(sh.sh_error_value(
+                                    b"Bash syntax is parsed but not executable yet",
+                                ));
+                            }
+                            NNOT => {
                                 status = flow!(evaltree(sh, n.nnot().com.as_deref(), EV_TESTED));
                                 if sh.eval.evalskip == 0 {
                                     status = (status == 0) as c_int;
                                 }
                                 break 'sw;
                             }
+                            _ => unreachable!("every owned node type is dispatched"),
                         }
                     }
                     // checkexit:
@@ -1291,6 +1292,14 @@ fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> 
     sh.vars.lineno = c.linno;
     if sh.eval.funcline != 0 {
         sh.vars.lineno -= sh.eval.funcline - 1;
+    }
+    if c
+        .assign
+        .iter()
+        .chain(c.args.iter())
+        .any(|node| node.node_type() == NBASH)
+    {
+        return Err(sh.sh_error_value(b"Bash array syntax is not executable yet"));
     }
 
     /* First expand the arguments. */
