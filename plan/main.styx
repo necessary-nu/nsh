@@ -5956,7 +5956,7 @@ children (
                         implements {
                             nsh-library ([spec:nsh:req:compat.bash.reference-profile])
                         }
-                        deps (specify-bash-compatibility-profile)
+                        deps (specify-bash-compatibility-profile fix-nplan-cpp-format-check)
                         log (
                             {
                                 at 2026-08-19T18:36:05.88018244Z
@@ -6268,6 +6268,49 @@ children (
                         author "brendan@necessary.nu"
                         kind @decision
                         text "Arrays use a structural value model. Process substitution and the rest of the compatibility work preserve safe Rust and owned descriptor APIs, with no new unsafe, libc, RawFd, manual dup2, or manual close in the core or public library."
+                    }
+                )
+            }
+
+            {
+                id fix-nplan-cpp-format-check
+                title "Remove the invalid formatter gate from the immutable C oracle"
+                kind @build
+                sealed true
+                log (
+                    {
+                        at 2026-08-19T18:42:25.457477872Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Definition of done: replace both pipeline-shaped C++ format commands with direct find -exec invocations; include every extension in the platform file mask, including .cxx; prove the dry-run command and complete nplan check execute inside scripts/sandboxed; retain an in-place formatter command for nplan commit --fix."
+                    }
+
+                    {
+                        at 2026-08-19T18:42:25.590358639Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-19T18:44:42.194759728Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "The direct find -exec probe exposed that the formatter gate is invalid rather than merely misquoted: include/ does not exist, clang-format is undeclared, and the documented byte-identical upstream C oracle must never be rewritten by a --fix command. Supersede the initial direct-find acceptance note: remove the C++ formatter platform, retain the Python gates, and verify the complete remaining nplan check set inside scripts/sandboxed."
+                    }
+
+                    {
+                        at 2026-08-19T18:45:28.640614896Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Completion evidence: removed the generated C++ formatting platform whose find pipeline could not execute and whose --fix contradicted the immutable upstream C-oracle contract. A forced nplan check ran inside scripts/sandboxed with only .git and posix/.work writable: Python syntax passed and all 14 POSIX harness unit tests passed. nplan lint and git diff --check are clean."
+                    }
+
+                    {
+                        at 2026-08-19T18:45:28.732506317Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }

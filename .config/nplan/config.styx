@@ -11,16 +11,6 @@ platforms (
             }
         }
     }
-    {
-        platform "c++"
-        files (src/**/*.c src/**/*.cc src/**/*.cpp src/**/*.cxx src/**/*.h src/**/*.hpp include/**/*.h include/**/*.hpp)
-        checks {
-            format {
-                cmd "find src include -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' | xargs clang-format --dry-run --Werror"
-                fix "find src include -name '*.c' -o -name '*.cc' -o -name '*.cpp' -o -name '*.h' -o -name '*.hpp' | xargs clang-format -i"
-            }
-        }
-    }
 )
 
 commit {
