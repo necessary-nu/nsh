@@ -1,4 +1,4 @@
-# nsh
+# Necessary Shell
 
 `nsh` is a POSIX shell written in Rust. The repository provides both:
 
