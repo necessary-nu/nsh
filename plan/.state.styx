@@ -1249,7 +1249,7 @@ assertions (
     {id enforce-survey-test-containment, kind @complete, author "brendan@necessary.nu", at 2026-08-19T15:16:19.694214821Z}
     {id record-bash-oracle-baseline, kind @complete, author "brendan@necessary.nu", at 2026-08-19T15:26:03.079941802Z}
     {id specify-smoosh-failure-contracts, kind @complete, author "brendan@necessary.nu", at 2026-08-19T15:36:02.180018603Z}
-    {id verify-smoosh-zero-failures, kind @doing, author "brendan@necessary.nu", at 2026-08-19T17:15:14.983635468Z}
+    {id verify-smoosh-zero-failures, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:31:28.927290215Z}
 )
 
 impl_evidence (
