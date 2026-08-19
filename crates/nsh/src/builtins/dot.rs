@@ -11,7 +11,6 @@ use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::c_int;
 use std::ffi::OsStr;
-use std::io::Write as _;
 use std::os::unix::ffi::OsStrExt;
 
 use crate::eval::Flow;
@@ -26,9 +25,16 @@ use crate::shellmain::cmdloop;
 fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Option<BString> {
     let path_value = crate::var::pathval(sh);
 
-    /* don't try this for absolute or relative paths */
+    /* Explicit paths do not use PATH, but they still have to name a
+     * readable regular file. Classifying a missing explicit operand here
+     * keeps `.`'s own diagnostic/status contract instead of leaking the
+     * input subsystem's generic open failure. */
     if basename.contains(&b'/') {
-        return Some(basename.to_owned());
+        let path = OsStr::from_bytes(basename);
+        let regular_file = std::fs::metadata(path)
+            .is_ok_and(|metadata| metadata.is_file());
+        let readable = nsh_platform::effective_access(path, nsh_platform::AccessMode::READ_OK);
+        return (regular_file && readable).then(|| basename.to_owned());
     }
 
     let mut path = PathCursor::new(path_value.as_slice().as_bstr());
@@ -58,7 +64,7 @@ fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Option<BStr
 // [spec:posix:req:builtin.dot.interfaces]
 // [spec:posix:req:builtin.dot.exit-status]
 pub fn dotcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    dotcmd_with_missing_status(sh, args, 2)
+    dotcmd_with_missing_status(sh, args, 1)
 }
 
 // [spec:nsh:req:compat.smoosh.source-builtin]
@@ -80,15 +86,7 @@ fn dotcmd_with_missing_status(
         let Some(fullname) = find_dot_file(sh, name) else {
             let mut message = name.to_vec();
             message.extend_from_slice(b": not found");
-            if missing_status == 1 {
-                let errors = sh.io.stderr();
-                let _ = errors.write_all(b"source: ");
-                let _ = errors.write_all(&message);
-                let _ = errors.write_all(b"\n");
-                return Err(Error::reported(sh.eval.errlinno, missing_status));
-            }
-            let error = Error::other(sh.eval.errlinno, missing_status, &message);
-            return Err(sh.report(error));
+            return Err(sh.builtin_error_value(missing_status, &message));
         };
 
         crate::input::setinputfile(

@@ -4935,4 +4935,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule compat.smoosh.control-boundaries}
     )}
+    {id fix-smoosh-error-status-diagnostics, covered_rules (
+        compat.smoosh.error-contracts
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.smoosh.error-contracts}
+    )}
 )

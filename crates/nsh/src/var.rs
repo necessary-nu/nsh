@@ -622,7 +622,6 @@ pub(crate) fn add_flags(sh: &mut Shell, name: &BStr, flags: c_int) -> bool {
     true
 }
 
-#[cfg(test)]
 pub(crate) fn flags_bytes(sh: &mut Shell, name: &BStr) -> Option<c_int> {
     sh.vars.tab.get(name).map(|var| var.flags)
 }

@@ -5723,6 +5723,13 @@ children (
                                 kind @note
                                 text "Owns builtin.command.nospecial.test, builtin.dot.nonexistent.test, builtin.exec.badredir.test, builtin.readonly.assign.noninteractive.test, builtin.special.redir.error.test, builtin.times.ioerror.test, builtin.unset.test, semantics.error.noninteractive.test, semantics.interactive.expansion.exit.test, semantics.noninteractive.expansion.exit.test, and semantics.redir.close.test. Definition of done: special-builtin demotion, fatal versus recoverable errors, parameter-expansion failure, descriptor errors, write errors, exit statuses, and diagnostic prefixes/text match the adopted contracts without weakening descriptor ownership. Add focused regressions and make all eleven Smoosh cases exact."
                             }
+
+                            {
+                                at 2026-08-19T16:06:58.279788348Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
                         )
                     }
 

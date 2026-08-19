@@ -3545,7 +3545,12 @@ fn varunset(
     message.extend_from_slice(b": ");
     message.extend_from_slice(msg);
     message.extend_from_slice(tail);
-    sh.sh_error_value(&message)
+    if sh.eval.inps4 != 0 {
+        sh.sh_error_value(&message)
+    } else {
+        // [spec:nsh:req:compat.smoosh.error-contracts]
+        sh.expansion_error_value(&message)
+    }
 }
 
 /// The `out:` tail `redirectsafe` and `expandstr` share: decide whether

@@ -434,7 +434,11 @@ pub(crate) fn cmdloop(
 
             sh.jobs.job_warning = if sh.jobs.job_warning == 2 { 1 } else { 0 };
             numeof = 0;
-            i = crate::eval::flow!(crate::eval::evaltree(sh, n.as_ref(), 0));
+            i = crate::eval::flow!(if top != 0 {
+                crate::eval::eval_top_level(sh, n.as_ref(), 0)
+            } else {
+                crate::eval::evaltree(sh, n.as_ref(), 0)
+            });
             if n.is_some() {
                 status = i;
             }

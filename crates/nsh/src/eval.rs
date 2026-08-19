@@ -307,7 +307,7 @@ pub(crate) fn parse_execute(sh: &mut Shell, flags: c_int) -> Result<Flow, Error>
         {
             let i: c_int;
 
-            i = flow!(evaltree(sh,
+            i = flow!(eval_top_level(sh,
                 n.as_ref(),
                 flags
                     & !(if crate::parser::parser_eof(sh) != 0 {
@@ -328,6 +328,70 @@ pub(crate) fn parse_execute(sh: &mut Shell, flags: c_int) -> Result<Flow, Error>
          * way out. */
     }
     Ok(Flow::Done(status))
+}
+
+/// Evaluate one parsed top-level command, retaining the rest of an
+/// interactive command list after a parameter-expansion failure.
+///
+/// The ordinary evaluator returns the error because a non-interactive shell
+/// must terminate. An interactive root instead abandons the affected command,
+/// restores its temporary state, and resumes at the next `;` command (or the
+/// next parsed input record).
+// [spec:nsh:req:compat.smoosh.error-contracts]
+pub(crate) fn eval_top_level(
+    sh: &mut Shell,
+    n: Option<&Node>,
+    flags: c_int,
+) -> Result<Flow, Error> {
+    if iflag(sh) == 0 || sh.shell_level != 0 {
+        return evaltree(sh, n, flags);
+    }
+    eval_interactive_sequence(sh, n, flags)
+}
+
+fn redirection_only_status(
+    status: c_int,
+    redirection_error: Option<&Error>,
+    has_command: bool,
+) -> c_int {
+    if redirection_error.is_some() && !has_command {
+        1
+    } else {
+        status
+    }
+}
+
+fn eval_interactive_sequence(
+    sh: &mut Shell,
+    n: Option<&Node>,
+    flags: c_int,
+) -> Result<Flow, Error> {
+    if let Some(n) = n.filter(|node| node.node_type() == NSEMI) {
+        let sequence = n.nbinary();
+        match eval_interactive_sequence(sh, sequence.ch1.as_deref(), flags & EV_TESTED)? {
+            Flow::Done(_) => {}
+            exit @ Flow::Exit { .. } => return Ok(exit),
+        }
+        if sh.eval.evalskip != 0 {
+            return Ok(Flow::Done(sh.status));
+        }
+        return eval_interactive_sequence(sh, sequence.ch2.as_deref(), flags);
+    }
+
+    let input_stop = crate::input::cur_mark(sh);
+    match evaltree(sh, n, flags) {
+        Err(error) if error.is_expansion() => {
+            let status = error.status();
+            sh.status = status;
+            drop(error);
+            crate::init::exitreset(sh, false);
+            crate::input::unwindfiles(sh, input_stop);
+            crate::var::mkinit_reset(sh);
+            crate::error::FORCEINTON(sh);
+            Ok(Flow::Done(status))
+        }
+        outcome => outcome,
+    }
 }
 
 /*
@@ -410,19 +474,18 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
                                     /* An interrupt is not a redirection
                                      * error and is not swallowed with
                                      * one. */
-                                    Err(e) if e.is_interrupt() => return Err(e),
+                                    Err(e) if e.is_interrupt() || e.is_expansion() => {
+                                        return Err(e);
+                                    }
                                     Err(e) => {
-                                        debug_assert_eq!(
-                                            e.status(),
-                                            2,
-                                            "a redirection error takes status 2"
-                                        );
-                                        /* From the value, not hardcoded:
-                                         * the assert above already claimed
-                                         * the two agree, and taking it
-                                         * from the error is what makes the
-                                         * claim structural. */
-                                        status = e.status();
+                                        /* The diagnostic is already written.
+                                         * The adopted closure profile assigns
+                                         * shell redirection failures status 1,
+                                         * including the no-command redirect in
+                                         * `exec 9&<-`. */
+                                        // [spec:nsh:req:compat.smoosh.error-contracts]
+                                        drop(e);
+                                        status = 1;
                                         checkexit = EV_TESTED;
                                     }
                                     Ok(()) => {
@@ -1323,7 +1386,7 @@ fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> 
     match crate::redir::redirectsafe(sh, &c.redirect, REDIR_PUSH | REDIR_SAVEFD2) {
         /* Same as the `NREDIR` arm: an interrupt leaves rather than
          * becoming this command's status. */
-        Err(e) if e.is_interrupt() => return Err(e),
+        Err(e) if e.is_interrupt() || e.is_expansion() => return Err(e),
         Err(e) => {
             /* From the value; see the `NREDIR` arm. Read before the move
              * into `redir_err`, which is where it is re-raised from. */
@@ -1502,6 +1565,12 @@ fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> 
             break 'out_lbl;
         }
         // bail:
+        /* A redirection-only command has no builtin entry whose specialness
+         * can classify the failure. The adopted Smoosh contract uses the
+         * shell-error status 1 for that path; this is the foreground half of
+         * the parsed `exec 9&<-` case. */
+        // [spec:nsh:req:compat.smoosh.error-contracts]
+        status = redirection_only_status(status, redir_err.as_ref(), osp.is_some());
         sh.status = status;
 
         /* We have a redirection error. */
@@ -1518,13 +1587,20 @@ fn evalcommand(sh: &mut Shell, cmd: &Node, flags: c_int) -> Result<Flow, Error> 
              * `docs/api-design.md` 3.3's "reported and carried on past".
              * `Error::reported` is that case -- a value with no text,
              * because the text has already been written. */
-            return Err(match redir_err.take() {
+            let error = match redir_err.take() {
                 Some(e) => {
                     debug_assert_eq!(e.status(), status, "a redirection error keeps its status");
                     e
                 }
                 None => crate::error::Error::reported(sh.eval.errlinno, status),
-            });
+            };
+            debug_assert!(!error.is_expansion(), "expansion errors bypass redirection status");
+            // Smoosh's adopted POSIX closure profile assigns status 1 to a
+            // redirection failure on a directly invoked special builtin.
+            // Its diagnostic was already written by the redirection layer.
+            // [spec:nsh:req:compat.smoosh.error-contracts]
+            sh.status = 1;
+            return Err(crate::error::Error::reported(sh.eval.errlinno, 1));
         }
 
         // goto out
@@ -1589,14 +1665,10 @@ fn evalbltin(
          * exactly as the C's `goto cmddone` skipped it. */
         sh.io.flushall();
         if crate::output::outerr(sh.io.stdout()) != 0 {
-            let mut message = Vec::new();
-            if let Some(name) = &sh.eval.commandname {
-                message.extend_from_slice(name);
-            }
-            message.extend_from_slice(b": I/O error");
-            sh.sh_warnx(&message);
+            // [spec:nsh:req:compat.smoosh.error-contracts]
+            sh.command_warnx(b"I/O error");
+            status = 2;
         }
-        status |= crate::output::outerr(sh.io.stdout());
         sh.status = status;
         Ok(Flow::Done(status))
     })();

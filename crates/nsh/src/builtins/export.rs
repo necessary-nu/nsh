@@ -15,7 +15,7 @@ use core::ffi::c_int;
 
 use crate::eval::Flow;
 use crate::options::Options;
-use crate::var::{VEXPORT, VREADONLY, add_flags, set_bytes, show_vars};
+use crate::var::{VEXPORT, VREADONLY, add_flags, flags_bytes, set_bytes, show_vars};
 
 // [spec:dash:def:var.exportcmd-fn]
 // [spec:dash:sem:var.exportcmd-fn]
@@ -57,9 +57,15 @@ pub fn exportcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         for word in operands {
             match word.iter().position(|&b| b == b'=') {
                 Some(at) => {
+                    let name = BStr::new(&word[..at]);
+                    if flags_bytes(sh, name).is_some_and(|flags| flags & VREADONLY != 0) {
+                        let mut message = name.to_vec();
+                        message.extend_from_slice(b": is read only");
+                        return Err(sh.builtin_error_value(1, &message));
+                    }
                     set_bytes(
                         sh,
-                        BStr::new(&word[..at]),
+                        name,
                         Some(BStr::new(&word[at + 1..])),
                         flag,
                     )?;

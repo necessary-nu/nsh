@@ -9,7 +9,7 @@ use crate::error::Error;
 use bstr::BStr;
 use crate::eval::Flow;
 use crate::options::Options;
-use crate::var::unset_bytes;
+use crate::var::{VREADONLY, flags_bytes, unset_bytes};
 
 // [spec:dash:def:var.unsetcmd-fn]
 // [spec:dash:sem:var.unsetcmd-fn]
@@ -34,6 +34,11 @@ pub fn unsetcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     for name in opts.operands() {
         if flag != b'f' {
+            if flags_bytes(sh, name).is_some_and(|flags| flags & VREADONLY != 0) {
+                let mut message = name.to_vec();
+                message.extend_from_slice(b" is read-only");
+                return Err(sh.builtin_error_value(1, &message));
+            }
             unset_bytes(sh, name)?;
             continue;
         }

@@ -170,6 +170,10 @@ pub struct ShellOptions {
     pub(crate) minusc: Option<BString>,
     /// `$0`, owned and NUL-terminated for the remaining C-shaped readers.
     arg0: Option<BString>,
+    /// The process invocation name before a command-file operand replaces
+    /// `$0`. Output failures in the Smoosh profile identify the interpreter,
+    /// not the script it is reading.
+    pub(crate) invocation_name: Option<BString>,
 }
 
 impl ShellOptions {
@@ -180,6 +184,7 @@ impl ShellOptions {
             shellparam: shparam::new(),
             minusc: None,
             arg0: None,
+            invocation_name: None,
         }
     }
 
@@ -196,6 +201,9 @@ impl ShellOptions {
     pub(crate) fn set_arg0(&mut self, value: &BStr) {
         let mut owned = value.to_owned();
         owned.push(0);
+        if self.invocation_name.is_none() {
+            self.invocation_name = Some(owned.clone());
+        }
         self.arg0 = Some(owned);
     }
 

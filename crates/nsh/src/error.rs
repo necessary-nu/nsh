@@ -344,6 +344,19 @@ pub enum Error {
         /// The already-rendered read diagnostic.
         message: BString,
     },
+    /// A parameter-expansion failure that aborts a non-interactive shell
+    /// but only abandons the affected command in an interactive shell.
+    ///
+    /// This cannot be represented by `Other`: redirection frames are
+    /// deliberately allowed to turn an ordinary diagnostic into a command
+    /// status, while POSIX expansion errors have to cross those same frames.
+    // [spec:nsh:req:compat.smoosh.error-contracts]
+    Expansion {
+        /// `errlinno` as it stood when expansion failed.
+        line: c_int,
+        /// The diagnostic without a shell or command prefix.
+        message: BString,
+    },
     /// A diagnostic with no more specific variant.
     Other {
         /// `errlinno` as it stood when the diagnostic was produced.
@@ -424,6 +437,12 @@ impl Error {
         matches!(self, Error::UnrecoverableRead { .. })
     }
 
+    /// Whether this failure has the interactive/non-interactive expansion
+    /// consequences specified by the shell language.
+    pub fn is_expansion(&self) -> bool {
+        matches!(self, Error::Expansion { .. })
+    }
+
     /// The exit status the shell takes from this error.
     pub fn status(&self) -> c_int {
         match self {
@@ -434,6 +453,7 @@ impl Error {
             Error::UnrecoverableRead { .. } => {
                 c_int::from(crate::status::ExitStatus::UNRECOVERABLE_READ.code())
             }
+            Error::Expansion { .. } => 1,
             Error::Other { status, .. } => *status,
         }
     }
@@ -450,7 +470,9 @@ impl Error {
             /* dash prints nothing for an interrupt. `main`'s handler
              * writes a bare newline and that is the whole of it. */
             Error::Interrupted { .. } => BStr::new(b""),
-            Error::UnrecoverableRead { message, .. } | Error::Other { message, .. } => {
+            Error::UnrecoverableRead { message, .. }
+            | Error::Expansion { message, .. }
+            | Error::Other { message, .. } => {
                 message.as_bstr()
             }
         }
@@ -463,7 +485,9 @@ impl Error {
              * diagnostic did, and reading `eval.errlinno` here would report
              * whichever line last failed. */
             Error::Interrupted { .. } => 0,
-            Error::UnrecoverableRead { line, .. } | Error::Other { line, .. } => *line,
+            Error::UnrecoverableRead { line, .. }
+            | Error::Expansion { line, .. }
+            | Error::Other { line, .. } => *line,
         }
     }
 }
@@ -537,6 +561,62 @@ impl crate::context::Shell {
          * receiver even before this method had one. */
         let e = Error::other(self.eval.errlinno, 2, msg);
         self.report(e)
+    }
+
+    /// Report a parameter-expansion error without the implementation's
+    /// shell/line prefix and retain its distinct control-flow class.
+    // [spec:nsh:req:compat.smoosh.error-contracts]
+    pub fn expansion_error_value(&mut self, msg: &[u8]) -> Error {
+        let e = Error::Expansion {
+            line: self.eval.errlinno,
+            message: BString::from(msg),
+        };
+        let _ = self.io.stderr().write_all(msg);
+        let _ = self.io.stderr().write_all(b"\n");
+        self.io.flushall();
+        e
+    }
+
+    /// Report `command: message` and return a diagnostic already written.
+    /// Builtin-defined failures use this form rather than the parser's
+    /// `$0: line: command:` diagnostic spine.
+    // [spec:nsh:req:compat.smoosh.error-contracts]
+    pub fn builtin_error_value(&mut self, status: c_int, msg: &[u8]) -> Error {
+        let name = self
+            .eval
+            .commandname
+            .clone()
+            .unwrap_or_else(|| BString::from(&b"sh"[..]));
+        let errors = self.io.stderr();
+        let _ = errors.write_all(&name);
+        let _ = errors.write_all(b": ");
+        let _ = errors.write_all(msg);
+        let _ = errors.write_all(b"\n");
+        self.io.flushall();
+        Error::reported(self.eval.errlinno, status)
+    }
+
+    /// Write `$0: command: message` for an output failure detected after a
+    /// builtin returns. Unlike `sh_warnx`, this contract has no line field.
+    // [spec:nsh:req:compat.smoosh.error-contracts]
+    pub fn command_warnx(&mut self, msg: &[u8]) {
+        let shell_name = self
+            .options
+            .invocation_name
+            .as_ref()
+            .map(|name| BStr::new(&name[..name.len() - 1]))
+            .unwrap_or(BStr::new(b"sh"))
+            .to_owned();
+        let command_name = self.eval.commandname.clone();
+        let errors = self.io.stderr();
+        let _ = errors.write_all(&shell_name);
+        let _ = errors.write_all(b": ");
+        if let Some(command_name) = command_name {
+            let _ = errors.write_all(&command_name);
+            let _ = errors.write_all(b": ");
+        }
+        let _ = errors.write_all(msg);
+        let _ = errors.write_all(b"\n");
     }
 
     /*
