@@ -1288,6 +1288,7 @@ assertions (
     {id verify-smoosh-zero-failures, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:31:28.927290215Z}
     {id specify-bash-compatibility-profile, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:36:22.237930781Z}
     {id fix-nplan-cpp-format-check, kind @complete, author "brendan@necessary.nu", at 2026-08-19T18:45:28.732506317Z}
+    {id refresh-project-readmes, kind @complete, author "brendan@necessary.nu", at 2026-08-19T22:47:09.703433578Z}
 )
 
 impl_evidence (

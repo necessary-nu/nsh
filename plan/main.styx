@@ -6366,4 +6366,26 @@ children (
             }
         )
     }
+
+    {
+        id refresh-project-readmes
+        title "Rewrite project and test READMEs for maintainers"
+        kind @docs
+        sealed true
+        log (
+            {
+                at 2026-08-19T22:47:06.011878327Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Todo → Doing (nplan start)"
+            }
+
+            {
+                at 2026-08-19T22:47:09.703433578Z
+                author "brendan@necessary.nu"
+                kind @status
+                text "Doing → Done (nplan complete)"
+            }
+        )
+    }
 )

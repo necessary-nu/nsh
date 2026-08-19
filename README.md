@@ -99,15 +99,19 @@ The public API is documented by the crate and checked with
 
 ## Testing
 
+> [!WARNING]
 > Test cases are hostile input. Never run them outside the repository's
 > containment wrapper. Some cases deliberately exercise process-wide signals
 > and job-control behavior.
 
-Build the C reference once, then run tests through `scripts/sandboxed`:
+Bootstrap the C reference, then run builds and tests through
+`scripts/sandboxed`. The bootstrap downloads the pinned official Dash archive,
+verifies its SHA-256 and the two documented oracle patches, and builds it
+inside the same containment boundary:
 
 ```sh
 ./tests/build-reference.sh
-cargo build
+scripts/sandboxed -- cargo build
 
 scripts/sandboxed -- cargo test --workspace
 scripts/sandboxed --writable tests/.build -- tests/harness/runall.sh 12
@@ -133,20 +137,27 @@ crates/nsh/           shell library
 crates/nsh-cli/       command-line frontend
 crates/nsh-platform/  safe wrappers around syscalls, locale, and terminal APIs
 crates/nsh-survey/    survey import and execution tools
-src/                  upstream dash C source used by the reference build
 posix/                POSIX.1-2024 rule corpus and conformance harness
-tests/                differential tests and vendored survey suites
+tests/                differential tests, reference lock, and survey suites
 docs/                 API design, specifications, and divergence records
 plan/                 nplan work breakdown and decision records
 scripts/sandboxed     test containment wrapper
 ```
 
-The C source under `src/` is kept byte-identical to upstream dash and exists as
-a behavioral reference. Rust-specific behavior and API contracts live under
-`docs/spec/nsh/`; current project state is kept under `plan/`.
+The C oracle is fetched at its pinned upstream tag into ignored test build
+state and receives two small, hash-locked compatibility patches; the full C
+tree is not vendored in the repository. Rust-specific behavior and API
+contracts live under `docs/spec/nsh/`; current project state is kept under
+`plan/`.
 
 ## License
 
-The shell is BSD-3-Clause. See [COPYING](COPYING) for the inherited copyright
-notices. Vendored POSIX text and survey corpora retain their respective
-licenses.
+Licensed under the [BSD 3-Clause License](LICENSE).
+
+`nsh` began as a Rust port of
+[dash](https://git.kernel.org/pub/scm/utils/dash/dash.git/). The inherited dash
+work is by Herbert Xu and Christos Zoulas and derives from software Kenneth
+Almquist contributed to the University of California, Berkeley. The complete
+copyright and attribution notices are in [LICENSE](LICENSE).
+
+Vendored POSIX text and survey corpora retain their respective licenses.

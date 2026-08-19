@@ -1,38 +1,27 @@
-# Smoosh POSIX shell survey
+# Smoosh shell survey
 
-This directory is the offline, reviewable input boundary for Smoosh's shell
-system tests. Smoosh is formal-POSIX-derived evidence, kept distinct from both
-the normative POSIX.1-2024 rules under `posix/` and the differential Oils
-shell-spec survey under `tests/surveys/oils/`.
+This directory contains a pinned copy of Smoosh's shell system tests and a
+native runner for `nsh`. It is supplemental compatibility data; the normative
+POSIX.1-2024 corpus and harness are under `posix/`.
 
-`SOURCE.toml` pins the exact upstream commit, tree, license, corpus counts,
-timeouts, and legacy known-hang classification. Ordinary verification is
-offline: it consumes only the checked-in files below this directory and does
-not require OPAM, Smoosh itself, or a checkout under the user's home directory.
-The origin of the known-hang classification is pinned separately to the exact
-Oils revision and `test/smoosh.sh` path that defined it.
+## Files
 
-The generated `MANIFEST.toml` exposes three selections: `regular`,
-`known-hang`, and `full`. The known-hang cases are never discarded; they run
-with the separately locked one-second deadline. All other cases retain
-Smoosh's five-second default.
+```text
+SOURCE.toml    upstream commit, tree, license, counts, and timeouts
+FILES.sha256   hashes for imported files
+MANIFEST.toml  generated regular, known-hang, and full groups
+LICENSE.txt    imported upstream license
+shell/         imported tests and expected output
+RESULTS.toml   recorded full-suite result for nsh
+```
 
-## Updating the pin
-
-1. Fetch the proposed commit into a disposable Smoosh checkout and detach at
-   that exact commit.
-2. Review the upstream license, `tests/shell_tests.sh`, `tests/Makefile`,
-   `tests/shell/`, and `tests/util/`.
-3. Update the source identity and reviewed counts in `SOURCE.toml`.
-4. Run `cargo run -p nsh-survey -- import-smoosh CHECKOUT`.
-5. Review the complete generated diff and run
-   `cargo run -p nsh-survey -- verify-smoosh`.
+Verification is offline and does not require OPAM, Smoosh, or an external
+checkout. `SOURCE.toml` also pins the Oils revision and `test/smoosh.sh` used
+to classify the legacy known-hang cases.
 
 ## Running the survey
 
-Build the release shell, then run the native harness:
-
-```text
+```sh
 cargo build --release --bin nsh
 cargo run -p nsh-survey -- run-smoosh
 cargo run -p nsh-survey -- run-smoosh --group known-hang
@@ -40,33 +29,59 @@ cargo run -p nsh-survey -- run-smoosh --group full --format json
 cargo run -p nsh-survey -- run-smoosh --group full --summary results.toml
 ```
 
-The native harness creates an isolated directory per script, supplies
-`TEST_SHELL`, `TEST_SHELL_FLAGS`, `TEST_UTIL`, `HOME`, and `LOGNAME`, compares
-only the streams for which upstream supplies an oracle, and defaults a missing
-`.ec` oracle to status zero exactly like `tests/shell_tests.sh`. Its helper
-executables are safe Rust implementations; no upstream C utility or shell
-driver is built or invoked.
+The available groups are:
 
-Before any script runs, the harness proves its fail-closed sandbox canary.
-Every script runs with fresh PID and network namespaces, a read-only root with
-only its scratch tree writable, a private `/tmp`, a bounded process limit,
-closed inherited descriptors, reset signal dispositions, and no controlling
-terminal. The namespace reaper kills leaked descendants. Missing or defective
-containment aborts the survey with no unsandboxed fallback, and result files
-record the active containment mode. Use `scripts/sandboxed -- COMMAND` around
-the top-level Cargo or regression-test command too, so harness regressions are
-contained before the per-script boundary is established.
+| Group | Timeout | Contents |
+|---|---:|---|
+| `regular` | 5 seconds | tests not classified as known hangs |
+| `known-hang` | 1 second | retained legacy hang cases |
+| `full` | per group | all imported tests |
 
-`--shell-flag` is repeatable. The native `smoosh-shell` wrapper process-replaces
-itself with the selected shell, ensuring those flags apply to the top-level
-script and every nested `$TEST_SHELL` invocation without changing parent-PID
-semantics. `nsh` needs no extra flag because its baseline language is POSIX;
-for example, use `--shell /bin/bash --shell-flag --posix` when surveying Bash.
+The default group is `regular`.
+
+The runner creates a working directory for each script and sets `TEST_SHELL`,
+`TEST_SHELL_FLAGS`, `TEST_UTIL`, `HOME`, and `LOGNAME`. It compares only streams
+with an upstream oracle. A missing `.ec` file means exit status zero, matching
+Smoosh's `tests/shell_tests.sh`. Helper programs are native Rust
+implementations; the upstream C utilities and shell driver are not run.
+
+`--shell-flag` is repeatable. The `smoosh-shell` wrapper applies the flags to
+the top-level script and nested `$TEST_SHELL` calls while preserving parent-PID
+semantics. `nsh` needs no extra flag. To survey Bash in POSIX mode, use:
+
+```sh
+cargo run -p nsh-survey -- run-smoosh \
+  --shell /bin/bash \
+  --shell-flag --posix
+```
+
+## Containment
+
+Run top-level Cargo and survey commands through `scripts/sandboxed`:
+
+```sh
+scripts/sandboxed -- cargo run -p nsh-survey -- run-smoosh --group full
+```
+
+The runner verifies its own fail-closed sandbox before executing any script.
+Each test gets fresh PID and network namespaces, a read-only root, a writable
+scratch directory, a private `/tmp`, a process limit, closed inherited
+descriptors, reset signals, and no controlling terminal. Leaked descendants
+are killed when the case ends. The survey aborts if containment is unavailable.
+
+## Updating the pin
+
+1. Check out the proposed Smoosh commit in detached state.
+2. Review the upstream license, `tests/shell_tests.sh`, `tests/Makefile`,
+   `tests/shell/`, and `tests/util/`.
+3. Update the identity and reviewed counts in `SOURCE.toml`.
+4. Run `cargo run -p nsh-survey -- import-smoosh CHECKOUT`.
+5. Review the generated diff.
+6. Run `cargo run -p nsh-survey -- verify-smoosh`.
 
 ## Recorded result
 
-`RESULTS.toml` is a deterministic summary from the complete `full` group. It
-records the tested release binary's SHA-256, both timeout classes, totals, and
-every non-passing script without conflating those observations with normative
-POSIX.1-2024 conformance. The initial nsh result is 155 pass and 31 fail, with
-zero timeouts and zero harness errors across all 186 scripts.
+`RESULTS.toml` contains the deterministic result for the complete `full`
+group, including the release binary SHA-256, both timeout classes, totals, and
+all non-passing scripts. The current baseline is 155 passes and 31 failures
+across 186 scripts, with no timeouts or harness errors.

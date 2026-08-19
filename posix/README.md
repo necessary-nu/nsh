@@ -1,31 +1,28 @@
-# POSIX shell specification → nspec corpus
+# POSIX specification corpus
 
-This turns the shell portion of the POSIX.1-2024 standard (IEEE Std 1003.1-2024,
-The Open Group Base Specifications Issue 8) into an [nspec](https://github.com/)
-rule corpus that an implementation can be tracked against with `nplan`.
+This directory contains the shell-related parts of POSIX.1-2024 (IEEE Std
+1003.1-2024, The Open Group Base Specifications Issue 8), the conversion
+tools, and the resulting nspec rule corpus.
 
-The vendored HTML of the standard is the input; `docs/spec/` is the output.
+The current corpus has 1,130 rules in 23 files: 821 `req`, 113 `def`, 106
+`syn`, 89 `sem`, and 1 `thm`.
 
-**1130 rules across 23 files**, covering everything POSIX requires a shell to
-implement internally: XCU chapters 1 and 2, the `sh` reference page, the fifteen
-special built-ins, and the sixteen intrinsic utilities — 821 `req`, 113 `def`,
-106 `syn`, 89 `sem`, 1 `thm`.
+## Layout
 
-## What's here
-
-```
-utilities/, basedefs/, functions/, …   the vendored Open Group HTML (untouched)
-tools/                                 the conversion + validation pipeline
-build/md/                              HTML converted to clean GFM
-build/units/                           that markdown sliced into authoring units
-build/AUTHORING.md                     the contract the corpus was authored against
-docs/spec/                             the nspec rule corpus
-.config/nspec/config.styx              nspec configuration
+```text
+utilities/, basedefs/, functions/, ...  vendored Open Group HTML
+tools/                                   conversion and validation tools
+build/md/                                converted Markdown
+build/units/                             Markdown split into authoring units
+build/AUTHORING.md                       corpus authoring rules
+docs/spec/                               nspec corpus
+harness/                                 executable conformance cases
+.config/nspec/config.styx                nspec configuration
 ```
 
 ## Scope
 
-The **shell** portion of XCU:
+The corpus covers the shell portions of XCU:
 
 | Source | Corpus | Rules | Prefix |
 |---|---|--:|---|
@@ -53,143 +50,92 @@ The **shell** portion of XCU:
 | Intrinsic `alias`, `unalias`, `fc` | `builtins-alias.md` | 49 | `builtin.` |
 | Intrinsic `read`, `getopts` | `builtins-input.md` | 53 | `builtin.` |
 
-Each file owns an exclusive id prefix. That matters more than it looks: nspec
-keys coverage on the **bare rule id**, dropping namespace and verb, so two files
-using the same id would silently merge into one rule.
+Each file owns its rule-id prefixes. nspec keys coverage by bare rule id, so
+reusing an id in another file would merge two rules.
 
-## Where the shell's boundary is
+### Shell boundary
 
-The scope above is not a judgement call — the standard draws the line itself.
-XCU 1.6 Built-In Utilities says every standard utility **except**
+XCU 1.6 and 1.7 define which utilities a conforming shell must provide
+internally: the XCU 2.15 special built-ins and the intrinsic utilities
+`alias`, `bg`, `cd`, `command`, `fc`, `fg`, `getopts`, `hash`, `jobs`, `kill`,
+`read`, `type`, `ulimit`, `umask`, `unalias`, and `wait`.
 
-- the special built-ins of XCU 2.15, and
-- the intrinsic utilities named in XCU 1.7, except for `kill`
+Other XCU utilities may be separate executables and are not part of this
+corpus. This includes `awk`, `sed`, `find`, `pwd`, `test`, `echo`, and
+`printf`, even when a shell provides built-in versions. The conversion tools
+can still process their source pages.
 
-shall be implemented so that it can be reached through the `exec` family. Those
-two sets are therefore exactly what a conforming shell must provide *internally*;
-everything else may be a separate executable. XCU 1.7 puts it the other way
-round: intrinsic utilities "are not subject to a *PATH* search during command
-search and execution".
+## Regenerating Markdown
 
-So the corpus covers both sets. The intrinsic utilities are `alias`, `bg`, `cd`,
-`command`, `fc`, `fg`, `getopts`, `hash`, `jobs`, `kill`, `read`, `type`,
-`ulimit`, `umask`, `unalias`, and `wait`.
-
-Not covered: the rest of the XCU utilities (`awk`, `sed`, `find`, …). Those are
-ordinary utilities — a shell may implement them as regular built-ins for speed,
-but it is not required to, and they are reachable via `exec`. `pwd`, `test`,
-`echo`, and `printf` fall in this group too, despite being built into most real
-shells. The pipeline handles them unchanged — `tools/convert.sh utilities/sed.html`
-— they simply aren't part of the shell's own contract.
-
-## Regenerating the markdown
+Run from `posix/`:
 
 ```sh
 tools/convert.sh utilities/V3_chap02.html utilities/sh.html
 ```
 
-`tools/strip-boilerplate.py` removes Open Group page furniture (navigation
-tables, publisher banners, the option-code popup script, font hacks) and fixes
-two places where the source encodes structure in something pandoc discards:
+`tools/strip-boilerplate.py` removes site navigation and presentation markup.
+It also restores headings for the XCU 2.15 built-ins and preserves command
+synopses before pandoc converts the document.
 
-- The special built-ins in XCU 2.15 have **no heading of their own** — each is
-  introduced only by an anchor pair and an HTML comment naming it. Without
-  promoting that to a real heading, all fifteen man pages run together as an
-  undifferentiated wall of `NAME` / `SYNOPSIS` / `DESCRIPTION` sections.
-- `<blockquote class="synopsis">` is a command synopsis, not a quotation.
-  pandoc's `BlockQuote` carries no attributes, so it becomes `<pre>` first.
+`tools/posix.lua` handles document-level changes: section anchors,
+option-conditional markers, informative-section markers, definition lists,
+and blockquotes used only for indentation. The generated Markdown is checked
+against the source's normalized `shall` statements.
 
-`tools/posix.lua` then handles what needs the document tree: hoisting each
-`tag_…` section anchor onto its heading (emitted as a raw anchor, since GFM has
-no heading attributes), converting the option-shading images that bracket
-option-conditional text into `[Option Start]` / `[Option End]` markers, turning
-the informative-section boxes into `<!-- INFORMATIVE-START -->` markers,
-rewriting definition lists into bullet lists (GFM has none, and pandoc's
-fallback loses the term/definition association), and unwrapping the blockquotes
-the man sections use purely for indentation.
-
-Content is preserved: the converted markdown carries the same normative
-sentences as the source, verified by diffing normalised `shall`-statements
-between the two.
-
-## Validating the corpus
+## Validation
 
 ```sh
-tools/check-nspec.py docs/spec     # format + corpus invariants
-tools/coverage-report.py           # how much normative source text landed
-nplan spec status                  # what nspec itself sees
+tools/check-nspec.py docs/spec
+tools/coverage-report.py
+nplan spec status
 ```
 
-`check-nspec.py` exists because **nspec reports nothing when a rule marker is
-malformed** — the line simply isn't a rule, silently. It mirrors the def-site
-grammar and flags every line that looks like it was meant to be a rule but
-wouldn't be seen, plus the invariants nspec doesn't enforce: duplicate ids
-(coverage is keyed on the bare id, so a duplicate merges two rules into one),
-empty bodies, missing citations, and markers inside fenced code blocks.
+`check-nspec.py` validates marker syntax, duplicate ids, rule bodies,
+citations, and markers inside fenced code blocks. This is necessary because a
+malformed marker is otherwise ignored by nspec.
 
-`coverage-report.py` measures the other direction: it pulls every normative
-sentence out of the source slice (skipping informative regions) and checks that
-a distinctive run of its words survives somewhere in the corpus. It currently
-reports 99%; the residue is section lead-ins whose content is covered by the
-individual rules beneath them ("The following operands shall be supported:") and
-"a future version of this standard may…" notes, which impose no obligation on a
-conforming implementation and were deliberately not converted.
+`coverage-report.py` checks that normative source sentences survive in the
+corpus. It currently reports 99%; the remainder consists of section lead-ins
+covered by their child rules and non-binding future-version notes.
 
-Two parser behaviours worth knowing if you edit the corpus by hand:
+## Editing rules
 
-- The def-site scanner **does not track fenced code blocks**. A `> [spec:…]`
-  line inside a fence in a spec file registers as a real rule.
-- The scanner **strips leading whitespace from body lines**, so indentation-
-  significant material (the yacc grammar's aligned `|` continuations, a GFM
-  table's leading pipes) reads differently in the parsed body than in the file.
+The full authoring contract is in `build/AUTHORING.md`. In summary:
 
-## Corpus conventions
+- Use namespace `posix` and an id owned by the file's prefix.
+- Use `def` for definitions, `syn` for grammar, `sem` for behaviour described
+  without a normative keyword, and `req` for obligations.
+- Preserve the standard's wording, including `shall`.
+- Preserve `[UP]`, `[XSI]`, and `[OB]` option markers at their original scope.
+- Exclude informative sections such as APPLICATION USAGE, EXAMPLES, RATIONALE,
+  FUTURE DIRECTIONS, SEE ALSO, and CHANGE HISTORY.
+- Include the source section and anchor for every rule.
 
-Rules follow the authoring contract in `build/AUTHORING.md`:
+Two parser details affect hand edits:
 
-- Namespace `posix`; ids are `CONCERN.NAME`, and each source file owns an
-  exclusive prefix so ids can't collide across the corpus.
-- Verbs are chosen deliberately — `def` for vocabulary, `syn` for grammar and
-  well-formedness, `sem` for behaviour stated without a normative keyword, `req`
-  for obligations.
-- **POSIX's wording is kept verbatim.** "shall" is not rewritten to "MUST":
-  POSIX "shall" already carries RFC 2119 MUST force and nspec treats them as the
-  same modality, so rewording would only risk changing the standard.
-- Option-conditional text keeps the standard's own margin code inline, as a code
-  span, at the point the standard shades it — `` `[UP]` `` (User Portability
-  Utilities), `` `[XSI]` `` (X/Open System Interfaces), `` `[OB]` ``
-  (obsolescent). Each code is defined once per file in a definition list after
-  the RFC 2119 boilerplate. Where the shaded span is a few words mid-sentence,
-  the `` `[Option Start]` `` / `` `[Option End]` `` pair is kept too, since the
-  rule boundary no longer supplies the extent. An unconditional rule where the
-  standard has a conditional one is a real defect.
-- Informative text (APPLICATION USAGE, EXAMPLES, RATIONALE, FUTURE DIRECTIONS,
-  SEE ALSO, CHANGE HISTORY) is excluded — it carries no requirements.
-- Every rule cites its source section and anchor.
+- A `> [spec:...]` marker inside a fenced block is still parsed as a rule.
+- Leading whitespace is removed from rule body lines, so indentation-sensitive
+  text does not have the same parsed form as the Markdown source.
 
-## Implementing against it
+## Implementation annotations
 
-`.config/nspec/config.styx` declares an impl at `src/**/*.rs`. Annotate the
-implementation with the rule it satisfies:
+Annotate implementation and test sites with the corresponding rule:
 
 ```rust
 // [spec:posix:req:quote.backslash]
 fn unescape(...) { ... }
-```
 
-and the test that verifies it:
-
-```rust
 // [spec:posix:req:quote.backslash/test]
 #[test]
 fn backslash_preserves_literal_value() { ... }
 ```
 
-Then `nplan spec status` reports coverage, `nplan spec uncovered` lists what's
-left, and `nplan unplanned` lists rules no plan node claims.
+Use `nplan spec status` for coverage, `nplan spec uncovered` for rules without
+an implementation annotation, and `nplan unplanned` for rules not claimed by
+a plan node.
 
-## Licensing
+## License
 
 `docs/spec/` reproduces normative text from IEEE Std 1003.1-2024, Copyright ©
-2001-2024 The IEEE and The Open Group. The vendored HTML carries the same
-notice. The pipeline in `tools/` is the only original work here.
+2001–2024 The IEEE and The Open Group. The vendored HTML carries the same
+notice. The tools under `tools/` are original to this repository.
