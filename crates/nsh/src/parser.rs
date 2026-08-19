@@ -412,7 +412,10 @@ fn wordtext_node(sh: &mut Shell) -> NodeText {
 // [spec:posix:def:cmd.command-kinds]
 // [spec:posix:syn:cmd.format-descriptions-informal]
 // [spec:posix:req:cmd.no-size-limit]
+// [spec:nsh:req:compat.bash.parse-boundary]
 pub fn parsecmd(sh: &mut Shell, interact: c_int) -> Result<ParseResult, Error> {
+    let dialect = sh.options.dialect();
+    sh.input.begin_parse(dialect);
     sh.input.tokpushback = 0;
     sh.input.heredoclist = Vec::new();
     sh.input.doprompt = interact;
@@ -2697,6 +2700,9 @@ pub fn goodname(locale: &nsh_platform::Locale, name: &BStr) -> c_int {
 pub fn parser_eof(sh: &Shell) -> c_int {
     (sh.input.tokpushback != 0 && sh.input.lasttoken == TEOF) as c_int
 }
+
+#[cfg(test)]
+mod bash_mode_tests;
 
 #[cfg(test)]
 mod tests {

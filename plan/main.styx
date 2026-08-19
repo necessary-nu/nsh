@@ -6006,6 +6006,13 @@ children (
                                         kind @note
                                         text "Definition of done: append a no-letter bash option without reindexing existing options; infer only from the frontend's raw argv[0] basename; make explicit +o win; keep Builder::arg0 as $0 only; cover nsh, -o/+o, bash, -bash, and nsh -c script bash cases plus two-Shell isolation and next-parse-unit behavior."
                                     }
+
+                                    {
+                                        at 2026-08-19T19:51:54.748890138Z
+                                        author "brendan@necessary.nu"
+                                        kind @status
+                                        text "Todo → Doing (nplan start)"
+                                    }
                                 )
                             }
 

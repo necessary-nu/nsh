@@ -193,6 +193,10 @@ pub struct InputStack {
     pub(crate) last_quoteflag: c_int,
     /// `tokpushback` — one token of lookahead, pushed back.
     pub(crate) tokpushback: c_int,
+    /// The option-derived dialect captured at the current parser entry.
+    /// It is a snapshot, not a second setting: every top-level parse unit
+    /// replaces it from this shell's [`crate::options::ShellOptions`].
+    parse_dialect: crate::options::Dialect,
     /// `wordtext` — text of the last word, with the terminating NUL
     /// `readtoken1` writes.
     pub(crate) wordtext: bstr::BString,
@@ -226,6 +230,7 @@ impl InputStack {
             lasttoken: 0,
             last_quoteflag: 0,
             tokpushback: 0,
+            parse_dialect: crate::options::Dialect::Posix,
             wordtext: bstr::BString::new(Vec::new()),
             backquotelist: Vec::new(),
             redirnode: None,
@@ -240,6 +245,16 @@ impl InputStack {
             stdin_istty: -1,
             alias_boundary: 0,
         }
+    }
+
+    /// Begin a parser entry with the shell's current dialect snapshot.
+    pub(crate) fn begin_parse(&mut self, dialect: crate::options::Dialect) {
+        self.parse_dialect = dialect;
+    }
+
+    /// The immutable dialect for the parser entry now in progress.
+    pub(crate) fn parse_dialect(&self) -> crate::options::Dialect {
+        self.parse_dialect
     }
 
     /// `parsefile`, as a value [`unwindfiles`] will accept.

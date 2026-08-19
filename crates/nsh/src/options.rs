@@ -14,6 +14,12 @@ use std::ffi::CStr;
 use std::io::{IsTerminal as _, Write};
 use std::os::fd::AsFd as _;
 
+mod dialect;
+pub(crate) use dialect::Dialect;
+
+#[cfg(test)]
+mod bash_mode_tests;
+
 // [spec:dash:def:options.shparam]
 /// The shell's positional parameters.
 ///
@@ -64,7 +70,7 @@ impl shparam {
     }
 }
 
-pub const NOPTS: usize = 20;
+pub const NOPTS: usize = 21;
 
 /*
  * options.h spells these `#define eflag optlist[0]` etc.  The port keeps the
@@ -91,6 +97,8 @@ pub const pipefail: usize = 16;
 pub const debug: usize = 17;
 pub const hflag: usize = 18;
 pub const nonlexicalctrl: usize = 19;
+// [spec:nsh:req:compat.bash.selection] long-option state
+pub const bash: usize = 20;
 
 /* `static const char *const optnames[NOPTS]`.
  *
@@ -119,6 +127,7 @@ static optnames: [&CStr; NOPTS] = [
     c"debug",
     c"hashall",
     c"nonlexicalctrl",
+    c"bash",
 ];
 
 pub static optletters: [c_char; NOPTS] = [
@@ -142,6 +151,7 @@ pub static optletters: [c_char; NOPTS] = [
     0,
     b'h' as c_char,
     0,
+    0,
 ];
 
 /// The shell's option flags — `set -e`, `set -x`, `-i` and the rest.
@@ -155,6 +165,7 @@ pub static optletters: [c_char; NOPTS] = [
 /// call sites: an index into a bare `[c_char; NOPTS]` is exactly the
 /// shape that let any module write any flag, and the accessors are what
 /// make "who sets `-e`" answerable.
+// [spec:nsh:req:compat.bash.state-isolation]
 pub struct ShellOptions {
     flags: [c_char; NOPTS],
     /// `shellparam` — the positional parameters, `$1` onwards, and

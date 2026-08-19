@@ -19,6 +19,25 @@
 
 #![deny(unsafe_code)]
 
+fn bash_invocation(raw_arg0: &[u8]) -> bool {
+    let basename = raw_arg0
+        .rsplit(|byte| *byte == b'/')
+        .next()
+        .unwrap_or_default();
+    matches!(basename, b"bash" | b"-bash")
+}
+
+// [spec:nsh:req:compat.bash.selection]
+/// Apply frontend-only dialect inference before the shell parses its options.
+fn select_invocation_mode(argv: &mut Vec<Vec<u8>>) {
+    if argv
+        .first()
+        .is_some_and(|raw_arg0| bash_invocation(raw_arg0))
+    {
+        argv.splice(1..1, [b"-o".to_vec(), b"bash".to_vec()]);
+    }
+}
+
 fn main() {
     nsh_platform::restore_shell_process_runtime_state();
 
@@ -43,9 +62,10 @@ fn main() {
     // non-UTF-8 bytes violates its own invariant, and building one with
     // `from_utf8_unchecked` would be undefined behaviour even though the
     // only thing done with it here is `as_bytes`.
-    let argv: Vec<Vec<u8>> = std::env::args_os()
+    let mut argv: Vec<Vec<u8>> = std::env::args_os()
         .map(std::os::unix::ffi::OsStringExt::into_vec)
         .collect();
+    select_invocation_mode(&mut argv);
     // The frontend is the thing entitled to the process's standard
     // descriptors, so it hands them to the shell explicitly rather than
     // letting the shell assume them. See [dec:nsh:host-owns-streams].
@@ -55,4 +75,51 @@ fn main() {
     // job control, so there is nothing left to do but leave.
     let status = nsh::shellmain::main_fn(argv, nsh::streams::Streams::INHERIT);
     std::process::exit(status.code().into());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // [spec:nsh:req:compat.bash.selection/test]
+    #[test]
+    fn only_exact_bash_basenames_infer_mode() {
+        for inferred in [
+            b"bash".as_slice(),
+            b"-bash",
+            b"/bin/bash",
+            b"relative/-bash",
+        ] {
+            assert!(bash_invocation(inferred), "{inferred:?}");
+        }
+        for ordinary in [b"nsh".as_slice(), b"mybash", b"bash/", b""] {
+            assert!(!bash_invocation(ordinary), "{ordinary:?}");
+        }
+    }
+
+    #[test]
+    fn inference_precedes_explicit_options() {
+        let mut argv = vec![
+            b"/bin/bash".to_vec(),
+            b"+o".to_vec(),
+            b"bash".to_vec(),
+            b"-c".to_vec(),
+            b":".to_vec(),
+        ];
+
+        select_invocation_mode(&mut argv);
+
+        assert_eq!(
+            argv,
+            [
+                b"/bin/bash".as_slice(),
+                b"-o",
+                b"bash",
+                b"+o",
+                b"bash",
+                b"-c",
+                b":"
+            ]
+        );
+    }
 }

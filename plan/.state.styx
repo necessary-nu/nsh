@@ -5009,4 +5009,17 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule compat.bash.reference-profile}
     )}
+    {id implement-bash-mode-selection, covered_rules (
+        compat.bash.default-isolation
+        compat.bash.mode
+        compat.bash.parse-boundary
+        compat.bash.selection
+        compat.bash.state-isolation
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.bash.default-isolation}
+        {impl_name nsh-library, rule compat.bash.mode}
+        {impl_name nsh-library, rule compat.bash.parse-boundary}
+        {impl_name nsh-library, rule compat.bash.selection}
+        {impl_name nsh-library, rule compat.bash.state-isolation}
+    )}
 )

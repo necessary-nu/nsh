@@ -295,6 +295,54 @@ mod tests {
         );
     }
 
+    // [spec:nsh:req:compat.bash.selection/test]
+    #[test]
+    fn arg0_does_not_select_bash_mode() {
+        let sh = Shell::builder().arg0(BStr::new(b"bash")).build().unwrap();
+        assert_eq!(sh.options.dialect(), crate::options::Dialect::Posix);
+
+        let selected = Shell::builder()
+            .arg0(BStr::new(b"nsh"))
+            .option(BStr::new(b"bash"), true)
+            .build()
+            .unwrap();
+        assert_eq!(selected.options.dialect(), crate::options::Dialect::Bash);
+    }
+
+    // [spec:nsh:req:compat.bash.state-isolation/test]
+    #[test]
+    fn shell_values_hold_isolated_dialects() {
+        let mut selected = Shell::builder()
+            .option(BStr::new(b"bash"), true)
+            .build()
+            .unwrap();
+        let ordinary = Shell::builder().build().unwrap();
+
+        assert_eq!(selected.options.dialect(), crate::options::Dialect::Bash);
+        assert_eq!(ordinary.options.dialect(), crate::options::Dialect::Posix);
+
+        crate::options::set_option_by_name(&mut selected, BStr::new(b"bash"), false).unwrap();
+        assert_eq!(selected.options.dialect(), crate::options::Dialect::Posix);
+        assert_eq!(ordinary.options.dialect(), crate::options::Dialect::Posix);
+    }
+
+    // [spec:nsh:req:compat.bash.default-isolation/test]
+    #[test]
+    fn disabling_bash_restores_default_dialect() {
+        let mut sh = Shell::builder()
+            .option(BStr::new(b"bash"), true)
+            .build()
+            .unwrap();
+        assert_eq!(sh.options.dialect(), crate::options::Dialect::Bash);
+
+        crate::options::set_option_by_name(&mut sh, BStr::new(b"bash"), false).unwrap();
+
+        assert_eq!(sh.options.dialect(), crate::options::Dialect::Posix);
+        for i in 0..crate::options::NOPTS {
+            assert_eq!(sh.options.flag(i), 0, "option {i} was not restored");
+        }
+    }
+
     /// The default is inert: every option off, which is what makes a
     /// library-built shell non-interactive with no job control.
     #[test]
