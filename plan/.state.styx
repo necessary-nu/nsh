@@ -1,6 +1,6 @@
 schema_version 7
 
-last_sync_at 2026-08-19T15:41:28.449453464Z
+last_sync_at 2026-08-19T18:38:24.018611387Z
 
 rule_versions (
     {id builtin.alias.create-or-display, version 0}
@@ -595,6 +595,25 @@ rule_versions (
     {id cmd.while-execution, version 0}
     {id cmd.while-exit-status, version 0}
     {id cmd.while-format, version 0}
+    {id compat.bash.arrays-declarations, version 0}
+    {id compat.bash.builtins-special-variables, version 0}
+    {id compat.bash.conditionals-arithmetic, version 0}
+    {id compat.bash.default-isolation, version 0}
+    {id compat.bash.expansion-globbing, version 0}
+    {id compat.bash.functions-scoping, version 0}
+    {id compat.bash.interactive, version 0}
+    {id compat.bash.mode, version 0}
+    {id compat.bash.options-builtins-dispatch, version 0}
+    {id compat.bash.parse-boundary, version 0}
+    {id compat.bash.parser-ast, version 0}
+    {id compat.bash.process-substitution, version 0}
+    {id compat.bash.reference-profile, version 0}
+    {id compat.bash.safe-core, version 0}
+    {id compat.bash.selection, version 0}
+    {id compat.bash.state-isolation, version 0}
+    {id compat.bash.survey-closure, version 0}
+    {id compat.bash.traps-introspection, version 0}
+    {id compat.bash.value-model, version 0}
     {id compat.smoosh.control-boundaries, version 0}
     {id compat.smoosh.error-contracts, version 0}
     {id compat.smoosh.hash-all, version 0}
@@ -1108,9 +1127,12 @@ rule_versions (
 
 derived_priorities (
     {id builtins-modules, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id calibrate-bash-5-3-oracle, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id define-oils-survey-manifests, priority 2, derived_at 2026-08-19T15:35:34.038807321Z}
     {id enable-default-history-navigation, priority 2, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id enforce-bash-safe-core, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id enforce-survey-test-containment, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id extend-bash-mode-aware-parser, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id fix-builtin-alias-stdout-format, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
     {id fix-builtin-cd-operand-empty-string, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
     {id fix-builtin-cd-opt-e, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
@@ -1188,8 +1210,19 @@ derived_priorities (
     {id fix-smoosh-interactive-job-control, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
     {id fix-smoosh-runner-fidelity, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
     {id fix-xcu-exit-status-listed-values-binding, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
+    {id gate-bash-builtins-options, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
+    {id implement-bash-arrays-declarations, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
+    {id implement-bash-builtins-special-vars, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
+    {id implement-bash-conditionals-arithmetic, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
+    {id implement-bash-expansion-globbing, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
+    {id implement-bash-functions-scoping, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
+    {id implement-bash-interactive-profile, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
+    {id implement-bash-mode-selection, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
+    {id implement-bash-process-substitution, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
+    {id implement-bash-traps-introspection, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id import-oils-osh-corpus, priority 1, derived_at 2026-08-19T15:35:34.038807321Z}
     {id integrate-smoosh-posix, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id introduce-bash-value-model, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id logical-descriptor-table, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
     {id native-oils-spec-runner, priority 2, derived_at 2026-08-19T15:35:34.038807321Z}
     {id owned-words, priority 3, derived_at 2026-08-18T00:28:34.316571429Z}
@@ -1199,8 +1232,10 @@ derived_priorities (
     {id record-bash-oracle-baseline, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
     {id register-posix-dash-divergences, priority 0, derived_at 2026-08-18T11:45:22.55395116Z}
     {id spec-default-history-navigation, priority 1, derived_at 2026-08-19T15:35:34.038807321Z}
+    {id specify-bash-compatibility-profile, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id specify-smoosh-failure-contracts, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
     {id test-fc-histfile-reload-format, priority 0, derived_at 2026-08-18T11:45:22.55395116Z}
+    {id verify-bash-compatibility-profile, priority 3, derived_at 2026-08-19T18:38:24.018611387Z}
     {id verify-smoosh-zero-failures, priority 3, derived_at 2026-08-19T15:35:34.038807321Z}
 )
 
@@ -1739,10 +1774,56 @@ impl_evidence (
     ), rule_versions_seen (
         {id sh.exit-status-values, version 0}
     )}
+    {id fix-smoosh-control-flow-boundaries, covered_rules (
+        compat.smoosh.control-boundaries
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.smoosh.control-boundaries}
+    ), rule_versions_seen (
+        {id compat.smoosh.control-boundaries, version 0}
+    )}
+    {id fix-smoosh-error-status-diagnostics, covered_rules (
+        compat.smoosh.error-contracts
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.smoosh.error-contracts}
+    ), rule_versions_seen (
+        {id compat.smoosh.error-contracts, version 0}
+    )}
+    {id fix-smoosh-exit-trap-semantics, covered_rules (
+        compat.smoosh.trap-status
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.smoosh.trap-status}
+    ), rule_versions_seen (
+        {id compat.smoosh.trap-status, version 0}
+    )}
+    {id fix-smoosh-extension-builtins-options, covered_rules (
+        compat.smoosh.hash-all
+        compat.smoosh.history-builtin
+        compat.smoosh.nonlexical-control
+        compat.smoosh.source-builtin
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.smoosh.hash-all}
+        {impl_name nsh-library, rule compat.smoosh.history-builtin}
+        {impl_name nsh-library, rule compat.smoosh.nonlexical-control}
+        {impl_name nsh-library, rule compat.smoosh.source-builtin}
+    ), rule_versions_seen (
+        {id compat.smoosh.hash-all, version 0}
+        {id compat.smoosh.history-builtin, version 0}
+        {id compat.smoosh.nonlexical-control, version 0}
+        {id compat.smoosh.source-builtin, version 0}
+    )}
+    {id fix-smoosh-interactive-job-control, covered_rules (
+        compat.smoosh.interactive-job-prompt
+    ), covered_claims (
+        {impl_name nsh-library, rule compat.smoosh.interactive-job-prompt}
+    ), rule_versions_seen (
+        {id compat.smoosh.interactive-job-prompt, version 0}
+    )}
     {id fix-smoosh-runner-fidelity, covered_rules (
         compat.smoosh.ifs-launch
     ), covered_claims (
         {impl_name nsh-library, rule compat.smoosh.ifs-launch}
+    ), rule_versions_seen (
+        {id compat.smoosh.ifs-launch, version 0}
     )}
     {id fix-xcu-exit-status-listed-values-binding, covered_rules (
         xcu.exit-status.listed-values-binding
@@ -4920,36 +5001,5 @@ impl_evidence (
         {id shell-locale.invalid-selection, version 0}
         {id shell-locale.operation-binding, version 0}
         {id shell-locale.selection, version 0}
-    )}
-    {id fix-smoosh-extension-builtins-options, covered_rules (
-        compat.smoosh.hash-all
-        compat.smoosh.history-builtin
-        compat.smoosh.nonlexical-control
-        compat.smoosh.source-builtin
-    ), covered_claims (
-        {impl_name nsh-library, rule compat.smoosh.hash-all}
-        {impl_name nsh-library, rule compat.smoosh.history-builtin}
-        {impl_name nsh-library, rule compat.smoosh.nonlexical-control}
-        {impl_name nsh-library, rule compat.smoosh.source-builtin}
-    )}
-    {id fix-smoosh-control-flow-boundaries, covered_rules (
-        compat.smoosh.control-boundaries
-    ), covered_claims (
-        {impl_name nsh-library, rule compat.smoosh.control-boundaries}
-    )}
-    {id fix-smoosh-error-status-diagnostics, covered_rules (
-        compat.smoosh.error-contracts
-    ), covered_claims (
-        {impl_name nsh-library, rule compat.smoosh.error-contracts}
-    )}
-    {id fix-smoosh-exit-trap-semantics, covered_rules (
-        compat.smoosh.trap-status
-    ), covered_claims (
-        {impl_name nsh-library, rule compat.smoosh.trap-status}
-    )}
-    {id fix-smoosh-interactive-job-control, covered_rules (
-        compat.smoosh.interactive-job-prompt
-    ), covered_claims (
-        {impl_name nsh-library, rule compat.smoosh.interactive-job-prompt}
     )}
 )
