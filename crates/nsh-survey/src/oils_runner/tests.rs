@@ -75,6 +75,7 @@ fn process_timeout_kills_background_descendants() {
         return;
     }
     let scratch = ScratchTree::new().unwrap();
+    let containment = Containment::verified(scratch.path()).unwrap();
     let case_dir = scratch.path().join("case");
     fs::create_dir(&case_dir).unwrap();
     let path = env::var_os("PATH").unwrap_or_default();
@@ -86,6 +87,7 @@ fn process_timeout_kills_background_descendants() {
         posix: false,
         survey_path: path,
         scratch: scratch.path(),
+        containment: &containment,
     };
     let process = run_process(
         &context,
@@ -105,6 +107,7 @@ fn process_gets_isolated_env_and_cwd() {
         return;
     }
     let scratch = ScratchTree::new().unwrap();
+    let containment = Containment::verified(scratch.path()).unwrap();
     let case_dir = scratch.path().join("case");
     fs::create_dir(&case_dir).unwrap();
     let context = RunContext {
@@ -115,6 +118,7 @@ fn process_gets_isolated_env_and_cwd() {
         posix: false,
         survey_path: env::var_os("PATH").unwrap_or_default(),
         scratch: scratch.path(),
+        containment: &containment,
     };
     let process = run_process(
         &context,
@@ -141,6 +145,7 @@ fn evaluation_applies_json_status_and_qualifier() {
     )
     .unwrap();
     let scratch = ScratchTree::new().unwrap();
+    let containment = Containment::verified(scratch.path()).unwrap();
     let case_dir = scratch.path().join("case");
     fs::create_dir(&case_dir).unwrap();
     let context = RunContext {
@@ -151,6 +156,7 @@ fn evaluation_applies_json_status_and_qualifier() {
         posix: false,
         survey_path: env::var_os("PATH").unwrap_or_default(),
         scratch: scratch.path(),
+        containment: &containment,
     };
     let process = run_process(&context, &case_dir, &parsed.cases[0].code).unwrap();
     let record = evaluate_case(&context, "fixture.test.sh", 0, &parsed.cases[0], process);
@@ -167,6 +173,7 @@ fn evaluation_reports_byte_exact_mismatch() {
     }
     let parsed = parse_spec_bytes(b"#### mismatch\nprintf actual\n## stdout: expected\n").unwrap();
     let scratch = ScratchTree::new().unwrap();
+    let containment = Containment::verified(scratch.path()).unwrap();
     let case_dir = scratch.path().join("case");
     fs::create_dir(&case_dir).unwrap();
     let context = RunContext {
@@ -177,6 +184,7 @@ fn evaluation_reports_byte_exact_mismatch() {
         posix: false,
         survey_path: env::var_os("PATH").unwrap_or_default(),
         scratch: scratch.path(),
+        containment: &containment,
     };
     let process = run_process(&context, &case_dir, &parsed.cases[0].code).unwrap();
     let record = evaluate_case(&context, "fixture.test.sh", 0, &parsed.cases[0], process);

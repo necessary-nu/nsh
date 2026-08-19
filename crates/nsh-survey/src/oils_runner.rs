@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::process::{
-    OUTPUT_LIMIT, Output as ProcessResult, Request as ProcessRequest, ScratchTree,
+    Containment, OUTPUT_LIMIT, Output as ProcessResult, Request as ProcessRequest, ScratchTree,
 };
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -177,6 +177,7 @@ fn run_manifest(options: &Options, manifest: &crate::OilsManifest) -> Result<Run
             )
         })?;
     let scratch = ScratchTree::new()?;
+    let containment = Containment::verified(scratch.path())?;
     let fixture_view = helpers::install(scratch.path(), &options.root)?;
     let inherited_path = env::var_os("PATH").unwrap_or_default();
     let mut path_parts = vec![fixture_view.bin.clone()];
@@ -190,6 +191,7 @@ fn run_manifest(options: &Options, manifest: &crate::OilsManifest) -> Result<Run
         posix: options.posix,
         survey_path,
         scratch: scratch.path(),
+        containment: &containment,
     };
 
     let started = Instant::now();
@@ -279,6 +281,7 @@ fn run_manifest(options: &Options, manifest: &crate::OilsManifest) -> Result<Run
         group_label: group.label.clone(),
         shell: options.shell.display().to_string(),
         expectation_shell: options.expectation_shell.clone(),
+        containment: containment.label().to_owned(),
         timeout_ms: duration_millis(options.timeout),
         elapsed_ms: duration_millis(started.elapsed()),
         totals,
@@ -299,6 +302,7 @@ struct RunContext<'a> {
     posix: bool,
     survey_path: OsString,
     scratch: &'a Path,
+    containment: &'a Containment,
 }
 
 fn execute_case(
@@ -364,6 +368,7 @@ fn run_process(context: &RunContext<'_>, directory: &Path, code: &[u8]) -> Resul
         (OsString::from("TMP"), directory.as_os_str().to_owned()),
     ];
     crate::process::run(&ProcessRequest {
+        containment: context.containment,
         program: context.shell,
         arguments: &arguments,
         directory,
@@ -1037,6 +1042,7 @@ struct RunReport {
     group_label: String,
     shell: String,
     expectation_shell: String,
+    containment: String,
     timeout_ms: u64,
     elapsed_ms: u64,
     totals: Totals,
@@ -1048,6 +1054,7 @@ impl RunReport {
         println!("Oils shell-spec survey: {}", self.group_label);
         println!("shell: {}", self.shell);
         println!("expectations: {}", self.expectation_shell);
+        println!("containment: {}", self.containment);
         for case in &self.cases {
             if verbose || !matches!(case.outcome, Outcome::Pass | Outcome::Skip) {
                 println!(

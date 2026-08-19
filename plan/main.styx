@@ -5701,12 +5701,42 @@ children (
                 title "Confine every survey and conformance test process tree"
                 kind @fix
                 deps (native-oils-spec-runner integrate-smoosh-posix)
+                sealed true
                 log (
                     {
                         at 2026-08-19T14:55:50.494443449Z
                         author "brendan@necessary.nu"
                         kind @note
                         text "Definition of done: every Oils, Smoosh, POSIX, differential, PTY, workspace-test, and focused regression command used by this work runs inside a fail-closed PID namespace before any shell-controlled input executes. Reuse or extend the repository sandbox boundary: host processes must be invisible; the root is read-only except explicit scratch/build/result binds; network is unshared; nproc is bounded; inherited signal dispositions are reset; non-PTY runs start a new session; PTY runs acquire only their private controlling terminal; leaked descendants die with the namespace. A containment probe and execution canary must pass before reporting results, and there is no unsandboxed fallback."
+                    }
+
+                    {
+                        at 2026-08-19T14:57:27.262815117Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-19T15:16:10.981386943Z
+                        author "brendan@necessary.nu"
+                        kind @note
+                        text "Implemented a fail-closed native survey boundary and top-level scripts/sandboxed wrapper. Both prove fresh PID and network namespaces, a read-only root outside explicit binds, nproc bounds, a private session with no controlling terminal, and a live execution canary; inherited descriptors are closed and signal dispositions reset. The runner has no uncontained Request construction path. A kill -KILL -1 regression proves an outer sentinel survives. Sandboxed verification: cargo test --workspace passed (including 30 nsh-survey tests); focused Oils smoke passed 1/1; focused Smoosh benchmark.fact5 passed 1/1; full Smoosh rerun completed 186/186 with the unchanged 155 pass / 31 fail classification, zero timeout/error, and containment recorded in RESULTS.toml."
+                    }
+
+                    {
+                        at 2026-08-19T15:16:19.694214821Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
+                    }
+
+                    {
+                        at 2026-08-19T15:17:35.222118413Z
+                        author "brendan@necessary.nu"
+                        kind @errata
+                        text "Final nsh-survey count is 31 passing tests, not 30: an additional regression proves normal shell exit kills background descendants before they can write."
+                        after_done true
                     }
                 )
             }

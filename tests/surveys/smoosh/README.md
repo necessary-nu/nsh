@@ -47,6 +47,16 @@ only the streams for which upstream supplies an oracle, and defaults a missing
 executables are safe Rust implementations; no upstream C utility or shell
 driver is built or invoked.
 
+Before any script runs, the harness proves its fail-closed sandbox canary.
+Every script runs with fresh PID and network namespaces, a read-only root with
+only its scratch tree writable, a private `/tmp`, a bounded process limit,
+closed inherited descriptors, reset signal dispositions, and no controlling
+terminal. The namespace reaper kills leaked descendants. Missing or defective
+containment aborts the survey with no unsandboxed fallback, and result files
+record the active containment mode. Use `scripts/sandboxed -- COMMAND` around
+the top-level Cargo or regression-test command too, so harness regressions are
+contained before the per-script boundary is established.
+
 `--shell-flag` is repeatable. The native `smoosh-shell` wrapper process-replaces
 itself with the selected shell, ensuring those flags apply to the top-level
 script and every nested `$TEST_SHELL` invocation without changing parent-PID

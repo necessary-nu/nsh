@@ -1,0 +1,137 @@
+#!/bin/bash
+# Run an entire test command behind the same fail-closed boundary used for
+# hostile shell cases. This protects the caller even when the harness code
+# itself regresses before it reaches its per-case sandbox.
+set -euo pipefail
+
+usage() {
+    echo "usage: scripts/sandboxed [--writable PATH]... [--timeout SECONDS] -- COMMAND [ARG...]" >&2
+    exit 2
+}
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
+SANDBOX=${NSH_TEST_SANDBOX:-sandbox}
+TIMEOUT=${NSH_TEST_TIMEOUT:-900}
+NPROC=${NSH_TEST_NPROC:-256}
+
+case $TIMEOUT in
+    ''|*[!0-9]*) usage ;;
+esac
+case $NPROC in
+    ''|*[!0-9]*|0) usage ;;
+esac
+command -v "$SANDBOX" >/dev/null 2>&1 || {
+    echo "scripts/sandboxed: '$SANDBOX' was not found; refusing to run tests unsandboxed" >&2
+    exit 1
+}
+SANDBOX=$(command -v "$SANDBOX")
+
+mkdir -p "$ROOT/target"
+WRITABLES=("$(cd "$ROOT/target" && pwd -P)")
+while (($#)); do
+    case $1 in
+        --writable)
+            (($# >= 2)) || usage
+            [[ -e $2 ]] || {
+                echo "scripts/sandboxed: writable path does not exist: $2" >&2
+                exit 1
+            }
+            path=$(cd "$2" 2>/dev/null && pwd -P) || {
+                echo "scripts/sandboxed: writable path must be a directory: $2" >&2
+                exit 1
+            }
+            [[ $path != "$ROOT" ]] || {
+                echo "scripts/sandboxed: refusing to make the whole repository writable" >&2
+                exit 1
+            }
+            WRITABLES+=("$path")
+            shift 2
+            ;;
+        --timeout)
+            (($# >= 2)) || usage
+            TIMEOUT=$2
+            case $TIMEOUT in
+                ''|*[!0-9]*) usage ;;
+            esac
+            shift 2
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *) usage ;;
+    esac
+done
+(($#)) || usage
+
+SANDBOX_ARGS=(
+    "$SANDBOX" --quiet
+    --unshare all
+    --die-with-parent
+    --new-session
+    --close-fds
+    --bind /:/:ro
+    --dev /dev
+    --proc /proc
+    --tmpfs /tmp
+    --chdir "$ROOT"
+    --limit "nproc=$NPROC"
+)
+for path in "${WRITABLES[@]}"; do
+    [[ $path != *:* ]] || {
+        echo "scripts/sandboxed: writable path contains ':': $path" >&2
+        exit 1
+    }
+    SANDBOX_ARGS+=(--bind "$path:$path")
+done
+
+root_probe="$ROOT/.sandboxed-root-write-probe-$$"
+[[ ! -e $root_probe ]] || {
+    echo "scripts/sandboxed: containment probe path already exists: $root_probe" >&2
+    exit 1
+}
+/bin/sleep 30 &
+sentinel=$!
+cleanup() {
+    kill "$sentinel" 2>/dev/null || :
+    wait "$sentinel" 2>/dev/null || :
+    rmdir "$root_probe" 2>/dev/null || :
+}
+trap cleanup EXIT HUP INT TERM
+
+host_pid_namespace=$(/usr/bin/readlink /proc/self/ns/pid)
+host_net_namespace=$(/usr/bin/readlink /proc/self/ns/net)
+if ! canary=$("${SANDBOX_ARGS[@]}" -- /usr/bin/env --default-signal -- /bin/sh -eu -c '
+    fail() { printf "containment probe: %s\n" "$1" >&2; exit 91; }
+    if test -e "/proc/$1" && test "$(/usr/bin/readlink "/proc/$1/ns/pid")" = "$2"; then
+        fail "host pid is visible"
+    fi
+    test "$(/usr/bin/readlink /proc/self/ns/pid)" != "$2" || fail "PID namespace was not replaced"
+    test "$(/usr/bin/readlink /proc/self/ns/net)" != "$3" || fail "network namespace was not replaced"
+    if mkdir "$4" 2>/dev/null; then fail "read-only root accepted a write"; fi
+    /usr/bin/awk -v expected="$5" '\''$1 == "Max" && $2 == "processes" { found=1; good=($3 == expected && $4 == expected) } END { exit !(found && good) }'\'' /proc/self/limits || fail "nproc limit is wrong"
+    set -- $(/usr/bin/cut -d " " -f 6,7 "/proc/$$/stat")
+    test "$1" -gt 0 || fail "command did not enter a private session"
+    test "$2" = 0 || fail "command retained a controlling terminal"
+    set -- /proc/[0-9]*
+    test "$#" -le 16 || fail "too many host processes are visible"
+    printf "%s\n" __NSH_TEST_SANDBOXED__
+' sandboxed-probe "$sentinel" "$host_pid_namespace" "$host_net_namespace" "$root_probe" "$NPROC" 2>&1); then
+    echo "scripts/sandboxed: containment failed: $canary" >&2
+    exit 1
+fi
+[[ $canary == __NSH_TEST_SANDBOXED__ ]] || {
+    echo "scripts/sandboxed: execution canary failed: $canary" >&2
+    exit 1
+}
+[[ ! -e $root_probe ]] || {
+    echo "scripts/sandboxed: sandbox wrote outside its explicit writable binds" >&2
+    exit 1
+}
+
+kill "$sentinel" 2>/dev/null || :
+wait "$sentinel" 2>/dev/null || :
+trap - EXIT HUP INT TERM
+
+exec /usr/bin/timeout "$TIMEOUT" "${SANDBOX_ARGS[@]}" -- \
+    /usr/bin/env --default-signal -- "$@"

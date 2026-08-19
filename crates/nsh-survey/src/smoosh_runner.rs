@@ -9,7 +9,9 @@ use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use crate::process::{Output as ProcessOutput, Request as ProcessRequest, ScratchTree};
+use crate::process::{
+    Containment, Output as ProcessOutput, Request as ProcessRequest, ScratchTree,
+};
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -184,6 +186,7 @@ fn run_manifest(options: &Options, manifest: &crate::smoosh::Manifest) -> Result
         .known_hang_timeout
         .unwrap_or_else(|| Duration::from_millis(manifest.timeouts.known_hang_ms));
     let scratch = ScratchTree::new()?;
+    let containment = Containment::verified(scratch.path())?;
     let fixture = Fixture::install(scratch.path())?;
     let flags_json = serde_json::to_string(&options.shell_flags)?;
     let inherited_path = env::var_os("PATH").unwrap_or_default();
@@ -250,7 +253,14 @@ fn run_manifest(options: &Options, manifest: &crate::smoosh::Manifest) -> Result
         } else {
             default_timeout
         };
-        let record = execute_test(&fixture, &common_environment, &options.root, test, timeout);
+        let record = execute_test(
+            &containment,
+            &fixture,
+            &common_environment,
+            &options.root,
+            test,
+            timeout,
+        );
         totals.add(record.outcome);
         records.push(record);
     }
@@ -265,6 +275,7 @@ fn run_manifest(options: &Options, manifest: &crate::smoosh::Manifest) -> Result
         shell: display_shell(&options.shell),
         shell_sha256: crate::sha256_file(&options.shell)?,
         shell_flags: options.shell_flags.clone(),
+        containment: containment.label().to_owned(),
         posix_mode: if options.shell_flags.is_empty() {
             "shell-native".to_owned()
         } else {
@@ -306,6 +317,7 @@ impl Fixture {
 }
 
 fn execute_test(
+    containment: &Containment,
     fixture: &Fixture,
     common_environment: &[(OsString, OsString)],
     root: &Path,
@@ -327,6 +339,7 @@ fn execute_test(
     environment.push((OsString::from("TMP"), directory.as_os_str().to_owned()));
     let arguments = [root.join(&test.script.path).into_os_string()];
     let process = crate::process::run(&ProcessRequest {
+        containment,
         program: &fixture.shell,
         arguments: &arguments,
         directory: &directory,
@@ -481,6 +494,7 @@ struct RunReport {
     shell: String,
     shell_sha256: String,
     shell_flags: Vec<String>,
+    containment: String,
     posix_mode: String,
     default_timeout_ms: u64,
     known_hang_timeout_ms: u64,
@@ -494,6 +508,7 @@ impl RunReport {
         println!("Smoosh POSIX survey: {}", self.group);
         println!("source: {}", self.source_commit);
         println!("shell: {}", self.shell);
+        println!("containment: {}", self.containment);
         println!("POSIX mode: {}", self.posix_mode);
         for case in &self.cases {
             if verbose || case.outcome != Outcome::Pass {
@@ -664,6 +679,7 @@ struct ResultSummary<'a> {
     shell: &'a str,
     shell_sha256: &'a str,
     shell_flags: &'a [String],
+    containment: &'a str,
     posix_mode: &'a str,
     default_timeout_ms: u64,
     known_hang_timeout_ms: u64,
@@ -697,6 +713,7 @@ fn write_summary(path: &Path, report: &RunReport) -> Result<()> {
         shell: &report.shell,
         shell_sha256: &report.shell_sha256,
         shell_flags: &report.shell_flags,
+        containment: &report.containment,
         posix_mode: &report.posix_mode,
         default_timeout_ms: report.default_timeout_ms,
         known_hang_timeout_ms: report.known_hang_timeout_ms,

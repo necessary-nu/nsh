@@ -81,9 +81,18 @@ failure. The command exits nonzero for failures, timeouts, or runner errors.
 
 `--spec NAME`, `--case TEXT`, and `--max-cases N` provide reproducible focused
 runs; excluded cases are counted as skipped. `--timeout-ms` bounds every case.
-Each execution receives a fresh working directory, a cleared deterministic
-environment, bounded stdout and stderr capture, and a dedicated process group
-that is terminated as a unit on timeout and cleaned after normal exit.
+Before any case runs, the native runner proves a fail-closed sandbox canary.
+Every execution then receives a fresh writable directory inside new PID and
+network namespaces, a read-only root, a private `/tmp`, a bounded process
+limit, closed inherited descriptors, a cleared deterministic environment,
+reset signal dispositions, bounded stdout and stderr capture, and no
+controlling terminal. The namespace reaper kills leaked descendants on normal
+exit and timeout. The runner refuses to execute cases if the sandbox is absent
+or any containment check fails; reports record the active containment mode.
+
+Use `scripts/sandboxed -- COMMAND` for the top-level Cargo or regression-test
+command as well. That outer boundary protects the caller if harness code
+regresses before it reaches the runner's per-case sandbox.
 
 The runner mounts a disposable fixture view over the byte-pinned corpus.
 Native Rust entry points replace the imported Python 2 helpers, including the

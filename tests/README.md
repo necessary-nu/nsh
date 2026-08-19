@@ -20,6 +20,19 @@ which meant a tmp sweep would have erased every case backing the port.
     tests/harness/dsdiff.sh tests/corpus/everything.txt 12   # just one
     python3 tests/harness/ptydiff.py
 
+Run top-level test commands through `scripts/sandboxed`, including unit tests
+whose regression code may fail before reaching the per-case harness:
+
+    scripts/sandboxed -- cargo test --workspace
+    scripts/sandboxed --writable tests/.build -- tests/harness/runall.sh 12
+
+The wrapper proves the PID and network namespaces, read-only root, bounded
+process count, detached terminal session, and command canary before it starts
+the requested test command. It makes only `target/` writable by default;
+additional build or result directories must be named explicitly with
+`--writable`. A failed setup aborts rather than falling back to an unsandboxed
+run.
+
 `runall.sh` leaves per-corpus failure detail in `tests/.build/fail/`, and
 only for corpora that actually failed.
 
