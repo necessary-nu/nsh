@@ -7,6 +7,7 @@ const EXPANSION_MODES: &str = include_str!("../src/expand/mode.rs");
 const EVALUATOR: &str = include_str!("../src/eval.rs");
 const REDIRECTIONS: &str = include_str!("../src/redir.rs");
 const JOBS: &str = include_str!("../src/jobs.rs");
+const JOB_MODEL: &str = include_str!("../src/jobs/model.rs");
 const BUILTIN_READ: &str = include_str!("../src/builtins/read.rs");
 const BUILTIN_BREAK: &str = include_str!("../src/builtins/break.rs");
 const BUILTIN_RETURN: &str = include_str!("../src/builtins/return.rs");
@@ -95,4 +96,39 @@ fn evaluator_control_is_carried_by_flow() {
         assert!(!source.contains("const L_"), "{name} has translated labels");
     }
     assert!(SHELL_MAIN.contains("enum StartupPhase"));
+}
+
+// [spec:nsh:def:idiom.job-control-model/test]
+#[test]
+fn typed_job_control_model() {
+    for required in [
+        "struct JobId",
+        "enum JobState",
+        "pid: ProcessId",
+        "status: Option<ChildStatus>",
+        "prev_job: Option<JobId>",
+        "fn transition_to",
+    ] {
+        assert!(JOB_MODEL.contains(required), "missing {required}");
+    }
+    assert!(JOBS.contains("enum WaitOutcome"));
+    assert!(JOBS.contains("ProcessGroupId"));
+
+    for forbidden in [
+        "JOBRUNNING",
+        "JOBSTOPPED",
+        "JOBDONE",
+        "state: u8",
+        "sigint: u8",
+        "jobctl: u8",
+        "waited: u8",
+        "used: u8",
+        "changed: u8",
+        "prev_job: Option<usize>",
+    ] {
+        assert!(
+            !JOB_MODEL.contains(forbidden) && !JOBS.contains(forbidden),
+            "job control retains legacy representation {forbidden:?}"
+        );
+    }
 }

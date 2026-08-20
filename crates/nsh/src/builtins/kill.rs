@@ -13,9 +13,11 @@ use core::ffi::c_int;
 use std::io::Write;
 
 use crate::eval::Flow;
-use crate::jobs::{getjob, ps_pid};
+use crate::jobs::{JobId, getjob, ps_pid};
 use crate::output::Dest;
 use crate::trap::SignalSpec;
+
+// [spec:nsh:def:idiom.job-control-model]
 
 fn process_target(value: i32) -> nsh_platform::ProcessTarget {
     match value {
@@ -61,7 +63,7 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut signal = None;
     let mut list = false;
     let mut i: c_int;
-    let mut jp: usize;
+    let mut jp: JobId;
 
     if args.len() <= 1 {
         // usage:

@@ -318,7 +318,8 @@ mod tests {
         let _g = crate::testutil::lock();
         let mut sh = crate::context::Shell::builder().build().unwrap();
         sh.run(b"set -m").unwrap();
-        assert_eq!(sh.jobs.jobctl, 0, "an ungranted shell took job control");
+        // [spec:nsh:def:idiom.job-control-model]
+        assert!(!sh.jobs.jobctl, "an ungranted shell took job control");
         assert!(sh.run(b"echo still running").is_ok());
     }
 

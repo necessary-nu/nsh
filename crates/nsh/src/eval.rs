@@ -41,7 +41,8 @@ use crate::builtins::{BUILTIN_ASSIGN, BUILTIN_REGULAR, BUILTIN_SPECIAL, builtinc
 use crate::error::{FORCEINTON, INTOFF, INTON};
 use crate::exec::{Command, DO_ERR, DO_NOFUNC, DO_REGBLTIN, find_command, shellexec};
 use crate::expand::{ExpansionMode, arglist, strlist};
-use crate::jobs::FORK_NOJOB;
+use crate::jobs::{FORK_NOJOB, JobId};
+// [spec:nsh:def:idiom.job-control-model]
 use crate::nodes::{
     BinaryCommand, CaseCommand, CompoundCommand, DescriptorTarget, ForCommand, FunctionDefinition,
     Node, Pipeline, Redirection, SimpleCommand,
@@ -119,7 +120,7 @@ impl EvalContext {
 pub struct backcmd {
     /* result of evalbackcmd */
     pub fd: Option<Descriptor>, /* descriptor to read from */
-    pub jp: Option<usize>,      /* index of the job structure for command */
+    pub jp: Option<JobId>,      /* index of the job structure for command */
 }
 
 // ---------------------------------------------------------------------
@@ -900,7 +901,7 @@ fn evalsubshell(
     background: bool,
     context: EvalContext,
 ) -> Result<Flow, Error> {
-    let jp: usize;
+    let jp: JobId;
     let backgnd: c_int = background as c_int;
     let mut status: ExitStatus;
     let mut context = context;
@@ -1077,7 +1078,7 @@ fn descriptor_source(sh: &mut Shell, text: &BStr) -> Result<Option<LogicalDescri
 // [spec:posix:req:cmd.pipeline-pipefail-setting-at-start]
 // [spec:nsh:req:idiom.no-raw-fd-core]
 fn evalpipe(sh: &mut Shell, pipeline: &Pipeline, context: EvalContext) -> Result<Flow, Error> {
-    let jp: usize;
+    let jp: JobId;
     let pipelen: c_int;
     let mut prevfd: Option<Descriptor>;
     let mut status = ExitStatus::SUCCESS;
@@ -1162,7 +1163,7 @@ fn evalpipe(sh: &mut Shell, pipeline: &Pipeline, context: EvalContext) -> Result
 // [spec:dash:def:eval.evalbackcmd-fn]
 // [spec:dash:sem:eval.evalbackcmd-fn]
 pub fn evalbackcmd(sh: &mut Shell, n: Option<&Node>, result: &mut backcmd) -> Result<(), Error> {
-    let jp: usize;
+    let jp: JobId;
 
     result.fd = None;
     result.jp = None;
@@ -1365,7 +1366,7 @@ fn evalcommand(
      * `command [-p]` words while `osp` keeps the original head for `set -x`. */
     let mut head: usize = 0;
     let mut resolved_command = Command::Builtin(&crate::builtins::bltin);
-    let mut jp: Option<usize>;
+    let mut jp: Option<JobId>;
     let lastarg: Option<usize>;
     let mut path: Option<BString> = None;
     let standard_path = crate::var::defpath();

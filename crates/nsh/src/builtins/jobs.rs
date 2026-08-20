@@ -13,6 +13,8 @@ use crate::eval::Flow;
 use crate::jobs::{JobDisplay, getjob, showjob, showjobs};
 use crate::output::Dest;
 
+// [spec:nsh:def:idiom.job-control-model]
+
 // [spec:dash:def:jobs.jobscmd-fn]
 // [spec:dash:sem:jobs.jobscmd-fn]
 // [spec:posix:syn:builtin.jobs.synopsis]

@@ -5135,4 +5135,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.evaluator-control-flow}
     )}
+    {id type-job-control-model, covered_rules (
+        idiom.job-control-model
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.job-control-model}
+    )}
 )

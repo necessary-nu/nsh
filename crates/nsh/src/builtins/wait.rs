@@ -9,13 +9,13 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use bstr::BStr;
-use core::ffi::c_int;
-
 use crate::eval::Flow;
 use crate::jobs::{
-    DOWAIT_WAITCMD, DOWAIT_WAITCMD_ALL, JOBRUNNING, dowait, getjob, getstatus, remove_waited_job,
+    DOWAIT_WAITCMD, DOWAIT_WAITCMD_ALL, JobId, dowait, getjob, getstatus, remove_waited_job,
 };
+use bstr::BStr;
+
+// [spec:nsh:def:idiom.job-control-model]
 
 // [spec:dash:def:jobs.waitcmd-fn]
 // [spec:dash:sem:jobs.waitcmd-fn]
@@ -35,9 +35,9 @@ use crate::jobs::{
 // [spec:posix:req:builtin.wait.interfaces]
 // [spec:posix:req:builtin.wait.exit-status-signal]
 pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut jobp: Option<usize>;
+    let mut jobp: Option<JobId>;
     let mut retval: crate::status::ExitStatus;
-    let mut jp: Option<usize>;
+    let mut jp: Option<JobId>;
 
     let mut opts = crate::options::Options::new(args);
     opts.next(sh, b"")?;
@@ -54,11 +54,11 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                         /* no running procs */
                         break 'out_lbl;
                     };
-                    if sh.jobs.tab[i].state as c_int == JOBRUNNING {
+                    if sh.jobs[i].is_running() {
                         break;
                     }
-                    let previous = sh.jobs.tab[i].prev_job;
-                    sh.jobs.tab[i].waited = 1;
+                    let previous = sh.jobs[i].prev_job;
+                    sh.jobs[i].waited = true;
                     remove_waited_job(sh, i);
                     jp = previous;
                 }
@@ -89,14 +89,14 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                              * for a job that has not forked yet is
                              * `ps[-1]`; such a job matches no pid. */
                             let i = jobp.unwrap();
-                            if sh.jobs.tab[i]
+                            if sh.jobs[i]
                                 .ps
                                 .last()
                                 .is_some_and(|candidate| Some(candidate.pid) == process)
                             {
                                 break;
                             }
-                            jobp = sh.jobs.tab[i].prev_job;
+                            jobp = sh.jobs[i].prev_job;
                         }
                         at_start = false;
                         // start:
@@ -117,7 +117,7 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     break 'out_lbl;
                 }
                 let i = jobp.unwrap();
-                sh.jobs.tab[i].waited = 1;
+                sh.jobs[i].waited = true;
                 retval = getstatus(sh, i);
                 remove_waited_job(sh, i);
             }

@@ -379,7 +379,8 @@ pub(crate) fn cmdloop(
         /* `setstackmark`/`popstackmark` per iteration: the parse tree and
          * everything the command allocated used to live in the region
          * between them. */
-        if sh.jobs.jobctl != 0 {
+        // [spec:nsh:def:idiom.job-control-model]
+        if sh.jobs.jobctl {
             /* An interrupt taken while announcing changed jobs leaves
              * through the read-eval loop, like any other. */
             crate::jobs::showjobs(sh, crate::output::Dest::Stderr, JobDisplay::Changed)?;

@@ -18,11 +18,13 @@ use std::io::Write;
 use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
 use crate::jobs::{
-    CUR_RUNNING, FORK_BG, FORK_FG, JOBDONE, JOBRUNNING, apply_saved_job_terminal_settings,
+    CUR_RUNNING, FORK_BG, FORK_FG, JobId, apply_saved_job_terminal_settings,
     capture_shell_terminal_settings, getjob, jobno, outcmd, ps_pid, set_curjob, showpipe,
     terminal_settings_error, waitforjob, xxtcsetpgrp,
 };
 use crate::output::Dest;
+
+// [spec:nsh:def:idiom.job-control-model]
 
 // [spec:dash:def:jobs.fgcmd-fn]
 // [spec:dash:sem:jobs.fgcmd-fn]
@@ -46,7 +48,7 @@ use crate::output::Dest;
 // [spec:posix:req:builtin.fg.stderr]
 // [spec:posix:req:builtin.fg.interfaces]
 pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut jp: usize;
+    let mut jp: JobId;
     let mode: c_int;
 
     mode = if args[0].first() == Some(&b'f') {
@@ -91,19 +93,18 @@ pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:jobctl.background-job-brought-to-foreground]
 // [spec:posix:req:jobctl.continue-suspended-job]
 // [spec:posix:req:jobctl.fg-terminal-settings-restore]
-fn restartjob(sh: &mut Shell, jp: usize, mode: c_int) -> Result<crate::status::ExitStatus, Error> {
+fn restartjob(sh: &mut Shell, jp: JobId, mode: c_int) -> Result<crate::status::ExitStatus, Error> {
     let process_group: nsh_platform::ProcessGroupId;
     let mut terminal_error = None;
 
     INTOFF(sh);
     'out_lbl: {
-        if sh.jobs.tab[jp].state as c_int == JOBDONE {
+        if !sh.jobs[jp].restart() {
             break 'out_lbl;
         }
         if mode == FORK_FG {
             capture_shell_terminal_settings(sh)?;
         }
-        sh.jobs.tab[jp].state = JOBRUNNING as u8;
         let Some(leader) = ps_pid(sh, jp, 0) else {
             return Err(sh.sh_error_value(b"job has no process"));
         };
@@ -118,12 +119,12 @@ fn restartjob(sh: &mut Shell, jp: usize, mode: c_int) -> Result<crate::status::E
         /* the C's `do { … } while (--i)` visits `ps[0]` before it looks
          * at the count, so a job with no processes walks the whole
          * address space; there is nothing to restart in one. */
-        for i in 0..sh.jobs.tab[jp].ps.len() {
+        for i in 0..sh.jobs[jp].ps.len() {
             if matches!(
-                sh.jobs.tab[jp].ps[i].status,
+                sh.jobs[jp].ps[i].status,
                 Some(nsh_platform::ChildStatus::Stopped(_))
             ) {
-                sh.jobs.tab[jp].ps[i].status = None;
+                sh.jobs[jp].ps[i].status = None;
             }
         }
     }
