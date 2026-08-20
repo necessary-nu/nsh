@@ -15,15 +15,21 @@ use std::io::Write;
 use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
 use crate::options::Options;
-use crate::trap::{NSIG, SignalSpec, clear_traps, decode_signal, decode_signum, setsignal};
+use crate::trap::{
+    NSIG, SignalSpec, TrapAction, clear_traps, decode_signal, decode_signum, setsignal,
+};
 
 // [spec:posix:req:builtin.trap.opt-p-suitable-for-reinput]
-fn listing_line(signo: usize, action: Option<&BString>) -> Vec<u8> {
+fn listing_line(signo: usize, action: &TrapAction) -> Vec<u8> {
     let mut line = b"trap -- ".to_vec();
-    if let Some(action) = action {
-        line.extend_from_slice(&crate::mystring::single_quote(BStr::new(action.as_slice())));
-    } else {
-        line.push(b'-');
+    match action {
+        TrapAction::Default => line.push(b'-'),
+        TrapAction::Ignore => line.extend_from_slice(b"''"),
+        TrapAction::Command(command) => {
+            line.extend_from_slice(&crate::mystring::single_quote(BStr::new(
+                command.as_slice(),
+            )));
+        }
     }
     line.push(b' ');
     line.extend_from_slice(crate::signames::signal_names[signo].to_bytes());
@@ -32,11 +38,11 @@ fn listing_line(signo: usize, action: Option<&BString>) -> Vec<u8> {
 }
 
 fn write_listing(sh: &mut Shell, signo: usize, include_default: bool) {
-    let line = match sh.traps.listed_action(signo) {
-        Some(action) => listing_line(signo, Some(action)),
-        None if include_default => listing_line(signo, None),
-        None => return,
-    };
+    let action = sh.traps.listed_action(signo);
+    if !include_default && matches!(action, TrapAction::Default) {
+        return;
+    }
+    let line = listing_line(signo, action);
     let _ = sh.io.stdout().write_all(&line);
 }
 
@@ -116,24 +122,21 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
          * list copy the previous copy; copying the argument word each time
          * gives the same bytes and leaves `action` pointing at what the
          * `'-'` test reads. */
-        let mut newtrap: Option<BString> = None;
+        let mut newtrap = TrapAction::Default;
         if let Some(text) = &action {
             if text.as_slice() == b"-" {
                 action = None;
+            } else if text.is_empty() {
+                newtrap = TrapAction::Ignore;
             } else {
-                if !text.is_empty() {
-                    sh.traps.trapcnt += 1;
-                }
-                newtrap = Some(text.clone());
+                sh.traps.trapcnt += 1;
+                newtrap = TrapAction::Command(text.clone());
             }
         }
         /* Asked as a `bool` first: the count is a field of the table the
          * question is about, and reading one while writing the other is
          * two borrows of `sh.traps`. */
-        let replacing_an_action = sh
-            .traps
-            .action(signal.index())
-            .map_or(false, |old| !old.is_empty());
+        let replacing_an_action = matches!(sh.traps.action(signal.index()), TrapAction::Command(_));
         if replacing_an_action {
             sh.traps.trapcnt -= 1;
         }

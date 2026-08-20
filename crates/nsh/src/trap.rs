@@ -1,16 +1,13 @@
-//! Literal port of `src/trap.c` / `src/trap.h`.
+//! Trap actions, signal dispositions, and pending delivery.
 //! Rules: `docs/spec/port/src/trap.md`.
 //!
-//! Note `sigmode`/`gotsig` are indexed by `signo - 1` while `trap` is indexed
-//! by `signo`, slot 0 being the `EXIT` trap.
+//! Dispositions and pending signals are indexed by `signo - 1`, while actions
+//! are indexed by `signo`, slot 0 being the `EXIT` trap.
 
 // [spec:nsh:req:idiom.operation-modes]
 // [spec:nsh:req:idiom.evaluator-control-flow]
 use bstr::{BStr, BString, ByteSlice};
-use core::ffi::{c_char, c_int};
-
-/// `sig_atomic_t` — `int` on every platform dash supports.
-pub type sig_atomic_t = c_int;
+use core::ffi::c_int;
 
 use crate::error::{Error, INTOFF, INTON};
 use crate::eval::Flow;
@@ -22,20 +19,34 @@ use crate::status::Signal;
 /// The active platform's signal-table width.
 pub const NSIG: usize = nsh_platform::SIGNAL_COUNT;
 
-/*
- * Sigmode records the current value of the signal handlers for the various
- * modes.  A value of zero means that the current handler is not known.
- * S_HARD_IGN indicates that the signal was ignored on entry to the shell,
- */
+/// What the shell should do when a condition is raised.
+// [spec:nsh:def:idiom.trap-dispositions]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) enum TrapAction {
+    /// Apply the condition's default behavior.
+    #[default]
+    Default,
+    /// Discard the condition (`trap '' ...`).
+    Ignore,
+    /// Evaluate these shell bytes when the condition is delivered.
+    Command(BString),
+}
 
-const S_DFL: c_char = 1; /* default signal handling (SIG_DFL) */
-const S_CATCH: c_char = 2; /* signal is caught */
-const S_IGN: c_char = 3; /* signal is ignored (SIG_IGN) */
-const S_HARD_IGN: c_char = 4; /* signal is ignored permenantly */
-const S_RESET: c_char = 5; /* temporary - to reset a hard ignored sig */
+/// What the shell knows about one installed signal disposition.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DispositionState {
+    /// The host's inherited disposition has not been queried yet.
+    Unknown,
+    /// The shell installed and cached this disposition.
+    Installed(crate::host::Disposition),
+    /// The signal was ignored on entry and cannot be trapped.
+    InheritedIgnore,
+    /// The inherited disposition was not ignored, so the desired state
+    /// must be installed even when it is `Default`.
+    ResetRequired,
+}
 
-/// The trap actions, the disposition cache, and the two counters that go
-/// with them: `trap.c`'s `trap`, `ptrap`, `trapcnt` and `sigmode`.
+/// The trap actions, disposition cache, and counters that govern delivery.
 ///
 /// This could not become a field until `onsig` stopped reading it. The
 /// handler asked the table one question — *is a trap set for N?* — at two
@@ -46,22 +57,19 @@ const S_RESET: c_char = 5; /* temporary - to reset a hard ignored sig */
 pub struct TrapTable {
     /// The action for each signal, slot 0 being the `EXIT` trap.
     ///
-    /// The C's three states are `NULL` (no trap), `""` (the signal is
-    /// ignored) and an action; `None` and an empty `BString` keep them
-    /// apart. The presence bit the handler reads is `is_some()`, so an
-    /// *ignored* signal counts as trapped — which is what dash's
-    /// `trap[signo] != NULL` said.
-    action: [Option<BString>; NSIG],
+    /// Default, ignored, and executable actions are distinct variants. An
+    /// ignored signal still counts as trapped for the signal-inbox mirror.
+    action: [TrapAction; NSIG],
     /// The actions visible to a listing before this subshell executes a
     /// `trap` command with operands.  Live dispositions are still reset on
     /// entry; POSIX requires only the pre-entry commands to remain reportable.
-    subshell_listing: Option<Box<[Option<BString>; NSIG]>>,
+    subshell_listing: Option<Box<[TrapAction; NSIG]>>,
     /// traps have not been fully cleared
     pub(crate) ptrap: c_int,
     /// number of non-null traps
     pub(crate) trapcnt: c_int,
-    /// current value of signal, indexed by `signo - 1`
-    sigmode: [c_char; NSIG - 1],
+    /// Current disposition knowledge, indexed by `signo - 1`.
+    dispositions: [DispositionState; NSIG - 1],
     /// Cached `setinteractive` mode (`on + 1`, preserving dash's sentinel).
     interactive: c_int,
 }
@@ -81,27 +89,25 @@ impl TrapTable {
             sink.set_trapped(signo, false);
         }
         TrapTable {
-            action: [const { None }; NSIG],
+            action: [const { TrapAction::Default }; NSIG],
             subshell_listing: None,
             ptrap: 0,
             trapcnt: 0,
-            sigmode: [0; NSIG - 1],
+            dispositions: [DispositionState::Unknown; NSIG - 1],
             interactive: 0,
         }
     }
 
-    /// The action set for `signo`, if any.
+    /// The action selected for `signo`.
     #[inline]
-    pub(crate) fn action(&self, signo: usize) -> Option<&BString> {
-        self.action[signo].as_ref()
+    pub(crate) fn action(&self, signo: usize) -> &TrapAction {
+        &self.action[signo]
     }
 
     /// The action a no-operand `trap` command must report.
-    pub(crate) fn listed_action(&self, signo: usize) -> Option<&BString> {
-        self.subshell_listing
-            .as_ref()
-            .map_or(&self.action, AsRef::as_ref)[signo]
-            .as_ref()
+    pub(crate) fn listed_action(&self, signo: usize) -> &TrapAction {
+        let actions = self.subshell_listing.as_deref().unwrap_or(&self.action);
+        &actions[signo]
     }
 
     /// Preserve the listing inherited by a newly entered subshell.
@@ -139,10 +145,11 @@ impl TrapTable {
         &mut self,
         _blocked: &crate::siginbox::SignalsBlocked,
         signo: usize,
-        to: Option<BString>,
-    ) -> Option<BString> {
+        to: TrapAction,
+    ) -> TrapAction {
         let was = core::mem::replace(&mut self.action[signo], to);
-        crate::siginbox::signals().set_trapped(signo, self.action[signo].is_some());
+        let is_trapped = !matches!(self.action[signo], TrapAction::Default);
+        crate::siginbox::signals().set_trapped(signo, is_trapped);
         was
     }
 
@@ -152,8 +159,8 @@ impl TrapTable {
     /// called with 0 and never reads the slot, so this needs neither the
     /// bracket nor the bit. Separating it is what keeps `exitshell` off
     /// the guarded path.
-    pub(crate) fn take_exit_action(&mut self) -> Option<BString> {
-        self.action[0].take()
+    pub(crate) fn take_exit_action(&mut self) -> TrapAction {
+        core::mem::take(&mut self.action[0])
     }
 }
 
@@ -166,7 +173,8 @@ pub fn have_traps(sh: &crate::context::Shell) -> c_int {
 /* mkinit INIT fragment from src/trap.c:94-97. */
 pub fn mkinit_init(sh: &mut crate::context::Shell) {
     let child = Signal::from(nsh_platform::child_signal());
-    sh.traps.sigmode[(child.number() - 1) as usize] = S_DFL;
+    sh.traps.dispositions[(child.number() - 1) as usize] =
+        DispositionState::Installed(crate::host::Disposition::Default);
     setsignal(sh, child);
 }
 
@@ -222,12 +230,10 @@ pub fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
      * `sigprocmask` pair per fork against the ~100us of the fork itself. */
     let blocked = crate::siginbox::SignalsBlocked::new();
     for signo in 0..NSIG {
-        /* trap not NULL or SIG_IGN */
-        match sh.traps.action(signo) {
-            Some(t) if !t.is_empty() => {}
-            _ => continue,
+        if !matches!(sh.traps.action(signo), TrapAction::Command(_)) {
+            continue;
         }
-        let otp = sh.traps.set(&blocked, signo, None);
+        let previous = sh.traps.set(&blocked, signo, TrapAction::Default);
         if signo != 0 {
             let signal =
                 Signal::from_number(signo as i32).expect("nonzero trap slots are positive signals");
@@ -235,13 +241,10 @@ pub fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
         }
 
         if simplecmd != 0 {
-            drop(sh.traps.set(&blocked, signo, otp));
+            drop(sh.traps.set(&blocked, signo, previous));
         }
-        /* The C's else arm is `ckfree(*tp)` after `*tp = NULL`, so it frees
-         * NULL and leaks `otp` (src/trap.c:189).  Dropping `otp` here frees
-         * it instead, which no reader can tell apart: `dotrap` and
-         * `exitshell` are the only readers of an action and both take a
-         * copy before running it. */
+        /* The C leaks the previous action in the non-simple-command arm.
+         * This owned value drops it after the last possible restore. */
     }
     sh.traps.trapcnt = 0;
     sh.traps.ptrap = simplecmd;
@@ -367,23 +370,21 @@ pub fn setsignal_in_child(sh: &mut crate::context::Shell, signal: Signal) {
 }
 
 fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
-    let mut action: c_int;
-    let mut tsig: c_char;
     let signo = signal.number();
 
-    action = match sh.traps.action(signo as usize) {
-        None => S_DFL as c_int,
-        Some(t) if !t.is_empty() => S_CATCH as c_int,
-        Some(_) => S_IGN as c_int,
+    let mut desired = match sh.traps.action(signo as usize) {
+        TrapAction::Default => crate::host::Disposition::Default,
+        TrapAction::Ignore => crate::host::Disposition::Ignore,
+        TrapAction::Command(_) => crate::host::Disposition::Catch,
     };
-    if crate::shellmain::rootshell(sh) != 0 && action == S_DFL as c_int {
+    if crate::shellmain::rootshell(sh) != 0 && desired == crate::host::Disposition::Default {
         match signal {
             signal if signal == Signal::from(nsh_platform::interrupt_signal()) => {
                 if sh.options.enabled(ShellOption::Interactive)
                     || sh.options.minusc.is_some()
                     || !sh.options.enabled(ShellOption::Stdin)
                 {
-                    action = S_CATCH as c_int;
+                    desired = crate::host::Disposition::Catch;
                 }
             }
             signal if signal == Signal::from(nsh_platform::quit_signal()) => {
@@ -391,12 +392,12 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
                 if crate::shell::DEBUG && sh.options.enabled(ShellOption::Debug) {
                     /* break */
                 } else if sh.options.enabled(ShellOption::Interactive) {
-                    action = S_IGN as c_int;
+                    desired = crate::host::Disposition::Ignore;
                 }
             }
             signal if signal == Signal::from(nsh_platform::termination_signal()) => {
                 if sh.options.enabled(ShellOption::Interactive) {
-                    action = S_IGN as c_int;
+                    desired = crate::host::Disposition::Ignore;
                 }
             }
             /* #if JOBS */
@@ -405,7 +406,7 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
                     || signal == Signal::from(nsh_platform::terminal_output_signal()) =>
             {
                 if sh.options.enabled(ShellOption::Monitor) {
-                    action = S_IGN as c_int;
+                    desired = crate::host::Disposition::Ignore;
                 }
             }
             _ => {}
@@ -413,26 +414,16 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
     }
 
     if signal == Signal::from(nsh_platform::child_signal()) {
-        action = S_CATCH as c_int;
+        desired = crate::host::Disposition::Catch;
     }
 
-    /* The C keeps a `char *tp` into `sigmode[]` across the two
-     * `sigaction` calls below. An index says the same thing and does not
-     * hold a raw pointer into `sh` while `sh.options` is read. */
-    let tp = (signo - 1) as usize;
-    tsig = sh.traps.sigmode[tp];
-    if tsig == 0 {
-        /*
-         * current setting unknown
-         */
+    let index = (signo - 1) as usize;
+    let mut state = sh.traps.dispositions[index];
+    if state == DispositionState::Unknown {
         let current = match current_disposition(sh, signal, via) {
             Ok(d) => d,
             Err(_) => {
-                /*
-                 * Pretend it worked; maybe we should give a warning
-                 * here, but other shells don't. We don't alter
-                 * sigmode, so that we retry every time.
-                 */
+                // Leave the state unknown so a later call retries the query.
                 return;
             }
         };
@@ -446,24 +437,19 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
                     || signal == Signal::from(nsh_platform::terminal_input_signal())
                     || signal == Signal::from(nsh_platform::terminal_output_signal()))
             {
-                tsig = S_IGN; /* don't hard ignore these */
+                state = DispositionState::Installed(crate::host::Disposition::Ignore);
             } else {
-                tsig = S_HARD_IGN;
+                state = DispositionState::InheritedIgnore;
             }
         } else {
-            tsig = S_RESET; /* force to be set */
+            state = DispositionState::ResetRequired;
         }
     }
-    if tsig == S_HARD_IGN || tsig as c_int == action {
+    if state == DispositionState::InheritedIgnore || state == DispositionState::Installed(desired) {
         return;
     }
-    let want = match action {
-        x if x == S_CATCH as c_int => crate::host::Disposition::Catch,
-        x if x == S_IGN as c_int => crate::host::Disposition::Ignore,
-        _ => crate::host::Disposition::Default,
-    };
-    sh.traps.sigmode[tp] = action as c_char;
-    install_disposition(sh, signal, want, via);
+    sh.traps.dispositions[index] = DispositionState::Installed(desired);
+    install_disposition(sh, signal, desired, via);
 }
 
 /*
@@ -485,12 +471,15 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
 // [spec:dash:sem:trap.ignoresig-fn]
 pub fn ignoresig_in_child(sh: &mut crate::context::Shell, signal: Signal) {
     let signo = signal.number();
-    let mode = sh.traps.sigmode[(signo - 1) as usize];
-    if mode == S_IGN || mode == S_HARD_IGN {
+    let index = (signo - 1) as usize;
+    let state = sh.traps.dispositions[index];
+    if state == DispositionState::Installed(crate::host::Disposition::Ignore)
+        || state == DispositionState::InheritedIgnore
+    {
         return;
     }
     let _ = nsh_platform::ignore_signal(signal.platform());
-    sh.traps.sigmode[(signo - 1) as usize] = S_IGN;
+    sh.traps.dispositions[index] = DispositionState::Installed(crate::host::Disposition::Ignore);
 }
 
 /*
@@ -559,9 +548,9 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
          * buffer it is handed and the action it runs may `trap` over this
          * very slot; the C passes the slot's own pointer and keeps reading
          * it after `trapcmd` has freed it. */
-        let p = match sh.traps.action(signal.number() as usize) {
-            Some(t) => t.clone(),
-            None => {
+        let command = match sh.traps.action(signal.number() as usize) {
+            TrapAction::Command(command) => command.clone(),
+            TrapAction::Default | TrapAction::Ignore => {
                 i += 1;
                 continue;
             }
@@ -573,7 +562,8 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
          * and interrupt errors still arrive as `Err` and propagate. */
         let outer_trap_status = sh.eval.trap_default_exit_status.replace(status);
         sh.eval.signal_trap_depth += 1;
-        let outcome = crate::eval::evalstring(sh, p.as_bstr(), crate::eval::EvalContext::DEFAULT);
+        let outcome =
+            crate::eval::evalstring(sh, command.as_bstr(), crate::eval::EvalContext::DEFAULT);
         sh.eval.signal_trap_depth -= 1;
         sh.eval.trap_default_exit_status = outer_trap_status;
         match outcome? {
@@ -648,12 +638,11 @@ pub fn exitshell(
         /* `trap[0] = NULL` with no free: the C leaks the EXIT action on
          * purpose so `evalstring` can still read it.  Taking it keeps the
          * action alive for exactly as long and gives the buffer back. */
-        let p = sh.traps.take_exit_action();
-        if let Some(p) = p {
+        let action = sh.traps.take_exit_action();
+        if let TrapAction::Command(command) = action {
             if sh.traps.ptrap != 0 {
                 break 'out;
             }
-            let p = p;
             /* An error in the EXIT trap is reported and dropped -- the
              * shell is already exiting, and the C's `longjmp` landed at
              * `out:` with nothing left to inspect it. What must not be
@@ -662,7 +651,7 @@ pub fn exitshell(
             let trap_entry_status = sh.status;
             let outer_trap_status = sh.eval.trap_default_exit_status.replace(trap_entry_status);
             let outcome =
-                crate::eval::evalstring(sh, p.as_bstr(), crate::eval::EvalContext::DEFAULT);
+                crate::eval::evalstring(sh, command.as_bstr(), crate::eval::EvalContext::DEFAULT);
             sh.eval.trap_default_exit_status = outer_trap_status;
             match outcome {
                 Ok(crate::eval::Flow::Exit {
@@ -791,14 +780,14 @@ mod tests {
         drop(t.set(
             &b,
             interrupt.number() as usize,
-            Some(BString::from("echo hi")),
+            TrapAction::Command(BString::from("echo hi")),
         ));
         assert!(
             signals().is_trapped(interrupt.into()),
             "set an action, set the bit"
         );
 
-        drop(t.set(&b, interrupt.number() as usize, None));
+        drop(t.set(&b, interrupt.number() as usize, TrapAction::Default));
         assert!(
             !signals().is_trapped(interrupt.into()),
             "clear the action, clear the bit"
@@ -817,16 +806,12 @@ mod tests {
         let interrupt = nsh_platform::interrupt_signal();
         let mut t = TrapTable::new();
         let b = SignalsBlocked::new();
-        drop(t.set(
-            &b,
-            interrupt.number() as usize,
-            Some(BString::new(Vec::new())),
-        ));
+        drop(t.set(&b, interrupt.number() as usize, TrapAction::Ignore));
         assert!(
             signals().is_trapped(interrupt.into()),
             "`trap '' INT` is a trap as far as the handler is concerned"
         );
-        drop(t.set(&b, interrupt.number() as usize, None));
+        drop(t.set(&b, interrupt.number() as usize, TrapAction::Default));
         drop(b);
     }
 
@@ -843,7 +828,7 @@ mod tests {
         drop(t.set(
             &b,
             child.number() as usize,
-            Some(BString::from("echo chld")),
+            TrapAction::Command(BString::from("echo chld")),
         ));
         drop(b);
         assert!(signals().is_trapped(child.into()));
@@ -885,5 +870,43 @@ mod tests {
             !nsh_platform::signal_is_blocked(interrupt).unwrap(),
             "restored on drop"
         );
+    }
+
+    // [spec:nsh:def:idiom.trap-dispositions/test]
+    #[test]
+    fn trap_and_disposition_states_are_distinct() {
+        let actions = [
+            TrapAction::Default,
+            TrapAction::Ignore,
+            TrapAction::Command(BString::from("echo caught")),
+        ];
+        assert!(matches!(&actions[0], TrapAction::Default));
+        assert!(matches!(&actions[1], TrapAction::Ignore));
+        assert!(matches!(&actions[2], TrapAction::Command(_)));
+
+        let states = [
+            DispositionState::Unknown,
+            DispositionState::Installed(crate::host::Disposition::Default),
+            DispositionState::Installed(crate::host::Disposition::Catch),
+            DispositionState::Installed(crate::host::Disposition::Ignore),
+            DispositionState::InheritedIgnore,
+            DispositionState::ResetRequired,
+        ];
+        assert_eq!(states.len(), 6);
+
+        let source = include_str!("trap.rs");
+        for parts in [
+            ("c_", "char"),
+            ("S_", "DFL"),
+            ("S_", "CATCH"),
+            ("S_HARD_", "IGN"),
+            ("S_", "RESET"),
+        ] {
+            let fragment = format!("{}{}", parts.0, parts.1);
+            assert!(
+                !source.contains(&fragment),
+                "found numeric trap mode {fragment}"
+            );
+        }
     }
 }

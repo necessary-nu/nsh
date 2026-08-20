@@ -5271,4 +5271,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.exec-boundary}
     )}
+    {id type-trap-disposition-state, covered_rules (
+        idiom.trap-dispositions
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.trap-dispositions}
+    )}
 )
