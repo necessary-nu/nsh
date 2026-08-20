@@ -10,7 +10,7 @@
 // [spec:nsh:req:idiom.evaluator-control-flow]
 use crate::context::Shell;
 use crate::error::Error;
-use core::ffi::{c_int, c_uint};
+use core::ffi::c_int;
 use std::ffi::CString;
 use std::io::Write as _;
 
@@ -34,6 +34,96 @@ const MB_LEN_MAX: usize = 16;
 /// and the closing length and marker at `out + 2 + ml` and `out + 3 + ml`,
 /// which for `ml == MB_LEN_MAX` is the twentieth byte and not one fewer.
 const READ_MBSLOP: usize = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 4;
+
+fn append_read_byte(line: &mut BString, input: crate::syntax::InputUnit) {
+    if crate::mystring::cqchars[1..]
+        .iter()
+        .any(|&byte| input.is(byte as u8))
+    {
+        line.push(crate::parser::CTLESC as u8);
+    }
+    line.push(input.expect_byte());
+}
+
+// [spec:nsh:req:idiom.jobs-startup-control-flow]
+fn read_input_line(
+    sh: &mut Shell,
+    delimiter: u8,
+    raw: bool,
+    prompt_for_continuation: bool,
+) -> Result<(BString, ExitStatus), Error> {
+    crate::input::pushstdin(sh);
+    let result = (|| {
+        let mut line = BString::default();
+        let mut region_start = 0_usize;
+        let mut escaped_region_end = None;
+        let mut status = ExitStatus::SUCCESS;
+
+        loop {
+            let input = if delimiter == b'\0' {
+                crate::input::pgetc_preserve_nul(sh)?
+            } else {
+                crate::input::pgetc(sh)?
+            };
+            if input == crate::syntax::InputUnit::EndOfInput {
+                status = ExitStatus::FAILURE;
+                break;
+            }
+            if input.is(b'\0') && delimiter != b'\0' {
+                continue;
+            }
+
+            let mut scratch = [0; crate::parser::MBSLOP];
+            let multibyte_len = crate::parser::getmbc(
+                sh,
+                input,
+                &mut scratch,
+                crate::parser::MultibyteMode::Framed,
+            )? as usize;
+            if multibyte_len != 0 {
+                debug_assert!(multibyte_len <= READ_MBSLOP);
+                line.extend_from_slice(&scratch[..multibyte_len]);
+            } else if escaped_region_end.is_some() {
+                if input.is(b'\n') {
+                    if prompt_for_continuation {
+                        let ps2 = crate::var::ps2val(sh);
+                        let _ = sh.io.stderr().write_all(&ps2);
+                    }
+                } else {
+                    append_read_byte(&mut line, input);
+                }
+            } else if !raw && input.is(b'\\') {
+                escaped_region_end = Some(line.len());
+                continue;
+            } else if input.is(delimiter) {
+                break;
+            } else {
+                append_read_byte(&mut line, input);
+            }
+
+            if let Some(region_end) = escaped_region_end.take() {
+                crate::expand::recordregion(
+                    &mut sh.expand,
+                    region_start as c_int,
+                    region_end as c_int,
+                    0,
+                );
+                region_start = line.len();
+            }
+        }
+        Ok::<_, Error>((line, status, region_start))
+    })();
+    crate::input::popfile(sh);
+
+    let (line, status, region_start) = result?;
+    crate::expand::recordregion(
+        &mut sh.expand,
+        region_start as c_int,
+        line.len() as c_int,
+        0,
+    );
+    Ok((line, status))
+}
 
 // ---------------------------------------------------------------------
 
@@ -127,20 +217,16 @@ fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> R
 // [spec:nsh:def:idiom.logical-descriptors]
 pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut prompt: Option<CString>;
-    let mut startloc: c_int;
-    let mut newloc: c_int;
-    let mut status: ExitStatus;
-    let mut rflag: c_int;
+    let mut raw = false;
     let mut delimiter = b'\n';
 
-    rflag = 0;
     prompt = None;
     let mut opts = crate::options::Options::new(args);
     while let Some(i) = opts.next(sh, b"d:p:r")? {
         match i {
             b'd' => delimiter = opts.arg().first().copied().unwrap_or(b'\0'),
             b'p' => prompt = Some(crate::shell::cstring(opts.arg())),
-            _ => rflag = 1,
+            _ => raw = true,
         }
     }
     if let Some(prompt) = &prompt {
@@ -165,90 +251,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         return Err(sh.sh_error_value(b"arg count"));
     }
 
-    status = ExitStatus::SUCCESS;
-    /* `STARTSTACKSTR(p)`.  The line is an owned buffer, so the C's cursor is
-     * its length and `stackblock()` its base: every `p - stackblock()` below
-     * is `line.len()`, and `USTPUTC` is `push`. */
-    let mut line = BString::default();
-
-    crate::input::pushstdin(sh);
-
-    startloc = line.len() as c_int;
-    newloc = startloc - 1;
-
-    loop {
-        let input = if delimiter == b'\0' {
-            crate::input::pgetc_preserve_nul(sh)?
-        } else {
-            crate::input::pgetc(sh)?
-        };
-        if input == crate::syntax::InputUnit::EndOfInput {
-            status = ExitStatus::FAILURE;
-            break;
-        }
-        if input.is(b'\0') && delimiter != b'\0' {
-            continue;
-        }
-
-        /* `CHECKSTRSPACE((MB_LEN_MAX > 16 ? MB_LEN_MAX : 16) + 4, p)`
-         * bought the C the room `getmbc` writes into. `getmbc` has its own
-         * scratch now, so there is nothing to reserve on its behalf. */
-        let mut scratch: [u8; crate::parser::MBSLOP] = [0; crate::parser::MBSLOP];
-        let ml: c_uint = crate::parser::getmbc(
-            sh,
-            input,
-            &mut scratch,
-            crate::parser::MultibyteMode::Framed,
-        )?;
-        let put_input = if ml != 0 {
-            /* `p += ml` is the commit of what `getmbc` wrote; a zero
-             * return commits nothing, and the scribble it left behind
-             * stays in the scratch rather than in `line`. */
-            debug_assert!(ml as usize <= READ_MBSLOP);
-            line.extend_from_slice(&scratch[..ml as usize]);
-            false
-        } else if newloc >= startloc {
-            if input.is(b'\n') {
-                if prompt_for_continuation {
-                    let ps2 = crate::var::ps2val(sh);
-                    let _ = sh.io.stderr().write_all(&ps2);
-                }
-                false
-            } else {
-                true
-            }
-        } else if rflag == 0 && input.is(b'\\') {
-            newloc = line.len() as c_int;
-            continue;
-        } else if input.is(delimiter) {
-            break;
-        } else {
-            true
-        };
-
-        if put_input {
-            /* `strchr` matches the terminator too, so the set the C
-             * scans is `cqchars[1..]` *including* its NUL -- which is
-             * how a NUL read from the input gets escaped. */
-            if crate::mystring::cqchars[1..]
-                .iter()
-                .any(|&byte| input.is(byte as u8))
-            {
-                /* USTPUTC(CTLESC, p) */
-                line.push(crate::parser::CTLESC as u8);
-            }
-            /* USTPUTC(c, p) */
-            line.push(input.expect_byte());
-        }
-
-        if newloc >= startloc {
-            crate::expand::recordregion(&mut sh.expand, startloc, newloc, 0);
-            startloc = line.len() as c_int;
-            newloc = startloc - 1;
-        }
-    }
-    crate::input::popfile(sh);
-    crate::expand::recordregion(&mut sh.expand, startloc, line.len() as c_int, 0);
+    let (mut line, status) = read_input_line(sh, delimiter, raw, prompt_for_continuation)?;
     /* `STACKSTRNUL(p)` writes the terminator without advancing, and the call
      * below then passes `p + 1` — the length *including* it.  Pushing is both
      * halves at once. */

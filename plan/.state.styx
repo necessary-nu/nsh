@@ -5261,4 +5261,9 @@ impl_evidence (
     ), rule_versions_seen (
         {id idiom.signal-wait, version 0}
     )}
+    {id structure-jobs-startup-control-flow, covered_rules (
+        idiom.jobs-startup-control-flow
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.jobs-startup-control-flow}
+    )}
 )

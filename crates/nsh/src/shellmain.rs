@@ -3,11 +3,10 @@
 //! prefix even though the module is called `shellmain`, since `main` is
 //! taken by the binary crate root).
 //!
-//! Translation notes (literal, bug-for-bug):
-//!   * `main()`'s `setjmp` on `main_handler` becomes
-//!     `crate::eval::setjmp_catch` over the startup sequence, and the
-//!     `state1`..`state4` labels become typed startup phases. The error
-//!     handler resumes at the phase recorded before each fallible step.
+//! Translation notes:
+//!   * Startup is a sequence of named operations. Each operation declares
+//!     where an interactive shell recovers if it fails; no translated label
+//!     state or non-local jump remains.
 //!   * `PROFILE` is 0 and `GPROF` undefined, so `monitor()`/`_mcleanup`
 //!     are not compiled; `DEBUG` is off, so `opentrace`/`trargs` and
 //!     every `TRACE` are compiled out.
@@ -62,13 +61,109 @@ fn etext() -> c_int {
  */
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum StartupPhase {
+enum StartupTask {
     Initialize,
+    SystemProfile,
     UserProfile,
     Environment,
     Command,
     CommandLoop,
-    Exit,
+}
+
+impl StartupTask {
+    const fn recovery(self) -> Option<Self> {
+        match self {
+            Self::Initialize => None,
+            Self::SystemProfile => Some(Self::UserProfile),
+            Self::UserProfile => Some(Self::Environment),
+            Self::Environment => Some(Self::Command),
+            Self::Command | Self::CommandLoop => Some(Self::CommandLoop),
+        }
+    }
+}
+
+enum StartupAdvance {
+    Next(StartupTask),
+    Finished,
+    Exit(Option<crate::status::ExitStatus>),
+}
+
+fn advance_after_flow(flow: crate::eval::Flow, next: StartupTask) -> StartupAdvance {
+    match flow {
+        crate::eval::Flow::Done(_) => StartupAdvance::Next(next),
+        crate::eval::Flow::Exit { status } => StartupAdvance::Exit(status),
+        control => unreachable!("startup operation returned local control: {control:?}"),
+    }
+}
+
+// [spec:nsh:req:idiom.jobs-startup-control-flow]
+fn run_startup_task(
+    sh: &mut Shell,
+    argv: &[Vec<u8>],
+    task: StartupTask,
+) -> Result<StartupAdvance, crate::error::Error> {
+    match task {
+        StartupTask::Initialize => {
+            crate::init::init(sh)?;
+            let next = if crate::options::procargs(sh, argv)? {
+                StartupTask::SystemProfile
+            } else {
+                StartupTask::Environment
+            };
+            Ok(StartupAdvance::Next(next))
+        }
+        StartupTask::SystemProfile => Ok(advance_after_flow(
+            read_profile(sh, BStr::new(b"/etc/profile"))?,
+            StartupTask::UserProfile,
+        )),
+        StartupTask::UserProfile => Ok(advance_after_flow(
+            read_profile(sh, BStr::new(b"$HOME/.profile"))?,
+            StartupTask::Environment,
+        )),
+        StartupTask::Environment => {
+            if sh.options.enabled(ShellOption::Interactive)
+                && let Some(shinit) = crate::var::lookup_bytes(sh, BStr::new(b"ENV"))
+                    .filter(|value| !value.is_empty())
+            {
+                let flow = read_profile(sh, BStr::new(shinit.as_slice()))?;
+                if !matches!(flow, crate::eval::Flow::Done(_)) {
+                    return Ok(advance_after_flow(flow, StartupTask::Command));
+                }
+            }
+            Ok(StartupAdvance::Next(StartupTask::Command))
+        }
+        StartupTask::Command => {
+            if let Some(command) = sh.options.minusc.clone() {
+                match crate::eval::evalstring(
+                    sh,
+                    BStr::new(command.as_slice()),
+                    if sh.options.enabled(ShellOption::Stdin) {
+                        EvalContext::DEFAULT
+                    } else {
+                        EvalContext::EXITING
+                    },
+                )? {
+                    crate::eval::Flow::Done(status) | crate::eval::Flow::Return { status, .. } => {
+                        sh.status = status
+                    }
+                    crate::eval::Flow::Exit { status } => return Ok(StartupAdvance::Exit(status)),
+                    control => {
+                        unreachable!("command option returned local control: {control:?}")
+                    }
+                }
+            }
+            if sh.options.enabled(ShellOption::Stdin) || sh.options.minusc.is_none() {
+                Ok(StartupAdvance::Next(StartupTask::CommandLoop))
+            } else {
+                Ok(StartupAdvance::Finished)
+            }
+        }
+        StartupTask::CommandLoop => Ok(match cmdloop(sh, 1)? {
+            crate::eval::Flow::Done(_) => StartupAdvance::Finished,
+            crate::eval::Flow::Exit { status } => StartupAdvance::Exit(status),
+            control => unreachable!("command loop returned local control: {control:?}"),
+        }),
+    }
 }
 
 /// The literal port of `main()` in `src/main.c`, taking the shell it is
@@ -104,190 +199,48 @@ enum StartupPhase {
 // [spec:nsh:req:idiom.evaluator-control-flow]
 pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
     /* #if PROFILE: monitor(4, etext, profile_buf, sizeof profile_buf, 50); */
-
-    /* Where the startup sequence resumes after an interactive error.
-     *
-     * `exit:` is inside the loop, and that is load bearing. In the C,
-     * `setjmp(main_handler.loc)` is armed in `main`'s own frame, so it
-     * stays a live jump target for as long as `main` runs — including
-     * during the `exitshell()` at `exit:`. `forkreset()` relies on
-     * exactly that: it points `handler` back at `main_handler`, so a
-     * subshell forked from inside an EXIT trap raises `EXEXIT` into
-     * this frame and leaves through `goto exit`.
-     *
-     * A `catch_unwind` is not a frame-lifetime jump target — it only
-     * catches while its body runs. With `exitshell()` called after the
-     * loop, that subshell's unwind had no handler on the stack, escaped
-     * `main`, and the child died with Rust's panic status 101, which the
-     * trap then reported as `$?`. */
-    let mut entry = StartupPhase::Initialize;
-    let mut resume = StartupPhase::Initialize;
-
-    /* Set by the `exit:` arm, which is what `exitshell` now hands back
-     * instead of ending the process. It has to be a captured local rather
-     * than the closure's return type, because `exit:` must stay *inside*
-     * the loop for the reason the comment above gives, and the closure's
-     * `Result<Flow, Error>` is the shape the handler below reads. */
-    let mut leaving: Option<crate::status::ExitStatus> = None;
-    let mut explicit_exit_status: Option<crate::status::ExitStatus> = None;
-
+    let mut task = StartupTask::Initialize;
     loop {
-        /* What the body had to say, which the C read off `exception`
-         * afterwards. `Ok(Flow::Exit { .. })` is EXEND or EXEXIT, `Err` is
-         * EXERROR, and a `jumped` of true is what is left travelling by
-         * longjmp -- EXINT, until step F. */
-        let outcome = (|| -> Result<crate::eval::Flow, crate::error::Error> {
-            let mut phase = entry;
-
-            if phase == StartupPhase::Initialize {
-                /* #ifdef DEBUG:
-                 *   opentrace();
-                 *   trputs("Shell args:  ");  trargs(argv); */
-                crate::init::init(sh)?;
-                let login = crate::options::procargs(sh, argv)?;
-                if login {
-                    resume = StartupPhase::UserProfile;
-                    crate::eval::flow!(read_profile(sh, BStr::new(b"/etc/profile")));
-                    phase = StartupPhase::UserProfile;
-                } else {
-                    phase = StartupPhase::Environment;
+        match run_startup_task(sh, argv, task) {
+            Ok(StartupAdvance::Next(next)) => task = next,
+            Ok(StartupAdvance::Finished) => {
+                /* #if PROFILE: monitor(0); */
+                /* #if GPROF: _mcleanup(); */
+                return crate::trap::exitshell(sh, None);
+            }
+            Ok(StartupAdvance::Exit(status)) => {
+                if let Some(status) = status {
+                    sh.status = status;
                 }
+                crate::init::exitreset(sh);
+                return crate::trap::exitshell(sh, status);
             }
+            Err(error) => {
+                let interrupted = error.is_interrupt();
+                let unrecoverable_read = error.is_unrecoverable_read();
+                sh.status = error.status();
+                drop(error);
+                crate::init::exitreset(sh);
 
-            if phase == StartupPhase::UserProfile {
-                resume = StartupPhase::Environment;
-                crate::eval::flow!(read_profile(sh, BStr::new(b"$HOME/.profile")));
-                phase = StartupPhase::Environment;
-            }
-
-            if phase == StartupPhase::Environment {
-                resume = StartupPhase::Command;
-                if
-                /* #ifndef linux: getuid() == geteuid() &&
-                 *                getgid() == getegid() && */
-                sh.options.enabled(ShellOption::Interactive)
-                    && let Some(shinit) = crate::var::lookup_bytes(sh, BStr::new(b"ENV"))
-                        .filter(|value| !value.is_empty())
+                // [spec:posix:req:exit.shell-error-consequences]
+                // [spec:posix:req:exit.unrecoverable-read-error]
+                let recovery = task.recovery();
+                if unrecoverable_read
+                    || recovery.is_none()
+                    || !sh.options.enabled(ShellOption::Interactive)
+                    || sh.shell_level != 0
                 {
-                    crate::eval::flow!(read_profile(sh, BStr::new(shinit.as_slice())));
-                }
-                phase = StartupPhase::Command;
-            }
-
-            if phase == StartupPhase::Command {
-                resume = StartupPhase::CommandLoop;
-                if let Some(command) = sh.options.minusc.clone() {
-                    match crate::eval::evalstring(
-                        sh,
-                        BStr::new(command.as_slice()),
-                        if sh.options.enabled(ShellOption::Stdin) {
-                            EvalContext::DEFAULT
-                        } else {
-                            EvalContext::EXITING
-                        },
-                    )? {
-                        crate::eval::Flow::Done(status)
-                        | crate::eval::Flow::Return { status, .. } => sh.status = status,
-                        control => return Ok(control),
-                    }
+                    return crate::trap::exitshell(sh, None);
                 }
 
-                phase = if sh.options.enabled(ShellOption::Stdin) || sh.options.minusc.is_none() {
-                    StartupPhase::CommandLoop
-                } else {
-                    StartupPhase::Exit
-                };
+                crate::init::reset(sh);
+                if interrupted {
+                    /* #if ATTY: && (!attyset() || equal(termval(), "emacs")) */
+                    let _ = sh.io.stderr().write_all(b"\n");
+                }
+                FORCEINTON(sh);
+                task = recovery.expect("recoverable startup task has a successor");
             }
-
-            if phase == StartupPhase::CommandLoop {
-                crate::eval::flow!(cmdloop(sh, 1));
-                phase = StartupPhase::Exit;
-            }
-
-            debug_assert_eq!(phase, StartupPhase::Exit);
-            /* #if PROFILE: monitor(0); */
-            /* #if GPROF: _mcleanup(); */
-            leaving = Some(crate::trap::exitshell(sh, explicit_exit_status.take()));
-            Ok(crate::eval::Flow::END)
-        })();
-
-        /* `exit:` ran. It used to end the process from inside the closure;
-         * it returns a status now, and this is where the status leaves.
-         * Checked before the handler because the handler would otherwise
-         * run `exitreset` a second time over a shell that has already
-         * finished exiting. */
-        if let Some(status) = leaving {
-            return status;
-        }
-
-        /* The C read `exception` here. The three things it distinguished
-         * arrive as three different shapes now, and an explicit exit's
-         * selected status travels with its control-flow value. */
-        let e_is_exit: bool;
-        let selected_status: Option<crate::status::ExitStatus>;
-        let interrupted: bool;
-        let unrecoverable_read: bool;
-
-        match &outcome {
-            /* `exit:` is the only way out of the body that does not reach
-             * here, because the `leaving` check above returns first. */
-            Ok(crate::eval::Flow::Done(_)) => {
-                unreachable!("main's body leaves only by exiting or by failing")
-            }
-            Ok(crate::eval::Flow::Exit { status }) => {
-                e_is_exit = true;
-                selected_status = *status;
-                interrupted = false;
-                unrecoverable_read = false;
-            }
-            Ok(control) => {
-                unreachable!("top-level startup left an uncaught local control: {control:?}")
-            }
-            Err(e) => {
-                e_is_exit = false;
-                selected_status = None;
-                /* The C read `exception == EXINT` here, for the bare
-                 * newline it writes before the next prompt. */
-                interrupted = e.is_interrupt();
-                unrecoverable_read = e.is_unrecoverable_read();
-                /* This is the outermost catch, and the status the raise
-                 * took travels in the value now. Everything downstream --
-                 * `exitshell`, and an interactive resume's next `$?` --
-                 * reads the shell, so the shell is written here. */
-                sh.status = e.status();
-            }
-        }
-        drop(outcome);
-
-        /* the handler */
-        {
-            if let Some(status) = selected_status {
-                sh.status = status;
-            }
-            crate::init::exitreset(sh);
-
-            // [spec:posix:req:exit.shell-error-consequences]
-            // [spec:posix:req:exit.unrecoverable-read-error]
-            if e_is_exit
-                || unrecoverable_read
-                || resume == StartupPhase::Initialize
-                || !sh.options.enabled(ShellOption::Interactive)
-                || sh.shell_level != 0
-            {
-                explicit_exit_status = if e_is_exit { selected_status } else { None };
-                entry = StartupPhase::Exit;
-                continue;
-            }
-
-            crate::init::reset(sh);
-
-            if interrupted
-            /* #if ATTY: && (!attyset() || equal(termval(), "emacs")) */
-            {
-                let _ = sh.io.stderr().write_all(b"\n");
-            }
-            FORCEINTON(sh); /* enable interrupts */
-            entry = resume;
         }
     }
 }
@@ -457,10 +410,9 @@ pub(crate) fn cmdloop(
 /// It is exact rather than approximate, and the reason is `forkchild`'s
 /// `shlvl += 1` (`jobs.rs:877`). `main`'s handler tests
 /// `e_is_exit || s == 0 || iflag() == 0 || shlvl != 0`, so in *any* forked
-/// child the last disjunct is true and every outcome — an exit, a `set -e`
-/// abort, a diagnostic, an interrupt — takes `goto exit` and nothing else.
-/// There is no resume path to reproduce, so the whole of the handler for a
-/// child is `exitreset` and then `exitshell`.
+/// child the last disjunct is true: an exit, a `set -e` abort, a diagnostic,
+/// or an interrupt all terminate that child. There is no recovery task, so
+/// its handler is exactly `exitreset` followed by `exitshell`.
 pub(crate) fn exit_from_child(
     sh: &mut Shell,
     outcome: Result<crate::eval::Flow, crate::error::Error>,
@@ -538,6 +490,36 @@ pub fn readcmdfile(sh: &mut Shell, name: &BStr) -> Result<crate::eval::Flow, cra
     }
     crate::input::popfile(sh);
     Ok(flow)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn startup_recovery_follows_tasks() {
+        assert_eq!(StartupTask::Initialize.recovery(), None);
+        assert_eq!(
+            StartupTask::SystemProfile.recovery(),
+            Some(StartupTask::UserProfile)
+        );
+        assert_eq!(
+            StartupTask::UserProfile.recovery(),
+            Some(StartupTask::Environment)
+        );
+        assert_eq!(
+            StartupTask::Environment.recovery(),
+            Some(StartupTask::Command)
+        );
+        assert_eq!(
+            StartupTask::Command.recovery(),
+            Some(StartupTask::CommandLoop)
+        );
+        assert_eq!(
+            StartupTask::CommandLoop.recovery(),
+            Some(StartupTask::CommandLoop)
+        );
+    }
 }
 
 /*

@@ -97,7 +97,38 @@ fn evaluator_control_is_carried_by_flow() {
         );
         assert!(!source.contains("const L_"), "{name} has translated labels");
     }
-    assert!(SHELL_MAIN.contains("enum StartupPhase"));
+    assert!(SHELL_MAIN.contains("enum StartupTask"));
+}
+
+// [spec:nsh:req:idiom.jobs-startup-control-flow/test]
+#[test]
+fn jobs_read_startup_are_structured() {
+    for (name, source) in [
+        ("jobs", JOBS),
+        ("read", BUILTIN_READ),
+        ("startup", SHELL_MAIN),
+    ] {
+        for forbidden in ["goto", "at_start", "let mut phase", "StartupPhase"] {
+            assert!(
+                !source.contains(forbidden),
+                "{name} retains translated control marker {forbidden:?}"
+            );
+        }
+        assert!(
+            !source.lines().any(|line| {
+                let line = line.trim_start();
+                line.starts_with('\'') && line.contains(": {")
+            }),
+            "{name} retains a labelled control block"
+        );
+    }
+
+    assert!(JOBS.contains("fn lookup_job"));
+    assert!(JOBS.contains("fn record_child_status"));
+    assert!(BUILTIN_READ.contains("fn read_input_line"));
+    assert!(BUILTIN_READ.contains("escaped_region_end.take()"));
+    assert!(SHELL_MAIN.contains("fn run_startup_task"));
+    assert!(SHELL_MAIN.contains("const fn recovery"));
 }
 
 // [spec:nsh:def:idiom.job-control-model/test]
