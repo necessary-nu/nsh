@@ -1,14 +1,10 @@
 //! Windows implementation of the shell's operating-system boundary.
-//!
-//! Windows handles stay opaque to the shell. POSIX-shaped concepts such as
-//! descriptor slots, process groups, signals, and wait statuses are modelled
-//! here in terms of handles, Job Objects, console events, and native process
-//! cloning.
+//! Handles stay opaque; POSIX concepts use native Windows primitives.
 
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
-use std::ffi::{CStr, OsStr, OsString};
+use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io::{Read as _, Seek as _, Write as _};
 use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
@@ -2189,11 +2185,11 @@ pub fn fd_is_regular_file(fd: &impl AsDescriptor) -> std::io::Result<bool> {
 
 static TEMPORARY_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-pub fn create_temporary_file(name: &str) -> std::io::Result<(File, PathBuf)> {
+pub fn create_temporary_file(name: impl AsRef<OsStr>) -> std::io::Result<(File, PathBuf)> {
     for _ in 0..256 {
         let unique = TEMPORARY_COUNTER.fetch_add(1, AtomicOrdering::Relaxed);
-        let mut path = std::env::temp_dir();
-        path.push(format!("{name}-{}-{unique:016x}.tmp", std::process::id()));
+        let mut path = std::env::temp_dir().join(name.as_ref());
+        path.as_mut_os_string().push(format!("-{unique:016x}.tmp"));
         match OpenOptions::new()
             .read(true)
             .write(true)
@@ -2212,12 +2208,12 @@ pub fn create_temporary_file(name: &str) -> std::io::Result<(File, PathBuf)> {
     ))
 }
 
-pub fn anonymous_file(name: &CStr) -> std::io::Result<Descriptor> {
-    let label = name.to_str().unwrap_or("nsh-anonymous");
+// [spec:nsh:req:idiom.filesystem-account-bytes]
+pub fn anonymous_file(name: impl AsRef<OsStr>) -> std::io::Result<Descriptor> {
     for _ in 0..256 {
         let unique = TEMPORARY_COUNTER.fetch_add(1, AtomicOrdering::Relaxed);
-        let mut path = std::env::temp_dir();
-        path.push(format!("{label}-{}-{unique:016x}.tmp", std::process::id()));
+        let mut path = std::env::temp_dir().join(name.as_ref());
+        path.as_mut_os_string().push(format!("-{unique:016x}.tmp"));
         match OpenOptions::new()
             .read(true)
             .write(true)

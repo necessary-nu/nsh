@@ -24,14 +24,14 @@ const RAW_ERROR_API_FRAGMENTS: &[&str] = &[
     "pub fn command_exec_failure_status(code",
 ];
 
-fn inspect_tree(path: &Path, violations: &mut Vec<String>) {
+fn inspect_tree(path: &Path, fragments: &[&str], violations: &mut Vec<String>) {
     for entry in std::fs::read_dir(path).unwrap() {
         let path = entry.unwrap().path();
         if path.is_dir() {
-            inspect_tree(&path, violations);
+            inspect_tree(&path, fragments, violations);
         } else if path.extension().is_some_and(|extension| extension == "rs") {
             let source = std::fs::read_to_string(&path).unwrap();
-            for fragment in FORBIDDEN_SOURCE_FRAGMENTS {
+            for fragment in fragments {
                 if source.contains(fragment) {
                     violations.push(format!("{} contains {fragment:?}", path.display()));
                 }
@@ -45,7 +45,11 @@ fn shell_crates_do_not_bypass_the_platform_boundary() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut violations = Vec::new();
     for source in ["crates/nsh/src", "crates/nsh-cli/src"] {
-        inspect_tree(&workspace.join(source), &mut violations);
+        inspect_tree(
+            &workspace.join(source),
+            FORBIDDEN_SOURCE_FRAGMENTS,
+            &mut violations,
+        );
     }
 
     for manifest in ["crates/nsh/Cargo.toml", "crates/nsh-cli/Cargo.toml"] {
@@ -127,4 +131,33 @@ fn descriptor_materialization_is_transactional() {
         .1;
     assert!(implementation.contains("libc::dup2("));
     assert!(implementation.contains("libc::close(*target)"));
+}
+
+// [spec:nsh:req:idiom.filesystem-account-bytes/test]
+#[test]
+fn filesystem_apis_keep_native_strings() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for source in [
+        "crates/nsh-platform/src/unix.rs",
+        "crates/nsh-platform/src/windows.rs",
+    ] {
+        let text = std::fs::read_to_string(workspace.join(source)).unwrap();
+        assert!(text.contains("pub fn named_user_home(name: &OsStr) -> Option<PathBuf>"));
+        assert!(text.contains("pub name: OsString"));
+        assert!(text.contains("pub fn anonymous_file(name: impl AsRef<OsStr>)"));
+        assert!(!text.contains("pub fn anonymous_file(name: &CStr"));
+        assert!(!text.contains("pub fn create_temporary_file(name: &str"));
+    }
+
+    let mut violations = Vec::new();
+    inspect_tree(
+        &workspace.join("crates/nsh/src"),
+        &["anonymous_file(c\""],
+        &mut violations,
+    );
+    assert!(
+        violations.is_empty(),
+        "core anonymous-file callers expose C strings:\n{}",
+        violations.join("\n"),
+    );
 }

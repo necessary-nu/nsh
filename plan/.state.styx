@@ -5085,4 +5085,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.descriptor-materialization}
     )}
+    {id type-platform-filesystem-account-api, covered_rules (
+        idiom.filesystem-account-bytes
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.filesystem-account-bytes}
+    )}
 )

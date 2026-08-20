@@ -58,11 +58,12 @@ impl Streams {
     /// per-shell table.
     ///
     /// [`Shell::run`]: crate::context::Shell::run
+    // [spec:nsh:req:idiom.filesystem-account-bytes]
     pub fn capture() -> std::io::Result<Streams> {
         Self::from_owned([
             nsh_platform::open_null_input()?,
-            nsh_platform::anonymous_file(c"nsh-stdout")?,
-            nsh_platform::anonymous_file(c"nsh-stderr")?,
+            nsh_platform::anonymous_file("nsh-stdout")?,
+            nsh_platform::anonymous_file("nsh-stderr")?,
         ])
     }
 
@@ -138,7 +139,7 @@ mod tests {
     use super::*;
     #[test]
     fn supplied_streams_own_hidden_fds() {
-        let source = nsh_platform::anonymous_file(c"streams-owned").unwrap();
+        let source = nsh_platform::anonymous_file("streams-owned").unwrap();
         let source_number = source.number();
         let streams = Streams::from_fds(&source, &source, &source).unwrap();
         let descriptors = streams.initial_descriptors().unwrap();

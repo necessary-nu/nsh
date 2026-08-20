@@ -689,10 +689,11 @@ mod tests {
         assert_eq!(&got[got.len() - written..], &payload[..written]);
     }
 
+    // [spec:nsh:req:idiom.filesystem-account-bytes/test]
     #[test]
     fn shell_io_instances_own_independent_writers() {
         let open = || {
-            let fd = nsh_platform::anonymous_file(c"shell-io-test").unwrap();
+            let fd = nsh_platform::anonymous_file("shell-io-test").unwrap();
             destination(Some(crate::fd::SharedFd::from_owned(fd).unwrap()))
         };
         let mut first = ShellIo::new(open(), open());
@@ -702,7 +703,7 @@ mod tests {
         first.stderr().set_destination(crate::fd::FdRef::default());
         first.previous_stderr().set_destination(destination(Some(
             crate::fd::SharedFd::from_owned(
-                nsh_platform::anonymous_file(c"previous-stderr").unwrap(),
+                nsh_platform::anonymous_file("previous-stderr").unwrap(),
             )
             .unwrap(),
         )));

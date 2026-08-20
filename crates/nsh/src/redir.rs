@@ -515,9 +515,10 @@ fn install_redirect(sh: &mut Shell, target: c_int, source: RedirectSource) -> Re
 
 // [spec:dash:def:redir.sh-pipe-fn]
 // [spec:dash:sem:redir.sh-pipe-fn]
+// [spec:nsh:req:idiom.filesystem-account-bytes]
 pub fn sh_pipe(sh: &mut crate::context::Shell, memfd: bool) -> Result<(Pipe, bool), Error> {
     if memfd && USE_MEMFD_CREATE != 0 {
-        if let Ok(read_fd) = nsh_platform::anonymous_file(c"dash") {
+        if let Ok(read_fd) = nsh_platform::anonymous_file("dash") {
             let source = read_fd.number();
             let write_fd = nsh_platform::duplicate_fd(&read_fd)
                 .map_err(|error| descriptor_error(sh, source, error))?;

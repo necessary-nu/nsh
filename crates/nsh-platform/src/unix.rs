@@ -1157,17 +1157,20 @@ pub fn fd_is_regular_file(fd: &impl AsDescriptor) -> std::io::Result<bool> {
 }
 
 /// Create an anonymous in-memory file and transfer ownership of its descriptor.
-pub fn anonymous_file(name: &std::ffi::CStr) -> std::io::Result<Descriptor> {
+// [spec:nsh:req:idiom.filesystem-account-bytes]
+pub fn anonymous_file(name: impl AsRef<OsStr>) -> std::io::Result<Descriptor> {
+    let name = name.as_ref();
     #[cfg(any(target_os = "linux", target_os = "android"))]
     {
-        rustix::fs::memfd_create(name, rustix::fs::MemfdFlags::CLOEXEC)
+        let name = CString::new(name.as_bytes())
+            .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+        rustix::fs::memfd_create(&name, rustix::fs::MemfdFlags::CLOEXEC)
             .map(Descriptor::from)
             .map_err(std::io::Error::from)
     }
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
     {
-        let label = name.to_str().unwrap_or("nsh-anonymous");
-        let (file, path) = create_temporary_file(label)?;
+        let (file, path) = create_temporary_file(name)?;
         remove_file(&path)?;
         Ok(Descriptor::from(OwnedFd::from(file)))
     }
@@ -1176,12 +1179,14 @@ pub fn anonymous_file(name: &std::ffi::CStr) -> std::io::Result<Descriptor> {
 /// Create a temporary file in the host temporary directory.
 /// The returned file owns the descriptor and is created atomically with mode
 /// `0600`; an existing path is never followed or replaced.
-pub fn create_temporary_file(name: &str) -> std::io::Result<(std::fs::File, PathBuf)> {
+pub fn create_temporary_file(name: impl AsRef<OsStr>) -> std::io::Result<(std::fs::File, PathBuf)> {
     const PLACEHOLDER: &[u8] = b"XXXXXX";
     const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
-    let mut template = std::env::temp_dir();
-    template.push(format!("{name}-{}-XXXXXX", std::process::id()));
+    let mut template = std::env::temp_dir().join(name.as_ref());
+    template
+        .as_mut_os_string()
+        .push(format!("-{}-XXXXXX", std::process::id()));
     let template = template.as_os_str().as_bytes();
     let prefix = template
         .strip_suffix(PLACEHOLDER)
@@ -1628,6 +1633,7 @@ mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt as _;
 
+    // [spec:nsh:req:idiom.filesystem-account-bytes/test]
     #[test]
     fn native_string_extensions_round_trip_non_utf8_values() {
         let bytes = vec![b'n', b's', b'h', b'-', 0xff];
@@ -1638,6 +1644,21 @@ mod tests {
             bytes.as_slice().try_to_path_buf().unwrap().as_os_str(),
             native
         );
+
+        let label = OsStr::from_bytes(b"nsh-platform-\xff");
+        let (file, path) = create_temporary_file(label).unwrap();
+        drop(file);
+        assert!(
+            path.file_name()
+                .unwrap()
+                .as_bytes()
+                .starts_with(label.as_bytes())
+        );
+        remove_file(&path).unwrap();
+
+        let anonymous = anonymous_file(label).unwrap();
+        write_all(&anonymous, b"native label").unwrap();
+        assert_eq!(take_file_contents(&anonymous).unwrap(), b"native label");
     }
 
     #[test]

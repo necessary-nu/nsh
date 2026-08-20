@@ -160,9 +160,9 @@ impl FdTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::CStr;
 
-    fn shared(name: &'static CStr) -> SharedFd {
+    // [spec:nsh:req:idiom.filesystem-account-bytes/test]
+    fn shared(name: &str) -> SharedFd {
         SharedFd::from_owned(nsh_platform::anonymous_file(name).unwrap()).unwrap()
     }
 
@@ -194,8 +194,8 @@ mod tests {
     fn slot_refs_follow_replacement() {
         let table = empty_table();
         let retained = table.slot(4).unwrap();
-        let first = shared(c"fd-first");
-        let second = shared(c"fd-second");
+        let first = shared("fd-first");
+        let second = shared("fd-second");
 
         assert!(retained.get().is_none());
         table.replace(4, Some(first.clone())).unwrap();
@@ -207,8 +207,8 @@ mod tests {
     #[test]
     fn replacement_returns_saved_value() {
         let table = empty_table();
-        let first = shared(c"fd-saved");
-        let second = shared(c"fd-current");
+        let first = shared("fd-saved");
+        let second = shared("fd-current");
         table.replace(6, Some(first.clone())).unwrap();
 
         let saved = table.replace(6, Some(second.clone())).unwrap().unwrap();
@@ -219,8 +219,8 @@ mod tests {
 
     #[test]
     fn logical_dup_survives_replacement() {
-        let original = shared(c"fd-dup-original");
-        let replacement = shared(c"fd-dup-replacement");
+        let original = shared("fd-dup-original");
+        let replacement = shared("fd-dup-replacement");
         let left = detached(original.clone());
         let right = detached(original.clone());
 
@@ -232,8 +232,8 @@ mod tests {
 
     #[test]
     fn writes_follow_current_slot() {
-        let first = shared(c"fd-write-first");
-        let second = shared(c"fd-write-second");
+        let first = shared("fd-write-first");
+        let second = shared("fd-write-second");
         let slot = detached(first.clone());
 
         slot.write_all(b"before").unwrap();
@@ -266,9 +266,9 @@ mod tests {
     #[test]
     fn install_owned_replaces_slot() {
         let table = empty_table();
-        let original = shared(c"fd-install-original");
+        let original = shared("fd-install-original");
         table.replace(5, Some(original.clone())).unwrap();
-        let replacement = nsh_platform::anonymous_file(c"fd-install-new").unwrap();
+        let replacement = nsh_platform::anonymous_file("fd-install-new").unwrap();
 
         let saved = table.install_owned(5, replacement).unwrap().unwrap();
 
@@ -278,7 +278,7 @@ mod tests {
 
     #[test]
     fn poisoned_slot_keeps_its_state() {
-        let value = shared(c"fd-poison");
+        let value = shared("fd-poison");
         let slot = detached(value.clone());
         let other = slot.clone();
         let result = std::thread::spawn(move || {
