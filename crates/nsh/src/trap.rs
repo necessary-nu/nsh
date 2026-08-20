@@ -161,8 +161,8 @@ pub fn have_traps(sh: &crate::context::Shell) -> c_int {
 /* mkinit INIT fragment from src/trap.c:94-97. */
 pub fn mkinit_init(sh: &mut crate::context::Shell) {
     let child = nsh_platform::child_signal();
-    sh.traps.sigmode[(child - 1) as usize] = S_DFL;
-    setsignal(sh, child);
+    sh.traps.sigmode[(child.number() - 1) as usize] = S_DFL;
+    setsignal(sh, child.number());
 }
 
 /* mkinit FORKRESET fragment from src/trap.c:99-101. */
@@ -293,7 +293,11 @@ fn current_disposition(
 ) -> std::io::Result<crate::host::Disposition> {
     match via {
         Via::Host => sh.host.signal(crate::status::Signal::from_raw(signo)),
-        Via::Platform => nsh_platform::signal_action(signo).map(disposition_of),
+        Via::Platform => {
+            let signal = nsh_platform::Signal::new(signo)
+                .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+            nsh_platform::signal_action(signal).map(disposition_of)
+        }
     }
 }
 
@@ -323,12 +327,15 @@ fn install_disposition(
                 .set_signal(crate::status::Signal::from_raw(signo), to);
         }
         Via::Platform => {
+            let Some(signal) = nsh_platform::Signal::new(signo) else {
+                return;
+            };
             let action = match to {
                 crate::host::Disposition::Catch => nsh_platform::SignalAction::Catch,
                 crate::host::Disposition::Ignore => nsh_platform::SignalAction::Ignore,
                 crate::host::Disposition::Default => nsh_platform::SignalAction::Default,
             };
-            let _ = nsh_platform::install_signal_action(signo, action, onsig);
+            let _ = nsh_platform::install_signal_action(signal, action, onsig);
         }
     }
 }
@@ -372,7 +379,7 @@ fn setsignal_via(sh: &mut crate::context::Shell, signo: c_int, via: Via) {
     };
     if crate::shellmain::rootshell(sh) != 0 && action == S_DFL as c_int {
         match signo {
-            signal if signal == nsh_platform::interrupt_signal() => {
+            signal if signal == nsh_platform::interrupt_signal().number() => {
                 if sh.options.flag(crate::options::iflag) != 0
                     || sh.options.minusc.is_some()
                     || sh.options.flag(crate::options::sflag) == 0
@@ -380,7 +387,7 @@ fn setsignal_via(sh: &mut crate::context::Shell, signo: c_int, via: Via) {
                     action = S_CATCH as c_int;
                 }
             }
-            signal if signal == nsh_platform::quit_signal() => {
+            signal if signal == nsh_platform::quit_signal().number() => {
                 /* #ifdef DEBUG: if (debug) break; */
                 if crate::shell::DEBUG && sh.options.flag(crate::options::debug) != 0 {
                     /* break */
@@ -388,15 +395,15 @@ fn setsignal_via(sh: &mut crate::context::Shell, signo: c_int, via: Via) {
                     action = S_IGN as c_int;
                 }
             }
-            signal if signal == nsh_platform::termination_signal() => {
+            signal if signal == nsh_platform::termination_signal().number() => {
                 if sh.options.flag(crate::options::iflag) != 0 {
                     action = S_IGN as c_int;
                 }
             }
             /* #if JOBS */
             signal
-                if signal == nsh_platform::terminal_stop_signal()
-                    || signal == nsh_platform::terminal_output_signal() =>
+                if signal == nsh_platform::terminal_stop_signal().number()
+                    || signal == nsh_platform::terminal_output_signal().number() =>
             {
                 if sh.options.flag(crate::options::mflag) != 0 {
                     action = S_IGN as c_int;
@@ -406,7 +413,7 @@ fn setsignal_via(sh: &mut crate::context::Shell, signo: c_int, via: Via) {
         }
     }
 
-    if signo == nsh_platform::child_signal() {
+    if signo == nsh_platform::child_signal().number() {
         action = S_CATCH as c_int;
     }
 
@@ -436,9 +443,9 @@ fn setsignal_via(sh: &mut crate::context::Shell, signo: c_int, via: Via) {
          * be reproduced without reading the inherited disposition. */
         if current == crate::host::Disposition::Ignore {
             if sh.options.flag(crate::options::mflag) != 0
-                && (signo == nsh_platform::terminal_stop_signal()
-                    || signo == nsh_platform::terminal_input_signal()
-                    || signo == nsh_platform::terminal_output_signal())
+                && (signo == nsh_platform::terminal_stop_signal().number()
+                    || signo == nsh_platform::terminal_input_signal().number()
+                    || signo == nsh_platform::terminal_output_signal().number())
             {
                 tsig = S_IGN; /* don't hard ignore these */
             } else {
@@ -482,7 +489,9 @@ pub fn ignoresig_in_child(sh: &mut crate::context::Shell, signo: c_int) {
     if mode == S_IGN || mode == S_HARD_IGN {
         return;
     }
-    let _ = nsh_platform::ignore_signal(signo);
+    if let Some(signal) = nsh_platform::Signal::new(signo) {
+        let _ = nsh_platform::ignore_signal(signal);
+    }
     sh.traps.sigmode[(signo - 1) as usize] = S_IGN;
 }
 
@@ -515,12 +524,13 @@ pub fn ignoresig_in_child(sh: &mut crate::context::Shell, signo: c_int) {
  * hit. The handler now does one store and returns, which is
  * async-signal-safe by construction and is what
  * [dec:nsh:host-owns-signals]'s `SignalSink` will formalise. */
-pub extern "C" fn onsig(signo: c_int) {
+pub fn onsig(signal: nsh_platform::Signal) {
     let signals = crate::siginbox::signals();
+    let signo = signal.number();
 
-    if signo == nsh_platform::child_signal() {
+    if signal == nsh_platform::child_signal() {
         signals.set_child_pending(true);
-        if !signals.is_trapped(nsh_platform::child_signal()) {
+        if !signals.is_trapped(nsh_platform::child_signal().number()) {
             return;
         }
     }
@@ -528,8 +538,8 @@ pub extern "C" fn onsig(signo: c_int) {
     signals.set_signal_pending(signo, true);
     signals.set_pending_signal(signo);
 
-    if signo == nsh_platform::interrupt_signal()
-        && !signals.is_trapped(nsh_platform::interrupt_signal())
+    if signal == nsh_platform::interrupt_signal()
+        && !signals.is_trapped(nsh_platform::interrupt_signal().number())
     {
         /* `if (!suppressint) onint();` is gone. The C had two delivery
          * modes and only one of them was asynchronous; now neither is.
@@ -642,9 +652,9 @@ pub fn setinteractive(sh: &mut crate::context::Shell, on: c_int) {
         return;
     }
     sh.traps.interactive = on;
-    setsignal(sh, nsh_platform::interrupt_signal());
-    setsignal(sh, nsh_platform::quit_signal());
-    setsignal(sh, nsh_platform::termination_signal());
+    setsignal(sh, nsh_platform::interrupt_signal().number());
+    setsignal(sh, nsh_platform::quit_signal().number());
+    setsignal(sh, nsh_platform::termination_signal().number());
 }
 
 /*
@@ -796,18 +806,25 @@ mod tests {
         let _g = crate::testutil::lock();
         let interrupt = nsh_platform::interrupt_signal();
         let mut t = TrapTable::new();
-        assert!(!signals().is_trapped(interrupt), "a new table has no traps");
+        assert!(
+            !signals().is_trapped(interrupt.number()),
+            "a new table has no traps"
+        );
 
         let b = SignalsBlocked::new();
-        drop(t.set(&b, interrupt as usize, Some(BString::from("echo hi"))));
+        drop(t.set(
+            &b,
+            interrupt.number() as usize,
+            Some(BString::from("echo hi")),
+        ));
         assert!(
-            signals().is_trapped(interrupt),
+            signals().is_trapped(interrupt.number()),
             "set an action, set the bit"
         );
 
-        drop(t.set(&b, interrupt as usize, None));
+        drop(t.set(&b, interrupt.number() as usize, None));
         assert!(
-            !signals().is_trapped(interrupt),
+            !signals().is_trapped(interrupt.number()),
             "clear the action, clear the bit"
         );
         drop(b);
@@ -824,12 +841,16 @@ mod tests {
         let interrupt = nsh_platform::interrupt_signal();
         let mut t = TrapTable::new();
         let b = SignalsBlocked::new();
-        drop(t.set(&b, interrupt as usize, Some(BString::new(Vec::new()))));
+        drop(t.set(
+            &b,
+            interrupt.number() as usize,
+            Some(BString::new(Vec::new())),
+        ));
         assert!(
-            signals().is_trapped(interrupt),
+            signals().is_trapped(interrupt.number()),
             "`trap '' INT` is a trap as far as the handler is concerned"
         );
-        drop(t.set(&b, interrupt as usize, None));
+        drop(t.set(&b, interrupt.number() as usize, None));
         drop(b);
     }
 
@@ -843,12 +864,19 @@ mod tests {
         let child = nsh_platform::child_signal();
         let mut t = TrapTable::new();
         let b = SignalsBlocked::new();
-        drop(t.set(&b, child as usize, Some(BString::from("echo chld"))));
+        drop(t.set(
+            &b,
+            child.number() as usize,
+            Some(BString::from("echo chld")),
+        ));
         drop(b);
-        assert!(signals().is_trapped(child));
+        assert!(signals().is_trapped(child.number()));
 
         let _fresh = TrapTable::new();
-        assert!(!signals().is_trapped(child), "a new table, a clear mirror");
+        assert!(
+            !signals().is_trapped(child.number()),
+            "a new table, a clear mirror"
+        );
     }
 
     /// **The guard blocks, and puts the mask back.** Without the `Drop`

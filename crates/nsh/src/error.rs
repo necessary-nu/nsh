@@ -271,7 +271,7 @@ pub fn onint(sh: &crate::context::Shell) -> Error {
     /* `exitstatus = SIGINT + 128` was here; `Error::status()` answers
      * exactly that for `Interrupted`, so the value already carries it. */
     Error::Interrupted {
-        signal: crate::status::Signal::from_raw(nsh_platform::interrupt_signal()),
+        signal: crate::status::Signal::from_raw(nsh_platform::interrupt_signal().number()),
     }
 }
 
@@ -811,7 +811,7 @@ mod tests {
         let e = onint(sh);
 
         assert!(e.is_interrupt());
-        assert_eq!(e.status(), nsh_platform::interrupt_signal() + 128);
+        assert_eq!(e.status(), nsh_platform::interrupt_signal().number() + 128);
         /* `onint` used to write this to `exitstatus` as well. It does
          * not any more -- and it could not: it takes `&Shell`, a
          * shared receiver, so the type says it reads the shell and
@@ -884,7 +884,7 @@ mod tests {
         CLEAR_PENDING_INT();
 
         rearm_interrupt(Error::Interrupted {
-            signal: crate::status::Signal::from_raw(nsh_platform::interrupt_signal()),
+            signal: crate::status::Signal::from_raw(nsh_platform::interrupt_signal().number()),
         });
         assert_eq!(int_pending(), 1);
         assert!(poll_interrupt(sh).is_some(), "the next poll site takes it");

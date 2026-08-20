@@ -23,7 +23,8 @@
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::{c_int, c_uint};
 use nsh_platform::{
-    Descriptor, NativeStrExt as _, ProcessGroupId, ProcessId, ProcessSelector, ProcessTarget,
+    ChildStatus, Descriptor, NativeStrExt as _, ProcessGroupId, ProcessId, ProcessSelector,
+    ProcessTarget,
 };
 use std::io::Write as _;
 
@@ -66,8 +67,8 @@ pub const JOBDONE: c_int = 2; /* all procs are completed */
 
 // [spec:dash:def:jobs.procstat]
 pub struct ProcStat {
-    pub pid: ProcessId, /* process id */
-    pub status: c_int,  /* last process status from wait() */
+    pub pid: ProcessId,              /* process id */
+    pub status: Option<ChildStatus>, /* last process status from wait() */
     /* text of command being run. The C points this at the shared
      * `nullstr` when there is none and at a `savestr` copy otherwise,
      * and `freejob` tells the two apart by address; an owned text that
@@ -89,7 +90,7 @@ pub struct Job {
      * in use — a self-reference the table could not be moved without
      * repairing. */
     pub ps: Vec<ProcStat>,
-    pub stopstatus: c_int, /* status of a stopped job (#if JOBS) */
+    pub stopstatus: Option<ChildStatus>, /* status of a stopped job (#if JOBS) */
     pub state: u8,
     pub sigint: u8,              /* job was killed by SIGINT (#if JOBS) */
     pub jobctl: u8,              /* job running under job control (#if JOBS) */
@@ -107,7 +108,7 @@ impl Job {
     const fn new() -> Job {
         Job {
             ps: Vec::new(),
-            stopstatus: 0,
+            stopstatus: None,
             state: JOBRUNNING as u8,
             sigint: 0,
             jobctl: 0,
@@ -560,7 +561,9 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
                         }
                         let _ = nsh_platform::send_signal(
                             ProcessTarget::CurrentProcessGroup,
-                            nsh_platform::terminal_input_signal(),
+                            nsh_platform::SignalRequest::Deliver(
+                                nsh_platform::terminal_input_signal(),
+                            ),
                         );
                     }
                 }
@@ -586,9 +589,9 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
         process_group = sh.jobs.initialpgrp;
     }
 
-    crate::trap::setsignal(sh, nsh_platform::terminal_stop_signal());
-    crate::trap::setsignal(sh, nsh_platform::terminal_output_signal());
-    crate::trap::setsignal(sh, nsh_platform::terminal_input_signal());
+    crate::trap::setsignal(sh, nsh_platform::terminal_stop_signal().number());
+    crate::trap::setsignal(sh, nsh_platform::terminal_output_signal().number());
+    crate::trap::setsignal(sh, nsh_platform::terminal_input_signal().number());
     if let (Some(tty), Some(group)) = (fd.as_ref(), process_group) {
         let _ = nsh_platform::set_process_group(ProcessSelector::CurrentProcess, group);
         xtcsetpgrp(sh, tty, group)?;
@@ -617,62 +620,54 @@ pub(crate) fn jobno(jp: usize) -> c_int {
 fn sprint_status(
     locale: &nsh_platform::Locale,
     out: &mut Vec<u8>,
-    status: c_int,
+    status: ChildStatus,
     sigonly: c_int,
 ) -> c_int {
     let start = out.len();
-    let mut st: c_int;
-
-    'out_lbl: {
-        st = nsh_platform::wait_status_exit_code(status);
-        if !nsh_platform::wait_status_is_exited(status) {
-            st = nsh_platform::wait_status_stop_signal(status);
-            if !nsh_platform::wait_status_is_stopped(status) {
-                st = nsh_platform::wait_status_term_signal(status);
+    match status {
+        ChildStatus::Exited(code) if sigonly == 0 => {
+            if code == 0 {
+                append_ascii(out, 5, "Done");
+            } else {
+                append_ascii(out, 16, &format!("Done({code})"));
             }
-            if sigonly != 0 {
-                if st == nsh_platform::interrupt_signal() || st == nsh_platform::pipe_signal() {
-                    break 'out_lbl;
-                }
-                if nsh_platform::wait_status_is_stopped(status) {
-                    break 'out_lbl;
-                }
+        }
+        ChildStatus::Stopped(signal) if sigonly == 0 => {
+            let signal_name = crate::signames::signal_names
+                .get(signal.number() as usize)
+                .map_or(BStr::new(b""), |name| BStr::new(name.to_bytes()));
+            out.extend_from_slice(b"Stopped");
+            if !signal_name.is_empty() {
+                out.extend_from_slice(b" (SIG");
+                out.extend_from_slice(signal_name);
+                out.push(b')');
             }
-            if nsh_platform::wait_status_is_stopped(status) {
-                let signal_name = usize::try_from(st)
-                    .ok()
-                    .and_then(|signal| crate::signames::signal_names.get(signal))
-                    .map_or(BStr::new(b""), |name| BStr::new(name.to_bytes()));
-                out.extend_from_slice(b"Stopped");
-                if !signal_name.is_empty() {
-                    out.extend_from_slice(b" (SIG");
-                    out.extend_from_slice(signal_name);
-                    out.push(b')');
-                }
-                break 'out_lbl;
-            }
+        }
+        ChildStatus::Signaled {
+            signal,
+            core_dumped,
+        } if sigonly == 0
+            || (signal != nsh_platform::interrupt_signal()
+                && signal != nsh_platform::pipe_signal()) =>
+        {
             /* `stpncpy(s, …, 32)` copies at most 32 bytes and NUL-pads
              * the rest of them, which is why the callers' buffers are
              * sized for 32 whatever the signal is called. `strsignal` is
              * locale text, not ASCII, so the bytes are copied rather than
              * routed through `copy_ascii_cstr`. */
-            let description = locale.signal_description(st);
+            let description = locale.signal_description(signal);
             let name = description.as_slice();
             let n = name.len().min(32);
             out.extend_from_slice(&name[..n]);
-            if nsh_platform::wait_status_core_dumped(status) {
+            if core_dumped {
                 append_ascii(out, 15, " (core dumped)");
             }
-        } else if sigonly == 0 {
-            if st != 0 {
-                let status = format!("Done({st})");
-                append_ascii(out, 16, &status);
-            } else {
-                append_ascii(out, 5, "Done");
-            }
         }
+        ChildStatus::Continued if sigonly == 0 => {
+            append_ascii(out, 8, "Running");
+        }
+        _ => {}
     }
-    // out:
     (out.len() - start) as c_int
 }
 
@@ -732,9 +727,13 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mod
     } else {
         /* `psend[-1]`: a job leaves JOBRUNNING only through `waitone`,
          * which needs a process to have exited to do it. */
-        let mut status: c_int = sh.jobs.tab[jp].ps[psend - 1].status;
+        let mut status = sh.jobs.tab[jp].ps[psend - 1]
+            .status
+            .expect("a completed job has a child status");
         if sh.jobs.tab[jp].state as c_int == JOBSTOPPED {
-            status = sh.jobs.tab[jp].stopstatus;
+            status = sh.jobs.tab[jp]
+                .stopstatus
+                .expect("a stopped job records its stop status");
         }
         col += sprint_status(&sh.locale, &mut s, status, 0);
     }
@@ -1128,11 +1127,11 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<usize>, n: Option<&Node>
         if mode == FORK_FG {
             xxtcsetpgrp(sh, process_group).unwrap_or_else(|e| forkchild_fatal(sh, e));
         }
-        crate::trap::setsignal_in_child(sh, nsh_platform::terminal_stop_signal());
-        crate::trap::setsignal_in_child(sh, nsh_platform::terminal_output_signal());
+        crate::trap::setsignal_in_child(sh, nsh_platform::terminal_stop_signal().number());
+        crate::trap::setsignal_in_child(sh, nsh_platform::terminal_output_signal().number());
     } else if mode == FORK_BG {
-        crate::trap::ignoresig_in_child(sh, nsh_platform::interrupt_signal());
-        crate::trap::ignoresig_in_child(sh, nsh_platform::quit_signal());
+        crate::trap::ignoresig_in_child(sh, nsh_platform::interrupt_signal().number());
+        crate::trap::ignoresig_in_child(sh, nsh_platform::quit_signal().number());
         if jp.map_or(false, |i| sh.jobs.tab[i].ps.is_empty()) {
             /* The C closes descriptor 0 and reopens /dev/null, relying on
              * `open` returning the lowest free descriptor to land back on
@@ -1158,9 +1157,9 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<usize>, n: Option<&Node>
         }
     }
     if oldlvl == 0 && iflag(sh) != 0 {
-        crate::trap::setsignal_in_child(sh, nsh_platform::interrupt_signal());
-        crate::trap::setsignal_in_child(sh, nsh_platform::quit_signal());
-        crate::trap::setsignal_in_child(sh, nsh_platform::termination_signal());
+        crate::trap::setsignal_in_child(sh, nsh_platform::interrupt_signal().number());
+        crate::trap::setsignal_in_child(sh, nsh_platform::quit_signal().number());
+        crate::trap::setsignal_in_child(sh, nsh_platform::termination_signal().number());
     }
 
     let Some(ji) = jp else {
@@ -1220,7 +1219,7 @@ fn forkparent(
     /* the C's second `if (jp)` is dead after the early return above */
     sh.jobs.tab[ji].ps.push(ProcStat {
         pid,
-        status: -1,
+        status: None,
         cmd: BString::new(Vec::new()),
     });
     if let Some(node) = n {
@@ -1413,7 +1412,10 @@ pub fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum WaitProcess {
-    Reaped(ProcessId),
+    Reaped {
+        process: ProcessId,
+        status: ChildStatus,
+    },
     Interrupted,
     Exhausted,
 }
@@ -1431,15 +1433,17 @@ fn waitone(
     let mut jp: Option<usize>;
     let mut thisjob: Option<usize> = None;
     let mut state: c_int = 0;
+    let mut reported_status = None;
 
     INTOFF(sh);
     /* TRACE(("dowait(%d) called\n", block)); */
-    let (waited, status) = waitproc(sh, block)?;
+    let waited = waitproc(sh, block)?;
     /* TRACE(("wait returns pid %d, status=%d\n", pid, status)); */
     'out_lbl: {
-        let WaitProcess::Reaped(process) = waited else {
+        let WaitProcess::Reaped { process, status } = waited else {
             break 'out_lbl;
         };
+        reported_status = Some(status);
 
         'gotjob: {
             jp = sh.jobs.curjob;
@@ -1459,17 +1463,17 @@ fn waitone(
                 while sp < spend {
                     if sh.jobs.tab[ji].ps[sp].pid == process {
                         /* TRACE(("Job %d: changing status of proc %d ...")); */
-                        sh.jobs.tab[ji].ps[sp].status = status;
+                        sh.jobs.tab[ji].ps[sp].status = Some(status);
                         thisjob = Some(ji);
                     }
                     'contin: {
-                        if sh.jobs.tab[ji].ps[sp].status == -1 {
+                        if sh.jobs.tab[ji].ps[sp].status.is_none() {
                             state = JOBRUNNING;
                         }
                         if state == JOBRUNNING {
                             break 'contin;
                         }
-                        if nsh_platform::wait_status_is_stopped(sh.jobs.tab[ji].ps[sp].status) {
+                        if matches!(sh.jobs.tab[ji].ps[sp].status, Some(ChildStatus::Stopped(_))) {
                             sh.jobs.tab[ji].stopstatus = sh.jobs.tab[ji].ps[sp].status;
                             state = JOBSTOPPED;
                         }
@@ -1502,7 +1506,12 @@ fn waitone(
 
     if thisjob.is_some() && thisjob == jobp {
         let mut message = Vec::with_capacity(49);
-        sprint_status(&sh.locale, &mut message, status, 1);
+        sprint_status(
+            &sh.locale,
+            &mut message,
+            reported_status.expect("a matched job has a reaped status"),
+            1,
+        );
         if !message.is_empty() {
             message.push(b'\n');
             let _ = sh.io.stderr().write_all(&message);
@@ -1595,9 +1604,8 @@ pub(crate) fn dowait(
 
 // [spec:dash:def:jobs.waitproc-fn]
 // [spec:dash:sem:jobs.waitproc-fn]
-fn waitproc(sh: &mut crate::context::Shell, block: c_int) -> Result<(WaitProcess, c_int), Error> {
+fn waitproc(sh: &mut crate::context::Shell, block: c_int) -> Result<WaitProcess, Error> {
     let nonblocking = block != DOWAIT_BLOCK;
-    let mut status = 0;
     let mut waited: WaitProcess;
 
     let signals = crate::siginbox::signals();
@@ -1606,8 +1614,10 @@ fn waitproc(sh: &mut crate::context::Shell, block: c_int) -> Result<(WaitProcess
         loop {
             match nsh_platform::wait_for_any_child(nonblocking, sh.jobs.jobctl != 0) {
                 Ok(Some((pid, child_status))) => {
-                    waited = WaitProcess::Reaped(pid);
-                    status = child_status;
+                    waited = WaitProcess::Reaped {
+                        process: pid,
+                        status: child_status,
+                    };
                     break;
                 }
                 Ok(None) => {
@@ -1650,7 +1660,7 @@ fn waitproc(sh: &mut crate::context::Shell, block: c_int) -> Result<(WaitProcess
         }
     }
 
-    Ok((waited, status))
+    Ok(waited)
 }
 
 /*
@@ -1904,8 +1914,7 @@ fn xtcsetpgrp(
 // [spec:posix:req:exit.status-normal-termination]
 // [spec:posix:req:exit.status-signal-terminated]
 pub(crate) fn getstatus(sh: &mut crate::context::Shell, jobp: usize) -> c_int {
-    let mut status: c_int;
-    let mut retval: c_int;
+    let mut status: ChildStatus;
     let mut ps: usize;
 
     /* `job->ps + job->nprocs - 1` in C: the bitfield promotes to `int`,
@@ -1913,35 +1922,38 @@ pub(crate) fn getstatus(sh: &mut crate::context::Shell, jobp: usize) -> c_int {
      * to report; `wait %n` on one answers 0. */
     ps = sh.jobs.tab[jobp].ps.len();
     status = if ps == 0 {
-        0
+        ChildStatus::Exited(0)
     } else {
-        sh.jobs.tab[jobp].ps[ps - 1].status
+        sh.jobs.tab[jobp].ps[ps - 1]
+            .status
+            .unwrap_or(ChildStatus::Exited(0))
     };
     if pipefail(sh) != 0 {
         loop {
-            if status != 0 {
+            if status != ChildStatus::Exited(0) {
                 break;
             }
             if ps < 2 {
                 break;
             }
             ps -= 1;
-            status = sh.jobs.tab[jobp].ps[ps - 1].status;
+            status = sh.jobs.tab[jobp].ps[ps - 1]
+                .status
+                .unwrap_or(ChildStatus::Exited(0));
         }
     }
 
-    retval = nsh_platform::wait_status_exit_code(status);
-    if !nsh_platform::wait_status_is_exited(status) {
-        retval = nsh_platform::wait_status_stop_signal(status);
-        if !nsh_platform::wait_status_is_stopped(status) {
-            /* XXX: limits number of signals */
-            retval = nsh_platform::wait_status_term_signal(status);
-            if retval == nsh_platform::interrupt_signal() {
+    let retval = match status {
+        ChildStatus::Exited(code) => c_int::from(code),
+        ChildStatus::Signaled { signal, .. } => {
+            if signal == nsh_platform::interrupt_signal() {
                 sh.jobs.tab[jobp].sigint = 1;
             }
+            signal.number() + 128
         }
-        retval += 128;
-    }
+        ChildStatus::Stopped(signal) => signal.number() + 128,
+        ChildStatus::Continued => 0,
+    };
     /* TRACE(("getstatus: job %d, nproc %d, status %x, retval %x\n", ...)); */
     retval
 }

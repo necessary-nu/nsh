@@ -120,8 +120,11 @@ fn restartjob(sh: &mut Shell, jp: usize, mode: c_int) -> Result<c_int, Error> {
          * at the count, so a job with no processes walks the whole
          * address space; there is nothing to restart in one. */
         for i in 0..sh.jobs.tab[jp].ps.len() {
-            if nsh_platform::wait_status_is_stopped(sh.jobs.tab[jp].ps[i].status) {
-                sh.jobs.tab[jp].ps[i].status = -1;
+            if matches!(
+                sh.jobs.tab[jp].ps[i].status,
+                Some(nsh_platform::ChildStatus::Stopped(_))
+            ) {
+                sh.jobs.tab[jp].ps[i].status = None;
             }
         }
     }

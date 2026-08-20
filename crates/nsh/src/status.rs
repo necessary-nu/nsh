@@ -158,7 +158,7 @@ mod tests {
     /// The `128 + n` convention, and the ambiguity it carries.
     #[test]
     fn a_signal_and_the_status_it_makes_round_trip() {
-        let int = Signal::from_raw(nsh_platform::interrupt_signal());
+        let int = Signal::from_raw(nsh_platform::interrupt_signal().number());
         assert_eq!(int.as_status().code(), 130);
         assert_eq!(int.as_status().signal(), Some(int));
 
@@ -176,11 +176,11 @@ mod tests {
     #[test]
     fn a_signal_names_itself_without_the_prefix() {
         assert_eq!(
-            Signal::from_raw(nsh_platform::interrupt_signal()).name(),
+            Signal::from_raw(nsh_platform::interrupt_signal().number()).name(),
             Some(BStr::new("INT"))
         );
         assert_eq!(
-            Signal::from_raw(nsh_platform::kill_signal()).name(),
+            Signal::from_raw(nsh_platform::kill_signal().number()).name(),
             Some(BStr::new("KILL"))
         );
         /* Index 0 is the exit trap's pseudo-signal, not a signal. */

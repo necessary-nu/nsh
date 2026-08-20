@@ -10,6 +10,8 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use crate::Signal;
+
 #[cfg(not(target_vendor = "apple"))]
 type MbState = libc::mbstate_t;
 
@@ -429,7 +431,7 @@ impl Locale {
         self.error_message_code(libc::ERANGE)
     }
 
-    pub fn signal_description(&self, signal: i32) -> Vec<u8> {
+    pub fn signal_description(&self, signal: Signal) -> Vec<u8> {
         // glibc documents `strsignal` as MT-Unsafe because it may return a
         // shared buffer.  Serialize only that call and its immediate copy;
         // locale selection remains independent and thread-local.
@@ -440,9 +442,9 @@ impl Locale {
             // SAFETY: `strsignal` accepts an integer signal number.  A
             // non-null result is a process-owned terminated string, copied
             // while the mutex is still held.
-            let description = unsafe { libc::strsignal(signal) };
+            let description = unsafe { libc::strsignal(signal.number()) };
             if description.is_null() {
-                signal.to_string().into_bytes()
+                signal.number().to_string().into_bytes()
             } else {
                 unsafe { CStr::from_ptr(description) }.to_bytes().to_vec()
             }

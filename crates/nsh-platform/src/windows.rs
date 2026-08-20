@@ -51,7 +51,10 @@ use windows_sys::Win32::System::Threading::{
     UpdateProcThreadAttribute, WaitForSingleObject,
 };
 
-use crate::{ForkResult, ProcessGroupId, ProcessId, ProcessSelector, ProcessTarget};
+use crate::{
+    ChildStatus, ForkResult, ProcessGroupId, ProcessId, ProcessSelector, ProcessTarget, Signal,
+    SignalRequest,
+};
 
 #[path = "signal_names.rs"]
 mod signal_names;
@@ -916,8 +919,8 @@ impl Locale {
         "Result too large".to_owned()
     }
 
-    pub fn signal_description(&self, signal: i32) -> Vec<u8> {
-        let description = match signal {
+    pub fn signal_description(&self, signal: Signal) -> Vec<u8> {
+        let description = match signal.number() {
             1 => "Hangup",
             2 => "Interrupt",
             3 => "Quit",
@@ -927,7 +930,7 @@ impl Locale {
             17 => "Child status changed",
             18 => "Continued",
             20 => "Terminal stop",
-            _ => return signal.to_string().into_bytes(),
+            _ => return signal.number().to_string().into_bytes(),
         };
         description.as_bytes().to_vec()
     }
@@ -2369,48 +2372,48 @@ pub fn is_bad_descriptor_error(error: &std::io::Error) -> bool {
     error.raw_os_error() == Some(ERROR_INVALID_HANDLE as i32)
 }
 
-pub fn interrupt_signal() -> i32 {
-    2
+pub fn interrupt_signal() -> Signal {
+    Signal::new(2).expect("SIGINT is positive")
 }
 
-pub fn quit_signal() -> i32 {
-    3
+pub fn quit_signal() -> Signal {
+    Signal::new(3).expect("SIGQUIT is positive")
 }
 
-pub fn termination_signal() -> i32 {
-    15
+pub fn termination_signal() -> Signal {
+    Signal::new(15).expect("SIGTERM is positive")
 }
 
-pub fn kill_signal() -> i32 {
-    9
+pub fn kill_signal() -> Signal {
+    Signal::new(9).expect("SIGKILL is positive")
 }
 
-pub fn child_signal() -> i32 {
-    17
+pub fn child_signal() -> Signal {
+    Signal::new(17).expect("SIGCHLD is positive")
 }
 
-pub fn pipe_signal() -> i32 {
-    13
+pub fn pipe_signal() -> Signal {
+    Signal::new(13).expect("SIGPIPE is positive")
 }
 
-pub fn hangup_signal() -> i32 {
-    1
+pub fn hangup_signal() -> Signal {
+    Signal::new(1).expect("SIGHUP is positive")
 }
 
-pub fn terminal_stop_signal() -> i32 {
-    20
+pub fn terminal_stop_signal() -> Signal {
+    Signal::new(20).expect("SIGTSTP is positive")
 }
 
-pub fn terminal_input_signal() -> i32 {
-    21
+pub fn terminal_input_signal() -> Signal {
+    Signal::new(21).expect("SIGTTIN is positive")
 }
 
-pub fn terminal_output_signal() -> i32 {
-    22
+pub fn terminal_output_signal() -> Signal {
+    Signal::new(22).expect("SIGTTOU is positive")
 }
 
-pub fn continue_signal() -> i32 {
-    18
+pub fn continue_signal() -> Signal {
+    Signal::new(18).expect("SIGCONT is positive")
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2435,10 +2438,8 @@ unsafe extern "system" fn console_control_handler(event: u32) -> i32 {
     dispatch_signal(signal) as i32
 }
 
-fn dispatch_signal(signal: i32) -> bool {
-    let Ok(index) = usize::try_from(signal) else {
-        return false;
-    };
+fn dispatch_signal(signal: Signal) -> bool {
+    let index = signal.number() as usize;
     let Some(action) = SIGNAL_ACTIONS.get(index) else {
         return false;
     };
@@ -2453,7 +2454,7 @@ fn dispatch_signal(signal: i32) -> bool {
             if address != 0 {
                 // SAFETY: only `install_signal_action` stores addresses here,
                 // and its parameter has exactly this ABI and static lifetime.
-                let handler: extern "C" fn(i32) = unsafe { std::mem::transmute(address) };
+                let handler: fn(Signal) = unsafe { std::mem::transmute(address) };
                 handler(signal);
             }
             true
@@ -2477,8 +2478,8 @@ fn ensure_console_handler() -> std::io::Result<()> {
     Ok(())
 }
 
-pub fn signal_action(signal: i32) -> std::io::Result<SignalAction> {
-    let index = usize::try_from(signal)
+pub fn signal_action(signal: Signal) -> std::io::Result<SignalAction> {
+    let index = usize::try_from(signal.number())
         .ok()
         .filter(|index| *index < SIGNAL_COUNT)
         .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
@@ -2490,11 +2491,11 @@ pub fn signal_action(signal: i32) -> std::io::Result<SignalAction> {
 }
 
 pub fn install_signal_action(
-    signal: i32,
+    signal: Signal,
     action: SignalAction,
-    handler: extern "C" fn(i32),
+    handler: fn(Signal),
 ) -> std::io::Result<()> {
-    let index = usize::try_from(signal)
+    let index = usize::try_from(signal.number())
         .ok()
         .filter(|index| *index > 0 && *index < SIGNAL_COUNT)
         .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
@@ -2511,9 +2512,9 @@ pub fn install_signal_action(
     Ok(())
 }
 
-extern "C" fn ignored_signal_placeholder(_: i32) {}
+fn ignored_signal_placeholder(_: Signal) {}
 
-pub fn ignore_signal(signal: i32) -> std::io::Result<()> {
+pub fn ignore_signal(signal: Signal) -> std::io::Result<()> {
     install_signal_action(signal, SignalAction::Ignore, ignored_signal_placeholder)
 }
 
@@ -2536,14 +2537,16 @@ impl Drop for BlockedSignals {
         if SIGNAL_BLOCK_DEPTH.fetch_sub(1, AtomicOrdering::AcqRel) == 1 {
             for signal in 1..SIGNAL_COUNT {
                 if PENDING_SIGNALS[signal].swap(0, AtomicOrdering::AcqRel) != 0 {
-                    let _ = dispatch_signal(signal as i32);
+                    let signal =
+                        Signal::new(signal as i32).expect("pending signal indices start at one");
+                    let _ = dispatch_signal(signal);
                 }
             }
         }
     }
 }
 
-pub fn signal_is_blocked(_signal: i32) -> std::io::Result<bool> {
+pub fn signal_is_blocked(_signal: Signal) -> std::io::Result<bool> {
     Ok(SIGNAL_BLOCK_DEPTH.load(AtomicOrdering::Acquire) != 0)
 }
 
@@ -2554,25 +2557,25 @@ pub fn unblock_all_signals() -> std::io::Result<()> {
 
 const SIGNAL_EXIT_BASE: u32 = 0xe000_0000;
 
-pub fn send_signal(target: ProcessTarget, signal: i32) -> std::io::Result<()> {
+pub fn send_signal(target: ProcessTarget, request: SignalRequest) -> std::io::Result<()> {
     match target {
-        ProcessTarget::Process(process) => send_signal_to_process(process, signal),
-        ProcessTarget::CurrentProcessGroup => raise_signal(signal),
+        ProcessTarget::Process(process) => send_signal_to_process(process, request),
+        ProcessTarget::CurrentProcessGroup => match request {
+            SignalRequest::Deliver(signal) => raise_signal(signal),
+            SignalRequest::Probe => Err(std::io::Error::from(std::io::ErrorKind::InvalidInput)),
+        },
         ProcessTarget::ProcessGroup(group) => send_signal_to_process(
             ProcessId::new(group.get()).expect("a process group leader is a process identity"),
-            signal,
+            request,
         ),
         ProcessTarget::AllProcesses => Err(std::io::Error::from(std::io::ErrorKind::InvalidInput)),
     }
 }
 
-fn send_signal_to_process(pid: ProcessId, signal: i32) -> std::io::Result<()> {
-    if signal < 0 {
-        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
-    }
-    if signal == 0 {
+fn send_signal_to_process(pid: ProcessId, request: SignalRequest) -> std::io::Result<()> {
+    let SignalRequest::Deliver(signal) = request else {
         return process_exists(pid);
-    }
+    };
     let _clone_guard = PROCESS_CLONE_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -2580,7 +2583,7 @@ fn send_signal_to_process(pid: ProcessId, signal: i32) -> std::io::Result<()> {
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(child) = children.get(&pid) {
-        let code = SIGNAL_EXIT_BASE | signal as u32;
+        let code = SIGNAL_EXIT_BASE | signal.number() as u32;
         // SAFETY: the handles are owned by the record for the whole call.
         let succeeded = unsafe {
             child.job.as_ref().map_or_else(
@@ -2609,7 +2612,7 @@ fn send_signal_to_process(pid: ProcessId, signal: i32) -> std::io::Result<()> {
     }
     // SAFETY: OpenProcess returned one owned handle.
     let process = unsafe { OwnedHandle::from_raw_handle(raw.cast()) };
-    let code = SIGNAL_EXIT_BASE | signal as u32;
+    let code = SIGNAL_EXIT_BASE | signal.number() as u32;
     // SAFETY: `process` remains live for this call.
     if unsafe { TerminateProcess(process.as_raw_handle() as HANDLE, code) } == 0 {
         Err(std::io::Error::last_os_error())
@@ -2630,14 +2633,14 @@ fn process_exists(pid: ProcessId) -> std::io::Result<()> {
     }
 }
 
-pub fn raise_signal(signal: i32) -> std::io::Result<()> {
-    if signal <= 0 || signal as usize >= SIGNAL_COUNT {
+pub fn raise_signal(signal: Signal) -> std::io::Result<()> {
+    if signal.number() as usize >= SIGNAL_COUNT {
         return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
     }
     if dispatch_signal(signal) {
         Ok(())
     } else {
-        exit_immediately(128 + signal)
+        exit_immediately(128 + signal.number())
     }
 }
 
@@ -2646,7 +2649,7 @@ pub fn send_continue_to_process_group(_process_group: ProcessGroupId) -> std::io
 }
 
 pub fn terminate_with_interrupt() -> ! {
-    exit_immediately(128 + interrupt_signal())
+    exit_immediately(128 + interrupt_signal().number())
 }
 
 pub fn configure_here_document_writer_signals() {
@@ -3068,36 +3071,16 @@ pub fn set_foreground_process_group(
     Ok(())
 }
 
-fn encoded_wait_status(exit_code: u32) -> i32 {
+fn decode_child_status(exit_code: u32) -> ChildStatus {
     if exit_code & 0xff00_0000 == SIGNAL_EXIT_BASE {
-        (exit_code & 0x7f) as i32
+        ChildStatus::Signaled {
+            signal: Signal::new((exit_code & 0x7f) as i32)
+                .expect("synthetic signal exit codes contain a positive signal"),
+            core_dumped: false,
+        }
     } else {
-        ((exit_code & 0xff) << 8) as i32
+        ChildStatus::Exited((exit_code & 0xff) as u8)
     }
-}
-
-pub fn wait_status_is_stopped(_status: i32) -> bool {
-    false
-}
-
-pub fn wait_status_is_exited(status: i32) -> bool {
-    status & 0x7f == 0
-}
-
-pub fn wait_status_exit_code(status: i32) -> i32 {
-    (status >> 8) & 0xff
-}
-
-pub fn wait_status_stop_signal(_status: i32) -> i32 {
-    0
-}
-
-pub fn wait_status_term_signal(status: i32) -> i32 {
-    status & 0x7f
-}
-
-pub fn wait_status_core_dumped(_status: i32) -> bool {
-    false
 }
 
 fn accumulate_child_times(process: HANDLE) {
@@ -3113,7 +3096,7 @@ fn accumulate_child_times(process: HANDLE) {
     }
 }
 
-fn reap_ready_child() -> std::io::Result<Option<(ProcessId, i32)>> {
+fn reap_ready_child() -> std::io::Result<Option<(ProcessId, ChildStatus)>> {
     let owner = std::thread::current().id();
     let _clone_guard = PROCESS_CLONE_LOCK
         .lock()
@@ -3147,13 +3130,13 @@ fn reap_ready_child() -> std::io::Result<Option<(ProcessId, i32)>> {
         return Err(std::io::Error::last_os_error());
     }
     accumulate_child_times(child.process.as_raw_handle() as HANDLE);
-    Ok(Some((pid, encoded_wait_status(code))))
+    Ok(Some((pid, decode_child_status(code))))
 }
 
 pub fn wait_for_any_child(
     nonblocking: bool,
     _report_stopped: bool,
-) -> std::io::Result<Option<(ProcessId, i32)>> {
+) -> std::io::Result<Option<(ProcessId, ChildStatus)>> {
     let owner = std::thread::current().id();
     loop {
         if let Some(child) = reap_ready_child()? {
@@ -3193,10 +3176,11 @@ pub fn run_in_child(body: impl FnOnce()) -> std::io::Result<i32> {
                 continue;
             };
             if reaped == pid {
-                return Ok(if wait_status_is_exited(status) {
-                    wait_status_exit_code(status)
-                } else {
-                    128 + wait_status_term_signal(status)
+                return Ok(match status {
+                    ChildStatus::Exited(code) => i32::from(code),
+                    ChildStatus::Signaled { signal, .. } => 128 + signal.number(),
+                    ChildStatus::Stopped(signal) => 128 + signal.number(),
+                    ChildStatus::Continued => 0,
                 });
             }
         },

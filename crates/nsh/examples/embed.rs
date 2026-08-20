@@ -126,11 +126,11 @@ fn expand_a_word() -> Result<(), Error> {
 /// rather than something a handler would have to clone.
 static SINK: OnceLock<SignalSink> = OnceLock::new();
 
-extern "C" fn on_signal(signo: i32) {
+fn on_signal(signal: nsh_platform::Signal) {
     if let Some(sink) = SINK.get() {
         // The only thing a handler may do, and the whole of what it may
         // do. Everything behind it is two atomics and three stores.
-        sink.raise(signo);
+        sink.raise(signal.number());
     }
 }
 
@@ -143,15 +143,17 @@ struct FrontendHost;
 
 impl Host for FrontendHost {
     fn attach(&mut self, sink: SignalSink) {
-        // Stored where the `extern "C"` handler can reach it. The handler
-        // does nothing but `sink.raise(signo)`.
+        // Stored where the platform's signal trampoline can reach it. The
+        // typed callback does nothing but report the signal to the sink.
         let _ = SINK.set(sink);
     }
 
     fn signal(&mut self, signal: Signal) -> io::Result<Disposition> {
         // `sigaction(signo, NULL, &old)`. The shell needs the inherited
         // value to reproduce dash's "ignored on entry stays ignored".
-        nsh_platform::signal_action(signal.number()).map(|action| match action {
+        let signal = nsh_platform::Signal::new(signal.number())
+            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+        nsh_platform::signal_action(signal).map(|action| match action {
             nsh_platform::SignalAction::Ignore => Disposition::Ignore,
             nsh_platform::SignalAction::Default => Disposition::Default,
             nsh_platform::SignalAction::Catch => Disposition::Catch,
@@ -167,7 +169,9 @@ impl Host for FrontendHost {
             Disposition::Ignore => nsh_platform::SignalAction::Ignore,
             Disposition::Default => nsh_platform::SignalAction::Default,
         };
-        nsh_platform::install_signal_action(signal.number(), action, on_signal)
+        let signal = nsh_platform::Signal::new(signal.number())
+            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+        nsh_platform::install_signal_action(signal, action, on_signal)
     }
 
     fn may_replace_process(&mut self) -> bool {

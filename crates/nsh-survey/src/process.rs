@@ -259,7 +259,7 @@ pub(crate) fn run(request: &Request<'_>) -> Result<Output> {
             timed_out = true;
             let signalled = nsh_platform::send_signal(
                 nsh_platform::ProcessTarget::Process(child_pid),
-                nsh_platform::termination_signal(),
+                nsh_platform::SignalRequest::Deliver(nsh_platform::termination_signal()),
             )
             .is_ok();
             if !signalled {

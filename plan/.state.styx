@@ -5095,4 +5095,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.process-identity}
     )}
+    {id type-platform-signal-wait-api, covered_rules (
+        idiom.signal-wait
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.signal-wait}
+    )}
 )

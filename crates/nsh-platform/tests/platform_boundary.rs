@@ -180,11 +180,16 @@ fn process_identities_are_typed() {
     ];
     assert_eq!(targets.len(), 4);
 
-    let _: fn(nsh_platform::ProcessTarget, i32) -> std::io::Result<()> = nsh_platform::send_signal;
+    let _: fn(nsh_platform::ProcessTarget, nsh_platform::SignalRequest) -> std::io::Result<()> =
+        nsh_platform::send_signal;
     let _: fn() -> nsh_platform::ProcessId = nsh_platform::current_process_id;
     let _: fn() -> Option<nsh_platform::ProcessId> = nsh_platform::parent_process_id;
     let _: fn() -> Option<nsh_platform::ProcessGroupId> = nsh_platform::current_process_group;
-    let _: fn(bool, bool) -> std::io::Result<Option<(nsh_platform::ProcessId, i32)>> =
+    let _: fn(
+        bool,
+        bool,
+    )
+        -> std::io::Result<Option<(nsh_platform::ProcessId, nsh_platform::ChildStatus)>> =
         nsh_platform::wait_for_any_child;
     let _: fn(nsh_platform::ProcessSelector, nsh_platform::ProcessGroupId) -> std::io::Result<()> =
         nsh_platform::set_process_group;
@@ -225,6 +230,75 @@ fn process_identities_are_typed() {
     assert!(
         violations.is_empty(),
         "core process identities are raw integers:\n{}",
+        violations.join("\n"),
+    );
+}
+
+// [spec:nsh:def:idiom.signal-wait/test]
+#[test]
+fn signal_and_wait_values_are_typed() {
+    assert!(nsh_platform::Signal::new(0).is_none());
+    assert!(nsh_platform::Signal::new(-1).is_none());
+
+    let interrupt = nsh_platform::interrupt_signal();
+    assert!(interrupt.number() > 0);
+    let requests = [
+        nsh_platform::SignalRequest::Probe,
+        nsh_platform::SignalRequest::Deliver(interrupt),
+    ];
+    assert_eq!(requests.len(), 2);
+
+    let statuses = [
+        nsh_platform::ChildStatus::Exited(0),
+        nsh_platform::ChildStatus::Signaled {
+            signal: interrupt,
+            core_dumped: false,
+        },
+        nsh_platform::ChildStatus::Stopped(interrupt),
+        nsh_platform::ChildStatus::Continued,
+    ];
+    assert_eq!(statuses.len(), 4);
+
+    let _: fn(nsh_platform::ProcessTarget, nsh_platform::SignalRequest) -> std::io::Result<()> =
+        nsh_platform::send_signal;
+    let _: fn(nsh_platform::Signal) -> std::io::Result<nsh_platform::SignalAction> =
+        nsh_platform::signal_action;
+    let _: fn(
+        bool,
+        bool,
+    )
+        -> std::io::Result<Option<(nsh_platform::ProcessId, nsh_platform::ChildStatus)>> =
+        nsh_platform::wait_for_any_child;
+
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for source in [
+        "crates/nsh-platform/src/unix.rs",
+        "crates/nsh-platform/src/windows.rs",
+    ] {
+        let text = std::fs::read_to_string(workspace.join(source)).unwrap();
+        for fragment in [
+            "pub fn interrupt_signal() -> i32",
+            "pub fn send_signal(target: ProcessTarget, signal: i32",
+            "pub fn signal_action(signal: i32",
+            "pub fn wait_status_",
+            "Option<(ProcessId, i32)>",
+        ] {
+            assert!(
+                !text.contains(fragment),
+                "{source} exposes raw signal/wait API fragment {fragment:?}",
+            );
+        }
+    }
+
+    let mut violations = Vec::new();
+    inspect_tree(
+        &workspace.join("crates/nsh/src"),
+        &["wait_status_"],
+        &mut violations,
+    );
+    assert!(
+        violations.is_empty(),
+        "core decodes raw wait statuses:\n{}",
         violations.join("\n"),
     );
 }

@@ -99,7 +99,7 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 
     if list == 0 && signo < 0 {
-        signo = nsh_platform::termination_signal();
+        signo = nsh_platform::termination_signal().number();
     }
 
     if (((signo < 0 || operands.is_empty()) as c_int) ^ list) != 0 {
@@ -164,7 +164,12 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             };
             process_target(value)
         };
-        if let Err(error) = nsh_platform::send_signal(target, signo) {
+        let request = match nsh_platform::Signal::new(signo) {
+            Some(signal) => nsh_platform::SignalRequest::Deliver(signal),
+            None if signo == 0 => nsh_platform::SignalRequest::Probe,
+            None => unreachable!("kill signal operands are validated before delivery"),
+        };
+        if let Err(error) = nsh_platform::send_signal(target, request) {
             let mut message = sh.locale.error_message(&error).into_bytes();
             message.push(b'\n');
             sh.sh_warnx(&message);

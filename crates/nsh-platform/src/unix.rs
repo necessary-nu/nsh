@@ -654,48 +654,48 @@ pub fn is_exec_format_error(error: &std::io::Error) -> bool {
     error.raw_os_error() == Some(rustix::io::Errno::NOEXEC.raw_os_error())
 }
 
-pub fn interrupt_signal() -> i32 {
-    rustix::process::Signal::INT.as_raw()
+pub fn interrupt_signal() -> Signal {
+    Signal::new(rustix::process::Signal::INT.as_raw()).expect("SIGINT is positive")
 }
 
-pub fn quit_signal() -> i32 {
-    rustix::process::Signal::QUIT.as_raw()
+pub fn quit_signal() -> Signal {
+    Signal::new(rustix::process::Signal::QUIT.as_raw()).expect("SIGQUIT is positive")
 }
 
-pub fn termination_signal() -> i32 {
-    rustix::process::Signal::TERM.as_raw()
+pub fn termination_signal() -> Signal {
+    Signal::new(rustix::process::Signal::TERM.as_raw()).expect("SIGTERM is positive")
 }
 
-pub fn kill_signal() -> i32 {
-    rustix::process::Signal::KILL.as_raw()
+pub fn kill_signal() -> Signal {
+    Signal::new(rustix::process::Signal::KILL.as_raw()).expect("SIGKILL is positive")
 }
 
-pub fn child_signal() -> i32 {
-    rustix::process::Signal::CHILD.as_raw()
+pub fn child_signal() -> Signal {
+    Signal::new(rustix::process::Signal::CHILD.as_raw()).expect("SIGCHLD is positive")
 }
 
-pub fn pipe_signal() -> i32 {
-    rustix::process::Signal::PIPE.as_raw()
+pub fn pipe_signal() -> Signal {
+    Signal::new(rustix::process::Signal::PIPE.as_raw()).expect("SIGPIPE is positive")
 }
 
-pub fn hangup_signal() -> i32 {
-    rustix::process::Signal::HUP.as_raw()
+pub fn hangup_signal() -> Signal {
+    Signal::new(rustix::process::Signal::HUP.as_raw()).expect("SIGHUP is positive")
 }
 
-pub fn terminal_stop_signal() -> i32 {
-    rustix::process::Signal::TSTP.as_raw()
+pub fn terminal_stop_signal() -> Signal {
+    Signal::new(rustix::process::Signal::TSTP.as_raw()).expect("SIGTSTP is positive")
 }
 
-pub fn terminal_input_signal() -> i32 {
-    rustix::process::Signal::TTIN.as_raw()
+pub fn terminal_input_signal() -> Signal {
+    Signal::new(rustix::process::Signal::TTIN.as_raw()).expect("SIGTTIN is positive")
 }
 
-pub fn terminal_output_signal() -> i32 {
-    rustix::process::Signal::TTOU.as_raw()
+pub fn terminal_output_signal() -> Signal {
+    Signal::new(rustix::process::Signal::TTOU.as_raw()).expect("SIGTTOU is positive")
 }
 
-pub fn continue_signal() -> i32 {
-    rustix::process::Signal::CONT.as_raw()
+pub fn continue_signal() -> Signal {
+    Signal::new(rustix::process::Signal::CONT.as_raw()).expect("SIGCONT is positive")
 }
 
 fn raw_process_id(process: ProcessId) -> std::io::Result<i32> {
@@ -706,15 +706,19 @@ fn raw_process_group(group: ProcessGroupId) -> std::io::Result<i32> {
     i32::try_from(group.get()).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))
 }
 
-pub fn send_signal(target: ProcessTarget, signal: i32) -> std::io::Result<()> {
+pub fn send_signal(target: ProcessTarget, request: SignalRequest) -> std::io::Result<()> {
     let target = match target {
         ProcessTarget::Process(process) => raw_process_id(process)?,
         ProcessTarget::CurrentProcessGroup => 0,
         ProcessTarget::ProcessGroup(group) => -raw_process_group(group)?,
         ProcessTarget::AllProcesses => -1,
     };
+    let signal = match request {
+        SignalRequest::Probe => 0,
+        SignalRequest::Deliver(signal) => signal.number(),
+    };
     // SAFETY: `kill` consumes only the scalar target encoding assembled from
-    // validated identities above and a signal number.
+    // validated identities above and a typed delivery or probe request.
     if unsafe { libc::kill(target, signal) } < 0 {
         Err(std::io::Error::last_os_error())
     } else {
@@ -722,8 +726,8 @@ pub fn send_signal(target: ProcessTarget, signal: i32) -> std::io::Result<()> {
     }
 }
 
-pub fn raise_signal(signal: i32) -> std::io::Result<()> {
-    let signal = rustix::process::Signal::from_named_raw(signal)
+pub fn raise_signal(signal: Signal) -> std::io::Result<()> {
+    let signal = rustix::process::Signal::from_named_raw(signal.number())
         .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
     rustix::process::kill_process(rustix::process::getpid(), signal).map_err(std::io::Error::from)
 }
@@ -733,12 +737,6 @@ pub fn send_continue_to_process_group(process_group: ProcessGroupId) -> std::io:
         .expect("a validated positive process group fits pid_t");
     rustix::process::kill_process_group(process_group, rustix::process::Signal::CONT)
         .map_err(std::io::Error::from)
-}
-
-pub fn wait_status_is_stopped(status: i32) -> bool {
-    std::process::ExitStatus::from_raw(status)
-        .stopped_signal()
-        .is_some()
 }
 
 pub fn terminate_with_interrupt() -> ! {
@@ -821,11 +819,30 @@ pub enum SignalAction {
     Catch,
 }
 
-pub fn signal_action(signal: i32) -> std::io::Result<SignalAction> {
+static SIGNAL_HANDLERS: [AtomicUsize; SIGNAL_COUNT] = [const { AtomicUsize::new(0) }; SIGNAL_COUNT];
+
+extern "C" fn signal_trampoline(number: i32) {
+    let Some(signal) = Signal::new(number) else {
+        return;
+    };
+    let Some(slot) = SIGNAL_HANDLERS.get(number as usize) else {
+        return;
+    };
+    let address = slot.load(AtomicOrdering::Relaxed);
+    if address == 0 {
+        return;
+    }
+    // SAFETY: only `install_signal_action` stores addresses in this table,
+    // and its handler parameter has this exact function type.
+    let handler: fn(Signal) = unsafe { std::mem::transmute(address) };
+    handler(signal);
+}
+
+pub fn signal_action(signal: Signal) -> std::io::Result<SignalAction> {
     let mut action = std::mem::MaybeUninit::<libc::sigaction>::uninit();
     // SAFETY: a null new action queries the disposition and initializes the
     // output record on success.
-    if unsafe { libc::sigaction(signal, std::ptr::null(), action.as_mut_ptr()) } < 0 {
+    if unsafe { libc::sigaction(signal.number(), std::ptr::null(), action.as_mut_ptr()) } < 0 {
         return Err(std::io::Error::last_os_error());
     }
     // SAFETY: the successful query initialized the record.
@@ -887,22 +904,26 @@ impl Drop for BlockedSignals {
 }
 
 pub fn install_signal_action(
-    signal: i32,
+    signal: Signal,
     action: SignalAction,
-    handler: extern "C" fn(i32),
+    handler: fn(Signal),
 ) -> std::io::Result<()> {
-    // SAFETY: the action is fully initialized, the handler has the platform
-    // signal ABI and static lifetime, and sigaction copies the record.
+    let Some(slot) = SIGNAL_HANDLERS.get(signal.number() as usize) else {
+        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+    };
+    slot.store(handler as usize, AtomicOrdering::Relaxed);
+    // SAFETY: the action is fully initialized, `signal_trampoline` has the
+    // platform signal ABI and static lifetime, and sigaction copies the record.
     unsafe {
         let mut raw: libc::sigaction = std::mem::zeroed();
         raw.sa_sigaction = match action {
             SignalAction::Default => libc::SIG_DFL,
             SignalAction::Ignore => libc::SIG_IGN,
-            SignalAction::Catch => handler as *const () as usize,
+            SignalAction::Catch => signal_trampoline as *const () as usize,
         };
         raw.sa_flags = 0;
         libc::sigfillset(&mut raw.sa_mask);
-        if libc::sigaction(signal, &raw, std::ptr::null_mut()) < 0 {
+        if libc::sigaction(signal.number(), &raw, std::ptr::null_mut()) < 0 {
             Err(std::io::Error::last_os_error())
         } else {
             Ok(())
@@ -910,15 +931,15 @@ pub fn install_signal_action(
     }
 }
 
-extern "C" fn ignored_signal_placeholder(_: i32) {}
+fn ignored_signal_placeholder(_: Signal) {}
 
-pub fn ignore_signal(signal: i32) -> std::io::Result<()> {
+pub fn ignore_signal(signal: Signal) -> std::io::Result<()> {
     // `SIG_IGN` needs no callback; the placeholder is never installed.
     install_signal_action(signal, SignalAction::Ignore, ignored_signal_placeholder)
 }
 
 /// Whether `signal` is blocked in the calling thread's current mask.
-pub fn signal_is_blocked(signal: i32) -> std::io::Result<bool> {
+pub fn signal_is_blocked(signal: Signal) -> std::io::Result<bool> {
     // SAFETY: a null new mask queries the current mask and initializes
     // `current`; `sigismember` only reads that initialized set.
     unsafe {
@@ -926,7 +947,7 @@ pub fn signal_is_blocked(signal: i32) -> std::io::Result<bool> {
         if libc::sigprocmask(libc::SIG_SETMASK, std::ptr::null(), &mut current) < 0 {
             return Err(std::io::Error::last_os_error());
         }
-        let result = libc::sigismember(&current, signal);
+        let result = libc::sigismember(&current, signal.number());
         if result < 0 {
             Err(std::io::Error::last_os_error())
         } else {
@@ -1551,37 +1572,32 @@ pub fn set_foreground_process_group(
     }
 }
 
-pub fn wait_status_is_exited(status: i32) -> bool {
-    std::process::ExitStatus::from_raw(status).code().is_some()
-}
-
-pub fn wait_status_exit_code(status: i32) -> i32 {
-    std::process::ExitStatus::from_raw(status)
-        .code()
-        .unwrap_or(0)
-}
-
-pub fn wait_status_stop_signal(status: i32) -> i32 {
-    std::process::ExitStatus::from_raw(status)
-        .stopped_signal()
-        .unwrap_or(0)
-}
-
-pub fn wait_status_term_signal(status: i32) -> i32 {
-    std::process::ExitStatus::from_raw(status)
-        .signal()
-        .unwrap_or(0)
-}
-
-pub fn wait_status_core_dumped(status: i32) -> bool {
-    std::process::ExitStatus::from_raw(status).core_dumped()
+fn decode_child_status(status: rustix::process::WaitStatus) -> ChildStatus {
+    if let Some(code) = status.exit_status() {
+        return ChildStatus::Exited(u8::try_from(code).expect("wait exit status fits eight bits"));
+    }
+    if let Some(number) = status.stopping_signal() {
+        return ChildStatus::Stopped(
+            Signal::new(number).expect("a stopping signal number is positive"),
+        );
+    }
+    if status.continued() {
+        return ChildStatus::Continued;
+    }
+    let number = status
+        .terminating_signal()
+        .expect("wait returned a recognized child state");
+    ChildStatus::Signaled {
+        signal: Signal::new(number).expect("a terminating signal number is positive"),
+        core_dumped: std::process::ExitStatus::from_raw(status.as_raw()).core_dumped(),
+    }
 }
 
 /// Wait for any child. `None` is the successful nonblocking "not yet" case.
 pub fn wait_for_any_child(
     nonblocking: bool,
     report_stopped: bool,
-) -> std::io::Result<Option<(ProcessId, i32)>> {
+) -> std::io::Result<Option<(ProcessId, ChildStatus)>> {
     let mut options = rustix::process::WaitOptions::empty();
     if nonblocking {
         options.insert(rustix::process::WaitOptions::NOHANG);
@@ -1595,7 +1611,7 @@ pub fn wait_for_any_child(
                 (
                     ProcessId::new(pid.as_raw_pid() as u32)
                         .expect("wait returned a positive child identity"),
-                    status.as_raw(),
+                    decode_child_status(status),
                 )
             })
         })
@@ -1622,10 +1638,11 @@ pub fn run_in_child(body: impl FnOnce()) -> std::io::Result<i32> {
                     Err(error) => return Err(std::io::Error::from(error)),
                 }
             };
-            Ok(if let Some(code) = status.exit_status() {
-                code
-            } else {
-                128 + status.terminating_signal().unwrap_or(0)
+            Ok(match decode_child_status(status) {
+                ChildStatus::Exited(code) => i32::from(code),
+                ChildStatus::Signaled { signal, .. } => 128 + signal.number(),
+                ChildStatus::Stopped(signal) => 128 + signal.number(),
+                ChildStatus::Continued => 0,
             })
         }
     }

@@ -6,7 +6,7 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use core::fmt;
-use core::num::NonZeroU32;
+use core::num::{NonZeroI32, NonZeroU32};
 
 /// The positive identity of one operating-system process.
 // [spec:nsh:def:idiom.process-identity]
@@ -85,6 +85,48 @@ pub enum ProcessTarget {
 pub enum ForkResult {
     Child,
     Parent(ProcessId),
+}
+
+/// A positive operating-system signal number.
+// [spec:nsh:def:idiom.signal-wait]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct Signal(NonZeroI32);
+
+impl Signal {
+    pub const fn new(number: i32) -> Option<Self> {
+        match NonZeroI32::new(number) {
+            Some(number) if number.is_positive() => Some(Self(number)),
+            _ => None,
+        }
+    }
+
+    pub const fn number(self) -> i32 {
+        self.0.get()
+    }
+}
+
+impl fmt::Display for Signal {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.number().fmt(formatter)
+    }
+}
+
+/// What a `kill`-style operation requests. Signal zero probes for a process;
+/// it is not represented as an invalid `Signal`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SignalRequest {
+    Probe,
+    Deliver(Signal),
+}
+
+/// The decoded state returned by waiting for a child process.
+// [spec:nsh:def:idiom.signal-wait]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ChildStatus {
+    Exited(u8),
+    Signaled { signal: Signal, core_dumped: bool },
+    Stopped(Signal),
+    Continued,
 }
 
 /// Portable error cases synthesized by the shell rather than returned by an

@@ -847,12 +847,15 @@ mod tests {
         let got = restore_handler_expandarg(
             &mut sh,
             Some(Error::Interrupted {
-                signal: crate::status::Signal::from_raw(nsh_platform::interrupt_signal()),
+                signal: crate::status::Signal::from_raw(nsh_platform::interrupt_signal().number()),
             }),
         )
         .expect("an interrupt must not be swallowed by this frame");
         assert!(got.is_interrupt());
-        assert_eq!(got.status(), nsh_platform::interrupt_signal() + 128);
+        assert_eq!(
+            got.status(),
+            nsh_platform::interrupt_signal().number() + 128
+        );
     }
 
     /// Opening directly into the target means the target was closed before

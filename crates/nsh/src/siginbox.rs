@@ -149,7 +149,9 @@ impl SignalSink {
     /// be the number the handler was invoked with.
     #[inline]
     pub fn raise(&self, signo: c_int) {
-        crate::trap::onsig(signo);
+        if let Some(signal) = nsh_platform::Signal::new(signo) {
+            crate::trap::onsig(signal);
+        }
     }
 }
 
