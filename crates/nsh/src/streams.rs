@@ -43,9 +43,9 @@ impl Streams {
     ) -> std::io::Result<Streams> {
         Ok(Streams {
             owned: Some([
-                SharedFd::from_backing(nsh_platform::duplicate_cloexec(&stdin, 10)?),
-                SharedFd::from_backing(nsh_platform::duplicate_cloexec(&stdout, 10)?),
-                SharedFd::from_backing(nsh_platform::duplicate_cloexec(&stderr, 10)?),
+                SharedFd::from(nsh_platform::duplicate_cloexec(&stdin, 10)?),
+                SharedFd::from(nsh_platform::duplicate_cloexec(&stdout, 10)?),
+                SharedFd::from(nsh_platform::duplicate_cloexec(&stderr, 10)?),
             ]),
         })
     }
@@ -92,8 +92,7 @@ impl Streams {
 
         let mut result: [Option<SharedFd>; crate::fd::SLOT_COUNT] = std::array::from_fn(|_| None);
         for (number, slot) in result.iter_mut().enumerate() {
-            *slot =
-                nsh_platform::snapshot_process_fd(number as i32, 10)?.map(SharedFd::from_backing);
+            *slot = nsh_platform::snapshot_process_fd(number as i32, 10)?.map(SharedFd::from);
         }
         Ok(result)
     }
@@ -137,19 +136,23 @@ impl crate::context::Shell {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // [spec:nsh:req:idiom.no-raw-fd-core/test]
     #[test]
-    fn supplied_streams_own_hidden_fds() {
+    fn supplied_streams_outlive_source() {
         let source = nsh_platform::anonymous_file("streams-owned").unwrap();
-        let source_number = source.number();
         let streams = Streams::from_fds(&source, &source, &source).unwrap();
         let descriptors = streams.initial_descriptors().unwrap();
         drop(source);
 
         for descriptor in &descriptors[..3] {
             let descriptor = descriptor.as_ref().expect("supplied stream is open");
-            assert_ne!(descriptor.number(), source_number);
-            assert!(descriptor.number() >= 10);
+            nsh_platform::write_all(descriptor, b"x").unwrap();
         }
+        assert_eq!(
+            nsh_platform::take_file_contents(descriptors[0].as_ref().unwrap()).unwrap(),
+            b"xxx"
+        );
         assert!(descriptors[3..].iter().all(Option::is_none));
     }
 

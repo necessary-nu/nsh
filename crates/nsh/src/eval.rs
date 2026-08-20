@@ -958,6 +958,7 @@ fn descriptor_source(sh: &mut Shell, text: &BStr) -> Result<Option<c_int>, Error
 // [spec:posix:req:cmd.pipeline-foreground-wait]
 // [spec:posix:req:cmd.pipeline-exit-status]
 // [spec:posix:req:cmd.pipeline-pipefail-setting-at-start]
+// [spec:nsh:req:idiom.no-raw-fd-core]
 fn evalpipe(sh: &mut Shell, pipeline: &Pipeline, flags: c_int) -> Result<Flow, Error> {
     let jp: usize;
     let pipelen: c_int;
@@ -1001,17 +1002,15 @@ fn evalpipe(sh: &mut Shell, pipeline: &Pipeline, flags: c_int) -> Result<Flow, E
                 pipe.write
             });
             if let Some(previous) = prevfd.take() {
-                let number = previous.number();
                 crate::input::reset_input(sh);
                 sh.fds
                     .install_owned(0, previous)
-                    .map_err(|error| crate::redir::descriptor_error(sh, number, error))?;
+                    .map_err(|error| crate::redir::descriptor_error(sh, 0, error))?;
             }
             if let Some(write) = write {
-                let number = write.number();
                 sh.fds
                     .install_owned(1, write)
-                    .map_err(|error| crate::redir::descriptor_error(sh, number, error))?;
+                    .map_err(|error| crate::redir::descriptor_error(sh, 1, error))?;
             }
             /* In a forked child, which may not return through the
              * parent's frames; see `evalsubshell`. */
@@ -1060,10 +1059,9 @@ pub fn evalbackcmd(sh: &mut Shell, n: Option<&Node>, result: &mut backcmd) -> Re
         ) {
             FORCEINTON(sh);
             drop(pipe.read);
-            let number = pipe.write.number();
             sh.fds
                 .install_owned(1, pipe.write)
-                .map_err(|error| crate::redir::descriptor_error(sh, number, error))?;
+                .map_err(|error| crate::redir::descriptor_error(sh, 1, error))?;
             crate::expand::ifsfree(&mut sh.expand);
             /* The one forked child that cannot hand its `Flow` back: it
              * sits under the whole expansion chain, which has no business

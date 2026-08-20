@@ -5110,4 +5110,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.process-group-zero-state}
     )}
+    {id remove-core-raw-fd-observation, covered_rules (
+        idiom.no-raw-fd-core
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.no-raw-fd-core}
+    )}
 )

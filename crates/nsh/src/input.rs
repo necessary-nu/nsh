@@ -1141,6 +1141,7 @@ fn install_input_file(sh: &mut Shell, mut fd: Descriptor, flags: c_int) -> Resul
 
 // [spec:dash:def:input.setinputfd-fn]
 // [spec:dash:sem:input.setinputfd-fn]
+// [spec:nsh:req:idiom.no-raw-fd-core]
 fn setinputfd(sh: &mut Shell, fd: Descriptor, push: c_int, dot_operand: bool) {
     pushfile(sh);
     if push == 0 {
@@ -1148,7 +1149,7 @@ fn setinputfd(sh: &mut Shell, fd: Descriptor, push: c_int, dot_operand: bool) {
     }
     let pf = cur_pf(sh);
     pf.uses_stdin = false;
-    pf.owned_fd = Some(crate::fd::SharedFd::from_backing(fd));
+    pf.owned_fd = Some(crate::fd::SharedFd::from(fd));
     pf.dot_operand = dot_operand;
     pf.buf = vec![0u8; IBUFSIZ];
     pf.pos = 0;

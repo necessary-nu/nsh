@@ -490,6 +490,7 @@ pub(crate) fn descriptor_error(sh: &mut Shell, source: c_int, error: std::io::Er
 // [spec:dash:sem:redir.dupredirect-fn]
 // [spec:dash:def:redir.sh-dup2-fn]
 // [spec:dash:sem:redir.sh-dup2-fn]
+// [spec:nsh:req:idiom.no-raw-fd-core]
 fn install_redirect(sh: &mut Shell, target: c_int, source: RedirectSource) -> Result<(), Error> {
     match source {
         RedirectSource::Noop => Ok(()),
@@ -503,13 +504,11 @@ fn install_redirect(sh: &mut Shell, target: c_int, source: RedirectSource) -> Re
             .replace(target, Some(source))
             .map(|_| ())
             .map_err(|error| descriptor_error(sh, target, error)),
-        RedirectSource::Owned(source) => {
-            let number = source.number();
-            sh.fds
-                .install_owned(target, source)
-                .map(|_| ())
-                .map_err(|error| descriptor_error(sh, number, error))
-        }
+        RedirectSource::Owned(source) => sh
+            .fds
+            .install_owned(target, source)
+            .map(|_| ())
+            .map_err(|error| descriptor_error(sh, target, error)),
     }
 }
 
@@ -519,14 +518,12 @@ fn install_redirect(sh: &mut Shell, target: c_int, source: RedirectSource) -> Re
 pub fn sh_pipe(sh: &mut crate::context::Shell, memfd: bool) -> Result<(Pipe, bool), Error> {
     if memfd && USE_MEMFD_CREATE != 0 {
         if let Ok(read_fd) = nsh_platform::anonymous_file("dash") {
-            let source = read_fd.number();
             let write_fd = nsh_platform::duplicate_fd(&read_fd)
-                .map_err(|error| descriptor_error(sh, source, error))?;
+                .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
             let read = nsh_platform::move_fd_cloexec(read_fd, crate::fd::SLOT_COUNT as i32)
-                .map_err(|error| descriptor_error(sh, source, error))?;
-            let source = write_fd.number();
+                .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
             let write = nsh_platform::move_fd_cloexec(write_fd, crate::fd::SLOT_COUNT as i32)
-                .map_err(|error| descriptor_error(sh, source, error))?;
+                .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
             return Ok((Pipe { read, write }, true));
         }
     }
@@ -684,8 +681,10 @@ pub fn mkinit_forkreset(sh: &mut Shell) {
 // [spec:dash:sem:redir.savefd-fn]
 /// Move an owned descriptor above the shell redirection range.
 pub fn move_fd_above(sh: &mut Shell, fd: Descriptor) -> Result<Descriptor, Error> {
-    let number = fd.number();
-    nsh_platform::move_fd_cloexec(fd, 10).map_err(|error| descriptor_error(sh, number, error))
+    nsh_platform::move_fd_cloexec(fd, 10).map_err(|error| {
+        let message = sh.locale.error_message(&error);
+        sh.sh_error_value(message.as_bytes())
+    })
 }
 
 /// Duplicate a process-table slot above the shell redirection range.

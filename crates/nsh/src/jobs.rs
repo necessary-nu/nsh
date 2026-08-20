@@ -1094,6 +1094,7 @@ fn forkchild_fatal(sh: &mut crate::context::Shell, e: Error) -> ! {
 // [spec:posix:req:shenv.subshell-creation]
 // [spec:posix:req:shenv.subshell-isolation]
 // [spec:posix:req:cmd.async-stdin-devnull]
+// [spec:nsh:req:idiom.no-raw-fd-core]
 fn forkchild(sh: &mut crate::context::Shell, jp: Option<usize>, n: Option<&Node>, mode: c_int) {
     let oldlvl: c_int;
 
@@ -1147,9 +1148,8 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<usize>, n: Option<&Node>
             )
             .unwrap_or_else(|e| forkchild_fatal(sh, e))
             .expect("a mandatory open returns a descriptor");
-            let number = f.number();
             if let Err(error) = sh.fds.install_owned(0, f) {
-                let error = crate::redir::descriptor_error(sh, number, error);
+                let error = crate::redir::descriptor_error(sh, 0, error);
                 forkchild_fatal(sh, error);
             }
             /* Should call reset_input here, but it's harmless

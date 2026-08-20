@@ -17,6 +17,7 @@ pub(crate) const SLOT_COUNT: usize = 10;
 ///
 /// Sharing models `2>&1`: the two logical slots are independently replaceable
 /// while retaining the same underlying open file description and offset.
+// [spec:nsh:req:idiom.no-raw-fd-core]
 #[derive(Clone, Debug)]
 pub(crate) struct SharedFd(Arc<Descriptor>);
 
@@ -26,16 +27,11 @@ impl SharedFd {
         let fd = nsh_platform::move_fd_cloexec(fd, SLOT_COUNT as i32)?;
         Ok(Self(Arc::new(fd)))
     }
+}
 
-    /// Adopt a descriptor already created in the hidden backing range with
-    /// close-on-exec set.
-    pub(crate) fn from_backing(fd: Descriptor) -> Self {
-        debug_assert!(fd.number() >= SLOT_COUNT as i32);
+impl From<Descriptor> for SharedFd {
+    fn from(fd: Descriptor) -> Self {
         Self(Arc::new(fd))
-    }
-
-    pub(crate) fn number(&self) -> i32 {
-        self.0.number()
     }
 }
 
@@ -255,11 +251,11 @@ mod tests {
     }
 
     #[test]
-    fn owned_fd_moves_above_slots() {
+    // [spec:nsh:req:idiom.no-raw-fd-core/test]
+    fn owned_descriptor_remains_usable_after_hiding() {
         let source = nsh_platform::open_null_input().unwrap();
         let shared = SharedFd::from_owned(source).unwrap();
 
-        assert!(shared.number() >= SLOT_COUNT as i32);
         assert_eq!(nsh_platform::read_to_end(&shared).unwrap(), b"");
     }
 

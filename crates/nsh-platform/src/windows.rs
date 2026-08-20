@@ -690,7 +690,8 @@ fn duplicate_at(fd: &impl AsDescriptor, minimum: i32) -> std::io::Result<Descrip
 }
 
 impl Descriptor {
-    pub fn number(&self) -> i32 {
+    // [spec:nsh:req:idiom.no-raw-fd-core]
+    pub(crate) fn number(&self) -> i32 {
         self.number
     }
 

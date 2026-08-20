@@ -11,9 +11,9 @@ use crate::{LimitResource, resource_limit};
 pub struct Descriptor(pub(crate) OwnedFd);
 
 impl Descriptor {
-    /// Return the process-local number used in diagnostics and exact-slot
-    /// operations. Shell code must not use this number for I/O.
-    pub fn number(&self) -> i32 {
+    /// Return the process-local number for private platform operations.
+    // [spec:nsh:req:idiom.no-raw-fd-core]
+    pub(crate) fn number(&self) -> i32 {
         self.0.as_raw_fd()
     }
 
