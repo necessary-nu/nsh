@@ -156,18 +156,18 @@ pub fn record_history_line(
 pub fn histedit(sh: &mut crate::context::Shell) {
     if sh.options.enabled(ShellOption::Interactive) {
         if !history_active(sh) {
-            crate::error::INTOFF(sh);
-            sh.histedit.history = Some(History::new());
-            sh.histedit.history_file = crate::var::lookup_bytes(sh, BStr::new(b"HISTFILE"))
-                .filter(|name| !name.is_empty())
-                .and_then(|name| {
-                    let path = name.try_to_path_buf().ok()?;
-                    let file = nsh_platform::open_history_file(&path).ok()?;
-                    nsh_platform::duplicate_cloexec(&file, LogicalDescriptor::COUNT as i32)
-                        .ok()
-                        .map(nsh_platform::Descriptor::into_file)
-                });
-            crate::error::INTON(sh);
+            crate::error::with_interrupts_deferred(sh, |sh| {
+                sh.histedit.history = Some(History::new());
+                sh.histedit.history_file = crate::var::lookup_bytes(sh, BStr::new(b"HISTFILE"))
+                    .filter(|name| !name.is_empty())
+                    .and_then(|name| {
+                        let path = name.try_to_path_buf().ok()?;
+                        let file = nsh_platform::open_history_file(&path).ok()?;
+                        nsh_platform::duplicate_cloexec(&file, LogicalDescriptor::COUNT as i32)
+                            .ok()
+                            .map(nsh_platform::Descriptor::into_file)
+                    });
+            });
             /* Hoisted out of the argument list, which also takes the
              * shell; see the note in `eval.rs`'s `evalcommand`. */
             let size = crate::var::histsizeval(sh);
@@ -214,34 +214,34 @@ pub fn histedit(sh: &mut crate::context::Shell) {
             && !editing_active(sh)
             && stdin.as_ref().is_some_and(nsh_platform::is_terminal)
         {
-            crate::error::INTOFF(sh);
-            let editor = match (stdin.as_ref(), stderr.as_ref()) {
-                (Some(input), Some(output)) => LineEditor::new(&sh.locale, input, output, mode),
-                _ => Err(std::io::Error::from(std::io::ErrorKind::NotConnected).into()),
-            };
-            match editor {
-                Ok(editor) => sh.histedit.editor = Some(editor),
-                Err(_) => {
-                    sh.histedit.editor = None;
-                    let _ = sh.io.stderr().write_all(b"sh: can't initialize editing\n");
+            crate::error::with_interrupts_deferred(sh, |sh| {
+                let editor = match (stdin.as_ref(), stderr.as_ref()) {
+                    (Some(input), Some(output)) => LineEditor::new(&sh.locale, input, output, mode),
+                    _ => Err(std::io::Error::from(std::io::ErrorKind::NotConnected).into()),
+                };
+                match editor {
+                    Ok(editor) => sh.histedit.editor = Some(editor),
+                    Err(_) => {
+                        sh.histedit.editor = None;
+                        let _ = sh.io.stderr().write_all(b"sh: can't initialize editing\n");
+                    }
                 }
-            }
-            crate::error::INTON(sh);
+            });
         } else if mode.is_none() && editing_active(sh) {
-            crate::error::INTOFF(sh);
-            sh.histedit.editor = None;
-            crate::error::INTON(sh);
+            crate::error::with_interrupts_deferred(sh, |sh| {
+                sh.histedit.editor = None;
+            });
         }
 
         if let (Some(mode), Some(editor)) = (mode, sh.histedit.editor.as_mut()) {
             editor.set_mode(mode);
         }
     } else {
-        crate::error::INTOFF(sh);
-        sh.histedit.editor = None;
-        sh.histedit.history = None;
-        sh.histedit.history_file = None;
-        crate::error::INTON(sh);
+        crate::error::with_interrupts_deferred(sh, |sh| {
+            sh.histedit.editor = None;
+            sh.histedit.history = None;
+            sh.histedit.history_file = None;
+        });
     }
 }
 

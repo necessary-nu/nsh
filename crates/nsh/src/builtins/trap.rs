@@ -12,7 +12,6 @@ use crate::error::Error;
 use bstr::{BStr, BString};
 use std::io::Write;
 
-use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
 use crate::options::Options;
 use crate::trap::{
@@ -103,11 +102,9 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     } else {
         (Some(BString::from(first)), &ap[1..])
     };
-    /* One guard for the whole command, which is the recorded granularity:
-     * `trap 'act' INT TERM HUP` blocks once, not three times. It sits
-     * outside the INTOFF/INTON pair below because that pair is per *word*
-     * -- the design note read it as per-command, and the region it names
-     * is this loop rather than that bracket. */
+    /* One signal-mask guard for the whole command, which is the recorded
+     * granularity: `trap 'act' INT TERM HUP` blocks once, not three times.
+     * Interrupt deferral remains per word inside the loop. */
     let blocked = crate::siginbox::SignalsBlocked::new();
     for word in signals {
         let Some(signal) = decode_signal(word, true) else {
@@ -117,40 +114,41 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             let _ = sh.io.stderr().write_all(&message);
             return Ok(Flow::Done((1).into()));
         };
-        INTOFF(sh);
-        /* The C's `action = savestr(action)` makes the next signal in the
-         * list copy the previous copy; copying the argument word each time
-         * gives the same bytes and leaves `action` pointing at what the
-         * `'-'` test reads. */
-        let mut newtrap = TrapAction::Default;
-        if let Some(text) = &action {
-            if text.as_slice() == b"-" {
-                action = None;
-            } else if text.is_empty() {
-                newtrap = TrapAction::Ignore;
-            } else {
-                sh.traps.trapcnt += 1;
-                newtrap = TrapAction::Command(text.clone());
+        crate::error::with_interrupts_deferred(sh, |sh| {
+            /* The C's `action = savestr(action)` makes the next signal in the
+             * list copy the previous copy; copying the argument word each time
+             * gives the same bytes and leaves `action` pointing at what the
+             * `'-'` test reads. */
+            let mut newtrap = TrapAction::Default;
+            if let Some(text) = &action {
+                if text.as_slice() == b"-" {
+                    action = None;
+                } else if text.is_empty() {
+                    newtrap = TrapAction::Ignore;
+                } else {
+                    sh.traps.trapcnt += 1;
+                    newtrap = TrapAction::Command(text.clone());
+                }
             }
-        }
-        /* Asked as a `bool` first: the count is a field of the table the
-         * question is about, and reading one while writing the other is
-         * two borrows of `sh.traps`. */
-        let replacing_an_action = matches!(sh.traps.action(signal.index()), TrapAction::Command(_));
-        if replacing_an_action {
-            sh.traps.trapcnt -= 1;
-        }
-        /* The C frees the old action and *then* stores the new one, so the
-         * slot is briefly a dangling non-NULL pointer; `onsig` only tests it
-         * for NULL, so it reads "a trap is set" throughout. A replace reads
-         * the same way and never leaves a stale pointer for it to load --
-         * and the presence bit `onsig` reads instead is published by the
-         * same call, with signals blocked so the two cannot disagree. */
-        drop(sh.traps.set(&blocked, signal.index(), newtrap));
-        if let SignalSpec::Signal(signal) = signal {
-            setsignal(sh, signal);
-        }
-        INTON(sh);
+            /* Asked as a `bool` first: the count is a field of the table the
+             * question is about, and reading one while writing the other is
+             * two borrows of `sh.traps`. */
+            let replacing_an_action =
+                matches!(sh.traps.action(signal.index()), TrapAction::Command(_));
+            if replacing_an_action {
+                sh.traps.trapcnt -= 1;
+            }
+            /* The C frees the old action and *then* stores the new one, so the
+             * slot is briefly a dangling non-NULL pointer; `onsig` only tests it
+             * for NULL, so it reads "a trap is set" throughout. A replace reads
+             * the same way and never leaves a stale pointer for it to load --
+             * and the presence bit `onsig` reads instead is published by the
+             * same call, with signals blocked so the two cannot disagree. */
+            drop(sh.traps.set(&blocked, signal.index(), newtrap));
+            if let SignalSpec::Signal(signal) = signal {
+                setsignal(sh, signal);
+            }
+        });
     }
     Ok(Flow::Done((0).into()))
 }

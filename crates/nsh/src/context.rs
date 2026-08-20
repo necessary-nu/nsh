@@ -83,7 +83,7 @@ pub struct Shell {
     /// Zero in the root shell and incremented in forked shell children.
     pub(crate) shell_level: c_int,
     /// Nesting depth of regions that defer delivery of SIGINT.
-    pub(crate) interrupt_suppression: c_int,
+    pub(crate) interrupt_deferral: crate::error::InterruptDeferral,
     /// The shell-language descriptor namespace. Open entries own hidden
     /// close-on-exec backing descriptors; redirection changes this table,
     /// never the host process table.
@@ -220,7 +220,7 @@ impl Shell {
             backgndpid: None,
             root_pid,
             shell_level: 0,
-            interrupt_suppression: 0,
+            interrupt_deferral: crate::error::InterruptDeferral::new(),
             commands: crate::exec::CmdTable::new(),
             eval: crate::eval::EvalState::new(),
             jobs: crate::jobs::JobTable::new(),

@@ -12,7 +12,6 @@ use crate::error::Error;
 use bstr::BStr;
 use core::ffi::c_int;
 
-use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
 
 // [spec:dash:def:options.shiftcmd-fn]
@@ -33,9 +32,9 @@ pub fn shiftcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if n > sh.options.shellparam.nparam {
         return Err(sh.sh_error_value(b"can't shift that many"));
     }
-    INTOFF(sh);
-    sh.options.shellparam.drop_first(n);
-    INTON(sh);
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        sh.options.shellparam.drop_first(n);
+    });
     Ok(Flow::Done((0).into()))
 }
 

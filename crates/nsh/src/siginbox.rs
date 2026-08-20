@@ -183,11 +183,11 @@ impl SignalSink {
 ///   shell takes the interrupt instead of running the user's trap, and
 ///   the `SIGCHLD` trap misses a delivery.
 ///
-/// `INTOFF`/`INTON` cannot do this job. They defer *taking* an interrupt;
-/// they do not stop the handler running, and since `errors-are-values`
-/// step F `INTON` is not a delivery point at all. Blocking is what makes
-/// the pair atomic against delivery, and a signal blocked here is pending
-/// in the kernel rather than lost.
+/// Shell interrupt deferral cannot do this job. It defers *taking* an
+/// interrupt but does not stop the handler running, and leaving a deferral
+/// scope is not a delivery point. Blocking makes the pair atomic against
+/// delivery, and a signal blocked here is pending in the kernel rather than
+/// lost.
 ///
 /// `jobs::xtcsetpgrp` brackets `tcsetpgrp` the same way for the same
 /// reason; this one restores the saved mask rather than clearing, so it

@@ -5286,4 +5286,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.resource-scopes}
     )}
+    {id structure-interrupt-deferral, covered_rules (
+        idiom.interrupt-deferral
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.interrupt-deferral}
+    )}
 )

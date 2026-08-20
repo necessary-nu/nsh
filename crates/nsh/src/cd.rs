@@ -10,7 +10,6 @@ use bstr::{BStr, BString};
 use core::ffi::c_int;
 use nsh_platform::NativeStrExt as _;
 
-use crate::error::{INTOFF, INTON};
 use crate::var::{VariableAttributes, set_bytes};
 
 /* The C's `nullstr` sentinel is `None`.  It is a sentinel, not an empty
@@ -111,26 +110,26 @@ pub(crate) fn setpwd_inner(
             VariableAttributes::EXPORTED,
         )?;
     }
-    INTOFF(sh);
-    /* `free(physdir)` guarded by `physdir != oldcur`: the C's `curdir` and
-     * `physdir` are one allocation after a `setpwd(NULL, …)`, and the guard
-     * exists only to stop the double free.  Two owned copies say the same
-     * thing without the alias. */
-    sh.cwd.physdir = None;
-    match val {
-        Pwd::Unknown | Pwd::Current => {
-            let s = getpwd(sh);
-            if matches!(val, Pwd::Unknown) {
-                sh.cwd.curdir = s.clone();
+    let dir = crate::error::with_interrupts_deferred(sh, |sh| {
+        /* `free(physdir)` guarded by `physdir != oldcur`: the C's `curdir` and
+         * `physdir` are one allocation after a `setpwd(NULL, …)`, and the guard
+         * exists only to stop the double free. Two owned copies say the same
+         * thing without the alias. */
+        sh.cwd.physdir = None;
+        match val {
+            Pwd::Unknown | Pwd::Current => {
+                let current = getpwd(sh);
+                if matches!(val, Pwd::Unknown) {
+                    sh.cwd.curdir = current.clone();
+                }
+                sh.cwd.physdir = current;
             }
-            sh.cwd.physdir = s;
+            Pwd::New(path) => {
+                sh.cwd.curdir = Some(path.to_owned());
+            }
         }
-        Pwd::New(v) => {
-            sh.cwd.curdir = Some(v.to_owned());
-        }
-    }
-    let dir = sh.cwd.curdir.clone().unwrap_or_default();
-    INTON(sh);
+        sh.cwd.curdir.clone().unwrap_or_default()
+    });
     set_bytes(
         sh,
         BStr::new("PWD"),

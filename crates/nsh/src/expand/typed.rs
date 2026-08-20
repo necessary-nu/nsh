@@ -866,32 +866,33 @@ fn character_end(locale: &nsh_platform::Locale, bytes: &[u8], at: usize) -> usiz
 
 fn command_substitution(sh: &mut Shell, command: Option<&Node>) -> Result<BString, Error> {
     let mut result = crate::eval::backcmd { fd: None, jp: None };
-    let mut output = BString::new(Vec::new());
-    let mut buffer = [0u8; 128];
+    let mut output = crate::error::with_interrupts_deferred(sh, |sh| {
+        let mut output = BString::new(Vec::new());
+        let mut buffer = [0u8; 128];
 
-    crate::error::INTOFF(sh);
-    crate::eval::evalbackcmd(sh, command, &mut result)?;
-    while let Some(fd) = result.fd.as_ref() {
-        let count = loop {
-            match nsh_platform::read_once(fd, &mut buffer) {
-                Ok(count) => break count,
-                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
-                    if let Some(error) = crate::error::poll_interrupt(sh) {
-                        return Err(error);
-                    }
+        crate::eval::evalbackcmd(sh, command, &mut result)?;
+        while let Some(fd) = result.fd.as_ref() {
+            let count = loop {
+                match nsh_platform::read_once(fd, &mut buffer) {
+                    Ok(count) => break count,
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(_) => break 0,
                 }
-                Err(_) => break 0,
+            };
+            if count == 0 {
+                break;
             }
-        };
-        if count == 0 {
-            break;
+            output.extend(buffer[..count].iter().copied().filter(|byte| *byte != 0));
         }
-        output.extend(buffer[..count].iter().copied().filter(|byte| *byte != 0));
+        if result.fd.take().is_some() {
+            sh.eval.back_exitstatus = crate::jobs::waitforjob(sh, result.jp)?;
+        }
+        Ok::<_, Error>(output)
+    })?;
+
+    if let Some(error) = crate::error::poll_interrupt(sh) {
+        return Err(error);
     }
-    if result.fd.take().is_some() {
-        sh.eval.back_exitstatus = crate::jobs::waitforjob(sh, result.jp)?;
-    }
-    crate::error::INTON(sh);
 
     while output.last() == Some(&b'\n') {
         output.pop();

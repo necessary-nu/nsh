@@ -26,7 +26,7 @@ impl CmdTable {
 /// options acquire dispatch effects.
 pub(crate) fn dispatch_changed(sh: &mut crate::context::Shell) {
     let dialect = sh.options.dialect();
-    crate::error::INTOFF(sh);
-    sh.commands.invalidate_dispatch(dialect);
-    crate::error::INTON(sh);
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        sh.commands.invalidate_dispatch(dialect);
+    });
 }

@@ -15,7 +15,6 @@ use std::io::Write as _;
 
 use bstr::BStr;
 
-use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
 
 /*
@@ -60,9 +59,7 @@ pub fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
     let mode = opts.operands().first().copied();
 
-    INTOFF(sh);
-    mask = nsh_platform::creation_mask();
-    INTON(sh);
+    mask = crate::error::with_interrupts_deferred(sh, |_| nsh_platform::creation_mask());
 
     if mode.is_none() {
         if symbolic_mode != 0 {

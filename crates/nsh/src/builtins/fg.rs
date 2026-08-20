@@ -15,7 +15,6 @@ use bstr::BStr;
 use core::ffi::c_int;
 use std::io::Write;
 
-use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
 use crate::jobs::{
     FORK_BG, FORK_FG, JobId, apply_saved_job_terminal_settings, capture_shell_terminal_settings,
@@ -93,48 +92,42 @@ pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:jobctl.continue-suspended-job]
 // [spec:posix:req:jobctl.fg-terminal-settings-restore]
 fn restartjob(sh: &mut Shell, jp: JobId, mode: c_int) -> Result<crate::status::ExitStatus, Error> {
-    let process_group: nsh_platform::ProcessGroupId;
-    let mut terminal_error = None;
-
-    INTOFF(sh);
-    'out_lbl: {
-        if !sh.jobs[jp].restart() {
-            break 'out_lbl;
+    let (status, terminal_error) = crate::error::with_interrupts_deferred(sh, |sh| {
+        let mut terminal_error = None;
+        'out_lbl: {
+            if !sh.jobs[jp].restart() {
+                break 'out_lbl;
+            }
+            if mode == FORK_FG {
+                capture_shell_terminal_settings(sh)?;
+            }
+            let Some(leader) = ps_pid(sh, jp, 0) else {
+                return Err(sh.sh_error_value(b"job has no process"));
+            };
+            let process_group = nsh_platform::ProcessGroupId::from_leader(leader);
+            if mode == FORK_FG {
+                xxtcsetpgrp(sh, process_group)?;
+                if let Err(error) = apply_saved_job_terminal_settings(sh, jp) {
+                    terminal_error = Some(error);
+                }
+            }
+            let _ = nsh_platform::send_continue_to_process_group(process_group);
+            /* the C's `do { … } while (--i)` visits `ps[0]` before it looks
+             * at the count, so a job with no processes walks the whole
+             * address space; there is nothing to restart in one. */
+            for process in &mut sh.jobs[jp].ps {
+                if matches!(process.status, Some(nsh_platform::ChildStatus::Stopped(_))) {
+                    process.status = None;
+                }
+            }
         }
-        if mode == FORK_FG {
-            capture_shell_terminal_settings(sh)?;
-        }
-        let Some(leader) = ps_pid(sh, jp, 0) else {
-            return Err(sh.sh_error_value(b"job has no process"));
+        let status = if mode == FORK_FG {
+            waitforjob(sh, Some(jp))?
+        } else {
+            crate::status::ExitStatus::SUCCESS
         };
-        process_group = nsh_platform::ProcessGroupId::from_leader(leader);
-        if mode == FORK_FG {
-            xxtcsetpgrp(sh, process_group)?;
-            if let Err(error) = apply_saved_job_terminal_settings(sh, jp) {
-                terminal_error = Some(error);
-            }
-        }
-        let _ = nsh_platform::send_continue_to_process_group(process_group);
-        /* the C's `do { … } while (--i)` visits `ps[0]` before it looks
-         * at the count, so a job with no processes walks the whole
-         * address space; there is nothing to restart in one. */
-        for i in 0..sh.jobs[jp].ps.len() {
-            if matches!(
-                sh.jobs[jp].ps[i].status,
-                Some(nsh_platform::ChildStatus::Stopped(_))
-            ) {
-                sh.jobs[jp].ps[i].status = None;
-            }
-        }
-    }
-    // out:
-    let status = if mode == FORK_FG {
-        waitforjob(sh, Some(jp))
-    } else {
-        Ok(crate::status::ExitStatus::SUCCESS)
-    };
-    INTON(sh);
-    let status = status?;
+        Ok::<_, Error>((status, terminal_error))
+    })?;
     if let Some(error) = terminal_error {
         return Err(terminal_settings_error(
             sh,

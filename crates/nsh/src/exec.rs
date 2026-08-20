@@ -15,7 +15,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
 use crate::builtins::{BUILTIN_REGULAR, builtincmd};
-use crate::error::{E_EXEC, Error, INTOFF, INTON};
+use crate::error::{E_EXEC, Error};
 use crate::nodes::FunctionDefinition;
 
 mod dialect_dispatch;
@@ -705,12 +705,12 @@ pub fn changepath(sh: &mut crate::context::Shell, newval: &BStr) {
 // [spec:dash:def:exec.clearcmdentry-fn]
 // [spec:dash:sem:exec.clearcmdentry-fn]
 pub(crate) fn clearcmdentry(sh: &mut crate::context::Shell) {
-    INTOFF(sh);
-    let builtinloc = sh.commands.builtinloc;
-    sh.commands
-        .map
-        .retain(|_, cmdp| !cmdp.path_dependent(builtinloc));
-    INTON(sh);
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        let builtinloc = sh.commands.builtinloc;
+        sh.commands
+            .map
+            .retain(|_, cmdp| !cmdp.path_dependent(builtinloc));
+    });
 }
 
 /*
@@ -748,9 +748,9 @@ pub(crate) fn cmdlookup<'a>(
 // [spec:dash:def:exec.delete-cmd-entry-fn]
 // [spec:dash:sem:exec.delete-cmd-entry-fn]
 pub(crate) fn delete_cmd_entry(sh: &mut crate::context::Shell, name: &BStr) {
-    INTOFF(sh);
-    sh.commands.map.remove(name);
-    INTON(sh);
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        sh.commands.map.remove(name);
+    });
 }
 
 // [spec:dash:def:exec.getcmdentry-fn]
@@ -787,13 +787,13 @@ fn addcmdentry(sh: &mut crate::context::Shell, name: &BStr, command: Command) {
 // [spec:dash:def:exec.defun-fn]
 // [spec:dash:sem:exec.defun-fn]
 pub fn defun(sh: &mut crate::context::Shell, definition: &FunctionDefinition) {
-    INTOFF(sh);
-    addcmdentry(
-        sh,
-        definition.name.as_bstr(),
-        Command::Function(definition.clone()),
-    );
-    INTON(sh);
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        addcmdentry(
+            sh,
+            definition.name.as_bstr(),
+            Command::Function(definition.clone()),
+        );
+    });
 }
 
 /*

@@ -397,7 +397,7 @@ pub fn expansion_result(sh: &crate::context::Shell) -> &BStr {
 // A `static` was needed only while the cursors were raw pointers that
 // outlived the borrow producing them.  With `&mut BString` threaded through
 // the recursion, "there is never a second glob in flight" stops being an
-// argument about `INTOFF` and becomes the borrow checker's.
+// argument about interrupt counters and becomes the borrow checker's.
 // ---------------------------------------------------------------------
 
 /// Escaping policy used while copying expansion bytes to their destination.
@@ -1027,65 +1027,51 @@ fn expbackq(
     mode: ExpansionMode,
 ) -> Result<(), Error> {
     let mut in_ = crate::eval::backcmd { fd: None, jp: None };
-    let mut i: c_int;
     /* `char buf[128]`, as bytes: it is only ever handed to `read` and to
      * `memtodest`, and both want the bytes rather than the sign. */
     let mut buf: [u8; 128] = [0; 128];
-    let startloc: c_int;
 
     if !mode.contains(ExpansionMode::DISCARD) {
-        crate::error::INTOFF(sh);
-        startloc = expdest_off(state);
-        /* `pushstackmark(&smark, startloc)`: the length kept `makejob`'s
-         * region allocations off the half-built word, and the save/restore
-         * released them afterwards.  The word is not in the region and
-         * neither is anything `evalbackcmd` reaches, so both halves are
-         * gone. */
-        /* This `?` and the one below return between this frame's `INTOFF`
-         * and its `INTON`, which is where the longjmp went too — it skipped
-         * the same `INTON`. docs/errors-are-values.md 2.4: do not pair
-         * them. */
-        crate::eval::evalbackcmd(sh, cmd, &mut in_)?;
+        let startloc = crate::error::with_interrupts_deferred(sh, |sh| {
+            let startloc = expdest_off(state);
+            /* `pushstackmark(&smark, startloc)`: the length kept `makejob`'s
+             * region allocations off the half-built word, and the save/restore
+             * released them afterwards. The word is not in the region and
+             * neither is anything `evalbackcmd` reaches, so both halves are
+             * gone. */
+            crate::eval::evalbackcmd(sh, cmd, &mut in_)?;
 
-        /* `evalbackcmd` always returns a pipe with an empty read-ahead
-         * area, so reading starts directly from that pipe. */
-        loop {
-            let Some(fd) = in_.fd.as_ref() else {
-                break;
-            };
+            /* `evalbackcmd` always returns a pipe with an empty read-ahead
+             * area, so reading starts directly from that pipe. */
             loop {
-                match nsh_platform::read_once(fd, &mut buf) {
-                    Ok(count) => {
-                        i = count as c_int;
-                        break;
+                let Some(fd) = in_.fd.as_ref() else {
+                    break;
+                };
+                let count = loop {
+                    match nsh_platform::read_once(fd, &mut buf) {
+                        Ok(count) => break count,
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                        Err(_) => break 0,
                     }
-                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
-                    Err(_) => {
-                        i = -1;
-                        break;
-                    }
+                };
+                /* TRACE(("expbackq: read returns %d\n", count)); */
+                if count == 0 {
+                    break;
                 }
-                /* One of the three EINTR sites the C retries blindly.
-                 * Reading a command substitution's output can block for
-                 * as long as the substituted command runs, so this is
-                 * where a ^C during `x=$(sleep 5)` is noticed. */
-                if let Some(e) = crate::error::poll_interrupt(sh) {
-                    return Err(e);
-                }
+                memtodest(&sh.locale, &buf[..count], mode, expb(state));
             }
-            /* TRACE(("expbackq: read returns %d\n", i)); */
-            if i <= 0 {
-                break;
+
+            if in_.fd.take().is_some() {
+                sh.eval.back_exitstatus = crate::jobs::waitforjob(sh, in_.jp)?;
             }
-            memtodest(&sh.locale, &buf[..i as usize], mode, expb(state));
+            Ok::<_, Error>(startloc)
+        })?;
+
+        if let Some(error) = crate::error::poll_interrupt(sh) {
+            return Err(error);
         }
 
-        if in_.fd.take().is_some() {
-            sh.eval.back_exitstatus = crate::jobs::waitforjob(sh, in_.jp)?;
-        }
-        crate::error::INTON(sh);
-
-        /* Eat all trailing newlines.  The cursor is the length, so the
+        /* Eat all trailing newlines. The cursor is the length, so the
          * walk is over the buffer's own bytes and `STADJUST` is a
          * `truncate`. */
         nsh_platform::trim_command_substitution_output(expb(state), startloc as usize);
@@ -2468,40 +2454,29 @@ fn expandmeta(
              * the words already in the list. */
             let savelastp = expargl(state).len();
 
-            crate::error::INTOFF(sh);
-            pattern.clear();
-            pattern.extend_from_slice(text);
-            pattern.push(0);
-            let pattern_len = rmescapes_buffer(&mut pattern, EscapeMode::Glob);
-            pattern.truncate(pattern_len + 1);
+            crate::error::with_interrupts_deferred(sh, |sh| {
+                pattern.clear();
+                pattern.extend_from_slice(text);
+                pattern.push(0);
+                let pattern_len = rmescapes_buffer(&mut pattern, EscapeMode::Glob);
+                pattern.truncate(pattern_len + 1);
 
-            /* The C's top-level `expmeta` starts on whatever block the
-             * region is on and gets away with it because `expdir_len`
-             * is 0: it writes from the base and never reads what was
-             * there.  An owned buffer's length is not 0 — the previous
-             * glob's `addfnamealt` left it at that glob's `expdir_len`
-             * — and every consequence of carrying it in is benign,
-             * which is the reason to clear rather than to argue.  The
-             * frame invariant is then an equality, and an equality is
-             * what `expmeta` can assert on entry.
-             *
-             * `p` is `pattern`'s buffer (or `str.text`, when
-             * `_rmescapes` found nothing to remove and returned its
-             * argument).  Neither is the glob buffer, which is what
-             * makes lending both to `expmeta` at once sound; the
-             * pattern is read-only from here down. */
-            globbuf.clear();
-            expmeta(
-                &sh.locale,
-                state,
-                &mut globbuf,
-                crate::mystring::cstr_prefix(&pattern),
-                0,
-            );
-            /* `if (p != str->text) ckfree(p)` — the C's way of asking
-             * "did `_rmescapes` allocate?".  `pattern` owns the bytes
-             * either way now, and the next iteration reuses it. */
-            crate::error::INTON(sh);
+                /* The C's top-level `expmeta` starts on whatever block the
+                 * region is on and gets away with it because `expdir_len`
+                 * is 0: it writes from the base and never reads what was
+                 * there. An owned buffer's length is not 0 — the previous
+                 * glob's `addfnamealt` left it at that glob's `expdir_len`
+                 * — and every consequence of carrying it in is benign,
+                 * which is the reason to clear rather than to argue. */
+                globbuf.clear();
+                expmeta(
+                    &sh.locale,
+                    state,
+                    &mut globbuf,
+                    crate::mystring::cstr_prefix(&pattern),
+                    0,
+                );
+            });
             if expargl(state).len() != savelastp {
                 /* `*exparg.lastp = NULL; sp = expsort(*savelastp);
                  * *savelastp = sp; while (sp->next) sp = sp->next;

@@ -38,7 +38,6 @@ use nsh_platform::Descriptor;
 use std::io::Write as _;
 
 use crate::builtins::{BUILTIN_ASSIGN, BUILTIN_REGULAR, BUILTIN_SPECIAL, builtincmd};
-use crate::error::{FORCEINTON, INTOFF, INTON};
 use crate::exec::{Command, DO_ERR, DO_NOFUNC, DO_REGBLTIN, find_command, shellexec};
 use crate::expand::{ExpansionMode, arglist, strlist};
 use crate::jobs::{FORK_NOJOB, JobId};
@@ -476,7 +475,7 @@ fn eval_interactive_sequence(
             drop(error);
             crate::init::exitreset(sh);
             crate::var::mkinit_reset(sh);
-            crate::error::FORCEINTON(sh);
+            crate::error::clear_interrupt_deferral(sh);
             Ok(Flow::Done((status).into()))
         }
         outcome => outcome,
@@ -873,9 +872,8 @@ fn evalsubshell(
     background: bool,
     context: EvalContext,
 ) -> Result<Flow, Error> {
-    let jp: JobId;
     let backgnd: c_int = background as c_int;
-    let mut status: ExitStatus;
+    let mut status = ExitStatus::SUCCESS;
     let mut context = context;
 
     sh.eval.errlinno = command.line;
@@ -885,19 +883,15 @@ fn evalsubshell(
     }
 
     let expanded_redirections = expredir(sh, &command.redirections)?;
-    INTOFF(sh);
     /* Whether the tail below runs in a child of this process or in this
-     * process. The C does not need to know, because its `evaltreenr`
-     * leaves by longjmp either way; a return has to know, and this is the
-     * difference. */
-    let forked: bool;
-    'nofork: {
+     * process. The structured scope restores the caller's interrupt depth
+     * before either tail continues. */
+    let forked = crate::error::with_interrupts_deferred(sh, |sh| {
         if backgnd == 0 && context.exits() && crate::trap::have_traps(sh) == 0 {
             crate::init::forkreset(sh, None);
-            forked = false;
-            break 'nofork;
+            return Ok(Some(false));
         }
-        jp = crate::jobs::makejob(sh, 1);
+        let jp = crate::jobs::makejob(sh, 1);
         if matches!(
             crate::jobs::forkshell(sh, Some(jp), Some(command.command.as_ref()), backgnd)?,
             nsh_platform::ForkResult::Child
@@ -906,20 +900,18 @@ fn evalsubshell(
             if backgnd != 0 {
                 context = context.without_tested();
             }
-            forked = true;
-            break 'nofork;
+            return Ok(Some(true));
         }
         /* the parent tail of the C function; the child path below
          * never returns, so it is reached only from here */
-        status = ExitStatus::SUCCESS;
         if backgnd == 0 {
             status = crate::jobs::waitforjob(sh, Some(jp))?;
         }
-        INTON(sh);
+        Ok::<_, Error>(None)
+    })?;
+    let Some(forked) = forked else {
         return Ok(Flow::Done((status).into()));
-    }
-    // nofork:
-    INTON(sh);
+    };
     let outcome = (|| -> Result<Flow, Error> {
         crate::redir::redirect(sh, &expanded_redirections, RedirectionMode::Apply)?;
         evaltreenr(sh, Some(command.command.as_ref()), context)
@@ -1050,79 +1042,89 @@ fn descriptor_source(sh: &mut Shell, text: &BStr) -> Result<Option<LogicalDescri
 // [spec:posix:req:cmd.pipeline-pipefail-setting-at-start]
 // [spec:nsh:req:idiom.no-raw-fd-core]
 fn evalpipe(sh: &mut Shell, pipeline: &Pipeline, context: EvalContext) -> Result<Flow, Error> {
-    let jp: JobId;
-    let pipelen: c_int;
-    let mut prevfd: Option<Descriptor>;
-    let mut status = ExitStatus::SUCCESS;
     let context = context.with_exit();
 
-    pipelen = pipeline.commands.len() as c_int;
-    INTOFF(sh);
-    jp = crate::jobs::makejob(sh, pipelen);
-    prevfd = None;
-    for (i, cmd) in pipeline.commands.iter().enumerate() {
-        let has_next = i + 1 < pipeline.commands.len();
-        match prehash(sh, cmd)? {
-            Flow::Done(_) => {}
-            control => return Ok(control),
-        }
-        let mut pipe = if has_next {
-            match crate::redir::sh_pipe(sh, false) {
-                Ok((pipe, _)) => Some(pipe),
-                Err(error) => {
-                    /* Between this frame's `INTOFF` and its `INTON`, exactly
-                     * where the longjmp was: the jump skipped the same `INTON`
-                     * and left the counter raised. Pairing them with a guard
-                     * would move the instruction a pending SIGINT is delivered
-                     * at, which `docs/errors-are-values.md` §2.4 forbids. */
-                    return Err(error);
-                }
+    enum PipelineStart<'a> {
+        Parent(ExitStatus),
+        Child {
+            command: &'a Node,
+            input: Option<Descriptor>,
+            output: Option<Descriptor>,
+        },
+        Control(Flow),
+    }
+
+    let start = crate::error::with_interrupts_deferred(sh, |sh| {
+        let jp = crate::jobs::makejob(sh, pipeline.commands.len() as c_int);
+        let mut previous = None;
+        for (index, command) in pipeline.commands.iter().enumerate() {
+            let has_next = index + 1 < pipeline.commands.len();
+            match prehash(sh, command)? {
+                Flow::Done(_) => {}
+                control => return Ok(PipelineStart::Control(control)),
             }
+            let mut pipe = if has_next {
+                Some(crate::redir::sh_pipe(sh, false)?.0)
+            } else {
+                None
+            };
+            if matches!(
+                crate::jobs::forkshell(sh, Some(jp), Some(command), pipeline.background as c_int,)?,
+                nsh_platform::ForkResult::Child
+            ) {
+                let output = pipe.take().map(|pipe| {
+                    drop(pipe.read);
+                    pipe.write
+                });
+                return Ok(PipelineStart::Child {
+                    command,
+                    input: previous.take(),
+                    output,
+                });
+            }
+            drop(previous.take());
+            if let Some(pipe) = pipe {
+                previous = Some(pipe.read);
+                drop(pipe.write);
+            }
+        }
+        let status = if pipeline.background {
+            ExitStatus::SUCCESS
         } else {
-            None
+            crate::jobs::waitforjob(sh, Some(jp))?
         };
-        if matches!(
-            crate::jobs::forkshell(sh, Some(jp), Some(cmd), pipeline.background as c_int)?,
-            nsh_platform::ForkResult::Child
-        ) {
-            INTON(sh);
-            let write = pipe.take().map(|pipe| {
-                drop(pipe.read);
-                pipe.write
-            });
-            if let Some(previous) = prevfd.take() {
+        Ok::<_, Error>(PipelineStart::Parent(status))
+    })?;
+
+    match start {
+        PipelineStart::Parent(status) => Ok(Flow::Done(status)),
+        PipelineStart::Control(control) => Ok(control),
+        PipelineStart::Child {
+            command,
+            input,
+            output,
+        } => {
+            if let Some(input) = input {
                 crate::input::reset_input(sh);
                 sh.fds
-                    .install_owned(LogicalDescriptor::STDIN, previous)
+                    .install_owned(LogicalDescriptor::STDIN, input)
                     .map_err(|error| {
                         crate::redir::descriptor_error(sh, LogicalDescriptor::STDIN, error)
                     })?;
             }
-            if let Some(write) = write {
+            if let Some(output) = output {
                 sh.fds
-                    .install_owned(LogicalDescriptor::STDOUT, write)
+                    .install_owned(LogicalDescriptor::STDOUT, output)
                     .map_err(|error| {
                         crate::redir::descriptor_error(sh, LogicalDescriptor::STDOUT, error)
                     })?;
             }
             /* In a forked child, which may not return through the
              * parent's frames; see `evalsubshell`. */
-            let outcome = evaltreenr(sh, Some(cmd), context);
+            let outcome = evaltreenr(sh, Some(command), context);
             crate::shellmain::exit_from_child(sh, outcome);
         }
-        drop(prevfd.take());
-        if let Some(pipe) = pipe {
-            prevfd = Some(pipe.read);
-            drop(pipe.write);
-        }
     }
-    if !pipeline.background {
-        status = crate::jobs::waitforjob(sh, Some(jp))?;
-        /* TRACE(("evalpipe:  job done exit status %d\n", status)); */
-    }
-    INTON(sh);
-
-    Ok(Flow::Done((status).into()))
 }
 
 /*
@@ -1150,7 +1152,7 @@ pub fn evalbackcmd(sh: &mut Shell, n: Option<&Node>, result: &mut backcmd) -> Re
             crate::jobs::forkshell(sh, Some(jp), n, FORK_NOJOB)?,
             nsh_platform::ForkResult::Child
         ) {
-            FORCEINTON(sh);
+            crate::error::clear_interrupt_deferral(sh);
             drop(pipe.read);
             sh.fds
                 .install_owned(LogicalDescriptor::STDOUT, pipe.write)
@@ -1346,7 +1348,7 @@ fn evalcommand_in_scope(
      * `command [-p]` words while `osp` keeps the original head for `set -x`. */
     let mut head: usize = 0;
     let mut resolved_command = Command::Builtin(&crate::builtins::bltin);
-    let mut jp: Option<JobId>;
+    let jp: Option<JobId>;
     let lastarg: Option<usize>;
     let mut path: Option<BString> = None;
     let standard_path = crate::var::defpath();
@@ -1677,19 +1679,23 @@ fn evalcommand_in_scope(
 
                     /* Fork off a child process if necessary. */
                     if !context.exits() || crate::trap::have_traps(sh) != 0 {
-                        INTOFF(sh);
                         let syntax = Node::Command(command.clone());
-                        jp = Some(crate::jobs::forkexec(
-                            sh,
-                            &syntax,
-                            &args,
-                            BStr::new(
-                                path.as_ref()
-                                    .expect("external command has a PATH")
-                                    .as_slice(),
-                            ),
-                            path_index,
-                        )?);
+                        status = crate::error::with_interrupts_deferred(sh, |sh| {
+                            let job = crate::jobs::forkexec(
+                                sh,
+                                &syntax,
+                                &args,
+                                BStr::new(
+                                    path.as_ref()
+                                        .expect("external command has a PATH")
+                                        .as_slice(),
+                                ),
+                                path_index,
+                            )?;
+                            crate::jobs::waitforjob(sh, Some(job))
+                        })?;
+                        crate::error::clear_interrupt_deferral(sh);
+                        break 'out_lbl;
                     } else {
                         /* `shellexec` replaces the process image or fails;
                          * failing, it reports and is the C's EXEND. */
@@ -1708,7 +1714,7 @@ fn evalcommand_in_scope(
             }
 
             status = crate::jobs::waitforjob(sh, jp)?;
-            FORCEINTON(sh);
+            crate::error::clear_interrupt_deferral(sh);
             break 'out_lbl;
         }
         // bail:
@@ -1860,33 +1866,28 @@ fn evalfun(
     savefuncline = sh.eval.funcline;
     saveloopnest = sh.eval.loopnest;
 
-    INTOFF(sh);
-    /* Command lookup cloned the owned body, so redefining this function
-     * while it runs cannot pull the body out from under this call. */
-    sh.eval.funcline = function.line;
-    // [spec:nsh:req:compat.smoosh.nonlexical-control]
-    // Ordinarily only loops lexically inside the function are visible.
-    // The explicit extension preserves the caller's dynamic loop depth so
-    // break/continue can leave through this frame and be consumed there.
-    if !sh.options.enabled(ShellOption::NonLexicalControl) {
-        sh.eval.loopnest = 0;
-    }
-    /* This `INTON` is *after* `reffunc`, and the epilogue's `freefunc` is
-     * what balances it on both paths. docs/errors-are-values.md 2.6
-     * records that a conversion reordering this prologue turns the
-     * balance into a use-after-free that only shows when a function
-     * redefines itself while running. Nothing here is reordered. */
-    INTON(sh);
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        /* Command lookup cloned the owned body, so redefining this function
+         * while it runs cannot pull the body out from under this call. */
+        sh.eval.funcline = function.line;
+        // [spec:nsh:req:compat.smoosh.nonlexical-control]
+        // Ordinarily only loops lexically inside the function are visible.
+        // The explicit extension preserves the caller's dynamic loop depth so
+        // break/continue can leave through this frame and be consumed there.
+        if !sh.options.enabled(ShellOption::NonLexicalControl) {
+            sh.eval.loopnest = 0;
+        }
+    });
     crate::options::setparam(sh, args.get(1..).unwrap_or_default());
 
     let outcome = evaltree(sh, Some(function.body.as_ref()), context.tested_only());
 
     // funcdone:
-    INTOFF(sh);
-    sh.eval.loopnest = saveloopnest;
-    sh.eval.funcline = savefuncline;
-    crate::options::restoreparam(sh, saveparam);
-    INTON(sh);
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        sh.eval.loopnest = saveloopnest;
+        sh.eval.funcline = savefuncline;
+        crate::options::restoreparam(sh, saveparam);
+    });
     match outcome? {
         Flow::Return { status, .. } => Ok(Flow::Done(status)),
         control => Ok(control),

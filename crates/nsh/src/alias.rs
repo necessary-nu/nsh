@@ -7,7 +7,7 @@ use core::ffi::c_int;
 use std::collections::BTreeMap;
 
 use crate::context::Shell;
-use crate::error::{Error, INTOFF, INTON};
+use crate::error::Error;
 
 pub const ALIASINUSE: c_int = 1;
 pub const ALIASDEAD: c_int = 2;
@@ -63,8 +63,7 @@ pub(crate) fn setalias(sh: &mut Shell, name: &BStr, value: &BStr) -> Result<(), 
         return Err(sh.sh_error_value(&message));
     }
 
-    INTOFF(sh);
-    match sh.aliases.map.get_mut(name) {
+    crate::error::with_interrupts_deferred(sh, |sh| match sh.aliases.map.get_mut(name) {
         Some(alias) => {
             alias.value = value.to_owned();
             alias.dead = false;
@@ -79,8 +78,7 @@ pub(crate) fn setalias(sh: &mut Shell, name: &BStr, value: &BStr) -> Result<(), 
                 },
             );
         }
-    }
-    INTON(sh);
+    });
     Ok(())
 }
 
@@ -117,33 +115,32 @@ pub(crate) fn finish_expansion(sh: &mut Shell, name: &BStr) {
 // [spec:dash:def:alias.unalias-fn]
 // [spec:dash:sem:alias.unalias-fn]
 pub(crate) fn unalias(sh: &mut Shell, name: &BStr) -> c_int {
-    INTOFF(sh);
-    let Some(alias) = sh.aliases.map.get_mut(name) else {
-        INTON(sh);
-        return 1;
-    };
-    if alias.in_use {
-        alias.dead = true;
-    } else {
-        sh.aliases.map.remove(name);
-    }
-    INTON(sh);
-    0
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        let Some(alias) = sh.aliases.map.get_mut(name) else {
+            return 1;
+        };
+        if alias.in_use {
+            alias.dead = true;
+        } else {
+            sh.aliases.map.remove(name);
+        }
+        0
+    })
 }
 
 // [spec:dash:def:alias.rmaliases-fn]
 // [spec:dash:sem:alias.rmaliases-fn]
 pub fn rmaliases(sh: &mut Shell) {
-    INTOFF(sh);
-    sh.aliases.map.retain(|_, alias| {
-        if alias.in_use {
-            alias.dead = true;
-            true
-        } else {
-            false
-        }
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        sh.aliases.map.retain(|_, alias| {
+            if alias.in_use {
+                alias.dead = true;
+                true
+            } else {
+                false
+            }
+        });
     });
-    INTON(sh);
 }
 
 // [spec:dash:def:alias.printalias-fn]

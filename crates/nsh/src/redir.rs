@@ -8,7 +8,6 @@ use nsh_platform::{Descriptor, ShellBytesExt as _};
 use std::io::Write;
 
 use crate::context::Shell;
-use crate::error::{INTOFF, INTON};
 use crate::fd::LogicalDescriptor;
 use crate::nodes::{FileRedirectionOperator, HereDocument, Node};
 use crate::options::ShellOption;
@@ -138,48 +137,44 @@ pub(crate) fn redirect(
     redir: &[ExpandedRedirection<'_>],
     mode: RedirectionMode,
 ) -> Result<(), Error> {
-    let sv: Option<usize>;
-
     /* #if notyet — the `memory[10]` in-memory sink is not compiled. */
     if redir.is_empty() {
         return Ok(());
     }
-    INTOFF(sh);
-    /* `sv = redirlist` — the frame `pushredir` just pushed, and NULL when
-     * there is none, which is what `checked_sub` says. */
-    sv = if mode == RedirectionMode::Push {
-        sh.redirs.list.len().checked_sub(1)
-    } else {
-        None
-    };
-    /* The C walks the list through `n->nfile.next`, which is the same offset
-     * in every redirection arm; the list is a `Vec` now. */
-    for n in redir {
-        let fd = n.descriptor();
-        let source = openredirect(sh, n)?;
-        if !matches!(source, RedirectSource::Noop) {
-            /* The C's `fd == 0` is "this redirection replaced the shell's
-             * own input", which is what makes the buffered parse state
-             * stale -- not descriptor 0 for its own sake. */
-            if fd == LogicalDescriptor::STDIN {
-                crate::input::reset_input(sh);
-            }
-
-            if let Some(svi) = sv {
-                let p_slot = fd.index();
-                if matches!(sh.redirs.list[svi].renamed[p_slot], SavedDescriptor::Empty) {
-                    let saved = sh.fds.get(fd);
-                    sh.redirs.list[svi].renamed[p_slot] = SavedDescriptor::Saved(saved);
+    let sv = crate::error::with_interrupts_deferred(sh, |sh| {
+        /* `sv = redirlist` — the frame `pushredir` just pushed, and NULL when
+         * there is none, which is what `checked_sub` says. */
+        let sv = if mode == RedirectionMode::Push {
+            sh.redirs.list.len().checked_sub(1)
+        } else {
+            None
+        };
+        /* The C walks the list through `n->nfile.next`, which is the same offset
+         * in every redirection arm; the list is a `Vec` now. */
+        for n in redir {
+            let fd = n.descriptor();
+            let source = openredirect(sh, n)?;
+            if !matches!(source, RedirectSource::Noop) {
+                /* The C's `fd == 0` is "this redirection replaced the shell's
+                 * own input", which is what makes the buffered parse state
+                 * stale -- not descriptor 0 for its own sake. */
+                if fd == LogicalDescriptor::STDIN {
+                    crate::input::reset_input(sh);
                 }
-            }
 
-            /* The `?` returns between the INTOFF above and the INTON below,
-             * leaking the counter exactly as the old `sh_dup2` error path
-             * did; see docs/errors-are-values.md 2.4. */
-            install_redirect(sh, fd, source)?;
+                if let Some(svi) = sv {
+                    let p_slot = fd.index();
+                    if matches!(sh.redirs.list[svi].renamed[p_slot], SavedDescriptor::Empty) {
+                        let saved = sh.fds.get(fd);
+                        sh.redirs.list[svi].renamed[p_slot] = SavedDescriptor::Saved(saved);
+                    }
+                }
+
+                install_redirect(sh, fd, source)?;
+            }
         }
-    }
-    INTON(sh);
+        Ok(sv)
+    })?;
     /* The C indexes slot 2 because that is where the shell's stderr is.
      * The slot follows the frontend's stderr instead -- and if that was
      * put past the end of `renamed`, which covers the ten descriptors
@@ -624,39 +619,37 @@ fn openhere(sh: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error
 // [spec:dash:def:redir.popredir-fn]
 // [spec:dash:sem:redir.popredir-fn]
 pub fn popredir(sh: &mut Shell, drop: c_int) {
-    let rp: usize;
-    let mut i: usize;
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        let rp = sh.redirs.list.len() - 1;
+        let mut i = 0;
+        while i < LogicalDescriptor::COUNT {
+            let renamed =
+                std::mem::replace(&mut sh.redirs.list[rp].renamed[i], SavedDescriptor::Empty);
 
-    INTOFF(sh);
-    rp = sh.redirs.list.len() - 1;
-    i = 0;
-    while i < LogicalDescriptor::COUNT {
-        let renamed = std::mem::replace(&mut sh.redirs.list[rp].renamed[i], SavedDescriptor::Empty);
-
-        if matches!(renamed, SavedDescriptor::Empty) {
-            i += 1;
-            continue;
-        }
-
-        match renamed {
-            SavedDescriptor::Saved(saved) => {
-                if drop == 0 {
-                    let descriptor = LogicalDescriptor::from_index(i)
-                        .expect("a redirection frame has only logical descriptors");
-                    if descriptor == LogicalDescriptor::STDIN {
-                        crate::input::reset_input(sh);
-                    }
-                    sh.fds.replace(descriptor, saved);
-                }
+            if matches!(renamed, SavedDescriptor::Empty) {
+                i += 1;
+                continue;
             }
-            SavedDescriptor::Empty => unreachable!(),
+
+            match renamed {
+                SavedDescriptor::Saved(saved) => {
+                    if drop == 0 {
+                        let descriptor = LogicalDescriptor::from_index(i)
+                            .expect("a redirection frame has only logical descriptors");
+                        if descriptor == LogicalDescriptor::STDIN {
+                            crate::input::reset_input(sh);
+                        }
+                        sh.fds.replace(descriptor, saved);
+                    }
+                }
+                SavedDescriptor::Empty => unreachable!(),
+            }
+            i += 1;
         }
-        i += 1;
-    }
-    /* `redirlist = rp->next` — which also drops anything pushed above `rp`
-     * and never popped, as the C's assignment did. */
-    sh.redirs.list.truncate(rp);
-    INTON(sh);
+        /* `redirlist = rp->next` — which also drops anything pushed above `rp`
+         * and never popped, as the C's assignment did. */
+        sh.redirs.list.truncate(rp);
+    });
 }
 
 /*
@@ -714,14 +707,9 @@ pub fn copy_slot_above(
 /// (POSIX's "an error in a special built-in exits a non-interactive
 /// shell") and an int cannot be re-raised.
 ///
-/// There is no longer a `setjmp` here, or a handler, or a
-/// `SAVEINT`-shaped reason for one. What is left of the C's frame is the
-/// `SAVEINT`/`RESTOREINT` pair itself, and it stays exactly where it was:
-/// this is a catch that returns into the middle of `evalcommand` rather
-/// than to a top level, so it restores the counter's saved value instead
-/// of resetting it (§2.4). `RESTOREINT` is still skipped when the error
-/// leaves, because the `?`-shaped return skips it exactly as the longjmp
-/// did, and the outermost `FORCEINTON` is what clears the leak.
+/// There is no longer a `setjmp`, handler, or saved interrupt counter here.
+/// [`redirect`] owns a structured deferral scope and restores its caller's
+/// depth on every ordinary return, including an error caught here.
 // [spec:dash:def:redir.redirectsafe-fn]
 // [spec:dash:sem:redir.redirectsafe-fn]
 pub(crate) fn redirectsafe(
@@ -729,17 +717,11 @@ pub(crate) fn redirectsafe(
     redir: &[ExpandedRedirection<'_>],
     mode: RedirectionMode,
 ) -> Result<(), Error> {
-    let mut saveint: c_int = 0;
-
-    crate::SAVEINT!(sh, saveint);
     let redirect_error = redirect(sh, redir, mode).err();
     let caught = crate::expand::restore_handler_expandarg(sh, redirect_error);
     if let Some(e) = caught {
-        /* The C's `longjmp` from `restore_handler_expandarg` left before
-         * the `RESTOREINT` below; so does this. */
         return Err(e);
     }
-    crate::RESTOREINT!(sh, saveint);
 
     Ok(())
 }

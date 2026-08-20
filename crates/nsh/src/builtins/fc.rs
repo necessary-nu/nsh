@@ -23,7 +23,6 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
-use crate::error::{INTOFF, INTON};
 use crate::expand::strlist;
 use crate::histedit::{history_active, history_mut, record_history_line};
 use crate::linedit::HistoryEvent;
@@ -269,87 +268,97 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
         if rflg != 0 {
             core::mem::swap(&mut first, &mut last);
         }
-        /*
-         * If editing, grab a temp file.
-         */
-        if editor.is_some() {
-            INTOFF(sh); /* easier */
-            let Ok((file, path)) = nsh_platform::create_temporary_file("nsh-fc") else {
-                return Err(sh.sh_error_value(b"can't create temporary file"));
-            };
-            editfile = Some(path);
-            edit_file = Some(file);
-        }
+        let editing = editor.is_some();
+        let mut run_selected_events =
+            |sh: &mut Shell| -> Result<Result<Option<crate::status::ExitStatus>, Flow>, Error> {
+                if editing {
+                    let Ok((file, path)) = nsh_platform::create_temporary_file("nsh-fc") else {
+                        return Err(sh.sh_error_value(b"can't create temporary file"));
+                    };
+                    editfile = Some(path);
+                    edit_file = Some(file);
+                }
 
-        // Snapshot the semantic range before `evalstring` can re-enter the
-        // shell and mutate history.
-        let events = history_mut(sh)
-            .map(|history| history.range(first, last))
-            .unwrap_or_default();
-        if lflg == 0 && discard_input_entry {
-            if let Some(history) = history_mut(sh) {
-                history.discard_input_entry();
-            }
-        }
-        for event in events {
-            if lflg != 0 {
-                let _ = write_listing(sh.io.stdout(), &event, nflg == 0);
-            } else {
-                let line = fc_replace(
-                    BStr::new(event.line.as_slice()),
-                    &mut pattern,
-                    BStr::new(replacement.as_slice()),
-                );
-
-                if sflg != 0 {
-                    if sh.displayhist != 0 {
-                        let _ = sh.io.stderr().write_all(&line);
+                // Snapshot the semantic range before `evalstring` can re-enter
+                // the shell and mutate history.
+                let events = history_mut(sh)
+                    .map(|history| history.range(first, last))
+                    .unwrap_or_default();
+                if lflg == 0 && discard_input_entry {
+                    if let Some(history) = history_mut(sh) {
+                        history.discard_input_entry();
+                    }
+                }
+                for event in events {
+                    if lflg != 0 {
+                        let _ = write_listing(sh.io.stdout(), &event, nflg == 0);
+                        continue;
                     }
 
-                    if history_active(sh) {
-                        record_history_line(sh, &line, true, false);
+                    let line = fc_replace(
+                        BStr::new(event.line.as_slice()),
+                        &mut pattern,
+                        BStr::new(replacement.as_slice()),
+                    );
+                    if sflg != 0 {
+                        if sh.displayhist != 0 {
+                            let _ = sh.io.stderr().write_all(&line);
+                        }
+                        if history_active(sh) {
+                            record_history_line(sh, &line, true, false);
+                        }
+                        match crate::eval::evalstring(
+                            sh,
+                            BStr::new(line.as_slice()),
+                            crate::eval::EvalContext::DEFAULT,
+                        )? {
+                            Flow::Done(status) => result_status = status,
+                            control => return Ok(Err(control)),
+                        }
+                        break;
                     }
 
-                    /* `fc -s` runs the recalled line, which can be an
-                     * `exit`. It leaves through the cleanup below like
-                     * everything else this frame catches. */
-                    result_status = crate::eval::flow!(crate::eval::evalstring(
-                        sh,
-                        BStr::new(line.as_slice()),
-                        crate::eval::EvalContext::DEFAULT,
-                    ));
-
-                    break;
-                } else {
                     let file = edit_file
                         .as_mut()
                         .expect("fc edit file must exist while an editor is selected");
                     let _ = file.write_all(&line);
                 }
-            }
-        }
-        if let Some(editor) = &editor {
-            /* The C `stalloc`s `strlen(editor) + strlen(editfile) + 2` —
-             * the two strings, the separating space and the terminator —
-             * and lets `fccmd`'s enclosing mark release it.  `evalstring`
-             * copies what it is given, so the buffer is dead as soon as
-             * that call returns and can be this block's. */
+
+                let Some(editor) = &editor else {
+                    return Ok(Ok(None));
+                };
+                let path = editfile.as_ref().expect("fc created an edit file");
+                let file_bytes = path.to_shell_bytes();
+                let mut command = Vec::with_capacity(editor.len() + file_bytes.len() + 1);
+                command.extend_from_slice(editor);
+                command.push(b' ');
+                command.extend_from_slice(&file_bytes);
+
+                drop(edit_file.take());
+                /* XXX - should use no JC command */
+                match crate::eval::evalstring(
+                    sh,
+                    BStr::new(&command),
+                    crate::eval::EvalContext::DEFAULT,
+                )? {
+                    Flow::Done(status) => Ok(Ok(Some(status))),
+                    control => Ok(Err(control)),
+                }
+            };
+
+        let selected = if editing {
+            crate::error::with_interrupts_deferred(sh, |sh| run_selected_events(sh))
+        } else {
+            run_selected_events(sh)
+        }?;
+        let editor_status = match selected {
+            Ok(status) => status,
+            Err(control) => return Ok(control),
+        };
+
+        if let Some(editor_status) = editor_status {
             let path = editfile.as_ref().expect("fc created an edit file").clone();
             let file_bytes = path.to_shell_bytes();
-            let mut editcmdbuf: Vec<u8> = Vec::with_capacity(editor.len() + file_bytes.len() + 1);
-            editcmdbuf.extend_from_slice(editor);
-            editcmdbuf.push(b' ');
-            editcmdbuf.extend_from_slice(&file_bytes);
-
-            drop(edit_file.take());
-            /* XXX - should use no JC command */
-            let editor_status = crate::eval::flow!(crate::eval::evalstring(
-                sh,
-                BStr::new(&editcmdbuf),
-                crate::eval::EvalContext::DEFAULT,
-            ));
-            INTON(sh);
-
             if editor_status.success() {
                 let edited = nsh_platform::read_path(&path).map_err(|error| {
                     let mut message = b"can't read temporary file ".to_vec();

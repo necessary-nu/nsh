@@ -20,7 +20,6 @@ use core::ffi::c_int;
 use nsh_platform::Descriptor;
 use std::io::Write;
 
-use crate::error::{INTOFF, INTON};
 use crate::fd::LogicalDescriptor;
 use crate::options::ShellOption;
 // [spec:nsh:def:idiom.shell-options]
@@ -550,10 +549,10 @@ fn release_strpush(sh: &mut crate::context::Shell, mut list: Vec<StrPush>) {
 // [spec:dash:def:input.freestrings-fn]
 // [spec:dash:sem:input.freestrings-fn]
 fn freestrings(sh: &mut crate::context::Shell) {
-    INTOFF(sh);
-    let list = core::mem::take(&mut cur_pf(sh).spfree);
-    release_strpush(sh, list);
-    INTON(sh);
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        let list = core::mem::take(&mut cur_pf(sh).spfree);
+        release_strpush(sh, list);
+    });
 }
 
 /*
@@ -837,13 +836,6 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
 // [spec:dash:sem:input.preadbuffer-fn]
 fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<InputUnit, Error> {
     let first: c_int = (sh.input.whichprompt == 1) as c_int;
-    let mut something: c_int;
-    let mut savec: u8 = 0;
-    let mut more: c_int;
-    /* The C's `q`, as an index into `buf`. */
-    let mut q: usize;
-    let mut nr: c_int;
-    let mut save = false;
 
     if (cur_pf(sh).eof & 2) != 0 {
         /* eof: */
@@ -852,145 +844,126 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
     }
     sh.io.flushall();
 
-    q = cur_pf(sh).pos;
-    something = (first == 0) as c_int;
+    let buffered = crate::error::with_interrupts_deferred(sh, |sh| {
+        let mut q = cur_pf(sh).pos;
+        let mut something = (first == 0) as c_int;
+        let mut more = input_get_lleft(cur_pf(sh));
+        let mut save = false;
+        let mut savec = 0;
 
-    more = input_get_lleft(cur_pf(sh));
-
-    INTOFF(sh);
-    'outer: loop {
-        if more <= 0 {
-            /* again: */
-            nr = (q - cur_pf(sh).pos) as c_int;
-            input_set_lleft(cur_pf(sh), nr);
-            more = preadfd(sh)?;
-            q = cur_pf(sh).pos + nr as usize;
+        'outer: loop {
             if more <= 0 {
-                cur_pf(sh).nleft = 0;
-                input_set_lleft(cur_pf(sh), 0);
-                if !IS_DEFINED_SMALL && nr > 0 {
-                    save = true;
-                    break 'outer; /* goto save */
-                }
-                INTON(sh);
-                /* **An interrupted read is not end of input.** The C could
-                 * not reach this line with an interrupt pending, because
-                 * its delivery left from *inside* the read by longjmp;
-                 * with delivery moved to a poll site, a `read` that came
-                 * back EINTR arrives here looking exactly like a `read`
-                 * that came back 0, and reporting end-of-input makes ^C behave
-                 * like ^D -- the shell exits instead of printing a fresh
-                 * prompt. The pty cases `^C in emacs mode`, `^C in vi
-                 * mode` and `^C during a blocked read` are what said so.
-                 *
-                 * The poll is here rather than inside `preadfd` because
-                 * this frame holds INTOFF across the read, so nothing
-                 * under it is due; this is the instruction where the
-                 * counter comes back to zero, which is where the C
-                 * delivered a *deferred* interrupt too. It also covers
-                 * the line editor, whose failed read reaches the same
-                 * line through `preadfd`'s `Err(_) => 0`. */
-                if let Some(e) = crate::error::poll_interrupt(sh) {
-                    return Err(e);
-                }
-                /* goto eof */
-                cur_pf(sh).eof = 3;
-                return Ok(InputUnit::EndOfInput);
-            }
-        }
-
-        if IS_DEFINED_SMALL {
-            q += more as usize;
-            more = 0;
-            break 'outer; /* goto done */
-        }
-
-        /* delete nul characters */
-        loop {
-            let byte: u8;
-
-            more -= 1;
-            byte = cur_pf(sh).buf[q];
-
-            if byte == 0 && !preserve_nul {
-                let pf = cur_pf(sh);
-                pf.buf.copy_within(q + 1..q + 1 + more as usize, q);
-                /* goto check */
-            } else {
-                q += 1;
-
-                if byte == b'\n' {
-                    let previous = {
-                        let pf = cur_pf(sh);
-                        (q - pf.pos >= 2).then(|| pf.buf[q - 2])
-                    };
-                    if nsh_platform::input_newline_width(previous) == 2 {
-                        // Keep the unread tail contiguous when the platform
-                        // treats the preceding CR as part of this newline.
-                        let pf = cur_pf(sh);
-                        pf.buf.copy_within(q - 1..q + more as usize, q - 2);
-                        q -= 1;
+                /* again: */
+                let nr = (q - cur_pf(sh).pos) as c_int;
+                input_set_lleft(cur_pf(sh), nr);
+                more = preadfd(sh)?;
+                q = cur_pf(sh).pos + nr as usize;
+                if more <= 0 {
+                    cur_pf(sh).nleft = 0;
+                    input_set_lleft(cur_pf(sh), 0);
+                    if !IS_DEFINED_SMALL && nr > 0 {
+                        save = true;
+                        break 'outer;
                     }
-                    break 'outer; /* goto done */
-                }
-                if byte != b'\t' && byte != b' ' {
-                    something = 1;
+                    return Ok(None);
                 }
             }
 
-            /* check: */
-            if more <= 0 {
-                continue 'outer; /* goto again */
+            if IS_DEFINED_SMALL {
+                q += more as usize;
+                more = 0;
+                break 'outer;
+            }
+
+            /* delete nul characters */
+            loop {
+                let byte: u8;
+
+                more -= 1;
+                byte = cur_pf(sh).buf[q];
+
+                if byte == 0 && !preserve_nul {
+                    let pf = cur_pf(sh);
+                    pf.buf.copy_within(q + 1..q + 1 + more as usize, q);
+                    /* goto check */
+                } else {
+                    q += 1;
+
+                    if byte == b'\n' {
+                        let previous = {
+                            let pf = cur_pf(sh);
+                            (q - pf.pos >= 2).then(|| pf.buf[q - 2])
+                        };
+                        if nsh_platform::input_newline_width(previous) == 2 {
+                            // Keep the unread tail contiguous when the platform
+                            // treats the preceding CR as part of this newline.
+                            let pf = cur_pf(sh);
+                            pf.buf.copy_within(q - 1..q + more as usize, q - 2);
+                            q -= 1;
+                        }
+                        break 'outer;
+                    }
+                    if byte != b'\t' && byte != b' ' {
+                        something = 1;
+                    }
+                }
+
+                /* check: */
+                if more <= 0 {
+                    continue 'outer;
+                }
             }
         }
-    }
 
-    if !save {
-        /* done: */
-        input_set_lleft(cur_pf(sh), more);
-    }
-
-    /* save: */
-    {
-        let pf = cur_pf(sh);
-        pf.nleft = (q - pf.pos) as c_int - 1;
-        if !IS_DEFINED_SMALL {
-            savec = pf.buf[q];
+        if !save {
+            input_set_lleft(cur_pf(sh), more);
         }
-        pf.buf[q] = b'\0';
-    }
 
-    let line = {
-        let pf = cur_pf(sh);
-        pf.buf[pf.pos..q].to_vec()
-    };
-
-    // A forced-interactive command file is the shell's top-level input even
-    // though it is not descriptor 0. Retain it, but not nested `source`,
-    // dot, eval, or command-substitution frames.
-    // [spec:nsh:req:compat.smoosh.history-builtin]
-    let top_level_history_input = cur_pf(sh).uses_stdin || sh.input.cur == sh.input.top;
-    if top_level_history_input
-        && crate::histedit::history_active(sh)
-        && !sh.options.enabled(ShellOption::NoLog)
-        && something != 0
-    {
-        let bytes = {
+        {
             let pf = cur_pf(sh);
-            &pf.buf[pf.pos..q]
+            pf.nleft = (q - pf.pos) as c_int - 1;
+            if !IS_DEFINED_SMALL {
+                savec = pf.buf[q];
+            }
+            pf.buf[q] = b'\0';
+        }
+
+        let line = {
+            let pf = cur_pf(sh);
+            pf.buf[pf.pos..q].to_vec()
         };
-        let bytes = bytes.to_vec();
-        crate::histedit::record_history_line(sh, &bytes, first != 0, true);
-    }
-    INTON(sh);
-    /* This frame brackets the read in INTOFF/INTON, so an interrupt that
-     * arrived during it is pending rather than taken, and the C delivered
-     * it right here when the counter reached zero. Polling at the call
-     * site rather than inside `INTON` is what keeps `INTON` infallible
-     * (§4.3) while leaving the delivery point where it was. */
+
+        // A forced-interactive command file is the shell's top-level input even
+        // though it is not descriptor 0. Retain it, but not nested `source`,
+        // dot, eval, or command-substitution frames.
+        // [spec:nsh:req:compat.smoosh.history-builtin]
+        let top_level_history_input = cur_pf(sh).uses_stdin || sh.input.cur == sh.input.top;
+        if top_level_history_input
+            && crate::histedit::history_active(sh)
+            && !sh.options.enabled(ShellOption::NoLog)
+            && something != 0
+        {
+            let bytes = {
+                let pf = cur_pf(sh);
+                &pf.buf[pf.pos..q]
+            };
+            let bytes = bytes.to_vec();
+            crate::histedit::record_history_line(sh, &bytes, first != 0, true);
+        }
+        Ok::<_, Error>(Some((line, q, savec)))
+    })?;
+
+    /* A read interrupted while this scope was active becomes deliverable at
+     * this explicit polling boundary, after the prior deferral depth has been
+     * restored. */
     if let Some(e) = crate::error::poll_interrupt(sh) {
         return Err(e);
     }
+
+    let Some((line, q, savec)) = buffered else {
+        cur_pf(sh).eof = 3;
+        return Ok(InputUnit::EndOfInput);
+    };
 
     if sh.options.enabled(ShellOption::Verbose) {
         let _ = sh.io.stderr().write_all(&line);
@@ -1035,67 +1008,67 @@ pub fn pungetc(sh: &mut Shell) {
 // [spec:dash:sem:input.pushstring-fn]
 pub fn pushstring(sh: &mut Shell, s: &BStr, alias_name: Option<BString>) {
     let len = s.len();
-    INTOFF(sh);
-    if let Some(name) = &alias_name {
-        crate::alias::begin_expansion(sh, BStr::new(name.as_slice()));
-    }
-    /*dprintf("*** calling pushstring: %s, %d\n", s, len);*/
-    /* The C picks between `basestrpush` and a `ckmalloc` here; a `Vec`
-     * needs neither, and the condition it picked on was only ever about
-     * whether the inline slot was still spoken for. */
-    let pf = cur_pf(sh);
-    let mut string: Vec<u8> = Vec::with_capacity(len as usize + 1);
-    string.extend_from_slice(s);
-    string.push(0);
-    let sp = StrPush {
-        prevpos: pf.pos,
-        prevnleft: pf.nleft,
-        unget: pf.unget,
-        spfree: core::mem::take(&mut pf.spfree),
-        alias_name,
-        string,
-    };
-    /* The C reads on through `ap->val`, which points into `ap->name`; this
-     * reads the copy, so redefining the alias mid-expansion cannot pull the
-     * text out from under the cursor and `popstring` has nothing to free. */
-    pf.pos = 0;
-    pf.nleft = len as c_int;
-    pf.unget = 0;
-    pf.strpush.push(sp);
-    INTON(sh);
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        if let Some(name) = &alias_name {
+            crate::alias::begin_expansion(sh, BStr::new(name.as_slice()));
+        }
+        /*dprintf("*** calling pushstring: %s, %d\n", s, len);*/
+        /* The C picks between `basestrpush` and a `ckmalloc` here; a `Vec`
+         * needs neither, and the condition it picked on was only ever about
+         * whether the inline slot was still spoken for. */
+        let pf = cur_pf(sh);
+        let mut string: Vec<u8> = Vec::with_capacity(len + 1);
+        string.extend_from_slice(s);
+        string.push(0);
+        let sp = StrPush {
+            prevpos: pf.pos,
+            prevnleft: pf.nleft,
+            unget: pf.unget,
+            spfree: core::mem::take(&mut pf.spfree),
+            alias_name,
+            string,
+        };
+        /* The C reads on through `ap->val`, which points into `ap->name`; this
+         * reads the copy, so redefining the alias mid-expansion cannot pull the
+         * text out from under the cursor and `popstring` has nothing to free. */
+        pf.pos = 0;
+        pf.nleft = len as c_int;
+        pf.unget = 0;
+        pf.strpush.push(sp);
+    });
 }
 
 // [spec:dash:def:input.popstring-fn]
 // [spec:dash:sem:input.popstring-fn]
 // [spec:posix:req:token.alias-trailing-blank-chaining]
 fn popstring(sh: &mut Shell) {
-    INTOFF(sh);
-    let pf = cur_pf(sh);
-    let mut sp = pf.strpush.pop().unwrap();
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        let pf = cur_pf(sh);
+        let mut sp = pf.strpush.pop().unwrap();
 
-    /* The C compares `nextc` against `sp->string`, which is `ap->name` —
-     * the base of the allocation `ap->val` points into — so the test reads
-     * as "always true" and the byte it then looks at is the one before the
-     * cursor. Against the copy the same test means "at least one character
-     * consumed", and the two agree: with none consumed the C reads the `=`
-     * that ends the alias name, which is neither a space nor a tab. */
-    let boundary =
-        sp.alias_name.is_some() && pf.pos > 0 && matches!(sp.string[pf.pos - 1], b' ' | b'\t');
-    pf.pos = sp.prevpos;
-    pf.nleft = sp.prevnleft;
-    pf.unget = sp.unget;
-    /*dprintf("*** calling popstring: restoring to '%s'\n", parsenextc);*/
-    /* `parsefile->spfree = sp` with `sp->spfree` already holding the chain
-     * that was hidden when `sp` was pushed. Anything the current chain still
-     * held is dropped, which is what the C's assignment does to it. */
-    pf.spfree = core::mem::take(&mut sp.spfree);
-    pf.spfree.push(sp);
-    /* Set after the frame's borrow ends; it is a flag on the stack, not
-     * on the frame, and nothing between here and there reads it. */
-    if boundary {
-        sh.input.alias_boundary = true;
-    }
-    INTON(sh);
+        /* The C compares `nextc` against `sp->string`, which is `ap->name` —
+         * the base of the allocation `ap->val` points into — so the test reads
+         * as "always true" and the byte it then looks at is the one before the
+         * cursor. Against the copy the same test means "at least one character
+         * consumed", and the two agree: with none consumed the C reads the `=`
+         * that ends the alias name, which is neither a space nor a tab. */
+        let boundary =
+            sp.alias_name.is_some() && pf.pos > 0 && matches!(sp.string[pf.pos - 1], b' ' | b'\t');
+        pf.pos = sp.prevpos;
+        pf.nleft = sp.prevnleft;
+        pf.unget = sp.unget;
+        /*dprintf("*** calling popstring: restoring to '%s'\n", parsenextc);*/
+        /* `parsefile->spfree = sp` with `sp->spfree` already holding the chain
+         * that was hidden when `sp` was pushed. Anything the current chain still
+         * held is dropped, which is what the C's assignment does to it. */
+        pf.spfree = core::mem::take(&mut sp.spfree);
+        pf.spfree.push(sp);
+        /* Set after the frame's borrow ends; it is a flag on the stack, not
+         * on the frame, and nothing between here and there reads it. */
+        if boundary {
+            sh.input.alias_boundary = true;
+        }
+    });
 }
 
 /*
@@ -1110,24 +1083,22 @@ pub fn setinputfile(
     fname: &BStr,
     flags: c_int,
 ) -> Result<bool, Error> {
-    INTOFF(sh);
-    let Some(fd) = crate::redir::sh_open_read(sh, fname, flags & INPUT_NOFILE_OK)? else {
-        INTON(sh);
-        return Ok(false); /* goto out */
-    };
-    install_input_file(sh, fd, flags)?;
-    INTON(sh);
-    Ok(true)
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        let Some(fd) = crate::redir::sh_open_read(sh, fname, flags & INPUT_NOFILE_OK)? else {
+            return Ok(false);
+        };
+        install_input_file(sh, fd, flags)?;
+        Ok(true)
+    })
 }
 
 /// Set the top-level input from the command file named on `sh`'s command line.
 // [spec:posix:req:sh.exit-status-values]
 pub fn set_command_input_file(sh: &mut crate::context::Shell, fname: &BStr) -> Result<(), Error> {
-    INTOFF(sh);
-    let fd = crate::redir::sh_open_command_file(sh, fname)?;
-    install_input_file(sh, fd, 0)?;
-    INTON(sh);
-    Ok(())
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        let fd = crate::redir::sh_open_command_file(sh, fname)?;
+        install_input_file(sh, fd, 0)
+    })
 }
 
 fn install_input_file(sh: &mut Shell, mut fd: Descriptor, flags: c_int) -> Result<(), Error> {
@@ -1164,21 +1135,21 @@ fn setinputfd(sh: &mut Shell, fd: Descriptor, push: c_int, dot_operand: bool) {
 // [spec:dash:def:input.setinputstring-fn]
 // [spec:dash:sem:input.setinputstring-fn]
 pub fn setinputstring(sh: &mut Shell, string: &BStr) {
-    INTOFF(sh);
-    pushfile(sh);
-    let len = string.len();
-    let pf = cur_pf(sh);
-    /* The C points `nextc` at the caller's string and reads it in place,
-     * which is why `evalstring` has to keep its `sstrdup` alive across the
-     * `popfile` and why `parsebackq` cannot release the stack block it
-     * grabbed. The level owns its text here. */
-    pf.buf = Vec::with_capacity(len + 1);
-    pf.buf.extend_from_slice(string);
-    pf.buf.push(0);
-    pf.pos = 0;
-    pf.nleft = len as c_int;
-    pf.eof = 2;
-    INTON(sh);
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        pushfile(sh);
+        let len = string.len();
+        let pf = cur_pf(sh);
+        /* The C points `nextc` at the caller's string and reads it in place,
+         * which is why `evalstring` has to keep its `sstrdup` alive across the
+         * `popfile` and why `parsebackq` cannot release the stack block it
+         * grabbed. The level owns its text here. */
+        pf.buf = Vec::with_capacity(len + 1);
+        pf.buf.extend_from_slice(string);
+        pf.buf.push(0);
+        pf.pos = 0;
+        pf.nleft = len as c_int;
+        pf.eof = 2;
+    });
 }
 
 /*
@@ -1203,11 +1174,11 @@ fn pushfile(sh: &mut Shell) {
 // [spec:dash:def:input.pushstdin-fn]
 // [spec:dash:sem:input.pushstdin-fn]
 pub fn pushstdin(sh: &mut Shell) {
-    INTOFF(sh);
-    let from = sh.input.cur;
-    pf_at(sh, 0).prev = Some(from);
-    sh.input.cur = 0;
-    INTON(sh);
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        let from = sh.input.cur;
+        pf_at(sh, 0).prev = Some(from);
+        sh.input.cur = 0;
+    });
 }
 
 // [spec:dash:def:input.popfile-fn]
@@ -1215,46 +1186,44 @@ pub fn pushstdin(sh: &mut Shell) {
 pub fn popfile(sh: &mut crate::context::Shell) {
     let dying: usize = sh.input.cur;
 
-    INTOFF(sh);
-    /* The C reads `pf->prev` into the global unconditionally, so popping
-     * `basepf` when nothing pushed it leaves `parsefile` NULL; there is no
-     * such value here and the base frame stays current. */
-    let to = pf_at(sh, dying).prev.take().unwrap_or(0);
-    sh.input.cur = to;
-    if dying == 0 {
-        INTON(sh);
-        return; /* goto out */
-    }
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        /* The C reads `pf->prev` into the global unconditionally, so popping
+         * `basepf` when nothing pushed it leaves `parsefile` NULL; there is no
+         * such value here and the base frame stays current. */
+        let to = pf_at(sh, dying).prev.take().unwrap_or(0);
+        sh.input.cur = to;
+        if dying == 0 {
+            return;
+        }
 
-    let frames = &mut *&mut sh.input.frames;
-    debug_assert_eq!(dying, frames.len());
-    let mut pf = frames.pop().unwrap();
-    /* `set_cur(cur)` stood here to re-derive the cached frame pointer,
-     * because popping the `Vec` can move the remaining frames. The index
-     * does not move with them, so with the cache gone this was a
-     * self-assignment and says nothing. */
+        let frames = &mut *&mut sh.input.frames;
+        debug_assert_eq!(dying, frames.len());
+        let mut pf = frames.pop().unwrap();
+        /* `set_cur(cur)` stood here to re-derive the cached frame pointer,
+         * because popping the `Vec` can move the remaining frames. The index
+         * does not move with them, so with the cache gone this was a
+         * self-assignment and says nothing. */
 
-    drop(pf.owned_fd.take());
-    /* `ckfree(pf->buf)` */
-    drop(core::mem::take(&mut pf.buf));
-    if !cur_pf(sh).spfree.is_empty() {
-        freestrings(sh);
-    }
-    /* `ckfree(pf)` takes the dying level's `spfree` chain with it, and the
-     * `ALIASINUSE` bits on it are never cleared: an alias expanded inside an
-     * old-style backquote, or any other level that ends with the alias
-     * already popped but not yet freed, stays marked in use for the rest of
-     * the shell's life and never expands again. That is observable, so the
-     * chain is dropped here rather than released.
-     *
-     * The C's `while (pf->strpush) { popstring(); … }` above the free reads
-     * `parsefile->strpush`, and `parsefile` was moved to the outer level two
-     * lines earlier — so the loop pops the wrong stack and then walks into a
-     * NULL `strpush`. It cannot run in any case that survives; these go the
-     * same way as the chain. */
-    drop(pf);
-
-    INTON(sh);
+        drop(pf.owned_fd.take());
+        /* `ckfree(pf->buf)` */
+        drop(core::mem::take(&mut pf.buf));
+        if !cur_pf(sh).spfree.is_empty() {
+            freestrings(sh);
+        }
+        /* `ckfree(pf)` takes the dying level's `spfree` chain with it, and the
+         * `ALIASINUSE` bits on it are never cleared: an alias expanded inside an
+         * old-style backquote, or any other level that ends with the alias
+         * already popped but not yet freed, stays marked in use for the rest of
+         * the shell's life and never expands again. That is observable, so the
+         * chain is dropped here rather than released.
+         *
+         * The C's `while (pf->strpush) { popstring(); … }` above the free reads
+         * `parsefile->strpush`, and `parsefile` was moved to the outer level two
+         * lines earlier — so the loop pops the wrong stack and then walks into a
+         * NULL `strpush`. It cannot run in any case that survives; these go the
+         * same way as the chain. */
+        drop(pf);
+    });
 }
 
 // [spec:dash:def:input.unwindfiles-fn]
@@ -1287,21 +1256,21 @@ pub fn flush_input(sh: &mut Shell) {
      * borrow ends at the `let`). */
     let base = pf_at(sh, 0);
     let left: c_int = base.nleft + input_get_lleft(base);
-    INTOFF(sh);
-    if sh.input.stdin_state.seekable != 0 && left != 0 {
-        if let Some(stdin) = sh.fds.get(LogicalDescriptor::STDIN) {
-            let _ = nsh_platform::seek_relative(&stdin, -(left as i64));
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        if sh.input.stdin_state.seekable != 0 && left != 0 {
+            if let Some(stdin) = sh.fds.get(LogicalDescriptor::STDIN) {
+                let _ = nsh_platform::seek_relative(&stdin, -(left as i64));
+            }
+        } else if sh.input.stdin_state.pending > left {
+            /* `basebuf` is scratch here; the bytes are being discarded. */
+            let pending = sh.input.stdin_state.pending;
+            flush_tee(sh, BUFSIZ, pending - left);
+            sh.input.stdin_state.pending = 0;
         }
-    } else if sh.input.stdin_state.pending > left {
-        /* `basebuf` is scratch here; the bytes are being discarded. */
-        let pending = sh.input.stdin_state.pending;
-        flush_tee(sh, BUFSIZ, pending - left);
-        sh.input.stdin_state.pending = 0;
-    }
-    let base = pf_at(sh, 0);
-    base.nleft = 0;
-    input_set_lleft(base, 0);
-    INTON(sh);
+        let base = pf_at(sh, 0);
+        base.nleft = 0;
+        input_set_lleft(base, 0);
+    });
 }
 
 // [spec:dash:def:input.reset-input-fn]

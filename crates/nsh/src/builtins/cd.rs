@@ -17,7 +17,6 @@ use nsh_platform::ShellBytesExt as _;
 use std::io::Write;
 
 use crate::cd::{Pwd, cbytes, setpwd_inner};
-use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
 use crate::options::Options;
 
@@ -190,69 +189,63 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:xcurel.change-cwd]
 // [spec:nsh:req:idiom.platform-errors]
 fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<CdResult, Error> {
-    let mut logical = None;
-    let err: c_int;
-
     /* `TRACE(("docd(sh, \"%s\", %d) called\n", dest, flags));` — `#ifdef DEBUG`
      * in `shell.h`, and the dash build does not define it. */
-
-    INTOFF(sh);
-    if (flags & CD_PHYSICAL) == 0 {
-        logical = updatepwd(sh, dest);
-    }
-    /* `chdir(2)` either way -- std saves the `CString` and makes the same
-     * call, and the result is folded back to the C's 0/-1 because `docd`
-     * is a `chdir` return code to every one of its callers. */
-    let target = logical
-        .as_ref()
-        .map(|dir| dir.as_slice().as_bstr())
-        .unwrap_or(dest);
-    err = match target
-        .try_to_path_buf()
-        .and_then(|path| nsh_platform::set_current_directory(&path))
-    {
-        Ok(()) => 0,
-        // [spec:posix:req:builtin.cd.step9-path-max-relative]
-        // `updatepwd` constructed this absolute path by prefixing PWD. If the
-        // kernel rejects only that combined spelling as too long, POSIX says
-        // the original short relative operand must still be used when that
-        // conversion is possible.
-        Err(error)
-            if logical.is_some()
-                && !nsh_platform::shell_path_is_absolute(dest)
-                && nsh_platform::is_path_error(
-                    &error,
-                    nsh_platform::PathErrorKind::NameTooLong,
-                ) =>
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        let logical = if (flags & CD_PHYSICAL) == 0 {
+            updatepwd(sh, dest)
+        } else {
+            None
+        };
+        /* `chdir(2)` either way -- std saves the `CString` and makes the same
+         * call, and the result is folded back to the C's 0/-1 because `docd`
+         * is a `chdir` return code to every one of its callers. */
+        let target = logical
+            .as_ref()
+            .map(|dir| dir.as_slice().as_bstr())
+            .unwrap_or(dest);
+        let err = match target
+            .try_to_path_buf()
+            .and_then(|path| nsh_platform::set_current_directory(&path))
         {
-            match dest
-                .try_to_path_buf()
-                .and_then(|path| nsh_platform::set_current_directory(&path))
+            Ok(()) => 0,
+            // [spec:posix:req:builtin.cd.step9-path-max-relative]
+            // `updatepwd` constructed this absolute path by prefixing PWD. If the
+            // kernel rejects only that combined spelling as too long, POSIX says
+            // the original short relative operand must still be used when that
+            // conversion is possible.
+            Err(error)
+                if logical.is_some()
+                    && !nsh_platform::shell_path_is_absolute(dest)
+                    && nsh_platform::is_path_error(
+                        &error,
+                        nsh_platform::PathErrorKind::NameTooLong,
+                    ) =>
             {
-                Ok(()) => 0,
-                Err(_) => -1,
+                match dest
+                    .try_to_path_buf()
+                    .and_then(|path| nsh_platform::set_current_directory(&path))
+                {
+                    Ok(()) => 0,
+                    Err(_) => -1,
+                }
             }
+            Err(_) => -1,
+        };
+        if err == 0 {
+            match logical.as_ref() {
+                Some(dir) => setpwd_inner(sh, Pwd::New(dir.as_slice().as_bstr()), 1)?,
+                None => setpwd_inner(sh, Pwd::Unknown, 1)?,
+            }
+            crate::exec::hashcd(sh);
         }
-        Err(_) => -1,
-    };
-    if err == 0 {
-        /* The `?` returns between the INTOFF above and the INTON below,
-         * leaking the interrupt counter exactly as the longjmp out of
-         * `sh_error` did; see docs/errors-are-values.md 2.4. */
-        match logical.as_ref() {
-            Some(dir) => setpwd_inner(sh, Pwd::New(dir.as_slice().as_bstr()), 1)?,
-            None => setpwd_inner(sh, Pwd::Unknown, 1)?,
-        }
-        crate::exec::hashcd(sh);
-    }
-    /* out: */
-    INTON(sh);
-    Ok(if err != 0 {
-        CdResult::Failed
-    } else if logical.is_none() && sh.cwd.curdir.is_none() {
-        CdResult::ChangedPwdUnknown
-    } else {
-        CdResult::Changed
+        Ok(if err != 0 {
+            CdResult::Failed
+        } else if logical.is_none() && sh.cwd.curdir.is_none() {
+            CdResult::ChangedPwdUnknown
+        } else {
+            CdResult::Changed
+        })
     })
 }
 

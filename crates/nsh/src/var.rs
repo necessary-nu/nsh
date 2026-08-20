@@ -17,7 +17,7 @@ use std::ffi::OsString;
 use std::io::Write as _;
 
 use crate::context::Shell;
-use crate::error::{Error, INTOFF, INTON};
+use crate::error::Error;
 use crate::options::{OptionSet, ShellOption, options_changed};
 // [spec:nsh:def:idiom.shell-options]
 
@@ -637,10 +637,9 @@ pub(crate) fn set_bytes(
     value: Option<&BStr>,
     attributes: VariableAttributes,
 ) -> Result<(), Error> {
-    INTOFF(sh);
-    let result = set_entry(sh, name, value, attributes, CallbackPolicy::Run);
-    INTON(sh);
-    result
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        set_entry(sh, name, value, attributes, CallbackPolicy::Run)
+    })
 }
 
 // [spec:dash:def:var.setvareq-fn]
@@ -664,16 +663,15 @@ pub(crate) fn setvarint_bytes(
     callback_policy: CallbackPolicy,
 ) -> Result<i64, Error> {
     let text = value.to_string();
-    INTOFF(sh);
-    let result = set_entry(
-        sh,
-        name,
-        Some(BStr::new(text.as_bytes())),
-        attributes,
-        callback_policy,
-    );
-    INTON(sh);
-    result?;
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        set_entry(
+            sh,
+            name,
+            Some(BStr::new(text.as_bytes())),
+            attributes,
+            callback_policy,
+        )
+    })?;
     Ok(value)
 }
 
@@ -763,35 +761,34 @@ pub(crate) fn make_local_bytes(
     assignment: &BStr,
     attributes: VariableAttributes,
 ) -> Result<(), Error> {
-    INTOFF(sh);
-    if assignment == b"-" {
-        let saved = sh.options.state;
-        sh.vars.push_local(LocalVar::Options(saved));
-        INTON(sh);
-        return Ok(());
-    }
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        if assignment == b"-" {
+            let saved = sh.options.state;
+            sh.vars.push_local(LocalVar::Options(saved));
+            return Ok(());
+        }
 
-    let name = varname(assignment).to_owned();
-    if let Some(previous) = sh.vars.tab.get(&name).cloned() {
-        sh.vars.push_local(LocalVar::Saved {
-            name: name.clone(),
-            previous,
-        });
-        if assignment.contains(&b'=') {
-            set_assignment_bytes(sh, assignment, attributes)?;
-        }
-    } else {
-        let mut attributes = attributes;
-        attributes.fixed = true;
-        if assignment.contains(&b'=') {
-            set_assignment_bytes(sh, assignment, attributes)?;
+        let name = varname(assignment).to_owned();
+        if let Some(previous) = sh.vars.tab.get(&name).cloned() {
+            sh.vars.push_local(LocalVar::Saved {
+                name: name.clone(),
+                previous,
+            });
+            if assignment.contains(&b'=') {
+                set_assignment_bytes(sh, assignment, attributes)?;
+            }
         } else {
-            set_bytes(sh, BStr::new(name.as_slice()), None, attributes)?;
+            let mut attributes = attributes;
+            attributes.fixed = true;
+            if assignment.contains(&b'=') {
+                set_assignment_bytes(sh, assignment, attributes)?;
+            } else {
+                set_bytes(sh, BStr::new(name.as_slice()), None, attributes)?;
+            }
+            sh.vars.push_local(LocalVar::Created(name));
         }
-        sh.vars.push_local(LocalVar::Created(name));
-    }
-    INTON(sh);
-    Ok(())
+        Ok(())
+    })
 }
 
 // [spec:dash:def:var.pushlocalvars-fn]
@@ -799,54 +796,54 @@ pub(crate) fn make_local_bytes(
 pub fn pushlocalvars(sh: &mut Shell, push: c_int) -> usize {
     let top = sh.vars.locals.len();
     if push != 0 {
-        INTOFF(sh);
-        sh.vars.locals.push(LocalVarList {
-            entries: Vec::new(),
+        crate::error::with_interrupts_deferred(sh, |sh| {
+            sh.vars.locals.push(LocalVarList {
+                entries: Vec::new(),
+            });
         });
-        INTON(sh);
     }
     top
 }
 
 fn poplocalvars(sh: &mut Shell) {
-    INTOFF(sh);
-    let mut frame = sh
-        .vars
-        .locals
-        .pop()
-        .expect("poplocalvars runs on a pushed frame");
-    while let Some(local) = frame.entries.pop() {
-        match local {
-            LocalVar::Options(saved) => {
-                sh.options.state = saved;
-                if let Err(error) = options_changed(sh) {
-                    sh.status = error.status();
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        let mut frame = sh
+            .vars
+            .locals
+            .pop()
+            .expect("poplocalvars runs on a pushed frame");
+        while let Some(local) = frame.entries.pop() {
+            match local {
+                LocalVar::Options(saved) => {
+                    sh.options.state = saved;
+                    if let Err(error) = options_changed(sh) {
+                        sh.status = error.status();
+                    }
                 }
-            }
-            LocalVar::Created(name) => {
-                let callback = sh
-                    .vars
-                    .tab
-                    .remove(&name)
-                    .map_or(Callback::None, |var| var.callback);
-                if callback == Callback::Locale {
-                    run_callback(sh, callback, BStr::new(name.as_slice()), None);
+                LocalVar::Created(name) => {
+                    let callback = sh
+                        .vars
+                        .tab
+                        .remove(&name)
+                        .map_or(Callback::None, |var| var.callback);
+                    if callback == Callback::Locale {
+                        run_callback(sh, callback, BStr::new(name.as_slice()), None);
+                    }
                 }
-            }
-            LocalVar::Saved { name, previous } => {
-                let callback = previous.callback;
-                let value = previous.scalar_owned();
-                sh.vars.tab.insert(name.clone(), previous);
-                run_callback(
-                    sh,
-                    callback,
-                    BStr::new(name.as_slice()),
-                    value.as_ref().map(|value| BStr::new(value.as_slice())),
-                );
+                LocalVar::Saved { name, previous } => {
+                    let callback = previous.callback;
+                    let value = previous.scalar_owned();
+                    sh.vars.tab.insert(name.clone(), previous);
+                    run_callback(
+                        sh,
+                        callback,
+                        BStr::new(name.as_slice()),
+                        value.as_ref().map(|value| BStr::new(value.as_slice())),
+                    );
+                }
             }
         }
-    }
-    INTON(sh);
+    });
 }
 
 // [spec:dash:def:var.unwindlocalvars-fn]

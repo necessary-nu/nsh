@@ -12,7 +12,6 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 
-use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
 use crate::options::{options, optschanged, setparam};
 use crate::var::{VariableSelection, show_vars};
@@ -32,15 +31,13 @@ pub fn setcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         show_vars(sh, BStr::new(b""), VariableSelection::Set);
         return Ok(Flow::Done((0).into()));
     }
-    INTOFF(sh);
-    let scan = options(sh, args, 1, false)?;
-    /* The fourth `?` to return between this frame's INTOFF and its INTON,
-     * and left leaking with the other three: 2.4 is explicit that pairing
-     * them would move the instruction a pending SIGINT is delivered at. */
-    optschanged(sh)?;
-    if scan.next < args.len() {
-        setparam(sh, &args[scan.next..]);
-    }
-    INTON(sh);
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        let scan = options(sh, args, 1, false)?;
+        optschanged(sh)?;
+        if scan.next < args.len() {
+            setparam(sh, &args[scan.next..]);
+        }
+        Ok::<(), Error>(())
+    })?;
     Ok(Flow::Done((0).into()))
 }

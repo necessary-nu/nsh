@@ -9,7 +9,7 @@
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::c_int;
 
-use crate::error::{Error, INTOFF, INTON};
+use crate::error::Error;
 use crate::eval::Flow;
 use crate::options::ShellOption;
 // [spec:nsh:def:idiom.shell-options]
@@ -221,35 +221,32 @@ pub fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
 
     simplecmd = crate::parser::issimplecmd(n, BStr::new(crate::builtins::TRAPCMD.name.to_bytes()));
 
-    INTOFF(sh);
-    /* One guard for the whole loop -- the fork's single pair -- rather
-     * than one per slot. The `simplecmd` arm below clears a slot and puts
-     * it back with a `setsignal` in between, and a per-write guard would
-     * make each half atomic while leaving the shell observably untrapped
-     * across the pair. Hoisting closes that too, and costs one
-     * `sigprocmask` pair per fork against the ~100us of the fork itself. */
-    let blocked = crate::siginbox::SignalsBlocked::new();
-    for signo in 0..NSIG {
-        if !matches!(sh.traps.action(signo), TrapAction::Command(_)) {
-            continue;
-        }
-        let previous = sh.traps.set(&blocked, signo, TrapAction::Default);
-        if signo != 0 {
-            let signal =
-                Signal::from_number(signo as i32).expect("nonzero trap slots are positive signals");
-            setsignal_in_child(sh, signal);
-        }
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        /* One guard for the whole loop rather than one per slot. The
+         * `simplecmd` arm clears a slot and puts it back with a disposition
+         * update in between, so the whole transition is one scope. */
+        let blocked = crate::siginbox::SignalsBlocked::new();
+        for signo in 0..NSIG {
+            if !matches!(sh.traps.action(signo), TrapAction::Command(_)) {
+                continue;
+            }
+            let previous = sh.traps.set(&blocked, signo, TrapAction::Default);
+            if signo != 0 {
+                let signal = Signal::from_number(signo as i32)
+                    .expect("nonzero trap slots are positive signals");
+                setsignal_in_child(sh, signal);
+            }
 
-        if simplecmd != 0 {
-            drop(sh.traps.set(&blocked, signo, previous));
+            if simplecmd != 0 {
+                drop(sh.traps.set(&blocked, signo, previous));
+            }
+            /* The C leaks the previous action in the non-simple-command arm.
+             * This owned value drops it after the last possible restore. */
         }
-        /* The C leaks the previous action in the non-simple-command arm.
-         * This owned value drops it after the last possible restore. */
-    }
-    sh.traps.trapcnt = 0;
-    sh.traps.ptrap = simplecmd;
-    drop(blocked);
-    INTON(sh);
+        sh.traps.trapcnt = 0;
+        sh.traps.ptrap = simplecmd;
+        drop(blocked);
+    });
 }
 
 /// Which side of a `fork` a disposition change is being made on, and so

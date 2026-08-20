@@ -72,47 +72,42 @@ pub fn barrier() {
     compiler_fence(Ordering::SeqCst);
 }
 
-/* `#define INTOFF ({ suppressint++; barrier(); 0; })` */
-#[inline(always)]
-pub fn INTOFF(sh: &mut crate::context::Shell) -> c_int {
-    sh.interrupt_suppression += 1;
-    barrier();
-    0
+/// Nesting depth of shell interrupt deferral.
+// [spec:nsh:sem:idiom.interrupt-deferral]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct InterruptDeferral {
+    depth: usize,
 }
 
-/// `#define INTON ({ barrier(); if (--suppressint == 0 && intpending) onint(sh); 0; })`
-///
-/// The `onint(sh)` is gone and the rest is unchanged. That is step F, and
-/// it is the whole of the divergence `docs/divergences.md`'s
-/// `error.interrupt-delivery-point` records: the C delivers a pending
-/// interrupt at the instruction where the counter reaches zero, and this
-/// leaves `intpending` set for the next poll site to take.
-///
-/// **`INTON` stays infallible, deliberately.** §4.3 measured what making
-/// it fallible costs — 44 functions enter the fixpoint, and they are the
-/// shell's teardown: `popredir`, `unwindredir`, `unwindfiles`,
-/// `popallfiles`, `exitreset`, `freejob`, `ifsfree`. A design in which
-/// cleanup can fail while handling a failure is the wrong shape, and
-/// every call site would have to decide what to do with an error raised
-/// while handling an error.
-#[inline(always)]
-pub fn INTON(sh: &mut crate::context::Shell) -> c_int {
-    barrier();
-    sh.interrupt_suppression -= 1;
-    0
+impl InterruptDeferral {
+    pub(crate) const fn new() -> Self {
+        Self { depth: 0 }
+    }
 }
 
-/// `#define FORCEINTON ({ barrier(); suppressint = 0; if (intpending) onint(sh); 0; })`
+/// Run one operation while interrupt delivery is deferred.
 ///
-/// Same change, same reason. This one *resets* the counter rather than
-/// balancing it (§2.4), which is what makes it the top level's way of
-/// discarding a leak; discarding the leak and taking delivery were one
-/// operation in the C and are two now.
-#[inline(always)]
-pub fn FORCEINTON(sh: &mut crate::context::Shell) -> c_int {
+/// The previous depth is restored after any ordinary return, including an
+/// error or evaluator control value. Reaching depth zero does not deliver a
+/// pending interrupt; delivery remains the responsibility of
+/// [`poll_interrupt`] at a documented polling boundary.
+pub(crate) fn with_interrupts_deferred<T>(
+    sh: &mut crate::context::Shell,
+    body: impl FnOnce(&mut crate::context::Shell) -> T,
+) -> T {
+    let previous = sh.interrupt_deferral.depth;
+    sh.interrupt_deferral.depth = previous + 1;
     barrier();
-    sh.interrupt_suppression = 0;
-    0
+    let outcome = body(sh);
+    barrier();
+    sh.interrupt_deferral.depth = previous;
+    outcome
+}
+
+/// Reset legacy deferral at a top-level recovery boundary.
+pub(crate) fn clear_interrupt_deferral(sh: &mut crate::context::Shell) {
+    barrier();
+    sh.interrupt_deferral.depth = 0;
 }
 
 /* `#define CLEAR_PENDING_INT intpending = 0` */
@@ -125,9 +120,9 @@ pub fn CLEAR_PENDING_INT() {
 ///
 /// The question every poll site asks, in one place so that all of them
 /// ask it the same way. "Due" is *pending* and *not suppressed*: an
-/// `INTOFF` bracket still holds the interrupt off, exactly as it held off
-/// the C's asynchronous delivery, because the bracket is what makes the
-/// mutation inside it atomic against a signal.
+/// An active deferral scope still holds the interrupt off, exactly as the
+/// translated counter did, because the scope makes the mutation inside it
+/// atomic against delivery.
 ///
 /// There are five poll sites, and they are the places the shell reaches
 /// on its own rather than the places a signal happens to arrive:
@@ -144,7 +139,7 @@ pub fn CLEAR_PENDING_INT() {
 /// `intpending` as it delivers.
 #[inline]
 pub fn poll_interrupt(sh: &crate::context::Shell) -> Option<Error> {
-    if sh.interrupt_suppression == 0 && int_pending() != 0 {
+    if sh.interrupt_deferral.depth == 0 && int_pending() != 0 {
         Some(onint(sh))
     } else {
         None
@@ -181,58 +176,11 @@ pub fn int_pending() -> sig_atomic_t {
     crate::siginbox::signals().interrupt_pending() as sig_atomic_t
 }
 
-/// `#define INTOFF` — macro spelling, for call sites that keep the C shape.
-#[macro_export]
-macro_rules! INTOFF {
-    ($sh:expr) => {
-        $crate::error::INTOFF($sh)
-    };
-}
-
-/// `#define INTON` — macro spelling.
-#[macro_export]
-macro_rules! INTON {
-    ($sh:expr) => {
-        $crate::error::INTON($sh)
-    };
-}
-
-/// `#define FORCEINTON` — macro spelling.
-#[macro_export]
-macro_rules! FORCEINTON {
-    ($sh:expr) => {
-        $crate::error::FORCEINTON($sh)
-    };
-}
-
-/// `#define SAVEINT(v) ((v) = suppressint)`
-#[macro_export]
-macro_rules! SAVEINT {
-    ($sh:expr, $v:expr) => {
-        $v = $sh.interrupt_suppression
-    };
-}
-
-/// ```c
-/// #define RESTOREINT(v) \
-///	({ barrier(); if ((suppressint = (v)) == 0 && intpending) onint(sh); 0; })
-/// ```
-#[macro_export]
-macro_rules! RESTOREINT {
-    ($sh:expr, $v:expr) => {{
-        /* The `if (... && intpending) onint(sh)` is gone with the one in
-         * `INTON`; see there. */
-        $crate::error::barrier();
-        $sh.interrupt_suppression = $v;
-        0
-    }};
-}
-
 /*
  * Called from trap.c when a SIGINT is received.  (If the user specifies
  * that SIGINT is to be trapped or ignored using the trap builtin, then
  * this routine is not called.)  Suppressint is nonzero when interrupts
- * are held using the INTOFF macro.  (The test for iflag is just
+ * are held using the interrupt-deferral state. (The test for iflag is just
  * defensive programming.)
  */
 
@@ -240,10 +188,10 @@ macro_rules! RESTOREINT {
 ///
 /// The C raises `EXINT` from here and never returns. This returns the
 /// interrupt instead, and the change of shape is the whole of step F:
-/// `onsig` no longer calls it from inside the signal handler, and `INTON`
-/// no longer calls it when the counter reaches zero. It is called only
-/// from a *poll site* — a place the shell reached on its own and that can
-/// return a `Result`.
+/// `onsig` no longer calls it from inside the signal handler, and leaving a
+/// deferral scope is not itself delivery. It is called only from a *poll
+/// site* — a place the shell reached on its own and that can return a
+/// `Result`.
 ///
 /// Clearing `intpending` is the delivery. After this returns, the
 /// interrupt has been taken and the next poll site must not take it
@@ -680,19 +628,6 @@ pub fn errmsg(
     }
 }
 
-/*
- * `#ifdef REALLY_SMALL` — out-of-line body of INTON.  REALLY_SMALL is
- * not defined in the shipped build, so this is never called; it is kept
- * so the symbol has a home and stays in step with `INTON` above.
- */
-// [spec:dash:def:error.inton-fn]
-// [spec:dash:sem:error.inton-fn]
-pub fn __inton(sh: &mut crate::context::Shell) {
-    /* In step with `INTON` above, including the `onint(sh)` it no longer
-     * makes. */
-    sh.interrupt_suppression -= 1;
-}
-
 /* There is no setjmp/longjmp here, no stand-in for one, and no FFI
  * declaration of either — and now no `catch_unwind` and no `panic_any`
  * either. The last of it went with `errors-are-values`.
@@ -846,7 +781,7 @@ mod tests {
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
         as_interactive_root(sh);
-        sh.interrupt_suppression = 0;
+        sh.interrupt_deferral.depth = 0;
         crate::siginbox::signals().set_interrupt_pending(true);
 
         assert!(
@@ -856,28 +791,37 @@ mod tests {
         assert!(poll_interrupt(sh).is_none(), "and not a second time");
     }
 
-    /// **The INTOFF discipline, which the polling must not break.** An
-    /// interrupt that arrives inside an `INTOFF` bracket is pending but
+    /// An interrupt that arrives inside a deferral scope is pending but
     /// not *due*, and no poll site may take it there -- the bracket is
     /// what makes the mutation inside it atomic against a signal. This is
     /// the one property that distinguishes "delivery moved to a poll
     /// site" from "delivery moved anywhere at all".
     // [spec:dash:sem:error.inton-fn/test]
+    // [spec:nsh:sem:idiom.interrupt-deferral/test]
     #[test]
-    fn intoff_still_holds_it_off() {
+    fn nested_deferral_restores_depth() {
         let _g = crate::testutil::lock();
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
         as_interactive_root(sh);
-        sh.interrupt_suppression = 0;
+        sh.interrupt_deferral.depth = 0;
         crate::siginbox::signals().set_interrupt_pending(true);
 
-        INTOFF(sh);
-        assert!(poll_interrupt(sh).is_none(), "suppressed: not due");
-        /* And `INTON` does not deliver it either -- that is the
-         * divergence, and it is why the counter reaching zero is no
-         * longer a delivery point. */
-        INTON(sh);
+        with_interrupts_deferred(sh, |sh| {
+            assert_eq!(sh.interrupt_deferral.depth, 1);
+            with_interrupts_deferred(sh, |sh| {
+                assert_eq!(sh.interrupt_deferral.depth, 2);
+                assert!(poll_interrupt(sh).is_none(), "suppressed: not due");
+            });
+            assert_eq!(sh.interrupt_deferral.depth, 1);
+        });
+        assert_eq!(sh.interrupt_deferral.depth, 0);
+        let failed: Result<(), ()> = with_interrupts_deferred(sh, |sh| {
+            assert_eq!(sh.interrupt_deferral.depth, 1);
+            Err(())
+        });
+        assert_eq!(failed, Err(()));
+        assert_eq!(sh.interrupt_deferral.depth, 0);
         assert_eq!(int_pending(), 1, "still pending, waiting for a poll site");
         assert!(
             poll_interrupt(sh).is_some(),
@@ -894,7 +838,7 @@ mod tests {
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
         as_interactive_root(sh);
-        sh.interrupt_suppression = 0;
+        sh.interrupt_deferral.depth = 0;
         CLEAR_PENDING_INT();
 
         rearm_interrupt(Error::Interrupted {

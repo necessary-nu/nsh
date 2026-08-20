@@ -20,7 +20,7 @@ use nsh_platform::{
 };
 use std::io::Write as _;
 
-use crate::error::{Error, INTOFF, INTON};
+use crate::error::Error;
 use crate::fd::LogicalDescriptor;
 use crate::nodes::{
     DescriptorRedirectionOperator, DescriptorTarget, FileRedirectionOperator, Node, Redirection,
@@ -566,11 +566,11 @@ pub(crate) fn showjobs(
 // [spec:dash:def:jobs.freejob-fn]
 // [spec:dash:sem:jobs.freejob-fn]
 fn freejob(sh: &mut crate::context::Shell, jp: JobId) {
-    INTOFF(sh);
-    /* Taking the occupied slot releases all owned process text and terminal
-     * state exactly once, while `JobTable::remove` also repairs ordering. */
-    drop(sh.jobs.remove(jp));
-    INTON(sh);
+    crate::error::with_interrupts_deferred(sh, |sh| {
+        /* Taking the occupied slot releases all owned process text and terminal
+         * state exactly once, while `JobTable::remove` also repairs ordering. */
+        drop(sh.jobs.remove(jp));
+    });
 }
 
 /// Remove a successfully waited, completed job from both the job list and
@@ -1142,34 +1142,36 @@ fn waitone(
     let mut state = JobState::Running;
     let mut reported_status = None;
 
-    INTOFF(sh);
-    /* TRACE(("dowait(%d) called\n", block)); */
-    let waited = waitproc(sh, block)?;
-    /* TRACE(("wait returns pid %d, status=%d\n", pid, status)); */
-    if let WaitOutcome::Reaped { process, status } = waited {
-        reported_status = Some(status);
-        for id in sh.jobs.order_snapshot() {
-            if sh.jobs[id].is_done() {
-                continue;
-            }
-            let Some(next_state) = record_child_status(&mut sh.jobs[id], process, status) else {
-                continue;
-            };
-            thisjob = Some(id);
-            state = next_state;
-            if next_state != JobState::Running {
-                sh.jobs[id].changed = true;
-                if sh.jobs[id].transition_to(next_state) {
-                    /* TRACE(("Job %d: changing state from %d to %d\n", ...)); */
-                    if next_state == JobState::Stopped {
-                        sh.jobs.position_stopped(id);
+    let waited = crate::error::with_interrupts_deferred(sh, |sh| {
+        /* TRACE(("dowait(%d) called\n", block)); */
+        let waited = waitproc(sh, block)?;
+        /* TRACE(("wait returns pid %d, status=%d\n", pid, status)); */
+        if let WaitOutcome::Reaped { process, status } = waited {
+            reported_status = Some(status);
+            for id in sh.jobs.order_snapshot() {
+                if sh.jobs[id].is_done() {
+                    continue;
+                }
+                let Some(next_state) = record_child_status(&mut sh.jobs[id], process, status)
+                else {
+                    continue;
+                };
+                thisjob = Some(id);
+                state = next_state;
+                if next_state != JobState::Running {
+                    sh.jobs[id].changed = true;
+                    if sh.jobs[id].transition_to(next_state) {
+                        /* TRACE(("Job %d: changing state from %d to %d\n", ...)); */
+                        if next_state == JobState::Stopped {
+                            sh.jobs.position_stopped(id);
+                        }
                     }
                 }
+                break;
             }
-            break;
         }
-    }
-    INTON(sh);
+        Ok::<_, Error>(waited)
+    })?;
 
     if thisjob.is_some() && thisjob == jobp {
         let mut message = Vec::with_capacity(49);
@@ -1184,14 +1186,9 @@ fn waitone(
             let _ = sh.io.stderr().write_all(&message);
         }
     }
-    /* This frame brackets the whole wait in INTOFF/INTON, so the poll
-     * inside `waitproc` cannot fire under it -- and the C did not deliver
-     * there either. The C delivered at the `INTON` above, when the
-     * counter reached zero, and this is that instruction. Putting the
-     * poll at the call site rather than inside `INTON` is what keeps
-     * `INTON` infallible (§4.3) without moving the delivery point for the
-     * one path where it would have been visible: a ^C during a foreground
-     * command that does not itself die of the signal. */
+    /* A blocking wait can leave an interrupt pending while this structured
+     * scope is active. Deliver it only after the caller's prior depth has
+     * been restored. */
     if let Some(e) = crate::error::poll_interrupt(sh) {
         return Err(e);
     }

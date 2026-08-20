@@ -21,7 +21,6 @@ use bstr::{BStr, BString};
 use core::ffi::c_int;
 use std::io::Write;
 
-use crate::error::FORCEINTON;
 use crate::eval::EvalContext;
 use crate::jobs::JobDisplay;
 use crate::options::ShellOption;
@@ -238,7 +237,7 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
                     /* #if ATTY: && (!attyset() || equal(termval(), "emacs")) */
                     let _ = sh.io.stderr().write_all(b"\n");
                 }
-                FORCEINTON(sh);
+                crate::error::clear_interrupt_deferral(sh);
                 task = recovery.expect("recoverable startup task has a successor");
             }
         }
