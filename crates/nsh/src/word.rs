@@ -126,7 +126,6 @@ impl ParsedWord {
             bytes,
             at: 0,
             substitutions: substitutions.into_iter(),
-            quoted: false,
         };
         let word = decoder.word_until(None);
         debug_assert!(decoder.substitutions.next().is_none());
@@ -306,7 +305,6 @@ struct Decoder<'a, I> {
     bytes: &'a [u8],
     at: usize,
     substitutions: I,
-    quoted: bool,
 }
 
 impl<I> Decoder<'_, I>
@@ -315,6 +313,11 @@ where
 {
     fn word_until(&mut self, stop: Option<u8>) -> ParsedWord {
         let mut parts = Vec::new();
+        // Quote boundaries are local to each structural word. A parameter
+        // operand begins its own word even when the containing expansion is
+        // inside double quotes, so its first marker is still an opening
+        // boundary rather than a close inherited from the parent word.
+        let mut quoted = false;
         while self.at < self.bytes.len() {
             let byte = self.bytes[self.at];
             if Some(byte) == stop {
@@ -331,12 +334,12 @@ where
                 }
                 LEGACY_MULTIBYTE => self.decode_multibyte(&mut parts),
                 LEGACY_QUOTE => {
-                    let boundary = if self.quoted {
+                    let boundary = if quoted {
                         QuoteBoundary::Close
                     } else {
                         QuoteBoundary::Open
                     };
-                    self.quoted = !self.quoted;
+                    quoted = !quoted;
                     parts.push(WordPart::Quote(boundary));
                 }
                 LEGACY_PARAMETER => parts.push(WordPart::Parameter(self.decode_parameter())),

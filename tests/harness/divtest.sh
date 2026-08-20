@@ -670,6 +670,65 @@ printf '%s\n' "trap 'echo caught' PIPE; trap PIPE" > "$case_file"
 check "trap_p_option: no -p operand is outside the entry" 1 \
 	"$TRAP_P_REF" "$TRAP_P_PORT" 2 0 "$case_file"
 
+printf '%s\n' 'export LC_ALL=en_US.UTF-8; case héllo in h?llo) echo m;; *) echo n;; esac' > "$case_file"
+check "utf8_pattern_characters: exact character wildcard witness" 0 \
+	n m 0 0 "$case_file"
+[ "$DS_DIVERGENCE" = utf8_pattern_characters ] || no \
+	"utf8_pattern_characters: reports its own id (got ${DS_DIVERGENCE:-none})"
+check "utf8_pattern_characters: changed result is not excused" 1 \
+	n x 0 0 "$case_file"
+check "utf8_pattern_characters: differing status is not excused" 1 \
+	n m 0 1 "$case_file"
+printf '%s\n' 'export LC_ALL=en_US.UTF-8; echo n' > "$case_file"
+check "utf8_pattern_characters: unrelated UTF-8 case is outside" 1 \
+	n m 0 0 "$case_file"
+
+printf '%s\n' "IFS='é'; echo \${\$:+é} 'a\$b' a?c" > "$case_file"
+check "c_locale_multibyte_ifs: exact byte-splitting witness" 0 \
+	$'é a$b a?c' $'  a$b a?c' 0 0 "$case_file"
+[ "$DS_DIVERGENCE" = c_locale_multibyte_ifs ] || no \
+	"c_locale_multibyte_ifs: reports its own id (got ${DS_DIVERGENCE:-none})"
+check "c_locale_multibyte_ifs: changed spacing is not excused" 1 \
+	$'é a$b a?c' $' a$b a?c' 0 0 "$case_file"
+check "c_locale_multibyte_ifs: differing status is not excused" 1 \
+	$'é a$b a?c' $'  a$b a?c' 0 1 "$case_file"
+printf '%s\n' "IFS=':'; echo \${\$:+é} 'a\$b' a?c" > "$case_file"
+check "c_locale_multibyte_ifs: another IFS is outside" 1 \
+	$'é a$b a?c' $'  a$b a?c' 0 0 "$case_file"
+
+printf '%s\n' 'while false; do :; done; echo ${v=a\*b}${x1:=\*}' > "$case_file"
+check "parameter_operand_quote_preservation: exact escaped-glob witness" 0 \
+	'ab.txt' 'a*b*' 0 0 "$case_file"
+[ "$DS_DIVERGENCE" = parameter_operand_quote_preservation ] || no \
+	"parameter_operand_quote_preservation: reports its own id (got ${DS_DIVERGENCE:-none})"
+check "parameter_operand_quote_preservation: changed literal is not excused" 1 \
+	'ab.txt' 'a*b?' 0 0 "$case_file"
+check "parameter_operand_quote_preservation: differing status is not excused" 1 \
+	'ab.txt' 'a*b*' 0 1 "$case_file"
+printf '%s\n' 'echo ${v=a*b}' > "$case_file"
+check "parameter_operand_quote_preservation: unescaped operand is outside" 1 \
+	'ab.txt' 'a*b*' 0 0 "$case_file"
+printf '%s\n' 'printf "<%s>" aéb ${v:="$(echo é '\''a%b'\'')"}; echo $((v &= ~1))' > "$case_file"
+check "parameter_operand_quote_preservation: surrounding diagnostic is exact" 0 \
+	$'<aéb><é><a%b>SH: 1: Illegal number: é a%b\n0' \
+	$'<aéb><é a%b>SH: 1: Illegal number: é a%b\n0' 0 0 "$case_file"
+check "parameter_operand_quote_preservation: changed diagnostic is not excused" 1 \
+	$'<aéb><é><a%b>SH: 1: Illegal number: é a%b\n0' \
+	$'<aéb><é a%b>SH: 1: Illegal number: other\n0' 0 0 "$case_file"
+
+printf '%s\n' 'while false; do :; done; echo $* ""$IFS"`echo $((IFS))`" [' > "$case_file"
+check "empty_quote_field_anchors: exact adjacent-substitution witness" 0 \
+	' 0 [' '0 [' 0 0 "$case_file"
+[ "$DS_DIVERGENCE" = empty_quote_field_anchors ] || no \
+	"empty_quote_field_anchors: reports its own id (got ${DS_DIVERGENCE:-none})"
+check "empty_quote_field_anchors: changed field is not excused" 1 \
+	' 0 [' '1 [' 0 0 "$case_file"
+check "empty_quote_field_anchors: differing status is not excused" 1 \
+	' 0 [' '0 [' 0 1 "$case_file"
+printf '%s\n' 'while false; do :; done; echo $* $IFS `echo $((IFS))` [' > "$case_file"
+check "empty_quote_field_anchors: no empty quote anchor is outside" 1 \
+	' 0 [' '0 [' 0 0 "$case_file"
+
 printf '%s\n' "trap 'echo X' TERM; (trap); echo ---; trap" > "$case_file"
 TRAP_LINE="trap -- 'echo X' TERM"
 check "trap_subshell_listing: inherited listing is added" 0 \

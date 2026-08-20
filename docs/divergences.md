@@ -306,7 +306,7 @@ name refusal, and an unsorted nsh permutation.
 ### POSIX corrections retained over dash
 
 **Status:** implemented in the Rust; dash unchanged. Category 3. Every ID
-below is registered in `tests/harness/divergences.sh`. Its 188 focused checks
+below is registered in `tests/harness/divergences.sh`. Its 210 focused checks
 exercise the intended matches and adversarial content, status and scope
 boundaries.
 
@@ -374,6 +374,25 @@ one in the same shell process.
 * `trap_p_option`: POSIX.1-2024 `trap -p PIPE` prints the selected trap. dash
   rejects `-p`; the decision entry pins both its exact diagnostic and nsh's
   exact listing.
+* `utf8_pattern_characters`: in a UTF-8 locale, pattern literals, `?`, bracket
+  expressions, character classes, and parameter trims operate on decoded
+  characters. dash's inherited matcher rejects or mis-trims the thirteen
+  pinned multibyte witnesses by treating bytes as characters. The entry
+  accepts only their complete output pairs and successful statuses.
+* `c_locale_multibyte_ifs`: in the C locale, the two bytes encoding `é` are
+  two non-whitespace `IFS` separators. dash incorrectly keeps the sequence as
+  one character. The entry pins all twelve generated witnesses, including
+  every surrounding field and diagnostic; the nsh side also agrees with Bash
+  in POSIX mode on the byte-wise split.
+* `parameter_operand_quote_preservation`: quoting and backslash protection in
+  a `${parameter op word}` operand survives when that operand supplies the
+  result. dash loses the protection while moving the encoded bytes, which can
+  split one field, glob an escaped metacharacter, or discard a quoted empty
+  field. Six complete generated results are registered.
+* `empty_quote_field_anchors`: an empty quote fragment anchors one field; it
+  neither creates a second empty field nor suppresses splitting in an adjacent
+  unquoted substitution. Three complete generated results pin both sides of
+  that rule.
 * `case_fallthrough_diagnostic`: nsh tokenizes the POSIX.1-2024 `;&` case
   operator as one token, so its unsupported-operator diagnostic names `;&`;
   dash stops at `;` or `&`. No other syntax diagnostic is changed.

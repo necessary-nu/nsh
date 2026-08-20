@@ -1,22 +1,10 @@
-//! Literal port of `src/expand.c` / `src/expand.h`.
-//! Rules: `docs/spec/port/src/expand.md`.
+//! Shell word expansion.
 //!
-//! Routines to expand arguments to commands.  We have to deal with
-//! backquotes, shell variables, and file metacharacters.
-//!
-//! This is a deliberately un-idiomatic, line-for-line translation.  The
-//! word being expanded is the parser's internal *encoded byte string* — a
-//! NUL-terminated `char *` in which `CTLESC`, `CTLVAR`, `CTLENDVAR`,
-//! `CTLBACKQ`, `CTLMBCHAR`, `CTLARI`, `CTLENDARI` and `CTLQUOTEMARK` (all
-//! negative `signed char` values) are markers.  It is therefore
-//! represented here exactly as in C, by `*mut c_char` plus index
-//! arithmetic; no `String`/`Vec<u8>` appears anywhere, and `mbnext` keeps
-//! its packed `start | end << 8` return rather than becoming a struct.
-//!
-//! C `goto`s are reproduced with labelled blocks (`'label: { … break
-//! 'label; }` for a forward jump) and labelled loops (for the backward
-//! jumps `tilde:`, `start:` and `again:`), so the control flow still
-//! diffs one-to-one against the C.
+//! Active argument and case-pattern expansion is implemented by [`typed`]
+//! as structural transformations over parsed word parts. The remaining
+//! translated helpers in this file serve compatibility call sites such as
+//! `read` field splitting; later cleanup leaves remove that inactive port
+//! machinery once its callers have typed interfaces of their own.
 
 #![allow(unknown_lints)]
 use crate::context::Shell;
@@ -30,6 +18,8 @@ use crate::error::Error;
 use crate::mystring::{byte_at, byte_at_i, slice_from};
 use crate::nodes::Node;
 use crate::pmatch::pmatch_slices;
+
+mod typed;
 
 // ---------------------------------------------------------------------
 // Constants mirrored from the headers this file includes.
@@ -678,17 +668,12 @@ pub fn expandarg(
     arglist: Option<&mut arglist>,
     flag: c_int,
 ) -> Result<(), Error> {
-    // [spec:nsh:def:idiom.word-ir]
-    let mut state = mem::take(&mut sh.expand);
     let Node::Word(word) = arg else {
         return Err(sh.sh_error_value(b"word expansion requires a word node"));
     };
-    let encoded = word.word.encode_legacy();
-    state.backquotes = encoded.substitutions;
-    state.next_backquote = 0;
-    let result = expandarg_inner(sh, &mut state, &encoded.bytes, arglist, flag);
-    sh.expand = state;
-    result
+    // [spec:nsh:def:idiom.word-ir]
+    // [spec:nsh:sem:idiom.typed-expansion]
+    typed::expand_argument(sh, &word.word, arglist, flag)
 }
 
 fn expandarg_inner(
@@ -3364,16 +3349,10 @@ pub fn casematch(
     pattern: &crate::nodes::Node,
     val: &BStr,
 ) -> Result<c_int, Error> {
-    let mut state = mem::take(&mut sh.expand);
     let Node::Word(word) = pattern else {
         return Err(sh.sh_error_value(b"case matching requires a word node"));
     };
-    let encoded = word.word.encode_legacy();
-    state.backquotes = encoded.substitutions;
-    state.next_backquote = 0;
-    let result = casematch_inner(sh, &mut state, &encoded.bytes, val);
-    sh.expand = state;
-    result
+    typed::case_matches(sh, &word.word, val).map(c_int::from)
 }
 
 fn casematch_inner(

@@ -707,6 +707,18 @@ ds_case_matches() {
 	grep -qE "$2" "$1" 2>/dev/null
 }
 
+# ds_case_contains CASE_FILE TEXT -- fixed-string form of the scoping guard.
+ds_case_contains() {
+	grep -qF -- "$2" "$1" 2>/dev/null
+}
+
+# ds_exact_pair REF PORT EXPECTED_REF EXPECTED_PORT -- accept only one fully
+# specified result pair. This is intentionally stronger than normalizing a
+# fragment: a changed prefix, suffix, diagnostic, field count, or byte fails.
+ds_exact_pair() {
+	[ "$1" = "$3" ] && [ "$2" = "$4" ]
+}
+
 # ds_moved_lines_match A B ERE -- true when every line that sits at a
 # different position in the two outputs matches ERE, on both sides.
 #
@@ -772,6 +784,10 @@ DS_DIVERGENCES=(
 	fc_recursion_error_status
 	logical_fd_low_nofile_survival
 	trap_p_option
+	utf8_pattern_characters
+	c_locale_multibyte_ifs
+	parameter_operand_quote_preservation
+	empty_quote_field_anchors
 	"${DS_NORMALIZERS[@]}"
 )
 
@@ -1052,6 +1068,122 @@ dsdiv_trap_p_option() {
 	[ "$3" = 2 ] && [ "$4" = 0 ] || return 1
 	[[ $1 =~ ^SH:[[:space:]][0-9]+:[[:space:]]trap:[[:space:]]Illegal[[:space:]]option[[:space:]]-p$ ]] || return 1
 	[ "$2" = "trap -- 'echo caught' PIPE" ]
+}
+
+# dash's matcher walks the UTF-8 bytes as if each byte were a character in
+# several literal, `?`, bracket, and parameter-trim paths. The typed matcher
+# walks decoded characters. Every accepted pair below is the complete output
+# of one pinned multibyte corpus witness; the feature substring prevents an
+# unrelated case with the same short output from borrowing the entry.
+dsdiv_utf8_pattern_characters() {
+	[ "$3" = 0 ] && [ "$4" = 0 ] || return 1
+	ds_case_contains "$5" 'LC_ALL=en_US.UTF-8' || return 1
+
+	ds_case_contains "$5" '${v#h}' &&
+		ds_exact_pair "$1" "$2" 'éllo héllo héll hél' 'éllo llo héll hél' && return 0
+	ds_case_contains "$5" 'case héllo in h?llo)' &&
+		ds_exact_pair "$1" "$2" n m && return 0
+	ds_case_contains "$5" 'case é in [é])' &&
+		ds_exact_pair "$1" "$2" n m && return 0
+	ds_case_contains "$5" 'case é in [[:alpha:]])' &&
+		ds_exact_pair "$1" "$2" n m && return 0
+	ds_case_contains "$5" '${v#é}' &&
+		ds_exact_pair "$1" "$2" 'éé' 'é' && return 0
+	ds_case_contains "$5" '${v##*é}' &&
+		ds_exact_pair "$1" "$2" 'aéa aéa' 'a a' && return 0
+	ds_case_contains "$5" '${v#*é}' &&
+		ds_exact_pair "$1" "$2" 'aéaéa aéaéa aéaéa aéaéa' 'aéa a aéa a' && return 0
+	ds_case_contains "$5" 'v=é; case $v in é)' &&
+		ds_exact_pair "$1" "$2" '' m && return 0
+	ds_case_contains "$5" 'v=é; case "$v" in "é")' &&
+		ds_exact_pair "$1" "$2" '' m && return 0
+	ds_case_contains "$5" $'v=\'é*\'; case \'éx\' in $v)' &&
+		ds_exact_pair "$1" "$2" n m && return 0
+	ds_case_contains "$5" '${v%é?}' &&
+		ds_exact_pair "$1" "$2" 'aébéc aébéc' 'aébéc aéb' && return 0
+	ds_case_contains "$5" '${v#[é]}' &&
+		ds_exact_pair "$1" "$2" 'éa éa' 'a a' && return 0
+	ds_case_contains "$5" '${v#[!é]}' &&
+		ds_exact_pair "$1" "$2" a 'éa' && return 0
+	return 1
+}
+
+# In the C locale the two bytes of UTF-8 `é` are two non-whitespace IFS
+# separators. dash incorrectly treats the byte sequence as one indivisible
+# character. These are exact generated-corpus observations, including all
+# surrounding output, so only the POSIX byte-wise split is sanctioned.
+dsdiv_c_locale_multibyte_ifs() {
+	[ "$3" = 0 ] && [ "$4" = 0 ] || return 1
+	ds_case_contains "$5" "IFS='é'" || return 1
+
+	ds_case_contains "$5" "echo 'a*b' \$IFS\$_a" &&
+		ds_exact_pair "$1" "$2" 'a*b é abc' 'a*b   abc' && return 0
+	ds_case_contains "$5" 'echo "aéb" aaaa}b' &&
+		ds_exact_pair "$1" "$2" $'SH: 1: Illegal number: é\né' $'SH: 1: Illegal number: é\n ' && return 0
+	ds_case_contains "$5" 'echo a\*b ${HOME?$*}' &&
+		ds_exact_pair "$1" "$2" "a*b $HOME 01 aéb" "a*b $HOME 01 a  b" && return 0
+	ds_case_contains "$5" 'echo $9 ${#IFS}' &&
+		ds_exact_pair "$1" "$2" $'2\nab.txt bb.txt cb.txt b 1 é' $'2\nab.txt bb.txt cb.txt b 1  ' && return 0
+	ds_case_contains "$5" 'echo  $((~v ? 31 : _a))' &&
+		ds_exact_pair "$1" "$2" $'31\né' $'31\n ' && return 0
+	ds_case_contains "$5" "echo '/a/b' '/a/b' \$IFS" &&
+		ds_exact_pair "$1" "$2" '<a*b></a/b></a/b><é><a b>' '<a*b></a/b></a/b><a b>' && return 0
+	ds_case_contains "$5" '${IFS%%$?}' &&
+		ds_exact_pair "$1" "$2" "1 a$HOME/z a=b a*b é" "1 a$HOME/z a=b a*b  " && return 0
+	ds_case_contains "$5" 'echo "$({ echo ${IFS}; })"' &&
+		ds_exact_pair "$1" "$2" 'é' ' ' && return 0
+	ds_case_contains "$5" '${w:=$(IFS=' &&
+		ds_exact_pair "$1" "$2" 'é aa a*b a*b n 15' '   aa a*b a*b n 15' && return 0
+	ds_case_contains "$5" '${$:+é}' &&
+		ds_exact_pair "$1" "$2" $'é a$b a?c' $'  a$b a?c' && return 0
+	ds_case_contains "$5" 'echo $(set -- b; echo "${#HOME}${#$}"' &&
+		ds_exact_pair "$1" "$2" "${#HOME}1 éx:y" "${#HOME}1   x:y" && return 0
+	ds_case_contains "$5" 'printf "<%s>"  ${IFS} $@' &&
+		ds_exact_pair "$1" "$2" $'<é><\n<a?b>>' $'<><><\n<a?b>>' && return 0
+	return 1
+}
+
+# A quoted or escaped `word` operand of `${parameter op word}` contributes its
+# quote mask to the resulting field. dash discards that mask by assigning and
+# then reparsing encoded bytes, which can split an intended field, glob an
+# escaped metacharacter, or discard an explicitly quoted empty value.
+dsdiv_parameter_operand_quote_preservation() {
+	[ "$3" = 0 ] && [ "$4" = 0 ] || return 1
+
+	ds_case_contains "$5" '${v=a\*b}' &&
+		ds_exact_pair "$1" "$2" 'ab.txt' 'a*b*' && return 0
+	ds_case_contains "$5" '${v:="$(echo é' &&
+		ds_exact_pair "$1" "$2" \
+		$'<aéb><é><a%b>SH: 1: Illegal number: é a%b\n0' \
+		$'<aéb><é a%b>SH: 1: Illegal number: é a%b\n0' && return 0
+	ds_case_contains "$5" '${v=\*}' &&
+		ds_exact_pair "$1" "$2" \
+		$'SH: 1: arithmetic expression: expecting EOF: "08 | 2"\nab.txt bb.txt cb.txt' \
+		$'SH: 1: arithmetic expression: expecting EOF: "08 | 2"\n*' && return 0
+	ds_case_contains "$5" '${v="${u}"}' &&
+		ds_exact_pair "$1" "$2" 'a[b' ' a[b' && return 0
+	ds_case_contains "$5" '${_a:=""$w""}' &&
+		ds_exact_pair "$1" "$2" '[abc] 0' ' [abc] 0' && return 0
+	ds_case_contains "$5" '${w="${IFS%$_a}"}' && {
+		local quoted_ifs=$' \t\n '"$HOME"
+		ds_exact_pair "$1" "$2" "$HOME" "$quoted_ifs"
+	} && return 0
+	return 1
+}
+
+# Empty quote fragments are field anchors, not extra fields and not licence to
+# suppress splitting of a neighbouring unquoted substitution. dash gets both
+# directions wrong in the three generated witnesses below.
+dsdiv_empty_quote_field_anchors() {
+	[ "$3" = 0 ] && [ "$4" = 0 ] || return 1
+
+	ds_case_contains "$5" '""$IFS""' &&
+		ds_exact_pair "$1" "$2" '<N><><><a[b>' '<N><><a[b>' && return 0
+	ds_case_contains "$5" '""`echo \ $#`""' &&
+		ds_exact_pair "$1" "$2" $' 0 a[b\n$ ' $'0 a[b\n$ ' && return 0
+	ds_case_contains "$5" '""$IFS"`echo $((IFS))`"' &&
+		ds_exact_pair "$1" "$2" ' 0 [' '0 [' && return 0
+	return 1
 }
 
 # An extra register, for testing the machinery itself. It was written

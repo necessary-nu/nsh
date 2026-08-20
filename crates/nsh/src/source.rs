@@ -328,6 +328,12 @@ impl Shell {
 
         crate::input::setinputstring(self, word);
         self.input.set_floor(self.input.mark());
+        // This is a fresh parser entry, not a continuation of the previous
+        // `run`. In particular, a completed command loop leaves EOF as one
+        // token of lookahead; consuming that here would make every public
+        // expansion after a run spuriously return no fields.
+        self.input.tokpushback = false;
+        self.input.begin_parse(self.options.dialect());
         let expanded = (|sh: &mut Shell| -> Result<Vec<BString>, Error> {
             let t = crate::parser::readtoken(sh, crate::parser::TokenContext::NONE)?;
             if t != crate::parser::TokenKind::Word {
