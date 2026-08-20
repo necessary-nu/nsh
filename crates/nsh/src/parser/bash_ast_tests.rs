@@ -5,7 +5,7 @@ use crate::context::Shell;
 use crate::error::Error;
 use crate::nodes::{
     BashArrayValue, BashAssignmentOperator, BashConditionalExpr, BashFunctionStyle, BashNode,
-    BashProcessDirection, Node,
+    BashProcessDirection, Node, SimpleCommand, WordNode,
 };
 use crate::word::WordPart;
 
@@ -23,6 +23,21 @@ fn parse(source: &[u8], bash: bool) -> Result<Node, Error> {
         ParseResult::Tree(None) => panic!("expected a command, found a blank parse unit"),
         ParseResult::Eof => panic!("expected a command, found EOF"),
     }
+}
+
+// [spec:nsh:req:idiom.structural-ast/test]
+fn command(node: &Node) -> &SimpleCommand {
+    let Node::Command(command) = node else {
+        panic!("expected a simple command")
+    };
+    command
+}
+
+fn word(node: &Node) -> &WordNode {
+    let Node::Word(word) = node else {
+        panic!("expected a word")
+    };
+    word
 }
 
 // [spec:nsh:req:compat.bash.parser-ast/test]
@@ -43,9 +58,9 @@ fn conditional_has_owned_precedence_tree() {
     ));
 
     let baseline = parse(b"[[ x ]]\n", false).unwrap();
-    assert!(matches!(baseline, Node::Cmd(_)));
+    assert!(matches!(baseline, Node::Command(_)));
     assert_eq!(
-        baseline.ncmd().args[0].narg().text.as_bstr(),
+        word(&command(&baseline).arguments[0]).word.as_bstr(),
         BStr::new(b"[[")
     );
 }
@@ -92,28 +107,28 @@ fn bash_function_retains_owned_body() {
     assert!(bare.body.is_some());
 
     let baseline = parse(b"function bash-name\n", false).unwrap();
-    assert!(matches!(baseline, Node::Cmd(_)));
+    assert!(matches!(baseline, Node::Command(_)));
 }
 
 #[test]
 fn array_assignments_are_structural() {
     let indexed = parse(b"a[2]+=x\n", true).unwrap();
-    let Node::Bash(BashNode::ArrayAssignment(indexed)) = &indexed.ncmd().assign[0] else {
+    let Node::Bash(BashNode::ArrayAssignment(indexed)) = &command(&indexed).assignments[0] else {
         panic!("indexed assignment must be structural");
     };
     assert_eq!(indexed.name.as_bstr(), BStr::new(b"a"));
     assert_eq!(
-        indexed.subscript.as_ref().unwrap().text.as_bstr(),
+        indexed.subscript.as_ref().unwrap().word.as_bstr(),
         BStr::new(b"2")
     );
     assert_eq!(indexed.operator, BashAssignmentOperator::Append);
     let BashArrayValue::Word(value) = &indexed.value else {
         panic!("simple indexed assignment must retain a word value");
     };
-    assert_eq!(value.text.as_bstr(), BStr::new(b"x"));
+    assert_eq!(value.word.as_bstr(), BStr::new(b"x"));
 
     let compound = parse(b"a=(zero [2]=two)\n", true).unwrap();
-    let Node::Bash(BashNode::ArrayAssignment(compound)) = &compound.ncmd().assign[0] else {
+    let Node::Bash(BashNode::ArrayAssignment(compound)) = &command(&compound).assignments[0] else {
         panic!("compound assignment must be structural");
     };
     let BashArrayValue::Compound(elements) = &compound.value else {
@@ -122,14 +137,14 @@ fn array_assignments_are_structural() {
     assert_eq!(elements.len(), 2);
     assert!(elements[0].subscript.is_none());
     assert_eq!(
-        elements[1].subscript.as_ref().unwrap().text.as_bstr(),
+        elements[1].subscript.as_ref().unwrap().word.as_bstr(),
         BStr::new(b"2")
     );
-    assert_eq!(elements[1].value.text.as_bstr(), BStr::new(b"two"));
+    assert_eq!(elements[1].value.word.as_bstr(), BStr::new(b"two"));
 
     let declaration = parse(b"declare -a a=(x)\n", true).unwrap();
     assert!(matches!(
-        declaration.ncmd().args[2],
+        command(&declaration).arguments[2],
         Node::Bash(BashNode::ArrayAssignment(_))
     ));
 
@@ -139,11 +154,17 @@ fn array_assignments_are_structural() {
 #[test]
 fn array_parameter_subscript_is_dialect_gated() {
     let tree = parse(b"echo ${a[1]}\n", true).unwrap();
-    assert_eq!(tree.ncmd().args.len(), 2);
+    assert_eq!(command(&tree).arguments.len(), 2);
     let baseline = parse(b"echo ${a[1]}\n", false).unwrap();
     assert_ne!(
-        tree.ncmd().args[1].narg().text.encode_legacy().bytes,
-        baseline.ncmd().args[1].narg().text.encode_legacy().bytes
+        word(&command(&tree).arguments[1])
+            .word
+            .encode_legacy()
+            .bytes,
+        word(&command(&baseline).arguments[1])
+            .word
+            .encode_legacy()
+            .bytes
     );
 }
 
@@ -151,16 +172,15 @@ fn array_parameter_subscript_is_dialect_gated() {
 // [spec:nsh:def:idiom.word-ir/test]
 fn process_substitutions_own_their_commands() {
     let tree = parse(b"echo <(printf x) >(cat)\n", true).unwrap();
-    let args = &tree.ncmd().args;
+    let args = &command(&tree).arguments;
     assert_eq!(args.len(), 3);
 
     for (argument, expected) in [
         (&args[1], BashProcessDirection::Input),
         (&args[2], BashProcessDirection::Output),
     ] {
-        let substitution = argument
-            .narg()
-            .text
+        let substitution = word(argument)
+            .word
             .parts()
             .iter()
             .find_map(|part| match part {

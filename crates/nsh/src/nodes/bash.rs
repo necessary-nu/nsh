@@ -2,12 +2,12 @@
 //!
 //! These nodes extend the one shell tree; they are not a parallel parser
 //! representation.  Each variant records the grammar boundary that later
-//! runtime work consumes, while embedded words keep using [`narg`]'s
-//! byte-preserving expansion program.
+//! runtime work consumes, while embedded words use [`WordNode`].
 
-use super::{Node, NodeText, narg};
+use super::{Node, NodeText, WordNode};
 
 /// Bash-only syntax in the shell's owned parse tree.
+// [spec:nsh:req:idiom.structural-ast]
 // [spec:nsh:req:compat.bash.parser-ast]
 #[derive(Clone)]
 pub(crate) enum BashNode {
@@ -29,15 +29,15 @@ pub(crate) struct BashConditional {
 #[derive(Clone)]
 pub(crate) enum BashConditionalExpr {
     Empty,
-    Word(narg),
+    Word(WordNode),
     Unary {
         operator: NodeText,
-        operand: narg,
+        operand: WordNode,
     },
     Binary {
-        left: narg,
+        left: WordNode,
         operator: NodeText,
-        right: narg,
+        right: WordNode,
     },
     Not(Box<BashConditionalExpr>),
     And(Box<BashConditionalExpr>, Box<BashConditionalExpr>),
@@ -88,7 +88,7 @@ pub(crate) enum BashAssignmentOperator {
 #[derive(Clone)]
 pub(crate) struct BashArrayAssignment {
     pub(crate) name: NodeText,
-    pub(crate) subscript: Option<narg>,
+    pub(crate) subscript: Option<WordNode>,
     pub(crate) operator: BashAssignmentOperator,
     pub(crate) value: BashArrayValue,
 }
@@ -96,16 +96,16 @@ pub(crate) struct BashArrayAssignment {
 /// The right-hand side of an array assignment.
 #[derive(Clone)]
 pub(crate) enum BashArrayValue {
-    Word(narg),
+    Word(WordNode),
     Compound(Vec<BashArrayElement>),
 }
 
 /// One word in a compound array assignment.
 #[derive(Clone)]
 pub(crate) struct BashArrayElement {
-    pub(crate) subscript: Option<narg>,
+    pub(crate) subscript: Option<WordNode>,
     pub(crate) operator: BashAssignmentOperator,
-    pub(crate) value: narg,
+    pub(crate) value: WordNode,
 }
 
 /// Whether a process substitution feeds or consumes a path.

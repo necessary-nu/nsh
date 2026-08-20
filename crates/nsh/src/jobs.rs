@@ -15,9 +15,9 @@
 //!     array out from under `curjob`, every `prev_job`, and every `ps`
 //!     that pointed at its own job's inline `ps0` — has nothing left to
 //!     relocate.
-//!   * C `goto`s are reproduced with labelled blocks; a `goto` *into*
-//!     the middle of a loop becomes an entry flag, and the two backward
-//!     `goto`s in `cmdtxt` become an explicit label program counter.
+//!   * Remaining C `goto`s are reproduced with labelled blocks; a `goto`
+//!     *into* the middle of a loop becomes an entry flag. Command rendering
+//!     follows the structural syntax tree directly.
 //!   * `TRACE(...)` compiles to nothing without `DEBUG` and is dropped.
 
 use bstr::{BStr, BString, ByteSlice};
@@ -26,11 +26,7 @@ use nsh_platform::{Descriptor, NativeStrExt as _};
 use std::io::Write as _;
 
 use crate::error::{Error, INTOFF, INTON};
-use crate::nodes::Node;
-use crate::nodes::{
-    NAND, NAPPEND, NARG, NBACKGND, NCASE, NCLOBBER, NCMD, NDEFUN, NFOR, NFROM, NFROMFD, NFROMTO,
-    NHERE, NIF, NNOT, NOR, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE, NXHERE,
-};
+use crate::nodes::{DescriptorRedirectionOperator, FileRedirectionOperator, Node};
 use crate::output::Dest;
 
 /// Append an already-rendered ASCII fragment with `fmtstr`'s historical
@@ -1701,233 +1697,136 @@ fn commandtext(n: &Node) -> BString {
 
 // [spec:dash:def:jobs.cmdtxt-fn]
 // [spec:dash:sem:jobs.cmdtxt-fn]
-//
-// `cmdtxt` has two *backward* gotos (`goto dodo` from NFOR and
-// `goto donode` from the redirection tail), so the label graph is
-// expressed as an explicit program counter rather than as nested
-// labelled blocks.
+// [spec:nsh:req:idiom.structural-ast]
 fn cmdtxt(n: Option<&Node>, text: &mut BString) {
-    let mut p: &[u8] = &[];
-    let mut s: [u8; 1] = [0];
-
-    const L_SWITCH: c_int = 0;
-    const L_BINOP: c_int = 1;
-    const L_DONODE: c_int = 2;
-    const L_UNTIL: c_int = 3;
-    const L_DODO: c_int = 4;
-    const L_DOTAIL: c_int = 5;
-    const L_DOTAIL2: c_int = 6;
-    const L_REDIR: c_int = 7;
-
-    /* The C reassigns `n` and jumps; every label that reads a *field* reads
-     * one of the node the switch was entered with, and every label that
-     * reassigns hands the new node straight to a recursive `cmdtxt` that
-     * tolerates NULL. So the entry node and the "next" node are separate
-     * bindings here. */
-    let cur: &Node = match n {
-        Some(n) => n,
-        None => return,
-    };
-    let mut n: Option<&Node> = None;
-
-    let mut pc: c_int = L_SWITCH;
-    loop {
-        match pc {
-            L_SWITCH => match cur.node_type() {
-                NSEMI => {
-                    p = b"; ";
-                    pc = L_BINOP;
-                }
-                NAND => {
-                    p = b" && ";
-                    pc = L_BINOP;
-                }
-                NOR => {
-                    p = b" || ";
-                    pc = L_BINOP;
-                }
-                NREDIR | NBACKGND => {
-                    n = cur.nredir().n.as_deref();
-                    pc = L_DONODE;
-                }
-                NNOT => {
-                    cmdputs(b"!", text);
-                    n = cur.nnot().com.as_deref();
-                    pc = L_DONODE;
-                }
-                NIF => {
-                    let f = cur.nif();
-                    cmdputs(b"if ", text);
-                    cmdtxt(f.test.as_deref(), text);
-                    cmdputs(b"; then ", text);
-                    if f.elsepart.is_some() {
-                        cmdtxt(f.ifpart.as_deref(), text);
-                        cmdputs(b"; else ", text);
-                        n = f.elsepart.as_deref();
-                    } else {
-                        n = f.ifpart.as_deref();
-                    }
-                    p = b"; fi";
-                    pc = L_DOTAIL;
-                }
-                NSUBSHELL => {
-                    cmdputs(b"(", text);
-                    n = cur.nredir().n.as_deref();
-                    p = b")";
-                    pc = L_DOTAIL;
-                }
-                NWHILE => {
-                    p = b"while ";
-                    pc = L_UNTIL;
-                }
-                NUNTIL => {
-                    p = b"until ";
-                    pc = L_UNTIL;
-                }
-                NFOR => {
-                    let f = cur.nfor();
-                    cmdputs(b"for ", text);
-                    cmdputs(f.var.as_bstr(), text);
-                    cmdputs(b" in ", text);
-                    cmdlist(&f.args, 1, text);
-                    n = f.body.as_deref();
-                    p = b"; done";
-                    pc = L_DODO;
-                }
-                NDEFUN => {
-                    cmdputs(cur.ndefun().text.as_bstr(), text);
-                    p = b"() { ... }";
-                    pc = L_DOTAIL2;
-                }
-                NCMD => {
-                    cmdlist(&cur.ncmd().args, 1, text);
-                    cmdlist(&cur.ncmd().redirect, 0, text);
-                    return;
-                }
-                NARG => {
-                    // [spec:nsh:def:idiom.word-ir]
-                    cur.narg().text.render(text);
-                    return;
-                }
-                NHERE | NXHERE => {
-                    p = b"<<...";
-                    pc = L_DOTAIL2;
-                }
-                NCASE => {
-                    let c = cur.ncase();
-                    cmdputs(b"case ", text);
-                    c.expr.as_deref().unwrap().narg().text.render(text);
-                    cmdputs(b" in ", text);
-                    for np in &c.cases {
-                        /* the C passes the head of the pattern list, so only
-                         * the first pattern of a case ever prints */
-                        cmdtxt(np.nclist().pattern.first(), text);
-                        cmdputs(b") ", text);
-                        cmdtxt(np.nclist().body.as_deref(), text);
-                        cmdputs(
-                            if np.nclist().fallthrough { b";& " } else { b";; " },
-                            text,
-                        );
-                    }
-                    p = b"esac";
-                    pc = L_DOTAIL2;
-                }
-                NTO => {
-                    p = b">";
-                    pc = L_REDIR;
-                }
-                NCLOBBER => {
-                    p = b">|";
-                    pc = L_REDIR;
-                }
-                NAPPEND => {
-                    p = b">>";
-                    pc = L_REDIR;
-                }
-                NTOFD => {
-                    p = b">&";
-                    pc = L_REDIR;
-                }
-                NFROM => {
-                    p = b"<";
-                    pc = L_REDIR;
-                }
-                NFROMFD => {
-                    p = b"<&";
-                    pc = L_REDIR;
-                }
-                NFROMTO => {
-                    p = b"<>";
-                    pc = L_REDIR;
-                }
-                /* `default:` is empty outside DEBUG, so an unrecognised
-                 * node type falls straight through into `case NPIPE:`.
-                 * NCLIST is the only type left over, and it never reaches
-                 * `cmdtxt`: the NCASE arm above hands over its `pattern`
-                 * and `body`, never the NCLIST itself. */
-                _ /* default, NPIPE */ => {
-                    let cl = &cur.npipe().cmdlist;
-                    for (i, c) in cl.iter().enumerate() {
-                        cmdtxt(Some(c), text);
-                        if i + 1 == cl.len() {
-                            break;
-                        }
-                        cmdputs(b" | ", text);
-                    }
-                    return;
-                }
-            },
-            L_BINOP => {
-                // binop:
-                cmdtxt(cur.nbinary().ch1.as_deref(), text);
-                cmdputs(p, text);
-                n = cur.nbinary().ch2.as_deref();
-                pc = L_DONODE;
+    let Some(node) = n else { return };
+    match node {
+        Node::Sequence(binary) => cmdtxt_binary(binary, b"; ", text),
+        Node::And(binary) => cmdtxt_binary(binary, b" && ", text),
+        Node::Or(binary) => cmdtxt_binary(binary, b" || ", text),
+        Node::Redirect(command) | Node::Background(command) => {
+            cmdtxt(command.command.as_deref(), text);
+        }
+        Node::Not(command) => {
+            cmdputs(b"!", text);
+            cmdtxt(command.command.as_deref(), text);
+        }
+        Node::If(command) => {
+            cmdputs(b"if ", text);
+            cmdtxt(command.condition.as_deref(), text);
+            cmdputs(b"; then ", text);
+            cmdtxt(command.then_branch.as_deref(), text);
+            if command.else_branch.is_some() {
+                cmdputs(b"; else ", text);
+                cmdtxt(command.else_branch.as_deref(), text);
             }
-            L_DONODE => {
-                // donode:
-                cmdtxt(n, text);
-                return;
-            }
-            L_UNTIL => {
-                // until:
-                cmdputs(p, text);
-                cmdtxt(cur.nbinary().ch1.as_deref(), text);
-                n = cur.nbinary().ch2.as_deref();
-                p = b"; done";
-                pc = L_DODO;
-            }
-            L_DODO => {
-                // dodo:
-                cmdputs(b"; do ", text);
-                pc = L_DOTAIL;
-            }
-            L_DOTAIL => {
-                // dotail:
-                cmdtxt(n, text);
-                pc = L_DOTAIL2;
-            }
-            L_DOTAIL2 => {
-                // dotail2:
-                cmdputs(p, text);
-                return;
-            }
-            _ /* L_REDIR */ => {
-                // redir:
-                s[0] = (cur.redir_fd() + '0' as c_int) as u8;
-                cmdputs(&s, text);
-                cmdputs(p, text);
-                if cur.node_type() == NTOFD || cur.node_type() == NFROMFD {
-                    s[0] = (cur.ndup().dupfd.get() + '0' as c_int) as u8;
-                    cmdputs(&s, text);
-                    return;
+            cmdputs(b"; fi", text);
+        }
+        Node::Subshell(command) => {
+            cmdputs(b"(", text);
+            cmdtxt(command.command.as_deref(), text);
+            cmdputs(b")", text);
+        }
+        Node::While(command) | Node::Until(command) => {
+            cmdputs(
+                if matches!(node, Node::While(_)) {
+                    b"while "
                 } else {
-                    n = cur.nfile().fname.as_deref();
-                    pc = L_DONODE;
+                    b"until "
+                },
+                text,
+            );
+            cmdtxt(command.left.as_deref(), text);
+            cmdputs(b"; do ", text);
+            cmdtxt(command.right.as_deref(), text);
+            cmdputs(b"; done", text);
+        }
+        Node::For(command) => {
+            cmdputs(b"for ", text);
+            cmdputs(command.variable.as_bstr(), text);
+            cmdputs(b" in ", text);
+            cmdlist(&command.words, 1, text);
+            cmdputs(b"; do ", text);
+            cmdtxt(command.body.as_deref(), text);
+            cmdputs(b"; done", text);
+        }
+        Node::Function(function) => {
+            cmdputs(function.name.as_bstr(), text);
+            cmdputs(b"() { ... }", text);
+        }
+        Node::Command(command) => {
+            cmdlist(&command.arguments, 1, text);
+            cmdlist(&command.redirections, 0, text);
+        }
+        Node::Word(word) => word.word.render(text),
+        Node::HereDocument(_) => cmdputs(b"<<...", text),
+        Node::Case(command) => {
+            cmdputs(b"case ", text);
+            cmdtxt(command.word.as_deref(), text);
+            cmdputs(b" in ", text);
+            for clause in &command.clauses {
+                let Node::CaseClause(clause) = clause else {
+                    continue;
+                };
+                /* The C passes the head of the pattern list, so only the
+                 * first pattern of a case ever prints. */
+                cmdtxt(clause.patterns.first(), text);
+                cmdputs(b") ", text);
+                cmdtxt(clause.body.as_deref(), text);
+                cmdputs(if clause.fallthrough { b";& " } else { b";; " }, text);
+            }
+            cmdputs(b"esac", text);
+        }
+        Node::FileRedirection(redirection) => {
+            cmdtxt_descriptor(redirection.descriptor, text);
+            cmdputs(
+                match redirection.operator {
+                    FileRedirectionOperator::Write => b">",
+                    FileRedirectionOperator::Clobber => b">|",
+                    FileRedirectionOperator::Read => b"<",
+                    FileRedirectionOperator::ReadWrite => b"<>",
+                    FileRedirectionOperator::Append => b">>",
+                },
+                text,
+            );
+            cmdtxt(redirection.target.as_deref(), text);
+        }
+        Node::DescriptorRedirection(redirection) => {
+            cmdtxt_descriptor(redirection.descriptor, text);
+            cmdputs(
+                match redirection.operator {
+                    DescriptorRedirectionOperator::Input => b"<&",
+                    DescriptorRedirectionOperator::Output => b">&",
+                },
+                text,
+            );
+            cmdtxt_descriptor(redirection.dupfd.get(), text);
+        }
+        Node::Pipeline(pipeline) => {
+            for (index, command) in pipeline.commands.iter().enumerate() {
+                if index != 0 {
+                    cmdputs(b" | ", text);
                 }
+                cmdtxt(Some(command), text);
             }
         }
+        Node::CaseClause(clause) => {
+            cmdtxt(clause.patterns.first(), text);
+            cmdputs(b") ", text);
+            cmdtxt(clause.body.as_deref(), text);
+        }
+        Node::Bash(_) => cmdputs(b"<bash syntax>", text),
     }
+}
+
+fn cmdtxt_binary(command: &crate::nodes::BinaryCommand, separator: &[u8], text: &mut BString) {
+    cmdtxt(command.left.as_deref(), text);
+    cmdputs(separator, text);
+    cmdtxt(command.right.as_deref(), text);
+}
+
+fn cmdtxt_descriptor(descriptor: c_int, text: &mut BString) {
+    cmdputs(&[(descriptor + b'0' as c_int) as u8], text);
 }
 
 // [spec:dash:def:jobs.cmdlist-fn]

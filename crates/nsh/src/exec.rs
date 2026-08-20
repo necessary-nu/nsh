@@ -16,7 +16,7 @@ use std::path::Path;
 
 use crate::builtins::{BUILTIN_REGULAR, builtincmd};
 use crate::error::{E_EXEC, Error, INTOFF, INTON};
-use crate::nodes::{Node, funcnode};
+use crate::nodes::FunctionDefinition;
 
 mod dialect_dispatch;
 pub(crate) use dialect_dispatch::dispatch_changed;
@@ -59,7 +59,8 @@ pub struct cmdentry {
 enum Command {
     Unknown,
     Normal(c_int),
-    Function(funcnode),
+    // [spec:nsh:req:idiom.structural-ast]
+    Function(FunctionDefinition),
     Builtin(&'static builtincmd),
 }
 
@@ -99,7 +100,7 @@ impl cmdentry {
         }
     }
 
-    pub(crate) fn function(&self) -> funcnode {
+    pub(crate) fn function(&self) -> FunctionDefinition {
         match &self.command {
             Command::Function(function) => function.clone(),
             _ => unreachable!("only shell functions have function bodies"),
@@ -611,7 +612,6 @@ pub fn find_command(
 
     let environment =
         crate::var::environment(sh).map_err(|error| native_string_error(sh, name, &error))?;
-
     let previous = cached
         .as_ref()
         .filter(|(_, rehash)| *rehash)
@@ -873,12 +873,12 @@ fn addcmdentry(sh: &mut crate::context::Shell, name: &BStr, command: Command) {
 
 // [spec:dash:def:exec.defun-fn]
 // [spec:dash:sem:exec.defun-fn]
-pub fn defun(sh: &mut crate::context::Shell, func: &Node) {
+pub fn defun(sh: &mut crate::context::Shell, definition: &FunctionDefinition) {
     INTOFF(sh);
     addcmdentry(
         sh,
-        func.ndefun().text.as_bstr(),
-        Command::Function(func.clone()),
+        definition.name.as_bstr(),
+        Command::Function(definition.clone()),
     );
     INTON(sh);
 }

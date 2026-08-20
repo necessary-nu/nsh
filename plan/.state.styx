@@ -5055,4 +5055,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.word-ir}
     )}
+    {id make-ast-structural, covered_rules (
+        idiom.structural-ast
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.structural-ast}
+    )}
 )

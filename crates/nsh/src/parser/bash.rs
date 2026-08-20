@@ -15,11 +15,11 @@ use crate::error::Error;
 use crate::nodes::{
     BashArithmeticCommand, BashArithmeticFor, BashArrayAssignment, BashArrayElement,
     BashArrayValue, BashAssignmentOperator, BashConditional, BashConditionalExpr, BashFunction,
-    BashFunctionStyle, BashNode, BashProcessDirection, BashProcessSubstitution, Node, NodeText,
-    narg,
+    BashFunctionStyle, BashNode, BashProcessDirection, BashProcessSubstitution,
+    FileRedirectionOperator, Node, NodeText, WordNode,
 };
-use crate::word::ParsedWord;
 use crate::options::Dialect;
+use crate::word::ParsedWord;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Quote {
@@ -29,7 +29,7 @@ enum Quote {
 }
 
 struct ConditionalWord {
-    arg: narg,
+    arg: WordNode,
     quoted: bool,
 }
 
@@ -115,6 +115,7 @@ pub(super) fn conditional(sh: &mut Shell) -> Result<Node, Error> {
     })))
 }
 
+// [spec:nsh:req:idiom.structural-ast]
 pub(super) fn function(sh: &mut Shell, line: c_int) -> Result<Node, Error> {
     let name_token = readtoken_with_flags(sh, TokenContext::NONE)?;
     if name_token.kind != TokenKind::Word || wordtext(sh).is_empty() {
@@ -142,8 +143,8 @@ pub(super) fn function(sh: &mut Shell, line: c_int) -> Result<Node, Error> {
     })))
 }
 
-pub(super) fn array_word(sh: &Shell, arg: narg) -> Result<Node, narg> {
-    let encoded = arg.text.encode_legacy();
+pub(super) fn array_word(sh: &Shell, arg: WordNode) -> Result<Node, WordNode> {
+    let encoded = arg.word.encode_legacy();
     let bytes = BStr::new(&encoded.bytes[..encoded.bytes.len() - 1]);
     let Some(open) = bytes.iter().position(|&byte| byte == b'[') else {
         return Err(arg);
@@ -168,10 +169,10 @@ pub(super) fn array_word(sh: &Shell, arg: narg) -> Result<Node, narg> {
 }
 
 pub(super) fn declaration_context(args: &[Node]) -> bool {
-    let Some(Node::Arg(command)) = args.first() else {
+    let Some(Node::Word(command)) = args.first() else {
         return false;
     };
-    let command: &[u8] = command.text.as_bstr().as_ref();
+    let command: &[u8] = command.word.as_bstr().as_ref();
     matches!(
         command,
         b"declare" | b"typeset" | b"local" | b"readonly" | b"export"
@@ -458,10 +459,10 @@ fn conditional_primary(sh: &mut Shell) -> Result<BashConditionalExpr, Error> {
     }
 
     let first = take_word(sh, token.quoted);
-    if !first.quoted && first.arg.text.as_bstr() == BStr::new(b"!") {
+    if !first.quoted && first.arg.word.as_bstr() == BStr::new(b"!") {
         return Ok(BashConditionalExpr::Not(Box::new(conditional_primary(sh)?)));
     }
-    if !first.quoted && unary_operator(first.arg.text.as_bstr()) {
+    if !first.quoted && unary_operator(first.arg.word.as_bstr()) {
         let operand_token = readtoken_with_flags(sh, TokenContext::NONE)?;
         if operand_token.kind != TokenKind::Word
             || closes_conditional(sh, operand_token.kind, operand_token.quoted)
@@ -469,7 +470,7 @@ fn conditional_primary(sh: &mut Shell) -> Result<BashConditionalExpr, Error> {
             return Err(synerror(sh, b"expected unary-test operand"));
         }
         return Ok(BashConditionalExpr::Unary {
-            operator: node_text(first.arg.text.as_bstr()),
+            operator: node_text(first.arg.word.as_bstr()),
             operand: take_word(sh, operand_token.quoted).arg,
         });
     }
@@ -477,9 +478,17 @@ fn conditional_primary(sh: &mut Shell) -> Result<BashConditionalExpr, Error> {
     let operator_token = readtoken_with_flags(sh, TokenContext::NONE)?;
     let operator = if operator_token.kind == super::TokenKind::Redirection {
         let redirection = sh.input.redirnode.take();
-        match redirection.as_ref().map(Node::node_type) {
-            Some(super::NFROM) => Some(node_text(b"<")),
-            Some(super::NTO) => Some(node_text(b">")),
+        match redirection.as_ref() {
+            Some(Node::FileRedirection(redirection))
+                if redirection.operator == FileRedirectionOperator::Read =>
+            {
+                Some(node_text(b"<"))
+            }
+            Some(Node::FileRedirection(redirection))
+                if redirection.operator == FileRedirectionOperator::Write =>
+            {
+                Some(node_text(b">"))
+            }
             _ => None,
         }
     } else if operator_token.kind == TokenKind::Word
@@ -567,8 +576,8 @@ fn binary_operator(operator: &BStr) -> bool {
 
 fn take_word(sh: &mut Shell, quoted: bool) -> ConditionalWord {
     ConditionalWord {
-        arg: narg {
-            text: mem::take(&mut sh.input.word),
+        arg: WordNode {
+            word: mem::take(&mut sh.input.word),
         },
         quoted,
     }
@@ -576,11 +585,11 @@ fn take_word(sh: &mut Shell, quoted: bool) -> ConditionalWord {
 
 fn compound_candidate(sh: &Shell, node: Option<&Node>) -> bool {
     match node {
-        Some(Node::Arg(arg)) => plain_prefix(arg).is_some_and(|(name_end, _)| {
-            goodname(&sh.locale, BStr::new(&arg.text.as_bstr()[..name_end])) != 0
+        Some(Node::Word(arg)) => plain_prefix(arg).is_some_and(|(name_end, _)| {
+            goodname(&sh.locale, BStr::new(&arg.word.as_bstr()[..name_end])) != 0
         }),
         Some(Node::Bash(BashNode::ArrayAssignment(assignment))) => {
-            matches!(&assignment.value, BashArrayValue::Word(value) if value.text.as_bstr().is_empty())
+            matches!(&assignment.value, BashArrayValue::Word(value) if value.word.as_bstr().is_empty())
         }
         _ => false,
     }
@@ -588,19 +597,19 @@ fn compound_candidate(sh: &Shell, node: Option<&Node>) -> bool {
 
 fn compound_prefix(sh: &Shell, node: Node) -> Option<BashArrayAssignment> {
     match node {
-        Node::Arg(arg) => {
+        Node::Word(arg) => {
             let (name_end, operator) = plain_prefix(&arg)?;
-            if goodname(&sh.locale, BStr::new(&arg.text.as_bstr()[..name_end])) == 0 {
+            if goodname(&sh.locale, BStr::new(&arg.word.as_bstr()[..name_end])) == 0 {
                 return None;
             }
             Some(BashArrayAssignment {
-                name: node_text(&arg.text.as_bstr()[..name_end]),
+                name: node_text(&arg.word.as_bstr()[..name_end]),
                 subscript: None,
                 operator,
                 value: BashArrayValue::Word(arg_part(
                     &arg,
-                    arg.text.as_bstr().len(),
-                    arg.text.as_bstr().len(),
+                    arg.word.as_bstr().len(),
+                    arg.word.as_bstr().len(),
                 )),
             })
         }
@@ -609,8 +618,8 @@ fn compound_prefix(sh: &Shell, node: Node) -> Option<BashArrayAssignment> {
     }
 }
 
-fn plain_prefix(arg: &narg) -> Option<(usize, BashAssignmentOperator)> {
-    let bytes = arg.text.as_bstr();
+fn plain_prefix(arg: &WordNode) -> Option<(usize, BashAssignmentOperator)> {
+    let bytes = arg.word.as_bstr();
     let (name_end, operator) = if bytes.ends_with(b"+=") {
         (bytes.len() - 2, BashAssignmentOperator::Append)
     } else if bytes.ends_with(b"=") {
@@ -624,8 +633,8 @@ fn plain_prefix(arg: &narg) -> Option<(usize, BashAssignmentOperator)> {
     Some((name_end, operator))
 }
 
-fn array_element(arg: narg) -> BashArrayElement {
-    let encoded = arg.text.encode_legacy();
+fn array_element(arg: WordNode) -> BashArrayElement {
+    let encoded = arg.word.encode_legacy();
     let bytes = BStr::new(&encoded.bytes[..encoded.bytes.len() - 1]);
     if bytes.first() == Some(&b'[') {
         if let Some(close) = matching_bracket(bytes, 0) {
@@ -686,20 +695,20 @@ fn assignment_operator(bytes: &[u8], start: usize) -> Option<(BashAssignmentOper
     }
 }
 
-fn arg_part(arg: &narg, start: usize, end: usize) -> narg {
+fn arg_part(arg: &WordNode, start: usize, end: usize) -> WordNode {
     // [spec:nsh:def:idiom.word-ir]
-    let encoded = arg.text.encode_legacy();
+    let encoded = arg.word.encode_legacy();
     let bytes = &encoded.bytes[..encoded.bytes.len() - 1];
     let first = backquote_count(&bytes[..start]);
     let count = backquote_count(&bytes[start..end]);
-    narg {
-        text: ParsedWord::from_legacy_fragment(
+    WordNode {
+        word: ParsedWord::from_legacy_fragment(
             &bytes[start..end],
             encoded
-            .substitutions
-            .get(first..first + count)
-            .unwrap_or(&[])
-            .to_vec(),
+                .substitutions
+                .get(first..first + count)
+                .unwrap_or(&[])
+                .to_vec(),
         ),
     }
 }

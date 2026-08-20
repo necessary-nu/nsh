@@ -15,15 +15,11 @@
 //! sibling lists are `Vec<Node>`, and the whole deep-copy apparatus is
 //! a derived `Clone`.
 //!
-//! Two things the C's layout did that an enum cannot, and how they are
-//! spelled here instead:
+//! Each grammar form is a distinct [`Node`] variant with the payload that is
+//! valid for that form. Consumers match variants directly; there are no
+//! numeric tags, shared union arms, relabelled nodes, or wrong-arm accessors.
+//! Two fields are still written at run time rather than at parse time:
 //!
-//!   * **Several node types share one arm.** `NREDIR`/`NBACKGND`/`NSUBSHELL`
-//!     are all `struct nredir`, and `list()` *relabels* a node from one to
-//!     another in place. The arms that cover more than one type therefore
-//!     keep the `type` field the C had, and [`Node::node_type`] recovers the
-//!     number every `switch (n->type)` in the shell still switches on.
-//!   * **Two fields are written at run time, not at parse time.**
 //!     `nfile.expfname` (the C marks it `temp`, so `copynode` never copied
 //!     it) and `ndup.dupfd` are filled in by `expredir` on a tree that may
 //!     be a shared function definition. They are `Cell`s.
@@ -54,65 +50,6 @@ pub(crate) use bash::{
     BashFunctionStyle, BashNode, BashProcessDirection, BashProcessSubstitution,
 };
 
-// ---- node types (positional in src/nodetypes) ------------------------
-
-/// a simple command
-pub const NCMD: c_int = 0;
-/// a pipeline
-pub const NPIPE: c_int = 1;
-/// redirection (of a complex command)
-pub const NREDIR: c_int = 2;
-/// run command in background
-pub const NBACKGND: c_int = 3;
-/// run command in a subshell
-pub const NSUBSHELL: c_int = 4;
-/// the && operator
-pub const NAND: c_int = 5;
-/// the || operator
-pub const NOR: c_int = 6;
-/// two commands separated by a semicolon
-pub const NSEMI: c_int = 7;
-/// the if statement
-pub const NIF: c_int = 8;
-/// the while statement
-pub const NWHILE: c_int = 9;
-/// the until statement
-pub const NUNTIL: c_int = 10;
-/// the for statement
-pub const NFOR: c_int = 11;
-/// a case statement
-pub const NCASE: c_int = 12;
-/// a case
-pub const NCLIST: c_int = 13;
-/// a function
-pub const NDEFUN: c_int = 14;
-/// represents a word
-pub const NARG: c_int = 15;
-/// fd> fname
-pub const NTO: c_int = 16;
-/// fd>| fname
-pub const NCLOBBER: c_int = 17;
-/// fd< fname
-pub const NFROM: c_int = 18;
-/// fd<> fname
-pub const NFROMTO: c_int = 19;
-/// fd>> fname
-pub const NAPPEND: c_int = 20;
-/// fd<&dupfd
-pub const NTOFD: c_int = 21;
-/// fd>&dupfd
-pub const NFROMFD: c_int = 22;
-/// fd<<\! (unexpanded here-document)
-pub const NHERE: c_int = 23;
-/// fd<<! (expanded here-document)
-pub const NXHERE: c_int = 24;
-/// ! command  (actually pipeline)
-pub const NNOT: c_int = 25;
-/// Bash-only grammar represented by an owned [`BashNode`]
-pub const NBASH: c_int = 26;
-
-// ---- the per-tag structs --------------------------------------------
-
 /// The slot a here-document body lands in.
 ///
 /// A here-document is read *after* its redirection node is already buried in
@@ -125,11 +62,10 @@ pub const NBASH: c_int = 26;
 /// then readers take an owned snapshot before an expansion can re-enter the
 /// tree. The mutex makes sharing the delayed write safe without preventing a
 /// complete [`Shell`](crate::context::Shell) from moving to another thread.
-#[allow(non_camel_case_types)]
 #[derive(Clone)]
-pub struct heredoc_body(Arc<Mutex<Option<Node>>>);
+pub struct HereDocumentBody(Arc<Mutex<Option<Node>>>);
 
-impl heredoc_body {
+impl HereDocumentBody {
     pub fn new() -> Self {
         Self(Arc::new(Mutex::new(None)))
     }
@@ -190,101 +126,100 @@ impl NodeText {
     }
 }
 
-/// `NCMD`
+/// A simple command and its lexical components.
+// [spec:nsh:req:idiom.structural-ast]
 #[derive(Clone)]
-pub struct ncmd {
-    pub linno: c_int,
-    /// variable assignments (C: a `narg.next`-linked list)
-    pub assign: Vec<Node>,
-    /// the arguments (C: a `narg.next`-linked list)
-    pub args: Vec<Node>,
-    /// list of file redirections (C: an `nfile.next`-linked list)
-    pub redirect: Vec<Node>,
+pub struct SimpleCommand {
+    pub line: c_int,
+    pub assignments: Vec<Node>,
+    pub arguments: Vec<Node>,
+    pub redirections: Vec<Node>,
 }
 
-/// `NPIPE`
+/// A pipeline of commands.
 #[derive(Clone)]
-pub struct npipe {
-    pub backgnd: c_int,
-    /// the commands in the pipeline (C: `struct nodelist *`)
-    pub cmdlist: Vec<Node>,
+pub struct Pipeline {
+    pub background: bool,
+    pub commands: Vec<Node>,
 }
 
-/// `NREDIR`, `NBACKGND`, `NSUBSHELL`
+/// A command wrapped by redirection, background execution, or a subshell.
 #[derive(Clone)]
-pub struct nredir {
-    pub r#type: c_int,
-    pub linno: c_int,
-    pub n: Option<Box<Node>>,
-    pub redirect: Vec<Node>,
+pub struct CompoundCommand {
+    pub line: c_int,
+    pub command: Option<Box<Node>>,
+    pub redirections: Vec<Node>,
 }
 
-/// `NAND`, `NOR`, `NSEMI`, `NWHILE`, `NUNTIL`
+/// The two children of a binary grammar form.
 #[derive(Clone)]
-pub struct nbinary {
-    pub r#type: c_int,
-    pub ch1: Option<Box<Node>>,
-    pub ch2: Option<Box<Node>>,
+pub struct BinaryCommand {
+    pub left: Option<Box<Node>>,
+    pub right: Option<Box<Node>>,
 }
 
-/// `NIF`
+/// An if command.
 #[derive(Clone)]
-pub struct nif {
-    pub test: Option<Box<Node>>,
-    pub ifpart: Option<Box<Node>>,
-    pub elsepart: Option<Box<Node>>,
+pub struct IfCommand {
+    pub condition: Option<Box<Node>>,
+    pub then_branch: Option<Box<Node>>,
+    pub else_branch: Option<Box<Node>>,
 }
 
-/// `NFOR`
+/// A for command.
 #[derive(Clone)]
-pub struct nfor {
-    pub linno: c_int,
-    pub args: Vec<Node>,
+pub struct ForCommand {
+    pub line: c_int,
+    pub words: Vec<Node>,
     pub body: Option<Box<Node>>,
-    pub var: NodeText,
+    pub variable: NodeText,
 }
 
-/// `NCASE`
+/// A case command.
 #[derive(Clone)]
-pub struct ncase {
-    pub linno: c_int,
-    pub expr: Option<Box<Node>>,
-    /// the list of cases (C: an `nclist.next`-linked list of NCLIST nodes)
-    pub cases: Vec<Node>,
+pub struct CaseCommand {
+    pub line: c_int,
+    pub word: Option<Box<Node>>,
+    pub clauses: Vec<Node>,
 }
 
-/// `NCLIST`
+/// One case clause.
 #[derive(Clone)]
-pub struct nclist {
-    /// list of patterns for this case (C: a `narg.next`-linked list)
-    pub pattern: Vec<Node>,
+pub struct CaseClause {
+    pub patterns: Vec<Node>,
     pub body: Option<Box<Node>>,
-    /// `;&` executes later clause bodies without testing their patterns.
     pub fallthrough: bool,
 }
 
-/// `NDEFUN`
+/// A shell function definition.
 #[derive(Clone)]
-pub struct ndefun {
-    pub linno: c_int,
-    pub text: NodeText,
+pub struct FunctionDefinition {
+    pub line: c_int,
+    pub name: NodeText,
     pub body: Option<Box<Node>>,
 }
 
-/// `NARG`
-// [spec:nsh:def:idiom.word-ir]
+/// A parsed word stored in the syntax tree.
 #[derive(Clone)]
-pub struct narg {
-    pub text: ParsedWord,
+pub struct WordNode {
+    pub word: ParsedWord,
 }
 
-/// `NTO`, `NCLOBBER`, `NFROM`, `NFROMTO`, `NAPPEND`
-pub struct nfile {
-    pub r#type: c_int,
-    /// file descriptor being redirected
-    pub fd: c_int,
-    /// file name, in a NARG node
-    pub fname: Option<Box<Node>>,
+/// A file-opening redirection operator.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FileRedirectionOperator {
+    Write,
+    Clobber,
+    Read,
+    ReadWrite,
+    Append,
+}
+
+/// A redirection whose operand names a file.
+pub struct FileRedirection {
+    pub operator: FileRedirectionOperator,
+    pub descriptor: c_int,
+    pub target: Option<Box<Node>>,
     /// actual file name — the C's `temp` field: written by `expredir` before
     /// every use and never copied by `copynode`, so it is interior-mutable
     /// here rather than part of the tree's value.
@@ -296,16 +231,16 @@ pub struct nfile {
     /// `expredir` and it can free the word. `None` is the C's null — the
     /// value the field has before `expredir` has ever written it, which is
     /// not the same as an empty file name (`> ""` is a real redirection).
-    pub expfname: RefCell<Option<BString>>,
+    pub expanded_target: RefCell<Option<BString>>,
 }
 
-impl nfile {
+impl FileRedirection {
     /// The expanded redirection target as owned shell bytes, without its
     /// storage terminator. Ownership lets opening the path re-enter shell
     /// code without retaining a `RefCell` borrow or a raw pointer.
     pub fn expanded_filename(&self) -> BString {
         let mut name = self
-            .expfname
+            .expanded_target
             .borrow()
             .as_ref()
             .expect("expredir fills every file redirection target")
@@ -316,280 +251,97 @@ impl nfile {
     }
 }
 
-impl Clone for nfile {
+impl Clone for FileRedirection {
     /// `expfname` is the C's `temp` field: `copynode` skips it, so a copied
     /// node inherits whatever was in the block. `expredir` writes it before
     /// every use, so what it starts as does not matter; null is the value an
     /// owned node can state.
-    fn clone(&self) -> nfile {
-        nfile {
-            r#type: self.r#type,
-            fd: self.fd,
-            fname: self.fname.clone(),
-            expfname: RefCell::new(None),
+    fn clone(&self) -> FileRedirection {
+        FileRedirection {
+            operator: self.operator,
+            descriptor: self.descriptor,
+            target: self.target.clone(),
+            expanded_target: RefCell::new(None),
         }
     }
 }
 
-/// `NTOFD`, `NFROMFD`
+/// The side of a descriptor-duplication redirection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DescriptorRedirectionOperator {
+    Input,
+    Output,
+}
+
+/// A redirection whose operand names another shell descriptor.
 #[derive(Clone)]
-pub struct ndup {
-    pub r#type: c_int,
-    /// file descriptor being redirected
-    pub fd: c_int,
+pub struct DescriptorRedirection {
+    pub operator: DescriptorRedirectionOperator,
+    pub descriptor: c_int,
     /// file descriptor to duplicate — rewritten by `expredir`/`fixredir`
     /// each time the redirection is performed, so interior-mutable.
     pub dupfd: Cell<c_int>,
     /// file name if `fd>&$var`; `fixredir` clears it at parse time.
-    pub vname: RefCell<Option<Box<Node>>>,
+    pub variable_target: RefCell<Option<Box<Node>>>,
 }
 
-/// `NHERE`, `NXHERE`
-pub struct nhere {
-    pub r#type: c_int,
-    /// file descriptor being redirected
-    pub fd: c_int,
-    /// input to command (NARG node), filled in by `parseheredoc`
-    pub doc: heredoc_body,
+/// A here-document redirection.
+pub struct HereDocument {
+    pub descriptor: c_int,
+    pub expand: bool,
+    pub body: HereDocumentBody,
 }
 
-impl Clone for nhere {
+impl Clone for HereDocument {
     /// `new->nhere.doc = copynode(n->nhere.doc)`. The slot is shared with a
     /// `struct heredoc` only so `parseheredoc` can reach it; a *copy* of the
     /// node needs its own body, not a second handle on this one — otherwise
     /// the copy would keep pointing at text in the stack allocator.
-    fn clone(&self) -> nhere {
-        let doc = heredoc_body::new();
-        if let Some(n) = self.doc.snapshot() {
-            doc.fill(n);
+    fn clone(&self) -> HereDocument {
+        let body = HereDocumentBody::new();
+        if let Some(node) = self.body.snapshot() {
+            body.fill(node);
         }
-        nhere {
-            r#type: self.r#type,
-            fd: self.fd,
-            doc,
+        HereDocument {
+            descriptor: self.descriptor,
+            expand: self.expand,
+            body,
         }
     }
 }
 
-/// `NNOT`
+/// A negated command.
 #[derive(Clone)]
-pub struct nnot {
-    pub com: Option<Box<Node>>,
+pub struct NegatedCommand {
+    pub command: Option<Box<Node>>,
 }
 
-/// The C's `union node`.
+/// The shell syntax tree.
+// [spec:nsh:req:idiom.structural-ast]
 #[derive(Clone)]
 pub enum Node {
-    Cmd(ncmd),
-    Pipe(npipe),
-    Redir(nredir),
-    Binary(nbinary),
-    If(nif),
-    For(nfor),
-    Case(ncase),
-    Clist(nclist),
-    Defun(ndefun),
-    Arg(narg),
-    File(nfile),
-    Dup(ndup),
-    Here(nhere),
-    Not(nnot),
+    Command(SimpleCommand),
+    Pipeline(Pipeline),
+    Redirect(CompoundCommand),
+    Background(CompoundCommand),
+    Subshell(CompoundCommand),
+    And(BinaryCommand),
+    Or(BinaryCommand),
+    Sequence(BinaryCommand),
+    If(IfCommand),
+    While(BinaryCommand),
+    Until(BinaryCommand),
+    For(ForCommand),
+    Case(CaseCommand),
+    CaseClause(CaseClause),
+    Function(FunctionDefinition),
+    Word(WordNode),
+    FileRedirection(FileRedirection),
+    DescriptorRedirection(DescriptorRedirection),
+    HereDocument(HereDocument),
+    Not(NegatedCommand),
     Bash(BashNode),
 }
-
-/* The C spells this `union node`; ported modules refer to it by both names. */
-pub type node = Node;
-
-/// Names a `union node` arm that the node is not.
-///
-/// Reached only where the C would have read one arm's fields through
-/// another's — a type pun on a node type that cannot occur at that point.
-/// Every such site in the shell is a `switch` default that C lets fall into
-/// the next `case`; see the comments there.
-#[cold]
-#[inline(never)]
-fn wrong_arm(want: &str) -> ! {
-    panic!("node is not a {want}");
-}
-
-impl Node {
-    /// The `int type` first member every arm of the C's union shared.
-    pub fn node_type(&self) -> c_int {
-        match self {
-            Node::Cmd(_) => NCMD,
-            Node::Pipe(_) => NPIPE,
-            Node::Redir(n) => n.r#type,
-            Node::Binary(n) => n.r#type,
-            Node::If(_) => NIF,
-            Node::For(_) => NFOR,
-            Node::Case(_) => NCASE,
-            Node::Clist(_) => NCLIST,
-            Node::Defun(_) => NDEFUN,
-            Node::Arg(_) => NARG,
-            Node::File(n) => n.r#type,
-            Node::Dup(n) => n.r#type,
-            Node::Here(n) => n.r#type,
-            Node::Not(_) => NNOT,
-            Node::Bash(_) => NBASH,
-        }
-    }
-
-    pub fn ncmd(&self) -> &ncmd {
-        match self {
-            Node::Cmd(n) => n,
-            _ => wrong_arm("ncmd"),
-        }
-    }
-
-    pub fn npipe(&self) -> &npipe {
-        match self {
-            Node::Pipe(n) => n,
-            _ => wrong_arm("npipe"),
-        }
-    }
-
-    pub fn npipe_mut(&mut self) -> &mut npipe {
-        match self {
-            Node::Pipe(n) => n,
-            _ => wrong_arm("npipe"),
-        }
-    }
-
-    pub fn nredir(&self) -> &nredir {
-        match self {
-            Node::Redir(n) => n,
-            _ => wrong_arm("nredir"),
-        }
-    }
-
-    pub fn nredir_mut(&mut self) -> &mut nredir {
-        match self {
-            Node::Redir(n) => n,
-            _ => wrong_arm("nredir"),
-        }
-    }
-
-    pub fn nbinary(&self) -> &nbinary {
-        match self {
-            Node::Binary(n) => n,
-            _ => wrong_arm("nbinary"),
-        }
-    }
-
-    pub fn nif(&self) -> &nif {
-        match self {
-            Node::If(n) => n,
-            _ => wrong_arm("nif"),
-        }
-    }
-
-    pub fn nfor(&self) -> &nfor {
-        match self {
-            Node::For(n) => n,
-            _ => wrong_arm("nfor"),
-        }
-    }
-
-    pub fn ncase(&self) -> &ncase {
-        match self {
-            Node::Case(n) => n,
-            _ => wrong_arm("ncase"),
-        }
-    }
-
-    pub fn nclist(&self) -> &nclist {
-        match self {
-            Node::Clist(n) => n,
-            _ => wrong_arm("nclist"),
-        }
-    }
-
-    pub fn ndefun(&self) -> &ndefun {
-        match self {
-            Node::Defun(n) => n,
-            _ => wrong_arm("ndefun"),
-        }
-    }
-
-    pub fn narg(&self) -> &narg {
-        match self {
-            Node::Arg(n) => n,
-            _ => wrong_arm("narg"),
-        }
-    }
-
-    /// Consume the node for its `narg`. `simplecmd` needs this where the C
-    /// relabelled an NARG node NDEFUN in place and kept its `text`.
-    pub fn into_narg(self) -> narg {
-        match self {
-            Node::Arg(n) => n,
-            _ => wrong_arm("narg"),
-        }
-    }
-
-    /// The `nfile` view. Where the C reads `n->nfile.fd` on a redirection
-    /// that is not one — `fd` sits at the same offset in `nfile`, `ndup` and
-    /// `nhere` — use [`Node::redir_fd`] instead.
-    pub fn nfile(&self) -> &nfile {
-        match self {
-            Node::File(n) => n,
-            _ => wrong_arm("nfile"),
-        }
-    }
-
-    pub fn nfile_mut(&mut self) -> &mut nfile {
-        match self {
-            Node::File(n) => n,
-            _ => wrong_arm("nfile"),
-        }
-    }
-
-    pub fn ndup(&self) -> &ndup {
-        match self {
-            Node::Dup(n) => n,
-            _ => wrong_arm("ndup"),
-        }
-    }
-
-    pub fn nhere(&self) -> &nhere {
-        match self {
-            Node::Here(n) => n,
-            _ => wrong_arm("nhere"),
-        }
-    }
-
-    pub fn nhere_mut(&mut self) -> &mut nhere {
-        match self {
-            Node::Here(n) => n,
-            _ => wrong_arm("nhere"),
-        }
-    }
-
-    pub fn nnot(&self) -> &nnot {
-        match self {
-            Node::Not(n) => n,
-            _ => wrong_arm("nnot"),
-        }
-    }
-
-    /// `n->nfile.fd` for any redirection node — the C reads it through the
-    /// `nfile` arm whatever the redirection actually is, because `fd` sits
-    /// at the same offset in `nfile`, `ndup` and `nhere`.
-    pub fn redir_fd(&self) -> c_int {
-        match self {
-            Node::File(n) => n.fd,
-            Node::Dup(n) => n.fd,
-            Node::Here(n) => n.fd,
-            _ => wrong_arm("redirection"),
-        }
-    }
-}
-
-// ---- nodes.c ---------------------------------------------------------
-
-/// Compatibility name for a stored function body. The command table owns the
-/// node directly; there is no separate allocation header.
-pub type funcnode = Node;
 
 // ---------------------------------------------------------------------
 // Shell names are bytes rather than UTF-8 text.
@@ -621,15 +373,15 @@ mod tests {
     fn cloning_a_node_copies_the_bytes_rather_than_sharing_them() {
         // `copyfunc` is why this matters: a function definition outlives
         // the text it was parsed from, so `copynode` called `nodesavestr`.
-        let n = Node::Arg(narg {
-            text: ParsedWord::literal(BString::from("$x")),
+        let n = Node::Word(WordNode {
+            word: ParsedWord::literal(BString::from("$x")),
         });
         let copy = n.clone();
-        assert_eq!(copy.narg().text.as_bstr(), n.narg().text.as_bstr());
-        assert_ne!(
-            copy.narg().text.parts().as_ptr(),
-            n.narg().text.parts().as_ptr()
-        );
+        let (Node::Word(copy), Node::Word(original)) = (&copy, &n) else {
+            unreachable!()
+        };
+        assert_eq!(copy.word.as_bstr(), original.word.as_bstr());
+        assert_ne!(copy.word.parts().as_ptr(), original.word.parts().as_ptr());
     }
 
     #[test]
@@ -641,38 +393,19 @@ mod tests {
         assert_eq!(t.as_cbytes().iter().position(|byte| *byte == 0), Some(1));
     }
 
-    /// `SHELL_ALIGN(sizeof(union node))` for every node struct, so the
-    /// figures can be diffed against the C.
-    ///
-    /// This was `examples/nodesizes.rs`, whose own first line called it a
-    /// temporary check and not part of the shell. It could not stay: an
-    /// example is a separate crate, so it needed `nodes` to be `pub`, and
-    /// the surface closure is exactly the commit that stops an internal
-    /// measurement from holding a module open. Run it for the numbers with
-    /// `cargo test -p nsh --lib node_sizes -- --nocapture`.
     #[test]
-    fn node_sizes_are_printable_for_a_diff_against_the_c() {
-        const fn align(n: usize) -> usize {
-            (n + 7) & !7
-        }
-        macro_rules! p {
-            ($t:ty, $n:expr) => {
-                println!("{} {}", $n, align(core::mem::size_of::<$t>()))
-            };
-        }
-        p!(ncmd, "ncmd");
-        p!(npipe, "npipe");
-        p!(nredir, "nredir");
-        p!(nbinary, "nbinary");
-        p!(nif, "nif");
-        p!(nfor, "nfor");
-        p!(ncase, "ncase");
-        p!(nclist, "nclist");
-        p!(narg, "narg");
-        p!(nfile, "nfile");
-        p!(ndup, "ndup");
-        p!(nhere, "nhere");
-        p!(nnot, "nnot");
-        println!("node {}", core::mem::size_of::<Node>());
+    // [spec:nsh:req:idiom.structural-ast/test]
+    fn grammar_forms_are_distinct_variants() {
+        let child = BinaryCommand {
+            left: None,
+            right: None,
+        };
+        assert!(matches!(Node::And(child.clone()), Node::And(_)));
+        assert!(matches!(Node::Or(child.clone()), Node::Or(_)));
+        assert!(matches!(Node::Sequence(child), Node::Sequence(_)));
+        assert_ne!(
+            FileRedirectionOperator::Write,
+            FileRedirectionOperator::Append
+        );
     }
 }

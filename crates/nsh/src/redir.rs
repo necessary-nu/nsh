@@ -9,7 +9,9 @@ use std::io::Write;
 
 use crate::context::Shell;
 use crate::error::{INTOFF, INTON};
-use crate::nodes::{NAPPEND, NCLOBBER, NFROM, NFROMFD, NFROMTO, NTO, NTOFD, NXHERE, Node};
+use crate::nodes::{
+    DescriptorRedirection, FileRedirection, FileRedirectionOperator, HereDocument, Node,
+};
 
 /* flags passed to redirect (redir.h) */
 pub const REDIR_PUSH: c_int = 0o1; /* save previous values of file descriptors */
@@ -114,9 +116,15 @@ pub fn redirect(sh: &mut Shell, redir: &[Node], flags: c_int) -> Result<(), Erro
     /* The C walks the list through `n->nfile.next`, which is the same offset
      * in every redirection arm; the list is a `Vec` now. */
     for n in redir {
+        // [spec:nsh:req:idiom.structural-ast]
+        let fd = match n {
+            Node::FileRedirection(redirection) => redirection.descriptor,
+            Node::DescriptorRedirection(redirection) => redirection.descriptor,
+            Node::HereDocument(redirection) => redirection.descriptor,
+            _ => return Err(sh.sh_error_value(b"non-redirection syntax reached redirection")),
+        };
         let source = openredirect(sh, n)?;
         if !matches!(source, RedirectSource::Noop) {
-            let fd = n.redir_fd();
             /* The C's `fd == 0` is "this redirection replaced the shell's
              * own input", which is what makes the buffered parse state
              * stale -- not descriptor 0 for its own sake. */
@@ -328,32 +336,47 @@ pub fn sh_open_command_file(sh: &mut Shell, pathname: &BStr) -> Result<Descripto
 // [spec:posix:def:xcurel.file-create-existing-codes]
 // [spec:posix:req:xcurel.file-append-mode]
 fn openredirect(sh: &mut Shell, redir: &Node) -> Result<RedirectSource, Error> {
-    let f = match redir.node_type() {
-        NFROM => RedirectSource::Owned(
+    // [spec:nsh:req:idiom.structural-ast]
+    let source = match redir {
+        Node::FileRedirection(redirection) => open_file_redirection(sh, redirection)?,
+        Node::DescriptorRedirection(redirection) => open_descriptor_redirection(sh, redirection)?,
+        Node::HereDocument(document) => RedirectSource::Owned(openhere(sh, document)?),
+        _ => return Err(sh.sh_error_value(b"non-redirection syntax reached redirection")),
+    };
+
+    Ok(source)
+}
+
+fn open_file_redirection(
+    sh: &mut Shell,
+    redirection: &FileRedirection,
+) -> Result<RedirectSource, Error> {
+    let source = match redirection.operator {
+        FileRedirectionOperator::Read => RedirectSource::Owned(
             sh_open(
                 sh,
-                BStr::new(redir.nfile().expanded_filename().as_slice()),
+                BStr::new(redirection.expanded_filename().as_slice()),
                 nsh_platform::OpenMode::ReadOnly,
                 0,
             )?
             .expect("a mandatory open returns a descriptor"),
         ),
-        NFROMTO => RedirectSource::Owned(
+        FileRedirectionOperator::ReadWrite => RedirectSource::Owned(
             sh_open(
                 sh,
-                BStr::new(redir.nfile().expanded_filename().as_slice()),
+                BStr::new(redirection.expanded_filename().as_slice()),
                 nsh_platform::OpenMode::ReadWriteCreate,
                 0,
             )?
             .expect("a mandatory open returns a descriptor"),
         ),
-        NTO | NCLOBBER => {
+        FileRedirectionOperator::Write | FileRedirectionOperator::Clobber => {
             let mut fell_through = true;
             let mut opened = None;
-            if redir.node_type() == NTO {
+            if redirection.operator == FileRedirectionOperator::Write {
                 /* Take care of noclobber mode. */
                 if sh.options.flag(crate::options::Cflag) != 0 {
-                    let fname = redir.nfile().expanded_filename();
+                    let fname = redirection.expanded_filename();
                     if !fname
                         .try_to_path_buf()
                         .is_ok_and(|path| nsh_platform::path_exists(&path))
@@ -408,7 +431,7 @@ fn openredirect(sh: &mut Shell, redir: &Node) -> Result<RedirectSource, Error> {
                 /* FALLTHROUGH */
             }
             if fell_through {
-                let fname = redir.nfile().expanded_filename();
+                let fname = redirection.expanded_filename();
                 RedirectSource::Owned(
                     sh_open(
                         sh,
@@ -422,8 +445,8 @@ fn openredirect(sh: &mut Shell, redir: &Node) -> Result<RedirectSource, Error> {
                 RedirectSource::Owned(opened.expect("the noclobber path opened a descriptor"))
             }
         }
-        NAPPEND => {
-            let fname = redir.nfile().expanded_filename();
+        FileRedirectionOperator::Append => {
+            let fname = redirection.expanded_filename();
             RedirectSource::Owned(
                 sh_open(
                     sh,
@@ -434,38 +457,28 @@ fn openredirect(sh: &mut Shell, redir: &Node) -> Result<RedirectSource, Error> {
                 .expect("a mandatory open returns a descriptor"),
             )
         }
-        NTOFD | NFROMFD => {
-            let source = redir.ndup().dupfd.get();
-            if source == redir.ndup().fd {
-                RedirectSource::Noop
-            } else if source < 0 {
-                RedirectSource::Close
-            } else {
-                let source_fd = sh
-                    .fds
-                    .get(source)
-                    .map_err(|error| descriptor_error(sh, source, error))?
-                    .ok_or_else(|| descriptor_error(sh, source, crate::fd::bad_descriptor()))?;
-                RedirectSource::Shared(source_fd)
-            }
-        }
-        /*
-         * default:
-         *   #ifdef DEBUG
-         *      abort();
-         *   #endif
-         *   / * Fall through to eliminate warning. * /
-         * case NHERE: case NXHERE:
-         */
-        _ => {
-            if crate::shell::DEBUG {
-                std::process::abort();
-            }
-            RedirectSource::Owned(openhere(sh, redir)?)
-        }
     };
 
-    Ok(f)
+    Ok(source)
+}
+
+fn open_descriptor_redirection(
+    sh: &mut Shell,
+    redirection: &DescriptorRedirection,
+) -> Result<RedirectSource, Error> {
+    let source = redirection.dupfd.get();
+    if source == redirection.descriptor {
+        Ok(RedirectSource::Noop)
+    } else if source < 0 {
+        Ok(RedirectSource::Close)
+    } else {
+        let source_fd = sh
+            .fds
+            .get(source)
+            .map_err(|error| descriptor_error(sh, source, error))?
+            .ok_or_else(|| descriptor_error(sh, source, crate::fd::bad_descriptor()))?;
+        Ok(RedirectSource::Shared(source_fd))
+    }
 }
 
 pub(crate) fn descriptor_error(sh: &mut Shell, source: c_int, error: std::io::Error) -> Error {
@@ -538,18 +551,17 @@ pub fn sh_pipe(sh: &mut crate::context::Shell, memfd: bool) -> Result<(Pipe, boo
 // [spec:dash:sem:redir.openhere-fn]
 // [spec:posix:sem:redir.here-doc-fd-type]
 // [spec:posix:req:redir.here-doc-expansion]
-fn openhere(sh: &mut Shell, redir: &Node) -> Result<Descriptor, Error> {
+fn openhere(sh: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error> {
     let len: usize;
     let expanded;
 
     /* `redir->nhere.doc` is the slot `parseheredoc` filled; the C would have
      * dereferenced a null pointer had it not run. */
-    let doc = redir
-        .nhere()
-        .doc
+    let doc = document
+        .body
         .snapshot()
         .expect("parseheredoc fills every here-document body");
-    let p: &[u8] = if redir.node_type() == NXHERE {
+    let p: &[u8] = if document.expand {
         crate::expand::expandarg(sh, &doc, None, crate::expand::EXP_QUOTED)?;
         /* The C reads the expansion back out of the region as
          * `stackblock()`.  The expansion buffer is owned now, so the read is
@@ -570,7 +582,10 @@ fn openhere(sh: &mut Shell, redir: &Node) -> Result<Descriptor, Error> {
          * second half matters because a here-document body can carry an
          * embedded NUL and the terminator is then not the one `strlen`
          * would have found. */
-        crate::mystring::cstr_prefix(doc.narg().text.as_bstr())
+        let Node::Word(word) = &doc else {
+            return Err(sh.sh_error_value(b"here-document body is not a word"));
+        };
+        crate::mystring::cstr_prefix(word.word.as_bstr())
     };
 
     len = p.len();

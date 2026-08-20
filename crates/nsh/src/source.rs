@@ -314,8 +314,8 @@ impl Shell {
     /// Tokenize `word` as one word and expand it under `flag`.
     ///
     /// The tokenizer is not skipped, and that is the point: `expandarg`
-    /// takes an `NARG` node, whose text carries the `CTL*` markers that
-    /// say where a `$` was quoted and where a `*` is a glob. Handing it
+    /// takes a parsed word node whose structure records where a `$` was
+    /// quoted and where a `*` is a glob. Handing it
     /// raw bytes would expand a *different* word from the one the shell
     /// would have seen. So this is what the parser does for an argument —
     /// `readtoken` into `wordtext`, `makename` into a node — with the

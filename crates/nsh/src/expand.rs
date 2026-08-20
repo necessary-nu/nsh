@@ -28,6 +28,7 @@ use core::ffi::{c_char, c_int, c_uint};
 
 use crate::error::Error;
 use crate::mystring::{byte_at, byte_at_i, slice_from};
+use crate::nodes::Node;
 use crate::pmatch::pmatch_slices;
 
 // ---------------------------------------------------------------------
@@ -670,6 +671,7 @@ pub(crate) fn mbnext_bytes(p: &[u8]) -> c_uint {
 // [spec:posix:req:expand.dollar-invalid-follower]
 // [spec:posix:req:expand.dollar-literal]
 // [spec:posix:sem:shell.word-processing]
+// [spec:nsh:req:idiom.structural-ast]
 pub fn expandarg(
     sh: &mut crate::context::Shell,
     arg: &crate::nodes::Node,
@@ -678,7 +680,10 @@ pub fn expandarg(
 ) -> Result<(), Error> {
     // [spec:nsh:def:idiom.word-ir]
     let mut state = mem::take(&mut sh.expand);
-    let encoded = arg.narg().text.encode_legacy();
+    let Node::Word(word) = arg else {
+        return Err(sh.sh_error_value(b"word expansion requires a word node"));
+    };
+    let encoded = word.word.encode_legacy();
     state.backquotes = encoded.substitutions;
     state.next_backquote = 0;
     let result = expandarg_inner(sh, &mut state, &encoded.bytes, arglist, flag);
@@ -3360,7 +3365,10 @@ pub fn casematch(
     val: &BStr,
 ) -> Result<c_int, Error> {
     let mut state = mem::take(&mut sh.expand);
-    let encoded = pattern.narg().text.encode_legacy();
+    let Node::Word(word) = pattern else {
+        return Err(sh.sh_error_value(b"case matching requires a word node"));
+    };
+    let encoded = word.word.encode_legacy();
     state.backquotes = encoded.substitutions;
     state.next_backquote = 0;
     let result = casematch_inner(sh, &mut state, &encoded.bytes, val);
@@ -3383,13 +3391,7 @@ fn casematch_inner(
     /* As in `expandarg`: this `?` returns past the `ifsfree()`, which is
      * where the longjmp went too, and the catch frame reclaims the
      * regions. */
-    argstr(
-        sh,
-        state,
-        pattern,
-        0,
-        EXP_TILDE | EXP_CASE,
-    )?;
+    argstr(sh, state, pattern, 0, EXP_TILDE | EXP_CASE)?;
     ifsfree(state);
     /* The C reads the word back as `stackblock()`. */
     rmescapes_buffer(expb(state), RMESCAPE_GLOB);
