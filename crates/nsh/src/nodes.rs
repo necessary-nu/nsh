@@ -11,18 +11,17 @@
 //! Every part of that existed because the tree lived in the stack allocator
 //! and C has neither destructors nor a discriminated union.
 //! [dec:nsh:owned-data] takes the allocator away, so what is here now is an
-//! owned Rust tree: children are `Option<Box<Node>>`, the `next`-linked
-//! sibling lists are `Vec<Node>`, and the whole deep-copy apparatus is
-//! a derived `Clone`.
+//! owned Rust tree: required children are `Box<Node>`, optional grammar
+//! branches use `Option<Box<Node>>`, the `next`-linked sibling lists are
+//! `Vec<Node>`, and the whole deep-copy apparatus is a derived `Clone`.
 //!
 //! Each grammar form is a distinct [`Node`] variant with the payload that is
 //! valid for that form. Consumers match variants directly; there are no
 //! numeric tags, shared union arms, relabelled nodes, or wrong-arm accessors.
-//! Two fields are still written at run time rather than at parse time:
-//!
-//!     `nfile.expfname` (the C marks it `temp`, so `copynode` never copied
-//!     it) and `ndup.dupfd` are filled in by `expredir` on a tree that may
-//!     be a shared function definition. They are `Cell`s.
+//! Redirections likewise store only parsed syntax. Here-document bodies are
+//! attached before parsing returns, while expanded paths and resolved
+//! descriptor operands live in evaluation-local values. A parsed function
+//! can consequently be cloned, cached, and evaluated without mutation.
 //!
 //! Parsed arguments own a structural [`crate::word::ParsedWord`]. Function
 //! names and the few remaining raw grammar fields use [`NodeText`] while the
@@ -33,9 +32,6 @@
 //! reference is built from, but nothing it emits — `nodesize[]`, `calcsize`,
 //! `copynode` — has a counterpart here, so the port of that generator went
 //! with the layout it described.
-
-use core::cell::{Cell, RefCell};
-use std::sync::{Arc, Mutex, PoisonError};
 
 use bstr::{BStr, BString};
 use core::ffi::c_int;
@@ -49,40 +45,6 @@ pub(crate) use bash::{
     BashArrayValue, BashAssignmentOperator, BashConditional, BashConditionalExpr, BashFunction,
     BashFunctionStyle, BashNode, BashProcessDirection, BashProcessSubstitution,
 };
-
-/// The slot a here-document body lands in.
-///
-/// A here-document is read *after* its redirection node is already buried in
-/// a command: `parseredir` builds the node, and `parseheredoc` — which runs
-/// at the next newline — supplies the text. The C did that with a back
-/// pointer out of `struct heredoc` into the tree (`here->here->nhere.doc =
-/// n`). A back pointer into an owned tree is the one thing Rust will not
-/// give you, so the *slot* is shared instead: the node and the pending
-/// `struct heredoc` hold one handle each. The body is filled exactly once,
-/// then readers take an owned snapshot before an expansion can re-enter the
-/// tree. The mutex makes sharing the delayed write safe without preventing a
-/// complete [`Shell`](crate::context::Shell) from moving to another thread.
-#[derive(Clone)]
-pub struct HereDocumentBody(Arc<Mutex<Option<Node>>>);
-
-impl HereDocumentBody {
-    pub fn new() -> Self {
-        Self(Arc::new(Mutex::new(None)))
-    }
-
-    pub fn fill(&self, node: Node) {
-        let mut body = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        assert!(body.is_none(), "a here-document body is filled only once");
-        *body = Some(node);
-    }
-
-    pub fn snapshot(&self) -> Option<Node> {
-        self.0
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
-    }
-}
 
 /// The text of a word, a `for` variable or a function name.
 ///
@@ -133,7 +95,7 @@ pub struct SimpleCommand {
     pub line: c_int,
     pub assignments: Vec<Node>,
     pub arguments: Vec<Node>,
-    pub redirections: Vec<Node>,
+    pub redirections: Vec<Redirection>,
 }
 
 /// A pipeline of commands.
@@ -147,22 +109,22 @@ pub struct Pipeline {
 #[derive(Clone)]
 pub struct CompoundCommand {
     pub line: c_int,
-    pub command: Option<Box<Node>>,
-    pub redirections: Vec<Node>,
+    pub command: Box<Node>,
+    pub redirections: Vec<Redirection>,
 }
 
 /// The two children of a binary grammar form.
 #[derive(Clone)]
 pub struct BinaryCommand {
-    pub left: Option<Box<Node>>,
-    pub right: Option<Box<Node>>,
+    pub left: Box<Node>,
+    pub right: Box<Node>,
 }
 
 /// An if command.
 #[derive(Clone)]
 pub struct IfCommand {
-    pub condition: Option<Box<Node>>,
-    pub then_branch: Option<Box<Node>>,
+    pub condition: Box<Node>,
+    pub then_branch: Box<Node>,
     pub else_branch: Option<Box<Node>>,
 }
 
@@ -171,7 +133,7 @@ pub struct IfCommand {
 pub struct ForCommand {
     pub line: c_int,
     pub words: Vec<Node>,
-    pub body: Option<Box<Node>>,
+    pub body: Box<Node>,
     pub variable: NodeText,
 }
 
@@ -179,8 +141,8 @@ pub struct ForCommand {
 #[derive(Clone)]
 pub struct CaseCommand {
     pub line: c_int,
-    pub word: Option<Box<Node>>,
-    pub clauses: Vec<Node>,
+    pub word: Box<Node>,
+    pub clauses: Vec<CaseClause>,
 }
 
 /// One case clause.
@@ -196,7 +158,7 @@ pub struct CaseClause {
 pub struct FunctionDefinition {
     pub line: c_int,
     pub name: NodeText,
-    pub body: Option<Box<Node>>,
+    pub body: Box<Node>,
 }
 
 /// A parsed word stored in the syntax tree.
@@ -215,55 +177,22 @@ pub enum FileRedirectionOperator {
     Append,
 }
 
+/// A parsed redirection. Redirections are syntax attached to commands, not
+/// commands themselves, so they do not inhabit [`Node`].
+// [spec:nsh:req:idiom.immutable-ast]
+#[derive(Clone)]
+pub enum Redirection {
+    File(FileRedirection),
+    Descriptor(DescriptorRedirection),
+    HereDocument(HereDocument),
+}
+
 /// A redirection whose operand names a file.
+#[derive(Clone)]
 pub struct FileRedirection {
     pub operator: FileRedirectionOperator,
     pub descriptor: c_int,
-    pub target: Option<Box<Node>>,
-    /// actual file name — the C's `temp` field: written by `expredir` before
-    /// every use and never copied by `copynode`, so it is interior-mutable
-    /// here rather than part of the tree's value.
-    ///
-    /// The C stores `fn.list->text`, a pointer into the region that stays
-    /// valid until `evalcommand`'s `popstackmark`. The node owns the bytes
-    /// instead, which is the same lifetime said without the allocator:
-    /// `redirect` runs while the node is alive, and nothing between
-    /// `expredir` and it can free the word. `None` is the C's null — the
-    /// value the field has before `expredir` has ever written it, which is
-    /// not the same as an empty file name (`> ""` is a real redirection).
-    pub expanded_target: RefCell<Option<BString>>,
-}
-
-impl FileRedirection {
-    /// The expanded redirection target as owned shell bytes, without its
-    /// storage terminator. Ownership lets opening the path re-enter shell
-    /// code without retaining a `RefCell` borrow or a raw pointer.
-    pub fn expanded_filename(&self) -> BString {
-        let mut name = self
-            .expanded_target
-            .borrow()
-            .as_ref()
-            .expect("expredir fills every file redirection target")
-            .clone();
-        debug_assert_eq!(name.last(), Some(&0), "expfname is a C string");
-        name.pop();
-        name
-    }
-}
-
-impl Clone for FileRedirection {
-    /// `expfname` is the C's `temp` field: `copynode` skips it, so a copied
-    /// node inherits whatever was in the block. `expredir` writes it before
-    /// every use, so what it starts as does not matter; null is the value an
-    /// owned node can state.
-    fn clone(&self) -> FileRedirection {
-        FileRedirection {
-            operator: self.operator,
-            descriptor: self.descriptor,
-            target: self.target.clone(),
-            expanded_target: RefCell::new(None),
-        }
-    }
+    pub target: WordNode,
 }
 
 /// The side of a descriptor-duplication redirection.
@@ -273,47 +202,34 @@ pub enum DescriptorRedirectionOperator {
     Output,
 }
 
+/// The parsed operand of `<&` or `>&`.
+#[derive(Clone)]
+pub enum DescriptorTarget {
+    Number(c_int),
+    Close,
+    Word(WordNode),
+}
+
 /// A redirection whose operand names another shell descriptor.
 #[derive(Clone)]
 pub struct DescriptorRedirection {
     pub operator: DescriptorRedirectionOperator,
     pub descriptor: c_int,
-    /// file descriptor to duplicate — rewritten by `expredir`/`fixredir`
-    /// each time the redirection is performed, so interior-mutable.
-    pub dupfd: Cell<c_int>,
-    /// file name if `fd>&$var`; `fixredir` clears it at parse time.
-    pub variable_target: RefCell<Option<Box<Node>>>,
+    pub target: DescriptorTarget,
 }
 
 /// A here-document redirection.
+#[derive(Clone)]
 pub struct HereDocument {
     pub descriptor: c_int,
     pub expand: bool,
-    pub body: HereDocumentBody,
-}
-
-impl Clone for HereDocument {
-    /// `new->nhere.doc = copynode(n->nhere.doc)`. The slot is shared with a
-    /// `struct heredoc` only so `parseheredoc` can reach it; a *copy* of the
-    /// node needs its own body, not a second handle on this one — otherwise
-    /// the copy would keep pointing at text in the stack allocator.
-    fn clone(&self) -> HereDocument {
-        let body = HereDocumentBody::new();
-        if let Some(node) = self.body.snapshot() {
-            body.fill(node);
-        }
-        HereDocument {
-            descriptor: self.descriptor,
-            expand: self.expand,
-            body,
-        }
-    }
+    pub body: WordNode,
 }
 
 /// A negated command.
 #[derive(Clone)]
 pub struct NegatedCommand {
-    pub command: Option<Box<Node>>,
+    pub command: Box<Node>,
 }
 
 /// The shell syntax tree.
@@ -333,12 +249,8 @@ pub enum Node {
     Until(BinaryCommand),
     For(ForCommand),
     Case(CaseCommand),
-    CaseClause(CaseClause),
     Function(FunctionDefinition),
     Word(WordNode),
-    FileRedirection(FileRedirection),
-    DescriptorRedirection(DescriptorRedirection),
-    HereDocument(HereDocument),
     Not(NegatedCommand),
     Bash(BashNode),
 }
@@ -396,9 +308,14 @@ mod tests {
     #[test]
     // [spec:nsh:req:idiom.structural-ast/test]
     fn grammar_forms_are_distinct_variants() {
+        let command = || {
+            Box::new(Node::Word(WordNode {
+                word: ParsedWord::literal(BString::from("command")),
+            }))
+        };
         let child = BinaryCommand {
-            left: None,
-            right: None,
+            left: command(),
+            right: command(),
         };
         assert!(matches!(Node::And(child.clone()), Node::And(_)));
         assert!(matches!(Node::Or(child.clone()), Node::Or(_)));

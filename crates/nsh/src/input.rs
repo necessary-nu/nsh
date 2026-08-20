@@ -167,10 +167,12 @@ pub struct InputStack {
     top: usize,
     /// `parsefile` — the current frame, by index. See `cur_pf`.
     cur: usize,
-    /// `heredoclist` — here-documents read but not yet attached. Filled
-    /// by `parseheredoc` and drained by the node builders, across input
-    /// positions, which is why it is state and not a local.
+    /// Here-document delimiters waiting for their bodies at the next
+    /// grammar newline.
     pub(crate) heredoclist: Vec<crate::parser::heredoc>,
+    /// Bodies read for the syntax tree currently under construction. They
+    /// are moved into that tree before it crosses a parser boundary.
+    pub(crate) completed_heredocs: Vec<crate::nodes::WordNode>,
     /// `doprompt` — whether to prompt before the next read.
     pub(crate) doprompt: c_int,
     /// `needprompt` — interactive and at the start of a line.
@@ -191,8 +193,9 @@ pub struct InputStack {
     /// The last parsed word, including its substitutions at their lexical
     /// positions.
     pub(crate) word: crate::word::ParsedWord,
-    /// `redirnode` — the redirection the last token opened.
-    pub(crate) redirnode: Option<crate::nodes::Node>,
+    /// The redirection operator the last token opened. Its required operand
+    /// is parsed before it becomes an AST redirection.
+    pub(crate) redirnode: Option<crate::parser::PendingRedirection>,
     /// `heredoc` — the here-document the last token opened.
     pub(crate) heredoc: Option<crate::parser::heredoc>,
     /// `stdin_state` — how the shell's standard input behaves.
@@ -214,6 +217,7 @@ impl InputStack {
             top: 0,
             cur: 0,
             heredoclist: Vec::new(),
+            completed_heredocs: Vec::new(),
             doprompt: 0,
             needprompt: 0,
             lasttoken: crate::parser::TokenKind::Eof,

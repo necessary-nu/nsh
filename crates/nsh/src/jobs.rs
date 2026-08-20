@@ -26,7 +26,9 @@ use nsh_platform::{Descriptor, NativeStrExt as _};
 use std::io::Write as _;
 
 use crate::error::{Error, INTOFF, INTON};
-use crate::nodes::{DescriptorRedirectionOperator, FileRedirectionOperator, Node};
+use crate::nodes::{
+    DescriptorRedirectionOperator, DescriptorTarget, FileRedirectionOperator, Node, Redirection,
+};
 use crate::output::Dest;
 
 /// Append an already-rendered ASCII fragment with `fmtstr`'s historical
@@ -1705,17 +1707,17 @@ fn cmdtxt(n: Option<&Node>, text: &mut BString) {
         Node::And(binary) => cmdtxt_binary(binary, b" && ", text),
         Node::Or(binary) => cmdtxt_binary(binary, b" || ", text),
         Node::Redirect(command) | Node::Background(command) => {
-            cmdtxt(command.command.as_deref(), text);
+            cmdtxt(Some(command.command.as_ref()), text);
         }
         Node::Not(command) => {
             cmdputs(b"!", text);
-            cmdtxt(command.command.as_deref(), text);
+            cmdtxt(Some(command.command.as_ref()), text);
         }
         Node::If(command) => {
             cmdputs(b"if ", text);
-            cmdtxt(command.condition.as_deref(), text);
+            cmdtxt(Some(command.condition.as_ref()), text);
             cmdputs(b"; then ", text);
-            cmdtxt(command.then_branch.as_deref(), text);
+            cmdtxt(Some(command.then_branch.as_ref()), text);
             if command.else_branch.is_some() {
                 cmdputs(b"; else ", text);
                 cmdtxt(command.else_branch.as_deref(), text);
@@ -1724,7 +1726,7 @@ fn cmdtxt(n: Option<&Node>, text: &mut BString) {
         }
         Node::Subshell(command) => {
             cmdputs(b"(", text);
-            cmdtxt(command.command.as_deref(), text);
+            cmdtxt(Some(command.command.as_ref()), text);
             cmdputs(b")", text);
         }
         Node::While(command) | Node::Until(command) => {
@@ -1736,9 +1738,9 @@ fn cmdtxt(n: Option<&Node>, text: &mut BString) {
                 },
                 text,
             );
-            cmdtxt(command.left.as_deref(), text);
+            cmdtxt(Some(command.left.as_ref()), text);
             cmdputs(b"; do ", text);
-            cmdtxt(command.right.as_deref(), text);
+            cmdtxt(Some(command.right.as_ref()), text);
             cmdputs(b"; done", text);
         }
         Node::For(command) => {
@@ -1747,7 +1749,7 @@ fn cmdtxt(n: Option<&Node>, text: &mut BString) {
             cmdputs(b" in ", text);
             cmdlist(&command.words, 1, text);
             cmdputs(b"; do ", text);
-            cmdtxt(command.body.as_deref(), text);
+            cmdtxt(Some(command.body.as_ref()), text);
             cmdputs(b"; done", text);
         }
         Node::Function(function) => {
@@ -1756,18 +1758,14 @@ fn cmdtxt(n: Option<&Node>, text: &mut BString) {
         }
         Node::Command(command) => {
             cmdlist(&command.arguments, 1, text);
-            cmdlist(&command.redirections, 0, text);
+            cmdredirs(&command.redirections, text);
         }
         Node::Word(word) => word.word.render(text),
-        Node::HereDocument(_) => cmdputs(b"<<...", text),
         Node::Case(command) => {
             cmdputs(b"case ", text);
-            cmdtxt(command.word.as_deref(), text);
+            cmdtxt(Some(command.word.as_ref()), text);
             cmdputs(b" in ", text);
             for clause in &command.clauses {
-                let Node::CaseClause(clause) = clause else {
-                    continue;
-                };
                 /* The C passes the head of the pattern list, so only the
                  * first pattern of a case ever prints. */
                 cmdtxt(clause.patterns.first(), text);
@@ -1777,31 +1775,6 @@ fn cmdtxt(n: Option<&Node>, text: &mut BString) {
             }
             cmdputs(b"esac", text);
         }
-        Node::FileRedirection(redirection) => {
-            cmdtxt_descriptor(redirection.descriptor, text);
-            cmdputs(
-                match redirection.operator {
-                    FileRedirectionOperator::Write => b">",
-                    FileRedirectionOperator::Clobber => b">|",
-                    FileRedirectionOperator::Read => b"<",
-                    FileRedirectionOperator::ReadWrite => b"<>",
-                    FileRedirectionOperator::Append => b">>",
-                },
-                text,
-            );
-            cmdtxt(redirection.target.as_deref(), text);
-        }
-        Node::DescriptorRedirection(redirection) => {
-            cmdtxt_descriptor(redirection.descriptor, text);
-            cmdputs(
-                match redirection.operator {
-                    DescriptorRedirectionOperator::Input => b"<&",
-                    DescriptorRedirectionOperator::Output => b">&",
-                },
-                text,
-            );
-            cmdtxt_descriptor(redirection.dupfd.get(), text);
-        }
         Node::Pipeline(pipeline) => {
             for (index, command) in pipeline.commands.iter().enumerate() {
                 if index != 0 {
@@ -1810,19 +1783,14 @@ fn cmdtxt(n: Option<&Node>, text: &mut BString) {
                 cmdtxt(Some(command), text);
             }
         }
-        Node::CaseClause(clause) => {
-            cmdtxt(clause.patterns.first(), text);
-            cmdputs(b") ", text);
-            cmdtxt(clause.body.as_deref(), text);
-        }
         Node::Bash(_) => cmdputs(b"<bash syntax>", text),
     }
 }
 
 fn cmdtxt_binary(command: &crate::nodes::BinaryCommand, separator: &[u8], text: &mut BString) {
-    cmdtxt(command.left.as_deref(), text);
+    cmdtxt(Some(command.left.as_ref()), text);
     cmdputs(separator, text);
-    cmdtxt(command.right.as_deref(), text);
+    cmdtxt(Some(command.right.as_ref()), text);
 }
 
 fn cmdtxt_descriptor(descriptor: c_int, text: &mut BString) {
@@ -1839,6 +1807,44 @@ fn cmdlist(np: &[Node], sep: c_int, text: &mut BString) {
         cmdtxt(Some(node), text);
         if sep != 0 && i + 1 < np.len() {
             cmdputs(b" ", text);
+        }
+    }
+}
+
+fn cmdredirs(redirections: &[Redirection], text: &mut BString) {
+    for redirection in redirections {
+        cmdputs(b" ", text);
+        match redirection {
+            Redirection::File(redirection) => {
+                cmdtxt_descriptor(redirection.descriptor, text);
+                cmdputs(
+                    match redirection.operator {
+                        FileRedirectionOperator::Write => b">",
+                        FileRedirectionOperator::Clobber => b">|",
+                        FileRedirectionOperator::Read => b"<",
+                        FileRedirectionOperator::ReadWrite => b"<>",
+                        FileRedirectionOperator::Append => b">>",
+                    },
+                    text,
+                );
+                redirection.target.word.render(text);
+            }
+            Redirection::Descriptor(redirection) => {
+                cmdtxt_descriptor(redirection.descriptor, text);
+                cmdputs(
+                    match redirection.operator {
+                        DescriptorRedirectionOperator::Input => b"<&",
+                        DescriptorRedirectionOperator::Output => b">&",
+                    },
+                    text,
+                );
+                match &redirection.target {
+                    DescriptorTarget::Number(descriptor) => cmdtxt_descriptor(*descriptor, text),
+                    DescriptorTarget::Close => cmdputs(b"-", text),
+                    DescriptorTarget::Word(word) => word.word.render(text),
+                }
+            }
+            Redirection::HereDocument(_) => cmdputs(b"<<...", text),
         }
     }
 }

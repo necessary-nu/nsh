@@ -43,11 +43,11 @@ use crate::expand::{EXP_FULL, EXP_MBCHAR, EXP_REDIR, EXP_TILDE, EXP_VARTILDE};
 use crate::expand::{arglist, strlist};
 use crate::jobs::FORK_NOJOB;
 use crate::nodes::{
-    BinaryCommand, CaseCommand, CompoundCommand, ForCommand, FunctionDefinition, Node, Pipeline,
-    SimpleCommand,
+    BinaryCommand, CaseCommand, CompoundCommand, DescriptorTarget, ForCommand, FunctionDefinition,
+    Node, Pipeline, Redirection, SimpleCommand,
 };
 use crate::output::Dest;
-use crate::redir::{REDIR_PUSH, REDIR_SAVEFD2};
+use crate::redir::{ExpandedRedirection, REDIR_PUSH, REDIR_SAVEFD2};
 use crate::var::VEXPORT;
 
 // ---------------------------------------------------------------------
@@ -385,14 +385,14 @@ fn eval_interactive_sequence(
     flags: c_int,
 ) -> Result<Flow, Error> {
     if let Some(Node::Sequence(sequence)) = n {
-        match eval_interactive_sequence(sh, sequence.left.as_deref(), flags & EV_TESTED)? {
+        match eval_interactive_sequence(sh, Some(sequence.left.as_ref()), flags & EV_TESTED)? {
             Flow::Done(_) => {}
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
         if sh.eval.evalskip != 0 {
             return Ok(Flow::Done(sh.status));
         }
-        return eval_interactive_sequence(sh, sequence.right.as_deref(), flags);
+        return eval_interactive_sequence(sh, Some(sequence.right.as_ref()), flags);
     }
 
     let input_stop = crate::input::cur_mark(sh);
@@ -449,10 +449,10 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
                 if sh.eval.funcline != 0 {
                     sh.vars.lineno -= sh.eval.funcline - 1;
                 }
-                expredir(sh, &redirection.redirections)?;
-                crate::redir::pushredir(sh, &redirection.redirections);
+                let expanded_redirections = expredir(sh, &redirection.redirections)?;
+                crate::redir::pushredir(sh, &expanded_redirections);
                 let status =
-                    match crate::redir::redirectsafe(sh, &redirection.redirections, REDIR_PUSH) {
+                    match crate::redir::redirectsafe(sh, &expanded_redirections, REDIR_PUSH) {
                         Err(error) if error.is_interrupt() || error.is_expansion() => {
                             return Err(error);
                         }
@@ -463,7 +463,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
                         }
                         Ok(()) => flow!(evaltree(
                             sh,
-                            redirection.command.as_deref(),
+                            Some(redirection.command.as_ref()),
                             flags & EV_TESTED,
                         )),
                     };
@@ -493,35 +493,35 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
             }
             Node::Case(command) => flow!(evalcase(sh, command, flags)),
             Node::And(command) => {
-                let left = flow!(evaltree(sh, command.left.as_deref(), EV_TESTED));
+                let left = flow!(evaltree(sh, Some(command.left.as_ref()), EV_TESTED));
                 if left != 0 || sh.eval.evalskip != 0 {
                     left
                 } else {
-                    flow!(evaltree(sh, command.right.as_deref(), flags))
+                    flow!(evaltree(sh, Some(command.right.as_ref()), flags))
                 }
             }
             Node::Or(command) => {
-                let left = flow!(evaltree(sh, command.left.as_deref(), EV_TESTED));
+                let left = flow!(evaltree(sh, Some(command.left.as_ref()), EV_TESTED));
                 if left == 0 || sh.eval.evalskip != 0 {
                     left
                 } else {
-                    flow!(evaltree(sh, command.right.as_deref(), flags))
+                    flow!(evaltree(sh, Some(command.right.as_ref()), flags))
                 }
             }
             Node::Sequence(command) => {
-                let _ = flow!(evaltree(sh, command.left.as_deref(), flags & EV_TESTED,));
+                let _ = flow!(evaltree(sh, Some(command.left.as_ref()), flags & EV_TESTED,));
                 if sh.eval.evalskip != 0 {
                     sh.status
                 } else {
-                    flow!(evaltree(sh, command.right.as_deref(), flags))
+                    flow!(evaltree(sh, Some(command.right.as_ref()), flags))
                 }
             }
             Node::If(command) => {
-                let condition = flow!(evaltree(sh, command.condition.as_deref(), EV_TESTED));
+                let condition = flow!(evaltree(sh, Some(command.condition.as_ref()), EV_TESTED));
                 if sh.eval.evalskip != 0 {
                     condition
                 } else if condition == 0 {
-                    flow!(evaltree(sh, command.then_branch.as_deref(), flags))
+                    flow!(evaltree(sh, Some(command.then_branch.as_ref()), flags))
                 } else if command.else_branch.is_some() {
                     flow!(evaltree(sh, command.else_branch.as_deref(), flags))
                 } else {
@@ -530,7 +530,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
             }
             Node::Function(definition) => {
                 if hflag(sh) != 0 {
-                    let _ = flow!(prehash_tree(sh, definition.body.as_deref()));
+                    let _ = flow!(prehash_tree(sh, Some(definition.body.as_ref())));
                 }
                 crate::exec::defun(sh, definition);
                 0
@@ -539,18 +539,14 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
                 return Err(sh.sh_error_value(b"Bash syntax is parsed but not executable yet"));
             }
             Node::Not(command) => {
-                let status = flow!(evaltree(sh, command.command.as_deref(), EV_TESTED));
+                let status = flow!(evaltree(sh, Some(command.command.as_ref()), EV_TESTED));
                 if sh.eval.evalskip == 0 {
                     (status == 0) as c_int
                 } else {
                     status
                 }
             }
-            Node::Word(_)
-            | Node::FileRedirection(_)
-            | Node::DescriptorRedirection(_)
-            | Node::HereDocument(_)
-            | Node::CaseClause(_) => {
+            Node::Word(_) => {
                 return Err(sh.sh_error_value(b"non-command syntax reached evaluation"));
             }
         };
@@ -634,7 +630,7 @@ fn evalloop(
         {
             let mut i: c_int;
 
-            i = flow!(evaltree(sh, command.left.as_deref(), EV_TESTED));
+            i = flow!(evaltree(sh, Some(command.left.as_ref()), EV_TESTED));
             skip = skiploop(sh);
             if skip == SKIPFUNC {
                 status = i;
@@ -648,7 +644,7 @@ fn evalloop(
                 if i != 0 {
                     break;
                 }
-                status = flow!(evaltree(sh, command.right.as_deref(), flags));
+                status = flow!(evaltree(sh, Some(command.right.as_ref()), flags));
                 skip = skiploop(sh);
             }
         }
@@ -691,7 +687,7 @@ fn evalfor(sh: &mut Shell, command: &ForCommand, flags: c_int) -> Result<Flow, E
             Some(crate::mystring::cstr_prefix(&sp.text)),
             0,
         )?;
-        status = flow!(evaltree(sh, command.body.as_deref(), flags));
+        status = flow!(evaltree(sh, Some(command.body.as_ref()), flags));
         if (skiploop(sh) & !SKIPCONT) != 0 {
             break;
         }
@@ -721,7 +717,7 @@ fn evalcase(sh: &mut Shell, command: &CaseCommand, flags: c_int) -> Result<Flow,
 
     crate::expand::expandarg(
         sh,
-        command.word.as_deref().unwrap(),
+        command.word.as_ref(),
         Some(&mut arglist),
         if crate::mystring::FNMATCH_IS_ENABLED != 0 {
             EXP_TILDE
@@ -734,13 +730,10 @@ fn evalcase(sh: &mut Shell, command: &CaseCommand, flags: c_int) -> Result<Flow,
      * exactly one entry whatever the word expands to. */
     debug_assert_eq!(arglist.list.len(), 1, "an unsplit expansion is one field");
     'out_lbl: {
-        for clause_node in &command.clauses {
+        for clause in &command.clauses {
             if sh.eval.evalskip != 0 {
                 break;
             }
-            let Node::CaseClause(clause) = clause_node else {
-                return Err(sh.sh_error_value(b"case command contains a non-clause node"));
-            };
             let mut selected = fallthrough;
             if !selected {
                 for patp in &clause.patterns {
@@ -805,7 +798,7 @@ fn evalsubshell(
         sh.vars.lineno -= sh.eval.funcline - 1;
     }
 
-    expredir(sh, &command.redirections)?;
+    let expanded_redirections = expredir(sh, &command.redirections)?;
     INTOFF(sh);
     /* Whether the tail below runs in a child of this process or in this
      * process. The C does not need to know, because its `evaltreenr`
@@ -819,7 +812,7 @@ fn evalsubshell(
             break 'nofork;
         }
         jp = crate::jobs::makejob(sh, 1);
-        if crate::jobs::forkshell(sh, Some(jp), command.command.as_deref(), backgnd)? == 0 {
+        if crate::jobs::forkshell(sh, Some(jp), Some(command.command.as_ref()), backgnd)? == 0 {
             flags |= EV_EXIT;
             if backgnd != 0 {
                 flags &= !EV_TESTED;
@@ -839,8 +832,8 @@ fn evalsubshell(
     // nofork:
     INTON(sh);
     let outcome = (|| -> Result<Flow, Error> {
-        crate::redir::redirect(sh, &command.redirections, 0)?;
-        evaltreenr(sh, command.command.as_deref(), flags)
+        crate::redir::redirect(sh, &expanded_redirections, 0)?;
+        evaltreenr(sh, Some(command.command.as_ref()), flags)
     })();
 
     if forked {
@@ -879,52 +872,63 @@ fn evalsubshell(
 // [spec:posix:req:redir.word-expansion]
 // [spec:posix:req:redir.word-pathname-expansion]
 // [spec:posix:req:grammar.redirection-filename]
-fn expredir(sh: &mut Shell, n: &[Node]) -> Result<(), Error> {
-    for redir in n {
+fn expredir<'a>(
+    sh: &mut Shell,
+    redirections: &'a [Redirection],
+) -> Result<Vec<ExpandedRedirection<'a>>, Error> {
+    let mut expanded = Vec::with_capacity(redirections.len());
+    for redir in redirections {
         let mut fnl: arglist = arglist::new();
         match redir {
-            Node::FileRedirection(redirection) => {
-                crate::expand::expandarg(
-                    sh,
-                    redirection.target.as_deref().unwrap(),
-                    Some(&mut fnl),
-                    EXP_TILDE | EXP_REDIR,
-                )?;
+            Redirection::File(redirection) => {
+                let target = Node::Word(redirection.target.clone());
+                crate::expand::expandarg(sh, &target, Some(&mut fnl), EXP_TILDE | EXP_REDIR)?;
                 /* `fn.list->text` with no null check: no EXP_FULL means
                  * `expandarg` took its single-field arm. */
                 debug_assert_eq!(fnl.list.len(), 1, "an unsplit expansion is one field");
-                /* `redir->nfile.expfname = fn.list->text` — the C hands the
-                 * node a pointer into the region and relies on this
-                 * function's caller not popping its mark before `redirect`
-                 * has run. The node owns the bytes instead; `fnl` is a
-                 * per-iteration local and its list would be gone one
-                 * statement later.  Now that the field owns them too this
-                 * is the C's assignment exactly: a move, not a copy. */
-                *redirection.expanded_target.borrow_mut() = Some(fnl.list.remove(0).text);
+                let mut target = fnl.list.remove(0).text;
+                debug_assert_eq!(target.last(), Some(&0), "expanded path is terminated");
+                target.pop();
+                expanded.push(ExpandedRedirection::File {
+                    operator: redirection.operator,
+                    descriptor: redirection.descriptor,
+                    target,
+                });
             }
-            Node::DescriptorRedirection(redirection) => {
-                /* The borrow of `vname` ends before `fixredir`, which writes
-                 * `dupfd` on this same node. */
-                let expand = {
-                    let vname = redirection.variable_target.borrow();
-                    match vname.as_deref() {
-                        None => false,
-                        Some(v) => {
-                            crate::expand::expandarg(sh, v, Some(&mut fnl), EXP_TILDE | EXP_REDIR)?;
-                            true
-                        }
+            Redirection::Descriptor(redirection) => {
+                let source = match &redirection.target {
+                    DescriptorTarget::Number(number) => Some(*number),
+                    DescriptorTarget::Close => None,
+                    DescriptorTarget::Word(word) => {
+                        let word = Node::Word(word.clone());
+                        crate::expand::expandarg(sh, &word, Some(&mut fnl), EXP_TILDE | EXP_REDIR)?;
+                        debug_assert_eq!(fnl.list.len(), 1, "an unsplit expansion is one field");
+                        descriptor_source(sh, crate::mystring::cstr_prefix(&fnl.list[0].text))?
                     }
                 };
-                if expand {
-                    debug_assert_eq!(fnl.list.len(), 1, "an unsplit expansion is one field");
-                    let word = crate::mystring::cstr_prefix(&fnl.list[0].text);
-                    crate::parser::fixredir(sh, redirection, word, 1)?;
-                }
+                expanded.push(ExpandedRedirection::Descriptor {
+                    descriptor: redirection.descriptor,
+                    source,
+                });
             }
-            _ => {}
+            Redirection::HereDocument(document) => {
+                expanded.push(ExpandedRedirection::HereDocument(document));
+            }
         }
     }
-    Ok(())
+    Ok(expanded)
+}
+
+fn descriptor_source(sh: &mut Shell, text: &BStr) -> Result<Option<c_int>, Error> {
+    if text.len() == 1 && crate::syntax::is_digit(text[0] as c_int) {
+        Ok(Some(crate::syntax::digit_val(text[0] as c_int)))
+    } else if text == BStr::new(b"-") {
+        Ok(None)
+    } else {
+        let mut message = b"Bad fd number: ".to_vec();
+        message.extend_from_slice(text);
+        Err(sh.sh_error_value(&message))
+    }
 }
 
 /*
@@ -1345,15 +1349,15 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
 
     let stderr = sh.fds.slot(2).expect("standard logical descriptor");
     sh.io.previous_stderr().set_destination(stderr);
-    expredir(sh, &command.redirections)?;
-    redir_stop = crate::redir::pushredir(sh, &command.redirections);
+    let expanded_redirections = expredir(sh, &command.redirections)?;
+    redir_stop = crate::redir::pushredir(sh, &expanded_redirections);
     /* `status = redirectsafe(..)`, which the C computes as `setjmp(..) *
      * 2`. The value is kept as well as the status, because `bail:` below
      * re-raises it when the command is a special built-in — that is the
      * one place a redirection error is *not* swallowed, and an `int`
      * cannot be re-raised. */
     let mut redir_err: Option<Error> = None;
-    match crate::redir::redirectsafe(sh, &command.redirections, REDIR_PUSH | REDIR_SAVEFD2) {
+    match crate::redir::redirectsafe(sh, &expanded_redirections, REDIR_PUSH | REDIR_SAVEFD2) {
         /* Same as compound-redirection evaluation: an interrupt leaves rather than
          * becoming this command's status. */
         Err(e) if e.is_interrupt() || e.is_expansion() => return Err(e),
@@ -1730,7 +1734,7 @@ fn evalfun(
     INTON(sh);
     crate::options::setparam(sh, args.get(1..).unwrap_or_default());
 
-    let outcome = evaltree(sh, function.body.as_deref(), flags & EV_TESTED);
+    let outcome = evaltree(sh, Some(function.body.as_ref()), flags & EV_TESTED);
 
     // funcdone:
     INTOFF(sh);
@@ -1790,43 +1794,36 @@ fn prehash_tree(sh: &mut Shell, n: Option<&Node>) -> Result<Flow, Error> {
             }
         }
         Node::Redirect(command) | Node::Background(command) | Node::Subshell(command) => {
-            let _ = flow!(prehash_tree(sh, command.command.as_deref()));
+            let _ = flow!(prehash_tree(sh, Some(command.command.as_ref())));
         }
         Node::And(binary)
         | Node::Or(binary)
         | Node::Sequence(binary)
         | Node::While(binary)
         | Node::Until(binary) => {
-            let _ = flow!(prehash_tree(sh, binary.left.as_deref()));
-            let _ = flow!(prehash_tree(sh, binary.right.as_deref()));
+            let _ = flow!(prehash_tree(sh, Some(binary.left.as_ref())));
+            let _ = flow!(prehash_tree(sh, Some(binary.right.as_ref())));
         }
         Node::If(conditional) => {
-            let _ = flow!(prehash_tree(sh, conditional.condition.as_deref()));
-            let _ = flow!(prehash_tree(sh, conditional.then_branch.as_deref()));
+            let _ = flow!(prehash_tree(sh, Some(conditional.condition.as_ref())));
+            let _ = flow!(prehash_tree(sh, Some(conditional.then_branch.as_ref())));
             let _ = flow!(prehash_tree(sh, conditional.else_branch.as_deref()));
         }
         Node::For(command) => {
-            let _ = flow!(prehash_tree(sh, command.body.as_deref()));
+            let _ = flow!(prehash_tree(sh, Some(command.body.as_ref())));
         }
         Node::Case(command) => {
             for clause in &command.clauses {
-                let _ = flow!(prehash_tree(sh, Some(clause)));
+                let _ = flow!(prehash_tree(sh, clause.body.as_deref()));
             }
         }
-        Node::CaseClause(clause) => {
-            let _ = flow!(prehash_tree(sh, clause.body.as_deref()));
-        }
         Node::Function(definition) => {
-            let _ = flow!(prehash_tree(sh, definition.body.as_deref()));
+            let _ = flow!(prehash_tree(sh, Some(definition.body.as_ref())));
         }
         Node::Not(command) => {
-            let _ = flow!(prehash_tree(sh, command.command.as_deref()));
+            let _ = flow!(prehash_tree(sh, Some(command.command.as_ref())));
         }
-        Node::Word(_)
-        | Node::FileRedirection(_)
-        | Node::DescriptorRedirection(_)
-        | Node::HereDocument(_)
-        | Node::Bash(_) => {}
+        Node::Word(_) | Node::Bash(_) => {}
     }
 
     Ok(Flow::Done(0))
@@ -1886,6 +1883,41 @@ mod tests {
     //! `tests/errors_are_values.rs`.
 
     use super::*;
+
+    // [spec:nsh:req:idiom.immutable-ast/test]
+    #[test]
+    fn redirection_expansion_stays_evaluation_local() {
+        let _guard = crate::testutil::lock();
+        let mut sh = crate::context::Shell::builder().build().unwrap();
+        crate::input::setinputstring(&mut sh, BStr::new(b": >\"$target\"\n"));
+        let tree = match crate::parser::parsecmd(&mut sh, 0).unwrap() {
+            crate::parser::ParseResult::Tree(Some(tree)) => tree,
+            _ => panic!("expected a command"),
+        };
+        let Node::Command(command) = &tree else {
+            panic!("expected a simple command");
+        };
+        let Redirection::File(parsed) = &command.redirections[0] else {
+            panic!("expected a file redirection");
+        };
+        let parsed_spelling = parsed.target.word.as_bstr().to_owned();
+
+        crate::var::set_bytes(&mut sh, BStr::new(b"target"), Some(BStr::new(b"one")), 0).unwrap();
+        let first = expredir(&mut sh, &command.redirections).unwrap();
+        assert!(matches!(
+            &first[0],
+            ExpandedRedirection::File { target, .. } if target == BStr::new(b"one")
+        ));
+        drop(first);
+
+        crate::var::set_bytes(&mut sh, BStr::new(b"target"), Some(BStr::new(b"two")), 0).unwrap();
+        let second = expredir(&mut sh, &command.redirections).unwrap();
+        assert!(matches!(
+            &second[0],
+            ExpandedRedirection::File { target, .. } if target == BStr::new(b"two")
+        ));
+        assert_eq!(parsed.target.word.as_bstr(), parsed_spelling.as_bstr());
+    }
 
     /// `flow!` on a finished evaluation yields the status and carries on.
     // [spec:dash:sem:eval.evaltree-fn/test]

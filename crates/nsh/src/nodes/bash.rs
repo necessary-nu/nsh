@@ -58,7 +58,7 @@ pub(crate) struct BashArithmeticFor {
     pub(crate) init: NodeText,
     pub(crate) test: NodeText,
     pub(crate) update: NodeText,
-    pub(crate) body: Option<Box<Node>>,
+    pub(crate) body: Box<Node>,
 }
 
 /// Which Bash spelling introduced a function definition.
@@ -74,7 +74,7 @@ pub(crate) struct BashFunction {
     pub(crate) line: i32,
     pub(crate) name: NodeText,
     pub(crate) style: BashFunctionStyle,
-    pub(crate) body: Option<Box<Node>>,
+    pub(crate) body: Box<Node>,
 }
 
 /// Assignment operator used by a structural array assignment.

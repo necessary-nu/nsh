@@ -5060,4 +5060,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.structural-ast}
     )}
+    {id remove-ast-shared-mutation, covered_rules (
+        idiom.immutable-ast
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.immutable-ast}
+    )}
 )

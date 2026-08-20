@@ -84,7 +84,7 @@ fn arithmetic_forms_have_distinct_nodes() {
     assert_eq!(loop_node.init.as_bstr(), BStr::new(b"i=0"));
     assert_eq!(loop_node.test.as_bstr(), BStr::new(b" i<3"));
     assert_eq!(loop_node.update.as_bstr(), BStr::new(b" i++"));
-    assert!(loop_node.body.is_some());
+    assert!(matches!(loop_node.body.as_ref(), Node::Command(_)));
 }
 
 #[test]
@@ -96,7 +96,7 @@ fn bash_function_retains_owned_body() {
     };
     assert_eq!(function.name.as_bstr(), BStr::new(b"bash-name"));
     assert_eq!(function.style, BashFunctionStyle::FunctionParens);
-    assert!(function.body.is_some());
+    assert!(matches!(function.body.as_ref(), Node::Command(_)));
 
     let bare = parse(b"function slash/name { :; }\n", true).unwrap();
     let Node::Bash(BashNode::Function(bare)) = bare else {
@@ -104,7 +104,7 @@ fn bash_function_retains_owned_body() {
     };
     assert_eq!(bare.name.as_bstr(), BStr::new(b"slash/name"));
     assert_eq!(bare.style, BashFunctionStyle::Function);
-    assert!(bare.body.is_some());
+    assert!(matches!(bare.body.as_ref(), Node::Command(_)));
 
     let baseline = parse(b"function bash-name\n", false).unwrap();
     assert!(matches!(baseline, Node::Command(_)));

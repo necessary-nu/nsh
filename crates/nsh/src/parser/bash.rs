@@ -6,8 +6,8 @@ use core::mem;
 use bstr::{BStr, BString};
 
 use super::{
-    CTLBACKQ, CTLESC, CTLMBCHAR, CTLQUOTEMARK, Rt1, TokenContext, TokenKind, command, goodname,
-    list, nlnoprompt, parseheredoc, pgetc, pgetc_eatbnl, popfile, pungetc, readtoken,
+    CTLBACKQ, CTLESC, CTLMBCHAR, CTLQUOTEMARK, Rt1, TokenContext, TokenKind, command, finalize,
+    goodname, list, nlnoprompt, parseheredoc, pgetc, pgetc_eatbnl, popfile, pungetc, readtoken,
     readtoken_with_flags, setinputstring, synerror, synexpect, wordtext, wordtext_node,
 };
 use crate::context::Shell;
@@ -86,13 +86,15 @@ pub(super) fn arithmetic_for(sh: &mut Shell, line: c_int) -> Result<Node, Error>
         return Err(synexpect(sh, Some(TokenKind::Do)));
     }
 
-    let body = list(sh, 0)?.into_node();
+    let body = list(sh, 0)?
+        .into_node()
+        .ok_or_else(|| synexpect(sh, None))?;
     Ok(Node::Bash(BashNode::ArithmeticFor(BashArithmeticFor {
         line,
         init,
         test,
         update,
-        body: body.map(Box::new),
+        body: Box::new(body),
     })))
 }
 
@@ -133,13 +135,14 @@ pub(super) fn function(sh: &mut Shell, line: c_int) -> Result<Node, Error> {
         sh.input.tokpushback = true;
         BashFunctionStyle::Function
     };
-    let body = command(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)?;
+    let body = command(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)?
+        .ok_or_else(|| synexpect(sh, None))?;
 
     Ok(Node::Bash(BashNode::Function(BashFunction {
         line,
         name,
         style,
-        body: body.map(Box::new),
+        body: Box::new(body),
     })))
 }
 
@@ -239,12 +242,14 @@ pub(super) fn process_substitutions(
         let slot = st.bqlist.len();
         st.bqlist.push(None);
         let saved_heredocs = mem::take(&mut sh.input.heredoclist);
-        let body = list(sh, 2)?.into_node();
+        let completed_at = sh.input.completed_heredocs.len();
+        let mut body = list(sh, 2)?.into_node();
         if readtoken(sh, TokenContext::NONE)? != TokenKind::RightParen {
             return Err(synexpect(sh, Some(TokenKind::RightParen)));
         }
         setinputstring(sh, BStr::new(b""));
         parseheredoc(sh)?;
+        finalize::node(sh, &mut body, completed_at)?;
         sh.input.heredoclist = saved_heredocs;
         popfile(sh);
 
@@ -479,13 +484,13 @@ fn conditional_primary(sh: &mut Shell) -> Result<BashConditionalExpr, Error> {
     let operator = if operator_token.kind == super::TokenKind::Redirection {
         let redirection = sh.input.redirnode.take();
         match redirection.as_ref() {
-            Some(Node::FileRedirection(redirection))
-                if redirection.operator == FileRedirectionOperator::Read =>
+            Some(super::PendingRedirection::File { operator, .. })
+                if *operator == FileRedirectionOperator::Read =>
             {
                 Some(node_text(b"<"))
             }
-            Some(Node::FileRedirection(redirection))
-                if redirection.operator == FileRedirectionOperator::Write =>
+            Some(super::PendingRedirection::File { operator, .. })
+                if *operator == FileRedirectionOperator::Write =>
             {
                 Some(node_text(b">"))
             }

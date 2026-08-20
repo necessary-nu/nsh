@@ -8,7 +8,6 @@
 //! `parsesub`, `parsebackq`, `parsearith`) are reached by `goto` in C and
 //! are plain functions taking the shared state by `&mut` here.
 
-use core::cell::{Cell, RefCell};
 use core::mem;
 use std::io::Write;
 
@@ -23,9 +22,9 @@ use crate::input::{
 };
 use crate::nodes::{
     BinaryCommand, CaseClause, CaseCommand, CompoundCommand, DescriptorRedirection,
-    DescriptorRedirectionOperator, FileRedirection, FileRedirectionOperator, ForCommand,
-    FunctionDefinition, HereDocument, HereDocumentBody, IfCommand, NegatedCommand, Node, NodeText,
-    Pipeline, SimpleCommand, WordNode,
+    DescriptorRedirectionOperator, DescriptorTarget, FileRedirection, FileRedirectionOperator,
+    ForCommand, FunctionDefinition, HereDocument, IfCommand, NegatedCommand, Node, NodeText,
+    Pipeline, Redirection, SimpleCommand, WordNode,
 };
 use crate::syntax::{
     InputUnit, SyntaxClass, SyntaxContext, digit_val, is_digit, is_in_name, is_name,
@@ -356,21 +355,29 @@ impl<'a> EofMark<'a> {
 // ---------------------------------------------------------------------
 
 // [spec:dash:def:parser.heredoc]
-/// The C carries `union node *here`, a back pointer to the redirection node,
-/// and reads `here->type` in `parseheredoc` to decide whether the body is
-/// expanded. Owning the tree makes that pointer impossible, so what travels
-/// is the shared body slot (`nodes::heredoc_body`) plus the one bit of the
-/// node's type `parseheredoc` actually wanted. `parsefname` settles the type
-/// immediately before appending, so the bit is final when it is recorded.
+/// A here-document delimiter waiting for its body at a grammar newline.
 pub struct heredoc {
-    /// the slot in the redirection node the body lands in
-    pub doc: HereDocumentBody,
     /// an expandable here-document uses double-quoted rather than
     /// single-quoted lexical rules
     pub expand: bool,
     /// string indicating end of input, with `rmescapes` already applied
     pub eofmark: BString,
     pub striptabs: c_int, /* if set, strip leading tabs */
+}
+
+/// A redirection operator whose required word operand has not been read yet.
+pub(crate) enum PendingRedirection {
+    File {
+        operator: FileRedirectionOperator,
+        descriptor: c_int,
+    },
+    Descriptor {
+        operator: DescriptorRedirectionOperator,
+        descriptor: c_int,
+    },
+    HereDocument {
+        descriptor: c_int,
+    },
 }
 
 // [spec:dash:def:parser.synstack]
@@ -466,12 +473,16 @@ pub fn parsecmd(sh: &mut Shell, interact: c_int) -> Result<ParseResult, Error> {
     sh.input.begin_parse(dialect);
     sh.input.tokpushback = false;
     sh.input.heredoclist = Vec::new();
+    sh.input.completed_heredocs = Vec::new();
     sh.input.doprompt = interact;
     if sh.input.doprompt != 0 {
         setprompt(sh, sh.input.doprompt);
     }
     sh.input.needprompt = 0;
-    list(sh, 1)
+    let mut result = list(sh, 1)?;
+    let bodies = core::mem::take(&mut sh.input.completed_heredocs);
+    finalize::parse_result(sh, &mut result, bodies)?;
+    Ok(result)
 }
 
 // [spec:dash:def:parser.list-fn]
@@ -488,7 +499,6 @@ fn list(sh: &mut Shell, nlflag: c_int) -> Result<ParseResult, Error> {
         TokenContext::SKIP_NEWLINES
     };
     let mut n1: Option<Node>;
-    let mut n2: Option<Node>;
     let mut tok: TokenKind;
 
     n1 = None;
@@ -527,11 +537,10 @@ fn list(sh: &mut Shell, nlflag: c_int) -> Result<ParseResult, Error> {
          * records the line its contents record. */
         let savelinno: c_int = crate::plinno!(sh);
 
-        n2 = andor(sh)?;
+        let mut next = andor(sh)?.ok_or_else(|| synexpect(sh, None))?;
         tok = readtoken(sh, TokenContext::NONE)?;
         if tok == TokenKind::Background {
-            let command = n2.take().expect("a background operator follows a command");
-            n2 = Some(match command {
+            next = match next {
                 Node::Pipeline(mut pipeline) => {
                     pipeline.background = true;
                     Node::Pipeline(pipeline)
@@ -539,18 +548,18 @@ fn list(sh: &mut Shell, nlflag: c_int) -> Result<ParseResult, Error> {
                 Node::Redirect(wrapper) => Node::Background(wrapper),
                 command => Node::Background(CompoundCommand {
                     line: savelinno,
-                    command: Some(Box::new(command)),
+                    command: Box::new(command),
                     redirections: Vec::new(),
                 }),
-            });
+            };
         }
-        if n1.is_none() {
-            n1 = n2;
-        } else {
+        if let Some(left) = n1.take() {
             n1 = Some(Node::Sequence(BinaryCommand {
-                left: n1.map(Box::new),
-                right: n2.map(Box::new),
+                left: Box::new(left),
+                right: Box::new(next),
             }));
+        } else {
+            n1 = Some(next);
         }
         match tok {
             TokenKind::Eof => {
@@ -596,10 +605,12 @@ fn andor(sh: &mut Shell) -> Result<Option<Node>, Error> {
                 return Ok(n1);
             }
         };
-        let n2 = pipeline(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)?;
+        let left = n1.take().ok_or_else(|| synexpect(sh, None))?;
+        let right = pipeline(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)?
+            .ok_or_else(|| synexpect(sh, None))?;
         n1 = Some(operator(BinaryCommand {
-            left: n1.map(Box::new),
-            right: n2.map(Box::new),
+            left: Box::new(left),
+            right: Box::new(right),
         }));
     }
 }
@@ -628,9 +639,12 @@ fn pipeline(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error
         /* Every `stalloc(sizeof(struct nodelist))` the C does here is one
          * `Vec` slot; the list is built front to back either way, and
          * `command()?` cannot return NULL without having raised first. */
-        let mut cmdlist: Vec<Node> = vec![n1.take().unwrap()];
+        let mut cmdlist: Vec<Node> = vec![n1.take().ok_or_else(|| synexpect(sh, None))?];
         loop {
-            cmdlist.push(command(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)?.unwrap());
+            cmdlist.push(
+                command(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)?
+                    .ok_or_else(|| synexpect(sh, None))?,
+            );
             if readtoken(sh, TokenContext::NONE)? != TokenKind::Pipe {
                 break;
             }
@@ -642,8 +656,9 @@ fn pipeline(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error
     }
     sh.input.tokpushback = true;
     if negate != 0 {
+        let command = n1.ok_or_else(|| synexpect(sh, None))?;
         Ok(Some(Node::Not(NegatedCommand {
-            command: n1.map(Box::new),
+            command: Box::new(command),
         })))
     } else {
         Ok(n1)
@@ -691,19 +706,27 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
          * collected in parse order and folded back up afterwards; the
          * sequence of `list(0)?` calls — and so of everything they read — is
          * unchanged. */
-        let mut clauses: Vec<(Option<Node>, Option<Node>)> = Vec::new();
-        let test = list(sh, 0)?.into_node();
+        let mut clauses: Vec<(Node, Node)> = Vec::new();
+        let test = list(sh, 0)?
+            .into_node()
+            .ok_or_else(|| synexpect(sh, None))?;
         if readtoken(sh, TokenContext::NONE)? != TokenKind::Then {
             return Err(synexpect(sh, Some(TokenKind::Then)));
         }
-        let ifpart = list(sh, 0)?.into_node();
+        let ifpart = list(sh, 0)?
+            .into_node()
+            .ok_or_else(|| synexpect(sh, None))?;
         clauses.push((test, ifpart));
         while readtoken(sh, TokenContext::NONE)? == TokenKind::Elif {
-            let test = list(sh, 0)?.into_node();
+            let test = list(sh, 0)?
+                .into_node()
+                .ok_or_else(|| synexpect(sh, None))?;
             if readtoken(sh, TokenContext::NONE)? != TokenKind::Then {
                 return Err(synexpect(sh, Some(TokenKind::Then)));
             }
-            let ifpart = list(sh, 0)?.into_node();
+            let ifpart = list(sh, 0)?
+                .into_node()
+                .ok_or_else(|| synexpect(sh, None))?;
             clauses.push((test, ifpart));
         }
         let mut elsepart: Option<Node> = if sh.input.lasttoken == TokenKind::Else {
@@ -714,8 +737,8 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
         };
         for (test, ifpart) in clauses.into_iter().rev() {
             elsepart = Some(Node::If(IfCommand {
-                condition: test.map(Box::new),
-                then_branch: ifpart.map(Box::new),
+                condition: Box::new(test),
+                then_branch: Box::new(ifpart),
                 else_branch: elsepart.map(Box::new),
             }));
         }
@@ -728,15 +751,19 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
         } else {
             Node::Until
         };
-        let ch1 = list(sh, 0)?.into_node();
+        let ch1 = list(sh, 0)?
+            .into_node()
+            .ok_or_else(|| synexpect(sh, None))?;
         got = readtoken(sh, TokenContext::NONE)?;
         if got != TokenKind::Do {
             return Err(synexpect(sh, Some(TokenKind::Do)));
         }
-        let ch2 = list(sh, 0)?.into_node();
+        let ch2 = list(sh, 0)?
+            .into_node()
+            .ok_or_else(|| synexpect(sh, None))?;
         n1 = Some(constructor(BinaryCommand {
-            left: ch1.map(Box::new),
-            right: ch2.map(Box::new),
+            left: Box::new(ch1),
+            right: Box::new(ch2),
         }));
         expected = TokenKind::Done;
     } else if tok == TokenKind::For {
@@ -785,11 +812,13 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
             if readtoken(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)? != TokenKind::Do {
                 return Err(synexpect(sh, Some(TokenKind::Do)));
             }
-            let body = list(sh, 0)?.into_node();
+            let body = list(sh, 0)?
+                .into_node()
+                .ok_or_else(|| synexpect(sh, None))?;
             n1 = Some(Node::For(ForCommand {
                 line: savelinno,
                 words: args,
-                body: body.map(Box::new),
+                body: Box::new(body),
                 variable: var,
             }));
         }
@@ -804,7 +833,7 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
         if readtoken(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)? != TokenKind::In {
             return Err(synexpect(sh, Some(TokenKind::In)));
         }
-        let mut cases: Vec<Node> = Vec::new();
+        let mut cases: Vec<CaseClause> = Vec::new();
         'next_case: loop {
             // [spec:posix:syn:grammar.case-clause]
             // Rule 4 applies here, before an optional `(`, and nowhere in
@@ -833,11 +862,11 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
                 }
                 let body = list(sh, 2)?.into_node();
                 expected = readtoken(sh, TokenContext::RESERVED_WORDS_AFTER_NEWLINES)?;
-                cases.push(Node::CaseClause(CaseClause {
+                cases.push(CaseClause {
                     patterns: pattern,
                     body: body.map(Box::new),
                     fallthrough: expected == TokenKind::FallThrough,
-                }));
+                });
 
                 if expected != TokenKind::Esac {
                     if expected != TokenKind::EndCase && expected != TokenKind::FallThrough {
@@ -851,15 +880,17 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
         }
         n1 = Some(Node::Case(CaseCommand {
             line: savelinno,
-            word: Some(Box::new(expr)),
+            word: Box::new(expr),
             clauses: cases,
         }));
         goto_redir = true;
     } else if tok == TokenKind::LeftParen {
-        let inner = list(sh, 0)?.into_node();
+        let inner = list(sh, 0)?
+            .into_node()
+            .ok_or_else(|| synexpect(sh, None))?;
         n1 = Some(Node::Subshell(CompoundCommand {
             line: savelinno,
-            command: inner.map(Box::new),
+            command: Box::new(inner),
             redirections: Vec::new(),
         }));
         expected = TokenKind::RightParen;
@@ -882,16 +913,16 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
 
     /* redir: */
     /* Now check for redirection which may follow command */
-    let mut redir: Vec<Node> = Vec::new();
+    let mut redir: Vec<Redirection> = Vec::new();
     let mut redirection_context = TokenContext::COMMAND_START;
     while readtoken(sh, redirection_context)? == TokenKind::Redirection {
         redirection_context = TokenContext::NONE;
         /* The C copies `redirnode` into a local *before* `parsefname`,
          * because the token read inside it can set the global again.
          * Taking ownership of it here is the same guarantee. */
-        let mut n2 = core::mem::take(&mut sh.input.redirnode).unwrap();
-        parsefname(sh, &mut n2)?;
-        redir.push(n2);
+        let pending = core::mem::take(&mut sh.input.redirnode)
+            .ok_or_else(|| synerror(sh, b"missing redirection operator state"))?;
+        redir.push(parsefname(sh, pending)?);
     }
     sh.input.tokpushback = true;
     if !redir.is_empty() {
@@ -900,11 +931,12 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
                 wrapper.redirections = redir;
                 Node::Subshell(wrapper)
             }
-            command => Node::Redirect(CompoundCommand {
+            Some(command) => Node::Redirect(CompoundCommand {
                 line: savelinno,
-                command: command.map(Box::new),
+                command: Box::new(command),
                 redirections: redir,
             }),
+            None => return Err(synexpect(sh, None)),
         });
     }
 
@@ -928,7 +960,7 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
 fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
     let mut args: Vec<Node> = Vec::new();
     let mut vars: Vec<Node> = Vec::new();
-    let mut redir: Vec<Node> = Vec::new();
+    let mut redir: Vec<Redirection> = Vec::new();
     let mut word_context: TokenContext;
     let savelinno: c_int;
 
@@ -961,9 +993,9 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
                 word_context = TokenContext::NONE;
             }
         } else if tok == TokenKind::Redirection {
-            let mut n = core::mem::take(&mut sh.input.redirnode).unwrap();
-            parsefname(sh, &mut n)?; /* read name of redirection file */
-            redir.push(n);
+            let pending = core::mem::take(&mut sh.input.redirnode)
+                .ok_or_else(|| synerror(sh, b"missing redirection operator state"))?;
+            redir.push(parsefname(sh, pending)?);
         } else {
             if tok == TokenKind::LeftParen
                 && bash::active(sh)
@@ -994,7 +1026,8 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
                  * in place. Moving the parsed name into a dedicated function
                  * variant states the result without an invalid intermediate. */
                 let linno = crate::plinno!(sh);
-                let body = command(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)?;
+                let body = command(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)?
+                    .ok_or_else(|| synexpect(sh, None))?;
                 return Ok(Some(Node::Function(FunctionDefinition {
                     line: linno,
                     name: {
@@ -1002,7 +1035,7 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
                         name.push(0);
                         NodeText::new(name)
                     },
-                    body: body.map(Box::new),
+                    body: Box::new(body),
                 })));
             }
             /* fall through */
@@ -1028,42 +1061,6 @@ pub(crate) fn makename(sh: &mut Shell) -> Node {
     })
 }
 
-// [spec:dash:def:parser.fixredir-fn]
-// [spec:dash:sem:parser.fixredir-fn]
-//
-// Called twice with different owners: from `parsefname` while the node is
-// still being built (`err == 0`), and from `expredir` on a tree that may be a
-// shared function definition (`err != 0`).  Only the second writes at run
-// time, and it only writes `dupfd`, which is why that field is the `Cell`.
-pub fn fixredir(
-    sh: &mut Shell,
-    redirection: &DescriptorRedirection,
-    text: &BStr,
-    err: c_int,
-) -> Result<(), Error> {
-    /* TRACE(("Fix redir %s %d\n", text, err)); */
-    if err == 0 {
-        *redirection.variable_target.borrow_mut() = None;
-    }
-
-    let text = crate::mystring::cstr_prefix(text);
-    if text.len() == 1 && is_digit(text[0] as c_int) {
-        redirection.dupfd.set(digit_val(text[0] as c_int));
-    } else if text == BStr::new(b"-") {
-        redirection.dupfd.set(-1);
-    } else {
-        if err != 0 {
-            let mut message = b"Bad fd number: ".to_vec();
-            message.extend_from_slice(text);
-            /* A stop before `sh_error` became a value, and still one. */
-            return Err(sh.sh_error_value(&message));
-        } else {
-            *redirection.variable_target.borrow_mut() = Some(Box::new(makename(sh)));
-        }
-    }
-    Ok(())
-}
-
 // [spec:dash:def:parser.parsefname-fn]
 // [spec:dash:sem:parser.parsefname-fn]
 // [spec:posix:req:redir.here-doc-quoted-delimiter]
@@ -1073,8 +1070,8 @@ pub fn fixredir(
 // The C reads the redirection node out of the `redirnode` global; here the
 // caller has already taken ownership of it, because the `readtoken` below can
 // set that global again before this function is done with it.
-fn parsefname(sh: &mut Shell, n: &mut Node) -> Result<(), Error> {
-    let is_here_document = matches!(n, Node::HereDocument(_));
+fn parsefname(sh: &mut Shell, pending: PendingRedirection) -> Result<Redirection, Error> {
+    let is_here_document = matches!(pending, PendingRedirection::HereDocument { .. });
     let token = readtoken_with_flags(
         sh,
         if is_here_document {
@@ -1086,24 +1083,54 @@ fn parsefname(sh: &mut Shell, n: &mut Node) -> Result<(), Error> {
     if token.kind != TokenKind::Word {
         return Err(synexpect(sh, None));
     }
-    match n {
-        Node::HereDocument(document) => {
-            let mut here: heredoc = core::mem::take(&mut sh.input.heredoc).unwrap();
-            document.expand = !token.quoted;
+    let redirection = match pending {
+        PendingRedirection::HereDocument { descriptor } => {
+            let mut here: heredoc = core::mem::take(&mut sh.input.heredoc)
+                .ok_or_else(|| synerror(sh, b"missing here-document delimiter state"))?;
+            let expand = !token.quoted;
             here.eofmark = BString::from(sh.input.word.as_bstr());
-            here.expand = document.expand;
+            here.expand = expand;
             sh.input.heredoclist.push(here);
+            Redirection::HereDocument(HereDocument {
+                descriptor,
+                expand,
+                body: WordNode {
+                    word: ParsedWord::new(),
+                },
+            })
         }
-        Node::DescriptorRedirection(redirection) => {
-            let word = wordtext(sh).to_owned();
-            fixredir(sh, redirection, BStr::new(word.as_slice()), 0)?;
+        PendingRedirection::Descriptor {
+            operator,
+            descriptor,
+        } => {
+            let text = crate::mystring::cstr_prefix(wordtext(sh));
+            let target = if text.len() == 1 && is_digit(text[0] as c_int) {
+                DescriptorTarget::Number(digit_val(text[0] as c_int))
+            } else if text == BStr::new(b"-") {
+                DescriptorTarget::Close
+            } else {
+                DescriptorTarget::Word(WordNode {
+                    word: mem::take(&mut sh.input.word),
+                })
+            };
+            Redirection::Descriptor(DescriptorRedirection {
+                operator,
+                descriptor,
+                target,
+            })
         }
-        Node::FileRedirection(redirection) => {
-            redirection.target = Some(Box::new(makename(sh)));
-        }
-        _ => return Err(synerror(sh, b"invalid redirection node")),
-    }
-    Ok(())
+        PendingRedirection::File {
+            operator,
+            descriptor,
+        } => Redirection::File(FileRedirection {
+            operator,
+            descriptor,
+            target: WordNode {
+                word: mem::take(&mut sh.input.word),
+            },
+        }),
+    };
+    Ok(redirection)
 }
 
 /*
@@ -1150,13 +1177,10 @@ fn parseheredoc(sh: &mut Shell) -> Result<(), Error> {
                 false,
             )?;
         }
-        let n = Node::Word(WordNode {
+        let body = WordNode {
             word: mem::take(&mut sh.input.word),
-        });
-        /* `here->here->nhere.doc = n` in the C — the same slot, reached
-         * through a shared handle instead of a back pointer.  It is written
-         * exactly once, so a second write cannot happen. */
-        here.doc.fill(n);
+        };
+        sh.input.completed_heredocs.push(body);
     }
     Ok(())
 }
@@ -2088,7 +2112,7 @@ fn parseredir(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
     enum ParsedRedirection {
         File(FileRedirectionOperator),
         Descriptor(DescriptorRedirectionOperator),
-        HereDocument(HereDocumentBody),
+        HereDocument,
     }
 
     let fdc: c_char = st.out[0] as c_char;
@@ -2117,19 +2141,16 @@ fn parseredir(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
         fd = 0;
         st.input = pgetc_eatbnl(sh)?;
         if st.input.is(b'<') {
-            let slot = HereDocumentBody::new();
             let mut here = heredoc {
-                doc: slot.clone(),
                 expand: false,
                 eofmark: BString::new(Vec::new()),
                 striptabs: 0,
             };
-            redirection = ParsedRedirection::HereDocument(slot);
+            redirection = ParsedRedirection::HereDocument;
             st.input = pgetc_eatbnl(sh)?;
             if st.input.is(b'-') {
                 here.striptabs = 1;
             } else {
-                here.striptabs = 0;
                 pungetc(sh);
             }
             sh.input.heredoc = Some(here);
@@ -2146,25 +2167,15 @@ fn parseredir(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
         fd = digit_val(fdc as c_int);
     }
     sh.input.redirnode = Some(match redirection {
-        ParsedRedirection::Descriptor(operator) => {
-            Node::DescriptorRedirection(DescriptorRedirection {
-                operator,
-                descriptor: fd,
-                dupfd: Cell::new(0),
-                variable_target: RefCell::new(None),
-            })
-        }
-        ParsedRedirection::HereDocument(body) => Node::HereDocument(HereDocument {
-            descriptor: fd,
-            expand: false,
-            body,
-        }),
-        ParsedRedirection::File(operator) => Node::FileRedirection(FileRedirection {
+        ParsedRedirection::Descriptor(operator) => PendingRedirection::Descriptor {
             operator,
             descriptor: fd,
-            target: None,
-            expanded_target: RefCell::new(None),
-        }),
+        },
+        ParsedRedirection::HereDocument => PendingRedirection::HereDocument { descriptor: fd },
+        ParsedRedirection::File(operator) => PendingRedirection::File {
+            operator,
+            descriptor: fd,
+        },
     });
     /* goto parseredir_return; */
     Ok(())
@@ -2389,7 +2400,8 @@ fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Result<(), E
     let mut saveprompt: c_int = 0;
     let saveheredoclist: Vec<heredoc>;
     let nlpp: usize;
-    let n: Option<Node>;
+    let mut n: Option<Node>;
+    let completed_at: usize;
     let mut ml: c_uint;
     /* `grabstackstr(pout)` had to reserve the backquote's text because
      * `list(2)?` builds on the same stack; owning it says the same thing, and
@@ -2468,6 +2480,7 @@ fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Result<(), E
     st.bqlist.push(None);
 
     saveheredoclist = core::mem::take(&mut sh.input.heredoclist);
+    completed_at = sh.input.completed_heredocs.len();
 
     if oldstyle != 0 {
         saveprompt = sh.input.doprompt;
@@ -2486,6 +2499,7 @@ fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Result<(), E
     }
 
     parseheredoc(sh)?;
+    finalize::node(sh, &mut n, completed_at)?;
     sh.input.heredoclist = saveheredoclist;
 
     st.bqlist[nlpp] = n;
@@ -2794,6 +2808,8 @@ pub fn parser_eof(sh: &Shell) -> bool {
 
 mod bash;
 
+mod finalize;
+
 #[cfg(test)]
 mod bash_mode_tests;
 
@@ -2803,6 +2819,31 @@ mod bash_ast_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // [spec:nsh:req:idiom.immutable-ast/test]
+    #[test]
+    fn parse_result_owns_here_document_bodies() {
+        let mut sh = Shell::builder().build().unwrap();
+        crate::input::setinputstring(&mut sh, BStr::new(b"cat <<A <<B\none\nA\ntwo\nB\n"));
+        let tree = match parsecmd(&mut sh, 0).unwrap() {
+            ParseResult::Tree(Some(tree)) => tree,
+            ParseResult::Tree(None) => panic!("expected a command, found a blank parse unit"),
+            ParseResult::Eof => panic!("expected a command, found EOF"),
+        };
+        let Node::Command(command) = tree else {
+            panic!("expected a simple command");
+        };
+        let bodies: Vec<&BStr> = command
+            .redirections
+            .iter()
+            .map(|redirection| match redirection {
+                Redirection::HereDocument(document) => document.body.word.as_bstr(),
+                _ => panic!("expected a here-document"),
+            })
+            .collect();
+
+        assert_eq!(bodies, [BStr::new(b"one\n"), BStr::new(b"two\n")]);
+    }
 
     // [spec:dash:sem:parser.findkwd-fn/test]
     #[test]

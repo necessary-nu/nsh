@@ -2,16 +2,14 @@
 //! Rules: `docs/spec/port/src/redir.md`.
 
 use crate::error::Error;
-use bstr::BStr;
+use bstr::{BStr, BString};
 use core::ffi::c_int;
 use nsh_platform::{Descriptor, ShellBytesExt as _};
 use std::io::Write;
 
 use crate::context::Shell;
 use crate::error::{INTOFF, INTON};
-use crate::nodes::{
-    DescriptorRedirection, FileRedirection, FileRedirectionOperator, HereDocument, Node,
-};
+use crate::nodes::{FileRedirectionOperator, HereDocument, Node};
 
 /* flags passed to redirect (redir.h) */
 pub const REDIR_PUSH: c_int = 0o1; /* save previous values of file descriptors */
@@ -42,6 +40,31 @@ enum RedirectSource {
     Close,
     Shared(crate::fd::SharedFd),
     Owned(Descriptor),
+}
+
+/// Evaluation-local redirection state. Parsed syntax stays immutable; file
+/// names and descriptor words are expanded into this value for one command.
+// [spec:nsh:req:idiom.immutable-ast]
+pub(crate) enum ExpandedRedirection<'a> {
+    File {
+        operator: FileRedirectionOperator,
+        descriptor: c_int,
+        target: BString,
+    },
+    Descriptor {
+        descriptor: c_int,
+        source: Option<c_int>,
+    },
+    HereDocument(&'a HereDocument),
+}
+
+impl ExpandedRedirection<'_> {
+    fn descriptor(&self) -> c_int {
+        match self {
+            Self::File { descriptor, .. } | Self::Descriptor { descriptor, .. } => *descriptor,
+            Self::HereDocument(document) => document.descriptor,
+        }
+    }
 }
 
 // [spec:dash:def:redir.redirtab]
@@ -98,7 +121,11 @@ impl RedirStack {
 // [spec:posix:sem:shell.redirection-processing]
 // [spec:posix:def:redir.purpose]
 // [spec:posix:sem:redir.evaluation-order]
-pub fn redirect(sh: &mut Shell, redir: &[Node], flags: c_int) -> Result<(), Error> {
+pub(crate) fn redirect(
+    sh: &mut Shell,
+    redir: &[ExpandedRedirection<'_>],
+    flags: c_int,
+) -> Result<(), Error> {
     let sv: Option<usize>;
 
     /* #if notyet — the `memory[10]` in-memory sink is not compiled. */
@@ -116,13 +143,7 @@ pub fn redirect(sh: &mut Shell, redir: &[Node], flags: c_int) -> Result<(), Erro
     /* The C walks the list through `n->nfile.next`, which is the same offset
      * in every redirection arm; the list is a `Vec` now. */
     for n in redir {
-        // [spec:nsh:req:idiom.structural-ast]
-        let fd = match n {
-            Node::FileRedirection(redirection) => redirection.descriptor,
-            Node::DescriptorRedirection(redirection) => redirection.descriptor,
-            Node::HereDocument(redirection) => redirection.descriptor,
-            _ => return Err(sh.sh_error_value(b"non-redirection syntax reached redirection")),
-        };
+        let fd = n.descriptor();
         let source = openredirect(sh, n)?;
         if !matches!(source, RedirectSource::Noop) {
             /* The C's `fd == 0` is "this redirection replaced the shell's
@@ -335,13 +356,17 @@ pub fn sh_open_command_file(sh: &mut Shell, pathname: &BStr) -> Result<Descripto
 // [spec:posix:req:xcurel.file-create-existing-actions]
 // [spec:posix:def:xcurel.file-create-existing-codes]
 // [spec:posix:req:xcurel.file-append-mode]
-fn openredirect(sh: &mut Shell, redir: &Node) -> Result<RedirectSource, Error> {
-    // [spec:nsh:req:idiom.structural-ast]
+fn openredirect(sh: &mut Shell, redir: &ExpandedRedirection<'_>) -> Result<RedirectSource, Error> {
     let source = match redir {
-        Node::FileRedirection(redirection) => open_file_redirection(sh, redirection)?,
-        Node::DescriptorRedirection(redirection) => open_descriptor_redirection(sh, redirection)?,
-        Node::HereDocument(document) => RedirectSource::Owned(openhere(sh, document)?),
-        _ => return Err(sh.sh_error_value(b"non-redirection syntax reached redirection")),
+        ExpandedRedirection::File {
+            operator, target, ..
+        } => open_file_redirection(sh, *operator, BStr::new(target.as_slice()))?,
+        ExpandedRedirection::Descriptor { descriptor, source } => {
+            open_descriptor_redirection(sh, *descriptor, *source)?
+        }
+        ExpandedRedirection::HereDocument(document) => {
+            RedirectSource::Owned(openhere(sh, document)?)
+        }
     };
 
     Ok(source)
@@ -349,51 +374,36 @@ fn openredirect(sh: &mut Shell, redir: &Node) -> Result<RedirectSource, Error> {
 
 fn open_file_redirection(
     sh: &mut Shell,
-    redirection: &FileRedirection,
+    operator: FileRedirectionOperator,
+    target: &BStr,
 ) -> Result<RedirectSource, Error> {
-    let source = match redirection.operator {
+    let source = match operator {
         FileRedirectionOperator::Read => RedirectSource::Owned(
-            sh_open(
-                sh,
-                BStr::new(redirection.expanded_filename().as_slice()),
-                nsh_platform::OpenMode::ReadOnly,
-                0,
-            )?
-            .expect("a mandatory open returns a descriptor"),
+            sh_open(sh, target, nsh_platform::OpenMode::ReadOnly, 0)?
+                .expect("a mandatory open returns a descriptor"),
         ),
         FileRedirectionOperator::ReadWrite => RedirectSource::Owned(
-            sh_open(
-                sh,
-                BStr::new(redirection.expanded_filename().as_slice()),
-                nsh_platform::OpenMode::ReadWriteCreate,
-                0,
-            )?
-            .expect("a mandatory open returns a descriptor"),
+            sh_open(sh, target, nsh_platform::OpenMode::ReadWriteCreate, 0)?
+                .expect("a mandatory open returns a descriptor"),
         ),
         FileRedirectionOperator::Write | FileRedirectionOperator::Clobber => {
             let mut fell_through = true;
             let mut opened = None;
-            if redirection.operator == FileRedirectionOperator::Write {
+            if operator == FileRedirectionOperator::Write {
                 /* Take care of noclobber mode. */
                 if sh.options.flag(crate::options::Cflag) != 0 {
-                    let fname = redirection.expanded_filename();
-                    if !fname
+                    if !target
                         .try_to_path_buf()
                         .is_ok_and(|path| nsh_platform::path_exists(&path))
                     {
                         /* goto do_open */
                         return Ok(RedirectSource::Owned(
-                            sh_open(
-                                sh,
-                                BStr::new(fname.as_slice()),
-                                nsh_platform::OpenMode::WriteCreateExclusive,
-                                0,
-                            )?
-                            .expect("a mandatory open returns a descriptor"),
+                            sh_open(sh, target, nsh_platform::OpenMode::WriteCreateExclusive, 0)?
+                                .expect("a mandatory open returns a descriptor"),
                         ));
                     }
 
-                    if fname
+                    if target
                         .try_to_path_buf()
                         .is_ok_and(|path| nsh_platform::path_is_file(&path))
                     {
@@ -401,26 +411,21 @@ fn open_file_redirection(
                         let error = nsh_platform::already_exists_error();
                         return Err(sh_open_fail(
                             sh,
-                            BStr::new(fname.as_slice()),
+                            target,
                             nsh_platform::OpenMode::WriteCreateTruncate,
                             &error,
                         ));
                     }
 
-                    let fv = sh_open(
-                        sh,
-                        BStr::new(fname.as_slice()),
-                        nsh_platform::OpenMode::WriteOnly,
-                        0,
-                    )?
-                    .expect("a mandatory open returns a descriptor");
+                    let fv = sh_open(sh, target, nsh_platform::OpenMode::WriteOnly, 0)?
+                        .expect("a mandatory open returns a descriptor");
                     if nsh_platform::fd_is_regular_file(&fv).unwrap_or(false) {
                         drop(fv);
                         /* goto ecreate */
                         let error = nsh_platform::already_exists_error();
                         return Err(sh_open_fail(
                             sh,
-                            BStr::new(fname.as_slice()),
+                            target,
                             nsh_platform::OpenMode::WriteCreateTruncate,
                             &error,
                         ));
@@ -431,32 +436,18 @@ fn open_file_redirection(
                 /* FALLTHROUGH */
             }
             if fell_through {
-                let fname = redirection.expanded_filename();
                 RedirectSource::Owned(
-                    sh_open(
-                        sh,
-                        BStr::new(fname.as_slice()),
-                        nsh_platform::OpenMode::WriteCreateTruncate,
-                        0,
-                    )?
-                    .expect("a mandatory open returns a descriptor"),
+                    sh_open(sh, target, nsh_platform::OpenMode::WriteCreateTruncate, 0)?
+                        .expect("a mandatory open returns a descriptor"),
                 )
             } else {
                 RedirectSource::Owned(opened.expect("the noclobber path opened a descriptor"))
             }
         }
-        FileRedirectionOperator::Append => {
-            let fname = redirection.expanded_filename();
-            RedirectSource::Owned(
-                sh_open(
-                    sh,
-                    BStr::new(fname.as_slice()),
-                    nsh_platform::OpenMode::WriteCreateAppend,
-                    0,
-                )?
+        FileRedirectionOperator::Append => RedirectSource::Owned(
+            sh_open(sh, target, nsh_platform::OpenMode::WriteCreateAppend, 0)?
                 .expect("a mandatory open returns a descriptor"),
-            )
-        }
+        ),
     };
 
     Ok(source)
@@ -464,13 +455,14 @@ fn open_file_redirection(
 
 fn open_descriptor_redirection(
     sh: &mut Shell,
-    redirection: &DescriptorRedirection,
+    descriptor: c_int,
+    source: Option<c_int>,
 ) -> Result<RedirectSource, Error> {
-    let source = redirection.dupfd.get();
-    if source == redirection.descriptor {
+    let Some(source) = source else {
+        return Ok(RedirectSource::Close);
+    };
+    if source == descriptor {
         Ok(RedirectSource::Noop)
-    } else if source < 0 {
-        Ok(RedirectSource::Close)
     } else {
         let source_fd = sh
             .fds
@@ -555,13 +547,8 @@ fn openhere(sh: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error
     let len: usize;
     let expanded;
 
-    /* `redir->nhere.doc` is the slot `parseheredoc` filled; the C would have
-     * dereferenced a null pointer had it not run. */
-    let doc = document
-        .body
-        .snapshot()
-        .expect("parseheredoc fills every here-document body");
     let p: &[u8] = if document.expand {
+        let doc = Node::Word(document.body.clone());
         crate::expand::expandarg(sh, &doc, None, crate::expand::EXP_QUOTED)?;
         /* The C reads the expansion back out of the region as
          * `stackblock()`.  The expansion buffer is owned now, so the read is
@@ -582,10 +569,7 @@ fn openhere(sh: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error
          * second half matters because a here-document body can carry an
          * embedded NUL and the terminator is then not the one `strlen`
          * would have found. */
-        let Node::Word(word) = &doc else {
-            return Err(sh.sh_error_value(b"here-document body is not a word"));
-        };
-        crate::mystring::cstr_prefix(word.word.as_bstr())
+        crate::mystring::cstr_prefix(document.body.word.as_bstr())
     };
 
     len = p.len();
@@ -726,7 +710,11 @@ pub fn copy_slot_above(sh: &mut Shell, from: c_int) -> Result<Option<Descriptor>
 /// did, and the outermost `FORCEINTON` is what clears the leak.
 // [spec:dash:def:redir.redirectsafe-fn]
 // [spec:dash:sem:redir.redirectsafe-fn]
-pub fn redirectsafe(sh: &mut Shell, redir: &[Node], flags: c_int) -> Result<(), Error> {
+pub(crate) fn redirectsafe(
+    sh: &mut Shell,
+    redir: &[ExpandedRedirection<'_>],
+    flags: c_int,
+) -> Result<(), Error> {
     let mut saveint: c_int = 0;
 
     crate::SAVEINT!(sh, saveint);
@@ -754,7 +742,7 @@ pub fn unwindredir(sh: &mut Shell, stop: usize) {
 
 // [spec:dash:def:redir.pushredir-fn]
 // [spec:dash:sem:redir.pushredir-fn]
-pub fn pushredir(sh: &mut Shell, redir: &[Node]) -> usize {
+pub(crate) fn pushredir(sh: &mut Shell, redir: &[ExpandedRedirection<'_>]) -> usize {
     let q: usize;
 
     q = sh.redirs.list.len();
