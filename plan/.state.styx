@@ -5376,4 +5376,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.regression-gates}
     )}
+    {id verify-idiomatic-core-conformance, covered_rules (
+        idiom.conformance-closure
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.conformance-closure}
+    )}
 )

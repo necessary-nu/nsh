@@ -268,6 +268,7 @@ fn summary_omits_timing_and_lists_failures() {
 }
 
 #[test]
+// [spec:nsh:req:idiom.conformance-closure/test]
 fn recorded_bash_summaries_are_complete() {
     let root = crate::survey_root();
     let manifest: crate::OilsManifest =

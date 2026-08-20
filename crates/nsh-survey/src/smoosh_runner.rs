@@ -808,4 +808,41 @@ mod tests {
             "stdout differs: expected 2 byte(s), got 4 byte(s)"
         );
     }
+
+    #[test]
+    // [spec:nsh:req:idiom.conformance-closure/test]
+    fn recorded_full_summary_is_complete() {
+        let root = crate::smoosh::survey_root();
+        let lock = crate::smoosh::read_lock(&root).unwrap();
+        let manifest = crate::smoosh::read_manifest(&root, &lock).unwrap();
+        let summary: toml::Value =
+            toml::from_str(&fs::read_to_string(root.join("RESULTS.toml")).unwrap()).unwrap();
+        let full = manifest
+            .groups
+            .iter()
+            .find(|group| group.id == "full")
+            .unwrap();
+        let totals = summary["totals"].as_table().unwrap();
+        let selected = usize::try_from(totals["selected"].as_integer().unwrap()).unwrap();
+        let executed = usize::try_from(totals["executed"].as_integer().unwrap()).unwrap();
+        let pass = usize::try_from(totals["pass"].as_integer().unwrap()).unwrap();
+        let nonpassing = summary["nonpassing"].as_array().unwrap();
+
+        assert_eq!(
+            summary["source_commit"].as_str(),
+            Some(lock.commit.as_str())
+        );
+        assert_eq!(summary["group"].as_str(), Some("full"));
+        assert_eq!(
+            summary["containment"].as_str(),
+            Some("sandbox-pid-net-ro-root")
+        );
+        assert_eq!(selected, full.tests);
+        assert_eq!(executed, selected);
+        assert_eq!(totals["skip"].as_integer(), Some(0));
+        assert_eq!(totals["timeout"].as_integer(), Some(0));
+        assert_eq!(totals["error"].as_integer(), Some(0));
+        assert_eq!(nonpassing.len(), selected - pass);
+        assert_eq!(summary["shell_sha256"].as_str().unwrap().len(), 64);
+    }
 }

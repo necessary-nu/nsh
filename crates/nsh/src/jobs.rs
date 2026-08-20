@@ -367,7 +367,10 @@ pub fn set_job_control(shell: &mut crate::context::Shell, enabled: bool) -> Resu
     crate::trap::configure_signal(shell, nsh_platform::terminal_output_signal().into());
     crate::trap::configure_signal(shell, nsh_platform::terminal_input_signal().into());
     if let (Some(tty), Some(group)) = (descriptor.as_ref(), process_group) {
-        if let Err(error) = nsh_platform::set_process_group(ProcessSelector::CurrentProcess, group)
+        let already_in_group = nsh_platform::current_process_group() == group;
+        if !already_in_group
+            && let Err(error) =
+                nsh_platform::set_process_group(ProcessSelector::CurrentProcess, group)
         {
             let mut message = b"Cannot set process group (".to_vec();
             message.extend_from_slice(shell.locale.error_message(&error).as_bytes());

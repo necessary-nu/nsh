@@ -27,8 +27,9 @@ Oils or depend on a checkout elsewhere on the machine.
 ## Verify the import
 
 ```sh
-cargo run -p nsh-survey -- generate-oils-manifests
-cargo run -p nsh-survey -- verify-oils
+scripts/sandboxed --writable tests/surveys/oils -- \
+  target/release/nsh-survey generate-oils-manifests
+scripts/sandboxed -- target/release/nsh-survey verify-oils
 ```
 
 `MANIFEST.toml` is generated from the imported metadata and `FILES.sha256`;
@@ -50,13 +51,15 @@ cases are not necessarily normative POSIX requirements.
 ## Running the survey
 
 ```sh
-cargo build --release --bin nsh
-cargo run -p nsh-survey -- run-oils --group posix-candidate
-cargo run -p nsh-survey -- run-oils --group bash-extension --format json
-cargo run -p nsh-survey -- run-oils \
+scripts/sandboxed -- cargo build --release -p nsh-cli --bin nsh
+scripts/sandboxed -- cargo build --release -p nsh-survey
+scripts/sandboxed -- target/release/nsh-survey run-oils --group posix-candidate
+scripts/sandboxed -- target/release/nsh-survey run-oils \
+  --group bash-extension --format json
+scripts/sandboxed --writable tests/.build -- target/release/nsh-survey run-oils \
   --group bash-extension \
   --expect-shell bash \
-  --summary results.toml
+  --summary tests/.build/bash-extension.toml
 ```
 
 The default shell is `target/release/nsh`, the default group is `full`, and
@@ -77,12 +80,6 @@ The small `python2 -c` subset used by the corpus is handled directly; compatible
 larger snippets use the repository's Python 3 test dependency.
 
 ## Containment
-
-Run the top-level command through `scripts/sandboxed`:
-
-```sh
-scripts/sandboxed -- cargo run -p nsh-survey -- run-oils --group full
-```
 
 The native runner also isolates every case. Before starting, it verifies a
 fail-closed sandbox canary. Each case gets fresh PID and network namespaces, a
@@ -139,7 +136,7 @@ Two clean builds produced SHA-256
    lock values.
 3. Review `LICENSE.txt`, `spec/README.md`, `test/sh_spec.py`,
    `test/spec-runner.sh`, and `test/spec-compat.sh` upstream.
-4. Run `cargo run -p nsh-survey -- import-oils CHECKOUT`. The importer must
+4. Run `scripts/sandboxed --writable CHECKOUT --writable tests/surveys/oils -- target/release/nsh-survey import-oils CHECKOUT`. The importer must
    reject a commit or tree that does not match the lock.
 5. Review the generated corpus, fixtures, hashes, manifests, and count changes.
 6. Run the importer tests, negative controls, and every manifest group.

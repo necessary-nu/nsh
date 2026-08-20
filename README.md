@@ -126,8 +126,9 @@ changing differential cases.
 The pinned survey suites have native runners:
 
 ```sh
-cargo run -p nsh-survey -- run-smoosh
-cargo run -p nsh-survey -- run-oils --group bash-comparison --expect-shell bash
+scripts/sandboxed -- target/release/nsh-survey run-smoosh
+scripts/sandboxed -- target/release/nsh-survey run-oils \
+    --group bash-comparison --expect-shell bash
 ```
 
 ## Repository layout

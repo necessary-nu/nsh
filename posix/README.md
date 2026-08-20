@@ -98,6 +98,20 @@ malformed marker is otherwise ignored by nspec.
 corpus. It currently reports 99%; the remainder consists of section lead-ins
 covered by their child rules and non-binding future-version notes.
 
+## Running the conformance harness
+
+Build and execute the shell only through the repository containment boundary:
+
+```sh
+scripts/sandboxed -- cargo build --release -p nsh-cli --bin nsh
+scripts/sandboxed --writable posix -- \
+  python3 posix/harness/run.py --shell target/release/nsh
+```
+
+The harness independently fails closed unless each case enters its own PID and
+network namespaces with no controlling terminal. The outer wrapper protects
+the invoking terminal if the harness itself regresses.
+
 ## Editing rules
 
 The full authoring contract is in `build/AUTHORING.md`. In summary:

@@ -1487,11 +1487,7 @@ fn evaluate_command_in_scope(
                 if assignments_are_arguments
                     && matches!(
                         argument,
-                        Node::Word(word)
-                            if crate::parser::is_assignment(
-                                &shell.locale,
-                                word.word.as_bstr(),
-                            )
+                        Node::Word(word) if word.word.is_assignment(&shell.locale)
                     )
                 {
                     ExpansionMode::ASSIGNMENT_TILDE

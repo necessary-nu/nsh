@@ -289,6 +289,17 @@ impl ParseResult {
     }
 }
 
+fn required_compound_node(
+    shell: &mut Shell,
+    result: ParseResult,
+    expected_at_eof: TokenKind,
+) -> Result<Node, Error> {
+    result.into_node().ok_or_else(|| {
+        let expected = (shell.input.last_token == TokenKind::Eof).then_some(expected_at_eof);
+        expected_token_error(shell, expected)
+    })
+}
+
 /// `readtoken1`'s `eofmark` argument.
 ///
 /// The C passes a `char *` that is overloaded three ways: NULL means "read a
@@ -389,15 +400,6 @@ impl Token {
     }
 }
 
-// [spec:dash:sem:parser.isassignment-fn]
-pub fn is_assignment(locale: &nsh_platform::Locale, text: &BStr) -> bool {
-    let end = name_end(locale, text);
-    if end == 0 {
-        return false;
-    }
-    text.get(end) == Some(&b'=')
-}
-
 // [spec:dash:sem:parser.issimplecmd-fn]
 pub fn is_simple_command(node: Option<&Node>, name: &BStr) -> bool {
     match node {
@@ -487,7 +489,13 @@ fn list(shell: &mut Shell, mode: ListMode) -> Result<ParseResult, Error> {
         if stop_at_terminator && token.ends_list() {
             return Ok(ParseResult::Tree(parsed_command));
         }
-        stop_at_terminator = true;
+        // Top-level input has no enclosing grammar production whose
+        // terminator it may return to.  A stray `do`, `}`, and similar
+        // token is therefore a syntax error here; only compound lists
+        // begin accepting terminators after their first command.
+        if mode != ListMode::TopLevel {
+            stop_at_terminator = true;
+        }
 
         /* The line the backgrounded command starts on, captured before
          * anything consumes it. `command()?` and `pipeline()?` both take
@@ -660,26 +668,22 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
          * sequence of `list(0)?` calls — and so of everything they read — is
          * unchanged. */
         let mut clauses: Vec<(Node, Node)> = Vec::new();
-        let test = list(shell, ListMode::Compound)?
-            .into_node()
-            .ok_or_else(|| expected_token_error(shell, None))?;
+        let parsed = list(shell, ListMode::Compound)?;
+        let test = required_compound_node(shell, parsed, TokenKind::Then)?;
         if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Then {
             return Err(expected_token_error(shell, Some(TokenKind::Then)));
         }
-        let then_branch = list(shell, ListMode::Compound)?
-            .into_node()
-            .ok_or_else(|| expected_token_error(shell, None))?;
+        let parsed = list(shell, ListMode::Compound)?;
+        let then_branch = required_compound_node(shell, parsed, TokenKind::Fi)?;
         clauses.push((test, then_branch));
         while read_token(shell, TokenContext::NONE)?.kind == TokenKind::Elif {
-            let test = list(shell, ListMode::Compound)?
-                .into_node()
-                .ok_or_else(|| expected_token_error(shell, None))?;
+            let parsed = list(shell, ListMode::Compound)?;
+            let test = required_compound_node(shell, parsed, TokenKind::Then)?;
             if read_token(shell, TokenContext::NONE)?.kind != TokenKind::Then {
                 return Err(expected_token_error(shell, Some(TokenKind::Then)));
             }
-            let then_branch = list(shell, ListMode::Compound)?
-                .into_node()
-                .ok_or_else(|| expected_token_error(shell, None))?;
+            let parsed = list(shell, ListMode::Compound)?;
+            let then_branch = required_compound_node(shell, parsed, TokenKind::Fi)?;
             clauses.push((test, then_branch));
         }
         let mut else_branch: Option<Node> = if shell.input.last_token == TokenKind::Else {
@@ -703,16 +707,14 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
         } else {
             Node::Until
         };
-        let left_command = list(shell, ListMode::Compound)?
-            .into_node()
-            .ok_or_else(|| expected_token_error(shell, None))?;
+        let parsed = list(shell, ListMode::Compound)?;
+        let left_command = required_compound_node(shell, parsed, TokenKind::Do)?;
         let got = read_token(shell, TokenContext::NONE)?.kind;
         if got != TokenKind::Do {
             return Err(expected_token_error(shell, Some(TokenKind::Do)));
         }
-        let right_command = list(shell, ListMode::Compound)?
-            .into_node()
-            .ok_or_else(|| expected_token_error(shell, None))?;
+        let parsed = list(shell, ListMode::Compound)?;
+        let right_command = required_compound_node(shell, parsed, TokenKind::Done)?;
         parsed_command = Some(constructor(BinaryCommand {
             left: Box::new(left_command),
             right: Box::new(right_command),
@@ -763,9 +765,8 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
             {
                 return Err(expected_token_error(shell, Some(TokenKind::Do)));
             }
-            let body = list(shell, ListMode::Compound)?
-                .into_node()
-                .ok_or_else(|| expected_token_error(shell, None))?;
+            let parsed = list(shell, ListMode::Compound)?;
+            let body = required_compound_node(shell, parsed, TokenKind::Done)?;
             parsed_command = Some(Node::For(ForCommand {
                 line: saved_line_number,
                 words: args,
@@ -835,9 +836,8 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
         }));
         closing_token = None;
     } else if token == TokenKind::LeftParen {
-        let inner = list(shell, ListMode::Compound)?
-            .into_node()
-            .ok_or_else(|| expected_token_error(shell, None))?;
+        let parsed = list(shell, ListMode::Compound)?;
+        let inner = required_compound_node(shell, parsed, TokenKind::RightParen)?;
         parsed_command = Some(Node::Subshell(CompoundCommand {
             line: saved_line_number,
             command: Box::new(inner),
@@ -913,7 +913,7 @@ fn parse_simple_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
     loop {
         let token = read_token(shell, word_context)?.kind;
         if token == TokenKind::Word {
-            let ordinary_assignment = is_assignment(&shell.locale, shell.input.word_text());
+            let ordinary_assignment = shell.input.word.is_assignment(&shell.locale);
             let mut node = Node::Word(WordNode {
                 word: mem::take(&mut shell.input.word),
             });
@@ -1670,6 +1670,8 @@ fn read_word_token(
                         } else {
                             lexer.output.push(WordToken::ArithmeticEnd);
                         }
+                        lexer.input = read_unit_for_syntax(shell, lexer.current_syntax())?;
+                        continue;
                     } else {
                         unread_input_unit(shell);
                     }
@@ -2192,6 +2194,9 @@ fn parse_command_substitution(
                 break;
             } else if input.is(b'\\') {
                 input = read_input_unit(shell)?;
+                if input.byte().is_none() {
+                    return Err(syntax_error(shell, b"EOF in backquote substitution"));
+                }
                 if !input.is(b'\\')
                     && !input.is(b'`')
                     && !input.is(b'$')
@@ -2515,56 +2520,4 @@ mod bash_mode_tests;
 mod bash_ast_tests;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // [spec:nsh:req:idiom.immutable-ast/test]
-    #[test]
-    fn parse_result_owns_here_document_bodies() {
-        let mut shell = Shell::builder().build().unwrap();
-        crate::input::set_input_string(&mut shell, BStr::new(b"cat <<A <<B\none\nA\ntwo\nB\n"));
-        let tree = match parse_command(&mut shell, false).unwrap() {
-            ParseResult::Tree(Some(tree)) => tree,
-            ParseResult::Tree(None) => panic!("expected a command, found a blank parse unit"),
-            ParseResult::Eof => panic!("expected a command, found EOF"),
-        };
-        let Node::Command(command) = tree else {
-            panic!("expected a simple command");
-        };
-        let bodies: Vec<&BStr> = command
-            .redirections
-            .iter()
-            .map(|redirection| match redirection {
-                Redirection::HereDocument(document) => document.body.word.as_bstr(),
-                _ => panic!("expected a here-document"),
-            })
-            .collect();
-
-        assert_eq!(bodies, [BStr::new(b"one\n"), BStr::new(b"two\n")]);
-    }
-
-    // [spec:dash:sem:parser.findkwd-fn/test]
-    #[test]
-    fn findkwd_preserves_the_sorted_table_contract() {
-        let mut previous: Option<&[u8]> = None;
-
-        for &(bytes, kind) in &RESERVED_WORDS {
-            if let Some(previous) = previous {
-                assert!(previous < bytes, "reserved words must be strictly sorted");
-            }
-            previous = Some(bytes);
-
-            assert_eq!(reserved_word(BStr::new(bytes)), Some(kind));
-
-            let mut longer = bytes.to_vec();
-            longer.push(b'x');
-            assert_eq!(reserved_word(BStr::new(&longer)), None);
-        }
-
-        for missing in [b"".as_slice(), b"cas", b"integer", b"zebra"] {
-            assert_eq!(reserved_word(BStr::new(missing)), None);
-        }
-
-        assert_eq!(reserved_word(BStr::new(&[0xff_u8])), None);
-    }
-}
+mod tests;

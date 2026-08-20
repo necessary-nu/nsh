@@ -4,7 +4,7 @@ source_commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
 group = "bash-comparison"
 group_label = "Bash comparison survey"
 shell = "target/release/nsh"
-shell_sha256 = "f72ebfa60ed098d4a0849ae8448f09e4a95e415a99f84a2d14cf8353d2acdf4a"
+shell_sha256 = "543166b494d5afacaa8098f84b7faa6aa95239a3a4ab284c8b949a0f00b65466"
 expectation_shell = "bash"
 containment = "sandbox-pid-net-ro-root"
 posix = false
@@ -13,11 +13,11 @@ timeout_ms = 5000
 [totals]
 selected = 2735
 executed = 2735
-pass = 1086
-fail = 1613
+pass = 1100
+fail = 1596
 skip = 0
 unsupported = 26
-known_bug = 10
+known_bug = 13
 timeout = 0
 error = 0
 
@@ -121,7 +121,7 @@ index = 2
 line = 17
 description = "Append string to undefined variable"
 outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",
@@ -254,7 +254,7 @@ index = 13
 line = 164
 description = "typeset s+="
 outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",
@@ -266,7 +266,7 @@ index = 14
 line = 186
 description = "typeset s${dyn}+="
 outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",
@@ -693,15 +693,6 @@ difference_fields = [
     "stdout",
     "status",
 ]
-
-[[nonpassing]]
-spec = "arith.test.sh"
-index = 20
-line = 234
-description = "Increment undefined variables with nounset"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
 
 [[nonpassing]]
 spec = "arith.test.sh"
@@ -4051,15 +4042,6 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "assign.test.sh"
-index = 18
-line = 205
-description = "'local x' does not set variable"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
-
-[[nonpassing]]
-spec = "assign.test.sh"
 index = 19
 line = 216
 description = "'local -a x' does not set variable"
@@ -5308,7 +5290,7 @@ index = 6
 line = 55
 description = "unset readonly -- one line"
 outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",
@@ -5320,7 +5302,7 @@ index = 7
 line = 65
 description = "unset readonly -- multiple lines"
 outcome = "fail"
-status = 2
+status = 1
 difference_fields = ["status"]
 
 [[nonpassing]]
@@ -5342,6 +5324,24 @@ outcome = "fail"
 status = 2
 qualifier = "BUG"
 difference_fields = ["status"]
+
+[[nonpassing]]
+spec = "bugs.test.sh"
+index = 12
+line = 142
+description = "'echo' and printf fail on writing to full disk"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "bugs.test.sh"
+index = 13
+line = 157
+description = "other builtins fail on writing to full disk"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "bugs.test.sh"
@@ -6770,24 +6770,15 @@ difference_fields = ["status"]
 
 [[nonpassing]]
 spec = "builtin-eval-source.test.sh"
-index = 8
-line = 155
-description = "source accepts/ignores --"
-outcome = "fail"
-status = 127
-difference_fields = [
-    "stdout",
-    "status",
-]
-
-[[nonpassing]]
-spec = "builtin-eval-source.test.sh"
 index = 9
 line = 164
 description = "Source nonexistent"
 outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
+status = 1
+difference_fields = [
+    "stdout",
+    "status",
+]
 
 [[nonpassing]]
 spec = "builtin-eval-source.test.sh"
@@ -6872,7 +6863,7 @@ index = 17
 line = 291
 description = "source works for files in current directory (bash only)"
 outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",
@@ -6884,7 +6875,7 @@ index = 21
 line = 343
 description = "source doesn't crash when targeting a directory"
 outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",
@@ -7013,10 +7004,10 @@ spec = "builtin-getopts.test.sh"
 index = 4
 line = 43
 description = "OPTARG is empty (not unset) after parsing a flag doesn't take an arg"
-outcome = "fail"
-status = 2
+outcome = "known-bug"
+status = 1
 qualifier = "BUG"
-difference_fields = ["status"]
+difference_fields = []
 
 [[nonpassing]]
 spec = "builtin-getopts.test.sh"
@@ -7170,16 +7161,6 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "builtin-history.test.sh"
-index = 11
-line = 253
-description = "history usage"
-outcome = "fail"
-status = 0
-qualifier = "OK"
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-history.test.sh"
 index = 12
 line = 272
 description = "HISTSIZE shrinks the in-memory history when changed"
@@ -7324,6 +7305,24 @@ spec = "builtin-kill.test.sh"
 index = 15
 line = 251
 description = "kill -15 %% kills current job"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "builtin-kill.test.sh"
+index = 16
+line = 287
+description = "kill -15 %- kills previous job"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "builtin-kill.test.sh"
+index = 18
+line = 333
+description = "kill pid and job at once"
 outcome = "fail"
 status = 0
 difference_fields = ["stdout"]
@@ -7854,15 +7853,6 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "builtin-process.test.sh"
-index = 20
-line = 363
-description = "arg that would overflow 64 bits is detected"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-process.test.sh"
 index = 21
 line = 395
 description = "ulimit -f 1 prevents files larger 512 bytes"
@@ -8323,21 +8313,21 @@ difference_fields = [
 
 [[nonpassing]]
 spec = "builtin-set.test.sh"
-index = 6
-line = 65
-description = "set -u with undefined var in interactive shell does NOT exit the interpreter"
+index = 5
+line = 44
+description = "set -u with undefined variable exits the interpreter"
 outcome = "fail"
 status = 0
 difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "builtin-set.test.sh"
-index = 10
-line = 141
-description = "set -eu (flag parsing)"
+index = 6
+line = 65
+description = "set -u with undefined var in interactive shell does NOT exit the interpreter"
 outcome = "fail"
-status = 2
-difference_fields = ["status"]
+status = 0
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "builtin-set.test.sh"
@@ -8925,6 +8915,33 @@ difference_fields = ["status"]
 
 [[nonpassing]]
 spec = "builtin-trap.test.sh"
+index = 18
+line = 373
+description = "trap EXIT return status ignored"
+outcome = "fail"
+status = 42
+difference_fields = ["status"]
+
+[[nonpassing]]
+spec = "builtin-trap.test.sh"
+index = 19
+line = 382
+description = "trap EXIT with PARSE error"
+outcome = "fail"
+status = 0
+difference_fields = ["status"]
+
+[[nonpassing]]
+spec = "builtin-trap.test.sh"
+index = 29
+line = 521
+description = "Remove trap with an unsigned integer"
+outcome = "fail"
+status = 0
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "builtin-trap.test.sh"
 index = 30
 line = 565
 description = "trap '' sets handler to empty string (SIG_IGN)"
@@ -9288,11 +9305,8 @@ index = 2
 line = 52
 description = "type of relative path"
 outcome = "fail"
-status = 127
-difference_fields = [
-    "stdout",
-    "status",
-]
+status = 1
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "builtin-type.test.sh"
@@ -9319,12 +9333,9 @@ index = 5
 line = 145
 description = "more special builtins"
 outcome = "fail"
-status = 127
+status = 0
 qualifier = "N-I"
-difference_fields = [
-    "stdout",
-    "status",
-]
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "builtin-umask.test.sh"
@@ -9550,7 +9561,7 @@ index = 21
 line = 294
 description = "Unset readonly variable"
 outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",
@@ -9661,15 +9672,6 @@ difference_fields = [
     "stdout",
     "status",
 ]
-
-[[nonpassing]]
-spec = "builtin-vars.test.sh"
-index = 37
-line = 608
-description = "Local without variable is still unset!"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
 
 [[nonpassing]]
 spec = "builtin-vars.test.sh"
@@ -10660,39 +10662,12 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "errexit.test.sh"
-index = 28
-line = 342
-description = "simple command that's an alias - redir failure checked"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "errexit.test.sh"
 index = 29
 line = 370
 description = "bash atoms [[ (( - redir failure checked"
 outcome = "fail"
 status = 0
 difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "errexit.test.sh"
-index = 30
-line = 404
-description = "brace group - redir failure checked"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
-
-[[nonpassing]]
-spec = "errexit.test.sh"
-index = 31
-line = 435
-description = "while loop - redirect failure checked"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
 
 [[nonpassing]]
 spec = "errexit.test.sh"
@@ -12222,11 +12197,8 @@ index = 2
 line = 110
 description = "BASH_SOURCE and BASH_LINENO scalar or array (e.g. for virtualenv)"
 outcome = "fail"
-status = 127
-difference_fields = [
-    "stdout",
-    "status",
-]
+status = 0
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "introspect.test.sh"
@@ -12251,15 +12223,6 @@ difference_fields = [
     "stdout",
     "status",
 ]
-
-[[nonpassing]]
-spec = "introspect.test.sh"
-index = 5
-line = 175
-description = '${FUNCNAME} and "set -u" (OSH regression)'
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
 
 [[nonpassing]]
 spec = "introspect.test.sh"
@@ -12324,7 +12287,7 @@ index = 11
 line = 249
 description = "Locations when sourcing"
 outcome = "fail"
-status = 127
+status = 2
 difference_fields = [
     "stdout",
     "status",
@@ -12336,7 +12299,7 @@ index = 12
 line = 271
 description = "Sourcing inside function grows the debug stack"
 outcome = "fail"
-status = 127
+status = 2
 difference_fields = [
     "stdout",
     "status",
@@ -12402,20 +12365,20 @@ spec = "loop.test.sh"
 index = 14
 line = 179
 description = "continue in subshell"
-outcome = "fail"
+outcome = "known-bug"
 status = 0
 qualifier = "BUG"
-difference_fields = ["stdout"]
+difference_fields = []
 
 [[nonpassing]]
 spec = "loop.test.sh"
 index = 15
 line = 214
 description = "continue in subshell aborts with errexit"
-outcome = "fail"
+outcome = "known-bug"
 status = 0
 qualifier = "BUG"
-difference_fields = ["stdout"]
+difference_fields = []
 
 [[nonpassing]]
 spec = "loop.test.sh"
@@ -12435,6 +12398,15 @@ description = "too many args to continue"
 outcome = "fail"
 status = 0
 qualifier = "BUG"
+difference_fields = ["stdout"]
+
+[[nonpassing]]
+spec = "loop.test.sh"
+index = 22
+line = 352
+description = "break/continue within source"
+outcome = "fail"
+status = 0
 difference_fields = ["stdout"]
 
 [[nonpassing]]
@@ -12565,15 +12537,6 @@ outcome = "fail"
 status = 0
 qualifier = "N-I"
 difference_fields = ["stdout-json"]
-
-[[nonpassing]]
-spec = "nameref.test.sh"
-index = 12
-line = 258
-description = "name ref on Undef cell"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
 
 [[nonpassing]]
 spec = "nameref.test.sh"
@@ -13765,15 +13728,6 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "redirect-multi.test.sh"
-index = 4
-line = 82
-description = "Redirect to $empty (in function body)"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "redirect-multi.test.sh"
 index = 5
 line = 94
 description = "Redirect to ''"
@@ -14031,7 +13985,7 @@ index = 33
 line = 443
 description = ": >/dev/null 2> / (OSH regression: fail to pop fd frame)"
 outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",
@@ -14599,15 +14553,6 @@ difference_fields = [
 ]
 
 [[nonpassing]]
-spec = "sh-func.test.sh"
-index = 11
-line = 158
-description = "Scope of global variable when sourced in function (Shell Functions aren't Closures)"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
-
-[[nonpassing]]
 spec = "sh-options-bash.test.sh"
 index = 0
 line = 4
@@ -14631,7 +14576,7 @@ index = 2
 line = 34
 description = "SHELLOPTS and BASHOPTS are non-empty"
 outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",
@@ -14747,24 +14692,6 @@ description = "interactive shell starts with emacs mode on"
 outcome = "fail"
 status = 0
 difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "sh-options.test.sh"
-index = 10
-line = 139
-description = "nounset"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
-
-[[nonpassing]]
-spec = "sh-options.test.sh"
-index = 11
-line = 148
-description = "-u is nounset"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
 
 [[nonpassing]]
 spec = "sh-options.test.sh"
@@ -14995,15 +14922,6 @@ description = "no-ops not shown by shopt -p"
 outcome = "fail"
 status = 0
 qualifier = "OK"
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "sh-usage.test.sh"
-index = 5
-line = 73
-description = "shell obeys --help (regression for OSH)"
-outcome = "fail"
-status = 0
 difference_fields = ["stdout"]
 
 [[nonpassing]]
@@ -15255,15 +15173,6 @@ difference_fields = []
 
 [[nonpassing]]
 spec = "toysh-posix.test.sh"
-index = 0
-line = 4
-description = "Fatal error"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
-
-[[nonpassing]]
-spec = "toysh-posix.test.sh"
 index = 1
 line = 12
 description = "setting readonly var (bash is only one where it's non-fatal)"
@@ -15294,7 +15203,7 @@ index = 3
 line = 46
 description = "Failed redirect in assignment, vs. export"
 outcome = "fail"
-status = 2
+status = 1
 qualifier = "BUG"
 difference_fields = [
     "stdout",
@@ -15892,15 +15801,6 @@ outcome = "fail"
 status = 0
 qualifier = "BUG"
 difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "var-op-len.test.sh"
-index = 6
-line = 192
-description = "Length of undefined variable with nounset"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
 
 [[nonpassing]]
 spec = "var-op-len.test.sh"
@@ -16527,15 +16427,6 @@ difference_fields = [
 
 [[nonpassing]]
 spec = "var-op-strip.test.sh"
-index = 3
-line = 22
-description = "Remove const suffix is vectorized on $@ array"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "var-op-strip.test.sh"
 index = 13
 line = 135
 description = "Prepend using replacement of #"
@@ -16648,15 +16539,6 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "var-op-test.test.sh"
-index = 21
-line = 450
-description = '$* ("" "") and - and + (IFS=)'
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "var-op-test.test.sh"
 index = 23
 line = 484
 description = "assoc array and - and +"
@@ -16666,24 +16548,6 @@ difference_fields = [
     "stdout",
     "status",
 ]
-
-[[nonpassing]]
-spec = "var-op-test.test.sh"
-index = 24
-line = 528
-description = "Error when empty"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
-
-[[nonpassing]]
-spec = "var-op-test.test.sh"
-index = 25
-line = 536
-description = "Error when unset"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
 
 [[nonpassing]]
 spec = "var-op-test.test.sh"
@@ -17470,7 +17334,7 @@ index = 39
 line = 745
 description = "$_ is not undefined on first use"
 outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",

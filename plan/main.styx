@@ -7690,6 +7690,20 @@ children (
                                 kind @decision
                                 text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
                             }
+
+                            {
+                                at 2026-08-20T16:30:13.910022521Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
+
+                            {
+                                at 2026-08-20T19:12:52.932026009Z
+                                author "brendan@necessary.nu"
+                                kind @note
+                                text "Final contained evidence: cargo test --workspace --all-targets passed; strict Clippy for nsh/nsh-cli/nsh-survey passed with warnings denied; x86_64-pc-windows-gnu and x86_64-pc-windows-msvc checks passed; POSIX.1-2024 passed 731/731 cases and 973/973 automatic rules; Smoosh passed 186/186 with zero failures, timeouts, or errors; Oils Bash comparison reproduced selected=2735 pass=1100 fail=1596 unsupported=26 known-bug=13, Bash extension selected=1121 pass=74 fail=1039 unsupported=6 known-bug=2, and named diagnostics selected=112 pass=4 fail=107 known-bug=1, all with zero timeouts/errors and byte-identical nonpassing records versus the prior post-cleanup run. Differential verification covered all 119 corpora in contained prefix/tail runs, then reran every changed parser/expansion/pathological corpus against the pre-cleanup release; the full 6963-case salvage sweep left only the classified POSIX and specified-defect movements and removed the legacy-backquote panic. Release pathological 20,000-iteration and 131 KiB cases match the pre-cleanup release. Every executable test, build, differential, and survey command ran through scripts/sandboxed."
+                            }
                         )
                     }
                 )

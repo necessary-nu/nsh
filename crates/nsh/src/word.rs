@@ -155,6 +155,47 @@ impl ParsedWord {
         self.spelling.as_bstr()
     }
 
+    /// Whether this word has the unquoted `name=value` shape recognized by
+    /// the shell grammar.  The spelling cache deliberately omits quoting, so
+    /// grammar classification must inspect the structural parts instead.
+    // [spec:dash:sem:parser.isassignment-fn]
+    pub(crate) fn is_assignment(&self, locale: &nsh_platform::Locale) -> bool {
+        let mut name_is_empty = true;
+
+        for part in &self.parts {
+            let bytes = match part {
+                WordPart::Literal(bytes) => bytes.as_slice(),
+                WordPart::Multibyte {
+                    bytes,
+                    escaped: false,
+                } => bytes.as_slice(),
+                WordPart::Escaped(_)
+                | WordPart::Multibyte { escaped: true, .. }
+                | WordPart::Quote(_)
+                | WordPart::Parameter(_)
+                | WordPart::Command(_)
+                | WordPart::Arithmetic(_) => return false,
+            };
+
+            for &byte in bytes {
+                if byte == b'=' {
+                    return !name_is_empty;
+                }
+                let is_name_byte = if name_is_empty {
+                    crate::syntax::is_name(locale, byte)
+                } else {
+                    crate::syntax::is_in_name(locale, byte)
+                };
+                if !is_name_byte {
+                    return false;
+                }
+                name_is_empty = false;
+            }
+        }
+
+        false
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.parts.is_empty()
     }
@@ -417,5 +458,31 @@ mod tests {
         let sliced = ParsedWord::from_units(&units[1..]);
         assert!(matches!(sliced.parts()[0], WordPart::Escaped(b'*')));
         assert!(matches!(sliced.parts()[1], WordPart::Arithmetic(_)));
+    }
+
+    #[test]
+    fn assignment_recognition_uses_structure() {
+        let locale = nsh_platform::Locale::c().unwrap();
+        let assignment = ParsedWord::from_tokens(vec![
+            WordToken::Literal(b'a'),
+            WordToken::Literal(b'='),
+            WordToken::Literal(b'b'),
+        ]);
+        let escaped_equal = ParsedWord::from_tokens(vec![
+            WordToken::Literal(b'a'),
+            WordToken::Escaped(b'='),
+            WordToken::Literal(b'b'),
+        ]);
+        let quoted_name = ParsedWord::from_tokens(vec![
+            WordToken::Quote(QuoteBoundary::Open),
+            WordToken::Literal(b'a'),
+            WordToken::Quote(QuoteBoundary::Close),
+            WordToken::Literal(b'='),
+            WordToken::Literal(b'b'),
+        ]);
+
+        assert!(assignment.is_assignment(&locale));
+        assert!(!escaped_equal.is_assignment(&locale));
+        assert!(!quoted_name.is_assignment(&locale));
     }
 }

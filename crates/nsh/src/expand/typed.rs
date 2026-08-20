@@ -20,52 +20,12 @@ use crate::pattern::Pattern;
 use crate::variables::value::VariableValue;
 use crate::word::{ParameterExpansion, ParameterOperation, ParsedWord, QuoteBoundary, WordPart};
 
+mod field;
 mod pathname;
 
-#[derive(Clone, Debug, Default)]
-struct Field {
-    bytes: BString,
-    quoted: Vec<bool>,
-    splittable: Vec<bool>,
-    preserve_empty: bool,
-}
-
-impl Field {
-    fn from_bytes(bytes: &[u8], quoted: bool, splittable: bool, preserve_empty: bool) -> Self {
-        let bytes = bytes
-            .iter()
-            .copied()
-            .filter(|byte| *byte != 0)
-            .collect::<Vec<_>>();
-        let len = bytes.len();
-        Self {
-            bytes: BString::from(bytes),
-            quoted: vec![quoted; len],
-            splittable: vec![splittable; len],
-            preserve_empty,
-        }
-    }
-
-    fn append(&mut self, mut other: Self) {
-        self.bytes.append(&mut other.bytes);
-        self.quoted.append(&mut other.quoted);
-        self.splittable.append(&mut other.splittable);
-        self.preserve_empty |= other.preserve_empty;
-    }
-
-    fn slice(&self, range: std::ops::Range<usize>) -> Self {
-        Self {
-            bytes: BString::from(&self.bytes[range.clone()]),
-            quoted: self.quoted[range.clone()].to_vec(),
-            splittable: self.splittable[range].to_vec(),
-            preserve_empty: false,
-        }
-    }
-
-    fn pattern(&self) -> Pattern {
-        Pattern::new(self.bytes.clone(), self.quoted.clone())
-    }
-}
+use field::Field;
+#[cfg(test)]
+use field::FieldRegion;
 
 #[derive(Clone, Debug)]
 struct Expansion {
@@ -110,7 +70,7 @@ impl Expansion {
 
     fn preserve_empty(&mut self) {
         for field in &mut self.fields {
-            field.preserve_empty = true;
+            field.anchor_empty();
         }
     }
 
@@ -165,7 +125,10 @@ impl Context {
             operand: true,
             tilde_at_start: true,
             tilde_after_equal: false,
-            tilde_after_colon: false,
+            // An operand remains part of the surrounding assignment word;
+            // POSIX.1-2024 therefore keeps `:`-separated tilde prefixes
+            // active inside `${parameter-word}`.
+            tilde_after_colon: self.tilde_after_colon,
             ..self
         }
     }
@@ -276,7 +239,11 @@ fn expand_parts(
     let mut result = Expansion::builder();
     let mut at = 0;
     let mut tilde = if context.tilde_at_start && !context.quoted {
-        TildePosition::WordStart
+        if context.operand && context.tilde_after_colon {
+            TildePosition::Assignment
+        } else {
+            TildePosition::WordStart
+        }
     } else {
         TildePosition::None
     };
@@ -478,11 +445,17 @@ impl Value {
         matches!(self, Self::Unset)
     }
 
-    fn is_empty(&self) -> bool {
+    fn is_empty(&self, shell: &Shell, context: Context) -> bool {
         match self {
             Self::Unset => true,
             Self::Variable(value) => value.scalar_ref().is_none_or(|bytes| bytes.is_empty()),
-            Self::At(words) | Self::Star(words) => words.is_empty(),
+            Self::At(words) if context.full => {
+                words.is_empty() || (words.len() == 1 && words[0].is_empty())
+            }
+            Self::Star(words) if context.full && !context.quoted => {
+                words.is_empty() || (words.len() == 1 && words[0].is_empty())
+            }
+            Self::At(words) | Self::Star(words) => join_parameters(shell, words).is_empty(),
         }
     }
 }
@@ -507,7 +480,7 @@ fn expand_parameter(
 
     let name = crate::variables::assignment_name(parameter.name.as_bstr()).to_owned();
     let value = parameter_value(shell, name.as_bstr());
-    let unavailable = value.is_unset() || (parameter.colon && value.is_empty());
+    let unavailable = value.is_unset() || (parameter.colon && value.is_empty(shell, context));
 
     match parameter.operation {
         ParameterOperation::Value => value_expansion(shell, name.as_bstr(), value, context),
@@ -540,15 +513,32 @@ fn expand_parameter(
         }
         ParameterOperation::Error => value_expansion(shell, name.as_bstr(), value, context),
         ParameterOperation::Assign if unavailable => {
-            let expanded = operand_expansion(shell, parameter, context)?;
-            let assigned = expanded.clone().collapse().bytes;
+            // Assignment operands are first reduced to a scalar, then the
+            // assigned value is expanded in the surrounding context.  This
+            // is observable for `${v="$@"}`: parameter boundaries join for
+            // the stored value and ordinary splitting applies afterward.
+            let assigned = operand_expansion(
+                shell,
+                parameter,
+                Context {
+                    full: false,
+                    ..context
+                },
+            )?
+            .collapse()
+            .bytes;
             crate::variables::set_bytes(
                 shell,
                 name.as_bstr(),
                 Some(assigned.as_bstr()),
                 crate::variables::VariableAttributes::NONE,
             )?;
-            Ok(expanded)
+            value_expansion(
+                shell,
+                name.as_bstr(),
+                Value::Variable(VariableValue::Scalar(assigned)),
+                context,
+            )
         }
         ParameterOperation::Assign => value_expansion(shell, name.as_bstr(), value, context),
         ParameterOperation::Length => {
@@ -704,11 +694,18 @@ fn value_expansion(
             if words.is_empty() {
                 return Ok(Expansion::none());
             }
+            let last = words.len() - 1;
             Ok(Expansion {
                 fields: words
                     .iter()
-                    .map(|word| {
-                        Field::from_bytes(word, context.protects(), !context.quoted, context.quoted)
+                    .enumerate()
+                    .map(|(index, word)| {
+                        Field::from_bytes(
+                            word,
+                            context.protects(),
+                            !context.quoted,
+                            context.quoted || index < last,
+                        )
                     })
                     .collect(),
             })
@@ -717,12 +714,18 @@ fn value_expansion(
             if words.is_empty() {
                 return Ok(Expansion::none());
             }
-            Ok(Expansion {
-                fields: words
-                    .iter()
-                    .map(|word| Field::from_bytes(word, false, true, false))
-                    .collect(),
-            })
+            if effective_ifs(shell).is_empty() {
+                return Ok(Expansion {
+                    fields: words
+                        .iter()
+                        .map(|word| Field::from_bytes(word, false, true, false))
+                        .collect(),
+                });
+            }
+            let joined = join_parameters(shell, &words);
+            Ok(Expansion::one(Field::from_bytes(
+                &joined, false, true, false,
+            )))
         }
         Value::At(words) | Value::Star(words) => {
             let joined = join_parameters(shell, &words);
@@ -988,13 +991,9 @@ fn separator_at<'a>(
     ifs: &'a [IfsCharacter],
     at: usize,
 ) -> Option<(&'a IfsCharacter, usize)> {
-    if !field.splittable.get(at).copied().unwrap_or(false) {
-        return None;
-    }
     let end = character_end(locale, &field.bytes, at);
-    field.splittable[at..end]
-        .iter()
-        .all(|eligible| *eligible)
+    field
+        .range_is_splittable(at..end)
         .then(|| {
             ifs.iter()
                 .find(|separator| separator.bytes.as_slice() == &field.bytes[at..end])
@@ -1004,8 +1003,8 @@ fn separator_at<'a>(
 }
 
 fn split_field(locale: &nsh_platform::Locale, field: Field, ifs: &[IfsCharacter]) -> Vec<Field> {
-    if ifs.is_empty() || !field.splittable.iter().any(|eligible| *eligible) {
-        return if field.bytes.is_empty() && !field.preserve_empty {
+    if ifs.is_empty() || !field.any_splittable() {
+        return if field.bytes.is_empty() && !field.has_empty_anchor(0..=0) {
             Vec::new()
         } else {
             vec![field]
@@ -1048,7 +1047,7 @@ fn split_field(locale: &nsh_platform::Locale, field: Field, ifs: &[IfsCharacter]
                     next = end;
                 }
                 start = next;
-            } else if at > start {
+            } else if at > start || field.has_empty_anchor(start..=at) {
                 result.push(field.slice(start..at));
                 start = next;
             } else {
@@ -1074,11 +1073,10 @@ fn split_field(locale: &nsh_platform::Locale, field: Field, ifs: &[IfsCharacter]
 
     if start < field.bytes.len() {
         result.push(field.slice(start..field.bytes.len()));
-    } else if result.is_empty() && field.preserve_empty {
-        result.push(Field {
-            preserve_empty: true,
-            ..Field::default()
-        });
+    } else if field.has_empty_anchor(start..=field.bytes.len()) {
+        let mut empty = Field::default();
+        empty.anchor_empty();
+        result.push(empty);
     }
     result
 }
@@ -1093,9 +1091,19 @@ mod tests {
     fn typed_field_masks() {
         let field = Field::from_bytes(b"a*b", true, false, true);
         assert_eq!(field.bytes, BString::from("a*b"));
-        assert_eq!(field.quoted, vec![true; 3]);
-        assert_eq!(field.splittable, vec![false; 3]);
-        assert!(field.preserve_empty);
+        assert_eq!(
+            field.regions,
+            vec![FieldRegion {
+                start: 0,
+                end: 3,
+                quoted: true,
+                splittable: false,
+            }]
+        );
+        assert!(field.empty_anchors.is_empty());
+
+        let empty = Field::from_bytes(b"", true, false, true);
+        assert_eq!(empty.empty_anchors, vec![0]);
 
         let indexed = Value::Variable(VariableValue::empty(
             crate::variables::value::VariableKind::Indexed,
@@ -1105,7 +1113,8 @@ mod tests {
         ));
 
         assert!(!indexed.is_unset());
-        assert!(indexed.is_empty());
+        let shell = Shell::builder().build().unwrap();
+        assert!(indexed.is_empty(&shell, Context::top(ExpansionMode::SPLIT)));
         assert!(matches!(
             indexed,
             Value::Variable(VariableValue::Indexed(_))
@@ -1114,5 +1123,44 @@ mod tests {
             associative,
             Value::Variable(VariableValue::Associative(_))
         ));
+    }
+
+    #[test]
+    fn expanded_backslash_quotes_pattern_byte() {
+        let locale = nsh_platform::Locale::c().unwrap();
+        let pattern = Field::from_bytes(b"\\*", false, false, false).pattern();
+
+        assert!(pattern.matches(&locale, b"*"));
+        assert!(!pattern.matches(&locale, b"anything"));
+    }
+
+    #[test]
+    fn field_metadata_stays_sparse() {
+        let mut field = Field::from_bytes(&vec![b'x'; 131_072], false, true, false);
+        assert_eq!(field.regions.len(), 1);
+
+        field.append(Field::from_bytes(b"quoted", true, false, false));
+        field.append(Field::from_bytes(b"-tail", true, false, false));
+        assert_eq!(field.regions.len(), 2);
+
+        let slice = field.slice(131_068..131_080);
+        assert_eq!(slice.bytes, BString::from("xxxxquoted-t"));
+        assert_eq!(
+            slice.regions,
+            [
+                FieldRegion {
+                    start: 0,
+                    end: 4,
+                    quoted: false,
+                    splittable: true,
+                },
+                FieldRegion {
+                    start: 4,
+                    end: 12,
+                    quoted: true,
+                    splittable: false,
+                },
+            ]
+        );
     }
 }

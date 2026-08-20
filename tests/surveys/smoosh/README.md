@@ -22,11 +22,14 @@ to classify the legacy known-hang cases.
 ## Running the survey
 
 ```sh
-cargo build --release --bin nsh
-cargo run -p nsh-survey -- run-smoosh
-cargo run -p nsh-survey -- run-smoosh --group known-hang
-cargo run -p nsh-survey -- run-smoosh --group full --format json
-cargo run -p nsh-survey -- run-smoosh --group full --summary results.toml
+scripts/sandboxed -- cargo build --release -p nsh-cli --bin nsh
+scripts/sandboxed -- cargo build --release -p nsh-survey
+scripts/sandboxed -- target/release/nsh-survey run-smoosh
+scripts/sandboxed -- target/release/nsh-survey run-smoosh --group known-hang
+scripts/sandboxed -- target/release/nsh-survey run-smoosh --group full --format json
+scripts/sandboxed --writable tests/surveys/smoosh -- \
+  target/release/nsh-survey run-smoosh --group full \
+  --summary tests/surveys/smoosh/RESULTS.toml
 ```
 
 The available groups are:
@@ -50,18 +53,12 @@ the top-level script and nested `$TEST_SHELL` calls while preserving parent-PID
 semantics. `nsh` needs no extra flag. To survey Bash in POSIX mode, use:
 
 ```sh
-cargo run -p nsh-survey -- run-smoosh \
+scripts/sandboxed -- target/release/nsh-survey run-smoosh \
   --shell /bin/bash \
   --shell-flag --posix
 ```
 
 ## Containment
-
-Run top-level Cargo and survey commands through `scripts/sandboxed`:
-
-```sh
-scripts/sandboxed -- cargo run -p nsh-survey -- run-smoosh --group full
-```
 
 The runner verifies its own fail-closed sandbox before executing any script.
 Each test gets fresh PID and network namespaces, a read-only root, a writable
@@ -75,13 +72,13 @@ are killed when the case ends. The survey aborts if containment is unavailable.
 2. Review the upstream license, `tests/shell_tests.sh`, `tests/Makefile`,
    `tests/shell/`, and `tests/util/`.
 3. Update the identity and reviewed counts in `SOURCE.toml`.
-4. Run `cargo run -p nsh-survey -- import-smoosh CHECKOUT`.
+4. Run `scripts/sandboxed --writable CHECKOUT --writable tests/surveys/smoosh -- target/release/nsh-survey import-smoosh CHECKOUT`.
 5. Review the generated diff.
-6. Run `cargo run -p nsh-survey -- verify-smoosh`.
+6. Run `scripts/sandboxed -- target/release/nsh-survey verify-smoosh`.
 
 ## Recorded result
 
 `RESULTS.toml` contains the deterministic result for the complete `full`
 group, including the release binary SHA-256, both timeout classes, totals, and
-all non-passing scripts. The current baseline is 155 passes and 31 failures
-across 186 scripts, with no timeouts or harness errors.
+all non-passing scripts. The current baseline is 186 passes across 186
+scripts, with no failures, timeouts, or harness errors.

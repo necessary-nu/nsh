@@ -4,7 +4,7 @@ source_commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
 group = "bash-named-diagnostic"
 group_label = "Named *-bash diagnostic slice"
 shell = "target/release/nsh"
-shell_sha256 = "f72ebfa60ed098d4a0849ae8448f09e4a95e415a99f84a2d14cf8353d2acdf4a"
+shell_sha256 = "543166b494d5afacaa8098f84b7faa6aa95239a3a4ab284c8b949a0f00b65466"
 expectation_shell = "bash"
 containment = "sandbox-pid-net-ro-root"
 posix = false
@@ -792,7 +792,7 @@ index = 2
 line = 34
 description = "SHELLOPTS and BASHOPTS are non-empty"
 outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",

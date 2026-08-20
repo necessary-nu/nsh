@@ -8,12 +8,12 @@ Timing data is omitted so reruns produce stable diffs.
 ## Current baseline
 
 Shell SHA-256:
-`f72ebfa60ed098d4a0849ae8448f09e4a95e415a99f84a2d14cf8353d2acdf4a`
+`543166b494d5afacaa8098f84b7faa6aa95239a3a4ab284c8b949a0f00b65466`
 
 | Group | Selected | Pass | Fail | Unsupported | Known bug | Timeout | Error |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| `bash-comparison` | 2,735 | 1,086 | 1,613 | 26 | 10 | 0 | 0 |
-| `bash-extension` | 1,121 | 70 | 1,043 | 6 | 2 | 0 | 0 |
+| `bash-comparison` | 2,735 | 1,100 | 1,596 | 26 | 13 | 0 | 0 |
+| `bash-extension` | 1,121 | 74 | 1,039 | 6 | 2 | 0 | 0 |
 | `bash-named-diagnostic` | 112 | 4 | 107 | 0 | 1 | 0 | 0 |
 
 ## Regenerating

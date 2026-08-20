@@ -97,55 +97,67 @@ impl Matcher<'_> {
         result
     }
 
-    fn match_uncached(&mut self, mut pattern_at: usize, subject_at: usize) -> bool {
-        if pattern_at == self.pattern.bytes.len() {
-            return subject_at == self.subject.len();
-        }
-
-        if self.pattern.active(pattern_at, b'*') {
-            while self.pattern.active(pattern_at, b'*') {
-                pattern_at += 1;
-            }
+    fn match_uncached(&mut self, mut pattern_at: usize, mut subject_at: usize) -> bool {
+        loop {
             if pattern_at == self.pattern.bytes.len() {
-                return true;
+                return subject_at == self.subject.len();
             }
-            let mut candidate = subject_at;
-            loop {
-                if self.matches_from(pattern_at, candidate) {
+
+            if self.pattern.active(pattern_at, b'*') {
+                while self.pattern.active(pattern_at, b'*') {
+                    pattern_at += 1;
+                }
+                if pattern_at == self.pattern.bytes.len() {
                     return true;
                 }
-                if candidate == self.subject.len() {
+                let mut candidate = subject_at;
+                loop {
+                    if self.matches_from(pattern_at, candidate) {
+                        return true;
+                    }
+                    if candidate == self.subject.len() {
+                        return false;
+                    }
+                    candidate = character_end(self.locale, self.subject, candidate);
+                }
+            }
+
+            if self.pattern.active(pattern_at, b'?') {
+                if subject_at == self.subject.len() {
                     return false;
                 }
-                candidate = character_end(self.locale, self.subject, candidate);
+                pattern_at += 1;
+                subject_at = character_end(self.locale, self.subject, subject_at);
+                continue;
             }
-        }
 
-        if self.pattern.active(pattern_at, b'?') {
+            if self.pattern.active(pattern_at, b'[')
+                && let Some((next_pattern, consumed)) = self.bracket(pattern_at + 1, subject_at)
+            {
+                let mut consumed = consumed.into_iter();
+                let Some(first) = consumed.next() else {
+                    return false;
+                };
+                if consumed.any(|count| self.matches_from(next_pattern, subject_at + count)) {
+                    return true;
+                }
+                pattern_at = next_pattern;
+                subject_at += first;
+                continue;
+            }
+
             if subject_at == self.subject.len() {
                 return false;
             }
-            return self.matches_from(
-                pattern_at + 1,
-                character_end(self.locale, self.subject, subject_at),
-            );
+            let pattern_end = character_end(self.locale, &self.pattern.bytes, pattern_at);
+            let subject_end = character_end(self.locale, self.subject, subject_at);
+            if self.pattern.bytes[pattern_at..pattern_end] != self.subject[subject_at..subject_end]
+            {
+                return false;
+            }
+            pattern_at = pattern_end;
+            subject_at = subject_end;
         }
-
-        if self.pattern.active(pattern_at, b'[')
-            && let Some((next_pattern, consumed)) = self.bracket(pattern_at + 1, subject_at)
-        {
-            return consumed
-                .into_iter()
-                .any(|count| self.matches_from(next_pattern, subject_at + count));
-        }
-
-        if subject_at == self.subject.len() {
-            return false;
-        }
-        let pattern_end = character_end(self.locale, &self.pattern.bytes, pattern_at);
-        let subject_end = character_end(self.locale, self.subject, subject_at);
-        self.pattern.bytes[pattern_at..pattern_end] == self.subject[subject_at..subject_end]
-            && self.matches_from(pattern_end, subject_end)
     }
 
     /// Return the continuation and every subject width matched by one
@@ -358,5 +370,18 @@ mod tests {
         let quoted_star = Pattern::new(BString::from("*"), vec![true]);
         assert!(quoted_star.matches(&locale, b"*"));
         assert!(!quoted_star.matches(&locale, b"anything"));
+    }
+
+    #[test]
+    fn long_literals_do_not_recurse() {
+        let locale = nsh_platform::Locale::c().unwrap();
+        let subject = vec![b'x'; 131_072];
+        let pattern = Pattern::unquoted(BString::from(subject.clone()));
+
+        assert!(pattern.matches(&locale, &subject));
+
+        let mut different = subject;
+        different.push(b'y');
+        assert!(!pattern.matches(&locale, &different));
     }
 }

@@ -4,7 +4,7 @@ source_commit = "15de8fd779569e6e3a9f5fcbfc00e7df0ebe0380"
 group = "bash-extension"
 group_label = "Bash extension survey"
 shell = "target/release/nsh"
-shell_sha256 = "f72ebfa60ed098d4a0849ae8448f09e4a95e415a99f84a2d14cf8353d2acdf4a"
+shell_sha256 = "543166b494d5afacaa8098f84b7faa6aa95239a3a4ab284c8b949a0f00b65466"
 expectation_shell = "bash"
 containment = "sandbox-pid-net-ro-root"
 posix = false
@@ -13,8 +13,8 @@ timeout_ms = 5000
 [totals]
 selected = 1121
 executed = 1121
-pass = 70
-fail = 1043
+pass = 74
+fail = 1039
 skip = 0
 unsupported = 6
 known_bug = 2
@@ -48,7 +48,7 @@ index = 2
 line = 17
 description = "Append string to undefined variable"
 outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",
@@ -181,7 +181,7 @@ index = 13
 line = 164
 description = "typeset s+="
 outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",
@@ -193,7 +193,7 @@ index = 14
 line = 186
 description = "typeset s${dyn}+="
 outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",
@@ -5200,16 +5200,6 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "builtin-history.test.sh"
-index = 11
-line = 253
-description = "history usage"
-outcome = "fail"
-status = 0
-qualifier = "OK"
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "builtin-history.test.sh"
 index = 12
 line = 272
 description = "HISTSIZE shrinks the in-memory history when changed"
@@ -8233,11 +8223,8 @@ index = 2
 line = 110
 description = "BASH_SOURCE and BASH_LINENO scalar or array (e.g. for virtualenv)"
 outcome = "fail"
-status = 127
-difference_fields = [
-    "stdout",
-    "status",
-]
+status = 0
+difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "introspect.test.sh"
@@ -8262,15 +8249,6 @@ difference_fields = [
     "stdout",
     "status",
 ]
-
-[[nonpassing]]
-spec = "introspect.test.sh"
-index = 5
-line = 175
-description = '${FUNCNAME} and "set -u" (OSH regression)'
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
 
 [[nonpassing]]
 spec = "introspect.test.sh"
@@ -8335,7 +8313,7 @@ index = 11
 line = 249
 description = "Locations when sourcing"
 outcome = "fail"
-status = 127
+status = 2
 difference_fields = [
     "stdout",
     "status",
@@ -8347,7 +8325,7 @@ index = 12
 line = 271
 description = "Sourcing inside function grows the debug stack"
 outcome = "fail"
-status = 127
+status = 2
 difference_fields = [
     "stdout",
     "status",
@@ -8477,15 +8455,6 @@ outcome = "fail"
 status = 0
 qualifier = "N-I"
 difference_fields = ["stdout-json"]
-
-[[nonpassing]]
-spec = "nameref.test.sh"
-index = 12
-line = 258
-description = "name ref on Undef cell"
-outcome = "fail"
-status = 2
-difference_fields = ["status"]
 
 [[nonpassing]]
 spec = "nameref.test.sh"
@@ -9323,15 +9292,6 @@ difference_fields = ["stdout"]
 
 [[nonpassing]]
 spec = "redirect-multi.test.sh"
-index = 4
-line = 82
-description = "Redirect to $empty (in function body)"
-outcome = "fail"
-status = 0
-difference_fields = ["stdout"]
-
-[[nonpassing]]
-spec = "redirect-multi.test.sh"
 index = 5
 line = 94
 description = "Redirect to ''"
@@ -9939,7 +9899,7 @@ index = 2
 line = 34
 description = "SHELLOPTS and BASHOPTS are non-empty"
 outcome = "fail"
-status = 2
+status = 1
 difference_fields = [
     "stdout",
     "status",

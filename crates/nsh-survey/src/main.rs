@@ -67,6 +67,10 @@ fn main() {
     }
 }
 
+// The survey entrypoint verifies pinned inputs before dispatching every
+// compatibility run; the repository-level wrapper supplies the outer,
+// terminal-safe containment boundary.
+// [spec:nsh:req:idiom.conformance-closure]
 fn run() -> Result<()> {
     let mut args = env::args_os();
     let _program = args.next();
