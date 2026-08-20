@@ -42,11 +42,13 @@ impl AliasTable {
     }
 }
 
+// [spec:nsh:req:idiom.lexer-tokens]
 fn valid_name(name: &BStr) -> bool {
     !name.is_empty()
-        && name
-            .iter()
-            .all(|&byte| crate::syntax::BASESYNTAX(byte as i8 as c_int) == crate::syntax::CWORD)
+        && name.iter().all(|&byte| {
+            crate::syntax::SyntaxContext::Base.classify(crate::syntax::InputUnit::Byte(byte))
+                == crate::syntax::SyntaxClass::Word
+        })
 }
 
 // [spec:dash:def:alias.setalias-fn]

@@ -310,6 +310,7 @@ pub fn evalstring(sh: &mut Shell, s: &BStr, flags: c_int) -> Result<Flow, Error>
 /// unwound to a mark by whoever catches, not by the frame that was passed
 /// through.
 // [spec:posix:req:token.incremental-execution]
+// [spec:nsh:req:idiom.lexer-tokens]
 pub(crate) fn parse_execute(sh: &mut Shell, flags: c_int) -> Result<Flow, Error> {
     let mut status: c_int = 0;
     loop {
@@ -324,7 +325,7 @@ pub(crate) fn parse_execute(sh: &mut Shell, flags: c_int) -> Result<Flow, Error>
                 sh,
                 n.as_ref(),
                 flags
-                    & !(if crate::parser::parser_eof(sh) != 0 {
+                    & !(if crate::parser::parser_eof(sh) {
                         0
                     } else {
                         EV_EXIT

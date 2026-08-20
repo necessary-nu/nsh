@@ -119,6 +119,7 @@ fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> R
 // [spec:posix:req:builtin.read.stdin]
 // [spec:posix:req:builtin.read.terminating-delimiter-removed]
 // [spec:posix:req:builtin.read.utility-syntax-guidelines]
+// [spec:nsh:req:idiom.lexer-tokens]
 pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut prompt: Option<CString>;
     let mut startloc: c_int = 0;
@@ -179,7 +180,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     const L_START: c_int = 3;
 
     let mut pc: c_int = L_START; /* goto start */
-    let mut c: c_int = 0;
+    let mut input = crate::syntax::InputUnit::EndOfInput;
 
     loop {
         if pc == L_BODY {
@@ -190,21 +191,21 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
              * own scratch now, so there is nothing to reserve on its
              * behalf -- the reservation left here would be a guess about
              * another function's internals. */
-            c = if delimiter == b'\0' {
+            input = if delimiter == b'\0' {
                 crate::input::pgetc_preserve_nul(sh)?
             } else {
                 crate::input::pgetc(sh)?
             };
-            if c == crate::syntax::PEOF {
+            if input == crate::syntax::InputUnit::EndOfInput {
                 status = 1;
                 break;
             }
-            if c == '\0' as c_int && delimiter != b'\0' {
+            if input.is(b'\0') && delimiter != b'\0' {
                 pc = L_BODY;
                 continue;
             }
             let mut scratch: [u8; crate::parser::MBSLOP] = [0; crate::parser::MBSLOP];
-            ml = crate::parser::getmbc(sh, c, &mut scratch, 0)?;
+            ml = crate::parser::getmbc(sh, input, &mut scratch, 0)?;
             if ml != 0 {
                 /* `p += ml` is the commit of what `getmbc` wrote; a zero
                  * return commits nothing, and the scribble it left behind
@@ -213,7 +214,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 line.extend_from_slice(&scratch[..ml as usize]);
                 pc = L_RECORD; /* goto record */
             } else if newloc >= startloc {
-                if c == '\n' as c_int {
+                if input.is(b'\n') {
                     if prompt_for_continuation {
                         let ps2 = crate::var::ps2val(sh);
                         let _ = sh.io.stderr().write_all(&ps2);
@@ -222,11 +223,11 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 } else {
                     pc = L_PUT; /* goto put */
                 }
-            } else if rflag == 0 && c == '\\' as c_int {
+            } else if rflag == 0 && input.is(b'\\') {
                 newloc = line.len() as c_int;
                 pc = L_BODY;
                 continue;
-            } else if c as u8 == delimiter {
+            } else if input.is(delimiter) {
                 break;
             } else {
                 pc = L_PUT; /* fall through to put: */
@@ -239,13 +240,13 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
              * how a NUL read from the input gets escaped. */
             if crate::mystring::cqchars[1..]
                 .iter()
-                .any(|&b| b as c_int == c)
+                .any(|&byte| input.is(byte as u8))
             {
                 /* USTPUTC(CTLESC, p) */
                 line.push(crate::parser::CTLESC as u8);
             }
             /* USTPUTC(c, p) */
-            line.push(c as u8);
+            line.push(input.expect_byte());
             pc = L_RECORD;
         }
         if pc == L_RECORD {

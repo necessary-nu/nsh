@@ -5045,4 +5045,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule cli.metadata-options}
     )}
+    {id type-lexer-syntax-protocol, covered_rules (
+        idiom.lexer-tokens
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.lexer-tokens}
+    )}
 )

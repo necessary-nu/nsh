@@ -21,10 +21,7 @@ use nsh_platform::Descriptor;
 use std::io::Write;
 
 use crate::error::{INTOFF, INTON};
-use crate::syntax::PEOF;
-
-/* PEOF (the end of file marker) is defined in syntax.h */
-pub const PEOA: c_int = PEOF - 1;
+use crate::syntax::InputUnit;
 
 /// `MB_LEN_MAX > 16 ? MB_LEN_MAX : 16` — 16 on glibc.
 pub const PUNGETC_MAX: usize = 16;
@@ -179,13 +176,13 @@ pub struct InputStack {
     /// `needprompt` — interactive and at the start of a line.
     pub(crate) needprompt: c_int,
     /// `lasttoken` — the last token read.
-    pub(crate) lasttoken: c_int,
+    pub(crate) lasttoken: crate::parser::TokenKind,
     /// Whether the last word token contained quoting. Kept beside
     /// `lasttoken` so pushing a token back preserves the complete token;
     /// ordinary parser code receives it as part of `readtoken`'s result.
-    pub(crate) last_quoteflag: c_int,
+    pub(crate) last_quoteflag: bool,
     /// `tokpushback` — one token of lookahead, pushed back.
-    pub(crate) tokpushback: c_int,
+    pub(crate) tokpushback: bool,
     /// The option-derived dialect captured at the current parser entry.
     /// It is a snapshot, not a second setting: every top-level parse unit
     /// replaces it from this shell's [`crate::options::ShellOptions`].
@@ -206,7 +203,7 @@ pub struct InputStack {
     /// `stdin_istty` — -1 until asked.
     pub(crate) stdin_istty: c_int,
     /// See [`take_alias_boundary`].
-    alias_boundary: c_int,
+    alias_boundary: bool,
 }
 
 impl InputStack {
@@ -220,9 +217,9 @@ impl InputStack {
             heredoclist: Vec::new(),
             doprompt: 0,
             needprompt: 0,
-            lasttoken: 0,
-            last_quoteflag: 0,
-            tokpushback: 0,
+            lasttoken: crate::parser::TokenKind::Eof,
+            last_quoteflag: false,
+            tokpushback: false,
             parse_dialect: crate::options::Dialect::Posix,
             wordtext: bstr::BString::new(Vec::new()),
             backquotelist: Vec::new(),
@@ -236,7 +233,7 @@ impl InputStack {
             },
             whichprompt: 0,
             stdin_istty: -1,
-            alias_boundary: 0,
+            alias_boundary: false,
         }
     }
 
@@ -292,17 +289,15 @@ impl InputStack {
 /// see [`take_alias_boundary`] and [`clear_alias_boundary`].
 /// Take the flag and clear it: the parser's `kwd |= checkkwd`.
 #[inline]
-pub fn take_alias_boundary(sh: &mut Shell) -> c_int {
-    let v = sh.input.alias_boundary;
-    sh.input.alias_boundary = 0;
-    v
+pub fn take_alias_boundary(sh: &mut Shell) -> bool {
+    core::mem::take(&mut sh.input.alias_boundary)
 }
 
 /// Drop the flag unread: the parser's `checkkwd = 0` while eating
 /// newlines, which discarded an alias bit set during that eating.
 #[inline]
 pub fn clear_alias_boundary(sh: &mut Shell) {
-    sh.input.alias_boundary = 0;
+    sh.input.alias_boundary = false;
 }
 
 /// Frame `i`. Index 0 is `basepf`, which is not in `FRAMES` because it
@@ -396,7 +391,7 @@ pub fn mkinit_init(sh: &mut Shell) {
 
 /* mkinit RESET fragment from src/input.c:101-112. */
 pub fn mkinit_reset(sh: &mut crate::context::Shell) {
-    let mut c: c_int;
+    let mut input: InputUnit;
 
     /* clear input buffer */
     popallfiles(sh);
@@ -406,11 +401,11 @@ pub fn mkinit_reset(sh: &mut crate::context::Shell) {
      * from a cursor that a live `strpush` has moved into an unrelated
      * allocation; the index says what the difference was meant to say. */
     let top = pf_at(sh, sh.input.top);
-    c = PEOF;
+    input = InputUnit::EndOfInput;
     if top.pos > top.unget as usize {
-        c = text(top)[top.pos - top.unget as usize - 1] as i8 as c_int;
+        input = InputUnit::Byte(text(top)[top.pos - top.unget as usize - 1]);
     }
-    while c != b'\n' as c_int && c != PEOF && crate::error::int_pending() == 0 {
+    while !input.is(b'\n') && input != InputUnit::EndOfInput && crate::error::int_pending() == 0 {
         /* Teardown: `reset` drains the rest of the bad line and cannot
          * fail its way out of doing so (§4.3). The loop's own
          * `int_pending` test is what stops it, and it is tested *before*
@@ -419,7 +414,7 @@ pub fn mkinit_reset(sh: &mut crate::context::Shell) {
          * other reason ends it too, with the diagnostic already
          * written. */
         match pgetc(sh) {
-            Ok(next) => c = next,
+            Ok(next) => input = next,
             Err(e) => {
                 sh.status = e.status();
                 drop(e);
@@ -553,14 +548,15 @@ fn freestrings(sh: &mut crate::context::Shell) {
 }
 
 /*
- * Read a character from the script, returning PEOF on end of file.
+ * Read one item from the script.
  * Nul characters in the input are silently discarded by the normal entry
  * point; `read -d ''` uses the preserving entry point below.
  */
 
 // [spec:dash:def:input.pgetc-fn]
 // [spec:dash:sem:input.pgetc-fn]
-pub fn pgetc(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
+// [spec:nsh:req:idiom.lexer-tokens]
+pub fn pgetc(sh: &mut crate::context::Shell) -> Result<InputUnit, Error> {
     pgetc_inner(sh, false)
 }
 
@@ -568,12 +564,12 @@ pub fn pgetc(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
 ///
 /// This is intentionally narrower than [`pgetc`]: shell input remains text,
 /// while `read -d ''` needs to observe the NUL that terminates its record.
-pub(crate) fn pgetc_preserve_nul(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
+pub(crate) fn pgetc_preserve_nul(sh: &mut crate::context::Shell) -> Result<InputUnit, Error> {
     pgetc_inner(sh, true)
 }
 
-fn pgetc_inner(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<c_int, Error> {
-    let mut c: c_int;
+fn pgetc_inner(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<InputUnit, Error> {
+    let mut input: InputUnit;
     /* Re-derived after everything that can push a level, because that is
      * what moves the frames; the C reloads the same global for the same
      * reason. */
@@ -589,48 +585,48 @@ fn pgetc_inner(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<c_i
             let unget = pf.unget as usize;
             pf.unget -= 1;
 
-            return Ok(text(pf)[pf.pos - unget] as i8 as c_int);
+            return Ok(InputUnit::Byte(text(pf)[pf.pos - unget]));
         }
 
         'nextc: loop {
             if pf.nleft > 0 {
                 pf.nleft -= 1;
-                c = text(pf)[pf.pos] as i8 as c_int;
+                input = InputUnit::Byte(text(pf)[pf.pos]);
                 pf.pos += 1;
             } else if !pf.strpush.is_empty() {
                 popstring(sh);
                 /* The freestrings call must be delayed til the next
-                 * pgetc call for PEOA to work properly.
+                 * input read so the alias-end boundary remains observable.
                  */
                 pf = cur_pf(sh);
                 continue 'again;
             } else {
-                c = preadbuffer(sh, preserve_nul)?;
+                input = preadbuffer(sh, preserve_nul)?;
                 pf = cur_pf(sh);
             }
 
             /* delete nul characters */
-            if IS_DEFINED_SMALL && !preserve_nul && c == 0 {
+            if IS_DEFINED_SMALL && !preserve_nul && input.is(0) {
                 let n = pf.nleft as usize;
                 pf.buf.copy_within(pf.pos..pf.pos + n, pf.pos - 1);
                 pf.pos -= 1;
                 continue 'nextc;
             }
 
-            return Ok(c);
+            return Ok(input);
         }
     }
 }
 
 // [spec:dash:def:input.pgetc-eoa-fn]
 // [spec:dash:sem:input.pgetc-eoa-fn]
-pub fn pgetc_eoa(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
+pub fn pgetc_eoa(sh: &mut crate::context::Shell) -> Result<InputUnit, Error> {
     let pf = cur_pf(sh);
     if !pf.strpush.is_empty()
         && pf.nleft == -1
         && pf.strpush[pf.strpush.len() - 1].alias_name.is_some()
     {
-        Ok(PEOA)
+        Ok(InputUnit::EndOfAlias)
     } else {
         pgetc(sh)
     }
@@ -830,7 +826,7 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
 
 // [spec:dash:def:input.preadbuffer-fn]
 // [spec:dash:sem:input.preadbuffer-fn]
-fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<c_int, Error> {
+fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<InputUnit, Error> {
     let first: c_int = (sh.input.whichprompt == 1) as c_int;
     let mut something: c_int;
     let mut savec: u8 = 0;
@@ -843,7 +839,7 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<c_i
     if (cur_pf(sh).eof & 2) != 0 {
         /* eof: */
         cur_pf(sh).eof = 3;
-        return Ok(PEOF);
+        return Ok(InputUnit::EndOfInput);
     }
     sh.io.flushall();
 
@@ -873,7 +869,7 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<c_i
                  * its delivery left from *inside* the read by longjmp;
                  * with delivery moved to a poll site, a `read` that came
                  * back EINTR arrives here looking exactly like a `read`
-                 * that came back 0, and reporting PEOF makes ^C behave
+                 * that came back 0, and reporting end-of-input makes ^C behave
                  * like ^D -- the shell exits instead of printing a fresh
                  * prompt. The pty cases `^C in emacs mode`, `^C in vi
                  * mode` and `^C during a blocked read` are what said so.
@@ -890,7 +886,7 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<c_i
                 }
                 /* goto eof */
                 cur_pf(sh).eof = 3;
-                return Ok(PEOF);
+                return Ok(InputUnit::EndOfInput);
             }
         }
 
@@ -902,19 +898,19 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<c_i
 
         /* delete nul characters */
         loop {
-            let c: c_int;
+            let byte: u8;
 
             more -= 1;
-            c = cur_pf(sh).buf[q] as i8 as c_int;
+            byte = cur_pf(sh).buf[q];
 
-            if c == 0 && !preserve_nul {
+            if byte == 0 && !preserve_nul {
                 let pf = cur_pf(sh);
                 pf.buf.copy_within(q + 1..q + 1 + more as usize, q);
                 /* goto check */
             } else {
                 q += 1;
 
-                if c == b'\n' as c_int {
+                if byte == b'\n' {
                     let previous = {
                         let pf = cur_pf(sh);
                         (q - pf.pos >= 2).then(|| pf.buf[q - 2])
@@ -928,7 +924,7 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<c_i
                     }
                     break 'outer; /* goto done */
                 }
-                if c != b'\t' as c_int && c != b' ' as c_int {
+                if byte != b'\t' && byte != b' ' {
                     something = 1;
                 }
             }
@@ -997,9 +993,9 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<c_i
     }
 
     let pf = cur_pf(sh);
-    let r = pf.buf[pf.pos] as i8 as c_int;
+    let byte = pf.buf[pf.pos];
     pf.pos += 1;
-    Ok(r)
+    Ok(InputUnit::Byte(byte))
 }
 
 // [spec:dash:def:input.pungetn-fn]
@@ -1010,7 +1006,7 @@ pub fn pungetn(sh: &mut Shell, n: c_int) {
 
 /*
  * Undo a call to pgetc.  Only two characters may be pushed back.
- * PEOF may be pushed back.
+ * End-of-input may be pushed back.
  */
 
 // [spec:dash:def:input.pungetc-fn]
@@ -1088,7 +1084,7 @@ fn popstring(sh: &mut Shell) {
     /* Set after the frame's borrow ends; it is a flag on the stack, not
      * on the frame, and nothing between here and there reads it. */
     if boundary {
-        sh.input.alias_boundary = 1;
+        sh.input.alias_boundary = true;
     }
     INTON(sh);
 }

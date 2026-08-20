@@ -17,8 +17,8 @@
 //!     `conv_escape` still needs to write through a bare cursor and touch
 //!     no region.
 //!   * `crate::parser::{CTLESC, CTLMBCHAR}` (src/parser.h:43,47)
-//!   * `crate::syntax::{sqsyntax, SYNBASE, CCTL}` -- the generated syntax
-//!     tables; `SQSYNTAX` is `sqsyntax + SYNBASE` with `SYNBASE` 129
+//!   * `crate::syntax::SyntaxContext` for bytes that need framing inside
+//!     single quotes.
 //!     (src/mksyntax.c:147,152)
 
 use bstr::BString;
@@ -117,6 +117,7 @@ const CH_V: c_int = b'v' as c_int;
 /// `mboff` is -2 when `!mbchar`, so the framing bytes are deliberately
 /// overwritten by the payload -- ordinary arithmetic instead of pointer
 /// arithmetic that happens to stay in bounds.
+// [spec:nsh:req:idiom.lexer-tokens]
 pub fn conv_escape(input: &[u8], out: &mut [u8; CONV_ESCAPE_SLOP], mbchar: bool) -> c_uint {
     /* The C's `out`, as the offset it always was. */
     let mut o: usize = 0;
@@ -298,11 +299,9 @@ pub fn conv_escape(input: &[u8], out: &mut [u8; CONV_ESCAPE_SLOP], mbchar: bool)
 
         if goto_check_value {
             // check_value:
-            // if (SQSYNTAX[(signed char)value] != CCTL) break;
-            if crate::syntax::sqsyntax
-                [(crate::syntax::SYNBASE as isize + (value as i8) as isize) as usize]
-                as c_int
-                != crate::syntax::CCTL as c_int
+            if crate::syntax::SyntaxContext::SingleQuoted
+                .classify(crate::syntax::InputUnit::Byte(value as u8))
+                != crate::syntax::SyntaxClass::Control
             {
                 goto_backslash = false;
             } else {

@@ -516,92 +516,29 @@ pub fn expansion_result(sh: &crate::context::Shell) -> &BStr {
 // argument about `INTOFF` and becomes the borrow checker's.
 // ---------------------------------------------------------------------
 
-/// One of the three tables the encoder classifies bytes with, carried the
-/// way `syntax.h` carries it: the whole table, indexed from `SYNBASE`.
-///
-/// The C spells these `basesyntax + SYNBASE` and then indexes with a
-/// *signed* char, so the index runs from -129 up. A raw pointer into the
-/// middle of the array is how the C gets a negative index, and it is also
-/// how the C loses every bound: `mbtodest` probes `syntax[CTLMBCHAR]` at
-/// -123, and under `is_type` unbiased that is a read before the array.
-///
-/// Carried as a slice with the origin folded into the accessor, the
-/// negative index is ordinary arithmetic and the read is bounds-checked.
-/// Nothing is given up: the deliberate deviation `IS_TYPE_UNBIASED`
-/// documents is a *padded* table, so the probe lands on a real zero byte
-/// here as it always has, and now the compiler can see that it does. A
-/// panic out of `at` would mean a classification query this port has
-/// never made.
+/// Escaping policy used while copying expansion bytes to their destination.
+// [spec:nsh:req:idiom.lexer-tokens]
 #[derive(Clone, Copy)]
-pub struct SyntaxRef(&'static [c_char]);
-
-impl SyntaxRef {
-    /// `syntax[c]`, where `syntax` is the C's `name + SYNBASE`.
-    #[inline]
-    fn at(self, c: c_int) -> c_char {
-        self.0[(c + crate::syntax::SYNBASE) as usize]
-    }
+enum DestinationSyntax {
+    Base,
+    SingleQuoted,
+    /// The old unbiased `is_type` use deterministically escaped nothing.
+    Unframed,
 }
 
-/// `syntax.h`: `#define BASESYNTAX (basesyntax + SYNBASE)`
-///
-/// A `const` rather than a function, which is what the C `#define`
-/// already was. It had to be spelled as a pointer into the middle of an
-/// array to carry the offset; [`SyntaxRef`] puts the offset in the
-/// accessor, so the table is once again just a value.
-const BASESYNTAX: SyntaxRef = SyntaxRef(&crate::syntax::basesyntax);
-
-/// `syntax.h`: `#define SQSYNTAX (sqsyntax + SYNBASE)`
-const SQSYNTAX: SyntaxRef = SyntaxRef(&crate::syntax::sqsyntax);
-
-/// Backing store for [`IS_TYPE_UNBIASED`]. See that constant for why the
-/// 129 leading zero bytes exist; they are never read as data, only as the
-/// answer to an out-of-bounds classification query.
-static IS_TYPE_UNBIASED_PAD: [c_char; 129 + 257] = {
-    let mut t = [0 as c_char; 129 + 257];
-    let mut i = 0;
-    while i < 257 {
-        t[129 + i] = crate::syntax::is_type[i];
-        i += 1;
+impl DestinationSyntax {
+    #[inline]
+    fn escapes(self, byte: u8) -> bool {
+        let context = match self {
+            Self::Base => Some(crate::syntax::SyntaxContext::Base),
+            Self::SingleQuoted => Some(crate::syntax::SyntaxContext::SingleQuoted),
+            Self::Unframed => None,
+        };
+        context.is_some_and(|context| {
+            context.classify(crate::syntax::InputUnit::Byte(byte))
+                == crate::syntax::SyntaxClass::Control
+        })
     }
-    t
-};
-
-/// `syntax.h`: the classification table as `memtodest` uses it.
-///
-/// `memtodest` passes this table **unbiased** — plain `is_type`, where
-/// every other user writes `is_type + SYNBASE`. Its consumers then index
-/// it with a `(signed char)`, and `mbtodest` additionally reads
-/// `syntax[CTLMBCHAR]` with `CTLMBCHAR == -123`. So in the C, every input
-/// byte >= 0x80 (and the CTLMBCHAR probe) reads up to 129 bytes *before*
-/// the array — undefined behaviour whose result is decided by whatever
-/// the linker happened to place there. In the reference build that is
-/// `nodesize` and `defpathvar`.
-///
-/// This port does NOT reproduce that read, and the deviation is
-/// deliberate. Reproducing an out-of-bounds read does not reproduce the
-/// C's *behaviour*: the byte it yields is a property of one binary's
-/// layout, so the C and the port would each be reading independently
-/// arbitrary memory, and could silently disagree the moment either side
-/// is relaid out. It is also genuine UB on the Rust side.
-///
-/// Instead the window is made real and zero-filled. Zero is `CWORD`, and
-/// the only question ever asked of these slots is `== CCTL`, so the port
-/// answers "no framing" — deterministically, in bounds. That is what both
-/// the reference C and this port were measured to do: the byte at
-/// `is_type - 123` is `0xE2` in the C binary and the classification is
-/// `!= CCTL` in both. `[spec:dash:sem:expand.memtodest-fn]` requires this
-/// treatment ("a port must not reproduce the out-of-bounds index").
-///
-/// The 129 leading bytes are exactly `SYNBASE`, so this table indexes by
-/// the same expression as the other two and [`SyntaxRef`] needs no
-/// per-table origin.
-const IS_TYPE_UNBIASED: SyntaxRef = SyntaxRef(&IS_TYPE_UNBIASED_PAD);
-
-/// `syntax.h`: syntax class "like CWORD, except it must be escaped".
-#[inline]
-fn CCTL() -> c_char {
-    crate::syntax::CCTL as c_char
 }
 
 /// `options.h`: `#define fflag optlist[1]`
@@ -1812,8 +1749,8 @@ fn evalvar(
 // [spec:dash:sem:expand.chtodest-fn]
 /// The cursor the C returns is the destination's own length now, so this
 /// appends and returns nothing. It performs no unsafe operation at all.
-fn chtodest(c: c_int, syntax: SyntaxRef, out: &mut BString) {
-    if syntax.at(c) == CCTL() {
+fn chtodest(c: c_int, syntax: DestinationSyntax, out: &mut BString) {
+    if syntax.escapes(c as u8) {
         /* USTPUTC(CTLESC, out) */
         out.push(CTLESC as u8);
     }
@@ -1847,7 +1784,7 @@ fn mbtodest(
     src: &[u8],
     at: usize,
     dst: &mut BString,
-    syntax: SyntaxRef,
+    syntax: DestinationSyntax,
 ) -> mbpair {
     let mbp: mbpair;
     /* The C's `q0`: where this call started writing. A length, because
@@ -1868,7 +1805,7 @@ fn mbtodest(
         /* `syntax[CTLMBCHAR]` — CTLMBCHAR is negative; see the note in
          * `memtodest` about the unbiased `is_type` table. Negative is an
          * ordinary index now, and a checked one. */
-        if syntax.at(CTLMBCHAR as c_int) == CCTL() {
+        if syntax.escapes(CTLMBCHAR as u8) {
             /* USTPUTC(CTLMBCHAR, q); USTPUTC(ml, q); */
             dst.push(CTLMBCHAR as u8);
             dst.push(ml as u8);
@@ -1880,7 +1817,7 @@ fn mbtodest(
          * over this same slice, so it cannot exceed it. */
         dst.extend_from_slice(&p[..ml]);
 
-        if syntax.at(CTLMBCHAR as c_int) == CCTL() {
+        if syntax.escapes(CTLMBCHAR as u8) {
             /* USTPUTC(ml, q); USTPUTC(CTLMBCHAR, q); */
             dst.push(ml as u8);
             dst.push(CTLMBCHAR as u8);
@@ -1936,7 +1873,7 @@ fn mbtodest(
 // reads eight bytes that exist, and `mbtodest`'s `p - 1` is an index into
 // something with a start.
 fn memtodest(locale: &nsh_platform::Locale, src: &[u8], flags: c_int, dst: &mut BString) -> usize {
-    let syntax: SyntaxRef;
+    let syntax: DestinationSyntax;
     let mut count: usize = 0;
     let expq: c_int;
     /* The C's `p` and `len` are one cursor over `src` and the number of
@@ -1988,12 +1925,12 @@ fn memtodest(locale: &nsh_platform::Locale, src: &[u8], flags: c_int, dst: &mut 
          * a read *before* the array; the C relies on that happening to
          * yield a non-CCTL byte.  Reproduced verbatim, not fixed. */
         syntax = if (flags & (QUOTES_ESC | EXP_MBCHAR)) != 0 {
-            BASESYNTAX
+            DestinationSyntax::Base
         } else {
-            IS_TYPE_UNBIASED
+            DestinationSyntax::Unframed
         };
     } else {
-        syntax = SQSYNTAX;
+        syntax = DestinationSyntax::SingleQuoted;
     }
 
     /* for (; len; len--) */

@@ -321,6 +321,7 @@ impl Shell {
     /// `readtoken` into `wordtext`, `makename` into a node — with the
     /// keyword and alias checks off, because a single word in isolation is
     /// neither.
+    // [spec:nsh:req:idiom.lexer-tokens]
     fn expand(&mut self, word: &BStr, flag: core::ffi::c_int) -> Result<Vec<BString>, Error> {
         let mark = self.input.mark();
         let old_floor = self.input.floor();
@@ -328,8 +329,8 @@ impl Shell {
         crate::input::setinputstring(self, word);
         self.input.set_floor(self.input.mark());
         let expanded = (|sh: &mut Shell| -> Result<Vec<BString>, Error> {
-            let t = crate::parser::readtoken(sh, 0)?;
-            if t != crate::parser::TWORD {
+            let t = crate::parser::readtoken(sh, crate::parser::TokenContext::NONE)?;
+            if t != crate::parser::TokenKind::Word {
                 /* An empty word is the honest answer for empty input, and
                  * anything else here is syntax the caller wrote rather
                  * than a word — a `;` or a `|` cannot be expanded. */
