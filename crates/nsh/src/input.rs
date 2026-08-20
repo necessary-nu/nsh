@@ -369,14 +369,6 @@ fn text(input_frame: &InputFrame) -> &[u8] {
     }
 }
 
-/// `#define plinno (parsefile->linno)`
-#[macro_export]
-macro_rules! plinno {
-    ($input:expr) => {
-        $crate::input::current_input_frame($input).line_number
-    };
-}
-
 // [spec:dash:sem:input.input-get-lleft-fn]
 pub fn remaining_buffer_bytes(input_frame: &InputFrame) -> usize {
     input_frame.buffer_remaining

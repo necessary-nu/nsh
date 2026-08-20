@@ -666,10 +666,7 @@ pub fn evaluate_tree(
 
 // [spec:dash:sem:eval.evaltreenr-fn]
 //
-// `evaltree` declared `noreturn`. Where the C compiler supports
-// `__attribute__((alias))` it is literally the same function; the
-// portable fallback — reproduced here — calls `evaltree` and aborts if
-// it ever comes back.
+// Child-side callers require an exit flow rather than an ordinary status.
 pub fn evaluate_tree_without_exit(
     shell: &mut Shell,
     node: Option<&Node>,
@@ -1225,7 +1222,6 @@ pub fn evaluate_command_substitution(
              * the same place by the longer road. */
             let outcome = evaluate_tree_without_exit(shell, node, EvaluationContext::EXITING);
             crate::runtime::exit_from_child(shell, outcome);
-            /* NOTREACHED */
         }
         drop(pipe.write);
         result.descriptor = Some(pipe.read);

@@ -104,6 +104,9 @@ pub use crate::streams::Streams;
 //
 // The receiver every function that touches shell state is being given,
 // ahead of the state itself moving onto it. [dec:nsh:no-ambient-state].
+// The module graph contains only live Rust implementation, with source-port
+// configuration and declaration scaffolding rejected by a repository test.
+// [spec:nsh:req:idiom.no-port-fossils]
 pub(crate) mod builder;
 pub(crate) mod context;
 pub(crate) mod host;

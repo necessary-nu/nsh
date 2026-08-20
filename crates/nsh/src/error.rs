@@ -60,7 +60,7 @@ pub enum Operation {
  * more fun than worrying about efficiency and portability. :-))
  */
 
-/* `#define barrier() ({ __asm__ __volatile__ ("": : :"memory"); })` */
+/// Prevent compiler reordering across an interrupt-deferral transition.
 #[inline(always)]
 pub fn barrier() {
     compiler_fence(Ordering::SeqCst);
@@ -116,7 +116,6 @@ pub(crate) fn clear_interrupt_deferral(deferral: &mut InterruptDeferral) {
     deferral.depth = 0;
 }
 
-/* `#define CLEAR_PENDING_INT intpending = 0` */
 #[inline(always)]
 pub fn clear_pending_interrupt() {
     crate::signal_inbox::signals().set_interrupt_pending(false);
@@ -194,7 +193,6 @@ pub fn rearm_interrupt(error: Error) {
     crate::signal_inbox::signals().set_interrupt_pending(true);
 }
 
-/* `#define int_pending() intpending` */
 #[inline(always)]
 pub fn interrupt_pending() -> bool {
     crate::signal_inbox::signals().interrupt_pending()

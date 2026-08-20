@@ -442,9 +442,8 @@ fn is_executable_candidate(full_path: &[u8], metadata: &nsh_platform::FileMetada
         return false;
     }
 
-    if (metadata.mode & 0o111) != 0o111 &&
-        /* HAVE_FACCESSAT; the non-faccessat build uses test_access(statb, X_OK) */
-        !crate::builtins::test::test_file_access(
+    if (metadata.mode & 0o111) != 0o111
+        && !crate::builtins::test::test_file_access(
             full_path.as_bstr(),
             nsh_platform::AccessMode::EXEC_OK,
         )

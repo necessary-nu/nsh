@@ -1,13 +1,8 @@
 //! `fg` and `bg`.
 //!
-//! Port of `fgcmd` and `restartjob` from `src/jobs.c`. The job table and
-//! everything that maintains it stay in `crate::jobs`; this is the
-//! command that restarts a stopped job.
-//!
-//! `bg` is this same function under the other name -- the C spells it
-//! `__attribute__((alias("fgcmd")))` -- and the two are told apart by the
-//! word the builtin was called as, so the table's `bg` row points here
-//! rather than at a module that would only forward.
+//! The job table and everything that maintains it stay in `crate::jobs`;
+//! this module owns the commands that restart a stopped job. `fg` and `bg`
+//! share one implementation and select their behavior from the invoked name.
 
 use crate::context::Shell;
 use crate::error::Error;
@@ -23,9 +18,7 @@ use bstr::BStr;
 // [spec:nsh:def:idiom.job-control-model]
 
 // [spec:dash:sem:jobs.fgcmd-fn]
-// `bgcmd` is this function: the C declares it
-// `__attribute__((alias("fgcmd")))`, so one definition answers for both
-// names and carries both claims.
+// One definition answers for both command names and carries both claims.
 // [spec:dash:sem:jobs.bgcmd-fn]
 // [spec:posix:syn:builtin.bg.synopsis]
 // [spec:posix:req:builtin.bg.operand-job-id]

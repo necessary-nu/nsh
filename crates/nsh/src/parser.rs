@@ -26,28 +26,6 @@ use crate::nodes::{
 use crate::syntax::{InputUnit, SyntaxClass, SyntaxContext, is_in_name, is_name};
 use crate::word::ParsedWord;
 
-// ---------------------------------------------------------------------
-// Local transcriptions of the C macros this file uses.
-// ---------------------------------------------------------------------
-
-/* `#define equal(s1, s2) (strcmp(s1, s2) == 0)` — src/mystring.h.  The
- * macro had one caller and `strcmp`'s ordering was never wanted there,
- * only its zero; `issimplecmd` now compares the two byte slices, and the
- * word's text already knows its own length. */
-
-/* `USTPUTC` (src/memalloc.h:88) and `STADJUST` (:93) were the last two
- * `memalloc.h` macros this file expanded, and they are gone. Neither ever
- * touched the region allocator -- they were a store-and-advance and an
- * advance over a `BString`'s spare capacity -- which is why
- * [[delete-memalloc]] closed with them still here and recorded rehoming
- * them as bookkeeping.
- *
- * What deletes them is not a rehoming. Their two remaining callers,
- * `getmbc` and `dollarsq_escape`, took a raw cursor because the buffer
- * they wrote into belonged to someone else; both write into their own
- * scratch now, so the cursor is an offset and each macro is one indexed
- * statement written out with the C's name beside it. */
-
 /// `MB_LEN_MAX` from `<limits.h>` (16 on the platforms dash targets).
 const MAX_MULTIBYTE_LENGTH: usize = 16;
 
@@ -289,15 +267,9 @@ pub const PARAMETER_TRIM_LONGEST_PREFIX: u8 = 0x9; /* ${var##pattern} */
 pub const PARAMETER_LENGTH: u8 = 0xa; /* ${#var} */
 /* VSLENGTH must come last. */
 
-/// What the C returns from `list()` and `parsecmd`.
-///
-/// `union node *` is three things there at once: a tree, `NULL` for a blank
-/// line, and the sentinel `#define NEOF ((union node *)&tokpushback)` for end
-/// of file. Only `list(1)?` — that is, `parsecmd` — can produce `NEOF`,
-/// because the `n1 = NEOF` assignment is guarded by `chknl == 0` and `chknl`
-/// is only zero when `nlflag & 1`.
+/// Outcome of parsing one top-level input unit.
 pub enum ParseResult {
-    /// the C's `NEOF`
+    /// The input source reached end of file.
     Eof,
     /// a tree, or `None` where the C returned `NULL` for a blank line
     Tree(Option<Node>),
@@ -336,7 +308,6 @@ impl<'a> EofMark<'a> {
         matches!(self, EofMark::None)
     }
 
-    /// `#define realeofmark(m) ((m) && (m) != FAKEEOFMARK)` — src/parser.c
     // [spec:dash:sem:parser.realeofmark-fn]
     fn real(self) -> Option<&'a BStr> {
         match self {
@@ -525,7 +496,7 @@ fn list(shell: &mut Shell, mode: ListMode) -> Result<ParseResult, Error> {
          * anything consumes it. `command()?` and `pipeline()?` both take
          * their `savelinno` at this same point, so a wrapper built here
          * records the line its contents record. */
-        let saved_line_number: i32 = crate::plinno!(&mut shell.input);
+        let saved_line_number = crate::input::current_input_frame(&mut shell.input).line_number;
 
         let mut next = parse_and_or(shell)?.ok_or_else(|| expected_token_error(shell, None))?;
         token = read_token(shell, TokenContext::NONE)?.kind;
@@ -680,7 +651,7 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
     let closing_token: Option<TokenKind>;
     let saved_line_number: i32;
 
-    saved_line_number = crate::plinno!(&mut shell.input);
+    saved_line_number = crate::input::current_input_frame(&mut shell.input).line_number;
 
     let token = read_token(shell, context)?.kind;
     if let Some(bash_node) = bash::command_prefix(shell, token, saved_line_number)? {
@@ -887,7 +858,6 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
         return parse_simple_command(shell);
     } else {
         return Err(expected_token_error(shell, None));
-        /* NOTREACHED */
     }
 
     if let Some(closing_token) = closing_token {
@@ -948,7 +918,7 @@ fn parse_simple_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
     let saved_line_number: i32;
 
     word_context = TokenContext::ALIASES;
-    saved_line_number = crate::plinno!(&mut shell.input);
+    saved_line_number = crate::input::current_input_frame(&mut shell.input).line_number;
     loop {
         let token = read_token(shell, word_context)?.kind;
         if token == TokenKind::Word {
@@ -1008,10 +978,9 @@ fn parse_simple_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
                 {
                     return Err(syntax_error(shell, b"Bad function name"));
                 }
-                /* The C relabels its argument union arm as a function node
-                 * in place. Moving the parsed name into a dedicated function
-                 * variant states the result without an invalid intermediate. */
-                let line_number = crate::plinno!(&mut shell.input);
+                /* Move the parsed name into a dedicated function variant so
+                 * the tree never passes through an invalid intermediate. */
+                let line_number = crate::input::current_input_frame(&mut shell.input).line_number;
                 let body = command(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?
                     .ok_or_else(|| expected_token_error(shell, None))?;
                 return Ok(Some(Node::Function(FunctionDefinition {
@@ -1245,7 +1214,7 @@ pub(crate) fn read_token(shell: &mut Shell, mut context: TokenContext) -> Result
 
 // [spec:dash:sem:parser.nlprompt-fn]
 fn prompt_after_newline(shell: &mut Shell) -> Result<(), Error> {
-    crate::plinno!(&mut shell.input) += 1;
+    crate::input::current_input_frame(&mut shell.input).line_number += 1;
     if shell.input.prompt_before_read {
         select_prompt(shell, PromptKind::Continuation)?;
     }
@@ -1254,7 +1223,7 @@ fn prompt_after_newline(shell: &mut Shell) -> Result<(), Error> {
 
 // [spec:dash:sem:parser.nlnoprompt-fn]
 fn consume_newline_without_prompt(shell: &mut Shell) {
-    crate::plinno!(&mut shell.input) += 1;
+    crate::input::current_input_frame(&mut shell.input).line_number += 1;
     shell.input.prompt_needed = shell.input.prompt_before_read;
 }
 
@@ -2465,7 +2434,8 @@ fn expected_token_error(shell: &mut Shell, expected: Option<TokenKind>) -> Error
 
 // [spec:dash:sem:parser.synerror-fn]
 fn syntax_error(shell: &mut Shell, msg: &[u8]) -> Error {
-    shell.evaluation.diagnostic_line = crate::plinno!(&mut shell.input);
+    shell.evaluation.diagnostic_line =
+        crate::input::current_input_frame(&mut shell.input).line_number;
     let mut message = b"Syntax error: ".to_vec();
     message.extend_from_slice(msg);
     shell.diagnostics().shell_error(&message)

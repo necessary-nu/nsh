@@ -51,8 +51,6 @@ fn append_output_byte(byte: u8, output: &mut [u8], output_index: &mut usize) {
     *output_index += 1;
 }
 
-/// `#define STADJUST(amount, p) (p += (amount))`.
-///
 /// The amount is signed and is genuinely negative here — `mboff` is -2 in
 /// the non-`mbchar` case — so the arithmetic is done in `isize` and the
 /// result is asserted back into range rather than wrapped.
@@ -62,13 +60,11 @@ fn adjust_output_index(output_index: &mut usize, amount: isize) {
     *output_index = adjusted as usize;
 }
 
-/// `#define isodigit(c) ((c) >= '0' && (c) <= '7')`
 #[inline]
 pub(crate) fn is_octal_digit(byte: u8) -> bool {
     matches!(byte, b'0'..=b'7')
 }
 
-/// `#define octtobin(c) ((c) - '0')`
 #[inline]
 fn octal_digit_value(byte: u8) -> u32 {
     u32::from(byte - b'0')

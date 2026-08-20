@@ -383,7 +383,6 @@ impl DestinationSyntax {
     }
 }
 
-/// `error.h`: `#define int_pending() intpending`
 #[inline]
 fn interrupt_pending() -> bool {
     crate::error::interrupt_pending()
