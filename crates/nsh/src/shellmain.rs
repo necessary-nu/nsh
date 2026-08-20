@@ -210,7 +210,9 @@ pub(crate) fn run(sh: &mut Shell, startup: &Startup) -> crate::status::ExitStatu
 
                 sh.recover_command_loop();
                 if interrupted {
-                    let _ = sh.io.stderr().write_all(b"\n");
+                    if sh.io.stderr().write_all(b"\n").is_err() {
+                        // The interrupt status takes precedence over its courtesy newline.
+                    }
                 }
                 crate::error::clear_interrupt_deferral(&mut sh.interrupt_deferral);
                 task = recovery.expect("recoverable startup task has a successor");
@@ -251,7 +253,7 @@ pub(crate) fn cmdloop(
         }
         let interactive = sh.options.enabled(ShellOption::Interactive) && top_level;
         if interactive {
-            crate::mail::chkmail(sh);
+            crate::mail::chkmail(sh)?;
         }
         let parsed = crate::parser::parsecmd(sh, interactive)?;
         if let crate::parser::ParseResult::Tree(n) = parsed {
@@ -289,14 +291,14 @@ pub(crate) fn cmdloop(
                 if !sh.options.enabled(ShellOption::IgnoreEof)
                     && sh.options.enabled(ShellOption::Interactive)
                 {
-                    let _ = sh.io.stderr().write_all(b"\n");
+                    sh.write_output(crate::output::Dest::Stderr, b"\n")?;
                 }
                 break;
             }
             if !sh.options.enabled(ShellOption::IgnoreEof) && eof_count >= 50 {
                 break;
             }
-            if !crate::jobs::stoppedjobs(sh) {
+            if !crate::jobs::stoppedjobs(sh)? {
                 if !sh.options.enabled(ShellOption::IgnoreEof) {
                     // [spec:nsh:req:compat.smoosh.interactive-job-prompt]
                     // A real terminal needs a line ending after the user's
@@ -306,14 +308,14 @@ pub(crate) fn cmdloop(
                     if sh.options.enabled(ShellOption::Interactive)
                         && sh.input.stdin_is_tty == Some(true)
                     {
-                        let _ = sh.io.stderr().write_all(b"\n");
+                        sh.write_output(crate::output::Dest::Stderr, b"\n")?;
                     }
                     break;
                 }
-                let _ = sh
-                    .io
-                    .stderr()
-                    .write_all(b"\nUse \"exit\" to leave shell.\n");
+                sh.write_output(
+                    crate::output::Dest::Stderr,
+                    b"\nUse \"exit\" to leave shell.\n",
+                )?;
             }
             crate::input::rearm_stdin_after_eof(sh);
             eof_count = eof_count.saturating_add(1);

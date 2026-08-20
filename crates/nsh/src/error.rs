@@ -232,9 +232,13 @@ pub fn int_pending() -> bool {
 // [spec:dash:def:error.onint-fn]
 // [spec:dash:sem:error.onint-fn]
 // [spec:nsh:def:idiom.shell-options]
+// [spec:dash:def:system.sigclearmask-fn]
+// [spec:dash:sem:system.sigclearmask-fn]
 fn onint(context: InterruptContext) -> Error {
     crate::siginbox::signals().set_interrupt_pending(false);
-    crate::system::sigclearmask();
+    if nsh_platform::unblock_all_signals().is_err() {
+        // Interrupt delivery still has to proceed when mask restoration fails.
+    }
     if !context.interactive_root {
         nsh_platform::terminate_with_interrupt();
     }
@@ -504,6 +508,22 @@ impl crate::context::Shell {
 }
 
 impl Diagnostics<'_> {
+    /// A diagnostic write cannot report its own failure through the same
+    /// broken stream. Observe the result here so callers never grow a hidden
+    /// output-error channel or recursively attempt another diagnostic.
+    fn write_diagnostic(&mut self, record: &[u8]) {
+        if self.io.stderr().write_all(record).is_err() {
+            // The diagnostic stream is the final reporting boundary.
+        }
+    }
+
+    /// Preserve the original diagnostic when flushing earlier stdout fails.
+    fn flush_after_diagnostic(&mut self) {
+        if self.io.flushall().is_err() {
+            // The error already being reported takes precedence over flush.
+        }
+    }
+
     /// Write a diagnostic where dash writes it, and hand it back as a
     /// value.
     ///
@@ -528,8 +548,7 @@ impl Diagnostics<'_> {
     // [spec:posix:req:xcu.errors.diagnostic-message-required]
     pub fn report(&mut self, e: Error) -> Error {
         self.sh_warnx(e.message());
-
-        let _ = self.io.flushall();
+        self.flush_after_diagnostic();
         e
     }
 
@@ -559,9 +578,10 @@ impl Diagnostics<'_> {
             line: self.line,
             message: BString::from(msg),
         };
-        let _ = self.io.stderr().write_all(msg);
-        let _ = self.io.stderr().write_all(b"\n");
-        let _ = self.io.flushall();
+        let mut record = BString::from(msg);
+        record.push(b'\n');
+        self.write_diagnostic(&record);
+        self.flush_after_diagnostic();
         e
     }
 
@@ -577,12 +597,12 @@ impl Diagnostics<'_> {
         let name = self
             .command_name
             .map_or(BStr::new(b"sh"), |name| name.as_bstr());
-        let errors = self.io.stderr();
-        let _ = errors.write_all(name);
-        let _ = errors.write_all(b": ");
-        let _ = errors.write_all(msg);
-        let _ = errors.write_all(b"\n");
-        let _ = self.io.flushall();
+        let mut record = BString::from(name);
+        record.extend_from_slice(b": ");
+        record.extend_from_slice(msg);
+        record.push(b'\n');
+        self.write_diagnostic(&record);
+        self.flush_after_diagnostic();
         Error::reported(self.line, status)
     }
 
@@ -594,15 +614,15 @@ impl Diagnostics<'_> {
             .invocation_name
             .map(|name| BStr::new(name.as_slice()))
             .unwrap_or(BStr::new(b"sh"));
-        let errors = self.io.stderr();
-        let _ = errors.write_all(shell_name);
-        let _ = errors.write_all(b": ");
+        let mut record = BString::from(shell_name);
+        record.extend_from_slice(b": ");
         if let Some(command_name) = self.command_name {
-            let _ = errors.write_all(command_name);
-            let _ = errors.write_all(b": ");
+            record.extend_from_slice(command_name);
+            record.extend_from_slice(b": ");
         }
-        let _ = errors.write_all(msg);
-        let _ = errors.write_all(b"\n");
+        record.extend_from_slice(msg);
+        record.push(b'\n');
+        self.write_diagnostic(&record);
     }
 
     /*
@@ -632,10 +652,9 @@ impl Diagnostics<'_> {
 
         /* stderr is unbuffered. Keep the C's three output operations
          * visible: prefix, complete message body, then newline. */
-        let errs = self.io.get(crate::output::Dest::Stderr);
-        let _ = errs.write_all(&prefix);
-        let _ = errs.write_all(msg);
-        let _ = errs.write_all(b"\n");
+        prefix.extend_from_slice(msg);
+        prefix.push(b'\n');
+        self.write_diagnostic(&prefix);
     }
 }
 

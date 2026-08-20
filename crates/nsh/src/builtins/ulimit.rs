@@ -1,11 +1,10 @@
 //! The `ulimit` builtin.
 
-use bstr::BStr;
-use std::io::Write as _;
-
 use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
+use crate::output::Dest;
+use bstr::BStr;
 use nsh_platform::{LimitResource, ResourceLimit};
 
 // [spec:dash:def:miscbltin.limits]
@@ -124,19 +123,22 @@ impl LimitSelection {
 // [spec:dash:def:miscbltin.printlim-fn]
 // [spec:dash:sem:miscbltin.printlim-fn]
 // [spec:posix:req:builtin.ulimit.stdout-single-limit-format]
-fn print_limit(sh: &mut Shell, selection: LimitSelection, values: ResourceLimit, limit: Limit) {
+fn print_limit(
+    sh: &mut Shell,
+    selection: LimitSelection,
+    values: ResourceLimit,
+    limit: Limit,
+) -> Result<(), Error> {
     let value = if selection.current {
         values.current
     } else {
         values.maximum
     };
     match value {
-        None => {
-            let _ = writeln!(sh.io.stdout(), "unlimited");
-        }
+        None => sh.write_output(Dest::Stdout, b"unlimited\n"),
         Some(value) => {
             let signed = (value / limit.factor) as i64;
-            let _ = writeln!(sh.io.stdout(), "{signed}");
+            sh.write_output_fmt(Dest::Stdout, format_args!("{signed}\n"))
         }
     }
 }
@@ -206,8 +208,8 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             label.extend_from_slice(b" (-");
             label.push(limit.option);
             label.extend_from_slice(b") ");
-            let _ = sh.io.stdout().write_all(&label);
-            print_limit(sh, selection, values, limit);
+            sh.write_output(Dest::Stdout, &label)?;
+            print_limit(sh, selection, values, limit)?;
         }
         return Ok(Flow::Done((0).into()));
     }
@@ -227,7 +229,7 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             return Err(sh.diagnostics().sh_error_value(message.as_bytes()));
         }
     } else {
-        print_limit(sh, selection, values, limit);
+        print_limit(sh, selection, values, limit)?;
     }
     Ok(Flow::Done((0).into()))
 }

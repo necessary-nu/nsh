@@ -271,6 +271,42 @@ fn output_failures_are_returned() {
     }
 }
 
+// [spec:nsh:req:idiom.no-ignored-results/test]
+#[test]
+fn fallible_results_are_explicit() {
+    let mut sources = Vec::new();
+    rust_sources_below(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut sources,
+    );
+    sources.sort();
+
+    for path in sources {
+        let source = std::fs::read_to_string(&path).expect("Rust source is UTF-8");
+        for discarded in ["let _ =", "#[allow(unused_must_use)]"] {
+            assert!(
+                !source.contains(discarded),
+                "{} discards a fallible result with {discarded:?}",
+                path.display()
+            );
+        }
+    }
+
+    for required in [
+        "fn command_output_error",
+        "fn write_output(",
+        "fn write_output_fmt(",
+        "fn flush_output(",
+        "result.map_err(|error| self.command_output_error(error))",
+    ] {
+        assert!(OUTPUT.contains(required), "missing {required}");
+    }
+    assert!(
+        !JOBS.contains("unwrap_or(ChildStatus::Exited(0))"),
+        "missing child status is still hidden as numeric success"
+    );
+}
+
 // [spec:nsh:req:idiom.builtin-registry/test]
 #[test]
 fn builtin_registry_is_fully_typed() {

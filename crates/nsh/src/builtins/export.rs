@@ -76,7 +76,7 @@ pub fn exportcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             }
         }
     } else {
-        show_vars(sh, args[0], selection);
+        show_vars(sh, args[0], selection)?;
     }
     Ok(Flow::Done((0).into()))
 }

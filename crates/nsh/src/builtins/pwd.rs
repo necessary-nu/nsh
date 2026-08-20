@@ -9,8 +9,8 @@
 
 use crate::context::Shell;
 use crate::error::Error;
+use crate::output::Dest;
 use bstr::BStr;
-use std::io::Write;
 
 use crate::builtins::cd::cdopt;
 use crate::cd::{Pwd, setpwd_inner};
@@ -30,6 +30,6 @@ pub fn pwdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         sh.cwd.curdir.clone().unwrap_or_default()
     };
     dir.push(b'\n');
-    let _ = sh.io.stdout().write_all(&dir);
+    sh.write_output(Dest::Stdout, &dir)?;
     Ok(Flow::Done((0).into()))
 }

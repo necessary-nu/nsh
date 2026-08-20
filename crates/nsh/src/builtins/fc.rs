@@ -25,6 +25,7 @@ use std::path::PathBuf;
 use crate::expand::strlist;
 use crate::histedit::{history_active, history_mut, record_history_line};
 use crate::linedit::HistoryEvent;
+use crate::output::Dest;
 
 /// max recursions through fc
 const MAX_HISTORY_LOOPS: usize = 4;
@@ -296,7 +297,8 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
                 }
                 for event in events {
                     if list {
-                        let _ = write_listing(sh.io.stdout(), &event, !suppress_numbers);
+                        let record = listing_record(&event, !suppress_numbers);
+                        sh.write_output(Dest::Stdout, &record)?;
                         continue;
                     }
 
@@ -307,7 +309,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
                     );
                     if substitute {
                         if sh.displayhist {
-                            let _ = sh.io.stderr().write_all(&line);
+                            sh.write_output(Dest::Stderr, &line)?;
                         }
                         if history_active(sh) {
                             record_history_line(sh, &line, true, false);
@@ -326,7 +328,13 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
                     let file = edit_file
                         .as_mut()
                         .expect("fc edit file must exist while an editor is selected");
-                    let _ = file.write_all(&line);
+                    file.write_all(&line).map_err(|error| {
+                        let message = format!(
+                            "can't write temporary file: {}",
+                            sh.locale.error_message(&error)
+                        );
+                        sh.diagnostics().sh_error_value(message.as_bytes())
+                    })?;
                 }
 
                 let Some(editor) = &editor else {
@@ -373,7 +381,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
                     sh.diagnostics().sh_error_value(&message)
                 })?;
                 if let Some(path) = editfile.take() {
-                    let _ = nsh_platform::remove_file(&path);
+                    cleanup_edit_file(&path);
                 }
                 if edited
                     .iter()
@@ -390,7 +398,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
             } else {
                 result_status = editor_status;
                 if let Some(path) = editfile.take() {
-                    let _ = nsh_platform::remove_file(&path);
+                    cleanup_edit_file(&path);
                 }
             }
         }
@@ -416,7 +424,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
             sh.histedit.fc_depth = 0;
             drop(edit_file.take());
             if let Some(path) = editfile.take() {
-                let _ = nsh_platform::remove_file(&path);
+                cleanup_edit_file(&path);
             }
             return outcome;
         }
@@ -429,22 +437,25 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
     Ok(Flow::Done((0).into()))
 }
 
+fn cleanup_edit_file(path: &std::path::Path) {
+    if nsh_platform::remove_file(path).is_err() {
+        // Cleanup cannot replace the editor or evaluation outcome being returned.
+    }
+}
+
 /// Write one listed history event with a tab before its first command line
-/// and every continuation line. Output errors remain recorded by `Output`
-/// for the builtin epilogue to fold into the exit status.
+/// and every continuation line.
 // [spec:posix:req:builtin.fc.stdout-list-format]
-fn write_listing(
-    output: &mut impl Write,
-    event: &HistoryEvent,
-    numbered: bool,
-) -> std::io::Result<()> {
+fn listing_record(event: &HistoryEvent, numbered: bool) -> Vec<u8> {
+    let mut output = Vec::new();
     if numbered {
-        write!(output, "{}\t", event.number)?;
+        write!(&mut output, "{}\t", event.number).expect("writing to a Vec cannot fail");
     } else {
-        output.write_all(b"\t")?;
+        output.push(b'\t');
     }
     if event.line.is_empty() {
-        return output.write_all(b"\n");
+        output.push(b'\n');
+        return output;
     }
     for (index, line) in event
         .line
@@ -452,14 +463,14 @@ fn write_listing(
         .enumerate()
     {
         if index != 0 {
-            output.write_all(b"\t")?;
+            output.push(b'\t');
         }
-        output.write_all(line)?;
+        output.extend_from_slice(line);
         if !line.ends_with(b"\n") {
-            output.write_all(b"\n")?;
+            output.push(b'\n');
         }
     }
-    Ok(())
+    output
 }
 
 // [spec:dash:def:histedit.fc-replace-fn]
@@ -640,12 +651,10 @@ mod tests {
             number: 12,
             line: BString::from("first\nsecond"),
         };
-        let mut numbered = Vec::new();
-        write_listing(&mut numbered, &event, true).unwrap();
+        let numbered = listing_record(&event, true);
         assert_eq!(numbered, b"12\tfirst\n\tsecond\n");
 
-        let mut plain = Vec::new();
-        write_listing(&mut plain, &event, false).unwrap();
+        let plain = listing_record(&event, false);
         assert_eq!(plain, b"\tfirst\n\tsecond\n");
     }
 }

@@ -19,7 +19,7 @@ pub(super) fn push(stack: &mut Vec<synstack>, syntax: SyntaxContext) {
 // [spec:dash:def:parser.synstack-pop-fn]
 // [spec:dash:sem:parser.synstack-pop-fn]
 pub(super) fn pop(stack: &mut Vec<synstack>) {
-    let _ = stack.pop();
+    stack.truncate(stack.len().saturating_sub(1));
 }
 
 #[cfg(test)]

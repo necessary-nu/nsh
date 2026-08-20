@@ -617,8 +617,7 @@ impl LineEditor {
                         })?;
                     }
                 }
-                byte if bytes.len() == 4096 => {
-                    let _ = byte;
+                _ if bytes.len() == 4096 => {
                     return Err(HostFailure::Failed("command input is too long".into()));
                 }
                 byte => {
@@ -667,7 +666,9 @@ impl LineEditor {
             Ok(text_from_bytes(&edited))
         })();
         drop(file);
-        let _ = nsh_platform::remove_file(&path);
+        if nsh_platform::remove_file(&path).is_err() {
+            // Temporary-file cleanup cannot replace the editor outcome.
+        }
         result
     }
 
@@ -815,7 +816,9 @@ impl LineEditor {
 impl Drop for LineEditor {
     fn drop(&mut self) {
         if let Some(editor) = self.editor.take() {
-            let _ = editor.finish();
+            if editor.finish().is_err() {
+                // Drop has no error channel and the terminal object is already leaving scope.
+            }
         }
     }
 }
@@ -1279,7 +1282,8 @@ fn prompt_from_text(text: &Text, escape: u32) -> Prompt {
     for part in text.as_units().split(|unit| *unit == marker) {
         if literal {
             let bytes = part.iter().copied().collect::<Text>();
-            let bytes = text_to_bytes(&bytes).unwrap_or_default();
+            let bytes = text_to_bytes(&bytes)
+                .expect("shell prompt bytes cannot contain opaque code points");
             prompt.push_literal(TerminalLiteral::from(bytes));
         } else {
             prompt.push_text(part.iter().copied().collect::<Text>());

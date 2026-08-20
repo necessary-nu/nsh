@@ -10,10 +10,10 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString};
-use std::io::Write;
 
 use crate::eval::Flow;
 use crate::options::Options;
+use crate::output::Dest;
 use crate::trap::{
     NSIG, SignalSpec, TrapAction, clear_traps, decode_signal, decode_signum, setsignal,
 };
@@ -34,13 +34,13 @@ fn listing_line(signo: usize, action: &TrapAction) -> Vec<u8> {
     line
 }
 
-fn write_listing(sh: &mut Shell, signo: usize, include_default: bool) {
+fn write_listing(sh: &mut Shell, signo: usize, include_default: bool) -> Result<(), Error> {
     let action = sh.traps.listed_action(signo);
     if !include_default && matches!(action, TrapAction::Default) {
-        return;
+        return Ok(());
     }
     let line = listing_line(signo, action);
-    let _ = sh.io.stdout().write_all(&line);
+    sh.write_output(Dest::Stdout, &line)
 }
 
 // [spec:dash:def:trap.trapcmd-fn]
@@ -71,7 +71,7 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let ap = opts.operands();
     if ap.is_empty() {
         for index in 0..NSIG {
-            write_listing(sh, index, print);
+            write_listing(sh, index, print)?;
         }
         return Ok(Flow::Done((0).into()));
     }
@@ -81,10 +81,10 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 let mut message = b"trap: ".to_vec();
                 message.extend_from_slice(word);
                 message.extend_from_slice(b": bad trap\n");
-                let _ = sh.io.stderr().write_all(&message);
+                sh.write_output(Dest::Stderr, &message)?;
                 return Ok(Flow::Done((1).into()));
             };
-            write_listing(sh, signal.index(), true);
+            write_listing(sh, signal.index(), true)?;
         }
         return Ok(Flow::Done((0).into()));
     }
@@ -109,7 +109,7 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             let mut message = b"trap: ".to_vec();
             message.extend_from_slice(word);
             message.extend_from_slice(b": bad trap\n");
-            let _ = sh.io.stderr().write_all(&message);
+            sh.write_output(Dest::Stderr, &message)?;
             return Ok(Flow::Done((1).into()));
         };
         crate::error::with_interrupts_deferred(sh, |sh| {

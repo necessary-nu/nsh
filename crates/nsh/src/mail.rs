@@ -3,7 +3,6 @@
 
 use bstr::BStr;
 use nsh_platform::ShellBytesExt as _;
-use std::io::Write;
 
 use crate::var::{mailval, mpathset, mpathval};
 
@@ -29,7 +28,8 @@ impl MailState {
         }
     }
 
-    fn check(&mut self, mail_path: &BStr, errors: &mut crate::output::Output) {
+    fn check(&mut self, mail_path: &BStr) -> Vec<Vec<u8>> {
+        let mut notices = Vec::new();
         for (index, component) in mail_path
             .split(|&byte| byte == b':')
             .take(MAXMBOXES)
@@ -56,12 +56,13 @@ impl MailState {
                     let mut notice =
                         message.map_or_else(|| b"you have mail".to_vec(), <[u8]>::to_vec);
                     notice.push(b'\n');
-                    let _ = errors.write_all(&notice);
+                    notices.push(notice);
                 }
                 self.mailtime[index] = modified;
             }
         }
         self.changed = false;
+        notices
     }
 }
 
@@ -72,15 +73,18 @@ impl MailState {
 
 // [spec:dash:def:mail.chkmail-fn]
 // [spec:dash:sem:mail.chkmail-fn]
-pub fn chkmail(sh: &mut crate::context::Shell) {
+pub fn chkmail(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
     let mail_path = if mpathset(sh) {
         mpathval(sh)
     } else {
         mailval(sh)
     }
     .to_owned();
-    sh.mail
-        .check(BStr::new(mail_path.as_slice()), sh.io.stderr());
+    let notices = sh.mail.check(BStr::new(mail_path.as_slice()));
+    for notice in notices {
+        sh.write_output(crate::output::Dest::Stderr, &notice)?;
+    }
+    Ok(())
 }
 
 // [spec:dash:def:mail.changemail-fn]

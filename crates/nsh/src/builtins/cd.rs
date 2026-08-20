@@ -13,11 +13,11 @@ use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
 use nsh_platform::NativeStrExt as _;
 use nsh_platform::ShellBytesExt as _;
-use std::io::Write;
 
 use crate::cd::{Pwd, setpwd_inner};
 use crate::eval::Flow;
 use crate::options::Options;
+use crate::output::Dest;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct CdOptions {
@@ -174,7 +174,7 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if options.print {
         let mut d = sh.cwd.curdir.clone().unwrap_or_default();
         d.push(b'\n');
-        let _ = sh.io.stdout().write_all(&d);
+        sh.write_output(Dest::Stdout, &d)?;
     }
     let status = i32::from(pwd_unknown && options.physical && options.error_if_unknown);
     Ok(Flow::Done((status).into()))

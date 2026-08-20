@@ -10,13 +10,12 @@
 // [spec:nsh:req:idiom.evaluator-control-flow]
 use crate::context::Shell;
 use crate::error::Error;
-use std::io::Write as _;
-
 use bstr::{BStr, BString};
 
 use crate::eval::Flow;
 use crate::expand::arglist;
 use crate::fd::LogicalDescriptor;
+use crate::output::Dest;
 use crate::status::ExitStatus;
 
 /* glibc <limits.h> */
@@ -85,7 +84,7 @@ fn read_input_line(
                 if input.is(b'\n') {
                     if prompt_for_continuation {
                         let ps2 = crate::var::ps2val(sh);
-                        let _ = sh.io.stderr().write_all(&ps2);
+                        sh.write_output(Dest::Stderr, &ps2)?;
                     }
                 } else {
                     append_read_byte(&mut line, input);
@@ -223,7 +222,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             .as_ref()
             .is_some_and(|fd| nsh_platform::is_terminal(fd))
         {
-            let _ = sh.io.stderr().write_all(prompt);
+            sh.write_output(Dest::Stderr, prompt)?;
         }
     }
     // [spec:nsh:def:idiom.shell-options]

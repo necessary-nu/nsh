@@ -320,21 +320,16 @@ fn install_disposition(
     signal: Signal,
     to: crate::host::Disposition,
     via: Via,
-) {
+) -> bool {
     match via {
-        Via::Host => {
-            /* The C ignores `sigaction`'s return value here, so a shell
-             * that cannot install a disposition carries on with the one it
-             * has; a host that refuses reads the same way. */
-            let _ = sh.host.set_signal(signal, to);
-        }
+        Via::Host => sh.host.set_signal(signal, to).is_ok(),
         Via::Platform => {
             let action = match to {
                 crate::host::Disposition::Catch => nsh_platform::SignalAction::Catch,
                 crate::host::Disposition::Ignore => nsh_platform::SignalAction::Ignore,
                 crate::host::Disposition::Default => nsh_platform::SignalAction::Default,
             };
-            let _ = nsh_platform::install_signal_action(signal.platform(), action, onsig);
+            nsh_platform::install_signal_action(signal.platform(), action, onsig).is_ok()
         }
     }
 }
@@ -442,8 +437,12 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
     if state == DispositionState::InheritedIgnore || state == DispositionState::Installed(desired) {
         return;
     }
-    sh.traps.dispositions[index] = DispositionState::Installed(desired);
-    install_disposition(sh, signal, desired, via);
+    sh.traps.dispositions[index] = if install_disposition(sh, signal, desired, via) {
+        DispositionState::Installed(desired)
+    } else {
+        // Retain a retryable state when the host or platform refused the install.
+        DispositionState::ResetRequired
+    };
 }
 
 /*
@@ -472,8 +471,11 @@ pub fn ignoresig_in_child(sh: &mut crate::context::Shell, signal: Signal) {
     {
         return;
     }
-    let _ = nsh_platform::ignore_signal(signal.platform());
-    sh.traps.dispositions[index] = DispositionState::Installed(crate::host::Disposition::Ignore);
+    sh.traps.dispositions[index] = if nsh_platform::ignore_signal(signal.platform()).is_ok() {
+        DispositionState::Installed(crate::host::Disposition::Ignore)
+    } else {
+        DispositionState::ResetRequired
+    };
 }
 
 /*
@@ -695,7 +697,9 @@ pub fn exitshell(
      * below. Dropping the diagnostic is that frame, exactly -- it caught
      * and went on -- and it is why the frame itself can go. */
     drop(crate::jobs::setjobctl(sh, false));
-    let _ = sh.io.flushall();
+    if sh.io.flushall().is_err() {
+        // Exit teardown retains the status already selected by the shell.
+    }
     crate::shell::flush_coverage();
     sh.status
 }
@@ -842,7 +846,7 @@ mod tests {
     #[test]
     fn the_guard_blocks_and_restores() {
         let _g = crate::testutil::lock();
-        crate::system::sigclearmask();
+        nsh_platform::unblock_all_signals().unwrap();
         let interrupt = nsh_platform::interrupt_signal();
         let child = nsh_platform::child_signal();
         assert!(

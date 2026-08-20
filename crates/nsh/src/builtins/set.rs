@@ -28,7 +28,7 @@ use crate::var::{VariableSelection, show_vars};
 // [spec:posix:req:builtin.set.exit-status]
 pub fn setcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if args.len() == 1 {
-        show_vars(sh, BStr::new(b""), VariableSelection::Set);
+        show_vars(sh, BStr::new(b""), VariableSelection::Set)?;
         return Ok(Flow::Done((0).into()));
     }
     crate::error::with_interrupts_deferred(sh, |sh| {

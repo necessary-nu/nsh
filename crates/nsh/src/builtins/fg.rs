@@ -11,15 +11,13 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use bstr::BStr;
-use std::io::Write;
-
 use crate::eval::Flow;
 use crate::jobs::{
     ForkMode, JobId, apply_saved_job_terminal_settings, capture_shell_terminal_settings, getjob,
     jobno, outcmd, ps_pid, showpipe, terminal_settings_error, waitforjob, xxtcsetpgrp,
 };
 use crate::output::Dest;
+use bstr::BStr;
 
 // [spec:nsh:def:idiom.job-control-model]
 
@@ -63,10 +61,10 @@ pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         jp = getjob(sh, operands.get(index).copied(), true)?;
         if mode == ForkMode::Background {
             sh.jobs.position_running(jp);
-            let _ = write!(sh.io.get(Dest::Stdout), "[{}] ", jobno(jp));
+            sh.write_output_fmt(Dest::Stdout, format_args!("[{}] ", jobno(jp)))?;
         }
-        outcmd(sh, jp, 0, Dest::Stdout);
-        showpipe(sh, jp, Dest::Stdout);
+        outcmd(sh, jp, 0, Dest::Stdout)?;
+        showpipe(sh, jp, Dest::Stdout)?;
         let status = restartjob(sh, jp, mode)?;
 
         index += 1;
@@ -114,7 +112,10 @@ fn restartjob(
                     terminal_error = Some(error);
                 }
             }
-            let _ = nsh_platform::send_continue_to_process_group(process_group);
+            if let Err(error) = nsh_platform::send_continue_to_process_group(process_group) {
+                let message = sh.locale.error_message(&error).into_bytes();
+                return Err(sh.diagnostics().sh_error_value(&message));
+            }
             /* the C's `do { … } while (--i)` visits `ps[0]` before it looks
              * at the count, so a job with no processes walks the whole
              * address space; there is nothing to restart in one. */

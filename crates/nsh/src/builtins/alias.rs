@@ -7,10 +7,10 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use std::io::Write;
 
 use crate::alias::{printalias, setalias};
 use crate::eval::Flow;
+use crate::output::Dest;
 
 // [spec:dash:def:alias.aliascmd-fn]
 // [spec:dash:sem:alias.aliascmd-fn]
@@ -38,7 +38,7 @@ pub fn aliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             })
             .collect();
         for line in lines {
-            let _ = sh.io.stdout().write_all(&line);
+            sh.write_output(Dest::Stdout, &line)?;
         }
         return Ok(Flow::Done((0).into()));
     }
@@ -55,12 +55,12 @@ pub fn aliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         if word.is_empty() || equals.is_none() {
             if let Some(value) = sh.aliases.lookup(word, false) {
                 let line = printalias(word, BStr::new(value.as_slice()));
-                let _ = sh.io.stdout().write_all(&line);
+                sh.write_output(Dest::Stdout, &line)?;
             } else {
                 let mut message = b"alias: ".to_vec();
                 message.extend_from_slice(word);
                 message.extend_from_slice(b" not found\n");
-                let _ = sh.io.stderr().write_all(&message);
+                sh.write_output(Dest::Stderr, &message)?;
                 failed = true;
             }
         } else {

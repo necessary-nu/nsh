@@ -8,13 +8,11 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use bstr::BStr;
-use std::io::Write;
-
 use crate::eval::Flow;
 use crate::jobs::{JobId, getjob, ps_pid};
 use crate::output::Dest;
 use crate::trap::SignalSpec;
+use bstr::BStr;
 
 // [spec:nsh:def:idiom.job-control-model]
 
@@ -111,11 +109,11 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     if list {
         let Some(status) = operands.first() else {
-            let _ = sh.io.get(Dest::Stdout).write_all(b"0\n");
+            sh.write_output(Dest::Stdout, b"0\n")?;
             for index in 1..crate::signames::NSIG {
                 let mut record = crate::signames::signal_names[index].to_bytes().to_vec();
                 record.push(b'\n');
-                let _ = sh.io.get(Dest::Stdout).write_all(&record);
+                sh.write_output(Dest::Stdout, &record)?;
             }
             return Ok(Flow::Done((0).into()));
         };
@@ -128,7 +126,7 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 .to_bytes()
                 .to_vec();
             record.push(b'\n');
-            let _ = sh.io.get(Dest::Stdout).write_all(&record);
+            sh.write_output(Dest::Stdout, &record)?;
         } else {
             let mut message = b"invalid signal number or exit status: ".to_vec();
             message.extend_from_slice(status);

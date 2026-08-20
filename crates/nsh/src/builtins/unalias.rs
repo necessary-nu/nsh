@@ -7,11 +7,11 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use std::io::Write;
 
 use crate::alias::{rmaliases, unalias};
 use crate::eval::Flow;
 use crate::options::Options;
+use crate::output::Dest;
 
 // [spec:dash:def:alias.unaliascmd-fn]
 // [spec:dash:sem:alias.unaliascmd-fn]
@@ -40,7 +40,7 @@ pub fn unaliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             let mut message = b"unalias: ".to_vec();
             message.extend_from_slice(name);
             message.extend_from_slice(b" not found\n");
-            let _ = sh.io.stderr().write_all(&message);
+            sh.write_output(Dest::Stderr, &message)?;
             failed = true;
         }
     }

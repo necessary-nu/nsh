@@ -3,8 +3,8 @@
 use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
+use crate::output::Dest;
 use bstr::BStr;
-use std::io::Write as _;
 
 // [spec:nsh:req:compat.smoosh.history-builtin]
 pub fn historycmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
@@ -30,6 +30,6 @@ pub fn historycmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     else {
         return Ok(Flow::Done((1).into()));
     };
-    let _ = sh.io.stdout().write_all(&contents);
+    sh.write_output(Dest::Stdout, &contents)?;
     Ok(Flow::Done((0).into()))
 }

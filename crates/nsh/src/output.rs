@@ -110,6 +110,43 @@ impl ShellIo {
     }
 }
 
+// [spec:nsh:req:idiom.no-ignored-results]
+impl crate::context::Shell {
+    fn command_output_error(&mut self, _error: io::Error) -> crate::error::Error {
+        let line = self.eval.errlinno;
+        self.diagnostics().command_warnx(b"I/O error");
+        crate::error::Error::reported(line, crate::status::ExitStatus::ERROR)
+    }
+
+    /// Write command output and turn an immediate stream failure into the
+    /// shell's ordinary, already-reported command error.
+    pub(crate) fn write_output(
+        &mut self,
+        dest: Dest,
+        bytes: &[u8],
+    ) -> Result<(), crate::error::Error> {
+        let result = self.io.get(dest).write_all(bytes);
+        result.map_err(|error| self.command_output_error(error))
+    }
+
+    /// Format command output without hiding the writer's failure behind
+    /// `fmt::Error`.
+    pub(crate) fn write_output_fmt(
+        &mut self,
+        dest: Dest,
+        arguments: std::fmt::Arguments<'_>,
+    ) -> Result<(), crate::error::Error> {
+        let result = self.io.get(dest).write_fmt(arguments);
+        result.map_err(|error| self.command_output_error(error))
+    }
+
+    /// Flush buffered command output through the same explicit error path.
+    pub(crate) fn flush_output(&mut self) -> Result<(), crate::error::Error> {
+        let result = self.io.flushall();
+        result.map_err(|error| self.command_output_error(error))
+    }
+}
+
 /// Which of the shell's three writers a caller means.
 ///
 /// This is the alternative to passing `*mut Output` around, and it exists
@@ -542,7 +579,7 @@ mod tests {
             }
         }
 
-        let _ = nsh_platform::read_exact(s.read(), pipe_buf).unwrap();
+        nsh_platform::read_exact(s.read(), pipe_buf).unwrap();
 
         let payload = vec![b'x'; pipe_buf * 2];
         let written = s.out.write(&payload).unwrap();

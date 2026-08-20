@@ -149,7 +149,8 @@ impl History {
             let Some(id) = self.store.oldest().map(HistoryEntry::id) else {
                 break;
             };
-            let _ = self.store.remove(id);
+            let removed = self.store.remove(id);
+            debug_assert!(removed.is_some(), "the oldest history id must exist");
             if self.append_target == Some(id) {
                 self.append_target = None;
             }

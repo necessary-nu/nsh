@@ -13,7 +13,6 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString};
 use nsh_platform::Descriptor;
-use std::io::Write;
 
 use crate::fd::LogicalDescriptor;
 use crate::options::ShellOption;
@@ -748,7 +747,10 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<usize, Error> {
                         && error_kind == std::io::ErrorKind::WouldBlock
                         && stdin_clear_nonblock(sh)
                     {
-                        let _ = sh.io.stderr().write_all(b"sh: turning off NDELAY mode\n");
+                        sh.write_output(
+                            crate::output::Dest::Stderr,
+                            b"sh: turning off NDELAY mode\n",
+                        )?;
                         continue 'retry;
                     }
                     /* The interactive prompt's read, and the one place the C had
@@ -797,7 +799,7 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
         cur_pf(&mut sh.input).eof_observed = true;
         return Ok(InputUnit::EndOfInput);
     }
-    let _ = sh.io.flushall();
+    sh.flush_output()?;
 
     let buffered = crate::error::with_interrupts_deferred(sh, |sh| {
         let mut q = cur_pf(&mut sh.input).pos;
@@ -913,7 +915,7 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
     };
 
     if sh.options.enabled(ShellOption::Verbose) {
-        let _ = sh.io.stderr().write_all(&line);
+        sh.write_output(crate::output::Dest::Stderr, &line)?;
     }
 
     let pf = cur_pf(&mut sh.input);
@@ -1205,7 +1207,10 @@ impl Shell {
             if shell.input.stdin_state.seekable && left != 0 {
                 if let Some(stdin) = shell.fds.get(LogicalDescriptor::STDIN) {
                     let offset = i64::try_from(left).unwrap_or(i64::MAX);
-                    let _ = nsh_platform::seek_relative(&stdin, -offset);
+                    if nsh_platform::seek_relative(&stdin, -offset).is_err() {
+                        // The descriptor stopped supporting rewind; future reads use tee state.
+                        shell.input.stdin_state.seekable = false;
+                    }
                 }
             } else if let Some(pending) = shell.input.stdin_state.pending.filter(|p| *p > left) {
                 flush_tee(shell, BUFSIZ, pending - left);

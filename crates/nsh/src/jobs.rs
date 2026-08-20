@@ -16,7 +16,6 @@ use nsh_platform::{
     ChildStatus, Descriptor, NativeStrExt as _, ProcessGroupId, ProcessGroupState, ProcessId,
     ProcessSelector, ProcessTarget,
 };
-use std::io::Write as _;
 
 use crate::error::Error;
 use crate::fd::LogicalDescriptor;
@@ -143,7 +142,12 @@ fn ps_cmd(sh: &crate::context::Shell, jp: JobId, i: usize) -> &BStr {
 /// puts control bytes 0x81-0x88 in them — so they go out as bytes and
 /// not through a `char *`.
 #[inline]
-pub(crate) fn outcmd(sh: &mut crate::context::Shell, jp: JobId, i: usize, dest: Dest) {
+pub(crate) fn outcmd(
+    sh: &mut crate::context::Shell,
+    jp: JobId,
+    i: usize,
+    dest: Dest,
+) -> Result<(), Error> {
     /* The lookup is spelled out here rather than going through `ps_cmd`,
      * which is otherwise these same three lines. The two borrows have to
      * be *field*-disjoint: the write takes `sh.io` mutably and the text is
@@ -155,8 +159,8 @@ pub(crate) fn outcmd(sh: &mut crate::context::Shell, jp: JobId, i: usize, dest: 
     let cmd = sh.jobs[jp]
         .ps
         .get(i)
-        .map_or(BStr::new(b""), |p| p.cmd.as_bstr());
-    let _ = sh.io.get(dest).write_all(cmd);
+        .map_or_else(BString::default, |process| process.cmd.clone());
+    sh.write_output(dest, &cmd)
 }
 
 /*
@@ -278,10 +282,15 @@ fn await_foreground_group(
         {
             return Some(group);
         }
-        let _ = nsh_platform::send_signal(
+        if nsh_platform::send_signal(
             ProcessTarget::CurrentProcessGroup,
             nsh_platform::SignalRequest::Deliver(nsh_platform::terminal_input_signal()),
-        );
+        )
+        .is_err()
+        {
+            // A failed self-stop means this shell cannot acquire the terminal.
+            return None;
+        }
     }
 }
 
@@ -358,7 +367,13 @@ pub fn setjobctl(sh: &mut crate::context::Shell, enabled: bool) -> Result<(), Er
     crate::trap::setsignal(sh, nsh_platform::terminal_output_signal().into());
     crate::trap::setsignal(sh, nsh_platform::terminal_input_signal().into());
     if let (Some(tty), Some(group)) = (fd.as_ref(), process_group) {
-        let _ = nsh_platform::set_process_group(ProcessSelector::CurrentProcess, group);
+        if let Err(error) = nsh_platform::set_process_group(ProcessSelector::CurrentProcess, group)
+        {
+            let mut message = b"Cannot set process group (".to_vec();
+            message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
+            message.push(b')');
+            return Err(sh.diagnostics().sh_error_value(&message));
+        }
         xtcsetpgrp(sh, tty, group)?;
 
         if !enabled {
@@ -445,7 +460,12 @@ fn sprint_status(
 // [spec:posix:req:builtin.jobs.stdout-l-format]
 // [spec:posix:req:builtin.jobs.stdout-default-format]
 // [spec:posix:req:jobctl.suspended-job-message]
-pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: JobId, mode: JobDisplay) {
+pub(crate) fn showjob(
+    sh: &mut crate::context::Shell,
+    dest: Dest,
+    jp: JobId,
+    mode: JobDisplay,
+) -> Result<(), Error> {
     let psend: usize;
     let mut column: usize;
     let indent: usize;
@@ -458,8 +478,8 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: JobId, mod
          * borrows `sh.io`, and evaluating one inside the other is the
          * conflict `Dest` exists to keep out of these functions. */
         let pid = process_id_text(ps_pid(sh, jp, 0));
-        let _ = writeln!(sh.io.get(dest), "{pid}");
-        return;
+        sh.write_output_fmt(dest, format_args!("{pid}\n"))?;
+        return Ok(());
     }
 
     let heading = format!("[{}]   ", jobno(jp));
@@ -518,13 +538,13 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: JobId, mod
 
         let width = 33usize.saturating_sub(line_column);
         record.resize(record.len() + width.max(1), b' ');
-        let _ = sh.io.get(dest).write_all(&record);
-        outcmd(sh, jp, ps, dest);
+        sh.write_output(dest, &record)?;
+        outcmd(sh, jp, ps, dest)?;
     }
     if matches!(mode, JobDisplay::Long) {
-        let _ = sh.io.get(dest).write_all(b"\n");
+        sh.write_output(dest, b"\n")?;
     } else {
-        showpipe(sh, jp, dest);
+        showpipe(sh, jp, dest)?;
     }
 
     sh.jobs[jp].changed = false;
@@ -532,6 +552,7 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: JobId, mod
     if sh.jobs[jp].is_done() {
         freejob(&mut sh.interrupt_deferral, &mut sh.jobs, jp);
     }
+    Ok(())
 }
 
 /*
@@ -559,7 +580,7 @@ pub(crate) fn showjobs(
      * the explicit presentation order. */
     for i in sh.jobs.order_snapshot() {
         if !matches!(mode, JobDisplay::Changed) || sh.jobs[i].changed {
-            showjob(sh, dest, i, mode);
+            showjob(sh, dest, i, mode)?;
         }
     }
     Ok(())
@@ -827,8 +848,11 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<JobId>, n: Option<&Node>
             process_group = ProcessGroupId::from_leader(sh.jobs[ji].ps[0].pid);
         }
         /* This can fail because we are doing it in the parent also */
-        let _ =
-            nsh_platform::set_process_group(ProcessSelector::CurrentProcess, process_group.into());
+        if nsh_platform::set_process_group(ProcessSelector::CurrentProcess, process_group.into())
+            .is_err()
+        {
+            // The parent performs the same race-safe process-group assignment.
+        }
         if mode == ForkMode::Foreground {
             xxtcsetpgrp(sh, process_group).unwrap_or_else(|e| forkchild_fatal(sh, e));
         }
@@ -893,9 +917,9 @@ fn forkparent(
     n: Option<&Node>,
     mode: ForkMode,
     pid: ProcessId,
-) {
+) -> Result<(), Error> {
     let Some(ji) = jp else {
-        return;
+        return Ok(());
     };
     if mode != ForkMode::WithoutJob && sh.jobs[ji].jobctl {
         let process_group: ProcessGroupId;
@@ -906,14 +930,17 @@ fn forkparent(
             process_group = ProcessGroupId::from_leader(sh.jobs[ji].ps[0].pid);
         }
         /* This can fail because we are doing it in the child also */
-        let _ =
-            nsh_platform::set_process_group(ProcessSelector::Process(pid), process_group.into());
+        if nsh_platform::set_process_group(ProcessSelector::Process(pid), process_group.into())
+            .is_err()
+        {
+            // The child performs the same race-safe process-group assignment.
+        }
     }
     if mode == ForkMode::Background {
         sh.backgndpid = Some(pid); /* set $! */
         sh.jobs.position_running(ji);
         if sh.options.enabled(ShellOption::Interactive) {
-            let _ = writeln!(sh.io.stderr(), "[{}] {pid}", jobno(ji));
+            sh.write_output_fmt(Dest::Stderr, format_args!("[{}] {pid}\n", jobno(ji)))?;
         }
     }
     /* the C's second `if (jp)` is dead after the early return above */
@@ -927,6 +954,7 @@ fn forkparent(
         let last = sh.jobs[ji].ps.len() - 1;
         sh.jobs[ji].ps[last].cmd = cmd;
     }
+    Ok(())
 }
 
 // [spec:dash:def:jobs.forkshell-fn]
@@ -952,7 +980,7 @@ pub fn forkshell(
             nsh_platform::ForkResult::Child
         }
         Ok(nsh_platform::ForkResult::Parent(pid)) => {
-            forkparent(sh, jp, n, mode, pid);
+            forkparent(sh, jp, n, mode, pid)?;
             nsh_platform::ForkResult::Parent(pid)
         }
         Err(_) => {
@@ -1001,7 +1029,7 @@ pub fn forkexec(
             return Err(sh.diagnostics().sh_error_value(b"Cannot fork"));
         }
     };
-    forkparent(sh, Some(jp), Some(n), ForkMode::Foreground, pid);
+    forkparent(sh, Some(jp), Some(n), ForkMode::Foreground, pid)?;
 
     Ok(jp)
 }
@@ -1094,7 +1122,12 @@ pub fn waitforjob(
          * occurred, and if so interrupt ourselves.  Yuck.  - mycroft
          */
         if sh.jobs[jp].sigint {
-            let _ = nsh_platform::raise_signal(nsh_platform::interrupt_signal());
+            if let Err(error) = nsh_platform::raise_signal(nsh_platform::interrupt_signal()) {
+                let mut message = b"Cannot raise interrupt (".to_vec();
+                message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
+                message.push(b')');
+                return Err(sh.diagnostics().sh_error_value(&message));
+            }
         }
     }
     if sh.jobs[jp].is_done() {
@@ -1190,7 +1223,7 @@ fn waitone(
         );
         if !message.is_empty() {
             message.push(b'\n');
-            let _ = sh.io.stderr().write_all(&message);
+            sh.write_output(Dest::Stderr, &message)?;
         }
     }
     /* A blocking wait can leave an interrupt pending while this structured
@@ -1212,7 +1245,7 @@ fn waitone(
             sh.jobs[changed_job].jobctl,
             Some(changed_job) == jobp,
         ) {
-            showjob(sh, Dest::Stderr, changed_job, JobDisplay::Standard);
+            showjob(sh, Dest::Stderr, changed_job, JobDisplay::Standard)?;
         }
     }
     Ok(waited)
@@ -1319,7 +1352,12 @@ fn waitproc(sh: &mut crate::context::Shell, mode: WaitMode) -> Result<WaitOutcom
             nsh_platform::BlockedSignals::all().expect("blocking signals around child wait failed");
 
         while !signals.child_pending() && signals.pending_signal().is_none() {
-            let _ = blocked.suspend();
+            if let Err(error) = blocked.suspend() {
+                let mut message = b"Cannot wait for signal (".to_vec();
+                message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
+                message.push(b')');
+                return Err(sh.diagnostics().sh_error_value(&message));
+            }
         }
 
         drop(blocked);
@@ -1338,16 +1376,16 @@ fn waitproc(sh: &mut crate::context::Shell, mode: WaitMode) -> Result<WaitOutcom
 
 // [spec:dash:def:jobs.stoppedjobs-fn]
 // [spec:dash:sem:jobs.stoppedjobs-fn]
-pub fn stoppedjobs(sh: &mut crate::context::Shell) -> bool {
+pub fn stoppedjobs(sh: &mut crate::context::Shell) -> Result<bool, Error> {
     if sh.jobs.job_warning != JobWarning::Ready {
-        return false;
+        return Ok(false);
     }
     if sh.jobs.current().is_some_and(|id| sh.jobs[id].is_stopped()) {
-        let _ = sh.io.stderr().write_all(b"You have stopped jobs.\n");
+        sh.write_output(Dest::Stderr, b"You have stopped jobs.\n")?;
         sh.jobs.job_warning = JobWarning::Reported;
-        true
+        Ok(true)
     } else {
-        false
+        Ok(false)
     }
 }
 
@@ -1531,15 +1569,15 @@ fn cmdputs(s: &[u8], text: &mut BString) {
 
 // [spec:dash:def:jobs.showpipe-fn]
 // [spec:dash:sem:jobs.showpipe-fn]
-pub(crate) fn showpipe(sh: &mut crate::context::Shell, jp: JobId, dest: Dest) {
+pub(crate) fn showpipe(sh: &mut crate::context::Shell, jp: JobId, dest: Dest) -> Result<(), Error> {
     let spend: usize = sh.jobs[jp].ps.len();
 
     for sp in 1..spend {
-        let _ = sh.io.get(dest).write_all(b" | ");
-        outcmd(sh, jp, sp, dest);
+        sh.write_output(dest, b" | ")?;
+        outcmd(sh, jp, sp, dest)?;
     }
-    let _ = sh.io.get(dest).write_all(b"\n");
-    let _ = sh.io.flushall();
+    sh.write_output(dest, b"\n")?;
+    sh.flush_output()
 }
 
 // [spec:dash:def:jobs.xtcsetpgrp-fn]
@@ -1568,45 +1606,34 @@ fn xtcsetpgrp(
 // [spec:posix:req:exit.status-normal-termination]
 // [spec:posix:req:exit.status-signal-terminated]
 pub(crate) fn getstatus(sh: &mut crate::context::Shell, jobp: JobId) -> crate::status::ExitStatus {
-    let mut status: ChildStatus;
-    let mut ps: usize;
-
     /* `job->ps + job->nprocs - 1` in C: the bitfield promotes to `int`,
      * so a job that has not forked yet reads `ps[-1]`. It has no status
      * to report; `wait %n` on one answers 0. */
-    ps = sh.jobs[jobp].ps.len();
-    status = if ps == 0 {
-        ChildStatus::Exited(0)
-    } else {
-        sh.jobs[jobp].ps[ps - 1]
-            .status
-            .unwrap_or(ChildStatus::Exited(0))
-    };
+    let mut ps = sh.jobs[jobp].ps.len();
+    let mut status = ps
+        .checked_sub(1)
+        .and_then(|last| sh.jobs[jobp].ps[last].status);
     if sh.options.enabled(ShellOption::Pipefail) {
-        loop {
-            if status != ChildStatus::Exited(0) {
-                break;
-            }
-            if ps < 2 {
-                break;
-            }
+        while matches!(status, None | Some(ChildStatus::Exited(0))) && ps >= 2 {
             ps -= 1;
-            status = sh.jobs[jobp].ps[ps - 1]
-                .status
-                .unwrap_or(ChildStatus::Exited(0));
+            status = sh.jobs[jobp].ps[ps - 1].status;
         }
     }
 
     let retval = match status {
-        ChildStatus::Exited(code) => crate::status::ExitStatus::from(code),
-        ChildStatus::Signaled { signal, .. } => {
+        // A job with no completed process has no failure status to report.
+        None => crate::status::ExitStatus::SUCCESS,
+        Some(ChildStatus::Exited(code)) => crate::status::ExitStatus::from(code),
+        Some(ChildStatus::Signaled { signal, .. }) => {
             if signal == nsh_platform::interrupt_signal() {
                 sh.jobs[jobp].sigint = true;
             }
             crate::status::ExitStatus::from_code(signal.number() + 128)
         }
-        ChildStatus::Stopped(signal) => crate::status::ExitStatus::from_code(signal.number() + 128),
-        ChildStatus::Continued => crate::status::ExitStatus::SUCCESS,
+        Some(ChildStatus::Stopped(signal)) => {
+            crate::status::ExitStatus::from_code(signal.number() + 128)
+        }
+        Some(ChildStatus::Continued) => crate::status::ExitStatus::SUCCESS,
     };
     retval
 }

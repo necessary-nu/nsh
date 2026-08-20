@@ -405,18 +405,29 @@ fn open_file_redirection(
 
                     let fv = sh_open(sh, target, nsh_platform::OpenMode::WriteOnly, false)?
                         .expect("a mandatory open returns a descriptor");
-                    if nsh_platform::fd_is_regular_file(&fv).unwrap_or(false) {
-                        drop(fv);
-                        /* goto ecreate */
-                        let error = nsh_platform::platform_error(
-                            nsh_platform::PlatformErrorKind::AlreadyExists,
-                        );
-                        return Err(sh_open_fail(
-                            sh,
-                            target,
-                            nsh_platform::OpenMode::WriteCreateTruncate,
-                            &error,
-                        ));
+                    match nsh_platform::fd_is_regular_file(&fv) {
+                        Ok(true) => {
+                            drop(fv);
+                            /* goto ecreate */
+                            let error = nsh_platform::platform_error(
+                                nsh_platform::PlatformErrorKind::AlreadyExists,
+                            );
+                            return Err(sh_open_fail(
+                                sh,
+                                target,
+                                nsh_platform::OpenMode::WriteCreateTruncate,
+                                &error,
+                            ));
+                        }
+                        Ok(false) => {}
+                        Err(error) => {
+                            return Err(sh_open_fail(
+                                sh,
+                                target,
+                                nsh_platform::OpenMode::WriteOnly,
+                                &error,
+                            ));
+                        }
                     }
                     opened = Some(fv);
                     fell_through = false;
@@ -568,7 +579,10 @@ fn openhere(sh: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error
     if memfd || len <= PIPESIZE {
         nsh_platform::write_all(&pip.write, p)
             .map_err(|error| here_document_write_error(sh, error))?;
-        let _ = nsh_platform::seek_start(&pip.write);
+        if memfd {
+            nsh_platform::seek_start(&pip.write)
+                .map_err(|error| here_document_write_error(sh, error))?;
+        }
         /* goto out */
         drop(pip.write);
         return Ok(pip.read);

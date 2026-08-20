@@ -6,7 +6,6 @@
 //! `parsearith` operate on the current word-lexer state directly.
 
 use core::mem;
-use std::io::Write;
 
 use bstr::{BStr, BString};
 
@@ -470,7 +469,7 @@ pub fn parsecmd(sh: &mut Shell, interactive: bool) -> Result<ParseResult, Error>
     sh.input.completed_heredocs = Vec::new();
     sh.input.doprompt = interactive;
     if sh.input.doprompt {
-        setprompt(sh, PromptKind::Primary);
+        setprompt(sh, PromptKind::Primary)?;
     }
     sh.input.needprompt = false;
     let mut result = list(sh, ListMode::TopLevel)?;
@@ -1135,7 +1134,7 @@ fn parseheredoc(sh: &mut Shell) -> Result<(), Error> {
 
     for here in list {
         if sh.input.needprompt {
-            setprompt(sh, PromptKind::Continuation);
+            setprompt(sh, PromptKind::Continuation)?;
         }
         let mark = EofMark::Word(BStr::new(&here.eofmark));
         /* The C reads the first character inside the argument list. The
@@ -1248,11 +1247,12 @@ fn readtoken_with_flags(sh: &mut Shell, mut context: TokenContext) -> Result<Tok
 
 // [spec:dash:def:parser.nlprompt-fn]
 // [spec:dash:sem:parser.nlprompt-fn]
-fn nlprompt(sh: &mut Shell) {
+fn nlprompt(sh: &mut Shell) -> Result<(), Error> {
     crate::plinno!(&mut sh.input) += 1;
     if sh.input.doprompt {
-        setprompt(sh, PromptKind::Continuation);
+        setprompt(sh, PromptKind::Continuation)?;
     }
+    Ok(())
 }
 
 // [spec:dash:def:parser.nlnoprompt-fn]
@@ -1295,7 +1295,7 @@ fn xxreadtoken(sh: &mut Shell, check_here_document_end: bool) -> Result<Token, E
         });
     }
     if sh.input.needprompt {
-        setprompt(sh, PromptKind::Continuation);
+        setprompt(sh, PromptKind::Continuation)?;
     }
     loop {
         /* until token or start of word found */
@@ -1404,7 +1404,7 @@ fn pgetc_eatbnl(sh: &mut Shell) -> Result<InputUnit, Error> {
             break;
         }
 
-        nlprompt(sh);
+        nlprompt(sh)?;
     }
 
     Ok(input)
@@ -1782,7 +1782,7 @@ fn readtoken1(
                         break 'word;
                     }
                     st.out.push(st.input.expect_byte());
-                    nlprompt(sh);
+                    nlprompt(sh)?;
                     st.input = pgetc_top(sh, st.syn())?;
                     continue 'word;
                 }
@@ -2342,7 +2342,7 @@ fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: bool) -> Result<(), Er
 
         loop {
             if sh.input.needprompt {
-                setprompt(sh, PromptKind::Continuation);
+                setprompt(sh, PromptKind::Continuation)?;
             }
             input = pgetc_eatbnl(sh)?;
             if input.is(b'`') {
@@ -2490,7 +2490,7 @@ fn synerror(sh: &mut Shell, msg: &[u8]) -> Error {
 // [spec:dash:def:parser.setprompt-fn]
 // [spec:dash:sem:parser.setprompt-fn]
 #[inline(never)]
-fn setprompt(sh: &mut Shell, prompt: PromptKind) {
+fn setprompt(sh: &mut Shell, prompt: PromptKind) -> Result<(), Error> {
     sh.input.needprompt = false;
     sh.input.prompt = Some(prompt);
 
@@ -2499,8 +2499,9 @@ fn setprompt(sh: &mut Shell, prompt: PromptKind) {
          * `expandstr` had left in the region for `out2str` to read.  The
          * expansion buffer is owned, so there is nothing to bound. */
         let prompt = getprompt(sh);
-        let _ = sh.io.stderr().write_all(&prompt);
+        sh.write_output(crate::output::Dest::Stderr, &prompt)?;
     }
+    Ok(())
 }
 
 // [spec:dash:def:parser.expandstr-fn]

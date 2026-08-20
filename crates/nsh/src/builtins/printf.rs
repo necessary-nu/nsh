@@ -21,12 +21,12 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use std::io::Write as _;
 
 use bstr::{BStr, BString, ByteSlice as _};
 
 use crate::escape::{CONV_ESCAPE_SLOP, conv_escape, conv_escape_str};
 use crate::eval::Flow;
+use crate::output::Dest;
 use crate::status::ExitStatus;
 
 mod conv;
@@ -43,11 +43,8 @@ use conv::{LIMIT, Spec};
 const WIDTH: &[u8] = b"*0123456789";
 
 /// Write one rendered conversion to standard output.
-///
-/// Nothing is checked: `evalbltin` reads `Output`'s sticky error flag
-/// after the builtin returns and folds it into the exit status.
-fn emit(sh: &mut crate::context::Shell, bytes: &[u8]) {
-    let _ = sh.io.stdout().write_all(bytes);
+fn emit(sh: &mut crate::context::Shell, bytes: &[u8]) -> Result<(), Error> {
+    sh.write_output(Dest::Stdout, bytes)
 }
 
 /// Write one rendered conversion, or raise what the C raised when it
@@ -59,10 +56,7 @@ fn emit(sh: &mut crate::context::Shell, bytes: &[u8]) {
 /// already printed stays printed, and the shell's status is 2.
 fn emit_field(sh: &mut crate::context::Shell, rendered: Option<Vec<u8>>) -> Result<(), Error> {
     match rendered {
-        Some(bytes) => {
-            emit(sh, &bytes);
-            Ok(())
-        }
+        Some(bytes) => emit(sh, &bytes),
         None => Err(sh.diagnostics().sh_error_value(b"xvsnprintf failed")),
     }
 }
@@ -665,7 +659,7 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 let converted = conv_escape(&format[at..], &mut scratch, false);
                 at += converted.consumed;
                 debug_assert!(converted.written <= CONV_ESCAPE_SLOP);
-                emit(sh, &scratch[..converted.written]);
+                emit(sh, &scratch[..converted.written])?;
                 continue;
             }
             /* A `%%` is one `%`; a `%` at the very end of the format
@@ -674,7 +668,7 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 if ch == b'%' {
                     at += 1;
                 }
-                emit(sh, &[ch]);
+                emit(sh, &[ch])?;
                 continue;
             }
 

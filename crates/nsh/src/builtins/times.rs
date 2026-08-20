@@ -12,8 +12,8 @@
 use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
+use crate::output::Dest;
 use bstr::BStr;
-use std::io::Write as _;
 
 // [spec:dash:def:times.timescmd-fn]
 // [spec:dash:sem:times.timescmd-fn]
@@ -46,10 +46,12 @@ pub fn timescmd(sh: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> {
     mcstime = (cstime / 60.0) as i32;
     cstime -= mcstime as f64 * 60.0;
 
-    let _ = write!(
-        sh.io.stdout(),
-        "{mutime}m{utime:.6}s {mstime}m{stime:.6}s\n\
-         {mcutime}m{cutime:.6}s {mcstime}m{cstime:.6}s\n"
-    );
+    sh.write_output_fmt(
+        Dest::Stdout,
+        format_args!(
+            "{mutime}m{utime:.6}s {mstime}m{stime:.6}s\n\
+             {mcutime}m{cutime:.6}s {mcstime}m{cstime:.6}s\n"
+        ),
+    )?;
     Ok(Flow::Done((0).into()))
 }

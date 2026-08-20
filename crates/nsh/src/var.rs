@@ -13,7 +13,6 @@ use bstr::{BStr, BString, ByteSlice};
 use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::io::Write as _;
 
 use crate::context::Shell;
 use crate::error::Error;
@@ -724,7 +723,11 @@ pub fn environment(sh: &Shell) -> std::io::Result<Vec<(OsString, OsString)>> {
 
 // [spec:dash:def:var.showvars-fn]
 // [spec:dash:sem:var.showvars-fn]
-pub(crate) fn show_vars(sh: &mut Shell, prefix: &BStr, selection: VariableSelection) {
+pub(crate) fn show_vars(
+    sh: &mut Shell,
+    prefix: &BStr,
+    selection: VariableSelection,
+) -> Result<(), Error> {
     let records: Vec<Vec<u8>> = sh
         .vars
         .tab
@@ -750,8 +753,9 @@ pub(crate) fn show_vars(sh: &mut Shell, prefix: &BStr, selection: VariableSelect
         })
         .collect();
     for record in records {
-        let _ = sh.io.stdout().write_all(&record);
+        sh.write_output(crate::output::Dest::Stdout, &record)?;
     }
+    Ok(())
 }
 
 // [spec:dash:def:var.mklocal-fn]

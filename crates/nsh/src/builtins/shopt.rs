@@ -1,12 +1,11 @@
 //! Bash's shell-option discovery and mutation builtin.
 
-use std::io::Write as _;
-
 use bstr::{BStr, ByteSlice as _};
 
 use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
+use crate::output::Dest;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum Action {
@@ -40,14 +39,11 @@ pub fn shoptcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let selection = match scan(args) {
         Scan::Selection(selection) => selection,
         Scan::Help => {
-            let _ = sh
-                .io
-                .stdout()
-                .write_all(b"shopt: shopt [-pqsu] [-o] [optname ...]\n");
+            sh.write_output(Dest::Stdout, b"shopt: shopt [-pqsu] [-o] [optname ...]\n")?;
             return Ok(Flow::Done((0).into()));
         }
         Scan::Invalid(option) => {
-            invalid_option(sh, &option);
+            invalid_option(sh, &option)?;
             return Ok(Flow::Done((2).into()));
         }
     };
@@ -110,7 +106,7 @@ fn mutate(sh: &mut Shell, selection: &Selection<'_>) -> Result<Flow, Error> {
     let mut invalid = false;
     for name in selection.operands {
         if state(sh, selection.namespace, name).is_none() {
-            invalid_name(sh, name);
+            invalid_name(sh, name)?;
             invalid = true;
             continue;
         }
@@ -139,13 +135,13 @@ fn report(sh: &mut Shell, selection: &Selection<'_>) -> Result<Flow, Error> {
     let mut invalid = false;
     for name in names {
         let Some(on) = state(sh, selection.namespace, name) else {
-            invalid_name(sh, name);
+            invalid_name(sh, name)?;
             invalid = true;
             continue;
         };
         all_on &= on;
         if selection.action != Action::Query && selected(selection.action, on) {
-            write_state(sh, selection.namespace, selection.action, name, on);
+            write_state(sh, selection.namespace, selection.action, name, on)?;
         }
     }
     let named_status = !selection.operands.is_empty() && !all_on;
@@ -182,7 +178,13 @@ fn selected(action: Action, on: bool) -> bool {
     }
 }
 
-fn write_state(sh: &mut Shell, namespace: Namespace, action: Action, name: &BStr, on: bool) {
+fn write_state(
+    sh: &mut Shell,
+    namespace: Namespace,
+    action: Action,
+    name: &BStr,
+    on: bool,
+) -> Result<(), Error> {
     let mut line = Vec::new();
     if action == Action::Print {
         match namespace {
@@ -199,19 +201,19 @@ fn write_state(sh: &mut Shell, namespace: Namespace, action: Action, name: &BStr
         line.extend_from_slice(if on { b"on" } else { b"off" });
     }
     line.push(b'\n');
-    let _ = sh.io.stdout().write_all(&line);
+    sh.write_output(Dest::Stdout, &line)
 }
 
-fn invalid_option(sh: &mut Shell, option: &[u8]) {
+fn invalid_option(sh: &mut Shell, option: &[u8]) -> Result<(), Error> {
     let mut message = b"shopt: ".to_vec();
     message.extend_from_slice(option);
     message.extend_from_slice(b": invalid option\n");
-    let _ = sh.io.stderr().write_all(&message);
+    sh.write_output(Dest::Stderr, &message)
 }
 
-fn invalid_name(sh: &mut Shell, name: &BStr) {
+fn invalid_name(sh: &mut Shell, name: &BStr) -> Result<(), Error> {
     let mut message = b"shopt: ".to_vec();
     message.extend_from_slice(name);
     message.extend_from_slice(b": invalid shell option name\n");
-    let _ = sh.io.stderr().write_all(&message);
+    sh.write_output(Dest::Stderr, &message)
 }

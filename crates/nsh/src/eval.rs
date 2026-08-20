@@ -30,7 +30,6 @@ use crate::fd::LogicalDescriptor;
 use crate::status::ExitStatus;
 use bstr::{BStr, BString, ByteSlice};
 use nsh_platform::Descriptor;
-use std::io::Write as _;
 
 use crate::builtins::{BuiltinHandler, BuiltinId, BuiltinSpec};
 use crate::exec::{Command, CommandSearch, find_command, shellexec};
@@ -573,7 +572,8 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
                 }
             }
             Node::Sequence(command) => {
-                let _ = flow!(evaltree(
+                // A sequence's observable status is its right-hand command.
+                flow!(evaltree(
                     sh,
                     Some(command.left.as_ref()),
                     context.tested_only(),
@@ -596,7 +596,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
             }
             Node::Function(definition) => {
                 if sh.options.enabled(ShellOption::HashAll) {
-                    let _ = flow!(prehash_tree(sh, Some(definition.body.as_ref())));
+                    flow!(prehash_tree(sh, Some(definition.body.as_ref())));
                 }
                 crate::exec::defun(&mut sh.interrupt_deferral, &mut sh.commands, definition);
                 ExitStatus::SUCCESS
@@ -1550,20 +1550,21 @@ fn evalcommand_in_scope(
                  * note in `evalcommand`. */
                 let ps4 = crate::var::ps4val(sh);
                 let prompt = crate::parser::expandstr(sh, BStr::new(ps4.as_slice()))?;
-                let _ = sh.io.get(dest).write_all(&prompt);
+                sh.write_output(dest, &prompt)?;
                 sh.eval.inps4 = false;
                 already_printed = false;
-                already_printed = eprintlist(sh.io.get(dest), &varlist.list, already_printed);
+                already_printed = eprintlist(sh, dest, &varlist.list, already_printed)?;
                 /* `eprintlist(sh, out, osp, sep)` prints from the *original*
                  * head, so `command -p foo` traces as it was written and not
                  * as `parse_command_args` left it.  A NULL `osp` prints
                  * nothing, which is the empty slice. */
                 eprintlist(
-                    sh.io.get(dest),
+                    sh,
+                    dest,
                     &arglist.list[osp.unwrap_or(arglist.list.len())..],
                     already_printed,
-                );
-                let _ = sh.io.get(dest).write_all(b"\n");
+                )?;
+                sh.write_output(dest, b"\n")?;
             }
 
             /* Now locate the command. */
@@ -1926,38 +1927,38 @@ fn prehash_tree(sh: &mut Shell, n: Option<&Node>) -> Result<Flow, Error> {
         Node::Command(_) => return prehash(sh, n),
         Node::Pipeline(pipeline) => {
             for command in &pipeline.commands {
-                let _ = flow!(prehash_tree(sh, Some(command)));
+                flow!(prehash_tree(sh, Some(command)));
             }
         }
         Node::Redirect(command) | Node::Background(command) | Node::Subshell(command) => {
-            let _ = flow!(prehash_tree(sh, Some(command.command.as_ref())));
+            flow!(prehash_tree(sh, Some(command.command.as_ref())));
         }
         Node::And(binary)
         | Node::Or(binary)
         | Node::Sequence(binary)
         | Node::While(binary)
         | Node::Until(binary) => {
-            let _ = flow!(prehash_tree(sh, Some(binary.left.as_ref())));
-            let _ = flow!(prehash_tree(sh, Some(binary.right.as_ref())));
+            flow!(prehash_tree(sh, Some(binary.left.as_ref())));
+            flow!(prehash_tree(sh, Some(binary.right.as_ref())));
         }
         Node::If(conditional) => {
-            let _ = flow!(prehash_tree(sh, Some(conditional.condition.as_ref())));
-            let _ = flow!(prehash_tree(sh, Some(conditional.then_branch.as_ref())));
-            let _ = flow!(prehash_tree(sh, conditional.else_branch.as_deref()));
+            flow!(prehash_tree(sh, Some(conditional.condition.as_ref())));
+            flow!(prehash_tree(sh, Some(conditional.then_branch.as_ref())));
+            flow!(prehash_tree(sh, conditional.else_branch.as_deref()));
         }
         Node::For(command) => {
-            let _ = flow!(prehash_tree(sh, Some(command.body.as_ref())));
+            flow!(prehash_tree(sh, Some(command.body.as_ref())));
         }
         Node::Case(command) => {
             for clause in &command.clauses {
-                let _ = flow!(prehash_tree(sh, clause.body.as_deref()));
+                flow!(prehash_tree(sh, clause.body.as_deref()));
             }
         }
         Node::Function(definition) => {
-            let _ = flow!(prehash_tree(sh, Some(definition.body.as_ref())));
+            flow!(prehash_tree(sh, Some(definition.body.as_ref())));
         }
         Node::Not(command) => {
-            let _ = flow!(prehash_tree(sh, Some(command.command.as_ref())));
+            flow!(prehash_tree(sh, Some(command.command.as_ref())));
         }
         Node::Word(_) | Node::Bash(_) => {}
     }
@@ -1984,10 +1985,11 @@ fn prehash_tree(sh: &mut Shell, n: Option<&Node>) -> Result<Flow, Error> {
 // [spec:dash:def:eval.eprintlist-fn]
 // [spec:dash:sem:eval.eprintlist-fn]
 fn eprintlist(
-    output: &mut crate::output::Output,
+    sh: &mut Shell,
+    dest: Dest,
     list: &[strlist],
     mut already_printed: bool,
-) -> bool {
+) -> Result<bool, Error> {
     for sp in list {
         let mut record = Vec::new();
         if already_printed {
@@ -1995,10 +1997,10 @@ fn eprintlist(
         }
         record.extend_from_slice(sp.as_bstr());
         already_printed = true;
-        let _ = output.write_all(&record);
+        sh.write_output(dest, &record)?;
     }
 
-    already_printed
+    Ok(already_printed)
 }
 
 #[cfg(test)]

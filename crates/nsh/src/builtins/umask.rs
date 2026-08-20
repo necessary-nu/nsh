@@ -10,11 +10,10 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use std::io::Write as _;
-
 use bstr::BStr;
 
 use crate::eval::Flow;
+use crate::output::Dest;
 
 /*
  * umask builtin
@@ -76,9 +75,9 @@ pub fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             }
             record.pop();
             record.push(b'\n');
-            let _ = sh.io.stdout().write_all(&record);
+            sh.write_output(Dest::Stdout, &record)?;
         } else {
-            let _ = writeln!(sh.io.stdout(), "{mask:04o}");
+            sh.write_output_fmt(Dest::Stdout, format_args!("{mask:04o}\n"))?;
         }
     } else {
         let mode = mode.expect("checked above");

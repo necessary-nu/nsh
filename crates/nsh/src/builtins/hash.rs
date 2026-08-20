@@ -8,12 +8,12 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, ByteSlice};
-use std::io::Write;
 
 use crate::eval::Flow;
 use crate::exec::{
     Command, CommandSearch, PathCursor, clearcmdentry, delete_cmd_entry, find_command, padvance,
 };
+use crate::output::Dest;
 
 // [spec:dash:def:exec.hashcmd-fn]
 // [spec:dash:sem:exec.hashcmd-fn]
@@ -77,7 +77,7 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             })
             .collect();
         for line in lines {
-            let _ = sh.io.stdout().write_all(&line);
+            sh.write_output(Dest::Stdout, &line)?;
         }
         return Ok(Flow::Done((0).into()));
     }

@@ -115,7 +115,6 @@ pub(crate) mod shell;
 pub(crate) mod siginbox;
 pub(crate) mod status;
 pub mod streams;
-pub(crate) mod system;
 
 // ---- unit-test scaffolding (test builds only) ------------------------
 #[cfg(test)]

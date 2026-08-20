@@ -11,7 +11,12 @@ fn set_bash(sh: &mut crate::context::Shell, on: bool) {
 fn find(sh: &mut crate::context::Shell, name: &BStr) -> Command {
     let path = crate::var::pathval(sh);
     let mut entry = Command::Unknown;
-    let _ = find_command(sh, name, &mut entry, CommandSearch::DEFAULT, path.as_bstr()).unwrap();
+    assert!(
+        find_command(sh, name, &mut entry, CommandSearch::DEFAULT, path.as_bstr())
+            .unwrap()
+            .status()
+            .is_some()
+    );
     entry
 }
 

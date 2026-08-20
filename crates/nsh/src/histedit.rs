@@ -126,15 +126,21 @@ pub fn record_history_line(
     first: bool,
     from_input: bool,
 ) {
-    {
+    let recorded = {
         let Some(history) = history_mut(sh) else {
             return;
         };
         if first {
-            let _ = history.enter(bytes, from_input);
+            history.enter(bytes, from_input).is_ok()
         } else {
-            let _ = history.append(bytes);
+            history.append(bytes)
         }
+    };
+    if !recorded {
+        // History is optional; a failed store is disabled without failing the command.
+        sh.histedit.history = None;
+        sh.histedit.history_file = None;
+        return;
     }
     save_history(sh);
 }
@@ -160,11 +166,18 @@ pub fn histedit(sh: &mut crate::context::Shell) {
                 sh.histedit.history_file = crate::var::lookup_bytes(sh, BStr::new(b"HISTFILE"))
                     .filter(|name| !name.is_empty())
                     .and_then(|name| {
-                        let path = name.try_to_path_buf().ok()?;
-                        let file = nsh_platform::open_history_file(&path).ok()?;
-                        nsh_platform::duplicate_cloexec(&file, LogicalDescriptor::COUNT as i32)
-                            .ok()
-                            .map(nsh_platform::Descriptor::into_file)
+                        let Ok(path) = name.try_to_path_buf() else {
+                            return None;
+                        };
+                        let Ok(file) = nsh_platform::open_history_file(&path) else {
+                            return None;
+                        };
+                        let Ok(duplicate) =
+                            nsh_platform::duplicate_cloexec(&file, LogicalDescriptor::COUNT as i32)
+                        else {
+                            return None;
+                        };
+                        Some(duplicate.into_file())
                     });
             });
             /* Hoisted out of the argument list, which also takes the
@@ -184,12 +197,19 @@ pub fn histedit(sh: &mut crate::context::Shell) {
                 saved.clear();
                 sh.histedit.history_file = None;
             }
+            let mut load_failed = false;
             if let Some(history) = history_mut(sh) {
                 for line in saved.split_inclusive(|byte| *byte == b'\n') {
-                    if !line.is_empty() {
-                        let _ = history.enter(line, false);
+                    if !line.is_empty() && history.enter(line, false).is_err() {
+                        load_failed = true;
+                        break;
                     }
                 }
+            }
+            if load_failed {
+                // A broken optional history store must not affect shell startup.
+                sh.histedit.history = None;
+                sh.histedit.history_file = None;
             }
         }
 
@@ -222,7 +242,14 @@ pub fn histedit(sh: &mut crate::context::Shell) {
                     Ok(editor) => sh.histedit.editor = Some(editor),
                     Err(_) => {
                         sh.histedit.editor = None;
-                        let _ = sh.io.stderr().write_all(b"sh: can't initialize editing\n");
+                        if sh
+                            .io
+                            .stderr()
+                            .write_all(b"sh: can't initialize editing\n")
+                            .is_err()
+                        {
+                            // There is no alternate channel for an editor-startup warning.
+                        }
                     }
                 }
             });
@@ -261,8 +288,8 @@ pub(crate) fn save_history(sh: &mut crate::context::Shell) {
     if file.set_len(0).is_err() || file.rewind().is_err() {
         return;
     }
-    if file.write_all(&contents).is_ok() {
-        let _ = file.flush();
+    if file.write_all(&contents).is_err() || file.flush().is_err() {
+        // Persistence is optional; retained in-memory history remains usable.
     }
 }
 
@@ -314,9 +341,10 @@ pub fn setterm(sh: &mut crate::context::Shell, term: &BStr) {
         let mut message = b"sh: Can't set terminal type ".to_vec();
         message.extend_from_slice(term);
         message.push(b'\n');
-        let errors = sh.io.stderr();
-        let _ = errors.write_all(&message);
-        let _ = errors.write_all(b"sh: Using dumb terminal settings.\n");
+        message.extend_from_slice(b"sh: Using dumb terminal settings.\n");
+        if sh.io.stderr().write_all(&message).is_err() {
+            // Terminal fallback is already installed; stderr has no fallback sink.
+        }
     }
 }
 

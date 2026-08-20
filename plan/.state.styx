@@ -5336,4 +5336,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.no-abi-scalars-core}
     )}
+    {id audit-ignored-results, covered_rules (
+        idiom.no-ignored-results
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.no-ignored-results}
+    )}
 )

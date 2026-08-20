@@ -7,8 +7,8 @@
 
 use crate::context::Shell;
 use crate::error::Error;
+use crate::output::Dest;
 use bstr::{BStr, BString};
-use std::io::Write;
 
 mod dialect;
 pub(crate) use dialect::Dialect;
@@ -277,7 +277,7 @@ fn minus_o(
     if name.is_none() {
         if enabled {
             let heading = b"Current option settings\n";
-            let _ = sh.io.stdout().write_all(heading);
+            sh.write_output(Dest::Stdout, heading)?;
             for spec in OPTION_SPECS {
                 let mut line = spec.name.to_vec();
                 if line.len() < 16 {
@@ -288,7 +288,7 @@ fn minus_o(
                 } else {
                     b"off\n"
                 });
-                let _ = sh.io.stdout().write_all(&line);
+                sh.write_output(Dest::Stdout, &line)?;
             }
         } else {
             for spec in OPTION_SPECS {
@@ -300,7 +300,7 @@ fn minus_o(
                 });
                 line.extend_from_slice(spec.name);
                 line.push(b'\n');
-                let _ = sh.io.stdout().write_all(&line);
+                sh.write_output(Dest::Stdout, &line)?;
             }
         }
     } else {

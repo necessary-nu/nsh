@@ -11,13 +11,11 @@
 // [spec:nsh:req:idiom.evaluator-control-flow]
 use crate::context::Shell;
 use crate::error::Error;
-use bstr::{BStr, BString, ByteSlice};
-use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
-use std::io::Write;
-
 use crate::eval::Flow;
 use crate::exec::{Command, CommandSearch, PathCursor, find_command, padvance};
 use crate::output::Dest;
+use bstr::{BStr, BString, ByteSlice};
+use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 
 // [spec:dash:def:exec.typecmd-fn]
 // [spec:dash:sem:exec.typecmd-fn]
@@ -63,7 +61,7 @@ pub(crate) fn describe_command(
 
     'out_label: {
         if verbose {
-            let _ = sh.io.get(dest).write_all(command);
+            sh.write_output(dest, command)?;
         }
 
         /* First look at the keywords */
@@ -73,7 +71,7 @@ pub(crate) fn describe_command(
             } else {
                 command.as_bytes()
             };
-            let _ = sh.io.get(dest).write_all(bytes);
+            sh.write_output(dest, bytes)?;
             break 'out_label;
         }
 
@@ -82,12 +80,12 @@ pub(crate) fn describe_command(
             if verbose {
                 let mut record = b" is an alias for ".to_vec();
                 record.extend_from_slice(&alias);
-                let _ = sh.io.get(dest).write_all(&record);
+                sh.write_output(dest, &record)?;
             } else {
                 let line = crate::alias::printalias(command, alias.as_slice().as_bstr());
-                let io = sh.io.get(dest);
-                let _ = io.write_all(b"alias ");
-                let _ = io.write_all(&line);
+                let mut record = b"alias ".to_vec();
+                record.extend_from_slice(&line);
+                sh.write_output(dest, &record)?;
                 return Ok(Flow::Done((0).into()));
             }
             break 'out_label;
@@ -148,17 +146,17 @@ pub(crate) fn describe_command(
                     }
                     record.push(b' ');
                     record.extend_from_slice(path_bytes);
-                    let _ = sh.io.get(dest).write_all(&record);
+                    sh.write_output(dest, &record)?;
                 } else {
-                    let _ = sh.io.get(dest).write_all(path_bytes);
+                    sh.write_output(dest, path_bytes)?;
                 }
             }
 
             Command::Function(_) => {
                 if verbose {
-                    let _ = sh.io.get(dest).write_all(b" is a shell function");
+                    sh.write_output(dest, b" is a shell function")?;
                 } else {
-                    let _ = sh.io.get(dest).write_all(command);
+                    sh.write_output(dest, command)?;
                 }
             }
 
@@ -169,21 +167,21 @@ pub(crate) fn describe_command(
                     } else {
                         b" is a shell builtin"
                     };
-                    let _ = sh.io.get(dest).write_all(record);
+                    sh.write_output(dest, record)?;
                 } else {
-                    let _ = sh.io.get(dest).write_all(command);
+                    sh.write_output(dest, command)?;
                 }
             }
 
             Command::Unknown => {
                 if verbose {
-                    let _ = sh.io.get(dest).write_all(b": not found\n");
+                    sh.write_output(dest, b": not found\n")?;
                 }
                 return Ok(Flow::Done((127).into()));
             }
         }
     }
     // out:
-    let _ = sh.io.get(dest).write_all(b"\n");
+    sh.write_output(dest, b"\n")?;
     Ok(Flow::Done((0).into()))
 }

@@ -4,12 +4,12 @@
 //! owned snapshot of either the positional parameters or explicit operands.
 
 use bstr::{BStr, BString};
-use std::io::Write;
 
 use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
 use crate::options::Options;
+use crate::output::Dest;
 use crate::var::{CallbackPolicy, VariableAttributes, set_bytes, setvarint_bytes, unset_bytes};
 
 // [spec:dash:def:options.getoptscmd-fn]
@@ -137,7 +137,7 @@ fn getopts(sh: &mut Shell, optstr: &BStr, optvar: &BStr, words: &[BString]) -> R
                 message.extend_from_slice(b": Illegal option -");
                 message.push(option);
                 message.push(b'\n');
-                let _ = sh.io.stderr().write_all(&message);
+                sh.write_output(Dest::Stderr, &message)?;
                 unset_bytes(sh, BStr::new(b"OPTARG"))?;
             }
             option = b'?';
@@ -176,7 +176,7 @@ fn getopts(sh: &mut Shell, optstr: &BStr, optvar: &BStr, words: &[BString]) -> R
                     message.extend_from_slice(b": No arg for -");
                     message.push(option);
                     message.extend_from_slice(b" option\n");
-                    let _ = sh.io.stderr().write_all(&message);
+                    sh.write_output(Dest::Stderr, &message)?;
                     unset_bytes(sh, BStr::new(b"OPTARG"))?;
                     option = b'?';
                 }
