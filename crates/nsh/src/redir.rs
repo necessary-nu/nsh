@@ -567,16 +567,8 @@ fn openhere(sh: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error
     let (pip, memfd) = sh_pipe(sh, len > PIPESIZE)?;
 
     if memfd || len <= PIPESIZE {
-        /* The return is discarded, as the C discards it, and the 8.3
-         * audit flagged both this and the sibling in the forked child
-         * below as places an interrupt could be dropped. They are not:
-         * `output::write_fd` retries EINTR internally and the output path
-         * is deliberately *not* a poll site -- dash collects output
-         * errors in `outerr` and checks them separately rather than
-         * raising, and making it fallible is the shape 4.3 argues
-         * against. They become live the day someone changes that, and
-         * that is a different node's decision. */
-        crate::output::xwrite(&pip.write, p);
+        nsh_platform::write_all(&pip.write, p)
+            .map_err(|error| here_document_write_error(sh, error))?;
         let _ = nsh_platform::seek_start(&pip.write);
         /* goto out */
         drop(pip.write);
@@ -589,13 +581,23 @@ fn openhere(sh: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error
     ) {
         drop(pip.read);
         nsh_platform::configure_here_document_writer_signals();
-        crate::output::xwrite(&pip.write, p);
+        if let Err(error) = nsh_platform::write_all(&pip.write, p) {
+            drop(here_document_write_error(sh, error));
+            crate::shell::flush_coverage();
+            nsh_platform::exit_immediately(1);
+        }
         crate::shell::flush_coverage();
         nsh_platform::exit_immediately(0);
     }
     /* out: */
     drop(pip.write);
     Ok(pip.read)
+}
+
+fn here_document_write_error(sh: &mut Shell, error: std::io::Error) -> Error {
+    let mut message = b"here document write error: ".to_vec();
+    message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
+    sh.diagnostics().sh_error_value(&message)
 }
 
 /*

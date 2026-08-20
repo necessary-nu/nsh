@@ -788,7 +788,7 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
         cur_pf(&mut sh.input).eof = 3;
         return Ok(InputUnit::EndOfInput);
     }
-    sh.io.flushall();
+    let _ = sh.io.flushall();
 
     let buffered = crate::error::with_interrupts_deferred(sh, |sh| {
         let mut q = cur_pf(&mut sh.input).pos;

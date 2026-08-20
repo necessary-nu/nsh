@@ -535,7 +535,7 @@ impl Diagnostics<'_> {
     pub fn report(&mut self, e: Error) -> Error {
         self.sh_warnx(e.message());
 
-        self.io.flushall();
+        let _ = self.io.flushall();
         e
     }
 
@@ -567,7 +567,7 @@ impl Diagnostics<'_> {
         };
         let _ = self.io.stderr().write_all(msg);
         let _ = self.io.stderr().write_all(b"\n");
-        self.io.flushall();
+        let _ = self.io.flushall();
         e
     }
 
@@ -588,7 +588,7 @@ impl Diagnostics<'_> {
         let _ = errors.write_all(b": ");
         let _ = errors.write_all(msg);
         let _ = errors.write_all(b"\n");
-        self.io.flushall();
+        let _ = self.io.flushall();
         Error::reported(self.line, status)
     }
 

@@ -1803,8 +1803,7 @@ fn evalbltin(
             .expect("non-exit builtin control carries a command status");
         /* Every `?` and every `Flow::Exit` above skips the rest of this,
          * exactly as the C's `goto cmddone` skipped it. */
-        sh.io.flushall();
-        if crate::output::outerr(sh.io.stdout()) != 0 {
+        if sh.io.flushall().is_err() {
             // [spec:nsh:req:compat.smoosh.error-contracts]
             sh.diagnostics().command_warnx(b"I/O error");
             status = ExitStatus::ERROR;

@@ -1510,7 +1510,7 @@ pub(crate) fn showpipe(sh: &mut crate::context::Shell, jp: JobId, dest: Dest) {
         outcmd(sh, jp, sp, dest);
     }
     let _ = sh.io.get(dest).write_all(b"\n");
-    sh.io.flushall();
+    let _ = sh.io.flushall();
 }
 
 // [spec:dash:def:jobs.xtcsetpgrp-fn]

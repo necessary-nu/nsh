@@ -20,6 +20,7 @@ const ALIASES: &str = include_str!("../src/alias.rs");
 const ERRORS: &str = include_str!("../src/error.rs");
 const INPUT: &str = include_str!("../src/input.rs");
 const MAIL: &str = include_str!("../src/mail.rs");
+const OUTPUT: &str = include_str!("../src/output.rs");
 
 fn rust_sources_below(directory: &Path, sources: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(directory).expect("source directory is readable") {
@@ -110,6 +111,33 @@ fn subsystem_helpers_use_narrow_state() {
         (MAIL, "impl MailState"),
     ] {
         assert!(source.contains(required), "missing {required}");
+    }
+}
+
+// [spec:nsh:req:idiom.output-results/test]
+#[test]
+fn output_failures_are_returned() {
+    for required in [
+        "impl Write for Output",
+        "pub(crate) fn flushall(&mut self) -> io::Result<()> {",
+        "self.stdout.flush()",
+    ] {
+        assert!(OUTPUT.contains(required), "missing {required}");
+    }
+
+    for forbidden in [
+        "OUTPUT_ERR",
+        "pub flags:",
+        "fn outerr(",
+        "fn remember_error",
+        "-> c_int {\n    if nsh_platform::write_all",
+        "pub fn outmem(",
+        "pub fn xwrite(",
+    ] {
+        assert!(
+            !OUTPUT.contains(forbidden),
+            "output retains error side channel {forbidden:?}"
+        );
     }
 }
 

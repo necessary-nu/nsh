@@ -694,7 +694,7 @@ pub fn exitshell(
      * below. Dropping the diagnostic is that frame, exactly -- it caught
      * and went on -- and it is why the frame itself can go. */
     drop(crate::jobs::setjobctl(sh, 0));
-    sh.io.flushall();
+    let _ = sh.io.flushall();
     crate::shell::flush_coverage();
     sh.status
 }

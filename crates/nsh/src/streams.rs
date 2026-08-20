@@ -128,7 +128,7 @@ impl Default for Streams {
 impl crate::context::Shell {
     /// Take everything captured on the shell's stdout since the last call.
     pub fn take_captured_stdout(&mut self) -> std::io::Result<bstr::BString> {
-        self.io.flushall();
+        self.io.flushall()?;
         self.take_captured_stream(1)
     }
 

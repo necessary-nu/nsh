@@ -5306,4 +5306,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.narrow-shell-context}
     )}
+    {id modernize-output-error-results, covered_rules (
+        idiom.output-results
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.output-results}
+    )}
 )
