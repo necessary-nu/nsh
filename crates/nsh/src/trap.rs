@@ -221,7 +221,7 @@ impl crate::context::Shell {
 pub fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
     let simplecmd: c_int;
 
-    simplecmd = crate::parser::issimplecmd(n, BStr::new(crate::builtins::TRAPCMD.name.to_bytes()));
+    simplecmd = crate::parser::issimplecmd(n, BStr::new(b"trap"));
 
     crate::error::with_interrupts_deferred(sh, |sh| {
         /* One guard for the whole loop rather than one per slot. The

@@ -9,36 +9,7 @@
 //! is named after the builtin even when the language would rather it were
 //! not.
 //!
-//! This file is the port of `src/builtins.c` / `src/builtins.h`.
-//!
-//! Both files are *generated* at build time by `src/mkbuiltins` (a shell
-//! script) from `src/builtins.def.in`, so nothing here carries
-//! `[spec:dash:…]` annotations — there is no C source file to annotate.
-//!
-//! The table includes the supported `fc` (`histcmd`) and `ulimit` builtins.
-//!
-//! `mkbuiltins` sorts the table by name with `LC_COLLATE=C`, and
-//! `exec.c`'s `find_builtin` binary-searches it, so **the order below is
-//! load-bearing**.
-//!
-//! Flags come from the `-` options in `builtins.def.in`: `-s` (posix special
-//! builtin) sets `BUILTIN_SPECIAL | BUILTIN_REGULAR`, `-u` (posix standard
-//! utility) sets `BUILTIN_REGULAR`, `-a` (posix assignment builtin) sets
-//! `BUILTIN_ASSIGN`, and `-n` (special entry point) makes the function
-//! pointer NULL — which is why `eval` has no `builtin` here: `eval.c` calls
-//! `evalcmd` directly through its three-argument entry point.
-
-use core::ffi::CStr;
-
 use bstr::BStr;
-use core::ffi::c_uint;
-
-/// posix 'special builtin'
-pub const BUILTIN_SPECIAL: c_uint = 0x1;
-/// posix 'standard utility'
-pub const BUILTIN_REGULAR: c_uint = 0x2;
-/// posix 'assignment builtin'
-pub const BUILTIN_ASSIGN: c_uint = 0x4;
 
 /// A builtin's entry point.
 ///
@@ -75,14 +46,141 @@ pub const BUILTIN_ASSIGN: c_uint = 0x4;
 /// `set -e` abort inside them has to travel back out through them. The
 /// remaining thirty produce `Flow::Done` and nothing else, which is what
 /// the C's `int` said.
-pub type Builtin =
+pub(crate) type Builtin =
     fn(&mut crate::context::Shell, &[&BStr]) -> Result<crate::eval::Flow, crate::error::Error>;
 
-pub struct builtincmd {
-    pub name: &'static CStr,
-    /// `None` is the C `NULL`: the command has a special entry point.
-    pub builtin: Option<Builtin>,
-    pub flags: c_uint,
+/// Stable identity for the handful of built-ins whose evaluator semantics
+/// differ from an ordinary registry dispatch.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BuiltinId {
+    Empty,
+    Dot,
+    Colon,
+    Bracket,
+    Alias,
+    Bg,
+    Break,
+    Cd,
+    Chdir,
+    Command,
+    Continue,
+    Echo,
+    Eval,
+    Exec,
+    Exit,
+    Export,
+    False,
+    Fc,
+    Fg,
+    Getopts,
+    Hash,
+    History,
+    Jobs,
+    Kill,
+    Local,
+    Printf,
+    Pwd,
+    Read,
+    Readonly,
+    Return,
+    Set,
+    Shift,
+    Source,
+    Test,
+    Times,
+    Trap,
+    True,
+    Type,
+    Ulimit,
+    Umask,
+    Unalias,
+    Unset,
+    Wait,
+    Shopt,
+}
+
+/// Typed, independent properties of a built-in command.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct BuiltinAttributes {
+    special: bool,
+    regular: bool,
+    assignment: bool,
+}
+
+impl BuiltinAttributes {
+    const NONE: Self = Self {
+        special: false,
+        regular: false,
+        assignment: false,
+    };
+    const REGULAR: Self = Self {
+        special: false,
+        regular: true,
+        assignment: false,
+    };
+    const REGULAR_ASSIGNMENT: Self = Self {
+        special: false,
+        regular: true,
+        assignment: true,
+    };
+    const SPECIAL: Self = Self {
+        special: true,
+        regular: true,
+        assignment: false,
+    };
+    const SPECIAL_ASSIGNMENT: Self = Self {
+        special: true,
+        regular: true,
+        assignment: true,
+    };
+
+    pub(crate) const fn is_special(self) -> bool {
+        self.special
+    }
+
+    pub(crate) const fn is_regular(self) -> bool {
+        self.regular
+    }
+
+    pub(crate) const fn takes_assignments(self) -> bool {
+        self.assignment
+    }
+}
+
+/// Every registry row has a handler; exceptional call signatures are enum
+/// variants rather than nullable function pointers.
+#[derive(Clone, Copy)]
+pub(crate) enum BuiltinHandler {
+    Standard(Builtin),
+    Eval,
+    History,
+}
+
+/// One byte-preserving, fully typed built-in registry entry.
+// [spec:nsh:req:idiom.builtin-registry]
+pub(crate) struct BuiltinSpec {
+    id: BuiltinId,
+    name: &'static [u8],
+    handler: BuiltinHandler,
+    attributes: BuiltinAttributes,
+}
+
+impl BuiltinSpec {
+    pub(crate) const fn id(&self) -> BuiltinId {
+        self.id
+    }
+
+    pub(crate) fn name(&self) -> &'static BStr {
+        BStr::new(self.name)
+    }
+
+    pub(crate) const fn handler(&self) -> BuiltinHandler {
+        self.handler
+    }
+
+    pub(crate) const fn attributes(&self) -> BuiltinAttributes {
+        self.attributes
+    }
 }
 
 /// The words a builtin is handed, out of the fields `evalcommand`
@@ -145,10 +243,11 @@ pub mod wait;
 /// The C keeps it in `eval.c` beside `evalcommand`, which is the only
 /// thing that reaches for it. It is a table row, so it lives with the
 /// table.
-pub(crate) static bltin: builtincmd = builtincmd {
-    name: c"",
-    builtin: Some(bltincmd),
-    flags: BUILTIN_REGULAR,
+pub(crate) static EMPTY_BUILTIN: BuiltinSpec = BuiltinSpec {
+    id: BuiltinId::Empty,
+    name: b"",
+    handler: BuiltinHandler::Standard(bltincmd),
+    attributes: BuiltinAttributes::REGULAR,
 };
 
 // [spec:dash:def:eval.bltincmd-fn]
@@ -164,8 +263,6 @@ fn bltincmd(
     Ok(crate::eval::Flow::Done((sh.eval.back_exitstatus).into()))
 }
 
-pub const NUMBUILTINS: usize = 42;
-
 // [spec:posix:req:builtin.special.supported-and-output]
 // [spec:posix:def:builtin.special.term-built-in]
 // [spec:posix:req:builtin.special.not-exec-accessible]
@@ -173,216 +270,258 @@ pub const NUMBUILTINS: usize = 42;
 // [spec:posix:req:xcu.builtin.exec-accessible]
 // [spec:posix:req:xcu.intrinsic-utilities]
 // [spec:posix:req:xcu.intrinsic.additional-implementation-defined]
-pub static builtincmd: [builtincmd; NUMBUILTINS] = [
-    builtincmd {
-        name: c".",
-        builtin: Some(dot::dotcmd),
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+pub(crate) static BUILTINS: &[BuiltinSpec] = &[
+    BuiltinSpec {
+        id: BuiltinId::Dot,
+        name: b".",
+        handler: BuiltinHandler::Standard(dot::dotcmd),
+        attributes: BuiltinAttributes::SPECIAL,
     }, // 0
-    builtincmd {
-        name: c":",
-        builtin: Some(r#true::truecmd),
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Colon,
+        name: b":",
+        handler: BuiltinHandler::Standard(r#true::truecmd),
+        attributes: BuiltinAttributes::SPECIAL,
     }, // 1
-    builtincmd {
-        name: c"[",
-        builtin: Some(test::testcmd),
-        flags: 0,
+    BuiltinSpec {
+        id: BuiltinId::Bracket,
+        name: b"[",
+        handler: BuiltinHandler::Standard(test::testcmd),
+        attributes: BuiltinAttributes::NONE,
     }, // 2
-    builtincmd {
-        name: c"alias",
-        builtin: Some(alias::aliascmd),
-        flags: BUILTIN_REGULAR | BUILTIN_ASSIGN,
+    BuiltinSpec {
+        id: BuiltinId::Alias,
+        name: b"alias",
+        handler: BuiltinHandler::Standard(alias::aliascmd),
+        attributes: BuiltinAttributes::REGULAR_ASSIGNMENT,
     }, // 3
-    builtincmd {
-        name: c"bg",
-        builtin: Some(fg::fgcmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Bg,
+        name: b"bg",
+        handler: BuiltinHandler::Standard(fg::fgcmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 4
-    builtincmd {
-        name: c"break",
-        builtin: Some(r#break::breakcmd),
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Break,
+        name: b"break",
+        handler: BuiltinHandler::Standard(r#break::breakcmd),
+        attributes: BuiltinAttributes::SPECIAL,
     }, // 5
-    builtincmd {
-        name: c"cd",
-        builtin: Some(cd::cdcmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Cd,
+        name: b"cd",
+        handler: BuiltinHandler::Standard(cd::cdcmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 6
-    builtincmd {
-        name: c"chdir",
-        builtin: Some(cd::cdcmd),
-        flags: 0,
+    BuiltinSpec {
+        id: BuiltinId::Chdir,
+        name: b"chdir",
+        handler: BuiltinHandler::Standard(cd::cdcmd),
+        attributes: BuiltinAttributes::NONE,
     }, // 7
-    builtincmd {
-        name: c"command",
-        builtin: Some(command::commandcmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Command,
+        name: b"command",
+        handler: BuiltinHandler::Standard(command::commandcmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 8
-    builtincmd {
-        name: c"continue",
-        builtin: Some(r#break::breakcmd),
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Continue,
+        name: b"continue",
+        handler: BuiltinHandler::Standard(r#break::breakcmd),
+        attributes: BuiltinAttributes::SPECIAL,
     }, // 9
-    builtincmd {
-        name: c"echo",
-        builtin: Some(echo::echocmd),
-        flags: 0,
+    BuiltinSpec {
+        id: BuiltinId::Echo,
+        name: b"echo",
+        handler: BuiltinHandler::Standard(echo::echocmd),
+        attributes: BuiltinAttributes::NONE,
     }, // 10
-    builtincmd {
-        name: c"eval",
-        builtin: None,
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Eval,
+        name: b"eval",
+        handler: BuiltinHandler::Eval,
+        attributes: BuiltinAttributes::SPECIAL,
     }, // 11
-    builtincmd {
-        name: c"exec",
-        builtin: Some(exec::execcmd),
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Exec,
+        name: b"exec",
+        handler: BuiltinHandler::Standard(exec::execcmd),
+        attributes: BuiltinAttributes::SPECIAL,
     }, // 12
-    builtincmd {
-        name: c"exit",
-        builtin: Some(exit::exitcmd),
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Exit,
+        name: b"exit",
+        handler: BuiltinHandler::Standard(exit::exitcmd),
+        attributes: BuiltinAttributes::SPECIAL,
     }, // 13
-    builtincmd {
-        name: c"export",
-        builtin: Some(export::exportcmd),
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN,
+    BuiltinSpec {
+        id: BuiltinId::Export,
+        name: b"export",
+        handler: BuiltinHandler::Standard(export::exportcmd),
+        attributes: BuiltinAttributes::SPECIAL_ASSIGNMENT,
     }, // 14
-    builtincmd {
-        name: c"false",
-        builtin: Some(r#false::falsecmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::False,
+        name: b"false",
+        handler: BuiltinHandler::Standard(r#false::falsecmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 15
-    builtincmd {
-        name: c"fc",
-        builtin: Some(fc::histcmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Fc,
+        name: b"fc",
+        handler: BuiltinHandler::History,
+        attributes: BuiltinAttributes::REGULAR,
     }, // 16
-    builtincmd {
-        name: c"fg",
-        builtin: Some(fg::fgcmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Fg,
+        name: b"fg",
+        handler: BuiltinHandler::Standard(fg::fgcmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 17
-    builtincmd {
-        name: c"getopts",
-        builtin: Some(getopts::getoptscmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Getopts,
+        name: b"getopts",
+        handler: BuiltinHandler::Standard(getopts::getoptscmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 18
-    builtincmd {
-        name: c"hash",
-        builtin: Some(hash::hashcmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Hash,
+        name: b"hash",
+        handler: BuiltinHandler::Standard(hash::hashcmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 19
-    builtincmd {
-        name: c"history",
-        builtin: Some(history::historycmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::History,
+        name: b"history",
+        handler: BuiltinHandler::Standard(history::historycmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 20
-    builtincmd {
-        name: c"jobs",
-        builtin: Some(jobs::jobscmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Jobs,
+        name: b"jobs",
+        handler: BuiltinHandler::Standard(jobs::jobscmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 21
-    builtincmd {
-        name: c"kill",
-        builtin: Some(kill::killcmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Kill,
+        name: b"kill",
+        handler: BuiltinHandler::Standard(kill::killcmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 22
-    builtincmd {
-        name: c"local",
-        builtin: Some(local::localcmd),
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN,
+    BuiltinSpec {
+        id: BuiltinId::Local,
+        name: b"local",
+        handler: BuiltinHandler::Standard(local::localcmd),
+        attributes: BuiltinAttributes::SPECIAL_ASSIGNMENT,
     }, // 23
-    builtincmd {
-        name: c"printf",
-        builtin: Some(printf::printfcmd),
-        flags: 0,
+    BuiltinSpec {
+        id: BuiltinId::Printf,
+        name: b"printf",
+        handler: BuiltinHandler::Standard(printf::printfcmd),
+        attributes: BuiltinAttributes::NONE,
     }, // 24
-    builtincmd {
-        name: c"pwd",
-        builtin: Some(pwd::pwdcmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Pwd,
+        name: b"pwd",
+        handler: BuiltinHandler::Standard(pwd::pwdcmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 25
-    builtincmd {
-        name: c"read",
-        builtin: Some(read::readcmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Read,
+        name: b"read",
+        handler: BuiltinHandler::Standard(read::readcmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 26
-    builtincmd {
-        name: c"readonly",
-        builtin: Some(export::exportcmd),
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR | BUILTIN_ASSIGN,
+    BuiltinSpec {
+        id: BuiltinId::Readonly,
+        name: b"readonly",
+        handler: BuiltinHandler::Standard(export::exportcmd),
+        attributes: BuiltinAttributes::SPECIAL_ASSIGNMENT,
     }, // 27
-    builtincmd {
-        name: c"return",
-        builtin: Some(r#return::returncmd),
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Return,
+        name: b"return",
+        handler: BuiltinHandler::Standard(r#return::returncmd),
+        attributes: BuiltinAttributes::SPECIAL,
     }, // 28
-    builtincmd {
-        name: c"set",
-        builtin: Some(set::setcmd),
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Set,
+        name: b"set",
+        handler: BuiltinHandler::Standard(set::setcmd),
+        attributes: BuiltinAttributes::SPECIAL,
     }, // 29
-    builtincmd {
-        name: c"shift",
-        builtin: Some(shift::shiftcmd),
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Shift,
+        name: b"shift",
+        handler: BuiltinHandler::Standard(shift::shiftcmd),
+        attributes: BuiltinAttributes::SPECIAL,
     }, // 30
-    builtincmd {
-        name: c"source",
-        builtin: Some(dot::sourcecmd),
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Source,
+        name: b"source",
+        handler: BuiltinHandler::Standard(dot::sourcecmd),
+        attributes: BuiltinAttributes::SPECIAL,
     }, // 31
-    builtincmd {
-        name: c"test",
-        builtin: Some(test::testcmd),
-        flags: 0,
+    BuiltinSpec {
+        id: BuiltinId::Test,
+        name: b"test",
+        handler: BuiltinHandler::Standard(test::testcmd),
+        attributes: BuiltinAttributes::NONE,
     }, // 32
-    builtincmd {
-        name: c"times",
-        builtin: Some(times::timescmd),
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Times,
+        name: b"times",
+        handler: BuiltinHandler::Standard(times::timescmd),
+        attributes: BuiltinAttributes::SPECIAL,
     }, // 33
-    builtincmd {
-        name: c"trap",
-        builtin: Some(trap::trapcmd),
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Trap,
+        name: b"trap",
+        handler: BuiltinHandler::Standard(trap::trapcmd),
+        attributes: BuiltinAttributes::SPECIAL,
     }, // 34
-    builtincmd {
-        name: c"true",
-        builtin: Some(r#true::truecmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::True,
+        name: b"true",
+        handler: BuiltinHandler::Standard(r#true::truecmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 35
-    builtincmd {
-        name: c"type",
-        builtin: Some(r#type::typecmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Type,
+        name: b"type",
+        handler: BuiltinHandler::Standard(r#type::typecmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 36
-    builtincmd {
-        name: c"ulimit",
-        builtin: Some(ulimit::ulimitcmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Ulimit,
+        name: b"ulimit",
+        handler: BuiltinHandler::Standard(ulimit::ulimitcmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 37
-    builtincmd {
-        name: c"umask",
-        builtin: Some(umask::umaskcmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Umask,
+        name: b"umask",
+        handler: BuiltinHandler::Standard(umask::umaskcmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 38
-    builtincmd {
-        name: c"unalias",
-        builtin: Some(unalias::unaliascmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Unalias,
+        name: b"unalias",
+        handler: BuiltinHandler::Standard(unalias::unaliascmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 39
-    builtincmd {
-        name: c"unset",
-        builtin: Some(unset::unsetcmd),
-        flags: BUILTIN_SPECIAL | BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Unset,
+        name: b"unset",
+        handler: BuiltinHandler::Standard(unset::unsetcmd),
+        attributes: BuiltinAttributes::SPECIAL,
     }, // 40
-    builtincmd {
-        name: c"wait",
-        builtin: Some(wait::waitcmd),
-        flags: BUILTIN_REGULAR,
+    BuiltinSpec {
+        id: BuiltinId::Wait,
+        name: b"wait",
+        handler: BuiltinHandler::Standard(wait::waitcmd),
+        attributes: BuiltinAttributes::REGULAR,
     }, // 41
 ];
 
@@ -390,48 +529,12 @@ pub static builtincmd: [builtincmd; NUMBUILTINS] = [
 /// current shell has Bash Compatibility Mode enabled. Keeping a separate
 /// sorted table prevents profile-only names from leaking into default mode
 /// and permits a future Bash implementation to override a baseline entry.
-pub static bash_builtincmd: [builtincmd; 1] = [builtincmd {
-    name: c"shopt",
-    builtin: Some(shopt::shoptcmd),
-    flags: 0,
+pub(crate) static BASH_BUILTINS: &[BuiltinSpec] = &[BuiltinSpec {
+    id: BuiltinId::Shopt,
+    name: b"shopt",
+    handler: BuiltinHandler::Standard(shopt::shoptcmd),
+    attributes: BuiltinAttributes::NONE,
 }];
-
-// The `*CMD` pointers of builtins.h: `#define NAME (builtincmd + n)`.
-pub static ALIASCMD: &builtincmd = &builtincmd[3];
-pub static BGCMD: &builtincmd = &builtincmd[4];
-pub static BREAKCMD: &builtincmd = &builtincmd[5];
-pub static CDCMD: &builtincmd = &builtincmd[6];
-pub static COMMANDCMD: &builtincmd = &builtincmd[8];
-pub static DOTCMD: &builtincmd = &builtincmd[0];
-pub static ECHOCMD: &builtincmd = &builtincmd[10];
-pub static EVALCMD: &builtincmd = &builtincmd[11];
-pub static EXECCMD: &builtincmd = &builtincmd[12];
-pub static EXITCMD: &builtincmd = &builtincmd[13];
-pub static EXPORTCMD: &builtincmd = &builtincmd[14];
-pub static FALSECMD: &builtincmd = &builtincmd[15];
-pub static FGCMD: &builtincmd = &builtincmd[17];
-pub static GETOPTSCMD: &builtincmd = &builtincmd[18];
-pub static HASHCMD: &builtincmd = &builtincmd[19];
-pub static HISTCMD: &builtincmd = &builtincmd[16];
-pub static JOBSCMD: &builtincmd = &builtincmd[21];
-pub static KILLCMD: &builtincmd = &builtincmd[22];
-pub static LOCALCMD: &builtincmd = &builtincmd[23];
-pub static PRINTFCMD: &builtincmd = &builtincmd[24];
-pub static PWDCMD: &builtincmd = &builtincmd[25];
-pub static READCMD: &builtincmd = &builtincmd[26];
-pub static RETURNCMD: &builtincmd = &builtincmd[28];
-pub static SETCMD: &builtincmd = &builtincmd[29];
-pub static SHIFTCMD: &builtincmd = &builtincmd[30];
-pub static TESTCMD: &builtincmd = &builtincmd[2];
-pub static TIMESCMD: &builtincmd = &builtincmd[33];
-pub static TRAPCMD: &builtincmd = &builtincmd[34];
-pub static TRUECMD: &builtincmd = &builtincmd[1];
-pub static TYPECMD: &builtincmd = &builtincmd[36];
-pub static ULIMITCMD: &builtincmd = &builtincmd[37];
-pub static UMASKCMD: &builtincmd = &builtincmd[38];
-pub static UNALIASCMD: &builtincmd = &builtincmd[39];
-pub static UNSETCMD: &builtincmd = &builtincmd[40];
-pub static WAITCMD: &builtincmd = &builtincmd[41];
 
 #[cfg(test)]
 mod tests {
@@ -465,21 +568,19 @@ mod tests {
 
     /// Every row the table names resolves, which is the check that a
     /// module move did not leave a name pointing at the wrong function.
+    // [spec:nsh:req:idiom.builtin-registry/test]
     #[test]
-    fn every_row_has_an_entry_point() {
-        for cmd in &builtincmd {
-            let name = cmd.name.to_bytes();
-            assert_eq!(
-                cmd.builtin.is_none(),
-                name == b"eval",
-                "only `eval` has a special entry point"
-            );
+    fn every_row_has_a_typed_handler() {
+        for spec in BUILTINS {
+            match (spec.id(), spec.handler()) {
+                (BuiltinId::Eval, BuiltinHandler::Eval)
+                | (BuiltinId::Fc, BuiltinHandler::History)
+                | (_, BuiltinHandler::Standard(_)) => {}
+                (id, _) => panic!("{id:?} has the wrong handler kind"),
+            }
         }
-        for cmd in &bash_builtincmd {
-            assert!(
-                cmd.builtin.is_some(),
-                "Bash-only rows use ordinary entry points"
-            );
+        for spec in BASH_BUILTINS {
+            assert!(matches!(spec.handler(), BuiltinHandler::Standard(_)));
         }
     }
 }

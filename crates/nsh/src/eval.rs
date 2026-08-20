@@ -33,7 +33,7 @@ use core::ffi::c_int;
 use nsh_platform::Descriptor;
 use std::io::Write as _;
 
-use crate::builtins::{BUILTIN_ASSIGN, BUILTIN_REGULAR, BUILTIN_SPECIAL, builtincmd};
+use crate::builtins::{BuiltinHandler, BuiltinId, BuiltinSpec};
 use crate::exec::{Command, DO_ERR, DO_NOFUNC, DO_REGBLTIN, find_command, shellexec};
 use crate::expand::{ExpansionMode, arglist, strlist};
 use crate::jobs::{FORK_NOJOB, JobId};
@@ -427,8 +427,8 @@ fn redirection_only_status(
     }
 }
 
-fn builtin_error_is_fatal(sh: &Shell, spclbltin: c_int, error: &Error) -> bool {
-    error.is_interrupt() || (spclbltin > 0 && sh.eval.signal_trap_depth == 0)
+fn builtin_error_is_fatal(sh: &Shell, special_builtin: bool, error: &Error) -> bool {
+    error.is_interrupt() || (special_builtin && sh.eval.signal_trap_depth == 0)
 }
 
 fn capture_local_control(flow: Flow, slot: &mut Option<Flow>) -> Result<(), Flow> {
@@ -1329,17 +1329,17 @@ fn evalcommand_in_scope(
     /* The C's `arglist.list`, which `parse_command_args` moves past the
      * `command [-p]` words while `osp` keeps the original head for `set -x`. */
     let mut head: usize = 0;
-    let mut resolved_command = Command::Builtin(&crate::builtins::bltin);
+    let mut resolved_command = Command::Builtin(&crate::builtins::EMPTY_BUILTIN);
     let jp: Option<JobId>;
     let lastarg: Option<usize>;
     let mut path: Option<BString> = None;
     let standard_path = crate::var::defpath();
-    let mut spclbltin: c_int;
+    let mut special_builtin: Option<bool>;
     let mut cmd_flag: c_int;
-    let mut execcmd: c_int;
+    let mut exec_builtin: bool;
     let mut status: ExitStatus;
     let mut variable_attributes: VariableAttributes;
-    let mut vlocal: c_int;
+    let mut use_local_variables: bool;
     let mut command_control: Option<Flow> = None;
 
     sh.eval.errlinno = command.line;
@@ -1362,15 +1362,15 @@ fn evalcommand_in_scope(
     sh.eval.back_exitstatus = ExitStatus::SUCCESS;
 
     cmd_flag = 0;
-    execcmd = 0;
-    spclbltin = -1;
+    exec_builtin = false;
+    special_builtin = None;
     variable_attributes = VariableAttributes::NONE;
-    vlocal = 0;
+    use_local_variables = false;
     argc = 0;
     argp = command.arguments.as_slice();
     osp = fill_arglist(sh, &mut arglist, &mut argp)?;
     if osp.is_some() {
-        let mut pseudovarflag: c_int = 0;
+        let mut assignments_are_arguments = false;
 
         loop {
             /* `find_command` can run a `%func` PATH file, which is shell
@@ -1393,7 +1393,7 @@ fn evalcommand_in_scope(
                 control => return Ok(control),
             }
 
-            vlocal += 1;
+            use_local_variables = true;
 
             /* implement bltin and command here */
             let Command::Builtin(builtin) = &resolved_command else {
@@ -1401,13 +1401,14 @@ fn evalcommand_in_scope(
             };
             let builtin = *builtin;
 
-            pseudovarflag = (builtin.flags & BUILTIN_ASSIGN) as c_int;
-            if spclbltin < 0 {
-                spclbltin = (builtin.flags & BUILTIN_SPECIAL) as c_int;
-                vlocal = spclbltin ^ (BUILTIN_SPECIAL as c_int);
+            assignments_are_arguments = builtin.attributes().takes_assignments();
+            if special_builtin.is_none() {
+                let special = builtin.attributes().is_special();
+                special_builtin = Some(special);
+                use_local_variables = !special;
             }
-            execcmd = core::ptr::eq(builtin, crate::builtins::EXECCMD) as c_int;
-            if !core::ptr::eq(builtin, crate::builtins::COMMANDCMD) {
+            exec_builtin = builtin.id() == BuiltinId::Exec;
+            if builtin.id() != BuiltinId::Command {
                 break;
             }
 
@@ -1429,7 +1430,7 @@ fn evalcommand_in_scope(
                 sh,
                 a,
                 Some(&mut arglist),
-                if pseudovarflag != 0
+                if assignments_are_arguments
                     && matches!(
                         a,
                         Node::Word(word)
@@ -1448,12 +1449,12 @@ fn evalcommand_in_scope(
 
         argc = (arglist.list.len() - head) as c_int;
 
-        if execcmd != 0 && argc > 1 {
+        if exec_builtin && argc > 1 {
             variable_attributes = VariableAttributes::EXPORTED;
         }
     }
 
-    resources.begin_local_variables(sh, vlocal != 0);
+    resources.begin_local_variables(sh, use_local_variables);
 
     lastarg = if sh.options.enabled(ShellOption::Interactive) && sh.eval.funcline == 0 && argc > 0 {
         Some(arglist.list.len() - 1)
@@ -1507,7 +1508,7 @@ fn evalcommand_in_scope(
                     "an unsplit expansion is one field"
                 );
 
-                if vlocal != 0 {
+                if use_local_variables {
                     crate::var::make_local_bytes(
                         sh,
                         crate::mystring::cstr_prefix(&varlist.list[spp].text),
@@ -1559,7 +1560,7 @@ fn evalcommand_in_scope(
             /* Now locate the command. */
             if !matches!(
                 &resolved_command,
-                Command::Builtin(builtin) if (builtin.flags & BUILTIN_REGULAR) != 0
+                Command::Builtin(builtin) if builtin.attributes().is_regular()
             ) {
                 if path.is_none() {
                     path = Some(crate::var::pathval(sh));
@@ -1625,7 +1626,7 @@ fn evalcommand_in_scope(
                              * error here would instead abort the shell and
                              * skip this command's ordinary cleanup. */
                             // [spec:nsh:req:compat.smoosh.trap-status]
-                            if builtin_error_is_fatal(sh, spclbltin, &e) {
+                            if builtin_error_is_fatal(sh, special_builtin.unwrap_or(false), &e) {
                                 return Err(e);
                             }
                             /* Reported already, and `evalbltin`'s epilogue
@@ -1709,7 +1710,7 @@ fn evalcommand_in_scope(
         sh.status = status;
 
         /* We have a redirection error. */
-        if spclbltin > 0 {
+        if special_builtin == Some(true) {
             /* POSIX's "an error in a special built-in exits a
              * non-interactive shell", and the C's textless
              * `exraise(EXERROR)`: no diagnostic is written here because
@@ -1744,7 +1745,7 @@ fn evalcommand_in_scope(
         // goto out
     }
     // out:
-    if execcmd != 0 {
+    if exec_builtin {
         resources.retain_redirections(sh);
     }
     resources.restore(sh);
@@ -1770,7 +1771,7 @@ fn evalcommand_in_scope(
 // [spec:dash:sem:eval.evalbltin-fn]
 fn evalbltin(
     sh: &mut Shell,
-    cmd: &'static builtincmd,
+    cmd: &'static BuiltinSpec,
     fields: &mut [strlist],
     context: EvalContext,
 ) -> Result<Flow, Error> {
@@ -1784,14 +1785,14 @@ fn evalbltin(
         .map(|field| BString::from(crate::mystring::cstr_prefix(&field.text)));
 
     let outcome = (|| -> Result<Flow, Error> {
-        let command_flow = if core::ptr::eq(cmd, crate::builtins::HISTCMD) {
-            crate::builtins::fc::histcmd_fields(sh, fields)?
-        } else {
-            let args = crate::builtins::args(fields);
-            if core::ptr::eq(cmd, crate::builtins::EVALCMD) {
+        let command_flow = match cmd.handler() {
+            BuiltinHandler::History => crate::builtins::fc::histcmd_fields(sh, fields)?,
+            BuiltinHandler::Eval => {
+                let args = crate::builtins::args(fields);
                 crate::builtins::eval::evalcmd(sh, &args, context)?
-            } else {
-                let entry = cmd.builtin.expect("a builtin with no special entry");
+            }
+            BuiltinHandler::Standard(entry) => {
+                let args = crate::builtins::args(fields);
                 entry(sh, &args)?
             }
         };

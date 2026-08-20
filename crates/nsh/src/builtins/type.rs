@@ -16,7 +16,6 @@ use core::ffi::c_int;
 use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 use std::io::Write;
 
-use crate::builtins::BUILTIN_SPECIAL;
 use crate::eval::Flow;
 use crate::exec::{Command, DO_ABS, PathCursor, find_command, padvance};
 use crate::output::Dest;
@@ -165,7 +164,7 @@ pub(crate) fn describe_command(
 
             Command::Builtin(builtin) => {
                 if verbose != 0 {
-                    let record: &[u8] = if (builtin.flags & BUILTIN_SPECIAL) != 0 {
+                    let record: &[u8] = if builtin.attributes().is_special() {
                         b" is a special shell builtin"
                     } else {
                         b" is a shell builtin"

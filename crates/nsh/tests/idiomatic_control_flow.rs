@@ -21,6 +21,7 @@ const ERRORS: &str = include_str!("../src/error.rs");
 const INPUT: &str = include_str!("../src/input.rs");
 const MAIL: &str = include_str!("../src/mail.rs");
 const OUTPUT: &str = include_str!("../src/output.rs");
+const BUILTINS: &str = include_str!("../src/builtins/mod.rs");
 
 fn rust_sources_below(directory: &Path, sources: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(directory).expect("source directory is readable") {
@@ -137,6 +138,38 @@ fn output_failures_are_returned() {
         assert!(
             !OUTPUT.contains(forbidden),
             "output retains error side channel {forbidden:?}"
+        );
+    }
+}
+
+// [spec:nsh:req:idiom.builtin-registry/test]
+#[test]
+fn builtin_registry_is_fully_typed() {
+    for required in [
+        "enum BuiltinId",
+        "struct BuiltinAttributes",
+        "enum BuiltinHandler",
+        "Standard(Builtin)",
+        "name: &'static [u8]",
+        "static BUILTINS: &[BuiltinSpec]",
+    ] {
+        assert!(BUILTINS.contains(required), "missing {required}");
+    }
+
+    for forbidden in [
+        "CStr",
+        "c_uint",
+        "name: c\"",
+        "BUILTIN_",
+        "NUMBUILTINS",
+        "Option<Builtin>",
+        "struct builtincmd",
+        "static builtincmd",
+        ".flags",
+    ] {
+        assert!(
+            !BUILTINS.contains(forbidden),
+            "builtin registry retains C representation {forbidden:?}"
         );
     }
 }

@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
-use crate::builtins::{BUILTIN_REGULAR, builtincmd};
+use crate::builtins::BuiltinSpec;
 use crate::error::{E_EXEC, Error};
 use crate::nodes::FunctionDefinition;
 
@@ -47,7 +47,7 @@ pub(crate) enum Command {
     External { path_index: c_int },
     // [spec:nsh:req:idiom.structural-ast]
     Function(FunctionDefinition),
-    Builtin(&'static builtincmd),
+    Builtin(&'static BuiltinSpec),
 }
 
 // [spec:dash:def:exec.tblentry]
@@ -72,7 +72,7 @@ impl tblentry {
     pub(crate) fn path_dependent(&self, builtinloc: c_int) -> bool {
         match self.command {
             Command::External { .. } => true,
-            Command::Builtin(cmd) => (cmd.flags & BUILTIN_REGULAR) == 0 && builtinloc > 0,
+            Command::Builtin(cmd) => !cmd.attributes().is_regular() && builtinloc > 0,
             _ => false,
         }
     }
@@ -486,7 +486,7 @@ pub fn find_command(
         let bit = match command {
             Command::Function(_) => DO_NOFUNC,
             Command::Builtin(command) => {
-                if (command.flags & BUILTIN_REGULAR) != 0 {
+                if command.attributes().is_regular() {
                     0
                 } else {
                     DO_REGBLTIN
@@ -509,7 +509,7 @@ pub fn find_command(
 
     let builtin_command = builtin(sh, name);
     if let Some(command) = builtin_command
-        && ((command.flags & BUILTIN_REGULAR) != 0
+        && (command.attributes().is_regular()
             || (act & DO_ALTPATH) != 0
             || sh.commands.builtinloc <= 0)
     {
@@ -652,17 +652,17 @@ fn native_string_error(
 
 // [spec:dash:def:exec.find-builtin-fn]
 // [spec:dash:sem:exec.find-builtin-fn]
-pub fn builtin(sh: &crate::context::Shell, name: &BStr) -> Option<&'static builtincmd> {
+pub fn builtin(sh: &crate::context::Shell, name: &BStr) -> Option<&'static BuiltinSpec> {
     if sh.options.dialect() == crate::options::Dialect::Bash
-        && let Ok(index) = crate::builtins::bash_builtincmd
-            .binary_search_by(|cmd| BStr::new(cmd.name.to_bytes()).cmp(name))
+        && let Ok(index) =
+            crate::builtins::BASH_BUILTINS.binary_search_by(|cmd| cmd.name().cmp(name))
     {
-        return Some(&crate::builtins::bash_builtincmd[index]);
+        return Some(&crate::builtins::BASH_BUILTINS[index]);
     }
-    crate::builtins::builtincmd
-        .binary_search_by(|cmd| BStr::new(cmd.name.to_bytes()).cmp(name))
+    crate::builtins::BUILTINS
+        .binary_search_by(|cmd| cmd.name().cmp(name))
         .ok()
-        .map(|index| &crate::builtins::builtincmd[index])
+        .map(|index| &crate::builtins::BUILTINS[index])
 }
 
 /*
@@ -905,11 +905,11 @@ mod tests {
 
     // [spec:dash:sem:exec.find-builtin-fn/test]
     #[test]
-    fn generated_builtin_lookup_round_trips() {
+    fn builtin_lookup_round_trips() {
         let sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        for expected in &crate::builtins::builtincmd {
+        for expected in crate::builtins::BUILTINS {
             assert!(core::ptr::eq(
-                builtin(&sh, BStr::new(expected.name.to_bytes())).expect("generated builtin"),
+                builtin(&sh, expected.name()).expect("registered builtin"),
                 expected,
             ));
         }
@@ -927,7 +927,7 @@ mod tests {
     fn printf_is_a_builtin() {
         let sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let found = builtin(&sh, BStr::new(b"printf")).expect("printf builtin");
-        assert!(core::ptr::eq(found, crate::builtins::PRINTFCMD));
+        assert_eq!(found.id(), crate::builtins::BuiltinId::Printf);
         /* `echo` shares printf.c with it and is the neighbouring row. */
         assert!(builtin(&sh, BStr::new(b"echo")).is_some());
     }
@@ -936,13 +936,12 @@ mod tests {
     /// adding a row must not have disturbed it.
     #[test]
     fn the_builtin_table_stays_sorted() {
-        let names: Vec<&[u8]> = crate::builtins::builtincmd
+        let names: Vec<&[u8]> = crate::builtins::BUILTINS
             .iter()
-            .map(|cmd| cmd.name.to_bytes())
+            .map(|cmd| cmd.name().as_bytes())
             .collect();
         let mut sorted = names.clone();
         sorted.sort();
         assert_eq!(names, sorted);
-        assert_eq!(names.len(), crate::builtins::NUMBUILTINS);
     }
 }

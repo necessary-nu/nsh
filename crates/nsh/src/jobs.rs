@@ -843,7 +843,7 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<JobId>, n: Option<&Node>
 
     freejob(&mut sh.interrupt_deferral, &mut sh.jobs, ji);
 
-    if crate::parser::issimplecmd(n, BStr::new(crate::builtins::JOBSCMD.name.to_bytes())) != 0 {
+    if crate::parser::issimplecmd(n, BStr::new(b"jobs")) != 0 {
         return;
     }
 

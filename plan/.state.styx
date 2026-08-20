@@ -5311,4 +5311,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.output-results}
     )}
+    {id modernize-builtin-registry, covered_rules (
+        idiom.builtin-registry
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.builtin-registry}
+    )}
 )

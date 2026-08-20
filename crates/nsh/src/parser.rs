@@ -1006,7 +1006,7 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
                 };
                 let bcmd = crate::exec::builtin(sh, word.word.as_bstr());
                 if goodname(&sh.locale, word.word.as_bstr()) == 0
-                    || bcmd.is_some_and(|cmd| (cmd.flags & crate::builtins::BUILTIN_SPECIAL) != 0)
+                    || bcmd.is_some_and(|cmd| cmd.attributes().is_special())
                 {
                     return Err(synerror(sh, b"Bad function name"));
                 }
