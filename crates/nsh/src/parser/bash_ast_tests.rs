@@ -1,6 +1,6 @@
 use bstr::BStr;
 
-use super::{ParseResult, parsecmd};
+use super::{ParseResult, parse_command};
 use crate::context::Shell;
 use crate::error::Error;
 use crate::nodes::{
@@ -10,15 +10,15 @@ use crate::nodes::{
 use crate::word::WordPart;
 
 fn parse(source: &[u8], bash: bool) -> Result<Node, Error> {
-    let mut sh = Shell::builder()
+    let mut shell = Shell::builder()
         .streams(crate::streams::Streams::capture().unwrap())
         .build()
         .unwrap();
     if bash {
-        crate::options::set_option_by_name(&mut sh, BStr::new(b"bash"), true).unwrap();
+        crate::options::set_option_by_name(&mut shell, BStr::new(b"bash"), true).unwrap();
     }
-    crate::input::setinputstring(&mut sh, BStr::new(source));
-    match parsecmd(&mut sh, false)? {
+    crate::input::set_input_string(&mut shell, BStr::new(source));
+    match parse_command(&mut shell, false)? {
         ParseResult::Tree(Some(tree)) => Ok(tree),
         ParseResult::Tree(None) => panic!("expected a command, found a blank parse unit"),
         ParseResult::Eof => panic!("expected a command, found EOF"),

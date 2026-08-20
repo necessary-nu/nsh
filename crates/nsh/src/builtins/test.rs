@@ -11,9 +11,9 @@ use nsh_platform::{AccessMode, FileKind, FileMetadata, ShellBytesExt as _};
 use std::cmp::Ordering;
 
 use crate::context::Shell;
+use crate::descriptors::LogicalDescriptor;
 use crate::error::Error;
-use crate::eval::Flow;
-use crate::fd::LogicalDescriptor;
+use crate::evaluation::Flow;
 
 // [spec:dash:def:test.token]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -138,7 +138,7 @@ fn is_c_space(byte: u8) -> bool {
 
 // [spec:dash:def:test.getn-fn]
 // [spec:dash:sem:test.getn-fn]
-fn getn(sh: &mut Shell, word: &BStr) -> Result<i64, Error> {
+fn parse_operand_integer(shell: &mut Shell, word: &BStr) -> Result<i64, Error> {
     let bytes: &[u8] = word.as_ref();
     let mut start = 0;
     while bytes.get(start).is_some_and(|byte| is_c_space(*byte)) {
@@ -157,7 +157,7 @@ fn getn(sh: &mut Shell, word: &BStr) -> Result<i64, Error> {
     if digits == end || !bytes[digits..end].iter().all(u8::is_ascii_digit) {
         let mut message = b"Illegal number: ".to_vec();
         message.extend_from_slice(bytes);
-        return Err(sh.diagnostics().sh_error_value(&message));
+        return Err(shell.diagnostics().shell_error(&message));
     }
 
     let limit = if negative {
@@ -204,7 +204,7 @@ impl<'a> TestParser<'a> {
 
     // [spec:dash:def:test.getop-fn]
     // [spec:dash:sem:test.getop-fn]
-    fn getop(&self, pos: usize) -> Option<&'static Operator> {
+    fn operator_at(&self, pos: usize) -> Option<&'static Operator> {
         self.word(pos).and_then(operator)
     }
 
@@ -240,16 +240,16 @@ impl<'a> TestParser<'a> {
         if self.word(pos + 2).is_none() {
             return false;
         }
-        self.getop(pos + 1)
+        self.operator_at(pos + 1)
             .is_some_and(|op| op.kind == OperatorKind::Binary)
     }
 
     // [spec:dash:def:test.oexpr-fn]
     // [spec:dash:sem:test.oexpr-fn]
-    fn or_expr(&mut self, sh: &mut Shell, mut token: Token) -> Result<bool, Error> {
+    fn or_expr(&mut self, shell: &mut Shell, mut token: Token) -> Result<bool, Error> {
         let mut result = false;
         loop {
-            result |= self.and_expr(sh, token)?;
+            result |= self.and_expr(shell, token)?;
             if self.word(self.pos).is_none() {
                 break;
             }
@@ -265,10 +265,10 @@ impl<'a> TestParser<'a> {
 
     // [spec:dash:def:test.aexpr-fn]
     // [spec:dash:sem:test.aexpr-fn]
-    fn and_expr(&mut self, sh: &mut Shell, mut token: Token) -> Result<bool, Error> {
+    fn and_expr(&mut self, shell: &mut Shell, mut token: Token) -> Result<bool, Error> {
         let mut result = true;
         loop {
-            if !self.not_expr(sh, token)? {
+            if !self.not_expr(shell, token)? {
                 result = false;
             }
             if self.word(self.pos).is_none() {
@@ -286,20 +286,20 @@ impl<'a> TestParser<'a> {
 
     // [spec:dash:def:test.nexpr-fn]
     // [spec:dash:sem:test.nexpr-fn]
-    fn not_expr(&mut self, sh: &mut Shell, mut token: Token) -> Result<bool, Error> {
+    fn not_expr(&mut self, shell: &mut Shell, mut token: Token) -> Result<bool, Error> {
         if token != Token::Not {
-            return self.primary(sh, token);
+            return self.primary(shell, token);
         }
         token = self.lex(self.pos + 1);
         if token != Token::End {
             self.pos += 1;
         }
-        Ok(!self.not_expr(sh, token)?)
+        Ok(!self.not_expr(shell, token)?)
     }
 
     // [spec:dash:def:test.primary-fn]
     // [spec:dash:sem:test.primary-fn]
-    fn primary(&mut self, sh: &mut Shell, token: Token) -> Result<bool, Error> {
+    fn primary(&mut self, shell: &mut Shell, token: Token) -> Result<bool, Error> {
         if token == Token::End {
             return Ok(false);
         }
@@ -309,10 +309,10 @@ impl<'a> TestParser<'a> {
             if nested == Token::RightParen {
                 return Ok(false);
             }
-            let result = self.or_expr(sh, nested)?;
+            let result = self.or_expr(shell, nested)?;
             self.pos += 1;
             if self.lex(self.pos) != Token::RightParen {
-                return Err(syntax(sh, None, b"closing paren expected"));
+                return Err(syntax(shell, None, b"closing paren expected"));
             }
             return Ok(result);
         }
@@ -323,9 +323,9 @@ impl<'a> TestParser<'a> {
         {
             self.pos += 1;
             let Some(operand) = self.word(self.pos) else {
-                return Err(syntax(sh, Some(op.text), b"argument expected"));
+                return Err(syntax(shell, Some(op.text), b"argument expected"));
             };
-            return self.unary(sh, token, operand);
+            return self.unary(shell, token, operand);
         }
 
         self.lex(self.pos + 1);
@@ -333,23 +333,23 @@ impl<'a> TestParser<'a> {
             .last_operator
             .is_some_and(|op| op.kind == OperatorKind::Binary)
         {
-            return self.binary(sh);
+            return self.binary(shell);
         }
 
         Ok(self.word(self.pos).is_some_and(|word| !word.is_empty()))
     }
 
     // [spec:nsh:def:idiom.logical-descriptors]
-    fn unary(&self, sh: &mut Shell, token: Token, operand: &BStr) -> Result<bool, Error> {
+    fn unary(&self, shell: &mut Shell, token: Token, operand: &BStr) -> Result<bool, Error> {
         Ok(match token {
             Token::StringEmpty => operand.is_empty(),
             Token::StringNonempty => !operand.is_empty(),
             Token::FileTerminal => {
-                let fd = getn(sh, operand)? as i32;
-                LogicalDescriptor::new(fd)
-                    .and_then(|descriptor| sh.fds.get(descriptor))
+                let descriptor = parse_operand_integer(shell, operand)? as i32;
+                LogicalDescriptor::new(descriptor)
+                    .and_then(|descriptor| shell.descriptors.get(descriptor))
                     .as_ref()
-                    .is_some_and(|fd| nsh_platform::is_terminal(fd))
+                    .is_some_and(|descriptor| nsh_platform::is_terminal(descriptor))
             }
             Token::FileReadable => test_file_access(operand, AccessMode::READ_OK),
             Token::FileWritable => test_file_access(operand, AccessMode::WRITE_OK),
@@ -360,7 +360,7 @@ impl<'a> TestParser<'a> {
 
     // [spec:dash:def:test.binop-fn]
     // [spec:dash:sem:test.binop-fn]
-    fn binary(&mut self, sh: &mut Shell) -> Result<bool, Error> {
+    fn binary(&mut self, shell: &mut Shell) -> Result<bool, Error> {
         let left = self
             .word(self.pos)
             .expect("binary operator has a left operand");
@@ -369,19 +369,31 @@ impl<'a> TestParser<'a> {
         let op = self.last_operator.expect("binary token names an operator");
         self.pos += 1;
         let Some(right) = self.word(self.pos) else {
-            return Err(syntax(sh, Some(op.text), b"argument expected"));
+            return Err(syntax(shell, Some(op.text), b"argument expected"));
         };
 
         Ok(match op.token {
             Token::StringNotEqual => left != right,
-            Token::StringLess => sh.locale.collate(left, right) == Ordering::Less,
-            Token::StringGreater => sh.locale.collate(left, right) == Ordering::Greater,
-            Token::IntegerEqual => getn(sh, left)? == getn(sh, right)?,
-            Token::IntegerNotEqual => getn(sh, left)? != getn(sh, right)?,
-            Token::IntegerGreaterEqual => getn(sh, left)? >= getn(sh, right)?,
-            Token::IntegerGreater => getn(sh, left)? > getn(sh, right)?,
-            Token::IntegerLessEqual => getn(sh, left)? <= getn(sh, right)?,
-            Token::IntegerLess => getn(sh, left)? < getn(sh, right)?,
+            Token::StringLess => shell.locale.collate(left, right) == Ordering::Less,
+            Token::StringGreater => shell.locale.collate(left, right) == Ordering::Greater,
+            Token::IntegerEqual => {
+                parse_operand_integer(shell, left)? == parse_operand_integer(shell, right)?
+            }
+            Token::IntegerNotEqual => {
+                parse_operand_integer(shell, left)? != parse_operand_integer(shell, right)?
+            }
+            Token::IntegerGreaterEqual => {
+                parse_operand_integer(shell, left)? >= parse_operand_integer(shell, right)?
+            }
+            Token::IntegerGreater => {
+                parse_operand_integer(shell, left)? > parse_operand_integer(shell, right)?
+            }
+            Token::IntegerLessEqual => {
+                parse_operand_integer(shell, left)? <= parse_operand_integer(shell, right)?
+            }
+            Token::IntegerLess => {
+                parse_operand_integer(shell, left)? < parse_operand_integer(shell, right)?
+            }
             Token::FileNewer => newer(left, right),
             Token::FileOlder => older(left, right),
             Token::FileSame => same_file(left, right),
@@ -392,7 +404,7 @@ impl<'a> TestParser<'a> {
 
 // [spec:dash:def:test.testcmd-fn]
 // [spec:dash:sem:test.testcmd-fn]
-pub fn testcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let Some(command) = args.first() else {
         return Ok(Flow::Done((1).into()));
     };
@@ -402,7 +414,7 @@ pub fn testcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             .last()
             .is_none_or(|word| word.first() != Some(&b']'))
         {
-            return Err(sh.diagnostics().sh_error_value(b"missing ]"));
+            return Err(shell.diagnostics().shell_error(b"missing ]"));
         }
         expression = &expression[..expression.len() - 1];
     }
@@ -433,10 +445,10 @@ pub fn testcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         } else {
             parser.lex(0)
         };
-        let value = parser.or_expr(sh, first)?;
+        let value = parser.or_expr(shell, first)?;
         if parser.word(parser.pos).is_some() && parser.word(parser.pos + 1).is_some() {
             let unexpected = parser.word(parser.pos).unwrap();
-            return Err(syntax(sh, Some(unexpected), b"unexpected operator"));
+            return Err(syntax(shell, Some(unexpected), b"unexpected operator"));
         }
         return Ok(Flow::Done((result ^ i32::from(value)).into()));
     }
@@ -444,14 +456,14 @@ pub fn testcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
 // [spec:dash:def:test.syntax-fn]
 // [spec:dash:sem:test.syntax-fn]
-fn syntax(sh: &mut Shell, op: Option<&[u8]>, message: &[u8]) -> Error {
+fn syntax(shell: &mut Shell, op: Option<&[u8]>, message: &[u8]) -> Error {
     let mut text = Vec::new();
     if let Some(op) = op.filter(|op| !op.is_empty()) {
         text.extend_from_slice(op);
         text.extend_from_slice(b": ");
     }
     text.extend_from_slice(message);
-    sh.diagnostics().sh_error_value(&text)
+    shell.diagnostics().shell_error(&text)
 }
 
 // [spec:dash:def:test.filstat-fn]
@@ -571,8 +583,8 @@ mod tests {
 
     fn eval(words: &[&[u8]]) -> i32 {
         let args: Vec<&BStr> = words.iter().map(|word| BStr::new(*word)).collect();
-        let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
-        let Flow::Done(status) = testcmd(sh, &args).unwrap() else {
+        let shell = &mut Shell::new(crate::streams::Streams::INHERIT);
+        let Flow::Done(status) = run(shell, &args).unwrap() else {
             unreachable!("`test` always finishes")
         };
         i32::from(status.code())
@@ -664,8 +676,8 @@ mod tests {
     fn bracket_requires_its_bracket() {
         assert_eq!(eval(&[b"[", b"x", b"]"]), 0);
         let args = [BStr::new(b"["), BStr::new(b"x")];
-        let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
-        let error = testcmd(sh, &args).expect_err("`[ x` is missing its bracket");
+        let shell = &mut Shell::new(crate::streams::Streams::INHERIT);
+        let error = run(shell, &args).expect_err("`[ x` is missing its bracket");
         assert_eq!(error.message().to_vec(), b"missing ]".to_vec());
     }
 }

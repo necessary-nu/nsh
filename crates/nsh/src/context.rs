@@ -56,14 +56,14 @@ pub struct Shell {
     pub(crate) aliases: crate::alias::AliasTable,
     /// The command hash and `%builtin` location. Function definitions live
     /// here too, because dash stores them in the same table.
-    pub(crate) commands: crate::exec::CmdTable,
+    pub(crate) commands: crate::execution::CommandTable,
     /// The shell's option flags. `options.rs` owns the shape; the
     /// array behind it is private, so the flags are set through named
     /// accessors rather than by indexing from anywhere.
     pub(crate) options: crate::options::ShellOptions,
     /// Where the evaluator is: what it is skipping, how deep, and the
-    /// buffers it must not re-enter. `eval.rs` owns the shape.
-    pub(crate) eval: crate::eval::EvalState,
+    /// buffers it must not re-enter. `evaluation.rs` owns the shape.
+    pub(crate) evaluation: crate::evaluation::EvaluationState,
     /// The jobs, and the terminal state job control needs. `jobs.rs`
     /// owns the shape.
     pub(crate) jobs: crate::jobs::JobTable,
@@ -75,7 +75,7 @@ pub struct Shell {
     /// one function writes it (`jobs::forkparent`) and one reads it
     /// (`expand::varvalue`, for `$!`), and neither reaches the job table
     /// to do so.
-    pub(crate) backgndpid: Option<nsh_platform::ProcessId>,
+    pub(crate) background_process: Option<nsh_platform::ProcessId>,
     /// PID of the process that created this shell instance.
     pub(crate) root_pid: nsh_platform::ProcessId,
     /// Zero in the root shell and incremented in forked shell children.
@@ -85,14 +85,14 @@ pub struct Shell {
     /// The shell-language descriptor namespace. Open entries own hidden
     /// close-on-exec backing descriptors; redirection changes this table,
     /// never the host process table.
-    pub(crate) fds: crate::fd::FdTable,
+    pub(crate) descriptors: crate::descriptors::DescriptorTable,
     /// The stack of logical descriptor values saved for restoration.
     /// `redir.rs` owns the shape; this owns the value.
-    pub(crate) redirs: crate::redir::RedirStack,
+    pub(crate) redirections: crate::redirection::RedirectionStack,
     /// Every variable, the sixteen the shell is born with, the `LINENO`
     /// buffer and line, and the `local` save stack. `var.rs` owns the
     /// shape; this owns the value.
-    pub(crate) vars: crate::var::VarTable,
+    pub(crate) variables: crate::variables::VariableTable,
     /// Who owns the process, and therefore what this shell may do to it.
     ///
     /// A `Box<dyn Host>` rather than a type parameter because `Shell`
@@ -104,7 +104,7 @@ pub struct Shell {
     pub(crate) input: crate::input::InputStack,
     /// Where the shell thinks it is: the logical and physical working
     /// directories. `cd.rs` owns the shape.
-    pub(crate) cwd: crate::cd::Cwd,
+    pub(crate) working_directory: crate::working_directory::WorkingDirectoryState,
     /// What `$MAILPATH` checking remembers between prompts. `mail.rs`
     /// owns the shape.
     pub(crate) mail: crate::mail::MailState,
@@ -116,11 +116,11 @@ pub struct Shell {
     /// nested frame.
     pub(crate) expand: crate::expand::ExpandState,
     /// `fc -l`: list the history rather than re-running it.
-    pub(crate) displayhist: bool,
+    pub(crate) display_history: bool,
     /// Interactive history, the line editor, and `fc` recursion state.
     /// `histedit.rs` owns the shape; keeping it here makes two shell
     /// instances independent instead of sharing a process-global editor.
-    pub(crate) histedit: crate::editor::HistEditState,
+    pub(crate) editor: crate::editor::EditorState,
     /// The trap actions, the disposition cache and their two counters.
     /// `trap.rs` owns the shape; this owns the value.
     ///
@@ -200,11 +200,11 @@ impl Shell {
     }
 
     pub(crate) fn try_new(streams: crate::streams::Streams) -> std::io::Result<Self> {
-        let fds = crate::fd::FdTable::from_streams(&streams)?;
+        let descriptors = crate::descriptors::DescriptorTable::from_streams(&streams)?;
         // [spec:nsh:def:idiom.logical-descriptors]
         let io = crate::output::ShellIo::new(
-            fds.slot(crate::fd::LogicalDescriptor::STDOUT),
-            fds.slot(crate::fd::LogicalDescriptor::STDERR),
+            descriptors.slot(crate::descriptors::LogicalDescriptor::STDOUT),
+            descriptors.slot(crate::descriptors::LogicalDescriptor::STDERR),
         );
         let locale = nsh_platform::Locale::c()?;
         let root_pid = nsh_platform::current_process_id();
@@ -212,28 +212,28 @@ impl Shell {
             locale,
             io,
             streams,
-            fds,
+            descriptors,
             aliases: crate::alias::AliasTable::new(),
-            backgndpid: None,
+            background_process: None,
             root_pid,
             shell_level: 0,
             interrupt_deferral: crate::error::InterruptDeferral::new(),
-            commands: crate::exec::CmdTable::new(),
-            eval: crate::eval::EvalState::new(),
+            commands: crate::execution::CommandTable::new(),
+            evaluation: crate::evaluation::EvaluationState::new(),
             jobs: crate::jobs::JobTable::new(),
             options: crate::options::ShellOptions::new(),
-            redirs: crate::redir::RedirStack::new(),
-            cwd: crate::cd::Cwd::new(),
+            redirections: crate::redirection::RedirectionStack::new(),
+            working_directory: crate::working_directory::WorkingDirectoryState::new(),
             mail: crate::mail::MailState::new(),
             ifs: crate::expand::IfsCache::new(),
             expand: crate::expand::ExpandState::new(),
-            displayhist: false,
-            histedit: crate::editor::HistEditState::new(),
+            display_history: false,
+            editor: crate::editor::EditorState::new(),
             traps: crate::trap::TrapTable::new(),
             input: crate::input::InputStack::new(),
             status: crate::status::ExitStatus::SUCCESS,
             exited: None,
-            vars: crate::var::VarTable::new(),
+            variables: crate::variables::VariableTable::new(),
             /* [dec:nsh:host-owns-signals]: a shell that was not told who
              * owns the process assumes nobody did, and touches nothing
              * outside itself. `Builder::host` replaces this. */

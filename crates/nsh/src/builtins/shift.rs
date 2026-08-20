@@ -11,7 +11,7 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 
-use crate::eval::Flow;
+use crate::evaluation::Flow;
 
 // [spec:dash:def:options.shiftcmd-fn]
 // [spec:dash:sem:options.shiftcmd-fn]
@@ -21,17 +21,17 @@ use crate::eval::Flow;
 // [spec:posix:req:builtin.shift.stderr]
 // [spec:posix:req:builtin.shift.exit-status]
 // [spec:posix:sem:builtin.shift.utility-defaults]
-pub fn shiftcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let parsed = match args.get(1) {
-        Some(count) => crate::number::parse_nonnegative(&mut sh.diagnostics(), count)?,
+        Some(count) => crate::number::parse_nonnegative(&mut shell.diagnostics(), count)?,
         None => 1,
     };
-    let n = parsed as usize;
-    if n > sh.options.shellparam.nparam {
-        return Err(sh.diagnostics().sh_error_value(b"can't shift that many"));
+    let count = parsed as usize;
+    if count > shell.options.positional_parameters.parameter_count {
+        return Err(shell.diagnostics().shell_error(b"can't shift that many"));
     }
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        sh.options.shellparam.drop_first(n);
+    crate::error::with_interrupts_deferred(shell, |shell| {
+        shell.options.positional_parameters.drop_first(count);
     });
     Ok(Flow::Done((0).into()))
 }
@@ -40,19 +40,20 @@ pub fn shiftcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 mod tests {
     use super::*;
 
-    use crate::options::setparam;
-    use crate::testutil::lock;
+    use crate::options::set_positional_parameters;
+    use crate::test_support::lock;
 
     /// The parameters belong to the shell under test, not to the
     /// process: these take the receiver rather than reaching a global.
-    fn params(sh: &mut Shell, words: &[&str]) {
+    fn params(shell: &mut Shell, words: &[&str]) {
         let words: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
-        setparam(sh, &words);
+        set_positional_parameters(shell, &words);
     }
 
-    fn remaining(sh: &mut Shell) -> Vec<Vec<u8>> {
-        sh.options
-            .shellparam
+    fn remaining(shell: &mut Shell) -> Vec<Vec<u8>> {
+        shell
+            .options
+            .positional_parameters
             .words()
             .into_iter()
             .map(Vec::from)
@@ -62,48 +63,48 @@ mod tests {
     #[test]
     fn one_by_default() {
         let _g = lock();
-        let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
-        params(sh, &["a", "b", "c"]);
+        let shell = &mut Shell::new(crate::streams::Streams::INHERIT);
+        params(shell, &["a", "b", "c"]);
         assert_eq!(
-            shiftcmd(sh, &[BStr::new("shift")]).unwrap(),
+            run(shell, &[BStr::new("shift")]).unwrap(),
             Flow::Done((0).into())
         );
-        assert_eq!(sh.options.shellparam.nparam, 2);
-        assert_eq!(remaining(sh), vec![b"b".to_vec(), b"c".to_vec()]);
+        assert_eq!(shell.options.positional_parameters.parameter_count, 2);
+        assert_eq!(remaining(shell), vec![b"b".to_vec(), b"c".to_vec()]);
     }
 
     #[test]
     fn a_count_drops_that_many() {
         let _g = lock();
-        let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
-        params(sh, &["a", "b", "c"]);
+        let shell = &mut Shell::new(crate::streams::Streams::INHERIT);
+        params(shell, &["a", "b", "c"]);
         assert_eq!(
-            shiftcmd(sh, &[BStr::new("shift"), BStr::new("2")]).unwrap(),
+            run(shell, &[BStr::new("shift"), BStr::new("2")]).unwrap(),
             Flow::Done((0).into())
         );
-        assert_eq!(sh.options.shellparam.nparam, 1);
-        assert_eq!(remaining(sh), vec![b"c".to_vec()]);
+        assert_eq!(shell.options.positional_parameters.parameter_count, 1);
+        assert_eq!(remaining(shell), vec![b"c".to_vec()]);
     }
 
     /// Shifting exactly all of them is allowed; one more is not.
     #[test]
     fn shifting_past_the_end_raises() {
         let _g = lock();
-        let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
-        params(sh, &["a", "b"]);
+        let shell = &mut Shell::new(crate::streams::Streams::INHERIT);
+        params(shell, &["a", "b"]);
         assert_eq!(
-            shiftcmd(sh, &[BStr::new("shift"), BStr::new("2")]).unwrap(),
+            run(shell, &[BStr::new("shift"), BStr::new("2")]).unwrap(),
             Flow::Done((0).into())
         );
-        assert_eq!(sh.options.shellparam.nparam, 0);
+        assert_eq!(shell.options.positional_parameters.parameter_count, 0);
         /* The diagnostic comes back as a value now rather than as an
          * unwind, so the assertion is on the error rather than on the
          * jump. The bytes are unchanged and still go to stderr. */
-        let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
-        params(sh, &["a"]);
-        let e = shiftcmd(sh, &[BStr::new("shift"), BStr::new("2")])
+        let shell = &mut Shell::new(crate::streams::Streams::INHERIT);
+        params(shell, &["a"]);
+        let error = run(shell, &[BStr::new("shift"), BStr::new("2")])
             .expect_err("shifting past the end fails");
-        assert_eq!(e.message().to_vec(), b"can't shift that many".to_vec());
-        assert_eq!(e.status().code(), 2);
+        assert_eq!(error.message().to_vec(), b"can't shift that many".to_vec());
+        assert_eq!(error.status().code(), 2);
     }
 }

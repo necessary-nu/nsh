@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use bstr::{BStr, BString};
 
-use super::{Var, VariableState};
+use super::{Variable, VariableState};
 use crate::context::Shell;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -182,40 +182,40 @@ impl BashAttributes {
     }
 }
 
-pub(crate) fn variable_value<'a>(sh: &'a Shell, name: &BStr) -> Option<&'a VariableValue> {
-    match &sh.vars.tab.get(name)?.state {
+pub(crate) fn variable_value<'a>(shell: &'a Shell, name: &BStr) -> Option<&'a VariableValue> {
+    match &shell.variables.entries.get(name)?.state {
         VariableState::Unset => None,
         VariableState::Set(value) => Some(value),
     }
 }
 
-pub(crate) fn variable_value_owned(sh: &mut Shell, name: &BStr) -> Option<VariableValue> {
-    sh.vars.refresh_lineno(name);
-    variable_value(sh, name).cloned()
+pub(crate) fn variable_value_owned(shell: &mut Shell, name: &BStr) -> Option<VariableValue> {
+    shell.variables.refresh_lineno(name);
+    variable_value(shell, name).cloned()
 }
 
-pub(crate) fn variable_kind(sh: &Shell, name: &BStr) -> Option<VariableKind> {
-    variable_value(sh, name).map(VariableValue::kind)
+pub(crate) fn variable_kind(shell: &Shell, name: &BStr) -> Option<VariableKind> {
+    variable_value(shell, name).map(VariableValue::kind)
 }
 
-pub(crate) fn bash_attributes(sh: &Shell, name: &BStr) -> Option<BashAttributes> {
-    sh.vars.tab.get(name).map(|var| var.bash_attributes)
+pub(crate) fn bash_attributes(shell: &Shell, name: &BStr) -> Option<BashAttributes> {
+    shell.variables.entries.get(name).map(|var| var.bash_attributes)
 }
 
 pub(crate) fn set_bash_attribute(
-    sh: &mut Shell,
+    shell: &mut Shell,
     name: &BStr,
     attribute: BashAttribute,
     enabled: bool,
 ) -> bool {
-    let Some(var) = sh.vars.tab.get_mut(name) else {
+    let Some(var) = shell.variables.entries.get_mut(name) else {
         return false;
     };
     var.bash_attributes.set(attribute, enabled);
     true
 }
 
-impl Var {
+impl Variable {
     pub(super) fn scalar(&self) -> Option<&BStr> {
         match &self.state {
             VariableState::Unset => None,
@@ -234,8 +234,8 @@ impl Var {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::var::{
-        Callback, Var, VariableAttributes, VariableState, lookup_bytes, set_bytes, unset_bytes,
+    use crate::variables::{
+        Callback, Variable, VariableAttributes, VariableState, lookup_bytes, set_bytes, unset_bytes,
     };
 
     // [spec:nsh:req:compat.bash.value-model/test]
@@ -296,9 +296,9 @@ mod tests {
     fn scalar_api_preserves_array_structure() {
         let mut shell = Shell::new(crate::streams::Streams::INHERIT);
         let name = BStr::new(b"array");
-        shell.vars.tab.insert(
+        shell.variables.entries.insert(
             name.to_owned(),
-            Var {
+            Variable {
                 attributes: VariableAttributes::NONE,
                 state: VariableState::Set(VariableValue::empty(VariableKind::Indexed)),
                 bash_attributes: BashAttributes::new(),
@@ -364,9 +364,9 @@ mod tests {
         assert_eq!(lookup_bytes(&mut shell, scalar), Some(BString::default()));
 
         let array = BStr::new(b"array");
-        shell.vars.tab.insert(
+        shell.variables.entries.insert(
             array.to_owned(),
-            Var {
+            Variable {
                 attributes: VariableAttributes::NONE,
                 state: VariableState::Set(VariableValue::empty(VariableKind::Associative)),
                 bash_attributes: BashAttributes::new(),

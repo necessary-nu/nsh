@@ -57,7 +57,7 @@ fn run(script: &str) -> (String, i32) {
     let status = nsh_platform::run_in_child(move || {
         let supplied = Streams::from_fds(std::io::stdin(), &w, &w).expect("duplicate streams");
         let mut shell = nsh::Shell::builder()
-            .arg0(bstr::BStr::new(b"sh"))
+            .argument_zero(bstr::BStr::new(b"sh"))
             .inherit_env()
             .streams(supplied)
             .host(nsh::ProcessHost)

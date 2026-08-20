@@ -97,7 +97,7 @@ impl OptionState {
 #[derive(Clone, Debug)]
 pub(super) struct Invocation {
     pub(super) invocation_name: BString,
-    pub(super) arg0: BString,
+    pub(super) argument_zero: BString,
     pub(super) parameters: Vec<BString>,
     pub(super) options: OptionState,
     pub(super) login: bool,
@@ -216,12 +216,12 @@ impl Invocation {
         }
 
         let remaining = &argv[next..];
-        let mut arg0 = BString::from(invocation_name.as_slice());
+        let mut argument_zero = BString::from(invocation_name.as_slice());
         let (input, parameters) = if command {
             let command = BString::from(remaining[0].as_slice());
             let mut parameter_start = 1;
             if let Some(name) = remaining.get(parameter_start) {
-                arg0 = BString::from(name.as_slice());
+                argument_zero = BString::from(name.as_slice());
                 parameter_start += 1;
             }
             let input = if options.enabled(ShellOption::Stdin) {
@@ -233,13 +233,16 @@ impl Invocation {
         } else if options.enabled(ShellOption::Stdin) {
             (Input::Stdin, owned_words(remaining))
         } else {
-            arg0 = BString::from(remaining[0].as_slice());
-            (Input::Script(arg0.clone()), owned_words(&remaining[1..]))
+            argument_zero = BString::from(remaining[0].as_slice());
+            (
+                Input::Script(argument_zero.clone()),
+                owned_words(&remaining[1..]),
+            )
         };
 
         Ok(Self {
             invocation_name: BString::from(invocation_name),
-            arg0,
+            argument_zero,
             parameters,
             options,
             login,
@@ -314,7 +317,7 @@ mod tests {
     #[test]
     fn command_name_and_parameters_are_separate() {
         let (invocation, _) = parse(&[b"nsh", b"-c", b":", b"name", b"one", b"two"]);
-        assert_eq!(invocation.arg0, b"name"[..]);
+        assert_eq!(invocation.argument_zero, b"name"[..]);
         assert_eq!(invocation.parameters, [b"one".as_slice(), b"two"]);
     }
 

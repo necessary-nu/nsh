@@ -9,10 +9,16 @@ fn shell(bash: bool) -> Shell {
         .expect("build shell")
 }
 
-fn run(sh: &mut Shell, script: &[u8]) -> (i32, Vec<u8>, Vec<u8>) {
-    let status = sh.run(script).expect("run script").code().into();
-    let stdout = sh.take_captured_stdout().expect("capture stdout").to_vec();
-    let stderr = sh.take_captured_stderr().expect("capture stderr").to_vec();
+fn run(shell: &mut Shell, script: &[u8]) -> (i32, Vec<u8>, Vec<u8>) {
+    let status = shell.run(script).expect("run script").code().into();
+    let stdout = shell
+        .take_captured_stdout()
+        .expect("capture stdout")
+        .to_vec();
+    let stderr = shell
+        .take_captured_stderr()
+        .expect("capture stderr")
+        .to_vec();
     (status, stdout, stderr)
 }
 
@@ -41,28 +47,28 @@ fn shopt_mode_isolation() {
 // [spec:nsh:req:compat.bash.options-builtins-dispatch/test]
 #[test]
 fn dialect_change_invalidates_cache() {
-    let mut sh = shell(true);
-    assert_eq!(run(&mut sh, b"type shopt").0, 0);
-    assert_eq!(run(&mut sh, b"set +o bash").0, 0);
-    assert_ne!(run(&mut sh, b"type shopt").0, 0);
+    let mut shell = shell(true);
+    assert_eq!(run(&mut shell, b"type shopt").0, 0);
+    assert_eq!(run(&mut shell, b"set +o bash").0, 0);
+    assert_ne!(run(&mut shell, b"type shopt").0, 0);
 }
 
 // [spec:nsh:req:compat.bash.options-builtins-dispatch/test]
 #[test]
 fn restorable_option_state() {
-    let mut sh = shell(true);
+    let mut shell = shell(true);
 
-    let (status, set_state, _) = run(&mut sh, b"set +o");
+    let (status, set_state, _) = run(&mut shell, b"set +o");
     assert_eq!(status, 0);
     assert!(
         set_state
             .split(|byte| *byte == b'\n')
             .any(|line| line == b"set -o bash")
     );
-    assert_eq!(run(&mut sh, &set_state).0, 0);
-    assert_eq!(run(&mut sh, b"set +o").1, set_state);
+    assert_eq!(run(&mut shell, &set_state).0, 0);
+    assert_eq!(run(&mut shell, b"set +o").1, set_state);
 
-    let (status, human_state, _) = run(&mut sh, b"set -o");
+    let (status, human_state, _) = run(&mut shell, b"set -o");
     assert_eq!(status, 0);
     assert!(
         human_state
@@ -70,22 +76,22 @@ fn restorable_option_state() {
             .any(|line| line.starts_with(b"bash") && line.ends_with(b"on"))
     );
 
-    let (status, stdout, _) = run(&mut sh, b"shopt -o -p bash");
+    let (status, stdout, _) = run(&mut shell, b"shopt -o -p bash");
     assert_eq!((status, stdout), (0, b"set -o bash\n".to_vec()));
 
-    let (status, off, _) = run(&mut sh, b"shopt -p expand_aliases");
+    let (status, off, _) = run(&mut shell, b"shopt -p expand_aliases");
     assert_eq!(status, 1);
     assert_eq!(off, b"shopt -u expand_aliases\n");
-    assert_eq!(run(&mut sh, b"shopt -s expand_aliases").0, 0);
-    let (status, on, _) = run(&mut sh, b"shopt -p expand_aliases");
+    assert_eq!(run(&mut shell, b"shopt -s expand_aliases").0, 0);
+    let (status, on, _) = run(&mut shell, b"shopt -p expand_aliases");
     assert_eq!(status, 0);
     assert_eq!(on, b"shopt -s expand_aliases\n");
-    assert_eq!(run(&mut sh, &off).0, 0);
-    assert_eq!(run(&mut sh, b"shopt -q expand_aliases").0, 1);
+    assert_eq!(run(&mut shell, &off).0, 0);
+    assert_eq!(run(&mut shell, b"shopt -q expand_aliases").0, 1);
 
-    let (status, _, _) = run(&mut sh, b"shopt -s expand_aliases not_an_option");
+    let (status, _, _) = run(&mut shell, b"shopt -s expand_aliases not_an_option");
     assert_eq!(status, 1);
-    assert_eq!(run(&mut sh, b"shopt -q expand_aliases").0, 0);
+    assert_eq!(run(&mut shell, b"shopt -q expand_aliases").0, 0);
 }
 
 // [spec:nsh:req:compat.bash.options-builtins-dispatch/test]

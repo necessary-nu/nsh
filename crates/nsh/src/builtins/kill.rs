@@ -1,16 +1,16 @@
 //! `kill`.
 //!
 //! Port of `killcmd` from `src/jobs.c`. The signal table is
-//! `crate::signames` and decoding a name is `crate::trap`'s, which the
+//! `crate::signal_names` and decoding a name is `crate::trap`'s, which the
 //! `trap` builtin shares; what is here is the argument grammar, and it is
 //! the awkward one -- `-9` and `-TERM` are a signal where every other
 //! builtin would read an option.
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::eval::Flow;
-use crate::jobs::{JobId, getjob, ps_pid};
-use crate::output::Dest;
+use crate::evaluation::Flow;
+use crate::jobs::{JobId, process_id, resolve_job};
+use crate::output::OutputDestination;
 use crate::trap::SignalSpec;
 use bstr::BStr;
 
@@ -52,21 +52,21 @@ fn process_target(value: i32) -> nsh_platform::ProcessTarget {
 // [spec:posix:req:builtin.kill.stderr]
 // [spec:posix:req:builtin.kill.interfaces]
 // [spec:posix:req:builtin.kill.exit-status]
-pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* the `usage:` label is a backward goto whose body only raises, so it
      * is reproduced as two returns of the same message. */
     const USAGE: &[u8] =
         b"Usage: kill [-s sigspec | -signum | -sigspec] [pid | job]... or\nkill -l [exitstatus]";
     let mut signal = None;
     let mut list = false;
-    let mut jp: JobId;
+    let mut job_id: JobId;
 
     if args.len() <= 1 {
         // usage:
-        return Err(sh.diagnostics().sh_error_value(USAGE));
+        return Err(shell.diagnostics().shell_error(USAGE));
     }
 
-    let mut opts = crate::options::Options::new(args);
+    let mut option_scan = crate::options::Options::new(args);
     /* `-9` and `-TERM` are a signal, not an option, so the option scan
      * runs only once the signal reading has failed -- and then from the
      * same word, which is where `Options` starts. */
@@ -74,15 +74,15 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if args[1].first() == Some(&b'-') {
         signal = crate::trap::decode_signal(BStr::new(&args[1][1..]), false);
         if signal.is_none() {
-            while let Some(c) = opts.next(&mut sh.diagnostics(), b"ls:")? {
-                match c {
+            while let Some(option) = option_scan.next(&mut shell.diagnostics(), b"ls:")? {
+                match option {
                     b's' => {
-                        let name = opts.arg();
+                        let name = option_scan.arg();
                         signal = crate::trap::decode_signal(name, false);
                         if signal.is_none() {
                             let mut message = b"invalid signal number or name: ".to_vec();
                             message.extend_from_slice(name);
-                            return Err(sh.diagnostics().sh_error_value(&message));
+                            return Err(shell.diagnostics().shell_error(&message));
                         }
                     }
                     _ /* default, 'l' */ => {
@@ -90,7 +90,7 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     }
                 }
             }
-            operands = opts.operands();
+            operands = option_scan.operands();
         } else {
             operands = &args[2..];
         }
@@ -104,33 +104,33 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     if (signal.is_none() || operands.is_empty()) != list {
         // goto usage
-        return Err(sh.diagnostics().sh_error_value(USAGE));
+        return Err(shell.diagnostics().shell_error(USAGE));
     }
 
     if list {
         let Some(status) = operands.first() else {
-            sh.write_output(Dest::Stdout, b"0\n")?;
-            for index in 1..crate::signames::NSIG {
-                let mut record = crate::signames::signal_names[index].to_bytes().to_vec();
+            shell.write_output(OutputDestination::Stdout, b"0\n")?;
+            for index in 1..crate::signal_names::SIGNAL_SLOT_COUNT {
+                let mut record = crate::signal_names::SIGNAL_NAMES[index].to_bytes().to_vec();
                 record.push(b'\n');
-                sh.write_output(Dest::Stdout, &record)?;
+                shell.write_output(OutputDestination::Stdout, &record)?;
             }
             return Ok(Flow::Done((0).into()));
         };
-        let number = crate::number::parse_nonnegative(&mut sh.diagnostics(), status)?;
+        let number = crate::number::parse_nonnegative(&mut shell.diagnostics(), status)?;
         let number = if number > 128 { number - 128 } else { number };
         if let Some(signal) = crate::status::Signal::from_number(number)
-            .filter(|signal| signal.number() < crate::signames::NSIG as i32)
+            .filter(|signal| signal.number() < crate::signal_names::SIGNAL_SLOT_COUNT as i32)
         {
-            let mut record = crate::signames::signal_names[signal.number() as usize]
+            let mut record = crate::signal_names::SIGNAL_NAMES[signal.number() as usize]
                 .to_bytes()
                 .to_vec();
             record.push(b'\n');
-            sh.write_output(Dest::Stdout, &record)?;
+            shell.write_output(OutputDestination::Stdout, &record)?;
         } else {
             let mut message = b"invalid signal number or exit status: ".to_vec();
             message.extend_from_slice(status);
-            return Err(sh.diagnostics().sh_error_value(&message));
+            return Err(shell.diagnostics().shell_error(&message));
         }
         return Ok(Flow::Done((0).into()));
     }
@@ -143,9 +143,9 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             // happened to be recorded for a background command. Requiring
             // a job-control job here prevents the latter from silently
             // becoming the former while monitor mode is disabled.
-            jp = getjob(sh, Some(spec), true)?;
-            let Some(leader) = ps_pid(sh, jp, 0) else {
-                sh.diagnostics().sh_warnx(b"No such process\n");
+            job_id = resolve_job(shell, Some(spec), true)?;
+            let Some(leader) = process_id(shell, job_id, 0) else {
+                shell.diagnostics().shell_warning(b"No such process\n");
                 failed = true;
                 continue;
             };
@@ -154,9 +154,9 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             ))
         } else {
             let value = if spec.first() == Some(&b'-') {
-                -crate::number::parse_nonnegative(&mut sh.diagnostics(), BStr::new(&spec[1..]))?
+                -crate::number::parse_nonnegative(&mut shell.diagnostics(), BStr::new(&spec[1..]))?
             } else {
-                crate::number::parse_nonnegative(&mut sh.diagnostics(), spec)?
+                crate::number::parse_nonnegative(&mut shell.diagnostics(), spec)?
             };
             process_target(value)
         };
@@ -165,9 +165,9 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             SignalSpec::Signal(signal) => nsh_platform::SignalRequest::Deliver(signal.platform()),
         };
         if let Err(error) = nsh_platform::send_signal(target, request) {
-            let mut message = sh.locale.error_message(&error).into_bytes();
+            let mut message = shell.locale.error_message(&error).into_bytes();
             message.push(b'\n');
-            sh.diagnostics().sh_warnx(&message);
+            shell.diagnostics().shell_warning(&message);
             failed = true;
         }
     }

@@ -2,7 +2,7 @@
 //!
 //! Port of `typecmd` and `describe_command` from `src/exec.c`.
 //!
-//! `describe_command` is here rather than in `crate::exec` because `type`
+//! `describe_command` is here rather than in `crate::execution` because `type`
 //! is what it is for: `command -v` and `command -V` are documented as
 //! describing a name the way `type` does, so `builtins::command` calls
 //! this one rather than either keeping a copy or pushing it back down
@@ -11,9 +11,9 @@
 // [spec:nsh:req:idiom.evaluator-control-flow]
 use crate::context::Shell;
 use crate::error::Error;
-use crate::eval::Flow;
-use crate::exec::{Command, CommandSearch, PathCursor, find_command, padvance};
-use crate::output::Dest;
+use crate::evaluation::Flow;
+use crate::execution::{Command, CommandSearch, PathCursor, find_command};
+use crate::output::OutputDestination;
 use bstr::{BStr, BString, ByteSlice};
 use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 
@@ -29,13 +29,13 @@ use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 // [spec:posix:req:builtin.type.stderr]
 // [spec:posix:req:builtin.type.interfaces]
 // [spec:posix:req:builtin.type.exit-status]
-pub fn typecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut failed = false;
 
-    let mut opts = crate::options::Options::new(args);
-    opts.next(&mut sh.diagnostics(), b"")?;
-    for name in opts.operands() {
-        match describe_command(sh, Dest::Stdout, name, None, true)? {
+    let mut option_scan = crate::options::Options::new(args);
+    option_scan.next(&mut shell.diagnostics(), b"")?;
+    for name in option_scan.operands() {
+        match describe_command(shell, OutputDestination::Stdout, name, None, true)? {
             Flow::Done(status) => failed |= !status.success(),
             control => return Ok(control),
         }
@@ -47,8 +47,8 @@ pub fn typecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:dash:sem:exec.describe-command-fn]
 // [spec:nsh:req:idiom.command-dispatch]
 pub(crate) fn describe_command(
-    sh: &mut Shell,
-    dest: Dest,
+    shell: &mut Shell,
+    dest: OutputDestination,
     command: &BStr,
     path: Option<&BStr>,
     verbose: bool,
@@ -56,53 +56,53 @@ pub(crate) fn describe_command(
     let standard_search = path.is_none();
     let path_value = path
         .map(BString::from)
-        .unwrap_or_else(|| crate::var::pathval(sh));
+        .unwrap_or_else(|| crate::variables::path_value(shell));
     let path = path_value.as_slice().as_bstr();
 
-    'out_label: {
+    'resolution_complete: {
         if verbose {
-            sh.write_output(dest, command)?;
+            shell.write_output(dest, command)?;
         }
 
         /* First look at the keywords */
-        if crate::parser::findkwd(command).is_some() {
+        if crate::parser::reserved_word(command).is_some() {
             let bytes = if verbose {
                 b" is a shell keyword" as &[u8]
             } else {
                 command.as_bytes()
             };
-            sh.write_output(dest, bytes)?;
-            break 'out_label;
+            shell.write_output(dest, bytes)?;
+            break 'resolution_complete;
         }
 
         /* Then look at the aliases */
-        if let Some(alias) = sh.aliases.lookup(command, false) {
+        if let Some(alias) = shell.aliases.lookup(command, false) {
             if verbose {
                 let mut record = b" is an alias for ".to_vec();
                 record.extend_from_slice(&alias);
-                sh.write_output(dest, &record)?;
+                shell.write_output(dest, &record)?;
             } else {
-                let line = crate::alias::printalias(command, alias.as_slice().as_bstr());
+                let line = crate::alias::format_alias(command, alias.as_slice().as_bstr());
                 let mut record = b"alias ".to_vec();
                 record.extend_from_slice(&line);
-                sh.write_output(dest, &record)?;
+                shell.write_output(dest, &record)?;
                 return Ok(Flow::Done((0).into()));
             }
-            break 'out_label;
+            break 'resolution_complete;
         }
 
         /* Then if the standard search path is used, check if it is
          * a tracked alias.
          */
         let tracked = standard_search
-            .then(|| sh.commands.resolved(command))
+            .then(|| shell.commands.resolved(command))
             .flatten();
         let was_tracked = tracked.is_some();
         let mut entry = tracked.unwrap_or(Command::Unknown);
         if !was_tracked {
             /* Finally use brute force */
             match find_command(
-                sh,
+                shell,
                 command,
                 &mut entry,
                 CommandSearch::DEFAULT.checking_absolute(),
@@ -119,7 +119,7 @@ pub(crate) fn describe_command(
                 let path_bytes: &BStr = if let Some(path_index) = path_index {
                     let mut cursor = PathCursor::new(path);
                     let candidate = (0..=path_index)
-                        .map(|_| padvance(&mut cursor, command))
+                        .map(|_| cursor.advance(command))
                         .last()
                         .flatten();
                     resolved = candidate
@@ -146,17 +146,17 @@ pub(crate) fn describe_command(
                     }
                     record.push(b' ');
                     record.extend_from_slice(path_bytes);
-                    sh.write_output(dest, &record)?;
+                    shell.write_output(dest, &record)?;
                 } else {
-                    sh.write_output(dest, path_bytes)?;
+                    shell.write_output(dest, path_bytes)?;
                 }
             }
 
             Command::Function(_) => {
                 if verbose {
-                    sh.write_output(dest, b" is a shell function")?;
+                    shell.write_output(dest, b" is a shell function")?;
                 } else {
-                    sh.write_output(dest, command)?;
+                    shell.write_output(dest, command)?;
                 }
             }
 
@@ -167,21 +167,21 @@ pub(crate) fn describe_command(
                     } else {
                         b" is a shell builtin"
                     };
-                    sh.write_output(dest, record)?;
+                    shell.write_output(dest, record)?;
                 } else {
-                    sh.write_output(dest, command)?;
+                    shell.write_output(dest, command)?;
                 }
             }
 
             Command::Unknown => {
                 if verbose {
-                    sh.write_output(dest, b": not found\n")?;
+                    shell.write_output(dest, b": not found\n")?;
                 }
                 return Ok(Flow::Done((127).into()));
             }
         }
     }
     // out:
-    sh.write_output(dest, b"\n")?;
+    shell.write_output(dest, b"\n")?;
     Ok(Flow::Done((0).into()))
 }

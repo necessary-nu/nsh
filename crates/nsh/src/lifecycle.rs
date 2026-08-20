@@ -6,7 +6,7 @@
 
 use crate::context::Shell;
 use crate::nodes::Node;
-use crate::var::EnvSource;
+use crate::variables::EnvSource;
 
 impl Shell {
     /// Establish the input, signal, locale, and variable state of a new shell.
@@ -26,9 +26,9 @@ impl Shell {
     // [spec:dash:def:init.exitreset-fn]
     // [spec:dash:sem:init.exitreset-fn]
     pub(crate) fn clear_evaluation_resources(&mut self) {
-        self.eval.loopnest = 0;
-        self.eval.inps4 = false;
-        crate::expand::ifsfree(&mut self.expand);
+        self.evaluation.loop_depth = 0;
+        self.evaluation.expanding_trace_prompt = false;
+        crate::expand::clear_split_regions(&mut self.expand);
         self.restore_saved_redirections();
     }
 
@@ -37,8 +37,8 @@ impl Shell {
     // [spec:dash:sem:init.forkreset-fn]
     pub(crate) fn prepare_fork_child(&mut self, command: Option<&Node>) {
         // [spec:nsh:req:compat.smoosh.control-boundaries]
-        self.eval.loopnest = 0;
-        self.eval.trap_default_exit_status = None;
+        self.evaluation.loop_depth = 0;
+        self.evaluation.trap_default_exit_status = None;
         self.detach_parent_input();
         self.discard_saved_redirections();
         self.prepare_traps_for_child(command);
@@ -61,7 +61,7 @@ mod tests {
     // [spec:nsh:req:idiom.owned-lifecycle/test]
     #[test]
     fn initialization_populates_owned_state() {
-        let _guard = crate::testutil::lock();
+        let _guard = crate::test_support::lock();
         let mut shell = Shell::new(crate::streams::Streams::INHERIT);
         let environment = [(BString::from("OWNED_LIFECYCLE"), BString::from("yes"))];
 
@@ -73,10 +73,16 @@ mod tests {
             shell.var(BStr::new("OWNED_LIFECYCLE")),
             Some(BStr::new("yes"))
         );
-        assert!(crate::input::cur_pf(&mut shell.input).uses_stdin());
-        shell.eval.loopnest = 3;
-        shell.eval.inps4 = true;
+        assert!(crate::input::current_input_frame(&mut shell.input).uses_stdin());
+        shell.evaluation.loop_depth = 3;
+        shell.evaluation.expanding_trace_prompt = true;
         shell.clear_evaluation_resources();
-        assert_eq!((shell.eval.loopnest, shell.eval.inps4), (0, false));
+        assert_eq!(
+            (
+                shell.evaluation.loop_depth,
+                shell.evaluation.expanding_trace_prompt
+            ),
+            (0, false)
+        );
     }
 }

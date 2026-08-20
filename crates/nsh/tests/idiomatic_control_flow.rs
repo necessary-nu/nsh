@@ -6,8 +6,8 @@ const PARSER: &str = include_str!("../src/parser.rs");
 const PARSER_MULTIBYTE: &str = include_str!("../src/parser/multibyte.rs");
 const EXPANDER: &str = include_str!("../src/expand.rs");
 const EXPANSION_MODES: &str = include_str!("../src/expand/mode.rs");
-const EVALUATOR: &str = include_str!("../src/eval.rs");
-const REDIRECTIONS: &str = include_str!("../src/redir.rs");
+const EVALUATOR: &str = include_str!("../src/evaluation.rs");
+const REDIRECTIONS: &str = include_str!("../src/redirection.rs");
 const JOBS: &str = include_str!("../src/jobs.rs");
 const JOB_MODEL: &str = include_str!("../src/jobs/model.rs");
 const OPTIONS: &str = include_str!("../src/options.rs");
@@ -23,8 +23,8 @@ const ALIASES: &str = include_str!("../src/alias.rs");
 const ERRORS: &str = include_str!("../src/error.rs");
 const INPUT: &str = include_str!("../src/input.rs");
 const MAIL: &str = include_str!("../src/mail.rs");
-const EXECUTION: &str = include_str!("../src/exec.rs");
-const VARIABLES: &str = include_str!("../src/var.rs");
+const EXECUTION: &str = include_str!("../src/execution.rs");
+const VARIABLES: &str = include_str!("../src/variables.rs");
 const ULIMIT: &str = include_str!("../src/builtins/ulimit.rs");
 const OUTPUT: &str = include_str!("../src/output.rs");
 const BUILTINS: &str = include_str!("../src/builtins/mod.rs");
@@ -240,7 +240,10 @@ fn subsystem_helpers_use_narrow_state() {
 
     for (source, required) in [
         (ALIASES, "impl AliasTable"),
-        (INPUT, "pub(crate) fn cur_pf(input: &mut InputStack)"),
+        (
+            INPUT,
+            "pub(crate) fn current_input_frame(input: &mut InputStack)",
+        ),
         (MAIL, "impl MailState"),
     ] {
         assert!(source.contains(required), "missing {required}");
@@ -252,7 +255,7 @@ fn subsystem_helpers_use_narrow_state() {
 fn output_failures_are_returned() {
     for required in [
         "impl Write for Output",
-        "pub(crate) fn flushall(&mut self) -> io::Result<()> {",
+        "pub(crate) fn flush_all(&mut self) -> io::Result<()> {",
         "self.stdout.flush()",
     ] {
         assert!(OUTPUT.contains(required), "missing {required}");
@@ -510,7 +513,7 @@ fn core_avoids_abi_scalars() {
         (EXECUTION, "struct CommandSearch"),
         (EXECUTION, "path_index: Option<usize>"),
         (ERRORS, "enum Operation"),
-        (ERRORS, "fn int_pending() -> bool"),
+        (ERRORS, "fn interrupt_pending() -> bool"),
         (EXPANDER, "enum VariableExpansion"),
         (MAIL, "changed: bool"),
         (VARIABLES, "push: bool"),
@@ -558,7 +561,7 @@ fn operation_modes_are_typed() {
     }
 
     for (source, typed_mode) in [
-        (EVALUATOR, "struct EvalContext"),
+        (EVALUATOR, "struct EvaluationContext"),
         (EXPANSION_MODES, "struct ExpansionMode"),
         (EXPANSION_MODES, "enum EscapeMode"),
         (REDIRECTIONS, "enum RedirectionMode"),
@@ -639,7 +642,7 @@ fn typed_job_control_model() {
     for required in [
         "struct JobId",
         "enum JobState",
-        "pid: ProcessId",
+        "process_id: ProcessId",
         "status: Option<ChildStatus>",
         "slots: Vec<Option<Job>>",
         "order: Vec<JobId>",

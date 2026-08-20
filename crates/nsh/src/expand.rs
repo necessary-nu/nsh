@@ -17,7 +17,7 @@ use crate::error::Error;
 use crate::nodes::Node;
 use crate::options::{OPTION_SPECS, ShellOption};
 // [spec:nsh:def:idiom.shell-options]
-use crate::pattern::pmatch_slices;
+use crate::pattern::pattern_matches;
 
 mod bytes;
 mod mode;
@@ -31,14 +31,14 @@ pub(crate) use mode::ExpansionMode;
 // Internal marker bytes shared with the parser.
 // ---------------------------------------------------------------------
 
-pub(crate) const CTLESC: u8 = crate::parser::CTLESC;
-const CTLVAR: u8 = crate::parser::CTLVAR;
-const CTLENDVAR: u8 = crate::parser::CTLENDVAR;
-const CTLBACKQ: u8 = crate::parser::CTLBACKQ;
-pub(crate) const CTLMBCHAR: u8 = crate::parser::CTLMBCHAR;
-const CTLARI: u8 = crate::parser::CTLARI;
-const CTLENDARI: u8 = crate::parser::CTLENDARI;
-const CTLQUOTEMARK: u8 = crate::parser::CTLQUOTEMARK;
+pub(crate) const LEGACY_ESCAPE: u8 = crate::parser::LEGACY_ESCAPE;
+const LEGACY_PARAMETER: u8 = crate::parser::LEGACY_PARAMETER;
+const LEGACY_END_PARAMETER: u8 = crate::parser::LEGACY_END_PARAMETER;
+const LEGACY_COMMAND_SUBSTITUTION: u8 = crate::parser::LEGACY_COMMAND_SUBSTITUTION;
+pub(crate) const LEGACY_MULTIBYTE: u8 = crate::parser::LEGACY_MULTIBYTE;
+const LEGACY_ARITHMETIC: u8 = crate::parser::LEGACY_ARITHMETIC;
+const LEGACY_END_ARITHMETIC: u8 = crate::parser::LEGACY_END_ARITHMETIC;
+const LEGACY_QUOTE: u8 = crate::parser::LEGACY_QUOTE;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum VariableExpansion {
@@ -63,22 +63,22 @@ struct VariableFlags {
 
 impl VariableFlags {
     fn decode(encoded: u8) -> Self {
-        let expansion = match encoded & crate::parser::VSTYPE {
-            crate::parser::VSNORMAL => VariableExpansion::Normal,
-            crate::parser::VSMINUS => VariableExpansion::Default,
-            crate::parser::VSPLUS => VariableExpansion::Alternative,
-            crate::parser::VSQUESTION => VariableExpansion::Error,
-            crate::parser::VSASSIGN => VariableExpansion::Assign,
-            crate::parser::VSTRIMRIGHT => VariableExpansion::TrimRight,
-            crate::parser::VSTRIMRIGHTMAX => VariableExpansion::TrimRightLongest,
-            crate::parser::VSTRIMLEFT => VariableExpansion::TrimLeft,
-            crate::parser::VSTRIMLEFTMAX => VariableExpansion::TrimLeftLongest,
-            crate::parser::VSLENGTH => VariableExpansion::Length,
+        let expansion = match encoded & crate::parser::PARAMETER_KIND_MASK {
+            crate::parser::PARAMETER_NORMAL => VariableExpansion::Normal,
+            crate::parser::PARAMETER_DEFAULT => VariableExpansion::Default,
+            crate::parser::PARAMETER_ALTERNATIVE => VariableExpansion::Alternative,
+            crate::parser::PARAMETER_ERROR => VariableExpansion::Error,
+            crate::parser::PARAMETER_ASSIGN => VariableExpansion::Assign,
+            crate::parser::PARAMETER_TRIM_SUFFIX => VariableExpansion::TrimRight,
+            crate::parser::PARAMETER_TRIM_LONGEST_SUFFIX => VariableExpansion::TrimRightLongest,
+            crate::parser::PARAMETER_TRIM_PREFIX => VariableExpansion::TrimLeft,
+            crate::parser::PARAMETER_TRIM_LONGEST_PREFIX => VariableExpansion::TrimLeftLongest,
+            crate::parser::PARAMETER_LENGTH => VariableExpansion::Length,
             _ => VariableExpansion::Invalid,
         };
         Self {
             expansion,
-            null_is_unset: encoded & crate::parser::VSNUL != 0,
+            null_is_unset: encoded & crate::parser::PARAMETER_COLON != 0,
         }
     }
 
@@ -92,24 +92,24 @@ impl VariableFlags {
 
 // C character literals used as `switch` labels; Rust `match` patterns
 // require named constants, so the ones this file switches on get names.
-pub(crate) const C_BANG: u8 = b'!';
-const C_HASH: u8 = b'#';
-const C_DOLLAR: u8 = b'$';
-pub(crate) const C_STAR: u8 = b'*';
-pub(crate) const C_MINUS: u8 = b'-';
-const C_DOT: u8 = b'.';
-const C_SLASH: u8 = b'/';
-pub(crate) const C_COLON: u8 = b':';
-pub(crate) const C_QUESTION: u8 = b'?';
-const C_AT: u8 = b'@';
-pub(crate) const C_LBRACKET: u8 = b'[';
-pub(crate) const C_RBRACKET: u8 = b']';
-const C_BACKSLASH: u8 = b'\\';
-pub(crate) const C_CARET: u8 = b'^';
-const C_EQUALS: u8 = b'=';
-const C_TILDE: u8 = b'~';
-const C_0: u8 = b'0';
-const C_9: u8 = b'9';
+pub(crate) const BANG: u8 = b'!';
+const HASH: u8 = b'#';
+const DOLLAR: u8 = b'$';
+pub(crate) const STAR: u8 = b'*';
+pub(crate) const MINUS: u8 = b'-';
+const DOT: u8 = b'.';
+const SLASH: u8 = b'/';
+pub(crate) const COLON: u8 = b':';
+pub(crate) const QUESTION: u8 = b'?';
+const AT: u8 = b'@';
+pub(crate) const LEFT_BRACKET: u8 = b'[';
+pub(crate) const RIGHT_BRACKET: u8 = b']';
+const BACKSLASH: u8 = b'\\';
+pub(crate) const CARET: u8 = b'^';
+const EQUALS: u8 = b'=';
+const TILDE: u8 = b'~';
+const ZERO: u8 = b'0';
+const NINE: u8 = b'9';
 
 // ---------------------------------------------------------------------
 // src/expand.h
@@ -129,14 +129,14 @@ const C_9: u8 = b'9';
 /// Owning the bytes says that lifetime directly.
 ///
 /// The bytes are length-delimited shell data; no framing byte is stored.
-pub struct strlist {
+pub struct ExpandedField {
     pub text: BString,
 }
 
-impl strlist {
+impl ExpandedField {
     /// Copy one complete length-delimited field.
-    pub fn from_bytes(bytes: &[u8]) -> strlist {
-        strlist {
+    pub fn from_bytes(bytes: &[u8]) -> ExpandedField {
+        ExpandedField {
             text: BString::from(bytes),
         }
     }
@@ -145,9 +145,9 @@ impl strlist {
     ///
     /// Quote removal compacts the field in place and returns its new length.
     #[inline]
-    pub fn rmescapes(&mut self) {
-        let n = rmescapes_owned(&mut self.text);
-        self.text.truncate(n);
+    pub fn remove_escapes(&mut self) {
+        let unescaped_length = remove_escapes_owned(&mut self.text);
+        self.text.truncate(unescaped_length);
     }
 }
 
@@ -165,15 +165,15 @@ impl strlist {
 /// `command [-p]` words it consumed while `eval.c:evalcommand` keeps the
 /// original head in `osp` for `set -x`.  A `Vec`'s start does not move, so
 /// that head travels as an index of its own.
-pub struct arglist {
-    pub list: Vec<strlist>,
+pub struct ExpandedFields {
+    pub fields: Vec<ExpandedField>,
 }
 
-impl arglist {
+impl ExpandedFields {
     /// The C writes `struct arglist arglist;` and then
     /// `arglist.lastp = &arglist.list`, which is an empty list.
-    pub const fn new() -> arglist {
-        arglist { list: Vec::new() }
+    pub const fn new() -> ExpandedFields {
+        ExpandedFields { fields: Vec::new() }
     }
 }
 
@@ -184,16 +184,16 @@ impl arglist {
 /// framing byte.
 // [spec:posix:req:expand.quote-removal]
 // [spec:posix:sem:expand.quote-removal-quoting-remembered]
-pub fn rmescapes_owned(s: &mut BString) -> usize {
-    rmescapes_buffer(s, EscapeMode::Plain)
+pub fn remove_escapes_owned(s: &mut BString) -> usize {
+    remove_escapes_in_buffer(s, EscapeMode::Plain)
 }
 
 // [spec:dash:def:expand.ifsregion]
 /// A byte range eligible for field splitting.
-pub struct ifsregion {
-    pub begoff: usize,
-    pub endoff: usize,
-    pub nulonly: bool,
+pub struct FieldSplitRegion {
+    pub start: usize,
+    pub end: usize,
+    pub nul_only: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -204,32 +204,32 @@ enum FieldLimit {
 
 // [spec:dash:def:expand.ifs-state]
 /// Mutable state for one field-splitting pass.
-pub struct ifs_state {
-    pub nulonly: bool,
-    pub start: usize,
+pub struct FieldSplitState {
+    pub nul_only: bool,
+    pub field_start: usize,
     /// Start of a trailing IFS run that should be removed.
-    pub r: Option<usize>,
+    pub trailing_whitespace_start: Option<usize>,
     max_fields: FieldLimit,
-    pub ifsspc: bool,
+    pub separator_is_whitespace: bool,
 }
 
 /// Owned intermediate buffers for one expansion.
 pub(crate) struct ExpandState {
     buffer: BString,
-    backquotes: Vec<Option<crate::nodes::Node>>,
-    next_backquote: usize,
-    ifs_regions: Vec<ifsregion>,
-    args: Vec<strlist>,
+    command_substitutions: Vec<Option<crate::nodes::Node>>,
+    next_command_substitution: usize,
+    ifs_regions: Vec<FieldSplitRegion>,
+    fields: Vec<ExpandedField>,
 }
 
 impl ExpandState {
     pub(crate) const fn new() -> Self {
         Self {
             buffer: BString::new(Vec::new()),
-            backquotes: Vec::new(),
-            next_backquote: 0,
+            command_substitutions: Vec::new(),
+            next_command_substitution: 0,
             ifs_regions: Vec::new(),
-            args: Vec::new(),
+            fields: Vec::new(),
         }
     }
 }
@@ -243,28 +243,28 @@ impl Default for ExpandState {
 /// Per-shell `IFS` data in byte, first-character, and wide-character forms.
 pub struct IfsCache {
     /// The single-byte members, as a lookup table.
-    ifsmap: [bool; 128],
+    ascii_membership: [bool; 128],
     /// `IFS` itself as length-delimited shell bytes.
-    ncifs: BString,
+    bytes: BString,
     /// Length of the first multibyte character, or 0.
-    ifsmb0len: usize,
+    first_character_length: usize,
     /// The wide-character form of `IFS`, built by `changeifs`.
-    wcifs: Vec<i32>,
+    wide_characters: Vec<i32>,
 }
 
 impl IfsCache {
     pub(crate) const fn new() -> Self {
         IfsCache {
-            ifsmap: [false; 128],
-            ncifs: BString::new(Vec::new()),
-            ifsmb0len: 0,
-            wcifs: Vec::new(),
+            ascii_membership: [false; 128],
+            bytes: BString::new(Vec::new()),
+            first_character_length: 0,
+            wide_characters: Vec::new(),
         }
     }
 }
 
 #[inline]
-fn ifsr(state: &mut ExpandState) -> &mut Vec<ifsregion> {
+fn split_regions(state: &mut ExpandState) -> &mut Vec<FieldSplitRegion> {
     &mut state.ifs_regions
 }
 
@@ -273,8 +273,8 @@ fn ifsr(state: &mut ExpandState) -> &mut Vec<ifsregion> {
 /// throwing away whatever the previous expansion left in the head — is a
 /// `clear`.
 #[inline]
-fn expargl(state: &mut ExpandState) -> &mut Vec<strlist> {
-    &mut state.args
+fn expansion_fields(state: &mut ExpandState) -> &mut Vec<ExpandedField> {
+    &mut state.fields
 }
 
 // ---------------------------------------------------------------------
@@ -282,7 +282,7 @@ fn expargl(state: &mut ExpandState) -> &mut Vec<strlist> {
 // ---------------------------------------------------------------------
 
 #[inline]
-fn expb(state: &mut ExpandState) -> &mut BString {
+fn expansion_buffer(state: &mut ExpandState) -> &mut BString {
     &mut state.buffer
 }
 
@@ -295,12 +295,6 @@ fn expb(state: &mut ExpandState) -> &mut BString {
 /// ([`rmescapes_grow`]), so there is nothing left to re-derive after a
 /// growth: an index does not move. What remains is [`expdest_off`], which
 /// is the cursor as the length it always was.
-
-/// `expdest - stackblock()`.
-#[inline]
-fn expdest_off(state: &mut ExpandState) -> usize {
-    expb(state).len()
-}
 
 /// `p = grabstackstr(expdest)`.
 ///
@@ -330,8 +324,8 @@ fn expdest_off(state: &mut ExpandState) -> usize {
 /// last until the next expansion begins.  Nothing between either call and
 /// its read expands — `openhere` only pipes and forks, `expandstr` reads
 /// on the next line.
-pub fn expansion_result(sh: &crate::context::Shell) -> &BStr {
-    BStr::new(sh.expand.buffer.as_slice())
+pub fn expansion_result(shell: &crate::context::Shell) -> &BStr {
+    BStr::new(shell.expand.buffer.as_slice())
 }
 
 // ---------------------------------------------------------------------
@@ -395,8 +389,8 @@ impl DestinationSyntax {
 
 /// `error.h`: `#define int_pending() intpending`
 #[inline]
-fn int_pending() -> bool {
-    crate::error::int_pending()
+fn interrupt_pending() -> bool {
+    crate::error::interrupt_pending()
 }
 
 /*
@@ -422,10 +416,10 @@ fn int_pending() -> bool {
 /// gone: `esclen` had a single caller, `scanright`, which walks the
 /// expansion buffer by offset now and passes the subslice from `startp`,
 /// so the floor `esclen` existed to carry is the slice's own start.
-fn mesclen_bytes(s: &[u8], mut at: usize, mesc: u8) -> usize {
+fn encoded_character_len(s: &[u8], mut at: usize, escape_marker: u8) -> usize {
     let mut esc: usize = 0;
 
-    while at > 0 && s[at - 1] == mesc {
+    while at > 0 && s[at - 1] == escape_marker {
         at -= 1;
         esc += 1;
     }
@@ -448,24 +442,24 @@ struct EncodedCharacterSpan {
 //
 // The decoding itself, over a slice, so the framing is bounds-checked
 // rather than trusted.
-fn mbnext_bytes(p: &[u8]) -> EncodedCharacterSpan {
+fn next_encoded_character(encoded: &[u8]) -> EncodedCharacterSpan {
     let mut prefix = 0usize;
     let mut remainder = 0usize;
 
-    let c = byte_at(p, remainder);
+    let character = byte_at(encoded, remainder);
     remainder += 1;
 
-    match c {
-        CTLMBCHAR => {
-            if byte_at(p, remainder) == CTLESC {
+    match character {
+        LEGACY_MULTIBYTE => {
+            if byte_at(encoded, remainder) == LEGACY_ESCAPE {
                 remainder += 1;
             }
-            let payload = usize::from(byte_at(p, remainder));
+            let payload = usize::from(byte_at(encoded, remainder));
             remainder += 1;
             prefix = remainder;
             remainder = payload + 2;
         }
-        CTLESC => {
+        LEGACY_ESCAPE => {
             prefix += 1;
         }
         _ => {}
@@ -495,48 +489,48 @@ fn mbnext_bytes(p: &[u8]) -> EncodedCharacterSpan {
 // [spec:posix:req:expand.dollar-literal]
 // [spec:posix:sem:shell.word-processing]
 // [spec:nsh:req:idiom.structural-ast]
-pub fn expandarg(
-    sh: &mut crate::context::Shell,
+pub fn expand_argument(
+    shell: &mut crate::context::Shell,
     arg: &crate::nodes::Node,
-    arglist: Option<&mut arglist>,
+    expanded_fields: Option<&mut ExpandedFields>,
     mode: ExpansionMode,
 ) -> Result<(), Error> {
     let Node::Word(word) = arg else {
-        return Err(sh
+        return Err(shell
             .diagnostics()
-            .sh_error_value(b"word expansion requires a word node"));
+            .shell_error(b"word expansion requires a word node"));
     };
     // [spec:nsh:def:idiom.word-ir]
     // [spec:nsh:sem:idiom.typed-expansion]
-    typed::expand_argument(sh, &word.word, arglist, mode)
+    typed::expand_argument(shell, &word.word, expanded_fields, mode)
 }
 
 // [spec:nsh:req:idiom.parser-control-flow]
-fn expandarg_inner(
-    sh: &mut crate::context::Shell,
+fn expand_argument_inner(
+    shell: &mut crate::context::Shell,
     state: &mut ExpandState,
     text: &[u8],
-    arglist: Option<&mut arglist>,
+    expanded_fields: Option<&mut ExpandedFields>,
     mode: ExpansionMode,
 ) -> Result<(), Error> {
-    let mut p: BString;
+    let mut expanded_word: BString;
 
     /* STARTSTACKSTR(expdest) */
-    expb(state).clear();
+    expansion_buffer(state).clear();
     /* The `?`s in this function return past the `ifsfree()` below, exactly
      * as the longjmp they replace jumped past it. The IFS regions are
      * reclaimed by the catch frame instead — `restore_handler_expandarg`'s
      * swallowing arm and `Shell::clear_evaluation_resources` both clear it, which is
      * docs/errors-are-values.md 2.2's mark-keyed cleanup working as
      * designed. Adding one here would free them twice. */
-    argstr(sh, state, text, 0, mode)?;
-    if let Some(arglist) = arglist {
-        p = mem::take(expb(state));
+    expand_encoded_word(shell, state, text, 0, mode)?;
+    if let Some(expanded_fields) = expanded_fields {
+        expanded_word = mem::take(expansion_buffer(state));
         /* `exparg.lastp = &exparg.list`.  It re-points the tail at the
          * head, which discards whatever the previous call left there —
          * reachable only when that call unwound between building the list
          * and splicing it into its caller's. */
-        expargl(state).clear();
+        expansion_fields(state).clear();
         /*
          * TODO - EXP_REDIR
          */
@@ -547,12 +541,12 @@ fn expandarg_inner(
              * offsets into the grabbed block, which is why the block had to
              * outlive them and why the enclosing mark had to be the thing
              * that freed it. */
-            ifsbreakup_regions(
-                sh,
+            split_regions_into_fields(
+                shell,
                 &state.ifs_regions,
-                &mut p,
+                &mut expanded_word,
                 FieldLimit::Unlimited,
-                &mut state.args,
+                &mut state.fields,
             );
             /* `*exparg.lastp = NULL; exparg.lastp = &exparg.list;` —
              * terminate the fields `ifsbreakup` built, then re-point the
@@ -561,19 +555,21 @@ fn expandarg_inner(
              * overwrites the head, which is why the C can read `str->next`
              * before the write reaches it; taking the `Vec` is both
              * halves. */
-            let words = mem::take(expargl(state));
-            expandmeta(sh, state, words)?;
+            let words = mem::take(expansion_fields(state));
+            expand_pathnames(shell, state, words)?;
         } else {
-            expargl(state).push(strlist { text: p });
+            expansion_fields(state).push(ExpandedField {
+                text: expanded_word,
+            });
         }
         /* `if (exparg.list) { *arglist->lastp = exparg.list; arglist->lastp
          * = exparg.lastp; }`.  The C guards on emptiness because splicing a
          * NULL head would leave the caller's tail pointing at `exparg`'s
          * own head; appending an empty `Vec` is already a no-op. */
-        arglist.list.append(expargl(state));
+        expanded_fields.fields.append(expansion_fields(state));
     }
 
-    ifsfree(state);
+    clear_split_regions(state);
     Ok(())
 }
 
@@ -585,53 +581,53 @@ fn expandarg_inner(
 
 // [spec:dash:def:expand.argstr-fn]
 // [spec:dash:sem:expand.argstr-fn]
-fn argstr(
-    sh: &mut crate::context::Shell,
+fn expand_encoded_word(
+    shell: &mut crate::context::Shell,
     state: &mut ExpandState,
     text: &[u8],
-    mut p: usize,
+    mut cursor: usize,
     mut mode: ExpansionMode,
 ) -> Result<usize, Error> {
-    static spclchars: [u8; 10] = [
-        C_EQUALS,
-        C_COLON,
-        CTLQUOTEMARK,
-        CTLENDVAR,
-        CTLESC,
-        CTLVAR,
-        CTLBACKQ,
-        CTLMBCHAR,
-        CTLARI,
-        CTLENDARI,
+    static SPECIAL_CHARACTERS: [u8; 10] = [
+        EQUALS,
+        COLON,
+        LEGACY_QUOTE,
+        LEGACY_END_PARAMETER,
+        LEGACY_ESCAPE,
+        LEGACY_PARAMETER,
+        LEGACY_COMMAND_SUBSTITUTION,
+        LEGACY_MULTIBYTE,
+        LEGACY_ARITHMETIC,
+        LEGACY_END_ARITHMETIC,
     ];
     /* The C advances a pointer into `spclchars`; the offset is the whole of
      * what it carries. The slice spells that set directly. */
-    let mut reject: usize = 0;
-    let mut c: u8;
-    let break_all =
+    let mut special_start_index = 0;
+    let mut control: u8;
+    let record_parameter_word_regions =
         mode.contains(ExpansionMode::PARAMETER_WORD) && !mode.contains(ExpansionMode::QUOTED);
     let mut in_quotes: bool;
-    let mut length: usize;
-    let mut startloc: usize;
+    let mut run_length: usize;
+    let mut region_start: usize;
 
-    reject += usize::from(mode.contains(ExpansionMode::COLON_TILDE));
-    reject += if mode.contains(ExpansionMode::ASSIGNMENT_TILDE) {
+    special_start_index += usize::from(mode.contains(ExpansionMode::COLON_TILDE));
+    special_start_index += if mode.contains(ExpansionMode::ASSIGNMENT_TILDE) {
         0
     } else {
         2
     };
     in_quotes = false;
-    length = 0;
+    run_length = 0;
 
     if mode.contains(ExpansionMode::TILDE) {
         mode = mode.without(ExpansionMode::TILDE);
-        if byte_at(text, p) == C_TILDE {
-            p = exptilde(sh, state, text, p, mode);
+        if byte_at(text, cursor) == TILDE {
+            cursor = expand_tilde(shell, state, text, cursor, mode);
         }
     }
 
     'expansion: loop {
-        startloc = expdest_off(state);
+        region_start = state.buffer.len();
         loop {
             let payload_length: usize;
             let span: EncodedCharacterSpan;
@@ -642,153 +638,163 @@ fn argstr(
              * re-enters after every control byte and taking the whole
              * remaining word each time would turn one pass into one pass
              * per escape. */
-            let rejectset = &spclchars[reject..];
-            let from = p + length;
-            length += text
+            let active_controls = &SPECIAL_CHARACTERS[special_start_index..];
+            let from = cursor + run_length;
+            run_length += text
                 .get(from..)
                 .unwrap_or_default()
                 .iter()
-                .take_while(|byte| !rejectset.contains(byte))
+                .take_while(|byte| !active_controls.contains(byte))
                 .count();
-            let Some(&control) = text.get(p + length) else {
-                if length > 0 && !mode.contains(ExpansionMode::DISCARD) {
-                    expb(state).extend_from_slice(&text[p..]);
-                    let newloc = expdest_off(state);
-                    if break_all && !in_quotes && newloc > startloc {
-                        recordregion(state, startloc, newloc, false);
+            let Some(&next_control) = text.get(cursor + run_length) else {
+                if run_length > 0 && !mode.contains(ExpansionMode::DISCARD) {
+                    expansion_buffer(state).extend_from_slice(&text[cursor..]);
+                    let expansion_end = state.buffer.len();
+                    if record_parameter_word_regions && !in_quotes && expansion_end > region_start {
+                        record_split_region(state, region_start, expansion_end, false);
                     }
                 }
                 return Ok(text.len());
             };
-            c = control;
-            if (c & 0x80) == 0 || c == CTLENDARI || c == CTLENDVAR {
-                length += 1;
-                closes_word = c == CTLENDARI || c == CTLENDVAR;
+            control = next_control;
+            if (control & 0x80) == 0
+                || control == LEGACY_END_ARITHMETIC
+                || control == LEGACY_END_PARAMETER
+            {
+                run_length += 1;
+                closes_word = control == LEGACY_END_ARITHMETIC || control == LEGACY_END_PARAMETER;
             } else {
                 closes_word = false;
             }
-            if length > 0 && !mode.contains(ExpansionMode::DISCARD) {
-                let newloc: usize;
-
-                /* `p` walks the word
+            if run_length > 0 && !mode.contains(ExpansionMode::DISCARD) {
+                /* `cursor` walks the word
                  * text and never the expansion buffer, which is what the
                  * `copy_nonoverlapping` inside the old accessor already
                  * assumed and what makes this an append. */
-                let b = expb(state);
-                let emitted = length - usize::from(closes_word);
-                b.extend_from_slice(&text[p..p + emitted]);
-                newloc = b.len();
-                if break_all && !in_quotes && newloc > startloc {
-                    recordregion(state, startloc, newloc, false);
+                let buffer = expansion_buffer(state);
+                let emitted = run_length - usize::from(closes_word);
+                buffer.extend_from_slice(&text[cursor..cursor + emitted]);
+                let expansion_end = buffer.len();
+                if record_parameter_word_regions && !in_quotes && expansion_end > region_start {
+                    record_split_region(state, region_start, expansion_end, false);
                 }
-                startloc = newloc;
+                region_start = expansion_end;
             }
-            p += length + 1;
-            length = 0;
+            cursor += run_length + 1;
+            run_length = 0;
 
             if closes_word {
-                return Ok(p - 1);
+                return Ok(cursor - 1);
             }
 
-            match c {
-                C_EQUALS | C_COLON => {
-                    if c == C_EQUALS {
+            match control {
+                EQUALS | COLON => {
+                    if control == EQUALS {
                         mode = mode | ExpansionMode::COLON_TILDE;
-                        reject += 1;
+                        special_start_index += 1;
                         /* fall through */
                     }
                     /*
                      * sort of a hack - expand tildes in variable
                      * assignments (after the first '=' and after ':'s).
                      */
-                    p -= 1;
-                    if byte_at(text, p) == C_TILDE {
-                        p = exptilde(sh, state, text, p, mode);
+                    cursor -= 1;
+                    if byte_at(text, cursor) == TILDE {
+                        cursor = expand_tilde(shell, state, text, cursor, mode);
                         continue 'expansion;
                     }
                     continue;
                 }
-                CTLQUOTEMARK => {
+                LEGACY_QUOTE => {
                     /* "$@" syntax adherence hack */
                     /* These are the five bytes the parser emits for a bare
                      * `"$@"`. */
                     let quoted_at_tail = [
-                        CTLVAR,
-                        crate::parser::VSNORMAL | crate::parser::VSBIT,
+                        LEGACY_PARAMETER,
+                        crate::parser::PARAMETER_NORMAL | crate::parser::PARAMETER_PRESENT,
                         b'@',
                         b'=',
-                        CTLQUOTEMARK,
+                        LEGACY_QUOTE,
                     ];
-                    if !in_quotes && text.get(p..).unwrap_or_default() == quoted_at_tail {
-                        p = evalvar(sh, state, text, p + 1, mode | ExpansionMode::QUOTED)? + 1;
+                    if !in_quotes && text.get(cursor..).unwrap_or_default() == quoted_at_tail {
+                        cursor = expand_parameter(
+                            shell,
+                            state,
+                            text,
+                            cursor + 1,
+                            mode | ExpansionMode::QUOTED,
+                        )? + 1;
                         continue 'expansion;
                     }
                     in_quotes = !in_quotes;
                     /* addquote: */
                     if mode.escapes_quotes() {
-                        p -= 1;
-                        length += 1;
-                        startloc += 1;
+                        cursor -= 1;
+                        run_length += 1;
+                        region_start += 1;
                     }
                 }
-                CTLMBCHAR => {
-                    c = byte_at(text, p);
-                    p -= 1;
-                    span = mbnext_bytes(text.get(p..).unwrap_or_default());
+                LEGACY_MULTIBYTE => {
+                    control = byte_at(text, cursor);
+                    cursor -= 1;
+                    span = next_encoded_character(text.get(cursor..).unwrap_or_default());
                     payload_length = span.remainder - 2;
                     if mode.escapes_quotes() || mode.contains(ExpansionMode::PRESERVE_MULTIBYTE) {
-                        length = span.prefix + span.remainder;
-                        if c == CTLESC {
-                            startloc += length;
+                        run_length = span.prefix + span.remainder;
+                        if control == LEGACY_ESCAPE {
+                            region_start += run_length;
                         }
                     } else {
-                        if c == CTLESC {
-                            startloc += payload_length;
+                        if control == LEGACY_ESCAPE {
+                            region_start += payload_length;
                         }
-                        p += span.prefix;
+                        cursor += span.prefix;
                         if !mode.contains(ExpansionMode::DISCARD) {
-                            expb(state).extend_from_slice(&text[p..p + payload_length]);
+                            expansion_buffer(state)
+                                .extend_from_slice(&text[cursor..cursor + payload_length]);
                         }
-                        p += span.remainder;
+                        cursor += span.remainder;
                     }
                 }
-                CTLESC => {
-                    startloc += 1;
-                    length += 1;
+                LEGACY_ESCAPE => {
+                    region_start += 1;
+                    run_length += 1;
                     if mode.escapes_quotes() {
-                        p -= 1;
-                        length += 1;
-                        startloc += 1;
+                        cursor -= 1;
+                        run_length += 1;
+                        region_start += 1;
                     }
                 }
-                CTLVAR => {
-                    p = evalvar(
-                        sh,
+                LEGACY_PARAMETER => {
+                    cursor = expand_parameter(
+                        shell,
                         state,
                         text,
-                        p,
+                        cursor,
                         mode.with_if(ExpansionMode::QUOTED, in_quotes),
                     )?;
                     continue 'expansion;
                 }
-                CTLBACKQ => {
-                    let at = state.next_backquote;
-                    state.next_backquote += 1;
-                    let cmd = state.backquotes.get_mut(at).and_then(Option::take);
-                    expbackq(
-                        sh,
+                LEGACY_COMMAND_SUBSTITUTION => {
+                    let substitution_index = state.next_command_substitution;
+                    state.next_command_substitution += 1;
+                    let command = state
+                        .command_substitutions
+                        .get_mut(substitution_index)
+                        .and_then(Option::take);
+                    expand_command_substitution(
+                        shell,
                         state,
-                        cmd.as_ref(),
+                        command.as_ref(),
                         mode.with_if(ExpansionMode::QUOTED, in_quotes),
                     )?;
                     continue 'expansion;
                 }
-                CTLARI => {
-                    p = expari(
-                        sh,
+                LEGACY_ARITHMETIC => {
+                    cursor = expand_arithmetic(
+                        shell,
                         state,
                         text,
-                        p,
                         mode.with_if(ExpansionMode::QUOTED, in_quotes),
                     )?;
                     continue 'expansion;
@@ -808,33 +814,30 @@ fn argstr(
 // [spec:posix:sem:expand.tilde-no-further-expansion]
 // [spec:posix:req:expand.tilde-replacement-pathname]
 // [spec:posix:req:expand.tilde-result-quoted]
-fn exptilde(
-    sh: &mut crate::context::Shell,
+fn expand_tilde(
+    shell: &mut crate::context::Shell,
     state: &mut ExpandState,
     text: &[u8],
-    startp: usize,
+    start: usize,
     mode: ExpansionMode,
 ) -> usize {
-    let mut c: u8;
-    let name: usize;
-    let mut p: usize;
-
-    p = startp;
-    name = p + 1;
+    let mut cursor = start;
+    let name_start = cursor + 1;
 
     loop {
-        p += 1;
-        let Some(&byte) = text.get(p) else { break };
-        c = byte;
-        match c {
-            CTLESC => return startp,
-            CTLQUOTEMARK => return startp,
-            C_COLON => {
+        cursor += 1;
+        let Some(&byte) = text.get(cursor) else {
+            break;
+        };
+        match byte {
+            LEGACY_ESCAPE => return start,
+            LEGACY_QUOTE => return start,
+            COLON => {
                 if mode.contains(ExpansionMode::ASSIGNMENT_TILDE) {
                     break;
                 }
             }
-            C_SLASH | CTLENDVAR => break,
+            SLASH | LEGACY_END_PARAMETER => break,
             _ => {}
         }
     }
@@ -845,59 +848,69 @@ fn exptilde(
          * borrowed and `&[u8]` now, so the name is copied out instead: it
          * is at most a login name long, it happens once per tilde, and it
          * is the last write this cluster made to the text it is reading. */
-        let namebuf: &[u8] = &text[name..p.min(text.len())];
+        let name_bytes = &text[name_start..cursor.min(text.len())];
 
-        if namebuf.is_empty() {
-            let Some(home) = crate::var::lookup_bytes(sh, BStr::new(b"HOME")) else {
-                return startp;
+        if name_bytes.is_empty() {
+            let Some(home) = crate::variables::lookup_bytes(shell, BStr::new(b"HOME")) else {
+                return start;
             };
-            memtodest(&sh.locale, &home, mode | ExpansionMode::QUOTED, expb(state));
+            push_bytes(
+                &shell.locale,
+                &home,
+                mode | ExpansionMode::QUOTED,
+                expansion_buffer(state),
+            );
         } else {
-            let Ok(name) = namebuf.try_to_os_string() else {
-                return startp;
+            let Ok(name) = name_bytes.try_to_os_string() else {
+                return start;
             };
             let Some(home) = nsh_platform::named_user_home(&name) else {
                 /* lose: */
-                return startp;
+                return start;
             };
             let home = home.to_shell_bytes();
-            memtodest(&sh.locale, &home, mode | ExpansionMode::QUOTED, expb(state));
+            push_bytes(
+                &shell.locale,
+                &home,
+                mode | ExpansionMode::QUOTED,
+                expansion_buffer(state),
+            );
         }
     }
-    p
+    cursor
 }
 
 // [spec:dash:def:expand.removerecordregions-fn]
 // [spec:dash:sem:expand.removerecordregions-fn]
-fn removerecordregions(state: &mut ExpandState, endoff: usize) {
+fn truncate_split_regions(state: &mut ExpandState, end: usize) {
     /* `ifslastp == NULL` */
-    if ifsr(state).is_empty() {
+    if split_regions(state).is_empty() {
         return;
     }
 
     /* `ifsfirst` is index 0; `ifslastp` is the index the walk below
      * settles on, and dropping the tail is `truncate`. */
-    if ifsr(state)[0].endoff > endoff {
-        while ifsr(state).len() > 1 {
-            ifsr(state).pop();
+    if split_regions(state)[0].end > end {
+        while split_regions(state).len() > 1 {
+            split_regions(state).pop();
         }
-        if ifsr(state)[0].begoff > endoff {
-            ifsr(state).clear();
+        if split_regions(state)[0].start > end {
+            split_regions(state).clear();
         } else {
-            ifsr(state)[0].endoff = endoff;
+            split_regions(state)[0].end = end;
         }
         return;
     }
 
     let mut last: usize = 0;
-    while last + 1 < ifsr(state).len() && ifsr(state)[last + 1].begoff < endoff {
+    while last + 1 < split_regions(state).len() && split_regions(state)[last + 1].start < end {
         last += 1;
     }
-    while ifsr(state).len() > last + 1 {
-        ifsr(state).pop();
+    while split_regions(state).len() > last + 1 {
+        split_regions(state).pop();
     }
-    if ifsr(state)[last].endoff > endoff {
-        ifsr(state)[last].endoff = endoff;
+    if split_regions(state)[last].end > end {
+        split_regions(state)[last].end = end;
     }
 }
 
@@ -909,26 +922,25 @@ fn removerecordregions(state: &mut ExpandState, endoff: usize) {
 // [spec:dash:def:expand.expari-fn]
 // [spec:dash:sem:expand.expari-fn]
 // [spec:posix:req:expand.arith-token-expansion]
-fn expari(
-    sh: &mut crate::context::Shell,
+fn expand_arithmetic(
+    shell: &mut crate::context::Shell,
     state: &mut ExpandState,
     text: &[u8],
-    start: usize,
     mode: ExpansionMode,
 ) -> Result<usize, Error> {
-    let begoff: usize;
-    let len: usize;
+    let expression_start: usize;
+    let rendered_length: usize;
     let result: i64;
     /* The C's `p` doubles as a scratch `stackblock()` before it becomes the
      * return value; only the second use survives. */
-    let p: usize;
+    let expansion_end: usize;
 
-    begoff = expdest_off(state);
-    p = argstr(
-        sh,
+    expression_start = state.buffer.len();
+    expansion_end = expand_encoded_word(
+        shell,
         state,
         text,
-        start,
+        expression_start,
         mode.intersection(ExpansionMode::DISCARD),
     )?;
 
@@ -938,24 +950,29 @@ fn expari(
          * the stack allocator's restored cursor.  The expression has value
          * semantics now: copy the counted bytes before rewinding the output
          * buffer, then lend that slice to the arithmetic parser. */
-        let arithmetic = BStr::new(&expb(state)[begoff..]).to_owned();
-        expb(state).truncate(begoff);
+        let arithmetic = BStr::new(&expansion_buffer(state)[expression_start..]).to_owned();
+        expansion_buffer(state).truncate(expression_start);
 
-        removerecordregions(state, begoff);
+        truncate_split_regions(state, expression_start);
 
         /* `arith` returns its diagnostic now instead of raising it, and as
          * of this commit so does `expari`, so the bridge that stood here is
          * gone and the value travels. */
-        result = crate::arithmetic::arith(sh, arithmetic.as_bstr())?;
+        result = crate::arithmetic::evaluate(shell, arithmetic.as_bstr())?;
 
-        len = cvtnum(&sh.locale, result, mode, expb(state));
+        rendered_length = push_integer(&shell.locale, result, mode, expansion_buffer(state));
 
         if !mode.contains(ExpansionMode::QUOTED) {
-            recordregion(state, begoff, begoff + len, false);
+            record_split_region(
+                state,
+                expression_start,
+                expression_start + rendered_length,
+                false,
+            );
         }
     }
 
-    Ok(p)
+    Ok(expansion_end)
 }
 
 /*
@@ -966,35 +983,38 @@ fn expari(
 // [spec:dash:sem:expand.expbackq-fn]
 // [spec:posix:req:expand.cmdsub-semantics]
 // [spec:posix:req:expand.cmdsub-no-reexpansion]
-fn expbackq(
-    sh: &mut crate::context::Shell,
+fn expand_command_substitution(
+    shell: &mut crate::context::Shell,
     state: &mut ExpandState,
-    cmd: Option<&crate::nodes::Node>,
+    command: Option<&crate::nodes::Node>,
     mode: ExpansionMode,
 ) -> Result<(), Error> {
-    let mut in_ = crate::eval::backcmd { fd: None, jp: None };
+    let mut substitution = crate::evaluation::CommandSubstitution {
+        descriptor: None,
+        job_id: None,
+    };
     /* `char buf[128]`, as bytes: it is only ever handed to `read` and to
      * `memtodest`, and both want the bytes rather than the sign. */
-    let mut buf: [u8; 128] = [0; 128];
+    let mut buffer = [0; 128];
 
     if !mode.contains(ExpansionMode::DISCARD) {
-        let startloc = crate::error::with_interrupts_deferred(sh, |sh| {
-            let startloc = expdest_off(state);
+        let expansion_start = crate::error::with_interrupts_deferred(shell, |shell| {
+            let expansion_start = state.buffer.len();
             /* `pushstackmark(&smark, startloc)`: the length kept `makejob`'s
              * region allocations off the half-built word, and the save/restore
              * released them afterwards. The word is not in the region and
              * neither is anything `evalbackcmd` reaches, so both halves are
              * gone. */
-            crate::eval::evalbackcmd(sh, cmd, &mut in_)?;
+            crate::evaluation::evaluate_command_substitution(shell, command, &mut substitution)?;
 
             /* `evalbackcmd` always returns a pipe with an empty read-ahead
              * area, so reading starts directly from that pipe. */
             loop {
-                let Some(fd) = in_.fd.as_ref() else {
+                let Some(descriptor) = substitution.descriptor.as_ref() else {
                     break;
                 };
                 let count = loop {
-                    match nsh_platform::read_once(fd, &mut buf) {
+                    match nsh_platform::read_once(descriptor, &mut buffer) {
                         Ok(count) => break count,
                         Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
                         Err(_) => break 0,
@@ -1003,27 +1023,33 @@ fn expbackq(
                 if count == 0 {
                     break;
                 }
-                memtodest(&sh.locale, &buf[..count], mode, expb(state));
+                push_bytes(
+                    &shell.locale,
+                    &buffer[..count],
+                    mode,
+                    expansion_buffer(state),
+                );
             }
 
-            if in_.fd.take().is_some() {
-                sh.eval.back_exitstatus = crate::jobs::waitforjob(sh, in_.jp)?;
+            if substitution.descriptor.take().is_some() {
+                shell.evaluation.command_substitution_status =
+                    crate::jobs::wait_for_job(shell, substitution.job_id)?;
             }
-            Ok::<_, Error>(startloc)
+            Ok::<_, Error>(expansion_start)
         })?;
 
-        if let Some(error) = crate::error::poll_interrupt(sh.interrupt_context()) {
+        if let Some(error) = crate::error::poll_interrupt(shell.interrupt_context()) {
             return Err(error);
         }
 
         /* Eat all trailing newlines. The cursor is the length, so the
          * walk is over the buffer's own bytes and `STADJUST` is a
          * `truncate`. */
-        nsh_platform::trim_command_substitution_output(expb(state), startloc);
+        nsh_platform::trim_command_substitution_output(expansion_buffer(state), expansion_start);
 
         if !mode.contains(ExpansionMode::QUOTED) {
-            let endloc = expdest_off(state);
-            recordregion(state, startloc, endloc, false);
+            let expansion_end = state.buffer.len();
+            record_split_region(state, expansion_start, expansion_end, false);
         }
     }
 
@@ -1052,56 +1078,63 @@ fn expbackq(
 /// bottom on purpose — and every read outside it answers NUL rather than
 /// panicking, which is the rule [`byte_at`] already follows and the one
 /// `pmatch_bytes` was written to.
-fn between(b: &[u8], from: usize, to: usize) -> &[u8] {
-    let from = from.min(b.len());
-    &b[from..to.clamp(from, b.len())]
+fn between(bytes: &[u8], from: usize, to: usize) -> &[u8] {
+    let from = from.min(bytes.len());
+    &bytes[from..to.clamp(from, bytes.len())]
 }
 
-struct Scan {
+struct PatternScan {
     /// The value being trimmed.
-    startp: usize,
+    value_start: usize,
     /// Its last byte. `scanright` walks down from here.
-    endp: usize,
+    value_end: usize,
     /// The unescaped copy `_rmescapes` left above the cursor, and its end.
     /// `loc2` tracks it because it is what an unquoted match returns.
-    rmesc: usize,
-    rmescend: usize,
+    unescaped_start: usize,
+    unescaped_end: usize,
     /// The pattern, `preglob`'d in place.
-    pat: usize,
-    quotes: bool,
-    zero: bool,
+    pattern_start: usize,
+    preserve_quotes: bool,
+    match_prefix: bool,
 }
 
-type ScanFn = fn(&nsh_platform::Locale, &[u8], &Scan) -> Option<usize>;
+type PatternScanFn = fn(&nsh_platform::Locale, &[u8], &PatternScan) -> Option<usize>;
 
 // [spec:dash:def:expand.scanleft-fn]
 // [spec:dash:sem:expand.scanleft-fn]
-fn scanleft(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize> {
-    let mut loc: usize = a.startp;
-    let mut loc2: usize = a.rmesc;
+fn scan_left(locale: &nsh_platform::Locale, bytes: &[u8], scan: &PatternScan) -> Option<usize> {
+    let mut encoded_cursor = scan.value_start;
+    let mut unescaped_cursor = scan.unescaped_start;
     loop {
-        let s = loc;
-        let c = byte_at(b, s);
+        let candidate_start = encoded_cursor;
 
         /* `c = *s; if (zero) { *s = '\0'; s = startp; } pmatch(str, s);
          * *loc = c;` — the temporary terminator, as a subslice that ends
          * where it went. */
-        let subject: &[u8] = if a.zero {
-            between(b, a.startp, s)
+        let subject: &[u8] = if scan.match_prefix {
+            between(bytes, scan.value_start, candidate_start)
         } else {
-            b.get(s..).unwrap_or_default()
+            bytes.get(candidate_start..).unwrap_or_default()
         };
-        if pmatch_slices(locale, b.get(a.pat..).unwrap_or_default(), subject) {
-            return Some(if a.quotes { loc } else { loc2 });
+        if pattern_matches(
+            locale,
+            bytes.get(scan.pattern_start..).unwrap_or_default(),
+            subject,
+        ) {
+            return Some(if scan.preserve_quotes {
+                encoded_cursor
+            } else {
+                unescaped_cursor
+            });
         }
 
-        if loc >= a.endp {
+        if encoded_cursor >= scan.value_end {
             break;
         }
 
-        let span = mbnext_bytes(b.get(loc..).unwrap_or_default());
-        loc += span.prefix + span.remainder;
-        loc2 += if span.remainder > 3 {
+        let span = next_encoded_character(bytes.get(encoded_cursor..).unwrap_or_default());
+        encoded_cursor += span.prefix + span.remainder;
+        unescaped_cursor += if span.remainder > 3 {
             span.remainder - 2
         } else {
             1
@@ -1112,76 +1145,91 @@ fn scanleft(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize> 
 
 // [spec:dash:def:expand.scanright-fn]
 // [spec:dash:sem:expand.scanright-fn]
-fn scanright(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize> {
-    let mut esc: usize = 0;
+fn scan_right(locale: &nsh_platform::Locale, bytes: &[u8], scan: &PatternScan) -> Option<usize> {
+    let mut escape_count: usize = 0;
     /* Signed, because the C's `loc--` walks off the bottom of the value on
      * purpose and `if (loc < startp) break` is how it notices.  `byte_at_i`
      * answers 0 for a negative index, so the two `*loc` reads inside the
      * multibyte rewind — which the C performs without a bounds test, on the
      * strength of the frame being well formed — cannot read before the
      * buffer here. */
-    let mut loc: isize = a.endp as isize;
-    let mut loc2: isize = a.rmescend as isize;
+    let mut encoded_cursor = scan.value_end as isize;
+    let mut unescaped_cursor = scan.unescaped_end as isize;
     loop {
-        let s = loc;
+        let candidate_start = encoded_cursor;
 
         /* `c = *s; if (zero) { *s = '\0'; s = startp; } pmatch(str, s);
          * *loc = c;` — see [`Scan`]: the subslice ends where the C's
          * temporary NUL went, so nothing is written. */
-        let subject: &[u8] = if a.zero {
-            between(b, a.startp, s.max(0) as usize)
+        let subject: &[u8] = if scan.match_prefix {
+            between(bytes, scan.value_start, candidate_start.max(0) as usize)
         } else {
-            b.get(s.max(0) as usize..).unwrap_or_default()
+            bytes
+                .get(candidate_start.max(0) as usize..)
+                .unwrap_or_default()
         };
-        if pmatch_slices(locale, b.get(a.pat..).unwrap_or_default(), subject) {
-            return Some(if a.quotes { loc } else { loc2 } as usize);
+        if pattern_matches(
+            locale,
+            bytes.get(scan.pattern_start..).unwrap_or_default(),
+            subject,
+        ) {
+            return Some(if scan.preserve_quotes {
+                encoded_cursor
+            } else {
+                unescaped_cursor
+            } as usize);
         }
-        loc -= 1;
-        if loc < a.startp as isize {
+        encoded_cursor -= 1;
+        if encoded_cursor < scan.value_start as isize {
             break;
         }
         /* if (!esc--) esc = esclen(startp, loc); */
-        let was: usize = esc;
-        esc = esc.wrapping_sub(1);
-        if was == 0 {
-            esc = mesclen_bytes(&b[a.startp..], loc as usize - a.startp, CTLESC);
+        let previous_escape_count = escape_count;
+        escape_count = escape_count.wrapping_sub(1);
+        if previous_escape_count == 0 {
+            escape_count = encoded_character_len(
+                &bytes[scan.value_start..],
+                encoded_cursor as usize - scan.value_start,
+                LEGACY_ESCAPE,
+            );
         }
-        if esc % 2 != 0 {
-            esc -= 1;
-            loc -= 1;
-        } else if byte_at_i(b, loc) == CTLMBCHAR {
-            loc -= 1;
-            let payload_length = usize::from(byte_at_i(b, loc));
-            loc -= isize::try_from(payload_length + 2).expect("encoded character fits isize");
-            if byte_at_i(b, loc) == CTLESC {
-                loc -= 1;
+        if escape_count % 2 != 0 {
+            escape_count -= 1;
+            encoded_cursor -= 1;
+        } else if byte_at_i(bytes, encoded_cursor) == LEGACY_MULTIBYTE {
+            encoded_cursor -= 1;
+            let payload_length = usize::from(byte_at_i(bytes, encoded_cursor));
+            encoded_cursor -=
+                isize::try_from(payload_length + 2).expect("encoded character fits isize");
+            if byte_at_i(bytes, encoded_cursor) == LEGACY_ESCAPE {
+                encoded_cursor -= 1;
             }
-            loc2 -= isize::try_from(payload_length.saturating_sub(1))
+            unescaped_cursor -= isize::try_from(payload_length.saturating_sub(1))
                 .expect("encoded character fits isize");
         }
-        loc2 -= 1;
+        unescaped_cursor -= 1;
     }
     None
 }
 
 // [spec:dash:def:expand.subevalvar-fn]
 // [spec:dash:sem:expand.subevalvar-fn]
-fn subevalvar(
-    sh: &mut crate::context::Shell,
+fn apply_parameter_operator(
+    shell: &mut crate::context::Shell,
     state: &mut ExpandState,
     text: &[u8],
-    start: usize,
+    input_start: usize,
     /* The C's `char *str`, which is the variable's *name* in the word on
      * entry and NULL for the trimming subtypes.  `Option` is that NULL as
      * a type; the C then reuses the same local for the pattern, which is
      * why the pattern has a name of its own below. */
-    str: Option<usize>,
-    strloc: usize,
-    startloc: usize,
+    variable_name_start: Option<usize>,
+    pattern_boundary: usize,
+    expansion_start: usize,
     variable: VariableFlags,
     mode: ExpansionMode,
 ) -> Result<usize, Error> {
-    let quotes = mode.escapes_quotes();
+    let preserve_quotes = mode.escapes_quotes();
     /* Every one of the C's `char *` locals here is a position in the
      * expansion buffer and only ever used as one.  As offsets they stop
      * having to be re-derived: the three `stackblock()` re-reads below the
@@ -1190,42 +1238,36 @@ fn subevalvar(
      * them — it is the variable's *name*, in the word text — and the C
      * reuses the same local for the pattern, which is why that one gets a
      * name of its own. */
-    let startp: usize;
-    let loc: usize;
-    let mut rmesc: usize;
-    let mut rmescend: usize;
-    let zero: bool;
-    let scan: ScanFn;
-    let endp: usize;
-    let pat: usize;
-    let p: usize;
-
-    p = argstr(
-        sh,
+    let next_input = expand_encoded_word(
+        shell,
         state,
         text,
-        start,
+        input_start,
         mode.intersection(ExpansionMode::DISCARD)
             | ExpansionMode::TILDE
-            | if str.is_some() {
+            | if variable_name_start.is_some() {
                 ExpansionMode::PLAIN
             } else {
                 ExpansionMode::CASE_PATTERN
             },
     )?;
     if mode.contains(ExpansionMode::DISCARD) {
-        return Ok(p);
+        return Ok(next_input);
     }
 
-    startp = startloc;
+    let result_end = if variable.expansion == VariableExpansion::Assign {
+        let name =
+            BStr::new(&text[variable_name_start.expect("VSASSIGN carries the variable's name")..]);
+        let name = crate::variables::assignment_name(name);
+        let value = BStr::new(&expansion_buffer(state)[expansion_start..]);
+        crate::variables::set_bytes(
+            shell,
+            name,
+            Some(value),
+            crate::variables::VariableAttributes::NONE,
+        )?;
 
-    if variable.expansion == VariableExpansion::Assign {
-        let name = BStr::new(&text[str.expect("VSASSIGN carries the variable's name")..]);
-        let name = crate::var::varname(name);
-        let value = BStr::new(&expb(state)[startp..]);
-        crate::var::set_bytes(sh, name, Some(value), crate::var::VariableAttributes::NONE)?;
-
-        loc = startp;
+        expansion_start
     } else {
         if variable.expansion == VariableExpansion::Error {
             /* `varunset` stopped diverging with this commit, so this
@@ -1233,101 +1275,105 @@ fn subevalvar(
              * before — docs/errors-are-values.md 0.2 is the bug that
              * happens when one of these is missed, and `Error` is
              * `#[must_use]` so the compiler now names it. */
-            let umsg = BStr::new(&expb(state)[startp..]);
-            let var = str.expect("VSQUESTION carries the variable's name");
-            return Err(varunset(
-                sh,
+            let unset_message = BStr::new(&expansion_buffer(state)[expansion_start..]);
+            let variable_name_start =
+                variable_name_start.expect("VSQUESTION carries the variable's name");
+            return Err(unset_parameter_error(
+                shell,
                 text,
-                start,
-                var,
-                Some(umsg),
+                input_start,
+                variable_name_start,
+                Some(unset_message),
                 variable.null_is_unset,
             ));
         }
 
-        rmescend = strloc;
+        let mut unescaped_end = pattern_boundary;
         /* `str = preglob(rmescend, 0, NULL)` — the pattern is unescaped in
          * place, so its result remains a position in this buffer. */
-        rmescapes_buffer(&mut expb(state)[rmescend..], EscapeMode::Glob);
-        pat = rmescend;
+        remove_escapes_in_buffer(
+            &mut expansion_buffer(state)[unescaped_end..],
+            EscapeMode::Glob,
+        );
+        let pattern_start = unescaped_end;
 
-        rmesc = startp;
-        if !quotes {
+        let mut unescaped_start = expansion_start;
+        if !preserve_quotes {
             /* `_rmescapes` with RMESCAPE_GROW appends an unescaped copy of
              * `startp` past the cursor and moves the cursor over it, so the
              * buffer can have reallocated underneath.  That is what the C's
              * three `stackblock()` re-reads on the lines after this call
              * were for, and they are gone: an offset survives a growth,
              * which is why this hands over one and gets one back. */
-            rmesc = rmescapes_grow(expb(state), startp);
-            if rmesc != startp {
-                rmescend = expb(state).len();
+            unescaped_start = remove_escapes_from_offset(expansion_buffer(state), expansion_start);
+            if unescaped_start != expansion_start {
+                unescaped_end = expansion_buffer(state).len();
             }
         }
-        rmescend -= 1;
+        unescaped_end -= 1;
 
-        (zero, scan) = match variable.expansion {
-            VariableExpansion::TrimRight => (false, scanright as ScanFn),
-            VariableExpansion::TrimRightLongest => (false, scanleft as ScanFn),
-            VariableExpansion::TrimLeft => (true, scanleft as ScanFn),
-            VariableExpansion::TrimLeftLongest => (true, scanright as ScanFn),
+        let (match_prefix, scan_pattern) = match variable.expansion {
+            VariableExpansion::TrimRight => (false, scan_right as PatternScanFn),
+            VariableExpansion::TrimRightLongest => (false, scan_left as PatternScanFn),
+            VariableExpansion::TrimLeft => (true, scan_left as PatternScanFn),
+            VariableExpansion::TrimLeftLongest => (true, scan_right as PatternScanFn),
             _ => unreachable!("subevalvar only trims, assigns, or reports an unset variable"),
         };
 
-        endp = strloc - 1;
-        let found = scan(
-            &sh.locale,
-            expb(state),
-            &Scan {
-                startp,
-                endp,
-                rmesc,
-                rmescend,
-                pat,
-                quotes,
-                zero,
+        let value_end = pattern_boundary - 1;
+        let found = scan_pattern(
+            &shell.locale,
+            expansion_buffer(state),
+            &PatternScan {
+                value_start: expansion_start,
+                value_end,
+                unescaped_start,
+                unescaped_end,
+                pattern_start,
+                preserve_quotes,
+                match_prefix,
             },
         );
         match found {
             None => {
-                if quotes {
-                    rmesc = startp;
-                    rmescend = endp;
+                if preserve_quotes {
+                    unescaped_start = expansion_start;
+                    unescaped_end = value_end;
                 }
             }
-            Some(at) if !quotes => {
-                if zero {
-                    rmesc = at;
+            Some(at) if !preserve_quotes => {
+                if match_prefix {
+                    unescaped_start = at;
                 } else {
-                    rmescend = at;
+                    unescaped_end = at;
                 }
             }
-            Some(at) if zero => {
-                rmesc = at;
-                rmescend = endp;
+            Some(at) if match_prefix => {
+                unescaped_start = at;
+                unescaped_end = value_end;
             }
             Some(at) => {
-                rmesc = startp;
-                rmescend = at;
+                unescaped_start = expansion_start;
+                unescaped_end = at;
             }
         }
 
         /* `memmove(startp, rmesc, rmescend - rmesc)` — the two ranges are
          * in one buffer and may overlap, which `copy_within` already
          * knows. */
-        expb(state).copy_within(rmesc..rmescend, startp);
-        loc = startp + (rmescend - rmesc);
-    }
+        expansion_buffer(state).copy_within(unescaped_start..unescaped_end, expansion_start);
+        expansion_start + (unescaped_end - unescaped_start)
+    };
 
     /* The compacted value ends at `loc`; its length is the boundary. */
-    let b = expb(state);
-    debug_assert!(loc <= b.len());
-    b.truncate(loc);
+    let buffer = expansion_buffer(state);
+    debug_assert!(result_end <= buffer.len());
+    buffer.truncate(result_end);
 
     /* Remove any recorded regions beyond start of variable */
-    removerecordregions(state, startloc);
+    truncate_split_regions(state, expansion_start);
 
-    Ok(p)
+    Ok(next_input)
 }
 
 /*
@@ -1354,31 +1400,31 @@ fn subevalvar(
 // [spec:posix:req:expand.param-remove-largest-suffix]
 // [spec:posix:req:expand.param-remove-smallest-prefix]
 // [spec:posix:req:expand.param-remove-largest-prefix]
-fn evalvar(
-    sh: &mut crate::context::Shell,
+fn expand_parameter(
+    shell: &mut crate::context::Shell,
     state: &mut ExpandState,
     text: &[u8],
-    mut p: usize,
+    mut cursor: usize,
     mut mode: ExpansionMode,
 ) -> Result<usize, Error> {
     let mut variable: VariableFlags;
-    let var: usize;
-    let patloc: usize;
-    let startloc: usize;
+    let variable_name_start: usize;
+    let pattern_start: usize;
+    let expansion_start: usize;
     let mut value_length: Option<usize>;
     let mut discard: bool;
     let quoted = mode.contains(ExpansionMode::QUOTED);
     let multibyte_mode: ExpansionMode;
 
-    variable = VariableFlags::decode(byte_at(text, p));
-    p += 1;
+    variable = VariableFlags::decode(byte_at(text, cursor));
+    cursor += 1;
 
-    var = p;
-    startloc = expdest_off(state);
+    variable_name_start = cursor;
+    expansion_start = state.buffer.len();
     /* The parser always writes the `=` that ends the variable name, and
      * the C dereferences `strchr`'s result without checking. */
-    p += BStr::new(text.get(p..).unwrap_or_default())
-        .find_byte(C_EQUALS)
+    cursor += BStr::new(text.get(cursor..).unwrap_or_default())
+        .find_byte(EQUALS)
         .expect("the parser ends a variable name with `=`")
         + 1;
 
@@ -1396,10 +1442,10 @@ fn evalvar(
     }
 
     let record_policy = loop {
-        value_length = varvalue(
-            sh,
+        value_length = parameter_value(
+            shell,
             state,
-            BStr::new(&text[var..p]),
+            BStr::new(&text[variable_name_start..cursor]),
             variable.expansion,
             mode | multibyte_mode,
         )?;
@@ -1418,11 +1464,11 @@ fn evalvar(
                     /* fall through */
                 }
 
-                p = argstr(
-                    sh,
+                cursor = expand_encoded_word(
+                    shell,
                     state,
                     text,
-                    p,
+                    cursor,
                     (mode | ExpansionMode::TILDE | ExpansionMode::PARAMETER_WORD)
                         .with_if(ExpansionMode::DISCARD, !discard),
                 )?;
@@ -1430,14 +1476,14 @@ fn evalvar(
             }
 
             VariableExpansion::Assign | VariableExpansion::Error => {
-                p = subevalvar(
-                    sh,
+                cursor = apply_parameter_operator(
+                    shell,
                     state,
                     text,
-                    p,
-                    Some(var),
+                    cursor,
+                    Some(variable_name_start),
                     0,
-                    startloc,
+                    expansion_start,
                     variable,
                     mode.without(ExpansionMode::SPLIT | ExpansionMode::CASE_PATTERN)
                         .with_if(ExpansionMode::DISCARD, !discard),
@@ -1455,22 +1501,29 @@ fn evalvar(
 
         if discard
             && !mode.contains(ExpansionMode::DISCARD)
-            && sh.options.enabled(ShellOption::Nounset)
+            && shell.options.enabled(ShellOption::Nounset)
         {
             /* A stop before `varunset` stopped diverging, and still one. */
-            return Err(varunset(sh, text, p, var, None, false));
+            return Err(unset_parameter_error(
+                shell,
+                text,
+                cursor,
+                variable_name_start,
+                None,
+                false,
+            ));
         }
 
         if variable.expansion == VariableExpansion::Length {
-            p += 1;
+            cursor += 1;
             if mode.contains(ExpansionMode::DISCARD) {
-                return Ok(p);
+                return Ok(cursor);
             }
-            cvtnum(
-                &sh.locale,
+            push_integer(
+                &shell.locale,
                 i64::try_from(value_length.unwrap_or(0)).unwrap_or(i64::MAX),
                 mode,
-                expb(state),
+                expansion_buffer(state),
             );
             break RecordPolicy::Always;
         }
@@ -1481,41 +1534,52 @@ fn evalvar(
 
         mode = mode.with_if(ExpansionMode::DISCARD, discard);
         /* `patloc` is the length-delimited boundary between value and pattern. */
-        patloc = expdest_off(state);
-        p = subevalvar(sh, state, text, p, None, patloc, startloc, variable, mode)?;
+        pattern_start = state.buffer.len();
+        cursor = apply_parameter_operator(
+            shell,
+            state,
+            text,
+            cursor,
+            None,
+            pattern_start,
+            expansion_start,
+            variable,
+            mode,
+        )?;
         break RecordPolicy::IfPresent;
     };
 
     if matches!(record_policy, RecordPolicy::IfPresent)
         && (mode.contains(ExpansionMode::DISCARD) || discard)
     {
-        return Ok(p);
+        return Ok(cursor);
     }
 
     let quoted_at = if quoted {
-        byte_at(text, var) == C_AT && sh.options.shellparam.nparam != 0
+        byte_at(text, variable_name_start) == AT
+            && shell.options.positional_parameters.parameter_count != 0
     } else {
         false
     };
     if quoted && !quoted_at {
-        return Ok(p);
+        return Ok(cursor);
     }
-    let endloc = expdest_off(state);
-    recordregion(state, startloc, endloc, quoted_at);
-    Ok(p)
+    let expansion_end = state.buffer.len();
+    record_split_region(state, expansion_start, expansion_end, quoted_at);
+    Ok(cursor)
 }
 
 // [spec:dash:def:expand.chtodest-fn]
 // [spec:dash:sem:expand.chtodest-fn]
 /// The cursor the C returns is the destination's own length now, so this
 /// appends and returns nothing. It performs no unsafe operation at all.
-fn chtodest(c: u8, syntax: DestinationSyntax, out: &mut BString) {
-    if syntax.escapes(c) {
+fn push_character(byte: u8, syntax: DestinationSyntax, output: &mut BString) {
+    if syntax.escapes(byte) {
         /* USTPUTC(CTLESC, out) */
-        out.push(CTLESC);
+        output.push(LEGACY_ESCAPE);
     }
     /* USTPUTC(c, out) */
-    out.push(c);
+    output.push(byte);
 }
 
 // [spec:dash:def:expand.mbpair]
@@ -1537,45 +1601,48 @@ fn chtodest(c: u8, syntax: DestinationSyntax, out: &mut BString) {
 // state is all-zero by definition — the C writes `mbstate_t mbs = {}` — so
 // `zeroed` produces a valid `mbstate_t` rather than an uninitialised one.
 // Two operations move inside the block rather than disappearing.
-fn mbtodest(
+fn push_multibyte_character(
     locale: &nsh_platform::Locale,
-    src: &[u8],
+    source: &[u8],
     at: usize,
-    dst: &mut BString,
+    output: &mut BString,
     syntax: DestinationSyntax,
 ) -> usize {
-    let mut ml: usize;
+    let mut multibyte_length: usize;
 
     /* `p = p - 1` */
-    let p: &[u8] = &src[at - 1..];
-    ml = locale.multibyte_len(p).unwrap_or(usize::MAX);
-    if ml == (0 as usize).wrapping_sub(2) || ml == (0 as usize).wrapping_sub(1) || ml < 2 {
-        chtodest(p[0], syntax, dst);
-        ml = 1;
+    let source_character = &source[at - 1..];
+    multibyte_length = locale.multibyte_len(source_character).unwrap_or(usize::MAX);
+    if multibyte_length == (0 as usize).wrapping_sub(2)
+        || multibyte_length == (0 as usize).wrapping_sub(1)
+        || multibyte_length < 2
+    {
+        push_character(source_character[0], syntax, output);
+        multibyte_length = 1;
     } else {
         /* `syntax[CTLMBCHAR]` — CTLMBCHAR is negative; see the note in
          * `memtodest` about the unbiased `is_type` table. Negative is an
          * ordinary index now, and a checked one. */
-        if syntax.escapes(CTLMBCHAR) {
+        if syntax.escapes(LEGACY_MULTIBYTE) {
             /* USTPUTC(CTLMBCHAR, q); USTPUTC(ml, q); */
-            dst.push(CTLMBCHAR);
-            dst.push(ml as u8);
+            output.push(LEGACY_MULTIBYTE);
+            output.push(multibyte_length as u8);
         }
 
         /* `q = mempcpy(q, p, ml)`. The source is the caller's input and
          * never `dst`'s own buffer -- `memtodest` records why -- so the
          * append cannot alias what it reads.  `ml` came from `mbrlen`
          * over this same slice, so it cannot exceed it. */
-        dst.extend_from_slice(&p[..ml]);
+        output.extend_from_slice(&source_character[..multibyte_length]);
 
-        if syntax.escapes(CTLMBCHAR) {
+        if syntax.escapes(LEGACY_MULTIBYTE) {
             /* USTPUTC(ml, q); USTPUTC(CTLMBCHAR, q); */
-            dst.push(ml as u8);
-            dst.push(CTLMBCHAR);
+            output.push(multibyte_length as u8);
+            output.push(LEGACY_MULTIBYTE);
         }
     }
 
-    ml.wrapping_sub(1)
+    multibyte_length.wrapping_sub(1)
 }
 
 /*
@@ -1614,39 +1681,38 @@ fn mbtodest(
 // question at once: `p` cannot run past `len`, the eight-byte fast path
 // reads eight bytes that exist, and `mbtodest`'s `p - 1` is an index into
 // something with a start.
-fn memtodest(
+fn push_bytes(
     locale: &nsh_platform::Locale,
-    src: &[u8],
+    source: &[u8],
     mode: ExpansionMode,
-    dst: &mut BString,
+    output: &mut BString,
 ) -> usize {
     let syntax: DestinationSyntax;
     let mut count: usize = 0;
     /* The C's `p` and `len` are one cursor over `src` and the number of
      * bytes left; `i` is the first and `src.len() - i` the second. */
-    let mut i: usize = 0;
+    let mut source_index = 0;
 
-    if src.is_empty() {
+    if source.is_empty() {
         return 0;
     }
 
     /* CTLMBCHAR, 2, c, c, 2, CTLMBCHAR.  A hint now rather than a
      * contract: the writes below are appends, so a short reservation
      * costs a growth instead of running off the end. */
-    dst.reserve(src.len() * 3);
+    output.reserve(source.len() * 3);
 
     let framed = mode.escapes_quotes() || mode.contains(ExpansionMode::PRESERVE_MULTIBYTE);
     if !mode.contains(ExpansionMode::QUOTED) || !framed {
-        while src.len() - i >= 8 {
-            let x: u64;
-
+        while source.len() - source_index >= 8 {
             /* `__builtin_memcpy` of eight bytes into a `uint64_t`, which
              * is an unaligned load the C spells with a cast.  Over a
              * slice it is a checked eight-byte read, and the check is
              * the loop condition. */
-            x = u64::from_ne_bytes(src[i..i + 8].try_into().unwrap());
+            let chunk =
+                u64::from_ne_bytes(source[source_index..source_index + 8].try_into().unwrap());
 
-            if (x | x.wrapping_sub(0x0101010101010101)) & 0x8080808080808080 != 0 {
+            if (chunk | chunk.wrapping_sub(0x0101010101010101)) & 0x8080808080808080 != 0 {
                 break;
             }
 
@@ -1655,10 +1721,10 @@ fn memtodest(
              * value round-trips through the same native representation
              * it was loaded from. The C's `q = q + count` after the loop
              * is gone because appending has already moved the cursor. */
-            dst.extend_from_slice(&x.to_ne_bytes());
+            output.extend_from_slice(&chunk.to_ne_bytes());
 
             count += 8;
-            i += 8;
+            source_index += 8;
         }
 
         /* NOTE (bug-for-bug): `is_type` is used here *unbiased*, i.e.
@@ -1678,26 +1744,26 @@ fn memtodest(
     }
 
     /* for (; len; len--) */
-    while i < src.len() {
-        let c = src[i];
-        i += 1;
+    while source_index < source.len() {
+        let byte = source[source_index];
+        source_index += 1;
 
-        if c == 0 && !mode.contains(ExpansionMode::KEEP_NUL) {
+        if byte == 0 && !mode.contains(ExpansionMode::KEEP_NUL) {
             continue;
         }
 
         count += 1;
 
-        if c & 0x80 != 0 {
+        if byte & 0x80 != 0 {
             /* `mbtodest(p, ...)` is called with `p` already past the
              * byte it is about to decode, and starts by stepping
              * back over it; `i` is that same position. */
-            let additional = mbtodest(locale, src, i, dst, syntax);
-            i += additional;
+            let additional = push_multibyte_character(locale, source, source_index, output, syntax);
+            source_index += additional;
             continue;
         }
 
-        chtodest(c, syntax, dst);
+        push_character(byte, syntax, output);
     }
 
     /* The C's `expdest = q` was this port's `set_len` over bytes a raw
@@ -1713,13 +1779,13 @@ fn memtodest(
 // The C string entry became a counted byte slice. Every caller now already
 // knows the value's bounds, so the old `strlen` scan and its raw pointer are
 // both redundant.
-fn strtodest(
+fn push_text(
     locale: &nsh_platform::Locale,
     value: &[u8],
     mode: ExpansionMode,
-    dst: &mut BString,
+    output: &mut BString,
 ) -> usize {
-    memtodest(locale, value, mode, dst)
+    push_bytes(locale, value, mode, output)
 }
 
 /*
@@ -1745,24 +1811,24 @@ fn strtodest(
 // [spec:posix:req:param.special-bang]
 // [spec:posix:req:param.special-zero]
 // [spec:posix:def:exit.expansion-error]
-fn varvalue(
-    sh: &mut crate::context::Shell,
+fn parameter_value(
+    shell: &mut crate::context::Shell,
     state: &mut ExpandState,
     name: &BStr,
     expansion: VariableExpansion,
     mut mode: ExpansionMode,
 ) -> Result<Option<usize>, Error> {
-    let mut seplen: usize;
+    let mut separator_length: usize;
     /* The C's `const char *seps` plus its length.  The comment that stood
      * at the assignment below owed a conversion — it said the pointer was
      * safe *because* of where the storage comes from, which is an argument
      * a slice does not have to make.  Both sources are bytes the shell
      * owns for the whole call, so both are slices. */
-    let mut seps: &[u8];
-    let mut len: usize = 0;
-    let start: usize;
+    let mut separators: &[u8];
+    let mut value_length = 0;
+    let expansion_start: usize;
     let discard: bool;
-    let name = crate::var::varname(name);
+    let name = crate::variables::assignment_name(name);
     let name_byte = name.first().copied().unwrap_or_default();
 
     discard = matches!(
@@ -1775,7 +1841,7 @@ fn varvalue(
             return Ok(None);
         }
 
-        return Err(sh.diagnostics().sh_error_value(b"Bad substitution"));
+        return Err(shell.diagnostics().shell_error(b"Bad substitution"));
     }
 
     if discard {
@@ -1784,98 +1850,111 @@ fn varvalue(
     /* `seps = nullstr` — the empty C string, whose one byte is the
      * terminator, and the terminator is what gets written when the
      * separator is a NUL. */
-    seps = &[0u8];
-    seplen = usize::from(mode.contains(ExpansionMode::SPLIT));
-    start = expdest_off(state);
+    separators = &[0u8];
+    separator_length = usize::from(mode.contains(ExpansionMode::SPLIT));
+    expansion_start = state.buffer.len();
 
     match name_byte {
-        C_DOLLAR | C_QUESTION | C_HASH | C_BANG => {
-            let num = match name_byte {
-                C_DOLLAR => i64::from(sh.root_pid.get()),
-                C_QUESTION => i64::from(sh.status.code()),
-                C_HASH => i64::try_from(sh.options.shellparam.nparam).unwrap_or(i64::MAX),
-                C_BANG => {
-                    let Some(pid) = sh.backgndpid else {
+        DOLLAR | QUESTION | HASH | BANG => {
+            let number = match name_byte {
+                DOLLAR => i64::from(shell.root_pid.get()),
+                QUESTION => i64::from(shell.status.code()),
+                HASH => i64::try_from(shell.options.positional_parameters.parameter_count)
+                    .unwrap_or(i64::MAX),
+                BANG => {
+                    let Some(process_id) = shell.background_process else {
                         return Ok(None);
                     };
-                    i64::from(pid.get())
+                    i64::from(process_id.get())
                 }
                 _ => unreachable!(),
             };
-            len = cvtnum(&sh.locale, num, mode, expb(state));
+            value_length = push_integer(&shell.locale, number, mode, expansion_buffer(state));
         }
-        C_MINUS => {
+        MINUS => {
             for spec in OPTION_SPECS.iter().rev() {
-                if sh.options.enabled(spec.option)
+                if shell.options.enabled(spec.option)
                     && let Some(letter) = spec.letter
                 {
-                    expb(state).push(letter);
-                    len += 1;
+                    expansion_buffer(state).push(letter);
+                    value_length += 1;
                 }
             }
         }
-        C_AT | C_STAR => {
-            if name_byte != C_AT
+        AT | STAR => {
+            if name_byte != AT
                 || !(mode.contains(ExpansionMode::QUOTED) && mode.contains(ExpansionMode::SPLIT))
             {
                 if mode.contains(ExpansionMode::QUOTED) {
-                    seplen = 0;
+                    separator_length = 0;
                 }
-                if seplen == 0 {
-                    seps = sh.ifs.ncifs.as_slice();
+                if separator_length == 0 {
+                    separators = shell.ifs.bytes.as_slice();
                 }
-                seplen =
-                    (seplen.wrapping_sub(1) & sh.ifs.ifsmb0len.wrapping_sub(1)).wrapping_add(1);
+                separator_length = (separator_length.wrapping_sub(1)
+                    & shell.ifs.first_character_length.wrapping_sub(1))
+                .wrapping_add(1);
             }
 
-            for (index, param) in sh.options.shellparam.words().iter().enumerate() {
+            for (index, parameter) in shell
+                .options
+                .positional_parameters
+                .words()
+                .iter()
+                .enumerate()
+            {
                 if index != 0 {
                     debug_assert!(
-                        seplen <= seps.len(),
-                        "varvalue: separator length {seplen} exceeds the {} bytes it names",
-                        seps.len()
+                        separator_length <= separators.len(),
+                        "parameter separator length {separator_length} exceeds the {} bytes it names",
+                        separators.len()
                     );
-                    len += memtodest(
-                        &sh.locale,
-                        &seps[..seplen],
+                    value_length += push_bytes(
+                        &shell.locale,
+                        &separators[..separator_length],
                         mode | ExpansionMode::KEEP_NUL,
-                        expb(state),
+                        expansion_buffer(state),
                     );
                 }
 
-                len += strtodest(&sh.locale, param, mode, expb(state));
+                value_length += push_text(&shell.locale, parameter, mode, expansion_buffer(state));
             }
         }
-        c if (C_0..=C_9).contains(&c) => {
+        digit if (ZERO..=NINE).contains(&digit) => {
             let position = crate::number::parse_decimal(name)
                 .and_then(|number| usize::try_from(number).ok())
                 .unwrap_or(0);
-            if position > sh.options.shellparam.nparam {
+            if position > shell.options.positional_parameters.parameter_count {
                 return Ok(None);
             }
             let value = if position != 0 {
-                sh.options.shellparam.words().get(position - 1).cloned()
+                shell
+                    .options
+                    .positional_parameters
+                    .words()
+                    .get(position - 1)
+                    .cloned()
             } else {
-                sh.options.arg0().map(BStr::to_owned)
+                shell.options.argument_zero().map(BStr::to_owned)
             };
             let Some(value) = value else {
                 return Ok(None);
             };
-            len = strtodest(&sh.locale, &value, mode, expb(state));
+            value_length = push_text(&shell.locale, &value, mode, expansion_buffer(state));
         }
         _ => {
-            let Some(value) = crate::var::lookup_bytes(sh, name) else {
+            let Some(value) = crate::variables::lookup_bytes(shell, name) else {
                 return Ok(None);
             };
-            len = strtodest(&sh.locale, &value, mode, expb(state));
+            value_length = push_text(&shell.locale, &value, mode, expansion_buffer(state));
         }
     }
 
     if discard {
-        expb(state).truncate(start);
+        expansion_buffer(state).truncate(expansion_start);
     }
 
-    Ok(Some(len))
+    Ok(Some(value_length))
 }
 
 /*
@@ -1885,14 +1964,17 @@ fn varvalue(
 
 // [spec:dash:def:expand.recordregion-fn]
 // [spec:dash:sem:expand.recordregion-fn]
-pub(crate) fn recordregion(state: &mut ExpandState, start: usize, end: usize, nulonly: bool) {
-    let r = ifsregion {
-        begoff: start,
-        endoff: end,
-        nulonly,
-    };
-
-    ifsr(state).push(r);
+pub(crate) fn record_split_region(
+    state: &mut ExpandState,
+    start: usize,
+    end: usize,
+    nul_only: bool,
+) {
+    split_regions(state).push(FieldSplitRegion {
+        start,
+        end,
+        nul_only,
+    });
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1903,82 +1985,94 @@ struct IfsMembership {
 
 // [spec:dash:def:expand.ifsisifs-fn]
 // [spec:dash:sem:expand.ifsisifs-fn]
-fn ifsisifs(sh: &Shell, s: &[u8], multibyte_len: usize, nulonly: bool) -> IfsMembership {
-    let mut isdefifs: bool = false;
-    let mut isifs: bool = false;
-    let mut wc: i32 = byte_at(s, 0) as i32;
+fn classify_ifs(
+    shell: &Shell,
+    bytes: &[u8],
+    multibyte_length: usize,
+    nul_only: bool,
+) -> IfsMembership {
+    let mut is_default_whitespace = false;
+    let mut is_separator = false;
+    let mut wide_character = byte_at(bytes, 0) as i32;
     /* C leaves `ifs0` uninitialised; it is only read when `isifs`, which
      * implies one of the branches below assigned it. */
-    let mut ifs0: i32 = 0;
+    let mut first_separator = 0;
 
-    if nulonly {
-        isifs = wc == 0;
-    } else if !sh.ifs.ncifs.is_empty() && !sh.ifs.wcifs.is_empty() {
-        if (wc & 0x80) != 0 {
+    if nul_only {
+        is_separator = wide_character == 0;
+    } else if !shell.ifs.bytes.is_empty() && !shell.ifs.wide_characters.is_empty() {
+        if (wide_character & 0x80) != 0 {
             /* `ml` came from `mbnext` over this same slice, so the
              * clamp can only bite where the C read past the word's
              * end -- and a short read fails the `!= ml` test exactly
              * as a malformed character does.  The same trade
              * `ccmatch_bytes` records. */
-            let n = multibyte_len.min(s.len());
-            let Some(wc2) = sh.locale.decode_exact(&s[..n], multibyte_len) else {
+            let available_length = multibyte_length.min(bytes.len());
+            let Some(decoded_character) = shell
+                .locale
+                .decode_exact(&bytes[..available_length], multibyte_length)
+            else {
                 return IfsMembership::default();
             };
-            wc = wc2;
+            wide_character = decoded_character;
         }
 
-        isifs = sh.ifs.wcifs.contains(&wc);
-        ifs0 = sh.ifs.wcifs[0];
-    } else if multibyte_len == 0 {
-        isifs = sh.ifs.ncifs.contains(&(wc as u8));
-        ifs0 = sh.ifs.ncifs.first().copied().unwrap_or(0) as i32;
+        is_separator = shell.ifs.wide_characters.contains(&wide_character);
+        first_separator = shell.ifs.wide_characters[0];
+    } else if multibyte_length == 0 {
+        is_separator = shell.ifs.bytes.contains(&(wide_character as u8));
+        first_separator = shell.ifs.bytes.first().copied().unwrap_or(0) as i32;
     }
 
-    if isifs {
-        isdefifs = sh.locale.wide_is_space(if wc != 0 { wc } else { ifs0 });
+    if is_separator {
+        is_default_whitespace = shell.locale.wide_is_space(if wide_character != 0 {
+            wide_character
+        } else {
+            first_separator
+        });
     }
     IfsMembership {
-        separator: isifs,
-        default_whitespace: isdefifs,
+        separator: is_separator,
+        default_whitespace: is_default_whitespace,
     }
 }
 
 // [spec:dash:def:expand.ifsbreakup-slow-fn]
 // [spec:dash:sem:expand.ifsbreakup-slow-fn]
-fn ifsbreakup_slow(
-    sh: &Shell,
-    ifst: &mut ifs_state,
-    fields: &mut Vec<strlist>,
-    nulonly: bool,
+fn split_fields_slow(
+    shell: &Shell,
+    split_state: &mut FieldSplitState,
+    fields: &mut Vec<ExpandedField>,
+    after_nul_region: bool,
     string: &[u8],
-    mut p: usize,
+    mut cursor: usize,
 ) -> usize {
     let character: EncodedCharacterSpan;
-    let isdefifs: bool;
-    let multibyte_len: usize;
-    let isifs: bool;
-    let mut q: usize;
+    let is_default_whitespace: bool;
+    let multibyte_length: usize;
+    let is_separator: bool;
+    let mut character_start: usize;
 
-    q = p;
+    character_start = cursor;
 
-    character = mbnext_bytes(string.get(p..).unwrap_or_default());
-    p += character.prefix;
-    multibyte_len = if character.remainder > 3 {
+    character = next_encoded_character(string.get(cursor..).unwrap_or_default());
+    cursor += character.prefix;
+    multibyte_length = if character.remainder > 3 {
         character.remainder - 2
     } else {
         0
     };
 
-    let membership = ifsisifs(
-        sh,
-        string.get(p..).unwrap_or_default(),
-        multibyte_len,
-        ifst.nulonly,
+    let membership = classify_ifs(
+        shell,
+        string.get(cursor..).unwrap_or_default(),
+        multibyte_length,
+        split_state.nul_only,
     );
-    p += character.remainder;
+    cursor += character.remainder;
 
-    isifs = membership.separator;
-    isdefifs = membership.default_whitespace;
+    is_separator = membership.separator;
+    is_default_whitespace = membership.default_whitespace;
 
     /* If only reading one more argument:
      * If we have exactly one field,
@@ -1999,40 +2093,40 @@ fn ifsbreakup_slow(
      * of the characters to remove, or NULL
      * if no characters should be removed.
      */
-    if matches!(ifst.max_fields, FieldLimit::Remaining(0)) {
-        if isdefifs {
-            if ifst.r.is_none() {
-                ifst.r = Some(q);
+    if matches!(split_state.max_fields, FieldLimit::Remaining(0)) {
+        if is_default_whitespace {
+            if split_state.trailing_whitespace_start.is_none() {
+                split_state.trailing_whitespace_start = Some(character_start);
             }
-            return p;
+            return cursor;
         }
 
-        if !(isifs && ifst.ifsspc) {
-            ifst.r = None;
+        if !(is_separator && split_state.separator_is_whitespace) {
+            split_state.trailing_whitespace_start = None;
         }
-    } else if ifst.ifsspc {
-        if isifs {
-            q = p;
+    } else if split_state.separator_is_whitespace {
+        if is_separator {
+            character_start = cursor;
         }
 
-        ifst.start = q;
+        split_state.field_start = character_start;
 
-        if isdefifs {
-            return p;
+        if is_default_whitespace {
+            return cursor;
         }
-    } else if isifs {
-        let mut ifsspc = ifst.ifsspc;
+    } else if is_separator {
+        let mut separator_is_whitespace = split_state.separator_is_whitespace;
 
-        if !nulonly {
-            ifsspc = isdefifs;
-            ifst.ifsspc = ifsspc;
+        if !after_nul_region {
+            separator_is_whitespace = is_default_whitespace;
+            split_state.separator_is_whitespace = separator_is_whitespace;
         }
 
         /* Ignore IFS whitespace at start. */
-        if q == ifst.start && ifsspc {
-            ifst.start = p;
+        if character_start == split_state.field_start && separator_is_whitespace {
+            split_state.field_start = cursor;
         } else {
-            let last_field = match &mut ifst.max_fields {
+            let last_field = match &mut split_state.max_fields {
                 FieldLimit::Unlimited => false,
                 FieldLimit::Remaining(remaining) => {
                     *remaining = remaining.saturating_sub(1);
@@ -2040,17 +2134,19 @@ fn ifsbreakup_slow(
                 }
             };
             if last_field {
-                ifst.r = Some(q);
-                return p;
+                split_state.trailing_whitespace_start = Some(character_start);
+                return cursor;
             }
-            fields.push(strlist::from_bytes(&string[ifst.start..q]));
-            ifst.start = p;
-            return p;
+            fields.push(ExpandedField::from_bytes(
+                &string[split_state.field_start..character_start],
+            ));
+            split_state.field_start = cursor;
+            return cursor;
         }
     }
 
-    ifst.ifsspc = false;
-    p
+    split_state.separator_is_whitespace = false;
+    cursor
 }
 
 /*
@@ -2063,95 +2159,105 @@ fn ifsbreakup_slow(
 
 // [spec:dash:def:expand.ifsbreakup-fn]
 // [spec:dash:sem:expand.ifsbreakup-fn]
-fn ifsbreakup_regions(
-    sh: &Shell,
-    regions: &[ifsregion],
+fn split_regions_into_fields(
+    shell: &Shell,
+    regions: &[FieldSplitRegion],
     string: &[u8],
     max_fields: FieldLimit,
-    fields: &mut Vec<strlist>,
+    fields: &mut Vec<ExpandedField>,
 ) {
-    let mut ifsp: usize;
+    let mut region_index: usize;
     /* `struct ifs_state ifst;` and the three assignments the C makes
      * before the loop, as one initialiser. `mem::zeroed` was standing in
      * for the C leaving `ifs` and `ifsspc` unset here, and both are
      * assigned on every path that reads them; a struct without a pointer
      * in it can say so directly. */
-    let mut ifst: ifs_state = ifs_state {
-        nulonly: false,
-        start: 0,
-        r: None,
+    let mut split_state = FieldSplitState {
+        nul_only: false,
+        field_start: 0,
+        trailing_whitespace_start: None,
         max_fields,
-        ifsspc: false,
+        separator_is_whitespace: false,
     };
-    let mut nulonly: bool;
-    let mut p: usize;
+    let mut nul_only: bool;
+    let mut cursor: usize;
     let mut preserve_nul_field = false;
     let mut final_end = string.len();
 
     if !regions.is_empty() {
-        ifst.ifsspc = false;
-        nulonly = false;
+        split_state.separator_is_whitespace = false;
+        nul_only = false;
         /* `realifs = ifsset() ? ncifs : nullstr` is gone with the
          * pointer it cached: `ifsisifs` reads `IFS` off the shell,
          * and what it needs from here is the one bit below. */
-        ifsp = 0;
+        region_index = 0;
         loop {
-            let afternul: bool;
-            let endoff = regions[ifsp].endoff;
+            let after_nul_region: bool;
+            let end = regions[region_index].end;
 
-            p = regions[ifsp].begoff;
+            cursor = regions[region_index].start;
             debug_assert!(
-                endoff <= string.len(),
+                end <= string.len(),
                 "a recorded region ends past the word it was recorded in"
             );
-            afternul = nulonly;
-            nulonly = regions[ifsp].nulonly;
-            ifst.nulonly = nulonly;
-            ifst.ifsspc = false;
+            after_nul_region = nul_only;
+            nul_only = regions[region_index].nul_only;
+            split_state.nul_only = nul_only;
+            split_state.separator_is_whitespace = false;
             loop {
-                let p0: usize = p;
+                let scan_start = cursor;
 
                 /* `stackblock() + endoff - p >= 8` — eight bytes of
                  * this region left to look at.  As offsets it is also
                  * the bound that makes the load below a checked one. */
-                while endoff >= p + 8 {
+                while end >= cursor + 8 {
                     /* union { uint64_t qw; unsigned char b[8]; } x; */
-                    let b: [u8; 8] = string[p..p + 8].try_into().unwrap();
-                    let qw: u64 = u64::from_ne_bytes(b);
+                    let chunk_bytes: [u8; 8] = string[cursor..cursor + 8].try_into().unwrap();
+                    let chunk_bits = u64::from_ne_bytes(chunk_bytes);
 
-                    if (qw & 0x8080808080808080) != 0 {
+                    if (chunk_bits & 0x8080808080808080) != 0 {
                         break;
                     }
-                    if b.iter().any(|byte| sh.ifs.ifsmap[*byte as usize]) {
+                    if chunk_bytes
+                        .iter()
+                        .any(|byte| shell.ifs.ascii_membership[*byte as usize])
+                    {
                         break;
                     }
-                    p += 8;
+                    cursor += 8;
                 }
 
-                if p != p0 {
-                    if matches!(ifst.max_fields, FieldLimit::Remaining(0)) {
-                        ifst.r = None;
-                    } else if ifst.ifsspc {
-                        ifst.start = p0;
+                if cursor != scan_start {
+                    if matches!(split_state.max_fields, FieldLimit::Remaining(0)) {
+                        split_state.trailing_whitespace_start = None;
+                    } else if split_state.separator_is_whitespace {
+                        split_state.field_start = scan_start;
                     }
-                    ifst.ifsspc = false;
+                    split_state.separator_is_whitespace = false;
                 }
 
-                if p >= endoff {
+                if cursor >= end {
                     break;
                 }
 
-                p = ifsbreakup_slow(sh, &mut ifst, fields, afternul || nulonly, string, p);
+                cursor = split_fields_slow(
+                    shell,
+                    &mut split_state,
+                    fields,
+                    after_nul_region || nul_only,
+                    string,
+                    cursor,
+                );
             }
 
-            ifsp += 1;
-            if ifsp >= regions.len() {
+            region_index += 1;
+            if region_index >= regions.len() {
                 break;
             }
         }
-        if nulonly {
+        if nul_only {
             preserve_nul_field = true;
-        } else if let Some(r) = ifst.r {
+        } else if let Some(trailing_whitespace_start) = split_state.trailing_whitespace_start {
             /* This is the one write into `string` that happens after
              * `ifsbreakup_slow` has stopped emitting fields, and the
              * fields no longer alias `string` — they copied out at the
@@ -2162,18 +2268,20 @@ fn ifsbreakup_regions(
              * branches that set it both return without emitting, so no
              * field is taken between the two points. */
             debug_assert!(
-                r >= ifst.start,
+                trailing_whitespace_start >= split_state.field_start,
                 "the trailing-IFS truncation lands in an already-taken field"
             );
-            final_end = r;
+            final_end = trailing_whitespace_start;
         }
     }
 
-    if !preserve_nul_field && ifst.start >= final_end {
+    if !preserve_nul_field && split_state.field_start >= final_end {
         return;
     }
 
-    fields.push(strlist::from_bytes(&string[ifst.start..final_end]));
+    fields.push(ExpandedField::from_bytes(
+        &string[split_state.field_start..final_end],
+    ));
 }
 
 // [spec:posix:req:expand.field-splitting-applies]
@@ -2189,50 +2297,56 @@ fn ifsbreakup_regions(
 // [spec:posix:def:expand.field-splitting-delimited]
 // [spec:posix:req:expand.field-splitting-algorithm]
 // [spec:posix:req:expand.field-splitting-output-replaces-input]
-pub fn ifsbreakup(sh: &Shell, string: &[u8], max_fields: usize, arglist: &mut arglist) {
-    ifsbreakup_regions(
-        sh,
-        &sh.expand.ifs_regions,
+pub fn split_fields(
+    shell: &Shell,
+    string: &[u8],
+    max_fields: usize,
+    expanded_fields: &mut ExpandedFields,
+) {
+    split_regions_into_fields(
+        shell,
+        &shell.expand.ifs_regions,
         string,
         FieldLimit::Remaining(max_fields),
-        &mut arglist.list,
+        &mut expanded_fields.fields,
     );
 }
 
 // [spec:dash:def:expand.ifsfree-fn]
 // [spec:dash:sem:expand.ifsfree-fn]
-pub(crate) fn ifsfree(state: &mut ExpandState) {
+pub(crate) fn clear_split_regions(state: &mut ExpandState) {
     /* Emptying the owned region list replaces freeing the C chain and
      * nulling its tail pointer. */
-    if ifsr(state).len() > 1 {
-        ifsr(state).truncate(1);
+    if split_regions(state).len() > 1 {
+        split_regions(state).truncate(1);
     }
-    ifsr(state).clear();
+    split_regions(state).clear();
 }
 
 // [spec:dash:def:expand.changeifs-fn]
 // [spec:dash:sem:expand.changeifs-fn]
-pub fn changeifs_bytes(sh: &mut crate::context::Shell, ifs: &BStr) {
+pub fn update_ifs_cache(shell: &mut crate::context::Shell, ifs: &BStr) {
     let mut has_multibyte = false;
-    sh.ifs.ncifs = ifs.to_owned();
+    shell.ifs.bytes = ifs.to_owned();
 
-    sh.ifs.ifsmap = [false; 128];
+    shell.ifs.ascii_membership = [false; 128];
 
-    let len = sh.ifs.ncifs.len();
-    for &byte in sh.ifs.ncifs.iter() {
+    let byte_length = shell.ifs.bytes.len();
+    for &byte in shell.ifs.bytes.iter() {
         has_multibyte |= !byte.is_ascii();
         if byte.is_ascii() {
-            sh.ifs.ifsmap[usize::from(byte)] = true;
+            shell.ifs.ascii_membership[usize::from(byte)] = true;
         }
     }
 
-    sh.ifs.ifsmb0len = usize::from(!sh.ifs.ncifs.is_empty());
-    sh.ifs.wcifs = if !has_multibyte {
+    shell.ifs.first_character_length = usize::from(!shell.ifs.bytes.is_empty());
+    shell.ifs.wide_characters = if !has_multibyte {
         Vec::new()
     } else {
-        let (first_len, wide) = sh.locale.wide_chars(&sh.ifs.ncifs[..len]);
-        sh.ifs.ifsmb0len = first_len;
-        wide
+        let (first_character_length, wide_characters) =
+            shell.locale.wide_chars(&shell.ifs.bytes[..byte_length]);
+        shell.ifs.first_character_length = first_character_length;
+        wide_characters
     };
 }
 
@@ -2255,10 +2369,10 @@ pub fn changeifs_bytes(sh: &mut crate::context::Shell, ifs: &BStr) {
 // [spec:posix:req:expand.pathname]
 // [spec:posix:req:pattern.no-match-unchanged]
 // [spec:posix:req:pattern.no-special-chars-unchanged]
-fn expandmeta(
-    sh: &mut crate::context::Shell,
+fn expand_pathnames(
+    shell: &mut crate::context::Shell,
     state: &mut ExpandState,
-    words: Vec<strlist>,
+    words: Vec<ExpandedField>,
 ) -> Result<(), Error> {
     /* TODO - EXP_REDIR */
 
@@ -2273,23 +2387,23 @@ fn expandmeta(
      * per `expandmeta` that globs anything, reused across the word loop
      * exactly as the region's block was; see the comment above
      * [`expmeta`]'s neighbours for why it stopped being a `static`. */
-    let mut globbuf: BString = BString::new(Vec::new());
+    let mut pathname_buffer = BString::new(Vec::new());
 
-    for mut str in words {
-        let text = str.as_bstr();
-        let has_meta = !sh.options.enabled(ShellOption::NoGlob)
+    for mut field in words {
+        let text = field.as_bstr();
+        let has_meta = !shell.options.enabled(ShellOption::NoGlob)
             && text.find_byteset(b"*?]").is_some()
             && text != b"]";
         if has_meta {
             /* `savelastp = exparg.lastp` — where this word's matches
              * will start, so that the sort below covers them and not
              * the words already in the list. */
-            let savelastp = expargl(state).len();
+            let first_match_index = expansion_fields(state).len();
 
-            crate::error::with_interrupts_deferred(sh, |sh| {
+            crate::error::with_interrupts_deferred(shell, |shell| {
                 pattern.clear();
                 pattern.extend_from_slice(text);
-                let pattern_len = rmescapes_buffer(&mut pattern, EscapeMode::Glob);
+                let pattern_len = remove_escapes_in_buffer(&mut pattern, EscapeMode::Glob);
                 pattern.truncate(pattern_len);
 
                 /* The C's top-level `expmeta` starts on whatever block the
@@ -2299,10 +2413,10 @@ fn expandmeta(
                  * glob's `addfnamealt` left it at that glob's `expdir_len`
                  * — and every consequence of carrying it in is benign,
                  * which is the reason to clear rather than to argue. */
-                globbuf.clear();
-                expmeta(&sh.locale, state, &mut globbuf, &pattern, 0);
+                pathname_buffer.clear();
+                expand_pathname_component(&shell.locale, state, &mut pathname_buffer, &pattern, 0);
             });
-            if expargl(state).len() != savelastp {
+            if expansion_fields(state).len() != first_match_index {
                 /* `*exparg.lastp = NULL; sp = expsort(*savelastp);
                  * *savelastp = sp; while (sp->next) sp = sp->next;
                  * exparg.lastp = &sp->next;` — terminate the run this
@@ -2310,25 +2424,32 @@ fn expandmeta(
                  * new end.  Three of those four exist to re-find the
                  * tail of a list the sort reordered; a slice's tail
                  * does not move. */
-                expsort(&sh.locale, &mut expargl(state)[savelastp..]);
+                sort_fields(
+                    &shell.locale,
+                    &mut expansion_fields(state)[first_match_index..],
+                );
                 continue;
             }
         }
-        str.rmescapes();
-        expargl(state).push(str);
+        field.remove_escapes();
+        expansion_fields(state).push(field);
     }
     Ok(())
 }
 
 // [spec:dash:def:expand.addfname-common-fn]
 // [spec:dash:sem:expand.addfname-common-fn]
-fn addfname_common(state: &mut ExpandState, name: BString) {
-    expargl(state).push(strlist { text: name });
+fn add_pathname(state: &mut ExpandState, name: BString) {
+    expansion_fields(state).push(ExpandedField { text: name });
 }
 
 // [spec:dash:def:expand.addfnamealt-fn]
 // [spec:dash:sem:expand.addfnamealt-fn]
-fn addfnamealt(state: &mut ExpandState, b: &mut BString, expdir_len: usize) {
+fn add_literal_pathname(
+    state: &mut ExpandState,
+    path_buffer: &mut BString,
+    directory_prefix_length: usize,
+) {
     /* `name = grabstackstr(enddir)` — in the C this allocates nothing and
      * copies nothing: it moves the region's bump pointer past bytes that
      * are already in place, which is how C says "these outlive the next
@@ -2355,14 +2476,14 @@ fn addfnamealt(state: &mut ExpandState, b: &mut BString, expdir_len: usize) {
      * `expmeta_rmescapes` appends, both callers arrive with the candidate
      * counted, `enddir` and `b.len()` say the same number, and the one
      * that has to go is the parameter. */
-    addfname_common(state, BString::from(b.to_vec()));
+    add_pathname(state, BString::from(path_buffer.to_vec()));
 
     /* `STARTSTACKSTR(enddir); return stnputs(name, expdir_len, enddir) -
      * expdir_len;` — the C has to start a new block and copy the directory
      * prefix back into it, because `grabstackstr` gave the old one away.
      * Nothing was given away here, so the prefix is still the first
      * `expdir_len` bytes and re-seeding is `truncate`. */
-    b.truncate(expdir_len);
+    path_buffer.truncate(directory_prefix_length);
 }
 
 // [spec:dash:def:expand.expmeta-rmescapes-fn]
@@ -2383,14 +2504,14 @@ fn addfnamealt(state: &mut ExpandState, b: &mut BString, expdir_len: usize) {
 /// back afterwards (`c = *start; *start = 0; ...; *start = c`).  A subslice
 /// says "just this much of the pattern" without writing to it, which is
 /// what lets `expmeta`'s `name` be a `&[u8]`.
-fn expmeta_rmescapes(b: &mut BString, name: &[u8]) {
-    let at = b.len();
+fn remove_pathname_escapes(path: &mut BString, name: &[u8]) {
+    let appended_start = path.len();
     /* The bytes use nsh's internal escaping, so copy and compact them in
      * place. The transform only shortens the appended input. */
-    b.extend_from_slice(name);
-    let n = rmescapes_buffer(&mut b[at..], EscapeMode::Plain);
-    debug_assert!(n <= name.len());
-    b.truncate(at + n);
+    path.extend_from_slice(name);
+    let unescaped_length = remove_escapes_in_buffer(&mut path[appended_start..], EscapeMode::Plain);
+    debug_assert!(unescaped_length <= name.len());
+    path.truncate(appended_start + unescaped_length);
 }
 
 /*
@@ -2408,26 +2529,26 @@ fn expmeta_rmescapes(b: &mut BString, name: &[u8]) {
 // [spec:posix:req:pattern.directory-permissions]
 // [spec:posix:req:pattern.permission-errors-not-fatal]
 // [spec:posix:req:pattern.unmatched-open-bracket-unspecified]
-fn expmeta(
+fn expand_pathname_component(
     locale: &nsh_platform::Locale,
     state: &mut ExpandState,
-    b: &mut BString,
+    path_buffer: &mut BString,
     name: &[u8],
-    mut expdir_len: usize,
+    mut directory_prefix_length: usize,
 ) {
-    let mesc = CTLESC;
-    let mut endname: usize;
-    let mut zeroedp: usize;
-    let mut matchdot: bool;
-    let mut esc: usize;
-    let start: usize;
-    let pat: &[u8];
-    let mut p: usize;
-    let c: u8;
+    let escape_marker = LEGACY_ESCAPE;
+    let mut remainder_start: usize;
+    let mut component_end: usize;
+    let mut match_leading_dot: bool;
+    let mut escape_count: usize;
+    let component_start: usize;
+    let component_pattern: &[u8];
+    let mut cursor: usize;
+    let following_byte: u8;
     /* Scratch for the encoded form of each directory entry; see the
      * `memtodest` call below.  A local rather than a static because
      * `expmeta` recurses, one frame per path component. */
-    let mut globenc: BString = BString::new(Vec::new());
+    let mut encoded_entry: BString = BString::new(Vec::new());
 
     /* The glob buffer's frame invariant, stated where it is relied
      * on: this frame's prefix is `[0, expdir_len)` and it is
@@ -2440,90 +2561,90 @@ fn expmeta(
      * cursor.  Appending needs no bound, so the same number is
      * only a hint that says how big this frame's candidate will
      * be before its component. */
-    debug_assert_eq!(b.len(), expdir_len);
-    b.reserve(name.len() + 1);
+    debug_assert_eq!(path_buffer.len(), directory_prefix_length);
+    path_buffer.reserve(name.len() + 1);
 
     /* `for (;;) { p = strpbrk(p + esc, "*?]"); ... }` — find the
      * first metacharacter that is not itself escaped. */
-    p = 0;
-    esc = 0;
+    cursor = 0;
+    escape_count = 0;
     let meta: Option<usize> = loop {
-        let from = p + esc;
+        let from = cursor + escape_count;
         let Some(at) = name[from..].find_byteset(b"*?]") else {
             break None;
         };
-        p = from + at;
-        esc = mesclen_bytes(name, p, mesc) & 1;
-        if esc == 0 {
-            break Some(p);
+        cursor = from + at;
+        escape_count = encoded_character_len(name, cursor, escape_marker) & 1;
+        if escape_count == 0 {
+            break Some(cursor);
         }
     };
     /* No meta characters */
     let Some(meta) = meta else {
-        if expdir_len == 0 {
-            debug_assert_eq!(b.len(), expdir_len);
+        if directory_prefix_length == 0 {
+            debug_assert_eq!(path_buffer.len(), directory_prefix_length);
             return;
         }
-        expmeta_rmescapes(b, name);
-        let exists = b
+        remove_pathname_escapes(path_buffer, name);
+        let exists = path_buffer
             .try_to_path_buf()
             .is_ok_and(|path| nsh_platform::path_metadata(&path, false).is_ok());
         if exists {
-            addfnamealt(state, b, expdir_len);
+            add_literal_pathname(state, path_buffer, directory_prefix_length);
         } else {
             /* The C leaves its uncounted bytes where they are and
              * returns the base; counted bytes have to be rewound,
              * so that this frame returns with the buffer holding
              * its prefix and nothing else. */
-            b.truncate(expdir_len);
+            path_buffer.truncate(directory_prefix_length);
         }
-        debug_assert_eq!(b.len(), expdir_len);
+        debug_assert_eq!(path_buffer.len(), directory_prefix_length);
         return;
     };
-    match name[..meta].rfind_byte(C_SLASH as u8) {
+    match name[..meta].rfind_byte(SLASH as u8) {
         Some(at) => {
             /* `c = *start; *start = 0; expmeta_rmescapes(enddir,
              * name); *start = c;` — the C borrows the pattern as
              * the directory prefix by terminating it in place.  A
              * subslice is that without the write, and without the
              * restore. */
-            start = at + 1;
-            expmeta_rmescapes(b, &name[..start]);
+            component_start = at + 1;
+            remove_pathname_escapes(path_buffer, &name[..component_start]);
             /* `expdir_len = enddir - cp` — this frame's prefix
              * grew by the unescaped directory part, and the bytes
              * it grew over are counted because they were
              * appended. */
-            expdir_len = b.len();
+            directory_prefix_length = path_buffer.len();
         }
-        None => start = 0,
+        None => component_start = 0,
     }
 
-    let directory = if expdir_len != 0 {
-        &b[..expdir_len]
+    let directory = if directory_prefix_length != 0 {
+        &path_buffer[..directory_prefix_length]
     } else {
         b"."
     };
     let Ok(directory) = directory.try_to_path_buf() else {
-        debug_assert_eq!(b.len(), expdir_len);
+        debug_assert_eq!(path_buffer.len(), directory_prefix_length);
         return;
     };
     let Ok(entries) = nsh_platform::read_directory(&directory) else {
-        debug_assert_eq!(b.len(), expdir_len);
+        debug_assert_eq!(path_buffer.len(), directory_prefix_length);
         return;
     };
     /* `p = strchrnul(p + 1, '/')` — the end of the component the
      * metacharacter is in.  The C's `esc = 0` before this is a
      * dead store in both languages: `esc` is read only inside the
      * branch that sets it. */
-    p = name[meta + 1..]
-        .find_byte(C_SLASH as u8)
+    cursor = name[meta + 1..]
+        .find_byte(SLASH as u8)
         .map_or(name.len(), |at| meta + 1 + at);
-    zeroedp = p;
-    endname = p;
-    if p != name.len() {
-        let esc = mesclen_bytes(name, p, mesc) & 1;
-        zeroedp -= esc;
-        endname += 1;
+    component_end = cursor;
+    remainder_start = cursor;
+    if cursor != name.len() {
+        let delimiter_escape_count = encoded_character_len(name, cursor, escape_marker) & 1;
+        component_end -= delimiter_escape_count;
+        remainder_start += 1;
     }
     /* `c = *zeroedp; *zeroedp = 0;` — the C reads the byte it is
      * about to overwrite so it can put it back, and everything
@@ -2535,15 +2656,15 @@ fn expmeta(
      * `name_len -= endname - name` is the recursion's argument and
      * is `name[endname..].len()`, which is why it stopped being a
      * parameter. */
-    c = byte_at(name, zeroedp);
-    matchdot = false;
-    pat = &name[start..zeroedp];
-    p = 0;
-    if byte_at(pat, p) == mesc {
-        p += 1;
+    following_byte = byte_at(name, component_end);
+    match_leading_dot = false;
+    component_pattern = &name[component_start..component_end];
+    cursor = 0;
+    if byte_at(component_pattern, cursor) == escape_marker {
+        cursor += 1;
     }
-    if byte_at(pat, p) == C_DOT {
-        matchdot = true;
+    if byte_at(component_pattern, cursor) == DOT {
+        match_leading_dot = true;
     }
     /* `read_dir` intentionally omits `.` and `..`; `readdir`
      * included both, so put them back before the native entries. */
@@ -2553,43 +2674,50 @@ fn expmeta(
             .into_iter()
             .map(|entry| (entry.name.to_shell_bytes(), entry.may_descend)),
     );
-    for (dname, may_descend) in entries {
-        let eligible = (dname[0] != C_DOT as u8 || matchdot) && (c == 0 || may_descend);
+    for (entry_name, may_descend) in entries {
+        let eligible = (entry_name[0] != DOT as u8 || match_leading_dot)
+            && (following_byte == 0 || may_descend);
         if eligible {
-            let dname: &[u8] = &dname;
-            let len: usize = dname.len();
+            let entry_name: &[u8] = &entry_name;
+            let entry_length = entry_name.len();
             /* Encode the directory entry as matcher input in separate
              * scratch storage. The candidate path itself stays raw and is
              * only appended after a successful match. */
-            globenc.clear();
-            memtodest(
+            encoded_entry.clear();
+            push_bytes(
                 locale,
-                dname,
+                entry_name,
                 ExpansionMode::PRESERVE_MULTIBYTE,
-                &mut globenc,
+                &mut encoded_entry,
             );
-            let subject = globenc.as_slice();
-            if crate::pattern::pmatch_slices(locale, pat, subject) {
+            let subject = encoded_entry.as_slice();
+            if crate::pattern::pattern_matches(locale, component_pattern, subject) {
                 /* `enddir = stnputs(dname, len, enddir)` — an
                  * append at a cursor below the end, which is
                  * truncate-then-append. */
-                b.truncate(expdir_len);
-                b.extend_from_slice(dname);
-                if c == 0 {
-                    addfnamealt(state, b, expdir_len);
+                path_buffer.truncate(directory_prefix_length);
+                path_buffer.extend_from_slice(entry_name);
+                if following_byte == 0 {
+                    add_literal_pathname(state, path_buffer, directory_prefix_length);
                 } else {
-                    b.push(C_SLASH as u8);
-                    expmeta(locale, state, b, &name[endname..], expdir_len + len + 1);
+                    path_buffer.push(SLASH as u8);
+                    expand_pathname_component(
+                        locale,
+                        state,
+                        path_buffer,
+                        &name[remainder_start..],
+                        directory_prefix_length + entry_length + 1,
+                    );
                     /* `enddir = cp + expdir_len` — the frame's
                      * rewind, said out loud.  The child returns
                      * with the buffer holding *its* prefix, which
                      * is this one plus the component just
                      * appended. */
-                    b.truncate(expdir_len);
+                    path_buffer.truncate(directory_prefix_length);
                 }
             }
         }
-        if int_pending() {
+        if interrupt_pending() {
             break;
         }
     }
@@ -2600,7 +2728,7 @@ fn expmeta(
      * frame's prefix and nothing above it.  `expdir_len` is the frame's
      * own, which may have grown past the caller's — hence the caller's
      * rewind after the recursive call. */
-    debug_assert_eq!(b.len(), expdir_len);
+    debug_assert_eq!(path_buffer.len(), directory_prefix_length);
 }
 
 /*
@@ -2612,10 +2740,10 @@ fn expmeta(
 // [spec:dash:def:expand.expsort-fn]
 // [spec:dash:sem:expand.expsort-fn]
 // [spec:posix:req:pattern.replacement-sorted]
-fn expsort(locale: &nsh_platform::Locale, str: &mut [strlist]) {
+fn sort_fields(locale: &nsh_platform::Locale, fields: &mut [ExpandedField]) {
     /* The C walks the chain to count it and hands the count to `msort`,
      * because a singly-linked list does not know its own length. */
-    msort(locale, str)
+    merge_sort_fields(locale, fields)
 }
 
 // [spec:dash:def:expand.msort-fn]
@@ -2632,7 +2760,7 @@ fn expsort(locale: &nsh_platform::Locale, str: &mut [strlist]) {
 ///     stable is stable.  `strcoll` can return 0 for byte-different
 ///     strings under a collating locale, so this is not vacuous.
 ///     `slice::sort_by` is stable.
-fn msort(locale: &nsh_platform::Locale, list: &mut [strlist]) {
+fn merge_sort_fields(locale: &nsh_platform::Locale, list: &mut [ExpandedField]) {
     if list.len() <= 1 {
         return;
     }
@@ -2665,60 +2793,60 @@ fn msort(locale: &nsh_platform::Locale, list: &mut [strlist]) {
 // [spec:posix:req:pattern.escaping-follows-quoting-rules]
 // [spec:posix:syn:pattern.trailing-backslash-unspecified]
 // [spec:posix:req:pattern.quote-to-match-literally]
-fn rmescapes_compact(buf: &mut [u8], at: usize, mode: EscapeMode) -> usize {
+fn compact_escapes(buffer: &mut [u8], start: usize, mode: EscapeMode) -> usize {
     let globbing = mode == EscapeMode::Glob;
     let mut in_quotes = false;
     let mut not_escaped = globbing;
     /* The C's `p` and `q`, which are indices into one buffer here. */
-    let mut p: usize = at;
-    let mut q: usize = at;
+    let mut read_index = start;
+    let mut write_index = start;
 
-    while p < buf.len() {
-        let mut c = byte_at(buf, p);
+    while read_index < buffer.len() {
+        let mut character = byte_at(buffer, read_index);
         let mut newly_not_escaped = globbing;
         let span: EncodedCharacterSpan;
         let mut span_to_copy: usize;
 
-        let copy_byte = if c == CTLQUOTEMARK {
-            p += 1;
+        let copy_byte = if character == LEGACY_QUOTE {
+            read_index += 1;
             in_quotes ^= globbing;
             continue;
-        } else if c == C_BACKSLASH {
+        } else if character == BACKSLASH {
             /* naked back slash */
             newly_not_escaped ^= not_escaped;
             /* naked backslashes can only occur outside quotes */
             in_quotes = false;
             if not_escaped {
-                c = CTLESC;
+                character = LEGACY_ESCAPE;
             }
             true
-        } else if c == CTLESC {
+        } else if character == LEGACY_ESCAPE {
             if !not_escaped && in_quotes {
                 /* Reaches back one byte.  `notescaped` is cleared only by
                  * the naked-backslash arm, which writes a byte first, so
                  * `q` has advanced before this is reachable. */
-                buf[q - 1] = C_BACKSLASH;
+                buffer[write_index - 1] = BACKSLASH;
             }
             if globbing {
-                buf[q] = CTLESC;
-                q += 1;
+                buffer[write_index] = LEGACY_ESCAPE;
+                write_index += 1;
             }
 
-            p += 1;
-            c = byte_at(buf, p);
+            read_index += 1;
+            character = byte_at(buffer, read_index);
             true
-        } else if c == CTLMBCHAR {
+        } else if character == LEGACY_MULTIBYTE {
             let mut suffix = 2usize;
 
             if globbing ^ not_escaped {
-                q -= 1;
+                write_index -= 1;
             }
 
-            span = mbnext_bytes(buf.get(p..).unwrap_or_default());
+            span = next_encoded_character(buffer.get(read_index..).unwrap_or_default());
             span_to_copy = span.remainder;
 
             if !globbing {
-                p += span.prefix;
+                read_index += span.prefix;
                 span_to_copy -= 2;
             } else {
                 span_to_copy += span.prefix;
@@ -2728,26 +2856,26 @@ fn rmescapes_compact(buf: &mut [u8], at: usize, mode: EscapeMode) -> usize {
             /* `q` trails `p` through the same buffer, which
              * `copy_within` already knows -- it is the C's
              * `memmove`, bounds-checked. */
-            buf.copy_within(p..p + span_to_copy, q);
-            q += span_to_copy;
-            p += span_to_copy + suffix;
+            buffer.copy_within(read_index..read_index + span_to_copy, write_index);
+            write_index += span_to_copy;
+            read_index += span_to_copy + suffix;
             false
         } else {
             true
         };
 
         if copy_byte {
-            buf[q] = c;
-            q += 1;
-            p += 1;
+            buffer[write_index] = character;
+            write_index += 1;
+            read_index += 1;
         }
         not_escaped = newly_not_escaped;
     }
     if globbing ^ not_escaped {
         /* The same reach-back, and the same argument. */
-        buf[q - 1] = C_BACKSLASH;
+        buffer[write_index - 1] = BACKSLASH;
     }
-    q
+    write_index
 }
 
 /// The index of the first byte `_rmescapes` has anything to do with, if
@@ -2755,22 +2883,22 @@ fn rmescapes_compact(buf: &mut [u8], at: usize, mode: EscapeMode) -> usize {
 ///
 /// The marker set is independent of byte value zero; the slice length stops
 /// the scan.
-fn rmescapes_scan(s: &[u8]) -> Option<usize> {
+fn first_escape_offset(bytes: &[u8]) -> Option<usize> {
     let markers = [
-        C_BACKSLASH as u8,
-        CTLESC as u8,
-        CTLMBCHAR as u8,
-        CTLQUOTEMARK as u8,
+        BACKSLASH as u8,
+        LEGACY_ESCAPE as u8,
+        LEGACY_MULTIBYTE as u8,
+        LEGACY_QUOTE as u8,
     ];
-    s.find_byteset(&markers)
+    bytes.find_byteset(&markers)
 }
 
 /// Apply quote removal to one owned byte buffer and return its new length.
-fn rmescapes_buffer(bytes: &mut [u8], mode: EscapeMode) -> usize {
-    let Some(at) = rmescapes_scan(bytes) else {
+fn remove_escapes_in_buffer(bytes: &mut [u8], mode: EscapeMode) -> usize {
+    let Some(first_escape) = first_escape_offset(bytes) else {
         return bytes.len();
     };
-    rmescapes_compact(bytes, at, mode)
+    compact_escapes(bytes, first_escape, mode)
 }
 
 // [spec:dash:def:expand.rmescapes-fn]
@@ -2805,23 +2933,28 @@ fn rmescapes_buffer(bytes: &mut [u8], mode: EscapeMode) -> usize {
 /// `STARTSTACKSTR`. An owned buffer cannot hold that pointer and has no
 /// reason to, so that store is not transcribed on the heap path: a
 /// deliberate divergence from a write with no observable value.
-pub fn rmescapes_grow(b: &mut BString, at: usize) -> usize {
-    let n = b.len().saturating_sub(at);
-    if rmescapes_scan(&b[at..at + n]).is_none() {
+pub fn remove_escapes_from_offset(buffer: &mut BString, start: usize) -> usize {
+    let remaining_length = buffer.len().saturating_sub(start);
+    if first_escape_offset(&buffer[start..start + remaining_length]).is_none() {
         /* `return str` — before the block is grown, so the cursor is
          * untouched and the caller's `rmesc == startp` test sees it. */
-        return at;
+        return start;
     }
-    let at_rel = rmescapes_scan(&b[at..at + n]).expect("scanned once already");
+    let relative_escape = first_escape_offset(&buffer[start..start + remaining_length])
+        .expect("scanned once already");
 
     /* `r = makestrspace(fulllen); mempcpy(q, str, len)` — the destination
      * is the space past the cursor, and the source is below it in the same
      * buffer, which is exactly what `extend_from_within` is for. */
-    let r: usize = b.len();
-    b.extend_from_within(at..at + n);
-    let m = rmescapes_compact(&mut b[r..], at_rel, EscapeMode::Plain);
-    b.truncate(r + m);
-    r
+    let destination_start = buffer.len();
+    buffer.extend_from_within(start..start + remaining_length);
+    let compacted_length = compact_escapes(
+        &mut buffer[destination_start..],
+        relative_escape,
+        EscapeMode::Plain,
+    );
+    buffer.truncate(destination_start + compacted_length);
+    destination_start
 }
 
 /*
@@ -2830,17 +2963,17 @@ pub fn rmescapes_grow(b: &mut BString, at: usize) -> usize {
 
 // [spec:dash:def:expand.casematch-fn]
 // [spec:dash:sem:expand.casematch-fn]
-pub fn casematch(
-    sh: &mut crate::context::Shell,
+pub fn case_pattern_matches(
+    shell: &mut crate::context::Shell,
     pattern: &crate::nodes::Node,
-    val: &BStr,
+    value: &BStr,
 ) -> Result<bool, Error> {
     let Node::Word(word) = pattern else {
-        return Err(sh
+        return Err(shell
             .diagnostics()
-            .sh_error_value(b"case matching requires a word node"));
+            .shell_error(b"case matching requires a word node"));
     };
-    typed::case_matches(sh, &word.word, val)
+    typed::case_matches(shell, &word.word, value)
 }
 
 /*
@@ -2849,24 +2982,24 @@ pub fn casematch(
 
 // [spec:dash:def:expand.cvtnum-fn]
 // [spec:dash:sem:expand.cvtnum-fn]
-fn cvtnum(
+fn push_integer(
     locale: &nsh_platform::Locale,
-    num: i64,
+    number: i64,
     mode: ExpansionMode,
-    dst: &mut BString,
+    output: &mut BString,
 ) -> usize {
-    let value = format!("{num}");
-    memtodest(locale, value.as_bytes(), mode, dst)
+    let value = format!("{number}");
+    push_bytes(locale, value.as_bytes(), mode, output)
 }
 
 // [spec:dash:def:expand.varunset-fn]
 // [spec:dash:sem:expand.varunset-fn]
-fn varunset(
-    sh: &mut crate::context::Shell,
+fn unset_parameter_error(
+    shell: &mut crate::context::Shell,
     text: &[u8],
     end: usize,
-    var: usize,
-    umsg: Option<&[u8]>,
+    variable_name_start: usize,
+    custom_message: Option<&[u8]>,
     null_is_unset: bool,
 ) -> Error {
     /* The C's three `char *` here are a NULL test and two `%s` arguments,
@@ -2878,30 +3011,32 @@ fn varunset(
      * expansion buffer's message, which is a slice at the call site rather
      * than a pointer here. */
     let mut tail: &[u8] = b"";
-    let mut msg: &[u8] = b"parameter not set";
-    if let Some(umsg) = umsg {
-        if byte_at(text, end) == CTLENDVAR {
+    let mut reason: &[u8] = b"parameter not set";
+    if let Some(custom_message) = custom_message {
+        if byte_at(text, end) == LEGACY_END_PARAMETER {
             if null_is_unset {
                 tail = b" or null";
             }
         } else {
-            msg = umsg;
+            reason = custom_message;
         }
     }
     /* `end - var - 1` — the variable's name, without the `=` the parser
      * writes after it.  Saturating because the C's subtraction is signed
      * and it clamped at zero. */
-    let name_len = end.saturating_sub(var + 1);
+    let name_length = end.saturating_sub(variable_name_start + 1);
     let mut message = Vec::new();
-    message.extend_from_slice(&text[var..(var + name_len).min(text.len())]);
+    message.extend_from_slice(
+        &text[variable_name_start..(variable_name_start + name_length).min(text.len())],
+    );
     message.extend_from_slice(b": ");
-    message.extend_from_slice(msg);
+    message.extend_from_slice(reason);
     message.extend_from_slice(tail);
-    if sh.eval.inps4 {
-        sh.diagnostics().sh_error_value(&message)
+    if shell.evaluation.expanding_trace_prompt {
+        shell.diagnostics().shell_error(&message)
     } else {
         // [spec:nsh:req:compat.smoosh.error-contracts]
-        sh.diagnostics().expansion_error_value(&message)
+        shell.diagnostics().expansion_error_value(&message)
     }
 }
 
@@ -2920,15 +3055,15 @@ fn varunset(
 /// frame that takes an interrupt is not the frame that owns them.
 // [spec:dash:def:expand.restore-handler-expandarg-fn]
 // [spec:dash:sem:expand.restore-handler-expandarg-fn]
-pub fn restore_handler_expandarg(
-    sh: &mut crate::context::Shell,
+pub fn recover_expansion(
+    shell: &mut crate::context::Shell,
     caught: Option<crate::error::Error>,
 ) -> Option<crate::error::Error> {
     match &caught {
         /* Not this frame's to keep, and never was: the C re-raised it
          * from here. */
-        Some(e) if e.is_interrupt() => {}
-        Some(_) => ifsfree(&mut sh.expand),
+        Some(error) if error.is_interrupt() => {}
+        Some(_) => clear_split_regions(&mut shell.expand),
         None => {}
     }
     caught
@@ -2949,7 +3084,7 @@ pub fn restore_handler_expandarg(
  * reachable as `nsh::expand::arith` until the surface closed, which is
  * what had been standing in for a use. */
 #[allow(unused_imports)]
-pub use crate::arithmetic::arith;
+pub use crate::arithmetic::evaluate;
 
 // The `expcmd(int, char **)` declaration in `expand.h` has no definition
 // or caller. It is intentionally represented by no Rust item.

@@ -11,12 +11,13 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::eval::Flow;
+use crate::evaluation::Flow;
 use crate::jobs::{
-    ForkMode, JobId, apply_saved_job_terminal_settings, capture_shell_terminal_settings, getjob,
-    jobno, outcmd, ps_pid, showpipe, terminal_settings_error, waitforjob, xxtcsetpgrp,
+    ForkMode, JobId, apply_saved_job_terminal_settings, capture_shell_terminal_settings,
+    job_number, process_id, resolve_job, set_terminal_process_group, terminal_settings_error,
+    wait_for_job, write_command_text, write_pipeline,
 };
-use crate::output::Dest;
+use crate::output::OutputDestination;
 use bstr::BStr;
 
 // [spec:nsh:def:idiom.job-control-model]
@@ -42,8 +43,8 @@ use bstr::BStr;
 // [spec:posix:req:builtin.fg.stdout-format]
 // [spec:posix:req:builtin.fg.stderr]
 // [spec:posix:req:builtin.fg.interfaces]
-pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut jp: JobId;
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+    let mut job_id: JobId;
     let mode: ForkMode;
 
     mode = if args[0].first() == Some(&b'f') {
@@ -51,28 +52,31 @@ pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     } else {
         ForkMode::Background
     };
-    let mut opts = crate::options::Options::new(args);
-    opts.next(&mut sh.diagnostics(), b"")?;
-    let operands = opts.operands();
+    let mut option_scan = crate::options::Options::new(args);
+    option_scan.next(&mut shell.diagnostics(), b"")?;
+    let operands = option_scan.operands();
     /* `do { ... } while (*argv && *++argv)`: one pass on the current job
      * when there is no operand, otherwise one pass per operand. */
     let mut index = 0usize;
-    let retval = loop {
-        jp = getjob(sh, operands.get(index).copied(), true)?;
+    let status = loop {
+        job_id = resolve_job(shell, operands.get(index).copied(), true)?;
         if mode == ForkMode::Background {
-            sh.jobs.position_running(jp);
-            sh.write_output_fmt(Dest::Stdout, format_args!("[{}] ", jobno(jp)))?;
+            shell.jobs.position_running(job_id);
+            shell.write_output_fmt(
+                OutputDestination::Stdout,
+                format_args!("[{}] ", job_number(job_id)),
+            )?;
         }
-        outcmd(sh, jp, 0, Dest::Stdout)?;
-        showpipe(sh, jp, Dest::Stdout)?;
-        let status = restartjob(sh, jp, mode)?;
+        write_command_text(shell, job_id, 0, OutputDestination::Stdout)?;
+        write_pipeline(shell, job_id, OutputDestination::Stdout)?;
+        let status = restart_job(shell, job_id, mode)?;
 
         index += 1;
         if index >= operands.len() {
             break status;
         }
     };
-    Ok(Flow::Done((retval).into()))
+    Ok(Flow::Done((status).into()))
 }
 
 // [spec:dash:def:jobs.restartjob-fn]
@@ -88,45 +92,45 @@ pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:jobctl.background-job-brought-to-foreground]
 // [spec:posix:req:jobctl.continue-suspended-job]
 // [spec:posix:req:jobctl.fg-terminal-settings-restore]
-fn restartjob(
-    sh: &mut Shell,
-    jp: JobId,
+fn restart_job(
+    shell: &mut Shell,
+    job_id: JobId,
     mode: ForkMode,
 ) -> Result<crate::status::ExitStatus, Error> {
-    let (status, terminal_error) = crate::error::with_interrupts_deferred(sh, |sh| {
+    let (status, terminal_error) = crate::error::with_interrupts_deferred(shell, |shell| {
         let mut terminal_error = None;
-        'out_lbl: {
-            if !sh.jobs[jp].restart() {
-                break 'out_lbl;
+        'restart_complete: {
+            if !shell.jobs[job_id].restart() {
+                break 'restart_complete;
             }
             if mode == ForkMode::Foreground {
-                capture_shell_terminal_settings(sh)?;
+                capture_shell_terminal_settings(shell)?;
             }
-            let Some(leader) = ps_pid(sh, jp, 0) else {
-                return Err(sh.diagnostics().sh_error_value(b"job has no process"));
+            let Some(leader) = process_id(shell, job_id, 0) else {
+                return Err(shell.diagnostics().shell_error(b"job has no process"));
             };
             let process_group = nsh_platform::ProcessGroupId::from_leader(leader);
             if mode == ForkMode::Foreground {
-                xxtcsetpgrp(sh, process_group)?;
-                if let Err(error) = apply_saved_job_terminal_settings(sh, jp) {
+                set_terminal_process_group(shell, process_group)?;
+                if let Err(error) = apply_saved_job_terminal_settings(shell, job_id) {
                     terminal_error = Some(error);
                 }
             }
             if let Err(error) = nsh_platform::send_continue_to_process_group(process_group) {
-                let message = sh.locale.error_message(&error).into_bytes();
-                return Err(sh.diagnostics().sh_error_value(&message));
+                let message = shell.locale.error_message(&error).into_bytes();
+                return Err(shell.diagnostics().shell_error(&message));
             }
             /* the C's `do { … } while (--i)` visits `ps[0]` before it looks
              * at the count, so a job with no processes walks the whole
              * address space; there is nothing to restart in one. */
-            for process in &mut sh.jobs[jp].ps {
+            for process in &mut shell.jobs[job_id].processes {
                 if matches!(process.status, Some(nsh_platform::ChildStatus::Stopped(_))) {
                     process.status = None;
                 }
             }
         }
         let status = if mode == ForkMode::Foreground {
-            waitforjob(sh, Some(jp))?
+            wait_for_job(shell, Some(job_id))?
         } else {
             crate::status::ExitStatus::SUCCESS
         };
@@ -134,7 +138,7 @@ fn restartjob(
     })?;
     if let Some(error) = terminal_error {
         return Err(terminal_settings_error(
-            sh,
+            shell,
             b"Cannot restore job tty settings",
             error,
         ));

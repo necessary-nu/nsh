@@ -12,7 +12,7 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 
-use crate::eval::Flow;
+use crate::evaluation::Flow;
 
 // [spec:dash:def:eval.breakcmd-fn]
 // [spec:dash:sem:eval.breakcmd-fn]
@@ -29,17 +29,20 @@ use crate::eval::Flow;
 // [spec:posix:req:builtin.continue.stderr]
 // [spec:posix:req:builtin.continue.interfaces]
 // [spec:posix:req:builtin.continue.exit-status]
-pub fn breakcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut levels = 1usize;
 
     if let Some(count) = args.get(1) {
-        let parsed = crate::number::parse_nonnegative(&mut sh.diagnostics(), count)?;
+        let parsed = crate::number::parse_nonnegative(&mut shell.diagnostics(), count)?;
         if parsed <= 0 {
-            return Err(crate::number::invalid_number(&mut sh.diagnostics(), count));
+            return Err(crate::number::invalid_number(
+                &mut shell.diagnostics(),
+                count,
+            ));
         }
         levels = parsed as usize;
     }
-    levels = levels.min(sh.eval.loopnest);
+    levels = levels.min(shell.evaluation.loop_depth);
     if levels > 0 {
         Ok(if args[0].first() == Some(&b'c') {
             Flow::Continue {
@@ -63,8 +66,8 @@ mod tests {
 
     /// The two names are told apart by the word the builtin was called
     /// as, so the flag each sets is the thing to check.
-    fn run(name: &[u8], count: Option<&[u8]>, nest: usize) -> Flow {
-        let _guard = crate::testutil::lock();
+    fn invoke(name: &[u8], count: Option<&[u8]>, nest: usize) -> Flow {
+        let _guard = crate::test_support::lock();
         let mut args = vec![BStr::new(name)];
         if let Some(count) = count {
             args.push(BStr::new(count));
@@ -73,22 +76,22 @@ mod tests {
          * builtin writes are the same shell's, which is the whole
          * point of the field. */
         let mut owned = Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned;
-        sh.eval.loopnest = nest;
-        breakcmd(sh, &args).unwrap()
+        let shell = &mut owned;
+        shell.evaluation.loop_depth = nest;
+        super::run(shell, &args).unwrap()
     }
 
     #[test]
     fn break_and_continue_differ() {
         assert_eq!(
-            run(b"break", None, 1),
+            invoke(b"break", None, 1),
             Flow::Break {
                 levels: 1,
                 status: 0.into()
             }
         );
         assert_eq!(
-            run(b"continue", None, 1),
+            invoke(b"continue", None, 1),
             Flow::Continue {
                 levels: 1,
                 status: 0.into()
@@ -102,7 +105,7 @@ mod tests {
     #[test]
     fn the_count_clamps_to_the_nesting() {
         assert_eq!(
-            run(b"break", Some(b"5"), 2),
+            invoke(b"break", Some(b"5"), 2),
             Flow::Break {
                 levels: 2,
                 status: 0.into()
@@ -113,6 +116,6 @@ mod tests {
     /// Outside any loop there is nothing to skip, so no flag is set.
     #[test]
     fn outside_a_loop_nothing_is_set() {
-        assert_eq!(run(b"break", None, 0), Flow::Done((0).into()));
+        assert_eq!(invoke(b"break", None, 0), Flow::Done((0).into()));
     }
 }

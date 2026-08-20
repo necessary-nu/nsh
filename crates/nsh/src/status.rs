@@ -62,9 +62,9 @@ impl ExitStatus {
     /// lossy in the language, not only in this type. `None` for a status
     /// below 129, and for one that no signal number reaches.
     pub fn signal(self) -> Option<Signal> {
-        let n = i32::from(self.0) - 128;
-        if n > 0 && (n as usize) < crate::signames::NSIG {
-            Signal::from_number(n)
+        let signal_number = i32::from(self.0) - 128;
+        if signal_number > 0 && (signal_number as usize) < crate::signal_names::SIGNAL_SLOT_COUNT {
+            Signal::from_number(signal_number)
         } else {
             None
         }
@@ -133,10 +133,12 @@ impl Signal {
     /// pseudo-signal the exit trap uses.
     pub fn name(self) -> Option<&'static BStr> {
         let index = usize::try_from(self.number()).ok()?;
-        if index >= crate::signames::NSIG {
+        if index >= crate::signal_names::SIGNAL_SLOT_COUNT {
             return None;
         }
-        Some(BStr::new(crate::signames::signal_names[index].to_bytes()))
+        Some(BStr::new(
+            crate::signal_names::SIGNAL_NAMES[index].to_bytes(),
+        ))
     }
 
     /// The status a command killed by this signal produces: `128 + n`.
@@ -199,7 +201,7 @@ mod tests {
             Some(BStr::new("KILL"))
         );
         assert!(Signal::from_number(0).is_none());
-        let outside = Signal::from_number(crate::signames::NSIG as i32).unwrap();
+        let outside = Signal::from_number(crate::signal_names::SIGNAL_SLOT_COUNT as i32).unwrap();
         assert_eq!(outside.name(), None);
         assert!(Signal::from_number(-1).is_none());
     }
@@ -207,19 +209,19 @@ mod tests {
     // [spec:nsh:req:idiom.status-flow-signal/test]
     #[test]
     fn core_carries_typed_status_flow_signals() {
-        let done = crate::eval::Flow::Done((7).into());
+        let done = crate::evaluation::Flow::Done((7).into());
         assert!(matches!(
             done,
-            crate::eval::Flow::Done(status) if status == ExitStatus::from_code(7)
+            crate::evaluation::Flow::Done(status) if status == ExitStatus::from_code(7)
         ));
         let _: fn(&crate::context::Shell) -> ExitStatus = crate::context::Shell::status;
-        let _: fn(&mut crate::context::Shell, Signal) = crate::trap::setsignal;
+        let _: fn(&mut crate::context::Shell, Signal) = crate::trap::configure_signal;
 
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         for (source, fragments) in [
             ("context.rs", &["pub(crate) status: i32"][..]),
             (
-                "eval.rs",
+                "evaluation.rs",
                 &[
                     "Done(i32)",
                     "Exit { status: Option<i32>",
@@ -228,7 +230,7 @@ mod tests {
                 ][..],
             ),
             (
-                "siginbox.rs",
+                "signal_inbox.rs",
                 &[
                     "fn pending_signal(&self) -> i32",
                     "fn signal_pending(&self, signo: i32)",

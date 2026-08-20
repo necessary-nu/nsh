@@ -24,9 +24,9 @@ use crate::error::Error;
 
 use bstr::{BStr, BString, ByteSlice as _};
 
-use crate::escape::{CONV_ESCAPE_SLOP, conv_escape, conv_escape_str};
-use crate::eval::Flow;
-use crate::output::Dest;
+use crate::escape::{ESCAPE_OUTPUT_CAPACITY, append_escape, parse_escape};
+use crate::evaluation::Flow;
+use crate::output::OutputDestination;
 use crate::status::ExitStatus;
 
 mod conv;
@@ -43,8 +43,8 @@ use conv::{LIMIT, Spec};
 const WIDTH: &[u8] = b"*0123456789";
 
 /// Write one rendered conversion to standard output.
-fn emit(sh: &mut crate::context::Shell, bytes: &[u8]) -> Result<(), Error> {
-    sh.write_output(Dest::Stdout, bytes)
+fn emit(shell: &mut crate::context::Shell, bytes: &[u8]) -> Result<(), Error> {
+    shell.write_output(OutputDestination::Stdout, bytes)
 }
 
 /// Write one rendered conversion, or raise what the C raised when it
@@ -54,10 +54,10 @@ fn emit(sh: &mut crate::context::Shell, bytes: &[u8]) -> Result<(), Error> {
 /// asked glibc to lay every conversion out and `xvasprintf` treated the
 /// refusal as fatal, so the builtin stops there: whatever the format had
 /// already printed stays printed, and the shell's status is 2.
-fn emit_field(sh: &mut crate::context::Shell, rendered: Option<Vec<u8>>) -> Result<(), Error> {
+fn emit_field(shell: &mut crate::context::Shell, rendered: Option<Vec<u8>>) -> Result<(), Error> {
     match rendered {
-        Some(bytes) => emit(sh, &bytes),
-        None => Err(sh.diagnostics().sh_error_value(b"xvsnprintf failed")),
+        Some(bytes) => emit(shell, &bytes),
+        None => Err(shell.diagnostics().shell_error(b"xvsnprintf failed")),
     }
 }
 
@@ -101,7 +101,7 @@ impl<'a> Operands<'a> {
     /// One argument's first byte, or 0 once they are exhausted.
     // [spec:dash:def:printf.getchr-fn]
     // [spec:dash:sem:printf.getchr-fn]
-    fn getchr(&mut self) -> u8 {
+    fn next_character(&mut self) -> u8 {
         self.next_word()
             .and_then(|word| word.first().copied())
             .unwrap_or(0)
@@ -110,7 +110,7 @@ impl<'a> Operands<'a> {
     /// One argument, or the empty string once they are exhausted.
     // [spec:dash:def:printf.getstr-fn]
     // [spec:dash:sem:printf.getstr-fn]
-    fn getstr(&mut self) -> &'a [u8] {
+    fn next_string(&mut self) -> &'a [u8] {
         self.next_word().map_or(&[][..], |word| &word[..])
     }
 
@@ -120,7 +120,7 @@ impl<'a> Operands<'a> {
     /// differ in where they saturate; both read base 0.
     // [spec:dash:def:printf.getuintmax-fn]
     // [spec:dash:sem:printf.getuintmax-fn]
-    fn getuintmax(&mut self, sh: &mut crate::context::Shell, signed: bool) -> u64 {
+    fn next_unsigned(&mut self, shell: &mut crate::context::Shell, signed: bool) -> u64 {
         let Some(word) = self.next_word() else {
             return 0;
         };
@@ -133,8 +133,8 @@ impl<'a> Operands<'a> {
             return u64::from(bytes.get(1).copied().unwrap_or(0));
         }
 
-        let (value, end, range) = scan_integer(&sh.locale, bytes, signed);
-        self.check_conversion(sh, bytes, end, range);
+        let (value, end, range) = scan_integer(&shell.locale, bytes, signed);
+        self.check_conversion(shell, bytes, end, range);
         value
     }
 
@@ -142,7 +142,7 @@ impl<'a> Operands<'a> {
     /// exhausted.
     // [spec:dash:def:printf.getdouble-fn]
     // [spec:dash:sem:printf.getdouble-fn]
-    fn getdouble(&mut self, sh: &mut crate::context::Shell) -> f64 {
+    fn next_float(&mut self, shell: &mut crate::context::Shell) -> f64 {
         let Some(word) = self.next_word() else {
             return 0.0;
         };
@@ -152,8 +152,8 @@ impl<'a> Operands<'a> {
             return f64::from(bytes.get(1).copied().unwrap_or(0));
         }
 
-        let (value, end, range) = scan_double(&sh.locale, bytes);
-        self.check_conversion(sh, bytes, end, range);
+        let (value, end, range) = scan_double(&shell.locale, bytes);
+        self.check_conversion(shell, bytes, end, range);
         value
     }
 
@@ -168,7 +168,7 @@ impl<'a> Operands<'a> {
     // [spec:dash:sem:printf.check-conversion-fn]
     fn check_conversion(
         &mut self,
-        sh: &mut crate::context::Shell,
+        shell: &mut crate::context::Shell,
         word: &[u8],
         end: usize,
         range: bool,
@@ -184,12 +184,12 @@ impl<'a> Operands<'a> {
             message.extend_from_slice(b": ");
             /* The C's `strerror(ERANGE)`, so the wording is the
              * platform's rather than this file's. */
-            message.extend_from_slice(sh.locale.range_error_message().as_bytes());
+            message.extend_from_slice(shell.locale.range_error_message().as_bytes());
         } else {
             return;
         }
 
-        sh.diagnostics().sh_warnx(&message);
+        shell.diagnostics().shell_warning(&message);
         self.status = ExitStatus::FAILURE;
     }
 }
@@ -608,36 +608,36 @@ fn span(bytes: &[u8], at: usize, set: &[u8]) -> usize {
 /// Laying out bytes needs no stand-in.
 // [spec:dash:def:printf.print-escape-str-fn]
 // [spec:dash:sem:printf.print-escape-str-fn]
-fn print_escape_str(
-    sh: &mut crate::context::Shell,
+fn write_escaped_text(
+    shell: &mut crate::context::Shell,
     spec: &Spec,
     word: &BStr,
 ) -> Result<bool, Error> {
-    let mut buf = BString::default();
-    let done = conv_escape_str(word, &mut buf);
-    emit_field(sh, spec.string(&buf))?;
+    let mut buffer = BString::default();
+    let done = append_escape(word, &mut buffer);
+    emit_field(shell, spec.string(&buffer))?;
     Ok(done)
 }
 
 // [spec:dash:def:printf.printfcmd-fn]
 // [spec:dash:sem:printf.printfcmd-fn]
-pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut options = crate::options::Options::new(args);
     /* `nextopt(nullstr)`: printf takes no options, so this exists to
      * reject `-x` and to step over a `--`. */
-    while options.next(&mut sh.diagnostics(), b"")?.is_some() {}
+    while options.next(&mut shell.diagnostics(), b"")?.is_some() {}
 
     let Some((format, arguments)) = options.operands().split_first() else {
-        return Err(sh
+        return Err(shell
             .diagnostics()
-            .sh_error_value(b"usage: printf format [arg ...]"));
+            .shell_error(b"usage: printf format [arg ...]"));
     };
 
     let format = format.as_bytes();
     let end = format.len();
     let mut operands = Operands::new(arguments);
 
-    'out: loop {
+    'format_arguments: loop {
         /*
          * Basic algorithm is to scan the format string for conversion
          * specifications -- once one is found, find out if the field
@@ -648,27 +648,27 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
          */
         let mut at = 0usize;
         while at < end {
-            let ch = format[at];
+            let character = format[at];
             at += 1;
 
-            if ch == b'\\' {
+            if character == b'\\' {
                 /* `STARTSTACKSTR(cp); CHECKSTRSPACE(4, cp)` -- one
                  * escape's worth of scratch and nothing else; see
                  * `CONV_ESCAPE_SLOP` for why 4 is not the bound. */
-                let mut scratch: [u8; CONV_ESCAPE_SLOP] = [0; CONV_ESCAPE_SLOP];
-                let converted = conv_escape(&format[at..], &mut scratch, false);
+                let mut scratch: [u8; ESCAPE_OUTPUT_CAPACITY] = [0; ESCAPE_OUTPUT_CAPACITY];
+                let converted = parse_escape(&format[at..], &mut scratch, false);
                 at += converted.consumed;
-                debug_assert!(converted.written <= CONV_ESCAPE_SLOP);
-                emit(sh, &scratch[..converted.written])?;
+                debug_assert!(converted.written <= ESCAPE_OUTPUT_CAPACITY);
+                emit(shell, &scratch[..converted.written])?;
                 continue;
             }
             /* A `%%` is one `%`; a `%` at the very end of the format
              * falls through and is the missing-conversion error. */
-            if ch != b'%' || format.get(at) == Some(&b'%') {
-                if ch == b'%' {
+            if character != b'%' || format.get(at) == Some(&b'%') {
+                if character == b'%' {
                     at += 1;
                 }
-                emit(sh, &[ch])?;
+                emit(shell, &[character])?;
                 continue;
             }
 
@@ -687,7 +687,7 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             }
             if format.get(at) == Some(&b'*') {
                 at += 1;
-                spec.set_width(operands.getuintmax(sh, true) as i32);
+                spec.set_width(operands.next_unsigned(shell, true) as i32);
             } else {
                 /* skip to possible '.', get following precision */
                 let digits = span(&format[..end], at, WIDTH);
@@ -704,7 +704,7 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 at += 1;
                 if format.get(at) == Some(&b'*') {
                     at += 1;
-                    let value = operands.getuintmax(sh, true) as i32;
+                    let value = operands.next_unsigned(shell, true) as i32;
                     if stop.is_none() {
                         spec.set_precision(value);
                     }
@@ -726,7 +726,7 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
             let conversion = format.get(at).copied().unwrap_or(0);
             if conversion == 0 {
-                return Err(sh.diagnostics().sh_error_value(b"missing format character"));
+                return Err(shell.diagnostics().shell_error(b"missing format character"));
             }
             at += 1;
             if let Some(stop) = stop {
@@ -737,37 +737,37 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             match conversion {
                 b'b' => {
                     /* escape if a \c was encountered */
-                    if print_escape_str(sh, &spec, BStr::new(operands.getstr()))? {
-                        break 'out;
+                    if write_escaped_text(shell, &spec, BStr::new(operands.next_string()))? {
+                        break 'format_arguments;
                     }
                 }
                 b'c' => {
-                    let value = operands.getchr();
-                    emit_field(sh, spec.character(value))?;
+                    let value = operands.next_character();
+                    emit_field(shell, spec.character(value))?;
                 }
                 b's' => {
-                    let value = operands.getstr();
-                    emit_field(sh, spec.string(value))?;
+                    let value = operands.next_string();
+                    emit_field(shell, spec.string(value))?;
                 }
                 /* `mklong` widened the specification to `PRIdMAX` so
                  * that C's printf would pull a whole `i64` off the
                  * varargs. The value arrives typed. */
                 b'd' | b'i' => {
-                    let value = operands.getuintmax(sh, true);
-                    emit_field(sh, spec.signed(value as i64))?;
+                    let value = operands.next_unsigned(shell, true);
+                    emit_field(shell, spec.signed(value as i64))?;
                 }
                 b'o' | b'u' | b'x' | b'X' => {
-                    let value = operands.getuintmax(sh, false);
-                    emit_field(sh, spec.unsigned(value, conversion))?;
+                    let value = operands.next_unsigned(shell, false);
+                    emit_field(shell, spec.unsigned(value, conversion))?;
                 }
                 b'a' | b'A' | b'e' | b'E' | b'f' | b'F' | b'g' | b'G' => {
-                    let value = operands.getdouble(sh);
-                    emit_field(sh, spec.double(value, conversion))?;
+                    let value = operands.next_float(shell);
+                    emit_field(shell, spec.double(value, conversion))?;
                 }
                 _ => {
                     let mut message = format[start..at].to_vec();
                     message.extend_from_slice(b": invalid directive");
-                    return Err(sh.diagnostics().sh_error_value(&message));
+                    return Err(shell.diagnostics().shell_error(&message));
                 }
             }
         }
@@ -983,14 +983,14 @@ mod tests {
     #[test]
     fn exhausted_operands_yield_defaults() {
         let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned_sh;
+        let shell = &mut owned_sh;
         let words: Vec<&BStr> = vec![BStr::new("ab")];
         let mut operands = Operands::new(&words);
-        assert_eq!(operands.getchr(), b'a');
-        assert_eq!(operands.getchr(), 0);
-        assert_eq!(operands.getstr(), b"");
-        assert_eq!(operands.getuintmax(sh, true), 0);
-        assert_eq!(operands.getdouble(sh), 0.0);
+        assert_eq!(operands.next_character(), b'a');
+        assert_eq!(operands.next_character(), 0);
+        assert_eq!(operands.next_string(), b"");
+        assert_eq!(operands.next_unsigned(shell, true), 0);
+        assert_eq!(operands.next_float(shell), 0.0);
         assert_eq!(operands.status, ExitStatus::SUCCESS);
     }
 
@@ -1001,9 +1001,9 @@ mod tests {
         let words: Vec<&BStr> = vec![BStr::new("a"), BStr::new("b")];
         let mut operands = Operands::new(&words);
         assert!(!operands.reuse_format());
-        operands.getstr();
+        operands.next_string();
         assert!(operands.reuse_format());
-        operands.getstr();
+        operands.next_string();
         assert!(!operands.reuse_format());
     }
 
@@ -1012,12 +1012,12 @@ mod tests {
     #[test]
     fn a_quote_argument_is_one_byte() {
         let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned_sh;
+        let shell = &mut owned_sh;
         let words: Vec<&BStr> = vec![BStr::new("'A"), BStr::new("\"z"), BStr::new("'")];
         let mut operands = Operands::new(&words);
-        assert_eq!(operands.getuintmax(sh, true), 65);
-        assert_eq!(operands.getdouble(sh), 122.0);
-        assert_eq!(operands.getuintmax(sh, false), 0);
+        assert_eq!(operands.next_unsigned(shell, true), 65);
+        assert_eq!(operands.next_float(shell), 122.0);
+        assert_eq!(operands.next_unsigned(shell, false), 0);
         assert_eq!(operands.status, ExitStatus::SUCCESS);
     }
 

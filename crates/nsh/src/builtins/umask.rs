@@ -12,8 +12,8 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 
-use crate::eval::Flow;
-use crate::output::Dest;
+use crate::evaluation::Flow;
+use crate::output::OutputDestination;
 
 /*
  * umask builtin
@@ -47,37 +47,37 @@ use crate::output::Dest;
 // [spec:posix:req:builtin.umask.stderr]
 // [spec:posix:req:builtin.umask.interfaces]
 // [spec:posix:req:builtin.umask.exit-status]
-pub fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut mask: u32;
     let mut symbolic_mode = false;
 
-    let mut opts = crate::options::Options::new(args);
-    while opts.next(&mut sh.diagnostics(), b"S")?.is_some() {
+    let mut option_scan = crate::options::Options::new(args);
+    while option_scan.next(&mut shell.diagnostics(), b"S")?.is_some() {
         symbolic_mode = true;
     }
-    let mode = opts.operands().first().copied();
+    let mode = option_scan.operands().first().copied();
 
-    mask = crate::error::with_interrupts_deferred(sh, |_| nsh_platform::creation_mask());
+    mask = crate::error::with_interrupts_deferred(shell, |_| nsh_platform::creation_mask());
 
     if mode.is_none() {
         if symbolic_mode {
             let allowed = !mask;
             let mut record = Vec::with_capacity(18);
-            for i in 0..3 {
-                record.push(b"ugo"[i]);
+            for class_index in 0..3 {
+                record.push(b"ugo"[class_index]);
                 record.push(b'=');
-                for j in 0..3 {
-                    if (allowed & (1 << (8 - (3 * i + j)))) != 0 {
-                        record.push(b"rwx"[j]);
+                for permission_index in 0..3 {
+                    if (allowed & (1 << (8 - (3 * class_index + permission_index)))) != 0 {
+                        record.push(b"rwx"[permission_index]);
                     }
                 }
                 record.push(b',');
             }
             record.pop();
             record.push(b'\n');
-            sh.write_output(Dest::Stdout, &record)?;
+            shell.write_output(OutputDestination::Stdout, &record)?;
         } else {
-            sh.write_output_fmt(Dest::Stdout, format_args!("{mask:04o}\n"))?;
+            shell.write_output_fmt(OutputDestination::Stdout, format_args!("{mask:04o}\n"))?;
         }
     } else {
         let mode = mode.expect("checked above");
@@ -91,7 +91,7 @@ pub fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 if !(b'0'..=b'7').contains(&byte) {
                     let mut message = b"Illegal number: ".to_vec();
                     message.extend_from_slice(bytes);
-                    return Err(sh.diagnostics().sh_error_value(&message));
+                    return Err(shell.diagnostics().shell_error(&message));
                 }
                 new_mask = (new_mask << 3) + u32::from(byte - b'0');
             }
@@ -123,26 +123,26 @@ pub fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                         break 'parse false;
                     }
                     at += 1;
-                    let mut new_val = 0u32;
+                    let mut permission_bits = 0u32;
                     while at < bytes.len() && b"rwxugoXs".contains(&bytes[at]) {
                         match bytes[at] {
-                            b'r' => new_val |= 0o4,
-                            b'w' => new_val |= 0o2,
-                            b'x' => new_val |= 0o1,
-                            b'u' => new_val |= mask >> 6,
-                            b'g' => new_val |= mask >> 3,
-                            b'o' => new_val |= mask,
-                            b'X' if (mask & 0o111) != 0 => new_val |= 0o1,
+                            b'r' => permission_bits |= 0o4,
+                            b'w' => permission_bits |= 0o2,
+                            b'x' => permission_bits |= 0o1,
+                            b'u' => permission_bits |= mask >> 6,
+                            b'g' => permission_bits |= mask >> 3,
+                            b'o' => permission_bits |= mask,
+                            b'X' if (mask & 0o111) != 0 => permission_bits |= 0o1,
                             b'X' | b's' => {}
                             _ => unreachable!(),
                         }
                         at += 1;
                     }
-                    new_val = (new_val & 0o7) * positions;
+                    permission_bits = (permission_bits & 0o7) * positions;
                     match op {
-                        b'-' => new_mask &= !new_val,
-                        b'=' => new_mask = new_val | (new_mask & !(positions * 0o7)),
-                        b'+' => new_mask |= new_val,
+                        b'-' => new_mask &= !permission_bits,
+                        b'=' => new_mask = permission_bits | (new_mask & !(positions * 0o7)),
+                        b'+' => new_mask |= permission_bits,
                         _ => unreachable!(),
                     }
                     match bytes.get(at).copied() {
@@ -159,7 +159,7 @@ pub fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             if !valid {
                 let mut message = b"Illegal mode: ".to_vec();
                 message.extend_from_slice(bytes);
-                return Err(sh.diagnostics().sh_error_value(&message));
+                return Err(shell.diagnostics().shell_error(&message));
             }
             new_mask = !new_mask;
         }
@@ -172,7 +172,7 @@ pub fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 mod tests {
     use super::*;
 
-    use crate::testutil::lock;
+    use crate::test_support::lock;
 
     /// The umask is the process's, so a test has to put back what it
     /// found -- and reading it is itself a write, which is why the
@@ -180,15 +180,15 @@ mod tests {
     fn with_mask<T>(body: impl FnOnce() -> T) -> T {
         let _guard = lock();
         let saved = nsh_platform::creation_mask();
-        let out = body();
+        let result = body();
         nsh_platform::replace_creation_mask(saved);
-        out
+        result
     }
 
     fn set(mode: &[u8]) -> u32 {
-        let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
+        let shell = &mut Shell::new(crate::streams::Streams::INHERIT);
         assert_eq!(
-            umaskcmd(sh, &[BStr::new("umask"), BStr::new(mode)]).unwrap(),
+            run(shell, &[BStr::new("umask"), BStr::new(mode)]).unwrap(),
             Flow::Done((0).into())
         );
         nsh_platform::creation_mask()
@@ -235,13 +235,13 @@ mod tests {
             ("999", &b"Illegal number: 999"[..]),
             ("q=r", &b"Illegal mode: q=r"[..]),
         ] {
-            let e = umaskcmd(
+            let error = run(
                 &mut Shell::new(crate::streams::Streams::INHERIT),
                 &[BStr::new("umask"), BStr::new(mode)],
             )
             .expect_err("a bad mode fails");
-            assert_eq!(e.message().to_vec(), text.to_vec());
-            assert_eq!(e.status().code(), 2);
+            assert_eq!(error.message().to_vec(), text.to_vec());
+            assert_eq!(error.status().code(), 2);
         }
     }
 }

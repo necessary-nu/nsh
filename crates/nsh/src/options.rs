@@ -7,7 +7,7 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::output::Dest;
+use crate::output::OutputDestination;
 use bstr::{BStr, BString};
 
 mod dialect;
@@ -31,19 +31,19 @@ mod bash_mode_tests;
 /// function gets a copy of its argument words, then the caller's list is
 /// moved back when the function returns. This is the same observable
 /// behaviour (including `shift`) without a pointer-lifetime mode.
-pub struct shparam {
-    pub nparam: usize,         /* # of positional parameters (without $0) */
-    pub optind: usize,         /* next parameter to be processed by getopts */
-    pub optoff: Option<usize>, /* offset in getopts' current word */
+pub struct PositionalParameters {
+    pub parameter_count: usize, /* # of positional parameters (without $0) */
+    pub option_index: usize,    /* next parameter to be processed by getopts */
+    pub option_offset: Option<usize>, /* offset in getopts' current word */
     words: Vec<BString>,
 }
 
-impl shparam {
-    pub const fn new() -> shparam {
-        shparam {
-            nparam: 0,
-            optind: 0,
-            optoff: None,
+impl PositionalParameters {
+    pub const fn new() -> PositionalParameters {
+        PositionalParameters {
+            parameter_count: 0,
+            option_index: 0,
+            option_offset: None,
             words: Vec::new(),
         }
     }
@@ -54,10 +54,10 @@ impl shparam {
     /// A function's parameter list is a call-scoped owned copy, so shifting
     /// it mutates exactly the list that is restored away on return.
     pub(crate) fn drop_first(&mut self, n: usize) {
-        self.nparam -= n;
+        self.parameter_count -= n;
         self.words.drain(..n);
-        self.optind = 1;
-        self.optoff = None;
+        self.option_index = 1;
+        self.option_offset = None;
     }
 
     /// Snapshot positional parameters for expansion and `getopts`.
@@ -66,10 +66,10 @@ impl shparam {
     }
 
     fn replace(&mut self, words: Vec<BString>) {
-        self.nparam = words.len();
+        self.parameter_count = words.len();
         self.words = words;
-        self.optind = 1;
-        self.optoff = None;
+        self.option_index = 1;
+        self.option_offset = None;
     }
 }
 
@@ -97,7 +97,7 @@ pub struct ShellOptions {
     /// across them the flags array has. It is here because
     /// `docs/api-design.md` §5 puts it here — one row for everything
     /// `set` and the option scan own.
-    pub(crate) shellparam: shparam,
+    pub(crate) positional_parameters: PositionalParameters,
     /// Whether the parsed startup request contains a `-c` command.
     ///
     /// SIGINT policy distinguishes `-s -c command` from plain `-s`; the
@@ -105,7 +105,7 @@ pub struct ShellOptions {
     /// state.
     pub(crate) command_source: bool,
     /// `$0`, as owned shell bytes.
-    arg0: Option<BString>,
+    argument_zero: Option<BString>,
     /// The process invocation name before a command-file operand replaces
     /// `$0`. Output failures in the Smoosh profile identify the interpreter,
     /// not the script it is reading.
@@ -118,9 +118,9 @@ impl ShellOptions {
         ShellOptions {
             state: OptionSet::EMPTY,
             bash_options: bash_options::BashOptions::new(),
-            shellparam: shparam::new(),
+            positional_parameters: PositionalParameters::new(),
             command_source: false,
-            arg0: None,
+            argument_zero: None,
             invocation_name: None,
         }
     }
@@ -143,15 +143,15 @@ impl ShellOptions {
         if self.invocation_name.is_none() {
             self.invocation_name = Some(owned.clone());
         }
-        self.arg0 = Some(owned);
+        self.argument_zero = Some(owned);
     }
 
     pub(crate) fn set_invocation_name(&mut self, value: &BStr) {
         self.invocation_name = Some(value.to_owned());
     }
 
-    pub(crate) fn arg0(&self) -> Option<&BStr> {
-        self.arg0.as_deref().map(BStr::new)
+    pub(crate) fn argument_zero(&self) -> Option<&BStr> {
+        self.argument_zero.as_deref().map(BStr::new)
     }
 }
 
@@ -159,16 +159,19 @@ impl ShellOptions {
 // [spec:dash:sem:options.optschanged-fn]
 /// Returns rather than raising, because `setjobctl` can fail and one of
 /// this function's callers is teardown. See `jobs::setjobctl`.
-pub fn optschanged(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
-    crate::exec::dispatch_changed(sh);
-    crate::trap::setinteractive(sh, sh.options.enabled(ShellOption::Interactive));
-    crate::editor::histedit(sh);
-    crate::jobs::setjobctl(sh, sh.options.enabled(ShellOption::Monitor))
+pub fn apply_option_changes(shell: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
+    crate::execution::dispatch_changed(shell);
+    crate::trap::set_interactive_signal_policy(
+        shell,
+        shell.options.enabled(ShellOption::Interactive),
+    );
+    crate::editor::refresh_editor_configuration(shell);
+    crate::jobs::set_job_control(shell, shell.options.enabled(ShellOption::Monitor))
 }
 
 /// Apply the side effects of a changed option set.
-pub(crate) fn options_changed(sh: &mut Shell) -> Result<(), Error> {
-    optschanged(sh)
+pub(crate) fn options_changed(shell: &mut Shell) -> Result<(), Error> {
+    apply_option_changes(shell)
 }
 
 /// What a `set` option scan found.
@@ -197,7 +200,7 @@ pub(crate) struct Scan {
 // [spec:posix:req:builtin.set.first-argument-hyphen]
 // [spec:posix:req:builtin.set.double-hyphen]
 pub(crate) fn options(
-    sh: &mut crate::context::Shell,
+    shell: &mut crate::context::Shell,
     args: &[&BStr],
     start: usize,
 ) -> Result<Scan, Error> {
@@ -210,40 +213,40 @@ pub(crate) fn options(
         scan.next += 1;
         /* `c = *p++`: the first byte decides, and the cluster starts at
          * the second. An empty word takes the `else` and is put back. */
-        let c = word.first().copied().unwrap_or(0);
-        let enabled = if c == b'-' {
+        let prefix = word.first().copied().unwrap_or(0);
+        let enabled = if prefix == b'-' {
             if word.len() == 1 || &word[..] == b"--" {
                 /* "-" means turn off -x and -v */
                 if word.len() == 1 {
-                    sh.options.set(ShellOption::Verbose, false);
-                    sh.options.set(ShellOption::Xtrace, false);
+                    shell.options.set(ShellOption::Verbose, false);
+                    shell.options.set(ShellOption::Xtrace, false);
                 }
                 /* "--" means reset params */
                 else if scan.next >= args.len() {
-                    setparam(sh, &args[scan.next..]);
+                    set_positional_parameters(shell, &args[scan.next..]);
                 }
                 break; /* "-" or "--" terminates options */
             }
             true
-        } else if c == b'+' {
+        } else if prefix == b'+' {
             false
         } else {
             scan.next -= 1;
             break;
         };
-        let mut i = 1usize;
+        let mut cluster_index = 1usize;
         loop {
-            let Some(&c) = word.get(i) else {
+            let Some(&option) = word.get(cluster_index) else {
                 break;
             };
-            i += 1;
-            if c == b'o' {
-                minus_o(sh, args.get(scan.next).copied(), enabled)?;
+            cluster_index += 1;
+            if option == b'o' {
+                minus_o(shell, args.get(scan.next).copied(), enabled)?;
                 if scan.next < args.len() {
                     scan.next += 1;
                 }
             } else {
-                setoption(sh, c, enabled)?;
+                set_option(shell, option, enabled)?;
             }
         }
     }
@@ -270,50 +273,50 @@ pub(crate) fn options(
 // [spec:posix:req:builtin.set.opt-o-vi]
 // [spec:posix:def:builtin.set.opt-o-xtrace]
 fn minus_o(
-    sh: &mut crate::context::Shell,
+    shell: &mut crate::context::Shell,
     name: Option<&BStr>,
     enabled: bool,
 ) -> Result<Option<ShellOption>, Error> {
     if name.is_none() {
         if enabled {
             let heading = b"Current option settings\n";
-            sh.write_output(Dest::Stdout, heading)?;
+            shell.write_output(OutputDestination::Stdout, heading)?;
             for spec in OPTION_SPECS {
                 let mut line = spec.name.to_vec();
                 if line.len() < 16 {
                     line.resize(16, b' ');
                 }
-                line.extend_from_slice(if sh.options.enabled(spec.option) {
+                line.extend_from_slice(if shell.options.enabled(spec.option) {
                     b"on\n"
                 } else {
                     b"off\n"
                 });
-                sh.write_output(Dest::Stdout, &line)?;
+                shell.write_output(OutputDestination::Stdout, &line)?;
             }
         } else {
             for spec in OPTION_SPECS {
                 let mut line = b"set ".to_vec();
-                line.extend_from_slice(if sh.options.enabled(spec.option) {
+                line.extend_from_slice(if shell.options.enabled(spec.option) {
                     b"-o "
                 } else {
                     b"+o "
                 });
                 line.extend_from_slice(spec.name);
                 line.push(b'\n');
-                sh.write_output(Dest::Stdout, &line)?;
+                shell.write_output(OutputDestination::Stdout, &line)?;
             }
         }
     } else {
         let name = name.expect("the naming branch");
         for spec in OPTION_SPECS {
             if name == spec.name {
-                set_typed_option(sh, spec.option, enabled);
+                set_typed_option(shell, spec.option, enabled);
                 return Ok(Some(spec.option));
             }
         }
         let mut message = b"Illegal option -o ".to_vec();
         message.extend_from_slice(name);
-        return Err(sh.diagnostics().sh_error_value(&message));
+        return Err(shell.diagnostics().shell_error(&message));
     }
     Ok(None)
 }
@@ -338,41 +341,45 @@ fn minus_o(
 /// `optschanged` triggers -- `setinteractive`, `histedit`, `setjobctl` --
 /// should run once against the finished set, not once per option.
 pub(crate) fn set_option_by_name(
-    sh: &mut crate::context::Shell,
+    shell: &mut crate::context::Shell,
     name: &BStr,
     on: bool,
 ) -> Result<(), Error> {
     if name.len() == 1 {
-        setoption(sh, name[0], on).map(|_| ())
+        set_option(shell, name[0], on).map(|_| ())
     } else {
-        minus_o(sh, Some(name), on).map(|_| ())
+        minus_o(shell, Some(name), on).map(|_| ())
     }
 }
 
-fn setoption(
-    sh: &mut crate::context::Shell,
+fn set_option(
+    shell: &mut crate::context::Shell,
     flag: u8,
     enabled: bool,
 ) -> Result<ShellOption, Error> {
     for spec in OPTION_SPECS {
         if spec.letter == Some(flag) {
-            set_typed_option(sh, spec.option, enabled);
+            set_typed_option(shell, spec.option, enabled);
             return Ok(spec.option);
         }
     }
     let mut message = b"Illegal option -".to_vec();
     message.push(flag);
-    Err(sh.diagnostics().sh_error_value(&message))
+    Err(shell.diagnostics().shell_error(&message))
 }
 
-pub(crate) fn set_typed_option(sh: &mut crate::context::Shell, option: ShellOption, enabled: bool) {
-    sh.options.set(option, enabled);
+pub(crate) fn set_typed_option(
+    shell: &mut crate::context::Shell,
+    option: ShellOption,
+    enabled: bool,
+) {
+    shell.options.set(option, enabled);
     if enabled {
         /* #%$ hack for ksh semantics */
         if option == ShellOption::Vi {
-            sh.options.set(ShellOption::Emacs, false);
+            shell.options.set(ShellOption::Emacs, false);
         } else if option == ShellOption::Emacs {
-            sh.options.set(ShellOption::Vi, false);
+            shell.options.set(ShellOption::Vi, false);
         }
     }
 }
@@ -384,23 +391,26 @@ pub(crate) fn set_typed_option(sh: &mut crate::context::Shell, option: ShellOpti
 // [spec:dash:def:options.setparam-fn]
 // [spec:dash:sem:options.setparam-fn]
 // [spec:posix:sem:param.positional-assignment]
-pub fn setparam(sh: &mut Shell, argv: &[&BStr]) {
+pub fn set_positional_parameters(shell: &mut Shell, argv: &[&BStr]) {
     /* Copied out in full before the old list goes, as the C's
      * `savestr` loop is: `freeparam` comes after the copy there too. */
     let words: Vec<BString> = argv.iter().map(|word| BString::from(*word)).collect();
-    sh.options.shellparam.replace(words);
+    shell.options.positional_parameters.replace(words);
 }
 
 /// `saveparam = shellparam`, which is a copy in the C only because
 /// `shellparam.malloc = 0` on the next line disarms the `freeparam` that
 /// would otherwise free what the copy still points at. One move says both.
-pub fn takeparam(sh: &mut Shell) -> shparam {
-    core::mem::replace(&mut sh.options.shellparam, shparam::new())
+pub fn take_positional_parameters(shell: &mut Shell) -> PositionalParameters {
+    core::mem::replace(
+        &mut shell.options.positional_parameters,
+        PositionalParameters::new(),
+    )
 }
 
 /// Drop the function's parameters and restore the caller's saved value.
-pub fn restoreparam(sh: &mut Shell, saved: shparam) {
-    sh.options.shellparam = saved;
+pub fn restore_positional_parameters(shell: &mut Shell, saved: PositionalParameters) {
+    shell.options.positional_parameters = saved;
 }
 
 /*
@@ -415,9 +425,9 @@ pub fn restoreparam(sh: &mut Shell, saved: shparam) {
 // [spec:dash:sem:options.getoptsreset-fn]
 // [spec:posix:req:builtin.getopts.env-optind]
 // [spec:posix:sem:builtin.getopts.reset]
-pub fn getoptsreset(sh: &mut crate::context::Shell, _value: &BStr) {
-    sh.options.shellparam.optind = 1;
-    sh.options.shellparam.optoff = None;
+pub fn reset_getopts(shell: &mut crate::context::Shell, _value: &BStr) {
+    shell.options.positional_parameters.option_index = 1;
+    shell.options.positional_parameters.option_offset = None;
 }
 
 /*
@@ -447,14 +457,14 @@ pub fn getoptsreset(sh: &mut crate::context::Shell, _value: &BStr) {
 // [spec:posix:req:xcu.operands.hyphen-means-stdin]
 // [spec:posix:req:xcu.operands.processing-order]
 pub struct Options<'a> {
-    args: &'a [&'a BStr],
+    words: &'a [&'a BStr],
     /// The next word to look at: dash's `argptr`.
     next: usize,
     /// How far a run of clustered options has got through a word already
     /// consumed: dash's `optptr`. `None` is its NULL.
-    run: Option<(usize, usize)>,
+    cluster: Option<(usize, usize)>,
     /// dash's `optionarg`.
-    optionarg: Option<&'a BStr>,
+    option_argument: Option<&'a BStr>,
 }
 
 impl<'a> Options<'a> {
@@ -467,10 +477,10 @@ impl<'a> Options<'a> {
     /// Scan from `start` when a caller has already consumed leading words.
     pub fn from(args: &'a [&'a BStr], start: usize) -> Self {
         Options {
-            args,
+            words: args,
             next: start.min(args.len()),
-            run: None,
-            optionarg: None,
+            cluster: None,
+            option_argument: None,
         }
     }
 
@@ -492,83 +502,85 @@ impl<'a> Options<'a> {
     ) -> Result<Option<u8>, Error> {
         /* `p = optptr; if (p == NULL || *p == '\0')` -- the run in
          * progress is exhausted, so the next word starts a new one. */
-        let (word, mut off) = match self.run {
-            Some((w, off)) if off < self.args[w].len() => (w, off),
+        let (word_index, mut offset) = match self.cluster {
+            Some((word_index, offset)) if offset < self.words[word_index].len() => {
+                (word_index, offset)
+            }
             _ => {
-                let w = self.next;
+                let word_index = self.next;
                 /* `p == NULL || *p != '-' || *++p == '\0'`: the end of
                  * the list, a word that is not an option, or a lone `-`.
                  * None of the three is consumed. The `?` this used to take
                  * on the `Option` is spelled out now that the scan can
                  * fail for a second reason. */
-                let Some(&word) = self.args.get(w) else {
+                let Some(&word) = self.words.get(word_index) else {
                     return Ok(None);
                 };
                 if word.first() != Some(&b'-') || word.len() < 2 {
                     return Ok(None);
                 }
-                self.next = w + 1; /* argptr++ */
+                self.next = word_index + 1; /* argptr++ */
                 if &word[..] == b"--" {
                     /* consumed, and it ends the options */
                     return Ok(None);
                 }
-                (w, 1)
+                (word_index, 1)
             }
         };
 
-        let c = self.args[word][off];
-        off += 1;
+        let option = self.words[word_index][offset];
+        offset += 1;
 
         /* Find `c` in the option string.  A `:` belongs to the option
          * before it, so the scan steps over one; running off the end is
          * the C reading its terminator, and the option is not ours. */
-        let mut q = 0usize;
+        let mut specification_index = 0usize;
         loop {
-            let cur = optstring.get(q).copied().unwrap_or(0);
-            if cur == c {
+            let specification_byte = optstring.get(specification_index).copied().unwrap_or(0);
+            if specification_byte == option {
                 break;
             }
-            if cur == 0 {
+            if specification_byte == 0 {
                 let mut message = b"Illegal option -".to_vec();
-                message.push(c);
+                message.push(option);
                 /* A stop: the loop would spin on the terminator. */
-                return Err(diagnostics.sh_error_value(&message));
+                return Err(diagnostics.shell_error(&message));
             }
-            q += 1;
-            if optstring.get(q) == Some(&b':') {
-                q += 1;
+            specification_index += 1;
+            if optstring.get(specification_index) == Some(&b':') {
+                specification_index += 1;
             }
         }
 
-        q += 1;
-        if optstring.get(q) == Some(&b':') {
+        specification_index += 1;
+        if optstring.get(specification_index) == Some(&b':') {
             /* The option takes an argument: the rest of this word if
              * there is any, otherwise the next word. */
-            let bytes = self.args[word];
-            if off < bytes.len() {
-                self.optionarg = Some(BStr::new(&bytes[off..]));
+            let bytes = self.words[word_index];
+            if offset < bytes.len() {
+                self.option_argument = Some(BStr::new(&bytes[offset..]));
             } else {
-                match self.args.get(self.next) {
-                    Some(a) => {
-                        self.optionarg = Some(a);
+                match self.words.get(self.next) {
+                    Some(argument) => {
+                        self.option_argument = Some(argument);
                         self.next += 1;
                     }
                     None => {
                         let mut message = b"No arg for -".to_vec();
-                        message.push(c);
+                        message.push(option);
                         message.extend_from_slice(b" option");
                         /* A stop: `arg()` would otherwise be asked for an
                          * `optionarg` that was never set. */
-                        return Err(diagnostics.sh_error_value(&message));
+                        return Err(diagnostics.shell_error(&message));
                     }
                 }
             }
-            self.run = None; /* p = NULL */
+            self.cluster = None; /* p = NULL */
         } else {
-            self.run = Some((word, off));
+            self.cluster = Some((word_index, offset));
         }
 
-        Ok(Some(c))
+        Ok(Some(option))
     }
 
     /// The argument of the option just returned: dash's `optionarg`.
@@ -577,14 +589,14 @@ impl<'a> Options<'a> {
     /// [`Options::next`] raises rather than return such an option without
     /// it, so a caller that asks in the right place always gets it.
     pub fn arg(&self) -> &'a BStr {
-        self.optionarg
+        self.option_argument
             .expect("an option marked `:` has an argument or does not return")
     }
 
     /// The words the scan stopped in front of: dash's `argptr`, read back
     /// after `nextopt` has returned `'\0'`.
     pub fn operands(&self) -> &'a [&'a BStr] {
-        &self.args[self.next..]
+        &self.words[self.next..]
     }
 }
 
@@ -599,28 +611,28 @@ mod tests {
 
     #[test]
     fn an_unknown_letter_returns_its_complaint() {
-        let _g = crate::testutil::lock();
+        let _g = crate::test_support::lock();
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned;
+        let shell = &mut owned;
         let args = [BStr::new("set"), BStr::new("-Q")];
 
-        let e = options(sh, &args, 1).expect_err("-Q is not an option");
+        let error = options(shell, &args, 1).expect_err("-Q is not an option");
 
-        assert_eq!(e.message().to_vec(), b"Illegal option -Q".to_vec());
-        assert_eq!(e.status().code(), 2);
+        assert_eq!(error.message().to_vec(), b"Illegal option -Q".to_vec());
+        assert_eq!(error.status().code(), 2);
     }
 
     #[test]
     fn an_unknown_name_returns_its_complaint() {
-        let _g = crate::testutil::lock();
+        let _g = crate::test_support::lock();
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned;
+        let shell = &mut owned;
         let args = [BStr::new("set"), BStr::new("-o"), BStr::new("nosuchopt")];
 
-        let e = options(sh, &args, 1).expect_err("-o nosuchopt is not an option");
+        let error = options(shell, &args, 1).expect_err("-o nosuchopt is not an option");
 
         assert_eq!(
-            e.message().to_vec(),
+            error.message().to_vec(),
             b"Illegal option -o nosuchopt".to_vec()
         );
     }
@@ -630,21 +642,21 @@ mod tests {
     /// which words the scan consumes is what decides where the operands
     /// start, and every builtin reads its operands from there.
     fn scan<'a>(args: &'a [&'a BStr], optstring: &[u8]) -> (Vec<u8>, Vec<&'a BStr>) {
-        let mut opts = Options::new(args);
+        let mut option_scan = Options::new(args);
         let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned_sh;
+        let shell = &mut owned_sh;
         let mut seen = Vec::new();
         /* `Ok(Some(c))` would end the scan silently on an error and make
          * a failure look like a short option list, so the error is taken
          * loudly: every option string these cases use accepts every
          * option they hand it. */
-        while let Some(c) = opts
-            .next(&mut sh.diagnostics(), optstring)
+        while let Some(c) = option_scan
+            .next(&mut shell.diagnostics(), optstring)
             .expect("the scan's cases never pass an option the string rejects")
         {
             seen.push(c);
         }
-        (seen, opts.operands().to_vec())
+        (seen, option_scan.operands().to_vec())
     }
 
     fn words<'a>(raw: &'a [&'a [u8]]) -> Vec<&'a BStr> {
@@ -670,31 +682,37 @@ mod tests {
     #[test]
     fn option_arg_from_same_word() {
         let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned_sh;
+        let shell = &mut owned_sh;
         let args = words(&[b"read", b"-pPROMPT", b"var"]);
-        let mut opts = Options::new(&args);
+        let mut option_scan = Options::new(&args);
         assert_eq!(
-            opts.next(&mut sh.diagnostics(), b"p:r").unwrap(),
+            option_scan.next(&mut shell.diagnostics(), b"p:r").unwrap(),
             Some(b'p')
         );
-        assert_eq!(opts.arg(), BStr::new(b"PROMPT"));
-        assert_eq!(opts.next(&mut sh.diagnostics(), b"p:r").unwrap(), None);
-        assert_eq!(opts.operands(), words(&[b"var"]));
+        assert_eq!(option_scan.arg(), BStr::new(b"PROMPT"));
+        assert_eq!(
+            option_scan.next(&mut shell.diagnostics(), b"p:r").unwrap(),
+            None
+        );
+        assert_eq!(option_scan.operands(), words(&[b"var"]));
     }
 
     #[test]
     fn option_arg_from_next_word() {
         let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned_sh;
+        let shell = &mut owned_sh;
         let args = words(&[b"read", b"-p", b"PROMPT", b"var"]);
-        let mut opts = Options::new(&args);
+        let mut option_scan = Options::new(&args);
         assert_eq!(
-            opts.next(&mut sh.diagnostics(), b"p:r").unwrap(),
+            option_scan.next(&mut shell.diagnostics(), b"p:r").unwrap(),
             Some(b'p')
         );
-        assert_eq!(opts.arg(), BStr::new(b"PROMPT"));
-        assert_eq!(opts.next(&mut sh.diagnostics(), b"p:r").unwrap(), None);
-        assert_eq!(opts.operands(), words(&[b"var"]));
+        assert_eq!(option_scan.arg(), BStr::new(b"PROMPT"));
+        assert_eq!(
+            option_scan.next(&mut shell.diagnostics(), b"p:r").unwrap(),
+            None
+        );
+        assert_eq!(option_scan.operands(), words(&[b"var"]));
     }
 
     /// A `:` in the option string belongs to the option in front of it, so
@@ -747,11 +765,11 @@ mod tests {
     /// What the `set` scan reports is where it stopped, which decides the
     /// positional parameters.
     fn scan_options(raw: &[&[u8]]) -> usize {
-        let _guard = crate::testutil::lock();
+        let _guard = crate::test_support::lock();
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned;
+        let shell = &mut owned;
         let args = words(raw);
-        options(sh, &args, 0)
+        options(shell, &args, 0)
             .expect("these cases scan cleanly")
             .next
     }
@@ -790,27 +808,27 @@ mod tests {
 
     #[test]
     fn hashall_tracks_minus_and_plus_forms() {
-        let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let mut shell = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let enable = words(&[b"-h"]);
-        options(&mut sh, &enable, 0).unwrap();
-        assert!(sh.options.enabled(ShellOption::HashAll));
+        options(&mut shell, &enable, 0).unwrap();
+        assert!(shell.options.enabled(ShellOption::HashAll));
 
         let disable = words(&[b"+h"]);
-        options(&mut sh, &disable, 0).unwrap();
-        assert!(!sh.options.enabled(ShellOption::HashAll));
+        options(&mut shell, &disable, 0).unwrap();
+        assert!(!shell.options.enabled(ShellOption::HashAll));
     }
 
     // [spec:nsh:req:compat.smoosh.nonlexical-control/test]
     #[test]
     fn nonlexical_control_tracks_long_option_forms() {
-        let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let mut shell = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let enable = words(&[b"-o", b"nonlexicalctrl"]);
-        options(&mut sh, &enable, 0).unwrap();
-        assert!(sh.options.enabled(ShellOption::NonLexicalControl));
+        options(&mut shell, &enable, 0).unwrap();
+        assert!(shell.options.enabled(ShellOption::NonLexicalControl));
 
         let disable = words(&[b"+o", b"nonlexicalctrl"]);
-        options(&mut sh, &disable, 0).unwrap();
-        assert!(!sh.options.enabled(ShellOption::NonLexicalControl));
+        options(&mut shell, &disable, 0).unwrap();
+        assert!(!shell.options.enabled(ShellOption::NonLexicalControl));
     }
 
     #[test]

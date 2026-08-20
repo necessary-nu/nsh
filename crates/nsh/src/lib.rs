@@ -106,40 +106,41 @@ pub(crate) mod host;
 pub(crate) mod source;
 
 // ---- foundation -----------------------------------------------------
+// [spec:nsh:req:idiom.rust-naming]
+pub(crate) mod descriptors;
 pub(crate) mod error;
 pub(crate) mod escape;
-pub(crate) mod fd;
 pub(crate) mod number;
 pub(crate) mod output;
-pub(crate) mod siginbox;
+pub(crate) mod signal_inbox;
 pub(crate) mod status;
 pub mod streams;
 
 // ---- unit-test scaffolding (test builds only) ------------------------
 #[cfg(test)]
-pub(crate) mod testutil;
+pub(crate) mod test_support;
 
 // ---- the builtins ----------------------------------------------------
 pub(crate) mod builtins;
 
 // ---- generated tables ------------------------------------------------
 pub(crate) mod nodes;
-pub(crate) mod signames;
+pub(crate) mod signal_names;
 pub(crate) mod syntax;
 // [spec:nsh:def:idiom.word-ir]
 pub(crate) mod word;
 
 // ---- shell state -----------------------------------------------------
 pub(crate) mod alias;
-pub(crate) mod cd;
 pub(crate) mod input;
 pub(crate) mod lifecycle;
 pub(crate) mod mail;
 pub(crate) mod options;
-pub(crate) mod redir;
+pub(crate) mod redirection;
 pub(crate) mod resource;
 pub(crate) mod trap;
-pub(crate) mod var;
+pub(crate) mod variables;
+pub(crate) mod working_directory;
 
 // ---- parsing and expansion -------------------------------------------
 // [spec:nsh:req:idiom.module-boundaries]
@@ -149,8 +150,8 @@ pub(crate) mod parser;
 pub(crate) mod pattern;
 
 // ---- execution --------------------------------------------------------
-pub(crate) mod eval;
-pub(crate) mod exec;
+pub(crate) mod evaluation;
+pub(crate) mod execution;
 pub(crate) mod jobs;
 pub(crate) mod runtime;
 

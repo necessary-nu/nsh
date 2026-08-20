@@ -26,7 +26,7 @@ pub enum Disposition {
 
 /// The shell's signal inbox, as the host receives it.
 ///
-/// This is [`crate::siginbox::SignalSink`] -- the one that already exists
+/// This is [`crate::signal_inbox::SignalSink`] -- the one that already exists
 /// -- and not a new type. `siginbox` is §5.3's sink already: it is what a
 /// signal handler may touch and the only place it may touch it, and its
 /// own module argues that process-wide storage is correct rather than a
@@ -37,7 +37,7 @@ pub enum Disposition {
 /// handle: there is one inbox per process because there is one set of
 /// dispositions per process, and an `Arc` would buy shareability that the
 /// storage does not need.
-pub type SignalSink = &'static crate::siginbox::SignalSink;
+pub type SignalSink = &'static crate::signal_inbox::SignalSink;
 
 /// What the library will not do on its own authority.
 ///
@@ -176,7 +176,7 @@ pub struct ProcessHost;
 
 impl Host for ProcessHost {
     /// Nothing to keep. This host is in the same crate as the inbox and
-    /// reaches it through [`crate::siginbox::signals`]; a host outside the
+    /// reaches it through [`crate::signal_inbox::signals`]; a host outside the
     /// crate has to hold the handle it is given here, because
     /// [`SignalSink::raise`] is the only thing its handler may call.
     fn attach(&mut self, _sink: SignalSink) {}
@@ -195,7 +195,11 @@ impl Host for ProcessHost {
             Disposition::Ignore => nsh_platform::SignalAction::Ignore,
             Disposition::Catch => nsh_platform::SignalAction::Catch,
         };
-        nsh_platform::install_signal_action(signal.platform(), action, crate::trap::onsig)
+        nsh_platform::install_signal_action(
+            signal.platform(),
+            action,
+            crate::trap::mark_signal_pending,
+        )
     }
 
     fn may_replace_process(&mut self) -> bool {
@@ -279,9 +283,9 @@ mod tests {
     /// the ask a host declining it is declining.
     #[test]
     fn the_parent_side_entry_point_asks_the_host() {
-        let _g = crate::testutil::lock();
+        let _g = crate::test_support::lock();
         let rec = Recorder::new();
-        let mut sh = crate::context::Shell::builder()
+        let mut shell = crate::context::Shell::builder()
             .host(rec.clone())
             .build()
             .unwrap();
@@ -292,7 +296,7 @@ mod tests {
             rec.installs()
         );
 
-        crate::trap::setsignal(&mut sh, nsh_platform::termination_signal().into());
+        crate::trap::configure_signal(&mut shell, nsh_platform::termination_signal().into());
         assert!(
             rec.installs().contains(&(
                 nsh_platform::termination_signal().number(),
@@ -314,12 +318,15 @@ mod tests {
     /// it is pinned here.
     #[test]
     fn set_m_without_a_grant_leaves_the_hosts_terminal_alone() {
-        let _g = crate::testutil::lock();
-        let mut sh = crate::context::Shell::builder().build().unwrap();
-        sh.run(b"set -m").unwrap();
+        let _g = crate::test_support::lock();
+        let mut shell = crate::context::Shell::builder().build().unwrap();
+        shell.run(b"set -m").unwrap();
         // [spec:nsh:def:idiom.job-control-model]
-        assert!(!sh.jobs.jobctl, "an ungranted shell took job control");
-        assert!(sh.run(b"echo still running").is_ok());
+        assert!(
+            !shell.jobs.job_control,
+            "an ungranted shell took job control"
+        );
+        assert!(shell.run(b"echo still running").is_ok());
     }
 
     /// The child-side entry point does not, and that is the whole point of
@@ -328,15 +335,18 @@ mod tests {
     /// the terminal along with the shell that backgrounded it.
     #[test]
     fn the_child_side_entry_point_does_not_ask_the_host() {
-        let _g = crate::testutil::lock();
+        let _g = crate::test_support::lock();
         let rec = Recorder::new();
-        let mut sh = crate::context::Shell::builder()
+        let mut shell = crate::context::Shell::builder()
             .host(rec.clone())
             .build()
             .unwrap();
         let before = rec.installs().len();
-        crate::trap::setsignal_in_child(&mut sh, nsh_platform::termination_signal().into());
-        crate::trap::ignoresig_in_child(&mut sh, nsh_platform::termination_signal().into());
+        crate::trap::configure_signal_in_child(
+            &mut shell,
+            nsh_platform::termination_signal().into(),
+        );
+        crate::trap::ignore_signal_in_child(&mut shell, nsh_platform::termination_signal().into());
         assert_eq!(
             rec.installs().len(),
             before,

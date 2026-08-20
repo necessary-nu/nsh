@@ -7,13 +7,13 @@
 
 use nsh_platform::{AsDescriptor, Descriptor};
 
-use crate::fd::{LogicalDescriptor, SharedFd};
+use crate::descriptors::{LogicalDescriptor, SharedDescriptor};
 
 /// The three descriptors that seed a shell's logical stdin, stdout and
 /// stderr slots.
 #[derive(Debug)]
 pub struct Streams {
-    owned: Option<[SharedFd; 3]>,
+    owned: Option<[SharedDescriptor; 3]>,
 }
 
 impl Streams {
@@ -43,15 +43,15 @@ impl Streams {
     ) -> std::io::Result<Streams> {
         Ok(Streams {
             owned: Some([
-                SharedFd::from(nsh_platform::duplicate_cloexec(
+                SharedDescriptor::from(nsh_platform::duplicate_cloexec(
                     &stdin,
                     LogicalDescriptor::COUNT as i32,
                 )?),
-                SharedFd::from(nsh_platform::duplicate_cloexec(
+                SharedDescriptor::from(nsh_platform::duplicate_cloexec(
                     &stdout,
                     LogicalDescriptor::COUNT as i32,
                 )?),
-                SharedFd::from(nsh_platform::duplicate_cloexec(
+                SharedDescriptor::from(nsh_platform::duplicate_cloexec(
                     &stderr,
                     LogicalDescriptor::COUNT as i32,
                 )?),
@@ -80,9 +80,9 @@ impl Streams {
         let [stdin, stdout, stderr] = owned;
         Ok(Streams {
             owned: Some([
-                SharedFd::from_owned(stdin)?,
-                SharedFd::from_owned(stdout)?,
-                SharedFd::from_owned(stderr)?,
+                SharedDescriptor::from_owned(stdin)?,
+                SharedDescriptor::from_owned(stdout)?,
+                SharedDescriptor::from_owned(stderr)?,
             ]),
         })
     }
@@ -90,9 +90,9 @@ impl Streams {
     // [spec:nsh:def:idiom.logical-descriptors]
     pub(crate) fn initial_descriptors(
         &self,
-    ) -> std::io::Result<[Option<SharedFd>; LogicalDescriptor::COUNT]> {
+    ) -> std::io::Result<[Option<SharedDescriptor>; LogicalDescriptor::COUNT]> {
         if let Some(owned) = &self.owned {
-            let mut result: [Option<SharedFd>; LogicalDescriptor::COUNT] =
+            let mut result: [Option<SharedDescriptor>; LogicalDescriptor::COUNT] =
                 std::array::from_fn(|_| None);
             result[LogicalDescriptor::STDIN.index()] = Some(owned[0].clone());
             result[LogicalDescriptor::STDOUT.index()] = Some(owned[1].clone());
@@ -100,7 +100,7 @@ impl Streams {
             return Ok(result);
         }
 
-        let mut result: [Option<SharedFd>; LogicalDescriptor::COUNT] =
+        let mut result: [Option<SharedDescriptor>; LogicalDescriptor::COUNT] =
             std::array::from_fn(|_| None);
         for (number, slot) in result.iter_mut().enumerate() {
             let descriptor = LogicalDescriptor::from_index(number)
@@ -109,12 +109,12 @@ impl Streams {
                 descriptor.as_i32(),
                 LogicalDescriptor::COUNT as i32,
             )?
-            .map(SharedFd::from);
+            .map(SharedDescriptor::from);
         }
         Ok(result)
     }
 
-    fn original(&self, index: usize) -> Option<SharedFd> {
+    fn original(&self, index: usize) -> Option<SharedDescriptor> {
         self.owned.as_ref().map(|owned| owned[index].clone())
     }
 }
@@ -128,7 +128,7 @@ impl Default for Streams {
 impl crate::context::Shell {
     /// Take everything captured on the shell's stdout since the last call.
     pub fn take_captured_stdout(&mut self) -> std::io::Result<bstr::BString> {
-        self.io.flushall()?;
+        self.io.flush_all()?;
         self.take_captured_stream(1)
     }
 
@@ -139,16 +139,17 @@ impl crate::context::Shell {
 
     // [spec:nsh:req:idiom.platform-errors]
     fn take_captured_stream(&self, index: usize) -> std::io::Result<bstr::BString> {
-        let fd = self
+        let descriptor = self
             .streams
             .original(index)
             .or_else(|| {
-                LogicalDescriptor::from_index(index).and_then(|descriptor| self.fds.get(descriptor))
+                LogicalDescriptor::from_index(index)
+                    .and_then(|descriptor| self.descriptors.get(descriptor))
             })
             .ok_or_else(|| {
                 nsh_platform::platform_error(nsh_platform::PlatformErrorKind::BadDescriptor)
             })?;
-        nsh_platform::take_file_contents(&fd).map(bstr::BString::from)
+        nsh_platform::take_file_contents(&descriptor).map(bstr::BString::from)
     }
 }
 

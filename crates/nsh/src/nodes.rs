@@ -35,7 +35,7 @@
 
 use bstr::{BStr, BString};
 
-use crate::fd::LogicalDescriptor;
+use crate::descriptors::LogicalDescriptor;
 use crate::word::ParsedWord;
 
 mod bash;
@@ -283,11 +283,11 @@ mod tests {
     fn cloning_a_node_copies_the_bytes_rather_than_sharing_them() {
         // `copyfunc` is why this matters: a function definition outlives
         // the text it was parsed from, so `copynode` called `nodesavestr`.
-        let n = Node::Word(WordNode {
+        let node = Node::Word(WordNode {
             word: ParsedWord::literal(BString::from("$x")),
         });
-        let copy = n.clone();
-        let (Node::Word(copy), Node::Word(original)) = (&copy, &n) else {
+        let copy = node.clone();
+        let (Node::Word(copy), Node::Word(original)) = (&copy, &node) else {
             unreachable!()
         };
         assert_eq!(copy.word.as_bstr(), original.word.as_bstr());

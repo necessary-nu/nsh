@@ -3,9 +3,9 @@ use std::os::unix::ffi::OsStrExt as _;
 use std::os::unix::process::CommandExt as _;
 use std::process::{Command, Output};
 
-fn run_shell(arg0: &[u8], args: &[&[u8]]) -> Output {
+fn run_shell(argument_zero: &[u8], args: &[&[u8]]) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_nsh"));
-    command.arg0(OsStr::from_bytes(arg0));
+    command.arg0(OsStr::from_bytes(argument_zero));
     for arg in args {
         command.arg(OsStr::from_bytes(arg));
     }
@@ -42,13 +42,17 @@ fn invocation_and_options_select_bash_mode() {
 // [spec:nsh:req:compat.bash.selection/test]
 #[test]
 fn raw_invocation_basename_selects_mode() {
-    for arg0 in [
+    for argument_zero in [
         b"bash".as_slice(),
         b"/opt/shells/bash",
         b"/opt/shells/-bash",
     ] {
-        let output = run_shell(arg0, &[b"-c", b"set -o"]);
-        assert_eq!(bash_lines(&output), [b"bash            on"], "{arg0:?}");
+        let output = run_shell(argument_zero, &[b"-c", b"set -o"]);
+        assert_eq!(
+            bash_lines(&output),
+            [b"bash            on"],
+            "{argument_zero:?}"
+        );
     }
 
     let overridden = run_shell(b"bash", &[b"+o", b"bash", b"-c", b"set -o"]);

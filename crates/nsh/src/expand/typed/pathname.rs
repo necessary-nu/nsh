@@ -10,7 +10,7 @@ use super::Field;
 use crate::context::Shell;
 use crate::pattern::Pattern;
 
-pub(super) fn expand(sh: &Shell, fields: Vec<Field>) -> Vec<Field> {
+pub(super) fn expand(shell: &Shell, fields: Vec<Field>) -> Vec<Field> {
     fields
         .into_iter()
         .flat_map(|field| {
@@ -18,11 +18,11 @@ pub(super) fn expand(sh: &Shell, fields: Vec<Field>) -> Vec<Field> {
             if !pattern.has_meta() {
                 return vec![field];
             }
-            let mut matches = matches(&sh.locale, &pattern);
+            let mut matches = matches(&shell.locale, &pattern);
             if matches.is_empty() {
                 return vec![field];
             }
-            matches.sort_by(|left, right| sh.locale.collate(left, right));
+            matches.sort_by(|left, right| shell.locale.collate(left, right));
             matches
                 .into_iter()
                 .map(|bytes| Field::from_bytes(&bytes, false, false, false))

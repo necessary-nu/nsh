@@ -5351,4 +5351,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.module-boundaries}
     )}
+    {id rename-c-shaped-symbols, covered_rules (
+        idiom.rust-naming
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.rust-naming}
+    )}
 )

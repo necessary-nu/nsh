@@ -12,7 +12,9 @@ use bstr::{BStr, ByteSlice};
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::var::{CallbackPolicy, VariableAttributes, lookupvarint_bytes, setvarint_bytes};
+use crate::variables::{
+    CallbackPolicy, VariableAttributes, lookup_integer_bytes, set_integer_bytes,
+};
 
 // [spec:dash:def:arith-yacc.yystype]
 /// The value carried by an arithmetic token.
@@ -25,12 +27,12 @@ enum Token<'a> {
     Bad,
     Number(i64),
     Variable(&'a BStr),
-    Assign(Option<BinOp>),
+    Assign(Option<BinaryOperator>),
     LogicalOr,
     LogicalAnd,
     Not,
     BitNot,
-    Binary(BinOp),
+    Binary(BinaryOperator),
     LParen,
     RParen,
     Question,
@@ -38,7 +40,7 @@ enum Token<'a> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum BinOp {
+enum BinaryOperator {
     LessEqual,
     GreaterEqual,
     Less,
@@ -57,7 +59,7 @@ enum BinOp {
     NotEqual,
 }
 
-impl BinOp {
+impl BinaryOperator {
     // [spec:dash:def:arith-yacc.arith-prec-fn]
     // [spec:dash:sem:arith-yacc.arith-prec-fn]
     const fn precedence(self) -> u8 {
@@ -144,58 +146,58 @@ impl<'a> Lexer<'a> {
         match byte {
             b'=' => {
                 if self.take_if(b'=') {
-                    Token::Binary(BinOp::Equal)
+                    Token::Binary(BinaryOperator::Equal)
                 } else {
                     Token::Assign(None)
                 }
             }
             b'>' => {
                 if self.take_if(b'=') {
-                    Token::Binary(BinOp::GreaterEqual)
+                    Token::Binary(BinaryOperator::GreaterEqual)
                 } else if self.take_if(b'>') {
                     if self.take_if(b'=') {
-                        Token::Assign(Some(BinOp::ShiftRight))
+                        Token::Assign(Some(BinaryOperator::ShiftRight))
                     } else {
-                        Token::Binary(BinOp::ShiftRight)
+                        Token::Binary(BinaryOperator::ShiftRight)
                     }
                 } else {
-                    Token::Binary(BinOp::Greater)
+                    Token::Binary(BinaryOperator::Greater)
                 }
             }
             b'<' => {
                 if self.take_if(b'=') {
-                    Token::Binary(BinOp::LessEqual)
+                    Token::Binary(BinaryOperator::LessEqual)
                 } else if self.take_if(b'<') {
                     if self.take_if(b'=') {
-                        Token::Assign(Some(BinOp::ShiftLeft))
+                        Token::Assign(Some(BinaryOperator::ShiftLeft))
                     } else {
-                        Token::Binary(BinOp::ShiftLeft)
+                        Token::Binary(BinaryOperator::ShiftLeft)
                     }
                 } else {
-                    Token::Binary(BinOp::Less)
+                    Token::Binary(BinaryOperator::Less)
                 }
             }
             b'|' => {
                 if self.take_if(b'|') {
                     Token::LogicalOr
                 } else if self.take_if(b'=') {
-                    Token::Assign(Some(BinOp::BitOr))
+                    Token::Assign(Some(BinaryOperator::BitOr))
                 } else {
-                    Token::Binary(BinOp::BitOr)
+                    Token::Binary(BinaryOperator::BitOr)
                 }
             }
             b'&' => {
                 if self.take_if(b'&') {
                     Token::LogicalAnd
                 } else if self.take_if(b'=') {
-                    Token::Assign(Some(BinOp::BitAnd))
+                    Token::Assign(Some(BinaryOperator::BitAnd))
                 } else {
-                    Token::Binary(BinOp::BitAnd)
+                    Token::Binary(BinaryOperator::BitAnd)
                 }
             }
             b'!' => {
                 if self.take_if(b'=') {
-                    Token::Binary(BinOp::NotEqual)
+                    Token::Binary(BinaryOperator::NotEqual)
                 } else {
                     Token::Not
                 }
@@ -205,17 +207,17 @@ impl<'a> Lexer<'a> {
             b'~' => Token::BitNot,
             b'?' => Token::Question,
             b':' => Token::Colon,
-            b'*' => self.binary_or_assign(BinOp::Multiply),
-            b'/' => self.binary_or_assign(BinOp::Divide),
-            b'%' => self.binary_or_assign(BinOp::Remainder),
-            b'+' => self.binary_or_assign(BinOp::Add),
-            b'-' => self.binary_or_assign(BinOp::Subtract),
-            b'^' => self.binary_or_assign(BinOp::BitXor),
+            b'*' => self.binary_or_assign(BinaryOperator::Multiply),
+            b'/' => self.binary_or_assign(BinaryOperator::Divide),
+            b'%' => self.binary_or_assign(BinaryOperator::Remainder),
+            b'+' => self.binary_or_assign(BinaryOperator::Add),
+            b'-' => self.binary_or_assign(BinaryOperator::Subtract),
+            b'^' => self.binary_or_assign(BinaryOperator::BitXor),
             _ => Token::Bad,
         }
     }
 
-    fn binary_or_assign(&mut self, op: BinOp) -> Token<'a> {
+    fn binary_or_assign(&mut self, op: BinaryOperator) -> Token<'a> {
         if self.take_if(b'=') {
             Token::Assign(Some(op))
         } else {
@@ -259,20 +261,20 @@ fn digit_value(byte: u8) -> Option<u32> {
     }
 }
 
-struct Parser<'a, 'sh> {
-    sh: &'sh mut Shell,
+struct Parser<'a, 'shell> {
+    shell: &'shell mut Shell,
     input: &'a BStr,
     tokens: Vec<Token<'a>>,
     pos: usize,
 }
 
-impl<'a, 'sh> Parser<'a, 'sh> {
+impl<'a, 'shell> Parser<'a, 'shell> {
     // The C header's `arith_lex_reset()` was an empty macro in this build.
     // Local lexer state makes reset synonymous with constructing a parser.
     // [spec:dash:def:expand.arith-lex-reset-fn]
     // [spec:dash:sem:expand.arith-lex-reset-fn]
-    fn new(sh: &'sh mut Shell, input: &'a BStr) -> Self {
-        let mut lexer = Lexer::new(input, sh.locale.clone());
+    fn new(shell: &'shell mut Shell, input: &'a BStr) -> Self {
+        let mut lexer = Lexer::new(input, shell.locale.clone());
         let mut tokens = Vec::new();
         loop {
             let token = lexer.next();
@@ -282,7 +284,7 @@ impl<'a, 'sh> Parser<'a, 'sh> {
             }
         }
         Self {
-            sh,
+            shell,
             input,
             tokens,
             pos: 0,
@@ -316,7 +318,7 @@ impl<'a, 'sh> Parser<'a, 'sh> {
         text.extend_from_slice(b": \"");
         text.extend_from_slice(self.input.as_ref());
         text.push(b'"');
-        self.sh.diagnostics().sh_error_value(&text)
+        self.shell.diagnostics().shell_error(&text)
     }
 
     // [spec:dash:def:arith-yacc.assignment-fn]
@@ -329,13 +331,13 @@ impl<'a, 'sh> Parser<'a, 'sh> {
                 return Ok(result);
             }
             let value = if let Some(op) = op {
-                let current = lookupvarint_bytes(self.sh, name)?;
+                let current = lookup_integer_bytes(self.shell, name)?;
                 self.apply(op, current, result)?
             } else {
                 result
             };
-            return setvarint_bytes(
-                self.sh,
+            return set_integer_bytes(
+                self.shell,
                 name,
                 value,
                 VariableAttributes::NONE,
@@ -430,7 +432,7 @@ impl<'a, 'sh> Parser<'a, 'sh> {
             Token::Number(value) => Ok(value),
             Token::Variable(name) => {
                 if evaluate {
-                    lookupvarint_bytes(self.sh, name)
+                    lookup_integer_bytes(self.shell, name)
                 } else {
                     Ok(0)
                 }
@@ -443,8 +445,8 @@ impl<'a, 'sh> Parser<'a, 'sh> {
                 self.advance();
                 Ok(value)
             }
-            Token::Binary(BinOp::Add) => self.primary(evaluate),
-            Token::Binary(BinOp::Subtract) => Ok(self.primary(evaluate)?.wrapping_neg()),
+            Token::Binary(BinaryOperator::Add) => self.primary(evaluate),
+            Token::Binary(BinaryOperator::Subtract) => Ok(self.primary(evaluate)?.wrapping_neg()),
             Token::Not => Ok((self.primary(evaluate)? == 0) as i64),
             Token::BitNot => Ok(!self.primary(evaluate)?),
             _ => Err(self.error(b"expecting primary")),
@@ -453,27 +455,27 @@ impl<'a, 'sh> Parser<'a, 'sh> {
 
     // [spec:dash:def:arith-yacc.do-binop-fn]
     // [spec:dash:sem:arith-yacc.do-binop-fn]
-    fn apply(&mut self, op: BinOp, left: i64, right: i64) -> Result<i64, Error> {
+    fn apply(&mut self, op: BinaryOperator, left: i64, right: i64) -> Result<i64, Error> {
         Ok(match op {
-            BinOp::Multiply => left.wrapping_mul(right),
-            BinOp::Add => left.wrapping_add(right),
-            BinOp::Subtract => left.wrapping_sub(right),
-            BinOp::ShiftLeft => left.wrapping_shl(right as u32),
-            BinOp::ShiftRight => left.wrapping_shr(right as u32),
-            BinOp::Less => (left < right) as i64,
-            BinOp::LessEqual => (left <= right) as i64,
-            BinOp::Greater => (left > right) as i64,
-            BinOp::GreaterEqual => (left >= right) as i64,
-            BinOp::Equal => (left == right) as i64,
-            BinOp::NotEqual => (left != right) as i64,
-            BinOp::BitAnd => left & right,
-            BinOp::BitXor => left ^ right,
-            BinOp::BitOr => left | right,
-            BinOp::Remainder | BinOp::Divide => {
+            BinaryOperator::Multiply => left.wrapping_mul(right),
+            BinaryOperator::Add => left.wrapping_add(right),
+            BinaryOperator::Subtract => left.wrapping_sub(right),
+            BinaryOperator::ShiftLeft => left.wrapping_shl(right as u32),
+            BinaryOperator::ShiftRight => left.wrapping_shr(right as u32),
+            BinaryOperator::Less => (left < right) as i64,
+            BinaryOperator::LessEqual => (left <= right) as i64,
+            BinaryOperator::Greater => (left > right) as i64,
+            BinaryOperator::GreaterEqual => (left >= right) as i64,
+            BinaryOperator::Equal => (left == right) as i64,
+            BinaryOperator::NotEqual => (left != right) as i64,
+            BinaryOperator::BitAnd => left & right,
+            BinaryOperator::BitXor => left ^ right,
+            BinaryOperator::BitOr => left | right,
+            BinaryOperator::Remainder | BinaryOperator::Divide => {
                 if right == 0 || (left == i64::MIN && right == -1) {
                     return Err(self.error(b"division error"));
                 }
-                if op == BinOp::Remainder {
+                if op == BinaryOperator::Remainder {
                     left % right
                 } else {
                     left / right
@@ -497,8 +499,8 @@ impl<'a, 'sh> Parser<'a, 'sh> {
 // [spec:posix:req:xcurel.arithmetic-variable-initialization]
 // [spec:posix:req:xcurel.arithmetic-operators]
 // [spec:posix:req:xcurel.arithmetic-expression-evaluation]
-pub fn arith(sh: &mut Shell, input: &BStr) -> Result<i64, Error> {
-    let mut parser = Parser::new(sh, input);
+pub fn evaluate(shell: &mut Shell, input: &BStr) -> Result<i64, Error> {
+    let mut parser = Parser::new(shell, input);
     let result = parser.assignment(true)?;
     if parser.current() != Token::End {
         return Err(parser.error(b"expecting EOF"));
@@ -517,57 +519,63 @@ mod tests {
 
     #[test]
     fn a_failed_evaluation_returns_its_diagnostic() {
-        let mut sh = shell();
-        let e = arith(&mut sh, BStr::new(b"1/0")).expect_err("1/0 must fail");
+        let mut shell = shell();
+        let error = evaluate(&mut shell, BStr::new(b"1/0")).expect_err("1/0 must fail");
         assert_eq!(
-            e.message().to_vec(),
+            error.message().to_vec(),
             b"arithmetic expression: division error: \"1/0\"".to_vec()
         );
-        assert_eq!(e.status().code(), 2);
+        assert_eq!(error.status().code(), 2);
     }
 
     #[test]
     fn a_trailing_token_returns_its_diagnostic() {
-        let mut sh = shell();
-        let e = arith(&mut sh, BStr::new(b"1 2")).expect_err("`1 2` must fail");
+        let mut shell = shell();
+        let error = evaluate(&mut shell, BStr::new(b"1 2")).expect_err("`1 2` must fail");
         assert_eq!(
-            e.message().to_vec(),
+            error.message().to_vec(),
             b"arithmetic expression: expecting EOF: \"1 2\"".to_vec()
         );
     }
 
     #[test]
     fn a_good_expression_still_evaluates() {
-        let mut sh = shell();
-        assert_eq!(arith(&mut sh, BStr::new(b"6*7")).unwrap(), 42);
+        let mut shell = shell();
+        assert_eq!(evaluate(&mut shell, BStr::new(b"6*7")).unwrap(), 42);
     }
 
     #[test]
     fn base_prefixes_and_overflow_match_intmax() {
-        let mut sh = shell();
-        assert_eq!(arith(&mut sh, BStr::new(b"0b11 + 010 + 0x10")).unwrap(), 27);
+        let mut shell = shell();
         assert_eq!(
-            arith(&mut sh, BStr::new(b"9223372036854775808")).unwrap(),
+            evaluate(&mut shell, BStr::new(b"0b11 + 010 + 0x10")).unwrap(),
+            27
+        );
+        assert_eq!(
+            evaluate(&mut shell, BStr::new(b"9223372036854775808")).unwrap(),
             i64::MAX
         );
     }
 
     #[test]
     fn short_circuit_skips_effects_but_parses_both_sides() {
-        let mut sh = shell();
-        assert_eq!(arith(&mut sh, BStr::new(b"0 && 1 / 0")).unwrap(), 0);
-        assert_eq!(arith(&mut sh, BStr::new(b"1 || 1 / 0")).unwrap(), 1);
-        assert_eq!(arith(&mut sh, BStr::new(b"1 ? 7 : 1 / 0")).unwrap(), 7);
+        let mut shell = shell();
+        assert_eq!(evaluate(&mut shell, BStr::new(b"0 && 1 / 0")).unwrap(), 0);
+        assert_eq!(evaluate(&mut shell, BStr::new(b"1 || 1 / 0")).unwrap(), 1);
+        assert_eq!(
+            evaluate(&mut shell, BStr::new(b"1 ? 7 : 1 / 0")).unwrap(),
+            7
+        );
     }
 
     // [spec:nsh:def:idiom.shell-options]
     // [spec:posix:req:builtin.set.opt-u-nounset/test]
     #[test]
     fn nounset_rejects_evaluated_arithmetic_reads() {
-        let mut sh = shell();
-        sh.options.set(ShellOption::Nounset, true);
+        let mut shell = shell();
+        shell.options.set(ShellOption::Nounset, true);
 
-        let error = arith(&mut sh, BStr::new(b"undefined_name + 1"))
+        let error = evaluate(&mut shell, BStr::new(b"undefined_name + 1"))
             .expect_err("an evaluated unset variable must fail under nounset");
         assert_eq!(
             error.message().to_vec(),
@@ -575,7 +583,13 @@ mod tests {
         );
         assert_eq!(error.status().code(), 2);
 
-        assert_eq!(arith(&mut sh, BStr::new(b"assigned_name = 7")).unwrap(), 7);
-        assert_eq!(arith(&mut sh, BStr::new(b"0 && skipped_name")).unwrap(), 0);
+        assert_eq!(
+            evaluate(&mut shell, BStr::new(b"assigned_name = 7")).unwrap(),
+            7
+        );
+        assert_eq!(
+            evaluate(&mut shell, BStr::new(b"0 && skipped_name")).unwrap(),
+            0
+        );
     }
 }

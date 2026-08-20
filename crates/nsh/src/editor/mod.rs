@@ -102,8 +102,8 @@ pub use history::{History, HistoryEvent};
 
 mod state;
 pub(crate) use state::{
-    HistEditState, editing_active, histedit, history_active, history_mut, read_edit_line,
-    record_history_line, save_history, sethistsize,
+    EditorState, editing_active, history_active, history_mut, read_edit_line, record_history_line,
+    refresh_editor_configuration, save_history, set_history_size,
 };
 
 /// A native editor/session integration error.
@@ -196,18 +196,28 @@ impl LineEditor {
         mode: EditingMode,
     ) -> Result<Self, LineEditorError> {
         // [spec:nsh:def:idiom.logical-descriptors]
-        let input =
-            nsh_platform::duplicate_cloexec(input_fd, crate::fd::LogicalDescriptor::COUNT as i32)?
-                .into_file();
-        let output =
-            nsh_platform::duplicate_cloexec(output_fd, crate::fd::LogicalDescriptor::COUNT as i32)?
-                .into_file();
+        let input = nsh_platform::duplicate_cloexec(
+            input_fd,
+            crate::descriptors::LogicalDescriptor::COUNT as i32,
+        )?
+        .into_file();
+        let output = nsh_platform::duplicate_cloexec(
+            output_fd,
+            crate::descriptors::LogicalDescriptor::COUNT as i32,
+        )?
+        .into_file();
         let terminal_snapshots = Arc::new(Mutex::new(TerminalSnapshots::default()));
         let terminal = OwnedTerminal::new(
-            nsh_platform::duplicate_cloexec(&input, crate::fd::LogicalDescriptor::COUNT as i32)?
-                .into_file(),
-            nsh_platform::duplicate_cloexec(&output, crate::fd::LogicalDescriptor::COUNT as i32)?
-                .into_file(),
+            nsh_platform::duplicate_cloexec(
+                &input,
+                crate::descriptors::LogicalDescriptor::COUNT as i32,
+            )?
+            .into_file(),
+            nsh_platform::duplicate_cloexec(
+                &output,
+                crate::descriptors::LogicalDescriptor::COUNT as i32,
+            )?
+            .into_file(),
             locale.clone(),
             terminal_snapshots.clone(),
         );
@@ -285,7 +295,7 @@ impl LineEditor {
     ///
     pub fn read_into(
         &mut self,
-        sh: &mut crate::context::Shell,
+        shell: &mut crate::context::Shell,
         history: &mut History,
         destination: &mut [u8],
     ) -> Result<usize, LineEditorError> {
@@ -302,7 +312,7 @@ impl LineEditor {
              * unpinned `panic = "unwind"`, under which a panic does not
              * unwind and the guard could never have run. Dead code that
              * looks live is worse than none. */
-            let line = self.drive_line(sh, history)?;
+            let line = self.drive_line(shell, history)?;
             let Some(mut line) = line else {
                 return Ok(0);
             };
@@ -318,7 +328,7 @@ impl LineEditor {
 
     fn drive_line(
         &mut self,
-        sh: &mut crate::context::Shell,
+        shell: &mut crate::context::Shell,
         history: &mut History,
     ) -> Result<Option<Vec<u8>>, LineEditorError> {
         self.refresh_terminal_configuration()?;
@@ -334,7 +344,7 @@ impl LineEditor {
             step = match step {
                 ReadStep::Prompt(pending) => {
                     let prompt = match pending.request().side {
-                        PromptSide::Left => shell_prompt(sh),
+                        PromptSide::Left => shell_prompt(shell),
                         PromptSide::Right => Prompt::default(),
                     };
                     let (editor, driver) = self.editor_and_driver();
@@ -348,7 +358,7 @@ impl LineEditor {
                 }
                 ReadStep::Read(pending) => {
                     let was_vi_insert = self.editor_mut().keymap_mode() == KeymapMode::ViInsert;
-                    let response = self.read_effect(&sh.locale, *pending.request());
+                    let response = self.read_effect(&shell.locale, *pending.request());
                     let next = {
                         let (editor, driver) = self.editor_and_driver();
                         driver.resume_read(editor, &pending, response)?
@@ -406,7 +416,7 @@ impl LineEditor {
                                 Direction::Previous => Text::from("\n/"),
                                 Direction::Next => Text::from("\n?"),
                             };
-                            self.read_host_text(&sh.locale, &prompt, true)
+                            self.read_host_text(&shell.locale, &prompt, true)
                                 .and_then(|pattern| {
                                     if pattern.is_empty() {
                                         self.last_history_pattern
@@ -423,14 +433,14 @@ impl LineEditor {
                                 Direction::Previous => Text::from("\nbck: "),
                                 Direction::Next => Text::from("\nfwd: "),
                             };
-                            self.read_host_text(&sh.locale, &prompt, true)
+                            self.read_host_text(&shell.locale, &prompt, true)
                         }
                     };
                     let mut copied_history_line = false;
                     let response = match pattern {
                         Ok(pattern) => {
                             let mut selection = history.search_editor(
-                                &sh.locale,
+                                &shell.locale,
                                 &mut self.history_cursor,
                                 &pattern,
                                 direction,
@@ -485,7 +495,7 @@ impl LineEditor {
                 }
                 ReadStep::Alias(pending) => {
                     let enter_insert = self.editor_mut().keymap_mode() == KeymapMode::ViCommand;
-                    let response = shell_alias(sh, &pending.request().name, enter_insert);
+                    let response = shell_alias(shell, &pending.request().name, enter_insert);
                     let (editor, driver) = self.editor_and_driver();
                     driver.resume_alias(editor, &pending, response)?
                 }
@@ -494,7 +504,7 @@ impl LineEditor {
                     driver.resume_editor_command(editor, &pending, Err(HostFailure::Unavailable))?
                 }
                 ReadStep::ExternalEdit(pending) => {
-                    let response = self.external_edit(sh, &pending.request().line);
+                    let response = self.external_edit(shell, &pending.request().line);
                     let (editor, driver) = self.editor_and_driver();
                     driver.resume_external_edit(editor, &pending, response)?
                 }
@@ -638,33 +648,33 @@ impl LineEditor {
 
     fn external_edit(
         &mut self,
-        sh: &mut crate::context::Shell,
+        shell: &mut crate::context::Shell,
         line: &Text,
     ) -> Result<Text, HostFailure> {
         let (mut file, path) =
             nsh_platform::create_temporary_file("nsh-edit").map_err(|error| {
-                HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
+                HostFailure::Failed(shell.locale.error_message(&error).into_boxed_str())
             })?;
         let result = (|| {
             file.write_all(&text_to_bytes(line).map_err(host_failure)?)
                 .and_then(|()| file.write_all(b"\n"))
                 .and_then(|()| file.flush())
                 .map_err(|error| {
-                    HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
+                    HostFailure::Failed(shell.locale.error_message(&error).into_boxed_str())
                 })?;
-            let editor = shell_editor(sh);
+            let editor = shell_editor(shell);
             let editor = editor.try_to_os_string().map_err(|error| {
-                HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
+                HostFailure::Failed(shell.locale.error_message(&error).into_boxed_str())
             })?;
             nsh_platform::run_editor(&editor, &path).map_err(|error| {
-                HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
+                HostFailure::Failed(shell.locale.error_message(&error).into_boxed_str())
             })?;
             file.rewind().map_err(|error| {
-                HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
+                HostFailure::Failed(shell.locale.error_message(&error).into_boxed_str())
             })?;
             let mut edited = Vec::new();
             file.read_to_end(&mut edited).map_err(|error| {
-                HostFailure::Failed(sh.locale.error_message(&error).into_boxed_str())
+                HostFailure::Failed(shell.locale.error_message(&error).into_boxed_str())
             })?;
             if edited.last() == Some(&b'\n') {
                 edited.pop();
@@ -1162,7 +1172,7 @@ fn refresh_shell_bindings<T: TerminalControl>(
 
 // [spec:posix:req:edit.command-alias-insert]
 fn shell_alias(
-    sh: &mut crate::context::Shell,
+    shell: &mut crate::context::Shell,
     name: &Text,
     enter_insert: bool,
 ) -> Result<AliasResponse, HostFailure> {
@@ -1172,7 +1182,7 @@ fn shell_alias(
             "an editor alias name contains NUL".into(),
         ));
     }
-    let Some(expansion) = sh.aliases.lookup(BStr::new(&name), false) else {
+    let Some(expansion) = shell.aliases.lookup(BStr::new(&name), false) else {
         return Ok(AliasResponse::Missing);
     };
     let mut macro_text = Text::default();
@@ -1271,13 +1281,13 @@ fn next_vi_original_line(
     }
 }
 
-fn shell_prompt(sh: &mut crate::context::Shell) -> Prompt {
+fn shell_prompt(shell: &mut crate::context::Shell) -> Prompt {
     /* The null check this had is gone with the pointer, and it was
      * already dead: `getprompt`'s three arms are two variable texts and
      * `nullstr`, and none of them can be null. The empty prompt now
      * arrives as an empty value and builds an empty `Prompt`, which is
      * what the unreachable early return produced. */
-    let prompt = crate::parser::getprompt(sh);
+    let prompt = crate::parser::render_prompt(shell);
     prompt_from_text(&text_from_bytes(&prompt), 0x01)
 }
 
@@ -1401,9 +1411,9 @@ fn all_completion_insertions(candidates: &nshedit::editor::CompletionCandidates)
     expansion
 }
 
-fn shell_editor(sh: &mut crate::context::Shell) -> Vec<u8> {
+fn shell_editor(shell: &mut crate::context::Shell) -> Vec<u8> {
     for name in [b"EDITOR".as_slice(), b"VISUAL".as_slice()] {
-        if let Some(value) = crate::var::lookup_bytes(sh, BStr::new(name)) {
+        if let Some(value) = crate::variables::lookup_bytes(shell, BStr::new(name)) {
             if !value.is_empty() {
                 return value.into();
             }

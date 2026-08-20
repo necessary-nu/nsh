@@ -14,34 +14,35 @@ use super::ParseResult;
 
 // [spec:nsh:req:idiom.immutable-ast]
 pub(super) fn parse_result(
-    sh: &mut Shell,
+    shell: &mut Shell,
     result: &mut ParseResult,
     bodies: Vec<WordNode>,
 ) -> Result<(), Error> {
     let mut bodies = VecDeque::from(bodies);
     if let ParseResult::Tree(Some(node)) = result {
         here_documents(node, &mut bodies).map_err(|()| {
-            sh.diagnostics()
-                .sh_error_value(b"parsed here-document redirection has no body")
+            shell
+                .diagnostics()
+                .shell_error(b"parsed here-document redirection has no body")
         })?;
     }
     if bodies.is_empty() {
         Ok(())
     } else {
-        Err(sh
+        Err(shell
             .diagnostics()
-            .sh_error_value(b"parsed here-document body has no redirection"))
+            .shell_error(b"parsed here-document body has no redirection"))
     }
 }
 
 pub(super) fn node(
-    sh: &mut Shell,
+    shell: &mut Shell,
     node: &mut Option<Node>,
     completed_at: usize,
 ) -> Result<(), Error> {
-    let bodies = sh.input.completed_heredocs.split_off(completed_at);
+    let bodies = shell.input.completed_here_documents.split_off(completed_at);
     let mut result = ParseResult::Tree(node.take());
-    parse_result(sh, &mut result, bodies)?;
+    parse_result(shell, &mut result, bodies)?;
     *node = result.into_node();
     Ok(())
 }

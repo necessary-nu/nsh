@@ -12,9 +12,9 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 
-use crate::eval::Flow;
-use crate::options::{options, optschanged, setparam};
-use crate::var::{VariableSelection, show_vars};
+use crate::evaluation::Flow;
+use crate::options::{apply_option_changes, options, set_positional_parameters};
+use crate::variables::{VariableSelection, show_vars};
 
 // [spec:dash:def:options.setcmd-fn]
 // [spec:dash:sem:options.setcmd-fn]
@@ -26,16 +26,16 @@ use crate::var::{VariableSelection, show_vars};
 // [spec:posix:req:builtin.set.utility-defaults]
 // [spec:posix:req:builtin.set.stderr-diagnostics-only]
 // [spec:posix:req:builtin.set.exit-status]
-pub fn setcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if args.len() == 1 {
-        show_vars(sh, BStr::new(b""), VariableSelection::Set)?;
+        show_vars(shell, BStr::new(b""), VariableSelection::Set)?;
         return Ok(Flow::Done((0).into()));
     }
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        let scan = options(sh, args, 1)?;
-        optschanged(sh)?;
+    crate::error::with_interrupts_deferred(shell, |shell| {
+        let scan = options(shell, args, 1)?;
+        apply_option_changes(shell)?;
         if scan.next < args.len() {
-            setparam(sh, &args[scan.next..]);
+            set_positional_parameters(shell, &args[scan.next..]);
         }
         Ok::<(), Error>(())
     })?;

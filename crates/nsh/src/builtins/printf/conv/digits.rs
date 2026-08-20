@@ -53,10 +53,10 @@ impl Number {
         }
     }
 
-    pub(super) fn write_to(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.head);
-        out.resize(out.len() + self.zeros, b'0');
-        out.extend_from_slice(&self.tail);
+    pub(super) fn write_to(&self, output: &mut Vec<u8>) {
+        output.extend_from_slice(&self.head);
+        output.resize(output.len() + self.zeros, b'0');
+        output.extend_from_slice(&self.tail);
     }
 }
 
@@ -111,9 +111,9 @@ mod tests {
     use super::*;
 
     fn written(number: &Number) -> Vec<u8> {
-        let mut out = Vec::new();
-        number.write_to(&mut out);
-        out
+        let mut output = Vec::new();
+        number.write_to(&mut output);
+        output
     }
 
     /// The counted run is written where it sits, and the length agrees

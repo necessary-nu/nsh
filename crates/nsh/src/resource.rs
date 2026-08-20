@@ -8,7 +8,7 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::redir::ExpandedRedirection;
+use crate::redirection::ExpandedRedirection;
 
 /// Snapshot of the temporary stacks that one shell operation may extend.
 // [spec:nsh:req:idiom.resource-scopes]
@@ -27,7 +27,7 @@ impl ResourceScope {
             input_mark: shell.input.mark(),
             input_floor: shell.input.floor(),
             redirection_mark: None,
-            local_mark: crate::var::pushlocalvars(shell, false),
+            local_mark: crate::variables::push_local_scope(shell, false),
             redirection_frame: false,
             active: true,
         }
@@ -35,7 +35,7 @@ impl ResourceScope {
 
     /// Start a command-local variable frame when the command requires one.
     pub(crate) fn begin_local_variables(&mut self, shell: &mut Shell, enabled: bool) {
-        let mark = crate::var::pushlocalvars(shell, enabled);
+        let mark = crate::variables::push_local_scope(shell, enabled);
         debug_assert_eq!(
             mark, self.local_mark,
             "a resource scope owns its local frame"
@@ -52,10 +52,14 @@ impl ResourceScope {
             self.redirection_mark.is_none(),
             "one scope applies redirections once"
         );
-        let mark = crate::redir::pushredir(shell, redirections);
+        let mark = crate::redirection::push_redirections(shell, redirections);
         self.redirection_mark = Some(mark);
         self.redirection_frame = !redirections.is_empty();
-        crate::redir::redirectsafe(shell, redirections, crate::redir::RedirectionMode::Push)
+        crate::redirection::redirect_safely(
+            shell,
+            redirections,
+            crate::redirection::RedirectionMode::Push,
+        )
     }
 
     /// Consume saved descriptor state while retaining the active mappings.
@@ -64,7 +68,7 @@ impl ResourceScope {
     /// shell's current descriptors instead of being restored on scope exit.
     pub(crate) fn retain_redirections(&mut self, shell: &mut Shell) {
         if self.redirection_frame {
-            crate::redir::popredir(shell, true);
+            crate::redirection::pop_redirection(shell, true);
             self.redirection_frame = false;
         }
     }
@@ -78,11 +82,11 @@ impl ResourceScope {
             return;
         }
         if let Some(mark) = self.redirection_mark.take() {
-            crate::redir::unwindredir(shell, mark);
+            crate::redirection::unwind_redirections(shell, mark);
         }
-        crate::input::unwindfiles(shell, self.input_mark);
+        crate::input::unwind_input_frames(shell, self.input_mark);
         shell.input.set_floor(self.input_floor);
-        crate::var::unwindlocalvars(shell, self.local_mark);
+        crate::variables::unwind_local_scopes(shell, self.local_mark);
         self.redirection_frame = false;
         self.active = false;
     }
@@ -104,14 +108,14 @@ mod tests {
     use bstr::BStr;
 
     use super::*;
-    use crate::fd::LogicalDescriptor;
-    use crate::var::VariableAttributes;
+    use crate::descriptors::LogicalDescriptor;
+    use crate::variables::VariableAttributes;
 
     // [spec:nsh:req:idiom.resource-scopes/test]
     #[test]
     fn an_error_restores_every_temporary_resource() {
         let mut shell = Shell::builder().build().unwrap();
-        crate::var::set_bytes(
+        crate::variables::set_bytes(
             &mut shell,
             BStr::new(b"scope_value"),
             Some(BStr::new(b"outer")),
@@ -119,12 +123,12 @@ mod tests {
         )
         .unwrap();
         let input_mark = shell.input.mark();
-        let local_mark = crate::var::pushlocalvars(&mut shell, false);
+        let local_mark = crate::variables::push_local_scope(&mut shell, false);
 
         let outcome: Result<(), Error> = with_resources(&mut shell, |shell, resources| {
-            crate::input::setinputstring(shell, BStr::new(b"temporary input"));
+            crate::input::set_input_string(shell, BStr::new(b"temporary input"));
             resources.begin_local_variables(shell, true);
-            crate::var::make_local_bytes(
+            crate::variables::make_local_bytes(
                 shell,
                 BStr::new(b"scope_value=inner"),
                 VariableAttributes::NONE,
@@ -134,16 +138,19 @@ mod tests {
                 source: None,
             }];
             resources.apply_redirections(shell, &redirections)?;
-            assert!(!shell.fds.is_open(LogicalDescriptor::STDOUT));
+            assert!(!shell.descriptors.is_open(LogicalDescriptor::STDOUT));
             Err(Error::reported(0, 1))
         });
 
         assert!(outcome.is_err());
         assert_eq!(shell.input.mark(), input_mark);
-        assert_eq!(crate::var::pushlocalvars(&mut shell, false), local_mark);
-        assert!(shell.fds.is_open(LogicalDescriptor::STDOUT));
         assert_eq!(
-            crate::var::lookup_bytes(&mut shell, BStr::new(b"scope_value"))
+            crate::variables::push_local_scope(&mut shell, false),
+            local_mark
+        );
+        assert!(shell.descriptors.is_open(LogicalDescriptor::STDOUT));
+        assert_eq!(
+            crate::variables::lookup_bytes(&mut shell, BStr::new(b"scope_value"))
                 .as_ref()
                 .map(|value| value.as_slice()),
             Some(b"outer".as_slice()),

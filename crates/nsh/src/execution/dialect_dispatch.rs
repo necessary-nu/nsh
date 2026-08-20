@@ -1,9 +1,9 @@
 //! Dialect-sensitive built-in cache invalidation.
 
-use super::{CmdTable, Command};
+use super::{CommandTable, Command};
 use crate::options::Dialect;
 
-impl CmdTable {
+impl CommandTable {
     /// Defend every lookup against stale classification even if a future
     /// option-changing path forgets the proactive notification.
     pub(super) fn ensure_dispatch(&mut self, dialect: Dialect) {
@@ -24,9 +24,9 @@ impl CmdTable {
 /// set. Today the dialect is the only dispatch-affecting setting; clearing on
 /// every completed option update keeps that contract correct as more Bash
 /// options acquire dispatch effects.
-pub(crate) fn dispatch_changed(sh: &mut crate::context::Shell) {
-    let dialect = sh.options.dialect();
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        sh.commands.invalidate_dispatch(dialect);
+pub(crate) fn dispatch_changed(shell: &mut crate::context::Shell) {
+    let dialect = shell.options.dialect();
+    crate::error::with_interrupts_deferred(shell, |shell| {
+        shell.commands.invalidate_dispatch(dialect);
     });
 }

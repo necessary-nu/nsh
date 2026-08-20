@@ -4,7 +4,7 @@
 use bstr::BStr;
 use nsh_platform::ShellBytesExt as _;
 
-use crate::var::{mailval, mpathset, mpathval};
+use crate::variables::{mail_path_is_set, mail_path_value, mail_value};
 
 /// What `$MAILPATH` checking remembers between prompts.
 ///
@@ -75,23 +75,23 @@ impl MailState {
 
 // [spec:dash:def:mail.chkmail-fn]
 // [spec:dash:sem:mail.chkmail-fn]
-pub fn chkmail(sh: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
-    let mail_path = if mpathset(sh) {
-        mpathval(sh)
+pub fn check_mail(shell: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
+    let mail_path = if mail_path_is_set(shell) {
+        mail_path_value(shell)
     } else {
-        mailval(sh)
+        mail_value(shell)
     }
     .to_owned();
-    let notices = sh.mail.check(BStr::new(mail_path.as_slice()));
+    let notices = shell.mail.check(BStr::new(mail_path.as_slice()));
     for notice in notices {
-        sh.write_output(crate::output::Dest::Stderr, &notice)?;
+        shell.write_output(crate::output::OutputDestination::Stderr, &notice)?;
     }
     Ok(())
 }
 
 // [spec:dash:def:mail.changemail-fn]
 // [spec:dash:sem:mail.changemail-fn]
-pub fn changemail(mail: &mut MailState, _value: &BStr) {
+pub fn reset_mail_state(mail: &mut MailState, _value: &BStr) {
     mail.changed = true;
 }
 

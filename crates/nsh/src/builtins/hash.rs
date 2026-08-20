@@ -1,7 +1,7 @@
 //! `hash`.
 //!
 //! Port of `hashcmd` and `printentry` from `src/exec.c`. The command
-//! table it prints and clears stays in `crate::exec`, which is what fills
+//! table it prints and clears stays in `crate::execution`, which is what fills
 //! it during a PATH search.
 
 // [spec:nsh:req:idiom.evaluator-control-flow]
@@ -9,11 +9,11 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, ByteSlice};
 
-use crate::eval::Flow;
-use crate::exec::{
-    Command, CommandSearch, PathCursor, clearcmdentry, delete_cmd_entry, find_command, padvance,
+use crate::evaluation::Flow;
+use crate::execution::{
+    Command, CommandSearch, PathCursor, clear_command_cache, find_command, remove_command_entry,
 };
-use crate::output::Dest;
+use crate::output::OutputDestination;
 
 // [spec:dash:def:exec.hashcmd-fn]
 // [spec:dash:sem:exec.hashcmd-fn]
@@ -33,21 +33,21 @@ use crate::output::Dest;
 // [spec:posix:req:builtin.hash.interfaces]
 // [spec:posix:req:builtin.hash.exit-status]
 // [spec:nsh:req:idiom.command-dispatch]
-pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut entry = Command::Unknown;
     let mut clear: bool;
 
     clear = false;
-    let mut opts = crate::options::Options::new(args);
-    while opts.next(&mut sh.diagnostics(), b"r")?.is_some() {
+    let mut option_scan = crate::options::Options::new(args);
+    while option_scan.next(&mut shell.diagnostics(), b"r")?.is_some() {
         clear = true;
     }
     if clear {
-        clearcmdentry(&mut sh.interrupt_deferral, &mut sh.commands);
+        clear_command_cache(&mut shell.interrupt_deferral, &mut shell.commands);
         return Ok(Flow::Done((0).into()));
     }
 
-    let operands = opts.operands();
+    let operands = option_scan.operands();
     if operands.is_empty() {
         /* `PATH` is read before the walk rather than inside
          * `printentry`: the walk holds `sh.commands` borrowed, and
@@ -57,50 +57,50 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
          * built-in location, with a pointer in place of a flag -- and the
          * value is the same one `printentry` read for itself, since
          * nothing in the loop assigns to `PATH`. */
-        let path = crate::var::pathval(sh);
-        let lines: Vec<Vec<u8>> = sh
+        let path = crate::variables::path_value(shell);
+        let lines: Vec<Vec<u8>> = shell
             .commands
             .iter()
-            .filter_map(|(name, cmdp)| {
-                let Command::External { path_index } = &cmdp.command else {
+            .filter_map(|(name, command_entry)| {
+                let Command::External { path_index } = &command_entry.command else {
                     return None;
                 };
                 let Some(path_index) = *path_index else {
                     return None;
                 };
-                Some(printentry(
+                Some(format_hash_entry(
                     name.as_slice().as_bstr(),
                     path_index,
-                    cmdp.rehash,
+                    command_entry.rehash,
                     path.as_slice().as_bstr(),
                 ))
             })
             .collect();
         for line in lines {
-            sh.write_output(Dest::Stdout, &line)?;
+            shell.write_output(OutputDestination::Stdout, &line)?;
         }
         return Ok(Flow::Done((0).into()));
     }
     let mut failed = false;
     for name in operands {
-        if sh
+        if shell
             .commands
             .get(name)
-            .is_some_and(|cmdp| sh.commands.path_dependent(cmdp))
+            .is_some_and(|command_entry| shell.commands.path_dependent(command_entry))
         {
-            delete_cmd_entry(&mut sh.interrupt_deferral, &mut sh.commands, name);
+            remove_command_entry(&mut shell.interrupt_deferral, &mut shell.commands, name);
         }
         /* Hoisted out of the argument list; see the note in `eval.rs`'s
          * `evalcommand`. */
-        let path = crate::var::pathval(sh);
+        let path = crate::variables::path_value(shell);
         match find_command(
-            sh,
+            shell,
             name,
             &mut entry,
             CommandSearch::DEFAULT.reporting_errors(),
             path.as_bstr(),
         )? {
-            crate::eval::Flow::Done(_) => {}
+            crate::evaluation::Flow::Done(_) => {}
             control => return Ok(control),
         }
         if matches!(&entry, Command::Unknown) {
@@ -118,19 +118,19 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 /// that walks the command table holds it borrowed across this call, so the
 /// read has to happen before the walk starts. Passing it in is what makes
 /// that visible rather than a surprise.
-fn printentry(name: &BStr, path_index: usize, rehash: bool, pathval: &BStr) -> Vec<u8> {
-    let mut path = PathCursor::new(pathval);
+fn format_hash_entry(name: &BStr, path_index: usize, rehash: bool, path_value: &BStr) -> Vec<u8> {
+    let mut path = PathCursor::new(path_value);
     let candidate = (0..=path_index)
-        .map(|_| padvance(&mut path, name))
+        .map(|_| path.advance(name))
         .last()
         .flatten();
-    let fullname = candidate
+    let full_path = candidate
         .expect("a cached PATH index must still name a PATH element")
         .path;
     /* Rendered rather than written, for the reason the note above gives
      * about `pathval`: the walk holds `sh.commands` borrowed, and a write
      * wants `sh.io` at the same time. */
-    let mut line = fullname.to_vec();
+    let mut line = full_path.to_vec();
     line.extend_from_slice(if rehash { b"*\n" } else { b"\n" });
     line
 }

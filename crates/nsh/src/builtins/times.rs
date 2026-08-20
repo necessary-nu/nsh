@@ -11,8 +11,8 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::eval::Flow;
-use crate::output::Dest;
+use crate::evaluation::Flow;
+use crate::output::OutputDestination;
 use bstr::BStr;
 
 // [spec:dash:def:times.timescmd-fn]
@@ -23,7 +23,7 @@ use bstr::BStr;
 // [spec:posix:req:builtin.times.stderr]
 // [spec:posix:req:builtin.times.exit-status]
 // [spec:posix:sem:builtin.times.utility-defaults]
-pub fn timescmd(sh: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> {
     let times = nsh_platform::process_times();
     let mutime: i32;
     let mstime: i32;
@@ -46,8 +46,8 @@ pub fn timescmd(sh: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> {
     mcstime = (cstime / 60.0) as i32;
     cstime -= mcstime as f64 * 60.0;
 
-    sh.write_output_fmt(
-        Dest::Stdout,
+    shell.write_output_fmt(
+        OutputDestination::Stdout,
         format_args!(
             "{mutime}m{utime:.6}s {mstime}m{stime:.6}s\n\
              {mcutime}m{cutime:.6}s {mcstime}m{cstime:.6}s\n"

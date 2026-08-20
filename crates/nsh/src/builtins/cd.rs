@@ -2,7 +2,7 @@
 //!
 //! Port of `cdcmd` and its helpers from `src/cd.c`.
 //!
-//! What stays in `crate::cd` is the shell's idea of where it is --
+//! What stays in `crate::working_directory` is the shell's idea of where it is --
 //! `curdir`, `physdir` and the `setpwd` that maintains them. This module
 //! is the command that moves it: the CDPATH search, the `-L`/`-P` option
 //! scan, and the logical-path bookkeeping that `cd ..` needs and `chdir`
@@ -14,10 +14,10 @@ use bstr::{BStr, BString, ByteSlice};
 use nsh_platform::NativeStrExt as _;
 use nsh_platform::ShellBytesExt as _;
 
-use crate::cd::{Pwd, setpwd_inner};
-use crate::eval::Flow;
+use crate::evaluation::Flow;
 use crate::options::Options;
-use crate::output::Dest;
+use crate::output::OutputDestination;
+use crate::working_directory::{DirectoryUpdate, update_current_directory};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct CdOptions {
@@ -41,13 +41,13 @@ enum CdResult {
 // [spec:posix:req:builtin.cd.opt-p]
 // [spec:posix:req:builtin.cd.opt-l-p-last-wins]
 // [spec:posix:req:builtin.cd.opt-e]
-pub(crate) fn cdopt(
-    sh: &mut crate::context::Shell,
-    opts: &mut Options,
+pub(crate) fn parse_cd_options(
+    shell: &mut crate::context::Shell,
+    option_scan: &mut Options,
 ) -> Result<CdOptions, Error> {
     let mut options = CdOptions::default();
 
-    while let Some(option) = opts.next(&mut sh.diagnostics(), b"LPe")? {
+    while let Some(option) = option_scan.next(&mut shell.diagnostics(), b"LPe")? {
         match option {
             b'e' => options.error_if_unknown = true,
             b'P' => options.physical = true,
@@ -83,28 +83,28 @@ pub(crate) fn cdopt(
 // [spec:posix:req:builtin.cd.interfaces]
 // [spec:posix:req:builtin.cd.exit-status]
 // [spec:posix:req:builtin.cd.consequences-of-errors]
-pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut opts = Options::new(args);
-    let mut options = cdopt(sh, &mut opts)?;
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+    let mut option_scan = Options::new(args);
+    let mut options = parse_cd_options(shell, &mut option_scan)?;
     /* The operand outlives every reader below, which is what the C got
      * from `argv` living in `evalcommand`'s frame. */
-    let operand = opts.operands().first().copied();
+    let operand = option_scan.operands().first().copied();
     // [spec:posix:req:builtin.cd.operand-empty-string]
     if operand.is_some_and(|directory| directory.is_empty()) {
-        return Err(sh
+        return Err(shell
             .diagnostics()
-            .sh_error_value(b"can't cd to an empty directory"));
+            .shell_error(b"can't cd to an empty directory"));
     }
     let dest_value = match operand {
-        None => crate::var::lookup_bytes(sh, BStr::new(b"HOME")).unwrap_or_default(),
+        None => crate::variables::lookup_bytes(shell, BStr::new(b"HOME")).unwrap_or_default(),
         Some(d) if d == b"-" => {
             options.print = true;
-            crate::var::lookup_bytes(sh, BStr::new(b"OLDPWD")).unwrap_or_default()
+            crate::variables::lookup_bytes(shell, BStr::new(b"OLDPWD")).unwrap_or_default()
         }
         Some(d) => d.to_owned(),
     };
     let mut dest = dest_value.as_slice().as_bstr();
-    let mut pwd_unknown = false;
+    let mut working_directory_unknown = false;
 
     let step6 = nsh_platform::shell_path_is_absolute(dest)
         || dest == b"."
@@ -112,22 +112,23 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         || dest == b".."
         || dest.starts_with(b"../");
 
-    let mut out = false;
+    let mut changed_via_search_path = false;
     if !step6 {
         if dest.is_empty() {
             dest = BStr::new(b".");
         }
-        let path_value = crate::var::lookup_bytes(sh, BStr::new(b"CDPATH")).unwrap_or_default();
+        let path_value =
+            crate::variables::lookup_bytes(shell, BStr::new(b"CDPATH")).unwrap_or_default();
         let mut components =
             path_value.split(|byte| *byte == nsh_platform::search_path_separator());
-        let mut path = crate::exec::PathCursor::literal(path_value.as_slice().as_bstr());
-        while let Some(candidate) = crate::exec::padvance(&mut path, dest) {
+        let mut path = crate::execution::PathCursor::literal(path_value.as_slice().as_bstr());
+        while let Some(candidate) = path.advance(dest) {
             let component = components
                 .next()
                 .expect("PATH cursor and components advance together");
-            let fullname = candidate.path.as_bstr();
+            let full_path = candidate.path.as_bstr();
 
-            if fullname
+            if full_path
                 .try_to_path_buf()
                 .is_ok_and(|path| nsh_platform::path_is_directory(&path))
             {
@@ -135,14 +136,14 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     options.print = true;
                 }
                 /* docd: */
-                match docd(sh, fullname, options)? {
+                match change_directory(shell, full_path, options)? {
                     CdResult::Changed => {
-                        out = true; /* goto out */
+                        changed_via_search_path = true;
                         break;
                     }
                     CdResult::ChangedPwdUnknown => {
-                        out = true;
-                        pwd_unknown = true;
+                        changed_via_search_path = true;
+                        working_directory_unknown = true;
                         break;
                     }
                     CdResult::Failed => {}
@@ -150,33 +151,34 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 /* goto err */
                 let mut message = b"can't cd to ".to_vec();
                 message.extend_from_slice(dest);
-                return Err(sh.diagnostics().sh_error_value(&message));
+                return Err(shell.diagnostics().shell_error(&message));
             }
         }
     }
 
-    if !out {
+    if !changed_via_search_path {
         /* step6: */
         /* docd: */
-        match docd(sh, dest, options)? {
+        match change_directory(shell, dest, options)? {
             CdResult::Changed => {}
-            CdResult::ChangedPwdUnknown => pwd_unknown = true,
+            CdResult::ChangedPwdUnknown => working_directory_unknown = true,
             CdResult::Failed => {
                 /* err: */
                 let mut message = b"can't cd to ".to_vec();
                 message.extend_from_slice(dest);
-                return Err(sh.diagnostics().sh_error_value(&message));
+                return Err(shell.diagnostics().shell_error(&message));
             }
         }
     }
 
     /* out: */
     if options.print {
-        let mut d = sh.cwd.curdir.clone().unwrap_or_default();
-        d.push(b'\n');
-        sh.write_output(Dest::Stdout, &d)?;
+        let mut directory = shell.working_directory.logical.clone().unwrap_or_default();
+        directory.push(b'\n');
+        shell.write_output(OutputDestination::Stdout, &directory)?;
     }
-    let status = i32::from(pwd_unknown && options.physical && options.error_if_unknown);
+    let status =
+        i32::from(working_directory_unknown && options.physical && options.error_if_unknown);
     Ok(Flow::Done((status).into()))
 }
 
@@ -188,10 +190,10 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:builtin.cd.oldpwd-set]
 // [spec:posix:req:xcurel.change-cwd]
 // [spec:nsh:req:idiom.platform-errors]
-fn docd(sh: &mut Shell, dest: &BStr, options: CdOptions) -> Result<CdResult, Error> {
-    crate::error::with_interrupts_deferred(sh, |sh| {
+fn change_directory(shell: &mut Shell, dest: &BStr, options: CdOptions) -> Result<CdResult, Error> {
+    crate::error::with_interrupts_deferred(shell, |shell| {
         let logical = if !options.physical {
-            updatepwd(sh, dest)
+            update_logical_directory(shell, dest)
         } else {
             None
         };
@@ -232,14 +234,18 @@ fn docd(sh: &mut Shell, dest: &BStr, options: CdOptions) -> Result<CdResult, Err
         };
         if changed {
             match logical.as_ref() {
-                Some(dir) => setpwd_inner(sh, Pwd::New(dir.as_slice().as_bstr()), true)?,
-                None => setpwd_inner(sh, Pwd::Unknown, true)?,
+                Some(dir) => update_current_directory(
+                    shell,
+                    DirectoryUpdate::New(dir.as_slice().as_bstr()),
+                    true,
+                )?,
+                None => update_current_directory(shell, DirectoryUpdate::Unknown, true)?,
             }
-            crate::exec::hashcd(sh);
+            crate::execution::invalidate_cache_after_directory_change(shell);
         }
         Ok(if !changed {
             CdResult::Failed
-        } else if logical.is_none() && sh.cwd.curdir.is_none() {
+        } else if logical.is_none() && shell.working_directory.logical.is_none() {
             CdResult::ChangedPwdUnknown
         } else {
             CdResult::Changed
@@ -252,10 +258,10 @@ fn docd(sh: &mut Shell, dest: &BStr, options: CdOptions) -> Result<CdResult, Err
 // [spec:posix:req:builtin.cd.step8-canonical-form-dot]
 // [spec:posix:req:builtin.cd.step8-further-simplification]
 // [spec:posix:req:builtin.cd.env-pwd]
-fn updatepwd(sh: &mut Shell, dir: &BStr) -> Option<BString> {
-    let current = sh
-        .cwd
-        .curdir
+fn update_logical_directory(shell: &mut Shell, dir: &BStr) -> Option<BString> {
+    let current = shell
+        .working_directory
+        .logical
         .as_ref()
         .and_then(|path| path.try_to_path_buf().ok());
     let directory = dir.try_to_path_buf().ok()?;
@@ -279,34 +285,34 @@ mod tests {
     /// `-L` and `-P` are a toggle rather than two flags: the C tracks
     /// which it saw last and flips only when the next one differs, so a
     /// repeat is not a flip and the pair cancels.
-    fn opts(words: &[&[u8]]) -> CdOptions {
+    fn option_scan(words: &[&[u8]]) -> CdOptions {
         let args: Vec<&BStr> = words.iter().map(|w| BStr::new(*w)).collect();
         let mut scan = Options::new(&args);
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        cdopt(&mut owned, &mut scan).unwrap()
+        parse_cd_options(&mut owned, &mut scan).unwrap()
     }
 
     #[test]
     fn no_option_is_logical() {
-        assert_eq!(opts(&[b"cd"]), CdOptions::default());
-        assert_eq!(opts(&[b"cd", b"/tmp"]), CdOptions::default());
+        assert_eq!(option_scan(&[b"cd"]), CdOptions::default());
+        assert_eq!(option_scan(&[b"cd", b"/tmp"]), CdOptions::default());
     }
 
     #[test]
     fn physical_and_logical_toggle() {
-        assert!(opts(&[b"cd", b"-P"]).physical);
-        assert!(!opts(&[b"cd", b"-L"]).physical);
-        assert!(!opts(&[b"cd", b"-P", b"-L"]).physical);
-        assert!(opts(&[b"cd", b"-L", b"-P"]).physical);
+        assert!(option_scan(&[b"cd", b"-P"]).physical);
+        assert!(!option_scan(&[b"cd", b"-L"]).physical);
+        assert!(!option_scan(&[b"cd", b"-P", b"-L"]).physical);
+        assert!(option_scan(&[b"cd", b"-L", b"-P"]).physical);
     }
 
     // [spec:posix:req:builtin.cd.opt-e/test]
     #[test]
     fn error_if_pwd_unknown_is_independent() {
-        assert!(opts(&[b"cd", b"-e"]).error_if_unknown);
-        let physical_error = opts(&[b"cd", b"-Pe"]);
+        assert!(option_scan(&[b"cd", b"-e"]).error_if_unknown);
+        let physical_error = option_scan(&[b"cd", b"-Pe"]);
         assert!(physical_error.physical && physical_error.error_if_unknown);
-        let logical_error = opts(&[b"cd", b"-eP", b"-L"]);
+        let logical_error = option_scan(&[b"cd", b"-eP", b"-L"]);
         assert!(!logical_error.physical && logical_error.error_if_unknown);
     }
 
@@ -316,7 +322,7 @@ mod tests {
         if !nsh_platform::can_unlink_current_directory() {
             return;
         }
-        let _guard = crate::testutil::lock();
+        let _guard = crate::test_support::lock();
         let old = std::env::current_dir().unwrap();
         let path = std::env::temp_dir().join(format!(
             "nsh-cd-e-{}-{}",
@@ -333,7 +339,7 @@ mod tests {
 
         let mut shell = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         assert_eq!(
-            cdcmd(
+            run(
                 &mut shell,
                 &[BStr::new(b"cd"), BStr::new(b"-e"), BStr::new(b".")]
             )
@@ -341,7 +347,7 @@ mod tests {
             Flow::Done((0).into())
         );
         assert_eq!(
-            cdcmd(
+            run(
                 &mut shell,
                 &[BStr::new(b"cd"), BStr::new(b"-Pe"), BStr::new(b".")]
             )
@@ -353,9 +359,9 @@ mod tests {
     /// A repeat is not a flip, whether clustered or spread.
     #[test]
     fn a_repeat_is_not_a_flip() {
-        assert!(opts(&[b"cd", b"-PP"]).physical);
-        assert!(opts(&[b"cd", b"-P", b"-P"]).physical);
-        assert!(!opts(&[b"cd", b"-LL"]).physical);
+        assert!(option_scan(&[b"cd", b"-PP"]).physical);
+        assert!(option_scan(&[b"cd", b"-P", b"-P"]).physical);
+        assert!(!option_scan(&[b"cd", b"-LL"]).physical);
     }
 
     #[test]
@@ -363,7 +369,7 @@ mod tests {
         let args = [BStr::new("cd"), BStr::new("-P"), BStr::new("dir")];
         let mut scan = Options::new(&args);
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        assert!(cdopt(&mut owned, &mut scan).unwrap().physical);
+        assert!(parse_cd_options(&mut owned, &mut scan).unwrap().physical);
         assert_eq!(scan.operands(), [BStr::new("dir")]);
     }
 
@@ -371,7 +377,7 @@ mod tests {
     #[test]
     fn empty_operand_is_an_error() {
         let mut shell = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let error = cdcmd(&mut shell, &[BStr::new(b"cd"), BStr::new(b"")])
+        let error = run(&mut shell, &[BStr::new(b"cd"), BStr::new(b"")])
             .expect_err("an explicit empty operand must not mean the current directory");
         assert_eq!(
             error.message(),

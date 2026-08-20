@@ -88,7 +88,7 @@ pub(crate) enum CallbackPolicy {
 
 // [spec:dash:def:var.var]
 #[derive(Clone, Debug)]
-struct Var {
+struct Variable {
     attributes: VariableAttributes,
     state: VariableState,
     /// Declaration attributes that do not already have a dash flag.
@@ -98,7 +98,7 @@ struct Var {
     dynamic_lineno: bool,
 }
 
-impl Var {
+impl Variable {
     fn set(value: &[u8], attributes: VariableAttributes, callback: Callback) -> Self {
         Self {
             attributes,
@@ -121,20 +121,20 @@ impl Var {
 }
 
 // [spec:dash:def:var.localvar]
-enum LocalVar {
+enum LocalVariable {
     Options(OptionSet),
     /// The declaration created this name; remove it on return.
     Created(BString),
     /// Restore the complete previous entry on return.
     Saved {
         name: BString,
-        previous: Var,
+        previous: Variable,
     },
 }
 
 // [spec:dash:def:var.localvar-list]
-pub struct LocalVarList {
-    entries: Vec<LocalVar>,
+pub struct LocalVariableScopes {
+    entries: Vec<LocalVariable>,
 }
 
 // [spec:posix:req:xcu.env.effects-confined-to-section]
@@ -143,17 +143,17 @@ pub struct LocalVarList {
 // [spec:posix:def:param.denotation]
 // [spec:posix:def:param.set-state]
 // [spec:posix:sem:param.variable-creation]
-pub struct VarTable {
-    tab: BTreeMap<BString, Var>,
-    pub(crate) lineno: i32,
-    locals: Vec<LocalVarList>,
+pub struct VariableTable {
+    entries: BTreeMap<BString, Variable>,
+    pub(crate) line_number: i32,
+    locals: Vec<LocalVariableScopes>,
 }
 
-impl VarTable {
+impl VariableTable {
     pub(crate) fn new() -> Self {
         Self {
-            tab: BTreeMap::new(),
-            lineno: 0,
+            entries: BTreeMap::new(),
+            line_number: 0,
             locals: Vec::new(),
         }
     }
@@ -163,7 +163,7 @@ impl VarTable {
         !self.locals.is_empty()
     }
 
-    fn push_local(&mut self, local: LocalVar) {
+    fn push_local(&mut self, local: LocalVariable) {
         self.locals
             .last_mut()
             .expect("mklocal runs inside a function")
@@ -173,10 +173,10 @@ impl VarTable {
 
     fn refresh_lineno(&mut self, name: &BStr) {
         if name == b"LINENO" {
-            if let Some(var) = self.tab.get_mut(name) {
+            if let Some(var) = self.entries.get_mut(name) {
                 if var.dynamic_lineno && matches!(&var.state, VariableState::Set(_)) {
                     var.state = VariableState::Set(VariableValue::Scalar(BString::from(
-                        self.lineno.to_string().as_bytes(),
+                        self.line_number.to_string().as_bytes(),
                     )));
                 }
             }
@@ -184,70 +184,70 @@ impl VarTable {
     }
 }
 
-pub fn defifs() -> &'static BStr {
+pub fn default_ifs() -> &'static BStr {
     BStr::new(DEFAULT_IFS)
 }
 
-pub fn defpath() -> BString {
+pub fn default_path() -> BString {
     BString::from(nsh_platform::default_search_path().to_shell_bytes())
 }
 
-fn builtin_value(sh: &Shell, name: &[u8]) -> BString {
-    sh.vars
-        .tab
+fn builtin_value(shell: &Shell, name: &[u8]) -> BString {
+    shell.variables
+        .entries
         .get(BStr::new(name))
-        .and_then(Var::scalar_owned)
+        .and_then(Variable::scalar_owned)
         .unwrap_or_default()
 }
 
-pub fn ifsval(sh: &Shell) -> BString {
-    builtin_value(sh, b"IFS")
+pub fn ifs_value(shell: &Shell) -> BString {
+    builtin_value(shell, b"IFS")
 }
 
-pub fn ifsset(sh: &Shell) -> bool {
-    sh.vars
-        .tab
+pub fn ifs_is_set(shell: &Shell) -> bool {
+    shell.variables
+        .entries
         .get(BStr::new(b"IFS"))
         .is_some_and(|var| matches!(&var.state, VariableState::Set(_)))
 }
 
-pub fn mailval(sh: &Shell) -> BString {
-    builtin_value(sh, b"MAIL")
+pub fn mail_value(shell: &Shell) -> BString {
+    builtin_value(shell, b"MAIL")
 }
 
-pub fn mpathval(sh: &Shell) -> BString {
-    builtin_value(sh, b"MAILPATH")
+pub fn mail_path_value(shell: &Shell) -> BString {
+    builtin_value(shell, b"MAILPATH")
 }
 
-pub fn pathval(sh: &Shell) -> BString {
-    builtin_value(sh, b"PATH")
+pub fn path_value(shell: &Shell) -> BString {
+    builtin_value(shell, b"PATH")
 }
 
-pub fn ps1val(sh: &Shell) -> BString {
-    builtin_value(sh, b"PS1")
+pub fn primary_prompt_value(shell: &Shell) -> BString {
+    builtin_value(shell, b"PS1")
 }
 
-pub fn ps2val(sh: &Shell) -> BString {
-    builtin_value(sh, b"PS2")
+pub fn continuation_prompt_value(shell: &Shell) -> BString {
+    builtin_value(shell, b"PS2")
 }
 
-pub fn ps4val(sh: &Shell) -> BString {
-    builtin_value(sh, b"PS4")
+pub fn trace_prompt_value(shell: &Shell) -> BString {
+    builtin_value(shell, b"PS4")
 }
 
-pub fn histsizeval(sh: &Shell) -> BString {
-    builtin_value(sh, b"HISTSIZE")
+pub fn history_size_value(shell: &Shell) -> BString {
+    builtin_value(shell, b"HISTSIZE")
 }
 
-pub fn mpathset(sh: &Shell) -> bool {
-    sh.vars
-        .tab
+pub fn mail_path_is_set(shell: &Shell) -> bool {
+    shell.variables
+        .entries
         .get(BStr::new(b"MAILPATH"))
         .is_some_and(|var| matches!(&var.state, VariableState::Set(_)))
 }
 
 /// The name portion of `name` or `name=value`.
-pub(crate) fn varname(text: &BStr) -> &BStr {
+pub(crate) fn assignment_name(text: &BStr) -> &BStr {
     BStr::new(
         text.split_once_str(b"=")
             .map_or(text.as_bytes(), |(name, _)| name),
@@ -283,9 +283,9 @@ macro_rules! is_locale_variable {
 
 // [spec:nsh:sem:shell-locale.selection]
 // [spec:posix:req:xcurel.establish-locale]
-fn selected_locale(sh: &Shell) -> std::io::Result<nsh_platform::Locale> {
+fn selected_locale(shell: &Shell) -> std::io::Result<nsh_platform::Locale> {
     let nonempty = |name: &[u8]| {
-        sh.vars.tab.get(BStr::new(name)).and_then(|var| {
+        shell.variables.entries.get(BStr::new(name)).and_then(|var| {
             matches!(&var.state, VariableState::Set(_))
                 .then(|| var.scalar_owned())
                 .flatten()
@@ -309,10 +309,10 @@ fn selected_locale(sh: &Shell) -> std::io::Result<nsh_platform::Locale> {
     nsh_platform::Locale::new(b"C", &overrides)
 }
 
-fn builtin(name: &[u8], value: Option<&[u8]>, callback: Callback) -> (BString, Var) {
+fn builtin(name: &[u8], value: Option<&[u8]>, callback: Callback) -> (BString, Variable) {
     let var = match value {
-        Some(value) => Var::set(value, VariableAttributes::FIXED, callback),
-        None => Var::unset(VariableAttributes::FIXED, callback),
+        Some(value) => Variable::set(value, VariableAttributes::FIXED, callback),
+        None => Variable::unset(VariableAttributes::FIXED, callback),
     };
     (BString::from(name), var)
 }
@@ -334,7 +334,7 @@ fn builtin(name: &[u8], value: Option<&[u8]>, callback: Callback) -> (BString, V
 // [spec:posix:def:param.path]
 // [spec:posix:req:param.ppid]
 // [spec:posix:req:param.ps1-default]
-pub fn initvar(sh: &mut Shell) {
+pub fn initialize_variables(shell: &mut Shell) {
     let prompt: &[u8] = if nsh_platform::effective_uid().is_root() {
         b"# "
     } else {
@@ -361,7 +361,7 @@ pub fn initvar(sh: &mut Shell) {
     ];
     entries[8].1.dynamic_lineno = true;
     for (name, var) in entries {
-        sh.vars.tab.entry(name).or_insert(var);
+        shell.variables.entries.entry(name).or_insert(var);
     }
 }
 
@@ -391,7 +391,7 @@ impl Shell {
     // [spec:posix:sem:sh.envvar-path]
     // [spec:posix:req:sh.envvar-pwd]
     pub(crate) fn initialize_variable_state(&mut self, env: EnvSource<'_>) -> Result<(), Error> {
-        initvar(self);
+        initialize_variables(self);
         let process_env;
         let pairs = match env {
             EnvSource::Process => {
@@ -414,7 +414,7 @@ impl Shell {
             if !is_locale_variable!(name) {
                 continue;
             }
-            let entry = self.vars.tab.entry(name.to_owned()).or_insert_with(|| Var {
+            let entry = self.variables.entries.entry(name.to_owned()).or_insert_with(|| Variable {
                 attributes: VariableAttributes::NONE,
                 state: VariableState::Unset,
                 bash_attributes: BashAttributes::new(),
@@ -434,7 +434,7 @@ impl Shell {
         set_bytes(
             self,
             BStr::new(b"IFS"),
-            Some(defifs()),
+            Some(default_ifs()),
             VariableAttributes::NONE,
         )?;
         set_bytes(
@@ -464,9 +464,9 @@ impl Shell {
         });
         match valid_pwd {
             Some(path) => {
-                crate::cd::setpwd_inner(self, crate::cd::Pwd::New(BStr::new(path)), false)
+                crate::working_directory::update_current_directory(self, crate::working_directory::DirectoryUpdate::New(BStr::new(path)), false)
             }
-            None => crate::cd::setpwd_inner(self, crate::cd::Pwd::Unknown, false),
+            None => crate::working_directory::update_current_directory(self, crate::working_directory::DirectoryUpdate::Unknown, false),
         }
     }
 
@@ -482,60 +482,60 @@ impl Shell {
     }
 
     pub(crate) fn unwind_local_variables(&mut self) {
-        while !self.vars.locals.is_empty() {
-            poplocalvars(self);
+        while !self.variables.locals.is_empty() {
+            pop_local_scope(self);
         }
     }
 }
 
 // [spec:nsh:sem:shell-locale.invalid-selection]
-fn run_callback(sh: &mut Shell, callback: Callback, name: &BStr, value: Option<&BStr>) {
+fn run_callback(shell: &mut Shell, callback: Callback, name: &BStr, value: Option<&BStr>) {
     let effective = value.unwrap_or_else(|| BStr::new(b""));
     match callback {
         Callback::None => {}
         Callback::Ifs => {
-            let effective_ifs = if ifsset(sh) { effective } else { defifs() };
-            crate::expand::changeifs_bytes(sh, effective_ifs);
+            let effective_ifs = if ifs_is_set(shell) { effective } else { default_ifs() };
+            crate::expand::update_ifs_cache(shell, effective_ifs);
         }
-        Callback::Mail => crate::mail::changemail(&mut sh.mail, effective),
+        Callback::Mail => crate::mail::reset_mail_state(&mut shell.mail, effective),
         Callback::Path => {
-            crate::exec::changepath(&mut sh.interrupt_deferral, &mut sh.commands, effective)
+            crate::execution::update_search_path(&mut shell.interrupt_deferral, &mut shell.commands, effective)
         }
-        Callback::Getopts => crate::options::getoptsreset(sh, effective),
-        Callback::History => crate::editor::sethistsize(sh, effective),
+        Callback::Getopts => crate::options::reset_getopts(shell, effective),
+        Callback::History => crate::editor::set_history_size(shell, effective),
         Callback::Locale => {
             // Locale selection depends on the complete variable table, not
             // merely on the entry that triggered this callback.
-            if let Ok(locale) = selected_locale(sh) {
-                sh.locale = locale;
-                let ifs = if ifsset(sh) {
-                    ifsval(sh)
+            if let Ok(locale) = selected_locale(shell) {
+                shell.locale = locale;
+                let ifs = if ifs_is_set(shell) {
+                    ifs_value(shell)
                 } else {
-                    defifs().to_owned()
+                    default_ifs().to_owned()
                 };
-                crate::expand::changeifs_bytes(sh, BStr::new(ifs.as_slice()));
+                crate::expand::update_ifs_cache(shell, BStr::new(ifs.as_slice()));
             }
         }
     }
 }
 
 fn set_entry(
-    sh: &mut Shell,
+    shell: &mut Shell,
     name: &BStr,
     value: Option<&BStr>,
     mut attributes: VariableAttributes,
     callback_policy: CallbackPolicy,
 ) -> Result<(), Error> {
-    if !valid_name(&sh.locale, name) {
+    if !valid_name(&shell.locale, name) {
         let mut message = name.to_vec();
         message.extend_from_slice(b": bad variable name");
-        return Err(sh.diagnostics().sh_error_value(&message));
+        return Err(shell.diagnostics().shell_error(&message));
     }
-    if sh.options.enabled(ShellOption::AllExport) {
+    if shell.options.enabled(ShellOption::AllExport) {
         attributes.exported = true;
     }
 
-    let existing = sh.vars.tab.get(name).cloned();
+    let existing = shell.variables.entries.get(name).cloned();
     let Some(old) = existing else {
         if value.is_none() && attributes == VariableAttributes::NONE {
             return Ok(());
@@ -545,9 +545,9 @@ fn set_entry(
         } else {
             Callback::None
         };
-        sh.vars.tab.insert(
+        shell.variables.entries.insert(
             name.to_owned(),
-            Var {
+            Variable {
                 attributes,
                 state: value.map_or(VariableState::Unset, |value| {
                     VariableState::Set(VariableValue::Scalar(value.to_owned()))
@@ -558,7 +558,7 @@ fn set_entry(
             },
         );
         if callback_policy == CallbackPolicy::Run {
-            run_callback(sh, callback, name, value);
+            run_callback(shell, callback, name, value);
         }
         return Ok(());
     };
@@ -566,7 +566,7 @@ fn set_entry(
     if old.attributes.read_only {
         let mut message = name.to_vec();
         message.extend_from_slice(b": is read only");
-        return Err(sh.diagnostics().sh_error_value(&message));
+        return Err(shell.diagnostics().shell_error(&message));
     }
 
     if value.is_some() || attributes != VariableAttributes::NONE {
@@ -576,9 +576,9 @@ fn set_entry(
     } else if old.attributes.fixed {
         attributes = VariableAttributes::FIXED;
     } else {
-        sh.vars.tab.remove(name);
+        shell.variables.entries.remove(name);
         if old.callback == Callback::Locale {
-            run_callback(sh, old.callback, name, None);
+            run_callback(shell, old.callback, name, None);
         }
         return Ok(());
     }
@@ -597,9 +597,9 @@ fn set_entry(
         VariableState::Unset => None,
         VariableState::Set(value) => value.scalar_owned(),
     };
-    sh.vars.tab.insert(
+    shell.variables.entries.insert(
         name.to_owned(),
-        Var {
+        Variable {
             attributes,
             state,
             bash_attributes,
@@ -609,7 +609,7 @@ fn set_entry(
     );
     if callback_policy == CallbackPolicy::Run {
         run_callback(
-            sh,
+            shell,
             callback,
             name,
             callback_value
@@ -623,48 +623,48 @@ fn set_entry(
 /// Read a variable through the owned-byte interface used throughout nsh.
 // [spec:dash:def:var.lookupvar-fn]
 // [spec:dash:sem:var.lookupvar-fn]
-pub(crate) fn lookup_bytes(sh: &mut Shell, name: &BStr) -> Option<BString> {
-    sh.vars.refresh_lineno(name);
-    sh.vars.tab.get(name).and_then(Var::scalar_owned)
+pub(crate) fn lookup_bytes(shell: &mut Shell, name: &BStr) -> Option<BString> {
+    shell.variables.refresh_lineno(name);
+    shell.variables.entries.get(name).and_then(Variable::scalar_owned)
 }
 
 // [spec:dash:def:var.setvar-fn]
 // [spec:dash:sem:var.setvar-fn]
 pub(crate) fn set_bytes(
-    sh: &mut Shell,
+    shell: &mut Shell,
     name: &BStr,
     value: Option<&BStr>,
     attributes: VariableAttributes,
 ) -> Result<(), Error> {
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        set_entry(sh, name, value, attributes, CallbackPolicy::Run)
+    crate::error::with_interrupts_deferred(shell, |shell| {
+        set_entry(shell, name, value, attributes, CallbackPolicy::Run)
     })
 }
 
 // [spec:dash:def:var.setvareq-fn]
 // [spec:dash:sem:var.setvareq-fn]
 pub(crate) fn set_assignment_bytes(
-    sh: &mut Shell,
+    shell: &mut Shell,
     assignment: &BStr,
     attributes: VariableAttributes,
 ) -> Result<(), Error> {
     match assignment.split_once_str(b"=") {
-        Some((name, value)) => set_bytes(sh, BStr::new(name), Some(BStr::new(value)), attributes),
-        None => set_bytes(sh, assignment, None, attributes),
+        Some((name, value)) => set_bytes(shell, BStr::new(name), Some(BStr::new(value)), attributes),
+        None => set_bytes(shell, assignment, None, attributes),
     }
 }
 
-pub(crate) fn setvarint_bytes(
-    sh: &mut Shell,
+pub(crate) fn set_integer_bytes(
+    shell: &mut Shell,
     name: &BStr,
     value: i64,
     attributes: VariableAttributes,
     callback_policy: CallbackPolicy,
 ) -> Result<i64, Error> {
     let text = value.to_string();
-    crate::error::with_interrupts_deferred(sh, |sh| {
+    crate::error::with_interrupts_deferred(shell, |shell| {
         set_entry(
-            sh,
+            shell,
             name,
             Some(BStr::new(text.as_bytes())),
             attributes,
@@ -677,25 +677,25 @@ pub(crate) fn setvarint_bytes(
 // [spec:dash:def:var.lookupvarint-fn]
 // [spec:dash:sem:var.lookupvarint-fn]
 // [spec:posix:req:builtin.set.opt-u-nounset]
-pub(crate) fn lookupvarint_bytes(sh: &mut Shell, name: &BStr) -> Result<i64, Error> {
-    let value = match lookup_bytes(sh, name) {
+pub(crate) fn lookup_integer_bytes(shell: &mut Shell, name: &BStr) -> Result<i64, Error> {
+    let value = match lookup_bytes(shell, name) {
         Some(value) => value,
-        None if sh.options.enabled(ShellOption::Nounset) => {
+        None if shell.options.enabled(ShellOption::Nounset) => {
             let mut message = name.to_vec();
             message.extend_from_slice(b": parameter not set");
-            return Err(sh.diagnostics().sh_error_value(&message));
+            return Err(shell.diagnostics().shell_error(&message));
         }
         None => BString::default(),
     };
-    crate::number::parse_integer(&mut sh.diagnostics(), BStr::new(&value), 0)
+    crate::number::parse_integer(&mut shell.diagnostics(), BStr::new(&value), 0)
 }
 
-pub(crate) fn unset_bytes(sh: &mut Shell, name: &BStr) -> Result<(), Error> {
-    set_bytes(sh, name, None, VariableAttributes::NONE)
+pub(crate) fn unset_bytes(shell: &mut Shell, name: &BStr) -> Result<(), Error> {
+    set_bytes(shell, name, None, VariableAttributes::NONE)
 }
 
-pub(crate) fn add_attributes(sh: &mut Shell, name: &BStr, attributes: VariableAttributes) -> bool {
-    let Some(var) = sh.vars.tab.get_mut(name) else {
+pub(crate) fn add_attributes(shell: &mut Shell, name: &BStr, attributes: VariableAttributes) -> bool {
+    let Some(var) = shell.variables.entries.get_mut(name) else {
         return false;
     };
     var.attributes.exported |= attributes.exported;
@@ -704,14 +704,14 @@ pub(crate) fn add_attributes(sh: &mut Shell, name: &BStr, attributes: VariableAt
     true
 }
 
-pub(crate) fn variable_attributes(sh: &Shell, name: &BStr) -> Option<VariableAttributes> {
-    sh.vars.tab.get(name).map(|var| var.attributes)
+pub(crate) fn variable_attributes(shell: &Shell, name: &BStr) -> Option<VariableAttributes> {
+    shell.variables.entries.get(name).map(|var| var.attributes)
 }
 
 /// Build the exported environment as owned native name/value pairs.
-pub fn environment(sh: &Shell) -> std::io::Result<Vec<(OsString, OsString)>> {
-    sh.vars
-        .tab
+pub fn environment(shell: &Shell) -> std::io::Result<Vec<(OsString, OsString)>> {
+    shell.variables
+        .entries
         .iter()
         .filter(|(_, var)| var.attributes.exported && matches!(&var.state, VariableState::Set(_)))
         .map(|(name, var)| {
@@ -724,13 +724,13 @@ pub fn environment(sh: &Shell) -> std::io::Result<Vec<(OsString, OsString)>> {
 // [spec:dash:def:var.showvars-fn]
 // [spec:dash:sem:var.showvars-fn]
 pub(crate) fn show_vars(
-    sh: &mut Shell,
+    shell: &mut Shell,
     prefix: &BStr,
     selection: VariableSelection,
 ) -> Result<(), Error> {
-    let records: Vec<Vec<u8>> = sh
-        .vars
-        .tab
+    let records: Vec<Vec<u8>> = shell
+        .variables
+        .entries
         .iter()
         .filter(|(_, var)| match selection {
             VariableSelection::Set => matches!(&var.state, VariableState::Set(_)),
@@ -753,7 +753,7 @@ pub(crate) fn show_vars(
         })
         .collect();
     for record in records {
-        sh.write_output(crate::output::Dest::Stdout, &record)?;
+        shell.write_output(crate::output::OutputDestination::Stdout, &record)?;
     }
     Ok(())
 }
@@ -761,35 +761,35 @@ pub(crate) fn show_vars(
 // [spec:dash:def:var.mklocal-fn]
 // [spec:dash:sem:var.mklocal-fn]
 pub(crate) fn make_local_bytes(
-    sh: &mut Shell,
+    shell: &mut Shell,
     assignment: &BStr,
     attributes: VariableAttributes,
 ) -> Result<(), Error> {
-    crate::error::with_interrupts_deferred(sh, |sh| {
+    crate::error::with_interrupts_deferred(shell, |shell| {
         if assignment == b"-" {
-            let saved = sh.options.state;
-            sh.vars.push_local(LocalVar::Options(saved));
+            let saved = shell.options.state;
+            shell.variables.push_local(LocalVariable::Options(saved));
             return Ok(());
         }
 
-        let name = varname(assignment).to_owned();
-        if let Some(previous) = sh.vars.tab.get(&name).cloned() {
-            sh.vars.push_local(LocalVar::Saved {
+        let name = assignment_name(assignment).to_owned();
+        if let Some(previous) = shell.variables.entries.get(&name).cloned() {
+            shell.variables.push_local(LocalVariable::Saved {
                 name: name.clone(),
                 previous,
             });
             if assignment.contains(&b'=') {
-                set_assignment_bytes(sh, assignment, attributes)?;
+                set_assignment_bytes(shell, assignment, attributes)?;
             }
         } else {
             let mut attributes = attributes;
             attributes.fixed = true;
             if assignment.contains(&b'=') {
-                set_assignment_bytes(sh, assignment, attributes)?;
+                set_assignment_bytes(shell, assignment, attributes)?;
             } else {
-                set_bytes(sh, BStr::new(name.as_slice()), None, attributes)?;
+                set_bytes(shell, BStr::new(name.as_slice()), None, attributes)?;
             }
-            sh.vars.push_local(LocalVar::Created(name));
+            shell.variables.push_local(LocalVariable::Created(name));
         }
         Ok(())
     })
@@ -797,11 +797,11 @@ pub(crate) fn make_local_bytes(
 
 // [spec:dash:def:var.pushlocalvars-fn]
 // [spec:dash:sem:var.pushlocalvars-fn]
-pub fn pushlocalvars(sh: &mut Shell, push: bool) -> usize {
-    let top = sh.vars.locals.len();
+pub fn push_local_scope(shell: &mut Shell, push: bool) -> usize {
+    let top = shell.variables.locals.len();
     if push {
-        crate::error::with_interrupts_deferred(sh, |sh| {
-            sh.vars.locals.push(LocalVarList {
+        crate::error::with_interrupts_deferred(shell, |shell| {
+            shell.variables.locals.push(LocalVariableScopes {
                 entries: Vec::new(),
             });
         });
@@ -809,37 +809,37 @@ pub fn pushlocalvars(sh: &mut Shell, push: bool) -> usize {
     top
 }
 
-fn poplocalvars(sh: &mut Shell) {
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        let mut frame = sh
-            .vars
+fn pop_local_scope(shell: &mut Shell) {
+    crate::error::with_interrupts_deferred(shell, |shell| {
+        let mut frame = shell
+            .variables
             .locals
             .pop()
             .expect("poplocalvars runs on a pushed frame");
         while let Some(local) = frame.entries.pop() {
             match local {
-                LocalVar::Options(saved) => {
-                    sh.options.state = saved;
-                    if let Err(error) = options_changed(sh) {
-                        sh.status = error.status();
+                LocalVariable::Options(saved) => {
+                    shell.options.state = saved;
+                    if let Err(error) = options_changed(shell) {
+                        shell.status = error.status();
                     }
                 }
-                LocalVar::Created(name) => {
-                    let callback = sh
-                        .vars
-                        .tab
+                LocalVariable::Created(name) => {
+                    let callback = shell
+                        .variables
+                        .entries
                         .remove(&name)
                         .map_or(Callback::None, |var| var.callback);
                     if callback == Callback::Locale {
-                        run_callback(sh, callback, BStr::new(name.as_slice()), None);
+                        run_callback(shell, callback, BStr::new(name.as_slice()), None);
                     }
                 }
-                LocalVar::Saved { name, previous } => {
+                LocalVariable::Saved { name, previous } => {
                     let callback = previous.callback;
                     let value = previous.scalar_owned();
-                    sh.vars.tab.insert(name.clone(), previous);
+                    shell.variables.entries.insert(name.clone(), previous);
                     run_callback(
-                        sh,
+                        shell,
                         callback,
                         BStr::new(name.as_slice()),
                         value.as_ref().map(|value| BStr::new(value.as_slice())),
@@ -852,9 +852,9 @@ fn poplocalvars(sh: &mut Shell) {
 
 // [spec:dash:def:var.unwindlocalvars-fn]
 // [spec:dash:sem:var.unwindlocalvars-fn]
-pub fn unwindlocalvars(sh: &mut Shell, stop: usize) {
-    while sh.vars.locals.len() > stop {
-        poplocalvars(sh);
+pub fn unwind_local_scopes(shell: &mut Shell, stop: usize) {
+    while shell.variables.locals.len() > stop {
+        pop_local_scope(shell);
     }
 }
 
@@ -862,8 +862,8 @@ impl Shell {
     /// Read a shell variable. `$LINENO` is refreshed before the borrow is
     /// returned, which is why this method takes `&mut self`.
     pub fn var(&mut self, name: &BStr) -> Option<&BStr> {
-        self.vars.refresh_lineno(name);
-        self.vars.tab.get(name).and_then(Var::scalar)
+        self.variables.refresh_lineno(name);
+        self.variables.entries.get(name).and_then(Variable::scalar)
     }
 
     /// Assign a shell variable with normal script-assignment semantics.
@@ -879,9 +879,9 @@ impl Shell {
     }
 
     /// Return every set variable as owned name/value pairs in name order.
-    pub fn vars(&mut self) -> Vec<(BString, BString)> {
-        self.vars
-            .tab
+    pub fn variables(&mut self) -> Vec<(BString, BString)> {
+        self.variables
+            .entries
             .iter()
             .filter_map(|(name, var)| Some((name.clone(), var.scalar_owned()?)))
             .collect()
@@ -891,7 +891,7 @@ impl Shell {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::lock;
+    use crate::test_support::lock;
 
     // [spec:nsh:sem:shell-locale.selection/test]
     #[test]
@@ -933,8 +933,8 @@ mod tests {
     fn lineno_survives_a_shell_move() {
         let _guard = lock();
         let mut shell = Shell::new(crate::streams::Streams::INHERIT);
-        initvar(&mut shell);
-        shell.vars.lineno = 41;
+        initialize_variables(&mut shell);
+        shell.variables.line_number = 41;
         assert_eq!(
             lookup_bytes(&mut shell, BStr::new(b"LINENO"))
                 .as_ref()
@@ -942,7 +942,7 @@ mod tests {
             Some(b"41".as_slice())
         );
         let mut moved = shell;
-        moved.vars.lineno = 42;
+        moved.variables.line_number = 42;
         assert_eq!(
             lookup_bytes(&mut moved, BStr::new(b"LINENO"))
                 .as_ref()
@@ -973,11 +973,11 @@ mod tests {
         unset_bytes(&mut shell, BStr::new(b"Tsetvar")).unwrap();
         assert_eq!(lookup_bytes(&mut shell, BStr::new(b"Tsetvar")), None);
 
-        initvar(&mut shell);
-        shell.options.shellparam.optind = 7;
-        shell.options.shellparam.optoff = Some(3);
+        initialize_variables(&mut shell);
+        shell.options.positional_parameters.option_index = 7;
+        shell.options.positional_parameters.option_offset = Some(3);
 
-        setvarint_bytes(
+        set_integer_bytes(
             &mut shell,
             BStr::new(b"OPTIND"),
             8,
@@ -985,8 +985,8 @@ mod tests {
             CallbackPolicy::Suppress,
         )
         .unwrap();
-        assert_eq!(shell.options.shellparam.optind, 7);
-        assert_eq!(shell.options.shellparam.optoff, Some(3));
+        assert_eq!(shell.options.positional_parameters.option_index, 7);
+        assert_eq!(shell.options.positional_parameters.option_offset, Some(3));
 
         set_bytes(
             &mut shell,
@@ -995,8 +995,8 @@ mod tests {
             VariableAttributes::NONE,
         )
         .unwrap();
-        assert_eq!(shell.options.shellparam.optind, 1);
-        assert_eq!(shell.options.shellparam.optoff, None);
+        assert_eq!(shell.options.positional_parameters.option_index, 1);
+        assert_eq!(shell.options.positional_parameters.option_offset, None);
         assert_eq!(
             variable_attributes(&shell, BStr::new(b"OPTIND")),
             Some(VariableAttributes::FIXED),
@@ -1015,7 +1015,7 @@ mod tests {
             VariableAttributes::NONE,
         )
         .unwrap();
-        let stop = pushlocalvars(&mut shell, true);
+        let stop = push_local_scope(&mut shell, true);
         make_local_bytes(
             &mut shell,
             BStr::new(b"Tframe=two"),
@@ -1034,7 +1034,7 @@ mod tests {
                 .map(|value| value.as_slice()),
             Some(b"three".as_slice())
         );
-        unwindlocalvars(&mut shell, stop);
+        unwind_local_scopes(&mut shell, stop);
         assert_eq!(
             lookup_bytes(&mut shell, BStr::new(b"Tframe"))
                 .as_ref()

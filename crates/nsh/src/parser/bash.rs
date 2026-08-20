@@ -6,9 +6,11 @@ use core::mem;
 use bstr::{BStr, BString, ByteSlice as _};
 
 use super::{
-    CTLBACKQ, CTLESC, CTLMBCHAR, CTLQUOTEMARK, ListMode, Rt1, TokenContext, TokenKind, command,
-    finalize, goodname, list, nlnoprompt, parseheredoc, pgetc, pgetc_eatbnl, pungetc, readtoken,
-    readtoken_with_flags, setinputstring, synerror, synexpect, wordtext,
+    LEGACY_COMMAND_SUBSTITUTION, LEGACY_ESCAPE, LEGACY_MULTIBYTE, LEGACY_QUOTE, ListMode,
+    TokenContext, TokenKind, WordLexer, command, consume_newline_without_prompt,
+    expected_token_error, finalize, is_valid_name, list, parse_here_documents, read_input_unit,
+    read_token, read_unit_skipping_line_continuations, set_input_string, syntax_error,
+    unread_input_unit,
 };
 use crate::context::Shell;
 use crate::error::Error;
@@ -33,62 +35,62 @@ struct ConditionalWord {
     quoted: bool,
 }
 
-pub(super) fn active(sh: &Shell) -> bool {
-    sh.input.parse_dialect() == Dialect::Bash
+pub(super) fn active(shell: &Shell) -> bool {
+    shell.input.parse_dialect() == Dialect::Bash
 }
 
 pub(super) fn command_prefix(
-    sh: &mut Shell,
+    shell: &mut Shell,
     token: TokenKind,
     line: i32,
 ) -> Result<Option<Node>, Error> {
-    if !active(sh) {
+    if !active(shell) {
         return Ok(None);
     }
     if token == TokenKind::DoubleParen {
-        return arithmetic_command(sh).map(Some);
+        return arithmetic_command(shell).map(Some);
     }
-    if token != TokenKind::Word || sh.input.last_quoteflag {
+    if token != TokenKind::Word || shell.input.last_token_quoted {
         return Ok(None);
     }
-    if wordtext(sh) == BStr::new(b"[[") {
-        conditional(sh).map(Some)
-    } else if wordtext(sh) == BStr::new(b"function") {
-        function(sh, line).map(Some)
+    if shell.input.word_text() == BStr::new(b"[[") {
+        conditional(shell).map(Some)
+    } else if shell.input.word_text() == BStr::new(b"function") {
+        function(shell, line).map(Some)
     } else {
         Ok(None)
     }
 }
 
-pub(super) fn arithmetic_command(sh: &mut Shell) -> Result<Node, Error> {
-    let expression = arithmetic_text(sh)?;
+pub(super) fn arithmetic_command(shell: &mut Shell) -> Result<Node, Error> {
+    let expression = arithmetic_text(shell)?;
     Ok(Node::Bash(BashNode::ArithmeticCommand(
         BashArithmeticCommand { expression },
     )))
 }
 
-pub(super) fn arithmetic_for(sh: &mut Shell, line: i32) -> Result<Node, Error> {
-    let text = arithmetic_text(sh)?;
-    let [init, test, update] = for_clauses(sh, text.as_bstr())?;
+pub(super) fn arithmetic_for(shell: &mut Shell, line: i32) -> Result<Node, Error> {
+    let text = arithmetic_text(shell)?;
+    let [init, test, update] = for_clauses(shell, text.as_bstr())?;
 
-    let separator = readtoken(sh, TokenContext::RESERVED_WORDS)?;
+    let separator = read_token(shell, TokenContext::RESERVED_WORDS)?.kind;
     let do_token = if separator == TokenKind::Do {
         TokenKind::Do
     } else if separator == TokenKind::Semicolon {
-        readtoken(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)?
+        read_token(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?.kind
     } else if separator == TokenKind::Newline {
-        sh.input.tokpushback = true;
-        readtoken(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)?
+        shell.input.token_pushed_back = true;
+        read_token(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?.kind
     } else {
-        return Err(synexpect(sh, Some(TokenKind::Do)));
+        return Err(expected_token_error(shell, Some(TokenKind::Do)));
     };
     if do_token != TokenKind::Do {
-        return Err(synexpect(sh, Some(TokenKind::Do)));
+        return Err(expected_token_error(shell, Some(TokenKind::Do)));
     }
 
-    let body = list(sh, ListMode::Compound)?
+    let body = list(shell, ListMode::Compound)?
         .into_node()
-        .ok_or_else(|| synexpect(sh, None))?;
+        .ok_or_else(|| expected_token_error(shell, None))?;
     Ok(Node::Bash(BashNode::ArithmeticFor(BashArithmeticFor {
         line,
         init,
@@ -98,16 +100,16 @@ pub(super) fn arithmetic_for(sh: &mut Shell, line: i32) -> Result<Node, Error> {
     })))
 }
 
-pub(super) fn conditional(sh: &mut Shell) -> Result<Node, Error> {
-    let first = readtoken_with_flags(sh, TokenContext::NONE)?;
-    let expression = if closes_conditional(sh, first.kind, first.quoted) {
+pub(super) fn conditional(shell: &mut Shell) -> Result<Node, Error> {
+    let first = read_token(shell, TokenContext::NONE)?;
+    let expression = if closes_conditional(shell, first.kind, first.quoted) {
         BashConditionalExpr::Empty
     } else {
-        sh.input.tokpushback = true;
-        let expression = conditional_or(sh)?;
-        let close = readtoken_with_flags(sh, TokenContext::NONE)?;
-        if !closes_conditional(sh, close.kind, close.quoted) {
-            return Err(synerror(sh, b"expected ']]'"));
+        shell.input.token_pushed_back = true;
+        let expression = conditional_or(shell)?;
+        let close = read_token(shell, TokenContext::NONE)?;
+        if !closes_conditional(shell, close.kind, close.quoted) {
+            return Err(syntax_error(shell, b"expected ']]'"));
         }
         expression
     };
@@ -118,25 +120,25 @@ pub(super) fn conditional(sh: &mut Shell) -> Result<Node, Error> {
 }
 
 // [spec:nsh:req:idiom.structural-ast]
-pub(super) fn function(sh: &mut Shell, line: i32) -> Result<Node, Error> {
-    let name_token = readtoken_with_flags(sh, TokenContext::NONE)?;
-    if name_token.kind != TokenKind::Word || wordtext(sh).is_empty() {
-        return Err(synerror(sh, b"invalid Bash function name"));
+pub(super) fn function(shell: &mut Shell, line: i32) -> Result<Node, Error> {
+    let name_token = read_token(shell, TokenContext::NONE)?;
+    if name_token.kind != TokenKind::Word || shell.input.word_text().is_empty() {
+        return Err(syntax_error(shell, b"invalid Bash function name"));
     }
-    let name = NodeText::from(wordtext(sh));
+    let name = NodeText::from(shell.input.word_text());
 
-    let next = readtoken(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)?;
+    let next = read_token(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?.kind;
     let style = if next == TokenKind::LeftParen {
-        if readtoken(sh, TokenContext::NONE)? != TokenKind::RightParen {
-            return Err(synexpect(sh, Some(TokenKind::RightParen)));
+        if read_token(shell, TokenContext::NONE)?.kind != TokenKind::RightParen {
+            return Err(expected_token_error(shell, Some(TokenKind::RightParen)));
         }
         BashFunctionStyle::FunctionParens
     } else {
-        sh.input.tokpushback = true;
+        shell.input.token_pushed_back = true;
         BashFunctionStyle::Function
     };
-    let body = command(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)?
-        .ok_or_else(|| synexpect(sh, None))?;
+    let body = command(shell, TokenContext::COMMAND_START_AFTER_NEWLINES)?
+        .ok_or_else(|| expected_token_error(shell, None))?;
 
     Ok(Node::Bash(BashNode::Function(BashFunction {
         line,
@@ -146,13 +148,13 @@ pub(super) fn function(sh: &mut Shell, line: i32) -> Result<Node, Error> {
     })))
 }
 
-pub(super) fn array_word(sh: &Shell, arg: WordNode) -> Result<Node, WordNode> {
+pub(super) fn array_word(shell: &Shell, arg: WordNode) -> Result<Node, WordNode> {
     let encoded = arg.word.encode_legacy();
     let bytes = encoded.bytes.as_bstr();
     let Some(open) = bytes.iter().position(|&byte| byte == b'[') else {
         return Err(arg);
     };
-    if !goodname(&sh.locale, BStr::new(&bytes[..open])) {
+    if !is_valid_name(&shell.locale, BStr::new(&bytes[..open])) {
         return Err(arg);
     }
     let Some(close) = matching_bracket(bytes, open) else {
@@ -183,33 +185,33 @@ pub(super) fn declaration_context(args: &[Node]) -> bool {
 }
 
 pub(super) fn compound_array(
-    sh: &mut Shell,
-    vars: &mut Vec<Node>,
+    shell: &mut Shell,
+    variables: &mut Vec<Node>,
     args: &mut Vec<Node>,
 ) -> Result<bool, Error> {
-    let use_args = declaration_context(args) && compound_candidate(sh, args.last());
-    let use_vars = args.is_empty() && compound_candidate(sh, vars.last());
+    let use_args = declaration_context(args) && compound_candidate(shell, args.last());
+    let use_vars = args.is_empty() && compound_candidate(shell, variables.last());
     let target = if use_args {
         args
     } else if use_vars {
-        vars
+        variables
     } else {
         return Ok(false);
     };
 
     let previous = target.pop().expect("a compound candidate exists");
     let mut assignment =
-        compound_prefix(sh, previous).expect("the candidate predicate and conversion agree");
+        compound_prefix(shell, previous).expect("the candidate predicate and conversion agree");
     let mut elements = Vec::new();
     loop {
-        let token = readtoken_with_flags(sh, TokenContext::SKIP_NEWLINES)?;
+        let token = read_token(shell, TokenContext::SKIP_NEWLINES)?;
         if token.kind == TokenKind::RightParen {
             break;
         }
         if token.kind != TokenKind::Word {
-            return Err(synerror(sh, b"invalid compound array assignment"));
+            return Err(syntax_error(shell, b"invalid compound array assignment"));
         }
-        let arg = take_word(sh, token.quoted).arg;
+        let arg = take_word(shell, token.quoted).arg;
         elements.push(array_element(arg));
     }
     assignment.value = BashArrayValue::Compound(elements);
@@ -219,61 +221,61 @@ pub(super) fn compound_array(
 
 // [spec:nsh:req:idiom.lexer-tokens]
 pub(super) fn process_substitutions(
-    sh: &mut Shell,
-    st: &mut Rt1<'_>,
+    shell: &mut Shell,
+    lexer: &mut WordLexer<'_>,
     enabled: bool,
 ) -> Result<(), Error> {
     loop {
-        if !enabled || !active(sh) || !st.eofmark.is_none() {
+        if !enabled || !active(shell) || !lexer.delimiter.is_none() {
             return Ok(());
         }
-        let direction = match st.input.byte() {
+        let direction = match lexer.input.byte() {
             Some(b'<') => BashProcessDirection::Input,
             Some(b'>') => BashProcessDirection::Output,
             _ => return Ok(()),
         };
-        if !pgetc_eatbnl(sh)?.is(b'(') {
-            pungetc(sh);
+        if !read_unit_skipping_line_continuations(shell)?.is(b'(') {
+            unread_input_unit(shell);
             return Ok(());
         }
 
-        st.out.push(CTLBACKQ as u8);
-        let parked = mem::take(&mut st.out);
-        let slot = st.bqlist.len();
-        st.bqlist.push(None);
-        let saved_heredocs = mem::take(&mut sh.input.heredoclist);
-        let completed_at = sh.input.completed_heredocs.len();
-        let parsed = crate::resource::with_resources(sh, |sh, _resources| {
-            let mut body = list(sh, ListMode::StopAtTerminator)?.into_node();
-            if readtoken(sh, TokenContext::NONE)? != TokenKind::RightParen {
-                return Err(synexpect(sh, Some(TokenKind::RightParen)));
+        lexer.output.push(LEGACY_COMMAND_SUBSTITUTION as u8);
+        let parked = mem::take(&mut lexer.output);
+        let slot = lexer.command_substitutions.len();
+        lexer.command_substitutions.push(None);
+        let saved_heredocs = mem::take(&mut shell.input.pending_here_documents);
+        let completed_at = shell.input.completed_here_documents.len();
+        let parsed = crate::resource::with_resources(shell, |shell, _resources| {
+            let mut body = list(shell, ListMode::StopAtTerminator)?.into_node();
+            if read_token(shell, TokenContext::NONE)?.kind != TokenKind::RightParen {
+                return Err(expected_token_error(shell, Some(TokenKind::RightParen)));
             }
-            setinputstring(sh, BStr::new(b""));
-            parseheredoc(sh)?;
-            finalize::node(sh, &mut body, completed_at)?;
+            set_input_string(shell, BStr::new(b""));
+            parse_here_documents(shell)?;
+            finalize::node(shell, &mut body, completed_at)?;
             Ok(body)
         });
-        sh.input.heredoclist = saved_heredocs;
-        st.out = parked;
+        shell.input.pending_here_documents = saved_heredocs;
+        lexer.output = parked;
         let body = parsed?;
 
-        st.bqlist[slot] = Some(Node::Bash(BashNode::ProcessSubstitution(
+        lexer.command_substitutions[slot] = Some(Node::Bash(BashNode::ProcessSubstitution(
             BashProcessSubstitution {
                 direction,
                 body: body.map(Box::new),
             },
         )));
-        st.input = super::pgetc_top(sh, st.syn())?;
+        lexer.input = super::read_unit_for_syntax(shell, lexer.current_syntax())?;
     }
 }
 
 pub(super) fn parameter_subscript(
-    sh: &mut Shell,
-    st: &mut Rt1<'_>,
-    badsub: bool,
+    shell: &mut Shell,
+    lexer: &mut WordLexer<'_>,
+    bad_substitution: bool,
     subtype: u8,
 ) -> Result<(), Error> {
-    if badsub || subtype != 0 || !st.input.is(b'[') || !active(sh) {
+    if bad_substitution || subtype != 0 || !lexer.input.is(b'[') || !active(shell) {
         return Ok(());
     }
     let mut depth = 0usize;
@@ -281,14 +283,14 @@ pub(super) fn parameter_subscript(
     let mut escaped = false;
 
     loop {
-        let input = st.input;
+        let input = lexer.input;
         let Some(byte) = input.byte() else {
-            return Err(synerror(sh, b"unterminated array subscript"));
+            return Err(syntax_error(shell, b"unterminated array subscript"));
         };
         if input.is(b'\n') {
-            nlnoprompt(sh);
+            consume_newline_without_prompt(shell);
         }
-        st.out.push(byte);
+        lexer.output.push(byte);
 
         if escaped {
             escaped = false;
@@ -306,19 +308,19 @@ pub(super) fn parameter_subscript(
                 Quote::None if input.is(b']') => {
                     depth -= 1;
                     if depth == 0 {
-                        st.input = pgetc_eatbnl(sh)?;
+                        lexer.input = read_unit_skipping_line_continuations(shell)?;
                         return Ok(());
                     }
                 }
                 Quote::None => {}
             }
         }
-        st.input = pgetc_eatbnl(sh)?;
+        lexer.input = read_unit_skipping_line_continuations(shell)?;
     }
 }
 
-fn arithmetic_text(sh: &mut Shell) -> Result<NodeText, Error> {
-    let mut out = BString::new(Vec::new());
+fn arithmetic_text(shell: &mut Shell) -> Result<NodeText, Error> {
+    let mut output = BString::new(Vec::new());
     let mut depth = 0usize;
     let mut quote = Quote::None;
     let mut escaped = false;
@@ -327,29 +329,29 @@ fn arithmetic_text(sh: &mut Shell) -> Result<NodeText, Error> {
     loop {
         let input = match pending.take() {
             Some(input) => input,
-            None => pgetc(sh)?,
+            None => read_input_unit(shell)?,
         };
         let Some(byte) = input.byte() else {
-            return Err(synerror(sh, b"missing '))'"));
+            return Err(syntax_error(shell, b"missing '))'"));
         };
         if input.is(b'\n') {
-            nlnoprompt(sh);
+            consume_newline_without_prompt(shell);
         }
 
         if escaped {
-            out.push(byte);
+            output.push(byte);
             escaped = false;
             continue;
         }
         match quote {
             Quote::Single => {
-                out.push(byte);
+                output.push(byte);
                 if input.is(b'\'') {
                     quote = Quote::None;
                 }
             }
             Quote::Double => {
-                out.push(byte);
+                output.push(byte);
                 if input.is(b'\\') {
                     escaped = true;
                 } else if input.is(b'"') {
@@ -357,40 +359,40 @@ fn arithmetic_text(sh: &mut Shell) -> Result<NodeText, Error> {
                 }
             }
             Quote::None if input.is(b'\\') => {
-                out.push(byte);
+                output.push(byte);
                 escaped = true;
             }
             Quote::None if input.is(b'\'') => {
-                out.push(byte);
+                output.push(byte);
                 quote = Quote::Single;
             }
             Quote::None if input.is(b'"') => {
-                out.push(byte);
+                output.push(byte);
                 quote = Quote::Double;
             }
             Quote::None if input.is(b'(') => {
                 depth += 1;
-                out.push(byte);
+                output.push(byte);
             }
             Quote::None if input.is(b')') && depth != 0 => {
                 depth -= 1;
-                out.push(byte);
+                output.push(byte);
             }
             Quote::None if input.is(b')') => {
-                let next = pgetc(sh)?;
+                let next = read_input_unit(shell)?;
                 if next.is(b')') {
                     break;
                 }
-                out.push(byte);
+                output.push(byte);
                 pending = Some(next);
             }
-            Quote::None => out.push(byte),
+            Quote::None => output.push(byte),
         }
     }
-    Ok(NodeText::from(out.as_slice()))
+    Ok(NodeText::from(output.as_slice()))
 }
 
-fn for_clauses(sh: &mut Shell, text: &BStr) -> Result<[NodeText; 3], Error> {
+fn for_clauses(shell: &mut Shell, text: &BStr) -> Result<[NodeText; 3], Error> {
     let mut separators = Vec::new();
     let mut parens = 0usize;
     let mut brackets = 0usize;
@@ -420,7 +422,10 @@ fn for_clauses(sh: &mut Shell, text: &BStr) -> Result<[NodeText; 3], Error> {
         }
     }
     if separators.len() != 2 {
-        return Err(synerror(sh, b"arithmetic for requires three expressions"));
+        return Err(syntax_error(
+            shell,
+            b"arithmetic for requires three expressions",
+        ));
     }
     Ok([
         NodeText::from(&text[..separators[0]]),
@@ -429,63 +434,65 @@ fn for_clauses(sh: &mut Shell, text: &BStr) -> Result<[NodeText; 3], Error> {
     ])
 }
 
-fn conditional_or(sh: &mut Shell) -> Result<BashConditionalExpr, Error> {
-    let mut left = conditional_and(sh)?;
+fn conditional_or(shell: &mut Shell) -> Result<BashConditionalExpr, Error> {
+    let mut left = conditional_and(shell)?;
     loop {
-        let token = readtoken(sh, TokenContext::NONE)?;
+        let token = read_token(shell, TokenContext::NONE)?.kind;
         if token != TokenKind::OrIf {
-            sh.input.tokpushback = true;
+            shell.input.token_pushed_back = true;
             return Ok(left);
         }
-        left = BashConditionalExpr::Or(Box::new(left), Box::new(conditional_and(sh)?));
+        left = BashConditionalExpr::Or(Box::new(left), Box::new(conditional_and(shell)?));
     }
 }
 
-fn conditional_and(sh: &mut Shell) -> Result<BashConditionalExpr, Error> {
-    let mut left = conditional_primary(sh)?;
+fn conditional_and(shell: &mut Shell) -> Result<BashConditionalExpr, Error> {
+    let mut left = conditional_primary(shell)?;
     loop {
-        let token = readtoken(sh, TokenContext::NONE)?;
+        let token = read_token(shell, TokenContext::NONE)?.kind;
         if token != TokenKind::AndIf {
-            sh.input.tokpushback = true;
+            shell.input.token_pushed_back = true;
             return Ok(left);
         }
-        left = BashConditionalExpr::And(Box::new(left), Box::new(conditional_primary(sh)?));
+        left = BashConditionalExpr::And(Box::new(left), Box::new(conditional_primary(shell)?));
     }
 }
 
-fn conditional_primary(sh: &mut Shell) -> Result<BashConditionalExpr, Error> {
-    let token = readtoken_with_flags(sh, TokenContext::NONE)?;
+fn conditional_primary(shell: &mut Shell) -> Result<BashConditionalExpr, Error> {
+    let token = read_token(shell, TokenContext::NONE)?;
     if token.kind == TokenKind::LeftParen {
-        let expression = conditional_or(sh)?;
-        if readtoken(sh, TokenContext::NONE)? != TokenKind::RightParen {
-            return Err(synexpect(sh, Some(TokenKind::RightParen)));
+        let expression = conditional_or(shell)?;
+        if read_token(shell, TokenContext::NONE)?.kind != TokenKind::RightParen {
+            return Err(expected_token_error(shell, Some(TokenKind::RightParen)));
         }
         return Ok(BashConditionalExpr::Group(Box::new(expression)));
     }
-    if token.kind != TokenKind::Word || closes_conditional(sh, token.kind, token.quoted) {
-        return Err(synerror(sh, b"expected conditional expression"));
+    if token.kind != TokenKind::Word || closes_conditional(shell, token.kind, token.quoted) {
+        return Err(syntax_error(shell, b"expected conditional expression"));
     }
 
-    let first = take_word(sh, token.quoted);
+    let first = take_word(shell, token.quoted);
     if !first.quoted && first.arg.word.as_bstr() == BStr::new(b"!") {
-        return Ok(BashConditionalExpr::Not(Box::new(conditional_primary(sh)?)));
+        return Ok(BashConditionalExpr::Not(Box::new(conditional_primary(
+            shell,
+        )?)));
     }
     if !first.quoted && unary_operator(first.arg.word.as_bstr()) {
-        let operand_token = readtoken_with_flags(sh, TokenContext::NONE)?;
+        let operand_token = read_token(shell, TokenContext::NONE)?;
         if operand_token.kind != TokenKind::Word
-            || closes_conditional(sh, operand_token.kind, operand_token.quoted)
+            || closes_conditional(shell, operand_token.kind, operand_token.quoted)
         {
-            return Err(synerror(sh, b"expected unary-test operand"));
+            return Err(syntax_error(shell, b"expected unary-test operand"));
         }
         return Ok(BashConditionalExpr::Unary {
             operator: NodeText::from(first.arg.word.as_bstr()),
-            operand: take_word(sh, operand_token.quoted).arg,
+            operand: take_word(shell, operand_token.quoted).arg,
         });
     }
 
-    let operator_token = readtoken_with_flags(sh, TokenContext::NONE)?;
+    let operator_token = read_token(shell, TokenContext::NONE)?;
     let operator = if operator_token.kind == super::TokenKind::Redirection {
-        let redirection = sh.input.redirnode.take();
+        let redirection = shell.input.pending_redirection.take();
         match redirection.as_ref() {
             Some(super::PendingRedirection::File { operator, .. })
                 if *operator == FileRedirectionOperator::Read =>
@@ -501,33 +508,33 @@ fn conditional_primary(sh: &mut Shell) -> Result<BashConditionalExpr, Error> {
         }
     } else if operator_token.kind == TokenKind::Word
         && !operator_token.quoted
-        && binary_operator(wordtext(sh))
+        && binary_operator(shell.input.word_text())
     {
-        let operator = NodeText::from(wordtext(sh));
+        let operator = NodeText::from(shell.input.word_text());
         Some(operator)
     } else {
         None
     };
     let Some(operator) = operator else {
-        sh.input.tokpushback = true;
+        shell.input.token_pushed_back = true;
         return Ok(BashConditionalExpr::Word(first.arg));
     };
 
-    let right_token = readtoken_with_flags(sh, TokenContext::NONE)?;
+    let right_token = read_token(shell, TokenContext::NONE)?;
     if right_token.kind != TokenKind::Word
-        || closes_conditional(sh, right_token.kind, right_token.quoted)
+        || closes_conditional(shell, right_token.kind, right_token.quoted)
     {
-        return Err(synerror(sh, b"expected binary-test operand"));
+        return Err(syntax_error(shell, b"expected binary-test operand"));
     }
     Ok(BashConditionalExpr::Binary {
         left: first.arg,
         operator,
-        right: take_word(sh, right_token.quoted).arg,
+        right: take_word(shell, right_token.quoted).arg,
     })
 }
 
-fn closes_conditional(sh: &Shell, kind: TokenKind, quoted: bool) -> bool {
-    kind == TokenKind::Word && !quoted && wordtext(sh) == BStr::new(b"]]")
+fn closes_conditional(shell: &Shell, kind: TokenKind, quoted: bool) -> bool {
+    kind == TokenKind::Word && !quoted && shell.input.word_text() == BStr::new(b"]]")
 }
 
 fn unary_operator(operator: &BStr) -> bool {
@@ -582,19 +589,19 @@ fn binary_operator(operator: &BStr) -> bool {
     )
 }
 
-fn take_word(sh: &mut Shell, quoted: bool) -> ConditionalWord {
+fn take_word(shell: &mut Shell, quoted: bool) -> ConditionalWord {
     ConditionalWord {
         arg: WordNode {
-            word: mem::take(&mut sh.input.word),
+            word: mem::take(&mut shell.input.word),
         },
         quoted,
     }
 }
 
-fn compound_candidate(sh: &Shell, node: Option<&Node>) -> bool {
+fn compound_candidate(shell: &Shell, node: Option<&Node>) -> bool {
     match node {
         Some(Node::Word(arg)) => plain_prefix(arg).is_some_and(|(name_end, _)| {
-            goodname(&sh.locale, BStr::new(&arg.word.as_bstr()[..name_end]))
+            is_valid_name(&shell.locale, BStr::new(&arg.word.as_bstr()[..name_end]))
         }),
         Some(Node::Bash(BashNode::ArrayAssignment(assignment))) => {
             matches!(&assignment.value, BashArrayValue::Word(value) if value.word.as_bstr().is_empty())
@@ -603,11 +610,11 @@ fn compound_candidate(sh: &Shell, node: Option<&Node>) -> bool {
     }
 }
 
-fn compound_prefix(sh: &Shell, node: Node) -> Option<BashArrayAssignment> {
+fn compound_prefix(shell: &Shell, node: Node) -> Option<BashArrayAssignment> {
     match node {
         Node::Word(arg) => {
             let (name_end, operator) = plain_prefix(&arg)?;
-            if !goodname(&sh.locale, BStr::new(&arg.word.as_bstr()[..name_end])) {
+            if !is_valid_name(&shell.locale, BStr::new(&arg.word.as_bstr()[..name_end])) {
                 return None;
             }
             Some(BashArrayAssignment {
@@ -668,12 +675,12 @@ fn matching_bracket(bytes: &[u8], open: usize) -> Option<usize> {
     let mut quoted = false;
     while index < bytes.len() {
         match bytes[index] {
-            byte if byte == CTLESC as u8 => index += 2,
-            byte if byte == CTLQUOTEMARK as u8 => {
+            byte if byte == LEGACY_ESCAPE as u8 => index += 2,
+            byte if byte == LEGACY_QUOTE as u8 => {
                 quoted = !quoted;
                 index += 1;
             }
-            byte if byte == CTLMBCHAR as u8 => {
+            byte if byte == LEGACY_MULTIBYTE as u8 => {
                 index = multibyte_end(bytes, index);
             }
             b'[' if !quoted => {
@@ -725,12 +732,12 @@ fn backquote_count(bytes: &[u8]) -> usize {
     let mut count = 0usize;
     let mut index = 0usize;
     while index < bytes.len() {
-        if bytes[index] == CTLESC as u8 {
+        if bytes[index] == LEGACY_ESCAPE as u8 {
             index += 2;
-        } else if bytes[index] == CTLMBCHAR as u8 {
+        } else if bytes[index] == LEGACY_MULTIBYTE as u8 {
             index = multibyte_end(bytes, index);
         } else {
-            count += usize::from(bytes[index] == CTLBACKQ as u8);
+            count += usize::from(bytes[index] == LEGACY_COMMAND_SUBSTITUTION as u8);
             index += 1;
         }
     }
@@ -738,7 +745,7 @@ fn backquote_count(bytes: &[u8]) -> usize {
 }
 
 fn multibyte_end(bytes: &[u8], start: usize) -> usize {
-    let length_at = start + 1 + usize::from(bytes.get(start + 1) == Some(&(CTLESC as u8)));
+    let length_at = start + 1 + usize::from(bytes.get(start + 1) == Some(&(LEGACY_ESCAPE as u8)));
     let length = bytes.get(length_at).copied().unwrap_or(0) as usize;
     length_at.saturating_add(length).saturating_add(3)
 }

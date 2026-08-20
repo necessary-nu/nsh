@@ -15,8 +15,8 @@ use crate::error::Error;
 
 use bstr::{BStr, ByteSlice};
 
-use crate::eval::Flow;
-use crate::exec::shellexec;
+use crate::evaluation::Flow;
+use crate::execution::execute_external_command;
 
 // [spec:dash:def:eval.execcmd-fn]
 // [spec:dash:sem:eval.execcmd-fn]
@@ -31,7 +31,7 @@ use crate::exec::shellexec;
 // [spec:posix:req:builtin.exec.interfaces]
 // [spec:posix:req:builtin.exec.exit-status]
 // [spec:nsh:def:idiom.shell-options]
-pub fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut utility = args.get(1..).unwrap_or_default();
     if utility
         .first()
@@ -41,36 +41,45 @@ pub fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 
     if !utility.is_empty() {
-        let interactive_root =
-            sh.options.enabled(crate::options::ShellOption::Interactive) && sh.shell_level == 0;
-        let saved_interactive = sh.options.enabled(crate::options::ShellOption::Interactive);
-        let saved_monitor = sh.options.enabled(crate::options::ShellOption::Monitor);
+        let interactive_root = shell
+            .options
+            .enabled(crate::options::ShellOption::Interactive)
+            && shell.shell_level == 0;
+        let saved_interactive = shell
+            .options
+            .enabled(crate::options::ShellOption::Interactive);
+        let saved_monitor = shell.options.enabled(crate::options::ShellOption::Monitor);
         if !interactive_root {
-            sh.options
+            shell
+                .options
                 .set(crate::options::ShellOption::Interactive, false); /* exit on error */
         }
-        sh.options.set(crate::options::ShellOption::Monitor, false);
-        crate::options::optschanged(sh)?;
+        shell
+            .options
+            .set(crate::options::ShellOption::Monitor, false);
+        crate::options::apply_option_changes(shell)?;
         if !interactive_root {
-            sh.flush_input();
+            shell.flush_input();
         }
         /* Hoisted out of `shellexec`'s argument list, which also takes
          * the shell; see the note in `eval.rs`'s `evalcommand`. */
-        let path = crate::var::pathval(sh);
-        let outcome = shellexec(sh, utility, path.as_slice().as_bstr(), None);
+        let path = crate::variables::path_value(shell);
+        let outcome = execute_external_command(shell, utility, path.as_slice().as_bstr(), None);
 
         if interactive_root {
             /* A successful exec never returns. On failure, restore the
              * interactive shell state before allowing evaluation to
              * continue. `Flow::Done` also takes the ordinary evalcommand
              * cleanup path, where exec's redirections are kept. */
-            sh.options
+            shell
+                .options
                 .set(crate::options::ShellOption::Interactive, saved_interactive);
-            sh.options
+            shell
+                .options
                 .set(crate::options::ShellOption::Monitor, saved_monitor);
-            crate::options::optschanged(sh)?;
+            crate::options::apply_option_changes(shell)?;
             return match outcome? {
-                Flow::Exit { .. } => Ok(Flow::Done((sh.status).into())),
+                Flow::Exit { .. } => Ok(Flow::Done((shell.status).into())),
                 done @ Flow::Done(_) => Ok(done),
                 control => Ok(control),
             };

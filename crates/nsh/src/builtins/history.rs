@@ -2,34 +2,34 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::eval::Flow;
-use crate::output::Dest;
+use crate::evaluation::Flow;
+use crate::output::OutputDestination;
 use bstr::BStr;
 
 // [spec:nsh:req:compat.smoosh.history-builtin]
-pub fn historycmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut clear = false;
-    let mut opts = crate::options::Options::new(args);
-    while let Some(option) = opts.next(&mut sh.diagnostics(), b"c")? {
+    let mut option_scan = crate::options::Options::new(args);
+    while let Some(option) = option_scan.next(&mut shell.diagnostics(), b"c")? {
         debug_assert_eq!(option, b'c');
         clear = true;
     }
 
     if clear {
-        let Some(history) = crate::editor::history_mut(sh) else {
+        let Some(history) = crate::editor::history_mut(shell) else {
             return Ok(Flow::Done((1).into()));
         };
         *history = crate::editor::History::new();
-        let size = crate::var::histsizeval(sh);
-        crate::editor::sethistsize(sh, BStr::new(size.as_slice()));
-        crate::editor::save_history(sh);
+        let size = crate::variables::history_size_value(shell);
+        crate::editor::set_history_size(shell, BStr::new(size.as_slice()));
+        crate::editor::save_history(shell);
         return Ok(Flow::Done((0).into()));
     }
 
-    let Some(contents) = crate::editor::history_mut(sh).map(|history| history.file_contents())
+    let Some(contents) = crate::editor::history_mut(shell).map(|history| history.file_contents())
     else {
         return Ok(Flow::Done((1).into()));
     };
-    sh.write_output(Dest::Stdout, &contents)?;
+    shell.write_output(OutputDestination::Stdout, &contents)?;
     Ok(Flow::Done((0).into()))
 }

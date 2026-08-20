@@ -13,7 +13,7 @@ use crate::error::Error;
 use bstr::BStr;
 
 use crate::builtins::r#type::describe_command;
-use crate::eval::Flow;
+use crate::evaluation::Flow;
 
 // [spec:dash:def:exec.commandcmd-fn]
 // [spec:dash:sem:exec.commandcmd-fn]
@@ -29,15 +29,15 @@ use crate::eval::Flow;
 // [spec:posix:req:builtin.command.stderr]
 // [spec:posix:req:builtin.command.interfaces]
 // [spec:posix:req:builtin.command.exit-status-v-options]
-pub fn commandcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut describe = None;
     let mut use_default_path = false;
 
-    let mut opts = crate::options::Options::new(args);
-    while let Some(c) = opts.next(&mut sh.diagnostics(), b"pvV")? {
-        if c == b'V' {
+    let mut option_scan = crate::options::Options::new(args);
+    while let Some(option) = option_scan.next(&mut shell.diagnostics(), b"pvV")? {
+        if option == b'V' {
             describe = Some(true);
-        } else if c == b'v' {
+        } else if option == b'v' {
             describe.get_or_insert(false);
         } else {
             use_default_path = true;
@@ -45,12 +45,12 @@ pub fn commandcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 
     if let Some(verbose) = describe {
-        if let Some(cmd) = opts.operands().first() {
-            let default_path = use_default_path.then(crate::var::defpath);
+        if let Some(command_name) = option_scan.operands().first() {
+            let default_path = use_default_path.then(crate::variables::default_path);
             return describe_command(
-                sh,
-                crate::output::Dest::Stdout,
-                cmd,
+                shell,
+                crate::output::OutputDestination::Stdout,
+                command_name,
                 default_path.as_ref().map(|path| BStr::new(path.as_slice())),
                 verbose,
             );

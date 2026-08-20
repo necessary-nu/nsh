@@ -9,8 +9,10 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::eval::Flow;
-use crate::jobs::{JobId, WaitMode, dowait, getjob, getstatus, remove_waited_job};
+use crate::evaluation::Flow;
+use crate::jobs::{
+    JobId, WaitMode, job_exit_status, reap_children, remove_waited_job, resolve_job,
+};
 use bstr::BStr;
 
 // [spec:nsh:def:idiom.job-control-model]
@@ -32,88 +34,87 @@ use bstr::BStr;
 // [spec:posix:req:builtin.wait.stderr]
 // [spec:posix:req:builtin.wait.interfaces]
 // [spec:posix:req:builtin.wait.exit-status-signal]
-pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut jobp: Option<JobId>;
-    let mut retval: crate::status::ExitStatus;
-    let mut jp: Option<JobId>;
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+    let mut job_id: Option<JobId>;
+    let mut status: crate::status::ExitStatus;
 
-    let mut opts = crate::options::Options::new(args);
-    opts.next(&mut sh.diagnostics(), b"")?;
-    retval = crate::status::ExitStatus::SUCCESS;
+    let mut option_scan = crate::options::Options::new(args);
+    option_scan.next(&mut shell.diagnostics(), b"")?;
+    status = crate::status::ExitStatus::SUCCESS;
 
-    let operands = opts.operands();
-    'out_lbl: {
+    let operands = option_scan.operands();
+    'wait_complete: {
         if operands.is_empty() {
             /* wait for all jobs */
             loop {
-                jp = None;
-                for i in sh.jobs.order_snapshot() {
-                    if sh.jobs[i].is_running() {
-                        jp = Some(i);
+                job_id = None;
+                for job_index in shell.jobs.order_snapshot() {
+                    if shell.jobs[job_index].is_running() {
+                        job_id = Some(job_index);
                         break;
                     }
-                    sh.jobs[i].waited = true;
-                    remove_waited_job(&mut sh.interrupt_deferral, &mut sh.jobs, i);
+                    shell.jobs[job_index].waited = true;
+                    remove_waited_job(&mut shell.interrupt_deferral, &mut shell.jobs, job_index);
                 }
-                if jp.is_none() {
+                if job_id.is_none() {
                     /* no running procs */
-                    break 'out_lbl;
+                    break 'wait_complete;
                 }
-                if !dowait(sh, WaitMode::CommandAll, None)? {
+                if !reap_children(shell, WaitMode::CommandAll, None)? {
                     // sigout:
-                    retval = crate::siginbox::signals()
+                    status = crate::signal_inbox::signals()
                         .pending_signal()
                         .expect("an interrupted wait records its signal")
                         .as_status();
-                    break 'out_lbl;
+                    break 'wait_complete;
                 }
             }
         }
 
         for spec in operands {
-            retval = crate::status::ExitStatus::NOT_FOUND;
-            'repeat: {
+            status = crate::status::ExitStatus::NOT_FOUND;
+            'operand_complete: {
                 if spec.first() != Some(&b'%') {
                     let process = u32::try_from(crate::number::parse_nonnegative(
-                        &mut sh.diagnostics(),
+                        &mut shell.diagnostics(),
                         spec,
                     )?)
                     .ok()
                     .and_then(nsh_platform::ProcessId::new);
-                    jobp = None;
-                    for i in sh.jobs.order_snapshot() {
-                        if sh.jobs[i]
-                            .ps
+                    job_id = None;
+                    for job_index in shell.jobs.order_snapshot() {
+                        if shell.jobs[job_index]
+                            .processes
                             .last()
-                            .is_some_and(|candidate| Some(candidate.pid) == process)
+                            .is_some_and(|candidate| Some(candidate.process_id) == process)
                         {
-                            jobp = Some(i);
+                            job_id = Some(job_index);
                             break;
                         }
                     }
-                    if jobp.is_none() {
-                        break 'repeat;
+                    if job_id.is_none() {
+                        break 'operand_complete;
                     }
                 } else {
-                    jobp = Some(getjob(sh, Some(spec), false)?);
+                    job_id = Some(resolve_job(shell, Some(spec), false)?);
                 }
                 /* loop until process terminated or stopped */
-                if !dowait(sh, WaitMode::Command, jobp)? {
+                if !reap_children(shell, WaitMode::Command, job_id)? {
                     // sigout:
-                    retval = crate::siginbox::signals()
+                    status = crate::signal_inbox::signals()
                         .pending_signal()
                         .expect("an interrupted wait records its signal")
                         .as_status();
-                    break 'out_lbl;
+                    break 'wait_complete;
                 }
-                let i = jobp.unwrap();
-                sh.jobs[i].waited = true;
-                retval = getstatus(sh, i);
-                remove_waited_job(&mut sh.interrupt_deferral, &mut sh.jobs, i);
+                let job_index = job_id.unwrap();
+                shell.jobs[job_index].waited = true;
+                status = job_exit_status(shell, job_index);
+                remove_waited_job(&mut shell.interrupt_deferral, &mut shell.jobs, job_index);
             }
             // repeat:
         }
     }
     // out:
-    Ok(Flow::Done((retval).into()))
+    Ok(Flow::Done(status))
 }

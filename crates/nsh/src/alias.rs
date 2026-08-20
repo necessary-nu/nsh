@@ -121,17 +121,18 @@ fn valid_name(name: &BStr) -> bool {
 // [spec:dash:def:alias.setalias-fn]
 // [spec:dash:sem:alias.setalias-fn]
 // [spec:posix:req:token.alias-change-timing]
-pub(crate) fn setalias(sh: &mut Shell, name: &BStr, value: &BStr) -> Result<(), Error> {
+pub(crate) fn set_alias(shell: &mut Shell, name: &BStr, value: &BStr) -> Result<(), Error> {
     if !valid_name(name) {
         let mut message = b"Invalid alias name: ".to_vec();
         message.extend_from_slice(name);
         message.push(b'=');
         message.extend_from_slice(value);
-        return Err(sh.diagnostics().sh_error_value(&message));
+        return Err(shell.diagnostics().shell_error(&message));
     }
 
-    sh.interrupt_deferral
-        .run_with(&mut sh.aliases, |aliases| aliases.set(name, value));
+    shell
+        .interrupt_deferral
+        .run_with(&mut shell.aliases, |aliases| aliases.set(name, value));
     Ok(())
 }
 
@@ -147,14 +148,14 @@ pub(crate) fn unalias(
 
 // [spec:dash:def:alias.rmaliases-fn]
 // [spec:dash:sem:alias.rmaliases-fn]
-pub fn rmaliases(interrupts: &mut crate::error::InterruptDeferral, aliases: &mut AliasTable) {
+pub fn clear_aliases(interrupts: &mut crate::error::InterruptDeferral, aliases: &mut AliasTable) {
     interrupts.run_with(aliases, AliasTable::clear);
 }
 
 // [spec:dash:def:alias.printalias-fn]
 // [spec:dash:sem:alias.printalias-fn]
 // [spec:posix:req:builtin.alias.stdout-format]
-pub(crate) fn printalias(name: &BStr, value: &BStr) -> Vec<u8> {
+pub(crate) fn format_alias(name: &BStr, value: &BStr) -> Vec<u8> {
     let quoted = crate::escape::shell_quote(value);
     let mut line = Vec::with_capacity(name.len() + quoted.len() + 2);
     line.extend_from_slice(name);
@@ -172,16 +173,16 @@ mod tests {
     #[test]
     fn alias_display_quotes_only_value() {
         assert_eq!(
-            printalias(BStr::new(b"sample"), BStr::new(b"a'b")),
+            format_alias(BStr::new(b"sample"), BStr::new(b"a'b")),
             b"sample='a'\"'\"'b'\n".as_slice()
         );
     }
 
     #[test]
     fn an_invalid_name_returns_its_complaint() {
-        let _guard = crate::testutil::lock();
+        let _guard = crate::test_support::lock();
         let mut shell = Shell::new(crate::streams::Streams::INHERIT);
-        let error = setalias(&mut shell, BStr::new(b"a b"), BStr::new(b"value"))
+        let error = set_alias(&mut shell, BStr::new(b"a b"), BStr::new(b"value"))
             .expect_err("a space is not a word character");
         assert_eq!(error.message(), BStr::new(b"Invalid alias name: a b=value"));
         assert!(shell.aliases.is_empty());
@@ -193,10 +194,10 @@ mod tests {
     // [spec:dash:sem:alias.rmaliases-fn/test]
     #[test]
     fn an_active_alias_defers_removal_and_can_be_revived() {
-        let _guard = crate::testutil::lock();
+        let _guard = crate::test_support::lock();
         let mut shell = Shell::new(crate::streams::Streams::INHERIT);
         let name = BStr::new(b"held");
-        setalias(&mut shell, name, BStr::new(b"old")).unwrap();
+        set_alias(&mut shell, name, BStr::new(b"old")).unwrap();
         shell.aliases.begin_expansion(name);
         assert!(shell.aliases.lookup(name, true).is_none());
         assert!(unalias(
@@ -213,7 +214,7 @@ mod tests {
             Some(b"old".as_slice())
         );
 
-        setalias(&mut shell, name, BStr::new(b"new")).unwrap();
+        set_alias(&mut shell, name, BStr::new(b"new")).unwrap();
         shell.aliases.finish_expansion(name);
         assert_eq!(
             shell

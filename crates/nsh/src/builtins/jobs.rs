@@ -9,9 +9,9 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 
-use crate::eval::Flow;
-use crate::jobs::{JobDisplay, getjob, showjob, showjobs};
-use crate::output::Dest;
+use crate::evaluation::Flow;
+use crate::jobs::{JobDisplay, resolve_job, write_job, write_jobs};
+use crate::output::OutputDestination;
 
 // [spec:nsh:def:idiom.job-control-model]
 
@@ -29,27 +29,27 @@ use crate::output::Dest;
 // [spec:posix:req:builtin.jobs.stderr]
 // [spec:posix:req:builtin.jobs.exit-status]
 // [spec:posix:req:builtin.jobs.interfaces]
-pub fn jobscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut mode = JobDisplay::Standard;
-    let mut opts = crate::options::Options::new(args);
-    while let Some(m) = opts.next(&mut sh.diagnostics(), b"lp")? {
-        if m == b'l' {
+    let mut option_scan = crate::options::Options::new(args);
+    while let Some(option) = option_scan.next(&mut shell.diagnostics(), b"lp")? {
+        if option == b'l' {
             mode = JobDisplay::Long;
         } else {
             mode = JobDisplay::ProcessGroup;
         }
     }
 
-    let operands = opts.operands();
+    let operands = option_scan.operands();
     if !operands.is_empty() {
         for spec in operands {
             /* `getjob` and `showjob` both take the receiver, so the
              * lookup is its own statement rather than an argument. */
-            let jp = getjob(sh, Some(spec), false)?;
-            showjob(sh, Dest::Stdout, jp, mode)?;
+            let job_id = resolve_job(shell, Some(spec), false)?;
+            write_job(shell, OutputDestination::Stdout, job_id, mode)?;
         }
     } else {
-        showjobs(sh, Dest::Stdout, mode)?;
+        write_jobs(shell, OutputDestination::Stdout, mode)?;
     }
 
     Ok(Flow::Done((0).into()))

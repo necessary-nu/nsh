@@ -14,16 +14,16 @@ use crate::error::Error;
 use bstr::{BStr, BString};
 use nsh_platform::Descriptor;
 
-use crate::fd::LogicalDescriptor;
+use crate::descriptors::LogicalDescriptor;
 use crate::options::ShellOption;
 // [spec:nsh:def:idiom.shell-options]
 use crate::syntax::InputUnit;
 
 /// `MB_LEN_MAX > 16 ? MB_LEN_MAX : 16` — 16 on glibc.
-pub const PUNGETC_MAX: usize = 16;
+pub const MAX_UNREAD_UNITS: usize = 16;
 /// stdio's `BUFSIZ`.
-pub const BUFSIZ: usize = 8192;
-pub const IBUFSIZ: usize = BUFSIZ + PUNGETC_MAX + 1;
+pub const INPUT_BUFFER_SIZE: usize = 8192;
+pub const INPUT_STORAGE_SIZE: usize = INPUT_BUFFER_SIZE + MAX_UNREAD_UNITS + 1;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct InputFileOptions {
@@ -60,18 +60,18 @@ impl InputFileOptions {
 /// `ap->name`, the *whole* `name=value` allocation that `ap->val` points
 /// into, held so that redefining an alias mid-expansion does not free the
 /// text being read. See `plan/decisions/owned-data.md`.
-pub struct StrPush {
+pub struct InputOverlay {
     /// `sp->prevstring`, as a cursor into the text that was current
-    pub prevpos: usize,
-    pub prevnleft: usize,
+    pub previous_position: usize,
+    pub previous_line_remaining: usize,
     /// if push was associated with an alias
     pub alias_name: Option<BString>,
     /// the complete pushed text
     pub string: Vec<u8>,
     /// `sp->spfree`: the pending-free chain hidden while this string is read
-    pub spfree: Vec<StrPush>,
+    pub deferred_overlays: Vec<InputOverlay>,
     /// Number of outstanding calls to pungetc.
-    pub unget: usize,
+    pub unread_count: usize,
 }
 
 /*
@@ -82,56 +82,56 @@ pub struct StrPush {
 // [spec:dash:def:input.parsefile]
 /// The C's `struct parsefile`. `prev` is an index into the frame stack, not
 /// a pointer, so that `Vec` growth cannot invalidate it.
-pub struct ParseFile {
+pub struct InputFrame {
     /// preceding file on stack
-    pub prev: Option<usize>,
+    pub previous: Option<usize>,
     /// current line
-    pub linno: i32,
+    pub line_number: i32,
     /// Whether this frame reads logical descriptor 0. Keeping the logical
     /// identity separate from the backing descriptor is what lets a later
     /// redirection change stdin without invalidating this parse frame.
     uses_stdin: bool,
     /// Ownership when this frame opened the descriptor itself.
-    owned_fd: Option<crate::fd::SharedFd>,
+    owned_descriptor: Option<crate::descriptors::SharedDescriptor>,
     /// Whether this file is the operand of the `.` special built-in.
     dot_operand: bool,
     /// number of chars left in this line
-    pub nleft: usize,
+    pub line_remaining: usize,
     /// Do not read again once the source reaches EOF.
     pub eof_latched: bool,
     /// The most recent read observed that EOF boundary.
     pub eof_observed: bool,
     /// next char in the current text
-    pub pos: usize,
+    pub position: usize,
     /// input buffer, or the whole text when this level reads a string
-    pub buf: Vec<u8>,
+    pub buffer: Vec<u8>,
     /// for pushing strings at this level
-    pub strpush: Vec<StrPush>,
+    pub overlays: Vec<InputOverlay>,
     /// Delay freeing so we can stop nested aliases.
-    pub spfree: Vec<StrPush>,
+    pub deferred_overlays: Vec<InputOverlay>,
     /// number of chars left in this buffer
-    pub lleft: usize,
+    pub buffer_remaining: usize,
     /// Number of outstanding calls to pungetc.
-    pub unget: usize,
+    pub unread_count: usize,
 }
 
-impl ParseFile {
+impl InputFrame {
     /// What `memset(pf, 0, sizeof(*pf))` produced.
-    pub const EMPTY: ParseFile = ParseFile {
-        prev: None,
-        linno: 0,
+    pub const EMPTY: InputFrame = InputFrame {
+        previous: None,
+        line_number: 0,
         uses_stdin: false,
-        owned_fd: None,
+        owned_descriptor: None,
         dot_operand: false,
-        nleft: 0,
+        line_remaining: 0,
         eof_latched: false,
         eof_observed: false,
-        pos: 0,
-        buf: Vec::new(),
-        strpush: Vec::new(),
-        spfree: Vec::new(),
-        lleft: 0,
-        unget: 0,
+        position: 0,
+        buffer: Vec::new(),
+        overlays: Vec::new(),
+        deferred_overlays: Vec::new(),
+        buffer_remaining: 0,
+        unread_count: 0,
     };
 
     /// Whether evaluation is still attached to interactive standard input,
@@ -142,9 +142,9 @@ impl ParseFile {
 }
 
 // [spec:dash:def:input.stdin-state]
-pub struct stdin_state_t {
+pub struct StandardInputState {
     pub seekable: bool,
-    pub pip: Option<crate::redir::Pipe>,
+    pub pipe: Option<crate::redirection::Pipe>,
     pub pending: Option<usize>,
     pub bufferable: bool,
 }
@@ -182,31 +182,31 @@ pub(crate) enum PromptKind {
 // [spec:posix:req:xcu.input-files.text-file-and-line-continuation]
 pub struct InputStack {
     /// `basepf` — the top-level input file, frame 0. Never popped.
-    base: ParseFile,
+    base: InputFrame,
     /// `FRAMES` — the pushed frames. `frames[i]` is frame index `i + 1`.
-    frames: Vec<ParseFile>,
+    frames: Vec<InputFrame>,
     /// `toppf` — how far `popallfiles` unwinds.
-    top: usize,
+    floor_index: usize,
     /// `parsefile` — the current frame, by index. See `cur_pf`.
-    cur: usize,
+    current: usize,
     /// Here-document delimiters waiting for their bodies at the next
     /// grammar newline.
-    pub(crate) heredoclist: Vec<crate::parser::heredoc>,
+    pub(crate) pending_here_documents: Vec<crate::parser::PendingHereDocument>,
     /// Bodies read for the syntax tree currently under construction. They
     /// are moved into that tree before it crosses a parser boundary.
-    pub(crate) completed_heredocs: Vec<crate::nodes::WordNode>,
+    pub(crate) completed_here_documents: Vec<crate::nodes::WordNode>,
     /// `doprompt` — whether to prompt before the next read.
-    pub(crate) doprompt: bool,
+    pub(crate) prompt_before_read: bool,
     /// `needprompt` — interactive and at the start of a line.
-    pub(crate) needprompt: bool,
+    pub(crate) prompt_needed: bool,
     /// `lasttoken` — the last token read.
-    pub(crate) lasttoken: crate::parser::TokenKind,
+    pub(crate) last_token: crate::parser::TokenKind,
     /// Whether the last word token contained quoting. Kept beside
     /// `lasttoken` so pushing a token back preserves the complete token;
     /// ordinary parser code receives it as part of `readtoken`'s result.
-    pub(crate) last_quoteflag: bool,
+    pub(crate) last_token_quoted: bool,
     /// `tokpushback` — one token of lookahead, pushed back.
-    pub(crate) tokpushback: bool,
+    pub(crate) token_pushed_back: bool,
     /// The option-derived dialect captured at the current parser entry.
     /// It is a snapshot, not a second setting: every top-level parse unit
     /// replaces it from this shell's [`crate::options::ShellOptions`].
@@ -217,15 +217,15 @@ pub struct InputStack {
     pub(crate) word: crate::word::ParsedWord,
     /// The redirection operator the last token opened. Its required operand
     /// is parsed before it becomes an AST redirection.
-    pub(crate) redirnode: Option<crate::parser::PendingRedirection>,
+    pub(crate) pending_redirection: Option<crate::parser::PendingRedirection>,
     /// `heredoc` — the here-document the last token opened.
-    pub(crate) heredoc: Option<crate::parser::heredoc>,
+    pub(crate) pending_here_document: Option<crate::parser::PendingHereDocument>,
     /// `stdin_state` — how the shell's standard input behaves.
-    pub(crate) stdin_state: stdin_state_t,
+    pub(crate) standard_input_state: StandardInputState,
     /// The prompt selected for the next interactive read.
     pub(crate) prompt: Option<PromptKind>,
     /// Whether standard input is a terminal, once queried.
-    pub(crate) stdin_is_tty: Option<bool>,
+    pub(crate) standard_input_is_terminal: Option<bool>,
     /// See [`InputStack::take_alias_boundary`].
     alias_boundary: bool,
 }
@@ -234,31 +234,36 @@ impl InputStack {
     /// What the statics were declared with.
     pub(crate) const fn new() -> Self {
         InputStack {
-            base: ParseFile::EMPTY,
+            base: InputFrame::EMPTY,
             frames: Vec::new(),
-            top: 0,
-            cur: 0,
-            heredoclist: Vec::new(),
-            completed_heredocs: Vec::new(),
-            doprompt: false,
-            needprompt: false,
-            lasttoken: crate::parser::TokenKind::Eof,
-            last_quoteflag: false,
-            tokpushback: false,
+            floor_index: 0,
+            current: 0,
+            pending_here_documents: Vec::new(),
+            completed_here_documents: Vec::new(),
+            prompt_before_read: false,
+            prompt_needed: false,
+            last_token: crate::parser::TokenKind::Eof,
+            last_token_quoted: false,
+            token_pushed_back: false,
             parse_dialect: crate::options::Dialect::Posix,
             word: crate::word::ParsedWord::new(),
-            redirnode: None,
-            heredoc: None,
-            stdin_state: stdin_state_t {
+            pending_redirection: None,
+            pending_here_document: None,
+            standard_input_state: StandardInputState {
                 seekable: false,
-                pip: None,
+                pipe: None,
                 pending: None,
                 bufferable: false,
             },
             prompt: None,
-            stdin_is_tty: None,
+            standard_input_is_terminal: None,
             alias_boundary: false,
         }
+    }
+
+    /// The last word read, as its shell-visible bytes.
+    pub(crate) fn word_text(&self) -> &BStr {
+        self.word.as_bstr()
     }
 
     /// Begin a parser entry with the shell's current dialect snapshot.
@@ -279,13 +284,13 @@ impl InputStack {
     /// see `run`'s own `debug_assert`.
     #[inline]
     pub(crate) fn mark(&self) -> usize {
-        self.cur
+        self.current
     }
 
     /// `toppf` — the floor [`popallfiles`] unwinds to.
     #[inline]
     pub(crate) fn floor(&self) -> usize {
-        self.top
+        self.floor_index
     }
 
     /// Move the floor.
@@ -298,7 +303,7 @@ impl InputStack {
     /// the push is what moves it.
     #[inline]
     pub(crate) fn set_floor(&mut self, to: usize) {
-        self.top = to;
+        self.floor_index = to;
     }
 
     /// Take the alias-expansion boundary flag and clear it.
@@ -325,11 +330,11 @@ impl InputStack {
 /// Frame `i`. Index 0 is `basepf`, which is not in `FRAMES` because it
 /// outlives every push and the C gives it a different `popfile`.
 #[inline(always)]
-fn pf_at(input: &mut InputStack, i: usize) -> &mut ParseFile {
-    if i == 0 {
+fn input_frame_at(input: &mut InputStack, frame_index: usize) -> &mut InputFrame {
+    if frame_index == 0 {
         &mut input.base
     } else {
-        &mut input.frames[i - 1]
+        &mut input.frames[frame_index - 1]
     }
 }
 
@@ -346,8 +351,8 @@ fn pf_at(input: &mut InputStack, i: usize) -> &mut ParseFile {
 /// path. Same answer as `VarSlot::Builtin`, `owned-jobs` and
 /// `owned-input`: name the thing, do not store where it lives.
 #[inline(always)]
-pub(crate) fn cur_pf(input: &mut InputStack) -> &mut ParseFile {
-    let current = input.cur;
+pub(crate) fn current_input_frame(input: &mut InputStack) -> &mut InputFrame {
+    let current = input.current;
     if current == 0 {
         &mut input.base
     } else {
@@ -359,11 +364,11 @@ pub(crate) fn cur_pf(input: &mut InputStack) -> &mut ParseFile {
 /// the level's own buffer otherwise. `preadbuffer` and `preadfd` are reached
 /// only with the `strpush` stack empty, so they may assume `buf`.
 #[inline(always)]
-fn text(pf: &ParseFile) -> &[u8] {
-    if pf.strpush.is_empty() {
-        &pf.buf
+fn text(input_frame: &InputFrame) -> &[u8] {
+    if input_frame.overlays.is_empty() {
+        &input_frame.buffer
     } else {
-        &pf.strpush[pf.strpush.len() - 1].string
+        &input_frame.overlays[input_frame.overlays.len() - 1].string
     }
 }
 
@@ -371,51 +376,54 @@ fn text(pf: &ParseFile) -> &[u8] {
 #[macro_export]
 macro_rules! plinno {
     ($input:expr) => {
-        $crate::input::cur_pf($input).linno
+        $crate::input::current_input_frame($input).line_number
     };
 }
 
 // [spec:dash:def:input.input-get-lleft-fn]
 // [spec:dash:sem:input.input-get-lleft-fn]
-pub fn input_get_lleft(pf: &ParseFile) -> usize {
-    pf.lleft
+pub fn remaining_buffer_bytes(input_frame: &InputFrame) -> usize {
+    input_frame.buffer_remaining
 }
 
 // [spec:dash:def:input.input-set-lleft-fn]
 // [spec:dash:sem:input.input-set-lleft-fn]
-pub fn input_set_lleft(pf: &mut ParseFile, len: usize) {
-    pf.lleft = len;
+pub fn set_remaining_buffer_bytes(input_frame: &mut InputFrame, len: usize) {
+    input_frame.buffer_remaining = len;
 }
 
 impl Shell {
     /// Establish the base input frame for a newly constructed shell.
     pub(crate) fn initialize_input_state(&mut self) {
-        let base = pf_at(&mut self.input, 0);
-        if base.buf.len() != IBUFSIZ {
-            base.buf = vec![0u8; IBUFSIZ];
+        let base = input_frame_at(&mut self.input, 0);
+        if base.buffer.len() != INPUT_STORAGE_SIZE {
+            base.buffer = vec![0u8; INPUT_STORAGE_SIZE];
         }
-        base.pos = 0;
-        base.linno = 1;
+        base.position = 0;
+        base.line_number = 1;
         /* The base frame follows the shell's logical standard input rather
          * than caching a process descriptor number. */
         base.uses_stdin = true;
-        base.owned_fd = None;
+        base.owned_descriptor = None;
     }
 
     /// Drain the abandoned input record before the command loop continues.
     pub(crate) fn discard_interrupted_input(&mut self) {
-        popallfiles(self);
+        pop_all_input_frames(self);
 
         /* At least one character past the pushback window has been consumed. */
-        let top_index = self.input.top;
-        let top = pf_at(&mut self.input, top_index);
-        let mut input = if top.pos > top.unget {
-            InputUnit::Byte(text(top)[top.pos - top.unget - 1])
+        let floor_index = self.input.floor_index;
+        let floor_frame = input_frame_at(&mut self.input, floor_index);
+        let mut input = if floor_frame.position > floor_frame.unread_count {
+            InputUnit::Byte(text(floor_frame)[floor_frame.position - floor_frame.unread_count - 1])
         } else {
             InputUnit::EndOfInput
         };
-        while !input.is(b'\n') && input != InputUnit::EndOfInput && !crate::error::int_pending() {
-            match pgetc(self) {
+        while !input.is(b'\n')
+            && input != InputUnit::EndOfInput
+            && !crate::error::interrupt_pending()
+        {
+            match read_input_unit(self) {
                 Ok(next) => input = next,
                 Err(error) => {
                     self.status = error.status();
@@ -428,57 +436,61 @@ impl Shell {
 
     /// Detach input buffers and owned sources copied from the parent shell.
     pub(crate) fn detach_parent_input(&mut self) {
-        popallfiles(self);
-        if !cur_pf(&mut self.input).uses_stdin && cur_pf(&mut self.input).owned_fd.is_some() {
-            let frame = cur_pf(&mut self.input);
-            drop(frame.owned_fd.take());
+        pop_all_input_frames(self);
+        if !current_input_frame(&mut self.input).uses_stdin
+            && current_input_frame(&mut self.input)
+                .owned_descriptor
+                .is_some()
+        {
+            let frame = current_input_frame(&mut self.input);
+            drop(frame.owned_descriptor.take());
             frame.uses_stdin = true;
         }
-        drop(self.input.stdin_state.pip.take());
+        drop(self.input.standard_input_state.pipe.take());
     }
 }
 
 // [spec:dash:def:input.input-init-fn]
 // [spec:dash:sem:input.input-init-fn]
 // [spec:nsh:def:idiom.logical-descriptors]
-pub fn input_init(sh: &mut Shell) {
-    let stdin = sh.fds.get(LogicalDescriptor::STDIN);
-    if let Some(canonical) = stdin
+pub fn initialize_input(shell: &mut Shell) {
+    let standard_input = shell.descriptors.get(LogicalDescriptor::STDIN);
+    if let Some(canonical) = standard_input
         .as_ref()
-        .and_then(|fd| nsh_platform::terminal_canonical_mode(fd))
+        .and_then(|descriptor| nsh_platform::terminal_canonical_mode(descriptor))
     {
-        sh.input.stdin_is_tty = Some(true);
-        sh.input.stdin_state.bufferable = canonical;
-        sh.input.stdin_state.seekable = false;
+        shell.input.standard_input_is_terminal = Some(true);
+        shell.input.standard_input_state.bufferable = canonical;
+        shell.input.standard_input_state.seekable = false;
     } else {
-        sh.input.stdin_is_tty = Some(false);
-        sh.input.stdin_state.seekable = stdin
+        shell.input.standard_input_is_terminal = Some(false);
+        shell.input.standard_input_state.seekable = standard_input
             .as_ref()
-            .is_some_and(|fd| nsh_platform::fd_is_seekable(fd));
-        sh.input.stdin_state.bufferable = sh.input.stdin_state.seekable;
+            .is_some_and(|descriptor| nsh_platform::fd_is_seekable(descriptor));
+        shell.input.standard_input_state.bufferable = shell.input.standard_input_state.seekable;
     }
 }
 
 // [spec:dash:def:input.stdin-bufferable-fn]
 // [spec:dash:sem:input.stdin-bufferable-fn]
-fn stdin_bufferable(sh: &mut Shell) -> bool {
-    if sh.input.stdin_is_tty.is_none() {
-        input_init(sh);
+fn standard_input_is_bufferable(shell: &mut Shell) -> bool {
+    if shell.input.standard_input_is_terminal.is_none() {
+        initialize_input(shell);
     }
-    sh.input.stdin_state.bufferable
+    shell.input.standard_input_state.bufferable
 }
 
 // [spec:dash:def:input.flush-tee-fn]
 // [spec:dash:sem:input.flush-tee-fn]
-fn flush_tee(sh: &mut crate::context::Shell, request: usize, mut pending: usize) {
-    let mut scratch = [0_u8; BUFSIZ];
-    let stdin = sh.fds.get(LogicalDescriptor::STDIN);
+fn flush_tee(shell: &mut crate::context::Shell, request: usize, mut pending: usize) {
+    let mut scratch = [0_u8; INPUT_BUFFER_SIZE];
+    let standard_input = shell.descriptors.get(LogicalDescriptor::STDIN);
     while pending > 0 {
         let length = request.min(pending);
-        let Some(stdin) = &stdin else {
+        let Some(standard_input) = &standard_input else {
             break;
         };
-        match nsh_platform::read_once(stdin, &mut scratch[..length]) {
+        match nsh_platform::read_once(standard_input, &mut scratch[..length]) {
             Ok(count) if count > 0 => pending -= count,
             _ => break,
         }
@@ -488,27 +500,27 @@ fn flush_tee(sh: &mut crate::context::Shell, request: usize, mut pending: usize)
 // [spec:dash:def:input.stdin-tee-fn]
 // [spec:dash:sem:input.stdin-tee-fn]
 // [spec:nsh:req:idiom.platform-errors]
-fn stdin_tee(sh: &mut Shell, request: usize) -> Result<std::io::Result<usize>, Error> {
-    if sh.input.stdin_state.pip.is_none() {
-        let (pipe, _) = crate::redir::sh_pipe(sh, false)?;
-        let read = crate::redir::move_fd_above(sh, pipe.read)?;
-        let write = crate::redir::move_fd_above(sh, pipe.write)?;
-        sh.input.stdin_state.pip = Some(crate::redir::Pipe { read, write });
+fn tee_standard_input(shell: &mut Shell, request: usize) -> Result<std::io::Result<usize>, Error> {
+    if shell.input.standard_input_state.pipe.is_none() {
+        let (pipe, _) = crate::redirection::create_pipe(shell, false)?;
+        let read = crate::redirection::move_descriptor_above(shell, pipe.read)?;
+        let write = crate::redirection::move_descriptor_above(shell, pipe.write)?;
+        shell.input.standard_input_state.pipe = Some(crate::redirection::Pipe { read, write });
     }
 
-    if let Some(pending) = sh.input.stdin_state.pending {
-        flush_tee(sh, request, pending);
+    if let Some(pending) = shell.input.standard_input_state.pending {
+        flush_tee(shell, request, pending);
     }
 
-    let pipe = sh
+    let pipe = shell
         .input
-        .stdin_state
-        .pip
+        .standard_input_state
+        .pipe
         .as_ref()
         .expect("stdin tee pipe exists");
     let result = if nsh_platform::supports_tee() {
-        match sh.fds.get(LogicalDescriptor::STDIN) {
-            Some(stdin) => nsh_platform::tee(&stdin, &pipe.write, request),
+        match shell.descriptors.get(LogicalDescriptor::STDIN) {
+            Some(standard_input) => nsh_platform::tee(&standard_input, &pipe.write, request),
             None => Err(nsh_platform::platform_error(
                 nsh_platform::PlatformErrorKind::BadDescriptor,
             )),
@@ -516,33 +528,33 @@ fn stdin_tee(sh: &mut Shell, request: usize) -> Result<std::io::Result<usize>, E
     } else {
         Err(std::io::Error::from(std::io::ErrorKind::InvalidInput))
     };
-    sh.input.stdin_state.pending = result.as_ref().ok().copied();
+    shell.input.standard_input_state.pending = result.as_ref().ok().copied();
     Ok(result)
 }
 
 /// Clear `ALIASINUSE` on everything in `list`, newest first, which is the
 /// order the C's `spfree` chain walks in. The `strpush` nodes themselves are
 /// dropped with the `Vec`; the C's `ckfree` on each is what that replaces.
-fn release_strpush(sh: &mut crate::context::Shell, mut list: Vec<StrPush>) {
-    while let Some(mut sp) = list.pop() {
-        if let Some(name) = &sp.alias_name {
-            sh.aliases.finish_expansion(BStr::new(name.as_slice()));
+fn release_input_overlays(shell: &mut crate::context::Shell, mut list: Vec<InputOverlay>) {
+    while let Some(mut overlay) = list.pop() {
+        if let Some(name) = &overlay.alias_name {
+            shell.aliases.finish_expansion(BStr::new(name.as_slice()));
         }
         /* Only an entry that is still on `strpush` carries one; `popstring`
          * moves the chain out on the way past. */
-        let carry = core::mem::take(&mut sp.spfree);
+        let carry = core::mem::take(&mut overlay.deferred_overlays);
         if !carry.is_empty() {
-            release_strpush(sh, carry);
+            release_input_overlays(shell, carry);
         }
     }
 }
 
 // [spec:dash:def:input.freestrings-fn]
 // [spec:dash:sem:input.freestrings-fn]
-fn freestrings(sh: &mut crate::context::Shell) {
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        let list = core::mem::take(&mut cur_pf(&mut sh.input).spfree);
-        release_strpush(sh, list);
+fn clear_input_overlays(shell: &mut crate::context::Shell) {
+    crate::error::with_interrupts_deferred(shell, |shell| {
+        let list = core::mem::take(&mut current_input_frame(&mut shell.input).deferred_overlays);
+        release_input_overlays(shell, list);
     });
 }
 
@@ -555,51 +567,58 @@ fn freestrings(sh: &mut crate::context::Shell) {
 // [spec:dash:def:input.pgetc-fn]
 // [spec:dash:sem:input.pgetc-fn]
 // [spec:nsh:req:idiom.lexer-tokens]
-pub fn pgetc(sh: &mut crate::context::Shell) -> Result<InputUnit, Error> {
-    pgetc_inner(sh, false)
+pub fn read_input_unit(shell: &mut crate::context::Shell) -> Result<InputUnit, Error> {
+    read_input_unit_with_mode(shell, false)
 }
 
 /// Read one input byte without applying the parser's normal NUL filtering.
 ///
 /// This is intentionally narrower than [`pgetc`]: shell input remains text,
 /// while `read -d ''` needs to observe the NUL that terminates its record.
-pub(crate) fn pgetc_preserve_nul(sh: &mut crate::context::Shell) -> Result<InputUnit, Error> {
-    pgetc_inner(sh, true)
+pub(crate) fn read_input_unit_preserving_nul(
+    shell: &mut crate::context::Shell,
+) -> Result<InputUnit, Error> {
+    read_input_unit_with_mode(shell, true)
 }
 
-fn pgetc_inner(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<InputUnit, Error> {
+fn read_input_unit_with_mode(
+    shell: &mut crate::context::Shell,
+    preserve_nul: bool,
+) -> Result<InputUnit, Error> {
     let input: InputUnit;
     /* Re-derived after everything that can push a level, because that is
      * what moves the frames; the C reloads the same global for the same
      * reason. */
-    let mut pf = cur_pf(&mut sh.input);
+    let mut input_frame = current_input_frame(&mut shell.input);
 
-    if !pf.spfree.is_empty() {
-        freestrings(sh);
-        pf = cur_pf(&mut sh.input);
+    if !input_frame.deferred_overlays.is_empty() {
+        clear_input_overlays(shell);
+        input_frame = current_input_frame(&mut shell.input);
     }
 
-    'again: loop {
-        if pf.unget != 0 {
-            let unget = pf.unget;
-            pf.unget -= 1;
+    'read_next_unit: loop {
+        if input_frame.unread_count != 0 {
+            let unread_count = input_frame.unread_count;
+            input_frame.unread_count -= 1;
 
-            return Ok(InputUnit::Byte(text(pf)[pf.pos - unget]));
+            return Ok(InputUnit::Byte(
+                text(input_frame)[input_frame.position - unread_count],
+            ));
         }
 
-        if pf.nleft > 0 {
-            pf.nleft -= 1;
-            input = InputUnit::Byte(text(pf)[pf.pos]);
-            pf.pos += 1;
-        } else if !pf.strpush.is_empty() {
-            popstring(sh);
+        if input_frame.line_remaining > 0 {
+            input_frame.line_remaining -= 1;
+            input = InputUnit::Byte(text(input_frame)[input_frame.position]);
+            input_frame.position += 1;
+        } else if !input_frame.overlays.is_empty() {
+            pop_string_input(shell);
             /* The freestrings call must be delayed til the next
              * input read so the alias-end boundary remains observable.
              */
-            pf = cur_pf(&mut sh.input);
-            continue 'again;
+            input_frame = current_input_frame(&mut shell.input);
+            continue 'read_next_unit;
         } else {
-            input = preadbuffer(sh, preserve_nul)?;
+            input = refill_input_buffer(shell, preserve_nul)?;
         }
 
         return Ok(input);
@@ -608,24 +627,27 @@ fn pgetc_inner(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
 
 // [spec:dash:def:input.pgetc-eoa-fn]
 // [spec:dash:sem:input.pgetc-eoa-fn]
-pub fn pgetc_eoa(sh: &mut crate::context::Shell) -> Result<InputUnit, Error> {
-    let pf = cur_pf(&mut sh.input);
-    if !pf.strpush.is_empty()
-        && pf.nleft == 0
-        && pf.strpush[pf.strpush.len() - 1].alias_name.is_some()
+pub fn read_input_unit_or_alias_end(shell: &mut crate::context::Shell) -> Result<InputUnit, Error> {
+    let input_frame = current_input_frame(&mut shell.input);
+    if !input_frame.overlays.is_empty()
+        && input_frame.line_remaining == 0
+        && input_frame.overlays[input_frame.overlays.len() - 1]
+            .alias_name
+            .is_some()
     {
         Ok(InputUnit::EndOfAlias)
     } else {
-        pgetc(sh)
+        read_input_unit(shell)
     }
 }
 
 // [spec:dash:def:input.stdin-clear-nonblock-fn]
 // [spec:dash:sem:input.stdin-clear-nonblock-fn]
-fn stdin_clear_nonblock(sh: &mut crate::context::Shell) -> bool {
-    sh.fds
+fn clear_standard_input_nonblocking(shell: &mut crate::context::Shell) -> bool {
+    shell
+        .descriptors
         .get(LogicalDescriptor::STDIN)
-        .is_some_and(|fd| nsh_platform::set_nonblocking(&fd, false).is_ok())
+        .is_some_and(|descriptor| nsh_platform::set_nonblocking(&descriptor, false).is_ok())
 }
 
 // [spec:dash:def:input.preadfd-fn]
@@ -638,27 +660,31 @@ fn stdin_clear_nonblock(sh: &mut crate::context::Shell) -> bool {
 // [spec:posix:req:xcurel.file-contents-nbytes]
 // [spec:posix:sem:xcurel.file-contents-read-error]
 // [spec:posix:req:exit.unrecoverable-read-error]
-fn preadfd(sh: &mut crate::context::Shell) -> Result<usize, Error> {
-    let uses_stdin = cur_pf(&mut sh.input).uses_stdin;
-    let dot_operand = cur_pf(&mut sh.input).dot_operand;
-    let mut use_tee: bool;
-    let buffered = input_get_lleft(cur_pf(&mut sh.input));
-    let unget = cur_pf(&mut sh.input).pos.min(PUNGETC_MAX);
+fn read_input_descriptor(shell: &mut crate::context::Shell) -> Result<usize, Error> {
+    let uses_stdin = current_input_frame(&mut shell.input).uses_stdin;
+    let dot_operand = current_input_frame(&mut shell.input).dot_operand;
+    let mut use_standard_input_tee: bool;
+    let buffered = remaining_buffer_bytes(current_input_frame(&mut shell.input));
+    let unread_count = current_input_frame(&mut shell.input)
+        .position
+        .min(MAX_UNREAD_UNITS);
 
     /* Slide the retained pushback window and the partial line already read
      * down to the front, so the read lands after both. */
     {
-        let pf = cur_pf(&mut sh.input);
-        let from = pf.pos - unget;
-        pf.buf.copy_within(from..from + unget + buffered, 0);
-        pf.pos = unget;
+        let input_frame = current_input_frame(&mut shell.input);
+        let retained_start = input_frame.position - unread_count;
+        input_frame
+            .buffer
+            .copy_within(retained_start..retained_start + unread_count + buffered, 0);
+        input_frame.position = unread_count;
     }
     /* The C's `buf` walks past both; here it is the offset the read fills
      * from, and it survives a nested `pushfile` because it is not a
      * pointer. */
-    let off = unget + buffered;
+    let buffer_offset = unread_count + buffered;
 
-    let mut requested = BUFSIZ - buffered;
+    let mut requested = INPUT_BUFFER_SIZE - buffered;
     if requested == 0 {
         return Ok(0);
     }
@@ -666,41 +692,48 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<usize, Error> {
     /* The C's `fd == 0` means "this parse file is the shell's standard
      * input", which is the condition for line editing and for teeing --
      * not descriptor 0 for its own sake. */
-    use_tee = uses_stdin && !crate::editor::editing_active(sh) && !stdin_bufferable(sh);
+    use_standard_input_tee =
+        uses_stdin && !crate::editor::editing_active(shell) && !standard_input_is_bufferable(shell);
 
     'retry: loop {
-        if uses_stdin && crate::editor::editing_active(sh) {
+        if uses_stdin && crate::editor::editing_active(shell) {
             /* `docs/api-design.md` §5.5: nothing the shell hands to a
              * callee may borrow from the shell, and `read_edit_line`
              * takes the shell too. The buffer is moved out, filled, and
              * put back -- a `Vec`, so that is a pointer swap rather than
              * a copy. Nothing can reach this frame's buffer while it is
              * out, which is the same thing the borrow used to assert. */
-            let mut buf = core::mem::take(&mut cur_pf(&mut sh.input).buf);
-            let result = crate::editor::read_edit_line(sh, &mut buf[off..off + requested]);
-            cur_pf(&mut sh.input).buf = buf;
+            let mut buffer = core::mem::take(&mut current_input_frame(&mut shell.input).buffer);
+            let result = crate::editor::read_edit_line(
+                shell,
+                &mut buffer[buffer_offset..buffer_offset + requested],
+            );
+            current_input_frame(&mut shell.input).buffer = buffer;
             return match result {
                 Ok(count) => Ok(count),
                 Err(error) => {
                     let mut message = BString::from("read error: ");
                     message.extend_from_slice(error.to_string().as_bytes());
-                    let failure =
-                        Error::unrecoverable_read(sh.eval.errlinno, &message, dot_operand);
-                    Err(sh.diagnostics().report(failure))
+                    let failure = Error::unrecoverable_read(
+                        shell.evaluation.diagnostic_line,
+                        &message,
+                        dot_operand,
+                    );
+                    Err(shell.diagnostics().report(failure))
                 }
             };
         }
 
         let mut reading_tee = false;
         let mut immediate_error = None;
-        if use_tee {
-            match stdin_tee(sh, requested)? {
+        if use_standard_input_tee {
+            match tee_standard_input(shell, requested)? {
                 Ok(count) => {
                     requested = count;
                     reading_tee = true;
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {
-                    use_tee = false;
+                    use_standard_input_tee = false;
                     requested = 1;
                 }
                 Err(error) => immediate_error = Some(error),
@@ -711,18 +744,20 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<usize, Error> {
             let source = if reading_tee {
                 None
             } else if uses_stdin {
-                sh.fds.get(LogicalDescriptor::STDIN)
+                shell.descriptors.get(LogicalDescriptor::STDIN)
             } else {
-                cur_pf(&mut sh.input).owned_fd.clone()
+                current_input_frame(&mut shell.input)
+                    .owned_descriptor
+                    .clone()
             };
-            let mut scratch = [0_u8; BUFSIZ];
+            let mut scratch = [0_u8; INPUT_BUFFER_SIZE];
             let result = if let Some(error) = immediate_error {
                 Err(error)
             } else if reading_tee {
-                let pipe = sh
+                let pipe = shell
                     .input
-                    .stdin_state
-                    .pip
+                    .standard_input_state
+                    .pipe
                     .as_ref()
                     .expect("stdin tee pipe exists");
                 nsh_platform::read_once(&pipe.read, &mut scratch[..requested])
@@ -738,17 +773,17 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<usize, Error> {
                 Err(error) => {
                     let error_kind = error.kind();
                     if error_kind == std::io::ErrorKind::Interrupted
-                        && !(pf_at(&mut sh.input, 0).prev.is_some()
-                            && crate::siginbox::signals().pending_signal().is_some())
+                        && !(input_frame_at(&mut shell.input, 0).previous.is_some()
+                            && crate::signal_inbox::signals().pending_signal().is_some())
                     {
                         continue 'retry;
                     }
                     if uses_stdin
                         && error_kind == std::io::ErrorKind::WouldBlock
-                        && stdin_clear_nonblock(sh)
+                        && clear_standard_input_nonblocking(shell)
                     {
-                        sh.write_output(
-                            crate::output::Dest::Stderr,
+                        shell.write_output(
+                            crate::output::OutputDestination::Stderr,
                             b"sh: turning off NDELAY mode\n",
                         )?;
                         continue 'retry;
@@ -763,17 +798,21 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<usize, Error> {
                      * signal pending -- is kept underneath, because it is about
                      * something else: abandoning a here-document or a `.` file
                      * when a trapped signal arrives. */
-                    if let Some(e) = crate::error::poll_interrupt(sh.interrupt_context()) {
-                        return Err(e);
+                    if let Some(error) = crate::error::poll_interrupt(shell.interrupt_context()) {
+                        return Err(error);
                     }
                     let mut message = BString::from("read error: ");
-                    message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
-                    let failure =
-                        Error::unrecoverable_read(sh.eval.errlinno, &message, dot_operand);
-                    return Err(sh.diagnostics().report(failure));
+                    message.extend_from_slice(shell.locale.error_message(&error).as_bytes());
+                    let failure = Error::unrecoverable_read(
+                        shell.evaluation.diagnostic_line,
+                        &message,
+                        dot_operand,
+                    );
+                    return Err(shell.diagnostics().report(failure));
                 }
             };
-            cur_pf(&mut sh.input).buf[off..off + count].copy_from_slice(&scratch[..count]);
+            current_input_frame(&mut shell.input).buffer[buffer_offset..buffer_offset + count]
+                .copy_from_slice(&scratch[..count]);
             return Ok(count);
         }
         return Ok(0);
@@ -791,34 +830,37 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<usize, Error> {
 
 // [spec:dash:def:input.preadbuffer-fn]
 // [spec:dash:sem:input.preadbuffer-fn]
-fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<InputUnit, Error> {
-    let first = sh.input.prompt == Some(PromptKind::Primary);
+fn refill_input_buffer(
+    shell: &mut crate::context::Shell,
+    preserve_nul: bool,
+) -> Result<InputUnit, Error> {
+    let first = shell.input.prompt == Some(PromptKind::Primary);
 
-    if cur_pf(&mut sh.input).eof_latched {
+    if current_input_frame(&mut shell.input).eof_latched {
         /* eof: */
-        cur_pf(&mut sh.input).eof_observed = true;
+        current_input_frame(&mut shell.input).eof_observed = true;
         return Ok(InputUnit::EndOfInput);
     }
-    sh.flush_output()?;
+    shell.flush_output()?;
 
-    let buffered = crate::error::with_interrupts_deferred(sh, |sh| {
-        let mut q = cur_pf(&mut sh.input).pos;
-        let mut something = !first;
-        let mut more = input_get_lleft(cur_pf(&mut sh.input));
-        let mut save = false;
+    let buffered = crate::error::with_interrupts_deferred(shell, |shell| {
+        let mut line_end = current_input_frame(&mut shell.input).position;
+        let mut has_content = !first;
+        let mut remaining = remaining_buffer_bytes(current_input_frame(&mut shell.input));
+        let mut preserve_buffer = false;
 
         'outer: loop {
-            if more == 0 {
+            if remaining == 0 {
                 /* again: */
-                let nr = q - cur_pf(&mut sh.input).pos;
-                input_set_lleft(cur_pf(&mut sh.input), nr);
-                more = preadfd(sh)?;
-                q = cur_pf(&mut sh.input).pos + nr;
-                if more == 0 {
-                    cur_pf(&mut sh.input).nleft = 0;
-                    input_set_lleft(cur_pf(&mut sh.input), 0);
-                    if nr != 0 {
-                        save = true;
+                let preserved_count = line_end - current_input_frame(&mut shell.input).position;
+                set_remaining_buffer_bytes(current_input_frame(&mut shell.input), preserved_count);
+                remaining = read_input_descriptor(shell)?;
+                line_end = current_input_frame(&mut shell.input).position + preserved_count;
+                if remaining == 0 {
+                    current_input_frame(&mut shell.input).line_remaining = 0;
+                    set_remaining_buffer_bytes(current_input_frame(&mut shell.input), 0);
+                    if preserved_count != 0 {
+                        preserve_buffer = true;
                         break 'outer;
                     }
                     return Ok(None);
@@ -829,73 +871,79 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
             loop {
                 let byte: u8;
 
-                more -= 1;
-                byte = cur_pf(&mut sh.input).buf[q];
+                remaining -= 1;
+                byte = current_input_frame(&mut shell.input).buffer[line_end];
 
                 if byte == 0 && !preserve_nul {
-                    let pf = cur_pf(&mut sh.input);
-                    pf.buf.copy_within(q + 1..q + 1 + more, q);
+                    let input_frame = current_input_frame(&mut shell.input);
+                    input_frame
+                        .buffer
+                        .copy_within(line_end + 1..line_end + 1 + remaining, line_end);
                     /* goto check */
                 } else {
-                    q += 1;
+                    line_end += 1;
 
                     if byte == b'\n' {
                         let previous = {
-                            let pf = cur_pf(&mut sh.input);
-                            (q - pf.pos >= 2).then(|| pf.buf[q - 2])
+                            let input_frame = current_input_frame(&mut shell.input);
+                            (line_end - input_frame.position >= 2)
+                                .then(|| input_frame.buffer[line_end - 2])
                         };
                         if nsh_platform::input_newline_width(previous) == 2 {
                             // Keep the unread tail contiguous when the platform
                             // treats the preceding CR as part of this newline.
-                            let pf = cur_pf(&mut sh.input);
-                            pf.buf.copy_within(q - 1..q + more as usize, q - 2);
-                            q -= 1;
+                            let input_frame = current_input_frame(&mut shell.input);
+                            input_frame.buffer.copy_within(
+                                line_end - 1..line_end + remaining as usize,
+                                line_end - 2,
+                            );
+                            line_end -= 1;
                         }
                         break 'outer;
                     }
                     if byte != b'\t' && byte != b' ' {
-                        something = true;
+                        has_content = true;
                     }
                 }
 
                 /* check: */
-                if more == 0 {
+                if remaining == 0 {
                     continue 'outer;
                 }
             }
         }
 
-        if !save {
-            input_set_lleft(cur_pf(&mut sh.input), more);
+        if !preserve_buffer {
+            set_remaining_buffer_bytes(current_input_frame(&mut shell.input), remaining);
         }
 
         {
-            let pf = cur_pf(&mut sh.input);
-            pf.nleft = (q - pf.pos).saturating_sub(1);
+            let input_frame = current_input_frame(&mut shell.input);
+            input_frame.line_remaining = (line_end - input_frame.position).saturating_sub(1);
         }
 
         let line = {
-            let pf = cur_pf(&mut sh.input);
-            pf.buf[pf.pos..q].to_vec()
+            let input_frame = current_input_frame(&mut shell.input);
+            input_frame.buffer[input_frame.position..line_end].to_vec()
         };
 
         // A forced-interactive command file is the shell's top-level input even
         // though it is not descriptor 0. Retain it, but not nested `source`,
         // dot, eval, or command-substitution frames.
         // [spec:nsh:req:compat.smoosh.history-builtin]
-        let top_level_history_input =
-            cur_pf(&mut sh.input).uses_stdin || sh.input.cur == sh.input.top;
+        let top_level_history_input = current_input_frame(&mut shell.input).uses_stdin
+            || shell.input.current == shell.input.floor_index;
         if top_level_history_input
-            && crate::editor::history_active(sh)
-            && !sh.options.enabled(ShellOption::NoLog)
-            && something
+            && crate::editor::history_active(shell)
+            && !shell.options.enabled(ShellOption::NoLog)
+            && has_content
         {
             let bytes = {
-                let pf = cur_pf(&mut sh.input);
-                &pf.buf[pf.pos..q]
+                let input_frame = current_input_frame(&mut shell.input);
+                &input_frame.buffer[input_frame.position..line_end]
             };
             let bytes = bytes.to_vec();
-            crate::editor::record_history_line(sh, &bytes, first, true);
+            crate::editor::record_history_line(shell, &bytes, first, true);
         }
         Ok::<_, Error>(Some(line))
     })?;
@@ -903,31 +951,31 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
     /* A read interrupted while this scope was active becomes deliverable at
      * this explicit polling boundary, after the prior deferral depth has been
      * restored. */
-    if let Some(e) = crate::error::poll_interrupt(sh.interrupt_context()) {
-        return Err(e);
+    if let Some(error) = crate::error::poll_interrupt(shell.interrupt_context()) {
+        return Err(error);
     }
 
     let Some(line) = buffered else {
-        let pf = cur_pf(&mut sh.input);
-        pf.eof_latched = true;
-        pf.eof_observed = true;
+        let input_frame = current_input_frame(&mut shell.input);
+        input_frame.eof_latched = true;
+        input_frame.eof_observed = true;
         return Ok(InputUnit::EndOfInput);
     };
 
-    if sh.options.enabled(ShellOption::Verbose) {
-        sh.write_output(crate::output::Dest::Stderr, &line)?;
+    if shell.options.enabled(ShellOption::Verbose) {
+        shell.write_output(crate::output::OutputDestination::Stderr, &line)?;
     }
 
-    let pf = cur_pf(&mut sh.input);
-    let byte = pf.buf[pf.pos];
-    pf.pos += 1;
+    let input_frame = current_input_frame(&mut shell.input);
+    let byte = input_frame.buffer[input_frame.position];
+    input_frame.position += 1;
     Ok(InputUnit::Byte(byte))
 }
 
 // [spec:dash:def:input.pungetn-fn]
 // [spec:dash:sem:input.pungetn-fn]
-pub fn pungetn(sh: &mut Shell, n: usize) {
-    cur_pf(&mut sh.input).unget += n;
+pub fn unread_input_units(shell: &mut Shell, count: usize) {
+    current_input_frame(&mut shell.input).unread_count += count;
 }
 
 /*
@@ -937,12 +985,12 @@ pub fn pungetn(sh: &mut Shell, n: usize) {
 
 // [spec:dash:def:input.pungetc-fn]
 // [spec:dash:sem:input.pungetc-fn]
-pub fn pungetc(sh: &mut Shell) {
-    let observed_eof = cur_pf(&mut sh.input).eof_observed;
+pub fn unread_input_unit(shell: &mut Shell) {
+    let observed_eof = current_input_frame(&mut shell.input).eof_observed;
     if !observed_eof {
-        pungetn(sh, 1);
+        unread_input_units(shell, 1);
     }
-    cur_pf(&mut sh.input).eof_observed = false;
+    current_input_frame(&mut shell.input).eof_observed = false;
 }
 
 /*
@@ -952,43 +1000,43 @@ pub fn pungetc(sh: &mut Shell) {
 
 // [spec:dash:def:input.pushstring-fn]
 // [spec:dash:sem:input.pushstring-fn]
-pub fn pushstring(sh: &mut Shell, s: &BStr, alias_name: Option<BString>) {
-    let len = s.len();
-    crate::error::with_interrupts_deferred(sh, |sh| {
+pub fn push_string_input(shell: &mut Shell, string: &BStr, alias_name: Option<BString>) {
+    let string_length = string.len();
+    crate::error::with_interrupts_deferred(shell, |shell| {
         if let Some(name) = &alias_name {
-            sh.aliases.begin_expansion(BStr::new(name.as_slice()));
+            shell.aliases.begin_expansion(BStr::new(name.as_slice()));
         }
         /*dprintf("*** calling pushstring: %s, %d\n", s, len);*/
         /* The C picks between `basestrpush` and a `ckmalloc` here; a `Vec`
          * needs neither, and the condition it picked on was only ever about
          * whether the inline slot was still spoken for. */
-        let pf = cur_pf(&mut sh.input);
-        let string = s.to_vec();
-        let sp = StrPush {
-            prevpos: pf.pos,
-            prevnleft: pf.nleft,
-            unget: pf.unget,
-            spfree: core::mem::take(&mut pf.spfree),
+        let input_frame = current_input_frame(&mut shell.input);
+        let string = string.to_vec();
+        let overlay = InputOverlay {
+            previous_position: input_frame.position,
+            previous_line_remaining: input_frame.line_remaining,
+            unread_count: input_frame.unread_count,
+            deferred_overlays: core::mem::take(&mut input_frame.deferred_overlays),
             alias_name,
             string,
         };
         /* The C reads on through `ap->val`, which points into `ap->name`; this
          * reads the copy, so redefining the alias mid-expansion cannot pull the
          * text out from under the cursor and `popstring` has nothing to free. */
-        pf.pos = 0;
-        pf.nleft = len;
-        pf.unget = 0;
-        pf.strpush.push(sp);
+        input_frame.position = 0;
+        input_frame.line_remaining = string_length;
+        input_frame.unread_count = 0;
+        input_frame.overlays.push(overlay);
     });
 }
 
 // [spec:dash:def:input.popstring-fn]
 // [spec:dash:sem:input.popstring-fn]
 // [spec:posix:req:token.alias-trailing-blank-chaining]
-fn popstring(sh: &mut Shell) {
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        let pf = cur_pf(&mut sh.input);
-        let mut sp = pf.strpush.pop().unwrap();
+fn pop_string_input(shell: &mut Shell) {
+    crate::error::with_interrupts_deferred(shell, |shell| {
+        let input_frame = current_input_frame(&mut shell.input);
+        let mut overlay = input_frame.overlays.pop().unwrap();
 
         /* The C compares `nextc` against `sp->string`, which is `ap->name` —
          * the base of the allocation `ap->val` points into — so the test reads
@@ -996,21 +1044,22 @@ fn popstring(sh: &mut Shell) {
          * cursor. Against the copy the same test means "at least one character
          * consumed", and the two agree: with none consumed the C reads the `=`
          * that ends the alias name, which is neither a space nor a tab. */
-        let boundary =
-            sp.alias_name.is_some() && pf.pos > 0 && matches!(sp.string[pf.pos - 1], b' ' | b'\t');
-        pf.pos = sp.prevpos;
-        pf.nleft = sp.prevnleft;
-        pf.unget = sp.unget;
+        let boundary = overlay.alias_name.is_some()
+            && input_frame.position > 0
+            && matches!(overlay.string[input_frame.position - 1], b' ' | b'\t');
+        input_frame.position = overlay.previous_position;
+        input_frame.line_remaining = overlay.previous_line_remaining;
+        input_frame.unread_count = overlay.unread_count;
         /*dprintf("*** calling popstring: restoring to '%s'\n", parsenextc);*/
         /* `parsefile->spfree = sp` with `sp->spfree` already holding the chain
          * that was hidden when `sp` was pushed. Anything the current chain still
          * held is dropped, which is what the C's assignment does to it. */
-        pf.spfree = core::mem::take(&mut sp.spfree);
-        pf.spfree.push(sp);
+        input_frame.deferred_overlays = core::mem::take(&mut overlay.deferred_overlays);
+        input_frame.deferred_overlays.push(overlay);
         /* Set after the frame's borrow ends; it is a flag on the stack, not
          * on the frame, and nothing between here and there reads it. */
         if boundary {
-            sh.input.alias_boundary = true;
+            shell.input.alias_boundary = true;
         }
     });
 }
@@ -1022,36 +1071,38 @@ fn popstring(sh: &mut Shell) {
 
 // [spec:dash:def:input.setinputfile-fn]
 // [spec:dash:sem:input.setinputfile-fn]
-pub fn setinputfile(
-    sh: &mut crate::context::Shell,
-    fname: &BStr,
+pub fn set_input_file(
+    shell: &mut crate::context::Shell,
+    path: &BStr,
     options: InputFileOptions,
 ) -> Result<bool, Error> {
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        let Some(fd) = crate::redir::sh_open_read(sh, fname, options.missing_ok)? else {
+    crate::error::with_interrupts_deferred(shell, |shell| {
+        let Some(descriptor) =
+            crate::redirection::open_file_for_reading(shell, path, options.missing_ok)?
+        else {
             return Ok(false);
         };
-        install_input_file(sh, fd, options)?;
+        install_input_file(shell, descriptor, options)?;
         Ok(true)
     })
 }
 
 /// Set the top-level input from the command file named on `sh`'s command line.
 // [spec:posix:req:sh.exit-status-values]
-pub fn set_command_input_file(sh: &mut crate::context::Shell, fname: &BStr) -> Result<(), Error> {
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        let fd = crate::redir::sh_open_command_file(sh, fname)?;
-        install_input_file(sh, fd, InputFileOptions::CURRENT)
+pub fn set_command_input_file(shell: &mut crate::context::Shell, path: &BStr) -> Result<(), Error> {
+    crate::error::with_interrupts_deferred(shell, |shell| {
+        let descriptor = crate::redirection::open_command_file(shell, path)?;
+        install_input_file(shell, descriptor, InputFileOptions::CURRENT)
     })
 }
 
 fn install_input_file(
-    sh: &mut Shell,
-    mut fd: Descriptor,
+    shell: &mut Shell,
+    mut descriptor: Descriptor,
     options: InputFileOptions,
 ) -> Result<(), Error> {
-    fd = crate::redir::move_fd_above(sh, fd)?;
-    setinputfd(sh, fd, options.push, options.dot_operand);
+    descriptor = crate::redirection::move_descriptor_above(shell, descriptor)?;
+    set_input_descriptor(shell, descriptor, options.push, options.dot_operand);
     Ok(())
 }
 
@@ -1063,17 +1114,17 @@ fn install_input_file(
 // [spec:dash:def:input.setinputfd-fn]
 // [spec:dash:sem:input.setinputfd-fn]
 // [spec:nsh:req:idiom.no-raw-fd-core]
-fn setinputfd(sh: &mut Shell, fd: Descriptor, push: bool, dot_operand: bool) {
-    pushfile(sh);
+fn set_input_descriptor(shell: &mut Shell, descriptor: Descriptor, push: bool, dot_operand: bool) {
+    push_input_frame(shell);
     if !push {
-        sh.input.top = sh.input.cur;
+        shell.input.floor_index = shell.input.current;
     }
-    let pf = cur_pf(&mut sh.input);
-    pf.uses_stdin = false;
-    pf.owned_fd = Some(crate::fd::SharedFd::from(fd));
-    pf.dot_operand = dot_operand;
-    pf.buf = vec![0u8; IBUFSIZ];
-    pf.pos = 0;
+    let input_frame = current_input_frame(&mut shell.input);
+    input_frame.uses_stdin = false;
+    input_frame.owned_descriptor = Some(crate::descriptors::SharedDescriptor::from(descriptor));
+    input_frame.dot_operand = dot_operand;
+    input_frame.buffer = vec![0u8; INPUT_STORAGE_SIZE];
+    input_frame.position = 0;
 }
 
 /*
@@ -1082,20 +1133,20 @@ fn setinputfd(sh: &mut Shell, fd: Descriptor, push: bool, dot_operand: bool) {
 
 // [spec:dash:def:input.setinputstring-fn]
 // [spec:dash:sem:input.setinputstring-fn]
-pub fn setinputstring(sh: &mut Shell, string: &BStr) {
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        pushfile(sh);
-        let len = string.len();
-        let pf = cur_pf(&mut sh.input);
+pub fn set_input_string(shell: &mut Shell, string: &BStr) {
+    crate::error::with_interrupts_deferred(shell, |shell| {
+        push_input_frame(shell);
+        let string_length = string.len();
+        let input_frame = current_input_frame(&mut shell.input);
         /* The C points `nextc` at the caller's string and reads it in place,
          * which is why `evalstring` has to keep its `sstrdup` alive across the
          * `popfile` and why `parsebackq` cannot release the stack block it
          * grabbed. The level owns its text here. */
-        pf.buf = string.to_vec();
-        pf.pos = 0;
-        pf.nleft = len;
-        pf.eof_latched = true;
-        pf.eof_observed = false;
+        input_frame.buffer = string.to_vec();
+        input_frame.position = 0;
+        input_frame.line_remaining = string_length;
+        input_frame.eof_latched = true;
+        input_frame.eof_observed = false;
     });
 }
 
@@ -1106,56 +1157,62 @@ pub fn setinputstring(sh: &mut Shell, string: &BStr) {
 
 // [spec:dash:def:input.pushfile-fn]
 // [spec:dash:sem:input.pushfile-fn]
-fn pushfile(sh: &mut Shell) {
-    let prev = sh.input.cur;
-    sh.input.frames.push(ParseFile {
-        prev: Some(prev),
-        linno: 1,
+fn push_input_frame(shell: &mut Shell) {
+    let previous = shell.input.current;
+    shell.input.frames.push(InputFrame {
+        previous: Some(previous),
+        line_number: 1,
         uses_stdin: false,
-        ..ParseFile::EMPTY
+        ..InputFrame::EMPTY
     });
-    let depth = sh.input.frames.len();
-    sh.input.cur = depth;
+    let depth = shell.input.frames.len();
+    shell.input.current = depth;
 }
 
 // [spec:dash:def:input.pushstdin-fn]
 // [spec:dash:sem:input.pushstdin-fn]
-pub fn pushstdin(sh: &mut Shell) {
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        let from = sh.input.cur;
-        pf_at(&mut sh.input, 0).prev = Some(from);
-        sh.input.cur = 0;
+pub fn push_standard_input(shell: &mut Shell) {
+    crate::error::with_interrupts_deferred(shell, |shell| {
+        let previous_frame = shell.input.current;
+        input_frame_at(&mut shell.input, 0).previous = Some(previous_frame);
+        shell.input.current = 0;
     });
 }
 
 // [spec:dash:def:input.popfile-fn]
 // [spec:dash:sem:input.popfile-fn]
-pub fn popfile(sh: &mut crate::context::Shell) {
-    let dying: usize = sh.input.cur;
+pub fn pop_input_frame(shell: &mut crate::context::Shell) {
+    let popped_index = shell.input.current;
 
-    crate::error::with_interrupts_deferred(sh, |sh| {
+    crate::error::with_interrupts_deferred(shell, |shell| {
         /* The C reads `pf->prev` into the global unconditionally, so popping
          * `basepf` when nothing pushed it leaves `parsefile` NULL; there is no
          * such value here and the base frame stays current. */
-        let to = pf_at(&mut sh.input, dying).prev.take().unwrap_or(0);
-        sh.input.cur = to;
-        if dying == 0 {
+        let previous_index = input_frame_at(&mut shell.input, popped_index)
+            .previous
+            .take()
+            .unwrap_or(0);
+        shell.input.current = previous_index;
+        if popped_index == 0 {
             return;
         }
 
-        let frames = &mut *&mut sh.input.frames;
-        debug_assert_eq!(dying, frames.len());
-        let mut pf = frames.pop().unwrap();
+        let frames = &mut *&mut shell.input.frames;
+        debug_assert_eq!(popped_index, frames.len());
+        let mut input_frame = frames.pop().unwrap();
         /* `set_cur(cur)` stood here to re-derive the cached frame pointer,
          * because popping the `Vec` can move the remaining frames. The index
          * does not move with them, so with the cache gone this was a
          * self-assignment and says nothing. */
 
-        drop(pf.owned_fd.take());
+        drop(input_frame.owned_descriptor.take());
         /* `ckfree(pf->buf)` */
-        drop(core::mem::take(&mut pf.buf));
-        if !cur_pf(&mut sh.input).spfree.is_empty() {
-            freestrings(sh);
+        drop(core::mem::take(&mut input_frame.buffer));
+        if !current_input_frame(&mut shell.input)
+            .deferred_overlays
+            .is_empty()
+        {
+            clear_input_overlays(shell);
         }
         /* `ckfree(pf)` takes the dying level's `spfree` chain with it, and the
          * `ALIASINUSE` bits on it are never cleared: an alias expanded inside an
@@ -1169,15 +1226,15 @@ pub fn popfile(sh: &mut crate::context::Shell) {
          * lines earlier — so the loop pops the wrong stack and then walks into a
          * NULL `strpush`. It cannot run in any case that survives; these go the
          * same way as the chain. */
-        drop(pf);
+        drop(input_frame);
     });
 }
 
 // [spec:dash:def:input.unwindfiles-fn]
 // [spec:dash:sem:input.unwindfiles-fn]
-pub fn unwindfiles(sh: &mut crate::context::Shell, stop: usize) {
-    while pf_at(&mut sh.input, 0).prev.is_some() || sh.input.cur != stop {
-        popfile(sh);
+pub fn unwind_input_frames(shell: &mut crate::context::Shell, stop: usize) {
+    while input_frame_at(&mut shell.input, 0).previous.is_some() || shell.input.current != stop {
+        pop_input_frame(shell);
     }
 }
 
@@ -1187,11 +1244,11 @@ pub fn unwindfiles(sh: &mut crate::context::Shell, stop: usize) {
 
 // [spec:dash:def:input.popallfiles-fn]
 // [spec:dash:sem:input.popallfiles-fn]
-pub fn popallfiles(sh: &mut crate::context::Shell) {
+pub fn pop_all_input_frames(shell: &mut crate::context::Shell) {
     /* Read out first: `toppf` is a field of the same stack `unwindfiles`
      * unwinds, so the depth is taken as a value before the call. */
-    let top = sh.input.top;
-    unwindfiles(sh, top);
+    let floor_index = shell.input.floor_index;
+    unwind_input_frames(shell, floor_index);
 }
 
 impl Shell {
@@ -1201,36 +1258,41 @@ impl Shell {
     // [spec:dash:def:init.postexitreset-fn]
     // [spec:dash:sem:init.postexitreset-fn]
     pub(crate) fn flush_input(&mut self) {
-        let base = pf_at(&mut self.input, 0);
-        let left = base.nleft + input_get_lleft(base);
+        let base = input_frame_at(&mut self.input, 0);
+        let left = base.line_remaining + remaining_buffer_bytes(base);
         crate::error::with_interrupts_deferred(self, |shell| {
-            if shell.input.stdin_state.seekable && left != 0 {
-                if let Some(stdin) = shell.fds.get(LogicalDescriptor::STDIN) {
+            if shell.input.standard_input_state.seekable && left != 0 {
+                if let Some(standard_input) = shell.descriptors.get(LogicalDescriptor::STDIN) {
                     let offset = i64::try_from(left).unwrap_or(i64::MAX);
-                    if nsh_platform::seek_relative(&stdin, -offset).is_err() {
+                    if nsh_platform::seek_relative(&standard_input, -offset).is_err() {
                         // The descriptor stopped supporting rewind; future reads use tee state.
-                        shell.input.stdin_state.seekable = false;
+                        shell.input.standard_input_state.seekable = false;
                     }
                 }
-            } else if let Some(pending) = shell.input.stdin_state.pending.filter(|p| *p > left) {
-                flush_tee(shell, BUFSIZ, pending - left);
-                shell.input.stdin_state.pending = None;
+            } else if let Some(pending) = shell
+                .input
+                .standard_input_state
+                .pending
+                .filter(|pending| *pending > left)
+            {
+                flush_tee(shell, INPUT_BUFFER_SIZE, pending - left);
+                shell.input.standard_input_state.pending = None;
             }
-            let base = pf_at(&mut shell.input, 0);
-            base.nleft = 0;
-            input_set_lleft(base, 0);
+            let base = input_frame_at(&mut shell.input, 0);
+            base.line_remaining = 0;
+            set_remaining_buffer_bytes(base, 0);
         });
     }
 }
 
 // [spec:dash:def:input.reset-input-fn]
 // [spec:dash:sem:input.reset-input-fn]
-pub fn reset_input(sh: &mut Shell) {
-    sh.input.stdin_is_tty = None;
-    let base = pf_at(&mut sh.input, 0);
+pub fn reset_input(shell: &mut Shell) {
+    shell.input.standard_input_is_terminal = None;
+    let base = input_frame_at(&mut shell.input, 0);
     base.eof_latched = false;
     base.eof_observed = false;
-    sh.flush_input();
+    shell.flush_input();
 }
 
 /// Let the interactive command loop try standard input again after EOF.
@@ -1239,8 +1301,8 @@ pub fn reset_input(sh: &mut Shell) {
 /// polled forever. `ignoreeof` is the one boundary that deliberately asks a
 /// terminal for a new record, without discarding any bytes that arrived in
 /// the meantime.
-pub(crate) fn rearm_stdin_after_eof(sh: &mut Shell) {
-    let base = pf_at(&mut sh.input, 0);
+pub(crate) fn rearm_stdin_after_eof(shell: &mut Shell) {
+    let base = input_frame_at(&mut shell.input, 0);
     base.eof_latched = false;
     base.eof_observed = false;
 }

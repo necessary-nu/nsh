@@ -7,7 +7,7 @@ use nsh_platform::{Descriptor, ShellBytesExt as _};
 use std::io::Write;
 
 use crate::context::Shell;
-use crate::fd::LogicalDescriptor;
+use crate::descriptors::LogicalDescriptor;
 use crate::nodes::{FileRedirectionOperator, HereDocument, Node};
 use crate::options::ShellOption;
 // [spec:nsh:def:idiom.shell-options]
@@ -26,7 +26,7 @@ pub(crate) enum RedirectionMode {
 }
 
 /// `PIPE_BUF` where available, 4096 otherwise.  4096 on Linux.
-const PIPESIZE: usize = 4096;
+const PIPE_BUFFER_SIZE: usize = 4096;
 
 /// Both owned ends of a pipe. Dropping either field closes that endpoint.
 #[derive(Debug)]
@@ -38,7 +38,7 @@ pub struct Pipe {
 enum RedirectSource {
     Noop,
     Close,
-    Shared(crate::fd::SharedFd),
+    Shared(crate::descriptors::SharedDescriptor),
     Owned(Descriptor),
 }
 
@@ -72,13 +72,13 @@ impl ExpandedRedirection<'_> {
 /// The C's `next` is gone with the intrusive stack. Saved logical values are
 /// shared owners: ordinary unwind restores them, while fork reset drops
 /// obsolete backups without changing the active table.
-pub struct redirtab {
-    renamed: [SavedDescriptor; LogicalDescriptor::COUNT],
+pub struct RedirectionFrame {
+    saved_descriptors: [SavedDescriptor; LogicalDescriptor::COUNT],
 }
 
 enum SavedDescriptor {
     Empty,
-    Saved(Option<crate::fd::SharedFd>),
+    Saved(Option<crate::descriptors::SharedDescriptor>),
 }
 
 /// The stack of saved logical-descriptor states.
@@ -88,21 +88,21 @@ enum SavedDescriptor {
 /// functions below, which is the property the two `static mut`s it
 /// replaces never had.
 ///
-/// The live map is [`crate::fd::FdTable`]; this stack records only the
+/// The live map is [`crate::descriptors::FdTable`]; this stack records only the
 /// values needed to restore command-scoped redirections.
-pub struct RedirStack {
+pub struct RedirectionStack {
     /// One frame per redirection scope, innermost last. A frame's *index*
     /// is what outlives a call here, never a borrow: `openredirect` can
     /// reach command substitution, which pushes and pops frames of its
     /// own and can move the vector out from under a reference.
-    list: Vec<redirtab>,
+    frames: Vec<RedirectionFrame>,
 }
 
-impl RedirStack {
+impl RedirectionStack {
     /// `redirlist = NULL` and `closed_redirs = 0`, which is what the two
     /// statics started at.
     pub(crate) const fn new() -> Self {
-        RedirStack { list: Vec::new() }
+        RedirectionStack { frames: Vec::new() }
     }
 }
 
@@ -120,46 +120,51 @@ impl RedirStack {
 // [spec:posix:def:redir.purpose]
 // [spec:posix:sem:redir.evaluation-order]
 pub(crate) fn redirect(
-    sh: &mut Shell,
-    redir: &[ExpandedRedirection<'_>],
+    shell: &mut Shell,
+    redirections: &[ExpandedRedirection<'_>],
     mode: RedirectionMode,
 ) -> Result<(), Error> {
-    if redir.is_empty() {
+    if redirections.is_empty() {
         return Ok(());
     }
-    let sv = crate::error::with_interrupts_deferred(sh, |sh| {
+    let saved_frame = crate::error::with_interrupts_deferred(shell, |shell| {
         /* `sv = redirlist` — the frame `pushredir` just pushed, and NULL when
          * there is none, which is what `checked_sub` says. */
-        let sv = if mode == RedirectionMode::Push {
-            sh.redirs.list.len().checked_sub(1)
+        let saved_frame = if mode == RedirectionMode::Push {
+            shell.redirections.frames.len().checked_sub(1)
         } else {
             None
         };
         /* The C walks the list through `n->nfile.next`, which is the same offset
          * in every redirection arm; the list is a `Vec` now. */
-        for n in redir {
-            let fd = n.descriptor();
-            let source = openredirect(sh, n)?;
+        for redirection in redirections {
+            let descriptor = redirection.descriptor();
+            let source = open_redirection(shell, redirection)?;
             if !matches!(source, RedirectSource::Noop) {
                 /* The C's `fd == 0` is "this redirection replaced the shell's
                  * own input", which is what makes the buffered parse state
                  * stale -- not descriptor 0 for its own sake. */
-                if fd == LogicalDescriptor::STDIN {
-                    crate::input::reset_input(sh);
+                if descriptor == LogicalDescriptor::STDIN {
+                    crate::input::reset_input(shell);
                 }
 
-                if let Some(svi) = sv {
-                    let p_slot = fd.index();
-                    if matches!(sh.redirs.list[svi].renamed[p_slot], SavedDescriptor::Empty) {
-                        let saved = sh.fds.get(fd);
-                        sh.redirs.list[svi].renamed[p_slot] = SavedDescriptor::Saved(saved);
+                if let Some(frame_index) = saved_frame {
+                    let descriptor_index = descriptor.index();
+                    if matches!(
+                        shell.redirections.frames[frame_index].saved_descriptors
+                            [descriptor_index],
+                        SavedDescriptor::Empty
+                    ) {
+                        let saved = shell.descriptors.get(descriptor);
+                        shell.redirections.frames[frame_index].saved_descriptors
+                            [descriptor_index] = SavedDescriptor::Saved(saved);
                     }
                 }
 
-                install_redirect(sh, fd, source)?;
+                install_redirection(shell, descriptor, source)?;
             }
         }
-        Ok(sv)
+        Ok(saved_frame)
     })?;
     /* The C indexes slot 2 because that is where the shell's stderr is.
      * The slot follows the frontend's stderr instead -- and if that was
@@ -167,14 +172,15 @@ pub(crate) fn redirect(
      * redirection can name, there is nothing saved to point the trace
      * stream at and it stays where it was. */
     if mode == RedirectionMode::Push {
-        if let Some(svi) = sv {
-            let renamed = &sh.redirs.list[svi].renamed;
+        if let Some(frame_index) = saved_frame {
+            let saved_descriptors =
+                &shell.redirections.frames[frame_index].saved_descriptors;
             if let Some(SavedDescriptor::Saved(Some(saved))) =
-                renamed.get(LogicalDescriptor::STDERR.index())
+                saved_descriptors.get(LogicalDescriptor::STDERR.index())
             {
-                let destination = crate::fd::FdRef::default();
+                let destination = crate::descriptors::DescriptorSlot::default();
                 destination.replace(Some(saved.clone()));
-                sh.io.previous_stderr().set_destination(destination);
+                shell.io.previous_stderr().set_destination(destination);
             }
         }
     }
@@ -184,17 +190,17 @@ pub(crate) fn redirect(
 // [spec:dash:def:redir.sh-open-fail-fn]
 // [spec:dash:sem:redir.sh-open-fail-fn]
 // [spec:nsh:req:idiom.platform-errors]
-fn sh_open_fail(
-    sh: &mut crate::context::Shell,
+fn open_error(
+    shell: &mut crate::context::Shell,
     pathname: &BStr,
     mode: nsh_platform::OpenMode,
     error: &std::io::Error,
 ) -> Error {
-    sh_open_fail_with_context(sh, pathname, mode, error, OpenFailureContext::Ordinary)
+    open_error_with_context(shell, pathname, mode, error, OpenFailureContext::Ordinary)
 }
 
-fn sh_open_fail_with_context(
-    sh: &mut crate::context::Shell,
+fn open_error_with_context(
+    shell: &mut crate::context::Shell,
     pathname: &BStr,
     mode: nsh_platform::OpenMode,
     error: &std::io::Error,
@@ -210,10 +216,10 @@ fn sh_open_fail_with_context(
     message.push(b' ');
     message.extend_from_slice(pathname);
     message.extend_from_slice(b": ");
-    message.extend_from_slice(&crate::error::errmsg(&sh.locale, error, operation));
+    message.extend_from_slice(&crate::error::error_message(&shell.locale, error, operation));
     let status = context.status(error);
-    let line = sh.eval.errlinno;
-    sh.diagnostics()
+    let line = shell.evaluation.diagnostic_line;
+    shell.diagnostics()
         .report(Error::other(line, i32::from(status.code()), &message))
 }
 
@@ -242,17 +248,17 @@ impl OpenFailureContext {
 // [spec:posix:req:xcurel.file-access-permissions]
 // [spec:posix:req:xcurel.file-open-access-mode]
 // [spec:posix:req:xcurel.pathname-resolution]
-pub fn sh_open(
-    sh: &mut Shell,
+pub fn open_file(
+    shell: &mut Shell,
     pathname: &BStr,
     mode: nsh_platform::OpenMode,
     may_fail: bool,
 ) -> Result<Option<Descriptor>, Error> {
-    sh_open_with_context(sh, pathname, mode, may_fail, OpenFailureContext::Ordinary)
+    open_file_with_context(shell, pathname, mode, may_fail, OpenFailureContext::Ordinary)
 }
 
-fn sh_open_with_context(
-    sh: &mut Shell,
+fn open_file_with_context(
+    shell: &mut Shell,
     pathname: &BStr,
     mode: nsh_platform::OpenMode,
     may_fail: bool,
@@ -272,23 +278,23 @@ fn sh_open_with_context(
                  * `pending_sig == 0` test this replaces: a signal that is
                  * pending but not *due* (suppressed, or trapped and handled
                  * elsewhere) is no reason to abandon the open. */
-                if let Some(err) = crate::error::poll_interrupt(sh.interrupt_context()) {
+                if let Some(err) = crate::error::poll_interrupt(shell.interrupt_context()) {
                     return Err(err);
                 }
-                if crate::siginbox::signals().pending_signal().is_none() {
+                if crate::signal_inbox::signals().pending_signal().is_none() {
                     continue;
                 }
                 if may_fail {
                     return Ok(None);
                 }
-                return Err(sh_open_fail_with_context(
-                    sh, pathname, mode, &error, context,
+                return Err(open_error_with_context(
+                    shell, pathname, mode, &error, context,
                 ));
             }
             Err(error) if may_fail => return Ok(None),
             Err(error) => {
-                return Err(sh_open_fail_with_context(
-                    sh, pathname, mode, &error, context,
+                return Err(open_error_with_context(
+                    shell, pathname, mode, &error, context,
                 ));
             }
         }
@@ -297,24 +303,24 @@ fn sh_open_with_context(
 
 /// Open a path for input without exposing the platform's numeric open flags
 /// to callers outside the redirection subsystem.
-pub fn sh_open_read(
-    sh: &mut Shell,
+pub fn open_file_for_reading(
+    shell: &mut Shell,
     pathname: &BStr,
     may_fail: bool,
 ) -> Result<Option<Descriptor>, Error> {
-    sh_open(sh, pathname, nsh_platform::OpenMode::ReadOnly, may_fail)
+    open_file(shell, pathname, nsh_platform::OpenMode::ReadOnly, may_fail)
 }
 
 /// Open `sh`'s command-file operand, preserving its POSIX status class.
-pub fn sh_open_command_file(sh: &mut Shell, pathname: &BStr) -> Result<Descriptor, Error> {
-    sh_open_with_context(
-        sh,
+pub fn open_command_file(shell: &mut Shell, pathname: &BStr) -> Result<Descriptor, Error> {
+    open_file_with_context(
+        shell,
         pathname,
         nsh_platform::OpenMode::ReadOnly,
         false,
         OpenFailureContext::CommandFile,
     )
-    .map(|fd| fd.expect("a mandatory command-file open returns a descriptor"))
+    .map(|descriptor| descriptor.expect("a mandatory command-file open returns a descriptor"))
 }
 
 // [spec:dash:def:redir.openredirect-fn]
@@ -335,16 +341,19 @@ pub fn sh_open_command_file(sh: &mut Shell, pathname: &BStr) -> Result<Descripto
 // [spec:posix:req:xcurel.file-create-existing-actions]
 // [spec:posix:def:xcurel.file-create-existing-codes]
 // [spec:posix:req:xcurel.file-append-mode]
-fn openredirect(sh: &mut Shell, redir: &ExpandedRedirection<'_>) -> Result<RedirectSource, Error> {
-    let source = match redir {
+fn open_redirection(
+    shell: &mut Shell,
+    redirection: &ExpandedRedirection<'_>,
+) -> Result<RedirectSource, Error> {
+    let source = match redirection {
         ExpandedRedirection::File {
             operator, target, ..
-        } => open_file_redirection(sh, *operator, BStr::new(target.as_slice()))?,
+        } => open_file_redirection(shell, *operator, BStr::new(target.as_slice()))?,
         ExpandedRedirection::Descriptor { descriptor, source } => {
-            open_descriptor_redirection(sh, *descriptor, *source)?
+            open_descriptor_redirection(shell, *descriptor, *source)?
         }
         ExpandedRedirection::HereDocument(document) => {
-            RedirectSource::Owned(openhere(sh, document)?)
+            RedirectSource::Owned(open_here_document(shell, document)?)
         }
     };
 
@@ -352,17 +361,17 @@ fn openredirect(sh: &mut Shell, redir: &ExpandedRedirection<'_>) -> Result<Redir
 }
 
 fn open_file_redirection(
-    sh: &mut Shell,
+    shell: &mut Shell,
     operator: FileRedirectionOperator,
     target: &BStr,
 ) -> Result<RedirectSource, Error> {
     let source = match operator {
         FileRedirectionOperator::Read => RedirectSource::Owned(
-            sh_open(sh, target, nsh_platform::OpenMode::ReadOnly, false)?
+            open_file(shell, target, nsh_platform::OpenMode::ReadOnly, false)?
                 .expect("a mandatory open returns a descriptor"),
         ),
         FileRedirectionOperator::ReadWrite => RedirectSource::Owned(
-            sh_open(sh, target, nsh_platform::OpenMode::ReadWriteCreate, false)?
+            open_file(shell, target, nsh_platform::OpenMode::ReadWriteCreate, false)?
                 .expect("a mandatory open returns a descriptor"),
         ),
         FileRedirectionOperator::Write | FileRedirectionOperator::Clobber => {
@@ -370,15 +379,15 @@ fn open_file_redirection(
             let mut opened = None;
             if operator == FileRedirectionOperator::Write {
                 /* Take care of noclobber mode. */
-                if sh.options.enabled(ShellOption::NoClobber) {
+                if shell.options.enabled(ShellOption::NoClobber) {
                     if !target
                         .try_to_path_buf()
                         .is_ok_and(|path| nsh_platform::path_exists(&path))
                     {
                         /* goto do_open */
                         return Ok(RedirectSource::Owned(
-                            sh_open(
-                                sh,
+                            open_file(
+                                shell,
                                 target,
                                 nsh_platform::OpenMode::WriteCreateExclusive,
                                 false,
@@ -395,15 +404,15 @@ fn open_file_redirection(
                         let error = nsh_platform::platform_error(
                             nsh_platform::PlatformErrorKind::AlreadyExists,
                         );
-                        return Err(sh_open_fail(
-                            sh,
+                        return Err(open_error(
+                            shell,
                             target,
                             nsh_platform::OpenMode::WriteCreateTruncate,
                             &error,
                         ));
                     }
 
-                    let fv = sh_open(sh, target, nsh_platform::OpenMode::WriteOnly, false)?
+                    let fv = open_file(shell, target, nsh_platform::OpenMode::WriteOnly, false)?
                         .expect("a mandatory open returns a descriptor");
                     match nsh_platform::fd_is_regular_file(&fv) {
                         Ok(true) => {
@@ -412,8 +421,8 @@ fn open_file_redirection(
                             let error = nsh_platform::platform_error(
                                 nsh_platform::PlatformErrorKind::AlreadyExists,
                             );
-                            return Err(sh_open_fail(
-                                sh,
+                            return Err(open_error(
+                                shell,
                                 target,
                                 nsh_platform::OpenMode::WriteCreateTruncate,
                                 &error,
@@ -421,8 +430,8 @@ fn open_file_redirection(
                         }
                         Ok(false) => {}
                         Err(error) => {
-                            return Err(sh_open_fail(
-                                sh,
+                            return Err(open_error(
+                                shell,
                                 target,
                                 nsh_platform::OpenMode::WriteOnly,
                                 &error,
@@ -436,8 +445,8 @@ fn open_file_redirection(
             }
             if fell_through {
                 RedirectSource::Owned(
-                    sh_open(
-                        sh,
+                    open_file(
+                        shell,
                         target,
                         nsh_platform::OpenMode::WriteCreateTruncate,
                         false,
@@ -449,7 +458,7 @@ fn open_file_redirection(
             }
         }
         FileRedirectionOperator::Append => RedirectSource::Owned(
-            sh_open(sh, target, nsh_platform::OpenMode::WriteCreateAppend, false)?
+            open_file(shell, target, nsh_platform::OpenMode::WriteCreateAppend, false)?
                 .expect("a mandatory open returns a descriptor"),
         ),
     };
@@ -458,7 +467,7 @@ fn open_file_redirection(
 }
 
 fn open_descriptor_redirection(
-    sh: &mut Shell,
+    shell: &mut Shell,
     descriptor: LogicalDescriptor,
     source: Option<LogicalDescriptor>,
 ) -> Result<RedirectSource, Error> {
@@ -468,9 +477,9 @@ fn open_descriptor_redirection(
     if source == descriptor {
         Ok(RedirectSource::Noop)
     } else {
-        let source_fd = sh.fds.get(source).ok_or_else(|| {
+        let source_fd = shell.descriptors.get(source).ok_or_else(|| {
             descriptor_error(
-                sh,
+                shell,
                 source,
                 nsh_platform::platform_error(nsh_platform::PlatformErrorKind::BadDescriptor),
             )
@@ -480,15 +489,15 @@ fn open_descriptor_redirection(
 }
 
 pub(crate) fn descriptor_error(
-    sh: &mut Shell,
+    shell: &mut Shell,
     source: LogicalDescriptor,
     error: std::io::Error,
 ) -> Error {
     let mut message = Vec::new();
     write!(&mut message, "{}", source).expect("writing to a Vec cannot fail");
     message.extend_from_slice(b": ");
-    message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
-    sh.diagnostics().sh_error_value(&message)
+    message.extend_from_slice(shell.locale.error_message(&error).as_bytes());
+    shell.diagnostics().shell_error(&message)
 }
 
 // [spec:dash:def:redir.dupredirect-fn]
@@ -496,51 +505,51 @@ pub(crate) fn descriptor_error(
 // [spec:dash:def:redir.sh-dup2-fn]
 // [spec:dash:sem:redir.sh-dup2-fn]
 // [spec:nsh:req:idiom.no-raw-fd-core]
-fn install_redirect(
-    sh: &mut Shell,
+fn install_redirection(
+    shell: &mut Shell,
     target: LogicalDescriptor,
     source: RedirectSource,
 ) -> Result<(), Error> {
     match source {
         RedirectSource::Noop => Ok(()),
         RedirectSource::Close => {
-            sh.fds.replace(target, None);
+            shell.descriptors.replace(target, None);
             Ok(())
         }
         RedirectSource::Shared(source) => {
-            sh.fds.replace(target, Some(source));
+            shell.descriptors.replace(target, Some(source));
             Ok(())
         }
-        RedirectSource::Owned(source) => sh
-            .fds
+        RedirectSource::Owned(source) => shell
+            .descriptors
             .install_owned(target, source)
             .map(|_| ())
-            .map_err(|error| descriptor_error(sh, target, error)),
+            .map_err(|error| descriptor_error(shell, target, error)),
     }
 }
 
 // [spec:dash:def:redir.sh-pipe-fn]
 // [spec:dash:sem:redir.sh-pipe-fn]
 // [spec:nsh:req:idiom.filesystem-account-bytes]
-pub fn sh_pipe(sh: &mut crate::context::Shell, memfd: bool) -> Result<(Pipe, bool), Error> {
+pub fn create_pipe(shell: &mut crate::context::Shell, memfd: bool) -> Result<(Pipe, bool), Error> {
     if memfd {
         if let Ok(read_fd) = nsh_platform::anonymous_file("dash") {
             let write_fd = nsh_platform::duplicate_fd(&read_fd)
-                .map_err(|_| sh.diagnostics().sh_error_value(b"Pipe call failed"))?;
+                .map_err(|_| shell.diagnostics().shell_error(b"Pipe call failed"))?;
             let read = nsh_platform::move_fd_cloexec(read_fd, LogicalDescriptor::COUNT as i32)
-                .map_err(|_| sh.diagnostics().sh_error_value(b"Pipe call failed"))?;
+                .map_err(|_| shell.diagnostics().shell_error(b"Pipe call failed"))?;
             let write = nsh_platform::move_fd_cloexec(write_fd, LogicalDescriptor::COUNT as i32)
-                .map_err(|_| sh.diagnostics().sh_error_value(b"Pipe call failed"))?;
+                .map_err(|_| shell.diagnostics().shell_error(b"Pipe call failed"))?;
             return Ok((Pipe { read, write }, true));
         }
     }
 
     let (read, write) =
-        nsh_platform::pipe().map_err(|_| sh.diagnostics().sh_error_value(b"Pipe call failed"))?;
+        nsh_platform::pipe().map_err(|_| shell.diagnostics().shell_error(b"Pipe call failed"))?;
     let read = nsh_platform::move_fd_cloexec(read, LogicalDescriptor::COUNT as i32)
-        .map_err(|_| sh.diagnostics().sh_error_value(b"Pipe call failed"))?;
+        .map_err(|_| shell.diagnostics().shell_error(b"Pipe call failed"))?;
     let write = nsh_platform::move_fd_cloexec(write, LogicalDescriptor::COUNT as i32)
-        .map_err(|_| sh.diagnostics().sh_error_value(b"Pipe call failed"))?;
+        .map_err(|_| shell.diagnostics().shell_error(b"Pipe call failed"))?;
     Ok((Pipe { read, write }, false))
 }
 
@@ -554,48 +563,52 @@ pub fn sh_pipe(sh: &mut crate::context::Shell, memfd: bool) -> Result<(Pipe, boo
 // [spec:dash:sem:redir.openhere-fn]
 // [spec:posix:sem:redir.here-doc-fd-type]
 // [spec:posix:req:redir.here-doc-expansion]
-fn openhere(sh: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error> {
-    let len: usize;
-    let expanded;
+fn open_here_document(shell: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error> {
+    let expanded_content;
 
-    let p: &[u8] = if document.expand {
-        let doc = Node::Word(document.body.clone());
-        crate::expand::expandarg(sh, &doc, None, crate::expand::ExpansionMode::QUOTED)?;
+    let content: &[u8] = if document.expand {
+        let word_node = Node::Word(document.body.clone());
+        crate::expand::expand_argument(
+            shell,
+            &word_node,
+            None,
+            crate::expand::ExpansionMode::QUOTED,
+        )?;
         /* The C reads the expansion back out of the region as
          * `stackblock()`.  The expansion buffer is owned now, so the read is
          * named.  Two consequences, both in the port's favour: the bytes
          * cannot be moved by the `sh_pipe`/`forkshell` allocations below —
          * the C's were only safe because neither happens to `stalloc` — and
          * the result carries its own byte length. */
-        expanded = bstr::BString::from(crate::expand::expansion_result(sh));
-        expanded.as_slice()
+        expanded_content = bstr::BString::from(crate::expand::expansion_result(shell));
+        expanded_content.as_slice()
     } else {
         document.body.word.as_bstr()
     };
 
-    len = p.len();
-    let (pip, memfd) = sh_pipe(sh, len > PIPESIZE)?;
+    let content_length = content.len();
+    let (pipe, memory_backed) = create_pipe(shell, content_length > PIPE_BUFFER_SIZE)?;
 
-    if memfd || len <= PIPESIZE {
-        nsh_platform::write_all(&pip.write, p)
-            .map_err(|error| here_document_write_error(sh, error))?;
-        if memfd {
-            nsh_platform::seek_start(&pip.write)
-                .map_err(|error| here_document_write_error(sh, error))?;
+    if memory_backed || content_length <= PIPE_BUFFER_SIZE {
+        nsh_platform::write_all(&pipe.write, content)
+            .map_err(|error| here_document_write_error(shell, error))?;
+        if memory_backed {
+            nsh_platform::seek_start(&pipe.write)
+                .map_err(|error| here_document_write_error(shell, error))?;
         }
         /* goto out */
-        drop(pip.write);
-        return Ok(pip.read);
+        drop(pipe.write);
+        return Ok(pipe.read);
     }
 
     if matches!(
-        crate::jobs::forkshell(sh, None, None, crate::jobs::ForkMode::WithoutJob)?,
+        crate::jobs::fork_shell(shell, None, None, crate::jobs::ForkMode::WithoutJob)?,
         nsh_platform::ForkResult::Child
     ) {
-        drop(pip.read);
+        drop(pipe.read);
         nsh_platform::configure_here_document_writer_signals();
-        if let Err(error) = nsh_platform::write_all(&pip.write, p) {
-            drop(here_document_write_error(sh, error));
+        if let Err(error) = nsh_platform::write_all(&pipe.write, content) {
+            drop(here_document_write_error(shell, error));
             nsh_platform::flush_coverage_profile();
             nsh_platform::exit_immediately(1);
         }
@@ -603,14 +616,14 @@ fn openhere(sh: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error
         nsh_platform::exit_immediately(0);
     }
     /* out: */
-    drop(pip.write);
-    Ok(pip.read)
+    drop(pipe.write);
+    Ok(pipe.read)
 }
 
-fn here_document_write_error(sh: &mut Shell, error: std::io::Error) -> Error {
+fn here_document_write_error(shell: &mut Shell, error: std::io::Error) -> Error {
     let mut message = b"here document write error: ".to_vec();
-    message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
-    sh.diagnostics().sh_error_value(&message)
+    message.extend_from_slice(shell.locale.error_message(&error).as_bytes());
+    shell.diagnostics().shell_error(&message)
 }
 
 /*
@@ -619,37 +632,39 @@ fn here_document_write_error(sh: &mut Shell, error: std::io::Error) -> Error {
 
 // [spec:dash:def:redir.popredir-fn]
 // [spec:dash:sem:redir.popredir-fn]
-pub fn popredir(sh: &mut Shell, discard: bool) {
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        let rp = sh.redirs.list.len() - 1;
-        let mut i = 0;
-        while i < LogicalDescriptor::COUNT {
-            let renamed =
-                std::mem::replace(&mut sh.redirs.list[rp].renamed[i], SavedDescriptor::Empty);
+pub fn pop_redirection(shell: &mut Shell, discard: bool) {
+    crate::error::with_interrupts_deferred(shell, |shell| {
+        let frame_index = shell.redirections.frames.len() - 1;
+        let mut descriptor_index = 0;
+        while descriptor_index < LogicalDescriptor::COUNT {
+            let saved_descriptor = std::mem::replace(
+                &mut shell.redirections.frames[frame_index].saved_descriptors[descriptor_index],
+                SavedDescriptor::Empty,
+            );
 
-            if matches!(renamed, SavedDescriptor::Empty) {
-                i += 1;
+            if matches!(saved_descriptor, SavedDescriptor::Empty) {
+                descriptor_index += 1;
                 continue;
             }
 
-            match renamed {
+            match saved_descriptor {
                 SavedDescriptor::Saved(saved) => {
                     if !discard {
-                        let descriptor = LogicalDescriptor::from_index(i)
+                        let descriptor = LogicalDescriptor::from_index(descriptor_index)
                             .expect("a redirection frame has only logical descriptors");
                         if descriptor == LogicalDescriptor::STDIN {
-                            crate::input::reset_input(sh);
+                            crate::input::reset_input(shell);
                         }
-                        sh.fds.replace(descriptor, saved);
+                        shell.descriptors.replace(descriptor, saved);
                     }
                 }
                 SavedDescriptor::Empty => unreachable!(),
             }
-            i += 1;
+            descriptor_index += 1;
         }
         /* `redirlist = rp->next` — which also drops anything pushed above `rp`
          * and never popped, as the C's assignment did. */
-        sh.redirs.list.truncate(rp);
+        shell.redirections.frames.truncate(frame_index);
     });
 }
 
@@ -660,14 +675,14 @@ pub fn popredir(sh: &mut Shell, discard: bool) {
 impl Shell {
     /// Restore every command-scoped redirection before recovery or shutdown.
     pub(crate) fn restore_saved_redirections(&mut self) {
-        while !self.redirs.list.is_empty() {
-            popredir(self, false);
+        while !self.redirections.frames.is_empty() {
+            pop_redirection(self, false);
         }
     }
 
     /// Consume inherited restoration frames without changing active slots.
     pub(crate) fn discard_saved_redirections(&mut self) {
-        let inherited = core::mem::take(&mut self.redirs.list);
+        let inherited = core::mem::take(&mut self.redirections.frames);
         drop(inherited);
     }
 }
@@ -680,23 +695,23 @@ impl Shell {
 // [spec:dash:def:redir.savefd-fn]
 // [spec:dash:sem:redir.savefd-fn]
 /// Move an owned descriptor above the shell redirection range.
-pub fn move_fd_above(sh: &mut Shell, fd: Descriptor) -> Result<Descriptor, Error> {
+pub fn move_descriptor_above(shell: &mut Shell, fd: Descriptor) -> Result<Descriptor, Error> {
     nsh_platform::move_fd_cloexec(fd, 10).map_err(|error| {
-        let message = sh.locale.error_message(&error);
-        sh.diagnostics().sh_error_value(message.as_bytes())
+        let message = shell.locale.error_message(&error);
+        shell.diagnostics().shell_error(message.as_bytes())
     })
 }
 
 /// Duplicate a process-table slot above the shell redirection range.
 pub fn copy_slot_above(
-    sh: &mut Shell,
+    shell: &mut Shell,
     from: LogicalDescriptor,
 ) -> Result<Option<Descriptor>, Error> {
-    let source = sh.fds.get(from);
+    let source = shell.descriptors.get(from);
     source
         .map(|source| nsh_platform::duplicate_cloexec(&source, 10))
         .transpose()
-        .map_err(|error| descriptor_error(sh, from, error))
+        .map_err(|error| descriptor_error(shell, from, error))
 }
 
 /// `redirect`, with the diagnostic it can produce handed back rather than
@@ -713,13 +728,13 @@ pub fn copy_slot_above(
 /// depth on every ordinary return, including an error caught here.
 // [spec:dash:def:redir.redirectsafe-fn]
 // [spec:dash:sem:redir.redirectsafe-fn]
-pub(crate) fn redirectsafe(
-    sh: &mut Shell,
-    redir: &[ExpandedRedirection<'_>],
+pub(crate) fn redirect_safely(
+    shell: &mut Shell,
+    redirections: &[ExpandedRedirection<'_>],
     mode: RedirectionMode,
 ) -> Result<(), Error> {
-    let redirect_error = redirect(sh, redir, mode).err();
-    let caught = crate::expand::restore_handler_expandarg(sh, redirect_error);
+    let redirect_error = redirect(shell, redirections, mode).err();
+    let caught = crate::expand::recover_expansion(shell, redirect_error);
     if let Some(e) = caught {
         return Err(e);
     }
@@ -731,27 +746,28 @@ pub(crate) fn redirectsafe(
 // [spec:dash:sem:redir.unwindredir-fn]
 /// `stop` was the `redirtab *` to unwind back to; a stack in a vector says
 /// the same thing with the depth to unwind back to.
-pub fn unwindredir(sh: &mut Shell, stop: usize) {
-    while sh.redirs.list.len() != stop {
-        popredir(sh, false);
+pub fn unwind_redirections(shell: &mut Shell, stop: usize) {
+    while shell.redirections.frames.len() != stop {
+        pop_redirection(shell, false);
     }
 }
 
 // [spec:dash:def:redir.pushredir-fn]
 // [spec:dash:sem:redir.pushredir-fn]
-pub(crate) fn pushredir(sh: &mut Shell, redir: &[ExpandedRedirection<'_>]) -> usize {
-    let q: usize;
-
-    q = sh.redirs.list.len();
-    if redir.is_empty() {
-        return q; /* goto out */
+pub(crate) fn push_redirections(
+    shell: &mut Shell,
+    redirections: &[ExpandedRedirection<'_>],
+) -> usize {
+    let depth = shell.redirections.frames.len();
+    if redirections.is_empty() {
+        return depth;
     }
 
-    sh.redirs.list.push(redirtab {
-        renamed: std::array::from_fn(|_| SavedDescriptor::Empty),
+    shell.redirections.frames.push(RedirectionFrame {
+        saved_descriptors: std::array::from_fn(|_| SavedDescriptor::Empty),
     });
 
-    q
+    depth
 }
 
 #[cfg(test)]
@@ -773,7 +789,7 @@ mod tests {
     use super::{LogicalDescriptor, OpenFailureContext};
     use crate::Shell;
     use crate::error::Error;
-    use crate::expand::restore_handler_expandarg;
+    use crate::expand::recover_expansion;
 
     fn diagnostic() -> Error {
         Error::Other {
@@ -803,9 +819,9 @@ mod tests {
     // [spec:dash:sem:expand.restore-handler-expandarg-fn/test]
     #[test]
     fn a_clean_frame_returns_nothing() {
-        let _guard = crate::testutil::lock();
-        let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        assert!(restore_handler_expandarg(&mut sh, None).is_none());
+        let _guard = crate::test_support::lock();
+        let mut shell = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        assert!(recover_expansion(&mut shell, None).is_none());
     }
 
     /// A diagnostic is handed straight back, text, status and line
@@ -813,9 +829,9 @@ mod tests {
     // [spec:dash:sem:expand.restore-handler-expandarg-fn/test]
     #[test]
     fn caught_diagnostic_comes_back() {
-        let _guard = crate::testutil::lock();
-        let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let got = restore_handler_expandarg(&mut sh, Some(diagnostic()))
+        let _guard = crate::test_support::lock();
+        let mut shell = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let got = recover_expansion(&mut shell, Some(diagnostic()))
             .expect("the caught diagnostic is the frame's to return");
         assert_eq!(got.message(), "Bad substitution");
         assert_eq!(got.status(), crate::status::ExitStatus::ERROR);
@@ -830,10 +846,10 @@ mod tests {
     // [spec:dash:sem:expand.restore-handler-expandarg-fn/test]
     #[test]
     fn an_interrupt_comes_back_as_one() {
-        let _guard = crate::testutil::lock();
-        let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let got = restore_handler_expandarg(
-            &mut sh,
+        let _guard = crate::test_support::lock();
+        let mut shell = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let got = recover_expansion(
+            &mut shell,
             Some(Error::Interrupted {
                 signal: crate::status::Signal::from(nsh_platform::interrupt_signal()),
             }),
@@ -853,13 +869,13 @@ mod tests {
     #[test]
     fn open_into_target_restores_closed_slot() {
         let status = nsh_platform::run_in_child(|| {
-            let mut sh = Shell::builder().build().unwrap();
+            let mut shell = Shell::builder().build().unwrap();
             let descriptor = LogicalDescriptor::new(3).unwrap();
-            sh.fds.replace(descriptor, None);
-            if sh.run(b"{ :; } 3>/dev/null").is_err() {
+            shell.descriptors.replace(descriptor, None);
+            if shell.run(b"{ :; } 3>/dev/null").is_err() {
                 nsh_platform::exit_immediately(2);
             }
-            if sh.fds.is_open(descriptor) {
+            if shell.descriptors.is_open(descriptor) {
                 nsh_platform::exit_immediately(3);
             }
             nsh_platform::exit_immediately(0);

@@ -5,7 +5,7 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::eval::Flow;
+use crate::evaluation::Flow;
 use bstr::BStr;
 
 // [spec:dash:def:eval.truecmd-fn]
@@ -15,7 +15,7 @@ use bstr::BStr;
 // [spec:posix:req:builtin.colon.no-options]
 // [spec:posix:req:builtin.colon.interfaces]
 // [spec:posix:req:builtin.colon.exit-status]
-pub fn truecmd(_sh: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(_shell: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> {
     Ok(Flow::Done((0).into()))
 }
 
@@ -27,13 +27,13 @@ mod tests {
     /// ignoring them is what makes it the idiom it is.
     #[test]
     fn always_succeeds() {
-        let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
+        let shell = &mut Shell::new(crate::streams::Streams::INHERIT);
         assert_eq!(
-            truecmd(sh, &[BStr::new("true")]).unwrap(),
+            run(shell, &[BStr::new("true")]).unwrap(),
             Flow::Done((0).into())
         );
         assert_eq!(
-            truecmd(sh, &[BStr::new(":"), BStr::new("ignored")]).unwrap(),
+            run(shell, &[BStr::new(":"), BStr::new("ignored")]).unwrap(),
             Flow::Done((0).into())
         );
     }

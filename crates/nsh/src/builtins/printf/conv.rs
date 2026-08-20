@@ -88,8 +88,8 @@ impl Spec {
     }
 
     /// Record one flag character, or report that `ch` ends the flags.
-    pub(super) fn flag(&mut self, ch: u8) -> bool {
-        match ch {
+    pub(super) fn flag(&mut self, character: u8) -> bool {
+        match character {
             b'#' => self.alt = true,
             b'-' => self.left = true,
             b'+' => self.plus = true,
@@ -216,20 +216,20 @@ impl Spec {
         }
 
         let fill = self.width.saturating_sub(len);
-        let mut out = Vec::with_capacity(len.max(self.width));
+        let mut output = Vec::with_capacity(len.max(self.width));
 
         if !self.left && !zeros {
-            out.resize(fill, b' ');
+            output.resize(fill, b' ');
         }
-        out.extend_from_slice(prefix);
+        output.extend_from_slice(prefix);
         if !self.left && zeros {
-            out.resize(out.len() + fill, b'0');
+            output.resize(output.len() + fill, b'0');
         }
-        body.write_to(&mut out);
+        body.write_to(&mut output);
         if self.left {
-            out.resize(self.width.max(len), b' ');
+            output.resize(self.width.max(len), b' ');
         }
-        Some(out)
+        Some(output)
     }
 
     /// `%s`: the argument's bytes, truncated by the precision.
@@ -237,7 +237,9 @@ impl Spec {
     /// Byte-oriented, so an argument that is not valid UTF-8 keeps its
     /// bytes and a precision counts them the way C counts them.
     pub(super) fn string(&self, bytes: &[u8]) -> Option<Vec<u8>> {
-        let take = self.precision.map_or(bytes.len(), |p| p.min(bytes.len()));
+        let take = self
+            .precision
+            .map_or(bytes.len(), |precision| precision.min(bytes.len()));
         self.field(&[], &Number::plain(bytes[..take].to_vec()), false)
     }
 
@@ -472,7 +474,7 @@ impl Spec {
 
         let kept = self
             .precision
-            .map_or(FRACTION_DIGITS, |p| p.min(FRACTION_DIGITS));
+            .map_or(FRACTION_DIGITS, |precision| precision.min(FRACTION_DIGITS));
         if kept < FRACTION_DIGITS {
             let shift = (FRACTION_DIGITS - kept) * 4;
             let dropped = fraction & ((1u64 << shift) - 1);

@@ -9,14 +9,14 @@
 use bstr::{BStr, BString, ByteSlice};
 
 use crate::error::Error;
-use crate::eval::Flow;
+use crate::evaluation::Flow;
 use crate::options::ShellOption;
 // [spec:nsh:def:idiom.shell-options]
 use crate::nodes::Node;
 use crate::status::Signal;
 
 /// The active platform's signal-table width.
-pub const NSIG: usize = nsh_platform::SIGNAL_COUNT;
+pub const SIGNAL_SLOT_COUNT: usize = nsh_platform::SIGNAL_COUNT;
 
 /// What the shell should do when a condition is raised.
 // [spec:nsh:def:idiom.trap-dispositions]
@@ -52,23 +52,23 @@ enum DispositionState {
 /// indices, and a handler has no receiver. The answer is now a mirror in
 /// the signal inbox, published by [`TrapTable::set`], which is why that is
 /// the only writer of a slot and why it demands a
-/// [`crate::siginbox::SignalsBlocked`] witness.
+/// [`crate::signal_inbox::SignalsBlocked`] witness.
 pub struct TrapTable {
     /// The action for each signal, slot 0 being the `EXIT` trap.
     ///
     /// Default, ignored, and executable actions are distinct variants. An
     /// ignored signal still counts as trapped for the signal-inbox mirror.
-    action: [TrapAction; NSIG],
+    action: [TrapAction; SIGNAL_SLOT_COUNT],
     /// The actions visible to a listing before this subshell executes a
     /// `trap` command with operands.  Live dispositions are still reset on
     /// entry; POSIX requires only the pre-entry commands to remain reportable.
-    subshell_listing: Option<Box<[TrapAction; NSIG]>>,
+    subshell_listing: Option<Box<[TrapAction; SIGNAL_SLOT_COUNT]>>,
     /// Traps have not been fully cleared in this child.
     pub(crate) parent_traps_pending: bool,
     /// number of non-null traps
     pub(crate) trap_count: usize,
     /// Current disposition knowledge, indexed by `signo - 1`.
-    dispositions: [DispositionState; NSIG - 1],
+    dispositions: [DispositionState; SIGNAL_SLOT_COUNT - 1],
     /// Cached interactive signal policy.
     interactive: bool,
 }
@@ -83,30 +83,30 @@ impl TrapTable {
          * one handler and it reports to one inbox. A fresh table has no
          * traps, so clearing is also simply correct for the only case
          * that is not that limit. */
-        let sink = crate::siginbox::signals();
-        for signo in 0..NSIG {
-            sink.set_trapped(signo, false);
+        let sink = crate::signal_inbox::signals();
+        for signal_number in 0..SIGNAL_SLOT_COUNT {
+            sink.set_trapped(signal_number, false);
         }
         TrapTable {
-            action: [const { TrapAction::Default }; NSIG],
+            action: [const { TrapAction::Default }; SIGNAL_SLOT_COUNT],
             subshell_listing: None,
             parent_traps_pending: false,
             trap_count: 0,
-            dispositions: [DispositionState::Unknown; NSIG - 1],
+            dispositions: [DispositionState::Unknown; SIGNAL_SLOT_COUNT - 1],
             interactive: false,
         }
     }
 
     /// The action selected for `signo`.
     #[inline]
-    pub(crate) fn action(&self, signo: usize) -> &TrapAction {
-        &self.action[signo]
+    pub(crate) fn action(&self, signal_number: usize) -> &TrapAction {
+        &self.action[signal_number]
     }
 
     /// The action a no-operand `trap` command must report.
-    pub(crate) fn listed_action(&self, signo: usize) -> &TrapAction {
+    pub(crate) fn listed_action(&self, signal_number: usize) -> &TrapAction {
         let actions = self.subshell_listing.as_deref().unwrap_or(&self.action);
-        &actions[signo]
+        &actions[signal_number]
     }
 
     /// Preserve the listing inherited by a newly entered subshell.
@@ -142,13 +142,13 @@ impl TrapTable {
     /// `docs/api-design.md` 5.3 carries the table.
     pub(crate) fn set(
         &mut self,
-        _blocked: &crate::siginbox::SignalsBlocked,
-        signo: usize,
+        _blocked: &crate::signal_inbox::SignalsBlocked,
+        signal_number: usize,
         to: TrapAction,
     ) -> TrapAction {
-        let was = core::mem::replace(&mut self.action[signo], to);
-        let is_trapped = !matches!(self.action[signo], TrapAction::Default);
-        crate::siginbox::signals().set_trapped(signo, is_trapped);
+        let was = core::mem::replace(&mut self.action[signal_number], to);
+        let is_trapped = !matches!(self.action[signal_number], TrapAction::Default);
+        crate::signal_inbox::signals().set_trapped(signal_number, is_trapped);
         was
     }
 
@@ -165,8 +165,8 @@ impl TrapTable {
 
 // [spec:dash:def:trap.have-traps-fn]
 // [spec:dash:sem:trap.have-traps-fn]
-pub fn have_traps(sh: &crate::context::Shell) -> bool {
-    sh.traps.trap_count != 0
+pub fn has_traps(shell: &crate::context::Shell) -> bool {
+    shell.traps.trap_count != 0
 }
 
 impl crate::context::Shell {
@@ -175,7 +175,7 @@ impl crate::context::Shell {
         let child = Signal::from(nsh_platform::child_signal());
         self.traps.dispositions[(child.number() - 1) as usize] =
             DispositionState::Installed(crate::host::Disposition::Default);
-        setsignal(self, child);
+        configure_signal(self, child);
     }
 
     /// Remove parent trap actions and begin the child's independent listing.
@@ -217,35 +217,37 @@ impl crate::context::Shell {
 // [spec:posix:req:builtin.trap.persistence]
 // [spec:posix:req:builtin.trap.subshell-reset]
 // [spec:posix:req:builtin.trap.subshell-lexical-check]
-pub fn clear_traps(sh: &mut crate::context::Shell, n: Option<&Node>) {
+pub fn clear_traps(shell: &mut crate::context::Shell, node: Option<&Node>) {
     let simple_command: bool;
 
-    simple_command = crate::parser::issimplecmd(n, BStr::new(b"trap"));
+    simple_command = crate::parser::is_simple_command(node, BStr::new(b"trap"));
 
-    crate::error::with_interrupts_deferred(sh, |sh| {
+    crate::error::with_interrupts_deferred(shell, |shell| {
         /* One guard for the whole loop rather than one per slot. The
          * `simplecmd` arm clears a slot and puts it back with a disposition
          * update in between, so the whole transition is one scope. */
-        let blocked = crate::siginbox::SignalsBlocked::new();
-        for signo in 0..NSIG {
-            if !matches!(sh.traps.action(signo), TrapAction::Command(_)) {
+        let blocked = crate::signal_inbox::SignalsBlocked::new();
+        for signal_number in 0..SIGNAL_SLOT_COUNT {
+            if !matches!(shell.traps.action(signal_number), TrapAction::Command(_)) {
                 continue;
             }
-            let previous = sh.traps.set(&blocked, signo, TrapAction::Default);
-            if signo != 0 {
-                let signal = Signal::from_number(signo as i32)
+            let previous = shell
+                .traps
+                .set(&blocked, signal_number, TrapAction::Default);
+            if signal_number != 0 {
+                let signal = Signal::from_number(signal_number as i32)
                     .expect("nonzero trap slots are positive signals");
-                setsignal_in_child(sh, signal);
+                configure_signal_in_child(shell, signal);
             }
 
             if simple_command {
-                drop(sh.traps.set(&blocked, signo, previous));
+                drop(shell.traps.set(&blocked, signal_number, previous));
             }
             /* The C leaks the previous action in the non-simple-command arm.
              * This owned value drops it after the last possible restore. */
         }
-        sh.traps.trap_count = 0;
-        sh.traps.parent_traps_pending = simple_command;
+        shell.traps.trap_count = 0;
+        shell.traps.parent_traps_pending = simple_command;
         drop(blocked);
     });
 }
@@ -295,12 +297,12 @@ pub(crate) fn disposition_of(action: nsh_platform::SignalAction) -> crate::host:
 
 /// What is installed for `signo` right now, or `Err` if it cannot be read.
 fn current_disposition(
-    sh: &mut crate::context::Shell,
+    shell: &mut crate::context::Shell,
     signal: Signal,
     via: Via,
 ) -> std::io::Result<crate::host::Disposition> {
     match via {
-        Via::Host => sh.host.signal(signal),
+        Via::Host => shell.host.signal(signal),
         Via::Platform => nsh_platform::signal_action(signal.platform()).map(disposition_of),
     }
 }
@@ -316,20 +318,21 @@ fn current_disposition(
 /// kernel-facing copy unconditionally. What is left is the signal number
 /// and the disposition, which is exactly what the host is asked for.
 fn install_disposition(
-    sh: &mut crate::context::Shell,
+    shell: &mut crate::context::Shell,
     signal: Signal,
     to: crate::host::Disposition,
     via: Via,
 ) -> bool {
     match via {
-        Via::Host => sh.host.set_signal(signal, to).is_ok(),
+        Via::Host => shell.host.set_signal(signal, to).is_ok(),
         Via::Platform => {
             let action = match to {
                 crate::host::Disposition::Catch => nsh_platform::SignalAction::Catch,
                 crate::host::Disposition::Ignore => nsh_platform::SignalAction::Ignore,
                 crate::host::Disposition::Default => nsh_platform::SignalAction::Default,
             };
-            nsh_platform::install_signal_action(signal.platform(), action, onsig).is_ok()
+            nsh_platform::install_signal_action(signal.platform(), action, mark_signal_pending)
+                .is_ok()
         }
     }
 }
@@ -350,43 +353,43 @@ fn install_disposition(
 // [spec:posix:req:sh.signal-actions-overridable]
 // [spec:posix:req:xcu.defaults.asynchronous-events-default]
 // [spec:posix:req:xcu.async.may-catch-and-resignal]
-pub fn setsignal(sh: &mut crate::context::Shell, signal: Signal) {
-    setsignal_via(sh, signal, Via::Host)
+pub fn configure_signal(shell: &mut crate::context::Shell, signal: Signal) {
+    configure_signal_via(shell, signal, Via::Host)
 }
 
 /// The forked child's entry point: identical policy, installed directly.
 ///
 /// See [`Via::Platform`] for why this is a second entry point rather than an
 /// argument the shell could have answered for itself.
-pub fn setsignal_in_child(sh: &mut crate::context::Shell, signal: Signal) {
-    setsignal_via(sh, signal, Via::Platform)
+pub fn configure_signal_in_child(shell: &mut crate::context::Shell, signal: Signal) {
+    configure_signal_via(shell, signal, Via::Platform)
 }
 
-fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
-    let signo = signal.number();
+fn configure_signal_via(shell: &mut crate::context::Shell, signal: Signal, via: Via) {
+    let signal_number = signal.number();
 
-    let mut desired = match sh.traps.action(signo as usize) {
+    let mut desired = match shell.traps.action(signal_number as usize) {
         TrapAction::Default => crate::host::Disposition::Default,
         TrapAction::Ignore => crate::host::Disposition::Ignore,
         TrapAction::Command(_) => crate::host::Disposition::Catch,
     };
-    if crate::runtime::rootshell(sh) && desired == crate::host::Disposition::Default {
+    if crate::runtime::is_root_shell(shell) && desired == crate::host::Disposition::Default {
         match signal {
             signal if signal == Signal::from(nsh_platform::interrupt_signal()) => {
-                if sh.options.enabled(ShellOption::Interactive)
-                    || sh.options.command_source
-                    || !sh.options.enabled(ShellOption::Stdin)
+                if shell.options.enabled(ShellOption::Interactive)
+                    || shell.options.command_source
+                    || !shell.options.enabled(ShellOption::Stdin)
                 {
                     desired = crate::host::Disposition::Catch;
                 }
             }
             signal if signal == Signal::from(nsh_platform::quit_signal()) => {
-                if sh.options.enabled(ShellOption::Interactive) {
+                if shell.options.enabled(ShellOption::Interactive) {
                     desired = crate::host::Disposition::Ignore;
                 }
             }
             signal if signal == Signal::from(nsh_platform::termination_signal()) => {
-                if sh.options.enabled(ShellOption::Interactive) {
+                if shell.options.enabled(ShellOption::Interactive) {
                     desired = crate::host::Disposition::Ignore;
                 }
             }
@@ -394,7 +397,7 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
                 if signal == Signal::from(nsh_platform::terminal_stop_signal())
                     || signal == Signal::from(nsh_platform::terminal_output_signal()) =>
             {
-                if sh.options.enabled(ShellOption::Monitor) {
+                if shell.options.enabled(ShellOption::Monitor) {
                     desired = crate::host::Disposition::Ignore;
                 }
             }
@@ -406,11 +409,11 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
         desired = crate::host::Disposition::Catch;
     }
 
-    let index = (signo - 1) as usize;
-    let mut state = sh.traps.dispositions[index];
+    let index = (signal_number - 1) as usize;
+    let mut state = shell.traps.dispositions[index];
     if state == DispositionState::Unknown {
-        let current = match current_disposition(sh, signal, via) {
-            Ok(d) => d,
+        let current = match current_disposition(shell, signal, via) {
+            Ok(disposition) => disposition,
             Err(_) => {
                 // Leave the state unknown so a later call retries the query.
                 return;
@@ -421,7 +424,7 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
          * is hard-ignored and can never be trapped, and that rule cannot
          * be reproduced without reading the inherited disposition. */
         if current == crate::host::Disposition::Ignore {
-            if sh.options.enabled(ShellOption::Monitor)
+            if shell.options.enabled(ShellOption::Monitor)
                 && (signal == Signal::from(nsh_platform::terminal_stop_signal())
                     || signal == Signal::from(nsh_platform::terminal_input_signal())
                     || signal == Signal::from(nsh_platform::terminal_output_signal()))
@@ -437,7 +440,7 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
     if state == DispositionState::InheritedIgnore || state == DispositionState::Installed(desired) {
         return;
     }
-    sh.traps.dispositions[index] = if install_disposition(sh, signal, desired, via) {
+    shell.traps.dispositions[index] = if install_disposition(shell, signal, desired, via) {
         DispositionState::Installed(desired)
     } else {
         // Retain a retryable state when the host or platform refused the install.
@@ -462,16 +465,16 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
 /// calls disagree about have nothing to apply to.
 // [spec:dash:def:trap.ignoresig-fn]
 // [spec:dash:sem:trap.ignoresig-fn]
-pub fn ignoresig_in_child(sh: &mut crate::context::Shell, signal: Signal) {
-    let signo = signal.number();
-    let index = (signo - 1) as usize;
-    let state = sh.traps.dispositions[index];
+pub fn ignore_signal_in_child(shell: &mut crate::context::Shell, signal: Signal) {
+    let signal_number = signal.number();
+    let index = (signal_number - 1) as usize;
+    let state = shell.traps.dispositions[index];
     if state == DispositionState::Installed(crate::host::Disposition::Ignore)
         || state == DispositionState::InheritedIgnore
     {
         return;
     }
-    sh.traps.dispositions[index] = if nsh_platform::ignore_signal(signal.platform()).is_ok() {
+    shell.traps.dispositions[index] = if nsh_platform::ignore_signal(signal.platform()).is_ok() {
         DispositionState::Installed(crate::host::Disposition::Ignore)
     } else {
         DispositionState::ResetRequired
@@ -487,10 +490,10 @@ pub fn ignoresig_in_child(sh: &mut crate::context::Shell, signal: Signal) {
 /* The platform crate owns the C-ABI trampoline and hands this callback a
  * validated signal. Delivery records atomics and returns; it never unwinds
  * through the signal frame. */
-pub fn onsig(signal: nsh_platform::Signal) {
+pub fn mark_signal_pending(signal: nsh_platform::Signal) {
     let signal = Signal::from_number(signal.number())
         .expect("the platform callback supplies a positive signal");
-    crate::siginbox::signals().raise(signal);
+    crate::signal_inbox::signals().raise(signal);
 }
 
 /*
@@ -503,7 +506,7 @@ pub fn onsig(signal: nsh_platform::Signal) {
 // [spec:posix:req:builtin.trap.action-overrides-and-exit-status]
 // [spec:posix:req:builtin.trap.action-executed-as-eval]
 // [spec:posix:sem:signal.pending-trap-order]
-pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
+pub fn run_pending_traps(shell: &mut crate::context::Shell) -> Result<Flow, Error> {
     let status: crate::status::ExitStatus;
 
     /* The poll site the shell reaches most often: `evaltree` calls
@@ -512,11 +515,11 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
      * the next command boundary at the latest. It is tested before
      * `pending_sig`, because an *untrapped* SIGINT sets `intpending` and
      * has no trap action for the loop below to run. */
-    if let Some(e) = crate::error::poll_interrupt(sh.interrupt_context()) {
-        return Err(e);
+    if let Some(error) = crate::error::poll_interrupt(shell.interrupt_context()) {
+        return Err(error);
     }
 
-    let signals = crate::siginbox::signals();
+    let signals = crate::signal_inbox::signals();
     if signals.pending_signal().is_none() {
         return Ok(Flow::Done((0).into()));
     }
@@ -525,11 +528,11 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
      * signal delivered while an EXIT action is running must save that
      * action's current status, not reuse the status that entered EXIT. */
     // [spec:nsh:req:compat.smoosh.trap-status]
-    status = sh.status;
+    status = shell.status;
     signals.set_pending_signal(None);
     crate::error::barrier();
 
-    for number in 1..NSIG {
+    for number in 1..SIGNAL_SLOT_COUNT {
         let signal = Signal::from_number(number as i32).expect("trap loop visits positive signals");
         if !signals.signal_pending(signal) {
             continue;
@@ -541,7 +544,7 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
          * buffer it is handed and the action it runs may `trap` over this
          * very slot; the C passes the slot's own pointer and keeps reading
          * it after `trapcmd` has freed it. */
-        let command = match sh.traps.action(signal.number() as usize) {
+        let command = match shell.traps.action(signal.number() as usize) {
             TrapAction::Command(command) => command.clone(),
             TrapAction::Default | TrapAction::Ignore => {
                 continue;
@@ -552,28 +555,31 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
          * ordinary status, so the command performs its own redirection,
          * input, and local-variable cleanup before returning here. Syntax
          * and interrupt errors still arrive as `Err` and propagate. */
-        let outer_trap_status = sh.eval.trap_default_exit_status.replace(status);
-        sh.eval.signal_trap_depth += 1;
-        let outcome =
-            crate::eval::evalstring(sh, command.as_bstr(), crate::eval::EvalContext::DEFAULT);
-        sh.eval.signal_trap_depth -= 1;
-        sh.eval.trap_default_exit_status = outer_trap_status;
+        let outer_trap_status = shell.evaluation.trap_default_exit_status.replace(status);
+        shell.evaluation.signal_trap_depth += 1;
+        let outcome = crate::evaluation::evaluate_string(
+            shell,
+            command.as_bstr(),
+            crate::evaluation::EvaluationContext::DEFAULT,
+        );
+        shell.evaluation.signal_trap_depth -= 1;
+        shell.evaluation.trap_default_exit_status = outer_trap_status;
         match outcome? {
-            Flow::Done(_) => sh.status = status,
+            Flow::Done(_) => shell.status = status,
             control @ Flow::Return { explicit: true, .. } => return Ok(control),
             control @ Flow::Return {
                 explicit: false, ..
             }
             | control @ Flow::Break { .. }
             | control @ Flow::Continue { .. } => {
-                sh.status = status;
+                shell.status = status;
                 return Ok(control.with_status(status));
             }
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
     }
 
-    Ok(Flow::Done((sh.status).into()))
+    Ok(Flow::Done((shell.status).into()))
 }
 
 /*
@@ -582,22 +588,22 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
 
 // [spec:dash:def:trap.setinteractive-fn]
 // [spec:dash:sem:trap.setinteractive-fn]
-pub fn setinteractive(sh: &mut crate::context::Shell, on: bool) {
-    if on == sh.traps.interactive {
+pub fn set_interactive_signal_policy(shell: &mut crate::context::Shell, on: bool) {
+    if on == shell.traps.interactive {
         return;
     }
-    sh.traps.interactive = on;
-    setsignal(sh, nsh_platform::interrupt_signal().into());
-    setsignal(sh, nsh_platform::quit_signal().into());
-    setsignal(sh, nsh_platform::termination_signal().into());
+    shell.traps.interactive = on;
+    configure_signal(shell, nsh_platform::interrupt_signal().into());
+    configure_signal(shell, nsh_platform::quit_signal().into());
+    configure_signal(shell, nsh_platform::termination_signal().into());
 }
 
 /// Re-evaluate the dispositions whose defaults depend on the parsed startup
 /// input mode as well as interactivity.
-pub(crate) fn refresh_startup_signal_policy(sh: &mut crate::context::Shell) {
-    setsignal(sh, nsh_platform::interrupt_signal().into());
-    setsignal(sh, nsh_platform::quit_signal().into());
-    setsignal(sh, nsh_platform::termination_signal().into());
+pub(crate) fn refresh_startup_signal_policy(shell: &mut crate::context::Shell) {
+    configure_signal(shell, nsh_platform::interrupt_signal().into());
+    configure_signal(shell, nsh_platform::quit_signal().into());
+    configure_signal(shell, nsh_platform::termination_signal().into());
 }
 
 /*
@@ -625,69 +631,75 @@ pub(crate) fn refresh_startup_signal_policy(sh: &mut crate::context::Shell) {
 /// `exit_from_child`, `jobs`' `forkchild_fatal` and `redir.rs:483` all
 /// end a child the library forked, which `[dec:nsh:fork-child-is-a-terminus]`
 /// says is a terminus rather than a frame.
-pub fn exitshell(
-    sh: &mut crate::context::Shell,
+pub fn exit_shell(
+    shell: &mut crate::context::Shell,
     explicit_status: Option<crate::status::ExitStatus>,
 ) -> crate::status::ExitStatus {
     if let Some(status) = explicit_status {
-        sh.status = status;
+        shell.status = status;
     }
-    'out: {
+    'exit_trap_done: {
         /* `trap[0] = NULL` with no free: the C leaks the EXIT action on
          * purpose so `evalstring` can still read it.  Taking it keeps the
          * action alive for exactly as long and gives the buffer back. */
-        let action = sh.traps.take_exit_action();
+        let action = shell.traps.take_exit_action();
         if let TrapAction::Command(command) = action {
-            if sh.traps.parent_traps_pending {
-                break 'out;
+            if shell.traps.parent_traps_pending {
+                break 'exit_trap_done;
             }
             /* An error in the EXIT trap is reported and dropped -- the
              * shell is already exiting, and the C's `longjmp` landed at
              * `out:` with nothing left to inspect it. What must not be
              * dropped is an `exit` *inside* the trap, because it names the
              * status the shell leaves with. */
-            let trap_entry_status = sh.status;
-            let outer_trap_status = sh.eval.trap_default_exit_status.replace(trap_entry_status);
-            let outcome =
-                crate::eval::evalstring(sh, command.as_bstr(), crate::eval::EvalContext::DEFAULT);
-            sh.eval.trap_default_exit_status = outer_trap_status;
+            let trap_entry_status = shell.status;
+            let outer_trap_status = shell
+                .evaluation
+                .trap_default_exit_status
+                .replace(trap_entry_status);
+            let outcome = crate::evaluation::evaluate_string(
+                shell,
+                command.as_bstr(),
+                crate::evaluation::EvaluationContext::DEFAULT,
+            );
+            shell.evaluation.trap_default_exit_status = outer_trap_status;
             match outcome {
-                Ok(crate::eval::Flow::Exit {
+                Ok(crate::evaluation::Flow::Exit {
                     status: Some(status),
                 }) => {
-                    sh.status = status;
-                    break 'out;
+                    shell.status = status;
+                    break 'exit_trap_done;
                 }
-                Ok(crate::eval::Flow::Exit { status: None }) => {
+                Ok(crate::evaluation::Flow::Exit { status: None }) => {
                     if let Some(status) = explicit_status {
-                        sh.status = status;
+                        shell.status = status;
                     }
-                    break 'out;
+                    break 'exit_trap_done;
                 }
-                Ok(crate::eval::Flow::Done(status)) => {
-                    sh.status = explicit_status.unwrap_or(status);
+                Ok(crate::evaluation::Flow::Done(status)) => {
+                    shell.status = explicit_status.unwrap_or(status);
                 }
                 Ok(control) => {
-                    sh.status = explicit_status
+                    shell.status = explicit_status
                         .or_else(|| control.status())
-                        .unwrap_or(sh.status);
+                        .unwrap_or(shell.status);
                 }
-                Err(e) => {
+                Err(error) => {
                     /* The EXIT trap failed. An explicit outer `exit n`
                      * still names the status; implicit shutdown instead
                      * uses the action error. Write the selected value here
                      * because raising the error no longer writes it. */
-                    sh.status = explicit_status.unwrap_or_else(|| e.status());
-                    drop(e);
-                    break 'out;
+                    shell.status = explicit_status.unwrap_or_else(|| error.status());
+                    drop(error);
+                    break 'exit_trap_done;
                 }
             }
         }
     }
     /* out: */
-    crate::editor::save_history(sh);
-    sh.clear_evaluation_resources();
-    sh.flush_input();
+    crate::editor::save_history(shell);
+    shell.clear_evaluation_resources();
+    shell.flush_input();
     /*
      * Disable job control so that whoever had the foreground before we
      * started can get it back.
@@ -696,12 +708,12 @@ pub fn exitshell(
      * raise inside the job-control teardown must not prevent the `_exit`
      * below. Dropping the diagnostic is that frame, exactly -- it caught
      * and went on -- and it is why the frame itself can go. */
-    drop(crate::jobs::setjobctl(sh, false));
-    if sh.io.flushall().is_err() {
+    drop(crate::jobs::set_job_control(shell, false));
+    if shell.io.flush_all().is_err() {
         // Exit teardown retains the status already selected by the shell.
     }
     nsh_platform::flush_coverage_profile();
-    sh.status
+    shell.status
 }
 
 /// A signal-like condition accepted by `trap` and `kill`. `EXIT` is the
@@ -723,9 +735,9 @@ impl SignalSpec {
 
 // [spec:dash:def:trap.decode-signum-fn]
 // [spec:dash:sem:trap.decode-signum-fn]
-pub(crate) fn decode_signum(string: &BStr) -> Option<SignalSpec> {
+pub(crate) fn parse_signal_number(string: &BStr) -> Option<SignalSpec> {
     let number = crate::number::parse_decimal(string)?;
-    if number >= NSIG as u64 {
+    if number >= SIGNAL_SLOT_COUNT as u64 {
         return None;
     }
     if number == 0 {
@@ -738,13 +750,13 @@ pub(crate) fn decode_signum(string: &BStr) -> Option<SignalSpec> {
 // [spec:dash:def:trap.decode-signal-fn]
 // [spec:dash:sem:trap.decode-signal-fn]
 pub(crate) fn decode_signal(string: &BStr, include_exit_name: bool) -> Option<SignalSpec> {
-    if let Some(signal) = decode_signum(string) {
+    if let Some(signal) = parse_signal_number(string) {
         return Some(signal);
     }
 
     let first = usize::from(!include_exit_name);
-    for index in first..NSIG {
-        if string.eq_ignore_ascii_case(crate::signames::signal_names[index].to_bytes()) {
+    for index in first..SIGNAL_SLOT_COUNT {
+        if string.eq_ignore_ascii_case(crate::signal_names::SIGNAL_NAMES[index].to_bytes()) {
             return if index == 0 {
                 Some(SignalSpec::Exit)
             } else {
@@ -758,7 +770,7 @@ pub(crate) fn decode_signal(string: &BStr, include_exit_name: bool) -> Option<Si
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::siginbox::{SignalsBlocked, signals};
+    use crate::signal_inbox::{SignalsBlocked, signals};
 
     /// **The mirror is the table, or it is a bug.** `onsig` cannot reach
     /// `sh.traps`, so the bit it reads instead has to say the same thing
@@ -768,7 +780,7 @@ mod tests {
     /// milliseconds rather than in a terminal.
     #[test]
     fn mirror_follows_the_slot() {
-        let _g = crate::testutil::lock();
+        let _g = crate::test_support::lock();
         let interrupt = nsh_platform::interrupt_signal();
         let mut t = TrapTable::new();
         assert!(
@@ -802,7 +814,7 @@ mod tests {
     /// every other test here and gets that one case backwards.
     #[test]
     fn ignored_signal_counts_as_trapped() {
-        let _g = crate::testutil::lock();
+        let _g = crate::test_support::lock();
         let interrupt = nsh_platform::interrupt_signal();
         let mut t = TrapTable::new();
         let b = SignalsBlocked::new();
@@ -821,7 +833,7 @@ mod tests {
     /// Stated as a test so it is a known property rather than a surprise.
     #[test]
     fn a_new_table_clears_the_mirror() {
-        let _g = crate::testutil::lock();
+        let _g = crate::test_support::lock();
         let child = nsh_platform::child_signal();
         let mut t = TrapTable::new();
         let b = SignalsBlocked::new();
@@ -845,7 +857,7 @@ mod tests {
     /// would notice, and which would make it stop answering anything.
     #[test]
     fn the_guard_blocks_and_restores() {
-        let _g = crate::testutil::lock();
+        let _g = crate::test_support::lock();
         nsh_platform::unblock_all_signals().unwrap();
         let interrupt = nsh_platform::interrupt_signal();
         let child = nsh_platform::child_signal();

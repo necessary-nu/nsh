@@ -62,9 +62,9 @@ fn write_frontend_output(bytes: &[u8]) {
     }
 }
 
-fn write_invocation_error(arg0: Option<&Vec<u8>>, message: &[u8]) {
+fn write_invocation_error(argument_zero: Option<&Vec<u8>>, message: &[u8]) {
     let mut stderr = std::io::stderr().lock();
-    let _ = stderr.write_all(arg0.map_or(b"sh", Vec::as_slice));
+    let _ = stderr.write_all(argument_zero.map_or(b"sh", Vec::as_slice));
     let _ = stderr.write_all(b": 0: ");
     let _ = stderr.write_all(message);
     let _ = stderr.write_all(b"\n");
@@ -129,7 +129,7 @@ fn main() {
         .collect();
     let mut builder = nsh::Shell::builder()
         .invocation_name(invocation.invocation_name.as_bstr())
-        .arg0(invocation.arg0.as_bstr())
+        .argument_zero(invocation.argument_zero.as_bstr())
         .args(&parameters)
         .inherit_env()
         .streams(nsh::Streams::INHERIT)

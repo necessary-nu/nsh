@@ -46,8 +46,10 @@ use bstr::BStr;
 /// `set -e` abort inside them has to travel back out through them. The
 /// remaining thirty produce `Flow::Done` and nothing else, which is what
 /// the C's `int` said.
-pub(crate) type Builtin =
-    fn(&mut crate::context::Shell, &[&BStr]) -> Result<crate::eval::Flow, crate::error::Error>;
+pub(crate) type Builtin = fn(
+    &mut crate::context::Shell,
+    &[&BStr],
+) -> Result<crate::evaluation::Flow, crate::error::Error>;
 
 /// Stable identity for the handful of built-ins whose evaluator semantics
 /// differ from an ordinary registry dispatch.
@@ -79,7 +81,7 @@ pub(crate) enum BuiltinId {
     Kill,
     Local,
     Printf,
-    Pwd,
+    DirectoryUpdate,
     Read,
     Readonly,
     Return,
@@ -186,8 +188,11 @@ impl BuiltinSpec {
 /// The words a builtin is handed, out of the fields `evalcommand`
 /// expanded.
 ///
-pub fn args(fields: &[crate::expand::strlist]) -> Vec<&BStr> {
-    fields.iter().map(crate::expand::strlist::as_bstr).collect()
+pub fn args(fields: &[crate::expand::ExpandedField]) -> Vec<&BStr> {
+    fields
+        .iter()
+        .map(crate::expand::ExpandedField::as_bstr)
+        .collect()
 }
 
 pub mod alias;
@@ -236,21 +241,23 @@ pub mod wait;
 pub(crate) static EMPTY_BUILTIN: BuiltinSpec = BuiltinSpec {
     id: BuiltinId::Empty,
     name: b"",
-    handler: BuiltinHandler::Standard(bltincmd),
+    handler: BuiltinHandler::Standard(execute_builtin),
     attributes: BuiltinAttributes::REGULAR,
 };
 
 // [spec:dash:def:eval.bltincmd-fn]
 // [spec:dash:sem:eval.bltincmd-fn]
-fn bltincmd(
-    sh: &mut crate::context::Shell,
+fn execute_builtin(
+    shell: &mut crate::context::Shell,
     _args: &[&BStr],
-) -> Result<crate::eval::Flow, crate::error::Error> {
+) -> Result<crate::evaluation::Flow, crate::error::Error> {
     /*
      * Preserve exitstatus of a previous possible redirection
      * as POSIX mandates
      */
-    Ok(crate::eval::Flow::Done((sh.eval.back_exitstatus).into()))
+    Ok(crate::evaluation::Flow::Done(
+        (shell.evaluation.command_substitution_status).into(),
+    ))
 }
 
 // [spec:posix:req:builtin.special.supported-and-output]
@@ -264,67 +271,67 @@ pub(crate) static BUILTINS: &[BuiltinSpec] = &[
     BuiltinSpec {
         id: BuiltinId::Dot,
         name: b".",
-        handler: BuiltinHandler::Standard(dot::dotcmd),
+        handler: BuiltinHandler::Standard(dot::run_dot),
         attributes: BuiltinAttributes::SPECIAL,
     }, // 0
     BuiltinSpec {
         id: BuiltinId::Colon,
         name: b":",
-        handler: BuiltinHandler::Standard(r#true::truecmd),
+        handler: BuiltinHandler::Standard(r#true::run),
         attributes: BuiltinAttributes::SPECIAL,
     }, // 1
     BuiltinSpec {
         id: BuiltinId::Bracket,
         name: b"[",
-        handler: BuiltinHandler::Standard(test::testcmd),
+        handler: BuiltinHandler::Standard(test::run),
         attributes: BuiltinAttributes::NONE,
     }, // 2
     BuiltinSpec {
         id: BuiltinId::Alias,
         name: b"alias",
-        handler: BuiltinHandler::Standard(alias::aliascmd),
+        handler: BuiltinHandler::Standard(alias::run),
         attributes: BuiltinAttributes::REGULAR_ASSIGNMENT,
     }, // 3
     BuiltinSpec {
         id: BuiltinId::Bg,
         name: b"bg",
-        handler: BuiltinHandler::Standard(fg::fgcmd),
+        handler: BuiltinHandler::Standard(fg::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 4
     BuiltinSpec {
         id: BuiltinId::Break,
         name: b"break",
-        handler: BuiltinHandler::Standard(r#break::breakcmd),
+        handler: BuiltinHandler::Standard(r#break::run),
         attributes: BuiltinAttributes::SPECIAL,
     }, // 5
     BuiltinSpec {
         id: BuiltinId::Cd,
         name: b"cd",
-        handler: BuiltinHandler::Standard(cd::cdcmd),
+        handler: BuiltinHandler::Standard(cd::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 6
     BuiltinSpec {
         id: BuiltinId::Chdir,
         name: b"chdir",
-        handler: BuiltinHandler::Standard(cd::cdcmd),
+        handler: BuiltinHandler::Standard(cd::run),
         attributes: BuiltinAttributes::NONE,
     }, // 7
     BuiltinSpec {
         id: BuiltinId::Command,
         name: b"command",
-        handler: BuiltinHandler::Standard(command::commandcmd),
+        handler: BuiltinHandler::Standard(command::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 8
     BuiltinSpec {
         id: BuiltinId::Continue,
         name: b"continue",
-        handler: BuiltinHandler::Standard(r#break::breakcmd),
+        handler: BuiltinHandler::Standard(r#break::run),
         attributes: BuiltinAttributes::SPECIAL,
     }, // 9
     BuiltinSpec {
         id: BuiltinId::Echo,
         name: b"echo",
-        handler: BuiltinHandler::Standard(echo::echocmd),
+        handler: BuiltinHandler::Standard(echo::run),
         attributes: BuiltinAttributes::NONE,
     }, // 10
     BuiltinSpec {
@@ -336,25 +343,25 @@ pub(crate) static BUILTINS: &[BuiltinSpec] = &[
     BuiltinSpec {
         id: BuiltinId::Exec,
         name: b"exec",
-        handler: BuiltinHandler::Standard(exec::execcmd),
+        handler: BuiltinHandler::Standard(exec::run),
         attributes: BuiltinAttributes::SPECIAL,
     }, // 12
     BuiltinSpec {
         id: BuiltinId::Exit,
         name: b"exit",
-        handler: BuiltinHandler::Standard(exit::exitcmd),
+        handler: BuiltinHandler::Standard(exit::run),
         attributes: BuiltinAttributes::SPECIAL,
     }, // 13
     BuiltinSpec {
         id: BuiltinId::Export,
         name: b"export",
-        handler: BuiltinHandler::Standard(export::exportcmd),
+        handler: BuiltinHandler::Standard(export::run),
         attributes: BuiltinAttributes::SPECIAL_ASSIGNMENT,
     }, // 14
     BuiltinSpec {
         id: BuiltinId::False,
         name: b"false",
-        handler: BuiltinHandler::Standard(r#false::falsecmd),
+        handler: BuiltinHandler::Standard(r#false::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 15
     BuiltinSpec {
@@ -366,151 +373,151 @@ pub(crate) static BUILTINS: &[BuiltinSpec] = &[
     BuiltinSpec {
         id: BuiltinId::Fg,
         name: b"fg",
-        handler: BuiltinHandler::Standard(fg::fgcmd),
+        handler: BuiltinHandler::Standard(fg::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 17
     BuiltinSpec {
         id: BuiltinId::Getopts,
         name: b"getopts",
-        handler: BuiltinHandler::Standard(getopts::getoptscmd),
+        handler: BuiltinHandler::Standard(getopts::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 18
     BuiltinSpec {
         id: BuiltinId::Hash,
         name: b"hash",
-        handler: BuiltinHandler::Standard(hash::hashcmd),
+        handler: BuiltinHandler::Standard(hash::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 19
     BuiltinSpec {
         id: BuiltinId::History,
         name: b"history",
-        handler: BuiltinHandler::Standard(history::historycmd),
+        handler: BuiltinHandler::Standard(history::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 20
     BuiltinSpec {
         id: BuiltinId::Jobs,
         name: b"jobs",
-        handler: BuiltinHandler::Standard(jobs::jobscmd),
+        handler: BuiltinHandler::Standard(jobs::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 21
     BuiltinSpec {
         id: BuiltinId::Kill,
         name: b"kill",
-        handler: BuiltinHandler::Standard(kill::killcmd),
+        handler: BuiltinHandler::Standard(kill::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 22
     BuiltinSpec {
         id: BuiltinId::Local,
         name: b"local",
-        handler: BuiltinHandler::Standard(local::localcmd),
+        handler: BuiltinHandler::Standard(local::run),
         attributes: BuiltinAttributes::SPECIAL_ASSIGNMENT,
     }, // 23
     BuiltinSpec {
         id: BuiltinId::Printf,
         name: b"printf",
-        handler: BuiltinHandler::Standard(printf::printfcmd),
+        handler: BuiltinHandler::Standard(printf::run),
         attributes: BuiltinAttributes::NONE,
     }, // 24
     BuiltinSpec {
-        id: BuiltinId::Pwd,
+        id: BuiltinId::DirectoryUpdate,
         name: b"pwd",
-        handler: BuiltinHandler::Standard(pwd::pwdcmd),
+        handler: BuiltinHandler::Standard(pwd::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 25
     BuiltinSpec {
         id: BuiltinId::Read,
         name: b"read",
-        handler: BuiltinHandler::Standard(read::readcmd),
+        handler: BuiltinHandler::Standard(read::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 26
     BuiltinSpec {
         id: BuiltinId::Readonly,
         name: b"readonly",
-        handler: BuiltinHandler::Standard(export::exportcmd),
+        handler: BuiltinHandler::Standard(export::run),
         attributes: BuiltinAttributes::SPECIAL_ASSIGNMENT,
     }, // 27
     BuiltinSpec {
         id: BuiltinId::Return,
         name: b"return",
-        handler: BuiltinHandler::Standard(r#return::returncmd),
+        handler: BuiltinHandler::Standard(r#return::run),
         attributes: BuiltinAttributes::SPECIAL,
     }, // 28
     BuiltinSpec {
         id: BuiltinId::Set,
         name: b"set",
-        handler: BuiltinHandler::Standard(set::setcmd),
+        handler: BuiltinHandler::Standard(set::run),
         attributes: BuiltinAttributes::SPECIAL,
     }, // 29
     BuiltinSpec {
         id: BuiltinId::Shift,
         name: b"shift",
-        handler: BuiltinHandler::Standard(shift::shiftcmd),
+        handler: BuiltinHandler::Standard(shift::run),
         attributes: BuiltinAttributes::SPECIAL,
     }, // 30
     BuiltinSpec {
         id: BuiltinId::Source,
         name: b"source",
-        handler: BuiltinHandler::Standard(dot::sourcecmd),
+        handler: BuiltinHandler::Standard(dot::run_source),
         attributes: BuiltinAttributes::SPECIAL,
     }, // 31
     BuiltinSpec {
         id: BuiltinId::Test,
         name: b"test",
-        handler: BuiltinHandler::Standard(test::testcmd),
+        handler: BuiltinHandler::Standard(test::run),
         attributes: BuiltinAttributes::NONE,
     }, // 32
     BuiltinSpec {
         id: BuiltinId::Times,
         name: b"times",
-        handler: BuiltinHandler::Standard(times::timescmd),
+        handler: BuiltinHandler::Standard(times::run),
         attributes: BuiltinAttributes::SPECIAL,
     }, // 33
     BuiltinSpec {
         id: BuiltinId::Trap,
         name: b"trap",
-        handler: BuiltinHandler::Standard(trap::trapcmd),
+        handler: BuiltinHandler::Standard(trap::run),
         attributes: BuiltinAttributes::SPECIAL,
     }, // 34
     BuiltinSpec {
         id: BuiltinId::True,
         name: b"true",
-        handler: BuiltinHandler::Standard(r#true::truecmd),
+        handler: BuiltinHandler::Standard(r#true::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 35
     BuiltinSpec {
         id: BuiltinId::Type,
         name: b"type",
-        handler: BuiltinHandler::Standard(r#type::typecmd),
+        handler: BuiltinHandler::Standard(r#type::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 36
     BuiltinSpec {
         id: BuiltinId::Ulimit,
         name: b"ulimit",
-        handler: BuiltinHandler::Standard(ulimit::ulimitcmd),
+        handler: BuiltinHandler::Standard(ulimit::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 37
     BuiltinSpec {
         id: BuiltinId::Umask,
         name: b"umask",
-        handler: BuiltinHandler::Standard(umask::umaskcmd),
+        handler: BuiltinHandler::Standard(umask::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 38
     BuiltinSpec {
         id: BuiltinId::Unalias,
         name: b"unalias",
-        handler: BuiltinHandler::Standard(unalias::unaliascmd),
+        handler: BuiltinHandler::Standard(unalias::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 39
     BuiltinSpec {
         id: BuiltinId::Unset,
         name: b"unset",
-        handler: BuiltinHandler::Standard(unset::unsetcmd),
+        handler: BuiltinHandler::Standard(unset::run),
         attributes: BuiltinAttributes::SPECIAL,
     }, // 40
     BuiltinSpec {
         id: BuiltinId::Wait,
         name: b"wait",
-        handler: BuiltinHandler::Standard(wait::waitcmd),
+        handler: BuiltinHandler::Standard(wait::run),
         attributes: BuiltinAttributes::REGULAR,
     }, // 41
 ];
@@ -522,7 +529,7 @@ pub(crate) static BUILTINS: &[BuiltinSpec] = &[
 pub(crate) static BASH_BUILTINS: &[BuiltinSpec] = &[BuiltinSpec {
     id: BuiltinId::Shopt,
     name: b"shopt",
-    handler: BuiltinHandler::Standard(shopt::shoptcmd),
+    handler: BuiltinHandler::Standard(shopt::run),
     attributes: BuiltinAttributes::NONE,
 }];
 
@@ -531,18 +538,18 @@ mod tests {
     use super::*;
     use bstr::BString;
 
-    use crate::expand::strlist;
+    use crate::expand::ExpandedField;
 
     #[test]
     fn args_borrow_complete_fields() {
         let fields = vec![
-            strlist {
+            ExpandedField {
                 text: BString::from(&b"echo"[..]),
             },
-            strlist {
+            ExpandedField {
                 text: BString::new(Vec::new()),
             },
-            strlist {
+            ExpandedField {
                 text: BString::from(&b"a b"[..]),
             },
         ];

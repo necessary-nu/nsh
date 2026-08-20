@@ -14,7 +14,7 @@ use crate::context::Shell;
 use crate::error::Error;
 use crate::options::ShellOption;
 use crate::streams::Streams;
-use crate::var::EnvSource;
+use crate::variables::EnvSource;
 
 enum RequestedOption {
     Named(BString, bool),
@@ -43,12 +43,12 @@ enum RequestedOption {
 pub struct Builder {
     streams: Streams,
     invocation_name: Option<BString>,
-    arg0: Option<BString>,
+    argument_zero: Option<BString>,
     args: Vec<BString>,
     env: Vec<(BString, BString)>,
     inherit_env: bool,
     options: Vec<RequestedOption>,
-    cwd: Option<std::path::PathBuf>,
+    working_directory: Option<std::path::PathBuf>,
     host: Option<Box<dyn crate::host::Host>>,
 }
 
@@ -64,19 +64,19 @@ impl Builder {
         Builder {
             streams: Streams::INHERIT,
             invocation_name: None,
-            arg0: None,
+            argument_zero: None,
             args: Vec::new(),
             env: Vec::new(),
             inherit_env: false,
             options: Vec::new(),
-            cwd: None,
+            working_directory: None,
             host: None,
         }
     }
 
     /// `$0`, and the name every diagnostic is prefixed with.
-    pub fn arg0(mut self, arg0: &BStr) -> Self {
-        self.arg0 = Some(arg0.to_owned());
+    pub fn argument_zero(mut self, argument_zero: &BStr) -> Self {
+        self.argument_zero = Some(argument_zero.to_owned());
         self
     }
 
@@ -94,7 +94,7 @@ impl Builder {
 
     /// The positional parameters `$1`, `$2`, ….
     pub fn args(mut self, args: &[&BStr]) -> Self {
-        self.args = args.iter().map(|a| (*a).to_owned()).collect();
+        self.args = args.iter().map(|argument| (*argument).to_owned()).collect();
         self
     }
 
@@ -104,13 +104,16 @@ impl Builder {
     /// Additive: two calls are the union, and a repeated name is resolved
     /// the way a repeated `environ` entry is -- the last one wins, because
     /// both go through the same `setvareq`.
-    pub fn env<K, V>(mut self, vars: impl IntoIterator<Item = (K, V)>) -> Self
+    pub fn env<K, V>(mut self, variables: impl IntoIterator<Item = (K, V)>) -> Self
     where
         K: Into<BString>,
         V: Into<BString>,
     {
-        self.env
-            .extend(vars.into_iter().map(|(k, v)| (k.into(), v.into())));
+        self.env.extend(
+            variables
+                .into_iter()
+                .map(|(name, value)| (name.into(), value.into())),
+        );
         self
     }
 
@@ -172,8 +175,8 @@ impl Builder {
     /// shell in the process and the process itself. `docs/api-design.md`
     /// §6 is why that is the honest thing to do rather than the
     /// alternative of a shell whose idea of "." differs from the kernel's.
-    pub fn cwd(mut self, dir: impl AsRef<std::path::Path>) -> Self {
-        self.cwd = Some(dir.as_ref().to_path_buf());
+    pub fn working_directory(mut self, dir: impl AsRef<std::path::Path>) -> Self {
+        self.working_directory = Some(dir.as_ref().to_path_buf());
         self
     }
 
@@ -186,7 +189,7 @@ impl Builder {
     /// comes last because `setpwd` writes `PWD` through the variable
     /// table and wants the kernel already moved.
     pub fn build(self) -> Result<Shell, Error> {
-        let mut sh = Shell::try_new(self.streams).map_err(|error| {
+        let mut shell = Shell::try_new(self.streams).map_err(|error| {
             Error::other(
                 0,
                 2,
@@ -198,9 +201,9 @@ impl Builder {
          * the only part of the shell a signal handler may touch, so the
          * host has to be holding it before a handler could exist. */
         if let Some(host) = self.host {
-            sh.host = host;
+            shell.host = host;
         }
-        sh.host.attach(crate::siginbox::signals());
+        shell.host.attach(crate::signal_inbox::signals());
         let mut environment = if self.inherit_env {
             nsh_platform::process_environment()
                 .into_iter()
@@ -215,53 +218,62 @@ impl Builder {
             Vec::new()
         };
         environment.extend(self.env);
-        sh.initialize_from(EnvSource::Explicit(&environment))?;
+        shell.initialize_from(EnvSource::Explicit(&environment))?;
 
         if let Some(invocation_name) = &self.invocation_name {
-            sh.options
+            shell
+                .options
                 .set_invocation_name(BStr::new(&invocation_name[..]));
         }
-        if let Some(arg0) = &self.arg0 {
-            sh.options.set_arg0(BStr::new(&arg0[..]));
+        if let Some(argument_zero) = &self.argument_zero {
+            shell.options.set_arg0(BStr::new(&argument_zero[..]));
         }
 
         if !self.args.is_empty() {
-            let refs: Vec<&BStr> = self.args.iter().map(|a| BStr::new(&a[..])).collect();
-            crate::options::setparam(&mut sh, &refs);
+            let refs: Vec<&BStr> = self
+                .args
+                .iter()
+                .map(|argument| BStr::new(&argument[..]))
+                .collect();
+            crate::options::set_positional_parameters(&mut shell, &refs);
         }
 
         for option in &self.options {
             match option {
                 RequestedOption::Named(name, on) => {
-                    crate::options::set_option_by_name(&mut sh, BStr::new(&name[..]), *on)?;
+                    crate::options::set_option_by_name(&mut shell, BStr::new(&name[..]), *on)?;
                 }
                 RequestedOption::Typed(option, on) => {
-                    crate::options::set_typed_option(&mut sh, *option, *on);
+                    crate::options::set_typed_option(&mut shell, *option, *on);
                 }
             }
         }
-        crate::options::optschanged(&mut sh)?;
+        crate::options::apply_option_changes(&mut shell)?;
 
-        if let Some(dir) = &self.cwd {
+        if let Some(dir) = &self.working_directory {
             /* `Error::Other` because the taxonomy's `Io` variant is
              * not promoted yet -- §3.4's "start with `Other`, promote
              * the interesting ones after". Status 2 is what dash's
              * `sh_error` takes, and what a failed `cd` leaves. */
-            nsh_platform::set_current_directory(dir).map_err(|e| {
+            nsh_platform::set_current_directory(dir).map_err(|error| {
                 Error::other(
                     0,
                     2,
                     format!(
                         "can't cd to {}: {}",
                         dir.display(),
-                        sh.locale.error_message(&e)
+                        shell.locale.error_message(&error)
                     )
                     .as_bytes(),
                 )
             })?;
-            crate::cd::setpwd_inner(&mut sh, crate::cd::Pwd::Unknown, false)?;
+            crate::working_directory::update_current_directory(
+                &mut shell,
+                crate::working_directory::DirectoryUpdate::Unknown,
+                false,
+            )?;
         }
-        Ok(sh)
+        Ok(shell)
     }
 }
 
@@ -271,8 +283,8 @@ mod tests {
 
     /// `lookupvar` as a byte string, or `None` when the shell has no such
     /// variable.
-    fn var(sh: &mut Shell, name: &BStr) -> Option<Vec<u8>> {
-        crate::var::lookup_bytes(sh, name).map(Vec::from)
+    fn var(shell: &mut Shell, name: &BStr) -> Option<Vec<u8>> {
+        crate::variables::lookup_bytes(shell, name).map(Vec::from)
     }
 
     fn process_probe() -> (BString, BString) {
@@ -297,28 +309,28 @@ mod tests {
     #[test]
     fn a_builder_with_no_env_setting_inherits_nothing_from_the_process() {
         let (name, _) = process_probe();
-        let mut sh = Shell::builder().build().unwrap();
-        assert_eq!(var(&mut sh, BStr::new(name.as_slice())), None);
+        let mut shell = Shell::builder().build().unwrap();
+        assert_eq!(var(&mut shell, BStr::new(name.as_slice())), None);
     }
 
     #[test]
     fn inherit_env_takes_the_processs_environment() {
         let (name, value) = process_probe();
-        let mut sh = Shell::builder().inherit_env().build().unwrap();
+        let mut shell = Shell::builder().inherit_env().build().unwrap();
         assert_eq!(
-            var(&mut sh, BStr::new(name.as_slice())).as_deref(),
+            var(&mut shell, BStr::new(name.as_slice())).as_deref(),
             Some(value.as_slice())
         );
     }
 
     #[test]
     fn explicit_pairs_are_set_and_exported() {
-        let mut sh = Shell::builder()
+        let mut shell = Shell::builder()
             .env([("NSH_EXPLICIT", "a value with spaces")])
             .build()
             .unwrap();
         assert_eq!(
-            var(&mut sh, BStr::new(b"NSH_EXPLICIT")).as_deref(),
+            var(&mut shell, BStr::new(b"NSH_EXPLICIT")).as_deref(),
             Some(&b"a value with spaces"[..])
         );
     }
@@ -354,11 +366,14 @@ mod tests {
     // [spec:nsh:req:compat.bash.selection/test]
     #[test]
     fn arg0_does_not_select_bash_mode() {
-        let sh = Shell::builder().arg0(BStr::new(b"bash")).build().unwrap();
-        assert_eq!(sh.options.dialect(), crate::options::Dialect::Posix);
+        let shell = Shell::builder()
+            .argument_zero(BStr::new(b"bash"))
+            .build()
+            .unwrap();
+        assert_eq!(shell.options.dialect(), crate::options::Dialect::Posix);
 
         let selected = Shell::builder()
-            .arg0(BStr::new(b"nsh"))
+            .argument_zero(BStr::new(b"nsh"))
             .option(BStr::new(b"bash"), true)
             .build()
             .unwrap();
@@ -367,15 +382,16 @@ mod tests {
 
     #[test]
     fn invocation_name_survives_arg_zero() {
-        let sh = Shell::builder()
+        let shell = Shell::builder()
             .invocation_name(BStr::new(b"nsh"))
-            .arg0(BStr::new(b"script.sh"))
+            .argument_zero(BStr::new(b"script.sh"))
             .build()
             .unwrap();
 
-        assert_eq!(sh.options.arg0(), Some(BStr::new(b"script.sh")));
+        assert_eq!(shell.options.argument_zero(), Some(BStr::new(b"script.sh")));
         assert_eq!(
-            sh.options
+            shell
+                .options
                 .invocation_name
                 .as_ref()
                 .map(|name| name.as_slice()),
@@ -403,18 +419,18 @@ mod tests {
     // [spec:nsh:req:compat.bash.default-isolation/test]
     #[test]
     fn disabling_bash_restores_default_dialect() {
-        let mut sh = Shell::builder()
+        let mut shell = Shell::builder()
             .option(BStr::new(b"bash"), true)
             .build()
             .unwrap();
-        assert_eq!(sh.options.dialect(), crate::options::Dialect::Bash);
+        assert_eq!(shell.options.dialect(), crate::options::Dialect::Bash);
 
-        crate::options::set_option_by_name(&mut sh, BStr::new(b"bash"), false).unwrap();
+        crate::options::set_option_by_name(&mut shell, BStr::new(b"bash"), false).unwrap();
 
-        assert_eq!(sh.options.dialect(), crate::options::Dialect::Posix);
+        assert_eq!(shell.options.dialect(), crate::options::Dialect::Posix);
         for spec in crate::options::OPTION_SPECS {
             assert!(
-                !sh.options.enabled(spec.option),
+                !shell.options.enabled(spec.option),
                 "option {:?} was not restored",
                 spec.option
             );
@@ -425,10 +441,10 @@ mod tests {
     /// library-built shell non-interactive with no job control.
     #[test]
     fn the_default_shell_has_every_option_off() {
-        let sh = Shell::builder().build().unwrap();
+        let shell = Shell::builder().build().unwrap();
         for spec in crate::options::OPTION_SPECS {
             assert!(
-                !sh.options.enabled(spec.option),
+                !shell.options.enabled(spec.option),
                 "option {:?} was not off",
                 spec.option
             );
@@ -440,13 +456,13 @@ mod tests {
     #[test]
     fn explicit_pairs_override_the_inherited_environment() {
         let (name, _) = process_probe();
-        let mut sh = Shell::builder()
+        let mut shell = Shell::builder()
             .inherit_env()
             .env([(name.clone(), BString::from("explicit"))])
             .build()
             .unwrap();
         assert_eq!(
-            var(&mut sh, BStr::new(name.as_slice())).as_deref(),
+            var(&mut shell, BStr::new(name.as_slice())).as_deref(),
             Some(&b"explicit"[..])
         );
     }

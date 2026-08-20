@@ -33,7 +33,7 @@ fn run(name: &str, invoked: &OsStr, arguments: &[OsString]) -> Result<i32> {
     match name {
         "smoosh-shell" => shell(arguments),
         "argv" => argv(invoked, arguments),
-        "fds" => fds(arguments),
+        "fds" => descriptors(arguments),
         "getenv" => getenv(arguments),
         "readdir" => readdir(arguments),
         _ => Err(format!("unknown native Smoosh helper {name}").into()),
@@ -85,7 +85,7 @@ fn getenv(arguments: &[OsString]) -> Result<i32> {
     Ok(0)
 }
 
-fn fds(arguments: &[OsString]) -> Result<i32> {
+fn descriptors(arguments: &[OsString]) -> Result<i32> {
     if arguments.len() > 2 {
         eprintln!("usage: fds [start_fd] [end_fd]");
         return Ok(1);

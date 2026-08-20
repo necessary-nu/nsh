@@ -117,7 +117,7 @@ fn exec_boundary_owns_native_values() {
     drop(image);
 
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let core = std::fs::read_to_string(workspace.join("crates/nsh/src/exec.rs")).unwrap();
+    let core = std::fs::read_to_string(workspace.join("crates/nsh/src/execution.rs")).unwrap();
     let unix = std::fs::read_to_string(workspace.join("crates/nsh-platform/src/unix.rs")).unwrap();
     let windows =
         std::fs::read_to_string(workspace.join("crates/nsh-platform/src/windows.rs")).unwrap();

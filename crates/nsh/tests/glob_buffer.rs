@@ -43,7 +43,7 @@ fn out_of(script: &str) -> Vec<u8> {
         let supplied =
             Streams::from_fds(std::io::stdin(), &w, std::io::stderr()).expect("duplicate streams");
         let mut shell = nsh::Shell::builder()
-            .arg0(bstr::BStr::new(b"sh"))
+            .argument_zero(bstr::BStr::new(b"sh"))
             .inherit_env()
             .streams(supplied)
             .host(nsh::ProcessHost)

@@ -25,9 +25,9 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString};
 
-use crate::escape::conv_escape_str;
-use crate::eval::Flow;
-use crate::output::Dest;
+use crate::escape::append_escape;
+use crate::evaluation::Flow;
+use crate::output::OutputDestination;
 
 /// Expand `echo`'s escapes and write the result, followed by `separator`
 /// unless a `\c` stopped the conversion.
@@ -39,16 +39,16 @@ use crate::output::Dest;
 /// `%s ` or `%s\n`, so it passes the byte itself.
 // [spec:dash:def:printf.print-escape-str-fn]
 // [spec:dash:sem:printf.print-escape-str-fn]
-fn print_escape_str(sh: &mut Shell, separator: u8, s: &BStr) -> Result<bool, Error> {
+fn write_escaped_text(shell: &mut Shell, separator: u8, text: &BStr) -> Result<bool, Error> {
     /* The C's `q` is a cursor into the stack block and `stackblock()` its
      * base.  Both are this buffer: `len` is its length and `q[-1]` its
      * last byte. */
-    let mut buf = BString::default();
+    let mut buffer = BString::default();
 
-    let stopped = conv_escape_str(s, &mut buf);
-    sh.write_output(Dest::Stdout, &buf)?;
+    let stopped = append_escape(text, &mut buffer);
+    shell.write_output(OutputDestination::Stdout, &buffer)?;
     if !stopped && separator != 0 {
-        sh.write_output(Dest::Stdout, &[separator])?;
+        shell.write_output(OutputDestination::Stdout, &[separator])?;
     }
 
     Ok(stopped)
@@ -56,7 +56,7 @@ fn print_escape_str(sh: &mut Shell, separator: u8, s: &BStr) -> Result<bool, Err
 
 // [spec:dash:def:printf.echocmd-fn]
 // [spec:dash:sem:printf.echocmd-fn]
-pub fn echocmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* The C picked between the formats `"%s\n"`, `"%s"` and `"%s "`; all
      * that ever differed was the byte after the conversion, so what is
      * chosen here is that byte. `-n` closes with nothing. */
@@ -71,17 +71,21 @@ pub fn echocmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut index = 0usize;
     loop {
         let mut separator: u8 = b' ';
-        let s = words.get(index);
+        let selected_word = words.get(index);
 
         // if (!s || !*++argv) — `++argv` is not evaluated when s is NULL.
-        if s.is_none() || {
+        if selected_word.is_none() || {
             index += 1;
             words.get(index).is_none()
         } {
             separator = last;
         }
 
-        let stopped = print_escape_str(sh, separator, s.copied().unwrap_or(BStr::new(b"")))?;
+        let stopped = write_escaped_text(
+            shell,
+            separator,
+            selected_word.copied().unwrap_or(BStr::new(b"")),
+        )?;
 
         if stopped || words.get(index).is_none() {
             break;

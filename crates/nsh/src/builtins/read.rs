@@ -12,14 +12,14 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString};
 
-use crate::eval::Flow;
-use crate::expand::arglist;
-use crate::fd::LogicalDescriptor;
-use crate::output::Dest;
+use crate::descriptors::LogicalDescriptor;
+use crate::evaluation::Flow;
+use crate::expand::ExpandedFields;
+use crate::output::OutputDestination;
 use crate::status::ExitStatus;
 
 /* glibc <limits.h> */
-const MB_LEN_MAX: usize = 16;
+const MAX_MULTIBYTE_LENGTH: usize = 16;
 
 /// `readcmd`'s `CHECKSTRSPACE((MB_LEN_MAX > 16 ? MB_LEN_MAX : 16) + 4, p)`.
 ///
@@ -30,27 +30,31 @@ const MB_LEN_MAX: usize = 16;
 /// always was: with `mode` 0 it puts the character's bytes at `out + 2`
 /// and the closing length and marker at `out + 2 + ml` and `out + 3 + ml`,
 /// which for `ml == MB_LEN_MAX` is the twentieth byte and not one fewer.
-const READ_MBSLOP: usize = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 4;
+const READ_MULTIBYTE_CAPACITY: usize = (if MAX_MULTIBYTE_LENGTH > 16 {
+    MAX_MULTIBYTE_LENGTH
+} else {
+    16
+}) + 4;
 
 fn append_read_byte(line: &mut BString, input: crate::syntax::InputUnit) {
-    if input.is(crate::parser::CTLESC as u8)
-        || input.is(crate::parser::CTLMBCHAR as u8)
-        || input.is(crate::parser::CTLQUOTEMARK as u8)
+    if input.is(crate::parser::LEGACY_ESCAPE as u8)
+        || input.is(crate::parser::LEGACY_MULTIBYTE as u8)
+        || input.is(crate::parser::LEGACY_QUOTE as u8)
     {
-        line.push(crate::parser::CTLESC as u8);
+        line.push(crate::parser::LEGACY_ESCAPE as u8);
     }
     line.push(input.expect_byte());
 }
 
 // [spec:nsh:req:idiom.jobs-startup-control-flow]
 fn read_input_line(
-    sh: &mut Shell,
+    shell: &mut Shell,
     delimiter: u8,
     raw: bool,
     prompt_for_continuation: bool,
 ) -> Result<(BString, ExitStatus), Error> {
-    let result = crate::resource::with_resources(sh, |sh, _resources| {
-        crate::input::pushstdin(sh);
+    let result = crate::resource::with_resources(shell, |shell, _resources| {
+        crate::input::push_standard_input(shell);
         let mut line = BString::default();
         let mut region_start = 0_usize;
         let mut escaped_region_end = None;
@@ -58,9 +62,9 @@ fn read_input_line(
 
         loop {
             let input = if delimiter == b'\0' {
-                crate::input::pgetc_preserve_nul(sh)?
+                crate::input::read_input_unit_preserving_nul(shell)?
             } else {
-                crate::input::pgetc(sh)?
+                crate::input::read_input_unit(shell)?
             };
             if input == crate::syntax::InputUnit::EndOfInput {
                 status = ExitStatus::FAILURE;
@@ -70,21 +74,21 @@ fn read_input_line(
                 continue;
             }
 
-            let mut scratch = [0; crate::parser::MBSLOP];
-            let multibyte_len = crate::parser::getmbc(
-                sh,
+            let mut scratch = [0; crate::parser::MULTIBYTE_OUTPUT_CAPACITY];
+            let multibyte_len = crate::parser::read_multibyte_character(
+                shell,
                 input,
                 &mut scratch,
                 crate::parser::MultibyteMode::Framed,
             )? as usize;
             if multibyte_len != 0 {
-                debug_assert!(multibyte_len <= READ_MBSLOP);
+                debug_assert!(multibyte_len <= READ_MULTIBYTE_CAPACITY);
                 line.extend_from_slice(&scratch[..multibyte_len]);
             } else if escaped_region_end.is_some() {
                 if input.is(b'\n') {
                     if prompt_for_continuation {
-                        let ps2 = crate::var::ps2val(sh);
-                        sh.write_output(Dest::Stderr, &ps2)?;
+                        let ps2 = crate::variables::continuation_prompt_value(shell);
+                        shell.write_output(OutputDestination::Stderr, &ps2)?;
                     }
                 } else {
                     append_read_byte(&mut line, input);
@@ -99,7 +103,12 @@ fn read_input_line(
             }
 
             if let Some(region_end) = escaped_region_end.take() {
-                crate::expand::recordregion(&mut sh.expand, region_start, region_end, false);
+                crate::expand::record_split_region(
+                    &mut shell.expand,
+                    region_start,
+                    region_end,
+                    false,
+                );
                 region_start = line.len();
             }
         }
@@ -107,7 +116,7 @@ fn read_input_line(
     });
 
     let (line, status, region_start) = result?;
-    crate::expand::recordregion(&mut sh.expand, region_start, line.len(), false);
+    crate::expand::record_split_region(&mut shell.expand, region_start, line.len(), false);
     Ok((line, status))
 }
 
@@ -136,36 +145,36 @@ fn read_input_line(
 // [spec:posix:def:builtin.read.operand-var]
 // [spec:posix:sem:builtin.read.operand-var-locale]
 // [spec:posix:req:builtin.read.env]
-fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> Result<(), Error> {
-    let mut arglist: arglist = arglist::new();
+fn assign_read_fields(shell: &mut Shell, line: &mut BString, names: &[&BStr]) -> Result<(), Error> {
+    let mut expanded_fields = ExpandedFields::new();
 
     /* An owned line already carries its bounds and there is nothing to reserve;
      * the fields `ifsbreakup` builds copy out of it rather than pointing
      * into it, so the line only has to outlive that one call. */
-    crate::expand::ifsbreakup(sh, line, names.len(), &mut arglist);
-    crate::expand::ifsfree(&mut sh.expand);
+    crate::expand::split_fields(shell, line, names.len(), &mut expanded_fields);
+    crate::expand::clear_split_regions(&mut shell.expand);
 
     /* The C walks the names and the fields with two cursors that advance
      * together, so the field for a name is the field at its index; a name
      * past the last field is the "nullify remaining arguments" case. */
     for (index, name) in names.iter().enumerate() {
-        match arglist.list.get_mut(index) {
+        match expanded_fields.fields.get_mut(index) {
             None => {
-                crate::var::set_bytes(
-                    sh,
+                crate::variables::set_bytes(
+                    shell,
                     name,
                     Some(BStr::new(b"")),
-                    crate::var::VariableAttributes::NONE,
+                    crate::variables::VariableAttributes::NONE,
                 )?;
             }
             Some(field) => {
                 /* set variable to field */
-                field.rmescapes();
-                crate::var::set_bytes(
-                    sh,
+                field.remove_escapes();
+                crate::variables::set_bytes(
+                    shell,
                     name,
                     Some(field.as_bstr()),
-                    crate::var::VariableAttributes::NONE,
+                    crate::variables::VariableAttributes::NONE,
                 )?;
             }
         }
@@ -201,43 +210,45 @@ fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> R
 // [spec:posix:req:builtin.read.utility-syntax-guidelines]
 // [spec:nsh:req:idiom.lexer-tokens]
 // [spec:nsh:def:idiom.logical-descriptors]
-pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut prompt: Option<BString>;
     let mut raw = false;
     let mut delimiter = b'\n';
 
     prompt = None;
-    let mut opts = crate::options::Options::new(args);
-    while let Some(i) = opts.next(&mut sh.diagnostics(), b"d:p:r")? {
-        match i {
-            b'd' => delimiter = opts.arg().first().copied().unwrap_or(b'\0'),
-            b'p' => prompt = Some(opts.arg().to_owned()),
+    let mut option_scan = crate::options::Options::new(args);
+    while let Some(option) = option_scan.next(&mut shell.diagnostics(), b"d:p:r")? {
+        match option {
+            b'd' => delimiter = option_scan.arg().first().copied().unwrap_or(b'\0'),
+            b'p' => prompt = Some(option_scan.arg().to_owned()),
             _ => raw = true,
         }
     }
     if let Some(prompt) = &prompt {
-        if sh
-            .fds
+        if shell
+            .descriptors
             .get(LogicalDescriptor::STDIN)
             .as_ref()
-            .is_some_and(|fd| nsh_platform::is_terminal(fd))
+            .is_some_and(|descriptor| nsh_platform::is_terminal(descriptor))
         {
-            sh.write_output(Dest::Stderr, prompt)?;
+            shell.write_output(OutputDestination::Stderr, prompt)?;
         }
     }
     // [spec:nsh:def:idiom.shell-options]
-    let prompt_for_continuation = sh.options.enabled(crate::options::ShellOption::Interactive)
-        && sh
-            .fds
+    let prompt_for_continuation = shell
+        .options
+        .enabled(crate::options::ShellOption::Interactive)
+        && shell
+            .descriptors
             .get(LogicalDescriptor::STDIN)
             .as_ref()
-            .is_some_and(|fd| nsh_platform::is_terminal(fd));
-    let names = opts.operands();
+            .is_some_and(|descriptor| nsh_platform::is_terminal(descriptor));
+    let names = option_scan.operands();
     if names.is_empty() {
-        return Err(sh.diagnostics().sh_error_value(b"arg count"));
+        return Err(shell.diagnostics().shell_error(b"arg count"));
     }
 
-    let (mut line, status) = read_input_line(sh, delimiter, raw, prompt_for_continuation)?;
-    readcmd_handle_line(sh, &mut line, names)?;
+    let (mut line, status) = read_input_line(shell, delimiter, raw, prompt_for_continuation)?;
+    assign_read_fields(shell, &mut line, names)?;
     Ok(Flow::Done((status).into()))
 }

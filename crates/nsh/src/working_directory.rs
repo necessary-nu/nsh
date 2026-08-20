@@ -9,7 +9,7 @@ use crate::error::Error;
 use bstr::{BStr, BString};
 use nsh_platform::NativeStrExt as _;
 
-use crate::var::{VariableAttributes, set_bytes};
+use crate::variables::{VariableAttributes, set_bytes};
 
 /* The C's `nullstr` sentinel is `None`.  It is a sentinel, not an empty
  * path: `getpwd` never returns an empty string on success and `updatepwd`
@@ -20,18 +20,18 @@ use crate::var::{VariableAttributes, set_bytes};
 /// the C's own `curdir`/`physdir`, the logical-versus-physical `$PWD`
 /// pair, and two shells in different directories cannot share them.
 /// Recorded as a correction to §5 on this node's log.
-pub struct Cwd {
+pub struct WorkingDirectoryState {
     /// `curdir` — the logical working directory, as `cd` computed it.
-    pub(crate) curdir: Option<BString>,
+    pub(crate) logical: Option<BString>,
     /// `physdir` — the physical one, after symlinks.
-    pub(crate) physdir: Option<BString>,
+    pub(crate) physical: Option<BString>,
 }
 
-impl Cwd {
+impl WorkingDirectoryState {
     pub(crate) const fn new() -> Self {
-        Cwd {
-            curdir: None,
-            physdir: None,
+        WorkingDirectoryState {
+            logical: None,
+            physical: None,
         }
     }
 }
@@ -53,13 +53,13 @@ impl Cwd {
 
 // [spec:dash:def:cd.getpwd-fn]
 // [spec:dash:sem:cd.getpwd-fn]
-fn getpwd() -> std::io::Result<BString> {
+fn current_directory() -> std::io::Result<BString> {
     nsh_platform::current_directory().map(|dir| BString::from(dir.to_shell_bytes()))
 }
 
 /// What `setpwd`'s `val` says, which the C encodes in two pointer
 /// comparisons against a value the caller cannot construct any other way.
-pub(crate) enum Pwd<'a> {
+pub(crate) enum DirectoryUpdate<'a> {
     /// `setpwd(NULL, …)` — ask the kernel, and take the answer for both
     /// `curdir` and `physdir`.
     Unknown,
@@ -74,50 +74,50 @@ pub(crate) enum Pwd<'a> {
 // [spec:dash:sem:cd.setpwd-fn]
 // [spec:posix:req:param.pwd]
 // [spec:posix:req:param.pwd-assignment]
-pub(crate) fn setpwd_inner(
-    sh: &mut crate::context::Shell,
-    val: Pwd,
+pub(crate) fn update_current_directory(
+    shell: &mut crate::context::Shell,
+    val: DirectoryUpdate,
     set_old: bool,
 ) -> Result<(), Error> {
     if set_old {
-        let old = sh.cwd.curdir.clone().unwrap_or_default();
+        let old = shell.working_directory.logical.clone().unwrap_or_default();
         set_bytes(
-            sh,
+            shell,
             BStr::new("OLDPWD"),
             Some(BStr::new(&old)),
             VariableAttributes::EXPORTED,
         )?;
     }
-    let dir = crate::error::with_interrupts_deferred(sh, |sh| {
+    let dir = crate::error::with_interrupts_deferred(shell, |shell| {
         /* `free(physdir)` guarded by `physdir != oldcur`: the C's `curdir` and
          * `physdir` are one allocation after a `setpwd(NULL, …)`, and the guard
          * exists only to stop the double free. Two owned copies say the same
          * thing without the alias. */
-        sh.cwd.physdir = None;
+        shell.working_directory.physical = None;
         match val {
-            Pwd::Unknown | Pwd::Current => {
-                let current = match getpwd() {
+            DirectoryUpdate::Unknown | DirectoryUpdate::Current => {
+                let current = match current_directory() {
                     Ok(current) => Some(current),
                     Err(error) => {
                         let mut message = b"getcwd() failed: ".to_vec();
-                        message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
-                        sh.diagnostics().sh_warnx(&message);
+                        message.extend_from_slice(shell.locale.error_message(&error).as_bytes());
+                        shell.diagnostics().shell_warning(&message);
                         None
                     }
                 };
-                if matches!(val, Pwd::Unknown) {
-                    sh.cwd.curdir = current.clone();
+                if matches!(val, DirectoryUpdate::Unknown) {
+                    shell.working_directory.logical = current.clone();
                 }
-                sh.cwd.physdir = current;
+                shell.working_directory.physical = current;
             }
-            Pwd::New(path) => {
-                sh.cwd.curdir = Some(path.to_owned());
+            DirectoryUpdate::New(path) => {
+                shell.working_directory.logical = Some(path.to_owned());
             }
         }
-        sh.cwd.curdir.clone().unwrap_or_default()
+        shell.working_directory.logical.clone().unwrap_or_default()
     });
     set_bytes(
-        sh,
+        shell,
         BStr::new("PWD"),
         Some(BStr::new(&dir)),
         VariableAttributes::EXPORTED,
@@ -131,12 +131,12 @@ mod tests {
     use nsh_platform::ShellBytesExt as _;
     use std::path::PathBuf;
 
-    struct CwdGuard {
+    struct WorkingDirectoryGuard {
         old: PathBuf,
         temporary: PathBuf,
     }
 
-    impl Drop for CwdGuard {
+    impl Drop for WorkingDirectoryGuard {
         fn drop(&mut self) {
             std::env::set_current_dir(&self.old).unwrap();
             match std::fs::remove_dir(&self.temporary) {
@@ -150,7 +150,7 @@ mod tests {
     // [spec:dash:sem:cd.getpwd-fn/test]
     #[test]
     fn getpwd_preserves_non_utf8_path_bytes() {
-        let _g = crate::testutil::lock();
+        let _g = crate::test_support::lock();
         {
             let old = std::env::current_dir().unwrap();
             let mut component = format!("nsh-cd-test-{}-", std::process::id()).into_bytes();
@@ -160,13 +160,13 @@ mod tests {
             component.extend_from_slice(&[0xed, 0xa0, 0x80]);
             let temporary = std::env::temp_dir().join(component.try_to_os_string().unwrap());
             std::fs::create_dir(&temporary).unwrap();
-            let _restore = CwdGuard {
+            let _restore = WorkingDirectoryGuard {
                 old,
                 temporary: temporary.clone(),
             };
             std::env::set_current_dir(&temporary).unwrap();
 
-            let got = getpwd().unwrap();
+            let got = current_directory().unwrap();
             assert_eq!(&got[..], temporary.to_shell_bytes());
             assert!(!got.contains(&0));
         }
@@ -180,14 +180,14 @@ mod tests {
             let component = format!("nsh-cd-deleted-{}", std::process::id());
             let temporary = std::env::temp_dir().join(component);
             std::fs::create_dir(&temporary).unwrap();
-            let _restore = CwdGuard {
+            let _restore = WorkingDirectoryGuard {
                 old,
                 temporary: temporary.clone(),
             };
             std::env::set_current_dir(&temporary).unwrap();
             std::fs::remove_dir(&temporary).unwrap();
 
-            assert!(getpwd().is_err());
+            assert!(current_directory().is_err());
         }
     }
 }

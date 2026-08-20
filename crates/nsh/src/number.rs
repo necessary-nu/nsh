@@ -18,7 +18,7 @@ use crate::error::{Diagnostics, Error};
 // [spec:dash:def:shell.max-int-length-fn]
 // [spec:dash:sem:shell.max-int-length-fn]
 #[inline]
-pub(crate) fn max_int_length(bytes: i32) -> i32 {
+pub(crate) fn maximum_integer_text_length(bytes: i32) -> i32 {
     ((bytes * 8 - 1) as f64 * 0.30102999566398119521 + 14.0) as i32
 }
 
@@ -28,7 +28,7 @@ pub(crate) fn max_int_length(bytes: i32) -> i32 {
 pub(crate) fn invalid_number(diagnostics: &mut Diagnostics<'_>, input: &BStr) -> Error {
     let mut message = b"Illegal number: ".to_vec();
     message.extend_from_slice(input);
-    diagnostics.sh_error_value(&message)
+    diagnostics.shell_error(&message)
 }
 
 // [spec:dash:def:mystring.atomax-fn]

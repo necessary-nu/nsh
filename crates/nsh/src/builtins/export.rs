@@ -4,7 +4,7 @@
 //! telling them apart by the word it was called as -- the two differ only
 //! in which flag they set on the variable.
 //!
-//! The variable table stays in `crate::var`. What is here is the argument
+//! The variable table stays in `crate::variables`. What is here is the argument
 //! handling: with no operands it prints the set, and with them it sets a
 //! flag on names that exist and creates the ones that do not.
 
@@ -12,9 +12,9 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 
-use crate::eval::Flow;
+use crate::evaluation::Flow;
 use crate::options::Options;
-use crate::var::{
+use crate::variables::{
     VariableAttributes, VariableSelection, add_attributes, set_bytes, show_vars,
     variable_attributes,
 };
@@ -43,7 +43,7 @@ use crate::var::{
 // [spec:posix:req:builtin.readonly.stderr]
 // [spec:posix:req:builtin.readonly.exit-status]
 // [spec:posix:sem:builtin.readonly.utility-defaults]
-pub fn exportcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* `export` and `readonly` are one builtin telling itself apart by the
      * word it was called as. */
     let (attribute, selection) = if args[0].first() == Some(&b'r') {
@@ -52,31 +52,32 @@ pub fn exportcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         (VariableAttributes::EXPORTED, VariableSelection::Exported)
     };
 
-    let mut opts = Options::new(args);
-    let notp = opts.next(&mut sh.diagnostics(), b"p")?.is_none();
-    let operands = opts.operands();
-    if notp && !operands.is_empty() {
+    let mut option_scan = Options::new(args);
+    let export_operands = option_scan.next(&mut shell.diagnostics(), b"p")?.is_none();
+    let operands = option_scan.operands();
+    if export_operands && !operands.is_empty() {
         for word in operands {
-            match word.iter().position(|&b| b == b'=') {
+            match word.iter().position(|&byte| byte == b'=') {
                 Some(at) => {
                     let name = BStr::new(&word[..at]);
-                    if variable_attributes(sh, name).is_some_and(|attributes| attributes.read_only)
+                    if variable_attributes(shell, name)
+                        .is_some_and(|attributes| attributes.read_only)
                     {
                         let mut message = name.to_vec();
                         message.extend_from_slice(b": is read only");
-                        return Err(sh.diagnostics().builtin_error_value(1, &message));
+                        return Err(shell.diagnostics().builtin_error_value(1, &message));
                     }
-                    set_bytes(sh, name, Some(BStr::new(&word[at + 1..])), attribute)?;
+                    set_bytes(shell, name, Some(BStr::new(&word[at + 1..])), attribute)?;
                 }
                 None => {
-                    if !add_attributes(sh, word, attribute) {
-                        set_bytes(sh, word, None, attribute)?;
+                    if !add_attributes(shell, word, attribute) {
+                        set_bytes(shell, word, None, attribute)?;
                     }
                 }
             }
         }
     } else {
-        show_vars(sh, args[0], selection)?;
+        show_vars(shell, args[0], selection)?;
     }
     Ok(Flow::Done((0).into()))
 }
@@ -85,16 +86,16 @@ pub fn exportcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 mod tests {
     use super::*;
 
-    use crate::testutil::lock;
-    use crate::var::{VariableAttributes, lookup_bytes, set_bytes, variable_attributes};
+    use crate::test_support::lock;
+    use crate::variables::{VariableAttributes, lookup_bytes, set_bytes, variable_attributes};
 
     /// The shell is the caller's: `export` reads and writes the variable
     /// table, which belongs to an instance, so a `Shell` made in here
     /// would be a different set of variables from the one the test set up.
-    fn run(sh: &mut Shell, name: &[u8], words: &[&[u8]]) -> Flow {
+    fn invoke(shell: &mut Shell, name: &[u8], words: &[&[u8]]) -> Flow {
         let mut args = vec![BStr::new(name)];
-        args.extend(words.iter().map(|w| BStr::new(*w)));
-        exportcmd(sh, &args).unwrap()
+        args.extend(words.iter().map(|word| BStr::new(*word)));
+        super::run(shell, &args).unwrap()
     }
 
     /// The word the builtin was called as picks the flag, which is the
@@ -103,16 +104,22 @@ mod tests {
     fn the_calling_name_picks_the_flag() {
         let _g = lock();
         let mut owned = Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned;
+        let shell = &mut owned;
         let name = BStr::new("Texport");
-        set_bytes(sh, name, Some(BStr::new("v")), VariableAttributes::FIXED).unwrap();
+        set_bytes(shell, name, Some(BStr::new("v")), VariableAttributes::FIXED).unwrap();
 
-        assert_eq!(run(sh, b"export", &[b"Texport"]), Flow::Done((0).into()));
-        assert!(variable_attributes(sh, name).unwrap().exported);
-        assert!(!variable_attributes(sh, name).unwrap().read_only);
+        assert_eq!(
+            invoke(shell, b"export", &[b"Texport"]),
+            Flow::Done((0).into())
+        );
+        assert!(variable_attributes(shell, name).unwrap().exported);
+        assert!(!variable_attributes(shell, name).unwrap().read_only);
 
-        assert_eq!(run(sh, b"readonly", &[b"Texport"]), Flow::Done((0).into()));
-        assert!(variable_attributes(sh, name).unwrap().read_only);
+        assert_eq!(
+            invoke(shell, b"readonly", &[b"Texport"]),
+            Flow::Done((0).into())
+        );
+        assert!(variable_attributes(shell, name).unwrap().read_only);
     }
 
     /// An operand carrying a value assigns as well as flags, which is
@@ -121,13 +128,16 @@ mod tests {
     fn an_operand_may_assign() {
         let _g = lock();
         let mut owned = Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned;
+        let shell = &mut owned;
         assert_eq!(
-            run(sh, b"export", &[b"Texport2=set"]),
+            invoke(shell, b"export", &[b"Texport2=set"]),
             Flow::Done((0).into())
         );
         let name = BStr::new("Texport2");
-        assert_eq!(lookup_bytes(sh, name).map(Vec::from), Some(b"set".to_vec()));
-        assert!(variable_attributes(sh, name).unwrap().exported);
+        assert_eq!(
+            lookup_bytes(shell, name).map(Vec::from),
+            Some(b"set".to_vec())
+        );
+        assert!(variable_attributes(shell, name).unwrap().exported);
     }
 }

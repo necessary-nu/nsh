@@ -44,39 +44,39 @@ fn io_error(e: io::Error) -> Error {
 // ---------------------------------------------------------------------
 
 fn run_and_capture() -> Result<(), Error> {
-    let mut sh = Shell::builder()
-        .arg0(BStr::new(b"myapp"))
+    let mut shell = Shell::builder()
+        .argument_zero(BStr::new(b"myapp"))
         .inherit_env()
         .streams(Streams::capture().map_err(io_error)?)
         .build()?;
 
-    sh.set_var(BStr::new(b"PATH"), BStr::new(b"/usr/bin:/bin"))?;
+    shell.set_var(BStr::new(b"PATH"), BStr::new(b"/usr/bin:/bin"))?;
 
     // Command substitution and direct external commands resolve the same
     // per-instance logical descriptors as builtins, so capture covers all
     // of them without replacing the host process's stdout.
     let status: ExitStatus =
-        sh.run(b"for f in /etc/hostname; do echo \"$(wc -l < \"$f\") $f\"; done")?;
-    let out: BString = sh.take_captured_stdout().map_err(io_error)?;
+        shell.run(b"for f in /etc/hostname; do echo \"$(wc -l < \"$f\") $f\"; done")?;
+    let out: BString = shell.take_captured_stdout().map_err(io_error)?;
 
     // Two runs compose like two lines of one script: `count` is still set.
-    sh.run(b"count=$(ls /etc | wc -l)")?;
-    sh.run(b"echo \"$count files\"")?;
-    let counted: BString = sh.take_captured_stdout().map_err(io_error)?;
+    shell.run(b"count=$(ls /etc | wc -l)")?;
+    shell.run(b"echo \"$count files\"")?;
+    let counted: BString = shell.take_captured_stdout().map_err(io_error)?;
 
     // `var` hands back a borrow of the table, so a value that has to
     // outlive the next `run` is copied out. The borrow checker is right
     // here: an assignment can move the table under it.
-    let home: Option<BString> = sh.var(BStr::new(b"HOME")).map(|v| v.to_owned());
+    let home: Option<BString> = shell.var(BStr::new(b"HOME")).map(|v| v.to_owned());
 
     // Untrusted data goes in as a positional parameter, never spliced into
     // the script text. This is the whole quoting problem, gone.
     let name = BStr::new(b"a file with 'quotes' and $HOME in it");
-    sh.run_command(
+    shell.run_command(
         BStr::new(b"printf '%s\\n' \"$1\""),
         &[BStr::new(b"myapp"), name],
     )?;
-    let echoed: BString = sh.take_captured_stdout().map_err(io_error)?;
+    let echoed: BString = shell.take_captured_stdout().map_err(io_error)?;
     assert_eq!(echoed.trim_ascii_end(), &name[..]);
 
     println!(
@@ -98,13 +98,13 @@ fn run_and_capture() -> Result<(), Error> {
 // ---------------------------------------------------------------------
 
 fn expand_a_word() -> Result<(), Error> {
-    let mut sh = Shell::builder().inherit_env().build()?;
+    let mut shell = Shell::builder().inherit_env().build()?;
 
     // Unquoted: splits on $IFS, then globs. Zero, one or many fields.
-    let fields: Vec<BString> = sh.expand_word(BStr::new(b"/etc/hostn*"))?;
+    let fields: Vec<BString> = shell.expand_word(BStr::new(b"/etc/hostn*"))?;
 
     // As if double-quoted: exactly one, no splitting, no globbing.
-    let one: BString = sh.expand_word_quoted(BStr::new(b"${EDITOR:-vi}"))?;
+    let one: BString = shell.expand_word_quoted(BStr::new(b"${EDITOR:-vi}"))?;
 
     println!(
         "2. {} field(s) from the glob, and ${{EDITOR:-vi}} is {one:?}",
@@ -188,15 +188,15 @@ fn frontend(argv: &[BString]) -> ! {
     // it, so the oracle covers the move.
     let interactive = argv.iter().any(|a| a.as_slice() == b"-i");
 
-    let mut sh = match Shell::builder()
-        .arg0(BStr::new(b"sh"))
+    let mut shell = match Shell::builder()
+        .argument_zero(BStr::new(b"sh"))
         .inherit_env()
         .streams(Streams::inherit())
         .host(FrontendHost)
         .option(BStr::new(b"interactive"), interactive)
         .build()
     {
-        Ok(sh) => sh,
+        Ok(shell) => shell,
         Err(e) => {
             // The diagnostic is already on stderr; this is only the status.
             std::process::exit(e.status().code().into());
@@ -205,7 +205,7 @@ fn frontend(argv: &[BString]) -> ! {
 
     // A shell with no operand reads its own standard input, prompting if
     // it is interactive. This is dash's `cmdloop(1)`.
-    let status = match sh.run(Source::stream()) {
+    let status = match shell.run(Source::stream()) {
         Ok(st) => st,
         Err(e) => e.status(),
     };
@@ -219,15 +219,15 @@ fn frontend(argv: &[BString]) -> ! {
 /// then exits — so this is the part of it that can be: a shell built with
 /// an embedder-written host, which therefore installs real handlers.
 fn a_shell_with_a_host() -> Result<(), Error> {
-    let mut sh = Shell::builder()
-        .arg0(BStr::new(b"sh"))
+    let mut shell = Shell::builder()
+        .argument_zero(BStr::new(b"sh"))
         .inherit_env()
         .host(FrontendHost)
         .streams(Streams::capture().map_err(io_error)?)
         .build()?;
-    sh.run(b"trap 'echo caught' INT; echo host installed the handler")?;
-    let out = sh.take_captured_stdout().map_err(io_error)?;
-    println!("3. {}, and $? is {}", show(&out), sh.status().code());
+    shell.run(b"trap 'echo caught' INT; echo host installed the handler")?;
+    let out = shell.take_captured_stdout().map_err(io_error)?;
+    println!("3. {}, and $? is {}", show(&out), shell.status().code());
     Ok(())
 }
 

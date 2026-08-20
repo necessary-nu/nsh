@@ -23,7 +23,7 @@ use nsh_platform::NativeStrExt as _;
 // [spec:nsh:req:idiom.evaluator-control-flow]
 use crate::context::Shell;
 use crate::error::Error;
-use crate::eval::Flow;
+use crate::evaluation::Flow;
 use crate::status::ExitStatus;
 
 /// Where [`Shell::run`] reads commands.
@@ -289,11 +289,11 @@ impl Shell {
         let outcome = crate::resource::with_resources(self, |shell, _resources| {
             match &source.0 {
                 Kind::Bytes(bytes) => {
-                    crate::input::setinputstring(shell, BStr::new(bytes));
+                    crate::input::set_input_string(shell, BStr::new(bytes));
                 }
                 Kind::File(path) => {
                     let path = path.to_shell_bytes();
-                    crate::input::setinputfile(
+                    crate::input::set_input_file(
                         shell,
                         BStr::new(&path),
                         crate::input::InputFileOptions::CURRENT,
@@ -309,11 +309,12 @@ impl Shell {
              * changed jobs, and counts consecutive `EOF`s for
              * `ignoreeof`. */
             match &source.0 {
-                Kind::Bytes(_) => {
-                    crate::eval::parse_execute(shell, crate::eval::EvalContext::DEFAULT)
-                }
-                Kind::File(_) => crate::runtime::cmdloop(shell, false),
-                Kind::Stream => crate::runtime::cmdloop(shell, true),
+                Kind::Bytes(_) => crate::evaluation::parse_and_execute(
+                    shell,
+                    crate::evaluation::EvaluationContext::DEFAULT,
+                ),
+                Kind::File(_) => crate::runtime::command_loop(shell, false),
+                Kind::Stream => crate::runtime::command_loop(shell, true),
             }
         });
         match outcome {
@@ -337,7 +338,7 @@ impl Shell {
                     self.status = status;
                 }
                 self.clear_evaluation_resources();
-                let exit_status = crate::trap::exitshell(self, status);
+                let exit_status = crate::trap::exit_shell(self, status);
                 self.exited = Some(exit_status);
                 Ok(exit_status)
             }
@@ -369,11 +370,11 @@ impl Shell {
     ///
     /// The parameters persist afterwards, exactly as `sh -c` leaves them.
     pub fn run_command(&mut self, command: &BStr, args: &[&BStr]) -> Result<ExitStatus, Error> {
-        if let Some(arg0) = args.first() {
-            self.options.set_arg0(arg0);
+        if let Some(argument_zero) = args.first() {
+            self.options.set_arg0(argument_zero);
         }
         let rest: Vec<&BStr> = args.iter().skip(1).copied().collect();
-        crate::options::setparam(self, &rest);
+        crate::options::set_positional_parameters(self, &rest);
         self.run(command)
     }
 
@@ -427,25 +428,25 @@ impl Shell {
         mode: crate::expand::ExpansionMode,
     ) -> Result<Vec<BString>, Error> {
         crate::resource::with_resources(self, |shell, _resources| {
-            crate::input::setinputstring(shell, word);
+            crate::input::set_input_string(shell, word);
             shell.input.set_floor(shell.input.mark());
             // This is a fresh parser entry, not a continuation of the previous
             // `run`. In particular, a completed command loop leaves EOF as one
             // token of lookahead; consuming that here would make every public
             // expansion after a run spuriously return no fields.
-            shell.input.tokpushback = false;
+            shell.input.token_pushed_back = false;
             shell.input.begin_parse(shell.options.dialect());
-            let t = crate::parser::readtoken(shell, crate::parser::TokenContext::NONE)?;
-            if t != crate::parser::TokenKind::Word {
+            let t = crate::parser::read_token(shell, crate::parser::TokenContext::NONE)?;
+            if t.kind != crate::parser::TokenKind::Word {
                 /* An empty word is the honest answer for empty input, and
                  * anything else here is syntax the caller wrote rather
                  * than a word — a `;` or a `|` cannot be expanded. */
                 return Ok(Vec::new());
             }
-            let n = crate::parser::makename(shell);
-            let mut list = crate::expand::arglist::new();
-            crate::expand::expandarg(shell, &n, Some(&mut list), mode)?;
-            Ok(list.list.into_iter().map(|field| field.text).collect())
+            let node = crate::parser::make_name_node(shell);
+            let mut fields = crate::expand::ExpandedFields::new();
+            crate::expand::expand_argument(shell, &node, Some(&mut fields), mode)?;
+            Ok(fields.fields.into_iter().map(|field| field.text).collect())
         })
     }
 
@@ -475,19 +476,19 @@ mod tests {
     /// parse does not.
     #[test]
     fn two_runs_compose_like_two_lines_of_one_script() {
-        let _g = crate::testutil::lock();
-        let mut sh = Shell::builder().build().unwrap();
-        sh.run(b"count=7").unwrap();
-        let st = sh.run(b"exit $count").unwrap();
+        let _g = crate::test_support::lock();
+        let mut shell = Shell::builder().build().unwrap();
+        shell.run(b"count=7").unwrap();
+        let st = shell.run(b"exit $count").unwrap();
         assert_eq!(st.code(), 7);
     }
 
     /// A `run` is a complete parse unit, exactly as `eval` is.
     #[test]
     fn an_incomplete_command_is_a_syntax_error_rather_than_a_continuation() {
-        let _g = crate::testutil::lock();
-        let mut sh = Shell::builder().build().unwrap();
-        assert!(sh.run(b"if true; then").is_err());
+        let _g = crate::test_support::lock();
+        let mut shell = Shell::builder().build().unwrap();
+        assert!(shell.run(b"if true; then").is_err());
     }
 
     /// The stack depth after a `run` is the depth before it, on the error
@@ -495,29 +496,29 @@ mod tests {
     /// a shell.
     #[test]
     fn a_failed_run_leaves_the_shell_usable() {
-        let _g = crate::testutil::lock();
-        let mut sh = Shell::builder().build().unwrap();
-        assert!(sh.run(b"if true; then").is_err());
-        let st = sh.run(b"true").unwrap();
+        let _g = crate::test_support::lock();
+        let mut shell = Shell::builder().build().unwrap();
+        assert!(shell.run(b"if true; then").is_err());
+        let st = shell.run(b"true").unwrap();
         assert_eq!(st.code(), 0);
     }
 
     /// `exit` inside a `run` is a status and a flag, not a dead process.
     #[test]
     fn exit_reports_itself_rather_than_ending_the_host() {
-        let _g = crate::testutil::lock();
-        let mut sh = Shell::builder().build().unwrap();
-        assert!(!sh.has_exited());
-        let st = sh.run(b"exit 3").unwrap();
+        let _g = crate::test_support::lock();
+        let mut shell = Shell::builder().build().unwrap();
+        assert!(!shell.has_exited());
+        let st = shell.run(b"exit 3").unwrap();
         assert_eq!(st.code(), 3);
-        assert!(sh.has_exited());
+        assert!(shell.has_exited());
     }
 
     // [spec:nsh:req:idiom.platform-errors/test]
     #[test]
     fn exec_requires_host_authority() {
-        let _g = crate::testutil::lock();
-        let mut sh = Shell::builder()
+        let _g = crate::test_support::lock();
+        let mut shell = Shell::builder()
             .streams(crate::streams::Streams::capture().unwrap())
             .build()
             .unwrap();
@@ -526,10 +527,10 @@ mod tests {
         let mut command = BString::from("exec ");
         command.extend_from_slice(&crate::escape::shell_quote(BStr::new(&executable)));
         command.extend_from_slice(b" replaced");
-        let status = sh.run(BStr::new(command.as_slice())).unwrap();
+        let status = shell.run(BStr::new(command.as_slice())).unwrap();
         assert_eq!(status.code(), 126);
-        assert!(sh.has_exited());
-        let diagnostic = sh.take_captured_stderr().unwrap();
+        assert!(shell.has_exited());
+        let diagnostic = shell.take_captured_stderr().unwrap();
         let denied =
             nsh_platform::platform_error(nsh_platform::PlatformErrorKind::PermissionDenied);
         let mut suffix = nsh_platform::Locale::c()
@@ -545,13 +546,13 @@ mod tests {
     /// the floor rather than `run` doing it.
     #[test]
     fn a_file_source_is_read_and_leaves_the_stack_where_it_found_it() {
-        let _g = crate::testutil::lock();
+        let _g = crate::test_support::lock();
         let path = std::env::temp_dir().join(format!("nsh-source-{}", std::process::id()));
         std::fs::write(&path, b"answer=41\nanswer=$((answer + 1))\n").unwrap();
-        let mut sh = Shell::builder().build().unwrap();
-        sh.run(Source::file(&path)).unwrap();
-        sh.run(b"exit $answer").unwrap();
-        assert_eq!(sh.status().code(), 42);
+        let mut shell = Shell::builder().build().unwrap();
+        shell.run(Source::file(&path)).unwrap();
+        shell.run(b"exit $answer").unwrap();
+        assert_eq!(shell.status().code(), 42);
         std::fs::remove_file(&path).unwrap();
     }
 
@@ -559,18 +560,18 @@ mod tests {
     /// which is the arm with nothing to push.
     #[test]
     fn a_stream_source_reads_the_shells_own_standard_input() {
-        let _g = crate::testutil::lock();
+        let _g = crate::test_support::lock();
         let (read, write) = nsh_platform::pipe().unwrap();
         nsh_platform::write_all(&write, b"exit 5\n").unwrap();
         drop(write);
-        let mut sh = Shell::builder()
+        let mut shell = Shell::builder()
             .streams(
                 crate::streams::Streams::from_fds(&read, std::io::stdout(), std::io::stderr())
                     .unwrap(),
             )
             .build()
             .unwrap();
-        let st = sh.run(Source::stream()).unwrap();
+        let st = shell.run(Source::stream()).unwrap();
         assert_eq!(st.code(), 5);
         drop(read);
     }
@@ -580,19 +581,20 @@ mod tests {
     /// as data, because it never reaches the parser.
     #[test]
     fn a_positional_parameter_is_data_rather_than_syntax() {
-        let _g = crate::testutil::lock();
-        let mut sh = Shell::builder()
+        let _g = crate::test_support::lock();
+        let mut shell = Shell::builder()
             .streams(crate::streams::Streams::capture().unwrap())
             .build()
             .unwrap();
         let hostile = BStr::new(b"a file with 'quotes' and $HOME in it");
-        sh.run_command(
-            BStr::new(b"printf '%s' \"$1\""),
-            &[BStr::new(b"myapp"), hostile],
-        )
-        .unwrap();
-        let out = sh.take_captured_stdout().unwrap();
-        assert_eq!(out, hostile);
+        shell
+            .run_command(
+                BStr::new(b"printf '%s' \"$1\""),
+                &[BStr::new(b"myapp"), hostile],
+            )
+            .unwrap();
+        let output = shell.take_captured_stdout().unwrap();
+        assert_eq!(output, hostile);
     }
 
     /// Capture is a file, so a script that writes more than a pipe buffer
@@ -600,47 +602,49 @@ mod tests {
     /// the reason it is a file. 256 KiB is well past the 64 KiB pipe.
     #[test]
     fn a_capture_holds_more_than_a_pipe_would() {
-        let _g = crate::testutil::lock();
-        let mut sh = Shell::builder()
+        let _g = crate::test_support::lock();
+        let mut shell = Shell::builder()
             .streams(crate::streams::Streams::capture().unwrap())
             .build()
             .unwrap();
-        sh.run(b"i=0; while [ $i -lt 4096 ]; do printf '%064d' $i; i=$((i+1)); done")
+        shell
+            .run(b"i=0; while [ $i -lt 4096 ]; do printf '%064d' $i; i=$((i+1)); done")
             .unwrap();
-        let out = sh.take_captured_stdout().unwrap();
-        assert_eq!(out.len(), 4096 * 64);
+        let output = shell.take_captured_stdout().unwrap();
+        assert_eq!(output.len(), 4096 * 64);
         /* And it is emptied, so "since the last call" is true. */
-        assert!(sh.take_captured_stdout().unwrap().is_empty());
+        assert!(shell.take_captured_stdout().unwrap().is_empty());
     }
 
     /// One word is zero, one or many fields, and splitting is on `$IFS`.
     #[test]
     fn an_unquoted_word_splits_and_a_quoted_one_does_not() {
-        let _g = crate::testutil::lock();
-        let mut sh = Shell::builder().build().unwrap();
-        sh.set_var(BStr::new(b"x"), BStr::new(b"a b c")).unwrap();
-        assert_eq!(sh.expand_word(BStr::new(b"$x")).unwrap().len(), 3);
+        let _g = crate::test_support::lock();
+        let mut shell = Shell::builder().build().unwrap();
+        shell.set_var(BStr::new(b"x"), BStr::new(b"a b c")).unwrap();
+        assert_eq!(shell.expand_word(BStr::new(b"$x")).unwrap().len(), 3);
         assert_eq!(
-            sh.expand_word_quoted(BStr::new(b"$x")).unwrap(),
+            shell.expand_word_quoted(BStr::new(b"$x")).unwrap(),
             BStr::new(b"a b c")
         );
-        sh.set_var(BStr::new(b"e"), BStr::new(b"")).unwrap();
-        assert_eq!(sh.expand_word(BStr::new(b"$e")).unwrap().len(), 0);
+        shell.set_var(BStr::new(b"e"), BStr::new(b"")).unwrap();
+        assert_eq!(shell.expand_word(BStr::new(b"$e")).unwrap().len(), 0);
     }
 
     /// The tokenizer is not skipped, which is what makes a quoted `$` and
     /// a defaulted parameter mean here what they mean in a script.
     #[test]
     fn expansion_sees_the_word_the_parser_would_have() {
-        let _g = crate::testutil::lock();
-        let mut sh = Shell::builder().build().unwrap();
+        let _g = crate::test_support::lock();
+        let mut shell = Shell::builder().build().unwrap();
         assert_eq!(
-            sh.expand_word_quoted(BStr::new(b"${NSH_UNSET_PROBE:-vi}"))
+            shell
+                .expand_word_quoted(BStr::new(b"${NSH_UNSET_PROBE:-vi}"))
                 .unwrap(),
             BStr::new(b"vi")
         );
         assert_eq!(
-            sh.expand_word(BStr::new(b"\\$HOME")).unwrap(),
+            shell.expand_word(BStr::new(b"\\$HOME")).unwrap(),
             vec![BString::from(&b"$HOME"[..])]
         );
     }
@@ -648,32 +652,34 @@ mod tests {
     /// The table, read and written from outside the language.
     #[test]
     fn a_variable_set_from_outside_is_the_one_a_script_reads() {
-        let _g = crate::testutil::lock();
-        let mut sh = Shell::builder().build().unwrap();
-        sh.set_var(BStr::new(b"greeting"), BStr::new(b"hello"))
+        let _g = crate::test_support::lock();
+        let mut shell = Shell::builder().build().unwrap();
+        shell
+            .set_var(BStr::new(b"greeting"), BStr::new(b"hello"))
             .unwrap();
-        assert_eq!(sh.var(BStr::new(b"greeting")), Some(BStr::new(b"hello")));
-        sh.run(b"greeting=$greeting-again").unwrap();
+        assert_eq!(shell.var(BStr::new(b"greeting")), Some(BStr::new(b"hello")));
+        shell.run(b"greeting=$greeting-again").unwrap();
         assert_eq!(
-            sh.var(BStr::new(b"greeting")),
+            shell.var(BStr::new(b"greeting")),
             Some(BStr::new(b"hello-again"))
         );
-        assert!(sh.vars().iter().any(|(k, _)| k == "greeting"));
-        assert!(sh.unset_var(BStr::new(b"greeting")).unwrap());
-        assert_eq!(sh.var(BStr::new(b"greeting")), None);
-        assert!(!sh.unset_var(BStr::new(b"greeting")).unwrap());
+        assert!(shell.variables().iter().any(|(k, _)| k == "greeting"));
+        assert!(shell.unset_var(BStr::new(b"greeting")).unwrap());
+        assert_eq!(shell.var(BStr::new(b"greeting")), None);
+        assert!(!shell.unset_var(BStr::new(b"greeting")).unwrap());
     }
 
     /// The `EXIT` trap runs, which is the reason `run` calls `exitshell`
     /// at all rather than just recording the status.
     #[test]
     fn the_exit_trap_runs_when_a_script_exits() {
-        let _g = crate::testutil::lock();
-        let mut sh = Shell::builder().build().unwrap();
-        sh.run(b"trap 'x=ran' EXIT").unwrap();
-        sh.run(b"exit 0").unwrap();
-        sh.run(b"exit $([ \"$x\" = ran ] && echo 0 || echo 9)")
+        let _g = crate::test_support::lock();
+        let mut shell = Shell::builder().build().unwrap();
+        shell.run(b"trap 'x=ran' EXIT").unwrap();
+        shell.run(b"exit 0").unwrap();
+        shell
+            .run(b"exit $([ \"$x\" = ran ] && echo 0 || echo 9)")
             .unwrap();
-        assert_eq!(sh.status().code(), 0);
+        assert_eq!(shell.status().code(), 0);
     }
 }

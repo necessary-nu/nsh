@@ -11,7 +11,7 @@ use crate::context::Shell;
 use bstr::BStr;
 use std::io::Write;
 
-use crate::eval::EvalContext;
+use crate::evaluation::EvaluationContext;
 use crate::jobs::JobDisplay;
 use crate::options::ShellOption;
 use crate::source::Startup;
@@ -19,8 +19,8 @@ use crate::source::Startup;
 
 /// Whether this is the top-level shell rather than one of its children.
 #[inline]
-pub(crate) fn rootshell(sh: &Shell) -> bool {
-    sh.shell_level == 0
+pub(crate) fn is_root_shell(shell: &Shell) -> bool {
+    shell.shell_level == 0
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -51,23 +51,23 @@ enum StartupAdvance {
     Exit(Option<crate::status::ExitStatus>),
 }
 
-fn advance_after_flow(flow: crate::eval::Flow, next: StartupTask) -> StartupAdvance {
+fn advance_after_flow(flow: crate::evaluation::Flow, next: StartupTask) -> StartupAdvance {
     match flow {
-        crate::eval::Flow::Done(_) => StartupAdvance::Next(next),
-        crate::eval::Flow::Exit { status } => StartupAdvance::Exit(status),
+        crate::evaluation::Flow::Done(_) => StartupAdvance::Next(next),
+        crate::evaluation::Flow::Exit { status } => StartupAdvance::Exit(status),
         control => unreachable!("startup operation returned local control: {control:?}"),
     }
 }
 
 // [spec:nsh:req:idiom.jobs-startup-control-flow]
 fn run_startup_task(
-    sh: &mut Shell,
+    shell: &mut Shell,
     startup: &Startup,
     task: StartupTask,
 ) -> Result<StartupAdvance, crate::error::Error> {
     match task {
         StartupTask::Initialize => {
-            configure_startup(sh, startup)?;
+            configure_startup(shell, startup)?;
             let next = if startup.login {
                 StartupTask::SystemProfile
             } else {
@@ -76,20 +76,20 @@ fn run_startup_task(
             Ok(StartupAdvance::Next(next))
         }
         StartupTask::SystemProfile => Ok(advance_after_flow(
-            read_profile(sh, BStr::new(b"/etc/profile"))?,
+            read_profile(shell, BStr::new(b"/etc/profile"))?,
             StartupTask::UserProfile,
         )),
         StartupTask::UserProfile => Ok(advance_after_flow(
-            read_profile(sh, BStr::new(b"$HOME/.profile"))?,
+            read_profile(shell, BStr::new(b"$HOME/.profile"))?,
             StartupTask::Environment,
         )),
         StartupTask::Environment => {
-            if sh.options.enabled(ShellOption::Interactive)
-                && let Some(shinit) = crate::var::lookup_bytes(sh, BStr::new(b"ENV"))
+            if shell.options.enabled(ShellOption::Interactive)
+                && let Some(shinit) = crate::variables::lookup_bytes(shell, BStr::new(b"ENV"))
                     .filter(|value| !value.is_empty())
             {
-                let flow = read_profile(sh, BStr::new(shinit.as_slice()))?;
-                if !matches!(flow, crate::eval::Flow::Done(_)) {
+                let flow = read_profile(shell, BStr::new(shinit.as_slice()))?;
+                if !matches!(flow, crate::evaluation::Flow::Done(_)) {
                     return Ok(advance_after_flow(flow, StartupTask::Command));
                 }
             }
@@ -97,19 +97,20 @@ fn run_startup_task(
         }
         StartupTask::Command => {
             if let Some(command) = startup.command_text() {
-                match crate::eval::evalstring(
-                    sh,
+                match crate::evaluation::evaluate_string(
+                    shell,
                     command,
                     if startup.reads_stdin() {
-                        EvalContext::DEFAULT
+                        EvaluationContext::DEFAULT
                     } else {
-                        EvalContext::EXITING
+                        EvaluationContext::EXITING
                     },
                 )? {
-                    crate::eval::Flow::Done(status) | crate::eval::Flow::Return { status, .. } => {
-                        sh.status = status
+                    crate::evaluation::Flow::Done(status)
+                    | crate::evaluation::Flow::Return { status, .. } => shell.status = status,
+                    crate::evaluation::Flow::Exit { status } => {
+                        return Ok(StartupAdvance::Exit(status));
                     }
-                    crate::eval::Flow::Exit { status } => return Ok(StartupAdvance::Exit(status)),
                     control => {
                         unreachable!("command option returned local control: {control:?}")
                     }
@@ -121,27 +122,27 @@ fn run_startup_task(
                 Ok(StartupAdvance::Finished)
             }
         }
-        StartupTask::CommandLoop => Ok(match cmdloop(sh, true)? {
-            crate::eval::Flow::Done(_) => StartupAdvance::Finished,
-            crate::eval::Flow::Exit { status } => StartupAdvance::Exit(status),
+        StartupTask::CommandLoop => Ok(match command_loop(shell, true)? {
+            crate::evaluation::Flow::Done(_) => StartupAdvance::Finished,
+            crate::evaluation::Flow::Exit { status } => StartupAdvance::Exit(status),
             control => unreachable!("command loop returned local control: {control:?}"),
         }),
     }
 }
 
-fn configure_startup(sh: &mut Shell, startup: &Startup) -> Result<(), crate::error::Error> {
-    sh.options.command_source = startup.has_command();
-    sh.options.set(ShellOption::Stdin, startup.reads_stdin());
+fn configure_startup(shell: &mut Shell, startup: &Startup) -> Result<(), crate::error::Error> {
+    shell.options.command_source = startup.has_command();
+    shell.options.set(ShellOption::Stdin, startup.reads_stdin());
 
-    if startup.reads_stdin() && sh.input.stdin_is_tty.is_none() {
-        crate::input::input_init(sh);
+    if startup.reads_stdin() && shell.input.standard_input_is_terminal.is_none() {
+        crate::input::initialize_input(shell);
     }
     if let Some(path) = startup.script_path() {
-        crate::input::set_command_input_file(sh, path)?;
+        crate::input::set_command_input_file(shell, path)?;
     }
 
-    crate::options::optschanged(sh)?;
-    crate::trap::refresh_startup_signal_policy(sh);
+    crate::options::apply_option_changes(shell)?;
+    crate::trap::refresh_startup_signal_policy(shell);
     Ok(())
 }
 
@@ -175,46 +176,46 @@ fn configure_startup(sh: &mut Shell, startup: &Startup) -> Result<(), crate::err
 // [spec:posix:sem:shell.input-sources]
 // [spec:posix:req:exit.interactive-abandons-command]
 // [spec:nsh:req:idiom.evaluator-control-flow]
-pub(crate) fn run(sh: &mut Shell, startup: &Startup) -> crate::status::ExitStatus {
+pub(crate) fn run(shell: &mut Shell, startup: &Startup) -> crate::status::ExitStatus {
     let mut task = StartupTask::Initialize;
     loop {
-        match run_startup_task(sh, startup, task) {
+        match run_startup_task(shell, startup, task) {
             Ok(StartupAdvance::Next(next)) => task = next,
             Ok(StartupAdvance::Finished) => {
-                return crate::trap::exitshell(sh, None);
+                return crate::trap::exit_shell(shell, None);
             }
             Ok(StartupAdvance::Exit(status)) => {
                 if let Some(status) = status {
-                    sh.status = status;
+                    shell.status = status;
                 }
-                sh.clear_evaluation_resources();
-                return crate::trap::exitshell(sh, status);
+                shell.clear_evaluation_resources();
+                return crate::trap::exit_shell(shell, status);
             }
             Err(error) => {
                 let interrupted = error.is_interrupt();
                 let unrecoverable_read = error.is_unrecoverable_read();
-                sh.status = error.status();
+                shell.status = error.status();
                 drop(error);
-                sh.clear_evaluation_resources();
+                shell.clear_evaluation_resources();
 
                 // [spec:posix:req:exit.shell-error-consequences]
                 // [spec:posix:req:exit.unrecoverable-read-error]
                 let recovery = task.recovery();
                 if unrecoverable_read
                     || recovery.is_none()
-                    || !sh.options.enabled(ShellOption::Interactive)
-                    || sh.shell_level != 0
+                    || !shell.options.enabled(ShellOption::Interactive)
+                    || shell.shell_level != 0
                 {
-                    return crate::trap::exitshell(sh, None);
+                    return crate::trap::exit_shell(shell, None);
                 }
 
-                sh.recover_command_loop();
+                shell.recover_command_loop();
                 if interrupted {
-                    if sh.io.stderr().write_all(b"\n").is_err() {
+                    if shell.io.stderr().write_all(b"\n").is_err() {
                         // The interrupt status takes precedence over its courtesy newline.
                     }
                 }
-                crate::error::clear_interrupt_deferral(&mut sh.interrupt_deferral);
+                crate::error::clear_interrupt_deferral(&mut shell.interrupt_deferral);
                 task = recovery.expect("recoverable startup task has a successor");
             }
         }
@@ -229,52 +230,64 @@ pub(crate) fn run(sh: &mut Shell, startup: &Startup) -> crate::status::ExitStatu
 // [spec:dash:def:main.cmdloop-fn]
 // [spec:dash:sem:main.cmdloop-fn]
 // [spec:posix:req:builtin.set.opt-o-ignoreeof]
-pub(crate) fn cmdloop(
-    sh: &mut Shell,
+pub(crate) fn command_loop(
+    shell: &mut Shell,
     top_level: bool,
-) -> Result<crate::eval::Flow, crate::error::Error> {
+) -> Result<crate::evaluation::Flow, crate::error::Error> {
     let mut status = crate::status::ExitStatus::SUCCESS;
     let mut eof_count = 0usize;
     /* `set -i` can change prompting and the other live interactive option
      * effects, but it cannot turn a command file into an interactive input
      * source. Capture that property before the first command can mutate the
      * option table. */
-    let interactive_input = sh.options.enabled(ShellOption::Interactive) && top_level;
+    let interactive_input = shell.options.enabled(ShellOption::Interactive) && top_level;
 
     loop {
         /* `setstackmark`/`popstackmark` per iteration: the parse tree and
          * everything the command allocated used to live in the region
          * between them. */
         // [spec:nsh:def:idiom.job-control-model]
-        if sh.jobs.jobctl {
+        if shell.jobs.job_control {
             /* An interrupt taken while announcing changed jobs leaves
              * through the read-eval loop, like any other. */
-            crate::jobs::showjobs(sh, crate::output::Dest::Stderr, JobDisplay::Changed)?;
+            crate::jobs::write_jobs(
+                shell,
+                crate::output::OutputDestination::Stderr,
+                JobDisplay::Changed,
+            )?;
         }
-        let interactive = sh.options.enabled(ShellOption::Interactive) && top_level;
+        let interactive = shell.options.enabled(ShellOption::Interactive) && top_level;
         if interactive {
-            crate::mail::chkmail(sh)?;
+            crate::mail::check_mail(shell)?;
         }
-        let parsed = crate::parser::parsecmd(sh, interactive)?;
-        if let crate::parser::ParseResult::Tree(n) = parsed {
-            sh.jobs.job_warning = sh.jobs.job_warning.advance();
+        let parsed = crate::parser::parse_command(shell, interactive)?;
+        if let crate::parser::ParseResult::Tree(command) = parsed {
+            shell.jobs.job_warning = shell.jobs.job_warning.advance();
             eof_count = 0;
             let flow = if top_level {
-                crate::eval::eval_top_level(sh, n.as_ref(), EvalContext::DEFAULT)
+                crate::evaluation::evaluate_top_level(
+                    shell,
+                    command.as_ref(),
+                    EvaluationContext::DEFAULT,
+                )
             } else {
-                crate::eval::evaltree(sh, n.as_ref(), EvalContext::DEFAULT)
+                crate::evaluation::evaluate_tree(
+                    shell,
+                    command.as_ref(),
+                    EvaluationContext::DEFAULT,
+                )
             }?;
             match flow {
-                crate::eval::Flow::Done(i) => {
-                    if n.is_some() {
-                        status = i;
+                crate::evaluation::Flow::Done(command_status) => {
+                    if command.is_some() {
+                        status = command_status;
                     }
                 }
-                crate::eval::Flow::Return {
+                crate::evaluation::Flow::Return {
                     status: return_status,
                     ..
                 } => {
-                    sh.status = return_status;
+                    shell.status = return_status;
                     status = return_status;
                     break;
                 }
@@ -288,41 +301,41 @@ pub(crate) fn cmdloop(
                 /* Preserve dash's line termination when a command file used
                  * the runtime `set -i` extension: prompting may be live, but
                  * EOF still terminates this non-interactive input source. */
-                if !sh.options.enabled(ShellOption::IgnoreEof)
-                    && sh.options.enabled(ShellOption::Interactive)
+                if !shell.options.enabled(ShellOption::IgnoreEof)
+                    && shell.options.enabled(ShellOption::Interactive)
                 {
-                    sh.write_output(crate::output::Dest::Stderr, b"\n")?;
+                    shell.write_output(crate::output::OutputDestination::Stderr, b"\n")?;
                 }
                 break;
             }
-            if !sh.options.enabled(ShellOption::IgnoreEof) && eof_count >= 50 {
+            if !shell.options.enabled(ShellOption::IgnoreEof) && eof_count >= 50 {
                 break;
             }
-            if !crate::jobs::stoppedjobs(sh)? {
-                if !sh.options.enabled(ShellOption::IgnoreEof) {
+            if !crate::jobs::has_stopped_jobs(shell)? {
+                if !shell.options.enabled(ShellOption::IgnoreEof) {
                     // [spec:nsh:req:compat.smoosh.interactive-job-prompt]
                     // A real terminal needs a line ending after the user's
                     // EOF keystroke. A forced-interactive pipe has no echoed
                     // keystroke to terminate, so the prompt is already the
                     // complete byte stream.
-                    if sh.options.enabled(ShellOption::Interactive)
-                        && sh.input.stdin_is_tty == Some(true)
+                    if shell.options.enabled(ShellOption::Interactive)
+                        && shell.input.standard_input_is_terminal == Some(true)
                     {
-                        sh.write_output(crate::output::Dest::Stderr, b"\n")?;
+                        shell.write_output(crate::output::OutputDestination::Stderr, b"\n")?;
                     }
                     break;
                 }
-                sh.write_output(
-                    crate::output::Dest::Stderr,
+                shell.write_output(
+                    crate::output::OutputDestination::Stderr,
                     b"\nUse \"exit\" to leave shell.\n",
                 )?;
             }
-            crate::input::rearm_stdin_after_eof(sh);
+            crate::input::rearm_stdin_after_eof(shell);
             eof_count = eof_count.saturating_add(1);
         }
     }
 
-    Ok(crate::eval::Flow::Done((status).into()))
+    Ok(crate::evaluation::Flow::Done((status).into()))
 }
 
 /// End a forked child, the way `main`'s handler ends one.
@@ -339,29 +352,29 @@ pub(crate) fn cmdloop(
 /// or an interrupt all terminate that child. There is no recovery task, so
 /// it clears evaluation resources and then runs `exitshell`.
 pub(crate) fn exit_from_child(
-    sh: &mut Shell,
-    outcome: Result<crate::eval::Flow, crate::error::Error>,
+    shell: &mut Shell,
+    outcome: Result<crate::evaluation::Flow, crate::error::Error>,
 ) -> ! {
     let selected_status = match &outcome {
-        Ok(crate::eval::Flow::Exit { status }) => *status,
+        Ok(crate::evaluation::Flow::Exit { status }) => *status,
         _ => None,
     };
     /* Same as `main`'s handler: the catch writes the status, because
      * `exitshell` below leaves the process with it. */
-    if let Err(e) = &outcome {
-        sh.status = e.status();
+    if let Err(error) = &outcome {
+        shell.status = error.status();
     }
     drop(outcome);
     if let Some(status) = selected_status {
-        sh.status = status;
+        shell.status = status;
     }
-    sh.clear_evaluation_resources();
+    shell.clear_evaluation_resources();
     /* `exitshell` returns now, and this is one of the three `_exit`s that
      * stay: it ends a child the library forked, which
      * [dec:nsh:fork-child-is-a-terminus] makes a terminus rather than a
      * frame. Returning from here would carry the child back up through
      * frames the parent owns. */
-    let status = crate::trap::exitshell(sh, selected_status);
+    let status = crate::trap::exit_shell(shell, selected_status);
     nsh_platform::exit_immediately(status.code().into());
 }
 
@@ -371,21 +384,24 @@ pub(crate) fn exit_from_child(
 
 // [spec:dash:def:main.read-profile-fn]
 // [spec:dash:sem:main.read-profile-fn]
-fn read_profile(sh: &mut Shell, name: &BStr) -> Result<crate::eval::Flow, crate::error::Error> {
-    let name = crate::parser::expandstr(sh, name)?;
+fn read_profile(
+    shell: &mut Shell,
+    name: &BStr,
+) -> Result<crate::evaluation::Flow, crate::error::Error> {
+    let name = crate::parser::expand_string(shell, name)?;
 
-    crate::resource::with_resources(sh, |sh, _resources| {
-        if !crate::input::setinputfile(
-            sh,
+    crate::resource::with_resources(shell, |shell, _resources| {
+        if !crate::input::set_input_file(
+            shell,
             BStr::new(&name),
             crate::input::InputFileOptions::OPTIONAL_PUSHED,
         )? {
-            return Ok(crate::eval::Flow::Done((0).into()));
+            return Ok(crate::evaluation::Flow::Done((0).into()));
         }
 
         /* An `exit` in a profile travels out as control flow after the
          * structured input scope has restored the previous frame. */
-        cmdloop(sh, false)
+        command_loop(shell, false)
     })
 }
 
@@ -397,13 +413,13 @@ fn read_profile(sh: &mut Shell, name: &BStr) -> Result<crate::eval::Flow, crate:
 /// how a login shell reads its profile.
 // [spec:dash:def:main.readcmdfile-fn]
 // [spec:dash:sem:main.readcmdfile-fn]
-pub(crate) fn readcmdfile(
-    sh: &mut Shell,
+pub(crate) fn read_command_file(
+    shell: &mut Shell,
     name: &BStr,
-) -> Result<crate::eval::Flow, crate::error::Error> {
-    crate::resource::with_resources(sh, |sh, _resources| {
-        crate::input::setinputfile(sh, name, crate::input::InputFileOptions::PUSHED)?;
-        cmdloop(sh, false)
+) -> Result<crate::evaluation::Flow, crate::error::Error> {
+    crate::resource::with_resources(shell, |shell, _resources| {
+        crate::input::set_input_file(shell, name, crate::input::InputFileOptions::PUSHED)?;
+        command_loop(shell, false)
     })
 }
 

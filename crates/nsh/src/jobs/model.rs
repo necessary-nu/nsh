@@ -26,19 +26,19 @@ impl JobState {
 }
 
 // [spec:dash:def:jobs.procstat]
-pub(crate) struct ProcStat {
-    pub(crate) pid: ProcessId,
+pub(crate) struct ProcessRecord {
+    pub(crate) process_id: ProcessId,
     pub(crate) status: Option<ChildStatus>,
-    pub(crate) cmd: BString,
+    pub(crate) command_text: BString,
 }
 
 // [spec:dash:def:jobs.job]
 pub(crate) struct Job {
-    pub(crate) ps: Vec<ProcStat>,
-    pub(crate) stopstatus: Option<ChildStatus>,
+    pub(crate) processes: Vec<ProcessRecord>,
+    pub(crate) stop_status: Option<ChildStatus>,
     state: JobState,
-    pub(crate) sigint: bool,
-    pub(crate) jobctl: bool,
+    pub(crate) interrupted: bool,
+    pub(crate) job_control: bool,
     pub(crate) waited: bool,
     pub(crate) changed: bool,
     pub(crate) terminal_settings: Option<nsh_platform::TerminalSettings>,
@@ -47,11 +47,11 @@ pub(crate) struct Job {
 impl Job {
     pub(super) const fn new() -> Self {
         Self {
-            ps: Vec::new(),
-            stopstatus: None,
+            processes: Vec::new(),
+            stop_status: None,
             state: JobState::Running,
-            sigint: false,
-            jobctl: false,
+            interrupted: false,
+            job_control: false,
             waited: false,
             changed: false,
             terminal_settings: None,
@@ -159,9 +159,9 @@ impl JobWarning {
 pub(crate) struct JobTable {
     pub(super) slots: Vec<Option<Job>>,
     order: Vec<JobId>,
-    pub(crate) jobctl: bool,
-    pub(crate) initialpgrp: Option<ProcessGroupState>,
-    pub(crate) ttyfd: Option<Descriptor>,
+    pub(crate) job_control: bool,
+    pub(crate) initial_process_group: Option<ProcessGroupState>,
+    pub(crate) terminal: Option<Descriptor>,
     pub(crate) shell_terminal_settings: Option<nsh_platform::TerminalSettings>,
     pub(crate) job_warning: JobWarning,
 }
@@ -173,9 +173,9 @@ impl JobTable {
         Self {
             slots: Vec::new(),
             order: Vec::new(),
-            jobctl: false,
-            initialpgrp: None,
-            ttyfd: None,
+            job_control: false,
+            initial_process_group: None,
+            terminal: None,
             shell_terminal_settings: None,
             job_warning: JobWarning::Ready,
         }

@@ -7,10 +7,12 @@ use bstr::{BStr, BString};
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::eval::Flow;
+use crate::evaluation::Flow;
 use crate::options::Options;
-use crate::output::Dest;
-use crate::var::{CallbackPolicy, VariableAttributes, set_bytes, setvarint_bytes, unset_bytes};
+use crate::output::OutputDestination;
+use crate::variables::{
+    CallbackPolicy, VariableAttributes, set_bytes, set_integer_bytes, unset_bytes,
+};
 
 // [spec:dash:def:options.getoptscmd-fn]
 // [spec:dash:sem:options.getoptscmd-fn]
@@ -25,27 +27,29 @@ use crate::var::{CallbackPolicy, VariableAttributes, set_bytes, setvarint_bytes,
 // [spec:posix:req:builtin.getopts.env]
 // [spec:posix:req:builtin.getopts.env-nlspath]
 // [spec:posix:req:builtin.getopts.interfaces]
-pub fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut opts = Options::new(args);
-    opts.next(&mut sh.diagnostics(), b"")?;
-    let operands = opts.operands();
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+    let mut option_scan = Options::new(args);
+    option_scan.next(&mut shell.diagnostics(), b"")?;
+    let operands = option_scan.operands();
     if operands.len() < 2 {
-        return Err(sh
+        return Err(shell
             .diagnostics()
-            .sh_error_value(b"Usage: getopts optstring var [arg...]"));
+            .shell_error(b"Usage: getopts optstring var [arg...]"));
     }
 
     let words: Vec<BString> = if operands.len() == 2 {
-        let words = sh.options.shellparam.words();
-        if sh.options.shellparam.optind > sh.options.shellparam.nparam + 1 {
-            sh.options.shellparam.optind = 1;
-            sh.options.shellparam.optoff = None;
+        let words = shell.options.positional_parameters.words();
+        if shell.options.positional_parameters.option_index
+            > shell.options.positional_parameters.parameter_count + 1
+        {
+            shell.options.positional_parameters.option_index = 1;
+            shell.options.positional_parameters.option_offset = None;
         }
         words
     } else {
-        if sh.options.shellparam.optind > operands.len() - 1 {
-            sh.options.shellparam.optind = 1;
-            sh.options.shellparam.optoff = None;
+        if shell.options.positional_parameters.option_index > operands.len() - 1 {
+            shell.options.positional_parameters.option_index = 1;
+            shell.options.positional_parameters.option_offset = None;
         }
         operands[2..]
             .iter()
@@ -54,7 +58,7 @@ pub fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     };
 
     Ok(Flow::Done(
-        i32::from(getopts(sh, operands[0], operands[1], &words)?).into(),
+        i32::from(getopts(shell, operands[0], operands[1], &words)?).into(),
     ))
 }
 
@@ -73,11 +77,20 @@ pub fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:sem:builtin.getopts.optstring-first-character]
 // [spec:posix:req:builtin.getopts.stderr-diagnostic]
 // [spec:posix:req:builtin.getopts.exit-status]
-fn getopts(sh: &mut Shell, optstr: &BStr, optvar: &BStr, words: &[BString]) -> Result<bool, Error> {
+fn getopts(
+    shell: &mut Shell,
+    optstr: &BStr,
+    optvar: &BStr,
+    words: &[BString],
+) -> Result<bool, Error> {
     let mut option = b'?';
     let mut done = false;
-    let mut next = sh.options.shellparam.optind.saturating_sub(1);
-    let offset = sh.options.shellparam.optoff;
+    let mut next = shell
+        .options
+        .positional_parameters
+        .option_index
+        .saturating_sub(1);
+    let offset = shell.options.positional_parameters.option_offset;
 
     let mut cursor = if next > 0
         && offset.is_some_and(|offset| words.get(next - 1).is_some_and(|word| word.len() >= offset))
@@ -123,22 +136,22 @@ fn getopts(sh: &mut Shell, optstr: &BStr, optvar: &BStr, words: &[BString]) -> R
         if spec == optstr.len() {
             if quiet {
                 set_bytes(
-                    sh,
+                    shell,
                     BStr::new(b"OPTARG"),
                     Some(BStr::new(&[option])),
                     VariableAttributes::NONE,
                 )?;
             } else {
-                let mut message = sh
+                let mut message = shell
                     .options
-                    .arg0()
+                    .argument_zero()
                     .unwrap_or_else(|| BStr::new(b"sh"))
                     .to_vec();
                 message.extend_from_slice(b": Illegal option -");
                 message.push(option);
                 message.push(b'\n');
-                sh.write_output(Dest::Stderr, &message)?;
-                unset_bytes(sh, BStr::new(b"OPTARG"))?;
+                shell.write_output(OutputDestination::Stderr, &message)?;
+                unset_bytes(shell, BStr::new(b"OPTARG"))?;
             }
             option = b'?';
             break 'scan;
@@ -161,70 +174,70 @@ fn getopts(sh: &mut Shell, optstr: &BStr, optvar: &BStr, words: &[BString]) -> R
             let Some(argument) = argument else {
                 if quiet {
                     set_bytes(
-                        sh,
+                        shell,
                         BStr::new(b"OPTARG"),
                         Some(BStr::new(&[option])),
                         VariableAttributes::NONE,
                     )?;
                     option = b':';
                 } else {
-                    let mut message = sh
+                    let mut message = shell
                         .options
-                        .arg0()
+                        .argument_zero()
                         .unwrap_or_else(|| BStr::new(b"sh"))
                         .to_vec();
                     message.extend_from_slice(b": No arg for -");
                     message.push(option);
                     message.extend_from_slice(b" option\n");
-                    sh.write_output(Dest::Stderr, &message)?;
-                    unset_bytes(sh, BStr::new(b"OPTARG"))?;
+                    shell.write_output(OutputDestination::Stderr, &message)?;
+                    unset_bytes(shell, BStr::new(b"OPTARG"))?;
                     option = b'?';
                 }
                 break 'scan;
             };
             set_bytes(
-                sh,
+                shell,
                 BStr::new(b"OPTARG"),
                 Some(BStr::new(argument.as_slice())),
                 VariableAttributes::NONE,
             )?;
         } else {
-            unset_bytes(sh, BStr::new(b"OPTARG"))?;
+            unset_bytes(shell, BStr::new(b"OPTARG"))?;
         }
         break 'scan;
     }
 
     if done {
-        unset_bytes(sh, BStr::new(b"OPTARG"))?;
+        unset_bytes(shell, BStr::new(b"OPTARG"))?;
     }
 
     let index = next + 1;
-    setvarint_bytes(
-        sh,
+    set_integer_bytes(
+        shell,
         BStr::new(b"OPTIND"),
         i64::try_from(index).unwrap_or(i64::MAX),
         VariableAttributes::NONE,
         CallbackPolicy::Suppress,
     )?;
     set_bytes(
-        sh,
+        shell,
         optvar,
         Some(BStr::new(&[option])),
         VariableAttributes::NONE,
     )?;
-    sh.options.shellparam.optoff = cursor.map(|(_, at)| at);
-    sh.options.shellparam.optind = index;
+    shell.options.positional_parameters.option_offset = cursor.map(|(_, at)| at);
+    shell.options.positional_parameters.option_index = index;
     Ok(done)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::lock;
-    use crate::var::lookup_bytes;
+    use crate::test_support::lock;
+    use crate::variables::lookup_bytes;
 
-    fn value(sh: &mut Shell, name: &str) -> String {
-        lookup_bytes(sh, BStr::new(name)).map_or_else(String::new, |value| {
+    fn value(shell: &mut Shell, name: &str) -> String {
+        lookup_bytes(shell, BStr::new(name)).map_or_else(String::new, |value| {
             String::from_utf8_lossy(&value).into_owned()
         })
     }
@@ -236,25 +249,16 @@ mod tests {
         let words = ["getopts", "ab:", "o", "-a", "-bVAL", "rest"];
         let args: Vec<&BStr> = words.iter().map(|word| BStr::new(*word)).collect();
         let mut shell = Shell::new(crate::streams::Streams::INHERIT);
-        shell.options.shellparam.optind = 1;
-        shell.options.shellparam.optoff = None;
+        shell.options.positional_parameters.option_index = 1;
+        shell.options.positional_parameters.option_offset = None;
 
-        assert_eq!(
-            getoptscmd(&mut shell, &args).unwrap(),
-            Flow::Done((0).into())
-        );
+        assert_eq!(run(&mut shell, &args).unwrap(), Flow::Done((0).into()));
         assert_eq!(value(&mut shell, "o"), "a");
         assert_eq!(lookup_bytes(&mut shell, BStr::new(b"OPTARG")), None);
-        assert_eq!(
-            getoptscmd(&mut shell, &args).unwrap(),
-            Flow::Done((0).into())
-        );
+        assert_eq!(run(&mut shell, &args).unwrap(), Flow::Done((0).into()));
         assert_eq!(value(&mut shell, "o"), "b");
         assert_eq!(value(&mut shell, "OPTARG"), "VAL");
-        assert_ne!(
-            getoptscmd(&mut shell, &args).unwrap(),
-            Flow::Done((0).into())
-        );
+        assert_ne!(run(&mut shell, &args).unwrap(), Flow::Done((0).into()));
         assert_eq!(lookup_bytes(&mut shell, BStr::new(b"OPTARG")), None);
         assert_eq!(value(&mut shell, "OPTIND"), "3");
     }
@@ -267,24 +271,18 @@ mod tests {
         let args: Vec<&BStr> = words.iter().map(|word| BStr::new(*word)).collect();
         let mut shell = Shell::new(crate::streams::Streams::capture().unwrap());
         shell.options.set_arg0(BStr::new(b"my-program"));
-        shell.options.shellparam.optind = 1;
-        shell.options.shellparam.optoff = None;
+        shell.options.positional_parameters.option_index = 1;
+        shell.options.positional_parameters.option_offset = None;
 
-        assert_eq!(
-            getoptscmd(&mut shell, &args).unwrap(),
-            Flow::Done((0).into())
-        );
+        assert_eq!(run(&mut shell, &args).unwrap(), Flow::Done((0).into()));
         assert_eq!(value(&mut shell, "o"), "?");
         assert_eq!(value(&mut shell, "OPTARG"), "z");
 
         let loud_words = ["getopts", "a", "o", "-z"];
         let loud_args: Vec<&BStr> = loud_words.iter().map(|word| BStr::new(*word)).collect();
-        shell.options.shellparam.optind = 1;
-        shell.options.shellparam.optoff = None;
-        assert_eq!(
-            getoptscmd(&mut shell, &loud_args).unwrap(),
-            Flow::Done((0).into())
-        );
+        shell.options.positional_parameters.option_index = 1;
+        shell.options.positional_parameters.option_offset = None;
+        assert_eq!(run(&mut shell, &loud_args).unwrap(), Flow::Done((0).into()));
         assert_eq!(
             shell.take_captured_stderr().unwrap(),
             BString::from("my-program: Illegal option -z\n")

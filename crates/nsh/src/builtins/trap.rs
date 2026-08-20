@@ -11,15 +11,16 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString};
 
-use crate::eval::Flow;
+use crate::evaluation::Flow;
 use crate::options::Options;
-use crate::output::Dest;
+use crate::output::OutputDestination;
 use crate::trap::{
-    NSIG, SignalSpec, TrapAction, clear_traps, decode_signal, decode_signum, setsignal,
+    SIGNAL_SLOT_COUNT, SignalSpec, TrapAction, clear_traps, configure_signal, decode_signal,
+    parse_signal_number,
 };
 
 // [spec:posix:req:builtin.trap.opt-p-suitable-for-reinput]
-fn listing_line(signo: usize, action: &TrapAction) -> Vec<u8> {
+fn listing_line(signal_number: usize, action: &TrapAction) -> Vec<u8> {
     let mut line = b"trap -- ".to_vec();
     match action {
         TrapAction::Default => line.push(b'-'),
@@ -29,18 +30,22 @@ fn listing_line(signo: usize, action: &TrapAction) -> Vec<u8> {
         }
     }
     line.push(b' ');
-    line.extend_from_slice(crate::signames::signal_names[signo].to_bytes());
+    line.extend_from_slice(crate::signal_names::SIGNAL_NAMES[signal_number].to_bytes());
     line.push(b'\n');
     line
 }
 
-fn write_listing(sh: &mut Shell, signo: usize, include_default: bool) -> Result<(), Error> {
-    let action = sh.traps.listed_action(signo);
+fn write_listing(
+    shell: &mut Shell,
+    signal_number: usize,
+    include_default: bool,
+) -> Result<(), Error> {
+    let action = shell.traps.listed_action(signal_number);
     if !include_default && matches!(action, TrapAction::Default) {
         return Ok(());
     }
-    let line = listing_line(signo, action);
-    sh.write_output(Dest::Stdout, &line)
+    let line = listing_line(signal_number, action);
+    shell.write_output(OutputDestination::Stdout, &line)
 }
 
 // [spec:dash:def:trap.trapcmd-fn]
@@ -62,79 +67,79 @@ fn write_listing(sh: &mut Shell, signo: usize, include_default: bool) -> Result<
 // [spec:posix:req:builtin.trap.utility-defaults]
 // [spec:posix:req:builtin.trap.stderr-usage]
 // [spec:posix:req:builtin.trap.exit-status]
-pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut print = false;
-    let mut opts = Options::new(args);
-    while let Some(option) = opts.next(&mut sh.diagnostics(), b"p")? {
+    let mut option_scan = Options::new(args);
+    while let Some(option) = option_scan.next(&mut shell.diagnostics(), b"p")? {
         print |= option == b'p';
     }
-    let ap = opts.operands();
-    if ap.is_empty() {
-        for index in 0..NSIG {
-            write_listing(sh, index, print)?;
+    let operands = option_scan.operands();
+    if operands.is_empty() {
+        for index in 0..SIGNAL_SLOT_COUNT {
+            write_listing(shell, index, print)?;
         }
         return Ok(Flow::Done((0).into()));
     }
     if print {
-        for word in ap {
+        for word in operands {
             let Some(signal) = decode_signal(word, true) else {
                 let mut message = b"trap: ".to_vec();
                 message.extend_from_slice(word);
                 message.extend_from_slice(b": bad trap\n");
-                sh.write_output(Dest::Stderr, &message)?;
+                shell.write_output(OutputDestination::Stderr, &message)?;
                 return Ok(Flow::Done((1).into()));
             };
-            write_listing(sh, signal.index(), true)?;
+            write_listing(shell, signal.index(), true)?;
         }
         return Ok(Flow::Done((0).into()));
     }
-    sh.traps.end_subshell_listing();
-    if sh.traps.parent_traps_pending {
-        clear_traps(sh, None);
+    shell.traps.end_subshell_listing();
+    if shell.traps.parent_traps_pending {
+        clear_traps(shell, None);
     }
     /* `trap SIG...` resets, and `trap ACTION SIG...` sets: the first word
      * is the action unless it is itself a signal, or the only word. */
-    let first = ap[0];
-    let (mut action, signals) = if ap.len() < 2 || decode_signum(first).is_some() {
-        (None, ap)
+    let first = operands[0];
+    let (mut action, signals) = if operands.len() < 2 || parse_signal_number(first).is_some() {
+        (None, operands)
     } else {
-        (Some(BString::from(first)), &ap[1..])
+        (Some(BString::from(first)), &operands[1..])
     };
     /* One signal-mask guard for the whole command, which is the recorded
      * granularity: `trap 'act' INT TERM HUP` blocks once, not three times.
      * Interrupt deferral remains per word inside the loop. */
-    let blocked = crate::siginbox::SignalsBlocked::new();
+    let blocked = crate::signal_inbox::SignalsBlocked::new();
     for word in signals {
         let Some(signal) = decode_signal(word, true) else {
             let mut message = b"trap: ".to_vec();
             message.extend_from_slice(word);
             message.extend_from_slice(b": bad trap\n");
-            sh.write_output(Dest::Stderr, &message)?;
+            shell.write_output(OutputDestination::Stderr, &message)?;
             return Ok(Flow::Done((1).into()));
         };
-        crate::error::with_interrupts_deferred(sh, |sh| {
+        crate::error::with_interrupts_deferred(shell, |shell| {
             /* The C's `action = savestr(action)` makes the next signal in the
              * list copy the previous copy; copying the argument word each time
              * gives the same bytes and leaves `action` pointing at what the
              * `'-'` test reads. */
-            let mut newtrap = TrapAction::Default;
+            let mut new_action = TrapAction::Default;
             if let Some(text) = &action {
                 if text.as_slice() == b"-" {
                     action = None;
                 } else if text.is_empty() {
-                    newtrap = TrapAction::Ignore;
+                    new_action = TrapAction::Ignore;
                 } else {
-                    sh.traps.trap_count += 1;
-                    newtrap = TrapAction::Command(text.clone());
+                    shell.traps.trap_count += 1;
+                    new_action = TrapAction::Command(text.clone());
                 }
             }
             /* Asked as a `bool` first: the count is a field of the table the
              * question is about, and reading one while writing the other is
              * two borrows of `sh.traps`. */
             let replacing_an_action =
-                matches!(sh.traps.action(signal.index()), TrapAction::Command(_));
+                matches!(shell.traps.action(signal.index()), TrapAction::Command(_));
             if replacing_an_action {
-                sh.traps.trap_count -= 1;
+                shell.traps.trap_count -= 1;
             }
             /* The C frees the old action and *then* stores the new one, so the
              * slot is briefly a dangling non-NULL pointer; `onsig` only tests it
@@ -142,9 +147,9 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
              * the same way and never leaves a stale pointer for it to load --
              * and the presence bit `onsig` reads instead is published by the
              * same call, with signals blocked so the two cannot disagree. */
-            drop(sh.traps.set(&blocked, signal.index(), newtrap));
+            drop(shell.traps.set(&blocked, signal.index(), new_action));
             if let SignalSpec::Signal(signal) = signal {
-                setsignal(sh, signal);
+                configure_signal(shell, signal);
             }
         });
     }

@@ -9,27 +9,27 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::output::Dest;
+use crate::output::OutputDestination;
 use bstr::BStr;
 
-use crate::builtins::cd::cdopt;
-use crate::cd::{Pwd, setpwd_inner};
-use crate::eval::Flow;
+use crate::builtins::cd::parse_cd_options;
+use crate::evaluation::Flow;
 use crate::options::Options;
+use crate::working_directory::{DirectoryUpdate, update_current_directory};
 
 // [spec:dash:def:cd.pwdcmd-fn]
 // [spec:dash:sem:cd.pwdcmd-fn]
-pub fn pwdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let options = cdopt(sh, &mut Options::new(args))?;
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+    let options = parse_cd_options(shell, &mut Options::new(args))?;
     let mut dir = if options.physical {
-        if sh.cwd.physdir.is_none() {
-            setpwd_inner(sh, Pwd::Current, false)?;
+        if shell.working_directory.physical.is_none() {
+            update_current_directory(shell, DirectoryUpdate::Current, false)?;
         }
-        sh.cwd.physdir.clone().unwrap_or_default()
+        shell.working_directory.physical.clone().unwrap_or_default()
     } else {
-        sh.cwd.curdir.clone().unwrap_or_default()
+        shell.working_directory.logical.clone().unwrap_or_default()
     };
     dir.push(b'\n');
-    sh.write_output(Dest::Stdout, &dir)?;
+    shell.write_output(OutputDestination::Stdout, &dir)?;
     Ok(Flow::Done((0).into()))
 }

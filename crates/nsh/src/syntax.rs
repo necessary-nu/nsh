@@ -184,7 +184,7 @@ pub fn is_special(byte: u8) -> bool {
 
 /// The numeric value of an ASCII digit.
 #[inline]
-pub fn digit_val(byte: u8) -> u8 {
+pub fn digit_value(byte: u8) -> u8 {
     byte - b'0'
 }
 

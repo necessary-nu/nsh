@@ -75,23 +75,23 @@ impl fmt::Display for LogicalDescriptor {
 /// while retaining the same underlying open file description and offset.
 // [spec:nsh:req:idiom.no-raw-fd-core]
 #[derive(Clone, Debug)]
-pub(crate) struct SharedFd(Arc<Descriptor>);
+pub(crate) struct SharedDescriptor(Arc<Descriptor>);
 
-impl SharedFd {
+impl SharedDescriptor {
     /// Move an owned descriptor into the shell's hidden backing range.
-    pub(crate) fn from_owned(fd: Descriptor) -> std::io::Result<Self> {
-        let fd = nsh_platform::move_fd_cloexec(fd, LogicalDescriptor::COUNT as i32)?;
-        Ok(Self(Arc::new(fd)))
+    pub(crate) fn from_owned(descriptor: Descriptor) -> std::io::Result<Self> {
+        let descriptor = nsh_platform::move_fd_cloexec(descriptor, LogicalDescriptor::COUNT as i32)?;
+        Ok(Self(Arc::new(descriptor)))
     }
 }
 
-impl From<Descriptor> for SharedFd {
-    fn from(fd: Descriptor) -> Self {
-        Self(Arc::new(fd))
+impl From<Descriptor> for SharedDescriptor {
+    fn from(descriptor: Descriptor) -> Self {
+        Self(Arc::new(descriptor))
     }
 }
 
-impl AsDescriptor for SharedFd {
+impl AsDescriptor for SharedDescriptor {
     fn as_platform_descriptor(&self) -> BorrowedDescriptor<'_> {
         self.0.as_platform_descriptor()
     }
@@ -103,20 +103,20 @@ impl AsDescriptor for SharedFd {
 /// buffered `Output` writes without changing or borrowing the host's process
 /// descriptor table.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct FdRef(Arc<Mutex<Option<SharedFd>>>);
+pub(crate) struct DescriptorSlot(Arc<Mutex<Option<SharedDescriptor>>>);
 
-impl FdRef {
-    fn lock(&self) -> MutexGuard<'_, Option<SharedFd>> {
+impl DescriptorSlot {
+    fn lock(&self) -> MutexGuard<'_, Option<SharedDescriptor>> {
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    pub(crate) fn get(&self) -> Option<SharedFd> {
+    pub(crate) fn get(&self) -> Option<SharedDescriptor> {
         self.lock().clone()
     }
 
-    pub(crate) fn replace(&self, value: Option<SharedFd>) -> Option<SharedFd> {
+    pub(crate) fn replace(&self, value: Option<SharedDescriptor>) -> Option<SharedDescriptor> {
         std::mem::replace(&mut *self.lock(), value)
     }
 
@@ -126,60 +126,60 @@ impl FdRef {
 
     // [spec:nsh:req:idiom.platform-errors]
     pub(crate) fn write_once(&self, bytes: &[u8]) -> std::io::Result<usize> {
-        let fd = self.get().ok_or_else(|| {
+        let descriptor = self.get().ok_or_else(|| {
             nsh_platform::platform_error(nsh_platform::PlatformErrorKind::BadDescriptor)
         })?;
-        nsh_platform::write_once(&fd, bytes)
+        nsh_platform::write_once(&descriptor, bytes)
     }
 
     pub(crate) fn write_all(&self, bytes: &[u8]) -> std::io::Result<()> {
-        let fd = self.get().ok_or_else(|| {
+        let descriptor = self.get().ok_or_else(|| {
             nsh_platform::platform_error(nsh_platform::PlatformErrorKind::BadDescriptor)
         })?;
-        nsh_platform::write_all(&fd, bytes)
+        nsh_platform::write_all(&descriptor, bytes)
     }
 }
 
 /// All descriptor slots in one shell execution environment.
 #[derive(Debug)]
-pub(crate) struct FdTable {
-    slots: [FdRef; LogicalDescriptor::COUNT],
+pub(crate) struct DescriptorTable {
+    slots: [DescriptorSlot; LogicalDescriptor::COUNT],
 }
 
-impl FdTable {
+impl DescriptorTable {
     pub(crate) fn from_streams(streams: &crate::streams::Streams) -> std::io::Result<Self> {
         let initial = streams.initial_descriptors()?;
         Ok(Self {
             slots: std::array::from_fn(|number| {
-                let slot = FdRef::default();
+                let slot = DescriptorSlot::default();
                 slot.replace(initial[number].clone());
                 slot
             }),
         })
     }
 
-    pub(crate) fn slot(&self, descriptor: LogicalDescriptor) -> FdRef {
+    pub(crate) fn slot(&self, descriptor: LogicalDescriptor) -> DescriptorSlot {
         self.slots[descriptor.index()].clone()
     }
 
-    pub(crate) fn get(&self, descriptor: LogicalDescriptor) -> Option<SharedFd> {
+    pub(crate) fn get(&self, descriptor: LogicalDescriptor) -> Option<SharedDescriptor> {
         self.slot(descriptor).get()
     }
 
     pub(crate) fn replace(
         &self,
         descriptor: LogicalDescriptor,
-        value: Option<SharedFd>,
-    ) -> Option<SharedFd> {
+        value: Option<SharedDescriptor>,
+    ) -> Option<SharedDescriptor> {
         self.slot(descriptor).replace(value)
     }
 
     pub(crate) fn install_owned(
         &self,
-        descriptor: LogicalDescriptor,
-        fd: Descriptor,
-    ) -> std::io::Result<Option<SharedFd>> {
-        Ok(self.replace(descriptor, Some(SharedFd::from_owned(fd)?)))
+        target: LogicalDescriptor,
+        owned: Descriptor,
+    ) -> std::io::Result<Option<SharedDescriptor>> {
+        Ok(self.replace(target, Some(SharedDescriptor::from_owned(owned)?)))
     }
 
     pub(crate) fn is_open(&self, descriptor: LogicalDescriptor) -> bool {
@@ -195,8 +195,8 @@ impl FdTable {
         let mut changes = Vec::with_capacity(LogicalDescriptor::COUNT);
         for (number, slot) in self.slots.iter().enumerate() {
             let source = match slot.get() {
-                Some(fd) => Some(nsh_platform::duplicate_cloexec(
-                    &fd,
+                Some(descriptor) => Some(nsh_platform::duplicate_cloexec(
+                    &descriptor,
                     LogicalDescriptor::COUNT as i32,
                 )?),
                 None => None,
@@ -214,19 +214,19 @@ mod tests {
     use super::*;
 
     // [spec:nsh:req:idiom.filesystem-account-bytes/test]
-    fn shared(name: &str) -> SharedFd {
-        SharedFd::from_owned(nsh_platform::anonymous_file(name).unwrap()).unwrap()
+    fn shared(name: &str) -> SharedDescriptor {
+        SharedDescriptor::from_owned(nsh_platform::anonymous_file(name).unwrap()).unwrap()
     }
 
-    fn empty_table() -> FdTable {
-        FdTable {
-            slots: std::array::from_fn(|_| FdRef::default()),
+    fn empty_table() -> DescriptorTable {
+        DescriptorTable {
+            slots: std::array::from_fn(|_| DescriptorSlot::default()),
         }
     }
 
-    fn detached(fd: SharedFd) -> FdRef {
-        let slot = FdRef::default();
-        slot.replace(Some(fd));
+    fn detached(descriptor: SharedDescriptor) -> DescriptorSlot {
+        let slot = DescriptorSlot::default();
+        slot.replace(Some(descriptor));
         slot
     }
 
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn closed_slot_reports_bad_descriptor() {
-        let slot = FdRef::default();
+        let slot = DescriptorSlot::default();
 
         let error = slot.write_all(b"nowhere").unwrap_err();
 
@@ -310,7 +310,7 @@ mod tests {
     // [spec:nsh:req:idiom.no-raw-fd-core/test]
     fn owned_descriptor_remains_usable_after_hiding() {
         let source = nsh_platform::open_null_input().unwrap();
-        let shared = SharedFd::from_owned(source).unwrap();
+        let shared = SharedDescriptor::from_owned(source).unwrap();
 
         assert_eq!(nsh_platform::read_to_end(&shared).unwrap(), b"");
     }

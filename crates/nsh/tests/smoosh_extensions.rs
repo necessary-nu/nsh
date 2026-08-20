@@ -25,7 +25,7 @@ fn run(script: &str, interactive: bool) -> (Vec<u8>, Vec<u8>, i32) {
         let supplied = Streams::from_fds(std::io::stdin(), &stdout_write, &stderr_write)
             .expect("duplicate test streams");
         let mut builder = nsh::Shell::builder()
-            .arg0(bstr::BStr::new(b"smoosh"))
+            .argument_zero(bstr::BStr::new(b"smoosh"))
             .inherit_env()
             .streams(supplied)
             .host(nsh::ProcessHost);

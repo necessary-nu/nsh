@@ -8,10 +8,10 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
 
-use crate::alias::{rmaliases, unalias};
-use crate::eval::Flow;
+use crate::alias::{clear_aliases, unalias};
+use crate::evaluation::Flow;
 use crate::options::Options;
-use crate::output::Dest;
+use crate::output::OutputDestination;
 
 // [spec:dash:def:alias.unaliascmd-fn]
 // [spec:dash:sem:alias.unaliascmd-fn]
@@ -25,22 +25,22 @@ use crate::output::Dest;
 // [spec:posix:req:builtin.unalias.stderr]
 // [spec:posix:req:builtin.unalias.interfaces]
 // [spec:posix:req:builtin.unalias.exit-status]
-pub fn unaliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut failed = false;
 
-    let mut opts = Options::new(args);
-    while let Some(opt) = opts.next(&mut sh.diagnostics(), b"a")? {
+    let mut option_scan = Options::new(args);
+    while let Some(opt) = option_scan.next(&mut shell.diagnostics(), b"a")? {
         if opt == b'a' {
-            rmaliases(&mut sh.interrupt_deferral, &mut sh.aliases);
+            clear_aliases(&mut shell.interrupt_deferral, &mut shell.aliases);
             return Ok(Flow::Done((0).into()));
         }
     }
-    for name in opts.operands() {
-        if !unalias(&mut sh.interrupt_deferral, &mut sh.aliases, name) {
+    for name in option_scan.operands() {
+        if !unalias(&mut shell.interrupt_deferral, &mut shell.aliases, name) {
             let mut message = b"unalias: ".to_vec();
             message.extend_from_slice(name);
             message.extend_from_slice(b" not found\n");
-            sh.write_output(Dest::Stderr, &message)?;
+            shell.write_output(OutputDestination::Stderr, &message)?;
             failed = true;
         }
     }

@@ -106,12 +106,12 @@ pub(crate) enum Command {
 /// intrusive `next` pointer, flexible array tail and untagged internal union
 /// all disappear. Values are boxed because `find_command` keeps their address
 /// across operations that can insert another command and rebalance the map.
-pub struct tblentry {
+pub struct CommandEntry {
     pub(crate) command: Command,
     pub(crate) rehash: bool,
 }
 
-impl tblentry {
+impl CommandEntry {
     /// `builtin_location` arrives as a value rather than being read here, and
     /// that is not a style choice: the only caller is `clearcmdentry`'s
     /// `retain`, whose closure already holds the table borrowed. Reading
@@ -140,19 +140,19 @@ impl tblentry {
 /// rebuilding the first. `docs/api-design.md` 5 groups them, and
 /// function definitions live here too because dash stores them in the
 /// same hash.
-pub struct CmdTable {
+pub struct CommandTable {
     /// Command names are shell bytes, without an artificial C terminator.
-    map: BTreeMap<BString, tblentry>,
+    map: BTreeMap<BString, CommandEntry>,
     /// Index in `PATH` of `%builtin`, when present.
     builtin_location: Option<usize>,
     /// Dialect under which cached built-in entries were classified.
     dispatch_dialect: crate::options::Dialect,
 }
 
-impl CmdTable {
+impl CommandTable {
     /// An empty hash with no `%builtin` component.
     pub(crate) const fn new() -> Self {
-        CmdTable {
+        CommandTable {
             map: BTreeMap::new(),
             builtin_location: None,
             dispatch_dialect: crate::options::Dialect::Posix,
@@ -165,16 +165,16 @@ impl CmdTable {
     /// entry does not have to reach for the sibling field itself. The
     /// two in-module walks cannot use this — they hold the map borrowed
     /// and take the option by value instead.
-    pub(crate) fn path_dependent(&self, cmdp: &tblentry) -> bool {
-        cmdp.path_dependent(self.builtin_location)
+    pub(crate) fn path_dependent(&self, command_entry: &CommandEntry) -> bool {
+        command_entry.path_dependent(self.builtin_location)
     }
 
     /// Every entry, in name order — what `hash` with no operand prints.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (&BString, &tblentry)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&BString, &CommandEntry)> {
         self.map.iter()
     }
 
-    pub(crate) fn get(&self, name: &BStr) -> Option<&tblentry> {
+    pub(crate) fn get(&self, name: &BStr) -> Option<&CommandEntry> {
         self.map.get(name)
     }
 
@@ -207,20 +207,20 @@ impl CmdTable {
 // [spec:posix:req:cmd.std-fd-closed]
 // [spec:posix:req:cmd.std-fd-nonconforming-environment]
 // [spec:nsh:req:idiom.platform-errors]
-pub fn shellexec(
-    sh: &mut crate::context::Shell,
-    argv: &[&BStr],
+pub fn execute_external_command(
+    shell: &mut crate::context::Shell,
+    arguments: &[&BStr],
     path: &BStr,
     path_index: Option<usize>,
-) -> Result<crate::eval::Flow, crate::error::Error> {
-    let command = argv.first().expect("shellexec needs a command name");
+) -> Result<crate::evaluation::Flow, crate::error::Error> {
+    let command = arguments.first().expect("shellexec needs a command name");
 
     /* A library shell may fork children, but it may not replace the host
      * process itself without the host's explicit grant. A forked shell owns
      * the child terminus regardless of which host policy its parent used. */
-    if sh.shell_level == 0 && !sh.host.may_replace_process() {
+    if shell.shell_level == 0 && !shell.host.may_replace_process() {
         return exec_failure(
-            sh,
+            shell,
             command,
             nsh_platform::platform_error(nsh_platform::PlatformErrorKind::PermissionDenied),
         );
@@ -229,37 +229,38 @@ pub fn shellexec(
     /* The C's `environment()` leaves its array in the stack allocator; ours
      * owns native strings, so the `Vec` has to outlive every execution
      * attempt below. */
-    let envv = match crate::var::environment(sh) {
+    let envv = match crate::variables::environment(shell) {
         Ok(environment) => environment,
-        Err(error) => return native_exec_failure(sh, command, &error),
+        Err(error) => return native_exec_failure(shell, command, &error),
     };
-    let arguments: Vec<OsString> = match argv
+    let arguments: Vec<OsString> = match arguments
         .iter()
         .map(|word| word.try_to_os_string())
         .collect::<std::io::Result<_>>()
     {
         Ok(arguments) => arguments,
-        Err(error) => return native_exec_failure(sh, command, &error),
+        Err(error) => return native_exec_failure(shell, command, &error),
     };
-    if let Err(error) = sh.fds.materialize() {
-        return exec_failure(sh, command, error);
+    if let Err(error) = shell.descriptors.materialize() {
+        return exec_failure(shell, command, error);
     }
     let error = if nsh_platform::shell_path_has_separator(command) {
         let resolved = nsh_platform::resolve_command_path(Path::new(&arguments[0]), &envv);
-        tryexec(resolved.as_os_str(), &arguments, &envv)
+        try_external_candidate(resolved.as_os_str(), &arguments, &envv)
     } else {
         let mut search_error =
             nsh_platform::platform_error(nsh_platform::PlatformErrorKind::NotFound);
         let mut cursor = PathCursor::new(path);
         let mut candidate_index = 0usize;
-        while let Some(candidate) = padvance(&mut cursor, command) {
+        while let Some(candidate) = cursor.advance(command) {
             if candidate_index >= path_index.unwrap_or(0) && candidate.option.is_none() {
                 let candidate = match candidate.path.try_to_path_buf() {
                     Ok(candidate) => candidate,
-                    Err(error) => return native_exec_failure(sh, command, &error),
+                    Err(error) => return native_exec_failure(shell, command, &error),
                 };
                 let candidate = nsh_platform::resolve_command_path(&candidate, &envv);
-                let candidate_error = tryexec(candidate.as_os_str(), &arguments, &envv);
+                let candidate_error =
+                    try_external_candidate(candidate.as_os_str(), &arguments, &envv);
                 if !nsh_platform::is_path_error(
                     &candidate_error,
                     nsh_platform::PathErrorKind::NotFound,
@@ -272,39 +273,39 @@ pub fn shellexec(
         search_error
     };
 
-    exec_failure(sh, command, error)
+    exec_failure(shell, command, error)
 }
 
 fn native_exec_failure(
-    sh: &mut crate::context::Shell,
+    shell: &mut crate::context::Shell,
     command: &BStr,
     error: &std::io::Error,
-) -> Result<crate::eval::Flow, crate::error::Error> {
+) -> Result<crate::evaluation::Flow, crate::error::Error> {
     let status = crate::status::ExitStatus::NOT_EXECUTABLE;
-    sh.status = status;
+    shell.status = status;
     let mut message = command.to_vec();
     message.extend_from_slice(b": ");
-    message.extend_from_slice(sh.locale.error_message(error).as_bytes());
-    let diagnostic = crate::error::Error::other(sh.eval.errlinno, status, &message);
-    drop(sh.diagnostics().report(diagnostic));
-    Ok(crate::eval::Flow::END)
+    message.extend_from_slice(shell.locale.error_message(error).as_bytes());
+    let diagnostic = crate::error::Error::other(shell.evaluation.diagnostic_line, status, &message);
+    drop(shell.diagnostics().report(diagnostic));
+    Ok(crate::evaluation::Flow::END)
 }
 
 // [spec:posix:req:exit.status-command-not-found]
 // [spec:posix:req:exit.status-not-executable]
 fn exec_failure(
-    sh: &mut crate::context::Shell,
+    shell: &mut crate::context::Shell,
     command: &BStr,
     error: std::io::Error,
-) -> Result<crate::eval::Flow, crate::error::Error> {
+) -> Result<crate::evaluation::Flow, crate::error::Error> {
     /* Map to POSIX errors */
-    let exerrno = nsh_platform::command_exec_failure_status(&error);
-    sh.status = crate::status::ExitStatus::from_code(exerrno);
+    let execution_status = nsh_platform::command_exec_failure_status(&error);
+    shell.status = crate::status::ExitStatus::from_code(execution_status);
     let mut message = Vec::new();
     message.extend_from_slice(command);
     message.extend_from_slice(b": ");
-    message.extend_from_slice(&crate::error::errmsg(
-        &sh.locale,
+    message.extend_from_slice(&crate::error::error_message(
+        &shell.locale,
         &error,
         Operation::Execute,
     ));
@@ -317,17 +318,18 @@ fn exec_failure(
     /* Built before the call rather than inside its argument list: the
      * receiver is borrowed for the whole call, so reading the line out of
      * the same shell in an argument is a conflict. */
-    let e = crate::error::Error::other(sh.eval.errlinno, exerrno, &message);
-    drop(sh.diagnostics().report(e));
+    let error =
+        crate::error::Error::other(shell.evaluation.diagnostic_line, execution_status, &message);
+    drop(shell.diagnostics().report(error));
 
-    Ok(crate::eval::Flow::END)
+    Ok(crate::evaluation::Flow::END)
 }
 
 // [spec:dash:def:exec.tryexec-fn]
 // [spec:dash:sem:exec.tryexec-fn]
 // [spec:posix:req:cmd.nonbuiltin-enoexec-script]
 // [spec:posix:req:cmd.nonbuiltin-slash-enoexec-script]
-fn tryexec(
+fn try_external_candidate(
     command: &OsStr,
     arguments: &[OsString],
     env: &[(OsString, OsString)],
@@ -388,6 +390,8 @@ impl<'a> PathCursor<'a> {
 
     // [spec:dash:def:exec.padvance-magic-fn]
     // [spec:dash:sem:exec.padvance-magic-fn]
+    // [spec:dash:def:exec.padvance-fn]
+    // [spec:dash:sem:exec.padvance-fn]
     pub fn advance(&mut self, name: &BStr) -> Option<PathAdvance> {
         let rest = self.remaining.take()?;
         let separator = nsh_platform::search_path_separator();
@@ -438,18 +442,11 @@ pub struct PathAdvance {
     pub option: Option<BString>,
 }
 
-// [spec:dash:def:exec.padvance-fn]
-// [spec:dash:sem:exec.padvance-fn]
-#[inline]
-pub fn padvance(cursor: &mut PathCursor<'_>, name: &BStr) -> Option<PathAdvance> {
-    cursor.advance(name)
-}
-
 /*** Command hashing code ***/
 
 // [spec:dash:def:exec.test-exec-fn]
 // [spec:dash:sem:exec.test-exec-fn]
-fn test_exec(fullname: &[u8], metadata: &nsh_platform::FileMetadata) -> bool {
+fn is_executable_candidate(full_path: &[u8], metadata: &nsh_platform::FileMetadata) -> bool {
     if metadata.kind != nsh_platform::FileKind::Regular {
         return false;
     }
@@ -457,7 +454,7 @@ fn test_exec(fullname: &[u8], metadata: &nsh_platform::FileMetadata) -> bool {
     if (metadata.mode & 0o111) != 0o111 &&
         /* HAVE_FACCESSAT; the non-faccessat build uses test_access(statb, X_OK) */
         !crate::builtins::test::test_file_access(
-            fullname.as_bstr(),
+            full_path.as_bstr(),
             nsh_platform::AccessMode::EXEC_OK,
         )
     {
@@ -485,43 +482,43 @@ fn test_exec(fullname: &[u8], metadata: &nsh_platform::FileMetadata) -> bool {
 // [spec:posix:req:cmd.search-path-unsuccessful]
 // [spec:posix:req:cmd.search-name-with-slash]
 pub fn find_command(
-    sh: &mut crate::context::Shell,
+    shell: &mut crate::context::Shell,
     name: &BStr,
     entry: &mut Command,
     mut search: CommandSearch,
     path: &BStr,
-) -> Result<crate::eval::Flow, Error> {
-    let dialect = sh.options.dialect();
-    sh.commands.ensure_dispatch(dialect);
+) -> Result<crate::evaluation::Flow, Error> {
+    let dialect = shell.options.dialect();
+    shell.commands.ensure_dispatch(dialect);
 
     /* If name contains a slash, don't use PATH or hash table */
     if nsh_platform::shell_path_has_separator(name) {
         if search.check_absolute {
-            let environment = crate::var::environment(sh)
-                .map_err(|error| native_string_error(sh, name, &error))?;
+            let environment = crate::variables::environment(shell)
+                .map_err(|error| native_string_error(shell, name, &error))?;
             let native = name
                 .try_to_path_buf()
-                .map_err(|error| native_string_error(sh, name, &error))?;
+                .map_err(|error| native_string_error(shell, name, &error))?;
             let resolved = nsh_platform::resolve_command_path(&native, &environment);
             let resolved_bytes = resolved.to_shell_bytes();
             let executable = nsh_platform::path_metadata(&resolved, true)
-                .is_ok_and(|metadata| test_exec(&resolved_bytes, &metadata));
+                .is_ok_and(|metadata| is_executable_candidate(&resolved_bytes, &metadata));
             if !executable {
                 *entry = Command::Unknown;
-                return Ok(crate::eval::Flow::Done((0).into()));
+                return Ok(crate::evaluation::Flow::Done((0).into()));
             }
         }
         *entry = Command::External { path_index: None };
-        return Ok(crate::eval::Flow::Done((0).into()));
+        return Ok(crate::evaluation::Flow::Done((0).into()));
     }
 
-    let configured_path = crate::var::pathval(sh);
+    let configured_path = crate::variables::path_value(shell);
     let mut update_table = path.as_bytes() == configured_path.as_slice();
     if !update_table {
         search = search.using_alternate_path();
     }
 
-    let mut cached = sh
+    let mut cached = shell
         .commands
         .map
         .get(name)
@@ -540,59 +537,62 @@ pub fn find_command(
         if conflicts_with_search {
             if search.regular_builtins_only && !matches!(command, Command::Function(_)) {
                 *entry = Command::Unknown;
-                return Ok(crate::eval::Flow::Done((0).into()));
+                return Ok(crate::evaluation::Flow::Done((0).into()));
             }
             update_table = false;
             cached = None;
         } else if !rehash {
             *entry = command.clone();
-            return Ok(crate::eval::Flow::Done((0).into()));
+            return Ok(crate::evaluation::Flow::Done((0).into()));
         }
     }
 
-    let builtin_command = builtin(sh, name);
+    let builtin_command = builtin(shell, name);
     if let Some(command) = builtin_command
         && (command.attributes().is_regular()
             || search.alternate_path
-            || !sh.commands.builtin_location.is_some_and(|index| index > 0))
+            || !shell
+                .commands
+                .builtin_location
+                .is_some_and(|index| index > 0))
     {
         if update_table {
-            addcmdentry(&mut sh.commands, name, Command::Builtin(command));
+            cache_command(&mut shell.commands, name, Command::Builtin(command));
         }
         *entry = Command::Builtin(command);
-        return Ok(crate::eval::Flow::Done((0).into()));
+        return Ok(crate::evaluation::Flow::Done((0).into()));
     }
 
     if search.regular_builtins_only {
         *entry = Command::Unknown;
-        return Ok(crate::eval::Flow::Done((0).into()));
+        return Ok(crate::evaluation::Flow::Done((0).into()));
     }
 
-    let environment =
-        crate::var::environment(sh).map_err(|error| native_string_error(sh, name, &error))?;
+    let environment = crate::variables::environment(shell)
+        .map_err(|error| native_string_error(shell, name, &error))?;
     let previous: Option<usize> =
         cached
             .as_ref()
             .filter(|(_, rehash)| *rehash)
             .and_then(|(command, _)| match command {
-                Command::Builtin(_) => sh.commands.builtin_location,
+                Command::Builtin(_) => shell.commands.builtin_location,
                 Command::External { path_index } => *path_index,
                 _ => None,
             });
     let mut error = nsh_platform::platform_error(nsh_platform::PlatformErrorKind::NotFound);
     let mut cursor = PathCursor::new(path);
     let mut index = 0usize;
-    while let Some(candidate) = padvance(&mut cursor, name) {
+    while let Some(candidate) = cursor.advance(name) {
         let candidate_index = index;
         index += 1;
         if let Some(option) = &candidate.option {
             if option.first() == Some(&b'b') {
                 if let Some(command) = builtin_command {
                     if update_table {
-                        addcmdentry(&mut sh.commands, name, Command::Builtin(command));
+                        cache_command(&mut shell.commands, name, Command::Builtin(command));
                     }
                     *entry = Command::Builtin(command);
-                    return Ok(crate::eval::Flow::Done((0).into()));
+                    return Ok(crate::evaluation::Flow::Done((0).into()));
                 }
                 continue;
             }
@@ -601,24 +601,24 @@ pub fn find_command(
             }
         }
 
-        let fullname = candidate.path;
-        if nsh_platform::shell_path_is_absolute(&fullname)
+        let full_path = candidate.path;
+        if nsh_platform::shell_path_is_absolute(&full_path)
             && previous.is_some_and(|previous| candidate_index <= previous)
         {
             if previous.is_some_and(|previous| candidate_index < previous) {
                 continue;
             }
             if let Some((command, _)) = cached {
-                if let Some(stored) = sh.commands.map.get_mut(name) {
+                if let Some(stored) = shell.commands.map.get_mut(name) {
                     stored.rehash = false;
                 }
                 *entry = command;
-                return Ok(crate::eval::Flow::Done((0).into()));
+                return Ok(crate::evaluation::Flow::Done((0).into()));
             }
         }
 
-        let native = fullname.try_to_path_buf().map_err(|io_error| {
-            native_string_error(sh, BStr::new(fullname.as_slice()), &io_error)
+        let native = full_path.try_to_path_buf().map_err(|io_error| {
+            native_string_error(shell, BStr::new(full_path.as_slice()), &io_error)
         })?;
         let resolved = nsh_platform::resolve_command_path(&native, &environment);
         let resolved_bytes = resolved.to_shell_bytes();
@@ -633,34 +633,34 @@ pub fn find_command(
         };
 
         if candidate.option.is_some() {
-            let flow = crate::runtime::readcmdfile(sh, BStr::new(fullname.as_slice()))?;
-            if let exit @ crate::eval::Flow::Exit { .. } = flow {
+            let flow = crate::runtime::read_command_file(shell, BStr::new(full_path.as_slice()))?;
+            if let exit @ crate::evaluation::Flow::Exit { .. } = flow {
                 return Ok(exit);
             }
-            let Some(stored) = sh.commands.map.get_mut(name) else {
+            let Some(stored) = shell.commands.map.get_mut(name) else {
                 let mut message = name.to_vec();
                 message.extend_from_slice(b" not defined in ");
-                message.extend_from_slice(&fullname);
-                return Err(sh.diagnostics().sh_error_value(&message));
+                message.extend_from_slice(&full_path);
+                return Err(shell.diagnostics().shell_error(&message));
             };
             if !matches!(stored.command, Command::Function(_)) {
                 let mut message = name.to_vec();
                 message.extend_from_slice(b" not defined in ");
-                message.extend_from_slice(&fullname);
-                return Err(sh.diagnostics().sh_error_value(&message));
+                message.extend_from_slice(&full_path);
+                return Err(shell.diagnostics().shell_error(&message));
             }
             stored.rehash = false;
             *entry = stored.command.clone();
-            return Ok(crate::eval::Flow::Done((0).into()));
+            return Ok(crate::evaluation::Flow::Done((0).into()));
         }
 
         error = nsh_platform::platform_error(nsh_platform::PlatformErrorKind::PermissionDenied);
-        if !test_exec(&resolved_bytes, &metadata) {
+        if !is_executable_candidate(&resolved_bytes, &metadata) {
             continue;
         }
         if update_table {
-            addcmdentry(
-                &mut sh.commands,
+            cache_command(
+                &mut shell.commands,
                 name,
                 Command::External {
                     path_index: Some(candidate_index),
@@ -670,35 +670,35 @@ pub fn find_command(
         *entry = Command::External {
             path_index: Some(candidate_index),
         };
-        return Ok(crate::eval::Flow::Done((0).into()));
+        return Ok(crate::evaluation::Flow::Done((0).into()));
     }
 
     if cached.is_some() && update_table {
-        delete_cmd_entry(&mut sh.interrupt_deferral, &mut sh.commands, name);
+        remove_command_entry(&mut shell.interrupt_deferral, &mut shell.commands, name);
     }
     if search.report_errors {
         let mut message = name.to_vec();
         message.extend_from_slice(b": ");
-        message.extend_from_slice(&crate::error::errmsg(
-            &sh.locale,
+        message.extend_from_slice(&crate::error::error_message(
+            &shell.locale,
             &error,
             Operation::Execute,
         ));
-        sh.diagnostics().sh_warnx(&message);
+        shell.diagnostics().shell_warning(&message);
     }
     *entry = Command::Unknown;
-    Ok(crate::eval::Flow::Done((0).into()))
+    Ok(crate::evaluation::Flow::Done((0).into()))
 }
 
 fn native_string_error(
-    sh: &mut crate::context::Shell,
+    shell: &mut crate::context::Shell,
     subject: &BStr,
     error: &std::io::Error,
 ) -> Error {
     let mut message = subject.to_vec();
     message.extend_from_slice(b": ");
-    message.extend_from_slice(sh.locale.error_message(error).as_bytes());
-    sh.diagnostics().sh_error_value(&message)
+    message.extend_from_slice(shell.locale.error_message(error).as_bytes());
+    shell.diagnostics().shell_error(&message)
 }
 
 /*
@@ -707,8 +707,8 @@ fn native_string_error(
 
 // [spec:dash:def:exec.find-builtin-fn]
 // [spec:dash:sem:exec.find-builtin-fn]
-pub fn builtin(sh: &crate::context::Shell, name: &BStr) -> Option<&'static BuiltinSpec> {
-    if sh.options.dialect() == crate::options::Dialect::Bash
+pub fn builtin(shell: &crate::context::Shell, name: &BStr) -> Option<&'static BuiltinSpec> {
+    if shell.options.dialect() == crate::options::Dialect::Bash
         && let Ok(index) =
             crate::builtins::BASH_BUILTINS.binary_search_by(|cmd| cmd.name().cmp(name))
     {
@@ -727,13 +727,13 @@ pub fn builtin(sh: &crate::context::Shell, name: &BStr) -> Option<&'static Built
 
 // [spec:dash:def:exec.hashcd-fn]
 // [spec:dash:sem:exec.hashcd-fn]
-pub fn hashcd(sh: &mut crate::context::Shell) {
+pub fn invalidate_cache_after_directory_change(shell: &mut crate::context::Shell) {
     /* Copied out for the same reason `clearcmdentry` copies it: the
      * walk below holds the table borrowed. */
-    let builtin_location = sh.commands.builtin_location;
-    for cmdp in sh.commands.map.values_mut() {
-        if cmdp.path_dependent(builtin_location) {
-            cmdp.rehash = true;
+    let builtin_location = shell.commands.builtin_location;
+    for command_entry in shell.commands.map.values_mut() {
+        if command_entry.path_dependent(builtin_location) {
+            command_entry.rehash = true;
         }
     }
 }
@@ -747,16 +747,16 @@ pub fn hashcd(sh: &mut crate::context::Shell) {
 
 // [spec:dash:def:exec.changepath-fn]
 // [spec:dash:sem:exec.changepath-fn]
-pub fn changepath(
+pub fn update_search_path(
     interrupts: &mut crate::error::InterruptDeferral,
-    commands: &mut CmdTable,
+    commands: &mut CommandTable,
     newval: &BStr,
 ) {
     let builtin_location = newval
         .split(|&byte| byte == nsh_platform::search_path_separator())
         .position(|component| component.starts_with(b"%builtin"));
     commands.builtin_location = builtin_location;
-    clearcmdentry(interrupts, commands);
+    clear_command_cache(interrupts, commands);
 }
 
 /*
@@ -766,15 +766,15 @@ pub fn changepath(
 
 // [spec:dash:def:exec.clearcmdentry-fn]
 // [spec:dash:sem:exec.clearcmdentry-fn]
-pub(crate) fn clearcmdentry(
+pub(crate) fn clear_command_cache(
     interrupts: &mut crate::error::InterruptDeferral,
-    commands: &mut CmdTable,
+    commands: &mut CommandTable,
 ) {
     interrupts.run_with(commands, |commands| {
         let builtin_location = commands.builtin_location;
         commands
             .map
-            .retain(|_, cmdp| !cmdp.path_dependent(builtin_location));
+            .retain(|_, command_entry| !command_entry.path_dependent(builtin_location));
     });
 }
 
@@ -786,17 +786,17 @@ pub(crate) fn clearcmdentry(
 
 // [spec:dash:def:exec.cmdlookup-fn]
 // [spec:dash:sem:exec.cmdlookup-fn]
-pub(crate) fn cmdlookup<'a>(
-    commands: &'a mut CmdTable,
+pub(crate) fn lookup_cached_command<'a>(
+    commands: &'a mut CommandTable,
     name: &BStr,
     add: bool,
-) -> Option<&'a mut tblentry> {
+) -> Option<&'a mut CommandEntry> {
     if add {
         Some(
             commands
                 .map
                 .entry(name.to_owned())
-                .or_insert_with(|| tblentry {
+                .or_insert_with(|| CommandEntry {
                     command: Command::Unknown,
                     rehash: false,
                 }),
@@ -812,9 +812,9 @@ pub(crate) fn cmdlookup<'a>(
 
 // [spec:dash:def:exec.delete-cmd-entry-fn]
 // [spec:dash:sem:exec.delete-cmd-entry-fn]
-pub(crate) fn delete_cmd_entry(
+pub(crate) fn remove_command_entry(
     interrupts: &mut crate::error::InterruptDeferral,
-    commands: &mut CmdTable,
+    commands: &mut CommandTable,
     name: &BStr,
 ) {
     interrupts.run_with(commands, |commands| {
@@ -829,10 +829,11 @@ pub(crate) fn delete_cmd_entry(
 
 // [spec:dash:def:exec.addcmdentry-fn]
 // [spec:dash:sem:exec.addcmdentry-fn]
-fn addcmdentry(commands: &mut CmdTable, name: &BStr, command: Command) {
-    let cmdp = cmdlookup(commands, name, true).expect("adding returns an entry");
-    cmdp.command = command;
-    cmdp.rehash = false;
+fn cache_command(commands: &mut CommandTable, name: &BStr, command: Command) {
+    let command_entry =
+        lookup_cached_command(commands, name, true).expect("adding returns an entry");
+    command_entry.command = command;
+    command_entry.rehash = false;
 }
 
 /*
@@ -841,13 +842,13 @@ fn addcmdentry(commands: &mut CmdTable, name: &BStr, command: Command) {
 
 // [spec:dash:def:exec.defun-fn]
 // [spec:dash:sem:exec.defun-fn]
-pub fn defun(
+pub fn define_function(
     interrupts: &mut crate::error::InterruptDeferral,
-    commands: &mut CmdTable,
+    commands: &mut CommandTable,
     definition: &FunctionDefinition,
 ) {
     interrupts.run_with(commands, |commands| {
-        addcmdentry(
+        cache_command(
             commands,
             definition.name.as_bstr(),
             Command::Function(definition.clone()),
@@ -861,15 +862,15 @@ pub fn defun(
 
 // [spec:dash:def:exec.unsetfunc-fn]
 // [spec:dash:sem:exec.unsetfunc-fn]
-pub fn unsetfunc(
+pub fn unset_function(
     interrupts: &mut crate::error::InterruptDeferral,
-    commands: &mut CmdTable,
+    commands: &mut CommandTable,
     name: &BStr,
 ) {
-    if cmdlookup(commands, name, false)
-        .is_some_and(|cmdp| matches!(cmdp.command, Command::Function(_)))
+    if lookup_cached_command(commands, name, false)
+        .is_some_and(|command_entry| matches!(command_entry.command, Command::Function(_)))
     {
-        delete_cmd_entry(interrupts, commands, name);
+        remove_command_entry(interrupts, commands, name);
     }
 }
 
@@ -888,34 +889,34 @@ mod tests {
     // [spec:dash:sem:exec.changepath-fn/test]
     #[test]
     fn changepath_files_the_builtin_slot() {
-        let _g = crate::testutil::lock();
+        let _g = crate::test_support::lock();
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned;
+        let shell = &mut owned;
 
         let separator = [nsh_platform::search_path_separator()];
         let first = [b"/bin".as_slice(), b"%builtin", b"/usr/bin"].join(separator.as_slice());
-        changepath(
-            &mut sh.interrupt_deferral,
-            &mut sh.commands,
+        update_search_path(
+            &mut shell.interrupt_deferral,
+            &mut shell.commands,
             BStr::new(&first),
         );
-        assert_eq!(sh.commands.builtin_location, Some(1));
+        assert_eq!(shell.commands.builtin_location, Some(1));
 
         let second = [b"%builtin".as_slice(), b"/bin"].join(separator.as_slice());
-        changepath(
-            &mut sh.interrupt_deferral,
-            &mut sh.commands,
+        update_search_path(
+            &mut shell.interrupt_deferral,
+            &mut shell.commands,
             BStr::new(&second),
         );
-        assert_eq!(sh.commands.builtin_location, Some(0));
+        assert_eq!(shell.commands.builtin_location, Some(0));
 
         let third = [b"/bin".as_slice(), b"/usr/bin"].join(separator.as_slice());
-        changepath(
-            &mut sh.interrupt_deferral,
-            &mut sh.commands,
+        update_search_path(
+            &mut shell.interrupt_deferral,
+            &mut shell.commands,
             BStr::new(&third),
         );
-        assert_eq!(sh.commands.builtin_location, None);
+        assert_eq!(shell.commands.builtin_location, None);
     }
 
     /// What `clearcmdentry` keeps, which is the predicate the walk runs
@@ -927,34 +928,34 @@ mod tests {
     // [spec:dash:sem:exec.clearcmdentry-fn/test]
     #[test]
     fn clearing_drops_only_path_dependent_entries() {
-        let _g = crate::testutil::lock();
+        let _g = crate::test_support::lock();
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned;
+        let shell = &mut owned;
 
         let external = BStr::new(b"Texternal");
         let unknown = BStr::new(b"Tunknown");
-        addcmdentry(
-            &mut sh.commands,
+        cache_command(
+            &mut shell.commands,
             external,
             Command::External {
                 path_index: Some(0),
             },
         );
-        cmdlookup(&mut sh.commands, unknown, true);
+        lookup_cached_command(&mut shell.commands, unknown, true);
 
-        let e = sh.commands.get(external).expect("external entry");
-        assert!(sh.commands.path_dependent(e));
-        let u = sh.commands.get(unknown).expect("unknown entry");
-        assert!(!sh.commands.path_dependent(u));
+        let error = shell.commands.get(external).expect("external entry");
+        assert!(shell.commands.path_dependent(error));
+        let u = shell.commands.get(unknown).expect("unknown entry");
+        assert!(!shell.commands.path_dependent(u));
 
-        clearcmdentry(&mut sh.interrupt_deferral, &mut sh.commands);
+        clear_command_cache(&mut shell.interrupt_deferral, &mut shell.commands);
 
         assert!(
-            sh.commands.get(external).is_none(),
+            shell.commands.get(external).is_none(),
             "an external command does not survive a PATH change"
         );
         assert!(
-            sh.commands.get(unknown).is_some(),
+            shell.commands.get(unknown).is_some(),
             "an entry naming nothing has nothing to invalidate"
         );
     }
@@ -962,16 +963,16 @@ mod tests {
     // [spec:dash:sem:exec.find-builtin-fn/test]
     #[test]
     fn builtin_lookup_round_trips() {
-        let sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let shell = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         for expected in crate::builtins::BUILTINS {
             assert!(core::ptr::eq(
-                builtin(&sh, expected.name()).expect("registered builtin"),
+                builtin(&shell, expected.name()).expect("registered builtin"),
                 expected,
             ));
         }
 
         for absent in [b"" as &[u8], b"/", b"alia", b"aliasx", b"waitx", b"zz"] {
-            assert!(builtin(&sh, BStr::new(absent)).is_none());
+            assert!(builtin(&shell, BStr::new(absent)).is_none());
         }
     }
 
@@ -981,11 +982,11 @@ mod tests {
     /// `[dec:nsh:printf-is-parsed-not-interpreted]`.
     #[test]
     fn printf_is_a_builtin() {
-        let sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let found = builtin(&sh, BStr::new(b"printf")).expect("printf builtin");
+        let shell = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let found = builtin(&shell, BStr::new(b"printf")).expect("printf builtin");
         assert_eq!(found.id(), crate::builtins::BuiltinId::Printf);
         /* `echo` shares printf.c with it and is the neighbouring row. */
-        assert!(builtin(&sh, BStr::new(b"echo")).is_some());
+        assert!(builtin(&shell, BStr::new(b"echo")).is_some());
     }
 
     /// The table is binary-searched, so its order is load-bearing —

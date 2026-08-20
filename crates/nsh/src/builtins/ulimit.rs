@@ -2,8 +2,8 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::eval::Flow;
-use crate::output::Dest;
+use crate::evaluation::Flow;
+use crate::output::OutputDestination;
 use bstr::BStr;
 use nsh_platform::{LimitResource, ResourceLimit};
 
@@ -124,7 +124,7 @@ impl LimitSelection {
 // [spec:dash:sem:miscbltin.printlim-fn]
 // [spec:posix:req:builtin.ulimit.stdout-single-limit-format]
 fn print_limit(
-    sh: &mut Shell,
+    shell: &mut Shell,
     selection: LimitSelection,
     values: ResourceLimit,
     limit: Limit,
@@ -135,22 +135,22 @@ fn print_limit(
         values.maximum
     };
     match value {
-        None => sh.write_output(Dest::Stdout, b"unlimited\n"),
+        None => shell.write_output(OutputDestination::Stdout, b"unlimited\n"),
         Some(value) => {
             let signed = (value / limit.factor) as i64;
-            sh.write_output_fmt(Dest::Stdout, format_args!("{signed}\n"))
+            shell.write_output_fmt(OutputDestination::Stdout, format_args!("{signed}\n"))
         }
     }
 }
 
 // [spec:posix:req:builtin.ulimit.unlimited-value]
 // [spec:posix:def:builtin.ulimit.operand-newlimit]
-fn parse_value(sh: &mut Shell, text: &BStr, factor: u64) -> Result<Option<u64>, Error> {
+fn parse_value(shell: &mut Shell, text: &BStr, factor: u64) -> Result<Option<u64>, Error> {
     if text == b"unlimited" {
         return Ok(None);
     }
     if text.is_empty() || !text.iter().all(u8::is_ascii_digit) {
-        return Err(sh.diagnostics().sh_error_value(b"bad number"));
+        return Err(shell.diagnostics().shell_error(b"bad number"));
     }
     let value = text.iter().fold(0_u64, |value, digit| {
         value.wrapping_mul(10).wrapping_add((digit - b'0') as u64)
@@ -178,12 +178,12 @@ fn parse_value(sh: &mut Shell, text: &BStr, factor: u64) -> Result<Option<u64>, 
 // [spec:posix:req:builtin.ulimit.stderr]
 // [spec:posix:req:builtin.ulimit.interfaces]
 // [spec:posix:req:builtin.ulimit.exit-status]
-pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut selection = LimitSelection::BOTH;
     let mut all = false;
     let mut selected = b'f';
     let mut options = crate::options::Options::new(args);
-    while let Some(option) = options.next(&mut sh.diagnostics(), b"HSatfdscmlpnvwr")? {
+    while let Some(option) = options.next(&mut shell.diagnostics(), b"HSatfdscmlpnvwr")? {
         match option {
             b'H' => selection = LimitSelection::MAXIMUM,
             b'S' => selection = LimitSelection::CURRENT,
@@ -197,7 +197,7 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         .expect("the option scanner and limit table agree");
     let operands = options.operands();
     if (all && !operands.is_empty()) || operands.len() > 1 {
-        return Err(sh.diagnostics().sh_error_value(b"too many arguments"));
+        return Err(shell.diagnostics().shell_error(b"too many arguments"));
     }
 
     if all {
@@ -208,8 +208,8 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             label.extend_from_slice(b" (-");
             label.push(limit.option);
             label.extend_from_slice(b") ");
-            sh.write_output(Dest::Stdout, &label)?;
-            print_limit(sh, selection, values, limit)?;
+            shell.write_output(OutputDestination::Stdout, &label)?;
+            print_limit(shell, selection, values, limit)?;
         }
         return Ok(Flow::Done((0).into()));
     }
@@ -217,7 +217,7 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut values =
         nsh_platform::resource_limit(limit.resource).expect("a supported resource has a limit");
     if let Some(argument) = operands.first() {
-        let value = parse_value(sh, argument, limit.factor)?;
+        let value = parse_value(shell, argument, limit.factor)?;
         if selection.maximum {
             values.maximum = value;
         }
@@ -225,11 +225,14 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             values.current = value;
         }
         if let Err(error) = nsh_platform::set_resource_limit(limit.resource, values) {
-            let message = format!("error setting limit ({})", sh.locale.error_message(&error));
-            return Err(sh.diagnostics().sh_error_value(message.as_bytes()));
+            let message = format!(
+                "error setting limit ({})",
+                shell.locale.error_message(&error)
+            );
+            return Err(shell.diagnostics().shell_error(message.as_bytes()));
         }
     } else {
-        print_limit(sh, selection, values, limit)?;
+        print_limit(shell, selection, values, limit)?;
     }
     Ok(Flow::Done((0).into()))
 }

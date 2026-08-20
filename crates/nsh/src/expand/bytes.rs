@@ -14,7 +14,7 @@ pub(super) fn at_signed(bytes: &[u8], index: isize) -> u8 {
         .map_or(0, |index| at(bytes, index))
 }
 
-impl super::strlist {
+impl super::ExpandedField {
     /// The shell-visible field bytes.
     pub fn as_bstr(&self) -> &BStr {
         BStr::new(&self.text)

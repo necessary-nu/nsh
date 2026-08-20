@@ -25,7 +25,7 @@
 use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 use crate::status::Signal;
-use crate::trap::NSIG;
+use crate::trap::SIGNAL_SLOT_COUNT;
 
 /// What `onsig` may read and write without a receiver.
 pub struct SignalSink {
@@ -39,9 +39,9 @@ pub struct SignalSink {
     ///
     /// Written only by [`crate::trap::TrapTable::set`], and only with
     /// signals blocked: see [`SignalsBlocked`].
-    trapped: [AtomicBool; NSIG],
+    trapped: [AtomicBool; SIGNAL_SLOT_COUNT],
     /// Signals awaiting their trap action, indexed by `signo - 1`.
-    caught: [AtomicBool; NSIG - 1],
+    caught: [AtomicBool; SIGNAL_SLOT_COUNT - 1],
     /// The most recently delivered trapped signal, or zero.
     pending: AtomicI32,
     /// Whether SIGCHLD has arrived since the last reap attempt.
@@ -51,8 +51,8 @@ pub struct SignalSink {
 }
 
 static SINK: SignalSink = SignalSink {
-    trapped: [const { AtomicBool::new(false) }; NSIG],
-    caught: [const { AtomicBool::new(false) }; NSIG - 1],
+    trapped: [const { AtomicBool::new(false) }; SIGNAL_SLOT_COUNT],
+    caught: [const { AtomicBool::new(false) }; SIGNAL_SLOT_COUNT - 1],
     pending: AtomicI32::new(0),
     child_pending: AtomicBool::new(false),
     interrupt_pending: AtomicBool::new(false),
@@ -124,8 +124,8 @@ impl SignalSink {
     /// disagreeing is observable in both directions — see
     /// [`crate::trap::TrapTable::set`], which is that place.
     #[inline]
-    pub(crate) fn set_trapped(&self, signo: usize, to: bool) {
-        self.trapped[signo].store(to, Ordering::Relaxed);
+    pub(crate) fn set_trapped(&self, signal_number: usize, to: bool) {
+        self.trapped[signal_number].store(to, Ordering::Relaxed);
     }
 
     /// Deliver a signal to the shell. The only thing a host's handler may

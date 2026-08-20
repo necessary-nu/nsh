@@ -311,7 +311,11 @@ fn character_end(locale: &nsh_platform::Locale, bytes: &[u8], at: usize) -> usiz
 }
 
 /// Compatibility entry for callers whose pattern contains no quoted bytes.
-pub(crate) fn pmatch_slices(locale: &nsh_platform::Locale, pattern: &[u8], subject: &[u8]) -> bool {
+pub(crate) fn pattern_matches(
+    locale: &nsh_platform::Locale,
+    pattern: &[u8],
+    subject: &[u8],
+) -> bool {
     Pattern::unquoted(BString::from(pattern)).matches(locale, subject)
 }
 
@@ -320,7 +324,7 @@ mod tests {
     use super::*;
 
     fn matches(locale: &nsh_platform::Locale, pattern: &[u8], subject: &[u8]) -> bool {
-        pmatch_slices(locale, pattern, subject)
+        pattern_matches(locale, pattern, subject)
     }
 
     #[test]

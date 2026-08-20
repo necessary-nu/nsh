@@ -12,17 +12,17 @@ use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
 use nsh_platform::ShellBytesExt as _;
 
-use crate::eval::Flow;
-use crate::exec::PathCursor;
-use crate::runtime::cmdloop;
+use crate::evaluation::Flow;
+use crate::execution::PathCursor;
+use crate::runtime::command_loop;
 
 // [spec:dash:def:main.find-dot-file-fn]
 // [spec:dash:sem:main.find-dot-file-fn]
 // [spec:posix:req:builtin.dot.path-search]
 /// The C returns a `stalloc`'d copy of the candidate. Here the caller owns
 /// the returned bytes directly, for exactly the same lifetime.
-fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Option<BString> {
-    let path_value = crate::var::pathval(sh);
+fn find_dot_file(shell: &mut crate::context::Shell, basename: &BStr) -> Option<BString> {
+    let path_value = crate::variables::path_value(shell);
 
     /* Explicit paths do not use PATH, but they still have to name a
      * readable regular file. Classifying a missing explicit operand here
@@ -38,9 +38,9 @@ fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Option<BStr
     }
 
     let mut path = PathCursor::new(path_value.as_slice().as_bstr());
-    while let Some(candidate) = crate::exec::padvance(&mut path, basename) {
-        let fullname = candidate.path.as_bstr();
-        let Ok(native) = fullname.try_to_path_buf() else {
+    while let Some(candidate) = path.advance(basename) {
+        let full_path = candidate.path.as_bstr();
+        let Ok(native) = full_path.try_to_path_buf() else {
             continue;
         };
         let regular_file = nsh_platform::path_is_file(&native);
@@ -50,7 +50,7 @@ fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Option<BStr
             && regular_file
             && readable
         {
-            return Some(fullname.to_owned());
+            return Some(full_path.to_owned());
         }
     }
     None
@@ -64,51 +64,51 @@ fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Option<BStr
 // [spec:posix:req:builtin.dot.stderr]
 // [spec:posix:req:builtin.dot.interfaces]
 // [spec:posix:req:builtin.dot.exit-status]
-pub fn dotcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    dotcmd_with_missing_status(sh, args, crate::status::ExitStatus::FAILURE)
+pub fn run_dot(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+    run_dot_with_missing_status(shell, args, crate::status::ExitStatus::FAILURE)
 }
 
 // [spec:nsh:req:compat.smoosh.source-builtin]
-pub fn sourcecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    dotcmd_with_missing_status(sh, args, crate::status::ExitStatus::FAILURE)
+pub fn run_source(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+    run_dot_with_missing_status(shell, args, crate::status::ExitStatus::FAILURE)
 }
 
-fn dotcmd_with_missing_status(
-    sh: &mut Shell,
+fn run_dot_with_missing_status(
+    shell: &mut Shell,
     args: &[&BStr],
     missing_status: crate::status::ExitStatus,
 ) -> Result<Flow, Error> {
     let mut status = crate::status::ExitStatus::SUCCESS;
 
-    let mut opts = crate::options::Options::new(args);
-    opts.next(&mut sh.diagnostics(), b"")?;
+    let mut option_scan = crate::options::Options::new(args);
+    option_scan.next(&mut shell.diagnostics(), b"")?;
 
-    if let Some(name) = opts.operands().first() {
-        let Some(fullname) = find_dot_file(sh, name) else {
+    if let Some(name) = option_scan.operands().first() {
+        let Some(full_path) = find_dot_file(shell, name) else {
             let mut message = name.to_vec();
             message.extend_from_slice(b": not found");
-            return Err(sh
+            return Err(shell
                 .diagnostics()
                 .builtin_error_value(missing_status, &message));
         };
 
-        let outcome = crate::resource::with_resources(sh, |sh, _resources| {
-            crate::input::setinputfile(
-                sh,
-                fullname.as_slice().as_bstr(),
+        let outcome = crate::resource::with_resources(shell, |shell, _resources| {
+            crate::input::set_input_file(
+                shell,
+                full_path.as_slice().as_bstr(),
                 crate::input::InputFileOptions::DOT,
             )?;
             /* `evalbltin`'s epilogue reads `commandname` after this returns.
              * The owned path remains valid independently of the input frame. */
-            sh.eval.commandname = Some(fullname);
+            shell.evaluation.command_name = Some(full_path);
 
             // A dot script is a fresh lexical command context for loop control:
             // loops active in its caller do not enclose commands read here.
             // [spec:nsh:req:compat.smoosh.control-boundaries]
-            let caller_loopnest = sh.eval.loopnest;
-            sh.eval.loopnest = 0;
-            let outcome = cmdloop(sh, false);
-            sh.eval.loopnest = caller_loopnest;
+            let caller_loopnest = shell.evaluation.loop_depth;
+            shell.evaluation.loop_depth = 0;
+            let outcome = command_loop(shell, false);
+            shell.evaluation.loop_depth = caller_loopnest;
             outcome
         });
         match outcome? {

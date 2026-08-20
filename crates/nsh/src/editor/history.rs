@@ -501,7 +501,7 @@ fn shell_history_pattern_matches(
     }
     expression.extend_from_slice(pattern);
     expression.push(b'*');
-    crate::pattern::pmatch_slices(locale, &expression, &line)
+    crate::pattern::pattern_matches(locale, &expression, &line)
 }
 
 fn is_history_space(unit: &TextUnit) -> bool {

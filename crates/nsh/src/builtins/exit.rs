@@ -12,7 +12,7 @@
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::eval::Flow;
+use crate::evaluation::Flow;
 use bstr::BStr;
 
 // [spec:dash:def:main.exitcmd-fn]
@@ -26,21 +26,24 @@ use bstr::BStr;
 // [spec:posix:req:builtin.exit.stderr]
 // [spec:posix:req:builtin.exit.interfaces]
 // [spec:posix:sem:builtin.exit.exit-status]
-pub fn exitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    if crate::jobs::stoppedjobs(sh)? {
+pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
+    if crate::jobs::has_stopped_jobs(shell)? {
         return Ok(Flow::Done((0).into()));
     }
 
     let status = match args.get(1) {
         Some(status) => crate::status::ExitStatus::from_code(crate::number::parse_nonnegative(
-            &mut sh.diagnostics(),
+            &mut shell.diagnostics(),
             status,
         )?),
         // POSIX gives operand-less `exit` the status immediately preceding
         // a trap action when the command directly ends that action. A
         // subshell clears this context, so the Smoosh nested-action case
         // still uses the subshell's then-current status.
-        None => sh.eval.trap_default_exit_status.unwrap_or(sh.status),
+        None => shell
+            .evaluation
+            .trap_default_exit_status
+            .unwrap_or(shell.status),
     };
 
     // Carrying the selected value keeps nested traps independent.
