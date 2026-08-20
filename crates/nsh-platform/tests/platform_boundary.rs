@@ -15,6 +15,15 @@ const FORBIDDEN_SOURCE_FRAGMENTS: &[&str] = &[
     "cfg!(target_vendor",
 ];
 
+const RAW_ERROR_API_FRAGMENTS: &[&str] = &[
+    "pub fn error_message_code",
+    "pub fn not_found_error_code",
+    "pub fn permission_denied_error_code",
+    "pub const BAD_DESCRIPTOR",
+    "pub fn path_error_is(code",
+    "pub fn command_exec_failure_status(code",
+];
+
 fn inspect_tree(path: &Path, violations: &mut Vec<String>) {
     for entry in std::fs::read_dir(path).unwrap() {
         let path = entry.unwrap().path();
@@ -56,4 +65,38 @@ fn shell_crates_do_not_bypass_the_platform_boundary() {
         "platform boundary violations:\n{}",
         violations.join("\n")
     );
+}
+
+// [spec:nsh:req:idiom.platform-errors/test]
+#[test]
+fn platform_errors_are_typed() {
+    let missing = nsh_platform::platform_error(nsh_platform::PlatformErrorKind::NotFound);
+    let denied = nsh_platform::platform_error(nsh_platform::PlatformErrorKind::PermissionDenied);
+    let bad_descriptor =
+        nsh_platform::platform_error(nsh_platform::PlatformErrorKind::BadDescriptor);
+
+    assert!(nsh_platform::is_path_error(
+        &missing,
+        nsh_platform::PathErrorKind::NotFound,
+    ));
+    assert_eq!(missing.kind(), std::io::ErrorKind::NotFound);
+    assert_eq!(denied.kind(), std::io::ErrorKind::PermissionDenied);
+    assert!(nsh_platform::is_bad_descriptor_error(&bad_descriptor));
+    assert_eq!(nsh_platform::command_exec_failure_status(&missing), 127);
+    assert_eq!(nsh_platform::command_exec_failure_status(&denied), 126);
+
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for source in [
+        "crates/nsh-platform/src/locale.rs",
+        "crates/nsh-platform/src/unix.rs",
+        "crates/nsh-platform/src/windows.rs",
+    ] {
+        let text = std::fs::read_to_string(workspace.join(source)).unwrap();
+        for fragment in RAW_ERROR_API_FRAGMENTS {
+            assert!(
+                !text.contains(fragment),
+                "{source} exposes raw error API fragment {fragment:?}",
+            );
+        }
+    }
 }

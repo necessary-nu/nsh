@@ -243,20 +243,24 @@ impl CmdTable {
 // [spec:posix:req:cmd.nonbuiltin-slash-not-found]
 // [spec:posix:req:cmd.std-fd-closed]
 // [spec:posix:req:cmd.std-fd-nonconforming-environment]
+// [spec:nsh:req:idiom.platform-errors]
 pub fn shellexec(
     sh: &mut crate::context::Shell,
     argv: &[&BStr],
     path: &BStr,
     mut idx: c_int,
 ) -> Result<crate::eval::Flow, crate::error::Error> {
-    let e: c_int;
     let command = argv.first().expect("shellexec needs a command name");
 
     /* A library shell may fork children, but it may not replace the host
      * process itself without the host's explicit grant. A forked shell owns
      * the child terminus regardless of which host policy its parent used. */
     if sh.shell_level == 0 && !sh.host.may_replace_process() {
-        return exec_failure(sh, command, nsh_platform::permission_denied_error_code());
+        return exec_failure(
+            sh,
+            command,
+            nsh_platform::platform_error(nsh_platform::PlatformErrorKind::PermissionDenied),
+        );
     }
 
     /* The C's `environment()` leaves its array in the stack allocator; ours
@@ -275,19 +279,14 @@ pub fn shellexec(
         Err(error) => return native_exec_failure(sh, command, &error),
     };
     if let Err(error) = sh.fds.materialize() {
-        return exec_failure(
-            sh,
-            command,
-            error
-                .raw_os_error()
-                .unwrap_or_else(nsh_platform::permission_denied_error_code),
-        );
+        return exec_failure(sh, command, error);
     }
-    if nsh_platform::shell_path_has_separator(command) {
+    let error = if nsh_platform::shell_path_has_separator(command) {
         let resolved = nsh_platform::resolve_command_path(Path::new(&arguments[0]), &envv);
-        e = tryexec(resolved.as_os_str(), &arguments, &envv);
+        tryexec(resolved.as_os_str(), &arguments, &envv)
     } else {
-        let mut se: c_int = nsh_platform::not_found_error_code();
+        let mut search_error =
+            nsh_platform::platform_error(nsh_platform::PlatformErrorKind::NotFound);
         let mut cursor = PathCursor::new(path);
         while let Some(candidate) = padvance(&mut cursor, command) {
             idx -= 1;
@@ -298,18 +297,18 @@ pub fn shellexec(
                 };
                 let candidate = nsh_platform::resolve_command_path(&candidate, &envv);
                 let candidate_error = tryexec(candidate.as_os_str(), &arguments, &envv);
-                if !nsh_platform::path_error_is(
-                    candidate_error,
+                if !nsh_platform::is_path_error(
+                    &candidate_error,
                     nsh_platform::PathErrorKind::NotFound,
                 ) {
-                    se = candidate_error;
+                    search_error = candidate_error;
                 }
             }
         }
-        e = se;
-    }
+        search_error
+    };
 
-    exec_failure(sh, command, e)
+    exec_failure(sh, command, error)
 }
 
 fn native_exec_failure(
@@ -332,16 +331,15 @@ fn native_exec_failure(
 fn exec_failure(
     sh: &mut crate::context::Shell,
     command: &BStr,
-    error: c_int,
+    error: std::io::Error,
 ) -> Result<crate::eval::Flow, crate::error::Error> {
     /* Map to POSIX errors */
-    let exerrno = nsh_platform::command_exec_failure_status(error);
+    let exerrno = nsh_platform::command_exec_failure_status(&error);
     sh.status = exerrno;
-    /* TRACE(("shellexec failed for %s, errno %d, suppressint %d\n", ...)); */
     let mut message = Vec::new();
     message.extend_from_slice(command);
     message.extend_from_slice(b": ");
-    message.extend_from_slice(&crate::error::errmsg(&sh.locale, error, E_EXEC));
+    message.extend_from_slice(&crate::error::errmsg(&sh.locale, &error, E_EXEC));
     /* `exerror(EXEND, msg)`: text *and* control flow, which is why the
      * bridge took the code as a parameter rather than reading it off the
      * value. The text is written here, where dash writes it, and the value
@@ -361,7 +359,11 @@ fn exec_failure(
 // [spec:dash:sem:exec.tryexec-fn]
 // [spec:posix:req:cmd.nonbuiltin-enoexec-script]
 // [spec:posix:req:cmd.nonbuiltin-slash-enoexec-script]
-fn tryexec(command: &OsStr, arguments: &[OsString], env: &[(OsString, OsString)]) -> c_int {
+fn tryexec(
+    command: &OsStr,
+    arguments: &[OsString],
+    env: &[(OsString, OsString)],
+) -> std::io::Error {
     let error = nsh_platform::execute_program(command, &arguments, env);
     let shell = nsh_platform::fallback_shell();
     if nsh_platform::is_exec_format_error(&error) && command != shell {
@@ -369,11 +371,9 @@ fn tryexec(command: &OsStr, arguments: &[OsString], env: &[(OsString, OsString)]
         shell_arguments.push(shell.to_os_string());
         shell_arguments.push(command.to_os_string());
         shell_arguments.extend(arguments.iter().skip(1).cloned());
-        return nsh_platform::execute_program(shell, &shell_arguments, env)
-            .raw_os_error()
-            .unwrap_or(0);
+        return nsh_platform::execute_program(shell, &shell_arguments, env);
     }
-    error.raw_os_error().unwrap_or(0)
+    error
 }
 
 // [spec:dash:def:exec.legal-pathopt-fn]
@@ -620,7 +620,7 @@ pub fn find_command(
             Command::Normal(index) => *index,
             _ => -1,
         });
-    let mut error = nsh_platform::not_found_error_code();
+    let mut error = nsh_platform::platform_error(nsh_platform::PlatformErrorKind::NotFound);
     let mut index = -1;
     let mut cursor = PathCursor::new(path);
     while let Some(candidate) = padvance(&mut cursor, name) {
@@ -663,10 +663,8 @@ pub fn find_command(
         let metadata = match nsh_platform::path_metadata(&resolved, true) {
             Ok(metadata) => metadata,
             Err(io_error) => {
-                if let Some(code) = io_error.raw_os_error()
-                    && !nsh_platform::path_error_is(code, nsh_platform::PathErrorKind::NotFound)
-                {
-                    error = code;
+                if !nsh_platform::is_path_error(&io_error, nsh_platform::PathErrorKind::NotFound) {
+                    error = io_error;
                 }
                 continue;
             }
@@ -694,7 +692,7 @@ pub fn find_command(
             return Ok(crate::eval::Flow::Done(0));
         }
 
-        error = nsh_platform::permission_denied_error_code();
+        error = nsh_platform::platform_error(nsh_platform::PlatformErrorKind::PermissionDenied);
         if !test_exec(&resolved_bytes, &metadata) {
             continue;
         }
@@ -711,7 +709,7 @@ pub fn find_command(
     if (act & DO_ERR) != 0 {
         let mut message = name.to_vec();
         message.extend_from_slice(b": ");
-        message.extend_from_slice(&crate::error::errmsg(&sh.locale, error, E_EXEC));
+        message.extend_from_slice(&crate::error::errmsg(&sh.locale, &error, E_EXEC));
         sh.sh_warnx(&message);
     }
     *entry = cmdentry::unknown();

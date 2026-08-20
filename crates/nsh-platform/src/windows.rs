@@ -918,10 +918,6 @@ impl Locale {
             .to_owned()
     }
 
-    pub fn error_message_code(&self, code: i32) -> String {
-        self.error_message(&std::io::Error::from_raw_os_error(code))
-    }
-
     pub fn range_error_message(&self) -> String {
         "Result too large".to_owned()
     }
@@ -1096,7 +1092,11 @@ pub enum PathErrorKind {
     NameTooLong,
 }
 
-pub fn path_error_is(code: i32, kind: PathErrorKind) -> bool {
+// [spec:nsh:req:idiom.platform-errors]
+pub fn is_path_error(error: &std::io::Error, kind: PathErrorKind) -> bool {
+    let Some(code) = error.raw_os_error() else {
+        return kind == PathErrorKind::NotFound && error.kind() == std::io::ErrorKind::NotFound;
+    };
     match kind {
         PathErrorKind::NotFound => {
             code == ERROR_FILE_NOT_FOUND as i32 || code == ERROR_PATH_NOT_FOUND as i32
@@ -1105,20 +1105,18 @@ pub fn path_error_is(code: i32, kind: PathErrorKind) -> bool {
     }
 }
 
-pub fn permission_denied_error_code() -> i32 {
-    ERROR_ACCESS_DENIED as i32
+pub fn platform_error(kind: crate::PlatformErrorKind) -> std::io::Error {
+    let code = match kind {
+        crate::PlatformErrorKind::AlreadyExists => ERROR_ALREADY_EXISTS,
+        crate::PlatformErrorKind::BadDescriptor => ERROR_INVALID_HANDLE,
+        crate::PlatformErrorKind::NotFound => ERROR_FILE_NOT_FOUND,
+        crate::PlatformErrorKind::PermissionDenied => ERROR_ACCESS_DENIED,
+    };
+    std::io::Error::from_raw_os_error(code as i32)
 }
 
-pub fn already_exists_error() -> std::io::Error {
-    std::io::Error::from_raw_os_error(ERROR_ALREADY_EXISTS as i32)
-}
-
-pub fn not_found_error_code() -> i32 {
-    ERROR_FILE_NOT_FOUND as i32
-}
-
-pub fn command_exec_failure_status(code: i32) -> i32 {
-    if path_error_is(code, PathErrorKind::NotFound) {
+pub fn command_exec_failure_status(error: &std::io::Error) -> i32 {
+    if is_path_error(error, PathErrorKind::NotFound) {
         127
     } else {
         126
@@ -2348,7 +2346,6 @@ pub fn exit_immediately(status: i32) -> ! {
     unsafe { ExitProcess(status as u32) }
 }
 
-pub const BAD_DESCRIPTOR: i32 = ERROR_INVALID_HANDLE as i32;
 pub const PIPE_BUFFER: usize = 4096;
 
 pub const fn reports_pipe_short_writes() -> bool {
@@ -2374,7 +2371,7 @@ pub fn is_pseudoterminal_end(error: &std::io::Error) -> bool {
 }
 
 pub fn is_bad_descriptor_error(error: &std::io::Error) -> bool {
-    error.raw_os_error() == Some(BAD_DESCRIPTOR)
+    error.raw_os_error() == Some(ERROR_INVALID_HANDLE as i32)
 }
 
 pub fn interrupt_signal() -> i32 {

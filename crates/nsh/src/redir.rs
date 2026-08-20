@@ -197,6 +197,7 @@ pub(crate) fn redirect(
 
 // [spec:dash:def:redir.sh-open-fail-fn]
 // [spec:dash:sem:redir.sh-open-fail-fn]
+// [spec:nsh:req:idiom.platform-errors]
 fn sh_open_fail(
     sh: &mut crate::context::Shell,
     pathname: &BStr,
@@ -223,11 +224,7 @@ fn sh_open_fail_with_context(
     message.push(b' ');
     message.extend_from_slice(pathname);
     message.extend_from_slice(b": ");
-    message.extend_from_slice(&crate::error::errmsg(
-        &sh.locale,
-        error.raw_os_error().unwrap_or_default(),
-        action,
-    ));
+    message.extend_from_slice(&crate::error::errmsg(&sh.locale, error, action));
     let status = context.status(error);
     sh.report(Error::other(
         sh.eval.errlinno,
@@ -247,9 +244,7 @@ impl OpenFailureContext {
     // [spec:posix:req:xcu.exit-status.listed-values-binding]
     fn status(self, error: &std::io::Error) -> crate::status::ExitStatus {
         if matches!(self, OpenFailureContext::CommandFile)
-            && error.raw_os_error().is_some_and(|code| {
-                nsh_platform::path_error_is(code, nsh_platform::PathErrorKind::NotFound)
-            })
+            && nsh_platform::is_path_error(error, nsh_platform::PathErrorKind::NotFound)
         {
             crate::status::ExitStatus::NOT_FOUND
         } else {
@@ -408,7 +403,9 @@ fn open_file_redirection(
                         .is_ok_and(|path| nsh_platform::path_is_file(&path))
                     {
                         /* goto ecreate */
-                        let error = nsh_platform::already_exists_error();
+                        let error = nsh_platform::platform_error(
+                            nsh_platform::PlatformErrorKind::AlreadyExists,
+                        );
                         return Err(sh_open_fail(
                             sh,
                             target,
@@ -422,7 +419,9 @@ fn open_file_redirection(
                     if nsh_platform::fd_is_regular_file(&fv).unwrap_or(false) {
                         drop(fv);
                         /* goto ecreate */
-                        let error = nsh_platform::already_exists_error();
+                        let error = nsh_platform::platform_error(
+                            nsh_platform::PlatformErrorKind::AlreadyExists,
+                        );
                         return Err(sh_open_fail(
                             sh,
                             target,
@@ -468,7 +467,13 @@ fn open_descriptor_redirection(
             .fds
             .get(source)
             .map_err(|error| descriptor_error(sh, source, error))?
-            .ok_or_else(|| descriptor_error(sh, source, crate::fd::bad_descriptor()))?;
+            .ok_or_else(|| {
+                descriptor_error(
+                    sh,
+                    source,
+                    nsh_platform::platform_error(nsh_platform::PlatformErrorKind::BadDescriptor),
+                )
+            })?;
         Ok(RedirectSource::Shared(source_fd))
     }
 }
@@ -790,9 +795,9 @@ mod tests {
     // [spec:posix:req:xcu.exit-status.listed-values-binding/test]
     #[test]
     fn command_file_open_status() {
-        let missing = std::io::Error::from_raw_os_error(nsh_platform::not_found_error_code());
+        let missing = nsh_platform::platform_error(nsh_platform::PlatformErrorKind::NotFound);
         let denied =
-            std::io::Error::from_raw_os_error(nsh_platform::permission_denied_error_code());
+            nsh_platform::platform_error(nsh_platform::PlatformErrorKind::PermissionDenied);
 
         assert_eq!(
             OpenFailureContext::CommandFile.status(&missing),

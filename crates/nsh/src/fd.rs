@@ -72,13 +72,18 @@ impl FdRef {
         self.lock().is_some()
     }
 
+    // [spec:nsh:req:idiom.platform-errors]
     pub(crate) fn write_once(&self, bytes: &[u8]) -> std::io::Result<usize> {
-        let fd = self.get().ok_or_else(bad_descriptor)?;
+        let fd = self.get().ok_or_else(|| {
+            nsh_platform::platform_error(nsh_platform::PlatformErrorKind::BadDescriptor)
+        })?;
         nsh_platform::write_once(&fd, bytes)
     }
 
     pub(crate) fn write_all(&self, bytes: &[u8]) -> std::io::Result<()> {
-        let fd = self.get().ok_or_else(bad_descriptor)?;
+        let fd = self.get().ok_or_else(|| {
+            nsh_platform::platform_error(nsh_platform::PlatformErrorKind::BadDescriptor)
+        })?;
         nsh_platform::write_all(&fd, bytes)
     }
 }
@@ -102,8 +107,12 @@ impl FdTable {
     }
 
     pub(crate) fn slot(&self, number: i32) -> std::io::Result<FdRef> {
-        let index = usize::try_from(number).map_err(|_| bad_descriptor())?;
-        self.slots.get(index).cloned().ok_or_else(bad_descriptor)
+        let index = usize::try_from(number).map_err(|_| {
+            nsh_platform::platform_error(nsh_platform::PlatformErrorKind::BadDescriptor)
+        })?;
+        self.slots.get(index).cloned().ok_or_else(|| {
+            nsh_platform::platform_error(nsh_platform::PlatformErrorKind::BadDescriptor)
+        })
     }
 
     pub(crate) fn get(&self, number: i32) -> std::io::Result<Option<SharedFd>> {
@@ -147,10 +156,6 @@ impl FdTable {
     }
 }
 
-pub(crate) fn bad_descriptor() -> std::io::Error {
-    std::io::Error::from_raw_os_error(nsh_platform::BAD_DESCRIPTOR)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,14 +181,12 @@ mod tests {
     fn slots_reject_out_of_range_numbers() {
         let table = empty_table();
 
-        assert_eq!(
-            table.slot(-1).unwrap_err().raw_os_error(),
-            Some(nsh_platform::BAD_DESCRIPTOR)
-        );
-        assert_eq!(
-            table.slot(SLOT_COUNT as i32).unwrap_err().raw_os_error(),
-            Some(nsh_platform::BAD_DESCRIPTOR)
-        );
+        assert!(nsh_platform::is_bad_descriptor_error(
+            &table.slot(-1).unwrap_err()
+        ));
+        assert!(nsh_platform::is_bad_descriptor_error(
+            &table.slot(SLOT_COUNT as i32).unwrap_err()
+        ));
     }
 
     #[test]
@@ -246,7 +249,7 @@ mod tests {
 
         let error = slot.write_all(b"nowhere").unwrap_err();
 
-        assert_eq!(error.raw_os_error(), Some(nsh_platform::BAD_DESCRIPTOR));
+        assert!(nsh_platform::is_bad_descriptor_error(&error));
         assert!(!slot.is_open());
     }
 

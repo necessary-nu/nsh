@@ -188,6 +188,7 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:builtin.cd.step10-pwd-physical]
 // [spec:posix:req:builtin.cd.oldpwd-set]
 // [spec:posix:req:xcurel.change-cwd]
+// [spec:nsh:req:idiom.platform-errors]
 fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<CdResult, Error> {
     let mut logical = None;
     let err: c_int;
@@ -219,9 +220,10 @@ fn docd(sh: &mut Shell, dest: &BStr, flags: c_int) -> Result<CdResult, Error> {
         Err(error)
             if logical.is_some()
                 && !nsh_platform::shell_path_is_absolute(dest)
-                && error.raw_os_error().is_some_and(|code| {
-                    nsh_platform::path_error_is(code, nsh_platform::PathErrorKind::NameTooLong)
-                }) =>
+                && nsh_platform::is_path_error(
+                    &error,
+                    nsh_platform::PathErrorKind::NameTooLong,
+                ) =>
         {
             match dest
                 .try_to_path_buf()

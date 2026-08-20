@@ -5075,4 +5075,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.parser-control-flow}
     )}
+    {id type-platform-errors, covered_rules (
+        idiom.platform-errors
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.platform-errors}
+    )}
 )

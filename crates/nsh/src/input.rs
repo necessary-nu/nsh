@@ -495,6 +495,7 @@ fn flush_tee(sh: &mut crate::context::Shell, nr: c_int, mut pending: c_int) {
 
 // [spec:dash:def:input.stdin-tee-fn]
 // [spec:dash:sem:input.stdin-tee-fn]
+// [spec:nsh:req:idiom.platform-errors]
 fn stdin_tee(sh: &mut Shell, nr: c_int) -> Result<std::io::Result<usize>, Error> {
     if sh.input.stdin_state.pip.is_none() {
         let (pipe, _) = crate::redir::sh_pipe(sh, false)?;
@@ -514,7 +515,9 @@ fn stdin_tee(sh: &mut Shell, nr: c_int) -> Result<std::io::Result<usize>, Error>
     let result = if nsh_platform::supports_tee() {
         match sh.fds.get(0).ok().flatten() {
             Some(stdin) => nsh_platform::tee(&stdin, &pipe.write, nr as usize),
-            None => Err(crate::fd::bad_descriptor()),
+            None => Err(nsh_platform::platform_error(
+                nsh_platform::PlatformErrorKind::BadDescriptor,
+            )),
         }
     } else {
         Err(std::io::Error::from(std::io::ErrorKind::InvalidInput))
@@ -761,7 +764,9 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
             } else if let Some(source) = &source {
                 nsh_platform::read_once(source, &mut scratch[..nr as usize])
             } else {
-                Err(crate::fd::bad_descriptor())
+                Err(nsh_platform::platform_error(
+                    nsh_platform::PlatformErrorKind::BadDescriptor,
+                ))
             };
             match result {
                 Ok(count) => {

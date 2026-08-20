@@ -658,9 +658,14 @@ impl crate::context::Shell {
 
 // [spec:dash:def:error.errmsg-fn]
 // [spec:dash:sem:error.errmsg-fn]
-pub fn errmsg(locale: &nsh_platform::Locale, e: c_int, action: c_int) -> bstr::BString {
-    if !nsh_platform::path_error_is(e, nsh_platform::PathErrorKind::NotFound) {
-        return bstr::BString::from(locale.error_message_code(e));
+// [spec:nsh:req:idiom.platform-errors]
+pub fn errmsg(
+    locale: &nsh_platform::Locale,
+    error: &std::io::Error,
+    action: c_int,
+) -> bstr::BString {
+    if !nsh_platform::is_path_error(error, nsh_platform::PathErrorKind::NotFound) {
+        return bstr::BString::from(locale.error_message(error));
     }
 
     if action & E_OPEN != 0 {

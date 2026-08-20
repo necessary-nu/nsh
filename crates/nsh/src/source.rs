@@ -434,6 +434,7 @@ mod tests {
         assert!(sh.has_exited());
     }
 
+    // [spec:nsh:req:idiom.platform-errors/test]
     #[test]
     fn exec_requires_host_authority() {
         let _g = crate::testutil::lock();
@@ -451,7 +452,7 @@ mod tests {
         assert!(sh.has_exited());
         let diagnostic = sh.take_captured_stderr().unwrap();
         let denied =
-            std::io::Error::from_raw_os_error(nsh_platform::permission_denied_error_code());
+            nsh_platform::platform_error(nsh_platform::PlatformErrorKind::PermissionDenied);
         let mut suffix = nsh_platform::Locale::c()
             .unwrap()
             .error_message(&denied)

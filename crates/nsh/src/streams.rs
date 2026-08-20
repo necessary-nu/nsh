@@ -120,12 +120,15 @@ impl crate::context::Shell {
         self.take_captured_stream(2)
     }
 
+    // [spec:nsh:req:idiom.platform-errors]
     fn take_captured_stream(&self, index: usize) -> std::io::Result<bstr::BString> {
         let fd = self
             .streams
             .original(index)
             .or_else(|| self.fds.get(index as i32).ok().flatten())
-            .ok_or_else(crate::fd::bad_descriptor)?;
+            .ok_or_else(|| {
+                nsh_platform::platform_error(nsh_platform::PlatformErrorKind::BadDescriptor)
+            })?;
         nsh_platform::take_file_contents(&fd).map(bstr::BString::from)
     }
 }

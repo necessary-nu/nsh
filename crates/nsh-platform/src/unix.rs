@@ -554,8 +554,12 @@ pub enum PathErrorKind {
     NameTooLong,
 }
 
-/// Classify a raw OS error without exposing platform errno constants to core.
-pub fn path_error_is(code: i32, kind: PathErrorKind) -> bool {
+// [spec:nsh:req:idiom.platform-errors]
+/// Classify an I/O error without exposing platform errno constants to core.
+pub fn is_path_error(error: &std::io::Error, kind: PathErrorKind) -> bool {
+    let Some(code) = error.raw_os_error() else {
+        return kind == PathErrorKind::NotFound && error.kind() == std::io::ErrorKind::NotFound;
+    };
     match kind {
         PathErrorKind::NotFound => [rustix::io::Errno::NOENT, rustix::io::Errno::NOTDIR]
             .iter()
@@ -564,39 +568,31 @@ pub fn path_error_is(code: i32, kind: PathErrorKind) -> bool {
     }
 }
 
-/// The error number used when a command candidate exists but is not
-/// executable. Keeping the numeric ABI detail here lets the shell carry an
-/// ordinary `i32` only for rendering the historical diagnostic.
-pub fn permission_denied_error_code() -> i32 {
-    rustix::io::Errno::ACCESS.raw_os_error()
-}
-
-pub fn already_exists_error() -> std::io::Error {
-    std::io::Error::from(rustix::io::Errno::EXIST)
-}
-
-/// The initial error for a PATH search before any candidate has supplied a
-/// more informative failure.
-pub fn not_found_error_code() -> i32 {
-    rustix::io::Errno::NOENT.raw_os_error()
+/// Construct a typed I/O error for a platform-independent shell condition.
+pub fn platform_error(kind: crate::PlatformErrorKind) -> std::io::Error {
+    let error = match kind {
+        crate::PlatformErrorKind::AlreadyExists => rustix::io::Errno::EXIST,
+        crate::PlatformErrorKind::BadDescriptor => rustix::io::Errno::BADF,
+        crate::PlatformErrorKind::NotFound => rustix::io::Errno::NOENT,
+        crate::PlatformErrorKind::PermissionDenied => rustix::io::Errno::ACCESS,
+    };
+    std::io::Error::from(error)
 }
 
 /// POSIX distinguishes "command not found" (127) from a command that was
 /// found but could not be executed (126).
-pub fn command_exec_failure_status(code: i32) -> i32 {
-    if [
-        rustix::io::Errno::LOOP,
-        rustix::io::Errno::NAMETOOLONG,
-        rustix::io::Errno::NOENT,
-        rustix::io::Errno::NOTDIR,
-    ]
-    .iter()
-    .any(|error| error.raw_os_error() == code)
-    {
-        127
-    } else {
-        126
-    }
+pub fn command_exec_failure_status(error: &std::io::Error) -> i32 {
+    let not_found = error.raw_os_error().is_some_and(|code| {
+        [
+            rustix::io::Errno::LOOP,
+            rustix::io::Errno::NAMETOOLONG,
+            rustix::io::Errno::NOENT,
+            rustix::io::Errno::NOTDIR,
+        ]
+        .iter()
+        .any(|error| error.raw_os_error() == code)
+    }) || error.kind() == std::io::ErrorKind::NotFound;
+    if not_found { 127 } else { 126 }
 }
 
 /// Replace the current process image.
@@ -1412,7 +1408,6 @@ pub fn exit_immediately(status: i32) -> ! {
     unsafe { libc::_exit(status) }
 }
 
-pub const BAD_DESCRIPTOR: i32 = rustix::io::Errno::BADF.raw_os_error();
 pub const PIPE_BUFFER: usize = rustix::pipe::PIPE_BUF;
 
 pub const fn reports_pipe_short_writes() -> bool {
@@ -1443,7 +1438,7 @@ pub fn is_pseudoterminal_end(error: &std::io::Error) -> bool {
 }
 
 pub fn is_bad_descriptor_error(error: &std::io::Error) -> bool {
-    error.raw_os_error() == Some(BAD_DESCRIPTOR)
+    error.raw_os_error() == Some(rustix::io::Errno::BADF.raw_os_error())
 }
 
 /// Unblock every signal in the calling thread.
@@ -1651,21 +1646,21 @@ mod tests {
         assert!(!message.contains("(os error"));
         assert!(!message.is_empty());
 
-        assert!(path_error_is(
-            rustix::io::Errno::NAMETOOLONG.raw_os_error(),
-            PathErrorKind::NameTooLong
+        assert!(is_path_error(
+            &std::io::Error::from(rustix::io::Errno::NAMETOOLONG),
+            PathErrorKind::NameTooLong,
         ));
-        assert!(path_error_is(
-            rustix::io::Errno::NOENT.raw_os_error(),
-            PathErrorKind::NotFound
+        assert!(is_path_error(
+            &std::io::Error::from(rustix::io::Errno::NOENT),
+            PathErrorKind::NotFound,
         ));
-        assert!(path_error_is(
-            rustix::io::Errno::NOTDIR.raw_os_error(),
-            PathErrorKind::NotFound
+        assert!(is_path_error(
+            &std::io::Error::from(rustix::io::Errno::NOTDIR),
+            PathErrorKind::NotFound,
         ));
-        assert!(!path_error_is(
-            rustix::io::Errno::ACCESS.raw_os_error(),
-            PathErrorKind::NotFound
+        assert!(!is_path_error(
+            &std::io::Error::from(rustix::io::Errno::ACCESS),
+            PathErrorKind::NotFound,
         ));
     }
 

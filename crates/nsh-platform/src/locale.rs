@@ -406,6 +406,7 @@ impl Locale {
         })
     }
 
+    // [spec:nsh:req:idiom.platform-errors]
     pub fn error_message(&self, error: &std::io::Error) -> String {
         self.with_selected(|| {
             let Some(code) = error.raw_os_error() else {
@@ -420,7 +421,7 @@ impl Locale {
         })
     }
 
-    pub fn error_message_code(&self, code: i32) -> String {
+    fn error_message_code(&self, code: i32) -> String {
         self.error_message(&std::io::Error::from_raw_os_error(code))
     }
 

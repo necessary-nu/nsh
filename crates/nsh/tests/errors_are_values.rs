@@ -165,6 +165,7 @@ fn failing_exec_redirect_aborts() {
 /// The exact shape of the bug this node shipped at `96cadd4`, kept as a
 /// case: under `noclobber` two failing creates must report twice and write
 /// nothing, and the file must still hold what it held before.
+// [spec:nsh:req:idiom.platform-errors/test]
 #[test]
 fn noclobber_failure_writes_nothing() {
     let f = scratch("noclobber");
@@ -176,7 +177,9 @@ fn noclobber_failure_writes_nothing() {
     let (out, status) = run(&script);
     let exists = nsh_platform::Locale::c()
         .unwrap()
-        .error_message(&nsh_platform::already_exists_error());
+        .error_message(&nsh_platform::platform_error(
+            nsh_platform::PlatformErrorKind::AlreadyExists,
+        ));
     let _ = std::fs::remove_file(&f);
     assert_eq!(
         out,
