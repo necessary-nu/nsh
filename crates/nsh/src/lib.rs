@@ -138,6 +138,7 @@ pub(crate) mod input;
 pub(crate) mod mail;
 pub(crate) mod options;
 pub(crate) mod redir;
+pub(crate) mod resource;
 pub(crate) mod trap;
 pub(crate) mod var;
 

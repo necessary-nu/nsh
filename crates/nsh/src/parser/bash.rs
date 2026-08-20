@@ -8,7 +8,7 @@ use bstr::{BStr, BString};
 
 use super::{
     CTLBACKQ, CTLESC, CTLMBCHAR, CTLQUOTEMARK, Rt1, TokenContext, TokenKind, command, finalize,
-    goodname, list, nlnoprompt, parseheredoc, pgetc, pgetc_eatbnl, popfile, pungetc, readtoken,
+    goodname, list, nlnoprompt, parseheredoc, pgetc, pgetc_eatbnl, pungetc, readtoken,
     readtoken_with_flags, setinputstring, synerror, synexpect, wordtext, wordtext_node,
 };
 use crate::context::Shell;
@@ -244,15 +244,19 @@ pub(super) fn process_substitutions(
         st.bqlist.push(None);
         let saved_heredocs = mem::take(&mut sh.input.heredoclist);
         let completed_at = sh.input.completed_heredocs.len();
-        let mut body = list(sh, 2)?.into_node();
-        if readtoken(sh, TokenContext::NONE)? != TokenKind::RightParen {
-            return Err(synexpect(sh, Some(TokenKind::RightParen)));
-        }
-        setinputstring(sh, BStr::new(b""));
-        parseheredoc(sh)?;
-        finalize::node(sh, &mut body, completed_at)?;
+        let parsed = crate::resource::with_resources(sh, |sh, _resources| {
+            let mut body = list(sh, 2)?.into_node();
+            if readtoken(sh, TokenContext::NONE)? != TokenKind::RightParen {
+                return Err(synexpect(sh, Some(TokenKind::RightParen)));
+            }
+            setinputstring(sh, BStr::new(b""));
+            parseheredoc(sh)?;
+            finalize::node(sh, &mut body, completed_at)?;
+            Ok(body)
+        });
         sh.input.heredoclist = saved_heredocs;
-        popfile(sh);
+        st.out = parked;
+        let body = parsed?;
 
         st.bqlist[slot] = Some(Node::Bash(BashNode::ProcessSubstitution(
             BashProcessSubstitution {
@@ -260,7 +264,6 @@ pub(super) fn process_substitutions(
                 body: body.map(Box::new),
             },
         )));
-        st.out = parked;
         st.input = super::pgetc_top(sh, st.syn())?;
     }
 }

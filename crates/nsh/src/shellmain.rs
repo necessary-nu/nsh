@@ -456,22 +456,19 @@ fn read_profile(sh: &mut Shell, name: &BStr) -> Result<crate::eval::Flow, crate:
     let mut name: BString = crate::parser::expandstr(sh, name)?;
     name.push(b'\0');
 
-    if !crate::input::setinputfile(
-        sh,
-        BStr::new(crate::mystring::cstr_prefix(&name)),
-        crate::input::INPUT_PUSH_FILE | crate::input::INPUT_NOFILE_OK,
-    )? {
-        return Ok(crate::eval::Flow::Done((0).into()));
-    }
+    crate::resource::with_resources(sh, |sh, _resources| {
+        if !crate::input::setinputfile(
+            sh,
+            BStr::new(crate::mystring::cstr_prefix(&name)),
+            crate::input::INPUT_PUSH_FILE | crate::input::INPUT_NOFILE_OK,
+        )? {
+            return Ok(crate::eval::Flow::Done((0).into()));
+        }
 
-    /* An `exit` in a profile ends the shell before it ever reads a
-     * command, so this call is one the exit has to travel out of. */
-    let flow = cmdloop(sh, 0)?;
-    if let crate::eval::Flow::Exit { .. } = flow {
-        return Ok(flow);
-    }
-    crate::input::popfile(sh);
-    Ok(flow)
+        /* An `exit` in a profile travels out as control flow after the
+         * structured input scope has restored the previous frame. */
+        cmdloop(sh, 0)
+    })
 }
 
 /*
@@ -483,13 +480,10 @@ fn read_profile(sh: &mut Shell, name: &BStr) -> Result<crate::eval::Flow, crate:
 // [spec:dash:def:main.readcmdfile-fn]
 // [spec:dash:sem:main.readcmdfile-fn]
 pub fn readcmdfile(sh: &mut Shell, name: &BStr) -> Result<crate::eval::Flow, crate::error::Error> {
-    crate::input::setinputfile(sh, name, crate::input::INPUT_PUSH_FILE)?;
-    let flow = cmdloop(sh, 0)?;
-    if let crate::eval::Flow::Exit { .. } = flow {
-        return Ok(flow);
-    }
-    crate::input::popfile(sh);
-    Ok(flow)
+    crate::resource::with_resources(sh, |sh, _resources| {
+        crate::input::setinputfile(sh, name, crate::input::INPUT_PUSH_FILE)?;
+        cmdloop(sh, 0)
+    })
 }
 
 #[cfg(test)]

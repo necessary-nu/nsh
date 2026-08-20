@@ -51,8 +51,8 @@ fn read_input_line(
     raw: bool,
     prompt_for_continuation: bool,
 ) -> Result<(BString, ExitStatus), Error> {
-    crate::input::pushstdin(sh);
-    let result = (|| {
+    let result = crate::resource::with_resources(sh, |sh, _resources| {
+        crate::input::pushstdin(sh);
         let mut line = BString::default();
         let mut region_start = 0_usize;
         let mut escaped_region_end = None;
@@ -106,8 +106,7 @@ fn read_input_line(
             }
         }
         Ok::<_, Error>((line, status, region_start))
-    })();
-    crate::input::popfile(sh);
+    });
 
     let (line, status, region_start) = result?;
     crate::expand::recordregion(&mut sh.expand, region_start, line.len(), false);

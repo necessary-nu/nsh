@@ -15,9 +15,7 @@ use crate::context::Shell;
 use crate::error::Error;
 use crate::expand::{ExpansionMode, expandarg, restore_handler_expandarg};
 use crate::fd::LogicalDescriptor;
-use crate::input::{
-    pgetc, pgetc_eoa, popfile, pungetc, pungetn, pushstring, setinputstring, unwindfiles,
-};
+use crate::input::{pgetc, pgetc_eoa, pungetc, pungetn, pushstring, setinputstring};
 use crate::nodes::{
     BinaryCommand, CaseClause, CaseCommand, CompoundCommand, DescriptorRedirection,
     DescriptorRedirectionOperator, DescriptorTarget, FileRedirection, FileRedirectionOperator,
@@ -2342,7 +2340,6 @@ fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Result<(), E
     let mut saveprompt: c_int = 0;
     let saveheredoclist: Vec<heredoc>;
     let nlpp: usize;
-    let mut n: Option<Node>;
     let completed_at: usize;
     let mut ml: c_uint;
     /* `grabstackstr(pout)` had to reserve the backquote's text because
@@ -2409,7 +2406,6 @@ fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Result<(), E
          * wrote, which is why the buffer is never empty here. */
         let last = pstr.len() - 1;
         pstr[last] = 0;
-        setinputstring(sh, crate::mystring::cstr_prefix(&pstr));
     }
     /* The C walks to the tail of `bqlist` and appends an empty cell, then
      * fills its `n` after the recursive parse.  Reserving the slot first is
@@ -2426,33 +2422,36 @@ fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Result<(), E
         sh.input.doprompt = 0;
     }
 
-    n = list(sh, 2)?.into_node();
+    let parsed = crate::resource::with_resources(sh, |sh, _resources| {
+        if oldstyle != 0 {
+            setinputstring(sh, crate::mystring::cstr_prefix(&pstr));
+        }
+        let mut node = list(sh, 2)?.into_node();
+
+        if oldstyle == 0 {
+            if readtoken(sh, TokenContext::NONE)? != TokenKind::RightParen {
+                return Err(synexpect(sh, Some(TokenKind::RightParen)));
+            }
+            setinputstring(sh, BStr::new(b""));
+        }
+
+        parseheredoc(sh)?;
+        finalize::node(sh, &mut node, completed_at)?;
+        Ok(node)
+    });
 
     if oldstyle != 0 {
         sh.input.doprompt = saveprompt;
-    } else {
-        if readtoken(sh, TokenContext::NONE)? != TokenKind::RightParen {
-            return Err(synexpect(sh, Some(TokenKind::RightParen)));
-        }
-        setinputstring(sh, BStr::new(b""));
     }
-
-    parseheredoc(sh)?;
-    finalize::node(sh, &mut n, completed_at)?;
     sh.input.heredoclist = saveheredoclist;
-
-    st.bqlist[nlpp] = n;
-    /* Start reading from old file again. */
-    popfile(sh);
-
     st.out = str;
-
     if oldstyle != 0 {
         /* Ignore any pushed back tokens left from the backquote
          * parsing.
          */
         sh.input.tokpushback = false;
     }
+    st.bqlist[nlpp] = parsed?;
     Ok(())
 }
 
@@ -2551,21 +2550,15 @@ fn setprompt(sh: &mut Shell, which: c_int) {
 // [spec:dash:def:parser.expandstr-fn]
 // [spec:dash:sem:parser.expandstr-fn]
 pub fn expandstr(sh: &mut Shell, ps: &BStr) -> Result<BString, Error> {
-    let file_stop: usize;
     let saveheredoclist: Vec<heredoc>;
     let mut result: BString;
     let saveprompt: c_int;
 
-    file_stop = crate::input::cur_mark(sh);
-
     /* XXX Fix (char *) cast. */
     let ps = crate::mystring::cstr_prefix(ps);
-    setinputstring(sh, ps);
 
     saveheredoclist = core::mem::take(&mut sh.input.heredoclist);
     saveprompt = sh.input.doprompt;
-    sh.input.doprompt = 0;
-    sh.input.needprompt = 0;
     /* `result = ps` — the C seeds the answer with the string it was given
      * and the failure path is what leaves the seed standing.
      *
@@ -2577,58 +2570,62 @@ pub fn expandstr(sh: &mut Shell, ps: &BStr) -> Result<BString, Error> {
      * The C read it anyway. Copying at the point the C takes the seed
      * keeps the C's sequence and removes the read-after-free. */
     result = BString::from(ps);
-    /* Parse and expand inside one fallible operation so a failure leaves
-     * the seeded result unchanged. */
-    let caught = (|| -> Result<(), crate::error::Error> {
-        let result = &mut result;
-        let firstc = pgetc_eatbnl(sh)?;
-        readtoken1(
-            sh,
-            firstc,
-            SyntaxContext::DoubleQuoted,
-            EofMark::Fake,
-            0,
-            false,
-        )?;
+    let caught = crate::resource::with_resources(sh, |sh, _resources| {
+        setinputstring(sh, ps);
+        sh.input.doprompt = 0;
+        sh.input.needprompt = 0;
+        /* Parse and expand inside one fallible operation so a failure leaves
+         * the seeded result unchanged. */
+        let caught = (|| -> Result<(), crate::error::Error> {
+            let result = &mut result;
+            let firstc = pgetc_eatbnl(sh)?;
+            readtoken1(
+                sh,
+                firstc,
+                SyntaxContext::DoubleQuoted,
+                EofMark::Fake,
+                0,
+                false,
+            )?;
 
-        let n = Node::Word(WordNode {
-            word: mem::take(&mut sh.input.word),
-        });
+            let n = Node::Word(WordNode {
+                word: mem::take(&mut sh.input.word),
+            });
 
-        expandarg(sh, &n, None, ExpansionMode::QUOTED)?;
-        /* The C reads the expansion back as `stackblock()`; the expansion
-         * buffer is owned now, so the read is named.  The C's pointer was
-         * live only until the next `stalloc`; this one is live until the
-         * next expansion, which is a superset.
+            expandarg(sh, &n, None, ExpansionMode::QUOTED)?;
+            /* The C reads the expansion back as `stackblock()`; the expansion
+             * buffer is owned now, so the read is named.  The C's pointer was
+             * live only until the next `stalloc`; this one is live until the
+             * next expansion, which is a superset.
+             *
+             * Neither `?` above reaches this line: a prompt that fails to parse
+             * or expand leaves `result` as the `ps` it was seeded with, and the
+             * caller renders the prompt unexpanded.
+             *
+             * The copy is what the C's pointer bought with liveness instead.
+             * It costs one allocation per prompt — drawn at the rate a human
+             * presses return, or once per traced command — and it buys the
+             * caller a value that no later expansion can pull out from under
+             * it. `getprompt` handing back a borrow of the expansion buffer
+             * would have to outlive the next `expandarg` to be useful, and it
+             * cannot. */
+            *result = BString::from(crate::expand::expansion_result(sh));
+            Ok(())
+        })()
+        .err();
+
+        /* A *diagnostic* is dropped, and that is dash: `expandstr` reports it
+         * and hands back the string it was given, which is why a bad `PS1` or
+         * `PS4` cannot abort a script (`docs/api-design.md` §3.3).
          *
-         * Neither `?` above reaches this line: a prompt that fails to parse
-         * or expand leaves `result` as the `ps` it was seeded with, and the
-         * caller renders the prompt unexpanded.
-         *
-         * The copy is what the C's pointer bought with liveness instead.
-         * It costs one allocation per prompt — drawn at the rate a human
-         * presses return, or once per traced command — and it buys the
-         * caller a value that no later expansion can pull out from under
-         * it. `getprompt` handing back a borrow of the expansion buffer
-         * would have to outlive the next `expandarg` to be useful, and it
-         * cannot. */
-        *result = BString::from(crate::expand::expansion_result(sh));
-        Ok(())
-    })()
-    .err();
-
-    /* A *diagnostic* is dropped, and that is dash: `expandstr` reports it
-     * and hands back the string it was given, which is why a bad `PS1` or
-     * `PS4` cannot abort a script (`docs/api-design.md` §3.3).
-     *
-     * An interrupt is not, and cannot be — the C re-raised it from
-     * `restore_handler_expandarg` and there is nothing here that may
-     * swallow a ^C. It is why this function returns a `Result` at all;
-     * both callers are fallible and neither wanted one otherwise. */
-    let caught = restore_handler_expandarg(sh, caught);
+         * An interrupt is not, and cannot be — the C re-raised it from
+         * `restore_handler_expandarg` and there is nothing here that may
+         * swallow a ^C. It is why this function returns a `Result` at all;
+         * both callers are fallible and neither wanted one otherwise. */
+        restore_handler_expandarg(sh, caught)
+    });
 
     sh.input.doprompt = saveprompt;
-    unwindfiles(sh, file_stop);
     sh.input.heredoclist = saveheredoclist;
 
     match caught {

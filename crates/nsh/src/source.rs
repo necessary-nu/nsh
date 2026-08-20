@@ -175,54 +175,37 @@ impl Shell {
     }
 
     fn run_source(&mut self, source: Source) -> Result<ExitStatus, Error> {
-        let mark = self.input.mark();
-        /* Read before the push, because for a file the push is what moves
-         * it: `setinputfd` sets `toppf` itself when the file was opened
-         * without `INPUT_PUSH_FILE`, and `setinputstring` never does. */
-        let old_floor = self.input.floor();
-
         /* The text has to outlive the parse: `setinputstring` keeps the
          * caller's pointer rather than copying, which is the same reason
          * `evalstring` owns its `sstrdup` across the `popfile`. Holding it
          * here says so on the unwind path too, where the C's `stunalloc`
          * never ran. */
-        match &source.0 {
-            Kind::Bytes(b) => {
-                crate::input::setinputstring(self, BStr::new(b));
+        let outcome = crate::resource::with_resources(self, |shell, _resources| {
+            match &source.0 {
+                Kind::Bytes(bytes) => {
+                    crate::input::setinputstring(shell, BStr::new(bytes));
+                }
+                Kind::File(path) => {
+                    let path = path.to_shell_bytes();
+                    crate::input::setinputfile(shell, BStr::new(&path), 0)?;
+                }
+                Kind::Stream => {}
             }
-            Kind::File(p) => {
-                /* Nothing has been pushed and no floor moved when this
-                 * fails, so leaving by `?` needs no unwind. */
-                let path = p.to_shell_bytes();
-                crate::input::setinputfile(self, BStr::new(&path), 0)?;
-            }
-            Kind::Stream => {
-                /* Nothing to push: the shell's standard input is frame
-                 * zero and is already current, so the unwind below is a
-                 * no-op. That is the honest description of a `run` that
-                 * reads the stream the shell was built with. */
-            }
-        }
-        self.input.set_floor(self.input.mark());
+            shell.input.set_floor(shell.input.mark());
 
-        let outcome = match &source.0 {
             /* dash's own mapping, kept: `-c` is the parse-execute loop,
              * `sh script` is `cmdloop(0)`, and bare `sh` is `cmdloop(1)`.
              * The difference is not cosmetic — `cmdloop` prompts, reports
              * changed jobs, and counts consecutive `EOF`s for
              * `ignoreeof`. */
-            Kind::Bytes(_) => crate::eval::parse_execute(self, crate::eval::EvalContext::DEFAULT),
-            Kind::File(_) => crate::shellmain::cmdloop(self, 0),
-            Kind::Stream => crate::shellmain::cmdloop(self, 1),
-        };
-
-        crate::input::unwindfiles(self, mark);
-        self.input.set_floor(old_floor);
-        debug_assert_eq!(
-            self.input.mark(),
-            mark,
-            "run left the input stack at a different depth than it found it"
-        );
+            match &source.0 {
+                Kind::Bytes(_) => {
+                    crate::eval::parse_execute(shell, crate::eval::EvalContext::DEFAULT)
+                }
+                Kind::File(_) => crate::shellmain::cmdloop(shell, 0),
+                Kind::Stream => crate::shellmain::cmdloop(shell, 1),
+            }
+        });
         match outcome {
             Ok(Flow::Done(status))
             | Ok(Flow::Return { status, .. })
@@ -333,28 +316,25 @@ impl Shell {
         word: &BStr,
         mode: crate::expand::ExpansionMode,
     ) -> Result<Vec<BString>, Error> {
-        let mark = self.input.mark();
-        let old_floor = self.input.floor();
-
-        crate::input::setinputstring(self, word);
-        self.input.set_floor(self.input.mark());
-        // This is a fresh parser entry, not a continuation of the previous
-        // `run`. In particular, a completed command loop leaves EOF as one
-        // token of lookahead; consuming that here would make every public
-        // expansion after a run spuriously return no fields.
-        self.input.tokpushback = false;
-        self.input.begin_parse(self.options.dialect());
-        let expanded = (|sh: &mut Shell| -> Result<Vec<BString>, Error> {
-            let t = crate::parser::readtoken(sh, crate::parser::TokenContext::NONE)?;
+        crate::resource::with_resources(self, |shell, _resources| {
+            crate::input::setinputstring(shell, word);
+            shell.input.set_floor(shell.input.mark());
+            // This is a fresh parser entry, not a continuation of the previous
+            // `run`. In particular, a completed command loop leaves EOF as one
+            // token of lookahead; consuming that here would make every public
+            // expansion after a run spuriously return no fields.
+            shell.input.tokpushback = false;
+            shell.input.begin_parse(shell.options.dialect());
+            let t = crate::parser::readtoken(shell, crate::parser::TokenContext::NONE)?;
             if t != crate::parser::TokenKind::Word {
                 /* An empty word is the honest answer for empty input, and
                  * anything else here is syntax the caller wrote rather
                  * than a word — a `;` or a `|` cannot be expanded. */
                 return Ok(Vec::new());
             }
-            let n = crate::parser::makename(sh);
+            let n = crate::parser::makename(shell);
             let mut list = crate::expand::arglist::new();
-            crate::expand::expandarg(sh, &n, Some(&mut list), mode)?;
+            crate::expand::expandarg(shell, &n, Some(&mut list), mode)?;
             Ok(list
                 .list
                 .into_iter()
@@ -373,11 +353,7 @@ impl Shell {
                     t
                 })
                 .collect())
-        })(self);
-
-        crate::input::unwindfiles(self, mark);
-        self.input.set_floor(old_floor);
-        expanded
+        })
     }
 
     /// The status of the last command the shell ran, which is `$?`.

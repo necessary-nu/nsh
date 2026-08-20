@@ -5281,4 +5281,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.variable-expansion-state}
     )}
+    {id structure-resource-scopes, covered_rules (
+        idiom.resource-scopes
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.resource-scopes}
+    )}
 )

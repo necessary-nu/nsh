@@ -90,37 +90,29 @@ fn dotcmd_with_missing_status(
             return Err(sh.builtin_error_value(missing_status, &message));
         };
 
-        crate::input::setinputfile(
-            sh,
-            fullname.as_slice().as_bstr(),
-            crate::input::INPUT_PUSH_FILE | crate::input::INPUT_DOT_FILE,
-        )?;
-        /* `evalbltin`'s epilogue reads `commandname` after this returns —
-         * `flushall(); if (outerr(out1)) sh_warnx("%s: I/O error",
-         * commandname);` — and the C is safe there only because the block
-         * is `stalloc`'d and the enclosing mark has not popped yet.
-         *
-         * Now that `commandname` owns its bytes there is nothing to keep
-         * alive: what the epilogue reads is a copy, so the buffer this
-         * frame allocated can be freed with the frame like any other
-         * local, and the static slot that used to hold it is gone. */
-        sh.eval.commandname = Some(fullname);
-        /* An `exit` inside a dotted file ends the shell, not the file, so
-         * it leaves through here without the `popfile` -- exactly as the
-         * C's longjmp did. The input stack is unwound to a mark by
-         * whatever catches, not by the frame it passed through. */
-        // A dot script is a fresh lexical command context for loop control:
-        // loops active in its caller do not enclose commands read here.
-        // [spec:nsh:req:compat.smoosh.control-boundaries]
-        let caller_loopnest = sh.eval.loopnest;
-        sh.eval.loopnest = 0;
-        let outcome = cmdloop(sh, 0);
-        sh.eval.loopnest = caller_loopnest;
+        let outcome = crate::resource::with_resources(sh, |sh, _resources| {
+            crate::input::setinputfile(
+                sh,
+                fullname.as_slice().as_bstr(),
+                crate::input::INPUT_PUSH_FILE | crate::input::INPUT_DOT_FILE,
+            )?;
+            /* `evalbltin`'s epilogue reads `commandname` after this returns.
+             * The owned path remains valid independently of the input frame. */
+            sh.eval.commandname = Some(fullname);
+
+            // A dot script is a fresh lexical command context for loop control:
+            // loops active in its caller do not enclose commands read here.
+            // [spec:nsh:req:compat.smoosh.control-boundaries]
+            let caller_loopnest = sh.eval.loopnest;
+            sh.eval.loopnest = 0;
+            let outcome = cmdloop(sh, 0);
+            sh.eval.loopnest = caller_loopnest;
+            outcome
+        });
         match outcome? {
             Flow::Done(s) => status = s,
             control => return Ok(control),
         }
-        crate::input::popfile(sh);
     }
 
     Ok(Flow::Done((status).into()))

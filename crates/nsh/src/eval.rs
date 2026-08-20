@@ -359,11 +359,10 @@ pub fn evalstring(sh: &mut Shell, s: &BStr, context: EvalContext) -> Result<Flow
      * is why the copy is taken *before* the mark is set and released by
      * hand afterwards.  Owning it says both halves at once, and says them
      * on the unwind path too, where the C's `stunalloc` never runs. */
-    crate::input::setinputstring(sh, s);
-    let status = flow!(parse_execute(sh, context));
-    crate::input::popfile(sh);
-
-    Ok(Flow::Done((status).into()))
+    crate::resource::with_resources(sh, |sh, _resources| {
+        crate::input::setinputstring(sh, s);
+        parse_execute(sh, context)
+    })
 }
 
 /// Parse and execute until the current input frame runs out.
@@ -469,14 +468,13 @@ fn eval_interactive_sequence(
         return eval_interactive_sequence(sh, Some(sequence.right.as_ref()), context);
     }
 
-    let input_stop = crate::input::cur_mark(sh);
-    match evaltree(sh, n, context) {
+    let outcome = crate::resource::with_resources(sh, |sh, _resources| evaltree(sh, n, context));
+    match outcome {
         Err(error) if error.is_expansion() => {
             let status = error.status();
             sh.status = status;
             drop(error);
             crate::init::exitreset(sh);
-            crate::input::unwindfiles(sh, input_stop);
             crate::var::mkinit_reset(sh);
             crate::error::FORCEINTON(sh);
             Ok(Flow::Done((status).into()))
@@ -524,15 +522,10 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
                     sh.vars.lineno -= sh.eval.funcline - 1;
                 }
                 let expanded_redirections = expredir(sh, &redirection.redirections)?;
-                crate::redir::pushredir(sh, &expanded_redirections);
-                let outcome = match crate::redir::redirectsafe(
-                    sh,
-                    &expanded_redirections,
-                    RedirectionMode::Push,
-                ) {
-                    Err(error) if error.is_interrupt() || error.is_expansion() => {
-                        return Err(error);
-                    }
+                let outcome = crate::resource::with_resources(sh, |sh, resources| match resources
+                    .apply_redirections(sh, &expanded_redirections)
+                {
+                    Err(error) if error.is_interrupt() || error.is_expansion() => Err(error),
                     Err(error) => {
                         drop(error);
                         check_exit = true;
@@ -543,10 +536,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
                         Some(redirection.command.as_ref()),
                         context.tested_only(),
                     ),
-                };
-                if !redirection.redirections.is_empty() {
-                    crate::redir::popredir(sh, 0);
-                }
+                });
                 match outcome? {
                     Flow::Done(status) => status,
                     control => return Ok(control),
@@ -1336,9 +1326,17 @@ fn evalcommand(
     command: &SimpleCommand,
     context: EvalContext,
 ) -> Result<Flow, Error> {
-    let localvar_stop: usize;
-    let file_stop: usize;
-    let redir_stop: usize;
+    crate::resource::with_resources(sh, |sh, resources| {
+        evalcommand_in_scope(sh, command, context, resources)
+    })
+}
+
+fn evalcommand_in_scope(
+    sh: &mut Shell,
+    command: &SimpleCommand,
+    context: EvalContext,
+    resources: &mut crate::resource::ResourceScope,
+) -> Result<Flow, Error> {
     let mut argp: &[Node];
     let mut arglist: arglist = arglist::new();
     let mut varlist: arglist = arglist::new();
@@ -1376,7 +1374,6 @@ fn evalcommand(
 
     /* First expand the arguments. */
     /* TRACE(("evalcommand(0x%lx, %d) called\n", (long)cmd, flags)); */
-    file_stop = crate::input::cur_mark(sh);
     sh.eval.back_exitstatus = ExitStatus::SUCCESS;
 
     cmd_flag = 0;
@@ -1471,7 +1468,7 @@ fn evalcommand(
         }
     }
 
-    localvar_stop = crate::var::pushlocalvars(sh, vlocal);
+    resources.begin_local_variables(sh, vlocal != 0);
 
     lastarg = if sh.options.enabled(ShellOption::Interactive) && sh.eval.funcline == 0 && argc > 0 {
         Some(arglist.list.len() - 1)
@@ -1482,14 +1479,13 @@ fn evalcommand(
     let stderr = sh.fds.slot(LogicalDescriptor::STDERR);
     sh.io.previous_stderr().set_destination(stderr);
     let expanded_redirections = expredir(sh, &command.redirections)?;
-    redir_stop = crate::redir::pushredir(sh, &expanded_redirections);
     /* `status = redirectsafe(..)`, which the C computes as `setjmp(..) *
      * 2`. The value is kept as well as the status, because `bail:` below
      * re-raises it when the command is a special built-in — that is the
      * one place a redirection error is *not* swallowed, and an `int`
      * cannot be re-raised. */
     let mut redir_err: Option<Error> = None;
-    match crate::redir::redirectsafe(sh, &expanded_redirections, RedirectionMode::Push) {
+    match resources.apply_redirections(sh, &expanded_redirections) {
         /* Same as compound-redirection evaluation: an interrupt leaves rather than
          * becoming this command's status. */
         Err(e) if e.is_interrupt() || e.is_expansion() => return Err(e),
@@ -1760,12 +1756,10 @@ fn evalcommand(
         // goto out
     }
     // out:
-    if !command.redirections.is_empty() {
-        crate::redir::popredir(sh, execcmd);
+    if execcmd != 0 {
+        resources.retain_redirections(sh);
     }
-    crate::redir::unwindredir(sh, redir_stop);
-    crate::input::unwindfiles(sh, file_stop);
-    crate::var::unwindlocalvars(sh, localvar_stop);
+    resources.restore(sh);
     if let Some(lastarg) = lastarg {
         /* dsl: I think this is intended to be used to support
          * '_' in 'vi' command mode during line editing...
