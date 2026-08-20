@@ -7,6 +7,7 @@ use crate::nodes::{
     BashArrayValue, BashAssignmentOperator, BashConditionalExpr, BashFunctionStyle, BashNode,
     BashProcessDirection, Node,
 };
+use crate::word::WordPart;
 
 fn parse(source: &[u8], bash: bool) -> Result<Node, Error> {
     let mut sh = Shell::builder()
@@ -141,12 +142,13 @@ fn array_parameter_subscript_is_dialect_gated() {
     assert_eq!(tree.ncmd().args.len(), 2);
     let baseline = parse(b"echo ${a[1]}\n", false).unwrap();
     assert_ne!(
-        tree.ncmd().args[1].narg().text.as_cbytes(),
-        baseline.ncmd().args[1].narg().text.as_cbytes()
+        tree.ncmd().args[1].narg().text.encode_legacy().bytes,
+        baseline.ncmd().args[1].narg().text.encode_legacy().bytes
     );
 }
 
 #[test]
+// [spec:nsh:def:idiom.word-ir/test]
 fn process_substitutions_own_their_commands() {
     let tree = parse(b"echo <(printf x) >(cat)\n", true).unwrap();
     let args = &tree.ncmd().args;
@@ -156,7 +158,16 @@ fn process_substitutions_own_their_commands() {
         (&args[1], BashProcessDirection::Input),
         (&args[2], BashProcessDirection::Output),
     ] {
-        let substitution = argument.narg().backquote[0].as_ref().unwrap();
+        let substitution = argument
+            .narg()
+            .text
+            .parts()
+            .iter()
+            .find_map(|part| match part {
+                WordPart::Command(Some(command)) => Some(command.as_ref()),
+                _ => None,
+            })
+            .unwrap();
         let Node::Bash(BashNode::ProcessSubstitution(substitution)) = substitution else {
             panic!("process substitution must not masquerade as command substitution");
         };

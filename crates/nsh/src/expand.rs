@@ -676,10 +676,12 @@ pub fn expandarg(
     arglist: Option<&mut arglist>,
     flag: c_int,
 ) -> Result<(), Error> {
+    // [spec:nsh:def:idiom.word-ir]
     let mut state = mem::take(&mut sh.expand);
-    state.backquotes.clone_from(&arg.narg().backquote);
+    let encoded = arg.narg().text.encode_legacy();
+    state.backquotes = encoded.substitutions;
     state.next_backquote = 0;
-    let result = expandarg_inner(sh, &mut state, arg, arglist, flag);
+    let result = expandarg_inner(sh, &mut state, &encoded.bytes, arglist, flag);
     sh.expand = state;
     result
 }
@@ -687,7 +689,7 @@ pub fn expandarg(
 fn expandarg_inner(
     sh: &mut crate::context::Shell,
     state: &mut ExpandState,
-    arg: &crate::nodes::Node,
+    text: &[u8],
     arglist: Option<&mut arglist>,
     flag: c_int,
 ) -> Result<(), Error> {
@@ -701,7 +703,7 @@ fn expandarg_inner(
      * swallowing arm and `init::exitreset` both call `ifsfree`, which is
      * docs/errors-are-values.md 2.2's mark-keyed cleanup working as
      * designed. Adding one here would free them twice. */
-    argstr(sh, state, arg.narg().text.as_cbytes(), 0, flag)?;
+    argstr(sh, state, text, 0, flag)?;
     'out: {
         let Some(arglist) = arglist else {
             /* here document expanded — the caller reads the buffer back
@@ -3358,9 +3360,10 @@ pub fn casematch(
     val: &BStr,
 ) -> Result<c_int, Error> {
     let mut state = mem::take(&mut sh.expand);
-    state.backquotes.clone_from(&pattern.narg().backquote);
+    let encoded = pattern.narg().text.encode_legacy();
+    state.backquotes = encoded.substitutions;
     state.next_backquote = 0;
-    let result = casematch_inner(sh, &mut state, pattern, val);
+    let result = casematch_inner(sh, &mut state, &encoded.bytes, val);
     sh.expand = state;
     result
 }
@@ -3368,7 +3371,7 @@ pub fn casematch(
 fn casematch_inner(
     sh: &mut crate::context::Shell,
     state: &mut ExpandState,
-    pattern: &crate::nodes::Node,
+    pattern: &[u8],
     val: &BStr,
 ) -> Result<c_int, Error> {
     let result: c_int;
@@ -3383,7 +3386,7 @@ fn casematch_inner(
     argstr(
         sh,
         state,
-        pattern.narg().text.as_cbytes(),
+        pattern,
         0,
         EXP_TILDE | EXP_CASE,
     )?;

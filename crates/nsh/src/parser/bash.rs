@@ -18,6 +18,7 @@ use crate::nodes::{
     BashFunctionStyle, BashNode, BashProcessDirection, BashProcessSubstitution, Node, NodeText,
     narg,
 };
+use crate::word::ParsedWord;
 use crate::options::Dialect;
 
 #[derive(Clone, Copy, Eq, PartialEq)]
@@ -120,7 +121,6 @@ pub(super) fn function(sh: &mut Shell, line: c_int) -> Result<Node, Error> {
         return Err(synerror(sh, b"invalid Bash function name"));
     }
     let name = wordtext_node(sh);
-    sh.input.backquotelist.clear();
 
     let next = readtoken(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)?;
     let style = if next == TokenKind::LeftParen {
@@ -143,7 +143,8 @@ pub(super) fn function(sh: &mut Shell, line: c_int) -> Result<Node, Error> {
 }
 
 pub(super) fn array_word(sh: &Shell, arg: narg) -> Result<Node, narg> {
-    let bytes = arg.text.as_bstr();
+    let encoded = arg.text.encode_legacy();
+    let bytes = BStr::new(&encoded.bytes[..encoded.bytes.len() - 1]);
     let Some(open) = bytes.iter().position(|&byte| byte == b'[') else {
         return Err(arg);
     };
@@ -468,7 +469,7 @@ fn conditional_primary(sh: &mut Shell) -> Result<BashConditionalExpr, Error> {
             return Err(synerror(sh, b"expected unary-test operand"));
         }
         return Ok(BashConditionalExpr::Unary {
-            operator: first.arg.text,
+            operator: node_text(first.arg.text.as_bstr()),
             operand: take_word(sh, operand_token.quoted).arg,
         });
     }
@@ -486,7 +487,6 @@ fn conditional_primary(sh: &mut Shell) -> Result<BashConditionalExpr, Error> {
         && binary_operator(wordtext(sh))
     {
         let operator = wordtext_node(sh);
-        sh.input.backquotelist.clear();
         Some(operator)
     } else {
         None
@@ -568,8 +568,7 @@ fn binary_operator(operator: &BStr) -> bool {
 fn take_word(sh: &mut Shell, quoted: bool) -> ConditionalWord {
     ConditionalWord {
         arg: narg {
-            text: wordtext_node(sh),
-            backquote: mem::take(&mut sh.input.backquotelist),
+            text: mem::take(&mut sh.input.word),
         },
         quoted,
     }
@@ -626,7 +625,8 @@ fn plain_prefix(arg: &narg) -> Option<(usize, BashAssignmentOperator)> {
 }
 
 fn array_element(arg: narg) -> BashArrayElement {
-    let bytes = arg.text.as_bstr();
+    let encoded = arg.text.encode_legacy();
+    let bytes = BStr::new(&encoded.bytes[..encoded.bytes.len() - 1]);
     if bytes.first() == Some(&b'[') {
         if let Some(close) = matching_bracket(bytes, 0) {
             if let Some((operator, value_start)) = assignment_operator(bytes, close + 1) {
@@ -687,16 +687,20 @@ fn assignment_operator(bytes: &[u8], start: usize) -> Option<(BashAssignmentOper
 }
 
 fn arg_part(arg: &narg, start: usize, end: usize) -> narg {
-    let bytes = arg.text.as_bstr();
+    // [spec:nsh:def:idiom.word-ir]
+    let encoded = arg.text.encode_legacy();
+    let bytes = &encoded.bytes[..encoded.bytes.len() - 1];
     let first = backquote_count(&bytes[..start]);
     let count = backquote_count(&bytes[start..end]);
     narg {
-        text: node_text(&bytes[start..end]),
-        backquote: arg
-            .backquote
+        text: ParsedWord::from_legacy_fragment(
+            &bytes[start..end],
+            encoded
+            .substitutions
             .get(first..first + count)
             .unwrap_or(&[])
             .to_vec(),
+        ),
     }
 }
 

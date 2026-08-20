@@ -5050,4 +5050,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.lexer-tokens}
     )}
+    {id introduce-typed-word-ir, covered_rules (
+        idiom.word-ir
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.word-ir}
+    )}
 )

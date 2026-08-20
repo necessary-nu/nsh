@@ -32,7 +32,6 @@ use crate::nodes::{
     NHERE, NIF, NNOT, NOR, NREDIR, NSEMI, NSUBSHELL, NTO, NTOFD, NUNTIL, NWHILE, NXHERE,
 };
 use crate::output::Dest;
-use crate::parser::{VSLENGTH, VSNORMAL, VSNUL, VSTYPE};
 
 /// Append an already-rendered ASCII fragment with `fmtstr`'s historical
 /// clamp-to-capacity convention.
@@ -1806,8 +1805,9 @@ fn cmdtxt(n: Option<&Node>, text: &mut BString) {
                     return;
                 }
                 NARG => {
-                    p = cur.narg().text.as_bstr();
-                    pc = L_DOTAIL2;
+                    // [spec:nsh:def:idiom.word-ir]
+                    cur.narg().text.render(text);
+                    return;
                 }
                 NHERE | NXHERE => {
                     p = b"<<...";
@@ -1816,7 +1816,7 @@ fn cmdtxt(n: Option<&Node>, text: &mut BString) {
                 NCASE => {
                     let c = cur.ncase();
                     cmdputs(b"case ", text);
-                    cmdputs(c.expr.as_deref().unwrap().narg().text.as_bstr(), text);
+                    c.expr.as_deref().unwrap().narg().text.render(text);
                     cmdputs(b" in ", text);
                     for np in &c.cases {
                         /* the C passes the head of the pattern list, so only
@@ -1947,92 +1947,11 @@ fn cmdlist(np: &[Node], sep: c_int, text: &mut BString) {
 // [spec:dash:def:jobs.cmdputs-fn]
 // [spec:dash:sem:jobs.cmdputs-fn]
 fn cmdputs(s: &[u8], text: &mut BString) {
-    const CTLESC_C: u8 = crate::parser::CTLESC as u8;
-    const CTLVAR_C: u8 = crate::parser::CTLVAR as u8;
-    const CTLENDVAR_C: u8 = crate::parser::CTLENDVAR as u8;
-    const CTLBACKQ_C: u8 = crate::parser::CTLBACKQ as u8;
-    const CTLARI_C: u8 = crate::parser::CTLARI as u8;
-    const CTLENDARI_C: u8 = crate::parser::CTLENDARI as u8;
-    const CTLQUOTEMARK_C: u8 = crate::parser::CTLQUOTEMARK as u8;
-
-    static VSTYPE_TEXT: [&[u8]; (VSTYPE + 1) as usize] = [
-        b"", b"}", b"-", b"+", b"?", b"=", b"%", b"%%", b"#", b"##", b"", b"", b"", b"", b"", b"",
-    ];
-
-    let mut at = 0;
-    let mut subtype: c_int = 0;
-    let mut quoted: c_int = 0;
-
-    while at < s.len() && s[at] != 0 {
-        let mut c = s[at];
-        at += 1;
-        let mut suffix: &[u8] = b"";
-        let mut write_c = true;
-        let mut escaped = [0_u8; 1];
-
-        match c {
-            CTLESC_C => {
-                c = *s.get(at).unwrap_or(&0);
-                at += usize::from(at < s.len());
-            }
-            CTLVAR_C => {
-                subtype = *s.get(at).unwrap_or(&0) as c_int;
-                at += usize::from(at < s.len());
-                suffix = if (subtype & VSTYPE) == VSLENGTH {
-                    b"${#"
-                } else {
-                    b"${"
-                };
-                write_c = false;
-            }
-            CTLENDVAR_C => {
-                suffix = if (quoted & 1) == 0 { b"}" } else { b"\"}" };
-                quoted >>= 1;
-                subtype = 0;
-                write_c = false;
-            }
-            CTLBACKQ_C => {
-                suffix = b"$(...)";
-                write_c = false;
-            }
-            CTLARI_C => {
-                suffix = b"$((";
-                write_c = false;
-            }
-            CTLENDARI_C => {
-                suffix = b"))";
-                write_c = false;
-            }
-            CTLQUOTEMARK_C => {
-                quoted ^= 1;
-                c = b'"';
-            }
-            b'=' if subtype != 0 => {
-                if (subtype & VSTYPE) != VSNORMAL {
-                    quoted <<= 1;
-                }
-                suffix = VSTYPE_TEXT[(subtype & VSTYPE) as usize];
-                if (subtype & VSNUL) != 0 {
-                    c = b':';
-                } else {
-                    write_c = false;
-                }
-            }
-            b'\'' | b'\\' | b'"' | b'$' => {
-                escaped[0] = c;
-                suffix = &escaped;
-                c = b'\\';
-            }
-            _ => {}
+    for &byte in s {
+        if matches!(byte, b'\'' | b'\\' | b'"' | b'$') {
+            text.push(b'\\');
         }
-
-        if write_c {
-            text.push(c);
-        }
-        text.extend_from_slice(suffix);
-    }
-    if (quoted & 1) != 0 {
-        text.push(b'"');
+        text.push(byte);
     }
     /* The C leaves an unadvanced `*nextc = '\0'` for `commandtext` to
      * read as the end of the text. The length is that. */

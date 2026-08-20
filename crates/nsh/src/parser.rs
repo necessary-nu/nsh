@@ -17,7 +17,7 @@ use core::ffi::{c_char, c_int, c_uint};
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::expand::{EXP_QUOTED, expandarg, restore_handler_expandarg, rmescapes_owned};
+use crate::expand::{EXP_QUOTED, expandarg, restore_handler_expandarg};
 use crate::input::{
     pgetc, pgetc_eoa, popfile, pungetc, pungetn, pushstring, setinputstring, unwindfiles,
 };
@@ -29,6 +29,7 @@ use crate::nodes::{
 use crate::syntax::{
     InputUnit, SyntaxClass, SyntaxContext, digit_val, is_digit, is_in_name, is_name,
 };
+use crate::word::ParsedWord;
 
 // ---------------------------------------------------------------------
 // Local transcriptions of the C macros this file uses.
@@ -430,14 +431,16 @@ pub fn issimplecmd(n: Option<&Node>, name: &BStr) -> c_int {
 /// Input storage retains the terminating NUL expected by the lexer;
 /// `cstr_prefix` removes it without exposing a pointer.
 fn wordtext(sh: &Shell) -> &BStr {
-    crate::mystring::cstr_prefix(&sh.input.wordtext)
+    sh.input.word.as_bstr()
 }
 
 /// The last word read, as a node's owned text.
 ///
 /// The bytes are cloned into the syntax tree's owned storage.
 fn wordtext_node(sh: &mut Shell) -> NodeText {
-    NodeText::new(sh.input.wordtext.clone())
+    let mut text = BString::from(sh.input.word.as_bstr());
+    text.push(0);
+    NodeText::new(text)
 }
 
 /*
@@ -764,8 +767,7 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
             if readtoken(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)? == TokenKind::In {
                 while readtoken(sh, TokenContext::NONE)? == TokenKind::Word {
                     args.push(Node::Arg(narg {
-                        text: wordtext_node(sh),
-                        backquote: core::mem::take(&mut sh.input.backquotelist),
+                        text: mem::take(&mut sh.input.word),
                     }));
                 }
                 if sh.input.lasttoken != TokenKind::Newline
@@ -780,8 +782,7 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
                  * it. */
                 let dolatstr: [u8; 7] = crate::mystring::dolatstr.map(|c| c as u8);
                 args.push(Node::Arg(narg {
-                    text: NodeText::new(BString::from(&dolatstr[..])),
-                    backquote: Vec::new(),
+                    text: ParsedWord::from_legacy(BString::from(&dolatstr[..]), Vec::new()),
                 }));
                 /*
                  * Newline or semicolon here is optional (but note
@@ -808,8 +809,7 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
             return Err(synexpect(sh, Some(TokenKind::Word)));
         }
         let expr = Node::Arg(narg {
-            text: wordtext_node(sh),
-            backquote: core::mem::take(&mut sh.input.backquotelist),
+            text: mem::take(&mut sh.input.word),
         });
         if readtoken(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)? != TokenKind::In {
             return Err(synexpect(sh, Some(TokenKind::In)));
@@ -831,8 +831,7 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
                         return Err(synexpect(sh, Some(TokenKind::Word)));
                     }
                     pattern.push(Node::Arg(narg {
-                        text: wordtext_node(sh),
-                        backquote: core::mem::take(&mut sh.input.backquotelist),
+                        text: mem::take(&mut sh.input.word),
                     }));
                     if readtoken(sh, TokenContext::NONE)? != TokenKind::Pipe {
                         break;
@@ -949,8 +948,7 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
         if tok == TokenKind::Word {
             let ordinary_assignment = isassignment(&sh.locale, wordtext(sh)) != 0;
             let mut n = Node::Arg(narg {
-                text: wordtext_node(sh),
-                backquote: core::mem::take(&mut sh.input.backquotelist),
+                text: mem::take(&mut sh.input.word),
             });
             if bash::active(sh)
                 && (word_context != TokenContext::NONE || bash::declaration_context(&args))
@@ -1007,7 +1005,11 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
                 let body = command(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)?;
                 return Ok(Some(Node::Defun(ndefun {
                     linno,
-                    text: word.text,
+                    text: {
+                        let mut name = BString::from(word.text.as_bstr());
+                        name.push(0);
+                        NodeText::new(name)
+                    },
                     body: body.map(Box::new),
                 })));
             }
@@ -1030,8 +1032,7 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
 // [spec:dash:sem:parser.makename-fn]
 pub(crate) fn makename(sh: &mut Shell) -> Node {
     Node::Arg(narg {
-        text: wordtext_node(sh),
-        backquote: core::mem::take(&mut sh.input.backquotelist),
+        text: mem::take(&mut sh.input.word),
     })
 }
 
@@ -1098,12 +1099,7 @@ fn parsefname(sh: &mut Shell, n: &mut Node) -> Result<(), Error> {
         /* TRACE(("Here document %d\n", n->type)); */
         /* `rmescapes` rewrites the word in place and can only shorten it, so
          * the new terminator is where the delimiter now ends. */
-        let mut mark = core::mem::take(&mut sh.input.wordtext);
-        /* The delimiter is compared as bytes, so the terminator that made
-         * it a C string is not part of it. */
-        let n_mark = rmescapes_owned(&mut mark);
-        mark.truncate(n_mark);
-        here.eofmark = mark;
+        here.eofmark = BString::from(sh.input.word.as_bstr());
         /* `parseheredoc` asked the node whether it was NXHERE; the type is
          * settled above, so the answer travels with the here-document. */
         here.expand = n.nhere().r#type == NXHERE;
@@ -1162,8 +1158,7 @@ fn parseheredoc(sh: &mut Shell) -> Result<(), Error> {
             )?;
         }
         let n = Node::Arg(narg {
-            text: wordtext_node(sh),
-            backquote: core::mem::take(&mut sh.input.backquotelist),
+            text: mem::take(&mut sh.input.word),
         });
         /* `here->here->nhere.doc = n` in the C — the same slot, reached
          * through a shared handle instead of a back pointer.  It is written
@@ -2003,11 +1998,11 @@ fn readtoken1(
         }
     }
     sh.input.last_quoteflag = st.quoted;
-    sh.input.backquotelist = mem::take(&mut st.bqlist);
     /* `grabstackblock(len)` reserved the bytes the C had been writing into
      * scratch space, which is what made `wordtext` outlive the next token.
      * Moving the buffer out is the same guarantee. */
-    sh.input.wordtext = mem::take(&mut st.out);
+    // [spec:nsh:def:idiom.word-ir]
+    sh.input.word = ParsedWord::from_legacy(mem::take(&mut st.out), mem::take(&mut st.bqlist));
     sh.input.lasttoken = TokenKind::Word;
     Ok(Token {
         kind: TokenKind::Word,
@@ -2657,8 +2652,7 @@ pub fn expandstr(sh: &mut Shell, ps: &BStr) -> Result<BString, Error> {
         )?;
 
         let n = Node::Arg(narg {
-            text: wordtext_node(sh),
-            backquote: core::mem::take(&mut sh.input.backquotelist),
+            text: mem::take(&mut sh.input.word),
         });
 
         expandarg(sh, &n, None, EXP_QUOTED)?;

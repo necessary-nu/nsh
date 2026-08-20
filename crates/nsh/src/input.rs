@@ -187,11 +187,10 @@ pub struct InputStack {
     /// It is a snapshot, not a second setting: every top-level parse unit
     /// replaces it from this shell's [`crate::options::ShellOptions`].
     parse_dialect: crate::options::Dialect,
-    /// `wordtext` — text of the last word, with the terminating NUL
-    /// `readtoken1` writes.
-    pub(crate) wordtext: bstr::BString,
-    /// `backquotelist` — the command substitutions found in the last word.
-    pub(crate) backquotelist: Vec<Option<crate::nodes::Node>>,
+    // [spec:nsh:def:idiom.word-ir]
+    /// The last parsed word, including its substitutions at their lexical
+    /// positions.
+    pub(crate) word: crate::word::ParsedWord,
     /// `redirnode` — the redirection the last token opened.
     pub(crate) redirnode: Option<crate::nodes::Node>,
     /// `heredoc` — the here-document the last token opened.
@@ -221,8 +220,7 @@ impl InputStack {
             last_quoteflag: false,
             tokpushback: false,
             parse_dialect: crate::options::Dialect::Posix,
-            wordtext: bstr::BString::new(Vec::new()),
-            backquotelist: Vec::new(),
+            word: crate::word::ParsedWord::new(),
             redirnode: None,
             heredoc: None,
             stdin_state: stdin_state_t {

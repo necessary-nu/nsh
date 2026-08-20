@@ -28,12 +28,10 @@
 //!     it) and `ndup.dupfd` are filled in by `expredir` on a tree that may
 //!     be a shared function definition. They are `Cell`s.
 //!
-//! A word's text is an owned [`NodeText`], which is a `BString` carrying the
-//! parser's trailing NUL ([dec:nsh:bytes-not-text]). The C kept a `char *`
-//! into the stack allocator and `copyfunc` called `nodesavestr` on every one
-//! of them; owning the bytes at parse time makes that copy the ordinary
-//! `Clone` and removes the distinction between a tree the allocator still
-//! backs and a tree that outlived its mark.
+//! Parsed arguments own a structural [`crate::word::ParsedWord`]. Function
+//! names and the few remaining raw grammar fields use [`NodeText`] while the
+//! AST itself is being typed; both own their bytes rather than borrowing the
+//! parser's scratch storage.
 //!
 //! `src/mknodes.c` still generates the `nodes.c`/`nodes.h` that the C
 //! reference is built from, but nothing it emits — `nodesize[]`, `calcsize`,
@@ -45,6 +43,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use bstr::{BStr, BString};
 use core::ffi::c_int;
+
+use crate::word::ParsedWord;
 
 mod bash;
 
@@ -272,12 +272,10 @@ pub struct ndefun {
 }
 
 /// `NARG`
+// [spec:nsh:def:idiom.word-ir]
 #[derive(Clone)]
 pub struct narg {
-    pub text: NodeText,
-    /// list of commands in back quotes (C: `struct nodelist *`).  An entry is
-    /// `None` where the C stored a null `n`, which is what `$( )` parses to.
-    pub backquote: Vec<Option<Node>>,
+    pub text: ParsedWord,
 }
 
 /// `NTO`, `NCLOBBER`, `NFROM`, `NFROMTO`, `NAPPEND`
@@ -594,36 +592,18 @@ impl Node {
 pub type funcnode = Node;
 
 // ---------------------------------------------------------------------
-// A word's bytes are not text, and the trailing NUL is part of the value.
-// Both of those are load-bearing for every reader that is still C-shaped,
-// and neither is visible to the differential harness as anything other
-// than "the shell changed".
+// Shell names are bytes rather than UTF-8 text.
 // ---------------------------------------------------------------------
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser::{CTLENDVAR, CTLQUOTEMARK, CTLVAR};
-
-    /// The bytes `"$x"` leaves the parser as: they are invalid UTF-8 by
-    /// construction, so nothing on this path may validate them as text.
-    fn quoted_var() -> BString {
-        BString::from(vec![
-            CTLQUOTEMARK as u8,
-            CTLVAR as u8,
-            b'x',
-            CTLENDVAR as u8,
-            CTLQUOTEMARK as u8,
-            0,
-        ])
-    }
 
     #[test]
-    fn node_text_keeps_the_in_band_control_bytes() {
-        let t = NodeText::new(quoted_var());
-        assert_eq!(t.as_bstr(), &quoted_var()[..5]);
+    fn node_text_preserves_non_utf8_names() {
+        let t = NodeText::new(BString::from(vec![0xff, 0]));
+        assert_eq!(t.as_bstr(), &[0xff]);
         assert!(core::str::from_utf8(t.as_bstr()).is_err());
-        assert_eq!(t.as_cbytes().len(), 6);
-        assert_eq!(t.as_cbytes()[0], CTLQUOTEMARK as u8);
+        assert_eq!(t.as_cbytes(), &[0xff, 0]);
     }
 
     #[test]
@@ -631,10 +611,10 @@ mod tests {
         // `as_bstr` stops one short of the end, so a value built from
         // bytes that already carry their NUL reads back without it -- and
         // the storage still carries one.
-        let src = quoted_var();
+        let src = BString::from(vec![b'n', b'a', b'm', b'e', 0]);
         let t = NodeText::new(BString::from(&src[..]));
-        assert_eq!(t.as_bstr(), &src[..5]);
-        assert_eq!(t.as_cbytes()[5], 0);
+        assert_eq!(t.as_bstr(), &src[..4]);
+        assert_eq!(t.as_cbytes()[4], 0);
     }
 
     #[test]
@@ -642,14 +622,13 @@ mod tests {
         // `copyfunc` is why this matters: a function definition outlives
         // the text it was parsed from, so `copynode` called `nodesavestr`.
         let n = Node::Arg(narg {
-            text: NodeText::new(quoted_var()),
-            backquote: Vec::new(),
+            text: ParsedWord::literal(BString::from("$x")),
         });
         let copy = n.clone();
         assert_eq!(copy.narg().text.as_bstr(), n.narg().text.as_bstr());
         assert_ne!(
-            copy.narg().text.as_cbytes().as_ptr(),
-            n.narg().text.as_cbytes().as_ptr()
+            copy.narg().text.parts().as_ptr(),
+            n.narg().text.parts().as_ptr()
         );
     }
 

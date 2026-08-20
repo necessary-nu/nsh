@@ -127,6 +127,8 @@ pub(crate) mod builtins;
 pub(crate) mod nodes;
 pub(crate) mod signames;
 pub(crate) mod syntax;
+// [spec:nsh:def:idiom.word-ir]
+pub(crate) mod word;
 
 // ---- shell state -----------------------------------------------------
 pub(crate) mod alias;
