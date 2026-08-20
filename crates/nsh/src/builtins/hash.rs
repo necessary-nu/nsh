@@ -13,8 +13,7 @@ use std::io::Write;
 
 use crate::eval::Flow;
 use crate::exec::{
-    CMDNORMAL, CMDUNKNOWN, DO_ERR, PathCursor, clearcmdentry, cmdentry, delete_cmd_entry,
-    find_command, padvance, tblentry,
+    Command, DO_ERR, PathCursor, clearcmdentry, delete_cmd_entry, find_command, padvance,
 };
 
 // [spec:dash:def:exec.hashcmd-fn]
@@ -34,9 +33,10 @@ use crate::exec::{
 // [spec:posix:req:builtin.hash.stderr]
 // [spec:posix:req:builtin.hash.interfaces]
 // [spec:posix:req:builtin.hash.exit-status]
+// [spec:nsh:req:idiom.command-dispatch]
 pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut c: c_int;
-    let mut entry = cmdentry::unknown();
+    let mut entry = Command::Unknown;
     let mut clear: bool;
 
     clear = false;
@@ -63,9 +63,16 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         let lines: Vec<Vec<u8>> = sh
             .commands
             .iter()
-            .filter(|(_, cmdp)| cmdp.cmdtype() == CMDNORMAL)
-            .map(|(name, cmdp)| {
-                printentry(name.as_slice().as_bstr(), cmdp, path.as_slice().as_bstr())
+            .filter_map(|(name, cmdp)| {
+                let Command::External { path_index } = &cmdp.command else {
+                    return None;
+                };
+                Some(printentry(
+                    name.as_slice().as_bstr(),
+                    *path_index,
+                    cmdp.rehash,
+                    path.as_slice().as_bstr(),
+                ))
             })
             .collect();
         for line in lines {
@@ -89,7 +96,7 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             crate::eval::Flow::Done(_) => {}
             exit @ crate::eval::Flow::Exit { .. } => return Ok(exit),
         }
-        if entry.cmdtype() == CMDUNKNOWN {
+        if matches!(&entry, Command::Unknown) {
             c = 1;
         }
     }
@@ -104,11 +111,9 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 /// that walks the command table holds it borrowed across this call, so the
 /// read has to happen before the walk starts. Passing it in is what makes
 /// that visible rather than a surprise.
-fn printentry(name: &BStr, cmdp: &tblentry, pathval: &BStr) -> Vec<u8> {
-    let mut idx: c_int;
+fn printentry(name: &BStr, mut idx: c_int, rehash: bool, pathval: &BStr) -> Vec<u8> {
     let mut candidate = None;
 
-    idx = cmdp.path_index();
     let mut path = PathCursor::new(pathval);
     loop {
         candidate = padvance(&mut path, name);
@@ -127,6 +132,6 @@ fn printentry(name: &BStr, cmdp: &tblentry, pathval: &BStr) -> Vec<u8> {
         .expect("padvance returns one terminated candidate")
         .to_bytes()
         .to_vec();
-    line.extend_from_slice(if cmdp.rehash { b"*\n" } else { b"\n" });
+    line.extend_from_slice(if rehash { b"*\n" } else { b"\n" });
     line
 }

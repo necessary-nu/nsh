@@ -24,16 +24,6 @@ pub(crate) use dialect_dispatch::dispatch_changed;
 #[cfg(test)]
 mod bash_dispatch_tests;
 
-// ---------------------------------------------------------------------
-// src/exec.h constants
-// ---------------------------------------------------------------------
-
-/* values of cmdtype */
-pub const CMDUNKNOWN: c_int = -1; /* no entry in table for command */
-pub const CMDNORMAL: c_int = 0; /* command is an executable program */
-pub const CMDFUNCTION: c_int = 1; /* command is a shell function */
-pub const CMDBUILTIN: c_int = 2; /* command is a shell builtin */
-
 /* action to find_command() */
 pub const DO_ERR: c_int = 0x01; /* prints errors */
 pub const DO_ABS: c_int = 0x02; /* checks absolute paths */
@@ -50,62 +40,14 @@ pub const DO_REGBLTIN: c_int = 0x10; /* regular built-ins and functions only */
 // disagree in Rust.
 
 // [spec:dash:def:exec.cmdentry]
+// [spec:nsh:req:idiom.command-dispatch]
 #[derive(Clone)]
-pub struct cmdentry {
-    command: Command,
-}
-
-#[derive(Clone)]
-enum Command {
+pub(crate) enum Command {
     Unknown,
-    Normal(c_int),
+    External { path_index: c_int },
     // [spec:nsh:req:idiom.structural-ast]
     Function(FunctionDefinition),
     Builtin(&'static builtincmd),
-}
-
-impl cmdentry {
-    pub(crate) fn unknown() -> Self {
-        Self {
-            command: Command::Unknown,
-        }
-    }
-
-    pub(crate) fn builtin_command(command: &'static builtincmd) -> Self {
-        Self {
-            command: Command::Builtin(command),
-        }
-    }
-
-    pub(crate) fn cmdtype(&self) -> c_int {
-        match self.command {
-            Command::Unknown => CMDUNKNOWN,
-            Command::Normal(_) => CMDNORMAL,
-            Command::Function(_) => CMDFUNCTION,
-            Command::Builtin(_) => CMDBUILTIN,
-        }
-    }
-
-    pub(crate) fn path_index(&self) -> c_int {
-        match self.command {
-            Command::Normal(index) => index,
-            _ => unreachable!("only external commands have PATH indices"),
-        }
-    }
-
-    pub(crate) fn builtin(&self) -> &'static builtincmd {
-        match self.command {
-            Command::Builtin(command) => command,
-            _ => unreachable!("only builtin commands have builtin entries"),
-        }
-    }
-
-    pub(crate) fn function(&self) -> FunctionDefinition {
-        match &self.command {
-            Command::Function(function) => function.clone(),
-            _ => unreachable!("only shell functions have function bodies"),
-        }
-    }
 }
 
 // [spec:dash:def:exec.tblentry]
@@ -116,34 +58,11 @@ impl cmdentry {
 /// all disappear. Values are boxed because `find_command` keeps their address
 /// across operations that can insert another command and rebalance the map.
 pub struct tblentry {
-    command: Command,
+    pub(crate) command: Command,
     pub(crate) rehash: bool,
 }
 
 impl tblentry {
-    pub(crate) fn cmdtype(&self) -> c_int {
-        match self.command {
-            Command::Unknown => CMDUNKNOWN,
-            Command::Normal(_) => CMDNORMAL,
-            Command::Function(_) => CMDFUNCTION,
-            Command::Builtin(_) => CMDBUILTIN,
-        }
-    }
-
-    pub(crate) fn path_index(&self) -> c_int {
-        match self.command {
-            Command::Normal(index) => index,
-            _ => unreachable!("only external commands have PATH indices"),
-        }
-    }
-
-    pub(crate) fn builtin(&self) -> &'static builtincmd {
-        match self.command {
-            Command::Builtin(cmd) => cmd,
-            _ => unreachable!("only builtin entries have builtin pointers"),
-        }
-    }
-
     /// `builtinloc` arrives as a value rather than being read here, and
     /// that is not a style choice: the only caller is `clearcmdentry`'s
     /// `retain`, whose closure already holds the table borrowed. Reading
@@ -152,15 +71,9 @@ impl tblentry {
     /// it is exact -- nothing in the closure can change it.
     pub(crate) fn path_dependent(&self, builtinloc: c_int) -> bool {
         match self.command {
-            Command::Normal(_) => true,
+            Command::External { .. } => true,
             Command::Builtin(cmd) => (cmd.flags & BUILTIN_REGULAR) == 0 && builtinloc > 0,
             _ => false,
-        }
-    }
-
-    pub(crate) fn resolved(&self) -> cmdentry {
-        cmdentry {
-            command: self.command.clone(),
         }
     }
 }
@@ -215,8 +128,8 @@ impl CmdTable {
         self.map.get(name)
     }
 
-    pub(crate) fn resolved(&self, name: &BStr) -> Option<cmdentry> {
-        self.get(name).map(tblentry::resolved)
+    pub(crate) fn resolved(&self, name: &BStr) -> Option<Command> {
+        self.get(name).map(|entry| entry.command.clone())
     }
 }
 
@@ -527,7 +440,7 @@ fn test_exec(fullname: &[u8], metadata: &nsh_platform::FileMetadata) -> bool {
 pub fn find_command(
     sh: &mut crate::context::Shell,
     name: &BStr,
-    entry: &mut cmdentry,
+    entry: &mut Command,
     mut act: c_int,
     path: &BStr,
 ) -> Result<crate::eval::Flow, Error> {
@@ -547,11 +460,11 @@ pub fn find_command(
             let executable = nsh_platform::path_metadata(&resolved, true)
                 .is_ok_and(|metadata| test_exec(&resolved_bytes, &metadata));
             if !executable {
-                *entry = cmdentry::unknown();
+                *entry = Command::Unknown;
                 return Ok(crate::eval::Flow::Done((0).into()));
             }
         }
-        entry.command = Command::Normal(-1);
+        *entry = Command::External { path_index: -1 };
         return Ok(crate::eval::Flow::Done((0).into()));
     }
 
@@ -581,13 +494,13 @@ pub fn find_command(
         };
         if (act & bit) != 0 {
             if (act & bit & DO_REGBLTIN) != 0 {
-                *entry = cmdentry::unknown();
+                *entry = Command::Unknown;
                 return Ok(crate::eval::Flow::Done((0).into()));
             }
             update_table = false;
             cached = None;
         } else if !rehash {
-            entry.command = command.clone();
+            *entry = command.clone();
             return Ok(crate::eval::Flow::Done((0).into()));
         }
     }
@@ -601,12 +514,12 @@ pub fn find_command(
         if update_table {
             addcmdentry(sh, name, Command::Builtin(command));
         }
-        entry.command = Command::Builtin(command);
+        *entry = Command::Builtin(command);
         return Ok(crate::eval::Flow::Done((0).into()));
     }
 
     if (act & DO_REGBLTIN) != 0 {
-        *entry = cmdentry::unknown();
+        *entry = Command::Unknown;
         return Ok(crate::eval::Flow::Done((0).into()));
     }
 
@@ -617,7 +530,7 @@ pub fn find_command(
         .filter(|(_, rehash)| *rehash)
         .map_or(-1, |(command, _)| match command {
             Command::Builtin(_) => sh.commands.builtinloc,
-            Command::Normal(index) => *index,
+            Command::External { path_index } => *path_index,
             _ => -1,
         });
     let mut error = nsh_platform::platform_error(nsh_platform::PlatformErrorKind::NotFound);
@@ -631,7 +544,7 @@ pub fn find_command(
                     if update_table {
                         addcmdentry(sh, name, Command::Builtin(command));
                     }
-                    entry.command = Command::Builtin(command);
+                    *entry = Command::Builtin(command);
                     return Ok(crate::eval::Flow::Done((0).into()));
                 }
                 continue;
@@ -650,7 +563,7 @@ pub fn find_command(
                 if let Some(stored) = sh.commands.map.get_mut(name) {
                     stored.rehash = false;
                 }
-                entry.command = command;
+                *entry = command;
                 return Ok(crate::eval::Flow::Done((0).into()));
             }
         }
@@ -681,14 +594,14 @@ pub fn find_command(
                 message.extend_from_slice(&fullname);
                 return Err(sh.sh_error_value(&message));
             };
-            if stored.cmdtype() != CMDFUNCTION {
+            if !matches!(stored.command, Command::Function(_)) {
                 let mut message = name.to_vec();
                 message.extend_from_slice(b" not defined in ");
                 message.extend_from_slice(&fullname);
                 return Err(sh.sh_error_value(&message));
             }
             stored.rehash = false;
-            *entry = stored.resolved();
+            *entry = stored.command.clone();
             return Ok(crate::eval::Flow::Done((0).into()));
         }
 
@@ -697,9 +610,9 @@ pub fn find_command(
             continue;
         }
         if update_table {
-            addcmdentry(sh, name, Command::Normal(index));
+            addcmdentry(sh, name, Command::External { path_index: index });
         }
-        entry.command = Command::Normal(index);
+        *entry = Command::External { path_index: index };
         return Ok(crate::eval::Flow::Done((0).into()));
     }
 
@@ -712,7 +625,7 @@ pub fn find_command(
         message.extend_from_slice(&crate::error::errmsg(&sh.locale, &error, E_EXEC));
         sh.sh_warnx(&message);
     }
-    *entry = cmdentry::unknown();
+    *entry = Command::Unknown;
     Ok(crate::eval::Flow::Done((0).into()))
 }
 
@@ -848,8 +761,8 @@ pub(crate) fn delete_cmd_entry(sh: &mut crate::context::Shell, name: &BStr) {
 // unsatisfiable `#ifdef notdef` guard, and the body is the literal
 // translation of the dead C.
 #[cfg(any())]
-pub fn getcmdentry(sh: &crate::context::Shell, name: &BStr) -> cmdentry {
-    sh.commands.resolved(name).unwrap_or_else(cmdentry::unknown)
+pub fn getcmdentry(sh: &crate::context::Shell, name: &BStr) -> Command {
+    sh.commands.resolved(name).unwrap_or(Command::Unknown)
 }
 
 /*
@@ -888,7 +801,7 @@ pub fn defun(sh: &mut crate::context::Shell, definition: &FunctionDefinition) {
 // [spec:dash:def:exec.unsetfunc-fn]
 // [spec:dash:sem:exec.unsetfunc-fn]
 pub fn unsetfunc(sh: &mut crate::context::Shell, name: &BStr) {
-    if cmdlookup(sh, name, false).is_some_and(|cmdp| cmdp.cmdtype() == CMDFUNCTION) {
+    if cmdlookup(sh, name, false).is_some_and(|cmdp| matches!(cmdp.command, Command::Function(_))) {
         delete_cmd_entry(sh, name);
     }
 }
@@ -941,7 +854,7 @@ mod tests {
 
         let external = BStr::new(b"Texternal");
         let unknown = BStr::new(b"Tunknown");
-        addcmdentry(sh, external, Command::Normal(0));
+        addcmdentry(sh, external, Command::External { path_index: 0 });
         cmdlookup(sh, unknown, true);
 
         let e = sh.commands.get(external).expect("external entry");

@@ -5120,4 +5120,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.logical-descriptors}
     )}
+    {id replace-command-tag-payload-protocols, covered_rules (
+        idiom.command-dispatch
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.command-dispatch}
+    )}
 )

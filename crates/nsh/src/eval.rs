@@ -39,8 +39,7 @@ use std::io::Write as _;
 
 use crate::builtins::{BUILTIN_ASSIGN, BUILTIN_REGULAR, BUILTIN_SPECIAL, builtincmd};
 use crate::error::{FORCEINTON, INTOFF, INTON};
-use crate::exec::{CMDBUILTIN, CMDFUNCTION, CMDUNKNOWN, DO_ERR, DO_NOFUNC, DO_REGBLTIN};
-use crate::exec::{cmdentry, find_command, shellexec};
+use crate::exec::{Command, DO_ERR, DO_NOFUNC, DO_REGBLTIN, find_command, shellexec};
 use crate::expand::{EXP_FULL, EXP_MBCHAR, EXP_REDIR, EXP_TILDE, EXP_VARTILDE};
 use crate::expand::{arglist, strlist};
 use crate::jobs::FORK_NOJOB;
@@ -1227,6 +1226,7 @@ fn parse_command_args(
 // [spec:posix:req:cmd.no-name-redirections-subshell]
 // [spec:posix:req:cmd.no-name-redirection-failure]
 // [spec:posix:req:cmd.no-name-exit-status]
+// [spec:nsh:req:idiom.command-dispatch]
 //
 // The `def` rule quotes the `#ifdef notyet` three-argument prototype;
 // the compiled signature — ported here — is
@@ -1243,7 +1243,7 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
     /* The C's `arglist.list`, which `parse_command_args` moves past the
      * `command [-p]` words while `osp` keeps the original head for `set -x`. */
     let mut head: usize = 0;
-    let mut cmdentry = cmdentry::builtin_command(&crate::builtins::bltin);
+    let mut resolved_command = Command::Builtin(&crate::builtins::bltin);
     let mut jp: Option<usize>;
     let lastarg: Option<usize>;
     let mut path: Option<BString> = None;
@@ -1298,7 +1298,7 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
             match find_command(
                 sh,
                 crate::mystring::cstr_prefix(&arglist.list[head].text),
-                &mut cmdentry,
+                &mut resolved_command,
                 cmd_flag | DO_REGBLTIN,
                 BStr::new(regpath.as_slice()),
             )? {
@@ -1309,17 +1309,18 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
             vlocal += 1;
 
             /* implement bltin and command here */
-            if cmdentry.cmdtype() != CMDBUILTIN {
+            let Command::Builtin(builtin) = &resolved_command else {
                 break;
-            }
+            };
+            let builtin = *builtin;
 
-            pseudovarflag = (cmdentry.builtin().flags & BUILTIN_ASSIGN) as c_int;
+            pseudovarflag = (builtin.flags & BUILTIN_ASSIGN) as c_int;
             if spclbltin < 0 {
-                spclbltin = (cmdentry.builtin().flags & BUILTIN_SPECIAL) as c_int;
+                spclbltin = (builtin.flags & BUILTIN_SPECIAL) as c_int;
                 vlocal = spclbltin ^ (BUILTIN_SPECIAL as c_int);
             }
-            execcmd = core::ptr::eq(cmdentry.builtin(), crate::builtins::EXECCMD) as c_int;
-            if !core::ptr::eq(cmdentry.builtin(), crate::builtins::COMMANDCMD) {
+            execcmd = core::ptr::eq(builtin, crate::builtins::EXECCMD) as c_int;
+            if !core::ptr::eq(builtin, crate::builtins::COMMANDCMD) {
                 break;
             }
 
@@ -1466,8 +1467,10 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
             }
 
             /* Now locate the command. */
-            if cmdentry.cmdtype() != CMDBUILTIN || (cmdentry.builtin().flags & BUILTIN_REGULAR) == 0
-            {
+            if !matches!(
+                &resolved_command,
+                Command::Builtin(builtin) if (builtin.flags & BUILTIN_REGULAR) != 0
+            ) {
                 if path.is_none() {
                     path = Some(crate::var::pathval(sh));
                 }
@@ -1477,7 +1480,7 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
                 match find_command(
                     sh,
                     command_name,
-                    &mut cmdentry,
+                    &mut resolved_command,
                     cmd_flag | DO_ERR,
                     search_path,
                 )? {
@@ -1489,13 +1492,13 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
             jp = None;
 
             /* Execute the command. */
-            match cmdentry.cmdtype() {
-                CMDUNKNOWN => {
+            match resolved_command {
+                Command::Unknown => {
                     status = ExitStatus::NOT_FOUND;
                     break 'bail;
                 }
 
-                CMDBUILTIN => {
+                Command::Builtin(builtin) => {
                     /* `if (evalbltin(..) && !(exception == EXERROR && spclbltin <= 0))
                      *      goto raise;`
                      *
@@ -1509,7 +1512,7 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
                      * shell, which is `docs/api-design.md` 3.3's contract and
                      * the mechanism that decides which errors an embedder
                      * ever sees. Anything else leaves as it arrived. */
-                    match evalbltin(sh, cmdentry.builtin(), &mut arglist.list[head..], flags) {
+                    match evalbltin(sh, builtin, &mut arglist.list[head..], flags) {
                         Ok(Flow::Done(_)) => {}
                         Ok(exit @ Flow::Exit { .. }) => return Ok(exit),
                         Err(e) => {
@@ -1542,11 +1545,10 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
                     }
                 }
 
-                CMDFUNCTION => {
+                Command::Function(function) => {
                     /* `if (evalfun(..)) goto raise;` -- a function body is
                      * not a builtin, so there is nothing to swallow: both an
                      * exit and a diagnostic leave through this frame. */
-                    let function = cmdentry.function();
                     let args = crate::builtins::args(&arglist.list[head..]);
                     match evalfun(sh, &function, &args, flags)? {
                         Flow::Done(_) => {}
@@ -1554,7 +1556,7 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
                     }
                 }
 
-                _ => {
+                Command::External { path_index } => {
                     crate::input::flush_input(sh);
                     let args = crate::builtins::args(&arglist.list[head..]);
 
@@ -1571,7 +1573,7 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
                                     .expect("external command has a PATH")
                                     .as_slice(),
                             ),
-                            cmdentry.path_index(),
+                            path_index,
                         )?);
                     } else {
                         /* `shellexec` replaces the process image or fails;
@@ -1584,7 +1586,7 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
                                     .expect("external command has a PATH")
                                     .as_slice(),
                             ),
-                            cmdentry.path_index(),
+                            path_index,
                         );
                     }
                 }
@@ -1611,7 +1613,7 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
              * whatever failed wrote its own.
              *
              * `redirectsafe` hands its error back, so the usual way in
-             * carries the value. The other way in is `CMDUNKNOWN` with
+             * carries the value. The other way in is an unknown command with
              * status 127, where there is no value to carry: `find_command`
              * reported "not found" and returned normally, which is
              * `docs/api-design.md` 3.3's "reported and carried on past".
@@ -1742,7 +1744,7 @@ fn evalfun(
     saveloopnest = sh.eval.loopnest;
 
     INTOFF(sh);
-    /* `cmdentry::function` cloned the owned body, so redefining this function
+    /* Command lookup cloned the owned body, so redefining this function
      * while it runs cannot pull the body out from under this call. */
     sh.eval.funcline = function.line;
     // [spec:nsh:req:compat.smoosh.nonlexical-control]
@@ -1783,7 +1785,7 @@ fn evalfun(
 // [spec:dash:def:eval.prehash-fn]
 // [spec:dash:sem:eval.prehash-fn]
 fn prehash(sh: &mut Shell, n: &Node) -> Result<Flow, Error> {
-    let mut entry = cmdentry::unknown();
+    let mut entry = Command::Unknown;
 
     if let Node::Command(command) = n
         && let Some(Node::Word(word)) = command.arguments.first()

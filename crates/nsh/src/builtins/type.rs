@@ -17,9 +17,7 @@ use std::io::Write;
 
 use crate::builtins::BUILTIN_SPECIAL;
 use crate::eval::Flow;
-use crate::exec::{
-    CMDBUILTIN, CMDFUNCTION, CMDNORMAL, DO_ABS, PathCursor, cmdentry, find_command, padvance,
-};
+use crate::exec::{Command, DO_ABS, PathCursor, find_command, padvance};
 use crate::output::Dest;
 
 // [spec:dash:def:exec.typecmd-fn]
@@ -50,6 +48,7 @@ pub fn typecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
 // [spec:dash:def:exec.describe-command-fn]
 // [spec:dash:sem:exec.describe-command-fn]
+// [spec:nsh:req:idiom.command-dispatch]
 pub(crate) fn describe_command(
     sh: &mut Shell,
     dest: Dest,
@@ -102,7 +101,7 @@ pub(crate) fn describe_command(
             .then(|| sh.commands.resolved(command))
             .flatten();
         let was_tracked = tracked.is_some();
-        let mut entry = tracked.unwrap_or_else(cmdentry::unknown);
+        let mut entry = tracked.unwrap_or(Command::Unknown);
         if !was_tracked {
             /* Finally use brute force */
             match find_command(sh, command, &mut entry, DO_ABS, path)? {
@@ -111,9 +110,9 @@ pub(crate) fn describe_command(
             }
         }
 
-        match entry.cmdtype() {
-            CMDNORMAL => {
-                let mut j = entry.path_index();
+        match entry {
+            Command::External { path_index } => {
+                let mut j = path_index;
                 let resolved: BString;
                 let path_bytes: &BStr = if j == -1 {
                     // [spec:posix:req:builtin.command.opt-v]
@@ -155,7 +154,7 @@ pub(crate) fn describe_command(
                 }
             }
 
-            CMDFUNCTION => {
+            Command::Function(_) => {
                 if verbose != 0 {
                     let _ = sh.io.get(dest).write_all(b" is a shell function");
                 } else {
@@ -163,9 +162,9 @@ pub(crate) fn describe_command(
                 }
             }
 
-            CMDBUILTIN => {
+            Command::Builtin(builtin) => {
                 if verbose != 0 {
-                    let record: &[u8] = if (entry.builtin().flags & BUILTIN_SPECIAL) != 0 {
+                    let record: &[u8] = if (builtin.flags & BUILTIN_SPECIAL) != 0 {
                         b" is a special shell builtin"
                     } else {
                         b" is a shell builtin"
@@ -176,7 +175,7 @@ pub(crate) fn describe_command(
                 }
             }
 
-            _ => {
+            Command::Unknown => {
                 if verbose != 0 {
                     let _ = sh.io.get(dest).write_all(b": not found\n");
                 }

@@ -1,15 +1,15 @@
 use bstr::{BStr, ByteSlice as _};
 
-use super::{CMDBUILTIN, CMDUNKNOWN, cmdentry, find_command};
+use super::{Command, find_command};
 
 fn set_bash(sh: &mut crate::context::Shell, on: bool) {
     crate::options::set_option_by_name(sh, BStr::new(b"bash"), on).unwrap();
     crate::options::options_changed(sh).unwrap();
 }
 
-fn find(sh: &mut crate::context::Shell, name: &BStr) -> cmdentry {
+fn find(sh: &mut crate::context::Shell, name: &BStr) -> Command {
     let path = crate::var::pathval(sh);
-    let mut entry = cmdentry::unknown();
+    let mut entry = Command::Unknown;
     let _ = find_command(sh, name, &mut entry, 0, path.as_bstr()).unwrap();
     entry
 }
@@ -29,6 +29,7 @@ fn bash_only_lookup_is_per_shell() {
 }
 
 // [spec:nsh:req:compat.bash.options-builtins-dispatch/test]
+// [spec:nsh:req:idiom.command-dispatch/test]
 #[test]
 fn notification_invalidates_builtin_cache() {
     let _guard = crate::testutil::lock();
@@ -36,12 +37,12 @@ fn notification_invalidates_builtin_cache() {
     let name = BStr::new(b"shopt");
     set_bash(&mut sh, true);
 
-    assert_eq!(find(&mut sh, name).cmdtype(), CMDBUILTIN);
+    assert!(matches!(find(&mut sh, name), Command::Builtin(_)));
     assert!(sh.commands.get(name).is_some());
 
     set_bash(&mut sh, false);
     assert!(sh.commands.get(name).is_none());
-    assert_eq!(find(&mut sh, name).cmdtype(), CMDUNKNOWN);
+    assert!(matches!(find(&mut sh, name), Command::Unknown));
 }
 
 // [spec:nsh:req:compat.bash.options-builtins-dispatch/test]
@@ -51,9 +52,9 @@ fn lookup_stamp_invalidates_cache() {
     let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
     let name = BStr::new(b"shopt");
     set_bash(&mut sh, true);
-    assert_eq!(find(&mut sh, name).cmdtype(), CMDBUILTIN);
+    assert!(matches!(find(&mut sh, name), Command::Builtin(_)));
 
     sh.options.set_flag(crate::options::bash, 0);
-    assert_eq!(find(&mut sh, name).cmdtype(), CMDUNKNOWN);
+    assert!(matches!(find(&mut sh, name), Command::Unknown));
     assert!(sh.commands.get(name).is_none());
 }
