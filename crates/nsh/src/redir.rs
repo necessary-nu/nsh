@@ -248,7 +248,7 @@ impl OpenFailureContext {
         {
             crate::status::ExitStatus::NOT_FOUND
         } else {
-            crate::status::ExitStatus::from_raw(2)
+            crate::status::ExitStatus::from_code(2)
         }
     }
 }
@@ -291,7 +291,7 @@ fn sh_open_with_context(
                 if let Some(err) = crate::error::poll_interrupt(sh) {
                     return Err(err);
                 }
-                if crate::siginbox::signals().pending_signal() == 0 {
+                if crate::siginbox::signals().pending_signal().is_none() {
                     continue;
                 }
                 if mayfail != 0 {
@@ -790,7 +790,7 @@ mod tests {
     fn diagnostic() -> Error {
         Error::Other {
             line: 7,
-            status: 2,
+            status: crate::status::ExitStatus::ERROR,
             message: bstr::BString::from(&b"Bad substitution"[..]),
         }
     }
@@ -830,7 +830,7 @@ mod tests {
         let got = restore_handler_expandarg(&mut sh, Some(diagnostic()))
             .expect("the caught diagnostic is the frame's to return");
         assert_eq!(got.message(), "Bad substitution");
-        assert_eq!(got.status(), 2);
+        assert_eq!(got.status(), crate::status::ExitStatus::ERROR);
         assert_eq!(got.line(), 7);
         assert!(!got.is_interrupt());
     }
@@ -847,14 +847,14 @@ mod tests {
         let got = restore_handler_expandarg(
             &mut sh,
             Some(Error::Interrupted {
-                signal: crate::status::Signal::from_raw(nsh_platform::interrupt_signal().number()),
+                signal: crate::status::Signal::from(nsh_platform::interrupt_signal()),
             }),
         )
         .expect("an interrupt must not be swallowed by this frame");
         assert!(got.is_interrupt());
         assert_eq!(
             got.status(),
-            nsh_platform::interrupt_signal().number() + 128
+            crate::status::Signal::from(nsh_platform::interrupt_signal()).as_status()
         );
     }
 

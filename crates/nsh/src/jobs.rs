@@ -589,9 +589,9 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
         process_group = sh.jobs.initialpgrp;
     }
 
-    crate::trap::setsignal(sh, nsh_platform::terminal_stop_signal().number());
-    crate::trap::setsignal(sh, nsh_platform::terminal_output_signal().number());
-    crate::trap::setsignal(sh, nsh_platform::terminal_input_signal().number());
+    crate::trap::setsignal(sh, nsh_platform::terminal_stop_signal().into());
+    crate::trap::setsignal(sh, nsh_platform::terminal_output_signal().into());
+    crate::trap::setsignal(sh, nsh_platform::terminal_input_signal().into());
     if let (Some(tty), Some(group)) = (fd.as_ref(), process_group) {
         let _ = nsh_platform::set_process_group(ProcessSelector::CurrentProcess, group);
         xtcsetpgrp(sh, tty, group)?;
@@ -1127,11 +1127,11 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<usize>, n: Option<&Node>
         if mode == FORK_FG {
             xxtcsetpgrp(sh, process_group).unwrap_or_else(|e| forkchild_fatal(sh, e));
         }
-        crate::trap::setsignal_in_child(sh, nsh_platform::terminal_stop_signal().number());
-        crate::trap::setsignal_in_child(sh, nsh_platform::terminal_output_signal().number());
+        crate::trap::setsignal_in_child(sh, nsh_platform::terminal_stop_signal().into());
+        crate::trap::setsignal_in_child(sh, nsh_platform::terminal_output_signal().into());
     } else if mode == FORK_BG {
-        crate::trap::ignoresig_in_child(sh, nsh_platform::interrupt_signal().number());
-        crate::trap::ignoresig_in_child(sh, nsh_platform::quit_signal().number());
+        crate::trap::ignoresig_in_child(sh, nsh_platform::interrupt_signal().into());
+        crate::trap::ignoresig_in_child(sh, nsh_platform::quit_signal().into());
         if jp.map_or(false, |i| sh.jobs.tab[i].ps.is_empty()) {
             /* The C closes descriptor 0 and reopens /dev/null, relying on
              * `open` returning the lowest free descriptor to land back on
@@ -1157,9 +1157,9 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<usize>, n: Option<&Node>
         }
     }
     if oldlvl == 0 && iflag(sh) != 0 {
-        crate::trap::setsignal_in_child(sh, nsh_platform::interrupt_signal().number());
-        crate::trap::setsignal_in_child(sh, nsh_platform::quit_signal().number());
-        crate::trap::setsignal_in_child(sh, nsh_platform::termination_signal().number());
+        crate::trap::setsignal_in_child(sh, nsh_platform::interrupt_signal().into());
+        crate::trap::setsignal_in_child(sh, nsh_platform::quit_signal().into());
+        crate::trap::setsignal_in_child(sh, nsh_platform::termination_signal().into());
     }
 
     let Some(ji) = jp else {
@@ -1335,8 +1335,11 @@ pub fn forkexec(
 // [spec:posix:req:jobctl.foreground-process-group-restored]
 // [spec:posix:req:signal.trap-deferred-until-foreground-command-completes]
 // [spec:posix:sem:cmd.async-status-via-wait]
-pub fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c_int, Error> {
-    let st: c_int;
+pub fn waitforjob(
+    sh: &mut crate::context::Shell,
+    jp: Option<usize>,
+) -> Result<crate::status::ExitStatus, Error> {
+    let st: crate::status::ExitStatus;
     let mut terminal_error: Option<(&'static [u8], std::io::Error)> = None;
 
     /* TRACE(("waitforjob(%%%d) called\n", jp ? jobno(jp) : 0)); */
@@ -1649,7 +1652,7 @@ fn waitproc(sh: &mut crate::context::Shell, block: c_int) -> Result<WaitProcess,
         let blocked =
             nsh_platform::BlockedSignals::all().expect("blocking signals around child wait failed");
 
-        while !signals.child_pending() && signals.pending_signal() == 0 {
+        while !signals.child_pending() && signals.pending_signal().is_none() {
             let _ = blocked.suspend();
         }
 
@@ -1913,7 +1916,7 @@ fn xtcsetpgrp(
 // [spec:dash:sem:jobs.getstatus-fn]
 // [spec:posix:req:exit.status-normal-termination]
 // [spec:posix:req:exit.status-signal-terminated]
-pub(crate) fn getstatus(sh: &mut crate::context::Shell, jobp: usize) -> c_int {
+pub(crate) fn getstatus(sh: &mut crate::context::Shell, jobp: usize) -> crate::status::ExitStatus {
     let mut status: ChildStatus;
     let mut ps: usize;
 
@@ -1944,15 +1947,15 @@ pub(crate) fn getstatus(sh: &mut crate::context::Shell, jobp: usize) -> c_int {
     }
 
     let retval = match status {
-        ChildStatus::Exited(code) => c_int::from(code),
+        ChildStatus::Exited(code) => crate::status::ExitStatus::from(code),
         ChildStatus::Signaled { signal, .. } => {
             if signal == nsh_platform::interrupt_signal() {
                 sh.jobs.tab[jobp].sigint = 1;
             }
-            signal.number() + 128
+            crate::status::ExitStatus::from_code(signal.number() + 128)
         }
-        ChildStatus::Stopped(signal) => signal.number() + 128,
-        ChildStatus::Continued => 0,
+        ChildStatus::Stopped(signal) => crate::status::ExitStatus::from_code(signal.number() + 128),
+        ChildStatus::Continued => crate::status::ExitStatus::SUCCESS,
     };
     /* TRACE(("getstatus: job %d, nproc %d, status %x, retval %x\n", ...)); */
     retval

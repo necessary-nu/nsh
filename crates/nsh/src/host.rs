@@ -183,9 +183,7 @@ impl Host for ProcessHost {
     fn attach(&mut self, _sink: SignalSink) {}
 
     fn signal(&mut self, signal: Signal) -> std::io::Result<Disposition> {
-        let signal = nsh_platform::Signal::new(signal.number())
-            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
-        nsh_platform::signal_action(signal).map(|action| match action {
+        nsh_platform::signal_action(signal.platform()).map(|action| match action {
             nsh_platform::SignalAction::Default => Disposition::Default,
             nsh_platform::SignalAction::Ignore => Disposition::Ignore,
             nsh_platform::SignalAction::Catch => Disposition::Catch,
@@ -198,9 +196,7 @@ impl Host for ProcessHost {
             Disposition::Ignore => nsh_platform::SignalAction::Ignore,
             Disposition::Catch => nsh_platform::SignalAction::Catch,
         };
-        let signal = nsh_platform::Signal::new(signal.number())
-            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
-        nsh_platform::install_signal_action(signal, action, crate::trap::onsig)
+        nsh_platform::install_signal_action(signal.platform(), action, crate::trap::onsig)
     }
 
     fn may_replace_process(&mut self) -> bool {
@@ -227,13 +223,13 @@ mod tests {
     fn the_default_host_reports_every_signal_as_default() {
         let mut h = NoHost;
         assert_eq!(
-            h.signal(Signal::from_raw(nsh_platform::interrupt_signal().number(),))
+            h.signal(Signal::from(nsh_platform::interrupt_signal()))
                 .unwrap(),
             Disposition::Default
         );
         assert!(
             h.set_signal(
-                Signal::from_raw(nsh_platform::interrupt_signal().number()),
+                Signal::from(nsh_platform::interrupt_signal()),
                 Disposition::Catch,
             )
             .is_ok()
@@ -297,7 +293,7 @@ mod tests {
             rec.installs()
         );
 
-        crate::trap::setsignal(&mut sh, nsh_platform::termination_signal().number());
+        crate::trap::setsignal(&mut sh, nsh_platform::termination_signal().into());
         assert!(
             rec.installs().contains(&(
                 nsh_platform::termination_signal().number(),
@@ -339,8 +335,8 @@ mod tests {
             .build()
             .unwrap();
         let before = rec.installs().len();
-        crate::trap::setsignal_in_child(&mut sh, nsh_platform::termination_signal().number());
-        crate::trap::ignoresig_in_child(&mut sh, nsh_platform::termination_signal().number());
+        crate::trap::setsignal_in_child(&mut sh, nsh_platform::termination_signal().into());
+        crate::trap::ignoresig_in_child(&mut sh, nsh_platform::termination_signal().into());
         assert_eq!(
             rec.installs().len(),
             before,

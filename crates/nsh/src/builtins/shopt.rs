@@ -44,11 +44,11 @@ pub fn shoptcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 .io
                 .stdout()
                 .write_all(b"shopt: shopt [-pqsu] [-o] [optname ...]\n");
-            return Ok(Flow::Done(0));
+            return Ok(Flow::Done((0).into()));
         }
         Scan::Invalid(option) => {
             invalid_option(sh, &option);
-            return Ok(Flow::Done(2));
+            return Ok(Flow::Done((2).into()));
         }
     };
 
@@ -126,7 +126,7 @@ fn mutate(sh: &mut Shell, selection: &Selection<'_>) -> Result<Flow, Error> {
     if changed {
         crate::options::options_changed(sh)?;
     }
-    Ok(Flow::Done(i32::from(invalid)))
+    Ok(Flow::Done((i32::from(invalid)).into()))
 }
 
 fn report(sh: &mut Shell, selection: &Selection<'_>) -> Result<Flow, Error> {
@@ -149,7 +149,7 @@ fn report(sh: &mut Shell, selection: &Selection<'_>) -> Result<Flow, Error> {
         }
     }
     let named_status = !selection.operands.is_empty() && !all_on;
-    Ok(Flow::Done(i32::from(invalid || named_status)))
+    Ok(Flow::Done((i32::from(invalid || named_status)).into()))
 }
 
 fn names(sh: &Shell, namespace: Namespace) -> Vec<&'static BStr> {

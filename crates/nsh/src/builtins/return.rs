@@ -20,7 +20,7 @@ use crate::eval::{Flow, SKIPFUNC, SKIPFUNCDEF};
 // [spec:posix:sem:builtin.return.utility-defaults]
 pub fn returncmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let skip: c_int;
-    let status: c_int;
+    let status: crate::status::ExitStatus;
 
     /*
      * If called outside a function, do what ksh does;
@@ -28,14 +28,14 @@ pub fn returncmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
      */
     if let Some(want) = args.get(1) {
         skip = SKIPFUNC;
-        status = crate::mystring::number(sh, want)?;
+        status = crate::status::ExitStatus::from_code(crate::mystring::number(sh, want)?);
     } else {
         skip = SKIPFUNCDEF;
         status = sh.status;
     }
     sh.eval.evalskip = skip;
 
-    Ok(Flow::Done(status))
+    Ok(Flow::Done((status).into()))
 }
 
 #[cfg(test)]
@@ -54,18 +54,18 @@ mod tests {
         }
         let mut owned = Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
-        sh.status = last;
+        sh.status = crate::status::ExitStatus::from_code(last);
         let returned = returncmd(sh, &args).unwrap();
         (sh.eval.evalskip, returned)
     }
 
     #[test]
     fn an_operand_is_the_status() {
-        assert_eq!(run(Some(b"7"), 3), (SKIPFUNC, Flow::Done(7)));
+        assert_eq!(run(Some(b"7"), 3), (SKIPFUNC, Flow::Done((7).into())));
     }
 
     #[test]
     fn without_one_the_last_status_stands() {
-        assert_eq!(run(None, 3), (SKIPFUNCDEF, Flow::Done(3)));
+        assert_eq!(run(None, 3), (SKIPFUNCDEF, Flow::Done((3).into())));
     }
 }

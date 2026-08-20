@@ -75,7 +75,7 @@ pub fn exportcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     } else {
         show_vars(sh, args[0], flag, 0);
     }
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }
 
 #[cfg(test)]
@@ -104,11 +104,11 @@ mod tests {
         let name = BStr::new("Texport");
         set_bytes(sh, name, Some(BStr::new("v")), VSTRFIXED).unwrap();
 
-        assert_eq!(run(sh, b"export", &[b"Texport"]), Flow::Done(0));
+        assert_eq!(run(sh, b"export", &[b"Texport"]), Flow::Done((0).into()));
         assert_ne!(flags_bytes(sh, name).unwrap() & VEXPORT, 0);
         assert_eq!(flags_bytes(sh, name).unwrap() & VREADONLY, 0);
 
-        assert_eq!(run(sh, b"readonly", &[b"Texport"]), Flow::Done(0));
+        assert_eq!(run(sh, b"readonly", &[b"Texport"]), Flow::Done((0).into()));
         assert_ne!(flags_bytes(sh, name).unwrap() & VREADONLY, 0);
     }
 
@@ -119,7 +119,10 @@ mod tests {
         let _g = lock();
         let mut owned = Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
-        assert_eq!(run(sh, b"export", &[b"Texport2=set"]), Flow::Done(0));
+        assert_eq!(
+            run(sh, b"export", &[b"Texport2=set"]),
+            Flow::Done((0).into())
+        );
         let name = BStr::new("Texport2");
         assert_eq!(lookup_bytes(sh, name).map(Vec::from), Some(b"set".to_vec()));
         assert_ne!(flags_bytes(sh, name).unwrap() & VEXPORT, 0);

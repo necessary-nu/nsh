@@ -193,7 +193,7 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             let _ = sh.io.stdout().write_all(&label);
             print_limit(sh, how, values, limit);
         }
-        return Ok(Flow::Done(0));
+        return Ok(Flow::Done((0).into()));
     }
 
     let mut values =
@@ -213,7 +213,7 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     } else {
         print_limit(sh, how, values, limit);
     }
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }
 
 #[cfg(test)]

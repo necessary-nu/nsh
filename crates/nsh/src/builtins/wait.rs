@@ -36,12 +36,12 @@ use crate::jobs::{
 // [spec:posix:req:builtin.wait.exit-status-signal]
 pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut jobp: Option<usize>;
-    let mut retval: c_int;
+    let mut retval: crate::status::ExitStatus;
     let mut jp: Option<usize>;
 
     let mut opts = crate::options::Options::new(args);
     opts.next(sh, b"")?;
-    retval = 0;
+    retval = crate::status::ExitStatus::SUCCESS;
 
     let operands = opts.operands();
     'out_lbl: {
@@ -64,14 +64,17 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 }
                 if dowait(sh, DOWAIT_WAITCMD_ALL, None)? == 0 {
                     // sigout:
-                    retval = 128 + crate::siginbox::signals().pending_signal();
+                    retval = crate::siginbox::signals()
+                        .pending_signal()
+                        .expect("an interrupted wait records its signal")
+                        .as_status();
                     break 'out_lbl;
                 }
             }
         }
 
         for spec in operands {
-            retval = 127;
+            retval = crate::status::ExitStatus::NOT_FOUND;
             'repeat: {
                 if spec.first() != Some(&b'%') {
                     let process = u32::try_from(crate::mystring::number(sh, spec)?)
@@ -107,7 +110,10 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 /* loop until process terminated or stopped */
                 if dowait(sh, DOWAIT_WAITCMD, jobp)? == 0 {
                     // sigout:
-                    retval = 128 + crate::siginbox::signals().pending_signal();
+                    retval = crate::siginbox::signals()
+                        .pending_signal()
+                        .expect("an interrupted wait records its signal")
+                        .as_status();
                     break 'out_lbl;
                 }
                 let i = jobp.unwrap();
@@ -119,5 +125,5 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
     }
     // out:
-    Ok(Flow::Done(retval))
+    Ok(Flow::Done((retval).into()))
 }

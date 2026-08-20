@@ -50,7 +50,7 @@ pub fn breakcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         };
         sh.eval.skipcount = n;
     }
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }
 
 #[cfg(test)]
@@ -71,7 +71,7 @@ mod tests {
         let mut owned = Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
         sh.eval.loopnest = nest;
-        assert_eq!(breakcmd(sh, &args).unwrap(), Flow::Done(0));
+        assert_eq!(breakcmd(sh, &args).unwrap(), Flow::Done((0).into()));
         (sh.eval.evalskip, sh.eval.skipcount)
     }
 

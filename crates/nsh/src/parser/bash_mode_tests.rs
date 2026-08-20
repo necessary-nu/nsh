@@ -22,7 +22,7 @@ fn dialect_changes_apply_next_parse_unit() {
     assert_eq!(sh.input.parse_dialect(), crate::options::Dialect::Posix);
     assert!(matches!(
         crate::eval::evaltree(&mut sh, Some(&first), 0).unwrap(),
-        crate::eval::Flow::Done(0)
+        crate::eval::Flow::Done(crate::status::ExitStatus::SUCCESS)
     ));
 
     let second = parse_tree(&mut sh);
@@ -31,14 +31,14 @@ fn dialect_changes_apply_next_parse_unit() {
     assert_eq!(sh.input.parse_dialect(), crate::options::Dialect::Bash);
     assert!(matches!(
         crate::eval::evaltree(&mut sh, Some(&second), 0).unwrap(),
-        crate::eval::Flow::Done(0)
+        crate::eval::Flow::Done(crate::status::ExitStatus::SUCCESS)
     ));
 
     let third = parse_tree(&mut sh);
     assert_eq!(sh.input.parse_dialect(), crate::options::Dialect::Posix);
     assert!(matches!(
         crate::eval::evaltree(&mut sh, Some(&third), 0).unwrap(),
-        crate::eval::Flow::Done(0)
+        crate::eval::Flow::Done(crate::status::ExitStatus::SUCCESS)
     ));
     assert_eq!(
         crate::var::lookup_bytes(&mut sh, BStr::new(b"second")).map(|value| value.to_vec()),

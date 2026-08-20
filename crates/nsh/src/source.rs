@@ -224,7 +224,7 @@ impl Shell {
         match outcome {
             Ok(Flow::Done(status)) => {
                 self.status = status;
-                Ok(ExitStatus::from_raw(status))
+                Ok(status)
             }
             Ok(Flow::Exit { status }) => {
                 /* Apply the status carried by `exit` before entering the
@@ -372,7 +372,7 @@ impl Shell {
 
     /// The status of the last command the shell ran, which is `$?`.
     pub fn status(&self) -> ExitStatus {
-        ExitStatus::from_raw(self.status)
+        self.status
     }
 
     /// Has the shell run `exit`?

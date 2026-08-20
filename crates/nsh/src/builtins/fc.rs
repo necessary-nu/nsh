@@ -186,7 +186,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
          */
     }
     let mut body = || {
-        let mut result_status = 0;
+        let mut result_status = crate::status::ExitStatus::SUCCESS;
         if executing {
             sh.histedit.fc_depth += 1;
             if sh.histedit.fc_depth > MAXHISTLOOPS {
@@ -346,7 +346,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
                 crate::eval::flow!(crate::eval::evalstring(sh, BStr::new(&editcmdbuf), 0,));
             INTON(sh);
 
-            if editor_status == 0 {
+            if editor_status.success() {
                 let edited = nsh_platform::read_path(&path).map_err(|error| {
                     let mut message = b"can't read temporary file ".to_vec();
                     message.extend_from_slice(&file_bytes);
@@ -380,7 +380,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
         if sh.displayhist != 0 {
             sh.displayhist = 0;
         }
-        Ok(Flow::Done(result_status))
+        Ok(Flow::Done((result_status).into()))
     };
 
     if executing {
@@ -405,7 +405,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
          * an error here propagates to whatever frame is outermost. */
         crate::eval::flow!(body());
     }
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }
 
 /// Write one listed history event with a tab before its first command line

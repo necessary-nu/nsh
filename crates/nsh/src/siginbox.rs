@@ -22,9 +22,9 @@
 //! from one thread are coherent whatever the ordering. Relaxed is what
 //! `volatile sig_atomic_t` bought the C, which is what these were.
 
-use core::ffi::c_int;
 use core::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
+use crate::status::Signal;
 use crate::trap::NSIG;
 
 /// What `onsig` may read and write without a receiver.
@@ -66,23 +66,24 @@ pub fn signals() -> &'static SignalSink {
 
 impl SignalSink {
     #[inline]
-    pub(crate) fn signal_pending(&self, signo: c_int) -> bool {
-        self.caught[(signo - 1) as usize].load(Ordering::Relaxed)
+    pub(crate) fn signal_pending(&self, signal: Signal) -> bool {
+        self.caught[(signal.number() - 1) as usize].load(Ordering::Relaxed)
     }
 
     #[inline]
-    pub(crate) fn set_signal_pending(&self, signo: c_int, pending: bool) {
-        self.caught[(signo - 1) as usize].store(pending, Ordering::Relaxed);
+    pub(crate) fn set_signal_pending(&self, signal: Signal, pending: bool) {
+        self.caught[(signal.number() - 1) as usize].store(pending, Ordering::Relaxed);
     }
 
     #[inline]
-    pub(crate) fn pending_signal(&self) -> c_int {
-        self.pending.load(Ordering::Relaxed)
+    pub(crate) fn pending_signal(&self) -> Option<Signal> {
+        Signal::from_number(self.pending.load(Ordering::Relaxed))
     }
 
     #[inline]
-    pub(crate) fn set_pending_signal(&self, signo: c_int) {
-        self.pending.store(signo, Ordering::Relaxed);
+    pub(crate) fn set_pending_signal(&self, signal: Option<Signal>) {
+        self.pending
+            .store(signal.map_or(0, Signal::number), Ordering::Relaxed);
     }
 
     #[inline]
@@ -113,8 +114,8 @@ impl SignalSink {
     /// two. A mirror keyed on "has a non-empty action" would answer
     /// differently for `trap '' INT`.
     #[inline]
-    pub fn is_trapped(&self, signo: c_int) -> bool {
-        self.trapped[signo as usize].load(Ordering::Relaxed)
+    pub fn is_trapped(&self, signal: Signal) -> bool {
+        self.trapped[signal.number() as usize].load(Ordering::Relaxed)
     }
 
     /// Publish `trap[signo].is_some()`.
@@ -130,12 +131,10 @@ impl SignalSink {
     /// Deliver a signal to the shell. The only thing a host's handler may
     /// do, and the whole of what it may do.
     ///
-    /// The body is [`crate::trap::onsig`], which is where it belongs: what
-    /// a delivery *does* is store into four locations — `gotsig`,
-    /// `pending_sig`, `gotsigchld` and `error::intpending` — and those
-    /// live beside the code that polls them, not here. This is the name
-    /// the host knows it by, so an embedder's handler needs no access to
-    /// the crate's internals to be correct.
+    /// A delivery stores into the inbox's caught, pending, child, and
+    /// interrupt atomics. This is the name the host knows it by, so an
+    /// embedder's handler needs no access to the crate's internals to be
+    /// correct.
     ///
     /// Everything it does is async-signal-safe by construction: it reads
     /// two atomics, compares a pid, and stores. It does not allocate, does
@@ -145,12 +144,25 @@ impl SignalSink {
     ///
     /// # Safety
     ///
-    /// Call it from a signal handler and from nowhere else. `signo` must
-    /// be the number the handler was invoked with.
+    /// Call it from a signal handler and from nowhere else.
     #[inline]
-    pub fn raise(&self, signo: c_int) {
-        if let Some(signal) = nsh_platform::Signal::new(signo) {
-            crate::trap::onsig(signal);
+    pub fn raise(&self, signal: Signal) {
+        if signal == Signal::from(nsh_platform::child_signal()) {
+            self.set_child_pending(true);
+            if !self.is_trapped(signal) {
+                return;
+            }
+        }
+
+        self.set_signal_pending(signal, true);
+        self.set_pending_signal(Some(signal));
+
+        if signal == Signal::from(nsh_platform::interrupt_signal()) && !self.is_trapped(signal) {
+            /* The handler stores, and the shell takes delivery at a poll
+             * site it reaches on its own: an EINTR return or `dotrap`.
+             * The platform installs handlers without SA_RESTART, matching
+             * dash, so an interruptible syscall always supplies that poll. */
+            self.set_interrupt_pending(true);
         }
     }
 }

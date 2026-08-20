@@ -10,13 +10,12 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString};
-use core::ffi::c_int;
 use std::io::Write;
 
 use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
 use crate::options::Options;
-use crate::trap::{NSIG, clear_traps, decode_signal, decode_signum, setsignal};
+use crate::trap::{NSIG, SignalSpec, clear_traps, decode_signal, decode_signum, setsignal};
 
 // [spec:posix:req:builtin.trap.opt-p-suitable-for-reinput]
 fn listing_line(signo: usize, action: Option<&BString>) -> Vec<u8> {
@@ -61,8 +60,6 @@ fn write_listing(sh: &mut Shell, signo: usize, include_default: bool) {
 // [spec:posix:req:builtin.trap.stderr-usage]
 // [spec:posix:req:builtin.trap.exit-status]
 pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut signo: c_int;
-
     let mut print = false;
     let mut opts = Options::new(args);
     while let Some(option) = opts.next(sh, b"p")? {
@@ -70,26 +67,23 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
     let ap = opts.operands();
     if ap.is_empty() {
-        signo = 0;
-        while signo < NSIG as c_int {
-            write_listing(sh, signo as usize, print);
-            signo += 1;
+        for index in 0..NSIG {
+            write_listing(sh, index, print);
         }
-        return Ok(Flow::Done(0));
+        return Ok(Flow::Done((0).into()));
     }
     if print {
         for word in ap {
-            signo = decode_signal(word, 0);
-            if signo < 0 {
+            let Some(signal) = decode_signal(word, true) else {
                 let mut message = b"trap: ".to_vec();
                 message.extend_from_slice(word);
                 message.extend_from_slice(b": bad trap\n");
                 let _ = sh.io.stderr().write_all(&message);
-                return Ok(Flow::Done(1));
-            }
-            write_listing(sh, signo as usize, true);
+                return Ok(Flow::Done((1).into()));
+            };
+            write_listing(sh, signal.index(), true);
         }
-        return Ok(Flow::Done(0));
+        return Ok(Flow::Done((0).into()));
     }
     sh.traps.end_subshell_listing();
     if sh.traps.ptrap != 0 {
@@ -98,7 +92,7 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* `trap SIG...` resets, and `trap ACTION SIG...` sets: the first word
      * is the action unless it is itself a signal, or the only word. */
     let first = ap[0];
-    let (mut action, signals) = if ap.len() < 2 || decode_signum(first) >= 0 {
+    let (mut action, signals) = if ap.len() < 2 || decode_signum(first).is_some() {
         (None, ap)
     } else {
         (Some(BString::from(first)), &ap[1..])
@@ -110,14 +104,13 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
      * is this loop rather than that bracket. */
     let blocked = crate::siginbox::SignalsBlocked::new();
     for word in signals {
-        signo = decode_signal(word, 0);
-        if signo < 0 {
+        let Some(signal) = decode_signal(word, true) else {
             let mut message = b"trap: ".to_vec();
             message.extend_from_slice(word);
             message.extend_from_slice(b": bad trap\n");
             let _ = sh.io.stderr().write_all(&message);
-            return Ok(Flow::Done(1));
-        }
+            return Ok(Flow::Done((1).into()));
+        };
         INTOFF(sh);
         /* The C's `action = savestr(action)` makes the next signal in the
          * list copy the previous copy; copying the argument word each time
@@ -139,7 +132,7 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
          * two borrows of `sh.traps`. */
         let replacing_an_action = sh
             .traps
-            .action(signo as usize)
+            .action(signal.index())
             .map_or(false, |old| !old.is_empty());
         if replacing_an_action {
             sh.traps.trapcnt -= 1;
@@ -150,11 +143,11 @@ pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
          * the same way and never leaves a stale pointer for it to load --
          * and the presence bit `onsig` reads instead is published by the
          * same call, with signals blocked so the two cannot disagree. */
-        drop(sh.traps.set(&blocked, signo as usize, newtrap));
-        if signo != 0 {
-            setsignal(sh, signo);
+        drop(sh.traps.set(&blocked, signal.index(), newtrap));
+        if let SignalSpec::Signal(signal) = signal {
+            setsignal(sh, signal);
         }
         INTON(sh);
     }
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }

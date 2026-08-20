@@ -41,7 +41,7 @@ pub fn aliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         for line in lines {
             let _ = sh.io.stdout().write_all(&line);
         }
-        return Ok(Flow::Done(0));
+        return Ok(Flow::Done((0).into()));
     }
     for word in &args[1..] {
         /* n + 1: funny ksh stuff (from 44lite) */
@@ -74,7 +74,7 @@ pub fn aliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
     }
 
-    Ok(Flow::Done(ret))
+    Ok(Flow::Done((ret).into()))
 }
 
 #[cfg(test)]
@@ -92,7 +92,7 @@ mod tests {
         let sh = &mut owned;
         assert_eq!(
             aliascmd(sh, &[BStr::new("alias"), BStr::new("ll=ls -l")]).unwrap(),
-            Flow::Done(0)
+            Flow::Done((0).into())
         );
         assert!(lookup_alias(sh, BStr::new(b"ll"), false).is_some());
     }
@@ -114,7 +114,7 @@ mod tests {
                 ]
             )
             .unwrap(),
-            Flow::Done(1)
+            Flow::Done((1).into())
         );
         assert!(lookup_alias(sh, BStr::new(b"after"), false).is_some());
     }

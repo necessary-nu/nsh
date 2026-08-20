@@ -64,12 +64,12 @@ pub fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             sh.options.set_flag(crate::options::mflag, saved_mflag);
             crate::options::optschanged(sh)?;
             return match outcome? {
-                Flow::Exit { .. } => Ok(Flow::Done(sh.status)),
+                Flow::Exit { .. } => Ok(Flow::Done((sh.status).into())),
                 done @ Flow::Done(_) => Ok(done),
             };
         }
 
         return outcome;
     }
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }

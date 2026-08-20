@@ -170,7 +170,7 @@ pub fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
         nsh_platform::replace_creation_mask(new_mask);
     }
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }
 
 #[cfg(test)]
@@ -194,7 +194,7 @@ mod tests {
         let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
         assert_eq!(
             umaskcmd(sh, &[BStr::new("umask"), BStr::new(mode)]).unwrap(),
-            Flow::Done(0)
+            Flow::Done((0).into())
         );
         nsh_platform::creation_mask()
     }
@@ -246,7 +246,7 @@ mod tests {
             )
             .expect_err("a bad mode fails");
             assert_eq!(e.message().to_vec(), text.to_vec());
-            assert_eq!(e.status(), 2);
+            assert_eq!(e.status().code(), 2);
         }
     }
 }

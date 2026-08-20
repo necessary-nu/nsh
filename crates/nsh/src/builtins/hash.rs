@@ -46,7 +46,7 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
     if clear {
         clearcmdentry(sh);
-        return Ok(Flow::Done(0));
+        return Ok(Flow::Done((0).into()));
     }
 
     let operands = opts.operands();
@@ -71,7 +71,7 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         for line in lines {
             let _ = sh.io.stdout().write_all(&line);
         }
-        return Ok(Flow::Done(0));
+        return Ok(Flow::Done((0).into()));
     }
     c = 0;
     for name in operands {
@@ -93,7 +93,7 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             c = 1;
         }
     }
-    Ok(Flow::Done(c))
+    Ok(Flow::Done((c).into()))
 }
 
 // [spec:dash:def:exec.printentry-fn]

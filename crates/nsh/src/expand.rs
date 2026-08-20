@@ -1990,7 +1990,7 @@ fn varvalue(
         C_DOLLAR | C_QUESTION | C_HASH | C_BANG => {
             let num = match name_byte {
                 C_DOLLAR => i64::from(sh.root_pid.get()),
-                C_QUESTION => i64::from(sh.status),
+                C_QUESTION => i64::from(sh.status.code()),
                 C_HASH => i64::from(sh.options.shellparam.nparam),
                 C_BANG => {
                     let Some(pid) = sh.backgndpid else {

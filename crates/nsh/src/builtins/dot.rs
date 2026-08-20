@@ -9,7 +9,6 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString, ByteSlice};
-use core::ffi::c_int;
 use nsh_platform::ShellBytesExt as _;
 
 use crate::eval::Flow;
@@ -65,20 +64,20 @@ fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Option<BStr
 // [spec:posix:req:builtin.dot.interfaces]
 // [spec:posix:req:builtin.dot.exit-status]
 pub fn dotcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    dotcmd_with_missing_status(sh, args, 1)
+    dotcmd_with_missing_status(sh, args, crate::status::ExitStatus::FAILURE)
 }
 
 // [spec:nsh:req:compat.smoosh.source-builtin]
 pub fn sourcecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    dotcmd_with_missing_status(sh, args, 1)
+    dotcmd_with_missing_status(sh, args, crate::status::ExitStatus::FAILURE)
 }
 
 fn dotcmd_with_missing_status(
     sh: &mut Shell,
     args: &[&BStr],
-    missing_status: c_int,
+    missing_status: crate::status::ExitStatus,
 ) -> Result<Flow, Error> {
-    let mut status: c_int = 0;
+    let mut status = crate::status::ExitStatus::SUCCESS;
 
     let mut opts = crate::options::Options::new(args);
     opts.next(sh, b"")?;
@@ -123,5 +122,5 @@ fn dotcmd_with_missing_status(
         crate::input::popfile(sh);
     }
 
-    Ok(Flow::Done(status))
+    Ok(Flow::Done((status).into()))
 }

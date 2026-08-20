@@ -52,5 +52,5 @@ pub fn jobscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         showjobs(sh, Dest::Stdout, mode)?;
     }
 
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }

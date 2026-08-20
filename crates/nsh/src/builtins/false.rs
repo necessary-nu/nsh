@@ -10,7 +10,7 @@ use bstr::BStr;
 // [spec:dash:def:eval.falsecmd-fn]
 // [spec:dash:sem:eval.falsecmd-fn]
 pub fn falsecmd(_sh: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> {
-    Ok(Flow::Done(1))
+    Ok(Flow::Done((1).into()))
 }
 
 #[cfg(test)]
@@ -20,10 +20,13 @@ mod tests {
     #[test]
     fn always_fails() {
         let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
-        assert_eq!(falsecmd(sh, &[BStr::new("false")]).unwrap(), Flow::Done(1));
+        assert_eq!(
+            falsecmd(sh, &[BStr::new("false")]).unwrap(),
+            Flow::Done((1).into())
+        );
         assert_eq!(
             falsecmd(sh, &[BStr::new("false"), BStr::new("ignored")]).unwrap(),
-            Flow::Done(1)
+            Flow::Done((1).into())
         );
     }
 }

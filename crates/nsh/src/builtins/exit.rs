@@ -28,11 +28,11 @@ use bstr::BStr;
 // [spec:posix:sem:builtin.exit.exit-status]
 pub fn exitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if crate::jobs::stoppedjobs(sh) != 0 {
-        return Ok(Flow::Done(0));
+        return Ok(Flow::Done((0).into()));
     }
 
     let status = match args.get(1) {
-        Some(status) => crate::mystring::number(sh, status)?,
+        Some(status) => crate::status::ExitStatus::from_code(crate::mystring::number(sh, status)?),
         // POSIX gives operand-less `exit` the status immediately preceding
         // a trap action when the command directly ends that action. A
         // subshell clears this context, so the Smoosh nested-action case

@@ -164,7 +164,7 @@ fn bltincmd(
      * Preserve exitstatus of a previous possible redirection
      * as POSIX mandates
      */
-    Ok(crate::eval::Flow::Done(sh.eval.back_exitstatus))
+    Ok(crate::eval::Flow::Done((sh.eval.back_exitstatus).into()))
 }
 
 pub const NUMBUILTINS: usize = 42;

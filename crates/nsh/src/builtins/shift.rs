@@ -36,7 +36,7 @@ pub fn shiftcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     INTOFF(sh);
     sh.options.shellparam.drop_first(n);
     INTON(sh);
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }
 
 #[cfg(test)]
@@ -67,7 +67,10 @@ mod tests {
         let _g = lock();
         let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
         params(sh, &["a", "b", "c"]);
-        assert_eq!(shiftcmd(sh, &[BStr::new("shift")]).unwrap(), Flow::Done(0));
+        assert_eq!(
+            shiftcmd(sh, &[BStr::new("shift")]).unwrap(),
+            Flow::Done((0).into())
+        );
         assert_eq!(sh.options.shellparam.nparam, 2);
         assert_eq!(remaining(sh), vec![b"b".to_vec(), b"c".to_vec()]);
     }
@@ -79,7 +82,7 @@ mod tests {
         params(sh, &["a", "b", "c"]);
         assert_eq!(
             shiftcmd(sh, &[BStr::new("shift"), BStr::new("2")]).unwrap(),
-            Flow::Done(0)
+            Flow::Done((0).into())
         );
         assert_eq!(sh.options.shellparam.nparam, 1);
         assert_eq!(remaining(sh), vec![b"c".to_vec()]);
@@ -93,7 +96,7 @@ mod tests {
         params(sh, &["a", "b"]);
         assert_eq!(
             shiftcmd(sh, &[BStr::new("shift"), BStr::new("2")]).unwrap(),
-            Flow::Done(0)
+            Flow::Done((0).into())
         );
         assert_eq!(sh.options.shellparam.nparam, 0);
         /* The diagnostic comes back as a value now rather than as an
@@ -104,6 +107,6 @@ mod tests {
         let e = shiftcmd(sh, &[BStr::new("shift"), BStr::new("2")])
             .expect_err("shifting past the end fails");
         assert_eq!(e.message().to_vec(), b"can't shift that many".to_vec());
-        assert_eq!(e.status(), 2);
+        assert_eq!(e.status().code(), 2);
     }
 }

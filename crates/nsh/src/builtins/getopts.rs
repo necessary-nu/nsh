@@ -52,7 +52,9 @@ pub fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             .collect()
     };
 
-    Ok(Flow::Done(getopts(sh, operands[0], operands[1], &words)?))
+    Ok(Flow::Done(
+        (getopts(sh, operands[0], operands[1], &words)?).into(),
+    ))
 }
 
 // [spec:dash:def:options.getopts-fn]
@@ -224,13 +226,22 @@ mod tests {
         shell.options.shellparam.optind = 1;
         shell.options.shellparam.optoff = -1;
 
-        assert_eq!(getoptscmd(&mut shell, &args).unwrap(), Flow::Done(0));
+        assert_eq!(
+            getoptscmd(&mut shell, &args).unwrap(),
+            Flow::Done((0).into())
+        );
         assert_eq!(value(&mut shell, "o"), "a");
         assert_eq!(lookup_bytes(&mut shell, BStr::new(b"OPTARG")), None);
-        assert_eq!(getoptscmd(&mut shell, &args).unwrap(), Flow::Done(0));
+        assert_eq!(
+            getoptscmd(&mut shell, &args).unwrap(),
+            Flow::Done((0).into())
+        );
         assert_eq!(value(&mut shell, "o"), "b");
         assert_eq!(value(&mut shell, "OPTARG"), "VAL");
-        assert_ne!(getoptscmd(&mut shell, &args).unwrap(), Flow::Done(0));
+        assert_ne!(
+            getoptscmd(&mut shell, &args).unwrap(),
+            Flow::Done((0).into())
+        );
         assert_eq!(lookup_bytes(&mut shell, BStr::new(b"OPTARG")), None);
         assert_eq!(value(&mut shell, "OPTIND"), "3");
     }
@@ -246,7 +257,10 @@ mod tests {
         shell.options.shellparam.optind = 1;
         shell.options.shellparam.optoff = -1;
 
-        assert_eq!(getoptscmd(&mut shell, &args).unwrap(), Flow::Done(0));
+        assert_eq!(
+            getoptscmd(&mut shell, &args).unwrap(),
+            Flow::Done((0).into())
+        );
         assert_eq!(value(&mut shell, "o"), "?");
         assert_eq!(value(&mut shell, "OPTARG"), "z");
 
@@ -254,7 +268,10 @@ mod tests {
         let loud_args: Vec<&BStr> = loud_words.iter().map(|word| BStr::new(*word)).collect();
         shell.options.shellparam.optind = 1;
         shell.options.shellparam.optoff = -1;
-        assert_eq!(getoptscmd(&mut shell, &loud_args).unwrap(), Flow::Done(0));
+        assert_eq!(
+            getoptscmd(&mut shell, &loud_args).unwrap(),
+            Flow::Done((0).into())
+        );
         assert_eq!(
             shell.take_captured_stderr().unwrap(),
             BString::from("my-program: Illegal option -z\n")

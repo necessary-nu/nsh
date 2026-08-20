@@ -35,5 +35,5 @@ pub fn pwdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     dir.pop();
     dir.push(b'\n');
     let _ = sh.io.stdout().write_all(&dir);
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }

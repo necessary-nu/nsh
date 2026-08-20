@@ -136,7 +136,7 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
      * the loop for the reason the comment above gives, and the closure's
      * `Result<Flow, Error>` is the shape the handler below reads. */
     let mut leaving: Option<crate::status::ExitStatus> = None;
-    let mut explicit_exit_status: Option<c_int> = None;
+    let mut explicit_exit_status: Option<crate::status::ExitStatus> = None;
 
     loop {
         /* What the body had to say, which the C read off `exception`
@@ -252,7 +252,7 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
          * arrive as three different shapes now, and an explicit exit's
          * selected status travels with its control-flow value. */
         let e_is_exit: bool;
-        let selected_status: Option<c_int>;
+        let selected_status: Option<crate::status::ExitStatus>;
         let interrupted: bool;
         let unrecoverable_read: bool;
 
@@ -356,7 +356,7 @@ pub fn main_fn(argv: Vec<Vec<u8>>, streams: crate::streams::Streams) -> crate::s
      * through the borrow that starts on the next line
      * ([dec:nsh:no-ambient-state]). */
     let Ok(mut sh) = Shell::try_new(streams) else {
-        return crate::status::ExitStatus::from_raw(2);
+        return crate::status::ExitStatus::from_code(2);
     };
     /* And it is a shell that owns its process, so it gets the host that
      * says so. `Shell::new` defaults to `NoHost` because a *library* shell
@@ -387,7 +387,7 @@ pub(crate) fn cmdloop(
     top: c_int,
 ) -> Result<crate::eval::Flow, crate::error::Error> {
     let mut inter: c_int;
-    let mut status: c_int = 0;
+    let mut status = crate::status::ExitStatus::SUCCESS;
     let mut numeof: c_int = 0;
     /* `set -i` can change prompting and the other live interactive option
      * effects, but it cannot turn a command file into an interactive input
@@ -415,7 +415,7 @@ pub(crate) fn cmdloop(
         let parsed = crate::parser::parsecmd(sh, inter)?;
         /* showtree(n); DEBUG */
         if let crate::parser::ParseResult::Tree(n) = parsed {
-            let i: c_int;
+            let i: crate::status::ExitStatus;
 
             sh.jobs.job_warning = if sh.jobs.job_warning == 2 { 1 } else { 0 };
             numeof = 0;
@@ -470,7 +470,7 @@ pub(crate) fn cmdloop(
         }
     }
 
-    Ok(crate::eval::Flow::Done(status))
+    Ok(crate::eval::Flow::Done((status).into()))
 }
 
 /// End a forked child, the way `main`'s handler ends one.
@@ -535,7 +535,7 @@ fn read_profile(sh: &mut Shell, name: &BStr) -> Result<crate::eval::Flow, crate:
         BStr::new(crate::mystring::cstr_prefix(&name)),
         crate::input::INPUT_PUSH_FILE | crate::input::INPUT_NOFILE_OK,
     )? {
-        return Ok(crate::eval::Flow::Done(0));
+        return Ok(crate::eval::Flow::Done((0).into()));
     }
 
     /* An `exit` in a profile ends the shell before it ever reads a

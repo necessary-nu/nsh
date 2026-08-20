@@ -5100,4 +5100,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.signal-wait}
     )}
+    {id adopt-core-status-flow-signal-types, covered_rules (
+        idiom.status-flow-signal
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.status-flow-signal}
+    )}
 )

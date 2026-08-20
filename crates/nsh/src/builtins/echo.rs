@@ -105,5 +105,5 @@ pub fn echocmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             break;
         }
     }
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }

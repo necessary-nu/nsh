@@ -41,11 +41,11 @@ pub fn typecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     opts.next(sh, b"")?;
     for name in opts.operands() {
         match describe_command(sh, Dest::Stdout, name, None, 1)? {
-            Flow::Done(status) => err |= status,
+            Flow::Done(status) => err |= i32::from(status.code()),
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
     }
-    Ok(Flow::Done(err))
+    Ok(Flow::Done((err).into()))
 }
 
 // [spec:dash:def:exec.describe-command-fn]
@@ -90,7 +90,7 @@ pub(crate) fn describe_command(
                 let io = sh.io.get(dest);
                 let _ = io.write_all(b"alias ");
                 let _ = io.write_all(&line);
-                return Ok(Flow::Done(0));
+                return Ok(Flow::Done((0).into()));
             }
             break 'out_label;
         }
@@ -180,11 +180,11 @@ pub(crate) fn describe_command(
                 if verbose != 0 {
                     let _ = sh.io.get(dest).write_all(b": not found\n");
                 }
-                return Ok(Flow::Done(127));
+                return Ok(Flow::Done((127).into()));
             }
         }
     }
     // out:
     let _ = sh.io.get(dest).write_all(b"\n");
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }

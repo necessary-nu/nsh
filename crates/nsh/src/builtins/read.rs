@@ -16,6 +16,7 @@ use bstr::{BStr, BString};
 
 use crate::eval::Flow;
 use crate::expand::arglist;
+use crate::status::ExitStatus;
 
 /* glibc <limits.h> */
 const MB_LEN_MAX: usize = 16;
@@ -124,7 +125,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut prompt: Option<CString>;
     let mut startloc: c_int = 0;
     let mut newloc: c_int = 0;
-    let mut status: c_int;
+    let mut status: ExitStatus;
     let mut rflag: c_int;
     let mut delimiter = b'\n';
 
@@ -163,7 +164,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         return Err(sh.sh_error_value(b"arg count"));
     }
 
-    status = 0;
+    status = ExitStatus::SUCCESS;
     /* `STARTSTACKSTR(p)`.  The line is an owned buffer, so the C's cursor is
      * its length and `stackblock()` its base: every `p - stackblock()` below
      * is `line.len()`, and `USTPUTC` is `push`. */
@@ -197,7 +198,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 crate::input::pgetc(sh)?
             };
             if input == crate::syntax::InputUnit::EndOfInput {
-                status = 1;
+                status = ExitStatus::FAILURE;
                 break;
             }
             if input.is(b'\0') && delimiter != b'\0' {
@@ -273,5 +274,5 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
      * halves at once. */
     line.push(b'\0');
     readcmd_handle_line(sh, &mut line, names)?;
-    Ok(Flow::Done(status))
+    Ok(Flow::Done((status).into()))
 }

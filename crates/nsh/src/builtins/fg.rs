@@ -48,7 +48,6 @@ use crate::output::Dest;
 pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut jp: usize;
     let mode: c_int;
-    let mut retval: c_int = 0;
 
     mode = if args[0].first() == Some(&b'f') {
         FORK_FG
@@ -61,7 +60,7 @@ pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* `do { ... } while (*argv && *++argv)`: one pass on the current job
      * when there is no operand, otherwise one pass per operand. */
     let mut index = 0usize;
-    loop {
+    let retval = loop {
         jp = getjob(sh, operands.get(index).copied(), 1)?;
         if mode == FORK_BG {
             set_curjob(sh, jp, CUR_RUNNING);
@@ -69,14 +68,14 @@ pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
         outcmd(sh, jp, 0, Dest::Stdout);
         showpipe(sh, jp, Dest::Stdout);
-        retval = restartjob(sh, jp, mode)?;
+        let status = restartjob(sh, jp, mode)?;
 
         index += 1;
         if index >= operands.len() {
-            break;
+            break status;
         }
-    }
-    Ok(Flow::Done(retval))
+    };
+    Ok(Flow::Done((retval).into()))
 }
 
 // [spec:dash:def:jobs.restartjob-fn]
@@ -92,7 +91,7 @@ pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:jobctl.background-job-brought-to-foreground]
 // [spec:posix:req:jobctl.continue-suspended-job]
 // [spec:posix:req:jobctl.fg-terminal-settings-restore]
-fn restartjob(sh: &mut Shell, jp: usize, mode: c_int) -> Result<c_int, Error> {
+fn restartjob(sh: &mut Shell, jp: usize, mode: c_int) -> Result<crate::status::ExitStatus, Error> {
     let process_group: nsh_platform::ProcessGroupId;
     let mut terminal_error = None;
 
@@ -132,7 +131,7 @@ fn restartjob(sh: &mut Shell, jp: usize, mode: c_int) -> Result<c_int, Error> {
     let status = if mode == FORK_FG {
         waitforjob(sh, Some(jp))
     } else {
-        Ok(0)
+        Ok(crate::status::ExitStatus::SUCCESS)
     };
     INTON(sh);
     let status = status?;

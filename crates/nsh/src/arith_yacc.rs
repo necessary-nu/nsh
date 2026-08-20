@@ -516,7 +516,7 @@ mod tests {
             e.message().to_vec(),
             b"arithmetic expression: division error: \"1/0\"".to_vec()
         );
-        assert_eq!(e.status(), 2);
+        assert_eq!(e.status().code(), 2);
     }
 
     #[test]
@@ -565,7 +565,7 @@ mod tests {
             error.message().to_vec(),
             b"undefined_name: parameter not set".to_vec()
         );
-        assert_eq!(error.status(), 2);
+        assert_eq!(error.status().code(), 2);
 
         assert_eq!(arith(&mut sh, BStr::new(b"assigned_name = 7")).unwrap(), 7);
         assert_eq!(arith(&mut sh, BStr::new(b"0 && skipped_name")).unwrap(), 0);

@@ -316,7 +316,7 @@ fn native_exec_failure(
     command: &BStr,
     error: &std::io::Error,
 ) -> Result<crate::eval::Flow, crate::error::Error> {
-    let status = 126;
+    let status = crate::status::ExitStatus::NOT_EXECUTABLE;
     sh.status = status;
     let mut message = command.to_vec();
     message.extend_from_slice(b": ");
@@ -335,7 +335,7 @@ fn exec_failure(
 ) -> Result<crate::eval::Flow, crate::error::Error> {
     /* Map to POSIX errors */
     let exerrno = nsh_platform::command_exec_failure_status(&error);
-    sh.status = exerrno;
+    sh.status = crate::status::ExitStatus::from_code(exerrno);
     let mut message = Vec::new();
     message.extend_from_slice(command);
     message.extend_from_slice(b": ");
@@ -548,11 +548,11 @@ pub fn find_command(
                 .is_ok_and(|metadata| test_exec(&resolved_bytes, &metadata));
             if !executable {
                 *entry = cmdentry::unknown();
-                return Ok(crate::eval::Flow::Done(0));
+                return Ok(crate::eval::Flow::Done((0).into()));
             }
         }
         entry.command = Command::Normal(-1);
-        return Ok(crate::eval::Flow::Done(0));
+        return Ok(crate::eval::Flow::Done((0).into()));
     }
 
     let configured_path = crate::var::pathval(sh);
@@ -582,13 +582,13 @@ pub fn find_command(
         if (act & bit) != 0 {
             if (act & bit & DO_REGBLTIN) != 0 {
                 *entry = cmdentry::unknown();
-                return Ok(crate::eval::Flow::Done(0));
+                return Ok(crate::eval::Flow::Done((0).into()));
             }
             update_table = false;
             cached = None;
         } else if !rehash {
             entry.command = command.clone();
-            return Ok(crate::eval::Flow::Done(0));
+            return Ok(crate::eval::Flow::Done((0).into()));
         }
     }
 
@@ -602,12 +602,12 @@ pub fn find_command(
             addcmdentry(sh, name, Command::Builtin(command));
         }
         entry.command = Command::Builtin(command);
-        return Ok(crate::eval::Flow::Done(0));
+        return Ok(crate::eval::Flow::Done((0).into()));
     }
 
     if (act & DO_REGBLTIN) != 0 {
         *entry = cmdentry::unknown();
-        return Ok(crate::eval::Flow::Done(0));
+        return Ok(crate::eval::Flow::Done((0).into()));
     }
 
     let environment =
@@ -632,7 +632,7 @@ pub fn find_command(
                         addcmdentry(sh, name, Command::Builtin(command));
                     }
                     entry.command = Command::Builtin(command);
-                    return Ok(crate::eval::Flow::Done(0));
+                    return Ok(crate::eval::Flow::Done((0).into()));
                 }
                 continue;
             }
@@ -651,7 +651,7 @@ pub fn find_command(
                     stored.rehash = false;
                 }
                 entry.command = command;
-                return Ok(crate::eval::Flow::Done(0));
+                return Ok(crate::eval::Flow::Done((0).into()));
             }
         }
 
@@ -689,7 +689,7 @@ pub fn find_command(
             }
             stored.rehash = false;
             *entry = stored.resolved();
-            return Ok(crate::eval::Flow::Done(0));
+            return Ok(crate::eval::Flow::Done((0).into()));
         }
 
         error = nsh_platform::platform_error(nsh_platform::PlatformErrorKind::PermissionDenied);
@@ -700,7 +700,7 @@ pub fn find_command(
             addcmdentry(sh, name, Command::Normal(index));
         }
         entry.command = Command::Normal(index);
-        return Ok(crate::eval::Flow::Done(0));
+        return Ok(crate::eval::Flow::Done((0).into()));
     }
 
     if cached.is_some() && update_table {
@@ -713,7 +713,7 @@ pub fn find_command(
         sh.sh_warnx(&message);
     }
     *entry = cmdentry::unknown();
-    Ok(crate::eval::Flow::Done(0))
+    Ok(crate::eval::Flow::Done((0).into()))
 }
 
 fn native_string_error(

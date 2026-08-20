@@ -29,7 +29,9 @@ use crate::var::{VUNSET, show_vars};
 // [spec:posix:req:builtin.set.exit-status]
 pub fn setcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if args.len() == 1 {
-        return Ok(Flow::Done(show_vars(sh, BStr::new(b""), 0, VUNSET)));
+        return Ok(Flow::Done(
+            (show_vars(sh, BStr::new(b""), 0, VUNSET)).into(),
+        ));
     }
     INTOFF(sh);
     let scan = options(sh, args, 1, false)?;
@@ -41,5 +43,5 @@ pub fn setcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         setparam(sh, &args[scan.next..]);
     }
     INTON(sh);
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }

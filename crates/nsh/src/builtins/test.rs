@@ -400,7 +400,7 @@ impl<'a> TestParser<'a> {
 // [spec:dash:sem:test.testcmd-fn]
 pub fn testcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let Some(command) = args.first() else {
-        return Ok(Flow::Done(1));
+        return Ok(Flow::Done((1).into()));
     };
     let mut expression = &args[1..];
     if *command == b"[".as_slice() {
@@ -416,7 +416,7 @@ pub fn testcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut result = 1;
     loop {
         if expression.is_empty() {
-            return Ok(Flow::Done(result));
+            return Ok(Flow::Done((result).into()));
         }
 
         let forced_operand = expression.len() == 3
@@ -444,7 +444,7 @@ pub fn testcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             let unexpected = parser.word(parser.pos).unwrap();
             return Err(syntax(sh, Some(unexpected), b"unexpected operator"));
         }
-        return Ok(Flow::Done(result ^ i32::from(value)));
+        return Ok(Flow::Done((result ^ i32::from(value)).into()));
     }
 }
 
@@ -596,7 +596,7 @@ mod tests {
         let Flow::Done(status) = testcmd(sh, &args).unwrap() else {
             unreachable!("`test` always finishes")
         };
-        status
+        i32::from(status.code())
     }
 
     #[test]

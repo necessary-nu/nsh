@@ -29,6 +29,7 @@ use core::ffi::c_int;
 
 use crate::escape::{CONV_ESCAPE_SLOP, conv_escape, conv_escape_str};
 use crate::eval::Flow;
+use crate::status::ExitStatus;
 
 mod conv;
 
@@ -79,7 +80,7 @@ struct Operands<'a> {
     next: usize,
     /// The C's `rval`: 1 once a numeric argument was malformed, and the
     /// builtin's exit status. Output still proceeds.
-    status: c_int,
+    status: ExitStatus,
 }
 
 impl<'a> Operands<'a> {
@@ -87,7 +88,7 @@ impl<'a> Operands<'a> {
         Self {
             words,
             next: 0,
-            status: 0,
+            status: ExitStatus::SUCCESS,
         }
     }
 
@@ -197,7 +198,7 @@ impl<'a> Operands<'a> {
         }
 
         sh.sh_warnx(&message);
-        self.status = 1;
+        self.status = ExitStatus::FAILURE;
     }
 }
 
@@ -794,7 +795,7 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 
     // out:
-    Ok(Flow::Done(operands.status))
+    Ok(Flow::Done((operands.status).into()))
 }
 
 #[cfg(test)]
@@ -1007,7 +1008,7 @@ mod tests {
         assert_eq!(operands.getstr(), b"");
         assert_eq!(operands.getuintmax(sh, true), 0);
         assert_eq!(operands.getdouble(sh), 0.0);
-        assert_eq!(operands.status, 0);
+        assert_eq!(operands.status, ExitStatus::SUCCESS);
     }
 
     /// The format is scanned again only while arguments remain and a
@@ -1034,7 +1035,7 @@ mod tests {
         assert_eq!(operands.getuintmax(sh, true), 65);
         assert_eq!(operands.getdouble(sh), 122.0);
         assert_eq!(operands.getuintmax(sh, false), 0);
-        assert_eq!(operands.status, 0);
+        assert_eq!(operands.status, ExitStatus::SUCCESS);
     }
 
     /// The digits of a written-out width are what the field asks for.

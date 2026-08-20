@@ -851,7 +851,7 @@ mod tests {
         let e = options(sh, &args, 1, false).expect_err("-Q is not an option");
 
         assert_eq!(e.message().to_vec(), b"Illegal option -Q".to_vec());
-        assert_eq!(e.status(), 2);
+        assert_eq!(e.status().code(), 2);
     }
 
     #[test]

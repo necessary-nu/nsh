@@ -271,7 +271,7 @@ pub fn onint(sh: &crate::context::Shell) -> Error {
     /* `exitstatus = SIGINT + 128` was here; `Error::status()` answers
      * exactly that for `Interrupted`, so the value already carries it. */
     Error::Interrupted {
-        signal: crate::status::Signal::from_raw(nsh_platform::interrupt_signal().number()),
+        signal: crate::status::Signal::from(nsh_platform::interrupt_signal()),
     }
 }
 
@@ -361,7 +361,7 @@ pub enum Error {
         /// `errlinno` as it stood when the diagnostic was produced.
         line: c_int,
         /// The status the shell takes from it.
-        status: c_int,
+        status: crate::status::ExitStatus,
         /// dash's text, without the `sh: N: cd: ` prefix.
         message: BString,
     },
@@ -378,10 +378,10 @@ impl Error {
     /// the value exists to carry. Now the raise says what it took and the
     /// frame that catches it is the frame that writes it. Same shape as
     /// [`Error::reported`], which always took it this way.
-    pub fn other(line: c_int, status: c_int, msg: &[u8]) -> Error {
+    pub fn other(line: c_int, status: impl Into<crate::status::ExitStatus>, msg: &[u8]) -> Error {
         Error::Other {
             line,
-            status,
+            status: status.into(),
             message: BString::from(msg),
         }
     }
@@ -400,10 +400,10 @@ impl Error {
     /// constructed through it. An empty message is therefore never
     /// rendered, and it must stay that way — a caller that reports one of
     /// these would emit a bare prefix and a newline dash does not.
-    pub fn reported(line: c_int, status: c_int) -> Error {
+    pub fn reported(line: c_int, status: impl Into<crate::status::ExitStatus>) -> Error {
         Error::Other {
             line,
-            status,
+            status: status.into(),
             message: BString::default(),
         }
     }
@@ -443,16 +443,14 @@ impl Error {
     }
 
     /// The exit status the shell takes from this error.
-    pub fn status(&self) -> c_int {
+    pub fn status(&self) -> crate::status::ExitStatus {
         match self {
             /* `onint` sets `exitstatus` to this before it returns, as the
              * C does before it raises. */
-            Error::Interrupted { signal } => signal.number() + 128,
+            Error::Interrupted { signal } => signal.as_status(),
             // [spec:posix:req:sh.exit-status-values]
-            Error::UnrecoverableRead { .. } => {
-                c_int::from(crate::status::ExitStatus::UNRECOVERABLE_READ.code())
-            }
-            Error::Expansion { .. } => 1,
+            Error::UnrecoverableRead { .. } => crate::status::ExitStatus::UNRECOVERABLE_READ,
+            Error::Expansion { .. } => crate::status::ExitStatus::FAILURE,
             Error::Other { status, .. } => *status,
         }
     }
@@ -578,7 +576,11 @@ impl crate::context::Shell {
     /// Builtin-defined failures use this form rather than the parser's
     /// `$0: line: command:` diagnostic spine.
     // [spec:nsh:req:compat.smoosh.error-contracts]
-    pub fn builtin_error_value(&mut self, status: c_int, msg: &[u8]) -> Error {
+    pub fn builtin_error_value(
+        &mut self,
+        status: impl Into<crate::status::ExitStatus>,
+        msg: &[u8],
+    ) -> Error {
         let name = self
             .eval
             .commandname
@@ -724,7 +726,7 @@ mod tests {
 
         /* The value carries what the site took, so propagation
          * through any number of `?` cannot lose it. */
-        assert_eq!(e.status(), 2);
+        assert_eq!(e.status(), crate::status::ExitStatus::ERROR);
         assert_eq!(e.message().to_vec(), b"a diagnostic".to_vec());
 
         /* Nothing here asserts that the raise leaves `$?` alone.
@@ -742,13 +744,16 @@ mod tests {
         let input = Error::unrecoverable_read(7, b"read failed", false);
         assert!(input.is_unrecoverable_read());
         assert_eq!(input.line(), 7);
-        assert_eq!(input.status(), 128);
+        assert_eq!(
+            input.status(),
+            crate::status::ExitStatus::UNRECOVERABLE_READ
+        );
         assert_eq!(input.message(), BStr::new(b"read failed"));
 
         let dot = Error::unrecoverable_read(8, b"dot read failed", true);
         assert!(!dot.is_unrecoverable_read());
         assert_eq!(dot.line(), 8);
-        assert_eq!(dot.status(), 2);
+        assert_eq!(dot.status(), crate::status::ExitStatus::ERROR);
         assert_eq!(dot.message(), BStr::new(b"dot read failed"));
     }
 
@@ -780,7 +785,7 @@ mod tests {
         let e = Error::other(sh.eval.errlinno, 127, b"nosuchcmd: not found");
         let e = sh.report(e);
 
-        assert_eq!(e.status(), 127);
+        assert_eq!(e.status(), crate::status::ExitStatus::NOT_FOUND);
     }
 
     /// Arrange for `onint` to be able to *return*.
@@ -811,13 +816,20 @@ mod tests {
         let e = onint(sh);
 
         assert!(e.is_interrupt());
-        assert_eq!(e.status(), nsh_platform::interrupt_signal().number() + 128);
+        assert_eq!(
+            e.status(),
+            crate::status::Signal::from(nsh_platform::interrupt_signal()).as_status()
+        );
         /* `onint` used to write this to `exitstatus` as well. It does
          * not any more -- and it could not: it takes `&Shell`, a
          * shared receiver, so the type says it reads the shell and
          * does not write it. `Error::status()` answers `signal + 128`
          * for `Interrupted`, and the frame that catches it writes. */
-        assert_eq!(sh.status, 0, "the raise path writes no shell state");
+        assert_eq!(
+            sh.status,
+            crate::status::ExitStatus::SUCCESS,
+            "the raise path writes no shell state"
+        );
         assert!(e.message().is_empty(), "dash prints nothing for a ^C");
     }
 
@@ -884,7 +896,7 @@ mod tests {
         CLEAR_PENDING_INT();
 
         rearm_interrupt(Error::Interrupted {
-            signal: crate::status::Signal::from_raw(nsh_platform::interrupt_signal().number()),
+            signal: crate::status::Signal::from(nsh_platform::interrupt_signal()),
         });
         assert_eq!(int_pending(), 1);
         assert!(poll_interrupt(sh).is_some(), "the next poll site takes it");

@@ -30,6 +30,7 @@
 
 use crate::context::Shell;
 use crate::error::Error;
+use crate::status::ExitStatus;
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::c_int;
 use nsh_platform::Descriptor;
@@ -103,7 +104,7 @@ pub struct EvalState {
     /// Prevent PS4 nesting. (MKINIT)
     pub(crate) inps4: c_int,
     /// exit status of backquoted command
-    pub(crate) back_exitstatus: c_int,
+    pub(crate) back_exitstatus: ExitStatus,
     /// Number of signal trap actions currently being evaluated.
     ///
     /// A special-builtin failure ordinarily terminates a non-interactive
@@ -118,7 +119,7 @@ pub struct EvalState {
     /// A fork clears this: `exit` in a subshell ends the subshell, not the
     /// parent's trap action. Signal actions temporarily replace the value
     /// with the status they interrupted, then restore the outer action.
-    pub(crate) trap_default_exit_status: Option<c_int>,
+    pub(crate) trap_default_exit_status: Option<ExitStatus>,
     /// The line a diagnostic reports — the `17` of `sh: 17: cd: ...`.
     ///
     /// `error.rs`'s `errlinno`. Six sites write it, five of them here
@@ -151,7 +152,7 @@ impl EvalState {
             loopnest: 0,
             funcline: 0,
             inps4: 0,
-            back_exitstatus: 0,
+            back_exitstatus: ExitStatus::SUCCESS,
             signal_trap_depth: 0,
             trap_default_exit_status: None,
             errlinno: 0,
@@ -195,14 +196,14 @@ impl EvalState {
 pub enum Flow {
     /// Evaluation finished. The value is the status, exactly what these
     /// functions returned before there was anything else to say.
-    Done(c_int),
+    Done(ExitStatus),
     /// The shell is exiting: the C's `EXEND` and `EXEXIT`.
     ///
     /// `status` is `Some` when the `exit` builtin selected a status and
     /// `None` for `EXEND`: `set -e`, an `EV_EXIT` evaluation, or an `exec`
     /// that could not happen. The latter already left its status on the
     /// shell.
-    Exit { status: Option<c_int> },
+    Exit { status: Option<ExitStatus> },
 }
 
 impl Flow {
@@ -211,9 +212,9 @@ impl Flow {
     pub const END: Flow = Flow::Exit { status: None };
 
     /// The `EXEXIT` exit: `exit` ran and selected `status`.
-    pub const fn exit(status: c_int) -> Flow {
+    pub fn exit(status: impl Into<ExitStatus>) -> Flow {
         Flow::Exit {
-            status: Some(status),
+            status: Some(status.into()),
         }
     }
 }
@@ -289,7 +290,7 @@ pub fn evalstring(sh: &mut Shell, s: &BStr, flags: c_int) -> Result<Flow, Error>
     let status = flow!(parse_execute(sh, flags));
     crate::input::popfile(sh);
 
-    Ok(Flow::Done(status))
+    Ok(Flow::Done((status).into()))
 }
 
 /// Parse and execute until the current input frame runs out.
@@ -311,14 +312,14 @@ pub fn evalstring(sh: &mut Shell, s: &BStr, flags: c_int) -> Result<Flow, Error>
 // [spec:posix:req:token.incremental-execution]
 // [spec:nsh:req:idiom.lexer-tokens]
 pub(crate) fn parse_execute(sh: &mut Shell, flags: c_int) -> Result<Flow, Error> {
-    let mut status: c_int = 0;
+    let mut status = ExitStatus::SUCCESS;
     loop {
         let n: Option<Node> = match crate::parser::parsecmd(sh, 0)? {
             crate::parser::ParseResult::Eof => break,
             crate::parser::ParseResult::Tree(n) => n,
         };
         {
-            let i: c_int;
+            let i: ExitStatus;
 
             i = flow!(eval_top_level(
                 sh,
@@ -341,7 +342,7 @@ pub(crate) fn parse_execute(sh: &mut Shell, flags: c_int) -> Result<Flow, Error>
         /* `popstackmark(&smark)` — one per parsed command, and one on the
          * way out. */
     }
-    Ok(Flow::Done(status))
+    Ok(Flow::Done((status).into()))
 }
 
 /// Evaluate one parsed top-level command, retaining the rest of an
@@ -364,12 +365,12 @@ pub(crate) fn eval_top_level(
 }
 
 fn redirection_only_status(
-    status: c_int,
+    status: ExitStatus,
     redirection_error: Option<&Error>,
     has_command: bool,
-) -> c_int {
+) -> ExitStatus {
     if redirection_error.is_some() && !has_command {
-        1
+        ExitStatus::FAILURE
     } else {
         status
     }
@@ -390,7 +391,7 @@ fn eval_interactive_sequence(
             exit @ Flow::Exit { .. } => return Ok(exit),
         }
         if sh.eval.evalskip != 0 {
-            return Ok(Flow::Done(sh.status));
+            return Ok(Flow::Done((sh.status).into()));
         }
         return eval_interactive_sequence(sh, Some(sequence.right.as_ref()), flags);
     }
@@ -405,7 +406,7 @@ fn eval_interactive_sequence(
             crate::input::unwindfiles(sh, input_stop);
             crate::var::mkinit_reset(sh);
             crate::error::FORCEINTON(sh);
-            Ok(Flow::Done(status))
+            Ok(Flow::Done((status).into()))
         }
         outcome => outcome,
     }
@@ -434,7 +435,7 @@ fn eval_interactive_sequence(
 // [spec:posix:req:cmd.if-exit-status]
 pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, Error> {
     let mut checkexit: c_int = 0;
-    let mut status: c_int = 0;
+    let mut status = ExitStatus::SUCCESS;
 
     if nflag(sh) == 0
         && let Some(node) = n
@@ -459,7 +460,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
                         Err(error) => {
                             drop(error);
                             checkexit = EV_TESTED;
-                            1
+                            ExitStatus::FAILURE
                         }
                         Ok(()) => flow!(evaltree(
                             sh,
@@ -494,7 +495,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
             Node::Case(command) => flow!(evalcase(sh, command, flags)),
             Node::And(command) => {
                 let left = flow!(evaltree(sh, Some(command.left.as_ref()), EV_TESTED));
-                if left != 0 || sh.eval.evalskip != 0 {
+                if !left.success() || sh.eval.evalskip != 0 {
                     left
                 } else {
                     flow!(evaltree(sh, Some(command.right.as_ref()), flags))
@@ -502,7 +503,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
             }
             Node::Or(command) => {
                 let left = flow!(evaltree(sh, Some(command.left.as_ref()), EV_TESTED));
-                if left == 0 || sh.eval.evalskip != 0 {
+                if left.success() || sh.eval.evalskip != 0 {
                     left
                 } else {
                     flow!(evaltree(sh, Some(command.right.as_ref()), flags))
@@ -520,12 +521,12 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
                 let condition = flow!(evaltree(sh, Some(command.condition.as_ref()), EV_TESTED));
                 if sh.eval.evalskip != 0 {
                     condition
-                } else if condition == 0 {
+                } else if condition.success() {
                     flow!(evaltree(sh, Some(command.then_branch.as_ref()), flags))
                 } else if command.else_branch.is_some() {
                     flow!(evaltree(sh, command.else_branch.as_deref(), flags))
                 } else {
-                    0
+                    ExitStatus::SUCCESS
                 }
             }
             Node::Function(definition) => {
@@ -533,7 +534,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
                     let _ = flow!(prehash_tree(sh, Some(definition.body.as_ref())));
                 }
                 crate::exec::defun(sh, definition);
-                0
+                ExitStatus::SUCCESS
             }
             Node::Bash(_) => {
                 return Err(sh.sh_error_value(b"Bash syntax is parsed but not executable yet"));
@@ -541,7 +542,11 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
             Node::Not(command) => {
                 let status = flow!(evaltree(sh, Some(command.command.as_ref()), EV_TESTED));
                 if sh.eval.evalskip == 0 {
-                    (status == 0) as c_int
+                    if status.success() {
+                        ExitStatus::FAILURE
+                    } else {
+                        ExitStatus::SUCCESS
+                    }
                 } else {
                     status
                 }
@@ -554,8 +559,9 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, flags: c_int) -> Result<Flow, 
     }
     flow!(crate::trap::dotrap(sh));
 
-    if !(eflag(sh) != 0 && (!flags & checkexit) != 0 && status != 0) && (flags & EV_EXIT) == 0 {
-        return Ok(Flow::Done(sh.status));
+    if !(eflag(sh) != 0 && (!flags & checkexit) != 0 && !status.success()) && (flags & EV_EXIT) == 0
+    {
+        return Ok(Flow::Done((sh.status).into()));
     }
     Ok(Flow::END)
 }
@@ -620,15 +626,15 @@ fn evalloop(
     flags: c_int,
 ) -> Result<Flow, Error> {
     let mut skip: c_int;
-    let mut status: c_int;
+    let mut status: ExitStatus;
     let mut flags: c_int = flags;
 
     sh.eval.loopnest += 1;
-    status = 0;
+    status = ExitStatus::SUCCESS;
     flags &= EV_TESTED;
     loop {
         {
-            let mut i: c_int;
+            let mut i: ExitStatus;
 
             i = flow!(evaltree(sh, Some(command.left.as_ref()), EV_TESTED));
             skip = skiploop(sh);
@@ -639,9 +645,13 @@ fn evalloop(
                 /* `continue` in the C do/while: re-test the condition */
             } else {
                 if until {
-                    i = (i == 0) as c_int;
+                    i = if i.success() {
+                        ExitStatus::FAILURE
+                    } else {
+                        ExitStatus::SUCCESS
+                    };
                 }
-                if i != 0 {
+                if !i.success() {
                     break;
                 }
                 status = flow!(evaltree(sh, Some(command.right.as_ref()), flags));
@@ -654,7 +664,7 @@ fn evalloop(
     }
     sh.eval.loopnest -= 1;
 
-    Ok(Flow::Done(status))
+    Ok(Flow::Done((status).into()))
 }
 
 // [spec:dash:def:eval.evalfor-fn]
@@ -664,7 +674,7 @@ fn evalloop(
 // [spec:posix:req:cmd.for-exit-status]
 fn evalfor(sh: &mut Shell, command: &ForCommand, flags: c_int) -> Result<Flow, Error> {
     let mut arglist: arglist = arglist::new();
-    let mut status: c_int;
+    let mut status: ExitStatus;
     let mut flags: c_int = flags;
 
     sh.eval.errlinno = command.line;
@@ -677,7 +687,7 @@ fn evalfor(sh: &mut Shell, command: &ForCommand, flags: c_int) -> Result<Flow, E
         crate::expand::expandarg(sh, argp, Some(&mut arglist), EXP_FULL | EXP_TILDE)?;
     }
 
-    status = 0;
+    status = ExitStatus::SUCCESS;
     sh.eval.loopnest += 1;
     flags &= EV_TESTED;
     for sp in &arglist.list {
@@ -694,7 +704,7 @@ fn evalfor(sh: &mut Shell, command: &ForCommand, flags: c_int) -> Result<Flow, E
     }
     sh.eval.loopnest -= 1;
 
-    Ok(Flow::Done(status))
+    Ok(Flow::Done((status).into()))
 }
 
 // [spec:dash:def:eval.evalcase-fn]
@@ -706,7 +716,7 @@ fn evalfor(sh: &mut Shell, command: &ForCommand, flags: c_int) -> Result<Flow, E
 // [spec:posix:req:cmd.case-clause-terminators]
 fn evalcase(sh: &mut Shell, command: &CaseCommand, flags: c_int) -> Result<Flow, Error> {
     let mut arglist: arglist = arglist::new();
-    let mut status: c_int = 0;
+    let mut status = ExitStatus::SUCCESS;
     let mut fallthrough = false;
 
     sh.eval.errlinno = command.line;
@@ -764,7 +774,7 @@ fn evalcase(sh: &mut Shell, command: &CaseCommand, flags: c_int) -> Result<Flow,
         }
     }
     // out:
-    Ok(Flow::Done(status))
+    Ok(Flow::Done((status).into()))
 }
 
 /*
@@ -789,7 +799,7 @@ fn evalsubshell(
 ) -> Result<Flow, Error> {
     let jp: usize;
     let backgnd: c_int = background as c_int;
-    let mut status: c_int;
+    let mut status: ExitStatus;
     let mut flags: c_int = flags;
 
     sh.eval.errlinno = command.line;
@@ -825,12 +835,12 @@ fn evalsubshell(
         }
         /* the parent tail of the C function; the child path below
          * never returns, so it is reached only from here */
-        status = 0;
+        status = ExitStatus::SUCCESS;
         if backgnd == 0 {
             status = crate::jobs::waitforjob(sh, Some(jp))?;
         }
         INTON(sh);
-        return Ok(Flow::Done(status));
+        return Ok(Flow::Done((status).into()));
     }
     // nofork:
     INTON(sh);
@@ -952,7 +962,7 @@ fn evalpipe(sh: &mut Shell, pipeline: &Pipeline, flags: c_int) -> Result<Flow, E
     let jp: usize;
     let pipelen: c_int;
     let mut prevfd: Option<Descriptor>;
-    let mut status: c_int = 0;
+    let mut status = ExitStatus::SUCCESS;
     let mut flags: c_int = flags;
 
     pipelen = pipeline.commands.len() as c_int;
@@ -1020,7 +1030,7 @@ fn evalpipe(sh: &mut Shell, pipeline: &Pipeline, flags: c_int) -> Result<Flow, E
     }
     INTON(sh);
 
-    Ok(Flow::Done(status))
+    Ok(Flow::Done((status).into()))
 }
 
 /*
@@ -1232,7 +1242,7 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
     let mut spclbltin: c_int;
     let mut cmd_flag: c_int;
     let mut execcmd: c_int;
-    let mut status: c_int;
+    let mut status: ExitStatus;
     let mut vflags: c_int;
     let mut vlocal: c_int;
 
@@ -1253,7 +1263,7 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
     /* First expand the arguments. */
     /* TRACE(("evalcommand(0x%lx, %d) called\n", (long)cmd, flags)); */
     file_stop = crate::input::cur_mark(sh);
-    sh.eval.back_exitstatus = 0;
+    sh.eval.back_exitstatus = ExitStatus::SUCCESS;
 
     cmd_flag = 0;
     execcmd = 0;
@@ -1374,12 +1384,12 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
             status = e.status();
             redir_err = Some(e);
         }
-        Ok(()) => status = 0,
+        Ok(()) => status = ExitStatus::SUCCESS,
     }
 
     'out_lbl: {
         'bail: {
-            if status != 0 {
+            if !status.success() {
                 break 'bail;
             }
 
@@ -1472,7 +1482,7 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
             /* Execute the command. */
             match cmdentry.cmdtype() {
                 CMDUNKNOWN => {
-                    status = 127;
+                    status = ExitStatus::NOT_FOUND;
                     break 'bail;
                 }
 
@@ -1613,7 +1623,7 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
             // redirection failure on a directly invoked special builtin.
             // Its diagnostic was already written by the redirection layer.
             // [spec:nsh:req:compat.smoosh.error-contracts]
-            sh.status = 1;
+            sh.status = ExitStatus::FAILURE;
             return Err(crate::error::Error::reported(sh.eval.errlinno, 1));
         }
 
@@ -1639,7 +1649,7 @@ fn evalcommand(sh: &mut Shell, command: &SimpleCommand, flags: c_int) -> Result<
         )?;
     }
 
-    Ok(Flow::Done(status))
+    Ok(Flow::Done((status).into()))
 }
 
 // [spec:dash:def:eval.evalbltin-fn]
@@ -1671,7 +1681,7 @@ fn evalbltin(
                 entry(sh, &args)?
             }
         };
-        let mut status: c_int = match command_flow {
+        let mut status = match command_flow {
             Flow::Done(status) => status,
             exit @ Flow::Exit { .. } => return Ok(exit),
         };
@@ -1681,10 +1691,10 @@ fn evalbltin(
         if crate::output::outerr(sh.io.stdout()) != 0 {
             // [spec:nsh:req:compat.smoosh.error-contracts]
             sh.command_warnx(b"I/O error");
-            status = 2;
+            status = ExitStatus::ERROR;
         }
         sh.status = status;
-        Ok(Flow::Done(status))
+        Ok(Flow::Done((status).into()))
     })();
 
     // cmddone:
@@ -1781,7 +1791,7 @@ fn prehash(sh: &mut Shell, n: &Node) -> Result<Flow, Error> {
             BStr::new(path.as_slice()),
         );
     }
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }
 
 /// With `set -h`, remember literal command names while a function is
@@ -1790,7 +1800,7 @@ fn prehash(sh: &mut Shell, n: &Node) -> Result<Flow, Error> {
 // [spec:nsh:req:compat.smoosh.hash-all]
 fn prehash_tree(sh: &mut Shell, n: Option<&Node>) -> Result<Flow, Error> {
     let Some(n) = n else {
-        return Ok(Flow::Done(0));
+        return Ok(Flow::Done((0).into()));
     };
 
     match n {
@@ -1833,7 +1843,7 @@ fn prehash_tree(sh: &mut Shell, n: Option<&Node>) -> Result<Flow, Error> {
         Node::Word(_) | Node::Bash(_) => {}
     }
 
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }
 
 /*
@@ -1932,10 +1942,12 @@ mod tests {
     fn flow_yields_a_status() {
         fn body(inner: Result<Flow, Error>) -> Result<Flow, Error> {
             let status = flow!(inner);
-            Ok(Flow::Done(status + 100))
+            Ok(Flow::Done(
+                (ExitStatus::from_code(i32::from(status.code()) + 100)).into(),
+            ))
         }
-        let got = body(Ok(Flow::Done(7)));
-        assert_eq!(got.unwrap(), Flow::Done(107));
+        let got = body(Ok(Flow::Done((7).into())));
+        assert_eq!(got.unwrap(), Flow::Done((107).into()));
     }
 
     /// …and on an exit it returns, so nothing after it runs. That is the
@@ -1949,7 +1961,12 @@ mod tests {
             panic!("flow! must not fall through on an exit");
         }
         let got = body(Ok(Flow::exit(9)));
-        assert_eq!(got.unwrap(), Flow::Exit { status: Some(9) });
+        assert_eq!(
+            got.unwrap(),
+            Flow::Exit {
+                status: Some(ExitStatus::from_code(9))
+            }
+        );
     }
 
     /// A diagnostic still propagates through it, because the `?` is
@@ -1963,7 +1980,7 @@ mod tests {
         }
         let e = Error::Other {
             line: 3,
-            status: 2,
+            status: ExitStatus::ERROR,
             message: bstr::BString::from(&b"nope"[..]),
         };
         let got = body(Err(e));
@@ -1976,7 +1993,12 @@ mod tests {
     // [spec:nsh:req:compat.smoosh.trap-status/test]
     #[test]
     fn explicit_exit_carries_status() {
-        assert_eq!(Flow::exit(9), Flow::Exit { status: Some(9) });
+        assert_eq!(
+            Flow::exit(9),
+            Flow::Exit {
+                status: Some(ExitStatus::from_code(9))
+            }
+        );
         assert_eq!(Flow::END, Flow::Exit { status: None });
         assert_ne!(Flow::exit(9), Flow::END);
     }
@@ -1991,10 +2013,10 @@ mod tests {
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
 
-        sh.status = 9;
+        sh.status = ExitStatus::from_code(9);
         sh.eval.evalskip = SKIPFUNCDEF;
         crate::init::exitreset(sh);
-        assert_eq!(sh.status, 9);
+        assert_eq!(sh.status, ExitStatus::from_code(9));
         assert_eq!(sh.eval.evalskip, 0);
     }
 }

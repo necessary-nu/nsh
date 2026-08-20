@@ -46,7 +46,7 @@ pub fn unsetcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             crate::exec::unsetfunc(sh, name);
         }
     }
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }
 
 #[cfg(test)]
@@ -67,7 +67,7 @@ mod tests {
         set_bytes(sh, name, Some(BStr::new("v")), 0).unwrap();
         assert_eq!(
             unsetcmd(sh, &[BStr::new("unset"), BStr::new("Tunset")]).unwrap(),
-            Flow::Done(0)
+            Flow::Done((0).into())
         );
         assert!(lookup_bytes(sh, name).is_none());
 
@@ -78,7 +78,7 @@ mod tests {
                 &[BStr::new("unset"), BStr::new("-v"), BStr::new("Tunset")]
             )
             .unwrap(),
-            Flow::Done(0)
+            Flow::Done((0).into())
         );
         assert!(lookup_bytes(sh, name).is_none());
 
@@ -89,7 +89,7 @@ mod tests {
                 &[BStr::new("unset"), BStr::new("-f"), BStr::new("Tunset")]
             )
             .unwrap(),
-            Flow::Done(0)
+            Flow::Done((0).into())
         );
         assert!(lookup_bytes(sh, name).is_some(), "-f is the function table");
         unset_bytes(sh, name).unwrap();
@@ -114,7 +114,7 @@ mod tests {
                 ]
             )
             .unwrap(),
-            Flow::Done(0)
+            Flow::Done((0).into())
         );
         assert!(lookup_bytes(sh, name).is_none());
     }

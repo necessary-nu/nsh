@@ -178,7 +178,7 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
     let status =
         i32::from(pwd_unknown && (flags & CD_PHYSICAL) != 0 && (flags & CD_ERROR_IF_UNKNOWN) != 0);
-    Ok(Flow::Done(status))
+    Ok(Flow::Done((status).into()))
 }
 
 // [spec:dash:def:cd.docd-fn]
@@ -345,7 +345,7 @@ mod tests {
                 &[BStr::new(b"cd"), BStr::new(b"-e"), BStr::new(b".")]
             )
             .unwrap(),
-            Flow::Done(0)
+            Flow::Done((0).into())
         );
         assert_eq!(
             cdcmd(
@@ -353,7 +353,7 @@ mod tests {
                 &[BStr::new(b"cd"), BStr::new(b"-Pe"), BStr::new(b".")]
             )
             .unwrap(),
-            Flow::Done(1)
+            Flow::Done((1).into())
         );
     }
 

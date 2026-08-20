@@ -130,7 +130,7 @@ fn on_signal(signal: nsh_platform::Signal) {
     if let Some(sink) = SINK.get() {
         // The only thing a handler may do, and the whole of what it may
         // do. Everything behind it is two atomics and three stores.
-        sink.raise(signal.number());
+        sink.raise(signal.into());
     }
 }
 
@@ -151,9 +151,7 @@ impl Host for FrontendHost {
     fn signal(&mut self, signal: Signal) -> io::Result<Disposition> {
         // `sigaction(signo, NULL, &old)`. The shell needs the inherited
         // value to reproduce dash's "ignored on entry stays ignored".
-        let signal = nsh_platform::Signal::new(signal.number())
-            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
-        nsh_platform::signal_action(signal).map(|action| match action {
+        nsh_platform::signal_action(signal.platform()).map(|action| match action {
             nsh_platform::SignalAction::Ignore => Disposition::Ignore,
             nsh_platform::SignalAction::Default => Disposition::Default,
             nsh_platform::SignalAction::Catch => Disposition::Catch,
@@ -169,9 +167,7 @@ impl Host for FrontendHost {
             Disposition::Ignore => nsh_platform::SignalAction::Ignore,
             Disposition::Default => nsh_platform::SignalAction::Default,
         };
-        let signal = nsh_platform::Signal::new(signal.number())
-            .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
-        nsh_platform::install_signal_action(signal, action, on_signal)
+        nsh_platform::install_signal_action(signal.platform(), action, on_signal)
     }
 
     fn may_replace_process(&mut self) -> bool {
@@ -203,7 +199,7 @@ fn frontend(argv: &[BString]) -> ! {
         Ok(sh) => sh,
         Err(e) => {
             // The diagnostic is already on stderr; this is only the status.
-            std::process::exit(e.status().into());
+            std::process::exit(e.status().code().into());
         }
     };
 
@@ -211,7 +207,7 @@ fn frontend(argv: &[BString]) -> ! {
     // it is interactive. This is dash's `cmdloop(1)`.
     let status = match sh.run(Source::stream()) {
         Ok(st) => st,
-        Err(e) => ExitStatus::from_raw(e.status()),
+        Err(e) => e.status(),
     };
 
     std::process::exit(status.code().into());

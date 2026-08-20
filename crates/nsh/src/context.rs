@@ -152,14 +152,14 @@ pub struct Shell {
     ///
     /// Its own field rather than a member of `eval`, because
     /// `docs/api-design.md` §5 gives it its own row: it is the shell's
-    /// answer to the outside world, and `public-api` replaces the
-    /// `c_int` with an `ExitStatus` without touching the evaluator.
+    /// answer to the outside world, so it has the same `ExitStatus` type
+    /// the public API returns rather than borrowing the evaluator's shape.
     ///
     /// It could only move once the raise path stopped writing it. That
     /// is what the commit before this one did: an error carries the
     /// status it took and the frame that catches it writes it here, so
     /// `sh_error_value`'s 56 call sites need no receiver.
-    pub(crate) status: c_int,
+    pub(crate) status: crate::status::ExitStatus,
     /// The status the shell exited with, once it has.
     ///
     /// `docs/api-design.md` §5's last row, and what it says there is what
@@ -230,7 +230,7 @@ impl Shell {
             histedit: crate::histedit::HistEditState::new(),
             traps: crate::trap::TrapTable::new(),
             input: crate::input::InputStack::new(),
-            status: 0,
+            status: crate::status::ExitStatus::SUCCESS,
             exited: None,
             vars: crate::var::VarTable::new(),
             /* [dec:nsh:host-owns-signals]: a shell that was not told who

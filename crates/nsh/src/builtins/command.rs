@@ -61,5 +61,5 @@ pub fn commandcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
     }
 
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }

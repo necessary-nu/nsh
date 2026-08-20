@@ -33,7 +33,7 @@ pub fn unaliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     while let Some(opt) = opts.next(sh, b"a")? {
         if opt == b'a' {
             rmaliases(sh);
-            return Ok(Flow::Done(0));
+            return Ok(Flow::Done((0).into()));
         }
     }
     i = 0;
@@ -47,5 +47,5 @@ pub fn unaliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
     }
 
-    Ok(Flow::Done(i))
+    Ok(Flow::Done((i).into()))
 }

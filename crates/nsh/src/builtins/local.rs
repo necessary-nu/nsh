@@ -26,5 +26,5 @@ pub fn localcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     for name in &args[1..] {
         make_local_bytes(sh, name, 0)?;
     }
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }

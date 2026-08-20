@@ -16,7 +16,7 @@ use bstr::BStr;
 // [spec:posix:req:builtin.colon.interfaces]
 // [spec:posix:req:builtin.colon.exit-status]
 pub fn truecmd(_sh: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> {
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }
 
 #[cfg(test)]
@@ -28,10 +28,13 @@ mod tests {
     #[test]
     fn always_succeeds() {
         let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
-        assert_eq!(truecmd(sh, &[BStr::new("true")]).unwrap(), Flow::Done(0));
+        assert_eq!(
+            truecmd(sh, &[BStr::new("true")]).unwrap(),
+            Flow::Done((0).into())
+        );
         assert_eq!(
             truecmd(sh, &[BStr::new(":"), BStr::new("ignored")]).unwrap(),
-            Flow::Done(0)
+            Flow::Done((0).into())
         );
     }
 }

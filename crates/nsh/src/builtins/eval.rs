@@ -44,5 +44,5 @@ pub(crate) fn evalcmd(sh: &mut Shell, args: &[&BStr], flags: c_int) -> Result<Fl
         };
         return evalstring(sh, text, flags & EV_TESTED);
     }
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }

@@ -787,7 +787,7 @@ fn preadfd(sh: &mut crate::context::Shell) -> Result<c_int, Error> {
                 .unwrap_or(std::io::ErrorKind::Other);
             if error_kind == std::io::ErrorKind::Interrupted
                 && !(pf_at(sh, 0).prev.is_some()
-                    && crate::siginbox::signals().pending_signal() != 0)
+                    && crate::siginbox::signals().pending_signal().is_some())
             {
                 continue 'retry;
             }

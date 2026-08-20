@@ -15,6 +15,7 @@ use std::io::Write;
 use crate::eval::Flow;
 use crate::jobs::{getjob, ps_pid};
 use crate::output::Dest;
+use crate::trap::SignalSpec;
 
 fn process_target(value: i32) -> nsh_platform::ProcessTarget {
     match value {
@@ -57,8 +58,8 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
      * is reproduced as two returns of the same message. */
     const USAGE: &[u8] =
         b"Usage: kill [-s sigspec | -signum | -sigspec] [pid | job]... or\nkill -l [exitstatus]\0";
-    let mut signo: c_int = -1;
-    let mut list: c_int = 0;
+    let mut signal = None;
+    let mut list = false;
     let mut i: c_int;
     let mut jp: usize;
 
@@ -73,14 +74,14 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
      * same word, which is where `Options` starts. */
     let mut operands: &[&BStr] = &args[1..];
     if args[1].first() == Some(&b'-') {
-        signo = crate::trap::decode_signal(BStr::new(&args[1][1..]), 1);
-        if signo < 0 {
+        signal = crate::trap::decode_signal(BStr::new(&args[1][1..]), false);
+        if signal.is_none() {
             while let Some(c) = opts.next(sh, b"ls:")? {
                 match c {
                     b's' => {
                         let name = opts.arg();
-                        signo = crate::trap::decode_signal(name, 1);
-                        if signo < 0 {
+                        signal = crate::trap::decode_signal(name, false);
+                        if signal.is_none() {
                             let mut message = b"invalid signal number or name: ".to_vec();
                             message.extend_from_slice(name);
                             return Err(sh.sh_error_value(&message));
@@ -88,7 +89,7 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     }
                     /* `default:` (DEBUG: abort()) falls through into 'l' */
                     _ /* default, 'l' */ => {
-                        list = 1;
+                        list = true;
                     }
                 }
             }
@@ -98,35 +99,33 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
     }
 
-    if list == 0 && signo < 0 {
-        signo = nsh_platform::termination_signal().number();
+    if !list && signal.is_none() {
+        signal = Some(SignalSpec::Signal(
+            nsh_platform::termination_signal().into(),
+        ));
     }
 
-    if (((signo < 0 || operands.is_empty()) as c_int) ^ list) != 0 {
+    if (signal.is_none() || operands.is_empty()) != list {
         // goto usage
         return Err(sh.sh_error_value(&USAGE[..USAGE.len() - 1]));
     }
 
-    if list != 0 {
+    if list {
         let Some(status) = operands.first() else {
             let _ = sh.io.get(Dest::Stdout).write_all(b"0\n");
-            let mut i = 1;
-            while i < crate::signames::NSIG as c_int {
-                let mut record = crate::signames::signal_names[i as usize]
-                    .to_bytes()
-                    .to_vec();
+            for index in 1..crate::signames::NSIG {
+                let mut record = crate::signames::signal_names[index].to_bytes().to_vec();
                 record.push(b'\n');
                 let _ = sh.io.get(Dest::Stdout).write_all(&record);
-                i += 1;
             }
-            return Ok(Flow::Done(0));
+            return Ok(Flow::Done((0).into()));
         };
-        signo = crate::mystring::number(sh, status)?;
-        if signo > 128 {
-            signo -= 128;
-        }
-        if 0 < signo && signo < crate::signames::NSIG as c_int {
-            let mut record = crate::signames::signal_names[signo as usize]
+        let number = crate::mystring::number(sh, status)?;
+        let number = if number > 128 { number - 128 } else { number };
+        if let Some(signal) = crate::status::Signal::from_number(number)
+            .filter(|signal| signal.number() < crate::signames::NSIG as i32)
+        {
+            let mut record = crate::signames::signal_names[signal.number() as usize]
                 .to_bytes()
                 .to_vec();
             record.push(b'\n');
@@ -136,7 +135,7 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             message.extend_from_slice(status);
             return Err(sh.sh_error_value(&message));
         }
-        return Ok(Flow::Done(0));
+        return Ok(Flow::Done((0).into()));
     }
 
     i = 0;
@@ -164,10 +163,9 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             };
             process_target(value)
         };
-        let request = match nsh_platform::Signal::new(signo) {
-            Some(signal) => nsh_platform::SignalRequest::Deliver(signal),
-            None if signo == 0 => nsh_platform::SignalRequest::Probe,
-            None => unreachable!("kill signal operands are validated before delivery"),
+        let request = match signal.expect("kill validates a signal before delivery") {
+            SignalSpec::Exit => nsh_platform::SignalRequest::Probe,
+            SignalSpec::Signal(signal) => nsh_platform::SignalRequest::Deliver(signal.platform()),
         };
         if let Err(error) = nsh_platform::send_signal(target, request) {
             let mut message = sh.locale.error_message(&error).into_bytes();
@@ -177,5 +175,5 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
     }
 
-    Ok(Flow::Done(i))
+    Ok(Flow::Done((i).into()))
 }

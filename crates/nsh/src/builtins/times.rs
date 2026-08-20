@@ -52,5 +52,5 @@ pub fn timescmd(sh: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> {
         "{mutime}m{utime:.6}s {mstime}m{stime:.6}s\n\
          {mcutime}m{cutime:.6}s {mcstime}m{cstime:.6}s\n"
     );
-    Ok(Flow::Done(0))
+    Ok(Flow::Done((0).into()))
 }
