@@ -101,6 +101,7 @@ fn evaluator_control_is_carried_by_flow() {
 }
 
 // [spec:nsh:def:idiom.job-control-model/test]
+// [spec:nsh:req:idiom.job-storage/test]
 #[test]
 fn typed_job_control_model() {
     for required in [
@@ -108,8 +109,11 @@ fn typed_job_control_model() {
         "enum JobState",
         "pid: ProcessId",
         "status: Option<ChildStatus>",
-        "prev_job: Option<JobId>",
+        "slots: Vec<Option<Job>>",
+        "order: Vec<JobId>",
         "fn transition_to",
+        "fn position_running",
+        "fn remove",
     ] {
         assert!(JOB_MODEL.contains(required), "missing {required}");
     }
@@ -126,7 +130,12 @@ fn typed_job_control_model() {
         "waited: u8",
         "used: u8",
         "changed: u8",
-        "prev_job: Option<usize>",
+        "used: bool",
+        "prev_job",
+        "enum Link",
+        "CUR_RUNNING",
+        "CUR_STOPPED",
+        "CUR_DELETE",
     ] {
         assert!(
             !JOB_MODEL.contains(forbidden) && !JOBS.contains(forbidden),

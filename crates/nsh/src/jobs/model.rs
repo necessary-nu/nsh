@@ -41,9 +41,7 @@ pub(crate) struct Job {
     pub(crate) sigint: bool,
     pub(crate) jobctl: bool,
     pub(crate) waited: bool,
-    pub(crate) used: bool,
     pub(crate) changed: bool,
-    pub(crate) prev_job: Option<JobId>,
     pub(crate) terminal_settings: Option<nsh_platform::TerminalSettings>,
 }
 
@@ -56,9 +54,7 @@ impl Job {
             sigint: false,
             jobctl: false,
             waited: false,
-            used: false,
             changed: false,
-            prev_job: None,
             terminal_settings: None,
         }
     }
@@ -108,12 +104,44 @@ mod tests {
         assert!(JobState::Stopped.can_transition_to(JobState::Running));
         assert!(JobState::Stopped.can_transition_to(JobState::Done));
     }
+
+    #[test]
+    fn slots_track_job_liveness() {
+        let mut table = JobTable::new();
+        table.slots.resize_with(2, || None);
+        table.occupy_current(JobId(1), Job::new());
+
+        assert_eq!(table.current(), Some(JobId(1)));
+        assert!(table.slots[0].is_none());
+        assert!(table.slots[1].is_some());
+
+        drop(table.remove(JobId(1)));
+        assert_eq!(table.current(), None);
+        assert!(table.slots[1].is_none());
+    }
+
+    #[test]
+    fn ordering_tracks_job_state() {
+        let mut table = JobTable::new();
+        table.slots.resize_with(2, || None);
+        table.occupy_current(JobId(0), Job::new());
+        table.occupy_current(JobId(1), Job::new());
+
+        table[JobId(0)].transition_to(JobState::Stopped);
+        table.position_stopped(JobId(0));
+        table.position_running(JobId(1));
+
+        assert_eq!(table.current(), Some(JobId(0)));
+        assert_eq!(table.previous(), Some(JobId(1)));
+        assert_eq!(table.order_snapshot(), vec![JobId(0), JobId(1)]);
+    }
 }
 
 /// The shell's jobs and the terminal state needed for job control.
+// [spec:nsh:req:idiom.job-storage]
 pub(crate) struct JobTable {
-    pub(crate) tab: Vec<Job>,
-    pub(crate) curjob: Option<JobId>,
+    pub(super) slots: Vec<Option<Job>>,
+    order: Vec<JobId>,
     pub(crate) jobctl: bool,
     pub(crate) initialpgrp: Option<ProcessGroupState>,
     pub(crate) ttyfd: Option<Descriptor>,
@@ -121,11 +149,13 @@ pub(crate) struct JobTable {
     pub(crate) job_warning: c_int,
 }
 
+// [spec:dash:def:jobs.set-curjob-fn]
+// [spec:dash:sem:jobs.set-curjob-fn]
 impl JobTable {
     pub(crate) const fn new() -> Self {
         Self {
-            tab: Vec::new(),
-            curjob: None,
+            slots: Vec::new(),
+            order: Vec::new(),
             jobctl: false,
             initialpgrp: None,
             ttyfd: None,
@@ -133,18 +163,86 @@ impl JobTable {
             job_warning: 0,
         }
     }
+
+    pub(crate) fn current(&self) -> Option<JobId> {
+        match self.order.as_slice() {
+            [current, ..] => Some(*current),
+            [] => None,
+        }
+    }
+
+    pub(crate) fn previous(&self) -> Option<JobId> {
+        match self.order.as_slice() {
+            [_, previous, ..] => Some(*previous),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn order_snapshot(&self) -> Vec<JobId> {
+        let mut snapshot = Vec::with_capacity(self.order.len());
+        snapshot.extend(self.order.iter().copied());
+        snapshot
+    }
+
+    pub(super) fn occupy_current(&mut self, id: JobId, job: Job) {
+        let slot = self
+            .slots
+            .get_mut(id.0)
+            .expect("a job slot must be allocated before occupation");
+        assert!(slot.is_none(), "a live job cannot be overwritten");
+        *slot = Some(job);
+        self.order.retain(|candidate| *candidate != id);
+        self.order.insert(0, id);
+    }
+
+    pub(crate) fn position_running(&mut self, id: JobId) {
+        assert!(
+            self.slots.get(id.0).is_some_and(Option::is_some),
+            "only a live job can be reordered"
+        );
+        self.order.retain(|candidate| *candidate != id);
+        let position = self
+            .order
+            .iter()
+            .position(|candidate| !self[*candidate].is_stopped())
+            .unwrap_or(self.order.len());
+        self.order.insert(position, id);
+    }
+
+    pub(super) fn position_stopped(&mut self, id: JobId) {
+        assert!(
+            self.slots.get(id.0).is_some_and(Option::is_some),
+            "only a live job can be reordered"
+        );
+        self.order.retain(|candidate| *candidate != id);
+        self.order.insert(0, id);
+    }
+
+    pub(super) fn remove(&mut self, id: JobId) -> Job {
+        self.order.retain(|candidate| *candidate != id);
+        self.slots
+            .get_mut(id.0)
+            .and_then(Option::take)
+            .expect("only a live job can be removed")
+    }
 }
 
 impl Index<JobId> for JobTable {
     type Output = Job;
 
     fn index(&self, id: JobId) -> &Self::Output {
-        &self.tab[id.0]
+        self.slots
+            .get(id.0)
+            .and_then(Option::as_ref)
+            .expect("a JobId must name a live job")
     }
 }
 
 impl IndexMut<JobId> for JobTable {
     fn index_mut(&mut self, id: JobId) -> &mut Self::Output {
-        &mut self.tab[id.0]
+        self.slots
+            .get_mut(id.0)
+            .and_then(Option::as_mut)
+            .expect("a JobId must name a live job")
     }
 }

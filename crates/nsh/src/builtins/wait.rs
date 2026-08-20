@@ -48,19 +48,18 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         if operands.is_empty() {
             /* wait for all jobs */
             loop {
-                jp = sh.jobs.curjob;
-                loop {
-                    let Some(i) = jp else {
-                        /* no running procs */
-                        break 'out_lbl;
-                    };
+                jp = None;
+                for i in sh.jobs.order_snapshot() {
                     if sh.jobs[i].is_running() {
+                        jp = Some(i);
                         break;
                     }
-                    let previous = sh.jobs[i].prev_job;
                     sh.jobs[i].waited = true;
                     remove_waited_job(sh, i);
-                    jp = previous;
+                }
+                if jp.is_none() {
+                    /* no running procs */
+                    break 'out_lbl;
                 }
                 if dowait(sh, DOWAIT_WAITCMD_ALL, None)? == 0 {
                     // sigout:
@@ -80,29 +79,19 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     let process = u32::try_from(crate::mystring::number(sh, spec)?)
                         .ok()
                         .and_then(nsh_platform::ProcessId::new);
-                    jobp = sh.jobs.curjob;
-                    /* `goto start` enters the do/while at `start:` */
-                    let mut at_start = true;
-                    loop {
-                        if !at_start {
-                            /* C indexes `job->ps[job->nprocs - 1]`, which
-                             * for a job that has not forked yet is
-                             * `ps[-1]`; such a job matches no pid. */
-                            let i = jobp.unwrap();
-                            if sh.jobs[i]
-                                .ps
-                                .last()
-                                .is_some_and(|candidate| Some(candidate.pid) == process)
-                            {
-                                break;
-                            }
-                            jobp = sh.jobs[i].prev_job;
+                    jobp = None;
+                    for i in sh.jobs.order_snapshot() {
+                        if sh.jobs[i]
+                            .ps
+                            .last()
+                            .is_some_and(|candidate| Some(candidate.pid) == process)
+                        {
+                            jobp = Some(i);
+                            break;
                         }
-                        at_start = false;
-                        // start:
-                        if jobp.is_none() {
-                            break 'repeat;
-                        }
+                    }
+                    if jobp.is_none() {
+                        break 'repeat;
                     }
                 } else {
                     jobp = Some(getjob(sh, Some(spec), 0)?);

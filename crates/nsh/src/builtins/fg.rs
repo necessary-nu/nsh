@@ -18,9 +18,8 @@ use std::io::Write;
 use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
 use crate::jobs::{
-    CUR_RUNNING, FORK_BG, FORK_FG, JobId, apply_saved_job_terminal_settings,
-    capture_shell_terminal_settings, getjob, jobno, outcmd, ps_pid, set_curjob, showpipe,
-    terminal_settings_error, waitforjob, xxtcsetpgrp,
+    FORK_BG, FORK_FG, JobId, apply_saved_job_terminal_settings, capture_shell_terminal_settings,
+    getjob, jobno, outcmd, ps_pid, showpipe, terminal_settings_error, waitforjob, xxtcsetpgrp,
 };
 use crate::output::Dest;
 
@@ -65,7 +64,7 @@ pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let retval = loop {
         jp = getjob(sh, operands.get(index).copied(), 1)?;
         if mode == FORK_BG {
-            set_curjob(sh, jp, CUR_RUNNING);
+            sh.jobs.position_running(jp);
             let _ = write!(sh.io.get(Dest::Stdout), "[{}] ", jobno(jp));
         }
         outcmd(sh, jp, 0, Dest::Stdout);

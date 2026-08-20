@@ -7,12 +7,10 @@
 //!     `!JOBS ||` / `! JOBS &&` expressions read as they do in C.
 //!   * Jobs use typed identities and states; C bitfields become `bool`
 //!     properties, and completed jobs cannot transition back to active.
-//!   * The job table is a `Vec<Job>` and a job is named by `JobId`. The
-//!     C's `growjobtab`
-//!     relocation pass — which existed because `realloc` moved the
-//!     array out from under `curjob`, every `prev_job`, and every `ps`
-//!     that pointed at its own job's inline `ps0` — has nothing left to
-//!     relocate.
+//!   * The job table stores `Option<Job>` slots and a separate ordering of
+//!     live `JobId`s. Vacancy and current/previous ordering are structural;
+//!     no sentinel fields or pointer-link emulation remain. The C's
+//!     `growjobtab` relocation pass has nothing left to relocate.
 //!   * Remaining C `goto`s are reproduced with labelled blocks; a `goto`
 //!     *into* the middle of a loop becomes an entry flag. Command rendering
 //!     follows the structural syntax tree directly.
@@ -78,11 +76,6 @@ pub(crate) enum JobDisplay {
 // ---------------------------------------------------------------------
 // src/jobs.c module state
 // ---------------------------------------------------------------------
-
-/* mode flags for set_curjob */
-const CUR_DELETE: c_uint = 2;
-pub(crate) const CUR_RUNNING: c_uint = 1;
-const CUR_STOPPED: c_uint = 0;
 
 /* mode flags for dowait */
 const DOWAIT_NONBLOCK: c_int = 0;
@@ -162,86 +155,6 @@ pub(crate) fn outcmd(sh: &mut crate::context::Shell, jp: JobId, i: usize, dest: 
 #[cfg(any())]
 fn onsigchild() -> c_int {
     unimplemented!("declared under #ifdef SYSV, never defined in dash")
-}
-
-/// Where the next link of the current-job chain lives. The C walks the
-/// chain through a `struct job **` so that it can rewrite the link it
-/// arrived by, and that pointer is either `&sh.jobs.curjob` or `&jp->prev_job`.
-#[derive(Clone, Copy)]
-enum Link {
-    Head,
-    Prev(JobId),
-}
-
-#[inline]
-fn link_get(sh: &mut crate::context::Shell, l: Link) -> Option<JobId> {
-    match l {
-        Link::Head => sh.jobs.curjob,
-        Link::Prev(id) => sh.jobs[id].prev_job,
-    }
-}
-
-#[inline]
-fn link_set(sh: &mut crate::context::Shell, l: Link, v: Option<JobId>) {
-    match l {
-        Link::Head => sh.jobs.curjob = v,
-        Link::Prev(id) => sh.jobs[id].prev_job = v,
-    }
-}
-
-// [spec:nsh:def:idiom.job-control-model]
-// [spec:dash:def:jobs.set-curjob-fn]
-// [spec:dash:sem:jobs.set-curjob-fn]
-pub(crate) fn set_curjob(sh: &mut crate::context::Shell, jp: JobId, mode: c_uint) {
-    let mut jp1: Option<JobId>;
-    let mut jpp: Link;
-    let curp: Link;
-
-    /* first remove from list */
-    jpp = Link::Head;
-    curp = jpp;
-    loop {
-        jp1 = link_get(sh, jpp);
-        if jp1 == Some(jp) {
-            break;
-        }
-        /* The C walks off the end of the chain and dereferences NULL if
-         * `jp` is not on it; every caller has just linked it or is
-         * deleting one that is linked. */
-        jpp = Link::Prev(jp1.expect("job is not on the current-job chain"));
-    }
-    link_set(sh, jpp, sh.jobs[jp].prev_job);
-
-    /* Then re-insert in correct position */
-    jpp = curp;
-    match mode {
-        CUR_RUNNING => {
-            /* newly created job or backgrounded job,
-            put after all stopped jobs. */
-            loop {
-                jp1 = link_get(sh, jpp);
-                match jp1 {
-                    Some(i) if JOBS != 0 && sh.jobs[i].is_stopped() => {
-                        jpp = Link::Prev(i);
-                    }
-                    _ => break,
-                }
-            }
-            /* FALLTHROUGH into CUR_STOPPED */
-            sh.jobs[jp].prev_job = link_get(sh, jpp);
-            link_set(sh, jpp, Some(jp));
-        }
-        CUR_STOPPED => {
-            /* newly stopped job - becomes the current job */
-            sh.jobs[jp].prev_job = link_get(sh, jpp);
-            link_set(sh, jpp, Some(jp));
-        }
-        /* `default:` (DEBUG: abort()) falls through into CUR_DELETE:
-         * the job is being deleted, so it is not re-inserted. */
-        _ /* default, CUR_DELETE */ => {
-            let _ = CUR_DELETE;
-        }
-    }
 }
 
 /*
@@ -601,13 +514,9 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: JobId, mod
     col = append_ascii(&mut s, 16, &heading);
     indent = col;
 
-    if Some(jp) == sh.jobs.curjob {
+    if Some(jp) == sh.jobs.current() {
         s[(col - 2) as usize] = b'+';
-    } else if sh
-        .jobs
-        .curjob
-        .is_some_and(|current| sh.jobs[current].prev_job == Some(jp))
-    {
+    } else if Some(jp) == sh.jobs.previous() {
         s[(col - 2) as usize] = b'-';
     }
 
@@ -691,8 +600,6 @@ pub(crate) fn showjobs(
     dest: Dest,
     mode: JobDisplay,
 ) -> Result<(), Error> {
-    let mut jp: Option<JobId>;
-
     /* TRACE(("showjobs(%x) called\n", mode)); */
 
     /* If not even one job changed, there is nothing to do */
@@ -701,15 +608,12 @@ pub(crate) fn showjobs(
      * path anyone expects to take. */
     dowait(sh, DOWAIT_NONBLOCK, None)?;
 
-    jp = sh.jobs.curjob;
-    /* `showjob` may `freejob` the entry this walk is standing on.
-     * `freejob` unlinks the job from the chain but leaves its own
-     * `prev_job` alone, which is what keeps the next step valid. */
-    while let Some(i) = jp {
+    /* `showjob` may remove a completed entry, so traverse a stable copy of
+     * the explicit presentation order. */
+    for i in sh.jobs.order_snapshot() {
         if !matches!(mode, JobDisplay::Changed) || sh.jobs[i].changed {
             showjob(sh, dest, i, mode);
         }
-        jp = sh.jobs[i].prev_job;
     }
     Ok(())
 }
@@ -722,15 +626,9 @@ pub(crate) fn showjobs(
 // [spec:dash:sem:jobs.freejob-fn]
 fn freejob(sh: &mut crate::context::Shell, jp: JobId) {
     INTOFF(sh);
-    /* The C `ckfree`s each `ps[i].cmd` that is not the shared null
-     * string and leaves `nprocs` alone, so freeing the same job twice
-     * frees them twice; dropping the array releases each text once and
-     * makes the second call the no-op the C only gets away with by
-     * never making it. */
-    sh.jobs[jp].ps.clear();
-    sh.jobs[jp].terminal_settings = None;
-    sh.jobs[jp].used = false;
-    set_curjob(sh, jp, CUR_DELETE);
+    /* Taking the occupied slot releases all owned process text and terminal
+     * state exactly once, while `JobTable::remove` also repairs ordering. */
+    drop(sh.jobs.remove(jp));
     INTON(sh);
 }
 
@@ -776,7 +674,7 @@ pub(crate) fn getjob(
         'gotit_lbl: {
             'check_lbl: {
                 'currentjob_lbl: {
-                    jp = sh.jobs.curjob;
+                    jp = sh.jobs.current();
                     let Some(name) = name else {
                         break 'currentjob_lbl; // goto currentjob
                     };
@@ -795,9 +693,7 @@ pub(crate) fn getjob(
                         if c == b'+' || c == b'%' {
                             break 'currentjob_lbl; // the currentjob: label body
                         } else if c == b'-' {
-                            if let Some(i) = jp {
-                                jp = sh.jobs[i].prev_job;
-                            }
+                            jp = sh.jobs.previous();
                             job_error = JobError::NoPrevious;
                             break 'check_lbl; // the check: label body
                         }
@@ -805,10 +701,10 @@ pub(crate) fn getjob(
 
                     if let Some(number) = crate::mystring::decimal_digits(BStr::new(p)) {
                         num = number.min(c_uint::MAX as u64) as c_uint;
-                        if num > 0 && num as usize <= sh.jobs.tab.len() {
+                        if num > 0 && num as usize <= sh.jobs.slots.len() {
                             let id = JobId((num - 1) as usize);
                             jp = Some(id);
-                            if sh.jobs[id].used {
+                            if sh.jobs.slots[id.0].is_some() {
                                 break 'gotit_lbl; // goto gotit
                             }
                             break 'err_lbl; // goto err
@@ -823,7 +719,7 @@ pub(crate) fn getjob(
 
                     let pat: &[u8] = p;
                     found = None;
-                    while let Some(i) = jp {
+                    for i in sh.jobs.order_snapshot() {
                         let cmd = ps_cmd(sh, i, 0);
                         let hit = if substring {
                             cmd.contains_str(pat)
@@ -837,7 +733,6 @@ pub(crate) fn getjob(
                             found = Some(i);
                             job_error = JobError::Ambiguous;
                         }
-                        jp = sh.jobs[i].prev_job;
                     }
 
                     if found.is_none() {
@@ -904,14 +799,14 @@ pub fn makejob(sh: &mut crate::context::Shell, nprocs: c_int) -> JobId {
 
     i = 0;
     jp = loop {
-        if i >= sh.jobs.tab.len() {
+        if i >= sh.jobs.slots.len() {
             break growjobtab(sh);
         }
         let id = JobId(i);
-        if !sh.jobs[id].used {
+        let Some(job) = sh.jobs.slots[id.0].as_ref() else {
             break id;
-        }
-        if !sh.jobs[id].is_done() || !sh.jobs[id].waited {
+        };
+        if !job.is_done() || !job.waited {
             i += 1;
             continue;
         }
@@ -922,21 +817,18 @@ pub fn makejob(sh: &mut crate::context::Shell, nprocs: c_int) -> JobId {
         freejob(sh, id);
         break id;
     };
-    /* C: memset(jp, 0, sizeof *jp) */
-    sh.jobs[jp] = Job::new();
+    let mut job = Job::new();
     /* The C picks the inline `ps0` for a single process and `ckmalloc`s
      * an array otherwise; all that decided was where the room came from,
      * so it is the capacity here and the processes are pushed as
      * `forkparent` forks them. */
     if nprocs > 0 {
-        sh.jobs[jp].ps.reserve_exact(nprocs as usize);
+        job.ps.reserve_exact(nprocs as usize);
     }
     if sh.jobs.jobctl {
-        sh.jobs[jp].jobctl = true;
+        job.jobctl = true;
     }
-    sh.jobs[jp].prev_job = sh.jobs.curjob;
-    sh.jobs.curjob = Some(jp);
-    sh.jobs[jp].used = true;
+    sh.jobs.occupy_current(jp, job);
     /* TRACE(("makejob(%d) returns %%%d\n", nprocs, jobno(jp))); */
     jp
 }
@@ -944,15 +836,13 @@ pub fn makejob(sh: &mut crate::context::Shell, nprocs: c_int) -> JobId {
 // [spec:dash:def:jobs.growjobtab-fn]
 // [spec:dash:sem:jobs.growjobtab-fn]
 //
-// The C's second half — relocating `curjob`, every `prev_job` and every
-// `ps` that pointed at its own job's `ps0`, because `ckrealloc` may have
-// moved the array — has no counterpart: a job is named by its index and
-// owns its process array, so nothing points into the table.
+// The C's relocation pass has no counterpart: jobs own their process arrays,
+// identities are indices, and ordering contains values rather than pointers.
 fn growjobtab(sh: &mut crate::context::Shell) -> JobId {
-    let len: usize = sh.jobs.tab.len();
+    let len: usize = sh.jobs.slots.len();
 
     for _ in 0..4 {
-        sh.jobs.tab.push(Job::new());
+        sh.jobs.slots.push(None);
     }
     JobId(len)
 }
@@ -1074,12 +964,8 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<JobId>, n: Option<&Node>
         return;
     }
 
-    /* as in `showjobs`, the walk steps through jobs `freejob` has just
-     * unlinked, using the `prev_job` it leaves behind */
-    let mut jq = sh.jobs.curjob;
-    while let Some(i) = jq {
+    for i in sh.jobs.order_snapshot() {
         freejob(sh, i);
-        jq = sh.jobs[i].prev_job;
     }
 }
 
@@ -1114,7 +1000,7 @@ fn forkparent(
     }
     if mode == FORK_BG {
         sh.backgndpid = Some(pid); /* set $! */
-        set_curjob(sh, ji, CUR_RUNNING);
+        sh.jobs.position_running(ji);
         if sh.options.enabled(ShellOption::Interactive) {
             let _ = writeln!(sh.io.stderr(), "[{}] {pid}", jobno(ji));
         }
@@ -1336,7 +1222,6 @@ fn waitone(
     block: c_int,
     jobp: Option<JobId>,
 ) -> Result<WaitOutcome, Error> {
-    let mut jp: Option<JobId>;
     let mut thisjob: Option<JobId> = None;
     let mut state = JobState::Running;
     let mut reported_status = None;
@@ -1352,10 +1237,8 @@ fn waitone(
         reported_status = Some(status);
 
         'gotjob: {
-            jp = sh.jobs.curjob;
-            while let Some(ji) = jp {
+            for ji in sh.jobs.order_snapshot() {
                 if sh.jobs[ji].is_done() {
-                    jp = sh.jobs[ji].prev_job;
                     continue;
                 }
                 state = JobState::Done;
@@ -1389,7 +1272,6 @@ fn waitone(
                 if thisjob.is_some() {
                     break 'gotjob;
                 }
-                jp = sh.jobs[ji].prev_job;
             }
             break 'out_lbl;
         }
@@ -1401,7 +1283,7 @@ fn waitone(
             if sh.jobs[tj].transition_to(state) {
                 /* TRACE(("Job %d: changing state from %d to %d\n", ...)); */
                 if state == JobState::Stopped {
-                    set_curjob(sh, tj, CUR_STOPPED);
+                    sh.jobs.position_stopped(tj);
                 }
             }
         }
@@ -1584,7 +1466,7 @@ pub fn stoppedjobs(sh: &mut crate::context::Shell) -> c_int {
         if sh.jobs.job_warning != 0 {
             break 'out_lbl;
         }
-        jp = sh.jobs.curjob;
+        jp = sh.jobs.current();
         if jp.is_some_and(|i| sh.jobs[i].is_stopped()) {
             let _ = sh.io.stderr().write_all(b"You have stopped jobs.\n");
             sh.jobs.job_warning = 2;

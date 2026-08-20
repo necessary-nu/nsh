@@ -5145,4 +5145,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.shell-options}
     )}
+    {id replace-job-slot-linkage, covered_rules (
+        idiom.job-storage
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.job-storage}
+    )}
 )
