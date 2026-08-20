@@ -32,7 +32,7 @@ pub fn setcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         return Ok(Flow::Done((0).into()));
     }
     crate::error::with_interrupts_deferred(sh, |sh| {
-        let scan = options(sh, args, 1, false)?;
+        let scan = options(sh, args, 1)?;
         optschanged(sh)?;
         if scan.next < args.len() {
             setparam(sh, &args[scan.next..]);

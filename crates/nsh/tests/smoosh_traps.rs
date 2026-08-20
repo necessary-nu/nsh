@@ -3,18 +3,21 @@
 use nsh::streams::Streams;
 
 fn run(script: &str) -> (Vec<u8>, Vec<u8>, i32) {
-    let argv = vec![
-        b"smoosh".to_vec(),
-        b"-c".to_vec(),
-        script.as_bytes().to_vec(),
-    ];
+    let command = script.as_bytes().to_vec();
     let (stdout_read, stdout_write) = nsh_platform::pipe().expect("create stdout pipe");
     let (stderr_read, stderr_write) = nsh_platform::pipe().expect("create stderr pipe");
 
     let status = nsh_platform::run_in_child(move || {
         let supplied = Streams::from_fds(std::io::stdin(), &stdout_write, &stderr_write)
             .expect("duplicate test streams");
-        let status = nsh::shellmain::main_fn(argv, supplied);
+        let mut shell = nsh::Shell::builder()
+            .arg0(bstr::BStr::new(b"smoosh"))
+            .inherit_env()
+            .streams(supplied)
+            .host(nsh::ProcessHost)
+            .build()
+            .expect("build process shell");
+        let status = shell.run_to_completion(nsh::Startup::command(command));
         nsh_platform::exit_immediately(status.code().into());
     })
     .expect("run shell child");

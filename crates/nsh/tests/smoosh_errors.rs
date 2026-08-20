@@ -13,18 +13,13 @@ fn run(script: &str, interactive: bool, file_operand: bool) -> (Vec<u8>, Vec<u8>
     ));
     std::fs::create_dir_all(&directory).expect("create isolated case directory");
 
-    let mut argv = vec![b"smoosh".to_vec()];
-    if interactive {
-        argv.push(b"-i".to_vec());
-    }
-    if file_operand {
+    let startup = if file_operand {
         let script_path = directory.join("case.sh");
         std::fs::write(&script_path, script).expect("write case script");
-        argv.push(script_path.as_os_str().as_encoded_bytes().to_vec());
+        nsh::Startup::script(script_path.as_os_str().as_encoded_bytes().to_vec())
     } else {
-        argv.push(b"-c".to_vec());
-        argv.push(script.as_bytes().to_vec());
-    }
+        nsh::Startup::command(script.as_bytes().to_vec())
+    };
 
     let (stdout_read, stdout_write) = nsh_platform::pipe().expect("create stdout pipe");
     let (stderr_read, stderr_write) = nsh_platform::pipe().expect("create stderr pipe");
@@ -33,7 +28,18 @@ fn run(script: &str, interactive: bool, file_operand: bool) -> (Vec<u8>, Vec<u8>
         std::env::set_current_dir(directory).expect("enter isolated case directory");
         let supplied = Streams::from_fds(std::io::stdin(), &stdout_write, &stderr_write)
             .expect("duplicate test streams");
-        let status = nsh::shellmain::main_fn(argv, supplied);
+        let mut builder = nsh::Shell::builder()
+            .arg0(bstr::BStr::new(b"smoosh"))
+            .inherit_env()
+            .streams(supplied)
+            .host(nsh::ProcessHost);
+        if interactive {
+            builder = builder
+                .shell_option(nsh::ShellOption::Interactive, true)
+                .shell_option(nsh::ShellOption::Monitor, true);
+        }
+        let mut shell = builder.build().expect("build process shell");
+        let status = shell.run_to_completion(startup);
         nsh_platform::exit_immediately(status.code().into());
     })
     .expect("run shell child");

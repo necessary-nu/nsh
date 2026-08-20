@@ -1,34 +1,109 @@
 //! Typed shell-option identities, state, and command-line metadata.
 
+use bstr::BStr;
+
 // [spec:nsh:def:idiom.shell-options]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ShellOption {
+/// One option in the shell's `set -o` namespace.
+pub enum ShellOption {
+    /// Exit when an untested command fails.
     Errexit,
+    /// Disable pathname expansion.
     NoGlob,
+    /// Require repeated end-of-file requests in an interactive shell.
     IgnoreEof,
+    /// Enable interactive parsing and diagnostics.
     Interactive,
+    /// Enable job control.
     Monitor,
+    /// Parse commands without executing them.
     NoExec,
+    /// Read commands from standard input.
     Stdin,
+    /// Trace expanded commands before executing them.
     Xtrace,
+    /// Echo input lines as they are read.
     Verbose,
+    /// Select vi-style line editing.
     Vi,
+    /// Select emacs-style line editing.
     Emacs,
+    /// Refuse to overwrite existing regular files with `>`.
     NoClobber,
+    /// Export variables modified by assignments.
     AllExport,
+    /// Report completed background jobs promptly.
     Notify,
+    /// Diagnose expansion of unset parameters.
     Nounset,
+    /// Suppress command-history recording.
     NoLog,
+    /// Make a pipeline report the rightmost failing status.
     Pipefail,
+    /// Enable implementation debugging behavior.
     Debug,
+    /// Remember command locations.
     HashAll,
+    /// Allow loop control to cross function boundaries.
     NonLexicalControl,
+    /// Enable Bash Compatibility Mode.
     Bash,
 }
 
 impl ShellOption {
+    /// Every shell option, in the stable order used by `set -o` reports.
+    pub const ALL: [Self; 21] = [
+        Self::Errexit,
+        Self::NoGlob,
+        Self::IgnoreEof,
+        Self::Interactive,
+        Self::Monitor,
+        Self::NoExec,
+        Self::Stdin,
+        Self::Xtrace,
+        Self::Verbose,
+        Self::Vi,
+        Self::Emacs,
+        Self::NoClobber,
+        Self::AllExport,
+        Self::Notify,
+        Self::Nounset,
+        Self::NoLog,
+        Self::Pipefail,
+        Self::Debug,
+        Self::HashAll,
+        Self::NonLexicalControl,
+        Self::Bash,
+    ];
+
     pub(super) const fn mask(self) -> u32 {
         1 << self as u32
+    }
+
+    /// The long name accepted by `set -o` and [`crate::Builder::option`].
+    pub fn name(self) -> &'static BStr {
+        BStr::new(OPTION_SPECS[self as usize].name)
+    }
+
+    /// The invocation/set letter, when this option has one.
+    pub const fn letter(self) -> Option<u8> {
+        OPTION_SPECS[self as usize].letter
+    }
+
+    /// Resolve a long `set -o` name without parsing an invocation.
+    pub fn from_name(name: &BStr) -> Option<Self> {
+        OPTION_SPECS
+            .iter()
+            .find(|spec| name == spec.name)
+            .map(|spec| spec.option)
+    }
+
+    /// Resolve one option letter without parsing an invocation.
+    pub fn from_letter(letter: u8) -> Option<Self> {
+        OPTION_SPECS
+            .iter()
+            .find(|spec| spec.letter == Some(letter))
+            .map(|spec| spec.option)
     }
 }
 
@@ -198,6 +273,13 @@ mod tests {
                         .all(|other| other.letter != Some(letter))
                 );
             }
+        }
+    }
+
+    #[test]
+    fn public_order_matches_metadata() {
+        for (index, option) in ShellOption::ALL.into_iter().enumerate() {
+            assert_eq!(option, OPTION_SPECS[index].option);
         }
     }
 }

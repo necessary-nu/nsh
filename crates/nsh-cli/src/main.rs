@@ -19,7 +19,10 @@
 
 #![deny(unsafe_code)]
 
-use std::io::Write as _;
+use bstr::{BStr, ByteSlice as _};
+use std::io::{IsTerminal as _, Write as _};
+
+mod invocation;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum FrontendAction {
@@ -59,23 +62,12 @@ fn write_frontend_output(bytes: &[u8]) {
     }
 }
 
-fn bash_invocation(raw_arg0: &[u8]) -> bool {
-    let basename = raw_arg0
-        .rsplit(|byte| *byte == b'/')
-        .next()
-        .unwrap_or_default();
-    matches!(basename, b"bash" | b"-bash")
-}
-
-// [spec:nsh:req:compat.bash.selection]
-/// Apply frontend-only dialect inference before the shell parses its options.
-fn select_invocation_mode(argv: &mut Vec<Vec<u8>>) {
-    if argv
-        .first()
-        .is_some_and(|raw_arg0| bash_invocation(raw_arg0))
-    {
-        argv.splice(1..1, [b"-o".to_vec(), b"bash".to_vec()]);
-    }
+fn write_invocation_error(arg0: Option<&Vec<u8>>, message: &[u8]) {
+    let mut stderr = std::io::stderr().lock();
+    let _ = stderr.write_all(arg0.map_or(b"sh", Vec::as_slice));
+    let _ = stderr.write_all(b": 0: ");
+    let _ = stderr.write_all(message);
+    let _ = stderr.write_all(b"\n");
 }
 
 use nsh_platform::NativeStrExt as _;
@@ -100,7 +92,7 @@ fn main() {
     //
     // Keep the operating-system representation intact until this explicit
     // handoff to the byte-oriented shell language engine.
-    let mut argv: Vec<Vec<u8>> = nsh_platform::process_arguments()
+    let argv: Vec<Vec<u8>> = nsh_platform::process_arguments()
         .iter()
         .map(|argument| argument.to_shell_bytes())
         .collect();
@@ -113,7 +105,43 @@ fn main() {
     }
 
     nsh_platform::restore_shell_process_runtime_state();
-    select_invocation_mode(&mut argv);
+    let stdin_is_terminal = std::io::stdin().is_terminal();
+    let stderr_is_terminal = std::io::stderr().is_terminal();
+    let invocation = {
+        let mut stdout = std::io::stdout().lock();
+        invocation::Invocation::parse(&argv, stdin_is_terminal, stderr_is_terminal, |bytes| {
+            stdout.write_all(bytes)
+        })
+    };
+    let invocation = match invocation {
+        Ok(invocation) => invocation,
+        Err(invocation::ParseError::Invocation(message)) => {
+            write_invocation_error(argv.first(), &message);
+            std::process::exit(2);
+        }
+        Err(invocation::ParseError::Output) => std::process::exit(1),
+    };
+
+    let parameters: Vec<&BStr> = invocation
+        .parameters
+        .iter()
+        .map(|parameter| parameter.as_bstr())
+        .collect();
+    let mut builder = nsh::Shell::builder()
+        .invocation_name(invocation.invocation_name.as_bstr())
+        .arg0(invocation.arg0.as_bstr())
+        .args(&parameters)
+        .inherit_env()
+        .streams(nsh::Streams::INHERIT)
+        .host(nsh::ProcessHost);
+    for option in nsh::ShellOption::ALL {
+        builder = builder.shell_option(option, invocation.options.enabled(option));
+    }
+    let startup = invocation.startup();
+    let mut shell = match builder.build() {
+        Ok(shell) => shell,
+        Err(error) => std::process::exit(error.status().code().into()),
+    };
     // The frontend is the thing entitled to the process's standard
     // descriptors, so it hands them to the shell explicitly rather than
     // letting the shell assume them. See [dec:nsh:host-owns-streams].
@@ -121,55 +149,13 @@ fn main() {
     // [dec:nsh:host-owns-the-process] makes that the frontend's act, and
     // this is the frontend. `exitshell` has already flushed and torn down
     // job control, so there is nothing left to do but leave.
-    let status = nsh::shellmain::main_fn(argv, nsh::streams::Streams::INHERIT);
+    let status = shell.run_to_completion(startup);
     std::process::exit(status.code().into());
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // [spec:nsh:req:compat.bash.selection/test]
-    #[test]
-    fn only_exact_bash_basenames_infer_mode() {
-        for inferred in [
-            b"bash".as_slice(),
-            b"-bash",
-            b"/bin/bash",
-            b"relative/-bash",
-        ] {
-            assert!(bash_invocation(inferred), "{inferred:?}");
-        }
-        for ordinary in [b"nsh".as_slice(), b"mybash", b"bash/", b""] {
-            assert!(!bash_invocation(ordinary), "{ordinary:?}");
-        }
-    }
-
-    #[test]
-    fn inference_precedes_explicit_options() {
-        let mut argv = vec![
-            b"/bin/bash".to_vec(),
-            b"+o".to_vec(),
-            b"bash".to_vec(),
-            b"-c".to_vec(),
-            b":".to_vec(),
-        ];
-
-        select_invocation_mode(&mut argv);
-
-        assert_eq!(
-            argv,
-            [
-                b"/bin/bash".as_slice(),
-                b"-o",
-                b"bash",
-                b"+o",
-                b"bash",
-                b"-c",
-                b":"
-            ]
-        );
-    }
 
     // [spec:nsh:req:cli.metadata-options/test]
     #[test]

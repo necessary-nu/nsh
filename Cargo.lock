@@ -164,6 +164,7 @@ dependencies = [
 name = "nsh-cli"
 version = "0.5.13"
 dependencies = [
+ "bstr",
  "nsh",
  "nsh-platform",
 ]

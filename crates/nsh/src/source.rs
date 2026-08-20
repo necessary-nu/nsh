@@ -39,6 +39,24 @@ use crate::status::ExitStatus;
 /// input path with no oracle behind it.
 pub struct Source(Kind);
 
+/// A fully parsed command-line shell session.
+///
+/// The command-line crate turns raw process arguments into this value. The
+/// library therefore receives a typed execution request and never parses an
+/// invocation or decides whether the host process should exit.
+// [spec:nsh:req:idiom.shell-entrypoint]
+pub struct Startup {
+    pub(crate) login: bool,
+    pub(crate) kind: StartupKind,
+}
+
+pub(crate) enum StartupKind {
+    Command(BString),
+    CommandThenStdin(BString),
+    Script(BString),
+    Stdin,
+}
+
 enum Kind {
     /// The `-c` / `eval` shape.
     Bytes(BString),
@@ -73,6 +91,80 @@ impl Source {
     /// The other two shapes are not that loop and do not prompt.
     pub fn stream() -> Source {
         Source(Kind::Stream)
+    }
+}
+
+impl Startup {
+    /// Run one `-c` command and then finish the session.
+    pub fn command(command: impl Into<BString>) -> Self {
+        Self {
+            login: false,
+            kind: StartupKind::Command(command.into()),
+        }
+    }
+
+    /// Run one `-c` command and then continue reading standard input.
+    pub fn command_then_stdin(command: impl Into<BString>) -> Self {
+        Self {
+            login: false,
+            kind: StartupKind::CommandThenStdin(command.into()),
+        }
+    }
+
+    /// Read commands from one byte-preserving script pathname.
+    pub fn script(path: impl Into<BString>) -> Self {
+        Self {
+            login: false,
+            kind: StartupKind::Script(path.into()),
+        }
+    }
+
+    /// Read commands from the shell's configured standard input.
+    pub fn standard_input() -> Self {
+        Self {
+            login: false,
+            kind: StartupKind::Stdin,
+        }
+    }
+
+    /// Select whether login profiles are read before the requested input.
+    pub fn login(mut self, login: bool) -> Self {
+        self.login = login;
+        self
+    }
+
+    pub(crate) fn command_text(&self) -> Option<&BStr> {
+        match &self.kind {
+            StartupKind::Command(command) | StartupKind::CommandThenStdin(command) => {
+                Some(command.as_ref())
+            }
+            StartupKind::Script(_) | StartupKind::Stdin => None,
+        }
+    }
+
+    pub(crate) const fn reads_stdin(&self) -> bool {
+        matches!(
+            self.kind,
+            StartupKind::CommandThenStdin(_) | StartupKind::Stdin
+        )
+    }
+
+    pub(crate) const fn runs_command_loop(&self) -> bool {
+        !matches!(self.kind, StartupKind::Command(_))
+    }
+
+    pub(crate) const fn has_command(&self) -> bool {
+        matches!(
+            self.kind,
+            StartupKind::Command(_) | StartupKind::CommandThenStdin(_)
+        )
+    }
+
+    pub(crate) fn script_path(&self) -> Option<&BStr> {
+        match &self.kind {
+            StartupKind::Script(path) => Some(path.as_ref()),
+            _ => None,
+        }
     }
 }
 
@@ -113,6 +205,20 @@ impl From<&str> for Source {
 }
 
 impl Shell {
+    /// Run a parsed command-line session through profile loading, command
+    /// execution, the top-level input loop, and EXIT-trap teardown.
+    ///
+    /// [`Startup`] contains no raw argument vector: the command-line crate
+    /// owns invocation parsing and gives the library the resulting mode. The
+    /// returned status is still only a value; deciding to end a process with
+    /// it remains the frontend's responsibility.
+    // [spec:nsh:req:idiom.shell-entrypoint]
+    pub fn run_to_completion(&mut self, startup: Startup) -> ExitStatus {
+        let status = crate::shellmain::run(self, &startup);
+        self.exited = Some(status);
+        status
+    }
+
     /// Run commands, and give back the status of the last one.
     ///
     /// This is `eval` at the top level — see the module documentation for

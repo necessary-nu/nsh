@@ -22,6 +22,9 @@ const INPUT: &str = include_str!("../src/input.rs");
 const MAIL: &str = include_str!("../src/mail.rs");
 const OUTPUT: &str = include_str!("../src/output.rs");
 const BUILTINS: &str = include_str!("../src/builtins/mod.rs");
+const LIBRARY: &str = include_str!("../src/lib.rs");
+const CLI: &str = include_str!("../../nsh-cli/src/main.rs");
+const CLI_INVOCATION: &str = include_str!("../../nsh-cli/src/invocation.rs");
 
 fn rust_sources_below(directory: &Path, sources: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(directory).expect("source directory is readable") {
@@ -170,6 +173,32 @@ fn builtin_registry_is_fully_typed() {
         assert!(
             !BUILTINS.contains(forbidden),
             "builtin registry retains C representation {forbidden:?}"
+        );
+    }
+}
+
+// [spec:nsh:req:idiom.shell-entrypoint/test]
+#[test]
+fn shell_entrypoint_uses_public_runtime() {
+    assert!(LIBRARY.contains("pub(crate) mod shellmain;"));
+    assert!(SHELL_MAIN.contains("pub(crate) fn run("));
+    assert!(SHELL_MAIN.contains("startup: &Startup"));
+    assert!(CLI.contains("nsh::Shell::builder()"));
+    assert!(CLI.contains("shell.run_to_completion(startup)"));
+    assert!(CLI_INVOCATION.contains("fn parse("));
+
+    for forbidden in [
+        "pub mod shellmain;",
+        "pub fn main_fn(",
+        "fn procargs(",
+        "shellmain::main_fn",
+    ] {
+        assert!(
+            !LIBRARY.contains(forbidden)
+                && !SHELL_MAIN.contains(forbidden)
+                && !OPTIONS.contains(forbidden)
+                && !CLI.contains(forbidden),
+            "startup retains translated public entrypoint {forbidden:?}"
         );
     }
 }
@@ -346,7 +375,8 @@ fn typed_shell_options() {
         assert!(OPTION_MODEL.contains(required), "missing {required}");
     }
     assert!(OPTIONS.contains("state: OptionSet"));
-    assert!(OPTIONS.contains("explicit: OptionSet"));
+    assert!(CLI_INVOCATION.contains("struct OptionState"));
+    assert!(CLI_INVOCATION.contains("let mut explicit = Vec::new()"));
 
     for forbidden in [
         "flags: [c_char",

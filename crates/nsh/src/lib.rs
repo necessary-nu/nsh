@@ -10,17 +10,17 @@
 //! **The surface is closed.** It was thirty-eight public modules, which is
 //! not an API but the transliteration left open — see
 //! [dec:nsh:public-surface]. What an embedder writes is now the handful of
-//! names re-exported below: [`Shell`] and its [`Builder`], [`Source`],
+//! names re-exported below: [`Shell`] and its [`Builder`], [`Source`] and
+//! [`Startup`],
 //! [`Streams`], [`ExitStatus`] and [`Signal`], [`Error`], and the [`Host`]
 //! seam with [`Disposition`], [`NoHost`] and [`ProcessHost`].
 //! `crates/nsh/examples/embed.rs` is written against exactly that set and
 //! is run, not merely compiled.
 //!
-//! Two modules stay public because they have callers outside the crate and
-//! nothing smaller would serve them: [`shellmain`], whose `main_fn` is the
-//! port of `main()` and is what the frontend and integration tests invoke,
-//! and [`streams`], which owns the shell's initial logical standard streams.
-//! The other thirty-six are `pub(crate)`.
+//! [`streams`] stays public because it owns the shell's initial logical
+//! standard streams. Startup itself is reached through
+//! [`Shell::run_to_completion`]; no translated `main` module is part of the
+//! library surface.
 //!
 //! `#![deny(missing_docs)]` is on, which is the point of closing rather
 //! than a tidiness measure: [dec:nsh:public-surface] asked for the surface
@@ -91,7 +91,8 @@ pub use crate::builder::Builder;
 pub use crate::context::Shell;
 pub use crate::error::Error;
 pub use crate::host::{Disposition, Host, NoHost, ProcessHost, SignalSink};
-pub use crate::source::Source;
+pub use crate::options::ShellOption;
+pub use crate::source::{Source, Startup};
 pub use crate::status::{ExitStatus, Signal};
 pub use crate::streams::Streams;
 
@@ -152,7 +153,7 @@ pub(crate) mod pmatch;
 pub(crate) mod eval;
 pub(crate) mod exec;
 pub(crate) mod jobs;
-pub mod shellmain;
+pub(crate) mod shellmain;
 
 // ---- builtins ---------------------------------------------------------
 pub(crate) mod histedit;

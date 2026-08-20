@@ -1,4 +1,4 @@
-//! Shell options and command-line option parsing.
+//! Shell-option state and the `set` builtin's option scan.
 //! Rules: `docs/spec/port/src/options.md`.
 //!
 //! Each option has a [`ShellOption`] identity and one [`model::OptionSpec`]
@@ -11,13 +11,12 @@ use bstr::{BStr, BString};
 use core::ffi::c_int;
 use std::io::Write;
 
-use crate::fd::LogicalDescriptor;
-
 mod dialect;
 pub(crate) use dialect::Dialect;
 
 mod model;
-pub(crate) use model::{OPTION_SPECS, OptionSet, ShellOption};
+pub use model::ShellOption;
+pub(crate) use model::{OPTION_SPECS, OptionSet};
 
 mod bash_options;
 pub(crate) use bash_options::NAMES as BASH_OPTION_NAMES;
@@ -100,8 +99,12 @@ pub struct ShellOptions {
     /// `docs/api-design.md` §5 puts it here — one row for everything
     /// `set` and the option scan own.
     pub(crate) shellparam: shparam,
-    /// `minusc` — the argument to `-c`, when one was supplied.
-    pub(crate) minusc: Option<BString>,
+    /// Whether the parsed startup request contains a `-c` command.
+    ///
+    /// SIGINT policy distinguishes `-s -c command` from plain `-s`; the
+    /// command bytes themselves live in [`crate::Startup`], not shell option
+    /// state.
+    pub(crate) command_source: bool,
     /// `$0`, owned and NUL-terminated for the remaining C-shaped readers.
     arg0: Option<BString>,
     /// The process invocation name before a command-file operand replaces
@@ -117,7 +120,7 @@ impl ShellOptions {
             state: OptionSet::EMPTY,
             bash_options: bash_options::BashOptions::new(),
             shellparam: shparam::new(),
-            minusc: None,
+            command_source: false,
             arg0: None,
             invocation_name: None,
         }
@@ -145,107 +148,17 @@ impl ShellOptions {
         self.arg0 = Some(owned);
     }
 
+    pub(crate) fn set_invocation_name(&mut self, value: &BStr) {
+        let mut owned = value.to_owned();
+        owned.push(0);
+        self.invocation_name = Some(owned);
+    }
+
     pub(crate) fn arg0(&self) -> Option<&BStr> {
         self.arg0
             .as_ref()
             .map(|value| BStr::new(&value[..value.len() - 1]))
     }
-}
-
-/*
- * Process the shell command line arguments.
- */
-
-// [spec:dash:def:options.procargs-fn]
-// [spec:dash:sem:options.procargs-fn]
-// [spec:posix:req:sh.option-o-without-option-argument]
-// [spec:posix:req:sh.option-c]
-// [spec:posix:req:sh.option-i]
-// [spec:posix:req:sh.option-s]
-// [spec:posix:req:sh.option-s-assumed]
-// [spec:posix:req:sh.operand-hyphen]
-// [spec:posix:req:sh.operand-argument]
-// [spec:posix:req:sh.operand-command-file]
-// [spec:posix:req:sh.special-parameter-0]
-// [spec:posix:req:sh.operand-command-name]
-// [spec:posix:req:sh.operand-command-string]
-pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<bool, Error> {
-    let first = argv.first().map(Vec::as_slice).unwrap_or_default();
-    let mut login = first.first() == Some(&b'-');
-
-    sh.options.state = OptionSet::EMPTY;
-
-    if let Some(first) = argv.first() {
-        sh.options.set_arg0(BStr::new(first.as_slice()));
-    }
-    let args: Vec<&BStr> = argv
-        .iter()
-        .skip(1)
-        .map(|word| BStr::new(word.as_slice()))
-        .collect();
-    /* `options` reports what the C left in `argptr` and `minusc`: how
-     * far it got, and whether `-c` was given. The pointer the C stores in
-     * `minusc` is only ever read as a flag before the line below
-     * overwrites it with the command itself. */
-    sh.options.minusc = None;
-    let scan = options(sh, &args, 0, true)?;
-    login |= scan.login;
-    let mut next = scan.next;
-    if next >= args.len() {
-        if scan.minus_c {
-            return Err(sh.diagnostics().sh_error_value(b"-c requires an argument"));
-        }
-        sh.options.set(ShellOption::Stdin, true);
-    }
-    if sh.options.enabled(ShellOption::Stdin) && sh.input.stdin_istty < 0 {
-        crate::input::input_init(sh);
-    }
-    if !scan.explicit.contains(ShellOption::Interactive) && sh.options.enabled(ShellOption::Stdin) {
-        // [spec:nsh:def:idiom.logical-descriptors]
-        if sh.input.stdin_istty != 0
-            && sh
-                .fds
-                .get(LogicalDescriptor::STDERR)
-                .as_ref()
-                .is_some_and(|fd| nsh_platform::is_terminal(fd))
-        {
-            sh.options.set(ShellOption::Interactive, true);
-        }
-    }
-    if !scan.explicit.contains(ShellOption::Monitor) {
-        // [spec:nsh:req:compat.smoosh.interactive-job-prompt]
-        // `-i` makes a pipe an interactive input source, but it does not
-        // conjure up the terminal that monitor mode needs. Leave monitor
-        // mode off in that one case; an explicit `set -m` remains distinct
-        // and still reaches `setjobctl`.
-        let monitor = if sh.options.enabled(ShellOption::Stdin) && sh.input.stdin_istty == 0 {
-            false
-        } else {
-            sh.options.enabled(ShellOption::Interactive)
-        };
-        sh.options.set(ShellOption::Monitor, monitor);
-    }
-    /* POSIX 1003.2: first arg after -c cmd is $0, remainder $1... */
-    let mut setarg0 = false;
-    if scan.minus_c {
-        sh.options.minusc = Some(args[next].to_owned());
-        next += 1;
-        if next < args.len() {
-            setarg0 = true; /* goto setarg0 */
-        }
-    } else if !sh.options.enabled(ShellOption::Stdin) {
-        crate::input::set_command_input_file(sh, args[next])?;
-        setarg0 = true;
-    }
-    if setarg0 {
-        sh.options.set_arg0(args[next]);
-        next += 1;
-    }
-
-    setparam(sh, &args[next..]);
-    optschanged(sh)?;
-
-    Ok(login)
 }
 
 // [spec:dash:def:options.optschanged-fn]
@@ -259,36 +172,17 @@ pub fn optschanged(sh: &mut crate::context::Shell) -> Result<(), crate::error::E
     crate::jobs::setjobctl(sh, sh.options.enabled(ShellOption::Monitor) as c_int)
 }
 
-/// Typed entry point for callers that do not participate in the legacy
-/// pointer-based option parser.
+/// Apply the side effects of a changed option set.
 pub(crate) fn options_changed(sh: &mut Shell) -> Result<(), Error> {
     optschanged(sh)
 }
 
-/// What a pass of [`options`] found.
-///
-/// The C reads all three back out of globals: the return value, `argptr`,
-/// and `minusc`.
+/// What a `set` option scan found.
 #[derive(Debug)]
 pub(crate) struct Scan {
-    /// The C's return value.
-    pub(crate) login: bool,
-    /// The first word the scan did not consume: the C's `argptr`.
+    /// The first argument the scan did not consume.
     pub(crate) next: usize,
-    /// `-c` was given. The C records it by pointing `minusc` into the
-    /// word, but every reader of that pointer treats it as a flag --
-    /// `procargs` replaces it with the command before anything reads the
-    /// bytes -- so a flag is what it is.
-    pub(crate) minus_c: bool,
-    /// Options explicitly named during this scan. Startup default inference
-    /// uses this instead of storing the C port's magic value `2` in state.
-    explicit: OptionSet,
 }
-
-/*
- * Process shell options.  The global variable argptr contains a pointer
- * to the argument list; we advance it past the options.
- */
 
 // [spec:dash:def:options.options-fn]
 // [spec:dash:sem:options.options-fn]
@@ -312,14 +206,8 @@ pub(crate) fn options(
     sh: &mut crate::context::Shell,
     args: &[&BStr],
     start: usize,
-    cmdline: bool,
 ) -> Result<Scan, Error> {
-    let mut scan = Scan {
-        login: false,
-        next: start,
-        minus_c: false,
-        explicit: OptionSet::EMPTY,
-    };
+    let mut scan = Scan { next: start };
 
     loop {
         let Some(word) = args.get(scan.next) else {
@@ -331,16 +219,14 @@ pub(crate) fn options(
         let c = word.first().copied().unwrap_or(0);
         let enabled = if c == b'-' {
             if word.len() == 1 || &word[..] == b"--" {
-                if !cmdline {
-                    /* "-" means turn off -x and -v */
-                    if word.len() == 1 {
-                        sh.options.set(ShellOption::Verbose, false);
-                        sh.options.set(ShellOption::Xtrace, false);
-                    }
-                    /* "--" means reset params */
-                    else if scan.next >= args.len() {
-                        setparam(sh, &args[scan.next..]);
-                    }
+                /* "-" means turn off -x and -v */
+                if word.len() == 1 {
+                    sh.options.set(ShellOption::Verbose, false);
+                    sh.options.set(ShellOption::Xtrace, false);
+                }
+                /* "--" means reset params */
+                else if scan.next >= args.len() {
+                    setparam(sh, &args[scan.next..]);
                 }
                 break; /* "-" or "--" terminates options */
             }
@@ -357,20 +243,13 @@ pub(crate) fn options(
                 break;
             };
             i += 1;
-            if c == b'c' && cmdline {
-                scan.minus_c = true; /* command is after shell args */
-            } else if c == b'l' && cmdline {
-                scan.login = true;
-            } else if c == b'o' {
-                if let Some(option) = minus_o(sh, args.get(scan.next).copied(), enabled)? {
-                    scan.explicit.set(option, true);
-                }
+            if c == b'o' {
+                minus_o(sh, args.get(scan.next).copied(), enabled)?;
                 if scan.next < args.len() {
                     scan.next += 1;
                 }
             } else {
-                let option = setoption(sh, c, enabled)?;
-                scan.explicit.set(option, true);
+                setoption(sh, c, enabled)?;
             }
         }
     }
@@ -435,7 +314,7 @@ fn minus_o(
         let name = name.expect("the naming branch");
         for spec in OPTION_SPECS {
             if name == spec.name {
-                sh.options.set(spec.option, enabled);
+                set_typed_option(sh, spec.option, enabled);
                 return Ok(Some(spec.option));
             }
         }
@@ -484,21 +363,25 @@ fn setoption(
 ) -> Result<ShellOption, Error> {
     for spec in OPTION_SPECS {
         if spec.letter == Some(flag) {
-            sh.options.set(spec.option, enabled);
-            if enabled {
-                /* #%$ hack for ksh semantics */
-                if spec.option == ShellOption::Vi {
-                    sh.options.set(ShellOption::Emacs, false);
-                } else if spec.option == ShellOption::Emacs {
-                    sh.options.set(ShellOption::Vi, false);
-                }
-            }
+            set_typed_option(sh, spec.option, enabled);
             return Ok(spec.option);
         }
     }
     let mut message = b"Illegal option -".to_vec();
     message.push(flag);
     Err(sh.diagnostics().sh_error_value(&message))
+}
+
+pub(crate) fn set_typed_option(sh: &mut crate::context::Shell, option: ShellOption, enabled: bool) {
+    sh.options.set(option, enabled);
+    if enabled {
+        /* #%$ hack for ksh semantics */
+        if option == ShellOption::Vi {
+            sh.options.set(ShellOption::Emacs, false);
+        } else if option == ShellOption::Emacs {
+            sh.options.set(ShellOption::Vi, false);
+        }
+    }
 }
 
 /*
@@ -591,8 +474,7 @@ impl<'a> Options<'a> {
         Self::from(args, 1)
     }
 
-    /// Scan from `start`, for the one caller whose word list does not
-    /// begin with a command name: `procargs` reads the shell's own.
+    /// Scan from `start` when a caller has already consumed leading words.
     pub fn from(args: &'a [&'a BStr], start: usize) -> Self {
         Options {
             args,
@@ -732,7 +614,7 @@ mod tests {
         let sh = &mut owned;
         let args = [BStr::new("set"), BStr::new("-Q")];
 
-        let e = options(sh, &args, 1, false).expect_err("-Q is not an option");
+        let e = options(sh, &args, 1).expect_err("-Q is not an option");
 
         assert_eq!(e.message().to_vec(), b"Illegal option -Q".to_vec());
         assert_eq!(e.status().code(), 2);
@@ -745,7 +627,7 @@ mod tests {
         let sh = &mut owned;
         let args = [BStr::new("set"), BStr::new("-o"), BStr::new("nosuchopt")];
 
-        let e = options(sh, &args, 1, false).expect_err("-o nosuchopt is not an option");
+        let e = options(sh, &args, 1).expect_err("-o nosuchopt is not an option");
 
         assert_eq!(
             e.message().to_vec(),
@@ -872,36 +754,27 @@ mod tests {
 
     /// The empty option string is what a builtin that takes no options
     /// passes: it accepts nothing and exists to eat a `--`.
-    /// The scan `set` and the shell's command line share. What it reports
-    /// is where it stopped, which is what decides the positional
-    /// parameters -- so the boundary between options and operands is the
-    /// property worth pinning.
-    fn scan_options(
-        sh: &mut crate::context::Shell,
-        raw: &[&[u8]],
-        cmdline: bool,
-    ) -> (usize, bool, bool) {
+    /// What the `set` scan reports is where it stopped, which decides the
+    /// positional parameters.
+    fn scan_options(raw: &[&[u8]]) -> usize {
         let _guard = crate::testutil::lock();
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
         let args = words(raw);
-        let scan = options(sh, &args, 0, cmdline).expect("these cases scan cleanly");
-        (scan.next, scan.minus_c, scan.login)
+        options(sh, &args, 0)
+            .expect("these cases scan cleanly")
+            .next
     }
 
     #[test]
     fn scan_stops_at_the_first_operand() {
-        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned_sh;
-        let (next, _, _) = scan_options(sh, &[b"-x", b"file", b"-y"], false);
+        let next = scan_options(&[b"-x", b"file", b"-y"]);
         assert_eq!(next, 1);
     }
 
     #[test]
     fn scan_consumes_a_double_dash() {
-        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned_sh;
-        let (next, _, _) = scan_options(sh, &[b"--", b"a"], false);
+        let next = scan_options(&[b"--", b"a"]);
         assert_eq!(next, 1);
     }
 
@@ -909,47 +782,19 @@ mod tests {
     /// scan, where it stays an operand.
     #[test]
     fn scan_consumes_a_lone_dash() {
-        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned_sh;
-        let (next, _, _) = scan_options(sh, &[b"-", b"a"], false);
+        let next = scan_options(&[b"-", b"a"]);
         assert_eq!(next, 1);
     }
 
     #[test]
     fn minus_o_takes_next_word() {
-        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned_sh;
-        let (next, _, _) = scan_options(sh, &[b"-o", b"noglob", b"rest"], false);
+        let next = scan_options(&[b"-o", b"noglob", b"rest"]);
         assert_eq!(next, 2);
     }
 
     #[test]
-    fn scan_records_typed_options() {
-        let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let args = words(&[b"-i", b"+m"]);
-        let scan = options(&mut sh, &args, 0, true).unwrap();
-        assert!(scan.explicit.contains(ShellOption::Interactive));
-        assert!(scan.explicit.contains(ShellOption::Monitor));
-        assert!(!scan.explicit.contains(ShellOption::Errexit));
-    }
-
-    /// `-c` and `-l` are command-line only: as a `set` option `-l` is an
-    /// ordinary letter, and `set -c` is an error rather than a command.
-    #[test]
-    fn minus_c_is_command_line_only() {
-        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned_sh;
-        let (_, minus_c, login) = scan_options(sh, &[b"-c", b"echo hi"], true);
-        assert!(minus_c);
-        let (_, _, login_off) = scan_options(sh, &[b"-l"], true);
-        assert_eq!((login, login_off), (false, true));
-    }
-
-    #[test]
     fn empty_word_is_not_an_option() {
-        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned_sh;
-        let (next, _, _) = scan_options(sh, &[b"", b"-x"], false);
+        let next = scan_options(&[b"", b"-x"]);
         assert_eq!(next, 0);
     }
 
@@ -957,11 +802,11 @@ mod tests {
     fn hashall_tracks_minus_and_plus_forms() {
         let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let enable = words(&[b"-h"]);
-        options(&mut sh, &enable, 0, false).unwrap();
+        options(&mut sh, &enable, 0).unwrap();
         assert!(sh.options.enabled(ShellOption::HashAll));
 
         let disable = words(&[b"+h"]);
-        options(&mut sh, &disable, 0, false).unwrap();
+        options(&mut sh, &disable, 0).unwrap();
         assert!(!sh.options.enabled(ShellOption::HashAll));
     }
 
@@ -970,11 +815,11 @@ mod tests {
     fn nonlexical_control_tracks_long_option_forms() {
         let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let enable = words(&[b"-o", b"nonlexicalctrl"]);
-        options(&mut sh, &enable, 0, false).unwrap();
+        options(&mut sh, &enable, 0).unwrap();
         assert!(sh.options.enabled(ShellOption::NonLexicalControl));
 
         let disable = words(&[b"+o", b"nonlexicalctrl"]);
-        options(&mut sh, &disable, 0, false).unwrap();
+        options(&mut sh, &disable, 0).unwrap();
         assert!(!sh.options.enabled(ShellOption::NonLexicalControl));
     }
 

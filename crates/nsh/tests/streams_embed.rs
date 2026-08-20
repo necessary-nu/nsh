@@ -5,7 +5,7 @@
 //! shows [dec:nsh:host-owns-streams] is a property of the shell rather than
 //! of one module.
 //!
-//! Everything here forks. `main_fn` runs a whole shell to completion --
+//! Everything here forks. `run_to_completion` runs a whole shell session --
 //! including its EXIT trap and its job-control teardown -- so a test that
 //! called it in process would leave the runner holding a shell that had
 //! finished exiting. It returns a status rather than `_exit`ing since
@@ -37,11 +37,10 @@ fn this_test_command(test: &str) -> String {
 ///
 /// `prepare` returning the value rather than stashing it in a global is
 /// the whole of what changed when `io` and `streams` moved onto the
-/// instance. Two of the cases below were passing a `Streams` through
-/// `streams::set` to reach `main_fn`'s parameter, which has taken one
-/// since [dec:nsh:host-owns-streams] landed.
+/// instance. The builder receives that value directly; no process-global
+/// stream installation or alternate entrypoint is involved.
 fn run_shell(script: &str, prepare: impl FnOnce() -> Streams) -> i32 {
-    let argv: Vec<Vec<u8>> = vec![b"sh".to_vec(), b"-c".to_vec(), script.as_bytes().to_vec()];
+    let command = script.as_bytes().to_vec();
     nsh_platform::run_in_child(move || {
         // The port raises `Longjmp` as ordinary control flow -- every
         // shell error and every `exit` is one -- and the default hook
@@ -49,11 +48,14 @@ fn run_shell(script: &str, prepare: impl FnOnce() -> Streams) -> i32 {
         // them in `main`; do the same so the test's stderr is the
         // shell's, not the runtime's.
         let streams = prepare();
-        /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
-        ending the process the caller's act — so this fork's child
-        has to end itself. Returning would carry it back into the
-        test harness after the fork. */
-        let status = nsh::shellmain::main_fn(argv, streams);
+        let mut shell = nsh::Shell::builder()
+            .arg0(bstr::BStr::new(b"sh"))
+            .inherit_env()
+            .streams(streams)
+            .host(nsh::ProcessHost)
+            .build()
+            .expect("build process shell");
+        let status = shell.run_to_completion(nsh::Startup::command(command));
         nsh_platform::exit_immediately(status.code().into());
     })
     .expect("run shell child")
@@ -171,15 +173,17 @@ fn the_shell_reads_a_script_from_the_stream_it_was_given() {
     drop(script_w);
 
     // `sh` with no operand reads commands from its standard input.
-    let argv: Vec<Vec<u8>> = vec![b"sh".to_vec()];
     let st = nsh_platform::run_in_child(move || {
         let supplied =
             Streams::from_fds(&script_r, &out_w, std::io::stderr()).expect("duplicate streams");
-        /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
-        ending the process the caller's act — so this fork's child
-        has to end itself. Returning would carry it back into the
-        test harness after the fork. */
-        let status = nsh::shellmain::main_fn(argv, supplied);
+        let mut shell = nsh::Shell::builder()
+            .arg0(bstr::BStr::new(b"sh"))
+            .inherit_env()
+            .streams(supplied)
+            .host(nsh::ProcessHost)
+            .build()
+            .expect("build process shell");
+        let status = shell.run_to_completion(nsh::Startup::standard_input());
         nsh_platform::exit_immediately(status.code().into());
     })
     .expect("run shell child");

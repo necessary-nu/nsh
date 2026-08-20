@@ -380,7 +380,7 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
         match signal {
             signal if signal == Signal::from(nsh_platform::interrupt_signal()) => {
                 if sh.options.enabled(ShellOption::Interactive)
-                    || sh.options.minusc.is_some()
+                    || sh.options.command_source
                     || !sh.options.enabled(ShellOption::Stdin)
                 {
                     desired = crate::host::Disposition::Catch;
@@ -592,6 +592,14 @@ pub fn setinteractive(sh: &mut crate::context::Shell, on: c_int) {
         return;
     }
     sh.traps.interactive = on;
+    setsignal(sh, nsh_platform::interrupt_signal().into());
+    setsignal(sh, nsh_platform::quit_signal().into());
+    setsignal(sh, nsh_platform::termination_signal().into());
+}
+
+/// Re-evaluate the dispositions whose defaults depend on the parsed startup
+/// input mode as well as interactivity.
+pub(crate) fn refresh_startup_signal_policy(sh: &mut crate::context::Shell) {
     setsignal(sh, nsh_platform::interrupt_signal().into());
     setsignal(sh, nsh_platform::quit_signal().into());
     setsignal(sh, nsh_platform::termination_signal().into());

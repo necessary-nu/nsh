@@ -18,10 +18,10 @@ fn bash_metadata_has_no_letter() {
 fn bash_tracks_long_option_forms() {
     let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
     let enable = [BStr::new(b"-o"), BStr::new(b"bash")];
-    options(&mut sh, &enable, 0, false).unwrap();
+    options(&mut sh, &enable, 0).unwrap();
     assert_eq!(sh.options.dialect(), Dialect::Bash);
 
     let disable = [BStr::new(b"+o"), BStr::new(b"bash")];
-    options(&mut sh, &disable, 0, false).unwrap();
+    options(&mut sh, &disable, 0).unwrap();
     assert_eq!(sh.options.dialect(), Dialect::Posix);
 }

@@ -1,11 +1,10 @@
-//! Literal port of `src/main.c` / `src/main.h`.
-//! Rules: `docs/spec/port/src/main.md` (the rule ids use the `main.`
-//! prefix even though the module is called `shellmain`, since `main` is
-//! taken by the binary crate root).
+//! Execute a typed command-line startup request.
 //!
-//! Startup is a sequence of named operations. Each operation declares where
-//! an interactive shell recovers if it fails; no translated label state or
-//! non-local jump remains.
+//! The command-line crate owns invocation parsing and process-exit policy.
+//! This internal module owns only the shell-language startup sequence:
+//! profiles, the requested input, interactive recovery, and EXIT traps.
+//! Each operation declares where an interactive shell recovers if it fails;
+//! no translated label state or non-local jump remains.
 
 // [spec:nsh:req:idiom.operation-modes]
 use crate::context::Shell;
@@ -16,21 +15,14 @@ use std::io::Write;
 use crate::eval::EvalContext;
 use crate::jobs::JobDisplay;
 use crate::options::ShellOption;
+use crate::source::Startup;
 // [spec:nsh:def:idiom.shell-options]
 
-/// src/main.h: `#define rootshell (!shlvl)`
+/// Whether this is the top-level shell rather than one of its children.
 #[inline]
-pub fn rootshell(sh: &Shell) -> c_int {
+pub(crate) fn rootshell(sh: &Shell) -> c_int {
     (sh.shell_level == 0) as c_int
 }
-
-/*
- * Main routine.  We initialize things, parse the arguments, execute
- * profiles if we're a login shell, and then call cmdloop to execute
- * commands.  The setjmp call sets up the location to jump to when an
- * exception occurs.  When an exception occurs the variable "state"
- * is used to figure out how far we had gotten.
- */
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum StartupTask {
@@ -71,13 +63,13 @@ fn advance_after_flow(flow: crate::eval::Flow, next: StartupTask) -> StartupAdva
 // [spec:nsh:req:idiom.jobs-startup-control-flow]
 fn run_startup_task(
     sh: &mut Shell,
-    argv: &[Vec<u8>],
+    startup: &Startup,
     task: StartupTask,
 ) -> Result<StartupAdvance, crate::error::Error> {
     match task {
         StartupTask::Initialize => {
-            sh.initialize_from(crate::var::EnvSource::Process)?;
-            let next = if crate::options::procargs(sh, argv)? {
+            configure_startup(sh, startup)?;
+            let next = if startup.login {
                 StartupTask::SystemProfile
             } else {
                 StartupTask::Environment
@@ -105,11 +97,11 @@ fn run_startup_task(
             Ok(StartupAdvance::Next(StartupTask::Command))
         }
         StartupTask::Command => {
-            if let Some(command) = sh.options.minusc.clone() {
+            if let Some(command) = startup.command_text() {
                 match crate::eval::evalstring(
                     sh,
-                    BStr::new(command.as_slice()),
-                    if sh.options.enabled(ShellOption::Stdin) {
+                    command,
+                    if startup.reads_stdin() {
                         EvalContext::DEFAULT
                     } else {
                         EvalContext::EXITING
@@ -124,7 +116,7 @@ fn run_startup_task(
                     }
                 }
             }
-            if sh.options.enabled(ShellOption::Stdin) || sh.options.minusc.is_none() {
+            if startup.runs_command_loop() {
                 Ok(StartupAdvance::Next(StartupTask::CommandLoop))
             } else {
                 Ok(StartupAdvance::Finished)
@@ -138,8 +130,23 @@ fn run_startup_task(
     }
 }
 
-/// The literal port of `main()` in `src/main.c`, taking the shell it is
-/// to run as. [`main_fn`] is what a caller outside the crate reaches.
+fn configure_startup(sh: &mut Shell, startup: &Startup) -> Result<(), crate::error::Error> {
+    sh.options.command_source = startup.has_command();
+    sh.options.set(ShellOption::Stdin, startup.reads_stdin());
+
+    if startup.reads_stdin() && sh.input.stdin_istty < 0 {
+        crate::input::input_init(sh);
+    }
+    if let Some(path) = startup.script_path() {
+        crate::input::set_command_input_file(sh, path)?;
+    }
+
+    crate::options::optschanged(sh)?;
+    crate::trap::refresh_startup_signal_policy(sh);
+    Ok(())
+}
+
+/// Run one fully parsed startup request on the supplied shell.
 // [spec:dash:def:main.main-fn]
 // [spec:dash:sem:main.main-fn]
 // [spec:posix:syn:sh.synopsis]
@@ -169,10 +176,10 @@ fn run_startup_task(
 // [spec:posix:sem:shell.input-sources]
 // [spec:posix:req:exit.interactive-abandons-command]
 // [spec:nsh:req:idiom.evaluator-control-flow]
-pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
+pub(crate) fn run(sh: &mut Shell, startup: &Startup) -> crate::status::ExitStatus {
     let mut task = StartupTask::Initialize;
     loop {
-        match run_startup_task(sh, argv, task) {
+        match run_startup_task(sh, startup, task) {
             Ok(StartupAdvance::Next(next)) => task = next,
             Ok(StartupAdvance::Finished) => {
                 return crate::trap::exitshell(sh, None);
@@ -211,55 +218,6 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
             }
         }
     }
-}
-
-/// Glue for the binary crate root: turns Rust's `Vec<String>` argv into
-/// the NUL-terminated `char **` the literal `main` above expects. Not
-/// part of `src/main.c`.
-/* argv arrives as raw bytes, not `String`: C argv elements are arbitrary
- * NUL-terminated byte strings and dash passes non-UTF-8 through untouched.
- * See the comment in main.rs. */
-/// Run the shell to completion on `streams`.
-///
-/// The `streams` argument is [dec:nsh:host-owns-streams] at the entry
-/// point: the shell is *given* its three streams rather than assuming
-/// descriptors 0, 1 and 2. [`crate::streams::Streams::INHERIT`] snapshots
-/// the frontend process's descriptor table into the shell's owned logical
-/// table; supplied streams need no process-wide installation step.
-///
-/// **It returns now**, with the status the shell left with.
-///
-/// It used to end in `_exit`, because `exitshell` did.
-/// [dec:nsh:host-owns-the-process] makes ending the host's process
-/// something a library may not do on its own authority, and answers it
-/// with an absence rather than a grant — so the status comes back and the
-/// frontend calls `std::process::exit`.
-///
-/// A caller that forks and then calls this **must end the child itself**.
-/// Before, the child could not return; now it can, and it would carry on
-/// executing whatever followed the fork.
-pub fn main_fn(argv: Vec<Vec<u8>>, streams: crate::streams::Streams) -> crate::status::ExitStatus {
-    /* The shell this process runs as. There is one, it is made here, and
-     * every function that has been threaded so far reaches its state
-     * through the borrow that starts on the next line
-     * ([dec:nsh:no-ambient-state]). */
-    let Ok(mut sh) = Shell::try_new(streams) else {
-        return crate::status::ExitStatus::from_code(2);
-    };
-    /* And it is a shell that owns its process, so it gets the host that
-     * says so. `Shell::new` defaults to `NoHost` because a *library* shell
-     * must; calling this function is the caller stating that this process
-     * is the shell, which is the grant [dec:nsh:host-owns-signals] asks
-     * for. Without this line the frontend would install no handler at all
-     * and every signal behaviour would change at once.
-     *
-     * `attach` before anything that could ask the host to install one: the
-     * sink is the only part of the shell a handler may touch, so the host
-     * has to be holding it before a handler could exist. Same order
-     * `Builder::build` keeps, for the same reason. */
-    sh.host = Box::new(crate::host::ProcessHost);
-    sh.host.attach(crate::siginbox::signals());
-    main(&mut sh, &argv)
 }
 
 /*
@@ -445,7 +403,10 @@ fn read_profile(sh: &mut Shell, name: &BStr) -> Result<crate::eval::Flow, crate:
 /// how a login shell reads its profile.
 // [spec:dash:def:main.readcmdfile-fn]
 // [spec:dash:sem:main.readcmdfile-fn]
-pub fn readcmdfile(sh: &mut Shell, name: &BStr) -> Result<crate::eval::Flow, crate::error::Error> {
+pub(crate) fn readcmdfile(
+    sh: &mut Shell,
+    name: &BStr,
+) -> Result<crate::eval::Flow, crate::error::Error> {
     crate::resource::with_resources(sh, |sh, _resources| {
         crate::input::setinputfile(sh, name, crate::input::INPUT_PUSH_FILE)?;
         cmdloop(sh, 0)

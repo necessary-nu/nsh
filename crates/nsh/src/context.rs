@@ -143,10 +143,9 @@ pub struct Shell {
     /// Where the shell's own three streams come from.
     ///
     /// [dec:nsh:host-owns-streams] as a field rather than as a process
-    /// global. `shellmain::main_fn` has taken a `Streams` argument since
-    /// that decision landed; the constructor snapshots those streams into
-    /// `fds`, and `io` retains stable references to its logical output
-    /// slots. No process-global stream installation step remains.
+    /// global. The builder takes a `Streams` value; the constructor snapshots
+    /// it into `fds`, and `io` retains stable references to its logical
+    /// output slots. No process-global stream installation step remains.
     pub(crate) streams: crate::streams::Streams,
     /// `$?` — the exit status of the last command.
     ///

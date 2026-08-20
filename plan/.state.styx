@@ -5316,4 +5316,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.builtin-registry}
     )}
+    {id modernize-shell-entrypoint, covered_rules (
+        idiom.shell-entrypoint
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.shell-entrypoint}
+    )}
 )

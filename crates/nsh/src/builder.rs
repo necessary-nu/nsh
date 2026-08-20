@@ -12,8 +12,14 @@ use nsh_platform::NativeStrExt as _;
 
 use crate::context::Shell;
 use crate::error::Error;
+use crate::options::ShellOption;
 use crate::streams::Streams;
 use crate::var::EnvSource;
+
+enum RequestedOption {
+    Named(BString, bool),
+    Typed(ShellOption, bool),
+}
 
 /// Builds a [`Shell`].
 ///
@@ -36,11 +42,12 @@ use crate::var::EnvSource;
 /// ```
 pub struct Builder {
     streams: Streams,
+    invocation_name: Option<BString>,
     arg0: Option<BString>,
     args: Vec<BString>,
     env: Vec<(BString, BString)>,
     inherit_env: bool,
-    options: Vec<(BString, bool)>,
+    options: Vec<RequestedOption>,
     cwd: Option<std::path::PathBuf>,
     host: Option<Box<dyn crate::host::Host>>,
 }
@@ -56,6 +63,7 @@ impl Builder {
     pub fn new() -> Builder {
         Builder {
             streams: Streams::INHERIT,
+            invocation_name: None,
             arg0: None,
             args: Vec::new(),
             env: Vec::new(),
@@ -69,6 +77,18 @@ impl Builder {
     /// `$0`, and the name every diagnostic is prefixed with.
     pub fn arg0(mut self, arg0: &BStr) -> Self {
         self.arg0 = Some(arg0.to_owned());
+        self
+    }
+
+    /// The process invocation name used by diagnostics that identify the
+    /// interpreter rather than the current script or command name.
+    ///
+    /// A command-file operand or the name after `-c` becomes `$0`, but it
+    /// must not replace the interpreter identity captured from raw `argv[0]`.
+    /// Callers that do not set this explicitly get the value passed to
+    /// [`Builder::arg0`].
+    pub fn invocation_name(mut self, name: &BStr) -> Self {
+        self.invocation_name = Some(name.to_owned());
         self
     }
 
@@ -120,7 +140,18 @@ impl Builder {
     /// Applied in call order, after the environment and the parameters,
     /// so an option whose effect depends on them sees them.
     pub fn option(mut self, name: &BStr, on: bool) -> Self {
-        self.options.push((name.to_owned(), on));
+        self.options
+            .push(RequestedOption::Named(name.to_owned(), on));
+        self
+    }
+
+    /// Set one shell option by typed identity.
+    ///
+    /// This is the frontend-friendly form: command-line parsing can resolve
+    /// spelling once and hand the builder a value rather than asking the core
+    /// to parse an invocation.
+    pub fn shell_option(mut self, option: ShellOption, on: bool) -> Self {
+        self.options.push(RequestedOption::Typed(option, on));
         self
     }
 
@@ -186,6 +217,10 @@ impl Builder {
         environment.extend(self.env);
         sh.initialize_from(EnvSource::Explicit(&environment))?;
 
+        if let Some(invocation_name) = &self.invocation_name {
+            sh.options
+                .set_invocation_name(BStr::new(&invocation_name[..]));
+        }
         if let Some(arg0) = &self.arg0 {
             sh.options.set_arg0(BStr::new(&arg0[..]));
         }
@@ -195,8 +230,15 @@ impl Builder {
             crate::options::setparam(&mut sh, &refs);
         }
 
-        for (name, on) in &self.options {
-            crate::options::set_option_by_name(&mut sh, BStr::new(&name[..]), *on)?;
+        for option in &self.options {
+            match option {
+                RequestedOption::Named(name, on) => {
+                    crate::options::set_option_by_name(&mut sh, BStr::new(&name[..]), *on)?;
+                }
+                RequestedOption::Typed(option, on) => {
+                    crate::options::set_typed_option(&mut sh, *option, *on);
+                }
+            }
         }
         crate::options::optschanged(&mut sh)?;
 
@@ -321,6 +363,24 @@ mod tests {
             .build()
             .unwrap();
         assert_eq!(selected.options.dialect(), crate::options::Dialect::Bash);
+    }
+
+    #[test]
+    fn invocation_name_survives_arg_zero() {
+        let sh = Shell::builder()
+            .invocation_name(BStr::new(b"nsh"))
+            .arg0(BStr::new(b"script.sh"))
+            .build()
+            .unwrap();
+
+        assert_eq!(sh.options.arg0(), Some(BStr::new(b"script.sh")));
+        assert_eq!(
+            sh.options
+                .invocation_name
+                .as_ref()
+                .map(|name| name.as_slice()),
+            Some(b"nsh\0".as_slice())
+        );
     }
 
     // [spec:nsh:req:compat.bash.state-isolation/test]

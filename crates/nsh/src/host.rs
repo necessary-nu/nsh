@@ -168,10 +168,9 @@ impl Host for NoHost {
 /// reach; the full mask is why a handler cannot be re-entered by a second
 /// signal while it is storing.
 ///
-/// This is what [`crate::shellmain::main_fn`] gives the shell it builds,
-/// and it is not the library acting on its own authority: `main_fn` is the
-/// port of `main()`, so a caller of it has already said that this process
-/// is the shell. An embedder whose program is something else wants
+/// This is what the command-line frontend gives its [`crate::Shell`], and it
+/// is not the library acting on its own authority: selecting this host says
+/// that the process is the shell. An embedder whose program is something else wants
 /// [`NoHost`], which is what [`crate::builder::Builder`] defaults to.
 pub struct ProcessHost;
 

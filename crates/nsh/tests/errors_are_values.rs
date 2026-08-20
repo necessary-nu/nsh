@@ -52,15 +52,18 @@ use nsh::streams::Streams;
 fn run(script: &str) -> (String, i32) {
     let (r, w) = nsh_platform::pipe().expect("create pipe");
 
-    let argv: Vec<Vec<u8>> = vec![b"sh".to_vec(), b"-c".to_vec(), script.as_bytes().to_vec()];
+    let command = script.as_bytes().to_vec();
 
     let status = nsh_platform::run_in_child(move || {
         let supplied = Streams::from_fds(std::io::stdin(), &w, &w).expect("duplicate streams");
-        /* `main_fn` returns now — [dec:nsh:host-owns-the-process] made
-        ending the process the caller's act — so this fork's child
-        has to end itself. Returning would carry it back into the
-        test harness after the fork. */
-        let status = nsh::shellmain::main_fn(argv, supplied);
+        let mut shell = nsh::Shell::builder()
+            .arg0(bstr::BStr::new(b"sh"))
+            .inherit_env()
+            .streams(supplied)
+            .host(nsh::ProcessHost)
+            .build()
+            .expect("build process shell");
+        let status = shell.run_to_completion(nsh::Startup::command(command));
         nsh_platform::exit_immediately(status.code().into());
     })
     .expect("run shell child");

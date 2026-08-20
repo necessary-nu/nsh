@@ -273,7 +273,7 @@ fn await_foreground_group(
 /// callers are teardown -- `exitshell`, and `optschanged` when
 /// `poplocalvars` restores a `local -` option set -- and 4.3's rule is
 /// that teardown does not become fallible; the `Result` is here so the
-/// callers that *are* ordinary code (`set -m`, `exec`, `procargs`) keep
+/// callers that *are* ordinary code (`set -m`, `exec`, startup) keep
 /// dash's behaviour of abandoning the command, and the teardown callers
 /// drop it where the C already swallowed it.
 pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error> {
