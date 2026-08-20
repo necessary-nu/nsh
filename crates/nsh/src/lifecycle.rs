@@ -73,7 +73,7 @@ mod tests {
             shell.var(BStr::new("OWNED_LIFECYCLE")),
             Some(BStr::new("yes"))
         );
-        assert!(crate::input::cur_pf(&mut shell).uses_stdin());
+        assert!(crate::input::cur_pf(&mut shell.input).uses_stdin());
         shell.eval.loopnest = 3;
         shell.eval.inps4 = 1;
         shell.clear_evaluation_resources();

@@ -530,7 +530,7 @@ fn list(sh: &mut Shell, nlflag: c_int) -> Result<ParseResult, Error> {
          * anything consumes it. `command()?` and `pipeline()?` both take
          * their `savelinno` at this same point, so a wrapper built here
          * records the line its contents record. */
-        let savelinno: c_int = crate::plinno!(sh);
+        let savelinno: c_int = crate::plinno!(&mut sh.input);
 
         let mut next = andor(sh)?.ok_or_else(|| synexpect(sh, None))?;
         tok = readtoken(sh, TokenContext::NONE)?;
@@ -683,7 +683,7 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
     let closing_token: Option<TokenKind>;
     let savelinno: c_int;
 
-    savelinno = crate::plinno!(sh);
+    savelinno = crate::plinno!(&mut sh.input);
 
     let tok = readtoken(sh, context)?;
     if let Some(bash_node) = bash::command_prefix(sh, tok, savelinno)? {
@@ -953,7 +953,7 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
     let savelinno: c_int;
 
     word_context = TokenContext::ALIASES;
-    savelinno = crate::plinno!(sh);
+    savelinno = crate::plinno!(&mut sh.input);
     loop {
         let tok = readtoken(sh, word_context)?;
         if tok == TokenKind::Word {
@@ -1013,7 +1013,7 @@ fn simplecmd(sh: &mut Shell) -> Result<Option<Node>, Error> {
                 /* The C relabels its argument union arm as a function node
                  * in place. Moving the parsed name into a dedicated function
                  * variant states the result without an invalid intermediate. */
-                let linno = crate::plinno!(sh);
+                let linno = crate::plinno!(&mut sh.input);
                 let body = command(sh, TokenContext::COMMAND_START_AFTER_NEWLINES)?
                     .ok_or_else(|| synexpect(sh, None))?;
                 return Ok(Some(Node::Function(FunctionDefinition {
@@ -1206,14 +1206,14 @@ fn readtoken_with_flags(sh: &mut Shell, mut context: TokenContext) -> Result<Tok
                 parseheredoc(sh)?;
                 /* The alias bit is dropped with the rest: dash clears the
                  * whole of `checkkwd` here, and the bit lived in it. */
-                crate::input::clear_alias_boundary(sh);
+                sh.input.clear_alias_boundary();
                 token = xxreadtoken(sh, context.check_here_document_end)?;
             }
         }
 
         /* `popstring` sets this while `xxreadtoken` runs. The bit belongs
          * to the input boundary now; this is the same hand-off point. */
-        if crate::input::take_alias_boundary(sh) {
+        if sh.input.take_alias_boundary() {
             context.aliases = true;
         }
 
@@ -1237,7 +1237,7 @@ fn readtoken_with_flags(sh: &mut Shell, mut context: TokenContext) -> Result<Tok
              * list. A raw pointer ends its borrow at the `let`, and the
              * word it points at is the parser's own, not the alias's. */
             let name = wordtext(sh).to_owned();
-            if let Some(value) = crate::alias::lookup_alias(sh, BStr::new(name.as_slice()), true) {
+            if let Some(value) = sh.aliases.lookup(BStr::new(name.as_slice()), true) {
                 if !value.is_empty() {
                     pushstring(sh, BStr::new(value.as_slice()), Some(name));
                 }
@@ -1252,7 +1252,7 @@ fn readtoken_with_flags(sh: &mut Shell, mut context: TokenContext) -> Result<Tok
 // [spec:dash:def:parser.nlprompt-fn]
 // [spec:dash:sem:parser.nlprompt-fn]
 fn nlprompt(sh: &mut Shell) {
-    crate::plinno!(sh) += 1;
+    crate::plinno!(&mut sh.input) += 1;
     if sh.input.doprompt != 0 {
         setprompt(sh, 2);
     }
@@ -1261,7 +1261,7 @@ fn nlprompt(sh: &mut Shell) {
 // [spec:dash:def:parser.nlnoprompt-fn]
 // [spec:dash:sem:parser.nlnoprompt-fn]
 fn nlnoprompt(sh: &mut Shell) {
-    crate::plinno!(sh) += 1;
+    crate::plinno!(&mut sh.input) += 1;
     sh.input.needprompt = sh.input.doprompt;
 }
 
@@ -2520,10 +2520,10 @@ fn synexpect(sh: &mut Shell, expected: Option<TokenKind>) -> Error {
 // [spec:dash:def:parser.synerror-fn]
 // [spec:dash:sem:parser.synerror-fn]
 fn synerror(sh: &mut Shell, msg: &[u8]) -> Error {
-    sh.eval.errlinno = crate::plinno!(sh);
+    sh.eval.errlinno = crate::plinno!(&mut sh.input);
     let mut message = b"Syntax error: ".to_vec();
     message.extend_from_slice(msg);
-    sh.sh_error_value(&message)
+    sh.diagnostics().sh_error_value(&message)
 }
 
 // [spec:dash:def:parser.setprompt-fn]
@@ -2536,7 +2536,7 @@ fn setprompt(sh: &mut Shell, which: c_int) {
     sh.input.whichprompt = which;
 
     show = (!crate::histedit::editing_active(sh)) as c_int;
-    if show != 0 && crate::input::cur_pf(sh).nleft == 0 {
+    if show != 0 && crate::input::cur_pf(&mut sh.input).nleft == 0 {
         /* `pushstackmark(&smark, stackblocksize())` bounded the prompt
          * `expandstr` had left in the region for `out2str` to read.  The
          * expansion buffer is owned, so there is nothing to bound. */

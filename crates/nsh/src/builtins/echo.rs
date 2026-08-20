@@ -32,8 +32,8 @@ use crate::escape::conv_escape_str;
 use crate::eval::Flow;
 
 /// Write one rendered conversion to standard output.
-fn emit(sh: &mut crate::context::Shell, bytes: &[u8]) {
-    let _ = sh.io.stdout().write_all(bytes);
+fn emit(output: &mut crate::output::Output, bytes: &[u8]) {
+    let _ = output.write_all(bytes);
 }
 
 /// Expand `echo`'s escapes and write the result, followed by `separator`
@@ -46,7 +46,7 @@ fn emit(sh: &mut crate::context::Shell, bytes: &[u8]) {
 /// `%s ` or `%s\n`, so it passes the byte itself.
 // [spec:dash:def:printf.print-escape-str-fn]
 // [spec:dash:sem:printf.print-escape-str-fn]
-fn print_escape_str(sh: &mut crate::context::Shell, separator: u8, s: &BStr) -> c_int {
+fn print_escape_str(output: &mut crate::output::Output, separator: u8, s: &BStr) -> c_int {
     let done: c_int;
     /* The C's `q` is a cursor into the stack block and `stackblock()` its
      * base.  Both are this buffer: `len` is its length and `q[-1]` its
@@ -66,7 +66,7 @@ fn print_escape_str(sh: &mut crate::context::Shell, separator: u8, s: &BStr) -> 
     buf[len - 1] = close;
     let total = len - 1 + (close != 0) as usize;
 
-    emit(sh, &buf[..total]);
+    emit(output, &buf[..total]);
 
     done
 }
@@ -87,6 +87,7 @@ pub fn echocmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 
     let mut index = 0usize;
+    let output = sh.io.stdout();
     loop {
         let mut separator: u8 = b' ';
         let s = words.get(index);
@@ -99,7 +100,7 @@ pub fn echocmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             separator = last;
         }
 
-        nonl = print_escape_str(sh, separator, s.copied().unwrap_or(BStr::new(b"")));
+        nonl = print_escape_str(output, separator, s.copied().unwrap_or(BStr::new(b"")));
 
         if !(nonl == 0 && words.get(index).is_some()) {
             break;

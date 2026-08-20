@@ -32,7 +32,7 @@ use crate::output::Dest;
 pub fn jobscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut mode = JobDisplay::Standard;
     let mut opts = crate::options::Options::new(args);
-    while let Some(m) = opts.next(sh, b"lp")? {
+    while let Some(m) = opts.next(&mut sh.diagnostics(), b"lp")? {
         if m == b'l' {
             mode = JobDisplay::Long;
         } else {

@@ -65,18 +65,8 @@ pub(crate) fn cbytes(s: &Option<BString>) -> Vec<u8> {
 
 // [spec:dash:def:cd.getpwd-fn]
 // [spec:dash:sem:cd.getpwd-fn]
-fn getpwd(sh: &mut crate::context::Shell) -> Option<BString> {
-    match nsh_platform::current_directory() {
-        Ok(dir) => return Some(BString::from(dir.to_shell_bytes())),
-        Err(err) => {
-            /* `current_dir` is an OS query on Unix, so this is the errno
-             * `getcwd` would have left for the C's `strerror(errno)` path. */
-            let mut message = b"getcwd() failed: ".to_vec();
-            message.extend_from_slice(sh.locale.error_message(&err).as_bytes());
-            sh.sh_warnx(&message);
-        }
-    }
-    None
+fn getpwd() -> std::io::Result<BString> {
+    nsh_platform::current_directory().map(|dir| BString::from(dir.to_shell_bytes()))
 }
 
 /// What `setpwd`'s `val` says, which the C encodes in two pointer
@@ -118,7 +108,15 @@ pub(crate) fn setpwd_inner(
         sh.cwd.physdir = None;
         match val {
             Pwd::Unknown | Pwd::Current => {
-                let current = getpwd(sh);
+                let current = match getpwd() {
+                    Ok(current) => Some(current),
+                    Err(error) => {
+                        let mut message = b"getcwd() failed: ".to_vec();
+                        message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
+                        sh.diagnostics().sh_warnx(&message);
+                        None
+                    }
+                };
                 if matches!(val, Pwd::Unknown) {
                     sh.cwd.curdir = current.clone();
                 }
@@ -164,8 +162,6 @@ mod tests {
     // [spec:dash:sem:cd.getpwd-fn/test]
     #[test]
     fn getpwd_preserves_non_utf8_path_bytes() {
-        let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
-        let sh = &mut owned_sh;
         let _g = crate::testutil::lock();
         {
             let old = std::env::current_dir().unwrap();
@@ -182,7 +178,7 @@ mod tests {
             };
             std::env::set_current_dir(&temporary).unwrap();
 
-            let got = getpwd(sh).unwrap();
+            let got = getpwd().unwrap();
             assert_eq!(&got[..], temporary.to_shell_bytes());
             assert!(!got.contains(&0));
         }
@@ -203,7 +199,7 @@ mod tests {
             std::env::set_current_dir(&temporary).unwrap();
             std::fs::remove_dir(&temporary).unwrap();
 
-            assert!(getpwd(sh).is_none());
+            assert!(getpwd().is_err());
         }
     }
 }

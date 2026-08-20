@@ -206,7 +206,7 @@ pub(crate) fn terminal_settings_error(
     message.extend_from_slice(b" (");
     message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
     message.push(b')');
-    sh.sh_error_value(&message)
+    sh.diagnostics().sh_error_value(&message)
 }
 
 fn acquire_control_terminal(sh: &mut crate::context::Shell) -> Result<Option<Descriptor>, Error> {
@@ -318,7 +318,8 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
         if !terminal_is_accessible {
             drop(fd.take());
             if sh.options.enabled(ShellOption::Interactive) {
-                sh.sh_warnx(b"can't access tty; job control turned off");
+                sh.diagnostics()
+                    .sh_warnx(b"can't access tty; job control turned off");
                 sh.options.set(ShellOption::Monitor, false);
                 return Ok(());
             }
@@ -507,7 +508,7 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: JobId, mod
     sh.jobs[jp].changed = false;
 
     if sh.jobs[jp].is_done() {
-        freejob(sh, jp);
+        freejob(&mut sh.interrupt_deferral, &mut sh.jobs, jp);
     }
 }
 
@@ -548,20 +549,24 @@ pub(crate) fn showjobs(
 
 // [spec:dash:def:jobs.freejob-fn]
 // [spec:dash:sem:jobs.freejob-fn]
-fn freejob(sh: &mut crate::context::Shell, jp: JobId) {
-    crate::error::with_interrupts_deferred(sh, |sh| {
+fn freejob(interrupts: &mut crate::error::InterruptDeferral, jobs: &mut JobTable, jp: JobId) {
+    interrupts.run_with(jobs, |jobs| {
         /* Taking the occupied slot releases all owned process text and terminal
          * state exactly once, while `JobTable::remove` also repairs ordering. */
-        drop(sh.jobs.remove(jp));
+        drop(jobs.remove(jp));
     });
 }
 
 /// Remove a successfully waited, completed job from both the job list and
 /// the set of process IDs known to this shell environment.
 // [spec:posix:req:builtin.wait.remove-waited-for-pid]
-pub(crate) fn remove_waited_job(sh: &mut crate::context::Shell, jp: JobId) {
-    if sh.jobs[jp].is_done() {
-        freejob(sh, jp);
+pub(crate) fn remove_waited_job(
+    interrupts: &mut crate::error::InterruptDeferral,
+    jobs: &mut JobTable,
+    jp: JobId,
+) {
+    if jobs[jp].is_done() {
+        freejob(interrupts, jobs, jp);
     }
 }
 
@@ -660,7 +665,7 @@ pub(crate) fn getjob(
             message.extend_from_slice(b" not created under job control");
         }
     }
-    Err(sh.sh_error_value(&message))
+    Err(sh.diagnostics().sh_error_value(&message))
 }
 
 /*
@@ -681,7 +686,7 @@ pub fn makejob(sh: &mut crate::context::Shell, nprocs: c_int) -> JobId {
     i = 0;
     jp = loop {
         if i >= sh.jobs.slots.len() {
-            break growjobtab(sh);
+            break growjobtab(&mut sh.jobs);
         }
         let id = JobId(i);
         let Some(job) = sh.jobs.slots[id.0].as_ref() else {
@@ -695,7 +700,7 @@ pub fn makejob(sh: &mut crate::context::Shell, nprocs: c_int) -> JobId {
             i += 1;
             continue;
         }
-        freejob(sh, id);
+        freejob(&mut sh.interrupt_deferral, &mut sh.jobs, id);
         break id;
     };
     let mut job = Job::new();
@@ -718,11 +723,11 @@ pub fn makejob(sh: &mut crate::context::Shell, nprocs: c_int) -> JobId {
 //
 // The C's relocation pass has no counterpart: jobs own their process arrays,
 // identities are indices, and ordering contains values rather than pointers.
-fn growjobtab(sh: &mut crate::context::Shell) -> JobId {
-    let len: usize = sh.jobs.slots.len();
+fn growjobtab(jobs: &mut JobTable) -> JobId {
+    let len: usize = jobs.slots.len();
 
     for _ in 0..4 {
-        sh.jobs.slots.push(None);
+        jobs.slots.push(None);
     }
     JobId(len)
 }
@@ -836,14 +841,14 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<JobId>, n: Option<&Node>
         return;
     };
 
-    freejob(sh, ji);
+    freejob(&mut sh.interrupt_deferral, &mut sh.jobs, ji);
 
     if crate::parser::issimplecmd(n, BStr::new(crate::builtins::JOBSCMD.name.to_bytes())) != 0 {
         return;
     }
 
     for i in sh.jobs.order_snapshot() {
-        freejob(sh, i);
+        freejob(&mut sh.interrupt_deferral, &mut sh.jobs, i);
     }
 }
 
@@ -923,9 +928,9 @@ pub fn forkshell(
         }
         Err(_) => {
             if let Some(job) = jp {
-                freejob(sh, job);
+                freejob(&mut sh.interrupt_deferral, &mut sh.jobs, job);
             }
-            return Err(sh.sh_error_value(b"Cannot fork"));
+            return Err(sh.diagnostics().sh_error_value(b"Cannot fork"));
         }
     };
 
@@ -963,8 +968,8 @@ pub fn forkexec(
         }
         Ok(nsh_platform::ForkResult::Parent(pid)) => pid,
         Err(_) => {
-            freejob(sh, jp);
-            return Err(sh.sh_error_value(b"Cannot fork"));
+            freejob(&mut sh.interrupt_deferral, &mut sh.jobs, jp);
+            return Err(sh.diagnostics().sh_error_value(b"Cannot fork"));
         }
     };
     forkparent(sh, Some(jp), Some(n), FORK_FG, pid);
@@ -1064,7 +1069,7 @@ pub fn waitforjob(
         }
     }
     if sh.jobs[jp].is_done() {
-        freejob(sh, jp);
+        freejob(&mut sh.interrupt_deferral, &mut sh.jobs, jp);
     }
     if let Some((operation, error)) = terminal_error {
         return Err(terminal_settings_error(sh, operation, error));
@@ -1162,7 +1167,7 @@ fn waitone(
     /* A blocking wait can leave an interrupt pending while this structured
      * scope is active. Deliver it only after the caller's prior depth has
      * been restored. */
-    if let Some(e) = crate::error::poll_interrupt(sh) {
+    if let Some(e) = crate::error::poll_interrupt(sh.interrupt_context()) {
         return Err(e);
     }
     /* A blocking wait for one foreground job can reap a different,
@@ -1268,7 +1273,7 @@ fn waitproc(sh: &mut crate::context::Shell, block: c_int) -> Result<WaitOutcome,
             /* One of the three EINTR sites the C retries blindly, and the
              * one that matters for a ^C during a foreground command that
              * does not itself die of it. */
-            if let Some(e) = crate::error::poll_interrupt(sh) {
+            if let Some(e) = crate::error::poll_interrupt(sh.interrupt_context()) {
                 return Err(e);
             }
         }
@@ -1524,7 +1529,7 @@ fn xtcsetpgrp(
         let mut message = b"Cannot set tty process group (".to_vec();
         message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
         message.push(b')');
-        return Err(sh.sh_error_value(&message));
+        return Err(sh.diagnostics().sh_error_value(&message));
     }
     Ok(())
 }

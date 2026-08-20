@@ -26,11 +26,11 @@ pub fn shiftcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let n: c_int;
 
     n = match args.get(1) {
-        Some(count) => crate::mystring::number(sh, count)?,
+        Some(count) => crate::mystring::number(&mut sh.diagnostics(), count)?,
         None => 1,
     };
     if n > sh.options.shellparam.nparam {
-        return Err(sh.sh_error_value(b"can't shift that many"));
+        return Err(sh.diagnostics().sh_error_value(b"can't shift that many"));
     }
     crate::error::with_interrupts_deferred(sh, |sh| {
         sh.options.shellparam.drop_first(n);

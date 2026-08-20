@@ -65,7 +65,7 @@ fn emit_field(sh: &mut crate::context::Shell, rendered: Option<Vec<u8>>) -> Resu
             emit(sh, &bytes);
             Ok(())
         }
-        None => Err(sh.sh_error_value(b"xvsnprintf failed")),
+        None => Err(sh.diagnostics().sh_error_value(b"xvsnprintf failed")),
     }
 }
 
@@ -197,7 +197,7 @@ impl<'a> Operands<'a> {
             return;
         }
 
-        sh.sh_warnx(&message);
+        sh.diagnostics().sh_warnx(&message);
         self.status = ExitStatus::FAILURE;
     }
 }
@@ -641,10 +641,12 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut options = crate::options::Options::new(args);
     /* `nextopt(nullstr)`: printf takes no options, so this exists to
      * reject `-x` and to step over a `--`. */
-    while options.next(sh, b"")?.is_some() {}
+    while options.next(&mut sh.diagnostics(), b"")?.is_some() {}
 
     let Some((format, arguments)) = options.operands().split_first() else {
-        return Err(sh.sh_error_value(b"usage: printf format [arg ...]"));
+        return Err(sh
+            .diagnostics()
+            .sh_error_value(b"usage: printf format [arg ...]"));
     };
 
     /* `conv_escape` reads through a raw cursor and stops at a NUL, so
@@ -742,7 +744,7 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
             let conversion = format[at];
             if conversion == 0 {
-                return Err(sh.sh_error_value(b"missing format character"));
+                return Err(sh.diagnostics().sh_error_value(b"missing format character"));
             }
             at += 1;
             if let Some(stop) = stop {
@@ -784,7 +786,7 @@ pub fn printfcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 _ => {
                     let mut message = format[start..at].to_vec();
                     message.extend_from_slice(b": invalid directive");
-                    return Err(sh.sh_error_value(&message));
+                    return Err(sh.diagnostics().sh_error_value(&message));
                 }
             }
         }

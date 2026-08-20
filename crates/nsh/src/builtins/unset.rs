@@ -28,7 +28,7 @@ pub fn unsetcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut flag: u8 = 0;
 
     let mut opts = Options::new(args);
-    while let Some(i) = opts.next(sh, b"vf")? {
+    while let Some(i) = opts.next(&mut sh.diagnostics(), b"vf")? {
         flag = i;
     }
 
@@ -37,13 +37,13 @@ pub fn unsetcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             if variable_attributes(sh, name).is_some_and(|attributes| attributes.read_only) {
                 let mut message = name.to_vec();
                 message.extend_from_slice(b" is read-only");
-                return Err(sh.builtin_error_value(1, &message));
+                return Err(sh.diagnostics().builtin_error_value(1, &message));
             }
             unset_bytes(sh, name)?;
             continue;
         }
         if flag != b'v' {
-            crate::exec::unsetfunc(sh, name);
+            crate::exec::unsetfunc(&mut sh.interrupt_deferral, &mut sh.commands, name);
         }
     }
     Ok(Flow::Done((0).into()))

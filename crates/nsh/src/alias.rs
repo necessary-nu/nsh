@@ -36,6 +36,77 @@ impl AliasTable {
         self.map.iter().map(|(name, alias)| (name, &alias.value))
     }
 
+    fn set(&mut self, name: &BStr, value: &BStr) {
+        match self.map.get_mut(name) {
+            Some(alias) => {
+                alias.value = value.to_owned();
+                alias.dead = false;
+            }
+            None => {
+                self.map.insert(
+                    name.to_owned(),
+                    Alias {
+                        value: value.to_owned(),
+                        in_use: false,
+                        dead: false,
+                    },
+                );
+            }
+        }
+    }
+
+    /// Return an owned alias expansion. `check_in_use` implements the
+    /// parser's recursive-alias guard.
+    // [spec:dash:def:alias.lookupalias-pub-fn]
+    // [spec:dash:sem:alias.lookupalias-pub-fn]
+    pub(crate) fn lookup(&self, name: &BStr, check_in_use: bool) -> Option<BString> {
+        self.map
+            .get(name)
+            .and_then(|alias| (!check_in_use || !alias.in_use).then(|| alias.value.clone()))
+    }
+
+    /// Mark an alias expansion active until the corresponding input string is
+    /// released.
+    pub(crate) fn begin_expansion(&mut self, name: &BStr) {
+        if let Some(alias) = self.map.get_mut(name) {
+            alias.in_use = true;
+        }
+    }
+
+    /// Release an alias expansion and complete a deferred `unalias`.
+    pub(crate) fn finish_expansion(&mut self, name: &BStr) {
+        let remove = self.map.get_mut(name).is_some_and(|alias| {
+            alias.in_use = false;
+            alias.dead
+        });
+        if remove {
+            self.map.remove(name);
+        }
+    }
+
+    fn remove(&mut self, name: &BStr) -> c_int {
+        let Some(alias) = self.map.get_mut(name) else {
+            return 1;
+        };
+        if alias.in_use {
+            alias.dead = true;
+        } else {
+            self.map.remove(name);
+        }
+        0
+    }
+
+    fn clear(&mut self) {
+        self.map.retain(|_, alias| {
+            if alias.in_use {
+                alias.dead = true;
+                true
+            } else {
+                false
+            }
+        });
+    }
+
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
         self.map.is_empty()
@@ -60,87 +131,28 @@ pub(crate) fn setalias(sh: &mut Shell, name: &BStr, value: &BStr) -> Result<(), 
         message.extend_from_slice(name);
         message.push(b'=');
         message.extend_from_slice(value);
-        return Err(sh.sh_error_value(&message));
+        return Err(sh.diagnostics().sh_error_value(&message));
     }
 
-    crate::error::with_interrupts_deferred(sh, |sh| match sh.aliases.map.get_mut(name) {
-        Some(alias) => {
-            alias.value = value.to_owned();
-            alias.dead = false;
-        }
-        None => {
-            sh.aliases.map.insert(
-                name.to_owned(),
-                Alias {
-                    value: value.to_owned(),
-                    in_use: false,
-                    dead: false,
-                },
-            );
-        }
-    });
+    sh.interrupt_deferral
+        .run_with(&mut sh.aliases, |aliases| aliases.set(name, value));
     Ok(())
-}
-
-/// Return an owned alias expansion. `check_in_use` implements the parser's
-/// recursive-alias guard.
-// [spec:dash:def:alias.lookupalias-pub-fn]
-// [spec:dash:sem:alias.lookupalias-pub-fn]
-pub(crate) fn lookup_alias(sh: &Shell, name: &BStr, check_in_use: bool) -> Option<BString> {
-    sh.aliases
-        .map
-        .get(name)
-        .and_then(|alias| (!check_in_use || !alias.in_use).then(|| alias.value.clone()))
-}
-
-/// Mark an alias expansion active until the corresponding input string is
-/// released.
-pub(crate) fn begin_expansion(sh: &mut Shell, name: &BStr) {
-    if let Some(alias) = sh.aliases.map.get_mut(name) {
-        alias.in_use = true;
-    }
-}
-
-/// Release an alias expansion and complete a deferred `unalias`.
-pub(crate) fn finish_expansion(sh: &mut Shell, name: &BStr) {
-    let remove = sh.aliases.map.get_mut(name).is_some_and(|alias| {
-        alias.in_use = false;
-        alias.dead
-    });
-    if remove {
-        sh.aliases.map.remove(name);
-    }
 }
 
 // [spec:dash:def:alias.unalias-fn]
 // [spec:dash:sem:alias.unalias-fn]
-pub(crate) fn unalias(sh: &mut Shell, name: &BStr) -> c_int {
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        let Some(alias) = sh.aliases.map.get_mut(name) else {
-            return 1;
-        };
-        if alias.in_use {
-            alias.dead = true;
-        } else {
-            sh.aliases.map.remove(name);
-        }
-        0
-    })
+pub(crate) fn unalias(
+    interrupts: &mut crate::error::InterruptDeferral,
+    aliases: &mut AliasTable,
+    name: &BStr,
+) -> c_int {
+    interrupts.run_with(aliases, |aliases| aliases.remove(name))
 }
 
 // [spec:dash:def:alias.rmaliases-fn]
 // [spec:dash:sem:alias.rmaliases-fn]
-pub fn rmaliases(sh: &mut Shell) {
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        sh.aliases.map.retain(|_, alias| {
-            if alias.in_use {
-                alias.dead = true;
-                true
-            } else {
-                false
-            }
-        });
-    });
+pub fn rmaliases(interrupts: &mut crate::error::InterruptDeferral, aliases: &mut AliasTable) {
+    interrupts.run_with(aliases, AliasTable::clear);
 }
 
 // [spec:dash:def:alias.printalias-fn]
@@ -189,25 +201,35 @@ mod tests {
         let mut shell = Shell::new(crate::streams::Streams::INHERIT);
         let name = BStr::new(b"held");
         setalias(&mut shell, name, BStr::new(b"old")).unwrap();
-        begin_expansion(&mut shell, name);
-        assert!(lookup_alias(&shell, name, true).is_none());
-        assert_eq!(unalias(&mut shell, name), 0);
+        shell.aliases.begin_expansion(name);
+        assert!(shell.aliases.lookup(name, true).is_none());
         assert_eq!(
-            lookup_alias(&shell, name, false)
+            unalias(&mut shell.interrupt_deferral, &mut shell.aliases, name),
+            0
+        );
+        assert_eq!(
+            shell
+                .aliases
+                .lookup(name, false)
                 .as_ref()
                 .map(|value| value.as_slice()),
             Some(b"old".as_slice())
         );
 
         setalias(&mut shell, name, BStr::new(b"new")).unwrap();
-        finish_expansion(&mut shell, name);
+        shell.aliases.finish_expansion(name);
         assert_eq!(
-            lookup_alias(&shell, name, false)
+            shell
+                .aliases
+                .lookup(name, false)
                 .as_ref()
                 .map(|value| value.as_slice()),
             Some(b"new".as_slice())
         );
-        assert_eq!(unalias(&mut shell, name), 0);
-        assert!(lookup_alias(&shell, name, false).is_none());
+        assert_eq!(
+            unalias(&mut shell.interrupt_deferral, &mut shell.aliases, name),
+            0
+        );
+        assert!(shell.aliases.lookup(name, false).is_none());
     }
 }

@@ -37,7 +37,7 @@ pub fn typecmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut err: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
-    opts.next(sh, b"")?;
+    opts.next(&mut sh.diagnostics(), b"")?;
     for name in opts.operands() {
         match describe_command(sh, Dest::Stdout, name, None, 1)? {
             Flow::Done(status) => err |= i32::from(status.code()),
@@ -80,7 +80,7 @@ pub(crate) fn describe_command(
         }
 
         /* Then look at the aliases */
-        if let Some(alias) = crate::alias::lookup_alias(sh, command, false) {
+        if let Some(alias) = sh.aliases.lookup(command, false) {
             if verbose != 0 {
                 let mut record = b" is an alias for ".to_vec();
                 record.extend_from_slice(&alias);

@@ -132,7 +132,7 @@ fn parse_value(sh: &mut Shell, text: &BStr, factor: u64) -> Result<Option<u64>, 
         return Ok(None);
     }
     if text.is_empty() || !text.iter().all(u8::is_ascii_digit) {
-        return Err(sh.sh_error_value(b"bad number"));
+        return Err(sh.diagnostics().sh_error_value(b"bad number"));
     }
     let value = text.iter().fold(0_u64, |value, digit| {
         value.wrapping_mul(10).wrapping_add((digit - b'0') as u64)
@@ -165,7 +165,7 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut all = false;
     let mut selected = b'f';
     let mut options = crate::options::Options::new(args);
-    while let Some(option) = options.next(sh, b"HSatfdscmlpnvwr")? {
+    while let Some(option) = options.next(&mut sh.diagnostics(), b"HSatfdscmlpnvwr")? {
         match option {
             b'H' => how = HARD,
             b'S' => how = SOFT,
@@ -179,7 +179,7 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         .expect("the option scanner and limit table agree");
     let operands = options.operands();
     if (all && !operands.is_empty()) || operands.len() > 1 {
-        return Err(sh.sh_error_value(b"too many arguments"));
+        return Err(sh.diagnostics().sh_error_value(b"too many arguments"));
     }
 
     if all {
@@ -208,7 +208,7 @@ pub fn ulimitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         }
         if let Err(error) = nsh_platform::set_resource_limit(limit.resource, values) {
             let message = format!("error setting limit ({})", sh.locale.error_message(&error));
-            return Err(sh.sh_error_value(message.as_bytes()));
+            return Err(sh.diagnostics().sh_error_value(message.as_bytes()));
         }
     } else {
         print_limit(sh, how, values, limit);

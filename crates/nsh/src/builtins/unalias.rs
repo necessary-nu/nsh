@@ -30,15 +30,15 @@ pub fn unaliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut i: c_int;
 
     let mut opts = Options::new(args);
-    while let Some(opt) = opts.next(sh, b"a")? {
+    while let Some(opt) = opts.next(&mut sh.diagnostics(), b"a")? {
         if opt == b'a' {
-            rmaliases(sh);
+            rmaliases(&mut sh.interrupt_deferral, &mut sh.aliases);
             return Ok(Flow::Done((0).into()));
         }
     }
     i = 0;
     for name in opts.operands() {
-        if unalias(sh, name) != 0 {
+        if unalias(&mut sh.interrupt_deferral, &mut sh.aliases, name) != 0 {
             let mut message = b"unalias: ".to_vec();
             message.extend_from_slice(name);
             message.extend_from_slice(b" not found\n");

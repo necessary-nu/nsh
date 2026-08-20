@@ -43,7 +43,7 @@ pub(crate) fn cdopt(sh: &mut crate::context::Shell, opts: &mut Options) -> Resul
     let mut flags: c_int = 0;
     let mut j: u8 = b'L';
 
-    while let Some(i) = opts.next(sh, b"LPe")? {
+    while let Some(i) = opts.next(&mut sh.diagnostics(), b"LPe")? {
         if i == b'e' {
             flags |= CD_ERROR_IF_UNKNOWN;
             continue;
@@ -91,7 +91,9 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let operand = opts.operands().first().copied();
     // [spec:posix:req:builtin.cd.operand-empty-string]
     if operand.is_some_and(|directory| directory.is_empty()) {
-        return Err(sh.sh_error_value(b"can't cd to an empty directory"));
+        return Err(sh
+            .diagnostics()
+            .sh_error_value(b"can't cd to an empty directory"));
     }
     let dest_value = match operand {
         None => crate::var::lookup_bytes(sh, BStr::new(b"HOME")).unwrap_or_default(),
@@ -148,7 +150,7 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 /* goto err */
                 let mut message = b"can't cd to ".to_vec();
                 message.extend_from_slice(dest);
-                return Err(sh.sh_error_value(&message));
+                return Err(sh.diagnostics().sh_error_value(&message));
             }
         }
     }
@@ -163,7 +165,7 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 /* err: */
                 let mut message = b"can't cd to ".to_vec();
                 message.extend_from_slice(dest);
-                return Err(sh.sh_error_value(&message));
+                return Err(sh.diagnostics().sh_error_value(&message));
             }
         }
     }

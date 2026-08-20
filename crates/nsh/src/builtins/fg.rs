@@ -55,7 +55,7 @@ pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         FORK_BG
     };
     let mut opts = crate::options::Options::new(args);
-    opts.next(sh, b"")?;
+    opts.next(&mut sh.diagnostics(), b"")?;
     let operands = opts.operands();
     /* `do { ... } while (*argv && *++argv)`: one pass on the current job
      * when there is no operand, otherwise one pass per operand. */
@@ -102,7 +102,7 @@ fn restartjob(sh: &mut Shell, jp: JobId, mode: c_int) -> Result<crate::status::E
                 capture_shell_terminal_settings(sh)?;
             }
             let Some(leader) = ps_pid(sh, jp, 0) else {
-                return Err(sh.sh_error_value(b"job has no process"));
+                return Err(sh.diagnostics().sh_error_value(b"job has no process"));
             };
             let process_group = nsh_platform::ProcessGroupId::from_leader(leader);
             if mode == FORK_FG {

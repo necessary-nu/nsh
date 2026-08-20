@@ -16,6 +16,10 @@ const BUILTIN_READ: &str = include_str!("../src/builtins/read.rs");
 const BUILTIN_BREAK: &str = include_str!("../src/builtins/break.rs");
 const BUILTIN_RETURN: &str = include_str!("../src/builtins/return.rs");
 const SHELL_MAIN: &str = include_str!("../src/shellmain.rs");
+const ALIASES: &str = include_str!("../src/alias.rs");
+const ERRORS: &str = include_str!("../src/error.rs");
+const INPUT: &str = include_str!("../src/input.rs");
+const MAIL: &str = include_str!("../src/mail.rs");
 
 fn rust_sources_below(directory: &Path, sources: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(directory).expect("source directory is readable") {
@@ -70,6 +74,42 @@ fn port_fossils_are_absent() {
                 path.display()
             );
         }
+    }
+}
+
+// [spec:nsh:req:idiom.narrow-shell-context/test]
+#[test]
+fn subsystem_helpers_use_narrow_state() {
+    for required in [
+        "struct Diagnostics<'a>",
+        "impl Diagnostics<'_>",
+        "fn diagnostics(&mut self) -> Diagnostics<'_>",
+        "fn run_with<S, T>",
+        "fn poll_interrupt(context: InterruptContext)",
+    ] {
+        assert!(ERRORS.contains(required), "missing {required}");
+    }
+
+    for forbidden in [
+        "fn clear_interrupt_deferral(sh:",
+        "fn poll_interrupt(sh:",
+        "pub fn cur_pf(sh:",
+        "pub fn pf_at(sh:",
+        "pub fn take_alias_boundary(sh:",
+        "pub fn clear_alias_boundary(sh:",
+    ] {
+        assert!(
+            !ERRORS.contains(forbidden) && !INPUT.contains(forbidden),
+            "low-level helper retains universal shell access: {forbidden}"
+        );
+    }
+
+    for (source, required) in [
+        (ALIASES, "impl AliasTable"),
+        (INPUT, "pub(crate) fn cur_pf(input: &mut InputStack)"),
+        (MAIL, "impl MailState"),
+    ] {
+        assert!(source.contains(required), "missing {required}");
     }
 }
 

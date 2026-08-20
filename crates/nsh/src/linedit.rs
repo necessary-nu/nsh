@@ -1163,7 +1163,7 @@ fn shell_alias(
             "an editor alias name contains NUL".into(),
         ));
     }
-    let Some(expansion) = crate::alias::lookup_alias(sh, BStr::new(&name), false) else {
+    let Some(expansion) = sh.aliases.lookup(BStr::new(&name), false) else {
         return Ok(AliasResponse::Missing);
     };
     let mut macro_text = Text::default();

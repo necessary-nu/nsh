@@ -85,7 +85,9 @@ fn scan_options(sh: &mut crate::context::Shell, args: &[&BStr]) -> Result<Flags,
                     } else {
                         index += 1;
                         let Some(argument) = args.get(index) else {
-                            return Err(sh.sh_error_value(b"option -e expects argument"));
+                            return Err(sh
+                                .diagnostics()
+                                .sh_error_value(b"option -e expects argument"));
                         };
                         flags.editor = Some(BString::from(*argument));
                     }
@@ -98,7 +100,7 @@ fn scan_options(sh: &mut crate::context::Shell, args: &[&BStr]) -> Result<Flags,
                 unknown => {
                     let mut message = b"unknown option: -".to_vec();
                     message.push(unknown);
-                    return Err(sh.sh_error_value(&message));
+                    return Err(sh.diagnostics().sh_error_value(&message));
                 }
             }
             option += 1;
@@ -160,9 +162,9 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
     // clobber them; they have no Rust equivalent.
 
     if !history_active(sh) {
-        return Err(sh.sh_error_value(b"history not active"));
+        return Err(sh.diagnostics().sh_error_value(b"history not active"));
     }
-    let discard_input_entry = crate::input::cur_pf(sh).uses_stdin();
+    let discard_input_entry = crate::input::cur_pf(&mut sh.input).uses_stdin();
 
     /*
      * If executing...
@@ -192,7 +194,9 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
             if sh.histedit.fc_depth > MAXHISTLOOPS {
                 sh.histedit.fc_depth = 0;
                 sh.displayhist = 0;
-                return Err(sh.sh_error_value(b"called recursively too many times"));
+                return Err(sh
+                    .diagnostics()
+                    .sh_error_value(b"called recursively too many times"));
             }
             /*
              * Set editor.
@@ -229,7 +233,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
                 }
             }
             if fields.len().saturating_sub(operand_start) >= 2 {
-                return Err(sh.sh_error_value(b"too many args"));
+                return Err(sh.diagnostics().sh_error_value(b"too many args"));
             }
         }
 
@@ -256,7 +260,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
             ),
             [first, last] => (BStr::new(first.as_slice()), BStr::new(last.as_slice())),
             _ => {
-                return Err(sh.sh_error_value(b"too many args"));
+                return Err(sh.diagnostics().sh_error_value(b"too many args"));
             }
         };
         /*
@@ -273,7 +277,9 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
             |sh: &mut Shell| -> Result<Result<Option<crate::status::ExitStatus>, Flow>, Error> {
                 if editing {
                     let Ok((file, path)) = nsh_platform::create_temporary_file("nsh-fc") else {
-                        return Err(sh.sh_error_value(b"can't create temporary file"));
+                        return Err(sh
+                            .diagnostics()
+                            .sh_error_value(b"can't create temporary file"));
                     };
                     editfile = Some(path);
                     edit_file = Some(file);
@@ -365,7 +371,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
                     message.extend_from_slice(&file_bytes);
                     message.extend_from_slice(b": ");
                     message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
-                    sh.sh_error_value(&message)
+                    sh.diagnostics().sh_error_value(&message)
                 })?;
                 if let Some(path) = editfile.take() {
                     let _ = nsh_platform::remove_file(&path);
@@ -560,12 +566,12 @@ pub fn str_to_event(
             let mut message = b"history number ".to_vec();
             message.extend_from_slice(word);
             message.extend_from_slice(b" not found (internal error)");
-            Err(sh.sh_error_value(&message))
+            Err(sh.diagnostics().sh_error_value(&message))
         }
         None => {
             let mut message = b"history pattern not found: ".to_vec();
             message.extend_from_slice(word);
-            Err(sh.sh_error_value(&message))
+            Err(sh.diagnostics().sh_error_value(&message))
         }
     }
 }

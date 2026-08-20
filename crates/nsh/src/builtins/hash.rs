@@ -42,11 +42,11 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     clear = false;
     let mut opts = crate::options::Options::new(args);
-    while opts.next(sh, b"r")?.is_some() {
+    while opts.next(&mut sh.diagnostics(), b"r")?.is_some() {
         clear = true;
     }
     if clear {
-        clearcmdentry(sh);
+        clearcmdentry(&mut sh.interrupt_deferral, &mut sh.commands);
         return Ok(Flow::Done((0).into()));
     }
 
@@ -88,7 +88,7 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             .get(name)
             .is_some_and(|cmdp| sh.commands.path_dependent(cmdp))
         {
-            delete_cmd_entry(sh, name);
+            delete_cmd_entry(&mut sh.interrupt_deferral, &mut sh.commands, name);
         }
         /* Hoisted out of the argument list; see the note in `eval.rs`'s
          * `evalcommand`. */

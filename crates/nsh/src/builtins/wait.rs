@@ -40,7 +40,7 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut jp: Option<JobId>;
 
     let mut opts = crate::options::Options::new(args);
-    opts.next(sh, b"")?;
+    opts.next(&mut sh.diagnostics(), b"")?;
     retval = crate::status::ExitStatus::SUCCESS;
 
     let operands = opts.operands();
@@ -55,7 +55,7 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                         break;
                     }
                     sh.jobs[i].waited = true;
-                    remove_waited_job(sh, i);
+                    remove_waited_job(&mut sh.interrupt_deferral, &mut sh.jobs, i);
                 }
                 if jp.is_none() {
                     /* no running procs */
@@ -76,9 +76,10 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             retval = crate::status::ExitStatus::NOT_FOUND;
             'repeat: {
                 if spec.first() != Some(&b'%') {
-                    let process = u32::try_from(crate::mystring::number(sh, spec)?)
-                        .ok()
-                        .and_then(nsh_platform::ProcessId::new);
+                    let process =
+                        u32::try_from(crate::mystring::number(&mut sh.diagnostics(), spec)?)
+                            .ok()
+                            .and_then(nsh_platform::ProcessId::new);
                     jobp = None;
                     for i in sh.jobs.order_snapshot() {
                         if sh.jobs[i]
@@ -108,7 +109,7 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 let i = jobp.unwrap();
                 sh.jobs[i].waited = true;
                 retval = getstatus(sh, i);
-                remove_waited_job(sh, i);
+                remove_waited_job(&mut sh.interrupt_deferral, &mut sh.jobs, i);
             }
             // repeat:
         }

@@ -466,7 +466,7 @@ fn expand_parameter(
     context: Context,
 ) -> Result<Expansion, Error> {
     if parameter.operation == ParameterOperation::Invalid {
-        return Err(sh.sh_error_value(b"Bad substitution"));
+        return Err(sh.diagnostics().sh_error_value(b"Bad substitution"));
     }
 
     let name = crate::var::varname(parameter.name.as_bstr()).to_owned();
@@ -759,9 +759,9 @@ fn parameter_error(
         }
     }
     if sh.eval.inps4 != 0 {
-        sh.sh_error_value(&message)
+        sh.diagnostics().sh_error_value(&message)
     } else {
-        sh.expansion_error_value(&message)
+        sh.diagnostics().expansion_error_value(&message)
     }
 }
 
@@ -890,7 +890,7 @@ fn command_substitution(sh: &mut Shell, command: Option<&Node>) -> Result<BStrin
         Ok::<_, Error>(output)
     })?;
 
-    if let Some(error) = crate::error::poll_interrupt(sh) {
+    if let Some(error) = crate::error::poll_interrupt(sh.interrupt_context()) {
         return Err(error);
     }
 

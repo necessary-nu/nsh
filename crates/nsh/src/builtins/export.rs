@@ -53,7 +53,7 @@ pub fn exportcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     };
 
     let mut opts = Options::new(args);
-    let notp = opts.next(sh, b"p")?.is_none();
+    let notp = opts.next(&mut sh.diagnostics(), b"p")?.is_none();
     let operands = opts.operands();
     if notp && !operands.is_empty() {
         for word in operands {
@@ -64,7 +64,7 @@ pub fn exportcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     {
                         let mut message = name.to_vec();
                         message.extend_from_slice(b": is read only");
-                        return Err(sh.builtin_error_value(1, &message));
+                        return Err(sh.diagnostics().builtin_error_value(1, &message));
                     }
                     set_bytes(sh, name, Some(BStr::new(&word[at + 1..])), attribute)?;
                 }

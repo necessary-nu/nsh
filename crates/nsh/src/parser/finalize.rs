@@ -20,13 +20,17 @@ pub(super) fn parse_result(
 ) -> Result<(), Error> {
     let mut bodies = VecDeque::from(bodies);
     if let ParseResult::Tree(Some(node)) = result {
-        here_documents(node, &mut bodies)
-            .map_err(|()| sh.sh_error_value(b"parsed here-document redirection has no body"))?;
+        here_documents(node, &mut bodies).map_err(|()| {
+            sh.diagnostics()
+                .sh_error_value(b"parsed here-document redirection has no body")
+        })?;
     }
     if bodies.is_empty() {
         Ok(())
     } else {
-        Err(sh.sh_error_value(b"parsed here-document body has no redirection"))
+        Err(sh
+            .diagnostics()
+            .sh_error_value(b"parsed here-document body has no redirection"))
     }
 }
 

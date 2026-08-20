@@ -5301,4 +5301,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.no-port-fossils}
     )}
+    {id narrow-shell-context, covered_rules (
+        idiom.narrow-shell-context
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.narrow-shell-context}
+    )}
 )

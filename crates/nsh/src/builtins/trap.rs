@@ -67,7 +67,7 @@ fn write_listing(sh: &mut Shell, signo: usize, include_default: bool) {
 pub fn trapcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut print = false;
     let mut opts = Options::new(args);
-    while let Some(option) = opts.next(sh, b"p")? {
+    while let Some(option) = opts.next(&mut sh.diagnostics(), b"p")? {
         print |= option == b'p';
     }
     let ap = opts.operands();

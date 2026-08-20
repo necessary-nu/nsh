@@ -157,7 +157,7 @@ fn getn(sh: &mut Shell, word: &BStr) -> Result<i64, Error> {
     if digits == end || !bytes[digits..end].iter().all(u8::is_ascii_digit) {
         let mut message = b"Illegal number: ".to_vec();
         message.extend_from_slice(bytes);
-        return Err(sh.sh_error_value(&message));
+        return Err(sh.diagnostics().sh_error_value(&message));
     }
 
     let limit = if negative {
@@ -402,7 +402,7 @@ pub fn testcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             .last()
             .is_none_or(|word| word.first() != Some(&b']'))
         {
-            return Err(sh.sh_error_value(b"missing ]"));
+            return Err(sh.diagnostics().sh_error_value(b"missing ]"));
         }
         expression = &expression[..expression.len() - 1];
     }
@@ -451,7 +451,7 @@ fn syntax(sh: &mut Shell, op: Option<&[u8]>, message: &[u8]) -> Error {
         text.extend_from_slice(b": ");
     }
     text.extend_from_slice(message);
-    sh.sh_error_value(&text)
+    sh.diagnostics().sh_error_value(&text)
 }
 
 // [spec:dash:def:test.filstat-fn]

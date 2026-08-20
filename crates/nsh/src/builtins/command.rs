@@ -37,7 +37,7 @@ pub fn commandcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut use_default_path = false;
 
     let mut opts = crate::options::Options::new(args);
-    while let Some(c) = opts.next(sh, b"pvV")? {
+    while let Some(c) = opts.next(&mut sh.diagnostics(), b"pvV")? {
         if c == b'V' {
             verify |= VERIFY_VERBOSE;
         } else if c == b'v' {

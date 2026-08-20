@@ -215,7 +215,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     prompt = None;
     let mut opts = crate::options::Options::new(args);
-    while let Some(i) = opts.next(sh, b"d:p:r")? {
+    while let Some(i) = opts.next(&mut sh.diagnostics(), b"d:p:r")? {
         match i {
             b'd' => delimiter = opts.arg().first().copied().unwrap_or(b'\0'),
             b'p' => prompt = Some(crate::shell::cstring(opts.arg())),
@@ -241,7 +241,7 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             .is_some_and(|fd| nsh_platform::is_terminal(fd));
     let names = opts.operands();
     if names.is_empty() {
-        return Err(sh.sh_error_value(b"arg count"));
+        return Err(sh.diagnostics().sh_error_value(b"arg count"));
     }
 
     let (mut line, status) = read_input_line(sh, delimiter, raw, prompt_for_continuation)?;

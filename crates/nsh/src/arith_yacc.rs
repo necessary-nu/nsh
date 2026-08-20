@@ -316,7 +316,7 @@ impl<'a, 'sh> Parser<'a, 'sh> {
         text.extend_from_slice(b": \"");
         text.extend_from_slice(self.input.as_ref());
         text.push(b'"');
-        self.sh.sh_error_value(&text)
+        self.sh.diagnostics().sh_error_value(&text)
     }
 
     // [spec:dash:def:arith-yacc.assignment-fn]

@@ -18,7 +18,7 @@ use crate::var::{VariableAttributes, make_local_bytes};
 // [spec:dash:sem:var.localcmd-fn]
 pub fn localcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if !sh.vars.in_function() {
-        return Err(sh.sh_error_value(b"not in a function"));
+        return Err(sh.diagnostics().sh_error_value(b"not in a function"));
     }
 
     /* `local` scans no options at all, so every word after the command

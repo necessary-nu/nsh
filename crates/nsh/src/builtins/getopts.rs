@@ -28,10 +28,12 @@ use crate::var::{CallbackPolicy, VariableAttributes, set_bytes, setvarint_bytes,
 // [spec:posix:req:builtin.getopts.interfaces]
 pub fn getoptscmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut opts = Options::new(args);
-    opts.next(sh, b"")?;
+    opts.next(&mut sh.diagnostics(), b"")?;
     let operands = opts.operands();
     if operands.len() < 2 {
-        return Err(sh.sh_error_value(b"Usage: getopts optstring var [arg...]"));
+        return Err(sh
+            .diagnostics()
+            .sh_error_value(b"Usage: getopts optstring var [arg...]"));
     }
 
     let words: Vec<BString> = if operands.len() == 2 {

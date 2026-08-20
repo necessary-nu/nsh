@@ -463,7 +463,7 @@ fn eval_interactive_sequence(
             drop(error);
             sh.clear_evaluation_resources();
             sh.unwind_local_variables();
-            crate::error::clear_interrupt_deferral(sh);
+            crate::error::clear_interrupt_deferral(&mut sh.interrupt_deferral);
             Ok(Flow::Done((status).into()))
         }
         outcome => outcome,
@@ -599,11 +599,13 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
                 if sh.options.enabled(ShellOption::HashAll) {
                     let _ = flow!(prehash_tree(sh, Some(definition.body.as_ref())));
                 }
-                crate::exec::defun(sh, definition);
+                crate::exec::defun(&mut sh.interrupt_deferral, &mut sh.commands, definition);
                 ExitStatus::SUCCESS
             }
             Node::Bash(_) => {
-                return Err(sh.sh_error_value(b"Bash syntax is parsed but not executable yet"));
+                return Err(sh
+                    .diagnostics()
+                    .sh_error_value(b"Bash syntax is parsed but not executable yet"));
             }
             Node::Not(command) => {
                 let status = flow!(evaltree(
@@ -618,7 +620,9 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
                 }
             }
             Node::Word(_) => {
-                return Err(sh.sh_error_value(b"non-command syntax reached evaluation"));
+                return Err(sh
+                    .diagnostics()
+                    .sh_error_value(b"non-command syntax reached evaluation"));
             }
         };
         sh.status = status;
@@ -1005,7 +1009,7 @@ fn descriptor_source(sh: &mut Shell, text: &BStr) -> Result<Option<LogicalDescri
     } else {
         let mut message = b"Bad fd number: ".to_vec();
         message.extend_from_slice(text);
-        Err(sh.sh_error_value(&message))
+        Err(sh.diagnostics().sh_error_value(&message))
     }
 }
 
@@ -1135,7 +1139,7 @@ pub fn evalbackcmd(sh: &mut Shell, n: Option<&Node>, result: &mut backcmd) -> Re
             crate::jobs::forkshell(sh, Some(jp), n, FORK_NOJOB)?,
             nsh_platform::ForkResult::Child
         ) {
-            crate::error::clear_interrupt_deferral(sh);
+            crate::error::clear_interrupt_deferral(&mut sh.interrupt_deferral);
             drop(pipe.read);
             sh.fds
                 .install_owned(LogicalDescriptor::STDOUT, pipe.write)
@@ -1349,7 +1353,9 @@ fn evalcommand_in_scope(
         .chain(command.arguments.iter())
         .any(|node| matches!(node, Node::Bash(_)))
     {
-        return Err(sh.sh_error_value(b"Bash array syntax is not executable yet"));
+        return Err(sh
+            .diagnostics()
+            .sh_error_value(b"Bash array syntax is not executable yet"));
     }
 
     /* First expand the arguments. */
@@ -1537,14 +1543,13 @@ fn evalcommand_in_scope(
                 let _ = sh.io.get(dest).write_all(&prompt);
                 sh.eval.inps4 = 0;
                 sep = 0;
-                sep = eprintlist(sh, dest, &varlist.list, sep);
+                sep = eprintlist(sh.io.get(dest), &varlist.list, sep);
                 /* `eprintlist(sh, out, osp, sep)` prints from the *original*
                  * head, so `command -p foo` traces as it was written and not
                  * as `parse_command_args` left it.  A NULL `osp` prints
                  * nothing, which is the empty slice. */
                 eprintlist(
-                    sh,
-                    dest,
+                    sh.io.get(dest),
                     &arglist.list[osp.unwrap_or(arglist.list.len())..],
                     sep,
                 );
@@ -1671,7 +1676,7 @@ fn evalcommand_in_scope(
                             )?;
                             crate::jobs::waitforjob(sh, Some(job))
                         })?;
-                        crate::error::clear_interrupt_deferral(sh);
+                        crate::error::clear_interrupt_deferral(&mut sh.interrupt_deferral);
                         break 'out_lbl;
                     } else {
                         /* `shellexec` replaces the process image or fails;
@@ -1691,7 +1696,7 @@ fn evalcommand_in_scope(
             }
 
             status = crate::jobs::waitforjob(sh, jp)?;
-            crate::error::clear_interrupt_deferral(sh);
+            crate::error::clear_interrupt_deferral(&mut sh.interrupt_deferral);
             break 'out_lbl;
         }
         // bail:
@@ -1801,7 +1806,7 @@ fn evalbltin(
         sh.io.flushall();
         if crate::output::outerr(sh.io.stdout()) != 0 {
             // [spec:nsh:req:compat.smoosh.error-contracts]
-            sh.command_warnx(b"I/O error");
+            sh.diagnostics().command_warnx(b"I/O error");
             status = ExitStatus::ERROR;
         }
         sh.status = status;
@@ -1971,7 +1976,7 @@ fn prehash_tree(sh: &mut Shell, n: Option<&Node>) -> Result<Flow, Error> {
 
 // [spec:dash:def:eval.eprintlist-fn]
 // [spec:dash:sem:eval.eprintlist-fn]
-fn eprintlist(sh: &mut crate::context::Shell, dest: Dest, list: &[strlist], sep: c_int) -> c_int {
+fn eprintlist(output: &mut crate::output::Output, list: &[strlist], sep: c_int) -> c_int {
     let mut sep: c_int = sep;
 
     for sp in list {
@@ -1981,7 +1986,7 @@ fn eprintlist(sh: &mut crate::context::Shell, dest: Dest, list: &[strlist], sep:
         }
         record.extend_from_slice(crate::mystring::cstr_prefix(&sp.text));
         sep |= 1;
-        let _ = sh.io.get(dest).write_all(&record);
+        let _ = output.write_all(&record);
     }
 
     sep

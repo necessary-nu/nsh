@@ -193,7 +193,7 @@ pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<bool
     let mut next = scan.next;
     if next >= args.len() {
         if scan.minus_c {
-            return Err(sh.sh_error_value(b"-c requires an argument"));
+            return Err(sh.diagnostics().sh_error_value(b"-c requires an argument"));
         }
         sh.options.set(ShellOption::Stdin, true);
     }
@@ -441,7 +441,7 @@ fn minus_o(
         }
         let mut message = b"Illegal option -o ".to_vec();
         message.extend_from_slice(name);
-        return Err(sh.sh_error_value(&message));
+        return Err(sh.diagnostics().sh_error_value(&message));
     }
     Ok(None)
 }
@@ -498,7 +498,7 @@ fn setoption(
     }
     let mut message = b"Illegal option -".to_vec();
     message.push(flag);
-    Err(sh.sh_error_value(&message))
+    Err(sh.diagnostics().sh_error_value(&message))
 }
 
 /*
@@ -608,16 +608,14 @@ impl<'a> Options<'a> {
     /// `optstring` is the C's, minus its terminator: a letter, optionally
     /// followed by `:` to say the option takes an argument.
     ///
-    /// The shell is a parameter and not a field, because `Options`
-    /// borrows the caller's argument words and a field would put a borrow
-    /// of caller data next to a borrow of the shell — `docs/api-design.md`
-    /// §5.5's rule. It is here at all because an unrecognised option
-    /// writes a diagnostic, and writing one needs the shell that reports.
+    /// The diagnostic capability is a parameter rather than a field because
+    /// `Options` borrows the caller's argument words. It exposes exactly the
+    /// reporting operation needed for a bad option, not the rest of the shell.
     // [spec:dash:def:options.nextopt-fn]
     // [spec:dash:sem:options.nextopt-fn]
     pub fn next(
         &mut self,
-        sh: &mut crate::context::Shell,
+        diagnostics: &mut crate::error::Diagnostics<'_>,
         optstring: &[u8],
     ) -> Result<Option<u8>, Error> {
         /* `p = optptr; if (p == NULL || *p == '\0')` -- the run in
@@ -662,7 +660,7 @@ impl<'a> Options<'a> {
                 let mut message = b"Illegal option -".to_vec();
                 message.push(c);
                 /* A stop: the loop would spin on the terminator. */
-                return Err(sh.sh_error_value(&message));
+                return Err(diagnostics.sh_error_value(&message));
             }
             q += 1;
             if optstring.get(q) == Some(&b':') {
@@ -689,7 +687,7 @@ impl<'a> Options<'a> {
                         message.extend_from_slice(b" option");
                         /* A stop: `arg()` would otherwise be asked for an
                          * `optionarg` that was never set. */
-                        return Err(sh.sh_error_value(&message));
+                        return Err(diagnostics.sh_error_value(&message));
                     }
                 }
             }
@@ -769,7 +767,7 @@ mod tests {
          * loudly: every option string these cases use accepts every
          * option they hand it. */
         while let Some(c) = opts
-            .next(sh, optstring)
+            .next(&mut sh.diagnostics(), optstring)
             .expect("the scan's cases never pass an option the string rejects")
         {
             seen.push(c);
@@ -803,9 +801,12 @@ mod tests {
         let sh = &mut owned_sh;
         let args = words(&[b"read", b"-pPROMPT", b"var"]);
         let mut opts = Options::new(&args);
-        assert_eq!(opts.next(sh, b"p:r").unwrap(), Some(b'p'));
+        assert_eq!(
+            opts.next(&mut sh.diagnostics(), b"p:r").unwrap(),
+            Some(b'p')
+        );
         assert_eq!(opts.arg(), BStr::new(b"PROMPT"));
-        assert_eq!(opts.next(sh, b"p:r").unwrap(), None);
+        assert_eq!(opts.next(&mut sh.diagnostics(), b"p:r").unwrap(), None);
         assert_eq!(opts.operands(), words(&[b"var"]));
     }
 
@@ -815,9 +816,12 @@ mod tests {
         let sh = &mut owned_sh;
         let args = words(&[b"read", b"-p", b"PROMPT", b"var"]);
         let mut opts = Options::new(&args);
-        assert_eq!(opts.next(sh, b"p:r").unwrap(), Some(b'p'));
+        assert_eq!(
+            opts.next(&mut sh.diagnostics(), b"p:r").unwrap(),
+            Some(b'p')
+        );
         assert_eq!(opts.arg(), BStr::new(b"PROMPT"));
-        assert_eq!(opts.next(sh, b"p:r").unwrap(), None);
+        assert_eq!(opts.next(&mut sh.diagnostics(), b"p:r").unwrap(), None);
         assert_eq!(opts.operands(), words(&[b"var"]));
     }
 

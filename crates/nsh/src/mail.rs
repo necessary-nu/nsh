@@ -29,6 +29,41 @@ impl MailState {
             changed: 0,
         }
     }
+
+    fn check(&mut self, mail_path: &BStr, errors: &mut crate::output::Output) {
+        for (index, component) in mail_path
+            .split(|&byte| byte == b':')
+            .take(MAXMBOXES)
+            .enumerate()
+        {
+            let (path, message) = component
+                .iter()
+                .position(|&byte| byte == b'%')
+                .map_or((component, None), |at| {
+                    (&component[..at], Some(&component[at + 1..]))
+                });
+            if path.is_empty() {
+                continue;
+            }
+            let modified = path
+                .try_to_path_buf()
+                .and_then(|path| nsh_platform::path_metadata(&path, true))
+                .map(|metadata| metadata.modified_seconds)
+                .unwrap_or(0);
+            if modified == 0 {
+                self.mailtime[index] = 0;
+            } else {
+                if self.changed == 0 && modified != self.mailtime[index] {
+                    let mut notice =
+                        message.map_or_else(|| b"you have mail".to_vec(), <[u8]>::to_vec);
+                    notice.push(b'\n');
+                    let _ = errors.write_all(&notice);
+                }
+                self.mailtime[index] = modified;
+            }
+        }
+        self.changed = 0;
+    }
 }
 
 /*
@@ -43,42 +78,14 @@ pub fn chkmail(sh: &mut crate::context::Shell) {
         mpathval(sh)
     } else {
         mailval(sh)
-    };
-    for (index, component) in mail_path
-        .split(|&byte| byte == b':')
-        .take(MAXMBOXES)
-        .enumerate()
-    {
-        let (path, message) = component
-            .iter()
-            .position(|&byte| byte == b'%')
-            .map_or((component, None), |at| {
-                (&component[..at], Some(&component[at + 1..]))
-            });
-        if path.is_empty() {
-            continue;
-        }
-        let modified = path
-            .try_to_path_buf()
-            .and_then(|path| nsh_platform::path_metadata(&path, true))
-            .map(|metadata| metadata.modified_seconds)
-            .unwrap_or(0);
-        if modified == 0 {
-            sh.mail.mailtime[index] = 0;
-        } else {
-            if sh.mail.changed == 0 && modified != sh.mail.mailtime[index] {
-                let mut notice = message.map_or_else(|| b"you have mail".to_vec(), <[u8]>::to_vec);
-                notice.push(b'\n');
-                let _ = sh.io.stderr().write_all(&notice);
-            }
-            sh.mail.mailtime[index] = modified;
-        }
     }
-    sh.mail.changed = 0;
+    .to_owned();
+    sh.mail
+        .check(BStr::new(mail_path.as_slice()), sh.io.stderr());
 }
 
 // [spec:dash:def:mail.changemail-fn]
 // [spec:dash:sem:mail.changemail-fn]
-pub fn changemail(sh: &mut crate::context::Shell, _value: &BStr) {
-    sh.mail.changed += 1;
+pub fn changemail(mail: &mut MailState, _value: &BStr) {
+    mail.changed += 1;
 }

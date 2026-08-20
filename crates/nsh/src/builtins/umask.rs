@@ -54,7 +54,7 @@ pub fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut symbolic_mode: c_int = 0;
 
     let mut opts = crate::options::Options::new(args);
-    while opts.next(sh, b"S")?.is_some() {
+    while opts.next(&mut sh.diagnostics(), b"S")?.is_some() {
         symbolic_mode = 1;
     }
     let mode = opts.operands().first().copied();
@@ -93,7 +93,7 @@ pub fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 if !(b'0'..=b'7').contains(&byte) {
                     let mut message = b"Illegal number: ".to_vec();
                     message.extend_from_slice(bytes);
-                    return Err(sh.sh_error_value(&message));
+                    return Err(sh.diagnostics().sh_error_value(&message));
                 }
                 new_mask = (new_mask << 3) + u32::from(byte - b'0');
             }
@@ -161,7 +161,7 @@ pub fn umaskcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             if !valid {
                 let mut message = b"Illegal mode: ".to_vec();
                 message.extend_from_slice(bytes);
-                return Err(sh.sh_error_value(&message));
+                return Err(sh.diagnostics().sh_error_value(&message));
             }
             new_mask = !new_mask;
         }

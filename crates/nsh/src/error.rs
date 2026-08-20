@@ -83,6 +83,18 @@ impl InterruptDeferral {
     pub(crate) const fn new() -> Self {
         Self { depth: 0 }
     }
+
+    /// Mutate one explicitly supplied subsystem while delivery is deferred.
+    /// The callback cannot reach any sibling shell state.
+    pub(crate) fn run_with<S, T>(&mut self, state: &mut S, body: impl FnOnce(&mut S) -> T) -> T {
+        let previous = self.depth;
+        self.depth = previous + 1;
+        barrier();
+        let outcome = body(state);
+        barrier();
+        self.depth = previous;
+        outcome
+    }
 }
 
 /// Run one operation while interrupt delivery is deferred.
@@ -105,9 +117,9 @@ pub(crate) fn with_interrupts_deferred<T>(
 }
 
 /// Reset legacy deferral at a top-level recovery boundary.
-pub(crate) fn clear_interrupt_deferral(sh: &mut crate::context::Shell) {
+pub(crate) fn clear_interrupt_deferral(deferral: &mut InterruptDeferral) {
     barrier();
-    sh.interrupt_deferral.depth = 0;
+    deferral.depth = 0;
 }
 
 /* `#define CLEAR_PENDING_INT intpending = 0` */
@@ -137,10 +149,28 @@ pub fn CLEAR_PENDING_INT() {
 ///
 /// Returns `Some` at most once per interrupt: [`onint`] clears
 /// `intpending` as it delivers.
+#[derive(Clone, Copy)]
+pub(crate) struct InterruptContext {
+    deferred: bool,
+    interactive_root: bool,
+}
+
+impl crate::context::Shell {
+    pub(crate) fn interrupt_context(&self) -> InterruptContext {
+        InterruptContext {
+            deferred: self.interrupt_deferral.depth != 0,
+            interactive_root: self.shell_level == 0
+                && self
+                    .options
+                    .enabled(crate::options::ShellOption::Interactive),
+        }
+    }
+}
+
 #[inline]
-pub fn poll_interrupt(sh: &crate::context::Shell) -> Option<Error> {
-    if sh.interrupt_deferral.depth == 0 && int_pending() != 0 {
-        Some(onint(sh))
+pub(crate) fn poll_interrupt(context: InterruptContext) -> Option<Error> {
+    if !context.deferred && int_pending() != 0 {
+        Some(onint(context))
     } else {
         None
     }
@@ -208,13 +238,10 @@ pub fn int_pending() -> sig_atomic_t {
 // [spec:dash:def:error.onint-fn]
 // [spec:dash:sem:error.onint-fn]
 // [spec:nsh:def:idiom.shell-options]
-pub fn onint(sh: &crate::context::Shell) -> Error {
+fn onint(context: InterruptContext) -> Error {
     crate::siginbox::signals().set_interrupt_pending(false);
     crate::system::sigclearmask();
-    /* `#define rootshell (!shlvl)` (main.h); `#define iflag optlist[3]`. */
-    let rootshell: bool = sh.shell_level == 0;
-    let interactive = sh.options.enabled(crate::options::ShellOption::Interactive);
-    if !(rootshell && interactive) {
+    if !context.interactive_root {
         nsh_platform::terminate_with_interrupt();
     }
     /* `exitstatus = SIGINT + 128` was here; `Error::status()` answers
@@ -436,7 +463,7 @@ impl Error {
     }
 }
 
-/// The diagnostic spine, threaded.
+/// The narrow capability required to render and flush a shell diagnostic.
 ///
 /// `move-state` transferred `arg0`, `errlinno` and `commandname` here as a
 /// choice between two options — thread the spine, or give the diagnostic
@@ -452,14 +479,37 @@ impl Error {
 /// write needs `&mut` on the stderr `Output`, so even a sink owning the
 /// prefix would not free `report` from a receiver. What the sink genuinely
 /// replaces is not the receiver — it is the three *statics*, which become
-/// fields of the shell that reports.
+/// fields of the shell that reports. Borrowing only those fields prevents a
+/// diagnostic helper from reaching unrelated parser, job, variable, or process
+/// state just because its caller owns a [`crate::context::Shell`].
 ///
 /// The threading is also much cheaper than it was costed, because
 /// `thread-context` had already put a `&mut Shell` on every execution
 /// path: of the 66 call sites outside this module, 45 already had a
 /// receiver in scope and the 21 that did not were leaf helpers whose
 /// callers did.
+// [spec:nsh:req:idiom.narrow-shell-context]
+pub(crate) struct Diagnostics<'a> {
+    arg0: Option<&'a BStr>,
+    invocation_name: Option<&'a BString>,
+    command_name: Option<&'a BString>,
+    line: c_int,
+    io: &'a mut crate::output::ShellIo,
+}
+
 impl crate::context::Shell {
+    pub(crate) fn diagnostics(&mut self) -> Diagnostics<'_> {
+        Diagnostics {
+            arg0: self.options.arg0(),
+            invocation_name: self.options.invocation_name.as_ref(),
+            command_name: self.eval.commandname.as_ref(),
+            line: self.eval.errlinno,
+            io: &mut self.io,
+        }
+    }
+}
+
+impl Diagnostics<'_> {
     /// Write a diagnostic where dash writes it, and hand it back as a
     /// value.
     ///
@@ -494,7 +544,7 @@ impl crate::context::Shell {
     /// than raising it.
     ///
     /// This is what a converted raise site calls —
-    /// `return Err(sh.sh_error_value(&msg))` — and it is the same three
+    /// `return Err(sh.diagnostics().sh_error_value(&msg))` — and it is the same three
     /// writes in the same order as the diverging form, because both are
     /// this function. When the last caller of `sh_error` is gone this one
     /// takes its name.
@@ -503,7 +553,7 @@ impl crate::context::Shell {
          * instead: the error carries what it took and the frame that
          * catches it writes it. That is why the *status* needed no
          * receiver even before this method had one. */
-        let e = Error::other(self.eval.errlinno, 2, msg);
+        let e = Error::other(self.line, 2, msg);
         self.report(e)
     }
 
@@ -512,7 +562,7 @@ impl crate::context::Shell {
     // [spec:nsh:req:compat.smoosh.error-contracts]
     pub fn expansion_error_value(&mut self, msg: &[u8]) -> Error {
         let e = Error::Expansion {
-            line: self.eval.errlinno,
+            line: self.line,
             message: BString::from(msg),
         };
         let _ = self.io.stderr().write_all(msg);
@@ -531,17 +581,15 @@ impl crate::context::Shell {
         msg: &[u8],
     ) -> Error {
         let name = self
-            .eval
-            .commandname
-            .clone()
-            .unwrap_or_else(|| BString::from(&b"sh"[..]));
+            .command_name
+            .map_or(BStr::new(b"sh"), |name| name.as_bstr());
         let errors = self.io.stderr();
-        let _ = errors.write_all(&name);
+        let _ = errors.write_all(name);
         let _ = errors.write_all(b": ");
         let _ = errors.write_all(msg);
         let _ = errors.write_all(b"\n");
         self.io.flushall();
-        Error::reported(self.eval.errlinno, status)
+        Error::reported(self.line, status)
     }
 
     /// Write `$0: command: message` for an output failure detected after a
@@ -549,18 +597,14 @@ impl crate::context::Shell {
     // [spec:nsh:req:compat.smoosh.error-contracts]
     pub fn command_warnx(&mut self, msg: &[u8]) {
         let shell_name = self
-            .options
             .invocation_name
-            .as_ref()
             .map(|name| BStr::new(&name[..name.len() - 1]))
-            .unwrap_or(BStr::new(b"sh"))
-            .to_owned();
-        let command_name = self.eval.commandname.clone();
+            .unwrap_or(BStr::new(b"sh"));
         let errors = self.io.stderr();
-        let _ = errors.write_all(&shell_name);
+        let _ = errors.write_all(shell_name);
         let _ = errors.write_all(b": ");
-        if let Some(command_name) = command_name {
-            let _ = errors.write_all(&command_name);
+        if let Some(command_name) = self.command_name {
+            let _ = errors.write_all(command_name);
             let _ = errors.write_all(b": ");
         }
         let _ = errors.write_all(msg);
@@ -578,16 +622,16 @@ impl crate::context::Shell {
     // [spec:dash:def:error.exvwarning2-fn]
     // [spec:dash:sem:error.exvwarning2-fn]
     pub fn sh_warnx(&mut self, msg: &[u8]) {
-        let name = self.options.arg0().unwrap_or(BStr::new(b"sh"));
+        let name = self.arg0.unwrap_or(BStr::new(b"sh"));
 
         /* The prefix is assembled here from the reporting shell. */
         let mut prefix = Vec::new();
         prefix.extend_from_slice(name);
         prefix.extend_from_slice(b": ");
-        let line = self.eval.errlinno;
+        let line = self.line;
         write!(&mut prefix, "{line}").expect("writing to a Vec cannot fail");
         prefix.extend_from_slice(b": ");
-        if let Some(name) = &self.eval.commandname {
+        if let Some(name) = self.command_name {
             prefix.extend_from_slice(name);
             prefix.extend_from_slice(b": ");
         }
@@ -658,7 +702,7 @@ mod tests {
         let _g = crate::testutil::lock();
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
-        let e = sh.sh_error_value(b"a diagnostic");
+        let e = sh.diagnostics().sh_error_value(b"a diagnostic");
 
         /* The value carries what the site took, so propagation
          * through any number of `?` cannot lose it. */
@@ -700,7 +744,7 @@ mod tests {
         let sh = &mut owned;
         sh.eval.errlinno = 17;
         let e = Error::other(sh.eval.errlinno, 2, b"cd: bad directory");
-        let e = sh.report(e);
+        let e = sh.diagnostics().report(e);
 
         /* The `sh: 17: ` prefix is `arg0`, `errlinno` and the running
          * command's name -- shell state, not error state -- so
@@ -719,7 +763,7 @@ mod tests {
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
         let e = Error::other(sh.eval.errlinno, 127, b"nosuchcmd: not found");
-        let e = sh.report(e);
+        let e = sh.diagnostics().report(e);
 
         assert_eq!(e.status(), crate::status::ExitStatus::NOT_FOUND);
     }
@@ -750,7 +794,7 @@ mod tests {
         as_interactive_root(sh);
         CLEAR_PENDING_INT();
 
-        let e = onint(sh);
+        let e = onint(sh.interrupt_context());
 
         assert!(e.is_interrupt());
         assert_eq!(
@@ -785,10 +829,13 @@ mod tests {
         crate::siginbox::signals().set_interrupt_pending(true);
 
         assert!(
-            poll_interrupt(sh).is_some(),
+            poll_interrupt(sh.interrupt_context()).is_some(),
             "one pending interrupt, one delivery"
         );
-        assert!(poll_interrupt(sh).is_none(), "and not a second time");
+        assert!(
+            poll_interrupt(sh.interrupt_context()).is_none(),
+            "and not a second time"
+        );
     }
 
     /// An interrupt that arrives inside a deferral scope is pending but
@@ -811,7 +858,10 @@ mod tests {
             assert_eq!(sh.interrupt_deferral.depth, 1);
             with_interrupts_deferred(sh, |sh| {
                 assert_eq!(sh.interrupt_deferral.depth, 2);
-                assert!(poll_interrupt(sh).is_none(), "suppressed: not due");
+                assert!(
+                    poll_interrupt(sh.interrupt_context()).is_none(),
+                    "suppressed: not due"
+                );
             });
             assert_eq!(sh.interrupt_deferral.depth, 1);
         });
@@ -824,7 +874,7 @@ mod tests {
         assert_eq!(sh.interrupt_deferral.depth, 0);
         assert_eq!(int_pending(), 1, "still pending, waiting for a poll site");
         assert!(
-            poll_interrupt(sh).is_some(),
+            poll_interrupt(sh.interrupt_context()).is_some(),
             "and due again once unsuppressed"
         );
     }
@@ -845,6 +895,9 @@ mod tests {
             signal: crate::status::Signal::from(nsh_platform::interrupt_signal()),
         });
         assert_eq!(int_pending(), 1);
-        assert!(poll_interrupt(sh).is_some(), "the next poll site takes it");
+        assert!(
+            poll_interrupt(sh.interrupt_context()).is_some(),
+            "the next poll site takes it"
+        );
     }
 }

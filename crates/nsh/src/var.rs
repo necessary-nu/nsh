@@ -497,8 +497,10 @@ fn run_callback(sh: &mut Shell, callback: Callback, name: &BStr, value: Option<&
             let effective_ifs = if ifsset(sh) { effective } else { defifs() };
             crate::expand::changeifs_bytes(sh, effective_ifs);
         }
-        Callback::Mail => crate::mail::changemail(sh, effective),
-        Callback::Path => crate::exec::changepath(sh, effective),
+        Callback::Mail => crate::mail::changemail(&mut sh.mail, effective),
+        Callback::Path => {
+            crate::exec::changepath(&mut sh.interrupt_deferral, &mut sh.commands, effective)
+        }
         Callback::Getopts => crate::options::getoptsreset(sh, effective),
         Callback::History => crate::histedit::sethistsize(sh, effective),
         Callback::Locale => {
@@ -527,7 +529,7 @@ fn set_entry(
     if !valid_name(&sh.locale, name) {
         let mut message = name.to_vec();
         message.extend_from_slice(b": bad variable name");
-        return Err(sh.sh_error_value(&message));
+        return Err(sh.diagnostics().sh_error_value(&message));
     }
     if sh.options.enabled(ShellOption::AllExport) {
         attributes.exported = true;
@@ -564,7 +566,7 @@ fn set_entry(
     if old.attributes.read_only {
         let mut message = name.to_vec();
         message.extend_from_slice(b": is read only");
-        return Err(sh.sh_error_value(&message));
+        return Err(sh.diagnostics().sh_error_value(&message));
     }
 
     if value.is_some() || attributes != VariableAttributes::NONE {
@@ -681,11 +683,11 @@ pub(crate) fn lookupvarint_bytes(sh: &mut Shell, name: &BStr) -> Result<i64, Err
         None if sh.options.enabled(ShellOption::Nounset) => {
             let mut message = name.to_vec();
             message.extend_from_slice(b": parameter not set");
-            return Err(sh.sh_error_value(&message));
+            return Err(sh.diagnostics().sh_error_value(&message));
         }
         None => BString::default(),
     };
-    crate::mystring::parse_integer(sh, BStr::new(&value), 0)
+    crate::mystring::parse_integer(&mut sh.diagnostics(), BStr::new(&value), 0)
 }
 
 pub(crate) fn unset_bytes(sh: &mut Shell, name: &BStr) -> Result<(), Error> {

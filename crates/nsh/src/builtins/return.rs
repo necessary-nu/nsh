@@ -26,7 +26,10 @@ pub fn returncmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
      * skip the rest of the file.
      */
     if let Some(want) = args.get(1) {
-        status = crate::status::ExitStatus::from_code(crate::mystring::number(sh, want)?);
+        status = crate::status::ExitStatus::from_code(crate::mystring::number(
+            &mut sh.diagnostics(),
+            want,
+        )?);
     } else {
         status = sh.status;
     }

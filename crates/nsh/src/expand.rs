@@ -527,7 +527,9 @@ pub fn expandarg(
     mode: ExpansionMode,
 ) -> Result<(), Error> {
     let Node::Word(word) = arg else {
-        return Err(sh.sh_error_value(b"word expansion requires a word node"));
+        return Err(sh
+            .diagnostics()
+            .sh_error_value(b"word expansion requires a word node"));
     };
     // [spec:nsh:def:idiom.word-ir]
     // [spec:nsh:sem:idiom.typed-expansion]
@@ -1059,7 +1061,7 @@ fn expbackq(
             Ok::<_, Error>(startloc)
         })?;
 
-        if let Some(error) = crate::error::poll_interrupt(sh) {
+        if let Some(error) = crate::error::poll_interrupt(sh.interrupt_context()) {
             return Err(error);
         }
 
@@ -1869,7 +1871,7 @@ fn varvalue(
             return Ok(-1);
         }
 
-        return Err(sh.sh_error_value(b"Bad substitution"));
+        return Err(sh.diagnostics().sh_error_value(b"Bad substitution"));
     }
 
     if discard {
@@ -3003,7 +3005,9 @@ pub fn casematch(
     val: &BStr,
 ) -> Result<c_int, Error> {
     let Node::Word(word) = pattern else {
-        return Err(sh.sh_error_value(b"case matching requires a word node"));
+        return Err(sh
+            .diagnostics()
+            .sh_error_value(b"case matching requires a word node"));
     };
     typed::case_matches(sh, &word.word, val).map(c_int::from)
 }
@@ -3093,10 +3097,10 @@ fn varunset(
     message.extend_from_slice(msg);
     message.extend_from_slice(tail);
     if sh.eval.inps4 != 0 {
-        sh.sh_error_value(&message)
+        sh.diagnostics().sh_error_value(&message)
     } else {
         // [spec:nsh:req:compat.smoosh.error-contracts]
-        sh.expansion_error_value(&message)
+        sh.diagnostics().expansion_error_value(&message)
     }
 }
 

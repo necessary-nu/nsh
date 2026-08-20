@@ -81,10 +81,10 @@ pub static dotdir: [c_char; 2] = to_cchar(b".\0");
 // [spec:dash:sem:mystring.badnum-fn]
 // The C's `badnum` does not return; here it builds the diagnostic and the
 // caller's `?` does the leaving. Same bytes, same point, same funnel.
-pub fn bad_number(sh: &mut crate::context::Shell, s: &BStr) -> Error {
+pub fn bad_number(diagnostics: &mut crate::error::Diagnostics<'_>, s: &BStr) -> Error {
     let mut message = b"Illegal number: ".to_vec();
     message.extend_from_slice(cstr_prefix(s.as_ref()));
-    sh.sh_error_value(&message)
+    diagnostics.sh_error_value(&message)
 }
 
 /*
@@ -99,7 +99,7 @@ pub fn bad_number(sh: &mut crate::context::Shell, s: &BStr) -> Error {
 // [spec:dash:def:mystring.atomax-fn]
 // [spec:dash:sem:mystring.atomax-fn]
 pub fn parse_integer(
-    sh: &mut crate::context::Shell,
+    diagnostics: &mut crate::error::Diagnostics<'_>,
     s: &BStr,
     requested_base: u32,
 ) -> Result<i64, Error> {
@@ -182,14 +182,14 @@ pub fn parse_integer(
         {
             return Ok(0);
         }
-        return Err(bad_number(sh, s));
+        return Err(bad_number(diagnostics, s));
     }
 
     while bytes.get(pos).is_some_and(|&b| is_c_space(b)) {
         pos += 1;
     }
     if pos != bytes.len() {
-        return Err(bad_number(sh, s));
+        return Err(bad_number(diagnostics, s));
     }
 
     Ok(if negative {
@@ -223,11 +223,11 @@ fn is_c_space(byte: u8) -> bool {
 
 // [spec:dash:def:mystring.number-fn]
 // [spec:dash:sem:mystring.number-fn]
-pub fn number(sh: &mut crate::context::Shell, s: &BStr) -> Result<c_int, Error> {
-    let n = parse_integer(sh, s, 10)?;
+pub fn number(diagnostics: &mut crate::error::Diagnostics<'_>, s: &BStr) -> Result<c_int, Error> {
+    let n = parse_integer(diagnostics, s, 10)?;
 
     if n < 0 || n > c_int::MAX as i64 {
-        return Err(bad_number(sh, s));
+        return Err(bad_number(diagnostics, s));
     }
 
     Ok(n as c_int)
@@ -400,13 +400,31 @@ mod tests {
         let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let _g = crate::testutil::lock();
-        assert_eq!(parse_integer(sh, BStr::new("42"), 10).unwrap(), 42);
-        assert_eq!(parse_integer(sh, BStr::new("-42"), 10).unwrap(), -42);
-        assert_eq!(parse_integer(sh, BStr::new("ff"), 16).unwrap(), 255);
-        assert_eq!(parse_integer(sh, BStr::new("777"), 8).unwrap(), 511);
+        assert_eq!(
+            parse_integer(&mut sh.diagnostics(), BStr::new("42"), 10).unwrap(),
+            42
+        );
+        assert_eq!(
+            parse_integer(&mut sh.diagnostics(), BStr::new("-42"), 10).unwrap(),
+            -42
+        );
+        assert_eq!(
+            parse_integer(&mut sh.diagnostics(), BStr::new("ff"), 16).unwrap(),
+            255
+        );
+        assert_eq!(
+            parse_integer(&mut sh.diagnostics(), BStr::new("777"), 8).unwrap(),
+            511
+        );
         // "Alow trailing spaces" -- the comment's typo is in the C too.
-        assert_eq!(parse_integer(sh, BStr::new("42   "), 10).unwrap(), 42);
-        assert_eq!(parse_integer(sh, BStr::new("42\t\n"), 10).unwrap(), 42);
+        assert_eq!(
+            parse_integer(&mut sh.diagnostics(), BStr::new("42   "), 10).unwrap(),
+            42
+        );
+        assert_eq!(
+            parse_integer(&mut sh.diagnostics(), BStr::new("42\t\n"), 10).unwrap(),
+            42
+        );
     }
 
     // [spec:dash:sem:mystring.atomax-fn/test]
@@ -418,18 +436,27 @@ mod tests {
         let _g = crate::testutil::lock();
         // Trailing junk is rejected, and the diagnostic is the value
         // now rather than an unwind, so the test can read it.
-        let e = parse_integer(sh, BStr::new("42x"), 10).expect_err("trailing junk");
+        let e =
+            parse_integer(&mut sh.diagnostics(), BStr::new("42x"), 10).expect_err("trailing junk");
         assert_eq!(e.message().to_vec(), b"Illegal number: 42x".to_vec());
         // ...and so is a wholly blank string, but only when base != 0.
         // At base 0 the blank check is skipped, which is what lets
         // arithmetic variable lookup treat an unset value as zero.
-        assert!(parse_integer(sh, BStr::new(""), 10).is_err());
-        assert!(parse_integer(sh, BStr::new("   "), 10).is_err());
-        assert_eq!(parse_integer(sh, BStr::new(""), 0).unwrap(), 0);
-        assert_eq!(parse_integer(sh, BStr::new("   "), 0).unwrap(), 0);
+        assert!(parse_integer(&mut sh.diagnostics(), BStr::new(""), 10).is_err());
+        assert!(parse_integer(&mut sh.diagnostics(), BStr::new("   "), 10).is_err());
+        assert_eq!(
+            parse_integer(&mut sh.diagnostics(), BStr::new(""), 0).unwrap(),
+            0
+        );
+        assert_eq!(
+            parse_integer(&mut sh.diagnostics(), BStr::new("   "), 0).unwrap(),
+            0
+        );
         // bad_number builds the diagnostic rather than raising it.
         assert_eq!(
-            bad_number(sh, BStr::new("zzz")).message().to_vec(),
+            bad_number(&mut sh.diagnostics(), BStr::new("zzz"))
+                .message()
+                .to_vec(),
             b"Illegal number: zzz".to_vec()
         );
     }
@@ -440,10 +467,16 @@ mod tests {
         let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let _g = crate::testutil::lock();
-        assert_eq!(parse_integer(sh, BStr::new("99"), 10).unwrap(), 99);
+        assert_eq!(
+            parse_integer(&mut sh.diagnostics(), BStr::new("99"), 10).unwrap(),
+            99
+        );
         // Base 10, so a leading 0 is not octal and 0x is not hex.
-        assert_eq!(parse_integer(sh, BStr::new("010"), 10).unwrap(), 10);
-        assert!(parse_integer(sh, BStr::new("0x10"), 10).is_err());
+        assert_eq!(
+            parse_integer(&mut sh.diagnostics(), BStr::new("010"), 10).unwrap(),
+            10
+        );
+        assert!(parse_integer(&mut sh.diagnostics(), BStr::new("0x10"), 10).is_err());
     }
 
     // [spec:dash:sem:mystring.number-fn/test]
@@ -452,15 +485,19 @@ mod tests {
         let mut owned_sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned_sh;
         let _g = crate::testutil::lock();
-        assert_eq!(number(sh, BStr::new("7")).unwrap(), 7);
+        assert_eq!(number(&mut sh.diagnostics(), BStr::new("7")).unwrap(), 7);
         assert_eq!(
-            number(sh, BStr::new(c_int::MAX.to_string().as_bytes())).unwrap(),
+            number(
+                &mut sh.diagnostics(),
+                BStr::new(c_int::MAX.to_string().as_bytes())
+            )
+            .unwrap(),
             c_int::MAX
         );
         // Negative and out-of-range both go through bad_number.
-        assert!(number(sh, BStr::new("-1")).is_err());
+        assert!(number(&mut sh.diagnostics(), BStr::new("-1")).is_err());
         let too_big = (c_int::MAX as i64 + 1).to_string();
-        assert!(number(sh, BStr::new(too_big.as_bytes())).is_err());
+        assert!(number(&mut sh.diagnostics(), BStr::new(too_big.as_bytes())).is_err());
     }
 
     // [spec:dash:sem:mystring.single-quote-fn/test]

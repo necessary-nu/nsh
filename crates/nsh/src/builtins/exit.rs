@@ -32,7 +32,10 @@ pub fn exitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 
     let status = match args.get(1) {
-        Some(status) => crate::status::ExitStatus::from_code(crate::mystring::number(sh, status)?),
+        Some(status) => crate::status::ExitStatus::from_code(crate::mystring::number(
+            &mut sh.diagnostics(),
+            status,
+        )?),
         // POSIX gives operand-less `exit` the status immediately preceding
         // a trap action when the command directly ends that action. A
         // subshell clears this context, so the Smoosh nested-action case

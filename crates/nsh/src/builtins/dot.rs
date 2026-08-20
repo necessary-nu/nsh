@@ -81,13 +81,15 @@ fn dotcmd_with_missing_status(
     let mut status = crate::status::ExitStatus::SUCCESS;
 
     let mut opts = crate::options::Options::new(args);
-    opts.next(sh, b"")?;
+    opts.next(&mut sh.diagnostics(), b"")?;
 
     if let Some(name) = opts.operands().first() {
         let Some(fullname) = find_dot_file(sh, name) else {
             let mut message = name.to_vec();
             message.extend_from_slice(b": not found");
-            return Err(sh.builtin_error_value(missing_status, &message));
+            return Err(sh
+                .diagnostics()
+                .builtin_error_value(missing_status, &message));
         };
 
         let outcome = crate::resource::with_resources(sh, |sh, _resources| {

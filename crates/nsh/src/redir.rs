@@ -213,11 +213,9 @@ fn sh_open_fail_with_context(
     message.extend_from_slice(b": ");
     message.extend_from_slice(&crate::error::errmsg(&sh.locale, error, action));
     let status = context.status(error);
-    sh.report(Error::other(
-        sh.eval.errlinno,
-        c_int::from(status.code()),
-        &message,
-    ))
+    let line = sh.eval.errlinno;
+    sh.diagnostics()
+        .report(Error::other(line, c_int::from(status.code()), &message))
 }
 
 #[derive(Copy, Clone)]
@@ -275,7 +273,7 @@ fn sh_open_with_context(
                  * `pending_sig == 0` test this replaces: a signal that is
                  * pending but not *due* (suppressed, or trapped and handled
                  * elsewhere) is no reason to abandon the open. */
-                if let Some(err) = crate::error::poll_interrupt(sh) {
+                if let Some(err) = crate::error::poll_interrupt(sh.interrupt_context()) {
                     return Err(err);
                 }
                 if crate::siginbox::signals().pending_signal().is_none() {
@@ -470,7 +468,7 @@ pub(crate) fn descriptor_error(
     write!(&mut message, "{}", source).expect("writing to a Vec cannot fail");
     message.extend_from_slice(b": ");
     message.extend_from_slice(sh.locale.error_message(&error).as_bytes());
-    sh.sh_error_value(&message)
+    sh.diagnostics().sh_error_value(&message)
 }
 
 // [spec:dash:def:redir.dupredirect-fn]
@@ -508,20 +506,21 @@ pub fn sh_pipe(sh: &mut crate::context::Shell, memfd: bool) -> Result<(Pipe, boo
     if memfd {
         if let Ok(read_fd) = nsh_platform::anonymous_file("dash") {
             let write_fd = nsh_platform::duplicate_fd(&read_fd)
-                .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
+                .map_err(|_| sh.diagnostics().sh_error_value(b"Pipe call failed"))?;
             let read = nsh_platform::move_fd_cloexec(read_fd, LogicalDescriptor::COUNT as i32)
-                .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
+                .map_err(|_| sh.diagnostics().sh_error_value(b"Pipe call failed"))?;
             let write = nsh_platform::move_fd_cloexec(write_fd, LogicalDescriptor::COUNT as i32)
-                .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
+                .map_err(|_| sh.diagnostics().sh_error_value(b"Pipe call failed"))?;
             return Ok((Pipe { read, write }, true));
         }
     }
 
-    let (read, write) = nsh_platform::pipe().map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
+    let (read, write) =
+        nsh_platform::pipe().map_err(|_| sh.diagnostics().sh_error_value(b"Pipe call failed"))?;
     let read = nsh_platform::move_fd_cloexec(read, LogicalDescriptor::COUNT as i32)
-        .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
+        .map_err(|_| sh.diagnostics().sh_error_value(b"Pipe call failed"))?;
     let write = nsh_platform::move_fd_cloexec(write, LogicalDescriptor::COUNT as i32)
-        .map_err(|_| sh.sh_error_value(b"Pipe call failed"))?;
+        .map_err(|_| sh.diagnostics().sh_error_value(b"Pipe call failed"))?;
     Ok((Pipe { read, write }, false))
 }
 
@@ -669,7 +668,7 @@ impl Shell {
 pub fn move_fd_above(sh: &mut Shell, fd: Descriptor) -> Result<Descriptor, Error> {
     nsh_platform::move_fd_cloexec(fd, 10).map_err(|error| {
         let message = sh.locale.error_message(&error);
-        sh.sh_error_value(message.as_bytes())
+        sh.diagnostics().sh_error_value(message.as_bytes())
     })
 }
 

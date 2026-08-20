@@ -235,7 +235,7 @@ fn native_exec_failure(
     message.extend_from_slice(b": ");
     message.extend_from_slice(sh.locale.error_message(error).as_bytes());
     let diagnostic = crate::error::Error::other(sh.eval.errlinno, status, &message);
-    drop(sh.report(diagnostic));
+    drop(sh.diagnostics().report(diagnostic));
     Ok(crate::eval::Flow::END)
 }
 
@@ -263,7 +263,7 @@ fn exec_failure(
      * receiver is borrowed for the whole call, so reading the line out of
      * the same shell in an argument is a conflict. */
     let e = crate::error::Error::other(sh.eval.errlinno, exerrno, &message);
-    drop(sh.report(e));
+    drop(sh.diagnostics().report(e));
 
     Ok(crate::eval::Flow::END)
 }
@@ -514,7 +514,7 @@ pub fn find_command(
             || sh.commands.builtinloc <= 0)
     {
         if update_table {
-            addcmdentry(sh, name, Command::Builtin(command));
+            addcmdentry(&mut sh.commands, name, Command::Builtin(command));
         }
         *entry = Command::Builtin(command);
         return Ok(crate::eval::Flow::Done((0).into()));
@@ -544,7 +544,7 @@ pub fn find_command(
             if option.first() == Some(&b'b') {
                 if let Some(command) = builtin_command {
                     if update_table {
-                        addcmdentry(sh, name, Command::Builtin(command));
+                        addcmdentry(&mut sh.commands, name, Command::Builtin(command));
                     }
                     *entry = Command::Builtin(command);
                     return Ok(crate::eval::Flow::Done((0).into()));
@@ -594,13 +594,13 @@ pub fn find_command(
                 let mut message = name.to_vec();
                 message.extend_from_slice(b" not defined in ");
                 message.extend_from_slice(&fullname);
-                return Err(sh.sh_error_value(&message));
+                return Err(sh.diagnostics().sh_error_value(&message));
             };
             if !matches!(stored.command, Command::Function(_)) {
                 let mut message = name.to_vec();
                 message.extend_from_slice(b" not defined in ");
                 message.extend_from_slice(&fullname);
-                return Err(sh.sh_error_value(&message));
+                return Err(sh.diagnostics().sh_error_value(&message));
             }
             stored.rehash = false;
             *entry = stored.command.clone();
@@ -612,20 +612,24 @@ pub fn find_command(
             continue;
         }
         if update_table {
-            addcmdentry(sh, name, Command::External { path_index: index });
+            addcmdentry(
+                &mut sh.commands,
+                name,
+                Command::External { path_index: index },
+            );
         }
         *entry = Command::External { path_index: index };
         return Ok(crate::eval::Flow::Done((0).into()));
     }
 
     if cached.is_some() && update_table {
-        delete_cmd_entry(sh, name);
+        delete_cmd_entry(&mut sh.interrupt_deferral, &mut sh.commands, name);
     }
     if (act & DO_ERR) != 0 {
         let mut message = name.to_vec();
         message.extend_from_slice(b": ");
         message.extend_from_slice(&crate::error::errmsg(&sh.locale, &error, E_EXEC));
-        sh.sh_warnx(&message);
+        sh.diagnostics().sh_warnx(&message);
     }
     *entry = Command::Unknown;
     Ok(crate::eval::Flow::Done((0).into()))
@@ -639,7 +643,7 @@ fn native_string_error(
     let mut message = subject.to_vec();
     message.extend_from_slice(b": ");
     message.extend_from_slice(sh.locale.error_message(error).as_bytes());
-    sh.sh_error_value(&message)
+    sh.diagnostics().sh_error_value(&message)
 }
 
 /*
@@ -688,13 +692,17 @@ pub fn hashcd(sh: &mut crate::context::Shell) {
 
 // [spec:dash:def:exec.changepath-fn]
 // [spec:dash:sem:exec.changepath-fn]
-pub fn changepath(sh: &mut crate::context::Shell, newval: &BStr) {
+pub fn changepath(
+    interrupts: &mut crate::error::InterruptDeferral,
+    commands: &mut CmdTable,
+    newval: &BStr,
+) {
     let bltin = newval
         .split(|&byte| byte == nsh_platform::search_path_separator())
         .position(|component| component.starts_with(b"%builtin"))
         .map_or(-1, |index| index as c_int);
-    sh.commands.builtinloc = bltin;
-    clearcmdentry(sh);
+    commands.builtinloc = bltin;
+    clearcmdentry(interrupts, commands);
 }
 
 /*
@@ -704,10 +712,13 @@ pub fn changepath(sh: &mut crate::context::Shell, newval: &BStr) {
 
 // [spec:dash:def:exec.clearcmdentry-fn]
 // [spec:dash:sem:exec.clearcmdentry-fn]
-pub(crate) fn clearcmdentry(sh: &mut crate::context::Shell) {
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        let builtinloc = sh.commands.builtinloc;
-        sh.commands
+pub(crate) fn clearcmdentry(
+    interrupts: &mut crate::error::InterruptDeferral,
+    commands: &mut CmdTable,
+) {
+    interrupts.run_with(commands, |commands| {
+        let builtinloc = commands.builtinloc;
+        commands
             .map
             .retain(|_, cmdp| !cmdp.path_dependent(builtinloc));
     });
@@ -722,13 +733,13 @@ pub(crate) fn clearcmdentry(sh: &mut crate::context::Shell) {
 // [spec:dash:def:exec.cmdlookup-fn]
 // [spec:dash:sem:exec.cmdlookup-fn]
 pub(crate) fn cmdlookup<'a>(
-    sh: &'a mut crate::context::Shell,
+    commands: &'a mut CmdTable,
     name: &BStr,
     add: bool,
 ) -> Option<&'a mut tblentry> {
     if add {
         Some(
-            sh.commands
+            commands
                 .map
                 .entry(name.to_owned())
                 .or_insert_with(|| tblentry {
@@ -737,7 +748,7 @@ pub(crate) fn cmdlookup<'a>(
                 }),
         )
     } else {
-        sh.commands.map.get_mut(name)
+        commands.map.get_mut(name)
     }
 }
 
@@ -747,9 +758,13 @@ pub(crate) fn cmdlookup<'a>(
 
 // [spec:dash:def:exec.delete-cmd-entry-fn]
 // [spec:dash:sem:exec.delete-cmd-entry-fn]
-pub(crate) fn delete_cmd_entry(sh: &mut crate::context::Shell, name: &BStr) {
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        sh.commands.map.remove(name);
+pub(crate) fn delete_cmd_entry(
+    interrupts: &mut crate::error::InterruptDeferral,
+    commands: &mut CmdTable,
+    name: &BStr,
+) {
+    interrupts.run_with(commands, |commands| {
+        commands.map.remove(name);
     });
 }
 
@@ -760,8 +775,8 @@ pub(crate) fn delete_cmd_entry(sh: &mut crate::context::Shell, name: &BStr) {
 
 // [spec:dash:def:exec.addcmdentry-fn]
 // [spec:dash:sem:exec.addcmdentry-fn]
-fn addcmdentry(sh: &mut crate::context::Shell, name: &BStr, command: Command) {
-    let cmdp = cmdlookup(sh, name, true).expect("adding returns an entry");
+fn addcmdentry(commands: &mut CmdTable, name: &BStr, command: Command) {
+    let cmdp = cmdlookup(commands, name, true).expect("adding returns an entry");
     cmdp.command = command;
     cmdp.rehash = false;
 }
@@ -772,10 +787,14 @@ fn addcmdentry(sh: &mut crate::context::Shell, name: &BStr, command: Command) {
 
 // [spec:dash:def:exec.defun-fn]
 // [spec:dash:sem:exec.defun-fn]
-pub fn defun(sh: &mut crate::context::Shell, definition: &FunctionDefinition) {
-    crate::error::with_interrupts_deferred(sh, |sh| {
+pub fn defun(
+    interrupts: &mut crate::error::InterruptDeferral,
+    commands: &mut CmdTable,
+    definition: &FunctionDefinition,
+) {
+    interrupts.run_with(commands, |commands| {
         addcmdentry(
-            sh,
+            commands,
             definition.name.as_bstr(),
             Command::Function(definition.clone()),
         );
@@ -788,9 +807,15 @@ pub fn defun(sh: &mut crate::context::Shell, definition: &FunctionDefinition) {
 
 // [spec:dash:def:exec.unsetfunc-fn]
 // [spec:dash:sem:exec.unsetfunc-fn]
-pub fn unsetfunc(sh: &mut crate::context::Shell, name: &BStr) {
-    if cmdlookup(sh, name, false).is_some_and(|cmdp| matches!(cmdp.command, Command::Function(_))) {
-        delete_cmd_entry(sh, name);
+pub fn unsetfunc(
+    interrupts: &mut crate::error::InterruptDeferral,
+    commands: &mut CmdTable,
+    name: &BStr,
+) {
+    if cmdlookup(commands, name, false)
+        .is_some_and(|cmdp| matches!(cmdp.command, Command::Function(_)))
+    {
+        delete_cmd_entry(interrupts, commands, name);
     }
 }
 
@@ -815,15 +840,27 @@ mod tests {
 
         let separator = [nsh_platform::search_path_separator()];
         let first = [b"/bin".as_slice(), b"%builtin", b"/usr/bin"].join(separator.as_slice());
-        changepath(sh, BStr::new(&first));
+        changepath(
+            &mut sh.interrupt_deferral,
+            &mut sh.commands,
+            BStr::new(&first),
+        );
         assert_eq!(sh.commands.builtinloc, 1);
 
         let second = [b"%builtin".as_slice(), b"/bin"].join(separator.as_slice());
-        changepath(sh, BStr::new(&second));
+        changepath(
+            &mut sh.interrupt_deferral,
+            &mut sh.commands,
+            BStr::new(&second),
+        );
         assert_eq!(sh.commands.builtinloc, 0);
 
         let third = [b"/bin".as_slice(), b"/usr/bin"].join(separator.as_slice());
-        changepath(sh, BStr::new(&third));
+        changepath(
+            &mut sh.interrupt_deferral,
+            &mut sh.commands,
+            BStr::new(&third),
+        );
         assert_eq!(sh.commands.builtinloc, -1, "no %builtin is -1, not 0");
     }
 
@@ -842,15 +879,19 @@ mod tests {
 
         let external = BStr::new(b"Texternal");
         let unknown = BStr::new(b"Tunknown");
-        addcmdentry(sh, external, Command::External { path_index: 0 });
-        cmdlookup(sh, unknown, true);
+        addcmdentry(
+            &mut sh.commands,
+            external,
+            Command::External { path_index: 0 },
+        );
+        cmdlookup(&mut sh.commands, unknown, true);
 
         let e = sh.commands.get(external).expect("external entry");
         assert!(sh.commands.path_dependent(e));
         let u = sh.commands.get(unknown).expect("unknown entry");
         assert!(!sh.commands.path_dependent(u));
 
-        clearcmdentry(sh);
+        clearcmdentry(&mut sh.interrupt_deferral, &mut sh.commands);
 
         assert!(
             sh.commands.get(external).is_none(),

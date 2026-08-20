@@ -10,7 +10,7 @@ use bstr::BStr;
 use core::ffi::c_int;
 use std::io::Write;
 
-use crate::alias::{lookup_alias, printalias, setalias};
+use crate::alias::{printalias, setalias};
 use crate::eval::Flow;
 
 // [spec:dash:def:alias.aliascmd-fn]
@@ -54,7 +54,7 @@ pub fn aliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             })
             .flatten();
         if word.is_empty() || equals.is_none() {
-            if let Some(value) = lookup_alias(sh, word, false) {
+            if let Some(value) = sh.aliases.lookup(word, false) {
                 let line = printalias(word, BStr::new(value.as_slice()));
                 let _ = sh.io.stdout().write_all(&line);
             } else {
@@ -81,8 +81,6 @@ pub fn aliascmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 mod tests {
     use super::*;
 
-    use crate::alias::lookup_alias;
-
     /// Defining prints nothing and lands in the table the parser reads,
     /// which is the whole of what `alias name=value` is for.
     #[test]
@@ -94,7 +92,7 @@ mod tests {
             aliascmd(sh, &[BStr::new("alias"), BStr::new("ll=ls -l")]).unwrap(),
             Flow::Done((0).into())
         );
-        assert!(lookup_alias(sh, BStr::new(b"ll"), false).is_some());
+        assert!(sh.aliases.lookup(BStr::new(b"ll"), false).is_some());
     }
 
     /// A name that is not defined is a diagnostic and a failing status,
@@ -116,6 +114,6 @@ mod tests {
             .unwrap(),
             Flow::Done((1).into())
         );
-        assert!(lookup_alias(sh, BStr::new(b"after"), false).is_some());
+        assert!(sh.aliases.lookup(BStr::new(b"after"), false).is_some());
     }
 }

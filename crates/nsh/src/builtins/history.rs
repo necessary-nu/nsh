@@ -10,7 +10,7 @@ use std::io::Write as _;
 pub fn historycmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut clear = false;
     let mut opts = crate::options::Options::new(args);
-    while let Some(option) = opts.next(sh, b"c")? {
+    while let Some(option) = opts.next(&mut sh.diagnostics(), b"c")? {
         debug_assert_eq!(option, b'c');
         clear = true;
     }

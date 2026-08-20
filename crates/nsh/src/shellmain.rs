@@ -206,7 +206,7 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
                 if interrupted {
                     let _ = sh.io.stderr().write_all(b"\n");
                 }
-                crate::error::clear_interrupt_deferral(sh);
+                crate::error::clear_interrupt_deferral(&mut sh.interrupt_deferral);
                 task = recovery.expect("recoverable startup task has a successor");
             }
         }

@@ -512,7 +512,7 @@ pub fn dotrap(sh: &mut crate::context::Shell) -> Result<Flow, Error> {
      * the next command boundary at the latest. It is tested before
      * `pending_sig`, because an *untrapped* SIGINT sets `intpending` and
      * has no trap action for the loop below to run. */
-    if let Some(e) = crate::error::poll_interrupt(sh) {
+    if let Some(e) = crate::error::poll_interrupt(sh.interrupt_context()) {
         return Err(e);
     }
 
