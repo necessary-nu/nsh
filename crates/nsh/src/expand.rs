@@ -1989,19 +1989,18 @@ fn varvalue(
     match name_byte {
         C_DOLLAR | C_QUESTION | C_HASH | C_BANG => {
             let num = match name_byte {
-                C_DOLLAR => sh.root_pid,
-                C_QUESTION => sh.status,
-                C_HASH => sh.options.shellparam.nparam,
+                C_DOLLAR => i64::from(sh.root_pid.get()),
+                C_QUESTION => i64::from(sh.status),
+                C_HASH => i64::from(sh.options.shellparam.nparam),
                 C_BANG => {
-                    let pid = sh.backgndpid as c_int;
-                    if pid == 0 {
+                    let Some(pid) = sh.backgndpid else {
                         return Ok(-1);
-                    }
-                    pid
+                    };
+                    i64::from(pid.get())
                 }
                 _ => unreachable!(),
             };
-            len = cvtnum(&sh.locale, num as i64, flags as c_int, expb(state)) as isize;
+            len = cvtnum(&sh.locale, num, flags as c_int, expb(state)) as isize;
         }
         C_MINUS => {
             let mut i = crate::options::NOPTS;

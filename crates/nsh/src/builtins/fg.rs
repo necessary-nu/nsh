@@ -93,7 +93,7 @@ pub fn fgcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 // [spec:posix:req:jobctl.continue-suspended-job]
 // [spec:posix:req:jobctl.fg-terminal-settings-restore]
 fn restartjob(sh: &mut Shell, jp: usize, mode: c_int) -> Result<c_int, Error> {
-    let pgid: i32;
+    let process_group: nsh_platform::ProcessGroupId;
     let mut terminal_error = None;
 
     INTOFF(sh);
@@ -105,14 +105,17 @@ fn restartjob(sh: &mut Shell, jp: usize, mode: c_int) -> Result<c_int, Error> {
             capture_shell_terminal_settings(sh)?;
         }
         sh.jobs.tab[jp].state = JOBRUNNING as u8;
-        pgid = ps_pid(sh, jp, 0);
+        let Some(leader) = ps_pid(sh, jp, 0) else {
+            return Err(sh.sh_error_value(b"job has no process"));
+        };
+        process_group = nsh_platform::ProcessGroupId::from_leader(leader);
         if mode == FORK_FG {
-            xxtcsetpgrp(sh, pgid)?;
+            xxtcsetpgrp(sh, process_group)?;
             if let Err(error) = apply_saved_job_terminal_settings(sh, jp) {
                 terminal_error = Some(error);
             }
         }
-        let _ = nsh_platform::send_continue_to_process_group(pgid);
+        let _ = nsh_platform::send_continue_to_process_group(process_group);
         /* the C's `do { … } while (--i)` visits `ps[0]` before it looks
          * at the count, so a job with no processes walks the whole
          * address space; there is nothing to restart in one. */

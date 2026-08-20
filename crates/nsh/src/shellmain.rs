@@ -151,8 +151,6 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
                         /* #ifdef DEBUG:
                          *   opentrace();
                          *   trputs("Shell args:  ");  trargs(argv); */
-                        sh.root_pid = nsh_platform::process_id() as c_int;
-                        sh.current_pid = sh.root_pid;
                         crate::init::init(sh)?;
                         /* `setstackmark(smark)`, popped at `state3` and
                          * on the exception path, bounded what `procargs`

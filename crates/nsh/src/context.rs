@@ -77,11 +77,9 @@ pub struct Shell {
     /// one function writes it (`jobs::forkparent`) and one reads it
     /// (`expand::varvalue`, for `$!`), and neither reaches the job table
     /// to do so.
-    pub(crate) backgndpid: i32,
+    pub(crate) backgndpid: Option<nsh_platform::ProcessId>,
     /// PID of the process that created this shell instance.
-    pub(crate) root_pid: i32,
-    /// Cached PID for the process currently executing the shell.
-    pub(crate) current_pid: i32,
+    pub(crate) root_pid: nsh_platform::ProcessId,
     /// Zero in the root shell and incremented in forked shell children.
     pub(crate) shell_level: c_int,
     /// Nesting depth of regions that defer delivery of SIGINT.
@@ -208,15 +206,15 @@ impl Shell {
         let fds = crate::fd::FdTable::from_streams(&streams)?;
         let io = crate::output::ShellIo::new(fds.slot(1)?, fds.slot(2)?);
         let locale = nsh_platform::Locale::c()?;
+        let root_pid = nsh_platform::current_process_id();
         Ok(Shell {
             locale,
             io,
             streams,
             fds,
             aliases: crate::alias::AliasTable::new(),
-            backgndpid: 0,
-            root_pid: 0,
-            current_pid: 0,
+            backgndpid: None,
+            root_pid,
             shell_level: 0,
             interrupt_suppression: 0,
             commands: crate::exec::CmdTable::new(),

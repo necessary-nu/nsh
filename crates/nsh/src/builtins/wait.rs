@@ -74,7 +74,9 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             retval = 127;
             'repeat: {
                 if spec.first() != Some(&b'%') {
-                    let pid: i32 = crate::mystring::number(sh, spec)?;
+                    let process = u32::try_from(crate::mystring::number(sh, spec)?)
+                        .ok()
+                        .and_then(nsh_platform::ProcessId::new);
                     jobp = sh.jobs.curjob;
                     /* `goto start` enters the do/while at `start:` */
                     let mut at_start = true;
@@ -84,7 +86,11 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                              * for a job that has not forked yet is
                              * `ps[-1]`; such a job matches no pid. */
                             let i = jobp.unwrap();
-                            if sh.jobs.tab[i].ps.last().map_or(false, |p| p.pid == pid) {
+                            if sh.jobs.tab[i]
+                                .ps
+                                .last()
+                                .is_some_and(|candidate| Some(candidate.pid) == process)
+                            {
                                 break;
                             }
                             jobp = sh.jobs.tab[i].prev_job;

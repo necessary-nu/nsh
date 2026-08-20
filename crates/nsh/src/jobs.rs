@@ -22,7 +22,9 @@
 
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::{c_int, c_uint};
-use nsh_platform::{Descriptor, NativeStrExt as _};
+use nsh_platform::{
+    Descriptor, NativeStrExt as _, ProcessGroupId, ProcessId, ProcessSelector, ProcessTarget,
+};
 use std::io::Write as _;
 
 use crate::error::{Error, INTOFF, INTON};
@@ -64,8 +66,8 @@ pub const JOBDONE: c_int = 2; /* all procs are completed */
 
 // [spec:dash:def:jobs.procstat]
 pub struct ProcStat {
-    pub pid: i32,      /* process id */
-    pub status: c_int, /* last process status from wait() */
+    pub pid: ProcessId, /* process id */
+    pub status: c_int,  /* last process status from wait() */
     /* text of command being run. The C points this at the shared
      * `nullstr` when there is none and at a `savestr` copy otherwise,
      * and `freejob` tells the two apart by address; an owned text that
@@ -174,7 +176,7 @@ pub struct JobTable {
     /// true if doing job control
     pub(crate) jobctl: c_int,
     /// pgrp of shell on invocation
-    initialpgrp: c_int,
+    initialpgrp: Option<ProcessGroupId>,
     /// control terminal
     ttyfd: Option<Descriptor>,
     /// Terminal state the interactive shell needs while it owns the terminal.
@@ -190,7 +192,7 @@ impl JobTable {
             tab: Vec::new(),
             curjob: None,
             jobctl: 0,
-            initialpgrp: 0,
+            initialpgrp: None,
             ttyfd: None,
             shell_terminal_settings: None,
             job_warning: 0,
@@ -203,12 +205,16 @@ impl JobTable {
 /// `makejob` before it opens the pipe, so a failing `pipe(2)` leaves a
 /// used, zero-process job on the current-job chain for `jobs`, `kill`
 /// and `wait` to find. Every reader the C writes as an unconditional
-/// `ps[i]` goes through these two. `ps_pid` answers with the zero the C
-/// reads out of `ps0`; `ps_cmd` answers with the empty text, where the
-/// C reads `ps0.cmd`, a null pointer it then hands to `%s`.
+/// `ps[i]` goes through these two. `ps_pid` makes the absence explicit;
+/// `ps_cmd` answers with the empty text, where the C reads `ps0.cmd`, a
+/// null pointer it then hands to `%s`.
 #[inline]
-pub(crate) fn ps_pid(sh: &crate::context::Shell, jp: usize, i: usize) -> i32 {
-    sh.jobs.tab[jp].ps.get(i).map_or(0, |p| p.pid)
+pub(crate) fn ps_pid(sh: &crate::context::Shell, jp: usize, i: usize) -> Option<ProcessId> {
+    sh.jobs.tab[jp].ps.get(i).map(|process| process.pid)
+}
+
+fn process_id_text(process: Option<ProcessId>) -> String {
+    process.map_or_else(|| "0".to_owned(), |process| process.to_string())
 }
 
 #[inline]
@@ -353,11 +359,14 @@ pub(crate) fn set_curjob(sh: &mut crate::context::Shell, jp: usize, mode: c_uint
 
 // [spec:dash:def:jobs.xxtcsetpgrp-fn]
 // [spec:dash:sem:jobs.xxtcsetpgrp-fn]
-pub(crate) fn xxtcsetpgrp(sh: &mut crate::context::Shell, pgrp: i32) -> Result<(), Error> {
+pub(crate) fn xxtcsetpgrp(
+    sh: &mut crate::context::Shell,
+    group: ProcessGroupId,
+) -> Result<(), Error> {
     let Some(fd) = sh.jobs.ttyfd.take() else {
         return Ok(());
     };
-    let result = xtcsetpgrp(sh, &fd, pgrp);
+    let result = xtcsetpgrp(sh, &fd, group);
     sh.jobs.ttyfd = Some(fd);
     result
 }
@@ -426,7 +435,7 @@ pub(crate) fn terminal_settings_error(
 /// drop it where the C already swallowed it.
 pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error> {
     let mut on: c_int = on;
-    let mut pgrp: c_int = -1;
+    let mut process_group: Option<ProcessGroupId> = None;
     let mut fd: Option<Descriptor>;
 
     if on == sh.jobs.jobctl || crate::shellmain::rootshell(sh) == 0 {
@@ -511,14 +520,14 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
                                 fd.as_ref().expect("tty descriptor exists"),
                             ) {
                                 Ok(group) => {
-                                    pgrp = group;
+                                    process_group = group;
                                     break;
                                 }
                                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
                                     continue;
                                 }
                                 Err(_) => {
-                                    pgrp = -1;
+                                    process_group = None;
                                     break;
                                 }
                             }
@@ -540,17 +549,17 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
                              * next real poll site, which is where it would
                              * have waited anyway. */
                         }
-                        if pgrp < 0 {
+                        let Some(group) = process_group else {
                             break 'close_lbl; // goto close
-                        }
-                        if pgrp == nsh_platform::current_process_group() {
+                        };
+                        if Some(group) == nsh_platform::current_process_group() {
                             break 'after_dowhile; // `break` of the do/while
                         }
                         if iflag(sh) == 0 {
                             break 'close_lbl; // goto close
                         }
-                        let _ = nsh_platform::send_signal_to_process_group(
-                            0,
+                        let _ = nsh_platform::send_signal(
+                            ProcessTarget::CurrentProcessGroup,
                             nsh_platform::terminal_input_signal(),
                         );
                     }
@@ -569,20 +578,20 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
             let _ = on;
             return Ok(());
         }
-        sh.jobs.initialpgrp = pgrp;
-        pgrp = sh.root_pid;
+        sh.jobs.initialpgrp = process_group;
+        process_group = Some(ProcessGroupId::from_leader(sh.root_pid));
     } else {
         /* turning job control off */
         fd = sh.jobs.ttyfd.take();
-        pgrp = sh.jobs.initialpgrp;
+        process_group = sh.jobs.initialpgrp;
     }
 
     crate::trap::setsignal(sh, nsh_platform::terminal_stop_signal());
     crate::trap::setsignal(sh, nsh_platform::terminal_output_signal());
     crate::trap::setsignal(sh, nsh_platform::terminal_input_signal());
-    if let Some(tty) = fd.as_ref() {
-        let _ = nsh_platform::set_process_group(0, pgrp);
-        xtcsetpgrp(sh, tty, pgrp)?;
+    if let (Some(tty), Some(group)) = (fd.as_ref(), process_group) {
+        let _ = nsh_platform::set_process_group(ProcessSelector::CurrentProcess, group);
+        xtcsetpgrp(sh, tty, group)?;
 
         if on == 0 {
             drop(fd.take());
@@ -691,7 +700,7 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mod
          * its argument list: `ps_pid` borrows the shell and the write
          * borrows `sh.io`, and evaluating one inside the other is the
          * conflict `Dest` exists to keep out of these functions. */
-        let pid = ps_pid(sh, jp, ps);
+        let pid = process_id_text(ps_pid(sh, jp, ps));
         let _ = writeln!(sh.io.get(dest), "{pid}");
         return;
     }
@@ -711,7 +720,7 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mod
     }
 
     if (mode & SHOW_PID) != 0 {
-        let pid = format!("{} ", ps_pid(sh, jp, ps));
+        let pid = format!("{} ", process_id_text(ps_pid(sh, jp, ps)));
         col += append_ascii(&mut s, 16, &pid);
     }
 
@@ -737,7 +746,7 @@ pub(crate) fn showjob(sh: &mut crate::context::Shell, dest: Dest, jp: usize, mod
             /* for each process */
             let continuation = format!(
                 " |\n{space:>width$}{} ",
-                ps_pid(sh, jp, ps),
+                process_id_text(ps_pid(sh, jp, ps)),
                 space = ' ',
                 width = indent.max(0) as usize,
             );
@@ -1094,7 +1103,6 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<usize>, n: Option<&Node>
     crate::shell::reset_coverage();
 
     oldlvl = sh.shell_level;
-    sh.current_pid = 0;
     sh.shell_level += 1;
 
     crate::init::forkreset(sh, if mode == FORK_NOJOB { n } else { None });
@@ -1107,19 +1115,18 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<usize>, n: Option<&Node>
     let ownpgrp =
         mode != FORK_NOJOB && oldlvl == 0 && jp.map_or(false, |i| sh.jobs.tab[i].jobctl != 0);
     if ownpgrp {
-        let pgrp: i32;
+        let process_group: ProcessGroupId;
         let ji: usize = jp.unwrap();
 
         if sh.jobs.tab[ji].ps.is_empty() {
-            pgrp = nsh_platform::current_process_id();
-            sh.current_pid = pgrp;
+            process_group = ProcessGroupId::from_leader(nsh_platform::current_process_id());
         } else {
-            pgrp = sh.jobs.tab[ji].ps[0].pid;
+            process_group = ProcessGroupId::from_leader(sh.jobs.tab[ji].ps[0].pid);
         }
         /* This can fail because we are doing it in the parent also */
-        let _ = nsh_platform::set_process_group(0, pgrp);
+        let _ = nsh_platform::set_process_group(ProcessSelector::CurrentProcess, process_group);
         if mode == FORK_FG {
-            xxtcsetpgrp(sh, pgrp).unwrap_or_else(|e| forkchild_fatal(sh, e));
+            xxtcsetpgrp(sh, process_group).unwrap_or_else(|e| forkchild_fatal(sh, e));
         }
         crate::trap::setsignal_in_child(sh, nsh_platform::terminal_stop_signal());
         crate::trap::setsignal_in_child(sh, nsh_platform::terminal_output_signal());
@@ -1186,33 +1193,25 @@ fn forkparent(
     jp: Option<usize>,
     n: Option<&Node>,
     mode: c_int,
-    pid: i32,
-) -> Result<(), Error> {
-    if pid < 0 {
-        /* TRACE(("Fork failed, errno=%d", errno)); */
-        if let Some(i) = jp {
-            freejob(sh, i);
-        }
-        return Err(sh.sh_error_value(b"Cannot fork"));
-    }
-
+    pid: ProcessId,
+) {
     /* TRACE(("In parent shell:  child = %d\n", pid)); */
     let Some(ji) = jp else {
-        return Ok(());
+        return;
     };
     if mode != FORK_NOJOB && sh.jobs.tab[ji].jobctl != 0 {
-        let pgrp: c_int;
+        let process_group: ProcessGroupId;
 
         if sh.jobs.tab[ji].ps.is_empty() {
-            pgrp = pid;
+            process_group = ProcessGroupId::from_leader(pid);
         } else {
-            pgrp = sh.jobs.tab[ji].ps[0].pid;
+            process_group = ProcessGroupId::from_leader(sh.jobs.tab[ji].ps[0].pid);
         }
         /* This can fail because we are doing it in the child also */
-        let _ = nsh_platform::set_process_group(pid, pgrp);
+        let _ = nsh_platform::set_process_group(ProcessSelector::Process(pid), process_group);
     }
     if mode == FORK_BG {
-        sh.backgndpid = pid; /* set $! */
+        sh.backgndpid = Some(pid); /* set $! */
         set_curjob(sh, ji, CUR_RUNNING);
         if sh.options.flag(crate::options::iflag) != 0 {
             let _ = writeln!(sh.io.stderr(), "[{}] {pid}", jobno(ji));
@@ -1229,7 +1228,6 @@ fn forkparent(
         let last = sh.jobs.tab[ji].ps.len() - 1;
         sh.jobs.tab[ji].ps[last].cmd = cmd;
     }
-    Ok(())
 }
 
 // [spec:dash:def:jobs.forkshell-fn]
@@ -1242,9 +1240,7 @@ pub fn forkshell(
     jp: Option<usize>,
     n: Option<&Node>,
     mode: c_int,
-) -> Result<c_int, Error> {
-    let pid: c_int;
-
+) -> Result<nsh_platform::ForkResult, Error> {
     /* TRACE(("forkshell(%%%d, %p, %d) called\n", jobno(jp), n, mode)); */
 
     crate::input::flush_input(sh);
@@ -1253,22 +1249,24 @@ pub fn forkshell(
         capture_shell_terminal_settings(sh)?;
     }
 
-    pid = match nsh_platform::fork_process() {
+    let fork = match nsh_platform::fork_process() {
         Ok(nsh_platform::ForkResult::Child) => {
             forkchild(sh, jp, n, mode);
-            0
+            nsh_platform::ForkResult::Child
         }
         Ok(nsh_platform::ForkResult::Parent(pid)) => {
-            forkparent(sh, jp, n, mode, pid)?;
-            pid
+            forkparent(sh, jp, n, mode, pid);
+            nsh_platform::ForkResult::Parent(pid)
         }
         Err(_) => {
-            forkparent(sh, jp, n, mode, -1)?;
-            unreachable!("forkparent returns an error for a failed fork")
+            if let Some(job) = jp {
+                freejob(sh, job);
+            }
+            return Err(sh.sh_error_value(b"Cannot fork"));
         }
     };
 
-    Ok(pid)
+    Ok(fork)
 }
 
 // [spec:dash:def:jobs.vforkexec-fn]
@@ -1288,24 +1286,25 @@ pub fn forkexec(
     idx: c_int,
 ) -> Result<usize, Error> {
     let jp: usize;
-    let pid: c_int;
-
     jp = makejob(sh, 1);
 
     if sh.jobs.tab[jp].jobctl != 0 {
         capture_shell_terminal_settings(sh)?;
     }
 
-    pid = match nsh_platform::fork_process() {
+    let pid = match nsh_platform::fork_process() {
         Ok(nsh_platform::ForkResult::Child) => {
             forkchild(sh, Some(jp), Some(n), FORK_FG);
             let outcome = crate::exec::shellexec(sh, argv, path, idx);
             crate::shellmain::exit_from_child(sh, outcome);
         }
         Ok(nsh_platform::ForkResult::Parent(pid)) => pid,
-        Err(_) => -1,
+        Err(_) => {
+            freejob(sh, jp);
+            return Err(sh.sh_error_value(b"Cannot fork"));
+        }
     };
-    forkparent(sh, Some(jp), Some(n), FORK_FG, pid)?;
+    forkparent(sh, Some(jp), Some(n), FORK_FG, pid);
 
     Ok(jp)
 }
@@ -1371,8 +1370,8 @@ pub fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c
                 None => {}
             }
         }
-        let root_pid = sh.root_pid;
-        xxtcsetpgrp(sh, root_pid)?;
+        let shell_group = ProcessGroupId::from_leader(sh.root_pid);
+        xxtcsetpgrp(sh, shell_group)?;
         if sh.jobs.tab[jp].state as c_int == JOBSTOPPED {
             if let Some(settings) = sh.jobs.shell_terminal_settings.take() {
                 let result = sh.jobs.ttyfd.as_ref().map(|fd| settings.apply(fd));
@@ -1412,6 +1411,13 @@ pub fn waitforjob(sh: &mut crate::context::Shell, jp: Option<usize>) -> Result<c
  * Wait for a process to terminate.
  */
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WaitProcess {
+    Reaped(ProcessId),
+    Interrupted,
+    Exhausted,
+}
+
 // [spec:dash:def:jobs.waitone-fn]
 // [spec:dash:sem:jobs.waitone-fn]
 // [spec:posix:req:jobctl.suspend-on-catchable-signal]
@@ -1421,21 +1427,19 @@ fn waitone(
     sh: &mut crate::context::Shell,
     block: c_int,
     jobp: Option<usize>,
-) -> Result<c_int, Error> {
-    let pid: c_int;
-    let mut status: c_int = 0;
+) -> Result<WaitProcess, Error> {
     let mut jp: Option<usize>;
     let mut thisjob: Option<usize> = None;
     let mut state: c_int = 0;
 
     INTOFF(sh);
     /* TRACE(("dowait(%d) called\n", block)); */
-    pid = waitproc(sh, block, &mut status)?;
+    let (waited, status) = waitproc(sh, block)?;
     /* TRACE(("wait returns pid %d, status=%d\n", pid, status)); */
     'out_lbl: {
-        if pid <= 0 {
+        let WaitProcess::Reaped(process) = waited else {
             break 'out_lbl;
-        }
+        };
 
         'gotjob: {
             jp = sh.jobs.curjob;
@@ -1453,7 +1457,7 @@ fn waitone(
                 let spend: usize = sh.jobs.tab[ji].ps.len();
                 let mut sp: usize = 0;
                 while sp < spend {
-                    if sh.jobs.tab[ji].ps[sp].pid == pid {
+                    if sh.jobs.tab[ji].ps[sp].pid == process {
                         /* TRACE(("Job %d: changing status of proc %d ...")); */
                         sh.jobs.tab[ji].ps[sp].status = status;
                         thisjob = Some(ji);
@@ -1531,7 +1535,7 @@ fn waitone(
             showjob(sh, Dest::Stderr, changed_job, 0);
         }
     }
-    Ok(pid)
+    Ok(waited)
 }
 
 // [spec:dash:def:jobs.dowait-fn]
@@ -1542,8 +1546,8 @@ pub(crate) fn dowait(
     jp: Option<usize>,
 ) -> Result<c_int, Error> {
     let gotchld: c_int = crate::siginbox::signals().child_pending() as c_int;
-    let mut rpid: c_int;
-    let mut pid: c_int;
+    let mut wait_completed: c_int;
+    let mut waited: WaitProcess;
     let mut block: c_int = block;
 
     if jp.map_or(false, |i| sh.jobs.tab[i].state as c_int != JOBRUNNING) {
@@ -1554,22 +1558,24 @@ pub(crate) fn dowait(
         return Ok(1);
     }
 
-    rpid = 1;
+    wait_completed = 1;
 
     loop {
-        pid = waitone(sh, block, jp)?;
-        rpid &= (pid != 0) as c_int;
+        waited = waitone(sh, block, jp)?;
+        wait_completed &= (waited != WaitProcess::Interrupted) as c_int;
 
         block &= !DOWAIT_WAITCMD_ALL;
-        if pid == 0 || jp.map_or(false, |i| sh.jobs.tab[i].state as c_int != JOBRUNNING) {
+        if waited == WaitProcess::Interrupted
+            || jp.map_or(false, |i| sh.jobs.tab[i].state as c_int != JOBRUNNING)
+        {
             block = DOWAIT_NONBLOCK;
         }
-        if !(pid >= 0) {
+        if waited == WaitProcess::Exhausted {
             break;
         }
     }
 
-    Ok(rpid)
+    Ok(wait_completed)
 }
 
 /*
@@ -1589,13 +1595,10 @@ pub(crate) fn dowait(
 
 // [spec:dash:def:jobs.waitproc-fn]
 // [spec:dash:sem:jobs.waitproc-fn]
-fn waitproc(
-    sh: &mut crate::context::Shell,
-    block: c_int,
-    status: &mut c_int,
-) -> Result<c_int, Error> {
+fn waitproc(sh: &mut crate::context::Shell, block: c_int) -> Result<(WaitProcess, c_int), Error> {
     let nonblocking = block != DOWAIT_BLOCK;
-    let mut err: c_int;
+    let mut status = 0;
+    let mut waited: WaitProcess;
 
     let signals = crate::siginbox::signals();
     loop {
@@ -1603,17 +1606,17 @@ fn waitproc(
         loop {
             match nsh_platform::wait_for_any_child(nonblocking, sh.jobs.jobctl != 0) {
                 Ok(Some((pid, child_status))) => {
-                    err = pid;
-                    *status = child_status;
+                    waited = WaitProcess::Reaped(pid);
+                    status = child_status;
                     break;
                 }
                 Ok(None) => {
-                    err = 0;
+                    waited = WaitProcess::Interrupted;
                     break;
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
                 Err(_) => {
-                    err = -1;
+                    waited = WaitProcess::Exhausted;
                     break;
                 }
             }
@@ -1625,11 +1628,11 @@ fn waitproc(
             }
         }
 
-        if err != 0 {
+        if waited != WaitProcess::Interrupted {
             break;
         }
-        err = -((block == 0) as c_int);
-        if err != 0 {
+        if block == DOWAIT_NONBLOCK {
+            waited = WaitProcess::Exhausted;
             break;
         }
 
@@ -1647,7 +1650,7 @@ fn waitproc(
         }
     }
 
-    Ok(err)
+    Ok((waited, status))
 }
 
 /*
@@ -1880,11 +1883,11 @@ pub(crate) fn showpipe(sh: &mut crate::context::Shell, jp: usize, dest: Dest) {
 fn xtcsetpgrp(
     sh: &mut crate::context::Shell,
     fd: &impl nsh_platform::AsDescriptor,
-    pgrp: i32,
+    group: ProcessGroupId,
 ) -> Result<(), Error> {
     let blocked = nsh_platform::BlockedSignals::all()
         .expect("blocking signals around terminal handoff failed");
-    let result = nsh_platform::set_foreground_process_group(fd, pgrp);
+    let result = nsh_platform::set_foreground_process_group(fd, group);
     drop(blocked);
 
     if let Err(error) = result {

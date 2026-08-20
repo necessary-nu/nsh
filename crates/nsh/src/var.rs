@@ -399,12 +399,12 @@ pub(crate) fn mkinit_init_from(sh: &mut Shell, env: EnvSource<'_>) -> Result<(),
 
     set_bytes(sh, BStr::new(b"IFS"), Some(defifs()), VTEXTFIXED)?;
     set_bytes(sh, BStr::new(b"OPTIND"), Some(BStr::new(b"1")), VTEXTFIXED)?;
+    let parent_pid = nsh_platform::parent_process_id()
+        .map_or_else(|| "0".to_owned(), |process| process.to_string());
     set_bytes(
         sh,
         BStr::new(b"PPID"),
-        Some(BStr::new(
-            nsh_platform::parent_process_id().to_string().as_bytes(),
-        )),
+        Some(BStr::new(parent_pid.as_bytes())),
         0,
     )?;
 

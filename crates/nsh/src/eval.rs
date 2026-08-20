@@ -812,7 +812,10 @@ fn evalsubshell(
             break 'nofork;
         }
         jp = crate::jobs::makejob(sh, 1);
-        if crate::jobs::forkshell(sh, Some(jp), Some(command.command.as_ref()), backgnd)? == 0 {
+        if matches!(
+            crate::jobs::forkshell(sh, Some(jp), Some(command.command.as_ref()), backgnd)?,
+            nsh_platform::ForkResult::Child
+        ) {
             flags |= EV_EXIT;
             if backgnd != 0 {
                 flags &= !EV_TESTED;
@@ -978,7 +981,10 @@ fn evalpipe(sh: &mut Shell, pipeline: &Pipeline, flags: c_int) -> Result<Flow, E
         } else {
             None
         };
-        if crate::jobs::forkshell(sh, Some(jp), Some(cmd), pipeline.background as c_int)? == 0 {
+        if matches!(
+            crate::jobs::forkshell(sh, Some(jp), Some(cmd), pipeline.background as c_int)?,
+            nsh_platform::ForkResult::Child
+        ) {
             INTON(sh);
             let write = pipe.take().map(|pipe| {
                 drop(pipe.read);
@@ -1028,7 +1034,6 @@ fn evalpipe(sh: &mut Shell, pipeline: &Pipeline, flags: c_int) -> Result<Flow, E
 // [spec:dash:sem:eval.evalbackcmd-fn]
 pub fn evalbackcmd(sh: &mut Shell, n: Option<&Node>, result: &mut backcmd) -> Result<(), Error> {
     let jp: usize;
-    let pid: c_int;
 
     result.fd = None;
     result.jp = None;
@@ -1039,8 +1044,10 @@ pub fn evalbackcmd(sh: &mut Shell, n: Option<&Node>, result: &mut backcmd) -> Re
 
         let pipe = crate::redir::sh_pipe(sh, false)?.0;
         jp = crate::jobs::makejob(sh, 1);
-        pid = crate::jobs::forkshell(sh, Some(jp), n, FORK_NOJOB)?;
-        if pid == 0 {
+        if matches!(
+            crate::jobs::forkshell(sh, Some(jp), n, FORK_NOJOB)?,
+            nsh_platform::ForkResult::Child
+        ) {
             FORCEINTON(sh);
             drop(pipe.read);
             let number = pipe.write.number();

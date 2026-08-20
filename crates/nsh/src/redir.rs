@@ -598,7 +598,10 @@ fn openhere(sh: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error
         return Ok(pip.read);
     }
 
-    if crate::jobs::forkshell(sh, None, None, crate::jobs::FORK_NOJOB)? == 0 {
+    if matches!(
+        crate::jobs::forkshell(sh, None, None, crate::jobs::FORK_NOJOB)?,
+        nsh_platform::ForkResult::Child
+    ) {
         drop(pip.read);
         nsh_platform::configure_here_document_writer_signals();
         crate::output::xwrite(&pip.write, p);

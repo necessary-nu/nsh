@@ -16,6 +16,20 @@ use crate::eval::Flow;
 use crate::jobs::{getjob, ps_pid};
 use crate::output::Dest;
 
+fn process_target(value: i32) -> nsh_platform::ProcessTarget {
+    match value {
+        1.. => nsh_platform::ProcessTarget::Process(
+            nsh_platform::ProcessId::new(value as u32).expect("a positive PID is nonzero"),
+        ),
+        0 => nsh_platform::ProcessTarget::CurrentProcessGroup,
+        -1 => nsh_platform::ProcessTarget::AllProcesses,
+        _ => nsh_platform::ProcessTarget::ProcessGroup(
+            nsh_platform::ProcessGroupId::new(value.unsigned_abs())
+                .expect("a negative process-group operand has nonzero magnitude"),
+        ),
+    }
+}
+
 // [spec:dash:def:jobs.killcmd-fn]
 // [spec:dash:sem:jobs.killcmd-fn]
 // [spec:posix:syn:builtin.kill.synopsis]
@@ -46,7 +60,6 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut signo: c_int = -1;
     let mut list: c_int = 0;
     let mut i: c_int;
-    let mut pid: i32;
     let mut jp: usize;
 
     if args.len() <= 1 {
@@ -128,23 +141,30 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     i = 0;
     for spec in operands {
-        if spec.first() == Some(&b'%') {
+        let target = if spec.first() == Some(&b'%') {
             // [spec:nsh:req:compat.smoosh.interactive-job-prompt]
             // A `%job` names a process group, not the first process that
             // happened to be recorded for a background command. Requiring
             // a job-control job here prevents the latter from silently
             // becoming the former while monitor mode is disabled.
             jp = getjob(sh, Some(spec), 1)?;
-            pid = ps_pid(sh, jp, 0);
-            pid = -pid;
+            let Some(leader) = ps_pid(sh, jp, 0) else {
+                sh.sh_warnx(b"No such process\n");
+                i = 1;
+                continue;
+            };
+            nsh_platform::ProcessTarget::ProcessGroup(nsh_platform::ProcessGroupId::from_leader(
+                leader,
+            ))
         } else {
-            pid = if spec.first() == Some(&b'-') {
+            let value = if spec.first() == Some(&b'-') {
                 -crate::mystring::number(sh, BStr::new(&spec[1..]))?
             } else {
                 crate::mystring::number(sh, spec)?
             };
-        }
-        if let Err(error) = nsh_platform::send_signal(pid, signo) {
+            process_target(value)
+        };
+        if let Err(error) = nsh_platform::send_signal(target, signo) {
             let mut message = sh.locale.error_message(&error).into_bytes();
             message.push(b'\n');
             sh.sh_warnx(&message);

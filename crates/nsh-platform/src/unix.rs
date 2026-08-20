@@ -543,11 +543,6 @@ pub fn process_environment() -> Vec<(OsString, OsString)> {
     std::env::vars_os().collect()
 }
 
-#[inline]
-pub fn process_id() -> u32 {
-    std::process::id()
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PathErrorKind {
     NotFound,
@@ -703,24 +698,27 @@ pub fn continue_signal() -> i32 {
     rustix::process::Signal::CONT.as_raw()
 }
 
-pub fn send_signal(pid: i32, signal: i32) -> std::io::Result<()> {
-    // SAFETY: `kill` consumes only integer process and signal identifiers.
-    if unsafe { libc::kill(pid, signal) } < 0 {
+fn raw_process_id(process: ProcessId) -> std::io::Result<i32> {
+    i32::try_from(process.get()).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))
+}
+
+fn raw_process_group(group: ProcessGroupId) -> std::io::Result<i32> {
+    i32::try_from(group.get()).map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))
+}
+
+pub fn send_signal(target: ProcessTarget, signal: i32) -> std::io::Result<()> {
+    let target = match target {
+        ProcessTarget::Process(process) => raw_process_id(process)?,
+        ProcessTarget::CurrentProcessGroup => 0,
+        ProcessTarget::ProcessGroup(group) => -raw_process_group(group)?,
+        ProcessTarget::AllProcesses => -1,
+    };
+    // SAFETY: `kill` consumes only the scalar target encoding assembled from
+    // validated identities above and a signal number.
+    if unsafe { libc::kill(target, signal) } < 0 {
         Err(std::io::Error::last_os_error())
     } else {
         Ok(())
-    }
-}
-
-pub fn send_signal_to_process_group(group: i32, signal: i32) -> std::io::Result<()> {
-    let signal = rustix::process::Signal::from_named_raw(signal)
-        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
-    if group == 0 {
-        rustix::process::kill_current_process_group(signal).map_err(std::io::Error::from)
-    } else {
-        let group = rustix::process::Pid::from_raw(group)
-            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
-        rustix::process::kill_process_group(group, signal).map_err(std::io::Error::from)
     }
 }
 
@@ -730,9 +728,9 @@ pub fn raise_signal(signal: i32) -> std::io::Result<()> {
     rustix::process::kill_process(rustix::process::getpid(), signal).map_err(std::io::Error::from)
 }
 
-pub fn send_continue_to_process_group(process_group: i32) -> std::io::Result<()> {
-    let process_group = rustix::process::Pid::from_raw(process_group)
-        .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+pub fn send_continue_to_process_group(process_group: ProcessGroupId) -> std::io::Result<()> {
+    let process_group = rustix::process::Pid::from_raw(raw_process_group(process_group)?)
+        .expect("a validated positive process group fits pid_t");
     rustix::process::kill_process_group(process_group, rustix::process::Signal::CONT)
         .map_err(std::io::Error::from)
 }
@@ -1481,19 +1479,14 @@ pub fn configure_here_document_writer_signals() {
 }
 
 #[inline]
-pub fn parent_process_id() -> i32 {
-    rustix::process::Pid::as_raw(rustix::process::getppid())
+pub fn parent_process_id() -> Option<ProcessId> {
+    ProcessId::new(rustix::process::Pid::as_raw(rustix::process::getppid()) as u32)
 }
 
 #[inline]
-pub fn current_process_id() -> i32 {
-    rustix::process::getpid().as_raw_pid()
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ForkResult {
-    Child,
-    Parent(i32),
+pub fn current_process_id() -> ProcessId {
+    ProcessId::new(rustix::process::getpid().as_raw_pid() as u32)
+        .expect("the current process has a positive identity")
 }
 
 /// Fork the calling process. The child is expected to terminate or replace
@@ -1507,19 +1500,22 @@ pub fn fork_process() -> std::io::Result<ForkResult> {
     } else if pid == 0 {
         Ok(ForkResult::Child)
     } else {
-        Ok(ForkResult::Parent(pid))
+        Ok(ForkResult::Parent(
+            ProcessId::new(pid as u32).expect("fork returned a positive child identity"),
+        ))
     }
 }
 
-pub fn current_process_group() -> i32 {
+pub fn current_process_group() -> Option<ProcessGroupId> {
     // SAFETY: `getpgrp` takes no arguments and cannot fail. Keep the raw
     // result because a process group inherited from outside a fresh PID
     // namespace is reported as zero until the shell establishes its own;
     // PID newtypes deliberately cannot represent that observable state.
-    unsafe { libc::getpgrp() }
+    let group = unsafe { libc::getpgrp() };
+    u32::try_from(group).ok().and_then(ProcessGroupId::new)
 }
 
-pub fn foreground_process_group(fd: &impl AsDescriptor) -> std::io::Result<i32> {
+pub fn foreground_process_group(fd: &impl AsDescriptor) -> std::io::Result<Option<ProcessGroupId>> {
     // SAFETY: the kernel validates the descriptor and returns only an
     // integer process-group id. As above, zero is a meaningful transient
     // result in a PID namespace and must not be rejected by a PID newtype.
@@ -1527,28 +1523,27 @@ pub fn foreground_process_group(fd: &impl AsDescriptor) -> std::io::Result<i32> 
     if group < 0 {
         Err(std::io::Error::last_os_error())
     } else {
-        Ok(group)
+        Ok(u32::try_from(group).ok().and_then(ProcessGroupId::new))
     }
 }
 
-pub fn set_process_group(pid: i32, group: i32) -> std::io::Result<()> {
-    if pid < 0 || group < 0 {
-        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
-    }
-    rustix::process::setpgid(
-        rustix::process::Pid::from_raw(pid),
-        rustix::process::Pid::from_raw(group),
-    )
-    .map_err(std::io::Error::from)
+pub fn set_process_group(process: ProcessSelector, group: ProcessGroupId) -> std::io::Result<()> {
+    let process = match process {
+        ProcessSelector::CurrentProcess => None,
+        ProcessSelector::Process(process) => {
+            Some(rustix::process::Pid::from_raw(raw_process_id(process)?).unwrap())
+        }
+    };
+    let group = rustix::process::Pid::from_raw(raw_process_group(group)?);
+    rustix::process::setpgid(process, group).map_err(std::io::Error::from)
 }
 
-pub fn set_foreground_process_group(fd: &impl AsDescriptor, group: i32) -> std::io::Result<()> {
-    if group < 0 {
-        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
-    }
-    // SAFETY: both arguments are scalar values validated above. Passing
-    // group zero preserves the kernel's ESRCH result during teardown in a
-    // fresh PID namespace, matching the underlying terminal API exactly.
+pub fn set_foreground_process_group(
+    fd: &impl AsDescriptor,
+    group: ProcessGroupId,
+) -> std::io::Result<()> {
+    let group = raw_process_group(group)?;
+    // SAFETY: both arguments are scalar values validated above.
     if unsafe { libc::tcsetpgrp(fd.as_platform_descriptor().0.as_raw_fd(), group) } < 0 {
         Err(std::io::Error::last_os_error())
     } else {
@@ -1586,7 +1581,7 @@ pub fn wait_status_core_dumped(status: i32) -> bool {
 pub fn wait_for_any_child(
     nonblocking: bool,
     report_stopped: bool,
-) -> std::io::Result<Option<(i32, i32)>> {
+) -> std::io::Result<Option<(ProcessId, i32)>> {
     let mut options = rustix::process::WaitOptions::empty();
     if nonblocking {
         options.insert(rustix::process::WaitOptions::NOHANG);
@@ -1595,7 +1590,15 @@ pub fn wait_for_any_child(
         options.insert(rustix::process::WaitOptions::UNTRACED);
     }
     rustix::process::wait(options)
-        .map(|result| result.map(|(pid, status)| (pid.as_raw_pid(), status.as_raw())))
+        .map(|result| {
+            result.map(|(pid, status)| {
+                (
+                    ProcessId::new(pid.as_raw_pid() as u32)
+                        .expect("wait returned a positive child identity"),
+                    status.as_raw(),
+                )
+            })
+        })
         .map_err(std::io::Error::from)
 }
 
@@ -1609,8 +1612,8 @@ pub fn run_in_child(body: impl FnOnce()) -> std::io::Result<i32> {
             exit_immediately(0);
         }
         ForkResult::Parent(pid) => {
-            let pid = rustix::process::Pid::from_raw(pid)
-                .expect("fork returned a positive child process id");
+            let pid = rustix::process::Pid::from_raw(raw_process_id(pid)?)
+                .expect("a forked child identity fits pid_t");
             let status = loop {
                 match rustix::process::waitpid(Some(pid), rustix::process::WaitOptions::empty()) {
                     Ok(Some((_, status))) => break status,

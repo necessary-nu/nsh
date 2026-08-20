@@ -240,7 +240,7 @@ pub(crate) fn run(request: &Request<'_>) -> Result<Output> {
         .stderr(Stdio::piped());
     let started = Instant::now();
     let mut child = command.spawn()?;
-    let child_pid = i32::try_from(child.id()).map_err(|_| "child pid does not fit i32")?;
+    let child_pid = nsh_platform::ProcessId::new(child.id()).ok_or("child returned PID zero")?;
     let mut input = child.stdin.take().ok_or("child stdin was not piped")?;
     let stdout = child.stdout.take().ok_or("child stdout was not piped")?;
     let stderr = child.stderr.take().ok_or("child stderr was not piped")?;
@@ -257,8 +257,11 @@ pub(crate) fn run(request: &Request<'_>) -> Result<Output> {
         }
         if Instant::now() >= deadline {
             timed_out = true;
-            let signalled =
-                nsh_platform::send_signal(child_pid, nsh_platform::termination_signal()).is_ok();
+            let signalled = nsh_platform::send_signal(
+                nsh_platform::ProcessTarget::Process(child_pid),
+                nsh_platform::termination_signal(),
+            )
+            .is_ok();
             if !signalled {
                 let _ = child.kill();
             }

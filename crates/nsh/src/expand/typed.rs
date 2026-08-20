@@ -569,13 +569,10 @@ fn parameter_value(sh: &mut Shell, name: &BStr) -> Value {
         Some(b'#') if name.len() == 1 => {
             Value::Scalar(BString::from(sh.options.shellparam.nparam.to_string()))
         }
-        Some(b'!') if name.len() == 1 => {
-            if sh.backgndpid == 0 {
-                Value::Unset
-            } else {
-                Value::Scalar(BString::from(sh.backgndpid.to_string()))
-            }
-        }
+        Some(b'!') if name.len() == 1 => match sh.backgndpid {
+            Some(pid) => Value::Scalar(BString::from(pid.to_string())),
+            None => Value::Unset,
+        },
         Some(b'-') if name.len() == 1 => {
             let mut flags = BString::new(Vec::new());
             for index in (0..crate::options::NOPTS).rev() {

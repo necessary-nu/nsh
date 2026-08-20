@@ -161,3 +161,70 @@ fn filesystem_apis_keep_native_strings() {
         violations.join("\n"),
     );
 }
+
+// [spec:nsh:def:idiom.process-identity/test]
+#[test]
+fn process_identities_are_typed() {
+    assert!(nsh_platform::ProcessId::new(0).is_none());
+    assert!(nsh_platform::ProcessGroupId::new(0).is_none());
+
+    let process = nsh_platform::current_process_id();
+    let group = nsh_platform::ProcessGroupId::from_leader(process);
+    assert_eq!(process.get(), group.get());
+
+    let targets = [
+        nsh_platform::ProcessTarget::Process(process),
+        nsh_platform::ProcessTarget::CurrentProcessGroup,
+        nsh_platform::ProcessTarget::ProcessGroup(group),
+        nsh_platform::ProcessTarget::AllProcesses,
+    ];
+    assert_eq!(targets.len(), 4);
+
+    let _: fn(nsh_platform::ProcessTarget, i32) -> std::io::Result<()> = nsh_platform::send_signal;
+    let _: fn() -> nsh_platform::ProcessId = nsh_platform::current_process_id;
+    let _: fn() -> Option<nsh_platform::ProcessId> = nsh_platform::parent_process_id;
+    let _: fn() -> Option<nsh_platform::ProcessGroupId> = nsh_platform::current_process_group;
+    let _: fn(bool, bool) -> std::io::Result<Option<(nsh_platform::ProcessId, i32)>> =
+        nsh_platform::wait_for_any_child;
+    let _: fn(nsh_platform::ProcessSelector, nsh_platform::ProcessGroupId) -> std::io::Result<()> =
+        nsh_platform::set_process_group;
+
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for source in [
+        "crates/nsh-platform/src/unix.rs",
+        "crates/nsh-platform/src/windows.rs",
+    ] {
+        let text = std::fs::read_to_string(workspace.join(source)).unwrap();
+        for fragment in [
+            "pub fn send_signal(pid: i32",
+            "pub fn set_process_group(pid: i32",
+            "pub fn set_foreground_process_group(fd: &impl AsDescriptor, group: i32",
+            "pub fn current_process_id() -> i32",
+            "pub fn wait_for_any_child(\n    nonblocking: bool,\n    report_stopped: bool,\n) -> std::io::Result<Option<(i32",
+        ] {
+            assert!(
+                !text.contains(fragment),
+                "{source} exposes raw process API fragment {fragment:?}",
+            );
+        }
+    }
+
+    let mut violations = Vec::new();
+    inspect_tree(
+        &workspace.join("crates/nsh/src"),
+        &[
+            "pid: i32",
+            "pid: c_int",
+            "pgrp: i32",
+            "pgrp: c_int",
+            "backgndpid: i32",
+            "root_pid: i32",
+        ],
+        &mut violations,
+    );
+    assert!(
+        violations.is_empty(),
+        "core process identities are raw integers:\n{}",
+        violations.join("\n"),
+    );
+}

@@ -11,7 +11,7 @@ use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
 use std::os::windows::fs::OpenOptionsExt as _;
 use std::os::windows::io::{AsHandle, AsRawHandle, BorrowedHandle, FromRawHandle, OwnedHandle};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
@@ -50,6 +50,8 @@ use windows_sys::Win32::System::Threading::{
     STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW, TerminateProcess,
     UpdateProcThreadAttribute, WaitForSingleObject,
 };
+
+use crate::{ForkResult, ProcessGroupId, ProcessId, ProcessSelector, ProcessTarget};
 
 #[path = "signal_names.rs"]
 mod signal_names;
@@ -221,10 +223,6 @@ fn with_shell_path_separators(value: OsString) -> OsString {
             })
             .collect::<Vec<_>>(),
     )
-}
-
-pub fn process_id() -> u32 {
-    std::process::id()
 }
 
 static DEFAULT_SEARCH_PATH: LazyLock<OsString> = LazyLock::new(build_default_search_path);
@@ -2556,8 +2554,20 @@ pub fn unblock_all_signals() -> std::io::Result<()> {
 
 const SIGNAL_EXIT_BASE: u32 = 0xe000_0000;
 
-pub fn send_signal(pid: i32, signal: i32) -> std::io::Result<()> {
-    if pid <= 0 || signal < 0 {
+pub fn send_signal(target: ProcessTarget, signal: i32) -> std::io::Result<()> {
+    match target {
+        ProcessTarget::Process(process) => send_signal_to_process(process, signal),
+        ProcessTarget::CurrentProcessGroup => raise_signal(signal),
+        ProcessTarget::ProcessGroup(group) => send_signal_to_process(
+            ProcessId::new(group.get()).expect("a process group leader is a process identity"),
+            signal,
+        ),
+        ProcessTarget::AllProcesses => Err(std::io::Error::from(std::io::ErrorKind::InvalidInput)),
+    }
+}
+
+fn send_signal_to_process(pid: ProcessId, signal: i32) -> std::io::Result<()> {
+    if signal < 0 {
         return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
     }
     if signal == 0 {
@@ -2591,7 +2601,7 @@ pub fn send_signal(pid: i32, signal: i32) -> std::io::Result<()> {
         OpenProcess(
             PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE,
             0,
-            pid as u32,
+            pid.get(),
         )
     };
     if raw.is_null() {
@@ -2608,23 +2618,15 @@ pub fn send_signal(pid: i32, signal: i32) -> std::io::Result<()> {
     }
 }
 
-fn process_exists(pid: i32) -> std::io::Result<()> {
+fn process_exists(pid: ProcessId) -> std::io::Result<()> {
     // SAFETY: the requested right is query-only and PID is positive.
-    let raw = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32) };
+    let raw = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid.get()) };
     if raw.is_null() {
         Err(std::io::Error::last_os_error())
     } else {
         // SAFETY: this is the one owned handle returned above.
         unsafe { CloseHandle(raw) };
         Ok(())
-    }
-}
-
-pub fn send_signal_to_process_group(group: i32, signal: i32) -> std::io::Result<()> {
-    if group == 0 {
-        raise_signal(signal)
-    } else {
-        send_signal(group, signal)
     }
 }
 
@@ -2639,7 +2641,7 @@ pub fn raise_signal(signal: i32) -> std::io::Result<()> {
     }
 }
 
-pub fn send_continue_to_process_group(_process_group: i32) -> std::io::Result<()> {
+pub fn send_continue_to_process_group(_process_group: ProcessGroupId) -> std::io::Result<()> {
     Ok(())
 }
 
@@ -2758,7 +2760,7 @@ struct ChildRecord {
     owner: std::thread::ThreadId,
 }
 
-static CHILDREN: LazyLock<Mutex<HashMap<i32, ChildRecord>>> =
+static CHILDREN: LazyLock<Mutex<HashMap<ProcessId, ChildRecord>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static PROCESS_CLONE_LOCK: Mutex<()> = Mutex::new(());
 
@@ -2833,12 +2835,6 @@ fn child_job(process: HANDLE) -> Option<OwnedHandle> {
     } else {
         Some(job)
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ForkResult {
-    Child,
-    Parent(i32),
 }
 
 /// Clone the current process using Windows' native copy-on-write user-process
@@ -2926,12 +2922,15 @@ pub fn fork_process() -> std::io::Result<ForkResult> {
         return Err(std::io::Error::from_raw_os_error(code as i32));
     }
 
-    let pid = information.ClientId.UniqueProcess as usize as i32;
-    if pid <= 0 || information.Process.is_null() {
+    let pid = u32::try_from(information.ClientId.UniqueProcess as usize)
+        .ok()
+        .and_then(ProcessId::new);
+    if pid.is_none() || information.Process.is_null() {
         return Err(std::io::Error::other(
             "RtlCloneUserProcess returned no child process",
         ));
     }
+    let pid = pid.expect("the child process identity was validated above");
     if information.Thread.is_null() {
         // SAFETY: the successful clone still returned one process handle.
         unsafe { CloseHandle(information.Process.cast()) };
@@ -3005,7 +3004,7 @@ pub fn fork_process() -> std::io::Result<ForkResult> {
     Ok(ForkResult::Parent(pid))
 }
 
-pub fn parent_process_id() -> i32 {
+pub fn parent_process_id() -> Option<ProcessId> {
     use ntapi::ntpsapi::{
         NtQueryInformationProcess, PROCESS_BASIC_INFORMATION, ProcessBasicInformation,
     };
@@ -3024,47 +3023,48 @@ pub fn parent_process_id() -> i32 {
         )
     };
     if status < 0 {
-        0
+        None
     } else {
-        information.InheritedFromUniqueProcessId as usize as i32
+        u32::try_from(information.InheritedFromUniqueProcessId as usize)
+            .ok()
+            .and_then(ProcessId::new)
     }
 }
 
-pub fn current_process_id() -> i32 {
+pub fn current_process_id() -> ProcessId {
     // SAFETY: this function takes no arguments and cannot fail.
-    unsafe { GetCurrentProcessId() as i32 }
+    ProcessId::new(unsafe { GetCurrentProcessId() })
+        .expect("the current process has a positive identity")
 }
 
-static FOREGROUND_PROCESS_GROUP: AtomicI32 = AtomicI32::new(0);
+static FOREGROUND_PROCESS_GROUP: AtomicU32 = AtomicU32::new(0);
 
-pub fn current_process_group() -> i32 {
-    current_process_id()
+pub fn current_process_group() -> Option<ProcessGroupId> {
+    Some(ProcessGroupId::from_leader(current_process_id()))
 }
 
-pub fn foreground_process_group(_fd: &impl AsDescriptor) -> std::io::Result<i32> {
+pub fn foreground_process_group(
+    _fd: &impl AsDescriptor,
+) -> std::io::Result<Option<ProcessGroupId>> {
     let group = FOREGROUND_PROCESS_GROUP.load(AtomicOrdering::Relaxed);
-    Ok(if group == 0 {
-        current_process_id()
+    Ok(if let Some(group) = ProcessGroupId::new(group) {
+        Some(group)
     } else {
-        group
+        current_process_group()
     })
 }
 
-pub fn set_process_group(pid: i32, group: i32) -> std::io::Result<()> {
-    if pid < 0 || group < 0 {
-        Err(std::io::Error::from(std::io::ErrorKind::InvalidInput))
-    } else {
-        // Every cloned child already owns a Job Object. Its PID is the public
-        // process-group key used by the shell's job table.
-        Ok(())
-    }
+pub fn set_process_group(_process: ProcessSelector, _group: ProcessGroupId) -> std::io::Result<()> {
+    // Every cloned child already owns a Job Object. Its PID is the public
+    // process-group key used by the shell's job table.
+    Ok(())
 }
 
-pub fn set_foreground_process_group(_fd: &impl AsDescriptor, group: i32) -> std::io::Result<()> {
-    if group < 0 {
-        return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
-    }
-    FOREGROUND_PROCESS_GROUP.store(group, AtomicOrdering::Relaxed);
+pub fn set_foreground_process_group(
+    _fd: &impl AsDescriptor,
+    group: ProcessGroupId,
+) -> std::io::Result<()> {
+    FOREGROUND_PROCESS_GROUP.store(group.get(), AtomicOrdering::Relaxed);
     Ok(())
 }
 
@@ -3113,7 +3113,7 @@ fn accumulate_child_times(process: HANDLE) {
     }
 }
 
-fn reap_ready_child() -> std::io::Result<Option<(i32, i32)>> {
+fn reap_ready_child() -> std::io::Result<Option<(ProcessId, i32)>> {
     let owner = std::thread::current().id();
     let _clone_guard = PROCESS_CLONE_LOCK
         .lock()
@@ -3153,7 +3153,7 @@ fn reap_ready_child() -> std::io::Result<Option<(i32, i32)>> {
 pub fn wait_for_any_child(
     nonblocking: bool,
     _report_stopped: bool,
-) -> std::io::Result<Option<(i32, i32)>> {
+) -> std::io::Result<Option<(ProcessId, i32)>> {
     let owner = std::thread::current().id();
     loop {
         if let Some(child) = reap_ready_child()? {

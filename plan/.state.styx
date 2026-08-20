@@ -5090,4 +5090,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.filesystem-account-bytes}
     )}
+    {id type-platform-process-api, covered_rules (
+        idiom.process-identity
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.process-identity}
+    )}
 )
