@@ -115,10 +115,12 @@ pub(crate) struct OptionSet(pub(super) u32);
 impl OptionSet {
     pub(crate) const EMPTY: Self = Self(0);
 
+    #[cfg(test)]
     pub(crate) const fn contains(self, option: ShellOption) -> bool {
         self.0 & option.mask() != 0
     }
 
+    #[cfg(test)]
     pub(crate) fn set(&mut self, option: ShellOption, enabled: bool) {
         if enabled {
             self.0 |= option.mask();

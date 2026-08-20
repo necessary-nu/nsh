@@ -66,13 +66,15 @@
 //! notice.
 
 #![deny(missing_docs)]
+// [spec:nsh:req:idiom.strict-lints]
 #![deny(unsafe_code)]
-#![allow(dead_code)]
-#![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
-#![allow(non_upper_case_globals)]
-#![allow(unused_variables)]
-#![allow(clippy::all)]
+#![deny(dead_code)]
+#![deny(non_camel_case_types)]
+#![deny(non_snake_case)]
+#![deny(non_upper_case_globals)]
+#![deny(unused_variables)]
+#![deny(unused_must_use)]
+#![deny(clippy::correctness)]
 
 // ---- the public API --------------------------------------------------
 //

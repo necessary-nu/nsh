@@ -109,7 +109,7 @@ impl<'a> Operands<'a> {
     /// One argument, or the empty string once they are exhausted.
     // [spec:dash:sem:printf.getstr-fn]
     fn next_string(&mut self) -> &'a [u8] {
-        self.next_word().map_or(&[][..], |word| &word[..])
+        self.next_word().map_or(&[][..], |word| word)
     }
 
     /// One argument as an integer, or 0 once they are exhausted.
@@ -121,7 +121,7 @@ impl<'a> Operands<'a> {
         let Some(word) = self.next_word() else {
             return 0;
         };
-        let bytes = &word[..];
+        let bytes = word;
 
         /* The POSIX rule that lets `printf %d "'A"` print 65: an
          * argument that opens with a quote is the character after it,
@@ -142,7 +142,7 @@ impl<'a> Operands<'a> {
         let Some(word) = self.next_word() else {
             return 0.0;
         };
-        let bytes = &word[..];
+        let bytes = word;
 
         if let Some(b'"' | b'\'') = bytes.first() {
             return f64::from(bytes.get(1).copied().unwrap_or(0));
@@ -771,7 +771,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 
     // out:
-    Ok(Flow::Done((operands.status).into()))
+    Ok(Flow::Done(operands.status))
 }
 
 #[cfg(test)]

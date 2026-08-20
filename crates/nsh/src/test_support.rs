@@ -32,20 +32,3 @@ pub fn lock() -> MutexGuard<'static, ()> {
         Err(poisoned) => poisoned.into_inner(),
     }
 }
-
-/// Run `body` in a forked child and return the child's exit status.
-///
-/// Some ported functions end in `exit()` -- every `main`, and
-/// `trap::exitshell` -- so calling them in-process would take the test
-/// runner with them. Forking is the only way to observe what they do and
-/// still have a test report afterwards. Anything the child writes to a
-/// file is visible to the parent, which is how the generator tests check
-/// their output.
-///
-/// Takes [`lock`] internally: forking a process whose other threads may
-/// hold locks is only safe if nothing else is running, and cargo runs
-/// tests on several threads by default.
-pub fn forked(body: impl FnOnce()) -> i32 {
-    let _g = lock();
-    nsh_platform::run_in_child(body).expect("forked test process failed")
-}

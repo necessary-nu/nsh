@@ -192,7 +192,9 @@ impl SignalSink {
 /// `jobs::xtcsetpgrp` brackets `tcsetpgrp` the same way for the same
 /// reason; this one restores the saved mask rather than clearing, so it
 /// composes with a caller that had signals blocked already.
-pub(crate) struct SignalsBlocked(nsh_platform::BlockedSignals);
+pub(crate) struct SignalsBlocked {
+    _guard: nsh_platform::BlockedSignals,
+}
 
 impl SignalsBlocked {
     /// Block everything until the guard is dropped.
@@ -207,9 +209,9 @@ impl SignalsBlocked {
     /// a per-write guard makes each half atomic while leaving the shell
     /// observably untrapped across the pair.
     pub(crate) fn new() -> Self {
-        SignalsBlocked(
-            nsh_platform::BlockedSignals::all()
+        SignalsBlocked {
+            _guard: nsh_platform::BlockedSignals::all()
                 .expect("blocking signals for an atomic trap update failed"),
-        )
+        }
     }
 }

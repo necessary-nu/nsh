@@ -80,7 +80,8 @@ pub(crate) struct SharedDescriptor(Arc<Descriptor>);
 impl SharedDescriptor {
     /// Move an owned descriptor into the shell's hidden backing range.
     pub(crate) fn from_owned(descriptor: Descriptor) -> std::io::Result<Self> {
-        let descriptor = nsh_platform::move_fd_cloexec(descriptor, LogicalDescriptor::COUNT as i32)?;
+        let descriptor =
+            nsh_platform::move_fd_cloexec(descriptor, LogicalDescriptor::COUNT as i32)?;
         Ok(Self(Arc::new(descriptor)))
     }
 }
@@ -120,6 +121,7 @@ impl DescriptorSlot {
         std::mem::replace(&mut *self.lock(), value)
     }
 
+    #[cfg(test)]
     pub(crate) fn is_open(&self) -> bool {
         self.lock().is_some()
     }
@@ -182,6 +184,7 @@ impl DescriptorTable {
         Ok(self.replace(target, Some(SharedDescriptor::from_owned(owned)?)))
     }
 
+    #[cfg(test)]
     pub(crate) fn is_open(&self, descriptor: LogicalDescriptor) -> bool {
         self.slot(descriptor).is_open()
     }

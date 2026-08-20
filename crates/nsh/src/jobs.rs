@@ -259,7 +259,7 @@ fn acquire_control_terminal(
             .descriptors
             .get(*candidate)
             .as_ref()
-            .is_some_and(|descriptor| nsh_platform::is_terminal(descriptor))
+            .is_some_and(nsh_platform::is_terminal)
     });
     match candidate {
         Some(candidate) => crate::redirection::copy_slot_above(shell, candidate),
@@ -459,9 +459,7 @@ pub(crate) fn write_job(
     job_id: JobId,
     mode: JobDisplay,
 ) -> Result<(), Error> {
-    let process_count: usize;
     let mut column: usize;
-    let indent: usize;
     let mut summary = Vec::new();
 
     if matches!(mode, JobDisplay::ProcessGroup) {
@@ -478,7 +476,7 @@ pub(crate) fn write_job(
     let heading = format!("[{}]   ", job_number(job_id));
     summary.extend_from_slice(heading.as_bytes());
     column = summary.len();
-    indent = column;
+    let indent = column;
 
     if Some(job_id) == shell.jobs.current() {
         summary[column - 2] = b'+';
@@ -492,7 +490,7 @@ pub(crate) fn write_job(
         column = summary.len();
     }
 
-    process_count = shell.jobs[job_id].processes.len();
+    let process_count = shell.jobs[job_id].processes.len();
 
     if shell.jobs[job_id].is_running() {
         /* scopy("Running", s + col) */
@@ -720,11 +718,10 @@ pub(crate) fn resolve_job(
 // [spec:posix:sem:cmd.async-job-control]
 // [spec:posix:req:cmd.async-known-pid-retention]
 pub fn create_job(shell: &mut crate::context::Shell, process_capacity: usize) -> JobId {
-    let job_id: JobId;
     let mut index: usize;
 
     index = 0;
-    job_id = loop {
+    let job_id = loop {
         if index >= shell.jobs.slots.len() {
             break reserve_job_slot(&mut shell.jobs);
         }
@@ -812,11 +809,9 @@ fn initialize_child_process(
     node: Option<&Node>,
     mode: ForkMode,
 ) {
-    let parent_shell_level: usize;
-
     nsh_platform::reset_coverage_counters();
 
-    parent_shell_level = shell.shell_level;
+    let parent_shell_level = shell.shell_level;
     shell.shell_level += 1;
 
     shell.prepare_fork_child(if mode == ForkMode::WithoutJob {
@@ -834,15 +829,13 @@ fn initialize_child_process(
         && parent_shell_level == 0
         && job_id.is_some_and(|index| shell.jobs[index].job_control);
     if controls_process_group {
-        let process_group: ProcessGroupId;
         let active_job: JobId = job_id.unwrap();
 
-        if shell.jobs[active_job].processes.is_empty() {
-            process_group = ProcessGroupId::from_leader(nsh_platform::current_process_id());
+        let process_group = if shell.jobs[active_job].processes.is_empty() {
+            ProcessGroupId::from_leader(nsh_platform::current_process_id())
         } else {
-            process_group =
-                ProcessGroupId::from_leader(shell.jobs[active_job].processes[0].process_id);
-        }
+            ProcessGroupId::from_leader(shell.jobs[active_job].processes[0].process_id)
+        };
         /* This can fail because we are doing it in the parent also */
         if nsh_platform::set_process_group(ProcessSelector::CurrentProcess, process_group.into())
             .is_err()
@@ -861,7 +854,7 @@ fn initialize_child_process(
     } else if mode == ForkMode::Background {
         crate::trap::ignore_signal_in_child(shell, nsh_platform::interrupt_signal().into());
         crate::trap::ignore_signal_in_child(shell, nsh_platform::quit_signal().into());
-        if job_id.map_or(false, |index| shell.jobs[index].processes.is_empty()) {
+        if job_id.is_some_and(|index| shell.jobs[index].processes.is_empty()) {
             /* The C closes descriptor 0 and reopens /dev/null, relying on
              * `open` returning the lowest free descriptor to land back on
              * 0. That only works when the shell's stdin *is* 0, so put it
@@ -925,14 +918,11 @@ fn record_forked_child(
         return Ok(());
     };
     if mode != ForkMode::WithoutJob && shell.jobs[active_job].job_control {
-        let process_group: ProcessGroupId;
-
-        if shell.jobs[active_job].processes.is_empty() {
-            process_group = ProcessGroupId::from_leader(process_id);
+        let process_group = if shell.jobs[active_job].processes.is_empty() {
+            ProcessGroupId::from_leader(process_id)
         } else {
-            process_group =
-                ProcessGroupId::from_leader(shell.jobs[active_job].processes[0].process_id);
-        }
+            ProcessGroupId::from_leader(shell.jobs[active_job].processes[0].process_id)
+        };
         /* This can fail because we are doing it in the child also */
         if nsh_platform::set_process_group(
             ProcessSelector::Process(process_id),
@@ -1018,8 +1008,7 @@ pub fn fork_and_execute(
     path: &BStr,
     path_index: Option<usize>,
 ) -> Result<JobId, Error> {
-    let job_id: JobId;
-    job_id = create_job(shell, 1);
+    let job_id = create_job(shell, 1);
 
     if shell.jobs[job_id].job_control {
         capture_shell_terminal_settings(shell)?;
@@ -1079,7 +1068,6 @@ pub fn wait_for_job(
     shell: &mut crate::context::Shell,
     job_id: Option<JobId>,
 ) -> Result<crate::status::ExitStatus, Error> {
-    let st: crate::status::ExitStatus;
     let mut terminal_error: Option<(&'static [u8], std::io::Error)> = None;
 
     reap_children(
@@ -1095,7 +1083,7 @@ pub fn wait_for_job(
         return Ok(shell.status);
     };
 
-    st = job_exit_status(shell, job_id);
+    let status = job_exit_status(shell, job_id);
     if shell.jobs[job_id].job_control {
         if shell.jobs[job_id].is_stopped() {
             let result = shell
@@ -1154,7 +1142,7 @@ pub fn wait_for_job(
     if let Some((operation, error)) = terminal_error {
         return Err(terminal_settings_error(shell, operation, error));
     }
-    Ok(st)
+    Ok(status)
 }
 
 /*
@@ -1221,10 +1209,8 @@ fn wait_once(
                 state = next_state;
                 if next_state != JobState::Running {
                     shell.jobs[id].changed = true;
-                    if shell.jobs[id].transition_to(next_state) {
-                        if next_state == JobState::Stopped {
-                            shell.jobs.position_stopped(id);
-                        }
+                    if shell.jobs[id].transition_to(next_state) && next_state == JobState::Stopped {
+                        shell.jobs.position_stopped(id);
                     }
                 }
                 break;
@@ -1667,7 +1653,7 @@ pub(crate) fn job_exit_status(
         }
     }
 
-    let status = match status {
+    match status {
         // A job with no completed process has no failure status to report.
         None => crate::status::ExitStatus::SUCCESS,
         Some(ChildStatus::Exited(code)) => crate::status::ExitStatus::from(code),
@@ -1681,8 +1667,7 @@ pub(crate) fn job_exit_status(
             crate::status::ExitStatus::from_code(signal.number() + 128)
         }
         Some(ChildStatus::Continued) => crate::status::ExitStatus::SUCCESS,
-    };
-    status
+    }
 }
 
 #[cfg(test)]

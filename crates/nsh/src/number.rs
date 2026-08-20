@@ -10,17 +10,6 @@ use bstr::BStr;
 
 use crate::error::{Diagnostics, Error};
 
-/*
- * Calculate enough decimal characters for an integer with `bytes` bytes.
- * (length * 8 - 1) * log10(2) + 1 + 1 + 12
- * The second 1 is for the minus sign and the 12 is a safety margin.
- */
-// [spec:dash:sem:shell.max-int-length-fn]
-#[inline]
-pub(crate) fn maximum_integer_text_length(bytes: i32) -> i32 {
-    ((bytes * 8 - 1) as f64 * 0.30102999566398119521 + 14.0) as i32
-}
-
 // [spec:dash:sem:mystring.badnum-fn]
 /// Build the shell's diagnostic for an invalid numeric operand.
 pub(crate) fn invalid_number(diagnostics: &mut Diagnostics<'_>, input: &BStr) -> Error {

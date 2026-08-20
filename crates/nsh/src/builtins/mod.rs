@@ -255,7 +255,7 @@ fn execute_builtin(
      * as POSIX mandates
      */
     Ok(crate::evaluation::Flow::Done(
-        (shell.evaluation.command_substitution_status).into(),
+        shell.evaluation.command_substitution_status,
     ))
 }
 

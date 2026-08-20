@@ -78,7 +78,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 .set(crate::options::ShellOption::Monitor, saved_monitor);
             crate::options::apply_option_changes(shell)?;
             return match outcome? {
-                Flow::Exit { .. } => Ok(Flow::Done((shell.status).into())),
+                Flow::Exit { .. } => Ok(Flow::Done(shell.status)),
                 done @ Flow::Done(_) => Ok(done),
                 control => Ok(control),
             };

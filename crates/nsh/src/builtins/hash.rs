@@ -64,9 +64,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                 let Command::External { path_index } = &command_entry.command else {
                     return None;
                 };
-                let Some(path_index) = *path_index else {
-                    return None;
-                };
+                let path_index = (*path_index)?;
                 Some(format_hash_entry(
                     name.as_slice().as_bstr(),
                     path_index,

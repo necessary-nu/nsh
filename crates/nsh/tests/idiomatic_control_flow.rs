@@ -215,6 +215,32 @@ fn port_fossils_are_absent() {
     }
 }
 
+// [spec:nsh:req:idiom.strict-lints/test]
+#[test]
+fn core_enforces_strict_rust_lints() {
+    for lint in [
+        "unsafe_code",
+        "dead_code",
+        "non_camel_case_types",
+        "non_snake_case",
+        "non_upper_case_globals",
+        "unused_variables",
+        "unused_must_use",
+        "clippy::correctness",
+    ] {
+        let directive = format!("#![deny({lint})]");
+        assert!(
+            LIBRARY.contains(&directive),
+            "missing strict lint {directive}"
+        );
+    }
+
+    assert!(
+        !LIBRARY.lines().any(|line| line.starts_with("#![allow(")),
+        "core crate root retains a blanket lint allowance"
+    );
+}
+
 // [spec:nsh:req:idiom.narrow-shell-context/test]
 #[test]
 fn subsystem_helpers_use_narrow_state() {
@@ -518,7 +544,7 @@ fn core_avoids_abi_scalars() {
         (EXECUTION, "path_index: Option<usize>"),
         (ERRORS, "enum Operation"),
         (ERRORS, "fn interrupt_pending() -> bool"),
-        (EXPANDER, "enum VariableExpansion"),
+        (EXPANSION_MODES, "struct ExpansionMode"),
         (MAIL, "changed: bool"),
         (VARIABLES, "push: bool"),
         (ULIMIT, "struct LimitSelection"),
@@ -567,7 +593,6 @@ fn operation_modes_are_typed() {
     for (source, typed_mode) in [
         (EVALUATOR, "struct EvaluationContext"),
         (EXPANSION_MODES, "struct ExpansionMode"),
-        (EXPANSION_MODES, "enum EscapeMode"),
         (REDIRECTIONS, "enum RedirectionMode"),
         (JOBS, "enum JobDisplay"),
         (PARSER_MULTIBYTE, "enum MultibyteMode"),

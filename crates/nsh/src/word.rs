@@ -99,6 +99,7 @@ impl ParsedWord {
     }
 
     /// Construct a word made entirely of literal bytes.
+    #[cfg(test)]
     pub(crate) fn literal(bytes: impl Into<BString>) -> Self {
         let bytes = bytes.into();
         let parts = if bytes.is_empty() {

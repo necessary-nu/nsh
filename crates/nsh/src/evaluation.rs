@@ -381,14 +381,13 @@ pub(crate) fn parse_and_execute(
             crate::parser::ParseResult::Tree(command) => command,
         };
         {
-            let command_status: ExitStatus;
-
             let command_context = if crate::parser::parser_eof(shell) {
                 context
             } else {
                 context.without_exit()
             };
-            command_status = flow!(evaluate_top_level(shell, command.as_ref(), command_context));
+            let command_status =
+                flow!(evaluate_top_level(shell, command.as_ref(), command_context));
             if command.is_some() {
                 status = command_status;
             }
@@ -396,7 +395,7 @@ pub(crate) fn parse_and_execute(
         /* `popstackmark(&smark)` — one per parsed command, and one on the
          * way out. */
     }
-    Ok(Flow::Done((status).into()))
+    Ok(Flow::Done(status))
 }
 
 /// Evaluate one parsed top-level command, retaining the rest of an
@@ -473,7 +472,7 @@ fn evaluate_interactive_sequence(
             shell.clear_evaluation_resources();
             shell.unwind_local_variables();
             crate::error::clear_interrupt_deferral(&mut shell.interrupt_deferral);
-            Ok(Flow::Done((status).into()))
+            Ok(Flow::Done(status))
         }
         outcome => outcome,
     }
@@ -659,7 +658,7 @@ pub fn evaluate_tree(
         && !context.is_tested()
         && !status.success();
     if !abort_for_errexit && !context.exits() {
-        return Ok(Flow::Done((shell.status).into()));
+        return Ok(Flow::Done(shell.status));
     }
     Ok(Flow::END)
 }
@@ -801,7 +800,7 @@ fn evaluate_for(
     }
     shell.evaluation.loop_depth -= 1;
 
-    Ok(Flow::Done((status).into()))
+    Ok(Flow::Done(status))
 }
 
 // [spec:dash:sem:eval.evalcase-fn]
@@ -870,7 +869,7 @@ fn evaluate_case(
         }
     }
     // out:
-    Ok(Flow::Done((status).into()))
+    Ok(Flow::Done(status))
 }
 
 /*
@@ -939,7 +938,7 @@ fn evaluate_subshell(
         Ok::<_, Error>(None)
     })?;
     let Some(forked) = forked else {
-        return Ok(Flow::Done((status).into()));
+        return Ok(Flow::Done(status));
     };
     let outcome = (|| -> Result<Flow, Error> {
         crate::redirection::redirect(shell, &expanded_redirections, RedirectionMode::Apply)?;
@@ -1239,17 +1238,14 @@ pub fn evaluate_command_substitution(
 // or NULL if the argument list ran out without producing one. As an index it
 // is the length the list had on entry, so the answer is `Some` exactly when
 // the list grew.
-fn append_expanded_arguments<'a>(
+fn append_expanded_arguments(
     shell: &mut Shell,
     expanded_fields: &mut ExpandedFields,
-    remaining_argument_nodes: &mut &'a [Node],
+    remaining_argument_nodes: &mut &[Node],
 ) -> Result<Option<usize>, Error> {
     let initial_field_count = expanded_fields.fields.len();
 
-    loop {
-        let Some((argument, rest)) = remaining_argument_nodes.split_first() else {
-            break;
-        };
+    while let Some((argument, rest)) = remaining_argument_nodes.split_first() {
         crate::expand::expand_argument(
             shell,
             argument,
@@ -1384,13 +1380,11 @@ fn evaluate_command_in_scope(
     let mut expanded_fields = ExpandedFields::new();
     let mut assignment_fields = ExpandedFields::new();
     let mut argument_count: usize;
-    let original_fields_start: Option<usize>;
     /* The C's `arglist.list`, which `parse_command_args` moves past the
      * `command [-p]` words while `osp` keeps the original head for `set -x`. */
     let mut head: usize = 0;
     let mut resolved_command = Command::Builtin(&crate::builtins::EMPTY_BUILTIN);
     let job_id: Option<JobId>;
-    let last_argument_index: Option<usize>;
     let mut path: Option<BString> = None;
     let standard_path = crate::variables::default_path();
     let mut special_builtin: Option<bool>;
@@ -1427,7 +1421,7 @@ fn evaluate_command_in_scope(
     use_local_variables = false;
     argument_count = 0;
     remaining_arguments = command.arguments.as_slice();
-    original_fields_start =
+    let original_fields_start =
         append_expanded_arguments(shell, &mut expanded_fields, &mut remaining_arguments)?;
     if original_fields_start.is_some() {
         let mut assignments_are_arguments = false;
@@ -1517,7 +1511,7 @@ fn evaluate_command_in_scope(
 
     resources.begin_local_variables(shell, use_local_variables);
 
-    last_argument_index = if shell.options.enabled(ShellOption::Interactive)
+    let last_argument_index = if shell.options.enabled(ShellOption::Interactive)
         && shell.evaluation.function_line == 0
         && argument_count > 0
     {
@@ -1555,9 +1549,7 @@ fn evaluate_command_in_scope(
             }
 
             for assignment in &command.assignments {
-                let assignment_index: usize;
-
-                assignment_index = assignment_fields.fields.len();
+                let assignment_index = assignment_fields.fields.len();
                 crate::expand::expand_argument(
                     shell,
                     assignment,
@@ -1863,9 +1855,7 @@ fn evaluate_builtin(
     fields: &mut [ExpandedField],
     context: EvaluationContext,
 ) -> Result<Flow, Error> {
-    let saved_command_name: Option<BString>; /* volatile */
-
-    saved_command_name = core::mem::take(&mut shell.evaluation.command_name);
+    let saved_command_name = core::mem::take(&mut shell.evaluation.command_name);
     /* `commandname = argv[0]`, and NULL for the command that has no word
      * at all -- the assignment-only one `bltin` stands for. */
     shell.evaluation.command_name = fields.first().map(|field| BString::from(field.as_bstr()));
@@ -1922,16 +1912,12 @@ fn evaluate_function(
     args: &[&BStr],
     context: EvaluationContext,
 ) -> Result<Flow, Error> {
-    let saved_parameters: crate::options::PositionalParameters; /* volatile */
-    let saved_function_line: i32;
-    let saved_loop_depth: usize;
-
     /* `saveparam = shellparam` plus the `shellparam.malloc = 0` that the C
      * puts inside the protected region so the epilogue's `freeparam` cannot
      * reach what the copy still points at. */
-    saved_parameters = crate::options::take_positional_parameters(shell);
-    saved_function_line = shell.evaluation.function_line;
-    saved_loop_depth = shell.evaluation.loop_depth;
+    let saved_parameters = crate::options::take_positional_parameters(shell);
+    let saved_function_line = shell.evaluation.function_line;
+    let saved_loop_depth = shell.evaluation.loop_depth;
 
     crate::error::with_interrupts_deferred(shell, |shell| {
         /* Command lookup cloned the owned body, so redefining this function
@@ -2144,9 +2130,9 @@ mod tests {
     fn flow_yields_a_status() {
         fn body(inner: Result<Flow, Error>) -> Result<Flow, Error> {
             let status = flow!(inner);
-            Ok(Flow::Done(
-                (ExitStatus::from_code(i32::from(status.code()) + 100)).into(),
-            ))
+            Ok(Flow::Done(ExitStatus::from_code(
+                i32::from(status.code()) + 100,
+            )))
         }
         let got = body(Ok(Flow::Done((7).into())));
         assert_eq!(got.unwrap(), Flow::Done((107).into()));

@@ -24,25 +24,21 @@ use bstr::BStr;
 // [spec:posix:sem:builtin.times.utility-defaults]
 pub fn run(shell: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> {
     let times = nsh_platform::process_times();
-    let mutime: i32;
-    let mstime: i32;
-    let mcutime: i32;
-    let mcstime: i32;
     let mut utime = times.user;
     let mut stime = times.system;
     let mut cutime = times.children_user;
     let mut cstime = times.children_system;
 
-    mutime = (utime / 60.0) as i32;
+    let mutime = (utime / 60.0) as i32;
     utime -= mutime as f64 * 60.0;
 
-    mstime = (stime / 60.0) as i32;
+    let mstime = (stime / 60.0) as i32;
     stime -= mstime as f64 * 60.0;
 
-    mcutime = (cutime / 60.0) as i32;
+    let mcutime = (cutime / 60.0) as i32;
     cutime -= mcutime as f64 * 60.0;
 
-    mcstime = (cstime / 60.0) as i32;
+    let mcstime = (cstime / 60.0) as i32;
     cstime -= mcstime as f64 * 60.0;
 
     shell.write_output_fmt(

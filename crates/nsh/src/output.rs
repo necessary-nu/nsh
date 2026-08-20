@@ -1,26 +1,8 @@
-//! Literal port of `src/output.c` / `src/output.h`.
-//! Rules: `docs/spec/port/src/output.md`.
+//! Buffered shell output over owned logical descriptor slots.
 //!
-//! The C introduced its own shell output routines because:
-//!	When a builtin command is interrupted we have to discard
-//!		any pending output.
-//!	When a builtin command appears in back quotes, it can save
-//!		the output in malloc-backed memory rather than fork and
-//!		read the output through a pipe.
-//!	Our output routines may be smaller than the stdio routines.
-//!
-//! ## Structural deviations in this module
-//!
-//! The C output cursor triplet (`buf`, `nextc`, `end`) becomes an owned
-//! `Option<Vec<u8>>`. `None` preserves the pre-allocation state needed by
-//! `outmem`'s exact-fill rule; `Vec::len` is the pending range and `bufsize`
-//! remains the logical limit.
-//!
-//! The three destinations are fields of [`ShellIo`], the unit that moves
-//! onto `Shell` when the remaining ambient state is threaded. `stdout()` and
-//! its siblings are temporary raw-pointer accessors for the still-literal
-//! callers; unlike the old `out1`/`out2` pointer statics they cannot carry a
-//! second, independently mutable view of which destination is selected.
+//! A builtin may discard pending output after an interrupt, while command
+//! substitution can capture bytes in memory without changing the host standard
+//! streams. Each buffer owns its pending range and destination.
 
 use std::io::{self, Write};
 
@@ -81,6 +63,7 @@ impl ShellIo {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn stdout(&mut self) -> &mut Output {
         &mut self.stdout
     }
@@ -373,7 +356,7 @@ mod tests {
             let write = crate::descriptors::SharedDescriptor::from_owned(write).unwrap();
             let output = Box::new(Output {
                 buffer: allocated.then(|| Vec::with_capacity(buffer_capacity)),
-                buffer_capacity: buffer_capacity as usize,
+                buffer_capacity,
                 destination: destination(Some(write.clone())),
             });
             Sink {
@@ -514,14 +497,14 @@ mod tests {
     #[test]
     fn write_fmt_buffers_and_reports_errors() {
         let mut buffered = Sink::new(64, true);
-        write!(&mut *buffered.output, "{}={}", "x", 42).unwrap();
+        write!(&mut *buffered.output, "x={}", 42).unwrap();
         assert_eq!(buffered.output.buffer.as_deref(), Some(&b"x=42"[..]));
         buffered.output.flush().unwrap();
         assert_eq!(buffered.drained(), b"x=42");
 
         let mut failed = Sink::new(0, false);
         failed.close_output();
-        assert!(write!(&mut *failed.output, "{}", "bad").is_err());
+        assert!(write!(&mut *failed.output, "bad").is_err());
     }
 
     #[test]

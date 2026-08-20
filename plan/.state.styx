@@ -5366,4 +5366,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.port-provenance}
     )}
+    {id enable-strict-rust-lints, covered_rules (
+        idiom.strict-lints
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.strict-lints}
+    )}
 )

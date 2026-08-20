@@ -50,8 +50,7 @@ mod tests {
         let mut owned = Shell::new(crate::streams::Streams::INHERIT);
         let shell = &mut owned;
         shell.status = crate::status::ExitStatus::from_code(last);
-        let returned = super::run(shell, &args).unwrap();
-        returned
+        super::run(shell, &args).unwrap()
     }
 
     #[test]

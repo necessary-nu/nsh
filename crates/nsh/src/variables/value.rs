@@ -3,6 +3,11 @@
 //! Scalar-facing APIs keep borrowing or cloning element zero, while Bash
 //! consumers can work with sparse indexed and associative maps directly.
 
+#![expect(
+    dead_code,
+    reason = "Bash arrays and attributes are staged for the paused compatibility implementation"
+)]
+
 use std::collections::BTreeMap;
 
 use bstr::{BStr, BString};
@@ -199,7 +204,11 @@ pub(crate) fn variable_kind(shell: &Shell, name: &BStr) -> Option<VariableKind> 
 }
 
 pub(crate) fn bash_attributes(shell: &Shell, name: &BStr) -> Option<BashAttributes> {
-    shell.variables.entries.get(name).map(|var| var.bash_attributes)
+    shell
+        .variables
+        .entries
+        .get(name)
+        .map(|var| var.bash_attributes)
 }
 
 pub(crate) fn set_bash_attribute(

@@ -203,10 +203,7 @@ pub(crate) fn options(
 ) -> Result<Scan, Error> {
     let mut scan = Scan { next: start };
 
-    loop {
-        let Some(word) = args.get(scan.next) else {
-            break;
-        };
+    while let Some(word) = args.get(scan.next) {
         scan.next += 1;
         /* `c = *p++`: the first byte decides, and the cluster starts at
          * the second. An empty word takes the `else` and is put back. */
@@ -232,10 +229,7 @@ pub(crate) fn options(
             break;
         };
         let mut cluster_index = 1usize;
-        loop {
-            let Some(&option) = word.get(cluster_index) else {
-                break;
-            };
+        while let Some(&option) = word.get(cluster_index) {
             cluster_index += 1;
             if option == b'o' {
                 minus_o(shell, args.get(scan.next).copied(), enabled)?;
@@ -273,46 +267,48 @@ fn minus_o(
     name: Option<&BStr>,
     enabled: bool,
 ) -> Result<Option<ShellOption>, Error> {
-    if name.is_none() {
-        if enabled {
-            let heading = b"Current option settings\n";
-            shell.write_output(OutputDestination::Stdout, heading)?;
-            for spec in OPTION_SPECS {
-                let mut line = spec.name.to_vec();
-                if line.len() < 16 {
-                    line.resize(16, b' ');
+    match name {
+        None => {
+            if enabled {
+                let heading = b"Current option settings\n";
+                shell.write_output(OutputDestination::Stdout, heading)?;
+                for spec in OPTION_SPECS {
+                    let mut line = spec.name.to_vec();
+                    if line.len() < 16 {
+                        line.resize(16, b' ');
+                    }
+                    line.extend_from_slice(if shell.options.enabled(spec.option) {
+                        b"on\n"
+                    } else {
+                        b"off\n"
+                    });
+                    shell.write_output(OutputDestination::Stdout, &line)?;
                 }
-                line.extend_from_slice(if shell.options.enabled(spec.option) {
-                    b"on\n"
-                } else {
-                    b"off\n"
-                });
-                shell.write_output(OutputDestination::Stdout, &line)?;
+            } else {
+                for spec in OPTION_SPECS {
+                    let mut line = b"set ".to_vec();
+                    line.extend_from_slice(if shell.options.enabled(spec.option) {
+                        b"-o "
+                    } else {
+                        b"+o "
+                    });
+                    line.extend_from_slice(spec.name);
+                    line.push(b'\n');
+                    shell.write_output(OutputDestination::Stdout, &line)?;
+                }
             }
-        } else {
+        }
+        Some(name) => {
             for spec in OPTION_SPECS {
-                let mut line = b"set ".to_vec();
-                line.extend_from_slice(if shell.options.enabled(spec.option) {
-                    b"-o "
-                } else {
-                    b"+o "
-                });
-                line.extend_from_slice(spec.name);
-                line.push(b'\n');
-                shell.write_output(OutputDestination::Stdout, &line)?;
+                if name == spec.name {
+                    set_typed_option(shell, spec.option, enabled);
+                    return Ok(Some(spec.option));
+                }
             }
+            let mut message = b"Illegal option -o ".to_vec();
+            message.extend_from_slice(name);
+            return Err(shell.diagnostics().shell_error(&message));
         }
-    } else {
-        let name = name.expect("the naming branch");
-        for spec in OPTION_SPECS {
-            if name == spec.name {
-                set_typed_option(shell, spec.option, enabled);
-                return Ok(Some(spec.option));
-            }
-        }
-        let mut message = b"Illegal option -o ".to_vec();
-        message.extend_from_slice(name);
-        return Err(shell.diagnostics().shell_error(&message));
     }
     Ok(None)
 }
@@ -512,7 +508,7 @@ impl<'a> Options<'a> {
                     return Ok(None);
                 }
                 self.next = word_index + 1; /* argptr++ */
-                if &word[..] == b"--" {
+                if word == b"--" {
                     /* consumed, and it ends the options */
                     return Ok(None);
                 }

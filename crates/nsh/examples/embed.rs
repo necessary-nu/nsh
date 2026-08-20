@@ -77,7 +77,7 @@ fn run_and_capture() -> Result<(), Error> {
         &[BStr::new(b"myapp"), name],
     )?;
     let echoed: BString = shell.take_captured_stdout().map_err(io_error)?;
-    assert_eq!(echoed.trim_ascii_end(), &name[..]);
+    assert_eq!(echoed.trim_ascii_end(), name);
 
     println!(
         "1. status {}, the script said {}",

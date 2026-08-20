@@ -116,6 +116,7 @@ pub(crate) fn clear_interrupt_deferral(deferral: &mut InterruptDeferral) {
     deferral.depth = 0;
 }
 
+#[cfg(test)]
 #[inline(always)]
 pub fn clear_pending_interrupt() {
     crate::signal_inbox::signals().set_interrupt_pending(false);

@@ -216,9 +216,7 @@ impl crate::context::Shell {
 // [spec:posix:req:builtin.trap.subshell-reset]
 // [spec:posix:req:builtin.trap.subshell-lexical-check]
 pub fn clear_traps(shell: &mut crate::context::Shell, node: Option<&Node>) {
-    let simple_command: bool;
-
-    simple_command = crate::parser::is_simple_command(node, BStr::new(b"trap"));
+    let simple_command = crate::parser::is_simple_command(node, BStr::new(b"trap"));
 
     crate::error::with_interrupts_deferred(shell, |shell| {
         /* One guard for the whole loop rather than one per slot. The
@@ -391,12 +389,11 @@ fn configure_signal_via(shell: &mut crate::context::Shell, signal: Signal, via: 
                 }
             }
             signal
-                if signal == Signal::from(nsh_platform::terminal_stop_signal())
-                    || signal == Signal::from(nsh_platform::terminal_output_signal()) =>
+                if (signal == Signal::from(nsh_platform::terminal_stop_signal())
+                    || signal == Signal::from(nsh_platform::terminal_output_signal()))
+                    && shell.options.enabled(ShellOption::Monitor) =>
             {
-                if shell.options.enabled(ShellOption::Monitor) {
-                    desired = crate::host::Disposition::Ignore;
-                }
+                desired = crate::host::Disposition::Ignore;
             }
             _ => {}
         }
@@ -501,8 +498,6 @@ pub fn mark_signal_pending(signal: nsh_platform::Signal) {
 // [spec:posix:req:builtin.trap.action-executed-as-eval]
 // [spec:posix:sem:signal.pending-trap-order]
 pub fn run_pending_traps(shell: &mut crate::context::Shell) -> Result<Flow, Error> {
-    let status: crate::status::ExitStatus;
-
     /* The poll site the shell reaches most often: `evaltree` calls
      * `dotrap` before every command and again at its `out:`, so an
      * interrupt taken anywhere the shell was not looking is delivered at
@@ -522,7 +517,7 @@ pub fn run_pending_traps(shell: &mut crate::context::Shell) -> Result<Flow, Erro
      * signal delivered while an EXIT action is running must save that
      * action's current status, not reuse the status that entered EXIT. */
     // [spec:nsh:req:compat.smoosh.trap-status]
-    status = shell.status;
+    let status = shell.status;
     signals.set_pending_signal(None);
     crate::error::barrier();
 
@@ -573,7 +568,7 @@ pub fn run_pending_traps(shell: &mut crate::context::Shell) -> Result<Flow, Erro
         }
     }
 
-    Ok(Flow::Done((shell.status).into()))
+    Ok(Flow::Done(shell.status))
 }
 
 /*

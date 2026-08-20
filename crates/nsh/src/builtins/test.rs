@@ -337,7 +337,7 @@ impl<'a> TestParser<'a> {
                 LogicalDescriptor::new(descriptor)
                     .and_then(|descriptor| shell.descriptors.get(descriptor))
                     .as_ref()
-                    .is_some_and(|descriptor| nsh_platform::is_terminal(descriptor))
+                    .is_some_and(nsh_platform::is_terminal)
             }
             Token::FileReadable => test_file_access(operand, AccessMode::READ_OK),
             Token::FileWritable => test_file_access(operand, AccessMode::WRITE_OK),
@@ -526,33 +526,12 @@ fn same_file(left: &BStr, right: &BStr) -> bool {
 
 // [spec:dash:sem:test.test-file-access-fn]
 // [spec:dash:sem:exec.test-file-access-fn]
-pub fn test_file_access(path: &BStr, access: AccessMode) -> bool {
-    path.try_to_path_buf()
-        .is_ok_and(|path| nsh_platform::effective_access(&path, access))
-}
-
 // [spec:dash:sem:test.test-access-fn]
 // [spec:dash:sem:exec.test-access-fn]
 // [spec:dash:sem:test.has-exec-bit-set-fn]
-pub fn test_access(metadata: &FileMetadata, access: AccessMode) -> bool {
-    let mut bits = match access {
-        AccessMode::READ_OK => 0o4,
-        AccessMode::WRITE_OK => 0o2,
-        AccessMode::EXEC_OK => 0o1,
-    };
-    let uid = nsh_platform::effective_uid();
-    if uid.is_root() {
-        return access != AccessMode::EXEC_OK || metadata.mode & 0o111 != 0;
-    }
-    if metadata.user == uid.as_raw() {
-        bits <<= 6;
-    } else if metadata.group == nsh_platform::effective_gid().as_raw()
-        || nsh_platform::supplementary_groups()
-            .is_ok_and(|groups| groups.iter().any(|gid| gid.as_raw() == metadata.group))
-    {
-        bits <<= 3;
-    }
-    metadata.mode & bits != 0
+pub fn test_file_access(path: &BStr, access: AccessMode) -> bool {
+    path.try_to_path_buf()
+        .is_ok_and(|path| nsh_platform::effective_access(&path, access))
 }
 
 #[cfg(test)]

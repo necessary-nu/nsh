@@ -51,24 +51,26 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
                     .map(|at| at + 1)
             })
             .flatten();
-        if word.is_empty() || equals.is_none() {
-            if let Some(value) = shell.aliases.lookup(word, false) {
-                let line = format_alias(word, BStr::new(value.as_slice()));
-                shell.write_output(OutputDestination::Stdout, &line)?;
-            } else {
-                let mut message = b"alias: ".to_vec();
-                message.extend_from_slice(word);
-                message.extend_from_slice(b" not found\n");
-                shell.write_output(OutputDestination::Stderr, &message)?;
-                failed = true;
+        match equals {
+            None => {
+                if let Some(value) = shell.aliases.lookup(word, false) {
+                    let line = format_alias(word, BStr::new(value.as_slice()));
+                    shell.write_output(OutputDestination::Stdout, &line)?;
+                } else {
+                    let mut message = b"alias: ".to_vec();
+                    message.extend_from_slice(word);
+                    message.extend_from_slice(b" not found\n");
+                    shell.write_output(OutputDestination::Stderr, &message)?;
+                    failed = true;
+                }
             }
-        } else {
-            let equals = equals.expect("the definition branch");
-            set_alias(
-                shell,
-                BStr::new(&word[..equals]),
-                BStr::new(&word[equals + 1..]),
-            )?;
+            Some(equals) => {
+                set_alias(
+                    shell,
+                    BStr::new(&word[..equals]),
+                    BStr::new(&word[equals + 1..]),
+                )?;
+            }
         }
     }
 

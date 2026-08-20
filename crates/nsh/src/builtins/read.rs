@@ -37,11 +37,11 @@ const READ_MULTIBYTE_CAPACITY: usize = (if MAX_MULTIBYTE_LENGTH > 16 {
 }) + 4;
 
 fn append_read_byte(line: &mut BString, input: crate::syntax::InputUnit) {
-    if input.is(crate::parser::LEGACY_ESCAPE as u8)
-        || input.is(crate::parser::LEGACY_MULTIBYTE as u8)
-        || input.is(crate::parser::LEGACY_QUOTE as u8)
+    if input.is(crate::parser::LEGACY_ESCAPE)
+        || input.is(crate::parser::LEGACY_MULTIBYTE)
+        || input.is(crate::parser::LEGACY_QUOTE)
     {
-        line.push(crate::parser::LEGACY_ESCAPE as u8);
+        line.push(crate::parser::LEGACY_ESCAPE);
     }
     line.push(input.expect_byte());
 }
@@ -80,7 +80,7 @@ fn read_input_line(
                 input,
                 &mut scratch,
                 crate::parser::MultibyteMode::Framed,
-            )? as usize;
+            )?;
             if multibyte_len != 0 {
                 debug_assert!(multibyte_len <= READ_MULTIBYTE_CAPACITY);
                 line.extend_from_slice(&scratch[..multibyte_len]);
@@ -122,7 +122,7 @@ fn read_input_line(
 
 // ---------------------------------------------------------------------
 
-/** handle one line of the read command.
+/* Handle one line of the read command.
  *  more fields than variables -> remainder shall be part of last variable.
  *  less fields than variables -> remaining variables unset.
  *
@@ -131,7 +131,6 @@ fn read_input_line(
  *  @param ap argument (variable) list
  *  @param len length of line including trailing '\0'
  */
-
 // [spec:dash:sem:miscbltin.readcmd-handle-line-fn]
 // [spec:posix:req:builtin.read.ifs-empty]
 // [spec:posix:req:builtin.read.field-splitting-modified]
@@ -227,7 +226,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             .descriptors
             .get(LogicalDescriptor::STDIN)
             .as_ref()
-            .is_some_and(|descriptor| nsh_platform::is_terminal(descriptor))
+            .is_some_and(nsh_platform::is_terminal)
         {
             shell.write_output(OutputDestination::Stderr, prompt)?;
         }
@@ -240,7 +239,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             .descriptors
             .get(LogicalDescriptor::STDIN)
             .as_ref()
-            .is_some_and(|descriptor| nsh_platform::is_terminal(descriptor));
+            .is_some_and(nsh_platform::is_terminal);
     let names = option_scan.operands();
     if names.is_empty() {
         return Err(shell.diagnostics().shell_error(b"arg count"));
@@ -248,5 +247,5 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     let (mut line, status) = read_input_line(shell, delimiter, raw, prompt_for_continuation)?;
     assign_read_fields(shell, &mut line, names)?;
-    Ok(Flow::Done((status).into()))
+    Ok(Flow::Done(status))
 }

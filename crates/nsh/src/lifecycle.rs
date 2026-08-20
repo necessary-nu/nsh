@@ -6,7 +6,7 @@
 
 use crate::context::Shell;
 use crate::nodes::Node;
-use crate::variables::EnvSource;
+use bstr::BString;
 
 impl Shell {
     /// Establish the input, signal, locale, and variable state of a new shell.
@@ -14,7 +14,7 @@ impl Shell {
     // [spec:nsh:req:idiom.owned-lifecycle]
     pub(crate) fn initialize_from(
         &mut self,
-        environment: EnvSource<'_>,
+        environment: &[(BString, BString)],
     ) -> Result<(), crate::Error> {
         self.initialize_input_state();
         self.initialize_trap_state();
@@ -61,9 +61,7 @@ mod tests {
         let mut shell = Shell::new(crate::streams::Streams::INHERIT);
         let environment = [(BString::from("OWNED_LIFECYCLE"), BString::from("yes"))];
 
-        shell
-            .initialize_from(EnvSource::Explicit(&environment))
-            .unwrap();
+        shell.initialize_from(&environment).unwrap();
 
         assert_eq!(
             shell.var(BStr::new("OWNED_LIFECYCLE")),

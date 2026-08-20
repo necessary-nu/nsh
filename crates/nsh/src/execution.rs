@@ -70,14 +70,6 @@ impl CommandSearch {
         self.regular_builtins_only = true;
         self
     }
-
-    pub const fn is_default(self) -> bool {
-        !self.report_errors
-            && !self.check_absolute
-            && !self.skip_functions
-            && !self.alternate_path
-            && !self.regular_builtins_only
-    }
 }
 
 // ---------------------------------------------------------------------

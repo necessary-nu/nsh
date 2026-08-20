@@ -115,5 +115,5 @@ fn run_dot_with_missing_status(
         }
     }
 
-    Ok(Flow::Done((status).into()))
+    Ok(Flow::Done(status))
 }

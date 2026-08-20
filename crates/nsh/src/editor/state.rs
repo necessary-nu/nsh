@@ -31,9 +31,7 @@ use crate::options::ShellOption;
 
 const DEFAULT_HISTORY_SIZE: usize = 128;
 
-/// `#include <sys/param.h>` — MAXPATHLEN.
-
-// The old myhistedit typedefs now map to owned semantic fields in this state.
+/// History and line-editor resources owned by one shell.
 pub(crate) struct EditorState {
     history: Option<History>,
     history_file: Option<File>,
@@ -323,23 +321,6 @@ pub fn set_history_size(shell: &mut crate::context::Shell, hs: &BStr) {
         return;
     };
     history.set_limit(histsize);
-}
-
-// [spec:dash:sem:histedit.setterm-fn]
-// [spec:dash:sem:myhistedit.setterm-fn]
-pub fn set_terminal_type(shell: &mut crate::context::Shell, term: &BStr) {
-    let Some(editor) = shell.editor.editor.as_mut() else {
-        return;
-    };
-    if editor.set_terminal(term).is_err() {
-        let mut message = b"sh: Can't set terminal type ".to_vec();
-        message.extend_from_slice(term);
-        message.push(b'\n');
-        message.extend_from_slice(b"sh: Using dumb terminal settings.\n");
-        if shell.io.stderr().write_all(&message).is_err() {
-            // Terminal fallback is already installed; stderr has no fallback sink.
-        }
-    }
 }
 
 #[cfg(test)]

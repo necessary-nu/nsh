@@ -155,12 +155,6 @@ impl SyntaxContext {
     }
 }
 
-/// Locale-sensitive alphabetic-byte classification.
-#[inline]
-pub fn is_alpha(locale: &nsh_platform::Locale, byte: u8) -> bool {
-    locale.is_alpha(byte)
-}
-
 /// Whether a byte can begin a shell name.
 #[inline]
 pub fn is_name(locale: &nsh_platform::Locale, byte: u8) -> bool {
@@ -180,12 +174,6 @@ pub fn is_special(byte: u8) -> bool {
         byte,
         b'0'..=b'9' | b'!' | b'$' | b'-' | b'?' | b'@' | b'#' | b'*'
     )
-}
-
-/// The numeric value of an ASCII digit.
-#[inline]
-pub fn digit_value(byte: u8) -> u8 {
-    byte - b'0'
 }
 
 #[cfg(test)]

@@ -1,7 +1,6 @@
 //! Signal names selected by the active platform backend.
 
 pub const SIGNAL_SLOT_COUNT: usize = nsh_platform::SIGNAL_COUNT;
-pub const LAST_SIGNAL_INDEX: usize = SIGNAL_SLOT_COUNT - 1;
 pub use nsh_platform::SIGNAL_NAMES;
 
 #[cfg(test)]

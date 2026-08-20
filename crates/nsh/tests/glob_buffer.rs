@@ -26,7 +26,7 @@
 //! Expected output was checked against the reference C, not against the
 //! port.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use nsh::streams::Streams;
 
@@ -67,11 +67,11 @@ fn fixture(name: &str) -> PathBuf {
     d
 }
 
-fn mkdirs(base: &PathBuf, rel: &str) {
+fn mkdirs(base: &Path, rel: &str) {
     std::fs::create_dir_all(base.join(rel)).expect("create_dir_all");
 }
 
-fn touch(base: &PathBuf, rel: &str) {
+fn touch(base: &Path, rel: &str) {
     std::fs::File::create(base.join(rel)).expect("create file");
 }
 

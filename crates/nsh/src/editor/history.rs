@@ -85,11 +85,13 @@ impl History {
         self.limit = limit;
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn len(&self) -> usize {
         self.store.len()
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.store.is_empty()
@@ -180,6 +182,7 @@ impl History {
         }
     }
 
+    #[cfg(test)]
     #[must_use]
     pub fn newest(&self) -> Option<HistoryEvent> {
         self.store.newest().map(history_event)

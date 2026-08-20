@@ -297,7 +297,7 @@ fn open_file_with_context(
                     shell, pathname, mode, &error, context,
                 ));
             }
-            Err(error) if may_fail => return Ok(None),
+            Err(_) if may_fail => return Ok(None),
             Err(error) => {
                 return Err(open_error_with_context(
                     shell, pathname, mode, &error, context,

@@ -44,7 +44,7 @@ impl WordLexer<'_> {
             self.current_syntax_mut().double_quote_variable_depth -= 1;
         }
         if !self.check_here_document_end {
-            self.input = InputUnit::Byte(LEGACY_END_PARAMETER as u8);
+            self.input = InputUnit::Byte(LEGACY_END_PARAMETER);
         }
         self.output.push(self.input.expect_byte());
     }
@@ -53,7 +53,7 @@ impl WordLexer<'_> {
 pub(super) fn read_backslash(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Result<(), Error> {
     lexer.input = read_input_unit(shell)?;
     if lexer.input == InputUnit::EndOfInput {
-        lexer.output.push(LEGACY_ESCAPE as u8);
+        lexer.output.push(LEGACY_ESCAPE);
         lexer.output.push(b'\\');
         unread_input_unit(shell);
         return Ok(());
@@ -68,7 +68,7 @@ pub(super) fn read_backslash(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
             || (!lexer.delimiter.is_none() && lexer.current_syntax().variable_depth == 0))
         && (!lexer.input.is(b'}') || lexer.current_syntax().variable_depth == 0)
     {
-        lexer.output.push(LEGACY_ESCAPE as u8);
+        lexer.output.push(LEGACY_ESCAPE);
         lexer.output.push(b'\\');
     }
     lexer.quoted = true;
@@ -80,7 +80,7 @@ pub(super) fn read_backslash(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> Re
         MultibyteMode::Escaped,
     )? == 0
     {
-        lexer.output.push(LEGACY_ESCAPE as u8);
+        lexer.output.push(LEGACY_ESCAPE);
         lexer.output.push(lexer.input.expect_byte());
     }
     Ok(())

@@ -4,6 +4,11 @@
 //! representation.  Each variant records the grammar boundary that later
 //! runtime work consumes, while embedded words use [`WordNode`].
 
+#![expect(
+    dead_code,
+    reason = "Bash syntax is parsed ahead of the paused evaluator implementation"
+)]
+
 use super::{Node, NodeText, WordNode};
 
 /// Bash-only syntax in the shell's owned parse tree.

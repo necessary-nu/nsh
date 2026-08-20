@@ -152,12 +152,6 @@ pub(crate) enum PromptKind {
     Continuation,
 }
 
-/// `basepf` — top level input file. Index 0 of the frame stack; it is never
-/// popped, and `pushstdin` makes it current again by setting its `prev`.
-/// The pushed frames. `FRAMES[i]` is frame index `i + 1`.
-/// `toppf` — how far `popallfiles` unwinds.
-/// `parsefile` — the current input frame.
-
 /// The shell's input: where it is reading from, and what it has read.
 ///
 /// `docs/api-design.md` §5 assigns `input.rs`'s statics and `parser.rs`'s
@@ -443,7 +437,7 @@ pub fn initialize_input(shell: &mut Shell) {
     let standard_input = shell.descriptors.get(LogicalDescriptor::STDIN);
     if let Some(canonical) = standard_input
         .as_ref()
-        .and_then(|descriptor| nsh_platform::terminal_canonical_mode(descriptor))
+        .and_then(nsh_platform::terminal_canonical_mode)
     {
         shell.input.standard_input_is_terminal = Some(true);
         shell.input.standard_input_state.bufferable = canonical;
@@ -452,7 +446,7 @@ pub fn initialize_input(shell: &mut Shell) {
         shell.input.standard_input_is_terminal = Some(false);
         shell.input.standard_input_state.seekable = standard_input
             .as_ref()
-            .is_some_and(|descriptor| nsh_platform::fd_is_seekable(descriptor));
+            .is_some_and(nsh_platform::fd_is_seekable);
         shell.input.standard_input_state.bufferable = shell.input.standard_input_state.seekable;
     }
 }
@@ -846,10 +840,8 @@ fn refill_input_buffer(
 
             /* delete nul characters */
             loop {
-                let byte: u8;
-
                 remaining -= 1;
-                byte = current_input_frame(&mut shell.input).buffer[line_end];
+                let byte = current_input_frame(&mut shell.input).buffer[line_end];
 
                 if byte == 0 && !preserve_nul {
                     let input_frame = current_input_frame(&mut shell.input);
@@ -870,10 +862,9 @@ fn refill_input_buffer(
                             // Keep the unread tail contiguous when the platform
                             // treats the preceding CR as part of this newline.
                             let input_frame = current_input_frame(&mut shell.input);
-                            input_frame.buffer.copy_within(
-                                line_end - 1..line_end + remaining as usize,
-                                line_end - 2,
-                            );
+                            input_frame
+                                .buffer
+                                .copy_within(line_end - 1..line_end + remaining, line_end - 2);
                             line_end -= 1;
                         }
                         break 'outer;
@@ -1165,7 +1156,7 @@ pub fn pop_input_frame(shell: &mut crate::context::Shell) {
             return;
         }
 
-        let frames = &mut *&mut shell.input.frames;
+        let frames = &mut shell.input.frames;
         debug_assert_eq!(popped_index, frames.len());
         let mut input_frame = frames.pop().unwrap();
         /* `set_cur(cur)` stood here to re-derive the cached frame pointer,

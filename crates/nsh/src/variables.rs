@@ -368,12 +368,6 @@ pub fn initialize_variables(shell: &mut Shell) {
     }
 }
 
-/// Where a new shell's exported variables come from.
-pub(crate) enum EnvSource<'a> {
-    Process,
-    Explicit(&'a [(BString, BString)]),
-}
-
 impl Shell {
     // [spec:nsh:sem:shell-locale.invalid-selection]
     // [spec:posix:req:param.variable-environment-initialization]
@@ -393,24 +387,11 @@ impl Shell {
     // [spec:posix:sem:sh.envvar-nlspath]
     // [spec:posix:sem:sh.envvar-path]
     // [spec:posix:req:sh.envvar-pwd]
-    pub(crate) fn initialize_variable_state(&mut self, env: EnvSource<'_>) -> Result<(), Error> {
+    pub(crate) fn initialize_variable_state(
+        &mut self,
+        pairs: &[(BString, BString)],
+    ) -> Result<(), Error> {
         initialize_variables(self);
-        let process_env;
-        let pairs = match env {
-            EnvSource::Process => {
-                process_env = nsh_platform::process_environment()
-                    .into_iter()
-                    .map(|(name, value)| {
-                        (
-                            BString::from(name.to_shell_bytes()),
-                            BString::from(value.to_shell_bytes()),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                process_env.as_slice()
-            }
-            EnvSource::Explicit(pairs) => pairs,
-        };
 
         for (name, value) in pairs {
             let name = BStr::new(name.as_slice());
@@ -504,7 +485,7 @@ impl Shell {
 // [spec:dash:sem:var.changelocale-fn]
 // [spec:dash:sem:var.varfunc-fn]
 // [spec:nsh:sem:shell-locale.invalid-selection]
-fn run_callback(shell: &mut Shell, callback: Callback, name: &BStr, value: Option<&BStr>) {
+fn run_callback(shell: &mut Shell, callback: Callback, value: Option<&BStr>) {
     let effective = value.unwrap_or_else(|| BStr::new(b""));
     match callback {
         Callback::None => {}
@@ -579,7 +560,7 @@ fn set_entry(
             },
         );
         if callback_policy == CallbackPolicy::Run {
-            run_callback(shell, callback, name, value);
+            run_callback(shell, callback, value);
         }
         return Ok(());
     };
@@ -599,7 +580,7 @@ fn set_entry(
     } else {
         shell.variables.entries.remove(name);
         if old.callback == Callback::Locale {
-            run_callback(shell, old.callback, name, None);
+            run_callback(shell, old.callback, None);
         }
         return Ok(());
     }
@@ -632,7 +613,6 @@ fn set_entry(
         run_callback(
             shell,
             callback,
-            name,
             callback_value
                 .as_ref()
                 .map(|value| BStr::new(value.as_slice())),
@@ -860,7 +840,7 @@ fn pop_local_scope(shell: &mut Shell) {
                         .remove(&name)
                         .map_or(Callback::None, |var| var.callback);
                     if callback == Callback::Locale {
-                        run_callback(shell, callback, BStr::new(name.as_slice()), None);
+                        run_callback(shell, callback, None);
                     }
                 }
                 LocalVariable::Saved { name, previous } => {
@@ -870,7 +850,6 @@ fn pop_local_scope(shell: &mut Shell) {
                     run_callback(
                         shell,
                         callback,
-                        BStr::new(name.as_slice()),
                         value.as_ref().map(|value| BStr::new(value.as_slice())),
                     );
                 }

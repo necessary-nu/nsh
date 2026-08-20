@@ -209,10 +209,8 @@ pub(crate) fn run(shell: &mut Shell, startup: &Startup) -> crate::status::ExitSt
                 }
 
                 shell.recover_command_loop();
-                if interrupted {
-                    if shell.io.stderr().write_all(b"\n").is_err() {
-                        // The interrupt status takes precedence over its courtesy newline.
-                    }
+                if interrupted && shell.io.stderr().write_all(b"\n").is_err() {
+                    // The interrupt status takes precedence over its courtesy newline.
                 }
                 crate::error::clear_interrupt_deferral(&mut shell.interrupt_deferral);
                 task = recovery.expect("recoverable startup task has a successor");
@@ -333,7 +331,7 @@ pub(crate) fn command_loop(
         }
     }
 
-    Ok(crate::evaluation::Flow::Done((status).into()))
+    Ok(crate::evaluation::Flow::Done(status))
 }
 
 /// End a forked child, the way `main`'s handler ends one.

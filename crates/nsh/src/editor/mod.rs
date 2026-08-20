@@ -113,7 +113,6 @@ pub enum LineEditorError {
     Start(StartError),
     Driver(DriverError),
     Domain(nshedit::domain::Error),
-    TerminalProfile(Box<str>),
     OpaqueCodePoint,
 }
 
@@ -124,7 +123,6 @@ impl fmt::Display for LineEditorError {
             Self::Start(error) => error.fmt(formatter),
             Self::Driver(error) => error.fmt(formatter),
             Self::Domain(error) => error.fmt(formatter),
-            Self::TerminalProfile(error) => formatter.write_str(error),
             Self::OpaqueCodePoint => {
                 formatter.write_str("editor returned a non-terminal opaque code point")
             }
@@ -139,7 +137,7 @@ impl StdError for LineEditorError {
             Self::Start(error) => Some(error),
             Self::Driver(error) => Some(error),
             Self::Domain(error) => Some(error),
-            Self::TerminalProfile(_) | Self::OpaqueCodePoint => None,
+            Self::OpaqueCodePoint => None,
         }
     }
 }
@@ -189,6 +187,10 @@ pub struct LineEditor {
 impl LineEditor {
     /// Duplicate the shell-owned descriptors and activate a native session.
     ///
+    // Terminal capabilities are selected while constructing the owned editor;
+    // there is no later mutation of a process-global editline terminal type.
+    // [spec:dash:sem:histedit.setterm-fn]
+    // [spec:dash:sem:myhistedit.setterm-fn]
     pub fn new(
         locale: &nsh_platform::Locale,
         input_fd: &impl nsh_platform::AsDescriptor,
@@ -268,25 +270,6 @@ impl LineEditor {
             .expect("terminal snapshots are not poisoned")
             .replace(attributes);
         refresh_shell_bindings(self.editor_mut(), Some(&attributes))?;
-        Ok(())
-    }
-
-    pub fn set_terminal(&mut self, name: &[u8]) -> Result<(), LineEditorError> {
-        let name = core::str::from_utf8(name).map_err(|error| {
-            LineEditorError::TerminalProfile(error.to_string().into_boxed_str())
-        })?;
-        let size = self.screen_size();
-        let profile = match nshterm::TermInfo::from_name(name) {
-            Ok(entry) => TerminalProfile::from_terminfo(&entry),
-            Err(error) => {
-                self.editor_mut()
-                    .configure_display(TerminalProfile::plain(), size);
-                return Err(LineEditorError::TerminalProfile(
-                    error.to_string().into_boxed_str(),
-                ));
-            }
-        };
-        self.editor_mut().configure_display(profile, size);
         Ok(())
     }
 

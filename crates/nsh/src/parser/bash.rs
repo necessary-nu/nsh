@@ -239,7 +239,7 @@ pub(super) fn process_substitutions(
             return Ok(());
         }
 
-        lexer.output.push(LEGACY_COMMAND_SUBSTITUTION as u8);
+        lexer.output.push(LEGACY_COMMAND_SUBSTITUTION);
         let parked = mem::take(&mut lexer.output);
         let slot = lexer.command_substitutions.len();
         lexer.command_substitutions.push(None);
@@ -675,12 +675,12 @@ fn matching_bracket(bytes: &[u8], open: usize) -> Option<usize> {
     let mut quoted = false;
     while index < bytes.len() {
         match bytes[index] {
-            byte if byte == LEGACY_ESCAPE as u8 => index += 2,
-            byte if byte == LEGACY_QUOTE as u8 => {
+            byte if byte == LEGACY_ESCAPE => index += 2,
+            byte if byte == LEGACY_QUOTE => {
                 quoted = !quoted;
                 index += 1;
             }
-            byte if byte == LEGACY_MULTIBYTE as u8 => {
+            byte if byte == LEGACY_MULTIBYTE => {
                 index = multibyte_end(bytes, index);
             }
             b'[' if !quoted => {
@@ -732,12 +732,12 @@ fn backquote_count(bytes: &[u8]) -> usize {
     let mut count = 0usize;
     let mut index = 0usize;
     while index < bytes.len() {
-        if bytes[index] == LEGACY_ESCAPE as u8 {
+        if bytes[index] == LEGACY_ESCAPE {
             index += 2;
-        } else if bytes[index] == LEGACY_MULTIBYTE as u8 {
+        } else if bytes[index] == LEGACY_MULTIBYTE {
             index = multibyte_end(bytes, index);
         } else {
-            count += usize::from(bytes[index] == LEGACY_COMMAND_SUBSTITUTION as u8);
+            count += usize::from(bytes[index] == LEGACY_COMMAND_SUBSTITUTION);
             index += 1;
         }
     }
@@ -745,7 +745,7 @@ fn backquote_count(bytes: &[u8]) -> usize {
 }
 
 fn multibyte_end(bytes: &[u8], start: usize) -> usize {
-    let length_at = start + 1 + usize::from(bytes.get(start + 1) == Some(&(LEGACY_ESCAPE as u8)));
+    let length_at = start + 1 + usize::from(bytes.get(start + 1) == Some(&(LEGACY_ESCAPE)));
     let length = bytes.get(length_at).copied().unwrap_or(0) as usize;
     length_at.saturating_add(length).saturating_add(3)
 }

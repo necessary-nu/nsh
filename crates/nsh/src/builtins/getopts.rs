@@ -98,7 +98,7 @@ fn getopts(
         None
     };
 
-    'scan: loop {
+    'scan: {
         if cursor.is_none() || cursor.is_some_and(|(word, at)| at >= words[word].len()) {
             let Some(word) = words.get(next) else {
                 done = true;

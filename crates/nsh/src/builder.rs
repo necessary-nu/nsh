@@ -14,7 +14,6 @@ use crate::context::Shell;
 use crate::error::Error;
 use crate::options::ShellOption;
 use crate::streams::Streams;
-use crate::variables::EnvSource;
 
 enum RequestedOption {
     Named(BString, bool),
@@ -218,7 +217,7 @@ impl Builder {
             Vec::new()
         };
         environment.extend(self.env);
-        shell.initialize_from(EnvSource::Explicit(&environment))?;
+        shell.initialize_from(&environment)?;
 
         if let Some(invocation_name) = &self.invocation_name {
             shell

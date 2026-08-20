@@ -219,9 +219,7 @@ pub fn parse_escape(
                 if byte.is_ascii_digit() {
                     digit = u32::from(byte - b'0');
                 } else {
-                    let uppercase_byte: u8;
-
-                    uppercase_byte = byte & !0x20;
+                    let uppercase_byte = byte & !0x20;
                     if matches!(uppercase_byte, b'A'..=b'F') {
                         digit = u32::from(uppercase_byte - b'A') + 10;
                     } else {
@@ -239,9 +237,7 @@ pub fn parse_escape(
                 }
             }
 
-            if digit_limit <= 2 {
-                validate_value = true;
-            } else if value < 0x80 {
+            if digit_limit <= 2 || value < 0x80 {
                 validate_value = true;
             } else {
                 if value < 0x110000 {
@@ -268,11 +264,7 @@ pub fn parse_escape(
                     // htonl(): host order to big-endian, i.e. UTF-8 order.
                     value = (value << ((4 - encoded_length) * 8)).to_be();
 
-                    append_output_byte(
-                        crate::parser::LEGACY_MULTIBYTE as u8,
-                        output,
-                        &mut output_index,
-                    );
+                    append_output_byte(crate::parser::LEGACY_MULTIBYTE, output, &mut output_index);
                     append_output_byte(encoded_length as u8, output, &mut output_index);
                     adjust_output_index(&mut output_index, multibyte_offset);
                     /* `memcpy(out, &value, 4)` — four bytes written where
@@ -281,11 +273,7 @@ pub fn parse_escape(
                     output[output_index..output_index + 4].copy_from_slice(&value.to_ne_bytes());
                     adjust_output_index(&mut output_index, encoded_length as isize);
                     append_output_byte(encoded_length as u8, output, &mut output_index);
-                    append_output_byte(
-                        crate::parser::LEGACY_MULTIBYTE as u8,
-                        output,
-                        &mut output_index,
-                    );
+                    append_output_byte(crate::parser::LEGACY_MULTIBYTE, output, &mut output_index);
                     adjust_output_index(&mut output_index, multibyte_offset);
 
                     /* The highest byte the block above touches, counted from
@@ -325,11 +313,7 @@ pub fn parse_escape(
         if emit_backslash {
             // case '\\':
             if preserve_multibyte_framing {
-                append_output_byte(
-                    crate::parser::LEGACY_ESCAPE as u8,
-                    output,
-                    &mut output_index,
-                );
+                append_output_byte(crate::parser::LEGACY_ESCAPE, output, &mut output_index);
             }
         }
 
@@ -365,9 +349,6 @@ pub(crate) fn append_escape(input: &[u8], output_bytes: &mut BString) -> bool {
     debug_assert!(output_bytes.is_empty());
 
     while at < input.len() {
-        let converted_escape: EscapeChunk;
-        let character: u8;
-
         /* `CHECKSTRSPACE(4, cp)` — the room `conv_escape` writes into
          * through the raw cursor below; see `CONV_ESCAPE_SLOP`. */
         output_bytes.reserve(ESCAPE_OUTPUT_CAPACITY);
@@ -377,11 +358,10 @@ pub(crate) fn append_escape(input: &[u8], output_bytes: &mut BString) -> bool {
         if byte != b'\\' {
             output_bytes.push(byte);
             continue;
-        } else {
-            character = byte_at(at);
-            if character == b'c' {
-                return true;
-            }
+        }
+        let character = byte_at(at);
+        if character == b'c' {
+            return true;
         }
 
         /*
@@ -395,7 +375,7 @@ pub(crate) fn append_escape(input: &[u8], output_bytes: &mut BString) -> bool {
 
         /* Finally test for sequences valid in the format string */
         let mut scratch: [u8; ESCAPE_OUTPUT_CAPACITY] = [0; ESCAPE_OUTPUT_CAPACITY];
-        converted_escape = parse_escape(&input[at.min(input.len())..], &mut scratch, false);
+        let converted_escape = parse_escape(&input[at.min(input.len())..], &mut scratch, false);
         at += converted_escape.consumed;
         debug_assert!(converted_escape.written <= ESCAPE_OUTPUT_CAPACITY);
         output_bytes.extend_from_slice(&scratch[..converted_escape.written]);

@@ -36,9 +36,7 @@ use bstr::BStr;
 // [spec:posix:req:builtin.fg.interfaces]
 pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut job_id: JobId;
-    let mode: ForkMode;
-
-    mode = if args[0].first() == Some(&b'f') {
+    let mode = if args[0].first() == Some(&b'f') {
         ForkMode::Foreground
     } else {
         ForkMode::Background
@@ -67,7 +65,7 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             break status;
         }
     };
-    Ok(Flow::Done((status).into()))
+    Ok(Flow::Done(status))
 }
 
 // [spec:dash:sem:jobs.restartjob-fn]

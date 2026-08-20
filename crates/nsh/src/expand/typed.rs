@@ -197,6 +197,7 @@ impl Context {
 
 // [spec:nsh:sem:idiom.typed-expansion]
 // [spec:nsh:req:idiom.parser-control-flow]
+// [spec:dash:sem:expand.argstr-fn]
 pub(super) fn expand_argument(
     shell: &mut Shell,
     word: &ParsedWord,
@@ -252,6 +253,12 @@ fn into_field(field: Field) -> ExpandedField {
     ExpandedField { text: field.bytes }
 }
 
+// The former helpers allocated fixed C buffers and threaded cursors through
+// them. Structural words, owned fields, and Rust's integer formatting now
+// implement the same observable expansion behavior without those mechanisms.
+// [spec:dash:sem:expand.expari-fn]
+// [spec:dash:sem:expand.expcmd-fn]
+// [spec:dash:sem:shell.max-int-length-fn]
 fn expand_parts(
     shell: &mut Shell,
     parts: &[WordPart],
@@ -388,6 +395,10 @@ fn is_empty_quoted_at(shell: &Shell, parts: &[WordPart], context: Context) -> bo
         )
 }
 
+// [spec:dash:sem:expand.chtodest-fn]
+// [spec:dash:sem:expand.mbtodest-fn]
+// [spec:dash:sem:expand.memtodest-fn]
+// [spec:dash:sem:expand.strtodest-fn]
 fn append_literal(
     shell: &mut Shell,
     result: &mut Expansion,
@@ -435,6 +446,7 @@ fn append_literal(
     }
 }
 
+// [spec:dash:sem:expand.exptilde-fn]
 fn tilde_home(shell: &mut Shell, user: &[u8]) -> Option<Vec<u8>> {
     if user.is_empty() {
         crate::variables::lookup_bytes(shell, BStr::new(b"HOME")).map(|home| home.to_vec())
@@ -466,6 +478,15 @@ impl Value {
     }
 }
 
+// The parameter operation and its scan direction are represented in the AST;
+// no integer selector or shared scan cursor crosses this boundary.
+// [spec:dash:sem:expand.cvtnum-fn]
+// [spec:dash:sem:expand.evalvar-fn]
+// [spec:dash:sem:expand.scanleft-fn]
+// [spec:dash:sem:expand.scanright-fn]
+// [spec:dash:sem:expand.subevalvar-fn]
+// [spec:dash:sem:expand.varunset-fn]
+// [spec:dash:sem:expand.varvalue-fn]
 fn expand_parameter(
     shell: &mut Shell,
     parameter: &ParameterExpansion,
@@ -525,7 +546,7 @@ fn expand_parameter(
             if value.is_unset() && shell.options.enabled(ShellOption::Nounset) {
                 return Err(parameter_error(shell, name.as_bstr(), false, None));
             }
-            let length = value_length(shell, &value, context);
+            let length = value_length(shell, &value);
             Ok(Expansion::one(Field::from_bytes(
                 length.to_string().as_bytes(),
                 context.protects(),
@@ -795,7 +816,7 @@ fn value_bytes(shell: &Shell, value: Value, context: Context) -> BString {
     }
 }
 
-fn value_length(shell: &Shell, value: &Value, context: Context) -> usize {
+fn value_length(shell: &Shell, value: &Value) -> usize {
     match value {
         Value::Unset => 0,
         Value::Variable(value) => value
@@ -876,6 +897,7 @@ fn character_end(locale: &nsh_platform::Locale, bytes: &[u8], at: usize) -> usiz
     at + width
 }
 
+// [spec:dash:sem:expand.expbackq-fn]
 fn command_substitution(shell: &mut Shell, command: Option<&Node>) -> Result<BString, Error> {
     let mut result = crate::evaluation::CommandSubstitution {
         descriptor: None,
@@ -920,6 +942,9 @@ fn effective_ifs(shell: &Shell) -> &[u8] {
     &shell.ifs.bytes
 }
 
+// Split eligibility lives beside each byte, so truncating a parallel linked
+// list of regions is no longer an operation the implementation can forget.
+// [spec:dash:sem:expand.removerecordregions-fn]
 fn split_fields(shell: &Shell, fields: Vec<Field>) -> Vec<Field> {
     let ifs = ifs_characters(&shell.locale, effective_ifs(shell));
     fields

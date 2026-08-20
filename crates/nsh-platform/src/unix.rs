@@ -448,6 +448,7 @@ pub fn open_history_file(path: &Path) -> std::io::Result<std::fs::File> {
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .open(path)
 }
 

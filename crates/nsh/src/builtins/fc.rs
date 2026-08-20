@@ -111,10 +111,13 @@ fn scan_options(shell: &mut crate::context::Shell, args: &[&BStr]) -> Result<Fla
     Ok(flags)
 }
 
-/*
- *  This command is provided since POSIX decided to standardize
- *  the Korn shell fc command.  Oh well...
- */
+fn split_substitution_operand(word: &BStr) -> Option<(BString, BString)> {
+    let at = word.find_byte(b'=')?;
+    Some((BString::from(&word[..at]), BString::from(&word[at + 1..])))
+}
+
+/// The evaluator's entry point. It receives the owned expanded fields used by
+/// the command evaluator and leaves them intact while parsing `old=new`.
 // [spec:dash:sem:histedit.histcmd-fn]
 // [spec:dash:sem:myhistedit.histcmd-fn]
 // [spec:posix:req:xcu.output-files.tmpdir]
@@ -133,21 +136,6 @@ fn scan_options(shell: &mut crate::context::Shell, args: &[&BStr]) -> Result<Fla
 // [spec:posix:sem:builtin.fc.env-nlspath]
 // [spec:posix:req:builtin.fc.stderr]
 // [spec:posix:req:builtin.fc.interfaces]
-pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
-    let mut fields: Vec<ExpandedField> = args
-        .iter()
-        .map(|word| ExpandedField::from_bytes(word))
-        .collect();
-    run_fields(shell, &mut fields)
-}
-
-fn split_substitution_operand(word: &BStr) -> Option<(BString, BString)> {
-    let at = word.find_byte(b'=')?;
-    Some((BString::from(&word[..at]), BString::from(&word[at + 1..])))
-}
-
-/// The evaluator's entry point. It receives the owned expanded fields used by
-/// the command evaluator and leaves them intact while parsing `old=new`.
 // [spec:posix:req:builtin.fc.edit-and-reexecute]
 // [spec:posix:req:builtin.fc.exit-status]
 // [spec:nsh:sem:idiom.specified-defects+1]
@@ -413,7 +401,7 @@ pub(crate) fn run_fields(shell: &mut Shell, fields: &mut [ExpandedField]) -> Res
         if shell.display_history {
             shell.display_history = false;
         }
-        Ok(Flow::Done((result_status).into()))
+        Ok(Flow::Done(result_status))
     };
 
     if executing {

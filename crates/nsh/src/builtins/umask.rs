@@ -58,111 +58,113 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     mask = crate::error::with_interrupts_deferred(shell, |_| nsh_platform::creation_mask());
 
-    if mode.is_none() {
-        if symbolic_mode {
-            let allowed = !mask;
-            let mut record = Vec::with_capacity(18);
-            for class_index in 0..3 {
-                record.push(b"ugo"[class_index]);
-                record.push(b'=');
-                for permission_index in 0..3 {
-                    if (allowed & (1 << (8 - (3 * class_index + permission_index)))) != 0 {
-                        record.push(b"rwx"[permission_index]);
+    match mode {
+        None => {
+            if symbolic_mode {
+                let allowed = !mask;
+                let mut record = Vec::with_capacity(18);
+                for class_index in 0..3 {
+                    record.push(b"ugo"[class_index]);
+                    record.push(b'=');
+                    for permission_index in 0..3 {
+                        if (allowed & (1 << (8 - (3 * class_index + permission_index)))) != 0 {
+                            record.push(b"rwx"[permission_index]);
+                        }
                     }
+                    record.push(b',');
                 }
-                record.push(b',');
+                record.pop();
+                record.push(b'\n');
+                shell.write_output(OutputDestination::Stdout, &record)?;
+            } else {
+                shell.write_output_fmt(OutputDestination::Stdout, format_args!("{mask:04o}\n"))?;
             }
-            record.pop();
-            record.push(b'\n');
-            shell.write_output(OutputDestination::Stdout, &record)?;
-        } else {
-            shell.write_output_fmt(OutputDestination::Stdout, format_args!("{mask:04o}\n"))?;
         }
-    } else {
-        let mode = mode.expect("checked above");
-        let bytes: &[u8] = mode.as_ref();
-        let mut at = 0usize;
-        let mut new_mask: u32;
+        Some(mode) => {
+            let bytes: &[u8] = mode.as_ref();
+            let mut at = 0usize;
+            let mut new_mask: u32;
 
-        if bytes.first().is_some_and(u8::is_ascii_digit) {
-            new_mask = 0;
-            for &byte in bytes {
-                if !(b'0'..=b'7').contains(&byte) {
-                    let mut message = b"Illegal number: ".to_vec();
+            if bytes.first().is_some_and(u8::is_ascii_digit) {
+                new_mask = 0;
+                for &byte in bytes {
+                    if !(b'0'..=b'7').contains(&byte) {
+                        let mut message = b"Illegal number: ".to_vec();
+                        message.extend_from_slice(bytes);
+                        return Err(shell.diagnostics().shell_error(&message));
+                    }
+                    new_mask = (new_mask << 3) + u32::from(byte - b'0');
+                }
+            } else {
+                let mut positions: u32;
+
+                mask = !mask;
+                new_mask = mask;
+                positions = 0;
+                let valid = 'parse: {
+                    while at < bytes.len() {
+                        while at < bytes.len() && b"augo".contains(&bytes[at]) {
+                            match bytes[at] {
+                                b'a' => positions |= 0o111,
+                                b'u' => positions |= 0o100,
+                                b'g' => positions |= 0o010,
+                                b'o' => positions |= 0o001,
+                                _ => unreachable!(),
+                            }
+                            at += 1;
+                        }
+                        if positions == 0 {
+                            positions = 0o111;
+                        }
+                        let Some(&op) = bytes.get(at) else {
+                            break 'parse false;
+                        };
+                        if !b"=+-".contains(&op) {
+                            break 'parse false;
+                        }
+                        at += 1;
+                        let mut permission_bits = 0u32;
+                        while at < bytes.len() && b"rwxugoXs".contains(&bytes[at]) {
+                            match bytes[at] {
+                                b'r' => permission_bits |= 0o4,
+                                b'w' => permission_bits |= 0o2,
+                                b'x' => permission_bits |= 0o1,
+                                b'u' => permission_bits |= mask >> 6,
+                                b'g' => permission_bits |= mask >> 3,
+                                b'o' => permission_bits |= mask,
+                                b'X' if (mask & 0o111) != 0 => permission_bits |= 0o1,
+                                b'X' | b's' => {}
+                                _ => unreachable!(),
+                            }
+                            at += 1;
+                        }
+                        permission_bits = (permission_bits & 0o7) * positions;
+                        match op {
+                            b'-' => new_mask &= !permission_bits,
+                            b'=' => new_mask = permission_bits | (new_mask & !(positions * 0o7)),
+                            b'+' => new_mask |= permission_bits,
+                            _ => unreachable!(),
+                        }
+                        match bytes.get(at).copied() {
+                            Some(b',') => {
+                                positions = 0;
+                                at += 1;
+                            }
+                            Some(b'=' | b'+' | b'-') | None => {}
+                            Some(_) => break 'parse false,
+                        }
+                    }
+                    true
+                };
+                if !valid {
+                    let mut message = b"Illegal mode: ".to_vec();
                     message.extend_from_slice(bytes);
                     return Err(shell.diagnostics().shell_error(&message));
                 }
-                new_mask = (new_mask << 3) + u32::from(byte - b'0');
+                new_mask = !new_mask;
             }
-        } else {
-            let mut positions: u32;
-
-            mask = !mask;
-            new_mask = mask;
-            positions = 0;
-            let valid = 'parse: {
-                while at < bytes.len() {
-                    while at < bytes.len() && b"augo".contains(&bytes[at]) {
-                        match bytes[at] {
-                            b'a' => positions |= 0o111,
-                            b'u' => positions |= 0o100,
-                            b'g' => positions |= 0o010,
-                            b'o' => positions |= 0o001,
-                            _ => unreachable!(),
-                        }
-                        at += 1;
-                    }
-                    if positions == 0 {
-                        positions = 0o111;
-                    }
-                    let Some(&op) = bytes.get(at) else {
-                        break 'parse false;
-                    };
-                    if !b"=+-".contains(&op) {
-                        break 'parse false;
-                    }
-                    at += 1;
-                    let mut permission_bits = 0u32;
-                    while at < bytes.len() && b"rwxugoXs".contains(&bytes[at]) {
-                        match bytes[at] {
-                            b'r' => permission_bits |= 0o4,
-                            b'w' => permission_bits |= 0o2,
-                            b'x' => permission_bits |= 0o1,
-                            b'u' => permission_bits |= mask >> 6,
-                            b'g' => permission_bits |= mask >> 3,
-                            b'o' => permission_bits |= mask,
-                            b'X' if (mask & 0o111) != 0 => permission_bits |= 0o1,
-                            b'X' | b's' => {}
-                            _ => unreachable!(),
-                        }
-                        at += 1;
-                    }
-                    permission_bits = (permission_bits & 0o7) * positions;
-                    match op {
-                        b'-' => new_mask &= !permission_bits,
-                        b'=' => new_mask = permission_bits | (new_mask & !(positions * 0o7)),
-                        b'+' => new_mask |= permission_bits,
-                        _ => unreachable!(),
-                    }
-                    match bytes.get(at).copied() {
-                        Some(b',') => {
-                            positions = 0;
-                            at += 1;
-                        }
-                        Some(b'=' | b'+' | b'-') | None => {}
-                        Some(_) => break 'parse false,
-                    }
-                }
-                true
-            };
-            if !valid {
-                let mut message = b"Illegal mode: ".to_vec();
-                message.extend_from_slice(bytes);
-                return Err(shell.diagnostics().shell_error(&message));
-            }
-            new_mask = !new_mask;
+            nsh_platform::replace_creation_mask(new_mask);
         }
-        nsh_platform::replace_creation_mask(new_mask);
     }
     Ok(Flow::Done((0).into()))
 }

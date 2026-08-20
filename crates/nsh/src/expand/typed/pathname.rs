@@ -10,6 +10,22 @@ use super::Field;
 use crate::context::Shell;
 use crate::pattern::Pattern;
 
+// Quote protection is part of `Pattern`, candidates are owned paths, and
+// sorting uses the shell locale. These operations collectively replace the
+// cursor-based glob, escape-counting, and linked-list merge-sort helpers.
+// [spec:dash:sem:expand.addfname-common-fn]
+// [spec:dash:sem:expand.addfnamealt-fn]
+// [spec:dash:sem:expand.addglob-fn]
+// [spec:dash:sem:expand.esclen-fn]
+// [spec:dash:sem:expand.expandmeta-fn]
+// [spec:dash:sem:expand.expandmeta-glob-fn]
+// [spec:dash:sem:expand.expmeta-fn]
+// [spec:dash:sem:expand.expmeta-rmescapes-fn]
+// [spec:dash:sem:expand.expsort-fn]
+// [spec:dash:sem:expand.mesclen-fn]
+// [spec:dash:sem:expand.msort-fn]
+// [spec:dash:sem:expand.opendir-interruptible-fn]
+// [spec:dash:sem:expand.preglob-fn]
 pub(super) fn expand(shell: &Shell, fields: Vec<Field>) -> Vec<Field> {
     fields
         .into_iter()
