@@ -3,6 +3,7 @@ use bstr::{BStr, ByteSlice as _};
 use super::{Command, find_command};
 
 fn set_bash(sh: &mut crate::context::Shell, on: bool) {
+    // [spec:nsh:def:idiom.shell-options]
     crate::options::set_option_by_name(sh, BStr::new(b"bash"), on).unwrap();
     crate::options::options_changed(sh).unwrap();
 }
@@ -54,7 +55,7 @@ fn lookup_stamp_invalidates_cache() {
     set_bash(&mut sh, true);
     assert!(matches!(find(&mut sh, name), Command::Builtin(_)));
 
-    sh.options.set_flag(crate::options::bash, 0);
+    sh.options.set(crate::options::ShellOption::Bash, false);
     assert!(matches!(find(&mut sh, name), Command::Unknown));
     assert!(sh.commands.get(name).is_none());
 }

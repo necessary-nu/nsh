@@ -22,6 +22,8 @@ use std::io::Write;
 
 use crate::error::{INTOFF, INTON};
 use crate::fd::LogicalDescriptor;
+use crate::options::ShellOption;
+// [spec:nsh:def:idiom.shell-options]
 use crate::syntax::InputUnit;
 
 /// `MB_LEN_MAX > 16 ? MB_LEN_MAX : 16` — 16 on glibc.
@@ -970,7 +972,7 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
     let top_level_history_input = cur_pf(sh).uses_stdin || sh.input.cur == sh.input.top;
     if top_level_history_input
         && crate::histedit::history_active(sh)
-        && sh.options.flag(crate::options::nolog) == 0
+        && !sh.options.enabled(ShellOption::NoLog)
         && something != 0
     {
         let bytes = {
@@ -990,7 +992,7 @@ fn preadbuffer(sh: &mut crate::context::Shell, preserve_nul: bool) -> Result<Inp
         return Err(e);
     }
 
-    if sh.options.flag(crate::options::vflag) != 0 {
+    if sh.options.enabled(ShellOption::Verbose) {
         let _ = sh.io.stderr().write_all(&line);
         /* #ifdef FLUSHERR flushout(out2); */
     }

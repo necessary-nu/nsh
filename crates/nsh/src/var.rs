@@ -10,7 +10,7 @@
 //! `docs/divergences.md`.
 
 use bstr::{BStr, BString, ByteSlice};
-use core::ffi::{c_char, c_int};
+use core::ffi::c_int;
 use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -18,7 +18,8 @@ use std::io::Write as _;
 
 use crate::context::Shell;
 use crate::error::{Error, INTOFF, INTON};
-use crate::options::{NOPTS, options_changed};
+use crate::options::{OptionSet, ShellOption, options_changed};
+// [spec:nsh:def:idiom.shell-options]
 
 pub(crate) mod value;
 use value::{BashAttributes, VariableValue};
@@ -85,7 +86,7 @@ impl Var {
 
 // [spec:dash:def:var.localvar]
 enum LocalVar {
-    Options([c_char; NOPTS]),
+    Options(OptionSet),
     /// The declaration created this name; remove it on return.
     Created(BString),
     /// Restore the complete previous entry on return.
@@ -487,7 +488,7 @@ fn set_entry(
     if value.is_none() {
         flags |= VUNSET;
     }
-    if sh.options.flag(crate::options::aflag) != 0 {
+    if sh.options.enabled(ShellOption::AllExport) {
         flags |= VEXPORT;
     }
 
@@ -623,7 +624,7 @@ pub(crate) fn setvarint_bytes(
 pub(crate) fn lookupvarint_bytes(sh: &mut Shell, name: &BStr) -> Result<i64, Error> {
     let value = match lookup_bytes(sh, name) {
         Some(value) => value,
-        None if sh.options.flag(crate::options::uflag) != 0 => {
+        None if sh.options.enabled(ShellOption::Nounset) => {
             let mut message = name.to_vec();
             message.extend_from_slice(b": parameter not set");
             return Err(sh.sh_error_value(&message));
@@ -701,7 +702,7 @@ pub(crate) fn make_local_bytes(
 ) -> Result<(), Error> {
     INTOFF(sh);
     if assignment == b"-" {
-        let saved = sh.options.snapshot();
+        let saved = sh.options.state;
         sh.vars.push_local(LocalVar::Options(saved));
         INTON(sh);
         return Ok(());
@@ -752,7 +753,7 @@ fn poplocalvars(sh: &mut Shell) {
     while let Some(local) = frame.entries.pop() {
         match local {
             LocalVar::Options(saved) => {
-                sh.options.restore(saved);
+                sh.options.state = saved;
                 if let Err(error) = options_changed(sh) {
                     sh.status = error.status();
                 }

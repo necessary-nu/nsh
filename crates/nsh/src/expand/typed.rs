@@ -14,6 +14,8 @@ use super::{ExpansionMode, arglist, strlist};
 use crate::context::Shell;
 use crate::error::Error;
 use crate::nodes::Node;
+use crate::options::{OPTION_SPECS, ShellOption};
+// [spec:nsh:def:idiom.shell-options]
 use crate::pmatch::Pattern;
 use crate::word::{ParameterExpansion, ParameterOperation, ParsedWord, QuoteBoundary, WordPart};
 
@@ -206,7 +208,7 @@ pub(super) fn expand_argument(
     if let Some(output) = output {
         let fields = if context.full {
             let mut split = split_fields(sh, expanded.fields);
-            if sh.options.flag(crate::options::fflag) == 0 {
+            if !sh.options.enabled(ShellOption::NoGlob) {
                 split = pathname::expand(sh, split);
             }
             split
@@ -508,7 +510,7 @@ fn expand_parameter(
         }
         ParameterOperation::Assign => value_expansion(sh, name.as_bstr(), value, context),
         ParameterOperation::Length => {
-            if value.is_unset() && sh.options.flag(14) != 0 {
+            if value.is_unset() && sh.options.enabled(ShellOption::Nounset) {
                 return Err(parameter_error(sh, name.as_bstr(), false, None));
             }
             let length = value_length(sh, &value, context);
@@ -524,7 +526,7 @@ fn expand_parameter(
         | ParameterOperation::RemoveSmallestPrefix
         | ParameterOperation::RemoveLargestPrefix => {
             if value.is_unset() {
-                if sh.options.flag(14) != 0 {
+                if sh.options.enabled(ShellOption::Nounset) {
                     return Err(parameter_error(sh, name.as_bstr(), false, None));
                 }
                 return Ok(empty_value(context));
@@ -577,10 +579,11 @@ fn parameter_value(sh: &mut Shell, name: &BStr) -> Value {
         },
         Some(b'-') if name.len() == 1 => {
             let mut flags = BString::new(Vec::new());
-            for index in (0..crate::options::NOPTS).rev() {
-                let letter = crate::options::optletters[index];
-                if sh.options.flag(index) != 0 && letter != 0 {
-                    flags.push(letter as u8);
+            for spec in OPTION_SPECS.iter().rev() {
+                if sh.options.enabled(spec.option)
+                    && let Some(letter) = spec.letter
+                {
+                    flags.push(letter);
                 }
             }
             Value::Scalar(flags)
@@ -631,7 +634,7 @@ fn value_expansion(
 ) -> Result<Expansion, Error> {
     match value {
         Value::Unset => {
-            if sh.options.flag(14) != 0 {
+            if sh.options.enabled(ShellOption::Nounset) {
                 Err(parameter_error(sh, name, false, None))
             } else {
                 Ok(empty_value(context))

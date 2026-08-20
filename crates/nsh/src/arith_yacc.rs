@@ -503,6 +503,7 @@ pub fn arith(sh: &mut Shell, input: &BStr) -> Result<i64, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::options::ShellOption;
 
     fn shell() -> Shell {
         Shell::new(crate::streams::Streams::INHERIT)
@@ -553,11 +554,12 @@ mod tests {
         assert_eq!(arith(&mut sh, BStr::new(b"1 ? 7 : 1 / 0")).unwrap(), 7);
     }
 
+    // [spec:nsh:def:idiom.shell-options]
     // [spec:posix:req:builtin.set.opt-u-nounset/test]
     #[test]
     fn nounset_rejects_evaluated_arithmetic_reads() {
         let mut sh = shell();
-        sh.options.set_flag(crate::options::uflag, 1);
+        sh.options.set(ShellOption::Nounset, true);
 
         let error = arith(&mut sh, BStr::new(b"undefined_name + 1"))
             .expect_err("an evaluated unset variable must fail under nounset");

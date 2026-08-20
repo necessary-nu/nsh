@@ -30,6 +30,7 @@ use crate::exec::shellexec;
 // [spec:posix:req:builtin.exec.stderr]
 // [spec:posix:req:builtin.exec.interfaces]
 // [spec:posix:req:builtin.exec.exit-status]
+// [spec:nsh:def:idiom.shell-options]
 pub fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut utility = args.get(1..).unwrap_or_default();
     if utility
@@ -40,13 +41,15 @@ pub fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 
     if !utility.is_empty() {
-        let interactive_root = sh.options.flag(crate::options::iflag) != 0 && sh.shell_level == 0;
-        let saved_iflag = sh.options.flag(crate::options::iflag);
-        let saved_mflag = sh.options.flag(crate::options::mflag);
+        let interactive_root =
+            sh.options.enabled(crate::options::ShellOption::Interactive) && sh.shell_level == 0;
+        let saved_interactive = sh.options.enabled(crate::options::ShellOption::Interactive);
+        let saved_monitor = sh.options.enabled(crate::options::ShellOption::Monitor);
         if !interactive_root {
-            sh.options.set_flag(crate::options::iflag, 0); /* exit on error */
+            sh.options
+                .set(crate::options::ShellOption::Interactive, false); /* exit on error */
         }
-        sh.options.set_flag(crate::options::mflag, 0);
+        sh.options.set(crate::options::ShellOption::Monitor, false);
         crate::options::optschanged(sh)?;
         if !interactive_root {
             crate::input::flush_input(sh);
@@ -61,8 +64,10 @@ pub fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
              * interactive shell state before allowing evaluation to
              * continue. `Flow::Done` also takes the ordinary evalcommand
              * cleanup path, where exec's redirections are kept. */
-            sh.options.set_flag(crate::options::iflag, saved_iflag);
-            sh.options.set_flag(crate::options::mflag, saved_mflag);
+            sh.options
+                .set(crate::options::ShellOption::Interactive, saved_interactive);
+            sh.options
+                .set(crate::options::ShellOption::Monitor, saved_monitor);
             crate::options::optschanged(sh)?;
             return match outcome? {
                 Flow::Exit { .. } => Ok(Flow::Done((sh.status).into())),

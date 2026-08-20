@@ -11,7 +11,7 @@
 //!   * `crate::error::{jmploc, jmp_buf, handler, setjmp, longjmp,
 //!     sh_error, suppressint, intpending, onint}`
 //!   * `crate::output::{stderr, stdout}`
-//!   * `crate::options::{optlist, arg0, optionarg}`
+//!   * `crate::options::{ShellOption, arg0, optionarg}`
 //!   * `crate::var::{bltinlookup, histsizeval}`
 //!   * `crate::mystring::is_number`
 //!   * `crate::eval::evalstring`
@@ -19,7 +19,7 @@
 //!   * `crate::shellmain::readcmdfile` (src/main.c:283)
 
 use bstr::{BStr, BString};
-use core::ffi::{c_char, c_int};
+use core::ffi::c_int;
 use nsh_platform::ShellBytesExt as _;
 use nshedit::domain::EditingMode;
 use std::fs::File;
@@ -27,6 +27,8 @@ use std::io::{Read as _, Seek as _, Write};
 
 use crate::fd::LogicalDescriptor;
 use crate::linedit::{History, LineEditor};
+use crate::options::ShellOption;
+// [spec:nsh:def:idiom.shell-options]
 
 const DEFAULT_HISTORY_SIZE: usize = 128;
 
@@ -138,28 +140,6 @@ pub fn record_history_line(
     save_history(sh);
 }
 
-// ---------------------------------------------------------------------
-// src/options.h:47-63 — the option flags are `#define`s over optlist[].
-// ---------------------------------------------------------------------
-
-/// `#define iflag optlist[3]` (src/options.h:50)
-#[inline]
-fn iflag(sh: &crate::context::Shell) -> c_char {
-    sh.options.flag(3)
-}
-
-/// `#define Vflag optlist[9]` (src/options.h:56)
-#[inline]
-fn Vflag(sh: &crate::context::Shell) -> c_char {
-    sh.options.flag(9)
-}
-
-/// `#define Eflag optlist[10]` (src/options.h:57)
-#[inline]
-fn Eflag(sh: &crate::context::Shell) -> c_char {
-    sh.options.flag(10)
-}
-
 /*
  * Set history and editing status.  Called whenever the status may
  * have changed (figures out what to do).
@@ -174,7 +154,7 @@ fn Eflag(sh: &crate::context::Shell) -> c_char {
 // [spec:posix:req:edit.history-list]
 // [spec:nsh:req:interactive.default-history-navigation]
 pub fn histedit(sh: &mut crate::context::Shell) {
-    if iflag(sh) != 0 {
+    if sh.options.enabled(ShellOption::Interactive) {
         if !history_active(sh) {
             crate::error::INTOFF(sh);
             sh.histedit.history = Some(History::new());
@@ -217,9 +197,11 @@ pub fn histedit(sh: &mut crate::context::Shell) {
         // [spec:nsh:def:idiom.logical-descriptors]
         let stdin = sh.fds.get(LogicalDescriptor::STDIN);
         let stderr = sh.fds.get(LogicalDescriptor::STDERR);
-        let mode = if Vflag(sh) != 0 {
+        let mode = if sh.options.enabled(ShellOption::Vi) {
             Some(EditingMode::Vi)
-        } else if Eflag(sh) != 0 || crate::linedit::declared_terminal_supports_line_editing() {
+        } else if sh.options.enabled(ShellOption::Emacs)
+            || crate::linedit::declared_terminal_supports_line_editing()
+        {
             // Every native editor needs a command family. Emacs is nshedit's
             // insertion-oriented baseline; selecting it here does not mutate
             // the shell's `emacs` option.
@@ -347,7 +329,7 @@ mod tests {
     fn noninteractive_ignores_editor_request() {
         let streams = crate::streams::Streams::capture().unwrap();
         let mut shell = crate::context::Shell::new(streams);
-        shell.options.set_flag(crate::options::Eflag, 1);
+        shell.options.set(ShellOption::Emacs, true);
 
         histedit(&mut shell);
 

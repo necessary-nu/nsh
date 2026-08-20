@@ -5140,4 +5140,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.job-control-model}
     )}
+    {id replace-integer-options-and-flags, covered_rules (
+        idiom.shell-options
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.shell-options}
+    )}
 )

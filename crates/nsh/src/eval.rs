@@ -47,7 +47,9 @@ use crate::nodes::{
     BinaryCommand, CaseCommand, CompoundCommand, DescriptorTarget, ForCommand, FunctionDefinition,
     Node, Pipeline, Redirection, SimpleCommand,
 };
+use crate::options::ShellOption;
 use crate::output::Dest;
+// [spec:nsh:def:idiom.shell-options]
 use crate::redir::{ExpandedRedirection, RedirectionMode};
 use crate::var::VEXPORT;
 
@@ -332,28 +334,6 @@ macro_rules! flow {
 }
 pub(crate) use flow;
 
-/* src/options.h: `#define nflag optlist[5]` and friends. */
-#[inline]
-fn nflag(sh: &crate::context::Shell) -> c_int {
-    sh.options.flag(crate::options::nflag) as c_int
-}
-#[inline]
-fn eflag(sh: &crate::context::Shell) -> c_int {
-    sh.options.flag(crate::options::eflag) as c_int
-}
-#[inline]
-fn xflag(sh: &crate::context::Shell) -> c_int {
-    sh.options.flag(crate::options::xflag) as c_int
-}
-#[inline]
-fn iflag(sh: &crate::context::Shell) -> c_int {
-    sh.options.flag(crate::options::iflag) as c_int
-}
-#[inline]
-fn hflag(sh: &crate::context::Shell) -> c_int {
-    sh.options.flag(crate::options::hflag) as c_int
-}
-
 /*
  * Called to reset things after an exception.
  *
@@ -443,7 +423,7 @@ pub(crate) fn eval_top_level(
     n: Option<&Node>,
     context: EvalContext,
 ) -> Result<Flow, Error> {
-    if iflag(sh) == 0 || sh.shell_level != 0 {
+    if !sh.options.enabled(ShellOption::Interactive) || sh.shell_level != 0 {
         return evaltree(sh, n, context);
     }
     eval_interactive_sequence(sh, n, context)
@@ -530,7 +510,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
     let mut check_exit = false;
     let mut status = ExitStatus::SUCCESS;
 
-    if nflag(sh) == 0
+    if !sh.options.enabled(ShellOption::NoExec)
         && let Some(node) = n
     {
         flow!(crate::trap::dotrap(sh));
@@ -639,7 +619,7 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
                 }
             }
             Node::Function(definition) => {
-                if hflag(sh) != 0 {
+                if sh.options.enabled(ShellOption::HashAll) {
                     let _ = flow!(prehash_tree(sh, Some(definition.body.as_ref())));
                 }
                 crate::exec::defun(sh, definition);
@@ -668,8 +648,10 @@ pub fn evaltree(sh: &mut Shell, n: Option<&Node>, context: EvalContext) -> Resul
     }
     flow!(crate::trap::dotrap(sh));
 
-    let abort_for_errexit =
-        eflag(sh) != 0 && check_exit && !context.is_tested() && !status.success();
+    let abort_for_errexit = sh.options.enabled(ShellOption::Errexit)
+        && check_exit
+        && !context.is_tested()
+        && !status.success();
     if !abort_for_errexit && !context.exits() {
         return Ok(Flow::Done((sh.status).into()));
     }
@@ -1491,7 +1473,7 @@ fn evalcommand(
 
     localvar_stop = crate::var::pushlocalvars(sh, vlocal);
 
-    lastarg = if iflag(sh) != 0 && sh.eval.funcline == 0 && argc > 0 {
+    lastarg = if sh.options.enabled(ShellOption::Interactive) && sh.eval.funcline == 0 && argc > 0 {
         Some(arglist.list.len() - 1)
     } else {
         None
@@ -1560,7 +1542,7 @@ fn evalcommand(
             }
 
             /* Print the command if xflag is set. */
-            if xflag(sh) != 0 && sh.eval.inps4 == 0 {
+            if sh.options.enabled(ShellOption::Xtrace) && sh.eval.inps4 == 0 {
                 let mut sep: c_int;
 
                 /* This block is why `Dest` exists. It used to open with
@@ -1892,7 +1874,7 @@ fn evalfun(
     // Ordinarily only loops lexically inside the function are visible.
     // The explicit extension preserves the caller's dynamic loop depth so
     // break/continue can leave through this frame and be consumed there.
-    if sh.options.flag(crate::options::nonlexicalctrl) == 0 {
+    if !sh.options.enabled(ShellOption::NonLexicalControl) {
         sh.eval.loopnest = 0;
     }
     /* This `INTON` is *after* `reffunc`, and the epilogue's `freefunc` is

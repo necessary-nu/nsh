@@ -11,6 +11,8 @@ use crate::context::Shell;
 use crate::error::{INTOFF, INTON};
 use crate::fd::LogicalDescriptor;
 use crate::nodes::{FileRedirectionOperator, HereDocument, Node};
+use crate::options::ShellOption;
+// [spec:nsh:def:idiom.shell-options]
 
 /// Whether applying redirections is permanent or records a restorable frame.
 ///
@@ -389,7 +391,7 @@ fn open_file_redirection(
             let mut opened = None;
             if operator == FileRedirectionOperator::Write {
                 /* Take care of noclobber mode. */
-                if sh.options.flag(crate::options::Cflag) != 0 {
+                if sh.options.enabled(ShellOption::NoClobber) {
                     if !target
                         .try_to_path_buf()
                         .is_ok_and(|path| nsh_platform::path_exists(&path))

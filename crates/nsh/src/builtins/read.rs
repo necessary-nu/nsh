@@ -153,7 +153,8 @@ pub fn readcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             let _ = sh.io.stderr().write_all(prompt.as_bytes());
         }
     }
-    let prompt_for_continuation = sh.options.flag(crate::options::iflag) != 0
+    // [spec:nsh:def:idiom.shell-options]
+    let prompt_for_continuation = sh.options.enabled(crate::options::ShellOption::Interactive)
         && sh
             .fds
             .get(LogicalDescriptor::STDIN)

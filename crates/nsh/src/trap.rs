@@ -14,6 +14,8 @@ pub type sig_atomic_t = c_int;
 
 use crate::error::{Error, INTOFF, INTON};
 use crate::eval::Flow;
+use crate::options::ShellOption;
+// [spec:nsh:def:idiom.shell-options]
 use crate::nodes::Node;
 use crate::status::Signal;
 
@@ -377,23 +379,23 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
     if crate::shellmain::rootshell(sh) != 0 && action == S_DFL as c_int {
         match signal {
             signal if signal == Signal::from(nsh_platform::interrupt_signal()) => {
-                if sh.options.flag(crate::options::iflag) != 0
+                if sh.options.enabled(ShellOption::Interactive)
                     || sh.options.minusc.is_some()
-                    || sh.options.flag(crate::options::sflag) == 0
+                    || !sh.options.enabled(ShellOption::Stdin)
                 {
                     action = S_CATCH as c_int;
                 }
             }
             signal if signal == Signal::from(nsh_platform::quit_signal()) => {
                 /* #ifdef DEBUG: if (debug) break; */
-                if crate::shell::DEBUG && sh.options.flag(crate::options::debug) != 0 {
+                if crate::shell::DEBUG && sh.options.enabled(ShellOption::Debug) {
                     /* break */
-                } else if sh.options.flag(crate::options::iflag) != 0 {
+                } else if sh.options.enabled(ShellOption::Interactive) {
                     action = S_IGN as c_int;
                 }
             }
             signal if signal == Signal::from(nsh_platform::termination_signal()) => {
-                if sh.options.flag(crate::options::iflag) != 0 {
+                if sh.options.enabled(ShellOption::Interactive) {
                     action = S_IGN as c_int;
                 }
             }
@@ -402,7 +404,7 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
                 if signal == Signal::from(nsh_platform::terminal_stop_signal())
                     || signal == Signal::from(nsh_platform::terminal_output_signal()) =>
             {
-                if sh.options.flag(crate::options::mflag) != 0 {
+                if sh.options.enabled(ShellOption::Monitor) {
                     action = S_IGN as c_int;
                 }
             }
@@ -439,7 +441,7 @@ fn setsignal_via(sh: &mut crate::context::Shell, signal: Signal, via: Via) {
          * is hard-ignored and can never be trapped, and that rule cannot
          * be reproduced without reading the inherited disposition. */
         if current == crate::host::Disposition::Ignore {
-            if sh.options.flag(crate::options::mflag) != 0
+            if sh.options.enabled(ShellOption::Monitor)
                 && (signal == Signal::from(nsh_platform::terminal_stop_signal())
                     || signal == Signal::from(nsh_platform::terminal_input_signal())
                     || signal == Signal::from(nsh_platform::terminal_output_signal()))

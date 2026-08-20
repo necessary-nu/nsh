@@ -25,6 +25,8 @@ use std::io::Write;
 use crate::error::FORCEINTON;
 use crate::eval::EvalContext;
 use crate::jobs::JobDisplay;
+use crate::options::ShellOption;
+// [spec:nsh:def:idiom.shell-options]
 
 /* `MKINIT struct jmploc main_handler;` was here — the outermost handler,
  * which the generated `FORKRESET` block re-pointed `handler` at after a
@@ -35,20 +37,6 @@ use crate::jobs::JobDisplay;
 #[inline]
 pub fn rootshell(sh: &Shell) -> c_int {
     (sh.shell_level == 0) as c_int
-}
-
-/* src/options.h: `#define iflag optlist[3]` and friends. */
-#[inline]
-fn iflag(sh: &crate::context::Shell) -> c_int {
-    sh.options.flag(crate::options::iflag) as c_int
-}
-#[inline]
-fn Iflag(sh: &crate::context::Shell) -> c_int {
-    sh.options.flag(crate::options::Iflag) as c_int
-}
-#[inline]
-fn sflag(sh: &crate::context::Shell) -> c_int {
-    sh.options.flag(crate::options::sflag) as c_int
 }
 
 // [spec:dash:def:main.etext-fn]
@@ -157,7 +145,7 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
                  *   trputs("Shell args:  ");  trargs(argv); */
                 crate::init::init(sh)?;
                 let login = crate::options::procargs(sh, argv)?;
-                if login != 0 {
+                if login {
                     resume = StartupPhase::UserProfile;
                     crate::eval::flow!(read_profile(sh, BStr::new(b"/etc/profile")));
                     phase = StartupPhase::UserProfile;
@@ -177,7 +165,7 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
                 if
                 /* #ifndef linux: getuid() == geteuid() &&
                  *                getgid() == getegid() && */
-                iflag(sh) != 0
+                sh.options.enabled(ShellOption::Interactive)
                     && let Some(shinit) = crate::var::lookup_bytes(sh, BStr::new(b"ENV"))
                         .filter(|value| !value.is_empty())
                 {
@@ -192,7 +180,7 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
                     match crate::eval::evalstring(
                         sh,
                         BStr::new(command.as_slice()),
-                        if sflag(sh) != 0 {
+                        if sh.options.enabled(ShellOption::Stdin) {
                             EvalContext::DEFAULT
                         } else {
                             EvalContext::EXITING
@@ -204,7 +192,7 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
                     }
                 }
 
-                phase = if sflag(sh) != 0 || sh.options.minusc.is_none() {
+                phase = if sh.options.enabled(ShellOption::Stdin) || sh.options.minusc.is_none() {
                     StartupPhase::CommandLoop
                 } else {
                     StartupPhase::Exit
@@ -283,7 +271,7 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
             if e_is_exit
                 || unrecoverable_read
                 || resume == StartupPhase::Initialize
-                || iflag(sh) == 0
+                || !sh.options.enabled(ShellOption::Interactive)
                 || sh.shell_level != 0
             {
                 explicit_exit_status = if e_is_exit { selected_status } else { None };
@@ -372,7 +360,7 @@ pub(crate) fn cmdloop(
      * effects, but it cannot turn a command file into an interactive input
      * source. Capture that property before the first command can mutate the
      * option table. */
-    let interactive_input = iflag(sh) != 0 && top != 0;
+    let interactive_input = sh.options.enabled(ShellOption::Interactive) && top != 0;
 
     /* TRACE(("cmdloop(%d) called\n", top)); */
     loop {
@@ -386,7 +374,7 @@ pub(crate) fn cmdloop(
             crate::jobs::showjobs(sh, crate::output::Dest::Stderr, JobDisplay::Changed)?;
         }
         inter = 0;
-        if iflag(sh) != 0 && top != 0 {
+        if sh.options.enabled(ShellOption::Interactive) && top != 0 {
             inter += 1;
             crate::mail::chkmail(sh);
         }
@@ -424,22 +412,24 @@ pub(crate) fn cmdloop(
                 /* Preserve dash's line termination when a command file used
                  * the runtime `set -i` extension: prompting may be live, but
                  * EOF still terminates this non-interactive input source. */
-                if Iflag(sh) == 0 && iflag(sh) != 0 {
+                if !sh.options.enabled(ShellOption::IgnoreEof)
+                    && sh.options.enabled(ShellOption::Interactive)
+                {
                     let _ = sh.io.stderr().write_all(b"\n");
                 }
                 break;
             }
-            if Iflag(sh) == 0 && numeof >= 50 {
+            if !sh.options.enabled(ShellOption::IgnoreEof) && numeof >= 50 {
                 break;
             }
             if crate::jobs::stoppedjobs(sh) == 0 {
-                if Iflag(sh) == 0 {
+                if !sh.options.enabled(ShellOption::IgnoreEof) {
                     // [spec:nsh:req:compat.smoosh.interactive-job-prompt]
                     // A real terminal needs a line ending after the user's
                     // EOF keystroke. A forced-interactive pipe has no echoed
                     // keystroke to terminate, so the prompt is already the
                     // complete byte stream.
-                    if iflag(sh) != 0 && sh.input.stdin_istty != 0 {
+                    if sh.options.enabled(ShellOption::Interactive) && sh.input.stdin_istty != 0 {
                         let _ = sh.io.stderr().write_all(b"\n");
                     }
                     break;

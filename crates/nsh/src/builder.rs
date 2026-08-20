@@ -281,6 +281,7 @@ mod tests {
         );
     }
 
+    // [spec:nsh:def:idiom.shell-options]
     /// The two spellings the sketch promised are the same option reach the
     /// same flag. This is the whole of `set_option_by_name`'s contract.
     #[test]
@@ -293,10 +294,18 @@ mod tests {
             .option(BStr::new(b"e"), true)
             .build()
             .unwrap();
-        assert_eq!(by_name.options.flag(crate::options::eflag), 1);
+        assert!(
+            by_name
+                .options
+                .enabled(crate::options::ShellOption::Errexit)
+        );
         assert_eq!(
-            by_name.options.flag(crate::options::eflag),
-            by_letter.options.flag(crate::options::eflag)
+            by_name
+                .options
+                .enabled(crate::options::ShellOption::Errexit),
+            by_letter
+                .options
+                .enabled(crate::options::ShellOption::Errexit)
         );
     }
 
@@ -343,8 +352,12 @@ mod tests {
         crate::options::set_option_by_name(&mut sh, BStr::new(b"bash"), false).unwrap();
 
         assert_eq!(sh.options.dialect(), crate::options::Dialect::Posix);
-        for i in 0..crate::options::NOPTS {
-            assert_eq!(sh.options.flag(i), 0, "option {i} was not restored");
+        for spec in crate::options::OPTION_SPECS {
+            assert!(
+                !sh.options.enabled(spec.option),
+                "option {:?} was not restored",
+                spec.option
+            );
         }
     }
 
@@ -353,8 +366,12 @@ mod tests {
     #[test]
     fn the_default_shell_has_every_option_off() {
         let sh = Shell::builder().build().unwrap();
-        for i in 0..crate::options::NOPTS {
-            assert_eq!(sh.options.flag(i), 0, "option {i} was not off");
+        for spec in crate::options::OPTION_SPECS {
+            assert!(
+                !sh.options.enabled(spec.option),
+                "option {:?} was not off",
+                spec.option
+            );
         }
     }
 

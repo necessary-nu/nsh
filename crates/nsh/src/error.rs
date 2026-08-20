@@ -14,7 +14,7 @@ use core::sync::atomic::{Ordering, compiler_fence};
 use std::io::Write;
 
 use bstr::{BStr, BString, ByteSlice};
-use core::ffi::{c_char, c_int};
+use core::ffi::c_int;
 
 /*
  * Types of operations (passed to the errmsg routine).
@@ -259,13 +259,14 @@ macro_rules! RESTOREINT {
 /// is a frontend boundary question and not this node's.
 // [spec:dash:def:error.onint-fn]
 // [spec:dash:sem:error.onint-fn]
+// [spec:nsh:def:idiom.shell-options]
 pub fn onint(sh: &crate::context::Shell) -> Error {
     crate::siginbox::signals().set_interrupt_pending(false);
     crate::system::sigclearmask();
     /* `#define rootshell (!shlvl)` (main.h); `#define iflag optlist[3]`. */
     let rootshell: bool = sh.shell_level == 0;
-    let iflag: c_char = sh.options.flag(crate::options::iflag);
-    if !(rootshell && iflag != 0) {
+    let interactive = sh.options.enabled(crate::options::ShellOption::Interactive);
+    if !(rootshell && interactive) {
         nsh_platform::terminate_with_interrupt();
     }
     /* `exitstatus = SIGINT + 128` was here; `Error::status()` answers
@@ -795,7 +796,8 @@ mod tests {
     /// dies of SIGINT. That branch is dash's and is deliberate; these
     /// cases are about the other one.
     fn as_interactive_root(sh: &mut crate::context::Shell) {
-        sh.options.set_flag(crate::options::iflag, 1);
+        sh.options
+            .set(crate::options::ShellOption::Interactive, true);
         /* Copied out: a shared reference to a mutable static is what the
          * lint forbids, and `assert_eq!` takes one. */
         let lvl = sh.shell_level;

@@ -1,4 +1,5 @@
-use super::{ShellOptions, bash};
+use super::{ShellOption, ShellOptions};
+// [spec:nsh:def:idiom.shell-options]
 
 // [spec:nsh:def:compat.bash.mode]
 /// The grammar and runtime profile selected for one shell input unit.
@@ -18,7 +19,7 @@ impl ShellOptions {
     // [spec:nsh:req:compat.bash.default-isolation]
     /// The dialect selected by this shell's own option table.
     pub(crate) fn dialect(&self) -> Dialect {
-        if self.flag(bash) == 0 {
+        if !self.enabled(ShellOption::Bash) {
             Dialect::Posix
         } else {
             Dialect::Bash

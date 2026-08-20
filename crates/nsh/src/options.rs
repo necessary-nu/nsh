@@ -1,22 +1,23 @@
-//! Literal port of `src/options.c` / `src/options.h`.
+//! Shell options and command-line option parsing.
 //! Rules: `docs/spec/port/src/options.md`.
 //!
-//! `optlist`, `optnames` and `optletters` are three parallel views of the same
-//! option and **must stay in the same order**.  The `eflag`/`fflag`/… names of
-//! `options.h` become `usize` indices, so a call site reads `optlist[eflag]`
-//! and stays assignable exactly like the C macro.
+//! Each option has a [`ShellOption`] identity and one [`model::OptionSpec`]
+//! containing its long name and optional invocation letter. Runtime state is
+//! an [`OptionSet`], never a byte array indexed by translated C macros.
 
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, BString};
-use core::ffi::{c_char, c_int};
-use std::ffi::CStr;
+use core::ffi::c_int;
 use std::io::Write;
 
 use crate::fd::LogicalDescriptor;
 
 mod dialect;
 pub(crate) use dialect::Dialect;
+
+mod model;
+pub(crate) use model::{OPTION_SPECS, OptionSet, ShellOption};
 
 mod bash_options;
 pub(crate) use bash_options::NAMES as BASH_OPTION_NAMES;
@@ -74,104 +75,18 @@ impl shparam {
     }
 }
 
-pub const NOPTS: usize = 21;
-
-/*
- * options.h spells these `#define eflag optlist[0]` etc.  The port keeps the
- * names as the *index* into `optlist`, so a call site reads
- * `optlist[iflag]` — assignable exactly like the C macro.
- */
-pub const eflag: usize = 0;
-pub const fflag: usize = 1;
-pub const Iflag: usize = 2;
-pub const iflag: usize = 3;
-pub const mflag: usize = 4;
-pub const nflag: usize = 5;
-pub const sflag: usize = 6;
-pub const xflag: usize = 7;
-pub const vflag: usize = 8;
-pub const Vflag: usize = 9;
-pub const Eflag: usize = 10;
-pub const Cflag: usize = 11;
-pub const aflag: usize = 12;
-pub const bflag: usize = 13;
-pub const uflag: usize = 14;
-pub const nolog: usize = 15;
-pub const pipefail: usize = 16;
-pub const debug: usize = 17;
-pub const hflag: usize = 18;
-pub const nonlexicalctrl: usize = 19;
-// [spec:nsh:req:compat.bash.selection] long-option state
-pub const bash: usize = 20;
-
-/* `static const char *const optnames[NOPTS]`.
- *
- * `static` rather than `static mut`: it is never written, and it was only
- * mutable because a `[*const c_char]` is not `Sync`. `&CStr` is, and it
- * carries the NUL the readers below rely on in the type instead of in a
- * comment. Same move `defifsvar` made in `var.rs`. */
-static optnames: [&CStr; NOPTS] = [
-    c"errexit",
-    c"noglob",
-    c"ignoreeof",
-    c"interactive",
-    c"monitor",
-    c"noexec",
-    c"stdin",
-    c"xtrace",
-    c"verbose",
-    c"vi",
-    c"emacs",
-    c"noclobber",
-    c"allexport",
-    c"notify",
-    c"nounset",
-    c"nolog",
-    c"pipefail",
-    c"debug",
-    c"hashall",
-    c"nonlexicalctrl",
-    c"bash",
-];
-
-pub static optletters: [c_char; NOPTS] = [
-    b'e' as c_char,
-    b'f' as c_char,
-    b'I' as c_char,
-    b'i' as c_char,
-    b'm' as c_char,
-    b'n' as c_char,
-    b's' as c_char,
-    b'x' as c_char,
-    b'v' as c_char,
-    b'V' as c_char,
-    b'E' as c_char,
-    b'C' as c_char,
-    b'a' as c_char,
-    b'b' as c_char,
-    b'u' as c_char,
-    0,
-    0,
-    0,
-    b'h' as c_char,
-    0,
-    0,
-];
-
 /// The shell's option flags — `set -e`, `set -x`, `-i` and the rest.
 ///
 /// `docs/api-design.md` 5 calls the field `options`; the type cannot be
 /// `Options` because that name is already this module's builtin option
 /// *parser*, which is a different thing and stays call-scoped per 5.2.
 ///
-/// The array is private and reached through [`ShellOptions::flag`] and
-/// [`ShellOptions::set_flag`]. That is worth the extra characters at 80
-/// call sites: an index into a bare `[c_char; NOPTS]` is exactly the
-/// shape that let any module write any flag, and the accessors are what
-/// make "who sets `-e`" answerable.
+/// Runtime state is addressed only by [`ShellOption`]. The metadata table is
+/// declarative and cannot drift away from that typed identity.
+// [spec:nsh:def:idiom.shell-options]
 // [spec:nsh:req:compat.bash.state-isolation]
 pub struct ShellOptions {
-    flags: [c_char; NOPTS],
+    pub(crate) state: OptionSet,
     /// Bash's `shopt` namespace. An explicit value is distinct from the
     /// interactive default, so `shopt -u expand_aliases` remains off in an
     /// interactive shell.
@@ -196,10 +111,10 @@ pub struct ShellOptions {
 }
 
 impl ShellOptions {
-    /// `optlist` was declared all-zero.
+    /// Every shell option defaults off.
     pub(crate) const fn new() -> Self {
         ShellOptions {
-            flags: [0; NOPTS],
+            state: OptionSet::EMPTY,
             bash_options: bash_options::BashOptions::new(),
             shellparam: shparam::new(),
             minusc: None,
@@ -209,13 +124,16 @@ impl ShellOptions {
     }
 
     #[inline]
-    pub(crate) fn flag(&self, which: usize) -> c_char {
-        self.flags[which]
+    pub(crate) const fn enabled(&self, option: ShellOption) -> bool {
+        self.state.0 & option.mask() != 0
     }
 
-    #[inline]
-    pub(crate) fn set_flag(&mut self, which: usize, to: c_char) {
-        self.flags[which] = to;
+    pub(crate) fn set(&mut self, option: ShellOption, enabled: bool) {
+        if enabled {
+            self.state.0 |= option.mask();
+        } else {
+            self.state.0 &= !option.mask();
+        }
     }
 
     pub(crate) fn set_arg0(&mut self, value: &BStr) {
@@ -231,22 +149,6 @@ impl ShellOptions {
         self.arg0
             .as_ref()
             .map(|value| BStr::new(&value[..value.len() - 1]))
-    }
-
-    /// The whole flag set, copied.
-    ///
-    /// `local -` saves it and `poplocalvars` puts it back, and that is
-    /// the only place the flags move as a unit. It is also the seam
-    /// where `options` and `vars` are genuinely entangled -- a
-    /// `localvar` holds a copy of this array -- so it is a named pair of
-    /// methods rather than a public field, and whoever moves `vars`
-    /// reads this comment first.
-    pub(crate) fn snapshot(&self) -> [c_char; NOPTS] {
-        self.flags
-    }
-
-    pub(crate) fn restore(&mut self, saved: [c_char; NOPTS]) {
-        self.flags = saved;
     }
 }
 
@@ -267,10 +169,11 @@ impl ShellOptions {
 // [spec:posix:req:sh.special-parameter-0]
 // [spec:posix:req:sh.operand-command-name]
 // [spec:posix:req:sh.operand-command-string]
-pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<c_int, Error> {
-    let mut i: c_int;
+pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<bool, Error> {
     let first = argv.first().map(Vec::as_slice).unwrap_or_default();
-    let mut login = (first.first() == Some(&b'-')) as c_int;
+    let mut login = first.first() == Some(&b'-');
+
+    sh.options.state = OptionSet::EMPTY;
 
     if let Some(first) = argv.first() {
         sh.options.set_arg0(BStr::new(first.as_slice()));
@@ -280,11 +183,6 @@ pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<c_in
         .skip(1)
         .map(|word| BStr::new(word.as_slice()))
         .collect();
-    i = 0;
-    while i < NOPTS as c_int {
-        sh.options.set_flag(i as usize, 2);
-        i += 1;
-    }
     /* `options` reports what the C left in `argptr` and `minusc`: how
      * far it got, and whether `-c` was given. The pointer the C stores in
      * `minusc` is only ever read as a flag before the line below
@@ -297,12 +195,12 @@ pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<c_in
         if scan.minus_c {
             return Err(sh.sh_error_value(b"-c requires an argument"));
         }
-        sh.options.set_flag(sflag, 1);
+        sh.options.set(ShellOption::Stdin, true);
     }
-    if sh.options.flag(sflag) == 1 && sh.input.stdin_istty < 0 {
+    if sh.options.enabled(ShellOption::Stdin) && sh.input.stdin_istty < 0 {
         crate::input::input_init(sh);
     }
-    if sh.options.flag(iflag) == 2 && sh.options.flag(sflag) == 1 {
+    if !scan.explicit.contains(ShellOption::Interactive) && sh.options.enabled(ShellOption::Stdin) {
         // [spec:nsh:def:idiom.logical-descriptors]
         if sh.input.stdin_istty != 0
             && sh
@@ -311,28 +209,21 @@ pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<c_in
                 .as_ref()
                 .is_some_and(|fd| nsh_platform::is_terminal(fd))
         {
-            sh.options.set_flag(iflag, 1);
+            sh.options.set(ShellOption::Interactive, true);
         }
     }
-    if sh.options.flag(mflag) == 2 {
+    if !scan.explicit.contains(ShellOption::Monitor) {
         // [spec:nsh:req:compat.smoosh.interactive-job-prompt]
         // `-i` makes a pipe an interactive input source, but it does not
         // conjure up the terminal that monitor mode needs. Leave monitor
         // mode off in that one case; an explicit `set -m` remains distinct
         // and still reaches `setjobctl`.
-        let monitor = if sh.options.flag(sflag) == 1 && sh.input.stdin_istty == 0 {
-            0
+        let monitor = if sh.options.enabled(ShellOption::Stdin) && sh.input.stdin_istty == 0 {
+            false
         } else {
-            sh.options.flag(iflag)
+            sh.options.enabled(ShellOption::Interactive)
         };
-        sh.options.set_flag(mflag, monitor);
-    }
-    i = 0;
-    while i < NOPTS as c_int {
-        if sh.options.flag(i as usize) == 2 {
-            sh.options.set_flag(i as usize, 0);
-        }
-        i += 1;
+        sh.options.set(ShellOption::Monitor, monitor);
     }
     /* #if DEBUG == 2 — not selected in this configuration:
      *     debug = 1;
@@ -345,7 +236,7 @@ pub fn procargs(sh: &mut crate::context::Shell, argv: &[Vec<u8>]) -> Result<c_in
         if next < args.len() {
             setarg0 = true; /* goto setarg0 */
         }
-    } else if sh.options.flag(sflag) == 0 {
+    } else if !sh.options.enabled(ShellOption::Stdin) {
         crate::input::set_command_input_file(sh, args[next])?;
         setarg0 = true;
     }
@@ -368,10 +259,10 @@ pub fn optschanged(sh: &mut crate::context::Shell) -> Result<(), crate::error::E
     crate::exec::dispatch_changed(sh);
     /* `#ifdef DEBUG opentrace();` — the dash build does not define DEBUG,
      * so `show.c` compiles to nothing and there is no trace file. */
-    crate::trap::setinteractive(sh, sh.options.flag(iflag) as c_int);
+    crate::trap::setinteractive(sh, sh.options.enabled(ShellOption::Interactive) as c_int);
     /* #ifndef SMALL */
     crate::histedit::histedit(sh);
-    crate::jobs::setjobctl(sh, sh.options.flag(mflag) as c_int)
+    crate::jobs::setjobctl(sh, sh.options.enabled(ShellOption::Monitor) as c_int)
 }
 
 /// Typed entry point for callers that do not participate in the legacy
@@ -387,7 +278,7 @@ pub(crate) fn options_changed(sh: &mut Shell) -> Result<(), Error> {
 #[derive(Debug)]
 pub(crate) struct Scan {
     /// The C's return value.
-    pub(crate) login: c_int,
+    pub(crate) login: bool,
     /// The first word the scan did not consume: the C's `argptr`.
     pub(crate) next: usize,
     /// `-c` was given. The C records it by pointing `minusc` into the
@@ -395,6 +286,9 @@ pub(crate) struct Scan {
     /// `procargs` replaces it with the command before anything reads the
     /// bytes -- so a flag is what it is.
     pub(crate) minus_c: bool,
+    /// Options explicitly named during this scan. Startup default inference
+    /// uses this instead of storing the C port's magic value `2` in state.
+    explicit: OptionSet,
 }
 
 /*
@@ -426,11 +320,11 @@ pub(crate) fn options(
     start: usize,
     cmdline: bool,
 ) -> Result<Scan, Error> {
-    let mut val: c_int = 0;
     let mut scan = Scan {
-        login: 0,
+        login: false,
         next: start,
         minus_c: false,
+        explicit: OptionSet::EMPTY,
     };
 
     loop {
@@ -441,14 +335,13 @@ pub(crate) fn options(
         /* `c = *p++`: the first byte decides, and the cluster starts at
          * the second. An empty word takes the `else` and is put back. */
         let c = word.first().copied().unwrap_or(0);
-        if c == b'-' {
-            val = 1;
+        let enabled = if c == b'-' {
             if word.len() == 1 || &word[..] == b"--" {
                 if !cmdline {
                     /* "-" means turn off -x and -v */
                     if word.len() == 1 {
-                        sh.options.set_flag(vflag, 0);
-                        sh.options.set_flag(xflag, sh.options.flag(vflag));
+                        sh.options.set(ShellOption::Verbose, false);
+                        sh.options.set(ShellOption::Xtrace, false);
                     }
                     /* "--" means reset params */
                     else if scan.next >= args.len() {
@@ -457,12 +350,13 @@ pub(crate) fn options(
                 }
                 break; /* "-" or "--" terminates options */
             }
+            true
         } else if c == b'+' {
-            val = 0;
+            false
         } else {
             scan.next -= 1;
             break;
-        }
+        };
         let mut i = 1usize;
         loop {
             let Some(&c) = word.get(i) else {
@@ -472,14 +366,17 @@ pub(crate) fn options(
             if c == b'c' && cmdline {
                 scan.minus_c = true; /* command is after shell args */
             } else if c == b'l' && cmdline {
-                scan.login = 1;
+                scan.login = true;
             } else if c == b'o' {
-                minus_o(sh, args.get(scan.next).copied(), val)?;
+                if let Some(option) = minus_o(sh, args.get(scan.next).copied(), enabled)? {
+                    scan.explicit.set(option, true);
+                }
                 if scan.next < args.len() {
                     scan.next += 1;
                 }
             } else {
-                setoption(sh, c, val)?;
+                let option = setoption(sh, c, enabled)?;
+                scan.explicit.set(option, true);
             }
         }
     }
@@ -505,59 +402,54 @@ pub(crate) fn options(
 // [spec:posix:def:builtin.set.opt-o-verbose]
 // [spec:posix:req:builtin.set.opt-o-vi]
 // [spec:posix:def:builtin.set.opt-o-xtrace]
-fn minus_o(sh: &mut crate::context::Shell, name: Option<&BStr>, val: c_int) -> Result<(), Error> {
-    let mut i: c_int;
-
-    let name = name.map(crate::shell::cstring);
+fn minus_o(
+    sh: &mut crate::context::Shell,
+    name: Option<&BStr>,
+    enabled: bool,
+) -> Result<Option<ShellOption>, Error> {
+    let name = name.map(|value| crate::mystring::cstr_prefix(value.as_ref()));
     if name.is_none() {
-        if val != 0 {
+        if enabled {
             let heading = b"Current option settings\n";
             let _ = sh.io.stdout().write_all(heading);
-            i = 0;
-            while i < NOPTS as c_int {
-                let name = optnames[i as usize].to_bytes();
-                let mut line = name.to_vec();
+            for spec in OPTION_SPECS {
+                let mut line = spec.name.to_vec();
                 if line.len() < 16 {
                     line.resize(16, b' ');
                 }
-                line.extend_from_slice(if sh.options.flag(i as usize) != 0 {
+                line.extend_from_slice(if sh.options.enabled(spec.option) {
                     b"on\n"
                 } else {
                     b"off\n"
                 });
                 let _ = sh.io.stdout().write_all(&line);
-                i += 1;
             }
         } else {
-            i = 0;
-            while i < NOPTS as c_int {
+            for spec in OPTION_SPECS {
                 let mut line = b"set ".to_vec();
-                line.extend_from_slice(if sh.options.flag(i as usize) != 0 {
+                line.extend_from_slice(if sh.options.enabled(spec.option) {
                     b"-o "
                 } else {
                     b"+o "
                 });
-                line.extend_from_slice(optnames[i as usize].to_bytes());
+                line.extend_from_slice(spec.name);
                 line.push(b'\n');
                 let _ = sh.io.stdout().write_all(&line);
-                i += 1;
             }
         }
     } else {
         let name = name.expect("the naming branch");
-        i = 0;
-        while i < NOPTS as c_int {
-            if name.as_bytes() == optnames[i as usize].to_bytes() {
-                sh.options.set_flag(i as usize, val as c_char);
-                return Ok(());
+        for spec in OPTION_SPECS {
+            if name == spec.name {
+                sh.options.set(spec.option, enabled);
+                return Ok(Some(spec.option));
             }
-            i += 1;
         }
         let mut message = b"Illegal option -o ".to_vec();
-        message.extend_from_slice(name.as_bytes());
+        message.extend_from_slice(name);
         return Err(sh.sh_error_value(&message));
     }
-    Ok(())
+    Ok(None)
 }
 
 // [spec:dash:def:options.setoption-fn]
@@ -584,32 +476,31 @@ pub(crate) fn set_option_by_name(
     name: &BStr,
     on: bool,
 ) -> Result<(), Error> {
-    let val: c_int = if on { 1 } else { 0 };
     if name.len() == 1 {
-        setoption(sh, name[0], val)
+        setoption(sh, name[0], on).map(|_| ())
     } else {
-        minus_o(sh, Some(name), val)
+        minus_o(sh, Some(name), on).map(|_| ())
     }
 }
 
-fn setoption(sh: &mut crate::context::Shell, flag: u8, val: c_int) -> Result<(), Error> {
-    let mut i: c_int;
-
-    i = 0;
-    while i < NOPTS as c_int {
-        if optletters[i as usize] as u8 == flag {
-            sh.options.set_flag(i as usize, val as c_char);
-            if val != 0 {
+fn setoption(
+    sh: &mut crate::context::Shell,
+    flag: u8,
+    enabled: bool,
+) -> Result<ShellOption, Error> {
+    for spec in OPTION_SPECS {
+        if spec.letter == Some(flag) {
+            sh.options.set(spec.option, enabled);
+            if enabled {
                 /* #%$ hack for ksh semantics */
-                if flag == b'V' {
-                    sh.options.set_flag(Eflag, 0);
-                } else if flag == b'E' {
-                    sh.options.set_flag(Vflag, 0);
+                if spec.option == ShellOption::Vi {
+                    sh.options.set(ShellOption::Emacs, false);
+                } else if spec.option == ShellOption::Emacs {
+                    sh.options.set(ShellOption::Vi, false);
                 }
             }
-            return Ok(());
+            return Ok(spec.option);
         }
-        i += 1;
     }
     let mut message = b"Illegal option -".to_vec();
     message.push(flag);
@@ -991,7 +882,7 @@ mod tests {
         sh: &mut crate::context::Shell,
         raw: &[&[u8]],
         cmdline: bool,
-    ) -> (usize, bool, c_int) {
+    ) -> (usize, bool, bool) {
         let _guard = crate::testutil::lock();
         let mut owned = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
@@ -1034,6 +925,16 @@ mod tests {
         assert_eq!(next, 2);
     }
 
+    #[test]
+    fn scan_records_typed_options() {
+        let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
+        let args = words(&[b"-i", b"+m"]);
+        let scan = options(&mut sh, &args, 0, true).unwrap();
+        assert!(scan.explicit.contains(ShellOption::Interactive));
+        assert!(scan.explicit.contains(ShellOption::Monitor));
+        assert!(!scan.explicit.contains(ShellOption::Errexit));
+    }
+
     /// `-c` and `-l` are command-line only: as a `set` option `-l` is an
     /// ordinary letter, and `set -c` is an error rather than a command.
     #[test]
@@ -1043,7 +944,7 @@ mod tests {
         let (_, minus_c, login) = scan_options(sh, &[b"-c", b"echo hi"], true);
         assert!(minus_c);
         let (_, _, login_off) = scan_options(sh, &[b"-l"], true);
-        assert_eq!((login, login_off), (0, 1));
+        assert_eq!((login, login_off), (false, true));
     }
 
     #[test]
@@ -1059,11 +960,11 @@ mod tests {
         let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let enable = words(&[b"-h"]);
         options(&mut sh, &enable, 0, false).unwrap();
-        assert_eq!(sh.options.flag(hflag), 1);
+        assert!(sh.options.enabled(ShellOption::HashAll));
 
         let disable = words(&[b"+h"]);
         options(&mut sh, &disable, 0, false).unwrap();
-        assert_eq!(sh.options.flag(hflag), 0);
+        assert!(!sh.options.enabled(ShellOption::HashAll));
     }
 
     // [spec:nsh:req:compat.smoosh.nonlexical-control/test]
@@ -1072,11 +973,11 @@ mod tests {
         let mut sh = crate::context::Shell::new(crate::streams::Streams::INHERIT);
         let enable = words(&[b"-o", b"nonlexicalctrl"]);
         options(&mut sh, &enable, 0, false).unwrap();
-        assert_eq!(sh.options.flag(nonlexicalctrl), 1);
+        assert!(sh.options.enabled(ShellOption::NonLexicalControl));
 
         let disable = words(&[b"+o", b"nonlexicalctrl"]);
         options(&mut sh, &disable, 0, false).unwrap();
-        assert_eq!(sh.options.flag(nonlexicalctrl), 0);
+        assert!(!sh.options.enabled(ShellOption::NonLexicalControl));
     }
 
     #[test]

@@ -1,14 +1,16 @@
 use super::*;
 use bstr::BStr;
 
+// [spec:nsh:def:idiom.shell-options]
 // [spec:nsh:def:compat.bash.mode/test]
 #[test]
-fn bash_option_appends_without_letter() {
-    assert_eq!(nonlexicalctrl, 19);
-    assert_eq!(bash, 20);
-    assert_eq!(bash, NOPTS - 1);
-    assert_eq!(optnames[bash].to_bytes(), b"bash");
-    assert_eq!(optletters[bash], 0);
+fn bash_metadata_has_no_letter() {
+    let spec = OPTION_SPECS
+        .iter()
+        .find(|spec| spec.option == ShellOption::Bash)
+        .expect("Bash has declarative option metadata");
+    assert_eq!(spec.name, b"bash");
+    assert_eq!(spec.letter, None);
 }
 
 // [spec:nsh:req:compat.bash.selection/test]

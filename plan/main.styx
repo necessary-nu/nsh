@@ -6865,6 +6865,13 @@ children (
                                 kind @decision
                                 text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
                             }
+
+                            {
+                                at 2026-08-20T07:23:13.29169092Z
+                                author "brendan@necessary.nu"
+                                kind @status
+                                text "Todo → Doing (nplan start)"
+                            }
                         )
                     }
 

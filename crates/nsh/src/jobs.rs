@@ -31,7 +31,9 @@ use crate::fd::LogicalDescriptor;
 use crate::nodes::{
     DescriptorRedirectionOperator, DescriptorTarget, FileRedirectionOperator, Node, Redirection,
 };
+use crate::options::ShellOption;
 use crate::output::Dest;
+// [spec:nsh:def:idiom.shell-options]
 
 mod model;
 
@@ -147,16 +149,6 @@ pub(crate) fn outcmd(sh: &mut crate::context::Shell, jp: JobId, i: usize, dest: 
         .get(i)
         .map_or(BStr::new(b""), |p| p.cmd.as_bstr());
     let _ = sh.io.get(dest).write_all(cmd);
-}
-
-/* src/options.h: `#define iflag optlist[3]` and friends. */
-#[inline]
-fn iflag(sh: &crate::context::Shell) -> c_int {
-    sh.options.flag(crate::options::iflag) as c_int
-}
-#[inline]
-fn pipefail(sh: &crate::context::Shell) -> c_int {
-    sh.options.flag(crate::options::pipefail) as c_int
 }
 
 // [spec:dash:def:jobs.onsigchild-fn]
@@ -463,7 +455,7 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
                         if group == nsh_platform::current_process_group() {
                             break 'after_dowhile; // `break` of the do/while
                         }
-                        if iflag(sh) == 0 {
+                        if !sh.options.enabled(ShellOption::Interactive) {
                             break 'close_lbl; // goto close
                         }
                         let _ = nsh_platform::send_signal(
@@ -479,11 +471,11 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
                 // falls through into out:
             }
             // out:
-            if iflag(sh) == 0 {
+            if !sh.options.enabled(ShellOption::Interactive) {
                 break 'after_dowhile; // `break` of the do/while
             }
             sh.sh_warnx(b"can't access tty; job control turned off");
-            sh.options.set_flag(crate::options::mflag, 0);
+            sh.options.set(ShellOption::Monitor, false);
             return Ok(());
         }
         sh.jobs.initialpgrp = process_group;
@@ -1066,7 +1058,7 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<JobId>, n: Option<&Node>
              */
         }
     }
-    if oldlvl == 0 && iflag(sh) != 0 {
+    if oldlvl == 0 && sh.options.enabled(ShellOption::Interactive) {
         crate::trap::setsignal_in_child(sh, nsh_platform::interrupt_signal().into());
         crate::trap::setsignal_in_child(sh, nsh_platform::quit_signal().into());
         crate::trap::setsignal_in_child(sh, nsh_platform::termination_signal().into());
@@ -1123,7 +1115,7 @@ fn forkparent(
     if mode == FORK_BG {
         sh.backgndpid = Some(pid); /* set $! */
         set_curjob(sh, ji, CUR_RUNNING);
-        if sh.options.flag(crate::options::iflag) != 0 {
+        if sh.options.enabled(ShellOption::Interactive) {
             let _ = writeln!(sh.io.stderr(), "[{}] {pid}", jobno(ji));
         }
     }
@@ -1450,7 +1442,7 @@ fn waitone(
             block,
             state,
             sh.jobs.jobctl,
-            sh.options.flag(crate::options::bflag) != 0,
+            sh.options.enabled(ShellOption::Notify),
             sh.jobs[changed_job].jobctl,
             Some(changed_job) == jobp,
         ) {
@@ -1835,7 +1827,7 @@ pub(crate) fn getstatus(sh: &mut crate::context::Shell, jobp: JobId) -> crate::s
             .status
             .unwrap_or(ChildStatus::Exited(0))
     };
-    if pipefail(sh) != 0 {
+    if sh.options.enabled(ShellOption::Pipefail) {
         loop {
             if status != ChildStatus::Exited(0) {
                 break;

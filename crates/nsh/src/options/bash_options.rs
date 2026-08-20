@@ -2,7 +2,8 @@
 
 use bstr::{BStr, ByteSlice as _};
 
-use super::{Dialect, ShellOptions, iflag, optnames};
+use super::{Dialect, OPTION_SPECS, ShellOption, ShellOptions};
+// [spec:nsh:def:idiom.shell-options]
 
 /// Names in this table are exposed only when Bash mode is active. Keep it
 /// sorted so discovery, lookup, and output all have one deterministic order.
@@ -32,7 +33,7 @@ impl ShellOptions {
             Dialect::Bash => self
                 .bash_options
                 .expand_aliases
-                .unwrap_or_else(|| self.flag(iflag) != 0),
+                .unwrap_or_else(|| self.enabled(ShellOption::Interactive)),
         }
     }
 
@@ -54,10 +55,9 @@ impl ShellOptions {
     }
 
     pub(crate) fn shell_options(&self) -> impl Iterator<Item = (&'static [u8], bool)> + '_ {
-        optnames
+        OPTION_SPECS
             .iter()
-            .enumerate()
-            .map(|(index, name)| (name.to_bytes(), self.flag(index) != 0))
+            .map(|spec| (spec.name, self.enabled(spec.option)))
     }
 
     pub(crate) fn shell_option(&self, name: &BStr) -> Option<bool> {
@@ -77,7 +77,7 @@ mod tests {
         assert!(options.alias_expansion_enabled(Dialect::Posix));
         assert!(!options.alias_expansion_enabled(Dialect::Bash));
 
-        options.set_flag(iflag, 1);
+        options.set(ShellOption::Interactive, true);
         assert!(options.alias_expansion_enabled(Dialect::Bash));
 
         assert!(options.set_bash_option(BStr::new(b"expand_aliases"), false));

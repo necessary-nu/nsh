@@ -8,6 +8,8 @@ const EVALUATOR: &str = include_str!("../src/eval.rs");
 const REDIRECTIONS: &str = include_str!("../src/redir.rs");
 const JOBS: &str = include_str!("../src/jobs.rs");
 const JOB_MODEL: &str = include_str!("../src/jobs/model.rs");
+const OPTIONS: &str = include_str!("../src/options.rs");
+const OPTION_MODEL: &str = include_str!("../src/options/model.rs");
 const BUILTIN_READ: &str = include_str!("../src/builtins/read.rs");
 const BUILTIN_BREAK: &str = include_str!("../src/builtins/break.rs");
 const BUILTIN_RETURN: &str = include_str!("../src/builtins/return.rs");
@@ -129,6 +131,37 @@ fn typed_job_control_model() {
         assert!(
             !JOB_MODEL.contains(forbidden) && !JOBS.contains(forbidden),
             "job control retains legacy representation {forbidden:?}"
+        );
+    }
+}
+
+// [spec:nsh:def:idiom.shell-options/test]
+#[test]
+fn typed_shell_options() {
+    for required in [
+        "enum ShellOption",
+        "struct OptionSet",
+        "struct OptionSpec",
+        "const OPTION_SPECS",
+    ] {
+        assert!(OPTION_MODEL.contains(required), "missing {required}");
+    }
+    assert!(OPTIONS.contains("state: OptionSet"));
+    assert!(OPTIONS.contains("explicit: OptionSet"));
+
+    for forbidden in [
+        "flags: [c_char",
+        "fn flag(",
+        "fn set_flag(",
+        "pub const eflag",
+        "pub const iflag",
+        "optnames",
+        "optletters",
+        "NOPTS",
+    ] {
+        assert!(
+            !OPTIONS.contains(forbidden) && !OPTION_MODEL.contains(forbidden),
+            "shell options retain legacy representation {forbidden:?}"
         );
     }
 }

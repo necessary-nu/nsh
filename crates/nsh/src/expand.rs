@@ -17,6 +17,8 @@ use core::ffi::{c_char, c_int, c_uint};
 use crate::error::Error;
 use crate::mystring::{byte_at, byte_at_i, slice_from};
 use crate::nodes::Node;
+use crate::options::{OPTION_SPECS, ShellOption};
+// [spec:nsh:def:idiom.shell-options]
 use crate::pmatch::pmatch_slices;
 
 mod mode;
@@ -505,18 +507,6 @@ impl DestinationSyntax {
                 == crate::syntax::SyntaxClass::Control
         })
     }
-}
-
-/// `options.h`: `#define fflag optlist[1]`
-#[inline]
-fn fflag(sh: &crate::context::Shell) -> c_char {
-    sh.options.flag(1)
-}
-
-/// `options.h`: `#define uflag optlist[14]`
-#[inline]
-fn uflag(sh: &crate::context::Shell) -> c_char {
-    sh.options.flag(14)
 }
 
 /// `error.h`: `#define int_pending() intpending`
@@ -1625,7 +1615,10 @@ fn evalvar(
             _ => {}
         }
 
-        if discard && !mode.contains(ExpansionMode::DISCARD) && uflag(sh) != 0 {
+        if discard
+            && !mode.contains(ExpansionMode::DISCARD)
+            && sh.options.enabled(ShellOption::Nounset)
+        {
             /* A stop before `varunset` stopped diverging, and still one. */
             return Err(varunset(sh, text, p, var, None, 0));
         }
@@ -2008,12 +2001,11 @@ fn varvalue(
             len = cvtnum(&sh.locale, num, mode, expb(state)) as isize;
         }
         C_MINUS => {
-            let mut i = crate::options::NOPTS;
-            while i > 0 {
-                i -= 1;
-                let letter = crate::options::optletters[i];
-                if sh.options.flag(i) != 0 && letter != 0 {
-                    expb(state).push(letter as u8);
+            for spec in OPTION_SPECS.iter().rev() {
+                if sh.options.enabled(spec.option)
+                    && let Some(letter) = spec.letter
+                {
+                    expb(state).push(letter);
                     len += 1;
                 }
             }
@@ -2518,7 +2510,9 @@ fn expandmeta(
 
     for mut str in words {
         let text = crate::mystring::cstr_prefix(&str.text);
-        let has_meta = fflag(sh) == 0 && text.find_byteset(b"*?]").is_some() && text != b"]";
+        let has_meta = !sh.options.enabled(ShellOption::NoGlob)
+            && text.find_byteset(b"*?]").is_some()
+            && text != b"]";
         if has_meta {
             /* `savelastp = exparg.lastp` — where this word's matches
              * will start, so that the sort below covers them and not
