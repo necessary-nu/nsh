@@ -8,7 +8,7 @@ Timing data is omitted so reruns produce stable diffs.
 ## Current baseline
 
 Shell SHA-256:
-`543166b494d5afacaa8098f84b7faa6aa95239a3a4ab284c8b949a0f00b65466`
+`b8289d9e6f0ec3ecbab6f568ede78ecc36bdeeb25adedab19281be31fed910c2`
 
 | Group | Selected | Pass | Fail | Unsupported | Known bug | Timeout | Error |
 |---|---:|---:|---:|---:|---:|---:|---:|

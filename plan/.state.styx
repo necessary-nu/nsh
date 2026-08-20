@@ -1930,8 +1930,6 @@ impl_evidence (
         cli.metadata-options
     ), covered_claims (
         {impl_name nsh-library, rule cli.metadata-options}
-    ), rule_versions_seen (
-        {id cli.metadata-options, version 0}
     )}
     {id introduce-bash-value-model, covered_rules (
         compat.bash.value-model
