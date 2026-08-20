@@ -6101,13 +6101,25 @@ children (
                                 implements {
                                     nsh-library ([spec:nsh:req:compat.bash.arrays-declarations])
                                 }
-                                deps (extend-bash-mode-aware-parser introduce-bash-value-model gate-bash-builtins-options)
+                                deps (
+                                    extend-bash-mode-aware-parser
+                                    introduce-bash-value-model
+                                    gate-bash-builtins-options
+                                    verify-idiomatic-core-conformance
+                                )
                                 log (
                                     {
                                         at 2026-08-19T18:36:06.54255616Z
                                         author "brendan@necessary.nu"
                                         kind @note
                                         text "Definition of done: close the calibrated array and declaration case subset for indexed and associative arrays, compound assignment, sparse access, attributes, scope, append, expansion, and unset, with focused unit tests and imported differential cases."
+                                    }
+
+                                    {
+                                        at 2026-08-19T23:32:55.892836573Z
+                                        author "brendan@necessary.nu"
+                                        kind @decision
+                                        text "Operator paused Bash compatibility work on 2026-08-20 before further implementation. Preserve the current uncommitted arrays/declarations WIP and resume only after the C-shaped core surface (`mystring`, run-together identifiers, C ABI scalar types, and blanket lint suppressions) has been specified and idiomatized."
                                     }
                                 )
                             }
@@ -6118,7 +6130,7 @@ children (
                                 implements {
                                     nsh-library ([spec:nsh:req:compat.bash.conditionals-arithmetic])
                                 }
-                                deps (extend-bash-mode-aware-parser introduce-bash-value-model)
+                                deps (extend-bash-mode-aware-parser introduce-bash-value-model verify-idiomatic-core-conformance)
                                 log (
                                     {
                                         at 2026-08-19T18:36:06.68106815Z
@@ -6135,7 +6147,12 @@ children (
                                 implements {
                                     nsh-library ([spec:nsh:req:compat.bash.expansion-globbing])
                                 }
-                                deps (extend-bash-mode-aware-parser introduce-bash-value-model gate-bash-builtins-options)
+                                deps (
+                                    extend-bash-mode-aware-parser
+                                    introduce-bash-value-model
+                                    gate-bash-builtins-options
+                                    verify-idiomatic-core-conformance
+                                )
                                 log (
                                     {
                                         at 2026-08-19T18:36:06.813472866Z
@@ -6152,7 +6169,7 @@ children (
                                 implements {
                                     nsh-library ([spec:nsh:req:compat.bash.process-substitution])
                                 }
-                                deps (extend-bash-mode-aware-parser implement-bash-expansion-globbing)
+                                deps (extend-bash-mode-aware-parser implement-bash-expansion-globbing verify-idiomatic-core-conformance)
                                 log (
                                     {
                                         at 2026-08-19T18:36:06.919311622Z
@@ -6169,7 +6186,12 @@ children (
                                 implements {
                                     nsh-library ([spec:nsh:req:compat.bash.functions-scoping])
                                 }
-                                deps (extend-bash-mode-aware-parser introduce-bash-value-model gate-bash-builtins-options)
+                                deps (
+                                    extend-bash-mode-aware-parser
+                                    introduce-bash-value-model
+                                    gate-bash-builtins-options
+                                    verify-idiomatic-core-conformance
+                                )
                                 log (
                                     {
                                         at 2026-08-19T18:36:07.054795996Z
@@ -6186,7 +6208,7 @@ children (
                                 implements {
                                     nsh-library ([spec:nsh:req:compat.bash.traps-introspection])
                                 }
-                                deps (implement-bash-functions-scoping gate-bash-builtins-options)
+                                deps (implement-bash-functions-scoping gate-bash-builtins-options verify-idiomatic-core-conformance)
                                 log (
                                     {
                                         at 2026-08-19T18:36:07.18470754Z
@@ -6210,6 +6232,7 @@ children (
                                     implement-bash-functions-scoping
                                     implement-bash-traps-introspection
                                     gate-bash-builtins-options
+                                    verify-idiomatic-core-conformance
                                 )
                                 log (
                                     {
@@ -6227,7 +6250,12 @@ children (
                                 implements {
                                     nsh-library ([spec:nsh:req:compat.bash.interactive])
                                 }
-                                deps (implement-bash-builtins-special-vars implement-bash-expansion-globbing implement-bash-functions-scoping)
+                                deps (
+                                    implement-bash-builtins-special-vars
+                                    implement-bash-expansion-globbing
+                                    implement-bash-functions-scoping
+                                    verify-idiomatic-core-conformance
+                                )
                                 log (
                                     {
                                         at 2026-08-19T18:36:07.408360542Z
@@ -6409,6 +6437,790 @@ children (
                 author "brendan@necessary.nu"
                 kind @note
                 text "single-flight overridden: started while implement-bash-arrays-declarations had uncommitted WIP"
+            }
+        )
+    }
+
+    {
+        id idiomatize-rust-core
+        title "Replace the remaining C-shaped core with idiomatic typed Rust"
+        priority 0
+        kind @refactor
+        children (
+            {
+                id specify-idiomatic-core-contract
+                title "Specify the typed core/platform boundary and measurable C-ism bans"
+                priority 3
+                kind @docs
+                deps (
+                    shell-as-library
+                    unsafe-is-a-crate
+                    logical-descriptor-table
+                    process-environment-soundness
+                    enforce-survey-test-containment
+                )
+                log (
+                    {
+                        at 2026-08-19T23:57:37.206530729Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                    }
+                )
+            }
+
+            {
+                id replace-c-frontend-representation
+                title "Replace the C-shaped parser, word, and AST representations"
+                children (
+                    {
+                        id type-lexer-syntax-protocol
+                        title "Replace integer tokens, negative EOF sentinels, and biased syntax tables with enums"
+                        priority 3
+                        deps (specify-idiomatic-core-contract)
+                        log (
+                            {
+                                at 2026-08-19T23:57:37.297979372Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id introduce-typed-word-ir
+                        title "Replace CTL bytecode, NUL framing, and parallel substitutions with typed word parts"
+                        priority 3
+                        deps (specify-idiomatic-core-contract type-lexer-syntax-protocol)
+                        log (
+                            {
+                                at 2026-08-19T23:57:37.385648921Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id make-ast-structural
+                        title "Replace numeric node tags and union-arm accessors with structural AST variants"
+                        priority 3
+                        deps (type-lexer-syntax-protocol introduce-typed-word-ir)
+                        log (
+                            {
+                                at 2026-08-19T23:57:37.472236807Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id remove-ast-shared-mutation
+                        title "Make parsed syntax immutable and finalize required children and here-documents during parsing"
+                        priority 3
+                        deps (make-ast-structural)
+                        log (
+                            {
+                                at 2026-08-19T23:57:37.560883707Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id rewrite-expansion-over-typed-words
+                        title "Rewrite expansion around typed word parts instead of in-place encoded-buffer surgery"
+                        priority 3
+                        deps (remove-ast-shared-mutation)
+                        log (
+                            {
+                                at 2026-08-19T23:57:37.645333218Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+                )
+            }
+
+            {
+                id harden-platform-boundary
+                title "Expose typed safe platform capabilities to the core"
+                children (
+                    {
+                        id type-platform-errors
+                        title "Replace raw errno and sentinel results in safe platform APIs with typed errors"
+                        priority 3
+                        deps (specify-idiomatic-core-contract)
+                        log (
+                            {
+                                at 2026-08-19T23:57:37.73329194Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id type-platform-process-api
+                        title "Expose typed process and process-group operations without raw integer identities"
+                        priority 3
+                        deps (type-platform-errors)
+                        log (
+                            {
+                                at 2026-08-19T23:57:37.820918348Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id type-platform-signal-wait-api
+                        title "Expose typed signals and wait outcomes instead of signal numbers and wait words"
+                        priority 3
+                        deps (type-platform-errors type-platform-process-api)
+                        log (
+                            {
+                                at 2026-08-19T23:57:37.907009268Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id type-platform-filesystem-account-api
+                        title "Expose byte-safe filesystem and account lookup APIs without C strings"
+                        priority 3
+                        deps (type-platform-errors)
+                        log (
+                            {
+                                at 2026-08-19T23:57:37.993423193Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id type-platform-exec-api
+                        title "Expose owned byte-string exec arguments and environment values with ABI conversion kept private"
+                        priority 3
+                        deps (type-platform-process-api type-platform-filesystem-account-api)
+                        log (
+                            {
+                                at 2026-08-19T23:57:38.080407083Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id contain-descriptor-materialization
+                        title "Keep numeric dup and close mechanics private to the process descriptor transaction"
+                        priority 3
+                        deps (specify-idiomatic-core-contract logical-descriptor-table type-platform-errors)
+                        log (
+                            {
+                                at 2026-08-19T23:57:38.168532628Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id remove-core-raw-fd-observation
+                        title "Remove core RawFd and AsRawFd observations in favor of logical descriptor capabilities"
+                        priority 3
+                        deps (contain-descriptor-materialization type-platform-process-api)
+                        log (
+                            {
+                                at 2026-08-19T23:57:38.255381187Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+                )
+            }
+
+            {
+                id type-core-domain-model
+                title "Make domain types the core's internal currency"
+                children (
+                    {
+                        id adopt-core-status-flow-signal-types
+                        title "Make ExitStatus, Flow, and Signal the core's internal currency"
+                        priority 3
+                        deps (specify-idiomatic-core-contract type-platform-signal-wait-api)
+                        log (
+                            {
+                                at 2026-08-19T23:57:38.342549029Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id replace-integer-options-and-flags
+                        title "Replace the macro-indexed option array and integer booleans with typed shell options"
+                        priority 3
+                        deps (adopt-core-status-flow-signal-types)
+                        log (
+                            {
+                                at 2026-08-19T23:57:38.431585414Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id type-variable-expansion-state
+                        title "Replace variable and expansion sentinel integers with typed value and state representations"
+                        priority 3
+                        deps (adopt-core-status-flow-signal-types introduce-typed-word-ir)
+                        log (
+                            {
+                                at 2026-08-19T23:57:38.515685241Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id replace-command-tag-payload-protocols
+                        title "Remove command-table tags and unreachable payload accessors in favor of enum matching"
+                        priority 3
+                        deps (adopt-core-status-flow-signal-types make-ast-structural)
+                        log (
+                            {
+                                at 2026-08-19T23:57:38.612165363Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id type-job-control-model
+                        title "Introduce JobId, JobState, process identities, and typed wait outcomes"
+                        priority 3
+                        deps (adopt-core-status-flow-signal-types type-platform-process-api type-platform-signal-wait-api)
+                        log (
+                            {
+                                at 2026-08-19T23:57:38.704037641Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id replace-job-slot-linkage
+                        title "Replace used-byte slots, manual current-job links, and magic missing values"
+                        priority 3
+                        deps (type-job-control-model)
+                        log (
+                            {
+                                at 2026-08-19T23:57:38.789018218Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id type-trap-disposition-state
+                        title "Replace numeric trap modes and signal-state bytes with typed dispositions"
+                        priority 3
+                        deps (adopt-core-status-flow-signal-types type-platform-signal-wait-api)
+                        log (
+                            {
+                                at 2026-08-19T23:57:38.877543108Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id seal-logical-descriptor-types
+                        title "Distinguish shell descriptor identities from owned host handles throughout core"
+                        priority 3
+                        deps (adopt-core-status-flow-signal-types remove-core-raw-fd-observation)
+                        log (
+                            {
+                                at 2026-08-19T23:57:38.962648816Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id type-evaluation-redirection-modes
+                        title "Replace evaluation, expansion, and redirection bitmasks with typed modes"
+                        priority 3
+                        deps (adopt-core-status-flow-signal-types rewrite-expansion-over-typed-words seal-logical-descriptor-types)
+                        log (
+                            {
+                                at 2026-08-19T23:57:39.056315805Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+                )
+            }
+
+            {
+                id structure-control-and-lifetimes
+                title "Replace translated control flow and manual lifetime pairing"
+                children (
+                    {
+                        id structure-parser-expander-control-flow
+                        title "Replace parser and expander goto translations with structured control flow"
+                        priority 3
+                        deps (rewrite-expansion-over-typed-words remove-ast-shared-mutation)
+                        log (
+                            {
+                                at 2026-08-19T23:57:39.145160148Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id structure-evaluator-builtin-control-flow
+                        title "Replace evaluator and builtin integer program counters with explicit Rust control flow"
+                        priority 3
+                        deps (replace-command-tag-payload-protocols type-evaluation-redirection-modes)
+                        log (
+                            {
+                                at 2026-08-19T23:57:39.234419205Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id structure-jobs-startup-control-flow
+                        title "Replace job rendering, read, and shell-startup goto emulators with typed control flow"
+                        priority 3
+                        deps (replace-job-slot-linkage adopt-core-status-flow-signal-types)
+                        log (
+                            {
+                                at 2026-08-19T23:57:39.322190505Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id structure-resource-scopes
+                        title "Replace push/pop and unwind pairs for descriptors, input, and local variables with structured scopes"
+                        priority 3
+                        deps (structure-evaluator-builtin-control-flow seal-logical-descriptor-types type-variable-expansion-state)
+                        log (
+                            {
+                                at 2026-08-19T23:57:39.410736914Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id structure-interrupt-deferral
+                        title "Replace INTOFF-style interrupt counters with explicit scopes while preserving delivery semantics"
+                        priority 3
+                        deps (structure-evaluator-builtin-control-flow type-trap-disposition-state structure-resource-scopes)
+                        log (
+                            {
+                                at 2026-08-19T23:57:39.497333471Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id modernize-shell-lifecycle
+                        title "Replace generated INIT, RESET, FORKRESET, and EXITRESET fragments with owned lifecycle methods"
+                        priority 3
+                        deps (
+                            structure-parser-expander-control-flow
+                            structure-jobs-startup-control-flow
+                            structure-resource-scopes
+                            structure-interrupt-deferral
+                            type-platform-process-api
+                            type-platform-signal-wait-api
+                        )
+                        log (
+                            {
+                                at 2026-08-19T23:57:39.584527264Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id narrow-shell-context
+                        title "Replace universal mutable Shell access with narrow subsystem capabilities and methods"
+                        priority 3
+                        deps (
+                            modernize-shell-lifecycle
+                            replace-integer-options-and-flags
+                            type-variable-expansion-state
+                            replace-job-slot-linkage
+                            type-trap-disposition-state
+                            seal-logical-descriptor-types
+                            replace-command-tag-payload-protocols
+                        )
+                        log (
+                            {
+                                at 2026-08-19T23:57:39.672557006Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+                )
+            }
+
+            {
+                id modernize-core-components
+                title "Modernize the command, output, and utility subsystems"
+                children (
+                    {
+                        id modernize-builtin-registry
+                        title "Replace C-string builtin tables, integer attributes, and optional handlers with typed specifications"
+                        priority 3
+                        deps (narrow-shell-context replace-command-tag-payload-protocols replace-integer-options-and-flags)
+                        log (
+                            {
+                                at 2026-08-19T23:57:39.761193906Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id modernize-output-error-results
+                        title "Use Write, io::Result, and explicit shell errors instead of 0/-1 and output side channels"
+                        priority 3
+                        deps (narrow-shell-context structure-resource-scopes adopt-core-status-flow-signal-types)
+                        log (
+                            {
+                                at 2026-08-19T23:57:39.849102248Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id remove-artificial-buffer-limits
+                        title "Remove inherited C truncation and fixed-buffer limits that are not shell semantics"
+                        priority 3
+                        deps (modernize-output-error-results rewrite-expansion-over-typed-words replace-job-slot-linkage)
+                        log (
+                            {
+                                at 2026-08-19T23:57:39.940326089Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id remove-mystring-module
+                        title "Move byte parsing and quoting into owning modules and delete mystring"
+                        priority 3
+                        deps (rewrite-expansion-over-typed-words type-variable-expansion-state modernize-output-error-results)
+                        log (
+                            {
+                                at 2026-08-19T23:57:40.03253961Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id delete-port-configuration-fossils
+                        title "Delete preprocessor constants, impossible cfg branches, declaration stubs, and no-op C hints"
+                        priority 3
+                        deps (modernize-shell-lifecycle type-lexer-syntax-protocol rewrite-expansion-over-typed-words)
+                        log (
+                            {
+                                at 2026-08-19T23:57:40.121225771Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id modernize-shell-entrypoint
+                        title "Make Shell the runtime entrypoint and keep CLI startup policy outside the core"
+                        priority 3
+                        deps (modernize-shell-lifecycle narrow-shell-context type-platform-exec-api)
+                        log (
+                            {
+                                at 2026-08-19T23:57:40.211853055Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+                )
+            }
+
+            {
+                id close-idiomatic-core
+                title "Close the C-ism inventory and enforce the endpoint"
+                children (
+                    {
+                        id remove-core-c-strings-terminators
+                        title "Remove CStr, CString, and artificial NUL terminators from core data and APIs"
+                        priority 3
+                        deps (
+                            rewrite-expansion-over-typed-words
+                            type-platform-filesystem-account-api
+                            type-platform-exec-api
+                            modernize-builtin-registry
+                            remove-mystring-module
+                            modernize-shell-entrypoint
+                        )
+                        log (
+                            {
+                                at 2026-08-19T23:57:40.301120872Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id remove-core-abi-scalars
+                        title "Eliminate core c_int, c_char, c_uint, integer booleans, and magic numeric sentinels"
+                        priority 3
+                        deps (
+                            remove-core-c-strings-terminators
+                            type-evaluation-redirection-modes
+                            replace-integer-options-and-flags
+                            type-variable-expansion-state
+                            replace-command-tag-payload-protocols
+                            replace-job-slot-linkage
+                            type-trap-disposition-state
+                            modernize-output-error-results
+                        )
+                        log (
+                            {
+                                at 2026-08-19T23:57:40.400256765Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id reorganize-rust-modules
+                        title "Replace C translation-unit modules with cohesive Rust subsystem boundaries"
+                        priority 3
+                        deps (
+                            remove-core-abi-scalars
+                            modernize-builtin-registry
+                            modernize-shell-entrypoint
+                            delete-port-configuration-fossils
+                        )
+                        log (
+                            {
+                                at 2026-08-19T23:57:40.48841025Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id rename-c-shaped-symbols
+                        title "Rename run-together functions, lowercase types, cmd suffixes, and C abbreviations"
+                        priority 3
+                        deps (reorganize-rust-modules)
+                        log (
+                            {
+                                at 2026-08-19T23:57:40.579664331Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id audit-bug-for-bug-behavior
+                        title "Replace bug-for-bug and undefined-behavior preservation with specified shell behavior"
+                        priority 3
+                        kind @fix
+                        deps (rename-c-shaped-symbols remove-artificial-buffer-limits remove-core-abi-scalars)
+                        log (
+                            {
+                                at 2026-08-19T23:57:40.667025076Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id retire-port-topology-contracts
+                        title "Retire C-topology-only annotations and source-dependent tests while preserving behavioral provenance"
+                        priority 3
+                        kind @docs
+                        deps (audit-bug-for-bug-behavior)
+                        log (
+                            {
+                                at 2026-08-19T23:57:40.754490342Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id audit-ignored-results
+                        title "Eliminate swallowed Results and implicit error side channels across the core"
+                        priority 3
+                        deps (
+                            remove-core-abi-scalars
+                            modernize-output-error-results
+                            type-platform-errors
+                            modernize-shell-lifecycle
+                        )
+                        log (
+                            {
+                                at 2026-08-19T23:57:40.84634461Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id enable-strict-rust-lints
+                        title "Remove blanket lint suppressions and make idiomatic naming and dead-code checks mandatory"
+                        priority 3
+                        deps (
+                            rename-c-shaped-symbols
+                            retire-port-topology-contracts
+                            audit-ignored-results
+                            delete-port-configuration-fossils
+                        )
+                        log (
+                            {
+                                at 2026-08-19T23:57:40.933543313Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id enforce-zero-cism-gates
+                        title "Add regression gates for forbidden C-shaped representations and APIs in core"
+                        priority 3
+                        kind @ci
+                        deps (enable-strict-rust-lints)
+                        log (
+                            {
+                                at 2026-08-19T23:57:41.021291713Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+
+                    {
+                        id verify-idiomatic-core-conformance
+                        title "Verify workspace, differential, POSIX, Smoosh, and Oils surveys in containment"
+                        priority 3
+                        kind @test
+                        deps (enforce-zero-cism-gates)
+                        log (
+                            {
+                                at 2026-08-19T23:57:41.116357479Z
+                                author "brendan@necessary.nu"
+                                kind @decision
+                                text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                            }
+                        )
+                    }
+                )
+            }
+        )
+        log (
+            {
+                at 2026-08-19T23:56:43.172612377Z
+                author "brendan@necessary.nu"
+                kind @decision
+                text "priority pinned to 0 — operator override: Stop Bash compatibility work for the moment and deal with the fundamentally C-shaped core first."
             }
         )
     }
