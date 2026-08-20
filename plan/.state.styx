@@ -5105,4 +5105,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.status-flow-signal}
     )}
+    {id preserve-zero-process-group-state, covered_rules (
+        idiom.process-group-zero-state
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.process-group-zero-state}
+    )}
 )

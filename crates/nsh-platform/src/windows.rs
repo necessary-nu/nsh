@@ -52,8 +52,8 @@ use windows_sys::Win32::System::Threading::{
 };
 
 use crate::{
-    ChildStatus, ForkResult, ProcessGroupId, ProcessId, ProcessSelector, ProcessTarget, Signal,
-    SignalRequest,
+    ChildStatus, ForkResult, ProcessGroupId, ProcessGroupState, ProcessId, ProcessSelector,
+    ProcessTarget, Signal, SignalRequest,
 };
 
 #[path = "signal_names.rs"]
@@ -3042,22 +3042,20 @@ pub fn current_process_id() -> ProcessId {
 
 static FOREGROUND_PROCESS_GROUP: AtomicU32 = AtomicU32::new(0);
 
-pub fn current_process_group() -> Option<ProcessGroupId> {
-    Some(ProcessGroupId::from_leader(current_process_id()))
+pub fn current_process_group() -> ProcessGroupState {
+    ProcessGroupState::Visible(ProcessGroupId::from_leader(current_process_id()))
 }
 
-pub fn foreground_process_group(
-    _fd: &impl AsDescriptor,
-) -> std::io::Result<Option<ProcessGroupId>> {
+pub fn foreground_process_group(_fd: &impl AsDescriptor) -> std::io::Result<ProcessGroupState> {
     let group = FOREGROUND_PROCESS_GROUP.load(AtomicOrdering::Relaxed);
     Ok(if let Some(group) = ProcessGroupId::new(group) {
-        Some(group)
+        ProcessGroupState::Visible(group)
     } else {
         current_process_group()
     })
 }
 
-pub fn set_process_group(_process: ProcessSelector, _group: ProcessGroupId) -> std::io::Result<()> {
+pub fn set_process_group(_: ProcessSelector, _: ProcessGroupState) -> std::io::Result<()> {
     // Every cloned child already owns a Job Object. Its PID is the public
     // process-group key used by the shell's job table.
     Ok(())
@@ -3065,9 +3063,9 @@ pub fn set_process_group(_process: ProcessSelector, _group: ProcessGroupId) -> s
 
 pub fn set_foreground_process_group(
     _fd: &impl AsDescriptor,
-    group: ProcessGroupId,
+    group: ProcessGroupState,
 ) -> std::io::Result<()> {
-    FOREGROUND_PROCESS_GROUP.store(group.get(), AtomicOrdering::Relaxed);
+    FOREGROUND_PROCESS_GROUP.store(group.nonnegative_platform_value(), AtomicOrdering::Relaxed);
     Ok(())
 }
 

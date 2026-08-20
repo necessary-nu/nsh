@@ -23,8 +23,8 @@
 use bstr::{BStr, BString, ByteSlice};
 use core::ffi::{c_int, c_uint};
 use nsh_platform::{
-    ChildStatus, Descriptor, NativeStrExt as _, ProcessGroupId, ProcessId, ProcessSelector,
-    ProcessTarget,
+    ChildStatus, Descriptor, NativeStrExt as _, ProcessGroupId, ProcessGroupState, ProcessId,
+    ProcessSelector, ProcessTarget,
 };
 use std::io::Write as _;
 
@@ -177,7 +177,7 @@ pub struct JobTable {
     /// true if doing job control
     pub(crate) jobctl: c_int,
     /// pgrp of shell on invocation
-    initialpgrp: Option<ProcessGroupId>,
+    initialpgrp: Option<ProcessGroupState>,
     /// control terminal
     ttyfd: Option<Descriptor>,
     /// Terminal state the interactive shell needs while it owns the terminal.
@@ -367,7 +367,7 @@ pub(crate) fn xxtcsetpgrp(
     let Some(fd) = sh.jobs.ttyfd.take() else {
         return Ok(());
     };
-    let result = xtcsetpgrp(sh, &fd, group);
+    let result = xtcsetpgrp(sh, &fd, group.into());
     sh.jobs.ttyfd = Some(fd);
     result
 }
@@ -436,7 +436,7 @@ pub(crate) fn terminal_settings_error(
 /// drop it where the C already swallowed it.
 pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error> {
     let mut on: c_int = on;
-    let mut process_group: Option<ProcessGroupId> = None;
+    let mut process_group: Option<ProcessGroupState> = None;
     let mut fd: Option<Descriptor>;
 
     if on == sh.jobs.jobctl || crate::shellmain::rootshell(sh) == 0 {
@@ -521,7 +521,7 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
                                 fd.as_ref().expect("tty descriptor exists"),
                             ) {
                                 Ok(group) => {
-                                    process_group = group;
+                                    process_group = Some(group);
                                     break;
                                 }
                                 Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
@@ -553,7 +553,7 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
                         let Some(group) = process_group else {
                             break 'close_lbl; // goto close
                         };
-                        if Some(group) == nsh_platform::current_process_group() {
+                        if group == nsh_platform::current_process_group() {
                             break 'after_dowhile; // `break` of the do/while
                         }
                         if iflag(sh) == 0 {
@@ -582,7 +582,7 @@ pub fn setjobctl(sh: &mut crate::context::Shell, on: c_int) -> Result<(), Error>
             return Ok(());
         }
         sh.jobs.initialpgrp = process_group;
-        process_group = Some(ProcessGroupId::from_leader(sh.root_pid));
+        process_group = Some(ProcessGroupId::from_leader(sh.root_pid).into());
     } else {
         /* turning job control off */
         fd = sh.jobs.ttyfd.take();
@@ -1123,7 +1123,8 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<usize>, n: Option<&Node>
             process_group = ProcessGroupId::from_leader(sh.jobs.tab[ji].ps[0].pid);
         }
         /* This can fail because we are doing it in the parent also */
-        let _ = nsh_platform::set_process_group(ProcessSelector::CurrentProcess, process_group);
+        let _ =
+            nsh_platform::set_process_group(ProcessSelector::CurrentProcess, process_group.into());
         if mode == FORK_FG {
             xxtcsetpgrp(sh, process_group).unwrap_or_else(|e| forkchild_fatal(sh, e));
         }
@@ -1207,7 +1208,8 @@ fn forkparent(
             process_group = ProcessGroupId::from_leader(sh.jobs.tab[ji].ps[0].pid);
         }
         /* This can fail because we are doing it in the child also */
-        let _ = nsh_platform::set_process_group(ProcessSelector::Process(pid), process_group);
+        let _ =
+            nsh_platform::set_process_group(ProcessSelector::Process(pid), process_group.into());
     }
     if mode == FORK_BG {
         sh.backgndpid = Some(pid); /* set $! */
@@ -1896,7 +1898,7 @@ pub(crate) fn showpipe(sh: &mut crate::context::Shell, jp: usize, dest: Dest) {
 fn xtcsetpgrp(
     sh: &mut crate::context::Shell,
     fd: &impl nsh_platform::AsDescriptor,
-    group: ProcessGroupId,
+    group: ProcessGroupState,
 ) -> Result<(), Error> {
     let blocked = nsh_platform::BlockedSignals::all()
         .expect("blocking signals around terminal handoff failed");

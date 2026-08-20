@@ -60,6 +60,12 @@ undefined behavior.
 > PIDs or process groups, and the representation of the POSIX zero and negative
 > process-selection forms MUST be explicit in the operation that supports them.
 
+> [spec:nsh:req:idiom.process-group-zero-state]
+> A zero process group reported across a PID-namespace boundary MUST be carried
+> as an explicit typed state, not absence or failure. Job control MUST compare
+> and round-trip that state without disabling itself before it establishes the
+> shell's own positive group.
+
 > [spec:nsh:def:idiom.signal-wait]
 > Signals and child wait outcomes crossing the platform boundary are typed
 > values. The core MUST NOT decode signal numbers, wait-status words, stopped

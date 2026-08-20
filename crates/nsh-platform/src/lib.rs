@@ -62,6 +62,57 @@ impl fmt::Display for ProcessGroupId {
     }
 }
 
+/// A process group observed through a namespace boundary.
+///
+/// Linux reports zero when a terminal or process group belongs to an ancestor
+/// PID namespace. That is a real, comparable state even though zero is not a
+/// process-group identity in the caller's namespace.
+// [spec:nsh:req:idiom.process-group-zero-state]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProcessGroupState {
+    /// The group exists outside the caller's PID namespace.
+    OutsideNamespace,
+    /// A positive group visible in the caller's PID namespace.
+    Visible(ProcessGroupId),
+}
+
+impl ProcessGroupState {
+    #[cfg(unix)]
+    fn from_platform_value(value: i32) -> Option<Self> {
+        if value == 0 {
+            Some(Self::OutsideNamespace)
+        } else {
+            u32::try_from(value)
+                .ok()
+                .and_then(ProcessGroupId::new)
+                .map(Self::Visible)
+        }
+    }
+
+    #[cfg(unix)]
+    fn platform_value(self) -> std::io::Result<i32> {
+        match self {
+            Self::OutsideNamespace => Ok(0),
+            Self::Visible(group) => i32::try_from(group.get())
+                .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput)),
+        }
+    }
+
+    #[cfg(windows)]
+    fn nonnegative_platform_value(self) -> u32 {
+        match self {
+            Self::OutsideNamespace => 0,
+            Self::Visible(group) => group.get(),
+        }
+    }
+}
+
+impl From<ProcessGroupId> for ProcessGroupState {
+    fn from(group: ProcessGroupId) -> Self {
+        Self::Visible(group)
+    }
+}
+
 /// Which process `setpgid` changes. The calling process is an operation,
 /// not a magic zero-valued process identity.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

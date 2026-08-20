@@ -163,6 +163,7 @@ fn filesystem_apis_keep_native_strings() {
 }
 
 // [spec:nsh:def:idiom.process-identity/test]
+// [spec:nsh:req:idiom.process-group-zero-state/test]
 #[test]
 fn process_identities_are_typed() {
     assert!(nsh_platform::ProcessId::new(0).is_none());
@@ -171,6 +172,10 @@ fn process_identities_are_typed() {
     let process = nsh_platform::current_process_id();
     let group = nsh_platform::ProcessGroupId::from_leader(process);
     assert_eq!(process.get(), group.get());
+    assert_ne!(
+        nsh_platform::ProcessGroupState::OutsideNamespace,
+        nsh_platform::ProcessGroupState::Visible(group),
+    );
 
     let targets = [
         nsh_platform::ProcessTarget::Process(process),
@@ -184,15 +189,17 @@ fn process_identities_are_typed() {
         nsh_platform::send_signal;
     let _: fn() -> nsh_platform::ProcessId = nsh_platform::current_process_id;
     let _: fn() -> Option<nsh_platform::ProcessId> = nsh_platform::parent_process_id;
-    let _: fn() -> Option<nsh_platform::ProcessGroupId> = nsh_platform::current_process_group;
+    let _: fn() -> nsh_platform::ProcessGroupState = nsh_platform::current_process_group;
     let _: fn(
         bool,
         bool,
     )
         -> std::io::Result<Option<(nsh_platform::ProcessId, nsh_platform::ChildStatus)>> =
         nsh_platform::wait_for_any_child;
-    let _: fn(nsh_platform::ProcessSelector, nsh_platform::ProcessGroupId) -> std::io::Result<()> =
-        nsh_platform::set_process_group;
+    let _: fn(
+        nsh_platform::ProcessSelector,
+        nsh_platform::ProcessGroupState,
+    ) -> std::io::Result<()> = nsh_platform::set_process_group;
 
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     for source in [

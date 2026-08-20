@@ -151,6 +151,7 @@ CASES = [
     ("job refs by name",       [], ["sleep 3 &", "jobs %sleep", "jobs %?lee", "wait", "exit"]),
     ("bg pipeline + jobs",     [], ["sleep 3 | cat &", "jobs", "wait", "echo done", "exit"]),
     # [spec:nsh:req:compat.smoosh.interactive-job-prompt/test]
+    # [spec:nsh:req:idiom.process-group-zero-state/test]
     ("monitor flag on tty",    [], ["case $- in *m*) echo MONITOR-ON;; *) echo MONITOR-OFF;; esac",
                                     "exit"]),
     ("fg a bg job",            [], ["sleep 2 &", "fg", "echo done", "exit"]),

@@ -1527,16 +1527,17 @@ pub fn fork_process() -> std::io::Result<ForkResult> {
     }
 }
 
-pub fn current_process_group() -> Option<ProcessGroupId> {
+pub fn current_process_group() -> ProcessGroupState {
     // SAFETY: `getpgrp` takes no arguments and cannot fail. Keep the raw
     // result because a process group inherited from outside a fresh PID
     // namespace is reported as zero until the shell establishes its own;
     // PID newtypes deliberately cannot represent that observable state.
     let group = unsafe { libc::getpgrp() };
-    u32::try_from(group).ok().and_then(ProcessGroupId::new)
+    ProcessGroupState::from_platform_value(group)
+        .expect("getpgrp returns a nonnegative process group")
 }
 
-pub fn foreground_process_group(fd: &impl AsDescriptor) -> std::io::Result<Option<ProcessGroupId>> {
+pub fn foreground_process_group(fd: &impl AsDescriptor) -> std::io::Result<ProcessGroupState> {
     // SAFETY: the kernel validates the descriptor and returns only an
     // integer process-group id. As above, zero is a meaningful transient
     // result in a PID namespace and must not be rejected by a PID newtype.
@@ -1544,26 +1545,30 @@ pub fn foreground_process_group(fd: &impl AsDescriptor) -> std::io::Result<Optio
     if group < 0 {
         Err(std::io::Error::last_os_error())
     } else {
-        Ok(u32::try_from(group).ok().and_then(ProcessGroupId::new))
+        Ok(ProcessGroupState::from_platform_value(group)
+            .expect("tcgetpgrp returned a nonnegative process group"))
     }
 }
 
-pub fn set_process_group(process: ProcessSelector, group: ProcessGroupId) -> std::io::Result<()> {
+pub fn set_process_group(
+    process: ProcessSelector,
+    group: ProcessGroupState,
+) -> std::io::Result<()> {
     let process = match process {
         ProcessSelector::CurrentProcess => None,
         ProcessSelector::Process(process) => {
             Some(rustix::process::Pid::from_raw(raw_process_id(process)?).unwrap())
         }
     };
-    let group = rustix::process::Pid::from_raw(raw_process_group(group)?);
+    let group = rustix::process::Pid::from_raw(group.platform_value()?);
     rustix::process::setpgid(process, group).map_err(std::io::Error::from)
 }
 
 pub fn set_foreground_process_group(
     fd: &impl AsDescriptor,
-    group: ProcessGroupId,
+    group: ProcessGroupState,
 ) -> std::io::Result<()> {
-    let group = raw_process_group(group)?;
+    let group = group.platform_value()?;
     // SAFETY: both arguments are scalar values validated above.
     if unsafe { libc::tcsetpgrp(fd.as_platform_descriptor().0.as_raw_fd(), group) } < 0 {
         Err(std::io::Error::last_os_error())
