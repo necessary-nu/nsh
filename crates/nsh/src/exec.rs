@@ -204,7 +204,7 @@ pub fn shellexec(
         while let Some(candidate) = padvance(&mut cursor, command) {
             idx -= 1;
             if idx < 0 && candidate.option.is_none() {
-                let candidate = match candidate.path[..candidate.path.len() - 1].try_to_path_buf() {
+                let candidate = match candidate.path.try_to_path_buf() {
                     Ok(candidate) => candidate,
                     Err(error) => return native_exec_failure(sh, command, &error),
                 };
@@ -363,34 +363,24 @@ impl<'a> PathCursor<'a> {
             }
         }
 
-        /* "2" is the possible slash and terminator. An empty component
-         * keeps the spare slash byte in its allocation, as dash does. */
-        let allocation_len = directory.len() + name.len() + 2;
-        let mut path = BString::new(Vec::with_capacity(allocation_len));
+        let capacity = directory.len() + name.len() + usize::from(!directory.is_empty());
+        let mut path = BString::new(Vec::with_capacity(capacity));
         if !directory.is_empty() {
             path.extend_from_slice(directory);
             path.push(nsh_platform::shell_directory_separator());
         }
         path.extend_from_slice(name);
-        path.push(0);
 
-        Some(PathAdvance {
-            path,
-            option,
-            allocation_len,
-        })
+        Some(PathAdvance { path, option })
     }
 }
 
 /// One independently owned result from a PATH walk.
 pub struct PathAdvance {
-    /// Candidate path including its trailing NUL.
+    /// Candidate path bytes.
     pub path: BString,
     /// `%option`, if the PATH element carried one.
     pub option: Option<BString>,
-    /// The allocation size dash returned, including its spare byte for an
-    /// empty PATH component.
-    pub allocation_len: usize,
 }
 
 // [spec:dash:def:exec.padvance-fn]
@@ -556,7 +546,7 @@ pub fn find_command(
             }
         }
 
-        let fullname = crate::mystring::cstr_prefix(&candidate.path).to_owned();
+        let fullname = candidate.path;
         if nsh_platform::shell_path_is_absolute(&fullname) && index <= previous {
             if index < previous {
                 continue;

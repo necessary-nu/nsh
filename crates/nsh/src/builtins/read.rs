@@ -35,9 +35,9 @@ const MB_LEN_MAX: usize = 16;
 const READ_MBSLOP: usize = (if MB_LEN_MAX > 16 { MB_LEN_MAX } else { 16 }) + 4;
 
 fn append_read_byte(line: &mut BString, input: crate::syntax::InputUnit) {
-    if crate::mystring::cqchars[1..]
-        .iter()
-        .any(|&byte| input.is(byte as u8))
+    if input.is(crate::parser::CTLESC as u8)
+        || input.is(crate::parser::CTLMBCHAR as u8)
+        || input.is(crate::parser::CTLQUOTEMARK as u8)
     {
         line.push(crate::parser::CTLESC as u8);
     }
@@ -171,7 +171,7 @@ fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> R
                 crate::var::set_bytes(
                     sh,
                     name,
-                    Some(crate::mystring::cstr_prefix(&field.text)),
+                    Some(field.as_bstr()),
                     crate::var::VariableAttributes::NONE,
                 )?;
             }

@@ -203,6 +203,17 @@ fn shell_entrypoint_uses_public_runtime() {
     }
 }
 
+// [spec:nsh:req:idiom.no-mystring/test]
+#[test]
+fn mystring_module_is_absent() {
+    let module = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/mystring.rs");
+    assert!(
+        !module.exists(),
+        "generic compatibility module still exists"
+    );
+    assert!(!LIBRARY.contains("mod mystring"));
+}
+
 // [spec:nsh:req:idiom.parser-control-flow/test]
 #[test]
 fn control_flow_is_structured() {

@@ -560,7 +560,12 @@ fn openhere(sh: &mut Shell, document: &HereDocument) -> Result<Descriptor, Error
          * second half matters because a here-document body can carry an
          * embedded NUL and the terminator is then not the one `strlen`
          * would have found. */
-        crate::mystring::cstr_prefix(document.body.word.as_bstr())
+        let bytes = document.body.word.as_bstr();
+        let end = bytes
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(bytes.len());
+        &bytes[..end]
     };
 
     len = p.len();

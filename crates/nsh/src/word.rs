@@ -112,6 +112,25 @@ impl ParsedWord {
         }
     }
 
+    /// Construct a quoted parameter expansion without legacy marker bytes.
+    pub(crate) fn quoted_parameter(name: impl Into<BString>) -> Self {
+        let mut word = Self {
+            parts: vec![
+                WordPart::Quote(QuoteBoundary::Open),
+                WordPart::Parameter(ParameterExpansion {
+                    name: name.into(),
+                    operation: ParameterOperation::Value,
+                    colon: false,
+                    operand: None,
+                }),
+                WordPart::Quote(QuoteBoundary::Close),
+            ],
+            spelling: BString::new(Vec::new()),
+        };
+        word.render_spelling();
+        word
+    }
+
     /// Decode the former parser transport format at the parser boundary.
     pub(crate) fn from_legacy(mut bytes: BString, substitutions: Vec<Option<Node>>) -> Self {
         if bytes.last() == Some(&0) {

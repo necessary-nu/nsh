@@ -121,7 +121,7 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             }
             return Ok(Flow::Done((0).into()));
         };
-        let number = crate::mystring::number(&mut sh.diagnostics(), status)?;
+        let number = crate::number::parse_nonnegative(&mut sh.diagnostics(), status)?;
         let number = if number > 128 { number - 128 } else { number };
         if let Some(signal) = crate::status::Signal::from_number(number)
             .filter(|signal| signal.number() < crate::signames::NSIG as i32)
@@ -158,9 +158,9 @@ pub fn killcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             ))
         } else {
             let value = if spec.first() == Some(&b'-') {
-                -crate::mystring::number(&mut sh.diagnostics(), BStr::new(&spec[1..]))?
+                -crate::number::parse_nonnegative(&mut sh.diagnostics(), BStr::new(&spec[1..]))?
             } else {
-                crate::mystring::number(&mut sh.diagnostics(), spec)?
+                crate::number::parse_nonnegative(&mut sh.diagnostics(), spec)?
             };
             process_target(value)
         };

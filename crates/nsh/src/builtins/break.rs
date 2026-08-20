@@ -34,9 +34,9 @@ pub fn breakcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut n: c_int = 1;
 
     if let Some(count) = args.get(1) {
-        n = crate::mystring::number(&mut sh.diagnostics(), count)?;
+        n = crate::number::parse_nonnegative(&mut sh.diagnostics(), count)?;
         if n <= 0 {
-            return Err(crate::mystring::bad_number(&mut sh.diagnostics(), count));
+            return Err(crate::number::invalid_number(&mut sh.diagnostics(), count));
         }
     }
     if n > sh.eval.loopnest {

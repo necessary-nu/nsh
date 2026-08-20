@@ -224,7 +224,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
         let mut replacement = BString::default();
         if sflg != 0 {
             if let Some(field) = fields.get_mut(operand_start) {
-                let word = crate::mystring::cstr_prefix(&field.text);
+                let word = field.as_bstr();
                 if let Some(at) = word.find_byte(b'=') {
                     pattern = Some(BString::from(&word[..at]));
                     replacement = BString::from(&word[at + 1..]);
@@ -239,7 +239,7 @@ pub(crate) fn histcmd_fields(sh: &mut Shell, fields: &mut [strlist]) -> Result<F
 
         let operands: Vec<BString> = fields[operand_start..]
             .iter()
-            .map(|field| BString::from(crate::mystring::cstr_prefix(&field.text)))
+            .map(|field| BString::from(field.as_bstr()))
             .collect();
 
         /*
@@ -535,7 +535,7 @@ pub fn str_to_event(
         }
         _ => {}
     }
-    let numeric = crate::mystring::decimal_digits(number_bytes);
+    let numeric = crate::number::parse_decimal(number_bytes);
     let event: Option<HistoryEvent> = if let Some(number) = numeric {
         let i = number.min(c_int::MAX as u64) as c_int;
         if relative != 0 {

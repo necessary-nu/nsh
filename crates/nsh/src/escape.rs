@@ -21,7 +21,7 @@
 //!     single quotes.
 //!     (src/mksyntax.c:147,152)
 
-use bstr::BString;
+use bstr::{BStr, BString};
 use core::ffi::{c_char, c_int, c_uint};
 
 // ---------------------------------------------------------------------
@@ -411,4 +411,66 @@ pub(crate) fn conv_escape_str(input: &[u8], cp: &mut BString) -> c_int {
     }
 
     c
+}
+
+/// Quote arbitrary bytes so parsing the result produces the same bytes.
+// [spec:dash:def:mystring.single-quote-fn]
+// [spec:dash:sem:mystring.single-quote-fn]
+// [spec:nsh:req:idiom.no-mystring]
+pub(crate) fn shell_quote(mut input: &BStr) -> BString {
+    let mut quoted = BString::new(Vec::new());
+    loop {
+        let ordinary = input
+            .iter()
+            .position(|&byte| byte == b'\'')
+            .unwrap_or(input.len());
+        quoted.push(b'\'');
+        quoted.extend_from_slice(&input[..ordinary]);
+        quoted.push(b'\'');
+        input = &input[ordinary..];
+
+        let quotes = input
+            .iter()
+            .position(|&byte| byte != b'\'')
+            .unwrap_or(input.len());
+        if quotes == 0 {
+            break;
+        }
+        quoted.push(b'"');
+        quoted.extend_from_slice(&input[..quotes]);
+        quoted.push(b'"');
+        input = &input[quotes..];
+        if input.is_empty() {
+            break;
+        }
+    }
+    quoted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // [spec:dash:sem:mystring.single-quote-fn/test]
+    #[test]
+    fn shell_quote_is_requotable() {
+        assert_eq!(shell_quote(BStr::new(b"abc")), b"'abc'".as_slice());
+        assert_eq!(shell_quote(BStr::new(b"")), b"''".as_slice());
+        assert_eq!(shell_quote(BStr::new(b"a'b")), b"'a'\"'\"'b'".as_slice());
+        assert_eq!(shell_quote(BStr::new(b"'")), b"''\"'\"".as_slice());
+        assert_eq!(shell_quote(BStr::new(b"a b|c$d")), b"'a b|c$d'".as_slice());
+    }
+
+    // [spec:dash:sem:mystring.single-quote-fn/test]
+    #[test]
+    fn shell_quote_handles_all_bytes() {
+        for byte in 1_u8..=u8::MAX {
+            let actual = shell_quote(BStr::new(&[byte]));
+            if byte == b'\'' {
+                assert_eq!(actual, b"''\"'\"".as_slice());
+            } else {
+                assert_eq!(actual.as_slice(), [b'\'', byte, b'\'']);
+            }
+        }
+    }
 }

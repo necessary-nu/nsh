@@ -76,10 +76,12 @@ pub fn waitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             retval = crate::status::ExitStatus::NOT_FOUND;
             'repeat: {
                 if spec.first() != Some(&b'%') {
-                    let process =
-                        u32::try_from(crate::mystring::number(&mut sh.diagnostics(), spec)?)
-                            .ok()
-                            .and_then(nsh_platform::ProcessId::new);
+                    let process = u32::try_from(crate::number::parse_nonnegative(
+                        &mut sh.diagnostics(),
+                        spec,
+                    )?)
+                    .ok()
+                    .and_then(nsh_platform::ProcessId::new);
                     jobp = None;
                     for i in sh.jobs.order_snapshot() {
                         if sh.jobs[i]

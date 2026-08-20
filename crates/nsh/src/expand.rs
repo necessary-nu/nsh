@@ -15,15 +15,16 @@ use bstr::{BStr, BString, ByteSlice};
 use core::ffi::{c_char, c_int, c_uint};
 
 use crate::error::Error;
-use crate::mystring::{byte_at, byte_at_i, slice_from};
 use crate::nodes::Node;
 use crate::options::{OPTION_SPECS, ShellOption};
 // [spec:nsh:def:idiom.shell-options]
 use crate::pmatch::pmatch_slices;
 
+mod bytes;
 mod mode;
 mod typed;
 
+use bytes::{at as byte_at, at_signed as byte_at_i, before_nul as terminated_prefix};
 use mode::EscapeMode;
 pub(crate) use mode::ExpansionMode;
 
@@ -99,10 +100,8 @@ const C_9: c_char = b'9' as c_char;
 /// Owning the bytes says that lifetime directly.
 ///
 /// **Invariant: the bytes end with a NUL, and the terminator is counted.**
-/// Every reader is a C-string reader — `setvar`, `setvareq`, `execve`,
-/// `find_command`, `strcoll`, `patmatch`, `outfmt` — so a field that
-/// stopped at `strlen` would have to have a terminator appended at each of
-/// them. [`strlist::textp`] asserts it.
+/// [`strlist::as_bstr`] is the single reader that hides that storage detail
+/// from the evaluator and builtins.
 pub struct strlist {
     pub text: BString,
 }
@@ -111,11 +110,10 @@ impl strlist {
     /// The same field, taken from bytes that already know where they end.
     ///
     /// `ifsbreakup` terminates each field in the word and then copies it
-    /// out; with the word a slice there is no pointer to hand to
-    /// [`strlist::from_cstr`], and the terminator is re-supplied here
-    /// rather than assumed to be in range.
+    /// out; the terminator is re-supplied here rather than assumed to be in
+    /// range.
     pub fn from_cbytes(s: &[u8]) -> strlist {
-        let mut text = BString::from(crate::mystring::cstr_prefix(s).as_bytes());
+        let mut text = BString::from(terminated_prefix(s));
         text.push(0);
         strlist { text }
     }
@@ -126,11 +124,10 @@ impl strlist {
     /// much, so the length is re-derived. No reader of a field uses its
     /// length — they all stop at the terminator, as the C's did — so the
     /// truncation is hygiene rather than correctness: what it buys is that
-    /// the entry's length keeps meaning the string's length, which is what
-    /// makes the assertion in [`strlist::textp`] worth anything.
+    /// the entry's length keeps meaning the stored field's length.
     #[inline]
     pub fn rmescapes(&mut self) {
-        /* A field keeps its terminator: [`strlist::textp`] asserts it. */
+        /* A field keeps its terminator for the remaining expansion engine. */
         let n = rmescapes_owned(&mut self.text);
         self.text.truncate(n + 1);
     }
@@ -346,9 +343,8 @@ fn grabexpdest(state: &mut ExpandState) -> BString {
 /// This hands back the bytes rather than the base pointer, and it is the
 /// only route by which the expansion buffer left this file as a bare
 /// `char *`.  Both callers did `CStr::from_ptr` on what they got, so the
-/// scan has not moved — it has become [`mystring::cstr_prefix`], which is
-/// safe, and the two `CStr::from_ptr` calls and the pointer that fed them
-/// are gone.
+/// scan has not moved — [`terminated_prefix`] owns it here, which is safe,
+/// and the two `CStr::from_ptr` calls and the pointer that fed them are gone.
 ///
 /// The borrow is `'static` because the buffer is, and the liveness the
 /// callers rely on is unchanged and still theirs to respect: the bytes
@@ -356,7 +352,7 @@ fn grabexpdest(state: &mut ExpandState) -> BString {
 /// its read expands — `openhere` only pipes and forks, `expandstr` reads
 /// on the next line.
 pub fn expansion_result(sh: &crate::context::Shell) -> &BStr {
-    crate::mystring::cstr_prefix(sh.expand.buffer.as_slice())
+    terminated_prefix(sh.expand.buffer.as_slice())
 }
 
 // ---------------------------------------------------------------------
@@ -755,9 +751,16 @@ fn argstr(
                     /* "$@" syntax adherence hack */
                     /* `dolatstr + 1` is the five bytes the parser emits for
                      * a bare `"$@"`, terminator excluded. */
-                    let dolat = crate::mystring::dolatstr.map(|c| c as u8);
+                    let quoted_at_tail = [
+                        CTLVAR as u8,
+                        (VSNORMAL | VSBIT) as u8,
+                        b'@',
+                        b'=',
+                        CTLQUOTEMARK as u8,
+                    ];
                     if !in_quotes
-                        && crate::mystring::cstr_prefix(slice_from(text, p)) == &dolat[1..6]
+                        && terminated_prefix(text.get(p..).unwrap_or_default()).as_bytes()
+                            == quoted_at_tail
                     {
                         p = evalvar(sh, state, text, p + 1, mode | ExpansionMode::QUOTED)? + 1;
                         continue 'expansion;
@@ -773,7 +776,7 @@ fn argstr(
                 CTLMBCHAR => {
                     c = byte_at(text, p) as c_int;
                     p -= 1;
-                    mb = mbnext_bytes(slice_from(text, p));
+                    mb = mbnext_bytes(text.get(p..).unwrap_or_default());
                     ml = (mb >> 8) - 2;
                     if mode.escapes_quotes() || mode.contains(ExpansionMode::PRESERVE_MULTIBYTE) {
                         length = ((mb >> 8) + (mb & 0xff)) as usize;
@@ -979,7 +982,7 @@ fn expari(
          * the stack allocator's restored cursor.  The expression has value
          * semantics now: copy the counted bytes before rewinding the output
          * buffer, then lend that slice to the arithmetic parser. */
-        let arithmetic = crate::mystring::cstr_prefix(&expb(state)[begoff as usize..]).to_owned();
+        let arithmetic = terminated_prefix(&expb(state)[begoff as usize..]).to_owned();
         expb(state).truncate(begoff as usize);
 
         removerecordregions(
@@ -1143,9 +1146,9 @@ fn scanleft(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize> 
         let subject: &[u8] = if a.zero {
             between(b, a.startp, s)
         } else {
-            slice_from(b, s)
+            b.get(s..).unwrap_or_default()
         };
-        if pmatch_slices(locale, slice_from(b, a.pat), subject) != 0 {
+        if pmatch_slices(locale, b.get(a.pat..).unwrap_or_default(), subject) != 0 {
             return Some(if a.quotes { loc } else { loc2 });
         }
 
@@ -1153,7 +1156,7 @@ fn scanleft(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize> 
             break;
         }
 
-        let mb: c_uint = mbnext_bytes(slice_from(b, loc));
+        let mb: c_uint = mbnext_bytes(b.get(loc..).unwrap_or_default());
         loc += ((mb & 0xff) + (mb >> 8)) as usize;
         let ml: c_uint = if (mb >> 8) > 3 { (mb >> 8) - 2 } else { 1 };
         loc2 += ml as usize;
@@ -1182,9 +1185,9 @@ fn scanright(locale: &nsh_platform::Locale, b: &[u8], a: &Scan) -> Option<usize>
         let subject: &[u8] = if a.zero {
             between(b, a.startp, s.max(0) as usize)
         } else {
-            slice_from(b, s.max(0) as usize)
+            b.get(s.max(0) as usize..).unwrap_or_default()
         };
-        if pmatch_slices(locale, slice_from(b, a.pat), subject) != 0 {
+        if pmatch_slices(locale, b.get(a.pat..).unwrap_or_default(), subject) != 0 {
             return Some(if a.quotes { loc } else { loc2 } as usize);
         }
         loc -= 1;
@@ -1276,11 +1279,9 @@ fn subevalvar(
     startp = startloc as usize;
 
     if subtype == VSASSIGN {
-        let name = crate::mystring::cstr_prefix(
-            &text[str.expect("VSASSIGN carries the variable's name")..],
-        );
+        let name = terminated_prefix(&text[str.expect("VSASSIGN carries the variable's name")..]);
         let name = crate::var::varname(name);
-        let value = crate::mystring::cstr_prefix(&expb(state)[startp..]);
+        let value = terminated_prefix(&expb(state)[startp..]);
         crate::var::set_bytes(sh, name, Some(value), crate::var::VariableAttributes::NONE)?;
 
         loc = startp;
@@ -1291,7 +1292,7 @@ fn subevalvar(
              * before — docs/errors-are-values.md 0.2 is the bug that
              * happens when one of these is missed, and `Error` is
              * `#[must_use]` so the compiler now names it. */
-            let umsg = crate::mystring::cstr_prefix(&expb(state)[startp..]);
+            let umsg = terminated_prefix(&expb(state)[startp..]);
             let var = str.expect("VSQUESTION carries the variable's name");
             return Err(varunset(sh, text, start, var, Some(umsg), varflags));
         }
@@ -1446,7 +1447,7 @@ fn evalvar(
     startloc = expdest_off(state);
     /* The parser always writes the `=` that ends the variable name, and
      * the C dereferences `strchr`'s result without checking. */
-    p += crate::mystring::cstr_prefix(slice_from(text, p))
+    p += terminated_prefix(text.get(p..).unwrap_or_default())
         .find_byte(C_EQUALS as u8)
         .expect("the parser ends a variable name with `=`")
         + 1;
@@ -1941,14 +1942,14 @@ fn varvalue(
 
                 len += strtodest(
                     &sh.locale,
-                    crate::mystring::cstr_prefix(param).as_bytes(),
+                    terminated_prefix(param).as_bytes(),
                     mode,
                     expb(state),
                 ) as isize;
             }
         }
         c if (C_0..=C_9).contains(&c) => {
-            let position = crate::mystring::decimal_digits(name)
+            let position = crate::number::parse_decimal(name)
                 .unwrap_or(0)
                 .min(c_int::MAX as u64) as c_int;
             if position > sh.options.shellparam.nparam {
@@ -1968,7 +1969,7 @@ fn varvalue(
             };
             len = strtodest(
                 &sh.locale,
-                crate::mystring::cstr_prefix(&value).as_bytes(),
+                terminated_prefix(&value).as_bytes(),
                 mode,
                 expb(state),
             ) as isize;
@@ -1979,7 +1980,7 @@ fn varvalue(
             };
             len = strtodest(
                 &sh.locale,
-                crate::mystring::cstr_prefix(&value).as_bytes(),
+                terminated_prefix(&value).as_bytes(),
                 mode,
                 expb(state),
             ) as isize;
@@ -2090,7 +2091,7 @@ fn ifsbreakup_slow(
 
     q = p;
 
-    ifschar = mbnext_bytes(slice_from(string, p));
+    ifschar = mbnext_bytes(string.get(p..).unwrap_or_default());
     p += (ifschar & 0xff) as usize;
     multibyte_len = if (ifschar >> 8) > 3 {
         ((ifschar >> 8) - 2) as usize
@@ -2098,7 +2099,12 @@ fn ifsbreakup_slow(
         0
     };
 
-    let membership = ifsisifs(sh, slice_from(string, p), multibyte_len, ifst.nulonly);
+    let membership = ifsisifs(
+        sh,
+        string.get(p..).unwrap_or_default(),
+        multibyte_len,
+        ifst.nulonly,
+    );
     p += (ifschar >> 8) as usize;
 
     isifs = membership.separator;
@@ -2408,7 +2414,7 @@ fn expandmeta(
     let mut globbuf: BString = BString::new(Vec::new());
 
     for mut str in words {
-        let text = crate::mystring::cstr_prefix(&str.text);
+        let text = str.as_bstr();
         let has_meta = !sh.options.enabled(ShellOption::NoGlob)
             && text.find_byteset(b"*?]").is_some()
             && text != b"]";
@@ -2437,7 +2443,7 @@ fn expandmeta(
                     &sh.locale,
                     state,
                     &mut globbuf,
-                    crate::mystring::cstr_prefix(&pattern),
+                    terminated_prefix(&pattern),
                     0,
                 );
             });
@@ -2876,7 +2882,7 @@ fn rmescapes_compact(buf: &mut [u8], at: usize, mode: EscapeMode) -> usize {
                 q -= 1;
             }
 
-            mb = mbnext_bytes(slice_from(buf, p));
+            mb = mbnext_bytes(buf.get(p..).unwrap_or_default());
             ml = mb >> 8;
 
             if !globbing {
@@ -2922,8 +2928,13 @@ fn rmescapes_compact(buf: &mut [u8], at: usize, mode: EscapeMode) -> usize {
 /// `strpbrk`'s set is the string without its terminator: it never matches
 /// a NUL, which is what stops the scan instead.
 fn rmescapes_scan(s: &[u8]) -> Option<usize> {
-    let cqset = crate::mystring::cqchars.map(|c| c as u8);
-    s.find_byteset(&cqset[..4])
+    let markers = [
+        C_BACKSLASH as u8,
+        CTLESC as u8,
+        CTLMBCHAR as u8,
+        CTLQUOTEMARK as u8,
+    ];
+    s.find_byteset(&markers)
 }
 
 /// Apply `_rmescapes` to one owned, NUL-terminated byte buffer and return
@@ -2975,7 +2986,7 @@ fn rmescapes_buffer(bytes: &mut [u8], mode: EscapeMode) -> usize {
 /// reason to, so that store is not transcribed on the heap path: a
 /// deliberate divergence from a write with no observable value.
 pub fn rmescapes_grow(b: &mut BString, at: usize) -> usize {
-    let n: usize = crate::mystring::cstr_prefix(&b[at..]).len();
+    let n = terminated_prefix(&b[at..]).len();
     if rmescapes_scan(&b[at..at + n]).is_none() {
         /* `return str` — before the block is grown, so the cursor is
          * untouched and the caller's `rmesc == startp` test sees it. */
@@ -3037,8 +3048,7 @@ fn casematch_inner(
     ifsfree(state);
     /* The C reads the word back as `stackblock()`. */
     rmescapes_buffer(expb(state), EscapeMode::Glob);
-    result =
-        crate::pmatch::pmatch_slices(&sh.locale, crate::mystring::cstr_prefix(expb(state)), val);
+    result = crate::pmatch::pmatch_slices(&sh.locale, terminated_prefix(expb(state)), val);
     Ok(result)
 }
 

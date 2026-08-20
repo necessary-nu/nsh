@@ -727,7 +727,7 @@ impl SignalSpec {
 // [spec:dash:def:trap.decode-signum-fn]
 // [spec:dash:sem:trap.decode-signum-fn]
 pub(crate) fn decode_signum(string: &BStr) -> Option<SignalSpec> {
-    let number = crate::mystring::decimal_digits(string)?;
+    let number = crate::number::parse_decimal(string)?;
     if number >= NSIG as u64 {
         return None;
     }

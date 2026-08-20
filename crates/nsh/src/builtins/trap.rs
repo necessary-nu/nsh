@@ -25,9 +25,7 @@ fn listing_line(signo: usize, action: &TrapAction) -> Vec<u8> {
         TrapAction::Default => line.push(b'-'),
         TrapAction::Ignore => line.extend_from_slice(b"''"),
         TrapAction::Command(command) => {
-            line.extend_from_slice(&crate::mystring::single_quote(BStr::new(
-                command.as_slice(),
-            )));
+            line.extend_from_slice(&crate::escape::shell_quote(BStr::new(command.as_slice())));
         }
     }
     line.push(b' ');

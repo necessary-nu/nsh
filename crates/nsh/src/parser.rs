@@ -783,13 +783,10 @@ fn command(sh: &mut Shell, context: TokenContext) -> Result<Option<Node>, Error>
                     return Err(synexpect(sh, None));
                 }
             } else {
-                /* The implicit `"$@"` of a `for` with no `in`. `dolatstr` is
-                 * seven bytes ending in the NUL that a word's text keeps, so
-                 * the value is the static and not what a C reader makes of
-                 * it. */
-                let dolatstr: [u8; 7] = crate::mystring::dolatstr.map(|c| c as u8);
+                /* The implicit `"$@"` of a `for` with no `in` is syntax,
+                 * so construct the structural word directly. */
                 args.push(Node::Word(WordNode {
-                    word: ParsedWord::from_legacy(BString::from(&dolatstr[..]), Vec::new()),
+                    word: ParsedWord::quoted_parameter(BString::from(b"@".as_slice())),
                 }));
                 /*
                  * Newline or semicolon here is optional (but note
@@ -1089,7 +1086,7 @@ fn parsefname(sh: &mut Shell, pending: PendingRedirection) -> Result<Redirection
             operator,
             descriptor,
         } => {
-            let text = crate::mystring::cstr_prefix(wordtext(sh));
+            let text = wordtext(sh);
             let target = if text.len() == 1 && is_digit(text[0] as c_int) {
                 DescriptorTarget::Number(
                     LogicalDescriptor::from_digit(text[0])
@@ -2423,7 +2420,11 @@ fn parsebackq(sh: &mut Shell, st: &mut Rt1<'_>, oldstyle: c_int) -> Result<(), E
 
     let parsed = crate::resource::with_resources(sh, |sh, _resources| {
         if oldstyle != 0 {
-            setinputstring(sh, crate::mystring::cstr_prefix(&pstr));
+            let end = pstr
+                .iter()
+                .position(|&byte| byte == 0)
+                .unwrap_or(pstr.len());
+            setinputstring(sh, BStr::new(&pstr[..end]));
         }
         let mut node = list(sh, 2)?.into_node();
 
@@ -2482,7 +2483,6 @@ fn parsearith(sh: &mut Shell, st: &mut Rt1<'_>) -> Result<(), Error> {
 // [spec:dash:def:parser.endofname-fn]
 // [spec:dash:sem:parser.endofname-fn]
 pub fn endofname(locale: &nsh_platform::Locale, name: &BStr) -> usize {
-    let name = crate::mystring::cstr_prefix(name);
     let Some(&first) = name.first() else {
         return 0;
     };
@@ -2551,9 +2551,6 @@ pub fn expandstr(sh: &mut Shell, ps: &BStr) -> Result<BString, Error> {
     let saveheredoclist: Vec<heredoc>;
     let mut result: BString;
     let saveprompt: c_int;
-
-    /* XXX Fix (char *) cast. */
-    let ps = crate::mystring::cstr_prefix(ps);
 
     saveheredoclist = core::mem::take(&mut sh.input.heredoclist);
     saveprompt = sh.input.doprompt;
@@ -2700,9 +2697,8 @@ pub fn getprompt(sh: &mut Shell) -> BString {
 // [spec:dash:def:parser.findkwd-fn]
 // [spec:dash:sem:parser.findkwd-fn]
 pub fn findkwd(s: &BStr) -> Option<TokenKind> {
-    let key = crate::mystring::cstr_prefix(s);
     RESERVED_WORDS
-        .binary_search_by(|(word, _)| word.cmp(&key.as_ref()))
+        .binary_search_by(|(word, _)| word.cmp(&s.as_ref()))
         .ok()
         .map(|index| RESERVED_WORDS[index].1)
 }
@@ -2714,7 +2710,6 @@ pub fn findkwd(s: &BStr) -> Option<TokenKind> {
 // [spec:dash:def:parser.goodname-fn]
 // [spec:dash:sem:parser.goodname-fn]
 pub fn goodname(locale: &nsh_platform::Locale, name: &BStr) -> c_int {
-    let name = crate::mystring::cstr_prefix(name);
     (endofname(locale, name) == name.len()) as c_int
 }
 

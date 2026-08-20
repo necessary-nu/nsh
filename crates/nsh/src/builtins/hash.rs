@@ -9,7 +9,6 @@ use crate::context::Shell;
 use crate::error::Error;
 use bstr::{BStr, ByteSlice};
 use core::ffi::c_int;
-use std::ffi::CStr;
 use std::io::Write;
 
 use crate::eval::Flow;
@@ -113,26 +112,21 @@ pub fn hashcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 /// read has to happen before the walk starts. Passing it in is what makes
 /// that visible rather than a surprise.
 fn printentry(name: &BStr, mut idx: c_int, rehash: bool, pathval: &BStr) -> Vec<u8> {
-    let mut candidate = None;
-
     let mut path = PathCursor::new(pathval);
-    loop {
-        candidate = padvance(&mut path, name);
+    let candidate = loop {
+        let candidate = padvance(&mut path, name);
         idx -= 1;
         if idx < 0 {
-            break;
+            break candidate;
         }
-    }
+    };
     let fullname = candidate
         .expect("a cached PATH index must still name a PATH element")
         .path;
     /* Rendered rather than written, for the reason the note above gives
      * about `pathval`: the walk holds `sh.commands` borrowed, and a write
      * wants `sh.io` at the same time. */
-    let mut line = CStr::from_bytes_with_nul(&fullname)
-        .expect("padvance returns one terminated candidate")
-        .to_bytes()
-        .to_vec();
+    let mut line = fullname.to_vec();
     line.extend_from_slice(if rehash { b"*\n" } else { b"\n" });
     line
 }

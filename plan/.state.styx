@@ -5321,4 +5321,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.shell-entrypoint}
     )}
+    {id remove-mystring-module, covered_rules (
+        idiom.no-mystring
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.no-mystring}
+    )}
 )

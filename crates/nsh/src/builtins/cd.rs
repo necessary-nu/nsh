@@ -125,7 +125,7 @@ pub fn cdcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             let component = components
                 .next()
                 .expect("PATH cursor and components advance together");
-            let fullname = crate::mystring::cstr_prefix(&candidate.path);
+            let fullname = candidate.path.as_bstr();
 
             if fullname
                 .try_to_path_buf()

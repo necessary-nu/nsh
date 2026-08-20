@@ -687,7 +687,7 @@ pub(crate) fn lookupvarint_bytes(sh: &mut Shell, name: &BStr) -> Result<i64, Err
         }
         None => BString::default(),
     };
-    crate::mystring::parse_integer(&mut sh.diagnostics(), BStr::new(&value), 0)
+    crate::number::parse_integer(&mut sh.diagnostics(), BStr::new(&value), 0)
 }
 
 pub(crate) fn unset_bytes(sh: &mut Shell, name: &BStr) -> Result<(), Error> {
@@ -742,7 +742,7 @@ pub(crate) fn show_vars(sh: &mut Shell, prefix: &BStr, selection: VariableSelect
             record.extend_from_slice(name);
             if let Some(value) = var.scalar() {
                 record.push(b'=');
-                record.extend_from_slice(&crate::mystring::single_quote(value));
+                record.extend_from_slice(&crate::escape::shell_quote(value));
             }
             record.push(b'\n');
             record

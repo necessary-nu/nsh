@@ -537,7 +537,7 @@ mod tests {
 
         let executable = std::env::current_exe().unwrap().to_shell_bytes();
         let mut command = BString::from("exec ");
-        command.extend_from_slice(&crate::mystring::single_quote(BStr::new(&executable)));
+        command.extend_from_slice(&crate::escape::shell_quote(BStr::new(&executable)));
         command.extend_from_slice(b" replaced");
         let status = sh.run(BStr::new(command.as_slice())).unwrap();
         assert_eq!(status.code(), 126);

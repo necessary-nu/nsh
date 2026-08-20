@@ -588,6 +588,8 @@ fn lookup_job(sh: &crate::context::Shell, name: Option<&BStr>) -> Result<JobId, 
     let Some(name) = name else {
         return current.ok_or(JobLookupError::NoCurrent);
     };
+    // [spec:dash:def:mystring.prefix-fn]
+    // [spec:dash:sem:mystring.prefix-fn]
     let Some(mut pattern) = name.strip_prefix(b"%") else {
         return Err(JobLookupError::NoSuch);
     };
@@ -598,7 +600,7 @@ fn lookup_job(sh: &crate::context::Shell, name: Option<&BStr>) -> Result<JobId, 
         _ => {}
     }
 
-    if let Some(number) = crate::mystring::decimal_digits(BStr::new(pattern))
+    if let Some(number) = crate::number::parse_decimal(BStr::new(pattern))
         && let Ok(number) = usize::try_from(number)
         && let Some(index) = number
             .checked_sub(1)

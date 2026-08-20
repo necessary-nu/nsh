@@ -32,7 +32,7 @@ pub fn exitcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 
     let status = match args.get(1) {
-        Some(status) => crate::status::ExitStatus::from_code(crate::mystring::number(
+        Some(status) => crate::status::ExitStatus::from_code(crate::number::parse_nonnegative(
             &mut sh.diagnostics(),
             status,
         )?),

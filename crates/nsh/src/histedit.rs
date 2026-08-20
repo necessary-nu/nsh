@@ -13,7 +13,7 @@
 //!   * `crate::output::{stderr, stdout}`
 //!   * `crate::options::{ShellOption, arg0, optionarg}`
 //!   * `crate::var::{bltinlookup, histsizeval}`
-//!   * `crate::mystring::is_number`
+//!   * `crate::number::parse_decimal`
 //!   * `crate::eval::evalstring`
 //!   * `crate::parser::getprompt`
 //!   * `crate::shellmain::readcmdfile` (src/main.c:283)

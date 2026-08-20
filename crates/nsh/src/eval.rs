@@ -756,7 +756,7 @@ fn evalfor(sh: &mut Shell, command: &ForCommand, context: EvalContext) -> Result
         crate::var::set_bytes(
             sh,
             command.variable.as_bstr(),
-            Some(crate::mystring::cstr_prefix(&sp.text)),
+            Some(sp.as_bstr()),
             VariableAttributes::NONE,
         )?;
         match catch_one_loop(evaltree(sh, Some(command.body.as_ref()), context)?) {
@@ -810,12 +810,7 @@ fn evalcase(sh: &mut Shell, command: &CaseCommand, context: EvalContext) -> Resu
             let mut selected = fallthrough;
             if !selected {
                 for patp in &clause.patterns {
-                    if crate::expand::casematch(
-                        sh,
-                        patp,
-                        BStr::new(crate::mystring::cstr_prefix(&arglist.list[0].text)),
-                    )? != 0
-                    {
+                    if crate::expand::casematch(sh, patp, arglist.list[0].as_bstr())? != 0 {
                         selected = true;
                         break;
                     }
@@ -982,7 +977,7 @@ fn expredir<'a>(
                             ExpansionMode::TILDE | ExpansionMode::REDIRECTION,
                         )?;
                         debug_assert_eq!(fnl.list.len(), 1, "an unsplit expansion is one field");
-                        descriptor_source(sh, crate::mystring::cstr_prefix(&fnl.list[0].text))?
+                        descriptor_source(sh, fnl.list[0].as_bstr())?
                     }
                 };
                 expanded.push(ExpandedRedirection::Descriptor {
@@ -1243,7 +1238,7 @@ fn parse_command_args(
                 None => return Ok(0),
             }
         };
-        let word = crate::mystring::cstr_prefix(&arglist.list[sp].text);
+        let word = arglist.list[sp].as_bstr();
         if word.first() != Some(&b'-') {
             break;
         }
@@ -1384,7 +1379,7 @@ fn evalcommand_in_scope(
             let regpath = crate::var::pathval(sh);
             match find_command(
                 sh,
-                crate::mystring::cstr_prefix(&arglist.list[head].text),
+                arglist.list[head].as_bstr(),
                 &mut resolved_command,
                 cmd_flag | DO_REGBLTIN,
                 BStr::new(regpath.as_slice()),
@@ -1511,13 +1506,13 @@ fn evalcommand_in_scope(
                 if use_local_variables {
                     crate::var::make_local_bytes(
                         sh,
-                        crate::mystring::cstr_prefix(&varlist.list[spp].text),
+                        varlist.list[spp].as_bstr(),
                         VariableAttributes::EXPORTED,
                     )?;
                 } else {
                     crate::var::set_assignment_bytes(
                         sh,
-                        crate::mystring::cstr_prefix(&varlist.list[spp].text),
+                        varlist.list[spp].as_bstr(),
                         variable_attributes,
                     )?;
                 }
@@ -1567,7 +1562,7 @@ fn evalcommand_in_scope(
                 }
                 let search_path =
                     BStr::new(path.as_ref().expect("command lookup has a PATH").as_slice());
-                let command_name = crate::mystring::cstr_prefix(&arglist.list[head].text);
+                let command_name = arglist.list[head].as_bstr();
                 match find_command(
                     sh,
                     command_name,
@@ -1757,7 +1752,7 @@ fn evalcommand_in_scope(
         crate::var::set_bytes(
             sh,
             BStr::new(b"_"),
-            Some(crate::mystring::cstr_prefix(&arglist.list[lastarg].text)),
+            Some(arglist.list[lastarg].as_bstr()),
             VariableAttributes::NONE,
         )?;
     }
@@ -1780,9 +1775,7 @@ fn evalbltin(
     savecmdname = core::mem::take(&mut sh.eval.commandname);
     /* `commandname = argv[0]`, and NULL for the command that has no word
      * at all -- the assignment-only one `bltin` stands for. */
-    sh.eval.commandname = fields
-        .first()
-        .map(|field| BString::from(crate::mystring::cstr_prefix(&field.text)));
+    sh.eval.commandname = fields.first().map(|field| BString::from(field.as_bstr()));
 
     let outcome = (|| -> Result<Flow, Error> {
         let command_flow = match cmd.handler() {
@@ -1984,7 +1977,7 @@ fn eprintlist(output: &mut crate::output::Output, list: &[strlist], sep: c_int) 
         if sep != 0 {
             record.push(b' ');
         }
-        record.extend_from_slice(crate::mystring::cstr_prefix(&sp.text));
+        record.extend_from_slice(sp.as_bstr());
         sep |= 1;
         let _ = output.write_all(&record);
     }

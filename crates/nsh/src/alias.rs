@@ -159,7 +159,7 @@ pub fn rmaliases(interrupts: &mut crate::error::InterruptDeferral, aliases: &mut
 // [spec:dash:sem:alias.printalias-fn]
 // [spec:posix:req:builtin.alias.stdout-format]
 pub(crate) fn printalias(name: &BStr, value: &BStr) -> Vec<u8> {
-    let quoted = crate::mystring::single_quote(value);
+    let quoted = crate::escape::shell_quote(value);
     let mut line = Vec::with_capacity(name.len() + quoted.len() + 2);
     line.extend_from_slice(name);
     line.push(b'=');

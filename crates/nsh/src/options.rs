@@ -280,7 +280,6 @@ fn minus_o(
     name: Option<&BStr>,
     enabled: bool,
 ) -> Result<Option<ShellOption>, Error> {
-    let name = name.map(|value| crate::mystring::cstr_prefix(value.as_ref()));
     if name.is_none() {
         if enabled {
             let heading = b"Current option settings\n";
@@ -394,10 +393,7 @@ pub(crate) fn set_typed_option(sh: &mut crate::context::Shell, option: ShellOpti
 pub fn setparam(sh: &mut Shell, argv: &[&BStr]) {
     /* Copied out in full before the old list goes, as the C's
      * `savestr` loop is: `freeparam` comes after the copy there too. */
-    let words: Vec<BString> = argv
-        .iter()
-        .map(|word| BString::from(crate::mystring::cstr_prefix(word)))
-        .collect();
+    let words: Vec<BString> = argv.iter().map(|word| BString::from(*word)).collect();
     sh.options.shellparam.replace(words);
 }
 

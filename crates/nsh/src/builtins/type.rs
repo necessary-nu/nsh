@@ -128,18 +128,17 @@ pub(crate) fn describe_command(
                     }
                 } else {
                     let mut cursor = PathCursor::new(path);
-                    let mut candidate = None;
-                    loop {
-                        candidate = padvance(&mut cursor, command);
+                    let candidate = loop {
+                        let candidate = padvance(&mut cursor, command);
                         j -= 1;
                         if j < 0 {
-                            break;
+                            break candidate;
                         }
-                    }
+                    };
                     resolved = candidate
                         .expect("a resolved PATH index must name a PATH element")
                         .path;
-                    crate::mystring::cstr_prefix(&resolved)
+                    resolved.as_bstr()
                 };
                 if verbose != 0 {
                     let mut record = b" is".to_vec();

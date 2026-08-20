@@ -109,7 +109,7 @@ pub(crate) mod source;
 pub(crate) mod error;
 pub(crate) mod escape;
 pub(crate) mod fd;
-pub(crate) mod mystring;
+pub(crate) mod number;
 pub(crate) mod output;
 pub(crate) mod shell;
 pub(crate) mod siginbox;

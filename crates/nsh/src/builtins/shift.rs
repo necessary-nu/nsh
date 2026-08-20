@@ -26,7 +26,7 @@ pub fn shiftcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let n: c_int;
 
     n = match args.get(1) {
-        Some(count) => crate::mystring::number(&mut sh.diagnostics(), count)?,
+        Some(count) => crate::number::parse_nonnegative(&mut sh.diagnostics(), count)?,
         None => 1,
     };
     if n > sh.options.shellparam.nparam {

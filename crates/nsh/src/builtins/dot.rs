@@ -39,7 +39,7 @@ fn find_dot_file(sh: &mut crate::context::Shell, basename: &BStr) -> Option<BStr
 
     let mut path = PathCursor::new(path_value.as_slice().as_bstr());
     while let Some(candidate) = crate::exec::padvance(&mut path, basename) {
-        let fullname = crate::mystring::cstr_prefix(&candidate.path);
+        let fullname = candidate.path.as_bstr();
         let Ok(native) = fullname.try_to_path_buf() else {
             continue;
         };
