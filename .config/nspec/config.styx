@@ -1,9 +1,10 @@
 // Three specs are tracked against this repo, and they answer different
 // questions. Keep them apart in your head:
 //
-//   dash   — "does the Rust port behave exactly like dash's C?"
-//            Derived FROM the C, so a rule here describes what dash
-//            does, bugs included. 534 rules, one per ported symbol.
+//   dash   — "what did the translated Dash source do?"
+//            Derived FROM the C, so these rules retain implementation
+//            provenance and differential anchors, bugs included. They
+//            do not outrank POSIX or an explicit nsh compatibility rule.
 //
 //   posix  — "does the shell conform to POSIX.1-2024?"
 //            Derived FROM the standard, so a rule here describes what
@@ -16,12 +17,11 @@
 //            neither the dash source nor the POSIX shell language can
 //            express.
 //
-// These will disagree, and that is the point: dash deliberately
-// deviates from POSIX in places. An uncovered posix rule therefore
-// means "not established", NOT "port bug" — a deviation the port
-// faithfully reproduces is correct behaviour for the `dash` spec and a
-// genuine non-conformance for the `posix` one. Do not "fix" the port to
-// satisfy a posix rule; that would break the bug-for-bug contract.
+// These will disagree, and that is the point: dash deviates from POSIX
+// in places. An uncovered POSIX rule means "not established". Once a
+// conflict is established, POSIX or an explicit nsh compatibility rule
+// owns the shipped behavior; the dash rule remains provenance for the
+// old observation rather than authority to preserve a defect.
 //
 // nspec keys coverage on the BARE rule id — namespace and verb are
 // dropped — so an id used by both corpora would silently merge into one

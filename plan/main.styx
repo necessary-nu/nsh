@@ -6459,12 +6459,34 @@ children (
                     process-environment-soundness
                     enforce-survey-test-containment
                 )
+                sealed true
                 log (
                     {
                         at 2026-08-19T23:57:37.206530729Z
                         author "brendan@necessary.nu"
                         kind @decision
                         text "priority pinned to 3 — operator override: Pause the remaining Bash compatibility implementation and make the approved idiomatic-core cleanup its prerequisite within the active P3 pass."
+                    }
+
+                    {
+                        at 2026-08-20T00:09:56.805318537Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Todo → Doing (nplan start)"
+                    }
+
+                    {
+                        at 2026-08-20T00:12:33.691227545Z
+                        author "brendan@necessary.nu"
+                        kind @decision
+                        text "The contract defines 44 implementation rules, one per cleanup leaf. POSIX and explicit nsh compatibility rules own observable behavior; Dash-derived rules retain provenance and regression evidence but do not require defect preservation. Shell bytes and logical descriptor numbers remain legitimate domain concepts, while C strings, ABI scalar aliases, raw host descriptors, and unsafe/libc stay out of crates/nsh. Necessary unsafe POSIX ABI work remains private to nsh-platform."
+                    }
+
+                    {
+                        at 2026-08-20T00:12:33.787954465Z
+                        author "brendan@necessary.nu"
+                        kind @status
+                        text "Doing → Done (nplan complete)"
                     }
                 )
             }
@@ -6477,6 +6499,9 @@ children (
                         id type-lexer-syntax-protocol
                         title "Replace integer tokens, negative EOF sentinels, and biased syntax tables with enums"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.lexer-tokens])
+                        }
                         deps (specify-idiomatic-core-contract)
                         log (
                             {
@@ -6492,6 +6517,9 @@ children (
                         id introduce-typed-word-ir
                         title "Replace CTL bytecode, NUL framing, and parallel substitutions with typed word parts"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:def:idiom.word-ir])
+                        }
                         deps (specify-idiomatic-core-contract type-lexer-syntax-protocol)
                         log (
                             {
@@ -6507,6 +6535,9 @@ children (
                         id make-ast-structural
                         title "Replace numeric node tags and union-arm accessors with structural AST variants"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.structural-ast])
+                        }
                         deps (type-lexer-syntax-protocol introduce-typed-word-ir)
                         log (
                             {
@@ -6522,6 +6553,9 @@ children (
                         id remove-ast-shared-mutation
                         title "Make parsed syntax immutable and finalize required children and here-documents during parsing"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.immutable-ast])
+                        }
                         deps (make-ast-structural)
                         log (
                             {
@@ -6537,6 +6571,9 @@ children (
                         id rewrite-expansion-over-typed-words
                         title "Rewrite expansion around typed word parts instead of in-place encoded-buffer surgery"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:sem:idiom.typed-expansion])
+                        }
                         deps (remove-ast-shared-mutation)
                         log (
                             {
@@ -6558,6 +6595,9 @@ children (
                         id type-platform-errors
                         title "Replace raw errno and sentinel results in safe platform APIs with typed errors"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.platform-errors])
+                        }
                         deps (specify-idiomatic-core-contract)
                         log (
                             {
@@ -6573,6 +6613,9 @@ children (
                         id type-platform-process-api
                         title "Expose typed process and process-group operations without raw integer identities"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:def:idiom.process-identity])
+                        }
                         deps (type-platform-errors)
                         log (
                             {
@@ -6588,6 +6631,9 @@ children (
                         id type-platform-signal-wait-api
                         title "Expose typed signals and wait outcomes instead of signal numbers and wait words"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:def:idiom.signal-wait])
+                        }
                         deps (type-platform-errors type-platform-process-api)
                         log (
                             {
@@ -6603,6 +6649,9 @@ children (
                         id type-platform-filesystem-account-api
                         title "Expose byte-safe filesystem and account lookup APIs without C strings"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.filesystem-account-bytes])
+                        }
                         deps (type-platform-errors)
                         log (
                             {
@@ -6618,6 +6667,9 @@ children (
                         id type-platform-exec-api
                         title "Expose owned byte-string exec arguments and environment values with ABI conversion kept private"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.exec-boundary])
+                        }
                         deps (type-platform-process-api type-platform-filesystem-account-api)
                         log (
                             {
@@ -6633,6 +6685,9 @@ children (
                         id contain-descriptor-materialization
                         title "Keep numeric dup and close mechanics private to the process descriptor transaction"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.descriptor-materialization])
+                        }
                         deps (specify-idiomatic-core-contract logical-descriptor-table type-platform-errors)
                         log (
                             {
@@ -6648,6 +6703,9 @@ children (
                         id remove-core-raw-fd-observation
                         title "Remove core RawFd and AsRawFd observations in favor of logical descriptor capabilities"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.no-raw-fd-core])
+                        }
                         deps (contain-descriptor-materialization type-platform-process-api)
                         log (
                             {
@@ -6669,6 +6727,9 @@ children (
                         id adopt-core-status-flow-signal-types
                         title "Make ExitStatus, Flow, and Signal the core's internal currency"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.status-flow-signal])
+                        }
                         deps (specify-idiomatic-core-contract type-platform-signal-wait-api)
                         log (
                             {
@@ -6684,6 +6745,9 @@ children (
                         id replace-integer-options-and-flags
                         title "Replace the macro-indexed option array and integer booleans with typed shell options"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:def:idiom.shell-options])
+                        }
                         deps (adopt-core-status-flow-signal-types)
                         log (
                             {
@@ -6699,6 +6763,9 @@ children (
                         id type-variable-expansion-state
                         title "Replace variable and expansion sentinel integers with typed value and state representations"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:def:idiom.variable-expansion-state])
+                        }
                         deps (adopt-core-status-flow-signal-types introduce-typed-word-ir)
                         log (
                             {
@@ -6714,6 +6781,9 @@ children (
                         id replace-command-tag-payload-protocols
                         title "Remove command-table tags and unreachable payload accessors in favor of enum matching"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.command-dispatch])
+                        }
                         deps (adopt-core-status-flow-signal-types make-ast-structural)
                         log (
                             {
@@ -6729,6 +6799,9 @@ children (
                         id type-job-control-model
                         title "Introduce JobId, JobState, process identities, and typed wait outcomes"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:def:idiom.job-control-model])
+                        }
                         deps (adopt-core-status-flow-signal-types type-platform-process-api type-platform-signal-wait-api)
                         log (
                             {
@@ -6744,6 +6817,9 @@ children (
                         id replace-job-slot-linkage
                         title "Replace used-byte slots, manual current-job links, and magic missing values"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.job-storage])
+                        }
                         deps (type-job-control-model)
                         log (
                             {
@@ -6759,6 +6835,9 @@ children (
                         id type-trap-disposition-state
                         title "Replace numeric trap modes and signal-state bytes with typed dispositions"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:def:idiom.trap-dispositions])
+                        }
                         deps (adopt-core-status-flow-signal-types type-platform-signal-wait-api)
                         log (
                             {
@@ -6774,6 +6853,9 @@ children (
                         id seal-logical-descriptor-types
                         title "Distinguish shell descriptor identities from owned host handles throughout core"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:def:idiom.logical-descriptors])
+                        }
                         deps (adopt-core-status-flow-signal-types remove-core-raw-fd-observation)
                         log (
                             {
@@ -6789,6 +6871,9 @@ children (
                         id type-evaluation-redirection-modes
                         title "Replace evaluation, expansion, and redirection bitmasks with typed modes"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.operation-modes])
+                        }
                         deps (adopt-core-status-flow-signal-types rewrite-expansion-over-typed-words seal-logical-descriptor-types)
                         log (
                             {
@@ -6810,6 +6895,9 @@ children (
                         id structure-parser-expander-control-flow
                         title "Replace parser and expander goto translations with structured control flow"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.parser-control-flow])
+                        }
                         deps (rewrite-expansion-over-typed-words remove-ast-shared-mutation)
                         log (
                             {
@@ -6825,6 +6913,9 @@ children (
                         id structure-evaluator-builtin-control-flow
                         title "Replace evaluator and builtin integer program counters with explicit Rust control flow"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.evaluator-control-flow])
+                        }
                         deps (replace-command-tag-payload-protocols type-evaluation-redirection-modes)
                         log (
                             {
@@ -6840,6 +6931,9 @@ children (
                         id structure-jobs-startup-control-flow
                         title "Replace job rendering, read, and shell-startup goto emulators with typed control flow"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.jobs-startup-control-flow])
+                        }
                         deps (replace-job-slot-linkage adopt-core-status-flow-signal-types)
                         log (
                             {
@@ -6855,6 +6949,9 @@ children (
                         id structure-resource-scopes
                         title "Replace push/pop and unwind pairs for descriptors, input, and local variables with structured scopes"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.resource-scopes])
+                        }
                         deps (structure-evaluator-builtin-control-flow seal-logical-descriptor-types type-variable-expansion-state)
                         log (
                             {
@@ -6870,6 +6967,9 @@ children (
                         id structure-interrupt-deferral
                         title "Replace INTOFF-style interrupt counters with explicit scopes while preserving delivery semantics"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:sem:idiom.interrupt-deferral])
+                        }
                         deps (structure-evaluator-builtin-control-flow type-trap-disposition-state structure-resource-scopes)
                         log (
                             {
@@ -6885,6 +6985,9 @@ children (
                         id modernize-shell-lifecycle
                         title "Replace generated INIT, RESET, FORKRESET, and EXITRESET fragments with owned lifecycle methods"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.owned-lifecycle])
+                        }
                         deps (
                             structure-parser-expander-control-flow
                             structure-jobs-startup-control-flow
@@ -6907,6 +7010,9 @@ children (
                         id narrow-shell-context
                         title "Replace universal mutable Shell access with narrow subsystem capabilities and methods"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.narrow-shell-context])
+                        }
                         deps (
                             modernize-shell-lifecycle
                             replace-integer-options-and-flags
@@ -6936,6 +7042,9 @@ children (
                         id modernize-builtin-registry
                         title "Replace C-string builtin tables, integer attributes, and optional handlers with typed specifications"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.builtin-registry])
+                        }
                         deps (narrow-shell-context replace-command-tag-payload-protocols replace-integer-options-and-flags)
                         log (
                             {
@@ -6951,6 +7060,9 @@ children (
                         id modernize-output-error-results
                         title "Use Write, io::Result, and explicit shell errors instead of 0/-1 and output side channels"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.output-results])
+                        }
                         deps (narrow-shell-context structure-resource-scopes adopt-core-status-flow-signal-types)
                         log (
                             {
@@ -6966,6 +7078,9 @@ children (
                         id remove-artificial-buffer-limits
                         title "Remove inherited C truncation and fixed-buffer limits that are not shell semantics"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.no-artificial-limits])
+                        }
                         deps (modernize-output-error-results rewrite-expansion-over-typed-words replace-job-slot-linkage)
                         log (
                             {
@@ -6981,6 +7096,9 @@ children (
                         id remove-mystring-module
                         title "Move byte parsing and quoting into owning modules and delete mystring"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.no-mystring])
+                        }
                         deps (rewrite-expansion-over-typed-words type-variable-expansion-state modernize-output-error-results)
                         log (
                             {
@@ -6996,6 +7114,9 @@ children (
                         id delete-port-configuration-fossils
                         title "Delete preprocessor constants, impossible cfg branches, declaration stubs, and no-op C hints"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.no-port-fossils])
+                        }
                         deps (modernize-shell-lifecycle type-lexer-syntax-protocol rewrite-expansion-over-typed-words)
                         log (
                             {
@@ -7011,6 +7132,9 @@ children (
                         id modernize-shell-entrypoint
                         title "Make Shell the runtime entrypoint and keep CLI startup policy outside the core"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.shell-entrypoint])
+                        }
                         deps (modernize-shell-lifecycle narrow-shell-context type-platform-exec-api)
                         log (
                             {
@@ -7032,6 +7156,9 @@ children (
                         id remove-core-c-strings-terminators
                         title "Remove CStr, CString, and artificial NUL terminators from core data and APIs"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.no-c-strings-core])
+                        }
                         deps (
                             rewrite-expansion-over-typed-words
                             type-platform-filesystem-account-api
@@ -7054,6 +7181,9 @@ children (
                         id remove-core-abi-scalars
                         title "Eliminate core c_int, c_char, c_uint, integer booleans, and magic numeric sentinels"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.no-abi-scalars-core])
+                        }
                         deps (
                             remove-core-c-strings-terminators
                             type-evaluation-redirection-modes
@@ -7078,6 +7208,9 @@ children (
                         id reorganize-rust-modules
                         title "Replace C translation-unit modules with cohesive Rust subsystem boundaries"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.module-boundaries])
+                        }
                         deps (
                             remove-core-abi-scalars
                             modernize-builtin-registry
@@ -7098,6 +7231,9 @@ children (
                         id rename-c-shaped-symbols
                         title "Rename run-together functions, lowercase types, cmd suffixes, and C abbreviations"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.rust-naming])
+                        }
                         deps (reorganize-rust-modules)
                         log (
                             {
@@ -7114,6 +7250,9 @@ children (
                         title "Replace bug-for-bug and undefined-behavior preservation with specified shell behavior"
                         priority 3
                         kind @fix
+                        implements {
+                            nsh-library ([spec:nsh:sem:idiom.specified-defects])
+                        }
                         deps (rename-c-shaped-symbols remove-artificial-buffer-limits remove-core-abi-scalars)
                         log (
                             {
@@ -7130,6 +7269,9 @@ children (
                         title "Retire C-topology-only annotations and source-dependent tests while preserving behavioral provenance"
                         priority 3
                         kind @docs
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.port-provenance])
+                        }
                         deps (audit-bug-for-bug-behavior)
                         log (
                             {
@@ -7145,6 +7287,9 @@ children (
                         id audit-ignored-results
                         title "Eliminate swallowed Results and implicit error side channels across the core"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.no-ignored-results])
+                        }
                         deps (
                             remove-core-abi-scalars
                             modernize-output-error-results
@@ -7165,6 +7310,9 @@ children (
                         id enable-strict-rust-lints
                         title "Remove blanket lint suppressions and make idiomatic naming and dead-code checks mandatory"
                         priority 3
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.strict-lints])
+                        }
                         deps (
                             rename-c-shaped-symbols
                             retire-port-topology-contracts
@@ -7186,6 +7334,9 @@ children (
                         title "Add regression gates for forbidden C-shaped representations and APIs in core"
                         priority 3
                         kind @ci
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.regression-gates])
+                        }
                         deps (enable-strict-rust-lints)
                         log (
                             {
@@ -7202,6 +7353,9 @@ children (
                         title "Verify workspace, differential, POSIX, Smoosh, and Oils surveys in containment"
                         priority 3
                         kind @test
+                        implements {
+                            nsh-library ([spec:nsh:req:idiom.conformance-closure])
+                        }
                         deps (enforce-zero-cism-gates)
                         log (
                             {
