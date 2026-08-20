@@ -5080,4 +5080,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.platform-errors}
     )}
+    {id contain-descriptor-materialization, covered_rules (
+        idiom.descriptor-materialization
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.descriptor-materialization}
+    )}
 )

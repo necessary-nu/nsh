@@ -152,10 +152,11 @@ mod tests {
         assert!(descriptors[3..].iter().all(Option::is_none));
     }
 
+    // [spec:nsh:req:idiom.descriptor-materialization/test]
     #[test]
     fn closed_inherited_streams_remain_closed() {
         let status = nsh_platform::run_in_child(|| {
-            nsh_platform::ProcessFdChanges::new([(0, None)])
+            nsh_platform::ProcessDescriptorTransaction::new([(0, None)])
                 .unwrap()
                 .apply()
                 .unwrap();

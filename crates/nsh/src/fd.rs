@@ -143,6 +143,7 @@ impl FdTable {
     ///
     /// This is the only route from logical descriptor state to process-wide
     /// state. It is called at the process terminus immediately before exec.
+    // [spec:nsh:req:idiom.descriptor-materialization]
     pub(crate) fn materialize(&self) -> std::io::Result<()> {
         let mut changes = Vec::with_capacity(SLOT_COUNT);
         for (number, slot) in self.slots.iter().enumerate() {
@@ -152,7 +153,7 @@ impl FdTable {
             };
             changes.push((number as i32, source));
         }
-        nsh_platform::ProcessFdChanges::new(changes)?.apply()
+        nsh_platform::ProcessDescriptorTransaction::new(changes)?.apply()
     }
 }
 

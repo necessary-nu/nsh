@@ -2053,12 +2053,13 @@ fn duplicate_windows_handle(raw: HANDLE, minimum: i32) -> std::io::Result<Descri
     }
 }
 
+// [spec:nsh:req:idiom.descriptor-materialization]
 #[derive(Debug)]
-pub struct ProcessFdChanges {
+pub struct ProcessDescriptorTransaction {
     changes: Vec<(i32, Option<Descriptor>)>,
 }
 
-impl ProcessFdChanges {
+impl ProcessDescriptorTransaction {
     pub fn new(
         changes: impl IntoIterator<Item = (i32, Option<Descriptor>)>,
     ) -> std::io::Result<Self> {
@@ -2992,8 +2993,7 @@ pub fn fork_process() -> std::io::Result<ForkResult> {
         }
         return Err(error);
     }
-    // SAFETY: the resumed initial thread remains owned by its process; this
-    // parent-side handle is no longer needed.
+    // SAFETY: the resumed thread remains owned by its process.
     unsafe { CloseHandle(information.Thread.cast()) };
     CHILDREN
         .lock()

@@ -100,3 +100,31 @@ fn platform_errors_are_typed() {
         }
     }
 }
+
+// [spec:nsh:req:idiom.descriptor-materialization/test]
+#[test]
+fn descriptor_materialization_is_transactional() {
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let unix = std::fs::read_to_string(workspace.join("crates/nsh-platform/src/unix.rs")).unwrap();
+    let windows =
+        std::fs::read_to_string(workspace.join("crates/nsh-platform/src/windows.rs")).unwrap();
+
+    for source in [&unix, &windows] {
+        assert!(source.contains("pub struct ProcessDescriptorTransaction"));
+        assert!(!source.contains("ProcessFdChanges"));
+        let implementation = source
+            .split_once("impl ProcessDescriptorTransaction")
+            .expect("descriptor transaction has an implementation")
+            .1;
+        assert!(implementation.contains("pub fn apply(self)"));
+    }
+
+    assert_eq!(unix.matches("libc::dup2(").count(), 1);
+    assert_eq!(unix.matches("libc::close(*target)").count(), 1);
+    let implementation = unix
+        .split_once("impl ProcessDescriptorTransaction")
+        .unwrap()
+        .1;
+    assert!(implementation.contains("libc::dup2("));
+    assert!(implementation.contains("libc::close(*target)"));
+}

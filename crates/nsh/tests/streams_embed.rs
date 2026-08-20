@@ -75,6 +75,7 @@ fn a_builtin_writes_to_the_stream_the_shell_was_given() {
 /// External commands materialize the shell's logical descriptor table in the
 /// child. The host's descriptor 1 is deliberately a different pipe so this
 /// also proves that materialization never leaks into the parent process.
+// [spec:nsh:req:idiom.descriptor-materialization/test]
 #[test]
 fn supplied_stdout_reaches_external_commands() {
     let (shell_r, shell_w) = nsh_platform::pipe().expect("create shell pipe");
@@ -82,7 +83,7 @@ fn supplied_stdout_reaches_external_commands() {
     let external = this_test_command("supplied_stdout_reaches_external_commands");
     let script = format!("echo builtin; {external}");
     let st = run_shell(&script, move || {
-        nsh_platform::ProcessFdChanges::new([(
+        nsh_platform::ProcessDescriptorTransaction::new([(
             1,
             Some(nsh_platform::duplicate_cloexec(&fd1_w, 10).unwrap()),
         )])
@@ -110,7 +111,7 @@ fn supplied_stdout_reaches_pipeline_output() {
     let external = this_test_command("supplied_stdout_reaches_pipeline_output");
     let script = format!("{external} | {{ IFS= read -r line; printf 'PIPE:%s' \"$line\"; }}");
     let st = run_shell(&script, move || {
-        nsh_platform::ProcessFdChanges::new([(
+        nsh_platform::ProcessDescriptorTransaction::new([(
             1,
             Some(nsh_platform::duplicate_cloexec(&fd1_w, 10).unwrap()),
         )])
@@ -144,7 +145,7 @@ fn supplied_stdout_survives_redirection() {
     let (shell_r, shell_w) = nsh_platform::pipe().expect("create shell pipe");
     let (fd1_r, fd1_w) = nsh_platform::pipe().expect("create fd 1 pipe");
     let st = run_shell(&script, move || {
-        nsh_platform::ProcessFdChanges::new([(
+        nsh_platform::ProcessDescriptorTransaction::new([(
             1,
             Some(nsh_platform::duplicate_cloexec(&fd1_w, 10).unwrap()),
         )])

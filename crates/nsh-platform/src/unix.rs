@@ -86,7 +86,7 @@ pub fn restore_shell_process_runtime_state() {
     let changes = (0..3)
         .filter(|fd| closed & (1 << fd) != 0)
         .map(|fd| (fd, None));
-    if let Ok(changes) = ProcessFdChanges::new(changes) {
+    if let Ok(changes) = ProcessDescriptorTransaction::new(changes) {
         let _ = changes.apply();
     }
 }
@@ -989,12 +989,13 @@ pub fn process_times() -> ProcessTimes {
 /// Applying changes is process-wide. It is intended for a forked child just
 /// before `exec`, or for a process whose owner has explicitly granted image
 /// replacement. No Rust descriptor object may own one of the target slots.
+// [spec:nsh:req:idiom.descriptor-materialization]
 #[derive(Debug)]
-pub struct ProcessFdChanges {
+pub struct ProcessDescriptorTransaction {
     changes: Vec<(i32, Option<Descriptor>)>,
 }
 
-impl ProcessFdChanges {
+impl ProcessDescriptorTransaction {
     /// Validate and stage exact-slot changes without modifying the process.
     ///
     /// `Some(fd)` duplicates `fd` into the target when [`apply`](Self::apply)
@@ -1695,12 +1696,13 @@ mod tests {
         assert_eq!(read_once(&duplicate, &mut byte).unwrap(), 0);
     }
 
+    // [spec:nsh:req:idiom.descriptor-materialization/test]
     #[test]
-    fn fd_changes_install_and_close_slots() {
+    fn descriptor_transaction_installs_slots() {
         let (read, write) = pipe().unwrap();
         let status = run_in_child(move || {
             let source = duplicate_cloexec(&write, 10).unwrap();
-            ProcessFdChanges::new([(7, Some(source)), (8, None)])
+            ProcessDescriptorTransaction::new([(7, Some(source)), (8, None)])
                 .unwrap()
                 .apply()
                 .unwrap();
@@ -1719,8 +1721,13 @@ mod tests {
     }
 
     #[test]
-    fn fd_changes_reject_invalid_targets() {
-        assert!(ProcessFdChanges::new([(-1, None)]).is_err());
-        assert!(ProcessFdChanges::new([(4, None), (4, None)]).is_err());
+    fn descriptor_transaction_validates_targets() {
+        assert!(ProcessDescriptorTransaction::new([(-1, None)]).is_err());
+        assert!(ProcessDescriptorTransaction::new([(4, None), (4, None)]).is_err());
+        let (_, write) = pipe().unwrap();
+        let number = write.number();
+
+        assert!(ProcessDescriptorTransaction::new([(-1, Some(write))]).is_err());
+        assert!(snapshot_process_fd(number, 10).unwrap().is_none());
     }
 }
