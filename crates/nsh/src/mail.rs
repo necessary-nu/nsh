@@ -39,7 +39,7 @@ impl MailState {
 // [spec:dash:def:mail.chkmail-fn]
 // [spec:dash:sem:mail.chkmail-fn]
 pub fn chkmail(sh: &mut crate::context::Shell) {
-    let mail_path = if mpathset(sh) != 0 {
+    let mail_path = if mpathset(sh) {
         mpathval(sh)
     } else {
         mailval(sh)

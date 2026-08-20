@@ -8,7 +8,7 @@ use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
 use crate::options::Options;
-use crate::var::{VREADONLY, flags_bytes, unset_bytes};
+use crate::var::{unset_bytes, variable_attributes};
 use bstr::BStr;
 
 // [spec:dash:def:var.unsetcmd-fn]
@@ -34,7 +34,7 @@ pub fn unsetcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
 
     for name in opts.operands() {
         if flag != b'f' {
-            if flags_bytes(sh, name).is_some_and(|flags| flags & VREADONLY != 0) {
+            if variable_attributes(sh, name).is_some_and(|attributes| attributes.read_only) {
                 let mut message = name.to_vec();
                 message.extend_from_slice(b" is read-only");
                 return Err(sh.builtin_error_value(1, &message));
@@ -54,7 +54,7 @@ mod tests {
     use super::*;
 
     use crate::testutil::lock;
-    use crate::var::{lookup_bytes, set_bytes};
+    use crate::var::{VariableAttributes, lookup_bytes, set_bytes};
 
     /// With neither option, and with `-v`, the variable goes; `-f` leaves
     /// it alone because it is looking at the other table.
@@ -64,14 +64,14 @@ mod tests {
         let name = BStr::new("Tunset");
         let sh = &mut Shell::new(crate::streams::Streams::INHERIT);
 
-        set_bytes(sh, name, Some(BStr::new("v")), 0).unwrap();
+        set_bytes(sh, name, Some(BStr::new("v")), VariableAttributes::NONE).unwrap();
         assert_eq!(
             unsetcmd(sh, &[BStr::new("unset"), BStr::new("Tunset")]).unwrap(),
             Flow::Done((0).into())
         );
         assert!(lookup_bytes(sh, name).is_none());
 
-        set_bytes(sh, name, Some(BStr::new("v")), 0).unwrap();
+        set_bytes(sh, name, Some(BStr::new("v")), VariableAttributes::NONE).unwrap();
         assert_eq!(
             unsetcmd(
                 sh,
@@ -82,7 +82,7 @@ mod tests {
         );
         assert!(lookup_bytes(sh, name).is_none());
 
-        set_bytes(sh, name, Some(BStr::new("v")), 0).unwrap();
+        set_bytes(sh, name, Some(BStr::new("v")), VariableAttributes::NONE).unwrap();
         assert_eq!(
             unsetcmd(
                 sh,
@@ -102,7 +102,7 @@ mod tests {
         let mut owned = Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
         let name = BStr::new("Tunset2");
-        set_bytes(sh, name, Some(BStr::new("v")), 0).unwrap();
+        set_bytes(sh, name, Some(BStr::new("v")), VariableAttributes::NONE).unwrap();
         assert_eq!(
             unsetcmd(
                 sh,

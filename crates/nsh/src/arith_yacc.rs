@@ -12,7 +12,7 @@ use bstr::{BStr, ByteSlice};
 
 use crate::context::Shell;
 use crate::error::Error;
-use crate::var::{lookupvarint_bytes, setvarint_bytes};
+use crate::var::{CallbackPolicy, VariableAttributes, lookupvarint_bytes, setvarint_bytes};
 
 // [spec:dash:def:arith-yacc.yystype]
 /// The value carried by an arithmetic token.
@@ -334,7 +334,13 @@ impl<'a, 'sh> Parser<'a, 'sh> {
             } else {
                 result
             };
-            return setvarint_bytes(self.sh, name, value, 0);
+            return setvarint_bytes(
+                self.sh,
+                name,
+                value,
+                VariableAttributes::NONE,
+                CallbackPolicy::Run,
+            );
         }
         self.conditional(evaluate)
     }

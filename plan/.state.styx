@@ -5276,4 +5276,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.trap-dispositions}
     )}
+    {id type-variable-expansion-state, covered_rules (
+        idiom.variable-expansion-state
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.variable-expansion-state}
+    )}
 )

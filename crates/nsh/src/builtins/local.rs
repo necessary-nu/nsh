@@ -12,7 +12,7 @@ use crate::error::Error;
 use bstr::BStr;
 
 use crate::eval::Flow;
-use crate::var::make_local_bytes;
+use crate::var::{VariableAttributes, make_local_bytes};
 
 // [spec:dash:def:var.localcmd-fn]
 // [spec:dash:sem:var.localcmd-fn]
@@ -24,7 +24,7 @@ pub fn localcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* `local` scans no options at all, so every word after the command
      * name is a name to localise -- including one that starts with `-`. */
     for name in &args[1..] {
-        make_local_bytes(sh, name, 0)?;
+        make_local_bytes(sh, name, VariableAttributes::NONE)?;
     }
     Ok(Flow::Done((0).into()))
 }

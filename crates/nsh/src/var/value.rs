@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use bstr::{BStr, BString};
 
-use super::{VUNSET, Var};
+use super::{Var, VariableState};
 use crate::context::Shell;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -183,11 +183,15 @@ impl BashAttributes {
 }
 
 pub(crate) fn variable_value<'a>(sh: &'a Shell, name: &BStr) -> Option<&'a VariableValue> {
-    sh.vars
-        .tab
-        .get(name)
-        .filter(|var| var.flags & VUNSET == 0)
-        .and_then(|var| var.value.as_ref())
+    match &sh.vars.tab.get(name)?.state {
+        VariableState::Unset => None,
+        VariableState::Set(value) => Some(value),
+    }
+}
+
+pub(crate) fn variable_value_owned(sh: &mut Shell, name: &BStr) -> Option<VariableValue> {
+    sh.vars.refresh_lineno(name);
+    variable_value(sh, name).cloned()
 }
 
 pub(crate) fn variable_kind(sh: &Shell, name: &BStr) -> Option<VariableKind> {
@@ -213,18 +217,26 @@ pub(crate) fn set_bash_attribute(
 
 impl Var {
     pub(super) fn scalar(&self) -> Option<&BStr> {
-        self.value.as_ref().and_then(VariableValue::scalar_ref)
+        match &self.state {
+            VariableState::Unset => None,
+            VariableState::Set(value) => value.scalar_ref(),
+        }
     }
 
     pub(super) fn scalar_owned(&self) -> Option<BString> {
-        self.value.as_ref().and_then(VariableValue::scalar_owned)
+        match &self.state {
+            VariableState::Unset => None,
+            VariableState::Set(value) => value.scalar_owned(),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::var::{Callback, Var, lookup_bytes, set_bytes, unset_bytes};
+    use crate::var::{
+        Callback, Var, VariableAttributes, VariableState, lookup_bytes, set_bytes, unset_bytes,
+    };
 
     // [spec:nsh:req:compat.bash.value-model/test]
     #[test]
@@ -287,8 +299,8 @@ mod tests {
         shell.vars.tab.insert(
             name.to_owned(),
             Var {
-                flags: 0,
-                value: Some(VariableValue::empty(VariableKind::Indexed)),
+                attributes: VariableAttributes::NONE,
+                state: VariableState::Set(VariableValue::empty(VariableKind::Indexed)),
                 bash_attributes: BashAttributes::new(),
                 callback: Callback::None,
                 dynamic_lineno: false,
@@ -297,7 +309,13 @@ mod tests {
 
         assert_eq!(variable_kind(&shell, name), Some(VariableKind::Indexed));
         assert_eq!(lookup_bytes(&mut shell, name), None);
-        set_bytes(&mut shell, name, Some(BStr::new(b"zero")), 0).unwrap();
+        set_bytes(
+            &mut shell,
+            name,
+            Some(BStr::new(b"zero")),
+            VariableAttributes::NONE,
+        )
+        .unwrap();
         assert_eq!(variable_kind(&shell, name), Some(VariableKind::Indexed));
         assert_eq!(lookup_bytes(&mut shell, name), Some(BString::from("zero")));
 
@@ -307,7 +325,13 @@ mod tests {
             BashAttribute::Integer,
             true,
         ));
-        set_bytes(&mut shell, name, Some(BStr::new(b"next")), 0).unwrap();
+        set_bytes(
+            &mut shell,
+            name,
+            Some(BStr::new(b"next")),
+            VariableAttributes::NONE,
+        )
+        .unwrap();
         assert!(
             bash_attributes(&shell, name)
                 .expect("array attributes")
@@ -316,11 +340,26 @@ mod tests {
     }
 
     // [spec:nsh:req:compat.bash.value-model/test]
+    // [spec:nsh:def:idiom.variable-expansion-state/test]
     #[test]
     fn unset_and_empty_remain_distinct() {
+        let attributes = VariableAttributes {
+            exported: true,
+            read_only: true,
+            ..VariableAttributes::NONE
+        };
+        assert!(attributes.exported);
+        assert!(attributes.read_only);
+
         let mut shell = Shell::new(crate::streams::Streams::INHERIT);
         let scalar = BStr::new(b"scalar");
-        set_bytes(&mut shell, scalar, Some(BStr::new(b"")), 0).unwrap();
+        set_bytes(
+            &mut shell,
+            scalar,
+            Some(BStr::new(b"")),
+            VariableAttributes::NONE,
+        )
+        .unwrap();
         assert_eq!(variable_kind(&shell, scalar), Some(VariableKind::Scalar));
         assert_eq!(lookup_bytes(&mut shell, scalar), Some(BString::default()));
 
@@ -328,8 +367,8 @@ mod tests {
         shell.vars.tab.insert(
             array.to_owned(),
             Var {
-                flags: 0,
-                value: Some(VariableValue::empty(VariableKind::Associative)),
+                attributes: VariableAttributes::NONE,
+                state: VariableState::Set(VariableValue::empty(VariableKind::Associative)),
                 bash_attributes: BashAttributes::new(),
                 callback: Callback::None,
                 dynamic_lineno: false,

@@ -51,7 +51,7 @@ use crate::options::ShellOption;
 use crate::output::Dest;
 // [spec:nsh:def:idiom.shell-options]
 use crate::redir::{ExpandedRedirection, RedirectionMode};
-use crate::var::VEXPORT;
+use crate::var::VariableAttributes;
 
 // ---------------------------------------------------------------------
 // src/eval.h
@@ -776,7 +776,7 @@ fn evalfor(sh: &mut Shell, command: &ForCommand, context: EvalContext) -> Result
             sh,
             command.variable.as_bstr(),
             Some(crate::mystring::cstr_prefix(&sp.text)),
-            0,
+            VariableAttributes::NONE,
         )?;
         match catch_one_loop(evaltree(sh, Some(command.body.as_ref()), context)?) {
             LoopStep::Value(body_status) => status = body_status,
@@ -1356,7 +1356,7 @@ fn evalcommand(
     let mut cmd_flag: c_int;
     let mut execcmd: c_int;
     let mut status: ExitStatus;
-    let mut vflags: c_int;
+    let mut variable_attributes: VariableAttributes;
     let mut vlocal: c_int;
     let mut command_control: Option<Flow> = None;
 
@@ -1382,7 +1382,7 @@ fn evalcommand(
     cmd_flag = 0;
     execcmd = 0;
     spclbltin = -1;
-    vflags = 0;
+    variable_attributes = VariableAttributes::NONE;
     vlocal = 0;
     argc = 0;
     argp = command.arguments.as_slice();
@@ -1467,7 +1467,7 @@ fn evalcommand(
         argc = (arglist.list.len() - head) as c_int;
 
         if execcmd != 0 && argc > 1 {
-            vflags = VEXPORT;
+            variable_attributes = VariableAttributes::EXPORTED;
         }
     }
 
@@ -1530,13 +1530,13 @@ fn evalcommand(
                     crate::var::make_local_bytes(
                         sh,
                         crate::mystring::cstr_prefix(&varlist.list[spp].text),
-                        VEXPORT,
+                        VariableAttributes::EXPORTED,
                     )?;
                 } else {
                     crate::var::set_assignment_bytes(
                         sh,
                         crate::mystring::cstr_prefix(&varlist.list[spp].text),
-                        vflags,
+                        variable_attributes,
                     )?;
                 }
             }
@@ -1775,7 +1775,7 @@ fn evalcommand(
             sh,
             BStr::new(b"_"),
             Some(crate::mystring::cstr_prefix(&arglist.list[lastarg].text)),
-            0,
+            VariableAttributes::NONE,
         )?;
     }
 
@@ -2046,7 +2046,13 @@ mod tests {
         };
         let parsed_spelling = parsed.target.word.as_bstr().to_owned();
 
-        crate::var::set_bytes(&mut sh, BStr::new(b"target"), Some(BStr::new(b"one")), 0).unwrap();
+        crate::var::set_bytes(
+            &mut sh,
+            BStr::new(b"target"),
+            Some(BStr::new(b"one")),
+            VariableAttributes::NONE,
+        )
+        .unwrap();
         let first = expredir(&mut sh, &command.redirections).unwrap();
         assert!(matches!(
             &first[0],
@@ -2054,7 +2060,13 @@ mod tests {
         ));
         drop(first);
 
-        crate::var::set_bytes(&mut sh, BStr::new(b"target"), Some(BStr::new(b"two")), 0).unwrap();
+        crate::var::set_bytes(
+            &mut sh,
+            BStr::new(b"target"),
+            Some(BStr::new(b"two")),
+            VariableAttributes::NONE,
+        )
+        .unwrap();
         let second = expredir(&mut sh, &command.redirections).unwrap();
         assert!(matches!(
             &second[0],

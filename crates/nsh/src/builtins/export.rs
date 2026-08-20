@@ -11,11 +11,13 @@
 use crate::context::Shell;
 use crate::error::Error;
 use bstr::BStr;
-use core::ffi::c_int;
 
 use crate::eval::Flow;
 use crate::options::Options;
-use crate::var::{VEXPORT, VREADONLY, add_flags, flags_bytes, set_bytes, show_vars};
+use crate::var::{
+    VariableAttributes, VariableSelection, add_attributes, set_bytes, show_vars,
+    variable_attributes,
+};
 
 // [spec:dash:def:var.exportcmd-fn]
 // [spec:dash:sem:var.exportcmd-fn]
@@ -44,10 +46,10 @@ use crate::var::{VEXPORT, VREADONLY, add_flags, flags_bytes, set_bytes, show_var
 pub fn exportcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* `export` and `readonly` are one builtin telling itself apart by the
      * word it was called as. */
-    let flag: c_int = if args[0].first() == Some(&b'r') {
-        VREADONLY
+    let (attribute, selection) = if args[0].first() == Some(&b'r') {
+        (VariableAttributes::READ_ONLY, VariableSelection::ReadOnly)
     } else {
-        VEXPORT
+        (VariableAttributes::EXPORTED, VariableSelection::Exported)
     };
 
     let mut opts = Options::new(args);
@@ -58,22 +60,23 @@ pub fn exportcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
             match word.iter().position(|&b| b == b'=') {
                 Some(at) => {
                     let name = BStr::new(&word[..at]);
-                    if flags_bytes(sh, name).is_some_and(|flags| flags & VREADONLY != 0) {
+                    if variable_attributes(sh, name).is_some_and(|attributes| attributes.read_only)
+                    {
                         let mut message = name.to_vec();
                         message.extend_from_slice(b": is read only");
                         return Err(sh.builtin_error_value(1, &message));
                     }
-                    set_bytes(sh, name, Some(BStr::new(&word[at + 1..])), flag)?;
+                    set_bytes(sh, name, Some(BStr::new(&word[at + 1..])), attribute)?;
                 }
                 None => {
-                    if !add_flags(sh, word, flag) {
-                        set_bytes(sh, word, None, flag)?;
+                    if !add_attributes(sh, word, attribute) {
+                        set_bytes(sh, word, None, attribute)?;
                     }
                 }
             }
         }
     } else {
-        show_vars(sh, args[0], flag, 0);
+        show_vars(sh, args[0], selection);
     }
     Ok(Flow::Done((0).into()))
 }
@@ -83,7 +86,7 @@ mod tests {
     use super::*;
 
     use crate::testutil::lock;
-    use crate::var::{VSTRFIXED, flags_bytes, lookup_bytes, set_bytes};
+    use crate::var::{VariableAttributes, lookup_bytes, set_bytes, variable_attributes};
 
     /// The shell is the caller's: `export` reads and writes the variable
     /// table, which belongs to an instance, so a `Shell` made in here
@@ -102,14 +105,14 @@ mod tests {
         let mut owned = Shell::new(crate::streams::Streams::INHERIT);
         let sh = &mut owned;
         let name = BStr::new("Texport");
-        set_bytes(sh, name, Some(BStr::new("v")), VSTRFIXED).unwrap();
+        set_bytes(sh, name, Some(BStr::new("v")), VariableAttributes::FIXED).unwrap();
 
         assert_eq!(run(sh, b"export", &[b"Texport"]), Flow::Done((0).into()));
-        assert_ne!(flags_bytes(sh, name).unwrap() & VEXPORT, 0);
-        assert_eq!(flags_bytes(sh, name).unwrap() & VREADONLY, 0);
+        assert!(variable_attributes(sh, name).unwrap().exported);
+        assert!(!variable_attributes(sh, name).unwrap().read_only);
 
         assert_eq!(run(sh, b"readonly", &[b"Texport"]), Flow::Done((0).into()));
-        assert_ne!(flags_bytes(sh, name).unwrap() & VREADONLY, 0);
+        assert!(variable_attributes(sh, name).unwrap().read_only);
     }
 
     /// An operand carrying a value assigns as well as flags, which is
@@ -125,6 +128,6 @@ mod tests {
         );
         let name = BStr::new("Texport2");
         assert_eq!(lookup_bytes(sh, name).map(Vec::from), Some(b"set".to_vec()));
-        assert_ne!(flags_bytes(sh, name).unwrap() & VEXPORT, 0);
+        assert!(variable_attributes(sh, name).unwrap().exported);
     }
 }

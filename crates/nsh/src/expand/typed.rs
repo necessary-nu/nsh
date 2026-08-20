@@ -17,6 +17,7 @@ use crate::nodes::Node;
 use crate::options::{OPTION_SPECS, ShellOption};
 // [spec:nsh:def:idiom.shell-options]
 use crate::pmatch::Pattern;
+use crate::var::value::VariableValue;
 use crate::word::{ParameterExpansion, ParameterOperation, ParsedWord, QuoteBoundary, WordPart};
 
 mod pathname;
@@ -440,7 +441,7 @@ fn tilde_home(sh: &mut Shell, user: &[u8]) -> Option<Vec<u8>> {
 #[derive(Clone)]
 enum Value {
     Unset,
-    Scalar(BString),
+    Variable(VariableValue),
     At(Vec<BString>),
     Star(Vec<BString>),
 }
@@ -453,7 +454,7 @@ impl Value {
     fn is_empty(&self) -> bool {
         match self {
             Self::Unset => true,
-            Self::Scalar(bytes) => bytes.is_empty(),
+            Self::Variable(value) => value.scalar_ref().is_none_or(|bytes| bytes.is_empty()),
             Self::At(words) | Self::Star(words) => words.is_empty(),
         }
     }
@@ -505,7 +506,12 @@ fn expand_parameter(
         ParameterOperation::Assign if unavailable => {
             let expanded = operand_expansion(sh, parameter, context)?;
             let assigned = expanded.clone().collapse().bytes;
-            crate::var::set_bytes(sh, name.as_bstr(), Some(assigned.as_bstr()), 0)?;
+            crate::var::set_bytes(
+                sh,
+                name.as_bstr(),
+                Some(assigned.as_bstr()),
+                crate::var::VariableAttributes::NONE,
+            )?;
             Ok(expanded)
         }
         ParameterOperation::Assign => value_expansion(sh, name.as_bstr(), value, context),
@@ -568,13 +574,17 @@ fn expand_parameter(
 
 fn parameter_value(sh: &mut Shell, name: &BStr) -> Value {
     match name.first().copied() {
-        Some(b'$') if name.len() == 1 => Value::Scalar(BString::from(sh.root_pid.to_string())),
-        Some(b'?') if name.len() == 1 => Value::Scalar(BString::from(sh.status.to_string())),
-        Some(b'#') if name.len() == 1 => {
-            Value::Scalar(BString::from(sh.options.shellparam.nparam.to_string()))
+        Some(b'$') if name.len() == 1 => Value::Variable(VariableValue::Scalar(BString::from(
+            sh.root_pid.to_string(),
+        ))),
+        Some(b'?') if name.len() == 1 => {
+            Value::Variable(VariableValue::Scalar(BString::from(sh.status.to_string())))
         }
+        Some(b'#') if name.len() == 1 => Value::Variable(VariableValue::Scalar(BString::from(
+            sh.options.shellparam.nparam.to_string(),
+        ))),
         Some(b'!') if name.len() == 1 => match sh.backgndpid {
-            Some(pid) => Value::Scalar(BString::from(pid.to_string())),
+            Some(pid) => Value::Variable(VariableValue::Scalar(BString::from(pid.to_string()))),
             None => Value::Unset,
         },
         Some(b'-') if name.len() == 1 => {
@@ -586,7 +596,7 @@ fn parameter_value(sh: &mut Shell, name: &BStr) -> Value {
                     flags.push(letter);
                 }
             }
-            Value::Scalar(flags)
+            Value::Variable(VariableValue::Scalar(flags))
         }
         Some(b'@') if name.len() == 1 => Value::At(sh.options.shellparam.words()),
         Some(b'*') if name.len() == 1 => Value::Star(sh.options.shellparam.words()),
@@ -598,7 +608,8 @@ fn parameter_value(sh: &mut Shell, name: &BStr) -> Value {
                 sh.options
                     .arg0()
                     .map(BStr::to_owned)
-                    .map(Value::Scalar)
+                    .map(VariableValue::Scalar)
+                    .map(Value::Variable)
                     .unwrap_or(Value::Unset)
             } else {
                 sh.options
@@ -606,12 +617,13 @@ fn parameter_value(sh: &mut Shell, name: &BStr) -> Value {
                     .words()
                     .get(index - 1)
                     .cloned()
-                    .map(Value::Scalar)
+                    .map(VariableValue::Scalar)
+                    .map(Value::Variable)
                     .unwrap_or(Value::Unset)
             }
         }
-        _ => crate::var::lookup_bytes(sh, name)
-            .map(Value::Scalar)
+        _ => crate::var::value::variable_value_owned(sh, name)
+            .map(Value::Variable)
             .unwrap_or(Value::Unset),
     }
 }
@@ -640,8 +652,8 @@ fn value_expansion(
                 Ok(empty_value(context))
             }
         }
-        Value::Scalar(bytes) => Ok(Expansion::one(Field::from_bytes(
-            &bytes,
+        Value::Variable(value) => Ok(Expansion::one(Field::from_bytes(
+            value.scalar_ref().unwrap_or_else(|| BStr::new(b"")),
             context.protects(),
             context.splits(),
             context.quoted,
@@ -756,7 +768,7 @@ fn parameter_error(
 fn value_bytes(sh: &Shell, value: Value, context: Context) -> BString {
     match value {
         Value::Unset => BString::new(Vec::new()),
-        Value::Scalar(bytes) => bytes,
+        Value::Variable(value) => value.scalar_owned().unwrap_or_default(),
         Value::At(words) | Value::Star(words) => {
             if context.full && !context.quoted {
                 let mut joined = BString::new(Vec::new());
@@ -774,7 +786,9 @@ fn value_bytes(sh: &Shell, value: Value, context: Context) -> BString {
 fn value_length(sh: &Shell, value: &Value, context: Context) -> usize {
     match value {
         Value::Unset => 0,
-        Value::Scalar(bytes) => character_count(&sh.locale, bytes),
+        Value::Variable(value) => value
+            .scalar_ref()
+            .map_or(0, |bytes| character_count(&sh.locale, bytes)),
         Value::At(words) | Value::Star(words) => {
             let values = words
                 .iter()
@@ -1025,13 +1039,32 @@ fn split_field(locale: &nsh_platform::Locale, field: Field, ifs: &[IfsCharacter]
 mod tests {
     use super::*;
 
-    #[test]
     // [spec:nsh:sem:idiom.typed-expansion/test]
+    // [spec:nsh:def:idiom.variable-expansion-state/test]
+    #[test]
     fn typed_field_masks() {
         let field = Field::from_bytes(b"a*b", true, false, true);
         assert_eq!(field.bytes, BString::from("a*b"));
         assert_eq!(field.quoted, vec![true; 3]);
         assert_eq!(field.splittable, vec![false; 3]);
         assert!(field.preserve_empty);
+
+        let indexed = Value::Variable(VariableValue::empty(
+            crate::var::value::VariableKind::Indexed,
+        ));
+        let associative = Value::Variable(VariableValue::empty(
+            crate::var::value::VariableKind::Associative,
+        ));
+
+        assert!(!indexed.is_unset());
+        assert!(indexed.is_empty());
+        assert!(matches!(
+            indexed,
+            Value::Variable(VariableValue::Indexed(_))
+        ));
+        assert!(matches!(
+            associative,
+            Value::Variable(VariableValue::Associative(_))
+        ));
     }
 }

@@ -184,87 +184,32 @@ pub fn rmescapes_owned(s: &mut BString) -> usize {
     rmescapes_buffer(s, EscapeMode::Plain)
 }
 
-// ---------------------------------------------------------------------
-// src/expand.c
-// ---------------------------------------------------------------------
-
-/*
- * Structure specifying which parts of the string should be searched
- * for IFS characters.
- */
-
 // [spec:dash:def:expand.ifsregion]
-///
-/// The C's `next` field is gone: the chain is [`ifsregions`], a `Vec`.
-/// See it for why "the `Vec` is empty" is exactly "`ifslastp` is NULL".
+/// A byte range eligible for field splitting.
 pub struct ifsregion {
-    pub begoff: c_int,  /* offset of start of region */
-    pub endoff: c_int,  /* offset of end of region */
-    pub nulonly: c_int, /* search for nul bytes only */
+    pub begoff: usize,
+    pub endoff: usize,
+    pub nulonly: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FieldLimit {
+    Unlimited,
+    Remaining(usize),
 }
 
 // [spec:dash:def:expand.ifs-state]
+/// Mutable state for one field-splitting pass.
 pub struct ifs_state {
-    /// The C's `ifst->ifs`, which is a `char *` carrying one bit.
-    ///
-    /// `ifsbreakup` assigns it `nulonly ? nullstr : realifs` and nothing
-    /// else ever assigns it, so the pointer's only content is which of the
-    /// two it is — and its sole reader, `ifsisifs`, can read `IFS` off the
-    /// shell for itself. The bit is stored and the pointer is gone.
-    ///
-    /// Not to be confused with `ifsbreakup_slow`'s `nulonly` *parameter*,
-    /// which the caller passes as `afternul | nulonly` — the previous
-    /// region's bit or'd with this one. They are different values and the
-    /// C gives them the same name.
-    pub nulonly: c_int,
-    /// Where the field being built starts, as an offset into the word.
+    pub nulonly: bool,
     pub start: usize,
-    /// Where the trailing IFS run to be cut starts, if there is one. The
-    /// C's `NULL` for "nothing to remove" is the `None`.
+    /// Start of a trailing IFS run that should be removed.
     pub r: Option<usize>,
-    pub maxargs: c_int,
-    pub ifsspc: c_int,
+    max_fields: FieldLimit,
+    pub ifsspc: bool,
 }
 
-/* output of current string */
-///
-/// The C is `static char *expdest;`, a cursor into the stack block whose
-/// base is `stackblock()`.  Here the word owns its bytes and **the cursor
-/// is the length**: `expdest` is `expbuf.len()`, `stackblock()` is
-/// [`expbase`], `STADJUST` backwards is `truncate`, and `STPUTC` is `push`.
-///
-/// Two properties of the region that the C leans on are *not* properties of
-/// a `Vec`, and both are audited where they matter:
-///
-///   * **The base does not move.** Every `p = stackblock()` re-read in the
-///     C is there because `makestrspace` may have reallocated. `Vec` has
-///     exactly the same hazard — `reserve` reallocates. The answer is not
-///     to keep the re-reads but to stop needing them: a position carried as
-///     an offset survives a growth, and [`_rmescapes`] is the last function
-///     in this file that still carries one as a pointer and so still calls
-///     [`expbase`].
-///   * **Bytes past the cursor survive a growth.** The region copies the
-///     whole block; `Vec::reserve` copies only the first `len` bytes. Two
-///     places write past the cursor and read the byte back: `subevalvar`'s
-///     closing `*loc = '\0'` (re-supplied by `argstr`'s own terminator
-///     before anything reads it) and `expari`'s arithmetic text (read by
-///     `arith`, which cannot grow this buffer). Both are argued at the
-///     site.
-/// The list of IFS regions.  The C is two statics — `ifsfirst`, a head
-/// node held in `.bss`, and `ifslastp`, a pointer to the last node —
-/// with every node after the head `ckmalloc`'d and chained through
-/// `next`.
-///
-/// The model this replaces them with is `ifsregions.is_empty()` **is**
-/// `ifslastp == NULL`, and that equality is exact rather than
-/// approximate.  `ifslastp` is NULL in three places and all three leave
-/// the chain behind the head empty as well: at startup, after `ifsfree`
-/// (which frees `ifsfirst.next` and nulls it before nulling `ifslastp`),
-/// and in `removerecordregions`' first branch (which frees the whole
-/// chain before testing `ifsfirst.begoff`).  So a NULL `ifslastp` never
-/// hides a live region, and `ifsfirst`'s stale contents are never read —
-/// `recordregion` overwrites them, and every other reader tests
-/// `ifslastp` first.
+/// Owned intermediate buffers for one expansion.
 pub(crate) struct ExpandState {
     buffer: BString,
     backquotes: Vec<Option<crate::nodes::Node>>,
@@ -291,51 +236,22 @@ impl Default for ExpandState {
     }
 }
 
-/// `IFS`, in the three forms field splitting wants it.
-///
-/// Rebuilt by [`changeifs`], which is the `varfunc_t` hook hanging off
-/// the `IFS` *variable* -- so this is state derived from a shell
-/// variable, and two shells with different `IFS` cannot share it. §5 does
-/// not list it; that it moves cleanly is owed to `f8267bd`, which gave
-/// every variable hook a `&mut Shell` and therefore gave this one
-/// somewhere to write.
+/// Per-shell `IFS` data in byte, first-character, and wide-character forms.
 pub struct IfsCache {
     /// The single-byte members, as a lookup table.
-    ifsmap: [c_char; 128],
-    /// `IFS` itself, with its terminating NUL counted.
-    ///
-    /// The C — and this port until now — kept a `const char *` **into the
-    /// IFS variable's text**, refreshed only when the `varfunc_t` hook
-    /// fires. That is a borrow the type system was not being told about
-    /// and the variable table was under no obligation to honour: setting
-    /// `IFS` reallocates the text, and every path that changes a
-    /// variable's storage without going through the hook leaves this
-    /// dangling. It is the shape of the `putenv` use-after-free
-    /// [[owned-vars]] fixed, and the fix is the same one — own the bytes.
-    ///
-    /// The terminator is counted because `ifsisifs` searches *including*
-    /// it: `strchr` matches a NUL, which is how a NUL byte counts as an
-    /// IFS separator.
+    ifsmap: [bool; 128],
+    /// `IFS` itself, including a terminating NUL used by field splitting.
     ncifs: BString,
     /// Length of the first multibyte character, or 0.
     ifsmb0len: usize,
     /// The wide-character form of `IFS`, built by `changeifs`.
-    ///
-    /// The C is a `ckmalloc`'d, zero-filled, NUL-terminated `i32 *`
-    /// that is NULL whenever `IFS` holds no byte with the high bit set.
-    /// Empty **is** NULL here: the C only allocates under `mb != 0`,
-    /// which needs a high-bit byte, so the buffer is never zero-length
-    /// when it exists.
     wcifs: Vec<i32>,
 }
 
 impl IfsCache {
     pub(crate) const fn new() -> Self {
         IfsCache {
-            ifsmap: [0; 128],
-            /* The C starts this NULL and `changeifs` runs before any
-             * reader; empty is that, and a reader that arrived early
-             * would now see an empty `IFS` rather than fault. */
+            ifsmap: [false; 128],
             ncifs: BString::new(Vec::new()),
             ifsmb0len: 0,
             wcifs: Vec::new(),
@@ -661,7 +577,13 @@ fn expandarg_inner(
              * offsets into the grabbed block, which is why the block had to
              * outlive them and why the enclosing mark had to be the thing
              * that freed it. */
-            ifsbreakup_regions(sh, &state.ifs_regions, &mut p, -1, &mut state.args);
+            ifsbreakup_regions(
+                sh,
+                &state.ifs_regions,
+                &mut p,
+                FieldLimit::Unlimited,
+                &mut state.args,
+            );
             /* `*exparg.lastp = NULL; exparg.lastp = &exparg.list;` —
              * terminate the fields `ifsbreakup` built, then re-point the
              * tail at the head so `expandmeta` rebuilds the list while
@@ -800,7 +722,12 @@ fn argstr(
                 );
                 newloc = q as c_int - end;
                 if break_all && !in_quotes && newloc > startloc {
-                    recordregion(state, startloc, newloc, 0);
+                    recordregion(
+                        state,
+                        usize::try_from(startloc).expect("expansion offsets are nonnegative"),
+                        usize::try_from(newloc).expect("expansion offsets are nonnegative"),
+                        false,
+                    );
                 }
                 startloc = newloc;
             }
@@ -988,7 +915,7 @@ fn exptilde(
 
 // [spec:dash:def:expand.removerecordregions-fn]
 // [spec:dash:sem:expand.removerecordregions-fn]
-fn removerecordregions(state: &mut ExpandState, endoff: c_int) {
+fn removerecordregions(state: &mut ExpandState, endoff: usize) {
     /* `ifslastp == NULL` */
     if ifsr(state).is_empty() {
         return;
@@ -1060,7 +987,10 @@ fn expari(
         let arithmetic = crate::mystring::cstr_prefix(&expb(state)[begoff as usize..]).to_owned();
         expb(state).truncate(begoff as usize);
 
-        removerecordregions(state, begoff);
+        removerecordregions(
+            state,
+            usize::try_from(begoff).expect("expansion offsets are nonnegative"),
+        );
 
         /* `arith` returns its diagnostic now instead of raising it, and as
          * of this commit so does `expari`, so the bridge that stood here is
@@ -1070,7 +1000,12 @@ fn expari(
         len = cvtnum(&sh.locale, result, mode, expb(state)) as c_int;
 
         if !mode.contains(ExpansionMode::QUOTED) {
-            recordregion(state, begoff, begoff + len, 0);
+            recordregion(
+                state,
+                usize::try_from(begoff).expect("expansion offsets are nonnegative"),
+                usize::try_from(begoff + len).expect("expansion offsets are nonnegative"),
+                false,
+            );
         }
     }
 
@@ -1157,7 +1092,12 @@ fn expbackq(
 
         if !mode.contains(ExpansionMode::QUOTED) {
             let endloc = expdest_off(state);
-            recordregion(state, startloc, endloc, 0);
+            recordregion(
+                state,
+                usize::try_from(startloc).expect("expansion offsets are nonnegative"),
+                usize::try_from(endloc).expect("expansion offsets are nonnegative"),
+                false,
+            );
         }
         /* TRACE(("evalbackq: size=%d: \"%.*s\"\n", ...)); */
     }
@@ -1373,7 +1313,7 @@ fn subevalvar(
         );
         let name = crate::var::varname(name);
         let value = crate::mystring::cstr_prefix(&expb(state)[startp..]);
-        crate::var::set_bytes(sh, name, Some(value), 0)?;
+        crate::var::set_bytes(sh, name, Some(value), crate::var::VariableAttributes::NONE)?;
 
         loc = startp;
     } else {
@@ -1487,7 +1427,10 @@ fn subevalvar(
     b.pop();
 
     /* Remove any recorded regions beyond start of variable */
-    removerecordregions(state, startloc);
+    removerecordregions(
+        state,
+        usize::try_from(startloc).expect("expansion offsets are nonnegative"),
+    );
 
     Ok(p)
 }
@@ -1681,7 +1624,12 @@ fn evalvar(
         return Ok(p);
     }
     let endloc = expdest_off(state);
-    recordregion(state, startloc, endloc, c_int::from(quoted_at));
+    recordregion(
+        state,
+        usize::try_from(startloc).expect("expansion offsets are nonnegative"),
+        usize::try_from(endloc).expect("expansion offsets are nonnegative"),
+        quoted_at,
+    );
     Ok(p)
 }
 
@@ -2100,7 +2048,7 @@ fn varvalue(
 
 // [spec:dash:def:expand.recordregion-fn]
 // [spec:dash:sem:expand.recordregion-fn]
-pub(crate) fn recordregion(state: &mut ExpandState, start: c_int, end: c_int, nulonly: c_int) {
+pub(crate) fn recordregion(state: &mut ExpandState, start: usize, end: usize, nulonly: bool) {
     let r = ifsregion {
         begoff: start,
         endoff: end,
@@ -2110,9 +2058,15 @@ pub(crate) fn recordregion(state: &mut ExpandState, start: c_int, end: c_int, nu
     ifsr(state).push(r);
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct IfsMembership {
+    separator: bool,
+    default_whitespace: bool,
+}
+
 // [spec:dash:def:expand.ifsisifs-fn]
 // [spec:dash:sem:expand.ifsisifs-fn]
-fn ifsisifs(sh: &Shell, s: &[u8], ml: c_uint, nulonly: c_int) -> c_uint {
+fn ifsisifs(sh: &Shell, s: &[u8], multibyte_len: usize, nulonly: bool) -> IfsMembership {
     let mut isdefifs: bool = false;
     let mut isifs: bool = false;
     let mut wc: i32 = byte_at(s, 0) as i32;
@@ -2126,7 +2080,7 @@ fn ifsisifs(sh: &Shell, s: &[u8], ml: c_uint, nulonly: c_int) -> c_uint {
      * than `[]` — a NUL byte in a NUL-only region is a separator, and
      * that is the whole of what a NUL-only region means. */
     const NULONLY: &[u8] = &[0];
-    let ifs: &[u8] = if nulonly != 0 {
+    let ifs: &[u8] = if nulonly {
         NULONLY
     } else {
         sh.ifs.ncifs.as_slice()
@@ -2139,16 +2093,16 @@ fn ifsisifs(sh: &Shell, s: &[u8], ml: c_uint, nulonly: c_int) -> c_uint {
              * end -- and a short read fails the `!= ml` test exactly
              * as a malformed character does.  The same trade
              * `ccmatch_bytes` records. */
-            let n = (ml as usize).min(s.len());
-            let Some(wc2) = sh.locale.decode_exact(&s[..n], ml as usize) else {
-                return 0;
+            let n = multibyte_len.min(s.len());
+            let Some(wc2) = sh.locale.decode_exact(&s[..n], multibyte_len) else {
+                return IfsMembership::default();
             };
             wc = wc2;
         }
 
         isifs = wcifs_chr(&sh.ifs.wcifs, wc);
         ifs0 = sh.ifs.wcifs[0];
-    } else if ml == 0 {
+    } else if multibyte_len == 0 {
         /* `strchr` matches the terminator, so a NUL character --
          * which is what `ml == 0` means -- counts as an IFS byte.
          * The counted terminator on `ncifs` keeps that, and it is why
@@ -2160,7 +2114,10 @@ fn ifsisifs(sh: &Shell, s: &[u8], ml: c_uint, nulonly: c_int) -> c_uint {
     if isifs {
         isdefifs = sh.locale.wide_is_space(if wc != 0 { wc } else { ifs0 });
     }
-    (isifs as c_uint) << 1 | (isdefifs as c_uint)
+    IfsMembership {
+        separator: isifs,
+        default_whitespace: isdefifs,
+    }
 }
 
 // [spec:dash:def:expand.ifsbreakup-slow-fn]
@@ -2169,14 +2126,13 @@ fn ifsbreakup_slow(
     sh: &Shell,
     ifst: &mut ifs_state,
     fields: &mut Vec<strlist>,
-    nulonly: c_int,
+    nulonly: bool,
     string: &mut [u8],
     mut p: usize,
 ) -> usize {
     let ifschar: c_uint;
-    let sisifs: c_uint;
     let isdefifs: bool;
-    let ml: c_uint;
+    let multibyte_len: usize;
     let isifs: bool;
     let mut q: usize;
 
@@ -2184,17 +2140,17 @@ fn ifsbreakup_slow(
 
     ifschar = mbnext_bytes(slice_from(string, p));
     p += (ifschar & 0xff) as usize;
-    ml = if (ifschar >> 8) > 3 {
-        (ifschar >> 8) - 2
+    multibyte_len = if (ifschar >> 8) > 3 {
+        ((ifschar >> 8) - 2) as usize
     } else {
         0
     };
 
-    sisifs = ifsisifs(sh, slice_from(string, p), ml, ifst.nulonly);
+    let membership = ifsisifs(sh, slice_from(string, p), multibyte_len, ifst.nulonly);
     p += (ifschar >> 8) as usize;
 
-    isifs = (sisifs >> 1) != 0;
-    isdefifs = (sisifs & 1) != 0;
+    isifs = membership.separator;
+    isdefifs = membership.default_whitespace;
 
     /* If only reading one more argument:
      * If we have exactly one field,
@@ -2215,7 +2171,7 @@ fn ifsbreakup_slow(
      * of the characters to remove, or NULL
      * if no characters should be removed.
      */
-    if ifst.maxargs == 0 {
+    if matches!(ifst.max_fields, FieldLimit::Remaining(0)) {
         if isdefifs {
             if ifst.r.is_none() {
                 ifst.r = Some(q);
@@ -2223,10 +2179,10 @@ fn ifsbreakup_slow(
             return p;
         }
 
-        if !(isifs && ifst.ifsspc != 0) {
+        if !(isifs && ifst.ifsspc) {
             ifst.r = None;
         }
-    } else if ifst.ifsspc != 0 {
+    } else if ifst.ifsspc {
         if isifs {
             q = p;
         }
@@ -2237,22 +2193,25 @@ fn ifsbreakup_slow(
             return p;
         }
     } else if isifs {
-        let mut ifsspc: c_int = ifst.ifsspc;
+        let mut ifsspc = ifst.ifsspc;
 
-        if nulonly == 0 {
-            ifsspc = isdefifs as c_int;
+        if !nulonly {
+            ifsspc = isdefifs;
             ifst.ifsspc = ifsspc;
         }
 
         /* Ignore IFS whitespace at start. */
-        if q == ifst.start && ifsspc != 0 {
+        if q == ifst.start && ifsspc {
             ifst.start = p;
         } else {
-            /* if (ifst->maxargs > 0 && !--ifst->maxargs) */
-            if ifst.maxargs > 0 && {
-                ifst.maxargs -= 1;
-                ifst.maxargs == 0
-            } {
+            let last_field = match &mut ifst.max_fields {
+                FieldLimit::Unlimited => false,
+                FieldLimit::Remaining(remaining) => {
+                    *remaining = remaining.saturating_sub(1);
+                    *remaining == 0
+                }
+            };
+            if last_field {
                 ifst.r = Some(q);
                 return p;
             }
@@ -2263,7 +2222,7 @@ fn ifsbreakup_slow(
         }
     }
 
-    ifst.ifsspc = 0;
+    ifst.ifsspc = false;
     p
 }
 
@@ -2271,8 +2230,8 @@ fn ifsbreakup_slow(
  * Break the argument string into pieces based upon IFS and add the
  * strings to the argument list.  The regions of the string to be
  * searched for IFS characters have been stored by recordregion.
- * If maxargs is non-negative, at most maxargs arguments will be created, by
- * joining together the last arguments.
+ * A finite field limit joins the remainder into its last field; an unlimited
+ * expansion emits every field.
  */
 
 // [spec:dash:def:expand.ifsbreakup-fn]
@@ -2281,7 +2240,7 @@ fn ifsbreakup_regions(
     sh: &Shell,
     regions: &[ifsregion],
     string: &mut [u8],
-    maxargs: c_int,
+    max_fields: FieldLimit,
     fields: &mut Vec<strlist>,
 ) {
     let mut ifsp: usize;
@@ -2291,43 +2250,43 @@ fn ifsbreakup_regions(
      * assigned on every path that reads them; a struct without a pointer
      * in it can say so directly. */
     let mut ifst: ifs_state = ifs_state {
-        nulonly: 0,
+        nulonly: false,
         start: 0,
         r: None,
-        maxargs,
-        ifsspc: 0,
+        max_fields,
+        ifsspc: false,
     };
-    let mut nulonly: c_int;
+    let mut nulonly: bool;
     let mut p: usize;
     let mut preserve_nul_field = false;
 
     if !regions.is_empty() {
-        ifst.ifsspc = 0;
-        nulonly = 0;
+        ifst.ifsspc = false;
+        nulonly = false;
         /* `realifs = ifsset() ? ncifs : nullstr` is gone with the
          * pointer it cached: `ifsisifs` reads `IFS` off the shell,
          * and what it needs from here is the one bit below. */
         ifsp = 0;
         loop {
-            let afternul: c_int;
-            let endoff: c_int = regions[ifsp].endoff;
+            let afternul: bool;
+            let endoff = regions[ifsp].endoff;
 
-            p = regions[ifsp].begoff as usize;
+            p = regions[ifsp].begoff;
             debug_assert!(
-                endoff as usize <= string.len(),
+                endoff <= string.len(),
                 "a recorded region ends past the word it was recorded in"
             );
             afternul = nulonly;
             nulonly = regions[ifsp].nulonly;
             ifst.nulonly = nulonly;
-            ifst.ifsspc = 0;
+            ifst.ifsspc = false;
             loop {
                 let p0: usize = p;
 
                 /* `stackblock() + endoff - p >= 8` — eight bytes of
                  * this region left to look at.  As offsets it is also
                  * the bound that makes the load below a checked one. */
-                while endoff as usize >= p + 8 {
+                while endoff >= p + 8 {
                     /* union { uint64_t qw; unsigned char b[8]; } x; */
                     let b: [u8; 8] = string[p..p + 8].try_into().unwrap();
                     let qw: u64 = u64::from_ne_bytes(b);
@@ -2335,35 +2294,26 @@ fn ifsbreakup_regions(
                     if (qw & 0x8080808080808080) != 0 {
                         break;
                     }
-                    if (sh.ifs.ifsmap[b[0] as usize]
-                        | sh.ifs.ifsmap[b[1] as usize]
-                        | sh.ifs.ifsmap[b[2] as usize]
-                        | sh.ifs.ifsmap[b[3] as usize]
-                        | sh.ifs.ifsmap[b[4] as usize]
-                        | sh.ifs.ifsmap[b[5] as usize]
-                        | sh.ifs.ifsmap[b[6] as usize]
-                        | sh.ifs.ifsmap[b[7] as usize])
-                        != 0
-                    {
+                    if b.iter().any(|byte| sh.ifs.ifsmap[*byte as usize]) {
                         break;
                     }
                     p += 8;
                 }
 
                 if p != p0 {
-                    if ifst.maxargs == 0 {
+                    if matches!(ifst.max_fields, FieldLimit::Remaining(0)) {
                         ifst.r = None;
-                    } else if ifst.ifsspc != 0 {
+                    } else if ifst.ifsspc {
                         ifst.start = p0;
                     }
-                    ifst.ifsspc = 0;
+                    ifst.ifsspc = false;
                 }
 
-                if p >= endoff as usize {
+                if p >= endoff {
                     break;
                 }
 
-                p = ifsbreakup_slow(sh, &mut ifst, fields, afternul | nulonly, string, p);
+                p = ifsbreakup_slow(sh, &mut ifst, fields, afternul || nulonly, string, p);
             }
 
             ifsp += 1;
@@ -2371,7 +2321,7 @@ fn ifsbreakup_regions(
                 break;
             }
         }
-        if nulonly != 0 {
+        if nulonly {
             preserve_nul_field = true;
         } else if let Some(r) = ifst.r {
             /* This is the one write into `string` that happens after
@@ -2380,7 +2330,7 @@ fn ifsbreakup_regions(
              * instant each was terminated.  So it has to land in the
              * field that has *not* been created yet, which is the one
              * `add:` below takes from `ifst.start`.  It does: `r` is
-             * only ever set once `maxargs` has reached 0, and the two
+             * only ever set once the field limit is exhausted, and the two
              * branches that set it both return without emitting, so no
              * field is taken between the two points. */
             debug_assert!(
@@ -2411,12 +2361,12 @@ fn ifsbreakup_regions(
 // [spec:posix:def:expand.field-splitting-delimited]
 // [spec:posix:req:expand.field-splitting-algorithm]
 // [spec:posix:req:expand.field-splitting-output-replaces-input]
-pub fn ifsbreakup(sh: &Shell, string: &mut [u8], maxargs: c_int, arglist: &mut arglist) {
+pub fn ifsbreakup(sh: &Shell, string: &mut [u8], max_fields: usize, arglist: &mut arglist) {
     ifsbreakup_regions(
         sh,
         &sh.expand.ifs_regions,
         string,
-        maxargs,
+        FieldLimit::Remaining(max_fields),
         &mut arglist.list,
     );
 }
@@ -2439,8 +2389,7 @@ pub fn changeifs_bytes(sh: &mut crate::context::Shell, ifs: &BStr) {
     sh.ifs.ncifs = ifs.to_owned();
     sh.ifs.ncifs.push(0);
 
-    /* memset(ifsmap, 0, sizeof(ifsmap)) */
-    sh.ifs.ifsmap = [0; 128];
+    sh.ifs.ifsmap = [false; 128];
 
     /* The C walks to the terminator and processes it *before* breaking,
      * so `ifsmap[0]` is set on every call — the loop below keeps that by
@@ -2453,7 +2402,7 @@ pub fn changeifs_bytes(sh: &mut crate::context::Shell, ifs: &BStr) {
 
         mb |= c >> 7;
         if (c >> 7) == 0 {
-            sh.ifs.ifsmap[c as usize] = 1;
+            sh.ifs.ifsmap[c as usize] = true;
         }
     }
 

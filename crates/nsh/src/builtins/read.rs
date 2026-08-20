@@ -10,7 +10,6 @@
 // [spec:nsh:req:idiom.evaluator-control-flow]
 use crate::context::Shell;
 use crate::error::Error;
-use core::ffi::c_int;
 use std::ffi::CString;
 use std::io::Write as _;
 
@@ -102,12 +101,7 @@ fn read_input_line(
             }
 
             if let Some(region_end) = escaped_region_end.take() {
-                crate::expand::recordregion(
-                    &mut sh.expand,
-                    region_start as c_int,
-                    region_end as c_int,
-                    0,
-                );
+                crate::expand::recordregion(&mut sh.expand, region_start, region_end, false);
                 region_start = line.len();
             }
         }
@@ -116,12 +110,7 @@ fn read_input_line(
     crate::input::popfile(sh);
 
     let (line, status, region_start) = result?;
-    crate::expand::recordregion(
-        &mut sh.expand,
-        region_start as c_int,
-        line.len() as c_int,
-        0,
-    );
+    crate::expand::recordregion(&mut sh.expand, region_start, line.len(), false);
     Ok((line, status))
 }
 
@@ -161,7 +150,7 @@ fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> R
      * into it, so the line only has to outlive that one call. */
     debug_assert!(!line.is_empty(), "readcmd always pushes the terminator");
 
-    crate::expand::ifsbreakup(sh, line, names.len() as c_int, &mut arglist);
+    crate::expand::ifsbreakup(sh, line, names.len(), &mut arglist);
     crate::expand::ifsfree(&mut sh.expand);
 
     /* The C walks the names and the fields with two cursors that advance
@@ -170,7 +159,12 @@ fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> R
     for (index, name) in names.iter().enumerate() {
         match arglist.list.get_mut(index) {
             None => {
-                crate::var::set_bytes(sh, name, Some(BStr::new(b"")), 0)?;
+                crate::var::set_bytes(
+                    sh,
+                    name,
+                    Some(BStr::new(b"")),
+                    crate::var::VariableAttributes::NONE,
+                )?;
             }
             Some(field) => {
                 /* set variable to field */
@@ -179,7 +173,7 @@ fn readcmd_handle_line(sh: &mut Shell, line: &mut BString, names: &[&BStr]) -> R
                     sh,
                     name,
                     Some(crate::mystring::cstr_prefix(&field.text)),
-                    0,
+                    crate::var::VariableAttributes::NONE,
                 )?;
             }
         }

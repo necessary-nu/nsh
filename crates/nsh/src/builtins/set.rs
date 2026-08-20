@@ -15,7 +15,7 @@ use bstr::BStr;
 use crate::error::{INTOFF, INTON};
 use crate::eval::Flow;
 use crate::options::{options, optschanged, setparam};
-use crate::var::{VUNSET, show_vars};
+use crate::var::{VariableSelection, show_vars};
 
 // [spec:dash:def:options.setcmd-fn]
 // [spec:dash:sem:options.setcmd-fn]
@@ -29,9 +29,8 @@ use crate::var::{VUNSET, show_vars};
 // [spec:posix:req:builtin.set.exit-status]
 pub fn setcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if args.len() == 1 {
-        return Ok(Flow::Done(
-            (show_vars(sh, BStr::new(b""), 0, VUNSET)).into(),
-        ));
+        show_vars(sh, BStr::new(b""), VariableSelection::Set);
+        return Ok(Flow::Done((0).into()));
     }
     INTOFF(sh);
     let scan = options(sh, args, 1, false)?;

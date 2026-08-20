@@ -11,7 +11,7 @@ use core::ffi::c_int;
 use nsh_platform::NativeStrExt as _;
 
 use crate::error::{INTOFF, INTON};
-use crate::var::{VEXPORT, set_bytes};
+use crate::var::{VariableAttributes, set_bytes};
 
 /* The C's `nullstr` sentinel is `None`.  It is a sentinel, not an empty
  * path: `getpwd` never returns an empty string on success and `updatepwd`
@@ -104,7 +104,12 @@ pub(crate) fn setpwd_inner(
 ) -> Result<(), Error> {
     if setold != 0 {
         let old = sh.cwd.curdir.clone().unwrap_or_default();
-        set_bytes(sh, BStr::new("OLDPWD"), Some(BStr::new(&old)), VEXPORT)?;
+        set_bytes(
+            sh,
+            BStr::new("OLDPWD"),
+            Some(BStr::new(&old)),
+            VariableAttributes::EXPORTED,
+        )?;
     }
     INTOFF(sh);
     /* `free(physdir)` guarded by `physdir != oldcur`: the C's `curdir` and
@@ -126,7 +131,12 @@ pub(crate) fn setpwd_inner(
     }
     let dir = sh.cwd.curdir.clone().unwrap_or_default();
     INTON(sh);
-    set_bytes(sh, BStr::new("PWD"), Some(BStr::new(&dir)), VEXPORT)?;
+    set_bytes(
+        sh,
+        BStr::new("PWD"),
+        Some(BStr::new(&dir)),
+        VariableAttributes::EXPORTED,
+    )?;
     Ok(())
 }
 

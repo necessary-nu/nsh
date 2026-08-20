@@ -11,7 +11,7 @@ use crate::context::Shell;
 use crate::error::Error;
 use crate::eval::Flow;
 use crate::options::Options;
-use crate::var::{VNOFUNC, set_bytes, setvarint_bytes, unset_bytes};
+use crate::var::{CallbackPolicy, VariableAttributes, set_bytes, setvarint_bytes, unset_bytes};
 
 // [spec:dash:def:options.getoptscmd-fn]
 // [spec:dash:sem:options.getoptscmd-fn]
@@ -130,7 +130,12 @@ fn getopts(
         }
         if spec == optstr.len() {
             if quiet {
-                set_bytes(sh, BStr::new(b"OPTARG"), Some(BStr::new(&[option])), 0)?;
+                set_bytes(
+                    sh,
+                    BStr::new(b"OPTARG"),
+                    Some(BStr::new(&[option])),
+                    VariableAttributes::NONE,
+                )?;
             } else {
                 let mut message = sh
                     .options
@@ -163,7 +168,12 @@ fn getopts(
 
             let Some(argument) = argument else {
                 if quiet {
-                    set_bytes(sh, BStr::new(b"OPTARG"), Some(BStr::new(&[option])), 0)?;
+                    set_bytes(
+                        sh,
+                        BStr::new(b"OPTARG"),
+                        Some(BStr::new(&[option])),
+                        VariableAttributes::NONE,
+                    )?;
                     option = b':';
                 } else {
                     let mut message = sh
@@ -184,7 +194,7 @@ fn getopts(
                 sh,
                 BStr::new(b"OPTARG"),
                 Some(BStr::new(argument.as_slice())),
-                0,
+                VariableAttributes::NONE,
             )?;
         } else {
             unset_bytes(sh, BStr::new(b"OPTARG"))?;
@@ -197,8 +207,19 @@ fn getopts(
     }
 
     let index = next as c_int + 1;
-    setvarint_bytes(sh, BStr::new(b"OPTIND"), index as i64, VNOFUNC)?;
-    set_bytes(sh, optvar, Some(BStr::new(&[option])), 0)?;
+    setvarint_bytes(
+        sh,
+        BStr::new(b"OPTIND"),
+        index as i64,
+        VariableAttributes::NONE,
+        CallbackPolicy::Suppress,
+    )?;
+    set_bytes(
+        sh,
+        optvar,
+        Some(BStr::new(&[option])),
+        VariableAttributes::NONE,
+    )?;
     sh.options.shellparam.optoff = cursor.map_or(-1, |(_, at)| at as c_int);
     sh.options.shellparam.optind = index;
     Ok(done)
