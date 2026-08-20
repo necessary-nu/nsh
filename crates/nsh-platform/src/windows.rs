@@ -1121,21 +1121,21 @@ pub fn command_exec_failure_status(error: &std::io::Error) -> i32 {
     }
 }
 
-pub fn execute_program(
-    path: &OsStr,
-    argv: &[OsString],
-    environment: &[(OsString, OsString)],
-) -> std::io::Error {
-    if let Some(result) = execute_through_clone_broker(path, argv, environment) {
+pub fn execute_program(program: crate::ProgramImage) -> std::io::Error {
+    if let Some(result) = execute_through_clone_broker(
+        program.path.as_os_str(),
+        &program.arguments,
+        &program.environment,
+    ) {
         return match result {
             Ok(code) => exit_immediately(code as i32),
             Err(error) => error,
         };
     }
     execute_program_here(
-        path,
-        argv,
-        environment,
+        program.path.as_os_str(),
+        &program.arguments,
+        &program.environment,
         materialized_standard_handles(),
         None,
     )

@@ -277,14 +277,16 @@ fn tryexec(
     arguments: &[OsString],
     env: &[(OsString, OsString)],
 ) -> std::io::Error {
-    let error = nsh_platform::execute_program(command, &arguments, env);
+    let program = nsh_platform::ProgramImage::new(command.into(), arguments.to_vec(), env.to_vec());
+    let error = nsh_platform::execute_program(program);
     let shell = nsh_platform::fallback_shell();
     if nsh_platform::is_exec_format_error(&error) && command != shell {
         let mut shell_arguments = Vec::with_capacity(arguments.len() + 1);
         shell_arguments.push(shell.to_os_string());
         shell_arguments.push(command.to_os_string());
         shell_arguments.extend(arguments.iter().skip(1).cloned());
-        return nsh_platform::execute_program(shell, &shell_arguments, env);
+        let program = nsh_platform::ProgramImage::new(shell.into(), shell_arguments, env.to_vec());
+        return nsh_platform::execute_program(program);
     }
     error
 }

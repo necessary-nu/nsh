@@ -105,6 +105,33 @@ fn platform_errors_are_typed() {
     }
 }
 
+// [spec:nsh:req:idiom.exec-boundary/test]
+#[test]
+fn exec_boundary_owns_native_values() {
+    let image = nsh_platform::ProgramImage::new(
+        "utility".into(),
+        vec!["utility".into(), "argument".into()],
+        vec![("NAME".into(), "value".into())],
+    );
+    let _: fn(nsh_platform::ProgramImage) -> std::io::Error = nsh_platform::execute_program;
+    drop(image);
+
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let core = std::fs::read_to_string(workspace.join("crates/nsh/src/exec.rs")).unwrap();
+    let unix = std::fs::read_to_string(workspace.join("crates/nsh-platform/src/unix.rs")).unwrap();
+    let windows =
+        std::fs::read_to_string(workspace.join("crates/nsh-platform/src/windows.rs")).unwrap();
+
+    assert!(core.contains("ProgramImage::new("));
+    assert!(!core.contains("CString"));
+    assert!(!core.contains("argument_pointers"));
+    assert!(unix.contains("argument_pointers.push(std::ptr::null())"));
+    assert!(unix.contains("environment_pointers.push(std::ptr::null())"));
+    for source in [&unix, &windows] {
+        assert!(source.contains("execute_program(program: crate::ProgramImage)"));
+    }
+}
+
 // [spec:nsh:req:idiom.descriptor-materialization/test]
 #[test]
 fn descriptor_materialization_is_transactional() {

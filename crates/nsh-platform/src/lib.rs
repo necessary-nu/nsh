@@ -191,6 +191,35 @@ pub enum PlatformErrorKind {
     PermissionDenied,
 }
 
+/// An owned description of the program image that should replace this one.
+///
+/// Native strings preserve every path, argument, and environment code unit.
+/// Platform implementations may borrow these values while materializing their
+/// private ABI representation, but no pointer or terminator is part of this
+/// public type.
+// [spec:nsh:req:idiom.exec-boundary]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProgramImage {
+    pub(crate) path: std::path::PathBuf,
+    pub(crate) arguments: Vec<std::ffi::OsString>,
+    pub(crate) environment: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+}
+
+impl ProgramImage {
+    #[must_use]
+    pub fn new(
+        path: std::path::PathBuf,
+        arguments: Vec<std::ffi::OsString>,
+        environment: Vec<(std::ffi::OsString, std::ffi::OsString)>,
+    ) -> Self {
+        Self {
+            path,
+            arguments,
+            environment,
+        }
+    }
+}
+
 #[cfg(unix)]
 include!("unix.rs");
 

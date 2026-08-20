@@ -596,21 +596,22 @@ pub fn command_exec_failure_status(error: &std::io::Error) -> i32 {
 /// The pointer arrays required by `execve` are assembled entirely inside the
 /// platform crate from validated, live C strings. Success never returns; the
 /// returned value is therefore always the operating-system error.
-pub fn execute_program(
-    path: &OsStr,
-    argv: &[OsString],
-    environment: &[(OsString, OsString)],
-) -> std::io::Error {
-    let path = match CString::new(path.as_bytes()) {
+pub fn execute_program(program: crate::ProgramImage) -> std::io::Error {
+    let crate::ProgramImage {
+        path,
+        arguments,
+        environment,
+    } = program;
+    let path = match CString::new(path.as_os_str().as_bytes()) {
         Ok(path) => path,
         Err(_) => return std::io::Error::from(std::io::ErrorKind::InvalidInput),
     };
-    let argv: Vec<CString> = match argv
+    let arguments: Vec<CString> = match arguments
         .iter()
         .map(|argument| CString::new(argument.as_bytes()))
         .collect()
     {
-        Ok(argv) => argv,
+        Ok(arguments) => arguments,
         Err(_) => return std::io::Error::from(std::io::ErrorKind::InvalidInput),
     };
     let environment: Vec<CString> = match environment
@@ -627,11 +628,11 @@ pub fn execute_program(
         Ok(environment) => environment,
         Err(_) => return std::io::Error::from(std::io::ErrorKind::InvalidInput),
     };
-    let mut argv_pointers: Vec<*const u8> = argv
+    let mut argument_pointers: Vec<*const u8> = arguments
         .iter()
         .map(|argument| argument.as_ptr().cast())
         .collect();
-    argv_pointers.push(std::ptr::null());
+    argument_pointers.push(std::ptr::null());
     let mut environment_pointers: Vec<*const u8> = environment
         .iter()
         .map(|entry| entry.as_ptr().cast())
@@ -644,7 +645,7 @@ pub fn execute_program(
     unsafe {
         libc::execve(
             path.as_ptr(),
-            argv_pointers.as_ptr().cast(),
+            argument_pointers.as_ptr().cast(),
             environment_pointers.as_ptr().cast(),
         );
     }

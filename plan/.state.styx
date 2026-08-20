@@ -5266,4 +5266,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.jobs-startup-control-flow}
     )}
+    {id type-platform-exec-api, covered_rules (
+        idiom.exec-boundary
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.exec-boundary}
+    )}
 )
