@@ -53,22 +53,25 @@ already accounted for in the low half. The **total** advance is therefore
 `(mb & 0xff) + (mb >> 8)`, which is exactly the expression that appears
 at every call site.
 
-> [spec:dash:def:expand.addfname-common-fn]
-> static void addfname_common(char *name)
+**Dash source shape (`expand.addfname-common-fn`):**
+
+    static void addfname_common(char *name)
 
 > [spec:dash:sem:expand.addfname-common-fn]
 > Append `name` to `exparg` as a new `struct strlist`, without copying
 > it — the caller owns the storage.
 
-> [spec:dash:def:expand.addfname-fn]
-> STATIC void addfname(char *name)
+**Dash source shape (`expand.addfname-fn`):**
 
-> [spec:dash:sem:expand.addfname-fn]
+    STATIC void addfname(char *name)
+
+**Retired C ownership helper (`expand.addfname-fn`):**
 > `addfname_common(sstrdup(name))` — append a *copy* of the name, used
 > for `glob` results whose storage `globfree64` will reclaim.
 
-> [spec:dash:def:expand.addfnamealt-fn]
-> static char *addfnamealt(char *enddir, size_t expdir_len)
+**Dash source shape (`expand.addfnamealt-fn`):**
+
+    static char *addfnamealt(char *enddir, size_t expdir_len)
 
 > [spec:dash:sem:expand.addfnamealt-fn]
 > Append the completed pathname the stack string holds, then restart the
@@ -78,22 +81,25 @@ at every call site.
 > `expdir_len` bytes of that name. Returns the new block base (the
 > `- expdir_len` undoes `stnputs`'s advance).
 
-> [spec:dash:def:expand.addglob-fn]
-> static void addglob(const glob64_t *pglob)
+**Dash source shape (`expand.addglob-fn`):**
+
+    static void addglob(const glob64_t *pglob)
 
 > [spec:dash:sem:expand.addglob-fn]
 > Append every path in `pglob->gl_pathv` with `addfname`. The loop is
 > do/while, so it assumes at least one match — guaranteed by the caller,
 > which only calls this after a successful `glob64`.
 
-> [spec:dash:def:expand.arglist]
-> struct arglist {
->   struct strlist *list;
->   struct strlist **lastp;
-> }
+**Dash source shape (`expand.arglist`):**
 
-> [spec:dash:def:expand.argstr-fn]
-> static char *argstr(char *p, int flag)
+    struct arglist {
+      struct strlist *list;
+      struct strlist **lastp;
+    }
+
+**Dash source shape (`expand.argstr-fn`):**
+
+    static char *argstr(char *p, int flag)
 
 > [spec:dash:sem:expand.argstr-fn]
 > The main expansion loop: walk the encoded word, copying literal text and
@@ -143,15 +149,17 @@ at every call site.
 > - `CTLBACKQ` — `expbackq` on the current entry of `argbackq`.
 > - `CTLARI` — `expari`.
 
-> [spec:dash:def:expand.arith-fn]
-> intmax_t arith(const char *)
+**Dash source shape (`expand.arith-fn`):**
+
+    intmax_t arith(const char *)
 
 > [spec:dash:sem:expand.arith-fn]
 > Prototype only; the implementation is in `arith_yacc.c`. See
 > `arith-yacc.arith-fn`.
 
-> [spec:dash:def:expand.arith-lex-reset-fn]
-> void arith_lex_reset(void)
+**Dash source shape (`expand.arith-lex-reset-fn`):**
+
+    void arith_lex_reset(void)
 
 > [spec:dash:sem:expand.arith-lex-reset-fn]
 > Reset the arithmetic lexer. Declared as a function only under
@@ -160,8 +168,9 @@ at every call site.
 > nothing, because `arith_yylex.c` keeps no state beyond `arith_buf`.
 > Nothing to port unless a generated lexer is used.
 
-> [spec:dash:def:expand.casematch-fn]
-> int casematch(union node *pattern, char *val)
+**Dash source shape (`expand.casematch-fn`):**
+
+    int casematch(union node *pattern, char *val)
 
 > [spec:dash:sem:expand.casematch-fn]
 > Test whether a `case` pattern matches `val`. Inside a stack mark: point
@@ -170,8 +179,9 @@ at every call site.
 > a quoted `*` in the pattern stays literal — release the IFS regions
 > (the pattern is not split), and `patmatch` the result against `val`.
 
-> [spec:dash:def:expand.ccmatch-fn]
-> static __attribute__((noinline)) int ccmatch(char *p, const char *mbc, int ml, char **r)
+**Dash source shape (`expand.ccmatch-fn`):**
+
+    static __attribute__((noinline)) int ccmatch(char *p, const char *mbc, int ml, char **r)
 
 > [spec:dash:sem:expand.ccmatch-fn]
 > Match a POSIX character class such as `[:alpha:]` inside a bracket
@@ -185,8 +195,9 @@ at every call site.
 > class". Then convert the candidate character with `mbrtowc`, requiring
 > that it consume exactly `ml` bytes, and test with `iswctype`.
 
-> [spec:dash:def:expand.changeifs-fn]
-> void changeifs(const char *ifs)
+**Dash source shape (`expand.changeifs-fn`):**
+
+    void changeifs(const char *ifs)
 
 > [spec:dash:sem:expand.changeifs-fn]
 > Recompute the cached IFS representation. Callback on the `IFS`
@@ -204,31 +215,35 @@ at every call site.
 >
 > Free the previous `wcifs` and install the new one.
 
-> [spec:dash:def:expand.chtodest-fn]
-> static char *chtodest(int c, const char *syntax, char *out)
+**Dash source shape (`expand.chtodest-fn`):**
+
+    static char *chtodest(int c, const char *syntax, char *out)
 
 > [spec:dash:sem:expand.chtodest-fn]
 > Append one byte to the output, prefixed by `CTLESC` when the syntax
 > table classifies it `CCTL` — i.e. when it would otherwise be mistaken
 > for one of the shell's internal markers.
 
-> [spec:dash:def:expand.cvtnum-fn]
-> static size_t cvtnum(intmax_t num, int flags)
+**Dash source shape (`expand.cvtnum-fn`):**
+
+    static size_t cvtnum(intmax_t num, int flags)
 
 > [spec:dash:sem:expand.cvtnum-fn]
 > Render `num` in decimal into a stack-sized buffer
 > (`max_int_length(sizeof(num))`) and append it to the output with
 > `memtodest`. Returns the number of bytes appended.
 
-> [spec:dash:def:expand.esclen-fn]
-> static size_t esclen(const char *start, const char *p)
+**Dash source shape (`expand.esclen-fn`):**
+
+    static size_t esclen(const char *start, const char *p)
 
 > [spec:dash:sem:expand.esclen-fn]
 > `mesclen(start, p, CTLESC)` — count the run of `CTLESC` bytes
 > immediately before `p`.
 
-> [spec:dash:def:expand.evalvar-fn]
-> STATIC char * evalvar(char *p, int flag)
+**Dash source shape (`expand.evalvar-fn`):**
+
+    STATIC char * evalvar(char *p, int flag)
 
 > [spec:dash:sem:expand.evalvar-fn]
 > Expand one `${…}` construct. `p` points at the subtype byte the parser
@@ -275,8 +290,9 @@ at every call site.
 > quoted; the `nulonly` argument to `recordregion` carries that
 > distinction.
 
-> [spec:dash:def:expand.expandarg-fn]
-> void expandarg(union node *arg, struct arglist *arglist, int flag)
+**Dash source shape (`expand.expandarg-fn`):**
+
+    void expandarg(union node *arg, struct arglist *arglist, int flag)
 
 > [spec:dash:sem:expand.expandarg-fn]
 > Expand one word node and append the resulting fields to `arglist`. A
@@ -291,8 +307,9 @@ at every call site.
 > for an unquoted `$@` with no parameters). Release the IFS regions on
 > every path.
 
-> [spec:dash:def:expand.expandmeta-fn]
-> STATIC void expandmeta(struct strlist *str)
+**Dash source shape (`expand.expandmeta-fn`):**
+
+    STATIC void expandmeta(struct strlist *str)
 
 > [spec:dash:sem:expand.expandmeta-fn]
 > Pathname expansion using the shell's own matcher; delegates to
@@ -308,8 +325,9 @@ at every call site.
 > `expsort` and splice them in — POSIX requires pathname expansion
 > results to be sorted.
 
-> [spec:dash:def:expand.expandmeta-glob-fn]
-> static void expandmeta_glob(struct strlist *str)
+**Dash source shape (`expand.expandmeta-glob-fn`):**
+
+    static void expandmeta_glob(struct strlist *str)
 
 > [spec:dash:sem:expand.expandmeta-glob-fn]
 > Pathname expansion via libc `glob64`. For each field: skip under
@@ -326,8 +344,9 @@ at every call site.
 > `sh_error("Out of space")`.
 >
 
-> [spec:dash:def:expand.expari-fn]
-> static char *expari(char *start, int flag)
+**Dash source shape (`expand.expari-fn`):**
+
+    static char *expari(char *start, int flag)
 
 > [spec:dash:sem:expand.expari-fn]
 > Expand `$(( … ))`. Note where the expansion's output begins, then
@@ -344,8 +363,9 @@ at every call site.
 > nothing is evaluated at all — important, since `$(( 1/0 ))` in an
 > unused branch must not error.
 
-> [spec:dash:def:expand.expbackq-fn]
-> STATIC void expbackq(union node *cmd, int flag)
+**Dash source shape (`expand.expbackq-fn`):**
+
+    STATIC void expbackq(union node *cmd, int flag)
 
 > [spec:dash:sem:expand.expbackq-fn]
 > Expand a command substitution. Under `EXP_DISCARD` only the
@@ -364,16 +384,17 @@ at every call site.
 > Strip *all* trailing newlines from the output, as POSIX requires.
 > Record the result as splittable unless quoted. Advance `argbackq`.
 
-> [spec:dash:def:expand.expcmd-fn]
-> int expcmd(int , char **)
+**Dash source shape (`expand.expcmd-fn`):**
+
+    int expcmd(int , char **)
 
 > [spec:dash:sem:expand.expcmd-fn]
 > Declared in `expand.h` but not defined anywhere in the tree — a vestige
-> of a removed builtin. There is nothing to port; Wave 2 should record
-> the omission.
+> of a removed builtin with no target behavior.
 
-> [spec:dash:def:expand.expmeta-fn]
-> static char *expmeta(char *name, unsigned name_len, size_t expdir_len)
+**Dash source shape (`expand.expmeta-fn`):**
+
+    static char *expmeta(char *name, unsigned name_len, size_t expdir_len)
 
 > [spec:dash:sem:expand.expmeta-fn]
 > The shell's own recursive pathname expansion, one path component per
@@ -395,9 +416,8 @@ at every call site.
 > descriptor is not leaked in ordinary operation; interruption is handled
 > by the `int_pending()` check inside the loop, not by unwinding.
 >
-> Port the dead machinery as written (Wave 2 is bug-for-bug) or omit it
-> and record the omission — but do not "repair" it by adding the missing
-> assignment, which would change behaviour.
+> nsh omits this unreachable cleanup machinery. Its interruptible pathname
+> expansion owns the live behavior without reproducing the dead C path.
 >
 > Find the first *unescaped* metacharacter (`*?]`), skipping ones
 > preceded by an odd number of escape characters — `\` under `fnmatch`,
@@ -431,8 +451,9 @@ at every call site.
 > Restore the delimiter byte, close the directory, restore the handler,
 > and re-raise if an exception was caught.
 
-> [spec:dash:def:expand.expmeta-rmescapes-fn]
-> static char *expmeta_rmescapes(char *enddir, const char *name)
+**Dash source shape (`expand.expmeta-rmescapes-fn`):**
+
+    static char *expmeta_rmescapes(char *enddir, const char *name)
 
 > [spec:dash:sem:expand.expmeta-rmescapes-fn]
 > Copy `name` into `enddir` with its escapes removed, returning a pointer
@@ -441,14 +462,16 @@ at every call site.
 > loop copies up to each backslash and then substitutes the character
 > that follows — a trailing lone backslash ends the copy.
 
-> [spec:dash:def:expand.expsort-fn]
-> strlist * expsort(struct strlist *str)
+**Dash source shape (`expand.expsort-fn`):**
+
+    strlist * expsort(struct strlist *str)
 
 > [spec:dash:sem:expand.expsort-fn]
 > Sort a `strlist` by counting its length and calling `msort`.
 
-> [spec:dash:def:expand.exptilde-fn]
-> static char *exptilde(char *startp, int flag)
+**Dash source shape (`expand.exptilde-fn`):**
+
+    static char *exptilde(char *startp, int flag)
 
 > [spec:dash:sem:expand.exptilde-fn]
 > Expand a leading `~`. Scan the name after it, stopping at `/` or
@@ -463,25 +486,28 @@ at every call site.
 > directory with `EXP_QUOTED` (so it is not itself split or globbed) and
 > return the position after the name.
 
-> [spec:dash:def:expand.getpwhome-fn]
-> static inline const char *getpwhome(const char *name)
+**Dash source shape (`expand.getpwhome-fn`):**
+
+    static inline const char *getpwhome(const char *name)
 
 > [spec:dash:sem:expand.getpwhome-fn]
 > Return the home directory of user `name` via `getpwnam`, or NULL if
 > unknown — and unconditionally NULL where `HAVE_GETPWNAM` is not
 > defined, so `~user` never expands on such systems.
 
-> [spec:dash:def:expand.ifs-state]
-> struct ifs_state {
->   const char *ifs;
->   char *start;
->   char *r;
->   int maxargs;
->   int ifsspc;
-> }
+**Dash source shape (`expand.ifs-state`):**
 
-> [spec:dash:def:expand.ifsbreakup-fn]
-> void ifsbreakup(char *string, int maxargs, struct arglist *arglist)
+    struct ifs_state {
+      const char *ifs;
+      char *start;
+      char *r;
+      int maxargs;
+      int ifsspc;
+    }
+
+**Dash source shape (`expand.ifsbreakup-fn`):**
+
+    void ifsbreakup(char *string, int maxargs, struct arglist *arglist)
 
 > [spec:dash:sem:expand.ifsbreakup-fn]
 > Split `string` into fields on IFS, appending them to `arglist`. Only
@@ -505,8 +531,9 @@ at every call site.
 > parameter. `ifst.r`, if set, marks trailing IFS whitespace to be
 > truncated.
 
-> [spec:dash:def:expand.ifsbreakup-slow-fn]
-> static char *ifsbreakup_slow(struct ifs_state *ifst, struct arglist *arglist, int nulonly, char *p)
+**Dash source shape (`expand.ifsbreakup-slow-fn`):**
+
+    static char *ifsbreakup_slow(struct ifs_state *ifst, struct arglist *arglist, int nulonly, char *p)
 
 > [spec:dash:sem:expand.ifsbreakup-slow-fn]
 > Process one character during field splitting and return the position
@@ -537,8 +564,9 @@ at every call site.
 > do not coalesce and an empty positional parameter survives as an empty
 > field. That guard is what makes `"$@"` preserve empty arguments.
 
-> [spec:dash:def:expand.ifsfree-fn]
-> void ifsfree(void)
+**Dash source shape (`expand.ifsfree-fn`):**
+
+    void ifsfree(void)
 
 > [spec:dash:sem:expand.ifsfree-fn]
 > Release the recorded IFS regions: free every node after the static
@@ -546,8 +574,9 @@ at every call site.
 > reads as empty. Called at the end of every expansion and from the
 > `EXITRESET` event.
 
-> [spec:dash:def:expand.ifsisifs-fn]
-> static unsigned ifsisifs(const char *p, unsigned ml, const char *ifs)
+**Dash source shape (`expand.ifsisifs-fn`):**
+
+    static unsigned ifsisifs(const char *p, unsigned ml, const char *ifs)
 
 > [spec:dash:sem:expand.ifsisifs-fn]
 > Classify a character as an IFS separator. Returns
@@ -561,16 +590,18 @@ at every call site.
 > character, or on the first IFS character when the character is NUL —
 > the synthesised separator used for `"$@"`.
 
-> [spec:dash:def:expand.ifsregion]
-> struct ifsregion {
->   struct ifsregion *next;
->   int begoff;
->   int endoff;
->   int nulonly;
-> }
+**Dash source shape (`expand.ifsregion`):**
 
-> [spec:dash:def:expand.mbnext-fn]
-> static __attribute__((noinline)) unsigned mbnext(const char *p)
+    struct ifsregion {
+      struct ifsregion *next;
+      int begoff;
+      int endoff;
+      int nulonly;
+    }
+
+**Dash source shape (`expand.mbnext-fn`):**
+
+    static __attribute__((noinline)) unsigned mbnext(const char *p)
 
 > [spec:dash:sem:expand.mbnext-fn]
 > Measure the encoded character at `p`, returning `start | end << 8`
@@ -584,14 +615,16 @@ at every call site.
 > is one byte further on, so `start` is 1. Anything else is a plain byte:
 > `start` 0, `end` 1.
 
-> [spec:dash:def:expand.mbpair]
-> struct mbpair {
->   unsigned ml;
->   unsigned ql;
-> }
+**Dash source shape (`expand.mbpair`):**
 
-> [spec:dash:def:expand.mbtodest-fn]
-> static struct mbpair mbtodest(const char *p, char *q, const char *syntax, size_t len)
+    struct mbpair {
+      unsigned ml;
+      unsigned ql;
+    }
+
+**Dash source shape (`expand.mbtodest-fn`):**
+
+    static struct mbpair mbtodest(const char *p, char *q, const char *syntax, size_t len)
 
 > [spec:dash:sem:expand.mbtodest-fn]
 > Copy one multibyte character to the output, adding the parser's framing
@@ -612,15 +645,17 @@ at every call site.
 > `is_type` mode the same expression is an out-of-bounds read that a port
 > must model as an explicit no-escape mode instead.
 
-> [spec:dash:def:expand.memrchr-fn]
-> static void *memrchr(const void *s, int c, size_t n)
+**Dash source shape (`expand.memrchr-fn`):**
 
-> [spec:dash:sem:expand.memrchr-fn]
+    static void *memrchr(const void *s, int c, size_t n)
+
+**Retired libc fallback (`expand.memrchr-fn`):**
 > Find the last occurrence of byte `c` in the `n` bytes at `s`, or NULL.
 > Compiled only where libc lacks it.
 
-> [spec:dash:def:expand.memtodest-fn]
-> static size_t memtodest(const char *p, size_t len, int flags)
+**Dash source shape (`expand.memtodest-fn`):**
+
+    static size_t memtodest(const char *p, size_t len, int flags)
 
 > [spec:dash:sem:expand.memtodest-fn]
 > Append `len` bytes to the output, applying whatever escaping the flags
@@ -665,29 +700,23 @@ at every call site.
 > every `syntax[…] == CCTL` test in it as false. That is the observed
 > behaviour, faithfully.
 >
-> **Why this rule says "do not reproduce" while
-> `[spec:dash:sem:expand.expmeta-fn]` says "port the dead machinery as
-> written".** The two are not in conflict, because the C constructs
-> differ in kind. `expmeta`'s never-installed handler is fully determined
-> by the source: it can only ever behave one way, so transcribing it
-> reproduces the behaviour exactly. This read is not determined by the
-> source at all — its result is a property of one binary's memory layout.
-> Transcribing it would give the port its *own* independently arbitrary
-> answer, which matches the C only by luck and can diverge silently the
-> moment either side is relaid out. Bug-for-bug means reproducing
-> observable behaviour; for layout-dependent UB, that means reproducing
-> the outcome, not the undefinedness.
+> This is a defect disposition, not a structural porting instruction.
+> `expand.expmeta-fn` owns the live pathname-expansion behavior; unreachable
+> cleanup and layout-dependent undefined behavior are deliberately absent
+> from the Rust implementation.
 
-> [spec:dash:def:expand.mesclen-fn]
-> static size_t mesclen(const char *start, const char *p, char mesc)
+**Dash source shape (`expand.mesclen-fn`):**
+
+    static size_t mesclen(const char *start, const char *p, char mesc)
 
 > [spec:dash:sem:expand.mesclen-fn]
 > Count the run of escape characters `mesc` immediately before `p`,
 > stopping at `start`. Used to decide whether a metacharacter is escaped:
 > an odd count means it is.
 
-> [spec:dash:def:expand.msort-fn]
-> strlist * msort(struct strlist *list, int len)
+**Dash source shape (`expand.msort-fn`):**
+
+    strlist * msort(struct strlist *list, int len)
 
 > [spec:dash:sem:expand.msort-fn]
 > Merge sort a `strlist` of known length `len`. Lists of 0 or 1 elements
@@ -697,8 +726,9 @@ at every call site.
 > pathname expansion results. The merge is stable in the sense that ties
 > take from the second half first, since the comparison is strict `< 0`.
 
-> [spec:dash:def:expand.opendir-interruptible-fn]
-> static void *opendir_interruptible(const char *pathname)
+**Dash source shape (`expand.opendir-interruptible-fn`):**
+
+    static void *opendir_interruptible(const char *pathname)
 
 > [spec:dash:sem:expand.opendir-interruptible-fn]
 > `opendir`, but first deliver any pending interrupt: when `int_pending()`
@@ -706,15 +736,17 @@ at every call site.
 > Installed as glibc `glob`'s `gl_opendir` hook so that a glob traversing
 > a huge tree can still be interrupted. glibc-only.
 
-> [spec:dash:def:expand.patmatch-fn]
-> STATIC inline int patmatch(char *pattern, const char *string)
+**Dash source shape (`expand.patmatch-fn`):**
+
+    STATIC inline int patmatch(char *pattern, const char *string)
 
 > [spec:dash:sem:expand.patmatch-fn]
 > `pmatch(preglob(pattern, 0), string)` — prepare the pattern (removing
 > quoting while preserving escaped metacharacters) and match.
 
-> [spec:dash:def:expand.pmatch-fn]
-> static int pmatch(char *pattern, const char *string)
+**Dash source shape (`expand.pmatch-fn`):**
+
+    static int pmatch(char *pattern, const char *string)
 
 > [spec:dash:sem:expand.pmatch-fn]
 > The shell's own pattern matcher, used when libc `fnmatch` is not
@@ -746,8 +778,9 @@ at every call site.
 > - anything else — must equal the next character of the string, which
 >   must be single-byte.
 
-> [spec:dash:def:expand.preglob-fn]
-> STATIC inline char * preglob(const char *pattern, int flag)
+**Dash source shape (`expand.preglob-fn`):**
+
+    STATIC inline char * preglob(const char *pattern, int flag)
 
 > [spec:dash:sem:expand.preglob-fn]
 > Prepare a pattern for matching: `_rmescapes` with `RMESCAPE_GLOB`
@@ -757,8 +790,9 @@ at every call site.
 > defaulted) because the backslash escaping can make the result longer
 > than the input. Returns stack-allocated storage.
 
-> [spec:dash:def:expand.recordregion-fn]
-> void recordregion(int start, int end, int nulonly)
+**Dash source shape (`expand.recordregion-fn`):**
+
+    void recordregion(int start, int end, int nulonly)
 
 > [spec:dash:sem:expand.recordregion-fn]
 > Record that bytes `[start, end)` of the result came from an expansion
@@ -767,8 +801,9 @@ at every call site.
 > and chained. `nulonly` marks a region where only NUL bytes separate —
 > the `"$@"` case.
 
-> [spec:dash:def:expand.removerecordregions-fn]
-> void removerecordregions(int endoff)
+**Dash source shape (`expand.removerecordregions-fn`):**
+
+    void removerecordregions(int endoff)
 
 > [spec:dash:sem:expand.removerecordregions-fn]
 > Discard recorded regions at or beyond `endoff`, and truncate a region
@@ -782,8 +817,9 @@ at every call site.
 > region beginning before `endoff`, free everything after it, and
 > truncate it if needed.
 
-> [spec:dash:def:expand.restore-handler-expandarg-fn]
-> void restore_handler_expandarg(struct jmploc *savehandler, int err)
+**Dash source shape (`expand.restore-handler-expandarg-fn`):**
+
+    void restore_handler_expandarg(struct jmploc *savehandler, int err)
 
 > [spec:dash:sem:expand.restore-handler-expandarg-fn]
 > Shared epilogue for code that runs an expansion under its own exception
@@ -792,8 +828,9 @@ at every call site.
 > absorb — re-raise it with `longjmp`. Otherwise release the IFS regions,
 > which the abandoned expansion would have leaked.
 
-> [spec:dash:def:expand.rmescapes-fn]
-> char * _rmescapes(char *str, int flag)
+**Dash source shape (`expand.rmescapes-fn`):**
+
+    char * _rmescapes(char *str, int flag)
 
 > [spec:dash:sem:expand.rmescapes-fn]
 > Remove the shell's quoting markers from `str`, optionally converting
@@ -824,8 +861,9 @@ at every call site.
 > Finally NUL-terminate, and when the result was built on the stack
 > update `expdest` and commit the space with `STADJUST`.
 
-> [spec:dash:def:expand.scanleft-fn]
-> static char *scanleft(char *startp, char *endp, char *rmesc, char *rmescend, char *str, int quotes, int zero )
+**Dash source shape (`expand.scanleft-fn`):**
+
+    static char *scanleft(char *startp, char *endp, char *rmesc, char *rmescend, char *str, int quotes, int zero )
 
 > [spec:dash:sem:expand.scanleft-fn]
 > Find a prefix or suffix match by scanning left to right, for
@@ -844,8 +882,9 @@ at every call site.
 > longest for a suffix, which is why the caller picks this direction for
 > exactly those two subtypes.
 
-> [spec:dash:def:expand.scanright-fn]
-> static char *scanright(char *startp, char *endp, char *rmesc, char *rmescend, char *str, int quotes, int zero )
+**Dash source shape (`expand.scanright-fn`):**
+
+    static char *scanright(char *startp, char *endp, char *rmesc, char *rmescend, char *str, int quotes, int zero )
 
 > [spec:dash:sem:expand.scanright-fn]
 > The mirror of `scanleft`, scanning right to left for `${x##pat}`
@@ -858,20 +897,23 @@ at every call site.
 > trailing `CTLMBCHAR` and length byte, which is precisely why the parser
 > writes the length on both sides of the character.
 
-> [spec:dash:def:expand.strlist]
-> struct strlist {
->   struct strlist *next;
->   char *text;
-> }
+**Dash source shape (`expand.strlist`):**
 
-> [spec:dash:def:expand.strtodest-fn]
-> static size_t strtodest(const char *p, int flags)
+    struct strlist {
+      struct strlist *next;
+      char *text;
+    }
+
+**Dash source shape (`expand.strtodest-fn`):**
+
+    static size_t strtodest(const char *p, int flags)
 
 > [spec:dash:sem:expand.strtodest-fn]
 > `memtodest(p, strlen(p), flags)`.
 
-> [spec:dash:def:expand.subevalvar-fn]
-> static char *subevalvar(char *start, char *str, int strloc, int startloc, int varflags, int flag)
+**Dash source shape (`expand.subevalvar-fn`):**
+
+    static char *subevalvar(char *start, char *str, int strloc, int startloc, int varflags, int flag)
 
 > [spec:dash:sem:expand.subevalvar-fn]
 > Handle the `${x=word}`, `${x?word}` and the four trimming forms.
@@ -906,8 +948,9 @@ at every call site.
 > Finally `removerecordregions(startloc)`, since the recorded splittable
 > ranges described text that has just moved.
 
-> [spec:dash:def:expand.varunset-fn]
-> STATIC void varunset(const char *end, const char *var, const char *umsg, int varflags)
+**Dash source shape (`expand.varunset-fn`):**
+
+    STATIC void varunset(const char *end, const char *var, const char *umsg, int varflags)
 
 > [spec:dash:sem:expand.varunset-fn]
 > Raise the "parameter not set" error and do not return. With no
@@ -917,8 +960,9 @@ at every call site.
 > The variable name is printed with an explicit length, since it is
 > terminated by `=` rather than NUL.
 
-> [spec:dash:def:expand.varvalue-fn]
-> static ssize_t varvalue(char *name, int varflags, unsigned flags)
+**Dash source shape (`expand.varvalue-fn`):**
+
+    static ssize_t varvalue(char *name, int varflags, unsigned flags)
 
 > [spec:dash:sem:expand.varvalue-fn]
 > Append a variable's value to the output and return its length, or -1 if
@@ -962,8 +1006,9 @@ at every call site.
 > out-of-range index reported unset. Anything else is an ordinary
 > variable via `lookupvar`.
 
-> [spec:dash:def:expand.yylex-fn]
-> int yylex(void)
+**Dash source shape (`expand.yylex-fn`):**
+
+    int yylex(void)
 
 > [spec:dash:sem:expand.yylex-fn]
 > Prototype only, declared in `expand.h` for the arithmetic parser's

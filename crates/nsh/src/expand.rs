@@ -115,7 +115,6 @@ const NINE: u8 = b'9';
 // src/expand.h
 // ---------------------------------------------------------------------
 
-// [spec:dash:def:expand.strlist]
 // [spec:nsh:req:idiom.no-c-strings-core]
 ///
 /// The C's `next` field is gone: the chain is the `Vec` inside
@@ -151,7 +150,6 @@ impl ExpandedField {
     }
 }
 
-// [spec:dash:def:expand.arglist]
 ///
 /// `lastp` goes with `next`.  The C carries it because appending to a
 /// singly-linked list needs its tail, and it is always
@@ -188,7 +186,6 @@ pub fn remove_escapes_owned(s: &mut BString) -> usize {
     remove_escapes_in_buffer(s, EscapeMode::Plain)
 }
 
-// [spec:dash:def:expand.ifsregion]
 /// A byte range eligible for field splitting.
 pub struct FieldSplitRegion {
     pub start: usize,
@@ -202,7 +199,6 @@ enum FieldLimit {
     Remaining(usize),
 }
 
-// [spec:dash:def:expand.ifs-state]
 /// Mutable state for one field-splitting pass.
 pub struct FieldSplitState {
     pub nul_only: bool,
@@ -399,11 +395,8 @@ fn interrupt_pending() -> bool {
  * Returns an stalloced string.
  */
 
-// [spec:dash:def:expand.preglob-fn]
 // [spec:dash:sem:expand.preglob-fn]
-// [spec:dash:def:expand.mesclen-fn]
 // [spec:dash:sem:expand.mesclen-fn]
-// [spec:dash:def:expand.esclen-fn]
 // [spec:dash:sem:expand.esclen-fn]
 //
 /// `mesclen`: how many `mesc` bytes immediately precede `at`.
@@ -426,7 +419,6 @@ fn encoded_character_len(s: &[u8], mut at: usize, escape_marker: u8) -> usize {
     esc
 }
 
-// [spec:dash:def:expand.mbnext-fn]
 // [spec:dash:sem:expand.mbnext-fn]
 //
 #[derive(Clone, Copy)]
@@ -468,7 +460,6 @@ fn next_encoded_character(encoded: &[u8]) -> EncodedCharacterSpan {
     EncodedCharacterSpan { prefix, remainder }
 }
 
-// [spec:dash:def:expand.getpwhome-fn]
 // [spec:dash:sem:expand.getpwhome-fn]
 /*
  * Perform variable substitution and command substitution on an argument,
@@ -477,7 +468,6 @@ fn next_encoded_character(encoded: &[u8]) -> EncodedCharacterSpan {
  * here document expansion.
  */
 
-// [spec:dash:def:expand.expandarg-fn]
 // [spec:dash:sem:expand.expandarg-fn]
 // [spec:posix:req:expand.order]
 // [spec:posix:req:expand.single-field]
@@ -579,7 +569,6 @@ fn expand_argument_inner(
  * $@ like $* since no splitting will be performed.
  */
 
-// [spec:dash:def:expand.argstr-fn]
 // [spec:dash:sem:expand.argstr-fn]
 fn expand_encoded_word(
     shell: &mut crate::context::Shell,
@@ -805,7 +794,6 @@ fn expand_encoded_word(
     }
 }
 
-// [spec:dash:def:expand.exptilde-fn]
 // [spec:dash:sem:expand.exptilde-fn]
 // [spec:posix:def:expand.tilde-prefix]
 // [spec:posix:def:expand.tilde-prefix-in-assignment]
@@ -880,7 +868,6 @@ fn expand_tilde(
     cursor
 }
 
-// [spec:dash:def:expand.removerecordregions-fn]
 // [spec:dash:sem:expand.removerecordregions-fn]
 fn truncate_split_regions(state: &mut ExpandState, end: usize) {
     /* `ifslastp == NULL` */
@@ -919,7 +906,6 @@ fn truncate_split_regions(state: &mut ExpandState, end: usize) {
  * evaluate, place result in (backed up) result, adjust string position.
  */
 
-// [spec:dash:def:expand.expari-fn]
 // [spec:dash:sem:expand.expari-fn]
 // [spec:posix:req:expand.arith-token-expansion]
 fn expand_arithmetic(
@@ -979,7 +965,6 @@ fn expand_arithmetic(
  * Expand stuff in backwards quotes.
  */
 
-// [spec:dash:def:expand.expbackq-fn]
 // [spec:dash:sem:expand.expbackq-fn]
 // [spec:posix:req:expand.cmdsub-semantics]
 // [spec:posix:req:expand.cmdsub-no-reexpansion]
@@ -1056,7 +1041,6 @@ fn expand_command_substitution(
     Ok(())
 }
 
-// [spec:dash:def:expand.scanleft-fn]
 // [spec:dash:sem:expand.scanleft-fn]
 /// The C's seven arguments to [`scanleft`] and [`scanright`], five of which
 /// are `char *` into the expansion buffer and are offsets here.
@@ -1100,7 +1084,6 @@ struct PatternScan {
 
 type PatternScanFn = fn(&nsh_platform::Locale, &[u8], &PatternScan) -> Option<usize>;
 
-// [spec:dash:def:expand.scanleft-fn]
 // [spec:dash:sem:expand.scanleft-fn]
 fn scan_left(locale: &nsh_platform::Locale, bytes: &[u8], scan: &PatternScan) -> Option<usize> {
     let mut encoded_cursor = scan.value_start;
@@ -1143,7 +1126,6 @@ fn scan_left(locale: &nsh_platform::Locale, bytes: &[u8], scan: &PatternScan) ->
     None
 }
 
-// [spec:dash:def:expand.scanright-fn]
 // [spec:dash:sem:expand.scanright-fn]
 fn scan_right(locale: &nsh_platform::Locale, bytes: &[u8], scan: &PatternScan) -> Option<usize> {
     let mut escape_count: usize = 0;
@@ -1212,7 +1194,6 @@ fn scan_right(locale: &nsh_platform::Locale, bytes: &[u8], scan: &PatternScan) -
     None
 }
 
-// [spec:dash:def:expand.subevalvar-fn]
 // [spec:dash:sem:expand.subevalvar-fn]
 fn apply_parameter_operator(
     shell: &mut crate::context::Shell,
@@ -1381,7 +1362,6 @@ fn apply_parameter_operator(
  * input string.
  */
 
-// [spec:dash:def:expand.evalvar-fn]
 // [spec:dash:sem:expand.evalvar-fn]
 // [spec:posix:syn:expand.param-format]
 // [spec:posix:req:expand.param-simple]
@@ -1569,7 +1549,6 @@ fn expand_parameter(
     Ok(cursor)
 }
 
-// [spec:dash:def:expand.chtodest-fn]
 // [spec:dash:sem:expand.chtodest-fn]
 /// The cursor the C returns is the destination's own length now, so this
 /// appends and returns nothing. It performs no unsafe operation at all.
@@ -1582,12 +1561,10 @@ fn push_character(byte: u8, syntax: DestinationSyntax, output: &mut BString) {
     output.push(byte);
 }
 
-// [spec:dash:def:expand.mbpair]
 // The translated `mbpair { ml, ql }` record is gone. The destination owns
 // its cursor, so only the number of additional source bytes remains a return
 // value.
 
-// [spec:dash:def:expand.mbtodest-fn]
 // [spec:dash:sem:expand.mbtodest-fn]
 // `p` and the C's `len` became `src` and the index of the byte *after* the
 // one to decode — the position `memtodest`'s cursor is at when it calls,
@@ -1649,7 +1626,6 @@ fn push_multibyte_character(
  * Put a string on the stack.
  */
 
-// [spec:dash:def:expand.memtodest-fn]
 // [spec:dash:sem:expand.memtodest-fn]
 //
 // PORT: the C reads and writes the global `expdest`; here the destination
@@ -1771,7 +1747,6 @@ fn push_bytes(
     count
 }
 
-// [spec:dash:def:expand.strtodest-fn]
 // [spec:dash:sem:expand.strtodest-fn]
 //
 // The C string entry became a counted byte slice. Every caller now already
@@ -1790,7 +1765,6 @@ fn push_text(
  * Add the value of a specialized variable to the stack string.
  */
 
-// [spec:dash:def:expand.varvalue-fn]
 // [spec:dash:sem:expand.varvalue-fn]
 // [spec:posix:def:param.positional-definition]
 // [spec:posix:req:param.positional-decimal-digits]
@@ -1960,7 +1934,6 @@ fn parameter_value(
  * string for IFS characters.
  */
 
-// [spec:dash:def:expand.recordregion-fn]
 // [spec:dash:sem:expand.recordregion-fn]
 pub(crate) fn record_split_region(
     state: &mut ExpandState,
@@ -1981,7 +1954,6 @@ struct IfsMembership {
     default_whitespace: bool,
 }
 
-// [spec:dash:def:expand.ifsisifs-fn]
 // [spec:dash:sem:expand.ifsisifs-fn]
 fn classify_ifs(
     shell: &Shell,
@@ -2036,7 +2008,6 @@ fn classify_ifs(
     }
 }
 
-// [spec:dash:def:expand.ifsbreakup-slow-fn]
 // [spec:dash:sem:expand.ifsbreakup-slow-fn]
 fn split_fields_slow(
     shell: &Shell,
@@ -2156,7 +2127,6 @@ fn split_fields_slow(
  * expansion emits every field.
  */
 
-// [spec:dash:def:expand.ifsbreakup-fn]
 // [spec:dash:sem:expand.ifsbreakup-fn]
 fn split_regions_into_fields(
     shell: &Shell,
@@ -2311,7 +2281,6 @@ pub fn split_fields(
     );
 }
 
-// [spec:dash:def:expand.ifsfree-fn]
 // [spec:dash:sem:expand.ifsfree-fn]
 pub(crate) fn clear_split_regions(state: &mut ExpandState) {
     /* Emptying the owned region list replaces freeing the C chain and
@@ -2322,7 +2291,6 @@ pub(crate) fn clear_split_regions(state: &mut ExpandState) {
     split_regions(state).clear();
 }
 
-// [spec:dash:def:expand.changeifs-fn]
 // [spec:dash:sem:expand.changeifs-fn]
 pub fn update_ifs_cache(shell: &mut crate::context::Shell, ifs: &BStr) {
     let mut has_multibyte = false;
@@ -2355,15 +2323,11 @@ pub fn update_ifs_cache(shell: &mut crate::context::Shell, ifs: &BStr) {
  */
 
 /* The shell's byte-preserving glob implementation is the only supported
- * pathname-expansion engine.
- * [spec:dash:def:expand.opendir-interruptible-fn]
- * [spec:dash:sem:expand.opendir-interruptible-fn]
- * [spec:dash:def:expand.expandmeta-glob-fn]
- * [spec:dash:sem:expand.expandmeta-glob-fn]
- * [spec:dash:def:expand.addglob-fn]
- * [spec:dash:sem:expand.addglob-fn] */
+ * pathname-expansion engine. */
 
-// [spec:dash:def:expand.expandmeta-fn]
+// [spec:dash:sem:expand.opendir-interruptible-fn]
+// [spec:dash:sem:expand.expandmeta-glob-fn]
+// [spec:dash:sem:expand.addglob-fn]
 // [spec:dash:sem:expand.expandmeta-fn]
 // [spec:posix:req:expand.pathname]
 // [spec:posix:req:pattern.no-match-unchanged]
@@ -2436,13 +2400,11 @@ fn expand_pathnames(
     Ok(())
 }
 
-// [spec:dash:def:expand.addfname-common-fn]
 // [spec:dash:sem:expand.addfname-common-fn]
 fn add_pathname(state: &mut ExpandState, name: BString) {
     expansion_fields(state).push(ExpandedField { text: name });
 }
 
-// [spec:dash:def:expand.addfnamealt-fn]
 // [spec:dash:sem:expand.addfnamealt-fn]
 fn add_literal_pathname(
     state: &mut ExpandState,
@@ -2485,7 +2447,6 @@ fn add_literal_pathname(
     path_buffer.truncate(directory_prefix_length);
 }
 
-// [spec:dash:def:expand.expmeta-rmescapes-fn]
 // [spec:dash:sem:expand.expmeta-rmescapes-fn]
 /// Unescape `name` and **append** it to the glob buffer.
 ///
@@ -2517,7 +2478,6 @@ fn remove_pathname_escapes(path: &mut BString, name: &[u8]) {
  * Do metacharacter (i.e. *, ?, [...]) expansion.
  */
 
-// [spec:dash:def:expand.expmeta-fn]
 // [spec:dash:sem:expand.expmeta-fn]
 // [spec:nsh:sem:idiom.specified-defects+1]
 // [spec:posix:def:pattern.filename-expansion-qualification]
@@ -2737,7 +2697,6 @@ fn expand_pathname_component(
  * work.
  */
 
-// [spec:dash:def:expand.expsort-fn]
 // [spec:dash:sem:expand.expsort-fn]
 // [spec:posix:req:pattern.replacement-sorted]
 fn sort_fields(locale: &nsh_platform::Locale, fields: &mut [ExpandedField]) {
@@ -2746,7 +2705,6 @@ fn sort_fields(locale: &nsh_platform::Locale, fields: &mut [ExpandedField]) {
     merge_sort_fields(locale, fields)
 }
 
-// [spec:dash:def:expand.msort-fn]
 // [spec:dash:sem:expand.msort-fn]
 ///
 /// The C's merge sort, as `sort_by`.  Two properties have to match, and
@@ -2771,7 +2729,6 @@ fn merge_sort_fields(locale: &nsh_platform::Locale, list: &mut [ExpandedField]) 
  * Remove any CTLESC characters from a string.
  */
 
-// [spec:dash:def:expand.rmescapes-fn]
 // [spec:dash:sem:expand.rmescapes-fn]
 /// The transform, over one buffer, in place.
 ///
@@ -2901,7 +2858,6 @@ fn remove_escapes_in_buffer(bytes: &mut [u8], mode: EscapeMode) -> usize {
     compact_escapes(bytes, first_escape, mode)
 }
 
-// [spec:dash:def:expand.rmescapes-fn]
 // [spec:dash:sem:expand.rmescapes-fn]
 //
 // The in-place and `RMESCAPE_HEAP` entries.  `RMESCAPE_GROW` moved to
@@ -2913,7 +2869,6 @@ fn remove_escapes_in_buffer(bytes: &mut [u8], mode: EscapeMode) -> usize {
 // both destinations are appended to, so a short reservation costs a growth
 // instead of a heap overflow, and there is no number left to assert
 // against.
-// [spec:dash:def:expand.rmescapes-fn]
 // [spec:dash:sem:expand.rmescapes-fn]
 //
 /// `_rmescapes(b + at, RMESCAPE_ALLOC | RMESCAPE_GROW)`: unescape the C
@@ -2961,7 +2916,6 @@ pub fn remove_escapes_from_offset(buffer: &mut BString, start: usize) -> usize {
  * See if a pattern matches in a case statement.
  */
 
-// [spec:dash:def:expand.casematch-fn]
 // [spec:dash:sem:expand.casematch-fn]
 pub fn case_pattern_matches(
     shell: &mut crate::context::Shell,
@@ -2980,7 +2934,6 @@ pub fn case_pattern_matches(
  * Our own itoa().
  */
 
-// [spec:dash:def:expand.cvtnum-fn]
 // [spec:dash:sem:expand.cvtnum-fn]
 fn push_integer(
     locale: &nsh_platform::Locale,
@@ -2992,7 +2945,6 @@ fn push_integer(
     push_bytes(locale, value.as_bytes(), mode, output)
 }
 
-// [spec:dash:def:expand.varunset-fn]
 // [spec:dash:sem:expand.varunset-fn]
 fn unset_parameter_error(
     shell: &mut crate::context::Shell,
@@ -3053,7 +3005,6 @@ fn unset_parameter_error(
 /// `ifsfree` belongs to the swallowing arm alone. The regions the failed
 /// expansion recorded would otherwise mis-split the *next* word, and the
 /// frame that takes an interrupt is not the frame that owns them.
-// [spec:dash:def:expand.restore-handler-expandarg-fn]
 // [spec:dash:sem:expand.restore-handler-expandarg-fn]
 pub fn recover_expansion(
     shell: &mut crate::context::Shell,
@@ -3077,7 +3028,6 @@ pub fn recover_expansion(
 /// `i64 arith(const char *)` — prototype only; the definition lives
 /// in `arith.y` / `arith_yacc.c`.  Re-exported so that `expand`'s view of
 /// the symbol resolves to the real one.
-// [spec:dash:def:expand.arith-fn]
 // [spec:dash:sem:expand.arith-fn]
 /* Unused as an import and kept as a symbol: it is this rule's target
  * site, and nothing in the crate calls `arith` through `expand`. It was
@@ -3088,5 +3038,4 @@ pub use crate::arithmetic::evaluate;
 
 // The `expcmd(int, char **)` declaration in `expand.h` has no definition
 // or caller. It is intentionally represented by no Rust item.
-// [spec:dash:def:expand.expcmd-fn]
 // [spec:dash:sem:expand.expcmd-fn]

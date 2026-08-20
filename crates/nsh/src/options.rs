@@ -23,7 +23,6 @@ pub(crate) use bash_options::NAMES as BASH_OPTION_NAMES;
 #[cfg(test)]
 mod bash_mode_tests;
 
-// [spec:dash:def:options.shparam]
 /// The shell's positional parameters.
 ///
 /// The C distinguished owned strings from a borrowed `char **` installed
@@ -155,7 +154,6 @@ impl ShellOptions {
     }
 }
 
-// [spec:dash:def:options.optschanged-fn]
 // [spec:dash:sem:options.optschanged-fn]
 /// Returns rather than raising, because `setjobctl` can fail and one of
 /// this function's callers is teardown. See `jobs::setjobctl`.
@@ -181,7 +179,6 @@ pub(crate) struct Scan {
     pub(crate) next: usize,
 }
 
-// [spec:dash:def:options.options-fn]
 // [spec:dash:sem:options.options-fn]
 // [spec:posix:req:builtin.set.options-both-forms]
 // [spec:posix:req:builtin.set.utility-syntax-guidelines]
@@ -254,7 +251,6 @@ pub(crate) fn options(
     Ok(scan)
 }
 
-// [spec:dash:def:options.minus-o-fn]
 // [spec:dash:sem:options.minus-o-fn]
 // [spec:posix:sem:builtin.set.opt-o-report]
 // [spec:posix:sem:builtin.set.plus-o-report]
@@ -321,7 +317,6 @@ fn minus_o(
     Ok(None)
 }
 
-// [spec:dash:def:options.setoption-fn]
 // [spec:dash:sem:options.setoption-fn]
 /// Set one option by its `set -o` long name or its single letter.
 ///
@@ -388,7 +383,6 @@ pub(crate) fn set_typed_option(
  * Set the shell parameters.
  */
 
-// [spec:dash:def:options.setparam-fn]
 // [spec:dash:sem:options.setparam-fn]
 // [spec:posix:sem:param.positional-assignment]
 pub fn set_positional_parameters(shell: &mut Shell, argv: &[&BStr]) {
@@ -421,7 +415,6 @@ pub fn restore_positional_parameters(shell: &mut Shell, saved: PositionalParamet
  * The set command builtin.
  */
 
-// [spec:dash:def:options.getoptsreset-fn]
 // [spec:dash:sem:options.getoptsreset-fn]
 // [spec:posix:req:builtin.getopts.env-optind]
 // [spec:posix:sem:builtin.getopts.reset]
@@ -493,7 +486,6 @@ impl<'a> Options<'a> {
     /// The diagnostic capability is a parameter rather than a field because
     /// `Options` borrows the caller's argument words. It exposes exactly the
     /// reporting operation needed for a bad option, not the rest of the shell.
-    // [spec:dash:def:options.nextopt-fn]
     // [spec:dash:sem:options.nextopt-fn]
     pub fn next(
         &mut self,

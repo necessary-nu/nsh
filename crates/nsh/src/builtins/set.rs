@@ -16,7 +16,6 @@ use crate::evaluation::Flow;
 use crate::options::{apply_option_changes, options, set_positional_parameters};
 use crate::variables::{VariableSelection, show_vars};
 
-// [spec:dash:def:options.setcmd-fn]
 // [spec:dash:sem:options.setcmd-fn]
 // [spec:posix:syn:builtin.set.synopsis]
 // [spec:posix:req:builtin.set.no-operands-writes-variables]

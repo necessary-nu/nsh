@@ -171,7 +171,6 @@ pub(crate) fn write_command_text(
  * Called with interrupts off.
  */
 
-// [spec:dash:def:jobs.xxtcsetpgrp-fn]
 // [spec:dash:sem:jobs.xxtcsetpgrp-fn]
 pub(crate) fn set_terminal_process_group(
     shell: &mut crate::context::Shell,
@@ -297,7 +296,6 @@ fn await_foreground_group(
     }
 }
 
-// [spec:dash:def:jobs.setjobctl-fn]
 // [spec:dash:sem:jobs.setjobctl-fn]
 // [spec:posix:def:jobctl.definition]
 // [spec:posix:req:jobctl.initial-foreground-process-group]
@@ -390,7 +388,6 @@ pub fn set_job_control(shell: &mut crate::context::Shell, enabled: bool) -> Resu
     Ok(())
 }
 
-// [spec:dash:def:jobs.jobno-fn]
 // [spec:dash:sem:jobs.jobno-fn]
 //
 // The C recovers the index by subtracting `jobtab` from the pointer.
@@ -398,7 +395,6 @@ pub(crate) const fn job_number(job_id: JobId) -> usize {
     job_id.0 + 1
 }
 
-// [spec:dash:def:jobs.sprint-status-fn]
 // [spec:dash:sem:jobs.sprint-status-fn]
 // [spec:posix:def:builtin.jobs.stdout-state-strings]
 // [spec:nsh:req:idiom.no-artificial-limits]
@@ -449,7 +445,6 @@ fn format_process_status(
     output.len() - start
 }
 
-// [spec:dash:def:jobs.showjob-fn]
 // [spec:dash:sem:jobs.showjob-fn]
 // [spec:posix:req:builtin.jobs.remove-reported-job]
 // [spec:posix:req:builtin.jobs.stdout-p-format]
@@ -561,7 +556,6 @@ pub(crate) fn write_job(
  * statuses have changed since the last call to showjobs.
  */
 
-// [spec:dash:def:jobs.showjobs-fn]
 // [spec:dash:sem:jobs.showjobs-fn]
 // [spec:posix:req:jobctl.background-job-suspended-message]
 // [spec:posix:req:jobctl.background-job-completion-message]
@@ -591,7 +585,6 @@ pub(crate) fn write_jobs(
  * Mark a job structure as unused.
  */
 
-// [spec:dash:def:jobs.freejob-fn]
 // [spec:dash:sem:jobs.freejob-fn]
 fn remove_job(
     interrupts: &mut crate::error::InterruptDeferral,
@@ -636,7 +629,6 @@ fn lookup_job(shell: &crate::context::Shell, name: Option<&BStr>) -> Result<JobI
     let Some(name) = name else {
         return current.ok_or(JobLookupError::NoCurrent);
     };
-    // [spec:dash:def:mystring.prefix-fn]
     // [spec:dash:sem:mystring.prefix-fn]
     let Some(mut pattern) = name.strip_prefix(b"%") else {
         return Err(JobLookupError::NoSuch);
@@ -679,7 +671,6 @@ fn lookup_job(shell: &crate::context::Shell, name: Option<&BStr>) -> Result<JobI
     found.ok_or(JobLookupError::NoSuch)
 }
 
-// [spec:dash:def:jobs.getjob-fn]
 // [spec:dash:sem:jobs.getjob-fn]
 pub(crate) fn resolve_job(
     shell: &mut crate::context::Shell,
@@ -723,7 +714,6 @@ pub(crate) fn resolve_job(
  * Called with interrupts off.
  */
 
-// [spec:dash:def:jobs.makejob-fn]
 // [spec:dash:sem:jobs.makejob-fn]
 // [spec:posix:req:jobctl.job-creation]
 // [spec:posix:req:cmd.async-job-number]
@@ -768,7 +758,6 @@ pub fn create_job(shell: &mut crate::context::Shell, process_capacity: usize) ->
     job_id
 }
 
-// [spec:dash:def:jobs.growjobtab-fn]
 // [spec:dash:sem:jobs.growjobtab-fn]
 //
 // The C's relocation pass has no counterpart: jobs own their process arrays,
@@ -808,7 +797,6 @@ fn reserve_job_slot(jobs: &mut JobTable) -> JobId {
 /// is what guarantees (see `runtime::exit_from_child`). The diagnostic
 /// has already been written.
 #[cold]
-// [spec:dash:def:jobs.forkchild-fn]
 // [spec:dash:sem:jobs.forkchild-fn]
 // [spec:posix:req:jobctl.pipeline-process-group]
 // [spec:posix:req:jobctl.foreground-process-group-assignment]
@@ -921,7 +909,6 @@ fn initialize_child_process(
     }
 }
 
-// [spec:dash:def:jobs.forkparent-fn]
 // [spec:dash:sem:jobs.forkparent-fn]
 // [spec:posix:req:jobctl.job-number-and-process-id]
 // [spec:posix:req:cmd.async-process-id-known]
@@ -980,7 +967,6 @@ fn record_forked_child(
     Ok(())
 }
 
-// [spec:dash:def:jobs.forkshell-fn]
 // [spec:dash:sem:jobs.forkshell-fn]
 // [spec:posix:req:shenv.subshell-contexts]
 // [spec:posix:req:xcurel.process-attributes-additional]
@@ -1017,7 +1003,6 @@ pub fn fork_shell(
     Ok(fork)
 }
 
-// [spec:dash:def:jobs.vforkexec-fn]
 // [spec:dash:sem:jobs.vforkexec-fn]
 // [spec:posix:req:cmd.nonbuiltin-separate-environment]
 /// Fork and immediately execute an external command.
@@ -1085,7 +1070,6 @@ pub fn fork_and_execute(
  * Called with interrupts off.
  */
 
-// [spec:dash:def:jobs.waitforjob-fn]
 // [spec:dash:sem:jobs.waitforjob-fn]
 // [spec:posix:sem:shell.exit-status-collection]
 // [spec:posix:req:jobctl.foreground-process-group-restored]
@@ -1208,7 +1192,6 @@ fn record_child_status(job: &mut Job, process: ProcessId, status: ChildStatus) -
     }
 }
 
-// [spec:dash:def:jobs.waitone-fn]
 // [spec:dash:sem:jobs.waitone-fn]
 // [spec:posix:req:jobctl.suspend-on-catchable-signal]
 // [spec:posix:req:jobctl.suspend-on-sigstop]
@@ -1293,7 +1276,6 @@ fn wait_once(
     Ok(waited)
 }
 
-// [spec:dash:def:jobs.dowait-fn]
 // [spec:dash:sem:jobs.dowait-fn]
 pub(crate) fn reap_children(
     shell: &mut crate::context::Shell,
@@ -1348,7 +1330,6 @@ pub(crate) fn reap_children(
  * children have been reaped.  Otherwise zombies may linger.
  */
 
-// [spec:dash:def:jobs.waitproc-fn]
 // [spec:dash:sem:jobs.waitproc-fn]
 fn wait_for_process(
     shell: &mut crate::context::Shell,
@@ -1421,7 +1402,6 @@ fn wait_for_process(
  * return 1 if there are stopped jobs, otherwise 0
  */
 
-// [spec:dash:def:jobs.stoppedjobs-fn]
 // [spec:dash:sem:jobs.stoppedjobs-fn]
 pub fn has_stopped_jobs(shell: &mut crate::context::Shell) -> Result<bool, Error> {
     if shell.jobs.job_warning != JobWarning::Ready {
@@ -1445,7 +1425,6 @@ pub fn has_stopped_jobs(shell: &mut crate::context::Shell) -> Result<bool, Error
  * jobs command).
  */
 
-// [spec:dash:def:jobs.commandtext-fn]
 // [spec:dash:sem:jobs.commandtext-fn]
 // [spec:posix:req:builtin.jobs.stdout-default-format]
 // [spec:nsh:sem:idiom.specified-defects+1]
@@ -1455,7 +1434,6 @@ fn render_command(node: &Node) -> BString {
     text
 }
 
-// [spec:dash:def:jobs.cmdtxt-fn]
 // [spec:dash:sem:jobs.cmdtxt-fn]
 // [spec:nsh:req:idiom.structural-ast]
 fn render_node(node: Option<&Node>, text: &mut BString) {
@@ -1567,7 +1545,6 @@ fn render_binary_command(
     render_node(Some(command.right.as_ref()), text);
 }
 
-// [spec:dash:def:jobs.cmdlist-fn]
 // [spec:dash:sem:jobs.cmdlist-fn]
 fn render_command_list(nodes: &[Node], space_between: bool, text: &mut BString) {
     for (index, node) in nodes.iter().enumerate() {
@@ -1621,7 +1598,6 @@ fn render_redirections(redirections: &[Redirection], text: &mut BString) {
     }
 }
 
-// [spec:dash:def:jobs.cmdputs-fn]
 // [spec:dash:sem:jobs.cmdputs-fn]
 fn push_command_text(s: &[u8], text: &mut BString) {
     for &byte in s {
@@ -1634,7 +1610,6 @@ fn push_command_text(s: &[u8], text: &mut BString) {
      * read as the end of the text. The length is that. */
 }
 
-// [spec:dash:def:jobs.showpipe-fn]
 // [spec:dash:sem:jobs.showpipe-fn]
 pub(crate) fn write_pipeline(
     shell: &mut crate::context::Shell,
@@ -1651,7 +1626,6 @@ pub(crate) fn write_pipeline(
     shell.flush_output()
 }
 
-// [spec:dash:def:jobs.xtcsetpgrp-fn]
 // [spec:dash:sem:jobs.xtcsetpgrp-fn]
 fn set_terminal_process_group_on(
     shell: &mut crate::context::Shell,
@@ -1672,7 +1646,6 @@ fn set_terminal_process_group_on(
     Ok(())
 }
 
-// [spec:dash:def:jobs.getstatus-fn]
 // [spec:dash:sem:jobs.getstatus-fn]
 // [spec:posix:req:exit.status-normal-termination]
 // [spec:posix:req:exit.status-signal-terminated]

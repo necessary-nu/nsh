@@ -4,9 +4,9 @@
 //! regression oracle behind POSIX and explicit nsh behavior. The implementation
 //! uses owned Rust data, explicit state and typed control flow rather than
 //! preserving C representations or defects.
-//! Items carry `[spec:dash:def:…]` / `[spec:dash:sem:…]` annotations for
-//! the rules they implement; corresponding C-source claims live in
-//! `plan/annotations.styx`.
+//! Items carry `[spec:dash:sem:…]` annotations for inherited behavior that
+//! remains relevant. Historical C signatures stay in `docs/spec/port/` as
+//! provenance, not as structural contracts on the Rust implementation.
 //! [spec:nsh:sem:idiom.specified-defects+1]
 //!
 //! **The surface is closed.** It was thirty-eight public modules, which is
@@ -89,6 +89,8 @@
 // The names below are what an embedder writes. Each is implemented in the
 // module that owns the concept, and named here so that reaching one does
 // not mean knowing which module that is.
+// The crate, rather than a translated C module graph, is the target artifact.
+// [spec:nsh:req:idiom.port-provenance+1]
 pub use crate::builder::Builder;
 pub use crate::context::Shell;
 pub use crate::error::Error;

@@ -36,8 +36,9 @@ bytes through `printf`, so the specification of the *conversion* is
 unchanged; only who computes it moved. See
 `[dec:nsh:printf-is-parsed-not-interpreted]`.
 
-> [spec:dash:def:printf.check-conversion-fn]
-> static void check_conversion(const char *s, const char *ep)
+**Dash source shape (`printf.check-conversion-fn`):**
+
+    static void check_conversion(const char *s, const char *ep)
 
 > [spec:dash:sem:printf.check-conversion-fn]
 > Validate the result of a `strto*` conversion of `s` that stopped at
@@ -47,8 +48,9 @@ unchanged; only who computes it moved. See
 > Any of these sets `rval` to 1, so the builtin reports failure while
 > still printing the value it managed to derive.
 
-> [spec:dash:def:printf.conv-escape-fn]
-> unsigned conv_escape(char *str0, char *out0, bool mbchar)
+**Dash source shape (`printf.conv-escape-fn`):**
+
+    unsigned conv_escape(char *str0, char *out0, bool mbchar)
 
 > [spec:dash:sem:printf.conv-escape-fn]
 > Decode one backslash escape. Defined here but declared in `system.h`
@@ -57,8 +59,9 @@ unchanged; only who computes it moved. See
 > `printf` dialect, in which `"` and `'` after a backslash are not
 > special and no `CTLESC`/`CTLMBCHAR` framing is emitted.
 
-> [spec:dash:def:printf.conv-escape-str-fn]
-> static int conv_escape_str(char *str, char **sp)
+**Dash source shape (`printf.conv-escape-str-fn`):**
+
+    static int conv_escape_str(char *str, char **sp)
 
 > [spec:dash:sem:printf.conv-escape-str-fn]
 > Expand SysV `echo`-style escapes in `str` onto the stack, storing the
@@ -74,8 +77,9 @@ unchanged; only who computes it moved. See
 > `conv_escape`, which reports how much input it consumed and how much
 > output it produced.
 
-> [spec:dash:def:printf.echocmd-fn]
-> int echocmd(int argc, char **argv)
+**Dash source shape (`printf.echocmd-fn`):**
+
+    int echocmd(int argc, char **argv)
 
 > [spec:dash:sem:printf.echocmd-fn]
 > The `echo` builtin. An initial `-n` is consumed and changes the final
@@ -90,16 +94,18 @@ unchanged; only who computes it moved. See
 > Stop early if `print_escape_str` reports that a `\c` escape was
 > encountered. Always returns 0.
 
-> [spec:dash:def:printf.getchr-fn]
-> static int getchr(void)
+**Dash source shape (`printf.getchr-fn`):**
+
+    static int getchr(void)
 
 > [spec:dash:sem:printf.getchr-fn]
 > Consume one argument and return its first character, or 0 when the
 > arguments are exhausted. Note `**gargv++` reads the first byte and then
 > advances the cursor.
 
-> [spec:dash:def:printf.getdouble-fn]
-> static double getdouble(void)
+**Dash source shape (`printf.getdouble-fn`):**
+
+    static double getdouble(void)
 
 > [spec:dash:sem:printf.getdouble-fn]
 > Consume one argument as a floating-point value, or 0 when exhausted.
@@ -107,14 +113,16 @@ unchanged; only who computes it moved. See
 > character that follows it — the POSIX rule that lets `printf %d "'A"`
 > print 65. Otherwise `strtod`, validated by `check_conversion`.
 
-> [spec:dash:def:printf.getstr-fn]
-> static char * getstr(void)
+**Dash source shape (`printf.getstr-fn`):**
+
+    static char * getstr(void)
 
 > [spec:dash:sem:printf.getstr-fn]
 > Consume one argument and return it, or `nullstr` when exhausted.
 
-> [spec:dash:def:printf.getuintmax-fn]
-> static uintmax_t getuintmax(int sign)
+**Dash source shape (`printf.getuintmax-fn`):**
+
+    static uintmax_t getuintmax(int sign)
 
 > [spec:dash:sem:printf.getuintmax-fn]
 > Consume one argument as an integer, or 0 when exhausted. `sign`
@@ -140,8 +148,9 @@ unchanged; only who computes it moved. See
 > by C99, but true everywhere dash is built. Returns the copy on the
 > stack.
 
-> [spec:dash:def:printf.print-escape-str-fn]
-> static int print_escape_str(const char *f, int *param, int *array, char *s)
+**Dash source shape (`printf.print-escape-str-fn`):**
+
+    static int print_escape_str(const char *f, int *param, int *array, char *s)
 
 > [spec:dash:sem:printf.print-escape-str-fn]
 > Print `s` with its escapes expanded, honouring the field width and
@@ -174,8 +183,9 @@ unchanged; only who computes it moved. See
 > with `out1mem`, which takes an explicit length and so tolerates
 > embedded NULs.
 
-> [spec:dash:def:printf.printfcmd-fn]
-> int printfcmd(int argc, char *argv[])
+**Dash source shape (`printf.printfcmd-fn`):**
+
+    int printfcmd(int argc, char *argv[])
 
 > [spec:dash:sem:printf.printfcmd-fn]
 > The `printf` builtin. Reset `rval`, consume options with

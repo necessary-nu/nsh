@@ -14,7 +14,6 @@ use crate::variables::{
     CallbackPolicy, VariableAttributes, set_bytes, set_integer_bytes, unset_bytes,
 };
 
-// [spec:dash:def:options.getoptscmd-fn]
 // [spec:dash:sem:options.getoptscmd-fn]
 // [spec:posix:syn:builtin.getopts.syn]
 // [spec:posix:req:builtin.getopts.retrieve-options]
@@ -62,7 +61,6 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     ))
 }
 
-// [spec:dash:def:options.getopts-fn]
 // [spec:dash:sem:options.getopts-fn]
 // [spec:posix:req:builtin.getopts.optind-after-invocation]
 // [spec:posix:req:builtin.getopts.unknown-option]

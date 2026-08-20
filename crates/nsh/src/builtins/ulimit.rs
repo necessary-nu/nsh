@@ -7,7 +7,6 @@ use crate::output::OutputDestination;
 use bstr::BStr;
 use nsh_platform::{LimitResource, ResourceLimit};
 
-// [spec:dash:def:miscbltin.limits]
 #[derive(Clone, Copy)]
 struct Limit {
     name: &'static [u8],
@@ -98,7 +97,6 @@ static LIMITS: [Limit; 12] = [
     },
 ];
 
-// [spec:dash:def:miscbltin.limtype]
 #[derive(Clone, Copy)]
 struct LimitSelection {
     current: bool,
@@ -120,7 +118,6 @@ impl LimitSelection {
     };
 }
 
-// [spec:dash:def:miscbltin.printlim-fn]
 // [spec:dash:sem:miscbltin.printlim-fn]
 // [spec:posix:req:builtin.ulimit.stdout-single-limit-format]
 fn print_limit(
@@ -163,7 +160,6 @@ fn parse_value(shell: &mut Shell, text: &BStr, factor: u64) -> Result<Option<u64
     Ok(Some(value))
 }
 
-// [spec:dash:def:miscbltin.ulimitcmd-fn]
 // [spec:dash:sem:miscbltin.ulimitcmd-fn]
 // [spec:posix:syn:builtin.ulimit.syn]
 // [spec:posix:req:builtin.ulimit.report-or-set]

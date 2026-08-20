@@ -41,17 +41,19 @@ for "start of word".
 `optionarg` receives an option's argument and `optptr` the position
 within a clustered option word.
 
-> [spec:dash:def:options.freeparam-fn]
-> void freeparam(volatile struct shparam *param)
+**Dash source shape (`options.freeparam-fn`):**
 
-> [spec:dash:sem:options.freeparam-fn]
+    void freeparam(volatile struct shparam *param)
+
+**Retired C ownership helper (`options.freeparam-fn`):**
 > Release a positional-parameter list, but only when `param->malloc` says
 > it is owned: free each string, then the vector itself. When `malloc` is
 > 0 the vector points into `argv` and must not be freed. The parameter is
 > `volatile` because callers hold these across `setjmp`.
 
-> [spec:dash:def:options.getopts-fn]
-> STATIC int getopts(char *optstr, char *optvar, char **optfirst)
+**Dash source shape (`options.getopts-fn`):**
+
+    STATIC int getopts(char *optstr, char *optvar, char **optfirst)
 
 > [spec:dash:sem:options.getopts-fn]
 > One step of `getopts`. Returns 1 when the options are exhausted and 0
@@ -95,8 +97,9 @@ within a clustered option word.
 > within the current word when one is partially consumed, else -1, and
 > store `optind`. Return `done`.
 
-> [spec:dash:def:options.getoptscmd-fn]
-> int getoptscmd(int argc, char **argv)
+**Dash source shape (`options.getoptscmd-fn`):**
+
+    int getoptscmd(int argc, char **argv)
 
 > [spec:dash:sem:options.getoptscmd-fn]
 > The `getopts` builtin. Consume options with `nextopt(nullstr)`, then
@@ -114,8 +117,9 @@ within a clustered option word.
 > value, which is the builtin's exit status: 0 while options remain, 1 at
 > the end.
 
-> [spec:dash:def:options.getoptsreset-fn]
-> void getoptsreset(const char *value)
+**Dash source shape (`options.getoptsreset-fn`):**
+
+    void getoptsreset(const char *value)
 
 > [spec:dash:sem:options.getoptsreset-fn]
 > Change callback on `OPTIND`: reset the cursor to `optind = 1`,
@@ -124,8 +128,9 @@ within a clustered option word.
 > ignored. `getopts` suppresses this with `VNOFUNC` when it updates
 > `OPTIND` itself.
 
-> [spec:dash:def:options.minus-o-fn]
-> STATIC void minus_o(char *name, int val)
+**Dash source shape (`options.minus-o-fn`):**
+
+    STATIC void minus_o(char *name, int val)
 
 > [spec:dash:sem:options.minus-o-fn]
 > Handle `-o`/`+o`. With a `name`, find it in `optnames` and set that
@@ -137,8 +142,9 @@ within a clustered option word.
 > `on`/`off`. `+o` prints one `set -o name` / `set +o name` line per
 > option, which is re-executable input that restores the current state.
 
-> [spec:dash:def:options.nextopt-fn]
-> int nextopt(const char *optstring)
+**Dash source shape (`options.nextopt-fn`):**
+
+    int nextopt(const char *optstring)
 
 > [spec:dash:sem:options.nextopt-fn]
 > `getopt`-style option scanning for builtins, over the global `argptr`.
@@ -161,8 +167,9 @@ within a clustered option word.
 > `optionarg` and clear `p` so the word is not rescanned. Save `p` into
 > `optptr` and return `c`.
 
-> [spec:dash:def:options.options-fn]
-> STATIC int options(int cmdline)
+**Dash source shape (`options.options-fn`):**
+
+    STATIC int options(int cmdline)
 
 > [spec:dash:sem:options.options-fn]
 > Parse option words from `argptr`, advancing it past them. `cmdline` is
@@ -188,8 +195,9 @@ within a clustered option word.
 > `minus_o`, advancing `argptr` only if a word was actually there. Any
 > other letter goes to `setoption(c, val)`.
 
-> [spec:dash:def:options.optschanged-fn]
-> void optschanged(void)
+**Dash source shape (`options.optschanged-fn`):**
+
+    void optschanged(void)
 
 > [spec:dash:sem:options.optschanged-fn]
 > Propagate option changes into the subsystems that cache them: reopen
@@ -199,8 +207,9 @@ within a clustered option word.
 > `optlist` wholesale — `set`, `procargs`, and the `$-` restore in
 > `poplocalvars`.
 
-> [spec:dash:def:options.procargs-fn]
-> int procargs(char **xargv)
+**Dash source shape (`options.procargs-fn`):**
+
+    int procargs(char **xargv)
 
 > [spec:dash:sem:options.procargs-fn]
 > Process the shell's command line. Returns non-zero for a login shell.
@@ -227,8 +236,9 @@ within a clustered option word.
 > and `optoff = -1`, and count the words into `nparam`. The vector is not
 > copied, so `malloc` stays 0. Finish with `optschanged()`.
 
-> [spec:dash:def:options.setcmd-fn]
-> int setcmd(int argc, char **argv)
+**Dash source shape (`options.setcmd-fn`):**
+
+    int setcmd(int argc, char **argv)
 
 > [spec:dash:sem:options.setcmd-fn]
 > The `set` builtin. With no arguments, print all set variables with
@@ -239,8 +249,9 @@ within a clustered option word.
 > no operands is handled inside `options`, which is why it clears the
 > parameters rather than leaving them alone here.
 
-> [spec:dash:def:options.setoption-fn]
-> STATIC void setoption(int flag, int val)
+**Dash source shape (`options.setoption-fn`):**
+
+    STATIC void setoption(int flag, int val)
 
 > [spec:dash:sem:options.setoption-fn]
 > Set the option whose letter is `flag` to `val`, raising
@@ -249,8 +260,9 @@ within a clustered option word.
 > mutually exclusive, ksh-style: `-V` (vi) clears `Eflag` and `-E`
 > (emacs) clears `Vflag`. Turning one off does not enable the other.
 
-> [spec:dash:def:options.setparam-fn]
-> void setparam(char **argv)
+**Dash source shape (`options.setparam-fn`):**
+
+    void setparam(char **argv)
 
 > [spec:dash:sem:options.setparam-fn]
 > Replace the positional parameters with copies of `argv`. Count the
@@ -261,8 +273,9 @@ within a clustered option word.
 > required because `argv` frequently points into storage that is about to
 > be reclaimed.
 
-> [spec:dash:def:options.shiftcmd-fn]
-> int shiftcmd(int argc, char **argv)
+**Dash source shape (`options.shiftcmd-fn`):**
+
+    int shiftcmd(int argc, char **argv)
 
 > [spec:dash:sem:options.shiftcmd-fn]
 > The `shift` builtin. The count is 1 by default, or `number(argv[1])`
@@ -273,11 +286,12 @@ within a clustered option word.
 > move the remaining pointers — including the NULL terminator — down to
 > the front. Reset the `getopts` cursor to 1/-1. Return 0.
 
-> [spec:dash:def:options.shparam]
-> struct shparam {
->   int nparam;
->   unsigned char malloc;
->   char **p;
->   int optind;
->   int optoff;
-> }
+**Dash source shape (`options.shparam`):**
+
+    struct shparam {
+      int nparam;
+      unsigned char malloc;
+      char **p;
+      int optind;
+      int optoff;
+    }

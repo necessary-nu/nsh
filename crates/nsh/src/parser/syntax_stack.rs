@@ -1,6 +1,5 @@
 use super::{BackquoteContext, SyntaxContext, SyntaxFrame};
 
-// [spec:dash:def:parser.synstack-push-fn]
 // [spec:dash:sem:parser.synstack-push-fn]
 // [spec:nsh:req:idiom.lexer-tokens]
 pub(super) fn push(stack: &mut Vec<SyntaxFrame>, syntax: SyntaxContext) {
@@ -16,7 +15,6 @@ pub(super) fn push(stack: &mut Vec<SyntaxFrame>, syntax: SyntaxContext) {
     });
 }
 
-// [spec:dash:def:parser.synstack-pop-fn]
 // [spec:dash:sem:parser.synstack-pop-fn]
 pub(super) fn pop(stack: &mut Vec<SyntaxFrame>) {
     stack.truncate(stack.len().saturating_sub(1));

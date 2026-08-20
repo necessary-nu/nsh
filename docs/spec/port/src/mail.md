@@ -7,8 +7,9 @@ holding the last-seen `st_mtime` of each mailbox in `MAILPATH` order, and
 merely repointing the variable does not announce mail that was already
 there.
 
-> [spec:dash:def:mail.changemail-fn]
-> void changemail(const char *val)
+**Dash source shape (`mail.changemail-fn`):**
+
+    void changemail(const char *val)
 
 > [spec:dash:sem:mail.changemail-fn]
 > Increment the module-private `changed` counter. Installed as the
@@ -18,8 +19,9 @@ there.
 > `val` argument is the new variable value and is deliberately ignored —
 > the hook signature is shared with other variable change handlers.
 
-> [spec:dash:def:mail.chkmail-fn]
-> void chkmail(void)
+**Dash source shape (`mail.chkmail-fn`):**
+
+    void chkmail(void)
 
 > [spec:dash:sem:mail.chkmail-fn]
 > Report newly arrived mail. Save the stack with `setstackmark`. Choose

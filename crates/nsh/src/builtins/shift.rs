@@ -13,7 +13,6 @@ use bstr::BStr;
 
 use crate::evaluation::Flow;
 
-// [spec:dash:def:options.shiftcmd-fn]
 // [spec:dash:sem:options.shiftcmd-fn]
 // [spec:posix:syn:builtin.shift.synopsis]
 // [spec:posix:req:builtin.shift.positional-parameters]

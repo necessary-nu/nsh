@@ -15,7 +15,6 @@ use crate::descriptors::LogicalDescriptor;
 use crate::error::Error;
 use crate::evaluation::Flow;
 
-// [spec:dash:def:test.token]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Token {
     End,
@@ -60,7 +59,6 @@ enum Token {
     Operand,
 }
 
-// [spec:dash:def:test.token-types]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OperatorKind {
     Unary,
@@ -70,7 +68,6 @@ enum OperatorKind {
     Parenthesis,
 }
 
-// [spec:dash:def:test.t-op]
 #[derive(Clone, Copy)]
 struct Operator {
     text: &'static [u8],
@@ -128,7 +125,6 @@ fn operator(word: &BStr) -> Option<&'static Operator> {
     OPERATORS.iter().find(|candidate| candidate.text == word)
 }
 
-// [spec:dash:def:test.faccessat-confused-about-superuser-fn]
 // [spec:dash:sem:test.faccessat-confused-about-superuser-fn]
 // The disabled configure-time workaround has no runtime representation.
 
@@ -136,7 +132,6 @@ fn is_c_space(byte: u8) -> bool {
     matches!(byte, b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c)
 }
 
-// [spec:dash:def:test.getn-fn]
 // [spec:dash:sem:test.getn-fn]
 fn parse_operand_integer(shell: &mut Shell, word: &BStr) -> Result<i64, Error> {
     let bytes: &[u8] = word.as_ref();
@@ -202,13 +197,11 @@ impl<'a> TestParser<'a> {
         self.words.get(pos).copied()
     }
 
-    // [spec:dash:def:test.getop-fn]
     // [spec:dash:sem:test.getop-fn]
     fn operator_at(&self, pos: usize) -> Option<&'static Operator> {
         self.word(pos).and_then(operator)
     }
 
-    // [spec:dash:def:test.t-lex-fn]
     // [spec:dash:sem:test.t-lex-fn]
     fn lex(&mut self, pos: usize) -> Token {
         let Some(word) = self.word(pos) else {
@@ -231,7 +224,6 @@ impl<'a> TestParser<'a> {
         }
     }
 
-    // [spec:dash:def:test.isoperand-fn]
     // [spec:dash:sem:test.isoperand-fn]
     fn is_operand(&self, pos: usize) -> bool {
         if self.word(pos + 1).is_none() {
@@ -244,7 +236,6 @@ impl<'a> TestParser<'a> {
             .is_some_and(|op| op.kind == OperatorKind::Binary)
     }
 
-    // [spec:dash:def:test.oexpr-fn]
     // [spec:dash:sem:test.oexpr-fn]
     fn or_expr(&mut self, shell: &mut Shell, mut token: Token) -> Result<bool, Error> {
         let mut result = false;
@@ -263,7 +254,6 @@ impl<'a> TestParser<'a> {
         Ok(result)
     }
 
-    // [spec:dash:def:test.aexpr-fn]
     // [spec:dash:sem:test.aexpr-fn]
     fn and_expr(&mut self, shell: &mut Shell, mut token: Token) -> Result<bool, Error> {
         let mut result = true;
@@ -284,7 +274,6 @@ impl<'a> TestParser<'a> {
         Ok(result)
     }
 
-    // [spec:dash:def:test.nexpr-fn]
     // [spec:dash:sem:test.nexpr-fn]
     fn not_expr(&mut self, shell: &mut Shell, mut token: Token) -> Result<bool, Error> {
         if token != Token::Not {
@@ -297,7 +286,6 @@ impl<'a> TestParser<'a> {
         Ok(!self.not_expr(shell, token)?)
     }
 
-    // [spec:dash:def:test.primary-fn]
     // [spec:dash:sem:test.primary-fn]
     fn primary(&mut self, shell: &mut Shell, token: Token) -> Result<bool, Error> {
         if token == Token::End {
@@ -358,7 +346,6 @@ impl<'a> TestParser<'a> {
         })
     }
 
-    // [spec:dash:def:test.binop-fn]
     // [spec:dash:sem:test.binop-fn]
     fn binary(&mut self, shell: &mut Shell) -> Result<bool, Error> {
         let left = self
@@ -402,7 +389,6 @@ impl<'a> TestParser<'a> {
     }
 }
 
-// [spec:dash:def:test.testcmd-fn]
 // [spec:dash:sem:test.testcmd-fn]
 pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let Some(command) = args.first() else {
@@ -454,7 +440,6 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     }
 }
 
-// [spec:dash:def:test.syntax-fn]
 // [spec:dash:sem:test.syntax-fn]
 fn syntax(shell: &mut Shell, op: Option<&[u8]>, message: &[u8]) -> Error {
     let mut text = Vec::new();
@@ -466,7 +451,6 @@ fn syntax(shell: &mut Shell, op: Option<&[u8]>, message: &[u8]) -> Error {
     shell.diagnostics().shell_error(&text)
 }
 
-// [spec:dash:def:test.filstat-fn]
 // [spec:dash:sem:test.filstat-fn]
 fn file_stat(word: &BStr, token: Token) -> bool {
     let Ok(path) = word.try_to_path_buf() else {
@@ -498,7 +482,6 @@ fn modified(metadata: &FileMetadata) -> (i64, i64) {
     (metadata.modified_seconds, metadata.modified_nanoseconds)
 }
 
-// [spec:dash:def:test.newerf-fn]
 // [spec:dash:sem:test.newerf-fn]
 fn newer(left: &BStr, right: &BStr) -> bool {
     let Ok(left) = left
@@ -516,7 +499,6 @@ fn newer(left: &BStr, right: &BStr) -> bool {
     modified(&left) > modified(&right)
 }
 
-// [spec:dash:def:test.olderf-fn]
 // [spec:dash:sem:test.olderf-fn]
 fn older(left: &BStr, right: &BStr) -> bool {
     let Ok(right) = right
@@ -534,7 +516,6 @@ fn older(left: &BStr, right: &BStr) -> bool {
     modified(&left) < modified(&right)
 }
 
-// [spec:dash:def:test.equalf-fn]
 // [spec:dash:sem:test.equalf-fn]
 fn same_file(left: &BStr, right: &BStr) -> bool {
     let (Ok(left), Ok(right)) = (left.try_to_path_buf(), right.try_to_path_buf()) else {
@@ -543,19 +524,16 @@ fn same_file(left: &BStr, right: &BStr) -> bool {
     nsh_platform::path_is_same_file(&left, &right)
 }
 
-// [spec:dash:def:test.test-file-access-fn]
 // [spec:dash:sem:test.test-file-access-fn]
-// [spec:dash:def:exec.test-file-access-fn]
 // [spec:dash:sem:exec.test-file-access-fn]
 pub fn test_file_access(path: &BStr, access: AccessMode) -> bool {
     path.try_to_path_buf()
         .is_ok_and(|path| nsh_platform::effective_access(&path, access))
 }
 
-// [spec:dash:def:test.test-access-fn]
 // [spec:dash:sem:test.test-access-fn]
-// [spec:dash:def:exec.test-access-fn]
 // [spec:dash:sem:exec.test-access-fn]
+// [spec:dash:sem:test.has-exec-bit-set-fn]
 pub fn test_access(metadata: &FileMetadata, access: AccessMode) -> bool {
     let mut bits = match access {
         AccessMode::READ_OK => 0o4,

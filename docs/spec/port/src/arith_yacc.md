@@ -33,8 +33,9 @@ window rather than a pushback.
 (`&&`, `||`, `?:`) are parsed for syntax but not evaluated, and in
 particular do not assign to variables or trigger division-by-zero errors.
 
-> [spec:dash:def:arith-yacc.and-fn]
-> static intmax_t and(int token, union yystype *val, int op, int noeval)
+**Dash source shape (`arith-yacc.and-fn`):**
+
+    static intmax_t and(int token, union yystype *val, int op, int noeval)
 
 > [spec:dash:sem:arith-yacc.and-fn]
 > Parse `&&`. Evaluate the left operand with `binop`. If the following
@@ -44,8 +45,9 @@ particular do not assign to variables or trigger division-by-zero errors.
 > normalises to 0 or 1. Right recursion makes the operator
 > right-associative, which is harmless for `&&`.
 
-> [spec:dash:def:arith-yacc.arith-fn]
-> intmax_t arith(const char *s)
+**Dash source shape (`arith-yacc.arith-fn`):**
+
+    intmax_t arith(const char *s)
 
 > [spec:dash:sem:arith-yacc.arith-fn]
 > Evaluate the arithmetic expression in `s`. Point both `arith_buf` (the
@@ -54,16 +56,18 @@ particular do not assign to variables or trigger division-by-zero errors.
 > Anything left over — `last_token` not 0, the end-of-input token — is
 > `yyerror("expecting EOF")`. Return the value.
 
-> [spec:dash:def:arith-yacc.arith-prec-fn]
-> static inline int arith_prec(int op)
+**Dash source shape (`arith-yacc.arith-prec-fn`):**
+
+    static inline int arith_prec(int op)
 
 > [spec:dash:sem:arith-yacc.arith-prec-fn]
 > Return `prec[op - ARITH_BINOP_MIN]`, the precedence level of a binary
 > operator. The caller must already have checked that `op` is in the
 > binary-operator range; there is no bounds check.
 
-> [spec:dash:def:arith-yacc.assignment-fn]
-> static intmax_t assignment(int var, int noeval)
+**Dash source shape (`arith-yacc.assignment-fn`):**
+
+    static intmax_t assignment(int var, int noeval)
 
 > [spec:dash:sem:arith-yacc.assignment-fn]
 > Parse an assignment, the lowest-precedence production. Capture the
@@ -82,8 +86,9 @@ particular do not assign to variables or trigger division-by-zero errors.
 > two ranges are laid out in the same order. `setvarint` returns the
 > value, so the assignment is itself an expression.
 
-> [spec:dash:def:arith-yacc.binop-fn]
-> static intmax_t binop(int token, union yystype *val, int op, int noeval)
+**Dash source shape (`arith-yacc.binop-fn`):**
+
+    static intmax_t binop(int token, union yystype *val, int op, int noeval)
 
 > [spec:dash:sem:arith-yacc.binop-fn]
 > Parse a binary-operator expression. Evaluate the left operand with
@@ -91,8 +96,9 @@ particular do not assign to variables or trigger division-by-zero errors.
 > it. Otherwise hand off to `binop2` with `ARITH_MAX_PREC`, the sentinel
 > precedence that lets it consume operators of every level.
 
-> [spec:dash:def:arith-yacc.binop2-fn]
-> static intmax_t binop2(intmax_t a, int op, int prec, int noeval)
+**Dash source shape (`arith-yacc.binop2-fn`):**
+
+    static intmax_t binop2(intmax_t a, int op, int prec, int noeval)
 
 > [spec:dash:sem:arith-yacc.binop2-fn]
 > Precedence-climbing loop. `a` is the accumulated left operand, `op` the
@@ -114,8 +120,9 @@ particular do not assign to variables or trigger division-by-zero errors.
 > precedence is at or beyond `prec`. Otherwise continue with it as the
 > new `op`, so same-precedence operators are applied left to right.
 
-> [spec:dash:def:arith-yacc.cond-fn]
-> static intmax_t cond(int token, union yystype *val, int op, int noeval)
+**Dash source shape (`arith-yacc.cond-fn`):**
+
+    static intmax_t cond(int token, union yystype *val, int op, int noeval)
 
 > [spec:dash:sem:arith-yacc.cond-fn]
 > Parse the ternary `?:`. Evaluate the condition with `or`. If what
@@ -129,8 +136,9 @@ particular do not assign to variables or trigger division-by-zero errors.
 > is what makes `a ? b : c ? d : e` group to the right and lets an
 > assignment appear unparenthesised in the middle.
 
-> [spec:dash:def:arith-yacc.do-binop-fn]
-> static intmax_t do_binop(int op, intmax_t a, intmax_t b)
+**Dash source shape (`arith-yacc.do-binop-fn`):**
+
+    static intmax_t do_binop(int op, intmax_t a, intmax_t b)
 
 > [spec:dash:sem:arith-yacc.do-binop-fn]
 > Apply one binary operator to two `intmax_t` values. Division and
@@ -145,24 +153,27 @@ particular do not assign to variables or trigger division-by-zero errors.
 > are not checked — a Rust port must decide explicitly (wrapping is the
 > closest match to the behaviour observed on the platforms dash targets).
 
-> [spec:dash:def:arith-yacc.higher-prec-fn]
-> static inline int higher_prec(int op1, int op2)
+**Dash source shape (`arith-yacc.higher-prec-fn`):**
+
+    static inline int higher_prec(int op1, int op2)
 
 > [spec:dash:sem:arith-yacc.higher-prec-fn]
 > Return whether `op1` binds tighter than `op2`:
 > `arith_prec(op1) < arith_prec(op2)`, since smaller numbers mean tighter
 > binding.
 
-> [spec:dash:def:arith-yacc.or-fn]
-> static intmax_t or(int token, union yystype *val, int op, int noeval)
+**Dash source shape (`arith-yacc.or-fn`):**
+
+    static intmax_t or(int token, union yystype *val, int op, int noeval)
 
 > [spec:dash:sem:arith-yacc.or-fn]
 > Parse `||`, mirroring `and`: evaluate the left side with `and`, and if
 > `||` follows, recurse with `noeval | !!a` so a true left operand
 > suppresses the right. Return `a || b`, normalised to 0 or 1.
 
-> [spec:dash:def:arith-yacc.primary-fn]
-> static intmax_t primary(int token, union yystype *val, int op, int noeval)
+**Dash source shape (`arith-yacc.primary-fn`):**
+
+    static intmax_t primary(int token, union yystype *val, int op, int noeval)
 
 > [spec:dash:sem:arith-yacc.primary-fn]
 > Parse a primary expression: a parenthesised expression, a literal, a
@@ -182,16 +193,18 @@ particular do not assign to variables or trigger division-by-zero errors.
 >   logically negate, or complement it.
 > - anything else — `yyerror("expecting primary")`.
 
-> [spec:dash:def:arith-yacc.yyerror-fn]
-> static void yyerror(const char *s)
+**Dash source shape (`arith-yacc.yyerror-fn`):**
+
+    static void yyerror(const char *s)
 
 > [spec:dash:sem:arith-yacc.yyerror-fn]
 > Raise `sh_error("arithmetic expression: %s: \"%s\"", s,
 > arith_startbuf)` — the reason plus the whole original expression, since
 > the cursor position is not tracked. Does not return.
 
-> [spec:dash:def:arith-yacc.yylex-fn]
-> int yylex(void)
+**Dash source shape (`arith-yacc.yylex-fn`):**
+
+    int yylex(void)
 
 > [spec:dash:sem:arith-yacc.yylex-fn]
 > The tokeniser prototype used by this file; the implementation lives in
@@ -199,8 +212,9 @@ particular do not assign to variables or trigger division-by-zero errors.
 > returns the token code and leaves any associated value in the global
 > `yylval`.
 
-> [spec:dash:def:arith-yacc.yystype]
-> union yystype {
->   intmax_t val;
->   char *name;
-> }
+**Dash source shape (`arith-yacc.yystype`):**
+
+    union yystype {
+      intmax_t val;
+      char *name;
+    }

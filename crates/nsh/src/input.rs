@@ -52,7 +52,6 @@ impl InputFileOptions {
     };
 }
 
-// [spec:dash:def:input.strpush]
 /// The C's `struct strpush`.
 ///
 /// `prev` is the `Vec` order and `basestrpush` has no reason to exist, so
@@ -79,7 +78,6 @@ pub struct InputOverlay {
  * contains information about the current file being read.
  */
 
-// [spec:dash:def:input.parsefile]
 /// The C's `struct parsefile`. `prev` is an index into the frame stack, not
 /// a pointer, so that `Vec` growth cannot invalidate it.
 pub struct InputFrame {
@@ -141,7 +139,6 @@ impl InputFrame {
     }
 }
 
-// [spec:dash:def:input.stdin-state]
 pub struct StandardInputState {
     pub seekable: bool,
     pub pipe: Option<crate::redirection::Pipe>,
@@ -380,13 +377,11 @@ macro_rules! plinno {
     };
 }
 
-// [spec:dash:def:input.input-get-lleft-fn]
 // [spec:dash:sem:input.input-get-lleft-fn]
 pub fn remaining_buffer_bytes(input_frame: &InputFrame) -> usize {
     input_frame.buffer_remaining
 }
 
-// [spec:dash:def:input.input-set-lleft-fn]
 // [spec:dash:sem:input.input-set-lleft-fn]
 pub fn set_remaining_buffer_bytes(input_frame: &mut InputFrame, len: usize) {
     input_frame.buffer_remaining = len;
@@ -450,7 +445,6 @@ impl Shell {
     }
 }
 
-// [spec:dash:def:input.input-init-fn]
 // [spec:dash:sem:input.input-init-fn]
 // [spec:nsh:def:idiom.logical-descriptors]
 pub fn initialize_input(shell: &mut Shell) {
@@ -471,7 +465,6 @@ pub fn initialize_input(shell: &mut Shell) {
     }
 }
 
-// [spec:dash:def:input.stdin-bufferable-fn]
 // [spec:dash:sem:input.stdin-bufferable-fn]
 fn standard_input_is_bufferable(shell: &mut Shell) -> bool {
     if shell.input.standard_input_is_terminal.is_none() {
@@ -480,7 +473,6 @@ fn standard_input_is_bufferable(shell: &mut Shell) -> bool {
     shell.input.standard_input_state.bufferable
 }
 
-// [spec:dash:def:input.flush-tee-fn]
 // [spec:dash:sem:input.flush-tee-fn]
 fn flush_tee(shell: &mut crate::context::Shell, request: usize, mut pending: usize) {
     let mut scratch = [0_u8; INPUT_BUFFER_SIZE];
@@ -497,7 +489,6 @@ fn flush_tee(shell: &mut crate::context::Shell, request: usize, mut pending: usi
     }
 }
 
-// [spec:dash:def:input.stdin-tee-fn]
 // [spec:dash:sem:input.stdin-tee-fn]
 // [spec:nsh:req:idiom.platform-errors]
 fn tee_standard_input(shell: &mut Shell, request: usize) -> Result<std::io::Result<usize>, Error> {
@@ -549,7 +540,6 @@ fn release_input_overlays(shell: &mut crate::context::Shell, mut list: Vec<Input
     }
 }
 
-// [spec:dash:def:input.freestrings-fn]
 // [spec:dash:sem:input.freestrings-fn]
 fn clear_input_overlays(shell: &mut crate::context::Shell) {
     crate::error::with_interrupts_deferred(shell, |shell| {
@@ -564,7 +554,6 @@ fn clear_input_overlays(shell: &mut crate::context::Shell) {
  * point; `read -d ''` uses the preserving entry point below.
  */
 
-// [spec:dash:def:input.pgetc-fn]
 // [spec:dash:sem:input.pgetc-fn]
 // [spec:nsh:req:idiom.lexer-tokens]
 pub fn read_input_unit(shell: &mut crate::context::Shell) -> Result<InputUnit, Error> {
@@ -625,7 +614,6 @@ fn read_input_unit_with_mode(
     }
 }
 
-// [spec:dash:def:input.pgetc-eoa-fn]
 // [spec:dash:sem:input.pgetc-eoa-fn]
 pub fn read_input_unit_or_alias_end(shell: &mut crate::context::Shell) -> Result<InputUnit, Error> {
     let input_frame = current_input_frame(&mut shell.input);
@@ -641,7 +629,6 @@ pub fn read_input_unit_or_alias_end(shell: &mut crate::context::Shell) -> Result
     }
 }
 
-// [spec:dash:def:input.stdin-clear-nonblock-fn]
 // [spec:dash:sem:input.stdin-clear-nonblock-fn]
 fn clear_standard_input_nonblocking(shell: &mut crate::context::Shell) -> bool {
     shell
@@ -650,7 +637,6 @@ fn clear_standard_input_nonblocking(shell: &mut crate::context::Shell) -> bool {
         .is_some_and(|descriptor| nsh_platform::set_nonblocking(&descriptor, false).is_ok())
 }
 
-// [spec:dash:def:input.preadfd-fn]
 // [spec:dash:sem:input.preadfd-fn]
 // [spec:posix:req:sh.stdin-used-only-if]
 // [spec:posix:req:sh.stdin-no-read-ahead]
@@ -828,7 +814,6 @@ fn read_input_descriptor(shell: &mut crate::context::Shell) -> Result<usize, Err
  * 4) Process input up to the next newline, normally deleting nul characters.
  */
 
-// [spec:dash:def:input.preadbuffer-fn]
 // [spec:dash:sem:input.preadbuffer-fn]
 fn refill_input_buffer(
     shell: &mut crate::context::Shell,
@@ -972,7 +957,6 @@ fn refill_input_buffer(
     Ok(InputUnit::Byte(byte))
 }
 
-// [spec:dash:def:input.pungetn-fn]
 // [spec:dash:sem:input.pungetn-fn]
 pub fn unread_input_units(shell: &mut Shell, count: usize) {
     current_input_frame(&mut shell.input).unread_count += count;
@@ -983,7 +967,6 @@ pub fn unread_input_units(shell: &mut Shell, count: usize) {
  * End-of-input may be pushed back.
  */
 
-// [spec:dash:def:input.pungetc-fn]
 // [spec:dash:sem:input.pungetc-fn]
 pub fn unread_input_unit(shell: &mut Shell) {
     let observed_eof = current_input_frame(&mut shell.input).eof_observed;
@@ -998,7 +981,6 @@ pub fn unread_input_unit(shell: &mut Shell) {
  * We handle aliases this way.
  */
 
-// [spec:dash:def:input.pushstring-fn]
 // [spec:dash:sem:input.pushstring-fn]
 pub fn push_string_input(shell: &mut Shell, string: &BStr, alias_name: Option<BString>) {
     let string_length = string.len();
@@ -1030,7 +1012,6 @@ pub fn push_string_input(shell: &mut Shell, string: &BStr, alias_name: Option<BS
     });
 }
 
-// [spec:dash:def:input.popstring-fn]
 // [spec:dash:sem:input.popstring-fn]
 // [spec:posix:req:token.alias-trailing-blank-chaining]
 fn pop_string_input(shell: &mut Shell) {
@@ -1069,7 +1050,6 @@ fn pop_string_input(shell: &mut Shell) {
  * old input onto the stack first.
  */
 
-// [spec:dash:def:input.setinputfile-fn]
 // [spec:dash:sem:input.setinputfile-fn]
 pub fn set_input_file(
     shell: &mut crate::context::Shell,
@@ -1111,7 +1091,6 @@ fn install_input_file(
  * interrupts off.
  */
 
-// [spec:dash:def:input.setinputfd-fn]
 // [spec:dash:sem:input.setinputfd-fn]
 // [spec:nsh:req:idiom.no-raw-fd-core]
 fn set_input_descriptor(shell: &mut Shell, descriptor: Descriptor, push: bool, dot_operand: bool) {
@@ -1131,7 +1110,6 @@ fn set_input_descriptor(shell: &mut Shell, descriptor: Descriptor, push: bool, d
  * Like setinputfile, but takes input from a string.
  */
 
-// [spec:dash:def:input.setinputstring-fn]
 // [spec:dash:sem:input.setinputstring-fn]
 pub fn set_input_string(shell: &mut Shell, string: &BStr) {
     crate::error::with_interrupts_deferred(shell, |shell| {
@@ -1155,7 +1133,6 @@ pub fn set_input_string(shell: &mut Shell, string: &BStr) {
  * adds a new entry to the stack and popfile restores the previous level.
  */
 
-// [spec:dash:def:input.pushfile-fn]
 // [spec:dash:sem:input.pushfile-fn]
 fn push_input_frame(shell: &mut Shell) {
     let previous = shell.input.current;
@@ -1169,7 +1146,6 @@ fn push_input_frame(shell: &mut Shell) {
     shell.input.current = depth;
 }
 
-// [spec:dash:def:input.pushstdin-fn]
 // [spec:dash:sem:input.pushstdin-fn]
 pub fn push_standard_input(shell: &mut Shell) {
     crate::error::with_interrupts_deferred(shell, |shell| {
@@ -1179,7 +1155,6 @@ pub fn push_standard_input(shell: &mut Shell) {
     });
 }
 
-// [spec:dash:def:input.popfile-fn]
 // [spec:dash:sem:input.popfile-fn]
 // [spec:nsh:sem:idiom.specified-defects+1]
 pub fn pop_input_frame(shell: &mut crate::context::Shell) {
@@ -1227,7 +1202,6 @@ pub fn pop_input_frame(shell: &mut crate::context::Shell) {
     });
 }
 
-// [spec:dash:def:input.unwindfiles-fn]
 // [spec:dash:sem:input.unwindfiles-fn]
 pub fn unwind_input_frames(shell: &mut crate::context::Shell, stop: usize) {
     while input_frame_at(&mut shell.input, 0).previous.is_some() || shell.input.current != stop {
@@ -1239,7 +1213,6 @@ pub fn unwind_input_frames(shell: &mut crate::context::Shell, stop: usize) {
  * Return to top level.
  */
 
-// [spec:dash:def:input.popallfiles-fn]
 // [spec:dash:sem:input.popallfiles-fn]
 pub fn pop_all_input_frames(shell: &mut crate::context::Shell) {
     /* Read out first: `toppf` is a field of the same stack `unwindfiles`
@@ -1250,9 +1223,7 @@ pub fn pop_all_input_frames(shell: &mut crate::context::Shell) {
 
 impl Shell {
     /// Discard buffered standard input while preserving the underlying source.
-    // [spec:dash:def:input.flush-input-fn]
     // [spec:dash:sem:input.flush-input-fn]
-    // [spec:dash:def:init.postexitreset-fn]
     // [spec:dash:sem:init.postexitreset-fn]
     pub(crate) fn flush_input(&mut self) {
         let base = input_frame_at(&mut self.input, 0);
@@ -1282,7 +1253,6 @@ impl Shell {
     }
 }
 
-// [spec:dash:def:input.reset-input-fn]
 // [spec:dash:sem:input.reset-input-fn]
 pub fn reset_input(shell: &mut Shell) {
     shell.input.standard_input_is_terminal = None;

@@ -26,8 +26,9 @@ Delivery is deferred: `onsig` only records into `gotsig[]` and
 safe point. `gotsigchld` is a separate flag because SIGCHLD is tracked
 even when untrapped.
 
-> [spec:dash:def:trap.clear-traps-fn]
-> void clear_traps(union node *n)
+**Dash source shape (`trap.clear-traps-fn`):**
+
+    void clear_traps(union node *n)
 
 > [spec:dash:sem:trap.clear-traps-fn]
 > Reset traps for a child process. POSIX says a subshell resets trapped
@@ -50,8 +51,9 @@ even when untrapped.
 > frees the NULL it just stored rather than the saved `otp`. Reproduce
 > both the no-op free and the leak.
 
-> [spec:dash:def:trap.decode-signal-fn]
-> int decode_signal(const char *string, int minsig)
+**Dash source shape (`trap.decode-signal-fn`):**
+
+    int decode_signal(const char *string, int minsig)
 
 > [spec:dash:sem:trap.decode-signal-fn]
 > Turn a signal name or number into a signal number, or -1 if it is
@@ -61,8 +63,9 @@ even when untrapped.
 > caller exclude signal 0 (`EXIT`), which is a valid `trap` target but
 > not a valid `kill` target.
 
-> [spec:dash:def:trap.decode-signum-fn]
-> static int decode_signum(const char *string)
+**Dash source shape (`trap.decode-signum-fn`):**
+
+    static int decode_signum(const char *string)
 
 > [spec:dash:sem:trap.decode-signum-fn]
 > Return the signal number if `string` is a valid decimal number below
@@ -70,8 +73,9 @@ even when untrapped.
 > space fails; the upper bound rejects out-of-range numbers. Note 0 is
 > accepted, since it names the `EXIT` trap.
 
-> [spec:dash:def:trap.dotrap-fn]
-> void dotrap(void)
+**Dash source shape (`trap.dotrap-fn`):**
+
+    void dotrap(void)
 
 > [spec:dash:sem:trap.dotrap-fn]
 > Run any pending trap commands. Returns at once if `pending_sig` is
@@ -95,8 +99,9 @@ even when untrapped.
 >
 > Finally restore `savestatus` to what it was on entry.
 
-> [spec:dash:def:trap.exitshell-fn]
-> void exitshell(void)
+**Dash source shape (`trap.exitshell-fn`):**
+
+    void exitshell(void)
 
 > [spec:dash:sem:trap.exitshell-fn]
 > Terminate the shell, running the `EXIT` trap first. Save `exitstatus`
@@ -117,16 +122,18 @@ even when untrapped.
 > the shell started gets it back. `flushall()` and `_exit(exitstatus)`.
 > Note the status used is `exitstatus`, which the trap may have changed.
 
-> [spec:dash:def:trap.have-traps-fn]
-> static inline int have_traps(void)
+**Dash source shape (`trap.have-traps-fn`):**
+
+    static inline int have_traps(void)
 
 > [spec:dash:sem:trap.have-traps-fn]
 > Return `trapcnt`, the number of signals with a non-empty trap command.
 > Used as a boolean to decide whether the shell must stay in a position
 > to run traps — e.g. whether it can `exec` directly instead of forking.
 
-> [spec:dash:def:trap.ignoresig-fn]
-> void ignoresig(int signo)
+**Dash source shape (`trap.ignoresig-fn`):**
+
+    void ignoresig(int signo)
 
 > [spec:dash:sem:trap.ignoresig-fn]
 > Set a signal to `SIG_IGN`, skipping the work when `sigmode` already
@@ -134,8 +141,9 @@ even when untrapped.
 > vfork child, since such a child shares the parent's memory and must not
 > corrupt its view of the parent's dispositions.
 
-> [spec:dash:def:trap.onsig-fn]
-> void onsig(int signo)
+**Dash source shape (`trap.onsig-fn`):**
+
+    void onsig(int signo)
 
 > [spec:dash:sem:trap.onsig-fn]
 > The installed signal handler. It records rather than acts, so that the
@@ -152,8 +160,9 @@ even when untrapped.
 > when interrupts are not suppressed, and otherwise set `intpending` so
 > the next `INTON` runs it.
 
-> [spec:dash:def:trap.setinteractive-fn]
-> void setinteractive(int on)
+**Dash source shape (`trap.setinteractive-fn`):**
+
+    void setinteractive(int on)
 
 > [spec:dash:sem:trap.setinteractive-fn]
 > Re-derive the dispositions that depend on interactivity. `on` is
@@ -164,8 +173,9 @@ even when untrapped.
 > SIGINT, SIGQUIT and SIGTERM, which are the signals whose default
 > handling differs between interactive and non-interactive shells.
 
-> [spec:dash:def:trap.setsignal-fn]
-> void setsignal(int signo)
+**Dash source shape (`trap.setsignal-fn`):**
+
+    void setsignal(int signo)
 
 > [spec:dash:sem:trap.setsignal-fn]
 > Install the correct disposition for `signo`, derived from the trap
@@ -199,16 +209,18 @@ even when untrapped.
 > `sa_mask` so no other signal interrupts the handler. Update the cache
 > unless in a vfork child.
 
-> [spec:dash:def:trap.sigblockall-fn]
-> void sigblockall(sigset_t *oldmask)
+**Dash source shape (`trap.sigblockall-fn`):**
+
+    void sigblockall(sigset_t *oldmask)
 
 > [spec:dash:sem:trap.sigblockall-fn]
 > Block every signal, storing the previous mask through `oldmask` (which
 > may be NULL): `sigfillset` then
 > `sigprocmask(SIG_SETMASK, &mask, oldmask)`.
 
-> [spec:dash:def:trap.trapcmd-fn]
-> int trapcmd(int argc, char **argv)
+**Dash source shape (`trap.trapcmd-fn`):**
+
+    int trapcmd(int argc, char **argv)
 
 > [spec:dash:sem:trap.trapcmd-fn]
 > The `trap` builtin. Consume options with `nextopt(nullstr)`. With no

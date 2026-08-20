@@ -15,14 +15,12 @@ use crate::error::{Diagnostics, Error};
  * (length * 8 - 1) * log10(2) + 1 + 1 + 12
  * The second 1 is for the minus sign and the 12 is a safety margin.
  */
-// [spec:dash:def:shell.max-int-length-fn]
 // [spec:dash:sem:shell.max-int-length-fn]
 #[inline]
 pub(crate) fn maximum_integer_text_length(bytes: i32) -> i32 {
     ((bytes * 8 - 1) as f64 * 0.30102999566398119521 + 14.0) as i32
 }
 
-// [spec:dash:def:mystring.badnum-fn]
 // [spec:dash:sem:mystring.badnum-fn]
 /// Build the shell's diagnostic for an invalid numeric operand.
 pub(crate) fn invalid_number(diagnostics: &mut Diagnostics<'_>, input: &BStr) -> Error {
@@ -31,7 +29,6 @@ pub(crate) fn invalid_number(diagnostics: &mut Diagnostics<'_>, input: &BStr) ->
     diagnostics.shell_error(&message)
 }
 
-// [spec:dash:def:mystring.atomax-fn]
 // [spec:dash:sem:mystring.atomax-fn]
 /// Parse one signed shell integer in `base`, where zero selects a prefix.
 // [spec:nsh:req:idiom.no-mystring]
@@ -142,9 +139,7 @@ pub(crate) fn parse_integer(
     })
 }
 
-// [spec:dash:def:mystring.number-fn]
 // [spec:dash:sem:mystring.number-fn]
-// [spec:dash:def:mystring.atomax10-fn]
 // [spec:dash:sem:mystring.atomax10-fn]
 /// Parse a non-negative decimal shell operand in the `i32` range.
 pub(crate) fn parse_nonnegative(
@@ -158,7 +153,6 @@ pub(crate) fn parse_nonnegative(
         .ok_or_else(|| invalid_number(diagnostics, input))
 }
 
-// [spec:dash:def:mystring.is-number-fn]
 // [spec:dash:sem:mystring.is-number-fn]
 /// Parse a non-empty string of ASCII decimal digits with saturation.
 pub(crate) fn parse_decimal(input: &BStr) -> Option<u64> {

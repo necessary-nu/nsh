@@ -98,9 +98,7 @@ pub struct EscapeChunk {
 /*
  * Print "standard" escape characters
  */
-// [spec:dash:def:printf.conv-escape-fn]
 // [spec:dash:sem:printf.conv-escape-fn]
-// [spec:dash:def:system.conv-escape-fn]
 // [spec:dash:sem:system.conv-escape-fn]
 /// The destination is a fixed scratch buffer rather than a raw cursor,
 /// and its size is the one this function needs.
@@ -360,7 +358,6 @@ pub fn parse_escape(
 ///
 /// Returns 0, or 0x100 when a `\c` was found — "stop all further output",
 /// which both callers obey. Input and output are both length-delimited.
-// [spec:dash:def:printf.conv-escape-str-fn]
 // [spec:dash:sem:printf.conv-escape-str-fn]
 pub(crate) fn append_escape(input: &[u8], output_bytes: &mut BString) -> bool {
     let mut at = 0usize;
@@ -412,7 +409,6 @@ pub(crate) fn append_escape(input: &[u8], output_bytes: &mut BString) -> bool {
 }
 
 /// Quote arbitrary bytes so parsing the result produces the same bytes.
-// [spec:dash:def:mystring.single-quote-fn]
 // [spec:dash:sem:mystring.single-quote-fn]
 // [spec:nsh:req:idiom.no-mystring]
 pub(crate) fn shell_quote(mut input: &BStr) -> BString {

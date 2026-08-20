@@ -51,7 +51,6 @@ impl WorkingDirectoryState {
  * directory, this routine returns immediately.
  */
 
-// [spec:dash:def:cd.getpwd-fn]
 // [spec:dash:sem:cd.getpwd-fn]
 fn current_directory() -> std::io::Result<BString> {
     nsh_platform::current_directory().map(|dir| BString::from(dir.to_shell_bytes()))
@@ -70,7 +69,6 @@ pub(crate) enum DirectoryUpdate<'a> {
     New(&'a BStr),
 }
 
-// [spec:dash:def:cd.setpwd-fn]
 // [spec:dash:sem:cd.setpwd-fn]
 // [spec:posix:req:param.pwd]
 // [spec:posix:req:param.pwd-assignment]

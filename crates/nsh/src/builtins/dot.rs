@@ -16,7 +16,6 @@ use crate::evaluation::Flow;
 use crate::execution::PathCursor;
 use crate::runtime::command_loop;
 
-// [spec:dash:def:main.find-dot-file-fn]
 // [spec:dash:sem:main.find-dot-file-fn]
 // [spec:posix:req:builtin.dot.path-search]
 /// The C returns a `stalloc`'d copy of the candidate. Here the caller owns
@@ -56,7 +55,6 @@ fn find_dot_file(shell: &mut crate::context::Shell, basename: &BStr) -> Option<B
     None
 }
 
-// [spec:dash:def:main.dotcmd-fn]
 // [spec:dash:sem:main.dotcmd-fn]
 // [spec:posix:syn:builtin.dot.syn]
 // [spec:posix:req:builtin.dot.execute-in-current-environment]

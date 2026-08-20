@@ -21,8 +21,9 @@ was only that search's adapter to C `bsearch`. Their
 blocks below keep describing the C source, but no longer carry
 `[spec:dash:…]` ids that would claim a target implementation still exists.
 
-> [spec:dash:def:mystring.atomax-fn]
-> intmax_t atomax(const char *s, int base)
+**Dash source shape (`mystring.atomax-fn`):**
+
+    intmax_t atomax(const char *s, int base)
 
 > [spec:dash:sem:mystring.atomax-fn]
 > Parse `s` as an `intmax_t` in the given base, erroring on anything
@@ -37,15 +38,17 @@ blocks below keep describing the C source, but no longer carry
 > checked, so a value out of `intmax_t` range returns the clamped
 > `strtoimax` result rather than erroring. Return the parsed value.
 
-> [spec:dash:def:mystring.atomax10-fn]
-> intmax_t atomax10(const char *s)
+**Dash source shape (`mystring.atomax10-fn`):**
+
+    intmax_t atomax10(const char *s)
 
 > [spec:dash:sem:mystring.atomax10-fn]
 > Convenience wrapper: `atomax(s, 10)`. Base 10 is non-zero, so unlike
 > the arithmetic path a blank string is rejected.
 
-> [spec:dash:def:mystring.badnum-fn]
-> void badnum(const char *s)
+**Dash source shape (`mystring.badnum-fn`):**
+
+    void badnum(const char *s)
 
 > [spec:dash:sem:mystring.badnum-fn]
 > Raise `sh_error(illnum, s)` — `"Illegal number: %s"` — which unwinds
@@ -60,8 +63,9 @@ blocks below keep describing the C source, but no longer carry
 > slot — so the caller can recover the index — or NULL. The array must
 > already be sorted by `strcmp` order.
 
-> [spec:dash:def:mystring.is-number-fn]
-> int is_number(const char *p)
+**Dash source shape (`mystring.is-number-fn`):**
+
+    int is_number(const char *p)
 
 > [spec:dash:sem:mystring.is-number-fn]
 > Return 1 if `p` consists entirely of digits, 0 otherwise. The loop is
@@ -69,8 +73,9 @@ blocks below keep describing the C source, but no longer carry
 > NUL fails `is_digit`). No sign, whitespace or base prefix is allowed —
 > strictly `[0-9]+`.
 
-> [spec:dash:def:mystring.number-fn]
-> int number(const char *s)
+**Dash source shape (`mystring.number-fn`):**
+
+    int number(const char *s)
 
 > [spec:dash:sem:mystring.number-fn]
 > Parse `s` as a non-negative `int`. Call `atomax10(s)`, then reject a
@@ -78,8 +83,9 @@ blocks below keep describing the C source, but no longer carry
 > narrowed to `int`. Used where the shell needs a plain count or status,
 > e.g. the operand of `exit` or `shift`.
 
-> [spec:dash:def:mystring.prefix-fn]
-> char * prefix(const char *string, const char *pfx)
+**Dash source shape (`mystring.prefix-fn`):**
+
+    char * prefix(const char *string, const char *pfx)
 
 > [spec:dash:sem:mystring.prefix-fn]
 > Test whether `pfx` is a prefix of `string`. Compare characters while
@@ -103,12 +109,12 @@ blocks below keep describing the C source, but no longer carry
 > otherwise write a NUL at the final position.
 >
 > Note: the whole function is inside `#if 0` in the source and is not
-> compiled. It is in the manifest because the extractor parses the text
-> regardless. Wave 2 need not port it; if it does, the annotation should
-> ride on equivalently dead code so the port stays 1:1.
+> compiled. The historical extractor nevertheless parsed the text. It
+> has no target behavior and no Rust counterpart.
 
-> [spec:dash:def:mystring.single-quote-fn]
-> char * single_quote(const char *s)
+**Dash source shape (`mystring.single-quote-fn`):**
+
+    char * single_quote(const char *s)
 
 > [spec:dash:sem:mystring.single-quote-fn]
 > Quote `s` so the shell would read it back as the same literal string,

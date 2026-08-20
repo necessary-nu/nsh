@@ -32,15 +32,15 @@ therefore carry no `[spec:dash:…]` ids — each is a C signature followed
 by its semantics — and are kept because they still describe
 `src/output.c` and `src/output.h`, which still have all seven.
 
-> [spec:dash:def:output.closememout-fn]
-> int __closememout(void)
+**Dash source shape (`output.closememout-fn`):**
+
+    int __closememout(void)
 
 > [spec:dash:sem:output.closememout-fn]
 > Close the in-memory output stream: `fclose(memout.stream)`, set
 > `memout.stream` to NULL, and return the `fclose` result. Compiled only
 > under `USE_GLIBC_STDIO` *and* `notyet`, so it is dead code in every
-> shipped configuration; Wave 2 may carry the annotation on an equally
-> inactive site.
+> shipped configuration and has no target behavior.
 
 > void doformat(struct output *dest, const char *f, va_list ap)
 
@@ -59,15 +59,17 @@ by its semantics — and are kept because they still describe
 > fills the buffer is treated as not fitting. Under `USE_GLIBC_STDIO`
 > this function does not exist and `doformat` is a macro for `vfprintf`.
 
-> [spec:dash:def:output.flushall-fn]
-> void flushall(void)
+**Dash source shape (`output.flushall-fn`):**
+
+    void flushall(void)
 
 > [spec:dash:sem:output.flushall-fn]
 > Flush `output`, and also `errout` when `FLUSHERR` is configured.
 > Called before the shell unwinds or exits so buffered text is not lost.
 
-> [spec:dash:def:output.flushout-fn]
-> void flushout(struct output *dest)
+**Dash source shape (`output.flushout-fn`):**
+
+    void flushout(struct output *dest)
 
 > [spec:dash:sem:output.flushout-fn]
 > Write out whatever is buffered. Compute `len = dest->nextc - dest->buf`
@@ -88,8 +90,9 @@ by its semantics — and are kept because they still describe
 > truncation. A negative return from `vsnprintf` is passed through
 > unclamped.
 
-> [spec:dash:def:output.freestdout-fn]
-> static inline void freestdout()
+**Dash source shape (`output.freestdout-fn`):**
+
+    static inline void freestdout()
 
 > [spec:dash:sem:output.freestdout-fn]
 > Discard anything buffered on `output` without writing it: reset
@@ -98,8 +101,9 @@ by its semantics — and are kept because they still describe
 > output the parent had buffered, and to reset the error state between
 > commands.
 
-> [spec:dash:def:output.initstreams-fn]
-> void initstreams()
+**Dash source shape (`output.initstreams-fn`):**
+
+    void initstreams()
 
 > [spec:dash:sem:output.initstreams-fn]
 > Bind the two standard outputs to stdio streams: `output.stream = stdout`
@@ -107,8 +111,9 @@ by its semantics — and are kept because they still describe
 > `notyet`; the `INIT` block in this file calls it when that
 > configuration is active.
 
-> [spec:dash:def:output.openmemout-fn]
-> void openmemout(void)
+**Dash source shape (`output.openmemout-fn`):**
+
+    void openmemout(void)
 
 > [spec:dash:sem:output.openmemout-fn]
 > Open the in-memory sink with
@@ -121,8 +126,9 @@ by its semantics — and are kept because they still describe
 > Collect the variadic arguments and `doformat(out1, fmt, ap)` — formatted
 > output to standard output.
 
-> [spec:dash:def:output.outc-fn]
-> static inline void outc(int ch, struct output *file)
+**Dash source shape (`output.outc-fn`):**
+
+    static inline void outc(int ch, struct output *file)
 
 > [spec:dash:sem:output.outc-fn]
 > Write one character. The fast path stores `ch` at `file->nextc` and
@@ -130,8 +136,9 @@ by its semantics — and are kept because they still describe
 > delegate to `outcslow`. Under `USE_GLIBC_STDIO` this is `putc` on the
 > stream instead.
 
-> [spec:dash:def:output.outcslow-fn]
-> void outcslow(int c, struct output *dest)
+**Dash source shape (`output.outcslow-fn`):**
+
+    void outcslow(int c, struct output *dest)
 
 > [spec:dash:sem:output.outcslow-fn]
 > Out-of-line one-character write: place `c` in a one-byte local and call
@@ -143,8 +150,9 @@ by its semantics — and are kept because they still describe
 > Collect the variadic arguments and `doformat(file, fmt, ap)` —
 > formatted output to an arbitrary `struct output`.
 
-> [spec:dash:def:output.outmem-fn]
-> void outmem(const char *p, size_t len, struct output *dest)
+**Dash source shape (`output.outmem-fn`):**
+
+    void outmem(const char *p, size_t len, struct output *dest)
 
 > [spec:dash:sem:output.outmem-fn]
 > Append `len` bytes to `dest`, buffering, growing or flushing as needed.
@@ -165,18 +173,20 @@ by its semantics — and are kept because they still describe
 > setting `OUTPUT_ERR` in `dest->flags` on failure. Under
 > `USE_GLIBC_STDIO` the whole body is `fwrite` between `INTOFF`/`INTON`.
 
-> [spec:dash:def:output.output]
-> struct output {
->   char *nextc;
->   char *end;
->   char *buf;
->   size_t bufsize;
->   int fd;
->   int flags;
-> }
+**Dash source shape (`output.output`):**
 
-> [spec:dash:def:output.outstr-fn]
-> void outstr(const char *p, struct output *file)
+    struct output {
+      char *nextc;
+      char *end;
+      char *buf;
+      size_t bufsize;
+      int fd;
+      int flags;
+    }
+
+**Dash source shape (`output.outstr-fn`):**
+
+    void outstr(const char *p, struct output *file)
 
 > [spec:dash:sem:output.outstr-fn]
 > `outmem(p, strlen(p), file)` — write a NUL-terminated string without
@@ -219,8 +229,9 @@ by its semantics — and are kept because they still describe
 > `vsnprintf`'s value: the number of characters the full result would
 > need, excluding the NUL.
 
-> [spec:dash:def:output.xwrite-fn]
-> int xwrite(int fd, const void *p, size_t n)
+**Dash source shape (`output.xwrite-fn`):**
+
+    int xwrite(int fd, const void *p, size_t n)
 
 > [spec:dash:sem:output.xwrite-fn]
 > Write all `n` bytes to `fd`, restarting on interruption and handling

@@ -15,7 +15,6 @@ use crate::output::OutputDestination;
 
 // [spec:nsh:def:idiom.job-control-model]
 
-// [spec:dash:def:jobs.jobscmd-fn]
 // [spec:dash:sem:jobs.jobscmd-fn]
 // [spec:posix:syn:builtin.jobs.synopsis]
 // [spec:posix:req:builtin.jobs.display-background-jobs]

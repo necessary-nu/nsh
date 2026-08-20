@@ -18,8 +18,9 @@ Note that `test_access` and `test_file_access` are also declared in
 (`exec.test-access-fn`, `exec.test-file-access-fn`), and the entries here
 are the same functions.
 
-> [spec:dash:def:test.aexpr-fn]
-> static int aexpr(enum token n)
+**Dash source shape (`test.aexpr-fn`):**
+
+    static int aexpr(enum token n)
 
 > [spec:dash:sem:test.aexpr-fn]
 > Parse and evaluate a `-a` (and) chain. Start with `res = 1` and loop:
@@ -28,8 +29,9 @@ are the same functions.
 > arguments, or when the next token is not `BAND`. Otherwise advance two
 > words (past the `-a` and onto the next operand) and continue.
 
-> [spec:dash:def:test.binop-fn]
-> static int binop(void)
+**Dash source shape (`test.binop-fn`):**
+
+    static int binop(void)
 
 > [spec:dash:sem:test.binop-fn]
 > Evaluate a binary operator. The first operand is the current word; lex
@@ -43,16 +45,18 @@ are the same functions.
 > `newerf`, `olderf` and `equalf`. An unrecognised operator `abort()`s
 > under `DEBUG`.
 
-> [spec:dash:def:test.equalf-fn]
-> static int equalf (const char *f1, const char *f2)
+**Dash source shape (`test.equalf-fn`):**
+
+    static int equalf (const char *f1, const char *f2)
 
 > [spec:dash:sem:test.equalf-fn]
 > `f1 -ef f2`: true when both files can be `stat64`'d and their `st_dev`
 > and `st_ino` both match — i.e. they are the same file, whether reached
 > by a link or a different path.
 
-> [spec:dash:def:test.faccessat-confused-about-superuser-fn]
-> static inline int faccessat_confused_about_superuser(void)
+**Dash source shape (`test.faccessat-confused-about-superuser-fn`):**
+
+    static inline int faccessat_confused_about_superuser(void)
 
 > [spec:dash:sem:test.faccessat-confused-about-superuser-fn]
 > Return whether this platform's `faccessat` wrongly grants execute
@@ -61,8 +65,9 @@ are the same functions.
 > `faccessat` exists. `test_file_access` uses it to decide whether to
 > apply the correction by hand.
 
-> [spec:dash:def:test.filstat-fn]
-> static int filstat(char *nm, enum token mode)
+**Dash source shape (`test.filstat-fn`):**
+
+    static int filstat(char *nm, enum token mode)
 
 > [spec:dash:sem:test.filstat-fn]
 > Evaluate a file test. `stat64` the name — or `lstat64` for `FILSYM`
@@ -78,31 +83,35 @@ are the same functions.
 > true for a non-zero size; `FILUID` (`-O`) and `FILGID` (`-G`) compare
 > the owner against the effective uid and gid. Any other mode returns 1.
 
-> [spec:dash:def:test.getn-fn]
-> static inline intmax_t getn(const char *s)
+**Dash source shape (`test.getn-fn`):**
+
+    static inline intmax_t getn(const char *s)
 
 > [spec:dash:sem:test.getn-fn]
 > `atomax10(s)` — parse a base-10 integer, raising a shell error on
 > anything malformed.
 
-> [spec:dash:def:test.getop-fn]
-> static const struct t_op *getop(const char *s)
+**Dash source shape (`test.getop-fn`):**
+
+    static const struct t_op *getop(const char *s)
 
 > [spec:dash:sem:test.getop-fn]
 > Linear-search `ops[]` for an entry whose `op_text` equals `s`, returning
 > it or NULL. Exact match only — this is why `test -x` sees `-x` as an
 > operator but `test -xy` does not.
 
-> [spec:dash:def:test.has-exec-bit-set-fn]
-> static int has_exec_bit_set(const char *path)
+**Dash source shape (`test.has-exec-bit-set-fn`):**
+
+    static int has_exec_bit_set(const char *path)
 
 > [spec:dash:sem:test.has-exec-bit-set-fn]
 > Return whether any of `S_IXUSR`, `S_IXGRP`, `S_IXOTH` is set on `path`,
 > and 0 if it cannot be stat'd. Used to correct `faccessat`'s
 > over-permissive answer for the superuser.
 
-> [spec:dash:def:test.isoperand-fn]
-> static int isoperand(char **tp)
+**Dash source shape (`test.isoperand-fn`):**
+
+    static int isoperand(char **tp)
 
 > [spec:dash:sem:test.isoperand-fn]
 > Decide whether the word at `tp` — which *looks* like a unary operator —
@@ -114,8 +123,9 @@ are the same functions.
 > operator. This is what implements POSIX's argument-count-driven
 > disambiguation.
 
-> [spec:dash:def:test.newerf-fn]
-> static bool newerf(const char *f1, const char *f2)
+**Dash source shape (`test.newerf-fn`):**
+
+    static bool newerf(const char *f1, const char *f2)
 
 > [spec:dash:sem:test.newerf-fn]
 > `f1 -nt f2`: false if `f1` cannot be stat'd; true if `f2` cannot be —
@@ -123,8 +133,9 @@ are the same functions.
 > modification times, using nanosecond precision (`st_mtim`) where
 > available and whole seconds otherwise.
 
-> [spec:dash:def:test.nexpr-fn]
-> static int nexpr(enum token n)
+**Dash source shape (`test.nexpr-fn`):**
+
+    static int nexpr(enum token n)
 
 > [spec:dash:sem:test.nexpr-fn]
 > Handle `!`. A token other than `UNOT` goes straight to `primary`.
@@ -134,24 +145,27 @@ are the same functions.
 > lets a trailing `!` be treated as an operand rather than running off
 > the end.
 
-> [spec:dash:def:test.oexpr-fn]
-> static int oexpr(enum token n)
+**Dash source shape (`test.oexpr-fn`):**
+
+    static int oexpr(enum token n)
 
 > [spec:dash:sem:test.oexpr-fn]
 > Parse and evaluate a `-o` (or) chain, mirroring `aexpr`: start with
 > `res = 0`, OR in each `aexpr`, and continue only while the next token
 > is `BOR`. Also does not short-circuit.
 
-> [spec:dash:def:test.olderf-fn]
-> static bool olderf(const char *f1, const char *f2)
+**Dash source shape (`test.olderf-fn`):**
+
+    static bool olderf(const char *f1, const char *f2)
 
 > [spec:dash:sem:test.olderf-fn]
 > `f1 -ot f2`: the mirror of `newerf` — false if `f2` cannot be stat'd,
 > true if `f1` cannot be, otherwise compares modification times with
 > nanosecond precision where available.
 
-> [spec:dash:def:test.primary-fn]
-> static int primary(enum token n)
+**Dash source shape (`test.primary-fn`):**
+
+    static int primary(enum token n)
 
 > [spec:dash:sem:test.primary-fn]
 > Evaluate a primary. `EOI` — a missing expression — is false.
@@ -171,15 +185,17 @@ are the same functions.
 > the comparison with `binop`. Failing all of that, the primary is a bare
 > string, true when non-empty.
 
-> [spec:dash:def:test.syntax-fn]
-> static void syntax(const char *op, const char *msg)
+**Dash source shape (`test.syntax-fn`):**
+
+    static void syntax(const char *op, const char *msg)
 
 > [spec:dash:sem:test.syntax-fn]
 > Raise a syntax error, prefixed with the operator when one is given and
 > non-empty: `"<op>: <msg>"` or just `"<msg>"`. Does not return.
 
-> [spec:dash:def:test.t-lex-fn]
-> static enum token t_lex(char **tp)
+**Dash source shape (`test.t-lex-fn`):**
+
+    static enum token t_lex(char **tp)
 
 > [spec:dash:sem:test.t-lex-fn]
 > Classify the word at `tp`, setting `t_wp_op` to its operator entry or
@@ -190,14 +206,16 @@ are the same functions.
 > `(` with nothing after it — the latter making a lone `(` a string
 > rather than an unterminated group. Anything else is `OPERAND`.
 
-> [spec:dash:def:test.t-op]
-> struct t_op {
->   const char *op_text;
->   short op_num, op_type;
-> }
+**Dash source shape (`test.t-op`):**
 
-> [spec:dash:def:test.test-access-fn]
-> int test_access(const struct stat64 *sp, int stmode)
+    struct t_op {
+      const char *op_text;
+      short op_num, op_type;
+    }
+
+**Dash source shape (`test.test-access-fn`):**
+
+    int test_access(const struct stat64 *sp, int stmode)
 
 > [spec:dash:sem:test.test-access-fn]
 > Permission test performed directly on the `struct stat64` bits rather
@@ -205,16 +223,18 @@ are the same functions.
 > `exec.h` declares it and command lookup uses it; this is the same
 > function.
 
-> [spec:dash:def:test.test-file-access-fn]
-> int test_file_access(const char *path, int mode)
+**Dash source shape (`test.test-file-access-fn`):**
+
+    int test_file_access(const char *path, int mode)
 
 > [spec:dash:sem:test.test-file-access-fn]
 > Permission test via `faccessat` with the superuser correction.
 > Specified in full at `exec.test-file-access-fn`; this is the same
 > function.
 
-> [spec:dash:def:test.testcmd-fn]
-> int testcmd(int argc, char **argv)
+**Dash source shape (`test.testcmd-fn`):**
+
+    int testcmd(int argc, char **argv)
 
 > [spec:dash:sem:test.testcmd-fn]
 > The `test` / `[` builtin. Note the return convention is inverted from
@@ -239,55 +259,57 @@ are the same functions.
 > over beyond a single trailing word is
 > `syntax(argv[0], "unexpected operator")`.
 
-> [spec:dash:def:test.token]
-> enum token {
->   EOI;
->   FILRD;
->   FILWR;
->   FILEX;
->   FILEXIST;
->   FILREG;
->   FILDIR;
->   FILCDEV;
->   FILBDEV;
->   FILFIFO;
->   FILSOCK;
->   FILSYM;
->   FILGZ;
->   FILTT;
->   FILSUID;
->   FILSGID;
->   FILSTCK;
->   FILNT;
->   FILOT;
->   FILEQ;
->   FILUID;
->   FILGID;
->   STREZ;
->   STRNZ;
->   STREQ;
->   STRNE;
->   STRLT;
->   STRGT;
->   INTEQ;
->   INTNE;
->   INTGE;
->   INTGT;
->   INTLE;
->   INTLT;
->   UNOT;
->   BAND;
->   BOR;
->   LPAREN;
->   RPAREN;
->   OPERAND;
-> }
+**Dash source shape (`test.token`):**
 
-> [spec:dash:def:test.token-types]
-> enum token_types {
->   UNOP;
->   BINOP;
->   BUNOP;
->   BBINOP;
->   PAREN;
-> }
+    enum token {
+      EOI;
+      FILRD;
+      FILWR;
+      FILEX;
+      FILEXIST;
+      FILREG;
+      FILDIR;
+      FILCDEV;
+      FILBDEV;
+      FILFIFO;
+      FILSOCK;
+      FILSYM;
+      FILGZ;
+      FILTT;
+      FILSUID;
+      FILSGID;
+      FILSTCK;
+      FILNT;
+      FILOT;
+      FILEQ;
+      FILUID;
+      FILGID;
+      STREZ;
+      STRNZ;
+      STREQ;
+      STRNE;
+      STRLT;
+      STRGT;
+      INTEQ;
+      INTNE;
+      INTGE;
+      INTGT;
+      INTLE;
+      INTLT;
+      UNOT;
+      BAND;
+      BOR;
+      LPAREN;
+      RPAREN;
+      OPERAND;
+    }
+
+**Dash source shape (`test.token-types`):**
+
+    enum token_types {
+      UNOP;
+      BINOP;
+      BUNOP;
+      BBINOP;
+      PAREN;
+    }

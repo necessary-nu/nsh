@@ -105,7 +105,6 @@ pub(super) struct Invocation {
 }
 
 impl Invocation {
-    // [spec:dash:def:options.procargs-fn]
     // [spec:dash:sem:options.procargs-fn]
     // [spec:posix:req:sh.option-o-without-option-argument]
     // [spec:posix:req:sh.option-c]

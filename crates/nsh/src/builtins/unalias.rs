@@ -13,7 +13,6 @@ use crate::evaluation::Flow;
 use crate::options::Options;
 use crate::output::OutputDestination;
 
-// [spec:dash:def:alias.unaliascmd-fn]
 // [spec:dash:sem:alias.unaliascmd-fn]
 // [spec:posix:syn:builtin.unalias.synopsis]
 // [spec:posix:req:builtin.unalias.remove-definitions]

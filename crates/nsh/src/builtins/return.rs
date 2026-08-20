@@ -10,7 +10,6 @@ use crate::error::Error;
 use crate::evaluation::Flow;
 use bstr::BStr;
 
-// [spec:dash:def:eval.returncmd-fn]
 // [spec:dash:sem:eval.returncmd-fn]
 // [spec:posix:syn:builtin.return.synopsis]
 // [spec:posix:req:builtin.return.stop-function-or-dot-script]

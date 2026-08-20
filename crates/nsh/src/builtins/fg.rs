@@ -22,12 +22,10 @@ use bstr::BStr;
 
 // [spec:nsh:def:idiom.job-control-model]
 
-// [spec:dash:def:jobs.fgcmd-fn]
 // [spec:dash:sem:jobs.fgcmd-fn]
 // `bgcmd` is this function: the C declares it
 // `__attribute__((alias("fgcmd")))`, so one definition answers for both
 // names and carries both claims.
-// [spec:dash:def:jobs.bgcmd-fn]
 // [spec:dash:sem:jobs.bgcmd-fn]
 // [spec:posix:syn:builtin.bg.synopsis]
 // [spec:posix:req:builtin.bg.operand-job-id]
@@ -79,7 +77,6 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     Ok(Flow::Done((status).into()))
 }
 
-// [spec:dash:def:jobs.restartjob-fn]
 // [spec:dash:sem:jobs.restartjob-fn]
 // [spec:posix:req:builtin.bg.resume-suspended-jobs]
 // [spec:posix:req:builtin.bg.already-running-no-effect]

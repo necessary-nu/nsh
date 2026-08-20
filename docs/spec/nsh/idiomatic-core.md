@@ -261,12 +261,20 @@ undefined behavior.
 > behavior. Numeric operands whose valid range is specified by the
 > implementation MUST be range-checked rather than wrapped.
 
-> [spec:nsh:req:idiom.port-provenance]
+> [spec:nsh:req:idiom.port-provenance+1]
 > Source-port provenance MUST remain discoverable without constraining the Rust
-> implementation to C symbol topology. Structural `dash:def` claims and tests
-> that parse generated C source MUST be retired when the corresponding target
-> artifact no longer exists; behavioral rules and differential cases MUST be
-> retained or replaced before their structural anchors are removed.
+> implementation to C symbol topology. Historical C signatures MAY remain as
+> non-normative prose, but the live Dash-derived specification MUST contain only
+> behavioral `dash:sem` rules, and Rust MUST NOT claim `dash:def` correspondence.
+> The repository MUST NOT index a missing C implementation, retain a source-port
+> manifest, or keep sidecar claims for removed paths. Behavioral rules and
+> differential cases MUST be retained or replaced before their structural
+> anchors are removed.
+>
+> The exact Dash oracle MUST be pinned by release, commit, archive digest, and
+> local patch digests. Its source MUST be downloaded and verified rather than
+> copied from a repository source tree; downloaded code MUST be built and run
+> only inside the repository containment boundary.
 
 > [spec:nsh:req:idiom.no-ignored-results]
 > Every fallible operation MUST be propagated, handled according to an explicit

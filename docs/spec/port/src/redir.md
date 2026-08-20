@@ -20,18 +20,19 @@ redirection, distinguishing "never open" from "closed by an enclosing
 documents at or below that size can be stuffed into a pipe without a
 writer process.
 
-> [spec:dash:def:redir.redirtab]
-> MKINIT struct redirtab {
->   struct redirtab *next;
->   int renamed[10];
-> }
->
-> Note: this type is absent from `plan/.port-manifest.styx` — the `MKINIT`
-> marker on the line before the declaration defeated the extractor. The
-> rule and its sidecar annotation are hand-added.
+**Dash source shape (`redir.redirtab`):**
 
-> [spec:dash:def:redir.dupredirect-fn]
-> static void dupredirect(union node *redir, int f) #endif
+    MKINIT struct redirtab {
+      struct redirtab *next;
+      int renamed[10];
+    }
+
+    The historical extractor missed this type because the `MKINIT` marker on
+    the preceding line defeated it. The shape remains provenance prose only.
+
+**Dash source shape (`redir.dupredirect-fn`):**
+
+    static void dupredirect(union node *redir, int f) #endif
 
 > [spec:dash:sem:redir.dupredirect-fn]
 > Put the opened result `f` in place at the descriptor the redirection
@@ -49,8 +50,9 @@ writer process.
 > Under `notyet` it takes an extra `char memory[10]` used to redirect
 > into the in-memory output sink.
 
-> [spec:dash:def:redir.openhere-fn]
-> STATIC int openhere(union node *redir)
+**Dash source shape (`redir.openhere-fn`):**
+
+    STATIC int openhere(union node *redir)
 
 > [spec:dash:sem:redir.openhere-fn]
 > Make a here document readable, returning a descriptor positioned at its
@@ -71,8 +73,9 @@ writer process.
 > default so it dies quietly if the reader goes away, writes the text and
 > `_exit(0)`. The parent closes the write end and returns the read end.
 
-> [spec:dash:def:redir.openredirect-fn]
-> STATIC int openredirect(union node *redir)
+**Dash source shape (`redir.openredirect-fn`):**
+
+    STATIC int openredirect(union node *redir)
 
 > [spec:dash:sem:redir.openredirect-fn]
 > Produce the descriptor a single redirection should install, without
@@ -99,8 +102,9 @@ writer process.
 >
 > Failures raise through `sh_open`/`sh_open_fail` and do not return.
 
-> [spec:dash:def:redir.popredir-fn]
-> void popredir(int drop)
+**Dash source shape (`redir.popredir-fn`):**
+
+    void popredir(int drop)
 
 > [spec:dash:sem:redir.popredir-fn]
 > Undo one level of redirections and pop it. With `drop` non-zero the
@@ -116,8 +120,9 @@ writer process.
 > invalidates any read-ahead — and in all cases close the saved copy.
 > Then unlink and free the entry.
 
-> [spec:dash:def:redir.pushredir-fn]
-> struct redirtab *pushredir(union node *redir)
+**Dash source shape (`redir.pushredir-fn`):**
+
+    struct redirtab *pushredir(union node *redir)
 
 > [spec:dash:sem:redir.pushredir-fn]
 > Begin a redirection scope and return the previous top of `redirlist`,
@@ -126,8 +131,9 @@ writer process.
 > pushing — an empty scope costs no allocation. Otherwise allocate a
 > `struct redirtab`, link it in, and initialise all ten slots to `EMPTY`.
 
-> [spec:dash:def:redir.redirect-fn]
-> void redirect(union node *redir, int flags)
+**Dash source shape (`redir.redirect-fn`):**
+
+    void redirect(union node *redir, int flags)
 
 > [spec:dash:sem:redir.redirect-fn]
 > Apply a list of redirections. `flags` may carry `REDIR_PUSH` (save the
@@ -162,8 +168,9 @@ writer process.
 > whenever `REDIR_PUSH` was not set. Reproduce the overlap; do not "fix"
 > it to a distinct bit.
 
-> [spec:dash:def:redir.redirectsafe-fn]
-> int redirectsafe(union node *redir, int flags)
+**Dash source shape (`redir.redirectsafe-fn`):**
+
+    int redirectsafe(union node *redir, int flags)
 
 > [spec:dash:sem:redir.redirectsafe-fn]
 > `redirect` with errors caught instead of propagated. Save the interrupt
@@ -175,8 +182,9 @@ writer process.
 > the exception was not one that may be caught here, and restore the
 > interrupt count.
 
-> [spec:dash:def:redir.savefd-fn]
-> int savefd(int from, int ofd)
+**Dash source shape (`redir.savefd-fn`):**
+
+    int savefd(int from, int ofd)
 
 > [spec:dash:sem:redir.savefd-fn]
 > Duplicate `from` to some descriptor ≥ 10 and close `ofd`, returning the
@@ -191,8 +199,9 @@ writer process.
 > descriptors above 9 is what makes the ten-slot `renamed` array
 > sufficient.
 
-> [spec:dash:def:redir.sh-dup2-fn]
-> static int sh_dup2(int ofd, int nfd, int cfd)
+**Dash source shape (`redir.sh-dup2-fn`):**
+
+    static int sh_dup2(int ofd, int nfd, int cfd)
 
 > [spec:dash:sem:redir.sh-dup2-fn]
 > Duplicate `ofd` onto `nfd`, or to the lowest free descriptor when `nfd`
@@ -202,8 +211,9 @@ writer process.
 > duplication it just made. A failure raises
 > `sh_error("%d: %s", ofd, strerror(errno))`. Returns the new descriptor.
 
-> [spec:dash:def:redir.sh-open-fail-fn]
-> static int sh_open_fail(const char *pathname, int flags, int e)
+**Dash source shape (`redir.sh-open-fail-fn`):**
+
+    static int sh_open_fail(const char *pathname, int flags, int e)
 
 > [spec:dash:sem:redir.sh-open-fail-fn]
 > Raise the diagnostic for a failed open and do not return. The verb and
@@ -212,8 +222,9 @@ writer process.
 > `"cannot open <path>: No such file"` versus
 > `"cannot create <path>: Directory nonexistent"`.
 
-> [spec:dash:def:redir.sh-open-fn]
-> int sh_open(const char *pathname, int flags, int mayfail)
+**Dash source shape (`redir.sh-open-fn`):**
+
+    int sh_open(const char *pathname, int flags, int mayfail)
 
 > [spec:dash:sem:redir.sh-open-fn]
 > `open64(pathname, flags, 0666)`, retrying while it fails with `EINTR`
@@ -223,8 +234,9 @@ writer process.
 > negative result when `mayfail` is set, otherwise raise via
 > `sh_open_fail`.
 
-> [spec:dash:def:redir.sh-pipe-fn]
-> int sh_pipe(int pip[2], int memfd)
+**Dash source shape (`redir.sh-pipe-fn`):**
+
+    int sh_pipe(int pip[2], int memfd)
 
 > [spec:dash:sem:redir.sh-pipe-fn]
 > Fill `pip` with a read and a write descriptor and report whether it is
@@ -235,16 +247,18 @@ writer process.
 > rather than forking a writer. Otherwise `pipe(pip)`, raising
 > `sh_error("Pipe call failed")` on failure.
 
-> [spec:dash:def:redir.unwindredir-fn]
-> void unwindredir(struct redirtab *stop)
+**Dash source shape (`redir.unwindredir-fn`):**
+
+    void unwindredir(struct redirtab *stop)
 
 > [spec:dash:sem:redir.unwindredir-fn]
 > `popredir(0)` — restoring, not dropping — until `redirlist` reaches
 > `stop`. Passing the value from `pushredir` unwinds exactly that scope;
 > passing 0 unwinds everything, which is what the `EXITRESET` event does.
 
-> [spec:dash:def:redir.update-closed-redirs-fn]
-> static unsigned update_closed_redirs(int fd, int nfd)
+**Dash source shape (`redir.update-closed-redirs-fn`):**
+
+    static unsigned update_closed_redirs(int fd, int nfd)
 
 > [spec:dash:sem:redir.update-closed-redirs-fn]
 > Record whether `fd` is now closed by a redirection and report whether

@@ -5361,4 +5361,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.specified-defects}
     )}
+    {id retire-port-topology-contracts, covered_rules (
+        idiom.port-provenance
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.port-provenance}
+    )}
 )

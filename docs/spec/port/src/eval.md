@@ -26,16 +26,18 @@ numbers relative to the function.
 `bltin` is a synthetic `struct builtincmd` for "no command name at all"
 (a bare assignment or redirection), whose handler is `bltincmd`.
 
-> [spec:dash:def:eval.backcmd]
-> struct backcmd {
->   int fd;
->   char *buf;
->   int nleft;
->   struct job *jp;
-> }
+**Dash source shape (`eval.backcmd`):**
 
-> [spec:dash:def:eval.bltincmd-fn]
-> STATIC int bltincmd(int argc, char **argv)
+    struct backcmd {
+      int fd;
+      char *buf;
+      int nleft;
+      struct job *jp;
+    }
+
+**Dash source shape (`eval.bltincmd-fn`):**
+
+    STATIC int bltincmd(int argc, char **argv)
 
 > [spec:dash:sem:eval.bltincmd-fn]
 > Handler for a command consisting only of assignments and/or
@@ -43,8 +45,9 @@ numbers relative to the function.
 > command substitution performed while expanding it — which is what POSIX
 > requires: `x=$(false)` must leave `$?` as 1.
 
-> [spec:dash:def:eval.breakcmd-fn]
-> int breakcmd(int argc, char **argv)
+**Dash source shape (`eval.breakcmd-fn`):**
+
+    int breakcmd(int argc, char **argv)
 
 > [spec:dash:sem:eval.breakcmd-fn]
 > Implements both `break` and `continue`; which one is decided by
@@ -56,8 +59,9 @@ numbers relative to the function.
 > `SKIPBREAK` and `skipcount` to the count. Outside any loop
 > (`loopnest == 0`) nothing happens at all. Always returns 0.
 
-> [spec:dash:def:eval.eprintlist-fn]
-> STATIC int eprintlist(struct output *out, struct strlist *sp, int sep)
+**Dash source shape (`eval.eprintlist-fn`):**
+
+    STATIC int eprintlist(struct output *out, struct strlist *sp, int sep)
 
 > [spec:dash:sem:eval.eprintlist-fn]
 > Print a `strlist` space-separated for `set -x` tracing, returning the
@@ -67,8 +71,9 @@ numbers relative to the function.
 > consecutive calls (assignments then arguments) share one separator
 > state.
 
-> [spec:dash:def:eval.evalbackcmd-fn]
-> void evalbackcmd(union node *n, struct backcmd *result)
+**Dash source shape (`eval.evalbackcmd-fn`):**
+
+    void evalbackcmd(union node *n, struct backcmd *result)
 
 > [spec:dash:sem:eval.evalbackcmd-fn]
 > Start a command substitution, returning a descriptor to read its output
@@ -89,8 +94,9 @@ numbers relative to the function.
 > The parent closes the write end and records the read end and the job in
 > `result`. The caller reads the output and then `waitforjob`s.
 
-> [spec:dash:def:eval.evalbltin-fn]
-> STATIC int evalbltin(const struct builtincmd *cmd, int argc, char **argv, int flags)
+**Dash source shape (`eval.evalbltin-fn`):**
+
+    STATIC int evalbltin(const struct builtincmd *cmd, int argc, char **argv, int flags)
 
 > [spec:dash:sem:eval.evalbltin-fn]
 > Run a builtin with its own exception handler, returning 0 normally or
@@ -112,8 +118,9 @@ numbers relative to the function.
 > discard any buffered or errored output state, and restores
 > `commandname` and `handler`.
 
-> [spec:dash:def:eval.evalcase-fn]
-> STATIC int evalcase(union node *n, int flags)
+**Dash source shape (`eval.evalcase-fn`):**
+
+    STATIC int evalcase(union node *n, int flags)
 
 > [spec:dash:sem:eval.evalcase-fn]
 > Evaluate a `case`. Set `errlinno`/`lineno` from the node, adjusting by
@@ -129,8 +136,9 @@ numbers relative to the function.
 > would leave the exit status unset. Return the body's status, or 0 if no
 > clause matched.
 
-> [spec:dash:def:eval.evalcmd-fn]
-> static int evalcmd(int argc, char **argv, int flags)
+**Dash source shape (`eval.evalcmd-fn`):**
+
+    static int evalcmd(int argc, char **argv, int flags)
 
 > [spec:dash:sem:eval.evalcmd-fn]
 > The `eval` builtin. With no operands return 0. With one, evaluate it
@@ -139,8 +147,9 @@ numbers relative to the function.
 > result. Pass only `flags & EV_TESTED` through to `evalstring` — never
 > `EV_EXIT`, since `eval` must return to its caller.
 
-> [spec:dash:def:eval.evalcommand-fn]
-> STATIC int evalcommand(union node *, int, struct backcmd *)
+**Dash source shape (`eval.evalcommand-fn`):**
+
+    STATIC int evalcommand(union node *, int, struct backcmd *)
 
 > [spec:dash:sem:eval.evalcommand-fn]
 > Evaluate a simple command: expand its words, apply assignments and
@@ -217,8 +226,9 @@ numbers relative to the function.
 > redirection, input and local-variable scopes to where they were on
 > entry, and finally set `_` to `lastarg` if one was recorded.
 
-> [spec:dash:def:eval.evalfor-fn]
-> STATIC int evalfor(union node *n, int flags)
+**Dash source shape (`eval.evalfor-fn`):**
+
+    STATIC int evalfor(union node *n, int flags)
 
 > [spec:dash:sem:eval.evalfor-fn]
 > Evaluate a `for` loop. Set the line number as in `evalcase`. Expand
@@ -231,8 +241,9 @@ numbers relative to the function.
 > ends the loop. Decrement `loopnest` and return the last body status —
 > 0 if the list was empty.
 
-> [spec:dash:def:eval.evalfun-fn]
-> STATIC int evalfun(struct funcnode *func, int argc, char **argv, int flags)
+**Dash source shape (`eval.evalfun-fn`):**
+
+    STATIC int evalfun(struct funcnode *func, int argc, char **argv, int flags)
 
 > [spec:dash:sem:eval.evalfun-fn]
 > Call a shell function. Returns 0 normally, or the non-zero `setjmp`
@@ -257,8 +268,9 @@ numbers relative to the function.
 > Finally clear `SKIPFUNC` and `SKIPFUNCDEF` from `evalskip` — a `return`
 > stops here and does not propagate further.
 
-> [spec:dash:def:eval.evalloop-fn]
-> STATIC int evalloop(union node *n, int flags)
+**Dash source shape (`eval.evalloop-fn`):**
+
+    STATIC int evalloop(union node *n, int flags)
 
 > [spec:dash:sem:eval.evalloop-fn]
 > Evaluate `while` or `until`. Increment `loopnest`, mask `flags` to
@@ -272,8 +284,9 @@ numbers relative to the function.
 > the skip state is zero or exactly `SKIPCONT`. Decrement `loopnest` and
 > return the last body status — 0 if the body never ran.
 
-> [spec:dash:def:eval.evalpipe-fn]
-> STATIC int evalpipe(union node *n, int flags)
+**Dash source shape (`eval.evalpipe-fn`):**
+
+    STATIC int evalpipe(union node *n, int flags)
 
 > [spec:dash:sem:eval.evalpipe-fn]
 > Evaluate a pipeline. Every process is a child of the shell that created
@@ -300,8 +313,9 @@ numbers relative to the function.
 > for a plain pipeline is the last element's, and with `pipefail` the
 > rightmost non-zero. Restore interrupts.
 
-> [spec:dash:def:eval.evalstring-fn]
-> int evalstring(char *s, int flags)
+**Dash source shape (`eval.evalstring-fn`):**
+
+    int evalstring(char *s, int flags)
 
 > [spec:dash:sem:eval.evalstring-fn]
 > Parse and execute the commands in a string. Copy it onto the stack with
@@ -319,8 +333,9 @@ numbers relative to the function.
 > Then pop the mark, `popfile()` to restore the previous input, and
 > `stunalloc(s)` to release the copy. Return the last status.
 
-> [spec:dash:def:eval.evalsubshell-fn]
-> STATIC int evalsubshell(union node *n, int flags)
+**Dash source shape (`eval.evalsubshell-fn`):**
+
+    STATIC int evalsubshell(union node *n, int flags)
 
 > [spec:dash:sem:eval.evalsubshell-fn]
 > Evaluate a subshell (`NSUBSHELL`) or a backgrounded command
@@ -342,8 +357,9 @@ numbers relative to the function.
 > The parent returns 0 for a background command, and otherwise
 > `waitforjob(jp)`.
 
-> [spec:dash:def:eval.evaltree-fn]
-> int evaltree(union node *n, int flags)
+**Dash source shape (`eval.evaltree-fn`):**
+
+    int evaltree(union node *n, int flags)
 
 > [spec:dash:sem:eval.evaltree-fn]
 > Evaluate a parse tree; the status is both returned and left in
@@ -388,8 +404,9 @@ numbers relative to the function.
 > `EV_EXIT` raises `EXEND` too. Otherwise pop the stack mark and return
 > `exitstatus`.
 
-> [spec:dash:def:eval.evaltreenr-fn]
-> void evaltreenr(union node *n, int flags) #ifdef HAVE_ATTRIBUTE_ALIAS __attribute__ ((alias("evaltree"))); #else
+**Dash source shape (`eval.evaltreenr-fn`):**
+
+    void evaltreenr(union node *n, int flags) #ifdef HAVE_ATTRIBUTE_ALIAS __attribute__ ((alias("evaltree"))); #else
 
 > [spec:dash:sem:eval.evaltreenr-fn]
 > `evaltree` declared `noreturn`, for the child paths that always pass
@@ -401,8 +418,9 @@ numbers relative to the function.
 > includes the surrounding preprocessor text; the real one is
 > `void evaltreenr(union node *n, int flags)`.
 
-> [spec:dash:def:eval.execcmd-fn]
-> int execcmd(int argc, char **argv)
+**Dash source shape (`eval.execcmd-fn`):**
+
+    int execcmd(int argc, char **argv)
 
 > [spec:dash:sem:eval.execcmd-fn]
 > The `exec` builtin. With no operands do nothing and return 0 — the
@@ -413,8 +431,9 @@ numbers relative to the function.
 > read-ahead, and `shellexec(argv + 1, pathval(), 0)`, which does not
 > return.
 
-> [spec:dash:def:eval.expredir-fn]
-> STATIC void expredir(union node *n)
+**Dash source shape (`eval.expredir-fn`):**
+
+    STATIC void expredir(union node *n)
 
 > [spec:dash:sem:eval.expredir-fn]
 > Expand the target of each redirection in a list, before any of them is
@@ -426,14 +445,16 @@ numbers relative to the function.
 > with a variable target, expand it and hand the text to `fixredir`,
 > which re-interprets the node as a numeric duplication or a close.
 
-> [spec:dash:def:eval.falsecmd-fn]
-> int falsecmd(int argc, char **argv)
+**Dash source shape (`eval.falsecmd-fn`):**
+
+    int falsecmd(int argc, char **argv)
 
 > [spec:dash:sem:eval.falsecmd-fn]
 > Return 1.
 
-> [spec:dash:def:eval.fill-arglist-fn]
-> static struct strlist *fill_arglist(struct arglist *arglist, union node **argpp)
+**Dash source shape (`eval.fill-arglist-fn`):**
+
+    static struct strlist *fill_arglist(struct arglist *arglist, union node **argpp)
 
 > [spec:dash:sem:eval.fill-arglist-fn]
 > Expand words from `*argpp` into `arglist` until at least one new field
@@ -445,8 +466,9 @@ numbers relative to the function.
 > expand to zero fields (`$@` with no parameters), so "one word" is not
 > the same as "one field".
 
-> [spec:dash:def:eval.parse-command-args-fn]
-> static int parse_command_args(struct arglist *arglist, union node **argpp, const char **path)
+**Dash source shape (`eval.parse-command-args-fn`):**
+
+    static int parse_command_args(struct arglist *arglist, union node **argpp, const char **path)
 
 > [spec:dash:sem:eval.parse-command-args-fn]
 > Parse the options of the `command` builtin from the already-expanded
@@ -463,8 +485,9 @@ numbers relative to the function.
 > `arglist->list` past the options so the caller sees the command word
 > first.
 
-> [spec:dash:def:eval.prehash-fn]
-> STATIC void prehash(union node *n)
+**Dash source shape (`eval.prehash-fn`):**
+
+    STATIC void prehash(union node *n)
 
 > [spec:dash:sem:eval.prehash-fn]
 > Resolve a simple command's name before forking, so the hash-table entry
@@ -474,8 +497,9 @@ numbers relative to the function.
 > that expansion cannot change — a conservative test, since expanding it
 > here would have side effects.
 
-> [spec:dash:def:eval.returncmd-fn]
-> int returncmd(int argc, char **argv)
+**Dash source shape (`eval.returncmd-fn`):**
+
+    int returncmd(int argc, char **argv)
 
 > [spec:dash:sem:eval.returncmd-fn]
 > The `return` builtin. With an operand, set `evalskip = SKIPFUNC` and
@@ -485,10 +509,11 @@ numbers relative to the function.
 > while `SKIPFUNCDEF` also abandons the rest of the current file — which
 > is ksh's behaviour for `return` outside a function.
 
-> [spec:dash:def:eval.skiploop-fn]
-> static int skiploop(void)
+**Dash source shape (`eval.skiploop-fn`):**
 
-> [spec:dash:sem:eval.skiploop-fn]
+    static int skiploop(void)
+
+**Retired evaluator flag plumbing (`eval.skiploop-fn`):**
 > Consume one loop level's worth of a pending `break`/`continue` and
 > report what remains. With no skip pending, return 0. For `SKIPBREAK` or
 > `SKIPCONT`, decrement `skipcount`; when it reaches zero this is the
@@ -504,8 +529,9 @@ numbers relative to the function.
 > `continue` applies to an outer loop. Any other skip (`SKIPFUNC`,
 > `SKIPFUNCDEF`) is returned unchanged for the caller to propagate.
 
-> [spec:dash:def:eval.truecmd-fn]
-> int truecmd(int argc, char **argv)
+**Dash source shape (`eval.truecmd-fn`):**
+
+    int truecmd(int argc, char **argv)
 
 > [spec:dash:sem:eval.truecmd-fn]
 > Return 0.

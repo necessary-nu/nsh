@@ -33,7 +33,6 @@ enum CdResult {
     Failed,
 }
 
-// [spec:dash:def:cd.cdopt-fn]
 // [spec:dash:sem:cd.cdopt-fn]
 // [spec:posix:syn:builtin.cd.syn]
 // [spec:posix:req:builtin.cd.utility-syntax-guidelines]
@@ -59,7 +58,6 @@ pub(crate) fn parse_cd_options(
     Ok(options)
 }
 
-// [spec:dash:def:cd.cdcmd-fn]
 // [spec:dash:sem:cd.cdcmd-fn]
 // [spec:posix:req:builtin.cd.change-working-directory]
 // [spec:posix:def:builtin.cd.curpath]
@@ -182,7 +180,6 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     Ok(Flow::Done((status).into()))
 }
 
-// [spec:dash:def:cd.docd-fn]
 // [spec:dash:sem:cd.docd-fn]
 // [spec:posix:sem:builtin.cd.step7-prefix-pwd]
 // [spec:posix:req:builtin.cd.step10-chdir]
@@ -253,7 +250,6 @@ fn change_directory(shell: &mut Shell, dest: &BStr, options: CdOptions) -> Resul
     })
 }
 
-// [spec:dash:def:cd.updatepwd-fn]
 // [spec:dash:sem:cd.updatepwd-fn]
 // [spec:posix:req:builtin.cd.step8-canonical-form-dot]
 // [spec:posix:req:builtin.cd.step8-further-simplification]

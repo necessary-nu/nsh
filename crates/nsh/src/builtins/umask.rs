@@ -24,7 +24,6 @@ use crate::output::OutputDestination;
  * Public domain.
  */
 
-// [spec:dash:def:miscbltin.umaskcmd-fn]
 // [spec:dash:sem:miscbltin.umaskcmd-fn]
 // [spec:posix:syn:builtin.umask.syn]
 // [spec:posix:req:builtin.umask.set-mask]

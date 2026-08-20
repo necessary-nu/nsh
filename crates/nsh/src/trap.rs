@@ -163,7 +163,6 @@ impl TrapTable {
     }
 }
 
-// [spec:dash:def:trap.have-traps-fn]
 // [spec:dash:sem:trap.have-traps-fn]
 pub fn has_traps(shell: &crate::context::Shell) -> bool {
     shell.traps.trap_count != 0
@@ -212,7 +211,6 @@ impl crate::context::Shell {
 ///   this function writes that flag from `simple_command` — which is true
 ///   only when a fork was made *for* a `trap` command. So that `trapcmd`
 ///   is running in that child, and the parent's flag stays false.
-// [spec:dash:def:trap.clear-traps-fn]
 // [spec:dash:sem:trap.clear-traps-fn]
 // [spec:posix:req:builtin.trap.persistence]
 // [spec:posix:req:builtin.trap.subshell-reset]
@@ -343,7 +341,6 @@ fn install_disposition(
  */
 
 /// The parent's entry point: the host installs what the shell decided.
-// [spec:dash:def:trap.setsignal-fn]
 // [spec:dash:sem:trap.setsignal-fn]
 // [spec:posix:req:builtin.trap.signals-ignored-on-entry]
 // [spec:posix:req:sh.signals-standard-action]
@@ -463,7 +460,6 @@ fn configure_signal_via(shell: &mut crate::context::Shell, signal: Signal, via: 
 /// `signal` rather than `sigaction` is dash's spelling and is kept, which
 /// costs nothing: `SIG_IGN` runs no handler, so the flags and mask the two
 /// calls disagree about have nothing to apply to.
-// [spec:dash:def:trap.ignoresig-fn]
 // [spec:dash:sem:trap.ignoresig-fn]
 pub fn ignore_signal_in_child(shell: &mut crate::context::Shell, signal: Signal) {
     let signal_number = signal.number();
@@ -485,7 +481,6 @@ pub fn ignore_signal_in_child(shell: &mut crate::context::Shell, signal: Signal)
  * Signal handler.
  */
 
-// [spec:dash:def:trap.onsig-fn]
 // [spec:dash:sem:trap.onsig-fn]
 /* The platform crate owns the C-ABI trampoline and hands this callback a
  * validated signal. Delivery records atomics and returns; it never unwinds
@@ -501,7 +496,6 @@ pub fn mark_signal_pending(signal: nsh_platform::Signal) {
  * handlers while we are executing a trap handler.
  */
 
-// [spec:dash:def:trap.dotrap-fn]
 // [spec:dash:sem:trap.dotrap-fn]
 // [spec:posix:req:builtin.trap.action-overrides-and-exit-status]
 // [spec:posix:req:builtin.trap.action-executed-as-eval]
@@ -586,7 +580,6 @@ pub fn run_pending_traps(shell: &mut crate::context::Shell) -> Result<Flow, Erro
  * Controls whether the shell is interactive or not.
  */
 
-// [spec:dash:def:trap.setinteractive-fn]
 // [spec:dash:sem:trap.setinteractive-fn]
 pub fn set_interactive_signal_policy(shell: &mut crate::context::Shell, on: bool) {
     if on == shell.traps.interactive {
@@ -610,7 +603,6 @@ pub(crate) fn refresh_startup_signal_policy(shell: &mut crate::context::Shell) {
  * Called to exit the shell.
  */
 
-// [spec:dash:def:trap.exitshell-fn]
 // [spec:dash:sem:trap.exitshell-fn]
 // [spec:posix:req:builtin.trap.exit-condition]
 // [spec:posix:req:builtin.trap.exit-action-environment]
@@ -733,7 +725,6 @@ impl SignalSpec {
     }
 }
 
-// [spec:dash:def:trap.decode-signum-fn]
 // [spec:dash:sem:trap.decode-signum-fn]
 pub(crate) fn parse_signal_number(string: &BStr) -> Option<SignalSpec> {
     let number = crate::number::parse_decimal(string)?;
@@ -747,7 +738,6 @@ pub(crate) fn parse_signal_number(string: &BStr) -> Option<SignalSpec> {
     }
 }
 
-// [spec:dash:def:trap.decode-signal-fn]
 // [spec:dash:sem:trap.decode-signal-fn]
 pub(crate) fn decode_signal(string: &BStr, include_exit_name: bool) -> Option<SignalSpec> {
     if let Some(signal) = parse_signal_number(string) {

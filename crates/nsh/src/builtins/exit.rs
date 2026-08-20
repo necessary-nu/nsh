@@ -15,7 +15,6 @@ use crate::error::Error;
 use crate::evaluation::Flow;
 use bstr::BStr;
 
-// [spec:dash:def:main.exitcmd-fn]
 // [spec:dash:sem:main.exitcmd-fn]
 // [spec:posix:syn:builtin.exit.syn]
 // [spec:posix:req:builtin.exit.cause-shell-exit]

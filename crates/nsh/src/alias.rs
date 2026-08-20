@@ -53,7 +53,6 @@ impl AliasTable {
 
     /// Return an owned alias expansion. `check_in_use` implements the
     /// parser's recursive-alias guard.
-    // [spec:dash:def:alias.lookupalias-pub-fn]
     // [spec:dash:sem:alias.lookupalias-pub-fn]
     pub(crate) fn lookup(&self, name: &BStr, check_in_use: bool) -> Option<BString> {
         self.map
@@ -118,7 +117,6 @@ fn valid_name(name: &BStr) -> bool {
         })
 }
 
-// [spec:dash:def:alias.setalias-fn]
 // [spec:dash:sem:alias.setalias-fn]
 // [spec:posix:req:token.alias-change-timing]
 pub(crate) fn set_alias(shell: &mut Shell, name: &BStr, value: &BStr) -> Result<(), Error> {
@@ -136,7 +134,6 @@ pub(crate) fn set_alias(shell: &mut Shell, name: &BStr, value: &BStr) -> Result<
     Ok(())
 }
 
-// [spec:dash:def:alias.unalias-fn]
 // [spec:dash:sem:alias.unalias-fn]
 pub(crate) fn unalias(
     interrupts: &mut crate::error::InterruptDeferral,
@@ -146,13 +143,11 @@ pub(crate) fn unalias(
     interrupts.run_with(aliases, |aliases| aliases.remove(name))
 }
 
-// [spec:dash:def:alias.rmaliases-fn]
 // [spec:dash:sem:alias.rmaliases-fn]
 pub fn clear_aliases(interrupts: &mut crate::error::InterruptDeferral, aliases: &mut AliasTable) {
     interrupts.run_with(aliases, AliasTable::clear);
 }
 
-// [spec:dash:def:alias.printalias-fn]
 // [spec:dash:sem:alias.printalias-fn]
 // [spec:posix:req:builtin.alias.stdout-format]
 pub(crate) fn format_alias(name: &BStr, value: &BStr) -> Vec<u8> {

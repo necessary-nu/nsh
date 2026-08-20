@@ -15,7 +15,6 @@ use crate::execution::{
 };
 use crate::output::OutputDestination;
 
-// [spec:dash:def:exec.hashcmd-fn]
 // [spec:dash:sem:exec.hashcmd-fn]
 // [spec:posix:syn:builtin.hash.synopsis]
 // [spec:posix:req:builtin.hash.remembered-locations]
@@ -110,7 +109,6 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     Ok(Flow::Done(i32::from(failed).into()))
 }
 
-// [spec:dash:def:exec.printentry-fn]
 // [spec:dash:sem:exec.printentry-fn]
 /// `path` is `pathval()`, read by the caller.
 ///

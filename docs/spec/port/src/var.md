@@ -25,9 +25,9 @@ the two allocations, which is what the ownership logic in `setvareq` and
 order — `var.h` addresses them by index through the `vifs`, `vmail`,
 `vpath`, `vps1`, … macros, and the `*val()` accessors skip the name by a
 hard-coded byte count (`ifsval()` is `vifs.text + 4`). Adding a variable
-anywhere but the end therefore breaks those macros; the port should
-prefer named fields and drop the offset arithmetic in Wave 4, but Wave 2
-must keep the order. Entries carry change callbacks: `changeifs`,
+anywhere but the end therefore breaks those macros. nsh replaces the array and
+offset arithmetic with named owned entries. Entries carry change callbacks:
+`changeifs`,
 `changemail`, `changepath`, `getoptsreset`, `sethistsize`, and
 `changelocale` for the `LC_*`/`LANG` group.
 
@@ -55,16 +55,18 @@ The five blocks are kept, without ids, because they still describe
 `src/var.c`, which still has all five. `docs/divergences.md` records the
 observable half.
 
-> [spec:dash:def:var.bltinlookup-fn]
-> static inline char *bltinlookup(const char *name)
+**Dash source shape (`var.bltinlookup-fn`):**
 
-> [spec:dash:sem:var.bltinlookup-fn]
+    static inline char *bltinlookup(const char *name)
+
+**Retired wrapper (`var.bltinlookup-fn`):**
 > Look up a variable from a builtin's environment: simply `lookupvar(name)`.
 > A separate name exists because builtins conceptually see a merged
 > environment; in this implementation the two are identical.
 
-> [spec:dash:def:var.changelocale-fn]
-> static void changelocale(const char *val)
+**Dash source shape (`var.changelocale-fn`):**
+
+    static void changelocale(const char *val)
 
 > [spec:dash:sem:var.changelocale-fn]
 > Callback for `LC_ALL`, `LC_COLLATE`, `LC_CTYPE`, `LC_NUMERIC` and
@@ -77,8 +79,9 @@ observable half.
 > keeps the pointer rather than copying, the text must outlive the call —
 > which is why they are also `VTEXTFIXED`.
 
-> [spec:dash:def:var.exportcmd-fn]
-> int exportcmd(int argc, char **argv)
+**Dash source shape (`var.exportcmd-fn`):**
+
+    int exportcmd(int argc, char **argv)
 
 > [spec:dash:sem:var.exportcmd-fn]
 > Implements both `export` and `readonly`; which one is decided by
@@ -94,10 +97,11 @@ observable half.
 > using the command name as the prefix so the output is re-executable.
 > Always returns 0.
 
-> [spec:dash:def:var.findvar-fn]
-> var ** findvar(const char *name)
+**Dash source shape (`var.findvar-fn`):**
 
-> [spec:dash:sem:var.findvar-fn]
+    var ** findvar(const char *name)
+
+**Retired hash-chain topology (`var.findvar-fn`):**
 > Return the address of the link holding `name`'s entry, or the address
 > of the trailing NULL link if absent — never NULL itself, so callers
 > test `*result`. Start at `hashvar(name)` and walk `&(*vpp)->next`,
@@ -119,8 +123,9 @@ observable half.
 
 > Return the bucket head address for `p`: `&vartab[hashval(p) % VTABSIZE]`.
 
-> [spec:dash:def:var.initvar-fn]
-> void initvar(void)
+**Dash source shape (`var.initvar-fn`):**
+
+    void initvar(void)
 
 > [spec:dash:sem:var.initvar-fn]
 > Link every entry of `varinit[]` into `vartab`. Walk the array and, for
@@ -132,8 +137,9 @@ observable half.
 > the environment is imported, an environment assignment to the same name
 > finds and updates them rather than creating a duplicate.
 
-> [spec:dash:def:var.listvars-fn]
-> char ** listvars(int on, int off, char ***end)
+**Dash source shape (`var.listvars-fn`):**
+
+    char ** listvars(int on, int off, char ***end)
 
 > [spec:dash:sem:var.listvars-fn]
 > Build a NULL-terminated array of the `text` pointers of all variables
@@ -148,8 +154,9 @@ observable half.
 > `listvars(VEXPORT, VUNSET, 0)` — everything exported and set — which is
 > what is passed to `execve`.
 
-> [spec:dash:def:var.localcmd-fn]
-> int localcmd(int argc, char **argv)
+**Dash source shape (`var.localcmd-fn`):**
+
+    int localcmd(int argc, char **argv)
 
 > [spec:dash:sem:var.localcmd-fn]
 > The `local` builtin. Raise `sh_error("not in a function")` when
@@ -157,22 +164,25 @@ observable half.
 > call `mklocal(name, 0)` on each operand from `argptr`. Return 0.
 > Operands may be bare names or `name=value`; `mklocal` handles both.
 
-> [spec:dash:def:var.localvar]
-> struct localvar {
->   struct localvar *next;
->   struct var *vp;
->   int flags;
->   const char *text;
-> }
+**Dash source shape (`var.localvar`):**
 
-> [spec:dash:def:var.localvar-list]
-> struct localvar_list {
->   struct localvar_list *next;
->   struct localvar *lv;
-> }
+    struct localvar {
+      struct localvar *next;
+      struct var *vp;
+      int flags;
+      const char *text;
+    }
 
-> [spec:dash:def:var.lookupvar-fn]
-> char * lookupvar(const char *name)
+**Dash source shape (`var.localvar-list`):**
+
+    struct localvar_list {
+      struct localvar_list *next;
+      struct localvar *lv;
+    }
+
+**Dash source shape (`var.lookupvar-fn`):**
+
+    char * lookupvar(const char *name)
 
 > [spec:dash:sem:var.lookupvar-fn]
 > Return a pointer to the value of `name`, or NULL if it does not exist
@@ -182,8 +192,9 @@ observable half.
 > that buffer from the current `lineno` so `$LINENO` reads as the line
 > being executed rather than a stale value.
 
-> [spec:dash:def:var.lookupvarint-fn]
-> intmax_t lookupvarint(const char *name)
+**Dash source shape (`var.lookupvarint-fn`):**
+
+    intmax_t lookupvarint(const char *name)
 
 > [spec:dash:sem:var.lookupvarint-fn]
 > `atomax(lookupvar(name) ?: nullstr, 0)` — look the variable up,
@@ -192,8 +203,9 @@ observable half.
 > blank value yields 0 instead of raising, which is what makes an unset
 > variable usable as a number.
 
-> [spec:dash:def:var.mklocal-fn]
-> void mklocal(char *name, int flags)
+**Dash source shape (`var.mklocal-fn`):**
+
+    void mklocal(char *name, int flags)
 
 > [spec:dash:sem:var.mklocal-fn]
 > Save a variable's current state so the enclosing function's return can
@@ -219,8 +231,9 @@ observable half.
 > which is safe only because `lvp->flags == VUNSET` makes the restore
 > path ignore it.
 
-> [spec:dash:def:var.poplocalvars-fn]
-> static void poplocalvars(void)
+**Dash source shape (`var.poplocalvars-fn`):**
+
+    static void poplocalvars(void)
 
 > [spec:dash:sem:var.poplocalvars-fn]
 > Undo one function's worth of `local` declarations. With interrupts
@@ -239,8 +252,9 @@ observable half.
 >
 > Free each save. Restore interrupts.
 
-> [spec:dash:def:var.pushlocalvars-fn]
-> struct localvar_list *pushlocalvars(int push)
+**Dash source shape (`var.pushlocalvars-fn`):**
+
+    struct localvar_list *pushlocalvars(int push)
 
 > [spec:dash:sem:var.pushlocalvars-fn]
 > Begin a new local-variable scope and return the previous top of
@@ -251,8 +265,9 @@ observable half.
 > allocate an empty `struct localvar_list`, link it in front, and make it
 > the new top.
 
-> [spec:dash:def:var.setvar-fn]
-> struct var *setvar(const char *name, const char *val, int flags)
+**Dash source shape (`var.setvar-fn`):**
+
+    struct var *setvar(const char *name, const char *val, int flags)
 
 > [spec:dash:sem:var.setvar-fn]
 > Set or unset a variable, building the combined `"name=value"` text.
@@ -270,8 +285,9 @@ observable half.
 > on. Hand ownership to `setvareq(nameeq, flags | VNOSAVE)` and return
 > its result.
 
-> [spec:dash:def:var.setvareq-fn]
-> struct var *setvareq(char *s, int flags)
+**Dash source shape (`var.setvareq-fn`):**
+
+    struct var *setvareq(char *s, int flags)
 
 > [spec:dash:sem:var.setvareq-fn]
 > Install the already-built `"name=value"` string `s` into the table.
@@ -310,8 +326,9 @@ observable half.
 > dereferences it, but a port must not "helpfully" substitute NULL;
 > reproduce the dangling return.
 
-> [spec:dash:def:var.setvarint-fn]
-> intmax_t setvarint(const char *name, intmax_t val, int flags)
+**Dash source shape (`var.setvarint-fn`):**
+
+    intmax_t setvarint(const char *name, intmax_t val, int flags)
 
 > [spec:dash:sem:var.setvarint-fn]
 > Set `name` to the decimal rendering of `val`. Size a VLA with
@@ -319,8 +336,9 @@ observable half.
 > `setvar`, and return `val` unchanged so the caller can use it as an
 > expression.
 
-> [spec:dash:def:var.showvars-fn]
-> int showvars(const char *prefix, int on, int off)
+**Dash source shape (`var.showvars-fn`):**
+
+    int showvars(const char *prefix, int on, int off)
 
 > [spec:dash:sem:var.showvars-fn]
 > Print matching variables in collating order, in re-executable form.
@@ -336,8 +354,9 @@ observable half.
 > `"%s%s%.*s%s\n"` — prefix, separator, the name *including* its `=` when
 > present, then the quoted value. Return 0.
 
-> [spec:dash:def:var.unsetcmd-fn]
-> int unsetcmd(int argc, char **argv)
+**Dash source shape (`var.unsetcmd-fn`):**
+
+    int unsetcmd(int argc, char **argv)
 
 > [spec:dash:sem:var.unsetcmd-fn]
 > The `unset` builtin. Parse `-v`/`-f` with `nextopt("vf")`, keeping only
@@ -348,14 +367,16 @@ observable half.
 > read-only variable of the same name would make the variable removal
 > fail. Return 0.
 
-> [spec:dash:def:var.unsetvar-fn]
-> void unsetvar(const char *s)
+**Dash source shape (`var.unsetvar-fn`):**
+
+    void unsetvar(const char *s)
 
 > [spec:dash:sem:var.unsetvar-fn]
 > `setvar(s, 0, 0)` — assigning a NULL value is how unsetting is spelled.
 
-> [spec:dash:def:var.unwindlocalvars-fn]
-> void unwindlocalvars(struct localvar_list *stop)
+**Dash source shape (`var.unwindlocalvars-fn`):**
+
+    void unwindlocalvars(struct localvar_list *stop)
 
 > [spec:dash:sem:var.unwindlocalvars-fn]
 > `poplocalvars()` repeatedly until `localvar_stack` equals `stop`.
@@ -363,17 +384,19 @@ observable half.
 > opened since; passing 0 unwinds everything, which is what the `RESET`
 > event does after an error.
 
-> [spec:dash:def:var.var]
-> struct var {
->   struct var *next;
->   int flags;
->   const char *text;
-> }
+**Dash source shape (`var.var`):**
 
-> [spec:dash:def:var.var.func-fn]
-> void (*func)(const char *)
+    struct var {
+      struct var *next;
+      int flags;
+      const char *text;
+    }
 
-> [spec:dash:sem:var.var.func-fn]
+**Dash source shape (`var.var.func-fn`):**
+
+    void (*func)(const char *)
+
+**Retired struct-member topology (`var.var.func-fn`):**
 > The change-callback member of `struct var`, not a function of its own —
 > the extractor lifted the member declaration out of the struct. It is
 > invoked whenever the variable is set or unset, unless `VNOFUNC` is
@@ -395,18 +418,20 @@ observable half.
 > `!varcmp(a, b)` — true when the two names are equal, ignoring anything
 > from an `=` onward.
 
-> [spec:dash:def:var.varfunc-fn]
-> static void varfunc(struct var *vp)
+**Dash source shape (`var.varfunc-fn`):**
+
+    static void varfunc(struct var *vp)
 
 > [spec:dash:sem:var.varfunc-fn]
 > Invoke a variable's change callback, if it has one. Pass the whole
 > `text` when `VFULL` is set — the form `putenv` needs — and otherwise
 > just the value, obtained with `varnull`. Do nothing when `func` is NULL.
 
-> [spec:dash:def:var.varnull-fn]
-> static char *varnull(const char *s)
+**Dash source shape (`var.varnull-fn`):**
 
-> [spec:dash:sem:var.varnull-fn]
+    static char *varnull(const char *s)
+
+**Retired C-string helper (`var.varnull-fn`):**
 > Return the value part of a `"name=value"` string: `strchrnul(s, '=') + 1`.
 > For an unset variable there is no `=`, so this lands one past the
 > terminating NUL — which is why `setvar` always allocates a trailing

@@ -14,22 +14,25 @@ set vary by platform, and it is terminated by an entry with a NULL
 Note the file `#undef`s `rflag` so `readcmd` can use that name for its
 own local, rather than the global shell option of the same name.
 
-> [spec:dash:def:miscbltin.limits]
-> struct limits {
->   const char *name;
->   int cmd;
->   int factor;
->   char option;
-> }
+**Dash source shape (`miscbltin.limits`):**
 
-> [spec:dash:def:miscbltin.limtype]
-> enum limtype {
->   SOFT = 0x1;
->   HARD = 0x2;
-> }
+    struct limits {
+      const char *name;
+      int cmd;
+      int factor;
+      char option;
+    }
 
-> [spec:dash:def:miscbltin.printlim-fn]
-> static void printlim(enum limtype how, const struct rlimit *limit, const struct limits *l)
+**Dash source shape (`miscbltin.limtype`):**
+
+    enum limtype {
+      SOFT = 0x1;
+      HARD = 0x2;
+    }
+
+**Dash source shape (`miscbltin.printlim-fn`):**
+
+    static void printlim(enum limtype how, const struct rlimit *limit, const struct limits *l)
 
 > [spec:dash:sem:miscbltin.printlim-fn]
 > Print one limit value and a newline. Select `limit->rlim_cur` when
@@ -39,8 +42,9 @@ own local, rather than the global shell option of the same name.
 > a value not a whole number of units is truncated) and print it as a
 > decimal `intmax_t`.
 
-> [spec:dash:def:miscbltin.readcmd-fn]
-> int readcmd(int argc, char **argv)
+**Dash source shape (`miscbltin.readcmd-fn`):**
+
+    int readcmd(int argc, char **argv)
 
 > [spec:dash:sem:miscbltin.readcmd-fn]
 > The `read` builtin. Parse options with `nextopt("p:r")`: `-p` takes an
@@ -88,8 +92,9 @@ own local, rather than the global shell option of the same name.
 > count is the number of remaining variable names. Return `status`: 0
 > normally, 1 if end of input was reached before a newline.
 
-> [spec:dash:def:miscbltin.readcmd-handle-line-fn]
-> static void readcmd_handle_line(char *s, int ac, char **ap)
+**Dash source shape (`miscbltin.readcmd-handle-line-fn`):**
+
+    static void readcmd_handle_line(char *s, int ac, char **ap)
 
 > [spec:dash:sem:miscbltin.readcmd-handle-line-fn]
 > Split one input line into `IFS` fields and assign them to the variable
@@ -107,8 +112,9 @@ own local, rather than the global shell option of the same name.
 > inserted) and `setvar(*ap, sl->text, 0)`. The loop is do/while on
 > `*++ap`, so at least one assignment always happens.
 
-> [spec:dash:def:miscbltin.ulimitcmd-fn]
-> int ulimitcmd(int argc, char **argv)
+**Dash source shape (`miscbltin.ulimitcmd-fn`):**
+
+    int ulimitcmd(int argc, char **argv)
 
 > [spec:dash:sem:miscbltin.ulimitcmd-fn]
 > The `ulimit` builtin. Default `what` to `'f'` (file size) and `how` to
@@ -143,8 +149,9 @@ own local, rather than the global shell option of the same name.
 > `sh_error("error setting limit (%s)", strerror(errno))` on failure.
 > When querying, `printlim`. Return 0.
 
-> [spec:dash:def:miscbltin.umaskcmd-fn]
-> int umaskcmd(int argc, char **argv)
+**Dash source shape (`miscbltin.umaskcmd-fn`):**
+
+    int umaskcmd(int argc, char **argv)
 
 > [spec:dash:sem:miscbltin.umaskcmd-fn]
 > The `umask` builtin. Parse `-S` with `nextopt("S")` to select symbolic

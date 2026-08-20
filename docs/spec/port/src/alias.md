@@ -9,16 +9,18 @@ currently being expanded by the parser, so its storage must not be
 released — and `ALIASDEAD` (2) — deletion was requested while in use and
 must happen when the expansion finishes.
 
-> [spec:dash:def:alias.alias]
-> struct alias {
->   struct alias *next;
->   char *name;
->   char *val;
->   int flag;
-> }
+**Dash source shape (`alias.alias`):**
 
-> [spec:dash:def:alias.aliascmd-fn]
-> int aliascmd(int argc, char **argv)
+    struct alias {
+      struct alias *next;
+      char *name;
+      char *val;
+      int flag;
+    }
+
+**Dash source shape (`alias.aliascmd-fn`):**
+
+    int aliascmd(int argc, char **argv)
 
 > [spec:dash:sem:alias.aliascmd-fn]
 > The `alias` builtin. With `argc == 1` (no operands), walk every bucket
@@ -37,10 +39,11 @@ must happen when the expansion finishes.
 > Definition failures do not set the return value — `setalias` raises a
 > shell error instead.
 
-> [spec:dash:def:alias.freealias-fn]
-> alias * freealias(struct alias *ap)
+**Dash source shape (`alias.freealias-fn`):**
 
-> [spec:dash:sem:alias.freealias-fn]
+    alias * freealias(struct alias *ap)
+
+**Retired C-only behavior (`alias.freealias-fn`):**
 > Release one alias entry and return the pointer that should replace it
 > in its chain. If `ap->flag` has `ALIASINUSE` set the entry is being
 > expanded and must not be freed: set `ALIASDEAD` on it and return `ap`
@@ -50,10 +53,11 @@ must happen when the expansion finishes.
 > convention is what lets callers splice the chain without re-testing
 > the in-use case.
 
-> [spec:dash:def:alias.lookupalias-fn]
-> alias ** __lookupalias(const char *name)
+**Dash source shape (`alias.lookupalias-fn`):**
 
-> [spec:dash:sem:alias.lookupalias-fn]
+    alias ** __lookupalias(const char *name)
+
+**Retired C-only behavior (`alias.lookupalias-fn`):**
 > Internal chain search returning the *address of the link* holding the
 > match, so callers can delete or insert in place. Compute the bucket as
 > `hashval(name) % ATABSIZE` and take `app = &atab[bucket]`. Walk
@@ -65,8 +69,9 @@ must happen when the expansion finishes.
 > if there is no match; the result is never NULL, and `*result == NULL`
 > is the "not found" test.
 
-> [spec:dash:def:alias.lookupalias-pub-fn]
-> struct alias * lookupalias(const char *name, int check)
+**Dash source shape (`alias.lookupalias-pub-fn`):**
+
+    struct alias * lookupalias(const char *name, int check)
 
 > [spec:dash:sem:alias.lookupalias-pub-fn]
 > Public lookup. Dereference `__lookupalias(name)` to get the entry or
@@ -76,14 +81,14 @@ must happen when the expansion finishes.
 > alias is still being expanded. Otherwise return the entry (possibly
 > NULL).
 >
-> Note: this symbol is absent from `plan/.port-manifest.styx` — the
-> extractor folded it into `alias.lookupalias-fn` after stripping the
-> leading underscores from the distinct static function `__lookupalias`.
-> The rule and its sidecar annotation are hand-added; Wave 2 must port
-> both functions.
+> The historical extractor folded this symbol into
+> `alias.lookupalias-fn` after stripping the leading underscores from the
+> distinct static function `__lookupalias`. The Rust implementation keeps
+> only the public lookup behavior; the chain-address topology is retired.
 
-> [spec:dash:def:alias.printalias-fn]
-> void __attribute__((noinline)) printalias(const struct alias *ap)
+**Dash source shape (`alias.printalias-fn`):**
+
+    void __attribute__((noinline)) printalias(const struct alias *ap)
 
 > [spec:dash:sem:alias.printalias-fn]
 > Write one alias definition to `out1` as `single_quote(ap->name)`
@@ -93,8 +98,9 @@ must happen when the expansion finishes.
 > Declared `noinline` purely to keep the caller's code size down; that
 > has no observable behavior.
 
-> [spec:dash:def:alias.rmaliases-fn]
-> void rmaliases(void)
+**Dash source shape (`alias.rmaliases-fn`):**
+
+    void rmaliases(void)
 
 > [spec:dash:sem:alias.rmaliases-fn]
 > Delete every alias. With interrupts suspended (`INTOFF` .. `INTON`
@@ -108,8 +114,9 @@ must happen when the expansion finishes.
 > aliases survive the sweep as dead entries and are reclaimed when their
 > expansion completes.
 
-> [spec:dash:def:alias.setalias-fn]
-> STATIC void setalias(const char *name, const char *val)
+**Dash source shape (`alias.setalias-fn`):**
+
+    STATIC void setalias(const char *name, const char *val)
 
 > [spec:dash:sem:alias.setalias-fn]
 > Define or redefine an alias. `name` points at a `"name=value"` string
@@ -130,8 +137,9 @@ must happen when the expansion finishes.
 > the value points into the new copy at the same offset. Restore
 > interrupts.
 
-> [spec:dash:def:alias.unalias-fn]
-> int unalias(const char *name)
+**Dash source shape (`alias.unalias-fn`):**
+
+    int unalias(const char *name)
 
 > [spec:dash:sem:alias.unalias-fn]
 > Delete one alias by name. `__lookupalias(name)` for the slot; if it
@@ -141,8 +149,9 @@ must happen when the expansion finishes.
 > If the slot is empty return 1. The return value is "not found", the
 > inverse of the usual success convention.
 
-> [spec:dash:def:alias.unaliascmd-fn]
-> int unaliascmd(int argc, char **argv)
+**Dash source shape (`alias.unaliascmd-fn`):**
+
+    int unaliascmd(int argc, char **argv)
 
 > [spec:dash:sem:alias.unaliascmd-fn]
 > The `unalias` builtin. Parse options with `nextopt("a")`; on `-a` call

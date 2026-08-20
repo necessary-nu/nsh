@@ -36,8 +36,9 @@ routine that writes global state checks it.
 Everything compiled under `#if JOBS` is absent from a build without job
 control.
 
-> [spec:dash:def:jobs.bgcmd-fn]
-> int bgcmd(int argc, char **argv) #ifdef HAVE_ALIAS_ATTRIBUTE __attribute__((__alias__("fgcmd"))); #else
+**Dash source shape (`jobs.bgcmd-fn`):**
+
+    int bgcmd(int argc, char **argv) #ifdef HAVE_ALIAS_ATTRIBUTE __attribute__((__alias__("fgcmd"))); #else
 
 > [spec:dash:sem:jobs.bgcmd-fn]
 > The `bg` builtin. It is the same function as `fgcmd` — an alias where
@@ -47,8 +48,9 @@ control.
 > preprocessor text; the real signature is
 > `int bgcmd(int argc, char **argv)`.
 
-> [spec:dash:def:jobs.cmdlist-fn]
-> STATIC void cmdlist(union node *np, int sep)
+**Dash source shape (`jobs.cmdlist-fn`):**
+
+    STATIC void cmdlist(union node *np, int sep)
 
 > [spec:dash:sem:jobs.cmdlist-fn]
 > Render a list of `narg`-linked nodes into the command-text buffer. With
@@ -56,8 +58,9 @@ control.
 > zero, emit a space *before* every item including the first
 > (redirections, which follow the arguments).
 
-> [spec:dash:def:jobs.cmdputs-fn]
-> STATIC void cmdputs(const char *s)
+**Dash source shape (`jobs.cmdputs-fn`):**
+
+    STATIC void cmdputs(const char *s)
 
 > [spec:dash:sem:jobs.cmdputs-fn]
 > Append `s` to the command-text buffer at `cmdnextc`, translating the
@@ -87,8 +90,9 @@ control.
 > At the end, close an unbalanced quote and NUL-terminate, leaving
 > `cmdnextc` at the terminator.
 
-> [spec:dash:def:jobs.cmdtxt-fn]
-> STATIC void cmdtxt(union node *n)
+**Dash source shape (`jobs.cmdtxt-fn`):**
+
+    STATIC void cmdtxt(union node *n)
 
 > [spec:dash:sem:jobs.cmdtxt-fn]
 > Recursively render a parse tree as shell source into the command-text
@@ -116,8 +120,9 @@ control.
 > `fd + '0'`, a single character, so a descriptor above 9 prints as
 > garbage.
 
-> [spec:dash:def:jobs.commandtext-fn]
-> STATIC char * commandtext(union node *n)
+**Dash source shape (`jobs.commandtext-fn`):**
+
+    STATIC char * commandtext(union node *n)
 
 > [spec:dash:sem:jobs.commandtext-fn]
 > Produce a heap-allocated string describing the command `n`, for display
@@ -125,8 +130,9 @@ control.
 > with `cmdtxt`, then `savestr` the result off the stack so it survives
 > the next stack reset. The caller (a `procstat`) owns and frees it.
 
-> [spec:dash:def:jobs.dowait-fn]
-> static int dowait(int block, struct job *jp)
+**Dash source shape (`jobs.dowait-fn`):**
+
+    static int dowait(int block, struct job *jp)
 
 > [spec:dash:sem:jobs.dowait-fn]
 > Reap children until there are none left to reap, updating job state.
@@ -144,8 +150,9 @@ control.
 > reaped or the target job has stopped running. Continue while `waitone`
 > returns non-negative; a negative return means no more children.
 
-> [spec:dash:def:jobs.fgcmd-fn]
-> int fgcmd(int argc, char **argv)
+**Dash source shape (`jobs.fgcmd-fn`):**
+
+    int fgcmd(int argc, char **argv)
 
 > [spec:dash:sem:jobs.fgcmd-fn]
 > Implements both `fg` and `bg`; `**argv == 'f'` selects `FORK_FG` over
@@ -159,8 +166,9 @@ control.
 > one iteration, resolving the current job. Returns the last `restartjob`
 > result: the job's status for `fg`, 0 for `bg`.
 
-> [spec:dash:def:jobs.forkchild-fn]
-> static void forkchild(struct job *jp, union node *n, int mode)
+**Dash source shape (`jobs.forkchild-fn`):**
+
+    static void forkchild(struct job *jp, union node *n, int mode)
 
 > [spec:dash:sem:jobs.forkchild-fn]
 > Set up the child side of a fork. Note it runs in a `vfork` child too
@@ -190,8 +198,9 @@ control.
 > command, which needs to report them — free every remaining job, so the
 > child does not later report or wait on the parent's jobs.
 
-> [spec:dash:def:jobs.forkparent-fn]
-> static void forkparent(struct job *jp, union node *n, int mode, pid_t pid)
+**Dash source shape (`jobs.forkparent-fn`):**
+
+    static void forkparent(struct job *jp, union node *n, int mode, pid_t pid)
 
 > [spec:dash:sem:jobs.forkparent-fn]
 > Record a newly forked child in the parent. A negative `pid` is a fork
@@ -216,8 +225,9 @@ control.
 > command text — `nullstr` unless job control is on and a command node
 > was supplied, in which case `commandtext(n)` renders it for `jobs`.
 
-> [spec:dash:def:jobs.forkshell-fn]
-> int forkshell(struct job *jp, union node *n, int mode)
+**Dash source shape (`jobs.forkshell-fn`):**
+
+    int forkshell(struct job *jp, union node *n, int mode)
 
 > [spec:dash:sem:jobs.forkshell-fn]
 > Fork, dispatching to `forkchild` or `forkparent`, and return the `fork`
@@ -225,8 +235,9 @@ control.
 > before it would be duplicated into the child. Must be called with
 > interrupts off. `jp` and `n` may both be NULL.
 
-> [spec:dash:def:jobs.freejob-fn]
-> STATIC void freejob(struct job *jp)
+**Dash source shape (`jobs.freejob-fn`):**
+
+    STATIC void freejob(struct job *jp)
 
 > [spec:dash:sem:jobs.freejob-fn]
 > Mark a job slot unused. With interrupts suspended, free each
@@ -234,8 +245,9 @@ control.
 > `ps` array unless it is the inline `ps0`, clear `used`, and unlink the
 > job from the current-job chain with `set_curjob(jp, CUR_DELETE)`.
 
-> [spec:dash:def:jobs.getjob-fn]
-> job * getjob(const char *name, int getctl)
+**Dash source shape (`jobs.getjob-fn`):**
+
+    job * getjob(const char *name, int getctl)
 
 > [spec:dash:sem:jobs.getjob-fn]
 > Resolve a job specification to a `struct job`, raising `sh_error` on
@@ -257,8 +269,9 @@ control.
 > `"No previous job"`, `"%s: ambiguous"`, or
 > `"job %s not created under job control"`.
 
-> [spec:dash:def:jobs.getstatus-fn]
-> STATIC int getstatus(struct job *job)
+**Dash source shape (`jobs.getstatus-fn`):**
+
+    STATIC int getstatus(struct job *job)
 
 > [spec:dash:sem:jobs.getstatus-fn]
 > Convert a finished job's raw wait status into a shell exit status. Take
@@ -270,8 +283,9 @@ control.
 > and for a `SIGINT` kill, set the job's `sigint` flag so `waitforjob`
 > knows to re-raise it. Signal statuses are reported as `signal + 128`.
 
-> [spec:dash:def:jobs.growjobtab-fn]
-> job * growjobtab(void)
+**Dash source shape (`jobs.growjobtab-fn`):**
+
+    job * growjobtab(void)
 
 > [spec:dash:sem:jobs.growjobtab-fn]
 > Extend `jobtab` by four slots and return the first new one. `ckrealloc`
@@ -285,22 +299,25 @@ control.
 > Finally add 4 to `njobs`, mark the four new slots unused, and return
 > the first.
 
-> [spec:dash:def:jobs.job]
-> struct job {
->   struct procstat ps0;
->   struct procstat *ps;
->   uint32_t nprocs: 16, /* number of processes */ state: 8, #define JOBRUNNING 0 /* at least one proc running */ #define JOBSTOPPED 1 /* all procs are stopped *...;
->   struct job *prev_job;
-> }
+**Dash source shape (`jobs.job`):**
 
-> [spec:dash:def:jobs.jobno-fn]
-> STATIC int jobno(const struct job *jp)
+    struct job {
+      struct procstat ps0;
+      struct procstat *ps;
+      uint32_t nprocs: 16, /* number of processes */ state: 8, #define JOBRUNNING 0 /* at least one proc running */ #define JOBSTOPPED 1 /* all procs are stopped *...;
+      struct job *prev_job;
+    }
+
+**Dash source shape (`jobs.jobno-fn`):**
+
+    STATIC int jobno(const struct job *jp)
 
 > [spec:dash:sem:jobs.jobno-fn]
 > Return the job's user-visible number: its index in `jobtab` plus 1.
 
-> [spec:dash:def:jobs.jobscmd-fn]
-> int jobscmd(int argc, char **argv)
+**Dash source shape (`jobs.jobscmd-fn`):**
+
+    int jobscmd(int argc, char **argv)
 
 > [spec:dash:sem:jobs.jobscmd-fn]
 > The `jobs` builtin. Parse `-l` (`SHOW_PID`, include process ids) and
@@ -308,8 +325,9 @@ control.
 > wins, as `mode` is assigned rather than OR-ed. With operands, show each
 > named job; with none, `showjobs(out, mode)` shows all. Return 0.
 
-> [spec:dash:def:jobs.killcmd-fn]
-> int killcmd(int argc, char **argv)
+**Dash source shape (`jobs.killcmd-fn`):**
+
+    int killcmd(int argc, char **argv)
 
 > [spec:dash:sem:jobs.killcmd-fn]
 > The `kill` builtin. With no arguments, print the usage message via
@@ -341,8 +359,9 @@ control.
 > `-n` is an explicit negative pid (also a group); anything else is a
 > pid. A failed `kill` warns with `strerror` and makes the result 1.
 
-> [spec:dash:def:jobs.makejob-fn]
-> struct job *makejob(int nprocs)
+**Dash source shape (`jobs.makejob-fn`):**
+
+    struct job *makejob(int nprocs)
 
 > [spec:dash:sem:jobs.makejob-fn]
 > Allocate a job for `nprocs` processes. Must be called with interrupts
@@ -358,24 +377,26 @@ control.
 > created, so it tracks how many have been started rather than how many
 > were requested.
 
-> [spec:dash:def:jobs.onsigchild-fn]
-> STATIC int onsigchild(void)
+**Dash source shape (`jobs.onsigchild-fn`):**
 
-> [spec:dash:sem:jobs.onsigchild-fn]
+    STATIC int onsigchild(void)
+
+**Retired dead prototype (`jobs.onsigchild-fn`):**
 > Declared under `#ifdef SYSV` but never defined anywhere in the tree — a
-> vestige of System V SIGCHLD handling that was removed. There is nothing
-> to port; the prototype is dead. Wave 2 should carry the annotation on
-> an equivalent placeholder, or record the omission.
+> vestige of System V SIGCHLD handling that was removed. It has no target
+> behavior or placeholder implementation.
 
-> [spec:dash:def:jobs.procstat]
-> struct procstat {
->   pid_t pid;
->   int status;
->   char *cmd;
-> }
+**Dash source shape (`jobs.procstat`):**
 
-> [spec:dash:def:jobs.restartjob-fn]
-> STATIC int restartjob(struct job *jp, int mode)
+    struct procstat {
+      pid_t pid;
+      int status;
+      char *cmd;
+    }
+
+**Dash source shape (`jobs.restartjob-fn`):**
+
+    STATIC int restartjob(struct job *jp, int mode)
 
 > [spec:dash:sem:jobs.restartjob-fn]
 > Resume a stopped job. With interrupts suspended, and skipping
@@ -385,8 +406,9 @@ control.
 > treated as running again. Return `waitforjob(jp)` for a foreground
 > resume and 0 for a background one.
 
-> [spec:dash:def:jobs.set-curjob-fn]
-> STATIC void set_curjob(struct job *jp, unsigned mode)
+**Dash source shape (`jobs.set-curjob-fn`):**
+
+    STATIC void set_curjob(struct job *jp, unsigned mode)
 
 > [spec:dash:sem:jobs.set-curjob-fn]
 > Maintain the current-job ordering that `%+`/`%-` and the `+`/`-`
@@ -401,8 +423,9 @@ control.
 > unrecognised mode silently unlinks without re-inserting. Reproduce the
 > fall-through.
 
-> [spec:dash:def:jobs.setjobctl-fn]
-> void setjobctl(int on)
+**Dash source shape (`jobs.setjobctl-fn`):**
+
+    void setjobctl(int on)
 
 > [spec:dash:sem:jobs.setjobctl-fn]
 > Turn job control on or off. Must be called with interrupts off. Does
@@ -439,8 +462,9 @@ control.
 > that when disabling. Close the descriptor when disabling. Record
 > `ttyfd` and `jobctl`.
 
-> [spec:dash:def:jobs.showjob-fn]
-> static void showjob(struct output *out, struct job *jp, int mode)
+**Dash source shape (`jobs.showjob-fn`):**
+
+    static void showjob(struct output *out, struct job *jp, int mode)
 
 > [spec:dash:sem:jobs.showjob-fn]
 > Print one job. With `SHOW_PGID`, print just the first process's pid and
@@ -463,8 +487,9 @@ control.
 > Clear `changed`, and free the job if it is `JOBDONE` — reporting a
 > finished job is what retires it.
 
-> [spec:dash:def:jobs.showjobs-fn]
-> void showjobs(struct output *out, int mode)
+**Dash source shape (`jobs.showjobs-fn`):**
+
+    void showjobs(struct output *out, int mode)
 
 > [spec:dash:sem:jobs.showjobs-fn]
 > Print the job list. First `dowait(DOWAIT_NONBLOCK, NULL)` to reap any
@@ -473,16 +498,18 @@ control.
 > jobs whose `changed` flag is set — which is how the interactive prompt
 > reports newly finished jobs without listing everything.
 
-> [spec:dash:def:jobs.showpipe-fn]
-> STATIC void showpipe(struct job *jp, struct output *out)
+**Dash source shape (`jobs.showpipe-fn`):**
+
+    STATIC void showpipe(struct job *jp, struct output *out)
 
 > [spec:dash:sem:jobs.showpipe-fn]
 > Append the *remaining* elements of a pipeline — from `ps[1]` on, since
 > the caller has already printed `ps[0]` — each as `" | <cmd>"`, then a
 > newline, then `flushall()`.
 
-> [spec:dash:def:jobs.sprint-status-fn]
-> STATIC int sprint_status(char *os, int status, int sigonly)
+**Dash source shape (`jobs.sprint-status-fn`):**
+
+    STATIC int sprint_status(char *os, int status, int sigonly)
 
 > [spec:dash:sem:jobs.sprint-status-fn]
 > Format a wait status into `os`, returning the number of characters
@@ -500,8 +527,9 @@ control.
 > `"Done(%d)"` with a non-zero status. Under `sigonly` a normal exit
 > produces nothing, which is how the caller detects "nothing to report".
 
-> [spec:dash:def:jobs.stoppedjobs-fn]
-> int stoppedjobs(void)
+**Dash source shape (`jobs.stoppedjobs-fn`):**
+
+    int stoppedjobs(void)
 
 > [spec:dash:sem:jobs.stoppedjobs-fn]
 > Return 1 and print `"You have stopped jobs.\n"` if the current job is
@@ -510,8 +538,9 @@ control.
 > and decayed by `cmdloop`, giving the user two commands' grace in which
 > a second `exit` succeeds. Always 0 in a build without job control.
 
-> [spec:dash:def:jobs.vforkexec-fn]
-> struct job *vforkexec(union node *n, char **argv, const char *path, int idx)
+**Dash source shape (`jobs.vforkexec-fn`):**
+
+    struct job *vforkexec(union node *n, char **argv, const char *path, int idx)
 
 > [spec:dash:sem:jobs.vforkexec-fn]
 > Run an external command with `vfork` instead of `fork`, avoiding the
@@ -526,8 +555,9 @@ control.
 > runs must not modify anything the parent will read — which is what all
 > the `vforked` guards enforce.
 
-> [spec:dash:def:jobs.waitcmd-fn]
-> int waitcmd(int argc, char **argv)
+**Dash source shape (`jobs.waitcmd-fn`):**
+
+    int waitcmd(int argc, char **argv)
 
 > [spec:dash:sem:jobs.waitcmd-fn]
 > The `wait` builtin. With no operands, wait for every job: repeatedly
@@ -546,8 +576,9 @@ control.
 >
 > An interrupted wait returns `128 + pending_sig`.
 
-> [spec:dash:def:jobs.waitforjob-fn]
-> int waitforjob(struct job *jp)
+**Dash source shape (`jobs.waitforjob-fn`):**
+
+    int waitforjob(struct job *jp)
 
 > [spec:dash:sem:jobs.waitforjob-fn]
 > Wait for a job to finish and return its status. Must be called with
@@ -572,8 +603,9 @@ control.
 > child does not also abort an enclosing loop. Programs that catch SIGINT
 > and then `exit` rather than re-raising it defeat this.
 
-> [spec:dash:def:jobs.waitone-fn]
-> static int waitone(int block, struct job *job)
+**Dash source shape (`jobs.waitone-fn`):**
+
+    static int waitone(int block, struct job *job)
 
 > [spec:dash:sem:jobs.waitone-fn]
 > Reap one child and update the job it belongs to. Returns the pid, 0 if
@@ -596,8 +628,9 @@ control.
 > write it to `out2` — this is the spontaneous "Terminated"/"Stopped"
 > notice.
 
-> [spec:dash:def:jobs.waitproc-fn]
-> STATIC int waitproc(int block, int *status)
+**Dash source shape (`jobs.waitproc-fn`):**
+
+    STATIC int waitproc(int block, int *status)
 
 > [spec:dash:sem:jobs.waitproc-fn]
 > Perform one wait system call. `WNOHANG` unless `block` is
@@ -618,8 +651,9 @@ control.
 > Note the caller of a non-blocking `dowait` must keep calling until
 > every dead child is reaped, or zombies accumulate.
 
-> [spec:dash:def:jobs.xtcsetpgrp-fn]
-> STATIC void xtcsetpgrp(int fd, pid_t pgrp)
+**Dash source shape (`jobs.xtcsetpgrp-fn`):**
+
+    STATIC void xtcsetpgrp(int fd, pid_t pgrp)
 
 > [spec:dash:sem:jobs.xtcsetpgrp-fn]
 > `tcsetpgrp` with all signals blocked around it — otherwise the call
@@ -627,8 +661,9 @@ control.
 > `sh_error("Cannot set tty process group (%s)", strerror(errno))` on
 > failure.
 
-> [spec:dash:def:jobs.xxtcsetpgrp-fn]
-> static void xxtcsetpgrp(pid_t pgrp)
+**Dash source shape (`jobs.xxtcsetpgrp-fn`):**
+
+    static void xxtcsetpgrp(pid_t pgrp)
 
 > [spec:dash:sem:jobs.xxtcsetpgrp-fn]
 > `xtcsetpgrp(ttyfd, pgrp)`, doing nothing when there is no saved

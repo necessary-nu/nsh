@@ -8,8 +8,9 @@ it: the `FORKRESET` block at the end of the file re-points `handler` at
 it after a fork, so a child that raises an exception unwinds to its own
 top level rather than into inherited state.
 
-> [spec:dash:def:main.cmdloop-fn]
-> static int cmdloop(int top)
+**Dash source shape (`main.cmdloop-fn`):**
+
+    static int cmdloop(int top)
 
 > [spec:dash:sem:main.cmdloop-fn]
 > Read and execute commands until end of input. `top` is non-zero for the
@@ -42,8 +43,9 @@ top level rather than into inherited state.
 > and break out of the loop, leaving any remaining skip bits for the
 > caller to act on. Return `status`.
 
-> [spec:dash:def:main.dotcmd-fn]
-> int dotcmd(int argc, char **argv)
+**Dash source shape (`main.dotcmd-fn`):**
+
+    int dotcmd(int argc, char **argv)
 
 > [spec:dash:sem:main.dotcmd-fn]
 > The `.` (dot / source) builtin. Consume options with `nextopt(nullstr)`
@@ -56,19 +58,20 @@ top level rather than into inherited state.
 > the status `cmdloop` reported. Extra operands beyond the first are
 > ignored — dash does not support passing positional parameters to `.`.
 
-> [spec:dash:def:main.etext-fn]
-> extern int etext()
+**Dash source shape (`main.etext-fn`):**
 
-> [spec:dash:sem:main.etext-fn]
+    extern int etext()
+
+**Retired linker symbol (`main.etext-fn`):**
 > Not a function of this program: `etext` is the linker-provided symbol
 > marking the end of the text segment. It is declared only under
 > `#if PROFILE` and its address is passed to `monitor()` to bound the
-> profiling range. There is nothing to port — a Rust build gets profiling
-> from its own tooling — so Wave 2 should carry the annotation on an
-> equivalent no-op or profiling-setup site rather than reimplement it.
+> profiling range. nsh does not ship that C profiling mode; Rust profiling
+> tooling needs no equivalent symbol.
 
-> [spec:dash:def:main.exitcmd-fn]
-> int exitcmd(int argc, char **argv)
+**Dash source shape (`main.exitcmd-fn`):**
+
+    int exitcmd(int argc, char **argv)
 
 > [spec:dash:sem:main.exitcmd-fn]
 > The `exit` builtin. If `stoppedjobs()` reports stopped jobs, refuse:
@@ -79,8 +82,9 @@ top level rather than into inherited state.
 > status of the last command is used. Then `exraise(EXEXIT)`, which
 > unwinds to `main` and does not return.
 
-> [spec:dash:def:main.find-dot-file-fn]
-> STATIC char * find_dot_file(char *basename)
+**Dash source shape (`main.find-dot-file-fn`):**
+
+    STATIC char * find_dot_file(char *basename)
 
 > [spec:dash:sem:main.find-dot-file-fn]
 > Resolve the operand of `.` against `PATH`. If `basename` contains a
@@ -94,8 +98,9 @@ top level rather than into inherited state.
 > the caller to release the stack space. If nothing matches, raise
 > `sh_error("%s: not found", basename)`, which does not return.
 
-> [spec:dash:def:main.main-fn]
-> int main(int argc, char **argv)
+**Dash source shape (`main.main-fn`):**
+
+    int main(int argc, char **argv)
 
 > [spec:dash:sem:main.main-fn]
 > Shell entry point. Under glibc cache `__errno_location()` in
@@ -133,8 +138,9 @@ top level rather than into inherited state.
 > continues from where it failed instead of restarting, and a broken
 > `/etc/profile` cannot wedge the shell.
 
-> [spec:dash:def:main.read-profile-fn]
-> STATIC void read_profile(const char *name)
+**Dash source shape (`main.read-profile-fn`):**
+
+    STATIC void read_profile(const char *name)
 
 > [spec:dash:sem:main.read-profile-fn]
 > Source a startup file, tolerating its absence. Expand `name` first with
@@ -145,8 +151,9 @@ top level rather than into inherited state.
 > instead of an error, in which case return silently. Otherwise run
 > `cmdloop(0)` and `popfile()`.
 
-> [spec:dash:def:main.readcmdfile-fn]
-> void readcmdfile(char *name)
+**Dash source shape (`main.readcmdfile-fn`):**
+
+    void readcmdfile(char *name)
 
 > [spec:dash:sem:main.readcmdfile-fn]
 > Read a file of shell function definitions: `setinputfile(name,

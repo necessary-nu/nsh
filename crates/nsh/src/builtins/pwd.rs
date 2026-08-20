@@ -17,7 +17,6 @@ use crate::evaluation::Flow;
 use crate::options::Options;
 use crate::working_directory::{DirectoryUpdate, update_current_directory};
 
-// [spec:dash:def:cd.pwdcmd-fn]
 // [spec:dash:sem:cd.pwdcmd-fn]
 pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let options = parse_cd_options(shell, &mut Options::new(args))?;

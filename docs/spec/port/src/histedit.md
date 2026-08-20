@@ -11,8 +11,9 @@ For a Rust port this is the natural boundary to substitute an idiomatic
 line-editing crate: the contract is the behaviour of `fc`/`histcmd` and
 the history-recording calls, not the libedit API.
 
-> [spec:dash:def:histedit.fc-replace-fn]
-> STATIC const char * fc_replace(const char *s, char *p, char *r)
+**Dash source shape (`histedit.fc-replace-fn`):**
+
+    STATIC const char * fc_replace(const char *s, char *p, char *r)
 
 > [spec:dash:sem:histedit.fc-replace-fn]
 > Implement `fc`'s `old=new` substitution: copy `s` to the stack,
@@ -22,8 +23,9 @@ the history-recording calls, not the libedit API.
 > is destroyed as a side effect. Returns the result claimed off the
 > stack.
 
-> [spec:dash:def:histedit.histcmd-fn]
-> int histcmd(int argc, char **argv)
+**Dash source shape (`histedit.histcmd-fn`):**
+
+    int histcmd(int argc, char **argv)
 
 > [spec:dash:sem:histedit.histcmd-fn]
 > The `fc` builtin: list, edit or re-execute history events. Raises
@@ -84,8 +86,9 @@ the history-recording calls, not the libedit API.
 >
 > Finally decrement `active`, clear `displayhist`, and return 0.
 
-> [spec:dash:def:histedit.histedit-fn]
-> void histedit(void)
+**Dash source shape (`histedit.histedit-fn`):**
+
+    void histedit(void)
 
 > [spec:dash:sem:histedit.histedit-fn]
 > Bring history and line editing into line with the current options.
@@ -105,8 +108,9 @@ the history-recording calls, not the libedit API.
 >
 > **Non-interactive**: shut down both editing and history.
 
-> [spec:dash:def:histedit.not-fcnumber-fn]
-> int not_fcnumber(char *s)
+**Dash source shape (`histedit.not-fcnumber-fn`):**
+
+    int not_fcnumber(char *s)
 
 > [spec:dash:sem:histedit.not-fcnumber-fn]
 > Return whether `s` is *not* a history event number: 0 for NULL (so a
@@ -114,8 +118,9 @@ the history-recording calls, not the libedit API.
 > `is_number` applied after skipping one leading `-`. Used to stop
 > `getopt` before it misreads `-1` as an option.
 
-> [spec:dash:def:histedit.sethistsize-fn]
-> void sethistsize(const char *hs)
+**Dash source shape (`histedit.sethistsize-fn`):**
+
+    void sethistsize(const char *hs)
 
 > [spec:dash:sem:histedit.sethistsize-fn]
 > `HISTSIZE` change callback. When history is active, set its size to
@@ -133,8 +138,9 @@ the history-recording calls, not the libedit API.
 > `history_def_enter`, so shrinking `HISTSIZE` has no effect until the
 > next entry is added.
 
-> [spec:dash:def:histedit.setterm-fn]
-> void setterm(const char *term)
+**Dash source shape (`histedit.setterm-fn`):**
+
+    void setterm(const char *term)
 
 > [spec:dash:sem:histedit.setterm-fn]
 > Tell editline the terminal type. When both editing is active and
@@ -142,8 +148,9 @@ the history-recording calls, not the libedit API.
 > `"sh: Can't set terminal type %s\n"` and
 > `"sh: Using dumb terminal settings.\n"` and carry on.
 
-> [spec:dash:def:histedit.str-to-event-fn]
-> int str_to_event(const char *str, int last)
+**Dash source shape (`histedit.str-to-event-fn`):**
+
+    int str_to_event(const char *str, int last)
 
 > [spec:dash:sem:histedit.str-to-event-fn]
 > Convert an `fc` operand into a history event number. `last` says

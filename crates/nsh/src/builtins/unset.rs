@@ -11,7 +11,6 @@ use crate::options::Options;
 use crate::variables::{unset_bytes, variable_attributes};
 use bstr::BStr;
 
-// [spec:dash:def:var.unsetcmd-fn]
 // [spec:dash:sem:var.unsetcmd-fn]
 // [spec:posix:syn:builtin.unset.synopsis]
 // [spec:posix:req:builtin.unset.unset-names]

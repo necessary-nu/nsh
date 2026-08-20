@@ -132,7 +132,6 @@ fn read_input_line(
  *  @param len length of line including trailing '\0'
  */
 
-// [spec:dash:def:miscbltin.readcmd-handle-line-fn]
 // [spec:dash:sem:miscbltin.readcmd-handle-line-fn]
 // [spec:posix:req:builtin.read.ifs-empty]
 // [spec:posix:req:builtin.read.field-splitting-modified]
@@ -190,7 +189,6 @@ fn assign_read_fields(shell: &mut Shell, line: &mut BString, names: &[&BStr]) ->
  * This uses unbuffered input, which may be avoidable in some cases.
  */
 
-// [spec:dash:def:miscbltin.readcmd-fn]
 // [spec:dash:sem:miscbltin.readcmd-fn]
 // [spec:posix:syn:builtin.read.syn]
 // [spec:posix:req:builtin.read.logical-line]

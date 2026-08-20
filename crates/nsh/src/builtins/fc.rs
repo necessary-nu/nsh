@@ -115,9 +115,7 @@ fn scan_options(shell: &mut crate::context::Shell, args: &[&BStr]) -> Result<Fla
  *  This command is provided since POSIX decided to standardize
  *  the Korn shell fc command.  Oh well...
  */
-// [spec:dash:def:histedit.histcmd-fn]
 // [spec:dash:sem:histedit.histcmd-fn]
-// [spec:dash:def:myhistedit.histcmd-fn]
 // [spec:dash:sem:myhistedit.histcmd-fn]
 // [spec:posix:req:xcu.output-files.tmpdir]
 // [spec:posix:req:xcu.output-files.temp-file-naming]
@@ -479,7 +477,6 @@ fn listing_record(event: &HistoryEvent, numbered: bool) -> Vec<u8> {
     output
 }
 
-// [spec:dash:def:histedit.fc-replace-fn]
 // [spec:dash:sem:histedit.fc-replace-fn]
 //
 // The owned result makes both its byte length and lifetime explicit before
@@ -518,18 +515,14 @@ fn replace_history_text(hay: &BStr, pattern: &mut Option<BString>, replacement: 
     dest
 }
 
-// [spec:dash:def:histedit.not-fcnumber-fn]
 // [spec:dash:sem:histedit.not-fcnumber-fn]
-// [spec:dash:def:myhistedit.not-fcnumber-fn]
 // [spec:dash:sem:myhistedit.not-fcnumber-fn]
 pub fn is_event_number(word: &BStr) -> bool {
     let digits = word.strip_prefix(b"-").unwrap_or(word);
     !digits.is_empty() && digits.iter().all(u8::is_ascii_digit)
 }
 
-// [spec:dash:def:histedit.str-to-event-fn]
 // [spec:dash:sem:histedit.str-to-event-fn]
-// [spec:dash:def:myhistedit.str-to-event-fn]
 // [spec:dash:sem:myhistedit.str-to-event-fn]
 pub fn resolve_history_event(
     shell: &mut crate::context::Shell,

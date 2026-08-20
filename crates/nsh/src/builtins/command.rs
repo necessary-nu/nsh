@@ -15,7 +15,6 @@ use bstr::BStr;
 use crate::builtins::r#type::describe_command;
 use crate::evaluation::Flow;
 
-// [spec:dash:def:exec.commandcmd-fn]
 // [spec:dash:sem:exec.commandcmd-fn]
 // [spec:posix:syn:builtin.command.synopsis]
 // [spec:posix:req:builtin.command.v-options-report-interpretation]

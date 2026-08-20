@@ -1,7 +1,8 @@
 # src/bltin/times.c
 
-> [spec:dash:def:times.timescmd-fn]
-> int timescmd(int argc, char *argv[])
+**Dash source shape (`times.timescmd-fn`):**
+
+    int timescmd(int argc, char *argv[])
 
 > [spec:dash:sem:times.timescmd-fn]
 > The `times` builtin: report accumulated CPU time for the shell and for

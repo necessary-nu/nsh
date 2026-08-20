@@ -337,7 +337,6 @@ impl<'a> EofMark<'a> {
     }
 
     /// `#define realeofmark(m) ((m) && (m) != FAKEEOFMARK)` — src/parser.c
-    // [spec:dash:def:parser.realeofmark-fn]
     // [spec:dash:sem:parser.realeofmark-fn]
     fn real(self) -> Option<&'a BStr> {
         match self {
@@ -349,7 +348,6 @@ impl<'a> EofMark<'a> {
 
 // ---------------------------------------------------------------------
 
-// [spec:dash:def:parser.heredoc]
 /// A here-document delimiter waiting for its body at a grammar newline.
 pub struct PendingHereDocument {
     /// an expandable here-document uses double-quoted rather than
@@ -376,7 +374,6 @@ pub(crate) enum PendingRedirection {
     },
 }
 
-// [spec:dash:def:parser.synstack]
 /// One owned parse context. [`Rt1::synstack`] holds the contexts from the
 /// base level through the current level, so the C's `next` link is the
 /// preceding element and its `prev` link is spare `Vec` capacity left by a
@@ -417,7 +414,6 @@ impl Token {
     }
 }
 
-// [spec:dash:def:parser.isassignment-fn]
 // [spec:dash:sem:parser.isassignment-fn]
 pub fn is_assignment(locale: &nsh_platform::Locale, text: &BStr) -> bool {
     let end = name_end(locale, text);
@@ -427,7 +423,6 @@ pub fn is_assignment(locale: &nsh_platform::Locale, text: &BStr) -> bool {
     text.get(end) == Some(&b'=')
 }
 
-// [spec:dash:def:parser.issimplecmd-fn]
 // [spec:dash:sem:parser.issimplecmd-fn]
 pub fn is_simple_command(node: Option<&Node>, name: &BStr) -> bool {
     match node {
@@ -451,7 +446,6 @@ pub fn is_simple_command(node: Option<&Node>, name: &BStr) -> bool {
  * valid parse tree indicating a blank line.)
  */
 
-// [spec:dash:def:parser.parsecmd-fn]
 // [spec:dash:sem:parser.parsecmd-fn]
 // [spec:posix:syn:grammar.program]
 // [spec:posix:def:cmd.command-kinds]
@@ -475,7 +469,6 @@ pub fn parse_command(shell: &mut Shell, interactive: bool) -> Result<ParseResult
     Ok(result)
 }
 
-// [spec:dash:def:parser.list-fn]
 // [spec:dash:sem:parser.list-fn]
 // [spec:posix:syn:grammar.separators]
 // [spec:posix:def:cmd.list-definition]
@@ -580,7 +573,6 @@ fn list(shell: &mut Shell, mode: ListMode) -> Result<ParseResult, Error> {
     }
 }
 
-// [spec:dash:def:parser.andor-fn]
 // [spec:dash:sem:parser.andor-fn]
 // [spec:posix:syn:grammar.list-and-or]
 // [spec:posix:def:cmd.and-or-list-definition]
@@ -613,7 +605,6 @@ fn parse_and_or(shell: &mut Shell) -> Result<Option<Node>, Error> {
     }
 }
 
-// [spec:dash:def:parser.pipeline-fn]
 // [spec:dash:sem:parser.pipeline-fn]
 // [spec:posix:syn:grammar.pipeline]
 // [spec:posix:def:cmd.pipeline-definition]
@@ -664,7 +655,6 @@ fn pipeline(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Er
     }
 }
 
-// [spec:dash:def:parser.command-fn]
 // [spec:dash:sem:parser.command-fn]
 // [spec:posix:syn:grammar.command]
 // [spec:posix:syn:grammar.subshell-and-compound-list]
@@ -937,7 +927,6 @@ fn command(shell: &mut Shell, context: TokenContext) -> Result<Option<Node>, Err
     Ok(parsed_command)
 }
 
-// [spec:dash:def:parser.simplecmd-fn]
 // [spec:dash:sem:parser.simplecmd-fn]
 // [spec:posix:req:redir.not-in-command-arguments]
 // [spec:posix:syn:grammar.simple-command]
@@ -1044,7 +1033,6 @@ fn parse_simple_command(shell: &mut Shell) -> Result<Option<Node>, Error> {
     })))
 }
 
-// [spec:dash:def:parser.makename-fn]
 // [spec:dash:sem:parser.makename-fn]
 pub(crate) fn make_name_node(shell: &mut Shell) -> Node {
     Node::Word(WordNode {
@@ -1052,8 +1040,8 @@ pub(crate) fn make_name_node(shell: &mut Shell) -> Node {
     })
 }
 
-// [spec:dash:def:parser.parsefname-fn]
 // [spec:dash:sem:parser.parsefname-fn]
+// [spec:dash:sem:parser.fixredir-fn]
 // [spec:posix:req:redir.here-doc-quoted-delimiter]
 // [spec:posix:req:redir.here-doc-unquoted-delimiter]
 // [spec:posix:req:grammar.here-doc-redirection]
@@ -1134,7 +1122,6 @@ fn parse_redirection_target(
  * Input any here documents.
  */
 
-// [spec:dash:def:parser.parseheredoc-fn]
 // [spec:dash:sem:parser.parseheredoc-fn]
 // [spec:posix:req:redir.here-doc-line-continuation]
 // [spec:posix:req:redir.here-doc-backslash]
@@ -1194,7 +1181,6 @@ fn parse_here_documents(shell: &mut Shell) -> Result<(), Error> {
 // [spec:posix:req:token.alias-reserved-word-unspecified]
 // [spec:posix:req:token.alias-replacement]
 // [spec:posix:req:token.reserved-word-recognition-contexts]
-// [spec:dash:def:parser.readtoken-fn]
 // [spec:dash:sem:parser.readtoken-fn]
 pub(crate) fn read_token(shell: &mut Shell, mut context: TokenContext) -> Result<Token, Error> {
     let mut token: Token;
@@ -1257,7 +1243,6 @@ pub(crate) fn read_token(shell: &mut Shell, mut context: TokenContext) -> Result
     Ok(token)
 }
 
-// [spec:dash:def:parser.nlprompt-fn]
 // [spec:dash:sem:parser.nlprompt-fn]
 fn prompt_after_newline(shell: &mut Shell) -> Result<(), Error> {
     crate::plinno!(&mut shell.input) += 1;
@@ -1267,7 +1252,6 @@ fn prompt_after_newline(shell: &mut Shell) -> Result<(), Error> {
     Ok(())
 }
 
-// [spec:dash:def:parser.nlnoprompt-fn]
 // [spec:dash:sem:parser.nlnoprompt-fn]
 fn consume_newline_without_prompt(shell: &mut Shell) {
     crate::plinno!(&mut shell.input) += 1;
@@ -1283,7 +1267,6 @@ fn consume_newline_without_prompt(shell: &mut Shell) {
  *	the redirection.
  */
 
-// [spec:dash:def:parser.xxreadtoken-fn]
 // [spec:dash:sem:parser.xxreadtoken-fn]
 // [spec:posix:syn:grammar.token-classification]
 // [spec:posix:req:token.input-lines]
@@ -1400,7 +1383,6 @@ fn read_next_token(shell: &mut Shell, check_here_document_end: bool) -> Result<T
     }
 }
 
-// [spec:dash:def:parser.pgetc-eatbnl-fn]
 // [spec:dash:sem:parser.pgetc-eatbnl-fn]
 // [spec:posix:req:quote.backslash-newline]
 fn read_unit_skipping_line_continuations(shell: &mut Shell) -> Result<InputUnit, Error> {
@@ -1422,7 +1404,6 @@ fn read_unit_skipping_line_continuations(shell: &mut Shell) -> Result<InputUnit,
     Ok(input)
 }
 
-// [spec:dash:def:parser.pgetc-top-fn]
 // [spec:dash:sem:parser.pgetc-top-fn]
 fn read_unit_for_syntax(shell: &mut Shell, stack: &SyntaxFrame) -> Result<InputUnit, Error> {
     if stack.syntax == SyntaxContext::SingleQuoted {
@@ -1438,7 +1419,6 @@ mod word_lexer;
 
 pub(crate) use multibyte::MultibyteMode;
 
-// [spec:dash:def:parser.getmbc-fn]
 // [spec:dash:sem:parser.getmbc-fn]
 /// The destination is a fixed scratch buffer sized to what this writes.
 ///
@@ -1584,7 +1564,6 @@ fn decode_multibyte_character_at(
     Ok(multibyte_length)
 }
 
-// [spec:dash:def:parser.dollarsq-escape-fn]
 // [spec:dash:sem:parser.dollarsq-escape-fn]
 // [spec:posix:def:quote.dollar-single-quotes-escapes]
 // [spec:posix:def:quote.dollar-single-quotes-control-escape]
@@ -1708,7 +1687,6 @@ impl WordLexer<'_> {
     }
 }
 
-// [spec:dash:def:parser.readtoken1-fn]
 // [spec:dash:sem:parser.readtoken1-fn]
 // [spec:posix:req:shell.hashbang-unspecified]
 // [spec:posix:sem:shell.tokenization-and-parsing]
@@ -2450,7 +2428,6 @@ fn parse_arithmetic_expansion(shell: &mut Shell, lexer: &mut WordLexer<'_>) -> R
  * more letters, underscores, and digits).
  */
 
-// [spec:dash:def:parser.endofname-fn]
 // [spec:dash:sem:parser.endofname-fn]
 pub fn name_end(locale: &nsh_platform::Locale, name: &BStr) -> usize {
     let Some(&first) = name.first() else {
@@ -2471,7 +2448,6 @@ pub fn name_end(locale: &nsh_platform::Locale, name: &BStr) -> usize {
  * occur at this point.
  */
 
-// [spec:dash:def:parser.synexpect-fn]
 // [spec:dash:sem:parser.synexpect-fn]
 // [spec:nsh:req:idiom.no-artificial-limits]
 fn expected_token_error(shell: &mut Shell, expected: Option<TokenKind>) -> Error {
@@ -2487,7 +2463,6 @@ fn expected_token_error(shell: &mut Shell, expected: Option<TokenKind>) -> Error
     syntax_error(shell, &message)
 }
 
-// [spec:dash:def:parser.synerror-fn]
 // [spec:dash:sem:parser.synerror-fn]
 fn syntax_error(shell: &mut Shell, msg: &[u8]) -> Error {
     shell.evaluation.diagnostic_line = crate::plinno!(&mut shell.input);
@@ -2496,7 +2471,6 @@ fn syntax_error(shell: &mut Shell, msg: &[u8]) -> Error {
     shell.diagnostics().shell_error(&message)
 }
 
-// [spec:dash:def:parser.setprompt-fn]
 // [spec:dash:sem:parser.setprompt-fn]
 #[inline(never)]
 fn select_prompt(shell: &mut Shell, prompt: PromptKind) -> Result<(), Error> {
@@ -2515,7 +2489,6 @@ fn select_prompt(shell: &mut Shell, prompt: PromptKind) -> Result<(), Error> {
     Ok(())
 }
 
-// [spec:dash:def:parser.expandstr-fn]
 // [spec:dash:sem:parser.expandstr-fn]
 pub fn expand_string(shell: &mut Shell, source: &BStr) -> Result<BString, Error> {
     let saved_here_documents: Vec<PendingHereDocument>;
@@ -2613,7 +2586,6 @@ pub fn expand_string(shell: &mut Shell, source: &BStr) -> Result<BString, Error>
  *    should be added here.
  */
 
-// [spec:dash:def:parser.getprompt-fn]
 // [spec:dash:sem:parser.getprompt-fn]
 // [spec:posix:req:param.ps1]
 // [spec:posix:req:param.ps1-two-pass]
@@ -2665,7 +2637,6 @@ pub fn render_prompt(shell: &mut Shell) -> BString {
 }
 
 /// Recognize a reserved word and return its semantic token directly.
-// [spec:dash:def:parser.findkwd-fn]
 // [spec:dash:sem:parser.findkwd-fn]
 pub fn reserved_word(s: &BStr) -> Option<TokenKind> {
     RESERVED_WORDS
@@ -2678,13 +2649,11 @@ pub fn reserved_word(s: &BStr) -> Option<TokenKind> {
 // src/parser.h inline functions
 // ---------------------------------------------------------------------
 
-// [spec:dash:def:parser.goodname-fn]
 // [spec:dash:sem:parser.goodname-fn]
 pub fn is_valid_name(locale: &nsh_platform::Locale, name: &BStr) -> bool {
     name_end(locale, name) == name.len()
 }
 
-// [spec:dash:def:parser.parser-eof-fn]
 // [spec:dash:sem:parser.parser-eof-fn]
 pub fn parser_eof(shell: &Shell) -> bool {
     shell.input.token_pushed_back && shell.input.last_token == TokenKind::Eof

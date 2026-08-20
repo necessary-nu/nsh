@@ -14,7 +14,6 @@ use bstr::BStr;
 
 use crate::evaluation::Flow;
 
-// [spec:dash:def:eval.breakcmd-fn]
 // [spec:dash:sem:eval.breakcmd-fn]
 // [spec:posix:syn:builtin.break.syn]
 // [spec:posix:req:builtin.break.exit-nth-loop]

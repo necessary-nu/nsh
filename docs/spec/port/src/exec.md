@@ -24,8 +24,9 @@ only regular builtins).
 in the search at which builtins are considered, and `%func` marks a
 directory of files defining shell functions.
 
-> [spec:dash:def:exec.addcmdentry-fn]
-> STATIC void addcmdentry(char *name, struct cmdentry *entry)
+**Dash source shape (`exec.addcmdentry-fn`):**
+
+    STATIC void addcmdentry(char *name, struct cmdentry *entry)
 
 > [spec:dash:sem:exec.addcmdentry-fn]
 > Install `entry` under `name`, creating the table entry if needed. If the
@@ -33,8 +34,9 @@ directory of files defining shell functions.
 > is what makes redefining a function free the old body. Copy `cmdtype`
 > and the `param` union, and clear `rehash` since the entry is fresh.
 
-> [spec:dash:def:exec.changepath-fn]
-> void changepath(const char *newval)
+**Dash source shape (`exec.changepath-fn`):**
+
+    void changepath(const char *newval)
 
 > [spec:dash:sem:exec.changepath-fn]
 > `PATH` change callback, invoked *before* the variable is updated, so
@@ -44,8 +46,9 @@ directory of files defining shell functions.
 > `clearcmdentry()` to drop every cached resolution that the new path
 > could change.
 
-> [spec:dash:def:exec.clearcmdentry-fn]
-> STATIC void clearcmdentry(void)
+**Dash source shape (`exec.clearcmdentry-fn`):**
+
+    STATIC void clearcmdentry(void)
 
 > [spec:dash:sem:exec.clearcmdentry-fn]
 > Drop cached entries that a `PATH` change may invalidate. With
@@ -55,21 +58,24 @@ directory of files defining shell functions.
 > element and could now be shadowed by an executable. Functions and
 > regular builtins are never affected by `PATH` and are kept.
 
-> [spec:dash:def:exec.cmdentry]
-> struct cmdentry {
->   int cmdtype;
->   union param { int index; const struct builtincmd *cmd; struct funcnode *func; } u;
-> }
+**Dash source shape (`exec.cmdentry`):**
 
-> [spec:dash:def:exec.cmdentry.param]
-> union param {
->   int index;
->   const struct builtincmd *cmd;
->   struct funcnode *func;
-> }
+    struct cmdentry {
+      int cmdtype;
+      union param { int index; const struct builtincmd *cmd; struct funcnode *func; } u;
+    }
 
-> [spec:dash:def:exec.cmdlookup-fn]
-> tblentry * cmdlookup(const char *name, int add)
+**Dash source shape (`exec.cmdentry.param`):**
+
+    union param {
+      int index;
+      const struct builtincmd *cmd;
+      struct funcnode *func;
+    }
+
+**Dash source shape (`exec.cmdlookup-fn`):**
+
+    tblentry * cmdlookup(const char *name, int add)
 
 > [spec:dash:sem:exec.cmdlookup-fn]
 > Find `name` in the command table, optionally creating it. Hash by
@@ -88,8 +94,9 @@ directory of files defining shell functions.
 > link that points at the result, so `delete_cmd_entry` can unlink it
 > without searching again. Returns NULL when not found and `add` is 0.
 
-> [spec:dash:def:exec.commandcmd-fn]
-> int commandcmd(int argc, char **argv)
+**Dash source shape (`exec.commandcmd-fn`):**
+
+    int commandcmd(int argc, char **argv)
 
 > [spec:dash:sem:exec.commandcmd-fn]
 > The `command` builtin, in its describing role. Parse `-p`, `-v`, `-V`:
@@ -107,8 +114,9 @@ directory of files defining shell functions.
 > handled here: `eval.c` recognises it earlier and applies `DO_NOFUNC`
 > and the alternate path directly.
 
-> [spec:dash:def:exec.defun-fn]
-> void defun(union node *func)
+**Dash source shape (`exec.defun-fn`):**
+
+    void defun(union node *func)
 
 > [spec:dash:sem:exec.defun-fn]
 > Define a shell function. With interrupts suspended, build a
@@ -117,8 +125,9 @@ directory of files defining shell functions.
 > it came from will be reclaimed — and install it under
 > `func->ndefun.text`.
 
-> [spec:dash:def:exec.delete-cmd-entry-fn]
-> STATIC void delete_cmd_entry(void)
+**Dash source shape (`exec.delete-cmd-entry-fn`):**
+
+    STATIC void delete_cmd_entry(void)
 
 > [spec:dash:sem:exec.delete-cmd-entry-fn]
 > Remove the entry found by the most recent `cmdlookup`, using the saved
@@ -126,8 +135,9 @@ directory of files defining shell functions.
 > `freefunc` its body if it was a function, and free the entry. Calling
 > this without a preceding successful `cmdlookup` is undefined.
 
-> [spec:dash:def:exec.describe-command-fn]
-> static int describe_command(struct output *out, char *command, const char *path, int verbose)
+**Dash source shape (`exec.describe-command-fn`):**
+
+    static int describe_command(struct output *out, char *command, const char *path, int verbose)
 
 > [spec:dash:sem:exec.describe-command-fn]
 > Back end of `type` and `command -v`/`-V`. `verbose` selects `type`-style
@@ -160,8 +170,9 @@ directory of files defining shell functions.
 >
 > All other paths finish with a newline and return 0.
 
-> [spec:dash:def:exec.find-builtin-fn]
-> struct builtincmd * find_builtin(const char *name)
+**Dash source shape (`exec.find-builtin-fn`):**
+
+    struct builtincmd * find_builtin(const char *name)
 
 > [spec:dash:sem:exec.find-builtin-fn]
 > Binary-search the generated `builtincmd[]` table (`NUMBUILTINS` entries,
@@ -169,8 +180,9 @@ directory of files defining shell functions.
 > The table is produced at build time by `mkbuiltins` from
 > `builtins.def.in`.
 
-> [spec:dash:def:exec.find-command-fn]
-> void find_command(char *name, struct cmdentry *entry, int act, const char *path)
+**Dash source shape (`exec.find-command-fn`):**
+
+    void find_command(char *name, struct cmdentry *entry, int act, const char *path)
 
 > [spec:dash:sem:exec.find-command-fn]
 > Resolve `name` to a function, builtin or executable, filling `entry`.
@@ -227,19 +239,21 @@ directory of files defining shell functions.
 > `DO_ERR` warn `"<name>: <errmsg>"`. The shared success path clears
 > `rehash` and copies `cmdtype` and `param` into `entry`.
 
-> [spec:dash:def:exec.getcmdentry-fn]
-> void getcmdentry(char *name, struct cmdentry *entry)
+**Dash source shape (`exec.getcmdentry-fn`):**
 
-> [spec:dash:sem:exec.getcmdentry-fn]
+    void getcmdentry(char *name, struct cmdentry *entry)
+
+**Retired uncompiled helper (`exec.getcmdentry-fn`):**
 > Read the table entry for `name` into `entry` without searching `PATH`:
 > copy `param` and `cmdtype` on a hit, or set `CMDUNKNOWN` with
 > `index = 0` on a miss.
 >
-> The whole function is inside `#ifdef notdef` and is not compiled; Wave 2
-> need not port it.
+> The whole function is inside `#ifdef notdef` and is not compiled. It has
+> no target behavior to preserve.
 
-> [spec:dash:def:exec.hashcd-fn]
-> void hashcd(void)
+**Dash source shape (`exec.hashcd-fn`):**
+
+    void hashcd(void)
 
 > [spec:dash:sem:exec.hashcd-fn]
 > Called after a successful `cd`. Set `rehash` on every entry whose
@@ -249,8 +263,9 @@ directory of files defining shell functions.
 > revalidate lazily and skip re-searching absolute path elements, which
 > cannot have changed.
 
-> [spec:dash:def:exec.hashcmd-fn]
-> int hashcmd(int argc, char **argv)
+**Dash source shape (`exec.hashcmd-fn`):**
+
+    int hashcmd(int argc, char **argv)
 
 > [spec:dash:sem:exec.hashcmd-fn]
 > The `hash` builtin. With `-r`, `clearcmdentry()` and return 0. With no
@@ -262,8 +277,9 @@ directory of files defining shell functions.
 > DO_ERR, pathval())`, which repopulates the table and reports failures.
 > Return 1 if any operand was unresolvable, else 0.
 
-> [spec:dash:def:exec.legal-pathopt-fn]
-> static const char *legal_pathopt(const char *opt, const char *term, int magic)
+**Dash source shape (`exec.legal-pathopt-fn`):**
+
+    static const char *legal_pathopt(const char *opt, const char *term, int magic)
 
 > [spec:dash:sem:exec.legal-pathopt-fn]
 > Decide whether the text at `opt` (just past a `%`) is a recognised path
@@ -275,15 +291,17 @@ directory of files defining shell functions.
 > Finally, a `%` at the resulting position is stepped over, so
 > back-to-back options are handled.
 
-> [spec:dash:def:exec.padvance-fn]
-> static inline int padvance(const char **path, const char *name)
+**Dash source shape (`exec.padvance-fn`):**
+
+    static inline int padvance(const char **path, const char *name)
 
 > [spec:dash:sem:exec.padvance-fn]
 > `padvance_magic(path, name, 1)` — the ordinary path walk, recognising
 > only `%builtin` and `%func`.
 
-> [spec:dash:def:exec.padvance-magic-fn]
-> int padvance_magic(const char **path, const char *name, int magic)
+**Dash source shape (`exec.padvance-magic-fn`):**
+
+    int padvance_magic(const char **path, const char *name, int magic)
 
 > [spec:dash:sem:exec.padvance-magic-fn]
 > Produce the next candidate path for `name` by consuming one element of
@@ -315,8 +333,9 @@ directory of files defining shell functions.
 > result, and `mail.c` relies on the trailing `/` when it passes an empty
 > `name`.
 
-> [spec:dash:def:exec.printentry-fn]
-> STATIC void printentry(struct tblentry *cmdp)
+**Dash source shape (`exec.printentry-fn`):**
+
+    STATIC void printentry(struct tblentry *cmdp)
 
 > [spec:dash:sem:exec.printentry-fn]
 > Print one hashed command as its full path. Replay `padvance` over
@@ -324,8 +343,9 @@ directory of files defining shell functions.
 > from, take the result from `stackblock()`, and print it followed by
 > `*` if the entry is marked for rehashing, else nothing, and a newline.
 
-> [spec:dash:def:exec.shellexec-fn]
-> void shellexec(char **argv, const char *path, int idx)
+**Dash source shape (`exec.shellexec-fn`):**
+
+    void shellexec(char **argv, const char *path, int idx)
 
 > [spec:dash:sem:exec.shellexec-fn]
 > Replace this process with the command in `argv`. Never returns. `idx`
@@ -344,17 +364,19 @@ directory of files defining shell functions.
 > everything else ("found but not executable"). Set `exitstatus` and
 > raise `exerror(EXEND, "%s: %s", argv[0], errmsg(e, E_EXEC))`.
 
-> [spec:dash:def:exec.tblentry]
-> struct tblentry {
->   struct tblentry *next;
->   union param param;
->   short cmdtype;
->   char rehash;
->   char cmdname[ARB];
-> }
+**Dash source shape (`exec.tblentry`):**
 
-> [spec:dash:def:exec.test-access-fn]
-> int test_access(const struct stat64 *sp, int stmode)
+    struct tblentry {
+      struct tblentry *next;
+      union param param;
+      short cmdtype;
+      char rehash;
+      char cmdname[ARB];
+    }
+
+**Dash source shape (`exec.test-access-fn`):**
+
+    int test_access(const struct stat64 *sp, int stmode)
 
 > [spec:dash:sem:exec.test-access-fn]
 > Decide whether the current process may access a file with the given
@@ -380,8 +402,9 @@ directory of files defining shell functions.
 > which `test -w` on a read-only filesystem still reports the write bit,
 > and avoids `access()`'s uselessly permissive answers for root.
 
-> [spec:dash:def:exec.test-exec-fn]
-> static int test_exec(const char *fullname, struct stat64 *statb)
+**Dash source shape (`exec.test-exec-fn`):**
+
+    static int test_exec(const char *fullname, struct stat64 *statb)
 
 > [spec:dash:sem:exec.test-exec-fn]
 > Return whether `fullname` is something the shell may execute. It must
@@ -390,8 +413,9 @@ directory of files defining shell functions.
 > checks; otherwise fall back to `test_file_access(fullname, X_OK)` where
 > `faccessat` exists, or `test_access(statb, X_OK)` where it does not.
 
-> [spec:dash:def:exec.test-file-access-fn]
-> int test_file_access(const char *path, int mode)
+**Dash source shape (`exec.test-file-access-fn`):**
+
+    int test_file_access(const char *path, int mode)
 
 > [spec:dash:sem:exec.test-file-access-fn]
 > `faccessat(AT_FDCWD, path, mode, AT_EACCESS)` inverted to a
@@ -406,8 +430,9 @@ directory of files defining shell functions.
 > bit — matching the POSIX superuser rule that `test_access` implements
 > directly.
 
-> [spec:dash:def:exec.tryexec-fn]
-> STATIC void tryexec(char *cmd, char **argv, char **envp)
+**Dash source shape (`exec.tryexec-fn`):**
+
+    STATIC void tryexec(char *cmd, char **argv, char **envp)
 
 > [spec:dash:sem:exec.tryexec-fn]
 > Attempt one `execve(cmd, argv, envp)`, retrying on `EINTR` under SYSV.
@@ -423,8 +448,9 @@ directory of files defining shell functions.
 > `argv[0] == <command name>` relative to the original vector; retry. Writing below `argv[0]` is safe because
 > callers construct the vector with a spare leading slot.
 
-> [spec:dash:def:exec.typecmd-fn]
-> int typecmd(int argc, char **argv)
+**Dash source shape (`exec.typecmd-fn`):**
+
+    int typecmd(int argc, char **argv)
 
 > [spec:dash:sem:exec.typecmd-fn]
 > The `type` builtin: consume options with `nextopt(nullstr)`, then
@@ -432,8 +458,9 @@ directory of files defining shell functions.
 > each operand, OR-ing the results so the status is non-zero if any name
 > was unknown.
 
-> [spec:dash:def:exec.unsetfunc-fn]
-> void unsetfunc(const char *name)
+**Dash source shape (`exec.unsetfunc-fn`):**
+
+    void unsetfunc(const char *name)
 
 > [spec:dash:sem:exec.unsetfunc-fn]
 > Delete `name`'s function definition if it has one: look it up and, only

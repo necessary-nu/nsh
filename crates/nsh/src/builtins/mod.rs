@@ -245,7 +245,6 @@ pub(crate) static EMPTY_BUILTIN: BuiltinSpec = BuiltinSpec {
     attributes: BuiltinAttributes::REGULAR,
 };
 
-// [spec:dash:def:eval.bltincmd-fn]
 // [spec:dash:sem:eval.bltincmd-fn]
 fn execute_builtin(
     shell: &mut crate::context::Shell,

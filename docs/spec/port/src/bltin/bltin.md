@@ -8,10 +8,11 @@ stdio-ish names those sources use (`printf`, `putchar`, `warnx`,
 capture `argv[0]` into `commandname`, aborting with `"Argc is zero\n"`
 when there is none.
 
-> [spec:dash:def:bltin.echocmd-fn]
-> int echocmd(int, char **)
+**Dash source shape (`bltin.echocmd-fn`):**
 
-> [spec:dash:sem:bltin.echocmd-fn]
+    int echocmd(int, char **)
+
+**Retired duplicate declaration (`bltin.echocmd-fn`):**
 > The `echo` builtin, declared here and defined in `printf.c` (see
 > `printf.echocmd-fn` for the full semantics). In outline: an initial
 > `-n` suppresses the trailing newline; each remaining argument is

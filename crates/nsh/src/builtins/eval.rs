@@ -15,7 +15,6 @@ use crate::error::Error;
 use crate::evaluation::{EvaluationContext, Flow, evaluate_string};
 use bstr::{BStr, BString, ByteSlice};
 
-// [spec:dash:def:eval.evalcmd-fn]
 // [spec:dash:sem:eval.evalcmd-fn]
 // [spec:posix:syn:builtin.evaluation.syn]
 // [spec:posix:req:builtin.evaluation.construct-and-execute]

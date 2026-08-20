@@ -25,14 +25,12 @@ impl JobState {
     }
 }
 
-// [spec:dash:def:jobs.procstat]
 pub(crate) struct ProcessRecord {
     pub(crate) process_id: ProcessId,
     pub(crate) status: Option<ChildStatus>,
     pub(crate) command_text: BString,
 }
 
-// [spec:dash:def:jobs.job]
 pub(crate) struct Job {
     pub(crate) processes: Vec<ProcessRecord>,
     pub(crate) stop_status: Option<ChildStatus>,
@@ -166,7 +164,6 @@ pub(crate) struct JobTable {
     pub(crate) job_warning: JobWarning,
 }
 
-// [spec:dash:def:jobs.set-curjob-fn]
 // [spec:dash:sem:jobs.set-curjob-fn]
 impl JobTable {
     pub(crate) const fn new() -> Self {

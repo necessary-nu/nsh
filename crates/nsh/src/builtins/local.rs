@@ -14,7 +14,6 @@ use bstr::BStr;
 use crate::evaluation::Flow;
 use crate::variables::{VariableAttributes, make_local_bytes};
 
-// [spec:dash:def:var.localcmd-fn]
 // [spec:dash:sem:var.localcmd-fn]
 pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     if !shell.variables.in_function() {

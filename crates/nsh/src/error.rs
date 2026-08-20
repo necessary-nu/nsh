@@ -229,10 +229,8 @@ pub fn interrupt_pending() -> bool {
 /// non-local jump, and `panic = "abort"` cannot break it.
 /// `docs/api-design.md` §3.4 wants this half in `nsh-cli` eventually; it
 /// is a frontend boundary question and not this node's.
-// [spec:dash:def:error.onint-fn]
 // [spec:dash:sem:error.onint-fn]
 // [spec:nsh:def:idiom.shell-options]
-// [spec:dash:def:system.sigclearmask-fn]
 // [spec:dash:sem:system.sigclearmask-fn]
 fn interrupt_error(context: InterruptContext) -> Error {
     crate::signal_inbox::signals().set_interrupt_pending(false);
@@ -629,11 +627,9 @@ impl Diagnostics<'_> {
      * error/warning routines for external builtins
      */
 
-    // [spec:dash:def:error.sh-warnx-fn]
     // [spec:dash:sem:error.sh-warnx-fn]
     /// Write a diagnostic with the `sh: 17: cd: ` prefix the shell puts on
     /// one, to the shell's own unbuffered stderr.
-    // [spec:dash:def:error.exvwarning2-fn]
     // [spec:dash:sem:error.exvwarning2-fn]
     pub fn shell_warning(&mut self, msg: &[u8]) {
         let name = self.argument_zero.unwrap_or(BStr::new(b"sh"));
@@ -664,7 +660,6 @@ impl Diagnostics<'_> {
  * Action describes the operation that got the error.
  */
 
-// [spec:dash:def:error.errmsg-fn]
 // [spec:dash:sem:error.errmsg-fn]
 // [spec:nsh:req:idiom.platform-errors]
 pub fn error_message(
@@ -859,7 +854,6 @@ mod tests {
     /// what makes the mutation inside it atomic against a signal. This is
     /// the one property that distinguishes "delivery moved to a poll
     /// site" from "delivery moved anywhere at all".
-    // [spec:dash:sem:error.inton-fn/test]
     // [spec:nsh:sem:idiom.interrupt-deferral/test]
     #[test]
     fn nested_deferral_restores_depth() {

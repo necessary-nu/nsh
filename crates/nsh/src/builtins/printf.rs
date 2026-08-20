@@ -99,7 +99,6 @@ impl<'a> Operands<'a> {
     }
 
     /// One argument's first byte, or 0 once they are exhausted.
-    // [spec:dash:def:printf.getchr-fn]
     // [spec:dash:sem:printf.getchr-fn]
     fn next_character(&mut self) -> u8 {
         self.next_word()
@@ -108,7 +107,6 @@ impl<'a> Operands<'a> {
     }
 
     /// One argument, or the empty string once they are exhausted.
-    // [spec:dash:def:printf.getstr-fn]
     // [spec:dash:sem:printf.getstr-fn]
     fn next_string(&mut self) -> &'a [u8] {
         self.next_word().map_or(&[][..], |word| &word[..])
@@ -118,7 +116,6 @@ impl<'a> Operands<'a> {
     ///
     /// `signed` picks between the C's `strtoimax` and `strtoumax`, which
     /// differ in where they saturate; both read base 0.
-    // [spec:dash:def:printf.getuintmax-fn]
     // [spec:dash:sem:printf.getuintmax-fn]
     fn next_unsigned(&mut self, shell: &mut crate::context::Shell, signed: bool) -> u64 {
         let Some(word) = self.next_word() else {
@@ -140,7 +137,6 @@ impl<'a> Operands<'a> {
 
     /// One argument as a floating-point value, or 0 once they are
     /// exhausted.
-    // [spec:dash:def:printf.getdouble-fn]
     // [spec:dash:sem:printf.getdouble-fn]
     fn next_float(&mut self, shell: &mut crate::context::Shell) -> f64 {
         let Some(word) = self.next_word() else {
@@ -164,7 +160,6 @@ impl<'a> Operands<'a> {
     /// 1 while the builtin goes on printing the value it did derive --
     /// text left over is the louder complaint of the two, so it is
     /// checked first, exactly as the C checked `*ep` before `errno`.
-    // [spec:dash:def:printf.check-conversion-fn]
     // [spec:dash:sem:printf.check-conversion-fn]
     fn check_conversion(
         &mut self,
@@ -606,7 +601,6 @@ fn span(bytes: &[u8], at: usize, set: &[u8]) -> usize {
 /// formatted a run of `X`s of the same length, let `printf` compute the
 /// padding around them, then copied the real bytes back over the run.
 /// Laying out bytes needs no stand-in.
-// [spec:dash:def:printf.print-escape-str-fn]
 // [spec:dash:sem:printf.print-escape-str-fn]
 fn write_escaped_text(
     shell: &mut crate::context::Shell,
@@ -619,7 +613,6 @@ fn write_escaped_text(
     Ok(done)
 }
 
-// [spec:dash:def:printf.printfcmd-fn]
 // [spec:dash:sem:printf.printfcmd-fn]
 pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     let mut options = crate::options::Options::new(args);

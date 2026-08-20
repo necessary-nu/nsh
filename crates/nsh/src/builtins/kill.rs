@@ -30,7 +30,6 @@ fn process_target(value: i32) -> nsh_platform::ProcessTarget {
     }
 }
 
-// [spec:dash:def:jobs.killcmd-fn]
 // [spec:dash:sem:jobs.killcmd-fn]
 // [spec:posix:syn:builtin.kill.synopsis]
 // [spec:posix:syn:builtin.kill.synopsis-xsi]

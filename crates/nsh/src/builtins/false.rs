@@ -7,7 +7,6 @@ use crate::error::Error;
 use crate::evaluation::Flow;
 use bstr::BStr;
 
-// [spec:dash:def:eval.falsecmd-fn]
 // [spec:dash:sem:eval.falsecmd-fn]
 pub fn run(_shell: &mut Shell, _args: &[&BStr]) -> Result<Flow, Error> {
     Ok(Flow::Done((1).into()))

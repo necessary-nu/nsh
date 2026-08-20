@@ -26,7 +26,6 @@ use std::io::{self, Write};
 
 const OUTPUT_BUFFER_SIZE: usize = 8192; /* BUFSIZ */
 
-// [spec:dash:def:output.output]
 pub struct Output {
     /// Optional pending-output storage. `None` preserves dash's lazy
     /// allocation state; `Some(_)` is the initialized buffer state.
@@ -94,13 +93,11 @@ impl ShellIo {
         &mut self.previous_stderr
     }
 
-    // [spec:dash:def:output.flushall-fn]
     // [spec:dash:sem:output.flushall-fn]
     pub(crate) fn flush_all(&mut self) -> io::Result<()> {
         self.stdout.flush()
     }
 
-    // [spec:dash:def:output.freestdout-fn]
     // [spec:dash:sem:output.freestdout-fn]
     pub(crate) fn reset_stdout(&mut self) {
         self.stdout.discard();
@@ -207,11 +204,8 @@ pub enum OutputDestination {
 
 // The C's `outmem`, `outstr`, and `outcslow` compatibility entry points have
 // no wrappers here. Callers compose the standard writer contract directly.
-// [spec:dash:def:output.outmem-fn]
 // [spec:dash:sem:output.outmem-fn]
-// [spec:dash:def:output.outstr-fn]
 // [spec:dash:sem:output.outstr-fn]
-// [spec:dash:def:output.outcslow-fn]
 // [spec:dash:sem:output.outcslow-fn]
 
 struct OutputFormatter<'a> {
@@ -277,7 +271,6 @@ impl Write for Output {
     /// The C had a free function over a `struct output *`; the port's is the
     /// trait method, because a writer that cannot be flushed through
     /// `Write::flush` is not a writer.
-    // [spec:dash:def:output.flushout-fn]
     // [spec:dash:sem:output.flushout-fn]
     fn flush(&mut self) -> io::Result<()> {
         let len = self.buffer.as_ref().map_or(0, Vec::len);
@@ -327,15 +320,11 @@ fn write_descriptor_once(
 }
 
 // The C's `xwrite` is the platform layer's fallible `write_all` operation.
-// [spec:dash:def:output.xwrite-fn]
 // [spec:dash:sem:output.xwrite-fn]
 
 // The reference's unused C-stdio routines have no Rust counterparts.
-// [spec:dash:def:output.initstreams-fn]
 // [spec:dash:sem:output.initstreams-fn]
-// [spec:dash:def:output.openmemout-fn]
 // [spec:dash:sem:output.openmemout-fn]
-// [spec:dash:def:output.closememout-fn]
 // [spec:dash:sem:output.closememout-fn]
 
 /* ------------------------------------------------------------------ */
@@ -343,7 +332,6 @@ fn write_descriptor_once(
 /* ------------------------------------------------------------------ */
 
 // The C's `outc` macro is `Write::write_all` over a one-byte slice.
-// [spec:dash:def:output.outc-fn]
 // [spec:dash:sem:output.outc-fn]
 
 /* The five `out1*`/`out2*` macros in output.h — `out1c`, `out2c`,

@@ -48,7 +48,6 @@ fn write_listing(
     shell.write_output(OutputDestination::Stdout, &line)
 }
 
-// [spec:dash:def:trap.trapcmd-fn]
 // [spec:dash:sem:trap.trapcmd-fn]
 // [spec:posix:syn:builtin.trap.synopsis]
 // [spec:posix:req:builtin.trap.operand-interpretation]

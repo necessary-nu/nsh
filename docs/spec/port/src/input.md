@@ -31,20 +31,21 @@ not seekable), `bufferable` says whether reading ahead is safe at all,
 and `pip`/`pending` hold a pipe and a byte count used to "un-read" data
 via `tee` when it is not.
 
-> [spec:dash:def:input.stdin-state]
-> MKINIT struct stdin_state {
->   off_t seekable;
->   int pip[2];
->   int pending;
->   tcflag_t bufferable;
-> }
->
-> Note: this type is absent from `plan/.port-manifest.styx` — the `MKINIT`
-> marker on the line before the declaration defeated the extractor. The
-> rule and its sidecar annotation are hand-added.
+**Dash source shape (`input.stdin-state`):**
 
-> [spec:dash:def:input.flush-input-fn]
-> void __attribute__((noinline)) flush_input(void)
+    MKINIT struct stdin_state {
+      off_t seekable;
+      int pip[2];
+      int pending;
+      tcflag_t bufferable;
+    }
+
+    The historical extractor missed this type because the `MKINIT` marker on
+    the preceding line defeated it. The shape remains provenance prose only.
+
+**Dash source shape (`input.flush-input-fn`):**
+
+    void __attribute__((noinline)) flush_input(void)
 
 > [spec:dash:sem:input.flush-input-fn]
 > Give back input that was read ahead from fd 0 but not consumed, so
@@ -59,8 +60,9 @@ via `tee` when it is not.
 > actually consumed from fd 0, so only the surplus needs discarding.
 > Then zero both `nleft` and `lleft`. Restore interrupts.
 
-> [spec:dash:def:input.flush-tee-fn]
-> static void flush_tee(void *buf, int nr, int pending)
+**Dash source shape (`input.flush-tee-fn`):**
+
+    static void flush_tee(void *buf, int nr, int pending)
 
 > [spec:dash:sem:input.flush-tee-fn]
 > Consume `pending` bytes from fd 0 into the scratch buffer `buf` of size
@@ -70,8 +72,9 @@ via `tee` when it is not.
 > the loop spins in that case — acceptable because it is only reached
 > when the bytes are known to be present in the pipe.
 
-> [spec:dash:def:input.freestrings-fn]
-> static void freestrings(struct strpush *sp)
+**Dash source shape (`input.freestrings-fn`):**
+
+    static void freestrings(struct strpush *sp)
 
 > [spec:dash:sem:input.freestrings-fn]
 > Release the deferred `strpush` chain starting at `sp`. With interrupts
@@ -82,15 +85,17 @@ via `tee` when it is not.
 > it is the level's inline `basestrpush`, which is not separately
 > allocated. Finally clear `parsefile->spfree`.
 
-> [spec:dash:def:input.input-get-lleft-fn]
-> static inline int input_get_lleft(struct parsefile *pf)
+**Dash source shape (`input.input-get-lleft-fn`):**
+
+    static inline int input_get_lleft(struct parsefile *pf)
 
 > [spec:dash:sem:input.input-get-lleft-fn]
 > Return `pf->lleft`, or the constant 0 under `SMALL`, where the field
 > does not exist because the small build reads one character at a time.
 
-> [spec:dash:def:input.input-init-fn]
-> void input_init(void)
+**Dash source shape (`input.input-init-fn`):**
+
+    void input_init(void)
 
 > [spec:dash:sem:input.input-init-fn]
 > Determine what fd 0 supports. `tcgetattr(0, &tios) + 1` is non-zero
@@ -101,29 +106,32 @@ via `tee` when it is not.
 > the descriptor is not seekable) and set `bufferable` to whether it is —
 > if we can seek backwards afterwards, reading ahead is safe.
 
-> [spec:dash:def:input.input-set-lleft-fn]
-> static inline void input_set_lleft(struct parsefile *pf, int len)
+**Dash source shape (`input.input-set-lleft-fn`):**
+
+    static inline void input_set_lleft(struct parsefile *pf, int len)
 
 > [spec:dash:sem:input.input-set-lleft-fn]
 > Store `len` into `pf->lleft`; a no-op under `SMALL`.
 
-> [spec:dash:def:input.parsefile]
-> struct parsefile {
->   struct parsefile *prev;
->   int linno;
->   int fd;
->   int nleft;
->   int eof;
->   char *nextc;
->   char *buf;
->   struct strpush *strpush;
->   struct strpush basestrpush;
->   struct strpush *spfree;
->   int unget;
-> }
+**Dash source shape (`input.parsefile`):**
 
-> [spec:dash:def:input.pgetc-eoa-fn]
-> int pgetc_eoa(void)
+    struct parsefile {
+      struct parsefile *prev;
+      int linno;
+      int fd;
+      int nleft;
+      int eof;
+      char *nextc;
+      char *buf;
+      struct strpush *strpush;
+      struct strpush basestrpush;
+      struct strpush *spfree;
+      int unget;
+    }
+
+**Dash source shape (`input.pgetc-eoa-fn`):**
+
+    int pgetc_eoa(void)
 
 > [spec:dash:sem:input.pgetc-eoa-fn]
 > Like `pgetc`, but return `PEOA` at the end of an alias instead of
@@ -132,8 +140,9 @@ via `tee` when it is not.
 > alias; otherwise defers to `pgetc`. The parser uses this where the end
 > of an alias is syntactically significant.
 
-> [spec:dash:def:input.pgetc-fn]
-> int __attribute__((noinline)) pgetc(void)
+**Dash source shape (`input.pgetc-fn`):**
+
+    int __attribute__((noinline)) pgetc(void)
 
 > [spec:dash:sem:input.pgetc-fn]
 > Read the next input character, or `PEOF` at end of input. Values are
@@ -157,15 +166,17 @@ via `tee` when it is not.
 > the remaining `nleft` bytes down over it and retrying; the normal build
 > strips NULs in `preadbuffer` instead.
 
-> [spec:dash:def:input.popallfiles-fn]
-> void popallfiles(void)
+**Dash source shape (`input.popallfiles-fn`):**
+
+    void popallfiles(void)
 
 > [spec:dash:sem:input.popallfiles-fn]
 > `unwindfiles(toppf)` — pop back to the top-level input, which is
 > `basepf` unless a non-pushing `setinputfd` moved `toppf`.
 
-> [spec:dash:def:input.popfile-fn]
-> void popfile(void)
+**Dash source shape (`input.popfile-fn`):**
+
+    void popfile(void)
 
 > [spec:dash:sem:input.popfile-fn]
 > Pop one input level. With interrupts suspended, make `prev` current and
@@ -197,8 +208,9 @@ via `tee` when it is not.
 > again and the next `q` reports "not found". Do not release the chain;
 > that is a behaviour change, not a leak fix.
 
-> [spec:dash:def:input.popstring-fn]
-> static void popstring(void)
+**Dash source shape (`input.popstring-fn`):**
+
+    static void popstring(void)
 
 > [spec:dash:sem:input.popstring-fn]
 > Undo one `pushstring`. With interrupts suspended: when the push came
@@ -212,8 +224,9 @@ via `tee` when it is not.
 > and put it on `spfree` rather than freeing it — the deferred free is
 > what keeps the alias marked in-use until the next `pgetc`.
 
-> [spec:dash:def:input.preadbuffer-fn]
-> static int preadbuffer(void)
+**Dash source shape (`input.preadbuffer-fn`):**
+
+    static int preadbuffer(void)
 
 > [spec:dash:sem:input.preadbuffer-fn]
 > Refill the buffer and return the next character. Returns `PEOF` at end
@@ -250,8 +263,9 @@ via `tee` when it is not.
 > restore the saved character, and return the first character, advancing
 > `nextc`.
 
-> [spec:dash:def:input.preadfd-fn]
-> static int preadfd(void)
+**Dash source shape (`input.preadfd-fn`):**
+
+    static int preadfd(void)
 
 > [spec:dash:sem:input.preadfd-fn]
 > Fill the buffer from the current descriptor, returning the number of
@@ -281,16 +295,18 @@ via `tee` when it is not.
 > `"sh: turning off NDELAY mode"` and retry, recovering from a caller
 > that left stdin non-blocking.
 
-> [spec:dash:def:input.pungetc-fn]
-> void pungetc(void)
+**Dash source shape (`input.pungetc-fn`):**
+
+    void pungetc(void)
 
 > [spec:dash:sem:input.pungetc-fn]
 > Undo one `pgetc`. Push back `1 - (eof & 1)` characters — so a `PEOF`
 > that was synthesised rather than read consumes no buffer position — and
 > clear the low `eof` bit, making the end-of-file readable again.
 
-> [spec:dash:def:input.pungetn-fn]
-> void pungetn(int n)
+**Dash source shape (`input.pungetn-fn`):**
+
+    void pungetn(int n)
 
 > [spec:dash:sem:input.pungetn-fn]
 > Add `n` to the level's `unget` counter, pushing back that many
@@ -298,8 +314,9 @@ via `tee` when it is not.
 > The buffer reserves `PUNGETC_MAX` bytes of history, which bounds how
 > far back this is valid.
 
-> [spec:dash:def:input.pushfile-fn]
-> STATIC void pushfile(void)
+**Dash source shape (`input.pushfile-fn`):**
+
+    STATIC void pushfile(void)
 
 > [spec:dash:sem:input.pushfile-fn]
 > Push a new, zeroed input level: allocate a `struct parsefile`,
@@ -308,8 +325,9 @@ via `tee` when it is not.
 > what leaves `nleft`, `eof`, `strpush` and `unget` in their initial
 > states.
 
-> [spec:dash:def:input.pushstdin-fn]
-> void pushstdin(void)
+**Dash source shape (`input.pushstdin-fn`):**
+
+    void pushstdin(void)
 
 > [spec:dash:sem:input.pushstdin-fn]
 > Temporarily switch to reading from the base level: link `basepf.prev`
@@ -317,8 +335,9 @@ via `tee` when it is not.
 > must consume from fd 0 rather than from the script being executed.
 > Undone by `popfile`.
 
-> [spec:dash:def:input.pushstring-fn]
-> void pushstring(char *s, void *ap)
+**Dash source shape (`input.pushstring-fn`):**
+
+    void pushstring(char *s, void *ap)
 
 > [spec:dash:sem:input.pushstring-fn]
 > Push `s` to be read before the rest of the current input — the
@@ -331,16 +350,18 @@ via `tee` when it is not.
 > Then point `nextc` at `s` with `nleft = strlen(s)`, and reset `unget`
 > and `spfree` to 0 — pushbacks do not cross a string boundary.
 
-> [spec:dash:def:input.reset-input-fn]
-> void reset_input(void)
+**Dash source shape (`input.reset-input-fn`):**
+
+    void reset_input(void)
 
 > [spec:dash:sem:input.reset-input-fn]
 > Forget everything cached about fd 0: set `stdin_istty` to -1 so
 > `stdin_bufferable` re-probes, clear `basepf.eof` so end-of-file is
 > re-tested, and `flush_input()` to give back any read-ahead.
 
-> [spec:dash:def:input.setinputfd-fn]
-> static void setinputfd(int fd, int push)
+**Dash source shape (`input.setinputfd-fn`):**
+
+    static void setinputfd(int fd, int push)
 
 > [spec:dash:sem:input.setinputfd-fn]
 > Make `fd` the input source. Must be called with interrupts off.
@@ -349,8 +370,9 @@ via `tee` when it is not.
 > makes `popallfiles` stop here. Store the descriptor and allocate an
 > `IBUFSIZ` buffer.
 
-> [spec:dash:def:input.setinputfile-fn]
-> int setinputfile(const char *fname, int flags)
+**Dash source shape (`input.setinputfile-fn`):**
+
+    int setinputfile(const char *fname, int flags)
 
 > [spec:dash:sem:input.setinputfile-fn]
 > Open `fname` and read from it. `flags` may carry `INPUT_PUSH_FILE`
@@ -361,8 +383,9 @@ via `tee` when it is not.
 > with it; then `setinputfd`. Return the descriptor, or the negative
 > `sh_open` result.
 
-> [spec:dash:def:input.setinputstring-fn]
-> void setinputstring(char *string)
+**Dash source shape (`input.setinputstring-fn`):**
+
+    void setinputstring(char *string)
 
 > [spec:dash:sem:input.setinputstring-fn]
 > Read from a string rather than a descriptor — how `eval` and command
@@ -376,23 +399,26 @@ via `tee` when it is not.
 > through it, so a level that copies the string into its own buffer is
 > behaviour for behaviour.
 
-> [spec:dash:def:input.stdin-bufferable-fn]
-> static bool stdin_bufferable(void)
+**Dash source shape (`input.stdin-bufferable-fn`):**
+
+    static bool stdin_bufferable(void)
 
 > [spec:dash:sem:input.stdin-bufferable-fn]
 > Return whether reading ahead on fd 0 is safe, calling `input_init()`
 > first if the state has never been probed (`stdin_istty < 0`).
 
-> [spec:dash:def:input.stdin-clear-nonblock-fn]
-> static int stdin_clear_nonblock(void)
+**Dash source shape (`input.stdin-clear-nonblock-fn`):**
+
+    static int stdin_clear_nonblock(void)
 
 > [spec:dash:sem:input.stdin-clear-nonblock-fn]
 > Clear `O_NONBLOCK` on fd 0: `F_GETFL`, mask the bit off, `F_SETFL`.
 > Returns the final `fcntl` result, negative on failure — including when
 > the initial `F_GETFL` failed, in which case nothing is attempted.
 
-> [spec:dash:def:input.stdin-tee-fn]
-> static int stdin_tee(void *buf, int nr)
+**Dash source shape (`input.stdin-tee-fn`):**
+
+    static int stdin_tee(void *buf, int nr)
 
 > [spec:dash:sem:input.stdin-tee-fn]
 > Copy up to `nr` bytes of fd 0's pending input into a private pipe
@@ -406,19 +432,21 @@ via `tee` when it is not.
 > `errno = EINVAL`, which is the caller's signal to fall back to
 > one-byte-at-a-time reads.
 
-> [spec:dash:def:input.strpush]
-> struct strpush {
->   struct strpush *prev;
->   char *prevstring;
->   int prevnleft;
->   struct alias *ap;
->   char *string;
->   struct strpush *spfree;
->   int unget;
-> }
+**Dash source shape (`input.strpush`):**
 
-> [spec:dash:def:input.unwindfiles-fn]
-> void __attribute__((noinline)) unwindfiles(struct parsefile *stop)
+    struct strpush {
+      struct strpush *prev;
+      char *prevstring;
+      int prevnleft;
+      struct alias *ap;
+      char *string;
+      struct strpush *spfree;
+      int unget;
+    }
+
+**Dash source shape (`input.unwindfiles-fn`):**
+
+    void __attribute__((noinline)) unwindfiles(struct parsefile *stop)
 
 > [spec:dash:sem:input.unwindfiles-fn]
 > `popfile()` until `parsefile` is `stop` *and* `basepf.prev` is NULL.

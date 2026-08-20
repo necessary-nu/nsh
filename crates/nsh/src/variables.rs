@@ -86,7 +86,6 @@ pub(crate) enum CallbackPolicy {
     Suppress,
 }
 
-// [spec:dash:def:var.var]
 #[derive(Clone, Debug)]
 struct Variable {
     attributes: VariableAttributes,
@@ -120,7 +119,6 @@ impl Variable {
     }
 }
 
-// [spec:dash:def:var.localvar]
 enum LocalVariable {
     Options(OptionSet),
     /// The declaration created this name; remove it on return.
@@ -132,7 +130,6 @@ enum LocalVariable {
     },
 }
 
-// [spec:dash:def:var.localvar-list]
 pub struct LocalVariableScopes {
     entries: Vec<LocalVariable>,
 }
@@ -193,7 +190,8 @@ pub fn default_path() -> BString {
 }
 
 fn builtin_value(shell: &Shell, name: &[u8]) -> BString {
-    shell.variables
+    shell
+        .variables
         .entries
         .get(BStr::new(name))
         .and_then(Variable::scalar_owned)
@@ -205,7 +203,8 @@ pub fn ifs_value(shell: &Shell) -> BString {
 }
 
 pub fn ifs_is_set(shell: &Shell) -> bool {
-    shell.variables
+    shell
+        .variables
         .entries
         .get(BStr::new(b"IFS"))
         .is_some_and(|var| matches!(&var.state, VariableState::Set(_)))
@@ -240,7 +239,8 @@ pub fn history_size_value(shell: &Shell) -> BString {
 }
 
 pub fn mail_path_is_set(shell: &Shell) -> bool {
-    shell.variables
+    shell
+        .variables
         .entries
         .get(BStr::new(b"MAILPATH"))
         .is_some_and(|var| matches!(&var.state, VariableState::Set(_)))
@@ -285,12 +285,16 @@ macro_rules! is_locale_variable {
 // [spec:posix:req:xcurel.establish-locale]
 fn selected_locale(shell: &Shell) -> std::io::Result<nsh_platform::Locale> {
     let nonempty = |name: &[u8]| {
-        shell.variables.entries.get(BStr::new(name)).and_then(|var| {
-            matches!(&var.state, VariableState::Set(_))
-                .then(|| var.scalar_owned())
-                .flatten()
-                .filter(|value| !value.is_empty())
-        })
+        shell
+            .variables
+            .entries
+            .get(BStr::new(name))
+            .and_then(|var| {
+                matches!(&var.state, VariableState::Set(_))
+                    .then(|| var.scalar_owned())
+                    .flatten()
+                    .filter(|value| !value.is_empty())
+            })
     };
     let selected: Vec<_> = LOCALE_CATEGORIES
         .iter()
@@ -317,7 +321,6 @@ fn builtin(name: &[u8], value: Option<&[u8]>, callback: Callback) -> (BString, V
     (BString::from(name), var)
 }
 
-// [spec:dash:def:var.initvar-fn]
 // [spec:dash:sem:var.initvar-fn]
 // [spec:posix:def:param.shell-variables]
 // [spec:posix:def:param.home]
@@ -414,13 +417,17 @@ impl Shell {
             if !is_locale_variable!(name) {
                 continue;
             }
-            let entry = self.variables.entries.entry(name.to_owned()).or_insert_with(|| Variable {
-                attributes: VariableAttributes::NONE,
-                state: VariableState::Unset,
-                bash_attributes: BashAttributes::new(),
-                callback: Callback::Locale,
-                dynamic_lineno: false,
-            });
+            let entry = self
+                .variables
+                .entries
+                .entry(name.to_owned())
+                .or_insert_with(|| Variable {
+                    attributes: VariableAttributes::NONE,
+                    state: VariableState::Unset,
+                    bash_attributes: BashAttributes::new(),
+                    callback: Callback::Locale,
+                    dynamic_lineno: false,
+                });
             entry.attributes.exported = true;
             entry.state = VariableState::Set(VariableValue::Scalar(value.clone()));
             entry.callback = Callback::Locale;
@@ -463,10 +470,16 @@ impl Shell {
             nsh_platform::path_is_same_file(&path, &dot)
         });
         match valid_pwd {
-            Some(path) => {
-                crate::working_directory::update_current_directory(self, crate::working_directory::DirectoryUpdate::New(BStr::new(path)), false)
-            }
-            None => crate::working_directory::update_current_directory(self, crate::working_directory::DirectoryUpdate::Unknown, false),
+            Some(path) => crate::working_directory::update_current_directory(
+                self,
+                crate::working_directory::DirectoryUpdate::New(BStr::new(path)),
+                false,
+            ),
+            None => crate::working_directory::update_current_directory(
+                self,
+                crate::working_directory::DirectoryUpdate::Unknown,
+                false,
+            ),
         }
     }
 
@@ -488,19 +501,27 @@ impl Shell {
     }
 }
 
+// [spec:dash:sem:var.changelocale-fn]
+// [spec:dash:sem:var.varfunc-fn]
 // [spec:nsh:sem:shell-locale.invalid-selection]
 fn run_callback(shell: &mut Shell, callback: Callback, name: &BStr, value: Option<&BStr>) {
     let effective = value.unwrap_or_else(|| BStr::new(b""));
     match callback {
         Callback::None => {}
         Callback::Ifs => {
-            let effective_ifs = if ifs_is_set(shell) { effective } else { default_ifs() };
+            let effective_ifs = if ifs_is_set(shell) {
+                effective
+            } else {
+                default_ifs()
+            };
             crate::expand::update_ifs_cache(shell, effective_ifs);
         }
         Callback::Mail => crate::mail::reset_mail_state(&mut shell.mail, effective),
-        Callback::Path => {
-            crate::execution::update_search_path(&mut shell.interrupt_deferral, &mut shell.commands, effective)
-        }
+        Callback::Path => crate::execution::update_search_path(
+            &mut shell.interrupt_deferral,
+            &mut shell.commands,
+            effective,
+        ),
         Callback::Getopts => crate::options::reset_getopts(shell, effective),
         Callback::History => crate::editor::set_history_size(shell, effective),
         Callback::Locale => {
@@ -621,14 +642,16 @@ fn set_entry(
 }
 
 /// Read a variable through the owned-byte interface used throughout nsh.
-// [spec:dash:def:var.lookupvar-fn]
 // [spec:dash:sem:var.lookupvar-fn]
 pub(crate) fn lookup_bytes(shell: &mut Shell, name: &BStr) -> Option<BString> {
     shell.variables.refresh_lineno(name);
-    shell.variables.entries.get(name).and_then(Variable::scalar_owned)
+    shell
+        .variables
+        .entries
+        .get(name)
+        .and_then(Variable::scalar_owned)
 }
 
-// [spec:dash:def:var.setvar-fn]
 // [spec:dash:sem:var.setvar-fn]
 pub(crate) fn set_bytes(
     shell: &mut Shell,
@@ -641,7 +664,6 @@ pub(crate) fn set_bytes(
     })
 }
 
-// [spec:dash:def:var.setvareq-fn]
 // [spec:dash:sem:var.setvareq-fn]
 pub(crate) fn set_assignment_bytes(
     shell: &mut Shell,
@@ -649,11 +671,14 @@ pub(crate) fn set_assignment_bytes(
     attributes: VariableAttributes,
 ) -> Result<(), Error> {
     match assignment.split_once_str(b"=") {
-        Some((name, value)) => set_bytes(shell, BStr::new(name), Some(BStr::new(value)), attributes),
+        Some((name, value)) => {
+            set_bytes(shell, BStr::new(name), Some(BStr::new(value)), attributes)
+        }
         None => set_bytes(shell, assignment, None, attributes),
     }
 }
 
+// [spec:dash:sem:var.setvarint-fn]
 pub(crate) fn set_integer_bytes(
     shell: &mut Shell,
     name: &BStr,
@@ -674,7 +699,6 @@ pub(crate) fn set_integer_bytes(
     Ok(value)
 }
 
-// [spec:dash:def:var.lookupvarint-fn]
 // [spec:dash:sem:var.lookupvarint-fn]
 // [spec:posix:req:builtin.set.opt-u-nounset]
 pub(crate) fn lookup_integer_bytes(shell: &mut Shell, name: &BStr) -> Result<i64, Error> {
@@ -690,11 +714,16 @@ pub(crate) fn lookup_integer_bytes(shell: &mut Shell, name: &BStr) -> Result<i64
     crate::number::parse_integer(&mut shell.diagnostics(), BStr::new(&value), 0)
 }
 
+// [spec:dash:sem:var.unsetvar-fn]
 pub(crate) fn unset_bytes(shell: &mut Shell, name: &BStr) -> Result<(), Error> {
     set_bytes(shell, name, None, VariableAttributes::NONE)
 }
 
-pub(crate) fn add_attributes(shell: &mut Shell, name: &BStr, attributes: VariableAttributes) -> bool {
+pub(crate) fn add_attributes(
+    shell: &mut Shell,
+    name: &BStr,
+    attributes: VariableAttributes,
+) -> bool {
     let Some(var) = shell.variables.entries.get_mut(name) else {
         return false;
     };
@@ -709,8 +738,10 @@ pub(crate) fn variable_attributes(shell: &Shell, name: &BStr) -> Option<Variable
 }
 
 /// Build the exported environment as owned native name/value pairs.
+// [spec:dash:sem:var.listvars-fn]
 pub fn environment(shell: &Shell) -> std::io::Result<Vec<(OsString, OsString)>> {
-    shell.variables
+    shell
+        .variables
         .entries
         .iter()
         .filter(|(_, var)| var.attributes.exported && matches!(&var.state, VariableState::Set(_)))
@@ -721,7 +752,6 @@ pub fn environment(shell: &Shell) -> std::io::Result<Vec<(OsString, OsString)>> 
         .collect()
 }
 
-// [spec:dash:def:var.showvars-fn]
 // [spec:dash:sem:var.showvars-fn]
 pub(crate) fn show_vars(
     shell: &mut Shell,
@@ -758,7 +788,6 @@ pub(crate) fn show_vars(
     Ok(())
 }
 
-// [spec:dash:def:var.mklocal-fn]
 // [spec:dash:sem:var.mklocal-fn]
 pub(crate) fn make_local_bytes(
     shell: &mut Shell,
@@ -795,7 +824,6 @@ pub(crate) fn make_local_bytes(
     })
 }
 
-// [spec:dash:def:var.pushlocalvars-fn]
 // [spec:dash:sem:var.pushlocalvars-fn]
 pub fn push_local_scope(shell: &mut Shell, push: bool) -> usize {
     let top = shell.variables.locals.len();
@@ -809,6 +837,7 @@ pub fn push_local_scope(shell: &mut Shell, push: bool) -> usize {
     top
 }
 
+// [spec:dash:sem:var.poplocalvars-fn]
 fn pop_local_scope(shell: &mut Shell) {
     crate::error::with_interrupts_deferred(shell, |shell| {
         let mut frame = shell
@@ -850,7 +879,6 @@ fn pop_local_scope(shell: &mut Shell) {
     });
 }
 
-// [spec:dash:def:var.unwindlocalvars-fn]
 // [spec:dash:sem:var.unwindlocalvars-fn]
 pub fn unwind_local_scopes(shell: &mut Shell, stop: usize) {
     while shell.variables.locals.len() > stop {

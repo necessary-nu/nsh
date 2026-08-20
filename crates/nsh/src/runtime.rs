@@ -147,7 +147,6 @@ fn configure_startup(shell: &mut Shell, startup: &Startup) -> Result<(), crate::
 }
 
 /// Run one fully parsed startup request on the supplied shell.
-// [spec:dash:def:main.main-fn]
 // [spec:dash:sem:main.main-fn]
 // [spec:posix:syn:sh.synopsis]
 // [spec:posix:req:sh.command-language-interpreter]
@@ -227,7 +226,6 @@ pub(crate) fn run(shell: &mut Shell, startup: &Startup) -> crate::status::ExitSt
  * loop; it turns on prompting if the shell is interactive.
  */
 
-// [spec:dash:def:main.cmdloop-fn]
 // [spec:dash:sem:main.cmdloop-fn]
 // [spec:posix:req:builtin.set.opt-o-ignoreeof]
 pub(crate) fn command_loop(
@@ -382,7 +380,6 @@ pub(crate) fn exit_from_child(
  * Read /etc/profile or .profile.  Return on error.
  */
 
-// [spec:dash:def:main.read-profile-fn]
 // [spec:dash:sem:main.read-profile-fn]
 fn read_profile(
     shell: &mut Shell,
@@ -411,7 +408,6 @@ fn read_profile(
 
 /// Read and execute a file of commands: the `.` built-in's engine, and
 /// how a login shell reads its profile.
-// [spec:dash:def:main.readcmdfile-fn]
 // [spec:dash:sem:main.readcmdfile-fn]
 pub(crate) fn read_command_file(
     shell: &mut Shell,

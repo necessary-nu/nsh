@@ -37,7 +37,6 @@ use crate::output::OutputDestination;
 /// and `f[2]` was the byte to append — `echo`'s space or its closing
 /// newline. `echo` is the only caller left and it only ever passed `%s`,
 /// `%s ` or `%s\n`, so it passes the byte itself.
-// [spec:dash:def:printf.print-escape-str-fn]
 // [spec:dash:sem:printf.print-escape-str-fn]
 fn write_escaped_text(shell: &mut Shell, separator: u8, text: &BStr) -> Result<bool, Error> {
     /* The C's `q` is a cursor into the stack block and `stackblock()` its
@@ -54,7 +53,6 @@ fn write_escaped_text(shell: &mut Shell, separator: u8, text: &BStr) -> Result<b
     Ok(stopped)
 }
 
-// [spec:dash:def:printf.echocmd-fn]
 // [spec:dash:sem:printf.echocmd-fn]
 pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     /* The C picked between the formats `"%s\n"`, `"%s"` and `"%s "`; all

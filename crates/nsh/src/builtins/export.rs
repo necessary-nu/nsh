@@ -19,7 +19,6 @@ use crate::variables::{
     variable_attributes,
 };
 
-// [spec:dash:def:var.exportcmd-fn]
 // [spec:dash:sem:var.exportcmd-fn]
 // [spec:posix:syn:builtin.export.synopsis]
 // [spec:posix:req:builtin.export.set-attribute]

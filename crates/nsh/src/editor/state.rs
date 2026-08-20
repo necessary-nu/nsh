@@ -34,9 +34,6 @@ const DEFAULT_HISTORY_SIZE: usize = 128;
 /// `#include <sys/param.h>` — MAXPATHLEN.
 
 // The old myhistedit typedefs now map to owned semantic fields in this state.
-// [spec:dash:def:myhistedit.history]
-// [spec:dash:def:myhistedit.edit-line]
-// [spec:dash:def:myhistedit.hist-event]
 pub(crate) struct EditorState {
     history: Option<History>,
     history_file: Option<File>,
@@ -80,7 +77,6 @@ impl EditorState {
     }
 }
 
-// [spec:dash:def:myhistedit.history-fn]
 // [spec:dash:sem:myhistedit.history-fn]
 #[inline]
 pub(crate) fn history_mut(shell: &mut crate::context::Shell) -> Option<&mut History> {
@@ -149,9 +145,7 @@ pub fn record_history_line(
  * Set history and editing status.  Called whenever the status may
  * have changed (figures out what to do).
  */
-// [spec:dash:def:histedit.histedit-fn]
 // [spec:dash:sem:histedit.histedit-fn]
-// [spec:dash:def:myhistedit.histedit-fn]
 // [spec:dash:sem:myhistedit.histedit-fn]
 // [spec:posix:req:builtin.fc.env-histfile-initialization]
 // [spec:posix:req:builtin.fc.env-histfile-sharing-and-deletion]
@@ -297,9 +291,7 @@ pub(crate) fn save_history(shell: &mut crate::context::Shell) {
     }
 }
 
-// [spec:dash:def:histedit.sethistsize-fn]
 // [spec:dash:sem:histedit.sethistsize-fn]
-// [spec:dash:def:myhistedit.sethistsize-fn]
 // [spec:dash:sem:myhistedit.sethistsize-fn]
 // [spec:posix:req:builtin.fc.env-histsize]
 pub fn set_history_size(shell: &mut crate::context::Shell, hs: &BStr) {
@@ -333,9 +325,7 @@ pub fn set_history_size(shell: &mut crate::context::Shell, hs: &BStr) {
     history.set_limit(histsize);
 }
 
-// [spec:dash:def:histedit.setterm-fn]
 // [spec:dash:sem:histedit.setterm-fn]
-// [spec:dash:def:myhistedit.setterm-fn]
 // [spec:dash:sem:myhistedit.setterm-fn]
 pub fn set_terminal_type(shell: &mut crate::context::Shell, term: &BStr) {
     let Some(editor) = shell.editor.editor.as_mut() else {

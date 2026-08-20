@@ -155,6 +155,5 @@ and are kept because they still describe `src/show.c`.
 > **Those are raw values, not digit characters** — the code omits the
 > `'0' +` that would make them printable — so the escape renders as three
 > control bytes rather than as `\101`. It is a real bug in the debug
-> tracing. Wave 2 must reproduce it exactly: emitting `'0' + digit`
-> instead would be a behaviour change, and this rule previously (and
-> wrongly) instructed that change.
+> tracing. nsh does not preserve this defect; specified diagnostics and
+> rendering rules own the target behavior.

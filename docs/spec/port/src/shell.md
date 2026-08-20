@@ -3,8 +3,9 @@
 The umbrella header: build-wide typedefs and configuration. `pointer` is
 the shell's spelling of `void *`, used for allocator return values.
 
-> [spec:dash:def:shell.max-int-length-fn]
-> static inline int max_int_length(int bytes)
+**Dash source shape (`shell.max-int-length-fn`):**
+
+    static inline int max_int_length(int bytes)
 
 > [spec:dash:sem:shell.max-int-length-fn]
 > Return a buffer size guaranteed to hold the decimal rendering of any
@@ -18,5 +19,6 @@ the shell's spelling of `void *`, used for allocator return values.
 > stack buffers, so being slightly large is free and being short would be
 > a buffer overflow.
 
-> [spec:dash:def:shell.pointer]
-> typedef void *pointer
+**Dash source shape (`shell.pointer`):**
+
+    typedef void *pointer

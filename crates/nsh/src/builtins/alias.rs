@@ -12,7 +12,6 @@ use crate::alias::{format_alias, set_alias};
 use crate::evaluation::Flow;
 use crate::output::OutputDestination;
 
-// [spec:dash:def:alias.aliascmd-fn]
 // [spec:dash:sem:alias.aliascmd-fn]
 // [spec:posix:syn:builtin.alias.synopsis]
 // [spec:posix:req:builtin.alias.create-or-display]

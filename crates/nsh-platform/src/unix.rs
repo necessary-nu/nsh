@@ -860,6 +860,7 @@ pub fn signal_action(signal: Signal) -> std::io::Result<SignalAction> {
 
 /// Guard that blocks every signal and restores the caller's prior mask when
 /// dropped. The raw signal-set representation never leaves this crate.
+// [spec:dash:sem:trap.sigblockall-fn]
 pub struct BlockedSignals(libc::sigset_t);
 
 impl BlockedSignals {

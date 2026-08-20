@@ -17,7 +17,6 @@ use bstr::BStr;
 
 // [spec:nsh:def:idiom.job-control-model]
 
-// [spec:dash:def:jobs.waitcmd-fn]
 // [spec:dash:sem:jobs.waitcmd-fn]
 // [spec:posix:req:signal.trap-during-wait]
 // [spec:posix:syn:builtin.wait.synopsis]

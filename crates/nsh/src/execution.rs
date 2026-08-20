@@ -84,11 +84,9 @@ impl CommandSearch {
 // src/exec.h types
 // ---------------------------------------------------------------------
 
-// [spec:dash:def:exec.cmdentry.param]
 // The C union is represented by `Command`; its tag and payload cannot
 // disagree in Rust.
 
-// [spec:dash:def:exec.cmdentry]
 // [spec:nsh:req:idiom.command-dispatch]
 #[derive(Clone)]
 pub(crate) enum Command {
@@ -99,7 +97,6 @@ pub(crate) enum Command {
     Builtin(&'static BuiltinSpec),
 }
 
-// [spec:dash:def:exec.tblentry]
 /// One cached command resolution.
 ///
 /// The name is the `BTreeMap` key and the command kind is an enum, so the
@@ -190,7 +187,6 @@ impl CommandTable {
  * have to change the find_command routine as well.
  */
 
-// [spec:dash:def:exec.shellexec-fn]
 // [spec:dash:sem:exec.shellexec-fn]
 // [spec:posix:req:xcu.env.utility-selection-path-search]
 // [spec:posix:req:shenv.utility-environment]
@@ -325,7 +321,6 @@ fn exec_failure(
     Ok(crate::evaluation::Flow::END)
 }
 
-// [spec:dash:def:exec.tryexec-fn]
 // [spec:dash:sem:exec.tryexec-fn]
 // [spec:posix:req:cmd.nonbuiltin-enoexec-script]
 // [spec:posix:req:cmd.nonbuiltin-slash-enoexec-script]
@@ -348,7 +343,6 @@ fn try_external_candidate(
     error
 }
 
-// [spec:dash:def:exec.legal-pathopt-fn]
 // [spec:dash:sem:exec.legal-pathopt-fn]
 fn legal_path_option(option: &[u8]) -> bool {
     option.starts_with(b"builtin") || option.starts_with(b"func")
@@ -388,9 +382,7 @@ impl<'a> PathCursor<'a> {
         }
     }
 
-    // [spec:dash:def:exec.padvance-magic-fn]
     // [spec:dash:sem:exec.padvance-magic-fn]
-    // [spec:dash:def:exec.padvance-fn]
     // [spec:dash:sem:exec.padvance-fn]
     pub fn advance(&mut self, name: &BStr) -> Option<PathAdvance> {
         let rest = self.remaining.take()?;
@@ -444,7 +436,6 @@ pub struct PathAdvance {
 
 /*** Command hashing code ***/
 
-// [spec:dash:def:exec.test-exec-fn]
 // [spec:dash:sem:exec.test-exec-fn]
 fn is_executable_candidate(full_path: &[u8], metadata: &nsh_platform::FileMetadata) -> bool {
     if metadata.kind != nsh_platform::FileKind::Regular {
@@ -469,7 +460,6 @@ fn is_executable_candidate(full_path: &[u8], metadata: &nsh_platform::FileMetada
  * change the shellexec routine as well.
  */
 
-// [spec:dash:def:exec.find-command-fn]
 // [spec:dash:sem:exec.find-command-fn]
 // [spec:posix:req:cmd.search-applies]
 // [spec:posix:req:cmd.search-special-builtin]
@@ -705,7 +695,6 @@ fn native_string_error(
  * Search the table of builtin commands.
  */
 
-// [spec:dash:def:exec.find-builtin-fn]
 // [spec:dash:sem:exec.find-builtin-fn]
 pub fn builtin(shell: &crate::context::Shell, name: &BStr) -> Option<&'static BuiltinSpec> {
     if shell.options.dialect() == crate::options::Dialect::Bash
@@ -725,7 +714,6 @@ pub fn builtin(shell: &crate::context::Shell, name: &BStr) -> Option<&'static Bu
  * are executed they will be rehashed.
  */
 
-// [spec:dash:def:exec.hashcd-fn]
 // [spec:dash:sem:exec.hashcd-fn]
 pub fn invalidate_cache_after_directory_change(shell: &mut crate::context::Shell) {
     /* Copied out for the same reason `clearcmdentry` copies it: the
@@ -745,7 +733,6 @@ pub fn invalidate_cache_after_directory_change(shell: &mut crate::context::Shell
  * Called with interrupts off.
  */
 
-// [spec:dash:def:exec.changepath-fn]
 // [spec:dash:sem:exec.changepath-fn]
 pub fn update_search_path(
     interrupts: &mut crate::error::InterruptDeferral,
@@ -764,7 +751,6 @@ pub fn update_search_path(
  * PATH which has changed.
  */
 
-// [spec:dash:def:exec.clearcmdentry-fn]
 // [spec:dash:sem:exec.clearcmdentry-fn]
 pub(crate) fn clear_command_cache(
     interrupts: &mut crate::error::InterruptDeferral,
@@ -784,7 +770,6 @@ pub(crate) fn clear_command_cache(
  * Interrupts must be off if called with add != 0.
  */
 
-// [spec:dash:def:exec.cmdlookup-fn]
 // [spec:dash:sem:exec.cmdlookup-fn]
 pub(crate) fn lookup_cached_command<'a>(
     commands: &'a mut CommandTable,
@@ -810,7 +795,6 @@ pub(crate) fn lookup_cached_command<'a>(
  * Delete a command table entry by name.
  */
 
-// [spec:dash:def:exec.delete-cmd-entry-fn]
 // [spec:dash:sem:exec.delete-cmd-entry-fn]
 pub(crate) fn remove_command_entry(
     interrupts: &mut crate::error::InterruptDeferral,
@@ -827,7 +811,6 @@ pub(crate) fn remove_command_entry(
  * the same name - except special builtins.
  */
 
-// [spec:dash:def:exec.addcmdentry-fn]
 // [spec:dash:sem:exec.addcmdentry-fn]
 fn cache_command(commands: &mut CommandTable, name: &BStr, command: Command) {
     let command_entry =
@@ -840,7 +823,6 @@ fn cache_command(commands: &mut CommandTable, name: &BStr, command: Command) {
  * Define a shell function.
  */
 
-// [spec:dash:def:exec.defun-fn]
 // [spec:dash:sem:exec.defun-fn]
 pub fn define_function(
     interrupts: &mut crate::error::InterruptDeferral,
@@ -860,7 +842,6 @@ pub fn define_function(
  * Delete a function if it exists.
  */
 
-// [spec:dash:def:exec.unsetfunc-fn]
 // [spec:dash:sem:exec.unsetfunc-fn]
 pub fn unset_function(
     interrupts: &mut crate::error::InterruptDeferral,

@@ -8,8 +8,9 @@ as reported by `getcwd`. `physdir` is computed lazily and reset to
 `CD_PHYSICAL` (1) selects `-P` semantics, `CD_PRINT` (2) requests that
 the resulting directory be echoed.
 
-> [spec:dash:def:cd.cdcmd-fn]
-> int cdcmd(int argc, char **argv)
+**Dash source shape (`cd.cdcmd-fn`):**
+
+    int cdcmd(int argc, char **argv)
 
 > [spec:dash:sem:cd.cdcmd-fn]
 > The `cd` builtin. Parse `-L`/`-P` with `cdopt` to get `flags`, then
@@ -49,8 +50,9 @@ the resulting directory be echoed.
 > if `CD_PRINT` is set write `curdir` followed by a newline to `out1`.
 > Return 0.
 
-> [spec:dash:def:cd.cdopt-fn]
-> STATIC int cdopt()
+**Dash source shape (`cd.cdopt-fn`):**
+
+    STATIC int cdopt()
 
 > [spec:dash:sem:cd.cdopt-fn]
 > Parse the `-L`/`-P` options shared by `cd` and `pwd`, returning
@@ -62,8 +64,9 @@ the resulting directory be echoed.
 > the mode each time, so the last distinct option given wins — `-L -P`
 > yields physical, `-P -P` yields physical, `-P -L` yields logical.
 
-> [spec:dash:def:cd.docd-fn]
-> STATIC int docd(const char *dest, int flags)
+**Dash source shape (`cd.docd-fn`):**
+
+    STATIC int docd(const char *dest, int flags)
 
 > [spec:dash:sem:cd.docd-fn]
 > Perform the actual directory change and keep the shell's bookkeeping in
@@ -80,8 +83,9 @@ the resulting directory be echoed.
 > entries, since a different directory may now shadow hashed commands.
 > Restore interrupts and return the `chdir` result.
 
-> [spec:dash:def:cd.getpwd-fn]
-> inline STATIC char * getpwd()
+**Dash source shape (`cd.getpwd-fn`):**
+
+    inline STATIC char * getpwd()
 
 > [spec:dash:sem:cd.getpwd-fn]
 > Return a freshly allocated string holding the physical current
@@ -92,8 +96,9 @@ the resulting directory be echoed.
 > `nullstr` — the shared empty string, which callers detect by pointer
 > identity, not by content, and must never free.
 
-> [spec:dash:def:cd.pwdcmd-fn]
-> int pwdcmd(int argc, char **argv)
+**Dash source shape (`cd.pwdcmd-fn`):**
+
+    int pwdcmd(int argc, char **argv)
 
 > [spec:dash:sem:cd.pwdcmd-fn]
 > The `pwd` builtin. Parse `-L`/`-P` with `cdopt`. Default to reporting
@@ -103,8 +108,9 @@ the resulting directory be echoed.
 > `OLDPWD` — then report `physdir`. Write the chosen string followed by a
 > newline to `out1` and return 0.
 
-> [spec:dash:def:cd.setpwd-fn]
-> void setpwd(const char *val, int setold)
+**Dash source shape (`cd.setpwd-fn`):**
+
+    void setpwd(const char *val, int setold)
 
 > [spec:dash:sem:cd.setpwd-fn]
 > Install a new current directory and publish it to the environment.
@@ -124,8 +130,9 @@ the resulting directory be echoed.
 >
 > Finally `setvar("PWD", dir, VEXPORT)` outside the critical section.
 
-> [spec:dash:def:cd.updatepwd-fn]
-> STATIC const char * updatepwd(const char *dir)
+**Dash source shape (`cd.updatepwd-fn`):**
+
+    STATIC const char * updatepwd(const char *dir)
 
 > [spec:dash:sem:cd.updatepwd-fn]
 > Compute the logical path that results from moving to `dir`, resolving

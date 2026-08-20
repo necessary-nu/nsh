@@ -17,7 +17,6 @@ use crate::output::OutputDestination;
 use bstr::{BStr, BString, ByteSlice};
 use nsh_platform::{NativeStrExt as _, ShellBytesExt as _};
 
-// [spec:dash:def:exec.typecmd-fn]
 // [spec:dash:sem:exec.typecmd-fn]
 // [spec:posix:syn:builtin.type.synopsis]
 // [spec:posix:req:builtin.type.indicate-interpretation]
@@ -43,7 +42,6 @@ pub fn run(shell: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
     Ok(Flow::Done(i32::from(failed).into()))
 }
 
-// [spec:dash:def:exec.describe-command-fn]
 // [spec:dash:sem:exec.describe-command-fn]
 // [spec:nsh:req:idiom.command-dispatch]
 pub(crate) fn describe_command(

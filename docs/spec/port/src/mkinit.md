@@ -25,10 +25,9 @@ renamed to `init.c`, so a failed run never leaves a truncated `init.c`.
 These markers sit inside `#ifdef mkinit` in the real sources, so the C
 compiler never sees them.
 
-**Porting note.** Wave 2 does not need to reproduce a code generator: the
-contract is the *content and ordering* of the five routines, which
-`init.md` records. A Rust port can call the corresponding per-module
-functions directly. The rules here specify what the generator does so
+**Historical note.** nsh does not reproduce this code generator. The
+observable lifecycle ordering is recorded in `init.md` and implemented by
+explicit Rust subsystem calls. The text here records what the generator did so
 that the generated output remains derivable.
 
 The `event[]` table drives everything; each entry names the keyword, the

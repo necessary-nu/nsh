@@ -5,8 +5,9 @@ advances it past the token consumed, returns the token code, and leaves
 any associated value in the global `yylval`. See `arith_yacc.md` for the
 token code table.
 
-> [spec:dash:def:arith-yylex.yylex-fn]
-> int yylex()
+**Dash source shape (`arith-yylex.yylex-fn`):**
+
+    int yylex()
 
 > [spec:dash:sem:arith-yylex.yylex-fn]
 > Scan one token from `arith_buf`.

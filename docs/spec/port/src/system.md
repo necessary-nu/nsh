@@ -2,9 +2,9 @@
 
 The portability layer. Almost everything here is conditional on a
 `HAVE_*` macro from `configure`: on a system that provides the function,
-none of this is compiled and the libc version is used. Wave 2 should
-treat these as *contracts the target must satisfy* rather than as code to
-reproduce — Rust's standard library supplies most of them directly, and
+none of this is compiled and the libc version is used. These blocks are
+historical implementation notes rather than target contracts: Rust's
+standard library supplies most of them directly, and
 the fallback stubs that merely return -1 exist only so the shell links on
 systems lacking the facility.
 
@@ -42,8 +42,9 @@ the `glob64` group are still implemented and still carry their rules.
 > `mididx + 1`; when smaller, set `nmemb = mididx`. Return NULL when the
 > range empties. The array must be sorted by the same comparator.
 
-> [spec:dash:def:system.conv-escape-fn]
-> unsigned conv_escape(char *str, char *out, bool mbchar)
+**Dash source shape (`system.conv-escape-fn`):**
+
+    unsigned conv_escape(char *str, char *out, bool mbchar)
 
 > [spec:dash:sem:system.conv-escape-fn]
 > Decode one backslash escape. `str` points at the character *after* the
@@ -94,10 +95,11 @@ the `glob64` group are still implemented and still carry their rules.
 > does its own pattern matching in `expand.c`, so this exists purely to
 > satisfy the link.
 
-> [spec:dash:def:system.gl-closedir-fn]
-> void (*gl_closedir)(void *)
+**Dash source shape (`system.gl-closedir-fn`):**
 
-> [spec:dash:sem:system.gl-closedir-fn]
+    void (*gl_closedir)(void *)
+
+**Retired fallback layout member (`system.gl-closedir-fn`):**
 > A member of the fallback `glob64_t`, not a function of this program —
 > the extractor lifted the member declaration out of the struct. In
 > glibc's `glob` these are the `GLOB_ALTDIRFUNC` hooks that let a caller
@@ -105,50 +107,57 @@ the `glob64` group are still implemented and still carry their rules.
 > are declared for layout compatibility only and are never called, since
 > the fallback `glob64` returns -1 without doing anything.
 
-> [spec:dash:def:system.gl-lstat-fn]
-> int (*gl_lstat)(const char *, struct stat64 *)
+**Dash source shape (`system.gl-lstat-fn`):**
 
-> [spec:dash:sem:system.gl-lstat-fn]
+    int (*gl_lstat)(const char *, struct stat64 *)
+
+**Retired fallback layout member (`system.gl-lstat-fn`):**
 > `GLOB_ALTDIRFUNC` hook member of the fallback `glob64_t`; see
 > `system.gl-closedir-fn`. Unused.
 
-> [spec:dash:def:system.gl-opendir-fn]
-> void *(*gl_opendir)(const char *)
+**Dash source shape (`system.gl-opendir-fn`):**
 
-> [spec:dash:sem:system.gl-opendir-fn]
+    void *(*gl_opendir)(const char *)
+
+**Retired fallback layout member (`system.gl-opendir-fn`):**
 > `GLOB_ALTDIRFUNC` hook member of the fallback `glob64_t`; see
 > `system.gl-closedir-fn`. Unused.
 
-> [spec:dash:def:system.gl-readdir-fn]
-> struct dirent64 *(*gl_readdir)(void *)
+**Dash source shape (`system.gl-readdir-fn`):**
 
-> [spec:dash:sem:system.gl-readdir-fn]
+    struct dirent64 *(*gl_readdir)(void *)
+
+**Retired fallback layout member (`system.gl-readdir-fn`):**
 > `GLOB_ALTDIRFUNC` hook member of the fallback `glob64_t`; see
 > `system.gl-closedir-fn`. Unused.
 
-> [spec:dash:def:system.gl-stat-fn]
-> int (*gl_stat)(const char *, struct stat64 *)
+**Dash source shape (`system.gl-stat-fn`):**
 
-> [spec:dash:sem:system.gl-stat-fn]
+    int (*gl_stat)(const char *, struct stat64 *)
+
+**Retired fallback layout member (`system.gl-stat-fn`):**
 > `GLOB_ALTDIRFUNC` hook member of the fallback `glob64_t`; see
 > `system.gl-closedir-fn`. Unused.
 
-> [spec:dash:def:system.glob64-fn]
-> static inline int glob64(const char *pattern, int flags, int (*errfunc)(const char *epath, int eerrno), glob64_t *restrict pglob)
+**Dash source shape (`system.glob64-fn`):**
 
-> [spec:dash:sem:system.glob64-fn]
+    static inline int glob64(const char *pattern, int flags, int (*errfunc)(const char *epath, int eerrno), glob64_t *restrict pglob)
+
+**Retired libc fallback (`system.glob64-fn`):**
 > Stub returning -1, compiled only where libc has no `glob`. `expand.c`
 > uses libc `glob` as a fast path when available and falls back to its own
 > matcher otherwise, so returning failure here simply selects the shell's
 > own implementation.
 
-> [spec:dash:def:system.glob64-t]
-> typedef struct
+**Dash source shape (`system.glob64-t`):**
 
-> [spec:dash:def:system.globfree64-fn]
-> static inline void globfree64(glob64_t *pglob)
+    typedef struct
 
-> [spec:dash:sem:system.globfree64-fn]
+**Dash source shape (`system.globfree64-fn`):**
+
+    static inline void globfree64(glob64_t *pglob)
+
+**Retired libc fallback (`system.globfree64-fn`):**
 > Empty stub, compiled only where libc has no `glob`: the fallback
 > `glob64` never allocates, so there is nothing to release.
 
@@ -219,16 +228,18 @@ the `glob64` group are still implemented and still carry their rules.
 > `sh_pipe` treats the failure as "no memfd available" and falls back to
 > a real pipe, so here documents still work.
 
-> [spec:dash:def:system.mempcpy-fn]
-> void *mempcpy(void *dest, const void *src, size_t n)
+**Dash source shape (`system.mempcpy-fn`):**
 
-> [spec:dash:sem:system.mempcpy-fn]
+    void *mempcpy(void *dest, const void *src, size_t n)
+
+**Retired libc fallback (`system.mempcpy-fn`):**
 > `memcpy` returning a pointer *past* the copied bytes rather than to
 > their start: `memcpy(dest, src, n) + n`. Used throughout the shell to
 > chain appends without recomputing lengths.
 
-> [spec:dash:def:system.sigclearmask-fn]
-> static inline void sigclearmask(void)
+**Dash source shape (`system.sigclearmask-fn`):**
+
+    static inline void sigclearmask(void)
 
 > [spec:dash:sem:system.sigclearmask-fn]
 > Unblock all signals. Uses BSD `sigsetmask(0)` where available — with
@@ -243,10 +254,11 @@ the `glob64` group are still implemented and still carry their rules.
 > `mempcpy` the `len` bytes — so the return value is the address of the
 > NUL just written.
 
-> [spec:dash:def:system.strchrnul-fn]
-> char *strchrnul(const char *s, int c)
+**Dash source shape (`system.strchrnul-fn`):**
 
-> [spec:dash:sem:system.strchrnul-fn]
+    char *strchrnul(const char *s, int c)
+
+**Retired libc fallback (`system.strchrnul-fn`):**
 > Like `strchr`, but returns a pointer to the terminating NUL instead of
 > NULL when `c` is absent, so the result is always dereferenceable. The
 > shell relies on this heavily to split `"name=value"` without a

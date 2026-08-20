@@ -18,8 +18,9 @@ reported in diagnostics.
 `errmsg`'s `action` argument is a mask of `E_OPEN` (01), `E_CREAT` (02)
 and `E_EXEC` (04).
 
-> [spec:dash:def:error.errmsg-fn]
-> const char * errmsg(int e, int action)
+**Dash source shape (`error.errmsg-fn`):**
+
+    const char * errmsg(int e, int action)
 
 > [spec:dash:sem:error.errmsg-fn]
 > Map an `errno` value to a message, tailored to what the shell was
@@ -31,20 +32,22 @@ and `E_EXEC` (04).
 > be a static buffer (`strerror`'s) that the next call overwrites, so
 > callers must not retain it.
 
-> [spec:dash:def:error.exerror-fn]
-> void exerror(int cond, const char *msg, ...)
+**Dash source shape (`error.exerror-fn`):**
 
-> [spec:dash:sem:error.exerror-fn]
+    void exerror(int cond, const char *msg, ...)
+
+**Retired C exception plumbing (`error.exerror-fn`):**
 > Variadic front end that raises exception `cond` with a printf-style
 > message: collect the arguments and hand them to `exverror(cond, msg, ap)`.
 > Does not return. Unlike `sh_error` it leaves `exitstatus` alone, so the
 > caller controls the resulting status — used where the exception is not
 > a plain error, e.g. raising `EXEXIT`.
 
-> [spec:dash:def:error.exraise-fn]
-> void exraise(int e)
+**Dash source shape (`error.exraise-fn`):**
 
-> [spec:dash:sem:error.exraise-fn]
+    void exraise(int e)
+
+**Retired C exception plumbing (`error.exraise-fn`):**
 > Raise exception `e` by longjmp'ing to the innermost handler. Under
 > `DEBUG`, `abort()` first if `handler` is NULL, since there is nowhere
 > to jump. If `vforked` is set the process is a vfork child sharing the
@@ -54,10 +57,11 @@ and `E_EXEC` (04).
 > store `e` into the global `exception`, and `longjmp(handler->loc, 1)`.
 > Does not return.
 
-> [spec:dash:def:error.exverror-fn]
-> static void exverror(int cond, const char *msg, va_list ap)
+**Dash source shape (`error.exverror-fn`):**
 
-> [spec:dash:sem:error.exverror-fn]
+    static void exverror(int cond, const char *msg, va_list ap)
+
+**Retired C exception plumbing (`error.exverror-fn`):**
 > Report and raise. Under `DEBUG`, trace the call — the message is
 > rendered through a `va_copy` so the original `ap` stays usable. If
 > `msg` is non-NULL, print it via `exvwarning`. Then `flushall()` so the
@@ -71,8 +75,9 @@ and `E_EXEC` (04).
 > `exverror` is only ever reached with a non-NULL `msg` in that
 > configuration.
 
-> [spec:dash:def:error.exvwarning2-fn]
-> static void exvwarning2(const char *msg, va_list ap)
+**Dash source shape (`error.exvwarning2-fn`):**
+
+    static void exvwarning2(const char *msg, va_list ap)
 
 > [spec:dash:sem:error.exvwarning2-fn]
 > Write one diagnostic line to `out2`. The prefix is the shell name —
@@ -90,23 +95,26 @@ and `E_EXEC` (04).
 > `outcslow` otherwise, so that on an unbuffered stderr the line is
 > pushed out immediately rather than waiting for a later flush.
 
-> [spec:dash:def:error.inton-fn]
-> void __inton()
+**Dash source shape (`error.inton-fn`):**
 
-> [spec:dash:sem:error.inton-fn]
+    void __inton()
+
+**Retired C exception plumbing (`error.inton-fn`):**
 > Out-of-line body of the `INTON` macro, compiled only under
 > `REALLY_SMALL` where the macro expands to a call instead of inline
 > code: decrement `suppressint`, and if it reached zero while
 > `intpending` is set, run `onint()` to deliver the deferred SIGINT.
 > Behaviour is identical to the inline form; only code size differs.
 
-> [spec:dash:def:error.jmploc]
-> struct jmploc {
->   jmp_buf loc;
-> }
+**Dash source shape (`error.jmploc`):**
 
-> [spec:dash:def:error.onint-fn]
-> void onint(void)
+    struct jmploc {
+      jmp_buf loc;
+    }
+
+**Dash source shape (`error.onint-fn`):**
+
+    void onint(void)
 
 > [spec:dash:sem:error.onint-fn]
 > Deliver a SIGINT that was received (or deferred). Clear `intpending`
@@ -120,17 +128,19 @@ and `E_EXEC` (04).
 > Called from `trap.c` on SIGINT, but only when the user has not trapped
 > or ignored SIGINT with the `trap` builtin.
 
-> [spec:dash:def:error.sh-error-fn]
-> void sh_error(const char *msg, ...)
+**Dash source shape (`error.sh-error-fn`):**
 
-> [spec:dash:sem:error.sh-error-fn]
+    void sh_error(const char *msg, ...)
+
+**Retired C exception plumbing (`error.sh-error-fn`):**
 > Report a shell error and unwind. Set `exitstatus = 2`, then collect the
 > variadic arguments and call `exverror(EXERROR, msg, ap)`. Does not
 > return. This is the ordinary error path for the shell proper; external
 > builtins use `sh_warnx` instead when they intend to continue.
 
-> [spec:dash:def:error.sh-warnx-fn]
-> void sh_warnx(const char *fmt, ...)
+**Dash source shape (`error.sh-warnx-fn`):**
+
+    void sh_warnx(const char *fmt, ...)
 
 > [spec:dash:sem:error.sh-warnx-fn]
 > Print a warning to `out2` in the same prefixed format as an error, then

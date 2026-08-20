@@ -15,7 +15,6 @@ use crate::evaluation::Flow;
 use crate::output::OutputDestination;
 use bstr::BStr;
 
-// [spec:dash:def:times.timescmd-fn]
 // [spec:dash:sem:times.timescmd-fn]
 // [spec:posix:syn:builtin.times.synopsis]
 // [spec:posix:req:builtin.times.output-format]

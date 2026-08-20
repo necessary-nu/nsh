@@ -20,10 +20,9 @@ purpose of the tool: a `nodeptr` is copied recursively, a `string` is
 duplicated into the function block, an `int`/`other` is copied by value,
 and a `temp` is skipped.
 
-**Porting note.** Wave 2 need not reproduce the generator: what must
-survive is the *set of node types and their field layouts*, and the
-deep-copy semantics that `copyfunc`/`freefunc` provide. In Rust an enum
-with per-variant data and a derived clone covers both.
+**Historical note.** nsh does not reproduce the generator. The typed Rust AST
+and owned clone/drop semantics replace its generated C layout and lifetime
+machinery.
 
 **Rules retired.** `delete-gen` removed `crates/nsh/src/gen/mknodes.rs`.
 The workspace has no `build.rs`, so nothing in the Rust build ran it, and

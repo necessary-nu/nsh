@@ -8,7 +8,6 @@ use crate::error::Error;
 use crate::evaluation::Flow;
 use bstr::BStr;
 
-// [spec:dash:def:eval.truecmd-fn]
 // [spec:dash:sem:eval.truecmd-fn]
 // [spec:posix:syn:builtin.colon.syn]
 // [spec:posix:req:builtin.colon.null-utility]

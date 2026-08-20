@@ -18,15 +18,9 @@ commit {
 }
 
 adoption {
-    scope "porting"
-}
-
-// The C source is upstream dash and stays byte-identical, so its
-// coverage claims live in plan/annotations.styx and never in source
-// comments. The Rust target carries its claims inline as ordinary
-// comments, which is what `@both` (the union of the two) allows.
-annotations {
-    mode @both
+    // The source-to-source port is complete. Current work maintains the Rust
+    // implementation against POSIX and pinned behavioral oracles.
+    scope "maintenance"
 }
 
 // Oils shell-spec and Smoosh shell files are pinned third-party survey inputs.

@@ -68,7 +68,6 @@ impl ExpandedRedirection<'_> {
     }
 }
 
-// [spec:dash:def:redir.redirtab]
 /// The C's `next` is gone with the intrusive stack. Saved logical values are
 /// shared owners: ordinary unwind restores them, while fork reset drops
 /// obsolete backups without changing the active table.
@@ -114,8 +113,8 @@ impl RedirectionStack {
  * stdout, is saved in memory.
  */
 
-// [spec:dash:def:redir.redirect-fn]
 // [spec:dash:sem:redir.redirect-fn]
+// [spec:dash:sem:redir.update-closed-redirs-fn]
 // [spec:posix:sem:shell.redirection-processing]
 // [spec:posix:def:redir.purpose]
 // [spec:posix:sem:redir.evaluation-order]
@@ -151,8 +150,7 @@ pub(crate) fn redirect(
                 if let Some(frame_index) = saved_frame {
                     let descriptor_index = descriptor.index();
                     if matches!(
-                        shell.redirections.frames[frame_index].saved_descriptors
-                            [descriptor_index],
+                        shell.redirections.frames[frame_index].saved_descriptors[descriptor_index],
                         SavedDescriptor::Empty
                     ) {
                         let saved = shell.descriptors.get(descriptor);
@@ -173,8 +171,7 @@ pub(crate) fn redirect(
      * stream at and it stays where it was. */
     if mode == RedirectionMode::Push {
         if let Some(frame_index) = saved_frame {
-            let saved_descriptors =
-                &shell.redirections.frames[frame_index].saved_descriptors;
+            let saved_descriptors = &shell.redirections.frames[frame_index].saved_descriptors;
             if let Some(SavedDescriptor::Saved(Some(saved))) =
                 saved_descriptors.get(LogicalDescriptor::STDERR.index())
             {
@@ -187,7 +184,6 @@ pub(crate) fn redirect(
     Ok(())
 }
 
-// [spec:dash:def:redir.sh-open-fail-fn]
 // [spec:dash:sem:redir.sh-open-fail-fn]
 // [spec:nsh:req:idiom.platform-errors]
 fn open_error(
@@ -216,10 +212,15 @@ fn open_error_with_context(
     message.push(b' ');
     message.extend_from_slice(pathname);
     message.extend_from_slice(b": ");
-    message.extend_from_slice(&crate::error::error_message(&shell.locale, error, operation));
+    message.extend_from_slice(&crate::error::error_message(
+        &shell.locale,
+        error,
+        operation,
+    ));
     let status = context.status(error);
     let line = shell.evaluation.diagnostic_line;
-    shell.diagnostics()
+    shell
+        .diagnostics()
         .report(Error::other(line, i32::from(status.code()), &message))
 }
 
@@ -243,7 +244,6 @@ impl OpenFailureContext {
     }
 }
 
-// [spec:dash:def:redir.sh-open-fn]
 // [spec:dash:sem:redir.sh-open-fn]
 // [spec:posix:req:xcurel.file-access-permissions]
 // [spec:posix:req:xcurel.file-open-access-mode]
@@ -254,7 +254,13 @@ pub fn open_file(
     mode: nsh_platform::OpenMode,
     may_fail: bool,
 ) -> Result<Option<Descriptor>, Error> {
-    open_file_with_context(shell, pathname, mode, may_fail, OpenFailureContext::Ordinary)
+    open_file_with_context(
+        shell,
+        pathname,
+        mode,
+        may_fail,
+        OpenFailureContext::Ordinary,
+    )
 }
 
 fn open_file_with_context(
@@ -323,7 +329,6 @@ pub fn open_command_file(shell: &mut Shell, pathname: &BStr) -> Result<Descripto
     .map(|descriptor| descriptor.expect("a mandatory command-file open returns a descriptor"))
 }
 
-// [spec:dash:def:redir.openredirect-fn]
 // [spec:dash:sem:redir.openredirect-fn]
 // [spec:posix:req:redir.open-failure]
 // [spec:posix:req:redir.input]
@@ -371,8 +376,13 @@ fn open_file_redirection(
                 .expect("a mandatory open returns a descriptor"),
         ),
         FileRedirectionOperator::ReadWrite => RedirectSource::Owned(
-            open_file(shell, target, nsh_platform::OpenMode::ReadWriteCreate, false)?
-                .expect("a mandatory open returns a descriptor"),
+            open_file(
+                shell,
+                target,
+                nsh_platform::OpenMode::ReadWriteCreate,
+                false,
+            )?
+            .expect("a mandatory open returns a descriptor"),
         ),
         FileRedirectionOperator::Write | FileRedirectionOperator::Clobber => {
             let mut fell_through = true;
@@ -458,8 +468,13 @@ fn open_file_redirection(
             }
         }
         FileRedirectionOperator::Append => RedirectSource::Owned(
-            open_file(shell, target, nsh_platform::OpenMode::WriteCreateAppend, false)?
-                .expect("a mandatory open returns a descriptor"),
+            open_file(
+                shell,
+                target,
+                nsh_platform::OpenMode::WriteCreateAppend,
+                false,
+            )?
+            .expect("a mandatory open returns a descriptor"),
         ),
     };
 
@@ -500,9 +515,7 @@ pub(crate) fn descriptor_error(
     shell.diagnostics().shell_error(&message)
 }
 
-// [spec:dash:def:redir.dupredirect-fn]
 // [spec:dash:sem:redir.dupredirect-fn]
-// [spec:dash:def:redir.sh-dup2-fn]
 // [spec:dash:sem:redir.sh-dup2-fn]
 // [spec:nsh:req:idiom.no-raw-fd-core]
 fn install_redirection(
@@ -528,7 +541,6 @@ fn install_redirection(
     }
 }
 
-// [spec:dash:def:redir.sh-pipe-fn]
 // [spec:dash:sem:redir.sh-pipe-fn]
 // [spec:nsh:req:idiom.filesystem-account-bytes]
 pub fn create_pipe(shell: &mut crate::context::Shell, memfd: bool) -> Result<(Pipe, bool), Error> {
@@ -559,7 +571,6 @@ pub fn create_pipe(shell: &mut crate::context::Shell, memfd: bool) -> Result<(Pi
  * the pipe without forking.
  */
 
-// [spec:dash:def:redir.openhere-fn]
 // [spec:dash:sem:redir.openhere-fn]
 // [spec:posix:sem:redir.here-doc-fd-type]
 // [spec:posix:req:redir.here-doc-expansion]
@@ -630,7 +641,6 @@ fn here_document_write_error(shell: &mut Shell, error: std::io::Error) -> Error 
  * Undo the effects of the last redirection.
  */
 
-// [spec:dash:def:redir.popredir-fn]
 // [spec:dash:sem:redir.popredir-fn]
 pub fn pop_redirection(shell: &mut Shell, discard: bool) {
     crate::error::with_interrupts_deferred(shell, |shell| {
@@ -692,7 +702,6 @@ impl Shell {
  * the original file dscriptor is not open.
  */
 
-// [spec:dash:def:redir.savefd-fn]
 // [spec:dash:sem:redir.savefd-fn]
 /// Move an owned descriptor above the shell redirection range.
 pub fn move_descriptor_above(shell: &mut Shell, fd: Descriptor) -> Result<Descriptor, Error> {
@@ -726,7 +735,6 @@ pub fn copy_slot_above(
 /// There is no longer a `setjmp`, handler, or saved interrupt counter here.
 /// [`redirect`] owns a structured deferral scope and restores its caller's
 /// depth on every ordinary return, including an error caught here.
-// [spec:dash:def:redir.redirectsafe-fn]
 // [spec:dash:sem:redir.redirectsafe-fn]
 pub(crate) fn redirect_safely(
     shell: &mut Shell,
@@ -742,7 +750,6 @@ pub(crate) fn redirect_safely(
     Ok(())
 }
 
-// [spec:dash:def:redir.unwindredir-fn]
 // [spec:dash:sem:redir.unwindredir-fn]
 /// `stop` was the `redirtab *` to unwind back to; a stack in a vector says
 /// the same thing with the depth to unwind back to.
@@ -752,7 +759,6 @@ pub fn unwind_redirections(shell: &mut Shell, stop: usize) {
     }
 }
 
-// [spec:dash:def:redir.pushredir-fn]
 // [spec:dash:sem:redir.pushredir-fn]
 pub(crate) fn push_redirections(
     shell: &mut Shell,

@@ -14,38 +14,44 @@ the shell tests to decide whether to print its own prompt) and
 The functions declared here are defined in `histedit.c`; their rules are
 in `histedit.md`, and the entries below cross-reference them.
 
-> [spec:dash:def:myhistedit.edit-line]
-> typedef void EditLine
+**Dash source shape (`myhistedit.edit-line`):**
 
-> [spec:dash:def:myhistedit.hist-event]
-> typedef int HistEvent
->
-> The extracted `def` above is the **`SMALL`** form. It is not usable for
-> the normal build: `histcmd` and `str_to_event` read `he.num` and
-> `he.str`, so outside `SMALL` this is libedit's
-> `struct histevent { int num; const char *str; }`, pulled in from
-> `<histedit.h>`. A port needs the struct; the `int` alias only serves
-> the `SMALL` stubs, which never inspect it.
+    typedef void EditLine
 
-> [spec:dash:def:myhistedit.histcmd-fn]
-> int histcmd(int, char **)
+**Dash source shape (`myhistedit.hist-event`):**
+
+    typedef int HistEvent
+
+    The extracted `def` above is the **`SMALL`** form. It is not usable for
+    the normal build: `histcmd` and `str_to_event` read `he.num` and
+    `he.str`, so outside `SMALL` this is libedit's
+    `struct histevent { int num; const char *str; }`, pulled in from
+    `<histedit.h>`. A port needs the struct; the `int` alias only serves
+    the `SMALL` stubs, which never inspect it.
+
+**Dash source shape (`myhistedit.histcmd-fn`):**
+
+    int histcmd(int, char **)
 
 > [spec:dash:sem:myhistedit.histcmd-fn]
 > Declaration of the `fc` builtin; defined in `histedit.c`. See
 > `histedit.histcmd-fn`.
 
-> [spec:dash:def:myhistedit.histedit-fn]
-> void histedit(void)
+**Dash source shape (`myhistedit.histedit-fn`):**
+
+    void histedit(void)
 
 > [spec:dash:sem:myhistedit.histedit-fn]
 > Declaration of the history/editing reconfiguration routine; defined in
 > `histedit.c`. See `histedit.histedit-fn`.
 
-> [spec:dash:def:myhistedit.history]
-> typedef void History
+**Dash source shape (`myhistedit.history`):**
 
-> [spec:dash:def:myhistedit.history-fn]
-> static inline void history(History *h, HistEvent *he, int action, char *p)
+    typedef void History
+
+**Dash source shape (`myhistedit.history-fn`):**
+
+    static inline void history(History *h, HistEvent *he, int action, char *p)
 
 > [spec:dash:sem:myhistedit.history-fn]
 > The `SMALL`-build stub for libedit's `history()`: accepts the same
@@ -64,27 +70,31 @@ in `histedit.md`, and the entries below cross-reference them.
 > `H_SETSIZE`) and whose remaining arguments depend on it. The `SMALL`
 > build defines only `H_APPEND` and `H_ENTER`, the two `input.c` uses.
 
-> [spec:dash:def:myhistedit.not-fcnumber-fn]
-> int not_fcnumber(char *)
+**Dash source shape (`myhistedit.not-fcnumber-fn`):**
+
+    int not_fcnumber(char *)
 
 > [spec:dash:sem:myhistedit.not-fcnumber-fn]
 > Declaration; defined in `histedit.c`. See `histedit.not-fcnumber-fn`.
 
-> [spec:dash:def:myhistedit.sethistsize-fn]
-> void sethistsize(const char *)
+**Dash source shape (`myhistedit.sethistsize-fn`):**
+
+    void sethistsize(const char *)
 
 > [spec:dash:sem:myhistedit.sethistsize-fn]
 > Declaration of the `HISTSIZE` change callback; defined in
 > `histedit.c`. See `histedit.sethistsize-fn`.
 
-> [spec:dash:def:myhistedit.setterm-fn]
-> void setterm(const char *)
+**Dash source shape (`myhistedit.setterm-fn`):**
+
+    void setterm(const char *)
 
 > [spec:dash:sem:myhistedit.setterm-fn]
 > Declaration; defined in `histedit.c`. See `histedit.setterm-fn`.
 
-> [spec:dash:def:myhistedit.str-to-event-fn]
-> int str_to_event(const char *, int)
+**Dash source shape (`myhistedit.str-to-event-fn`):**
+
+    int str_to_event(const char *, int)
 
 > [spec:dash:sem:myhistedit.str-to-event-fn]
 > Declaration; defined in `histedit.c`. See `histedit.str-to-event-fn`.

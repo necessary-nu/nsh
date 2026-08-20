@@ -1,5 +1,5 @@
 #!/bin/bash
-# Differential harness: the Rust port vs a C dash built from this same tree.
+# Differential harness: nsh vs the pinned C Dash reference build.
 #
 #   dsdiff.sh CORPUS [JOBS]
 #

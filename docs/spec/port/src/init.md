@@ -8,16 +8,16 @@ emits `init.c` containing one function per event. `init.h` declares them;
 the bodies exist only in generated code. See `mkinit.md` for how the
 generation works.
 
-For the port this means the *contract* is "run these fragments, in this
-order, at this lifecycle point". Wave 2 may satisfy it with an explicit
-function that calls the corresponding per-module routines rather than by
-reproducing a code generator, provided the order and the set of effects
-match. The block locations in the current source are listed per event
+For nsh the behavioral contract is "run these fragments, in this order, at
+this lifecycle point". Explicit Rust subsystem calls replace the code
+generator while preserving the observable order and effects. The historical
+block locations are listed per event
 below, in the order `mkinit` visits them — the order of `dash_CFILES` in
 `src/Makefile.am`, which is *not* alphabetical.
 
-> [spec:dash:def:init.exitreset-fn]
-> void exitreset(void)
+**Dash source shape (`init.exitreset-fn`):**
+
+    void exitreset(void)
 
 > [spec:dash:sem:init.exitreset-fn]
 > Called when an error or interrupt in an interactive shell returns
@@ -32,8 +32,9 @@ below, in the order `mkinit` visits them — the order of `dash_CFILES` in
 > about to exit, whereas `reset` restores state only needed for
 > continuing.
 
-> [spec:dash:def:init.forkreset-fn]
-> void forkreset(union node *)
+**Dash source shape (`init.forkreset-fn`):**
+
+    void forkreset(union node *)
 
 > [spec:dash:sem:init.forkreset-fn]
 > Called immediately after entering a subshell, in the child. Runs the
@@ -47,8 +48,9 @@ below, in the order `mkinit` visits them — the order of `dash_CFILES` in
 > event whose routine takes a parameter — the `union node *` for the
 > command being run in the subshell.
 
-> [spec:dash:def:init.init-fn]
-> void init(void)
+**Dash source shape (`init.init-fn`):**
+
+    void init(void)
 
 > [spec:dash:sem:init.init-fn]
 > One-time startup, called from `main` before anything else. Runs the
@@ -59,8 +61,9 @@ below, in the order `mkinit` visits them — the order of `dash_CFILES` in
 > `USE_GLIBC_STDIO`); and build the variable table from the environment,
 > set the shell's own defaults and establish `PWD`.
 
-> [spec:dash:def:init.postexitreset-fn]
-> void postexitreset(void)
+**Dash source shape (`init.postexitreset-fn`):**
+
+    void postexitreset(void)
 
 > [spec:dash:sem:init.postexitreset-fn]
 > Called from `exitshell`, after the exit trap has run. Runs the single
@@ -68,8 +71,9 @@ below, in the order `mkinit` visits them — the order of `dash_CFILES` in
 > stack. Separated from `exitreset` so it happens after any code that
 > could still need to read input.
 
-> [spec:dash:def:init.reset-fn]
-> void reset(void)
+**Dash source shape (`init.reset-fn`):**
+
+    void reset(void)
 
 > [spec:dash:sem:init.reset-fn]
 > Called when an error or interrupt in an interactive shell returns

@@ -73,7 +73,6 @@ impl MailState {
  * then the value of MAIL has changed, so we just update the values.
  */
 
-// [spec:dash:def:mail.chkmail-fn]
 // [spec:dash:sem:mail.chkmail-fn]
 pub fn check_mail(shell: &mut crate::context::Shell) -> Result<(), crate::error::Error> {
     let mail_path = if mail_path_is_set(shell) {
@@ -89,7 +88,6 @@ pub fn check_mail(shell: &mut crate::context::Shell) -> Result<(), crate::error:
     Ok(())
 }
 
-// [spec:dash:def:mail.changemail-fn]
 // [spec:dash:sem:mail.changemail-fn]
 pub fn reset_mail_state(mail: &mut MailState, _value: &BStr) {
     mail.changed = true;

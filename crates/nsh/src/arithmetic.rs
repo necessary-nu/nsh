@@ -16,7 +16,6 @@ use crate::variables::{
     CallbackPolicy, VariableAttributes, lookup_integer_bytes, set_integer_bytes,
 };
 
-// [spec:dash:def:arith-yacc.yystype]
 /// The value carried by an arithmetic token.
 ///
 /// This is an enum rather than the C `union yystype`: a number cannot be
@@ -60,7 +59,6 @@ enum BinaryOperator {
 }
 
 impl BinaryOperator {
-    // [spec:dash:def:arith-yacc.arith-prec-fn]
     // [spec:dash:sem:arith-yacc.arith-prec-fn]
     const fn precedence(self) -> u8 {
         match self {
@@ -75,7 +73,6 @@ impl BinaryOperator {
         }
     }
 
-    // [spec:dash:def:arith-yacc.higher-prec-fn]
     // [spec:dash:sem:arith-yacc.higher-prec-fn]
     const fn binding_power(self) -> u8 {
         8 - self.precedence()
@@ -110,11 +107,8 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    // [spec:dash:def:arith-yacc.yylex-fn]
     // [spec:dash:sem:arith-yacc.yylex-fn]
-    // [spec:dash:def:arith-yylex.yylex-fn]
     // [spec:dash:sem:arith-yylex.yylex-fn]
-    // [spec:dash:def:expand.yylex-fn]
     // [spec:dash:sem:expand.yylex-fn]
     fn next(&mut self) -> Token<'a> {
         while matches!(self.peek(0), Some(b' ' | b'\t' | b'\n')) {
@@ -271,7 +265,6 @@ struct Parser<'a, 'shell> {
 impl<'a, 'shell> Parser<'a, 'shell> {
     // The C header's `arith_lex_reset()` was an empty macro in this build.
     // Local lexer state makes reset synonymous with constructing a parser.
-    // [spec:dash:def:expand.arith-lex-reset-fn]
     // [spec:dash:sem:expand.arith-lex-reset-fn]
     fn new(shell: &'shell mut Shell, input: &'a BStr) -> Self {
         let mut lexer = Lexer::new(input, shell.locale.clone());
@@ -310,7 +303,6 @@ impl<'a, 'shell> Parser<'a, 'shell> {
         token
     }
 
-    // [spec:dash:def:arith-yacc.yyerror-fn]
     // [spec:dash:sem:arith-yacc.yyerror-fn]
     fn error(&mut self, message: &[u8]) -> Error {
         let mut text = b"arithmetic expression: ".to_vec();
@@ -321,7 +313,6 @@ impl<'a, 'shell> Parser<'a, 'shell> {
         self.shell.diagnostics().shell_error(&text)
     }
 
-    // [spec:dash:def:arith-yacc.assignment-fn]
     // [spec:dash:sem:arith-yacc.assignment-fn]
     fn assignment(&mut self, evaluate: bool) -> Result<i64, Error> {
         if let (Token::Variable(name), Token::Assign(op)) = (self.current(), self.peek(1)) {
@@ -347,7 +338,6 @@ impl<'a, 'shell> Parser<'a, 'shell> {
         self.conditional(evaluate)
     }
 
-    // [spec:dash:def:arith-yacc.cond-fn]
     // [spec:dash:sem:arith-yacc.cond-fn]
     fn conditional(&mut self, evaluate: bool) -> Result<i64, Error> {
         let condition = self.logical_or(evaluate)?;
@@ -368,7 +358,6 @@ impl<'a, 'shell> Parser<'a, 'shell> {
         })
     }
 
-    // [spec:dash:def:arith-yacc.or-fn]
     // [spec:dash:sem:arith-yacc.or-fn]
     fn logical_or(&mut self, evaluate: bool) -> Result<i64, Error> {
         let left = self.logical_and(evaluate)?;
@@ -380,7 +369,6 @@ impl<'a, 'shell> Parser<'a, 'shell> {
         Ok((left != 0 || right != 0) as i64)
     }
 
-    // [spec:dash:def:arith-yacc.and-fn]
     // [spec:dash:sem:arith-yacc.and-fn]
     fn logical_and(&mut self, evaluate: bool) -> Result<i64, Error> {
         let left = self.binary(evaluate)?;
@@ -392,14 +380,12 @@ impl<'a, 'shell> Parser<'a, 'shell> {
         Ok((left != 0 && right != 0) as i64)
     }
 
-    // [spec:dash:def:arith-yacc.binop-fn]
     // [spec:dash:sem:arith-yacc.binop-fn]
     fn binary(&mut self, evaluate: bool) -> Result<i64, Error> {
         let left = self.primary(evaluate)?;
         self.binary_rhs(left, 1, evaluate)
     }
 
-    // [spec:dash:def:arith-yacc.binop2-fn]
     // [spec:dash:sem:arith-yacc.binop2-fn]
     fn binary_rhs(&mut self, mut left: i64, min_power: u8, evaluate: bool) -> Result<i64, Error> {
         loop {
@@ -425,7 +411,6 @@ impl<'a, 'shell> Parser<'a, 'shell> {
         }
     }
 
-    // [spec:dash:def:arith-yacc.primary-fn]
     // [spec:dash:sem:arith-yacc.primary-fn]
     fn primary(&mut self, evaluate: bool) -> Result<i64, Error> {
         match self.advance() {
@@ -453,7 +438,6 @@ impl<'a, 'shell> Parser<'a, 'shell> {
         }
     }
 
-    // [spec:dash:def:arith-yacc.do-binop-fn]
     // [spec:dash:sem:arith-yacc.do-binop-fn]
     // [spec:nsh:sem:idiom.specified-defects+1]
     fn apply(&mut self, op: BinaryOperator, left: i64, right: i64) -> Result<i64, Error> {
@@ -486,9 +470,7 @@ impl<'a, 'shell> Parser<'a, 'shell> {
     }
 }
 
-// [spec:dash:def:arith-yacc.arith-fn]
 // [spec:dash:sem:arith-yacc.arith-fn]
-// [spec:dash:def:expand.arith-fn]
 // [spec:dash:sem:expand.arith-fn]
 // [spec:posix:req:expand.arith-evaluation]
 // [spec:posix:req:expand.arith-variable-changes]

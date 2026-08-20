@@ -51,6 +51,7 @@ impl Pattern {
         }
     }
 
+    // [spec:dash:sem:expand.pmatch-fn]
     pub(crate) fn matches(&self, locale: &nsh_platform::Locale, subject: &[u8]) -> bool {
         Matcher {
             locale,
@@ -149,7 +150,6 @@ impl Matcher<'_> {
 
     /// Return the continuation and every subject width matched by one
     /// well-formed bracket expression. `None` means `[` is an ordinary byte.
-    // [spec:dash:def:expand.ccmatch-fn]
     // [spec:dash:sem:expand.ccmatch-fn]
     fn bracket(&self, mut at: usize, subject_at: usize) -> Option<(usize, Vec<usize>)> {
         let inverted = (self.pattern.active(at, b'!') || self.pattern.active(at, b'^'))
@@ -311,6 +311,7 @@ fn character_end(locale: &nsh_platform::Locale, bytes: &[u8], at: usize) -> usiz
 }
 
 /// Compatibility entry for callers whose pattern contains no quoted bytes.
+// [spec:dash:sem:expand.patmatch-fn]
 pub(crate) fn pattern_matches(
     locale: &nsh_platform::Locale,
     pattern: &[u8],

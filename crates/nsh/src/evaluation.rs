@@ -111,7 +111,6 @@ impl EvaluationContext {
     }
 }
 
-// [spec:dash:def:eval.backcmd]
 pub struct CommandSubstitution {
     /* result of evalbackcmd */
     pub descriptor: Option<Descriptor>, /* descriptor to read from */
@@ -335,7 +334,6 @@ pub(crate) use flow;
  * Execute a command or commands contained in a string.
  */
 
-// [spec:dash:def:eval.evalstring-fn]
 // [spec:dash:sem:eval.evalstring-fn]
 pub fn evaluate_string(
     shell: &mut Shell,
@@ -486,7 +484,6 @@ fn evaluate_interactive_sequence(
  * exitstatus.
  */
 
-// [spec:dash:def:eval.evaltree-fn]
 // [spec:dash:sem:eval.evaltree-fn]
 // [spec:posix:def:exit.command-status]
 // [spec:posix:req:cmd.default-exit-status]
@@ -667,7 +664,6 @@ pub fn evaluate_tree(
     Ok(Flow::END)
 }
 
-// [spec:dash:def:eval.evaltreenr-fn]
 // [spec:dash:sem:eval.evaltreenr-fn]
 //
 // `evaltree` declared `noreturn`. Where the C compiler supports
@@ -704,7 +700,6 @@ pub fn evaluate_tree_without_exit(
     Ok(flow)
 }
 
-// [spec:dash:def:eval.evalloop-fn]
 // [spec:dash:sem:eval.evalloop-fn]
 // [spec:posix:req:cmd.while-execution]
 // [spec:posix:req:cmd.while-exit-status]
@@ -757,7 +752,6 @@ fn evaluate_loop(
     outcome
 }
 
-// [spec:dash:def:eval.evalfor-fn]
 // [spec:dash:sem:eval.evalfor-fn]
 // [spec:posix:req:cmd.for-iteration]
 // [spec:posix:req:cmd.for-omitted-in]
@@ -813,7 +807,6 @@ fn evaluate_for(
     Ok(Flow::Done((status).into()))
 }
 
-// [spec:dash:def:eval.evalcase-fn]
 // [spec:dash:sem:eval.evalcase-fn]
 // [spec:posix:req:cmd.case-selection]
 // [spec:posix:req:cmd.case-pattern-expansion]
@@ -887,7 +880,6 @@ fn evaluate_case(
  * Kick off a subshell to evaluate a tree.
  */
 
-// [spec:dash:def:eval.evalsubshell-fn]
 // [spec:dash:sem:eval.evalsubshell-fn]
 // [spec:posix:req:jobctl.list-splitting]
 // [spec:posix:def:jobctl.background-job]
@@ -987,7 +979,6 @@ fn evaluate_subshell(
  * Compute the names of the files in a redirection list.
  */
 
-// [spec:dash:def:eval.expredir-fn]
 // [spec:dash:sem:eval.expredir-fn]
 // [spec:posix:req:redir.word-expansion]
 // [spec:posix:req:redir.word-pathname-expansion]
@@ -1070,7 +1061,6 @@ fn descriptor_source(shell: &mut Shell, text: &BStr) -> Result<Option<LogicalDes
  * of all the rest.)
  */
 
-// [spec:dash:def:eval.evalpipe-fn]
 // [spec:dash:sem:eval.evalpipe-fn]
 // [spec:posix:req:cmd.pipeline-connects-stdio]
 // [spec:posix:req:cmd.pipeline-assignment-precedes-redirection]
@@ -1190,7 +1180,6 @@ fn evaluate_pipeline(
  * Should be called with interrupts off.
  */
 
-// [spec:dash:def:eval.evalbackcmd-fn]
 // [spec:dash:sem:eval.evalbackcmd-fn]
 pub fn evaluate_command_substitution(
     shell: &mut Shell,
@@ -1246,7 +1235,6 @@ pub fn evaluate_command_substitution(
     Ok(())
 }
 
-// [spec:dash:def:eval.fill-arglist-fn]
 // [spec:dash:sem:eval.fill-arglist-fn]
 //
 // The C's `argpp` is a `union node **` cursor walking `narg.next`; the
@@ -1285,7 +1273,6 @@ fn append_expanded_arguments<'a>(
     }
 }
 
-// [spec:dash:def:eval.parse-command-args-fn]
 // [spec:dash:sem:eval.parse-command-args-fn]
 // [spec:posix:req:builtin.command.suppress-function-lookup]
 // [spec:posix:req:builtin.command.special-builtin-properties-suppressed]
@@ -1356,7 +1343,6 @@ fn parse_command_args(
  * Execute a simple command.
  */
 
-// [spec:dash:def:eval.evalcommand-fn]
 // [spec:dash:sem:eval.evalcommand-fn]
 // [spec:posix:req:builtin.special.error-may-abort-shell]
 // [spec:posix:req:builtin.special.preceding-assignments-persist]
@@ -1874,7 +1860,6 @@ fn evaluate_command_in_scope(
         .with_status(status))
 }
 
-// [spec:dash:def:eval.evalbltin-fn]
 // [spec:dash:sem:eval.evalbltin-fn]
 fn evaluate_builtin(
     shell: &mut Shell,
@@ -1930,7 +1915,6 @@ fn evaluate_builtin(
     outcome
 }
 
-// [spec:dash:def:eval.evalfun-fn]
 // [spec:dash:sem:eval.evalfun-fn]
 // [spec:posix:req:cmd.function-invocation-positional-parameters]
 // [spec:posix:req:cmd.function-return]
@@ -1988,7 +1972,6 @@ fn evaluate_function(
  * check that the name will not be subject to expansion.
  */
 
-// [spec:dash:def:eval.prehash-fn]
 // [spec:dash:sem:eval.prehash-fn]
 fn prepare_command_hash(shell: &mut Shell, node: &Node) -> Result<Flow, Error> {
     let mut entry = Command::Unknown;
@@ -2079,7 +2062,6 @@ fn prehash_tree(shell: &mut Shell, node: Option<&Node>) -> Result<Flow, Error> {
  * The return command.
  */
 
-// [spec:dash:def:eval.eprintlist-fn]
 // [spec:dash:sem:eval.eprintlist-fn]
 fn write_trace_fields(
     shell: &mut Shell,

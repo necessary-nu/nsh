@@ -18,7 +18,6 @@ use bstr::{BStr, ByteSlice};
 use crate::evaluation::Flow;
 use crate::execution::execute_external_command;
 
-// [spec:dash:def:eval.execcmd-fn]
 // [spec:dash:sem:eval.execcmd-fn]
 // [spec:posix:syn:builtin.exec.syn]
 // [spec:posix:req:builtin.exec.no-operands-redirections]

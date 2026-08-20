@@ -1,10 +1,10 @@
 // Three specs are tracked against this repo, and they answer different
 // questions. Keep them apart in your head:
 //
-//   dash   — "what did the translated Dash source do?"
-//            Derived FROM the C, so these rules retain implementation
-//            provenance and differential anchors, bugs included. They
-//            do not outrank POSIX or an explicit nsh compatibility rule.
+//   dash   — "what observable behavior did the translated Dash source have?"
+//            Derived FROM the pinned C oracle. Source signatures remain as
+//            historical prose, while only behavioral rules constrain Rust.
+//            They do not outrank POSIX or explicit nsh compatibility rules.
 //
 //   posix  — "does the shell conform to POSIX.1-2024?"
 //            Derived FROM the standard, so a rule here describes what
@@ -34,7 +34,6 @@ specs (
         include (docs/spec/port/**/*.md),
         source_url "https://git.kernel.org/pub/scm/utils/dash/dash.git",
         impls (
-            {name source-impl, languages (@c), include (src/**/*.c src/**/*.h), mode @impl-only}
             {name target-impl, languages (@rust), include (crates/**/*.rs), exclude (target/**), mode @both}
         )
     }
@@ -44,10 +43,9 @@ specs (
         source_url "https://pubs.opengroup.org/onlinepubs/9799919799/",
         impls (
             // Conformance is a property of the shell we ship, so it is
-            // claimed on the Rust port. The C is not a second impl here:
-            // it cannot carry inline annotations (it stays byte-identical
-            // to upstream), and since the port is bug-for-bug, a claim
-            // about one is a claim about the other.
+            // claimed on the Rust implementation. The downloaded C oracle is
+            // not a second indexed implementation and carries no repository
+            // annotations.
             // Python files are verification sites only: the shipped shell
             // remains the Rust implementation, while the rule-driven harness
             // carries `[spec:posix:.../test]` evidence.

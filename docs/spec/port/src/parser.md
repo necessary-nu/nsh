@@ -40,8 +40,9 @@ next newline. `heredoclist` is that queue.
 here document, but there is no real delimiter" — used by `expandstr`.
 `realeofmark` distinguishes it.
 
-> [spec:dash:def:parser.andor-fn]
-> node * andor(void)
+**Dash source shape (`parser.andor-fn`):**
+
+    node * andor(void)
 
 > [spec:dash:sem:parser.andor-fn]
 > Parse `pipeline (&& | || pipeline)*`. Parse a pipeline, then loop: a
@@ -52,8 +53,9 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > operator. Left-associative, since each new node takes the previous
 > result as its left child.
 
-> [spec:dash:def:parser.command-fn]
-> node * command(void)
+**Dash source shape (`parser.command-fn`):**
+
+    node * command(void)
 
 > [spec:dash:sem:parser.command-fn]
 > Parse one command — a compound command, a function definition, or a
@@ -94,8 +96,9 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > `NREDIR` node — except for `NSUBSHELL`, which already has a `redirect`
 > field of its own and is used directly.
 
-> [spec:dash:def:parser.dollarsq-escape-fn]
-> static char *dollarsq_escape(char *out)
+**Dash source shape (`parser.dollarsq-escape-fn`):**
+
+    static char *dollarsq_escape(char *out)
 
 > [spec:dash:sem:parser.dollarsq-escape-fn]
 > Decode one escape inside a `$'…'` string. Read up to 9 characters,
@@ -116,8 +119,9 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > Finally push back the characters of the window that were not consumed,
 > and return the updated output pointer.
 
-> [spec:dash:def:parser.endofname-fn]
-> char * endofname(const char *name)
+**Dash source shape (`parser.endofname-fn`):**
+
+    char * endofname(const char *name)
 
 > [spec:dash:sem:parser.endofname-fn]
 > Return a pointer to the first character of `name` that cannot be part
@@ -126,8 +130,9 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > sees an empty name. Otherwise advance while `is_in_name` (letter,
 > underscore or digit) holds.
 
-> [spec:dash:def:parser.expandstr-fn]
-> const char * expandstr(const char *ps)
+**Dash source shape (`parser.expandstr-fn`):**
+
+    const char * expandstr(const char *ps)
 
 > [spec:dash:sem:parser.expandstr-fn]
 > Parse and expand a string as if it were a double-quoted word — used for
@@ -150,16 +155,18 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > `restore_handler_expandarg`, restore `doprompt`, unwind the input stack
 > and restore `heredoclist`.
 
-> [spec:dash:def:parser.findkwd-fn]
-> const char *const * findkwd(const char *s)
+**Dash source shape (`parser.findkwd-fn`):**
+
+    const char *const * findkwd(const char *s)
 
 > [spec:dash:sem:parser.findkwd-fn]
 > Binary-search the sorted `parsekwd` table for the reserved word `s`,
 > returning a pointer to the matching slot or NULL. The caller converts
 > the slot address into a token code via `pp - parsekwd + KWDOFFSET`.
 
-> [spec:dash:def:parser.fixredir-fn]
-> void fixredir(union node *n, const char *text, int err)
+**Dash source shape (`parser.fixredir-fn`):**
+
+    void fixredir(union node *n, const char *text, int err)
 
 > [spec:dash:sem:parser.fixredir-fn]
 > Resolve the operand of a `>&`/`<&` redirection. `err` is set when the
@@ -173,8 +180,9 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > as `ndup.vname = makename()` so `expredir` can expand it at execution
 > time and call back here with `err` set.
 
-> [spec:dash:def:parser.getmbc-fn]
-> unsigned getmbc(int c, char *out, int mode)
+**Dash source shape (`parser.getmbc-fn`):**
+
+    unsigned getmbc(int c, char *out, int mode)
 
 > [spec:dash:sem:parser.getmbc-fn]
 > Try to read a complete multibyte character starting at `c`, writing it
@@ -208,8 +216,9 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > `pungetn(ml - 1)` and return 0, leaving the caller to treat `c` as a
 > single byte.
 
-> [spec:dash:def:parser.getprompt-fn]
-> const char * getprompt(void *unused)
+**Dash source shape (`parser.getprompt-fn`):**
+
+    const char * getprompt(void *unused)
 
 > [spec:dash:sem:parser.getprompt-fn]
 > Return the current prompt text, expanded. Select by `whichprompt`: 0
@@ -218,31 +227,35 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > 0 case. The selected value is passed through `expandstr`. Called by
 > libedit as well as by `setprompt`, hence the unused `void *`.
 
-> [spec:dash:def:parser.goodname-fn]
-> static inline int goodname(const char *p)
+**Dash source shape (`parser.goodname-fn`):**
+
+    static inline int goodname(const char *p)
 
 > [spec:dash:sem:parser.goodname-fn]
 > Return whether `p` is entirely a valid variable name:
 > `!*endofname(p)` — the scan consumed everything. An empty string
 > returns 0, since `endofname` stops immediately at the NUL.
 
-> [spec:dash:def:parser.heredoc]
-> struct heredoc {
->   struct heredoc *next;
->   union node *here;
->   char *eofmark;
->   int striptabs;
-> }
+**Dash source shape (`parser.heredoc`):**
 
-> [spec:dash:def:parser.isassignment-fn]
-> int isassignment(const char *p)
+    struct heredoc {
+      struct heredoc *next;
+      union node *here;
+      char *eofmark;
+      int striptabs;
+    }
+
+**Dash source shape (`parser.isassignment-fn`):**
+
+    int isassignment(const char *p)
 
 > [spec:dash:sem:parser.isassignment-fn]
 > Return whether `p` has the form `name=…`: `endofname` must have
 > consumed at least one character and must have stopped at an `=`.
 
-> [spec:dash:def:parser.issimplecmd-fn]
-> int issimplecmd(union node *n, const char *name)
+**Dash source shape (`parser.issimplecmd-fn`):**
+
+    int issimplecmd(union node *n, const char *name)
 
 > [spec:dash:sem:parser.issimplecmd-fn]
 > Return whether `n` is a simple command whose first word is exactly
@@ -250,8 +263,9 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > is nothing but a `trap` or a `jobs` command needs to inherit state that
 > a subshell normally discards.
 
-> [spec:dash:def:parser.list-fn]
-> node * list(int nlflag)
+**Dash source shape (`parser.list-fn`):**
+
+    node * list(int nlflag)
 
 > [spec:dash:sem:parser.list-fn]
 > Parse a list of and-or expressions separated by `;`, `&` or newline,
@@ -283,31 +297,35 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > error when newlines are not being skipped, and otherwise is pushed back
 > and ends the list.
 
-> [spec:dash:def:parser.makename-fn]
-> node * makename(void)
+**Dash source shape (`parser.makename-fn`):**
+
+    node * makename(void)
 
 > [spec:dash:sem:parser.makename-fn]
 > Build an `NARG` node from the token just read: `wordtext` as the text,
 > `backquotelist` as its command substitutions, `next` NULL.
 
-> [spec:dash:def:parser.nlnoprompt-fn]
-> static void nlnoprompt(void)
+**Dash source shape (`parser.nlnoprompt-fn`):**
+
+    static void nlnoprompt(void)
 
 > [spec:dash:sem:parser.nlnoprompt-fn]
 > Account for a newline that ends a command: increment `plinno` and set
 > `needprompt` to `doprompt`, deferring the prompt until the parser
 > actually needs more input rather than issuing it now.
 
-> [spec:dash:def:parser.nlprompt-fn]
-> static void nlprompt(void)
+**Dash source shape (`parser.nlprompt-fn`):**
+
+    static void nlprompt(void)
 
 > [spec:dash:sem:parser.nlprompt-fn]
 > Account for a newline in the middle of a construct: increment `plinno`
 > and, when prompting, issue the `PS2` continuation prompt immediately —
 > the parser is about to read more input as part of the same command.
 
-> [spec:dash:def:parser.parsecmd-fn]
-> union node * parsecmd(int interact)
+**Dash source shape (`parser.parsecmd-fn`):**
+
+    union node * parsecmd(int interact)
 
 > [spec:dash:sem:parser.parsecmd-fn]
 > Parse one complete command. Reset the parser: clear the pushback,
@@ -317,8 +335,9 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > end-of-input yields `NEOF`. Returns `NEOF` at end of input; NULL is a
 > valid result meaning a blank line.
 
-> [spec:dash:def:parser.parsefname-fn]
-> STATIC void parsefname(void)
+**Dash source shape (`parser.parsefname-fn`):**
+
+    STATIC void parsefname(void)
 
 > [spec:dash:sem:parser.parsefname-fn]
 > Read the operand of the redirection in `redirnode`. For a here document
@@ -335,8 +354,9 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > For `>&`/`<&`, hand the text to `fixredir` with `err` 0. Otherwise
 > store the filename node from `makename`.
 
-> [spec:dash:def:parser.parseheredoc-fn]
-> STATIC void parseheredoc(void)
+**Dash source shape (`parser.parseheredoc-fn`):**
+
+    STATIC void parseheredoc(void)
 
 > [spec:dash:sem:parser.parseheredoc-fn]
 > Read the bodies of all queued here documents. Detach `heredoclist`
@@ -352,8 +372,9 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > inside `readtoken1`. Wrap the resulting text in an `NARG` node and
 > attach it to the redirection node.
 
-> [spec:dash:def:parser.parser-eof-fn]
-> static inline int parser_eof(void)
+**Dash source shape (`parser.parser-eof-fn`):**
+
+    static inline int parser_eof(void)
 
 > [spec:dash:sem:parser.parser-eof-fn]
 > Return whether the parser has hit end of input: `tokpushback &&
@@ -361,8 +382,9 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > command it is about to run is genuinely the last one and may therefore
 > `exec` in place.
 
-> [spec:dash:def:parser.pgetc-eatbnl-fn]
-> static int pgetc_eatbnl(void)
+**Dash source shape (`parser.pgetc-eatbnl-fn`):**
+
+    static int pgetc_eatbnl(void)
 
 > [spec:dash:sem:parser.pgetc-eatbnl-fn]
 > `pgetc` with backslash-newline line continuations removed: while the
@@ -371,16 +393,18 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > and return the backslash. Used everywhere except inside single quotes,
 > where a backslash is literal.
 
-> [spec:dash:def:parser.pgetc-top-fn]
-> static int pgetc_top(struct synstack *stack)
+**Dash source shape (`parser.pgetc-top-fn`):**
+
+    static int pgetc_top(struct synstack *stack)
 
 > [spec:dash:sem:parser.pgetc-top-fn]
 > Read the next character honouring the current quoting context: plain
 > `pgetc` under `SQSYNTAX`, where backslash-newline is not a
 > continuation, and `pgetc_eatbnl` otherwise.
 
-> [spec:dash:def:parser.pipeline-fn]
-> node * pipeline(void)
+**Dash source shape (`parser.pipeline-fn`):**
+
+    node * pipeline(void)
 
 > [spec:dash:sem:parser.pipeline-fn]
 > Parse `[!] command (| command)*`. A leading `TNOT` sets `negate`
@@ -391,8 +415,9 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > follow the `|`. Push back the token that ended the pipeline. Wrap the
 > result in an `NNOT` node when negated.
 
-> [spec:dash:def:parser.readtoken-fn]
-> STATIC int readtoken(void)
+**Dash source shape (`parser.readtoken-fn`):**
+
+    STATIC int readtoken(void)
 
 > [spec:dash:sem:parser.readtoken-fn]
 > Read one token, applying the `checkkwd` policy captured on entry.
@@ -417,8 +442,9 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > re-tokenised. An alias whose value is empty is consumed without
 > pushing, which still suppresses the word.
 
-> [spec:dash:def:parser.readtoken1-fn]
-> STATIC int readtoken1(int firstc, char const *syntax, char *eofmark, int striptabs)
+**Dash source shape (`parser.readtoken1-fn`):**
+
+    STATIC int readtoken1(int firstc, char const *syntax, char *eofmark, int striptabs)
 
 > [spec:dash:sem:parser.readtoken1-fn]
 > Read a word, a redirection operator, or a here-document body, building
@@ -543,16 +569,18 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > replace the `$((` already emitted with a single `CTLARI` marker (or
 > keep it literal under `CHKEOFMARK`).
 
-> [spec:dash:def:parser.realeofmark-fn]
-> static inline int realeofmark(const char *eofmark)
+**Dash source shape (`parser.realeofmark-fn`):**
+
+    static inline int realeofmark(const char *eofmark)
 
 > [spec:dash:sem:parser.realeofmark-fn]
 > Return whether `eofmark` is a genuine here-document delimiter — non-NULL
 > and not the `FAKEEOFMARK` sentinel — and therefore whether `checkend`
 > should actually look for it.
 
-> [spec:dash:def:parser.setprompt-fn]
-> static void __attribute__((noinline)) setprompt(int which)
+**Dash source shape (`parser.setprompt-fn`):**
+
+    static void __attribute__((noinline)) setprompt(int which)
 
 > [spec:dash:sem:parser.setprompt-fn]
 > Issue prompt number `which` (1 for `PS1`, 2 for `PS2`). Clear
@@ -563,8 +591,9 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > `getprompt(NULL)` to `out2` inside a stack mark, since prompt expansion
 > allocates.
 
-> [spec:dash:def:parser.simplecmd-fn]
-> node * simplecmd(void)
+**Dash source shape (`parser.simplecmd-fn`):**
+
+    node * simplecmd(void)
 
 > [spec:dash:sem:parser.simplecmd-fn]
 > Parse a simple command: leading assignments, arguments and
@@ -591,15 +620,17 @@ here document, but there is no real delimiter" — used by `expandstr`.
 >
 > Terminate the three lists and build an `NCMD` node.
 
-> [spec:dash:def:parser.synerror-fn]
-> STATIC void synerror(const char *msg)
+**Dash source shape (`parser.synerror-fn`):**
+
+    STATIC void synerror(const char *msg)
 
 > [spec:dash:sem:parser.synerror-fn]
 > Set `errlinno` to the current parse line and raise
 > `sh_error("Syntax error: %s", msg)`. Does not return.
 
-> [spec:dash:def:parser.synexpect-fn]
-> STATIC void synexpect(int token)
+**Dash source shape (`parser.synexpect-fn`):**
+
+    STATIC void synexpect(int token)
 
 > [spec:dash:sem:parser.synexpect-fn]
 > Report an unexpected token. Format into a 64-byte buffer either
@@ -608,22 +639,24 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > several would have been valid, using `tokname[]` for both. Then
 > `synerror`. Does not return.
 
-> [spec:dash:def:parser.synstack]
-> struct synstack {
->   const char *syntax;
->   struct synstack *prev;
->   struct synstack *next;
->   int innerdq;
->   int varpushed;
->   int dblquote;
->   int backq;
->   int varnest;
->   int parenlevel;
->   int dqvarnest;
-> }
+**Dash source shape (`parser.synstack`):**
 
-> [spec:dash:def:parser.synstack-pop-fn]
-> static void synstack_pop(struct synstack **stack)
+    struct synstack {
+      const char *syntax;
+      struct synstack *prev;
+      struct synstack *next;
+      int innerdq;
+      int varpushed;
+      int dblquote;
+      int backq;
+      int varnest;
+      int parenlevel;
+      int dqvarnest;
+    }
+
+**Dash source shape (`parser.synstack-pop-fn`):**
+
+    static void synstack_pop(struct synstack **stack)
 
 > [spec:dash:sem:parser.synstack-pop-fn]
 > Make the enclosing level current: `*stack = (*stack)->next`. The popped
@@ -631,8 +664,9 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > `prev` link so `synstack_push` can reuse its storage, which is what
 > makes the `alloca`-based allocation safe inside a loop.
 
-> [spec:dash:def:parser.synstack-push-fn]
-> static void synstack_push(struct synstack **stack, struct synstack *next, const char *syntax)
+**Dash source shape (`parser.synstack-push-fn`):**
+
+    static void synstack_push(struct synstack **stack, struct synstack *next, const char *syntax)
 
 > [spec:dash:sem:parser.synstack-push-fn]
 > Push a new parse context. Zero the supplied storage, set its syntax
@@ -640,8 +674,9 @@ here document, but there is no real delimiter" — used by `expandstr`.
 > `prev` to it), and make it current. The caller passes either the
 > previously popped level (via `prev`) or fresh `alloca` space.
 
-> [spec:dash:def:parser.xxreadtoken-fn]
-> STATIC int xxreadtoken(void)
+**Dash source shape (`parser.xxreadtoken-fn`):**
+
+    STATIC int xxreadtoken(void)
 
 > [spec:dash:sem:parser.xxreadtoken-fn]
 > Read one raw token, before keyword and alias processing. A pending
