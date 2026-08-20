@@ -52,7 +52,7 @@ pub fn execcmd(sh: &mut Shell, args: &[&BStr]) -> Result<Flow, Error> {
         sh.options.set(crate::options::ShellOption::Monitor, false);
         crate::options::optschanged(sh)?;
         if !interactive_root {
-            crate::input::flush_input(sh);
+            sh.flush_input();
         }
         /* Hoisted out of `shellexec`'s argument list, which also takes
          * the shell; see the note in `eval.rs`'s `evalcommand`. */

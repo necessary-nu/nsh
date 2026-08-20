@@ -126,8 +126,6 @@ impl ParseFile {
 }
 
 // [spec:dash:def:input.stdin-state]
-/// `MKINIT struct stdin_state { … }` — absent from the port manifest because
-/// the `MKINIT` marker defeated the extractor.
 pub struct stdin_state_t {
     pub seekable: i64,
     pub pip: Option<crate::redir::Pipe>,
@@ -373,79 +371,56 @@ pub fn input_set_lleft(pf: &mut ParseFile, len: c_int) {
     pf.lleft = len;
 }
 
-/* mkinit INIT fragment from src/input.c:96-99. */
-pub fn mkinit_init(sh: &mut Shell) {
-    /* Read before `pf_at` borrows the shell: the base parse file and the
-     * streams are different fields, but `pf_at` borrows the whole shell
-     * to reach one of them. */
-    let base = pf_at(sh, 0);
-    /* `basebuf` is a static array in the C, so re-entering `init` keeps
-     * whatever it held. Only allocate when there is nothing to keep. */
-    if base.buf.len() != IBUFSIZ {
-        base.buf = vec![0u8; IBUFSIZ];
+impl Shell {
+    /// Establish the base input frame for a newly constructed shell.
+    pub(crate) fn initialize_input_state(&mut self) {
+        let base = pf_at(self, 0);
+        if base.buf.len() != IBUFSIZ {
+            base.buf = vec![0u8; IBUFSIZ];
+        }
+        base.pos = 0;
+        base.linno = 1;
+        /* The base frame follows the shell's logical standard input rather
+         * than caching a process descriptor number. */
+        base.uses_stdin = true;
+        base.owned_fd = None;
     }
-    base.pos = 0;
-    base.linno = 1;
-    /* The C's `basepf.fd = 0` means that this frame follows the shell's
-     * standard input. Preserve that identity directly rather than caching
-     * a process descriptor number. See [dec:nsh:host-owns-streams]. */
-    base.uses_stdin = true;
-    base.owned_fd = None;
-}
 
-/* mkinit RESET fragment from src/input.c:101-112. */
-pub fn mkinit_reset(sh: &mut crate::context::Shell) {
-    let mut input: InputUnit;
+    /// Drain the abandoned input record before the command loop continues.
+    pub(crate) fn discard_interrupted_input(&mut self) {
+        popallfiles(self);
 
-    /* clear input buffer */
-    popallfiles(sh);
-
-    /* `toppf->nextc - toppf->buf > toppf->unget` is "at least one character
-     * past the pushback window has been consumed". The C subtracts `buf`
-     * from a cursor that a live `strpush` has moved into an unrelated
-     * allocation; the index says what the difference was meant to say. */
-    let top = pf_at(sh, sh.input.top);
-    input = InputUnit::EndOfInput;
-    if top.pos > top.unget as usize {
-        input = InputUnit::Byte(text(top)[top.pos - top.unget as usize - 1]);
-    }
-    while !input.is(b'\n') && input != InputUnit::EndOfInput && crate::error::int_pending() == 0 {
-        /* Teardown: `reset` drains the rest of the bad line and cannot
-         * fail its way out of doing so (§4.3). The loop's own
-         * `int_pending` test is what stops it, and it is tested *before*
-         * the read rather than after, so an interrupt ends the drain
-         * rather than being reported by it. A read that fails for any
-         * other reason ends it too, with the diagnostic already
-         * written. */
-        match pgetc(sh) {
-            Ok(next) => input = next,
-            Err(e) => {
-                sh.status = e.status();
-                drop(e);
-                break;
+        /* At least one character past the pushback window has been consumed. */
+        let top_index = self.input.top;
+        let top = pf_at(self, top_index);
+        let mut input = if top.pos > top.unget as usize {
+            InputUnit::Byte(text(top)[top.pos - top.unget as usize - 1])
+        } else {
+            InputUnit::EndOfInput
+        };
+        while !input.is(b'\n') && input != InputUnit::EndOfInput && crate::error::int_pending() == 0
+        {
+            match pgetc(self) {
+                Ok(next) => input = next,
+                Err(error) => {
+                    self.status = error.status();
+                    drop(error);
+                    break;
+                }
             }
         }
     }
-}
 
-/* mkinit FORKRESET fragment from src/input.c:114-125. */
-pub fn mkinit_forkreset(sh: &mut crate::context::Shell) {
-    popallfiles(sh);
-    /* The C tests `> 0`, meaning "an open file that is not stdin". With a
-     * frontend-supplied stdin the second half of that is no longer implied
-     * by the first, and getting it wrong would close the shell's own
-     * input. */
-    if !cur_pf(sh).uses_stdin && cur_pf(sh).owned_fd.is_some() {
-        let pf = cur_pf(sh);
-        drop(pf.owned_fd.take());
-        pf.uses_stdin = true;
+    /// Detach input buffers and owned sources copied from the parent shell.
+    pub(crate) fn detach_parent_input(&mut self) {
+        popallfiles(self);
+        if !cur_pf(self).uses_stdin && cur_pf(self).owned_fd.is_some() {
+            let frame = cur_pf(self);
+            drop(frame.owned_fd.take());
+            frame.uses_stdin = true;
+        }
+        drop(self.input.stdin_state.pip.take());
     }
-    drop(sh.input.stdin_state.pip.take());
-}
-
-/* mkinit POSTEXITRESET fragment from src/input.c:127-129. */
-pub fn mkinit_postexitreset(sh: &mut Shell) {
-    flush_input(sh);
 }
 
 // [spec:dash:def:input.input-init-fn]
@@ -1247,30 +1222,30 @@ pub fn popallfiles(sh: &mut crate::context::Shell) {
     unwindfiles(sh, top);
 }
 
-// [spec:dash:def:input.flush-input-fn]
-// [spec:dash:sem:input.flush-input-fn]
-pub fn flush_input(sh: &mut Shell) {
-    /* The frame's borrow is dropped before the stack's scalars are read:
-     * `base` borrows `sh.input`, and so do they. What survives it is
-     * `left` (a value) and the scratch pointer (a raw pointer, whose
-     * borrow ends at the `let`). */
-    let base = pf_at(sh, 0);
-    let left: c_int = base.nleft + input_get_lleft(base);
-    crate::error::with_interrupts_deferred(sh, |sh| {
-        if sh.input.stdin_state.seekable != 0 && left != 0 {
-            if let Some(stdin) = sh.fds.get(LogicalDescriptor::STDIN) {
-                let _ = nsh_platform::seek_relative(&stdin, -(left as i64));
+impl Shell {
+    /// Discard buffered standard input while preserving the underlying source.
+    // [spec:dash:def:input.flush-input-fn]
+    // [spec:dash:sem:input.flush-input-fn]
+    // [spec:dash:def:init.postexitreset-fn]
+    // [spec:dash:sem:init.postexitreset-fn]
+    pub(crate) fn flush_input(&mut self) {
+        let base = pf_at(self, 0);
+        let left: c_int = base.nleft + input_get_lleft(base);
+        crate::error::with_interrupts_deferred(self, |shell| {
+            if shell.input.stdin_state.seekable != 0 && left != 0 {
+                if let Some(stdin) = shell.fds.get(LogicalDescriptor::STDIN) {
+                    let _ = nsh_platform::seek_relative(&stdin, -(left as i64));
+                }
+            } else if shell.input.stdin_state.pending > left {
+                let pending = shell.input.stdin_state.pending;
+                flush_tee(shell, BUFSIZ, pending - left);
+                shell.input.stdin_state.pending = 0;
             }
-        } else if sh.input.stdin_state.pending > left {
-            /* `basebuf` is scratch here; the bytes are being discarded. */
-            let pending = sh.input.stdin_state.pending;
-            flush_tee(sh, BUFSIZ, pending - left);
-            sh.input.stdin_state.pending = 0;
-        }
-        let base = pf_at(sh, 0);
-        base.nleft = 0;
-        input_set_lleft(base, 0);
-    });
+            let base = pf_at(shell, 0);
+            base.nleft = 0;
+            input_set_lleft(base, 0);
+        });
+    }
 }
 
 // [spec:dash:def:input.reset-input-fn]
@@ -1278,7 +1253,7 @@ pub fn flush_input(sh: &mut Shell) {
 pub fn reset_input(sh: &mut Shell) {
     sh.input.stdin_istty = -1;
     pf_at(sh, 0).eof = 0;
-    flush_input(sh);
+    sh.flush_input();
 }
 
 /// Let the interactive command loop try standard input again after EOF.

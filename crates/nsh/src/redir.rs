@@ -79,9 +79,6 @@ impl ExpandedRedirection<'_> {
 }
 
 // [spec:dash:def:redir.redirtab]
-/// `MKINIT struct redirtab { … }` — absent from the port manifest because the
-/// `MKINIT` marker defeated the extractor.
-///
 /// The C's `next` is gone with the intrusive stack. Saved logical values are
 /// shared owners: ordinary unwind restores them, while fork reset drops
 /// obsolete backups without changing the active table.
@@ -656,19 +653,19 @@ pub fn popredir(sh: &mut Shell, drop: c_int) {
  * Undo all redirections.  Called on error or interrupt.
  */
 
-/* mkinit EXITRESET fragment from src/redir.c:443-448. */
-pub fn mkinit_exitreset(sh: &mut Shell) {
-    /*
-     * Discard all saved file descriptors.
-     */
-    unwindredir(sh, 0);
-}
+impl Shell {
+    /// Restore every command-scoped redirection before recovery or shutdown.
+    pub(crate) fn restore_saved_redirections(&mut self) {
+        while !self.redirs.list.is_empty() {
+            popredir(self, 0);
+        }
+    }
 
-/* mkinit FORKRESET fragment from src/redir.c:450-452. */
-pub fn mkinit_forkreset(sh: &mut Shell) {
-    /* `redirlist = NULL`: abandon saved states without restoring them. The
-     * current logical table owns what survives in the child. */
-    sh.redirs.list.clear();
+    /// Consume inherited restoration frames without changing active slots.
+    pub(crate) fn discard_saved_redirections(&mut self) {
+        let inherited = core::mem::take(&mut self.redirs.list);
+        drop(inherited);
+    }
 }
 
 /*

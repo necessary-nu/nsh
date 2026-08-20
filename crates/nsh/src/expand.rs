@@ -556,7 +556,7 @@ fn expandarg_inner(
     /* The `?`s in this function return past the `ifsfree()` below, exactly
      * as the longjmp they replace jumped past it. The IFS regions are
      * reclaimed by the catch frame instead — `restore_handler_expandarg`'s
-     * swallowing arm and `init::exitreset` both call `ifsfree`, which is
+     * swallowing arm and `Shell::clear_evaluation_resources` both clear it, which is
      * docs/errors-are-values.md 2.2's mark-keyed cleanup working as
      * designed. Adding one here would free them twice. */
     argstr(sh, state, text, 0, mode)?;
@@ -3252,20 +3252,6 @@ pub fn restore_handler_expandarg(
     }
     caught
 }
-
-/* #ifdef mkinit
- *
- * INCLUDE "expand.h"
- *
- * EXITRESET {
- *	ifsfree();
- * }
- *
- * #endif
- *
- * The EXITRESET hook is emitted into init.c by mkinit; it belongs to the
- * generated `init` module, not here.
- */
 
 // ---------------------------------------------------------------------
 // Prototypes declared in expand.h that have no definition in expand.c.

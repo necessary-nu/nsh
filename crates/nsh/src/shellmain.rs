@@ -26,11 +26,6 @@ use crate::jobs::JobDisplay;
 use crate::options::ShellOption;
 // [spec:nsh:def:idiom.shell-options]
 
-/* `MKINIT struct jmploc main_handler;` was here — the outermost handler,
- * which the generated `FORKRESET` block re-pointed `handler` at after a
- * fork so that a child unwound to its own top level. Nothing unwinds, so
- * there is no handler and no static to hold one. */
-
 /// src/main.h: `#define rootshell (!shlvl)`
 #[inline]
 pub fn rootshell(sh: &Shell) -> c_int {
@@ -103,7 +98,7 @@ fn run_startup_task(
 ) -> Result<StartupAdvance, crate::error::Error> {
     match task {
         StartupTask::Initialize => {
-            crate::init::init(sh)?;
+            sh.initialize_from(crate::var::EnvSource::Process)?;
             let next = if crate::options::procargs(sh, argv)? {
                 StartupTask::SystemProfile
             } else {
@@ -211,7 +206,7 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
                 if let Some(status) = status {
                     sh.status = status;
                 }
-                crate::init::exitreset(sh);
+                sh.clear_evaluation_resources();
                 return crate::trap::exitshell(sh, status);
             }
             Err(error) => {
@@ -219,7 +214,7 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
                 let unrecoverable_read = error.is_unrecoverable_read();
                 sh.status = error.status();
                 drop(error);
-                crate::init::exitreset(sh);
+                sh.clear_evaluation_resources();
 
                 // [spec:posix:req:exit.shell-error-consequences]
                 // [spec:posix:req:exit.unrecoverable-read-error]
@@ -232,7 +227,7 @@ pub fn main(sh: &mut Shell, argv: &[Vec<u8>]) -> crate::status::ExitStatus {
                     return crate::trap::exitshell(sh, None);
                 }
 
-                crate::init::reset(sh);
+                sh.recover_command_loop();
                 if interrupted {
                     /* #if ATTY: && (!attyset() || equal(termval(), "emacs")) */
                     let _ = sh.io.stderr().write_all(b"\n");
@@ -411,7 +406,7 @@ pub(crate) fn cmdloop(
 /// `e_is_exit || s == 0 || iflag() == 0 || shlvl != 0`, so in *any* forked
 /// child the last disjunct is true: an exit, a `set -e` abort, a diagnostic,
 /// or an interrupt all terminate that child. There is no recovery task, so
-/// its handler is exactly `exitreset` followed by `exitshell`.
+/// it clears evaluation resources and then runs `exitshell`.
 pub(crate) fn exit_from_child(
     sh: &mut Shell,
     outcome: Result<crate::eval::Flow, crate::error::Error>,
@@ -429,7 +424,7 @@ pub(crate) fn exit_from_child(
     if let Some(status) = selected_status {
         sh.status = status;
     }
-    crate::init::exitreset(sh);
+    sh.clear_evaluation_resources();
     /* `exitshell` returns now, and this is one of the three `_exit`s that
      * stay: it ends a child the library forked, which
      * [dec:nsh:fork-child-is-a-terminus] makes a terminus rather than a

@@ -133,8 +133,8 @@ pub(crate) mod word;
 // ---- shell state -----------------------------------------------------
 pub(crate) mod alias;
 pub(crate) mod cd;
-pub(crate) mod init;
 pub(crate) mod input;
+pub(crate) mod lifecycle;
 pub(crate) mod mail;
 pub(crate) mod options;
 pub(crate) mod redir;

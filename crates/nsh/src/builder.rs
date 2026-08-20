@@ -148,7 +148,7 @@ impl Builder {
 
     /// Build the shell.
     ///
-    /// The order below is the constraint, not a preference. `init_from`
+    /// The order below is the constraint, not a preference. Initialization
     /// has to come first because everything after it writes into tables it
     /// creates; the options come after the parameters because
     /// `optschanged` acts on the finished set; and the working directory
@@ -184,7 +184,7 @@ impl Builder {
             Vec::new()
         };
         environment.extend(self.env);
-        crate::init::init_from(&mut sh, EnvSource::Explicit(&environment))?;
+        sh.initialize_from(EnvSource::Explicit(&environment))?;
 
         if let Some(arg0) = &self.arg0 {
             sh.options.set_arg0(BStr::new(&arg0[..]));

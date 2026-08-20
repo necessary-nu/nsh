@@ -137,13 +137,13 @@ pub struct backcmd {
 /// protect, and twelve one-line accessors would be noise.
 ///
 pub struct EvalState {
-    /// current loop nesting level (MKINIT)
+    /// Current loop nesting level.
     pub(crate) loopnest: c_int,
     /// starting line number of current function, or 0
     ///
     /// Private: `eval.rs` is the only module that names it.
     funcline: c_int,
-    /// Prevent PS4 nesting. (MKINIT)
+    /// Prevent PS4 nesting.
     pub(crate) inps4: c_int,
     /// exit status of backquoted command
     pub(crate) back_exitstatus: ExitStatus,
@@ -334,14 +334,6 @@ macro_rules! flow {
 pub(crate) use flow;
 
 /*
- * Called to reset things after an exception.
- *
- * The `EXITRESET` block at the top of src/eval.c is `#ifdef mkinit`
- * material: it is collected by the generator into `init.c`, which the
- * port keeps in `crate::init`. No manifest symbol lives here.
- */
-
-/*
  * The eval commmand.
  */
 
@@ -473,8 +465,8 @@ fn eval_interactive_sequence(
             let status = error.status();
             sh.status = status;
             drop(error);
-            crate::init::exitreset(sh);
-            crate::var::mkinit_reset(sh);
+            sh.clear_evaluation_resources();
+            sh.unwind_local_variables();
             crate::error::clear_interrupt_deferral(sh);
             Ok(Flow::Done((status).into()))
         }
@@ -888,7 +880,7 @@ fn evalsubshell(
      * before either tail continues. */
     let forked = crate::error::with_interrupts_deferred(sh, |sh| {
         if backgnd == 0 && context.exits() && crate::trap::have_traps(sh) == 0 {
-            crate::init::forkreset(sh, None);
+            sh.prepare_fork_child(None);
             return Ok(Some(false));
         }
         let jp = crate::jobs::makejob(sh, 1);
@@ -938,9 +930,8 @@ fn evalsubshell(
          * trap, which the corpus has now caught twice. */
         crate::shellmain::exit_from_child(sh, outcome);
     }
-    /* Not forked: `forkreset` pointed `handler` at `main_handler` and this
-     * is still the same process, so the frames this returns through are
-     * its own and `main`'s handler is the right destination. */
+    /* Not forked: this is still the same process, so the frames this returns
+     * through are its own. */
     outcome
 }
 
@@ -1674,7 +1665,7 @@ fn evalcommand_in_scope(
                 }
 
                 Command::External { path_index } => {
-                    crate::input::flush_input(sh);
+                    sh.flush_input();
                     let args = crate::builtins::args(&arglist.list[head..]);
 
                     /* Fork off a child process if necessary. */
@@ -2150,7 +2141,7 @@ mod tests {
         sh.status = ExitStatus::from_code(9);
         sh.eval.loopnest = 3;
         sh.eval.inps4 = 1;
-        crate::init::exitreset(sh);
+        sh.clear_evaluation_resources();
         assert_eq!(sh.status, ExitStatus::from_code(9));
         assert_eq!(sh.eval.loopnest, 0);
         assert_eq!(sh.eval.inps4, 0);

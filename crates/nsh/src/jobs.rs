@@ -795,7 +795,7 @@ fn forkchild(sh: &mut crate::context::Shell, jp: Option<JobId>, n: Option<&Node>
     oldlvl = sh.shell_level;
     sh.shell_level += 1;
 
-    crate::init::forkreset(sh, if mode == FORK_NOJOB { n } else { None });
+    sh.prepare_fork_child(if mode == FORK_NOJOB { n } else { None });
 
     /* do job control only in root shell */
     sh.jobs.jobctl = false;
@@ -929,7 +929,7 @@ pub fn forkshell(
 ) -> Result<nsh_platform::ForkResult, Error> {
     /* TRACE(("forkshell(%%%d, %p, %d) called\n", jobno(jp), n, mode)); */
 
-    crate::input::flush_input(sh);
+    sh.flush_input();
 
     if mode == FORK_FG && jp.is_some_and(|i| sh.jobs[i].jobctl) {
         capture_shell_terminal_settings(sh)?;

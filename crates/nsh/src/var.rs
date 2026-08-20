@@ -373,122 +373,119 @@ pub(crate) enum EnvSource<'a> {
     Explicit(&'a [(BString, BString)]),
 }
 
-pub fn mkinit_init(sh: &mut Shell) -> Result<(), Error> {
-    mkinit_init_from(sh, EnvSource::Process)
-}
-
-// [spec:nsh:sem:shell-locale.invalid-selection]
-// [spec:posix:req:param.variable-environment-initialization]
-// [spec:posix:def:sh.environment-variables]
-// [spec:posix:req:sh.envvar-env]
-// [spec:posix:req:sh.envvar-fcedit]
-// [spec:posix:req:sh.envvar-histfile]
-// [spec:posix:req:sh.envvar-histsize]
-// [spec:posix:sem:sh.envvar-home]
-// [spec:posix:sem:sh.envvar-lang-and-lc-all]
-// [spec:posix:sem:sh.envvar-lc-collate]
-// [spec:posix:sem:sh.envvar-lc-ctype]
-// [spec:posix:req:sh.envvar-lc-messages]
-// [spec:posix:req:sh.envvar-mail]
-// [spec:posix:req:sh.envvar-mailcheck]
-// [spec:posix:req:sh.envvar-mailpath]
-// [spec:posix:sem:sh.envvar-nlspath]
-// [spec:posix:sem:sh.envvar-path]
-// [spec:posix:req:sh.envvar-pwd]
-pub(crate) fn mkinit_init_from(sh: &mut Shell, env: EnvSource<'_>) -> Result<(), Error> {
-    initvar(sh);
-    let process_env;
-    let pairs = match env {
-        EnvSource::Process => {
-            process_env = nsh_platform::process_environment()
-                .into_iter()
-                .map(|(name, value)| {
-                    (
-                        BString::from(name.to_shell_bytes()),
-                        BString::from(value.to_shell_bytes()),
-                    )
-                })
-                .collect::<Vec<_>>();
-            process_env.as_slice()
-        }
-        EnvSource::Explicit(pairs) => pairs,
-    };
-
-    for (name, value) in pairs {
-        let name = BStr::new(name.as_slice());
-        if !is_locale_variable!(name) {
-            continue;
-        }
-        let entry = sh.vars.tab.entry(name.to_owned()).or_insert_with(|| Var {
-            attributes: VariableAttributes::NONE,
-            state: VariableState::Unset,
-            bash_attributes: BashAttributes::new(),
-            callback: Callback::Locale,
-            dynamic_lineno: false,
-        });
-        entry.attributes.exported = true;
-        entry.state = VariableState::Set(VariableValue::Scalar(value.clone()));
-        entry.callback = Callback::Locale;
-        entry.dynamic_lineno = false;
-    }
-    if let Ok(locale) = selected_locale(sh) {
-        sh.locale = locale;
-    }
-    mkinit_env_pairs(sh, pairs)?;
-
-    set_bytes(
-        sh,
-        BStr::new(b"IFS"),
-        Some(defifs()),
-        VariableAttributes::NONE,
-    )?;
-    set_bytes(
-        sh,
-        BStr::new(b"OPTIND"),
-        Some(BStr::new(b"1")),
-        VariableAttributes::NONE,
-    )?;
-    let parent_pid = nsh_platform::parent_process_id()
-        .map_or_else(|| "0".to_owned(), |process| process.to_string());
-    set_bytes(
-        sh,
-        BStr::new(b"PPID"),
-        Some(BStr::new(parent_pid.as_bytes())),
-        VariableAttributes::NONE,
-    )?;
-
-    let pwd = lookup_bytes(sh, BStr::new(b"PWD"));
-    let valid_pwd = pwd.as_ref().filter(|path| {
-        if !nsh_platform::shell_path_is_absolute(path) {
-            return false;
-        }
-        let (Ok(path), Ok(dot)) = (path.try_to_path_buf(), b"."[..].try_to_path_buf()) else {
-            return false;
+impl Shell {
+    // [spec:nsh:sem:shell-locale.invalid-selection]
+    // [spec:posix:req:param.variable-environment-initialization]
+    // [spec:posix:def:sh.environment-variables]
+    // [spec:posix:req:sh.envvar-env]
+    // [spec:posix:req:sh.envvar-fcedit]
+    // [spec:posix:req:sh.envvar-histfile]
+    // [spec:posix:req:sh.envvar-histsize]
+    // [spec:posix:sem:sh.envvar-home]
+    // [spec:posix:sem:sh.envvar-lang-and-lc-all]
+    // [spec:posix:sem:sh.envvar-lc-collate]
+    // [spec:posix:sem:sh.envvar-lc-ctype]
+    // [spec:posix:req:sh.envvar-lc-messages]
+    // [spec:posix:req:sh.envvar-mail]
+    // [spec:posix:req:sh.envvar-mailcheck]
+    // [spec:posix:req:sh.envvar-mailpath]
+    // [spec:posix:sem:sh.envvar-nlspath]
+    // [spec:posix:sem:sh.envvar-path]
+    // [spec:posix:req:sh.envvar-pwd]
+    pub(crate) fn initialize_variable_state(&mut self, env: EnvSource<'_>) -> Result<(), Error> {
+        initvar(self);
+        let process_env;
+        let pairs = match env {
+            EnvSource::Process => {
+                process_env = nsh_platform::process_environment()
+                    .into_iter()
+                    .map(|(name, value)| {
+                        (
+                            BString::from(name.to_shell_bytes()),
+                            BString::from(value.to_shell_bytes()),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                process_env.as_slice()
+            }
+            EnvSource::Explicit(pairs) => pairs,
         };
-        nsh_platform::path_is_same_file(&path, &dot)
-    });
-    match valid_pwd {
-        Some(path) => crate::cd::setpwd_inner(sh, crate::cd::Pwd::New(BStr::new(path)), 0),
-        None => crate::cd::setpwd_inner(sh, crate::cd::Pwd::Unknown, 0),
-    }
-}
 
-pub(crate) fn mkinit_env_pairs(sh: &mut Shell, pairs: &[(BString, BString)]) -> Result<(), Error> {
-    for (name, value) in pairs {
-        let name = BStr::new(name.as_slice());
-        let value = BStr::new(value.as_slice());
-        if is_locale_variable!(name) {
-            continue;
+        for (name, value) in pairs {
+            let name = BStr::new(name.as_slice());
+            if !is_locale_variable!(name) {
+                continue;
+            }
+            let entry = self.vars.tab.entry(name.to_owned()).or_insert_with(|| Var {
+                attributes: VariableAttributes::NONE,
+                state: VariableState::Unset,
+                bash_attributes: BashAttributes::new(),
+                callback: Callback::Locale,
+                dynamic_lineno: false,
+            });
+            entry.attributes.exported = true;
+            entry.state = VariableState::Set(VariableValue::Scalar(value.clone()));
+            entry.callback = Callback::Locale;
+            entry.dynamic_lineno = false;
         }
-        if valid_name(&sh.locale, name) {
-            set_bytes(sh, name, Some(value), VariableAttributes::EXPORTED)?;
+        if let Ok(locale) = selected_locale(self) {
+            self.locale = locale;
+        }
+        self.import_environment_pairs(pairs)?;
+
+        set_bytes(
+            self,
+            BStr::new(b"IFS"),
+            Some(defifs()),
+            VariableAttributes::NONE,
+        )?;
+        set_bytes(
+            self,
+            BStr::new(b"OPTIND"),
+            Some(BStr::new(b"1")),
+            VariableAttributes::NONE,
+        )?;
+        let parent_pid = nsh_platform::parent_process_id()
+            .map_or_else(|| "0".to_owned(), |process| process.to_string());
+        set_bytes(
+            self,
+            BStr::new(b"PPID"),
+            Some(BStr::new(parent_pid.as_bytes())),
+            VariableAttributes::NONE,
+        )?;
+
+        let pwd = lookup_bytes(self, BStr::new(b"PWD"));
+        let valid_pwd = pwd.as_ref().filter(|path| {
+            if !nsh_platform::shell_path_is_absolute(path) {
+                return false;
+            }
+            let (Ok(path), Ok(dot)) = (path.try_to_path_buf(), b"."[..].try_to_path_buf()) else {
+                return false;
+            };
+            nsh_platform::path_is_same_file(&path, &dot)
+        });
+        match valid_pwd {
+            Some(path) => crate::cd::setpwd_inner(self, crate::cd::Pwd::New(BStr::new(path)), 0),
+            None => crate::cd::setpwd_inner(self, crate::cd::Pwd::Unknown, 0),
         }
     }
-    Ok(())
-}
 
-pub fn mkinit_reset(sh: &mut Shell) {
-    unwindlocalvars(sh, 0);
+    fn import_environment_pairs(&mut self, pairs: &[(BString, BString)]) -> Result<(), Error> {
+        for (name, value) in pairs {
+            let name = BStr::new(name.as_slice());
+            let value = BStr::new(value.as_slice());
+            if !is_locale_variable!(name) && valid_name(&self.locale, name) {
+                set_bytes(self, name, Some(value), VariableAttributes::EXPORTED)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn unwind_local_variables(&mut self) {
+        while !self.vars.locals.is_empty() {
+            poplocalvars(self);
+        }
+    }
 }
 
 // [spec:nsh:sem:shell-locale.invalid-selection]

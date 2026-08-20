@@ -170,18 +170,20 @@ pub fn have_traps(sh: &crate::context::Shell) -> c_int {
     sh.traps.trapcnt
 }
 
-/* mkinit INIT fragment from src/trap.c:94-97. */
-pub fn mkinit_init(sh: &mut crate::context::Shell) {
-    let child = Signal::from(nsh_platform::child_signal());
-    sh.traps.dispositions[(child.number() - 1) as usize] =
-        DispositionState::Installed(crate::host::Disposition::Default);
-    setsignal(sh, child);
-}
+impl crate::context::Shell {
+    /// Establish the child-status disposition for a newly constructed shell.
+    pub(crate) fn initialize_trap_state(&mut self) {
+        let child = Signal::from(nsh_platform::child_signal());
+        self.traps.dispositions[(child.number() - 1) as usize] =
+            DispositionState::Installed(crate::host::Disposition::Default);
+        setsignal(self, child);
+    }
 
-/* mkinit FORKRESET fragment from src/trap.c:99-101. */
-pub fn mkinit_forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
-    sh.traps.begin_subshell_listing();
-    clear_traps(sh, n);
+    /// Remove parent trap actions and begin the child's independent listing.
+    pub(crate) fn prepare_traps_for_child(&mut self, command: Option<&Node>) {
+        self.traps.begin_subshell_listing();
+        clear_traps(self, command);
+    }
 }
 
 /*
@@ -199,9 +201,9 @@ pub fn mkinit_forkreset(sh: &mut crate::context::Shell, n: Option<&Node>) {
 /// is why it takes [`setsignal_in_child`] and needs no split. The seam was
 /// recorded as "on both paths"; counted through, it is not:
 ///
-/// * `mkinit_forkreset` ← `init::forkreset` ← `jobs::forkchild` is the
+/// * `prepare_traps_for_child` ← `prepare_fork_child` ← `jobs::forkchild` is the
 ///   child.
-/// * `init::forkreset`'s other caller is `evalsubshell`'s no-fork arm,
+/// * `prepare_fork_child`'s other caller is `evalsubshell`'s no-fork arm,
 ///   which runs in the shell's own process — but it is guarded by
 ///   `have_traps(sh) == 0`, and `trapcnt` counts exactly the slots with a
 ///   non-empty action, which is exactly what the loop below skips. The
@@ -685,8 +687,8 @@ pub fn exitshell(
     }
     /* out: */
     crate::histedit::save_history(sh);
-    crate::init::exitreset(sh);
-    crate::init::postexitreset(sh);
+    sh.clear_evaluation_resources();
+    sh.flush_input();
     /*
      * Disable job control so that whoever had the foreground before we
      * started can get it back.

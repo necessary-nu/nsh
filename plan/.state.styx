@@ -5291,4 +5291,9 @@ impl_evidence (
     ), covered_claims (
         {impl_name nsh-library, rule idiom.interrupt-deferral}
     )}
+    {id modernize-shell-lifecycle, covered_rules (
+        idiom.owned-lifecycle
+    ), covered_claims (
+        {impl_name nsh-library, rule idiom.owned-lifecycle}
+    )}
 )

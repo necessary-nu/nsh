@@ -148,8 +148,8 @@ impl Shell {
     /// optimisation stays available to `nsh-cli`, which does pass it.
     ///
     /// It has a second effect worth knowing: `evalsubshell`'s no-fork arm
-    /// is `EV_EXIT`-only too, so from `run` the shell never runs
-    /// `forkreset` in its own process either. `exec cmd` written out in
+    /// is `EV_EXIT`-only too, so from `run` the shell never prepares a
+    /// fork-child environment in its own process either. `exec cmd` written out in
     /// full is still asked of the [`crate::host::Host`], which answers
     /// [`crate::host::NoHost`]'s refusal by default.
     ///
@@ -226,7 +226,7 @@ impl Shell {
                 if let Some(status) = status {
                     self.status = status;
                 }
-                crate::init::exitreset(self);
+                self.clear_evaluation_resources();
                 let exit_status = crate::trap::exitshell(self, status);
                 self.exited = Some(exit_status);
                 Ok(exit_status)
@@ -238,7 +238,7 @@ impl Shell {
                  * evaluator's loop nesting and `PS4` guard are reset so the
                  * next `run` starts clean. */
                 self.status = e.status();
-                crate::init::exitreset(self);
+                self.clear_evaluation_resources();
                 Err(e)
             }
         }

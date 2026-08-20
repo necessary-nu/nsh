@@ -3,7 +3,7 @@
 //!
 //! There is no `src/shell.c`; `shell.h` is the umbrella header holding
 //! build-wide typedefs and configuration.  The preprocessor knobs
-//! (`JOBS`, `BSD`, `DO_SHAREDVFORK`, `STATIC`, `MKINIT`, `TRACE`,
+//! (`JOBS`, `BSD`, `DO_SHAREDVFORK`, `STATIC`, `TRACE`,
 //! `TRACEV`) have no runtime meaning here and are recorded as plain
 //! constants or comments.
 
